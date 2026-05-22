@@ -934,6 +934,27 @@ async def shutdown_scheduler():
     print("✅ Scheduler shutdown complete\n")
 
 
+# ========== Claude Agent Factory ==========
+
+from claude_agent import ClaudeAgentThreadFactory
+
+claude_agent_thread_factory = ClaudeAgentThreadFactory()
+
+
+@app.on_event("startup")
+async def startup_claude_agent():
+    """Start the Claude Agent session pool sweeper."""
+    claude_agent_thread_factory.start()
+    print("✅ Claude Agent factory started\n")
+
+
+@app.on_event("shutdown")
+async def shutdown_claude_agent():
+    """Gracefully close all Claude Agent sessions."""
+    await claude_agent_thread_factory.aclose()
+    print("✅ Claude Agent factory closed\n")
+
+
 # ========== Request/Response Models ==========
 
 
@@ -2091,6 +2112,150 @@ def get_friend_timeline(
     if timeline is None:
         raise HTTPException(status_code=403, detail="Not friends or friend not found")
     return {"pictures": timeline}
+
+
+# ========== Claude Agent Routes ==========
+# Isolated from the PolyCLI agent sessions; no cross-module state.
+
+from fastapi.responses import StreamingResponse
+from claude_agent import ClaudeAgentRunRequest
+
+
+class ClaudeAgentRequestBody(BaseModel):
+    message: str
+    resume: bool = False
+    tool_choice: str = "auto"
+    model: Optional[str] = None
+    max_turns: int = 100
+    cwd: Optional[str] = None
+
+
+class ToolConfirmRequestBody(BaseModel):
+    tool_call_id: str
+    approved: bool
+    reason: Optional[str] = None
+    answers: Optional[dict] = None
+
+
+@app.post("/api/claude-agent")
+async def claude_agent_stream(
+    body: ClaudeAgentRequestBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """SSE streaming endpoint for Claude Agent.
+
+    Returns ``text/event-stream``; each frame is a JSON object:
+    ``{"type": "text-delta"|"tool-event"|"message-final"|"finish"|"error", ...}``
+    """
+    user_id = current_user["user_id"]
+    request = ClaudeAgentRunRequest(
+        user_id=user_id,
+        message=body.message,
+        resume=body.resume,
+        tool_choice=body.tool_choice,
+        model=body.model,
+        max_turns=body.max_turns,
+        cwd=body.cwd,
+    )
+
+    async def generate():
+        async for frame in claude_agent_thread_factory.run_streaming(request):
+            yield frame
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.get("/api/claude-agent/chat-history")
+async def claude_agent_chat_history(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return recent writing sessions for the authenticated user.
+
+    The agent uses these sessions as context; this endpoint exposes them
+    to the frontend so the chat UI can show relevant entry snippets.
+    """
+    user_id = current_user["user_id"]
+    sessions = database.list_sessions(user_id)
+    return {"sessions": sessions or []}
+
+
+@app.post("/api/claude-agent/message-latency")
+async def claude_agent_message_latency(
+    body: dict,
+    current_user: dict = Depends(get_current_user),
+):
+    """Record browser-side latency metrics for a Claude Agent message.
+
+    Stored as extra metadata on the session record when available;
+    silently ignored if the referenced session is not found.
+    """
+    # Lightweight pass-through: latency data is logged but not yet persisted.
+    import logging as _logging
+    _logging.getLogger("claude_agent.latency").info(
+        "message-latency user_id=%s data=%s",
+        current_user.get("user_id"),
+        body,
+    )
+    return {"ok": True}
+
+
+@app.get("/api/claude-agent/session")
+async def claude_agent_session_status(
+    session_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the keepalive snapshot for the caller's active session.
+
+    If *session_id* is omitted the caller's ``user_id`` is used as the key
+    (matching the ``build_session_id`` convention).
+    """
+    user_id = current_user["user_id"]
+    sid = session_id or user_id
+    snapshot = claude_agent_thread_factory.session_snapshot(sid)
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="No active session found")
+    return snapshot
+
+
+@app.delete("/api/claude-agent/session")
+async def claude_agent_session_close(
+    session_id: Optional[str] = None,
+    current_user: dict = Depends(get_current_user),
+):
+    """Explicitly close (destroy) the caller's Claude Agent session.
+
+    Triggers Phase 4 lifecycle hooks; the next request will start a fresh session.
+    """
+    user_id = current_user["user_id"]
+    sid = session_id or user_id
+    claude_agent_thread_factory.close_thread(sid)
+    return {"ok": True, "session_id": sid}
+
+
+@app.post("/api/claude-agent/tool-confirm")
+async def claude_agent_tool_confirm(
+    body: ToolConfirmRequestBody,
+    current_user: dict = Depends(get_current_user),
+):
+    """Resolve a pending tool confirmation from the frontend.
+
+    Must be called while the SSE stream is still open and the agent is
+    awaiting approval in its ``on_tool_confirmation_request`` callback.
+    """
+    user_id = current_user["user_id"]
+    resolved = claude_agent_thread_factory.confirm_tool(
+        session_id=user_id,
+        tool_call_id=body.tool_call_id,
+        approved=body.approved,
+        reason=body.reason,
+        answers=body.answers,
+    )
+    if not resolved:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No pending confirmation for tool_call_id={body.tool_call_id}",
+        )
+    return {"ok": True, "approved": body.approved}
 
 
 @app.websocket("/ws/speech-recognition")

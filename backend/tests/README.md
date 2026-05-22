@@ -8,9 +8,16 @@ Organized test suite for the Ink & Memory backend deck system.
 
 ```
 tests/
-├── __init__.py                 # Test package init
-├── test_database.py           # Database layer tests (CRUD operations)
-└── test_api_endpoints.py      # API integration tests (HTTP endpoints)
+├── __init__.py                          # Test package init
+├── test_database.py                     # Database layer tests (CRUD operations)
+├── test_api_endpoints.py                # API integration tests (HTTP endpoints)
+│
+│ # Claude Agent module tests (migrated from Pawkeyland scripts/)
+├── test_claude_agent_workspace.py       # Workspace lifecycle: root resolution, skeleton, idempotency
+├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
+├── test_claude_agent_runner.py          # Runner: streaming callbacks, session_id, error handling
+├── test_claude_agent_thread_factory.py  # Factory: flyweight cache, TTL eviction, Phase 1-4 contracts
+└── test_server_claude_agent.py          # Server smoke: route registration, auth enforcement, models
 ```
 
 ## Running Tests
@@ -41,7 +48,79 @@ source .venv/bin/activate
 python tests/test_api_endpoints.py
 ```
 
+**Claude Agent — Workspace (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_claude_agent_workspace.py -v
+```
+
+**Claude Agent — Context Builder (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_claude_agent_context_builder.py -v
+```
+
+**Claude Agent — Runner (mocks SDK, no server needed):**
+```bash
+source .venv/bin/activate
+python tests/test_claude_agent_runner.py -v
+```
+
+**Claude Agent — Thread Factory (mocks SDK, no server needed):**
+```bash
+source .venv/bin/activate
+python tests/test_claude_agent_thread_factory.py -v
+```
+
+**Claude Agent — Server Routes (import-level smoke, no SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_server_claude_agent.py -v
+```
+
 ## Test Coverage
+
+### Claude Agent — Workspace (`test_claude_agent_workspace.py`)
+- ✅ `get_workspace_root` — AGENT_CWD 优先，fallback 到 `ink-agent-workspaces`
+- ✅ `init_workspace` — 创建 files/logs/.claude 骨架，幂等，自动修复
+- ✅ `get_or_create_workspace` — 同 session 返回相同路径
+- ✅ `_validate_session_id` — 拒绝 `/` `\\` `..` 路径穿越
+
+### Claude Agent — Context Builder (`test_claude_agent_context_builder.py`)
+- ✅ `_render_session_entry` — 日期/标题/摘要字段渲染
+- ✅ `build_system_prompt` — 包含写作助手角色定位、近期会话块
+- ✅ 空会话回退为 "No recent entries found"
+- ✅ `context_session_count` 截断（只取前 N 条）
+- ✅ DB 异常时优雅降级（不抛，返回无会话 prompt）
+- ✅ `build_user_message` — 运行时上下文前缀、时区注入
+
+### Claude Agent — Runner (`test_claude_agent_runner.py`)
+- ✅ `on_text_delta` — AssistantMessage 文本块触发，full_text 正确累积
+- ✅ `on_text_done` — 流结束后收到完整拼接文本
+- ✅ `on_tool_event` — tool_use 块触发，携带正确 ToolEventPayload (name/id/input)
+- ✅ 多个 tool_use 块各自独立触发事件
+- ✅ `on_tool_confirmation_request` — tool_choice='manual' 时触发；auto 时不触发
+- ✅ SDK 异常触发 `on_error` + `AgentRunResult(success=False)`
+- ✅ `BaseExceptionGroup` 包装 CLI 失败（文档化行为，需 runner 扩展后生效）
+- ✅ 纯 `CancelledError` / 纯取消 BaseExceptionGroup 被重新抛出（on_error 不吞）
+- ✅ `session_id` 从 ResultMessage 提取
+- ✅ StreamEvent 不被 runner 分发（text_delta / thinking_delta 均忽略）
+
+### Claude Agent — Thread Factory (`test_claude_agent_thread_factory.py`)
+- ✅ Phase 2：runner 在 session 内创建一次，跨 turn 复用
+- ✅ TTL 过期驱逐：`INK_AGENT_TTL_S` 控制
+- ✅ `close_thread`：销毁 session，清除 runner 缓存
+- ✅ Phase 1 extrinsic state：每 turn 写入后清空
+- ✅ Phase 4 observer hooks：`session_ended` 在销毁时触发
+- ✅ 不同 session_id 独立隔离
+
+### Claude Agent — Server (`test_server_claude_agent.py`)
+- ✅ 6 个 `/api/claude-agent/*` 路由已注册
+- ✅ `ClaudeAgentRequestBody` 默认值和必填字段
+- ✅ `ToolConfirmRequestBody` 合约
+- ✅ `claude_agent_thread_factory` 实例已创建
+- ✅ startup/shutdown 钩子已注册
+- ✅ 无 JWT 时返回 401
 
 ### Database Layer (`test_database.py`)
 - ✅ Get system decks

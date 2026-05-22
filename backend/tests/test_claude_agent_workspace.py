@@ -1,0 +1,164 @@
+# [Input] Consume get_workspace_root, init_workspace, get_or_create_workspace
+#         from backend/claude_agent/workspace.py.
+# [Output] Validate workspace root resolution, skeleton creation, idempotency,
+#          path traversal rejection, and AGENT_CWD env var handling.
+# [Pos] test node in backend/tests
+# [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_workspace_manager.py.
+#                    Removed: skills/symlink tests (workspace_file_sync not migrated),
+#                    resolve_safe_path tests (not in simplified workspace.py).
+#                    Adapted: module path backend/claude_agent/workspace.py,
+#                    default workspace dir renamed ink-agent-workspaces.
+
+"""Regression tests for backend/claude_agent/workspace.py."""
+from __future__ import annotations
+
+import os
+import sys
+import tempfile
+import unittest
+import unittest.mock
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]  # backend/
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import tests._sdk_stubs  # noqa: F401
+from libs.claude_agent_kit.server.workspace import (
+    WORKSPACE_SUBDIRS,
+    get_or_create_workspace,
+    get_workspace_root,
+    init_workspace,
+)
+
+
+class TestGetWorkspaceRoot(unittest.TestCase):
+    def test_returns_temp_subdir_when_env_not_set(self):
+        env = {k: v for k, v in os.environ.items() if k != "AGENT_CWD"}
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
+            root = get_workspace_root()
+        self.assertTrue(root.is_absolute())
+        self.assertEqual(root.name, "ink-agent-workspaces")
+
+    def test_respects_absolute_agent_cwd(self):
+        with tempfile.TemporaryDirectory() as td:
+            with unittest.mock.patch.dict(os.environ, {"AGENT_CWD": td}):
+                root = get_workspace_root()
+            self.assertEqual(root.resolve(), Path(td).resolve())
+
+    def test_ignores_relative_agent_cwd_and_falls_back(self):
+        with unittest.mock.patch.dict(os.environ, {"AGENT_CWD": "relative/path"}):
+            root = get_workspace_root()
+        self.assertTrue(root.is_absolute())
+        self.assertEqual(root.name, "ink-agent-workspaces")
+
+
+class TestInitWorkspace(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["AGENT_CWD"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ.pop("AGENT_CWD", None)
+        self._tmp.cleanup()
+
+    def test_creates_standard_subdirectories(self):
+        ws = init_workspace("sess-001")
+        for subdir in WORKSPACE_SUBDIRS:
+            self.assertTrue((ws / subdir).is_dir(), f"{subdir}/ should exist")
+
+    def test_creates_claude_directory(self):
+        ws = init_workspace("sess-001")
+        self.assertTrue((ws / ".claude").is_dir())
+
+    def test_idempotent_on_repeat_calls(self):
+        ws1 = init_workspace("sess-repeat")
+        ws2 = init_workspace("sess-repeat")
+        self.assertEqual(ws1, ws2)
+
+    def test_repairs_deleted_subdir(self):
+        ws = init_workspace("sess-repair")
+        logs_dir = ws / "logs"
+        logs_dir.rmdir()
+        self.assertFalse(logs_dir.exists())
+        init_workspace("sess-repair")
+        self.assertTrue(logs_dir.is_dir())
+
+    def test_preserves_existing_claude_content_on_repeat(self):
+        ws = init_workspace("sess-copy")
+        marker = ws / ".claude" / "test_marker.txt"
+        marker.write_text("kept")
+        init_workspace("sess-copy")
+        self.assertEqual(marker.read_text(), "kept")
+
+    def test_creates_workspace_under_agent_cwd(self):
+        ws = init_workspace("my-session")
+        self.assertTrue(ws.is_dir())
+        self.assertEqual(ws.resolve().parent, Path(self._tmp.name).resolve())
+        self.assertEqual(ws.name, "my-session")
+
+
+class TestGetOrCreateWorkspace(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["AGENT_CWD"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ.pop("AGENT_CWD", None)
+        self._tmp.cleanup()
+
+    def test_returns_same_path_for_same_session(self):
+        ws1 = get_or_create_workspace("conv-abc")
+        ws2 = get_or_create_workspace("conv-abc")
+        self.assertEqual(ws1, ws2)
+
+    def test_different_sessions_get_different_paths(self):
+        ws1 = get_or_create_workspace("conv-111")
+        ws2 = get_or_create_workspace("conv-222")
+        self.assertNotEqual(ws1, ws2)
+
+    def test_creates_workspace_skeleton_on_first_call(self):
+        ws = get_or_create_workspace("fresh-session")
+        for subdir in WORKSPACE_SUBDIRS:
+            self.assertTrue((ws / subdir).is_dir(), f"missing {subdir}/")
+
+    def test_returns_existing_path_without_error(self):
+        ws1 = get_or_create_workspace("existing")
+        ws2 = get_or_create_workspace("existing")
+        self.assertEqual(ws1, ws2)
+        self.assertTrue(ws2.is_dir())
+
+
+class TestSessionIdValidation(unittest.TestCase):
+    """Workspace functions should reject dangerous session IDs."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["AGENT_CWD"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ.pop("AGENT_CWD", None)
+        self._tmp.cleanup()
+
+    def test_rejects_session_id_with_slash(self):
+        from claude_agent.thread_pool import _validate_session_id
+        with self.assertRaises(ValueError):
+            _validate_session_id("../../etc/passwd")
+
+    def test_rejects_session_id_with_double_dot(self):
+        from claude_agent.thread_pool import _validate_session_id
+        with self.assertRaises(ValueError):
+            _validate_session_id("..evil")
+
+    def test_rejects_session_id_with_backslash(self):
+        from claude_agent.thread_pool import _validate_session_id
+        with self.assertRaises(ValueError):
+            _validate_session_id("a\\b")
+
+    def test_accepts_plain_user_id(self):
+        from claude_agent.thread_pool import _validate_session_id
+        _validate_session_id("user_42")  # should not raise
+
+
+if __name__ == "__main__":
+    unittest.main()
