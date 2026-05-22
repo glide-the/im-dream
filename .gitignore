@@ -18,6 +18,7 @@ backend/tests/*.pyc
 
 # Node
 frontend/node_modules/
+frontend/package-lock.json
 
 # IDE
 .vscode/
