@@ -2157,7 +2157,7 @@ def get_friend_timeline(
 # ========== Claude Agent Routes ==========
 # Isolated from the PolyCLI agent sessions; no cross-module state.
 
-from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse
 from claude_agent import ClaudeAgentRunRequest
 
 
