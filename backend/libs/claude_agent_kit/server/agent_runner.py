@@ -67,6 +67,12 @@ from ..types import (
 from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
+from .editor_tool import allowed_editor_tool_names
+from .editor_index import (
+    get_editor_resource_data,
+    is_editor_index_path,
+    resolve_editor_resource,
+)
 from .sdk_env import apply_project_sdk_runtime_options
 
 logger = logging.getLogger(__name__)
@@ -90,10 +96,12 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "mcp__user__touch_animation",
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
+    *allowed_editor_tool_names(),
 ]
 _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
+_EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 _FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -123,6 +131,10 @@ _MEMORY_ENV_NAMES: tuple[str, ...] = (
     "PAWKEYLAND_MEM0_TOP_K",
     "PAWKEYLAND_MEM0_USER_ID",
     "PAWKEYLAND_AGENT_USER_MESSAGE",
+)
+_EDITOR_ENV_NAMES: tuple[str, ...] = (
+    "INK_EDITOR_INTERNAL_BASE_URL",
+    "INK_EDITOR_SESSION_ID",
 )
 _CLAUDE_SDK_ENV_KEYS: tuple[str, ...] = (
     "ANTHROPIC_BASE_URL",
@@ -337,6 +349,15 @@ def _memory_mcp_enabled() -> bool:
     return True
 
 
+def _editor_mcp_enabled() -> bool:
+    raw = os.getenv("INK_ENABLE_AGENT_EDITOR_MCP", "").strip().lower()
+    if raw in _FALSE_ENV_VALUES:
+        return False
+    if raw in _TRUE_ENV_VALUES:
+        return True
+    return True
+
+
 def _pythonpath_with_repo_root() -> str:
     """Return a PYTHONPATH that lets Claude-spawned MCP subprocesses import this repo."""
 
@@ -355,6 +376,7 @@ def _stdio_env(
     extra_env: Optional[dict[str, str]] = None,
     include_memory_config: bool = False,
     include_necklace_config: bool = False,
+    include_editor_config: bool = False,
 ) -> dict[str, str]:
     env = {
         "PYTHONPATH": _pythonpath_with_repo_root(),
@@ -367,6 +389,11 @@ def _stdio_env(
                 env[name] = value
     if include_memory_config:
         for name in _MEMORY_ENV_NAMES:
+            value = os.getenv(name, "")
+            if value:
+                env[name] = value
+    if include_editor_config:
+        for name in _EDITOR_ENV_NAMES:
             value = os.getenv(name, "")
             if value:
                 env[name] = value
@@ -407,6 +434,18 @@ def _memory_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpS
         args=["-m", "libs.claude_agent_kit.server.memory_mcp_stdio"],
         env=_stdio_env(extra_env=extra_env, include_memory_config=True),
     )
+
+
+def _editor_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
+    """Build the external stdio MCP config for the EditorEngine state server."""
+
+    return McpStdioServerConfig(
+        type="stdio",
+        command=sys.executable,
+        args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
+        env=_stdio_env(extra_env=extra_env, include_editor_config=True),
+    )
+
 
 # ---------------------------------------------------------------------------
 # Async helper
@@ -582,6 +621,7 @@ class ClaudeAgentRunner:
         system_prompt = opts.system_prompt
         mcp_env = dict(opts.mcp_env or {})
         turn_runtime = dict(opts.turn_runtime or {})
+        editor_state: Optional[dict[str, Any]] = opts.editor_state
 
         include_partial_messages = True
 
@@ -605,6 +645,9 @@ class ClaudeAgentRunner:
         # empty content_block_start; emit one complete tool event at block stop.
         pending_stream_tools: dict[int, dict[str, Any]] = {}
         pending_stream_thinking: dict[int, dict[str, Any]] = {}
+        # Transient tempfiles created by the .editor/ interception hook.
+        # Collected here so they can be removed after the run completes.
+        editor_intercept_tmpfiles: list[str] = []
 
         # Build user message dict for the SDK
         runtime_ctx = RuntimeContext(
@@ -680,6 +723,64 @@ class ClaudeAgentRunner:
                 "tool_name": tool_name,
                 "input": tool_input,
             }
+
+            # ------------------------------------------------------------------
+            # EditorState virtual index interception.
+            #
+            # When Claude issues a ``Read`` tool call against any path inside the
+            # ``.editor/`` virtual directory, redirect it to a transient tempfile
+            # populated from the live ``editor_state`` snapshot attached to this
+            # run.  This keeps the on-disk placeholder files empty while always
+            # serving the up-to-date frontend state.
+            #
+            # The ``Read`` tool uses ``file_path`` as its primary path field but
+            # some SDK versions surface it as ``path``; both are checked.
+            # ------------------------------------------------------------------
+            if tool_name == "Read" and editor_state is not None:
+                raw_path = str(
+                    tool_input.get("file_path") or tool_input.get("path") or ""
+                )
+                if is_editor_index_path(raw_path):
+                    resource = resolve_editor_resource(raw_path)
+                    if resource is not None:
+                        data = get_editor_resource_data(editor_state, resource)
+                        try:
+                            import json as _json
+                            import tempfile as _tempfile
+
+                            with _tempfile.NamedTemporaryFile(
+                                mode="w",
+                                suffix=".json",
+                                prefix=f"ink_editor_{resource}_",
+                                delete=False,
+                                encoding="utf-8",
+                            ) as _tf:
+                                _json.dump(data, _tf, ensure_ascii=False, indent=2)
+                                tmp_path = _tf.name
+
+                            editor_intercept_tmpfiles.append(tmp_path)
+                            # Redirect ``Read`` to the populated tempfile.
+                            # Preserve ``file_path`` vs ``path`` depending on
+                            # which field was present in the original tool_input.
+                            redirect_key = (
+                                "file_path"
+                                if "file_path" in tool_input
+                                else "path"
+                            )
+                            return HookJSONOutput(
+                                hookSpecificOutput={
+                                    "tool_input": {**tool_input, redirect_key: tmp_path}
+                                }
+                            )
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "EditorState intercept: failed to write tempfile "
+                                "for resource=%s path=%r",
+                                resource,
+                                raw_path,
+                                exc_info=True,
+                            )
+                            # Fall through — let Claude read the empty placeholder.
 
             if tool_choice != "manual":
                 return HookJSONOutput()
@@ -779,6 +880,12 @@ class ClaudeAgentRunner:
             tool.startswith(_NECKLACE_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):
             mcp_servers["necklace"] = _necklace_mcp_stdio_config(mcp_env)
+        if _editor_mcp_enabled() and any(
+            tool.startswith(_EDITOR_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
+        ):
+            mcp_servers["editor"] = _editor_mcp_stdio_config(
+                extra_env={**mcp_env, "INK_EDITOR_SESSION_ID": thread_id}
+            )
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = apply_project_sdk_runtime_options(
@@ -964,6 +1071,12 @@ class ClaudeAgentRunner:
                 _stderr_buf.close()
             except Exception:  # noqa: BLE001
                 pass
+            # Clean up transient tempfiles written by the .editor/ interception hook.
+            for _tmp_path in editor_intercept_tmpfiles:
+                try:
+                    os.unlink(_tmp_path)
+                except Exception:  # noqa: BLE001
+                    pass
         return AgentRunResult(
             full_text=full_text,  # type: ignore[possibly-undefined]
             session_id=current_session_id,

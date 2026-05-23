@@ -146,6 +146,11 @@ class AgentRunOptions:
     turn_runtime: dict[str, Any] = field(default_factory=dict)
     # Environment passed to project-owned MCP subprocesses for current-session bindings.
     mcp_env: dict[str, str] = field(default_factory=dict)
+    # Live EditorState snapshot for the current writing session.
+    # When provided, ``Read`` calls against ``.editor/`` virtual paths are
+    # intercepted by the ``PreToolUse`` hook and redirected to transient
+    # tempfiles populated from this dict.
+    editor_state: Optional[dict[str, Any]] = None
 
 
 @dataclass

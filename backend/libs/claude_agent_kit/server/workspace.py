@@ -6,6 +6,7 @@
 # [Sync] 2026-05-08: refresh project .claude template files on every init while preserving runtime skills.
 # [Sync] 2026-05-08: call sync_skills_symlinks() at the end of init_workspace so skills are linked on first init.
 # [Sync] 2026-05-09: seed workspace/skills/ from project .claude/skills/ on init so bundled skills are available.
+# [Sync] 2026-05-23: create .editor/ virtual index directory with placeholder files on workspace init.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -114,6 +115,9 @@ def init_workspace(session_id: str) -> Path:
     from .workspace_file_sync import sync_skills_symlinks  # local import avoids circular
     sync_skills_symlinks(workspace)
 
+    # Create .editor/ virtual index directory with placeholder files.
+    _init_editor_index(workspace)
+
     logger.debug("Workspace initialised: %s", workspace)
     return workspace
 
@@ -131,6 +135,52 @@ def get_or_create_workspace(session_id: str) -> Path:
     if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
         raise ValueError(f"Invalid session_id: {session_id!r}")
     return init_workspace(session_id)
+
+
+# ---------------------------------------------------------------------------
+# Internal — template asset copying
+# ---------------------------------------------------------------------------
+
+
+def _init_editor_index(workspace: Path) -> None:
+    """Create (or repair) the ``.editor/`` virtual index directory.
+
+    Writes lightweight placeholder files so Claude can discover the virtual
+    resources via ``ls``/``glob``.  The on-disk content is always empty JSON
+    (``{}``); any ``Read`` call against these paths is intercepted by the
+    ``PreToolUse`` hook in ``agent_runner.py`` and redirected to a transient
+    tempfile populated with the live ``EditorState`` snapshot.
+
+    This function is idempotent — safe to call on every ``init_workspace``.
+    """
+    from .editor_index import (  # local import avoids circular
+        EDITOR_INDEX_DIR,
+        EDITOR_INDEX_PLACEHOLDER,
+        EDITOR_INDEX_README,
+        EDITOR_RESOURCES,
+    )
+
+    editor_dir = workspace / EDITOR_INDEX_DIR
+    editor_dir.mkdir(exist_ok=True)
+
+    # Write README (always refresh so it stays up to date with the template).
+    readme_path = editor_dir / "README.md"
+    try:
+        readme_path.write_text(EDITOR_INDEX_README, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to write .editor/README.md in %s", workspace, exc_info=True)
+
+    # Write placeholder JSON files — skip if already present to avoid
+    # overwriting any data a future implementation might store here.
+    for stem in EDITOR_RESOURCES:
+        placeholder = editor_dir / f"{stem}.json"
+        if not placeholder.exists():
+            try:
+                placeholder.write_text(EDITOR_INDEX_PLACEHOLDER, encoding="utf-8")
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "Failed to write .editor/%s.json in %s", stem, workspace, exc_info=True
+                )
 
 
 # ---------------------------------------------------------------------------

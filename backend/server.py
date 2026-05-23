@@ -2118,7 +2118,18 @@ def get_friend_timeline(
 # Isolated from the PolyCLI agent sessions; no cross-module state.
 
 from fastapi.responses import StreamingResponse
+from fastapi import Request as _FastAPIRequest
 from claude_agent import ClaudeAgentRunRequest
+from libs.claude_agent_kit.server.editor_index import get_editor_resource_data
+
+# ---------------------------------------------------------------------------
+# In-memory EditorState store.
+#
+# The editor MCP subprocess cannot share in-process memory with the FastAPI
+# server, so the current session's EditorState snapshot is parked here and
+# served over a localhost-only internal HTTP endpoint.
+# ---------------------------------------------------------------------------
+_editor_state_store: dict[str, dict] = {}
 
 
 class ClaudeAgentRequestBody(BaseModel):
@@ -2128,6 +2139,7 @@ class ClaudeAgentRequestBody(BaseModel):
     model: Optional[str] = None
     max_turns: int = 100
     cwd: Optional[str] = None
+    editor_state: Optional[dict] = None
 
 
 class ToolConfirmRequestBody(BaseModel):
@@ -2148,6 +2160,10 @@ async def claude_agent_stream(
     ``{"type": "text-delta"|"tool-event"|"message-final"|"finish"|"error", ...}``
     """
     user_id = current_user["user_id"]
+    # Persist editor state so the MCP subprocess can fetch it via the
+    # internal endpoint if needed.
+    if body.editor_state is not None:
+        _editor_state_store[user_id] = body.editor_state
     request = ClaudeAgentRunRequest(
         user_id=user_id,
         message=body.message,
@@ -2156,6 +2172,7 @@ async def claude_agent_stream(
         model=body.model,
         max_turns=body.max_turns,
         cwd=body.cwd,
+        editor_state=body.editor_state,
     )
 
     async def generate():
@@ -2163,6 +2180,27 @@ async def claude_agent_stream(
             yield frame
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@app.get("/api/internal/editor-state/{session_id}")
+async def internal_editor_state(
+    session_id: str,
+    http_request: _FastAPIRequest,
+    resource: str = "full_state",
+):
+    """Internal-only endpoint: return the latest EditorState snapshot for a session.
+
+    Only accessible from localhost; used by the editor MCP subprocess which
+    cannot share in-process memory with the FastAPI server.
+    """
+    client_host = (http_request.client.host if http_request.client else None)
+    if client_host not in ("127.0.0.1", "::1", "localhost"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    data = _editor_state_store.get(session_id)
+    if data is None:
+        return {"ok": False, "error": "not_found", "data": None}
+    sliced = get_editor_resource_data(data, resource)
+    return {"ok": True, "data": sliced}
 
 
 @app.get("/api/claude-agent/chat-history")

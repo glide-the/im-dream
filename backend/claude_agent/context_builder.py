@@ -57,6 +57,24 @@ Principles:
 - Respect privacy: treat all journal content as confidential.
 - Respond in the same language the user writes in.
 
+## Live Editor Access
+
+The workspace ``.editor/`` directory provides live snapshots of the user's current writing \
+session.  You can read these files with the ``Read`` tool or use the \
+``mcp__editor__read_full_state`` tool (no arguments needed) to retrieve structured data:
+
+| File / Tool                        | Content                                      |
+|------------------------------------|----------------------------------------------|
+| ``.editor/cells.json``             | Text and widget cells (the document body)    |
+| ``.editor/commentors.json``        | Voice commentor annotations on the document  |
+| ``.editor/tasks.json``             | In-progress analysis tasks                   |
+| ``.editor/session.json``           | Session metadata (id, state, timestamp)      |
+| ``.editor/full_state.json``        | Complete EditorState snapshot                |
+| ``mcp__editor__read_full_state``   | Same as full_state.json via MCP              |
+
+Use these resources when the user asks about their current document, annotations, or \
+writing session.  The data is served from the live frontend state — do not edit these files.
+
 {recent_sessions_block}\
 """
 

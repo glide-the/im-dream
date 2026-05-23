@@ -66,6 +66,9 @@ class ClaudeAgentRunRequest:
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
+    # Live EditorState snapshot forwarded from the frontend request.
+    # Passed to AgentRunOptions so the PreToolUse hook can serve .editor/ reads.
+    editor_state: Optional[dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +149,7 @@ class ClaudeAgentService:
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
+            editor_state=request.editor_state,
         )
 
         confirmation_store = ToolConfirmationStore()
