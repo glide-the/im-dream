@@ -8,7 +8,7 @@ import './App.css';
 import {
   FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye,
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass,
-  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog,
+  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments,
 } from 'react-icons/fa';
 import TopNavBar from './components/TopNavBar';
 import LeftToolbar from './components/LeftToolbar';
@@ -38,6 +38,7 @@ import { InspirationHint } from './components/Editor/InspirationHint';
 import { useComments } from './hooks/useComments';
 import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
+import ChatView from './components/chat/ChatView';
 
 // @@@ Icon map with React Icons
 const iconMap = {
@@ -120,7 +121,7 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
-  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks'>('writing');
+  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat'>('writing');
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
 
@@ -264,6 +265,7 @@ export default function App() {
     { key: 'timeline' as const, label: t('nav.timeline'), icon: FaRegClock },
     { key: 'analysis' as const, label: t('nav.analysis'), icon: FaChartBar },
     { key: 'decks' as const, label: t('nav.decks'), icon: FaLayerGroup },
+    { key: 'chat' as const, label: t('nav.chat'), icon: FaComments },
     { key: 'settings' as const, label: t('nav.settings'), icon: FaCog },
   ];
 
@@ -1773,6 +1775,19 @@ export default function App() {
           overflow: 'hidden'
         }}>
           <AnalysisView />
+        </div>
+      )}
+
+      {currentView === 'chat' && (
+        <div style={{
+          position: 'fixed',
+          top: viewTopOffset,
+          left: 0,
+          right: 0,
+          bottom: mobileBottomOffset,
+          overflow: 'auto'
+        }}>
+          <ChatView />
         </div>
       )}
 
