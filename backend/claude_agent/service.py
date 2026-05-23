@@ -59,6 +59,7 @@ class ClaudeAgentRunRequest:
     """
 
     user_id: str
+    thread_id: str
     message: str
     resume: bool = False
     tool_choice: str = "auto"
@@ -197,12 +198,42 @@ class ClaudeAgentService:
                 })
             )
             await queue.put(_sse("finish", {"reason": "success"}))
+            # Persist user and assistant messages to the database
+            await self._persist_turn(execution, full_text)
         else:
             error_msg = str(result.error) if result.error else "Unknown error"
             await queue.put(_sse("error", {"message": error_msg}))
             await queue.put(_sse("finish", {"reason": "error"}))
 
         await queue.put(None)  # Sentinel: end of stream
+
+    async def _persist_turn(
+        self, execution: "_TurnExecution", assistant_text: str
+    ) -> None:
+        """Save user and assistant messages to the database after a successful turn."""
+        import asyncio
+        import database
+
+        thread_id = execution.request.thread_id
+        user_text = execution.request.message
+
+        loop = asyncio.get_running_loop()
+
+        def _save() -> None:
+            database.save_chat_message(thread_id, "user", user_text)
+            database.save_chat_message(thread_id, "assistant", assistant_text)
+            # Auto-fill thread title from first user message if still NULL
+            thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
+            if thread and not thread.get("title"):
+                title = user_text.strip()[:50]
+                database.update_chat_thread_title(thread_id, title)
+
+        try:
+            await loop.run_in_executor(None, _save)
+        except Exception:
+            logger.exception(
+                "Failed to persist messages for thread_id=%s", thread_id
+            )
 
     # ------------------------------------------------------------------
     # Tool confirmation (called from HTTP endpoint via factory)
