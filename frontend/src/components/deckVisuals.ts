@@ -5,9 +5,9 @@ import {
 
 export const COLORS = {
   'blue': { hex: 'var(--color-action-link)', label: 'Blue' },
-  'purple': { hex: '#9b59b6', label: 'Purple' },
-  'pink': { hex: '#e91e63', label: 'Pink' },
-  'green': { hex: '#27ae60', label: 'Green' },
+  'purple': { hex: 'var(--color-voice-purple)', label: 'Purple' },
+  'pink': { hex: 'var(--color-voice-pink)', label: 'Pink' },
+  'green': { hex: 'var(--color-voice-green)', label: 'Green' },
   'yellow': { hex: 'var(--color-state-warning)', label: 'Yellow' }
 };
 

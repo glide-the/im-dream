@@ -179,7 +179,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
                 <textarea value={systemPrompt} onChange={(event) => { setSystemPrompt(event.target.value); setDirty(true); }} rows={5} style={{ width: '100%', marginTop: '0.65rem', padding: '0.75rem 0.85rem', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', resize: 'vertical', boxSizing: 'border-box' }} />
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.65rem' }}>
                   <button type="button" onClick={handleResetPrompt} style={{ border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer' }}>Reset</button>
-                  <button type="button" onClick={handleSavePrompt} disabled={saving || !dirty} style={{ border: 'none', borderRadius: '999px', padding: '0.55rem 0.9rem', background: 'var(--color-action-link)', color: '#fff', fontWeight: 600, cursor: saving || !dirty ? 'not-allowed' : 'pointer', opacity: saving || !dirty ? 0.55 : 1 }}>{saving ? 'Saving…' : 'Save'}</button>
+                  <button type="button" onClick={handleSavePrompt} disabled={saving || !dirty} style={{ border: 'none', borderRadius: '999px', padding: '0.55rem 0.9rem', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: saving || !dirty ? 'not-allowed' : 'pointer', opacity: saving || !dirty ? 0.55 : 1 }}>{saving ? 'Saving…' : 'Save'}</button>
                 </div>
               </section>
 
@@ -189,7 +189,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
                   <p style={{ margin: '0.2rem 0 0', fontSize: '0.74rem', color: 'var(--color-text-muted)' }}>Enable file-side context while chatting.</p>
                 </div>
                 <button type="button" onClick={handleWorkspaceToggle} aria-pressed={workspaceMode} style={{ position: 'relative', width: '2.9rem', height: '1.7rem', border: 'none', borderRadius: '999px', background: workspaceMode ? 'var(--color-action-link)' : 'var(--color-disabled-bg)', cursor: 'pointer' }}>
-                  <span style={{ position: 'absolute', top: '0.15rem', left: workspaceMode ? '1.45rem' : '0.15rem', width: '1.4rem', height: '1.4rem', borderRadius: '999px', background: '#fff', transition: 'left 0.2s ease' }} />
+                  <span style={{ position: 'absolute', top: '0.15rem', left: workspaceMode ? '1.45rem' : '0.15rem', width: '1.4rem', height: '1.4rem', borderRadius: '999px', background: 'var(--color-text-on-action)', transition: 'left 0.2s ease' }} />
                 </button>
               </section>
             </>
