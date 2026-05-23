@@ -29,10 +29,10 @@ EditorEngine 已具备清晰的命令接口，将这些方法直接映射为 MCP
 | `insertWidgetAtCursor(...)` | `insert_widget` | 写（需确认） |
 | `setCommentFeedback(commentId, feedback)` | `set_comment_feedback` | 写（需确认） |
 | `addCommentChatMessage(commentId, role, content)` | `reply_to_comment` | 写（可自动） |
-| ——（读取通过文件系统，见 `workspace-adapter.md`） | `read_segment` / `list_segments` / `read_comments` | 只读 |
+| ——（读取通过虚拟索引拦截，见 `workspace-adapter.md`） | `read_segment` / `list_segments` / `read_comments` | 只读 |
 
 **读写分离策略：**
-- **只读工具**：返回文档内容，无副作用，Agent 可自由调用（也可直接读文件系统）
+- **只读工具**：返回文档内容，无副作用，Agent 可自由调用（也可通过 `.editor/` 虚拟索引路径触发 PreToolUse 拦截读取）
 - **写工具**：修改 EditorState，必须经 `PreToolUse` 拦截并等待人类 Approve
 
 ---
@@ -49,7 +49,7 @@ EditorEngine 已具备清晰的命令接口，将这些方法直接映射为 MCP
 | `list_comments` | `EditorState.commentors`（已应用） | 列出所有已应用评论的摘要（id、phrase、voice、appliedAt） |
 | `read_comment` | `EditorState.commentors[commentId]` | 读取指定评论的完整内容，含对话历史 |
 
-> 只读工具等价于读取工作空间文件，具体文件路径见 [`workspace-adapter.md`](./workspace-adapter.md)。Agent 也可直接通过 `read_file` 获取相同内容。
+> 只读工具与 `.editor/` 虚拟索引路径等价：Agent 也可通过 `read_file(".editor/cells.json")` 等路径触发 `PreToolUse` 拦截获取相同内容（见 [`workspace-adapter.md`](./workspace-adapter.md)）。
 
 ### 2.2 写工具（全部需要人类确认）
 
@@ -264,8 +264,8 @@ EditorEngine 已具备清晰的命令接口，将这些方法直接映射为 MCP
 
 ```
 Agent 需要了解文档结构
-  → 调用 list_segments
-  → MCP Server 直接从 EditorState（或工作空间文件）读取
+  → 调用 list_segments（或 read_file(".editor/cells.json") 触发虚拟索引拦截）
+  → MCP Server / PreToolUse hook 从 editor_state 内存快照读取
   → 返回片段列表
   → Agent 继续推理
 ```

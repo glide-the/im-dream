@@ -1,4 +1,4 @@
-# EditorState 工作空间文件系统适配器
+# EditorState 虚拟索引适配器
 
 Status: Draft  
 Updated: 2026-05-23  
@@ -9,12 +9,12 @@ Scope: Design only — 不含实现代码
 ## 目录
 
 1. [设计背景](#1-设计背景)
-2. [工作空间目录结构](#2-工作空间目录结构)
-3. [文件格式规范](#3-文件格式规范)
-4. [适配器职责与接口](#4-适配器职责与接口)
-5. [同步策略](#5-同步策略)
+2. [虚拟索引目录结构](#2-虚拟索引目录结构)
+3. [资源映射规范](#3-资源映射规范)
+4. [PreToolUse 拦截机制](#4-pretooluse-拦截机制)
+5. [工作空间初始化集成](#5-工作空间初始化集成)
 6. [读写路径分离](#6-读写路径分离)
-7. [与工作空间文件系统的集成](#7-与工作空间文件系统的集成)
+7. [设计决策：为何不写实际文件](#7-设计决策为何不写实际文件)
 
 ---
 
@@ -30,204 +30,198 @@ Claude Agent 需要"读取"当前文档内容才能进行分析、建议和修�
 
 ### 1.2 解决方案
 
-引入 **SessionWorkspaceAdapter**：在每次 EditorState 变更后，将状态以结构化文件的形式同步到 Claude Agent 的工作空间文件系统（`AGENT_CWD`）。Agent 通过 `read_file` 原生能力读取文档内容，无需新增 API。
+引入 **虚拟索引适配器**：在工作空间内创建 `.editor/` 目录，其中仅放置**占位符文件**（空 JSON `{}`）。Agent 通过 `read_file` 原生能力尝试读取这些路径时，`PreToolUse` 钩子会在实际执行前拦截该调用，将其重定向到一个临时文件——该临时文件在拦截时动态填充自当前 `AgentRunOptions.editor_state` 快照。
 
 **核心思路：**
+
 ```
-EditorState（内存）
-    ↓ SessionWorkspaceAdapter.sync()
-工作空间文件系统（{AGENT_CWD}/{userId}/document/）
-    ↑ Claude Agent read_file
+AgentRunOptions.editor_state（内存快照，随每轮请求注入）
+    ↑ 按需提取
+PreToolUse hook（agent_runner.py）
+    ↑ 拦截 Read 工具调用
+.editor/{resource}.json（占位符，磁盘内容始终为 {}）
+    ↑ Agent read_file（被重定向前的目标路径）
+```
+
+运行时实际路径（拦截后）：
+
+```
+.editor/cells.json  ──PreToolUse──▶  /tmp/ink_editor_cells_XXXX.json（动态填充）
+                                           ↑
+                                    editor_state["cells"] 序列化
 ```
 
 ---
 
-## 2. 工作空间目录结构
+## 2. 虚拟索引目录结构
 
-在现有工作空间结构的基础上，新增 `document/` 子目录：
+在现有工作空间结构的基础上，新增 `.editor/` 虚拟索引目录：
 
 ```
 {AGENT_CWD}/
-  └── {userId}/                        ← 用户工作空间根
+  └── {session_id}/                    ← 用户工作空间根
       ├── .claude/                     ← Claude 配置（现有）
       ├── .mcp.json                    ← MCP 服务配置（现有）
       ├── files/                       ← 用户上传文件（现有）
       ├── logs/                        ← Agent 执行日志（现有）
       ├── skills/                      ← Skills（现有）
-      └── document/                    ← ★ 新增：EditorState 镜像
-            ├── manifest.json          ← 文档元数据 + 片段有序列表
-            ├── segments/              ← 各片段文件
-            │     ├── {cellId}.txt     ← 文本片段（纯文本）
-            │     └── {cellId}.json    ← 组件片段（JSON）
-            └── comments/             ← 已应用评论文件
-                  └── {commentorId}.json
+      └── .editor/                     ← ★ 新增：EditorState 虚拟索引
+            ├── README.md              ← 说明文件（告知 Agent 这是虚拟目录）
+            ├── cells.json             ← 占位符（{}），读时被重定向至实时数据
+            ├── commentors.json        ← 占位符（{}），同上
+            ├── tasks.json             ← 占位符（{}），同上
+            ├── session.json           ← 占位符（{}），同上
+            └── full_state.json        ← 占位符（{}），同上
 ```
+
+> **关键约束**：`.editor/` 中的 `.json` 文件磁盘内容**始终为空 JSON `{}`**，从不写入真实数据。实际内容仅在 `PreToolUse` 拦截时写入临时文件并一次性返回给 Agent，运行结束后清理。
 
 ---
 
-## 3. 文件格式规范
+## 3. 资源映射规范
 
-### 3.1 `manifest.json` — 文档总览
+每个虚拟文件对应 `EditorState` 中的一个字段或预设的字段组合：
 
-Agent 读取文档的入口文件，包含会话元数据和片段有序列表。
+| 虚拟路径 | `EditorState` 来源 | 说明 |
+|----------|--------------------|------|
+| `.editor/cells.json` | `editor_state["cells"]` | 文档所有文本/组件片段的有序数组 |
+| `.editor/commentors.json` | `editor_state["commentors"]` | 已应用的声音评论者注释列表 |
+| `.editor/tasks.json` | `editor_state["tasks"]` | 进行中的分析任务列表 |
+| `.editor/session.json` | `{"id", "selectedState", "createdAt"}` | 会话元数据（id、情感状态、创建时间） |
+| `.editor/full_state.json` | 整个 `editor_state` dict | 完整 EditorState 快照（调试 / 全量分析用） |
+
+### 3.1 `cells.json` 内容示例
 
 ```json
-{
-  "sessionId": "sess-uuid-xxxx",
-  "createdAt": "2026-05-23T08:00:00.000Z",
-  "selectedState": "平静",
-  "lastSyncedAt": "2026-05-23T08:30:12.345Z",
-  "segments": [
-    {
-      "id": "cell-001",
-      "type": "text",
-      "file": "segments/cell-001.txt",
-      "length": 48
-    },
-    {
-      "id": "cell-002",
-      "type": "widget",
-      "widgetType": "chat",
-      "file": "segments/cell-002.json"
-    },
-    {
-      "id": "cell-003",
-      "type": "text",
-      "file": "segments/cell-003.txt",
-      "length": 62
+[
+  {
+    "id": "cell-001",
+    "type": "text",
+    "content": "今天的天空很蓝，我想起了那个夏天的午后。风吹过院子里的老树，叶子哗哗作响。"
+  },
+  {
+    "id": "cell-002",
+    "type": "widget",
+    "widgetType": "chat",
+    "data": {
+      "voiceId": "voice-azure",
+      "messages": [
+        { "role": "assistant", "content": "这段文字让我想到了……" }
+      ]
     }
-  ],
-  "commentCount": 3,
-  "commentsDir": "comments/"
-}
-```
-
-### 3.2 `segments/{cellId}.txt` — 文本片段
-
-```
-今天的天空很蓝，我想起了那个夏天的午后。风吹过院子里的老树，
-叶子哗哗作响，像是在说什么秘密的话。
-```
-
-纯文本文件，UTF-8 编码，无额外格式包装。Agent 可直接 `read_file` 获取完整文本。
-
-### 3.3 `segments/{cellId}.json` — 组件片段
-
-```json
-{
-  "id": "cell-002",
-  "type": "widget",
-  "widgetType": "chat",
-  "data": {
-    "voiceId": "voice-azure",
-    "messages": [
-      { "role": "assistant", "content": "这段文字让我想到了……" },
-      { "role": "user", "content": "你觉得这个比喻怎么样？" }
-    ]
   }
-}
+]
 ```
 
-### 3.4 `comments/{commentorId}.json` — 评论
+### 3.2 `session.json` 内容示例
 
 ```json
 {
-  "id": "cmt-uuid-xxxx",
-  "phrase": "风吹过院子里的老树",
-  "comment": "这个意象很有力量，树的沉默与风的流动形成了对话。",
-  "voiceId": "voice-azure",
-  "voice": "Azure",
-  "icon": "🌙",
-  "color": "#4A90D9",
-  "appliedAt": 1716451812345,
-  "computedAt": 1716451800000,
-  "feedback": null,
-  "chatHistory": [
-    {
-      "role": "assistant",
-      "content": "这个意象很有力量，树的沉默与风的流动形成了对话。"
-    },
-    {
-      "role": "user",
-      "content": "我想让这段更有节奏感，你有什么建议吗？"
-    },
-    {
-      "role": "assistant",
-      "content": "可以考虑在"老树"和"叶子"之间加一个短句停顿……"
-    }
-  ]
+  "id": "sess-uuid-xxxx",
+  "selectedState": "平静",
+  "createdAt": "2026-05-23T08:00:00.000Z"
 }
 ```
 
 ---
 
-## 4. 适配器职责与接口
+## 4. PreToolUse 拦截机制
 
-### 4.1 SessionWorkspaceAdapter
+### 4.1 拦截条件
 
-适配器负责将 EditorState 快照单向同步到工作空间文件系统。
+`agent_runner.py` 的 `PreToolUse` 钩子在以下条件**同时满足**时触发拦截：
 
-**核心职责：**
-1. 在 EditorEngine `notifyChange()` 之后（或防抖后）触发同步
-2. 将 EditorState 中的 cells 逐一写入 `segments/` 对应文件
-3. 将已应用的 commentors 写入 `comments/` 对应文件
-4. 更新 `manifest.json`
-5. 清理已删除的 cell/commentor 对应文件
+1. 工具名为 `Read`（Claude 的原生文件读取工具）
+2. `AgentRunOptions.editor_state` 不为 `None`（本轮运行注入了编辑器状态）
+3. 路径参数（`file_path` 或 `path`）落在 `.editor/` 虚拟目录内
 
-**接口概念（设计层面）：**
-
-```typescript
-interface SessionWorkspaceAdapter {
-  // 全量同步当前 EditorState 到文件系统
-  sync(state: EditorState, workspacePath: string): Promise<void>;
-
-  // 增量同步单个 cell（Engine 方法调用后触发）
-  syncCell(cell: Cell, workspacePath: string): Promise<void>;
-
-  // 增量同步单个 commentor（评论应用后触发）
-  syncCommentor(commentor: Commentor, workspacePath: string): Promise<void>;
-
-  // 删除文件（cell 或 commentor 被移除后）
-  removeCell(cellId: string, workspacePath: string): Promise<void>;
-  removeCommentor(commentorId: string, workspacePath: string): Promise<void>;
-}
-```
-
-### 4.2 工作空间路径解析
-
-用户的工作空间路径基于现有工作空间设计（见 [`../workspace-filesystem.md`](../workspace-filesystem.md)）：
+### 4.2 拦截流程
 
 ```
-workspacePath = {AGENT_CWD}/{userId}
-documentPath  = {workspacePath}/document/
+Agent 发出 Read 工具调用
+  → tool_name = "Read", tool_input.file_path = ".editor/cells.json"
+  ↓
+PreToolUse hook 检测到 is_editor_index_path(path) == True
+  ↓
+resolve_editor_resource(path)  →  resource = "cells"
+  ↓
+get_editor_resource_data(editor_state, "cells")  →  data = [...]
+  ↓
+写入临时文件（tempfile.NamedTemporaryFile）
+  /tmp/ink_editor_cells_XXXX.json  ←  json.dump(data)
+  ↓
+HookJSONOutput({ "tool_input": { "file_path": "/tmp/ink_editor_cells_XXXX.json" } })
+  ↓
+Claude SDK 使用重定向后的路径执行 Read
+  → Agent 得到实时的 cells 数据
+  ↓
+运行结束后：清理所有本轮创建的临时文件
 ```
 
-与现有的 `get_or_create_workspace(session_id)` 集成：`document/` 目录在工作空间初始化时一并创建，或在首次同步时按需创建。
+### 4.3 拦截失败回退
+
+若临时文件写入失败（如磁盘满），钩子记录警告日志并**直通**（fall-through），让 SDK 继续读取磁盘上的占位符 `{}`。Agent 收到空内容，可通过 MCP 工具重试获取数据。
+
+### 4.4 时序图
+
+```mermaid
+sequenceDiagram
+    participant Agent as Claude Agent
+    participant Hook as PreToolUse Hook<br/>(agent_runner.py)
+    participant EdState as editor_state<br/>(内存快照)
+    participant Tmp as 临时文件<br/>(/tmp/ink_editor_*)
+    participant FS as 工作空间文件系统<br/>(.editor/cells.json = {})
+
+    Agent->>Hook: Read { file_path: ".editor/cells.json" }
+    Hook->>Hook: is_editor_index_path(".editor/cells.json") → True
+    Hook->>EdState: get_editor_resource_data(state, "cells")
+    EdState-->>Hook: cells 数组
+    Hook->>Tmp: 写入 /tmp/ink_editor_cells_XXXX.json
+    Hook-->>Agent: HookJSONOutput { file_path: "/tmp/ink_editor_cells_XXXX.json" }
+    Note over FS: 占位符 {} 从未被读取
+    Agent->>Tmp: Read /tmp/ink_editor_cells_XXXX.json
+    Tmp-->>Agent: 实时 cells 数组
+    Note over Tmp: 运行结束后由 runner 清理临时文件
+```
 
 ---
 
-## 5. 同步策略
+## 5. 工作空间初始化集成
 
-### 5.1 触发时机
+### 5.1 `_init_editor_index` 函数职责
 
-| 触发点 | 同步类型 | 说明 |
-|--------|---------|------|
-| EditorEngine `notifyChange()` 后 | 防抖增量同步（1s） | 人类键入时频繁触发，避免每次按键都写文件 |
-| 会话保存成功（`saveSessionToDatabase` 后） | 全量同步 | 确保文件系统与 DB 数据一致 |
-| Agent MCP 工具写操作执行后 | 立即增量同步 | Agent 写入后立即可读，保证后续 `read_file` 的一致性 |
-| 会话加载（`loadState` 后） | 全量同步 | 从 DB 恢复状态后同步到文件 |
+`workspace.py` 的 `init_workspace` 在创建标准子目录（`files/`, `logs/`, `skills/`）后，调用 `_init_editor_index(workspace)` 完成：
 
-### 5.2 增量 vs 全量
+1. 创建 `.editor/` 目录（`exist_ok=True`，幂等）
+2. 写入 `README.md`（每次刷新，确保说明与模板同步）
+3. 为 `EDITOR_RESOURCES` 中每个 stem 写入占位符 `{}\n`（**仅首次写入，已存在则跳过**）
 
-- **增量同步**：仅写入变更的 cell/commentor 文件，更新 `manifest.json` 的 `lastSyncedAt`
-- **全量同步**：重写所有文件，清理孤立文件（已删除 cell 对应的文件），重建 `manifest.json`
+```
+init_workspace(session_id)
+  ├── mkdir files/ logs/ skills/
+  ├── _copy_template_assets()
+  ├── sync_skills_symlinks()
+  └── _init_editor_index()          ← 创建 .editor/ 虚拟索引目录
+        ├── mkdir .editor/
+        ├── write .editor/README.md
+        ├── write .editor/cells.json        = "{}\n"  (skip if exists)
+        ├── write .editor/commentors.json   = "{}\n"  (skip if exists)
+        ├── write .editor/tasks.json        = "{}\n"  (skip if exists)
+        ├── write .editor/session.json      = "{}\n"  (skip if exists)
+        └── write .editor/full_state.json   = "{}\n"  (skip if exists)
+```
 
-### 5.3 失败处理
+### 5.2 `EDITOR_RESOURCES` 常量（来自 `editor_index.py`）
 
-同步失败（如文件系统写入错误）：
-- 记录错误日志，不阻塞 EditorEngine 主流程（副作用，非关键路径）
-- 保留重试队列，下次触发时补偿同步
-- 同步失败不影响 Agent 通过 MCP 只读工具获取数据（MCP 工具直接从 EditorState 内存读取）
+```python
+EDITOR_RESOURCES: dict[str, str] = {
+    "cells":       "cells",        # → editor_state["cells"]
+    "commentors":  "commentors",   # → editor_state["commentors"]
+    "tasks":       "tasks",        # → editor_state["tasks"]
+    "session":     "__session__",  # → {id, selectedState, createdAt}
+    "full_state":  "__full__",     # → 整个 editor_state dict
+}
+```
 
 ---
 
@@ -235,21 +229,22 @@ documentPath  = {workspacePath}/document/
 
 ```
 Agent 读取文档内容：
-  ┌─ 方式 A（推荐）: read_file("document/manifest.json")
-  │                  read_file("document/segments/cell-001.txt")
-  │                  → 直接读工作空间文件（无 MCP 调用开销）
+  ┌─ 方式 A（主路径）: read_file(".editor/cells.json")
+  │                    → PreToolUse 拦截 → 临时文件 → 返回实时 EditorState 数据
+  │                    ✅ 无 MCP 额外开销；✅ 始终返回最新状态
   │
-  └─ 方式 B: 调用 MCP 工具 list_segments / read_segment
-             → MCP Server 从 EditorState 内存读取（最新状态，无文件延迟）
+  └─ 方式 B（等价）: 调用 MCP 工具 list_segments / read_segment
+                     → EditorEngine MCP Server 从 editor_state 内存读取
+                     ✅ 同样返回实时数据，适合细粒度按需读取
 
 Agent 修改文档内容：
   └─ 唯一路径: 调用 MCP 工具 write_segment / delete_segment
-               → PreToolUse 拦截 → 人类确认 → EditorEngine 执行 → 适配器同步文件
-               ⚠️ 禁止直接写文件（写文件不经过 EditorEngine，状态不一致）
+               → PreToolUse 拦截 → 人类确认 → EditorEngine 执行
+               ⚠️ 禁止直接写文件（.editor/ 为虚拟只读目录，写入无效）
 ```
 
 **设计约束：**
-- `document/` 目录对 Agent 的文件系统权限：**只读**（write_file 操作应被 MCP 工具权限配置阻止）
+- `.editor/` 目录对 Agent 的文件系统权限：**虚拟只读**（`write_file` 到占位符路径不经过 EditorEngine，状态不会改变，占位符内容也会在下次运行时被重置）
 - 所有写操作必须通过 MCP 工具路径，以确保：
   1. 经过人类确认
   2. 经过 EditorEngine 的状态校验（能量门控、类型约束等）
@@ -257,20 +252,20 @@ Agent 修改文档内容：
 
 ---
 
-## 7. 与工作空间文件系统的集成
+## 7. 设计决策：为何不写实际文件
 
-现有工作空间结构（见 [`../workspace-filesystem.md`](../workspace-filesystem.md)）在 `init_workspace` 时创建 `files/`, `logs/`, `skills/` 三个子目录。新增 `document/` 作为第四个标准子目录：
+### 早期方案（已废弃）
 
-```python
-# workspace.py 扩展（设计层面）
-WORKSPACE_DIRS = {
-    "files": "files",
-    "logs": "logs",
-    "skills": "skills",
-    "document": "document",          # ★ 新增
-    "document_segments": "document/segments",   # ★ 新增
-    "document_comments": "document/comments",   # ★ 新增
-}
-```
+早期方案设计了 `SessionWorkspaceAdapter`，在每次 `EditorEngine.notifyChange()` 后将 EditorState 同步到 `document/segments/{cellId}.txt` 等真实文件。
 
-`document/` 目录的初始状态为空（无 `manifest.json`），首次同步时由适配器写入。
+### 为何转向虚拟索引方案
+
+| 维度 | 文件同步方案（废弃） | 虚拟索引方案（当前） |
+|------|---------------------|---------------------|
+| 数据新鲜度 | 依赖同步触发时机；防抖窗口内可能过时 | Agent 读取时动态填充，始终反映最新 `editor_state` |
+| 实现复杂度 | 需要增量/全量同步逻辑、孤立文件清理、重试队列 | 仅需 PreToolUse 钩子中若干行拦截代码 |
+| 磁盘 I/O | 每次 EditorState 变更均触发文件写入 | 仅在 Agent 实际读取时写入一次性临时文件 |
+| 状态一致性 | 同步失败时文件与内存不一致 | 内存即权威，文件（临时文件）由内存直接派生 |
+| 工作空间大小 | 随文档增长持续膨胀 | 占位符恒为空 `{}`，临时文件运行后清理 |
+
+**结论**：虚拟索引方案以更少的代码、更低的复杂度实现了更强的数据一致性保证，是 Ink & Memory EditorState 读取的首选设计。
