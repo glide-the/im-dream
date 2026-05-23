@@ -30,6 +30,7 @@ import auth
 SUPPORTED_LANGUAGES = {"en", "zh"}
 DEFAULT_LANGUAGE = "en"
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
+PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/ink-and-memory/")
 
 
 def normalize_language_code(language: Optional[str]) -> str:
@@ -1026,12 +1027,11 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(http_be
 @app.get("/")
 def root():
     """Root endpoint"""
-    return {
-        "service": "Ink & Memory API",
-        "version": "2.0.0",
-        "docs": "/docs",
-        "control_panel": "/polycli",
-    }
+    base = PUBLIC_BASE_URL.rstrip("/") + "/"
+    return PlainTextResponse(
+        f"The server is configured with a public base URL of {base}"
+        f" - did you mean to visit {base}api/claude-agent/threads instead?"
+    )
 
 
 # ========== Auth Endpoints ==========
@@ -2120,7 +2120,7 @@ def get_friend_timeline(
 # ========== Claude Agent Routes ==========
 # Isolated from the PolyCLI agent sessions; no cross-module state.
 
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, PlainTextResponse
 from claude_agent import ClaudeAgentRunRequest
 
 
