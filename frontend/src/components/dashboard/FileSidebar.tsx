@@ -145,7 +145,6 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
     const input = folderInputRef.current;
     if (!input) return;
     input.setAttribute('webkitdirectory', '');
-    input.setAttribute('directory', '');
   }, []);
 
   useEffect(() => {
