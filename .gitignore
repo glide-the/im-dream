@@ -11,7 +11,7 @@ AGENTS.md
 operation_book.md
 .operations
 backend/pyrightconfig.json
-
+backend/uv.lock
 # Test artifacts
 backend/tests/*.pyc
 /tmp/test_server.log
@@ -38,3 +38,4 @@ backend/ink-backend*.tar.gz
 CLAUDE.md
 
 logs
+backend/uv.lock
