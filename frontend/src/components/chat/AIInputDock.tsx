@@ -621,7 +621,7 @@ export default function AIInputDock({
               borderRadius: '999px',
               border: 'none',
               background: '#d9534f',
-              color: '#fff',
+              color: 'var(--color-text-on-action)',
               cursor: 'pointer',
             }}
           >
@@ -642,7 +642,7 @@ export default function AIInputDock({
               borderRadius: '999px',
               border: 'none',
               background: canSend ? 'var(--color-action-link)' : 'var(--color-disabled-bg)',
-              color: '#fff',
+              color: 'var(--color-text-on-action)',
               cursor: canSend ? 'pointer' : 'not-allowed',
             }}
           >

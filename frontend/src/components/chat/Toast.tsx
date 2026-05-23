@@ -23,7 +23,7 @@ export default function Toast({ message, onClose }: ToastProps) {
         padding: '0.625rem 1rem',
         borderRadius: '999px',
         background: 'var(--color-text-primary)',
-        color: '#fff',
+        color: 'var(--color-text-on-action)',
         fontSize: '0.75rem',
         fontWeight: 600,
         boxShadow: '0 10px 24px var(--color-shadow-medium)',

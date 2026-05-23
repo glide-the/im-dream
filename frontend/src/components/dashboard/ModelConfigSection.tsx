@@ -234,7 +234,7 @@ export default function ModelConfigSection() {
               borderRadius: '999px',
               padding: '0.55rem 1.1rem',
               background: 'var(--color-action-link)',
-              color: '#fff',
+              color: 'var(--color-text-on-action)',
               fontWeight: 600,
               fontSize: '0.82rem',
               cursor: saving || !dirty ? 'not-allowed' : 'pointer',
@@ -281,7 +281,7 @@ export default function ModelConfigSection() {
               width: '1.4rem',
               height: '1.4rem',
               borderRadius: '999px',
-              background: '#fff',
+              background: 'var(--color-text-on-action)',
               transition: 'left 0.2s ease',
             }}
           />
