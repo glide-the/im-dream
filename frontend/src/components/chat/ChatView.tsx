@@ -31,6 +31,7 @@ export default function ChatView({
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
+  const [hasConversationStarted, setHasConversationStarted] = useState(false);
 
   const quickActionsGrid = useMemo(() => quickActions.length > 0, [quickActions.length]);
 
@@ -48,13 +49,14 @@ export default function ChatView({
             <button type="button" onClick={onNewChat} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.7rem 1rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', fontWeight: 600, cursor: 'pointer' }}>New chat</button>
           </div>
 
-          {quickActionsGrid ? (
+          {quickActionsGrid && !hasConversationStarted ? (
             <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', flexShrink: 0 }}>
               {quickActions.map((item) => (
                 <QuickActionCard
                   key={item.title}
                   item={item}
                   onClick={(prompt) => {
+                    setHasConversationStarted(true);
                     setQueuedPrompt(prompt);
                     setQueuedAttachments([]);
                     setQueuedPromptNonce((value) => value + 1);
@@ -73,6 +75,7 @@ export default function ChatView({
               queuedAttachments={queuedAttachments}
               queuedPromptNonce={queuedPromptNonce}
               inputPlaceholder="Ask Ink & Memory…"
+              onConversationStart={() => setHasConversationStarted(true)}
             />
           </section>
         </main>

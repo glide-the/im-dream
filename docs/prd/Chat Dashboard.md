@@ -82,6 +82,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 - 图标颜色来自 `color.voice.*` 或 `color.state.*`，只用于图标/徽标。
 - 卡片 hover 可增加 `color.shadow.soft`，位移不超过 3px。
 - 不使用 3D 翻转、强 glow、渐变装饰。
+- **触发后隐藏**：用户点击任意快捷指令卡片或在输入框发送第一条消息后，QuickActions 区域立即隐藏，MainArea 只显示 ChatPanel（消息流 + 输入 Dock）。新建会话（New Chat）后恢复显示。
 
 ### 4.4 ChatPanel + AIInputDock
 
@@ -108,6 +109,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 | 状态 | 设计要求 |
 |---|---|
 | 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据。 |
+| 对话已触发 | 用户点击快捷指令或发送第一条消息后，QuickActions 区域隐藏，MainArea 仅展示 ChatPanel（消息流 + 输入 Dock）；页面不刷新、不跳转。 |
 | 加载态 | 消息区显示低对比 skeleton 或 pulse；输入区保持可见但根据能力禁用发送。 |
 | 错误态 | 使用 `color.state.error` 加明确错误文本；提供重试入口。 |
 | 禁用态 | 按钮使用 `color.disabled.bg`，光标和说明同步变化。 |
@@ -152,10 +154,11 @@ ChatDashboard（height: 100%，overflow: hidden）
 ## 11. 前端实现备注
 
 本轮已完成以下前端实现：
-- `ChatView.tsx`：移除 `Sidebar` 组件，`height: 100%` + `overflow: hidden` 防止外层滚动，新增 `onNavigateToSettings` prop。
+- `ChatView.tsx`：移除 `Sidebar` 组件，`height: 100%` + `overflow: hidden` 防止外层滚动，新增 `onNavigateToSettings` prop。新增 `hasConversationStarted` 状态，首次发送消息或点击快捷指令后隐藏 QuickActions，仅展示 ChatPanel。
 - `VerticalNav.tsx`：移除 `onToggleSidebar`，新增 `onNavigateToSettings` prop 并绑定设置图标。
 - `const.ts`：快捷指令替换为笔记系统场景。
 - `App.tsx`：ChatView 容器改为 `overflow: hidden`，向 ChatView 传递 `onNavigateToSettings`。
+- `ChatPanel.tsx`：新增 `onConversationStart` 回调 prop，在发送第一条消息时触发，供父组件隐藏 QuickActions。
 
 后续如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。
 
