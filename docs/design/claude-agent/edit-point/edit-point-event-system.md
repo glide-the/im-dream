@@ -491,6 +491,8 @@ flowchart LR
 
 ### 9.2 确认策略
 
+> **设计决策（已收敛）**：UI 中所有由 Agent 发起的 EditPoint 操作，**必须**经由人类确认后方可执行。此规则不可绕过，通过现有 Tool Confirmation Flow（`PreToolUse` hook + `ToolConfirmationStore` + SSE `tool-approval-request`）实现。Agent 发起的编辑操作在未获人类 Approve 前，`EditEvent.status` 保持 `pending`，EditorEngine 不执行任何状态变更。
+
 对 Agent 操作，确认策略建议：
 
 | 操作类型 | 确认策略 | 理由 |
@@ -579,21 +581,70 @@ EditEvent 链（时序有序）
 
 | 风险 | 等级 | 说明 |
 |------|------|------|
-| **并发操作冲突** | 高 | 人类和 Agent 同时操作同一 EditPoint 时，最后写入覆盖，可能导致操作丢失 |
+| **并发操作冲突** | 高 | 人类和 Agent 同时操作同一 EditPoint 时，最后写入覆盖，可能导致操作丢失（见 §11.3 已收敛设计决策） |
 | **EditEvent 状态管理复杂性** | 中 | `pending → confirmed → applied` 的状态转换需要在前后端同步，增加协调复杂度 |
 | **确认超时处理** | 中 | Agent 操作等待用户确认期间，若用户长时间不响应，ToolConfirmationStore 有 5 分钟超时，Agent 会收到 timeout 错误 |
 | **向后兼容性** | 低 | 阶段一仅增加旁路观察，不影响现有行为；阶段二及以后需谨慎测试 |
 
 ### 11.2 开放问题
 
-| 问题 | 说明 |
-|------|------|
-| **Q1: EditEvent 是否需要在前端本地持久化？** | 若用户离线操作产生 EditEvent，是否需要队列化后重新上传？ |
-| **Q2: Agent 操作的粒度如何界定？** | Agent 是否应该一次性提交整篇重写（一个 TEXT_REPLACE），还是按段落逐步操作？粒度过大影响用户审查体验，粒度过小增加确认次数 |
-| **Q3: 多 Agent 协作如何处理？** | 多个 Agent 实例同时操作同一会话时，EditEvent 的冲突解决策略？ |
-| **Q4: Undo 栈的范围是否跨会话？** | Undo 是否应跨越会话边界（如撤销"新建会话"操作）？ |
-| **Q5: EditEvent 审计日志的保留策略？** | 每个会话的 EditEvent 链可能很长，是否需要压缩/归档策略？ |
-| **Q6: 确认 UI 的 EditPoint 预览实现？** | 前端如何根据 `editPoint` 渲染精确的操作预览（如显示"将在第 42 字符处插入'Hello'"）？ |
+| 问题 | 状态 | 说明 |
+|------|------|------|
+| **Q1: EditEvent 是否需要在前端本地持久化？** | 开放 | 若用户离线操作产生 EditEvent，是否需要队列化后重新上传？ |
+| **Q2: Agent 操作的粒度如何界定？** | ✅ 已收敛 | 见 §11.3 |
+| **Q3: 多 Agent 协作如何处理？** | ✅ 已收敛 | 见 §11.3 |
+| **Q4: Undo 栈的范围是否跨会话？** | 开放 | Undo 是否应跨越会话边界（如撤销"新建会话"操作）？ |
+| **Q5: EditEvent 审计日志的保留策略？** | ⏸ 暂不涉及 | 当前阶段不实现审计日志保留/归档策略，Deferred。 |
+| **Q6: 确认 UI 的 EditPoint 预览实现？** | 开放 | 前端如何根据 `editPoint` 渲染精确的操作预览（如显示"将在第 42 字符处插入'Hello'"）？ |
+
+### 11.3 已收敛设计决策
+
+#### Q2：Agent 操作粒度 — 档案 > 片段
+
+文档对象层次为 **档案（Archive） > 片段（Segment/Fragment）**，这是工作空间的核心抽象。
+
+- **片段（Segment）是 Agent 操作的最小粒度单元**：Agent 不直接操作字符流，而是以片段为目标声明操作意图（`editPoint.targetType = 'cell'` 对应片段级边界）。
+- **用户可通过选择片段进行评论**：评论锚定到具体片段，而非全文偏移位置。
+- **Agent 通过 MCP 读取和修改片段记录**：MCP 工具以片段 ID 为操作句柄，读取片段内容、写回修改、或追加评论，与人类评论路径共享同一语义层。
+- **粒度权衡原则**：Agent 提交整段替换（一个 `TEXT_REPLACE` 覆盖整个片段）而非字符级逐步操作，避免确认次数过多；如需跨多个片段操作，分拆为多个独立 EditEvent，每个 EditEvent 对应一个片段，逐一经用户确认。
+
+```
+档案（Archive / Session）
+  └── 片段（Segment / Cell）
+        ├── 文本内容（TextCell.content）
+        └── 关联评论（Commentor → phrase anchor）
+
+Agent MCP 操作粒度：片段级
+  - read_segment(cellId)         → 读取片段内容
+  - write_segment(cellId, text)  → 替换片段内容（触发 EditEvent + 人类确认）
+  - add_comment(cellId, phrase, comment) → 添加片段评论（触发 EditEvent + 人类确认）
+```
+
+#### Q3：多 Agent 协作冲突解决 — 人类仲裁
+
+多 Agent 协作时的冲突解决策略：**由人类处理**，设计参考 [`docs/design/lifecycle/ISSUE-生命周期分析.md`](../../lifecycle/ISSUE-生命周期分析.md) §4.2 Atomic Checkout Protocol。
+
+**核心原则：冲突显式化，不静默覆盖。**
+
+当多个 Agent 实例试图同时操作同一 EditPoint（同一片段）时：
+
+| 阶段 | 机制 | 说明 |
+|------|------|------|
+| **冲突检测** | EditPoint 锁语义 | 同一 `targetId` 的 EditEvent 在 `pending` 或 `confirmed` 状态时，后续 Agent 操作视为冲突 |
+| **冲突显式化** | 返回冲突信息 + SSE 推送 | 系统不选择"最后写入覆盖"，而是向人类操作员推送冲突信息（含两个 Agent 的 EditEvent 摘要） |
+| **人类仲裁** | Approve / Reject | 人类在确认 UI 中选择接受哪个 Agent 的变更，拒绝另一个；拒绝结果通过 `ToolConfirmationStore.resolve(approved=false)` 返回 |
+| **仲裁记录** | EditEvent 审计链 | 仲裁决策记录在 EditEvent.status（`confirmed` / `rejected`）中，可追溯"谁赢得冲突、谁被拒绝" |
+
+与 ISSUE 生命周期的对应关系：
+
+| ISSUE 生命周期概念 | EditEvent 对应 |
+|---------------------|----------------|
+| `checkoutRunId`（工作所有权锁） | 同一 `targetId` 的 `pending/confirmed` EditEvent |
+| `409 checkout conflict` | EditPoint 冲突，系统推送冲突 SSE |
+| Board 人工裁决 | 人类 Approve/Reject 仲裁 |
+| 锁接管（stale lock adopt） | 超时的 pending EditEvent 被系统清除，新操作可重试 |
+
+> **设计约束**：Agent 不具备自主解决与其他 Agent 冲突的能力（类比 ISSUE 中 Agent 不能 `approve` 他人操作）。冲突仲裁权专属于人类操作员。
 
 ---
 
