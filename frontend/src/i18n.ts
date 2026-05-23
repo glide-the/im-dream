@@ -11,6 +11,7 @@ const resources = {
         timeline: 'Timeline',
         analysis: 'Reflections',
         decks: 'Decks',
+        chat: 'Chat',
         friends: 'Friends',
         settings: 'Settings'
       },
@@ -211,6 +212,7 @@ const resources = {
         timeline: '时间线',
         analysis: '回顾',
         decks: '卡组',
+        chat: '对话',
         friends: '好友',
         settings: '设置'
       },
