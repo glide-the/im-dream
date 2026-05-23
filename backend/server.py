@@ -13,6 +13,7 @@ from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from polycli.orchestration.session_registry import session_def, get_registry
 from polycli.integrations.fastapi import mount_control_panel
@@ -2120,7 +2121,7 @@ def get_friend_timeline(
 # ========== Claude Agent Routes ==========
 # Isolated from the PolyCLI agent sessions; no cross-module state.
 
-from fastapi.responses import StreamingResponse, PlainTextResponse
+from fastapi.responses import StreamingResponse
 from claude_agent import ClaudeAgentRunRequest
 
 
