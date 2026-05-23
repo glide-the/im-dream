@@ -27,7 +27,7 @@ function colorToStyles(color: QuickActionCardItem['color']) {
     case 'voice-green':
       return { background: 'rgba(39, 174, 96, 0.12)', color: 'var(--color-voice-green)' };
     default:
-      return { background: 'rgba(76, 175, 80, 0.12)', color: '#22c55e' };
+      return { background: 'rgba(76, 175, 80, 0.12)', color: 'var(--color-state-success)' };
   }
 }
 

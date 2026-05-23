@@ -25,6 +25,9 @@
   --color-voice-pink: #e91e63;
   --color-voice-green: #27ae60;
   --color-voice-yellow: #f39c12;
+  --color-text-on-action: #ffffff;
+  --color-code-bg: #2c2c2c;
+  --color-code-text: #f3eee6;
 }
 
 [data-theme='dark'] {
@@ -54,4 +57,7 @@
   --color-voice-pink: #ff8fbd;
   --color-voice-green: #7bdba0;
   --color-voice-yellow: #f7c96a;
+  --color-text-on-action: #ffffff;
+  --color-code-bg: #0d1117;
+  --color-code-text: #e6edf3;
 }
