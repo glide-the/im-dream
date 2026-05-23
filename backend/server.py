@@ -2221,14 +2221,14 @@ async def claude_agent_stream(
 async def claude_agent_chat_history(
     current_user: dict = Depends(get_current_user),
 ):
-    """Return recent writing sessions for the authenticated user.
+    """Return chat thread history for the authenticated user.
 
-    The agent uses these sessions as context; this endpoint exposes them
-    to the frontend so the chat UI can show relevant entry snippets.
+    Returns the list of chat threads (newest first) so the frontend
+    can display the user's past conversations.
     """
     user_id = current_user["user_id"]
-    sessions = database.list_sessions(user_id)
-    return {"sessions": sessions or []}
+    threads = database.list_chat_threads(user_id)
+    return {"threads": threads or []}
 
 
 # ========== Claude Agent Thread Management ==========
