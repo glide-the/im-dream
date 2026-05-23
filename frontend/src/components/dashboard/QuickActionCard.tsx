@@ -14,7 +14,7 @@ function CardIcon({ icon }: { icon: QuickActionCardItem['icon'] }) {
   return <IconEnvelope style={{ width: '1.2rem', height: '1.2rem' }} />;
 }
 
-function colorToStyles(color: string) {
+function colorToStyles(color: QuickActionCardItem['color']) {
   switch (color) {
     case 'warning':
       return { background: 'rgba(243, 156, 18, 0.14)', color: 'var(--color-state-warning)' };
@@ -27,18 +27,14 @@ function colorToStyles(color: string) {
     case 'voice-green':
       return { background: 'rgba(39, 174, 96, 0.12)', color: 'var(--color-voice-green)' };
     default:
-      return { background: 'rgba(76, 175, 80, 0.12)', color: 'var(--color-state-success)' };
+      return { background: 'rgba(76, 175, 80, 0.12)', color: '#22c55e' };
   }
 }
 
 export default function QuickActionCard({ item, onClick }: QuickActionCardProps) {
   const accent = colorToStyles(item.color);
   return (
-    <button
-      type="button"
-      onClick={() => onClick(item.prompt)}
-      style={{ width: '100%', padding: '1.15rem', borderRadius: '18px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', textAlign: 'left', boxShadow: '0 8px 20px var(--color-shadow-soft)', cursor: 'pointer' }}
-    >
+    <button type="button" onClick={() => onClick(item.prompt)} style={{ width: '100%', padding: '1.15rem', borderRadius: '18px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', textAlign: 'left', boxShadow: '0 1px 4px rgba(0,0,0,0.06)', cursor: 'pointer' }}>
       <div style={{ display: 'flex', gap: '1rem' }}>
         <div style={{ display: 'inline-flex', width: '2.5rem', height: '2.5rem', alignItems: 'center', justifyContent: 'center', borderRadius: '14px', ...accent }}>
           <CardIcon icon={item.icon} />

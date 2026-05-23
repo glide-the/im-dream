@@ -3,9 +3,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
-import ToolMessagePart from './ToolMessagePart';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
+import ToolMessagePart from './ToolMessagePart';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -89,7 +89,7 @@ export default function ChatMessageList({ messages, isLoading, error, addToolRes
               if (part.type === 'reasoning') {
                 const reasoningText = (part as { text?: string }).text ?? '';
                 return (
-                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-state-warning)' }}>
+                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-action-link)' }}>
                     <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-muted)', fontSize: '0.85rem', fontStyle: 'italic', cursor: 'pointer' }}>
                       <span style={{ flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{reasoningText.slice(0, REASONING_PREVIEW_LENGTH) || 'Thinking…'}</span>
                       <span>{isExpanded ? '‹' : '›'}</span>
@@ -106,7 +106,7 @@ export default function ChatMessageList({ messages, isLoading, error, addToolRes
                 if (isUser) {
                   return (
                     <div key={partKey} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <div style={{ maxWidth: '85%', borderRadius: '18px', padding: '0.9rem 1rem', background: 'var(--color-bg-surface)', boxShadow: '0 6px 18px var(--color-shadow-soft)' }}>
+                      <div style={{ maxWidth: '85%', borderRadius: '18px', padding: '0.9rem 1rem', background: 'var(--color-bg-paper)', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
                         <div className="prose prose-chat" style={{ color: 'var(--color-text-primary)', fontSize: '0.92rem', lineHeight: 1.7 }}>
                           <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
                         </div>
@@ -150,22 +150,22 @@ export default function ChatMessageList({ messages, isLoading, error, addToolRes
                     <div key={partKey} style={{ overflow: 'hidden', borderRadius: '12px', background: '#1a1a1a', color: '#f3eee6' }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1rem', fontSize: '0.75rem', color: '#b0b0b0' }}>
                         <span>‹ Terminal</span>
-                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? '#7bcf8f' : '#f3eee6', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
+                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? '#22c55e' : '#f3eee6', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
                       </div>
                       <div style={{ padding: '0 1rem 0.9rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8rem', lineHeight: 1.65 }}>
-                        {command ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: '#f7c96a' }}>$</span> <span>{command}</span></p> : null}
+                        {command ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>{command}</span></p> : null}
                         <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', color: '#c9c9c9' }}>{output || outputText}</pre>
                       </div>
-                      {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? '#7bcf8f' : '#ff7a70' }}>Exit code: {exitCode}</div> : null}
-                      {isError && exitCodeNumber == null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontSize: '0.75rem', color: '#ff7a70' }}>Error</div> : null}
+                      {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? '#22c55e' : '#d9534f' }}>Exit code: {exitCode}</div> : null}
+                      {isError && exitCodeNumber == null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontSize: '0.75rem', color: '#d9534f' }}>Error</div> : null}
                     </div>
                   );
                 }
 
                 return (
-                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-state-warning)' }}>
+                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-action-link)' }}>
                     <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.55rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-secondary)', fontSize: '0.88rem', cursor: 'pointer' }}>
-                      {toolStatus === 'executing' ? <span style={{ width: '0.7rem', height: '0.7rem', borderRadius: '999px', border: '2px solid var(--color-state-warning)', borderTopColor: 'transparent', display: 'inline-block' }} /> : null}
+                      {toolStatus === 'executing' ? <span style={{ width: '0.7rem', height: '0.7rem', borderRadius: '999px', border: '2px solid var(--color-action-link)', borderTopColor: 'transparent', display: 'inline-block' }} /> : null}
                       <span style={{ flex: 1, textAlign: 'left', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayTitle}</span>
                       <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>
                     </button>
@@ -185,8 +185,8 @@ export default function ChatMessageList({ messages, isLoading, error, addToolRes
         );
       })}
 
-      {shouldShowLoadingIndicator ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
-      {error ? <div style={{ alignSelf: 'flex-start', maxWidth: '80%', borderRadius: '18px', padding: '0.8rem 0.95rem', background: 'rgba(244,67,54,0.12)', color: 'var(--color-state-error)', fontSize: '0.85rem' }}>Error: {error.message}</div> : null}
+      {shouldShowLoadingIndicator ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
+      {error ? <div style={{ alignSelf: 'flex-start', maxWidth: '80%', borderRadius: '18px', padding: '0.8rem 0.95rem', background: 'rgba(217,83,79,0.1)', color: '#d9534f', fontSize: '0.85rem' }}>Error: {error.message}</div> : null}
     </div>
   );
 }

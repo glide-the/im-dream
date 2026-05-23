@@ -9,11 +9,16 @@ export function getVisibleOperations(
   expanded: boolean,
   defaultVisible = 3,
 ): OperationPart[] {
-  if (expanded) return operations;
+  if (expanded) {
+    return operations;
+  }
   return operations.slice(0, defaultVisible);
 }
 
-export function shouldShowExpandOperations(operations: OperationPart[], defaultVisible = 3): boolean {
+export function shouldShowExpandOperations(
+  operations: OperationPart[],
+  defaultVisible = 3,
+): boolean {
   return operations.length > defaultVisible;
 }
 
@@ -23,6 +28,8 @@ export function shouldSendMessageOnKeyDown(event: {
   shiftKey: boolean;
   isComposing?: boolean;
 }): boolean {
-  if (event.isComposing) return false;
+  if (event.isComposing) {
+    return false;
+  }
   return event.key === 'Enter' && event.metaKey && !event.shiftKey;
 }

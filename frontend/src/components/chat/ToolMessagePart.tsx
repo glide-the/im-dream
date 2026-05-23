@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
-import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
+import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 
 type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 
@@ -23,6 +23,20 @@ function IconAlert() {
   );
 }
 
+async function confirmToolCall(
+  toolCallId: string,
+  approved: boolean,
+  reason?: string,
+  answers?: Record<string, unknown>,
+) {
+  const response = await fetch('/api/claude-agent/tool-confirm', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ toolCallId, approved, reason, answers }),
+  });
+  return (await response.json()) as { success?: boolean; message?: string };
+}
+
 interface ToolMessagePartProps {
   part: AnyToolUIPart;
   isLast?: boolean;
@@ -31,7 +45,7 @@ interface ToolMessagePartProps {
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
 }
 
-export default function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocation, addToolResult }: ToolMessagePartProps) {
+export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocation, addToolResult }: ToolMessagePartProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
   const toolCallId = part.toolCallId;
@@ -65,17 +79,33 @@ export default function ToolMessagePart({ part, isLast, isLoading, isManualToolI
   const handleApprove = useCallback(async () => {
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
-    addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
-    await Promise.resolve();
-    setConfirmationStatus('confirmed');
+    try {
+      const result = await confirmToolCall(toolCallId, true);
+      if (result.success) {
+        addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
+        setConfirmationStatus('confirmed');
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    setConfirmationStatus('idle');
   }, [addToolResult, confirmationStatus, toolCallId, toolName]);
 
   const handleReject = useCallback(async () => {
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
-    addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
-    await Promise.resolve();
-    setConfirmationStatus('rejected');
+    try {
+      const result = await confirmToolCall(toolCallId, false, '用户拒绝执行工具');
+      if (result.success) {
+        addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
+        setConfirmationStatus('rejected');
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    setConfirmationStatus('idle');
   }, [addToolResult, confirmationStatus, toolCallId, toolName]);
 
   useEffect(() => {
@@ -97,24 +127,40 @@ export default function ToolMessagePart({ part, isLast, isLoading, isManualToolI
   const handleAskUserSubmit = useCallback(async (answers: Record<string, unknown>) => {
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
-    addToolResult?.({ tool: toolName, toolCallId, output: answers });
-    await Promise.resolve();
-    setConfirmationStatus('confirmed');
+    try {
+      const result = await confirmToolCall(toolCallId, true, undefined, answers);
+      if (result.success) {
+        addToolResult?.({ tool: toolName, toolCallId, output: answers });
+        setConfirmationStatus('confirmed');
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    setConfirmationStatus('idle');
   }, [addToolResult, confirmationStatus, toolCallId, toolName]);
 
   const handleAskUserCancel = useCallback(async () => {
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
-    addToolResult?.({ tool: toolName, toolCallId, output: { cancelled: true } });
-    await Promise.resolve();
-    setConfirmationStatus('rejected');
+    try {
+      const result = await confirmToolCall(toolCallId, false, '用户取消了问题回答');
+      if (result.success) {
+        addToolResult?.({ tool: toolName, toolCallId, output: { cancelled: true } });
+        setConfirmationStatus('rejected');
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    setConfirmationStatus('idle');
   }, [addToolResult, confirmationStatus, toolCallId, toolName]);
 
   return (
     <div style={{ width: '100%' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', boxShadow: '0 8px 20px var(--color-shadow-soft)' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <div onClick={() => setExpanded((value) => !value)} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 0.9rem', cursor: 'pointer' }}>
-          <div style={{ display: 'grid', placeItems: 'center', width: '1.9rem', height: '1.9rem', borderRadius: '10px', background: 'var(--color-bg-surface)', color: isError ? 'var(--color-state-danger)' : isExecuting ? 'var(--color-state-warning)' : 'var(--color-text-secondary)' }}>
+          <div style={{ display: 'grid', placeItems: 'center', width: '1.9rem', height: '1.9rem', borderRadius: '10px', background: 'var(--color-bg-surface)', color: isError ? '#d9534f' : isExecuting ? 'var(--color-action-link)' : 'var(--color-text-secondary)' }}>
             {isExecuting ? <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} /> : isError ? <IconAlert /> : <IconTool />}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
@@ -136,16 +182,14 @@ export default function ToolMessagePart({ part, isLast, isLoading, isManualToolI
                 {title ? <div>Title: {title}</div> : null}
               </div>
             </section>
-
             <section style={{ borderRadius: '10px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', padding: '0.85rem' }}>
               <h5 style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Input</h5>
               <pre style={{ margin: 0, fontSize: '0.76rem', whiteSpace: 'pre-wrap', overflowX: 'auto', color: 'var(--color-text-secondary)' }}>{inputDisplay}</pre>
             </section>
-
             {outputDisplay ? (
               <section style={{ borderRadius: '10px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', padding: '0.85rem' }}>
                 <h5 style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{isError ? 'Error' : 'Output'}</h5>
-                <pre style={{ margin: 0, fontSize: '0.76rem', whiteSpace: 'pre-wrap', overflowX: 'auto', color: isError ? 'var(--color-state-danger)' : 'var(--color-text-secondary)' }}>{outputDisplay}</pre>
+                <pre style={{ margin: 0, fontSize: '0.76rem', whiteSpace: 'pre-wrap', overflowX: 'auto', color: isError ? '#d9534f' : 'var(--color-text-secondary)' }}>{outputDisplay}</pre>
               </section>
             ) : null}
           </div>
@@ -172,6 +216,8 @@ export default function ToolMessagePart({ part, isLast, isLoading, isManualToolI
 }
 
 function StatusRow({ tone, label, icon }: { tone: 'warning' | 'success' | 'danger'; label: string; icon?: ReactNode }) {
-  const color = tone === 'success' ? 'var(--color-state-success)' : tone === 'danger' ? 'var(--color-state-danger)' : 'var(--color-state-warning)';
+  const color = tone === 'success' ? '#22c55e' : tone === 'danger' ? '#d9534f' : 'var(--color-action-link)';
   return <div style={{ padding: '0 0.9rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color, fontSize: '0.85rem' }}>{icon || <IconLoader style={{ width: '1rem', height: '1rem' }} />}{label}</div>;
 }
+
+export default ToolMessagePart;
