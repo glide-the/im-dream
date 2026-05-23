@@ -13,6 +13,7 @@ from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from polycli.orchestration.session_registry import session_def, get_registry
 from polycli.integrations.fastapi import mount_control_panel
 from polycli import PolyAgent
@@ -881,6 +882,8 @@ app = FastAPI(
     version="2.0.0",
 )
 
+http_bearer = HTTPBearer(auto_error=False)
+
 print(f"🧾 Backend version: {BACKEND_VERSION}")
 
 # Add CORS middleware
@@ -999,14 +1002,14 @@ class SessionBatchRequest(BaseModel):
 # ========== Auth Dependency ==========
 
 
-def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(http_bearer)) -> dict:
     """
     Dependency to extract and verify JWT token from Authorization header.
 
     Raises:
         HTTPException 401 if token is missing or invalid
     """
-    token = auth.extract_token_from_header(authorization)
+    token = credentials.credentials if credentials else None
     if not token:
         raise HTTPException(status_code=401, detail="Missing authorization token")
 
@@ -2320,6 +2323,13 @@ if __name__ == "__main__":
     print("    DELETE /api/friends/{id}          - Remove friend")
     print("    GET  /api/friends/{id}/timeline   - Get friend's timeline")
     print("    GET  /api/friends/{id}/pictures/{date}/full - Get friend's full picture")
+    print("\n  Claude Agent:")
+    print("    POST /api/claude-agent                 - Stream agent response (SSE)")
+    print("    GET  /api/claude-agent/chat-history    - Get recent sessions for context")
+    print("    POST /api/claude-agent/message-latency - Record message latency metrics")
+    print("    GET  /api/claude-agent/session         - Get active session snapshot")
+    print("    DELETE /api/claude-agent/session       - Close active session")
+    print("    POST /api/claude-agent/tool-confirm    - Resolve pending tool confirmation")
     print("\n  PolyCLI (AI Functions):")
     print("    /polycli                  - Control panel UI")
     print("    /polycli/api/trigger-sync - Direct sync API")
