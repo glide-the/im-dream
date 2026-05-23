@@ -3,50 +3,50 @@ export interface QuickActionCardItem {
   title: string;
   description: string;
   prompt: string;
-  color: string;
+  color: 'success' | 'warning' | 'voice-blue' | 'voice-purple' | 'voice-pink' | 'voice-green';
 }
 
 export const QUICK_ACTION_CARDS: QuickActionCardItem[] = [
   {
     icon: 'envelope',
-    title: 'Draft a follow-up',
-    description: 'Generate a warm, professional follow-up note from your latest context.',
-    prompt: 'Help me draft a concise, thoughtful follow-up note with a clear next step.',
+    title: '撰写跟进邮件',
+    description: '针对潜在客户生成一封专业的销售跟进邮件。',
+    prompt: '帮我写一封简洁有力的客户跟进邮件，包含明确的行动号召。',
     color: 'success',
   },
   {
     icon: 'table',
-    title: 'Research patterns',
-    description: 'Summarize comparisons, tradeoffs, or notes into a readable table.',
-    prompt: 'Turn my notes into a comparison table with key patterns and opportunities.',
+    title: '竞品价格调研',
+    description: '汇总竞品定价策略与市场定位亮点。',
+    prompt: '调研竞品定价信息，总结我们报价方案的优化机会。',
     color: 'warning',
   },
   {
     icon: 'calendar',
-    title: 'Plan a session',
-    description: 'Outline what to cover next, including goals, risks, and open questions.',
-    prompt: 'Help me plan my next work session with priorities, risks, and questions.',
+    title: '会议准备',
+    description: '整理会议要点、潜在风险与讨论提纲。',
+    prompt: '帮我准备即将到来的会议，整理相关议题和讨论要点。',
     color: 'voice-blue',
   },
   {
     icon: 'tasks',
-    title: 'Create tasks',
-    description: 'Transform loose thoughts into structured tasks with ownership and timing.',
-    prompt: 'Convert these notes into a task list with next actions and owners.',
+    title: '创建任务',
+    description: '将笔记转化为结构化任务，包含负责人和后续行动。',
+    prompt: '根据我的笔记创建一个任务，包含负责人、影响范围和时间节点。',
     color: 'voice-purple',
   },
   {
     icon: 'calendarAlt',
-    title: 'Shape a timeline',
-    description: 'Build a simple week plan around deep work, review, and communication.',
-    prompt: 'Build me a balanced weekly timeline from these notes.',
+    title: '下周日程规划',
+    description: '围绕会议、跟进和深度工作安排下周计划。',
+    prompt: '下周哪天最忙？什么时候有空闲时间？',
     color: 'voice-pink',
   },
   {
     icon: 'database',
-    title: 'Summarize sources',
-    description: 'Pull key evidence, questions, and references into a compact brief.',
-    prompt: 'Summarize the most important source material into a short brief.',
+    title: '优化查询',
+    description: '分析并优化数据库查询性能与索引策略。',
+    prompt: '分析当前查询，找出可以添加索引或优化的机会。',
     color: 'voice-green',
   },
 ];
