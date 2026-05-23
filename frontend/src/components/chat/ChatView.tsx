@@ -9,6 +9,9 @@ import QuickActionCard from '../dashboard/QuickActionCard';
 import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
 import VerticalNav from '../dashboard/VerticalNav';
 
+/** Default system prompt shown in the Sidebar settings panel. */
+const DEFAULT_SYSTEM_PROMPT = 'You are a concise and reflective writing assistant.';
+
 interface ChatViewProps {
   title?: string;
   messages: UIMessage[];
@@ -26,7 +29,7 @@ export default function ChatView({ title = 'Untitled conversation', messages, is
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [fileSidebarOpen, setFileSidebarOpen] = useState(true);
   const [theme, setTheme] = useState<ThemeMode>('light');
-  const [systemPrompt, setSystemPrompt] = useState('You are a concise and reflective writing assistant.');
+  const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [workspaceMode, setWorkspaceMode] = useState(true);
 

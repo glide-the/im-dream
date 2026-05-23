@@ -117,8 +117,12 @@ function revokeObjectPreviewUrl(url?: string): void {
   }
 }
 
+/** Max textarea auto-grow height before scroll kicks in (px). */
 const QUERY_INPUT_MAX_HEIGHT = 320;
+/** Min textarea height — enough for one comfortable input line (px). */
 const QUERY_INPUT_MIN_HEIGHT = 72;
+/** Max individual file size accepted for upload. Adjust via config if needed. */
+const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
 export function shouldShowUploadHint(query: string, isInputFocused: boolean): boolean {
   return query.length === 0 && !isInputFocused;
@@ -177,12 +181,11 @@ export default function AIInputDock({
 
   const handleFiles = useCallback((files: FileList | null, uploadSource: 'click' | 'paste' | 'drag') => {
     if (!files?.length) return;
-    const maxFileSize = 50 * 1024 * 1024;
     const nextFiles: UploadedFile[] = [];
 
     Array.from(files).forEach((file) => {
-      if (file.size > maxFileSize) {
-        setUploadError(`${file.name}: file too large (max 50MB)`);
+      if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
+        setUploadError(`${file.name}: file too large (max ${formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES)})`);
         return;
       }
 
