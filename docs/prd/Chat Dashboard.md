@@ -8,69 +8,87 @@ Chat Dashboard 是用户进入对话工作区后的首屏，用于创建新会�
 
 本次更新删除旧稿中的独立 Tailwind HTML 原型、外部头像、橙色主视觉和灰色营销式 Hero，改为与 Ink & Memory 当前纸张式界面统一。
 
+模型配置（主题、AI 模型、系统提示词、工作区模式）已迁移至独立的 Settings 页面，参见 [Settings PRD](<./Settings.md>)。Chat 页面不再渲染模型配置侧边栏。
+
 ## 2. 设计目标
 
-- 保持“暖纸张、手写、安静工具台”的产品气质。
+- 保持"暖纸张、手写、安静工具台"的产品气质。
 - 让用户在首屏立即理解：当前是否有会话、能否输入、可否上传文件、如何新建对话。
 - 将快捷入口、状态反馈和输入区放在同一视觉层级内，避免首页变成营销页。
 - 为 Light/Dark 模式共用同一语义 token。
+- 页面不出现外层垂直滚动；消息流内部自行滚动。
 
 ## 3. 页面布局
 
 ```
-ChatDashboard
-├── TopActionRow
-│   ├── 当前工作区/会话状态
-│   └── New Chat
-├── MainConversationCanvas
-│   ├── EmptyState 或 ChatHistoryPreview
-│   ├── ToolStepPreview
-│   └── TerminalPreview
-├── QuickActions
-│   ├── Recent Files
-│   ├── Continue Writing
-│   └── Review History
-└── AIInputDock
-    ├── Placeholder: Press i chat
-    ├── Add/File入口
-    └── Send
+ChatDashboard（height: 100%，overflow: hidden）
+├── VerticalNav（左侧图标栏，含文件入口、历史、设置导航）
+├── MainArea（flex: 1，flex-direction: column，overflow: hidden）
+│   ├── TopActionRow（flexShrink: 0）
+│   │   ├── 当前工作区/会话状态
+│   │   └── New Chat
+│   ├── QuickActions（flexShrink: 0）
+│   │   ├── 继续写作
+│   │   ├── 总结笔记
+│   │   ├── 整理大纲
+│   │   ├── 发现关联
+│   │   ├── 写作灵感
+│   │   └── 回顾反思
+│   └── ChatPanel（flex: 1，minHeight: 0，overflow: hidden）
+│       ├── ChatMessageList（flex: 1，overflowY: auto）
+│       └── AIInputDock（flexShrink: 0）
+└── FileSidebar（右侧文件侧边栏，可收起）
 ```
 
 | 区域 | 桌面端规范 | 移动端规范 |
 |---|---|---|
-| 页面画布 | `color.bg.app`，内容最大宽度以阅读舒适为准 | 全宽，保留安全区和底部输入高度 |
+| 页面画布 | `color.bg.app`，`height: 100%`，`overflow: hidden` | 全高，禁止外层滚动 |
+| VerticalNav | 固定 4rem 宽，始终可见 | 同左 |
 | 顶部操作 | 右上角 `New Chat`，炭黑文字和加号 | 合并为顶部紧凑按钮 |
-| 主内容 | 消息流居中，宽度不超过长行阅读上限 | 单列，左右留 16px 内边距 |
-| 快捷入口 | 2 到 3 列纸面卡片 | 纵向列表或横滑 |
+| 快捷入口 | 2 到 3 列纸面卡片，`flexShrink: 0` | 纵向列表或横滑 |
+| ChatPanel | `flex: 1`，`minHeight: 0`，消息流内部滚动 | 单列，左右留 16px 内边距 |
 | 输入 Dock | 底部 sticky，宽度与消息流对齐 | 固定底部，避开系统安全区 |
 
 ## 4. 组件层级
 
-### 4.1 TopActionRow
+### 4.1 VerticalNav
+
+- 顶部品牌标志固定，不可点击触发侧边栏。
+- 文件图标（`IconFolder`）：切换右侧 FileSidebar 显示。
+- 历史图标（`IconClock`）：预留，后续接入会话历史。
+- 设置图标（`IconSettings`）：调用 `onNavigateToSettings` 回调，跳转至 Settings 页面。
+- 头像区域：底部，展示当前用户状态。
+
+### 4.2 TopActionRow
 
 - `New Chat` 使用文本加图标，不使用高饱和填充按钮。
 - 当前会话标题使用 `color.text.primary`，元信息使用 `color.text.muted`。
 - Hover 背景使用 `rgba(44,44,44,0.04)` 或对应 token，不改变布局尺寸。
 
-### 4.2 MainConversationCanvas
-
-- 有内容时显示最近消息、工具步骤和终端结果摘要。
-- 无内容时显示简短空状态，不出现大面积插画或营销描述。
-- 工具步骤左侧细线使用 `color.state.warning`，正文仍使用 `color.text.body`。
-- Terminal 使用深色代码块，与截图 `image.png` 的层级保持一致。
-
 ### 4.3 QuickActions
+
+快捷指令应与 Ink & Memory 笔记系统场景一致：
+
+| 快捷指令 | 说明 | 颜色 |
+|---|---|---|
+| 继续写作 | 从当前段落继续扩展，保持原有语气与风格 | `color.state.success` |
+| 总结笔记 | 提炼核心观点，生成简洁的笔记摘要 | `color.state.warning` |
+| 整理大纲 | 将零散想法重组为清晰的结构化大纲 | `color.voice.blue` |
+| 发现关联 | 找出笔记之间的联系与隐藏的共同主题 | `color.voice.purple` |
+| 写作灵感 | 基于当前主题，提供创意角度与扩展方向 | `color.voice.pink` |
+| 回顾反思 | 引导反思已有笔记，提出思考问题与行动建议 | `color.voice.green` |
 
 - 卡片使用 `color.bg.surface` 或 `color.bg.surfaceSolid`。
 - 图标颜色来自 `color.voice.*` 或 `color.state.*`，只用于图标/徽标。
 - 卡片 hover 可增加 `color.shadow.soft`，位移不超过 3px。
 - 不使用 3D 翻转、强 glow、渐变装饰。
 
-### 4.4 AIInputDock
+### 4.4 ChatPanel + AIInputDock
 
-- 输入 Dock 是 Dashboard 的核心操作，不放在装饰卡片里。
+- ChatPanel 占剩余所有高度（`flex: 1`，`minHeight: 0`），内部消息列表独立滚动。
+- AIInputDock 在 ChatPanel 内部 sticky，不触发外层滚动。
 - 视觉沿用 [Chat Send](<./Chat Send.md>)：纸面容器、柔和边框、底部操作行。
-- `Press i chat` 使用 `color.text.muted`，不可用作唯一功能说明。
+- `Ask Ink & Memory…` placeholder 使用 `color.text.muted`。
 
 ## 5. 色彩与视觉规范
 
@@ -89,7 +107,7 @@ ChatDashboard
 
 | 状态 | 设计要求 |
 |---|---|
-| 空状态 | 显示可输入的提示、最近入口占位和 Add 入口；不显示虚构数据。 |
+| 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据。 |
 | 加载态 | 消息区显示低对比 skeleton 或 pulse；输入区保持可见但根据能力禁用发送。 |
 | 错误态 | 使用 `color.state.error` 加明确错误文本；提供重试入口。 |
 | 禁用态 | 按钮使用 `color.disabled.bg`，光标和说明同步变化。 |
@@ -126,8 +144,18 @@ ChatDashboard
 - Dashboard PRD 不再包含可复制 HTML 原型、Tailwind 配置或外部头像依赖。
 - 所有颜色描述均引用 [Color System](<./Color System.md>) token。
 - Light/Dark、空/加载/错误/禁用/选中/悬停状态均有明确要求。
+- Chat 页面无外层垂直滚动，消息区自行滚动。
+- 模型配置侧边栏已从 Chat 页面移除，迁移至 [Settings PRD](<./Settings.md>)。
+- 快捷指令与笔记系统场景一致，不含业务销售类内容。
 - `image.png` 被保留为视觉参考，未被覆盖。
 
 ## 11. 前端实现备注
 
-本 PRD 不要求本轮实现。后续实现时应优先复用现有 `TopNavBar`、聊天输入、工具步骤和文件组件模式；如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。
+本轮已完成以下前端实现：
+- `ChatView.tsx`：移除 `Sidebar` 组件，`height: 100%` + `overflow: hidden` 防止外层滚动，新增 `onNavigateToSettings` prop。
+- `VerticalNav.tsx`：移除 `onToggleSidebar`，新增 `onNavigateToSettings` prop 并绑定设置图标。
+- `const.ts`：快捷指令替换为笔记系统场景。
+- `App.tsx`：ChatView 容器改为 `overflow: hidden`，向 ChatView 传递 `onNavigateToSettings`。
+
+后续如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。
+
