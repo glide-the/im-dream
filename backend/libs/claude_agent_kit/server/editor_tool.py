@@ -135,7 +135,7 @@ async def _fetch_editor_resource(session_id: str, resource: str) -> dict[str, An
             session_id,
             exc,
         )
-        return {"ok": False, "error": str(exc), "data": None}
+        return {"ok": False, "error": "fetch_failed", "data": None}
 
 
 # ---------------------------------------------------------------------------

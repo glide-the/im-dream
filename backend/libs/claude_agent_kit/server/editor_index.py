@@ -98,7 +98,7 @@ def is_editor_index_path(path: str) -> bool:
     # ``/some/workspace/.editor/cells.json`` also matches.
     try:
         parts = PurePosixPath(normalised).parts
-    except Exception:  # noqa: BLE001
+    except ValueError:  # noqa: BLE001
         return False
     return EDITOR_INDEX_DIR in parts
 

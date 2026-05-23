@@ -745,17 +745,14 @@ class ClaudeAgentRunner:
                     if resource is not None:
                         data = get_editor_resource_data(editor_state, resource)
                         try:
-                            import json as _json
-                            import tempfile as _tempfile
-
-                            with _tempfile.NamedTemporaryFile(
+                            with tempfile.NamedTemporaryFile(
                                 mode="w",
                                 suffix=".json",
                                 prefix=f"ink_editor_{resource}_",
                                 delete=False,
                                 encoding="utf-8",
                             ) as _tf:
-                                _json.dump(data, _tf, ensure_ascii=False, indent=2)
+                                json.dump(data, _tf, ensure_ascii=False, indent=2)
                                 tmp_path = _tf.name
 
                             editor_intercept_tmpfiles.append(tmp_path)
@@ -1076,7 +1073,10 @@ class ClaudeAgentRunner:
                 try:
                     os.unlink(_tmp_path)
                 except Exception:  # noqa: BLE001
-                    pass
+                    logger.warning(
+                        "EditorState intercept: failed to remove tempfile %r",
+                        _tmp_path,
+                    )
         return AgentRunResult(
             full_text=full_text,  # type: ignore[possibly-undefined]
             session_id=current_session_id,

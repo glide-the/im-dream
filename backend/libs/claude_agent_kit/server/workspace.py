@@ -167,7 +167,7 @@ def _init_editor_index(workspace: Path) -> None:
     readme_path = editor_dir / "README.md"
     try:
         readme_path.write_text(EDITOR_INDEX_README, encoding="utf-8")
-    except Exception:  # noqa: BLE001
+    except OSError:
         logger.warning("Failed to write .editor/README.md in %s", workspace, exc_info=True)
 
     # Write placeholder JSON files — skip if already present to avoid
@@ -177,7 +177,7 @@ def _init_editor_index(workspace: Path) -> None:
         if not placeholder.exists():
             try:
                 placeholder.write_text(EDITOR_INDEX_PLACEHOLDER, encoding="utf-8")
-            except Exception:  # noqa: BLE001
+            except OSError:
                 logger.warning(
                     "Failed to write .editor/%s.json in %s", stem, workspace, exc_info=True
                 )
