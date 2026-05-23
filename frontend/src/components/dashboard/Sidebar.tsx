@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 
+const API_BASE = '/ink-and-memory';
+
 export type ThemeMode = 'light' | 'system' | 'dark';
 
 interface SystemConfigData {
@@ -54,7 +56,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
     let active = true;
     void (async () => {
       try {
-        const response = await fetch('/api/system-config');
+        const response = await fetch(`${API_BASE}/api/system-config`);
         if (!response.ok) {
           return;
         }
@@ -108,7 +110,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>) => {
     setSaving(true);
     try {
-      await fetch('/api/system-config', {
+      await fetch(`${API_BASE}/api/system-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
