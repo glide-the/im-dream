@@ -7,12 +7,21 @@ import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const
 import VerticalNav from '../dashboard/VerticalNav';
 import ChatPanel from './ChatPanel';
 import type { Attachment, ContextCustomer } from './AIInputDock';
+import type { UIMessage } from 'ai';
 
 interface ChatThread {
   id: string;
   title: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface RawChatMessage {
+  id: string;
+  role: string;
+  content: string;
+  parts_json?: string;
+  created_at: string;
 }
 
 interface ChatViewProps {
@@ -47,6 +56,29 @@ async function fetchThreads(): Promise<ChatThread[]> {
   }
 }
 
+async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
+  try {
+    const res = await fetch(`/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`);
+    if (!res.ok) return [];
+    const data = await res.json() as { messages?: RawChatMessage[] };
+    const msgs = data.messages ?? [];
+    return msgs.map((m) => {
+      let parts: UIMessage['parts'] = [{ type: 'text', text: m.content }];
+      if (m.parts_json) {
+        try { parts = JSON.parse(m.parts_json) as UIMessage['parts']; } catch { /* fallback */ }
+      }
+      return {
+        id: m.id,
+        role: m.role as UIMessage['role'],
+        parts,
+        createdAt: new Date(m.created_at),
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 async function deleteThread(threadId: string): Promise<boolean> {
   try {
     const res = await fetch(`/api/claude-agent/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE' });
@@ -74,6 +106,8 @@ export default function ChatView({
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
   const [isCreatingThread, setIsCreatingThread] = useState(false);
+  const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
   // Create an initial thread if none provided
   useEffect(() => {
@@ -95,6 +129,23 @@ export default function ChatView({
   useEffect(() => {
     void reloadThreads();
   }, [reloadThreads]);
+
+  // Fetch messages for the active thread (following better-chatbot pattern:
+  // parent fetches history and passes as initialMessages to the chat component)
+  useEffect(() => {
+    if (!activeThreadId) return;
+    let cancelled = false;
+    setIsLoadingMessages(true);
+    setThreadMessages(null);
+    void (async () => {
+      const msgs = await fetchThreadMessages(activeThreadId);
+      if (!cancelled) {
+        setThreadMessages(msgs);
+        setIsLoadingMessages(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeThreadId]);
 
   const handleNewChat = useCallback(async () => {
     setIsCreatingThread(true);
@@ -120,9 +171,9 @@ export default function ChatView({
     e.stopPropagation();
     const ok = await deleteThread(threadId);
     if (ok) {
-      setThreads((prev) => prev.filter((t) => t.id !== threadId));
+      const remaining = threads.filter((t) => t.id !== threadId);
+      setThreads(remaining);
       if (threadId === activeThreadId) {
-        const remaining = threads.filter((t) => t.id !== threadId);
         if (remaining.length > 0) {
           setActiveThreadId(remaining[0].id);
           setHasConversationStarted(true);
@@ -221,6 +272,8 @@ export default function ChatView({
               threadId={activeThreadId}
               contextCustomerId={contextCustomerId}
               contextCustomers={contextCustomers}
+              initialMessages={threadMessages ?? undefined}
+              isLoading={isLoadingMessages}
               queuedPrompt={queuedPrompt}
               queuedAttachments={queuedAttachments}
               queuedPromptNonce={queuedPromptNonce}
