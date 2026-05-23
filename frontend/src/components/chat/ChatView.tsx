@@ -3,7 +3,6 @@ import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import QuickActionCard from '../dashboard/QuickActionCard';
-import Sidebar from '../dashboard/Sidebar';
 import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
 import VerticalNav from '../dashboard/VerticalNav';
 import ChatPanel from './ChatPanel';
@@ -15,6 +14,7 @@ interface ChatViewProps {
   contextCustomerId?: string;
   contextCustomers?: ContextCustomer[];
   onNewChat?: () => void;
+  onNavigateToSettings?: () => void;
   quickActions?: QuickActionCardItem[];
 }
 
@@ -24,10 +24,10 @@ export default function ChatView({
   contextCustomerId,
   contextCustomers = [],
   onNewChat,
+  onNavigateToSettings,
   quickActions = QUICK_ACTION_CARDS,
 }: ChatViewProps) {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [fileSidebarOpen, setFileSidebarOpen] = useState(true);
+  const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
@@ -36,12 +36,11 @@ export default function ChatView({
 
   return (
     <WorkspaceProvider>
-      <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <VerticalNav onToggleSidebar={() => setSidebarCollapsed((value) => !value)} onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} unreadCount={0} />
-        <Sidebar open={!sidebarCollapsed} desktopCollapsed={sidebarCollapsed} onClose={() => setSidebarCollapsed(true)} />
+      <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
+        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onNavigateToSettings={onNavigateToSettings} unreadCount={0} />
 
-        <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', padding: '0.25rem 0.25rem 0 0.25rem' }}>
+        <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem', overflow: 'hidden' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', padding: '0.25rem 0.25rem 0 0.25rem', flexShrink: 0 }}>
             <div>
               <div style={{ fontSize: '0.74rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>Session</div>
               <h1 style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', color: 'var(--color-text-primary)' }}>{title}</h1>
@@ -50,7 +49,7 @@ export default function ChatView({
           </div>
 
           {quickActionsGrid ? (
-            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
+            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', flexShrink: 0 }}>
               {quickActions.map((item) => (
                 <QuickActionCard
                   key={item.title}
@@ -65,7 +64,7 @@ export default function ChatView({
             </div>
           ) : null}
 
-          <section style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <section style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <ChatPanel
               threadId={threadId}
               contextCustomerId={contextCustomerId}
@@ -83,3 +82,4 @@ export default function ChatView({
     </WorkspaceProvider>
   );
 }
+

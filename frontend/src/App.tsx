@@ -39,6 +39,7 @@ import { useComments } from './hooks/useComments';
 import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
 import ChatView from './components/chat/ChatView';
+import ModelConfigSection from './components/dashboard/ModelConfigSection';
 
 // @@@ Icon map with React Icons
 const iconMap = {
@@ -1741,6 +1742,27 @@ export default function App() {
               </div>
             </section>
 
+            {/* AI Model Configuration */}
+            <section style={{ marginBottom: 48 }}>
+              <h2 style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: '#2c2c2c',
+                marginBottom: 16,
+                fontFamily: 'Georgia, "Times New Roman", serif'
+              }}>
+                AI 模型配置
+              </h2>
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.5)',
+                border: '1px solid #d0c4b0',
+                borderRadius: 8,
+                padding: 24
+              }}>
+                <ModelConfigSection />
+              </div>
+            </section>
+
             {/* About Content */}
             <AboutView />
           </div>
@@ -1785,9 +1807,9 @@ export default function App() {
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
-          overflow: 'auto'
+          overflow: 'hidden'
         }}>
-          <ChatView />
+          <ChatView onNavigateToSettings={() => setCurrentView('settings')} />
         </div>
       )}
 
