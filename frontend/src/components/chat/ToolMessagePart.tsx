@@ -1,0 +1,177 @@
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
+import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
+import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
+
+type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
+
+function IconTool() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: '0.95rem', height: '0.95rem' }}>
+      <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z" />
+    </svg>
+  );
+}
+
+function IconAlert() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: '0.95rem', height: '0.95rem' }}>
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  );
+}
+
+interface ToolMessagePartProps {
+  part: AnyToolUIPart;
+  isLast?: boolean;
+  isLoading?: boolean;
+  isManualToolInvocation?: boolean;
+  addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
+}
+
+export default function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocation, addToolResult }: ToolMessagePartProps) {
+  const [expanded, setExpanded] = useState(false);
+  const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
+  const toolCallId = part.toolCallId;
+  const toolName = getToolName(part);
+  const input = 'input' in part ? part.input : undefined;
+  const output = 'output' in part ? part.output : undefined;
+  const state = part.state;
+  const title = 'title' in part ? (part as { title?: string }).title : undefined;
+  const providerExecuted = 'providerExecuted' in part ? (part as { providerExecuted?: boolean }).providerExecuted : undefined;
+  const partType = part.type;
+
+  const isCompleted = useMemo(() => state === 'output-available' || state === 'output-error', [state]);
+  const isExecuting = useMemo(() => !isCompleted && Boolean(isLast && isLoading), [isCompleted, isLast, isLoading]);
+  const isError = useMemo(() => state === 'output-error', [state]);
+  const isAskUserQuestion = useMemo(() => {
+    const normalizedType = partType?.toLowerCase() || '';
+    const normalizedName = toolName?.toLowerCase() || '';
+    return normalizedType === 'tool-askuserquestion' || ['askuserquestion', 'ask_user_question', 'ask_user', 'askuser'].includes(normalizedName) || normalizedName.endsWith('__ask_user') || normalizedName.endsWith('__askuserquestion');
+  }, [partType, toolName]);
+  const shouldShowAskUserUI = useMemo(() => isAskUserQuestion && !isCompleted && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isAskUserQuestion, isCompleted, state]);
+  const shouldShowApprovalUI = Boolean(isManualToolInvocation) && !shouldShowAskUserUI;
+
+  const inputDisplay = useMemo(() => {
+    try { return JSON.stringify(input, null, 2); } catch { return String(input); }
+  }, [input]);
+  const outputDisplay = useMemo(() => {
+    if (output == null) return null;
+    try { return JSON.stringify(output, null, 2); } catch { return String(output); }
+  }, [output]);
+
+  const handleApprove = useCallback(async () => {
+    if (confirmationStatus !== 'idle') return;
+    setConfirmationStatus('confirming');
+    addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
+    await Promise.resolve();
+    setConfirmationStatus('confirmed');
+  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+
+  const handleReject = useCallback(async () => {
+    if (confirmationStatus !== 'idle') return;
+    setConfirmationStatus('confirming');
+    addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
+    await Promise.resolve();
+    setConfirmationStatus('rejected');
+  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+
+  useEffect(() => {
+    if (!shouldShowApprovalUI) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+        event.preventDefault();
+        void handleApprove();
+      }
+      if ((event.metaKey || event.ctrlKey) && event.key === 'Escape') {
+        event.preventDefault();
+        void handleReject();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleApprove, handleReject, shouldShowApprovalUI]);
+
+  const handleAskUserSubmit = useCallback(async (answers: Record<string, unknown>) => {
+    if (confirmationStatus !== 'idle') return;
+    setConfirmationStatus('confirming');
+    addToolResult?.({ tool: toolName, toolCallId, output: answers });
+    await Promise.resolve();
+    setConfirmationStatus('confirmed');
+  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+
+  const handleAskUserCancel = useCallback(async () => {
+    if (confirmationStatus !== 'idle') return;
+    setConfirmationStatus('confirming');
+    addToolResult?.({ tool: toolName, toolCallId, output: { cancelled: true } });
+    await Promise.resolve();
+    setConfirmationStatus('rejected');
+  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+
+  return (
+    <div style={{ width: '100%' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', boxShadow: '0 8px 20px var(--color-shadow-soft)' }}>
+        <div onClick={() => setExpanded((value) => !value)} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 0.9rem', cursor: 'pointer' }}>
+          <div style={{ display: 'grid', placeItems: 'center', width: '1.9rem', height: '1.9rem', borderRadius: '10px', background: 'var(--color-bg-surface)', color: isError ? 'var(--color-state-danger)' : isExecuting ? 'var(--color-state-warning)' : 'var(--color-text-secondary)' }}>
+            {isExecuting ? <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} /> : isError ? <IconAlert /> : <IconTool />}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{title || toolName}</div>
+            <div style={{ marginTop: '0.15rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{partType}{providerExecuted !== undefined ? ` • ${providerExecuted ? 'provider' : 'local'} execution` : ''}</div>
+          </div>
+          <div style={{ color: 'var(--color-text-muted)' }}>{expanded ? <IconChevronUp style={{ width: '1rem', height: '1rem' }} /> : <IconChevronDown style={{ width: '1rem', height: '1rem' }} />}</div>
+        </div>
+
+        {expanded ? (
+          <div style={{ padding: '0 0.9rem 0.9rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <section style={{ borderRadius: '10px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', padding: '0.85rem' }}>
+              <h5 style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Tool info</h5>
+              <div style={{ display: 'grid', gap: '0.3rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+                <div>Type: {partType}</div>
+                <div>Tool: {toolName}</div>
+                <div>Call ID: <code>{toolCallId}</code></div>
+                <div>Status: {state || 'pending'}</div>
+                {title ? <div>Title: {title}</div> : null}
+              </div>
+            </section>
+
+            <section style={{ borderRadius: '10px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', padding: '0.85rem' }}>
+              <h5 style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Input</h5>
+              <pre style={{ margin: 0, fontSize: '0.76rem', whiteSpace: 'pre-wrap', overflowX: 'auto', color: 'var(--color-text-secondary)' }}>{inputDisplay}</pre>
+            </section>
+
+            {outputDisplay ? (
+              <section style={{ borderRadius: '10px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', padding: '0.85rem' }}>
+                <h5 style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{isError ? 'Error' : 'Output'}</h5>
+                <pre style={{ margin: 0, fontSize: '0.76rem', whiteSpace: 'pre-wrap', overflowX: 'auto', color: isError ? 'var(--color-state-danger)' : 'var(--color-text-secondary)' }}>{outputDisplay}</pre>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+
+        {shouldShowAskUserUI && confirmationStatus === 'idle' ? <div style={{ padding: '0 0.9rem 0.9rem' }}><AskUserQuestionUI input={input as AskUserQuestionInput} toolCallId={toolCallId} toolName={toolName} onSubmit={handleAskUserSubmit} onCancel={handleAskUserCancel} /></div> : null}
+        {shouldShowAskUserUI && confirmationStatus === 'confirming' ? <StatusRow tone="warning" label="Submitting…" /> : null}
+        {shouldShowAskUserUI && confirmationStatus === 'confirmed' ? <StatusRow tone="success" label="Answers submitted" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} /> : null}
+        {shouldShowAskUserUI && confirmationStatus === 'rejected' ? <StatusRow tone="danger" label="Answer cancelled" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} /> : null}
+
+        {shouldShowApprovalUI && confirmationStatus === 'idle' ? (
+          <div style={{ display: 'flex', gap: '0.75rem', padding: '0 0.9rem 0.9rem' }}>
+            <button type="button" onClick={() => void handleApprove()} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: 'var(--color-action-link)', color: '#fff', fontWeight: 600, cursor: 'pointer' }}><IconCheck style={{ width: '1rem', height: '1rem' }} />Approve</button>
+            <button type="button" onClick={() => void handleReject()} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', borderRadius: '999px', padding: '0.8rem 1rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontWeight: 600, cursor: 'pointer' }}><IconX style={{ width: '1rem', height: '1rem' }} />Cancel</button>
+          </div>
+        ) : null}
+        {shouldShowApprovalUI && confirmationStatus === 'confirming' ? <StatusRow tone="warning" label="Processing…" /> : null}
+        {shouldShowApprovalUI && confirmationStatus === 'confirmed' ? <StatusRow tone="success" label="Confirmed" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} /> : null}
+        {shouldShowApprovalUI && confirmationStatus === 'rejected' ? <StatusRow tone="danger" label="Cancelled" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} /> : null}
+        {isExecuting ? <StatusRow tone="warning" label="Executing…" /> : null}
+      </div>
+    </div>
+  );
+}
+
+function StatusRow({ tone, label, icon }: { tone: 'warning' | 'success' | 'danger'; label: string; icon?: ReactNode }) {
+  const color = tone === 'success' ? 'var(--color-state-success)' : tone === 'danger' ? 'var(--color-state-danger)' : 'var(--color-state-warning)';
+  return <div style={{ padding: '0 0.9rem 0.9rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color, fontSize: '0.85rem' }}>{icon || <IconLoader style={{ width: '1rem', height: '1rem' }} />}{label}</div>;
+}
