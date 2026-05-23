@@ -45,6 +45,9 @@ logger = logging.getLogger(__name__)
 # Keepalive interval for SSE comments (seconds).
 _SSE_KEEPALIVE_S: float = float(os.getenv("INK_AGENT_SSE_KEEPALIVE_S", "15") or "15")
 
+# Maximum characters to use when auto-titling a thread from the first user message.
+MAX_THREAD_TITLE_LENGTH: int = 50
+
 
 # ---------------------------------------------------------------------------
 # Request model
@@ -225,7 +228,7 @@ class ClaudeAgentService:
             # Auto-fill thread title from first user message if still NULL
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
             if thread and not thread.get("title"):
-                title = user_text.strip()[:50]
+                title = user_text.strip()[:MAX_THREAD_TITLE_LENGTH]
                 database.update_chat_thread_title(thread_id, title)
 
         try:

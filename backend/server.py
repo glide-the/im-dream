@@ -2166,7 +2166,7 @@ class ClaudeAgentRequestBody(BaseModel):
 
 
 class ToolConfirmRequestBody(BaseModel):
-    session_id: str  # thread_id of the active conversation
+    thread_id: str
     tool_call_id: str
     approved: bool
     reason: Optional[str] = None
@@ -2357,11 +2357,11 @@ async def claude_agent_tool_confirm(
 
     Must be called while the SSE stream is still open and the agent is
     awaiting approval in its ``on_tool_confirmation_request`` callback.
-    ``body.session_id`` must be the ``thread_id`` of the active conversation.
+    ``body.thread_id`` must be the ``thread_id`` of the active conversation.
     """
-    session_id = body.session_id
+    session_id = body.thread_id
     if not session_id:
-        raise HTTPException(status_code=400, detail="session_id (thread_id) is required")
+        raise HTTPException(status_code=400, detail="thread_id is required")
     resolved = claude_agent_thread_factory.confirm_tool(
         session_id=session_id,
         tool_call_id=body.tool_call_id,
