@@ -12,7 +12,7 @@ import os
 
 from pydantic import BaseModel, ConfigDict
 
-from infrastructure.mem0_gateway import get_default_mem0_gateway
+# from infrastructure.mem0_gateway import get_default_mem0_gateway
 from libs.utils.env import read_int_env
 from libs.utils.policy_loader import expand_memory_recall_query
 
@@ -50,29 +50,29 @@ async def recall_shared_stories_handler() -> str:
             separators=(",", ":"),
         )
 
-    gateway = get_default_mem0_gateway()
-    if not gateway.is_configured():
-        return json.dumps(
-            {
-                "ok": False,
-                "tool_intent": MEMORY_TOOL_NAME,
-                "error": "mem0_not_configured",
-                "shared_stories": [],
-            },
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
+    # gateway = get_default_mem0_gateway()
+    # if not gateway.is_configured():
+    #     return json.dumps(
+    #         {
+    #             "ok": False,
+    #             "tool_intent": MEMORY_TOOL_NAME,
+    #             "error": "mem0_not_configured",
+    #             "shared_stories": [],
+    #         },
+    #         ensure_ascii=False,
+    #         separators=(",", ":"),
+    #     )
 
-    stories = gateway.search_shared_stories(
-        mem0_user_id=mem0_user_id,
-        query=expand_memory_recall_query(user_message),
-        top_k=top_k,
-    )
+    # stories = gateway.search_shared_stories(
+    #     mem0_user_id=mem0_user_id,
+    #     query=expand_memory_recall_query(user_message),
+    #     top_k=top_k,
+    # )
     return json.dumps(
         {
             "ok": True,
             "tool_intent": MEMORY_TOOL_NAME,
-            "shared_stories": stories,
+            # "shared_stories": stories,
         },
         ensure_ascii=False,
         separators=(",", ":"),
