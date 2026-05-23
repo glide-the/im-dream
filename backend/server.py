@@ -21,7 +21,7 @@ from polycli import PolyAgent
 from stateless_analyzer import analyze_stateless
 from speech_recognition import init_speech_recognition
 import config
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel
 
 # Import database and auth modules
