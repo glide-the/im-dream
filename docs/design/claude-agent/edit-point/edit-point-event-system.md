@@ -31,7 +31,7 @@ Scope: Design only — 不含实现代码，不含模块重构
 | 维度 | 旧设计 | 新设计 |
 |------|-------|-------|
 | Agent 操作入口 | 新建 EditEvent 事件系统 | EditorEngine 方法 → MCP 工具定义 |
-| Agent 读取文档 | 无设计 | EditorState → 工作空间文件系统适配器 |
+| Agent 读取文档 | 无设计 | EditorState → `.editor/` 虚拟索引适配器（PreToolUse 拦截） |
 | UI Hooks 层职责 | 仅人类操作入口 | 人类入口 + Agent 操作可视化 + 人机协作确认面 |
 | Agent 操作粒度 | 字符级 | 片段（Cell/Segment）级 |
 
@@ -103,13 +103,13 @@ Ink & Memory 的文档抽象层次为 **档案（Archive / Session） > 片段�
                        │  EditorState 快照
                        ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                 EditorState / 工作空间适配器层                  │
+│                 EditorState / 虚拟索引层                       │
 │                                                              │
-│  EditorState → 工作空间文件系统（Claude 可直接 read_file）      │
-│  SessionWorkspaceAdapter（新增，详见 workspace-adapter.md）    │
+│  EditorState → `.editor/` 虚拟索引（PreToolUse 拦截 read_file）│
+│  editor_index.py（`_init_editor_index` / `handle_read_hook`） │
 │                                                              │
-│  {AGENT_CWD}/{userId}/document/                              │
-│    manifest.json / segments/{cellId}.txt / comments/*.json  │
+│  {AGENT_CWD}/{session_id}/.editor/                           │
+│    cells.json / commentors.json / tasks.json / session.json  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -119,7 +119,7 @@ Ink & Memory 的文档抽象层次为 **档案（Archive / Session） > 片段�
 |----|---------|----------|
 | **UI / Hooks** | 接收键盘/鼠标输入，渲染编辑器，管理 IME/防抖 | 渲染 Agent 待确认操作预览，展示 Approve/Reject UI，显示 Agent 已执行操作高亮 |
 | **EditorEngine** | 通过 Hooks 调用命令方法，维护状态 | 通过 MCP 工具调用（经 PreToolUse 拦截 → 人类确认 → 执行） |
-| **EditorState / Adapter** | 序列化为 JSON 持久化到后端 DB | 同步到工作空间文件系统，供 Agent `read_file` 获取文档内容 |
+| **EditorState / 虚拟索引** | 序列化为 JSON 持久化到后端 DB | 通过 `.editor/` 虚拟索引占位符 + PreToolUse 拦截，Agent `read_file` 时动态返回实时 EditorState 快照 |
 
 ---
 
@@ -127,7 +127,7 @@ Ink & Memory 的文档抽象层次为 **档案（Archive / Session） > 片段�
 
 1. **Engine 接口即 MCP 工具**：不引入新抽象层，直接将 EditorEngine 的命令方法映射为 MCP 工具定义。工具名称语义化（`write_segment`、`add_comment` 等）。
 
-2. **读取通过文件系统，写入通过工具**：Agent 读取文档内容使用文件系统（`read_file`），写入/修改必须通过 MCP 工具，以触发人类确认流程。
+2. **读取通过虚拟索引，写入通过工具**：Agent 读取文档内容通过 `.editor/` 虚拟索引（`read_file` 触发 PreToolUse 拦截，动态返回实时 EditorState 快照），写入/修改必须通过 MCP 工具，以触发人类确认流程。
 
 3. **Agent 写操作必须经人类确认**：任何由 Agent 发起的写操作，在 EditorEngine 执行前必须通过 `PreToolUse` hook 阻塞，等待人类 Approve/Reject。此规则不可绕过。
 
@@ -142,6 +142,6 @@ Ink & Memory 的文档抽象层次为 **档案（Archive / Session） > 片段�
 | 文档 | 职责 |
 |------|------|
 | [mcp-tools.md](./mcp-tools.md) | EditorEngine → MCP 工具目录；工具 Schema；读/写权限矩阵 |
-| [workspace-adapter.md](./workspace-adapter.md) | EditorState 工作空间文件系统适配器；目录结构；同步策略 |
+| [workspace-adapter.md](./workspace-adapter.md) | EditorState → `.editor/` 虚拟索引适配器；PreToolUse 拦截机制；资源映射规范；读写路径分离 |
 | [human-agent-collab.md](./human-agent-collab.md) | UI 人机协作设计；Agent 操作可视化；确认流程 |
 | [conflict-resolution.md](./conflict-resolution.md) | 多 Agent 并发冲突检测与人类仲裁机制 |
