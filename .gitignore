@@ -36,3 +36,5 @@ backend/ink-backend*.tar.gz
 
 # Project documentation (private)
 CLAUDE.md
+
+logs
