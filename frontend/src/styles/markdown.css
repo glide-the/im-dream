@@ -69,7 +69,7 @@
 .prose pre {
   padding: 1em;
   border-radius: 0.75em;
-  background: #2c2c2c;
+  background: var(--color-text-primary);
   color: #f3eee6;
   overflow-x: auto;
 }

@@ -38,8 +38,8 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
       maxWidth: '400px',
       margin: '0 auto',
       padding: '32px',
-      backgroundColor: '#fffef9',
-      border: '2px solid #d0c4b0',
+      backgroundColor: 'var(--color-bg-paper)',
+      border: '2px solid var(--color-border-paper)',
       borderRadius: '12px',
       boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
       fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif"
@@ -48,7 +48,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
         margin: '0 0 24px 0',
         fontSize: '24px',
         fontWeight: 600,
-        color: '#333',
+        color: 'var(--color-text-body)',
         textAlign: 'center'
       }}>
         Welcome Back
@@ -88,7 +88,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
             style={{
               width: '100%',
               padding: '10px 12px',
-              border: '1px solid #d0c4b0',
+              border: '1px solid var(--color-border-paper)',
               borderRadius: '6px',
               fontSize: '15px',
               fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
@@ -116,7 +116,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
             style={{
               width: '100%',
               padding: '10px 12px',
-              border: '1px solid #d0c4b0',
+              border: '1px solid var(--color-border-paper)',
               borderRadius: '6px',
               fontSize: '15px',
               fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
@@ -133,7 +133,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
             padding: '12px',
             border: 'none',
             borderRadius: '6px',
-            backgroundColor: isSubmitting ? '#ccc' : '#4a90e2',
+            backgroundColor: isSubmitting ? '#ccc' : 'var(--color-action-link)',
             color: 'white',
             fontSize: '16px',
             fontWeight: 600,
@@ -148,7 +148,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
           }}
           onMouseLeave={(e) => {
             if (!isSubmitting) {
-              e.currentTarget.style.backgroundColor = '#4a90e2';
+              e.currentTarget.style.backgroundColor = 'var(--color-action-link)';
             }
           }}
         >
@@ -160,7 +160,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
         marginTop: '20px',
         textAlign: 'center',
         fontSize: '14px',
-        color: '#666'
+        color: 'var(--color-text-secondary)'
       }}>
         Don't have an account?{' '}
         <button
@@ -169,7 +169,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
           style={{
             background: 'none',
             border: 'none',
-            color: '#4a90e2',
+            color: 'var(--color-action-link)',
             cursor: 'pointer',
             textDecoration: 'underline',
             fontSize: '14px',

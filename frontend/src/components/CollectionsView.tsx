@@ -55,7 +55,7 @@ export default function CollectionsView({ isVisible, voiceConfigs, timezone }: C
       height: '100%',
       display: 'flex',
       fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-      background: '#f8f0e6',
+      background: 'var(--color-bg-app)',
       overflow: 'hidden'
     }}>
       <TimelinePage
@@ -299,7 +299,7 @@ function TimelineCard({
         <div style={{
           fontSize: '13px',
           fontWeight: 600,
-          color: day.isToday ? '#2c2c2c' : '#666',
+          color: day.isToday ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
           marginBottom: '0.25rem'
         }}>
           {day.isToday ? t('timeline.today') : formatDate(day.date, dateLocale)}
@@ -331,7 +331,7 @@ function TimelineCard({
                 height: isMobile ? '64px' : '72px',
                 objectFit: 'cover',
                 borderRadius: '6px',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+                boxShadow: '0 2px 8px var(--color-shadow-medium)'
               }}
             />
             {onGenerate && (
@@ -376,9 +376,9 @@ function TimelineCard({
             width: isMobile ? '64px' : '72px',
             height: isMobile ? '64px' : '72px',
             background: day.isFuture
-              ? 'linear-gradient(135deg, #f8f0e6 0%, #ede3d5 100%)'
+              ? 'linear-gradient(135deg, var(--color-bg-app) 0%, #ede3d5 100%)'
               : 'linear-gradient(135deg, #f0e8de 0%, #e5dbc9 100%)',
-            border: day.isFuture ? '2px dashed #d0c4b0' : '2px dashed #b8a896',
+            border: day.isFuture ? '2px dashed var(--color-border-paper)' : '2px dashed #b8a896',
             borderRadius: '6px',
             display: 'flex',
             alignItems: 'center',
@@ -834,7 +834,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
       style={{
         width: '100%',
         height: '100%',
-        background: '#f8f0e6',
+        background: 'var(--color-bg-app)',
         overflowX: 'hidden',
         overflowY: 'auto',
         display: 'flex',
@@ -860,7 +860,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
             top: isMobile ? '1rem' : '2rem',
             bottom: isMobile ? '4rem' : '5rem',
             width: isMobile ? '2px' : '4px',
-            background: 'linear-gradient(180deg, transparent 0%, #d0c4b0 2%, #d0c4b0 98%, transparent 100%)',
+            background: 'linear-gradient(180deg, transparent 0%, var(--color-border-paper) 2%, var(--color-border-paper) 98%, transparent 100%)',
             transform: 'translateX(-50%)',
             zIndex: 1,
             opacity: 1
@@ -927,9 +927,9 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
                   width: '14px',
                   height: '14px',
                   borderRadius: '50%',
-                  background: hasData ? '#4CAF50' : (day.isToday ? '#666' : '#ddd'),
-                  border: '3px solid #f8f0e6',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                  background: hasData ? 'var(--color-state-success)' : (day.isToday ? 'var(--color-text-secondary)' : '#ddd'),
+                  border: '3px solid var(--color-bg-app)',
+                  boxShadow: '0 2px 6px var(--color-shadow-medium)',
                   zIndex: 10,
                 }}
               />
@@ -1032,7 +1032,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
                     alignItems: 'center',
                     justifyContent: 'center',
                     fontSize: '22px',
-                    color: '#333',
+                    color: 'var(--color-text-body)',
                     fontWeight: 'bold',
                     transition: 'all 0.2s',
                     boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
@@ -1168,7 +1168,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
                               minWidth: 0
                             }}>
                               <span style={{ fontSize: '18px', flexShrink: 0 }}>{getIconForVoice(comment.icon)}</span>
-                              <span style={{ fontWeight: 600, fontSize: '14px', color: '#333', flexShrink: 0 }}>{voiceConfigs[comment.voice]?.name || comment.voice}</span>
+                              <span style={{ fontWeight: 600, fontSize: '14px', color: 'var(--color-text-body)', flexShrink: 0 }}>{voiceConfigs[comment.voice]?.name || comment.voice}</span>
                               {comment.feedback === 'star' && (
                                 <span style={{ fontSize: '14px', marginLeft: 'auto', flexShrink: 0 }}>⭐</span>
                               )}
@@ -1222,7 +1222,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
             }}>
               <div style={{
                 fontSize: '13px',
-                color: '#666'
+                color: 'var(--color-text-secondary)'
               }}>
                 {new Date(viewingImage.date).toLocaleDateString(dateLocale, {
                   year: 'numeric',

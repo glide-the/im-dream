@@ -11,15 +11,6 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
   const { activeSessionId } = useWorkspaceSession();
   const fileSidebarSessionId = activeSessionId ?? 'shared-workspace';
 
-  const handleToggleSidebar = useCallback(() => {
-    setFileSidebarOpen(false);
-    if (window.innerWidth >= 768) {
-      setDesktopCollapsed((value) => !value);
-    } else {
-      setSidebarOpen((value) => !value);
-    }
-  }, []);
-
   const handleToggleFileSidebar = useCallback(() => {
     const nextOpen = !fileSidebarOpen;
     setFileSidebarOpen(nextOpen);
@@ -33,7 +24,7 @@ function AppLayoutShell({ children }: { children: ReactNode }) {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh', overflow: 'hidden', background: 'var(--color-bg-app)' }}>
-      <VerticalNav onToggleSidebar={handleToggleSidebar} onToggleFileSidebar={handleToggleFileSidebar} />
+      <VerticalNav onToggleFileSidebar={handleToggleFileSidebar} />
       <Sidebar open={sidebarOpen} desktopCollapsed={desktopCollapsed} onClose={() => setSidebarOpen(false)} />
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflowY: 'auto', padding: '1rem 1rem 2rem' }}>{children}</main>
       <FileSidebar sessionId={fileSidebarSessionId} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
