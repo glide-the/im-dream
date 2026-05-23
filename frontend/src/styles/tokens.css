@@ -1,0 +1,65 @@
+:root {
+  --color-bg-app: #f8f0e6;
+  --color-bg-paper: #fffef9;
+  --color-bg-surface: rgba(255, 255, 255, 0.5);
+  --color-bg-surface-solid: #ffffff;
+  --color-bg-overlay: rgba(0, 0, 0, 0.5);
+  --color-border-paper: #d0c4b0;
+  --color-border-neutral: #e0e0e0;
+  --color-border-focus: #2c2c2c;
+  --color-text-primary: #2c2c2c;
+  --color-text-body: #333333;
+  --color-text-secondary: #666666;
+  --color-text-muted: #8a7a69;
+  --color-action-primary: #2c2c2c;
+  --color-action-link: #4a90e2;
+  --color-state-success: #4CAF50;
+  --color-state-warning: #f39c12;
+  --color-state-error: #f44336;
+  --color-state-danger: #dd4444;
+  --color-disabled-bg: #cccccc;
+  --color-shadow-soft: rgba(0, 0, 0, 0.08);
+  --color-shadow-medium: rgba(0, 0, 0, 0.15);
+  --color-voice-blue: #4a90e2;
+  --color-voice-purple: #9b59b6;
+  --color-voice-pink: #e91e63;
+  --color-voice-green: #27ae60;
+  --color-voice-yellow: #f39c12;
+  --color-text-on-action: #ffffff;
+  --color-code-bg: #2c2c2c;
+  --color-code-text: #f3eee6;
+  --color-code-inline-bg: rgba(0, 0, 0, 0.08);
+}
+
+[data-theme='dark'] {
+  --color-bg-app: #1f1b16;
+  --color-bg-paper: #2a251e;
+  --color-bg-surface: rgba(42, 37, 30, 0.82);
+  --color-bg-surface-solid: #332d25;
+  --color-bg-overlay: rgba(0, 0, 0, 0.72);
+  --color-border-paper: #5a4d3d;
+  --color-border-neutral: #4a4238;
+  --color-border-focus: #f3eee6;
+  --color-text-primary: #f3eee6;
+  --color-text-body: #eee8df;
+  --color-text-secondary: #c8bcae;
+  --color-text-muted: #9f9283;
+  --color-action-primary: #f3eee6;
+  --color-action-link: #81b7d2;
+  --color-state-success: #7bcf8f;
+  --color-state-warning: #f7c96a;
+  --color-state-error: #ff7a70;
+  --color-state-danger: #ff8a7f;
+  --color-disabled-bg: #58504a;
+  --color-shadow-soft: rgba(0, 0, 0, 0.32);
+  --color-shadow-medium: rgba(0, 0, 0, 0.45);
+  --color-voice-blue: #81b7d2;
+  --color-voice-purple: #c99be1;
+  --color-voice-pink: #ff8fbd;
+  --color-voice-green: #7bdba0;
+  --color-voice-yellow: #f7c96a;
+  --color-text-on-action: #ffffff;
+  --color-code-bg: #0d1117;
+  --color-code-text: #e6edf3;
+  --color-code-inline-bg: rgba(0, 0, 0, 0.18);
+}

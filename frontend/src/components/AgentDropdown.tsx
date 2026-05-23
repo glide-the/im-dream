@@ -88,12 +88,12 @@ export default function AgentDropdown({ voices, position, onSelect, onClose }: A
         background: '#fff',
         border: '1px solid #ccc',
         borderRadius: '8px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        boxShadow: '0 4px 12px var(--color-shadow-medium)',
         padding: '8px',
         zIndex: 1000,
         minWidth: '200px',
         fontSize: '14px',
-        color: '#666'
+        color: 'var(--color-text-secondary)'
       }}>
         No agents available
       </div>
@@ -110,7 +110,7 @@ export default function AgentDropdown({ voices, position, onSelect, onClose }: A
         background: '#fff',
         border: '1px solid #ccc',
         borderRadius: '8px',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        boxShadow: '0 4px 12px var(--color-shadow-medium)',
         padding: '4px 0',
         zIndex: 1000,
         minWidth: '220px',
@@ -143,12 +143,12 @@ export default function AgentDropdown({ voices, position, onSelect, onClose }: A
               background: isSelected ? '#f0f0f0' : 'transparent'
             }}
           >
-            <Icon size={16} color="#666" />
+            <Icon size={16} color="var(--color-text-secondary)" />
             <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: '14px', color: '#333' }}>
+              <div style={{ fontWeight: 600, fontSize: '14px', color: 'var(--color-text-body)' }}>
                 {cfg.name}
               </div>
-              <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>
+              <div style={{ fontSize: '12px', color: 'var(--color-text-secondary)', marginTop: '2px' }}>
                 {cfg.systemPrompt.substring(0, 40)}...
               </div>
             </div>

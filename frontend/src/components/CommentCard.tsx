@@ -130,7 +130,7 @@ export function CommentGroupCard({
               background: colors.gradient,
               borderRadius: '4px 4px 0 0',
               fontSize: '13px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              boxShadow: '0 4px 12px var(--color-shadow-medium)',
             }}
           >
           <div style={{
@@ -278,7 +278,7 @@ export function CommentGroupCard({
             borderRadius: isExpanded ? '0' : '4px',
             fontSize: '13px',
             lineHeight: '1.4',
-            boxShadow: isHovered || isExpanded ? '0 4px 12px rgba(0,0,0,0.15)' : 'none',
+            boxShadow: isHovered || isExpanded ? '0 4px 12px var(--color-shadow-medium)' : 'none',
             transition: 'box-shadow 0.2s ease',
           }}
         >
@@ -416,7 +416,7 @@ export function CommentGroupCard({
                   border: `1px solid ${colors.glow}`,
                   borderRadius: '3px',
                   background: 'rgba(255,255,255,0.9)',
-                  color: '#333',
+                  color: 'var(--color-text-body)',
                   fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
                 }}
               />
@@ -429,7 +429,7 @@ export function CommentGroupCard({
                 style={{
                   padding: '6px 12px',
                   fontSize: '12px',
-                  background: inputValue.trim() && !isChatProcessing ? '#4a90e2' : '#ccc',
+                  background: inputValue.trim() && !isChatProcessing ? 'var(--color-action-link)' : '#ccc',
                   color: '#fff',
                   border: 'none',
                   borderRadius: '3px',

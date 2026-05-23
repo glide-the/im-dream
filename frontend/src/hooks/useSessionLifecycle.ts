@@ -193,14 +193,14 @@ export function useSessionLifecycle({
         position: fixed;
         top: 70px;
         right: 20px;
-        background: #f44336;
+        background: var(--color-state-error);
         color: white;
         padding: 12px 20px;
         borderRadius: 6px;
         fontSize: 14px;
         fontFamily: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
         zIndex: 10000;
-        boxShadow: 0 4px 12px rgba(0,0,0,0.15);
+        boxShadow: 0 4px 12px var(--color-shadow-medium);
       `;
       document.body.appendChild(toast);
       setTimeout(() => {
@@ -223,14 +223,14 @@ export function useSessionLifecycle({
         position: fixed;
         top: 70px;
         right: 20px;
-        background: #4CAF50;
+        background: var(--color-state-success);
         color: white;
         padding: 12px 20px;
         borderRadius: 6px;
         fontSize: 14px;
         fontFamily: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
         zIndex: 10000;
-        boxShadow: 0 4px 12px rgba(0,0,0,0.15);
+        boxShadow: 0 4px 12px var(--color-shadow-medium);
       `;
       document.body.appendChild(toast);
       setTimeout(() => {

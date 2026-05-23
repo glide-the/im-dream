@@ -3,8 +3,8 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 
 interface Props {
-  currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks';
-  onViewChange: (view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks') => void;
+  currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat';
+  onViewChange: (view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat') => void;
 }
 
 export default function LeftSidebar({ currentView, onViewChange }: Props) {
@@ -24,9 +24,9 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
     alignItems: 'center',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    color: isActive ? '#2c2c2c' : '#888',
+    color: isActive ? 'var(--color-text-primary)' : '#888',
     position: 'relative' as const,
-    borderBottom: isActive ? '3px solid #2c2c2c' : '3px solid transparent',
+    borderBottom: isActive ? '3px solid var(--color-text-primary)' : '3px solid transparent',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
     letterSpacing: '-0.2px'
   });
@@ -38,8 +38,8 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
       top: 0,
       right: 0,
       height: 52,
-      background: '#f8f0e6',
-      borderBottom: '1px solid #d0c4b0',
+      background: 'var(--color-bg-app)',
+      borderBottom: '1px solid var(--color-border-paper)',
       display: 'flex',
       flexDirection: 'row',
       alignItems: 'center',
@@ -58,22 +58,22 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
         <span style={{
           fontSize: 20,
           fontWeight: 700,
-          color: '#2c2c2c',
+          color: 'var(--color-text-primary)',
           fontStyle: 'italic'
         }}>I</span>
         <span style={{
           fontWeight: 400,
-          color: '#2c2c2c'
+          color: 'var(--color-text-primary)'
         }}>nk & </span>
         <span style={{
           fontSize: 20,
           fontWeight: 700,
-          color: '#2c2c2c',
+          color: 'var(--color-text-primary)',
           fontStyle: 'italic'
         }}>M</span>
         <span style={{
           fontWeight: 400,
-          color: '#2c2c2c'
+          color: 'var(--color-text-primary)'
         }}>emory</span>
       </div>
 
@@ -153,6 +153,24 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
         >
           {t('nav.decks')}
         </button>
+
+        <button
+          onClick={() => onViewChange('chat')}
+          style={buttonStyle(currentView === 'chat')}
+          title={t('nav.chat')}
+          onMouseEnter={e => {
+            if (currentView !== 'chat') {
+              e.currentTarget.style.background = 'rgba(44, 44, 44, 0.04)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (currentView !== 'chat') {
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
+        >
+          {t('nav.chat')}
+        </button>
       </div>
 
       <div style={{ flex: 1 }} />
@@ -166,11 +184,11 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: currentView === 'settings' ? 'rgba(0, 0, 0, 0.08)' : 'transparent',
+          background: currentView === 'settings' ? 'var(--color-shadow-soft)' : 'transparent',
           border: 'none',
           cursor: 'pointer',
           transition: 'all 0.2s',
-          color: '#666',
+          color: 'var(--color-text-secondary)',
           fontSize: 16
         }}
         onMouseEnter={e => {
@@ -200,7 +218,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: '#4CAF50',
+            background: 'var(--color-state-success)',
             border: 'none',
             cursor: 'pointer',
             transition: 'all 0.2s',
@@ -213,7 +231,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
             e.currentTarget.style.background = '#45a049';
           }}
           onMouseLeave={e => {
-            e.currentTarget.style.background = '#4CAF50';
+            e.currentTarget.style.background = 'var(--color-state-success)';
           }}
           title="User Profile"
         >
@@ -240,9 +258,9 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
               marginTop: 8,
               width: 200,
               background: '#fff',
-              border: '1px solid #d0c4b0',
+              border: '1px solid var(--color-border-paper)',
               borderRadius: 8,
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              boxShadow: '0 4px 12px var(--color-shadow-medium)',
               zIndex: 999,
               overflow: 'hidden'
             }}>
@@ -254,7 +272,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
                 <div style={{ fontWeight: 600, marginBottom: 4 }}>
                   {user?.display_name || 'User'}
                 </div>
-                <div style={{ fontSize: 11, color: '#666' }}>
+                <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
                   {user?.email}
                 </div>
               </div>

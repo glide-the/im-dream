@@ -219,11 +219,11 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
           style={{
             flex: '0 0 auto',
             width: '460px',
-            background: 'linear-gradient(145deg, #fffef9 0%, #faf8f3 100%)',
-            border: '2px solid #d0c4b0',
+            background: 'linear-gradient(145deg, var(--color-bg-paper) 0%, #faf8f3 100%)',
+            border: '2px solid var(--color-border-paper)',
             borderRadius: '16px',
             padding: '20px',
-            boxShadow: '0 12px 40px rgba(0,0,0,0.15)',
+            boxShadow: '0 12px 40px var(--color-shadow-medium)',
             fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif"
           }}
         >
@@ -243,16 +243,16 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                 fontSize: '20px',
                 padding: '8px 12px',
                 borderRadius: '8px',
-                color: '#666',
+                color: 'var(--color-text-secondary)',
                 transition: 'all 0.2s'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = '#f0ebe0';
-                e.currentTarget.style.color = '#333';
+                e.currentTarget.style.color = 'var(--color-text-body)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#666';
+                e.currentTarget.style.color = 'var(--color-text-secondary)';
               }}
             >
               ‹
@@ -260,7 +260,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
             <div style={{
               fontSize: '20px',
               fontWeight: 600,
-              color: '#2c2c2c',
+              color: 'var(--color-text-primary)',
               letterSpacing: '0.5px'
             }}>
               {currentMonth.toLocaleDateString(dateLocale, { month: 'long', year: 'numeric' })}
@@ -274,16 +274,16 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                 fontSize: '20px',
                 padding: '8px 12px',
                 borderRadius: '8px',
-                color: '#666',
+                color: 'var(--color-text-secondary)',
                 transition: 'all 0.2s'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = '#f0ebe0';
-                e.currentTarget.style.color = '#333';
+                e.currentTarget.style.color = 'var(--color-text-body)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.color = '#666';
+                e.currentTarget.style.color = 'var(--color-text-secondary)';
               }}
             >
               ›
@@ -348,9 +348,9 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                     justifyContent: 'center',
                     transition: 'all 0.2s',
                     boxShadow: day.hasEntries
-                      ? '0 2px 8px rgba(0,0,0,0.08)'
+                      ? '0 2px 8px var(--color-shadow-soft)'
                       : 'none',
-                    color: '#333',
+                    color: 'var(--color-text-body)',
                     fontWeight: day.isToday || isSelected ? 700 : 400
                   }}
                   onMouseEnter={(e) => {
@@ -373,7 +373,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                       height: 28,
                       borderRadius: '50%',
                       border: '2px solid #fb8c00',
-                      color: '#333',
+                      color: 'var(--color-text-body)',
                       background: isSelected ? 'rgba(255,255,255,0.9)' : 'transparent'
                     }}>
                       {day.date}
@@ -457,7 +457,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                 flex: 1,
                 overflow: 'auto',
                 backdropFilter: 'blur(8px)',
-                boxShadow: '0 12px 40px rgba(0,0,0,0.15)'
+                boxShadow: '0 12px 40px var(--color-shadow-medium)'
               }}
             >
               {selectedEntries.length === 0 ? (
@@ -497,7 +497,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                           alignItems: 'center',
                           gap: '12px',
                           boxShadow: isCurrentEntry
-                            ? '0 2px 12px rgba(76, 175, 80, 0.2), inset 0 0 0 2px #4CAF50'
+                            ? '0 2px 12px rgba(76, 175, 80, 0.2), inset 0 0 0 2px var(--color-state-success)'
                             : '0 2px 8px rgba(0,0,0,0.06)',
                           transition: 'all 0.2s',
                           minWidth: 0
@@ -538,7 +538,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                                 textTransform: 'uppercase',
                                 padding: '3px 8px',
                                 borderRadius: '999px',
-                                background: '#4CAF50',
+                                background: 'var(--color-state-success)',
                                 color: '#fff',
                                 fontWeight: 600,
                                 flexShrink: 0
@@ -549,7 +549,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
                           </div>
                           <div style={{
                             fontSize: '14px',
-                            color: '#333',
+                            color: 'var(--color-text-body)',
                             lineHeight: 1.4,
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',

@@ -8,7 +8,7 @@ import './App.css';
 import {
   FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye,
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass,
-  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog,
+  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments,
 } from 'react-icons/fa';
 import TopNavBar from './components/TopNavBar';
 import LeftToolbar from './components/LeftToolbar';
@@ -38,6 +38,8 @@ import { InspirationHint } from './components/Editor/InspirationHint';
 import { useComments } from './hooks/useComments';
 import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
+import ChatView from './components/chat/ChatView';
+import ModelConfigSection from './components/dashboard/ModelConfigSection';
 
 // @@@ Icon map with React Icons
 const iconMap = {
@@ -120,7 +122,7 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
-  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks'>('writing');
+  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat'>('writing');
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
 
@@ -264,6 +266,7 @@ export default function App() {
     { key: 'timeline' as const, label: t('nav.timeline'), icon: FaRegClock },
     { key: 'analysis' as const, label: t('nav.analysis'), icon: FaChartBar },
     { key: 'decks' as const, label: t('nav.decks'), icon: FaLayerGroup },
+    { key: 'chat' as const, label: t('nav.chat'), icon: FaComments },
     { key: 'settings' as const, label: t('nav.settings'), icon: FaCog },
   ];
 
@@ -468,14 +471,14 @@ export default function App() {
         position: fixed;
         top: 70px;
         right: 20px;
-        background: #f44336;
+        background: var(--color-state-error);
         color: white;
         padding: 12px 20px;
         borderRadius: 6px;
         fontSize: 14px;
         fontFamily: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
         zIndex: 10000;
-        boxShadow: 0 4px 12px rgba(0,0,0,0.15);
+        boxShadow: 0 4px 12px var(--color-shadow-medium);
       `;
       document.body.appendChild(toast);
       setTimeout(() => {
@@ -499,14 +502,14 @@ export default function App() {
         position: fixed;
         top: 70px;
         right: 20px;
-        background: #4CAF50;
+        background: var(--color-state-success);
         color: white;
         padding: 12px 20px;
         borderRadius: 6px;
         fontSize: 14px;
         fontFamily: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
         zIndex: 10000;
-        boxShadow: 0 4px 12px rgba(0,0,0,0.15);
+        boxShadow: 0 4px 12px var(--color-shadow-medium);
     `;
       document.body.appendChild(toast);
       setTimeout(() => {
@@ -523,14 +526,14 @@ export default function App() {
         position: fixed;
         top: 70px;
         right: 20px;
-        background: #f44336;
+        background: var(--color-state-error);
         color: white;
         padding: 12px 20px;
         borderRadius: 6px;
         fontSize: 14px;
         fontFamily: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
         zIndex: 10000;
-        boxShadow: 0 4px 12px rgba(0,0,0,0.15);
+        boxShadow: 0 4px 12px var(--color-shadow-medium);
       `;
       document.body.appendChild(toast);
       setTimeout(() => {
@@ -945,7 +948,7 @@ export default function App() {
         height: '100vh',
         fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
         fontSize: '18px',
-        color: '#666'
+        color: 'var(--color-text-secondary)'
       }}>
         Loading...
       </div>
@@ -1006,8 +1009,8 @@ export default function App() {
           padding: '20px'
         }}>
           <div style={{
-            backgroundColor: '#fffef9',
-            border: '2px solid #d0c4b0',
+            backgroundColor: 'var(--color-bg-paper)',
+            border: '2px solid var(--color-border-paper)',
             borderRadius: '12px',
             padding: '32px',
             maxWidth: '500px',
@@ -1017,7 +1020,7 @@ export default function App() {
             <h2 style={{
               margin: '0 0 16px 0',
               fontSize: '24px',
-              color: '#333',
+              color: 'var(--color-text-body)',
               fontWeight: 600
             }}>
               Migrate Your Data?
@@ -1043,7 +1046,7 @@ export default function App() {
                   flex: 1,
                   padding: '12px 20px',
                   border: 'none',
-                  background: isMigrating ? '#ccc' : '#4a90e2',
+                  background: isMigrating ? '#ccc' : 'var(--color-action-link)',
                   borderRadius: '6px',
                   cursor: isMigrating ? 'not-allowed' : 'pointer',
                   fontSize: '16px',
@@ -1056,7 +1059,7 @@ export default function App() {
                   if (!isMigrating) e.currentTarget.style.backgroundColor = '#357abd';
                 }}
                 onMouseLeave={(e) => {
-                  if (!isMigrating) e.currentTarget.style.backgroundColor = '#4a90e2';
+                  if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-action-link)';
                 }}
               >
                 {isMigrating ? 'Migrating...' : 'Migrate Data'}
@@ -1067,13 +1070,13 @@ export default function App() {
                 style={{
                   flex: 1,
                   padding: '12px 20px',
-                  border: '1px solid #d0c4b0',
+                  border: '1px solid var(--color-border-paper)',
                   background: '#fff',
                   borderRadius: '6px',
                   cursor: isMigrating ? 'not-allowed' : 'pointer',
                   fontSize: '16px',
                   fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                  color: '#666',
+                  color: 'var(--color-text-secondary)',
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
@@ -1121,10 +1124,10 @@ export default function App() {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                boxShadow: '0 2px 6px var(--color-shadow-medium)',
                 fontSize: '20px',
                 fontWeight: '300',
-                color: '#666',
+                color: 'var(--color-text-secondary)',
                 transition: 'all 0.2s ease'
               }}
               onMouseEnter={(e) => {
@@ -1183,10 +1186,10 @@ export default function App() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
+                  boxShadow: '0 2px 6px var(--color-shadow-medium)',
                   fontSize: '24px',
                   fontWeight: '300',
-                  color: '#666',
+                  color: 'var(--color-text-secondary)',
                   transition: 'all 0.2s ease'
                 }}
                 onMouseEnter={(e) => {
@@ -1213,11 +1216,11 @@ export default function App() {
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  boxShadow: '0 2px 8px var(--color-shadow-medium)',
                   transition: 'all 0.2s ease',
                   fontSize: '24px',
                   fontWeight: 600,
-                  color: '#333',
+                  color: 'var(--color-text-body)',
                   fontFamily: 'monospace'
                 }}
               >
@@ -1259,7 +1262,7 @@ export default function App() {
                   paddingBottom: isMobile
                     ? `calc(80px + ${mobileNavHeight}px + env(safe-area-inset-bottom, 0px))`
                     : '80px',  // Extra space for smooth scrolling to bottom
-                  backgroundColor: '#fffef9'  // @@@ Cream paper background for notebook lines
+                  backgroundColor: 'var(--color-bg-paper)'  // @@@ Cream paper background for notebook lines
                 }}>
                 <div style={{
                   position: 'relative',
@@ -1329,8 +1332,8 @@ export default function App() {
                               lineHeight: '1.8',
                               fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
                               background: 'transparent',
-                              color: '#333',
-                              caretColor: '#333',
+                              color: 'var(--color-text-body)',
+                              caretColor: 'var(--color-text-body)',
                               position: 'relative',
                               zIndex: 1,
                               marginBottom: '0px',
@@ -1500,9 +1503,9 @@ export default function App() {
                 left: 0,
                 right: 0,
                 padding: isMobile ? '8px 12px' : '10px 20px',
-                borderTop: '1px solid #e0e0e0',
+                borderTop: '1px solid var(--color-border-neutral)',
                 fontSize: isMobile ? '11px' : '12px',
-                color: '#666',
+                color: 'var(--color-text-secondary)',
                 display: 'flex',
                 gap: isMobile ? '12px' : '20px',
                 flexWrap: isMobile ? 'wrap' : 'nowrap',
@@ -1537,7 +1540,7 @@ export default function App() {
                             display: 'block',
                             height: '100%',
                             width: `${Math.round(energyProgress * 100)}%`,
-                            background: '#666',
+                            background: 'var(--color-text-secondary)',
                             borderRadius: '999px',
                             transition: 'width 0.25s ease',
                           }}
@@ -1568,7 +1571,7 @@ export default function App() {
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
-          background: '#f8f0e6',
+          background: 'var(--color-bg-app)',
           display: 'flex',
           overflow: 'hidden'
         }}>
@@ -1598,7 +1601,7 @@ export default function App() {
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
-          background: '#f8f0e6'
+          background: 'var(--color-bg-app)'
         }}>
           <div style={{
             maxWidth: 800,
@@ -1608,7 +1611,7 @@ export default function App() {
               <h2 style={{
                 fontSize: 24,
                 fontWeight: 600,
-                color: '#2c2c2c',
+                color: 'var(--color-text-primary)',
                 marginBottom: 16,
                 fontFamily: 'Georgia, "Times New Roman", serif'
               }}>
@@ -1616,7 +1619,7 @@ export default function App() {
               </h2>
               <div style={{
                 background: 'rgba(255, 255, 255, 0.5)',
-                border: '1px solid #d0c4b0',
+                border: '1px solid var(--color-border-paper)',
                 borderRadius: 8,
                 padding: 24
               }}>
@@ -1624,7 +1627,7 @@ export default function App() {
                   <label style={{
                     fontSize: 14,
                     fontWeight: 500,
-                    color: '#2c2c2c',
+                    color: 'var(--color-text-primary)',
                     marginBottom: 6,
                     display: 'block',
                     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
@@ -1634,7 +1637,7 @@ export default function App() {
                   <p style={{
                     margin: 0,
                     fontSize: 13,
-                    color: '#666',
+                    color: 'var(--color-text-secondary)',
                     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                   }}>
                     {t('settings.language.description')}
@@ -1650,15 +1653,15 @@ export default function App() {
                         onClick={() => handleUILanguageChange(code)}
                         style={{
                           padding: '8px 16px',
-                          background: isActive ? '#2c2c2c' : 'transparent',
-                          color: isActive ? '#fff' : '#666',
-                          border: isActive ? 'none' : '1px solid #d0c4b0',
+                          background: isActive ? 'var(--color-text-primary)' : 'transparent',
+                          color: isActive ? '#fff' : 'var(--color-text-secondary)',
+                          border: isActive ? 'none' : '1px solid var(--color-border-paper)',
                           borderRadius: 6,
                           fontSize: 14,
                           fontWeight: 500,
                           cursor: isActive ? 'default' : 'pointer',
                           fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          boxShadow: isActive ? '0 2px 8px rgba(0,0,0,0.15)' : 'none',
+                          boxShadow: isActive ? '0 2px 8px var(--color-shadow-medium)' : 'none',
                           transition: 'all 0.2s ease'
                         }}
                       >
@@ -1671,7 +1674,7 @@ export default function App() {
                 <p style={{
                   marginTop: 12,
                   fontSize: 12,
-                  color: '#8a7a69',
+                  color: 'var(--color-text-muted)',
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                 }}>
                   {t('settings.language.preview')}
@@ -1680,7 +1683,7 @@ export default function App() {
                 <div style={{
                   marginTop: 20,
                   paddingTop: 16,
-                  borderTop: '1px dashed #d0c4b0'
+                  borderTop: '1px dashed var(--color-border-paper)'
                 }}>
                   <div style={{
                     display: 'flex',
@@ -1692,7 +1695,7 @@ export default function App() {
                       <div style={{
                         fontSize: 14,
                         fontWeight: 500,
-                        color: '#2c2c2c',
+                        color: 'var(--color-text-primary)',
                         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                       }}>
                         Energy Bar / 能量条
@@ -1700,7 +1703,7 @@ export default function App() {
                       <div style={{
                         marginTop: 6,
                         fontSize: 12,
-                        color: '#666',
+                        color: 'var(--color-text-secondary)',
                         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
                       }}>
                         Toggle the energy progress bar in the bottom stats line.
@@ -1714,8 +1717,8 @@ export default function App() {
                         width: 44,
                         height: 24,
                         borderRadius: 999,
-                        border: showEnergyBar ? '1px solid #2c2c2c' : '1px solid #d0c4b0',
-                        background: showEnergyBar ? '#2c2c2c' : 'transparent',
+                        border: showEnergyBar ? '1px solid var(--color-text-primary)' : '1px solid var(--color-border-paper)',
+                        background: showEnergyBar ? 'var(--color-text-primary)' : 'transparent',
                         cursor: 'pointer',
                         position: 'relative',
                         padding: 0,
@@ -1730,12 +1733,33 @@ export default function App() {
                         width: 16,
                         height: 16,
                         borderRadius: '50%',
-                        background: showEnergyBar ? '#fff' : '#8a7a69',
+                        background: showEnergyBar ? '#fff' : 'var(--color-text-muted)',
                         transition: 'all 0.2s ease'
                       }} />
                     </button>
                   </div>
                 </div>
+              </div>
+            </section>
+
+            {/* AI Model Configuration */}
+            <section style={{ marginBottom: 48 }}>
+              <h2 style={{
+                fontSize: 24,
+                fontWeight: 600,
+                color: 'var(--color-text-primary)',
+                marginBottom: 16,
+                fontFamily: 'Georgia, "Times New Roman", serif'
+              }}>
+                AI 模型配置
+              </h2>
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.5)',
+                border: '1px solid var(--color-border-paper)',
+                borderRadius: 8,
+                padding: 24
+              }}>
+                <ModelConfigSection />
               </div>
             </section>
 
@@ -1751,7 +1775,7 @@ export default function App() {
         left: 0,
         right: 0,
         bottom: mobileBottomOffset,
-        background: '#f8f0e6',
+        background: 'var(--color-bg-app)',
         display: currentView === 'timeline' ? 'flex' : 'none',
         overflow: 'hidden'
       }}>
@@ -1768,11 +1792,24 @@ export default function App() {
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
-          background: '#f8f0e6',
+          background: 'var(--color-bg-app)',
           display: 'flex',
           overflow: 'hidden'
         }}>
           <AnalysisView />
+        </div>
+      )}
+
+      {currentView === 'chat' && (
+        <div style={{
+          position: 'fixed',
+          top: viewTopOffset,
+          left: 0,
+          right: 0,
+          bottom: mobileBottomOffset,
+          overflow: 'hidden'
+        }}>
+          <ChatView onNavigateToSettings={() => setCurrentView('settings')} />
         </div>
       )}
 
@@ -1784,8 +1821,8 @@ export default function App() {
           bottom: 0,
           height: `calc(${mobileNavHeight}px + env(safe-area-inset-bottom, 0px))`,
           paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-          background: '#f8f0e6',
-          borderTop: '1px solid #d0c4b0',
+          background: 'var(--color-bg-app)',
+          borderTop: '1px solid var(--color-border-paper)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-around',
@@ -1809,7 +1846,7 @@ export default function App() {
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: 4,
-                  color: isActive ? '#2c2c2c' : '#8a7a69',
+                  color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
                   fontSize: 11,
                   fontWeight: isActive ? 600 : 400,
                   fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -1839,8 +1876,8 @@ export default function App() {
           zIndex: 1000
         }}>
           <div style={{
-            backgroundColor: '#fffef9',
-            border: '2px solid #d0c4b0',
+            backgroundColor: 'var(--color-bg-paper)',
+            border: '2px solid var(--color-border-paper)',
             borderRadius: '8px',
             padding: '32px',
             maxWidth: '400px',
@@ -1850,7 +1887,7 @@ export default function App() {
             <h2 style={{
               margin: '0 0 16px 0',
               fontSize: '20px',
-              color: '#333',
+              color: 'var(--color-text-body)',
               fontWeight: 600
             }}>
               Start Fresh?
@@ -1895,13 +1932,13 @@ export default function App() {
                 onClick={() => setShowWarning(false)}
                 style={{
                   padding: '8px 20px',
-                  border: '1px solid #d0c4b0',
+                  border: '1px solid var(--color-border-paper)',
                   background: '#fff',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '15px',
                   fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                  color: '#333',
+                  color: 'var(--color-text-body)',
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {

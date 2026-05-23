@@ -130,7 +130,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
         alignItems: 'flex-start',
         marginBottom: '16px'
       }}>
-        <Icon size={18} color="#666" style={{ marginTop: '2px', flexShrink: 0 }} />
+        <Icon size={18} color="var(--color-text-secondary)" style={{ marginTop: '2px', flexShrink: 0 }} />
         <div style={{
           color: '#444',
           fontSize: '15px',
@@ -181,7 +181,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
                       alignItems: 'center',
                       justifyContent: 'center',
                       fontSize: '11px',
-                      color: '#666',
+                      color: 'var(--color-text-secondary)',
                       fontWeight: 600,
                       fontFamily: 'system-ui'
                     }}>
@@ -199,7 +199,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
                   </>
                 ) : (
                   <>
-                    <Icon size={18} color="#666" style={{ marginTop: '2px', flexShrink: 0 }} />
+                    <Icon size={18} color="var(--color-text-secondary)" style={{ marginTop: '2px', flexShrink: 0 }} />
                     <div style={{
                       color: '#444',
                       fontSize: '15px',
@@ -255,7 +255,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
           style={{
             padding: '6px 14px',
             backgroundColor: 'transparent',
-            color: isProcessing || !inputValue.trim() ? '#ccc' : '#666',
+            color: isProcessing || !inputValue.trim() ? '#ccc' : 'var(--color-text-secondary)',
             border: '1.5px solid',
             borderColor: isProcessing || !inputValue.trim() ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.2)',
             borderRadius: '6px',

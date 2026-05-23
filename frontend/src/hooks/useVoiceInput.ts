@@ -59,14 +59,14 @@ function showToast(message: string, isError: boolean = false) {
     position: fixed;
     top: 70px;
     right: 20px;
-    background: ${isError ? '#f44336' : '#4CAF50'};
+    background: ${isError ? 'var(--color-state-error)' : 'var(--color-state-success)'};
     color: white;
     padding: 12px 20px;
     border-radius: 6px;
     font-size: 14px;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto;
     z-index: 10000;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    box-shadow: 0 4px 12px var(--color-shadow-medium);
   `;
   document.body.appendChild(toast);
   setTimeout(() => {

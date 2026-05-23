@@ -53,12 +53,12 @@ function ToolButton({
             transform: 'translateY(-50%)',
             padding: '6px 10px',
             background: '#fff',
-            border: '1px solid #e0e0e0',
+            border: '1px solid var(--color-border-neutral)',
             borderRadius: '6px',
-            boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+            boxShadow: '0 4px 12px var(--color-shadow-soft)',
             whiteSpace: 'nowrap',
             fontSize: '12px',
-            color: '#333',
+            color: 'var(--color-text-body)',
             pointerEvents: 'none',
             zIndex: 5,
           }}
@@ -97,7 +97,7 @@ export default function LeftToolbar({
         width: '40px',
         margin: '30px auto 0',
         backgroundColor: '#fff',
-        border: '1px solid #e0e0e0',
+        border: '1px solid var(--color-border-neutral)',
         borderRadius: '8px',
         boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
         display: 'flex',
@@ -135,21 +135,21 @@ export default function LeftToolbar({
       <ToolButton
         label="Insert chat"
         onClick={onInsertAgent}
-        icon={<span style={{ fontSize: '20px', fontWeight: 600, color: '#333', fontFamily: 'monospace' }}>@</span>}
+        icon={<span style={{ fontSize: '20px', fontWeight: 600, color: 'var(--color-text-body)', fontFamily: 'monospace' }}>@</span>}
       />
 
       <ToolButton
         label={isAligned ? 'Unpin comments' : 'Align comments'}
         onClick={onToggleAlign}
         active={isAligned}
-        icon={<FaAlignRight size={18} color={isAligned ? '#1976d2' : '#333'} />}
+        icon={<FaAlignRight size={18} color={isAligned ? '#1976d2' : 'var(--color-text-body)'} />}
       />
 
       <ToolButton
         label="Voice input"
         onClick={onToggleTalking}
         active={isTalking}
-        icon={<FaMicrophone size={18} color={isTalking ? '#1976d2' : '#333'} />}
+        icon={<FaMicrophone size={18} color={isTalking ? '#1976d2' : 'var(--color-text-body)'} />}
       />
     </div>
   );
