@@ -143,7 +143,7 @@ export default function ChatView({
     return (
       <WorkspaceProvider>
         <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', color: 'var(--color-text-muted)' }}>
-          {isCreatingThread ? 'Starting chat…' : 'Initialising…'}
+          {isCreatingThread ? 'Starting chat…' : 'Initializing…'}
         </div>
       </WorkspaceProvider>
     );
