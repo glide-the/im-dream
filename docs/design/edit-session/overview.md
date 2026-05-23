@@ -268,7 +268,7 @@ flowchart LR
     U5[选择情感状态]
     U6[星标 / 杀死评论]
     U7[发送评论聊天消息]
-    U8[@触发 Voice 选择]
+    U8["＠触发 Voice 选择"]
   end
 
   subgraph EditorUI["🖥️ Editor UI / Hooks"]

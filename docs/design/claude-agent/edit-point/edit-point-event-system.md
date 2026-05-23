@@ -376,7 +376,7 @@ Agent 意图
 flowchart LR
   subgraph Human["👤 Human User"]
     HU1[键入文本 / 粘贴]
-    HU2[选择 Voice @触发]
+    HU2["选择 Voice ＠触发"]
     HU3[评论反馈 star/kill]
     HU4[评论聊天]
     HU5[Approve / Reject\nAgent 操作]
