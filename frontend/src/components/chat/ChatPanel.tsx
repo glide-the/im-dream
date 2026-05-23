@@ -60,6 +60,7 @@ interface ChatPanelProps {
   queuedAttachments?: Attachment[];
   queuedPromptNonce?: number;
   openFileDialogSignal?: number;
+  onConversationStart?: () => void;
 }
 
 function mapConversationToUiMessages(conversationMessages: ConversationMessage[]): UIMessage[] {
@@ -97,6 +98,7 @@ export default function ChatPanel({
   queuedAttachments = [],
   queuedPromptNonce,
   openFileDialogSignal,
+  onConversationStart,
 }: ChatPanelProps) {
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
@@ -247,6 +249,7 @@ export default function ChatPanel({
     lastQueuedNonceRef.current = queuedPromptNonce;
 
     void (async () => {
+      onConversationStart?.();
       setCurrentToolChoice('auto');
       pendingDataRef.current = {
         rawAttachments: queuedAttachments,
@@ -321,6 +324,7 @@ export default function ChatPanel({
           contextCustomers={contextCustomers}
           openFileDialogSignal={openFileDialogSignal}
           onSendMessage={async (message, uploadedFiles = [], customerIds = [], toolChoice = 'auto') => {
+            onConversationStart?.();
             setCurrentToolChoice(toolChoice);
             pendingDataRef.current = {
               rawAttachments: uploadedFiles.map(toAttachment),
