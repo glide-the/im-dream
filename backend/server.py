@@ -31,7 +31,7 @@ import auth
 SUPPORTED_LANGUAGES = {"en", "zh"}
 DEFAULT_LANGUAGE = "en"
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
-PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/ink-and-memory/")
+PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/")
 
 
 def normalize_language_code(language: Optional[str]) -> str:
