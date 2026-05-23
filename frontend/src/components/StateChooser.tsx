@@ -147,7 +147,7 @@ export default function StateChooser({
             {/* Date */}
             <div style={{
               fontSize: 13,
-              color: '#666',
+              color: 'var(--color-text-secondary)',
               fontWeight: 400
             }}>
               {dateString}
@@ -163,17 +163,17 @@ export default function StateChooser({
                 padding: '4px 12px',
                 background: 'rgba(255,255,255,0.6)',
                 borderRadius: 6,
-                border: '1px solid rgba(0,0,0,0.08)',
+                border: '1px solid var(--color-shadow-soft)',
                 transition: 'all 0.2s',
                 animation: shouldAnimate ? 'stateHighlight 0.6s ease-out' : 'none'
               }}
               onMouseEnter={(e) => {
                 e.currentTarget.style.background = 'rgba(255,255,255,0.9)';
-                e.currentTarget.style.borderColor = 'rgba(0,0,0,0.15)';
+                e.currentTarget.style.borderColor = 'var(--color-shadow-medium)';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.background = 'rgba(255,255,255,0.6)';
-                e.currentTarget.style.borderColor = 'rgba(0,0,0,0.08)';
+                e.currentTarget.style.borderColor = 'var(--color-shadow-soft)';
               }}
             >
             {/* Shrunken state icon */}
@@ -184,7 +184,7 @@ export default function StateChooser({
             <span style={{
               fontSize: 14,
               fontWeight: 500,
-              color: '#333'
+              color: 'var(--color-text-body)'
             }}>
               {selectedStateData.name}
             </span>
@@ -212,7 +212,7 @@ export default function StateChooser({
           <h1 style={{
             fontSize: 48,
             fontWeight: 300,
-            color: '#333',
+            color: 'var(--color-text-body)',
             marginBottom: 60,
             textAlign: 'center',
             letterSpacing: '0.05em',

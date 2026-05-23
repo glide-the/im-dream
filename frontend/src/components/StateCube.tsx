@@ -574,9 +574,9 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
             pointerEvents: 'none'
           }}>
             <svg width="80" height="80" viewBox="0 0 100 100" style={{ opacity: 0.6 }}>
-              <rect x="30" y="45" width="40" height="35" rx="4" fill="none" stroke="#666" strokeWidth="6"/>
-              <path d="M 35 45 V 35 Q 35 20 50 20 Q 65 20 65 35 V 45" fill="none" stroke="#666" strokeWidth="6" strokeLinecap="round"/>
-              <circle cx="50" cy="62" r="4" fill="#666"/>
+              <rect x="30" y="45" width="40" height="35" rx="4" fill="none" stroke="var(--color-text-secondary)" strokeWidth="6"/>
+              <path d="M 35 45 V 35 Q 35 20 50 20 Q 65 20 65 35 V 45" fill="none" stroke="var(--color-text-secondary)" strokeWidth="6" strokeLinecap="round"/>
+              <circle cx="50" cy="62" r="4" fill="var(--color-text-secondary)"/>
             </svg>
           </div>
         )}

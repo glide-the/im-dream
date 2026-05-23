@@ -300,12 +300,12 @@ export default function DeckManager({ onUpdate }: Props) {
         justifyContent: 'center',
         width: '100%',
         minHeight: '100vh',
-        background: '#f8f0e6'
+        background: 'var(--color-bg-app)'
       }}>
         <style>{spinnerKeyframes}</style>
         <div style={{
           fontSize: 18,
-          color: '#666',
+          color: 'var(--color-text-secondary)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -317,7 +317,7 @@ export default function DeckManager({ onUpdate }: Props) {
             height: '18px',
             borderRadius: '50%',
             border: '2px solid rgba(0,0,0,0.1)',
-            borderTopColor: '#666',
+            borderTopColor: 'var(--color-text-secondary)',
             animation: 'deck-spin 0.9s linear infinite'
           }} />
           Loading decks…
@@ -334,7 +334,7 @@ export default function DeckManager({ onUpdate }: Props) {
         alignItems: 'center',
         justifyContent: 'center',
         height: '100vh',
-        background: '#f8f0e6',
+        background: 'var(--color-bg-app)',
         gap: 16
       }}>
         <div style={{ fontSize: 18, color: '#e74c3c' }}>❌ {error}</div>
@@ -342,7 +342,7 @@ export default function DeckManager({ onUpdate }: Props) {
           onClick={() => loadDecks()}
           style={{
             padding: '8px 16px',
-            background: '#2c2c2c',
+            background: 'var(--color-text-primary)',
             color: '#fff',
             border: 'none',
             borderRadius: 6,
@@ -358,20 +358,20 @@ export default function DeckManager({ onUpdate }: Props) {
   const activeDeck = decks.find(d => d.id === activeDeckId) || null;
 
   return (
-    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#f8f0e6', overflow: 'hidden' }}>
+    <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-app)', overflow: 'hidden' }}>
       {/* Scrollable Content with embedded header */}
       <div ref={scrollContainerRef} style={{ flex: 1, overflowY: 'auto', padding: 'clamp(16px, 4vw, 32px)' }}>
         <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
           {/* Embedded Header */}
           <div style={{
             padding: '0 0 24px 0',
-            borderBottom: '2px solid #d0c4b0'
+            borderBottom: '2px solid var(--color-border-paper)'
           }}>
             <h1 style={{
               margin: 0,
               fontSize: 28,
               fontWeight: 700,
-              color: '#2c2c2c',
+              color: 'var(--color-text-primary)',
               fontFamily: 'Georgia, serif',
               letterSpacing: '-0.5px'
             }}>
@@ -380,7 +380,7 @@ export default function DeckManager({ onUpdate }: Props) {
             <p style={{
               margin: '6px 0 0',
               fontSize: 14,
-              color: '#666',
+              color: 'var(--color-text-secondary)',
               fontStyle: 'italic'
             }}>
               {t('deck.subheading')}
@@ -427,7 +427,7 @@ export default function DeckManager({ onUpdate }: Props) {
             margin: '8px 0',
             fontSize: '16px',
             fontWeight: '500',
-            color: '#2c2c2c'
+            color: 'var(--color-text-primary)'
           }}>
             {t('deck.sections.myDecks')}
           </h3>
@@ -441,7 +441,7 @@ export default function DeckManager({ onUpdate }: Props) {
             {decks.map(deck => {
               const isSystem = !!deck.is_system;
               const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-              const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || '#4a90e2';
+              const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
               const voiceCount = deck.voice_count || deck.voices?.length || 0;
               const voiceCountLabel = t('deck.labels.voiceCount', { count: voiceCount });
 
@@ -451,9 +451,9 @@ export default function DeckManager({ onUpdate }: Props) {
                   onClick={() => toggleDeck(deck.id)}
                   style={{
                     background: '#fff',
-                    border: `2px solid ${isSystem ? '#d0c4b0' : colorHex}`,
+                    border: `2px solid ${isSystem ? 'var(--color-border-paper)' : colorHex}`,
                     borderRadius: 10,
-                    boxShadow: '0 3px 10px rgba(0,0,0,0.08)',
+                    boxShadow: '0 3px 10px var(--color-shadow-soft)',
                     padding: 12,
                     display: 'flex',
                     flexDirection: 'column',
@@ -470,7 +470,7 @@ export default function DeckManager({ onUpdate }: Props) {
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 3px 10px rgba(0,0,0,0.08)';
+                    e.currentTarget.style.boxShadow = '0 3px 10px var(--color-shadow-soft)';
                   }}
                 >
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -507,7 +507,7 @@ export default function DeckManager({ onUpdate }: Props) {
 
                     <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <div style={{ fontSize: 17, fontWeight: 700, color: '#2c2c2c', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <div style={{ fontSize: 17, fontWeight: 700, color: 'var(--color-text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {deck.name}
                         </div>
                         {isSystem && (
@@ -635,13 +635,13 @@ export default function DeckManager({ onUpdate }: Props) {
           </div>
 
           {/* @@@ Community Decks Section */}
-          <hr style={{ margin: '32px 0', border: '1px solid #d0c4b0' }} />
+          <hr style={{ margin: '32px 0', border: '1px solid var(--color-border-paper)' }} />
 
           <h3 style={{
             margin: '16px 0',
             fontSize: '16px',
             fontWeight: '500',
-            color: '#2c2c2c'
+            color: 'var(--color-text-primary)'
           }}>
             {t('deck.sections.community', { count: communityDecks.length })}
           </h3>
@@ -665,7 +665,7 @@ export default function DeckManager({ onUpdate }: Props) {
             }}>
               {communityDecks.map(deck => {
                 const Icon = iconMap[deck.icon as keyof typeof iconMap] || iconMap.brain;
-                const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || '#4a90e2';
+                const colorHex = COLORS[deck.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
 
                 return (
                   <div
@@ -675,7 +675,7 @@ export default function DeckManager({ onUpdate }: Props) {
                       border: `2px solid ${colorHex}`,
                       borderRadius: 10,
                       padding: 12,
-                      boxShadow: '0 3px 10px rgba(0,0,0,0.08)',
+                      boxShadow: '0 3px 10px var(--color-shadow-soft)',
                       transition: 'transform 0.15s, box-shadow 0.15s',
                       display: 'flex',
                       flexDirection: 'column',
@@ -690,7 +690,7 @@ export default function DeckManager({ onUpdate }: Props) {
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
-                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 3px 10px rgba(0,0,0,0.08)';
+                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 3px 10px var(--color-shadow-soft)';
                     }}
                   >
                     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -713,7 +713,7 @@ export default function DeckManager({ onUpdate }: Props) {
                         <div style={{
                           fontSize: 17,
                           fontWeight: 700,
-                          color: '#2c2c2c',
+                          color: 'var(--color-text-primary)',
                           marginBottom: 4,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',
@@ -812,7 +812,7 @@ export default function DeckManager({ onUpdate }: Props) {
               padding: '24px',
               borderRadius: '8px',
               maxWidth: '400px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
+              boxShadow: '0 4px 12px var(--color-shadow-medium)'
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -834,7 +834,7 @@ export default function DeckManager({ onUpdate }: Props) {
                 style={{
                   padding: '8px 16px',
                   background: '#ccc',
-                  color: '#2c2c2c',
+                  color: 'var(--color-text-primary)',
                   border: 'none',
                   borderRadius: '4px',
                   cursor: 'pointer',

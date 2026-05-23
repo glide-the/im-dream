@@ -255,7 +255,7 @@ export default function AnalysisView() {
       <div style={{
         width: '100%',
         height: '100%',
-        background: 'linear-gradient(180deg, #f8f0e6 0%, #ede3d5 100%)',
+        background: 'linear-gradient(180deg, var(--color-bg-app) 0%, #ede3d5 100%)',
         fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
         position: 'relative',
         overflow: 'hidden',
@@ -333,7 +333,7 @@ export default function AnalysisView() {
       width: '100%',
       height: '100%',
       overflowY: 'auto',
-      background: 'linear-gradient(180deg, #f8f0e6 0%, #ede3d5 100%)',
+      background: 'linear-gradient(180deg, var(--color-bg-app) 0%, #ede3d5 100%)',
       fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
       padding: isMobile ? '1.75rem 1rem 2.5rem' : '3rem 2rem',
       position: 'relative'
@@ -462,7 +462,7 @@ export default function AnalysisView() {
                       <div style={{
                         fontSize: '10px',
                         fontWeight: 600,
-                        color: '#4CAF50',
+                        color: 'var(--color-state-success)',
                         background: 'rgba(76,175,80,0.1)',
                         padding: '4px 8px',
                         borderRadius: '8px',
