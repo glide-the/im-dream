@@ -2332,6 +2332,70 @@ async def claude_agent_delete_thread(
     return {"ok": True}
 
 
+# ========== Claude Agent Thread Management ==========
+
+
+class CreateThreadResponseBody(BaseModel):
+    thread_id: str
+
+
+@app.post("/api/claude-agent/threads", response_model=CreateThreadResponseBody)
+async def claude_agent_create_thread(
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a new chat thread and return its ``thread_id``.
+
+    Call this endpoint when the user clicks "New Chat".  The returned
+    ``thread_id`` must be included in every subsequent
+    ``POST /api/claude-agent`` request for that conversation.
+    """
+    user_id = current_user["user_id"]
+    thread_id = database.create_chat_thread(user_id)
+    return {"thread_id": thread_id}
+
+
+@app.get("/api/claude-agent/threads")
+async def claude_agent_list_threads(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return all chat threads for the authenticated user, newest first."""
+    user_id = current_user["user_id"]
+    threads = database.list_chat_threads(user_id)
+    return {"threads": threads}
+
+
+@app.get("/api/claude-agent/threads/{thread_id}/messages")
+async def claude_agent_thread_messages(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return all persisted messages for *thread_id* in chronological order.
+
+    Returns 404 if the thread does not exist or belongs to another user.
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    messages = database.list_chat_messages(thread_id)
+    return {"thread": thread, "messages": messages}
+
+
+@app.delete("/api/claude-agent/threads/{thread_id}")
+async def claude_agent_delete_thread(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a chat thread and all its messages."""
+    user_id = current_user["user_id"]
+    deleted = database.delete_chat_thread(thread_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    # Also close the in-memory session if it is still alive
+    claude_agent_thread_factory.close_thread(thread_id)
+    return {"ok": True}
+
+
 @app.post("/api/claude-agent/message-latency")
 async def claude_agent_message_latency(
     body: dict,

@@ -139,34 +139,47 @@ export default function ChatPanel({
 
   useEffect(() => {
     let active = true;
-    const targetId = contextCustomerId ?? threadId;
+    // If contextCustomerId is set, use the legacy conversations endpoint.
+    // Otherwise load persisted messages from the chat thread history.
+    const useThreadHistory = !contextCustomerId;
     setIsConversationLoading(true);
     void (async () => {
       try {
-        const response = await fetch(`/api/conversations?customerId=${encodeURIComponent(targetId)}`);
+        let url: string;
+        if (useThreadHistory) {
+          url = `/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`;
+        } else {
+          url = `/api/conversations?customerId=${encodeURIComponent(contextCustomerId!)}`;
+        }
+        const response = await fetch(url);
         if (!response.ok) {
-          if (active) {
-            setConversationMessages([]);
-          }
+          if (active) setConversationMessages([]);
           return;
         }
         const payload = (await response.json()) as ConversationResponse;
         if (active) {
-          setConversationMessages(normalizeConversationResponse(payload));
+          if (useThreadHistory) {
+            // Thread history returns {thread, messages: [{id, role, content, parts_json, created_at}]}
+            const msgs = (payload as unknown as { messages?: Array<{ id: string; role: string; content: string; parts_json?: string; created_at: string }> }).messages ?? [];
+            const mapped: ConversationMessage[] = msgs.map((m) => {
+              let parts = [{ type: 'text' as const, text: m.content }];
+              if (m.parts_json) {
+                try { parts = JSON.parse(m.parts_json) as typeof parts; } catch { /* fallback */ }
+              }
+              return { id: m.id, role: m.role as UIMessage['role'], parts, created_at: m.created_at };
+            });
+            setConversationMessages(mapped);
+          } else {
+            setConversationMessages(normalizeConversationResponse(payload));
+          }
         }
       } catch {
-        if (active) {
-          setConversationMessages([]);
-        }
+        if (active) setConversationMessages([]);
       } finally {
-        if (active) {
-          setIsConversationLoading(false);
-        }
+        if (active) setIsConversationLoading(false);
       }
     })();
-    return () => {
-      active = false;
-    };
+    return () => { active = false; };
   }, [contextCustomerId, threadId]);
 
   const getPendingData = () => pendingDataRef.current;
