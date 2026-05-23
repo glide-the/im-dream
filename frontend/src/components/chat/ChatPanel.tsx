@@ -23,6 +23,8 @@ import AIInputDock, {
 } from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
 
+const API_BASE = '/ink-and-memory';
+
 interface SystemConfigData {
   provider?: string;
   model?: string;
@@ -93,7 +95,7 @@ export default function ChatPanel({
     let active = true;
     void (async () => {
       try {
-        const response = await fetch('/api/system-config');
+        const response = await fetch(`${API_BASE}/api/system-config`);
         if (!response.ok) {
           return;
         }
@@ -115,7 +117,7 @@ export default function ChatPanel({
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
     id: threadId,
     transport: new DefaultChatTransport({
-      api: '/api/claude-agent',
+      api: `${API_BASE}/api/claude-agent`,
       prepareSendMessagesRequest: ({ messages: outgoingMessages, body, id }) => {
         const lastMessage = outgoingMessages.at(-1) as UIMessage | undefined;
         if (!lastMessage) {

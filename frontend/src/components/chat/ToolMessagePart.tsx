@@ -3,6 +3,8 @@ import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 
+const API_BASE = '/ink-and-memory';
+
 type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 
 function IconTool() {
@@ -29,7 +31,7 @@ async function confirmToolCall(
   reason?: string,
   answers?: Record<string, unknown>,
 ) {
-  const response = await fetch('/api/claude-agent/tool-confirm', {
+  const response = await fetch(`${API_BASE}/api/claude-agent/tool-confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ toolCallId, approved, reason, answers }),
