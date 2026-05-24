@@ -1,4 +1,5 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentService 模块设计.md — 路径已适配 Ink & Memory 工程规范。
+> **[Sync] 2026-05-24**: 类图与 SSE 事件表对齐当前 service.py：`ClaudeAgentRunRequest` 字段替换为 Ink & Memory 实际字段；`ClaudeAgentService` 移除 `has_pending_tool` / `pending_tool_ids`（Pawkeyland 专属）；`_TurnExecution.turn_context` 字段名修正；SSE 事件表移除 `reasoning-*`（未启用 thinking）、`tool-approval-request.approvalId`（I&M 不发）；新增 `on_tool_event` 改为 `event.type` 分发注记、`_TurnContext` 新增 `registered_tool_call_ids` / `emitted_tool_input_ids`。
 
 # ClaudeAgentService 模块设计
 
@@ -45,37 +46,38 @@ backend/claude_agent/
 classDiagram
     class ClaudeAgentRunRequest {
         user_id: str
-        pet_id: str
-        persona_id: str
+        thread_id: str
         message: str
         resume: bool
         tool_choice: ToolChoiceMode
         model: str|None
-        system_prompt: str|None
         max_turns: int
         cwd: str|None
-        persona_record: dict
-        +++ conversation_id 已移除 +++
-        +++ session_id 由 Runner 返回后绑定到 DB +++
+        extra: dict
     }
 
     class ClaudeAgentService {
-        -_store: ToolConfirmationStore
-        +assemble_context(request, *, state, queue) _TurnExecution
+        -_context_builder: ClaudeAgentContextBuilder
+        +assemble_context(request, *, state, queue, runner) _TurnExecution
         +execute_session(execution) None
-        +confirm_tool(session_id, tool_call_id, approved, reason, answers) bool
-        +has_pending_tool(tool_call_id) bool
-        +pending_tool_ids() list[str]
+        +confirm_tool(state, tool_call_id, approved, reason, answers) bool
     }
 
     class _TurnExecution {
         request: ClaudeAgentRunRequest
-        state: AgentRunState|None
-        queue: asyncio.Queue
-        ctx: _TurnContext
-        runner: ClaudeAgentRunner|None
+        state: AgentRunState
+        runner: ClaudeAgentRunner
         run_options: AgentRunOptions
-        callbacks: AgentStreamingCallbacks
+        turn_context: _TurnContext
+    }
+
+    class _TurnContext {
+        queue: asyncio.Queue
+        confirmation_store: ToolConfirmationStore
+        text_started: bool
+        full_text_accumulator: list[str]
+        registered_tool_call_ids: set
+        emitted_tool_input_ids: set
     }
 
     class ClaudeAgentThreadFactory {
@@ -116,8 +118,8 @@ classDiagram
 
 `ClaudeAgentService` 不再暴露 all-in-one orchestrator，只提供两个 phase-aware 方法：
 
-- **`assemble_context(request, *, state, queue)`** — Phase 1 单一所有者。完成 DB 会话加载、`_TurnContext` 构建、5 个 `AgentStreamingCallbacks` 闭包、初始 `message-metadata`、首轮 Mem0 preflight、`resolved_identity` / `persisted_pet_info` / `mem0_user_id` / `system_prompt` / `cwd` 五段 intrinsic 享元短路、`user_message` 构建、`AgentRunOptions` 构建，并把 extrinsic 三件套（`user_message` / `callbacks` / `run_options`）+ `turn_context` 写回 `state`。返回 `_TurnExecution` 载体，`runner` 字段为 `None`，由 Phase 2 填入。
-- **`execute_session(execution)`** — Phase 3 纯消费者。要求 `execution.runner` 已填入；驱动 `runner.run_streaming(opts, callbacks)`、emit `message-final` / `finish` / `error`、持久化 `claude_message` 行 + `chat_session` 元数据。`execution.runner is None` 时抛 `RuntimeError`，让 4 阶段边界显式失败。
+- **`assemble_context(request, *, state, queue, runner)`** — Phase 1 单一所有者（Ink & Memory）。首轮调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id)` 构建 system prompt，写入 `state.system_prompt`（享元缓存）；后续轮复用缓存，跳过重建。构建 `user_message`、`AgentRunOptions`、`_TurnContext`（包含 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合），发射初始 `message-metadata` SSE。返回 `_TurnExecution` 载体，`runner` 字段由 Phase 2 填入。
+- **`execute_session(execution)`** — Phase 3 纯消费者。构造 5 个 `AgentStreamingCallbacks` 闭包（`on_text_delta`、`on_text_done`、`on_tool_event`、`on_tool_confirmation_request`、`on_error`），驱动 `runner.run_streaming(opts, callbacks)`，emit `message-final` / `finish` / `error`，持久化用户和助手消息到 `chat_messages` 表。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -272,28 +274,31 @@ sequenceDiagram
 
 ---
 
-## 7. SSE 事件类型
+## 7. SSE 事件类型（Ink & Memory 实际发射）
 
 | 事件类型 | 触发场景 | 关键字段 |
 |---|---|---|
-| `message-metadata` | 流开始 / 结束 / tool_progress | `toolChoice`, `sessionId`, `agentContractVersion`, `toolCount`, `unstableData` |
-| `text-start` | 首个文本 delta 前 / tool_use_summary 汇总文本 | `id` |
-| `text-delta` | 文本增量 / 汇总文本内容 | `id`, `delta` |
-| `text-end` | 文本块结束 | `id` |
-| `reasoning-start` | thinking_delta 首帧 | `id` |
-| `reasoning-delta` | thinking_delta 增量 | `id`, `delta` |
-| `reasoning-end` | 思考块结束 | `id` |
-| `tool-input-start` | 工具调用开始 | `toolCallId`, `toolName` |
-| `tool-input-available` | 工具输入完整 | `toolCallId`, `toolName`, `input`（动画事件时 `input = {act, duration, interaction}`） |
-| `tool-approval-request` | 交互工具确认等待 | `approvalId`, `toolCallId` |
-| `tool-output-available` | 工具执行结果 | `toolCallId`, `output` |
-| `finish` | 会话完成 | `finishReason` |
-| `error` | 任意错误 | `errorText` |
+| `message-metadata` | 流开始（Phase 1） | `sessionId`, `turnIndex` |
+| `text-start` | 首个文本 delta 前（`on_text_delta` 内自动发射） | `id`（固定 `"text-0"`） |
+| `text-delta` | 文本增量 | `id`, `delta` |
+| `text-end` | 文本块结束（`on_text_done` 或工具事件前） | `id` |
+| `reasoning-start` | thinking 块开始（`thinking_delta` / `thinking` 触发） | `id` |
+| `reasoning-delta` | thinking 内容增量 | `id`, `delta` |
+| `reasoning-end` | thinking 块结束（`content_block_stop` / `thinking` 触发） | `id` |
+| `tool-input-start` | 工具调用开始（`tool_use_start` / `tool_input_available` 触发） | `toolCallId`, `toolName` |
+| `tool-input-available` | 工具输入完整（`tool_input_available` 触发） | `toolCallId`, `toolName`, `input` |
+| `tool-approval-request` | 交互工具等待确认（`tool_choice="manual"`） | `toolCallId`, `toolName`, `input` |
+| `tool-output-available` | 工具执行结果（`tool_result` 触发） | `toolCallId`, `output`, `isError` |
+| `message-final` | 流成功结束前 | `text`, `usage`, `sessionId` |
+| `finish` | 流结束 | `finishReason`（`"stop"` 或 `"error"`） |
+| `error` | 任意异常 | `errorText` |
 
-> `tool_use_summary`（ToolEventPayload.type）：多工具执行后汇总文本，通过 `text-start/delta/end` 渲染；
-> `tool_progress`（ToolEventPayload.type）：长时工具进度更新，通过 `message-metadata.unstableData` 下发。
+> **`on_tool_event` 分发模式**（2026-05-24 对齐 Pawkeyland）：回调按 `ToolEventPayload.type` 分发（`tool_use_start`、`tool_input_available`、`tool_result`），而非旧的 `payload.state` 分发。`result`、`thinking`、`message_*`、`tool_progress` 等类型在 Ink & Memory 中明确忽略。
+>
+> **与 Pawkeyland 差异**：Pawkeyland 还额外发射 `reasoning-start/delta/end`（thinking 模式）、`message-metadata.unstableData`、`tool-approval-request.approvalId`，Ink & Memory 均未启用。详细对比见 [`claude-agent-api-contracts.md §4.5.3`](./claude-agent-api-contracts.md)。
 
 ---
+
 
 ## 10. 上下文拼接扩展
 
@@ -322,10 +327,10 @@ async def _shutdown_thread_factory() -> None:
     await claude_agent_thread_factory.aclose()
 
 @app.post("/api/claude-agent")
-async def claude_agent(user_id: str, pet_id: str, message: str):
+async def claude_agent(user_id: str, thread_id: str, message: str):
     request = ClaudeAgentRunRequest(
         user_id=user_id,
-        pet_id=pet_id,
+        thread_id=thread_id,
         message=message,
         max_turns=10,
         tool_choice="auto",
