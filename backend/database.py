@@ -2068,14 +2068,21 @@ def save_chat_message(
     role: str,
     content: str,
     parts_json: Optional[str] = None,
+    message_id: Optional[str] = None,
 ) -> str:
-    """Persist one chat message. Returns the new message_id."""
+    """Persist one chat message. Returns the message_id.
+
+    If *message_id* is provided it is used verbatim (aligned with the
+    Vercel AI SDK message ID sent by the frontend), which keeps the stored
+    IDs stable across reloads.  If omitted a fresh UUID is generated.
+    """
     import uuid
-    message_id = str(uuid.uuid4())
+    if not message_id:
+        message_id = str(uuid.uuid4())
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO chat_message (id, thread_id, role, content, parts_json) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO chat_message (id, thread_id, role, content, parts_json) VALUES (?, ?, ?, ?, ?)",
             (message_id, thread_id, role, content, parts_json),
         )
         _touch_chat_thread(db, thread_id)

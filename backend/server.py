@@ -2245,6 +2245,8 @@ async def claude_agent_stream(
         model=body.model,
         max_turns=body.max_turns,
         cwd=body.cwd,
+        message_id=body.message.get("id") if isinstance(body.message, dict) else None,
+        message_parts=body.message.get("parts") if isinstance(body.message, dict) else None,
     )
 
     async def generate():

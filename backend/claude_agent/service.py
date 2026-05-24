@@ -87,6 +87,9 @@ class ClaudeAgentRunRequest:
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
+    # Original AI-SDK message fields (for aligned DB persistence)
+    message_id: Optional[str] = None
+    message_parts: Optional[list] = None
 
 
 # ---------------------------------------------------------------------------
@@ -246,17 +249,37 @@ class ClaudeAgentService:
     async def _persist_turn(
         self, execution: "_TurnExecution", assistant_text: str
     ) -> None:
-        """Save user and assistant messages to the database after a successful turn."""
+        """Save user and assistant messages to the database after a successful turn.
+
+        Aligned with the better-chatbot pattern: the user message is stored
+        with its original AI-SDK message ID and full ``parts_json`` so that
+        file attachments and other non-text parts survive a page reload.
+        """
         import asyncio
         import database
 
         thread_id = execution.request.thread_id
         user_text = execution.request.message
+        user_message_id = execution.request.message_id  # original AI-SDK ID or None
+        user_parts = execution.request.message_parts     # original parts list or None
 
         loop = asyncio.get_running_loop()
 
         def _save() -> None:
-            database.save_chat_message(thread_id, "user", user_text)
+            # Serialise user message parts for storage (mirrors better-chatbot
+            # convertToSavePart: store parts as-is so they are restored on reload).
+            parts_json: Optional[str] = None
+            if user_parts:
+                try:
+                    parts_json = json.dumps(user_parts, ensure_ascii=False)
+                except Exception:
+                    parts_json = None
+
+            database.save_chat_message(
+                thread_id, "user", user_text,
+                parts_json=parts_json,
+                message_id=user_message_id,
+            )
             database.save_chat_message(thread_id, "assistant", assistant_text)
             # Auto-fill thread title from first user message if still NULL
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))

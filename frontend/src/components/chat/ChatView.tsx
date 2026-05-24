@@ -155,6 +155,10 @@ export default function ChatView({
     const id = await createThread();
     setIsCreatingThread(false);
     if (id) {
+      // Reset messages before switching so the new ChatPanel (remounted via
+      // key={activeThreadId}) never sees stale messages from the previous thread.
+      setThreadMessages(null);
+      setIsLoadingMessages(false);
       setActiveThreadId(id);
       setHasConversationStarted(false);
       setQueuedPrompt('');
@@ -165,6 +169,11 @@ export default function ChatView({
   }, [onNewChat, reloadThreads]);
 
   const handleSelectThread = useCallback((threadId: string) => {
+    // Reset messages synchronously so the incoming ChatPanel (remounted via
+    // key={activeThreadId}) starts with initialMessages=undefined and doesn't
+    // pick up the previous thread's messages before the fetch completes.
+    setThreadMessages(null);
+    setIsLoadingMessages(true);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
     setThreadSidebarOpen(false);
