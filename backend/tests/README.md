@@ -106,7 +106,7 @@ python tests/test_server_claude_agent.py -v
 - ✅ `session_id` 从 ResultMessage 提取
 - ✅ StreamEvent text_delta / thinking_delta 被 runner 分发
 - ✅ `INK_AGENT_MEM0_*` / `INK_AGENT_ENABLE_MEMORY_MCP` 优先于旧 Mem0 env 别名
-- ✅ `ANTHROPIC_API_KEY` 作为 Claude Code SDK auth 诊断依据
+- ✅ `ANTHROPIC_AUTH_TOKEN` 作为 Claude Code SDK auth 诊断依据
 - ✅ SDK dotenv helper 只向子进程转发 Claude Code / Anthropic 相关 key
 
 ### Claude Agent — Thread Factory (`test_claude_agent_thread_factory.py`)

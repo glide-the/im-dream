@@ -27,6 +27,7 @@ def _drop_unsupported_agent_env() -> None:
         "INK_AGENT_MAX_TURNS",
         "INK_AGENT_CONTEXT_SESSIONS",
     }
+    os.environ.pop("ANTHROPIC_API_KEY", None)
     for key in list(os.environ):
         if key.startswith("INK_AGENT_MEM0_") or key in allowed_ink_names:
             continue

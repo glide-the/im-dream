@@ -8,7 +8,7 @@
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
 #                    Adapted: module import path backend/libs/claude_agent_kit/runner.py.
 # [Sync] 2026-05-24: cover INK_AGENT_MEM0_* aliases for memory MCP/hook env.
-# [Sync] 2026-05-24: cover direct ANTHROPIC_API_KEY SDK auth diagnostics.
+# [Sync] 2026-05-24: cover direct ANTHROPIC_AUTH_TOKEN SDK auth diagnostics.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -716,15 +716,15 @@ class TestClaudeAgentRunnerMemoryEnvAliases(unittest.TestCase):
 class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
     """SDK env diagnostics use direct Anthropic credentials."""
 
-    def test_anthropic_api_key_counts_as_auth(self):
-        options = _SDK_OPTIONS(env={"ANTHROPIC_API_KEY": "sk-test"})
+    def test_anthropic_auth_token_counts_as_auth(self):
+        options = _SDK_OPTIONS(env={"ANTHROPIC_AUTH_TOKEN": "sk-test"})
 
         with patch.object(agent_runner_module.logger, "warning") as warning:
             agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
 
         warning.assert_not_called()
 
-    def test_missing_auth_warns_for_anthropic_api_key(self):
+    def test_missing_auth_warns_for_anthropic_auth_token(self):
         options = _SDK_OPTIONS(env={})
 
         with patch.object(agent_runner_module.logger, "warning") as warning:
@@ -733,7 +733,7 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
         warning.assert_called_once()
         warning_args = warning.call_args.args
         self.assertIn("has no auth key", warning_args[0])
-        self.assertIn("ANTHROPIC_API_KEY", warning_args[2])
+        self.assertIn("ANTHROPIC_AUTH_TOKEN", warning_args[2])
 
 
 class TestClaudeSdkEnvHelper(unittest.TestCase):
@@ -745,7 +745,8 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             env_file.write_text(
                 "\n".join(
                     [
-                        "ANTHROPIC_API_KEY=sk-test",
+                        "ANTHROPIC_AUTH_TOKEN=sk-test",
+                        "ANTHROPIC_API_KEY=legacy-test",
                         "API_TIMEOUT_MS=1000",
                         "INK_AGENT_MEM0_API_KEY=mem0-test",
                         "INK_AGENT_TTL_S=600",
@@ -759,10 +760,18 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
         self.assertEqual(
             loaded,
             {
-                "ANTHROPIC_API_KEY": "sk-test",
+                "ANTHROPIC_AUTH_TOKEN": "sk-test",
                 "API_TIMEOUT_MS": "1000",
             },
         )
+
+    def test_merge_project_dotenv_env_removes_legacy_api_key_override(self):
+        loaded = sdk_env_module.merge_project_dotenv_env(
+            {"ANTHROPIC_API_KEY": "legacy-test", "ANTHROPIC_AUTH_TOKEN": "sk-test"},
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
 
 
 # ---------------------------------------------------------------------------

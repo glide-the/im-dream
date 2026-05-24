@@ -4,7 +4,7 @@
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 
-> **Ink & Memory 简化说明**：`server.py` 启动时先加载 `backend/.env` 到进程环境；Claude Code SDK 子进程每次运行时也从 `backend/.env` 合并 `ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL` 等直接 SDK 变量。Ink & Memory 不再维护 Agent runtime 别名映射。
+> **Ink & Memory 简化说明**：`server.py` 启动时先加载 `backend/.env` 到进程环境；Claude Code SDK 子进程每次运行时也从 `backend/.env` 合并 `ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL` 等直接 SDK 变量。Ink & Memory 不再维护 Agent runtime 别名映射。
 
 > 落地路径：`backend/claude_agent/`
 > 影响入口：`ClaudeAgentRunner`、`SimpleClaudeAgentSDKClient`、`IClaudeAgentSDKClient.query_stream()`
@@ -27,7 +27,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 `backend/.env` 中维护 Claude Code / Anthropic SDK 运行所需环境变量，例如：
 
 - `ANTHROPIC_BASE_URL`
-- `ANTHROPIC_API_KEY`
+- `ANTHROPIC_AUTH_TOKEN`
 - `ANTHROPIC_MODEL`
 - `ANTHROPIC_DEFAULT_HAIKU_MODEL`
 - `ANTHROPIC_DEFAULT_SONNET_MODEL`
@@ -119,7 +119,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 1. 先读取 `backend/.env`。
 2. 再叠加 `options.env`。
 3. 相同 key 下，`options.env` 覆盖 `backend/.env`。
-4. 保持变量契约以 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL` 为准。
+4. 保持变量契约以 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` 为准。
 5. SDK helper 不写入 `os.environ`；服务进程启动阶段由 `server.py` 负责加载 `backend/.env`，并移除不属于当前 Ink Agent 契约的旧 Agent env。
 
 ### 5.2 Runner 层使用 helper
@@ -142,7 +142,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 在传入 `_sdk_client.query_stream(...)` 前，`ClaudeAgentRunner` 还会执行一次调用链检查：
 
 - 只检查关键 env key 是否存在，不读取或输出变量值。
-- 如果没有 `ANTHROPIC_API_KEY`，则写 warning 日志。
+- 如果没有 `ANTHROPIC_AUTH_TOKEN`，则写 warning 日志。
 - 如果 auth key 存在，则写 debug 日志，便于排查 Runner 到 SDK client 之间是否丢失 env。
 
 ### 5.3 请求级 model 覆盖保护

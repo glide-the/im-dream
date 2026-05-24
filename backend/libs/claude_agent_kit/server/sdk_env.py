@@ -19,22 +19,26 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _PROJECT_ENV_FILE = _BACKEND_ROOT / ".env"
 _CLAUDE_SETTING_SOURCES_ARG = "setting-sources"
 _CLAUDE_PROJECT_SETTING_SOURCE = "project"
-_PROJECT_DOTENV_SDK_ENV_PREFIXES = ("ANTHROPIC_",)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
     {
+        "ANTHROPIC_AUTH_TOKEN",
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
         "API_TIMEOUT_MS",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         "DISABLE_INTERLEAVED_THINKING",
     }
 )
+_REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
 
 
 def _is_project_dotenv_sdk_env_key(key: str) -> bool:
     """Return whether a backend .env key should be passed to Claude Code."""
 
-    return key in _PROJECT_DOTENV_SDK_ENV_NAMES or key.startswith(
-        _PROJECT_DOTENV_SDK_ENV_PREFIXES
-    )
+    return key in _PROJECT_DOTENV_SDK_ENV_NAMES
 
 
 def project_dotenv_env(env_file: Optional[Path | str] = None) -> dict[str, str]:
@@ -65,6 +69,8 @@ def merge_project_dotenv_env(
                 if value is not None
             }
         )
+    for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
+        merged.pop(key, None)
     return merged
 
 

@@ -191,6 +191,8 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
                 "INK_AGENT_MEM0_API_KEY": "mem0-test",
                 "INK_AGENT_TTL_S": "600",
                 "INK_AGENT_UNSUPPORTED": "stale",
+                "ANTHROPIC_API_KEY": "legacy",
+                "ANTHROPIC_AUTH_TOKEN": "current",
                 "CLAUDE_CODE_UNUSED_TOKEN": "stale",
             },
             clear=True,
@@ -199,7 +201,9 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
 
             self.assertEqual(os.environ["INK_AGENT_MEM0_API_KEY"], "mem0-test")
             self.assertEqual(os.environ["INK_AGENT_TTL_S"], "600")
+            self.assertEqual(os.environ["ANTHROPIC_AUTH_TOKEN"], "current")
             self.assertNotIn("INK_AGENT_UNSUPPORTED", os.environ)
+            self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
             self.assertNotIn("CLAUDE_CODE_UNUSED_TOKEN", os.environ)
 
 
