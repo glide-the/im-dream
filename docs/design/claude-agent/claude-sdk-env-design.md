@@ -1,4 +1,5 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
+> **[Sync] 2026-05-24**: 迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
 
 # ClaudeSDKClient 项目 env 注入方案设计
 
@@ -34,8 +35,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 - `ANTHROPIC_DEFAULT_OPUS_MODEL`
 - `API_TIMEOUT_MS`
 - `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC`
-
-> _(Pawkeyland 原文还包含 `PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
+- `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`（请求级模型覆盖开关；旧 `PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` 同时保留作为 fallback）
 
 > _(Pawkeyland 原文中 `libs/volcresource/` 的图像、OSS、Volcengine 常量属于 Pawkeyland 专属；Ink & Memory 不迁移 Agent/text runtime 映射函数。)_
 
@@ -154,7 +154,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 - 如果 `request.model` 为空，不设置 `sdk_options.model`，由 Claude Code 自身和 `ANTHROPIC_MODEL` / `ANTHROPIC_DEFAULT_*_MODEL` 环境变量决定模型。
 - 如果 `request.model` 非空，Runner 只记录 key 级诊断日志，不设置 `sdk_options.model`。
 
-> _(Pawkeyland 原文中 `PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` 开关，属于 Pawkeyland 专属，Ink & Memory 中不适用，默认始终忽略请求级 model)_
+显式开启：在 `backend/.env` 中设置 `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE=true`，Runner 才会将 `request.model` 写入 `sdk_options.model`。旧名称 `PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` 同样有效（迁移兼容 fallback）。
 
 ### 5.4 Client 层启动前兜底
 
