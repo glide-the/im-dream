@@ -446,7 +446,7 @@ class ClaudeAgentService:
                     and turn_ctx.current_reasoning_id
                 ):
                     await queue.put(_sse("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
-                    reasoning_text = str(content_block.get("thinking") or "".join(turn_ctx.current_reasoning_text))
+                    reasoning_text = str(content_block.get("thinking") if content_block.get("thinking") is not None else "".join(turn_ctx.current_reasoning_text))
                     turn_ctx.collected_parts.append({
                         "type": "reasoning",
                         "id": turn_ctx.current_reasoning_id,

@@ -11,6 +11,7 @@ Schema:
 
 import sqlite3
 import os
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Union
@@ -19,6 +20,8 @@ import json
 # Database location
 DB_DIR = Path(__file__).parent / "data"
 DB_PATH = DB_DIR / "ink-and-memory.db"
+
+logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
 DB_DIR.mkdir(exist_ok=True)
@@ -269,8 +272,9 @@ def create_tables(db):
     try:
         db.execute("ALTER TABLE chat_message ADD COLUMN metadata TEXT")
         db.commit()
-    except Exception:
-        pass  # Column already exists
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            logger.warning("Unexpected error adding metadata column: %s", exc)
 
     print("✅ Tables created")
 
