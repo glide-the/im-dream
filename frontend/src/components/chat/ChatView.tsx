@@ -8,6 +8,7 @@ import VerticalNav from '../dashboard/VerticalNav';
 import ChatPanel from './ChatPanel';
 import type { Attachment, ContextCustomer } from './AIInputDock';
 import type { UIMessage } from 'ai';
+import { getAuthToken } from '../../contexts/AuthContext';
 
 const API_BASE = '/ink-and-memory';
 
@@ -38,7 +39,7 @@ interface ChatViewProps {
 
 async function createThread(): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, { method: 'POST' });
+    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, { method: 'POST', headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
     if (!res.ok) return null;
     const data = await res.json() as { thread_id: string };
     return data.thread_id ?? null;
@@ -49,7 +50,7 @@ async function createThread(): Promise<string | null> {
 
 async function fetchThreads(): Promise<ChatThread[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads`);
+    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
     if (!res.ok) return [];
     const data = await res.json() as { threads: ChatThread[] };
     return data.threads ?? [];
@@ -60,7 +61,7 @@ async function fetchThreads(): Promise<ChatThread[]> {
 
 async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`);
+    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
     if (!res.ok) return [];
     const data = await res.json() as { messages?: RawChatMessage[] };
     const msgs = data.messages ?? [];
@@ -83,7 +84,7 @@ async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
 
 async function deleteThread(threadId: string): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE' });
+    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
     return res.ok;
   } catch {
     return false;

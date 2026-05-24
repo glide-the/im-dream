@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
+import { getAuthToken } from '../../contexts/AuthContext';
 
 const API_BASE = '/ink-and-memory';
 
@@ -33,7 +34,7 @@ async function confirmToolCall(
 ) {
   const response = await fetch(`${API_BASE}/api/claude-agent/tool-confirm`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
     body: JSON.stringify({ toolCallId, approved, reason, answers }),
   });
   return (await response.json()) as { success?: boolean; message?: string };

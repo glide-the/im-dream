@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconChevronDown, IconChevronRight, IconDownload, IconFile, IconFolder, IconLoader, IconPlus, IconTrash, IconX } from '../chat/Icons';
+import { getAuthToken } from '../../contexts/AuthContext';
 
 const API_BASE = '/ink-and-memory';
 
@@ -128,7 +129,9 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
     setLoading(true);
     setDirectoryError(null);
     try {
-      const response = await fetch(`${API_BASE}/api/workspace/files?${new URLSearchParams({ sessionId, recursive: '1' }).toString()}`);
+      const response = await fetch(`${API_BASE}/api/workspace/files?${new URLSearchParams({ sessionId, recursive: '1' }).toString()}`, {
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+      });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(payload.error || `目录刷新失败 (${response.status})`);
@@ -189,7 +192,7 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
         formData.append('relativePath', normalizePath(file.webkitRelativePath || file.name));
       });
       setUploadQueue((current) => current.map((item) => ids.includes(item.id) ? { ...item, status: 'uploading' } : item));
-      const response = await fetch(`${API_BASE}/api/workspace/files`, { method: 'POST', body: formData });
+      const response = await fetch(`${API_BASE}/api/workspace/files`, { method: 'POST', headers: { 'Authorization': `Bearer ${getAuthToken()}` }, body: formData });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(payload.error || `上传失败 (${response.status})`);
@@ -226,7 +229,9 @@ export default function FileSidebar({ sessionId, open, onClose, title = 'Files' 
   const handleDownload = useCallback(async (file: FileInfo) => {
     if (!sessionId || file.isDirectory) return;
     try {
-      const response = await fetch(buildWorkspaceFileDownloadUrl(sessionId, file.path));
+      const response = await fetch(buildWorkspaceFileDownloadUrl(sessionId, file.path), {
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+      });
       if (!response.ok) {
         const payload = (await response.json().catch(() => ({}))) as { error?: string };
         throw new Error(payload.error || `下载失败 (${response.status})`);
