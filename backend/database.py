@@ -259,11 +259,18 @@ def create_tables(db):
       role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
       content TEXT NOT NULL,
       parts_json TEXT,
+      metadata TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (thread_id) REFERENCES chat_thread (id) ON DELETE CASCADE
     )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_chat_message_thread ON chat_message(thread_id, created_at)")
+    # Migration: add metadata column to existing databases that pre-date this column.
+    try:
+        db.execute("ALTER TABLE chat_message ADD COLUMN metadata TEXT")
+        db.commit()
+    except Exception:
+        pass  # Column already exists
 
     print("✅ Tables created")
 
@@ -2069,6 +2076,7 @@ def save_chat_message(
     content: str,
     parts_json: Optional[str] = None,
     message_id: Optional[str] = None,
+    metadata_json: Optional[str] = None,
 ) -> str:
     """Persist one chat message. Returns the message_id.
 
@@ -2082,8 +2090,8 @@ def save_chat_message(
     db = get_db()
     try:
         db.execute(
-            "INSERT OR REPLACE INTO chat_message (id, thread_id, role, content, parts_json) VALUES (?, ?, ?, ?, ?)",
-            (message_id, thread_id, role, content, parts_json),
+            "INSERT OR REPLACE INTO chat_message (id, thread_id, role, content, parts_json, metadata) VALUES (?, ?, ?, ?, ?, ?)",
+            (message_id, thread_id, role, content, parts_json, metadata_json),
         )
         _touch_chat_thread(db, thread_id)
         db.commit()
@@ -2097,7 +2105,7 @@ def list_chat_messages(thread_id: str) -> list[dict]:
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id, role, content, parts_json, created_at FROM chat_message WHERE thread_id = ? ORDER BY created_at ASC",
+            "SELECT id, role, content, parts_json, metadata, created_at FROM chat_message WHERE thread_id = ? ORDER BY created_at ASC",
             (thread_id,),
         ).fetchall()
         return [dict(row) for row in rows]

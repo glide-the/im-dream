@@ -118,6 +118,13 @@ class _TurnContext:
     current_reasoning_id: Optional[str] = None
     has_thinking_delta: bool = False
     completed_streamed_reasoning_texts: list = field(default_factory=list)
+    # Parts accumulation for persistence (built during streaming; used in _persist_turn)
+    collected_parts: list = field(default_factory=list)
+    # Tool invocations by toolCallId — entries are shared refs inside collected_parts
+    # so in-place mutations are reflected without index tracking.
+    tool_inv_by_id: dict = field(default_factory=dict)
+    # Current reasoning text accumulator (deltas for the open reasoning block)
+    current_reasoning_text: list = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -238,7 +245,7 @@ class ClaudeAgentService:
             )
             await queue.put(_sse("finish", {"finishReason": "stop"}))
             # Persist user and assistant messages to the database
-            await self._persist_turn(execution, full_text)
+            await self._persist_turn(execution, result)
         else:
             error_msg = str(result.error) if result.error else "Unknown error"
             await queue.put(_sse("error", {"errorText": error_msg}))
@@ -247,13 +254,15 @@ class ClaudeAgentService:
         await queue.put(None)  # Sentinel: end of stream
 
     async def _persist_turn(
-        self, execution: "_TurnExecution", assistant_text: str
+        self, execution: "_TurnExecution", result: Any
     ) -> None:
         """Save user and assistant messages to the database after a successful turn.
 
         Aligned with the better-chatbot pattern: the user message is stored
         with its original AI-SDK message ID and full ``parts_json`` so that
         file attachments and other non-text parts survive a page reload.
+        The assistant message is saved with its complete ``parts_json`` (including
+        reasoning and tool-invocation parts) and ``metadata_json`` (model / usage).
         """
         import asyncio
         import database
@@ -262,25 +271,67 @@ class ClaudeAgentService:
         user_text = execution.request.message
         user_message_id = execution.request.message_id  # original AI-SDK ID or None
         user_parts = execution.request.message_parts     # original parts list or None
+        assistant_text: str = result.full_text if result else ""
+        turn_ctx = execution.turn_context
 
         loop = asyncio.get_running_loop()
 
         def _save() -> None:
             # Serialise user message parts for storage (mirrors better-chatbot
             # convertToSavePart: store parts as-is so they are restored on reload).
-            parts_json: Optional[str] = None
+            user_parts_json: Optional[str] = None
             if user_parts:
                 try:
-                    parts_json = json.dumps(user_parts, ensure_ascii=False)
+                    user_parts_json = json.dumps(user_parts, ensure_ascii=False)
                 except Exception:
-                    parts_json = None
+                    user_parts_json = None
 
             database.save_chat_message(
                 thread_id, "user", user_text,
-                parts_json=parts_json,
+                parts_json=user_parts_json,
                 message_id=user_message_id,
             )
-            database.save_chat_message(thread_id, "assistant", assistant_text)
+
+            # Build complete assistant parts list: reasoning + tool-invocations + text
+            asst_parts: list = list(turn_ctx.collected_parts)
+            if assistant_text:
+                asst_parts.append({"type": "text", "text": assistant_text})
+            asst_parts_json: Optional[str] = None
+            if asst_parts:
+                try:
+                    asst_parts_json = json.dumps(asst_parts, ensure_ascii=False)
+                except Exception:
+                    asst_parts_json = None
+
+            # Build metadata (model + usage + toolCount) for the assistant message
+            metadata: dict = {}
+            if result and result.usage:
+                input_t = result.usage.get("input_tokens")
+                output_t = result.usage.get("output_tokens")
+                metadata["usage"] = {
+                    "inputTokens": input_t,
+                    "outputTokens": output_t,
+                    "totalTokens": result.usage.get("total_tokens") or (
+                        (input_t or 0) + (output_t or 0)
+                    ),
+                }
+            if execution.request.model:
+                metadata["chatModel"] = {
+                    "provider": "anthropic",
+                    "model": execution.request.model,
+                }
+            tool_count = sum(
+                1 for p in asst_parts if p.get("type") == "tool-invocation"
+            )
+            if tool_count:
+                metadata["toolCount"] = tool_count
+            asst_metadata_json: Optional[str] = json.dumps(metadata, ensure_ascii=False) if metadata else None
+
+            database.save_chat_message(
+                thread_id, "assistant", assistant_text,
+                parts_json=asst_parts_json,
+                metadata_json=asst_metadata_json,
+            )
             # Auto-fill thread title from first user message if still NULL
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
             if thread and not thread.get("title"):
@@ -377,9 +428,11 @@ class ClaudeAgentService:
                     turn_ctx.current_reasoning_id = str(uuid4())
                     await queue.put(_sse("reasoning-start", {"id": turn_ctx.current_reasoning_id}))
                 turn_ctx.has_thinking_delta = True
+                delta_text = str(payload.output)
+                turn_ctx.current_reasoning_text.append(delta_text)
                 await queue.put(_sse("reasoning-delta", {
                     "id": turn_ctx.current_reasoning_id,
-                    "delta": str(payload.output),
+                    "delta": delta_text,
                 }))
                 return
 
@@ -393,11 +446,16 @@ class ClaudeAgentService:
                     and turn_ctx.current_reasoning_id
                 ):
                     await queue.put(_sse("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
-                    turn_ctx.completed_streamed_reasoning_texts.append(
-                        str(content_block.get("thinking") or "")
-                    )
+                    reasoning_text = str(content_block.get("thinking") or "".join(turn_ctx.current_reasoning_text))
+                    turn_ctx.collected_parts.append({
+                        "type": "reasoning",
+                        "id": turn_ctx.current_reasoning_id,
+                        "text": reasoning_text,
+                    })
+                    turn_ctx.completed_streamed_reasoning_texts.append(reasoning_text)
                     turn_ctx.current_reasoning_id = None
                     turn_ctx.has_thinking_delta = False
+                    turn_ctx.current_reasoning_text.clear()
                     return
 
             # --- thinking: complete reasoning block (non-streamed or dedup guard) ---
@@ -415,12 +473,18 @@ class ClaudeAgentService:
                     await queue.put(_sse("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
                     turn_ctx.current_reasoning_id = None
                     turn_ctx.has_thinking_delta = False
+                    turn_ctx.current_reasoning_text.clear()
                     return
                 # No prior thinking_delta — emit full reasoning block atomically
                 reasoning_id = str(uuid4())
                 await queue.put(_sse("reasoning-start", {"id": reasoning_id}))
                 await queue.put(_sse("reasoning-delta", {"id": reasoning_id, "delta": thinking_output}))
                 await queue.put(_sse("reasoning-end", {"id": reasoning_id}))
+                turn_ctx.collected_parts.append({
+                    "type": "reasoning",
+                    "id": reasoning_id,
+                    "text": thinking_output,
+                })
                 return
 
             # --- tool_use / tool_use_start: new tool call beginning ---
@@ -458,6 +522,18 @@ class ClaudeAgentService:
                         "toolName": tool_name,
                         "input": payload.input or {},
                     }))
+                    # Create a tool-invocation part in "call" state; output will be
+                    # patched in-place when tool_result arrives.
+                    inv_part: dict = {
+                        "type": "tool-invocation",
+                        "toolCallId": tool_call_id,
+                        "toolName": tool_name,
+                        "state": "call",
+                        "input": payload.input or {},
+                        "dynamic": True,
+                    }
+                    turn_ctx.collected_parts.append(inv_part)
+                    turn_ctx.tool_inv_by_id[tool_call_id] = inv_part
                 return
 
             # --- tool_result: tool execution result from user message ---
@@ -483,6 +559,25 @@ class ClaudeAgentService:
                         "input": {},
                     }))
                     turn_ctx.emitted_tool_input_ids.add(tool_call_id)
+                    inv_part = {
+                        "type": "tool-invocation",
+                        "toolCallId": tool_call_id,
+                        "toolName": fallback_name,
+                        "state": "call",
+                        "input": {},
+                        "dynamic": True,
+                    }
+                    turn_ctx.collected_parts.append(inv_part)
+                    turn_ctx.tool_inv_by_id[tool_call_id] = inv_part
+                # Update the existing tool-invocation part with output (in-place).
+                if tool_call_id in turn_ctx.tool_inv_by_id:
+                    inv = turn_ctx.tool_inv_by_id[tool_call_id]
+                    if bool(payload.is_error):
+                        inv["state"] = "output-error"
+                        inv["output"] = payload.output
+                    else:
+                        inv["state"] = "output-available"
+                        inv["output"] = payload.output
                 await queue.put(_sse("tool-output-available", {
                     "toolCallId": tool_call_id,
                     "output": payload.output,

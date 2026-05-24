@@ -24,6 +24,7 @@ interface RawChatMessage {
   role: string;
   content: string;
   parts_json?: string;
+  metadata?: string;
   created_at: string;
 }
 
@@ -70,10 +71,15 @@ async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
       if (m.parts_json) {
         try { parts = JSON.parse(m.parts_json) as UIMessage['parts']; } catch { /* fallback */ }
       }
+      let metadata: Record<string, unknown> | undefined;
+      if (m.metadata) {
+        try { metadata = JSON.parse(m.metadata) as Record<string, unknown>; } catch { /* skip */ }
+      }
       return {
         id: m.id,
         role: m.role as UIMessage['role'],
         parts,
+        metadata,
         createdAt: new Date(m.created_at),
       };
     });
