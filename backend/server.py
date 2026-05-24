@@ -2268,7 +2268,6 @@ async def claude_agent_chat_history(
     return {"threads": threads or []}
 
 
-
 # ========== Claude Agent Thread Management ==========
 
 
