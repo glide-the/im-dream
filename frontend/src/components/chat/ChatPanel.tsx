@@ -22,6 +22,7 @@ import AIInputDock, {
   toAttachment,
 } from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
+import { getAuthToken } from '../../contexts/AuthContext';
 
 const API_BASE = '/ink-and-memory';
 
@@ -95,7 +96,9 @@ export default function ChatPanel({
     let active = true;
     void (async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/system-config`);
+        const response = await fetch(`${API_BASE}/api/system-config`, {
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        });
         if (!response.ok) {
           return;
         }
@@ -118,6 +121,7 @@ export default function ChatPanel({
     id: threadId,
     transport: new DefaultChatTransport({
       api: `${API_BASE}/api/claude-agent`,
+      headers: () => ({ 'Authorization': `Bearer ${getAuthToken()}` }),
       prepareSendMessagesRequest: ({ messages: outgoingMessages, body, id }) => {
         const lastMessage = outgoingMessages.at(-1) as UIMessage | undefined;
         if (!lastMessage) {

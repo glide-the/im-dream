@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
+import { getAuthToken } from '../../contexts/AuthContext';
 
 const API_BASE = '/ink-and-memory';
 
@@ -56,7 +57,9 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
     let active = true;
     void (async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/system-config`);
+        const response = await fetch(`${API_BASE}/api/system-config`, {
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        });
         if (!response.ok) {
           return;
         }
@@ -112,7 +115,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
     try {
       await fetch(`${API_BASE}/api/system-config`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
         body: JSON.stringify(patch),
       });
     } finally {
