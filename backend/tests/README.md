@@ -100,7 +100,7 @@ python tests/test_server_claude_agent.py -v
 - ✅ `on_tool_event` — tool_use 块触发，携带正确 ToolEventPayload (name/id/input)
 - ✅ 多个 tool_use 块各自独立触发事件
 - ✅ `on_tool_confirmation_request` — tool_choice='manual' 时触发；auto 时不触发
-- ✅ SDK 异常触发 `on_error` + `AgentRunResult(success=False)`
+- ✅ SDK 异常触发 `on_error` + `AgentRunResult(success=False)` + 后台 `logger.exception` 堆栈日志
 - ✅ `BaseExceptionGroup` 包装 CLI 失败（文档化行为，需 runner 扩展后生效）
 - ✅ 纯 `CancelledError` / 纯取消 BaseExceptionGroup 被重新抛出（on_error 不吞）
 - ✅ `session_id` 从 ResultMessage 提取

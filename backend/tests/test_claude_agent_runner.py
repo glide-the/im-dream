@@ -9,6 +9,7 @@
 #                    Adapted: module import path backend/libs/claude_agent_kit/runner.py.
 # [Sync] 2026-05-24: cover INK_AGENT_MEM0_* aliases for memory MCP/hook env.
 # [Sync] 2026-05-24: cover direct ANTHROPIC_AUTH_TOKEN SDK auth diagnostics.
+# [Sync] 2026-05-24: assert SDK runner failures emit backend exception logs with traceback.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -529,22 +530,27 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         runner = _runner_with_error_query(boom)
         errors: list[Exception] = []
 
-        result = await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="err-001",
-                user_message="explode",
-                tool_choice="none",
-            ),
-            callbacks=AgentStreamingCallbacks(
-                on_text_delta=lambda d: None,
-                on_error=lambda e: errors.append(e),
-            ),
-        )
+        with self.assertLogs(agent_runner_module.logger, level="ERROR") as log_cm:
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="err-001",
+                    user_message="explode",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda d: None,
+                    on_error=lambda e: errors.append(e),
+                ),
+            )
 
         self.assertFalse(result.success)
         self.assertIsNotNone(result.error)
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], RuntimeError)
+        self.assertEqual(len(log_cm.records), 1)
+        self.assertIn("Claude SDK run failed", log_cm.output[0])
+        self.assertIsNotNone(log_cm.records[0].exc_info)
+        self.assertIs(log_cm.records[0].exc_info[1], boom)
 
     async def test_base_exception_group_with_cli_failure_fires_on_error(self):
         """anyio TaskGroup wraps CLI failure + sibling CancelledError into a
@@ -554,17 +560,18 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         runner = _runner_with_exception_group([cli_failure, asyncio.CancelledError()])
         errors: list[Exception] = []
 
-        result = await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="err-base-group-001",
-                user_message="explode",
-                tool_choice="none",
-            ),
-            callbacks=AgentStreamingCallbacks(
-                on_text_delta=lambda d: None,
-                on_error=lambda e: errors.append(e),
-            ),
-        )
+        with self.assertLogs(agent_runner_module.logger, level="ERROR") as log_cm:
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="err-base-group-001",
+                    user_message="explode",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda d: None,
+                    on_error=lambda e: errors.append(e),
+                ),
+            )
 
         self.assertFalse(result.success)
         self.assertIsNotNone(result.error)
@@ -573,6 +580,10 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         self.assertNotIsInstance(errors[0], BaseExceptionGroup)
         self.assertIsInstance(errors[0], Exception)
         self.assertIn("Command failed with exit code 1", str(errors[0]))
+        self.assertEqual(len(log_cm.records), 1)
+        self.assertIn("Claude SDK run failed", log_cm.output[0])
+        self.assertIsNotNone(log_cm.records[0].exc_info)
+        self.assertIsInstance(log_cm.records[0].exc_info[1], BaseExceptionGroup)
 
     async def test_pure_cancellation_group_is_reraised(self):
         """A BaseExceptionGroup whose every leaf is CancelledError is a true outer
