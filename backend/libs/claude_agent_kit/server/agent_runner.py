@@ -21,6 +21,7 @@
 # [Sync] 2026-05-12: enrich the on_error path with SDK-call context **without changing the exception type** — the SDK's Query._read_messages strips the original ProcessError(message, exit_code, stderr) down to ``str(e)`` before re-raising, so by the time the runner's ``except Exception`` runs we only have a generic "Command failed with exit code 1" string.  The except block now (a) keeps the original exception object untouched (``run_error = exc`` for non-group exceptions, preserving downstream ``isinstance`` checks like ``test_sdk_error_sets_success_false``'s ``assertIsInstance(errors[0], RuntimeError)``); (b) attaches a structured ``[claude_agent_kit] sdk_call_context: resume=… thread_id=… cwd=… model=…`` PEP-678 note via ``run_error.add_note(...)`` so formatted tracebacks and ``getattr(exc, '__notes__', [])`` consumers see the failing session; (c) attaches a second ``[claude_agent_kit] cli_stderr: …`` note when the SDK ``debug_stderr`` buffer captured anything; (d) emits a single ``logger.exception`` with all the structured fields plus traceback for log aggregators.  ``ExceptionGroup`` is the only case that still gets re-wrapped into a plain Exception (its default ``str()`` is unreadable and downstream typed handlers gain nothing from the group wrapper).  The Service-side ``on_error`` SSE frame composes the user-facing ``errorText`` by joining ``str(error)`` with the notes via ``" | "`` so the rich context surfaces through the existing SSE schema unchanged.
 # [Sync] 2026-05-12: widen run_streaming's exception catch from ``except Exception`` to ``except BaseException`` so anyio TaskGroup ``BaseExceptionGroup`` wrappers actually fire ``callbacks.on_error`` and surface as ``AgentRunResult(success=False)``.  Root cause: ``claude_code_sdk._internal.query.Query._read_messages`` catches the CLI failure, logs ``ERROR Fatal error in message reader: Command failed with exit code 1``, and reshapes it into a synthetic ``{"type":"error"}`` stream message; ``Query.receive_messages`` raises a plain ``Exception`` from that sentinel; ``async with ClaudeSDKClient`` ``__aexit__`` then cancels the still-running write / control sibling tasks, raising ``CancelledError`` (a ``BaseException`` subclass), and the SDK's TaskGroup packages everything into a ``BaseExceptionGroup``.  ``BaseExceptionGroup`` is **not** an ``Exception`` subclass, so the previous ``except Exception`` silently let the failure propagate past the runner — ``on_error`` never fired, ``success`` kept its default ``True``, and the caller saw a half-finished stream with no error frame.  New ``_is_pure_cancellation(exc)`` helper distinguishes "every leaf is ``CancelledError``" (true outer cancel — re-raise so the FastAPI / pytest task hierarchy still unwinds) from "at least one non-cancelled leaf" (the typical CLI-failure-plus-sibling-cancel group — fall through to the existing diagnostic-enrichment + ``on_error`` path).  The group-flattening branch is also widened from ``_EXCEPTION_GROUP_TYPES`` to ``_BASE_EXCEPTION_GROUP_TYPES`` so ``BaseExceptionGroup`` (which ``ExceptionGroup`` is now a subclass of, per PEP 654) gets the same readable-message treatment instead of leaving the ugly default group ``str()`` in the SSE error frame.  Bare non-cancelled ``BaseException`` leaves (``KeyboardInterrupt`` / ``SystemExit``) are wrapped into a plain ``Exception`` for the same SSE-serialisation reason.  No service-side change required: ``execute_session`` already routes ``result.success is False`` to a ``{"type":"error","errorText":...}`` SSE frame, and the existing ``except BaseException`` + ``_exception_group_contains_cancelled`` re-raise stays as the *outer* cancel safety net for cases the runner re-raises from ``_is_pure_cancellation``.
 # [Sync] 2026-05-24: keep run_streaming's BaseException diagnostic log on logger.exception so backend logs include the caught traceback while on_error still receives the enriched run_error.
+# [Sync] 2026-05-24: rename _REQUEST_MODEL_OVERRIDE_ENV_KEY from PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE; keep legacy key as fallback in _apply_request_model_override_if_allowed for zero-downtime migration.
 
 """Claude Agent Runner.
 
@@ -142,7 +143,10 @@ _CLAUDE_SDK_ENV_KEYS: tuple[str, ...] = (
 _CLAUDE_SDK_AUTH_ENV_KEYS: tuple[str, ...] = (
     "ANTHROPIC_AUTH_TOKEN",
 )
-_REQUEST_MODEL_OVERRIDE_ENV_KEY = (
+# Primary key (Ink & Memory prefix); legacy Pawkeyland key is accepted as
+# fallback so deployments with the old .env survive until they migrate.
+_REQUEST_MODEL_OVERRIDE_ENV_KEY = "INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE"
+_REQUEST_MODEL_OVERRIDE_ENV_KEY_LEGACY = (
     "PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE"
 )
 
@@ -229,9 +233,14 @@ def _apply_request_model_override_if_allowed(
         env = dict(existing_env or {})
         sdk_options.env = env
 
-    if _env_flag_enabled(env.get(_REQUEST_MODEL_OVERRIDE_ENV_KEY)):
+    # Accept both new (INK_AGENT_*) and legacy (PAWKEYLAND_*) key names.
+    override_enabled = _env_flag_enabled(
+        env.get(_REQUEST_MODEL_OVERRIDE_ENV_KEY)
+        or env.get(_REQUEST_MODEL_OVERRIDE_ENV_KEY_LEGACY)
+    )
+    if override_enabled:
         sdk_options.model = model_name
-        logger.debug("Claude SDK request model override enabled.")
+        logger.debug("Claude SDK request model override enabled; model=%s", model_name)
         return
 
     logger.info(

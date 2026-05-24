@@ -6,6 +6,9 @@
 # [Sync] 2026-05-08: map TypeScript settingSources=["project"] to Python SDK extra_args.
 # [Sync] 2026-05-24: load SDK subprocess env from backend/.env by default.
 # [Sync] 2026-05-24: keep SDK env injection direct; no app runtime alias mapping.
+# [Sync] 2026-05-24: add INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to allowlist (renamed from
+#                    PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE); legacy key kept
+#                    for zero-downtime migration.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -30,6 +33,11 @@ _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
         "API_TIMEOUT_MS",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         "DISABLE_INTERLEAVED_THINKING",
+        # Request-level model override gate (renamed from Pawkeyland prefix)
+        "INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE",
+        # Legacy key — accepted by agent_runner.py fallback; kept here so old
+        # .env files continue to work without redeployment.
+        "PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE",
     }
 )
 _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
