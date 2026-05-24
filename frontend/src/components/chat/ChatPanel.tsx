@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
-  DefaultChatTransport,
   isToolUIPart,
   type FileUIPart,
   type TextUIPart,
   type UIMessage,
 } from 'ai';
+import { ClaudeAgentChatTransport } from '../../lib/claude-agent-transport';
 import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import {
   type ChatApiSchemaRequestBody,
@@ -119,7 +119,7 @@ export default function ChatPanel({
 
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
     id: threadId,
-    transport: new DefaultChatTransport({
+    transport: new ClaudeAgentChatTransport({
       api: `${API_BASE}/api/claude-agent`,
       headers: () => ({ 'Authorization': `Bearer ${getAuthToken()}` }),
       prepareSendMessagesRequest: ({ messages: outgoingMessages, body, id }) => {
