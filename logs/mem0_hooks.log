@@ -35,3 +35,17 @@
 [2026-05-24T20:06:28] _context_async mem0_user_id_set=False query_len=0 api_key_set=False host_set=False top_k=5
 [2026-05-24T20:06:28] _context_async query=''
 [2026-05-24T20:06:28] _context_async skip: missing mem0_user_id or empty query
+[2026-05-24T21:08:49] context_main start project_dir=/Users/dmeck/project/ink-and-memory stdin_bytes=402
+[2026-05-24T21:08:49] context_main parsed hook_input_keys=['conversation_id', 'generation_id', 'model', 'is_background_agent', 'composer_mode', 'session_id', 'hook_event_name', 'cursor_version', 'workspace_roots', 'user_email', 'transcript_path']
+[2026-05-24T21:08:49] _context_async mem0_user_id_set=False query_len=0 api_key_set=False host_set=False top_k=5
+[2026-05-24T21:08:49] _context_async query=''
+[2026-05-24T21:08:49] _context_async skip: missing mem0_user_id or empty query
+[2026-05-24T21:27:10] stop_main start project_dir=/Users/dmeck/project/ink-and-memory stdin_bytes=572
+[2026-05-24T21:27:10] stop_main parsed hook_input_keys=['conversation_id', 'generation_id', 'model', 'status', 'loop_count', 'session_id', 'hook_event_name', 'cursor_version', 'workspace_roots', 'user_email', 'transcript_path']
+[2026-05-24T21:27:10] _stop_async skip: missing mem0_user_id
+[2026-05-24T21:33:58] stop_main start project_dir=/Users/dmeck/project/ink-and-memory stdin_bytes=674
+[2026-05-24T21:33:58] stop_main parsed hook_input_keys=['conversation_id', 'generation_id', 'model', 'status', 'loop_count', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'session_id', 'hook_event_name', 'cursor_version', 'workspace_roots', 'user_email', 'transcript_path']
+[2026-05-24T21:33:58] _stop_async skip: missing mem0_user_id
+[2026-05-24T21:44:57] stop_main start project_dir=/Users/dmeck/project/ink-and-memory stdin_bytes=674
+[2026-05-24T21:44:57] stop_main parsed hook_input_keys=['conversation_id', 'generation_id', 'model', 'status', 'loop_count', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'session_id', 'hook_event_name', 'cursor_version', 'workspace_roots', 'user_email', 'transcript_path']
+[2026-05-24T21:44:57] _stop_async skip: missing mem0_user_id

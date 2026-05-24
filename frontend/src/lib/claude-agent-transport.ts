@@ -1,15 +1,34 @@
 /**
+ * [Input]  /api/claude-agent SSE stream (Pawkeyland-aligned protocol).
+ * [Output] UIMessageChunk stream consumed by @ai-sdk/react useChat.
+ * [Pos]    transport adapter in frontend/src/lib
+ * [Sync]   2026-05-24: initial implementation with old protocol (text-delta.text,
+ *                      tool-event.state, finish.reason, error.message).
+ * [Sync]   2026-05-24: full rewrite to match Pawkeyland-aligned SSE protocol:
+ *                      text-start/text-delta(delta)/text-end, separate tool-input-start /
+ *                      tool-input-available / tool-output-available events, finish.finishReason,
+ *                      error.errorText. Mirrors backend service.py AgentStreamingCallbacks.
+ * [Sync]   2026-05-24: add reasoning-start/reasoning-delta/reasoning-end event handling
+ *                      for thinking mode (emitted by on_tool_event thinking_delta/thinking
+ *                      branches in service.py).
+ *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
- * The backend emits a custom SSE protocol:
- *   data: {"type": "text-delta",     "text": "..."}
- *   data: {"type": "text-done",      "text": "..."}
- *   data: {"type": "tool-event",     "tool_name": "...", "tool_call_id": "...", "state": "...", ...}
+ * The backend emits a Pawkeyland-aligned SSE protocol:
+ *   data: {"type": "message-metadata",      "sessionId": "...", "turnIndex": 0}
+ *   data: {"type": "text-start",            "id": "..."}
+ *   data: {"type": "text-delta",            "id": "...", "delta": "..."}
+ *   data: {"type": "text-end",              "id": "..."}
+ *   data: {"type": "reasoning-start",       "id": "..."}
+ *   data: {"type": "reasoning-delta",       "id": "...", "delta": "..."}
+ *   data: {"type": "reasoning-end",         "id": "..."}
+ *   data: {"type": "tool-input-start",      "toolCallId": "...", "toolName": "..."}
+ *   data: {"type": "tool-input-available",  "toolCallId": "...", "toolName": "...", "input": {...}}
+ *   data: {"type": "tool-output-available", "toolCallId": "...", "output": ..., "isError": false}
  *   data: {"type": "tool-approval-request", "toolCallId": "...", "toolName": "...", "input": {...}}
- *   data: {"type": "message-metadata", "sessionId": "...", "turnIndex": 0}
- *   data: {"type": "message-final",  "text": "...", "usage": {...}}
- *   data: {"type": "finish",         "reason": "success"|"error"}
- *   data: {"type": "error",          "message": "..."}
+ *   data: {"type": "message-final",         "text": "...", "usage": {...}, "sessionId": "..."}
+ *   data: {"type": "finish",                "finishReason": "stop"|"error"}
+ *   data: {"type": "error",                 "errorText": "..."}
  *
  * This transport converts those events into the UIMessageChunk objects that
  * @ai-sdk/react's useChat hook expects.
@@ -21,29 +40,70 @@
 import { HttpChatTransport, type HttpChatTransportInitOptions, type UIMessage, type UIMessageChunk } from 'ai';
 
 // ---------------------------------------------------------------------------
-// Backend event shapes
+// Backend event shapes (Pawkeyland-aligned)
 // ---------------------------------------------------------------------------
+
+interface BackendMessageMetadata {
+  type: 'message-metadata';
+  sessionId: string;
+  turnIndex?: number;
+  [key: string]: unknown;
+}
+
+interface BackendTextStart {
+  type: 'text-start';
+  id: string;
+}
 
 interface BackendTextDelta {
   type: 'text-delta';
-  text: string;
+  id: string;
+  delta: string;
 }
 
-interface BackendTextDone {
-  type: 'text-done';
-  text: string;
+interface BackendTextEnd {
+  type: 'text-end';
+  id: string;
 }
 
-interface BackendToolEvent {
-  type: 'tool-event';
-  tool_name: string;
-  tool_call_id: string;
-  state: 'input-available' | 'input-streaming' | 'output-available' | 'output-error' | 'error';
-  input?: unknown;
-  output?: unknown;
-  is_error?: boolean;
+interface BackendReasoningStart {
+  type: 'reasoning-start';
+  id: string;
+}
+
+interface BackendReasoningDelta {
+  type: 'reasoning-delta';
+  id: string;
+  delta: string;
+}
+
+interface BackendReasoningEnd {
+  type: 'reasoning-end';
+  id: string;
+}
+
+interface BackendToolInputStart {
+  type: 'tool-input-start';
+  toolCallId: string;
+  toolName: string;
   title?: string;
-  provider_executed?: boolean;
+  providerExecuted?: boolean;
+}
+
+interface BackendToolInputAvailable {
+  type: 'tool-input-available';
+  toolCallId: string;
+  toolName: string;
+  input: unknown;
+  title?: string;
+  providerExecuted?: boolean;
+}
+
+interface BackendToolOutputAvailable {
+  type: 'tool-output-available';
+  toolCallId: string;
+  output: unknown;
+  isError: boolean;
 }
 
 interface BackendToolApprovalRequest {
@@ -51,12 +111,6 @@ interface BackendToolApprovalRequest {
   toolCallId: string;
   toolName: string;
   input?: unknown;
-}
-
-interface BackendMessageMetadata {
-  type: 'message-metadata';
-  sessionId: string;
-  turnIndex: number;
 }
 
 interface BackendMessageFinal {
@@ -68,20 +122,26 @@ interface BackendMessageFinal {
 
 interface BackendFinish {
   type: 'finish';
-  reason: 'success' | 'error';
+  finishReason: 'stop' | 'error';
 }
 
 interface BackendError {
   type: 'error';
-  message: string;
+  errorText: string;
 }
 
 type BackendEvent =
-  | BackendTextDelta
-  | BackendTextDone
-  | BackendToolEvent
-  | BackendToolApprovalRequest
   | BackendMessageMetadata
+  | BackendTextStart
+  | BackendTextDelta
+  | BackendTextEnd
+  | BackendReasoningStart
+  | BackendReasoningDelta
+  | BackendReasoningEnd
+  | BackendToolInputStart
+  | BackendToolInputAvailable
+  | BackendToolOutputAvailable
+  | BackendToolApprovalRequest
   | BackendMessageFinal
   | BackendFinish
   | BackendError;
@@ -90,8 +150,6 @@ type BackendEvent =
 // Stream conversion
 // ---------------------------------------------------------------------------
 
-const TEXT_PART_ID = 'text-0';
-
 /**
  * Parse raw SSE text into an array of BackendEvent objects.
  * Each SSE frame is separated by a blank line; lines beginning with
@@ -99,7 +157,6 @@ const TEXT_PART_ID = 'text-0';
  */
 function parseSSEChunk(raw: string): BackendEvent[] {
   const events: BackendEvent[] = [];
-  // Split by double newline to get individual SSE frames
   const frames = raw.split(/\n\n+/);
   for (const frame of frames) {
     for (const line of frame.split('\n')) {
@@ -120,19 +177,25 @@ function parseSSEChunk(raw: string): BackendEvent[] {
   return events;
 }
 
+interface ConversionState {
+  started: boolean;
+}
+
 /**
- * Convert a single backend event into zero or more UIMessageChunk objects.
+ * Convert a single backend SSE event into zero or more UIMessageChunk objects.
  *
- * @param event - The parsed backend SSE event.
- * @param state - Mutable state bag shared across all events in one stream.
+ * Protocol contract (Pawkeyland-aligned):
+ *   - text-start / text-delta(delta) / text-end   replace old text-delta(text) / text-done
+ *   - tool-input-start + tool-input-available + tool-output-available  replace old tool-event
+ *   - finish.finishReason   replaces old finish.reason
+ *   - error.errorText       replaces old error.message
  */
 function convertEvent(
   event: BackendEvent,
-  state: { started: boolean; textStarted: boolean },
+  state: ConversionState,
 ): UIMessageChunk[] {
   const chunks: UIMessageChunk[] = [];
 
-  // Helper: emit start + start-step once before any content
   const ensureStarted = () => {
     if (!state.started) {
       chunks.push({ type: 'start' });
@@ -142,123 +205,136 @@ function convertEvent(
   };
 
   switch (event.type) {
+    // -----------------------------------------------------------------------
+    // Text streaming
+    // -----------------------------------------------------------------------
+    case 'text-start': {
+      ensureStarted();
+      chunks.push({ type: 'text-start', id: event.id });
+      break;
+    }
+
     case 'text-delta': {
       ensureStarted();
-      if (!state.textStarted) {
-        chunks.push({ type: 'text-start', id: TEXT_PART_ID });
-        state.textStarted = true;
-      }
-      chunks.push({ type: 'text-delta', id: TEXT_PART_ID, delta: event.text });
+      chunks.push({ type: 'text-delta', id: event.id, delta: event.delta });
       break;
     }
 
-    case 'text-done': {
-      if (state.textStarted) {
-        chunks.push({ type: 'text-end', id: TEXT_PART_ID });
-        state.textStarted = false;
-      }
+    case 'text-end': {
+      chunks.push({ type: 'text-end', id: event.id });
       break;
     }
 
-    case 'tool-event': {
+    // -----------------------------------------------------------------------
+    // Reasoning / thinking events (thinking mode)
+    // -----------------------------------------------------------------------
+    case 'reasoning-start': {
       ensureStarted();
-      const { tool_call_id: toolCallId, tool_name: toolName, state: toolState } = event;
-      switch (toolState) {
-        case 'input-available':
-          chunks.push({
-            type: 'tool-input-start',
-            toolCallId,
-            toolName,
-            dynamic: true,
-            ...(event.title ? { title: event.title } : {}),
-            ...(event.provider_executed !== undefined ? { providerExecuted: event.provider_executed } : {}),
-          });
-          chunks.push({
-            type: 'tool-input-available',
-            toolCallId,
-            toolName,
-            input: event.input,
-            dynamic: true,
-          });
-          break;
-
-        case 'input-streaming':
-          chunks.push({
-            type: 'tool-input-delta',
-            toolCallId,
-            inputTextDelta:
-              typeof event.input === 'string' ? event.input : JSON.stringify(event.input),
-          });
-          break;
-
-        case 'output-available':
-          chunks.push({
-            type: 'tool-output-available',
-            toolCallId,
-            output: event.output,
-            dynamic: true,
-          });
-          break;
-
-        case 'output-error':
-        case 'error':
-          chunks.push({
-            type: 'tool-output-error',
-            toolCallId,
-            errorText:
-              typeof event.output === 'string' ? event.output : JSON.stringify(event.output ?? ''),
-            dynamic: true,
-          });
-          break;
-      }
+      chunks.push({ type: 'reasoning-start', id: event.id });
       break;
     }
 
-    case 'tool-approval-request': {
+    case 'reasoning-delta': {
       ensureStarted();
-      const { toolCallId, toolName } = event;
+      chunks.push({ type: 'reasoning-delta', id: event.id, delta: event.delta });
+      break;
+    }
+
+    case 'reasoning-end': {
+      chunks.push({ type: 'reasoning-end', id: event.id });
+      break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Tool events (separate Pawkeyland-style events)
+    // -----------------------------------------------------------------------
+    case 'tool-input-start': {
+      ensureStarted();
       chunks.push({
         type: 'tool-input-start',
-        toolCallId,
-        toolName,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
         dynamic: true,
+        ...(event.title ? { title: event.title } : {}),
+        ...(event.providerExecuted !== undefined ? { providerExecuted: event.providerExecuted } : {}),
       });
+      break;
+    }
+
+    case 'tool-input-available': {
+      ensureStarted();
       chunks.push({
         type: 'tool-input-available',
-        toolCallId,
-        toolName,
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
         input: event.input,
         dynamic: true,
       });
       break;
     }
 
-    case 'message-metadata':
+    case 'tool-output-available': {
+      ensureStarted();
+      if (event.isError) {
+        chunks.push({
+          type: 'tool-output-error',
+          toolCallId: event.toolCallId,
+          errorText:
+            typeof event.output === 'string'
+              ? event.output
+              : JSON.stringify(event.output ?? ''),
+          dynamic: true,
+        });
+      } else {
+        chunks.push({
+          type: 'tool-output-available',
+          toolCallId: event.toolCallId,
+          output: event.output,
+          dynamic: true,
+        });
+      }
+      break;
+    }
+
+    // tool-approval-request: tool-input-start/available were already emitted
+    // by the backend before this event; the tool remains in running state
+    // which triggers the approval UI in ToolMessagePart.tsx.
+    case 'tool-approval-request': {
+      // No additional chunks needed — ToolMessagePart.tsx detects pending
+      // approval from the running tool state (input received, no output yet).
+      break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Session metadata & lifecycle
+    // -----------------------------------------------------------------------
+    case 'message-metadata': {
       chunks.push({
         type: 'message-metadata',
-        messageMetadata: { sessionId: event.sessionId, turnIndex: event.turnIndex },
+        messageMetadata: {
+          sessionId: event.sessionId,
+          turnIndex: event.turnIndex,
+        },
       });
       break;
+    }
 
-    case 'message-final':
-      // Close any open text part then close the step
-      if (state.textStarted) {
-        chunks.push({ type: 'text-end', id: TEXT_PART_ID });
-        state.textStarted = false;
-      }
+    case 'message-final': {
       chunks.push({ type: 'finish-step' });
       break;
+    }
 
-    case 'finish':
+    case 'finish': {
       chunks.push({
         type: 'finish',
-        finishReason: event.reason === 'success' ? 'stop' : 'error',
+        finishReason: event.finishReason === 'stop' ? 'stop' : 'error',
       });
       break;
+    }
 
-    case 'error':
-      // Surfaces as a stream error; useChat will capture it via its error state.
-      throw new Error(event.message);
+    case 'error': {
+      throw new Error(event.errorText);
+    }
   }
 
   return chunks;
@@ -279,7 +355,7 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     stream: ReadableStream<Uint8Array>,
   ): ReadableStream<UIMessageChunk> {
     const decoder = new TextDecoder();
-    const conversionState = { started: false, textStarted: false };
+    const conversionState: ConversionState = { started: false };
 
     return stream.pipeThrough(
       new TransformStream<Uint8Array, UIMessageChunk>({
@@ -299,7 +375,6 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
           }
         },
         flush(controller) {
-          // Flush any remaining decoder bytes (no-op for UTF-8 SSE text)
           const remaining = decoder.decode();
           if (remaining) {
             const events = parseSSEChunk(remaining);

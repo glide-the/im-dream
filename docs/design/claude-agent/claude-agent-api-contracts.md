@@ -1,22 +1,25 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude Code Runtime 服务入参与SSE响应报文整理.md
-> **Ink & Memory 适配**: API 端点路径一致（`POST /api/claude-agent`）；necklace/pet 相关字段已在 Ink & Memory 版本中移除。
+> **Ink & Memory 适配**: API 端点路径一致（`POST /api/claude-agent`）；necklace/pet/Mem0 等 Pawkeyland 专属字段已移除。
+> **[Sync] 2026-05-24**: SSE 报文格式已与 Pawkeyland 完全对齐：`text-delta.delta`（原 `text`）、`text-start/end`（原 `text-done`）、分离 tool 事件、`error.errorText`（原 `message`）、`finish.finishReason`（原 `reason`）。
+> **[Sync] 2026-05-24**: backend `_make_tool_event_cb` 改为 `event.type` 分发（原 `payload.state`）；修复 `result` 事件导致 `toolCallId=null` 的错误 SSE 帧；新增 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合到 `_TurnContext`；`_make_tool_confirm_cb` 增加 `turn_ctx` 参数与 `CancelledError` 处理。
+> **[Sync] 2026-05-24**: frontend `claude-agent-transport.ts` 完全重写：移除旧 `text-delta.text` / `text-done` / `tool-event.state` / `finish.reason` / `error.message`；新增 `text-start` / `text-delta(delta)` / `text-end` / `tool-input-start` / `tool-input-available` / `tool-output-available` 独立事件处理；`tool-approval-request` 不再重复 emit chunks（backend 已单独发 tool-input-start/available）。
+> **[Sync] 2026-05-24**: 启用 thinking 模式 — 迁移 Pawkeyland `thinking_delta` / `thinking` / `content_block_stop` 分支到 `_make_tool_event_cb`；`_TurnContext` 新增 `current_reasoning_id` / `has_thinking_delta` / `completed_streamed_reasoning_texts`；SSE 新增 `reasoning-start/delta/end` 三类事件；前端 transport 新增对应处理；`DISABLE_INTERLEAVED_THINKING` 未设置时 thinking 默认启用。
 
-# pet-agent 服务入参与SSE响应报文整理
+# Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
 > 目标服务：`POST /api/claude-agent`
 > 配套接口：`POST /api/claude-agent/tool-confirm`
-> 代码依据：`server.py`、`server.py（路由定义内）`、`backend/claude_agent/service.py`、`backend/claude_agent/thread_factory.py`、`backend/claude_agent/context_builder.py`、`（Ink infrastructure/necklace_gateway.py Memory 中不适用）`
+> 代码依据：`backend/server.py`、`backend/claude_agent/service.py`、`backend/claude_agent/thread_factory.py`、`backend/claude_agent/context_builder.py`
+> 前端消费：`frontend/src/lib/claude-agent-transport.ts`
 > 关联设计稿：
-> - `docs/app/design/claude-agent上下文拼接设计.md`
-> - `docs/app/design/ClaudeAgentService 模块设计.md`
-> - `docs/app/design/Claude Agent SDK 交互式工具时序图.md`
-> - `docs/app/design/LLM驱动动画事件图设计方案.md`
+> - `docs/design/claude-agent/claude-agent-service-design.md`
+> - `docs/design/claude-agent/claude-agent-thread-session-patterns.md`
 
 ## 1. 背景与目标
 
-Pawkeyland 已将 Claude Agent 业务迁移到 pet-agent 链路，当前主入口为 `POST /api/claude-agent`。现有信息分散在模块设计、上下文拼接、动画事件图和代码实现中，下游很难一次性拿到稳定的请求协议与 SSE 报文口径。
+Ink & Memory Claude Agent 业务主入口为 `POST /api/claude-agent`，SSE 协议与 Pawkeyland 保持一致。
 
-本文目标是把 pet-agent 业务服务的两类协议整理为一份可直接消费的设计真相源：
+本文目标是把服务的两类协议整理为可直接消费的设计真相源：
 
 1. HTTP 入参协议：调用方可以传什么，哪些字段会被服务层归一或覆盖。
 2. SSE 响应协议：服务会按什么顺序推送什么事件，每个事件包含哪些字段。
@@ -65,79 +68,53 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 
 ### 4.2 `POST /api/claude-agent` 入参契约
 
-#### 4.2.1 顶层字段
+#### 4.2.1 顶层字段（Ink & Memory）
 
 | 字段 | 类型 | 默认值 | 必填 | 说明 |
 |---|---|---:|---|---|
-| `message` | string | `""` | 否 | 用户本轮输入文本；允许为空，但不建议业务侧省略。 |
-| `resume` | bool | `true` | 否 | 是否复用此子物的已有 Claude session / workspace。 |
-| `tool_choice` | string | `"auto"` | 否 | 工具模式；当前设计口径为 `auto` / `none`。 |
-| `user_id` | string | `""` | 否 | 用户标识；与 `pet_id` 共同为会话查询键。 |
-| `pet_id` | string | `""` | 否 | 孠物标识；与 `user_id` 共同为会话查询键，也用于角色记录加载和硬件状态查询。 |
-| `pet_info` | object | `{}` | 否 | 孠物资料扩展字典。 |
-| `runtime` | object | `{}` | 否 | 运行时扩展字典。 |
-| `long_term_profile` | string/null | `null` | 否 | 用户长期画像文本；不传则不注入 `[long_term_profile]` 块。 |
-| `cwd` | string/null | `null` | 否 | agent 子进程工作目录；不传时回退到按 `"{user_id}__{persona_id}"` 派生的 workspace 目录。 |
+| `id` | string | — | 是（或 thread_id） | 对话线程 ID，由 `POST /api/claude-agent/threads` 预先创建。Vercel AI SDK 发送为 `id`。 |
+| `thread_id` | string | — | 是（或 id） | 同上，兼容别名。 |
+| `message` | string / UIMessage | `""` | 是 | 用户本轮输入；可为纯字符串或含 `parts` 数组的 UIMessage 对象。 |
+| `resume` | bool | `false` | 否 | 是否复用已有 Claude session。 |
+| `tool_choice` | string | `"auto"` | 否 | 工具模式：`auto` / `none`。 |
 | `model` | string/null | `null` | 否 | 模型覆盖。 |
-| `max_turns` | integer | `10` | 否 | 本轮 agent 最大 turn 数。 |
+| `max_turns` | integer | `100` | 否 | 本轮 agent 最大 turn 数（可由 `INK_AGENT_MAX_TURNS` 环境变量覆盖）。 |
+| `cwd` | string/null | `null` | 否 | agent 子进程工作目录；不传则由 thread_id 派生 workspace 目录。 |
+| `chatModel` | object/null | `null` | 否 | 前端 ChatModel 对象（前端内部使用，后端忽略）。 |
 
-> 当前正式 HTTP 合同不暴露客户端 `system_prompt` 字段；Claude Agent system prompt 由服务端 `pet_persona` 和 `prompts/agent/*` 组装。若旧调用多传该 extra 字段，Python 请求模型会忽略，路由不会转发给 Agent。
+> `thread_id` 必须在请求前通过 `POST /api/claude-agent/threads` 创建，并属于认证用户。
 
 #### 4.2.2 顶层校验与派生规则
 
-- `user_id`、`pet_id` 不能包含 `/`、`\`、`..`，避免 workspace 路径逃逸。
-- `user_id` 和 `pet_id` 都为空时，不应作为正式业务调用。
-- 当前实现不会强制校验 `message` 非空，因此调用方需要自行保证业务输入完整。
-
-#### 4.2.3 `pet_info` 的实际消费字段
-
-`pet_info` 是开放字典，但当前服务主要消费以下字段：
-
-| 字段 | 用途 |
-|---|---|
-| `pet_id`, `persona_id`, `pet_name`, `pet_gender`, `pet_age`, `pet_species`, `pet_breed`, `profile`, `mbti` | 服务端已持久化 persona / pet 快照；`profile`、`mbti`、名称、物种和品种进入 voice-only `character_card`。兼容保存的示例字段不进入 `pet_info` 或 prompt；独立 per-persona prompt 字段已退休 |
-| `pet_id`, `pet_species` / `species` / `pet_type` | 仅用于生成 necklace MCP 子进程 env，不进入 system/user prompt |
-
-#### 4.2.4 `runtime` 的实际消费字段
-
-`runtime` 同样是开放字典；`curr_time` 不再进入 app user prompt，而是被服务端合并进 SDK `<runtime_context>` content block。未传 `curr_time` 时，服务端按 `PAWKEYLAND_CHAT_SESSION_TIMEZONE` 生成本地时间。其它运行态键不进入当前链路。
-
-| 字段 | 用途 |
-|---|---|
-| `curr_time` | 注入 SDK `<runtime_context>` 的 `Local time` |
-| 其它键 | 当前正式 Agent prompt 不消费；实时硬件事实由 necklace MCP 工具按需读取 |
+- `thread_id`（或 `id`）不能为空；缺失时返回 `400`。
+- `thread_id` 必须属于认证用户；否则返回 `404`。
+- `message` 文本提取后不能为空；缺失时返回 `400`。
+- `system_prompt` 由服务端 `ClaudeAgentContextBuilder` 组装，调用方不可传入。
 
 ### 4.3 服务层归一规则
 
 `POST /api/claude-agent` 在进入 Claude runtime 之前，会依次经过以下归一流程：
 
-1. 真实宠物聊天先用业务 `pet_id` 查询已有 `pet_persona`；不存在则返回 `404`，要求先走 `/api/character/create`。
-2. 若查询成功，服务端从 `pet_persona` hydrate `persisted_pet_info`，并整体替代请求体 `pet_info`；正式调用不依赖客户端传入的人设字段。
-3. 路由只接收显式 `long_term_profile` 诊断覆盖，并构建 `ClaudeAgentRunRequest`。
-4. `ClaudeAgentService.assemble_context`（由 `ClaudeAgentThreadFactory._run_lifecycle` 在 Phase 1 调用）以 `(user_id, persona_id)` 为键执行 `load_conversation_by_persona(user_id, persona_id)`，获取 `claude_session_id`；首轮 `thread_id=None`，Runner 自动生成。后续轮直接命中 `AgentRunState` 享元缓存的 `system_prompt` / `cwd` / `persisted_pet_info` / `mem0_user_id` / `resolved_identity`，不再重新构建。
-5. `ClaudeAgentContextBuilder.system_prompt()` 生成最终 `system_prompt`：
-   - 拼接 `prompts/agent/system_base.txt`、`system_tools.txt`、`system_policies.txt`、`pet_persona` voice-only character/style blocks、虚拟角色策略和 `long_term_profile`。
-6. `ClaudeAgentContextBuilder.user_message()` 生成最终 `user_message`：
-   - `[user_message]`
-7. Runner 追加 SDK `<runtime_context>` content block，承载 UTC Date、本地时间、时区、模型、最大 turn、session id 和 resume 状态。
-8. `_mcp_env_for_request()` 把当前业务 `pet_id`、物种和 petType 写入 necklace MCP env；这些值不拼进 prompt。
-9. 若 `cwd` 为空，则回退到 `get_or_create_workspace("{user_id}__{persona_id}")` 返回的隔离工作目录。
-10. `onFinish` 后，将 Runner 返回的 `session_id` 通过 `upsert_conversation_by_persona(user_id, persona_id, ...)` 写入 `chat_session` 表。
+1. 路由校验 `thread_id` 存在且属于认证用户，否则 `404`。
+2. 从 `message` 提取文本（支持纯字符串和 UIMessage `parts` 格式）。
+3. 构建 `ClaudeAgentRunRequest`（`user_id`、`thread_id`、`message_text`、`tool_choice`、`model`、`max_turns`、`cwd`）。
+4. `ClaudeAgentService.assemble_context`（Phase 1）：
+   - 首轮：调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id)` 构建 system prompt，写入 `AgentRunState`。
+   - 后续轮：复用享元缓存的 `state.system_prompt`，不再重新构建。
+   - 构建 `user_message`、`AgentRunOptions`，发射初始 `message-metadata` SSE 帧。
+5. Phase 2：创建（或复用）`ClaudeAgentRunner`。
+6. `ClaudeAgentService.execute_session`（Phase 3）：驱动 runner、emit SSE 事件、持久化消息。
+7. `onFinish`：保存 `user` + `assistant` 消息到 `chat_messages` 表，自动填充线程标题。
 
 ### 4.4 请求报文示例
 
 ```json
 {
-  "message": "你现在在干嘛？",
-  "resume": true,
+  "id": "thread-abc123",
+  "message": "帮我整理一下今天的笔记",
+  "resume": false,
   "tool_choice": "auto",
-  "user_id": "17",
-  "pet_id": "4706",
-  "runtime": {
-    "curr_time": "2026-05-06 20:00:00"
-  },
-  "long_term_profile": "用户下班后通常会来和我聊天。",
-  "max_turns": 10
+  "max_turns": 100
 }
 ```
 
@@ -154,39 +131,36 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 - 流开始时一定先发一条 `message-metadata`。
 - 流正常结束时一定发 `finish`；异常结束时发 `error` 后关闭流，通常不会再补 `finish`。
 
-#### 4.5.2 事件全集
+#### 4.5.2 事件全集（Ink & Memory 当前实现）
 
 | `type` | 触发时机 | 关键字段 | 备注 |
 |---|---|---|---|
-| `message-metadata` | 流开始 | `toolChoice`, `sessionId` | 第一条事件。 |
-| `message-metadata` | 工具进度 / 结果补充 | `unstableData` | 作为复用事件承载 `tool_progress` 与 `session_result`。 |
-| `message-metadata` | 流结束前 | `toolChoice`, `toolCount`, `sessionId` | 最终元数据。 |
-| `text-start` | 文本块开始 | `id` | `id` 为服务端生成的块 ID。 |
-| `text-delta` | 文本增量 | `id`, `delta` | 与最近一次 `text-start` 对应。 |
-| `text-end` | 文本块结束 | `id` | 与最近一次 `text-start` 对应。 |
-| `reasoning-start` | 思考块开始 | `id` | 来源于 `thinking_delta` / `thinking`。 |
-| `reasoning-delta` | 思考增量 | `id`, `delta` | 仅在服务开启 thinking 输出时出现。 |
-| `reasoning-end` | 思考块结束 | `id` | 与最近一次 `reasoning-start` 对应。 |
+| `message-metadata` | 流开始（Phase 1） | `sessionId`, `turnIndex` | 第一条事件；由 `assemble_context` 发射。 |
+| `text-start` | 首个文本 delta 前 | `id` | `id` 固定为服务端分配的块 ID。 |
+| `text-delta` | 文本增量 | `id`, `delta` | 与最近一次 `text-start` 对应；字段名 `delta`（非 `text`）。 |
+| `text-end` | 文本块结束 | `id` | 与最近一次 `text-start` 对应；由 `on_text_done` 发射。 |
+| `reasoning-start` | thinking 块开始（thinking 模式） | `id` | 由 `thinking_delta` 或 `thinking` 事件触发。 |
+| `reasoning-delta` | thinking 内容增量 | `id`, `delta` | 与最近一次 `reasoning-start` 对应。 |
+| `reasoning-end` | thinking 块结束 | `id` | 由 `content_block_stop`（流式）或 `thinking`（完整块）触发。 |
 | `tool-input-start` | 工具调用开始 | `toolCallId`, `toolName` | auto/manual 都会出现。 |
-| `tool-input-available` | 工具输入完整 | `toolCallId`, `toolName`, `input` | 动画事件时 `input` 通常含 `act/duration/interaction`。 |
-| `tool-approval-request` | 交互工具等待确认 | `approvalId`, `toolCallId` | 上层配置了 `on_tool_confirmation_request` 时出现。 |
-| `tool-output-available` | 工具结果返回 | `toolCallId`, `output` | 当前未附 `toolName`。 |
-| `finish` | 正常完成 | `finishReason` | 当前实现固定为 `"stop"`。 |
-| `error` | 任意异常 | `errorText` | 可能来自 service 内部，也可能由路由层兜底。 |
+| `tool-input-available` | 工具输入完整 | `toolCallId`, `toolName`, `input` | 紧跟 `tool-input-start`。 |
+| `tool-approval-request` | 交互工具等待确认 | `toolCallId`, `toolName`, `input` | `tool_choice="manual"` 时出现；前端需调用 `/api/claude-agent/tool-confirm`。 |
+| `tool-output-available` | 工具结果返回 | `toolCallId`, `output`, `isError` | `isError=true` 时表示工具执行出错。 |
+| `message-final` | 流成功结束前 | `text`, `usage`, `sessionId` | 包含完整 assistant 文本和 token 用量。 |
+| `finish` | 流结束 | `finishReason` | 成功时为 `"stop"`，失败时为 `"error"`。 |
+| `error` | 任意异常 | `errorText` | 字段名 `errorText`（非 `message`）。 |
 
-#### 4.5.3 条件字段
+#### 4.5.3 字段对比：与 Pawkeyland 的关键差异
 
-部分工具事件在 auto 模式下还可能附带以下可选字段：
-
-| 字段 | 所在事件 | 说明 |
-|---|---|---|
-| `title` | `tool-input-start`, `tool-input-available` | 来自 `ToolEventPayload.title` |
-| `providerExecuted` | `tool-input-start`, `tool-input-available`, `tool-output-available` | 标记工具是否由 provider 直接执行 |
-
-注意：
-
-- `tool-input-start` / `tool-input-available` 由 `on_tool_confirmation_request()` 直接生成，当前不会补 `title` 与 `providerExecuted`。
-- 若运行时收到 `tool_result` 却没收到对应 `tool-input-start`，服务会自动补一组空 `input` 的起始事件，保证前端事件顺序稳定。
+| 事件 | Pawkeyland 字段 | Ink & Memory 字段 | 说明 |
+|---|---|---|---|
+| `text-delta` | `id` + `delta` | `id` + `delta` | 已对齐 ✅ |
+| `text-start` / `text-end` | 有 | 有 | 已对齐 ✅ |
+| `error` | `errorText` | `errorText` | 已对齐 ✅ |
+| `finish` | `finishReason: "stop"` | `finishReason: "stop"/"error"` | 已对齐 ✅ |
+| `tool` 事件 | 三条分离事件 | 三条分离事件 | 已对齐 ✅ |
+| `reasoning-start/delta/end` | 有（thinking 模式） | 有 ✅ | 2026-05-24 启用 |
+| `message-metadata` | `toolChoice/toolCount/sessionId` | `sessionId/turnIndex` | 结构略有简化 |
 
 ### 4.6 SSE 顺序规则
 
@@ -232,34 +206,60 @@ finish
 #### 4.7.1 流开始
 
 ```text
-data: {"type":"message-metadata","toolChoice":"auto","sessionId":"u_001__pet_001"}
+data: {"type":"message-metadata","sessionId":"thread-abc123","turnIndex":0}
 
 ```
 
-#### 4.7.2 交互工具确认三连
+#### 4.7.2 文本流
 
 ```text
-data: {"type":"tool-input-start","toolCallId":"toolu_01","toolName":"AskUserQuestion"}
+data: {"type":"text-start","id":"text-0"}
 
-data: {"type":"tool-input-available","toolCallId":"toolu_01","toolName":"mcp__user__touch_animation","input":{"act":"playing","duration":6300,"interaction":{"type":"choice","choices":[{"id":"pat_head","label":"摸摸头"},{"id":"handshake","label":"握手"},{"id":"hug","label":"抱一抱"}]}}}
+data: {"type":"text-delta","id":"text-0","delta":"你好"}
 
-data: {"type":"tool-approval-request","approvalId":"2bde...","toolCallId":"toolu_01"}
+data: {"type":"text-delta","id":"text-0","delta":"，今天有什么可以帮你的？"}
+
+data: {"type":"text-end","id":"text-0"}
 
 ```
 
-#### 4.7.3 工具进度复用 `message-metadata`
+#### 4.7.3 工具调用（auto 模式）
 
 ```text
-data: {"type":"message-metadata","unstableData":{"type":"tool_progress","toolCallId":"toolu_01","toolName":"Bash","elapsedTimeSeconds":12}}
+data: {"type":"tool-input-start","toolCallId":"toolu_01","toolName":"Bash"}
+
+data: {"type":"tool-input-available","toolCallId":"toulu_01","toolName":"Bash","input":{"command":"ls"}}
+
+data: {"type":"tool-output-available","toolCallId":"toulu_01","output":"file1.txt","isError":false}
 
 ```
 
-#### 4.7.4 正常结束
+#### 4.7.4 交互工具确认（manual 模式）
 
 ```text
-data: {"type":"message-metadata","toolChoice":"auto","toolCount":1,"sessionId":"u_001__pet_001"}
+data: {"type":"tool-input-start","toolCallId":"toulu_01","toolName":"AskUserQuestion"}
+
+data: {"type":"tool-input-available","toolCallId":"toulu_01","toolName":"AskUserQuestion","input":{"question":"是否继续？"}}
+
+data: {"type":"tool-approval-request","toolCallId":"toulu_01","toolName":"AskUserQuestion","input":{"question":"是否继续？"}}
+
+```
+
+#### 4.7.5 正常结束
+
+```text
+data: {"type":"message-final","text":"整理完成。","usage":{"input_tokens":120,"output_tokens":45},"sessionId":"thread-abc123"}
 
 data: {"type":"finish","finishReason":"stop"}
+
+```
+
+#### 4.7.6 错误结束
+
+```text
+data: {"type":"error","errorText":"Command failed with exit code 1"}
+
+data: {"type":"finish","finishReason":"error"}
 
 ```
 
@@ -269,38 +269,32 @@ data: {"type":"finish","finishReason":"stop"}
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
+| `thread_id` | string | 是 | 对话线程 ID，与 SSE 流关联。 |
 | `tool_call_id` | string | 是 | 待确认工具调用 ID，对应 SSE 中的 `toolCallId`。 |
 | `approved` | bool | 是 | 是否批准执行。 |
 | `reason` | string/null | 否 | 拒绝或补充说明。 |
-| `answers` | object/null | 否 | 动画事件或问答工具的结果回传。 |
-
-`answers` 当前常见承载：
-
-- `trigger`: `auto` / `tap` / `choice`
-- `choiceId`: 仅 `trigger="choice"` 时出现
-- `elapsedMs`: 动画已播放时长
+| `answers` | object/null | 否 | 工具结果回传（问答工具等）。 |
 
 #### 4.8.2 成功响应
 
 ```json
 {
-  "success": true,
-  "tool_call_id": "toolu_01",
+  "ok": true,
   "approved": true
 }
 ```
 
 #### 4.8.3 错误语义
 
-- 若 `tool_call_id` 不存在或已超时，返回 `404`，错误信息为 `No pending tool confirmation found`。
+- 若 `tool_call_id` 不存在或已超时，返回 `404`，错误信息为 `No pending confirmation for tool_call_id=...`。
 - `approved=false` 时，SSE 主流不会立刻报 HTTP 错；是否继续输出后续文本由 Claude runtime 基于 deny 结果决定。
 
 ### 4.9 当前实现中的兼容性与边界
 
-- `pet_info` 与 `runtime` 都是开放对象，便于前端增量扩展；但真正稳定可依赖的只有本文列出的已消费字段。
-- `long_term_profile` 可由调用方显式覆盖；未传时不注入本地长期画像，正式长期记忆由 Mem0 memory MCP 按需召回。
-- `tool-output-available` 事件当前没有 `toolName` 字段；客户端若需要展示工具名，应缓存前序 `tool-input-start`。
-- `finishReason` 当前硬编码为 `"stop"`，暂未区分 `max_turns`、用户取消、工具拒绝等细粒度完成原因。
+- `tool-output-available` 的 `isError=true` 表示工具执行出错。
+- `finishReason` 成功时为 `"stop"`，失败时为 `"error"`。
+- `text-end` 与最近一次 `text-start` 对应；`id` 字段保证客户端能关联文本块。
+- 前端 `frontend/src/lib/claude-agent-transport.ts` 消费上述格式，将 SSE 事件转换为 `@ai-sdk/react` 的 `UIMessageChunk`。
 
 ## 5. 验收标准
 
