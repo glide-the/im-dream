@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from pydantic import BaseModel, ConfigDict
 
-from infrastructure.necklace_gateway import fetch_necklace_live_context
+# from infrastructure.necklace_gateway import fetch_necklace_live_context
 
 
 @dataclass(frozen=True)
@@ -119,10 +119,11 @@ async def get_pet_live_context_handler(tool_name: str) -> str:
     }
     if query_date:
         fetch_kwargs["date"] = query_date
-    result = await fetch_necklace_live_context(
-        **fetch_kwargs,
-    )
-    result["tool_intent"] = tool_name
-    if query_date:
-        result["query_date"] = query_date
-    return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+    # result = await fetch_necklace_live_context(
+    #     **fetch_kwargs,
+    # )
+    # result["tool_intent"] = tool_name
+    # if query_date:
+    #     result["query_date"] = query_date
+    # return json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+    
