@@ -33,7 +33,7 @@ user_id
 | `system_prompt` | `AgentRunOptions.system_prompt` | 会话级规则、语气、工具规则、媒体策略 |
 | `user_message` | `AgentRunOptions.user_message` | 本轮原始用户文本；UTC Date、模型、session 和本地时间等运行态由 SDK runtime context content block 承载 |
 
-`ClaudeAgentService.assemble_context()` 在 Phase 1 内部完成拼接、构造 `AgentRunOptions` / 5 个 `AgentStreamingCallbacks` / `_TurnContext`，并把全部组件发布到享元 `AgentRunState`；Phase 3 (`execute_session`) 再把 carrier 中的 `runner` / `opts` / `callbacks` 交给 `backend/claude_agent/runner.py::ClaudeAgentRunner`。
+`ClaudeAgentService.assemble_context()` 在 Phase 1 内部完成拼接、构造 `AgentRunOptions` / 5 个 `AgentStreamingCallbacks` / `_TurnContext`，并把全部组件发布到享元 `AgentRunState`；Phase 3 (`execute_session`) 再把 carrier 中的 `runner` / `opts` / `callbacks` 交给 `backend/libs/claude_agent_kit/server/agent_runner.py::ClaudeAgentRunner`。
 
 ### 2.1 享元短路（Thread Session 模式）
 

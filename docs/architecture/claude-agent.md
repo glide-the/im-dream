@@ -16,8 +16,11 @@ backend/
 │   └── claude_agent_kit/               # Kit 层 ← 迁移自 Pawkeyland libs/claude_agent_kit/
 │       ├── __init__.py                 # 公共导出（类型、Runner、Workspace）
 │       ├── types.py                    # AgentRunOptions/Result/Callbacks/ToolEventPayload
-│       ├── runner.py                   # ClaudeAgentRunner — SDK 封装（合并 agent_runner + sdk_env）
-│       ├── workspace.py                # 会话工作区目录管理
+│       ├── messages/                   # SDK user message content builder
+│       ├── server/
+│           ├── agent_runner.py         # ClaudeAgentRunner — SDK 封装
+│           ├── sdk_env.py              # backend/.env 注入和 runtime env 映射
+│           └── workspace.py            # 会话工作区目录管理
 │       └── .folder.md
 │
 └── claude_agent/                       # 应用层 ← 迁移自 Pawkeyland application/claude_agent/
@@ -59,7 +62,7 @@ HTTP 层 (server.py)
 ThreadFactory (thread_factory.py)
     ↓  每 session 一把 asyncio.Lock，串行化并发请求
     Phase 1  context_builder  → 组装 system_prompt + 写作上下文
-    Phase 2  runner.py        → 创建 ClaudeAgentRunner（cached）
+    Phase 2  server/agent_runner.py → 创建 ClaudeAgentRunner（cached）
     Phase 3  service.py       → 执行流式对话，写 DB，发 SSE 事件
     Phase 4  (销毁时)          → 触发 SessionObserver
     ↓  AgentRunStatePool (thread_pool.py)
@@ -89,9 +92,10 @@ ThreadFactory (thread_factory.py)
 | `application/claude_agent/context_builder.py` | `backend/claude_agent/context_builder.py` | 重写：用写作会话上下文替换 pet/persona 上下文 |
 | `application/claude_agent/service.py` | `backend/claude_agent/service.py` | 大幅简化：移除 pet/persona/mem0/sticker_filter |
 | `libs/claude_agent_kit/types.py` | `backend/libs/claude_agent_kit/types.py` | 直接迁移，移除 Pawkeyland 特定注释 |
-| `libs/claude_agent_kit/server/agent_runner.py` | `backend/libs/claude_agent_kit/runner.py` | 合并 agent_runner + sdk_env，移除 MCP 子进程（necklace/memory/touch_animation）|
-| `libs/claude_agent_kit/server/workspace.py` | `backend/libs/claude_agent_kit/workspace.py` | 简化：移除 skills 符号链接同步，保留工作区骨架 |
-| `libs/claude_agent_kit/server/sdk_env.py` | 合并入 `backend/libs/claude_agent_kit/runner.py` | 合并为单文件，直接使用 ANTHROPIC_* 变量 |
+| `libs/claude_agent_kit/server/agent_runner.py` | `backend/libs/claude_agent_kit/server/agent_runner.py` | 直接迁移，保留 streaming / tool confirmation / error handling |
+| `libs/claude_agent_kit/server/workspace.py` | `backend/libs/claude_agent_kit/server/workspace.py` | 简化：移除 skills 符号链接同步，保留工作区骨架 |
+| `libs/claude_agent_kit/server/sdk_env.py` | `backend/libs/claude_agent_kit/server/sdk_env.py` | 改为直接读取 `backend/.env` 中 Claude Code / Anthropic SDK key |
+| `libs/volcresource/cfg.py` | _(不迁移)_ | Volcengine 图像/OSS 与专属 runtime 配置均不属于 Ink & Memory 当前范围 |
 | `application/claude_agent/state_builder.py` | _(内联至 thread_pool.py)_ | 代码量极小（111行），直接内联 |
 
 **未迁移内容**（见第 9 节）：
@@ -106,18 +110,22 @@ ThreadFactory (thread_factory.py)
 ## 5. 配置与环境变量
 
 所有运行时配置通过环境变量解析，不硬编码业务值。  
-Ink & Memory 使用 `INK_AGENT_*` 前缀（替换 Pawkeyland 的 `PAWKEYLAND_AGENT_*`）。
+Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`；`INK_AGENT_*` 仅用于本项目的会话和 Mem0 配置。
 
 ### 5.1 Agent SDK 配置
 
-直接在项目根目录 `.env` 中配置 Claude Code SDK 所需的 `ANTHROPIC_*` 变量即可，  
-运行时由 `runner._build_sdk_env()` 从 `.env` 加载后传给 SDK 子进程。
+直接在 `backend/.env` 中配置 Claude Code SDK 所需的 `ANTHROPIC_*` 变量；`server/sdk_env.py` 会把这些 key 合并到 SDK 子进程环境。
 
 | 环境变量（`.env`）| 默认值 | 用途 |
 |-------------------|--------|------|
 | `ANTHROPIC_API_KEY` | 无 | Claude API Key |
 | `ANTHROPIC_BASE_URL` | 无（官方端点）| API Base URL（代理场景使用）|
 | `ANTHROPIC_MODEL` | 无（SDK 默认）| 模型名 |
+| `ANTHROPIC_DEFAULT_HAIKU_MODEL` | 无 | 可选 Haiku 默认模型别名 |
+| `ANTHROPIC_DEFAULT_SONNET_MODEL` | 无 | 可选 Sonnet 默认模型别名 |
+| `ANTHROPIC_DEFAULT_OPUS_MODEL` | 无 | 可选 Opus 默认模型别名 |
+| `API_TIMEOUT_MS` | `3000000` | SDK API 超时 |
+| `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` | `1` | 禁用非必要 Claude Code 流量 |
 
 ### 5.2 会话保活配置
 
@@ -134,6 +142,20 @@ Ink & Memory 使用 `INK_AGENT_*` 前缀（替换 Pawkeyland 的 `PAWKEYLAND_AGE
 | `INK_AGENT_MAX_TURNS` | `100` | 每轮对话最大 Agent turn 数 |
 | `AGENT_CWD` | `{tmpdir}/claude-agent-workspaces` | 工作区根目录（绝对路径）|
 | `INK_AGENT_CONTEXT_SESSIONS` | `5` | 注入写作上下文的最近会话数 |
+
+### 5.4 Mem0 记忆配置
+
+当前迁移版 Claude Agent Kit 仍保留 memory MCP/hook 配置入口，因此 `.env.example` 保留以下 Mem0 服务配置；请求态身份和消息（`INK_AGENT_MEM0_USER_ID` / `INK_AGENT_USER_MESSAGE` / `MEM0_USER_ID`）由运行时注入，不写入 `.env`。旧 `PAWKEYLAND_*` Mem0 变量仍作为兼容 fallback 读取，但不再作为模板推荐命名。
+
+| 环境变量 | 默认值 | 用途 |
+|----------|--------|------|
+| `INK_AGENT_MEM0_ENABLED` | `true` | 是否启用 Mem0 服务配置 |
+| `INK_AGENT_MEM0_API_KEY` | 无 | Mem0 API Key |
+| `INK_AGENT_MEM0_API_HOST` | 无 | Mem0 API Host |
+| `INK_AGENT_MEM0_CONNECT_TIMEOUT_MS` | `1500` | Mem0 连接超时 |
+| `INK_AGENT_MEM0_READ_TIMEOUT_MS` | `8000` | Mem0 读取超时 |
+| `INK_AGENT_MEM0_TOP_K` | `10` | 记忆召回数量 |
+| `INK_AGENT_ENABLE_MEMORY_MCP` | `1` | 是否启用 memory stdio MCP |
 
 ---
 
@@ -153,9 +175,9 @@ POST /api/claude-agent
     │   │   ├─ 查询 database.list_sessions(user_id) → 近期写作会话
     │   │   └─ 拼装 system_prompt（Ink & Memory 写作助手角色）
     │   │
-    │   ├─ Phase 2: runner.py
+    │   ├─ Phase 2: server/agent_runner.py
     │   │   └─ ClaudeAgentRunner(session_id, cwd)
-    │   │       └─ env: INK_AGENT_API_KEY/BASE_URL/MODEL → ANTHROPIC_*
+    │   │       └─ env: ANTHROPIC_* → Claude SDK subprocess
     │   │
     │   └─ Phase 3: service.py
     │       ├─ runner.run_streaming(opts, callbacks)
@@ -200,14 +222,14 @@ POST /api/claude-agent
 
 | 内容 | 不迁移原因 |
 |------|-----------|
-| Mem0 记忆服务 (`memory_*.py`) | Ink & Memory 无 Mem0 服务，通过 DB 写作会话替代 |
+| Mem0 gateway 实现 | 当前仅保留 Claude Agent memory MCP/hook 配置入口；正式网关实现未迁入 |
 | 项圈 MCP (`necklace_*.py`) | IoT 硬件，Ink & Memory 无此设备 |
 | 触摸动画工具 (`touch_animation_tool.py`) | Pawkeyland UI 专属，Ink & Memory 无动画层 |
 | 宠物 MCP (`mcp_server.py`) | Pawkeyland 宠物领域专属，与 Ink & Memory 无关 |
 | `state_builder.py` | 代码极少（111行），内联至 thread_pool.py |
 | `session_files.py` | JSONL 会话文件解析，当前版本通过 DB 替代 |
 | `workspace_file_sync.py` | skills 符号链接，当前不引入 skills 机制 |
-| `libs/volcresource/cfg.py` | Pawkeyland 专属 volcengine 配置解析 |
+| `libs/volcresource/cfg.py` | Pawkeyland 专属资源和 runtime 配置，Ink & Memory 当前不迁移 |
 | `api/contracts.py` | Pawkeyland 路由契约，Ink & Memory 直接用 Pydantic 在 server.py |
 
 ---
