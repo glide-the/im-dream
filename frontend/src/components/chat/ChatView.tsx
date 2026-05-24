@@ -206,7 +206,7 @@ export default function ChatView({
   return (
     <WorkspaceProvider>
       <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onNavigateToSettings={onNavigateToSettings} unreadCount={0} />
+        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onToggleThreadSidebar={() => setThreadSidebarOpen((v) => !v)} onNavigateToSettings={onNavigateToSettings} unreadCount={0} />
 
         {/* Thread history sidebar */}
         {threadSidebarOpen && (
@@ -240,12 +240,9 @@ export default function ChatView({
 
         <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem', overflow: 'hidden' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', padding: '0.25rem 0.25rem 0 0.25rem', flexShrink: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <button type="button" onClick={() => setThreadSidebarOpen((v) => !v)} title="Chat history" style={{ border: '1px solid var(--color-border-paper)', borderRadius: '8px', padding: '0.4rem 0.6rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', cursor: 'pointer' }}>☰</button>
-              <div>
-                <div style={{ fontSize: '0.74rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>Session</div>
-                <h1 style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', color: 'var(--color-text-primary)' }}>{displayTitle}</h1>
-              </div>
+            <div>
+              <div style={{ fontSize: '0.74rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>Session</div>
+              <h1 style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', color: 'var(--color-text-primary)' }}>{displayTitle}</h1>
             </div>
             <button type="button" onClick={() => void handleNewChat()} disabled={isCreatingThread} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.7rem 1rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', fontWeight: 600, cursor: isCreatingThread ? 'wait' : 'pointer' }}>
               {isCreatingThread ? '…' : 'New chat'}

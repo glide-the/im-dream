@@ -254,6 +254,16 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self._mock_client = _MockSDKClient()
+        # Bypass the real auth-key check: these tests exercise runner logic,
+        # not env propagation (see TestClaudeAgentRunnerSdkEnvDiagnostics).
+        self._verify_patch = patch.object(
+            agent_runner_module,
+            "_verify_claude_sdk_env_for_query_stream",
+        )
+        self._verify_patch.start()
+
+    def tearDown(self):
+        self._verify_patch.stop()
 
     def make_runner(self, session_id: str = "test-session") -> ClaudeAgentRunner:
         return ClaudeAgentRunner(sdk_client=self._mock_client)
@@ -735,16 +745,18 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
         warning.assert_not_called()
 
-    def test_missing_auth_warns_for_anthropic_auth_token(self):
+    def test_missing_auth_warns_and_raises_for_anthropic_auth_token(self):
         options = _SDK_OPTIONS(env={})
 
         with patch.object(agent_runner_module.logger, "warning") as warning:
-            agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
+            with self.assertRaises(RuntimeError) as ctx:
+                agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
 
         warning.assert_called_once()
         warning_args = warning.call_args.args
         self.assertIn("has no auth key", warning_args[0])
         self.assertIn("ANTHROPIC_AUTH_TOKEN", warning_args[2])
+        self.assertIn("no auth key", str(ctx.exception))
 
 
 class TestClaudeSdkEnvHelper(unittest.TestCase):

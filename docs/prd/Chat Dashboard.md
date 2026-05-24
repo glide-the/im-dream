@@ -55,7 +55,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 
 - 顶部品牌标志固定，不可点击触发侧边栏。
 - 文件图标（`IconFolder`）：切换右侧 FileSidebar 显示。
-- 历史图标（`IconClock`）：预留，后续接入会话历史。
+- 历史图标（`IconClock`）：切换会话历史侧边栏（Thread Sidebar）显示/隐藏，通过 `onToggleThreadSidebar` 回调驱动。
 - 设置图标（`IconSettings`）：调用 `onNavigateToSettings` 回调，跳转至 Settings 页面。
 - 头像区域：底部，展示当前用户状态。
 
@@ -154,8 +154,8 @@ ChatDashboard（height: 100%，overflow: hidden）
 ## 11. 前端实现备注
 
 本轮已完成以下前端实现：
-- `ChatView.tsx`：移除 `Sidebar` 组件，`height: 100%` + `overflow: hidden` 防止外层滚动，新增 `onNavigateToSettings` prop。新增 `hasConversationStarted` 状态，首次发送消息或点击快捷指令后隐藏 QuickActions，仅展示 ChatPanel。
-- `VerticalNav.tsx`：移除 `onToggleSidebar`，新增 `onNavigateToSettings` prop 并绑定设置图标。
+- `ChatView.tsx`：移除 `Sidebar` 组件，`height: 100%` + `overflow: hidden` 防止外层滚动，新增 `onNavigateToSettings` prop。新增 `hasConversationStarted` 状态，首次发送消息或点击快捷指令后隐藏 QuickActions，仅展示 ChatPanel。移除 TopActionRow 中的 `☰` 历史入口按钮，改为通过 `VerticalNav` 的 `IconClock` 触发。
+- `VerticalNav.tsx`：移除 `onToggleSidebar`，新增 `onNavigateToSettings` prop 并绑定设置图标。新增 `onToggleThreadSidebar` prop，绑定至 `IconClock` 按钮，实现会话历史侧边栏的切换。
 - `const.ts`：快捷指令替换为笔记系统场景。
 - `App.tsx`：ChatView 容器改为 `overflow: hidden`，向 ChatView 传递 `onNavigateToSettings`。
 - `ChatPanel.tsx`：新增 `onConversationStart` 回调 prop，在发送第一条消息时触发，供父组件隐藏 QuickActions。

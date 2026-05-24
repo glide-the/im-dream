@@ -22,6 +22,7 @@
 # [Sync] 2026-05-12: widen run_streaming's exception catch from ``except Exception`` to ``except BaseException`` so anyio TaskGroup ``BaseExceptionGroup`` wrappers actually fire ``callbacks.on_error`` and surface as ``AgentRunResult(success=False)``.  Root cause: ``claude_code_sdk._internal.query.Query._read_messages`` catches the CLI failure, logs ``ERROR Fatal error in message reader: Command failed with exit code 1``, and reshapes it into a synthetic ``{"type":"error"}`` stream message; ``Query.receive_messages`` raises a plain ``Exception`` from that sentinel; ``async with ClaudeSDKClient`` ``__aexit__`` then cancels the still-running write / control sibling tasks, raising ``CancelledError`` (a ``BaseException`` subclass), and the SDK's TaskGroup packages everything into a ``BaseExceptionGroup``.  ``BaseExceptionGroup`` is **not** an ``Exception`` subclass, so the previous ``except Exception`` silently let the failure propagate past the runner — ``on_error`` never fired, ``success`` kept its default ``True``, and the caller saw a half-finished stream with no error frame.  New ``_is_pure_cancellation(exc)`` helper distinguishes "every leaf is ``CancelledError``" (true outer cancel — re-raise so the FastAPI / pytest task hierarchy still unwinds) from "at least one non-cancelled leaf" (the typical CLI-failure-plus-sibling-cancel group — fall through to the existing diagnostic-enrichment + ``on_error`` path).  The group-flattening branch is also widened from ``_EXCEPTION_GROUP_TYPES`` to ``_BASE_EXCEPTION_GROUP_TYPES`` so ``BaseExceptionGroup`` (which ``ExceptionGroup`` is now a subclass of, per PEP 654) gets the same readable-message treatment instead of leaving the ugly default group ``str()`` in the SSE error frame.  Bare non-cancelled ``BaseException`` leaves (``KeyboardInterrupt`` / ``SystemExit``) are wrapped into a plain ``Exception`` for the same SSE-serialisation reason.  No service-side change required: ``execute_session`` already routes ``result.success is False`` to a ``{"type":"error","errorText":...}`` SSE frame, and the existing ``except BaseException`` + ``_exception_group_contains_cancelled`` re-raise stays as the *outer* cancel safety net for cases the runner re-raises from ``_is_pure_cancellation``.
 # [Sync] 2026-05-24: keep run_streaming's BaseException diagnostic log on logger.exception so backend logs include the caught traceback while on_error still receives the enriched run_error.
 # [Sync] 2026-05-24: rename _REQUEST_MODEL_OVERRIDE_ENV_KEY from PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE; keep legacy key as fallback in _apply_request_model_override_if_allowed for zero-downtime migration.
+# [Sync] 2026-05-24: move _inject_mem0_session_hook_env and _verify_claude_sdk_env_for_query_stream calls inside run_streaming's try/except BaseException block so any raised exception is caught and routed to callbacks.on_error → SSE error frame; raise RuntimeError in _verify_claude_sdk_env_for_query_stream when no auth key is present instead of silently returning.
 
 """Claude Agent Runner.
 
@@ -173,7 +174,11 @@ def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeCodeOptions) -> N
             missing_keys,
             len(env),
         )
-        return
+        raise RuntimeError(
+            f"Claude SDK has no auth key in subprocess env; "
+            f"expected one of {_CLAUDE_SDK_AUTH_ENV_KEYS!r}. "
+            f"present_keys={present_keys!r} env_count={len(env)}"
+        )
 
     logger.debug(
         "Claude SDK env check before query_stream; present_keys=%s "
@@ -858,9 +863,6 @@ class ClaudeAgentRunner:
         _apply_request_model_override_if_allowed(sdk_options, model)
         if system_prompt:
             sdk_options.system_prompt = system_prompt
-        _inject_mem0_session_hook_env(sdk_options, mcp_env)
-        _verify_claude_sdk_env_for_query_stream(sdk_options)
-
         # ------------------------------------------------------------------
         # Stream processing
         # ------------------------------------------------------------------
@@ -868,6 +870,8 @@ class ClaudeAgentRunner:
             text_parts.append(delta)
 
         try:
+            _inject_mem0_session_hook_env(sdk_options, mcp_env)
+            _verify_claude_sdk_env_for_query_stream(sdk_options)
             async for message in self._sdk_client.query_stream(
                 _generate_messages(), sdk_options
             ):
