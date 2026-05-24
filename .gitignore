@@ -39,3 +39,4 @@ CLAUDE.md
 
 logs/*
 backend/uv.lock
+**/.env
