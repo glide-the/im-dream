@@ -118,7 +118,7 @@ Ink & Memory 的 Claude Code SDK 鉴权和模型配置直接使用 `ANTHROPIC_*`
 
 | 环境变量（`.env`）| 默认值 | 用途 |
 |-------------------|--------|------|
-| `ANTHROPIC_API_KEY` | 无 | Claude API Key |
+| `ANTHROPIC_AUTH_TOKEN` | 无 | Claude Auth Token |
 | `ANTHROPIC_BASE_URL` | 无（官方端点）| API Base URL（代理场景使用）|
 | `ANTHROPIC_MODEL` | 无（SDK 默认）| 模型名 |
 | `ANTHROPIC_DEFAULT_HAIKU_MODEL` | 无 | 可选 Haiku 默认模型别名 |
