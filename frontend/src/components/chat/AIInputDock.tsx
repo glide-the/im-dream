@@ -13,6 +13,9 @@ import { useFileUpload } from '../../hooks/useFileUpload';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
 import { IconArrowUp, IconFile, IconLoader, IconStop, IconX } from './Icons';
 import { shouldSendMessageOnKeyDown } from './interaction-utils';
+import { getAuthToken } from '../../contexts/AuthContext';
+
+const API_BASE = '/ink-and-memory';
 
 export interface UploadedFile {
   id: string;
@@ -209,8 +212,9 @@ export default function AIInputDock({
       formData.set('path', 'files');
       formData.append('file', file);
 
-      const response = await fetch('/api/workspace/files', {
+      const response = await fetch(`${API_BASE}/api/workspace/files`, {
         method: 'POST',
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
         body: formData,
       });
 

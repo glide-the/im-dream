@@ -238,6 +238,33 @@ def create_tables(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_invites_user ON friend_invites(user_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_invites_expires ON friend_invites(expires_at)")
 
+    # @@@ Claude Agent chat threads
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS chat_thread (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      title TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_chat_thread_user ON chat_thread(user_id, updated_at)")
+
+    # @@@ Claude Agent chat messages (one row per user/assistant turn)
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS chat_message (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+      content TEXT NOT NULL,
+      parts_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (thread_id) REFERENCES chat_thread (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_chat_message_thread ON chat_message(thread_id, created_at)")
+
     print("✅ Tables created")
 
 def seed_system_decks():
@@ -1956,6 +1983,122 @@ def get_daily_pictures_range(user_id: int, start_date: Optional[str], end_date: 
     finally:
         db.close()
 
+
+# ========== Claude Agent Chat Thread CRUD ==========
+
+def create_chat_thread(user_id: int) -> str:
+    """Create a new chat thread for the user. Returns the thread_id (UUID)."""
+    import uuid
+    thread_id = str(uuid.uuid4())
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO chat_thread (id, user_id) VALUES (?, ?)",
+            (thread_id, user_id),
+        )
+        db.commit()
+        return thread_id
+    finally:
+        db.close()
+
+
+def get_chat_thread(thread_id: str, user_id: int) -> Optional[dict]:
+    """Return the chat_thread row if it belongs to user_id, else None."""
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id, user_id, title, created_at, updated_at FROM chat_thread WHERE id = ? AND user_id = ?",
+            (thread_id, user_id),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def list_chat_threads(user_id: int) -> list[dict]:
+    """List all chat threads for a user, newest first."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT id, title, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
+            (user_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def delete_chat_thread(thread_id: str, user_id: int) -> bool:
+    """Delete a chat thread (cascades to messages). Returns True if deleted."""
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "DELETE FROM chat_thread WHERE id = ? AND user_id = ?",
+            (thread_id, user_id),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        db.close()
+
+
+def update_chat_thread_title(thread_id: str, title: str) -> None:
+    """Set or update the title of a chat thread."""
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE chat_thread SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (title, thread_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def _touch_chat_thread(db, thread_id: str) -> None:
+    """Bump the updated_at timestamp of a thread (same connection, no commit)."""
+    db.execute(
+        "UPDATE chat_thread SET updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+        (thread_id,),
+    )
+
+
+def save_chat_message(
+    thread_id: str,
+    role: str,
+    content: str,
+    parts_json: Optional[str] = None,
+) -> str:
+    """Persist one chat message. Returns the new message_id."""
+    import uuid
+    message_id = str(uuid.uuid4())
+    db = get_db()
+    try:
+        db.execute(
+            "INSERT INTO chat_message (id, thread_id, role, content, parts_json) VALUES (?, ?, ?, ?, ?)",
+            (message_id, thread_id, role, content, parts_json),
+        )
+        _touch_chat_thread(db, thread_id)
+        db.commit()
+        return message_id
+    finally:
+        db.close()
+
+
+def list_chat_messages(thread_id: str) -> list[dict]:
+    """Return all messages for a thread in chronological order."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT id, role, content, parts_json, created_at FROM chat_message WHERE thread_id = ? ORDER BY created_at ASC",
+            (thread_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     # Initialize database
     init_db()
+

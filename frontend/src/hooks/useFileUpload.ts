@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { toFileProxyUrl } from '../lib/toFileProxyUrl';
+import { getAuthToken } from '../contexts/AuthContext';
+
+const API_BASE = '/ink-and-memory';
 
 interface StorageInfo {
   type: 's3' | 'vercel-blob' | 'unknown';
@@ -75,6 +78,8 @@ async function uploadWithXHR(
       }
     };
     xhr.onerror = () => reject(new Error('上传失败'));
+    const token = getAuthToken();
+    if (token) xhr.setRequestHeader('Authorization', `****** ${token}`);
     xhr.send(body);
   });
 }
@@ -88,11 +93,12 @@ async function serverUpload(
   formData.append('file', file, filename);
 
   if (onProgress) {
-    return uploadWithXHR('/api/storage/upload', formData, onProgress);
+    return uploadWithXHR(`${API_BASE}/api/storage/upload`, formData, onProgress);
   }
 
-  const response = await fetch('/api/storage/upload', {
+  const response = await fetch(`${API_BASE}/api/storage/upload`, {
     method: 'POST',
+    headers: { 'Authorization': `Bearer ${getAuthToken()}` },
     body: formData,
   });
 
@@ -130,7 +136,9 @@ export function useFileUpload() {
 
     async function fetchStorageInfo() {
       try {
-        const response = await fetch('/api/storage');
+        const response = await fetch(`${API_BASE}/api/storage`, {
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        });
         if (!response.ok) {
           throw new Error('Failed to load storage info');
         }
@@ -181,9 +189,9 @@ export function useFileUpload() {
 
       try {
         if (info.supportsDirectUpload) {
-          const uploadUrlResponse = await fetch('/api/storage/upload-url', {
+          const uploadUrlResponse = await fetch(`${API_BASE}/api/storage/upload-url`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
             body: JSON.stringify({ filename, contentType }),
           });
 

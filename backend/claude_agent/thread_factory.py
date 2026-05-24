@@ -58,10 +58,11 @@ logger = logging.getLogger(__name__)
 def build_session_id(request: ClaudeAgentRunRequest) -> str:
     """Return a stable session_id for *request*.
 
-    Current convention: the authenticated ``user_id``.  Session IDs must not
-    contain ``/``, ``\\``, or ``..`` (enforced by :func:`_validate_session_id`).
+    Uses the thread_id supplied by the caller (created via POST /api/claude-agent/threads).
+    Session IDs must not contain ``/``, ``\\``, or ``..``
+    (enforced by :func:`_validate_session_id`).
     """
-    sid = request.user_id
+    sid = request.thread_id
     _validate_session_id(sid)
     return sid
 

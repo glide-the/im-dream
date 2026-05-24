@@ -100,11 +100,14 @@ python tests/test_server_claude_agent.py -v
 - ✅ `on_tool_event` — tool_use 块触发，携带正确 ToolEventPayload (name/id/input)
 - ✅ 多个 tool_use 块各自独立触发事件
 - ✅ `on_tool_confirmation_request` — tool_choice='manual' 时触发；auto 时不触发
-- ✅ SDK 异常触发 `on_error` + `AgentRunResult(success=False)`
+- ✅ SDK 异常触发 `on_error` + `AgentRunResult(success=False)` + 后台 `logger.exception` 堆栈日志
 - ✅ `BaseExceptionGroup` 包装 CLI 失败（文档化行为，需 runner 扩展后生效）
 - ✅ 纯 `CancelledError` / 纯取消 BaseExceptionGroup 被重新抛出（on_error 不吞）
 - ✅ `session_id` 从 ResultMessage 提取
-- ✅ StreamEvent 不被 runner 分发（text_delta / thinking_delta 均忽略）
+- ✅ StreamEvent text_delta / thinking_delta 被 runner 分发
+- ✅ `INK_AGENT_MEM0_*` / `INK_AGENT_ENABLE_MEMORY_MCP` 优先于旧 Mem0 env 别名
+- ✅ `ANTHROPIC_AUTH_TOKEN` 作为 Claude Code SDK auth 诊断依据
+- ✅ SDK dotenv helper 只向子进程转发 Claude Code / Anthropic 相关 key
 
 ### Claude Agent — Thread Factory (`test_claude_agent_thread_factory.py`)
 - ✅ Phase 2：runner 在 session 内创建一次，跨 turn 复用
@@ -116,6 +119,7 @@ python tests/test_server_claude_agent.py -v
 
 ### Claude Agent — Server (`test_server_claude_agent.py`)
 - ✅ 6 个 `/api/claude-agent/*` 路由已注册
+- ✅ 启动时清理不支持的 Agent env key，同时保留 Mem0/session 配置
 - ✅ `ClaudeAgentRequestBody` 默认值和必填字段
 - ✅ `ToolConfirmRequestBody` 合约
 - ✅ `claude_agent_thread_factory` 实例已创建

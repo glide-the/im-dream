@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
+import { getAuthToken } from '../../contexts/AuthContext';
+
+const API_BASE = '/ink-and-memory';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
 
@@ -54,7 +57,9 @@ export default function ModelConfigSection() {
     let active = true;
     void (async () => {
       try {
-        const response = await fetch('/api/system-config');
+        const response = await fetch(`${API_BASE}/api/system-config`, {
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        });
         if (!response.ok) return;
         const payload = (await response.json()) as { data?: SystemConfigData } & SystemConfigData;
         const config = payload.data ?? payload;
@@ -98,9 +103,9 @@ export default function ModelConfigSection() {
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>) => {
     setSaving(true);
     try {
-      await fetch('/api/system-config', {
+      await fetch(`${API_BASE}/api/system-config`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
         body: JSON.stringify(patch),
       });
     } finally {

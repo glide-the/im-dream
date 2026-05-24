@@ -137,6 +137,13 @@ sequenceDiagram
     Runner-->>App: AgentRunResult
 ```
 
+### 4.1 SDK 异常诊断与后台堆栈
+
+- `run_streaming` 捕获 `BaseException`，先用 `_is_pure_cancellation(exc)` 区分真实取消；纯取消继续抛出，不进入 `on_error`。
+- 非取消异常会被归一化为 `run_error`：普通 `Exception` 保持原类型；`BaseExceptionGroup` 和非取消 `BaseException` 转为可序列化的 `Exception`，便于 SSE error frame 消费。
+- Runner 会向 `run_error.__notes__` 写入 `sdk_call_context`，并在有 CLI stderr 时追加 `cli_stderr`。
+- 后台日志使用 `logger.exception("Claude SDK run failed", ...)` 输出结构化字段和 traceback；随后才调用 `callbacks.on_error(run_error)`。
+
 ---
 
 ## 5. 工具确认流程（PreToolUse hook）
@@ -201,7 +208,7 @@ sequenceDiagram
 
 ### 5.1 动画事件确认（AskUserQuestion 宠物动作场景）
 
-> 参考：[LLM 驱动动画事件图设计方案](./LLM驱动动画事件图设计方案.md)
+> 参考：原 Pawkeyland LLM 驱动动画事件图设计方案（Ink & Memory 未迁移该文档）
 
 当 LLM 通过 `mcp__user__touch_animation` 工具触发宠物动作时，`tool_input` 的格式为：
 
@@ -270,7 +277,7 @@ LLM 读取 `answers.trigger` / `answers.choiceId` 决定下一步动作。
 
 Python SDK 的 `StreamEvent.event` 字段存放原始 Anthropic API 流式事件字典，与 TypeScript
 `stream_event.event` 结构完全相同。处理逻辑参见
-[`Claude SDK Message 事件类型层级.md`](./Claude%20SDK%20Message%20事件类型层级.md)。
+[`claude-sdk-message-types.md`](./claude-sdk-message-types.md)。
 
 | `event.type` | Python 处理 | 触发回调 |
 |---|---|---|

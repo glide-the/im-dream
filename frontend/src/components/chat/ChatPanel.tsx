@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
-  DefaultChatTransport,
   isToolUIPart,
   type FileUIPart,
   type TextUIPart,
   type UIMessage,
 } from 'ai';
+import { ClaudeAgentChatTransport } from '../../lib/claude-agent-transport';
 import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import {
   type ChatApiSchemaRequestBody,
@@ -22,18 +22,9 @@ import AIInputDock, {
   toAttachment,
 } from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
+import { getAuthToken } from '../../contexts/AuthContext';
 
-interface ConversationMessage {
-  id: string;
-  role: UIMessage['role'];
-  parts: UIMessage['parts'];
-  created_at: string;
-}
-
-interface ConversationResponse {
-  data?: { messages?: ConversationMessage[] };
-  messages?: ConversationMessage[];
-}
+const API_BASE = '/ink-and-memory';
 
 interface SystemConfigData {
   provider?: string;
@@ -52,7 +43,7 @@ interface ChatPanelProps {
   threadId: string;
   contextCustomerId?: string;
   contextCustomers: ContextCustomer[];
-  initialMessages?: ConversationMessage[];
+  initialMessages?: UIMessage[];
   isLoading?: boolean;
   className?: string;
   inputPlaceholder?: string;
@@ -61,19 +52,6 @@ interface ChatPanelProps {
   queuedPromptNonce?: number;
   openFileDialogSignal?: number;
   onConversationStart?: () => void;
-}
-
-function mapConversationToUiMessages(conversationMessages: ConversationMessage[]): UIMessage[] {
-  return conversationMessages.map((message) => ({
-    id: message.id,
-    role: message.role,
-    parts: message.parts,
-    createdAt: new Date(message.created_at),
-  }));
-}
-
-function normalizeConversationResponse(payload: ConversationResponse): ConversationMessage[] {
-  return payload.data?.messages ?? payload.messages ?? [];
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -107,8 +85,6 @@ export default function ChatPanel({
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
-  const [conversationMessages, setConversationMessages] = useState<ConversationMessage[] | null>(null);
-  const [isConversationLoading, setIsConversationLoading] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -120,7 +96,9 @@ export default function ChatPanel({
     let active = true;
     void (async () => {
       try {
-        const response = await fetch('/api/system-config');
+        const response = await fetch(`${API_BASE}/api/system-config`, {
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        });
         if (!response.ok) {
           return;
         }
@@ -137,44 +115,13 @@ export default function ChatPanel({
     };
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    const targetId = contextCustomerId ?? threadId;
-    setIsConversationLoading(true);
-    void (async () => {
-      try {
-        const response = await fetch(`/api/conversations?customerId=${encodeURIComponent(targetId)}`);
-        if (!response.ok) {
-          if (active) {
-            setConversationMessages([]);
-          }
-          return;
-        }
-        const payload = (await response.json()) as ConversationResponse;
-        if (active) {
-          setConversationMessages(normalizeConversationResponse(payload));
-        }
-      } catch {
-        if (active) {
-          setConversationMessages([]);
-        }
-      } finally {
-        if (active) {
-          setIsConversationLoading(false);
-        }
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [contextCustomerId, threadId]);
-
   const getPendingData = () => pendingDataRef.current;
 
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
     id: threadId,
-    transport: new DefaultChatTransport({
-      api: '/api/claude-agent',
+    transport: new ClaudeAgentChatTransport({
+      api: `${API_BASE}/api/claude-agent`,
+      headers: () => ({ 'Authorization': `Bearer ${getAuthToken()}` }),
       prepareSendMessagesRequest: ({ messages: outgoingMessages, body, id }) => {
         const lastMessage = outgoingMessages.at(-1) as UIMessage | undefined;
         if (!lastMessage) {
@@ -228,16 +175,20 @@ export default function ChatPanel({
     };
   }, [setActiveSessionId, threadId]);
 
+  // Initialise the chat with messages provided by the parent (following the
+  // better-chatbot pattern: parent fetches history, passes as initialMessages).
   useEffect(() => {
     if (hasInitializedRef.current) {
       return;
     }
-    const baseMessages = initialMessages ?? conversationMessages ?? [];
-    if (baseMessages.length > 0) {
-      setMessages(mapConversationToUiMessages(baseMessages));
-      hasInitializedRef.current = true;
+    if (!initialMessages) {
+      return;
     }
-  }, [conversationMessages, initialMessages, setMessages]);
+    if (initialMessages.length > 0) {
+      setMessages(initialMessages);
+    }
+    hasInitializedRef.current = true;
+  }, [initialMessages, setMessages]);
 
   useEffect(() => {
     if (!queuedPromptNonce || queuedPromptNonce === lastQueuedNonceRef.current) {
@@ -276,7 +227,7 @@ export default function ChatPanel({
     })();
   }, [contextCustomerId, contextCustomers, queuedAttachments, queuedPrompt, queuedPromptNonce, sendMessage]);
 
-  const chatLoading = status === 'streaming' || status === 'submitted' || isLoading || isConversationLoading;
+  const chatLoading = status === 'streaming' || status === 'submitted' || isLoading;
 
   const shouldShowLoadingIndicator = useMemo(() => {
     if (!chatLoading || messages.length === 0) {

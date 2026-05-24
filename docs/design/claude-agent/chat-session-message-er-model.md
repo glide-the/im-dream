@@ -1,72 +1,82 @@
-> **迁移来源**: Pawkeyland docs/app/design/chat-session-message-er-model.md
-> **Ink & Memory 说明**: 以下 ER 模型为 Pawkeyland 的 chat_session + claude_message 持久化设计参考。
-> Ink & Memory 目前的最小迁移版本**尚未实现消息持久化**；如需持久化，可参考此 ER 设计，
-> 将 `pet_id / persona_id` 字段替换为 Ink & Memory 的 `session_id`（= `user_id`），并在 `database.py` 中建表。
+# Chat Thread & Message ER Model
 
-# Chat Session & Claude Message ER Model
-
-> **当前口径**：主链路只保留 `chat_session + claude_message`。`chat_session` 保存 Claude SDK session metadata，`claude_message` 保存 user/assistant 消息明细、顶层 `parts` 和 normalized metadata。
+> **Ink & Memory 实现**：Claude Agent 的对话持久化使用 `chat_thread + chat_message` 两张表。
+> `chat_thread` 表示一次完整的对话会话（即前端 "New Chat"），`chat_message` 按轮次记录 user/assistant 消息明细。
+> `chat_thread.id` 同时作为 Claude SDK 的 `thread_id`（`session_id`），支持跨轮次对话继续。
 
 ## 1. 设计目标
 
 | 目标 | 说明 |
 |------|------|
-| 会话 metadata 独立 | `chat_session` 不再保存 transcript 数组，只保存会话状态、宠物快照、`claude_session_id` 和 `agent_contract_version` |
-| 消息一行一条 | `claude_message` 以 `message_id` 幂等写入 user/assistant 明细 |
-| 用户与角色隔离 | 查询和回放按 `user_id + pet_persona.persona_id` 绑定 |
-| 支持 Mem0 flush | Mem0 应用记忆从 `claude_message` 批量读取 user/assistant 明细 |
+| 每次 New Chat 独立 | 前端点击 New Chat → 后端 `POST /api/claude-agent/threads` 创建 `chat_thread`，返回 `thread_id` |
+| thread_id 双重用途 | `chat_thread.id` 既是 DB 主键，也是传给 Claude SDK 的 `thread_id`（维持多轮对话上下文） |
+| 消息一行一条 | `chat_message` 以 `message_id` 幂等写入 user/assistant 明细 |
+| 会话标题自动生成 | 第一轮完成后，从 user message 截取前 50 字符作为 `title` |
+| 历史可回放 | `GET /api/claude-agent/threads/{id}/messages` 返回消息列表，前端可重建对话视图 |
 
 ## 2. ER 图
 
 ```text
-chat_session
+users
 ────────────────────────────────────────────────────────────
- PK  chat_id                  TEXT
-     user_id                  TEXT
-     pet_id                   TEXT
-     persona_id               TEXT
-     pet_name                 TEXT
-     title                    TEXT
-     status                   TEXT
-     claude_session_id        TEXT NULL
-     agent_contract_version   TEXT
-     created_at               TIMESTAMPTZ
-     updated_at               TIMESTAMPTZ
-────────────────────────────────────────────────────────────
- INDEX: (user_id, persona_id, updated_at DESC)
+ PK  id          INTEGER
 
         │ 1
         │
         │ N
 
-claude_message
+chat_thread
 ────────────────────────────────────────────────────────────
- PK  message_id    TEXT
- FK  chat_id       TEXT -> chat_session.chat_id ON DELETE CASCADE
-     user_id       TEXT
-     pet_id        TEXT
-     persona_id    TEXT
-     role          TEXT  ('user' | 'assistant')
-     content_type  TEXT
-     content       TEXT
-     parts         JSONB
-     media_url     TEXT
-     extra         JSONB
-     created_at    TIMESTAMPTZ
+ PK  id          TEXT  (UUID, 同时作为 Claude SDK thread_id)
+ FK  user_id     INTEGER -> users.id ON DELETE CASCADE
+     title       TEXT NULL  (第一轮消息后自动填入)
+     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+     updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP
 ────────────────────────────────────────────────────────────
- INDEX: (chat_id, created_at DESC)
- INDEX: (user_id, persona_id, created_at DESC)
+ INDEX: (user_id, updated_at DESC)
+
+        │ 1
+        │
+        │ N
+
+chat_message
+────────────────────────────────────────────────────────────
+ PK  id          TEXT  (UUID)
+ FK  thread_id   TEXT -> chat_thread.id ON DELETE CASCADE
+     role        TEXT  ('user' | 'assistant')
+     content     TEXT  (完整消息文本)
+     parts_json  TEXT  (JSON array, AI SDK UIMessage parts 格式)
+     created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+────────────────────────────────────────────────────────────
+ INDEX: (thread_id, created_at ASC)
 ```
 
 ## 3. Schema Bootstrap
 
-启动 schema bootstrap 只声明当前 `chat_session` 与 `claude_message` 结构。
+`database.py` 的 `create_tables()` 函数在启动时创建上述两张表（`IF NOT EXISTS`）。
+现有数据库通过 `ALTER TABLE ... ADD COLUMN` 迁移方式向前兼容。
 
-如果 `claude_message` 行缺对应 `chat_session`，bootstrap 会先按 `chat_id` 回填 metadata 占位会话，再添加 `claude_message.chat_id -> chat_session.chat_id` 的外键约束。
+## 4. 读写规则
 
-## 4. 当前读写规则
+### 写入
+- 每轮 agent 执行成功后，`service.py` 的 `execute_session` 尾部写入 user message + assistant message 各一行。
+- `chat_thread.updated_at` 随每轮写入更新。
+- `chat_thread.title` 在第一轮写入时截取 user message 前 50 字符自动填入（若此前为 NULL）。
 
-- 聊天路由先按 `user_id + pet_id` 定位真实宠物 persona，系统角色则按 `user_id + system_persona_id` 定位。
-- 每轮完成后 upsert `chat_session`，保存 `claude_session_id`、`agent_contract_version` 和快照字段。
-- 同一轮 user/assistant 明细写入 `claude_message`；assistant 的 `extra.normalized_payload` 保存贴纸、分段和动画 metadata。
-- 聊天历史、回放和 Mem0 flush 都读取 `claude_message`，不读取请求中的历史数组。
+### 读取
+- `GET /api/claude-agent/threads` → 按 `updated_at DESC` 返回用户的所有 `chat_thread`（不含消息体）。
+- `GET /api/claude-agent/threads/{id}/messages` → 按 `created_at ASC` 返回该 thread 的所有 `chat_message`。
+- 前端 `ChatPanel` 组件在挂载时调用此接口加载历史消息，实现聊天记录回放。
+
+### 删除
+- `DELETE /api/claude-agent/threads/{id}` → 级联删除该 thread 下所有 `chat_message`。
+
+## 5. API 契约
+
+| Method | Path | 说明 |
+|--------|------|------|
+| `POST` | `/api/claude-agent/threads` | 创建新 thread，返回 `{thread_id}` |
+| `GET`  | `/api/claude-agent/threads` | 列出用户所有 threads |
+| `GET`  | `/api/claude-agent/threads/{id}/messages` | 获取 thread 消息列表 |
+| `DELETE` | `/api/claude-agent/threads/{id}` | 删除 thread（级联删消息） |
+| `POST` | `/api/claude-agent` | 发送消息，body 必须包含 `thread_id` |

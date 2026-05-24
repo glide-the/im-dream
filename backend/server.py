@@ -1,8 +1,44 @@
 #!/usr/bin/env python3
+# [Input] Consume backend/.env, HTTP requests, database/auth/config modules.
+# [Output] Publish FastAPI application and REST/SSE routes.
+# [Pos] backend API entrypoint
+# [Sync] 2026-05-24: load backend/.env before importing config and route modules.
+# [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
 import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
+load_dotenv(_BACKEND_ENV_FILE, override=False)
+
+
+def _drop_unsupported_agent_env() -> None:
+    """Remove stale Agent env aliases that are outside this project's contract."""
+
+    allowed_ink_names = {
+        "INK_AGENT_ENABLE_MEMORY_MCP",
+        "INK_AGENT_TTL_S",
+        "INK_AGENT_SWEEP_INTERVAL_S",
+        "INK_AGENT_SSE_KEEPALIVE_S",
+        "INK_AGENT_MAX_TURNS",
+        "INK_AGENT_CONTEXT_SESSIONS",
+    }
+    os.environ.pop("ANTHROPIC_API_KEY", None)
+    for key in list(os.environ):
+        if key.startswith("INK_AGENT_MEM0_") or key in allowed_ink_names:
+            continue
+        if key.startswith("INK_AGENT_"):
+            os.environ.pop(key, None)
+            continue
+        if key.startswith("CLAUDE_CODE_") and key.endswith("_TOKEN"):
+            os.environ.pop(key, None)
+
+
+_drop_unsupported_agent_env()
 
 os.environ.setdefault("TZ", "UTC")
 if hasattr(time, "tzset"):
@@ -13,6 +49,7 @@ from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from polycli.orchestration.session_registry import session_def, get_registry
 from polycli.integrations.fastapi import mount_control_panel
@@ -20,7 +57,7 @@ from polycli import PolyAgent
 from stateless_analyzer import analyze_stateless
 from speech_recognition import init_speech_recognition
 import config
-from typing import Optional, List
+from typing import Optional, List, Any
 from pydantic import BaseModel
 
 # Import database and auth modules
@@ -30,6 +67,7 @@ import auth
 SUPPORTED_LANGUAGES = {"en", "zh"}
 DEFAULT_LANGUAGE = "en"
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
+PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/")
 
 
 def normalize_language_code(language: Optional[str]) -> str:
@@ -1026,12 +1064,11 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(http_be
 @app.get("/")
 def root():
     """Root endpoint"""
-    return {
-        "service": "Ink & Memory API",
-        "version": "2.0.0",
-        "docs": "/docs",
-        "control_panel": "/polycli",
-    }
+    base = PUBLIC_BASE_URL.rstrip("/") + "/"
+    return PlainTextResponse(
+        f"The server is configured with a public base URL of {base}"
+        f" - did you mean to visit {base}api/claude-agent/threads instead?"
+    )
 
 
 # ========== Auth Endpoints ==========
@@ -2124,16 +2161,49 @@ from fastapi.responses import StreamingResponse
 from claude_agent import ClaudeAgentRunRequest
 
 
+def _extract_message_text(message: Any) -> str:
+    """Extract plain text from a message value.
+
+    Accepts either a plain ``str`` or a Vercel AI SDK ``UIMessage`` dict
+    (has ``parts`` list with ``{type: 'text', text: '...'}`` entries).
+    """
+    if isinstance(message, str):
+        return message
+    if isinstance(message, dict):
+        parts = message.get("parts") or []
+        texts = [
+            p.get("text", "")
+            for p in parts
+            if isinstance(p, dict) and p.get("type") == "text"
+        ]
+        text = " ".join(t for t in texts if t).strip()
+        # Fallback: try plain content field
+        if not text:
+            text = str(message.get("content") or "").strip()
+        return text
+    return str(message) if message else ""
+
+
 class ClaudeAgentRequestBody(BaseModel):
-    message: str
+    thread_id: Optional[str] = None
+    id: Optional[str] = None  # alias sent by the Vercel AI SDK (maps to thread_id)
+    message: Any  # str or UIMessage dict from Vercel AI SDK
     resume: bool = False
     tool_choice: str = "auto"
+    chatModel: Optional[dict] = None
     model: Optional[str] = None
     max_turns: int = 100
     cwd: Optional[str] = None
 
+    def get_thread_id(self) -> Optional[str]:
+        return self.thread_id or self.id
+
+    def get_message_text(self) -> str:
+        return _extract_message_text(self.message)
+
 
 class ToolConfirmRequestBody(BaseModel):
+    thread_id: str
     tool_call_id: str
     approved: bool
     reason: Optional[str] = None
@@ -2149,11 +2219,27 @@ async def claude_agent_stream(
 
     Returns ``text/event-stream``; each frame is a JSON object:
     ``{"type": "text-delta"|"tool-event"|"message-final"|"finish"|"error", ...}``
+
+    Requires a ``thread_id`` (created via ``POST /api/claude-agent/threads``).
     """
     user_id = current_user["user_id"]
+    thread_id = body.get_thread_id()
+    if not thread_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
+
+    # Validate thread belongs to the authenticated user
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    message_text = body.get_message_text()
+    if not message_text:
+        raise HTTPException(status_code=400, detail="message text is required")
+
     request = ClaudeAgentRunRequest(
-        user_id=user_id,
-        message=body.message,
+        user_id=str(user_id),
+        thread_id=thread_id,
+        message=message_text,
         resume=body.resume,
         tool_choice=body.tool_choice,
         model=body.model,
@@ -2172,14 +2258,78 @@ async def claude_agent_stream(
 async def claude_agent_chat_history(
     current_user: dict = Depends(get_current_user),
 ):
-    """Return recent writing sessions for the authenticated user.
+    """Return chat thread history for the authenticated user.
 
-    The agent uses these sessions as context; this endpoint exposes them
-    to the frontend so the chat UI can show relevant entry snippets.
+    Returns the list of chat threads (newest first) so the frontend
+    can display the user's past conversations.
     """
     user_id = current_user["user_id"]
-    sessions = database.list_sessions(user_id)
-    return {"sessions": sessions or []}
+    threads = database.list_chat_threads(user_id)
+    return {"threads": threads or []}
+
+
+# ========== Claude Agent Thread Management ==========
+
+
+class CreateThreadResponseBody(BaseModel):
+    thread_id: str
+
+
+@app.post("/api/claude-agent/threads", response_model=CreateThreadResponseBody)
+async def claude_agent_create_thread(
+    current_user: dict = Depends(get_current_user),
+):
+    """Create a new chat thread and return its ``thread_id``.
+
+    Call this endpoint when the user clicks "New Chat".  The returned
+    ``thread_id`` must be included in every subsequent
+    ``POST /api/claude-agent`` request for that conversation.
+    """
+    user_id = current_user["user_id"]
+    thread_id = database.create_chat_thread(user_id)
+    return {"thread_id": thread_id}
+
+
+@app.get("/api/claude-agent/threads")
+async def claude_agent_list_threads(
+    current_user: dict = Depends(get_current_user),
+):
+    """Return all chat threads for the authenticated user, newest first."""
+    user_id = current_user["user_id"]
+    threads = database.list_chat_threads(user_id)
+    return {"threads": threads}
+
+
+@app.get("/api/claude-agent/threads/{thread_id}/messages")
+async def claude_agent_thread_messages(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return all persisted messages for *thread_id* in chronological order.
+
+    Returns 404 if the thread does not exist or belongs to another user.
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    messages = database.list_chat_messages(thread_id)
+    return {"thread": thread, "messages": messages}
+
+
+@app.delete("/api/claude-agent/threads/{thread_id}")
+async def claude_agent_delete_thread(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Delete a chat thread and all its messages."""
+    user_id = current_user["user_id"]
+    deleted = database.delete_chat_thread(thread_id, user_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    # Also close the in-memory session if it is still alive
+    claude_agent_thread_factory.close_thread(thread_id)
+    return {"ok": True}
 
 
 @app.post("/api/claude-agent/message-latency")
@@ -2209,12 +2359,11 @@ async def claude_agent_session_status(
 ):
     """Return the keepalive snapshot for the caller's active session.
 
-    If *session_id* is omitted the caller's ``user_id`` is used as the key
-    (matching the ``build_session_id`` convention).
+    *session_id* must be a valid ``thread_id``.
     """
-    user_id = current_user["user_id"]
-    sid = session_id or user_id
-    snapshot = claude_agent_thread_factory.session_snapshot(sid)
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id (thread_id) is required")
+    snapshot = claude_agent_thread_factory.session_snapshot(session_id)
     if snapshot is None:
         raise HTTPException(status_code=404, detail="No active session found")
     return snapshot
@@ -2228,11 +2377,12 @@ async def claude_agent_session_close(
     """Explicitly close (destroy) the caller's Claude Agent session.
 
     Triggers Phase 4 lifecycle hooks; the next request will start a fresh session.
+    *session_id* must be a valid ``thread_id``.
     """
-    user_id = current_user["user_id"]
-    sid = session_id or user_id
-    claude_agent_thread_factory.close_thread(sid)
-    return {"ok": True, "session_id": sid}
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id (thread_id) is required")
+    claude_agent_thread_factory.close_thread(session_id)
+    return {"ok": True, "session_id": session_id}
 
 
 @app.post("/api/claude-agent/tool-confirm")
@@ -2244,10 +2394,13 @@ async def claude_agent_tool_confirm(
 
     Must be called while the SSE stream is still open and the agent is
     awaiting approval in its ``on_tool_confirmation_request`` callback.
+    ``body.thread_id`` must be the ``thread_id`` of the active conversation.
     """
-    user_id = current_user["user_id"]
+    session_id = body.thread_id
+    if not session_id:
+        raise HTTPException(status_code=400, detail="thread_id is required")
     resolved = claude_agent_thread_factory.confirm_tool(
-        session_id=user_id,
+        session_id=session_id,
         tool_call_id=body.tool_call_id,
         approved=body.approved,
         reason=body.reason,

@@ -1,12 +1,15 @@
 # [Input] Consume ClaudeAgentRunner, AgentRunOptions, AgentStreamingCallbacks,
 #         AgentRunResult from backend/libs/claude_agent_kit/runner.py and types.py.
 # [Output] Verify streaming callbacks, session_id extraction, error handling,
-#          on_text_done, on_tool_event, tool confirmation flow.
+#          on_text_done, on_tool_event, tool confirmation flow, env aliases.
 # [Pos] test node in backend/tests
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_runner.py.
 #                    Removed: necklace/memory/touch_animation MCP tests,
 #                    PAWKEYLAND_AGENT_* env mapping tests, thinking proxy tests.
 #                    Adapted: module import path backend/libs/claude_agent_kit/runner.py.
+# [Sync] 2026-05-24: cover INK_AGENT_MEM0_* aliases for memory MCP/hook env.
+# [Sync] 2026-05-24: cover direct ANTHROPIC_AUTH_TOKEN SDK auth diagnostics.
+# [Sync] 2026-05-24: assert SDK runner failures emit backend exception logs with traceback.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -21,7 +24,9 @@ Key differences from Pawkeyland:
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any, Optional
@@ -135,6 +140,8 @@ _make_sdk_stubs()
 # Now import the modules under test (after stubs are in place)
 # ---------------------------------------------------------------------------
 
+import libs.claude_agent_kit.server.agent_runner as agent_runner_module  # noqa: E402
+import libs.claude_agent_kit.server.sdk_env as sdk_env_module  # noqa: E402
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner  # noqa: E402
 from libs.claude_agent_kit.types import (  # noqa: E402
     AgentRunOptions,
@@ -149,6 +156,7 @@ from libs.claude_agent_kit.types import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 _SDK_ASSISTANT = sys.modules["claude_code_sdk.types"].AssistantMessage
+_SDK_OPTIONS = sys.modules["claude_code_sdk.types"].ClaudeCodeOptions
 _SDK_RESULT = sys.modules["claude_code_sdk.types"].ResultMessage
 _SDK_STREAM_EVENT = sys.modules["claude_code_sdk.types"].StreamEvent
 _SDK_USER = sys.modules["claude_code_sdk.types"].UserMessage
@@ -522,22 +530,27 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         runner = _runner_with_error_query(boom)
         errors: list[Exception] = []
 
-        result = await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="err-001",
-                user_message="explode",
-                tool_choice="none",
-            ),
-            callbacks=AgentStreamingCallbacks(
-                on_text_delta=lambda d: None,
-                on_error=lambda e: errors.append(e),
-            ),
-        )
+        with self.assertLogs(agent_runner_module.logger, level="ERROR") as log_cm:
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="err-001",
+                    user_message="explode",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda d: None,
+                    on_error=lambda e: errors.append(e),
+                ),
+            )
 
         self.assertFalse(result.success)
         self.assertIsNotNone(result.error)
         self.assertEqual(len(errors), 1)
         self.assertIsInstance(errors[0], RuntimeError)
+        self.assertEqual(len(log_cm.records), 1)
+        self.assertIn("Claude SDK run failed", log_cm.output[0])
+        self.assertIsNotNone(log_cm.records[0].exc_info)
+        self.assertIs(log_cm.records[0].exc_info[1], boom)
 
     async def test_base_exception_group_with_cli_failure_fires_on_error(self):
         """anyio TaskGroup wraps CLI failure + sibling CancelledError into a
@@ -547,17 +560,18 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         runner = _runner_with_exception_group([cli_failure, asyncio.CancelledError()])
         errors: list[Exception] = []
 
-        result = await runner.run_streaming(
-            opts=AgentRunOptions(
-                thread_id="err-base-group-001",
-                user_message="explode",
-                tool_choice="none",
-            ),
-            callbacks=AgentStreamingCallbacks(
-                on_text_delta=lambda d: None,
-                on_error=lambda e: errors.append(e),
-            ),
-        )
+        with self.assertLogs(agent_runner_module.logger, level="ERROR") as log_cm:
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="err-base-group-001",
+                    user_message="explode",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda d: None,
+                    on_error=lambda e: errors.append(e),
+                ),
+            )
 
         self.assertFalse(result.success)
         self.assertIsNotNone(result.error)
@@ -566,6 +580,10 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         self.assertNotIsInstance(errors[0], BaseExceptionGroup)
         self.assertIsInstance(errors[0], Exception)
         self.assertIn("Command failed with exit code 1", str(errors[0]))
+        self.assertEqual(len(log_cm.records), 1)
+        self.assertIn("Claude SDK run failed", log_cm.output[0])
+        self.assertIsNotNone(log_cm.records[0].exc_info)
+        self.assertIsInstance(log_cm.records[0].exc_info[1], BaseExceptionGroup)
 
     async def test_pure_cancellation_group_is_reraised(self):
         """A BaseExceptionGroup whose every leaf is CancelledError is a true outer
@@ -663,6 +681,108 @@ class TestClaudeAgentRunnerToolConfirmation(_RunnerBase):
 
         self.assertTrue(result.success)
         self.assertEqual(confirmation_requests, [])
+
+
+class TestClaudeAgentRunnerMemoryEnvAliases(unittest.TestCase):
+    """Memory MCP env uses Ink-owned names with Pawkeyland aliases as fallback."""
+
+    def test_ink_memory_mcp_disable_flag_takes_precedence(self):
+        with patch.dict(
+            os.environ,
+            {
+                "INK_AGENT_ENABLE_MEMORY_MCP": "0",
+                "PAWKEYLAND_ENABLE_AGENT_MEMORY_MCP": "1",
+            },
+            clear=True,
+        ):
+            self.assertFalse(agent_runner_module._memory_mcp_enabled())
+
+    def test_mem0_hook_env_maps_ink_names_and_legacy_aliases(self):
+        options = _SDK_OPTIONS(env={})
+        request_env = {
+            "INK_AGENT_MEM0_USER_ID": "ink-memory-user",
+            "INK_AGENT_USER_MESSAGE": "remember this",
+        }
+
+        with patch.dict(
+            os.environ,
+            {
+                "INK_AGENT_MEM0_API_KEY": "ink-mem0-key",
+                "INK_AGENT_MEM0_API_HOST": "https://mem0.example",
+                "INK_AGENT_MEM0_TOP_K": "7",
+            },
+            clear=True,
+        ):
+            agent_runner_module._inject_mem0_session_hook_env(options, request_env)
+
+        self.assertEqual(options.env["MEM0_USER_ID"], "ink-memory-user")
+        self.assertNotIn("INK_AGENT_MEM0_USER_ID", options.env)
+        self.assertNotIn("PAWKEYLAND_MEM0_USER_ID", options.env)
+        self.assertEqual(options.env["INK_AGENT_MEM0_API_KEY"], "ink-mem0-key")
+        self.assertEqual(options.env["PAWKEYLAND_MEM0_API_KEY"], "ink-mem0-key")
+        self.assertEqual(options.env["INK_AGENT_USER_MESSAGE"], "remember this")
+        self.assertEqual(options.env["PAWKEYLAND_AGENT_USER_MESSAGE"], "remember this")
+
+
+class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
+    """SDK env diagnostics use direct Anthropic credentials."""
+
+    def test_anthropic_auth_token_counts_as_auth(self):
+        options = _SDK_OPTIONS(env={"ANTHROPIC_AUTH_TOKEN": "sk-test"})
+
+        with patch.object(agent_runner_module.logger, "warning") as warning:
+            agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
+
+        warning.assert_not_called()
+
+    def test_missing_auth_warns_for_anthropic_auth_token(self):
+        options = _SDK_OPTIONS(env={})
+
+        with patch.object(agent_runner_module.logger, "warning") as warning:
+            agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
+
+        warning.assert_called_once()
+        warning_args = warning.call_args.args
+        self.assertIn("has no auth key", warning_args[0])
+        self.assertIn("ANTHROPIC_AUTH_TOKEN", warning_args[2])
+
+
+class TestClaudeSdkEnvHelper(unittest.TestCase):
+    """Project dotenv loading only forwards SDK-level keys."""
+
+    def test_project_dotenv_env_filters_non_sdk_keys(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "ANTHROPIC_AUTH_TOKEN=sk-test",
+                        "ANTHROPIC_API_KEY=legacy-test",
+                        "API_TIMEOUT_MS=1000",
+                        "INK_AGENT_MEM0_API_KEY=mem0-test",
+                        "INK_AGENT_TTL_S=600",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = sdk_env_module.project_dotenv_env(env_file)
+
+        self.assertEqual(
+            loaded,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "sk-test",
+                "API_TIMEOUT_MS": "1000",
+            },
+        )
+
+    def test_merge_project_dotenv_env_removes_legacy_api_key_override(self):
+        loaded = sdk_env_module.merge_project_dotenv_env(
+            {"ANTHROPIC_API_KEY": "legacy-test", "ANTHROPIC_AUTH_TOKEN": "sk-test"},
+            env_file=Path("/tmp/does-not-exist"),
+        )
+
+        self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
 
 
 # ---------------------------------------------------------------------------
