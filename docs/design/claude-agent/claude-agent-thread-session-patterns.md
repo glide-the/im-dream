@@ -2,7 +2,7 @@
 
 # Claude Agent Thread Session — 设计模式重构方案
 
-> **来源**：基于现有 `backend/claude_agent/service.py` + `backend/claude_agent/runner.py` 的会话管理重构设计  
+> **来源**：基于现有 `backend/claude_agent/service.py` + `backend/libs/claude_agent_kit/server/agent_runner.py` 的会话管理重构设计
 > **目标**：引入 Thread 会话模型，通过 sessionId 在角色扮演状态加载前维护 Claude Runner 线程，实现工作空间初始化与宠物系统上下文一次性注入，后续轮次只传递用户消息
 > **关联设计**：
 > - [claude-agent-session-persistence.md §10](./claude-agent-session-persistence.md#10-thread-session--进程内-sessionid-享元层) — 与 DB 持久化层的接合

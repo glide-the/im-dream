@@ -5,6 +5,7 @@
 # [Sync] 2026-05-22: initial — smoke tests for /api/claude-agent/* routes in server.py.
 #                    Adapted from Pawkeyland scripts/test_demo_server_import.py
 #                    (removed pet/persona/sticker/necklace contract tests).
+# [Sync] 2026-05-24: cover server startup cleanup of unsupported Agent env keys.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -17,6 +18,7 @@ without error in the test environment — SQLite is created at first import).
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 import unittest
@@ -41,8 +43,65 @@ def _stub_module(name: str, **attrs) -> types.ModuleType:
 
 # Stub claude_code_sdk so runner.py doesn't fail on import
 if "claude_code_sdk" not in sys.modules:
-    _stub_module("claude_code_sdk", query=None)
-    _stub_module("claude_code_sdk.types")
+    sdk_types = _stub_module("claude_code_sdk.types")
+
+    class _SdkStub:
+        def __init__(self, **kwargs):
+            for key, value in kwargs.items():
+                setattr(self, key, value)
+
+    class AssistantMessage(_SdkStub):
+        pass
+
+    class ClaudeCodeOptions(_SdkStub):
+        pass
+
+    class HookContext(_SdkStub):
+        pass
+
+    class HookJSONOutput(_SdkStub):
+        pass
+
+    class HookMatcher(_SdkStub):
+        pass
+
+    class McpServerConfig(_SdkStub):
+        pass
+
+    class McpStdioServerConfig(_SdkStub):
+        pass
+
+    class ResultMessage(_SdkStub):
+        pass
+
+    class StreamEvent(_SdkStub):
+        pass
+
+    class SystemMessage(_SdkStub):
+        pass
+
+    class UserMessage(_SdkStub):
+        pass
+
+    for _cls in [
+        AssistantMessage,
+        ClaudeCodeOptions,
+        HookContext,
+        HookJSONOutput,
+        HookMatcher,
+        McpServerConfig,
+        McpStdioServerConfig,
+        ResultMessage,
+        StreamEvent,
+        SystemMessage,
+        UserMessage,
+    ]:
+        setattr(sdk_types, _cls.__name__, _cls)
+
+    class ClaudeSDKClient:
+        pass
+
+    _stub_module("claude_code_sdk", ClaudeSDKClient=ClaudeSDKClient, query=None, types=sdk_types)
 
 # Stub heavy optional dependencies so server.py can be imported in minimal envs.
 
@@ -121,6 +180,29 @@ def _skip_if_no_server(cls):
     return cls
 
 
+@_skip_if_no_server
+class TestServerAgentEnvCleanup(unittest.TestCase):
+    """Verify server startup env cleanup preserves only supported Agent keys."""
+
+    def test_cleanup_preserves_mem0_and_session_keys(self):
+        with unittest.mock.patch.dict(
+            os.environ,
+            {
+                "INK_AGENT_MEM0_API_KEY": "mem0-test",
+                "INK_AGENT_TTL_S": "600",
+                "INK_AGENT_UNSUPPORTED": "stale",
+                "CLAUDE_CODE_UNUSED_TOKEN": "stale",
+            },
+            clear=True,
+        ):
+            _SERVER_MODULE._drop_unsupported_agent_env()
+
+            self.assertEqual(os.environ["INK_AGENT_MEM0_API_KEY"], "mem0-test")
+            self.assertEqual(os.environ["INK_AGENT_TTL_S"], "600")
+            self.assertNotIn("INK_AGENT_UNSUPPORTED", os.environ)
+            self.assertNotIn("CLAUDE_CODE_UNUSED_TOKEN", os.environ)
+
+
 # ---------------------------------------------------------------------------
 # Route registration tests (import-level, no HTTP calls)
 # ---------------------------------------------------------------------------
@@ -135,7 +217,7 @@ class TestClaudeAgentRouteRegistration(unittest.TestCase):
         cls.app = _SERVER_MODULE.app
 
         cls.routes = {
-            (r.methods, r.path)
+            (frozenset(r.methods or set()), r.path)
             for r in cls.app.routes
             if hasattr(r, "path") and "claude-agent" in getattr(r, "path", "")
         }
@@ -220,14 +302,14 @@ class TestToolConfirmRequestModel(unittest.TestCase):
 
     def test_requires_approved(self):
         with self.assertRaises(Exception):
-            self.Model(tool_call_id="xyz")
+            self.Model(thread_id="thread-1", tool_call_id="xyz")
 
     def test_reason_optional(self):
-        m = self.Model(tool_call_id="xyz", approved=True)
+        m = self.Model(thread_id="thread-1", tool_call_id="xyz", approved=True)
         self.assertIsNone(m.reason)
 
     def test_answers_optional(self):
-        m = self.Model(tool_call_id="xyz", approved=False)
+        m = self.Model(thread_id="thread-1", tool_call_id="xyz", approved=False)
         self.assertIsNone(m.answers)
 
 

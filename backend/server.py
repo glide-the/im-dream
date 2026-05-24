@@ -1,8 +1,43 @@
 #!/usr/bin/env python3
+# [Input] Consume backend/.env, HTTP requests, database/auth/config modules.
+# [Output] Publish FastAPI application and REST/SSE routes.
+# [Pos] backend API entrypoint
+# [Sync] 2026-05-24: load backend/.env before importing config and route modules.
+# [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
 import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+_BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
+load_dotenv(_BACKEND_ENV_FILE, override=False)
+
+
+def _drop_unsupported_agent_env() -> None:
+    """Remove stale Agent env aliases that are outside this project's contract."""
+
+    allowed_ink_names = {
+        "INK_AGENT_ENABLE_MEMORY_MCP",
+        "INK_AGENT_TTL_S",
+        "INK_AGENT_SWEEP_INTERVAL_S",
+        "INK_AGENT_SSE_KEEPALIVE_S",
+        "INK_AGENT_MAX_TURNS",
+        "INK_AGENT_CONTEXT_SESSIONS",
+    }
+    for key in list(os.environ):
+        if key.startswith("INK_AGENT_MEM0_") or key in allowed_ink_names:
+            continue
+        if key.startswith("INK_AGENT_"):
+            os.environ.pop(key, None)
+            continue
+        if key.startswith("CLAUDE_CODE_") and key.endswith("_TOKEN"):
+            os.environ.pop(key, None)
+
+
+_drop_unsupported_agent_env()
 
 os.environ.setdefault("TZ", "UTC")
 if hasattr(time, "tzset"):
