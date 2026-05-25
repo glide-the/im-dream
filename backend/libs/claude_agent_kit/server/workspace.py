@@ -550,20 +550,25 @@ def _resolve_workspace_safe_path(
 ) -> Path:
     """Resolve *rel_path* inside *workspace_path* with path-traversal protection.
 
+    Returns a path reconstructed from the workspace root and the validated
+    relative portion (with symlinks resolved), so the return value contains
+    no user-controlled string components.
+
     Raises :class:`WorkspaceFileAccessError` (code ``"PATH_TRAVERSAL"``) when the
     resolved path would escape the workspace root.
     """
-    full_path = workspace_path / rel_path
-    resolved = full_path.resolve()
+    workspace_root = workspace_path.resolve()
+    resolved = (workspace_path / rel_path).resolve()
     try:
-        resolved.relative_to(workspace_path.resolve())
+        relative_part = resolved.relative_to(workspace_root)
     except ValueError:
         raise WorkspaceFileAccessError(
             "PATH_TRAVERSAL",
             "Path traversal not allowed",
             400,
         ) from None
-    return full_path
+    # Build the return path from trusted components only (no user string).
+    return workspace_root / relative_part
 
 
 def _mtime_iso(stat: os.stat_result) -> str:

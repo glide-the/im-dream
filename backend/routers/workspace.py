@@ -88,6 +88,24 @@ def _debug_headers() -> dict[str, str]:
     }
 
 
+import re as _re
+_SESSION_ID_RE = _re.compile(r'^[A-Za-z0-9_-]{1,128}$')
+
+
+def _validate_session_id(session_id: str) -> str:
+    """Validate that *session_id* is a safe alphanumeric identifier.
+
+    Raises :class:`HTTPException` 400 if the value contains path separators,
+    ``..``, or other characters that could be abused in filesystem operations.
+    """
+    if not session_id or not _SESSION_ID_RE.match(session_id):
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "Invalid sessionId: must be 1-128 alphanumeric, dash, or underscore characters"},
+        )
+    return session_id
+
+
 def _normalize_incoming_relative_path(raw_path: str) -> str:
     """Sanitise an untrusted relative path from a request.
 
@@ -153,6 +171,7 @@ async def list_workspace_files_endpoint(
 
     if not session_id:
         raise HTTPException(status_code=400, detail={"error": "sessionId is required"})
+    _validate_session_id(session_id)
 
     is_recursive = recursive in ("1", "true")
 
@@ -228,6 +247,7 @@ async def upload_workspace_files(
 
     if not session_id:
         raise HTTPException(status_code=400, detail={"error": "sessionId is required"})
+    _validate_session_id(session_id)
 
     target_path = (path or "").replace("\\", "/").strip("/")
 
@@ -343,6 +363,7 @@ async def delete_workspace_file_endpoint(
             status_code=400,
             detail={"error": "sessionId and path are required"},
         )
+    _validate_session_id(body.sessionId)
 
     try:
         workspace_path = get_or_create_workspace(body.sessionId)
@@ -393,6 +414,7 @@ async def move_workspace_file_endpoint(
             status_code=400,
             detail={"error": "sessionId, fromPath, and toPath are required"},
         )
+    _validate_session_id(body.sessionId)
 
     try:
         workspace_path = get_or_create_workspace(body.sessionId)
@@ -440,6 +462,7 @@ async def download_workspace_file(
             status_code=400,
             detail={"error": "sessionId and path are required"},
         )
+    _validate_session_id(session_id)
 
     try:
         workspace_path = get_or_create_workspace(session_id)
