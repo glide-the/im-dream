@@ -1,3 +1,7 @@
+// [Input] Consume AI SDK message and usage types for chat request/metadata contracts.
+// [Output] Define frontend chat transport request body, attachment, model, tool, and metadata types.
+// [Pos] chat-schema type node in frontend/src/lib
+// [Sync] 2026-05-25: remove frontend customer-context request fields from the chat schema.
 import type { LanguageModelUsage, UIMessage } from 'ai';
 
 export type ChatAttachment = {
@@ -27,7 +31,6 @@ export type ChatApiSchemaRequestBody = {
   chatModel?: ChatModel;
   toolChoice?: ToolChoice;
   attachments?: ChatAttachment[];
-  contextCustomerIds?: string[];
   systemPrompt?: string;
   allowedMcpServers?: Record<string, unknown>;
   allowedAppDefaultToolkit?: string[];

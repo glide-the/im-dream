@@ -1,3 +1,7 @@
+// [Input] Consume ClaudeAgentChatTransport, WorkspaceContext, chat schema/types, file proxy utilities, AIInputDock/helpers, ChatMessageList, and auth token.
+// [Output] Coordinate chat transport, pending attachments/tool choice, message state, scrolling, and input/message layout.
+// [Pos] chat-panel component node in frontend/src/components/chat
+// [Sync] 2026-05-25: stop forwarding frontend customer context into chat requests.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -12,15 +16,15 @@ import {
   type ChatApiSchemaRequestBody,
   type ChatAttachment,
   type ChatModel,
+  type ToolChoice,
   DEFAULT_CHAT_MODEL,
 } from '../../lib/chat-schema';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
-import AIInputDock, {
+import {
   type Attachment,
-  type ContextCustomer,
-  type ToolChoice,
   toAttachment,
-} from './AIInputDock';
+} from './AIInputDock.helpers';
+import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
 import { getAuthToken } from '../../contexts/AuthContext';
 
@@ -41,8 +45,6 @@ interface SystemConfigResponse {
 
 interface ChatPanelProps {
   threadId: string;
-  contextCustomerId?: string;
-  contextCustomers: ContextCustomer[];
   initialMessages?: UIMessage[];
   isLoading?: boolean;
   className?: string;
@@ -66,8 +68,6 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
 
 export default function ChatPanel({
   threadId,
-  contextCustomerId,
-  contextCustomers,
   initialMessages,
   isLoading = false,
   className,
@@ -80,7 +80,6 @@ export default function ChatPanel({
 }: ChatPanelProps) {
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
-    contextCustomerIds: string[];
     toolChoice: ToolChoice;
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
@@ -154,7 +153,6 @@ export default function ChatPanel({
           allowedAppDefaultToolkit: [],
           allowedMcpServers: {},
           attachments,
-          contextCustomerIds: getPendingData()?.contextCustomerIds ?? (contextCustomerId ? [contextCustomerId] : contextCustomers.map((customer) => customer.id)),
           systemPrompt: systemConfig?.system_prompt,
         };
 
@@ -204,7 +202,6 @@ export default function ChatPanel({
       setCurrentToolChoice('auto');
       pendingDataRef.current = {
         rawAttachments: queuedAttachments,
-        contextCustomerIds: contextCustomerId ? [contextCustomerId] : contextCustomers.map((customer) => customer.id),
         toolChoice: 'auto',
       };
 
@@ -225,7 +222,7 @@ export default function ChatPanel({
       }
       await sendMessage({ role: 'user', parts: queuedMessageParts });
     })();
-  }, [contextCustomerId, contextCustomers, queuedAttachments, queuedPrompt, queuedPromptNonce, sendMessage]);
+  }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, sendMessage]);
 
   const chatLoading = status === 'streaming' || status === 'submitted' || isLoading;
 
@@ -271,15 +268,12 @@ export default function ChatPanel({
 
       <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '48rem', margin: '0.75rem auto 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
         <AIInputDock
-          contextCustomerId={contextCustomerId}
-          contextCustomers={contextCustomers}
           openFileDialogSignal={openFileDialogSignal}
-          onSendMessage={async (message, uploadedFiles = [], customerIds = [], toolChoice = 'auto') => {
+          onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
             onConversationStart?.();
             setCurrentToolChoice(toolChoice);
             pendingDataRef.current = {
               rawAttachments: uploadedFiles.map(toAttachment),
-              contextCustomerIds: customerIds.length > 0 ? customerIds : contextCustomers.map((customer) => customer.id),
               toolChoice,
             };
 

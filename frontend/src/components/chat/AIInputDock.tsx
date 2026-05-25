@@ -1,3 +1,7 @@
+// [Input] Consume file upload hook, file proxy utility, input-dock helpers, chat icons, auth token, and keyboard interaction helpers.
+// [Output] Render the chat input dock, attachment upload controls, and message submit/stop actions.
+// [Pos] chat-input-dock component node in frontend/src/components/chat
+// [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
 import {
   useCallback,
   useEffect,
@@ -11,73 +15,25 @@ import {
 } from 'react';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
+import type { ToolChoice } from '../../lib/chat-schema';
 import { IconArrowUp, IconFile, IconLoader, IconStop, IconX } from './Icons';
+import {
+  runWithFileDialogTaskLock,
+  shouldHandleOpenFileDialogSignal,
+  shouldShowUploadHint,
+  type UploadedFile,
+} from './AIInputDock.helpers';
 import { shouldSendMessageOnKeyDown } from './interaction-utils';
 import { getAuthToken } from '../../contexts/AuthContext';
 
 const API_BASE = '/ink-and-memory';
 
-export interface UploadedFile {
-  id: string;
-  name: string;
-  mimeType: string;
-  size: number;
-  previewUrl?: string;
-  url?: string;
-  storageKey?: string;
-  dataUrl?: string;
-  progress?: number;
-  isUploading?: boolean;
-  abortController?: AbortController;
-  file?: File;
-  workspacePath?: string;
-  savedAt?: string;
-  hash?: string;
-  uploadSource?: 'click' | 'paste' | 'drag';
-}
-
-export interface Attachment {
-  name: string;
-  type: string;
-  size: number;
-  url?: string;
-  storageKey?: string;
-  workspacePath?: string;
-  savedAt?: string;
-  hash?: string;
-  uploadSource?: 'click' | 'paste' | 'drag';
-}
-
-export function toAttachment(file: UploadedFile): Attachment {
-  return {
-    name: file.name,
-    type: file.mimeType,
-    size: file.size,
-    url: file.storageKey ? toFileProxyUrl(file.storageKey) : file.url,
-    storageKey: file.storageKey,
-    workspacePath: file.workspacePath,
-    savedAt: file.savedAt,
-    hash: file.hash,
-    uploadSource: file.uploadSource,
-  };
-}
-
-export interface ContextCustomer {
-  id: string;
-  name?: string;
-  company?: string;
-}
-
-export type ToolChoice = 'auto' | 'none' | 'manual';
-export type AIInputDockMode = 'simple' | 'full';
+type AIInputDockMode = 'simple' | 'full';
 
 interface AIInputDockProps {
-  contextCustomerId?: string;
-  contextCustomers?: ContextCustomer[];
   onSendMessage: (
     message: string,
     files?: UploadedFile[],
-    customerIds?: string[],
     toolChoice?: ToolChoice,
   ) => void;
   placeholder?: string;
@@ -90,29 +46,9 @@ interface AIInputDockProps {
   workspaceSessionId?: string;
 }
 
-let fileDialogOpenLocked = false;
 const QUERY_INPUT_MAX_HEIGHT = 320;
 const QUERY_INPUT_MIN_HEIGHT = 72;
 const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
-
-export function shouldHandleOpenFileDialogSignal(
-  signal: number | undefined,
-  lastHandledSignal: number,
-): signal is number {
-  return typeof signal === 'number' && signal > 0 && signal !== lastHandledSignal;
-}
-
-export function runWithFileDialogTaskLock(callback: () => void): boolean {
-  if (fileDialogOpenLocked) {
-    return false;
-  }
-  fileDialogOpenLocked = true;
-  callback();
-  queueMicrotask(() => {
-    fileDialogOpenLocked = false;
-  });
-  return true;
-}
 
 function generateFileId(): string {
   return `file_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
@@ -128,10 +64,6 @@ function revokeObjectPreviewUrl(url?: string) {
   if (url?.startsWith('blob:')) {
     URL.revokeObjectURL(url);
   }
-}
-
-export function shouldShowUploadHint(query: string, isInputFocused: boolean): boolean {
-  return query.length === 0 && !isInputFocused;
 }
 
 function shouldSendWithKeyboard(
@@ -153,8 +85,6 @@ function shouldSendWithKeyboard(
 }
 
 export default function AIInputDock({
-  contextCustomerId,
-  contextCustomers = [],
   onSendMessage,
   placeholder = 'Ask Ink & Memory…',
   disabled = false,
@@ -415,23 +345,15 @@ export default function AIInputDock({
       return;
     }
 
-    const customerIds = contextCustomers.map((customer) => customer.id);
-    if (contextCustomerId && !customerIds.includes(contextCustomerId)) {
-      customerIds.push(contextCustomerId);
-    }
-
     onSendMessage(
       trimmedQuery,
       uploadedFiles.length > 0 ? uploadedFiles : undefined,
-      customerIds,
       defaultToolChoice,
     );
     setQuery('');
     uploadedFiles.forEach((file) => revokeObjectPreviewUrl(file.previewUrl));
     setUploadedFiles([]);
   }, [
-    contextCustomerId,
-    contextCustomers,
     defaultToolChoice,
     loading,
     onSendMessage,

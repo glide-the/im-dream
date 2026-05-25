@@ -2,6 +2,7 @@
 // [Output] Render chat workspace, thread history sidebar, file sidebar, quick actions, and ChatPanel.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
+// [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -10,7 +11,7 @@ import QuickActionCard from '../dashboard/QuickActionCard';
 import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
 import VerticalNav from '../dashboard/VerticalNav';
 import ChatPanel from './ChatPanel';
-import type { Attachment, ContextCustomer } from './AIInputDock';
+import type { Attachment } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 
@@ -34,10 +35,7 @@ interface RawChatMessage {
 }
 
 interface ChatViewProps {
-  title?: string;
   threadId?: string;
-  contextCustomerId?: string;
-  contextCustomers?: ContextCustomer[];
   onNewChat?: () => void;
   quickActions?: QuickActionCardItem[];
 }
@@ -100,10 +98,7 @@ async function deleteThread(threadId: string): Promise<boolean> {
 }
 
 export default function ChatView({
-  title: _title,
   threadId: initialThreadId,
-  contextCustomerId,
-  contextCustomers = [],
   onNewChat,
   quickActions = QUICK_ACTION_CARDS,
 }: ChatViewProps) {
@@ -291,8 +286,6 @@ export default function ChatView({
             <ChatPanel
               key={activeThreadId}
               threadId={activeThreadId}
-              contextCustomerId={contextCustomerId}
-              contextCustomers={contextCustomers}
               initialMessages={threadMessages ?? undefined}
               isLoading={isLoadingMessages}
               queuedPrompt={queuedPrompt}
