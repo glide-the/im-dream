@@ -19,6 +19,17 @@
 #                    branches from Pawkeyland on_tool_event; _TurnContext gains
 #                    current_reasoning_id/has_thinking_delta/completed_streamed_reasoning_texts;
 #                    emits reasoning-start/delta/end SSE frames.
+# [Sync] 2026-05-25: fix tool-invocation persistence for non-streaming AssistantMessage path:
+#                    tool_use/tool_use_start events emit SSE but never created inv_part, causing
+#                    tools to be lost in history; now creates inv_part alongside tool-input-available
+#                    SSE when payload.input is present and the tool is not yet in tool_inv_by_id.
+# [Sync] 2026-05-25: align _persist_turn with better-chatbot schema (parts list, NOT NULL):
+#                    use new database.save_chat_message(parts=list, metadata=dict) signature;
+#                    user message always has parts (text fallback when message_parts is None);
+#                    JSON serialisation moved into database layer.
+# [Sync] 2026-05-25: refactor parts collection — use AgentStreamingCallbacks as single source:
+#                    text deltas written directly to collected_parts[-1]["text"] in on_text_delta;
+#                    text-end emitted once from on_text_done(full_text); no state flags needed.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -102,29 +113,45 @@ _TEXT_PART_ID = "text-0"
 
 @dataclass
 class _TurnContext:
-    """Mutable state bundle for a single agent turn."""
+    """Mutable state bundle for a single agent turn.
+
+    ``collected_parts`` is the single authority for persistence.  It mirrors the
+    UIMessage parts that correspond to the SSE events sent to the frontend (§4.5.2):
+
+      SSE event(s)                         → collected_parts entry
+      ─────────────────────────────────    ────────────────────────────────────────
+      text-start / text-delta / text-end   → {"type":"text", "text":"..."}
+                                             (delta appended in-place; no buffer)
+      reasoning-start/delta/end            → {"type":"reasoning","id":"...","text":"..."}
+      tool-input-start + tool-input-       → {"type":"tool-invocation","state":"call",
+        available                              "toolCallId":..., "toolName":..., ...}
+      tool-output-available                → patches matching entry in-place via
+                                             tool_inv_by_id: state→"output-available"
+
+    Events NOT written to collected_parts:
+      message-metadata, tool-approval-request, message-final, finish, error
+      — these are lifecycle / aggregate frames with no UIMessage part equivalent.
+
+    ``_TurnContext`` is created fresh each turn so ``collected_parts`` starts empty
+    automatically — no explicit clearing is needed.
+    """
 
     queue: asyncio.Queue
     confirmation_store: ToolConfirmationStore
     pending_tool_call_ids: set = field(default_factory=set)
-    full_text_accumulator: list[str] = field(default_factory=list)
     turn_start_ts: float = field(default_factory=time.monotonic)
-    # Tracks whether text-start has been emitted for the current text block
-    text_started: bool = False
-    # Dedup sets for tool events (mirrors Pawkeyland registered/emitted_tool_input_ids)
+    # Dedup sets for tool events.
     registered_tool_call_ids: set = field(default_factory=set)
     emitted_tool_input_ids: set = field(default_factory=set)
-    # Thinking / reasoning tracking (mirrors Pawkeyland thinking state)
+    # Thinking / reasoning tracking.
     current_reasoning_id: Optional[str] = None
     has_thinking_delta: bool = False
     completed_streamed_reasoning_texts: list = field(default_factory=list)
-    # Parts accumulation for persistence (built during streaming; used in _persist_turn)
-    collected_parts: list = field(default_factory=list)
-    # Tool invocations by toolCallId — entries are shared refs inside collected_parts
-    # so in-place mutations are reflected without index tracking.
-    tool_inv_by_id: dict = field(default_factory=dict)
-    # Current reasoning text accumulator (deltas for the open reasoning block)
     current_reasoning_text: list = field(default_factory=list)
+    # Ordered UIMessage parts written in SSE event order (reasoning / tool-invocation / text).
+    collected_parts: list = field(default_factory=list)
+    # Shared refs so tool_result can patch the matching tool-invocation part in-place.
+    tool_inv_by_id: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +259,6 @@ class ClaudeAgentService:
 
         if result.success:
             full_text = result.full_text
-            # Ensure any open text block is closed before message-final
-            if execution.turn_context.text_started:
-                await queue.put(_sse("text-end", {"id": _TEXT_PART_ID}))
-                execution.turn_context.text_started = False
             await queue.put(
                 _sse("message-final", {
                     "text": full_text,
@@ -258,11 +281,10 @@ class ClaudeAgentService:
     ) -> None:
         """Save user and assistant messages to the database after a successful turn.
 
-        Aligned with the better-chatbot pattern: the user message is stored
-        with its original AI-SDK message ID and full ``parts_json`` so that
-        file attachments and other non-text parts survive a page reload.
-        The assistant message is saved with its complete ``parts_json`` (including
-        reasoning and tool-invocation parts) and ``metadata_json`` (model / usage).
+        Aligned with better-chatbot onFinish / chatRepository.upsertMessage pattern:
+        - user message: parts list (from frontend AI-SDK message.parts, or text fallback)
+        - assistant message: parts list (reasoning + tool-invocations + text) + metadata dict
+        Serialisation (JSON) is handled inside database.save_chat_message.
         """
         import asyncio
         import database
@@ -277,38 +299,33 @@ class ClaudeAgentService:
         loop = asyncio.get_running_loop()
 
         def _save() -> None:
-            # Serialise user message parts for storage (mirrors better-chatbot
-            # convertToSavePart: store parts as-is so they are restored on reload).
-            user_parts_json: Optional[str] = None
-            if user_parts:
-                try:
-                    user_parts_json = json.dumps(user_parts, ensure_ascii=False)
-                except Exception:
-                    user_parts_json = None
-
+            # --- User message ---
+            # Mirror better-chatbot: store message.parts from the frontend AI SDK.
+            # Fall back to a minimal text part when message_parts is not provided.
+            resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": user_text}]
             database.save_chat_message(
-                thread_id, "user", user_text,
-                parts_json=user_parts_json,
+                thread_id, "user",
+                parts=resolved_user_parts,
                 message_id=user_message_id,
             )
 
-            # Build complete assistant parts list: reasoning + tool-invocations + text
+            # --- Assistant message ---
+            # collected_parts is the ordered UIMessage parts list built in real-time
+            # as SSE events were emitted: text (flushed on text-end) → tool-invocation
+            # (created on tool_input_available) → more text → ... This mirrors how the
+            # Vercel AI SDK assembles responseMessage.parts from UIMessageChunks in
+            # better-chatbot — the ordering is naturally preserved by the SSE event order.
             asst_parts: list = list(turn_ctx.collected_parts)
-            if assistant_text:
-                asst_parts.append({"type": "text", "text": assistant_text})
-            asst_parts_json: Optional[str] = None
-            if asst_parts:
-                try:
-                    asst_parts_json = json.dumps(asst_parts, ensure_ascii=False)
-                except Exception:
-                    asst_parts_json = None
+            if not asst_parts:
+                # Fallback: streaming produced no parts (e.g. test stubs or empty run).
+                asst_parts = [{"type": "text", "text": assistant_text}] if assistant_text else []
 
-            # Build metadata (model + usage + toolCount) for the assistant message
-            metadata: dict = {}
+            # Build metadata (model + usage + toolCount) — same as better-chatbot metadata
+            asst_metadata: dict = {}
             if result and result.usage:
                 input_t = result.usage.get("input_tokens")
                 output_t = result.usage.get("output_tokens")
-                metadata["usage"] = {
+                asst_metadata["usage"] = {
                     "inputTokens": input_t,
                     "outputTokens": output_t,
                     "totalTokens": result.usage.get("total_tokens") or (
@@ -316,21 +333,18 @@ class ClaudeAgentService:
                     ),
                 }
             if execution.request.model:
-                metadata["chatModel"] = {
+                asst_metadata["chatModel"] = {
                     "provider": "anthropic",
                     "model": execution.request.model,
                 }
-            tool_count = sum(
-                1 for p in asst_parts if p.get("type") == "tool-invocation"
-            )
+            tool_count = sum(1 for p in asst_parts if p.get("type") == "tool-invocation")
             if tool_count:
-                metadata["toolCount"] = tool_count
-            asst_metadata_json: Optional[str] = json.dumps(metadata, ensure_ascii=False) if metadata else None
+                asst_metadata["toolCount"] = tool_count
 
             database.save_chat_message(
-                thread_id, "assistant", assistant_text,
-                parts_json=asst_parts_json,
-                metadata_json=asst_metadata_json,
+                thread_id, "assistant",
+                parts=asst_parts,
+                metadata=asst_metadata or None,
             )
             # Auto-fill thread title from first user message if still NULL
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
@@ -376,48 +390,45 @@ class ClaudeAgentService:
         queue: asyncio.Queue, turn_ctx: _TurnContext
     ):
         async def on_text_delta(delta: str) -> None:
-            turn_ctx.full_text_accumulator.append(delta)
-            if not turn_ctx.text_started:
+            # Open a new text part when none is active; append delta in-place otherwise.
+            if not turn_ctx.collected_parts or turn_ctx.collected_parts[-1].get("type") != "text":
+                turn_ctx.collected_parts.append({"type": "text", "text": ""})
                 await queue.put(_sse("text-start", {"id": _TEXT_PART_ID}))
-                turn_ctx.text_started = True
+            turn_ctx.collected_parts[-1]["text"] += delta
             await queue.put(_sse("text-delta", {"id": _TEXT_PART_ID, "delta": delta}))
 
         return on_text_delta
 
     @staticmethod
     def _make_text_done_cb(queue: asyncio.Queue, turn_ctx: _TurnContext):
-        async def on_text_done(full_text: str) -> None:  # noqa: ARG001
-            if turn_ctx.text_started:
+        async def on_text_done(full_text: str) -> None:
+            if full_text:
                 await queue.put(_sse("text-end", {"id": _TEXT_PART_ID}))
-                turn_ctx.text_started = False
 
         return on_text_done
 
     @staticmethod
     def _make_tool_event_cb(queue: asyncio.Queue, turn_ctx: _TurnContext):
-        """Emit Pawkeyland-style separated tool SSE events.
+        """Emit SSE tool / reasoning events and mirror them into collected_parts.
 
-        Dispatches on ``ToolEventPayload.type`` (Pawkeyland convention) rather
-        than the legacy ``payload.state`` approach, which could emit spurious
-        ``tool-output-available`` frames for ``result`` events (tool_call_id=None).
+        Dispatches on ``ToolEventPayload.type`` (aligned with §4.5.2 event contract).
 
-        Handled event types:
-          ``tool_use`` / ``tool_use_start``  → tool-input-start (+ input if present)
-          ``tool_input_available``           → tool-input-start (dedup) + tool-input-available
-          ``tool_result``                    → tool-output-available (with defensive auto-register)
+        Handled → SSE emitted + collected_parts updated:
+          ``thinking_delta``          → reasoning-start / reasoning-delta
+          ``content_block_stop``      → reasoning-end + reasoning part appended
+          ``thinking``                → reasoning-start/delta/end (atomic block)
+          ``tool_use`` / ``tool_use_start`` → tool-input-start (+ tool-input-available
+                                         if input present) + inv_part created
+          ``tool_input_available``    → tool-input-start (dedup) + tool-input-available
+                                         + inv_part created
+          ``tool_result``             → tool-output-available + inv_part patched in-place
 
-        Intentionally ignored:
-          ``result``, ``thinking``, ``thinking_delta``, ``content_block_stop``,
-          ``message_start``, ``message_delta``, ``message_stop``, ``tool_progress``,
-          ``tool_use_summary``, ``text_block_start``, ``tool_input_delta``
-          — not applicable to Ink & Memory.
+        Intentionally ignored (no SSE frame, no collected_parts entry):
+          ``result``, ``message_start``, ``message_delta``, ``message_stop``,
+          ``tool_progress``, ``tool_use_summary``, ``text_block_start``,
+          ``tool_input_delta`` — not part of the §4.5.2 contract.
         """
         async def on_tool_event(payload: ToolEventPayload) -> None:
-            # Close any open text block before tool events (matches Pawkeyland on_tool_event)
-            if turn_ctx.text_started:
-                await queue.put(_sse("text-end", {"id": _TEXT_PART_ID}))
-                turn_ctx.text_started = False
-
             tool_call_id = payload.tool_call_id
             tool_name = payload.tool_name
             event_type = payload.type
@@ -505,6 +516,20 @@ class ClaudeAgentService:
                         "toolName": tool_name,
                         "input": payload.input,
                     }))
+                    # Persist: tool_use events (non-streaming AssistantMessage path) carry
+                    # the full input but no subsequent tool_input_available event is fired,
+                    # so we must create the inv_part here to avoid tool calls being lost.
+                    if tool_call_id not in turn_ctx.tool_inv_by_id:
+                        new_inv: dict = {
+                            "type": "tool-invocation",
+                            "toolCallId": tool_call_id,
+                            "toolName": tool_name,
+                            "state": "call",
+                            "input": payload.input,
+                            "dynamic": True,
+                        }
+                        turn_ctx.collected_parts.append(new_inv)
+                        turn_ctx.tool_inv_by_id[tool_call_id] = new_inv
                 return
 
             # --- tool_input_available: complete streamed JSON input ready ---
@@ -605,7 +630,8 @@ class ClaudeAgentService:
             # POST /tool-confirm (fast clients must not resolve ahead of registration).
             store.begin_pending(tool_call_id)
 
-            # Step 1: register and emit input events (dedup against on_tool_event).
+            # Step 1: register and emit tool-input-start + tool-input-available SSEs.
+            # Also write inv_part to collected_parts so tool_result can patch it in-place.
             turn_ctx.registered_tool_call_ids.add(tool_call_id)
             await queue.put(_sse("tool-input-start", {
                 "toolCallId": tool_call_id,
@@ -617,8 +643,19 @@ class ClaudeAgentService:
                 "toolName": tool_name,
                 "input": tool_input,
             }))
+            if tool_call_id not in turn_ctx.tool_inv_by_id:
+                inv_part: dict = {
+                    "type": "tool-invocation",
+                    "toolCallId": tool_call_id,
+                    "toolName": tool_name,
+                    "state": "call",
+                    "input": tool_input,
+                    "dynamic": True,
+                }
+                turn_ctx.collected_parts.append(inv_part)
+                turn_ctx.tool_inv_by_id[tool_call_id] = inv_part
 
-            # Step 2: emit approval-request event.
+            # Step 2: emit tool-approval-request (§4.5.2 lifecycle frame — not in collected_parts).
             await queue.put(_sse("tool-approval-request", {
                 "toolCallId": tool_call_id,
                 "toolName": tool_name,

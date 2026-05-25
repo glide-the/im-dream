@@ -22,9 +22,10 @@ interface ChatThread {
 interface RawChatMessage {
   id: string;
   role: string;
-  content: string;
-  parts_json?: string;
-  metadata?: string;
+  /** Parsed UIMessage['parts'] array — returned by the API already deserialized. */
+  parts: UIMessage['parts'];
+  /** Parsed ChatMetadata — returned by the API already deserialized. */
+  metadata?: Record<string, unknown>;
   created_at: string;
 }
 
@@ -67,14 +68,12 @@ async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
     const data = await res.json() as { messages?: RawChatMessage[] };
     const msgs = data.messages ?? [];
     return msgs.map((m) => {
-      let parts: UIMessage['parts'] = [{ type: 'text', text: m.content }];
-      if (m.parts_json) {
-        try { parts = JSON.parse(m.parts_json) as UIMessage['parts']; } catch { /* fallback */ }
-      }
-      let metadata: Record<string, unknown> | undefined;
-      if (m.metadata) {
-        try { metadata = JSON.parse(m.metadata) as Record<string, unknown>; } catch { /* skip */ }
-      }
+      // parts is already a parsed list — aligned with better-chatbot
+      // ChatRepository.selectMessagesByThreadId which returns parts directly.
+      const parts: UIMessage['parts'] = Array.isArray(m.parts) && m.parts.length > 0
+        ? m.parts
+        : [{ type: 'text', text: '' }];
+      const metadata = m.metadata && typeof m.metadata === 'object' ? m.metadata : undefined;
       return {
         id: m.id,
         role: m.role as UIMessage['role'],

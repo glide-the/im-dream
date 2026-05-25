@@ -1,5 +1,6 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentService 模块设计.md — 路径已适配 Ink & Memory 工程规范。
-> **[Sync] 2026-05-24**: 类图与 SSE 事件表对齐当前 service.py：`ClaudeAgentRunRequest` 字段替换为 Ink & Memory 实际字段；`ClaudeAgentService` 移除 `has_pending_tool` / `pending_tool_ids`（Pawkeyland 专属）；`_TurnExecution.turn_context` 字段名修正；SSE 事件表移除 `reasoning-*`（未启用 thinking）、`tool-approval-request.approvalId`（I&M 不发）；新增 `on_tool_event` 改为 `event.type` 分发注记、`_TurnContext` 新增 `registered_tool_call_ids` / `emitted_tool_input_ids`。
+> **[Sync] 2026-05-24**: 类图与 SSE 事件表对齐当前 service.py：`ClaudeAgentRunRequest` 字段替换为 Ink & Memory 实际字段；`ClaudeAgentService` 移除 `has_pending_tool` / `pending_tool_ids`（Pawkeyland 专属）；SSE 事件表对齐 thinking 模式（reasoning-start/delta/end 已启用）。  
+> **[Sync] 2026-05-25**: 更新 `_TurnContext` 类图补充持久化字段（`collected_parts`、`tool_inv_by_id`、`current_reasoning_*`）；更新 `execute_session` 描述说明 `_persist_turn` 逻辑；补充 `tool_use` 非流式路径 inv_part 修复说明。
 
 # ClaudeAgentService 模块设计
 
@@ -78,6 +79,12 @@ classDiagram
         full_text_accumulator: list[str]
         registered_tool_call_ids: set
         emitted_tool_input_ids: set
+        collected_parts: list[dict]
+        tool_inv_by_id: dict[str, dict]
+        current_reasoning_id: str|None
+        has_thinking_delta: bool
+        completed_streamed_reasoning_texts: list[str]
+        current_reasoning_text: list[str]
     }
 
     class ClaudeAgentThreadFactory {
@@ -119,7 +126,7 @@ classDiagram
 `ClaudeAgentService` 不再暴露 all-in-one orchestrator，只提供两个 phase-aware 方法：
 
 - **`assemble_context(request, *, state, queue, runner)`** — Phase 1 单一所有者（Ink & Memory）。首轮调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id)` 构建 system prompt，写入 `state.system_prompt`（享元缓存）；后续轮复用缓存，跳过重建。构建 `user_message`、`AgentRunOptions`、`_TurnContext`（包含 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合），发射初始 `message-metadata` SSE。返回 `_TurnExecution` 载体，`runner` 字段由 Phase 2 填入。
-- **`execute_session(execution)`** — Phase 3 纯消费者。构造 5 个 `AgentStreamingCallbacks` 闭包（`on_text_delta`、`on_text_done`、`on_tool_event`、`on_tool_confirmation_request`、`on_error`），驱动 `runner.run_streaming(opts, callbacks)`，emit `message-final` / `finish` / `error`，持久化用户和助手消息到 `chat_messages` 表。
+- **`execute_session(execution)`** — Phase 3 纯消费者。构造 5 个 `AgentStreamingCallbacks` 闭包（`on_text_delta`、`on_text_done`、`on_tool_event`、`on_tool_confirmation_request`、`on_error`），驱动 `runner.run_streaming(opts, callbacks)`，emit `message-final` / `finish` / `error`。成功后调用 `_persist_turn`，将 user 消息（含原始 `message_parts`）和 assistant 消息（`collected_parts` 中的 `reasoning` + `tool-invocation` + 末尾追加的 `text`）写入 `chat_message` 表；首轮自动填充 `chat_thread.title`。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -293,9 +300,13 @@ sequenceDiagram
 | `finish` | 流结束 | `finishReason`（`"stop"` 或 `"error"`） |
 | `error` | 任意异常 | `errorText` |
 
-> **`on_tool_event` 分发模式**（2026-05-24 对齐 Pawkeyland）：回调按 `ToolEventPayload.type` 分发（`tool_use_start`、`tool_input_available`、`tool_result`），而非旧的 `payload.state` 分发。`result`、`thinking`、`message_*`、`tool_progress` 等类型在 Ink & Memory 中明确忽略。
+> **`on_tool_event` 分发模式**（2026-05-24 对齐 Pawkeyland）：回调按 `ToolEventPayload.type` 分发，`result`、`message_*`、`tool_progress` 等类型在 Ink & Memory 中明确忽略。
 >
-> **与 Pawkeyland 差异**：Pawkeyland 还额外发射 `reasoning-start/delta/end`（thinking 模式）、`message-metadata.unstableData`、`tool-approval-request.approvalId`，Ink & Memory 均未启用。详细对比见 [`claude-agent-api-contracts.md §4.5.3`](./claude-agent-api-contracts.md)。
+> **持久化路径说明**（2026-05-25）：
+> - **流式路径**（`StreamEvent`）：`tool_use_start` → `tool_input_available`（`content_block_stop` 触发）→ `tool_result`；`inv_part` 在 `tool_input_available` 时创建。
+> - **非流式路径**（`AssistantMessage`）：`tool_use`（携带完整 input）→ `tool_result`；`inv_part` 在 `tool_use` 事件处理时创建（2026-05-25 修复：之前仅发 SSE 不创建 `inv_part`，导致工具调用在历史中完全丢失）。
+>
+> **与 Pawkeyland 差异**：`reasoning-start/delta/end`（thinking 模式）在 Ink & Memory 中已启用；`message-metadata.unstableData`、`tool-approval-request.approvalId` 未启用。详细对比见 [`claude-agent-api-contracts.md §4.5.3`](./claude-agent-api-contracts.md)。
 
 ---
 
