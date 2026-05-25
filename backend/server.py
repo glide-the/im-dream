@@ -749,6 +749,7 @@ from routers.preferences import router as preferences_router
 from routers.reports import router as reports_router
 from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
+from routers.workspace import router as workspace_router
 from routers.voices import (
     DeckCreateRequest,
     DeckUpdateRequest,
@@ -801,6 +802,7 @@ app.include_router(voices_router)
 app.include_router(friends_router)
 app.include_router(claude_agent_router)
 app.include_router(storage_router)
+app.include_router(workspace_router)
 
 
 @app.websocket("/ws/speech-recognition")

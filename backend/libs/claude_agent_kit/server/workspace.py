@@ -1,11 +1,14 @@
 # [Input] None — reads AGENT_CWD env var and project root for template assets.
 # [Output] Provide get_workspace_root, init_workspace, get_or_create_workspace,
-#          extract_archive_in_skills to application and API layers.
+#          extract_archive_in_skills, list_workspace_files, list_workspace_file_tree,
+#          read_workspace_file_content, write_workspace_file, delete_workspace_file,
+#          move_workspace_file to application and API layers.
 # [Pos] workspace manager node in libs/claude_agent_kit/server
 # [Sync] 2026-05-06: initial implementation — WSK-01 workspace init + WSK-04 archive extraction
 # [Sync] 2026-05-08: refresh project .claude template files on every init while preserving runtime skills.
 # [Sync] 2026-05-08: call sync_skills_symlinks() at the end of init_workspace so skills are linked on first init.
 # [Sync] 2026-05-09: seed workspace/skills/ from project .claude/skills/ on init so bundled skills are available.
+# [Sync] 2026-05-25: add file management API (list/read/write/delete/move) ported from claude-agent-next-kit workspace.ts.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -27,14 +30,17 @@ failure the original ``skills/`` content is preserved unchanged.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import shutil
 import tarfile
 import tempfile
 import zipfile
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Literal, Optional
+from typing import List, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -472,3 +478,288 @@ def _extract_tar_safe(archive_path: Path, extract_root: Path) -> None:
             tf.extractall(extract_root, members=members, filter="data")
         except TypeError:
             tf.extractall(extract_root, members=members)
+
+# ---------------------------------------------------------------------------
+# Public API — file management (ported from claude-agent-next-kit workspace.ts)
+# ---------------------------------------------------------------------------
+
+# Error codes mirroring the TypeScript WorkspaceFileAccessErrorCode union type.
+WorkspaceFileAccessErrorCode = Literal["PATH_TRAVERSAL", "NOT_FOUND", "IS_DIRECTORY"]
+
+
+class WorkspaceFileAccessError(Exception):
+    """Raised when a workspace file access operation fails.
+
+    Attributes:
+        code: Machine-readable error category.
+        status: Suggested HTTP status code.
+    """
+
+    def __init__(
+        self,
+        code: WorkspaceFileAccessErrorCode,
+        message: str,
+        status: int,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
+@dataclass
+class WorkspaceFileInfo:
+    """Metadata for a single entry inside a workspace directory."""
+
+    name: str
+    path: str
+    is_directory: bool
+    size: int
+    modified_at: str  # ISO 8601
+
+
+@dataclass
+class WorkspaceFileTreeNode:
+    """Recursive tree node — extends WorkspaceFileInfo with optional children."""
+
+    name: str
+    path: str
+    is_directory: bool
+    size: int
+    modified_at: str  # ISO 8601
+    children: Optional[List["WorkspaceFileTreeNode"]] = field(default=None)
+
+
+@dataclass
+class WorkspaceFileContent:
+    """File content together with its metadata."""
+
+    content: bytes
+    file_name: str
+    size: int
+    modified_at: str  # ISO 8601
+
+
+def _normalize_sub_path(sub_path: str) -> str:
+    """Strip leading/trailing slashes and normalise backslashes."""
+    return sub_path.replace("\\", "/").strip("/")
+
+
+def _resolve_workspace_safe_path(
+    workspace_path: Path,
+    rel_path: str,
+) -> Path:
+    """Resolve *rel_path* inside *workspace_path* with path-traversal protection.
+
+    Raises :class:`WorkspaceFileAccessError` (code ``"PATH_TRAVERSAL"``) when the
+    resolved path would escape the workspace root.
+    """
+    full_path = workspace_path / rel_path
+    resolved = full_path.resolve()
+    try:
+        resolved.relative_to(workspace_path.resolve())
+    except ValueError:
+        raise WorkspaceFileAccessError(
+            "PATH_TRAVERSAL",
+            "Path traversal not allowed",
+            400,
+        ) from None
+    return full_path
+
+
+def _mtime_iso(stat: os.stat_result) -> str:
+    """Convert a ``stat_result`` mtime to an ISO 8601 UTC string."""
+    return datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+
+
+def _is_skills_path(file_path: str) -> bool:
+    """Return True when *file_path* (relative) is inside the ``skills/`` directory."""
+    normalized = file_path.replace("\\", "/")
+    return normalized == "skills" or normalized.startswith("skills/")
+
+
+def list_workspace_files(
+    workspace_path: Path,
+    sub_path: str = "",
+) -> List[WorkspaceFileInfo]:
+    """List the immediate children of a workspace directory.
+
+    Returns entries sorted with directories first, then by name.
+    Dot-prefixed entries are excluded.  Returns an empty list when *sub_path*
+    does not exist inside *workspace_path*.
+    """
+    normalized_sub = _normalize_sub_path(sub_path)
+    if normalized_sub:
+        target_dir = _resolve_workspace_safe_path(workspace_path, normalized_sub)
+    else:
+        target_dir = workspace_path
+
+    if not target_dir.exists():
+        return []
+
+    try:
+        entries = list(target_dir.iterdir())
+    except OSError:
+        return []
+
+    result: List[WorkspaceFileInfo] = []
+    for entry in entries:
+        if entry.name.startswith("."):
+            continue
+        try:
+            stat = entry.stat()
+        except OSError:
+            continue
+        relative_path = f"{normalized_sub}/{entry.name}" if normalized_sub else entry.name
+        result.append(
+            WorkspaceFileInfo(
+                name=entry.name,
+                path=relative_path,
+                is_directory=entry.is_dir(),
+                size=stat.st_size,
+                modified_at=_mtime_iso(stat),
+            )
+        )
+
+    result.sort(key=lambda f: (0 if f.is_directory else 1, f.name.lower()))
+    return result
+
+
+def list_workspace_file_tree(
+    workspace_path: Path,
+    sub_path: str = "",
+) -> List[WorkspaceFileTreeNode]:
+    """Recursively build a file-tree rooted at *sub_path* in *workspace_path*."""
+    current_level = list_workspace_files(workspace_path, sub_path)
+    nodes: List[WorkspaceFileTreeNode] = []
+    for info in current_level:
+        node = WorkspaceFileTreeNode(
+            name=info.name,
+            path=info.path,
+            is_directory=info.is_directory,
+            size=info.size,
+            modified_at=info.modified_at,
+        )
+        if info.is_directory:
+            node.children = list_workspace_file_tree(workspace_path, info.path)
+        nodes.append(node)
+    return nodes
+
+
+def read_workspace_file_content(
+    workspace_path: Path,
+    file_path: str,
+) -> WorkspaceFileContent:
+    """Read a file from the workspace and return its content and metadata.
+
+    Raises :class:`WorkspaceFileAccessError` when the file is not found, the
+    path traverses outside the workspace, or the path points to a directory.
+    """
+    full_path = _resolve_workspace_safe_path(workspace_path, file_path)
+
+    if not full_path.exists():
+        raise WorkspaceFileAccessError("NOT_FOUND", "File not found", 404)
+
+    if full_path.is_dir():
+        raise WorkspaceFileAccessError(
+            "IS_DIRECTORY",
+            "Directory download is not supported",
+            400,
+        )
+
+    stat = full_path.stat()
+    return WorkspaceFileContent(
+        content=full_path.read_bytes(),
+        file_name=full_path.name,
+        size=stat.st_size,
+        modified_at=_mtime_iso(stat),
+    )
+
+
+def write_workspace_file(
+    workspace_path: Path,
+    file_path: str,
+    content: bytes,
+) -> str:
+    """Write *content* to *file_path* inside *workspace_path*.
+
+    Creates parent directories as needed.  When *file_path* is inside
+    ``skills/``, symlinks are automatically re-synced and any recognised
+    archive is extracted asynchronously.
+
+    Returns the relative path of the written file.
+    """
+    full_path = _resolve_workspace_safe_path(workspace_path, file_path)
+    full_path.parent.mkdir(parents=True, exist_ok=True)
+    full_path.write_bytes(content)
+
+    if _is_skills_path(file_path):
+        from .workspace_file_sync import sync_skills_symlinks  # local import
+        sync_skills_symlinks(workspace_path)
+        if is_archive(full_path.name):
+            import threading
+            threading.Thread(
+                target=lambda: extract_archive_in_skills(workspace_path, full_path.name),
+                daemon=True,
+            ).start()
+
+    return file_path
+
+
+def delete_workspace_file(
+    workspace_path: Path,
+    file_path: str,
+) -> bool:
+    """Delete a file or directory from the workspace.
+
+    Returns ``True`` on success, ``False`` when the path does not exist.
+    Automatically re-syncs skills symlinks when the deleted path is inside
+    ``skills/``.
+    """
+    full_path = _resolve_workspace_safe_path(workspace_path, file_path)
+
+    if not full_path.exists() and not full_path.is_symlink():
+        return False
+
+    try:
+        if full_path.is_dir() and not full_path.is_symlink():
+            shutil.rmtree(full_path)
+        else:
+            full_path.unlink()
+    except OSError:
+        return False
+
+    if _is_skills_path(file_path):
+        from .workspace_file_sync import sync_skills_symlinks  # local import
+        sync_skills_symlinks(workspace_path)
+
+    return True
+
+
+def move_workspace_file(
+    workspace_path: Path,
+    from_path: str,
+    to_path: str,
+) -> bool:
+    """Move or rename a file within the workspace.
+
+    Returns ``True`` on success, ``False`` when the source does not exist.
+    Creates the destination parent directory if needed.  Re-syncs skills
+    symlinks when either path is inside ``skills/``.
+    """
+    full_from = _resolve_workspace_safe_path(workspace_path, from_path)
+    full_to = _resolve_workspace_safe_path(workspace_path, to_path)
+
+    if not full_from.exists():
+        return False
+
+    try:
+        full_to.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(full_from), str(full_to))
+    except OSError:
+        return False
+
+    if _is_skills_path(from_path) or _is_skills_path(to_path):
+        from .workspace_file_sync import sync_skills_symlinks  # local import
+        sync_skills_symlinks(workspace_path)
+
+    return True
