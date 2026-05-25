@@ -142,7 +142,6 @@ Settings 页面通过以下入口访问：
 
 - 桌面端顶部导航栏（`TopNavBar`）的 Settings 选项。
 - 移动端底部导航栏的 Settings 图标。
-- Chat 页面左侧 `VerticalNav` 的设置图标（`IconSettings`）通过 `onNavigateToSettings` 回调跳转，不再触发侧边栏弹出。
 
 ## 10. 可访问性
 
@@ -154,7 +153,7 @@ Settings 页面通过以下入口访问：
 ## 11. 验收标准
 
 - Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式）。
-- Chat 页面不再渲染模型配置侧边栏，首次点击 Settings 图标导航至 Settings 页面。
+- Chat 页面不再渲染模型配置侧边栏，也不在左侧 `VerticalNav` 中提供 Settings 入口。
 - 所有颜色引用 [Color System](<./Color System.md>) token，无孤立十六进制值。
 - Light/Dark 模式均可正常显示。
 - 配置变更后正确同步到 `/api/system-config`。
@@ -165,7 +164,7 @@ Settings 页面通过以下入口访问：
 本轮已完成以下前端实现：
 - 新建 `ModelConfigSection.tsx`，封装主题、模型、系统提示词、工作区模式的配置 UI 与 API 交互逻辑。
 - 在 `App.tsx` Settings 视图中注入 `<ModelConfigSection />`，作为独立区域显示。
-- `VerticalNav.tsx` 设置图标绑定 `onNavigateToSettings` 回调。
+- `VerticalNav.tsx` 不再渲染 Settings 图标；Settings 保留顶部导航栏和移动端底部导航栏入口。
 - `ChatView.tsx` 移除 `Sidebar` 组件，不再触发模型配置侧边栏弹出。
 
 后续如需扩展 Settings 页面，建议将整个 Settings 视图提取为独立 `SettingsView.tsx` 组件，与 `App.tsx` 解耦。

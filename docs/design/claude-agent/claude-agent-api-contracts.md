@@ -1,6 +1,7 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude Code Runtime 服务入参与SSE响应报文整理.md
 > **Ink & Memory 适配**: API 端点路径一致（`POST /api/claude-agent`）；necklace/pet/Mem0 等 Pawkeyland 专属字段已移除。
-> **[Sync] 2026-05-24**: SSE 报文格式已与 Pawkeyland 完全对齐：`text-delta.delta`（原 `text`）、`text-start/end`（原 `text-done`）、分离 tool 事件、`error.errorText`（原 `message`）、`finish.finishReason`（原 `reason`）。
+> **[Sync] 2026-05-24**: SSE 报文格式已与 Pawkeyland 完全对齐：`text-delta.delta`（原 `text`）、`text-start/end`（原 `text-done`）、分离 tool 事件、`error.errorText`（原 `message`）、`finish.finishReason`（原 `reason`）。  
+> **[Sync] 2026-05-25**: 新增 §4.5.4 说明 SSE 事件收集机制：`collected_parts` 按发出顺序收集原始事件 dict，`_sse_events_to_ui_parts()` 在持久化时做线性转换。
 > **[Sync] 2026-05-24**: backend `_make_tool_event_cb` 改为 `event.type` 分发（原 `payload.state`）；修复 `result` 事件导致 `toolCallId=null` 的错误 SSE 帧；新增 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合到 `_TurnContext`；`_make_tool_confirm_cb` 增加 `turn_ctx` 参数与 `CancelledError` 处理。
 > **[Sync] 2026-05-24**: frontend `claude-agent-transport.ts` 完全重写：移除旧 `text-delta.text` / `text-done` / `tool-event.state` / `finish.reason` / `error.message`；新增 `text-start` / `text-delta(delta)` / `text-end` / `tool-input-start` / `tool-input-available` / `tool-output-available` 独立事件处理；`tool-approval-request` 不再重复 emit chunks（backend 已单独发 tool-input-start/available）。
 > **[Sync] 2026-05-24**: 启用 thinking 模式 — 迁移 Pawkeyland `thinking_delta` / `thinking` / `content_block_stop` 分支到 `_make_tool_event_cb`；`_TurnContext` 新增 `current_reasoning_id` / `has_thinking_delta` / `completed_streamed_reasoning_texts`；SSE 新增 `reasoning-start/delta/end` 三类事件；前端 transport 新增对应处理；`DISABLE_INTERLEAVED_THINKING` 未设置时 thinking 默认启用。
@@ -161,6 +162,19 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `tool` 事件 | 三条分离事件 | 三条分离事件 | 已对齐 ✅ |
 | `reasoning-start/delta/end` | 有（thinking 模式） | 有 ✅ | 2026-05-24 启用 |
 | `message-metadata` | `toolChoice/toolCount/sessionId` | `sessionId/turnIndex` | 结构略有简化 |
+
+#### 4.5.4 持久化侧的 SSE 事件收集
+
+每个 SSE 回调在发出事件到前端的同时，将**原始事件 dict** 追加到 `_TurnContext.collected_parts`：
+
+| 收集 | 不收集 |
+|------|--------|
+| `text-start/delta/end` | `tool-input-start`（无数据载荷） |
+| `reasoning-start/delta/end` | `tool-approval-request`（lifecycle） |
+| `tool-input-available` | `message-metadata`、`message-final` |
+| `tool-output-available` | `finish`、`error` |
+
+`_persist_turn` 调用 `_sse_events_to_ui_parts(collected_parts)` 做一次线性转换，输出 UIMessage-compatible parts 列表写入 `chat_message.parts`。见 [claude-agent-session-persistence.md §4](./claude-agent-session-persistence.md)。
 
 ### 4.6 SSE 顺序规则
 

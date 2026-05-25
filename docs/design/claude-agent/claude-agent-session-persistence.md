@@ -1,6 +1,7 @@
 > **迁移来源**: Pawkeyland docs/app/design/claude-agent-session-persistence.md  
-> **[Sync] 2026-05-25 v1**: 全面对齐 Ink & Memory 实际实现（SQLite `chat_thread + chat_message`，`better-chatbot` 对齐存储模式，UIMessage-compatible `parts_json`）。补充 `_persist_turn` 完整逻辑与 `tool_use` 事件修复说明。  
-> **[Sync] 2026-05-25 v2**: 对齐 better-chatbot `schema.pg.ts` 实际表结构：`parts_json TEXT nullable` → `parts TEXT NOT NULL DEFAULT '[]'`；`save_chat_message` 接收 `parts: list` 并在 DB 层序列化；`list_chat_messages` 返回已解析的 parts/metadata；用户消息始终写入 parts（text fallback 兜底）；前端读 `m.parts`（已解析列表）而非手动 JSON.parse `m.parts_json`。
+> **[Sync] 2026-05-25 v1**: 全面对齐 Ink & Memory 实际实现（SQLite `chat_thread + chat_message`，`better-chatbot` 对齐存储模式）。  
+> **[Sync] 2026-05-25 v2**: 对齐 better-chatbot schema：`parts TEXT NOT NULL DEFAULT '[]'`（移除 `content` 列和 `parts_json` 列）；`save_chat_message(parts: list, metadata: dict)` 签名；`list_chat_messages` 返回已解析对象；前端读 `m.parts` 直接使用。  
+> **[Sync] 2026-05-25 v3**: 重大设计重构 — `collected_parts` 改为收集**原始 SSE 事件报文**；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做线性转换；`tool_inv_by_id` 等状态字段从 `_TurnContext` 移除。
 
 # Claude Agent 会话持久化设计
 
@@ -162,75 +163,94 @@ CREATE TABLE IF NOT EXISTS chat_message (
 
 ## 4. `_persist_turn` 实现逻辑
 
-`ClaudeAgentService._persist_turn` 在 `execute_session` 成功后异步写库，对齐 better-chatbot 的 `onFinish` 回调模式：
+`ClaudeAgentService._persist_turn` 在 `execute_session` 成功后异步写库，对齐 better-chatbot 的 `onFinish` 回调模式。
+
+### 4.1 两阶段设计：收集（streaming） → 转换（persist）
+
+```
+streaming 阶段（实时）
+  每次发 SSE → queue.put(sse_frame)
+              + collected_parts.append(raw_event_dict)   ← 原始 SSE 事件报文
+
+persist 阶段（_persist_turn，run 完成后一次性执行）
+  ui_parts = _sse_events_to_ui_parts(collected_parts)
+           → 线性单遍扫描，无状态副作用
+           → 输出 UIMessage-compatible parts list
+  database.save_chat_message(parts=ui_parts)
+```
+
+**`_sse_events_to_ui_parts()` 转换规则：**
+
+| SSE 事件（collected_parts 中） | 转换后的 UIMessage part |
+|-------------------------------|------------------------|
+| `text-start` | 创建 `{"type":"text","text":""}` |
+| `text-delta` | 追加 `.delta` 到当前 text part |
+| `text-end` | 关闭当前 text part（current_text = None） |
+| `reasoning-start` | 创建 `{"type":"reasoning","id":...,"text":""}` |
+| `reasoning-delta` | 追加 `.delta` 到当前 reasoning part |
+| `reasoning-end` | 关闭当前 reasoning part |
+| `tool-input-available` | 创建 `{"type":"tool-invocation","state":"call",...}` |
+| `tool-output-available` | 原地 patch 匹配的 invocation → `state:"output-available"/"output-error"` |
+
+不收集（无 UIMessage part 等价）：`tool-input-start`、`tool-approval-request`、`message-metadata`、`message-final`、`finish`、`error`。
+
+### 4.2 `_persist_turn` 代码骨架
 
 ```python
 async def _persist_turn(self, execution, result) -> None:
-    # 在 executor 线程中执行同步 SQLite 写操作
     def _save() -> None:
         # 1. 写 user 消息
-        # 始终写入 parts list（对齐 better-chatbot NOT NULL 约束）
-        # 若前端未传 message_parts，回退到最小 text part
         resolved_user_parts = list(user_parts) if user_parts else [{"type": "text", "text": user_text}]
         database.save_chat_message(
-            thread_id, "user", user_text,
-            parts=resolved_user_parts,         # list，DB 层序列化
-            message_id=user_message_id,        # 前端 AI-SDK message.id（稳定 ID）
+            thread_id, "user",
+            parts=resolved_user_parts,
+            message_id=user_message_id,
         )
 
-        # 2. 构建 assistant parts（顺序：reasoning → tool-invocation → text）
-        asst_parts = list(turn_ctx.collected_parts)   # reasoning + tool-invocation
-        if assistant_text:
-            asst_parts.append({"type": "text", "text": assistant_text})
+        # 2. 将原始 SSE 事件转换为 UIMessage parts（线性单遍扫描）
+        asst_parts = _sse_events_to_ui_parts(turn_ctx.collected_parts)
         if not asst_parts:
-            asst_parts = [{"type": "text", "text": assistant_text or ""}]
+            asst_parts = [{"type": "text", "text": assistant_text}] if assistant_text else []
 
-        # 3. 写 assistant 消息（DB 层负责 JSON 序列化）
+        # 3. 写 assistant 消息
         database.save_chat_message(
-            thread_id, "assistant", assistant_text,
-            parts=asst_parts,                  # list，DB 层序列化
-            metadata=asst_metadata or None,    # dict，DB 层序列化
+            thread_id, "assistant",
+            parts=asst_parts,
+            metadata=asst_metadata or None,
         )
 
-        # 4. 自动填充 thread 标题（首轮，title 为空时）
+        # 4. 自动填充 thread 标题（首轮）
         if not thread.get("title"):
             database.update_chat_thread_title(thread_id, user_text[:50])
 
     await loop.run_in_executor(None, _save)
 ```
 
-### 4.1 `_TurnContext.collected_parts` 采集时序
+### 4.3 collected_parts 示例（text → tool → text 场景）
 
-`collected_parts` 在流式过程中按事件到达顺序追加，通过共享引用与 `tool_inv_by_id` 联动实现 tool 状态原地更新：
+```python
+# streaming 结束后 collected_parts 内容（原始 SSE 事件报文）：
+[
+    {"type": "text-start",           "id": "text-0"},
+    {"type": "text-delta",           "id": "text-0", "delta": "让我检查一下"},
+    {"type": "tool-input-available", "toolCallId": "t1", "toolName": "bash",
+     "input": {"command": "ls -la"}},
+    {"type": "tool-output-available","toolCallId": "t1",
+     "output": "file1.txt", "isError": False},
+    {"type": "text-start",           "id": "text-0"},
+    {"type": "text-delta",           "id": "text-0", "delta": "目录结构如下..."},
+    {"type": "text-end",             "id": "text-0"},
+]
 
+# _sse_events_to_ui_parts() 输出（写入 chat_message.parts）：
+[
+    {"type": "text",           "text": "让我检查一下"},
+    {"type": "tool-invocation","toolCallId": "t1", "toolName": "bash",
+     "state": "output-available", "input": {"command": "ls -la"},
+     "output": "file1.txt", "dynamic": True},
+    {"type": "text",           "text": "目录结构如下..."},
+]
 ```
-on_tool_event 分发流程：
-
-  thinking_delta        → 累积 current_reasoning_text[]
-  content_block_stop    → 检测 content_block.type == "thinking"
-    (thinking 块结束)     → collected_parts.append({ type:"reasoning", id, text })
-                            清空 current_reasoning_text / current_reasoning_id
-
-  tool_input_available  → 流式路径（content_block_stop 触发）
-    (input 完整)          → collected_parts.append(inv_part{ state:"call" })
-                            tool_inv_by_id[toolCallId] = inv_part   ← 共享引用
-
-  tool_use / tool_use_start (非流式 AssistantMessage 路径，有 payload.input)
-    (input 完整)          → 同上，确保非流式路径也能注册 inv_part
-                            ⚠️ 2026-05-25 修复：之前仅发 SSE 不创建 inv_part，
-                               导致工具记录在历史中完全丢失
-
-  tool_result           → tool_inv_by_id[toolCallId].state = "output-available"
-    (工具结果到来)          tool_inv_by_id[toolCallId].output = payload.output
-                            （原地修改，collected_parts 中的对象自动同步更新）
-```
-
-### 4.2 两条工具路径对比
-
-| 路径 | 触发事件序列 | inv_part 创建时机 |
-|------|------------|-----------------|
-| **流式路径**（`StreamEvent`） | `content_block_start(tool_use)` → `input_json_delta` × N → `content_block_stop` → `tool_result` | `tool_input_available`（`content_block_stop` 触发）时创建 |
-| **非流式路径**（`AssistantMessage`） | `tool_use`（携带完整 input）→ `tool_result` | `tool_use` 事件处理时创建（2026-05-25 修复前：不创建，导致丢失） |
 
 ---
 
@@ -270,12 +290,12 @@ GET /api/claude-agent/threads/{thread_id}/messages
 | better-chatbot（TypeScript） | Ink & Memory（Python） | 说明 |
 |---|---|---|
 | `ChatMessageTable.parts: json[].notNull()` | `chat_message.parts TEXT NOT NULL DEFAULT '[]'` | SQLite TEXT 模拟 PostgreSQL json[]；DB 层负责序列化/反序列化 |
-| `responseMessage.parts.map(convertToSavePart)` | `turn_ctx.collected_parts` + 末尾追加 text part | `convertToSavePart` 过滤大文件；本项目直接存结构化 dict |
-| `chatRepository.upsertMessage({ parts, metadata })` | `database.save_chat_message(..., parts=list, metadata=dict)` | 签名对齐：接收 Python 原生类型，序列化在 DB 层 |
-| `onFinish({ responseMessage })` 钩子 | `_persist_turn(execution, result)` | post-run 异步持久化，`execute_session` 成功后调用 |
+| `responseMessage.parts.map(convertToSavePart)` | `_sse_events_to_ui_parts(collected_parts)` | AI SDK 从流式 chunks 组装 parts；本项目从 SSE 事件 dict 列表线性转换 |
+| `chatRepository.upsertMessage({ parts, metadata })` | `database.save_chat_message(parts=list, metadata=dict)` | 签名对齐；序列化在 DB 层 |
+| `onFinish({ responseMessage })` 钩子 | `_persist_turn(execution, result)` | post-run 异步持久化 |
 | `chatRepository.selectMessagesByThreadId(id)` | `database.list_chat_messages(thread_id)` | 返回已反序列化的 parts / metadata（无需前端 JSON.parse） |
-| AI SDK 自动组装 `responseMessage.parts` | `collected_parts` 手动追加 | 格式兼容：`reasoning` / `tool-invocation` / `text` |
-| `m.parts`（已解析 list）直接用于渲染 | `m.parts`（前端接收已解析 list） | 前端无需 `JSON.parse`，直接用于 `useChat({ initialMessages })` |
+| AI SDK 自动组装 `responseMessage.parts` | SSE 回调收集原始事件 → `_sse_events_to_ui_parts()` 转换 | 两者均输出 UIMessage-compatible parts |
+| `m.parts`（已解析 list）直接用于渲染 | `m.parts`（前端接收已解析 list） | 前端无需 `JSON.parse`，直接传入 `useChat({ initialMessages })` |
 
 ---
 

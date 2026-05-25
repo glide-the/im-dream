@@ -1,3 +1,7 @@
+// [Input] Consume WorkspaceContext, dashboard file/nav/quick-action components, ChatPanel, auth token, and AI SDK message types.
+// [Output] Render chat workspace, thread history sidebar, file sidebar, quick actions, and ChatPanel.
+// [Pos] chat-workspace view node in frontend/src/components/chat
+// [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -35,7 +39,6 @@ interface ChatViewProps {
   contextCustomerId?: string;
   contextCustomers?: ContextCustomer[];
   onNewChat?: () => void;
-  onNavigateToSettings?: () => void;
   quickActions?: QuickActionCardItem[];
 }
 
@@ -102,7 +105,6 @@ export default function ChatView({
   contextCustomerId,
   contextCustomers = [],
   onNewChat,
-  onNavigateToSettings,
   quickActions = QUICK_ACTION_CARDS,
 }: ChatViewProps) {
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
@@ -225,7 +227,7 @@ export default function ChatView({
   return (
     <WorkspaceProvider>
       <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onToggleThreadSidebar={() => setThreadSidebarOpen((v) => !v)} onNavigateToSettings={onNavigateToSettings} unreadCount={0} />
+        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onToggleThreadSidebar={() => setThreadSidebarOpen((v) => !v)} unreadCount={0} />
 
         {/* Thread history sidebar */}
         {threadSidebarOpen && (
@@ -310,4 +312,3 @@ export default function ChatView({
     </WorkspaceProvider>
   );
 }
-

@@ -1,4 +1,7 @@
-// App.tsx
+// [Input] Consume React hooks, editor engine modules, app views/components, auth/session hooks, storage utilities, and API helpers.
+// [Output] Render the authenticated Ink & Memory app shell and route current view state.
+// [Pos] frontend app-root node in frontend/src
+// [Sync] 2026-05-25: remove ChatView settings-navigation prop after left chat nav Settings button deletion.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -1809,7 +1812,7 @@ export default function App() {
           bottom: mobileBottomOffset,
           overflow: 'hidden'
         }}>
-          <ChatView onNavigateToSettings={() => setCurrentView('settings')} />
+          <ChatView />
         </div>
       )}
 

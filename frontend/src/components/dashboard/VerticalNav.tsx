@@ -1,13 +1,16 @@
-import { IconClock, IconFolder, IconGrid, IconSettings, IconUser } from '../chat/Icons';
+// [Input] Consume chat icon components and parent callbacks for files/thread history.
+// [Output] Render left dashboard navigation with brand mark, files, chat history, and user avatar controls.
+// [Pos] vertical-navigation component node in frontend/src/components/dashboard
+// [Sync] 2026-05-25: remove Settings button from the chat/dashboard vertical nav.
+import { IconClock, IconFolder, IconGrid, IconUser } from '../chat/Icons';
 
 interface VerticalNavProps {
   onToggleFileSidebar: () => void;
   onToggleThreadSidebar?: () => void;
-  onNavigateToSettings?: () => void;
   unreadCount?: number;
 }
 
-export default function VerticalNav({ onToggleFileSidebar, onToggleThreadSidebar, onNavigateToSettings, unreadCount = 0 }: VerticalNavProps) {
+export default function VerticalNav({ onToggleFileSidebar, onToggleThreadSidebar, unreadCount = 0 }: VerticalNavProps) {
   return (
     <aside style={{ width: '4rem', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', padding: '1.25rem 0.75rem', borderRight: '1px solid var(--color-border-paper)', background: 'var(--color-bg-app)' }}>
       <div style={{ marginBottom: '1.75rem', display: 'grid', placeItems: 'center', width: '2.2rem', height: '2.2rem', borderRadius: '12px', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)' }}>
@@ -19,14 +22,6 @@ export default function VerticalNav({ onToggleFileSidebar, onToggleThreadSidebar
           {unreadCount > 0 ? <span style={{ position: 'absolute', top: '-0.45rem', right: '-0.6rem', minWidth: '1rem', height: '1rem', padding: '0 0.2rem', borderRadius: '999px', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontSize: '0.6rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{unreadCount}</span> : null}
         </button>
         <button type="button" onClick={onToggleThreadSidebar} title="Chat history" style={{ border: 'none', background: 'transparent', color: onToggleThreadSidebar ? 'var(--color-text-secondary)' : 'inherit', cursor: onToggleThreadSidebar ? 'pointer' : 'default', transition: 'color 0.2s ease' }}><IconClock style={{ width: '1.2rem', height: '1.2rem' }} /></button>
-        <button
-          type="button"
-          onClick={onNavigateToSettings}
-          title="Settings"
-          style={{ border: 'none', background: 'transparent', color: onNavigateToSettings ? 'var(--color-text-secondary)' : 'inherit', cursor: onNavigateToSettings ? 'pointer' : 'default', transition: 'color 0.2s ease' }}
-        >
-          <IconSettings style={{ width: '1.2rem', height: '1.2rem' }} />
-        </button>
       </div>
       <div style={{ padding: '0.35rem', borderRadius: '999px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)' }}>
         <IconUser style={{ width: '1rem', height: '1rem', color: 'var(--color-text-secondary)' }} />
