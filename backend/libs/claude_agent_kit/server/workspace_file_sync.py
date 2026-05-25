@@ -300,15 +300,15 @@ def save_buffer_to_workspace_files(
     try:
         write_workspace_file(workspace_path, workspace_relative_path, content)
     except Exception as exc:
+        import logging as _logging
+        _logging.getLogger(__name__).warning(
+            "Failed to save %s into workspace: %s", sanitized_name, exc
+        )
         raise WorkspaceFileSyncError(
             WorkspaceFileSyncErrorCode.WRITE_FAILED,
             "Failed to save file into workspace",
             500,
-            {
-                "fileName": sanitized_name,
-                "workspacePath": workspace_relative_path,
-                "reason": str(exc),
-            },
+            {"fileName": sanitized_name, "workspacePath": workspace_relative_path},
         ) from exc
 
     return {
@@ -335,5 +335,4 @@ def normalize_workspace_file_sync_error(error: object) -> WorkspaceFileSyncError
         WorkspaceFileSyncErrorCode.INTERNAL_ERROR,
         "Unexpected workspace file sync error",
         500,
-        {"reason": str(error)},
     )

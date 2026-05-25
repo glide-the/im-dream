@@ -21,10 +21,13 @@ GET    /api/workspace/files/download — download a single workspace file
 
 from __future__ import annotations
 
+import logging
 import mimetypes
 import os
 import socket
 from typing import Annotated, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -188,9 +191,10 @@ async def list_workspace_files_endpoint(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
     except Exception as exc:
+        logger.exception("Unexpected error listing workspace files")
         import json
         return Response(
-            content=json.dumps({"error": str(exc)}),
+            content=json.dumps({"error": "Internal server error"}),
             status_code=500,
             media_type="application/json",
             headers=_debug_headers(),
@@ -270,11 +274,11 @@ async def upload_workspace_files(
                 uploaded_metadata.append(saved)
             except Exception as exc:
                 err = normalize_workspace_file_sync_error(exc)
+                logger.warning("Workspace file upload failed: %s", err)
                 return Response(
                     content=json.dumps({
                         "error": err.args[0] if err.args else "Upload failed",
                         "code": err.code.value if hasattr(err.code, "value") else str(err.code),
-                        "details": err.details,
                     }),
                     status_code=err.status,
                     media_type="application/json",
@@ -286,11 +290,11 @@ async def upload_workspace_files(
                 uploaded_files.append(file_path)
             except Exception as exc:
                 err = normalize_workspace_file_sync_error(exc)
+                logger.warning("Workspace file write failed: %s", err)
                 return Response(
                     content=json.dumps({
                         "error": err.args[0] if err.args else "Upload failed",
                         "code": err.code.value if hasattr(err.code, "value") else str(err.code),
-                        "details": err.details,
                     }),
                     status_code=err.status,
                     media_type="application/json",
