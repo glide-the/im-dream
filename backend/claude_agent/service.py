@@ -20,9 +20,8 @@
 #                    current_reasoning_id/has_thinking_delta/completed_streamed_reasoning_texts;
 #                    emits reasoning-start/delta/end SSE frames.
 # [Sync] 2026-05-25: fix tool-invocation persistence for non-streaming AssistantMessage path:
-#                    tool_use/tool_use_start events emit SSE but never created inv_part, causing
-#                    tools to be lost in history; now creates inv_part alongside tool-input-available
-#                    SSE when payload.input is present and the tool is not yet in tool_inv_by_id.
+#                    tool_use/tool_use_start now collect tool-input-available SSE event into
+#                    collected_parts (superceded by full SSE-event-collection refactor below).
 # [Sync] 2026-05-25: align _persist_turn with better-chatbot schema (parts list, NOT NULL):
 #                    use new database.save_chat_message(parts=list, metadata=dict) signature;
 #                    user message always has parts (text fallback when message_parts is None);
@@ -115,43 +114,38 @@ _TEXT_PART_ID = "text-0"
 class _TurnContext:
     """Mutable state bundle for a single agent turn.
 
-    ``collected_parts`` is the single authority for persistence.  It mirrors the
-    UIMessage parts that correspond to the SSE events sent to the frontend (§4.5.2):
+    ``collected_parts`` collects the raw SSE event dicts **as they are emitted**
+    to the frontend (§4.5.2).  The subset that carries UIMessage-relevant data:
 
-      SSE event(s)                         → collected_parts entry
-      ─────────────────────────────────    ────────────────────────────────────────
-      text-start / text-delta / text-end   → {"type":"text", "text":"..."}
-                                             (delta appended in-place; no buffer)
-      reasoning-start/delta/end            → {"type":"reasoning","id":"...","text":"..."}
-      tool-input-start + tool-input-       → {"type":"tool-invocation","state":"call",
-        available                              "toolCallId":..., "toolName":..., ...}
-      tool-output-available                → patches matching entry in-place via
-                                             tool_inv_by_id: state→"output-available"
+      collected event types     → UIMessage part (after _sse_events_to_ui_parts)
+      ───────────────────────── ────────────────────────────────────────────────
+      text-start/delta/end      → {"type":"text", "text":"..."}
+      reasoning-start/delta/end → {"type":"reasoning", "id":"...", "text":"..."}
+      tool-input-available      → {"type":"tool-invocation", "state":"call", ...}
+      tool-output-available     → patches matching invocation → "output-available"
 
-    Events NOT written to collected_parts:
-      message-metadata, tool-approval-request, message-final, finish, error
-      — these are lifecycle / aggregate frames with no UIMessage part equivalent.
+    NOT collected (lifecycle / aggregate, no UIMessage equivalent):
+      message-metadata, tool-input-start, tool-approval-request,
+      message-final, finish, error.
 
-    ``_TurnContext`` is created fresh each turn so ``collected_parts`` starts empty
-    automatically — no explicit clearing is needed.
+    ``_TurnContext`` is created fresh each turn — no explicit clearing needed.
+    ``_persist_turn`` calls ``_sse_events_to_ui_parts(collected_parts)`` once.
     """
 
     queue: asyncio.Queue
     confirmation_store: ToolConfirmationStore
     pending_tool_call_ids: set = field(default_factory=set)
     turn_start_ts: float = field(default_factory=time.monotonic)
-    # Dedup sets for tool events.
+    # Dedup sets for SSE emission.
     registered_tool_call_ids: set = field(default_factory=set)
     emitted_tool_input_ids: set = field(default_factory=set)
-    # Thinking / reasoning tracking.
+    # Thinking / reasoning tracking (for SSE reasoning-start/end emission).
     current_reasoning_id: Optional[str] = None
     has_thinking_delta: bool = False
     completed_streamed_reasoning_texts: list = field(default_factory=list)
     current_reasoning_text: list = field(default_factory=list)
-    # Ordered UIMessage parts written in SSE event order (reasoning / tool-invocation / text).
+    # Raw SSE event dicts collected as they are emitted; converted at persist time.
     collected_parts: list = field(default_factory=list)
-    # Shared refs so tool_result can patch the matching tool-invocation part in-place.
-    tool_inv_by_id: dict = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -310,14 +304,12 @@ class ClaudeAgentService:
             )
 
             # --- Assistant message ---
-            # collected_parts is the ordered UIMessage parts list built in real-time
-            # as SSE events were emitted: text (flushed on text-end) → tool-invocation
-            # (created on tool_input_available) → more text → ... This mirrors how the
-            # Vercel AI SDK assembles responseMessage.parts from UIMessageChunks in
-            # better-chatbot — the ordering is naturally preserved by the SSE event order.
-            asst_parts: list = list(turn_ctx.collected_parts)
+            # Convert the collected raw SSE events to UIMessage-compatible parts.
+            # This is the server-side equivalent of the Vercel AI SDK assembling
+            # responseMessage.parts from UIMessageChunks in better-chatbot.
+            asst_parts: list = _sse_events_to_ui_parts(turn_ctx.collected_parts)
             if not asst_parts:
-                # Fallback: streaming produced no parts (e.g. test stubs or empty run).
+                # Fallback: no collectible SSE events (e.g. test stubs / empty run).
                 asst_parts = [{"type": "text", "text": assistant_text}] if assistant_text else []
 
             # Build metadata (model + usage + toolCount) — same as better-chatbot metadata
@@ -390,12 +382,13 @@ class ClaudeAgentService:
         queue: asyncio.Queue, turn_ctx: _TurnContext
     ):
         async def on_text_delta(delta: str) -> None:
-            # Open a new text part when none is active; append delta in-place otherwise.
-            if not turn_ctx.collected_parts or turn_ctx.collected_parts[-1].get("type") != "text":
-                turn_ctx.collected_parts.append({"type": "text", "text": ""})
+            # Emit text-start when this is the first delta of a new text block.
+            last_type = turn_ctx.collected_parts[-1].get("type") if turn_ctx.collected_parts else None
+            if last_type not in ("text-start", "text-delta"):
                 await queue.put(_sse("text-start", {"id": _TEXT_PART_ID}))
-            turn_ctx.collected_parts[-1]["text"] += delta
+                turn_ctx.collected_parts.append({"type": "text-start", "id": _TEXT_PART_ID})
             await queue.put(_sse("text-delta", {"id": _TEXT_PART_ID, "delta": delta}))
+            turn_ctx.collected_parts.append({"type": "text-delta", "id": _TEXT_PART_ID, "delta": delta})
 
         return on_text_delta
 
@@ -404,29 +397,28 @@ class ClaudeAgentService:
         async def on_text_done(full_text: str) -> None:
             if full_text:
                 await queue.put(_sse("text-end", {"id": _TEXT_PART_ID}))
+                turn_ctx.collected_parts.append({"type": "text-end", "id": _TEXT_PART_ID})
 
         return on_text_done
 
     @staticmethod
     def _make_tool_event_cb(queue: asyncio.Queue, turn_ctx: _TurnContext):
-        """Emit SSE tool / reasoning events and mirror them into collected_parts.
+        """Emit SSE tool / reasoning events and collect them into collected_parts.
 
-        Dispatches on ``ToolEventPayload.type`` (aligned with §4.5.2 event contract).
+        Each SSE event is both emitted to ``queue`` (frontend) and appended to
+        ``collected_parts`` (persistence).  The conversion to UIMessage parts
+        happens later in ``_sse_events_to_ui_parts()``.
 
-        Handled → SSE emitted + collected_parts updated:
-          ``thinking_delta``          → reasoning-start / reasoning-delta
-          ``content_block_stop``      → reasoning-end + reasoning part appended
-          ``thinking``                → reasoning-start/delta/end (atomic block)
-          ``tool_use`` / ``tool_use_start`` → tool-input-start (+ tool-input-available
-                                         if input present) + inv_part created
-          ``tool_input_available``    → tool-input-start (dedup) + tool-input-available
-                                         + inv_part created
-          ``tool_result``             → tool-output-available + inv_part patched in-place
+        Collected → SSE event type stored in collected_parts:
+          ``thinking_delta``               → reasoning-start (first), reasoning-delta
+          ``content_block_stop``           → reasoning-end
+          ``thinking`` (atomic)            → reasoning-start, reasoning-delta, reasoning-end
+          ``tool_use`` / ``tool_use_start``→ tool-input-available (when input present)
+          ``tool_input_available``         → tool-input-available
+          ``tool_result``                  → tool-output-available
 
-        Intentionally ignored (no SSE frame, no collected_parts entry):
-          ``result``, ``message_start``, ``message_delta``, ``message_stop``,
-          ``tool_progress``, ``tool_use_summary``, ``text_block_start``,
-          ``tool_input_delta`` — not part of the §4.5.2 contract.
+        Not collected: tool-input-start (no data payload), tool-approval-request.
+        Ignored entirely: result, message_*, tool_progress, tool_use_summary, etc.
         """
         async def on_tool_event(payload: ToolEventPayload) -> None:
             tool_call_id = payload.tool_call_id
@@ -438,13 +430,12 @@ class ClaudeAgentService:
                 if not turn_ctx.current_reasoning_id:
                     turn_ctx.current_reasoning_id = str(uuid4())
                     await queue.put(_sse("reasoning-start", {"id": turn_ctx.current_reasoning_id}))
+                    turn_ctx.collected_parts.append({"type": "reasoning-start", "id": turn_ctx.current_reasoning_id})
                 turn_ctx.has_thinking_delta = True
                 delta_text = str(payload.output)
                 turn_ctx.current_reasoning_text.append(delta_text)
-                await queue.put(_sse("reasoning-delta", {
-                    "id": turn_ctx.current_reasoning_id,
-                    "delta": delta_text,
-                }))
+                await queue.put(_sse("reasoning-delta", {"id": turn_ctx.current_reasoning_id, "delta": delta_text}))
+                turn_ctx.collected_parts.append({"type": "reasoning-delta", "id": turn_ctx.current_reasoning_id, "delta": delta_text})
                 return
 
             # --- content_block_stop for streamed thinking ---
@@ -457,13 +448,10 @@ class ClaudeAgentService:
                     and turn_ctx.current_reasoning_id
                 ):
                     await queue.put(_sse("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
-                    reasoning_text = str(content_block.get("thinking") if content_block.get("thinking") is not None else "".join(turn_ctx.current_reasoning_text))
-                    turn_ctx.collected_parts.append({
-                        "type": "reasoning",
-                        "id": turn_ctx.current_reasoning_id,
-                        "text": reasoning_text,
-                    })
-                    turn_ctx.completed_streamed_reasoning_texts.append(reasoning_text)
+                    turn_ctx.collected_parts.append({"type": "reasoning-end", "id": turn_ctx.current_reasoning_id})
+                    turn_ctx.completed_streamed_reasoning_texts.append(
+                        str(content_block.get("thinking") or "".join(turn_ctx.current_reasoning_text))
+                    )
                     turn_ctx.current_reasoning_id = None
                     turn_ctx.has_thinking_delta = False
                     turn_ctx.current_reasoning_text.clear()
@@ -476,142 +464,67 @@ class ClaudeAgentService:
                     turn_ctx.completed_streamed_reasoning_texts
                     and thinking_output == turn_ctx.completed_streamed_reasoning_texts[0]
                 ):
-                    # Already emitted via thinking_delta stream — skip duplicate
                     turn_ctx.completed_streamed_reasoning_texts.pop(0)
                     return
                 if turn_ctx.has_thinking_delta and turn_ctx.current_reasoning_id:
-                    # thinking_delta already streamed content — close the open block
                     await queue.put(_sse("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
+                    turn_ctx.collected_parts.append({"type": "reasoning-end", "id": turn_ctx.current_reasoning_id})
                     turn_ctx.current_reasoning_id = None
                     turn_ctx.has_thinking_delta = False
                     turn_ctx.current_reasoning_text.clear()
                     return
-                # No prior thinking_delta — emit full reasoning block atomically
                 reasoning_id = str(uuid4())
                 await queue.put(_sse("reasoning-start", {"id": reasoning_id}))
+                turn_ctx.collected_parts.append({"type": "reasoning-start", "id": reasoning_id})
                 await queue.put(_sse("reasoning-delta", {"id": reasoning_id, "delta": thinking_output}))
+                turn_ctx.collected_parts.append({"type": "reasoning-delta", "id": reasoning_id, "delta": thinking_output})
                 await queue.put(_sse("reasoning-end", {"id": reasoning_id}))
-                turn_ctx.collected_parts.append({
-                    "type": "reasoning",
-                    "id": reasoning_id,
-                    "text": thinking_output,
-                })
+                turn_ctx.collected_parts.append({"type": "reasoning-end", "id": reasoning_id})
                 return
 
             # --- tool_use / tool_use_start: new tool call beginning ---
             if event_type in ("tool_use", "tool_use_start") and tool_call_id and tool_name:
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-start", {
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                    }))
-                if (
-                    payload.input is not None
-                    and tool_call_id not in turn_ctx.emitted_tool_input_ids
-                ):
+                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+                if payload.input is not None and tool_call_id not in turn_ctx.emitted_tool_input_ids:
                     turn_ctx.emitted_tool_input_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-available", {
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                        "input": payload.input,
-                    }))
-                    # Persist: tool_use events (non-streaming AssistantMessage path) carry
-                    # the full input but no subsequent tool_input_available event is fired,
-                    # so we must create the inv_part here to avoid tool calls being lost.
-                    if tool_call_id not in turn_ctx.tool_inv_by_id:
-                        new_inv: dict = {
-                            "type": "tool-invocation",
-                            "toolCallId": tool_call_id,
-                            "toolName": tool_name,
-                            "state": "call",
-                            "input": payload.input,
-                            "dynamic": True,
-                        }
-                        turn_ctx.collected_parts.append(new_inv)
-                        turn_ctx.tool_inv_by_id[tool_call_id] = new_inv
+                    evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}
+                    await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}))
+                    turn_ctx.collected_parts.append(evt)
                 return
 
             # --- tool_input_available: complete streamed JSON input ready ---
             if event_type == "tool_input_available" and tool_call_id and tool_name:
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-start", {
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                    }))
+                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
                 if tool_call_id not in turn_ctx.emitted_tool_input_ids:
                     turn_ctx.emitted_tool_input_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-available", {
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                        "input": payload.input or {},
-                    }))
-                    # Create a tool-invocation part in "call" state; output will be
-                    # patched in-place when tool_result arrives.
-                    inv_part: dict = {
-                        "type": "tool-invocation",
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                        "state": "call",
-                        "input": payload.input or {},
-                        "dynamic": True,
-                    }
-                    turn_ctx.collected_parts.append(inv_part)
-                    turn_ctx.tool_inv_by_id[tool_call_id] = inv_part
+                    evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}
+                    await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}))
+                    turn_ctx.collected_parts.append(evt)
                 return
 
-            # --- tool_result: tool execution result from user message ---
+            # --- tool_result: tool execution result ---
             if event_type == "tool_result" and tool_call_id:
-                # Defensive: ensure tool-input-start was sent before
-                # tool-output-available (AI SDK requires this ordering).
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     fallback_name = tool_name or "unknown"
                     logger.warning(
-                        "tool_result for unregistered toolCallId=%s (toolName=%s). "
-                        "Auto-registering to prevent stream error.",
-                        tool_call_id,
-                        fallback_name,
+                        "tool_result for unregistered toolCallId=%s (toolName=%s). Auto-registering.",
+                        tool_call_id, fallback_name,
                     )
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-start", {
-                        "toolCallId": tool_call_id,
-                        "toolName": fallback_name,
-                    }))
-                    await queue.put(_sse("tool-input-available", {
-                        "toolCallId": tool_call_id,
-                        "toolName": fallback_name,
-                        "input": {},
-                    }))
+                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": fallback_name}))
                     turn_ctx.emitted_tool_input_ids.add(tool_call_id)
-                    inv_part = {
-                        "type": "tool-invocation",
-                        "toolCallId": tool_call_id,
-                        "toolName": fallback_name,
-                        "state": "call",
-                        "input": {},
-                        "dynamic": True,
-                    }
-                    turn_ctx.collected_parts.append(inv_part)
-                    turn_ctx.tool_inv_by_id[tool_call_id] = inv_part
-                # Update the existing tool-invocation part with output (in-place).
-                if tool_call_id in turn_ctx.tool_inv_by_id:
-                    inv = turn_ctx.tool_inv_by_id[tool_call_id]
-                    if bool(payload.is_error):
-                        inv["state"] = "output-error"
-                        inv["output"] = payload.output
-                    else:
-                        inv["state"] = "output-available"
-                        inv["output"] = payload.output
-                await queue.put(_sse("tool-output-available", {
-                    "toolCallId": tool_call_id,
-                    "output": payload.output,
-                    "isError": bool(payload.is_error),
-                }))
+                    fallback_evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}
+                    await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}))
+                    turn_ctx.collected_parts.append(fallback_evt)
+                is_error = bool(payload.is_error)
+                evt = {"type": "tool-output-available", "toolCallId": tool_call_id, "output": payload.output, "isError": is_error}
+                await queue.put(_sse("tool-output-available", {"toolCallId": tool_call_id, "output": payload.output, "isError": is_error}))
+                turn_ctx.collected_parts.append(evt)
                 return
-
-            # All other types (result, thinking, message_*, tool_progress, etc.)
-            # are intentionally ignored for Ink & Memory.
 
         return on_tool_event
 
@@ -630,37 +543,16 @@ class ClaudeAgentService:
             # POST /tool-confirm (fast clients must not resolve ahead of registration).
             store.begin_pending(tool_call_id)
 
-            # Step 1: register and emit tool-input-start + tool-input-available SSEs.
-            # Also write inv_part to collected_parts so tool_result can patch it in-place.
+            # Step 1: emit tool-input-start + tool-input-available; collect the latter.
             turn_ctx.registered_tool_call_ids.add(tool_call_id)
-            await queue.put(_sse("tool-input-start", {
-                "toolCallId": tool_call_id,
-                "toolName": tool_name,
-            }))
+            await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
             turn_ctx.emitted_tool_input_ids.add(tool_call_id)
-            await queue.put(_sse("tool-input-available", {
-                "toolCallId": tool_call_id,
-                "toolName": tool_name,
-                "input": tool_input,
-            }))
-            if tool_call_id not in turn_ctx.tool_inv_by_id:
-                inv_part: dict = {
-                    "type": "tool-invocation",
-                    "toolCallId": tool_call_id,
-                    "toolName": tool_name,
-                    "state": "call",
-                    "input": tool_input,
-                    "dynamic": True,
-                }
-                turn_ctx.collected_parts.append(inv_part)
-                turn_ctx.tool_inv_by_id[tool_call_id] = inv_part
+            evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
+            await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
+            turn_ctx.collected_parts.append(evt)
 
-            # Step 2: emit tool-approval-request (§4.5.2 lifecycle frame — not in collected_parts).
-            await queue.put(_sse("tool-approval-request", {
-                "toolCallId": tool_call_id,
-                "toolName": tool_name,
-                "input": tool_input,
-            }))
+            # Step 2: emit tool-approval-request (lifecycle frame — not collected).
+            await queue.put(_sse("tool-approval-request", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
 
             # Step 3 & 4: block until user responds.
             try:
@@ -700,6 +592,79 @@ class _TurnExecution:
     runner: ClaudeAgentRunner
     run_options: AgentRunOptions
     turn_context: _TurnContext
+
+
+# ---------------------------------------------------------------------------
+# SSE events → UIMessage parts conversion
+# ---------------------------------------------------------------------------
+
+
+def _sse_events_to_ui_parts(events: list) -> list:
+    """Convert collected raw SSE events to UIMessage-compatible parts for persistence.
+
+    Linear single-pass over the collected SSE event dicts.  Mirrors how the
+    Vercel AI SDK assembles UIMessage['parts'] from UIMessageChunks in better-chatbot.
+
+    Input event types (§4.5.2):
+      text-start/delta/end    → {"type":"text", "text":"..."}
+      reasoning-start/delta/end → {"type":"reasoning", "id":"...", "text":"..."}
+      tool-input-available    → {"type":"tool-invocation", "state":"call", ...}
+      tool-output-available   → patches matching invocation in-place
+
+    Ignored: anything not listed above (tool-input-start, tool-approval-request, etc.)
+    """
+    parts: list[dict] = []
+    current_text: Optional[dict] = None
+    current_reasoning: Optional[dict] = None
+    tool_by_id: dict[str, dict] = {}
+
+    for event in events:
+        etype = event.get("type")
+
+        if etype == "text-start":
+            current_text = {"type": "text", "text": ""}
+            parts.append(current_text)
+
+        elif etype == "text-delta":
+            if current_text is not None:
+                current_text["text"] += event.get("delta", "")
+
+        elif etype == "text-end":
+            current_text = None
+
+        elif etype == "reasoning-start":
+            current_reasoning = {"type": "reasoning", "id": event.get("id", ""), "text": ""}
+            parts.append(current_reasoning)
+
+        elif etype == "reasoning-delta":
+            if current_reasoning is not None:
+                current_reasoning["text"] += event.get("delta", "")
+
+        elif etype == "reasoning-end":
+            current_reasoning = None
+
+        elif etype == "tool-input-available":
+            tool_id = event.get("toolCallId")
+            if tool_id:
+                inv: dict = {
+                    "type": "tool-invocation",
+                    "toolCallId": tool_id,
+                    "toolName": event.get("toolName"),
+                    "state": "call",
+                    "input": event.get("input", {}),
+                    "dynamic": True,
+                }
+                parts.append(inv)
+                tool_by_id[tool_id] = inv
+
+        elif etype == "tool-output-available":
+            tool_id = event.get("toolCallId")
+            if tool_id and tool_id in tool_by_id:
+                inv = tool_by_id[tool_id]
+                inv["state"] = "output-error" if event.get("isError") else "output-available"
+                inv["output"] = event.get("output")
+
+    return parts
 
 
 # ---------------------------------------------------------------------------
