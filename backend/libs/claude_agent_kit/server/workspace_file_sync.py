@@ -531,7 +531,8 @@ def inject_attachment_message_parts(
             break
 
     if insertion_index != -1:
-        base_parts[insertion_index:insertion_index] = attachment_parts
+        for i, part in enumerate(attachment_parts):
+            base_parts.insert(insertion_index + i, part)
         return base_parts
 
     return base_parts + attachment_parts
