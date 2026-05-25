@@ -1,11 +1,14 @@
 # [Input] Consume workspace_path from libs/claude_agent_kit/server/workspace.py.
 # [Output] Provide sync_skills_symlinks, _clean_stale_skill_symlinks,
 #          WorkspaceFileSyncError, save_buffer_to_workspace_files,
+#          sync_attachments_to_workspace_files, inject_attachment_message_parts,
 #          normalize_workspace_file_sync_error to workspace.py and the API layer.
 # [Pos] symlink-sync node in libs/claude_agent_kit/server
 # [Sync] 2026-05-06: initial implementation — WSK-02 skills symlink sync
 # [Sync] 2026-05-25: add WorkspaceFileSyncError, save_buffer_to_workspace_files,
 #         normalize_workspace_file_sync_error ported from claude-agent-next-kit workspace-file-sync.ts.
+# [Sync] 2026-05-25: add sync_attachments_to_workspace_files, inject_attachment_message_parts
+#         ported from claude-agent-next-kit chat-attachment-processing.ts (WeKnora excluded).
 
 """Skills symlink synchronisation for Claude Agent workspaces.
 
@@ -31,7 +34,7 @@ import logging
 import os
 from enum import Enum
 from pathlib import Path
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -336,3 +339,199 @@ def normalize_workspace_file_sync_error(error: object) -> WorkspaceFileSyncError
         "Unexpected workspace file sync error",
         500,
     )
+
+
+# ---------------------------------------------------------------------------
+# Attachment → workspace sync (ported from claude-agent-next-kit
+# chat-attachment-processing.ts / workspace-file-sync.ts, WeKnora excluded)
+# ---------------------------------------------------------------------------
+
+
+def _resolve_workspace_part_from_attachment_metadata(
+    workspace_path: Path,
+    attachment: dict,
+) -> Optional[dict]:
+    """Return a ``workspace-file`` part dict if the attachment already names
+    an existing file inside the workspace, otherwise return ``None``.
+
+    This mirrors ``resolveWorkspacePartFromAttachmentMetadata`` from
+    ``workspace-file-sync.ts`` in claude-agent-next-kit.
+    """
+    import os as _os
+
+    raw_path = attachment.get("workspacePath")
+    if not raw_path:
+        return None
+
+    # Normalize: strip leading slashes, convert backslashes.
+    normalized = raw_path.replace("\\", "/").lstrip("/")
+    full_path = (workspace_path / normalized).resolve()
+    files_root = (workspace_path / "files").resolve()
+
+    # Security: the resolved path must stay inside workspace/files/.
+    try:
+        full_path.relative_to(files_root)
+    except ValueError:
+        raise WorkspaceFileSyncError(
+            WorkspaceFileSyncErrorCode.INVALID_WORKSPACE_PATH,
+            "workspacePath must stay inside workspace files directory",
+            400,
+            {"workspacePath": raw_path},
+        )
+
+    if not full_path.exists():
+        return None
+
+    stat = full_path.stat()
+    saved_at_raw = attachment.get("savedAt")
+    try:
+        from datetime import datetime, timezone
+        saved_at = (
+            datetime.fromisoformat(saved_at_raw).astimezone(timezone.utc).isoformat()
+            if saved_at_raw
+            else datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+        )
+    except (ValueError, OSError):
+        from datetime import datetime, timezone
+        saved_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+
+    return {
+        "type": "workspace-file",
+        "fileName": attachment.get("filename") or _os.path.basename(normalized),
+        "mimeType": _normalize_mime_type(attachment.get("mediaType")),
+        "size": attachment.get("size") or stat.st_size,
+        "workspacePath": normalized,
+        "savedAt": saved_at,
+        "hash": attachment.get("hash"),
+    }
+
+
+async def sync_attachments_to_workspace_files(
+    workspace_path: Path,
+    attachments: list,
+    download_file: "Callable[[str, Optional[str]], Awaitable[tuple[bytes, str]]]",
+) -> list:
+    """Download each ``file``-type attachment and save it to the workspace.
+
+    Parameters
+    ----------
+    workspace_path:
+        Absolute path to the workspace root (from ``get_or_create_workspace``).
+    attachments:
+        List of attachment dicts matching the ``ChatAttachment`` schema
+        ``{type, url, storageKey?, mediaType?, filename?, size?, workspacePath?, ...}``.
+    download_file:
+        Async callable ``(url, storage_key) -> (bytes, content_type)`` that
+        retrieves the file content from the storage backend.
+
+    Returns
+    -------
+    list of ``workspace-file`` part dicts, one per successfully synced file.
+
+    Ported from ``syncAttachmentsToWorkspaceFiles`` in
+    ``claude-agent-next-kit/app/lib/workspace-file-sync.ts`` (WeKnora excluded).
+    """
+    synced_parts: list = []
+
+    for index, attachment in enumerate(attachments):
+        if attachment.get("type") != "file":
+            continue
+
+        url = attachment.get("url")
+        if not url:
+            raise WorkspaceFileSyncError(
+                WorkspaceFileSyncErrorCode.INVALID_ATTACHMENT,
+                "Attachment url is required for file sync",
+                400,
+                {"index": index},
+            )
+
+        # Fast path: attachment already points to an existing workspace file.
+        existing_part = _resolve_workspace_part_from_attachment_metadata(
+            workspace_path, attachment
+        )
+        if existing_part:
+            synced_parts.append(existing_part)
+            continue
+
+        # Download the file from storage.
+        storage_key = attachment.get("storageKey")
+        try:
+            content, content_type = await download_file(url, storage_key)
+        except WorkspaceFileSyncError:
+            raise
+        except Exception as exc:
+            raise WorkspaceFileSyncError(
+                WorkspaceFileSyncErrorCode.DOWNLOAD_FAILED,
+                "Failed to download attachment before workspace sync",
+                502,
+                {
+                    "index": index,
+                    "url": url,
+                    "reason": str(exc),
+                },
+            ) from exc
+
+        inferred_mime = _normalize_mime_type(
+            attachment.get("mediaType") or content_type or "application/octet-stream"
+        )
+
+        try:
+            part = save_buffer_to_workspace_files(
+                workspace_path,
+                file_name=attachment.get("filename"),
+                mime_type=inferred_mime,
+                content=content,
+            )
+            synced_parts.append(part)
+        except WorkspaceFileSyncError as exc:
+            details = dict(exc.details) if isinstance(exc.details, dict) else {"details": exc.details}
+            raise WorkspaceFileSyncError(
+                exc.code,
+                str(exc),
+                exc.status,
+                {"index": index, "fileName": attachment.get("filename"), "mimeType": inferred_mime, **details},
+            ) from exc
+        except Exception as exc:
+            raise WorkspaceFileSyncError(
+                WorkspaceFileSyncErrorCode.INTERNAL_ERROR,
+                "Unexpected error while syncing file to workspace",
+                500,
+                {
+                    "index": index,
+                    "fileName": attachment.get("filename"),
+                    "reason": str(exc),
+                },
+            ) from exc
+
+    return synced_parts
+
+
+def inject_attachment_message_parts(
+    original_parts: Optional[list],
+    attachment_parts: list,
+) -> list:
+    """Insert *attachment_parts* immediately before the last text part.
+
+    If there are no text parts, the attachment parts are appended at the end.
+    Empty *attachment_parts* returns *original_parts* unchanged.
+
+    Ported from ``injectAttachmentMessageParts`` in
+    ``claude-agent-next-kit/app/lib/chat-attachment-processing.ts``.
+    """
+    base_parts: list = list(original_parts or [])
+
+    if not attachment_parts:
+        return base_parts
+
+    insertion_index = -1
+    for i in range(len(base_parts) - 1, -1, -1):
+        if isinstance(base_parts[i], dict) and base_parts[i].get("type") == "text":
+            insertion_index = i
+            break
+
+    if insertion_index != -1:
+        base_parts[insertion_index:insertion_index] = attachment_parts
+        return base_parts
+
+    return base_parts + attachment_parts

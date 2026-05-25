@@ -3,8 +3,10 @@
 # [Output] Register /api/claude-agent* endpoints.
 # [Pos] claude-agent route node in backend/routers
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
+# [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
 
-from typing import Any, Optional
+import logging
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -13,8 +15,19 @@ from pydantic import BaseModel
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
+from libs.claude_agent_kit.server.workspace import get_or_create_workspace
+from libs.claude_agent_kit.server.workspace_file_sync import (
+    WorkspaceFileSyncError,
+    WorkspaceFileSyncErrorCode,
+    inject_attachment_message_parts,
+    normalize_workspace_file_sync_error,
+    sync_attachments_to_workspace_files,
+)
+from libs.file_storage import server_file_storage
 
 from .deps import get_current_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -51,6 +64,7 @@ class ClaudeAgentRequestBody(BaseModel):
     model: Optional[str] = None
     max_turns: int = 100
     cwd: Optional[str] = None
+    attachments: List[dict] = []
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id
@@ -97,6 +111,57 @@ async def claude_agent_stream(
         raise HTTPException(status_code=400, detail="message text is required")
 
     _msg_dict = body.message if isinstance(body.message, dict) else None
+    message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
+
+    # Process attachments: download from file storage and sync to workspace.
+    if body.attachments:
+        try:
+            workspace_path = get_or_create_workspace(thread_id)
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail="Failed to initialize workspace") from exc
+
+        async def _download_file(url: str, storage_key: Optional[str] = None):
+            if not storage_key:
+                raise WorkspaceFileSyncError(
+                    WorkspaceFileSyncErrorCode.DOWNLOAD_FAILED,
+                    f"Attachment storage key is required for file download: {url}",
+                    400,
+                    {"url": url},
+                )
+            content = await server_file_storage.download(storage_key)
+            metadata = await server_file_storage.get_metadata(storage_key)
+            content_type = (metadata.content_type if metadata else None) or "application/octet-stream"
+            return content, content_type
+
+        workspace_sync_error = None
+        workspace_file_parts: list = []
+        try:
+            workspace_file_parts = await sync_attachments_to_workspace_files(
+                workspace_path=workspace_path,
+                attachments=body.attachments,
+                download_file=_download_file,
+            )
+        except WorkspaceFileSyncError as exc:
+            workspace_sync_error = normalize_workspace_file_sync_error(exc)
+            logger.warning(
+                "[Claude Agent API] Workspace file sync degraded: %s", workspace_sync_error
+            )
+        except Exception as exc:
+            workspace_sync_error = normalize_workspace_file_sync_error(exc)
+            logger.warning(
+                "[Claude Agent API] Workspace file sync degraded: %s", workspace_sync_error
+            )
+
+        if workspace_file_parts:
+            message_parts = inject_attachment_message_parts(
+                message_parts,
+                workspace_file_parts,
+            )
+            logger.info(
+                "[Claude Agent API] Injected %d workspace file parts into message",
+                len(workspace_file_parts),
+            )
+
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
         thread_id=thread_id,
@@ -107,7 +172,7 @@ async def claude_agent_stream(
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=_msg_dict.get("id") if _msg_dict else None,
-        message_parts=_msg_dict.get("parts") if _msg_dict else None,
+        message_parts=message_parts,
     )
 
     async def generate():
