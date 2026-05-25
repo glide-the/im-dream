@@ -183,6 +183,11 @@ export default function ChatView({
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
     setThreadSidebarOpen(false);
+    // Clear any pending queued prompt so the remounted ChatPanel doesn't
+    // replay a previous quick-action when its lastQueuedNonceRef resets to
+    // undefined on mount.
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
   }, []);
 
   const handleDeleteThread = useCallback(async (threadId: string, e: React.MouseEvent) => {
