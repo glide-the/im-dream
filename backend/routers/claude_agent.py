@@ -54,6 +54,21 @@ def _extract_message_text(message: Any) -> str:
     return str(message) if message else ""
 
 
+class ChatAttachment(BaseModel):
+    type: str  # "file" | "source-url"
+    url: str
+    storageKey: Optional[str] = None
+    mediaType: Optional[str] = None
+    filename: Optional[str] = None
+    size: Optional[int] = None
+    workspacePath: Optional[str] = None
+    savedAt: Optional[str] = None
+    hash: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        return self.model_dump(exclude_none=True)
+
+
 class ClaudeAgentRequestBody(BaseModel):
     thread_id: Optional[str] = None
     id: Optional[str] = None
@@ -64,7 +79,7 @@ class ClaudeAgentRequestBody(BaseModel):
     model: Optional[str] = None
     max_turns: int = 100
     cwd: Optional[str] = None
-    attachments: List[dict] = []
+    attachments: List[ChatAttachment] = []
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id
@@ -123,7 +138,7 @@ async def claude_agent_stream(
         async def _download_file(url: str, storage_key: Optional[str] = None):
             if not storage_key:
                 raise WorkspaceFileSyncError(
-                    WorkspaceFileSyncErrorCode.DOWNLOAD_FAILED,
+                    WorkspaceFileSyncErrorCode.INVALID_ATTACHMENT,
                     f"Attachment storage key is required for file download: {url}",
                     400,
                     {"url": url},
@@ -138,7 +153,7 @@ async def claude_agent_stream(
         try:
             workspace_file_parts = await sync_attachments_to_workspace_files(
                 workspace_path=workspace_path,
-                attachments=body.attachments,
+                attachments=[a.to_dict() for a in body.attachments],
                 download_file=_download_file,
             )
         except WorkspaceFileSyncError as exc:
