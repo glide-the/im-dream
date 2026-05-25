@@ -2426,9 +2426,6 @@ async def speech_recognition(websocket: WebSocket):
 
 # ========== File Storage API ==========
 
-import sys as _sys
-_sys.path.insert(0, os.path.join(os.path.dirname(__file__), "libs"))
-
 from fastapi import UploadFile, File as FastAPIFile
 from fastapi.responses import Response, StreamingResponse
 
@@ -2437,6 +2434,7 @@ from libs.file_storage import (
     storage_driver,
     UploadOptions,
     UploadUrlOptions,
+    encode_key_to_base64,
     decode_base64_key,
     is_valid_storage_key,
     get_content_type_from_filename,
@@ -2553,7 +2551,7 @@ async def upload_file(
         return {
             "success": True,
             "key": result.key,
-            "url": f"/api/storage/file/{__import__('base64').b64encode(result.key.encode()).decode()}",
+            "url": f"/api/storage/file/{encode_key_to_base64(result.key)}",
             "metadata": {
                 "key": result.metadata.key,
                 "filename": result.metadata.filename,
@@ -2620,7 +2618,10 @@ async def get_upload_url(
 
 
 @app.get("/api/storage/file/{encoded_key}")
-async def serve_file(encoded_key: str):
+async def serve_file(
+    encoded_key: str,
+    credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
+):
     """
     GET /api/storage/file/{encoded_key}
 
@@ -2628,6 +2629,7 @@ async def serve_file(encoded_key: str):
     content from the backend storage (used by local and S3 backends).
     For S3 with a public bucket, clients may use the direct source URL instead.
     """
+    auth.verify_access_token(credentials)
     try:
         key = decode_base64_key(encoded_key)
     except Exception:
