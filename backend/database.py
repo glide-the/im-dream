@@ -11,6 +11,7 @@ Schema:
 
 import sqlite3
 import os
+import logging
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Union
@@ -19,6 +20,8 @@ import json
 # Database location
 DB_DIR = Path(__file__).parent / "data"
 DB_PATH = DB_DIR / "ink-and-memory.db"
+
+logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
 DB_DIR.mkdir(exist_ok=True)
@@ -252,18 +255,75 @@ def create_tables(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_chat_thread_user ON chat_thread(user_id, updated_at)")
 
     # @@@ Claude Agent chat messages (one row per user/assistant turn)
+    # Schema fully aligned with better-chatbot ChatMessageTable (schema.pg.ts):
+    #   id TEXT PK (AI-SDK message ID), thread_id FK, role, parts JSON array, metadata JSON, created_at
+    # No `content` column — exactly matching better-chatbot where text lives inside parts[].text.
     db.execute("""
     CREATE TABLE IF NOT EXISTS chat_message (
       id TEXT PRIMARY KEY,
       thread_id TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-      content TEXT NOT NULL,
-      parts_json TEXT,
+      parts TEXT NOT NULL DEFAULT '[]',
+      metadata TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (thread_id) REFERENCES chat_thread (id) ON DELETE CASCADE
     )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_chat_message_thread ON chat_message(thread_id, created_at)")
+    # Migration: add metadata column for databases pre-dating this column.
+    try:
+        db.execute("ALTER TABLE chat_message ADD COLUMN metadata TEXT")
+        db.commit()
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            logger.warning("Unexpected error adding metadata column: %s", exc)
+    # Migration: add parts column (replaces parts_json) for databases pre-dating this column.
+    # parts is NOT NULL with default '[]'; existing rows with parts_json data are backfilled below.
+    try:
+        db.execute("ALTER TABLE chat_message ADD COLUMN parts TEXT NOT NULL DEFAULT '[]'")
+        db.commit()
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            logger.warning("Unexpected error adding parts column: %s", exc)
+    # Backfill: copy parts_json → parts for rows that still have the old column populated.
+    # For rows with no parts_json, build a text part from the content column if it exists.
+    try:
+        db.execute("""
+            UPDATE chat_message
+            SET parts = parts_json
+            WHERE parts_json IS NOT NULL AND parts = '[]'
+        """)
+        # content column may still exist on old DBs — use it as fallback text source.
+        db.execute("""
+            UPDATE chat_message
+            SET parts = json_array(json_object('type', 'text', 'text', content))
+            WHERE (parts_json IS NULL OR parts_json = '') AND parts = '[]'
+              AND content IS NOT NULL
+        """)
+        db.commit()
+    except Exception as exc:
+        logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
+    # Migration: drop legacy content column (not in better-chatbot schema).
+    # SQLite supports DROP COLUMN since 3.35.0 (2021); skip gracefully on older builds.
+    try:
+        db.execute("ALTER TABLE chat_message DROP COLUMN content")
+        db.commit()
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "no such column" in msg or "unknown column" in msg or "cannot drop" in msg:
+            pass  # already dropped or not present on new DBs
+        else:
+            logger.warning("Drop content column warning (non-fatal): %s", exc)
+    # Migration: drop legacy parts_json column (superseded by parts).
+    try:
+        db.execute("ALTER TABLE chat_message DROP COLUMN parts_json")
+        db.commit()
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "no such column" in msg or "unknown column" in msg or "cannot drop" in msg:
+            pass
+        else:
+            logger.warning("Drop parts_json column warning (non-fatal): %s", exc)
 
     print("✅ Tables created")
 
@@ -2066,17 +2126,45 @@ def _touch_chat_thread(db, thread_id: str) -> None:
 def save_chat_message(
     thread_id: str,
     role: str,
-    content: str,
+    parts: list,
+    message_id: Optional[str] = None,
+    metadata: Optional[dict] = None,
+    # Deprecated aliases kept for one-release backward compatibility.
     parts_json: Optional[str] = None,
+    metadata_json: Optional[str] = None,
 ) -> str:
-    """Persist one chat message. Returns the new message_id."""
+    """Persist one chat message. Returns the message_id.
+
+    Fully aligned with better-chatbot ChatMessageTable — no ``content`` column.
+    Text lives inside ``parts`` as ``{type: "text", text: "..."}`` entries.
+
+      - ``parts``    list[dict] — UIMessage['parts'] array; required; serialized internally.
+      - ``metadata`` dict       — ChatMetadata (usage / chatModel / toolCount); nullable.
+      - ``message_id`` — AI-SDK message.id from the frontend; auto-generated if omitted.
+    """
     import uuid
-    message_id = str(uuid.uuid4())
+    if not message_id:
+        message_id = str(uuid.uuid4())
+
+    # Resolve parts: prefer list param, fall back to deprecated string param.
+    if parts_json is not None and not parts:
+        parts_str = parts_json
+    else:
+        parts_str = json.dumps(parts, ensure_ascii=False)
+
+    # Resolve metadata: prefer dict param, fall back to deprecated string param.
+    if metadata is not None:
+        metadata_str: Optional[str] = json.dumps(metadata, ensure_ascii=False)
+    elif metadata_json is not None:
+        metadata_str = metadata_json
+    else:
+        metadata_str = None
+
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO chat_message (id, thread_id, role, content, parts_json) VALUES (?, ?, ?, ?, ?)",
-            (message_id, thread_id, role, content, parts_json),
+            "INSERT OR REPLACE INTO chat_message (id, thread_id, role, parts, metadata) VALUES (?, ?, ?, ?, ?)",
+            (message_id, thread_id, role, parts_str, metadata_str),
         )
         _touch_chat_thread(db, thread_id)
         db.commit()
@@ -2086,14 +2174,32 @@ def save_chat_message(
 
 
 def list_chat_messages(thread_id: str) -> list[dict]:
-    """Return all messages for a thread in chronological order."""
+    """Return all messages for a thread in chronological order.
+
+    Fully aligned with better-chatbot ChatRepository.selectMessagesByThreadId:
+    returns ``parts`` as a parsed Python list and ``metadata`` as a parsed dict
+    (or None) so callers receive UIMessage-compatible objects directly.
+    """
     db = get_db()
     try:
         rows = db.execute(
-            "SELECT id, role, content, parts_json, created_at FROM chat_message WHERE thread_id = ? ORDER BY created_at ASC",
+            "SELECT id, role, parts, metadata, created_at FROM chat_message WHERE thread_id = ? ORDER BY created_at ASC",
             (thread_id,),
         ).fetchall()
-        return [dict(row) for row in rows]
+        results = []
+        for row in rows:
+            m = dict(row)
+            try:
+                m["parts"] = json.loads(m["parts"]) if m["parts"] else []
+            except Exception:
+                m["parts"] = []
+            if m.get("metadata"):
+                try:
+                    m["metadata"] = json.loads(m["metadata"])
+                except Exception:
+                    m["metadata"] = None
+            results.append(m)
+        return results
     finally:
         db.close()
 

@@ -2236,6 +2236,7 @@ async def claude_agent_stream(
     if not message_text:
         raise HTTPException(status_code=400, detail="message text is required")
 
+    _msg_dict = body.message if isinstance(body.message, dict) else None
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
         thread_id=thread_id,
@@ -2245,6 +2246,8 @@ async def claude_agent_stream(
         model=body.model,
         max_turns=body.max_turns,
         cwd=body.cwd,
+        message_id=_msg_dict.get("id") if _msg_dict else None,
+        message_parts=_msg_dict.get("parts") if _msg_dict else None,
     )
 
     async def generate():

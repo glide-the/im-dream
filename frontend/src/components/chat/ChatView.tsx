@@ -1,3 +1,8 @@
+// [Input] Consume WorkspaceContext, dashboard file/nav/quick-action components, ChatPanel, auth token, and AI SDK message types.
+// [Output] Render chat workspace, thread history sidebar, file sidebar, quick actions, and ChatPanel.
+// [Pos] chat-workspace view node in frontend/src/components/chat
+// [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
+// [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -6,7 +11,7 @@ import QuickActionCard from '../dashboard/QuickActionCard';
 import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
 import VerticalNav from '../dashboard/VerticalNav';
 import ChatPanel from './ChatPanel';
-import type { Attachment, ContextCustomer } from './AIInputDock';
+import type { Attachment } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 
@@ -22,18 +27,16 @@ interface ChatThread {
 interface RawChatMessage {
   id: string;
   role: string;
-  content: string;
-  parts_json?: string;
+  /** Parsed UIMessage['parts'] array — returned by the API already deserialized. */
+  parts: UIMessage['parts'];
+  /** Parsed ChatMetadata — returned by the API already deserialized. */
+  metadata?: Record<string, unknown>;
   created_at: string;
 }
 
 interface ChatViewProps {
-  title?: string;
   threadId?: string;
-  contextCustomerId?: string;
-  contextCustomers?: ContextCustomer[];
   onNewChat?: () => void;
-  onNavigateToSettings?: () => void;
   quickActions?: QuickActionCardItem[];
 }
 
@@ -66,14 +69,17 @@ async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
     const data = await res.json() as { messages?: RawChatMessage[] };
     const msgs = data.messages ?? [];
     return msgs.map((m) => {
-      let parts: UIMessage['parts'] = [{ type: 'text', text: m.content }];
-      if (m.parts_json) {
-        try { parts = JSON.parse(m.parts_json) as UIMessage['parts']; } catch { /* fallback */ }
-      }
+      // parts is already a parsed list — aligned with better-chatbot
+      // ChatRepository.selectMessagesByThreadId which returns parts directly.
+      const parts: UIMessage['parts'] = Array.isArray(m.parts) && m.parts.length > 0
+        ? m.parts
+        : [{ type: 'text', text: '' }];
+      const metadata = m.metadata && typeof m.metadata === 'object' ? m.metadata : undefined;
       return {
         id: m.id,
         role: m.role as UIMessage['role'],
         parts,
+        metadata,
         createdAt: new Date(m.created_at),
       };
     });
@@ -92,12 +98,8 @@ async function deleteThread(threadId: string): Promise<boolean> {
 }
 
 export default function ChatView({
-  title: _title,
   threadId: initialThreadId,
-  contextCustomerId,
-  contextCustomers = [],
   onNewChat,
-  onNavigateToSettings,
   quickActions = QUICK_ACTION_CARDS,
 }: ChatViewProps) {
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
@@ -155,6 +157,10 @@ export default function ChatView({
     const id = await createThread();
     setIsCreatingThread(false);
     if (id) {
+      // Reset messages before switching so the new ChatPanel (remounted via
+      // key={activeThreadId}) never sees stale messages from the previous thread.
+      setThreadMessages(null);
+      setIsLoadingMessages(false);
       setActiveThreadId(id);
       setHasConversationStarted(false);
       setQueuedPrompt('');
@@ -165,9 +171,19 @@ export default function ChatView({
   }, [onNewChat, reloadThreads]);
 
   const handleSelectThread = useCallback((threadId: string) => {
+    // Reset messages synchronously so the incoming ChatPanel (remounted via
+    // key={activeThreadId}) starts with initialMessages=undefined and doesn't
+    // pick up the previous thread's messages before the fetch completes.
+    setThreadMessages(null);
+    setIsLoadingMessages(true);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
     setThreadSidebarOpen(false);
+    // Clear any pending queued prompt so the remounted ChatPanel doesn't
+    // replay a previous quick-action when its lastQueuedNonceRef resets to
+    // undefined on mount.
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
   }, []);
 
   const handleDeleteThread = useCallback(async (threadId: string, e: React.MouseEvent) => {
@@ -206,7 +222,7 @@ export default function ChatView({
   return (
     <WorkspaceProvider>
       <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onToggleThreadSidebar={() => setThreadSidebarOpen((v) => !v)} onNavigateToSettings={onNavigateToSettings} unreadCount={0} />
+        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onToggleThreadSidebar={() => setThreadSidebarOpen((v) => !v)} unreadCount={0} />
 
         {/* Thread history sidebar */}
         {threadSidebarOpen && (
@@ -270,8 +286,6 @@ export default function ChatView({
             <ChatPanel
               key={activeThreadId}
               threadId={activeThreadId}
-              contextCustomerId={contextCustomerId}
-              contextCustomers={contextCustomers}
               initialMessages={threadMessages ?? undefined}
               isLoading={isLoadingMessages}
               queuedPrompt={queuedPrompt}
@@ -291,4 +305,3 @@ export default function ChatView({
     </WorkspaceProvider>
   );
 }
-
