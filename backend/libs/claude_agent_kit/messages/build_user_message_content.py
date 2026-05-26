@@ -95,32 +95,7 @@ def build_user_message_content(
                                 "data": base64_data,
                             },
                         }
-                    )
-                elif media_type == "text/plain":
-                    decoded = _decode_base64_text(base64_data)
-                    blocks.append(
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "text",
-                                "media_type": "text/plain",
-                                "data": decoded,
-                            },
-                            "title": attachment.name,
-                        }
-                    )
-                elif media_type == "application/pdf":
-                    blocks.append(
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": base64_data,
-                            },
-                            "title": attachment.name,
-                        }
-                    )
+                    ) 
                 else:
                     logger.warning("Cannot process file: %s", attachment.name)
             except Exception as exc:  # noqa: BLE001
