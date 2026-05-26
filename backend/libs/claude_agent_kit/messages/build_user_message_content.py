@@ -13,10 +13,12 @@ Python translation of TypeScript:
 from __future__ import annotations
 
 import base64
-import sys
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # MIME types that can be rendered inline within chat transcripts
@@ -120,12 +122,9 @@ def build_user_message_content(
                         }
                     )
                 else:
-                    print(
-                        f"Cannot process file: {attachment.name}",
-                        file=sys.stderr,
-                    )
+                    logger.warning("Cannot process file: %s", attachment.name)
             except Exception as exc:  # noqa: BLE001
-                print(f"Error processing file: {exc}", file=sys.stderr)
+                logger.error("Error processing file: %s", exc)
 
     include_runtime_context = (
         runtime_context is None or runtime_context.include_runtime_context
