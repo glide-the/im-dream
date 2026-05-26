@@ -202,18 +202,24 @@ class ClaudeAgentService:
                 "Phase 1: reusing cached system_prompt for session_id=%s", state.session_id
             )
 
-        user_message = self._context_builder.build_user_message(request.message)
+        user_message_content = self._context_builder.build_user_message(
+            request.message,
+            attachments=request.attachments,
+            model=request.model,
+            max_turns=request.max_turns,
+            thread_id=state.session_id,
+            resume=request.resume,
+        )
 
         run_options = AgentRunOptions(
             thread_id=state.session_id,
-            user_message=user_message,
+            user_message=user_message_content,
             resume=request.resume,
             model=request.model,
             cwd=request.cwd or state.cwd or None,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
-            attachments=request.attachments,
         )
 
         confirmation_store = ToolConfirmationStore()

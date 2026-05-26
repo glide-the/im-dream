@@ -148,28 +148,105 @@ class TestBuildUserMessage(unittest.TestCase):
     def setUp(self):
         self.builder = ClaudeAgentContextBuilder()
 
-    def test_prepends_runtime_context_block(self):
-        msg = self.builder.build_user_message("Hello there")
-        self.assertIn("Current time:", msg)
-        self.assertIn("Hello there", msg)
+    def _text_blocks(self, blocks):
+        """Return the concatenated text of all text-type blocks."""
+        return "\n".join(b["text"] for b in blocks if b.get("type") == "text")
 
-    def test_runtime_block_before_user_text(self):
-        msg = self.builder.build_user_message("My message")
-        time_pos = msg.index("Current time:")
-        user_pos = msg.index("My message")
-        self.assertLess(time_pos, user_pos)
+    def test_returns_list_of_content_blocks(self):
+        blocks = self.builder.build_user_message("Hello there")
+        self.assertIsInstance(blocks, list)
+        self.assertTrue(all(isinstance(b, dict) for b in blocks))
 
-    def test_includes_timezone_hint(self):
-        msg = self.builder.build_user_message("x", timezone_name="Asia/Shanghai")
-        self.assertIn("Asia/Shanghai", msg)
+    def test_includes_runtime_context_block(self):
+        blocks = self.builder.build_user_message("Hello there")
+        combined = self._text_blocks(blocks)
+        self.assertIn("<runtime_context>", combined)
+        self.assertIn("Date:", combined)
 
-    def test_default_timezone_is_utc(self):
-        msg = self.builder.build_user_message("x")
-        self.assertIn("UTC", msg)
+    def test_user_text_is_last_block(self):
+        blocks = self.builder.build_user_message("My message")
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        self.assertEqual(last["text"], "My message")
+
+    def test_runtime_context_block_before_user_text(self):
+        blocks = self.builder.build_user_message("My message")
+        types = [b["type"] for b in blocks]
+        # At least two text blocks: runtime_context and user text
+        self.assertGreaterEqual(len(blocks), 2)
+        # runtime_context block appears before the final user text block
+        runtime_idx = next(
+            i for i, b in enumerate(blocks) if "<runtime_context>" in b.get("text", "")
+        )
+        user_idx = len(blocks) - 1
+        self.assertLess(runtime_idx, user_idx)
+
+    def test_includes_local_timezone(self):
+        blocks = self.builder.build_user_message("x", local_timezone="Asia/Shanghai")
+        combined = self._text_blocks(blocks)
+        self.assertIn("Asia/Shanghai", combined)
+
+    def test_no_timezone_by_default(self):
+        blocks = self.builder.build_user_message("x")
+        combined = self._text_blocks(blocks)
+        # No Timezone line when local_timezone is not provided
+        self.assertNotIn("Timezone:", combined)
 
     def test_empty_message_still_has_runtime_block(self):
-        msg = self.builder.build_user_message("")
-        self.assertIn("Current time:", msg)
+        blocks = self.builder.build_user_message("")
+        combined = self._text_blocks(blocks)
+        self.assertIn("<runtime_context>", combined)
+
+    def test_include_runtime_context_false_skips_block(self):
+        blocks = self.builder.build_user_message(
+            "hello", include_runtime_context=False
+        )
+        combined = self._text_blocks(blocks)
+        self.assertNotIn("<runtime_context>", combined)
+        self.assertIn("hello", combined)
+
+    def test_image_attachment_becomes_image_block(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Att:
+            name: str
+            media_type: str
+            data: str
+
+        att = _Att(name="photo.jpg", media_type="image/jpeg", data="abc123")
+        blocks = self.builder.build_user_message("see image", attachments=[att])
+        image_blocks = [b for b in blocks if b.get("type") == "image"]
+        self.assertEqual(len(image_blocks), 1)
+        self.assertEqual(image_blocks[0]["source"]["data"], "abc123")
+
+    def test_unsupported_attachment_is_skipped(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Att:
+            name: str
+            media_type: str
+            data: str
+
+        att = _Att(name="doc.pdf", media_type="application/pdf", data="abc")
+        blocks = self.builder.build_user_message("see doc", attachments=[att])
+        image_blocks = [b for b in blocks if b.get("type") == "image"]
+        self.assertEqual(len(image_blocks), 0)
+
+    def test_model_and_thread_id_in_runtime_context(self):
+        blocks = self.builder.build_user_message(
+            "hi", model="claude-3-5-sonnet", thread_id="sess-abc", max_turns=50
+        )
+        combined = self._text_blocks(blocks)
+        self.assertIn("claude-3-5-sonnet", combined)
+        self.assertIn("sess-abc", combined)
+        self.assertIn("50", combined)
+
+    def test_resume_flag_in_runtime_context(self):
+        blocks = self.builder.build_user_message("hi", resume=True)
+        combined = self._text_blocks(blocks)
+        self.assertIn("Resumed conversation: yes", combined)
 
 
 if __name__ == "__main__":
