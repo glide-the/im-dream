@@ -206,7 +206,6 @@ async def claude_agent_stream(
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
         thread_id=thread_id,
-        message=message_text,
         resume=body.resume,
         tool_choice=body.tool_choice,
         model=body.model,

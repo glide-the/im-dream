@@ -152,26 +152,29 @@ class TestBuildUserMessage(unittest.TestCase):
         """Return the concatenated text of all text-type blocks."""
         return "\n".join(b["text"] for b in blocks if b.get("type") == "text")
 
+    def _parts(self, text: str) -> list:
+        """Wrap plain text as a minimal AI-SDK UIMessage parts list."""
+        return [{"type": "text", "text": text}]
+
     def test_returns_list_of_content_blocks(self):
-        blocks = self.builder.build_user_message("Hello there")
+        blocks = self.builder.build_user_message(self._parts("Hello there"))
         self.assertIsInstance(blocks, list)
         self.assertTrue(all(isinstance(b, dict) for b in blocks))
 
     def test_includes_runtime_context_block(self):
-        blocks = self.builder.build_user_message("Hello there")
+        blocks = self.builder.build_user_message(self._parts("Hello there"))
         combined = self._text_blocks(blocks)
         self.assertIn("<runtime_context>", combined)
         self.assertIn("Date:", combined)
 
     def test_user_text_is_last_block(self):
-        blocks = self.builder.build_user_message("My message")
+        blocks = self.builder.build_user_message(self._parts("My message"))
         last = blocks[-1]
         self.assertEqual(last["type"], "text")
         self.assertEqual(last["text"], "My message")
 
     def test_runtime_context_block_before_user_text(self):
-        blocks = self.builder.build_user_message("My message")
-        types = [b["type"] for b in blocks]
+        blocks = self.builder.build_user_message(self._parts("My message"))
         # At least two text blocks: runtime_context and user text
         self.assertGreaterEqual(len(blocks), 2)
         # runtime_context block appears before the final user text block
@@ -182,24 +185,29 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertLess(runtime_idx, user_idx)
 
     def test_includes_local_timezone(self):
-        blocks = self.builder.build_user_message("x", local_timezone="Asia/Shanghai")
+        blocks = self.builder.build_user_message(self._parts("x"), local_timezone="Asia/Shanghai")
         combined = self._text_blocks(blocks)
         self.assertIn("Asia/Shanghai", combined)
 
     def test_no_timezone_by_default(self):
-        blocks = self.builder.build_user_message("x")
+        blocks = self.builder.build_user_message(self._parts("x"))
         combined = self._text_blocks(blocks)
         # No Timezone line when local_timezone is not provided
         self.assertNotIn("Timezone:", combined)
 
     def test_empty_message_still_has_runtime_block(self):
-        blocks = self.builder.build_user_message("")
+        blocks = self.builder.build_user_message(self._parts(""))
+        combined = self._text_blocks(blocks)
+        self.assertIn("<runtime_context>", combined)
+
+    def test_none_message_parts_still_has_runtime_block(self):
+        blocks = self.builder.build_user_message(None)
         combined = self._text_blocks(blocks)
         self.assertIn("<runtime_context>", combined)
 
     def test_include_runtime_context_false_skips_block(self):
         blocks = self.builder.build_user_message(
-            "hello", include_runtime_context=False
+            self._parts("hello"), include_runtime_context=False
         )
         combined = self._text_blocks(blocks)
         self.assertNotIn("<runtime_context>", combined)
@@ -215,7 +223,7 @@ class TestBuildUserMessage(unittest.TestCase):
             data: str
 
         att = _Att(name="photo.jpg", media_type="image/jpeg", data="abc123")
-        blocks = self.builder.build_user_message("see image", attachments=[att])
+        blocks = self.builder.build_user_message(self._parts("see image"), attachments=[att])
         image_blocks = [b for b in blocks if b.get("type") == "image"]
         self.assertEqual(len(image_blocks), 1)
         self.assertEqual(image_blocks[0]["source"]["data"], "abc123")
@@ -230,13 +238,13 @@ class TestBuildUserMessage(unittest.TestCase):
             data: str
 
         att = _Att(name="doc.pdf", media_type="application/pdf", data="abc")
-        blocks = self.builder.build_user_message("see doc", attachments=[att])
+        blocks = self.builder.build_user_message(self._parts("see doc"), attachments=[att])
         image_blocks = [b for b in blocks if b.get("type") == "image"]
         self.assertEqual(len(image_blocks), 0)
 
     def test_model_and_thread_id_in_runtime_context(self):
         blocks = self.builder.build_user_message(
-            "hi", model="claude-3-5-sonnet", thread_id="sess-abc", max_turns=50
+            self._parts("hi"), model="claude-3-5-sonnet", thread_id="sess-abc", max_turns=50
         )
         combined = self._text_blocks(blocks)
         self.assertIn("claude-3-5-sonnet", combined)
@@ -244,9 +252,17 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("50", combined)
 
     def test_resume_flag_in_runtime_context(self):
-        blocks = self.builder.build_user_message("hi", resume=True)
+        blocks = self.builder.build_user_message(self._parts("hi"), resume=True)
         combined = self._text_blocks(blocks)
         self.assertIn("Resumed conversation: yes", combined)
+
+    def test_multiple_text_parts_concatenated(self):
+        parts = [{"type": "text", "text": "Hello"}, {"type": "text", "text": "world"}]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        self.assertIn("Hello", last["text"])
+        self.assertIn("world", last["text"])
 
 
 if __name__ == "__main__":

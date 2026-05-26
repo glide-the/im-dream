@@ -78,6 +78,28 @@ MAX_THREAD_TITLE_LENGTH: int = 50
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_text_from_parts(parts: Optional[list]) -> str:
+    """Extract concatenated plain text from AI-SDK UIMessage parts.
+
+    Scans *parts* for ``{"type": "text", "text": "..."}`` entries and joins
+    their text with a single newline.  Returns an empty string when *parts* is
+    ``None`` or contains no text entries.
+    """
+    if not parts:
+        return ""
+    texts = [
+        p.get("text", "")
+        for p in parts
+        if isinstance(p, dict) and p.get("type") == "text"
+    ]
+    return "\n".join(t for t in texts if t)
+
+
+# ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
 
@@ -87,18 +109,20 @@ class ClaudeAgentRunRequest:
     """Validated request for a single Claude Agent turn.
 
     All string IDs are validated by the factory before this dataclass is built.
+    ``message_parts`` carries the AI-SDK UIMessage parts list (e.g.
+    ``[{"type": "text", "text": "..."}]``); plain text is derived from it as
+    needed — the raw ``message_text`` string is never stored here.
     """
 
     user_id: str
     thread_id: str
-    message: str
     resume: bool = False
     tool_choice: str = "auto"
     model: Optional[str] = None
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
-    # Original AI-SDK message fields (for aligned DB persistence)
+    # AI-SDK message fields (for context assembly and DB persistence)
     message_id: Optional[str] = None
     message_parts: Optional[list] = None
     # File attachments to be passed as content blocks to Claude.
@@ -203,7 +227,7 @@ class ClaudeAgentService:
             )
 
         user_message_content = self._context_builder.build_user_message(
-            request.message,
+            request.message_parts,
             attachments=request.attachments,
             model=request.model,
             max_turns=request.max_turns,
@@ -294,7 +318,6 @@ class ClaudeAgentService:
         import database
 
         thread_id = execution.request.thread_id
-        user_text = execution.request.message
         user_message_id = execution.request.message_id  # original AI-SDK ID or None
         user_parts = execution.request.message_parts     # original parts list or None
         assistant_text: str = result.full_text if result else ""
@@ -305,8 +328,8 @@ class ClaudeAgentService:
         def _save() -> None:
             # --- User message ---
             # Mirror better-chatbot: store message.parts from the frontend AI SDK.
-            # Fall back to a minimal text part when message_parts is not provided.
-            resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": user_text}]
+            # Fall back to an empty parts list when message_parts is not provided.
+            resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": ""}]
             database.save_chat_message(
                 thread_id, "user",
                 parts=resolved_user_parts,
@@ -351,7 +374,7 @@ class ClaudeAgentService:
             # Auto-fill thread title from first user message if still NULL
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
             if thread and not thread.get("title"):
-                title = user_text.strip()[:MAX_THREAD_TITLE_LENGTH]
+                title = _extract_text_from_parts(user_parts).strip()[:MAX_THREAD_TITLE_LENGTH]
                 database.update_chat_thread_title(thread_id, title)
 
         try:

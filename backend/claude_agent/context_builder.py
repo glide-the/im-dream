@@ -118,7 +118,7 @@ class ClaudeAgentContextBuilder:
 
     def build_user_message(
         self,
-        raw_message: str,
+        message_parts: Optional[list],
         *,
         attachments: Optional[list[Any]] = None,
         model: Optional[str] = None,
@@ -130,6 +130,10 @@ class ClaudeAgentContextBuilder:
         local_timezone: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
+
+        *message_parts* is the AI-SDK UIMessage ``parts`` list
+        (e.g. ``[{"type": "text", "text": "..."}]``).  Text is extracted from
+        all ``type == "text"`` entries and appended as the final content block.
 
         Returns a list of content blocks in the order expected by Claude:
         attachment image blocks first, then the ``<runtime_context>`` block
@@ -197,7 +201,17 @@ class ClaudeAgentContextBuilder:
                 }
             )
 
-        blocks.append({"type": "text", "text": raw_message})
+        # Extract plain text from message_parts and append as the final block.
+        if message_parts:
+            texts = [
+                p.get("text", "")
+                for p in message_parts
+                if isinstance(p, dict) and p.get("type") == "text"
+            ]
+            user_text = "\n".join(t for t in texts if t)
+        else:
+            user_text = ""
+        blocks.append({"type": "text", "text": user_text})
         return blocks
 
 
