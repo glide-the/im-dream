@@ -66,6 +66,7 @@ from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
+from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 
 logger = logging.getLogger(__name__)
@@ -83,20 +84,13 @@ MAX_THREAD_TITLE_LENGTH: int = 50
 
 
 def _extract_text_from_parts(parts: Optional[list]) -> str:
-    """Extract concatenated plain text from AI-SDK UIMessage parts.
+    """Extract text from AI-SDK UIMessage parts for use as a plain string.
 
-    Scans *parts* for ``{"type": "text", "text": "..."}`` entries and joins
-    their text with a single newline.  Returns an empty string when *parts* is
-    ``None`` or contains no text entries.
+    Delegates to ``extract_text_from_parts`` (full UIMessage parts protocol:
+    text + file + source-url + workspace-file).  Used for thread title
+    auto-fill where a compact string representation is needed.
     """
-    if not parts:
-        return ""
-    texts = [
-        p.get("text", "")
-        for p in parts
-        if isinstance(p, dict) and p.get("type") == "text"
-    ]
-    return "\n".join(t for t in texts if t)
+    return extract_text_from_parts(parts)
 
 
 # ---------------------------------------------------------------------------

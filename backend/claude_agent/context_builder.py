@@ -6,6 +6,8 @@
 #                    context assembly with writing-session context injection.
 # [Sync] 2026-05-26: merge build_user_message_content (SDK lib) into build_user_message
 #                    so that the SDK no longer participates in context processing.
+# [Sync] 2026-05-26: use extract_text_from_parts (message_parts.py) for full UIMessage
+#                    parts protocol (text + file + source-url + workspace-file).
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -18,7 +20,8 @@ pet persona, Mem0 memories, and necklace sensor data), this builder:
    assistant with knowledge of the user's recent entries.
 3. Provides a ``build_user_message`` helper that builds the full list of
    content blocks for a user turn: attachment image blocks, a lightweight
-   ``<runtime_context>`` block, and the user's message text.
+   ``<runtime_context>`` block, and the user's message text extracted from
+   the full AI-SDK UIMessage parts list.
 """
 from __future__ import annotations
 
@@ -26,6 +29,8 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 
 logger = logging.getLogger(__name__)
 
@@ -201,16 +206,9 @@ class ClaudeAgentContextBuilder:
                 }
             )
 
-        # Extract plain text from message_parts and append as the final block.
-        if message_parts:
-            texts = [
-                p.get("text", "")
-                for p in message_parts
-                if isinstance(p, dict) and p.get("type") == "text"
-            ]
-            user_text = "\n".join(t for t in texts if t)
-        else:
-            user_text = ""
+        # Convert all message_parts (text, file, source-url, workspace-file) to
+        # a single text string using the full UIMessage parts protocol.
+        user_text = extract_text_from_parts(message_parts)
         blocks.append({"type": "text", "text": user_text})
         return blocks
 

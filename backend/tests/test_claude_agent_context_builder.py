@@ -264,6 +264,83 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("Hello", last["text"])
         self.assertIn("world", last["text"])
 
+    def test_file_part_rendered_as_metadata(self):
+        parts = [
+            {
+                "type": "file",
+                "url": "https://example.com/report.pdf",
+                "filename": "report.pdf",
+                "mediaType": "application/pdf",
+                "size": 2048,
+            }
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("report.pdf", text)
+        self.assertIn("application/pdf", text)
+        self.assertIn("2.0 KB", text)
+        self.assertIn("https://example.com/report.pdf", text)
+
+    def test_source_url_part_rendered_as_metadata(self):
+        parts = [
+            {
+                "type": "source-url",
+                "url": "https://example.com/article",
+                "title": "My Article",
+                "mediaType": "text/html",
+            }
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("My Article", text)
+        self.assertIn("https://example.com/article", text)
+        self.assertIn("text/html", text)
+
+    def test_workspace_file_part_rendered_as_metadata(self):
+        parts = [
+            {
+                "type": "workspace-file",
+                "fileName": "notes.md",
+                "workspacePath": "/workspace/notes.md",
+                "mimeType": "text/markdown",
+                "size": 512,
+                "savedAt": "2026-01-01T00:00:00Z",
+                "hash": "abc123",
+            }
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("notes.md", text)
+        self.assertIn("/workspace/notes.md", text)
+        self.assertIn("text/markdown", text)
+        self.assertIn("512", text)
+        self.assertIn("abc123", text)
+
+    def test_mixed_text_and_file_parts(self):
+        parts = [
+            {"type": "text", "text": "Please review this file:"},
+            {
+                "type": "file",
+                "url": "https://example.com/data.csv",
+                "filename": "data.csv",
+                "mediaType": "text/csv",
+                "size": 1024,
+            },
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("Please review this file:", text)
+        self.assertIn("data.csv", text)
+        self.assertIn("text/csv", text)
+
 
 if __name__ == "__main__":
     unittest.main()
