@@ -683,7 +683,7 @@ class ClaudeAgentRunner:
                 or ""
             ).strip() or None,
         )
-        user_msg_content = build_user_message_content(user_message, None, runtime_ctx)
+        user_msg_content = build_user_message_content(user_message, opts.attachments, runtime_ctx)
         user_msg_dict: dict[str, Any] = {
             "type": "user",
             "uuid": str(uuid4()),

@@ -65,6 +65,7 @@ from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
+from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 
 logger = logging.getLogger(__name__)
@@ -100,6 +101,8 @@ class ClaudeAgentRunRequest:
     # Original AI-SDK message fields (for aligned DB persistence)
     message_id: Optional[str] = None
     message_parts: Optional[list] = None
+    # File attachments to be passed as content blocks to Claude.
+    attachments: Optional[list[AttachmentPayload]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +213,7 @@ class ClaudeAgentService:
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
+            attachments=request.attachments,
         )
 
         confirmation_store = ToolConfirmationStore()

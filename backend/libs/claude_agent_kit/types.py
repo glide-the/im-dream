@@ -20,6 +20,8 @@ from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional, Union
 
+from .messages.build_user_message_content import AttachmentPayload
+
 # ---------------------------------------------------------------------------
 # Convenience re-export so callers can import the SDK Message type from here.
 # ---------------------------------------------------------------------------
@@ -146,6 +148,8 @@ class AgentRunOptions:
     turn_runtime: dict[str, Any] = field(default_factory=dict)
     # Environment passed to project-owned MCP subprocesses for current-session bindings.
     mcp_env: dict[str, str] = field(default_factory=dict)
+    # File attachments to be passed as content blocks to Claude.
+    attachments: Optional[list[AttachmentPayload]] = None
 
 
 @dataclass

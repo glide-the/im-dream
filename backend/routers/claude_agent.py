@@ -5,7 +5,9 @@
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
 
+import base64
 import logging
+from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +17,7 @@ from pydantic import BaseModel
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
+from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.server.workspace import get_or_create_workspace
 from libs.claude_agent_kit.server.workspace_file_sync import (
     WorkspaceFileSyncError,
@@ -129,6 +132,7 @@ async def claude_agent_stream(
     message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
 
     # Process attachments: download from file storage and sync to workspace.
+    attachment_payloads: list[AttachmentPayload] = []
     if body.attachments:
         try:
             workspace_path = get_or_create_workspace(thread_id)
@@ -177,6 +181,28 @@ async def claude_agent_stream(
                 len(workspace_file_parts),
             )
 
+        # Build AttachmentPayload list from synced workspace files so that
+        # images, PDFs, and text files are also passed as content blocks to Claude.
+        for part in workspace_file_parts:
+            rel_path = part.get("workspacePath")
+            if not rel_path:
+                continue
+            try:
+                file_bytes = (workspace_path / rel_path).read_bytes()
+                attachment_payloads.append(
+                    AttachmentPayload(
+                        name=part.get("fileName") or Path(rel_path).name,
+                        media_type=part.get("mimeType") or "application/octet-stream",
+                        data=base64.b64encode(file_bytes).decode("ascii"),
+                    )
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[Claude Agent API] Could not read workspace file for AttachmentPayload: %s — %s",
+                    rel_path,
+                    exc,
+                )
+
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
         thread_id=thread_id,
@@ -188,6 +214,7 @@ async def claude_agent_stream(
         cwd=body.cwd,
         message_id=_msg_dict.get("id") if _msg_dict else None,
         message_parts=message_parts,
+        attachments=attachment_payloads or None,
     )
 
     async def generate():
