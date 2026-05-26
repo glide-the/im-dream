@@ -64,6 +64,7 @@ from uuid import uuid4
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
+from libs.claude_agent_kit.server.workspace import get_or_create_workspace
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
@@ -229,12 +230,18 @@ class ClaudeAgentService:
             resume=request.resume,
         )
 
+        cwd = request.cwd or state.cwd
+        if not cwd:
+            workspace_path = get_or_create_workspace(state.session_id)
+            cwd = str(workspace_path)
+            state.with_cwd(cwd)
+
         run_options = AgentRunOptions(
             thread_id=state.session_id,
             user_message=user_message_content,
             resume=request.resume,
             model=request.model,
-            cwd=request.cwd or state.cwd or None,
+            cwd=cwd or None,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
