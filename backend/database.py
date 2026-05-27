@@ -293,12 +293,20 @@ def create_tables(db):
             logger.warning("Unexpected error adding parts column: %s", exc)
     # Backfill: copy parts_json → parts for rows that still have the old column populated.
     # For rows with no parts_json, build a text part from the content column if it exists.
+    # Both columns (parts_json, content) may not exist on new or already-migrated DBs —
+    # skip silently in that case, matching the pattern used by the DROP COLUMN blocks below.
     try:
         db.execute("""
             UPDATE chat_message
             SET parts = parts_json
             WHERE parts_json IS NOT NULL AND parts = '[]'
         """)
+        db.commit()
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "no such column" not in msg and "unknown column" not in msg:
+            logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
+    try:
         # content column may still exist on old DBs — use it as fallback text source.
         db.execute("""
             UPDATE chat_message
@@ -307,8 +315,10 @@ def create_tables(db):
               AND content IS NOT NULL
         """)
         db.commit()
-    except Exception as exc:
-        logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "no such column" not in msg and "unknown column" not in msg:
+            logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
     # Migration: drop legacy content column (not in better-chatbot schema).
     # SQLite supports DROP COLUMN since 3.35.0 (2021); skip gracefully on older builds.
     try:
