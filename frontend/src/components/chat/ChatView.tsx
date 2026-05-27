@@ -3,6 +3,7 @@
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
 // [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
+// [Sync] 2026-05-26: mark conversations started when loaded history contains messages.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -146,6 +147,9 @@ export default function ChatView({
       const msgs = await fetchThreadMessages(activeThreadId);
       if (!cancelled) {
         setThreadMessages(msgs);
+        if (msgs.length > 0) {
+          setHasConversationStarted(true);
+        }
         setIsLoadingMessages(false);
       }
     })();

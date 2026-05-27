@@ -79,7 +79,7 @@ async function uploadWithXHR(
     };
     xhr.onerror = () => reject(new Error('上传失败'));
     const token = getAuthToken();
-    if (token) xhr.setRequestHeader('Authorization', `****** ${token}`);
+    if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.send(body);
   });
 }

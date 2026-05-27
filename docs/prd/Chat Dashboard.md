@@ -35,7 +35,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 │   │   ├── 写作灵感
 │   │   └── 回顾反思
 │   └── ChatPanel（flex: 1，minHeight: 0，overflow: hidden）
-│       ├── ChatMessageList（flex: 1，overflowY: auto）
+│       ├── ChatMessageList（有消息或错误后加载，flex: 1，overflowY: auto）
 │       └── AIInputDock（flexShrink: 0）
 └── FileSidebar（右侧文件侧边栏，可收起）
 ```
@@ -86,6 +86,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 ### 4.4 ChatPanel + AIInputDock
 
 - ChatPanel 占剩余所有高度（`flex: 1`，`minHeight: 0`），内部消息列表独立滚动。
+- 默认空会话不渲染空的消息纸面容器；只有已有消息、发送后产生消息或错误需要展示时，才加载 ChatMessageList 区域。
 - AIInputDock 在 ChatPanel 内部 sticky，不触发外层滚动。
 - 视觉沿用 [Chat Send](<./Chat Send.md>)：纸面容器、柔和边框、底部操作行。
 - `Ask Ink & Memory…` placeholder 使用 `color.text.muted`。
@@ -107,7 +108,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 
 | 状态 | 设计要求 |
 |---|---|
-| 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据。 |
+| 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据，也不显示空白消息纸面容器。 |
 | 对话已触发 | 用户点击快捷指令或发送第一条消息后，QuickActions 区域隐藏，MainArea 仅展示 ChatPanel（消息流 + 输入 Dock）；页面不刷新、不跳转。 |
 | 加载态 | 消息区显示低对比 skeleton 或 pulse；输入区保持可见但根据能力禁用发送。 |
 | 错误态 | 使用 `color.state.error` 加明确错误文本；提供重试入口。 |
@@ -157,6 +158,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 - `VerticalNav.tsx`：移除 `onToggleSidebar` 和 Settings 按钮。新增 `onToggleThreadSidebar` prop，绑定至 `IconClock` 按钮，实现会话历史侧边栏的切换。
 - `const.ts`：快捷指令替换为笔记系统场景。
 - `App.tsx`：ChatView 容器改为 `overflow: hidden`。
-- `ChatPanel.tsx`：新增 `onConversationStart` 回调 prop，在发送第一条消息时触发，供父组件隐藏 QuickActions。
+- `ChatPanel.tsx`：新增 `onConversationStart` 回调 prop，在发送第一条消息时触发，供父组件隐藏 QuickActions；默认空会话不挂载 ChatMessageList 纸面区域，有消息或错误后再显示。
+- `ChatView.tsx`：加载历史消息后，如果当前线程已有消息，同步视为已开始对话并隐藏 QuickActions。
 
 后续如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。

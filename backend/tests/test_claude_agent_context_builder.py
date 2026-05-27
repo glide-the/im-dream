@@ -148,28 +148,198 @@ class TestBuildUserMessage(unittest.TestCase):
     def setUp(self):
         self.builder = ClaudeAgentContextBuilder()
 
-    def test_prepends_runtime_context_block(self):
-        msg = self.builder.build_user_message("Hello there")
-        self.assertIn("Current time:", msg)
-        self.assertIn("Hello there", msg)
+    def _text_blocks(self, blocks):
+        """Return the concatenated text of all text-type blocks."""
+        return "\n".join(b["text"] for b in blocks if b.get("type") == "text")
 
-    def test_runtime_block_before_user_text(self):
-        msg = self.builder.build_user_message("My message")
-        time_pos = msg.index("Current time:")
-        user_pos = msg.index("My message")
-        self.assertLess(time_pos, user_pos)
+    def _parts(self, text: str) -> list:
+        """Wrap plain text as a minimal AI-SDK UIMessage parts list."""
+        return [{"type": "text", "text": text}]
 
-    def test_includes_timezone_hint(self):
-        msg = self.builder.build_user_message("x", timezone_name="Asia/Shanghai")
-        self.assertIn("Asia/Shanghai", msg)
+    def test_returns_list_of_content_blocks(self):
+        blocks = self.builder.build_user_message(self._parts("Hello there"))
+        self.assertIsInstance(blocks, list)
+        self.assertTrue(all(isinstance(b, dict) for b in blocks))
 
-    def test_default_timezone_is_utc(self):
-        msg = self.builder.build_user_message("x")
-        self.assertIn("UTC", msg)
+    def test_includes_runtime_context_block(self):
+        blocks = self.builder.build_user_message(self._parts("Hello there"))
+        combined = self._text_blocks(blocks)
+        self.assertIn("<runtime_context>", combined)
+        self.assertIn("Date:", combined)
+
+    def test_user_text_is_last_block(self):
+        blocks = self.builder.build_user_message(self._parts("My message"))
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        self.assertEqual(last["text"], "My message")
+
+    def test_runtime_context_block_before_user_text(self):
+        blocks = self.builder.build_user_message(self._parts("My message"))
+        # At least two text blocks: runtime_context and user text
+        self.assertGreaterEqual(len(blocks), 2)
+        # runtime_context block appears before the final user text block
+        runtime_idx = next(
+            i for i, b in enumerate(blocks) if "<runtime_context>" in b.get("text", "")
+        )
+        user_idx = len(blocks) - 1
+        self.assertLess(runtime_idx, user_idx)
+
+    def test_includes_local_timezone(self):
+        blocks = self.builder.build_user_message(self._parts("x"), local_timezone="Asia/Shanghai")
+        combined = self._text_blocks(blocks)
+        self.assertIn("Asia/Shanghai", combined)
+
+    def test_no_timezone_by_default(self):
+        blocks = self.builder.build_user_message(self._parts("x"))
+        combined = self._text_blocks(blocks)
+        # No Timezone line when local_timezone is not provided
+        self.assertNotIn("Timezone:", combined)
 
     def test_empty_message_still_has_runtime_block(self):
-        msg = self.builder.build_user_message("")
-        self.assertIn("Current time:", msg)
+        blocks = self.builder.build_user_message(self._parts(""))
+        combined = self._text_blocks(blocks)
+        self.assertIn("<runtime_context>", combined)
+
+    def test_none_message_parts_still_has_runtime_block(self):
+        blocks = self.builder.build_user_message(None)
+        combined = self._text_blocks(blocks)
+        self.assertIn("<runtime_context>", combined)
+
+    def test_include_runtime_context_false_skips_block(self):
+        blocks = self.builder.build_user_message(
+            self._parts("hello"), include_runtime_context=False
+        )
+        combined = self._text_blocks(blocks)
+        self.assertNotIn("<runtime_context>", combined)
+        self.assertIn("hello", combined)
+
+    def test_image_attachment_becomes_image_block(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Att:
+            name: str
+            media_type: str
+            data: str
+
+        att = _Att(name="photo.jpg", media_type="image/jpeg", data="abc123")
+        blocks = self.builder.build_user_message(self._parts("see image"), attachments=[att])
+        image_blocks = [b for b in blocks if b.get("type") == "image"]
+        self.assertEqual(len(image_blocks), 1)
+        self.assertEqual(image_blocks[0]["source"]["data"], "abc123")
+
+    def test_unsupported_attachment_is_skipped(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class _Att:
+            name: str
+            media_type: str
+            data: str
+
+        att = _Att(name="doc.pdf", media_type="application/pdf", data="abc")
+        blocks = self.builder.build_user_message(self._parts("see doc"), attachments=[att])
+        image_blocks = [b for b in blocks if b.get("type") == "image"]
+        self.assertEqual(len(image_blocks), 0)
+
+    def test_model_and_thread_id_in_runtime_context(self):
+        blocks = self.builder.build_user_message(
+            self._parts("hi"), model="claude-3-5-sonnet", thread_id="sess-abc", max_turns=50
+        )
+        combined = self._text_blocks(blocks)
+        self.assertIn("claude-3-5-sonnet", combined)
+        self.assertIn("sess-abc", combined)
+        self.assertIn("50", combined)
+
+    def test_resume_flag_in_runtime_context(self):
+        blocks = self.builder.build_user_message(self._parts("hi"), resume=True)
+        combined = self._text_blocks(blocks)
+        self.assertIn("Resumed conversation: yes", combined)
+
+    def test_multiple_text_parts_concatenated(self):
+        parts = [{"type": "text", "text": "Hello"}, {"type": "text", "text": "world"}]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        self.assertIn("Hello", last["text"])
+        self.assertIn("world", last["text"])
+
+    def test_file_part_rendered_as_metadata(self):
+        parts = [
+            {
+                "type": "file",
+                "url": "https://example.com/report.pdf",
+                "filename": "report.pdf",
+                "mediaType": "application/pdf",
+                "size": 2048,
+            }
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("report.pdf", text)
+        self.assertIn("application/pdf", text)
+        self.assertIn("2.0 KB", text)
+        self.assertIn("https://example.com/report.pdf", text)
+
+    def test_source_url_part_rendered_as_metadata(self):
+        parts = [
+            {
+                "type": "source-url",
+                "url": "https://example.com/article",
+                "title": "My Article",
+                "mediaType": "text/html",
+            }
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("My Article", text)
+        self.assertIn("https://example.com/article", text)
+        self.assertIn("text/html", text)
+
+    def test_workspace_file_part_rendered_as_metadata(self):
+        parts = [
+            {
+                "type": "workspace-file",
+                "fileName": "notes.md",
+                "workspacePath": "/workspace/notes.md",
+                "mimeType": "text/markdown",
+                "size": 512,
+                "savedAt": "2026-01-01T00:00:00Z",
+                "hash": "abc123",
+            }
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("notes.md", text)
+        self.assertIn("/workspace/notes.md", text)
+        self.assertIn("text/markdown", text)
+        self.assertIn("512", text)
+        self.assertIn("abc123", text)
+
+    def test_mixed_text_and_file_parts(self):
+        parts = [
+            {"type": "text", "text": "Please review this file:"},
+            {
+                "type": "file",
+                "url": "https://example.com/data.csv",
+                "filename": "data.csv",
+                "mediaType": "text/csv",
+                "size": 1024,
+            },
+        ]
+        blocks = self.builder.build_user_message(parts, include_runtime_context=False)
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        text = last["text"]
+        self.assertIn("Please review this file:", text)
+        self.assertIn("data.csv", text)
+        self.assertIn("text/csv", text)
 
 
 if __name__ == "__main__":
