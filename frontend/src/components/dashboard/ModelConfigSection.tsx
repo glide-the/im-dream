@@ -170,7 +170,7 @@ export default function ModelConfigSection() {
   const handleSaveEnvVars = useCallback(async () => {
     const record: Record<string, string> = {};
     for (const { key, value } of envVars) {
-      if (key.trim()) record[key.trim()] = value;
+      if (key.trim()) record[key.trim()] = value.trim();
     }
     setEnvVarsSaving(true);
     try {

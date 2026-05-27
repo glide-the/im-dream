@@ -247,7 +247,7 @@ class ClaudeAgentService:
             sys_cfg = _db.get_system_config(int(request.user_id))
             raw_env = sys_cfg.get("env_vars") or {}
             if isinstance(raw_env, dict):
-                user_env_vars = {str(k): str(v) for k, v in raw_env.items() if k and v is not None}
+                user_env_vars = {str(k).strip(): str(v) for k, v in raw_env.items() if str(k).strip() and v is not None}
         except Exception:
             logger.warning("Failed to load user env_vars from system_config; skipping.")
 

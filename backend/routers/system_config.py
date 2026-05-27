@@ -50,7 +50,7 @@ def _sanitize_env_vars(raw: object) -> dict[str, str]:
     result: dict[str, str] = {}
     for key, value in raw.items():
         k = str(key).strip()[: _ENV_VAR_KEY_MAX_LEN]
-        v = str(value)[: _ENV_VAR_VALUE_MAX_LEN]
+        v = str(value).strip()[: _ENV_VAR_VALUE_MAX_LEN]
         if k:
             result[k] = v
         if len(result) >= _ENV_VARS_MAX_ENTRIES:
