@@ -119,3 +119,32 @@ def apply_project_sdk_runtime_options(
     apply_project_dotenv_to_options(options, env_file)
     apply_project_setting_sources_to_options(options)
     return options
+
+
+def apply_user_sdk_env_to_options(
+    options: Any,
+    user_env: Optional[Mapping[str, str]] = None,
+) -> Any:
+    """Overlay user-stored SDK env vars onto options, filtered to the allowlist.
+
+    Must be called *after* apply_project_sdk_runtime_options so that
+    user values take precedence over backend/.env defaults.
+    """
+    if not user_env:
+        return options
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    # Only forward keys on the SDK allowlist to the subprocess.
+    filtered = {
+        str(k): str(v)
+        for k, v in user_env.items()
+        if k and v is not None and _is_project_dotenv_sdk_env_key(str(k))
+    }
+    # Merge: filtered user env overlays existing (which already has backend/.env).
+    merged = {**existing_env, **filtered}
+    # Remove any deprecated keys.
+    for key in _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES:
+        merged.pop(key, None)
+    options.env = merged
+    return options

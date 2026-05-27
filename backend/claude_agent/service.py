@@ -261,6 +261,7 @@ class ClaudeAgentService:
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
             mcp_env=user_env_vars,
+            user_sdk_env=user_env_vars,
         )
 
         confirmation_store = ToolConfirmationStore()

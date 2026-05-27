@@ -73,7 +73,7 @@ from ..types import (
 from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
-from .sdk_env import apply_project_sdk_runtime_options
+from .sdk_env import apply_project_sdk_runtime_options, apply_user_sdk_env_to_options
 
 logger = logging.getLogger(__name__)
 
@@ -881,6 +881,8 @@ class ClaudeAgentRunner:
                 mcp_servers=mcp_servers,
             )
         )
+        # Overlay user-scoped SDK env vars (higher priority than backend/.env).
+        apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
         existing_extra_args = getattr(sdk_options, "extra_args", None)
         sdk_options.extra_args = _StderrSentinelArgs(
             existing_extra_args if existing_extra_args is not None else {}
