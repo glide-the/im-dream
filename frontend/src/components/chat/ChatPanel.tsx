@@ -2,6 +2,7 @@
 // [Output] Coordinate chat transport, pending attachments/tool choice, message state, scrolling, and input/message layout.
 // [Pos] chat-panel component node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop forwarding frontend customer context into chat requests.
+// [Sync] 2026-05-26: hide the empty message surface until chat content or an error exists.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -225,6 +226,7 @@ export default function ChatPanel({
   }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, sendMessage]);
 
   const chatLoading = status === 'streaming' || status === 'submitted' || isLoading;
+  const shouldShowMessageSurface = messages.length > 0 || Boolean(error);
 
   const shouldShowLoadingIndicator = useMemo(() => {
     if (!chatLoading || messages.length === 0) {
@@ -252,19 +254,21 @@ export default function ChatPanel({
   }, [messages, status]);
 
   return (
-    <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
-      <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1rem 1rem 1.5rem' }}>
-        <ChatMessageList
-          messages={messages}
-          isLoading={chatLoading}
-          error={error}
-          addToolResult={addToolResult}
-          shouldShowLoadingIndicator={shouldShowLoadingIndicator}
-          setMessages={setMessages}
-          sendMessage={sendMessage}
-        />
-        <div ref={bottomRef} aria-hidden="true" />
-      </div>
+    <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
+      {shouldShowMessageSurface ? (
+        <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1rem 1rem 1.5rem' }}>
+          <ChatMessageList
+            messages={messages}
+            isLoading={chatLoading}
+            error={error}
+            addToolResult={addToolResult}
+            shouldShowLoadingIndicator={shouldShowLoadingIndicator}
+            setMessages={setMessages}
+            sendMessage={sendMessage}
+          />
+          <div ref={bottomRef} aria-hidden="true" />
+        </div>
+      ) : null}
 
       <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '48rem', margin: '0.75rem auto 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
         <AIInputDock
