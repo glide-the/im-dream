@@ -102,6 +102,7 @@ def create_tables(db):
       selected_state TEXT,
       timezone TEXT,
       first_login_completed INTEGER DEFAULT 0,
+      system_config_json TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     )
