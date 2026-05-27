@@ -1,3 +1,7 @@
+// [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, FileMessagePart sub-components.
+// [Output] Scrollable chat message list with tool, text, reasoning, and file part rendering.
+// [Pos] chat-message-list component node in frontend/src/components/chat
+// [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +13,7 @@ import ToolMessagePart from './ToolMessagePart';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
+  threadId: string;
   isLoading: boolean;
   error?: Error | null;
   addToolResult: (args: { tool: string; toolCallId: string; output: unknown }) => void;
@@ -61,7 +66,14 @@ function IconCopy() {
   );
 }
 
-export default function ChatMessageList({ messages, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, setMessages, sendMessage }: ChatMessageListProps) {
+const ASK_USER_TOOL_NAMES = new Set(['askuserquestion', 'ask_user_question', 'ask_user', 'askuser']);
+
+function isAskUserQuestionTool(part: ToolUIPart | DynamicToolUIPart): boolean {
+  const name = getToolName(part).toLowerCase();
+  return ASK_USER_TOOL_NAMES.has(name) || name.endsWith('__ask_user') || name.endsWith('__askuserquestion');
+}
+
+export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, setMessages, sendMessage }: ChatMessageListProps) {
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
 
@@ -162,6 +174,17 @@ export default function ChatMessageList({ messages, isLoading, error, addToolRes
                   );
                 }
 
+                // AskUserQuestion tools that are waiting for user input are rendered
+                // directly (not collapsed) so the question form is immediately visible.
+                const needsUserInput = isAskUserQuestionTool(toolPart) && !isCompleted;
+                if (needsUserInput) {
+                  return (
+                    <div key={partKey}>
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} />
+                    </div>
+                  );
+                }
+
                 return (
                   <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-action-link)' }}>
                     <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.55rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-secondary)', fontSize: '0.88rem', cursor: 'pointer' }}>
@@ -169,7 +192,7 @@ export default function ChatMessageList({ messages, isLoading, error, addToolRes
                       <span style={{ flex: 1, textAlign: 'left', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayTitle}</span>
                       <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>
                     </button>
-                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} /></div> : null}
+                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} /></div> : null}
                   </div>
                 );
               }

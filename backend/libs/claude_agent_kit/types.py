@@ -20,6 +20,8 @@ from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional, Union
 
+from .messages.build_user_message_content import AttachmentPayload
+
 # ---------------------------------------------------------------------------
 # Convenience re-export so callers can import the SDK Message type from here.
 # ---------------------------------------------------------------------------
@@ -124,8 +126,12 @@ class AgentRunOptions:
 
     # Thread ID for conversation context — same as session_id in the SDK.
     thread_id: str
-    # User's message text.
-    user_message: str
+    # User's message: either a plain string or a pre-built list of content
+    # blocks (as returned by ClaudeAgentContextBuilder.build_user_message).
+    # When a list is provided the runner uses it directly without further
+    # context processing; when a plain string is provided the runner wraps it
+    # in a single text block.
+    user_message: Union[str, list[dict[str, Any]]]
     # Whether to resume an existing conversation.
     resume: bool = False
     # Model to use.
@@ -140,12 +146,17 @@ class AgentRunOptions:
     tool_choice: ToolChoiceMode = "auto"
     # System prompt override.
     system_prompt: Optional[str] = None
-    # Whether the SDK message builder should prepend its lightweight runtime block.
+    # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.
+    # Kept for backward compatibility with callers that set it; ignored by runner.
     include_runtime_context: bool = True
-    # App-provided turn runtime metadata, e.g. local time and timezone.
+    # Deprecated: local time/timezone should be passed to build_user_message instead.
+    # Kept for backward compatibility; ignored by runner when user_message is a list.
     turn_runtime: dict[str, Any] = field(default_factory=dict)
     # Environment passed to project-owned MCP subprocesses for current-session bindings.
     mcp_env: dict[str, str] = field(default_factory=dict)
+    # Deprecated: attachments should be passed to build_user_message instead.
+    # Kept for backward compatibility; ignored by runner when user_message is a list.
+    attachments: Optional[list[AttachmentPayload]] = None
 
 
 @dataclass

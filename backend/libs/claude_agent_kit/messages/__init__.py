@@ -9,9 +9,11 @@ from .build_user_message_content import (
     RuntimeContext,
     build_user_message_content,
 )
+from .message_parts import extract_text_from_parts
 
 __all__ = [
     "AttachmentPayload",
     "RuntimeContext",
     "build_user_message_content",
+    "extract_text_from_parts",
 ]

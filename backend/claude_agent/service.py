@@ -22,6 +22,10 @@
 # [Sync] 2026-05-25: fix tool-invocation persistence for non-streaming AssistantMessage path:
 #                    tool_use/tool_use_start now collect tool-input-available SSE event into
 #                    collected_parts (superceded by full SSE-event-collection refactor below).
+# [Sync] 2026-05-27: _make_tool_confirm_cb: (1) dedup start/available with registered/emitted
+#                    sets; (2) idempotent begin_pending — join existing Future on duplicate hook
+#                    invocation to prevent immediate-deny via exception path; (3) include answers
+#                    in confirmation return dict so Claude receives user responses for AskUserQuestion.
 # [Sync] 2026-05-25: align _persist_turn with better-chatbot schema (parts list, NOT NULL):
 #                    use new database.save_chat_message(parts=list, metadata=dict) signature;
 #                    user message always has parts (text fallback when message_parts is None);
@@ -64,7 +68,10 @@ from uuid import uuid4
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
+from libs.claude_agent_kit.server.workspace import get_or_create_workspace
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
+from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
+from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 
 logger = logging.getLogger(__name__)
@@ -77,6 +84,21 @@ MAX_THREAD_TITLE_LENGTH: int = 50
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _extract_text_from_parts(parts: Optional[list]) -> str:
+    """Extract text from AI-SDK UIMessage parts for use as a plain string.
+
+    Delegates to ``extract_text_from_parts`` (full UIMessage parts protocol:
+    text + file + source-url + workspace-file).  Used for thread title
+    auto-fill where a compact string representation is needed.
+    """
+    return extract_text_from_parts(parts)
+
+
+# ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
 
@@ -86,20 +108,24 @@ class ClaudeAgentRunRequest:
     """Validated request for a single Claude Agent turn.
 
     All string IDs are validated by the factory before this dataclass is built.
+    ``message_parts`` carries the AI-SDK UIMessage parts list (e.g.
+    ``[{"type": "text", "text": "..."}]``); plain text is derived from it as
+    needed — the raw ``message_text`` string is never stored here.
     """
 
     user_id: str
     thread_id: str
-    message: str
     resume: bool = False
     tool_choice: str = "auto"
     model: Optional[str] = None
     max_turns: int = int(os.getenv("INK_AGENT_MAX_TURNS", "100") or "100")
     cwd: Optional[str] = None
     extra: dict[str, Any] = field(default_factory=dict)
-    # Original AI-SDK message fields (for aligned DB persistence)
+    # AI-SDK message fields (for context assembly and DB persistence)
     message_id: Optional[str] = None
     message_parts: Optional[list] = None
+    # File attachments to be passed as content blocks to Claude.
+    attachments: Optional[list[AttachmentPayload]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -199,14 +225,27 @@ class ClaudeAgentService:
                 "Phase 1: reusing cached system_prompt for session_id=%s", state.session_id
             )
 
-        user_message = self._context_builder.build_user_message(request.message)
+        user_message_content = self._context_builder.build_user_message(
+            request.message_parts,
+            attachments=request.attachments,
+            model=request.model,
+            max_turns=request.max_turns,
+            thread_id=state.session_id,
+            resume=request.resume,
+        )
+
+        cwd = request.cwd or state.cwd
+        if not cwd:
+            workspace_path = get_or_create_workspace(state.session_id)
+            cwd = str(workspace_path)
+            state.with_cwd(cwd)
 
         run_options = AgentRunOptions(
             thread_id=state.session_id,
-            user_message=user_message,
+            user_message=user_message_content,
             resume=request.resume,
             model=request.model,
-            cwd=request.cwd or state.cwd or None,
+            cwd=cwd or None,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
@@ -284,7 +323,6 @@ class ClaudeAgentService:
         import database
 
         thread_id = execution.request.thread_id
-        user_text = execution.request.message
         user_message_id = execution.request.message_id  # original AI-SDK ID or None
         user_parts = execution.request.message_parts     # original parts list or None
         assistant_text: str = result.full_text if result else ""
@@ -295,8 +333,8 @@ class ClaudeAgentService:
         def _save() -> None:
             # --- User message ---
             # Mirror better-chatbot: store message.parts from the frontend AI SDK.
-            # Fall back to a minimal text part when message_parts is not provided.
-            resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": user_text}]
+            # Fall back to an empty parts list when message_parts is not provided.
+            resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": ""}]
             database.save_chat_message(
                 thread_id, "user",
                 parts=resolved_user_parts,
@@ -341,7 +379,7 @@ class ClaudeAgentService:
             # Auto-fill thread title from first user message if still NULL
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
             if thread and not thread.get("title"):
-                title = user_text.strip()[:MAX_THREAD_TITLE_LENGTH]
+                title = _extract_text_from_parts(user_parts).strip()[:MAX_THREAD_TITLE_LENGTH]
                 database.update_chat_thread_title(thread_id, title)
 
         try:
@@ -541,15 +579,36 @@ class ClaudeAgentService:
 
             # Step 0: register Future before any SSE that can trigger an immediate
             # POST /tool-confirm (fast clients must not resolve ahead of registration).
+            # Guard: if the hook fires twice for the same tool call (SDK quirk), skip
+            # re-registration and join the existing waiter to avoid RuntimeError +
+            # the immediate-deny path in agent_runner._pre_tool_use_hook.
+            if store.has_pending(tool_call_id):
+                logger.debug(
+                    "on_tool_confirmation_request: duplicate hook invocation for "
+                    "tool_call_id=%s — joining existing Future",
+                    tool_call_id,
+                )
+                try:
+                    result = await store.await_pending(tool_call_id, tool_name=tool_name)
+                    return {"approved": result.approved, "reason": result.reason, "answers": result.answers}
+                except TimeoutError:
+                    return {"approved": False, "reason": "timeout"}
+                except asyncio.CancelledError:
+                    store.cancel_pending(tool_call_id)
+                    raise
+
             store.begin_pending(tool_call_id)
 
-            # Step 1: emit tool-input-start + tool-input-available; collect the latter.
-            turn_ctx.registered_tool_call_ids.add(tool_call_id)
-            await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
-            turn_ctx.emitted_tool_input_ids.add(tool_call_id)
-            evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
-            await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
-            turn_ctx.collected_parts.append(evt)
+            # Step 1: emit tool-input-start + tool-input-available with dedup so that
+            # events already sent by _make_tool_event_cb are not repeated.
+            if tool_call_id not in turn_ctx.registered_tool_call_ids:
+                turn_ctx.registered_tool_call_ids.add(tool_call_id)
+                await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+            if tool_call_id not in turn_ctx.emitted_tool_input_ids:
+                turn_ctx.emitted_tool_input_ids.add(tool_call_id)
+                evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
+                await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
+                turn_ctx.collected_parts.append(evt)
 
             # Step 2: emit tool-approval-request (lifecycle frame — not collected).
             await queue.put(_sse("tool-approval-request", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
@@ -557,7 +616,9 @@ class ClaudeAgentService:
             # Step 3 & 4: block until user responds.
             try:
                 result = await store.await_pending(tool_call_id, tool_name=tool_name)
-                return {"approved": result.approved, "reason": result.reason}
+                # Include answers so agent_runner can merge them into tool_input for
+                # AskUserQuestion-style tools (§9.5 design contract).
+                return {"approved": result.approved, "reason": result.reason, "answers": result.answers}
             except TimeoutError:
                 logger.warning(
                     "Tool confirmation timed out: tool_call_id=%s tool_name=%s",

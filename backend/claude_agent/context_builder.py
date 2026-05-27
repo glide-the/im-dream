@@ -4,6 +4,10 @@
 # [Pos] context-assembly node in backend/claude_agent
 # [Sync] 2026-05-22: rewritten for Ink & Memory; replaces Pawkeyland's pet/persona
 #                    context assembly with writing-session context injection.
+# [Sync] 2026-05-26: merge build_user_message_content (SDK lib) into build_user_message
+#                    so that the SDK no longer participates in context processing.
+# [Sync] 2026-05-26: use extract_text_from_parts (message_parts.py) for full UIMessage
+#                    parts protocol (text + file + source-url + workspace-file).
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -14,8 +18,10 @@ pet persona, Mem0 memories, and necklace sensor data), this builder:
 1. Loads the user's recent writing sessions from the database.
 2. Renders a system prompt that positions Claude as a reflective writing
    assistant with knowledge of the user's recent entries.
-3. Provides a ``build_user_message`` helper that prepends lightweight
-   runtime context (current date/time) to the raw user message.
+3. Provides a ``build_user_message`` helper that builds the full list of
+   content blocks for a user turn: attachment image blocks, a lightweight
+   ``<runtime_context>`` block, and the user's message text extracted from
+   the full AI-SDK UIMessage parts list.
 """
 from __future__ import annotations
 
@@ -24,7 +30,14 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
+
 logger = logging.getLogger(__name__)
+
+# MIME types that can be rendered inline within chat transcripts.
+_INLINE_IMAGE_MIME_TYPES = frozenset(
+    {"image/jpeg", "image/png", "image/gif", "image/webp"}
+)
 
 # Number of recent sessions injected into system prompt.
 # Configurable via INK_AGENT_CONTEXT_SESSIONS (default 5).
@@ -90,8 +103,8 @@ class ClaudeAgentContextBuilder:
     Usage::
 
         builder = ClaudeAgentContextBuilder()
-        system_prompt = await builder.build_system_prompt(user_id, db_conn_or_None)
-        user_msg = builder.build_user_message(raw_message)
+        system_prompt = await builder.build_system_prompt(user_id)
+        content_blocks = builder.build_user_message(raw_message, attachments=attachments)
     """
 
     def __init__(self, context_session_count: Optional[int] = None) -> None:
@@ -110,19 +123,95 @@ class ClaudeAgentContextBuilder:
 
     def build_user_message(
         self,
-        raw_message: str,
+        message_parts: Optional[list],
         *,
-        timezone_name: str = "UTC",
-    ) -> str:
-        """Prepend a lightweight runtime context block to *raw_message*.
+        attachments: Optional[list[Any]] = None,
+        model: Optional[str] = None,
+        max_turns: Optional[int] = None,
+        thread_id: Optional[str] = None,
+        resume: bool = False,
+        include_runtime_context: bool = True,
+        local_time: Optional[str] = None,
+        local_timezone: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Build the content blocks for a user turn.
 
-        The runtime block informs Claude of the current date so it can use
-        temporal references naturally (e.g. "yesterday's entry").
+        *message_parts* is the AI-SDK UIMessage ``parts`` list
+        (e.g. ``[{"type": "text", "text": "..."}]``).  Text is extracted from
+        all ``type == "text"`` entries and appended as the final content block.
+
+        Returns a list of content blocks in the order expected by Claude:
+        attachment image blocks first, then the ``<runtime_context>`` block
+        (unless *include_runtime_context* is False), then the user's message
+        text.
+
+        This method absorbs the responsibilities of the SDK-level
+        ``build_user_message_content`` so the SDK no longer participates in
+        context assembly.
         """
-        now = datetime.now(tz=timezone.utc)
-        date_str = now.strftime("%Y-%m-%d %H:%M UTC")
-        runtime_block = f"[Current time: {date_str} / Timezone hint: {timezone_name}]\n\n"
-        return runtime_block + raw_message
+        blocks: list[dict[str, Any]] = []
+
+        # Attach any user-supplied image assets.
+        if attachments:
+            for attachment in attachments:
+                try:
+                    media_type = getattr(attachment, "media_type", None) or ""
+                    base64_data = getattr(attachment, "data", None) or ""
+                    name = getattr(attachment, "name", "")
+                    if media_type in _INLINE_IMAGE_MIME_TYPES:
+                        blocks.append(
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": base64_data,
+                                },
+                            }
+                        )
+                    else:
+                        logger.warning("Cannot process file: %s", name)
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Error processing attachment: %s", exc)
+
+        if include_runtime_context:
+            now = datetime.now(tz=timezone.utc)
+            env_lines = [
+                (
+                    f"Date: {now.isoformat()}"
+                    f" ({now.strftime('%A, %B %d, %Y')})"
+                ),
+            ]
+            if local_time:
+                env_lines.append(f"Local time: {local_time}")
+            if local_timezone:
+                env_lines.append(f"Timezone: {local_timezone}")
+            if model:
+                env_lines.append(f"Model: {model}")
+            if max_turns is not None:
+                env_lines.append(f"Max turns: {max_turns}")
+            if thread_id:
+                env_lines.append(f"Session ID: {thread_id}")
+            if resume:
+                env_lines.append("Resumed conversation: yes")
+
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        "<runtime_context>\n"
+                        + "\n".join(env_lines)
+                        + "\n</runtime_context>"
+                    ),
+                }
+            )
+
+        # Convert all message_parts (text, file, source-url, workspace-file) to
+        # a single text string using the full UIMessage parts protocol.
+        user_text = extract_text_from_parts(message_parts)
+        blocks.append({"type": "text", "text": user_text})
+        return blocks
+
 
     async def _load_recent_sessions_block(self, user_id: str) -> str:
         """Return a Markdown block with the user's recent journal entries."""

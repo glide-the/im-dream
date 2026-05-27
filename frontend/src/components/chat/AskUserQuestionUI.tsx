@@ -1,3 +1,7 @@
+// [Input] AskUserQuestionInput from tool part; onSubmit/onCancel callbacks from ToolMessagePart.
+// [Output] Interactive question form rendered inline in the chat message list.
+// [Pos] ask-user-question component node in frontend/src/components/chat
+// [Sync] 2026-05-27: add null guard for undefined input at useMemo start to prevent crash when tool is in input-streaming state.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { IconCheck, IconX } from './Icons';
 
@@ -53,6 +57,9 @@ const fieldStyle: CSSProperties = {
 
 export default function AskUserQuestionUI({ input, toolCallId, toolName, isProcessing = false, onSubmit, onCancel }: AskUserQuestionUIProps) {
   const questions = useMemo<QuestionField[]>(() => {
+    if (!input) {
+      return [{ id: 'answer', question: '请回答问题', type: 'text', required: true }];
+    }
     if (input.questions?.length) {
       return input.questions.map((question, index) => {
         const hasOptions = Array.isArray(question.options) && question.options.length > 0;

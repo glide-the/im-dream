@@ -2,6 +2,7 @@
 // [Output] Render the chat input dock, attachment upload controls, and message submit/stop actions.
 // [Pos] chat-input-dock component node in frontend/src/components/chat
 // [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
+// [Sync] 2026-05-27: add internal toolChoice state with Auto/逐步确认 segmented toggle; sends selected toolChoice via onSendMessage.
 import {
   useCallback,
   useEffect,
@@ -84,6 +85,11 @@ function shouldSendWithKeyboard(
   return event.key === 'Enter' && !event.shiftKey;
 }
 
+const TOOL_CHOICE_OPTIONS: { value: ToolChoice; label: string; title: string }[] = [
+  { value: 'auto', label: '自动', title: 'Claude 自主决定是否调用工具' },
+  { value: 'manual', label: '逐步确认', title: '每次工具调用都需要手动确认' },
+];
+
 export default function AIInputDock({
   onSendMessage,
   placeholder = 'Ask Ink & Memory…',
@@ -100,6 +106,7 @@ export default function AIInputDock({
   const [isDragOver, setIsDragOver] = useState(false);
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
@@ -348,13 +355,13 @@ export default function AIInputDock({
     onSendMessage(
       trimmedQuery,
       uploadedFiles.length > 0 ? uploadedFiles : undefined,
-      defaultToolChoice,
+      toolChoice,
     );
     setQuery('');
     uploadedFiles.forEach((file) => revokeObjectPreviewUrl(file.previewUrl));
     setUploadedFiles([]);
   }, [
-    defaultToolChoice,
+    toolChoice,
     loading,
     onSendMessage,
     query,
@@ -516,22 +523,62 @@ export default function AIInputDock({
       />
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem' }}>
-        <button
-          type="button"
-          aria-label="添加附件"
-          onClick={openAttachmentDialog}
-          disabled={disabled}
-          style={{
-            border: '1px solid var(--color-border-paper)',
-            borderRadius: '999px',
-            padding: '0.55rem 0.9rem',
-            background: 'var(--color-bg-paper)',
-            color: 'var(--color-text-secondary)',
-            cursor: disabled ? 'not-allowed' : 'pointer',
-          }}
-        >
-          + Add
-        </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <button
+            type="button"
+            aria-label="添加附件"
+            onClick={openAttachmentDialog}
+            disabled={disabled}
+            style={{
+              border: '1px solid var(--color-border-paper)',
+              borderRadius: '999px',
+              padding: '0.55rem 0.9rem',
+              background: 'var(--color-bg-paper)',
+              color: 'var(--color-text-secondary)',
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              fontSize: '0.82rem',
+            }}
+          >
+            + Add
+          </button>
+
+          <div
+            role="group"
+            aria-label="工具调用模式"
+            style={{
+              display: 'flex',
+              borderRadius: '999px',
+              border: '1px solid var(--color-border-paper)',
+              overflow: 'hidden',
+              fontSize: '0.78rem',
+            }}
+          >
+            {TOOL_CHOICE_OPTIONS.map((option) => {
+              const isActive = toolChoice === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  title={option.title}
+                  disabled={disabled || loading}
+                  onClick={() => setToolChoice(option.value)}
+                  style={{
+                    border: 'none',
+                    padding: '0.35rem 0.7rem',
+                    background: isActive ? 'var(--color-action-link)' : 'var(--color-bg-paper)',
+                    color: isActive ? '#fff' : 'var(--color-text-muted)',
+                    cursor: disabled || loading ? 'not-allowed' : 'pointer',
+                    fontWeight: isActive ? 600 : 400,
+                    transition: 'background 0.15s, color 0.15s',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
         {loading && onStop ? (
           <button

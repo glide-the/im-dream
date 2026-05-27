@@ -56,8 +56,12 @@ def _run(coro):
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
-def _make_request(user_id: str = "user_1", message: str = "hello") -> ClaudeAgentRunRequest:
-    return ClaudeAgentRunRequest(user_id=user_id, message=message)
+def _make_request(user_id: str = "user_1", message: str = "hello", thread_id: str = "thread_1") -> ClaudeAgentRunRequest:
+    return ClaudeAgentRunRequest(
+        user_id=user_id,
+        thread_id=thread_id,
+        message_parts=[{"type": "text", "text": message}],
+    )
 
 
 def _make_factory() -> ClaudeAgentThreadFactory:

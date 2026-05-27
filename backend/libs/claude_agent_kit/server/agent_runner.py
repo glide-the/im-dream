@@ -60,7 +60,6 @@ from claude_code_sdk.types import (  # type: ignore[import-untyped]
     UserMessage,
 )
 
-from ..messages.build_user_message_content import RuntimeContext, build_user_message_content
 from ..types import (
     AgentRunOptions,
     AgentRunResult,
@@ -664,26 +663,14 @@ class ClaudeAgentRunner:
         pending_stream_tools: dict[int, dict[str, Any]] = {}
         pending_stream_thinking: dict[int, dict[str, Any]] = {}
 
-        # Build user message dict for the SDK
-        runtime_ctx = RuntimeContext(
-            cwd=cwd,
-            model=model,
-            max_turns=max_turns,
-            thread_id=thread_id,
-            resume=resume,
-            include_runtime_context=opts.include_runtime_context,
-            local_time=str(
-                turn_runtime.get("curr_time")
-                or turn_runtime.get("local_time")
-                or ""
-            ).strip() or None,
-            local_timezone=str(
-                turn_runtime.get("timezone")
-                or turn_runtime.get("local_timezone")
-                or ""
-            ).strip() or None,
-        )
-        user_msg_content = build_user_message_content(user_message, None, runtime_ctx)
+        # Build user message content blocks for the SDK.
+        # When the caller (e.g. ClaudeAgentContextBuilder.build_user_message) has
+        # already produced a list of content blocks, use them directly.
+        # For plain-string messages (e.g. in tests) wrap the text in a single block.
+        if isinstance(user_message, list):
+            user_msg_content = user_message
+        else:
+            user_msg_content = [{"type": "text", "text": user_message}]
         user_msg_dict: dict[str, Any] = {
             "type": "user",
             "uuid": str(uuid4()),
