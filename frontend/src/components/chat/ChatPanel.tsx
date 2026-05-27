@@ -259,6 +259,7 @@ export default function ChatPanel({
         <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1rem 1rem 1.5rem' }}>
           <ChatMessageList
             messages={messages}
+            threadId={threadId}
             isLoading={chatLoading}
             error={error}
             addToolResult={addToolResult}

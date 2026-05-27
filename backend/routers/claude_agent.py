@@ -4,6 +4,7 @@
 # [Pos] claude-agent route node in backend/routers
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
+# [Sync] 2026-05-27: ClaudeAgentRequestBody.tool_choice uses AliasChoices("tool_choice","toolChoice") so frontend camelCase is accepted.
 
 import base64
 import logging
@@ -12,7 +13,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import AliasChoices, BaseModel, Field
 
 import database
 from agent_factory import claude_agent_thread_factory
@@ -77,7 +78,7 @@ class ClaudeAgentRequestBody(BaseModel):
     id: Optional[str] = None
     message: Any
     resume: bool = False
-    tool_choice: str = "auto"
+    tool_choice: str = Field(default="auto", validation_alias=AliasChoices("tool_choice", "toolChoice"))
     chatModel: Optional[dict] = None
     model: Optional[str] = None
     max_turns: int = 100

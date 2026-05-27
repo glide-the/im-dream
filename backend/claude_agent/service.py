@@ -22,6 +22,10 @@
 # [Sync] 2026-05-25: fix tool-invocation persistence for non-streaming AssistantMessage path:
 #                    tool_use/tool_use_start now collect tool-input-available SSE event into
 #                    collected_parts (superceded by full SSE-event-collection refactor below).
+# [Sync] 2026-05-27: _make_tool_confirm_cb: (1) dedup start/available with registered/emitted
+#                    sets; (2) idempotent begin_pending — join existing Future on duplicate hook
+#                    invocation to prevent immediate-deny via exception path; (3) include answers
+#                    in confirmation return dict so Claude receives user responses for AskUserQuestion.
 # [Sync] 2026-05-25: align _persist_turn with better-chatbot schema (parts list, NOT NULL):
 #                    use new database.save_chat_message(parts=list, metadata=dict) signature;
 #                    user message always has parts (text fallback when message_parts is None);
@@ -575,15 +579,36 @@ class ClaudeAgentService:
 
             # Step 0: register Future before any SSE that can trigger an immediate
             # POST /tool-confirm (fast clients must not resolve ahead of registration).
+            # Guard: if the hook fires twice for the same tool call (SDK quirk), skip
+            # re-registration and join the existing waiter to avoid RuntimeError +
+            # the immediate-deny path in agent_runner._pre_tool_use_hook.
+            if store.has_pending(tool_call_id):
+                logger.debug(
+                    "on_tool_confirmation_request: duplicate hook invocation for "
+                    "tool_call_id=%s — joining existing Future",
+                    tool_call_id,
+                )
+                try:
+                    result = await store.await_pending(tool_call_id, tool_name=tool_name)
+                    return {"approved": result.approved, "reason": result.reason, "answers": result.answers}
+                except TimeoutError:
+                    return {"approved": False, "reason": "timeout"}
+                except asyncio.CancelledError:
+                    store.cancel_pending(tool_call_id)
+                    raise
+
             store.begin_pending(tool_call_id)
 
-            # Step 1: emit tool-input-start + tool-input-available; collect the latter.
-            turn_ctx.registered_tool_call_ids.add(tool_call_id)
-            await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
-            turn_ctx.emitted_tool_input_ids.add(tool_call_id)
-            evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
-            await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
-            turn_ctx.collected_parts.append(evt)
+            # Step 1: emit tool-input-start + tool-input-available with dedup so that
+            # events already sent by _make_tool_event_cb are not repeated.
+            if tool_call_id not in turn_ctx.registered_tool_call_ids:
+                turn_ctx.registered_tool_call_ids.add(tool_call_id)
+                await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+            if tool_call_id not in turn_ctx.emitted_tool_input_ids:
+                turn_ctx.emitted_tool_input_ids.add(tool_call_id)
+                evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
+                await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
+                turn_ctx.collected_parts.append(evt)
 
             # Step 2: emit tool-approval-request (lifecycle frame — not collected).
             await queue.put(_sse("tool-approval-request", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
@@ -591,7 +616,9 @@ class ClaudeAgentService:
             # Step 3 & 4: block until user responds.
             try:
                 result = await store.await_pending(tool_call_id, tool_name=tool_name)
-                return {"approved": result.approved, "reason": result.reason}
+                # Include answers so agent_runner can merge them into tool_input for
+                # AskUserQuestion-style tools (§9.5 design contract).
+                return {"approved": result.approved, "reason": result.reason, "answers": result.answers}
             except TimeoutError:
                 logger.warning(
                     "Tool confirmation timed out: tool_call_id=%s tool_name=%s",

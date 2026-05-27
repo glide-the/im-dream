@@ -1,3 +1,8 @@
+// [Input] AskUserQuestionUI, Icons, AuthContext token; part shape from @ai-sdk/react DynamicToolUIPart/ToolUIPart.
+// [Output] Rendered tool invocation card with inline AskUserQuestion form or Approve/Reject UI.
+// [Pos] tool-message-part component node in frontend/src/components/chat
+// [Sync] 2026-05-27: add threadId prop; fix confirmToolCall body to send thread_id+tool_call_id (snake_case) matching ToolConfirmRequestBody; accept ok|success response flag.
+// [Sync] 2026-05-27: when shouldShowAskUserUI is true, render only AskUserQuestionUI (no collapsible header) for clean UX.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
@@ -27,6 +32,7 @@ function IconAlert() {
 }
 
 async function confirmToolCall(
+  threadId: string,
   toolCallId: string,
   approved: boolean,
   reason?: string,
@@ -35,20 +41,21 @@ async function confirmToolCall(
   const response = await fetch(`${API_BASE}/api/claude-agent/tool-confirm`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
-    body: JSON.stringify({ toolCallId, approved, reason, answers }),
+    body: JSON.stringify({ thread_id: threadId, tool_call_id: toolCallId, approved, reason, answers }),
   });
-  return (await response.json()) as { success?: boolean; message?: string };
+  return (await response.json()) as { ok?: boolean; success?: boolean; message?: string };
 }
 
 interface ToolMessagePartProps {
   part: AnyToolUIPart;
+  threadId: string;
   isLast?: boolean;
   isLoading?: boolean;
   isManualToolInvocation?: boolean;
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
 }
 
-export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocation, addToolResult }: ToolMessagePartProps) {
+export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToolInvocation, addToolResult }: ToolMessagePartProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
   const toolCallId = part.toolCallId;
@@ -83,8 +90,8 @@ export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocatio
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
     try {
-      const result = await confirmToolCall(toolCallId, true);
-      if (result.success) {
+      const result = await confirmToolCall(threadId, toolCallId, true);
+      if (result.ok ?? result.success) {
         addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
         setConfirmationStatus('confirmed');
         return;
@@ -93,14 +100,14 @@ export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocatio
       // fall through
     }
     setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
 
   const handleReject = useCallback(async () => {
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
     try {
-      const result = await confirmToolCall(toolCallId, false, '用户拒绝执行工具');
-      if (result.success) {
+      const result = await confirmToolCall(threadId, toolCallId, false, '用户拒绝执行工具');
+      if (result.ok ?? result.success) {
         addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
         setConfirmationStatus('rejected');
         return;
@@ -109,7 +116,7 @@ export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocatio
       // fall through
     }
     setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
 
   useEffect(() => {
     if (!shouldShowApprovalUI) return;
@@ -131,8 +138,8 @@ export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocatio
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
     try {
-      const result = await confirmToolCall(toolCallId, true, undefined, answers);
-      if (result.success) {
+      const result = await confirmToolCall(threadId, toolCallId, true, undefined, answers);
+      if (result.ok ?? result.success) {
         addToolResult?.({ tool: toolName, toolCallId, output: answers });
         setConfirmationStatus('confirmed');
         return;
@@ -141,14 +148,14 @@ export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocatio
       // fall through
     }
     setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
 
   const handleAskUserCancel = useCallback(async () => {
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
     try {
-      const result = await confirmToolCall(toolCallId, false, '用户取消了问题回答');
-      if (result.success) {
+      const result = await confirmToolCall(threadId, toolCallId, false, '用户取消了问题回答');
+      if (result.ok ?? result.success) {
         addToolResult?.({ tool: toolName, toolCallId, output: { cancelled: true } });
         setConfirmationStatus('rejected');
         return;
@@ -157,7 +164,37 @@ export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocatio
       // fall through
     }
     setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, toolCallId, toolName]);
+  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
+
+  // When the AskUserQuestion form is active, render only the question UI (no
+  // collapsible header) so the user sees the clean form immediately.
+  if (shouldShowAskUserUI) {
+    return (
+      <div style={{ width: '100%' }}>
+        {confirmationStatus === 'idle' && input !== undefined ? (
+          <AskUserQuestionUI
+            input={input as AskUserQuestionInput}
+            toolCallId={toolCallId}
+            toolName={toolName}
+            isProcessing={false}
+            onSubmit={handleAskUserSubmit}
+            onCancel={handleAskUserCancel}
+          />
+        ) : confirmationStatus === 'idle' ? (
+          <div style={{ borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1.25rem', color: 'var(--color-text-muted)', fontSize: '0.85rem', textAlign: 'center' }}>
+            <IconLoader style={{ width: '1rem', height: '1rem', display: 'inline-block', marginRight: '0.5rem' }} />
+            加载中…
+          </div>
+        ) : confirmationStatus === 'confirming' ? (
+          <StatusRow tone="warning" label="提交中…" />
+        ) : confirmationStatus === 'confirmed' ? (
+          <StatusRow tone="success" label="答案已提交" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} />
+        ) : (
+          <StatusRow tone="danger" label="已取消" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div style={{ width: '100%' }}>
@@ -197,11 +234,6 @@ export function ToolMessagePart({ part, isLast, isLoading, isManualToolInvocatio
             ) : null}
           </div>
         ) : null}
-
-        {shouldShowAskUserUI && confirmationStatus === 'idle' ? <div style={{ padding: '0 0.9rem 0.9rem' }}><AskUserQuestionUI input={input as AskUserQuestionInput} toolCallId={toolCallId} toolName={toolName} onSubmit={handleAskUserSubmit} onCancel={handleAskUserCancel} /></div> : null}
-        {shouldShowAskUserUI && confirmationStatus === 'confirming' ? <StatusRow tone="warning" label="Submitting…" /> : null}
-        {shouldShowAskUserUI && confirmationStatus === 'confirmed' ? <StatusRow tone="success" label="Answers submitted" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} /> : null}
-        {shouldShowAskUserUI && confirmationStatus === 'rejected' ? <StatusRow tone="danger" label="Answer cancelled" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} /> : null}
 
         {shouldShowApprovalUI && confirmationStatus === 'idle' ? (
           <div style={{ display: 'flex', gap: '0.75rem', padding: '0 0.9rem 0.9rem' }}>
