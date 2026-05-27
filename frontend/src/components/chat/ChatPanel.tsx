@@ -3,6 +3,7 @@
 // [Pos] chat-panel component node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop forwarding frontend customer context into chat requests.
 // [Sync] 2026-05-26: hide the empty message surface until chat content or an error exists.
+// [Sync] 2026-05-27: forward currentToolChoice to ChatMessageList so manual-mode tool approvals are shown inline.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -264,6 +265,7 @@ export default function ChatPanel({
             error={error}
             addToolResult={addToolResult}
             shouldShowLoadingIndicator={shouldShowLoadingIndicator}
+            toolChoice={currentToolChoice}
             setMessages={setMessages}
             sendMessage={sendMessage}
           />

@@ -5,6 +5,7 @@
 > **[Sync] 2026-05-24**: backend `_make_tool_event_cb` 改为 `event.type` 分发（原 `payload.state`）；修复 `result` 事件导致 `toolCallId=null` 的错误 SSE 帧；新增 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合到 `_TurnContext`；`_make_tool_confirm_cb` 增加 `turn_ctx` 参数与 `CancelledError` 处理。
 > **[Sync] 2026-05-24**: frontend `claude-agent-transport.ts` 完全重写：移除旧 `text-delta.text` / `text-done` / `tool-event.state` / `finish.reason` / `error.message`；新增 `text-start` / `text-delta(delta)` / `text-end` / `tool-input-start` / `tool-input-available` / `tool-output-available` 独立事件处理；`tool-approval-request` 不再重复 emit chunks（backend 已单独发 tool-input-start/available）。
 > **[Sync] 2026-05-24**: 启用 thinking 模式 — 迁移 Pawkeyland `thinking_delta` / `thinking` / `content_block_stop` 分支到 `_make_tool_event_cb`；`_TurnContext` 新增 `current_reasoning_id` / `has_thinking_delta` / `completed_streamed_reasoning_texts`；SSE 新增 `reasoning-start/delta/end` 三类事件；前端 transport 新增对应处理；`DISABLE_INTERLEAVED_THINKING` 未设置时 thinking 默认启用。
+> **[Sync] 2026-05-27**: `tool_choice` 字段新增 `"manual"` 合法值；`tool-approval-request` 出现条件扩展为"manual 模式全部工具 **或** auto 模式下工具名属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）"；新增 §4.6.4 auto+AskUserQuestion SSE 顺序；`PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范（`hookEventName` + `permissionDecision` + `updatedInput`）；前端 `ChatMessageList` 新增 `toolChoice` prop 在 manual 模式下为非 AskUserQuestion 工具显示 Approve/Cancel UI。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -47,7 +48,7 @@ Ink & Memory Claude Agent 业务主入口为 `POST /api/claude-agent`，SSE 协�
 - 请求模型是“强约束外层字段 + 弱约束上下文字典”的混合模式：外层字段由 `ClaudeAgentRequest` 明确约束，`pet_info` 与 `runtime` 保持开放字典，但服务层只消费其中少数字段。
 - 请求中不再传入 `conversation_id`；服务层以 `(user_id, persona_id)` 为键查询 DB 展开会话续接。首轮 情况 Runner 自动生成新 `session_id`，`onFinish` 后绑定到 `chat_session`。
 - SSE 事件分为 4 类：元数据类（`message-metadata`）、文本/思考类（`text-*` / `reasoning-*`）、工具类（`tool-*`）、结束/错误类（`finish` / `error`）。
-- Runner 注册 `PreToolUse` hook。`tool_choice=auto` 时 hook 只记录工具输入并立即放行，保证动画和 necklace 工具由 Agent 自主调用；`tool_choice=manual` 时才进入 `on_tool_confirmation_request` 侧路等待前端确认。
+- Runner 注册 `PreToolUse` hook。`tool_choice=auto` 时，属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）的工具进入 `on_tool_confirmation_request` 侧路等待前端填写答案；其他工具立即放行，保证动画和文件系统工具由 Agent 自主调用。`tool_choice=manual` 时所有工具均进入确认侧路，前端显示 Approve/Cancel UI。
 
 ## 4. 详细设计
 
@@ -77,7 +78,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `thread_id` | string | — | 是（或 id） | 同上，兼容别名。 |
 | `message` | string / UIMessage | `""` | 是 | 用户本轮输入；可为纯字符串或含 `parts` 数组的 UIMessage 对象。 |
 | `resume` | bool | `false` | 否 | 是否复用已有 Claude session。 |
-| `tool_choice` | string | `"auto"` | 否 | 工具模式：`auto` / `none`。 |
+| `tool_choice` | string | `"auto"` | 否 | 工具模式：`auto` / `manual` / `none`。`manual` = 所有工具都需前端 Approve/Cancel 确认；`auto` = 仅 `AskUserQuestion` 类工具需前端填写答案，其余自动执行；`none` = 禁用工具。前端通过 AIInputDock「逐步确认」开关发送 `manual`。|
 | `model` | string/null | `null` | 否 | 模型覆盖。 |
 | `max_turns` | integer | `100` | 否 | 本轮 agent 最大 turn 数（可由 `INK_AGENT_MAX_TURNS` 环境变量覆盖）。 |
 | `cwd` | string/null | `null` | 否 | agent 子进程工作目录；不传则由 thread_id 派生 workspace 目录。 |
@@ -145,7 +146,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `reasoning-end` | thinking 块结束 | `id` | 由 `content_block_stop`（流式）或 `thinking`（完整块）触发。 |
 | `tool-input-start` | 工具调用开始 | `toolCallId`, `toolName` | auto/manual 都会出现。 |
 | `tool-input-available` | 工具输入完整 | `toolCallId`, `toolName`, `input` | 紧跟 `tool-input-start`。 |
-| `tool-approval-request` | 交互工具等待确认 | `toolCallId`, `toolName`, `input` | `tool_choice="manual"` 时出现；前端需调用 `/api/claude-agent/tool-confirm`。 |
+| `tool-approval-request` | 工具等待确认 | `toolCallId`, `toolName`, `input` | 两种情况出现：① `tool_choice="manual"` 时所有工具；② `tool_choice="auto"` 时工具名属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）。前端需调用 `/api/claude-agent/tool-confirm`。**[2026-05-27]** |
 | `tool-output-available` | 工具结果返回 | `toolCallId`, `output`, `isError` | `isError=true` 时表示工具执行出错。 |
 | `message-final` | 流成功结束前 | `text`, `usage`, `sessionId` | 包含完整 assistant 文本和 token 用量。 |
 | `finish` | 流结束 | `finishReason` | 成功时为 `"stop"`，失败时为 `"error"`。 |
@@ -202,16 +203,32 @@ message-metadata(final)
 finish
 ```
 
-#### 4.6.3 带工具确认的交互模式
+#### 4.6.3 manual 模式 — 所有工具需 Approve/Cancel
 
 ```text
 message-metadata(initial)
 tool-input-start
 tool-input-available
+tool-approval-request          ← 前端显示 Approve / Cancel 按钮
+POST /api/claude-agent/tool-confirm {approved:true|false}
+tool-output-available          ← 仅 approved=true 后出现
+text-*
+message-final
+finish
+```
+
+#### 4.6.4 auto 模式 — AskUserQuestion 工具需填答案 **[2026-05-27]**
+
+```text
+message-metadata(initial)
+text-*
+tool-input-start
+tool-input-available           ← 前端显示 AskUserQuestion 表单
 tool-approval-request
-POST /api/claude-agent/tool-confirm
-tool-output-available        # 仅批准后才会出现
-message-metadata(final)
+POST /api/claude-agent/tool-confirm {approved:true, answers:{...}}
+tool-output-available          ← 包含 answers 的工具结果
+text-*
+message-final
 finish
 ```
 
@@ -248,18 +265,54 @@ data: {"type":"tool-output-available","toolCallId":"toulu_01","output":"file1.tx
 
 ```
 
-#### 4.7.4 交互工具确认（manual 模式）
+#### 4.7.4 AskUserQuestion 确认（auto 或 manual 模式均适用）**[2026-05-27]**
 
 ```text
-data: {"type":"tool-input-start","toolCallId":"toulu_01","toolName":"AskUserQuestion"}
+data: {"type":"tool-input-start","toolCallId":"call_abc","toolName":"AskUserQuestion"}
 
-data: {"type":"tool-input-available","toolCallId":"toulu_01","toolName":"AskUserQuestion","input":{"question":"是否继续？"}}
+data: {"type":"tool-input-available","toolCallId":"call_abc","toolName":"AskUserQuestion","input":{"questions":[{"question":"你想选哪些水果？","header":"水果选择","options":[{"label":"苹果","description":"清甜爽脆"},{"label":"香蕉","description":"软糯香甜"}],"multiSelect":true}]}}
 
-data: {"type":"tool-approval-request","toolCallId":"toulu_01","toolName":"AskUserQuestion","input":{"question":"是否继续？"}}
+data: {"type":"tool-approval-request","toolCallId":"call_abc","toolName":"AskUserQuestion","input":{...同上...}}
 
 ```
 
-#### 4.7.5 正常结束
+前端随即显示 `AskUserQuestionUI` 表单，用户选择后发起：
+
+```json
+POST /api/claude-agent/tool-confirm
+{
+  "thread_id": "thread-abc123",
+  "tool_call_id": "call_abc",
+  "approved": true,
+  "answers": { "你想选哪些水果？": "苹果,香蕉" }
+}
+```
+
+批准后后端 hook 将 `answers` 合并进 `updatedInput`，CLI 以完整 input 执行工具，返回：
+
+```text
+data: {"type":"tool-output-available","toolCallId":"call_abc","output":{"questions":[...],"answers":{"你想选哪些水果？":"苹果,香蕉"}},"isError":false}
+```
+
+#### 4.7.5 manual 模式 — 普通工具（Read / Bash 等）
+
+```text
+data: {"type":"tool-input-start","toolCallId":"call_xyz","toolName":"Read"}
+
+data: {"type":"tool-input-available","toolCallId":"call_xyz","toolName":"Read","input":{"file_path":"/workspace/notes.md"}}
+
+data: {"type":"tool-approval-request","toolCallId":"call_xyz","toolName":"Read","input":{...}}
+
+```
+
+前端显示工具卡片 + Approve/Cancel 按钮。用户点击 Approve 后：
+
+```json
+POST /api/claude-agent/tool-confirm
+{ "thread_id": "thread-abc123", "tool_call_id": "call_xyz", "approved": true }
+```
+
+#### 4.7.6 正常结束
 
 ```text
 data: {"type":"message-final","text":"整理完成。","usage":{"input_tokens":120,"output_tokens":45},"sessionId":"thread-abc123"}
@@ -268,7 +321,7 @@ data: {"type":"finish","finishReason":"stop"}
 
 ```
 
-#### 4.7.6 错误结束
+#### 4.7.7 错误结束
 
 ```text
 data: {"type":"error","errorText":"Command failed with exit code 1"}

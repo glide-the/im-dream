@@ -1,6 +1,7 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude Agent SDK 交互式工具时序图.md
 > SDK 工具确认交互模式的通用设计参考，与 Ink & Memory `backend/claude_agent/tool_confirmation_store.py` 对应实现。
 > **[Sync] 2026-05-24**: `_make_tool_confirm_cb` 新增 `turn_ctx` 参数，注册 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重；新增 `CancelledError` 处理（调 `store.cancel_pending` 后 re-raise）；`payload` 字段同时兼容 `tool_call_id`（runner）和 `toolCallId`（遗留）。
+> **[Sync] 2026-05-27**: `PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范；新增 `_ALWAYS_CONFIRM_TOOL_NAMES` 机制在 auto 模式下对 `AskUserQuestion` 触发确认；新增前端 `isManualToolInvocation` / `toolChoice` prop 逻辑说明（§6、§7）。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -329,3 +330,130 @@ await asyncio.wait_for(event.wait(), timeout=300)  # 5分钟超时
 | 配置向导 | 带验证的多步骤表单 |
 | 人工介入 | 在执行破坏性操作前暂停审核 |
 | 富输入 | 图片标注、拖放等前端支持的任何交互 |
+
+---
+
+## 5. `PreToolUse` Hook `hookSpecificOutput` 格式 — CLI ≥2.1 规范 **[2026-05-27]**
+
+> **背景**：CLI v2.1+ 更改了 PreToolUse hook 的 `hookSpecificOutput` 协议。旧格式 `{"tool_input": ...}` 被 CLI 静默忽略，导致 `AskUserQuestion` 以无 `answers` 字段的原始 input 执行，返回 `isError:true / output:null`。
+
+### 5.1 旧格式（CLI < 2.1，已废弃）
+
+```python
+# ❌ 旧格式：CLI 静默忽略，工具 input 不会被更新
+return HookJSONOutput(
+    hookSpecificOutput={"tool_input": updated_input}
+)
+
+# ❌ 旧格式 block：
+return HookJSONOutput(decision="block", systemMessage=reason)
+```
+
+### 5.2 新格式（CLI ≥2.1，当前实现）
+
+```python
+# ✅ 允许并更新 input（携带 answers）
+return HookJSONOutput(
+    hookSpecificOutput={
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+        "updatedInput": updated_input,   # 包含 answers 的完整 tool_input
+    }
+)
+
+# ✅ 允许，不更新 input
+return HookJSONOutput()  # 空 dict，CLI 默认 allow
+
+# ✅ 拒绝，附带 Claude 可见的原因
+return HookJSONOutput(
+    hookSpecificOutput={
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "deny",
+        "permissionDecisionReason": reason,  # Claude 收到拒绝原因，避免无效重试
+    }
+)
+```
+
+### 5.3 关键规则
+
+- `updatedInput` 必须放在 `hookSpecificOutput` 内，**不能**放在顶层。
+- 使用 `updatedInput` 时必须同时声明 `permissionDecision: "allow"` 或 `"ask"`。
+- `hookEventName` 必须与 hook 事件类型一致（这里固定为 `"PreToolUse"`）。
+
+---
+
+## 6. `_ALWAYS_CONFIRM_TOOL_NAMES` — auto 模式下强制确认的工具 **[2026-05-27]**
+
+```python
+# backend/libs/claude_agent_kit/server/agent_runner.py
+_ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
+    "AskUserQuestion",
+    "mcp__user__ask_user",
+})
+```
+
+### 6.1 决策逻辑
+
+```python
+# _pre_tool_use_hook 内
+if tool_choice != "manual" and tool_name not in _ALWAYS_CONFIRM_TOOL_NAMES:
+    return HookJSONOutput()   # auto 模式下，普通工具立即放行
+# 否则（manual 模式，或 auto+AskUserQuestion）→ 进入确认侧路
+```
+
+### 6.2 工具决策矩阵
+
+| 工具 | `tool_choice=auto` | `tool_choice=manual` |
+|------|:------------------:|:--------------------:|
+| `AskUserQuestion` | 走确认流 → 显示 AskUserQuestion 表单 | 走确认流 → 显示 AskUserQuestion 表单 |
+| `mcp__user__ask_user` | 走确认流 → 显示 AskUserQuestion 表单 | 走确认流 → 显示 AskUserQuestion 表单 |
+| `mcp__user__touch_animation` | **自动执行**（动画由 Agent 驱动） | 走确认流 → 显示 Approve/Cancel |
+| `Read` / `Bash` / 其他工具 | **自动执行** | 走确认流 → 显示 Approve/Cancel |
+
+> `mcp__user__touch_animation` 不在 `_ALWAYS_CONFIRM_TOOL_NAMES` 内，auto 模式下 Agent 自主触发动画，符合设计预期。
+
+---
+
+## 7. 前端 `tool_choice` 路由逻辑 **[2026-05-27]**
+
+### 7.1 组件层级
+
+```
+ChatPanel
+  ├─ currentToolChoice: ToolChoice   ('auto'|'manual'|'none')
+  ├─ AIInputDock               ← 「逐步确认」开关 → 发送 toolChoice='manual'
+  └─ ChatMessageList(toolChoice=currentToolChoice)
+       └─ ToolMessagePart(isManualToolInvocation: bool)
+            ├─ shouldShowAskUserUI   = isAskUserQuestion && !isCompleted && state∈{input-available,...}
+            └─ shouldShowApprovalUI  = isManualToolInvocation && !shouldShowAskUserUI && !isCompleted
+```
+
+### 7.2 `ChatMessageList` 渲染决策
+
+```typescript
+// 优先级从高到低：
+// 1. 已完成 + 有输出 → 终端/折叠视图
+if (isCompleted && outputText) { /* terminal view */ }
+
+// 2. AskUserQuestion + 未完成 → 直接展开 AskUserQuestionUI
+//    (isManualToolInvocation=false，表单由 shouldShowAskUserUI 驱动)
+const needsUserInput = isAskUserQuestionTool(toolPart) && !isCompleted;
+if (needsUserInput) { /* AskUserQuestion form */ }
+
+// 3. manual 模式 + 非 AskUserQuestion + 未完成 → Approve/Cancel UI
+const needsManualApproval = toolChoice === 'manual' && !isCompleted;
+if (needsManualApproval) { /* isManualToolInvocation=true → Approve/Cancel */ }
+
+// 4. 其他 → 折叠视图
+```
+
+### 7.3 `shouldShowApprovalUI` 生命周期
+
+```
+工具调用到达
+  ↓ state='input-available', isCompleted=false
+  isManualToolInvocation=true → shouldShowApprovalUI=true → 显示 Approve/Cancel
+  ↓ 用户点击 Approve → POST tool-confirm
+  ↓ 工具执行 → tool-output-available
+  isCompleted=true → shouldShowApprovalUI=false → 恢复折叠/终端视图
+```

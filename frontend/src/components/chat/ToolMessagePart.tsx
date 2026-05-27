@@ -3,6 +3,7 @@
 // [Pos] tool-message-part component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; fix confirmToolCall body to send thread_id+tool_call_id (snake_case) matching ToolConfirmRequestBody; accept ok|success response flag.
 // [Sync] 2026-05-27: when shouldShowAskUserUI is true, render only AskUserQuestionUI (no collapsible header) for clean UX.
+// [Sync] 2026-05-27: add !isCompleted guard to shouldShowApprovalUI so Approve/Cancel disappears after tool completes in manual mode.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
@@ -76,7 +77,9 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
     return normalizedType === 'tool-askuserquestion' || ['askuserquestion', 'ask_user_question', 'ask_user', 'askuser'].includes(normalizedName) || normalizedName.endsWith('__ask_user') || normalizedName.endsWith('__askuserquestion');
   }, [partType, toolName]);
   const shouldShowAskUserUI = useMemo(() => isAskUserQuestion && !isCompleted && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isAskUserQuestion, isCompleted, state]);
-  const shouldShowApprovalUI = Boolean(isManualToolInvocation) && !shouldShowAskUserUI;
+  // Only show Approve/Cancel while the tool is still pending — once the output
+  // arrives (isCompleted) the card transitions to the normal completed view.
+  const shouldShowApprovalUI = Boolean(isManualToolInvocation) && !shouldShowAskUserUI && !isCompleted;
 
   const inputDisplay = useMemo(() => {
     try { return JSON.stringify(input, null, 2); } catch { return String(input); }

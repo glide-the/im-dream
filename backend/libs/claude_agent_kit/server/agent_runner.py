@@ -23,6 +23,8 @@
 # [Sync] 2026-05-24: keep run_streaming's BaseException diagnostic log on logger.exception so backend logs include the caught traceback while on_error still receives the enriched run_error.
 # [Sync] 2026-05-24: rename _REQUEST_MODEL_OVERRIDE_ENV_KEY from PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE; keep legacy key as fallback in _apply_request_model_override_if_allowed for zero-downtime migration.
 # [Sync] 2026-05-24: move _inject_mem0_session_hook_env and _verify_claude_sdk_env_for_query_stream calls inside run_streaming's try/except BaseException block so any raised exception is caught and routed to callbacks.on_error → SSE error frame; raise RuntimeError in _verify_claude_sdk_env_for_query_stream when no auth key is present instead of silently returning.
+# [Sync] 2026-05-27: migrate _pre_tool_use_hook hookSpecificOutput from old {"tool_input":...} format to CLI ≥2.1 format: hookEventName + permissionDecision:"allow" + updatedInput for input override; permissionDecision:"deny" + permissionDecisionReason for all block paths. The old "tool_input" key is silently ignored by the CLI, leaving AskUserQuestion without answers and returning isError:true / output:null.
+# [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; in auto mode, AskUserQuestion/mcp__user__ask_user still go through on_tool_confirmation_request so the frontend form collects answers before execution; all other tools are auto-approved.
 
 """Claude Agent Runner.
 
@@ -98,6 +100,17 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
 _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
+
+# Tools that must always go through the on_tool_confirmation_request side-channel
+# regardless of tool_choice mode (i.e. even in "auto" mode).  These are
+# interactive Q&A tools whose answers can only come from the user — they cannot
+# be auto-approved because they need the frontend form to collect answers.
+# Note: mcp__user__touch_animation is intentionally excluded; in auto mode the
+# animation runs without user interaction.
+_ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
+    "AskUserQuestion",
+    "mcp__user__ask_user",
+})
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 _FALSE_ENV_VALUES = {"0", "false", "no", "off"}
 _REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -726,7 +739,11 @@ class ClaudeAgentRunner:
                 "input": tool_input,
             }
 
-            if tool_choice != "manual":
+            # In auto mode, let all tools run immediately EXCEPT
+            # _ALWAYS_CONFIRM_TOOL_NAMES (AskUserQuestion and equivalents).
+            # Those must collect user answers through the frontend form before
+            # the SDK executes them, so they fall through to the confirmation path.
+            if tool_choice != "manual" and tool_name not in _ALWAYS_CONFIRM_TOOL_NAMES:
                 return HookJSONOutput()
 
             if callbacks.on_tool_confirmation_request:
@@ -752,7 +769,11 @@ class ClaudeAgentRunner:
                     )
                     pending_tool_calls.pop(tool_call_id, None)
                     return HookJSONOutput(
-                        decision="block", systemMessage="工具确认回调异常"
+                        hookSpecificOutput={
+                            "hookEventName": "PreToolUse",
+                            "permissionDecision": "deny",
+                            "permissionDecisionReason": "工具确认回调异常",
+                        }
                     )
 
                 if (
@@ -784,8 +805,18 @@ class ClaudeAgentRunner:
                                 **tool_input,
                                 "answers": confirmation_result["answers"],
                             }
+                            # CLI ≥ 2.1 expects the PreToolUse hookSpecificOutput
+                            # shape: hookEventName + permissionDecision:"allow" +
+                            # updatedInput (the old {"tool_input": ...} key is no
+                            # longer recognised and causes the override to be silently
+                            # ignored, leaving AskUserQuestion without answers and
+                            # returning isError:true / output:null).
                             return HookJSONOutput(
-                                hookSpecificOutput={"tool_input": updated_input}
+                                hookSpecificOutput={
+                                    "hookEventName": "PreToolUse",
+                                    "permissionDecision": "allow",
+                                    "updatedInput": updated_input,
+                                }
                             )
 
                         return HookJSONOutput()
@@ -796,11 +827,23 @@ class ClaudeAgentRunner:
                             confirmation_result.get("reason")
                             or "用户拒绝执行该工具"
                         )
-                        return HookJSONOutput(decision="block", systemMessage=reason)
+                        return HookJSONOutput(
+                            hookSpecificOutput={
+                                "hookEventName": "PreToolUse",
+                                "permissionDecision": "deny",
+                                "permissionDecisionReason": reason,
+                            }
+                        )
 
             # No callback or no result — deny by default
             pending_tool_calls.pop(tool_call_id, None)
-            return HookJSONOutput(decision="block", systemMessage="需要用户确认但未收到响应")
+            return HookJSONOutput(
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "需要用户确认但未收到响应",
+                }
+            )
 
         # ------------------------------------------------------------------
         # Build SDK options
