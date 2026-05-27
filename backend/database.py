@@ -112,6 +112,11 @@ def create_tables(db):
     except Exception:
         pass
 
+    try:
+        db.execute("ALTER TABLE user_preferences ADD COLUMN system_config_json TEXT")
+    except Exception:
+        pass
+
     # Auth sessions
     db.execute("""
     CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -1598,6 +1603,52 @@ def get_preferences(user_id: int):
         return None
     finally:
         db.close()
+
+def get_system_config(user_id: int) -> dict:
+    """Get per-user system config (model, provider, system_prompt, workspace_enabled, theme, env_vars).
+
+    Returns an empty dict when no config has been saved yet.
+    """
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT system_config_json FROM user_preferences WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if row and row["system_config_json"]:
+            return json.loads(row["system_config_json"])
+        return {}
+    finally:
+        db.close()
+
+
+def save_system_config(user_id: int, patch: dict) -> None:
+    """Merge *patch* into the stored system config for *user_id*.
+
+    Unknown keys are preserved so that future fields are not dropped on save.
+    """
+    db = get_db()
+    try:
+        existing = db.execute(
+            "SELECT system_config_json FROM user_preferences WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if existing:
+            current = json.loads(existing["system_config_json"]) if existing["system_config_json"] else {}
+            current.update(patch)
+            db.execute(
+                "UPDATE user_preferences SET system_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                (json.dumps(current), user_id),
+            )
+        else:
+            db.execute(
+                "INSERT INTO user_preferences (user_id, system_config_json) VALUES (?, ?)",
+                (user_id, json.dumps(patch)),
+            )
+        db.commit()
+    finally:
+        db.close()
+
 
 def set_first_login_completed(user_id: int):
     """Mark user's first login as completed."""
