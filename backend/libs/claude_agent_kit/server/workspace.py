@@ -276,13 +276,18 @@ def _init_editor_index(workspace: Path) -> None:
     This function is called by :func:`init_workspace` after the standard
     ``files/``, ``logs/``, ``skills/`` subdirectories are created.
     """
-    editor_dir = workspace / ".editor"
-    # Resolve absolute path and verify it stays inside the workspace root to
-    # guard against any unexpected path traversal in the input.
+    # Resolve the workspace to an absolute path and construct the .editor/
+    # subdirectory.  Verify the resolved path stays inside the workspace root
+    # to guard against unexpected traversal in the input.  If resolution
+    # fails (e.g. workspace does not exist yet on this call), fall back to
+    # the unresolved path — `mkdir(exist_ok=True)` will create both.
     try:
         workspace_abs = workspace.resolve()
         editor_dir_abs = (workspace_abs / ".editor").resolve()
-        if not str(editor_dir_abs).startswith(str(workspace_abs)):
+        if not (
+            str(editor_dir_abs) == str(workspace_abs / ".editor")
+            or str(editor_dir_abs).startswith(str(workspace_abs) + os.sep)
+        ):
             logger.warning(
                 "_init_editor_index: resolved .editor/ path %r is outside workspace %r; aborting.",
                 editor_dir_abs,
@@ -291,7 +296,11 @@ def _init_editor_index(workspace: Path) -> None:
             return
         editor_dir = editor_dir_abs
     except Exception:  # noqa: BLE001
-        logger.warning("_init_editor_index: could not resolve workspace path; using original.", exc_info=True)
+        logger.warning(
+            "_init_editor_index: could not resolve workspace path; aborting to avoid writing to unverified path.",
+            exc_info=True,
+        )
+        return
     editor_dir.mkdir(exist_ok=True)
 
     # Always refresh README so instructions stay in sync with the template.

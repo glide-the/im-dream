@@ -1147,15 +1147,13 @@ class ClaudeAgentRunner:
             # Clean up the editor_state tempfile if it was created.
             if _editor_state_file_path:
                 try:
-                    import os as _os
-                    _os.unlink(_editor_state_file_path)
+                    os.unlink(_editor_state_file_path)
                 except Exception:  # noqa: BLE001
                     pass
             # Clean up per-read .editor/ redirect tempfiles.
             for _rpath in _editor_redirect_tmp_paths:
                 try:
-                    import os as _os2
-                    _os2.unlink(_rpath)
+                    os.unlink(_rpath)
                 except Exception:  # noqa: BLE001
                     pass
         return AgentRunResult(
