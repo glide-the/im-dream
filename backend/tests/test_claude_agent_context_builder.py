@@ -28,6 +28,10 @@ from claude_agent.context_builder import (
     _SESSIONS_HEADER,
     _render_session_entry,
 )
+from claude_agent.workspace_context import (
+    WORKSPACE_CONTEXT_TEMPLATE,
+    build_workspace_context_block,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -341,6 +345,110 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("data.csv", text)
         self.assertIn("text/csv", text)
 
+
+# ---------------------------------------------------------------------------
+# build_workspace_context_block (standalone)
+# ---------------------------------------------------------------------------
+
+class TestBuildWorkspaceContextBlock(unittest.TestCase):
+    def test_returns_empty_string_for_empty_cwd(self):
+        self.assertEqual(build_workspace_context_block(""), "")
+
+    def test_returns_empty_string_for_none_via_falsy(self):
+        # build_workspace_context_block takes str; guard against "" as falsy
+        self.assertEqual(build_workspace_context_block(""), "")
+
+    def test_substitutes_cwd_in_output(self):
+        block = build_workspace_context_block("/workspaces/sess-abc")
+        self.assertIn("/workspaces/sess-abc", block)
+
+    def test_block_has_opening_tag(self):
+        block = build_workspace_context_block("/some/path")
+        self.assertTrue(block.startswith("<workspace_context>"))
+
+    def test_block_has_closing_tag(self):
+        block = build_workspace_context_block("/some/path")
+        self.assertTrue(block.endswith("</workspace_context>"))
+
+    def test_editor_virtual_index_described(self):
+        block = build_workspace_context_block("/some/path")
+        self.assertIn(".editor/", block)
+        self.assertIn("cells.json", block)
+
+    def test_constraint_line_present(self):
+        block = build_workspace_context_block("/some/path")
+        self.assertIn("CONSTRAINT", block)
+
+    def test_no_leftover_braces(self):
+        block = build_workspace_context_block("/workspaces/sess-xyz")
+        # Only {{ }} escapes (rendered as { }) should remain, not {cwd}
+        self.assertNotIn("{cwd}", block)
+
+
+# ---------------------------------------------------------------------------
+# build_user_message — workspace_context integration
+# ---------------------------------------------------------------------------
+
+class TestBuildUserMessageWorkspaceContext(unittest.TestCase):
+    def setUp(self):
+        self.builder = ClaudeAgentContextBuilder()
+
+    def _parts(self, text: str) -> list:
+        return [{"type": "text", "text": text}]
+
+    def _text_blocks(self, blocks):
+        return "\n".join(b["text"] for b in blocks if b.get("type") == "text")
+
+    def test_no_workspace_context_when_cwd_not_provided(self):
+        blocks = self.builder.build_user_message(self._parts("hello"))
+        combined = self._text_blocks(blocks)
+        self.assertNotIn("<workspace_context>", combined)
+
+    def test_workspace_context_present_when_cwd_provided(self):
+        blocks = self.builder.build_user_message(
+            self._parts("hello"), cwd="/workspaces/sess-abc"
+        )
+        combined = self._text_blocks(blocks)
+        self.assertIn("<workspace_context>", combined)
+
+    def test_cwd_substituted_in_workspace_context(self):
+        blocks = self.builder.build_user_message(
+            self._parts("hello"), cwd="/workspaces/sess-abc"
+        )
+        combined = self._text_blocks(blocks)
+        self.assertIn("/workspaces/sess-abc", combined)
+
+    def test_workspace_context_after_runtime_context(self):
+        blocks = self.builder.build_user_message(
+            self._parts("hello"), cwd="/workspaces/sess-abc"
+        )
+        text_blocks = [b for b in blocks if b.get("type") == "text"]
+        runtime_idx = next(
+            i for i, b in enumerate(text_blocks) if "<runtime_context>" in b["text"]
+        )
+        ws_idx = next(
+            i for i, b in enumerate(text_blocks) if "<workspace_context>" in b["text"]
+        )
+        self.assertLess(runtime_idx, ws_idx)
+
+    def test_workspace_context_before_user_text(self):
+        blocks = self.builder.build_user_message(
+            self._parts("user msg"), cwd="/workspaces/sess-abc"
+        )
+        text_blocks = [b for b in blocks if b.get("type") == "text"]
+        ws_idx = next(
+            i for i, b in enumerate(text_blocks) if "<workspace_context>" in b["text"]
+        )
+        user_idx = len(text_blocks) - 1
+        self.assertLess(ws_idx, user_idx)
+
+    def test_user_text_still_last_when_cwd_provided(self):
+        blocks = self.builder.build_user_message(
+            self._parts("final text"), cwd="/workspaces/sess-abc"
+        )
+        last = blocks[-1]
+        self.assertEqual(last["type"], "text")
+        self.assertEqual(last["text"], "final text")
 
 if __name__ == "__main__":
     unittest.main()

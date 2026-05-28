@@ -31,6 +31,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
+from claude_agent.workspace_context import build_workspace_context_block
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,7 @@ class ClaudeAgentContextBuilder:
         include_runtime_context: bool = True,
         local_time: Optional[str] = None,
         local_timezone: Optional[str] = None,
+        cwd: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
 
@@ -142,8 +144,9 @@ class ClaudeAgentContextBuilder:
 
         Returns a list of content blocks in the order expected by Claude:
         attachment image blocks first, then the ``<runtime_context>`` block
-        (unless *include_runtime_context* is False), then the user's message
-        text.
+        (unless *include_runtime_context* is False), then the
+        ``<workspace_context>`` block (when *cwd* is provided), then the
+        user's message text.
 
         This method absorbs the responsibilities of the SDK-level
         ``build_user_message_content`` so the SDK no longer participates in
@@ -205,6 +208,11 @@ class ClaudeAgentContextBuilder:
                     ),
                 }
             )
+
+        # Inject workspace context block after runtime_context when cwd is known.
+        workspace_block = build_workspace_context_block(cwd or "")
+        if workspace_block:
+            blocks.append({"type": "text", "text": workspace_block})
 
         # Convert all message_parts (text, file, source-url, workspace-file) to
         # a single text string using the full UIMessage parts protocol.

@@ -225,6 +225,12 @@ class ClaudeAgentService:
                 "Phase 1: reusing cached system_prompt for session_id=%s", state.session_id
             )
 
+        cwd = request.cwd or state.cwd
+        if not cwd:
+            workspace_path = get_or_create_workspace(state.session_id)
+            cwd = str(workspace_path)
+            state.with_cwd(cwd)
+
         user_message_content = self._context_builder.build_user_message(
             request.message_parts,
             attachments=request.attachments,
@@ -232,13 +238,8 @@ class ClaudeAgentService:
             max_turns=request.max_turns,
             thread_id=state.session_id,
             resume=request.resume,
+            cwd=cwd,
         )
-
-        cwd = request.cwd or state.cwd
-        if not cwd:
-            workspace_path = get_or_create_workspace(state.session_id)
-            cwd = str(workspace_path)
-            state.with_cwd(cwd)
 
         # Load user-configured env vars (skills / MCP environment) from system config.
         user_env_vars: dict[str, str] = {}
