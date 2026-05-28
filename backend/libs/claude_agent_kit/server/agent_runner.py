@@ -739,6 +739,10 @@ class ClaudeAgentRunner:
         except RuntimeError:  # pragma: no cover — run_streaming is async
             host_loop = None
 
+        # Collects paths of per-read tempfiles created by the .editor/ redirect
+        # logic inside _pre_tool_use_hook. Cleaned up in the finally block.
+        _editor_redirect_tmp_paths: list[str] = []
+
         async def _pre_tool_use_hook(
             hook_input: dict[str, Any],
             tool_use_id: Optional[str],
@@ -777,6 +781,7 @@ class ClaudeAgentRunner:
                         ) as tmp:
                             json.dump(resource_data, tmp, ensure_ascii=False)
                             tmp_path = tmp.name
+                        _editor_redirect_tmp_paths.append(tmp_path)
                         logger.debug(
                             "PreToolUse: redirected .editor read %r → %r",
                             raw_path,
@@ -1144,6 +1149,13 @@ class ClaudeAgentRunner:
                 try:
                     import os as _os
                     _os.unlink(_editor_state_file_path)
+                except Exception:  # noqa: BLE001
+                    pass
+            # Clean up per-read .editor/ redirect tempfiles.
+            for _rpath in _editor_redirect_tmp_paths:
+                try:
+                    import os as _os2
+                    _os2.unlink(_rpath)
                 except Exception:  # noqa: BLE001
                     pass
         return AgentRunResult(

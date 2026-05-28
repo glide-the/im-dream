@@ -277,6 +277,21 @@ def _init_editor_index(workspace: Path) -> None:
     ``files/``, ``logs/``, ``skills/`` subdirectories are created.
     """
     editor_dir = workspace / ".editor"
+    # Resolve absolute path and verify it stays inside the workspace root to
+    # guard against any unexpected path traversal in the input.
+    try:
+        workspace_abs = workspace.resolve()
+        editor_dir_abs = (workspace_abs / ".editor").resolve()
+        if not str(editor_dir_abs).startswith(str(workspace_abs)):
+            logger.warning(
+                "_init_editor_index: resolved .editor/ path %r is outside workspace %r; aborting.",
+                editor_dir_abs,
+                workspace_abs,
+            )
+            return
+        editor_dir = editor_dir_abs
+    except Exception:  # noqa: BLE001
+        logger.warning("_init_editor_index: could not resolve workspace path; using original.", exc_info=True)
     editor_dir.mkdir(exist_ok=True)
 
     # Always refresh README so instructions stay in sync with the template.
