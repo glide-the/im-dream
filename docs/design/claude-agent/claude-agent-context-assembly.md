@@ -1,223 +1,197 @@
-> **迁移来源**: Pawkeyland docs/app/design/claude-agent上下文拼接设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
+> [Input] `backend/routers/claude_agent.py`, `backend/claude_agent/service.py`, `backend/claude_agent/context_builder.py`, `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`, `backend/libs/claude_agent_kit/types.py`
+> [Output] Define the `assemble_context` lifecycle contract, context source order, filtering policy, failure handling, and test expectations for Claude Agent planning and execution turns.
+> [Pos] context-design-doc in `docs/design/claude-agent`
+> [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
 
-# Claude Agent 上下文拼接设计
+# Claude Agent Context Assembly Design
 
-> **迁移来源**: Pawkeyland docs/app/design/claude-agent上下文拼接设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
+This document is the implementation contract for `ClaudeAgentService.assemble_context`.
+It covers the Phase 1 context boundary only: what context can enter a turn, how it is ordered and filtered, what the method returns, and what must remain outside this stage.
 
-> 当前状态：2026-05-12 实现对齐版。本文是设计参考；接口字段真源仍以 `../api-calling-guide.md` 为准，上下文运行真源以 `../chat-context-assembly-flow.md` 为准。
+Prompt optimization for planning turns is specified separately in [`claude-agent-prompt-optimization.md`](./claude-agent-prompt-optimization.md). That optimizer prepares the task text before `assemble_context`; it does not replace the runtime system prompt or workspace context described here.
 
-> [Sync] 2026-05-12: Thread Session 享元化后，上下文拼接成为 Phase 1 (Context Assembly) 的唯一职责，由 `ClaudeAgentService.assemble_context` 统一持有；`system_prompt` / `cwd` 在首轮组装后回写到 `AgentRunState` 享元，续轮短路复用。`user_message` / `AgentRunOptions` / `AgentStreamingCallbacks` / `_TurnContext` 仍每轮重建并由 Phase 4 销毁。详见 [claude-agent-thread-session-patterns.md](./claude-agent-thread-session-patterns.md)。
+## 1. Scope
 
-## 1. 当前入口
+`assemble_context` is the single application-layer entry point that turns a validated `ClaudeAgentRunRequest` plus an `AgentRunState` into a `_TurnExecution` carrier for `execute_session`.
 
-Claude Agent 主链路只有 `POST /api/claude-agent`。HTTP 请求不暴露客户端 prompt 字段，不接收 `conversation_id`，也不接收 `history` / `chat_history`。
+It owns:
 
-会话键路由：
+- building or reusing the session `system_prompt`;
+- building the current turn's Claude content blocks from `message_parts` and attachments;
+- resolving the working directory for the session;
+- copying runtime controls into `AgentRunOptions`;
+- creating the per-turn `_TurnContext` that stores queue, tool confirmation state, streaming dedup sets, reasoning state, and persistence buffers;
+- returning a carrier that Phase 3 can execute without re-reading request context.
 
-```text
-user_id
-  -> chat_session(user_id)
-  -> claude_session_id（续接 ID）
+It does not own:
+
+- HTTP authentication or thread ownership checks;
+- prompt optimization LLM calls;
+- runner creation or SDK process lifecycle;
+- streaming callbacks, SSE frame emission, or persistence;
+- tool execution, tool result interpretation, or manual approval UI;
+- client-provided system prompts, untrusted history arrays, or ad hoc `conversation_id` routing.
+
+## 2. Lifecycle Position
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Opt as Prompt Optimization
+    participant API as Claude Agent API
+    participant Factory as ThreadFactory
+    participant State as AgentRunState
+    participant Service as ClaudeAgentService
+    participant Builder as ContextBuilder
+    participant Runner as ClaudeAgentRunner
+
+    User->>Opt: raw planning task
+    Opt-->>API: optimized planning prompt as UIMessage text
+    API->>API: auth, thread ownership, message validation, attachment sync
+    API->>Factory: ClaudeAgentRunRequest
+    Factory->>State: get_or_create(thread_id) + per-session lock
+    Factory->>Runner: create or reuse runner
+    Factory->>Service: assemble_context(request, state, queue, runner)
+    alt first turn or rebuilt state
+        Service->>Builder: build_system_prompt(user_id)
+        Builder-->>Service: system prompt with recent writing sessions
+        Service->>State: cache system_prompt and mark initialized
+    else initialized state
+        Service->>State: reuse cached system_prompt
+    end
+    Service->>Builder: build_user_message(message_parts, attachments, runtime)
+    Service->>State: cache cwd if workspace is initialized here
+    Service-->>Factory: _TurnExecution(run_options, turn_context, runner)
+    Factory->>Service: execute_session(execution)
 ```
 
-> _(Pawkeyland 原文中的 `pet_persona` / `pet_id` 路由链，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
+The factory is responsible for session locking, runner caching, lifecycle observers, and final cleanup. `assemble_context` may receive an already-created runner because the current service carrier includes `runner`; the runner is opaque in this phase and must not be called here.
 
-## 2. 上下文构建职责
+## 3. Inputs
 
-实现文件：`backend/claude_agent/context_builder.py`（被 `backend/claude_agent/service.py::ClaudeAgentService.assemble_context` 调用）。
+| Input | Source | Required | Context role |
+|---|---|---:|---|
+| `request.user_id` | authenticated HTTP user | yes | Key for recent writing context lookup and persistence ownership. |
+| `request.thread_id` | `/api/claude-agent/threads` | yes | Stable chat thread, Thread Session key, and workspace key after validation. |
+| `request.message_parts` | Vercel AI SDK `UIMessage.parts` | yes for normal text turns | User goal, optimized planning prompt, file metadata, source URL metadata, and workspace-file metadata. |
+| `request.attachments` | synced API attachments | no | Inline image content blocks when the media type can be sent to Claude. |
+| `request.resume` | client request | no | Runtime context flag copied into content blocks and `AgentRunOptions`. |
+| `request.tool_choice` | client request | no | Tool policy copied into `AgentRunOptions`; valid modes are `auto`, `manual`, and `none`. |
+| `request.model` | client request or server selection | no | Runtime context and SDK model override when allowed by server policy. |
+| `request.max_turns` | server default or client request | no | SDK turn budget; defaults belong in config/env, not in route logic. |
+| `request.cwd` | trusted internal/debug caller | no | Explicit workspace override. Production chat callers should omit it. |
+| `state` | `AgentRunStatePool` | yes | Cross-turn cache for `system_prompt`, `cwd`, runner presence, lifecycle, and turn count. |
+| `queue` | factory-owned `asyncio.Queue` | yes | Shared queue later used by Phase 3 callbacks. |
+| `runner` | factory-owned runner cache | yes in current service signature | Passed through to `_TurnExecution`; not executed during assembly. |
 
-构建器只产出两个字符串：
+## 4. Context Source Order
 
-| 输出 | 消费方 | 说明 |
-|---|---|---|
-| `system_prompt` | `AgentRunOptions.system_prompt` | 会话级规则、语气、工具规则、媒体策略 |
-| `user_message` | `AgentRunOptions.user_message` | 本轮原始用户文本；UTC Date、模型、session 和本地时间等运行态由 SDK runtime context content block 承载 |
+`assemble_context` must assemble context in this order so higher-trust, lower-volatility inputs stay stable and volatile turn data stays local to the current request.
 
-`ClaudeAgentService.assemble_context()` 在 Phase 1 内部完成拼接、构造 `AgentRunOptions` / 5 个 `AgentStreamingCallbacks` / `_TurnContext`，并把全部组件发布到享元 `AgentRunState`；Phase 3 (`execute_session`) 再把 carrier 中的 `runner` / `opts` / `callbacks` 交给 `backend/libs/claude_agent_kit/server/agent_runner.py::ClaudeAgentRunner`。
+1. **Validated identity and thread**
+   The API route must authenticate the user, require `thread_id`, verify that the thread belongs to the user, and reject empty text before creating `ClaudeAgentRunRequest`.
 
-### 2.1 享元短路（Thread Session 模式）
+2. **Task goal or optimized planning prompt**
+   The final task text enters through `request.message_parts`. For planning tasks, the text should already be transformed by the Expert Prompt Architect flow in [`claude-agent-prompt-optimization.md`](./claude-agent-prompt-optimization.md). `assemble_context` treats that optimized text as the user turn payload and does not call the optimizer itself.
 
-`ClaudeAgentService.assemble_context` 用三层级解析顺序处理 intrinsic 字段，首轮构建后写回 `AgentRunState`，续轮短路：
+3. **Historical writing context**
+   On the first initialized turn for a state, `ClaudeAgentContextBuilder.build_system_prompt(user_id)` loads recent writing sessions through `database.list_sessions`. The number of sessions is controlled by `INK_AGENT_CONTEXT_SESSIONS`. The rendered block is cached in `state.system_prompt` and reused until the state is rebuilt.
 
-| 字段 | 三层解析顺序（从优先级高到低） | 享元写回点 |
-|---|---|---|
-| `state.system_prompt` | ① 享元已缓存；② `_context_builder.system_prompt(...)` | 首轮 → `state.system_prompt` + `state.agent_contract_version` |
-| `state.cwd` | ① 享元已缓存；② `request.cwd` 显式覆盖；③ `get_or_create_workspace(workspace_key)` | 首轮 → `state.cwd` |
+4. **Rules and assistant behavior**
+   Current behavior rules live in `ClaudeAgentContextBuilder`'s system prompt template. Future prompt assets must be loaded through the project's prompt/config pattern rather than embedded in route handlers.
 
-> _(Pawkeyland 原文中还包含 `state.resolved_identity` / `state.persisted_pet_info` / `state.mem0_user_id` 的享元字段，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
+5. **File memory and attachment context**
+   The API route syncs uploaded files into the workspace before `assemble_context`. Metadata is injected into `message_parts` as file/source/workspace-file parts, and inline-safe image attachments are passed through `request.attachments`. `build_user_message` converts these into Claude content blocks and readable file metadata.
 
-> **bare Service 调用**（`state is None`）：每次都走重建分支；不写回（每次调用独立）。
+6. **Runtime context**
+   `build_user_message` inserts a lightweight `<runtime_context>` block before the user text. It may include date, local time, timezone, model, max turns, session ID, and resume status when those values are supplied by upstream code.
 
-### 2.2 每轮重建的 extrinsic 字段
+7. **Workspace**
+   `cwd` resolution uses this priority: `request.cwd`, then cached `state.cwd`, then `get_or_create_workspace(state.session_id)`. Only the last branch writes `state.cwd`.
 
-| 字段 | 构造时机 | 销毁时机 |
-|---|---|---|
-| `state.user_message` | Phase 1 内 `_context_builder.user_message(...)` | Phase 4 finally |
-| `state.callbacks` | Phase 1 内构造 `AgentStreamingCallbacks` 5 闭包（绑定 `state.turn_context` 内累加器） | Phase 4 finally |
-| `state.run_options` | Phase 1 内构造 `AgentRunOptions(thread_id, cwd, system_prompt, tool_choice, ...)` | Phase 4 finally |
-| `state.turn_context` | Phase 1 内 `_TurnContext(queue, accumulators, latency tracker, pending_confirmation_ids, ...)` | Phase 4 finally |
+8. **Tool state**
+   `tool_choice` is copied into `AgentRunOptions`. `_TurnContext` starts with empty confirmation/dedup/reasoning state for the turn. Existing pending tool confirmations must not leak into a new turn.
 
-> _(Pawkeyland 原文中 `_TurnContext` 还包含 `sticker filter`，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
+## 5. Filtering And Priority Rules
 
-> "Phase 4 finally" 指每轮 `_run_lifecycle.finally`。它**不**触发 Phase 4 (Session End) 观察者钩子 —— 后者由 `_fire_session_ended` 在 `close_thread` / TTL Sweeper / `aclose` 三条 State 销毁路径上各发一次。
-
-## 3. system_prompt 拼接顺序
-
-当前顺序固定为：
-
-```text
-prompts/agent/system_base.txt
-prompts/agent/system_tools.txt
-prompts/agent/system_policies.txt
-<long_term_profile>...</long_term_profile>
-```
-
-前三个文件是稳定政策前缀，放在动态 memory 之前，以便大模型服务复用更长的 prefix cache。
-
-> _(Pawkeyland 原文中还包含 `<character_card>` / `<virtual_character>` 块，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
-
-### 3.1 `system_base.txt`
-
-定义 Ink & Memory AI 助手的身份、输出节奏、事实核源、共情边界和情绪价值策略。
-
-### 3.2 `system_tools.txt`
-
-定义 Agent 工具边界，包括允许使用的 MCP 工具列表及零参数只读意图工具的调用规范。
-
-> _(Pawkeyland 原文中包含 `mcp__user__touch_animation` / `mcp__necklace__*` 等宠物专属工具，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
-
-### 3.3 `system_policies.txt`
-
-定义输出格式规范、工具策略和 text 情绪协同规则。
-
-> _(Pawkeyland 原文中包含动画 act 枚举、贴纸枚举、`[sticker:sticker_id]` token 合同，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
-
-### 3.4 `long_term_profile`
-
-来源优先级：
-
-1. 请求显式传入 `long_term_profile`，仅调试/Demo 使用；
-2. 服务端按 `user_id` 从记忆服务读取；
-3. 没有则不注入。
-
-长期画像是半静态上下文，放在 `system_prompt`，不重复塞入每轮 `user_message`。
-
-> _(Pawkeyland 原文中从 `PetMemoryService` 按 `user_id + pet_persona` 读取，Ink & Memory 简化为按 `user_id` 读取)_
-
-## 4. user_message 拼接
-
-模板文件：`prompts/agent/user_message.txt`。
-
-当前模板只有一个占位符：
-
-```text
-<user_turn>
-{user_message_block}
-</user_turn>
-```
-
-构建器填充：
-
-```text
-[user_message]
-{本轮用户文本}
-```
-
-UTC Date、模型、最大 turn、session id 和 resume 状态由 SDK message builder 的 `<runtime_context>` content block 提供；服务端还会把 `curr_time` 和会话时区写进同一个 block，不在 app prompt 中重复注入。
-
-以下内容不会进入 `user_message`：
-
-- `long_term_profile`
-- `user_id`
-- 任何外部实时 JSON 原始数据
-
-> _(Pawkeyland 原文中还排除了 `pet_persona.profile` / `pet_id` / necklace 上游原始 JSON / `[宠物硬件实时状态]`，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
-
-## 5. 实时外部信息
-
-当前实现不在每轮请求前预取外部状态，也不把 `live_context` 直接拼入 prompt。
-
-实时事实只通过 MCP 工具按需进入模型上下文。工具返回时，只有实际出现的字段能作为事实来源；`ok=false`、`error=no_data` 时，不存在可引用事实，模型只能用不确定表达。
-
-> _(Pawkeyland 原文中实时硬件事实通过 necklace MCP 读取 `PAWKEYLAND_AGENT_PET_ID` / `PAWKEYLAND_AGENT_PET_SPECIES` / `PAWKEYLAND_AGENT_PET_TYPE`，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
-
-## 6. 会话与 workspace
-
-服务层以业务 `user_id` 作为稳定会话键：
-
-```text
-workspace_key = session_id = "{user_id}"
-```
-
-`session_id` 同时用作 **进程内 Thread Session 享元键**（`AgentRunStatePool` 的 key）与 **workspace 目录键**（`get_or_create_workspace(session_id)`）。
-
-> _(Pawkeyland 原文中为 `session_id = "{user_id}__{persona_id}"`，Ink & Memory 简化为单 user_id)_
-
-默认工作目录：
-
-```text
-get_or_create_workspace(workspace_key)
-```
-
-如果请求显式传 `cwd`，仅调试/内部用途会覆盖默认 workspace。
-
-`chat_session.claude_session_id` 是 Claude SDK 续接 ID。首轮不传 `thread_id`，由 Runner 创建；可续接时下一轮传入 `claude_session_id`。
-
-服务端会拒绝复用这些历史 session：
-
-- 最新 assistant 消息为空；
-- 历史消息包含已移除工具名；
-- `agent_contract_version` 与当前版本不一致；
-- 开启日切分且最新 session 已跨本地自然日。
-
-### 6.1 三种 sessionId 的语义对比
-
-| 名称 | 取值 | 生命周期 | 作用 |
-|---|---|---|---|
-| `session_id`（Thread Session 享元键 = workspace_key） | `f"{user_id}"` | TTL（默认 600 s）keepalive；`close_thread` / TTL Sweeper / `aclose` 三条路径销毁 | `AgentRunStatePool` 的 key；`asyncio.Lock` 的 key；`get_or_create_workspace` 的输入 |
-| `claude_session_id`（DB 字段，SDK 续接 ID） | Claude SDK `AgentRunResult.session_id`（首轮 SDK 自动分配，由 `_persist_conversation` 写入 `chat_session.claude_session_id`） | 与 `chat_session(user_id)` 行同生命周期；跨进程 / 跨重启稳定 | Phase 1 决策 `should_resume` / `thread_id_for_agent` 的真源；`AgentRunOptions.thread_id` 续轮的实际取值 |
-| `workspace_key`（同 `session_id`） | 同上 | 与 `session_id` 同寿 | `backend/claude_agent/workspace.py::init_workspace` 的输入；`{AGENT_CWD}/{workspace_key}/` 物理目录 |
-
-> 享元 `state.runner` / `state.system_prompt` / `state.cwd` 与 `claude_session_id` 互为正交：享元销毁 ≠ DB 续接失效；DB rollover ≠ 享元失效。详见 [claude-agent-session-persistence.md §10.6](./claude-agent-session-persistence.md#106-失效与重建场景)。
-
-## 7. AgentRunOptions 当前入参
-
-`ClaudeAgentService` 最终传给 Runner 的关键字段：
-
-| 字段 | 来源 |
+| Rule | Required behavior |
 |---|---|
-| `thread_id` | 可续接时为 `chat_session.claude_session_id`，首轮为 `None` |
-| `user_message` | `ClaudeAgentContextBuilder.user_message()` |
-| `system_prompt` | `ClaudeAgentContextBuilder.system_prompt()` |
-| `resume` | 是否存在可用 `thread_id` |
-| `model` | 请求模型字段，仅在服务端配置允许时有效 |
-| `cwd` | 请求 `cwd` 或 `get_or_create_workspace(workspace_key)` |
-| `max_turns` | 请求字段，默认 10 |
-| `tool_choice` | 请求字段 `tool_choice`，仅接受 `auto`（默认）或 `none` |
+| Client system prompts | Do not accept or merge client-provided system prompt fields in the public HTTP contract. |
+| Client history | Do not accept client-owned `history` or `chat_history` arrays as authoritative context. Persisted chat messages are read through server-owned storage APIs. |
+| Message text | Extract text through the UIMessage parts protocol. Text parts remain the goal source; file/source/workspace-file parts become explicit metadata text. |
+| Attachments | Inline image MIME types may become image blocks. Unsupported binary types are represented by metadata when available; otherwise log and omit the binary payload. |
+| External facts | Do not prefetch arbitrary live data during assembly. Realtime facts must enter through explicit tools during Phase 3. |
+| Historical context | If DB context cannot be loaded, degrade to a valid system prompt with the no-session fallback. Do not fail the turn for missing optional history. |
+| Workspace override | Treat `request.cwd` as trusted/internal. Public callers should rely on `thread_id` workspace resolution. |
+| Tool policy | Support `auto`, `manual`, and `none`; invalid values should be rejected before SDK execution. |
+| Prompt optimization | Preserve the raw user task for audit upstream, but pass only the optimized planning prompt into `message_parts` when the turn is a planning task. |
 
-> _(Pawkeyland 原文中还包含 `mcp_env`（宠物 ID、物种、petType），属于 Pawkeyland 专属，Ink & Memory 中不适用)_
+## 6. Outputs
 
-## 8. 输出归一化
+`assemble_context` returns `_TurnExecution` with:
 
-Agent 原始流经 `ClaudeAgentService` 转成 SSE 事件。最终 `message-final.normalizedPayload` 包含：
-
-| 字段 | 说明 |
+| Output | Contents |
 |---|---|
-| `text` | 完整 assistant 文本 |
-| `tool_call_count` | 本轮工具调用数量 |
-| `claude_session_id` | 本轮 SDK session |
-| `agent_contract_version` | 当前 Agent runtime/tool contract 版本 |
-| `parts` | 持久化用的流式事件副本，不含 `finish` / `error` / `message-metadata` / `message-final` |
+| `request` | Original validated `ClaudeAgentRunRequest`. |
+| `state` | The active `AgentRunState` after any `system_prompt`, `cwd`, and `turn_context` writes. |
+| `runner` | Opaque runner reference supplied by the factory. |
+| `run_options` | `AgentRunOptions(thread_id, user_message, resume, model, cwd, max_turns, tool_choice, system_prompt)`. |
+| `turn_context` | New `_TurnContext(queue, confirmation_store, pending sets, reasoning state, collected_parts)`. |
 
-> _(Pawkeyland 原文中还包含 `sticker_tokens` / `segments` / `animation_events` 字段，属于 Pawkeyland 专属，Ink & Memory 中不适用)_
+State side effects:
 
-## 9. 与历史设计的差异
+- `state.system_prompt` is built once per fresh state and reused while `state.is_context_initialized` is true.
+- `state.cwd` is written when workspace initialization is needed.
+- `state.turn_context` is replaced every turn.
+- The current implementation keeps `run_options` in `_TurnExecution`; do not assume `state.run_options` is populated unless a future change explicitly adds that mirror.
 
-这些旧设计已经不代表当前实现：
+## 7. Failure Handling
 
-| 旧说法 | 当前实现 |
+| Failure | Handling contract |
 |---|---|
-| `conversation_id` 由调用方传入 | 已移除；以 `user_id` 查 session |
-| 客户端可传 `system_prompt` | HTTP 合同不暴露；extra 字段被忽略 |
-| 每轮预取硬件状态并拼入提示词 | 已移除；实时事实由零参数 MCP 工具按需读取 |
-| `get_pet_status` / `get_long_term_memory` / `update_long_term_memory` Agent 工具 | 未实现为聊天工具；长期画像由服务端读取后放入 system prompt |
+| Missing or unauthorized `thread_id` | API route rejects before `assemble_context`. |
+| Invalid session/workspace key | Factory or workspace layer rejects before SDK execution; no context should be persisted. |
+| Empty user text | API route rejects before context assembly. Attachment-only turns must still provide file/source/workspace metadata text. |
+| DB session lookup failure | Log and return a system prompt with the no-session fallback. |
+| Workspace initialization failure | Fail the turn before SDK execution; cleanup must leave the state idle and without stale `turn_context`. |
+| Unsupported attachment media | Log and continue with available metadata; do not inject unreadable binary data as text. |
+| Prompt optimizer unavailable | Planning layer should fall back to the raw task or a policy-defined retry path before calling `assemble_context`; this method should not block waiting for optimizer recovery. |
+| Tool confirmation leak | Factory cleanup must cancel pending confirmations and clear `state.turn_context` when the stream ends or disconnects. |
+
+## 8. Boundary Conditions
+
+- Same `thread_id` calls are serialized by the factory lock; different threads remain isolated.
+- Destroyed states are rebuilt through `AgentRunStatePool.get_or_create`; rebuilt states must rebuild `system_prompt` and workspace state as needed.
+- `state.system_prompt` cache is intentionally independent of persisted chat history. Updating recent journal context requires state rebuild or explicit invalidation.
+- `message_parts=None` produces a valid content-block list with runtime context and empty text, but public routes should reject empty user-facing text before that point.
+- `request.cwd` can cause context to run outside the default workspace if accepted. Keep it out of public UI flows unless a trusted admin/debug policy is in place.
+
+## 9. Testability Requirements
+
+Coverage should stay focused on the contracts above:
+
+- `ClaudeAgentContextBuilder.build_system_prompt` includes the writing assistant role, recent entries, session count cap, no-session fallback, and DB-error fallback.
+- `build_user_message` preserves block order: image attachments, runtime context, final user text/metadata.
+- `assemble_context` builds `system_prompt` once per fresh state and reuses it on subsequent turns.
+- `assemble_context` resolves `cwd` by request override, cached state, then workspace initialization.
+- `assemble_context` copies `tool_choice`, `model`, `max_turns`, and `resume` into `AgentRunOptions`.
+- `_TurnContext` starts clean each turn and does not reuse confirmation or reasoning state.
+- Planning prompt optimization tests should assert that optimized prompt text enters through `message_parts`, while `assemble_context` remains optimizer-agnostic.
+- Failure tests should cover DB fallback, invalid session ID, workspace initialization failure, unsupported attachment media, and cleanup after cancellation.
+
+## 10. Implementation Checklist
+
+- [ ] Validate auth, thread ownership, and non-empty text before constructing `ClaudeAgentRunRequest`.
+- [ ] Run Expert Prompt Architect optimization before planning turns and store the result as UIMessage text.
+- [ ] Keep raw user task available upstream for audit or UI comparison.
+- [ ] Build `system_prompt` only through `ClaudeAgentContextBuilder`.
+- [ ] Guard recent-session count through `INK_AGENT_CONTEXT_SESSIONS`.
+- [ ] Convert UIMessage parts with `extract_text_from_parts` semantics.
+- [ ] Sync attachments to workspace before context assembly and inject workspace-file parts.
+- [ ] Keep unsupported binary payloads out of prompt text.
+- [ ] Resolve `cwd` without hard-coded local paths.
+- [ ] Create a fresh `_TurnContext` for every turn.
+- [ ] Copy tool mode into `AgentRunOptions` and start with no pending confirmations.
+- [ ] Keep SDK calls and SSE callbacks out of `assemble_context`.
+- [ ] Clear `turn_context` and pending confirmations on completion, error, or disconnect.
+- [ ] Add or update tests whenever a new context source, priority rule, or failure path is introduced.

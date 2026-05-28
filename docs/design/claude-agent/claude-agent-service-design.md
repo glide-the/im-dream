@@ -1,7 +1,11 @@
+> [Input] `backend/claude_agent/service.py`, `backend/claude_agent/context_builder.py`, `backend/claude_agent/thread_factory.py`, `backend/libs/claude_agent_kit/types.py`
+> [Output] Define ClaudeAgentService phase-aware responsibilities, SSE event flow, `_TurnContext`, and persistence conversion.
+> [Pos] module-design-doc in `docs/design/claude-agent`
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentService 模块设计.md — 路径已适配 Ink & Memory 工程规范。
 > **[Sync] 2026-05-24**: 类图与 SSE 事件表对齐当前 service.py；reasoning-start/delta/end 已启用。  
 > **[Sync] 2026-05-25 v1**: 更新 `_TurnContext` 类图补充持久化字段；更新 `execute_session` 描述。  
 > **[Sync] 2026-05-25 v2**: 重大重构 — `collected_parts` 改为收集**原始 SSE 事件报文**（而非 UIMessage parts）；移除 `text_started` / `full_text_accumulator` / `tool_inv_by_id` 等状态字段；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做一次线性转换。
+> **[Sync] 2026-05-28**: 校准 `assemble_context` 边界：该阶段构建 `system_prompt` / `user_message` / `AgentRunOptions` / `_TurnContext`，但不发射 `message-metadata`、不创建 streaming callbacks；这些由 `execute_session` 执行。详细上下文接入规则见 [`claude-agent-context-assembly.md`](./claude-agent-context-assembly.md)。
 
 # ClaudeAgentService 模块设计
 
@@ -19,8 +23,8 @@
 |------|------|
 | 源模块 | `glide-the/claude-agent-next-kit` 的 `app/api/claude-agent`（TypeScript / Next.js API Route） |
 | 目标模块 | `backend/claude_agent/service.py` + `backend/claude_agent/tool_confirmation_store.py`（Python 3.11+） |
-| 依赖 | `backend/claude_agent/` — 已完成迁移的 `ClaudeAgentRunner` Python 包；`infrastructure/persistence/chat.py` — DB 持久化层；`backend/claude_agent/thread_factory.py` — 生产环境的 SSE 入口 |
-| 迁移目标 | 1. 等价功能的 Python 服务层；2. 会话持久化（`onFinish` 迁移）；3. `claude_session_id` 续接逻辑；4. 在 `docs/app/design/` 中完整记录模块设计；5. 与 Thread Session（Observer/Flyweight-State/Builder/Factory）四模式协同 |
+| 依赖 | `backend/claude_agent/` — 已完成迁移的 `ClaudeAgentRunner` Python 包；`backend/database.py` — DB 持久化层；`backend/claude_agent/thread_factory.py` — 生产环境的 SSE 入口 |
+| 迁移目标 | 1. 等价功能的 Python 服务层；2. 会话持久化（`onFinish` 迁移）；3. `thread_id` 续接逻辑；4. 在 `docs/design/claude-agent/` 中完整记录模块设计；5. 与 Thread Session（Observer/Flyweight-State/Builder/Factory）四模式协同 |
 
 ---
 
@@ -38,7 +42,7 @@ backend/claude_agent/
 └── tool_confirmation_store.py   # ToolConfirmationStore（asyncio.Future 实现）
 ```
 
-> `backend/claude_agent_service.py` / `backend/tool_confirmation_store.py` 旧扁平路径已删除；引用时请使用 `from backend.claude_agent import ClaudeAgentService, ClaudeAgentThreadFactory, ToolConfirmationStore`。
+> 旧扁平 service/store 路径已删除；引用时请使用 `from backend.claude_agent import ClaudeAgentService, ClaudeAgentThreadFactory, ToolConfirmationStore`。
 
 ---
 
@@ -123,7 +127,7 @@ classDiagram
 
 `ClaudeAgentService` 不再暴露 all-in-one orchestrator，只提供两个 phase-aware 方法：
 
-- **`assemble_context(request, *, state, queue, runner)`** — Phase 1 单一所有者（Ink & Memory）。首轮调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id)` 构建 system prompt，写入 `state.system_prompt`（享元缓存）；后续轮复用缓存，跳过重建。构建 `user_message`、`AgentRunOptions`、`_TurnContext`（包含 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合），发射初始 `message-metadata` SSE。返回 `_TurnExecution` 载体，`runner` 字段由 Phase 2 填入。
+- **`assemble_context(request, *, state, queue, runner)`** — Phase 1 单一所有者（Ink & Memory）。首轮调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id)` 构建 system prompt，写入 `state.system_prompt`（享元缓存）；后续轮复用缓存，跳过重建。构建 `user_message`、`AgentRunOptions`、`_TurnContext`（包含 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合），返回 `_TurnExecution` 载体。该阶段不发射 SSE，也不创建 streaming callbacks。
 - **`execute_session(execution)`** — Phase 3 纯消费者。构造 5 个 `AgentStreamingCallbacks` 闭包，驱动 `runner.run_streaming(opts, callbacks)`，emit `message-final` / `finish` / `error`。每个 SSE 回调在发出事件到 `queue` 的同时，将**原始 SSE 事件 dict**追加到 `turn_ctx.collected_parts`。成功后调用 `_persist_turn`，通过 `_sse_events_to_ui_parts(collected_parts)` 做一次线性转换，将 SSE 事件流还原为 UIMessage-compatible parts 后写入 `chat_message.parts` 列。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
@@ -132,11 +136,11 @@ classDiagram
 
 ## 4. 数据流：Factory 驱动的 Phase 1 → 4
 
-> **2026-05-11 重构**：生产链路完全由 `ClaudeAgentThreadFactory._run_lifecycle` 编排。本节描述真实的生产时序；Service 不再独自跑 `_run()` 后台任务。
+> **2026-05-11 重构**：生产链路完全由 `ClaudeAgentThreadFactory.run_streaming` 编排。本节描述真实的生产时序；Service 不再独自跑 `_run()` 后台任务。
 
 ```mermaid
 sequenceDiagram
-    participant HTTP as HTTP 层 (server.py)
+    participant HTTP as HTTP 层 (routers/claude_agent.py)
     participant Factory as ClaudeAgentThreadFactory
     participant Pool as AgentRunStatePool
     participant Svc as ClaudeAgentService
@@ -147,20 +151,20 @@ sequenceDiagram
     HTTP->>Factory: run_streaming(request)
     Factory->>Pool: get_or_create(session_id, builder)
     Pool-->>Factory: state (IDLE, intrinsic may be cached)
-
-    Note over Factory,Svc: Phase 1 — Context Assembly
-    Factory->>Svc: assemble_context(request, state=state, queue=queue)
-    Svc->>Queue: put("message-metadata")
-    Svc-->>Factory: _TurnExecution (runner=None)
+    Factory->>Factory: state.mark_running()
 
     Note over Factory: Phase 2 — Runner Creation
     Factory->>Factory: state.runner = state.runner or create_agent_runner()
-    Factory->>Factory: execution.runner = state.runner
+
+    Note over Factory,Svc: Phase 1 — Context Assembly
+    Factory->>Svc: assemble_context(request, state=state, queue=queue, runner=state.runner)
+    Svc-->>Factory: _TurnExecution(run_options, turn_context, runner)
 
     Note over Factory,Svc: Phase 3 — Session Start
-    Factory->>Factory: state.mark_running()
     Factory->>Svc: execute_session(execution)  [as background task]
     activate Svc
+    Svc->>Queue: put("message-metadata")
+    Svc->>Svc: create AgentStreamingCallbacks
     Svc->>Runner: runner.run_streaming(opts, callbacks)
 
     loop 消息流
@@ -170,8 +174,8 @@ sequenceDiagram
         HTTP-->>HTTP: f"data: {json}\n\n"
     end
 
-    Runner->>Queue: put(None) [sentinel]
     Svc->>Queue: emit message-final + finish + persist conversation
+    Svc->>Queue: put(None) [sentinel]
     deactivate Svc
 
     Note over Factory: Phase 4 (per-turn finally) — extrinsic 清空 + mark_idle
@@ -185,19 +189,18 @@ sequenceDiagram
 ### 4.1 worker 不变量（队列 + 后台 Task + StreamingResponse 协作）
 
 > [Sync] 2026-05-10: 与「Claude Agent SDK 交互式工具时序图.md」事件循环泳道呼应，明确 manual 模式下 FastAPI 主 loop 不会被任何一条等待路径独占。
-> [Sync] 2026-05-10: `server.py` 的 `_event_generator` 在 `claude_agent_thread_factory.run_streaming` 上加了**带超时的下一帧等待 + `: keepalive` 注释帧**（默认 15s，可经 `INK_AGENT_SSE_KEEPALIVE_S` 调），既补 nginx/移动网关的 idle 超时缺口，又保留 Factory 端"队列+后台 Task+StreamingResponse"的 worker-non-blocking 不变量；客户端断开会通过 `agent_iter.aclose()` + `CancelledError` 透传到 Factory 的 `_run_lifecycle.finally`，确保 `cancel_pending` 仍清理 `ToolConfirmationStore` 的 Future。
-> [Sync] 2026-05-11: `ClaudeAgentService.run_streaming` 已删除 —— 生产链路改由 `ClaudeAgentThreadFactory._run_lifecycle` 显式驱动 `service.assemble_context` (Phase 1) + `create_agent_runner` (Phase 2) + `service.execute_session` (Phase 3) + 自身 `finally` (Phase 4)。Service 不再有 all-in-one orchestrator。
-> [Sync] 2026-05-12: `state.mark_idle()` 仅在 `lifecycle == RUNNING` 时递增 `turn_count`；Phase 1 / Phase 2 失败（未到达 `mark_running`）的 finally 调用只刷新 `last_active_at`，不会让首轮 Mem0 preflight 误命中"已完成"分支（`state.turn_count == 0` gate）。
+> [Sync] 2026-05-10: Factory 的 queue-drain 层负责下一帧等待和 `: keepalive` 注释帧，既补网关 idle 超时缺口，又保留"队列 + 后台 Task + StreamingResponse"的 worker-non-blocking 不变量；客户端断开会进入 Factory cleanup，确保 pending tool confirmation Future 被取消。
+> [Sync] 2026-05-11: `ClaudeAgentService.run_streaming` 已删除 —— 生产链路改由 `ClaudeAgentThreadFactory.run_streaming` 显式驱动 runner 缓存、`service.assemble_context`、`service.execute_session` 和 per-turn cleanup。Service 不再有 all-in-one orchestrator。
+> [Sync] 2026-05-12: `state.mark_idle()` 仅在 `lifecycle == RUNNING` 时递增 `turn_count`；每轮结束由 Factory 清理 `turn_context` 并取消未完成的工具确认 Future。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
 | 不变量 | 实现位置 | 失效后果 |
 |---|---|---|
-| `execute_task = asyncio.create_task(self._service.execute_session(execution))` 唯一持有 `runner.run_streaming` 协程；它把事件写进**共享的** `asyncio.Queue` 而非直接 yield | `backend/claude_agent/thread_factory.py::_run_lifecycle` | 否则 SDK 错误会沿 `StreamingResponse.body_iterator` 泄漏，BaseHTTPMiddleware 会把 worker 锁住 |
-| `execution.ctx.pending_confirmation_ids` 跟踪每个 `on_tool_confirmation_request` 注册的 `tool_call_id`，Factory 的 `finally` 调 `self._service._store.cancel_pending` 清理（封装泄漏，后续应迁到 Service 公开 API） | `backend/claude_agent/thread_factory.py::_run_lifecycle.finally` | 否则客户端断开后 store 残留 Future，下次同 id 再入会触发 `RuntimeError: already has a pending Future` |
-| `_run_lifecycle` 用 `except BaseException` 兜底但保留 CancelledError 透传（`_exception_group_contains_cancelled`） | 同上 | 否则 SDK 抛 `BaseExceptionGroup(CancelledError)` 时被吞掉，generator 既不收 sentinel 也不传播取消 |
-| `_PureASGIRequestLogger` 替换 `@app.middleware("http")` | `server.py` | 否则 BaseHTTPMiddleware 把 `StreamingResponse.body_iterator` 包进 anyio TaskGroup，与背后挂起的 Future 形成"事件循环 worker 协程槽被占满"现象 |
-| `@app.on_event("shutdown")` 调 `claude_agent_thread_factory.aclose()` | `server.py` | 否则 TTL sweeper 无法干净停止，SDK 子进程句柄留给 GC，shutdown 不会发出 Phase 4 `reason="factory_aclose"` 事件 |
+| `asyncio.create_task(self._service.execute_session(execution))` 唯一持有 `runner.run_streaming` 协程；它把事件写进共享 `asyncio.Queue` 而非直接 yield | `backend/claude_agent/thread_factory.py` | 否则 SDK 错误会沿 `StreamingResponse.body_iterator` 泄漏。 |
+| Factory cleanup 遍历 `turn_context.confirmation_store.pending_ids()` 并取消残留 Future | `backend/claude_agent/thread_factory.py` | 否则客户端断开后 store 残留 Future，下次同 id 再入可能冲突。 |
+| `execute_session` 总是在结束时投递 `None` sentinel | `backend/claude_agent/service.py` | 否则 Factory 无法判断 SSE 流结束。 |
+| 应用 shutdown 调 `claude_agent_thread_factory.aclose()` | `backend/server.py` | 否则 TTL sweeper 无法干净停止，SDK runner 句柄留给 GC。 |
 
 ### 4.2 跨边界 resolve 流向
 
@@ -222,7 +225,7 @@ flowchart LR
 > **宠物动作（动画事件）说明**：当 LLM 调用 `AskUserQuestion` 工具且 `input` 包含
 > `{ act, duration, interaction }` 时，为动画事件确认流程。前端动画层播放完成后
 > 调用 `confirm_tool(tool_call_id, approved=True, answers={trigger, choiceId?, elapsedMs?})`。
-> 详细状态机见 [LLM 驱动动画事件图设计方案](./LLM驱动动画事件图设计方案.md)。
+> 该状态机属于 Pawkeyland 专属动画层，Ink & Memory 不迁移对应设计文档。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -254,24 +257,23 @@ sequenceDiagram
 
 ## 6. TypeScript → Python 关键映射
 
-> 所有 Python 列引用的路径均已迁到 `backend/claude_agent/` 子包；与"假设 `backend/claude_agent_service.py` 还在"的旧文档不同，下表反映 2026-05-11 重构后的真实状态。
+> 所有 Python 列引用的路径均已迁到 `backend/claude_agent/` 子包；旧扁平路径已删除。下表反映当前 Ink & Memory 合同。
 
 | TypeScript（route.ts）| Python（backend/claude_agent/）| 说明 |
 |---|---|---|
-| `createUIMessageStream({ execute })` | `service.assemble_context()` 构造 `_TurnExecution` 载体 + `service.execute_session()` 驱动 runner；二者由 `thread_factory._run_lifecycle` 串联 | Factory 边读 `execution.queue` 边 yield；Service 端没有独立的 AsyncGenerator |
+| `createUIMessageStream({ execute })` | `service.assemble_context()` 构造 `_TurnExecution` 载体 + `service.execute_session()` 驱动 runner；二者由 `thread_factory.run_streaming` 串联 | Factory 边读共享 queue 边 yield SSE frame；Service 端没有独立的 AsyncGenerator |
 | `writer.write(part)` | `queue.put_nowait(event)` | 向**共享** `asyncio.Queue` 写入事件 dict（Factory 和 Service 共用同一队列）|
-| `streamedParts.push({ ...part })` | `response_parts.append(copy.copy(event))` in `_TurnContext._put` | SSE parts 采集（用于持久化） |
-| `extractTextFromParts(...)` | `"".join(full_response_text)` | 响应文本聚合 |
+| `streamedParts.push({ ...part })` | `turn_ctx.collected_parts.append(event)` | 原始 SSE 事件采集（用于持久化转换） |
+| `extractTextFromParts(...)` | `extract_text_from_parts(message_parts)` | 用户 UIMessage parts 文本提取 |
 | `createId("msg")` | `str(uuid4())` | 消息 ID 生成 |
-| `createPendingToolConfirmation(id, name, input)` | `await store.create_pending(...)` | 创建 Future 并阻塞等待 |
+| `createPendingToolConfirmation(id, name, input)` | `await turn_context.confirmation_store.create_pending(...)` | 创建 Future 并阻塞等待 |
 | `resolvePendingToolConfirmation(id, result)` | `store.resolve(id, result)` | 设置 Future 结果 |
-| `req.signal.aborted` / `AbortController` | `task.cancel()` / `asyncio.CancelledError` 经 `_run_lifecycle.finally` 处理 | 中止信号处理 |
-| `setInterval(heartbeat)` | 由 HTTP 层（`server.py::_event_generator`）的 keepalive 注释帧处理 | SSE 心跳由 FastAPI StreamingResponse 管理 |
-| `getConversationById(conversationId)` | `await asyncio.to_thread(load_conversation_by_persona, user_id, persona_id)` in `service.assemble_context` | pre-run 加载现有会话；后续轮在享元短路时跳过 |
-| `shouldResume = !!existingConversation?.claude_session_id` | `should_resume = bool(request.resume and existing_claude_session_id and agent_contract_version matches)` | 续接判断；空 assistant、跨日会话、旧工具 transcript（如已移除的 `mcp__necklace__get_pet_live_context`）都会新开 SDK session |
-| `threadIdForAgent = existingConversation?.claude_session_id ?? conversationId` | `thread_id_for_agent = existing_claude_session_id or None`（首轮不传 thread_id，Runner 自动生成） | 续接 ID |
+| `req.signal.aborted` / `AbortController` | `task.cancel()` / `asyncio.CancelledError` 经 Factory cleanup 处理 | 中止信号处理 |
+| `setInterval(heartbeat)` | Factory queue-drain keepalive 注释帧 | SSE 心跳由 FastAPI StreamingResponse 管理 |
+| `getConversationById(conversationId)` | `database.get_chat_thread(thread_id, user_id)` in route layer | 请求前做 thread ownership 校验。 |
+| `threadIdForAgent` | `AgentRunOptions.thread_id = request.thread_id` | SDK 会话与 Ink & Memory chat thread 对齐。 |
 | `capturedSessionId = result.sessionId` | `captured_session_id = result.session_id` | 捕获 SDK 会话 ID |
-| `onFinish({ responseMessage })` → `createConversation` / `updateConversation` | `await asyncio.to_thread(_persist_conversation, upsert_conversation_by_persona, ...)` in `service.execute_session` | 会话持久化（post-run）|
+| `onFinish({ responseMessage })` → persist message rows | `_persist_turn(...)` calls `database.save_chat_message(...)` in `service.execute_session` | 会话持久化（post-run）|
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -317,63 +319,41 @@ sequenceDiagram
 
 ## 10. 上下文拼接扩展
 
-详见 [`claude-agent上下文拼接设计.md`](./claude-agent上下文拼接设计.md)：系统提示词、用户工具、外部数据注入、动态策略（贴图、动作动画）的完整设计。
-
-> _(Pawkeyland 专属，Ink & Memory 中不适用)_
+详见 [`claude-agent-context-assembly.md`](./claude-agent-context-assembly.md)：`assemble_context` 的上下文来源、接入顺序、过滤规则、失败处理和可测试性要求。
 
 ---
 
 ## 8. 使用示例
 
 ```python
-import asyncio
-import json
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
-from backend.claude_agent import ClaudeAgentThreadFactory, ClaudeAgentRunRequest
+from claude_agent import ClaudeAgentRunRequest
 
-app = FastAPI()
-claude_agent_thread_factory = ClaudeAgentThreadFactory()
 
-@app.on_event("shutdown")
-async def _shutdown_thread_factory() -> None:
-    # Stop the background keepalive sweeper and release every cached
-    # SDK runner subprocess handle on graceful shutdown.
-    await claude_agent_thread_factory.aclose()
+request = ClaudeAgentRunRequest(
+    user_id=str(authenticated_user_id),
+    thread_id=validated_thread_id,
+    resume=should_resume,
+    tool_choice=resolved_tool_choice,
+    model=resolved_model,
+    max_turns=resolved_max_turns,
+    cwd=None,
+    message_id=ui_message_id,
+    message_parts=[
+        {"type": "text", "text": user_or_optimized_planning_prompt}
+    ],
+    attachments=attachment_payloads or None,
+)
 
-@app.post("/api/claude-agent")
-async def claude_agent(user_id: str, thread_id: str, message: str):
-    request = ClaudeAgentRunRequest(
-        user_id=user_id,
-        thread_id=thread_id,
-        message=message,
-        max_turns=10,
-        tool_choice="auto",
-    )
+async for frame in claude_agent_thread_factory.run_streaming(request):
+    yield frame
 
-    async def event_generator():
-        # Factory drives Phase 1 → 4 internally:
-        #   service.assemble_context → create_agent_runner → service.execute_session
-        async for event in claude_agent_thread_factory.run_streaming(request):
-            yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
-
-@app.post("/api/claude-agent/tool-confirm")
-async def tool_confirm(tool_call_id: str, approved: bool, reason: str = ""):
-    ok = claude_agent_thread_factory.confirm_tool(
-        session_id="",  # API symmetry; lookup is by tool_call_id
-        tool_call_id=tool_call_id,
-        approved=approved,
-        reason=reason or None,
-    )
-    if not ok:
-        raise HTTPException(404, f"No pending confirmation for {tool_call_id}")
-    return {"success": True, "toolCallId": tool_call_id, "approved": approved}
+resolved = claude_agent_thread_factory.confirm_tool(
+    session_id=validated_thread_id,
+    tool_call_id=tool_call_id,
+    approved=approved,
+    reason=reason,
+    answers=answers,
+)
 ```
 
 ---
@@ -382,34 +362,35 @@ async def tool_confirm(tool_call_id: str, approved: bool, reason: str = ""):
 
 | 包 / 模块 | 说明 |
 |---|---|
-| `backend.claude_agent` | ClaudeAgentRunner、AgentRunOptions、AgentStreamingCallbacks、ToolEventPayload |
-| `infrastructure.persistence.chat` | `load_conversation`（pre-run 加载会话）、`upsert_conversation`（post-run 持久化） |
-| `asyncio` | asyncio.Queue（事件桥接）、asyncio.Future（工具确认阻塞）、asyncio.Task（后台运行）、asyncio.to_thread（DB 同步操作异步化）|
+| `backend/routers/claude_agent.py` | HTTP request validation, thread ownership checks, attachment sync, and `ClaudeAgentRunRequest` construction |
+| `backend/claude_agent/service.py` | `assemble_context`, `execute_session`, tool confirmation resolution, and message persistence |
+| `backend/claude_agent/context_builder.py` | `system_prompt` and `message_parts` to Claude content block assembly |
+| `backend/claude_agent/thread_factory.py` | Per-thread lock, runner cache, lifecycle observer calls, queue draining, and cleanup |
+| `backend/database.py` | Chat thread/message persistence and recent writing session lookup |
+| `backend/libs/claude_agent_kit/types.py` | `AgentRunOptions`, `AgentStreamingCallbacks`, `ToolEventPayload` |
+| `asyncio` | Queue event bridge, Future-based tool confirmation, background task execution, and `to_thread` DB calls |
 | `uuid` | uuid4() 用于生成 ID |
-| `copy` | copy.copy() 用于 response_parts 快照 |
 | `datetime` | datetime.now(timezone.utc).isoformat() 用于时间戳 |
-| Python 3.12 标准库 | 无第三方新增依赖 |
+| Python 标准库 | 不要求为 Service 设计新增第三方依赖 |
 
 ---
 
 ## 10. Thread Session 扩展（ClaudeAgentThreadFactory）
 
-> 详细设计见 `docs/app/design/claude-agent-thread-session-patterns.md`
+> 详细设计见 [`claude-agent-thread-session-patterns.md`](./claude-agent-thread-session-patterns.md)。
 
 `ClaudeAgentService` 是所有业务逻辑的核心实现，但只暴露两个 phase-aware 方法：`assemble_context`（Phase 1）和 `execute_session`（Phase 3）。
-`ClaudeAgentThreadFactory`（2026-05-11 新增）在其基础上封装了 4 阶段生命周期、并发隔离、Observer 钩子、享元状态池、TTL 后台 sweeper 等能力，并通过显式调用 Service 的两个 phase-aware 方法（而不是任何 all-in-one orchestrator）来串起 SSE 业务逻辑（DB、Mem0、贴纸过滤、session rollover、reasoning 事件、keepalive、message-final）。
-
-> _(Pawkeyland 专属，Ink & Memory 中不适用)_
+`ClaudeAgentThreadFactory`（2026-05-11 新增）在其基础上封装了 4 阶段生命周期、并发隔离、Observer 钩子、享元状态池、TTL 后台 sweeper 等能力，并通过显式调用 Service 的两个 phase-aware 方法（而不是任何 all-in-one orchestrator）来串起 SSE 业务逻辑（DB 持久化、reasoning 事件、keepalive、message-final）。
 
 ### 10.1 与 Service 的职责对比
 
 | 能力 | ClaudeAgentService | ClaudeAgentThreadFactory |
 |------|--------------------|--------------------------|
-| 业务逻辑（DB/Mem0/贴纸/rollover/etc.） | 内置 | ✅ 委托给内部 service 实例 |
+| 业务逻辑（DB 持久化 / reasoning / keepalive / message-final） | 内置 | ✅ 委托给内部 service 实例 |
 | 并发隔离 | 无 | `asyncio.Lock` per `session_id` (FIFO) |
 | 生命周期钩子 | 无 | `SessionObserverRegistry`（8 个钩子） |
 | 状态追踪 | 无状态 | `AgentRunStatePool`（turn_count / IDLE/RUNNING） |
-| 工具确认 | `self._store` 直接管理 | 委托给 `self._service.confirm_tool()` |
+| 工具确认 | 每轮 `_TurnContext.confirmation_store` 管理 | 委托给 `self._service.confirm_tool()` |
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
