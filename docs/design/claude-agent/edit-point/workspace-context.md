@@ -124,11 +124,7 @@ Editor virtual index (.editor/):
   .editor/full_state.json  — complete EditorState snapshot (debug / full analysis)
 
 Reading document content:
-  Option A  read_file(".editor/<resource>.json")   ← intercepted; returns live snapshot
-  Option B  MCP read tools                         ← same live data, finer granularity
-              list_segments / read_segment         ← cells.json equivalent
-              list_comments / read_comment         ← commentors.json equivalent
-              read_session_meta                    ← session.json equivalent
+  read_file(".editor/<resource>.json")   — intercepted; returns live snapshot
 
 Writing document content (requires human confirmation):
   write_segment(cellId, text, reason)   — replace a cell's full text
@@ -150,7 +146,7 @@ Writing document content (requires human confirmation):
 | `{cwd}` | `AgentRunOptions.cwd` | 由 `assemble_context` 中 `get_or_create_workspace(session_id)` 解析得到的绝对路径 |
 
 `<workspace_context>` 块**不依赖** `editor_state` 内容——它只描述机制，实际内容由 Agent 在执行时通过 `read_file` 读取。  
-即使本轮 `AgentRunOptions.editor_state` 为 `None`，块中关于 `.editor/` 的描述仍然有效（Agent 读取时会得到占位符 `{}`，可通过 MCP 工具重试）。
+即使本轮 `AgentRunOptions.editor_state` 为 `None`，块中关于 `.editor/` 的描述仍然有效（Agent 读取时 PreToolUse 钩子条件不满足，直通读取占位符 `{}`）。
 
 ---
 

@@ -230,13 +230,9 @@ EDITOR_RESOURCES: dict[str, str] = {
 
 ```
 Agent 读取文档内容：
-  ┌─ 方式 A（主路径）: read_file(".editor/cells.json")
-  │                    → PreToolUse 拦截 → 临时文件 → 返回实时 EditorState 数据
-  │                    ✅ 无 MCP 额外开销；✅ 始终返回最新状态
-  │
-  └─ 方式 B（等价）: 调用 MCP 工具 list_segments / read_segment
-                     → EditorEngine MCP Server 从 editor_state 内存读取
-                     ✅ 同样返回实时数据，适合细粒度按需读取
+  └─ 唯一路径: read_file(".editor/cells.json")
+               → PreToolUse 拦截 → 临时文件 → 返回实时 EditorState 数据
+               ✅ 无 MCP 额外开销；✅ 始终返回最新状态
 
 Agent 修改文档内容：
   └─ 唯一路径: 调用 MCP 工具 write_segment / delete_segment
