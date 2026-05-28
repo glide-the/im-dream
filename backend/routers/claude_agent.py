@@ -5,6 +5,7 @@
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
 # [Sync] 2026-05-27: ClaudeAgentRequestBody.tool_choice uses AliasChoices("tool_choice","toolChoice") so frontend camelCase is accepted.
+# [Sync] 2026-05-28: remove planning_mode field and prompt_optimizer integration (unrelated code).
 
 import base64
 import logging
@@ -18,7 +19,6 @@ from pydantic import AliasChoices, BaseModel, Field
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
-from claude_agent.prompt_optimizer import apply_prompt_optimizer
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.server.workspace import get_or_create_workspace
 from libs.claude_agent_kit.server.workspace_file_sync import (
@@ -79,7 +79,6 @@ class ClaudeAgentRequestBody(BaseModel):
     id: Optional[str] = None
     message: Any
     resume: bool = False
-    planning_mode: bool = False
     tool_choice: str = Field(default="auto", validation_alias=AliasChoices("tool_choice", "toolChoice"))
     chatModel: Optional[dict] = None
     model: Optional[str] = None
@@ -134,21 +133,6 @@ async def claude_agent_stream(
 
     _msg_dict = body.message if isinstance(body.message, dict) else None
     message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
-
-    # Planning mode: wrap the raw task in the Expert Prompt Architect template
-    # so the agent first refines the requirement before planning.
-    if body.planning_mode:
-        optimized_text = apply_prompt_optimizer(message_text)
-        # Replace any existing text parts with the optimized text, keeping
-        # non-text parts (e.g. file/attachment parts) intact.
-        non_text_parts = [
-            p for p in (message_parts or [])
-            if not (isinstance(p, dict) and p.get("type") == "text")
-        ]
-        message_parts = [{"type": "text", "text": optimized_text}] + non_text_parts
-        logger.debug(
-            "[Claude Agent API] planning_mode: wrapped task in Expert Prompt Architect template"
-        )
 
     # Process attachments: download from file storage and sync to workspace.
     attachment_payloads: list[AttachmentPayload] = []
