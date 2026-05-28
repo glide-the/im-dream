@@ -220,8 +220,9 @@ class TestEditorIndexInit(unittest.TestCase):
         editor_dir = ws / ".editor"
         for stem in EDITOR_RESOURCES:
             content = (editor_dir / f"{stem}.json").read_text(encoding="utf-8")
-            self.assertTrue(
-                content.strip() in ("{}", "{}"),
+            self.assertEqual(
+                content.strip(),
+                "{}",
                 f".editor/{stem}.json should contain empty JSON, got {content!r}",
             )
 
