@@ -73,6 +73,7 @@ from ..types import (
 from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
+from .editor_tool import allowed_editor_tool_names
 from .sdk_env import apply_project_sdk_runtime_options, apply_user_sdk_env_to_options
 
 logger = logging.getLogger(__name__)
@@ -96,10 +97,12 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "mcp__user__touch_animation",
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
+    *allowed_editor_tool_names(),
 ]
 _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
+_EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 
 # Tools that must always go through the on_tool_confirmation_request side-channel
 # regardless of tool_choice mode (i.e. even in "auto" mode).  These are
@@ -478,6 +481,17 @@ def _memory_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpS
         env=_stdio_env(extra_env=extra_env, include_memory_config=True),
     )
 
+
+def _editor_mcp_stdio_config(editor_state_file: str) -> McpStdioServerConfig:
+    """Build the external stdio MCP config for the EditorState read-only server."""
+
+    return McpStdioServerConfig(
+        type="stdio",
+        command=sys.executable,
+        args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
+        env=_stdio_env(extra_env={"INK_EDITOR_STATE_FILE": editor_state_file}),
+    )
+
 # ---------------------------------------------------------------------------
 # Async helper
 # ---------------------------------------------------------------------------
@@ -739,6 +753,49 @@ class ClaudeAgentRunner:
                 "input": tool_input,
             }
 
+            # ----------------------------------------------------------
+            # .editor/ virtual index interception (Read tool only)
+            # When the agent reads a file under .editor/, redirect to a
+            # tempfile populated with live editor_state data so the agent
+            # gets real content instead of the placeholder `{}`.
+            # This must run before the tool_choice / manual-confirm checks
+            # so virtual-index reads are always served in all modes.
+            # ----------------------------------------------------------
+            if tool_name == "Read" and opts.editor_state is not None:
+                raw_path: str = tool_input.get("file_path", "")
+                # Normalise to the path portion relative to cwd when absolute.
+                try:
+                    from .editor_index import is_editor_index_path, get_editor_resource_data
+                    if is_editor_index_path(raw_path):
+                        resource_data = get_editor_resource_data(raw_path, opts.editor_state)
+                        with tempfile.NamedTemporaryFile(
+                            mode="w",
+                            suffix=".json",
+                            delete=False,
+                            prefix="editor_",
+                            encoding="utf-8",
+                        ) as tmp:
+                            json.dump(resource_data, tmp, ensure_ascii=False)
+                            tmp_path = tmp.name
+                        logger.debug(
+                            "PreToolUse: redirected .editor read %r → %r",
+                            raw_path,
+                            tmp_path,
+                        )
+                        return HookJSONOutput(
+                            hookSpecificOutput={
+                                "hookEventName": "PreToolUse",
+                                "permissionDecision": "allow",
+                                "updatedInput": {"file_path": tmp_path},
+                            }
+                        )
+                except Exception:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to intercept .editor/ read for %r; falling through.",
+                        raw_path,
+                        exc_info=True,
+                    )
+
             # In auto mode, let all tools run immediately EXCEPT
             # _ALWAYS_CONFIRM_TOOL_NAMES (AskUserQuestion and equivalents).
             # Those must collect user answers through the frontend form before
@@ -867,6 +924,35 @@ class ClaudeAgentRunner:
             tool.startswith(_NECKLACE_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):
             mcp_servers["necklace"] = _necklace_mcp_stdio_config(mcp_env)
+
+        # Write editor_state to a tempfile so the editor MCP subprocess can
+        # read it.  The file is created here (before sdk_options / try block)
+        # and cleaned up in the finally block further below.
+        _editor_state_file: Optional[tempfile.NamedTemporaryFile] = None  # type: ignore[type-arg]
+        _editor_state_file_path: Optional[str] = None
+        if (
+            opts.editor_state is not None
+            and any(
+                tool.startswith(_EDITOR_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
+            )
+        ):
+            try:
+                _editor_state_file = tempfile.NamedTemporaryFile(
+                    mode="w",
+                    suffix=".json",
+                    delete=False,
+                    prefix="editor_state_",
+                    encoding="utf-8",
+                )
+                json.dump(opts.editor_state, _editor_state_file, ensure_ascii=False)
+                _editor_state_file.flush()
+                _editor_state_file_path = _editor_state_file.name
+                _editor_state_file.close()
+                _editor_state_file = None  # file is closed, track path only
+                mcp_servers["editor"] = _editor_mcp_stdio_config(_editor_state_file_path)
+                logger.debug("Editor MCP enabled; state file: %s", _editor_state_file_path)
+            except Exception:  # noqa: BLE001
+                logger.warning("Failed to create editor_state tempfile; skipping editor MCP.", exc_info=True)
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = apply_project_sdk_runtime_options(
@@ -1053,6 +1139,13 @@ class ClaudeAgentRunner:
                 _stderr_buf.close()
             except Exception:  # noqa: BLE001
                 pass
+            # Clean up the editor_state tempfile if it was created.
+            if _editor_state_file_path:
+                try:
+                    import os as _os
+                    _os.unlink(_editor_state_file_path)
+                except Exception:  # noqa: BLE001
+                    pass
         return AgentRunResult(
             full_text=full_text,  # type: ignore[possibly-undefined]
             session_id=current_session_id,

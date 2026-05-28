@@ -290,3 +290,107 @@ Agent 修改文档内容：
 |------|----------|
 | `workspace-adapter.md`（本文档） | Agent 调用 `read_file(".editor/cells.json")` 时，数据从哪里来？ |
 | [`workspace-context.md`](./workspace-context.md) | Agent 怎么知道 `.editor/` 目录存在，以及如何与工作空间交互？ |
+
+---
+
+## 9. `.claude/settings.json` 与虚拟索引的设计关系
+
+### 9.1 模板同步机制
+
+每次 `workspace.py::init_workspace(session_id)` 被调用时，`_copy_template_assets()` 会将项目根目录的 `.claude/` 内容（包括 `settings.json`、`hooks/`、`commands/` 等）同步到 `{workspace}/.claude/`。
+
+```
+项目根 .claude/settings.json  ──init_workspace()──▶  {workspace}/.claude/settings.json
+                                  (每次都刷新，保证最新)
+```
+
+这意味着：**`.claude/settings.json` 的项目级模板是所有 Agent 会话的统一配置来源**。对模板的修改会在下一次 workspace 初始化时自动生效。
+
+> 参见 `claude-sdk-env-design.md` §5.5：Claude Code 通过 `setting-sources=project` 仅加载项目级 settings，不读取用户目录 settings。
+
+### 9.2 Hook 执行顺序与读取路径
+
+`settings.json` 中的 `hooks` 配置（shell 脚本）由 **Claude Code CLI 子进程**执行，Python SDK 的 `PreToolUse` 回调由 **claude_code_sdk 层**注册。两者执行顺序为：
+
+```
+Agent 发出 Read { file_path: ".editor/cells.json" }
+  │
+  ├── ① settings.json shell hooks（PreToolUse matcher: "Read|Edit|Write|View"）
+  │       └── protect-files.sh 检查路径
+  │               .editor/ 不在受保护列表 → exit 0（允许通过）
+  │
+  └── ② Python SDK PreToolUse hook（agent_runner.py）
+              is_editor_index_path(".editor/cells.json") → True
+              → 写入临时文件并重定向路径
+              → Agent 读取到实时 EditorState 数据
+```
+
+**关键约束**：`.editor/` 路径**必须不出现在** `protect-files.sh` 的保护列表中，否则 shell hook 会在 Python hook 运行之前以 `exit 2` 拦截 Read，导致虚拟索引失效。
+
+### 9.3 `.editor/` 写入保护设计
+
+`.editor/` 是虚拟只读目录。Agent 直接通过 `Edit` / `Write` 工具向 `.editor/*.json` 写入不会更新 EditorState（占位符是永久空 `{}`，写入的内容在下次运行时被重置），属于静默无效操作，可能误导 Agent 认为修改已生效。
+
+为此，在 `.claude/settings.json` 中通过 `permissions.deny` 在 **Claude Code 设置层**明确拒绝对 `.editor/` 的写操作：
+
+```json
+{
+  "permissions": {
+    "deny": [
+      "Edit(.editor/**)",
+      "Write(.editor/**)",
+      "MultiEdit(.editor/**)"
+    ]
+  }
+}
+```
+
+设计分层如下：
+
+| 层级 | 机制 | 作用范围 |
+|------|------|---------|
+| Claude Code settings 层 | `permissions.deny` | 拒绝 Edit/Write/MultiEdit 到 `.editor/**` |
+| Claude Code CLI shell hook 层 | `protect-files.sh`（`Read\|Edit\|Write\|View`） | 拒绝对 `.env`、`.git/`、`.claude/` 等敏感路径的一切操作 |
+| Python SDK hook 层 | `agent_runner.py` PreToolUse 回调 | 拦截 `Read` 到 `.editor/` → 重定向至临时文件 |
+
+三层协同保证：
+- ✅ `read_file(".editor/cells.json")` → Python hook 重定向 → 返回实时数据
+- ✅ `edit_file(".editor/cells.json", ...)` → settings.json deny → 被拒绝，Agent 收到明确错误
+- ✅ `.claude/settings.json` 本身 → protect-files.sh → 被保护，Agent 无法自改配置
+
+### 9.4 工具权限管理分工
+
+Editor MCP 只读工具（`mcp__editor__list_segments` 等）的授权**在 Python 层**管理，而非通过 `settings.json`：
+
+| 机制 | 管理层 | 特点 |
+|------|--------|------|
+| `AgentRunOptions.allowed_tools` | Python runner 层 | 动态，每次请求可按业务逻辑控制 |
+| `settings.json` `permissions.allow` | Claude Code CLI 层 | 静态，对所有会话一致生效 |
+
+设计决策：Editor MCP 工具通过 Python 层 `allowed_tools` 授权，而不写入 `settings.json`。理由：
+
+1. `settings.json` 是全局模板，不适合控制依赖运行时注入的 `editor_state` 的工具
+2. 写工具（`write_segment` 等）需要在 `_ALWAYS_CONFIRM_TOOL_NAMES` 中注册，属于 runner 层逻辑
+3. 未来如需按会话类型区分（纯对话 vs 文档编辑），只需在 service 层决定是否传入 `editor_state` 和对应的工具列表，无需修改静态模板
+
+### 9.5 生命周期总览
+
+```
+服务启动
+  └─ workspace.py::init_workspace(session_id)
+       ├─ _copy_template_assets()
+       │    └─ 同步项目 .claude/settings.json → {workspace}/.claude/settings.json
+       │         settings.json 包含：
+       │           · hooks: protect-files.sh（保护 .env/.git/.claude/，不包含 .editor/）
+       │           · permissions.deny: Edit/Write/MultiEdit(.editor/**)
+       └─ _init_editor_index(workspace)       [★ 新增]
+            └─ 创建 .editor/ 占位符目录 + README.md
+
+Agent 运行（每次请求）
+  ├─ service.py::assemble_context()
+  │    └─ 将 editor_state 注入 AgentRunOptions
+  └─ agent_runner.py::run_streaming()
+       ├─ 构建 ClaudeCodeOptions（setting-sources=project → 读取 workspace/.claude/settings.json）
+       ├─ 注册 Python PreToolUse hook（.editor/ Read 重定向）
+       └─ 注册 editor MCP 子进程（list_segments / read_segment 等）
+```

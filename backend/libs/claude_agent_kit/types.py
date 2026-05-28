@@ -161,6 +161,14 @@ class AgentRunOptions:
     # Deprecated: attachments should be passed to build_user_message instead.
     # Kept for backward compatibility; ignored by runner when user_message is a list.
     attachments: Optional[list[AttachmentPayload]] = None
+    # Current EditorState snapshot for the session.  When set, the runner:
+    #   (a) intercepts ``Read`` tool calls targeting ``.editor/<resource>.json``
+    #       and redirects them to a temporary file containing the extracted
+    #       resource slice (see ``editor_index.py``);
+    #   (b) starts the editor MCP subprocess and passes the state via
+    #       INK_EDITOR_STATE_FILE so the MCP read tools can serve the same data.
+    # None means no editor context is active (e.g. pure chat turns).
+    editor_state: Optional[dict[str, Any]] = None
 
 
 @dataclass

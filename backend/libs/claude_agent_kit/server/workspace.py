@@ -8,7 +8,7 @@
 # [Sync] 2026-05-08: refresh project .claude template files on every init while preserving runtime skills.
 # [Sync] 2026-05-08: call sync_skills_symlinks() at the end of init_workspace so skills are linked on first init.
 # [Sync] 2026-05-09: seed workspace/skills/ from project .claude/skills/ on init so bundled skills are available.
-# [Sync] 2026-05-25: add file management API (list/read/write/delete/move) ported from claude-agent-next-kit workspace.ts.
+# [Sync] 2026-05-28: add _init_editor_index() — create .editor/ virtual index placeholder directory.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -18,6 +18,7 @@ Each conversation gets an isolated working directory under the workspace root:
         files/          – user-uploaded or agent-produced files
         logs/           – agent execution logs
         skills/         – installable skill packages / files
+        .editor/        – EditorState virtual index (placeholder files; see workspace-adapter.md)
         .claude/        – Claude project config (synced from repo template)
         .claude/skills/ – symlinks → ../skills/* (managed by workspace_file_sync)
 
@@ -119,6 +120,9 @@ def init_workspace(session_id: str) -> Path:
     # Sync skills symlinks on every init (create on first call, refresh on subsequent calls).
     from .workspace_file_sync import sync_skills_symlinks  # local import avoids circular
     sync_skills_symlinks(workspace)
+
+    # Initialise the .editor/ virtual index placeholder directory.
+    _init_editor_index(workspace)
 
     logger.debug("Workspace initialised: %s", workspace)
     return workspace
@@ -225,6 +229,74 @@ def _seed_workspace_skills(project_root: Path, workspace: Path) -> None:
                 "Failed to seed skill %s to %s; skipping.",
                 src_entry,
                 dst_entry,
+                exc_info=True,
+            )
+
+
+_EDITOR_INDEX_README = """\
+# .editor/ — EditorState 虚拟索引目录
+
+此目录下的 JSON 文件是**占位符**，磁盘内容始终为空 `{}`。
+
+当 Agent 调用 `read_file(".editor/<resource>.json")` 时，Python SDK 的 PreToolUse
+钩子会将读取路径重定向到一个临时文件，该临时文件在运行时由当前 `editor_state` 动态填充。
+
+等价的 MCP 工具读取方式：
+  - `list_segments` / `read_segment`   → cells.json 等效
+  - `list_comments` / `read_comment`   → commentors.json 等效
+  - `read_session_meta`                → session.json 等效
+
+⚠️ 禁止向此目录写入文件。写入操作被 Claude Code settings.json `permissions.deny` 拒绝，
+   即使绕过限制写入也不会影响 EditorState（占位符不是真实数据源）。
+"""
+
+# Placeholder content for every .editor/<resource>.json file.
+_EDITOR_PLACEHOLDER = "{}\n"
+
+# Ordered list of virtual resource filenames (stems used in EDITOR_RESOURCES).
+_EDITOR_PLACEHOLDER_STEMS: tuple[str, ...] = (
+    "cells",
+    "commentors",
+    "tasks",
+    "session",
+    "full_state",
+)
+
+
+def _init_editor_index(workspace: Path) -> None:
+    """Create (or repair) the ``.editor/`` virtual index directory.
+
+    - Creates ``.editor/`` (idempotent — ``exist_ok=True``).
+    - Writes (or refreshes) ``.editor/README.md`` so the Agent always sees
+      current instructions.
+    - Writes placeholder ``{}\n`` for each resource JSON on **first init
+      only** — existing placeholder files are preserved so accidental early
+      writes are not silently restored.
+
+    This function is called by :func:`init_workspace` after the standard
+    ``files/``, ``logs/``, ``skills/`` subdirectories are created.
+    """
+    editor_dir = workspace / ".editor"
+    editor_dir.mkdir(exist_ok=True)
+
+    # Always refresh README so instructions stay in sync with the template.
+    try:
+        (editor_dir / "README.md").write_text(_EDITOR_INDEX_README, encoding="utf-8")
+    except Exception:  # noqa: BLE001
+        logger.warning("Failed to write .editor/README.md; skipping.", exc_info=True)
+
+    # Write placeholder JSON files (skip if already present).
+    for stem in _EDITOR_PLACEHOLDER_STEMS:
+        placeholder = editor_dir / f"{stem}.json"
+        if placeholder.exists():
+            continue
+        try:
+            placeholder.write_text(_EDITOR_PLACEHOLDER, encoding="utf-8")
+            logger.debug("Created .editor/%s.json placeholder", stem)
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Failed to create .editor/%s.json placeholder; skipping.",
+                stem,
                 exc_info=True,
             )
 

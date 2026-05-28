@@ -126,6 +126,8 @@ class ClaudeAgentRunRequest:
     message_parts: Optional[list] = None
     # File attachments to be passed as content blocks to Claude.
     attachments: Optional[list[AttachmentPayload]] = None
+    # Current EditorState for the .editor/ virtual index (optional).
+    editor_state: Optional[dict[str, Any]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -263,6 +265,7 @@ class ClaudeAgentService:
             system_prompt=state.system_prompt,
             mcp_env=user_env_vars,
             user_sdk_env=user_env_vars,
+            editor_state=request.editor_state,
         )
 
         confirmation_store = ToolConfirmationStore()
