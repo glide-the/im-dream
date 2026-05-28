@@ -56,8 +56,11 @@ Editor virtual index (.editor/):
   .editor/full_state.json  — complete EditorState snapshot (debug / full analysis)
 
 Reading document content (choose either):
-  Option A  read_file(".editor/cells.json")        — intercepted; returns live data
-  Option B  list_segments / read_segment (MCP)     — same live data, finer granularity
+  Option A  read_file(".editor/<resource>.json")   — intercepted; returns live snapshot
+  Option B  MCP read tools (same live data, finer granularity):
+              list_segments / read_segment         — cells.json equivalent
+              list_comments / read_comment         — commentors.json equivalent
+              read_session_meta                    — session.json equivalent
 
 Writing document content (all require human confirmation):
   write_segment(cellId, text, reason)              — replace a cell's full text
