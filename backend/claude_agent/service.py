@@ -240,6 +240,17 @@ class ClaudeAgentService:
             cwd = str(workspace_path)
             state.with_cwd(cwd)
 
+        # Load user-configured env vars (skills / MCP environment) from system config.
+        user_env_vars: dict[str, str] = {}
+        try:
+            import database as _db
+            sys_cfg = _db.get_system_config(int(request.user_id))
+            raw_env = sys_cfg.get("env_vars") or {}
+            if isinstance(raw_env, dict):
+                user_env_vars = {str(k).strip(): str(v) for k, v in raw_env.items() if str(k).strip() and v is not None}
+        except Exception:
+            logger.warning("Failed to load user env_vars from system_config; skipping.")
+
         run_options = AgentRunOptions(
             thread_id=state.session_id,
             user_message=user_message_content,
@@ -249,6 +260,8 @@ class ClaudeAgentService:
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
+            mcp_env=user_env_vars,
+            user_sdk_env=user_env_vars,
         )
 
         confirmation_store = ToolConfirmationStore()

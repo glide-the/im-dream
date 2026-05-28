@@ -102,6 +102,7 @@ def create_tables(db):
       selected_state TEXT,
       timezone TEXT,
       first_login_completed INTEGER DEFAULT 0,
+      system_config_json TEXT,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     )
@@ -109,6 +110,11 @@ def create_tables(db):
 
     try:
         db.execute("ALTER TABLE user_preferences ADD COLUMN timezone TEXT")
+    except Exception:
+        pass
+
+    try:
+        db.execute("ALTER TABLE user_preferences ADD COLUMN system_config_json TEXT")
     except Exception:
         pass
 
@@ -287,12 +293,20 @@ def create_tables(db):
             logger.warning("Unexpected error adding parts column: %s", exc)
     # Backfill: copy parts_json → parts for rows that still have the old column populated.
     # For rows with no parts_json, build a text part from the content column if it exists.
+    # Both columns (parts_json, content) may not exist on new or already-migrated DBs —
+    # skip silently in that case, matching the pattern used by the DROP COLUMN blocks below.
     try:
         db.execute("""
             UPDATE chat_message
             SET parts = parts_json
             WHERE parts_json IS NOT NULL AND parts = '[]'
         """)
+        db.commit()
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "no such column" not in msg and "unknown column" not in msg:
+            logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
+    try:
         # content column may still exist on old DBs — use it as fallback text source.
         db.execute("""
             UPDATE chat_message
@@ -301,8 +315,10 @@ def create_tables(db):
               AND content IS NOT NULL
         """)
         db.commit()
-    except Exception as exc:
-        logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
+    except sqlite3.OperationalError as exc:
+        msg = str(exc).lower()
+        if "no such column" not in msg and "unknown column" not in msg:
+            logger.warning("Parts backfill migration warning (non-fatal): %s", exc)
     # Migration: drop legacy content column (not in better-chatbot schema).
     # SQLite supports DROP COLUMN since 3.35.0 (2021); skip gracefully on older builds.
     try:
@@ -1598,6 +1614,52 @@ def get_preferences(user_id: int):
         return None
     finally:
         db.close()
+
+def get_system_config(user_id: int) -> dict:
+    """Get per-user system config (model, provider, system_prompt, workspace_enabled, theme, env_vars).
+
+    Returns an empty dict when no config has been saved yet.
+    """
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT system_config_json FROM user_preferences WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if row and row["system_config_json"]:
+            return json.loads(row["system_config_json"])
+        return {}
+    finally:
+        db.close()
+
+
+def save_system_config(user_id: int, patch: dict) -> None:
+    """Merge *patch* into the stored system config for *user_id*.
+
+    Unknown keys are preserved so that future fields are not dropped on save.
+    """
+    db = get_db()
+    try:
+        existing = db.execute(
+            "SELECT system_config_json FROM user_preferences WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if existing:
+            current = json.loads(existing["system_config_json"]) if existing["system_config_json"] else {}
+            current.update(patch)
+            db.execute(
+                "UPDATE user_preferences SET system_config_json = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?",
+                (json.dumps(current), user_id),
+            )
+        else:
+            db.execute(
+                "INSERT INTO user_preferences (user_id, system_config_json) VALUES (?, ?)",
+                (user_id, json.dumps(patch)),
+            )
+        db.commit()
+    finally:
+        db.close()
+
 
 def set_first_login_completed(user_id: int):
     """Mark user's first login as completed."""

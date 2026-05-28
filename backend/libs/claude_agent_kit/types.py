@@ -154,6 +154,10 @@ class AgentRunOptions:
     turn_runtime: dict[str, Any] = field(default_factory=dict)
     # Environment passed to project-owned MCP subprocesses for current-session bindings.
     mcp_env: dict[str, str] = field(default_factory=dict)
+    # User-scoped SDK env vars from system_config.env_vars.
+    # Allowlist-filtered before injection into ClaudeCodeOptions.env.
+    # Priority: higher than backend/.env, lower than explicit options.env.
+    user_sdk_env: dict[str, str] = field(default_factory=dict)
     # Deprecated: attachments should be passed to build_user_message instead.
     # Kept for backward compatibility; ignored by runner when user_message is a list.
     attachments: Optional[list[AttachmentPayload]] = None

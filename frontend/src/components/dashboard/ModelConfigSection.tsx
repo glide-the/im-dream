@@ -6,12 +6,18 @@ const API_BASE = '/ink-and-memory';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
 
+interface EnvVar {
+  key: string;
+  value: string;
+}
+
 interface SystemConfigData {
   provider?: string;
   model?: string;
   system_prompt?: string;
   workspace_enabled?: boolean;
   theme?: ThemeMode;
+  env_vars?: Record<string, string>;
 }
 
 const THEME_OPTIONS: { mode: ThemeMode; label: string; Icon: typeof IconSun }[] = [
@@ -52,6 +58,9 @@ export default function ModelConfigSection() {
   const [dirty, setDirty] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [envVars, setEnvVars] = useState<EnvVar[]>([]);
+  const [envVarsDirty, setEnvVarsDirty] = useState(false);
+  const [envVarsSaving, setEnvVarsSaving] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -69,7 +78,10 @@ export default function ModelConfigSection() {
         setWorkspaceMode(config.workspace_enabled ?? true);
         const match = MODEL_OPTIONS.find((option) => option.model === config.model);
         setSelectedModel(match?.value ?? 'auto');
+        const savedEnvVars = config.env_vars ?? {};
+        setEnvVars(Object.entries(savedEnvVars).map(([key, value]) => ({ key, value })));
         setDirty(false);
+        setEnvVarsDirty(false);
       } catch {
         // ignore fetch errors
       } finally {
@@ -139,6 +151,39 @@ export default function ModelConfigSection() {
     setSystemPrompt(DEFAULT_SYSTEM_PROMPT);
     setDirty(true);
   }, []);
+
+  const handleAddEnvVar = useCallback(() => {
+    setEnvVars((prev) => [...prev, { key: '', value: '' }]);
+    setEnvVarsDirty(true);
+  }, []);
+
+  const handleRemoveEnvVar = useCallback((index: number) => {
+    setEnvVars((prev) => prev.filter((_, i) => i !== index));
+    setEnvVarsDirty(true);
+  }, []);
+
+  const handleUpdateEnvVar = useCallback((index: number, field: 'key' | 'value', val: string) => {
+    setEnvVars((prev) => prev.map((item, i) => i === index ? { ...item, [field]: val } : item));
+    setEnvVarsDirty(true);
+  }, []);
+
+  const handleSaveEnvVars = useCallback(async () => {
+    const record: Record<string, string> = {};
+    for (const { key, value } of envVars) {
+      if (key.trim()) record[key.trim()] = value.trim();
+    }
+    setEnvVarsSaving(true);
+    try {
+      await fetch(`${API_BASE}/api/system-config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
+        body: JSON.stringify({ env_vars: record }),
+      });
+      setEnvVarsDirty(false);
+    } finally {
+      setEnvVarsSaving(false);
+    }
+  }, [envVars]);
 
   const fieldStyle: React.CSSProperties = {
     width: '100%',
@@ -291,6 +336,88 @@ export default function ModelConfigSection() {
             }}
           />
         </button>
+      </div>
+
+      {/* Environment Variables */}
+      <div>
+        <p style={{ margin: '0 0 0.3rem', fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+          环境变量 / Environment Variables
+        </p>
+        <p style={{ margin: '0 0 0.75rem', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+          为 Skills / MCP 工具配置运行时环境变量。
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+          {envVars.map((ev, i) => (
+            <div key={i} style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <input
+                type="text"
+                placeholder="KEY"
+                value={ev.key}
+                onChange={(e) => handleUpdateEnvVar(i, 'key', e.target.value)}
+                style={{ ...fieldStyle, flex: 1, fontFamily: 'monospace', fontSize: '0.82rem' }}
+              />
+              <input
+                type="password"
+                placeholder="value"
+                value={ev.value}
+                onChange={(e) => handleUpdateEnvVar(i, 'value', e.target.value)}
+                style={{ ...fieldStyle, flex: 2, fontFamily: 'monospace', fontSize: '0.82rem' }}
+              />
+              <button
+                type="button"
+                onClick={() => handleRemoveEnvVar(i)}
+                style={{
+                  flexShrink: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--color-text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '1rem',
+                  padding: '0.25rem 0.4rem',
+                  borderRadius: '6px',
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+          <button
+            type="button"
+            onClick={handleAddEnvVar}
+            style={{
+              border: '1px dashed var(--color-border-paper)',
+              borderRadius: '8px',
+              padding: '0.4rem 0.85rem',
+              background: 'transparent',
+              color: 'var(--color-text-muted)',
+              fontSize: '0.82rem',
+              cursor: 'pointer',
+            }}
+          >
+            + 添加变量
+          </button>
+          <button
+            type="button"
+            disabled={!envVarsDirty || envVarsSaving}
+            onClick={handleSaveEnvVars}
+            style={{
+              border: 'none',
+              borderRadius: '999px',
+              padding: '0.4rem 1rem',
+              background: 'var(--color-action-link)',
+              color: 'var(--color-text-on-action)',
+              fontWeight: 600,
+              fontSize: '0.82rem',
+              cursor: !envVarsDirty || envVarsSaving ? 'not-allowed' : 'pointer',
+              opacity: !envVarsDirty || envVarsSaving ? 0.55 : 1,
+              transition: 'opacity 0.2s ease',
+            }}
+          >
+            {envVarsSaving ? '保存中…' : '保存'}
+          </button>
+        </div>
       </div>
     </div>
   );
