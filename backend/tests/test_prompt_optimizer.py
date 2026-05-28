@@ -78,13 +78,13 @@ class TestApplyPromptOptimizer:
     def test_result_is_string(self):
         assert isinstance(apply_prompt_optimizer("any"), str)
 
-    def test_empty_task_produces_valid_string(self):
-        """Empty task should not raise; the template is still returned."""
+    def test_empty_string_task_produces_valid_string(self):
+        """Empty string task should not raise; the template is still returned."""
         result = apply_prompt_optimizer("")
         assert isinstance(result, str)
         assert "{{task}}" not in result
 
-    def test_falsy_none_task_produces_valid_string(self):
+    def test_falsy_empty_task_user_requirement_present(self):
         """None-like value (empty string after guard) must not crash."""
         result = apply_prompt_optimizer("")
         assert "USER REQUIREMENT:" in result

@@ -282,25 +282,25 @@ def _init_editor_index(workspace: Path) -> None:
     # fails (e.g. workspace does not exist yet on this call), fall back to
     # the unresolved path — `mkdir(exist_ok=True)` will create both.
     try:
+        workspace_root_abs = get_workspace_root().resolve()
         workspace_abs = workspace.resolve()
-        editor_dir_abs = (workspace_abs / ".editor").resolve()
-        if not (
-            str(editor_dir_abs) == str(workspace_abs / ".editor")
-            or str(editor_dir_abs).startswith(str(workspace_abs) + os.sep)
-        ):
+        # Confirm the workspace itself is inside the configured root.
+        if not workspace_abs.is_relative_to(workspace_root_abs):
             logger.warning(
-                "_init_editor_index: resolved .editor/ path %r is outside workspace %r; aborting.",
-                editor_dir_abs,
+                "_init_editor_index: workspace %r is outside workspace root %r; aborting.",
                 workspace_abs,
+                workspace_root_abs,
             )
             return
-        editor_dir = editor_dir_abs
+        # .editor/ is a fixed subdirectory name — no further user input involved.
+        editor_dir_abs = workspace_abs / ".editor"
     except Exception:  # noqa: BLE001
         logger.warning(
             "_init_editor_index: could not resolve workspace path; aborting to avoid writing to unverified path.",
             exc_info=True,
         )
         return
+    editor_dir = editor_dir_abs
     editor_dir.mkdir(exist_ok=True)
 
     # Always refresh README so instructions stay in sync with the template.
