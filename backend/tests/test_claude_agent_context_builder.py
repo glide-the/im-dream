@@ -15,6 +15,7 @@ import sys
 import unittest
 import unittest.mock
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
@@ -354,8 +355,8 @@ class TestBuildWorkspaceContextBlock(unittest.TestCase):
     def test_returns_empty_string_for_empty_cwd(self):
         self.assertEqual(build_workspace_context_block(""), "")
 
-    def test_returns_empty_string_for_none_via_falsy(self):
-        # build_workspace_context_block takes str; guard against "" as falsy
+    def test_returns_empty_string_for_empty_string(self):
+        # build_workspace_context_block treats "" as falsy → returns ""
         self.assertEqual(build_workspace_context_block(""), "")
 
     def test_substitutes_cwd_in_output(self):
@@ -393,10 +394,10 @@ class TestBuildUserMessageWorkspaceContext(unittest.TestCase):
     def setUp(self):
         self.builder = ClaudeAgentContextBuilder()
 
-    def _parts(self, text: str) -> list:
+    def _parts(self, text: str) -> list[dict[str, Any]]:
         return [{"type": "text", "text": text}]
 
-    def _text_blocks(self, blocks):
+    def _text_blocks(self, blocks: list[dict[str, Any]]) -> str:
         return "\n".join(b["text"] for b in blocks if b.get("type") == "text")
 
     def test_no_workspace_context_when_cwd_not_provided(self):
