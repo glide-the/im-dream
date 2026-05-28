@@ -1,13 +1,17 @@
 # [Input] Consume get_workspace_root, init_workspace, get_or_create_workspace
 #         from backend/claude_agent/workspace.py.
 # [Output] Validate workspace root resolution, skeleton creation, idempotency,
-#          path traversal rejection, and AGENT_CWD env var handling.
+#          path traversal rejection, AGENT_CWD env var handling, and .editor/
+#          virtual index initialisation (Hook execution order & read path).
 # [Pos] test node in backend/tests
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_workspace_manager.py.
 #                    Removed: skills/symlink tests (workspace_file_sync not migrated),
 #                    resolve_safe_path tests (not in simplified workspace.py).
 #                    Adapted: module path backend/claude_agent/workspace.py,
 #                    default workspace dir renamed ink-agent-workspaces.
+# [Sync] 2026-05-28: add TestEditorIndexInit — covers .editor/ placeholder directory
+#                    creation driven by _init_editor_index(), which is the workspace
+#                    initialisation step that enables the PreToolUse read-path redirect.
 
 """Regression tests for backend/claude_agent/workspace.py."""
 from __future__ import annotations
@@ -24,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import tests._sdk_stubs  # noqa: F401
+from libs.claude_agent_kit.server.editor_index import EDITOR_RESOURCES
 from libs.claude_agent_kit.server.workspace import (
     WORKSPACE_SUBDIRS,
     get_or_create_workspace,
@@ -158,6 +163,114 @@ class TestSessionIdValidation(unittest.TestCase):
     def test_accepts_plain_user_id(self):
         from claude_agent.thread_pool import _validate_session_id
         _validate_session_id("user_42")  # should not raise
+
+
+class TestEditorIndexInit(unittest.TestCase):
+    """Tests for the .editor/ virtual-index initialisation driven by _init_editor_index.
+
+    The .editor/ directory is the workspace-layer prerequisite for the
+    PreToolUse read-path redirect described in
+    docs/design/claude-agent/edit-point/workspace-adapter.md §9.2.
+
+    Assertions cover:
+    - directory created by init_workspace
+    - one placeholder JSON per EDITOR_RESOURCES stem
+    - placeholder content is always empty-JSON ``{}``
+    - README.md created with non-empty content
+    - placeholder files are NOT overwritten on repeat init (preserving any
+      early writes so the agent can continue from an existing session)
+    - README.md IS refreshed on every init (instructions stay in sync)
+    """
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["AGENT_CWD"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ.pop("AGENT_CWD", None)
+        self._tmp.cleanup()
+
+    # ------------------------------------------------------------------
+    # Directory and file existence
+    # ------------------------------------------------------------------
+
+    def test_editor_directory_created(self):
+        ws = init_workspace("editor-init-001")
+        self.assertTrue((ws / ".editor").is_dir())
+
+    def test_editor_readme_created(self):
+        ws = init_workspace("editor-init-002")
+        readme = ws / ".editor" / "README.md"
+        self.assertTrue(readme.is_file())
+        self.assertGreater(readme.stat().st_size, 0)
+
+    def test_placeholder_files_created_for_all_resources(self):
+        ws = init_workspace("editor-init-003")
+        editor_dir = ws / ".editor"
+        for stem in EDITOR_RESOURCES:
+            placeholder = editor_dir / f"{stem}.json"
+            self.assertTrue(placeholder.is_file(), f"missing .editor/{stem}.json")
+
+    # ------------------------------------------------------------------
+    # Placeholder content
+    # ------------------------------------------------------------------
+
+    def test_placeholder_content_is_empty_json(self):
+        ws = init_workspace("editor-init-004")
+        editor_dir = ws / ".editor"
+        for stem in EDITOR_RESOURCES:
+            content = (editor_dir / f"{stem}.json").read_text(encoding="utf-8")
+            self.assertTrue(
+                content.strip() in ("{}", "{}"),
+                f".editor/{stem}.json should contain empty JSON, got {content!r}",
+            )
+
+    # ------------------------------------------------------------------
+    # Idempotency
+    # ------------------------------------------------------------------
+
+    def test_placeholder_not_overwritten_on_repeat_init(self):
+        """Existing placeholder files must survive a second init_workspace call.
+
+        This mirrors the .editor/ idempotency contract: once a placeholder exists
+        (possibly modified by a running agent session) it is never silently reset,
+        so the agent can continue from its last checkpoint without data loss.
+        """
+        ws = init_workspace("editor-init-005")
+        cells_json = ws / ".editor" / "cells.json"
+        cells_json.write_text('{"cells": ["custom"]}', encoding="utf-8")
+
+        # Re-init must NOT reset the file.
+        init_workspace("editor-init-005")
+        self.assertEqual(
+            cells_json.read_text(encoding="utf-8"),
+            '{"cells": ["custom"]}',
+        )
+
+    def test_readme_refreshed_on_repeat_init(self):
+        """README.md should be rewritten on every init to keep instructions current."""
+        ws = init_workspace("editor-init-006")
+        readme = ws / ".editor" / "README.md"
+        original_content = readme.read_text(encoding="utf-8")
+
+        # Overwrite with stale content, then re-init.
+        readme.write_text("stale content", encoding="utf-8")
+        init_workspace("editor-init-006")
+        self.assertEqual(
+            readme.read_text(encoding="utf-8"),
+            original_content,
+            "README.md should be refreshed with the canonical template on re-init",
+        )
+
+    # ------------------------------------------------------------------
+    # Interaction with standard workspace skeleton
+    # ------------------------------------------------------------------
+
+    def test_editor_dir_created_alongside_standard_subdirs(self):
+        ws = init_workspace("editor-init-007")
+        for subdir in WORKSPACE_SUBDIRS:
+            self.assertTrue((ws / subdir).is_dir(), f"standard dir {subdir}/ missing")
+        self.assertTrue((ws / ".editor").is_dir())
 
 
 if __name__ == "__main__":
