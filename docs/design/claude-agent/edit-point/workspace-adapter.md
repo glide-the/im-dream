@@ -15,6 +15,7 @@ Scope: Design only — 不含实现代码
 5. [工作空间初始化集成](#5-工作空间初始化集成)
 6. [读写路径分离](#6-读写路径分离)
 7. [设计决策：为何不写实际文件](#7-设计决策为何不写实际文件)
+8. [上下文接入说明](#8-上下文接入说明)
 
 ---
 
@@ -269,3 +270,23 @@ Agent 修改文档内容：
 | 工作空间大小 | 随文档增长持续膨胀 | 占位符恒为空 `{}`，临时文件运行后清理 |
 
 **结论**：虚拟索引方案以更少的代码、更低的复杂度实现了更强的数据一致性保证，是 Ink & Memory EditorState 读取的首选设计。
+
+---
+
+## 8. 上下文接入说明
+
+本文档（`workspace-adapter.md`）描述的是 `.editor/` 虚拟索引的**存储与拦截机制**，即"文档内容如何在运行时被动态提供给 Agent 的文件读取工具"。
+
+**Agent 如何在 Prompt 层感知工作空间的存在**，由独立设计文档 [`workspace-context.md`](./workspace-context.md) 说明。该文档定义了：
+
+- `<workspace_context>` 提示词块的结构与内容
+- 该块在 `assemble_context` 管道中的注入位置（`<runtime_context>` 之后、用户文本之前）
+- `build_workspace_context_block(cwd)` 函数的调用规范（实现位于 `backend/claude_agent/workspace_context.py`）
+- 与 [`claude-agent-context-assembly.md`](../claude-agent-context-assembly.md) Section 4 Item 7（Workspace）的对应关系
+
+两份文档的分工：
+
+| 文档 | 回答的问题 |
+|------|----------|
+| `workspace-adapter.md`（本文档） | Agent 调用 `read_file(".editor/cells.json")` 时，数据从哪里来？ |
+| [`workspace-context.md`](./workspace-context.md) | Agent 怎么知道 `.editor/` 目录存在，以及如何与工作空间交互？ |
