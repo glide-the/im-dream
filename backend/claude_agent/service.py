@@ -30,9 +30,9 @@
 #                    use new database.save_chat_message(parts=list, metadata=dict) signature;
 #                    user message always has parts (text fallback when message_parts is None);
 #                    JSON serialisation moved into database layer.
-# [Sync] 2026-05-25: refactor parts collection — use AgentStreamingCallbacks as single source:
-#                    text deltas written directly to collected_parts[-1]["text"] in on_text_delta;
-#                    text-end emitted once from on_text_done(full_text); no state flags needed.
+# [Sync] 2026-05-29: pass editor_session_id (extracted from request.editor_state["id"])
+#                    to build_user_message so the agent receives it in <workspace_context>
+#                    and can pass it as the required first argument to MCP write tool calls.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -233,6 +233,11 @@ class ClaudeAgentService:
             cwd = str(workspace_path)
             state.with_cwd(cwd)
 
+        # editor_session_id is user_sessions.id from /api/sessions, carried in
+        # editor_state["id"].  This is distinct from state.session_id (Claude thread ID)
+        # and os.path.basename(cwd) (workspace directory name).
+        editor_session_id: str = (request.editor_state or {}).get("id") or ""
+
         user_message_content = self._context_builder.build_user_message(
             request.message_parts,
             attachments=request.attachments,
@@ -241,6 +246,7 @@ class ClaudeAgentService:
             thread_id=state.session_id,
             resume=request.resume,
             cwd=cwd,
+            editor_session_id=editor_session_id,
         )
 
         # Load user-configured env vars (skills / MCP environment) from system config.

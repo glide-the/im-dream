@@ -7,6 +7,9 @@
 > [Sync] 2026-05-28: initial design — workspace context integration for edit-point.
 > [Sync] 2026-05-29: add Section 9 — editor_state role and loading path; clarify two-layer architecture (prompt layer vs runtime layer).
 > [Sync] 2026-05-29: §9.3 add reference to editor-state-lifecycle.md for complete lifecycle documentation.
+> [Sync] 2026-05-29: rename session_id → editor_session_id throughout; §9.3 updated to show
+>         service.py extracts editor_session_id from request.editor_state["id"] — not from
+>         cwd basename; three-ID comparison table added.
 
 # 工作空间上下文接入设计
 
@@ -309,19 +312,22 @@ if tool_name == "Read" and opts.editor_state is not None:
 
 当 `editor_state` 为 `None` 时，拦截条件不满足，Agent 读到占位符 `{}`。
 
-#### 作用 B：Editor MCP 子进程启动
+#### 作用 B：Editor MCP 写工具子进程启动
 
 ```python
+_editor_session_id = (opts.mcp_env or {}).get("INK_AGENT_SESSION_ID", "").strip()
+_editor_user_id = (opts.mcp_env or {}).get("INK_AGENT_USER_ID", "").strip()
 if (
-    opts.editor_state is not None
+    _editor_session_id
+    and _editor_user_id
     and any(tool.startswith("mcp__editor__") for tool in effective_allowed_tools)
 ):
-    # 将 editor_state 序列化到临时文件
-    # 启动 editor_mcp_stdio 子进程（INK_EDITOR_STATE_FILE 环境变量传入路径）
-    mcp_servers["editor"] = _editor_mcp_stdio_config(editor_state_file_path)
+    # 启动 editor_mcp_stdio 子进程（INK_AGENT_SESSION_ID / INK_AGENT_USER_ID 传入）
+    # 子进程直接调用数据库读取/保存 editor_state，不依赖预序列化快照
+    mcp_servers["editor"] = _editor_mcp_stdio_config(session_id, user_id)
 ```
 
-Editor MCP 子进程提供结构化只读工具（`mcp__editor__list_segments`、`mcp__editor__read_segment` 等），是 `read_file` 路径之外的第二条等价读取路径。`editor_state` 为 `None` 时，子进程不启动，这些 MCP 工具不可用。
+Editor MCP 子进程提供4个写工具（`mcp__editor__write_segment`、`mcp__editor__delete_segment`、`mcp__editor__insert_widget`、`mcp__editor__reply_to_comment`），均在 `_ALWAYS_CONFIRM_TOOL_NAMES` 中注册，必须经人类确认后才执行。`editor_state` 为 `None` 且 `mcp_env` 中无 session_id 时，子进程不启动。
 
 ### 9.3 加载路径：从前端到 `AgentRunOptions`
 
@@ -331,25 +337,34 @@ Editor MCP 子进程提供结构化只读工具（`mcp__editor__list_segments`�
 ClaudeAgentRunRequest.editor_state     ← 前端传入的 EditorState JSON
   ↓
 ClaudeAgentService.assemble_context()
-  ↓
-AgentRunOptions(
-    thread_id = ...,
-    user_message = content_blocks,   ← 包含 <workspace_context> 块
-    cwd = resolved_cwd,
-    editor_state = request.editor_state,   ← 透传到运行时
-    allowed_tools = [..., "mcp__editor__*"],   ← 文档编辑模式下包含 Editor MCP 工具
-    mcp_env = ...,
-)
-  ↓
-ClaudeAgentRunner.run_streaming(opts, callbacks)
-  ├─ Prompt 层：user_message 中的 <workspace_context> 块
-  │    └─ Agent 在收到消息时读取，了解工作空间布局
-  └─ 运行时层：opts.editor_state 驱动
-       ├─ PreToolUse 钩子：Read .editor/* → 临时文件重定向
-       └─ Editor MCP 子进程：mcp__editor__* 工具服务
+  │
+  ├─ editor_session_id = request.editor_state.get("id") or ""
+  │    ↑ user_sessions.id（来自 /api/sessions）
+  │    ↑ 在此步提取，NOT 从 cwd basename 推导
+  │
+  └─ build_user_message(
+         ...,
+         cwd = resolved_cwd,
+         editor_session_id = editor_session_id,   ← 显式传入
+     )
+       ↓
+       build_workspace_context_block(cwd, editor_session_id=editor_session_id)
+         ↓
+         <workspace_context> 块中包含：
+           Editor Session ID: {editor_session_id}   ← Claude 在写工具调用时传入
 ```
 
-**`editor_state` 的来源**：前端在发起文档编辑相关 Agent 请求时，将当前 `EditorEngine` 的 `EditorState` 快照序列化为 JSON，随请求体一并传送。后端 `assemble_context` 无需额外从数据库读取，直接将其透传至 `AgentRunOptions`。
+**实现文件**：`backend/claude_agent/service.py` `assemble_context` 方法。
+
+**三种 ID 对应关系（重申）：**
+
+| 字段 | 含义 | 提取方式 |
+|------|------|---------|
+| `editor_session_id` | 文档数据库记录 ID | `request.editor_state["id"]`（= `user_sessions.id`）|
+| `os.path.basename(cwd)` | workspace 目录名 | 由 `get_or_create_workspace` 创建，≠ editor_session_id |
+| `state.session_id` | Claude SDK 对话线程 ID | Claude Code SDK 生成 |
+
+**`editor_session_id` 为空的处理**：若 `request.editor_state` 为 `None`（纯对话轮次），`editor_session_id` 为空字符串，`<workspace_context>` 块仍注入但显示 `(unknown — ...)`。Agent 此时不会调用写工具（prompt 中没有 `<workspace_context>` 的情况下，Edit-Point Workflow 不触发）。
 
 > 完整的 `editor_state` 生命周期（数据结构定义、五阶段说明、业务时序图、不持久化决策）详见独立设计文档：
 > **[`editor-state-lifecycle.md`](./editor-state-lifecycle.md)**
@@ -360,7 +375,9 @@ ClaudeAgentRunner.run_streaming(opts, callbacks)
 |------|---------------|--------------------------|---------------------|------------|
 | 纯对话轮次（pet chat 等） | `None` | 不注入（无 `cwd`）| N/A | 不启动 |
 | 工作空间对话（无编辑器） | `None` | 注入（描述 `.editor/` 机制）| 占位符 `{}` | 不启动 |
-| 文档编辑轮次 | 非 `None` | 注入（同上）| 实时 EditorState 数据 | 启动 |
+| 文档编辑轮次 | 非 `None` | 注入（同上）| 实时 EditorState 数据 | 启动（需 mcp_env 含 session_id/user_id） |
+
+**Editor MCP 启动条件（2026-05-29 更新）**：editor MCP 子进程的启动不再依赖 `opts.editor_state`，而是检查 `mcp_env` 中是否同时含有 `INK_AGENT_SESSION_ID` 和 `INK_AGENT_USER_ID`。写工具子进程通过这两个变量直接从数据库获取和保存状态。`opts.editor_state` 仍用于 `.editor/` 虚拟索引 PreToolUse 拦截（读路径）。
 
 **纯对话轮次**（`cwd` 为 `None`）：`<workspace_context>` 块本身也不注入（`build_workspace_context_block` 仅在 `cwd` 非空时调用），`editor_state` 为 `None`，两层均不激活。
 

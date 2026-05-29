@@ -15,6 +15,13 @@
 #                    receives scheduling guidance (when/how to use .editor/ read and MCP
 #                    write tools) in the system prompt, not only in the workspace_context
 #                    user-message block. Fix [Input] header to reference workspace_context.
+# [Sync] 2026-05-29: remove set_comment_feedback from MCP write tools in Edit-Point
+#                    Workflow section; reading is exclusively via .editor/ virtual index.
+# [Sync] 2026-05-29: extract session_id from cwd basename and pass to
+#                    build_workspace_context_block so agent receives it in prompt.
+# [Sync] 2026-05-29: rename session_id → editor_session_id (user_sessions.id from
+#                    /api/sessions); add explicit parameter to build_user_message;
+#                    remove cwd-basename fallback — service layer must supply it.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -164,6 +171,7 @@ class ClaudeAgentContextBuilder:
         local_time: Optional[str] = None,
         local_timezone: Optional[str] = None,
         cwd: Optional[str] = None,
+        editor_session_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
 
@@ -174,8 +182,13 @@ class ClaudeAgentContextBuilder:
         Returns a list of content blocks in the order expected by Claude:
         attachment image blocks first, then the ``<runtime_context>`` block
         (unless *include_runtime_context* is False), then the
-        ``<workspace_context>`` block (when *cwd* is provided), then the
-        user's message text.
+        ``<workspace_context>`` block (when *cwd* is provided, with
+        *editor_session_id* embedded so the agent can pass it to write tools),
+        then the user's message text.
+
+        *editor_session_id* is the ``user_sessions.id`` from ``/api/sessions``
+        (the document session ID) — NOT the workspace directory name or the
+        Claude thread ID.  The service layer must resolve and pass it explicitly.
 
         This method absorbs the responsibilities of the SDK-level
         ``build_user_message_content`` so the SDK no longer participates in
@@ -239,7 +252,13 @@ class ClaudeAgentContextBuilder:
             )
 
         # Inject workspace context block after runtime_context when cwd is known.
-        workspace_block = build_workspace_context_block(cwd or "")
+        # editor_session_id is the user_sessions.id from /api/sessions — distinct from
+        # the workspace directory name (cwd basename) and the Claude thread ID.
+        # The service layer must supply it explicitly via the editor_session_id parameter.
+        workspace_block = build_workspace_context_block(
+            cwd or "",
+            editor_session_id=editor_session_id or "",
+        )
         if workspace_block:
             blocks.append({"type": "text", "text": workspace_block})
 

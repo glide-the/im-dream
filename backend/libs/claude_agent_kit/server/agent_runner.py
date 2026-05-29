@@ -30,6 +30,18 @@
 # [Sync] 2026-05-29: _editor_mcp_stdio_config now accepts editor_state dict and passes it
 #                    as INK_EDITOR_STATE_JSON env var (session-inline, no tempfile);
 #                    removes tempfile creation/cleanup for editor MCP in run_streaming.
+# [Sync] 2026-05-29: switch editor MCP from read-only tools to write-only tools; replace
+#                    INK_EDITOR_STATE_JSON injection with INK_AGENT_SESSION_ID +
+#                    INK_AGENT_USER_ID so write handlers call database directly; add all
+#                    four write tool names to _ALWAYS_CONFIRM_TOOL_NAMES; editor MCP
+#                    startup condition now checks mcp_env for INK_AGENT_SESSION_ID.
+# [Sync] 2026-05-29: remove env-var session injection; _editor_mcp_stdio_config is
+#                    zero-argument — session_id flows via MCP tool arguments from prompt;
+#                    editor MCP startup condition restored to opts.editor_state is not None.
+# [Sync] 2026-05-29: remove env-var session context injection; session_id flows through
+#                    MCP tool call arguments (agent reads from <workspace_context> prompt);
+#                    _editor_mcp_stdio_config reverts to zero-arg form; editor MCP startup
+#                    condition restored to opts.editor_state is not None.
 
 """Claude Agent Runner.
 
@@ -115,9 +127,16 @@ _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 # be auto-approved because they need the frontend form to collect answers.
 # Note: mcp__user__touch_animation is intentionally excluded; in auto mode the
 # animation runs without user interaction.
+# Editor write tools are always confirmed: all document mutations require explicit
+# human approval before the MCP subprocess applies them to the database.
 _ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
     "AskUserQuestion",
     "mcp__user__ask_user",
+    # Editor write tools — all require human confirmation (see mcp-tools.md §4)
+    "mcp__editor__write_segment",
+    "mcp__editor__delete_segment",
+    "mcp__editor__insert_widget",
+    "mcp__editor__reply_to_comment",
 })
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 _FALSE_ENV_VALUES = {"0", "false", "no", "off"}
@@ -487,21 +506,19 @@ def _memory_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpS
     )
 
 
-def _editor_mcp_stdio_config(editor_state: dict[str, Any]) -> McpStdioServerConfig:
-    """Build the external stdio MCP config for the EditorState read-only server.
+def _editor_mcp_stdio_config() -> McpStdioServerConfig:
+    """Build the external stdio MCP config for the EditorState write-only server.
 
-    Serialises the session's ``editor_state`` directly into the subprocess
-    environment as ``INK_EDITOR_STATE_JSON`` — no tempfile is created or read.
-    The MCP subprocess's ``_load_editor_state`` reads this env var as its
-    primary data source.
+    Session context (session_id) is supplied by the Claude agent at tool-call
+    time — the agent reads it from the ``<workspace_context>`` prompt block and
+    includes it as a required argument in every write tool call.  No session
+    data needs to be injected into the subprocess environment here.
     """
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
         args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
-        env=_stdio_env(
-            extra_env={"INK_EDITOR_STATE_JSON": json.dumps(editor_state, ensure_ascii=False)}
-        ),
+        env=_stdio_env(),
     )
 
 
@@ -995,17 +1012,18 @@ class ClaudeAgentRunner:
         ):
             mcp_servers["necklace"] = _necklace_mcp_stdio_config(mcp_env)
 
-        # Inject editor_state into the MCP subprocess via INK_EDITOR_STATE_JSON env var.
-        # The session's editor_state dict is serialised directly into the subprocess
-        # environment — no tempfile is created or cleaned up.
+        # Start the editor MCP subprocess when editor_state is active and at least one
+        # write tool is in the effective allowlist.  Session context (session_id) flows
+        # through the MCP protocol: the agent reads it from <workspace_context> and
+        # passes it as a required argument in every write tool call — no env-var injection.
         if (
             opts.editor_state is not None
             and any(
                 tool.startswith(_EDITOR_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
             )
         ):
-            mcp_servers["editor"] = _editor_mcp_stdio_config(opts.editor_state)
-            logger.debug("Editor MCP enabled; state injected via INK_EDITOR_STATE_JSON.")
+            mcp_servers["editor"] = _editor_mcp_stdio_config()
+            logger.debug("Editor MCP enabled; session context flows via tool arguments.")
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = apply_project_sdk_runtime_options(
