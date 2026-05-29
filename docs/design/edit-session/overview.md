@@ -1,7 +1,7 @@
 # 编辑器会话模块设计梳理
 
 Status: Draft  
-Updated: 2026-05-23  
+Updated: 2026-05-30  
 Scope: Design only — 不含实现代码，不含重构建议
 
 ---
@@ -252,6 +252,32 @@ checkAnalysisTrigger:
         → engine.setCurrentEntryId(savedId)
 ```
 
+### 6.4 Agent MCP 写工具触发的会话同步
+
+当 Agent 通过 MCP 工具（`mcp__editor__*`）修改会话内容时，前端通过以下机制同步：
+
+```
+用户点击"批准"（Chat 视图 EditorWriteApprovalUI）
+  → ToolMessagePart.handleEditorWriteApprove()
+    → POST /api/claude-agent/tool-confirm {approved: true}
+    ← {ok: true}  ← 此时后端 DB 写入尚未完成（异步）
+    → onEditorWriteConfirmed()
+      → App.handleEditorWriteConfirmed()
+        → await setTimeout(2000ms)   ← 等待后端 DB 写入完成
+        → GET /api/sessions/{sessionId}
+          ← 最新 editor_state（包含 Agent 写入内容）
+        → engineRef.current.loadState(refreshed)
+        → setState({ ...engine.getState() })
+          → useTextCells useEffect（监听 state）
+            → setLocalTexts 同步更新
+          → Writing 视图 textarea 渲染新内容
+```
+
+**设计约束**：
+- 2000ms 延迟是经验值，保证后端 MCP 工具执行（DB 写入）在前端拉取前完成。
+- 延迟期间若 `engineRef.current` 变为 `null`（用户切换会话），直接返回，避免写入错误会话。
+- 拉取使用 `engineRef.current.getState().id` 而非闭包中的 `state.id`，保证拉取最新 live 会话 ID。
+
 ---
 
 ## 7. 对象泳道图
@@ -408,6 +434,7 @@ flowchart LR
 | **无操作历史（Undo/Redo）** | EditorEngine 不维护操作栈，无法撤销 |
 | **无细粒度事件类型** | 状态变更以整体快照推送，无法区分"文本变更"vs"评论应用"vs"任务更新" |
 | **Agent 操作无入口** | 当前所有状态变更入口仅暴露给人类 UI（React Hooks），无 Agent 可调用的命令接口 |
+| **Agent MCP 写工具确认后前端状态未及时更新** | 用户在 Chat 视图批准 `mcp__editor__` 写工具时，`onEditorWriteConfirmed` 立即触发并调用 `/api/sessions/{id}` 拉取最新状态。但后端 MCP 工具执行（DB 写入）在工具确认 HTTP 响应返回后异步进行，导致前端拉到的仍是旧数据，Writing 视图无法反映 Agent 写入内容。**修复策略**：在 `handleEditorWriteConfirmed`（`App.tsx`）调用 `getSession()` 前插入 2000ms 延迟，保证 DB 写入先于前端拉取完成。 |
 | **保存无重试机制** | 自动保存失败仅 console.error，无排队重试 |
 | **评论应用不可配置** | threshold=50 硬编码在 Engine 构造函数中 |
 | **跨设备同步** | 无冲突解决机制，最后写入覆盖（last-write-wins） |

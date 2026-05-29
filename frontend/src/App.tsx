@@ -6,6 +6,8 @@
 // [Sync] 2026-05-29: add handleEditorWriteConfirmed callback; reloads session from DB after agent MCP write tool approved.
 // [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
+// [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
+// [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -670,16 +672,21 @@ export default function App() {
     setCommentsAligned(prev => !prev);
   }, []);
 
-  // @@@ Reload editor state from database after Agent MCP write tool is confirmed
+  // @@@ Reload editor state from database after Agent MCP write tool is confirmed.
+  // Delay 2s before fetching to avoid a race condition where the DB write has not
+  // yet completed when the tool-confirm HTTP response returns.
   const handleEditorWriteConfirmed = useCallback(async () => {
     if (!isAuthenticated || !state?.id || !engineRef.current) return;
     try {
+      await new Promise<void>(resolve => setTimeout(resolve, 2000));
+      if (!engineRef.current) return;
+      const sessionId = engineRef.current.getState().id || state.id;
       const { getSession } = await import('./api/voiceApi');
-      const sessionData = await getSession(state.id);
+      const sessionData = await getSession(sessionId);
       if (sessionData?.editor_state) {
         const refreshed: EditorState = {
           ...sessionData.editor_state,
-          id: state.id,
+          id: sessionId,
         };
         engineRef.current.loadState(refreshed);
         setState({ ...engineRef.current.getState() });
@@ -857,12 +864,40 @@ export default function App() {
 
     const cursorPos = textarea.selectionStart;
 
+    // Snapshot widget IDs before insertion to identify the newly added widget
+    const beforeWidgetIds = new Set(
+      engineRef.current.getState().cells
+        .filter(c => c.type === 'widget')
+        .map(c => c.id)
+    );
+
     // Create chat widget
     const chatWidget = new ChatWidget(voiceName, voiceConfig);
 
     // Insert widget at cursor (engine will handle @ removal)
     engineRef.current.insertWidgetAtCursor(dropdownTriggerCellId, cursorPos, 'chat', chatWidget.getData());
     setDropdownTriggerCellId(null);
+
+    // Focus the text cell immediately after the newly inserted widget
+    const updatedCells = engineRef.current.getState().cells;
+    const newWidget = updatedCells.find(c => c.type === 'widget' && !beforeWidgetIds.has(c.id));
+    if (newWidget) {
+      const widgetIdx = updatedCells.findIndex(c => c.id === newWidget.id);
+      const nextCell = widgetIdx >= 0 && widgetIdx + 1 < updatedCells.length
+        ? updatedCells[widgetIdx + 1]
+        : null;
+      if (nextCell && nextCell.type === 'text') {
+        const nextCellId = nextCell.id;
+        setTimeout(() => {
+          const nextTextarea = textareaRefs.current.get(nextCellId);
+          if (nextTextarea) {
+            nextTextarea.focus();
+            nextTextarea.selectionStart = 0;
+            nextTextarea.selectionEnd = 0;
+          }
+        }, 0);
+      }
+    }
   }, [dropdownTriggerCellId]);
 
   // @@@ Handle sending chat message

@@ -468,8 +468,8 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
         );
       default:
         return (
-          <svg {...iconProps}>
-            <circle cx="50" cy="50" r="35" fill="none" stroke="#999" strokeWidth="4"/>
+          <svg {...iconProps} style={{ ...iconProps.style, color: 'var(--color-text-muted)' }}>
+            <circle cx="50" cy="50" r="35" fill="none" stroke="currentColor" strokeWidth="4"/>
           </svg>
         );
     }
@@ -486,9 +486,9 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
           backfaceVisibility: 'hidden',
           background: face.unlocked
             ? `linear-gradient(135deg, ${face.color}40, ${face.color}80)`
-            : 'linear-gradient(135deg, #ccc, #999)',
-          opacity: face.unlocked ? 1 : 0.5,  // @@@ Semi-transparent locked faces
-          border: '2px solid rgba(0,0,0,0.1)',
+            : 'linear-gradient(135deg, var(--color-bg-surface) 0%, var(--color-bg-paper) 100%)',
+          opacity: face.unlocked ? 1 : 0.6,
+          border: '2px solid var(--color-border-paper)',
           borderRadius: '8px',
           padding: '10px',
           boxSizing: 'border-box',
@@ -516,8 +516,8 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
                 background: state.isEmpty
                   ? 'transparent'
                   : isClicked
-                    ? 'rgba(163, 213, 255, 0.9)'
-                    : 'rgba(255,255,255,0.6)',
+                    ? 'var(--color-bg-active)'
+                    : 'var(--color-bg-surface)',
                 borderRadius: '4px',
                 padding: '8px',
                 display: 'flex',
@@ -530,26 +530,26 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
                 transition: 'all 0.2s ease',
                 userSelect: 'none',
                 transform: isClicked ? 'scale(0.95)' : 'scale(1)',
-                boxShadow: isClicked ? '0 0 12px rgba(163, 213, 255, 0.6)' : 'none',
+                boxShadow: isClicked ? '0 0 12px var(--color-bg-active-hover)' : 'none',
                 pointerEvents: face.unlocked && !state.isEmpty ? 'auto' : 'none'
               }}
               onMouseEnter={(e) => {
                 if (face.unlocked && !isClicked && !state.isEmpty) {
                   e.currentTarget.style.transform = 'scale(1.05)';
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.9)';
+                  e.currentTarget.style.background = 'var(--color-bg-surface-solid)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (!isClicked && !state.isEmpty) {
                   e.currentTarget.style.transform = 'scale(1)';
-                  e.currentTarget.style.background = 'rgba(255,255,255,0.6)';
+                  e.currentTarget.style.background = 'var(--color-bg-surface)';
                 }
               }}
             >
               {!face.unlocked || state.isEmpty ? null : (
                 <>
                   {getStateIcon(state.id)}
-                  <div style={{ marginTop: '4px', fontWeight: 500, color: '#555' }}>
+                  <div style={{ marginTop: '4px', fontWeight: 500, color: 'var(--color-text-body)' }}>
                     {state.cn}
                   </div>
                 </>
@@ -569,7 +569,7 @@ export function StateCube({ onStateSelect, stateConfig }: StateCubeProps) {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(200, 200, 200, 0.5)',
+            background: 'color-mix(in srgb, var(--color-border-paper) 40%, transparent)',
             borderRadius: '8px',
             pointerEvents: 'none'
           }}>
