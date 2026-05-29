@@ -1,7 +1,7 @@
 # EditorState 虚拟索引适配器
 
 Status: Draft  
-Updated: 2026-05-23  
+Updated: 2026-05-28  
 Scope: Design only — 不含实现代码
 
 ---
@@ -11,7 +11,7 @@ Scope: Design only — 不含实现代码
 1. [设计背景](#1-设计背景)
 2. [虚拟索引目录结构](#2-虚拟索引目录结构)
 3. [资源映射规范](#3-资源映射规范)
-4. [PreToolUse 拦截机制](#4-pretooluse-拦截机制)
+4. [Python SDK PreToolUse 拦截机制](#4-python-sdk-pretooluse-拦截机制)
 5. [工作空间初始化集成](#5-工作空间初始化集成)
 6. [读写路径分离](#6-读写路径分离)
 7. [设计决策：为何不写实际文件](#7-设计决策为何不写实际文件)
@@ -126,63 +126,85 @@ PreToolUse hook（agent_runner.py）
 
 ---
 
-## 4. PreToolUse 拦截机制
+## 4. Python SDK PreToolUse 拦截机制
 
-### 4.1 拦截条件
+### 4.1 设计选择：在 Python SDK 层拦截
 
-`agent_runner.py` 的 `PreToolUse` 钩子在以下条件**同时满足**时触发拦截：
+`.editor/` 读取拦截实现于 `agent_runner.py` 的 `_pre_tool_use_hook` 回调（Python SDK 层），而非 `.claude/hooks` Shell 脚本层。核心理由：
+
+| 维度 | Python SDK `_pre_tool_use_hook`（采用） | `.claude/hooks` Shell Hook（不采用） |
+|------|----------------------------------------|--------------------------------------|
+| 调试支持 | ✅ 支持 Python 调试器断点 | ❌ Shell 脚本无法附加调试器 |
+| 数据访问 | ✅ 直接读取内存中 `editor_state`，无需跨进程桥接 | ❌ 需预写文件到 `.live/` 目录，额外 I/O |
+| 实现复杂度 | ✅ 若干行 Python 代码 | ❌ 需维护 bash + python 双脚本 + 部署逻辑 |
+| 失败可见性 | ✅ 异常直接出现在 Python traceback | ❌ Shell 退出码难追踪 |
+
+### 4.2 拦截条件
+
+`_pre_tool_use_hook` 在以下条件**同时满足**时触发 `.editor/` 重定向：
 
 1. 工具名为 `Read`（Claude 的原生文件读取工具）
 2. `AgentRunOptions.editor_state` 不为 `None`（本轮运行注入了编辑器状态）
-3. 路径参数（`file_path` 或 `path`）落在 `.editor/` 虚拟目录内
+3. 路径参数（`file_path`）落在 `.editor/` 虚拟目录内（`is_editor_index_path` 返回 `True`）
 
-### 4.2 拦截流程
+`.editor/` 拦截在其他所有 hook 判断之前执行（早于 `tool_choice` / 工具确认逻辑），确保虚拟索引读取在所有模式下均生效。
+
+### 4.3 拦截流程
 
 ```
 Agent 发出 Read 工具调用
   → tool_name = "Read", tool_input.file_path = ".editor/cells.json"
   ↓
-PreToolUse hook 检测到 is_editor_index_path(path) == True
+_pre_tool_use_hook 检测到 is_editor_index_path(path) == True
+  且 opts.editor_state is not None
   ↓
-resolve_editor_resource(path)  →  resource = "cells"
+get_editor_resource_data(path, editor_state)  →  data = [...]
   ↓
-get_editor_resource_data(editor_state, "cells")  →  data = [...]
+写入临时文件（tempfile.NamedTemporaryFile, delete=False）
+  /tmp/editor_XXXX.json  ←  json.dump(data, ensure_ascii=False)
+  路径追加至 _editor_redirect_tmp_paths 列表
   ↓
-写入临时文件（tempfile.NamedTemporaryFile）
-  /tmp/ink_editor_cells_XXXX.json  ←  json.dump(data)
-  ↓
-HookJSONOutput({ "tool_input": { "file_path": "/tmp/ink_editor_cells_XXXX.json" } })
+return HookJSONOutput(hookSpecificOutput={
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "allow",
+    "updatedInput": {"file_path": "/tmp/editor_XXXX.json"}
+})
   ↓
 Claude SDK 使用重定向后的路径执行 Read
   → Agent 得到实时的 cells 数据
   ↓
-运行结束后：清理所有本轮创建的临时文件
+finally 块：os.unlink 清理所有本轮创建的临时文件
 ```
 
-### 4.3 拦截失败回退
+### 4.4 拦截失败回退
 
-若临时文件写入失败（如磁盘满），钩子记录警告日志并**直通**（fall-through），让 SDK 继续读取磁盘上的占位符 `{}`。Agent 收到空内容，可通过 MCP 工具重试获取数据。
+| 失败场景 | 处理策略 |
+|---------|---------|
+| `editor_state` 为 `None` | 条件不满足，跳过拦截；Agent 读到占位符 `{}` |
+| `is_editor_index_path` 返回 `False` | 条件不满足，跳过拦截；Agent 读到实际文件内容 |
+| 临时文件写入失败（磁盘满等） | `except Exception` 捕获，记录 warning 并 fall-through；Agent 读到占位符 `{}` |
+| `get_editor_resource_data` 抛出异常 | 同上 fall-through |
 
-### 4.4 时序图
+### 4.5 时序图
 
 ```mermaid
 sequenceDiagram
     participant Agent as Claude Agent
-    participant Hook as PreToolUse Hook<br/>(agent_runner.py)
+    participant Hook as _pre_tool_use_hook<br/>(agent_runner.py)
     participant EdState as editor_state<br/>(内存快照)
-    participant Tmp as 临时文件<br/>(/tmp/ink_editor_*)
+    participant Tmp as 临时文件<br/>(/tmp/editor_*)
     participant FS as 工作空间文件系统<br/>(.editor/cells.json = {})
 
     Agent->>Hook: Read { file_path: ".editor/cells.json" }
     Hook->>Hook: is_editor_index_path(".editor/cells.json") → True
-    Hook->>EdState: get_editor_resource_data(state, "cells")
+    Hook->>EdState: get_editor_resource_data(path, state)
     EdState-->>Hook: cells 数组
-    Hook->>Tmp: 写入 /tmp/ink_editor_cells_XXXX.json
-    Hook-->>Agent: HookJSONOutput { file_path: "/tmp/ink_editor_cells_XXXX.json" }
+    Hook->>Tmp: 写入 /tmp/editor_XXXX.json
+    Hook-->>Agent: HookJSONOutput { permissionDecision:"allow", updatedInput:{file_path:"/tmp/editor_XXXX.json"} }
     Note over FS: 占位符 {} 从未被读取
-    Agent->>Tmp: Read /tmp/ink_editor_cells_XXXX.json
+    Agent->>Tmp: Read /tmp/editor_XXXX.json
     Tmp-->>Agent: 实时 cells 数组
-    Note over Tmp: 运行结束后由 runner 清理临时文件
+    Note over Tmp: finally 块：os.unlink 清理临时文件
 ```
 
 ---
@@ -280,12 +302,15 @@ Agent 修改文档内容：
 - `build_workspace_context_block(cwd)` 函数的调用规范（实现位于 `backend/claude_agent/workspace_context.py`）
 - 与 [`claude-agent-context-assembly.md`](../claude-agent-context-assembly.md) Section 4 Item 7（Workspace）的对应关系
 
-两份文档的分工：
+**`editor_state` 快照的完整生命周期**（数据结构、五阶段说明、业务时序图、不持久化决策），由独立设计文档 [`editor-state-lifecycle.md`](./editor-state-lifecycle.md) 说明。
+
+三份文档的分工：
 
 | 文档 | 回答的问题 |
 |------|----------|
-| `workspace-adapter.md`（本文档） | Agent 调用 `read_file(".editor/cells.json")` 时，数据从哪里来？ |
-| [`workspace-context.md`](./workspace-context.md) | Agent 怎么知道 `.editor/` 目录存在，以及如何与工作空间交互？ |
+| `workspace-adapter.md`（本文档） | Agent 调用 `read_file(".editor/cells.json")` 时，数据从哪里来？（拦截机制） |
+| [`workspace-context.md`](./workspace-context.md) | Agent 怎么知道 `.editor/` 目录存在，以及如何与工作空间交互？（Prompt 层） |
+| [`editor-state-lifecycle.md`](./editor-state-lifecycle.md) | `editor_state` 快照从前端采集到运行时激活再到清理，完整经历了哪些阶段？（数据流） |
 
 ---
 
@@ -306,7 +331,7 @@ Agent 修改文档内容：
 
 ### 9.2 Hook 执行顺序与读取路径
 
-`settings.json` 中的 `hooks` 配置（shell 脚本）由 **Claude Code CLI 子进程**执行，Python SDK 的 `PreToolUse` 回调由 **claude_code_sdk 层**注册。两者执行顺序为：
+`settings.json` 中的 `hooks` 配置（shell 脚本）由 **Claude Code CLI 子进程**执行，Python SDK 的 `_pre_tool_use_hook` 回调由 **claude_code_sdk 层**注册。两者执行顺序为：
 
 ```
 Agent 发出 Read { file_path: ".editor/cells.json" }
@@ -315,9 +340,10 @@ Agent 发出 Read { file_path: ".editor/cells.json" }
   │       └── protect-files.sh 检查路径
   │               .editor/ 不在受保护列表 → exit 0（允许通过）
   │
-  └── ② Python SDK PreToolUse hook（agent_runner.py）
+  └── ② Python SDK _pre_tool_use_hook（agent_runner.py）
               is_editor_index_path(".editor/cells.json") → True
-              → 写入临时文件并重定向路径
+              editor_state 不为 None → 读取内存快照
+              → 写入临时文件并重定向路径（CLI ≥2.1 updatedInput 格式）
               → Agent 读取到实时 EditorState 数据
 ```
 
@@ -379,7 +405,7 @@ Editor MCP 只读工具（`mcp__editor__list_segments` 等）的授权**在 Pyth
        │         settings.json 包含：
        │           · hooks: protect-files.sh（保护 .env/.git/.claude/，不包含 .editor/）
        │           · permissions.deny: Edit/Write/MultiEdit(.editor/**)
-       └─ _init_editor_index(workspace)       [★ 新增]
+       └─ _init_editor_index(workspace)       [★ 已实现]
             └─ 创建 .editor/ 占位符目录 + README.md
 
 Agent 运行（每次请求）
@@ -387,6 +413,53 @@ Agent 运行（每次请求）
   │    └─ 将 editor_state 注入 AgentRunOptions
   └─ agent_runner.py::run_streaming()
        ├─ 构建 ClaudeCodeOptions（setting-sources=project → 读取 workspace/.claude/settings.json）
-       ├─ 注册 Python PreToolUse hook（.editor/ Read 重定向）
+       ├─ 注册 Python _pre_tool_use_hook
+       │    ├─ .editor/ Read 拦截：is_editor_index_path → 写临时文件 → updatedInput 重定向
+       │    └─ 工具确认逻辑（AskUserQuestion 等）
        └─ 注册 editor MCP 子进程（list_segments / read_segment 等）
+
+Agent 运行后（finally 块）
+  └─ 清理所有本轮创建的 .editor/ 重定向临时文件
+       └─ os.unlink(_editor_redirect_tmp_paths[*])
 ```
+
+---
+
+## 10. 实现清单
+
+### 10.1 `editor_index.py`（虚拟索引辅助函数）
+
+- [x] `EDITOR_RESOURCES` 常量：虚拟文件名 stem → EditorState 提取键映射
+- [x] `is_editor_index_path(path: str) -> bool`：检测路径是否为 `.editor/` 虚拟资源
+- [x] `resolve_editor_resource(path: str) -> Optional[str]`：提取资源 stem
+- [x] `get_editor_resource_data(path, editor_state) -> Any`：按路径提取 EditorState 切片
+
+### 10.2 `agent_runner.py`（`_pre_tool_use_hook` 拦截）
+
+- [x] `_editor_redirect_tmp_paths: list[str]` — 本轮临时文件路径收集器（用于 finally 清理）
+- [x] `_pre_tool_use_hook` 中 `.editor/` 读取拦截块（早于工具确认逻辑）：
+  - 条件：`tool_name == "Read"` 且 `opts.editor_state is not None` 且 `is_editor_index_path(path)`
+  - `get_editor_resource_data(path, editor_state)` 提取数据
+  - `tempfile.NamedTemporaryFile(delete=False)` 写入临时文件
+  - 路径追加至 `_editor_redirect_tmp_paths`
+  - 返回 `HookJSONOutput(hookSpecificOutput={"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"file_path":tmp_path}})`
+  - `except Exception` fall-through（记录 warning，不阻断 Agent）
+- [x] `finally` 块：`os.unlink(_editor_redirect_tmp_paths[*])` 逐一清理临时文件
+
+### 10.3 `workspace.py`（工作空间初始化）
+
+- [x] `_init_editor_index(workspace)` — 创建 `.editor/` 占位符目录 + README.md（说明虚拟重定向机制）
+- [x] `init_workspace(session_id)` 末尾调用 `_init_editor_index`
+
+### 10.4 单元测试（留 Task 3）
+
+- [ ] `test_is_editor_index_path`：绝对路径、相对路径、非 `.editor/` 路径、子路径各场景
+- [ ] `test_get_editor_resource_data`：cells / session / full_state 各映射，`editor_state` 缺字段降级
+- [ ] `test_pre_tool_use_hook_editor_redirect`：mock hook，验证临时文件内容和 `updatedInput`
+- [ ] `test_pre_tool_use_hook_fallthrough`：`editor_state=None` 时不触发拦截
+- [ ] `test_editor_redirect_tmp_cleanup`：finally 块正确清理所有临时文件
+
+### 10.5 文档同步
+
+- [x] 更新 `docs/design/claude-agent/edit-point/.folder.md`
+- [x] 更新 `backend/libs/claude_agent_kit/.folder.md`

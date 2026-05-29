@@ -34,6 +34,8 @@ export type ChatApiSchemaRequestBody = {
   systemPrompt?: string;
   allowedMcpServers?: Record<string, unknown>;
   allowedAppDefaultToolkit?: string[];
+  /** Current EditorState snapshot — enables .editor/ virtual index redirect in the agent runner. */
+  editor_state?: Record<string, unknown>;
 };
 
 export type ChatMetadata = {

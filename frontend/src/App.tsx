@@ -2,6 +2,7 @@
 // [Output] Render the authenticated Ink & Memory app shell and route current view state.
 // [Pos] frontend app-root node in frontend/src
 // [Sync] 2026-05-25: remove ChatView settings-navigation prop after left chat nav Settings button deletion.
+// [Sync] 2026-05-29: pass state as editorState prop to ChatView so agent receives current EditorState snapshot.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -1812,7 +1813,7 @@ export default function App() {
           bottom: mobileBottomOffset,
           overflow: 'hidden'
         }}>
-          <ChatView />
+          <ChatView editorState={state as Record<string, unknown> | null} />
         </div>
       )}
 

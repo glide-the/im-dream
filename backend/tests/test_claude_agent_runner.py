@@ -10,6 +10,9 @@
 # [Sync] 2026-05-24: cover INK_AGENT_MEM0_* aliases for memory MCP/hook env.
 # [Sync] 2026-05-24: cover direct ANTHROPIC_AUTH_TOKEN SDK auth diagnostics.
 # [Sync] 2026-05-24: assert SDK runner failures emit backend exception logs with traceback.
+# [Sync] 2026-05-29: add TestEditorIndexRedirectHelper — 15 tests for _apply_editor_index_redirect
+#                    module-level helper (redirect creates tempfile, updatedInput, fallthrough
+#                    on None state / non-Read / non-.editor path, tmp_paths cleanup contract).
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -795,6 +798,222 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
         )
 
         self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
+
+
+# ---------------------------------------------------------------------------
+# TestEditorIndexRedirectHelper
+# ---------------------------------------------------------------------------
+
+
+class TestEditorIndexRedirectHelper(unittest.TestCase):
+    """Unit tests for _apply_editor_index_redirect (module-level helper).
+
+    This helper is extracted from the .editor/ PreToolUse interception block
+    so it can be tested without a real Claude Code SDK subprocess.
+
+    Design reference:
+        docs/design/claude-agent/edit-point/workspace-adapter.md §10.4
+    """
+
+    _SAMPLE_STATE: dict = {
+        "id": "sess-test",
+        "selectedState": "calm",
+        "createdAt": "2026-05-01T00:00:00Z",
+        "cells": [{"id": "c1", "type": "text", "content": "Hello world"}],
+        "commentors": [],
+        "tasks": [],
+    }
+
+    def _call_redirect(
+        self,
+        tool_name: str,
+        file_path: str,
+        editor_state,
+        tmp_paths=None,
+    ):
+        if tmp_paths is None:
+            tmp_paths = []
+        return agent_runner_module._apply_editor_index_redirect(
+            tool_name,
+            {"file_path": file_path},
+            editor_state,
+            tmp_paths,
+        )
+
+    # ------------------------------------------------------------------
+    # Positive: redirect activates for Read + editor_state + .editor/ path
+    # ------------------------------------------------------------------
+
+    def test_redirect_returns_hook_json_output(self):
+        tmp_paths: list[str] = []
+        result = self._call_redirect(
+            "Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths
+        )
+        self.assertIsNotNone(result)
+
+    def test_redirect_hook_output_has_permission_allow(self):
+        result = self._call_redirect("Read", ".editor/cells.json", self._SAMPLE_STATE)
+        specific = getattr(result, "hookSpecificOutput", None)
+        self.assertIsNotNone(specific)
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+
+    def test_redirect_updated_input_points_to_existing_tempfile(self):
+        tmp_paths: list[str] = []
+        result = self._call_redirect(
+            "Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths
+        )
+        specific = getattr(result, "hookSpecificOutput", {})
+        tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
+        try:
+            self.assertTrue(
+                os.path.isfile(tmp_path),
+                f"Tempfile {tmp_path!r} does not exist",
+            )
+        finally:
+            if os.path.isfile(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_redirect_tempfile_contains_correct_cells_json(self):
+        """The tempfile must contain the cells slice serialised as JSON."""
+        import json as _json
+
+        tmp_paths: list[str] = []
+        result = self._call_redirect(
+            "Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths
+        )
+        specific = getattr(result, "hookSpecificOutput", {})
+        tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
+        try:
+            with open(tmp_path, encoding="utf-8") as fh:
+                data = _json.load(fh)
+            # editor_index maps "cells" → {"cells": [...]}
+            self.assertIn("cells", data)
+            self.assertEqual(data["cells"], self._SAMPLE_STATE["cells"])
+        finally:
+            if os.path.isfile(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_redirect_tempfile_contains_session_json(self):
+        """session.json resource → {id, selectedState, createdAt}."""
+        import json as _json
+
+        tmp_paths: list[str] = []
+        result = self._call_redirect(
+            "Read", ".editor/session.json", self._SAMPLE_STATE, tmp_paths
+        )
+        specific = getattr(result, "hookSpecificOutput", {})
+        tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
+        try:
+            with open(tmp_path, encoding="utf-8") as fh:
+                data = _json.load(fh)
+            self.assertEqual(data.get("id"), "sess-test")
+            self.assertEqual(data.get("selectedState"), "calm")
+            self.assertNotIn("cells", data)
+        finally:
+            if os.path.isfile(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_redirect_tempfile_contains_full_state_json(self):
+        """full_state.json resource → entire editor_state dict."""
+        import json as _json
+
+        tmp_paths: list[str] = []
+        result = self._call_redirect(
+            "Read", ".editor/full_state.json", self._SAMPLE_STATE, tmp_paths
+        )
+        specific = getattr(result, "hookSpecificOutput", {})
+        tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
+        try:
+            with open(tmp_path, encoding="utf-8") as fh:
+                data = _json.load(fh)
+            self.assertEqual(data, self._SAMPLE_STATE)
+        finally:
+            if os.path.isfile(tmp_path):
+                os.unlink(tmp_path)
+
+    def test_redirect_appends_path_to_tmp_paths_list(self):
+        """The caller's tmp_paths list must have exactly one new entry."""
+        tmp_paths: list[str] = []
+        self._call_redirect("Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths)
+        self.assertEqual(len(tmp_paths), 1)
+        # Clean up
+        for p in tmp_paths:
+            if os.path.isfile(p):
+                os.unlink(p)
+
+    # ------------------------------------------------------------------
+    # Negative: fall-through conditions
+    # ------------------------------------------------------------------
+
+    def test_fallthrough_when_editor_state_is_none(self):
+        """Condition 2 unmet (editor_state is None) → returns None."""
+        result = self._call_redirect("Read", ".editor/cells.json", None)
+        self.assertIsNone(result)
+
+    def test_fallthrough_for_non_read_tool(self):
+        """Condition 1 unmet (tool_name != 'Read') → returns None."""
+        result = self._call_redirect("Write", ".editor/cells.json", self._SAMPLE_STATE)
+        self.assertIsNone(result)
+
+    def test_fallthrough_for_non_editor_path(self):
+        """Condition 3 unmet (path not in .editor/) → returns None."""
+        result = self._call_redirect("Read", "files/report.txt", self._SAMPLE_STATE)
+        self.assertIsNone(result)
+
+    def test_fallthrough_for_unknown_editor_resource(self):
+        """Path is under .editor/ but stem is not a registered resource → None."""
+        result = self._call_redirect(
+            "Read", ".editor/unknown_resource.json", self._SAMPLE_STATE
+        )
+        self.assertIsNone(result)
+
+    def test_fallthrough_for_editor_subdir_path(self):
+        """.editor/subdir/cells.json must NOT match — only top-level files are virtual."""
+        result = self._call_redirect(
+            "Read", ".editor/subdir/cells.json", self._SAMPLE_STATE
+        )
+        self.assertIsNone(result)
+
+    def test_no_tmpfile_created_on_fallthrough(self):
+        """No tempfile should be created when the helper returns None."""
+        tmp_paths: list[str] = []
+        self._call_redirect("Read", "files/other.txt", self._SAMPLE_STATE, tmp_paths)
+        self.assertEqual(tmp_paths, [])
+
+    # ------------------------------------------------------------------
+    # Tempfile cleanup contract
+    # ------------------------------------------------------------------
+
+    def test_tmp_paths_list_used_for_cleanup(self):
+        """All redirect tempfiles appended to tmp_paths can be deleted via unlink."""
+        tmp_paths: list[str] = []
+        # Trigger two redirects to two different resources.
+        self._call_redirect("Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths)
+        self._call_redirect(
+            "Read", ".editor/session.json", self._SAMPLE_STATE, tmp_paths
+        )
+        self.assertEqual(len(tmp_paths), 2)
+        all_exist = all(os.path.isfile(p) for p in tmp_paths)
+        self.assertTrue(all_exist, "All created tempfiles must exist before cleanup")
+        for p in tmp_paths:
+            os.unlink(p)
+        all_gone = all(not os.path.exists(p) for p in tmp_paths)
+        self.assertTrue(all_gone, "All tempfiles must be gone after cleanup")
+
+    def test_absolute_editor_path_is_redirected(self):
+        """Absolute paths like /workspace/sess/.editor/cells.json must be intercepted."""
+        tmp_paths: list[str] = []
+        result = self._call_redirect(
+            "Read",
+            "/workspace/sess-abc/.editor/cells.json",
+            self._SAMPLE_STATE,
+            tmp_paths,
+        )
+        self.assertIsNotNone(result)
+        for p in tmp_paths:
+            if os.path.isfile(p):
+                os.unlink(p)
 
 
 # ---------------------------------------------------------------------------

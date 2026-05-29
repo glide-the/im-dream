@@ -1,6 +1,9 @@
 # [Input] Consume editor_index.py, editor_tool.py helpers.
 # [Output] Unit tests for editor virtual index read helpers and MCP tool handlers.
 # [Sync] 2026-05-28: initial test suite — editor_index and editor_tool.
+# [Sync] 2026-05-29: add SDK stub import; add boundary-path tests for is_editor_index_path
+#                    (sub-path, unknown stem, README, deep absolute path) and degraded-state
+#                    tests for get_editor_resource_data (missing fields → empty list / None).
 
 """Unit tests for the .editor/ virtual index and EditorEngine MCP read tools."""
 from __future__ import annotations
@@ -17,6 +20,8 @@ from unittest.mock import patch
 import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import tests._sdk_stubs  # noqa: F401 — must precede any libs.claude_agent_kit import
 
 from libs.claude_agent_kit.server.editor_index import (
     EDITOR_RESOURCES,
@@ -52,6 +57,32 @@ class TestIsEditorIndexPath(unittest.TestCase):
 
     def test_false_for_none_like_empty(self):
         self.assertFalse(is_editor_index_path(""))
+
+    def test_false_for_sub_path_under_editor(self):
+        """Only top-level .editor/ files are virtual; subdirectories are not."""
+        self.assertFalse(is_editor_index_path(".editor/subdir/cells.json"))
+
+    def test_false_for_unknown_stem_in_editor(self):
+        self.assertFalse(is_editor_index_path(".editor/unknown_resource.json"))
+
+    def test_true_for_full_state_resource(self):
+        self.assertTrue(is_editor_index_path(".editor/full_state.json"))
+
+    def test_true_for_commentors_resource(self):
+        self.assertTrue(is_editor_index_path(".editor/commentors.json"))
+
+    def test_true_for_tasks_resource(self):
+        self.assertTrue(is_editor_index_path(".editor/tasks.json"))
+
+    def test_false_for_readme_in_editor(self):
+        """README.md is not a virtual resource."""
+        self.assertFalse(is_editor_index_path(".editor/README.md"))
+
+    def test_recognises_deep_absolute_path(self):
+        """Absolute path with multiple parent directories must still match."""
+        self.assertTrue(
+            is_editor_index_path("/some/deep/workspace/sess-abc/.editor/full_state.json")
+        )
 
 
 class TestResolveEditorResource(unittest.TestCase):
@@ -98,6 +129,31 @@ class TestGetEditorResourceData(unittest.TestCase):
 
     def test_unknown_resource_returns_empty(self):
         result = get_editor_resource_data(".editor/unknown.json", self._STATE)
+        self.assertEqual(result, {})
+
+    def test_cells_missing_from_state_returns_empty_list(self):
+        """When editor_state lacks 'cells', the slice returns an empty list."""
+        result = get_editor_resource_data(".editor/cells.json", {})
+        self.assertEqual(result, {"cells": []})
+
+    def test_tasks_missing_from_state_returns_empty_list(self):
+        result = get_editor_resource_data(".editor/tasks.json", {})
+        self.assertEqual(result, {"tasks": []})
+
+    def test_session_missing_fields_returns_none_values(self):
+        """Partial editor_state → session slice fills missing fields with None."""
+        result = get_editor_resource_data(".editor/session.json", {})
+        self.assertIsNone(result.get("id"))
+        self.assertIsNone(result.get("selectedState"))
+        self.assertIsNone(result.get("createdAt"))
+
+    def test_full_state_with_empty_dict(self):
+        """full_state.json with empty state returns the same empty dict."""
+        result = get_editor_resource_data(".editor/full_state.json", {})
+        self.assertEqual(result, {})
+
+    def test_non_editor_path_returns_empty(self):
+        result = get_editor_resource_data("files/other.txt", self._STATE)
         self.assertEqual(result, {})
 
 

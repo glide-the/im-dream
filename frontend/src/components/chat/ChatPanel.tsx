@@ -4,6 +4,7 @@
 // [Sync] 2026-05-25: stop forwarding frontend customer context into chat requests.
 // [Sync] 2026-05-26: hide the empty message surface until chat content or an error exists.
 // [Sync] 2026-05-27: forward currentToolChoice to ChatMessageList so manual-mode tool approvals are shown inline.
+// [Sync] 2026-05-29: accept editorState prop and forward as editor_state in prepareSendMessagesRequest body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -56,6 +57,8 @@ interface ChatPanelProps {
   queuedPromptNonce?: number;
   openFileDialogSignal?: number;
   onConversationStart?: () => void;
+  /** Current EditorState snapshot forwarded to the backend agent runner via editor_state request field. */
+  editorState?: Record<string, unknown> | null;
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -79,6 +82,7 @@ export default function ChatPanel({
   queuedPromptNonce,
   openFileDialogSignal,
   onConversationStart,
+  editorState,
 }: ChatPanelProps) {
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
@@ -156,6 +160,7 @@ export default function ChatPanel({
           allowedMcpServers: {},
           attachments,
           systemPrompt: systemConfig?.system_prompt,
+          ...(editorState != null ? { editor_state: editorState } : {}),
         };
 
         setTimeout(() => {

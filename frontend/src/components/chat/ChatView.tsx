@@ -4,6 +4,7 @@
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
 // [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
 // [Sync] 2026-05-26: mark conversations started when loaded history contains messages.
+// [Sync] 2026-05-29: accept editorState prop and forward to ChatPanel for editor_state request injection.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -39,6 +40,8 @@ interface ChatViewProps {
   threadId?: string;
   onNewChat?: () => void;
   quickActions?: QuickActionCardItem[];
+  /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
+  editorState?: Record<string, unknown> | null;
 }
 
 async function createThread(): Promise<string | null> {
@@ -102,6 +105,7 @@ export default function ChatView({
   threadId: initialThreadId,
   onNewChat,
   quickActions = QUICK_ACTION_CARDS,
+  editorState,
 }: ChatViewProps) {
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
@@ -296,6 +300,7 @@ export default function ChatView({
               queuedAttachments={queuedAttachments}
               queuedPromptNonce={queuedPromptNonce}
               inputPlaceholder="Ask Ink & Memory…"
+              editorState={editorState}
               onConversationStart={() => {
                 setHasConversationStarted(true);
                 void reloadThreads();

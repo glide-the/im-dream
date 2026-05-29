@@ -5,6 +5,8 @@
 >          enters the Agent context assembly pipeline as a `<workspace_context>` block.
 > [Pos] context-design-doc in `docs/design/claude-agent/edit-point`
 > [Sync] 2026-05-28: initial design — workspace context integration for edit-point.
+> [Sync] 2026-05-29: add Section 9 — editor_state role and loading path; clarify two-layer architecture (prompt layer vs runtime layer).
+> [Sync] 2026-05-29: §9.3 add reference to editor-state-lifecycle.md for complete lifecycle documentation.
 
 # 工作空间上下文接入设计
 
@@ -24,6 +26,7 @@ Scope: Design only — 不含实现代码
 6. [失败处理](#6-失败处理)
 7. [时序图](#7-时序图)
 8. [实现清单](#8-实现清单)
+9. [`editor_state` 的角色与加载路径](#9-editor_state-的角色与加载路径)
 
 ---
 
@@ -265,3 +268,116 @@ sequenceDiagram
 - [ ] 为 `build_workspace_context_block` 添加单元测试：验证 `{cwd}` 占位符替换、块边界标签存在性、`cwd=None` 不调用的守卫逻辑
 - [ ] 更新 `docs/design/claude-agent/edit-point/.folder.md`，在文件表格中新增本文档行
 - [ ] 在 `workspace-adapter.md` 末尾增加指向本文档的"上下文接入"参考章节
+
+---
+
+## 9. `editor_state` 的角色与加载路径
+
+### 9.1 "不依赖 `editor_state`" 的精确含义
+
+本文档第 3.2、5.1、5.2 节多次出现 "不依赖 `editor_state`" 的表述。这一表述**仅针对 `<workspace_context>` 提示词块的内容**，而非整个 edit-point 子系统。
+
+完整的 edit-point 上下文由**两个独立层**组成：
+
+| 层 | 组件 | 依赖项 | 作用 |
+|----|------|--------|------|
+| **Prompt 层**（静态导航地图） | `<workspace_context>` 块 | 仅 `cwd` | 告知 Agent 工作空间布局、`.editor/` 的存在及读写规则 |
+| **运行时层**（实时数据注入） | PreToolUse 钩子 + Editor MCP 子进程 | `editor_state` | 当 Agent 实际调用 `read_file(".editor/...")` 时，将内存快照动态注入为可读数据 |
+
+两层相互独立，但**缺一不可**：
+
+- 无 `<workspace_context>` 块：Agent 不知道 `.editor/` 目录的存在，不会主动读取
+- 无 `editor_state`：Agent 知道 `.editor/` 存在并尝试读取，但 PreToolUse 钩子不满足触发条件（`opts.editor_state is not None` 为 `False`），只读到空占位符 `{}`
+- 两者都有：Agent 获得完整的工作空间感知能力，读取 `.editor/` 时得到实时文档数据
+
+### 9.2 `editor_state` 的两个运行时作用
+
+`AgentRunOptions.editor_state` 非空时，`agent_runner.py` 在运行时激活两个机制：
+
+#### 作用 A：PreToolUse 虚拟索引重定向
+
+`_pre_tool_use_hook` 中的拦截条件（三个条件**同时满足**）：
+
+```python
+if tool_name == "Read" and opts.editor_state is not None:
+    if is_editor_index_path(raw_path):
+        # 写临时文件 → updatedInput 重定向 → Agent 读到实时数据
+```
+
+当 `editor_state` 为 `None` 时，拦截条件不满足，Agent 读到占位符 `{}`。
+
+#### 作用 B：Editor MCP 子进程启动
+
+```python
+if (
+    opts.editor_state is not None
+    and any(tool.startswith("mcp__editor__") for tool in effective_allowed_tools)
+):
+    # 将 editor_state 序列化到临时文件
+    # 启动 editor_mcp_stdio 子进程（INK_EDITOR_STATE_FILE 环境变量传入路径）
+    mcp_servers["editor"] = _editor_mcp_stdio_config(editor_state_file_path)
+```
+
+Editor MCP 子进程提供结构化只读工具（`mcp__editor__list_segments`、`mcp__editor__read_segment` 等），是 `read_file` 路径之外的第二条等价读取路径。`editor_state` 为 `None` 时，子进程不启动，这些 MCP 工具不可用。
+
+### 9.3 加载路径：从前端到 `AgentRunOptions`
+
+```
+前端 → HTTP API 请求（携带 editor_state 快照）
+  ↓
+ClaudeAgentRunRequest.editor_state     ← 前端传入的 EditorState JSON
+  ↓
+ClaudeAgentService.assemble_context()
+  ↓
+AgentRunOptions(
+    thread_id = ...,
+    user_message = content_blocks,   ← 包含 <workspace_context> 块
+    cwd = resolved_cwd,
+    editor_state = request.editor_state,   ← 透传到运行时
+    allowed_tools = [..., "mcp__editor__*"],   ← 文档编辑模式下包含 Editor MCP 工具
+    mcp_env = ...,
+)
+  ↓
+ClaudeAgentRunner.run_streaming(opts, callbacks)
+  ├─ Prompt 层：user_message 中的 <workspace_context> 块
+  │    └─ Agent 在收到消息时读取，了解工作空间布局
+  └─ 运行时层：opts.editor_state 驱动
+       ├─ PreToolUse 钩子：Read .editor/* → 临时文件重定向
+       └─ Editor MCP 子进程：mcp__editor__* 工具服务
+```
+
+**`editor_state` 的来源**：前端在发起文档编辑相关 Agent 请求时，将当前 `EditorEngine` 的 `EditorState` 快照序列化为 JSON，随请求体一并传送。后端 `assemble_context` 无需额外从数据库读取，直接将其透传至 `AgentRunOptions`。
+
+> 完整的 `editor_state` 生命周期（数据结构定义、五阶段说明、业务时序图、不持久化决策）详见独立设计文档：
+> **[`editor-state-lifecycle.md`](./editor-state-lifecycle.md)**
+
+### 9.4 `editor_state` 存在与否的行为对比
+
+| 场景 | `editor_state` | `<workspace_context>` 块 | `.editor/` 读取结果 | Editor MCP |
+|------|---------------|--------------------------|---------------------|------------|
+| 纯对话轮次（pet chat 等） | `None` | 不注入（无 `cwd`）| N/A | 不启动 |
+| 工作空间对话（无编辑器） | `None` | 注入（描述 `.editor/` 机制）| 占位符 `{}` | 不启动 |
+| 文档编辑轮次 | 非 `None` | 注入（同上）| 实时 EditorState 数据 | 启动 |
+
+**纯对话轮次**（`cwd` 为 `None`）：`<workspace_context>` 块本身也不注入（`build_workspace_context_block` 仅在 `cwd` 非空时调用），`editor_state` 为 `None`，两层均不激活。
+
+**工作空间对话但无编辑器**（`cwd` 非空，`editor_state` 为 `None`）：`<workspace_context>` 块注入，描述 `.editor/` 的存在和机制。若 Agent 确实尝试读取 `.editor/`，得到占位符 `{}`，这是设计预期行为（见 §3.2、§6）。
+
+**文档编辑轮次**（`cwd` 非空，`editor_state` 非空）：两层完整激活，Agent 可获得实时文档数据并调用结构化 Editor MCP 工具。
+
+### 9.5 `editor_state` 与 `allowed_tools` 的协同条件
+
+Editor MCP 子进程的启动同时需要满足两个条件：
+
+```python
+opts.editor_state is not None
+AND
+any(tool.startswith("mcp__editor__") for tool in effective_allowed_tools)
+```
+
+`allowed_tools` 中是否包含 `mcp__editor__*` 工具，由业务层（`ClaudeAgentService`）在构建 `AgentRunOptions` 时根据会话类型决定：
+
+- **文档编辑会话**：传入 `editor_state` + 在 `allowed_tools` 中包含 `mcp__editor__*`
+- **纯对话会话**：不传 `editor_state`，`allowed_tools` 中不包含 `mcp__editor__*`
+
+这一双重条件设计保证：即使 `allowed_tools` 错误包含了 Editor MCP 工具名，在 `editor_state` 为 `None` 时子进程也不会启动（避免启动一个无法服务数据的 MCP 服务器）。
