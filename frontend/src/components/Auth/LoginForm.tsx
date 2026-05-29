@@ -41,7 +41,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
       backgroundColor: 'var(--color-bg-paper)',
       border: '2px solid var(--color-border-paper)',
       borderRadius: '12px',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+      boxShadow: '0 4px 12px var(--color-shadow-soft)',
       fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif"
     }}>
       <h2 style={{
@@ -58,11 +58,11 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
         <div style={{
           padding: '12px',
           marginBottom: '16px',
-          backgroundColor: '#fee',
-          border: '1px solid #fcc',
+          backgroundColor: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)',
           borderRadius: '6px',
           fontSize: '14px',
-          color: '#c33'
+          color: 'var(--color-state-danger)'
         }}>
           {error}
         </div>
@@ -75,7 +75,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
             marginBottom: '6px',
             fontSize: '14px',
             fontWeight: 500,
-            color: '#555'
+            color: 'var(--color-text-secondary)'
           }}>
             Email
           </label>
@@ -92,6 +92,8 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
               borderRadius: '6px',
               fontSize: '15px',
               fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
+              backgroundColor: 'var(--color-bg-surface-solid)',
+              color: 'var(--color-text-body)',
               boxSizing: 'border-box'
             }}
           />
@@ -103,7 +105,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
             marginBottom: '6px',
             fontSize: '14px',
             fontWeight: 500,
-            color: '#555'
+            color: 'var(--color-text-secondary)'
           }}>
             Password
           </label>
@@ -120,6 +122,8 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
               borderRadius: '6px',
               fontSize: '15px',
               fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
+              backgroundColor: 'var(--color-bg-surface-solid)',
+              color: 'var(--color-text-body)',
               boxSizing: 'border-box'
             }}
           />
@@ -133,8 +137,8 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
             padding: '12px',
             border: 'none',
             borderRadius: '6px',
-            backgroundColor: isSubmitting ? '#ccc' : 'var(--color-action-link)',
-            color: 'white',
+            backgroundColor: isSubmitting ? 'var(--color-disabled-bg)' : 'var(--color-action-link)',
+            color: 'var(--color-text-on-action)',
             fontSize: '16px',
             fontWeight: 600,
             cursor: isSubmitting ? 'not-allowed' : 'pointer',
@@ -143,7 +147,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
           }}
           onMouseEnter={(e) => {
             if (!isSubmitting) {
-              e.currentTarget.style.backgroundColor = '#357abd';
+              e.currentTarget.style.backgroundColor = 'var(--color-action-link-hover)';
             }
           }}
           onMouseLeave={(e) => {

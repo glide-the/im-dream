@@ -48,7 +48,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
       backgroundColor: 'var(--color-bg-paper)',
       border: '2px solid var(--color-border-paper)',
       borderRadius: '12px',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+      boxShadow: '0 4px 12px var(--color-shadow-soft)',
       fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif"
     }}>
       <h2 style={{
@@ -65,11 +65,11 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
         <div style={{
           padding: '12px',
           marginBottom: '16px',
-          backgroundColor: '#fee',
-          border: '1px solid #fcc',
+          backgroundColor: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)',
+          border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)',
           borderRadius: '6px',
           fontSize: '14px',
-          color: '#c33'
+          color: 'var(--color-state-danger)'
         }}>
           {error}
         </div>
@@ -82,7 +82,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
             marginBottom: '6px',
             fontSize: '14px',
             fontWeight: 500,
-            color: '#555'
+            color: 'var(--color-text-secondary)'
           }}>
             Email
           </label>
@@ -98,7 +98,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
               border: '1px solid var(--color-border-paper)',
               borderRadius: '6px',
               fontSize: '15px',
-              fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
+              fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif", backgroundColor: 'var(--color-bg-surface-solid)', color: 'var(--color-text-body)',
               boxSizing: 'border-box'
             }}
           />
@@ -110,7 +110,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
             marginBottom: '6px',
             fontSize: '14px',
             fontWeight: 500,
-            color: '#555'
+            color: 'var(--color-text-secondary)'
           }}>
             Password
           </label>
@@ -126,14 +126,14 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
               border: '1px solid var(--color-border-paper)',
               borderRadius: '6px',
               fontSize: '15px',
-              fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
+              fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif", backgroundColor: 'var(--color-bg-surface-solid)', color: 'var(--color-text-body)',
               boxSizing: 'border-box'
             }}
           />
           <div style={{
             marginTop: '4px',
             fontSize: '12px',
-            color: '#888'
+            color: 'var(--color-text-muted)'
           }}>
             At least 6 characters
           </div>
@@ -145,7 +145,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
             marginBottom: '6px',
             fontSize: '14px',
             fontWeight: 500,
-            color: '#555'
+            color: 'var(--color-text-secondary)'
           }}>
             Display Name (Optional)
           </label>
@@ -160,7 +160,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
               border: '1px solid var(--color-border-paper)',
               borderRadius: '6px',
               fontSize: '15px',
-              fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
+              fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif", backgroundColor: 'var(--color-bg-surface-solid)', color: 'var(--color-text-body)',
               boxSizing: 'border-box'
             }}
           />
@@ -174,8 +174,8 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
             padding: '12px',
             border: 'none',
             borderRadius: '6px',
-            backgroundColor: isSubmitting ? '#ccc' : 'var(--color-action-link)',
-            color: 'white',
+            backgroundColor: isSubmitting ? 'var(--color-disabled-bg)' : 'var(--color-action-link)',
+            color: 'var(--color-text-on-action)',
             fontSize: '16px',
             fontWeight: 600,
             cursor: isSubmitting ? 'not-allowed' : 'pointer',
@@ -184,7 +184,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
           }}
           onMouseEnter={(e) => {
             if (!isSubmitting) {
-              e.currentTarget.style.backgroundColor = '#357abd';
+              e.currentTarget.style.backgroundColor = 'var(--color-action-link-hover)';
             }
           }}
           onMouseLeave={(e) => {

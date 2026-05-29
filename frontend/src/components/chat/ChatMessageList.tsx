@@ -209,17 +209,17 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   const { command, output, exitCode } = parseTerminalOutput(outputText);
                   const exitCodeNumber = exitCode != null ? Number(exitCode) : null;
                   return (
-                    <div key={partKey} style={{ overflow: 'hidden', borderRadius: '12px', background: '#1a1a1a', color: '#f3eee6' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1rem', fontSize: '0.75rem', color: '#b0b0b0' }}>
+                    <div key={partKey} style={{ overflow: 'hidden', borderRadius: '12px', background: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                         <span>‹ Terminal</span>
-                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? '#22c55e' : '#f3eee6', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
+                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? 'var(--color-state-success)' : 'var(--color-code-text)', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
                       </div>
                       <div style={{ padding: '0 1rem 0.9rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8rem', lineHeight: 1.65 }}>
                         {command ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>{command}</span></p> : null}
-                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', color: '#c9c9c9' }}>{output || outputText}</pre>
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', color: 'var(--color-code-text)' }}>{output || outputText}</pre>
                       </div>
-                      {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? '#22c55e' : '#d9534f' }}>Exit code: {exitCode}</div> : null}
-                      {isError && exitCodeNumber == null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontSize: '0.75rem', color: '#d9534f' }}>Error</div> : null}
+                      {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? 'var(--color-state-success)' : 'var(--color-state-error)' }}>Exit code: {exitCode}</div> : null}
+                      {isError && exitCodeNumber == null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontSize: '0.75rem', color: 'var(--color-state-error)' }}>Error</div> : null}
                     </div>
                   );
                 }
@@ -283,7 +283,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
       })}
 
       {shouldShowLoadingIndicator ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
-      {error ? <div style={{ alignSelf: 'flex-start', maxWidth: '80%', borderRadius: '18px', padding: '0.8rem 0.95rem', background: 'rgba(217,83,79,0.1)', color: '#d9534f', fontSize: '0.85rem' }}>Error: {error.message}</div> : null}
+      {error ? <div style={{ alignSelf: 'flex-start', maxWidth: '80%', borderRadius: '18px', padding: '0.8rem 0.95rem', background: 'color-mix(in srgb, var(--color-state-error) 10%, transparent)', color: 'var(--color-state-error)', fontSize: '0.85rem' }}>Error: {error.message}</div> : null}
     </div>
   );
 }
