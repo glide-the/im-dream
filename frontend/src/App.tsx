@@ -4,6 +4,7 @@
 // [Sync] 2026-05-25: remove ChatView settings-navigation prop after left chat nav Settings button deletion.
 // [Sync] 2026-05-29: pass state as editorState prop to ChatView so agent receives current EditorState snapshot.
 // [Sync] 2026-05-29: add handleEditorWriteConfirmed callback; reloads session from DB after agent MCP write tool approved.
+// [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -128,6 +129,8 @@ export default function App() {
   }, [currentLanguage, i18n]);
 
   const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat'>('writing');
+  const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
+  const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
 
@@ -321,6 +324,13 @@ export default function App() {
     if (currentView === 'writing') {
       // Force re-render to recalculate comment positions
       setRefsReady(prev => prev + 1);
+    }
+  }, [currentView]);
+
+  // @@@ Preserve ChatView local state after the first visit while avoiding eager thread creation on app load.
+  useEffect(() => {
+    if (currentView === 'chat') {
+      setHasOpenedChatView(true);
     }
   }, [currentView]);
 
@@ -1825,16 +1835,17 @@ export default function App() {
         </div>
       )}
 
-      {currentView === 'chat' && (
+      {shouldRenderChatView && (
         <div style={{
           position: 'fixed',
           top: viewTopOffset,
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
+          display: currentView === 'chat' ? 'block' : 'none',
           overflow: 'hidden'
         }}>
-          <ChatView editorState={state as Record<string, unknown> | null} onEditorWriteConfirmed={handleEditorWriteConfirmed} />
+          <ChatView editorState={state ? (state as unknown as Record<string, unknown>) : null} onEditorWriteConfirmed={handleEditorWriteConfirmed} />
         </div>
       )}
 
