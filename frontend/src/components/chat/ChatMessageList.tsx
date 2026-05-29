@@ -4,6 +4,7 @@
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
 // [Sync] 2026-05-27: add toolChoice prop; render non-completed tool parts in manual mode directly with isManualToolInvocation=true so Approve/Cancel UI is shown.
 // [Sync] 2026-05-29: import isEditorWriteTool; render editor write tool parts directly (not collapsed) with isManualToolInvocation=true so specialized approval UI shows immediately.
+// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ToolMessagePart for editor write tools.
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,6 +26,8 @@ interface ChatMessageListProps {
   toolChoice?: string;
   setMessages?: UseChatHelpers<UIMessage>['setMessages'];
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
+  /** Forwarded to ToolMessagePart for editor write tools — triggers Writing view reload. */
+  onEditorWriteConfirmed?: () => void;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -77,7 +80,7 @@ function isAskUserQuestionTool(part: ToolUIPart | DynamicToolUIPart): boolean {
   return ASK_USER_TOOL_NAMES.has(name) || name.endsWith('__ask_user') || name.endsWith('__askuserquestion');
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
 
@@ -196,7 +199,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 if (needsEditorWriteApproval) {
                   return (
                     <div key={partKey}>
-                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} />
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} />
                     </div>
                   );
                 }

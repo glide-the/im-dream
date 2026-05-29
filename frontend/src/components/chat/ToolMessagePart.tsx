@@ -5,6 +5,7 @@
 // [Sync] 2026-05-27: when shouldShowAskUserUI is true, render only AskUserQuestionUI (no collapsible header) for clean UX.
 // [Sync] 2026-05-27: add !isCompleted guard to shouldShowApprovalUI so Approve/Cancel disappears after tool completes in manual mode.
 // [Sync] 2026-05-29: integrate EditorWriteApprovalUI for mcp__editor__ write tools; detect by isEditorWriteTool().
+// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; call after successful editor write approve to trigger Writing view reload.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
@@ -56,9 +57,11 @@ interface ToolMessagePartProps {
   isLoading?: boolean;
   isManualToolInvocation?: boolean;
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
+  /** Called after an editor write tool is successfully confirmed so the Writing view can reload. */
+  onEditorWriteConfirmed?: () => void;
 }
 
-export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToolInvocation, addToolResult }: ToolMessagePartProps) {
+export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToolInvocation, addToolResult, onEditorWriteConfirmed }: ToolMessagePartProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
   const toolCallId = part.toolCallId;
@@ -181,13 +184,14 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
       if (result.ok ?? result.success) {
         addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
         setConfirmationStatus('confirmed');
+        onEditorWriteConfirmed?.();
         return;
       }
     } catch {
       // fall through
     }
     setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
+  }, [addToolResult, confirmationStatus, onEditorWriteConfirmed, threadId, toolCallId, toolName]);
 
   const handleEditorWriteReject = useCallback(async (reason?: string) => {
     if (confirmationStatus !== 'idle') return;

@@ -6,6 +6,7 @@
 // [Sync] 2026-05-27: forward currentToolChoice to ChatMessageList so manual-mode tool approvals are shown inline.
 // [Sync] 2026-05-29: accept editorState prop and forward as editor_state in prepareSendMessagesRequest body.
 // [Sync] 2026-05-29: default resume=true in every claude-agent request body.
+// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatMessageList.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -60,6 +61,8 @@ interface ChatPanelProps {
   onConversationStart?: () => void;
   /** Current EditorState snapshot forwarded to the backend agent runner via editor_state request field. */
   editorState?: Record<string, unknown> | null;
+  /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
+  onEditorWriteConfirmed?: () => void;
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -84,6 +87,7 @@ export default function ChatPanel({
   openFileDialogSignal,
   onConversationStart,
   editorState,
+  onEditorWriteConfirmed,
 }: ChatPanelProps) {
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
@@ -275,6 +279,7 @@ export default function ChatPanel({
             toolChoice={currentToolChoice}
             setMessages={setMessages}
             sendMessage={sendMessage}
+            onEditorWriteConfirmed={onEditorWriteConfirmed}
           />
           <div ref={bottomRef} aria-hidden="true" />
         </div>

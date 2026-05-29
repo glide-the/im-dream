@@ -3,6 +3,7 @@
 // [Pos] frontend app-root node in frontend/src
 // [Sync] 2026-05-25: remove ChatView settings-navigation prop after left chat nav Settings button deletion.
 // [Sync] 2026-05-29: pass state as editorState prop to ChatView so agent receives current EditorState snapshot.
+// [Sync] 2026-05-29: add handleEditorWriteConfirmed callback; reloads session from DB after agent MCP write tool approved.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -656,6 +657,26 @@ export default function App() {
   const handleToggleAlign = useCallback(() => {
     setCommentsAligned(prev => !prev);
   }, []);
+
+  // @@@ Reload editor state from database after Agent MCP write tool is confirmed
+  const handleEditorWriteConfirmed = useCallback(async () => {
+    if (!isAuthenticated || !state?.id || !engineRef.current) return;
+    try {
+      const { getSession } = await import('./api/voiceApi');
+      const sessionData = await getSession(state.id);
+      if (sessionData?.editor_state) {
+        const refreshed: EditorState = {
+          ...sessionData.editor_state,
+          id: state.id,
+        };
+        engineRef.current.loadState(refreshed);
+        setState({ ...engineRef.current.getState() });
+        setRefsReady(prev => prev + 1);
+      }
+    } catch (error) {
+      console.error('Failed to reload editor state after agent write:', error);
+    }
+  }, [isAuthenticated, state?.id]);
 
   // @@@ Handle localStorage migration
   const handleMigrateData = useCallback(async () => {
@@ -1813,7 +1834,7 @@ export default function App() {
           bottom: mobileBottomOffset,
           overflow: 'hidden'
         }}>
-          <ChatView editorState={state as Record<string, unknown> | null} />
+          <ChatView editorState={state as Record<string, unknown> | null} onEditorWriteConfirmed={handleEditorWriteConfirmed} />
         </div>
       )}
 

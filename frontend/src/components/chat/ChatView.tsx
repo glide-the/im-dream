@@ -5,6 +5,7 @@
 // [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
 // [Sync] 2026-05-26: mark conversations started when loaded history contains messages.
 // [Sync] 2026-05-29: accept editorState prop and forward to ChatPanel for editor_state request injection.
+// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatPanel so Writing view reloads after agent writes.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -42,6 +43,8 @@ interface ChatViewProps {
   quickActions?: QuickActionCardItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
   editorState?: Record<string, unknown> | null;
+  /** Called when an editor write tool is confirmed so the Writing view can reload. */
+  onEditorWriteConfirmed?: () => void;
 }
 
 async function createThread(): Promise<string | null> {
@@ -106,6 +109,7 @@ export default function ChatView({
   onNewChat,
   quickActions = QUICK_ACTION_CARDS,
   editorState,
+  onEditorWriteConfirmed,
 }: ChatViewProps) {
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
@@ -301,6 +305,7 @@ export default function ChatView({
               queuedPromptNonce={queuedPromptNonce}
               inputPlaceholder="Ask Ink & Memory…"
               editorState={editorState}
+              onEditorWriteConfirmed={onEditorWriteConfirmed}
               onConversationStart={() => {
                 setHasConversationStarted(true);
                 void reloadThreads();
