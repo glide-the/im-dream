@@ -1,8 +1,12 @@
 # [Input] None — self-contained prompt template module.
+#         Runtime dependency: libs.claude_agent_kit.server.editor_index.EDITOR_RESOURCES
+#         defines the virtual resource names embedded in this template.
 # [Output] Provide build_workspace_context_block to ClaudeAgentContextBuilder.build_user_message.
 # [Pos] workspace-context-prompt node in backend/claude_agent
 # [Sync] 2026-05-28: initial implementation — standalone workspace context prompt
 #                    for edit-point context assembly integration.
+# [Sync] 2026-05-29: add Document editing workflow section so Agent receives in-message
+#                    scheduling guidance alongside the capability inventory.
 
 """Workspace context prompt for the Ink & Memory Claude Agent.
 
@@ -68,6 +72,15 @@ Writing document content (all require human confirmation):
   CONSTRAINT: Do NOT write files directly inside .editor/. Direct writes are
   silently ignored — placeholder content is never treated as real state.
   All document mutations must go through the MCP write tools listed above.
+
+Document editing workflow (follow this order every editing session):
+  Step 1 — Orient: read_file(".editor/cells.json") to load the full cell array.
+           Optionally read ".editor/session.json" for mood / metadata context.
+  Step 2 — Analyse: digest content, then share observations or draft proposals
+           with the user before making any changes.
+  Step 3 — Mutate via MCP write tools only (each requires human confirmation):
+           write_segment / delete_segment / insert_widget / reply_to_comment
+  Step 4 — Verify: after confirmation, re-read updated cells to confirm the change.
 </workspace_context>"""
 
 

@@ -1,8 +1,8 @@
 # EditorState 虚拟索引适配器
 
-Status: Draft  
-Updated: 2026-05-28  
-Scope: Design only — 不含实现代码
+Status: Updated  
+Updated: 2026-05-29  
+Scope: Design + 实现状态同步
 
 ---
 
@@ -437,6 +437,7 @@ Agent 运行后（finally 块）
 ### 10.2 `agent_runner.py`（`_pre_tool_use_hook` 拦截）
 
 - [x] `_editor_redirect_tmp_paths: list[str]` — 本轮临时文件路径收集器（用于 finally 清理）
+- [x] `_apply_editor_index_redirect` 模块级辅助函数（可独立单测，从 `_pre_tool_use_hook` 委托调用）
 - [x] `_pre_tool_use_hook` 中 `.editor/` 读取拦截块（早于工具确认逻辑）：
   - 条件：`tool_name == "Read"` 且 `opts.editor_state is not None` 且 `is_editor_index_path(path)`
   - `get_editor_resource_data(path, editor_state)` 提取数据
@@ -451,15 +452,31 @@ Agent 运行后（finally 块）
 - [x] `_init_editor_index(workspace)` — 创建 `.editor/` 占位符目录 + README.md（说明虚拟重定向机制）
 - [x] `init_workspace(session_id)` 末尾调用 `_init_editor_index`
 
-### 10.4 单元测试（留 Task 3）
+### 10.4 `editor_tool.py`（MCP 工具处理函数 — 使用 editor_index.py 统一映射源）
 
-- [ ] `test_is_editor_index_path`：绝对路径、相对路径、非 `.editor/` 路径、子路径各场景
-- [ ] `test_get_editor_resource_data`：cells / session / full_state 各映射，`editor_state` 缺字段降级
-- [ ] `test_pre_tool_use_hook_editor_redirect`：mock hook，验证临时文件内容和 `updatedInput`
-- [ ] `test_pre_tool_use_hook_fallthrough`：`editor_state=None` 时不触发拦截
-- [ ] `test_editor_redirect_tmp_cleanup`：finally 块正确清理所有临时文件
+`editor_tool.py` 曾直接硬编码 EditorState 字段名（`state.get("cells")` 等），与 `editor_index.py` 的 `EDITOR_RESOURCES` 定义重复，违反统一映射规则。
 
-### 10.5 文档同步
+**修复**（2026-05-29）：
+
+- [x] 从 `editor_index.py` 导入 `EDITOR_RESOURCES` 和 `get_editor_resource_data`
+- [x] 更新 `[Input]` 头部引用 `editor_index.py` 的 `EDITOR_RESOURCES`
+- [x] `_list_segments` / `_read_segment` 通过 `EDITOR_RESOURCES["cells"]` 获取字段名
+- [x] `_read_session_meta` 通过 `get_editor_resource_data(".editor/session.json", state)` 提取数据
+- [x] `_list_comments` / `_read_comment` 通过 `EDITOR_RESOURCES["commentors"]` 获取字段名
+
+### 10.5 `context_builder.py`（系统提示词 + 上下文装配）
+
+- [x] 在 `_SYSTEM_PROMPT_TEMPLATE` 中追加 `## Edit-Point Workflow` 节：告知 Agent 调度规则（何时读文档、如何分析、如何走写入路径）
+- [x] 更新 `[Input]` 头部引用 `claude_agent.workspace_context`（已导入但未在头部标注）及 `editor_index.py` 路径
+
+### 10.6 单元测试
+
+- [x] `test_is_editor_index_path`：覆盖绝对路径、相对路径、子路径、未知 stem、README
+- [x] `test_get_editor_resource_data`：cells / session / full_state / 缺字段降级
+- [x] `TestEditorIndexRedirectHelper`（`test_claude_agent_runner.py`）：15 个 redirect / fallthrough / cleanup 用例
+- [ ] `test_workspace_context_block`：验证 `{cwd}` 替换、块边界标签、cwd=None 守卫
+
+### 10.7 文档同步
 
 - [x] 更新 `docs/design/claude-agent/edit-point/.folder.md`
 - [x] 更新 `backend/libs/claude_agent_kit/.folder.md`

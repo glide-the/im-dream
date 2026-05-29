@@ -1,5 +1,8 @@
 # [Input] Consume database.list_sessions (via database module import).
 #         Reads INK_AGENT_CONTEXT_SESSIONS env var.
+#         Imports build_workspace_context_block from claude_agent.workspace_context —
+#           that module's template is sourced from the virtual index mapping rules
+#           defined in libs.claude_agent_kit.server.editor_index.EDITOR_RESOURCES.
 # [Output] Provide ClaudeAgentContextBuilder to ClaudeAgentService.
 # [Pos] context-assembly node in backend/claude_agent
 # [Sync] 2026-05-22: rewritten for Ink & Memory; replaces Pawkeyland's pet/persona
@@ -8,6 +11,10 @@
 #                    so that the SDK no longer participates in context processing.
 # [Sync] 2026-05-26: use extract_text_from_parts (message_parts.py) for full UIMessage
 #                    parts protocol (text + file + source-url + workspace-file).
+# [Sync] 2026-05-29: add Edit-Point Workflow section to _SYSTEM_PROMPT_TEMPLATE so Agent
+#                    receives scheduling guidance (when/how to use .editor/ read and MCP
+#                    write tools) in the system prompt, not only in the workspace_context
+#                    user-message block. Fix [Input] header to reference workspace_context.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -70,6 +77,28 @@ Principles:
 - Do not lecture or give unsolicited advice; ask questions that open new avenues.
 - Respect privacy: treat all journal content as confidential.
 - Respond in the same language the user writes in.
+
+## Edit-Point Workflow
+
+When the user message includes a <workspace_context> block, you are in a document-editing
+session.  Follow this scheduling workflow for every editing-related request:
+
+1. Orient yourself first — call read_file(".editor/cells.json") to load all document cells
+   (TextCell / WidgetCell array).  For session metadata (mood state, creation time) also
+   call read_file(".editor/session.json").
+2. Analyse before proposing — digest the full content, then share observations or draft
+   suggestions with the user before making any changes.
+3. Mutate via MCP write tools only — all document modifications require human confirmation
+   before execution.  Use these tools exclusively:
+     write_segment(cellId, text, reason)     — replace a cell's full text
+     delete_segment(cellId, reason)          — remove a cell (irreversible)
+     insert_widget(widgetType, data, ...)    — insert a new widget cell
+     reply_to_comment(commentId, ...)        — respond to a voice comment thread
+4. Never write directly to .editor/ files — they are virtual placeholders; writing to them
+   has no effect on real document state.  All mutations must go through the MCP write tools.
+
+If no <workspace_context> block is present, treat the turn as a pure-chat exchange and
+respond without attempting to read workspace files.
 
 {recent_sessions_block}\
 """

@@ -10,9 +10,9 @@
 
 # 工作空间上下文接入设计
 
-Status: Draft  
-Updated: 2026-05-28  
-Scope: Design only — 不含实现代码
+Status: Updated  
+Updated: 2026-05-29  
+Scope: Design + 实现状态同步
 
 ---
 
@@ -27,6 +27,7 @@ Scope: Design only — 不含实现代码
 7. [时序图](#7-时序图)
 8. [实现清单](#8-实现清单)
 9. [`editor_state` 的角色与加载路径](#9-editor_state-的角色与加载路径)
+10. [系统提示词 Edit-Point Workflow 指导](#10-系统提示词-edit-point-workflow-指导)
 
 ---
 
@@ -261,13 +262,15 @@ sequenceDiagram
 
 ## 8. 实现清单
 
-- [ ] 在 `backend/claude_agent/workspace_context.py` 中定义 `WORKSPACE_CONTEXT_TEMPLATE` 常量和 `build_workspace_context_block(cwd: str) -> str` 函数
-- [ ] 在 `ClaudeAgentContextBuilder.build_user_message` 中增加 `cwd: Optional[str] = None` 参数
-- [ ] 在 `build_user_message` 中，当 `cwd` 非空时调用 `build_workspace_context_block(cwd)` 并将结果插入 `<runtime_context>` 块之后、用户文本之前
-- [ ] 在 `ClaudeAgentService.assemble_context` 中，将已解析的 `cwd` 传入 `build_user_message` 调用
+- [x] 在 `backend/claude_agent/workspace_context.py` 中定义 `WORKSPACE_CONTEXT_TEMPLATE` 常量和 `build_workspace_context_block(cwd: str) -> str` 函数
+- [x] 在 `ClaudeAgentContextBuilder.build_user_message` 中增加 `cwd: Optional[str] = None` 参数
+- [x] 在 `build_user_message` 中，当 `cwd` 非空时调用 `build_workspace_context_block(cwd)` 并将结果插入 `<runtime_context>` 块之后、用户文本之前
+- [x] 在 `ClaudeAgentService.assemble_context` 中，将已解析的 `cwd` 传入 `build_user_message` 调用
+- [x] 在 `WORKSPACE_CONTEXT_TEMPLATE` 中添加 `Document editing workflow` 节，给出文档读写调度步骤
+- [x] 在 `ClaudeAgentContextBuilder._SYSTEM_PROMPT_TEMPLATE` 中添加 `Edit-Point Workflow` 节，使 Agent 在系统提示词层感知 workflow 调度规则
 - [ ] 为 `build_workspace_context_block` 添加单元测试：验证 `{cwd}` 占位符替换、块边界标签存在性、`cwd=None` 不调用的守卫逻辑
-- [ ] 更新 `docs/design/claude-agent/edit-point/.folder.md`，在文件表格中新增本文档行
-- [ ] 在 `workspace-adapter.md` 末尾增加指向本文档的"上下文接入"参考章节
+- [x] 更新 `docs/design/claude-agent/edit-point/.folder.md`，在文件表格中新增本文档行
+- [x] 在 `workspace-adapter.md` 末尾增加指向本文档的"上下文接入"参考章节
 
 ---
 
@@ -381,3 +384,68 @@ any(tool.startswith("mcp__editor__") for tool in effective_allowed_tools)
 - **纯对话会话**：不传 `editor_state`，`allowed_tools` 中不包含 `mcp__editor__*`
 
 这一双重条件设计保证：即使 `allowed_tools` 错误包含了 Editor MCP 工具名，在 `editor_state` 为 `None` 时子进程也不会启动（避免启动一个无法服务数据的 MCP 服务器）。
+
+---
+
+## 10. 系统提示词 Edit-Point Workflow 指导
+
+### 10.1 缺口分析（已修复）
+
+**原始问题**：`ClaudeAgentContextBuilder._SYSTEM_PROMPT_TEMPLATE` 只描述了 Agent 的写作助手角色，并未告知 Agent 在存在 `<workspace_context>` 时如何调度工具。Agent 因此无法判断：
+
+- 何时应先读取 `.editor/cells.json`
+- 读取后应做什么（分析、讨论、提议修改）
+- 修改文档时该走哪条工具链
+
+**后果**：即使 `<workspace_context>` 出现在用户消息中，Agent 也可能因缺乏调度 workflow 指导而忽略文档工具，直接以纯对话形式回应，无法完成文档编辑任务。
+
+### 10.2 修复方案
+
+在 `_SYSTEM_PROMPT_TEMPLATE` 中追加 `## Edit-Point Workflow` 节（实现于 `backend/claude_agent/context_builder.py`）：
+
+```
+## Edit-Point Workflow
+
+When the user message includes a <workspace_context> block, you are in a
+document-editing session.  Follow this scheduling workflow:
+
+1. Orient yourself first: call read_file(".editor/cells.json") to load all
+   document cells (TextCell / WidgetCell array).  For session metadata
+   (mood state, creation time) also read ".editor/session.json".
+2. Analyse before proposing: understand the full content, then share
+   observations or draft suggestions with the user.
+3. Mutate via MCP write tools only — all modifications require human
+   confirmation before execution:
+     write_segment(cellId, text, reason)
+     delete_segment(cellId, reason)
+     insert_widget(widgetType, data, afterCellId)
+     reply_to_comment(commentId, role, content)
+4. Never write directly to .editor/ files — they are virtual placeholders;
+   writing to them has no effect on real document state.
+
+If no <workspace_context> block is present, treat the turn as a pure-chat
+exchange and respond without attempting to read workspace files.
+```
+
+### 10.3 两层协同（Prompt 层 + Runtime 层）
+
+| 层 | 位置 | 内容 | 作用 |
+|----|------|------|------|
+| 系统提示词（静态） | `_SYSTEM_PROMPT_TEMPLATE` §Edit-Point Workflow | 调度规则：何时读、如何分析、如何改 | Agent 知道**工具调用顺序** |
+| 用户消息（动态） | `<workspace_context>` 块 | 工作空间目录结构 + 工具清单 | Agent 知道**工具是什么** |
+
+两层分工：系统提示词告知 **workflow（顺序与规则）**，workspace_context 块告知 **capabilities（工具与路径）**。
+
+### 10.4 `editor_tool.py` 统一映射源
+
+`editor_tool.py` 中的 MCP 工具处理函数曾直接硬编码字段名（`state.get("cells")` 等），与 `editor_index.py` 的 `EDITOR_RESOURCES` 定义重复。
+
+修复方案：`editor_tool.py` 从 `editor_index.py` 导入 `EDITOR_RESOURCES` 和 `get_editor_resource_data`，以统一映射规则作为唯一数据提取源：
+
+| 处理函数 | 原实现 | 修复后 |
+|---------|--------|--------|
+| `_list_segments` | `state.get("cells") or []` | `state.get(EDITOR_RESOURCES["cells"]) or []` |
+| `_read_segment` | `state.get("cells") or []` | `state.get(EDITOR_RESOURCES["cells"]) or []` |
+| `_read_session_meta` | 手工拼 `{id, selectedState, createdAt}` | `get_editor_resource_data(".editor/session.json", state)` |
+| `_list_comments` | `state.get("commentors") or []` | `state.get(EDITOR_RESOURCES["commentors"]) or []` |
+| `_read_comment` | `state.get("commentors") or []` | `state.get(EDITOR_RESOURCES["commentors"]) or []` |

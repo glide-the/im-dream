@@ -27,6 +27,9 @@
 # [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; in auto mode, AskUserQuestion/mcp__user__ask_user still go through on_tool_confirmation_request so the frontend form collects answers before execution; all other tools are auto-approved.
 # [Sync] 2026-05-28: implement .editor/ virtual index read interception in _pre_tool_use_hook — detect is_editor_index_path, write tempfile from editor_state, return updatedInput redirect (CLI ≥2.1 format); cleanup tempfiles in finally block.
 # [Sync] 2026-05-29: extract .editor/ redirect block into module-level _apply_editor_index_redirect for unit-testability; _pre_tool_use_hook delegates to it.
+# [Sync] 2026-05-29: _editor_mcp_stdio_config now accepts editor_state dict and passes it
+#                    as INK_EDITOR_STATE_JSON env var (session-inline, no tempfile);
+#                    removes tempfile creation/cleanup for editor MCP in run_streaming.
 
 """Claude Agent Runner.
 
@@ -484,14 +487,21 @@ def _memory_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpS
     )
 
 
-def _editor_mcp_stdio_config(editor_state_file: str) -> McpStdioServerConfig:
-    """Build the external stdio MCP config for the EditorState read-only server."""
+def _editor_mcp_stdio_config(editor_state: dict[str, Any]) -> McpStdioServerConfig:
+    """Build the external stdio MCP config for the EditorState read-only server.
 
+    Serialises the session's ``editor_state`` directly into the subprocess
+    environment as ``INK_EDITOR_STATE_JSON`` — no tempfile is created or read.
+    The MCP subprocess's ``_load_editor_state`` reads this env var as its
+    primary data source.
+    """
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
         args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
-        env=_stdio_env(extra_env={"INK_EDITOR_STATE_FILE": editor_state_file}),
+        env=_stdio_env(
+            extra_env={"INK_EDITOR_STATE_JSON": json.dumps(editor_state, ensure_ascii=False)}
+        ),
     )
 
 
@@ -985,34 +995,17 @@ class ClaudeAgentRunner:
         ):
             mcp_servers["necklace"] = _necklace_mcp_stdio_config(mcp_env)
 
-        # Write editor_state to a tempfile so the editor MCP subprocess can
-        # read it.  The file is created here (before sdk_options / try block)
-        # and cleaned up in the finally block further below.
-        _editor_state_file: Optional[tempfile.NamedTemporaryFile] = None  # type: ignore[type-arg]
-        _editor_state_file_path: Optional[str] = None
+        # Inject editor_state into the MCP subprocess via INK_EDITOR_STATE_JSON env var.
+        # The session's editor_state dict is serialised directly into the subprocess
+        # environment — no tempfile is created or cleaned up.
         if (
             opts.editor_state is not None
             and any(
                 tool.startswith(_EDITOR_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
             )
         ):
-            try:
-                _editor_state_file = tempfile.NamedTemporaryFile(
-                    mode="w",
-                    suffix=".json",
-                    delete=False,
-                    prefix="editor_state_",
-                    encoding="utf-8",
-                )
-                json.dump(opts.editor_state, _editor_state_file, ensure_ascii=False)
-                _editor_state_file.flush()
-                _editor_state_file_path = _editor_state_file.name
-                _editor_state_file.close()
-                _editor_state_file = None  # file is closed, track path only
-                mcp_servers["editor"] = _editor_mcp_stdio_config(_editor_state_file_path)
-                logger.debug("Editor MCP enabled; state file: %s", _editor_state_file_path)
-            except Exception:  # noqa: BLE001
-                logger.warning("Failed to create editor_state tempfile; skipping editor MCP.", exc_info=True)
+            mcp_servers["editor"] = _editor_mcp_stdio_config(opts.editor_state)
+            logger.debug("Editor MCP enabled; state injected via INK_EDITOR_STATE_JSON.")
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = apply_project_sdk_runtime_options(
@@ -1199,12 +1192,6 @@ class ClaudeAgentRunner:
                 _stderr_buf.close()
             except Exception:  # noqa: BLE001
                 pass
-            # Clean up the editor_state tempfile if it was created.
-            if _editor_state_file_path:
-                try:
-                    os.unlink(_editor_state_file_path)
-                except Exception:  # noqa: BLE001
-                    pass
             # Clean up per-read .editor/ redirect tempfiles.
             for _rpath in _editor_redirect_tmp_paths:
                 try:

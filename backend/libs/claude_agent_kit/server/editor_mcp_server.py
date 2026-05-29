@@ -1,7 +1,10 @@
 # [Input] Consume EDITOR_READ_TOOL_SPECS, handle_editor_read_tool from editor_tool.py.
+#         editor_tool.py in turn derives field names from editor_index.EDITOR_RESOURCES,
+#         making editor_index.py the ultimate source of the virtual index mapping rules.
 # [Output] Provide create_editor_mcp_server() for the stdio MCP entrypoint.
 # [Pos] mcp-server node in libs/claude_agent_kit/server
 # [Sync] 2026-05-28: initial implementation — read-only EditorState MCP server.
+# [Sync] 2026-05-29: update [Input] header to trace the editor_index.py mapping origin.
 
 from __future__ import annotations
 

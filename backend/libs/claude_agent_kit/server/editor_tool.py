@@ -1,8 +1,18 @@
-# [Input] Consume editor_state JSON file at INK_EDITOR_STATE_FILE path.
+# [Input] Consume editor_state injected by the runner via INK_EDITOR_STATE_JSON env var
+#         (session-inline JSON, no tempfile).  Falls back to INK_EDITOR_STATE_FILE for
+#         legacy / large-state callers.
+#         Consume EDITOR_RESOURCES and get_editor_resource_data from editor_index.py
+#         as the unified source of EditorState field-name mapping.
 # [Output] Provide EDITOR_READ_TOOL_SPECS, allowed_editor_tool_names,
 #          handle_editor_read_tool to the editor MCP server.
 # [Pos] tool-definition node in libs/claude_agent_kit/server
 # [Sync] 2026-05-28: initial implementation — 5 read-only EditorState tools.
+# [Sync] 2026-05-29: import EDITOR_RESOURCES and get_editor_resource_data from
+#                    editor_index.py and use them as the unified mapping source in
+#                    all handler functions — eliminates hardcoded field-name strings.
+# [Sync] 2026-05-29: _load_editor_state reads from INK_EDITOR_STATE_JSON (session-inline
+#                    JSON env var) as primary source, falls back to INK_EDITOR_STATE_FILE;
+#                    eliminates mandatory tempfile creation in the normal execution path.
 
 """EditorEngine read-only MCP tool handlers.
 
@@ -28,7 +38,23 @@ import os
 from dataclasses import dataclass
 from typing import Any, Optional
 
+from .editor_index import EDITOR_RESOURCES, get_editor_resource_data
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Unified field-name constants derived from EDITOR_RESOURCES (editor_index.py).
+# Using these constants instead of hardcoded strings ensures that any rename
+# in the virtual index adapter's mapping is automatically reflected here.
+# ---------------------------------------------------------------------------
+
+# Simple direct-field resources (non-special mapping values).
+_CELLS_FIELD: str = EDITOR_RESOURCES["cells"]        # "cells"
+_COMMENTORS_FIELD: str = EDITOR_RESOURCES["commentors"]  # "commentors"
+_TASKS_FIELD: str = EDITOR_RESOURCES["tasks"]        # "tasks"
+# Session and full_state use special mappings ("__session__", "__full__");
+# those are extracted via get_editor_resource_data().
+_SESSION_VIRTUAL_PATH = ".editor/session.json"
 
 # ---------------------------------------------------------------------------
 # Tool spec registry
@@ -110,26 +136,49 @@ def allowed_editor_tool_names() -> list[str]:
 
 
 def _load_editor_state() -> dict[str, Any]:
-    """Load the editor_state dict from ``INK_EDITOR_STATE_FILE``.
+    """Load the editor_state dict for the current MCP session.
 
-    Returns an empty dict if the env var is unset or the file cannot be read.
-    Errors are logged at WARNING level so the tools can still return graceful
-    "no data" responses.
+    Primary path — ``INK_EDITOR_STATE_JSON``:
+        The runner serialises the session's ``editor_state`` directly into the
+        subprocess environment as a JSON string.  No tempfile is created or read.
+
+    Fallback path — ``INK_EDITOR_STATE_FILE``:
+        Legacy / large-state callers that still write a tempfile and pass its path.
+        Supported for backward compatibility; prefer the JSON env var in new code.
+
+    Returns an empty dict when neither variable is set or the data cannot be parsed.
+    Errors are logged at WARNING level so tools can return graceful "no data" responses.
     """
+    # Primary: session-inline JSON from the runner (no disk I/O).
+    state_json = os.getenv("INK_EDITOR_STATE_JSON", "").strip()
+    if state_json:
+        try:
+            data = json.loads(state_json)
+            if isinstance(data, dict):
+                return data
+            logger.warning("INK_EDITOR_STATE_JSON is not a JSON object; ignoring.")
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to parse INK_EDITOR_STATE_JSON", exc_info=True)
+
+    # Fallback: file-based IPC (legacy or large-state).
     state_file = os.getenv("INK_EDITOR_STATE_FILE", "").strip()
-    if not state_file:
-        logger.warning("INK_EDITOR_STATE_FILE not set; editor tools will return empty state.")
-        return {}
-    try:
-        with open(state_file, encoding="utf-8") as fh:
-            data = json.load(fh)
-        if not isinstance(data, dict):
-            logger.warning("INK_EDITOR_STATE_FILE content is not a JSON object; ignoring.")
+    if state_file:
+        try:
+            with open(state_file, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                logger.warning("INK_EDITOR_STATE_FILE content is not a JSON object; ignoring.")
+                return {}
+            return data
+        except Exception:  # noqa: BLE001
+            logger.warning("Failed to read INK_EDITOR_STATE_FILE %r", state_file, exc_info=True)
             return {}
-        return data
-    except Exception:  # noqa: BLE001
-        logger.warning("Failed to read INK_EDITOR_STATE_FILE %r", state_file, exc_info=True)
-        return {}
+
+    logger.warning(
+        "Neither INK_EDITOR_STATE_JSON nor INK_EDITOR_STATE_FILE is set; "
+        "editor tools will return empty state."
+    )
+    return {}
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +216,8 @@ def handle_editor_read_tool(
 
 
 def _list_segments(state: dict[str, Any]) -> str:
-    cells: list[dict[str, Any]] = state.get("cells") or []
+    # Use EDITOR_RESOURCES["cells"] as the unified field name source.
+    cells: list[dict[str, Any]] = state.get(_CELLS_FIELD) or []
     segments = []
     for cell in cells:
         cell_id = cell.get("id", "")
@@ -201,7 +251,8 @@ def _list_segments(state: dict[str, Any]) -> str:
 def _read_segment(state: dict[str, Any], cell_id: str) -> str:
     if not cell_id:
         return json.dumps({"ok": False, "error": "cellId_required"})
-    cells: list[dict[str, Any]] = state.get("cells") or []
+    # Use EDITOR_RESOURCES["cells"] as the unified field name source.
+    cells: list[dict[str, Any]] = state.get(_CELLS_FIELD) or []
     for cell in cells:
         if cell.get("id") == cell_id:
             return json.dumps({"ok": True, "cell": cell}, ensure_ascii=False)
@@ -209,16 +260,15 @@ def _read_segment(state: dict[str, Any], cell_id: str) -> str:
 
 
 def _read_session_meta(state: dict[str, Any]) -> str:
-    return json.dumps({
-        "ok": True,
-        "id": state.get("id"),
-        "selectedState": state.get("selectedState"),
-        "createdAt": state.get("createdAt"),
-    }, ensure_ascii=False)
+    # Delegate to get_editor_resource_data for the __session__ special mapping,
+    # keeping session field extraction consistent with the virtual index adapter.
+    session = get_editor_resource_data(_SESSION_VIRTUAL_PATH, state)
+    return json.dumps({"ok": True, **session}, ensure_ascii=False)
 
 
 def _list_comments(state: dict[str, Any], filter_val: str) -> str:
-    commentors: list[dict[str, Any]] = state.get("commentors") or []
+    # Use EDITOR_RESOURCES["commentors"] as the unified field name source.
+    commentors: list[dict[str, Any]] = state.get(_COMMENTORS_FIELD) or []
     valid_filters = {"all", "starred", "killed", "pending"}
     if filter_val not in valid_filters:
         filter_val = "all"
@@ -247,7 +297,8 @@ def _list_comments(state: dict[str, Any], filter_val: str) -> str:
 def _read_comment(state: dict[str, Any], comment_id: str) -> str:
     if not comment_id:
         return json.dumps({"ok": False, "error": "commentId_required"})
-    commentors: list[dict[str, Any]] = state.get("commentors") or []
+    # Use EDITOR_RESOURCES["commentors"] as the unified field name source.
+    commentors: list[dict[str, Any]] = state.get(_COMMENTORS_FIELD) or []
     for c in commentors:
         if c.get("id") == comment_id:
             return json.dumps({"ok": True, "comment": c}, ensure_ascii=False)

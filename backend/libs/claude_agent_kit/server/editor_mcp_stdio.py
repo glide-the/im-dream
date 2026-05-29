@@ -1,7 +1,9 @@
 # [Input] Consume create_editor_mcp_server from editor_mcp_server.py and MCP stdio transport.
+#         Tool mapping traces: editor_mcp_server → editor_tool → editor_index.EDITOR_RESOURCES.
 # [Output] Run the editor MCP namespace as a standalone stdio server for Claude Code CLI.
 # [Pos] stdio-mcp-entrypoint node in libs/claude_agent_kit/server
 # [Sync] 2026-05-28: initial implementation — EditorState read-only tools over stdio MCP.
+# [Sync] 2026-05-29: update [Input] header to trace mapping origin through editor_index.py.
 
 from __future__ import annotations
 

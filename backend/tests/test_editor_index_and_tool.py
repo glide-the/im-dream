@@ -4,6 +4,9 @@
 # [Sync] 2026-05-29: add SDK stub import; add boundary-path tests for is_editor_index_path
 #                    (sub-path, unknown stem, README, deep absolute path) and degraded-state
 #                    tests for get_editor_resource_data (missing fields → empty list / None).
+# [Sync] 2026-05-29: update TestHandleEditorReadToolDispatch to use INK_EDITOR_STATE_JSON
+#                    (session-inline env var) as the primary data source; legacy
+#                    INK_EDITOR_STATE_FILE fallback also verified.
 
 """Unit tests for the .editor/ virtual index and EditorEngine MCP read tools."""
 from __future__ import annotations
@@ -301,7 +304,68 @@ class TestReadComment(unittest.TestCase):
 
 
 class TestHandleEditorReadToolDispatch(unittest.TestCase):
-    """Integration tests for handle_editor_read_tool via INK_EDITOR_STATE_FILE."""
+    """Integration tests for handle_editor_read_tool.
+
+    Primary data source: INK_EDITOR_STATE_JSON (session-inline JSON env var).
+    Fallback data source: INK_EDITOR_STATE_FILE (legacy file path env var).
+    """
+
+    # ------------------------------------------------------------------
+    # Primary path: INK_EDITOR_STATE_JSON (session-inline, no tempfile)
+    # ------------------------------------------------------------------
+
+    def test_list_segments_via_state_json(self):
+        """Primary path: state loaded from INK_EDITOR_STATE_JSON env var."""
+        env = {"INK_EDITOR_STATE_JSON": json.dumps(_SAMPLE_STATE)}
+        with patch.dict(os.environ, env):
+            result = json.loads(handle_editor_read_tool("list_segments", {}))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["totalSegments"], 2)
+
+    def test_read_session_meta_via_state_json(self):
+        env = {"INK_EDITOR_STATE_JSON": json.dumps(_SAMPLE_STATE)}
+        with patch.dict(os.environ, env):
+            result = json.loads(handle_editor_read_tool("read_session_meta", {}))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["id"], "session-abc")
+
+    def test_read_segment_via_state_json(self):
+        env = {"INK_EDITOR_STATE_JSON": json.dumps(_SAMPLE_STATE)}
+        with patch.dict(os.environ, env):
+            result = json.loads(handle_editor_read_tool("read_segment", {"cellId": "c1"}))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["cell"]["id"], "c1")
+
+    def test_list_comments_via_state_json(self):
+        env = {"INK_EDITOR_STATE_JSON": json.dumps(_SAMPLE_STATE)}
+        with patch.dict(os.environ, env):
+            result = json.loads(handle_editor_read_tool("list_comments", {"filter": "starred"}))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["totalComments"], 1)
+
+    def test_json_env_takes_priority_over_file(self):
+        """INK_EDITOR_STATE_JSON is read before INK_EDITOR_STATE_FILE."""
+        state_via_json = {**_SAMPLE_STATE, "id": "from-json"}
+        state_via_file = {**_SAMPLE_STATE, "id": "from-file"}
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False, encoding="utf-8"
+        ) as fh:
+            json.dump(state_via_file, fh)
+            file_path = fh.name
+        try:
+            env = {
+                "INK_EDITOR_STATE_JSON": json.dumps(state_via_json),
+                "INK_EDITOR_STATE_FILE": file_path,
+            }
+            with patch.dict(os.environ, env):
+                result = json.loads(handle_editor_read_tool("read_session_meta", {}))
+            self.assertEqual(result["id"], "from-json", "JSON env var must take priority over file")
+        finally:
+            os.unlink(file_path)
+
+    # ------------------------------------------------------------------
+    # Fallback path: INK_EDITOR_STATE_FILE (legacy file-based IPC)
+    # ------------------------------------------------------------------
 
     def _write_state_file(self, state: dict) -> str:
         with tempfile.NamedTemporaryFile(
@@ -310,34 +374,60 @@ class TestHandleEditorReadToolDispatch(unittest.TestCase):
             json.dump(state, fh)
             return fh.name
 
-    def test_list_segments_via_state_file(self):
+    def test_list_segments_via_state_file_fallback(self):
+        """Fallback path: state loaded from INK_EDITOR_STATE_FILE when JSON var absent."""
         path = self._write_state_file(_SAMPLE_STATE)
         try:
-            with patch.dict(os.environ, {"INK_EDITOR_STATE_FILE": path}):
+            env = {"INK_EDITOR_STATE_FILE": path}
+            # Ensure INK_EDITOR_STATE_JSON is not set
+            with patch.dict(os.environ, env):
+                os.environ.pop("INK_EDITOR_STATE_JSON", None)
                 result = json.loads(handle_editor_read_tool("list_segments", {}))
             self.assertTrue(result["ok"])
             self.assertEqual(result["totalSegments"], 2)
         finally:
             os.unlink(path)
 
-    def test_read_session_meta_via_state_file(self):
+    def test_read_session_meta_via_state_file_fallback(self):
         path = self._write_state_file(_SAMPLE_STATE)
         try:
             with patch.dict(os.environ, {"INK_EDITOR_STATE_FILE": path}):
+                os.environ.pop("INK_EDITOR_STATE_JSON", None)
                 result = json.loads(handle_editor_read_tool("read_session_meta", {}))
             self.assertTrue(result["ok"])
             self.assertEqual(result["id"], "session-abc")
         finally:
             os.unlink(path)
 
+    # ------------------------------------------------------------------
+    # Error / empty-state cases
+    # ------------------------------------------------------------------
+
     def test_unknown_tool_returns_error(self):
-        with patch.dict(os.environ, {"INK_EDITOR_STATE_FILE": ""}):
+        env = {"INK_EDITOR_STATE_JSON": json.dumps({})}
+        with patch.dict(os.environ, env):
             result = json.loads(handle_editor_read_tool("no_such_tool", {}))
         self.assertFalse(result["ok"])
         self.assertIn("unknown_tool", result["error"])
 
-    def test_missing_env_returns_empty_state_gracefully(self):
-        env = {k: v for k, v in os.environ.items() if k != "INK_EDITOR_STATE_FILE"}
+    def test_missing_both_env_vars_returns_empty_state_gracefully(self):
+        """Neither JSON nor FILE var set → tools return graceful empty-state responses."""
+        env = {
+            k: v for k, v in os.environ.items()
+            if k not in ("INK_EDITOR_STATE_JSON", "INK_EDITOR_STATE_FILE")
+        }
+        with patch.dict(os.environ, env, clear=True):
+            result = json.loads(handle_editor_read_tool("list_segments", {}))
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["totalSegments"], 0)
+
+    def test_invalid_json_in_state_json_var_falls_through_to_empty(self):
+        """Malformed INK_EDITOR_STATE_JSON falls through and returns empty state."""
+        env = {
+            k: v for k, v in os.environ.items()
+            if k not in ("INK_EDITOR_STATE_JSON", "INK_EDITOR_STATE_FILE")
+        }
+        env["INK_EDITOR_STATE_JSON"] = "this is not json {"
         with patch.dict(os.environ, env, clear=True):
             result = json.loads(handle_editor_read_tool("list_segments", {}))
         self.assertTrue(result["ok"])
