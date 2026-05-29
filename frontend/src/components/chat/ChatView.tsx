@@ -1,22 +1,25 @@
 // [Input] Consume WorkspaceContext, dashboard file/nav/quick-action components, ChatPanel, auth token, and AI SDK message types.
-// [Output] Render chat workspace, thread history sidebar, file sidebar, quick actions, and ChatPanel.
+// [Output] Render chat workspace with ChatGPT-style sidebar (thread list inside VerticalNav), file sidebar, quick actions, and ChatPanel.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
 // [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
 // [Sync] 2026-05-26: mark conversations started when loaded history contains messages.
 // [Sync] 2026-05-29: accept editorState prop and forward to ChatPanel for editor_state request injection.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatPanel so Writing view reloads after agent writes.
+// [Sync] 2026-05-29: keep the original full-height workspace shell so VerticalNav stays flush-left.
+// [Sync] 2026-05-29: make status bar and collapsible sidebar-panel chrome theme-adaptive.
+// [Sync] 2026-05-29: move thread list into VerticalNav expanded sidebar; remove separate thread sidebar and flyout; remove header bar; float share+more buttons.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import QuickActionCard from '../dashboard/QuickActionCard';
 import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
-import VerticalNav from '../dashboard/VerticalNav';
 import ChatPanel from './ChatPanel';
 import type { Attachment } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
+import { IconClock, IconFolder, IconMoreHorizontal, IconPlus, IconShare, IconX } from './Icons';
 
 const API_BASE = '/ink-and-memory';
 
@@ -122,6 +125,9 @@ export default function ChatView({
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = useState('');
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
 
   // Create an initial thread if none provided
   useEffect(() => {
@@ -216,10 +222,22 @@ export default function ChatView({
     }
   }, [activeThreadId, threads]);
 
-  const activeThread = threads.find((t) => t.id === activeThreadId);
-  const displayTitle = activeThread?.title ?? 'New conversation';
+  const handleShare = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 1600);
+    } catch {
+      setShareCopied(false);
+    }
+  }, []);
 
   const quickActionsGrid = useMemo(() => quickActions.length > 0, [quickActions.length]);
+  const visibleThreads = useMemo(() => {
+    const query = threadSearchQuery.trim().toLowerCase();
+    if (!query) return threads;
+    return threads.filter((thread) => (thread.title ?? '新对话').toLowerCase().includes(query));
+  }, [threadSearchQuery, threads]);
 
   if (!activeThreadId) {
     return (
@@ -233,86 +251,146 @@ export default function ChatView({
 
   return (
     <WorkspaceProvider>
-      <div style={{ display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <VerticalNav onToggleFileSidebar={() => setFileSidebarOpen((value) => !value)} onToggleThreadSidebar={() => setThreadSidebarOpen((v) => !v)} unreadCount={0} />
-
-        {/* Thread history sidebar */}
-        {threadSidebarOpen && (
-          <aside style={{ width: '240px', flexShrink: 0, borderRight: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <div style={{ padding: '0.75rem 1rem', borderBottom: '1px solid var(--color-border-paper)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontWeight: 600, fontSize: '0.85rem' }}>Chat History</span>
-              <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '1rem' }}>✕</button>
-            </div>
-            <div style={{ overflowY: 'auto', flex: 1 }}>
-              {threads.length === 0 && (
-                <div style={{ padding: '1rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>No conversations yet</div>
-              )}
-              {threads.map((thread) => (
-                <div
-                  key={thread.id}
-                  onClick={() => handleSelectThread(thread.id)}
-                  style={{ padding: '0.6rem 1rem', cursor: 'pointer', borderBottom: '1px solid var(--color-border-paper)', background: thread.id === activeThreadId ? 'var(--color-bg-app)' : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}
-                >
-                  <span style={{ fontSize: '0.82rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{thread.title ?? 'New conversation'}</span>
-                  <button
-                    type="button"
-                    onClick={(e) => void handleDeleteThread(thread.id, e)}
-                    style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', fontSize: '0.75rem', flexShrink: 0 }}
-                    title="Delete"
-                  >🗑</button>
-                </div>
-              ))}
-            </div>
-          </aside>
-        )}
-
-        <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '1rem', gap: '1rem', overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', padding: '0.25rem 0.25rem 0 0.25rem', flexShrink: 0 }}>
-            <div>
-              <div style={{ fontSize: '0.74rem', letterSpacing: '0.14em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>Session</div>
-              <h1 style={{ margin: '0.2rem 0 0', fontSize: '1.35rem', color: 'var(--color-text-primary)' }}>{displayTitle}</h1>
-            </div>
-            <button type="button" onClick={() => void handleNewChat()} disabled={isCreatingThread} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.7rem 1rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', fontWeight: 600, cursor: isCreatingThread ? 'wait' : 'pointer' }}>
-              {isCreatingThread ? '…' : 'New chat'}
+      <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
+        <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+          {/* 浮动操作按钮区 – 右上角：新建 / 更多（含下拉菜单） */}
+          <div style={{ position: 'absolute', top: '0.65rem', right: '0.75rem', zIndex: 20, display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
+            {/* 新建对话 */}
+            <button
+              type="button"
+              onClick={() => void handleNewChat()}
+              disabled={isCreatingThread}
+              style={{ height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: 'transparent', color: isCreatingThread ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isCreatingThread ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0 0.55rem', fontSize: '0.82rem', opacity: isCreatingThread ? 0.6 : 1, transition: 'background 0.14s ease, color 0.14s ease' }}
+              title="新建对话"
+              onMouseEnter={(e) => { if (!isCreatingThread) { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; } }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isCreatingThread ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
+            >
+              <IconPlus style={{ width: '0.95rem', height: '0.95rem' }} />
+              <span>{isCreatingThread ? '创建中' : '新建'}</span>
             </button>
+
+            {/* 更多 */}
+            <div style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setMoreMenuOpen((v) => !v)}
+                style={{ width: '2rem', height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: moreMenuOpen ? 'var(--color-bg-surface)' : 'transparent', color: moreMenuOpen ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center', transition: 'background 0.14s ease, color 0.14s ease' }}
+                title="更多"
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
+                onMouseLeave={(e) => { if (!moreMenuOpen) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; } }}
+              >
+                <IconMoreHorizontal style={{ width: '1.1rem', height: '1.1rem' }} />
+              </button>
+
+              {moreMenuOpen ? (
+                <>
+                  {/* 点击蒙层关闭菜单 */}
+                  <div style={{ position: 'fixed', inset: 0, zIndex: 19 }} onClick={() => setMoreMenuOpen(false)} aria-hidden="true" />
+                  {/* 下拉菜单 */}
+                  <div style={{ position: 'absolute', top: '2.4rem', right: 0, zIndex: 20, minWidth: '10rem', padding: '0.35rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.85rem', background: 'var(--color-bg-surface-solid)', boxShadow: '0 8px 24px var(--color-shadow-medium)', display: 'flex', flexDirection: 'column', gap: '0.05rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => { setThreadSidebarOpen((v) => !v); setMoreMenuOpen(false); }}
+                      style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: threadSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
+                    >
+                      <IconClock style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
+                      <span>历史对话</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setFileSidebarOpen((v) => !v); setMoreMenuOpen(false); }}
+                      style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: fileSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
+                    >
+                      <IconFolder style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
+                      <span>工作空间</span>
+                    </button>
+                    <div style={{ height: '1px', background: 'var(--color-border-paper)', margin: '0.2rem 0.4rem' }} />
+                    <button
+                      type="button"
+                      onClick={() => { void handleShare(); setMoreMenuOpen(false); }}
+                      style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
+                    >
+                      <IconShare style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
+                      <span>{shareCopied ? '已复制链接' : '分享'}</span>
+                    </button>
+                  </div>
+                </>
+              ) : null}
+            </div>
           </div>
 
-          {quickActionsGrid && !hasConversationStarted ? (
-            <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', flexShrink: 0 }}>
-              {quickActions.map((item) => (
-                <QuickActionCard
-                  key={item.title}
-                  item={item}
-                  onClick={(prompt) => {
-                    setHasConversationStarted(true);
-                    setQueuedPrompt(prompt);
-                    setQueuedAttachments([]);
-                    setQueuedPromptNonce((value) => value + 1);
-                  }}
-                />
-              ))}
-            </div>
-          ) : null}
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden' }}>
+            {quickActionsGrid && !hasConversationStarted ? (
+              <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', flexShrink: 0 }}>
+                {quickActions.map((item) => (
+                  <QuickActionCard
+                    key={item.title}
+                    item={item}
+                    onClick={(prompt) => {
+                      setHasConversationStarted(true);
+                      setQueuedPrompt(prompt);
+                      setQueuedAttachments([]);
+                      setQueuedPromptNonce((value) => value + 1);
+                    }}
+                  />
+                ))}
+              </div>
+            ) : null}
 
-          <section style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <ChatPanel
-              key={activeThreadId}
-              threadId={activeThreadId}
-              initialMessages={threadMessages ?? undefined}
-              isLoading={isLoadingMessages}
-              queuedPrompt={queuedPrompt}
-              queuedAttachments={queuedAttachments}
-              queuedPromptNonce={queuedPromptNonce}
-              inputPlaceholder="Ask Ink & Memory…"
-              editorState={editorState}
-              onEditorWriteConfirmed={onEditorWriteConfirmed}
-              onConversationStart={() => {
-                setHasConversationStarted(true);
-                void reloadThreads();
-              }}
-            />
-          </section>
+            <section style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <ChatPanel
+                key={activeThreadId}
+                threadId={activeThreadId}
+                initialMessages={threadMessages ?? undefined}
+                isLoading={isLoadingMessages}
+                queuedPrompt={queuedPrompt}
+                queuedAttachments={queuedAttachments}
+                queuedPromptNonce={queuedPromptNonce}
+                inputPlaceholder="Ask Ink & Memory…"
+                editorState={editorState}
+                onEditorWriteConfirmed={onEditorWriteConfirmed}
+                onConversationStart={() => {
+                  setHasConversationStarted(true);
+                  void reloadThreads();
+                }}
+              />
+            </section>
+          </div>
         </main>
+
+        {/* 历史对话右侧面板 */}
+        <aside style={{ width: threadSidebarOpen ? '16rem' : 0, minWidth: threadSidebarOpen ? '16rem' : 0, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderLeft: threadSidebarOpen ? '1px solid var(--color-border-paper)' : 'none', background: 'var(--color-bg-paper)', transition: 'width 0.22s ease, min-width 0.22s ease' }}>
+          {threadSidebarOpen ? (
+            <>
+              <div style={{ padding: '0.75rem 0.85rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border-paper)' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>历史对话</span>
+                <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title="关闭">
+                  <IconX style={{ width: '0.85rem', height: '0.85rem' }} />
+                </button>
+              </div>
+              <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
+                {visibleThreads.length === 0 ? (
+                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>暂无会话</div>
+                ) : null}
+                {visibleThreads.map((thread) => {
+                  const isActive = thread.id === activeThreadId;
+                  return (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      onClick={() => handleSelectThread(thread.id)}
+                      style={{ width: '100%', minHeight: '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', marginBottom: '0.1rem', transition: 'background 0.12s ease' }}
+                      title={thread.title ?? '新对话'}
+                    >
+                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? '新对话'}</span>
+                      {isActive ? <span style={{ width: '0.38rem', height: '0.38rem', borderRadius: '999px', background: 'var(--color-action-link)', flexShrink: 0 }} aria-hidden="true" /> : null}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
+        </aside>
 
         <FileSidebar sessionId={activeThreadId} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
       </div>

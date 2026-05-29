@@ -1,3 +1,7 @@
+// [Input] VoiceConfig map, position coords, keyboard event listener.
+// [Output] Fixed-position @ agent picker dropdown with keyboard navigation.
+// [Pos] agent-dropdown component in frontend/src/components
+// [Sync] 2026-05-29: replace hardcoded #fff/#ccc/#f0f0f0 with CSS tokens for dark theme support.
 import React from 'react';
 import type { VoiceConfig } from '../api/voiceApi';
 import {
@@ -85,8 +89,8 @@ export default function AgentDropdown({ voices, position, onSelect, onClose }: A
         position: 'fixed',
         left: `${position.x}px`,
         top: `${position.y}px`,
-        background: '#fff',
-        border: '1px solid #ccc',
+        background: 'var(--color-bg-surface-solid)',
+        border: '1px solid var(--color-border-neutral)',
         borderRadius: '8px',
         boxShadow: '0 4px 12px var(--color-shadow-medium)',
         padding: '8px',
@@ -107,8 +111,8 @@ export default function AgentDropdown({ voices, position, onSelect, onClose }: A
         position: 'fixed',
         left: `${position.x}px`,
         top: `${position.y}px`,
-        background: '#fff',
-        border: '1px solid #ccc',
+        background: 'var(--color-bg-surface-solid)',
+        border: '1px solid var(--color-border-neutral)',
         borderRadius: '8px',
         boxShadow: '0 4px 12px var(--color-shadow-medium)',
         padding: '4px 0',
@@ -140,7 +144,7 @@ export default function AgentDropdown({ voices, position, onSelect, onClose }: A
               alignItems: 'center',
               gap: '10px',
               transition: 'background 0.15s',
-              background: isSelected ? '#f0f0f0' : 'transparent'
+              background: isSelected ? 'var(--color-bg-hover)' : 'transparent'
             }}
           >
             <Icon size={16} color="var(--color-text-secondary)" />

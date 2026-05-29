@@ -1,3 +1,7 @@
+/* [Input] App-level React class names and semantic theme tokens from styles/tokens.css. */
+/* [Output] Global app shell, notebook, binder, scrollbar, and modal styling. */
+/* [Pos] app-style sheet in frontend/src */
+/* [Sync] 2026-05-29: restore notebook ruled-line colors to existing theme tokens. */
 @font-face {
   font-family: 'Excalifont';
   src: url('/Excalifont-Regular.woff2') format('woff2');
@@ -41,7 +45,7 @@
   flex: 1;
   display: flex;
   background-color: var(--color-bg-paper);
-  border: 1px solid #ccc;
+  border: 1px solid var(--color-border-neutral);
   border-radius: 4px;
   position: relative;
   overflow: hidden;
@@ -215,7 +219,7 @@
   height: var(--bar-height);
   background: linear-gradient(180deg,
     var(--color-text-secondary) 0%,
-    #aaa 50%,
+    var(--color-scrollbar-thumb) 50%,
     var(--color-text-secondary) 100%
   );
   border-radius: calc(var(--bar-height) / 2);
@@ -257,15 +261,17 @@
 
 /* @@@ Notebook ruled lines background */
 .notebook-lines {
+  --notebook-margin-line: color-mix(in srgb, var(--color-state-error) 24%, transparent);
+  --notebook-rule-line: color-mix(in srgb, var(--color-border-paper) 58%, transparent);
   background-image:
     /* Vertical margin line (left) */
-    linear-gradient(to right, transparent 0, transparent 39px, rgba(255, 100, 100, 0.15) 40px, rgba(255, 100, 100, 0.15) 41px, transparent 41px),
+    linear-gradient(to right, transparent 0, transparent 39px, var(--notebook-margin-line) 40px, var(--notebook-margin-line) 41px, transparent 41px),
     /* Horizontal ruled lines */
     repeating-linear-gradient(
       transparent,
       transparent 31.4px,
-      rgba(170, 170, 180, 0.2) 31.4px,
-      rgba(170, 170, 180, 0.2) 32.4px
+      var(--notebook-rule-line) 31.4px,
+      var(--notebook-rule-line) 32.4px
     );
   background-size: 100% 100%;
   background-position: 0 0;
@@ -285,13 +291,13 @@
 
 .writing-textarea::-webkit-scrollbar-thumb,
 .comments-panel::-webkit-scrollbar-thumb {
-  background: #ccc;
+  background: var(--color-scrollbar-thumb);
   border-radius: 4px;
 }
 
 .writing-textarea::-webkit-scrollbar-thumb:hover,
 .comments-panel::-webkit-scrollbar-thumb:hover {
-  background: #999;
+  background: var(--color-scrollbar-thumb-hover);
 }
 
 .voice-input-modal {

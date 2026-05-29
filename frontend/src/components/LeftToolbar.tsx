@@ -1,3 +1,7 @@
+// [Input] React icons (FaAlignRight, FaMicrophone), parent props for toolbar actions.
+// [Output] Floating left toolbar with tool buttons and hover tooltips.
+// [Pos] left-toolbar component in frontend/src/components
+// [Sync] 2026-05-29: replace all hardcoded colors (#fff, #e3f2fd, #1976d2 etc.) with CSS tokens for theme support.
 import React, { useState } from 'react';
 import { FaAlignRight, FaMicrophone } from 'react-icons/fa';
 
@@ -14,8 +18,13 @@ function ToolButton({
   active?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
-  const baseBg = active ? '#e3f2fd' : '#fff';
-  const hoverBg = active ? '#bbdefb' : '#f0f0f0';
+
+  const baseBg = active
+    ? 'var(--color-bg-active)'
+    : 'var(--color-bg-surface-solid)';
+  const hoverBg = active
+    ? 'var(--color-bg-active-hover)'
+    : 'var(--color-bg-hover)';
 
   return (
     <div
@@ -35,6 +44,7 @@ function ToolButton({
           border: 'none',
           borderRadius: '4px',
           backgroundColor: hovered ? hoverBg : baseBg,
+          color: 'var(--color-text-secondary)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
@@ -52,7 +62,7 @@ function ToolButton({
             top: '50%',
             transform: 'translateY(-50%)',
             padding: '6px 10px',
-            background: '#fff',
+            background: 'var(--color-bg-surface-solid)',
             border: '1px solid var(--color-border-neutral)',
             borderRadius: '6px',
             boxShadow: '0 4px 12px var(--color-shadow-soft)',
@@ -96,10 +106,10 @@ export default function LeftToolbar({
         top: '80px',
         width: '40px',
         margin: '30px auto 0',
-        backgroundColor: '#fff',
+        backgroundColor: 'var(--color-bg-surface-solid)',
         border: '1px solid var(--color-border-neutral)',
         borderRadius: '8px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        boxShadow: '0 2px 8px var(--color-shadow-soft)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -142,14 +152,14 @@ export default function LeftToolbar({
         label={isAligned ? 'Unpin comments' : 'Align comments'}
         onClick={onToggleAlign}
         active={isAligned}
-        icon={<FaAlignRight size={18} color={isAligned ? '#1976d2' : 'var(--color-text-body)'} />}
+        icon={<FaAlignRight size={18} color={isAligned ? 'var(--color-action-link)' : 'var(--color-text-body)'} />}
       />
 
       <ToolButton
         label="Voice input"
         onClick={onToggleTalking}
         active={isTalking}
-        icon={<FaMicrophone size={18} color={isTalking ? '#1976d2' : 'var(--color-text-body)'} />}
+        icon={<FaMicrophone size={18} color={isTalking ? 'var(--color-action-link)' : 'var(--color-text-body)'} />}
       />
     </div>
   );

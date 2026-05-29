@@ -5,6 +5,8 @@
 // [Sync] 2026-05-29: pass state as editorState prop to ChatView so agent receives current EditorState snapshot.
 // [Sync] 2026-05-29: add handleEditorWriteConfirmed callback; reloads session from DB after agent MCP write tool approved.
 // [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
+// [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
+// [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -688,6 +690,38 @@ export default function App() {
     }
   }, [isAuthenticated, state?.id]);
 
+  // @@@ Jump to a specific cell in the writing view (triggered by editor:jump-to-cell custom event)
+  const jumpToCellRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const cellId = (e as CustomEvent<{ cellId: string }>).detail?.cellId;
+      if (!cellId) return;
+      jumpToCellRef.current = cellId;
+      setCurrentView('writing');
+    };
+    window.addEventListener('editor:jump-to-cell', handler);
+    return () => window.removeEventListener('editor:jump-to-cell', handler);
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== 'writing' || !jumpToCellRef.current) return;
+    const cellId = jumpToCellRef.current;
+    jumpToCellRef.current = null;
+    const attemptScroll = (attempts = 0) => {
+      const textarea = textareaRefs.current.get(cellId);
+      if (textarea) {
+        textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        textarea.focus();
+        return;
+      }
+      if (attempts < 10) {
+        setTimeout(() => attemptScroll(attempts + 1), 80);
+      }
+    };
+    setTimeout(() => attemptScroll(), 100);
+  }, [currentView]);
+
   // @@@ Handle localStorage migration
   const handleMigrateData = useCallback(async () => {
     setIsMigrating(true);
@@ -1064,7 +1098,7 @@ export default function App() {
               margin: '0 0 24px 0',
               fontSize: '16px',
               lineHeight: '1.6',
-              color: '#555'
+              color: 'var(--color-text-secondary)'
             }}>
               We found data in your browser. Would you like to migrate it to your account?
               This will move all your sessions, pictures, and preferences to the cloud.
@@ -1081,17 +1115,17 @@ export default function App() {
                   flex: 1,
                   padding: '12px 20px',
                   border: 'none',
-                  background: isMigrating ? '#ccc' : 'var(--color-action-link)',
+                  background: isMigrating ? 'var(--color-disabled-bg)' : 'var(--color-action-link)',
                   borderRadius: '6px',
                   cursor: isMigrating ? 'not-allowed' : 'pointer',
                   fontSize: '16px',
                   fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                  color: '#fff',
+                  color: 'var(--color-text-on-action)',
                   fontWeight: 600,
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isMigrating) e.currentTarget.style.backgroundColor = '#357abd';
+                  if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-action-link-hover)';
                 }}
                 onMouseLeave={(e) => {
                   if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-action-link)';
@@ -1106,7 +1140,7 @@ export default function App() {
                   flex: 1,
                   padding: '12px 20px',
                   border: '1px solid var(--color-border-paper)',
-                  background: '#fff',
+                  background: 'var(--color-bg-surface-solid)',
                   borderRadius: '6px',
                   cursor: isMigrating ? 'not-allowed' : 'pointer',
                   fontSize: '16px',
@@ -1115,10 +1149,10 @@ export default function App() {
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isMigrating) e.currentTarget.style.backgroundColor = '#f5f5f5';
+                  if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                 }}
                 onMouseLeave={(e) => {
-                  if (!isMigrating) e.currentTarget.style.backgroundColor = '#fff';
+                  if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                 }}
               >
                 Skip
@@ -1154,7 +1188,7 @@ export default function App() {
                 height: '32px',
                 border: 'none',
                 borderRadius: '50%',
-                backgroundColor: '#fff',
+                backgroundColor: 'var(--color-bg-surface-solid)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -1166,11 +1200,11 @@ export default function App() {
                 transition: 'all 0.2s ease'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#f8f8f8';
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                 e.currentTarget.style.transform = 'scale(1.1)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#fff';
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                 e.currentTarget.style.transform = 'scale(1)';
               }}
             >
@@ -1216,7 +1250,7 @@ export default function App() {
                   height: '44px',
                   border: 'none',
                   borderRadius: '50%',
-                  backgroundColor: '#fff',
+                  backgroundColor: 'var(--color-bg-surface-solid)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -1228,11 +1262,11 @@ export default function App() {
                   transition: 'all 0.2s ease'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f8f8f8';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                   e.currentTarget.style.transform = 'scale(1.1)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fff';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                   e.currentTarget.style.transform = 'scale(1)';
                 }}
               >
@@ -1246,7 +1280,7 @@ export default function App() {
                   height: '44px',
                   border: 'none',
                   borderRadius: '50%',
-                  backgroundColor: '#fff',
+                  backgroundColor: 'var(--color-bg-surface-solid)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -1495,11 +1529,11 @@ export default function App() {
                     bottom: `calc(${mobileNavHeight}px + 20px + env(safe-area-inset-bottom, 0px))`,
                     left: '10px',
                     right: '10px',
-                    background: '#fff',
-                    border: '2px solid #ddd',
+                    background: 'var(--color-bg-surface-solid)',
+                    border: '2px solid var(--color-border-neutral)',
                     borderRadius: '12px',
                     padding: '16px',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                    boxShadow: '0 8px 24px var(--color-shadow-medium)',
                     zIndex: 100,
                     fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
                     animation: 'slideInFromBottom 0.3s ease-out'
@@ -1519,7 +1553,7 @@ export default function App() {
                               <div style={{ fontWeight: 600, fontSize: '16px', color: colors.text, marginBottom: '8px' }}>
                                 {mobileActiveComment.voice}
                               </div>
-                              <div style={{ fontSize: '15px', lineHeight: '1.5', color: '#444' }}>
+                              <div style={{ fontSize: '15px', lineHeight: '1.5', color: 'var(--color-text-body)' }}>
                                 {mobileActiveComment.comment}
                               </div>
                             </div>
@@ -1544,7 +1578,7 @@ export default function App() {
                 display: 'flex',
                 gap: isMobile ? '12px' : '20px',
                 flexWrap: isMobile ? 'wrap' : 'nowrap',
-                backgroundColor: '#fafafa',
+                backgroundColor: 'var(--color-bg-paper)',
                 zIndex: 50
               }}>
                 <span>Weight: {lastEntry?.weight || 0}</span>
@@ -1653,7 +1687,7 @@ export default function App() {
                 {t('nav.settings')}
               </h2>
               <div style={{
-                background: 'rgba(255, 255, 255, 0.5)',
+                background: 'var(--color-bg-surface)',
                 border: '1px solid var(--color-border-paper)',
                 borderRadius: 8,
                 padding: 24
@@ -1689,7 +1723,7 @@ export default function App() {
                         style={{
                           padding: '8px 16px',
                           background: isActive ? 'var(--color-text-primary)' : 'transparent',
-                          color: isActive ? '#fff' : 'var(--color-text-secondary)',
+                          color: isActive ? 'var(--color-text-on-action)' : 'var(--color-text-secondary)',
                           border: isActive ? 'none' : '1px solid var(--color-border-paper)',
                           borderRadius: 6,
                           fontSize: 14,
@@ -1768,7 +1802,7 @@ export default function App() {
                         width: 16,
                         height: 16,
                         borderRadius: '50%',
-                        background: showEnergyBar ? '#fff' : 'var(--color-text-muted)',
+                        background: showEnergyBar ? 'var(--color-text-on-action)' : 'var(--color-text-muted)',
                         transition: 'all 0.2s ease'
                       }} />
                     </button>
@@ -1789,7 +1823,7 @@ export default function App() {
                 AI 模型配置
               </h2>
               <div style={{
-                background: 'rgba(255, 255, 255, 0.5)',
+                background: 'var(--color-bg-surface)',
                 border: '1px solid var(--color-border-paper)',
                 borderRadius: 8,
                 padding: 24
@@ -1932,7 +1966,7 @@ export default function App() {
               margin: '0 0 24px 0',
               fontSize: '16px',
               lineHeight: '1.6',
-              color: '#555'
+              color: 'var(--color-text-secondary)'
             }}>
               This will delete all your current writing and comments. This action cannot be undone.
             </p>
@@ -1945,21 +1979,21 @@ export default function App() {
                 onClick={handleConfirmStartFresh}
                 style={{
                   padding: '8px 20px',
-                  border: '1px solid #d44',
-                  background: '#d44',
+                  border: '1px solid var(--color-state-danger)',
+                  background: 'var(--color-state-danger)',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '15px',
                   fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                  color: '#fff',
+                  color: 'var(--color-text-on-action)',
                   fontWeight: 600,
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#c33';
+                  e.currentTarget.style.backgroundColor = 'var(--color-state-danger-hover)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#d44';
+                  e.currentTarget.style.backgroundColor = 'var(--color-state-danger)';
                 }}
               >
                 Delete All
@@ -1969,7 +2003,7 @@ export default function App() {
                 style={{
                   padding: '8px 20px',
                   border: '1px solid var(--color-border-paper)',
-                  background: '#fff',
+                  background: 'var(--color-bg-surface-solid)',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '15px',
@@ -1978,10 +2012,10 @@ export default function App() {
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fff';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                 }}
               >
                 Cancel

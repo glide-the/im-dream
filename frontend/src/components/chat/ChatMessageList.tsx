@@ -4,7 +4,10 @@
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
 // [Sync] 2026-05-27: add toolChoice prop; render non-completed tool parts in manual mode directly with isManualToolInvocation=true so Approve/Cancel UI is shown.
 // [Sync] 2026-05-29: import isEditorWriteTool; render editor write tool parts directly (not collapsed) with isManualToolInvocation=true so specialized approval UI shows immediately.
+// [Sync] 2026-05-29: render completed editor write tool parts as EditorWriteCompletedCard instead of Terminal card.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ToolMessagePart for editor write tools.
+// [Sync] 2026-05-29: let the message list fill the available chat page width.
+// [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -13,7 +16,7 @@ import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
 import ToolMessagePart from './ToolMessagePart';
-import { isEditorWriteTool } from './EditorWriteApprovalUI';
+import { isEditorWriteTool, EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -80,6 +83,27 @@ function isAskUserQuestionTool(part: ToolUIPart | DynamicToolUIPart): boolean {
   return ASK_USER_TOOL_NAMES.has(name) || name.endsWith('__ask_user') || name.endsWith('__askuserquestion');
 }
 
+/**
+ * Robustly resolve the tool name from a part.
+ *
+ * History-loaded DynamicToolUIPart objects can lose their `toolName` field after
+ * DB serialization. When that happens, the AI SDK's `getToolName()` falls back to
+ * stripping the 'tool-' prefix from `type`, yielding 'invocation' instead of the
+ * real tool name. This helper retries with a direct field read so that
+ * `isEditorWriteTool` works correctly for both live-stream and history-replay paths.
+ */
+function resolveToolName(part: ToolUIPart | DynamicToolUIPart): string {
+  try {
+    const name = getToolName(part);
+    if (name && name !== 'invocation') return name;
+  } catch {
+    // getToolName may throw if the part has an unexpected structure
+  }
+  const raw = part as unknown as Record<string, unknown>;
+  if (typeof raw.toolName === 'string' && raw.toolName) return raw.toolName;
+  return '';
+}
+
 export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
@@ -95,7 +119,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   };
 
   return (
-    <div style={{ width: '100%', maxWidth: '48rem', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {messages.map((message, index) => {
         const isLastMessage = index === messages.length - 1;
         return (
@@ -137,7 +161,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const isLastPart = partIndex === (message.parts?.length ?? 0) - 1;
                 const previousMessage = index > 0 ? messages[index - 1] : undefined;
                 return (
-                  <div key={partKey} style={{ maxWidth: '48rem' }}>
+                  <div key={partKey} style={{ width: '100%' }}>
                     <AssistMessagePart
                       part={part}
                       isLast={isLastMessage && isLastPart}
@@ -160,7 +184,26 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const isError = toolStatus === 'error';
                 const outputText = getToolOutputText(toolPart);
                 const title = 'title' in toolPart ? (toolPart as { title?: string }).title : undefined;
-                const displayTitle = title || getToolName(toolPart);
+                const toolName = resolveToolName(toolPart);
+                const displayTitle = title || toolName || getToolName(toolPart);
+
+                // Editor write tools always render as EditorWriteCompletedCard when
+                // completed — this check is independent of outputText so that history-
+                // replay parts (which may lack output after DB serialization) still get
+                // the correct UI instead of falling through to the Terminal block.
+                if (isCompleted && isEditorWriteTool(toolName)) {
+                  const rawInput = 'input' in toolPart ? (toolPart as { input?: unknown }).input : undefined;
+                  const rawOutput = 'output' in toolPart ? (toolPart as { output?: unknown }).output : undefined;
+                  return (
+                    <div key={partKey}>
+                      <EditorWriteCompletedCard
+                        toolName={toolName}
+                        input={(rawInput ?? {}) as Record<string, unknown>}
+                        output={(rawOutput ?? {}) as EditorWriteOutput}
+                      />
+                    </div>
+                  );
+                }
 
                 if (isCompleted && outputText) {
                   const { command, output, exitCode } = parseTerminalOutput(outputText);
@@ -195,7 +238,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 // Editor write tools (write_segment, delete_segment, insert_widget,
                 // reply_to_comment) are always-confirm tools — render directly with
                 // isManualToolInvocation=true so the specialized approval UI shows immediately.
-                const needsEditorWriteApproval = isEditorWriteTool(getToolName(toolPart)) && !isCompleted;
+                const needsEditorWriteApproval = isEditorWriteTool(toolName) && !isCompleted;
                 if (needsEditorWriteApproval) {
                   return (
                     <div key={partKey}>

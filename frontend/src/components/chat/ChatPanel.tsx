@@ -7,6 +7,7 @@
 // [Sync] 2026-05-29: accept editorState prop and forward as editor_state in prepareSendMessagesRequest body.
 // [Sync] 2026-05-29: default resume=true in every claude-agent request body.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatMessageList.
+// [Sync] 2026-05-29: let the input dock fill the available chat page width.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -268,7 +269,7 @@ export default function ChatPanel({
   return (
     <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
       {shouldShowMessageSurface ? (
-        <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1rem 1rem 1.5rem' }}>
+        <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}>
           <ChatMessageList
             messages={messages}
             threadId={threadId}
@@ -285,7 +286,7 @@ export default function ChatPanel({
         </div>
       ) : null}
 
-      <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '48rem', margin: '0.75rem auto 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
+      <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
         <AIInputDock
           openFileDialogSignal={openFileDialogSignal}
           onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {

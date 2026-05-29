@@ -2,8 +2,8 @@
 // [Output] Specialized confirmation UI cards for write_segment, delete_segment, insert_widget, reply_to_comment.
 // [Pos] editor-write-approval component node in frontend/src/components/chat
 // [Sync] 2026-05-29: initial creation — 4 specialized editor write tool confirmation UIs + router component.
+// [Sync] 2026-05-29: remove decorative icons from editor write approval/completed cards in the chat message surface.
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { IconCheck, IconX } from './Icons';
 
 // ── Tool name constants ──────────────────────────────────────────────────────
 
@@ -169,18 +169,16 @@ function ActionRow({
           type="button"
           onClick={onApprove}
           disabled={isProcessing}
-          style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: approveColor, color: '#fff', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}
+          style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: approveColor, color: '#fff', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}
         >
-          <IconCheck style={{ width: '1rem', height: '1rem' }} />
           {approveLabel}
         </button>
         <button
           type="button"
           onClick={showRejectInput ? onReject : onToggleRejectInput}
           disabled={isProcessing}
-          style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', borderRadius: '999px', padding: '0.8rem 1rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}
+          style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '999px', padding: '0.8rem 1rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}
         >
-          <IconX style={{ width: '1rem', height: '1rem' }} />
           {showRejectInput ? '确认拒绝' : rejectLabel}
         </button>
       </div>
@@ -232,8 +230,7 @@ export function WriteSegmentApprovalUI({ toolCallId, isProcessing, onApprove, on
   return (
     <div style={cardStyle}>
       <div style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '1rem' }}>🤖</span>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Agent 建议修改文字内容</h3>
         </div>
         <p style={metaStyle}>mcp__editor__write_segment · {toolCallId}</p>
@@ -288,8 +285,7 @@ export function DeleteSegmentApprovalUI({ toolCallId, isProcessing, onApprove, o
   return (
     <div style={{ ...cardStyle, borderColor: 'rgba(217,83,79,0.35)' }}>
       <div style={{ ...headerStyle, background: 'rgba(217,83,79,0.06)', borderBottomColor: 'rgba(217,83,79,0.2)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '1rem' }}>⚠️</span>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: '#c0392b' }}>Agent 建议删除片段（不可逆操作）</h3>
         </div>
         <p style={metaStyle}>mcp__editor__delete_segment · {toolCallId}</p>
@@ -302,7 +298,7 @@ export function DeleteSegmentApprovalUI({ toolCallId, isProcessing, onApprove, o
           </div>
         ) : null}
         <div style={{ borderRadius: '10px', border: '1px solid rgba(217,83,79,0.3)', background: 'rgba(217,83,79,0.06)', padding: '0.65rem 0.85rem', fontSize: '0.85rem', color: '#c0392b' }}>
-          ⚠️ 此操作不可逆，片段删除后无法通过工具恢复。
+          此操作不可逆，片段删除后无法通过工具恢复。
         </div>
         {input.reason ? <ReasonBox reason={input.reason} /> : null}
         <ActionRow
@@ -348,8 +344,7 @@ export function InsertWidgetApprovalUI({ toolCallId, isProcessing, onApprove, on
   return (
     <div style={cardStyle}>
       <div style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '1rem' }}>🤖</span>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Agent 建议插入组件</h3>
         </div>
         <p style={metaStyle}>mcp__editor__insert_widget · {toolCallId}</p>
@@ -422,8 +417,7 @@ export function ReplyToCommentApprovalUI({ toolCallId, isProcessing, onApprove, 
   return (
     <div style={cardStyle}>
       <div style={headerStyle}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <span style={{ fontSize: '1rem' }}>🤖</span>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
           <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Agent 建议回复语音评论</h3>
         </div>
         <p style={metaStyle}>mcp__editor__reply_to_comment · {toolCallId}</p>
@@ -458,7 +452,118 @@ export function ReplyToCommentApprovalUI({ toolCallId, isProcessing, onApprove, 
   );
 }
 
-// ── EditorWriteApprovalUI (router) ────────────────────────────────────────────
+// ── EditorWriteCompletedCard ──────────────────────────────────────────────────
+
+export interface EditorWriteOutput {
+  ok?: boolean;
+  cellId?: string;
+  reason?: string;
+  error?: string;
+}
+
+interface EditorWriteCompletedCardProps {
+  toolName: string;
+  input: Record<string, unknown>;
+  output: EditorWriteOutput;
+}
+
+const COMPLETED_LABEL: Record<string, string> = {
+  'mcp__editor__write_segment': '已写入内容',
+  'mcp__editor__delete_segment': '已删除片段',
+  'mcp__editor__insert_widget': '已插入组件',
+  'mcp__editor__reply_to_comment': '已回复评论',
+};
+
+function resolveTargetCellId(toolName: string, input: Record<string, unknown>, output: EditorWriteOutput): string | null {
+  if (output.cellId) return output.cellId;
+  if (typeof input.cellId === 'string') return input.cellId;
+  if (toolName === 'mcp__editor__reply_to_comment' && typeof input.commentId === 'string') return input.commentId;
+  return null;
+}
+
+export function EditorWriteCompletedCard({ toolName, input, output }: EditorWriteCompletedCardProps) {
+  const name = toolName.toLowerCase();
+  const label = COMPLETED_LABEL[name] ?? toolName;
+  const isSuccess = output.ok !== false;
+  const targetCellId = resolveTargetCellId(name, input, output);
+  const reason = output.reason ?? (typeof input.reason === 'string' ? input.reason : undefined);
+
+  const handleJumpToCell = () => {
+    if (!targetCellId) return;
+    window.dispatchEvent(new CustomEvent('editor:jump-to-cell', { detail: { cellId: targetCellId } }));
+  };
+
+  return (
+    <div style={{
+      overflow: 'hidden',
+      borderRadius: '12px',
+      border: `1px solid ${isSuccess ? 'rgba(34,197,94,0.3)' : 'rgba(217,83,79,0.3)'}`,
+      background: isSuccess ? 'rgba(34,197,94,0.04)' : 'rgba(217,83,79,0.04)',
+    }}>
+      <div style={{
+        padding: '0.7rem 1rem',
+        borderBottom: `1px solid ${isSuccess ? 'rgba(34,197,94,0.15)' : 'rgba(217,83,79,0.15)'}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: '0.55rem',
+      }}>
+        <span style={{ fontSize: '0.9rem', fontWeight: 600, color: isSuccess ? '#166534' : '#c0392b', flex: 1 }}>{label}</span>
+        <span style={{
+          fontSize: '0.72rem',
+          fontWeight: 600,
+          padding: '0.15rem 0.55rem',
+          borderRadius: '999px',
+          background: isSuccess ? 'rgba(34,197,94,0.12)' : 'rgba(217,83,79,0.12)',
+          color: isSuccess ? '#166534' : '#c0392b',
+        }}>
+          {isSuccess ? '成功' : '失败'}
+        </span>
+      </div>
+      <div style={{ padding: '0.65rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+        {targetCellId ? (
+          <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+            片段 ID：<code style={{ fontSize: '0.78rem', background: 'var(--color-bg-surface)', padding: '0.1rem 0.4rem', borderRadius: '4px', color: 'var(--color-text-secondary)' }}>{targetCellId}</code>
+          </div>
+        ) : null}
+        {reason ? (
+          <div style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical' as const, overflow: 'hidden' }}>
+            {reason}
+          </div>
+        ) : null}
+        {!isSuccess && output.error ? (
+          <div style={{ fontSize: '0.82rem', color: '#c0392b' }}>{output.error}</div>
+        ) : null}
+      </div>
+      {targetCellId && isSuccess ? (
+        <div style={{ padding: '0 1rem 0.75rem', display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={handleJumpToCell}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              padding: '0.45rem 0.85rem',
+              border: '1px solid rgba(34,197,94,0.35)',
+              borderRadius: '8px',
+              background: 'rgba(34,197,94,0.06)',
+              color: '#166534',
+              fontSize: '0.82rem',
+              fontWeight: 600,
+              cursor: 'pointer',
+              transition: 'background 0.15s',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.14)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.06)'; }}
+          >
+            跳转到笔记
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 
 interface EditorWriteApprovalUIProps {
   toolName: string;
@@ -490,14 +595,14 @@ export default function EditorWriteApprovalUI({ toolName, toolCallId, input, isP
   return (
     <div style={{ ...cardStyle, padding: '1rem' }}>
       <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-        🤖 Agent 请求执行编辑器操作：<code>{toolName}</code>
+        Agent 请求执行编辑器操作：<code>{toolName}</code>
       </p>
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.85rem' }}>
         <button type="button" onClick={onApprove} disabled={isProcessing} style={{ flex: 1, border: 'none', borderRadius: '999px', padding: '0.75rem', background: 'var(--color-action-link)', color: '#fff', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>
-          <IconCheck style={{ width: '1rem', height: '1rem', display: 'inline', marginRight: '0.4rem' }} />接受
+          接受
         </button>
         <button type="button" onClick={() => onReject()} disabled={isProcessing} style={{ flex: 1, border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.75rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>
-          <IconX style={{ width: '1rem', height: '1rem', display: 'inline', marginRight: '0.4rem' }} />拒绝
+          拒绝
         </button>
       </div>
     </div>

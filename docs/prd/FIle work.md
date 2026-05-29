@@ -1,6 +1,6 @@
 # File Work PRD
 
-> 工作区文件管理、上传、保留提示、文件列表和文件操作的产品与视觉规范。本文引用 [Color System](<./Color System.md>)，仅更新 PRD，不修改产品代码。
+> 工作区文件管理、上传、保留提示、文件列表和文件操作的产品与视觉规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
 
 ## 1. 文档范围
 
@@ -143,7 +143,7 @@ FileWork
 
 - 上传区、Toolbar、文件列表、预览、策略提示和操作菜单均有视觉规则。
 - Empty、Loading、Uploading、Processing、Ready、Failed、Expired、Selected 状态均可验收。
-- 所有颜色来自 [Color System](<./Color System.md>)。
+- 所有颜色来自 [Color System](<./color_system/README.md>)。
 - 文档不再包含与本项目无关的 Python 架构分析内容。
 
 ## 12. 前端实现备注

@@ -70,7 +70,7 @@ Editor UI / Hooks 层的当前职责是**人类操作的适配层**：接收键�
 | 目标片段 | 高亮目标片段在文档中的位置，视觉锚定 |
 | 操作内容预览 | 对于 `write_segment`：显示 diff（原文 vs 拟修改文本）；对于 `delete_segment`：显示将被删除的内容 |
 | Agent 理由 | Agent 调用工具时传入的 `reason` 字段 |
-| 确认按钮 | ✅ 接受 / ❌ 拒绝（可附拒绝理由） |
+| 确认按钮 | 接受 / 拒绝（可附拒绝理由） |
 
 ### 3.2 已执行操作（Applied）
 
@@ -127,14 +127,14 @@ Agent 操作被 Approve 后，在文档中提供视觉反馈：
 ### 4.3 用户决策处理
 
 ```
-用户点击 ✅ 接受
+用户点击 接受
   → useAgentActions.approve(toolCallId)
   → POST /api/claude-agent/tool-confirm { toolCallId, approved: true }
   → 从 pendingActions 队列移除
   → Engine 执行写操作（由 Agent 侧 hook 返回 allow 后触发）
   → 片段高亮变为"已执行"动画
 
-用户点击 ❌ 拒绝
+用户点击 拒绝
   → useAgentActions.reject(toolCallId, reason?)
   → POST /api/claude-agent/tool-confirm { toolCallId, approved: false, reason }
   → 从 pendingActions 队列移除
@@ -164,6 +164,7 @@ ToolConfirmationStore 有 5 分钟确认超时（现有机制）。超时后：
 | `InsertWidgetApprovalUI` | `mcp__editor__insert_widget` | `input.widgetType`, `input.data`, `input.afterCellId`, `input.reason` | 展示组件类型、插入位置与操作理由 |
 | `ReplyToCommentApprovalUI` | `mcp__editor__reply_to_comment` | `input.commentId`, `input.content`, `input.reason` | 展示目标评论 ID、回复内容与操作理由 |
 | `EditorWriteApprovalUI`（路由器） | 以上全部 | `toolName`, `input`, `toolCallId`, `threadId`, `isProcessing`, `onApprove`, `onReject` | 根据 `toolName` 派发到对应专用组件 |
+| `EditorWriteCompletedCard` | 以上全部（已完成态） | `toolName`, `input`, `output` | 工具执行完成后的结果摘要卡片；包含「跳转到笔记」导航按钮 |
 
 **公共 Props 接口（所有专用组件共享）：**
 
@@ -177,13 +178,104 @@ interface EditorWriteApprovalProps {
 }
 ```
 
+### 5.1.1 `EditorWriteCompletedCard` — 完成态结果卡片
+
+**触发条件：** 工具 part 状态为 `output-available` 且 `isEditorWriteTool(toolName)` 为真。
+
+**取代行为：** 替代 `ChatMessageList` 中默认的 `‹ Terminal` 暗色卡片渲染路径。
+
+**UI 布局：**
+
+```
+┌────────────────────────────────────────────────────┐
+│ 已写入内容   [成功]                                  │
+│ mcp__editor__write_segment                          │
+├────────────────────────────────────────────────────┤
+│ 片段 ID: {cellId}                                   │
+│                                                    │
+│ 执行理由: {reason（截断到 2 行）}                   │
+├────────────────────────────────────────────────────┤
+│                    [跳转到笔记]                    │
+└────────────────────────────────────────────────────┘
+```
+
+**工具操作类型标签映射：** Chat 对话消息面保持纯文字完成态，不在 `EditorWriteCompletedCard` 或编辑器写入确认卡片中使用装饰性图标。
+
+| MCP 工具名 | 完成标签 |
+|-----------|---------|
+| `mcp__editor__write_segment` | 已写入内容 |
+| `mcp__editor__delete_segment` | 已删除片段 |
+| `mcp__editor__insert_widget` | 已插入组件 |
+| `mcp__editor__reply_to_comment` | 已回复评论 |
+
+**「跳转到笔记」交互流：**
+
+```
+用户点击 [跳转到笔记]
+  → window.dispatchEvent(new CustomEvent('editor:jump-to-cell', { detail: { cellId } }))
+  → App.tsx 监听到事件
+  → setCurrentView('writing')
+  → jumpToCellRef.current = cellId
+  → currentView 变为 'writing' 后 useEffect 触发
+  → textareaRefs.current.get(cellId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  → 对应 textarea 获得焦点
+```
+
+**cellId 来源优先级：** `output.cellId` → `input.cellId` → `input.commentId`（reply 工具）→ 无（隐藏按钮）
+
+### 5.1.2 历史回放渲染问题与修复
+
+#### 问题现象
+
+会话历史重新加载时（`fetchThreadMessages` + `setMessages(initialMessages)`），已完成的 editor write 工具（`state = "output-available"`）依然渲染为 `‹ Terminal` 暗色卡片，而非预期的 `EditorWriteCompletedCard`。
+
+#### 根因分析
+
+原始检测逻辑将 `isEditorWriteTool(getToolName(toolPart))` 嵌套在 `isCompleted && outputText` 条件内：
+
+```
+if (isCompleted && outputText) {
+  if (isEditorWriteTool(getToolName(toolPart))) → EditorWriteCompletedCard
+  else → Terminal  ← 历史回放走此分支
+}
+```
+
+历史回放时 `DynamicToolUIPart` 从数据库反序列化，可能出现：
+
+| 情形 | 结果 |
+|------|------|
+| `toolName` 字段未持久化 | `getToolName()` 对 `type: "tool-invocation"` 的 part 返回 `"invocation"` |
+| 后端 API 序列化变换了 type | `getToolName()` 返回非预期值 |
+| 以上任一情形 | `isEditorWriteTool("invocation")` = false → 回退到 Terminal |
+
+实时流式传输时 AI SDK 内部 DynamicToolUIPart 保持完整的 `toolName` 字段，故 `getToolName()` 正常返回工具名。历史加载路径的结构差异导致静默失效。
+
+#### 修复方案
+
+1. **健壮化工具名解析**：提取 `resolveToolName()` 辅助函数，优先使用 `getToolName()`，失败时直接读 `part.toolName` 字段作为兜底。
+
+2. **独立检测分支**：将 editor write 工具的完成态检测提升为独立条件，**优先级高于** Terminal 渲染分支，且不依赖 `outputText` 是否存在：
+
+```
+// 修复后的检测顺序（ChatMessageList.tsx）
+if (isCompleted && isEditorWriteTool(resolveToolName(toolPart)))
+  → EditorWriteCompletedCard（无论 outputText 是否非空）
+
+if (isCompleted && outputText)
+  → Terminal（仅非 editor write 工具走此路径）
+```
+
+3. **兼容性**：`resolveToolName()` 兜底逻辑确保历史加载的 DynamicToolUIPart 和实时流式 DynamicToolUIPart 均能正确识别。
+
+---
+
 ### 5.2 `AgentActionOverlay` — 待确认操作预览
 
 位置：以 modal/panel 形式浮层显示，不遮挡整个编辑器（可参考 GitHub 的 code review suggestion UI 模式）。
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  🤖 Claude Agent 建议修改                              │
+│  Claude Agent 建议修改                                 │
 ├─────────────────────────────────────────────────────┤
 │  目标片段：第 1 段                                     │
 │                                                     │
@@ -195,7 +287,7 @@ interface EditorWriteApprovalProps {
 │                                                     │
 │  理由：将"夏天的午后"改为"难忘的夏天"，使情感表达更直接  │
 ├─────────────────────────────────────────────────────┤
-│        [✅ 接受修改]        [❌ 拒绝]                 │
+│        [接受修改]           [拒绝]                    │
 └─────────────────────────────────────────────────────┘
 ```
 
@@ -289,7 +381,7 @@ toolName 检测优先级：
 **UI 布局：**
 ```
 ┌────────────────────────────────────────────────────┐
-│ 🤖 Agent 建议修改文字内容                           │
+│ Agent 建议修改文字内容                              │
 │ mcp__editor__write_segment · {toolCallId}           │
 ├────────────────────────────────────────────────────┤
 │ 目标片段 ID: {cellId}                               │
@@ -301,7 +393,7 @@ toolName 检测优先级：
 │                                                    │
 │ 操作理由: {reason}                                  │
 ├────────────────────────────────────────────────────┤
-│    [✅ 接受修改]          [❌ 拒绝]                 │
+│    [接受修改]             [拒绝]                   │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -314,16 +406,16 @@ toolName 检测优先级：
 **UI 布局：**
 ```
 ┌────────────────────────────────────────────────────┐
-│ ⚠️ Agent 建议删除片段（不可逆操作）                 │
+│ Agent 建议删除片段（不可逆操作）                    │
 │ mcp__editor__delete_segment · {toolCallId}          │
 ├────────────────────────────────────────────────────┤
 │ 将删除片段 ID: {cellId}                             │
 │                                                    │
-│ ⚠️ 此操作不可逆，片段删除后无法通过工具恢复。        │
+│ 此操作不可逆，片段删除后无法通过工具恢复。          │
 │                                                    │
 │ 操作理由: {reason}                                  │
 ├────────────────────────────────────────────────────┤
-│    [✅ 确认删除]          [❌ 取消]                 │
+│    [确认删除]             [取消]                   │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -336,7 +428,7 @@ toolName 检测优先级：
 **UI 布局：**
 ```
 ┌────────────────────────────────────────────────────┐
-│ 🤖 Agent 建议插入组件                               │
+│ Agent 建议插入组件                                  │
 │ mcp__editor__insert_widget · {toolCallId}           │
 ├────────────────────────────────────────────────────┤
 │ 组件类型: {widgetType}                              │
@@ -349,7 +441,7 @@ toolName 检测优先级：
 │                                                    │
 │ 操作理由: {reason}                                  │
 ├────────────────────────────────────────────────────┤
-│    [✅ 接受插入]          [❌ 拒绝]                 │
+│    [接受插入]             [拒绝]                   │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -361,7 +453,7 @@ toolName 检测优先级：
 **UI 布局：**
 ```
 ┌────────────────────────────────────────────────────┐
-│ 🤖 Agent 建议回复语音评论                           │
+│ Agent 建议回复语音评论                              │
 │ mcp__editor__reply_to_comment · {toolCallId}        │
 ├────────────────────────────────────────────────────┤
 │ 目标评论 ID: {commentId}                            │
@@ -373,7 +465,7 @@ toolName 检测优先级：
 │                                                    │
 │ 操作理由: {reason}                                  │
 ├────────────────────────────────────────────────────┤
-│    [✅ 发送回复]          [❌ 拒绝]                 │
+│    [发送回复]             [拒绝]                   │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -413,7 +505,7 @@ sequenceDiagram
     Hook->>Hook: await Promise（阻塞 Agent 执行）
 
     alt 用户点击 Approve
-        Human->>UI: 点击 [✅ 接受修改]
+        Human->>UI: 点击 [接受修改]
         UI->>Part: onApprove()
         Part->>API: POST /tool-confirm {thread_id, tool_call_id, approved: true}
         API->>Store: resolve(approved=true)
@@ -428,7 +520,7 @@ sequenceDiagram
         SDK->>List: tool part 更新 state=output-available
         List->>List: isCompleted → 折叠/Terminal 渲染
     else 用户点击 Reject
-        Human->>UI: 点击 [❌ 拒绝]（可选输入拒绝理由）
+        Human->>UI: 点击 [拒绝]（可选输入拒绝理由）
         UI->>Part: onReject(reason?)
         Part->>API: POST /tool-confirm {thread_id, tool_call_id, approved: false, reason}
         API->>Store: resolve(approved=false)
@@ -457,15 +549,15 @@ sequenceDiagram
     Hook->>Store: createPendingConfirmation(toolCallId)
     Hook-->>SDK: SSE tool part（state=input-available）
     SDK->>List: isEditorWriteTool → 直接渲染 DeleteSegmentApprovalUI
-    UI->>Human: 展示⚠️不可逆警告 + cellId + reason
+    UI->>Human: 展示不可逆警告 + cellId + reason
 
     alt Approve
-        Human->>UI: 点击 [✅ 确认删除]（红色按钮）
+        Human->>UI: 点击 [确认删除]（红色按钮）
         UI->>API: POST tool-confirm approved=true
         API->>Hook: allow → MCP 执行 deleteCell(cellId)
         MCP-->>Agent: {ok: true}
     else Reject
-        Human->>UI: 点击 [❌ 取消]
+        Human->>UI: 点击 [取消]
         UI->>API: POST tool-confirm approved=false
         API->>Hook: deny → Agent 调整方案
     end
@@ -490,12 +582,12 @@ sequenceDiagram
     UI->>Human: 展示组件类型 + 插入位置 + data JSON 预览 + reason
 
     alt Approve
-        Human->>UI: 点击 [✅ 接受插入]
+        Human->>UI: 点击 [接受插入]
         UI->>API: POST tool-confirm approved=true
         API->>Hook: allow → MCP 执行 insertWidgetAtCursor(...)
         MCP-->>Agent: {ok: true}
     else Reject
-        Human->>UI: 点击 [❌ 拒绝]
+        Human->>UI: 点击 [拒绝]
         UI->>API: POST tool-confirm approved=false
     end
 ```
@@ -519,12 +611,12 @@ sequenceDiagram
     UI->>Human: 展示目标评论 ID + 回复内容 + reason
 
     alt Approve
-        Human->>UI: 点击 [✅ 发送回复]
+        Human->>UI: 点击 [发送回复]
         UI->>API: POST tool-confirm approved=true
         API->>Hook: allow → MCP 执行 addCommentChatMessage(commentId, 'agent', content)
         MCP-->>Agent: {ok: true}
     else Reject
-        Human->>UI: 点击 [❌ 拒绝]
+        Human->>UI: 点击 [拒绝]
         UI->>API: POST tool-confirm approved=false
     end
 ```
