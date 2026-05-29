@@ -6,6 +6,10 @@
 #                    Removed pet/persona/mem0/resolved_identity intrinsic fields.
 #                    Renamed env prefix PAWKEYLAND_* → INK_AGENT_*.
 #                    Inlined state_builder (was 111 lines) into AgentRunState.
+# [Sync] 2026-05-29: add editor_state (soft-cached EditorState dict) and editor_user_id
+#                    to AgentRunState intrinsic state so the session flyweight survives
+#                    across turns and MCP write-tool results can refresh in-place.
+#                    Added with_editor_state() builder helper.
 
 """Claude Agent Thread Session Pool.
 
@@ -130,6 +134,13 @@ class AgentRunState:
     system_prompt: str = ""
     is_context_initialized: bool = False
     runner: Optional[Any] = field(default=None, repr=False)
+    # Soft-cached EditorState dict.  Updated by assemble_context on each turn
+    # that carries an editor_state snapshot, and refreshed in-place by the
+    # tool-event callback after a confirmed MCP write-tool result.
+    # None means no editor context has been established yet for this session.
+    editor_state: Optional[Any] = field(default=None, repr=False)
+    # DB user_id needed to reload editor_state after write-tool execution.
+    editor_user_id: int = 0
 
     # ------------------------------------------------------------------
     # Extrinsic state (refreshed each turn)
@@ -219,6 +230,19 @@ class AgentRunState:
 
     def with_runner(self, runner: Any) -> "AgentRunState":
         self.runner = runner
+        return self
+
+    def with_editor_state(self, editor_state: Optional[Any], user_id: int) -> "AgentRunState":
+        """Update the soft-cached editor state.
+
+        Only overwrites when *editor_state* is not None so that pure-chat turns
+        (editor_state=None) don't erase a previously established document context.
+        *user_id* is always stored so DB-reload calls in the write-tool callback
+        can reference the correct user row.
+        """
+        if editor_state is not None:
+            self.editor_state = editor_state
+        self.editor_user_id = user_id
         return self
 
 

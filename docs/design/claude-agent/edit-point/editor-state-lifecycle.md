@@ -4,18 +4,21 @@
 >         `backend/libs/claude_agent_kit/server/agent_runner.py` (run_streaming, _pre_tool_use_hook),
 >         `backend/libs/claude_agent_kit/server/editor_index.py` (get_editor_resource_data),
 >         `backend/libs/claude_agent_kit/server/editor_tool.py` (handle_editor_read_tool),
+>         `backend/claude_agent/thread_pool.py` (AgentRunState, editor_state, editor_user_id),
 >         `docs/design/claude-agent/edit-point/workspace-adapter.md`,
 >         `docs/design/claude-agent/edit-point/workspace-context.md`
-> [Output] 定义 `editor_state` 快照从前端采集到运行时激活再到清理的完整生命周期，
->          包括数据结构、五个阶段说明、业务时序图、不持久化决策、None 语义与双路径读取对比。
+> [Output] 定义 `editor_state` 快照从前端采集到运行时激活、MCP写工具后DB刷新再到清理的完整生命周期，
+>          包括数据结构、六个阶段说明、业务时序图、AgentRunState软缓存决策、None 语义与双路径读取对比。
 > [Pos] lifecycle-design-doc in `docs/design/claude-agent/edit-point`
 > [Sync] 2026-05-29: initial design — editor_state snapshot lifecycle.
+> [Sync] 2026-05-29: editor_state 迁移至 AgentRunState 软缓存；新增阶段 3b（MCP写工具后DB刷新），
+>                    更新 §5 不持久化决策表（AgentRunState 改为软缓存 ✅），更新 §4 时序图。
 
 # `editor_state` 快照生命周期设计
 
-Status: Draft  
+Status: Updated  
 Updated: 2026-05-29  
-Scope: Design only — 不含实现代码
+Scope: Design + 实现对应代码
 
 ---
 
@@ -23,14 +26,15 @@ Scope: Design only — 不含实现代码
 
 1. [概述](#1-概述)
 2. [数据结构定义](#2-数据结构定义)
-3. [生命周期五阶段](#3-生命周期五阶段)
+3. [生命周期六阶段](#3-生命周期六阶段)
    - 3.1 [阶段 0：前端采集](#31-阶段-0前端采集)
    - 3.2 [阶段 1：HTTP 序列化传输](#32-阶段-1http-序列化传输)
    - 3.3 [阶段 2：后端接收与透传](#33-阶段-2后端接收与透传)
    - 3.4 [阶段 3：运行时双激活](#34-阶段-3运行时双激活)
-   - 3.5 [阶段 4：临时文件清理](#35-阶段-4临时文件清理)
+   - 3.5 [阶段 3b：MCP 写工具后 DB 刷新](#35-阶段-3bmcp-写工具后-db-刷新)
+   - 3.6 [阶段 4：临时文件清理](#36-阶段-4临时文件清理)
 4. [完整业务时序图](#4-完整业务时序图)
-5. [不持久化设计决策](#5-不持久化设计决策)
+5. [AgentRunState 软缓存设计](#5-agentrunstate-软缓存设计)
 6. [`None` 语义](#6-none-语义)
 7. [双路径读取对比](#7-双路径读取对比)
 8. [与双层上下文架构的关系](#8-与双层上下文架构的关系)
@@ -43,18 +47,25 @@ Scope: Design only — 不含实现代码
 `editor_state` 快照是 Ink & Memory 文档编辑场景中 Agent 感知文档内容的**唯一数据源**。
 
 - **来源**：前端 `EditorEngine` 维护的内存状态，用户发起 Agent 请求时按需采集
-- **传递方式**：随 HTTP 请求体一次性发送，后端全程透传，不落数据库
+- **传递方式**：随 HTTP 请求体一次性发送，后端存入 `AgentRunState` 享元缓存（软缓存）
 - **使用方**：`agent_runner.py` 中的两个机制——PreToolUse 虚拟索引重定向 和 Editor MCP 子进程
-- **生命周期**：仅存活于单次 `run_streaming` 调用期间，结束后连同临时文件一起清理
+- **刷新时机**：① 每轮请求前端提供新快照时覆盖；② MCP 写工具成功执行后从 DB 重载
+- **生命周期**：软缓存存活于 `AgentRunState`（TTL 600 s），运行时临时文件在 `run_streaming` finally 块清理
 
 ```
-EditorEngine(内存)
-  → 前端序列化(JSON)
-    → HTTP body
-      → AgentRunOptions.editor_state
+EditorEngine(内存) → 前端序列化(JSON)
+  → HTTP body
+    → AgentRunState.editor_state（软缓存，跨轮复用）
+      → AgentRunOptions.editor_state（每轮注入）
         → ① PreToolUse 临时文件重定向（per-Read）
         → ② Editor MCP 子进程状态文件（per-run）
-          → finally 块清理
+          → finally 块清理临时文件
+
+MCP 写工具成功执行后:
+  → DB 写入
+    → service.py tool_result 回调从 DB 重载
+      → 更新 AgentRunState.editor_state（下一轮生效）
+      → 更新 run_options.editor_state（当前轮 PreToolUse 立即生效）
 ```
 
 ---
@@ -117,7 +128,7 @@ interface Commentor {
 
 ---
 
-## 3. 生命周期五阶段
+## 3. 生命周期六阶段
 
 ### 3.1 阶段 0：前端采集
 
@@ -158,35 +169,38 @@ FastAPI 通过 Pydantic 自动将请求体中的 JSON 对象反序列化为 Pyth
 
 ### 3.3 阶段 2：后端接收与透传
 
-`editor_state` 在后端经历**三次透传**，均不做格式转换：
+`editor_state` 在后端经历**三次透传 + 一次缓存写入**：
 
 ```
 ClaudeAgentRequestBody.editor_state          ← HTTP body (Pydantic dict)
   │
   ▼
-ClaudeAgentRunRequest.editor_state           ← 路由层构建（claude_agent.py:220）
+ClaudeAgentRunRequest.editor_state           ← 路由层构建（claude_agent.py）
   │
-  ▼
-AgentRunOptions.editor_state                 ← 上下文装配（service.py:268）
+  ▼ state.with_editor_state(editor_state, user_id)
+AgentRunState.editor_state                   ← ★ 享元缓存（软缓存）
+  │                                               仅当 editor_state 不为 None 时覆盖
+  ▼ active_editor_state = request or cache
+AgentRunOptions.editor_state                 ← 上下文装配（service.py assemble_context）
   │
   ▼
 ClaudeAgentRunner.run_streaming(opts, ...)   ← 运行时使用
 ```
 
-**`assemble_context` 中的装配位置**（`service.py`）：
+**`assemble_context` 中的装配逻辑（`service.py`）：**
 
 ```python
+# 更新享元缓存（None 不覆盖，纯对话轮次不丢失已有文档上下文）
+state.with_editor_state(request.editor_state, int(request.user_id))
+
+# 解析活跃 editor_state：前端快照优先，降级使用缓存
+active_editor_state = request.editor_state if request.editor_state is not None else state.editor_state
+
 run_options = AgentRunOptions(
-    thread_id=state.session_id,
-    user_message=user_message_content,   # 含 <workspace_context> 块
-    cwd=cwd or None,
-    editor_state=request.editor_state,   # ← 直接透传，不查 DB
-    allowed_tools=[..., "mcp__editor__*"],
     ...
+    editor_state=active_editor_state,   # ← 注入活跃 editor_state
 )
 ```
-
-`editor_state` **不参与** `<workspace_context>` 块的构建——提示词块内容只由 `cwd` 决定（见 `workspace-context.md §3.2`）。
 
 ---
 
@@ -250,7 +264,46 @@ Agent 读到实时 cells 数组
 
 ---
 
-### 3.5 阶段 4：临时文件清理
+### 3.5 阶段 3b：MCP 写工具后 DB 刷新
+
+**触发时机**：MCP 写工具（`write_segment` / `delete_segment` / `insert_widget` / `reply_to_comment`）被用户 Approve 后，Agent 收到 `tool_result` 事件（非 error）。
+
+```
+Agent 收到 tool_result（写工具成功）
+  ↓
+_make_tool_event_cb（service.py）检测 tool_name ∈ _EDITOR_WRITE_TOOL_NAMES
+  ↓
+await asyncio.to_thread(database.get_session, user_id, editor_session_id)
+  ↓
+fresh_row["editor_state"] → 更新单一源：
+  └─ state.editor_state = fresh_editor_state   ← AgentRunState 享元（唯一权威源）
+     opts.editor_state_getter 绑定到 state → PreToolUse hook 调用 getter 时自动读到最新值
+```
+
+**刷新时序：**
+
+```mermaid
+sequenceDiagram
+    participant Agent as Claude Agent
+    participant Svc as _make_tool_event_cb<br/>(service.py)
+    participant DB as Database<br/>(user_sessions)
+    participant State as AgentRunState<br/>（享元缓存·唯一权威源）
+    participant Hook as _pre_tool_use_hook<br/>（agent_runner.py）
+
+    Agent->>Svc: tool_result { toolCallId, output:{ok:true}, isError:false }
+    Note over Svc: resolved_tool_name ∈ _EDITOR_WRITE_TOOL_NAMES?
+    Svc->>DB: asyncio.to_thread(get_session, user_id, editor_session_id)
+    DB-->>Svc: { editor_state: { cells:[最新内容], ... } }
+    Svc->>State: state.editor_state = fresh_editor_state
+    Note over State: opts.editor_state_getter = lambda: state.editor_state<br/>（由 assemble_context 注入）
+    Note over Hook: 当轮内后续 read_file(".editor/cells.json")<br/>→ opts.editor_state_getter() 返回最新值<br/>→ PreToolUse 写临时文件，Agent 读到最新内容
+```
+
+**失败处理**：DB 查询异常时记录 warning 并跳过刷新（不阻断 Agent 执行）。`state.editor_state` 保留写工具执行前的快照，下一轮请求会由前端提供新快照覆盖。
+
+---
+
+### 3.6 阶段 4：临时文件清理
 
 `run_streaming` 的 `finally` 块负责清理本次运行创建的所有临时文件：
 
@@ -285,11 +338,13 @@ sequenceDiagram
     participant API  as POST /api/claude-agent
     participant Rtr  as ClaudeAgentRouter
     participant Svc  as ClaudeAgentService<br/>assemble_context
+    participant State as AgentRunState<br/>（享元缓存）
     participant Run  as ClaudeAgentRunner<br/>run_streaming
     participant Hook as _pre_tool_use_hook
     participant EMCP as Editor MCP 子进程<br/>editor_mcp_stdio
     participant Agt  as Claude Agent<br/>(Claude Code CLI)
     participant Tmp  as /tmp/ 临时文件系统
+    participant DB   as Database<br/>(user_sessions)
 
     rect rgb(240, 248, 255)
         Note over EE,Chat: 阶段 0：前端采集
@@ -303,10 +358,11 @@ sequenceDiagram
     end
 
     rect rgb(255, 250, 240)
-        Note over Rtr,Svc: 阶段 2：后端透传（三次透传，不做格式转换）
+        Note over Rtr,State: 阶段 2：后端透传 + 享元缓存写入
         API->>Rtr: ClaudeAgentRequestBody<br/>editor_state = dict
         Rtr->>Svc: ClaudeAgentRunRequest<br/>editor_state = dict
-        Svc->>Run: AgentRunOptions(<br/>  user_message = [..., <workspace_context>],<br/>  cwd = /workspace/{thread_id},<br/>  editor_state = dict,<br/>  allowed_tools = [..., "mcp__editor__*"]<br/>)
+        Svc->>State: state.with_editor_state(editor_state, user_id)<br/>（仅 editor_state≠None 时覆盖）
+        Svc->>Run: AgentRunOptions(<br/>  user_message = [..., <workspace_context>],<br/>  cwd = /workspace/{thread_id},<br/>  editor_state = active_editor_state,<br/>  ← request.editor_state 或 state.editor_state 缓存兜底<br/>  allowed_tools = [..., "mcp__editor__*"]<br/>)
     end
 
     rect rgb(255, 240, 240)
@@ -319,32 +375,42 @@ sequenceDiagram
 
         Note over Run,Agt: Agent 执行开始
         Run->>Agt: system_prompt + user_message<br/>（含 <workspace_context> 块）
-        Note over Agt: 读取 <workspace_context>，<br/>了解 .editor/ 目录机制
+        Note over Agt: 读取 <workspace_context>，了解 .editor/ 目录机制
 
         alt 读取路径 A：read_file(".editor/cells.json")
             Agt->>Hook: Read { file_path: ".editor/cells.json" }
-            Hook->>Hook: is_editor_index_path → True<br/>editor_state is not None → True<br/>get_editor_resource_data → cells[]
+            Hook->>Hook: is_editor_index_path → True<br/>opts.editor_state_getter() ≠ None → True<br/>（getter 读取 AgentRunState.editor_state 最新值）
             Note over Hook: ⬇ 激活 B：per-Read 临时文件（每次一份）
             Hook->>Tmp: tempfile editor_XXXX.json<br/>json.dump(cells数组)
             Tmp-->>Hook: /tmp/editor_XXXX.json
             Hook-->>Agt: HookJSONOutput {<br/>  permissionDecision: "allow",<br/>  updatedInput: { file_path: "/tmp/editor_XXXX.json" }<br/>}
             Agt->>Tmp: Read /tmp/editor_XXXX.json
             Tmp-->>Agt: 实时 cells 数组
-        else 读取路径 B：mcp__editor__list_segments
-            Agt->>EMCP: mcp__editor__list_segments {}
-            EMCP->>Tmp: open(INK_EDITOR_STATE_FILE)
-            Tmp-->>EMCP: editor_state dict
-            EMCP-->>Agt: { ok:true, segments:[{ id, type, preview, length }] }
         end
 
-        Agt-->>Run: 输出文本 + tool events（SSE 流）
+        Agt-->>Run: 调用写工具 write_segment(cellId, text, reason)
+        Note over Run: PreToolUse 拦截 → 人类确认流程
+        Note over Agt: 等待确认结果...
+        Note over Run: 用户 Approve → MCP 执行
+        Run->>DB: save_session(user_id, session_id, updated_state)
+        DB-->>Run: ok
+        Run-->>Agt: tool_result { ok: true }
+    end
+
+    rect rgb(230, 255, 230)
+        Note over Svc,State: 阶段 3b：MCP写工具后 DB 刷新
+        Svc->>DB: asyncio.to_thread(get_session, user_id, editor_session_id)
+        DB-->>Svc: { editor_state: { cells:[最新内容], ... } }
+        Svc->>State: state.editor_state = fresh_state
+        Note over State: opts.editor_state_getter 绑定到 state<br/>PreToolUse hook 调用 getter 时自动读到最新值
+        Note over Opts: ⚠️ run_options.editor_state 不需要更新<br/>getter 已绑定 flyweight，无需同步 opts
     end
 
     rect rgb(248, 240, 255)
         Note over Run,Tmp: 阶段 4：finally 块清理
         Run->>Tmp: os.unlink(editor_state_XXXX.json)
         Run->>Tmp: os.unlink(editor_XXXX.json × N 个)
-        Note over Tmp: 所有本轮临时文件已删除
+        Note over Tmp: 所有本轮临时文件已删除<br/>AgentRunState.editor_state 保留（下一轮可复用）
     end
 
     Run-->>Svc: AgentRunResult { full_text, success }
@@ -354,36 +420,46 @@ sequenceDiagram
 
 ---
 
-## 5. 不持久化设计决策
+## 5. AgentRunState 软缓存设计
 
-### 5.1 `editor_state` 从不写入数据库
-
-`editor_state` 快照在整个后端生命周期中**只存在于内存和临时文件中**，从不持久化到任何存储：
+### 5.1 存储位置总览
 
 | 存储位置 | `editor_state` 是否写入 | 说明 |
 |---------|------------------------|------|
 | SQLite `chat_thread` | ❌ | 只存线程元信息 |
 | SQLite `chat_message` | ❌ | 只存 `parts` 和 `metadata`（model/usage/toolCount） |
-| `AgentRunState`（内存会话缓存） | ❌ | 只缓存 `system_prompt`、`cwd`，不缓存 `editor_state` |
+| `AgentRunState`（内存会话缓存） | ✅ **软缓存** | 缓存 `editor_state` 和 `editor_user_id`；TTL 600 s；前端快照优先覆盖，写工具后从 DB 更新 |
 | `/tmp/editor_state_*.json` | ✅ 临时 | 仅限本次 run_streaming，finally 清理 |
 | `/tmp/editor_*.json` | ✅ 临时 | 仅限本次 Read 调用，finally 清理 |
 
-### 5.2 为何不持久化
+### 5.2 为何改为软缓存（vs 原始无缓存设计）
+
+原始设计（`editor-state-lifecycle.md §5.3`，2026-05-29 前）将 `editor_state` 设计为每轮无状态注入，不在 `AgentRunState` 缓存。改为软缓存的原因：
 
 | 原因 | 说明 |
 |------|------|
-| **文档状态高频变化** | 用户每次编辑都会改变 `cells`，持久化的快照会立即过时 |
-| **权威源在前端内存** | `EditorEngine` 是 `editor_state` 的权威来源，后端无法独立维护其最新版本 |
-| **每轮请求提供最新快照** | 前端在每次请求时采集当前状态，保证 Agent 每轮都得到最新数据 |
-| **避免同步复杂度** | 不持久化意味着无需处理缓存失效、版本冲突、数据库 GC 等问题 |
+| **写工具后同轮读取一致性** | MCP 写工具（write_segment 等）修改 DB 后，Agent 在同一轮继续调用 `read_file(".editor/cells.json")` 应看到最新内容。无缓存时 `run_options.editor_state` 是静态快照，无法更新 |
+| **跨轮连续性（纯对话轮次）** | 用户发送纯对话消息（不带 `editor_state`）时，Agent 仍需知道文档内容（上下文连续性）。软缓存提供兜底，避免 `run_options.editor_state = None` 导致 `.editor/` 读取退化为占位符 `{}` |
+| **减少前端负担** | 写工具执行后 DB 即为权威源，无需强制前端在下一轮重发快照才能保证数据新鲜度 |
 
-### 5.3 `AgentRunState` 不缓存 `editor_state`
+### 5.3 软缓存语义规则
 
-`AgentRunState`（会话 TTL 缓存）只缓存跨轮次稳定的上下文：`system_prompt`（基于写作历史，首轮构建一次）和 `cwd`（工作空间路径）。
+```
+assemble_context() 每轮执行:
+  ├─ request.editor_state ≠ None → state.editor_state = request.editor_state（前端快照优先）
+  ├─ request.editor_state = None  → state.editor_state 保持缓存值（纯对话轮次不清空）
+  └─ active_editor_state = request.editor_state ?? state.editor_state
 
-`editor_state` **刻意不缓存**，原因：
-- 多轮对话中用户可能修改文档内容，每轮都应使用最新快照
-- 相邻两轮中用户发送不带 `editor_state` 的消息（切换到纯对话模式）时，缓存会导致错误注入上一轮的文档状态
+tool_result 回调（写工具成功）:
+  ├─ state.editor_state = DB 最新快照（下一轮可用）
+  └─ run_options.editor_state = DB 最新快照（当轮 PreToolUse 立即生效）
+```
+
+> **⚠️ 注意**：Editor MCP 子进程的状态文件（`/tmp/editor_state_XXXX.json`）在 `run_streaming` 启动时写入一次，写工具后不会重写该文件。因此同轮内通过 `mcp__editor__list_segments` 等 MCP 读工具仍会看到写前快照。PreToolUse 路径（`read_file(".editor/cells.json")`）因为直接读 `run_options.editor_state` 内存，所以可以看到刷新后的数据。
+
+### 5.4 `editor_state` 从不持久化到 SQLite
+
+`editor_state` 内容（cells、commentors 等）始终不持久化到 `chat_thread` 或 `chat_message`——文档本身持久化在 `user_sessions.editor_state_json`（由前端写入），Agent 读取的只是快照。
 
 ---
 
@@ -455,10 +531,12 @@ Edit-point 上下文由两个互补但独立的层组成：
 
 | 故障场景 | 处理策略 |
 |---------|---------|
-| `editor_state = None`（前端未传） | 两个运行时机制均不激活；`.editor/` 读取返回占位符 `{}`；`<workspace_context>` 块不受影响 |
+| `editor_state = None`（前端未传，缓存也为空） | 两个运行时机制均不激活；`.editor/` 读取返回占位符 `{}`；`<workspace_context>` 块不受影响 |
+| `editor_state = None`（前端未传，但缓存有值） | 使用缓存值激活运行时机制（软缓存兜底），保证上下文连续性 |
 | `editor_state` 格式非 dict（前端 Bug） | Pydantic 解析失败，HTTP 422 错误，请求被拒绝 |
 | 写入 MCP 状态临时文件失败（磁盘满等） | `except Exception` 捕获，记录 warning，跳过 Editor MCP；Agent 仍可通过路径 A（PreToolUse）读取 |
 | 写入 PreToolUse 重定向临时文件失败 | `except Exception` fall-through，记录 warning；Agent 读到占位符 `{}` |
 | `get_editor_resource_data` 异常（如字段缺失） | 同上 fall-through；返回 `{}` |
-| Agent 执行被取消（`CancelledError`） | `finally` 块仍执行，临时文件正常清理 |
+| Agent 执行被取消（`CancelledError`） | `finally` 块仍执行，临时文件正常清理；`AgentRunState.editor_state` 保留写工具执行前值 |
 | Editor MCP 子进程崩溃 | Claude Code CLI 报告工具不可用；Agent 可降级使用路径 A（`read_file`）|
+| **写工具后 DB 刷新失败**（网络/DB 错误） | `logger.warning` 记录，跳过刷新；`run_options.editor_state` 保留写前快照；下一轮前端提供新快照覆盖 |

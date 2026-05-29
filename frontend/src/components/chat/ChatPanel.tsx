@@ -5,6 +5,7 @@
 // [Sync] 2026-05-26: hide the empty message surface until chat content or an error exists.
 // [Sync] 2026-05-27: forward currentToolChoice to ChatMessageList so manual-mode tool approvals are shown inline.
 // [Sync] 2026-05-29: accept editorState prop and forward as editor_state in prepareSendMessagesRequest body.
+// [Sync] 2026-05-29: default resume=true in every claude-agent request body.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -153,6 +154,7 @@ export default function ChatPanel({
 
         const requestBody: ChatApiSchemaRequestBody = {
           id,
+          resume: true,
           message: lastMessage,
           chatModel: resolvedChatModel,
           toolChoice: getPendingData()?.toolChoice ?? currentToolChoice,

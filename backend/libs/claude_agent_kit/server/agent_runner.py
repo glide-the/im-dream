@@ -42,6 +42,10 @@
 #                    MCP tool call arguments (agent reads from <workspace_context> prompt);
 #                    _editor_mcp_stdio_config reverts to zero-arg form; editor MCP startup
 #                    condition restored to opts.editor_state is not None.
+# [Sync] 2026-05-29: _pre_tool_use_hook reads live editor_state via opts.editor_state_getter
+#                    (supplied by service.py as lambda: state.editor_state) so PreToolUse
+#                    virtual-index reads see the flyweight's latest value after write-tool
+#                    DB refreshes; falls back to opts.editor_state when getter is absent.
 
 """Claude Agent Runner.
 
@@ -876,9 +880,21 @@ class ClaudeAgentRunner:
             # so virtual-index reads are always served in all modes.
             # Delegated to the module-level _apply_editor_index_redirect
             # helper so it can be unit-tested without a real SDK subprocess.
+            #
+            # Read the editor_state from the AgentRunState flyweight via
+            # opts.editor_state_getter (injected by service.py as
+            # lambda: state.editor_state) so we always see the latest value —
+            # including updates written back after a confirmed MCP write-tool
+            # result.  Fall back to the snapshot in opts.editor_state when the
+            # getter is not provided (e.g. unit tests, direct runner calls).
             # ----------------------------------------------------------
+            live_editor_state = (
+                opts.editor_state_getter()
+                if opts.editor_state_getter is not None
+                else opts.editor_state
+            )
             redirect_result = _apply_editor_index_redirect(
-                tool_name, tool_input, opts.editor_state, _editor_redirect_tmp_paths
+                tool_name, tool_input, live_editor_state, _editor_redirect_tmp_paths
             )
             if redirect_result is not None:
                 return redirect_result

@@ -253,12 +253,20 @@ def create_tables(db):
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
       title TEXT,
+      claude_session_id TEXT,
+      agent_contract_version TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_chat_thread_user ON chat_thread(user_id, updated_at)")
+    # Migration: add claude_session_id / agent_contract_version for resume support.
+    for _col, _type in (("claude_session_id", "TEXT"), ("agent_contract_version", "TEXT")):
+        try:
+            db.execute(f"ALTER TABLE chat_thread ADD COLUMN {_col} {_type}")
+        except Exception:
+            pass  # Column already exists
 
     # @@@ Claude Agent chat messages (one row per user/assistant turn)
     # Schema fully aligned with better-chatbot ChatMessageTable (schema.pg.ts):
@@ -2129,7 +2137,8 @@ def get_chat_thread(thread_id: str, user_id: int) -> Optional[dict]:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, user_id, title, created_at, updated_at FROM chat_thread WHERE id = ? AND user_id = ?",
+            "SELECT id, user_id, title, claude_session_id, agent_contract_version, created_at, updated_at"
+            " FROM chat_thread WHERE id = ? AND user_id = ?",
             (thread_id, user_id),
         ).fetchone()
         return dict(row) if row else None
@@ -2171,6 +2180,29 @@ def update_chat_thread_title(thread_id: str, title: str) -> None:
         db.execute(
             "UPDATE chat_thread SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
             (title, thread_id),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def update_chat_thread_claude_session(
+    thread_id: str,
+    claude_session_id: str,
+    agent_contract_version: str,
+) -> None:
+    """Persist the Claude SDK session ID and contract version on a chat thread.
+
+    Called by the agent service after each successful turn so subsequent turns
+    can resume the correct transcript file.
+    """
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE chat_thread"
+            " SET claude_session_id = ?, agent_contract_version = ?, updated_at = CURRENT_TIMESTAMP"
+            " WHERE id = ?",
+            (claude_session_id, agent_contract_version, thread_id),
         )
         db.commit()
     finally:

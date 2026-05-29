@@ -1,8 +1,8 @@
 # UI 人机协作设计 — Agent 操作可视化与确认流
 
-Status: Draft  
-Updated: 2026-05-23  
-Scope: Design only — 不含实现代码
+Status: Updated  
+Updated: 2026-05-29  
+Scope: Design + 实现对应前端组件
 
 ---
 
@@ -13,8 +13,11 @@ Scope: Design only — 不含实现代码
 3. [Agent 操作可视化](#3-agent-操作可视化)
 4. [确认流程设计](#4-确认流程设计)
 5. [UI 组件设计](#5-ui-组件设计)
-6. [对象泳道图](#6-对象泳道图)
-7. [不变量与约束](#7-不变量与约束)
+6. [前端路由 — 工具检测与组件派发](#6-前端路由--工具检测与组件派发)
+7. [各工具确认 UI 详细规格](#7-各工具确认-ui-详细规格)
+8. [业务时序图](#8-业务时序图)
+9. [对象泳道图](#9-对象泳道图)
+10. [不变量与约束](#10-不变量与约束)
 
 ---
 
@@ -150,7 +153,31 @@ ToolConfirmationStore 有 5 分钟确认超时（现有机制）。超时后：
 
 ## 5. UI 组件设计
 
-### 5.1 `AgentActionOverlay` — 待确认操作预览
+### 5.1 组件注册表
+
+以下组件均位于 `frontend/src/components/chat/EditorWriteApprovalUI.tsx`：
+
+| 组件名 | 对应工具 | 核心 Props | 职责 |
+|--------|---------|-----------|------|
+| `WriteSegmentApprovalUI` | `mcp__editor__write_segment` | `input.cellId`, `input.text`, `input.reason` | 展示新文本内容预览与操作理由，提供 Approve/Reject |
+| `DeleteSegmentApprovalUI` | `mcp__editor__delete_segment` | `input.cellId`, `input.reason` | 展示将被删除的片段 ID、不可逆警告与操作理由 |
+| `InsertWidgetApprovalUI` | `mcp__editor__insert_widget` | `input.widgetType`, `input.data`, `input.afterCellId`, `input.reason` | 展示组件类型、插入位置与操作理由 |
+| `ReplyToCommentApprovalUI` | `mcp__editor__reply_to_comment` | `input.commentId`, `input.content`, `input.reason` | 展示目标评论 ID、回复内容与操作理由 |
+| `EditorWriteApprovalUI`（路由器） | 以上全部 | `toolName`, `input`, `toolCallId`, `threadId`, `isProcessing`, `onApprove`, `onReject` | 根据 `toolName` 派发到对应专用组件 |
+
+**公共 Props 接口（所有专用组件共享）：**
+
+```typescript
+interface EditorWriteApprovalProps {
+  toolCallId: string;
+  threadId: string;
+  isProcessing: boolean;
+  onApprove: () => void;
+  onReject: (reason?: string) => void;
+}
+```
+
+### 5.2 `AgentActionOverlay` — 待确认操作预览
 
 位置：以 modal/panel 形式浮层显示，不遮挡整个编辑器（可参考 GitHub 的 code review suggestion UI 模式）。
 
@@ -175,7 +202,7 @@ ToolConfirmationStore 有 5 分钟确认超时（现有机制）。超时后：
 - 使用绿色/红色高亮显示 diff（before 用删除线红色，after 用绿色底色）
 - 拒绝时可选择输入拒绝理由（textarea，可选填）
 
-### 5.2 `AgentOperationHistory` — 操作历史
+### 5.3 `AgentOperationHistory` — 操作历史
 
 侧边栏可折叠面板，显示 Agent 在当前会话中的操作记录：
 
@@ -187,7 +214,7 @@ ToolConfirmationStore 有 5 分钟确认超时（现有机制）。超时后：
 ❌ 08:29 删除第 2 段 — 已拒绝
 ```
 
-### 5.3 文档内联标识
+### 5.4 文档内联标识
 
 Agent 已修改的片段在文档中显示小型标识（类似 git blame 的旁注）：
 
@@ -197,7 +224,314 @@ Agent 已修改的片段在文档中显示小型标识（类似 git blame 的旁
 
 ---
 
-## 6. 对象泳道图
+## 6. 前端路由 — 工具检测与组件派发
+
+### 6.1 工具名称常量集合
+
+```typescript
+// EditorWriteApprovalUI.tsx
+export const EDITOR_WRITE_TOOL_NAMES = new Set([
+  'mcp__editor__write_segment',
+  'mcp__editor__delete_segment',
+  'mcp__editor__insert_widget',
+  'mcp__editor__reply_to_comment',
+]);
+
+export function isEditorWriteTool(toolName: string): boolean {
+  return EDITOR_WRITE_TOOL_NAMES.has(toolName.toLowerCase());
+}
+```
+
+### 6.2 ChatMessageList.tsx 检测逻辑
+
+```
+工具 part 到达（AI SDK UIMessage 流）
+  ↓
+getToolName(part) → toolName
+  ├── isAskUserQuestionTool(toolName) && !isCompleted
+  │     → 直接渲染 ToolMessagePart（AskUserQuestion UI）
+  ├── isEditorWriteTool(toolName) && !isCompleted
+  │     → 直接渲染 ToolMessagePart（EditorWriteApproval UI，isManualToolInvocation=true）
+  ├── toolChoice === 'manual' && !isCompleted
+  │     → 直接渲染 ToolMessagePart（通用 Approve/Reject）
+  └── 其他 / isCompleted
+        → 折叠/Terminal 渲染
+```
+
+### 6.3 ToolMessagePart.tsx 内部派发
+
+```
+input = part.input
+toolName 检测优先级：
+  1. isEditorWriteTool(toolName) && !isCompleted && state ∈ {input-available, approval-requested, undefined, input-streaming}
+     → 渲染 EditorWriteApprovalUI（路由器组件）
+  2. isAskUserQuestionTool
+     → 渲染 AskUserQuestionUI
+  3. shouldShowApprovalUI（manual mode 通用）
+     → 渲染通用 Approve/Reject 按钮
+```
+
+### 6.4 键盘快捷键
+
+所有编辑器写工具确认 UI 均支持与 `AskUserQuestionUI` 相同的快捷键：
+
+| 快捷键 | 动作 |
+|--------|------|
+| `Cmd/Ctrl + Enter` | Approve（接受） |
+| `Cmd/Ctrl + Escape` | Reject（拒绝，不含拒绝理由） |
+
+---
+
+## 7. 各工具确认 UI 详细规格
+
+### 7.1 `write_segment` — 写入片段
+
+**UI 布局：**
+```
+┌────────────────────────────────────────────────────┐
+│ 🤖 Agent 建议修改文字内容                           │
+│ mcp__editor__write_segment · {toolCallId}           │
+├────────────────────────────────────────────────────┤
+│ 目标片段 ID: {cellId}                               │
+├────────────────────────────────────────────────────┤
+│ 新内容预览:                                         │
+│ ┌──────────────────────────────────────────────┐   │
+│ │ {text（多行文本预览，最多 8 行，超出可滚动）}  │   │
+│ └──────────────────────────────────────────────┘   │
+│                                                    │
+│ 操作理由: {reason}                                  │
+├────────────────────────────────────────────────────┤
+│    [✅ 接受修改]          [❌ 拒绝]                 │
+└────────────────────────────────────────────────────┘
+```
+
+**关键字段：** `cellId`、`text`（新完整内容）、`reason`  
+**警告等级：** 中（内容被替换，可通过文档历史恢复）  
+**拒绝理由输入：** 可选 textarea（折叠，点击"添加说明"展开）
+
+### 7.2 `delete_segment` — 删除片段
+
+**UI 布局：**
+```
+┌────────────────────────────────────────────────────┐
+│ ⚠️ Agent 建议删除片段（不可逆操作）                 │
+│ mcp__editor__delete_segment · {toolCallId}          │
+├────────────────────────────────────────────────────┤
+│ 将删除片段 ID: {cellId}                             │
+│                                                    │
+│ ⚠️ 此操作不可逆，片段删除后无法通过工具恢复。        │
+│                                                    │
+│ 操作理由: {reason}                                  │
+├────────────────────────────────────────────────────┤
+│    [✅ 确认删除]          [❌ 取消]                 │
+└────────────────────────────────────────────────────┘
+```
+
+**关键字段：** `cellId`、`reason`  
+**警告等级：** 高（标题使用橙色/警告色调，含不可逆说明文字）  
+**接受按钮：** 红色/危险色（`var(--color-state-danger)` 或类似变量）
+
+### 7.3 `insert_widget` — 插入组件
+
+**UI 布局：**
+```
+┌────────────────────────────────────────────────────┐
+│ 🤖 Agent 建议插入组件                               │
+│ mcp__editor__insert_widget · {toolCallId}           │
+├────────────────────────────────────────────────────┤
+│ 组件类型: {widgetType}                              │
+│ 插入位置: 片段 {afterCellId} 之后（或文档末尾）      │
+│                                                    │
+│ 组件数据预览:                                       │
+│ ┌──────────────────────────────────────────────┐   │
+│ │ {data JSON（折叠展示，最多展示 key list）}     │   │
+│ └──────────────────────────────────────────────┘   │
+│                                                    │
+│ 操作理由: {reason}                                  │
+├────────────────────────────────────────────────────┤
+│    [✅ 接受插入]          [❌ 拒绝]                 │
+└────────────────────────────────────────────────────┘
+```
+
+**关键字段：** `widgetType`、`data`（JSON 预览）、`afterCellId`、`reason`  
+**警告等级：** 低（新增内容，不影响现有片段）
+
+### 7.4 `reply_to_comment` — 回复评论
+
+**UI 布局：**
+```
+┌────────────────────────────────────────────────────┐
+│ 🤖 Agent 建议回复语音评论                           │
+│ mcp__editor__reply_to_comment · {toolCallId}        │
+├────────────────────────────────────────────────────┤
+│ 目标评论 ID: {commentId}                            │
+│                                                    │
+│ 回复内容:                                           │
+│ ┌──────────────────────────────────────────────┐   │
+│ │ {content（最多 6 行，超出可滚动）}             │   │
+│ └──────────────────────────────────────────────┘   │
+│                                                    │
+│ 操作理由: {reason}                                  │
+├────────────────────────────────────────────────────┤
+│    [✅ 发送回复]          [❌ 拒绝]                 │
+└────────────────────────────────────────────────────┘
+```
+
+**关键字段：** `commentId`、`content`、`reason`  
+**警告等级：** 低（追加消息，不修改现有文档内容）
+
+---
+
+## 8. 业务时序图
+
+### 8.1 write_segment 完整时序
+
+```mermaid
+sequenceDiagram
+    participant Agent as Claude Agent
+    participant Hook as PreToolUse Hook
+    participant Store as ToolConfirmationStore
+    participant SSE as SSE 推送
+    participant SDK as AI SDK (useChat)
+    participant List as ChatMessageList
+    participant Part as ToolMessagePart
+    participant UI as WriteSegmentApprovalUI
+    participant Human as 用户
+    participant API as /api/claude-agent/tool-confirm
+    participant MCP as Editor MCP 子进程
+    participant DB as Database
+
+    Agent->>Hook: write_segment(cellId, text, reason)
+    Hook->>Store: createPendingConfirmation(toolCallId)
+    Hook->>SSE: tool-approval-request {toolCallId, toolName, input}
+    SSE->>SDK: 推送 tool part（state=input-available）
+    SDK->>List: 更新 messages，新增 tool UI part
+    List->>List: isEditorWriteTool("mcp__editor__write_segment") → true
+    List->>Part: 直接渲染 ToolMessagePart（isManualToolInvocation=true）
+    Part->>UI: 检测 write_segment → 渲染 WriteSegmentApprovalUI
+    UI->>Human: 展示新内容预览 + reason + Approve/Reject 按钮
+    Hook->>Hook: await Promise（阻塞 Agent 执行）
+
+    alt 用户点击 Approve
+        Human->>UI: 点击 [✅ 接受修改]
+        UI->>Part: onApprove()
+        Part->>API: POST /tool-confirm {thread_id, tool_call_id, approved: true}
+        API->>Store: resolve(approved=true)
+        Store->>Hook: permissionDecision = 'allow'
+        Hook->>Agent: 返回 allow
+        Agent->>MCP: 执行 write_segment handler
+        MCP->>DB: get_session(editor_session_id)
+        DB-->>MCP: 最新 editor_state
+        MCP->>MCP: 更新 cells[cellId].content = text
+        MCP->>DB: save_session(updated_state)
+        MCP-->>Agent: {ok: true}
+        SDK->>List: tool part 更新 state=output-available
+        List->>List: isCompleted → 折叠/Terminal 渲染
+    else 用户点击 Reject
+        Human->>UI: 点击 [❌ 拒绝]（可选输入拒绝理由）
+        UI->>Part: onReject(reason?)
+        Part->>API: POST /tool-confirm {thread_id, tool_call_id, approved: false, reason}
+        API->>Store: resolve(approved=false)
+        Store->>Hook: permissionDecision = 'deny'
+        Hook->>Agent: 返回 deny + reason
+        Note over Agent: Agent 根据拒绝原因调整方案继续对话
+        SDK->>List: tool part 更新 state=output-available（带拒绝结果）
+    end
+```
+
+### 8.2 delete_segment 完整时序
+
+```mermaid
+sequenceDiagram
+    participant Agent as Claude Agent
+    participant Hook as PreToolUse Hook
+    participant Store as ToolConfirmationStore
+    participant SDK as AI SDK (useChat)
+    participant List as ChatMessageList
+    participant UI as DeleteSegmentApprovalUI
+    participant Human as 用户
+    participant API as /api/claude-agent/tool-confirm
+    participant MCP as Editor MCP 子进程
+
+    Agent->>Hook: delete_segment(cellId, reason)
+    Hook->>Store: createPendingConfirmation(toolCallId)
+    Hook-->>SDK: SSE tool part（state=input-available）
+    SDK->>List: isEditorWriteTool → 直接渲染 DeleteSegmentApprovalUI
+    UI->>Human: 展示⚠️不可逆警告 + cellId + reason
+
+    alt Approve
+        Human->>UI: 点击 [✅ 确认删除]（红色按钮）
+        UI->>API: POST tool-confirm approved=true
+        API->>Hook: allow → MCP 执行 deleteCell(cellId)
+        MCP-->>Agent: {ok: true}
+    else Reject
+        Human->>UI: 点击 [❌ 取消]
+        UI->>API: POST tool-confirm approved=false
+        API->>Hook: deny → Agent 调整方案
+    end
+```
+
+### 8.3 insert_widget 完整时序
+
+```mermaid
+sequenceDiagram
+    participant Agent as Claude Agent
+    participant Hook as PreToolUse Hook
+    participant SDK as AI SDK (useChat)
+    participant List as ChatMessageList
+    participant UI as InsertWidgetApprovalUI
+    participant Human as 用户
+    participant API as /api/claude-agent/tool-confirm
+    participant MCP as Editor MCP 子进程
+
+    Agent->>Hook: insert_widget(widgetType, data, afterCellId, reason)
+    Hook-->>SDK: SSE tool part（state=input-available）
+    SDK->>List: isEditorWriteTool → 直接渲染 InsertWidgetApprovalUI
+    UI->>Human: 展示组件类型 + 插入位置 + data JSON 预览 + reason
+
+    alt Approve
+        Human->>UI: 点击 [✅ 接受插入]
+        UI->>API: POST tool-confirm approved=true
+        API->>Hook: allow → MCP 执行 insertWidgetAtCursor(...)
+        MCP-->>Agent: {ok: true}
+    else Reject
+        Human->>UI: 点击 [❌ 拒绝]
+        UI->>API: POST tool-confirm approved=false
+    end
+```
+
+### 8.4 reply_to_comment 完整时序
+
+```mermaid
+sequenceDiagram
+    participant Agent as Claude Agent
+    participant Hook as PreToolUse Hook
+    participant SDK as AI SDK (useChat)
+    participant List as ChatMessageList
+    participant UI as ReplyToCommentApprovalUI
+    participant Human as 用户
+    participant API as /api/claude-agent/tool-confirm
+    participant MCP as Editor MCP 子进程
+
+    Agent->>Hook: reply_to_comment(commentId, content, reason)
+    Hook-->>SDK: SSE tool part（state=input-available）
+    SDK->>List: isEditorWriteTool → 直接渲染 ReplyToCommentApprovalUI
+    UI->>Human: 展示目标评论 ID + 回复内容 + reason
+
+    alt Approve
+        Human->>UI: 点击 [✅ 发送回复]
+        UI->>API: POST tool-confirm approved=true
+        API->>Hook: allow → MCP 执行 addCommentChatMessage(commentId, 'agent', content)
+        MCP-->>Agent: {ok: true}
+    else Reject
+        Human->>UI: 点击 [❌ 拒绝]
+        UI->>API: POST tool-confirm approved=false
+    end
+```
+
+---
+
+## 9. 对象泳道图
 
 ```mermaid
 flowchart LR
@@ -266,7 +600,7 @@ flowchart LR
 
 ---
 
-## 7. 不变量与约束
+## 10. 不变量与约束
 
 > ⚠️ **不可违反的设计约束**
 

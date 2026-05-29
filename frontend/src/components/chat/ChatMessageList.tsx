@@ -3,6 +3,7 @@
 // [Pos] chat-message-list component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
 // [Sync] 2026-05-27: add toolChoice prop; render non-completed tool parts in manual mode directly with isManualToolInvocation=true so Approve/Cancel UI is shown.
+// [Sync] 2026-05-29: import isEditorWriteTool; render editor write tool parts directly (not collapsed) with isManualToolInvocation=true so specialized approval UI shows immediately.
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,6 +12,7 @@ import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
 import ToolMessagePart from './ToolMessagePart';
+import { isEditorWriteTool } from './EditorWriteApprovalUI';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -183,6 +185,18 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   return (
                     <div key={partKey}>
                       <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} />
+                    </div>
+                  );
+                }
+
+                // Editor write tools (write_segment, delete_segment, insert_widget,
+                // reply_to_comment) are always-confirm tools — render directly with
+                // isManualToolInvocation=true so the specialized approval UI shows immediately.
+                const needsEditorWriteApproval = isEditorWriteTool(getToolName(toolPart)) && !isCompleted;
+                if (needsEditorWriteApproval) {
+                  return (
+                    <div key={partKey}>
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} />
                     </div>
                   );
                 }

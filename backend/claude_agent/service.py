@@ -33,6 +33,27 @@
 # [Sync] 2026-05-29: pass editor_session_id (extracted from request.editor_state["id"])
 #                    to build_user_message so the agent receives it in <workspace_context>
 #                    and can pass it as the required first argument to MCP write tool calls.
+# [Sync] 2026-05-29: migrate existing_session design from Pawkeyland assemble_context:
+#                    load chat_thread to get claude_session_id; gate resume on
+#                    _has_usable_claude_resume (contract version check) + local file probe
+#                    via locate_session_file; set thread_id_for_agent=None on first turn,
+#                    claude_session_id on resume; _persist_turn writes back claude_session_id
+#                    + agent_contract_version so DB self-heals across deployments.
+#                    Added _AGENT_RUNTIME_CONTRACT_VERSION constant and
+#                    _has_usable_claude_resume helper. resume_existing_session added to
+#                    _TurnExecution carrier. DB columns claude_session_id /
+#                    agent_contract_version added to chat_thread table.
+# [Sync] 2026-05-29: move editor_state into AgentRunState flyweight (soft-cache):
+#                    assemble_context calls state.with_editor_state() so the snapshot
+#                    survives across turns; AgentRunOptions receives state.editor_state
+#                    (not raw request.editor_state) via active_editor_state.
+#                    editor_state_getter=lambda: state.editor_state injected into
+#                    AgentRunOptions so agent_runner._pre_tool_use_hook always reads the
+#                    live flyweight value via opts.editor_state_getter().
+#                    _make_tool_event_cb gains state param; on tool_result for
+#                    _EDITOR_WRITE_TOOL_NAMES it reloads editor_state from DB and updates
+#                    state.editor_state — getter propagates change to PreToolUse instantly.
+#                    _TurnContext gains tool_name_by_id dict for tool_result name lookup.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -62,7 +83,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, AsyncGenerator, Optional
+from typing import Any, AsyncGenerator, Mapping, Optional
 from uuid import uuid4
 
 from claude_agent.context_builder import ClaudeAgentContextBuilder
@@ -81,6 +102,43 @@ _SSE_KEEPALIVE_S: float = float(os.getenv("INK_AGENT_SSE_KEEPALIVE_S", "15") or 
 
 # Maximum characters to use when auto-titling a thread from the first user message.
 MAX_THREAD_TITLE_LENGTH: int = 50
+
+# Agent contract version — bump when the system prompt or tool set changes in a
+# way that makes old SDK transcripts incompatible with the current runtime.
+_AGENT_RUNTIME_CONTRACT_VERSION: str = os.getenv(
+    "INK_AGENT_CONTRACT_VERSION", "2026-05-29-ink-and-memory-v1"
+) or "2026-05-29-ink-and-memory-v1"
+
+# MCP editor write tools that require human confirmation AND trigger an
+# editor_state DB-reload after successful execution (see mcp-tools.md §4).
+_EDITOR_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
+    "mcp__editor__write_segment",
+    "mcp__editor__delete_segment",
+    "mcp__editor__insert_widget",
+    "mcp__editor__reply_to_comment",
+})
+
+
+# ---------------------------------------------------------------------------
+# Resume helpers
+# ---------------------------------------------------------------------------
+
+
+def _has_usable_claude_resume(existing_session: Optional[Mapping[str, Any]]) -> bool:
+    """Return True when the saved chat_thread has a resumable Claude SDK session.
+
+    A session is resumable when:
+    - ``claude_session_id`` is non-empty, AND
+    - ``agent_contract_version`` matches the current runtime version (schema/tool
+      compatibility guard).
+
+    The transcript JSONL file existence check is performed separately by the
+    caller (``assemble_context``) because it requires async I/O.
+    """
+    if not existing_session or not existing_session.get("claude_session_id"):
+        return False
+    stored_version = str(existing_session.get("agent_contract_version") or "").strip()
+    return stored_version == _AGENT_RUNTIME_CONTRACT_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -167,6 +225,10 @@ class _TurnContext:
     # Dedup sets for SSE emission.
     registered_tool_call_ids: set = field(default_factory=set)
     emitted_tool_input_ids: set = field(default_factory=set)
+    # tool_call_id → tool_name mapping built as tool_use* events arrive.
+    # Used by the tool_result branch to identify editor write tools when the
+    # result event itself does not carry tool_name.
+    tool_name_by_id: dict = field(default_factory=dict)
     # Thinking / reasoning tracking (for SSE reasoning-start/end emission).
     current_reasoning_id: Optional[str] = None
     has_thinking_delta: bool = False
@@ -233,10 +295,83 @@ class ClaudeAgentService:
             cwd = str(workspace_path)
             state.with_cwd(cwd)
 
+        # ---------------------------------------------------------------
+        # Resolve resume: load existing chat_thread to get claude_session_id.
+        #
+        # First turn:  thread_id_for_agent=None  → SDK allocates new session.
+        # Resume turn: thread_id_for_agent=claude_session_id from DB → SDK
+        #              resumes the existing transcript.
+        #
+        # Cross-environment safety: probe the local JSONL file before
+        # committing to resume.  A fresh deployment or CLI retention reaping
+        # will cause the subprocess to exit 1 ("Fatal error in message reader")
+        # if we pass a stale claude_session_id.  On a miss we fall back to a
+        # fresh SDK session; _persist_turn will write the new claude_session_id
+        # so the DB self-heals for the next turn.
+        # ---------------------------------------------------------------
+        from libs.claude_agent_kit.server.session_files import (
+            get_projects_root,
+            locate_session_file,
+        )
+        import database as _db
+
+        existing_session: Optional[dict] = None
+        try:
+            existing_session = await asyncio.to_thread(
+                _db.get_chat_thread, request.thread_id, int(request.user_id)
+            )
+        except Exception:
+            logger.warning(
+                "Failed to load existing chat_thread for resume check; thread_id=%s",
+                request.thread_id,
+            )
+
+        resume_existing_session: Optional[dict] = (
+            existing_session
+            if request.resume and _has_usable_claude_resume(existing_session)
+            else None
+        )
+        if resume_existing_session is not None:
+            candidate_session_id = str(
+                resume_existing_session.get("claude_session_id") or ""
+            ).strip()
+            projects_root = get_projects_root()
+            located_session_path = (
+                await locate_session_file(projects_root, candidate_session_id)
+                if (projects_root and candidate_session_id)
+                else None
+            )
+            if not located_session_path:
+                logger.warning(
+                    "Claude session transcript missing locally; falling back "
+                    "to a fresh SDK session. thread_id=%s stale_claude_session_id=%s "
+                    "projects_root=%s",
+                    request.thread_id,
+                    candidate_session_id,
+                    projects_root,
+                )
+                resume_existing_session = None
+
+        existing_claude_session_id: Optional[str] = (
+            resume_existing_session.get("claude_session_id") if resume_existing_session else None
+        )
+        should_resume = bool(request.resume and existing_claude_session_id)
+        # None on first turn lets the SDK allocate a fresh session ID.
+        thread_id_for_agent: Optional[str] = existing_claude_session_id if should_resume else None
+
         # editor_session_id is user_sessions.id from /api/sessions, carried in
         # editor_state["id"].  This is distinct from state.session_id (Claude thread ID)
         # and os.path.basename(cwd) (workspace directory name).
-        editor_session_id: str = (request.editor_state or {}).get("id") or ""
+        #
+        # Soft-cache semantics: update AgentRunState.editor_state when the request
+        # provides a snapshot (frontend snapshot takes priority); fall back to the
+        # previously cached state when the request omits editor_state (pure-chat turn).
+        state.with_editor_state(request.editor_state, int(request.user_id))
+        # Resolve the active editor_state: prefer the freshly provided snapshot; fall
+        # back to the flyweight cache so a resumed turn without a snapshot still sees
+        # document context.
+        active_editor_state = request.editor_state if request.editor_state is not None else state.editor_state
+        editor_session_id: str = (active_editor_state or {}).get("id") or ""
 
         user_message_content = self._context_builder.build_user_message(
             request.message_parts,
@@ -244,7 +379,7 @@ class ClaudeAgentService:
             model=request.model,
             max_turns=request.max_turns,
             thread_id=state.session_id,
-            resume=request.resume,
+            resume=should_resume,
             cwd=cwd,
             editor_session_id=editor_session_id,
         )
@@ -252,7 +387,6 @@ class ClaudeAgentService:
         # Load user-configured env vars (skills / MCP environment) from system config.
         user_env_vars: dict[str, str] = {}
         try:
-            import database as _db
             sys_cfg = _db.get_system_config(int(request.user_id))
             raw_env = sys_cfg.get("env_vars") or {}
             if isinstance(raw_env, dict):
@@ -261,9 +395,9 @@ class ClaudeAgentService:
             logger.warning("Failed to load user env_vars from system_config; skipping.")
 
         run_options = AgentRunOptions(
-            thread_id=state.session_id,
+            thread_id=thread_id_for_agent,
             user_message=user_message_content,
-            resume=request.resume,
+            resume=should_resume,
             model=request.model,
             cwd=cwd or None,
             max_turns=request.max_turns,
@@ -271,7 +405,11 @@ class ClaudeAgentService:
             system_prompt=state.system_prompt,
             mcp_env=user_env_vars,
             user_sdk_env=user_env_vars,
-            editor_state=request.editor_state,
+            editor_state=active_editor_state,
+            # Live getter: agent_runner._pre_tool_use_hook calls this instead of
+            # reading opts.editor_state so it always sees the AgentRunState
+            # flyweight's latest value (updated after each write-tool DB refresh).
+            editor_state_getter=(lambda s=state: s.editor_state) if active_editor_state is not None else None,
         )
 
         confirmation_store = ToolConfirmationStore()
@@ -287,6 +425,7 @@ class ClaudeAgentService:
             runner=runner,
             run_options=run_options,
             turn_context=turn_ctx,
+            resume_existing_session=resume_existing_session,
         )
 
     # ------------------------------------------------------------------
@@ -306,7 +445,9 @@ class ClaudeAgentService:
         callbacks = AgentStreamingCallbacks(
             on_text_delta=self._make_text_delta_cb(queue, execution.turn_context),
             on_text_done=self._make_text_done_cb(queue, execution.turn_context),
-            on_tool_event=self._make_tool_event_cb(queue, execution.turn_context),
+            on_tool_event=self._make_tool_event_cb(
+                queue, execution.turn_context, execution.state
+            ),
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
             on_error=self._make_error_cb(queue),
         )
@@ -405,6 +546,18 @@ class ClaudeAgentService:
                 title = _extract_text_from_parts(user_parts).strip()[:MAX_THREAD_TITLE_LENGTH]
                 database.update_chat_thread_title(thread_id, title)
 
+            # Persist the Claude SDK session ID so subsequent turns can resume.
+            # result.session_id is the SDK-assigned session ID (e.g. "abc123");
+            # writing it here means the next turn's assemble_context will find it
+            # in chat_thread and pass it as thread_id_for_agent.
+            captured_session_id = result.session_id if result else None
+            if captured_session_id:
+                database.update_chat_thread_claude_session(
+                    thread_id,
+                    captured_session_id,
+                    _AGENT_RUNTIME_CONTRACT_VERSION,
+                )
+
         try:
             await loop.run_in_executor(None, _save)
         except Exception:
@@ -463,7 +616,11 @@ class ClaudeAgentService:
         return on_text_done
 
     @staticmethod
-    def _make_tool_event_cb(queue: asyncio.Queue, turn_ctx: _TurnContext):
+    def _make_tool_event_cb(
+        queue: asyncio.Queue,
+        turn_ctx: _TurnContext,
+        state: Optional[Any] = None,
+    ):
         """Emit SSE tool / reasoning events and collect them into collected_parts.
 
         Each SSE event is both emitted to ``queue`` (frontend) and appended to
@@ -480,6 +637,13 @@ class ClaudeAgentService:
 
         Not collected: tool-input-start (no data payload), tool-approval-request.
         Ignored entirely: result, message_*, tool_progress, tool_use_summary, etc.
+
+        After a successful ``tool_result`` for any tool in ``_EDITOR_WRITE_TOOL_NAMES``,
+        the method reloads ``editor_state`` from the database and updates
+        ``state.editor_state`` (the AgentRunState flyweight).  The PreToolUse hook in
+        agent_runner reads editor_state via ``opts.editor_state_getter`` which is bound
+        to ``state.editor_state``, so subsequent same-turn virtual-index reads
+        automatically see the refreshed data without any additional opts patching.
         """
         async def on_tool_event(payload: ToolEventPayload) -> None:
             tool_call_id = payload.tool_call_id
@@ -545,6 +709,8 @@ class ClaudeAgentService:
 
             # --- tool_use / tool_use_start: new tool call beginning ---
             if event_type in ("tool_use", "tool_use_start") and tool_call_id and tool_name:
+                # Track name so tool_result can identify editor write tools.
+                turn_ctx.tool_name_by_id[tool_call_id] = tool_name
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
                     await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
@@ -557,6 +723,8 @@ class ClaudeAgentService:
 
             # --- tool_input_available: complete streamed JSON input ready ---
             if event_type == "tool_input_available" and tool_call_id and tool_name:
+                # Track name so tool_result can identify editor write tools.
+                turn_ctx.tool_name_by_id[tool_call_id] = tool_name
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
                     await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
@@ -585,6 +753,39 @@ class ClaudeAgentService:
                 evt = {"type": "tool-output-available", "toolCallId": tool_call_id, "output": payload.output, "isError": is_error}
                 await queue.put(_sse("tool-output-available", {"toolCallId": tool_call_id, "output": payload.output, "isError": is_error}))
                 turn_ctx.collected_parts.append(evt)
+
+                # After a confirmed editor write-tool result, reload editor_state from
+                # DB so that same-turn PreToolUse reads and subsequent turns see the
+                # updated document content.
+                resolved_tool_name = tool_name or turn_ctx.tool_name_by_id.get(tool_call_id, "")
+                if (
+                    not is_error
+                    and resolved_tool_name in _EDITOR_WRITE_TOOL_NAMES
+                    and state is not None
+                    and state.editor_state is not None
+                ):
+                    editor_session_id: str = (state.editor_state or {}).get("id") or ""
+                    user_id: int = state.editor_user_id
+                    if editor_session_id and user_id:
+                        try:
+                            import database as _db_mod
+                            fresh_row = await asyncio.to_thread(
+                                _db_mod.get_session, user_id, editor_session_id
+                            )
+                            if fresh_row and fresh_row.get("editor_state"):
+                                fresh_editor_state = fresh_row["editor_state"]
+                                state.editor_state = fresh_editor_state
+                                logger.debug(
+                                    "editor_state refreshed from DB after %s "
+                                    "(editor_session_id=%s user_id=%s)",
+                                    resolved_tool_name, editor_session_id, user_id,
+                                )
+                        except Exception:
+                            logger.warning(
+                                "editor_state DB-reload failed after write tool=%s "
+                                "editor_session_id=%s user_id=%s",
+                                resolved_tool_name, editor_session_id, user_id,
+                            )
                 return
 
         return on_tool_event
@@ -676,6 +877,9 @@ class _TurnExecution:
     runner: ClaudeAgentRunner
     run_options: AgentRunOptions
     turn_context: _TurnContext
+    # The DB row used to source claude_session_id for resume / persistence;
+    # None on the first turn of a session.
+    resume_existing_session: Optional[dict] = None
 
 
 # ---------------------------------------------------------------------------

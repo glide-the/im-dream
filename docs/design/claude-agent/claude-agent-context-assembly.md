@@ -2,6 +2,7 @@
 > [Output] Define the `assemble_context` lifecycle contract, context source order, filtering policy, failure handling, and test expectations for Claude Agent planning and execution turns.
 > [Pos] context-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
+> [Sync] 2026-05-29: add existing_session / resume resolution design — `assemble_context` now loads `chat_thread` from DB, gates resume on `_has_usable_claude_resume` (contract-version check) + local JSONL file probe, derives `thread_id_for_agent` / `should_resume`; `_TurnExecution` gains `resume_existing_session` field; `_persist_turn` writes back `claude_session_id` + `agent_contract_version` so the DB self-heals across deployments.
 
 # Claude Agent Context Assembly Design
 
@@ -19,6 +20,8 @@ It owns:
 - building or reusing the session `system_prompt`;
 - building the current turn's Claude content blocks from `message_parts` and attachments;
 - resolving the working directory for the session;
+- **loading `existing_session` from `chat_thread` DB row** and resolving resume eligibility (`_has_usable_claude_resume` + local JSONL file probe);
+- **deriving `thread_id_for_agent` and `should_resume`** for `AgentRunOptions`;
 - copying runtime controls into `AgentRunOptions`;
 - creating the per-turn `_TurnContext` that stores queue, tool confirmation state, streaming dedup sets, reasoning state, and persistence buffers;
 - returning a carrier that Phase 3 can execute without re-reading request context.
@@ -75,7 +78,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | `request.thread_id` | `/api/claude-agent/threads` | yes | Stable chat thread, Thread Session key, and workspace key after validation. |
 | `request.message_parts` | Vercel AI SDK `UIMessage.parts` | yes for normal text turns | User goal, optimized planning prompt, file metadata, source URL metadata, and workspace-file metadata. |
 | `request.attachments` | synced API attachments | no | Inline image content blocks when the media type can be sent to Claude. |
-| `request.resume` | client request | no | Runtime context flag copied into content blocks and `AgentRunOptions`. |
+| `request.resume` | client request | no | Gate for resume eligibility; `True` enables the DB + file-system resume check. |
 | `request.tool_choice` | client request | no | Tool policy copied into `AgentRunOptions`; valid modes are `auto`, `manual`, and `none`. |
 | `request.model` | client request or server selection | no | Runtime context and SDK model override when allowed by server policy. |
 | `request.max_turns` | server default or client request | no | SDK turn budget; defaults belong in config/env, not in route logic. |
@@ -83,6 +86,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | `state` | `AgentRunStatePool` | yes | Cross-turn cache for `system_prompt`, `cwd`, runner presence, lifecycle, and turn count. |
 | `queue` | factory-owned `asyncio.Queue` | yes | Shared queue later used by Phase 3 callbacks. |
 | `runner` | factory-owned runner cache | yes in current service signature | Passed through to `_TurnExecution`; not executed during assembly. |
+| `existing_session` (DB) | `database.get_chat_thread(thread_id, user_id)` | internal | Loaded by `assemble_context`; provides `claude_session_id` and `agent_contract_version` for resume gating. |
 
 ## 4. Context Source Order
 
@@ -106,10 +110,23 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 6. **Runtime context**
    `build_user_message` inserts a lightweight `<runtime_context>` block before the user text. It may include date, local time, timezone, model, max turns, session ID, and resume status when those values are supplied by upstream code.
 
-7. **Workspace**
+7. **Resume resolution (existing_session)**
+   `assemble_context` loads the `chat_thread` DB row for `request.thread_id` to determine whether the Claude SDK session can be resumed.
+
+   | Step | Logic |
+   |---|---|
+   | **Load** | `database.get_chat_thread(thread_id, user_id)` → `existing_session` |
+   | **Contract check** | `_has_usable_claude_resume(existing_session)` — requires `claude_session_id` non-empty **and** `agent_contract_version == _AGENT_RUNTIME_CONTRACT_VERSION` |
+   | **File probe** | `locate_session_file(projects_root, candidate_session_id)` — verifies the transcript JSONL exists locally; prevents `--resume` from causing CLI exit-1 on a fresh deployment or after CLI retention reaping |
+   | **thread_id_for_agent** | `existing_claude_session_id` if all checks pass, else `None` (SDK allocates a new session) |
+   | **should_resume** | `bool(request.resume and thread_id_for_agent is not None)` |
+
+   `_AGENT_RUNTIME_CONTRACT_VERSION` is controlled by the `INK_AGENT_CONTRACT_VERSION` env var; bump it when the system prompt or tool set changes incompatibly.
+
+8. **Workspace**
    `cwd` resolution uses this priority: `request.cwd`, then cached `state.cwd`, then `get_or_create_workspace(state.session_id)`. Only the last branch writes `state.cwd`.
 
-8. **Tool state**
+9. **Tool state**
    `tool_choice` is copied into `AgentRunOptions`. `_TurnContext` starts with empty confirmation/dedup/reasoning state for the turn. Existing pending tool confirmations must not leak into a new turn.
 
 ## 5. Filtering And Priority Rules
@@ -135,8 +152,9 @@ The factory is responsible for session locking, runner caching, lifecycle observ
 | `request` | Original validated `ClaudeAgentRunRequest`. |
 | `state` | The active `AgentRunState` after any `system_prompt`, `cwd`, and `turn_context` writes. |
 | `runner` | Opaque runner reference supplied by the factory. |
-| `run_options` | `AgentRunOptions(thread_id, user_message, resume, model, cwd, max_turns, tool_choice, system_prompt)`. |
+| `run_options` | `AgentRunOptions(thread_id=thread_id_for_agent, user_message, resume=should_resume, model, cwd, max_turns, tool_choice, system_prompt)`. `thread_id` is `None` on the first turn; the Claude SDK session ID on resume turns. |
 | `turn_context` | New `_TurnContext(queue, confirmation_store, pending sets, reasoning state, collected_parts)`. |
+| `resume_existing_session` | The `chat_thread` DB row when the session is being resumed; `None` on the first turn. Carried to Phase 3 for diagnostic / persistence use. |
 
 State side effects:
 
@@ -152,7 +170,10 @@ State side effects:
 | Missing or unauthorized `thread_id` | API route rejects before `assemble_context`. |
 | Invalid session/workspace key | Factory or workspace layer rejects before SDK execution; no context should be persisted. |
 | Empty user text | API route rejects before context assembly. Attachment-only turns must still provide file/source/workspace metadata text. |
-| DB session lookup failure | Log and return a system prompt with the no-session fallback. |
+| DB session lookup failure (`get_chat_thread`) | Log warning, set `existing_session = None`; treat as first turn — resume is skipped, no turn failure. |
+| `_has_usable_claude_resume` returns False | Fall through to `thread_id_for_agent = None` silently; SDK allocates a fresh session. |
+| Local JSONL file missing (`locate_session_file` returns None) | Log warning with `stale_claude_session_id`; set `resume_existing_session = None`; SDK allocates a fresh session; `_persist_turn` will write the new `claude_session_id` to heal the DB row. |
+| `_AGENT_RUNTIME_CONTRACT_VERSION` mismatch | `_has_usable_claude_resume` returns False; fall through to a fresh session. |
 | Workspace initialization failure | Fail the turn before SDK execution; cleanup must leave the state idle and without stale `turn_context`. |
 | Unsupported attachment media | Log and continue with available metadata; do not inject unreadable binary data as text. |
 | Prompt optimizer unavailable | Planning layer should fall back to the raw task or a policy-defined retry path before calling `assemble_context`; this method should not block waiting for optimizer recovery. |
@@ -165,6 +186,8 @@ State side effects:
 - `state.system_prompt` cache is intentionally independent of persisted chat history. Updating recent journal context requires state rebuild or explicit invalidation.
 - `message_parts=None` produces a valid content-block list with runtime context and empty text, but public routes should reject empty user-facing text before that point.
 - `request.cwd` can cause context to run outside the default workspace if accepted. Keep it out of public UI flows unless a trusted admin/debug policy is in place.
+- **Cross-environment resume safety**: `chat_thread.claude_session_id` is durable in DB, but the SDK transcript JSONL lives in the local CLI runtime at `~/.claude/projects/<cwd-encoded>/<session_id>.jsonl`. After a fresh deployment or CLI retention reaping, the DB row still points at a stale `claude_session_id`; `assemble_context` probes the filesystem before committing to `--resume`. On a miss, the DB self-heals after `_persist_turn` writes the freshly captured `claude_session_id`.
+- **Contract version gating**: `_AGENT_RUNTIME_CONTRACT_VERSION` (env `INK_AGENT_CONTRACT_VERSION`) must be bumped whenever the system prompt, MCP tool set, or SDK interaction changes incompatibly with existing transcripts. The check prevents old transcripts from being resumed with a mismatched runtime.
 
 ## 9. Testability Requirements
 
@@ -174,8 +197,14 @@ Coverage should stay focused on the contracts above:
 - `build_user_message` preserves block order: image attachments, runtime context, final user text/metadata.
 - `assemble_context` builds `system_prompt` once per fresh state and reuses it on subsequent turns.
 - `assemble_context` resolves `cwd` by request override, cached state, then workspace initialization.
-- `assemble_context` copies `tool_choice`, `model`, `max_turns`, and `resume` into `AgentRunOptions`.
+- `assemble_context` copies `tool_choice`, `model`, `max_turns` into `AgentRunOptions`.
+- **Resume path**: when `request.resume=True` and `existing_session` has a matching contract version and the JSONL file exists locally, `run_options.thread_id` equals the stored `claude_session_id` and `run_options.resume=True`.
+- **No-resume path (first turn)**: `run_options.thread_id=None`, `run_options.resume=False` when `existing_session` is absent or `_has_usable_claude_resume` returns False.
+- **File-probe miss**: when `locate_session_file` returns None for a otherwise valid `existing_session`, the method falls back to `thread_id_for_agent=None` and logs a warning.
+- **Contract version mismatch**: when `existing_session.agent_contract_version` differs from `_AGENT_RUNTIME_CONTRACT_VERSION`, resume is skipped.
+- **DB load failure**: when `get_chat_thread` raises, `assemble_context` does not fail the turn; it proceeds as a first turn.
 - `_TurnContext` starts clean each turn and does not reuse confirmation or reasoning state.
+- `_TurnExecution.resume_existing_session` is the DB row when resuming, `None` otherwise.
 - Planning prompt optimization tests should assert that optimized prompt text enters through `message_parts`, while `assemble_context` remains optimizer-agnostic.
 - Failure tests should cover DB fallback, invalid session ID, workspace initialization failure, unsupported attachment media, and cleanup after cancellation.
 
@@ -190,6 +219,10 @@ Coverage should stay focused on the contracts above:
 - [ ] Sync attachments to workspace before context assembly and inject workspace-file parts.
 - [ ] Keep unsupported binary payloads out of prompt text.
 - [ ] Resolve `cwd` without hard-coded local paths.
+- [x] **Load `chat_thread` row from DB and call `_has_usable_claude_resume` before building `AgentRunOptions`.** *(2026-05-29)*
+- [x] **Probe local JSONL via `locate_session_file` before committing to `--resume`.** *(2026-05-29)*
+- [x] **Set `run_options.thread_id = thread_id_for_agent` (None on first turn) and `run_options.resume = should_resume`.** *(2026-05-29)*
+- [x] **Carry `resume_existing_session` in `_TurnExecution`.** *(2026-05-29)*
 - [ ] Create a fresh `_TurnContext` for every turn.
 - [ ] Copy tool mode into `AgentRunOptions` and start with no pending confirmations.
 - [ ] Keep SDK calls and SSE callbacks out of `assemble_context`.

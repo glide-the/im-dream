@@ -2,7 +2,7 @@
 
 Status: Updated  
 Updated: 2026-05-29  
-Scope: Design + 实现状态同步
+Scope: Design + 实现状态同步（含写工具后 editor_state DB 刷新）
 
 ---
 
@@ -13,6 +13,7 @@ Scope: Design + 实现状态同步
 3. [工具 Schema 定义](#3-工具-schema-定义)
 4. [权限矩阵](#4-权限矩阵)
 5. [工具调用流程](#5-工具调用流程)
+6. [前端交互入口](#6-前端交互入口)
 
 ---
 
@@ -249,6 +250,10 @@ Agent 意图修改片段内容
       │             → 更新 cells[cellId].content = text
       │             → database.save_session(user_id, session_id, updated_state)
       │             → 返回 { ok: true }
+      │             → ★ service.py tool_result 回调检测到 mcp__editor__write_segment
+      │               → asyncio.to_thread(database.get_session, user_id, editor_session_id)
+      │               → state.editor_state = fresh_state（AgentRunState 享元更新）
+      │               → run_options.editor_state = fresh_state（当轮 PreToolUse 立即生效）
       └── Reject  → hook 返回 { permissionDecision: 'deny' }
                     → Agent 收到拒绝原因，继续对话或调整方案
 ```
@@ -291,6 +296,9 @@ sequenceDiagram
     participant Human as 用户
     participant MCP as Editor MCP 子进程<br/>(editor_tool.py)
     participant DB as Database
+    participant Svc as ClaudeAgentService<br/>tool_result 回调
+    participant State as AgentRunState<br/>（享元缓存）
+    participant Opts as run_options<br/>(AgentRunOptions)
 
     Agent->>Hook: write_segment(cellId, text, reason)
     Hook->>Store: createPendingConfirmation(toolCallId)
@@ -310,6 +318,13 @@ sequenceDiagram
         MCP->>MCP: 更新 cells[cellId].content
         MCP->>DB: save_session(user_id, session_id, updated_state)
         MCP-->>Agent: { ok: true }
+
+        Note over Svc: ★ tool_result 事件到达，检测到写工具成功
+        Agent->>Svc: tool_result { toolCallId, output:{ok:true}, isError:false }
+        Svc->>DB: asyncio.to_thread(get_session, user_id, editor_session_id)
+        DB-->>Svc: { editor_state: { cells:[最新内容], ... } }
+        Svc->>State: state.editor_state = fresh_state
+        Note over State: opts.editor_state_getter 绑定到 state<br/>下次 PreToolUse 调用 getter 时自动读到最新值
     else 用户 Reject
         Human->>UI: 点击 Reject（可附理由）
         UI->>Store: POST /tool-confirm { toolCallId, approved: false, reason }
@@ -318,3 +333,56 @@ sequenceDiagram
         Note over Agent: 根据拒绝原因调整方案
     end
 ```
+
+---
+
+## 6. 前端交互入口
+
+### 6.1 工具检测路由表
+
+前端通过 `isEditorWriteTool(toolName)` 检测编辑器写工具，渲染专用确认 UI（位于 `EditorWriteApprovalUI.tsx`）。
+
+| MCP 工具名 | 前端 UI 组件 | 渲染位置 | 检测函数 |
+|-----------|------------|---------|---------|
+| `mcp__editor__write_segment` | `WriteSegmentApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
+| `mcp__editor__delete_segment` | `DeleteSegmentApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
+| `mcp__editor__insert_widget` | `InsertWidgetApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
+| `mcp__editor__reply_to_comment` | `ReplyToCommentApprovalUI` | `ToolMessagePart` → `EditorWriteApprovalUI` | `isEditorWriteTool()` |
+
+### 6.2 前端文件路径
+
+| 文件 | 职责 |
+|------|------|
+| `frontend/src/components/chat/EditorWriteApprovalUI.tsx` | 4个专用确认 UI 组件 + `isEditorWriteTool()` 工具函数 |
+| `frontend/src/components/chat/ToolMessagePart.tsx` | 检测编辑器写工具，渲染 `EditorWriteApprovalUI` |
+| `frontend/src/components/chat/ChatMessageList.tsx` | 检测编辑器写工具，直接展开渲染（不折叠） |
+
+### 6.3 前端检测条件
+
+`ChatMessageList.tsx` 中的工具渲染决策：
+
+```
+isEditorWriteTool(toolName) && !isCompleted
+  → 直接渲染 ToolMessagePart（isManualToolInvocation=true）
+  → ToolMessagePart 内部识别工具名 → 渲染对应专用 ApprovalUI
+```
+
+编辑器写工具的 `tool part state` 在等待用户确认时处于 `input-available` 或 `approval-requested`（`isCompleted = false`），此时必须展示确认 UI，阻止 Agent 继续执行。
+
+### 6.4 确认提交接口
+
+所有编辑器写工具确认均调用同一个接口：
+
+```
+POST /api/claude-agent/tool-confirm
+Content-Type: application/json
+
+{
+  "thread_id": "{threadId}",
+  "tool_call_id": "{toolCallId}",
+  "approved": true | false,
+  "reason": "{拒绝理由（可选）}"
+}
+```
+
+完整交互时序参见 [`human-agent-collab.md` §8 业务时序图](./human-agent-collab.md#8-业务时序图)。
