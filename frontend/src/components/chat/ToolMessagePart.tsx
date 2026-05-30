@@ -1,12 +1,15 @@
-// [Input] AskUserQuestionUI, Icons, AuthContext token; part shape from @ai-sdk/react DynamicToolUIPart/ToolUIPart.
-// [Output] Rendered tool invocation card with inline AskUserQuestion form or Approve/Reject UI.
+// [Input] AskUserQuestionUI, EditorWriteApprovalUI, Icons, AuthContext token; part shape from @ai-sdk/react DynamicToolUIPart/ToolUIPart.
+// [Output] Rendered tool invocation card with inline AskUserQuestion form, EditorWriteApproval UI, or generic Approve/Reject UI.
 // [Pos] tool-message-part component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; fix confirmToolCall body to send thread_id+tool_call_id (snake_case) matching ToolConfirmRequestBody; accept ok|success response flag.
 // [Sync] 2026-05-27: when shouldShowAskUserUI is true, render only AskUserQuestionUI (no collapsible header) for clean UX.
 // [Sync] 2026-05-27: add !isCompleted guard to shouldShowApprovalUI so Approve/Cancel disappears after tool completes in manual mode.
+// [Sync] 2026-05-29: integrate EditorWriteApprovalUI for mcp__editor__ write tools; detect by isEditorWriteTool().
+// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; call after successful editor write approve to trigger Writing view reload.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
+import EditorWriteApprovalUI, { isEditorWriteTool } from './EditorWriteApprovalUI';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 
@@ -54,9 +57,11 @@ interface ToolMessagePartProps {
   isLoading?: boolean;
   isManualToolInvocation?: boolean;
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
+  /** Called after an editor write tool is successfully confirmed so the Writing view can reload. */
+  onEditorWriteConfirmed?: () => void;
 }
 
-export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToolInvocation, addToolResult }: ToolMessagePartProps) {
+export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToolInvocation, addToolResult, onEditorWriteConfirmed }: ToolMessagePartProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
   const toolCallId = part.toolCallId;
@@ -77,9 +82,11 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
     return normalizedType === 'tool-askuserquestion' || ['askuserquestion', 'ask_user_question', 'ask_user', 'askuser'].includes(normalizedName) || normalizedName.endsWith('__ask_user') || normalizedName.endsWith('__askuserquestion');
   }, [partType, toolName]);
   const shouldShowAskUserUI = useMemo(() => isAskUserQuestion && !isCompleted && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isAskUserQuestion, isCompleted, state]);
+  const isEditorWrite = useMemo(() => isEditorWriteTool(toolName), [toolName]);
+  const shouldShowEditorWriteUI = useMemo(() => isEditorWrite && !isCompleted && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isEditorWrite, isCompleted, state]);
   // Only show Approve/Cancel while the tool is still pending — once the output
   // arrives (isCompleted) the card transitions to the normal completed view.
-  const shouldShowApprovalUI = Boolean(isManualToolInvocation) && !shouldShowAskUserUI && !isCompleted;
+  const shouldShowApprovalUI = Boolean(isManualToolInvocation) && !shouldShowAskUserUI && !shouldShowEditorWriteUI && !isCompleted;
 
   const inputDisplay = useMemo(() => {
     try { return JSON.stringify(input, null, 2); } catch { return String(input); }
@@ -169,6 +176,39 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
     setConfirmationStatus('idle');
   }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
 
+  const handleEditorWriteApprove = useCallback(async () => {
+    if (confirmationStatus !== 'idle') return;
+    setConfirmationStatus('confirming');
+    try {
+      const result = await confirmToolCall(threadId, toolCallId, true);
+      if (result.ok ?? result.success) {
+        addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
+        setConfirmationStatus('confirmed');
+        onEditorWriteConfirmed?.();
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    setConfirmationStatus('idle');
+  }, [addToolResult, confirmationStatus, onEditorWriteConfirmed, threadId, toolCallId, toolName]);
+
+  const handleEditorWriteReject = useCallback(async (reason?: string) => {
+    if (confirmationStatus !== 'idle') return;
+    setConfirmationStatus('confirming');
+    try {
+      const result = await confirmToolCall(threadId, toolCallId, false, reason || '用户拒绝了编辑器写操作');
+      if (result.ok ?? result.success) {
+        addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
+        setConfirmationStatus('rejected');
+        return;
+      }
+    } catch {
+      // fall through
+    }
+    setConfirmationStatus('idle');
+  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
+
   // When the AskUserQuestion form is active, render only the question UI (no
   // collapsible header) so the user sees the clean form immediately.
   if (shouldShowAskUserUI) {
@@ -194,6 +234,36 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
           <StatusRow tone="success" label="答案已提交" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} />
         ) : (
           <StatusRow tone="danger" label="已取消" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} />
+        )}
+      </div>
+    );
+  }
+
+  // Editor write tools (write_segment, delete_segment, insert_widget, reply_to_comment)
+  // are always-confirm tools; render the specialized approval UI directly.
+  if (shouldShowEditorWriteUI) {
+    return (
+      <div style={{ width: '100%' }}>
+        {confirmationStatus === 'idle' && input !== undefined ? (
+          <EditorWriteApprovalUI
+            toolName={toolName}
+            toolCallId={toolCallId}
+            input={input as Record<string, unknown>}
+            isProcessing={false}
+            onApprove={() => void handleEditorWriteApprove()}
+            onReject={(reason) => void handleEditorWriteReject(reason)}
+          />
+        ) : confirmationStatus === 'idle' ? (
+          <div style={{ borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1.25rem', color: 'var(--color-text-muted)', fontSize: '0.85rem', textAlign: 'center' }}>
+            <IconLoader style={{ width: '1rem', height: '1rem', display: 'inline-block', marginRight: '0.5rem' }} />
+            加载中…
+          </div>
+        ) : confirmationStatus === 'confirming' ? (
+          <StatusRow tone="warning" label="处理中…" />
+        ) : confirmationStatus === 'confirmed' ? (
+          <StatusRow tone="success" label="操作已接受" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} />
+        ) : (
+          <StatusRow tone="danger" label="操作已拒绝" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} />
         )}
       </div>
     );

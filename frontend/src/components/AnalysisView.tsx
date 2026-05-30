@@ -255,7 +255,7 @@ export default function AnalysisView() {
       <div style={{
         width: '100%',
         height: '100%',
-        background: 'linear-gradient(180deg, var(--color-bg-app) 0%, #ede3d5 100%)',
+        background: 'linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg-paper) 100%)',
         fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
         position: 'relative',
         overflow: 'hidden',
@@ -271,8 +271,8 @@ export default function AnalysisView() {
             left: isMobile ? '1rem' : '2rem',
             padding: isMobile ? '10px 16px' : '12px 24px',
             borderRadius: '24px',
-            background: 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,250,240,0.9) 100%)',
-            border: '2px solid rgba(139,115,85,0.25)',
+            background: 'var(--color-bg-surface-solid)',
+            border: '1px solid var(--color-border-paper)',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -280,22 +280,22 @@ export default function AnalysisView() {
             gap: '8px',
             fontSize: '14px',
             fontWeight: 500,
-            color: '#5d4a3a',
+            color: 'var(--color-text-body)',
             transition: 'all 0.3s',
-            boxShadow: '0 4px 16px rgba(139,115,85,0.2), inset 0 1px 0 rgba(255,255,255,0.8)',
+            boxShadow: '0 4px 16px var(--color-shadow-soft)',
             zIndex: 30,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
             letterSpacing: '0.3px'
           }}
           onMouseEnter={e => {
             e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px rgba(139,115,85,0.3), inset 0 1px 0 rgba(255,255,255,0.8)';
-            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(255,255,255,1) 0%, rgba(255,248,235,0.95) 100%)';
+            e.currentTarget.style.boxShadow = '0 8px 24px var(--color-shadow-medium)';
+            e.currentTarget.style.background = 'var(--color-bg-hover)';
           }}
           onMouseLeave={e => {
             e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 4px 16px rgba(139,115,85,0.2), inset 0 1px 0 rgba(255,255,255,0.8)';
-            e.currentTarget.style.background = 'linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,250,240,0.9) 100%)';
+            e.currentTarget.style.boxShadow = '0 4px 16px var(--color-shadow-soft)';
+            e.currentTarget.style.background = 'var(--color-bg-surface-solid)';
           }}
           title={t('analysis.backTitle')}
         >
@@ -333,7 +333,7 @@ export default function AnalysisView() {
       width: '100%',
       height: '100%',
       overflowY: 'auto',
-      background: 'linear-gradient(180deg, var(--color-bg-app) 0%, #ede3d5 100%)',
+      background: 'linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg-paper) 100%)',
       fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
       padding: isMobile ? '1.75rem 1rem 2.5rem' : '3rem 2rem',
       position: 'relative'
@@ -350,25 +350,25 @@ export default function AnalysisView() {
           <h1 style={{
             fontSize: isMobile ? '32px' : '48px',
             fontWeight: 400,
-            color: '#3d3226',
+            color: 'var(--color-text-primary)',
             marginBottom: '0.75rem',
             fontFamily: 'Georgia, serif',
             fontStyle: 'italic',
             letterSpacing: '-0.5px',
-            textShadow: '2px 2px 0px rgba(139,115,85,0.1)'
+            textShadow: '2px 2px 0px var(--color-shadow-soft)'
           }}>
             {t('analysis.title')}
           </h1>
           <div style={{
             width: '80px',
             height: '3px',
-            background: 'linear-gradient(90deg, transparent, #8B7355, transparent)',
+            background: 'linear-gradient(90deg, transparent, var(--color-text-muted), transparent)',
             margin: '0 auto 1rem',
             opacity: 0.4
           }} />
           <p style={{
             fontSize: isMobile ? '14px' : '15px',
-            color: '#6b5d4f',
+            color: 'var(--color-text-secondary)',
             lineHeight: 1.8,
             fontStyle: 'italic',
             maxWidth: '500px',
@@ -397,7 +397,7 @@ export default function AnalysisView() {
             <h2 style={{
               fontSize: '20px',
               fontWeight: 500,
-              color: '#5d4a3a',
+              color: 'var(--color-text-body)',
               marginBottom: '1.5rem',
               textAlign: 'center',
               fontFamily: 'Georgia, serif',
@@ -423,16 +423,16 @@ export default function AnalysisView() {
                   }}
                   style={{
                     padding: '1.5rem',
-                    background: 'rgba(255,248,240,0.6)',
+                    background: 'var(--color-bg-surface)',
                     borderRadius: '16px',
-                    border: '1px solid rgba(139,115,85,0.2)',
+                    border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
                     cursor: 'pointer',
                     transition: 'all 0.3s',
                     backdropFilter: 'blur(10px)'
                   }}
                   onMouseEnter={e => {
                     e.currentTarget.style.transform = 'translateY(-4px)';
-                    e.currentTarget.style.boxShadow = '0 8px 24px rgba(139,115,85,0.2)';
+                    e.currentTarget.style.boxShadow = '0 8px 24px color-mix(in srgb, var(--color-border-paper) 60%, transparent)';
                   }}
                   onMouseLeave={e => {
                     e.currentTarget.style.transform = 'translateY(0)';
@@ -447,7 +447,7 @@ export default function AnalysisView() {
                   }}>
                     <div style={{
                       fontSize: '13px',
-                      color: '#8B7355',
+                      color: 'var(--color-text-muted)',
                       fontWeight: 500
                     }}>
                       {new Date(report.timestamp).toLocaleDateString(dateLocale, {
@@ -463,7 +463,7 @@ export default function AnalysisView() {
                         fontSize: '10px',
                         fontWeight: 600,
                         color: 'var(--color-state-success)',
-                        background: 'rgba(76,175,80,0.1)',
+                        background: 'color-mix(in srgb, var(--color-state-success) 10%, transparent)',
                         padding: '4px 8px',
                         borderRadius: '8px',
                         textTransform: 'uppercase',
@@ -477,7 +477,7 @@ export default function AnalysisView() {
                     display: 'flex',
                     gap: '1rem',
                     fontSize: '12px',
-                    color: '#6b5d4f',
+                    color: 'var(--color-text-secondary)',
                     marginBottom: '0.75rem'
                   }}>
                     <div>{formatDaysLabel(report.stats?.days || 0)}</div>
@@ -495,9 +495,9 @@ export default function AnalysisView() {
                       <span style={{
                         fontSize: '11px',
                         padding: '4px 10px',
-                        background: 'rgba(139,115,85,0.1)',
+                        background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
                         borderRadius: '12px',
-                        color: '#5d4a3a'
+                        color: 'var(--color-text-body)'
                       }}>
                         {t('analysis.reportCounts.echoes', { count: report.echoes.length })}
                       </span>
@@ -506,9 +506,9 @@ export default function AnalysisView() {
                       <span style={{
                         fontSize: '11px',
                         padding: '4px 10px',
-                        background: 'rgba(139,115,85,0.1)',
+                        background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
                         borderRadius: '12px',
-                        color: '#5d4a3a'
+                        color: 'var(--color-text-body)'
                       }}>
                         {t('analysis.reportCounts.traits', { count: report.traits.length })}
                       </span>
@@ -517,9 +517,9 @@ export default function AnalysisView() {
                       <span style={{
                         fontSize: '11px',
                         padding: '4px 10px',
-                        background: 'rgba(139,115,85,0.1)',
+                        background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
                         borderRadius: '12px',
-                        color: '#5d4a3a'
+                        color: 'var(--color-text-body)'
                       }}>
                         {t('analysis.reportCounts.patterns', { count: report.patterns.length })}
                       </span>
@@ -538,10 +538,10 @@ export default function AnalysisView() {
             disabled={anyLoading}
             style={{
               padding: '16px 48px',
-              background: anyLoading ? 'rgba(139,115,85,0.3)' : 'transparent',
-              color: anyLoading ? '#999' : '#5d4a3a',
+              background: anyLoading ? 'color-mix(in srgb, var(--color-text-muted) 50%, transparent)' : 'transparent',
+              color: anyLoading ? '#999' : 'var(--color-text-body)',
               border: '2px solid',
-              borderColor: anyLoading ? '#ccc' : '#8B7355',
+              borderColor: anyLoading ? '#ccc' : 'var(--color-text-muted)',
               borderRadius: '30px',
               cursor: anyLoading ? 'not-allowed' : 'pointer',
               fontSize: '15px',
@@ -555,9 +555,9 @@ export default function AnalysisView() {
             }}
             onMouseEnter={e => {
               if (!anyLoading) {
-                e.currentTarget.style.background = 'rgba(139,115,85,0.12)';
+                e.currentTarget.style.background = 'color-mix(in srgb, var(--color-border-paper) 36%, transparent)';
                 e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 20px rgba(139,115,85,0.2)';
+                e.currentTarget.style.boxShadow = '0 6px 20px color-mix(in srgb, var(--color-border-paper) 60%, transparent)';
               }
             }}
             onMouseLeave={e => {
@@ -575,10 +575,10 @@ export default function AnalysisView() {
         {error && (
           <div style={{
             padding: '1rem',
-            background: '#fee',
-            border: '1px solid #fcc',
+            background: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)',
             borderRadius: '8px',
-            color: '#c33',
+            color: 'var(--color-state-danger)',
             marginBottom: '2rem',
             textAlign: 'center'
           }}>
@@ -602,7 +602,7 @@ export default function AnalysisView() {
               width: '300px',
               height: '300px',
               borderRadius: '50%',
-              background: 'radial-gradient(circle, rgba(139,115,85,0.06) 0%, transparent 70%)',
+              background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 18%, transparent) 0%, transparent 70%)',
               filter: 'blur(40px)',
               pointerEvents: 'none'
             }} />
@@ -618,7 +618,7 @@ export default function AnalysisView() {
             <p style={{
               fontSize: '20px',
               marginBottom: '0.75rem',
-              color: '#5d4a3a',
+              color: 'var(--color-text-body)',
               fontFamily: 'Georgia, serif',
               fontStyle: 'italic',
               fontWeight: 300
@@ -627,7 +627,7 @@ export default function AnalysisView() {
             </p>
             <p style={{
               fontSize: '14px',
-              color: '#8B7355',
+              color: 'var(--color-text-muted)',
               maxWidth: '400px',
               margin: '0 auto',
               lineHeight: 1.7
@@ -654,7 +654,7 @@ function DecorativeInkSpots() {
         width: '120px',
         height: '120px',
         borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(139,115,85,0.08) 0%, rgba(139,115,85,0) 70%)',
+        background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 24%, transparent) 0%, rgba(139,115,85,0) 70%)',
         filter: 'blur(20px)',
         pointerEvents: 'none'
       }} />
@@ -665,7 +665,7 @@ function DecorativeInkSpots() {
         width: '150px',
         height: '150px',
         borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(160,130,109,0.06) 0%, rgba(160,130,109,0) 70%)',
+        background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 18%, transparent) 0%, rgba(160,130,109,0) 70%)',
         filter: 'blur(25px)',
         pointerEvents: 'none'
       }} />
@@ -809,22 +809,19 @@ function PaperStack({
               <div style={{
                 width: '100%',
                 height: '100%',
-                background: `
-                  linear-gradient(135deg,
-                    rgba(255,255,255,0.95) 0%,
-                    rgba(255,250,240,0.92) 50%,
-                    rgba(255,248,235,0.9) 100%
-                  )
-                `,
+                background: `linear-gradient(135deg,
+                    var(--color-bg-surface-solid) 0%,
+                    var(--color-bg-paper) 100%
+                  )`,
                 borderRadius: '3px',
                 boxShadow: `
-                  0 1px 3px rgba(139,115,85,0.12),
-                  0 4px 12px rgba(139,115,85,0.15),
-                  0 10px 30px rgba(139,115,85,0.2),
-                  inset 0 1px 0 rgba(255,255,255,0.9),
-                  inset 0 -1px 0 rgba(139,115,85,0.08)
+                  0 1px 3px var(--color-shadow-soft),
+                  0 4px 12px var(--color-shadow-soft),
+                  0 10px 30px var(--color-shadow-medium),
+                  inset 0 1px 0 var(--color-bg-surface-solid),
+                  inset 0 -1px 0 var(--color-shadow-soft)
                 `,
-                border: '1px solid rgba(139,115,85,0.15)',
+                border: '1px solid var(--color-border-paper)',
                 padding: isMobile ? '1.5rem' : '3rem',
                 overflow: 'hidden',
                 position: 'relative'
@@ -839,15 +836,15 @@ function PaperStack({
                   backgroundImage: `
                     repeating-linear-gradient(
                       0deg,
-                      rgba(139,115,85,0.01) 0px,
-                      rgba(139,115,85,0.015) 1px,
+                      color-mix(in srgb, var(--color-border-paper) 3%, transparent) 0px,
+                      color-mix(in srgb, var(--color-border-paper) 5%, transparent) 1px,
                       transparent 1px,
                       transparent 2px
                     ),
                     repeating-linear-gradient(
                       90deg,
-                      rgba(139,115,85,0.008) 0px,
-                      rgba(139,115,85,0.012) 1px,
+                      color-mix(in srgb, var(--color-border-paper) 2%, transparent) 0px,
+                      color-mix(in srgb, var(--color-border-paper) 4%, transparent) 1px,
                       transparent 1px,
                       transparent 2px
                     )
@@ -864,7 +861,7 @@ function PaperStack({
                   width: '150px',
                   height: '150px',
                   borderRadius: '50%',
-                  background: 'radial-gradient(circle, rgba(160,130,109,0.06) 0%, transparent 70%)',
+                  background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 18%, transparent) 0%, transparent 70%)',
                   filter: 'blur(30px)',
                   pointerEvents: 'none'
                 }} />
@@ -874,7 +871,7 @@ function PaperStack({
                   {/* Paper header */}
                   <div style={{
                     marginBottom: '2rem',
-                    borderBottom: '2px solid rgba(139,115,85,0.15)',
+                    borderBottom: '2px solid color-mix(in srgb, var(--color-border-paper) 45%, transparent)',
                     paddingBottom: '1rem'
                   }}>
                     <div style={{
@@ -888,7 +885,7 @@ function PaperStack({
                         <h2 style={{
                           fontSize: isMobile ? '22px' : '28px',
                           fontWeight: 400,
-                          color: '#3d3226',
+                          color: 'var(--color-text-primary)',
                           fontFamily: 'Georgia, serif',
                           fontStyle: 'italic',
                           letterSpacing: '-0.3px',
@@ -899,7 +896,7 @@ function PaperStack({
                         </h2>
                         <div style={{
                           fontSize: '12px',
-                          color: '#8B7355',
+                          color: 'var(--color-text-muted)',
                           textTransform: 'uppercase',
                           letterSpacing: '1.5px',
                           fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
@@ -935,27 +932,27 @@ function PaperStack({
               width: isMobile ? '40px' : '48px',
               height: isMobile ? '40px' : '48px',
               borderRadius: '50%',
-              background: currentPaper === 0 ? 'rgba(139,115,85,0.1)' : 'rgba(255,255,255,0.95)',
-              border: '2px solid rgba(139,115,85,0.2)',
+              background: currentPaper === 0 ? 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)' : 'rgba(255,255,255,0.95)',
+              border: '2px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
               cursor: currentPaper === 0 ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: isMobile ? '18px' : '20px',
-              color: currentPaper === 0 ? '#ccc' : '#5d4a3a',
+              color: currentPaper === 0 ? '#ccc' : 'var(--color-text-body)',
               transition: 'all 0.3s',
-              boxShadow: currentPaper === 0 ? 'none' : '0 4px 12px rgba(139,115,85,0.15)',
+              boxShadow: currentPaper === 0 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)',
               zIndex: 20
             }}
             onMouseEnter={e => {
               if (currentPaper !== 0) {
                 e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
-                e.currentTarget.style.boxShadow = '0 6px 20px rgba(139,115,85,0.25)';
+                e.currentTarget.style.boxShadow = '0 6px 20px color-mix(in srgb, var(--color-shadow-medium) 60%, transparent)';
               }
             }}
             onMouseLeave={e => {
               e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
-              e.currentTarget.style.boxShadow = currentPaper === 0 ? 'none' : '0 4px 12px rgba(139,115,85,0.15)';
+              e.currentTarget.style.boxShadow = currentPaper === 0 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)';
             }}
           >
             ←
@@ -974,27 +971,27 @@ function PaperStack({
               width: isMobile ? '40px' : '48px',
               height: isMobile ? '40px' : '48px',
               borderRadius: '50%',
-              background: currentPaper === totalPapers - 1 ? 'rgba(139,115,85,0.1)' : 'rgba(255,255,255,0.95)',
-              border: '2px solid rgba(139,115,85,0.2)',
+              background: currentPaper === totalPapers - 1 ? 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)' : 'rgba(255,255,255,0.95)',
+              border: '2px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
               cursor: currentPaper === totalPapers - 1 ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               fontSize: isMobile ? '18px' : '20px',
-              color: currentPaper === totalPapers - 1 ? '#ccc' : '#5d4a3a',
+              color: currentPaper === totalPapers - 1 ? '#ccc' : 'var(--color-text-body)',
               transition: 'all 0.3s',
-              boxShadow: currentPaper === totalPapers - 1 ? 'none' : '0 4px 12px rgba(139,115,85,0.15)',
+              boxShadow: currentPaper === totalPapers - 1 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)',
               zIndex: 20
             }}
             onMouseEnter={e => {
               if (currentPaper !== totalPapers - 1) {
                 e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
-                e.currentTarget.style.boxShadow = '0 6px 20px rgba(139,115,85,0.25)';
+                e.currentTarget.style.boxShadow = '0 6px 20px color-mix(in srgb, var(--color-shadow-medium) 60%, transparent)';
               }
             }}
             onMouseLeave={e => {
               e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
-              e.currentTarget.style.boxShadow = currentPaper === totalPapers - 1 ? 'none' : '0 4px 12px rgba(139,115,85,0.15)';
+              e.currentTarget.style.boxShadow = currentPaper === totalPapers - 1 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)';
             }}
           >
             →
@@ -1018,7 +1015,7 @@ function PaperStack({
                   width: '12px',
                   height: '12px',
                   borderRadius: '50%',
-                  background: idx === currentPaper ? '#8B7355' : 'rgba(139,115,85,0.3)',
+                  background: idx === currentPaper ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-text-muted) 50%, transparent)',
                   border: 'none',
                   cursor: 'pointer',
                   transition: 'all 0.3s',
@@ -1026,13 +1023,13 @@ function PaperStack({
                 }}
                 onMouseEnter={e => {
                   if (idx !== currentPaper) {
-                    e.currentTarget.style.background = 'rgba(139,115,85,0.5)';
+                    e.currentTarget.style.background = 'color-mix(in srgb, var(--color-text-muted) 70%, transparent)';
                     e.currentTarget.style.transform = 'scale(1.2)';
                   }
                 }}
                 onMouseLeave={e => {
                   if (idx !== currentPaper) {
-                    e.currentTarget.style.background = 'rgba(139,115,85,0.3)';
+                    e.currentTarget.style.background = 'color-mix(in srgb, var(--color-text-muted) 50%, transparent)';
                     e.currentTarget.style.transform = 'scale(1)';
                   }
                 }}
@@ -1056,7 +1053,7 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
       <div style={{
         fontSize: '36px',
         fontWeight: 300,
-        color: '#5d4a3a',
+        color: 'var(--color-text-body)',
         fontFamily: 'Georgia, serif',
         lineHeight: 1
       }}>
@@ -1064,12 +1061,12 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
       </div>
       <div style={{
         fontSize: '11px',
-        color: '#8B7355',
+        color: 'var(--color-text-muted)',
         fontWeight: 500,
         textTransform: 'uppercase',
         letterSpacing: '1.5px',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        borderTop: '1px solid rgba(139,115,85,0.3)',
+        borderTop: '1px solid color-mix(in srgb, var(--color-text-muted) 50%, transparent)',
         paddingTop: '0.5rem'
       }}>
         {label}
@@ -1081,10 +1078,10 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
 function EchoCard({ echo }: { echo: Echo }) {
   return (
     <div style={{
-      background: 'rgba(255,248,240,0.6)',
+      background: 'var(--color-bg-surface)',
       padding: '1.75rem',
       borderRadius: '16px',
-      border: '1px solid rgba(139,115,85,0.2)',
+      border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
       transition: 'all 0.3s',
       position: 'relative',
       backdropFilter: 'blur(10px)'
@@ -1092,7 +1089,7 @@ function EchoCard({ echo }: { echo: Echo }) {
       <h3 style={{
         fontSize: '19px',
         fontWeight: 500,
-        color: '#3d3226',
+        color: 'var(--color-text-primary)',
         marginBottom: '1rem',
         fontFamily: 'Georgia, serif',
         fontStyle: 'italic',
@@ -1101,7 +1098,7 @@ function EchoCard({ echo }: { echo: Echo }) {
         {echo.title}
       </h3>
       <p style={{
-        color: '#5d4a3a',
+        color: 'var(--color-text-body)',
         lineHeight: 1.8,
         marginBottom: '1.25rem',
         fontSize: '14px'
@@ -1113,7 +1110,7 @@ function EchoCard({ echo }: { echo: Echo }) {
           <div style={{
             fontSize: '10px',
             fontWeight: 600,
-            color: '#8B7355',
+            color: 'var(--color-text-muted)',
             marginBottom: '0.75rem',
             textTransform: 'uppercase',
             letterSpacing: '1px',
@@ -1126,12 +1123,12 @@ function EchoCard({ echo }: { echo: Echo }) {
               key={i}
               style={{
                 padding: '1rem',
-                background: 'rgba(255,255,255,0.7)',
-                borderLeft: '4px solid rgba(139,115,85,0.4)',
+                background: 'color-mix(in srgb, var(--color-bg-surface-solid) 70%, transparent)',
+                borderLeft: '4px solid var(--color-border-paper)',
                 marginBottom: '0.75rem',
                 fontSize: '13px',
                 fontStyle: 'italic',
-                color: '#5d4a3a',
+                color: 'var(--color-text-body)',
                 borderRadius: '0 8px 8px 0',
                 lineHeight: 1.6
               }}
@@ -1148,10 +1145,10 @@ function EchoCard({ echo }: { echo: Echo }) {
 function TraitCard({ trait }: { trait: Trait }) {
   return (
     <div style={{
-      background: 'rgba(255,252,247,0.7)',
+      background: 'var(--color-bg-surface)',
       padding: '1.75rem',
       borderRadius: '18px',
-      border: '1px solid rgba(139,115,85,0.2)',
+      border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
       transition: 'all 0.3s',
       position: 'relative',
       backdropFilter: 'blur(8px)'
@@ -1165,7 +1162,7 @@ function TraitCard({ trait }: { trait: Trait }) {
         <h3 style={{
           fontSize: '18px',
           fontWeight: 500,
-          color: '#3d3226',
+          color: 'var(--color-text-primary)',
           fontFamily: 'Georgia, serif',
           fontStyle: 'italic',
           flex: 1
@@ -1175,12 +1172,12 @@ function TraitCard({ trait }: { trait: Trait }) {
         <div style={{
           fontSize: '12px',
           fontWeight: 600,
-          color: '#8B7355',
-          background: 'rgba(139,115,85,0.1)',
+          color: 'var(--color-text-muted)',
+          background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
           padding: '6px 12px',
           borderRadius: '20px',
           fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-          border: '1px solid rgba(139,115,85,0.2)',
+          border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
           marginLeft: '1rem'
         }}>
           {trait.strength}/5
@@ -1201,8 +1198,8 @@ function TraitCard({ trait }: { trait: Trait }) {
               height: '6px',
               borderRadius: '3px',
               background: i <= trait.strength
-                ? 'linear-gradient(90deg, rgba(139,115,85,0.6), rgba(160,130,109,0.4))'
-                : 'rgba(139,115,85,0.1)',
+                ? 'linear-gradient(90deg, var(--color-text-muted), color-mix(in srgb, var(--color-text-muted) 50%, transparent))'
+                : 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
               transition: 'all 0.4s',
               opacity: i <= trait.strength ? 1 : 0.4
             }}
@@ -1211,7 +1208,7 @@ function TraitCard({ trait }: { trait: Trait }) {
       </div>
 
       <p style={{
-        color: '#5d4a3a',
+        color: 'var(--color-text-body)',
         lineHeight: 1.8,
         fontSize: '13px'
       }}>
@@ -1224,10 +1221,10 @@ function TraitCard({ trait }: { trait: Trait }) {
 function PatternCard({ pattern }: { pattern: Pattern }) {
   return (
     <div style={{
-      background: 'rgba(255,250,242,0.6)',
+      background: 'var(--color-bg-surface)',
       padding: '1.75rem',
       borderRadius: '16px',
-      border: '1px solid rgba(139,115,85,0.2)',
+      border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
       transition: 'all 0.3s',
       position: 'relative',
       backdropFilter: 'blur(10px)'
@@ -1235,7 +1232,7 @@ function PatternCard({ pattern }: { pattern: Pattern }) {
       <h3 style={{
         fontSize: '19px',
         fontWeight: 500,
-        color: '#3d3226',
+        color: 'var(--color-text-primary)',
         marginBottom: '1rem',
         fontFamily: 'Georgia, serif',
         fontStyle: 'italic',
@@ -1244,7 +1241,7 @@ function PatternCard({ pattern }: { pattern: Pattern }) {
         {pattern.pattern}
       </h3>
       <p style={{
-        color: '#5d4a3a',
+        color: 'var(--color-text-body)',
         lineHeight: 1.8,
         marginBottom: '1.25rem',
         fontSize: '14px'
@@ -1256,12 +1253,12 @@ function PatternCard({ pattern }: { pattern: Pattern }) {
         alignItems: 'center',
         gap: '0.5rem',
         fontSize: '12px',
-        color: '#8B7355',
+        color: 'var(--color-text-muted)',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        background: 'rgba(139,115,85,0.08)',
+        background: 'color-mix(in srgb, var(--color-border-paper) 24%, transparent)',
         padding: '6px 14px',
         borderRadius: '20px',
-        border: '1px solid rgba(139,115,85,0.15)'
+        border: '1px solid color-mix(in srgb, var(--color-border-paper) 45%, transparent)'
       }}>
         <span style={{ fontWeight: 600 }}>Frequency:</span>
         <span style={{ fontStyle: 'italic' }}>{pattern.frequency}</span>

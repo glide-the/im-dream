@@ -1,6 +1,9 @@
 /**
  * EditorEngine.ts
  * Clean editor engine based on trace-based energy model
+ * [Sync] 2026-05-30: fix insertWidgetAfterLine to always ensure a text cell exists after any widget,
+ *   even when inserting between two widgets (was only guarding the last-cell case).
+ * [Sync] 2026-05-30: fix deleteCell to guarantee last cell is always text after widget removal.
  */
 
 import { findNormalizedPhrase } from '../utils/textNormalize';
@@ -661,13 +664,12 @@ export class EditorEngine {
       data
     });
 
-    // Text after widget (only if non-empty, otherwise rely on adjacent cell or create empty)
-    // Always add if non-empty, or if this is the last cell (to allow continued writing)
-    const isLastCell = cellIndex === this.state.cells.length - 1;
+    // Text after widget: always add when there's afterText, or when the next cell is not
+    // already a text cell (covers both end-of-list and widget-follows-widget cases).
     const hasNextTextCell = cellIndex + 1 < this.state.cells.length &&
       this.state.cells[cellIndex + 1].type === 'text';
 
-    if (afterText.length > 0 || (isLastCell && !hasNextTextCell)) {
+    if (afterText.length > 0 || !hasNextTextCell) {
       replacementCells.push({
         id: generateId(),
         type: 'text',
@@ -755,6 +757,12 @@ export class EditorEngine {
 
     // Merge consecutive text cells (important when deleting a widget between text cells)
     this.mergeConsecutiveTextCells();
+
+    // Ensure the last cell is always a text cell so the user can continue writing
+    const lastCell = this.state.cells[this.state.cells.length - 1];
+    if (lastCell && lastCell.type !== 'text') {
+      this.state.cells.push({ id: generateId(), type: 'text', content: '' });
+    }
 
     this.notifyChange();
   }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
+import { toggleTheme, getTheme } from '../utils/theme';
 
 interface Props {
   currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat';
@@ -11,12 +12,19 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
   const { user, logout } = useAuth();
   const { t } = useTranslation();
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
+
+  const handleToggleTheme = () => {
+    const next = toggleTheme();
+    setIsDark(next === 'dark');
+  };
+
   const buttonStyle = (isActive: boolean) => ({
     height: '100%',
     minWidth: 120,
     padding: '0 26px',
     border: 'none',
-    background: isActive ? 'rgba(44, 44, 44, 0.08)' : 'transparent',
+    background: isActive ? 'var(--color-bg-hover)' : 'transparent',
     fontSize: 16,
     fontWeight: isActive ? 600 : 400,
     cursor: 'pointer',
@@ -24,7 +32,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
     alignItems: 'center',
     justifyContent: 'center',
     transition: 'all 0.2s',
-    color: isActive ? 'var(--color-text-primary)' : '#888',
+    color: isActive ? 'var(--color-text-primary)' : 'var(--color-text-secondary)',
     position: 'relative' as const,
     borderBottom: isActive ? '3px solid var(--color-text-primary)' : '3px solid transparent',
     fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
@@ -88,7 +96,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           title={t('nav.writing')}
           onMouseEnter={e => {
             if (currentView !== 'writing') {
-              e.currentTarget.style.background = 'rgba(44, 44, 44, 0.04)';
+              e.currentTarget.style.background = 'var(--color-bg-hover)';
             }
           }}
           onMouseLeave={e => {
@@ -106,7 +114,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           title={t('nav.timeline')}
           onMouseEnter={e => {
             if (currentView !== 'timeline') {
-              e.currentTarget.style.background = 'rgba(44, 44, 44, 0.04)';
+              e.currentTarget.style.background = 'var(--color-bg-hover)';
             }
           }}
           onMouseLeave={e => {
@@ -124,7 +132,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           title={t('nav.analysis')}
           onMouseEnter={e => {
             if (currentView !== 'analysis') {
-              e.currentTarget.style.background = 'rgba(44, 44, 44, 0.04)';
+              e.currentTarget.style.background = 'var(--color-bg-hover)';
             }
           }}
           onMouseLeave={e => {
@@ -142,7 +150,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           title={t('nav.decks')}
           onMouseEnter={e => {
             if (currentView !== 'decks') {
-              e.currentTarget.style.background = 'rgba(44, 44, 44, 0.04)';
+              e.currentTarget.style.background = 'var(--color-bg-hover)';
             }
           }}
           onMouseLeave={e => {
@@ -160,7 +168,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           title={t('nav.chat')}
           onMouseEnter={e => {
             if (currentView !== 'chat') {
-              e.currentTarget.style.background = 'rgba(44, 44, 44, 0.04)';
+              e.currentTarget.style.background = 'var(--color-bg-hover)';
             }
           }}
           onMouseLeave={e => {
@@ -175,6 +183,31 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
 
       <div style={{ flex: 1 }} />
 
+      {/* Theme toggle button */}
+      <button
+        onClick={handleToggleTheme}
+        title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 6,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'transparent',
+          border: 'none',
+          cursor: 'pointer',
+          transition: 'all 0.2s',
+          color: 'var(--color-text-secondary)',
+          fontSize: 15,
+          marginRight: 4
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+      >
+        {isDark ? '☀️' : '🌙'}
+      </button>
+
       <button
         onClick={() => onViewChange('settings')}
         style={{
@@ -184,7 +217,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          background: currentView === 'settings' ? 'var(--color-shadow-soft)' : 'transparent',
+          background: currentView === 'settings' ? 'var(--color-bg-hover)' : 'transparent',
           border: 'none',
           cursor: 'pointer',
           transition: 'all 0.2s',
@@ -193,7 +226,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
         }}
         onMouseEnter={e => {
           if (currentView !== 'settings') {
-            e.currentTarget.style.background = 'rgba(0, 0, 0, 0.05)';
+            e.currentTarget.style.background = 'var(--color-bg-hover)';
           }
         }}
         onMouseLeave={e => {
@@ -222,13 +255,13 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
             border: 'none',
             cursor: 'pointer',
             transition: 'all 0.2s',
-            color: '#fff',
+            color: 'var(--color-text-on-action)',
             fontSize: 12,
             fontWeight: 600,
             fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
           }}
           onMouseEnter={e => {
-            e.currentTarget.style.background = '#45a049';
+            e.currentTarget.style.background = 'var(--color-state-success-hover)';
           }}
           onMouseLeave={e => {
             e.currentTarget.style.background = 'var(--color-state-success)';
@@ -257,7 +290,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
               right: 0,
               marginTop: 8,
               width: 200,
-              background: '#fff',
+              background: 'var(--color-bg-surface-solid)',
               border: '1px solid var(--color-border-paper)',
               borderRadius: 8,
               boxShadow: '0 4px 12px var(--color-shadow-medium)',
@@ -266,10 +299,11 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
             }}>
               <div style={{
                 padding: '12px 16px',
-                borderBottom: '1px solid #e8e8e8',
-                fontSize: 13
+                borderBottom: '1px solid var(--color-border-neutral)',
+                fontSize: 13,
+                color: 'var(--color-text-body)'
               }}>
-                <div style={{ fontWeight: 600, marginBottom: 4 }}>
+                <div style={{ fontWeight: 600, marginBottom: 4, color: 'var(--color-text-primary)' }}>
                   {user?.display_name || 'User'}
                 </div>
                 <div style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>
@@ -290,10 +324,11 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
                   fontSize: 13,
                   cursor: 'pointer',
                   transition: 'background 0.2s',
-                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto'
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto',
+                  color: 'var(--color-text-body)'
                 }}
                 onMouseEnter={e => {
-                  e.currentTarget.style.background = '#f5f5f5';
+                  e.currentTarget.style.background = 'var(--color-bg-hover)';
                 }}
                 onMouseLeave={e => {
                   e.currentTarget.style.background = 'transparent';

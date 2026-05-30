@@ -385,12 +385,13 @@ export default function AIInputDock({
       style={{
         width: '100%',
         minWidth: 0,
-        padding: '1rem',
+        padding: '0.85rem 1rem',
         borderRadius: '1.25rem',
         border: `1px solid ${isDragOver ? 'var(--color-action-link)' : 'var(--color-border-paper)'}`,
-        background: isDragOver ? 'rgba(74,144,226,0.08)' : 'var(--color-bg-paper)',
-        boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+        background: isDragOver ? 'color-mix(in srgb, var(--color-action-link) 6%, var(--color-bg-paper))' : 'var(--color-bg-paper)',
+        boxShadow: '0 2px 8px var(--color-shadow-soft)',
         boxSizing: 'border-box',
+        transition: 'border-color 0.18s ease, background 0.18s ease',
       }}
     >
       <input
@@ -407,11 +408,12 @@ export default function AIInputDock({
         <div
           style={{
             marginBottom: '0.75rem',
-            borderRadius: '0.75rem',
-            padding: '0.65rem 0.8rem',
-            background: 'rgba(217,83,79,0.1)',
-            color: '#d9534f',
-            fontSize: '0.85rem',
+            borderRadius: '0.65rem',
+            padding: '0.6rem 0.8rem',
+            background: 'color-mix(in srgb, var(--color-state-error) 8%, transparent)',
+            color: 'var(--color-state-error)',
+            fontSize: '0.82rem',
+            border: '1px solid color-mix(in srgb, var(--color-state-error) 20%, transparent)',
           }}
         >
           {uploadError || uploadHookError}
@@ -430,27 +432,27 @@ export default function AIInputDock({
                 style={{
                   position: 'relative',
                   overflow: 'hidden',
-                  borderRadius: '0.75rem',
+                  borderRadius: '0.65rem',
                   border: '1px solid var(--color-border-paper)',
-                  background: 'var(--color-bg-paper)',
+                  background: 'var(--color-bg-app)',
                 }}
               >
                 {isImage && previewUrl ? (
                   <img src={previewUrl} alt={file.name} style={{ display: 'block', width: '5rem', height: '5rem', objectFit: 'cover' }} />
                 ) : (
-                  <div style={{ width: '7rem', height: '5rem', padding: '0.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', background: 'var(--color-bg-paper)' }}>
+                  <div style={{ width: '7rem', height: '5rem', padding: '0.5rem', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', background: 'var(--color-bg-app)' }}>
                     <IconFile style={{ width: '1.4rem', height: '1.4rem', color: 'var(--color-text-muted)', marginBottom: '0.2rem' }} />
                     <span style={{ width: '100%', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', fontSize: '0.68rem', color: 'var(--color-text-secondary)' }}>{file.name}</span>
                     <span style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)' }}>{displayExt} · {formatFileSize(file.size)}</span>
                   </div>
                 )}
                 {file.isUploading ? (
-                  <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(255,254,249,0.88)' }}>
+                  <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'color-mix(in srgb, var(--color-bg-paper) 90%, transparent)' }}>
                     <IconLoader style={{ width: '1rem', height: '1rem', color: 'var(--color-action-link)', marginBottom: '0.25rem' }} className="spin" />
                     <div style={{ width: '3rem', height: '0.25rem', borderRadius: '999px', overflow: 'hidden', background: 'var(--color-border-paper)' }}>
-                      <div style={{ width: `${file.progress || 0}%`, height: '100%', background: 'var(--color-action-link)' }} />
+                      <div style={{ width: `${file.progress || 0}%`, height: '100%', background: 'var(--color-action-link)', transition: 'width 0.2s ease' }} />
                     </div>
-                    <span style={{ marginTop: '0.2rem', fontSize: '0.6rem', color: 'var(--color-text-secondary)' }}>{Math.round(file.progress || 0)}%</span>
+                    <span style={{ marginTop: '0.2rem', fontSize: '0.6rem', color: 'var(--color-text-muted)' }}>{Math.round(file.progress || 0)}%</span>
                   </div>
                 ) : null}
                 <button
@@ -464,10 +466,10 @@ export default function AIInputDock({
                     right: '0.35rem',
                     width: '1.5rem',
                     height: '1.5rem',
-                    border: 'none',
+                    border: '1px solid var(--color-border-paper)',
                     borderRadius: '999px',
-                    background: 'rgba(255,255,255,0.92)',
-                    color: '#d9534f',
+                    background: 'var(--color-bg-surface-solid)',
+                    color: 'var(--color-state-danger)',
                     cursor: file.isUploading ? 'not-allowed' : 'pointer',
                     display: 'grid',
                     placeItems: 'center',
@@ -482,9 +484,9 @@ export default function AIInputDock({
       ) : null}
 
       {(showUploadHint || mode === 'full') ? (
-        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.73rem', color: 'var(--color-text-muted)' }}>
           {showUploadHint ? <span id="chat-upload-hint">上传方式：粘贴 · 拖拽 · 点击选择</span> : null}
-          {mode === 'full' ? <span style={{ marginLeft: 'auto' }}>⌘/Ctrl + Enter 发送</span> : null}
+          {mode === 'full' ? <span style={{ marginLeft: 'auto', letterSpacing: '0.01em' }}>⌘ / Ctrl + Enter 发送</span> : null}
         </div>
       ) : null}
 
@@ -514,16 +516,16 @@ export default function AIInputDock({
           border: 'none',
           outline: 'none',
           background: 'transparent',
-          color: 'var(--color-text-primary)',
+          color: 'var(--color-text-body)',
           fontSize: '1rem',
-          lineHeight: 1.6,
+          lineHeight: 1.65,
           fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif",
           boxSizing: 'border-box',
         }}
       />
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.75rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginTop: '0.65rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
           <button
             type="button"
             aria-label="添加附件"
@@ -532,14 +534,15 @@ export default function AIInputDock({
             style={{
               border: '1px solid var(--color-border-paper)',
               borderRadius: '999px',
-              padding: '0.55rem 0.9rem',
-              background: 'var(--color-bg-paper)',
+              padding: '0.42rem 0.85rem',
+              background: 'var(--color-bg-app)',
               color: 'var(--color-text-secondary)',
               cursor: disabled ? 'not-allowed' : 'pointer',
-              fontSize: '0.82rem',
+              fontSize: '0.8rem',
+              transition: 'background 0.15s ease, color 0.15s ease',
             }}
           >
-            + Add
+            + 附件
           </button>
 
           <div
@@ -550,7 +553,8 @@ export default function AIInputDock({
               borderRadius: '999px',
               border: '1px solid var(--color-border-paper)',
               overflow: 'hidden',
-              fontSize: '0.78rem',
+              fontSize: '0.76rem',
+              background: 'var(--color-bg-app)',
             }}
           >
             {TOOL_CHOICE_OPTIONS.map((option) => {
@@ -565,11 +569,11 @@ export default function AIInputDock({
                   style={{
                     border: 'none',
                     padding: '0.35rem 0.7rem',
-                    background: isActive ? 'var(--color-action-link)' : 'var(--color-bg-paper)',
-                    color: isActive ? '#fff' : 'var(--color-text-muted)',
+                    background: isActive ? 'var(--color-text-primary)' : 'transparent',
+                    color: isActive ? 'var(--color-bg-paper)' : 'var(--color-text-muted)',
                     cursor: disabled || loading ? 'not-allowed' : 'pointer',
                     fontWeight: isActive ? 600 : 400,
-                    transition: 'background 0.15s, color 0.15s',
+                    transition: 'background 0.15s ease, color 0.15s ease',
                     whiteSpace: 'nowrap',
                   }}
                 >
@@ -593,7 +597,7 @@ export default function AIInputDock({
               height: '2.25rem',
               borderRadius: '999px',
               border: 'none',
-              background: '#d9534f',
+              background: 'var(--color-state-danger)',
               color: 'var(--color-text-on-action)',
               cursor: 'pointer',
             }}
@@ -605,7 +609,7 @@ export default function AIInputDock({
             type="button"
             onClick={handleSend}
             disabled={!canSend}
-            title={hasUploadingFiles ? '等待上传完成...' : '发送'}
+            title={hasUploadingFiles ? '等待上传完成…' : '发送'}
             aria-label="发送消息"
             style={{
               display: 'grid',
@@ -614,9 +618,10 @@ export default function AIInputDock({
               height: '2.25rem',
               borderRadius: '999px',
               border: 'none',
-              background: canSend ? 'var(--color-action-link)' : 'var(--color-disabled-bg)',
-              color: 'var(--color-text-on-action)',
+              background: canSend ? 'var(--color-text-primary)' : 'var(--color-disabled-bg)',
+              color: canSend ? 'var(--color-bg-paper)' : 'var(--color-text-muted)',
               cursor: canSend ? 'pointer' : 'not-allowed',
+              transition: 'background 0.18s ease',
             }}
           >
             {hasUploadingFiles ? (

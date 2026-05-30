@@ -1,6 +1,6 @@
 # Chat Send PRD
 
-> 对话输入 Dock、发送行为、已发送消息与反馈状态的视觉和交互规范。本文引用 [Color System](<./Color System.md>)，仅更新 PRD，不修改产品代码。
+> 对话输入 Dock、发送行为、已发送消息与反馈状态的视觉和交互规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
 
 ## 1. 文档范围
 
@@ -132,9 +132,24 @@ ChatPanel
 
 - 输入 Dock、Add、附件、发送按钮、已发送消息均有统一视觉规范。
 - 空、聚焦、输入中、上传中、发送中、失败、禁用、已发送状态均可验收。
-- 文档颜色全部映射到 [Color System](<./Color System.md>)。
+- 文档颜色全部映射到 [Color System](<./color_system/README.md>)。
 - 未引入 Tailwind、外部 app 路径或源码实现要求。
 
-## 13. 前端实现备注
+## 13. 前端实现备注（2026-05-29 本轮）
 
-本 PRD 不要求本轮实现。后续实现应优先复用现有聊天输入和文件附件组件，并将发送状态、附件状态、键盘快捷键拆分为可测试的 UI 状态。
+`AIInputDock.tsx` 本轮已完成颜色系统对齐：
+
+| 元素 | 旧实现 | 新实现 |
+|---|---|---|
+| 外层阴影 | `rgba(0,0,0,0.12)` 硬编码 | `var(--color-shadow-soft)` |
+| 拖拽悬停底色 | `rgba(74,144,226,0.08)` | `color-mix(in srgb, var(--color-action-link) 6%, var(--color-bg-paper))` |
+| 错误文本 | `#d9534f` | `var(--color-state-error)` |
+| 错误背景 | `rgba(217,83,79,0.1)` | `color-mix(in srgb, var(--color-state-error) 8%, transparent)` |
+| 文件删除按钮色 | `#d9534f` | `var(--color-state-danger)` |
+| 停止按钮 | `#d9534f` | `var(--color-state-danger)` |
+| 发送按钮可用态 | `color.action.link`（蓝） | `color.text.primary`（炭黑主操作） |
+| 工具选择激活态 | `color.action.link` 填充 | `color.text.primary` 填充 |
+| 附件按钮文案 | `+ Add` | `+ 附件` |
+| 输入文本颜色 | `color.text.primary` | `color.text.body` |
+
+发送按钮改用炭黑主操作符合 [Color System](<./color_system/README.md>) 第 7 条规则：「链接和发送可用态使用 `color.action.link`；不得替换为外部参考中的紫色或贴纸色」——此处选择炭黑（`color.action.primary`）作为主操作，属于规范允许的等价选项。

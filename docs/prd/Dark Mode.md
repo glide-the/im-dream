@@ -1,6 +1,6 @@
 # Dark Mode PRD
 
-> Ink & Memory 聊天与文件 PRD 的暗色模式设计规范。本文引用 [Color System](<./Color System.md>)，仅更新 PRD，不修改产品代码。
+> Ink & Memory 聊天与文件 PRD 的暗色模式设计规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
 
 ## 1. 文档范围
 
@@ -11,7 +11,7 @@ Dark Mode 定义聊天 Dashboard、Sidebar、History、Send、File 和 File Work
 ## 2. 设计原则
 
 - 保留纸张和笔记本气质：暗色模式应是“夜间纸张”，不是赛博控制台。
-- 统一语义 token：所有模块使用 [Color System](<./Color System.md>) 的 Dark 值，不在模块内新增孤立色值。
+- 统一语义 token：所有模块使用 [Color System](<./color_system/README.md>) 的 Dark 值，不在模块内新增孤立色值。
 - 降低装饰亮度：状态色只做小面积提示，不使用霓虹 glow。
 - 阅读优先：正文对比度、Terminal 可读性、文件预览辨识度必须高于装饰。
 
@@ -99,7 +99,7 @@ Dark Mode 定义聊天 Dashboard、Sidebar、History、Send、File 和 File Work
 
 ## 8. 验收标准
 
-- 所有暗色颜色均来自 [Color System](<./Color System.md>)。
+- 所有暗色颜色均来自 [Color System](<./color_system/README.md>)。
 - Dashboard、Sidebar、History、Send、File、File Work 均有暗色适配说明。
 - Hover、Focus、Selected、Disabled、Loading、Error、Success 状态均可验收。
 - 文档明确说明当前为设计目标，不声称源码已实现。

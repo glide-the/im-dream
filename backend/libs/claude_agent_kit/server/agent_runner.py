@@ -25,6 +25,27 @@
 # [Sync] 2026-05-24: move _inject_mem0_session_hook_env and _verify_claude_sdk_env_for_query_stream calls inside run_streaming's try/except BaseException block so any raised exception is caught and routed to callbacks.on_error → SSE error frame; raise RuntimeError in _verify_claude_sdk_env_for_query_stream when no auth key is present instead of silently returning.
 # [Sync] 2026-05-27: migrate _pre_tool_use_hook hookSpecificOutput from old {"tool_input":...} format to CLI ≥2.1 format: hookEventName + permissionDecision:"allow" + updatedInput for input override; permissionDecision:"deny" + permissionDecisionReason for all block paths. The old "tool_input" key is silently ignored by the CLI, leaving AskUserQuestion without answers and returning isError:true / output:null.
 # [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; in auto mode, AskUserQuestion/mcp__user__ask_user still go through on_tool_confirmation_request so the frontend form collects answers before execution; all other tools are auto-approved.
+# [Sync] 2026-05-28: implement .editor/ virtual index read interception in _pre_tool_use_hook — detect is_editor_index_path, write tempfile from editor_state, return updatedInput redirect (CLI ≥2.1 format); cleanup tempfiles in finally block.
+# [Sync] 2026-05-29: extract .editor/ redirect block into module-level _apply_editor_index_redirect for unit-testability; _pre_tool_use_hook delegates to it.
+# [Sync] 2026-05-29: _editor_mcp_stdio_config now accepts editor_state dict and passes it
+#                    as INK_EDITOR_STATE_JSON env var (session-inline, no tempfile);
+#                    removes tempfile creation/cleanup for editor MCP in run_streaming.
+# [Sync] 2026-05-29: switch editor MCP from read-only tools to write-only tools; replace
+#                    INK_EDITOR_STATE_JSON injection with INK_AGENT_SESSION_ID +
+#                    INK_AGENT_USER_ID so write handlers call database directly; add all
+#                    four write tool names to _ALWAYS_CONFIRM_TOOL_NAMES; editor MCP
+#                    startup condition now checks mcp_env for INK_AGENT_SESSION_ID.
+# [Sync] 2026-05-29: remove env-var session injection; _editor_mcp_stdio_config is
+#                    zero-argument — session_id flows via MCP tool arguments from prompt;
+#                    editor MCP startup condition restored to opts.editor_state is not None.
+# [Sync] 2026-05-29: remove env-var session context injection; session_id flows through
+#                    MCP tool call arguments (agent reads from <workspace_context> prompt);
+#                    _editor_mcp_stdio_config reverts to zero-arg form; editor MCP startup
+#                    condition restored to opts.editor_state is not None.
+# [Sync] 2026-05-29: _pre_tool_use_hook reads live editor_state via opts.editor_state_getter
+#                    (supplied by service.py as lambda: state.editor_state) so PreToolUse
+#                    virtual-index reads see the flyweight's latest value after write-tool
+#                    DB refreshes; falls back to opts.editor_state when getter is absent.
 
 """Claude Agent Runner.
 
@@ -73,6 +94,7 @@ from ..types import (
 from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
+from .editor_tool import allowed_editor_tool_names
 from .sdk_env import apply_project_sdk_runtime_options, apply_user_sdk_env_to_options
 
 logger = logging.getLogger(__name__)
@@ -96,10 +118,12 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "mcp__user__touch_animation",
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
+    *allowed_editor_tool_names(),
 ]
 _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
+_EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 
 # Tools that must always go through the on_tool_confirmation_request side-channel
 # regardless of tool_choice mode (i.e. even in "auto" mode).  These are
@@ -107,9 +131,16 @@ _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 # be auto-approved because they need the frontend form to collect answers.
 # Note: mcp__user__touch_animation is intentionally excluded; in auto mode the
 # animation runs without user interaction.
+# Editor write tools are always confirmed: all document mutations require explicit
+# human approval before the MCP subprocess applies them to the database.
 _ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
     "AskUserQuestion",
     "mcp__user__ask_user",
+    # Editor write tools — all require human confirmation (see mcp-tools.md §4)
+    "mcp__editor__write_segment",
+    "mcp__editor__delete_segment",
+    "mcp__editor__insert_widget",
+    "mcp__editor__reply_to_comment",
 })
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 _FALSE_ENV_VALUES = {"0", "false", "no", "off"}
@@ -478,6 +509,103 @@ def _memory_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpS
         env=_stdio_env(extra_env=extra_env, include_memory_config=True),
     )
 
+
+def _editor_mcp_stdio_config() -> McpStdioServerConfig:
+    """Build the external stdio MCP config for the EditorState write-only server.
+
+    Session context (session_id) is supplied by the Claude agent at tool-call
+    time — the agent reads it from the ``<workspace_context>`` prompt block and
+    includes it as a required argument in every write tool call.  No session
+    data needs to be injected into the subprocess environment here.
+    """
+    return McpStdioServerConfig(
+        type="stdio",
+        command=sys.executable,
+        args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
+        env=_stdio_env(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# .editor/ virtual index redirect helper
+# ---------------------------------------------------------------------------
+
+
+def _apply_editor_index_redirect(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    editor_state: Optional[dict[str, Any]],
+    tmp_paths: list[str],
+) -> Optional[HookJSONOutput]:
+    """Apply `.editor/` virtual-index redirect for a PreToolUse Read call.
+
+    Returns a :class:`HookJSONOutput` whose ``updatedInput`` points to a freshly
+    written tempfile when all three conditions are satisfied:
+
+    1. ``tool_name == "Read"``
+    2. ``editor_state`` is not ``None``
+    3. The ``file_path`` input targets a recognised ``.editor/`` resource
+
+    Returns ``None`` when any condition is not met (fall-through).
+
+    Side effects:
+    - On success, appends the tempfile path to *tmp_paths* so the caller can
+      clean it up in a ``finally`` block.
+
+    On any exception the error is logged at WARNING level and ``None`` is
+    returned so the caller falls through to the unmodified read path (the
+    agent sees the on-disk placeholder ``{}``).
+
+    This function is module-level so it can be tested in isolation without
+    running a real Claude Code SDK subprocess.
+
+    Design reference: ``docs/design/claude-agent/edit-point/workspace-adapter.md``
+    §4.2 Interception conditions, §4.3 Interception flow.
+    """
+    if tool_name != "Read" or editor_state is None:
+        return None
+
+    raw_path: str = tool_input.get("file_path", "")
+
+    try:
+        from .editor_index import is_editor_index_path, get_editor_resource_data  # noqa: PLC0415
+
+        if not is_editor_index_path(raw_path):
+            return None
+
+        resource_data = get_editor_resource_data(raw_path, editor_state)
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            prefix="editor_",
+            encoding="utf-8",
+        ) as tmp:
+            json.dump(resource_data, tmp, ensure_ascii=False)
+            tmp_path = tmp.name
+
+        tmp_paths.append(tmp_path)
+        logger.debug(
+            "PreToolUse: redirected .editor read %r → %r",
+            raw_path,
+            tmp_path,
+        )
+        return HookJSONOutput(
+            hookSpecificOutput={
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+                "updatedInput": {"file_path": tmp_path},
+            }
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to intercept .editor/ read for %r; falling through.",
+            raw_path,
+            exc_info=True,
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Async helper
 # ---------------------------------------------------------------------------
@@ -725,6 +853,10 @@ class ClaudeAgentRunner:
         except RuntimeError:  # pragma: no cover — run_streaming is async
             host_loop = None
 
+        # Collects paths of per-read tempfiles created by the .editor/ redirect
+        # logic inside _pre_tool_use_hook. Cleaned up in the finally block.
+        _editor_redirect_tmp_paths: list[str] = []
+
         async def _pre_tool_use_hook(
             hook_input: dict[str, Any],
             tool_use_id: Optional[str],
@@ -738,6 +870,34 @@ class ClaudeAgentRunner:
                 "tool_name": tool_name,
                 "input": tool_input,
             }
+
+            # ----------------------------------------------------------
+            # .editor/ virtual index interception (Read tool only)
+            # When the agent reads a file under .editor/, redirect to a
+            # tempfile populated with live editor_state data so the agent
+            # gets real content instead of the placeholder `{}`.
+            # This must run before the tool_choice / manual-confirm checks
+            # so virtual-index reads are always served in all modes.
+            # Delegated to the module-level _apply_editor_index_redirect
+            # helper so it can be unit-tested without a real SDK subprocess.
+            #
+            # Read the editor_state from the AgentRunState flyweight via
+            # opts.editor_state_getter (injected by service.py as
+            # lambda: state.editor_state) so we always see the latest value —
+            # including updates written back after a confirmed MCP write-tool
+            # result.  Fall back to the snapshot in opts.editor_state when the
+            # getter is not provided (e.g. unit tests, direct runner calls).
+            # ----------------------------------------------------------
+            live_editor_state = (
+                opts.editor_state_getter()
+                if opts.editor_state_getter is not None
+                else opts.editor_state
+            )
+            redirect_result = _apply_editor_index_redirect(
+                tool_name, tool_input, live_editor_state, _editor_redirect_tmp_paths
+            )
+            if redirect_result is not None:
+                return redirect_result
 
             # In auto mode, let all tools run immediately EXCEPT
             # _ALWAYS_CONFIRM_TOOL_NAMES (AskUserQuestion and equivalents).
@@ -867,6 +1027,19 @@ class ClaudeAgentRunner:
             tool.startswith(_NECKLACE_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):
             mcp_servers["necklace"] = _necklace_mcp_stdio_config(mcp_env)
+
+        # Start the editor MCP subprocess when editor_state is active and at least one
+        # write tool is in the effective allowlist.  Session context (session_id) flows
+        # through the MCP protocol: the agent reads it from <workspace_context> and
+        # passes it as a required argument in every write tool call — no env-var injection.
+        if (
+            opts.editor_state is not None
+            and any(
+                tool.startswith(_EDITOR_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
+            )
+        ):
+            mcp_servers["editor"] = _editor_mcp_stdio_config()
+            logger.debug("Editor MCP enabled; session context flows via tool arguments.")
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = apply_project_sdk_runtime_options(
@@ -1053,6 +1226,12 @@ class ClaudeAgentRunner:
                 _stderr_buf.close()
             except Exception:  # noqa: BLE001
                 pass
+            # Clean up per-read .editor/ redirect tempfiles.
+            for _rpath in _editor_redirect_tmp_paths:
+                try:
+                    os.unlink(_rpath)
+                except Exception:  # noqa: BLE001
+                    pass
         return AgentRunResult(
             full_text=full_text,  # type: ignore[possibly-undefined]
             session_id=current_session_id,

@@ -4,6 +4,10 @@
 // [Sync] 2026-05-25: stop forwarding frontend customer context into chat requests.
 // [Sync] 2026-05-26: hide the empty message surface until chat content or an error exists.
 // [Sync] 2026-05-27: forward currentToolChoice to ChatMessageList so manual-mode tool approvals are shown inline.
+// [Sync] 2026-05-29: accept editorState prop and forward as editor_state in prepareSendMessagesRequest body.
+// [Sync] 2026-05-29: default resume=true in every claude-agent request body.
+// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatMessageList.
+// [Sync] 2026-05-29: let the input dock fill the available chat page width.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -56,6 +60,10 @@ interface ChatPanelProps {
   queuedPromptNonce?: number;
   openFileDialogSignal?: number;
   onConversationStart?: () => void;
+  /** Current EditorState snapshot forwarded to the backend agent runner via editor_state request field. */
+  editorState?: Record<string, unknown> | null;
+  /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
+  onEditorWriteConfirmed?: () => void;
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -79,6 +87,8 @@ export default function ChatPanel({
   queuedPromptNonce,
   openFileDialogSignal,
   onConversationStart,
+  editorState,
+  onEditorWriteConfirmed,
 }: ChatPanelProps) {
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
@@ -149,6 +159,7 @@ export default function ChatPanel({
 
         const requestBody: ChatApiSchemaRequestBody = {
           id,
+          resume: true,
           message: lastMessage,
           chatModel: resolvedChatModel,
           toolChoice: getPendingData()?.toolChoice ?? currentToolChoice,
@@ -156,6 +167,7 @@ export default function ChatPanel({
           allowedMcpServers: {},
           attachments,
           systemPrompt: systemConfig?.system_prompt,
+          ...(editorState != null ? { editor_state: editorState } : {}),
         };
 
         setTimeout(() => {
@@ -257,7 +269,7 @@ export default function ChatPanel({
   return (
     <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
       {shouldShowMessageSurface ? (
-        <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1rem 1rem 1.5rem' }}>
+        <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}>
           <ChatMessageList
             messages={messages}
             threadId={threadId}
@@ -268,12 +280,13 @@ export default function ChatPanel({
             toolChoice={currentToolChoice}
             setMessages={setMessages}
             sendMessage={sendMessage}
+            onEditorWriteConfirmed={onEditorWriteConfirmed}
           />
           <div ref={bottomRef} aria-hidden="true" />
         </div>
       ) : null}
 
-      <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '48rem', margin: '0.75rem auto 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
+      <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
         <AIInputDock
           openFileDialogSignal={openFileDialogSignal}
           onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {

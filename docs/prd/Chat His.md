@@ -1,6 +1,6 @@
 # Chat History PRD
 
-> 对话历史消息流、工具步骤、Terminal 输出和会话统计的视觉与交互规范。本文引用 [Color System](<./Color System.md>)，仅更新 PRD，不修改产品代码。
+> 对话历史消息流、工具步骤、Terminal 输出和会话统计的视觉与交互规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
 
 ## 1. 文档范围
 
@@ -119,7 +119,7 @@ ChatHistory
 ## 10. 验收标准
 
 - 每类消息均有对齐、容器、色彩和状态定义。
-- 工具步骤和 Terminal 输出与 [Color System](<./Color System.md>) 保持一致。
+- 工具步骤和 Terminal 输出与 [Color System](<./color_system/README.md>) 保持一致。
 - PRD 不包含与当前项目冲突的 Tailwind 类和独立 HTML 原型。
 - `image.png` 未被覆盖，仅作为参考。
 

@@ -5,6 +5,7 @@
 # [Sync] 2026-05-25: extracted Claude Agent routes from backend/server.py.
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
 # [Sync] 2026-05-27: ClaudeAgentRequestBody.tool_choice uses AliasChoices("tool_choice","toolChoice") so frontend camelCase is accepted.
+# [Sync] 2026-05-28: remove planning_mode field and prompt_optimizer integration (unrelated code).
 
 import base64
 import logging
@@ -84,6 +85,7 @@ class ClaudeAgentRequestBody(BaseModel):
     max_turns: int = 100
     cwd: Optional[str] = None
     attachments: List[ChatAttachment] = []
+    editor_state: Optional[dict] = None
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id
@@ -215,6 +217,7 @@ async def claude_agent_stream(
         message_id=_msg_dict.get("id") if _msg_dict else None,
         message_parts=message_parts,
         attachments=attachment_payloads or None,
+        editor_state=body.editor_state,
     )
 
     async def generate():

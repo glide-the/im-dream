@@ -2,6 +2,7 @@
 > **[Sync] 2026-05-25 v1**: 全面对齐 Ink & Memory 实际实现（SQLite `chat_thread + chat_message`，`better-chatbot` 对齐存储模式）。  
 > **[Sync] 2026-05-25 v2**: 对齐 better-chatbot schema：`parts TEXT NOT NULL DEFAULT '[]'`（移除 `content` 列和 `parts_json` 列）；`save_chat_message(parts: list, metadata: dict)` 签名；`list_chat_messages` 返回已解析对象；前端读 `m.parts` 直接使用。  
 > **[Sync] 2026-05-25 v3**: 重大设计重构 — `collected_parts` 改为收集**原始 SSE 事件报文**；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做线性转换；`tool_inv_by_id` 等状态字段从 `_TurnContext` 移除。
+> **[Sync] 2026-05-29 v4**: Claude SDK session ID 持久化落地 — `chat_thread` 新增 `claude_session_id TEXT` 和 `agent_contract_version TEXT` 两列；`_persist_turn` 每次成功 turn 后调用 `update_chat_thread_claude_session` 写回 `result.session_id`；`assemble_context` Phase 1 据此决定是否 resume（详见 `claude-agent-context-assembly.md §4.7`）。
 
 # Claude Agent 会话持久化设计
 
@@ -56,25 +57,29 @@ export const ChatMessageTable = pgTable("chat_message", {
 ```sql
 -- 会话 metadata 表（与 ChatThreadTable 对齐）
 CREATE TABLE IF NOT EXISTS chat_thread (
-  id         TEXT PRIMARY KEY,          -- UUID string (compatible with better-chatbot uuid)
-  user_id    INTEGER NOT NULL,          -- INTEGER vs UUID (SQLite user ID)
-  title      TEXT,                      -- nullable: filled on first message
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,  -- extra: not in reference
+  id                     TEXT PRIMARY KEY,          -- UUID string
+  user_id                INTEGER NOT NULL,          -- INTEGER vs UUID (SQLite user ID)
+  title                  TEXT,                      -- nullable: filled on first message
+  claude_session_id      TEXT,                      -- Claude SDK session ID for --resume (2026-05-29)
+  agent_contract_version TEXT,                      -- Runtime contract version guard  (2026-05-29)
+  created_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at             DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
 -- 消息真源表（与 ChatMessageTable 完全对齐，无 content 列）
 CREATE TABLE IF NOT EXISTS chat_message (
-  id         TEXT PRIMARY KEY,          -- AI-SDK message.id (对齐 better-chatbot text PK)
+  id         TEXT PRIMARY KEY,          -- AI-SDK message.id
   thread_id  TEXT NOT NULL,
   role       TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-  parts      TEXT NOT NULL DEFAULT '[]', -- JSON array string; aligned with parts json[] NOT NULL
-  metadata   TEXT,                      -- JSON object string; aligned with metadata json nullable
+  parts      TEXT NOT NULL DEFAULT '[]', -- JSON array string
+  metadata   TEXT,                      -- JSON object string; nullable
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (thread_id) REFERENCES chat_thread (id) ON DELETE CASCADE
 );
 ```
+
+**运行时迁移（已存在的数据库）**：`init_db()` 在启动时对两个新列各执行一次 `ALTER TABLE chat_thread ADD COLUMN … TEXT`，异常时静默跳过（列已存在）。
 
 ### 2.3 与参考实现的差距分析
 
@@ -85,16 +90,19 @@ CREATE TABLE IF NOT EXISTS chat_message (
 | `chat_message.content` | **不存在**（文本在 parts 里） | **已删除**，完全对齐 | ✅ `parts` 是唯一内容列 |
 | `chat_thread.title` | `TEXT NOT NULL` | `TEXT nullable` | ⚠️ 差异（首轮填写；向后兼容） |
 | `chat_thread.updated_at` | 不存在 | `DATETIME` | ⚠️ 额外列（用于线程排序；不影响正确性） |
+| `chat_thread.claude_session_id` | 不适用 | `TEXT nullable` | ✅ **新增**（Claude SDK resume 使用；2026-05-29） |
+| `chat_thread.agent_contract_version` | 不适用 | `TEXT nullable` | ✅ **新增**（契约版本校验，防止跨版本 resume；2026-05-29） |
 
 ### 2.4 DB 层函数（`backend/database.py`）
 
 | 函数 | 说明 |
 |------|------|
 | `create_chat_thread(user_id)` | 创建新会话，返回 `thread_id`（UUID） |
-| `get_chat_thread(thread_id, user_id)` | 权限校验 + 返回会话 row |
+| `get_chat_thread(thread_id, user_id)` | 权限校验 + 返回会话 row（含 `claude_session_id` / `agent_contract_version`） |
 | `save_chat_message(thread_id, role, content, *, parts, message_id, metadata)` | `INSERT OR REPLACE`，`parts: list`（序列化在 DB 层），`metadata: dict`，同时 BUMP `chat_thread.updated_at` |
 | `list_chat_messages(thread_id)` | 按 `created_at ASC` 返回全部消息；`parts` 已反序列化为 Python list，`metadata` 已反序列化为 dict |
 | `update_chat_thread_title(thread_id, title)` | 首轮写入时自动从 user_text 截取标题（前 50 字符） |
+| `update_chat_thread_claude_session(thread_id, claude_session_id, agent_contract_version)` | **新增（2026-05-29）**：每次成功 turn 后由 `_persist_turn` 调用，将 `result.session_id` 与当前 `_AGENT_RUNTIME_CONTRACT_VERSION` 写回，供下轮 `assemble_context` 的 resume 判断使用 |
 
 ---
 
@@ -223,6 +231,16 @@ async def _persist_turn(self, execution, result) -> None:
         if not thread.get("title"):
             database.update_chat_thread_title(thread_id, user_text[:50])
 
+        # 5. 写回 Claude SDK session ID（供下轮 assemble_context resume 使用）
+        #    result.session_id 是 SDK 分配的实际 session ID（非 app thread_id）
+        captured_session_id = result.session_id if result else None
+        if captured_session_id:
+            database.update_chat_thread_claude_session(
+                thread_id,
+                captured_session_id,
+                _AGENT_RUNTIME_CONTRACT_VERSION,
+            )
+
     await loop.run_in_executor(None, _save)
 ```
 
@@ -303,9 +321,9 @@ GET /api/claude-agent/threads/{thread_id}/messages
 
 | Phase | Factory 触发点 | 持久化交互 |
 |-------|--------------|-----------|
-| **Phase 1 — Context Assembly** | `Service.assemble_context()` | 无 DB 写入；首轮组装 `system_prompt`，续轮享元短路 |
+| **Phase 1 — Context Assembly** | `Service.assemble_context()` | **新（2026-05-29）**：调用 `database.get_chat_thread()` 加载 `existing_session`，读取 `claude_session_id` / `agent_contract_version` 决定是否 resume；无写操作。首轮享元组装 `system_prompt`，续轮享元短路 |
 | **Phase 2 — Runner Creation** | `state.runner = create_agent_runner()` | 无 DB 交互 |
-| **Phase 3 — Session Start** | `Service.execute_session()` | run 完成后调用 `_persist_turn`：写入 user + assistant `chat_message` 行；首轮写 `chat_thread.title` |
+| **Phase 3 — Session Start** | `Service.execute_session()` | run 完成后调用 `_persist_turn`：写入 user + assistant `chat_message` 行；首轮写 `chat_thread.title`；**每次成功 turn 写回 `chat_thread.claude_session_id` + `agent_contract_version`（2026-05-29）** |
 | **Phase 4 — Session End** | `close_thread` / TTL Sweeper / `aclose` | 享元销毁不触发 DB 变更；`chat_thread` + `chat_message` 原状保留，下轮重新加载 |
 
 ---
@@ -314,7 +332,7 @@ GET /api/claude-agent/threads/{thread_id}/messages
 
 | 项目 | 当前状态 | 后续方向 |
 |------|---------|---------|
-| Claude SDK `session_id` 续接 | 未持久化；每次重启 SDK 自动分配新 `session_id` | 可将 `result.session_id` 写入 `chat_thread` 新增列，实现跨进程 SDK 续接 |
+| Claude SDK `session_id` 续接 | ✅ **已落地（2026-05-29）**：`_persist_turn` 将 `result.session_id` + `_AGENT_RUNTIME_CONTRACT_VERSION` 写入 `chat_thread`；`assemble_context` 读取并通过 `_has_usable_claude_resume` + 本地文件探针决定是否 `--resume` | 可添加"turn-window 满时开新 session"策略（对齐 Pawkeyland `_session_turn_window_is_full`） |
 | 多文本块交错 | 所有文本 delta 合并为单一 text part（追加在 parts 末尾） | 若需精确还原多块交错顺序，可在 `on_text_done` 时追加中间 text part |
 | `parts_json` 大小 | 无限制（SQLite TEXT 列） | 若工具输出超大，可在 `_persist_turn` 中对 `output` 字段做截断处理 |
 | `message_id` 稳定性 | 前端 AI-SDK 提供的 `message_id` 原样存储，`INSERT OR REPLACE` 保幂等 | 重发场景自动覆盖，无需额外去重逻辑 |

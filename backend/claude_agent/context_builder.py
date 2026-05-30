@@ -1,5 +1,8 @@
 # [Input] Consume database.list_sessions (via database module import).
 #         Reads INK_AGENT_CONTEXT_SESSIONS env var.
+#         Imports build_workspace_context_block from claude_agent.workspace_context —
+#           that module's template is sourced from the virtual index mapping rules
+#           defined in libs.claude_agent_kit.server.editor_index.EDITOR_RESOURCES.
 # [Output] Provide ClaudeAgentContextBuilder to ClaudeAgentService.
 # [Pos] context-assembly node in backend/claude_agent
 # [Sync] 2026-05-22: rewritten for Ink & Memory; replaces Pawkeyland's pet/persona
@@ -8,6 +11,17 @@
 #                    so that the SDK no longer participates in context processing.
 # [Sync] 2026-05-26: use extract_text_from_parts (message_parts.py) for full UIMessage
 #                    parts protocol (text + file + source-url + workspace-file).
+# [Sync] 2026-05-29: add Edit-Point Workflow section to _SYSTEM_PROMPT_TEMPLATE so Agent
+#                    receives scheduling guidance (when/how to use .editor/ read and MCP
+#                    write tools) in the system prompt, not only in the workspace_context
+#                    user-message block. Fix [Input] header to reference workspace_context.
+# [Sync] 2026-05-29: remove set_comment_feedback from MCP write tools in Edit-Point
+#                    Workflow section; reading is exclusively via .editor/ virtual index.
+# [Sync] 2026-05-29: extract session_id from cwd basename and pass to
+#                    build_workspace_context_block so agent receives it in prompt.
+# [Sync] 2026-05-29: rename session_id → editor_session_id (user_sessions.id from
+#                    /api/sessions); add explicit parameter to build_user_message;
+#                    remove cwd-basename fallback — service layer must supply it.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -31,6 +45,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
+from claude_agent.workspace_context import build_workspace_context_block
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +84,28 @@ Principles:
 - Do not lecture or give unsolicited advice; ask questions that open new avenues.
 - Respect privacy: treat all journal content as confidential.
 - Respond in the same language the user writes in.
+
+## Edit-Point Workflow
+
+When the user message includes a <workspace_context> block, you are in a document-editing
+session.  Follow this scheduling workflow for every editing-related request:
+
+1. Orient yourself first — call read_file(".editor/cells.json") to load all document cells
+   (TextCell / WidgetCell array).  For session metadata (mood state, creation time) also
+   call read_file(".editor/session.json").
+2. Analyse before proposing — digest the full content, then share observations or draft
+   suggestions with the user before making any changes.
+3. Mutate via MCP write tools only — all document modifications require human confirmation
+   before execution.  Use these tools exclusively:
+     write_segment(cellId, text, reason)     — replace a cell's full text
+     delete_segment(cellId, reason)          — remove a cell (irreversible)
+     insert_widget(widgetType, data, ...)    — insert a new widget cell
+     reply_to_comment(commentId, ...)        — respond to a voice comment thread
+4. Never write directly to .editor/ files — they are virtual placeholders; writing to them
+   has no effect on real document state.  All mutations must go through the MCP write tools.
+
+If no <workspace_context> block is present, treat the turn as a pure-chat exchange and
+respond without attempting to read workspace files.
 
 {recent_sessions_block}\
 """
@@ -133,6 +170,8 @@ class ClaudeAgentContextBuilder:
         include_runtime_context: bool = True,
         local_time: Optional[str] = None,
         local_timezone: Optional[str] = None,
+        cwd: Optional[str] = None,
+        editor_session_id: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
 
@@ -142,8 +181,14 @@ class ClaudeAgentContextBuilder:
 
         Returns a list of content blocks in the order expected by Claude:
         attachment image blocks first, then the ``<runtime_context>`` block
-        (unless *include_runtime_context* is False), then the user's message
-        text.
+        (unless *include_runtime_context* is False), then the
+        ``<workspace_context>`` block (when *cwd* is provided, with
+        *editor_session_id* embedded so the agent can pass it to write tools),
+        then the user's message text.
+
+        *editor_session_id* is the ``user_sessions.id`` from ``/api/sessions``
+        (the document session ID) — NOT the workspace directory name or the
+        Claude thread ID.  The service layer must resolve and pass it explicitly.
 
         This method absorbs the responsibilities of the SDK-level
         ``build_user_message_content`` so the SDK no longer participates in
@@ -205,6 +250,17 @@ class ClaudeAgentContextBuilder:
                     ),
                 }
             )
+
+        # Inject workspace context block after runtime_context when cwd is known.
+        # editor_session_id is the user_sessions.id from /api/sessions — distinct from
+        # the workspace directory name (cwd basename) and the Claude thread ID.
+        # The service layer must supply it explicitly via the editor_session_id parameter.
+        workspace_block = build_workspace_context_block(
+            cwd or "",
+            editor_session_id=editor_session_id or "",
+        )
+        if workspace_block:
+            blocks.append({"type": "text", "text": workspace_block})
 
         # Convert all message_parts (text, file, source-url, workspace-file) to
         # a single text string using the full UIMessage parts protocol.

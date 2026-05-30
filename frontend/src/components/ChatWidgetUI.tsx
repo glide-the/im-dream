@@ -82,7 +82,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
       style={{
         margin: '20px 0',
         padding: '16px 20px',
-        background: 'rgba(250, 248, 245, 0.6)',
+        background: 'var(--color-bg-surface)',
         borderRadius: '12px',
         maxWidth: '600px',
         position: 'relative',
@@ -100,7 +100,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
           right: '8px',
           padding: '4px 8px',
           backgroundColor: 'transparent',
-          color: '#999',
+          color: 'var(--color-text-muted)',
           border: 'none',
           borderRadius: '4px',
           fontSize: '16px',
@@ -112,11 +112,11 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.opacity = '1';
-          e.currentTarget.style.color = '#d44';
+          e.currentTarget.style.color = 'var(--color-state-danger)';
         }}
         onMouseLeave={(e) => {
           e.currentTarget.style.opacity = '0.6';
-          e.currentTarget.style.color = '#999';
+          e.currentTarget.style.color = 'var(--color-text-muted)';
         }}
         title="Delete chat"
       >
@@ -132,7 +132,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
       }}>
         <Icon size={18} color="var(--color-text-secondary)" style={{ marginTop: '2px', flexShrink: 0 }} />
         <div style={{
-          color: '#444',
+          color: 'var(--color-text-body)',
           fontSize: '15px',
           lineHeight: '1.6',
           fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
@@ -175,7 +175,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
                       width: '26px',
                       height: '26px',
                       borderRadius: '50%',
-                      backgroundColor: 'rgba(100, 100, 100, 0.1)',
+                      backgroundColor: 'var(--color-bg-hover)',
                       flexShrink: 0,
                       display: 'flex',
                       alignItems: 'center',
@@ -188,7 +188,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
                       U
                     </div>
                     <div style={{
-                      color: '#555',
+                      color: 'var(--color-text-secondary)',
                       fontSize: '15px',
                       lineHeight: '1.6',
                       paddingTop: '2px',
@@ -201,7 +201,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
                   <>
                     <Icon size={18} color="var(--color-text-secondary)" style={{ marginTop: '2px', flexShrink: 0 }} />
                     <div style={{
-                      color: '#444',
+                      color: 'var(--color-text-body)',
                       fontSize: '15px',
                       lineHeight: '1.6',
                       paddingTop: '2px',
@@ -234,19 +234,19 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
             flex: 1,
             padding: '8px 12px',
             border: 'none',
-            borderBottom: '2px solid rgba(0, 0, 0, 0.1)',
+            borderBottom: '2px solid var(--color-border-neutral)',
             fontSize: '15px',
             outline: 'none',
             backgroundColor: 'transparent',
             fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-            color: '#444',
+            color: 'var(--color-text-body)',
             transition: 'border-color 0.2s'
           }}
           onFocus={(e) => {
-            e.currentTarget.style.borderBottomColor = 'rgba(0, 0, 0, 0.2)';
+            e.currentTarget.style.borderBottomColor = 'var(--color-border-focus)';
           }}
           onBlur={(e) => {
-            e.currentTarget.style.borderBottomColor = 'rgba(0, 0, 0, 0.1)';
+            e.currentTarget.style.borderBottomColor = 'var(--color-border-neutral)';
           }}
         />
         <button
@@ -255,9 +255,9 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
           style={{
             padding: '6px 14px',
             backgroundColor: 'transparent',
-            color: isProcessing || !inputValue.trim() ? '#ccc' : 'var(--color-text-secondary)',
+            color: isProcessing || !inputValue.trim() ? 'var(--color-text-muted)' : 'var(--color-text-secondary)',
             border: '1.5px solid',
-            borderColor: isProcessing || !inputValue.trim() ? 'rgba(0,0,0,0.1)' : 'rgba(0,0,0,0.2)',
+            borderColor: isProcessing || !inputValue.trim() ? 'var(--color-border-neutral)' : 'var(--color-border-paper)',
             borderRadius: '6px',
             fontSize: '14px',
             fontWeight: 500,
@@ -268,7 +268,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
           }}
           onMouseEnter={(e) => {
             if (!isProcessing && inputValue.trim()) {
-              e.currentTarget.style.backgroundColor = 'rgba(0,0,0,0.05)';
+              e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
             }
           }}
           onMouseLeave={(e) => {

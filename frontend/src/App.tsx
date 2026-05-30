@@ -2,6 +2,13 @@
 // [Output] Render the authenticated Ink & Memory app shell and route current view state.
 // [Pos] frontend app-root node in frontend/src
 // [Sync] 2026-05-25: remove ChatView settings-navigation prop after left chat nav Settings button deletion.
+// [Sync] 2026-05-29: pass state as editorState prop to ChatView so agent receives current EditorState snapshot.
+// [Sync] 2026-05-29: add handleEditorWriteConfirmed callback; reloads session from DB after agent MCP write tool approved.
+// [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
+// [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
+// [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
+// [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
+// [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -126,6 +133,8 @@ export default function App() {
   }, [currentLanguage, i18n]);
 
   const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat'>('writing');
+  const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
+  const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
 
@@ -319,6 +328,13 @@ export default function App() {
     if (currentView === 'writing') {
       // Force re-render to recalculate comment positions
       setRefsReady(prev => prev + 1);
+    }
+  }, [currentView]);
+
+  // @@@ Preserve ChatView local state after the first visit while avoiding eager thread creation on app load.
+  useEffect(() => {
+    if (currentView === 'chat') {
+      setHasOpenedChatView(true);
     }
   }, [currentView]);
 
@@ -656,6 +672,63 @@ export default function App() {
     setCommentsAligned(prev => !prev);
   }, []);
 
+  // @@@ Reload editor state from database after Agent MCP write tool is confirmed.
+  // Delay 2s before fetching to avoid a race condition where the DB write has not
+  // yet completed when the tool-confirm HTTP response returns.
+  const handleEditorWriteConfirmed = useCallback(async () => {
+    if (!isAuthenticated || !state?.id || !engineRef.current) return;
+    try {
+      await new Promise<void>(resolve => setTimeout(resolve, 2000));
+      if (!engineRef.current) return;
+      const sessionId = engineRef.current.getState().id || state.id;
+      const { getSession } = await import('./api/voiceApi');
+      const sessionData = await getSession(sessionId);
+      if (sessionData?.editor_state) {
+        const refreshed: EditorState = {
+          ...sessionData.editor_state,
+          id: sessionId,
+        };
+        engineRef.current.loadState(refreshed);
+        setState({ ...engineRef.current.getState() });
+        setRefsReady(prev => prev + 1);
+      }
+    } catch (error) {
+      console.error('Failed to reload editor state after agent write:', error);
+    }
+  }, [isAuthenticated, state?.id]);
+
+  // @@@ Jump to a specific cell in the writing view (triggered by editor:jump-to-cell custom event)
+  const jumpToCellRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const cellId = (e as CustomEvent<{ cellId: string }>).detail?.cellId;
+      if (!cellId) return;
+      jumpToCellRef.current = cellId;
+      setCurrentView('writing');
+    };
+    window.addEventListener('editor:jump-to-cell', handler);
+    return () => window.removeEventListener('editor:jump-to-cell', handler);
+  }, []);
+
+  useEffect(() => {
+    if (currentView !== 'writing' || !jumpToCellRef.current) return;
+    const cellId = jumpToCellRef.current;
+    jumpToCellRef.current = null;
+    const attemptScroll = (attempts = 0) => {
+      const textarea = textareaRefs.current.get(cellId);
+      if (textarea) {
+        textarea.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        textarea.focus();
+        return;
+      }
+      if (attempts < 10) {
+        setTimeout(() => attemptScroll(attempts + 1), 80);
+      }
+    };
+    setTimeout(() => attemptScroll(), 100);
+  }, [currentView]);
+
   // @@@ Handle localStorage migration
   const handleMigrateData = useCallback(async () => {
     setIsMigrating(true);
@@ -791,12 +864,40 @@ export default function App() {
 
     const cursorPos = textarea.selectionStart;
 
+    // Snapshot widget IDs before insertion to identify the newly added widget
+    const beforeWidgetIds = new Set(
+      engineRef.current.getState().cells
+        .filter(c => c.type === 'widget')
+        .map(c => c.id)
+    );
+
     // Create chat widget
     const chatWidget = new ChatWidget(voiceName, voiceConfig);
 
     // Insert widget at cursor (engine will handle @ removal)
     engineRef.current.insertWidgetAtCursor(dropdownTriggerCellId, cursorPos, 'chat', chatWidget.getData());
     setDropdownTriggerCellId(null);
+
+    // Focus the text cell immediately after the newly inserted widget
+    const updatedCells = engineRef.current.getState().cells;
+    const newWidget = updatedCells.find(c => c.type === 'widget' && !beforeWidgetIds.has(c.id));
+    if (newWidget) {
+      const widgetIdx = updatedCells.findIndex(c => c.id === newWidget.id);
+      const nextCell = widgetIdx >= 0 && widgetIdx + 1 < updatedCells.length
+        ? updatedCells[widgetIdx + 1]
+        : null;
+      if (nextCell && nextCell.type === 'text') {
+        const nextCellId = nextCell.id;
+        setTimeout(() => {
+          const nextTextarea = textareaRefs.current.get(nextCellId);
+          if (nextTextarea) {
+            nextTextarea.focus();
+            nextTextarea.selectionStart = 0;
+            nextTextarea.selectionEnd = 0;
+          }
+        }, 0);
+      }
+    }
   }, [dropdownTriggerCellId]);
 
   // @@@ Handle sending chat message
@@ -1032,7 +1133,7 @@ export default function App() {
               margin: '0 0 24px 0',
               fontSize: '16px',
               lineHeight: '1.6',
-              color: '#555'
+              color: 'var(--color-text-secondary)'
             }}>
               We found data in your browser. Would you like to migrate it to your account?
               This will move all your sessions, pictures, and preferences to the cloud.
@@ -1049,17 +1150,17 @@ export default function App() {
                   flex: 1,
                   padding: '12px 20px',
                   border: 'none',
-                  background: isMigrating ? '#ccc' : 'var(--color-action-link)',
+                  background: isMigrating ? 'var(--color-disabled-bg)' : 'var(--color-action-link)',
                   borderRadius: '6px',
                   cursor: isMigrating ? 'not-allowed' : 'pointer',
                   fontSize: '16px',
                   fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                  color: '#fff',
+                  color: 'var(--color-text-on-action)',
                   fontWeight: 600,
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isMigrating) e.currentTarget.style.backgroundColor = '#357abd';
+                  if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-action-link-hover)';
                 }}
                 onMouseLeave={(e) => {
                   if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-action-link)';
@@ -1074,7 +1175,7 @@ export default function App() {
                   flex: 1,
                   padding: '12px 20px',
                   border: '1px solid var(--color-border-paper)',
-                  background: '#fff',
+                  background: 'var(--color-bg-surface-solid)',
                   borderRadius: '6px',
                   cursor: isMigrating ? 'not-allowed' : 'pointer',
                   fontSize: '16px',
@@ -1083,10 +1184,10 @@ export default function App() {
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  if (!isMigrating) e.currentTarget.style.backgroundColor = '#f5f5f5';
+                  if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                 }}
                 onMouseLeave={(e) => {
-                  if (!isMigrating) e.currentTarget.style.backgroundColor = '#fff';
+                  if (!isMigrating) e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                 }}
               >
                 Skip
@@ -1122,7 +1223,7 @@ export default function App() {
                 height: '32px',
                 border: 'none',
                 borderRadius: '50%',
-                backgroundColor: '#fff',
+                backgroundColor: 'var(--color-bg-surface-solid)',
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
@@ -1134,11 +1235,11 @@ export default function App() {
                 transition: 'all 0.2s ease'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = '#f8f8f8';
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                 e.currentTarget.style.transform = 'scale(1.1)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = '#fff';
+                e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                 e.currentTarget.style.transform = 'scale(1)';
               }}
             >
@@ -1184,7 +1285,7 @@ export default function App() {
                   height: '44px',
                   border: 'none',
                   borderRadius: '50%',
-                  backgroundColor: '#fff',
+                  backgroundColor: 'var(--color-bg-surface-solid)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -1196,11 +1297,11 @@ export default function App() {
                   transition: 'all 0.2s ease'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f8f8f8';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                   e.currentTarget.style.transform = 'scale(1.1)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fff';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                   e.currentTarget.style.transform = 'scale(1)';
                 }}
               >
@@ -1214,7 +1315,7 @@ export default function App() {
                   height: '44px',
                   border: 'none',
                   borderRadius: '50%',
-                  backgroundColor: '#fff',
+                  backgroundColor: 'var(--color-bg-surface-solid)',
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
@@ -1463,11 +1564,11 @@ export default function App() {
                     bottom: `calc(${mobileNavHeight}px + 20px + env(safe-area-inset-bottom, 0px))`,
                     left: '10px',
                     right: '10px',
-                    background: '#fff',
-                    border: '2px solid #ddd',
+                    background: 'var(--color-bg-surface-solid)',
+                    border: '2px solid var(--color-border-neutral)',
                     borderRadius: '12px',
                     padding: '16px',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.2)',
+                    boxShadow: '0 8px 24px var(--color-shadow-medium)',
                     zIndex: 100,
                     fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
                     animation: 'slideInFromBottom 0.3s ease-out'
@@ -1487,7 +1588,7 @@ export default function App() {
                               <div style={{ fontWeight: 600, fontSize: '16px', color: colors.text, marginBottom: '8px' }}>
                                 {mobileActiveComment.voice}
                               </div>
-                              <div style={{ fontSize: '15px', lineHeight: '1.5', color: '#444' }}>
+                              <div style={{ fontSize: '15px', lineHeight: '1.5', color: 'var(--color-text-body)' }}>
                                 {mobileActiveComment.comment}
                               </div>
                             </div>
@@ -1512,7 +1613,7 @@ export default function App() {
                 display: 'flex',
                 gap: isMobile ? '12px' : '20px',
                 flexWrap: isMobile ? 'wrap' : 'nowrap',
-                backgroundColor: '#fafafa',
+                backgroundColor: 'var(--color-bg-paper)',
                 zIndex: 50
               }}>
                 <span>Weight: {lastEntry?.weight || 0}</span>
@@ -1621,7 +1722,7 @@ export default function App() {
                 {t('nav.settings')}
               </h2>
               <div style={{
-                background: 'rgba(255, 255, 255, 0.5)',
+                background: 'var(--color-bg-surface)',
                 border: '1px solid var(--color-border-paper)',
                 borderRadius: 8,
                 padding: 24
@@ -1657,7 +1758,7 @@ export default function App() {
                         style={{
                           padding: '8px 16px',
                           background: isActive ? 'var(--color-text-primary)' : 'transparent',
-                          color: isActive ? '#fff' : 'var(--color-text-secondary)',
+                          color: isActive ? 'var(--color-text-on-action)' : 'var(--color-text-secondary)',
                           border: isActive ? 'none' : '1px solid var(--color-border-paper)',
                           borderRadius: 6,
                           fontSize: 14,
@@ -1736,7 +1837,7 @@ export default function App() {
                         width: 16,
                         height: 16,
                         borderRadius: '50%',
-                        background: showEnergyBar ? '#fff' : 'var(--color-text-muted)',
+                        background: showEnergyBar ? 'var(--color-text-on-action)' : 'var(--color-text-muted)',
                         transition: 'all 0.2s ease'
                       }} />
                     </button>
@@ -1757,7 +1858,7 @@ export default function App() {
                 AI 模型配置
               </h2>
               <div style={{
-                background: 'rgba(255, 255, 255, 0.5)',
+                background: 'var(--color-bg-surface)',
                 border: '1px solid var(--color-border-paper)',
                 borderRadius: 8,
                 padding: 24
@@ -1803,16 +1904,17 @@ export default function App() {
         </div>
       )}
 
-      {currentView === 'chat' && (
+      {shouldRenderChatView && (
         <div style={{
           position: 'fixed',
           top: viewTopOffset,
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
+          display: currentView === 'chat' ? 'block' : 'none',
           overflow: 'hidden'
         }}>
-          <ChatView />
+          <ChatView editorState={state ? (state as unknown as Record<string, unknown>) : null} onEditorWriteConfirmed={handleEditorWriteConfirmed} />
         </div>
       )}
 
@@ -1899,7 +2001,7 @@ export default function App() {
               margin: '0 0 24px 0',
               fontSize: '16px',
               lineHeight: '1.6',
-              color: '#555'
+              color: 'var(--color-text-secondary)'
             }}>
               This will delete all your current writing and comments. This action cannot be undone.
             </p>
@@ -1912,21 +2014,21 @@ export default function App() {
                 onClick={handleConfirmStartFresh}
                 style={{
                   padding: '8px 20px',
-                  border: '1px solid #d44',
-                  background: '#d44',
+                  border: '1px solid var(--color-state-danger)',
+                  background: 'var(--color-state-danger)',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '15px',
                   fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-                  color: '#fff',
+                  color: 'var(--color-text-on-action)',
                   fontWeight: 600,
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#c33';
+                  e.currentTarget.style.backgroundColor = 'var(--color-state-danger-hover)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#d44';
+                  e.currentTarget.style.backgroundColor = 'var(--color-state-danger)';
                 }}
               >
                 Delete All
@@ -1936,7 +2038,7 @@ export default function App() {
                 style={{
                   padding: '8px 20px',
                   border: '1px solid var(--color-border-paper)',
-                  background: '#fff',
+                  background: 'var(--color-bg-surface-solid)',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '15px',
@@ -1945,10 +2047,10 @@ export default function App() {
                   transition: 'all 0.2s'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.backgroundColor = '#f5f5f5';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-hover)';
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.backgroundColor = '#fff';
+                  e.currentTarget.style.backgroundColor = 'var(--color-bg-surface-solid)';
                 }}
               >
                 Cancel

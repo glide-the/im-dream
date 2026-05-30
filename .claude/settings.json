@@ -2,6 +2,13 @@
   "enabledPlugins": {},
   "language": "chinese",
   "alwaysThinkingEnabled": false,
+  "permissions": {
+    "deny": [
+      "Edit(.editor/**)",
+      "Write(.editor/**)",
+      "MultiEdit(.editor/**)"
+    ]
+  },
   "hooks": {
     "PreToolUse": [
       {

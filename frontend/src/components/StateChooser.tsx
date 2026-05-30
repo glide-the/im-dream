@@ -161,18 +161,18 @@ export default function StateChooser({
                 alignItems: 'center',
                 gap: 10,
                 padding: '4px 12px',
-                background: 'rgba(255,255,255,0.6)',
+                background: 'var(--color-bg-surface)',
                 borderRadius: 6,
                 border: '1px solid var(--color-shadow-soft)',
                 transition: 'all 0.2s',
                 animation: shouldAnimate ? 'stateHighlight 0.6s ease-out' : 'none'
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.9)';
+                e.currentTarget.style.background = 'var(--color-bg-surface-solid)';
                 e.currentTarget.style.borderColor = 'var(--color-shadow-medium)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'rgba(255,255,255,0.6)';
+                e.currentTarget.style.background = 'var(--color-bg-surface)';
                 e.currentTarget.style.borderColor = 'var(--color-shadow-soft)';
               }}
             >
@@ -198,7 +198,7 @@ export default function StateChooser({
           left: 0,
           right: 0,
           bottom: 0,
-          backgroundColor: '#ffffff',
+          backgroundColor: 'var(--color-bg-paper)',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'center',
@@ -239,7 +239,7 @@ export default function StateChooser({
           <p style={{
             marginTop: 40,
             fontSize: 14,
-            color: '#999',
+            color: 'var(--color-text-muted)',
             textAlign: 'center',
             opacity: isFadingOut ? 0 : 1,
             transition: 'opacity 0.8s ease-out'

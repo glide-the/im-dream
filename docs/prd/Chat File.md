@@ -1,6 +1,6 @@
 # Chat File PRD
 
-> 聊天输入区和消息流中的文件/附件体验规范。本文引用 [Color System](<./Color System.md>)，仅更新 PRD，不修改产品代码。
+> 聊天输入区和消息流中的文件/附件体验规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
 
 ## 1. 文档范围
 
@@ -124,7 +124,7 @@ ChatFileExperience
 ## 10. 验收标准
 
 - 附件入口、预览、上传、错误、删除、禁用、hover、selected 状态均有明确设计规则。
-- 文件色彩全部映射到 [Color System](<./Color System.md>)。
+- 文件色彩全部映射到 [Color System](<./color_system/README.md>)。
 - 不包含 Tailwind 原型、Font Awesome 或外部资源依赖。
 - 未对 `docs/prd/image.png` 做任何覆盖。
 

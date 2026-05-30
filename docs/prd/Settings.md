@@ -1,6 +1,6 @@
 # Settings PRD
 
-> Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./Color System.md>)，仅更新 PRD，不修改产品代码。
+> Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
 > **[Sync] 2026-05-27**: 新增 4.3.5 用户 API 配置区域（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 等按用户存储并注入 Claude SDK 子进程）；关联设计文档 [用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)。
 
 ## 1. 文档范围
@@ -196,7 +196,7 @@ Settings 页面通过以下入口访问：
 - Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式）。
 - Settings 页面包含用户 API 配置区域（API 密钥、API 端点、默认模型三个输入项）。
 - Chat 页面不再渲染模型配置侧边栏，也不在左侧 `VerticalNav` 中提供 Settings 入口。
-- 所有颜色引用 [Color System](<./Color System.md>) token，无孤立十六进制值。
+- 所有颜色引用 [Color System](<./color_system/README.md>) token，无孤立十六进制值。
 - Light/Dark 模式均可正常显示。
 - 配置变更后正确同步到 `/api/system-config`。
 - 语言、展示选项、AI 模型配置、用户 API 配置、关于内容分区清晰，各自有标题说明。

@@ -3,6 +3,11 @@
 // [Pos] chat-message-list component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
 // [Sync] 2026-05-27: add toolChoice prop; render non-completed tool parts in manual mode directly with isManualToolInvocation=true so Approve/Cancel UI is shown.
+// [Sync] 2026-05-29: import isEditorWriteTool; render editor write tool parts directly (not collapsed) with isManualToolInvocation=true so specialized approval UI shows immediately.
+// [Sync] 2026-05-29: render completed editor write tool parts as EditorWriteCompletedCard instead of Terminal card.
+// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ToolMessagePart for editor write tools.
+// [Sync] 2026-05-29: let the message list fill the available chat page width.
+// [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,6 +16,7 @@ import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
 import ToolMessagePart from './ToolMessagePart';
+import { isEditorWriteTool, EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -23,6 +29,8 @@ interface ChatMessageListProps {
   toolChoice?: string;
   setMessages?: UseChatHelpers<UIMessage>['setMessages'];
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
+  /** Forwarded to ToolMessagePart for editor write tools — triggers Writing view reload. */
+  onEditorWriteConfirmed?: () => void;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -75,7 +83,28 @@ function isAskUserQuestionTool(part: ToolUIPart | DynamicToolUIPart): boolean {
   return ASK_USER_TOOL_NAMES.has(name) || name.endsWith('__ask_user') || name.endsWith('__askuserquestion');
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage }: ChatMessageListProps) {
+/**
+ * Robustly resolve the tool name from a part.
+ *
+ * History-loaded DynamicToolUIPart objects can lose their `toolName` field after
+ * DB serialization. When that happens, the AI SDK's `getToolName()` falls back to
+ * stripping the 'tool-' prefix from `type`, yielding 'invocation' instead of the
+ * real tool name. This helper retries with a direct field read so that
+ * `isEditorWriteTool` works correctly for both live-stream and history-replay paths.
+ */
+function resolveToolName(part: ToolUIPart | DynamicToolUIPart): string {
+  try {
+    const name = getToolName(part);
+    if (name && name !== 'invocation') return name;
+  } catch {
+    // getToolName may throw if the part has an unexpected structure
+  }
+  const raw = part as unknown as Record<string, unknown>;
+  if (typeof raw.toolName === 'string' && raw.toolName) return raw.toolName;
+  return '';
+}
+
+export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
 
@@ -90,7 +119,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
   };
 
   return (
-    <div style={{ width: '100%', maxWidth: '48rem', margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+    <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
       {messages.map((message, index) => {
         const isLastMessage = index === messages.length - 1;
         return (
@@ -132,7 +161,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const isLastPart = partIndex === (message.parts?.length ?? 0) - 1;
                 const previousMessage = index > 0 ? messages[index - 1] : undefined;
                 return (
-                  <div key={partKey} style={{ maxWidth: '48rem' }}>
+                  <div key={partKey} style={{ width: '100%' }}>
                     <AssistMessagePart
                       part={part}
                       isLast={isLastMessage && isLastPart}
@@ -155,23 +184,42 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const isError = toolStatus === 'error';
                 const outputText = getToolOutputText(toolPart);
                 const title = 'title' in toolPart ? (toolPart as { title?: string }).title : undefined;
-                const displayTitle = title || getToolName(toolPart);
+                const toolName = resolveToolName(toolPart);
+                const displayTitle = title || toolName || getToolName(toolPart);
+
+                // Editor write tools always render as EditorWriteCompletedCard when
+                // completed — this check is independent of outputText so that history-
+                // replay parts (which may lack output after DB serialization) still get
+                // the correct UI instead of falling through to the Terminal block.
+                if (isCompleted && isEditorWriteTool(toolName)) {
+                  const rawInput = 'input' in toolPart ? (toolPart as { input?: unknown }).input : undefined;
+                  const rawOutput = 'output' in toolPart ? (toolPart as { output?: unknown }).output : undefined;
+                  return (
+                    <div key={partKey}>
+                      <EditorWriteCompletedCard
+                        toolName={toolName}
+                        input={(rawInput ?? {}) as Record<string, unknown>}
+                        output={(rawOutput ?? {}) as EditorWriteOutput}
+                      />
+                    </div>
+                  );
+                }
 
                 if (isCompleted && outputText) {
                   const { command, output, exitCode } = parseTerminalOutput(outputText);
                   const exitCodeNumber = exitCode != null ? Number(exitCode) : null;
                   return (
-                    <div key={partKey} style={{ overflow: 'hidden', borderRadius: '12px', background: '#1a1a1a', color: '#f3eee6' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1rem', fontSize: '0.75rem', color: '#b0b0b0' }}>
+                    <div key={partKey} style={{ overflow: 'hidden', borderRadius: '12px', background: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
                         <span>‹ Terminal</span>
-                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? '#22c55e' : '#f3eee6', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
+                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? 'var(--color-state-success)' : 'var(--color-code-text)', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
                       </div>
                       <div style={{ padding: '0 1rem 0.9rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8rem', lineHeight: 1.65 }}>
                         {command ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>{command}</span></p> : null}
-                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', color: '#c9c9c9' }}>{output || outputText}</pre>
+                        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', color: 'var(--color-code-text)' }}>{output || outputText}</pre>
                       </div>
-                      {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? '#22c55e' : '#d9534f' }}>Exit code: {exitCode}</div> : null}
-                      {isError && exitCodeNumber == null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontSize: '0.75rem', color: '#d9534f' }}>Error</div> : null}
+                      {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? 'var(--color-state-success)' : 'var(--color-state-error)' }}>Exit code: {exitCode}</div> : null}
+                      {isError && exitCodeNumber == null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontSize: '0.75rem', color: 'var(--color-state-error)' }}>Error</div> : null}
                     </div>
                   );
                 }
@@ -183,6 +231,18 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   return (
                     <div key={partKey}>
                       <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} />
+                    </div>
+                  );
+                }
+
+                // Editor write tools (write_segment, delete_segment, insert_widget,
+                // reply_to_comment) are always-confirm tools — render directly with
+                // isManualToolInvocation=true so the specialized approval UI shows immediately.
+                const needsEditorWriteApproval = isEditorWriteTool(toolName) && !isCompleted;
+                if (needsEditorWriteApproval) {
+                  return (
+                    <div key={partKey}>
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} />
                     </div>
                   );
                 }
@@ -223,7 +283,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
       })}
 
       {shouldShowLoadingIndicator ? <div style={{ alignSelf: 'flex-start', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '0.8rem 0.95rem', color: 'var(--color-text-secondary)', fontSize: '0.85rem' }}>Thinking…</div> : null}
-      {error ? <div style={{ alignSelf: 'flex-start', maxWidth: '80%', borderRadius: '18px', padding: '0.8rem 0.95rem', background: 'rgba(217,83,79,0.1)', color: '#d9534f', fontSize: '0.85rem' }}>Error: {error.message}</div> : null}
+      {error ? <div style={{ alignSelf: 'flex-start', maxWidth: '80%', borderRadius: '18px', padding: '0.8rem 0.95rem', background: 'color-mix(in srgb, var(--color-state-error) 10%, transparent)', color: 'var(--color-state-error)', fontSize: '0.85rem' }}>Error: {error.message}</div> : null}
     </div>
   );
 }
