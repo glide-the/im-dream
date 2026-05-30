@@ -1,15 +1,13 @@
 """Voice archetypes configuration - Echo system."""
 
-import json
 import os
-from typing import Any, Dict, Optional
+from typing import Optional
 
 # ---------------------------------------------------------------------------
 # Text model configuration — read from environment variables.
 #
 # All LLM text-generation roles (voice analysis, chat, echo / trait /
 # pattern analysis, image description) are configured entirely through .env.
-# No models.json entry is required for these services.
 # ---------------------------------------------------------------------------
 
 # Shared provider endpoint and API key used by the PolyAgent text roles.
@@ -40,83 +38,28 @@ IMAGE_DESCRIPTION_MODEL: str = os.getenv(
 )
 
 # ---------------------------------------------------------------------------
-# Image generation model configuration — read from models.json.
-#
-# models.json retains only non-text (image generation) service configuration:
-# the model entry, retry settings, and API endpoint/key for image calls.
+# Image generation model configuration — read from environment variables.
 # ---------------------------------------------------------------------------
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "models.json")
-
-
-def _load_models_config() -> Dict[str, Any]:
-    """Load image-service configuration from models.json."""
-    if not os.path.exists(CONFIG_PATH):
-        raise RuntimeError(
-            "models.json not found; copy models.json.example and fill in your "
-            "image-generation API credentials"
-        )
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    if not isinstance(data, dict):
-        raise RuntimeError("models.json must contain a JSON object at the top level")
-    return data
-
-
-_CONFIG = _load_models_config()
-
-
-def _resolve_image_generation_config() -> Dict[str, Any]:
-    roles = _CONFIG.get("roles")
-    if not isinstance(roles, dict):
-        raise RuntimeError('models.json must define a "roles" object')
-    image_gen_role = roles.get("image_generation")
-    if not image_gen_role:
-        raise RuntimeError(
-            '"image_generation" role missing in models.json "roles"'
-        )
-    models = _CONFIG.get("models")
-    if not isinstance(models, dict):
-        raise RuntimeError('models.json must define a "models" object')
-    entry = models.get(image_gen_role)
-    if not isinstance(entry, dict):
-        raise RuntimeError(
-            f'image generation model "{image_gen_role}" not found under "models" in models.json'
-        )
-    if "model" not in entry:
-        raise RuntimeError(
-            f'image generation model entry "{image_gen_role}" must include a "model" key in models.json'
-        )
-    return entry
-
-
-_IMAGE_MODEL_CONFIG = _resolve_image_generation_config()
-
-IMAGE_GENERATION_MODEL: str = _IMAGE_MODEL_CONFIG["model"]
-IMAGE_API_KEY: Optional[str] = _IMAGE_MODEL_CONFIG.get("api_key")
-if not IMAGE_API_KEY:
-    raise RuntimeError(
-        f'api_key missing for image generation model in models.json'
-    )
-
-_IMAGE_API_SECTION = _CONFIG.get("image_api") or {}
-IMAGE_API_ENDPOINT: Optional[str] = _IMAGE_MODEL_CONFIG.get(
-    "endpoint"
-) or _IMAGE_API_SECTION.get("endpoint")
-if not IMAGE_API_ENDPOINT:
-    raise RuntimeError(
-        'endpoint missing for image generation model in models.json '
-        'and no "image_api.endpoint" fallback provided'
-    )
+IMAGE_GENERATION_MODEL: str = os.getenv(
+    "INK_IMAGE_GENERATION_MODEL", "google/gemini-2.5-flash-image-preview"
+)
+IMAGE_API_KEY: Optional[str] = os.getenv("INK_IMAGE_API_KEY") or None
+IMAGE_API_ENDPOINT: Optional[str] = os.getenv("INK_IMAGE_API_ENDPOINT") or None
 
 # Retry configuration for image generation
-_IMAGE_RETRY = _CONFIG.get("image_retry") or {}
-IMAGE_RETRY_MAX_ATTEMPTS: int = _IMAGE_RETRY.get("max_attempts", 3)
-IMAGE_RETRY_BASE_TIMEOUT: int = _IMAGE_RETRY.get("base_timeout", 90)
-IMAGE_RETRY_TIMEOUT_INCREMENT: int = _IMAGE_RETRY.get("timeout_increment", 30)
-IMAGE_MAX_TOKENS: int = _IMAGE_RETRY.get("max_tokens", 1000)
-IMAGE_DESCRIPTION_MAX_TOKENS: int = _IMAGE_RETRY.get("description_max_tokens", 500)
-IMAGE_DESCRIPTION_TIMEOUT: int = _IMAGE_RETRY.get("description_timeout", 120)
+IMAGE_RETRY_MAX_ATTEMPTS: int = int(os.getenv("INK_IMAGE_RETRY_MAX_ATTEMPTS", "3"))
+IMAGE_RETRY_BASE_TIMEOUT: int = int(os.getenv("INK_IMAGE_RETRY_BASE_TIMEOUT", "90"))
+IMAGE_RETRY_TIMEOUT_INCREMENT: int = int(
+    os.getenv("INK_IMAGE_RETRY_TIMEOUT_INCREMENT", "30")
+)
+IMAGE_MAX_TOKENS: int = int(os.getenv("INK_IMAGE_MAX_TOKENS", "1000"))
+IMAGE_DESCRIPTION_MAX_TOKENS: int = int(
+    os.getenv("INK_IMAGE_DESCRIPTION_MAX_TOKENS", "500")
+)
+IMAGE_DESCRIPTION_TIMEOUT: int = int(
+    os.getenv("INK_IMAGE_DESCRIPTION_TIMEOUT", "120")
+)
 
 # ---------------------------------------------------------------------------
 # Prompt helpers and voice archetypes
