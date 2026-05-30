@@ -53,7 +53,7 @@ def _load_models_config() -> Dict[str, Any]:
     """Load image-service configuration from models.json."""
     if not os.path.exists(CONFIG_PATH):
         raise RuntimeError(
-            "models.json not found; copy backend/models.json.example and fill in your "
+            "models.json not found; copy models.json.example and fill in your "
             "image-generation API credentials"
         )
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
@@ -83,14 +83,16 @@ def _resolve_image_generation_config() -> Dict[str, Any]:
         raise RuntimeError(
             f'image generation model "{image_gen_role}" not found under "models" in models.json'
         )
+    if "model" not in entry:
+        raise RuntimeError(
+            f'image generation model entry "{image_gen_role}" must include a "model" key in models.json'
+        )
     return entry
 
 
 _IMAGE_MODEL_CONFIG = _resolve_image_generation_config()
 
-IMAGE_GENERATION_MODEL: str = _IMAGE_MODEL_CONFIG.get(
-    "model", list(_CONFIG.get("roles", {}).values())[-1]
-)
+IMAGE_GENERATION_MODEL: str = _IMAGE_MODEL_CONFIG["model"]
 IMAGE_API_KEY: Optional[str] = _IMAGE_MODEL_CONFIG.get("api_key")
 if not IMAGE_API_KEY:
     raise RuntimeError(

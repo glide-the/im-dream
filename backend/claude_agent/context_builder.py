@@ -264,7 +264,7 @@ class ClaudeAgentContextBuilder:
             blocks.append({"type": "text", "text": workspace_block})
 
         # Inject voice / deck system prompt as context so the agent knows which
-        # persona to adopt.  Appended before the user text ("拼接到massage报文中").
+        # persona to adopt.  Appended before the user text ("拼接到message报文中").
         if voice_system_prompt and voice_system_prompt.strip():
             blocks.append(
                 {
