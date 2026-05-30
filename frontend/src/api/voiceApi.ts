@@ -12,6 +12,7 @@ export interface VoiceConfig {
   enabled: boolean;
   icon: string;
   color: string;
+  thread_id?: string;
 }
 
 export interface UserState {
@@ -1016,7 +1017,8 @@ export async function loadVoicesFromDecks(): Promise<Record<string, VoiceConfig>
               systemPrompt: voice.system_prompt,
               enabled: voice.enabled,
               icon: voice.icon,
-              color: voice.color
+              color: voice.color,
+              thread_id: voice.thread_id
             };
           }
         }

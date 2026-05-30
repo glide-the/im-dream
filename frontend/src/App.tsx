@@ -897,7 +897,7 @@ export default function App() {
     // The user stays in the Writing view — the inline ChatWidgetUI handles the conversation.
     void (async () => {
       try {
-        const threadId = await ensureVoiceThread(voiceName);
+        const threadId = await ensureVoiceThread(voiceName, voiceConfig.thread_id);
         if (newWidget && engineRef.current) {
           const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
           engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
