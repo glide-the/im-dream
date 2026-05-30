@@ -218,7 +218,7 @@ def create_tables(db):
     try:
         db.execute("ALTER TABLE voices ADD COLUMN thread_id TEXT")
         db.commit()
-    except Exception:
+    except sqlite3.OperationalError:
         pass  # Column already exists
 
     # @@@ Friendships table - bidirectional friend relationships

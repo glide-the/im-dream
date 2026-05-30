@@ -516,8 +516,12 @@ export default function DeckEditorModal({
                       {onOpenChat && (
                         <button
                           onClick={async () => {
-                            const threadId = await ensureVoiceThread(selectedVoice.id, selectedVoice.thread_id);
-                            onOpenChat(threadId);
+                            try {
+                              const threadId = await ensureVoiceThread(selectedVoice.id, selectedVoice.thread_id);
+                              onOpenChat(threadId);
+                            } catch (err) {
+                              console.error('Failed to open chat thread:', err);
+                            }
                           }}
                           style={{
                             padding: '8px 12px',

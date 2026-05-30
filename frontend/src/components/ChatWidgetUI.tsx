@@ -27,9 +27,6 @@ interface ChatWidgetUIProps {
   /** Called when the user clicks "Open Chat". Passes the linked thread_id. */
   onOpenChat: (threadId: string) => void;
   onDelete: () => void;
-  /** Legacy – kept for backwards compat; no longer used for inline chat. */
-  onSendMessage?: (message: string) => void;
-  isProcessing?: boolean;
 }
 
 export default function ChatWidgetUI({ data, onOpenChat, onDelete }: ChatWidgetUIProps) {
