@@ -50,6 +50,7 @@ import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
+import type { ActiveChatVoice } from './lib/chat-schema';
 
 // @@@ Icon map with React Icons
 const iconMap = {
@@ -174,6 +175,8 @@ export default function App() {
   const [dropdownTriggerCellId, setDropdownTriggerCellId] = useState<string | null>(null);
   /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
+  /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
+  const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
 
   // @@@ Warning dialog state
   const [showWarning, setShowWarning] = useState(false);
@@ -852,8 +855,9 @@ export default function App() {
   }, [composingCells, handleTextCellKeyDown]);
 
   // @@@ Navigate to Chat view with a specific thread (used by editor widgets and Deck manager).
-  const handleOpenChatThread = useCallback((threadId: string) => {
+  const handleOpenChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
     setRequestedChatThreadId(threadId);
+    setActiveChatVoice(voiceInfo);
     setCurrentView('chat');
     setHasOpenedChatView(true);
   }, []);
@@ -896,8 +900,13 @@ export default function App() {
           const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
           engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
         }
-        // Navigate to the new Chat thread
-        handleOpenChatThread(threadId);
+        // Navigate to the new Chat thread, carrying the voice info for the badge + prompt context
+        handleOpenChatThread(threadId, {
+          name: voiceConfig.name,
+          systemPrompt: voiceConfig.systemPrompt,
+          icon: voiceConfig.icon,
+          color: voiceConfig.color,
+        });
       } catch (err) {
         console.error('Failed to create Claude-agent thread for voice:', err);
       }
@@ -1423,7 +1432,15 @@ export default function App() {
                         <ChatWidgetUI
                           key={cell.id}
                           data={cell.data as ChatWidgetData}
-                          onOpenChat={(threadId) => handleOpenChatThread(threadId)}
+                          onOpenChat={(threadId) => {
+                            const d = cell.data as ChatWidgetData;
+                            handleOpenChatThread(threadId, {
+                              name: d.voiceConfig.name,
+                              systemPrompt: d.voiceConfig.tagline,
+                              icon: d.voiceConfig.icon,
+                              color: d.voiceConfig.color,
+                            });
+                          }}
                           onDelete={() => handleChatDelete(cell.id)}
                         />
                       );
@@ -1886,6 +1903,7 @@ export default function App() {
             editorState={state ? (state as unknown as Record<string, unknown>) : null}
             onEditorWriteConfirmed={handleEditorWriteConfirmed}
             requestedThreadId={requestedChatThreadId}
+            activeVoice={activeChatVoice}
           />
         </div>
       )}

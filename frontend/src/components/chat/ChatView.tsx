@@ -275,8 +275,43 @@ export default function ChatView({
     <WorkspaceProvider>
       <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
         <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-          {/* 浮动操作按钮区 – 右上角：新建 / 更多（含下拉菜单） */}
+          {/* 浮动操作按钮区 – 右上角：卡组信息 / 新建 / 更多（含下拉菜单） */}
           <div style={{ position: 'absolute', top: '0.65rem', right: '0.75rem', zIndex: 20, display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
+            {/* 当前 Deck Voice 徽标 */}
+            {activeVoice && (() => {
+              const colorHex: Record<string, string> = {
+                blue: '#4da3ff', pink: '#ff66b3', green: '#52c77e',
+                purple: '#9b7ff5', orange: '#f9a875', red: '#f86e6e',
+                yellow: '#f5d76e', teal: '#5ec0c0'
+              };
+              const hex = colorHex[activeVoice.color] ?? '#4da3ff';
+              const VoiceIcon = iconMap[activeVoice.icon as keyof typeof iconMap] || iconMap.brain;
+              return (
+                <div
+                  title={activeVoice.name}
+                  style={{
+                    height: '2rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0 0.6rem',
+                    borderRadius: '0.55rem',
+                    border: `1px solid ${hex}55`,
+                    background: `${hex}18`,
+                    color: hex,
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    maxWidth: '9rem',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <VoiceIcon style={{ width: '0.85rem', height: '0.85rem', flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeVoice.name}
+                  </span>
+                </div>
+              );
+            })()}
             {/* 新建对话 */}
             <button
               type="button"
@@ -371,6 +406,7 @@ export default function ChatView({
                 inputPlaceholder="Ask Ink & Memory…"
                 editorState={editorState}
                 onEditorWriteConfirmed={onEditorWriteConfirmed}
+                voiceSystemPrompt={activeVoice?.systemPrompt}
                 onConversationStart={() => {
                   setHasConversationStarted(true);
                   void reloadThreads();

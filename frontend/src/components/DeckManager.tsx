@@ -17,10 +17,11 @@ import {
 } from '../api/voiceApi';
 import DeckEditorModal from './DeckEditorModal';
 import { COLORS, iconMap } from './deckVisuals';
+import type { ActiveChatVoice } from '../lib/chat-schema';
 
 interface Props {
   onUpdate?: () => void;
-  onOpenChat?: (threadId: string) => void;
+  onOpenChat?: (threadId: string, voiceInfo: ActiveChatVoice) => void;
 }
 
 export default function DeckManager({ onUpdate, onOpenChat }: Props) {
