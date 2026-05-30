@@ -8,7 +8,7 @@
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
 // [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
-// [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect no longer navigates to Chat view; ChatWidgetUI handles conversation inline using claude-agent service.
+// [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -33,8 +33,8 @@ import AgentDropdown from './components/AgentDropdown';
 import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
 import type { VoiceConfig } from './api/voiceApi';
-import { getVoices, getStateConfig } from './utils/voiceStorage';
-import { getDefaultVoices, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
+import { getVoices, getMetaPrompt, getStateConfig } from './utils/voiceStorage';
+import { getDefaultVoices, chatWithVoice, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
 import { useMobile } from './utils/mobileDetect';
 import { CommentGroupCard } from './components/CommentCard';
 import { findNormalizedPhrase } from './utils/textNormalize';
@@ -174,6 +174,7 @@ export default function App() {
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ x: 0, y: 0 });
   const [dropdownTriggerCellId, setDropdownTriggerCellId] = useState<string | null>(null);
+  const [chatProcessing, setChatProcessing] = useState<Set<string>>(new Set());
   /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
@@ -933,6 +934,63 @@ export default function App() {
     engineRef.current.deleteCell(widgetId);
   }, []);
 
+  // @@@ Handle sending chat message — calls chatWithVoice with full writing context
+  const handleChatSend = useCallback(async (widgetId: string, message: string) => {
+    if (!engineRef.current || !state) return;
+
+    // Find widget
+    const widgetCell = state.cells.find(c => c.type === 'widget' && c.id === widgetId);
+    if (!widgetCell || widgetCell.type !== 'widget') return;
+
+    const widgetData = widgetCell.data as ChatWidgetData;
+    const chatWidget = ChatWidget.fromData(widgetData);
+
+    // Add user message optimistically
+    chatWidget.addUserMessage(message);
+    engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
+
+    // Mark as processing
+    setChatProcessing(prev => new Set(prev).add(widgetId));
+
+    try {
+      // Get ALL text from all text cells as unified context
+      const allText = state.cells
+        .filter(c => c.type === 'text')
+        .map(c => (c as TextCell).content)
+        .join('');
+
+      const metaPrompt = getMetaPrompt();
+      const statePrompt = selectedState && stateConfig.states[selectedState]
+        ? stateConfig.states[selectedState].prompt
+        : '';
+
+      // @@@ Use voiceName (which is the voice ID/key) for backend lookup
+      // Backend loads voice config from database using user_id from JWT
+      const response = await chatWithVoice(
+        widgetData.voiceName,  // This is the voice ID (key like "holder", "mirror")
+        chatWidget.getConversationHistory().slice(0, -1), // Exclude last message (just added)
+        message,
+        allText,
+        metaPrompt,
+        statePrompt
+      );
+
+      // Add assistant response
+      chatWidget.addAssistantMessage(response);
+      engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
+    } catch (error) {
+      console.error('Chat failed:', error);
+      chatWidget.addAssistantMessage('Sorry, I encountered an error.');
+      engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
+    } finally {
+      setChatProcessing(prev => {
+        const next = new Set(prev);
+        next.delete(widgetId);
+        return next;
+      });
+    }
+  }, [state, selectedState, stateConfig]);
+
   // @@@ Helper to get watercolor background
   const getWatercolorBg = (color: string) => {
     const brushes: Record<string, string> = {
@@ -1427,7 +1485,8 @@ export default function App() {
                         <ChatWidgetUI
                           key={cell.id}
                           data={cell.data as ChatWidgetData}
-                          onOpenChat={(threadId) => {
+                          onSendMessage={(msg) => handleChatSend(cell.id, msg)}
+                          onOpenChat={(cell.data as ChatWidgetData).threadId ? (threadId) => {
                             const d = cell.data as ChatWidgetData;
                             handleOpenChatThread(threadId, {
                               name: d.voiceConfig.name,
@@ -1435,8 +1494,9 @@ export default function App() {
                               icon: d.voiceConfig.icon,
                               color: d.voiceConfig.color,
                             });
-                          }}
+                          } : undefined}
                           onDelete={() => handleChatDelete(cell.id)}
+                          isProcessing={chatProcessing.has(cell.id)}
                         />
                       );
                     }
