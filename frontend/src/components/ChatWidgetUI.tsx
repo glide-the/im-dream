@@ -131,7 +131,7 @@ export default function ChatWidgetUI({ data, onSendMessage, onOpenChat, onDelete
       {/* "Chat →" button - only visible when a thread is linked */}
       {onOpenChat && data.threadId && (
         <button
-          onClick={() => onOpenChat(data.threadId!)}
+          onClick={() => onOpenChat(data.threadId as string)}
           style={{
             position: 'absolute',
             top: '8px',
