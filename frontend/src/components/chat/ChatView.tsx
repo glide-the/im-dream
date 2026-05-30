@@ -9,6 +9,7 @@
 // [Sync] 2026-05-29: keep the original full-height workspace shell so VerticalNav stays flush-left.
 // [Sync] 2026-05-29: make status bar and collapsible sidebar-panel chrome theme-adaptive.
 // [Sync] 2026-05-29: move thread list into VerticalNav expanded sidebar; remove separate thread sidebar and flyout; remove header bar; float share+more buttons.
+// [Sync] 2026-05-30: accept activeVoice prop to display deck/voice badge in top-right and forward system prompt to ChatPanel.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -20,6 +21,8 @@ import type { Attachment } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { IconClock, IconFolder, IconMoreHorizontal, IconPlus, IconShare, IconX } from './Icons';
+import type { ActiveChatVoice } from '../../lib/chat-schema';
+import { iconMap } from '../deckVisuals';
 
 const API_BASE = '/ink-and-memory';
 
@@ -50,6 +53,8 @@ interface ChatViewProps {
   editorState?: Record<string, unknown> | null;
   /** Called when an editor write tool is confirmed so the Writing view can reload. */
   onEditorWriteConfirmed?: () => void;
+  /** Active deck / voice info — displayed in the top-right badge and forwarded to the backend as voice context. */
+  activeVoice?: ActiveChatVoice;
 }
 
 async function createThread(): Promise<string | null> {
@@ -116,6 +121,7 @@ export default function ChatView({
   quickActions = QUICK_ACTION_CARDS,
   editorState,
   onEditorWriteConfirmed,
+  activeVoice,
 }: ChatViewProps) {
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');

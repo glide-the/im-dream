@@ -186,6 +186,8 @@ class ClaudeAgentRunRequest:
     attachments: Optional[list[AttachmentPayload]] = None
     # Current EditorState for the .editor/ virtual index (optional).
     editor_state: Optional[dict[str, Any]] = None
+    # Voice / deck system prompt injected as context into each user message.
+    system_prompt: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +384,7 @@ class ClaudeAgentService:
             resume=should_resume,
             cwd=cwd,
             editor_session_id=editor_session_id,
+            voice_system_prompt=request.system_prompt or None,
         )
 
         # Load user-configured env vars (skills / MCP environment) from system config.

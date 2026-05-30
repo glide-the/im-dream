@@ -47,3 +47,11 @@ export type ChatMetadata = {
   workspacePath?: string;
   workspaceSessionId?: string;
 };
+
+/** Voice / deck info displayed in the Chat view and forwarded to the backend as voice context. */
+export interface ActiveChatVoice {
+  name: string;
+  systemPrompt: string;
+  icon: string;
+  color: string;
+}

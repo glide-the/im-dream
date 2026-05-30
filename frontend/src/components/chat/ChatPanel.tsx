@@ -64,6 +64,8 @@ interface ChatPanelProps {
   editorState?: Record<string, unknown> | null;
   /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
   onEditorWriteConfirmed?: () => void;
+  /** Voice / deck system prompt injected as voice_context into each user message. */
+  voiceSystemPrompt?: string;
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -89,6 +91,7 @@ export default function ChatPanel({
   onConversationStart,
   editorState,
   onEditorWriteConfirmed,
+  voiceSystemPrompt,
 }: ChatPanelProps) {
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
@@ -166,7 +169,7 @@ export default function ChatPanel({
           allowedAppDefaultToolkit: [],
           allowedMcpServers: {},
           attachments,
-          systemPrompt: systemConfig?.system_prompt,
+          systemPrompt: voiceSystemPrompt ?? systemConfig?.system_prompt,
           ...(editorState != null ? { editor_state: editorState } : {}),
         };
 
