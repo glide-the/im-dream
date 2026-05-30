@@ -32,8 +32,8 @@ import AgentDropdown from './components/AgentDropdown';
 import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
 import type { VoiceConfig } from './api/voiceApi';
-import { getVoices, getMetaPrompt, getStateConfig } from './utils/voiceStorage';
-import { getDefaultVoices, chatWithVoice, importLocalData, loadVoicesFromDecks } from './api/voiceApi';
+import { getVoices, getStateConfig } from './utils/voiceStorage';
+import { getDefaultVoices, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
 import { useMobile } from './utils/mobileDetect';
 import { CommentGroupCard } from './components/CommentCard';
 import { findNormalizedPhrase } from './utils/textNormalize';
@@ -172,7 +172,8 @@ export default function App() {
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const [dropdownPosition, setDropdownPosition] = useState({ x: 0, y: 0 });
   const [dropdownTriggerCellId, setDropdownTriggerCellId] = useState<string | null>(null);
-  const [chatProcessing, setChatProcessing] = useState<Set<string>>(new Set());
+  /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
+  const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
 
   // @@@ Warning dialog state
   const [showWarning, setShowWarning] = useState(false);
@@ -850,7 +851,14 @@ export default function App() {
     }
   }, [composingCells, handleTextCellKeyDown]);
 
-  // @@@ Handle agent selection from dropdown
+  // @@@ Navigate to Chat view with a specific thread (used by editor widgets and Deck manager).
+  const handleOpenChatThread = useCallback((threadId: string) => {
+    setRequestedChatThreadId(threadId);
+    setCurrentView('chat');
+    setHasOpenedChatView(true);
+  }, []);
+
+  // @@@ Handle agent selection from dropdown — creates a Claude-agent thread and inserts an Agent Link widget.
   const handleAgentSelect = useCallback((voiceName: string, voiceConfig: VoiceConfig) => {
     setDropdownVisible(false);
 
@@ -871,16 +879,31 @@ export default function App() {
         .map(c => c.id)
     );
 
-    // Create chat widget
+    // Insert widget immediately (without thread_id yet – shows "Creating thread…")
     const chatWidget = new ChatWidget(voiceName, voiceConfig);
-
-    // Insert widget at cursor (engine will handle @ removal)
     engineRef.current.insertWidgetAtCursor(dropdownTriggerCellId, cursorPos, 'chat', chatWidget.getData());
     setDropdownTriggerCellId(null);
 
-    // Focus the text cell immediately after the newly inserted widget
+    // Identify the newly inserted widget
     const updatedCells = engineRef.current.getState().cells;
     const newWidget = updatedCells.find(c => c.type === 'widget' && !beforeWidgetIds.has(c.id));
+
+    // Create Claude-agent thread asynchronously, then update widget with thread_id
+    void (async () => {
+      try {
+        const threadId = await ensureVoiceThread(voiceName);
+        if (newWidget && engineRef.current) {
+          const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
+          engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
+        }
+        // Navigate to the new Chat thread
+        handleOpenChatThread(threadId);
+      } catch (err) {
+        console.error('Failed to create Claude-agent thread for voice:', err);
+      }
+    })();
+
+    // Focus the text cell immediately after the newly inserted widget
     if (newWidget) {
       const widgetIdx = updatedCells.findIndex(c => c.id === newWidget.id);
       const nextCell = widgetIdx >= 0 && widgetIdx + 1 < updatedCells.length
@@ -898,64 +921,7 @@ export default function App() {
         }, 0);
       }
     }
-  }, [dropdownTriggerCellId]);
-
-  // @@@ Handle sending chat message
-  const handleChatSend = useCallback(async (widgetId: string, message: string) => {
-    if (!engineRef.current || !state) return;
-
-    // Find widget
-    const widgetCell = state.cells.find(c => c.type === 'widget' && c.id === widgetId);
-    if (!widgetCell || widgetCell.type !== 'widget') return;
-
-    const widgetData = widgetCell.data as ChatWidgetData;
-    const chatWidget = ChatWidget.fromData(widgetData);
-
-    // Add user message optimistically
-    chatWidget.addUserMessage(message);
-    engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
-
-    // Mark as processing
-    setChatProcessing(prev => new Set(prev).add(widgetId));
-
-    try {
-      // Get ALL text from all text cells as unified context
-      const allText = state.cells
-        .filter(c => c.type === 'text')
-        .map(c => (c as TextCell).content)
-        .join('');
-
-      const metaPrompt = getMetaPrompt();
-      const statePrompt = selectedState && stateConfig.states[selectedState]
-        ? stateConfig.states[selectedState].prompt
-        : '';
-
-      // @@@ Use voiceName (which is the voice ID/key) for backend lookup
-      // Backend loads voice config from database using user_id from JWT
-      const response = await chatWithVoice(
-        widgetData.voiceName,  // This is the voice ID (key like "holder", "mirror")
-        chatWidget.getConversationHistory().slice(0, -1), // Exclude last message (just added)
-        message,
-        allText,
-        metaPrompt,
-        statePrompt
-      );
-
-      // Add assistant response
-      chatWidget.addAssistantMessage(response);
-      engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
-    } catch (error) {
-      console.error('Chat failed:', error);
-      chatWidget.addAssistantMessage('Sorry, I encountered an error.');
-      engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
-    } finally {
-      setChatProcessing(prev => {
-        const next = new Set(prev);
-        next.delete(widgetId);
-        return next;
-      });
-    }
-  }, [state, selectedState, stateConfig]);
+  }, [dropdownTriggerCellId, handleOpenChatThread]);
 
   // @@@ Handle deleting chat widget
   const handleChatDelete = useCallback((widgetId: string) => {
@@ -1457,9 +1423,8 @@ export default function App() {
                         <ChatWidgetUI
                           key={cell.id}
                           data={cell.data as ChatWidgetData}
-                          onSendMessage={(msg) => handleChatSend(cell.id, msg)}
+                          onOpenChat={(threadId) => handleOpenChatThread(threadId)}
                           onDelete={() => handleChatDelete(cell.id)}
-                          isProcessing={chatProcessing.has(cell.id)}
                         />
                       );
                     }
@@ -1679,7 +1644,8 @@ export default function App() {
           display: 'flex',
           overflow: 'hidden'
         }}>
-          <DeckManager onUpdate={async () => {
+          <DeckManager
+            onUpdate={async () => {
             // @@@ Reload voice configs from deck system
             console.log('Deck system updated, reloading voices...');
             const updatedVoices = await loadVoicesFromDecks();
@@ -1690,7 +1656,9 @@ export default function App() {
             }
 
             console.log(`✅ Loaded ${Object.keys(updatedVoices).length} enabled voices`);
-          }} />
+          }}
+            onOpenChat={handleOpenChatThread}
+          />
         </div>
       )}
       {currentView === 'settings' && (
@@ -1914,7 +1882,11 @@ export default function App() {
           display: currentView === 'chat' ? 'block' : 'none',
           overflow: 'hidden'
         }}>
-          <ChatView editorState={state ? (state as unknown as Record<string, unknown>) : null} onEditorWriteConfirmed={handleEditorWriteConfirmed} />
+          <ChatView
+            editorState={state ? (state as unknown as Record<string, unknown>) : null}
+            onEditorWriteConfirmed={handleEditorWriteConfirmed}
+            requestedThreadId={requestedChatThreadId}
+          />
         </div>
       )}
 

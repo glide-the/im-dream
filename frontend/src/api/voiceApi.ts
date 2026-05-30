@@ -37,6 +37,7 @@ export interface Voice {
   owner_id?: number;
   enabled: boolean;
   order_index?: number;
+  thread_id?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -910,6 +911,7 @@ export async function updateVoice(voiceId: string, data: {
   color?: string;
   enabled?: boolean;
   order_index?: number;
+  thread_id?: string;
 }): Promise<void> {
   const response = await fetch(`${API_BASE}/api/voices/${voiceId}`, {
     method: 'PUT',
@@ -921,6 +923,35 @@ export async function updateVoice(voiceId: string, data: {
     const error = await response.json();
     throw new Error(error.detail || 'Update voice failed');
   }
+}
+
+/**
+ * Create a Claude-agent thread and associate it with a voice (lazy).
+ * If the voice already has a thread_id, returns it unchanged.
+ * Otherwise creates a new thread, persists it on the voice, and returns the id.
+ */
+export async function ensureVoiceThread(voiceId: string, existingThreadId?: string): Promise<string> {
+  if (existingThreadId) return existingThreadId;
+
+  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (!token) throw new Error('Not authenticated');
+
+  // Create a new Claude-agent thread
+  const res = await fetch(`${API_BASE}/api/claude-agent/threads`, {
+    method: 'POST',
+    headers: { 'Authorization': 'Bearer ' + token }
+  });
+  if (!res.ok) throw new Error('Failed to create Claude-agent thread');
+  const { thread_id } = await res.json() as { thread_id: string };
+
+  // Persist the association on the voice (best-effort; non-system voices only)
+  try {
+    await updateVoice(voiceId, { thread_id });
+  } catch {
+    // Ignore if voice update fails (e.g. system voice) - thread_id is still usable
+  }
+
+  return thread_id;
 }
 
 /**

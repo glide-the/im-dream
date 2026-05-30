@@ -42,6 +42,8 @@ interface RawChatMessage {
 
 interface ChatViewProps {
   threadId?: string;
+  /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
+  requestedThreadId?: string;
   onNewChat?: () => void;
   quickActions?: QuickActionCardItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
@@ -109,6 +111,7 @@ async function deleteThread(threadId: string): Promise<boolean> {
 
 export default function ChatView({
   threadId: initialThreadId,
+  requestedThreadId,
   onNewChat,
   quickActions = QUICK_ACTION_CARDS,
   editorState,
@@ -149,6 +152,19 @@ export default function ChatView({
   useEffect(() => {
     void reloadThreads();
   }, [reloadThreads]);
+
+  // @@@ External navigation: switch to a specific thread when requestedThreadId changes.
+  useEffect(() => {
+    if (!requestedThreadId || requestedThreadId === activeThreadId) return;
+    setThreadMessages(null);
+    setIsLoadingMessages(true);
+    setActiveThreadId(requestedThreadId);
+    setHasConversationStarted(true);
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    void reloadThreads();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedThreadId]);
 
   // Fetch messages for the active thread (following better-chatbot pattern:
   // parent fetches history and passes as initialMessages to the chat component)
