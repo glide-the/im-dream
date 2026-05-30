@@ -44,8 +44,8 @@ IMAGE_DESCRIPTION_MODEL: str = os.getenv(
 IMAGE_GENERATION_MODEL: str = os.getenv(
     "INK_IMAGE_GENERATION_MODEL", "google/gemini-2.5-flash-image-preview"
 )
-IMAGE_API_KEY: Optional[str] = os.getenv("INK_IMAGE_API_KEY") or None
-IMAGE_API_ENDPOINT: Optional[str] = os.getenv("INK_IMAGE_API_ENDPOINT") or None
+IMAGE_API_KEY: Optional[str] = os.getenv("INK_IMAGE_API_KEY")
+IMAGE_API_ENDPOINT: Optional[str] = os.getenv("INK_IMAGE_API_ENDPOINT")
 
 # Retry configuration for image generation
 IMAGE_RETRY_MAX_ATTEMPTS: int = int(os.getenv("INK_IMAGE_RETRY_MAX_ATTEMPTS", "3"))
