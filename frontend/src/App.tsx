@@ -8,6 +8,7 @@
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
 // [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
+// [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect no longer navigates to Chat view; ChatWidgetUI handles conversation inline using claude-agent service.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -892,7 +893,8 @@ export default function App() {
     const updatedCells = engineRef.current.getState().cells;
     const newWidget = updatedCells.find(c => c.type === 'widget' && !beforeWidgetIds.has(c.id));
 
-    // Create Claude-agent thread asynchronously, then update widget with thread_id
+    // Create Claude-agent thread asynchronously, then update widget with thread_id.
+    // The user stays in the Writing view — the inline ChatWidgetUI handles the conversation.
     void (async () => {
       try {
         const threadId = await ensureVoiceThread(voiceName);
@@ -900,13 +902,6 @@ export default function App() {
           const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
           engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
         }
-        // Navigate to the new Chat thread, carrying the voice info for the badge + prompt context
-        handleOpenChatThread(threadId, {
-          name: voiceConfig.name,
-          systemPrompt: voiceConfig.systemPrompt,
-          icon: voiceConfig.icon,
-          color: voiceConfig.color,
-        });
       } catch (err) {
         console.error('Failed to create Claude-agent thread for voice:', err);
       }
@@ -930,7 +925,7 @@ export default function App() {
         }, 0);
       }
     }
-  }, [dropdownTriggerCellId, handleOpenChatThread]);
+  }, [dropdownTriggerCellId]);
 
   // @@@ Handle deleting chat widget
   const handleChatDelete = useCallback((widgetId: string) => {

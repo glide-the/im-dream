@@ -3,12 +3,17 @@
 ## Overview
 
 Each **Voice** inside a Deck can be associated with a persistent **Claude-agent thread**
-(`thread_id`).  When a user selects a voice from the `@`-agent picker in the Writing
-view, or presses **Chat** on a voice card in the Deck Manager, the app creates (or reuses)
-a Claude-agent thread for that voice and opens it in the Chat view.
+(`thread_id`).  When a user types `@` in the Writing view and selects a voice from the
+agent picker, an **inline chat widget** is inserted at the cursor position.  The widget
+communicates directly with the Claude-agent service — the user stays in the Writing view
+and the conversation happens inline, without navigating to the Chat page.
 
-This replaces the previous inline `ChatWidgetUI` that was powered by the stateless
-`/api/analyze` (`chatWithVoice`) endpoint.
+The voice's **system prompt** (`voiceConfig.systemPrompt`) is concatenated into every
+message request sent to `/api/claude-agent` via the `systemPrompt` request field, so the
+agent always responds in character as the selected Deck voice.
+
+Optionally, a **"Chat →"** button in the widget lets the user open the full Chat view
+for a richer experience (tool calls, file attachments, history sidebar).
 
 ---
 
@@ -16,7 +21,7 @@ This replaces the previous inline `ChatWidgetUI` that was powered by the statele
 
 ### `voices` table (backend)
 
-A new nullable column is added:
+A nullable column links each voice to a Claude-agent thread:
 
 ```sql
 ALTER TABLE voices ADD COLUMN thread_id TEXT;
@@ -26,9 +31,7 @@ ALTER TABLE voices ADD COLUMN thread_id TEXT;
 |-------------|--------|-------------------------------------------------|
 | `thread_id` | TEXT   | UUID of the linked `chat_thread` row, or NULL   |
 
-The `thread_id` column is populated the first time a user starts a chat session with that
-voice (lazy creation).  Multiple voices in the same deck each have their own independent
-thread.
+The `thread_id` is populated lazily on the first `@`-select of a voice.
 
 ---
 
@@ -47,6 +50,25 @@ thread association after creation:
 
 Unchanged – the frontend calls this to create a new thread and receives `{ thread_id }`.
 
+### `POST /api/claude-agent` (existing)
+
+The inline widget sends messages here.  The voice system prompt is forwarded as
+`systemPrompt` in the request body so the agent responds in character:
+
+```jsonc
+{
+  "id": "<thread_id>",
+  "resume": true,
+  "message": { "id": "…", "role": "user", "parts": [{ "type": "text", "text": "…" }] },
+  "chatModel": { "provider": "anthropic", "model": "claude-sonnet-4-20250514" },
+  "toolChoice": "auto",
+  "attachments": [],
+  "systemPrompt": "<voice.system_prompt>",   // ← injected per request
+  "allowedAppDefaultToolkit": [],
+  "allowedMcpServers": {}
+}
+```
+
 ---
 
 ## Frontend Flow
@@ -54,89 +76,96 @@ Unchanged – the frontend calls this to create a new thread and receives `{ thr
 ### 1. `@`-Agent Picker in the Writing View
 
 ```
-User types "@" → AgentDropdown opens (list of enabled voices from Deck system)
+User types "@" → AgentDropdown opens (enabled voices from Deck system)
    ↓
 User selects a voice
    ↓
 handleAgentSelect():
-  1. Call POST /api/claude-agent/threads → get thread_id
-  2. Save thread_id on the voice (PUT /api/voices/{voice_id}) [optional, lazy]
-  3. Insert a lightweight AgentLinkWidget into the editor
-     { voiceName, voiceConfig, thread_id }
-  4. Navigate to Chat view with requestedThreadId = thread_id
+  1. Insert inline ChatWidgetUI into the editor (shows "Creating thread…")
+  2. Call POST /api/claude-agent/threads → get thread_id (async)
+  3. Update widget data with thread_id
+  4. User stays in the Writing view — no navigation occurs
 ```
 
-### 2. AgentLinkWidget (replaces ChatWidgetUI)
+### 2. ChatWidgetUI — Inline Chat Widget
 
-The old full-featured inline chat widget is replaced by a compact card:
+The widget renders directly in the editor at the `@`-insertion point:
 
 ```
-┌────────────────────────────────────────┐
-│  🧠  Mirror                  [Chat →]  │
-│  "Thread started 2026-05-30"           │
-└────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│  🧠  Mirror                               [Chat →]   │
+│  Ask anything…                                        │
+├──────────────────────────────────────────────────────┤
+│  [user bubble]  What do you notice in this text?      │
+│  [agent bubble] I see patterns of …                  │
+├──────────────────────────────────────────────────────┤
+│  Message Mirror…                       [✈ send]      │
+└──────────────────────────────────────────────────────┘
 ```
 
-Clicking **Chat →** fires `onOpenChat(thread_id)` in App.tsx, which:
-- Sets `requestedChatThreadId` state
-- Switches `currentView` to `'chat'`
+- **Inline send**: user types and presses Enter (or the send button).  The message is
+  POST-ed to `/api/claude-agent` with the voice system prompt.  The SSE response is
+  streamed and displayed inline with a blinking cursor.
+- **Chat →**: opens the same thread in the full Chat view (sidebar, tools, history).
+- **×** (hover): removes the widget from the editor.
 
-### 3. ChatView – External Thread Navigation
+The widget manages its own local message history (`InlineMessage[]`).  Messages are not
+persisted to the editor state — they live in component state and survive view switches
+while the Writing view remains mounted.
 
-`ChatView` accepts a new optional prop:
+### 3. Deck Manager – Voice Chat Button
 
-```ts
-requestedThreadId?: string;
-```
-
-A `useEffect` watches it.  When it changes to a non-null value that differs from
-`activeThreadId`, the view switches to that thread (same as `handleSelectThread`).
-
-### 4. Deck Manager – Voice Chat Button
-
-Each voice card inside `DeckEditorModal` gets a **Chat** button.  When clicked:
-
-1. If `voice.thread_id` exists → call `onOpenChat(voice.thread_id)` directly.
-2. Otherwise → `POST /api/claude-agent/threads`, then `PUT /api/voices/{id}`
-   to persist the association, then call `onOpenChat(newThreadId)`.
-
-`DeckManager` exposes `onOpenChat?: (threadId: string) => void` to its parent (`App.tsx`).
+Each voice card inside `DeckEditorModal` gets a **Chat** button.  When clicked it opens
+the full Chat view (same `handleOpenChatThread` path), regardless of whether a thread
+already exists.
 
 ---
 
 ## Sequence Diagram
 
 ```
-User (Writing View)           App.tsx           ChatView
-       │                        │                  │
-       │  types "@Mirror"       │                  │
-       │──────────────────────► │                  │
-       │  voice selected        │                  │
-       │                        │                  │
-       │               POST /claude-agent/threads  │
-       │                        │──────────────────X (Claude Agent API)
-       │                        │◄─── thread_id ───│
-       │                        │                  │
-       │         insert AgentLinkWidget(thread_id) │
-       │                        │                  │
-       │      [Chat →] clicked  │                  │
-       │──────────────────────► │                  │
-       │                        │ requestedThreadId=id
-       │                        │─────────────────►│
-       │                        │ currentView='chat'│
-       │                        │─────────────────►│ (switch to thread)
+User (Writing View)         App.tsx              Claude-Agent API
+       │                      │                        │
+       │  types "@Mirror"     │                        │
+       │─────────────────────►│                        │
+       │  voice selected      │                        │
+       │                      │ POST /threads ─────────►│
+       │                      │◄──── thread_id ─────────│
+       │  ChatWidgetUI inserted (thread_id set)         │
+       │   User stays in Writing view                   │
+       │                      │                        │
+       │  [types message]     │                        │
+       │  [presses Enter]     │                        │
+       │  ChatWidgetUI ────── POST /claude-agent ───────►│
+       │                      │     (systemPrompt=voice.system_prompt)
+       │  SSE stream ◄────────│◄────── text-delta ──────│
+       │  inline display      │                        │
+       │                      │                        │
+       │  [Chat →] clicked    │                        │
+       │─────────────────────►│                        │
+       │                      │ requestedThreadId=id   │
+       │                      │ currentView='chat'     │
 ```
 
 ---
 
-## Removed Components
+## Component Responsibilities
 
-| Old Component / API           | Replacement                                     |
-|-------------------------------|-------------------------------------------------|
-| `ChatWidgetUI`                | `AgentLinkUI` (compact link card)               |
-| `handleChatSend` in App.tsx   | Removed (no inline chat)                        |
-| `chatWithVoice` API call      | Removed from agent-select flow                  |
-| `chatProcessing` state        | Removed                                         |
+| Component / Function      | Responsibility                                              |
+|---------------------------|-------------------------------------------------------------|
+| `AgentDropdown`           | List enabled voices; fire `onSelect(voiceName, voiceConfig)` |
+| `handleAgentSelect`       | Insert widget, create thread async — **no navigation**       |
+| `ChatWidgetUI`            | Inline chat UI; SSE streaming; system prompt injection       |
+| `ChatWidget` (engine)     | Widget data model; stores `voiceName`, `voiceConfig`, `threadId` |
+| `handleOpenChatThread`    | Navigate to Chat view (used by "Chat →" and Deck Manager)    |
 
-The `chatWithVoice` function itself remains in `voiceApi.ts` as it may still be used by
-the Comments chat feature (`handleCommentChatSend`).
+---
+
+## Removed / Changed Behaviour
+
+| Old Behaviour                                      | New Behaviour                                      |
+|----------------------------------------------------|----------------------------------------------------|
+| `handleAgentSelect` auto-navigated to Chat view    | User stays in Writing view; inline chat in widget  |
+| `ChatWidgetUI` was a static link card              | `ChatWidgetUI` has a full inline chat interface    |
+| Voice system prompt was forwarded only for Chat view | System prompt forwarded on every inline message   |
+
