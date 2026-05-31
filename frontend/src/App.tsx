@@ -9,6 +9,7 @@
 // [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
+// [Sync] 2026-05-30: fix Deck widget SSE — handleChatSend now calls chatWithVoiceSSE (POST /api/claude-agent); chatStreamingText Map tracks partial text per widget; ChatWidgetUI receives streamingText prop for real-time display.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +35,7 @@ import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
 import type { VoiceConfig } from './api/voiceApi';
 import { getVoices, getMetaPrompt, getStateConfig } from './utils/voiceStorage';
-import { getDefaultVoices, chatWithVoice, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
+import { getDefaultVoices, chatWithVoiceSSE, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
 import { useMobile } from './utils/mobileDetect';
 import { CommentGroupCard } from './components/CommentCard';
 import { findNormalizedPhrase } from './utils/textNormalize';
@@ -175,6 +176,8 @@ export default function App() {
   const [dropdownPosition, setDropdownPosition] = useState({ x: 0, y: 0 });
   const [dropdownTriggerCellId, setDropdownTriggerCellId] = useState<string | null>(null);
   const [chatProcessing, setChatProcessing] = useState<Set<string>>(new Set());
+  /** Per-widget streaming state: text response + reasoning/thinking deltas. */
+  const [chatStreaming, setChatStreaming] = useState<Map<string, { text: string; reasoning: string; reasoningDone: boolean }>>(new Map());
   /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
@@ -934,62 +937,111 @@ export default function App() {
     engineRef.current.deleteCell(widgetId);
   }, []);
 
-  // @@@ Handle sending chat message — calls chatWithVoice with full writing context
+  const handleChatToggleCollapse = useCallback((widgetId: string, collapsed: boolean) => {
+    if (!engineRef.current || !state) return;
+    const widgetCell = state.cells.find(c => c.type === 'widget' && c.id === widgetId);
+    if (!widgetCell || widgetCell.type !== 'widget') return;
+    const updated = { ...(widgetCell.data as ChatWidgetData), collapsed };
+    engineRef.current.updateWidgetData(widgetId, updated);
+  }, [state]);
+
+  // @@@ Handle sending chat message — streams via Claude-agent SSE
   const handleChatSend = useCallback(async (widgetId: string, message: string) => {
     if (!engineRef.current || !state) return;
 
-    // Find widget
     const widgetCell = state.cells.find(c => c.type === 'widget' && c.id === widgetId);
     if (!widgetCell || widgetCell.type !== 'widget') return;
 
-    const widgetData = widgetCell.data as ChatWidgetData;
+    const rawData = widgetCell.data as Partial<ChatWidgetData>;
+    // Guard against malformed or old-format widget data
+    const widgetData: ChatWidgetData = {
+      id: rawData.id ?? widgetId,
+      voiceName: rawData.voiceName ?? '',
+      voiceConfig: rawData.voiceConfig ?? { name: 'Agent', tagline: '', icon: 'brain', color: 'blue' },
+      threadId: rawData.threadId,
+      messages: rawData.messages ?? [],
+      createdAt: rawData.createdAt ?? Date.now(),
+    };
     const chatWidget = ChatWidget.fromData(widgetData);
 
-    // Add user message optimistically
+    // Optimistically add user message
     chatWidget.addUserMessage(message);
     engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
 
-    // Mark as processing
     setChatProcessing(prev => new Set(prev).add(widgetId));
+    setChatStreaming(prev => { const m = new Map(prev); m.set(widgetId, { text: '', reasoning: '', reasoningDone: false }); return m; });
 
-    try {
-      // Get ALL text from all text cells as unified context
-      const allText = state.cells
-        .filter(c => c.type === 'text')
-        .map(c => (c as TextCell).content)
-        .join('');
-
-      const metaPrompt = getMetaPrompt();
-      const statePrompt = selectedState && stateConfig.states[selectedState]
-        ? stateConfig.states[selectedState].prompt
-        : '';
-
-      // @@@ Use voiceName (which is the voice ID/key) for backend lookup
-      // Backend loads voice config from database using user_id from JWT
-      const response = await chatWithVoice(
-        widgetData.voiceName,  // This is the voice ID (key like "holder", "mirror")
-        chatWidget.getConversationHistory().slice(0, -1), // Exclude last message (just added)
-        message,
-        allText,
-        metaPrompt,
-        statePrompt
-      );
-
-      // Add assistant response
-      chatWidget.addAssistantMessage(response);
-      engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
-    } catch (error) {
-      console.error('Chat failed:', error);
-      chatWidget.addAssistantMessage('Sorry, I encountered an error.');
-      engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
-    } finally {
-      setChatProcessing(prev => {
-        const next = new Set(prev);
-        next.delete(widgetId);
-        return next;
-      });
+    // Ensure the widget has a thread_id before sending
+    let threadId = widgetData.threadId;
+    if (!threadId) {
+      try {
+        threadId = await ensureVoiceThread(widgetData.voiceName, undefined);
+        // Persist thread_id back into widget data
+        chatWidget.getData().threadId = threadId;
+        engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
+      } catch (err) {
+        console.error('Failed to create thread for widget:', err);
+        chatWidget.addAssistantMessage('Sorry, I could not start a session.');
+        engineRef.current.updateWidgetData(widgetId, chatWidget.getData());
+        setChatProcessing(prev => { const s = new Set(prev); s.delete(widgetId); return s; });
+        setChatStreaming(prev => { const m = new Map(prev); m.delete(widgetId); return m; });
+        return;
+      }
     }
-  }, [state, selectedState, stateConfig]);
+
+    const systemPrompt = widgetData.voiceConfig.tagline || '';
+
+    await chatWithVoiceSSE({
+      threadId,
+      message,
+      systemPrompt,
+      onDelta: (delta) => {
+        setChatStreaming(prev => {
+          const m = new Map(prev);
+          const cur = m.get(widgetId) ?? { text: '', reasoning: '', reasoningDone: false };
+          m.set(widgetId, { ...cur, text: cur.text + delta });
+          return m;
+        });
+      },
+      onReasoningDelta: (delta) => {
+        setChatStreaming(prev => {
+          const m = new Map(prev);
+          const cur = m.get(widgetId) ?? { text: '', reasoning: '', reasoningDone: false };
+          m.set(widgetId, { ...cur, reasoning: cur.reasoning + delta });
+          return m;
+        });
+      },
+      onReasoningEnd: () => {
+        setChatStreaming(prev => {
+          const m = new Map(prev);
+          const cur = m.get(widgetId);
+          if (cur) m.set(widgetId, { ...cur, reasoningDone: true });
+          return m;
+        });
+      },
+      onComplete: (fullText, reasoning) => {
+        const currentCell = engineRef.current?.getState()?.cells.find(c => c.id === widgetId);
+        const finalWidget = currentCell?.type === 'widget'
+          ? ChatWidget.fromData(currentCell.data as ChatWidgetData)
+          : chatWidget;
+        finalWidget.addAssistantMessage(fullText || 'Sorry, I could not respond.', reasoning);
+        engineRef.current?.updateWidgetData(widgetId, finalWidget.getData());
+        setChatProcessing(prev => { const s = new Set(prev); s.delete(widgetId); return s; });
+        setChatStreaming(prev => { const m = new Map(prev); m.delete(widgetId); return m; });
+      },
+      onError: (error) => {
+        console.error('Chat SSE failed:', error);
+        const currentCell = engineRef.current?.getState()?.cells.find(c => c.id === widgetId);
+        const finalWidget = currentCell?.type === 'widget'
+          ? ChatWidget.fromData(currentCell.data as ChatWidgetData)
+          : chatWidget;
+        finalWidget.addAssistantMessage('Sorry, I encountered an error.');
+        engineRef.current?.updateWidgetData(widgetId, finalWidget.getData());
+        setChatProcessing(prev => { const s = new Set(prev); s.delete(widgetId); return s; });
+        setChatStreaming(prev => { const m = new Map(prev); m.delete(widgetId); return m; });
+      },
+    });
+  }, [state]);
 
   // @@@ Helper to get watercolor background
   const getWatercolorBg = (color: string) => {
@@ -1496,7 +1548,11 @@ export default function App() {
                             });
                           } : undefined}
                           onDelete={() => handleChatDelete(cell.id)}
+                          onToggleCollapse={(collapsed) => handleChatToggleCollapse(cell.id, collapsed)}
                           isProcessing={chatProcessing.has(cell.id)}
+                          streamingText={chatStreaming.get(cell.id)?.text}
+                          streamingReasoning={chatStreaming.get(cell.id)?.reasoning}
+                          isReasoningDone={chatStreaming.get(cell.id)?.reasoningDone}
                         />
                       );
                     }

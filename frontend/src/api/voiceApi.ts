@@ -174,6 +174,119 @@ export async function analyzeText(
 }
 
 /**
+ * Chat with a voice via Claude-agent SSE streaming.
+ * Calls POST /api/claude-agent with the voice's thread_id and system prompt.
+ * Fires onDelta for each text-delta chunk, onComplete with full text, onError on failure.
+ */
+export async function chatWithVoiceSSE({
+  threadId,
+  message,
+  systemPrompt,
+  onDelta,
+  onReasoningDelta,
+  onReasoningEnd,
+  onComplete,
+  onError,
+}: {
+  threadId: string;
+  message: string;
+  systemPrompt: string;
+  onDelta: (delta: string) => void;
+  /** Called for each incremental reasoning/thinking chunk. */
+  onReasoningDelta?: (delta: string) => void;
+  /** Called once when the reasoning block finishes (reasoning-end received). */
+  onReasoningEnd?: () => void;
+  /** Called with (fullResponseText, fullReasoningText) when the stream completes. */
+  onComplete: (fullText: string, reasoning?: string) => void;
+  onError: (error: Error) => void;
+}): Promise<void> {
+  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}/api/claude-agent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        id: threadId,
+        resume: true,
+        message: {
+          id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
+          role: 'user',
+          parts: [{ type: 'text', text: message }],
+        },
+        chatModel: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
+        toolChoice: 'auto',
+        allowedAppDefaultToolkit: [],
+        allowedMcpServers: {},
+        attachments: [],
+        systemPrompt,
+      }),
+    });
+  } catch (err) {
+    onError(err instanceof Error ? err : new Error(String(err)));
+    return;
+  }
+
+  if (!response.ok || !response.body) {
+    onError(new Error(`Claude-agent request failed: ${response.status}`));
+    return;
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let accumulated = '';
+  let accumulatedReasoning = '';
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split(/\n\n+/);
+      buffer = frames.pop() ?? '';
+
+      for (const frame of frames) {
+        for (const line of frame.split('\n')) {
+          if (!line.startsWith('data: ')) continue;
+          const json = line.slice('data: '.length).trim();
+          if (!json) continue;
+          let evt: { type: string; delta?: string; errorText?: string };
+          try {
+            evt = JSON.parse(json);
+          } catch {
+            continue;
+          }
+          if (evt.type === 'text-delta' && typeof evt.delta === 'string') {
+            accumulated += evt.delta;
+            onDelta(evt.delta);
+          } else if (evt.type === 'reasoning-delta' && typeof evt.delta === 'string') {
+            accumulatedReasoning += evt.delta;
+            onReasoningDelta?.(evt.delta);
+          } else if (evt.type === 'reasoning-end') {
+            onReasoningEnd?.();
+          } else if (evt.type === 'error') {
+            onError(new Error(evt.errorText ?? 'Claude-agent error'));
+            return;
+          } else if (evt.type === 'finish') {
+            onComplete(accumulated, accumulatedReasoning || undefined);
+            return;
+          }
+        }
+      }
+    }
+    onComplete(accumulated, accumulatedReasoning || undefined);
+  } catch (err) {
+    onError(err instanceof Error ? err : new Error(String(err)));
+  }
+}
+
+/**
  * Chat with a voice persona (PolyCLI direct call)
  * Backend loads voice config from database using voice_id and user_id from JWT
  */

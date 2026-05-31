@@ -8,6 +8,8 @@
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ToolMessagePart for editor write tools.
 // [Sync] 2026-05-29: let the message list fill the available chat page width.
 // [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
+// [Sync] 2026-05-30: fix reasoning SSE display — auto-expand reasoning when state==='streaming'; show spin loader + blinking cursor during stream; border dims when done; hide manual expand toggle while streaming.
+// [Sync] 2026-05-30: reasoning blocks default to expanded (isExpandedActual ?? true) so thinking content stays visible after streaming ends; user can click to collapse; toggle flips isExpandedActual.
 import { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -127,17 +129,64 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
             {message.parts?.map((part, partIndex) => {
               const partKey = `${message.id}-${partIndex}`;
               const isExpanded = expandedParts[partKey] ?? false;
+              // For reasoning parts: default expanded (see isExpandedActual below).
+              // toggleExpanded flips from the *actual* state that was used to render.
               const toggleExpanded = () => setExpandedParts((current) => ({ ...current, [partKey]: !isExpanded }));
 
               if (part.type === 'reasoning') {
-                const reasoningText = (part as { text?: string }).text ?? '';
+                const reasoningPart = part as { text?: string; state?: 'streaming' | 'done' };
+                const reasoningText = reasoningPart.text ?? '';
+                const isStreaming = reasoningPart.state === 'streaming';
+                // Reasoning defaults to expanded so users always see thinking content.
+                // Use ?? true so first render is expanded; user can click to collapse.
+                const isExpandedActual = expandedParts[partKey] ?? true;
+                const showContent = isExpandedActual || isStreaming;
+                const toggleReasoningExpanded = () =>
+                  setExpandedParts((current) => ({ ...current, [partKey]: !isExpandedActual }));
                 return (
-                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-action-link)' }}>
-                    <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.5rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-muted)', fontSize: '0.85rem', fontStyle: 'italic', cursor: 'pointer' }}>
-                      <span style={{ flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{reasoningText.slice(0, REASONING_PREVIEW_LENGTH) || 'Thinking…'}</span>
-                      <span>{isExpanded ? '‹' : '›'}</span>
+                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: `2px solid ${isStreaming ? 'var(--color-action-link)' : 'var(--color-border-paper)'}`, transition: 'border-color 0.3s' }}>
+                    <button
+                      type="button"
+                      onClick={isStreaming ? undefined : toggleReasoningExpanded}
+                      style={{
+                        width: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        border: 'none',
+                        background: 'transparent',
+                        padding: 0,
+                        color: 'var(--color-text-muted)',
+                        fontSize: '0.85rem',
+                        fontStyle: 'italic',
+                        cursor: isStreaming ? 'default' : 'pointer',
+                      }}
+                    >
+                      {isStreaming ? (
+                        <span style={{
+                          width: '0.65rem', height: '0.65rem', borderRadius: '999px',
+                          border: '2px solid var(--color-action-link)', borderTopColor: 'transparent',
+                          display: 'inline-block', flexShrink: 0,
+                          animation: 'spin 0.8s linear infinite',
+                        }} />
+                      ) : null}
+                      <span style={{ flex: 1, textAlign: 'left', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {reasoningText.slice(0, REASONING_PREVIEW_LENGTH) || 'Thinking…'}
+                      </span>
+                      {!isStreaming ? <span>{isExpandedActual ? '‹' : '›'}</span> : null}
                     </button>
-                    {isExpanded ? <div style={{ marginTop: '0.5rem', whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.7, color: 'var(--color-text-secondary)' }}>{reasoningText}</div> : null}
+                    {showContent ? (
+                      <div style={{ marginTop: '0.5rem', whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.7, color: 'var(--color-text-secondary)' }}>
+                        {reasoningText}
+                        {isStreaming ? (
+                          <span style={{
+                            display: 'inline-block', width: '2px', height: '0.85em',
+                            background: 'var(--color-text-muted)', marginLeft: '1px',
+                            verticalAlign: 'text-bottom', animation: 'pulse 1s ease-in-out infinite',
+                          }} />
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                 );
               }
