@@ -70,12 +70,19 @@ def create_tables(db):
       user_id INTEGER NOT NULL,
       name TEXT,
       editor_state_json TEXT NOT NULL,
+      labels TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id)")
+
+    # Migration: add labels column for Agent-note collaboration (2026-05-31).
+    try:
+        db.execute("ALTER TABLE user_sessions ADD COLUMN labels TEXT")
+    except Exception:
+        pass
 
     # Daily pictures (generated images) - no UNIQUE constraint, allows multiple per day
     db.execute("""
@@ -1149,20 +1156,34 @@ def _normalize_created_at(created_at: Optional[Union[str, datetime]]) -> Optiona
     return str(created_at)
 
 
+def _parse_labels(raw: Optional[str]) -> list:
+    """Parse a JSON-encoded labels string into a Python list. Returns [] on error."""
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else []
+    except Exception:
+        return []
+
+
 def save_session(user_id: int, session_id: str, editor_state: dict, name: str = None,
-                 created_at: Optional[Union[str, datetime]] = None):
+                 created_at: Optional[Union[str, datetime]] = None,
+                 labels: Optional[list] = None):
     """Save or update a user session."""
     db = get_db()
     try:
         created_at_value = _normalize_created_at(created_at)
+        labels_json = json.dumps(labels, ensure_ascii=False) if labels is not None else None
         db.execute("""
-        INSERT INTO user_sessions (id, user_id, name, editor_state_json, created_at, updated_at)
-        VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
+        INSERT INTO user_sessions (id, user_id, name, editor_state_json, labels, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), CURRENT_TIMESTAMP)
         ON CONFLICT(id) DO UPDATE SET
           editor_state_json = excluded.editor_state_json,
           name = COALESCE(excluded.name, user_sessions.name),
+          labels = COALESCE(excluded.labels, user_sessions.labels),
           updated_at = CURRENT_TIMESTAMP
-        """, (session_id, user_id, name, json.dumps(editor_state), created_at_value))
+        """, (session_id, user_id, name, json.dumps(editor_state), labels_json, created_at_value))
         db.commit()
     finally:
         db.close()
@@ -1172,7 +1193,7 @@ def get_session(user_id: int, session_id: str):
     db = get_db()
     try:
         row = db.execute("""
-        SELECT id, name, editor_state_json, created_at, updated_at
+        SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
         WHERE user_id = ? AND id = ?
         """, (user_id, session_id)).fetchone()
@@ -1181,6 +1202,10 @@ def get_session(user_id: int, session_id: str):
             result = dict(row)
             result['editor_state'] = json.loads(result['editor_state_json'])
             del result['editor_state_json']
+            try:
+                result['labels'] = json.loads(result['labels']) if result.get('labels') else []
+            except Exception:
+                result['labels'] = []
             return result
         return None
     finally:
@@ -1195,7 +1220,7 @@ def get_sessions_batch(user_id: int, session_ids: list[str]) -> list[dict]:
     try:
         placeholders = ",".join("?" for _ in session_ids)
         query = f"""
-        SELECT id, name, editor_state_json, created_at, updated_at
+        SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
         WHERE user_id = ? AND id IN ({placeholders})
         """
@@ -1206,12 +1231,17 @@ def get_sessions_batch(user_id: int, session_ids: list[str]) -> list[dict]:
                 state = json.loads(row["editor_state_json"])
             except Exception:
                 state = {}
+            try:
+                labels = json.loads(row["labels"]) if row["labels"] else []
+            except Exception:
+                labels = []
             sessions.append(
                 {
                     "id": row["id"],
                     "name": row["name"],
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
+                    "labels": labels,
                     "editor_state": state,
                 }
             )
@@ -1224,7 +1254,7 @@ def list_sessions(user_id: int):
     db = get_db()
     try:
         rows = db.execute("""
-        SELECT id, name, editor_state_json, created_at, updated_at
+        SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
         WHERE user_id = ?
         ORDER BY updated_at DESC
@@ -1250,6 +1280,7 @@ def list_sessions(user_id: int):
                     "name": row["name"],
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
+                    "labels": _parse_labels(row["labels"]),
                     "first_line": first_line,
                 }
             )
@@ -1265,7 +1296,7 @@ def list_sessions_in_range(user_id: int, start_date: Optional[str], end_date: Op
     db = get_db()
     try:
         rows = db.execute(f"""
-        SELECT id, name, editor_state_json, created_at, updated_at
+        SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
         WHERE user_id = ?
           AND (? IS NULL OR date(COALESCE(created_at, updated_at)) >= ?)
@@ -1293,6 +1324,7 @@ def list_sessions_in_range(user_id: int, start_date: Optional[str], end_date: Op
                     "name": row["name"],
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
+                    "labels": _parse_labels(row["labels"]),
                     "first_line": first_line,
                 }
             )

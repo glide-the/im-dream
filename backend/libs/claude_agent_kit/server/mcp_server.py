@@ -58,6 +58,11 @@ from mcp import types as mcp_types
 from mcp.server import Server as McpServer
 
 from .touch_animation_tool import AnimationInteraction, TouchAnimationInput, touch_animation_handler
+from .sessions_tool import (
+    GET_SESSIONS_RANGE_TOOL_NAME,
+    GET_SESSIONS_RANGE_TOOL_SPEC,
+    handle_get_sessions_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -250,37 +255,46 @@ def create_user_mcp_server() -> McpServer:
                 name="touch_animation",
                 description=tool_description,
                 inputSchema=input_schema,
-            )
+            ),
+            mcp_types.Tool(
+                name=GET_SESSIONS_RANGE_TOOL_NAME,
+                description=GET_SESSIONS_RANGE_TOOL_SPEC.description,
+                inputSchema=GET_SESSIONS_RANGE_TOOL_SPEC.input_schema,
+            ),
         ]
 
     @server.call_tool()  # type: ignore[misc]
     async def call_tool(
         name: str, arguments: Optional[dict[str, Any]]
     ) -> list[mcp_types.TextContent]:
-        if name != "touch_animation":
-            raise ValueError(f"Unknown tool: {name!r}")
-
-        args: dict[str, Any] = arguments or {}
-        try:
-            input_data = TouchAnimationInput(
-                act=args.get("act", ""),
-                duration=int(args.get("duration", 3000)),
-                interaction=AnimationInteraction.model_validate(
-                    args.get("interaction", {"type": "text"})
-                ),
-                answers=args.get("answers"),
-            )
-        except (ValueError, TypeError, Exception) as exc:  # noqa: BLE001  # pydantic raises generic ValueError/ValidationError
-            logger.warning("touch_animation: input validation failed: %s", exc)
-            # Return a graceful error to the LLM rather than raising
-            return [
-                mcp_types.TextContent(
-                    type="text",
-                    text=f"动画工具输入格式错误：{exc}。请检查 act、duration 和 interaction 字段。",
+        if name == "touch_animation":
+            args: dict[str, Any] = arguments or {}
+            try:
+                input_data = TouchAnimationInput(
+                    act=args.get("act", ""),
+                    duration=int(args.get("duration", 3000)),
+                    interaction=AnimationInteraction.model_validate(
+                        args.get("interaction", {"type": "text"})
+                    ),
+                    answers=args.get("answers"),
                 )
-            ]
+            except (ValueError, TypeError, Exception) as exc:  # noqa: BLE001  # pydantic raises generic ValueError/ValidationError
+                logger.warning("touch_animation: input validation failed: %s", exc)
+                # Return a graceful error to the LLM rather than raising
+                return [
+                    mcp_types.TextContent(
+                        type="text",
+                        text=f"动画工具输入格式错误：{exc}。请检查 act、duration 和 interaction 字段。",
+                    )
+                ]
 
-        result_text = await touch_animation_handler(input_data)
-        return [mcp_types.TextContent(type="text", text=result_text)]
+            result_text = await touch_animation_handler(input_data)
+            return [mcp_types.TextContent(type="text", text=result_text)]
+
+        if name == GET_SESSIONS_RANGE_TOOL_NAME:
+            result_text = handle_get_sessions_range(arguments)
+            return [mcp_types.TextContent(type="text", text=result_text)]
+
+        raise ValueError(f"Unknown tool: {name!r}")
 
     return server

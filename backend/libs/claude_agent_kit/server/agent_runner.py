@@ -95,6 +95,7 @@ from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names
+from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import apply_project_sdk_runtime_options, apply_user_sdk_env_to_options
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ except NameError:
 
 DEFAULT_ALLOWED_TOOLS: list[str] = [
     "mcp__user__touch_animation",
+    f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
@@ -477,14 +479,18 @@ def _stdio_env(
     return env
 
 
-def _user_mcp_stdio_config() -> McpStdioServerConfig:
-    """Build the external stdio MCP config for the user animation tool server."""
+def _user_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
+    """Build the external stdio MCP config for the user animation + session tool server.
+
+    *extra_env* is forwarded to ``_stdio_env`` so that session-scoped bindings
+    (e.g. ``INK_AGENT_USER_ID``) reach the subprocess.
+    """
 
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
         args=["-m", "libs.claude_agent_kit.server.user_mcp_stdio"],
-        env=_stdio_env(),
+        env=_stdio_env(extra_env=extra_env),
     )
 
 
@@ -1018,7 +1024,7 @@ class ClaudeAgentRunner:
             # reaches EOF, later control writes can fail with
             # "ProcessTransport is not ready for writing".  Stdio MCP gives the
             # tool protocol its own child-process stdin/stdout.
-            mcp_servers["user"] = _user_mcp_stdio_config()
+            mcp_servers["user"] = _user_mcp_stdio_config(extra_env=mcp_env)
         if _memory_mcp_enabled() and any(
             tool.startswith(_MEMORY_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):

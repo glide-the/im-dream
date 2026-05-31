@@ -15,6 +15,8 @@
 | SSE 流式输出 | ✅ | text-delta / tool-event / finish |
 | 工具确认（手动审批）| ✅ | ToolConfirmationStore |
 | 用户认证 | ✅ | 复用现有 JWT `get_current_user` |
+| 笔记标签（labels）| ✅ | **新增（2026-05-31）** user_sessions 增加 labels 列，用于 Agent-笔记协作检索 |
+| Agent 跨 session 笔记检索（get_sessions_range）| ✅ | **新增（2026-05-31）** MCP 工具，Agent 可按日期范围检索历史 session |
 | Mem0 长期记忆 | ❌ | 不引入；通过写作会话提供上下文 |
 | IoT/硬件 MCP（项圈）| ❌ | Ink & Memory 无此设备 |
 | 宠物/角色 persona | ❌ | Ink & Memory 无宠物领域 |
@@ -221,3 +223,87 @@ data: {"type": "finish", "reason": "error"}
 | 速率限制 | `thread_factory.run_streaming` 入口 | 检查 per-user 频率 |
 | 多工作区 | `workspace.get_workspace_root` | 支持 S3/NFS 远程工作区 |
 | 管理员 session 列表 | 新增 `/api/claude-agent/sessions` | `list_session_snapshots()` |
+
+---
+
+## 7. 笔记标签（labels）与跨 Session 协作检索
+
+> **新增（2026-05-31）**
+
+### 7.1 背景与目标
+
+用户每次编辑笔记时，在 `user_sessions` 中记录一个 `labels` 属性（JSON 数组字符串），用于标注该笔记的主题标签（如 `["孤独", "成长"]`）。
+
+此功能服务于 **Agent 与笔记之间的协作交互**：
+- Agent 在系统提示的近期条目块中可以看到每条 session 的 `sessionId` 和 `labels`，从而感知用户写作主题的分布；
+- 当用户提到某个主题时，Agent 可调用 `mcp__user__get_sessions_range` 工具检索超过三天的历史 session，并根据返回的 `labels` 定位相关内容。
+
+### 7.2 数据库变更
+
+`user_sessions` 新增 `labels` 列（TEXT，JSON 数组，可空）：
+
+```sql
+ALTER TABLE user_sessions ADD COLUMN labels TEXT;
+-- 运行时迁移：已存在的数据库在 init_db() 中自动执行，列已存在则静默跳过
+```
+
+`POST /api/sessions` 接受 `labels` 字段（列表），序列化为 JSON 字符串后存储。
+
+### 7.3 近期 Session 上下文格式变更
+
+`_load_recent_sessions_block` 仅注入**最近三天**的 session，格式改为：
+
+```
+### {date} — sessionId:{sessionId}, {labels}: {title}
+{excerpt}
+```
+
+示例：
+```
+### 2026-05-30 — sessionId:abc123, 孤独,成长: 今天的感悟
+今天的会面让我...
+```
+
+### 7.4 `mcp__user__get_sessions_range` MCP 工具
+
+用于检索**三天前**的历史 session，供 Agent 在用户提到某主题时按需拉取。
+
+| 字段 | 说明 |
+|------|------|
+| 工具名 | `mcp__user__get_sessions_range` |
+| 命名空间 | `user`（与 `touch_animation` 同一 MCP 子进程） |
+| 参数 | `start_date: string (YYYY-MM-DD)`, `end_date: string (YYYY-MM-DD)` |
+| 返回 | sessions 数组，每项含 `id`, `name`, `labels`, `date`, `excerpt` |
+| 数据源 | 直接读取 `user_sessions` 数据库（trusted subprocess），`user_id` 通过 `INK_AGENT_USER_ID` env var 注入 |
+
+**系统提示中的 Workflow 说明**（见 `_SYSTEM_PROMPT_TEMPLATE`）：
+
+```
+## Session Retrieval Workflow
+
+The system prompt above only injects the last 3 days of journal entries.
+When the user mentions a topic, theme, or past event that might be covered
+in older entries, use `mcp__user__get_sessions_range` to search further back:
+
+1. Call get_sessions_range(start_date, end_date) with an estimated date window.
+2. Scan the returned `labels` and `excerpt` fields to find relevant sessions.
+3. If a relevant session is found, reference its content when responding to the user.
+
+Do not call this tool for every turn — only when the user's message suggests
+they are referring to something that predates the visible recent entries.
+```
+
+### 7.5 env var 注入路径
+
+```
+ClaudeAgentService.assemble_context
+  → run_options.mcp_env["INK_AGENT_USER_ID"] = str(request.user_id)
+
+agent_runner._user_mcp_stdio_config(extra_env)
+  → _stdio_env(extra_env=extra_env)
+  → McpStdioServerConfig.env["INK_AGENT_USER_ID"] = user_id
+
+sessions_tool.get_sessions_range_handler
+  → os.getenv("INK_AGENT_USER_ID")
+  → database.list_sessions_in_range(user_id, start_date, end_date)
+```

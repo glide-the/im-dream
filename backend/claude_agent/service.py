@@ -406,7 +406,7 @@ class ClaudeAgentService:
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
-            mcp_env=user_env_vars,
+            mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,
             editor_state=active_editor_state,
             # Live getter: agent_runner._pre_tool_use_hook calls this instead of
