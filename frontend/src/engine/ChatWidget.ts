@@ -9,6 +9,8 @@
 export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  /** Extended thinking/reasoning text produced before the response. */
+  thinking?: string;
   timestamp: number;
 }
 
@@ -25,6 +27,8 @@ export interface ChatWidgetData {
   threadId?: string;
   messages: ChatMessage[];
   createdAt: number;
+  /** Whether the widget is collapsed in the Writing view. */
+  collapsed?: boolean;
 }
 
 export class ChatWidget {
@@ -63,10 +67,11 @@ export class ChatWidget {
   }
 
   // @@@ Add assistant response (after backend returns)
-  addAssistantMessage(content: string): void {
+  addAssistantMessage(content: string, thinking?: string): void {
     this.data.messages.push({
       role: 'assistant',
       content,
+      ...(thinking ? { thinking } : {}),
       timestamp: Date.now()
     });
   }

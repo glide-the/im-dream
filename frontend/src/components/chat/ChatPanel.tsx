@@ -6,6 +6,7 @@
 // [Sync] 2026-05-27: forward currentToolChoice to ChatMessageList so manual-mode tool approvals are shown inline.
 // [Sync] 2026-05-29: accept editorState prop and forward as editor_state in prepareSendMessagesRequest body.
 // [Sync] 2026-05-29: default resume=true in every claude-agent request body.
+// [Sync] 2026-05-30: fix shouldShowLoadingIndicator — include reasoning parts as visible so "Thinking…" footer doesn't show alongside inline reasoning block.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatMessageList.
 // [Sync] 2026-05-29: let the input dock fill the available chat page width.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -249,7 +250,9 @@ export default function ChatPanel({
       return false;
     }
     const lastMessage = messages.at(-1);
-    const hasVisibleParts = lastMessage?.parts?.some((part) => part.type === 'text' || isToolUIPart(part));
+    const hasVisibleParts = lastMessage?.parts?.some(
+      (part) => part.type === 'text' || part.type === 'reasoning' || isToolUIPart(part),
+    );
     return !hasVisibleParts;
   }, [chatLoading, messages]);
 
