@@ -8,6 +8,7 @@
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
 // [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
+// [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -33,7 +34,7 @@ import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
 import type { VoiceConfig } from './api/voiceApi';
 import { getVoices, getMetaPrompt, getStateConfig } from './utils/voiceStorage';
-import { getDefaultVoices, chatWithVoice, importLocalData, loadVoicesFromDecks } from './api/voiceApi';
+import { getDefaultVoices, chatWithVoice, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
 import { useMobile } from './utils/mobileDetect';
 import { CommentGroupCard } from './components/CommentCard';
 import { findNormalizedPhrase } from './utils/textNormalize';
@@ -50,6 +51,7 @@ import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
+import type { ActiveChatVoice } from './lib/chat-schema';
 
 // @@@ Icon map with React Icons
 const iconMap = {
@@ -173,6 +175,10 @@ export default function App() {
   const [dropdownPosition, setDropdownPosition] = useState({ x: 0, y: 0 });
   const [dropdownTriggerCellId, setDropdownTriggerCellId] = useState<string | null>(null);
   const [chatProcessing, setChatProcessing] = useState<Set<string>>(new Set());
+  /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
+  const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
+  /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
+  const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
 
   // @@@ Warning dialog state
   const [showWarning, setShowWarning] = useState(false);
@@ -850,7 +856,15 @@ export default function App() {
     }
   }, [composingCells, handleTextCellKeyDown]);
 
-  // @@@ Handle agent selection from dropdown
+  // @@@ Navigate to Chat view with a specific thread (used by editor widgets and Deck manager).
+  const handleOpenChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
+    setRequestedChatThreadId(threadId);
+    setActiveChatVoice(voiceInfo);
+    setCurrentView('chat');
+    setHasOpenedChatView(true);
+  }, []);
+
+  // @@@ Handle agent selection from dropdown — creates a Claude-agent thread and inserts an Agent Link widget.
   const handleAgentSelect = useCallback((voiceName: string, voiceConfig: VoiceConfig) => {
     setDropdownVisible(false);
 
@@ -871,16 +885,30 @@ export default function App() {
         .map(c => c.id)
     );
 
-    // Create chat widget
+    // Insert widget immediately (without thread_id yet – shows "Creating thread…")
     const chatWidget = new ChatWidget(voiceName, voiceConfig);
-
-    // Insert widget at cursor (engine will handle @ removal)
     engineRef.current.insertWidgetAtCursor(dropdownTriggerCellId, cursorPos, 'chat', chatWidget.getData());
     setDropdownTriggerCellId(null);
 
-    // Focus the text cell immediately after the newly inserted widget
+    // Identify the newly inserted widget
     const updatedCells = engineRef.current.getState().cells;
     const newWidget = updatedCells.find(c => c.type === 'widget' && !beforeWidgetIds.has(c.id));
+
+    // Create Claude-agent thread asynchronously, then update widget with thread_id.
+    // The user stays in the Writing view — the inline ChatWidgetUI handles the conversation.
+    void (async () => {
+      try {
+        const threadId = await ensureVoiceThread(voiceName, voiceConfig.thread_id);
+        if (newWidget && engineRef.current) {
+          const widgetWithThread = new ChatWidget(voiceName, voiceConfig, threadId);
+          engineRef.current.updateWidgetData(newWidget.id, widgetWithThread.getData());
+        }
+      } catch (err) {
+        console.error('Failed to create Claude-agent thread for voice:', err);
+      }
+    })();
+
+    // Focus the text cell immediately after the newly inserted widget
     if (newWidget) {
       const widgetIdx = updatedCells.findIndex(c => c.id === newWidget.id);
       const nextCell = widgetIdx >= 0 && widgetIdx + 1 < updatedCells.length
@@ -900,7 +928,13 @@ export default function App() {
     }
   }, [dropdownTriggerCellId]);
 
-  // @@@ Handle sending chat message
+  // @@@ Handle deleting chat widget
+  const handleChatDelete = useCallback((widgetId: string) => {
+    if (!engineRef.current) return;
+    engineRef.current.deleteCell(widgetId);
+  }, []);
+
+  // @@@ Handle sending chat message — calls chatWithVoice with full writing context
   const handleChatSend = useCallback(async (widgetId: string, message: string) => {
     if (!engineRef.current || !state) return;
 
@@ -956,12 +990,6 @@ export default function App() {
       });
     }
   }, [state, selectedState, stateConfig]);
-
-  // @@@ Handle deleting chat widget
-  const handleChatDelete = useCallback((widgetId: string) => {
-    if (!engineRef.current) return;
-    engineRef.current.deleteCell(widgetId);
-  }, []);
 
   // @@@ Helper to get watercolor background
   const getWatercolorBg = (color: string) => {
@@ -1458,6 +1486,15 @@ export default function App() {
                           key={cell.id}
                           data={cell.data as ChatWidgetData}
                           onSendMessage={(msg) => handleChatSend(cell.id, msg)}
+                          onOpenChat={(cell.data as ChatWidgetData).threadId ? (threadId) => {
+                            const d = cell.data as ChatWidgetData;
+                            handleOpenChatThread(threadId, {
+                              name: d.voiceConfig.name,
+                              systemPrompt: d.voiceConfig.tagline,
+                              icon: d.voiceConfig.icon,
+                              color: d.voiceConfig.color,
+                            });
+                          } : undefined}
                           onDelete={() => handleChatDelete(cell.id)}
                           isProcessing={chatProcessing.has(cell.id)}
                         />
@@ -1679,7 +1716,8 @@ export default function App() {
           display: 'flex',
           overflow: 'hidden'
         }}>
-          <DeckManager onUpdate={async () => {
+          <DeckManager
+            onUpdate={async () => {
             // @@@ Reload voice configs from deck system
             console.log('Deck system updated, reloading voices...');
             const updatedVoices = await loadVoicesFromDecks();
@@ -1690,7 +1728,9 @@ export default function App() {
             }
 
             console.log(`✅ Loaded ${Object.keys(updatedVoices).length} enabled voices`);
-          }} />
+          }}
+            onOpenChat={handleOpenChatThread}
+          />
         </div>
       )}
       {currentView === 'settings' && (
@@ -1914,7 +1954,12 @@ export default function App() {
           display: currentView === 'chat' ? 'block' : 'none',
           overflow: 'hidden'
         }}>
-          <ChatView editorState={state ? (state as unknown as Record<string, unknown>) : null} onEditorWriteConfirmed={handleEditorWriteConfirmed} />
+          <ChatView
+            editorState={state ? (state as unknown as Record<string, unknown>) : null}
+            onEditorWriteConfirmed={handleEditorWriteConfirmed}
+            requestedThreadId={requestedChatThreadId}
+            activeVoice={activeChatVoice}
+          />
         </div>
       )}
 

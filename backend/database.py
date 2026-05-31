@@ -214,6 +214,13 @@ def create_tables(db):
     db.execute("CREATE INDEX IF NOT EXISTS idx_voices_deck ON voices(deck_id)")
     db.execute("CREATE INDEX IF NOT EXISTS idx_voices_owner ON voices(owner_id)")
 
+    # @@@ Migration: add thread_id column for Claude-agent thread association
+    try:
+        db.execute("ALTER TABLE voices ADD COLUMN thread_id TEXT")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # @@@ Friendships table - bidirectional friend relationships
     db.execute("""
     CREATE TABLE IF NOT EXISTS friendships (
@@ -983,7 +990,7 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
 
         # Build update query
         allowed_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
-                         'icon', 'color', 'enabled', 'order_index']
+                         'icon', 'color', 'enabled', 'order_index', 'thread_id']
         content_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
                          'icon', 'color']
 

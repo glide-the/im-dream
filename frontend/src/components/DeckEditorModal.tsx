@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import type { Deck, Voice } from '../api/voiceApi';
+import { ensureVoiceThread } from '../api/voiceApi';
 import { COLORS, iconMap } from './deckVisuals';
+import type { ActiveChatVoice } from '../lib/chat-schema';
 
 interface Props {
   deck: Deck;
@@ -14,6 +16,7 @@ interface Props {
   onUpdateVoice: (voiceId: string, data: Partial<Voice>) => Promise<void>;
   onToggleVoice: (voiceId: string, currentEnabled: boolean) => Promise<void>;
   onDeleteVoice: (voiceId: string) => Promise<void>;
+  onOpenChat?: (threadId: string, voiceInfo: ActiveChatVoice) => void;
 }
 
 export default function DeckEditorModal({
@@ -27,7 +30,8 @@ export default function DeckEditorModal({
   onUpdateDeck,
   onUpdateVoice,
   onToggleVoice,
-  onDeleteVoice
+  onDeleteVoice,
+  onOpenChat
 }: Props) {
   const voices = deck.voices || [];
   const selectedVoice = useMemo(
@@ -507,6 +511,35 @@ export default function DeckEditorModal({
                           }}
                         >
                           Delete
+                        </button>
+                      )}
+
+                      {onOpenChat && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const threadId = await ensureVoiceThread(selectedVoice.id, selectedVoice.thread_id);
+                              onOpenChat(threadId, {
+                                name: selectedVoice.name,
+                                systemPrompt: selectedVoice.system_prompt,
+                                icon: selectedVoice.icon,
+                                color: selectedVoice.color,
+                              });
+                            } catch (err) {
+                              console.error('Failed to open chat thread:', err);
+                            }
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            background: 'var(--color-action-link)',
+                            border: 'none',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            color: '#fff'
+                          }}
+                        >
+                          Chat →
                         </button>
                       )}
                     </div>

@@ -9,6 +9,7 @@
 // [Sync] 2026-05-29: keep the original full-height workspace shell so VerticalNav stays flush-left.
 // [Sync] 2026-05-29: make status bar and collapsible sidebar-panel chrome theme-adaptive.
 // [Sync] 2026-05-29: move thread list into VerticalNav expanded sidebar; remove separate thread sidebar and flyout; remove header bar; float share+more buttons.
+// [Sync] 2026-05-30: accept activeVoice prop to display deck/voice badge in top-right and forward system prompt to ChatPanel.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -20,6 +21,8 @@ import type { Attachment } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { IconClock, IconFolder, IconMoreHorizontal, IconPlus, IconShare, IconX } from './Icons';
+import type { ActiveChatVoice } from '../../lib/chat-schema';
+import { iconMap } from '../deckVisuals';
 
 const API_BASE = '/ink-and-memory';
 
@@ -42,12 +45,16 @@ interface RawChatMessage {
 
 interface ChatViewProps {
   threadId?: string;
+  /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
+  requestedThreadId?: string;
   onNewChat?: () => void;
   quickActions?: QuickActionCardItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
   editorState?: Record<string, unknown> | null;
   /** Called when an editor write tool is confirmed so the Writing view can reload. */
   onEditorWriteConfirmed?: () => void;
+  /** Active deck / voice info — displayed in the top-right badge and forwarded to the backend as voice context. */
+  activeVoice?: ActiveChatVoice;
 }
 
 async function createThread(): Promise<string | null> {
@@ -109,10 +116,12 @@ async function deleteThread(threadId: string): Promise<boolean> {
 
 export default function ChatView({
   threadId: initialThreadId,
+  requestedThreadId,
   onNewChat,
   quickActions = QUICK_ACTION_CARDS,
   editorState,
   onEditorWriteConfirmed,
+  activeVoice,
 }: ChatViewProps) {
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
@@ -149,6 +158,19 @@ export default function ChatView({
   useEffect(() => {
     void reloadThreads();
   }, [reloadThreads]);
+
+  // @@@ External navigation: switch to a specific thread when requestedThreadId changes.
+  useEffect(() => {
+    if (!requestedThreadId || requestedThreadId === activeThreadId) return;
+    setThreadMessages(null);
+    setIsLoadingMessages(true);
+    setActiveThreadId(requestedThreadId);
+    setHasConversationStarted(true);
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    void reloadThreads();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedThreadId]);
 
   // Fetch messages for the active thread (following better-chatbot pattern:
   // parent fetches history and passes as initialMessages to the chat component)
@@ -253,8 +275,43 @@ export default function ChatView({
     <WorkspaceProvider>
       <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
         <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
-          {/* 浮动操作按钮区 – 右上角：新建 / 更多（含下拉菜单） */}
+          {/* 浮动操作按钮区 – 右上角：卡组信息 / 新建 / 更多（含下拉菜单） */}
           <div style={{ position: 'absolute', top: '0.65rem', right: '0.75rem', zIndex: 20, display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
+            {/* 当前 Deck Voice 徽标 */}
+            {activeVoice && (() => {
+              const colorHex: Record<string, string> = {
+                blue: '#4da3ff', pink: '#ff66b3', green: '#52c77e',
+                purple: '#9b7ff5', orange: '#f9a875', red: '#f86e6e',
+                yellow: '#f5d76e', teal: '#5ec0c0'
+              };
+              const hex = colorHex[activeVoice.color] ?? '#4da3ff';
+              const VoiceIcon = iconMap[activeVoice.icon as keyof typeof iconMap] || iconMap.brain;
+              return (
+                <div
+                  title={activeVoice.name}
+                  style={{
+                    height: '2rem',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0 0.6rem',
+                    borderRadius: '0.55rem',
+                    border: `1px solid ${hex}55`,
+                    background: `${hex}18`,
+                    color: hex,
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    maxWidth: '9rem',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <VoiceIcon style={{ width: '0.85rem', height: '0.85rem', flexShrink: 0 }} />
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {activeVoice.name}
+                  </span>
+                </div>
+              );
+            })()}
             {/* 新建对话 */}
             <button
               type="button"
@@ -349,6 +406,7 @@ export default function ChatView({
                 inputPlaceholder="Ask Ink & Memory…"
                 editorState={editorState}
                 onEditorWriteConfirmed={onEditorWriteConfirmed}
+                voiceSystemPrompt={activeVoice?.systemPrompt}
                 onConversationStart={() => {
                   setHasConversationStarted(true);
                   void reloadThreads();

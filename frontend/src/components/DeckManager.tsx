@@ -17,12 +17,14 @@ import {
 } from '../api/voiceApi';
 import DeckEditorModal from './DeckEditorModal';
 import { COLORS, iconMap } from './deckVisuals';
+import type { ActiveChatVoice } from '../lib/chat-schema';
 
 interface Props {
   onUpdate?: () => void;
+  onOpenChat?: (threadId: string, voiceInfo: ActiveChatVoice) => void;
 }
 
-export default function DeckManager({ onUpdate }: Props) {
+export default function DeckManager({ onUpdate, onOpenChat }: Props) {
   const { t } = useTranslation();
   const spinnerKeyframes = useMemo(() => (
     `@keyframes deck-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`
@@ -784,6 +786,7 @@ export default function DeckManager({ onUpdate }: Props) {
           onUpdateVoice={handleUpdateVoice}
           onToggleVoice={handleToggleVoice}
           onDeleteVoice={handleDeleteVoice}
+          onOpenChat={onOpenChat}
         />
       )}
 

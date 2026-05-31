@@ -1,7 +1,8 @@
 /**
- * ChatWidget - Persistent 1-to-1 chat with a voice agent
+ * ChatWidget - Agent reference card linked to a Claude-agent thread.
  *
- * Each widget maintains its own conversation history.
+ * Each widget stores the associated Claude-agent thread_id so the user can
+ * jump from the Writing view directly into the persisted Chat session.
  * The widget is inserted after the line where @ was triggered.
  */
 
@@ -20,6 +21,8 @@ export interface ChatWidgetData {
     icon: string;
     color: string;
   };
+  /** Claude-agent thread_id for the linked Chat session. */
+  threadId?: string;
   messages: ChatMessage[];
   createdAt: number;
 }
@@ -27,7 +30,7 @@ export interface ChatWidgetData {
 export class ChatWidget {
   private data: ChatWidgetData;
 
-  constructor(voiceName: string, voiceConfig: any) {
+  constructor(voiceName: string, voiceConfig: any, threadId?: string) {
     this.data = {
       id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
       voiceName,
@@ -37,6 +40,7 @@ export class ChatWidget {
         icon: voiceConfig.icon,
         color: voiceConfig.color
       },
+      threadId,
       messages: [],
       createdAt: Date.now()
     };
@@ -94,5 +98,9 @@ export class ChatWidget {
 
   getMessages(): ChatMessage[] {
     return this.data.messages;
+  }
+
+  getThreadId(): string | undefined {
+    return this.data.threadId;
   }
 }

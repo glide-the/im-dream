@@ -57,6 +57,7 @@ class VoiceUpdateRequest(BaseModel):
     color: str = None
     enabled: bool = None
     order_index: int = None
+    thread_id: str = None
 
 
 class VoiceForkRequest(BaseModel):

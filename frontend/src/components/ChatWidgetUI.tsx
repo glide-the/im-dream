@@ -1,3 +1,6 @@
+// [Sync] 2026-05-30: restore inline Deck chat — onSendMessage/isProcessing props connect to
+//   handleChatSend in App.tsx which calls chatWithVoice with full writing context (allText,
+//   metaPrompt, statePrompt). "Chat →" button opens the full Chat view when thread is available.
 import React, { useState, useRef, useEffect } from 'react';
 import type { ChatWidgetData } from '../engine/ChatWidget';
 import {
@@ -43,11 +46,13 @@ const iconMap = {
 interface ChatWidgetUIProps {
   data: ChatWidgetData;
   onSendMessage: (message: string) => void;
+  /** Called when the user clicks "Chat →". Passes the linked thread_id. */
+  onOpenChat?: (threadId: string) => void;
   onDelete: () => void;
   isProcessing: boolean;
 }
 
-export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessing }: ChatWidgetUIProps) {
+export default function ChatWidgetUI({ data, onSendMessage, onOpenChat, onDelete, isProcessing }: ChatWidgetUIProps) {
   const [inputValue, setInputValue] = useState('');
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [isHovered, setIsHovered] = useState(false);
@@ -122,6 +127,34 @@ export default function ChatWidgetUI({ data, onSendMessage, onDelete, isProcessi
       >
         ×
       </button>
+
+      {/* "Chat →" button - only visible when a thread is linked */}
+      {onOpenChat && data.threadId && (
+        <button
+          onClick={() => onOpenChat(data.threadId as string)}
+          style={{
+            position: 'absolute',
+            top: '8px',
+            right: '36px',
+            padding: '3px 8px',
+            backgroundColor: 'transparent',
+            color: 'var(--color-action-link)',
+            border: '1px solid var(--color-action-link)',
+            borderRadius: '4px',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            transition: 'all 0.2s',
+            opacity: isHovered ? 1 : 0,
+            pointerEvents: isHovered ? 'auto' : 'none',
+            lineHeight: '1.5',
+            whiteSpace: 'nowrap',
+          }}
+          title="Open full Chat view"
+        >
+          Chat →
+        </button>
+      )}
 
       {/* Initial greeting or first message */}
       <div style={{
