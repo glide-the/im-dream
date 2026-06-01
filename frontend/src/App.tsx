@@ -9,7 +9,7 @@
 // [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
-// [Sync] 2026-05-30: fix Deck widget SSE — handleChatSend now calls chatWithVoiceSSE (POST /api/claude-agent); chatStreamingText Map tracks partial text per widget; ChatWidgetUI receives streamingText prop for real-time display.
+// [Sync] 2026-06-01: pass state as editorState to chatWithVoiceSSE in handleChatSend so inline widget agent receives editor_state.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -995,6 +995,7 @@ export default function App() {
       threadId,
       message,
       systemPrompt,
+      editorState: state ? (state as unknown as Record<string, unknown>) : null,
       onDelta: (delta) => {
         setChatStreaming(prev => {
           const m = new Map(prev);
