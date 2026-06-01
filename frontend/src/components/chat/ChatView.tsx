@@ -1,5 +1,5 @@
-// [Input] Consume WorkspaceContext, dashboard file/nav/quick-action components, ChatPanel, auth token, and AI SDK message types.
-// [Output] Render chat workspace with ChatGPT-style sidebar (thread list inside VerticalNav), file sidebar, quick actions, and ChatPanel.
+// [Input] Consume WorkspaceContext, dashboard file/nav/quick-action components, AIInputDock, ChatPanel, auth token, and AI SDK message types.
+// [Output] Render chat workspace with lazy thread creation, history/file sidebars, quick actions, and ChatPanel.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
 // [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
@@ -10,18 +10,25 @@
 // [Sync] 2026-05-29: make status bar and collapsible sidebar-panel chrome theme-adaptive.
 // [Sync] 2026-05-29: move thread list into VerticalNav expanded sidebar; remove separate thread sidebar and flyout; remove header bar; float share+more buttons.
 // [Sync] 2026-05-30: accept activeVoice prop to display deck/voice badge in top-right and forward system prompt to ChatPanel.
+// [Sync] 2026-06-01: stop creating a thread on first Chat view mount; create lazily on first send, quick action, or explicit New Chat.
+// [Sync] 2026-06-01: add delete button to thread list items; hover shows × button; calls DELETE /api/claude-agent/threads/{id}; clears workspace when active thread is deleted.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import QuickActionCard from '../dashboard/QuickActionCard';
 import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
+import AIInputDock from './AIInputDock';
 import ChatPanel from './ChatPanel';
-import type { Attachment } from './AIInputDock.helpers';
+import {
+  type Attachment,
+  type UploadedFile,
+  toAttachment,
+} from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { IconClock, IconFolder, IconMoreHorizontal, IconPlus, IconShare, IconX } from './Icons';
-import type { ActiveChatVoice } from '../../lib/chat-schema';
+import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 
 const API_BASE = '/ink-and-memory';
@@ -79,6 +86,18 @@ async function fetchThreads(): Promise<ChatThread[]> {
   }
 }
 
+async function deleteThread(threadId: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
   try {
     const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
@@ -105,15 +124,6 @@ async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
   }
 }
 
-async function deleteThread(threadId: string): Promise<boolean> {
-  try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    return res.ok;
-  } catch {
-    return false;
-  }
-}
-
 export default function ChatView({
   threadId: initialThreadId,
   requestedThreadId,
@@ -126,6 +136,7 @@ export default function ChatView({
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
+  const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
   const [hasConversationStarted, setHasConversationStarted] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
@@ -134,20 +145,12 @@ export default function ChatView({
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
-  const [threadSearchQuery, setThreadSearchQuery] = useState('');
+  const threadSearchQuery = '';
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-
-  // Create an initial thread if none provided
-  useEffect(() => {
-    if (activeThreadId) return;
-    let cancelled = false;
-    void (async () => {
-      const id = await createThread();
-      if (!cancelled && id) setActiveThreadId(id);
-    })();
-    return () => { cancelled = true; };
-  }, [activeThreadId]);
+  const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
+  const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
 
   // Load thread list
   const reloadThreads = useCallback(async () => {
@@ -168,6 +171,7 @@ export default function ChatView({
     setHasConversationStarted(true);
     setQueuedPrompt('');
     setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
     void reloadThreads();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedThreadId]);
@@ -192,7 +196,46 @@ export default function ChatView({
     return () => { cancelled = true; };
   }, [activeThreadId]);
 
+  const queuePromptForThread = useCallback((
+    threadId: string,
+    prompt: string,
+    attachments: Attachment[] = [],
+    toolChoice: ToolChoice = 'auto',
+  ) => {
+    setThreadMessages([]);
+    setIsLoadingMessages(false);
+    setActiveThreadId(threadId);
+    setHasConversationStarted(true);
+    setQueuedPrompt(prompt);
+    setQueuedAttachments(attachments);
+    setQueuedToolChoice(toolChoice);
+    setQueuedPromptNonce((value) => value + 1);
+    void reloadThreads();
+  }, [reloadThreads]);
+
+  const startThreadWithQueuedSend = useCallback(async (
+    message: string,
+    uploadedFiles: UploadedFile[] = [],
+    toolChoice: ToolChoice = 'auto',
+  ) => {
+    if (isCreatingThread) return;
+
+    setDraftInputError(null);
+    setIsCreatingThread(true);
+    const id = await createThread();
+    setIsCreatingThread(false);
+    if (!id) {
+      setDraftInputError('创建对话失败，请稍后再试。');
+      return;
+    }
+
+    queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
+  }, [isCreatingThread, queuePromptForThread]);
+
   const handleNewChat = useCallback(async () => {
+    if (isCreatingThread) return;
+
+    setDraftInputError(null);
     setIsCreatingThread(true);
     const id = await createThread();
     setIsCreatingThread(false);
@@ -205,10 +248,14 @@ export default function ChatView({
       setHasConversationStarted(false);
       setQueuedPrompt('');
       setQueuedAttachments([]);
+      setQueuedToolChoice('auto');
       void reloadThreads();
     }
+    if (!id) {
+      setDraftInputError('创建对话失败，请稍后再试。');
+    }
     onNewChat?.();
-  }, [onNewChat, reloadThreads]);
+  }, [isCreatingThread, onNewChat, reloadThreads]);
 
   const handleSelectThread = useCallback((threadId: string) => {
     // Reset messages synchronously so the incoming ChatPanel (remounted via
@@ -224,25 +271,8 @@ export default function ChatView({
     // undefined on mount.
     setQueuedPrompt('');
     setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
   }, []);
-
-  const handleDeleteThread = useCallback(async (threadId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const ok = await deleteThread(threadId);
-    if (ok) {
-      const remaining = threads.filter((t) => t.id !== threadId);
-      setThreads(remaining);
-      if (threadId === activeThreadId) {
-        if (remaining.length > 0) {
-          setActiveThreadId(remaining[0].id);
-          setHasConversationStarted(true);
-        } else {
-          setActiveThreadId(null);
-          setHasConversationStarted(false);
-        }
-      }
-    }
-  }, [activeThreadId, threads]);
 
   const handleShare = useCallback(async () => {
     try {
@@ -254,22 +284,31 @@ export default function ChatView({
     }
   }, []);
 
+  const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
+    e.stopPropagation();
+    if (deletingThreadId) return;
+    setDeletingThreadId(threadId);
+    const ok = await deleteThread(threadId);
+    setDeletingThreadId(null);
+    if (!ok) return;
+    // If deleting the active thread, clear the workspace
+    if (threadId === activeThreadId) {
+      setActiveThreadId(null);
+      setThreadMessages(null);
+      setHasConversationStarted(false);
+      setQueuedPrompt('');
+      setQueuedAttachments([]);
+      setQueuedToolChoice('auto');
+    }
+    setThreads((prev) => prev.filter((t) => t.id !== threadId));
+  }, [deletingThreadId, activeThreadId]);
+
   const quickActionsGrid = useMemo(() => quickActions.length > 0, [quickActions.length]);
   const visibleThreads = useMemo(() => {
     const query = threadSearchQuery.trim().toLowerCase();
     if (!query) return threads;
     return threads.filter((thread) => (thread.title ?? '新对话').toLowerCase().includes(query));
   }, [threadSearchQuery, threads]);
-
-  if (!activeThreadId) {
-    return (
-      <WorkspaceProvider>
-        <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center', background: 'var(--color-bg-app)', color: 'var(--color-text-muted)' }}>
-          {isCreatingThread ? 'Starting chat…' : 'Initializing…'}
-        </div>
-      </WorkspaceProvider>
-    );
-  }
 
   return (
     <WorkspaceProvider>
@@ -384,10 +423,15 @@ export default function ChatView({
                     key={item.title}
                     item={item}
                     onClick={(prompt) => {
-                      setHasConversationStarted(true);
-                      setQueuedPrompt(prompt);
-                      setQueuedAttachments([]);
-                      setQueuedPromptNonce((value) => value + 1);
+                      if (activeThreadId) {
+                        setHasConversationStarted(true);
+                        setQueuedPrompt(prompt);
+                        setQueuedAttachments([]);
+                        setQueuedToolChoice('auto');
+                        setQueuedPromptNonce((value) => value + 1);
+                        return;
+                      }
+                      void startThreadWithQueuedSend(prompt);
                     }}
                   />
                 ))}
@@ -395,23 +439,45 @@ export default function ChatView({
             ) : null}
 
             <section style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              <ChatPanel
-                key={activeThreadId}
-                threadId={activeThreadId}
-                initialMessages={threadMessages ?? undefined}
-                isLoading={isLoadingMessages}
-                queuedPrompt={queuedPrompt}
-                queuedAttachments={queuedAttachments}
-                queuedPromptNonce={queuedPromptNonce}
-                inputPlaceholder="Ask Ink & Memory…"
-                editorState={editorState}
-                onEditorWriteConfirmed={onEditorWriteConfirmed}
-                voiceSystemPrompt={activeVoice?.systemPrompt}
-                onConversationStart={() => {
-                  setHasConversationStarted(true);
-                  void reloadThreads();
-                }}
-              />
+              {activeThreadId ? (
+                <ChatPanel
+                  key={activeThreadId}
+                  threadId={activeThreadId}
+                  initialMessages={threadMessages ?? undefined}
+                  isLoading={isLoadingMessages}
+                  queuedPrompt={queuedPrompt}
+                  queuedAttachments={queuedAttachments}
+                  queuedToolChoice={queuedToolChoice}
+                  queuedPromptNonce={queuedPromptNonce}
+                  inputPlaceholder="Ask Ink & Memory…"
+                  editorState={editorState}
+                  onEditorWriteConfirmed={onEditorWriteConfirmed}
+                  voiceSystemPrompt={activeVoice?.systemPrompt}
+                  onConversationStart={() => {
+                    setHasConversationStarted(true);
+                    void reloadThreads();
+                  }}
+                />
+              ) : (
+                <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: 'flex-end', overflow: 'hidden' }}>
+                  {draftInputError ? (
+                    <div style={{ margin: '0 0 0.75rem', borderRadius: '0.75rem', border: '1px solid color-mix(in srgb, var(--color-state-error) 24%, transparent)', background: 'color-mix(in srgb, var(--color-state-error) 8%, var(--color-bg-paper))', color: 'var(--color-state-error)', padding: '0.65rem 0.85rem', fontSize: '0.84rem' }}>
+                      {draftInputError}
+                    </div>
+                  ) : null}
+                  <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
+                    <AIInputDock
+                      onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
+                        void startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
+                      }}
+                      placeholder="Ask Ink & Memory…"
+                      disabled={isCreatingThread}
+                      loading={isCreatingThread}
+                      mode="full"
+                    />
+                  </div>
+                </div>
+              )}
             </section>
           </div>
         </main>
@@ -432,17 +498,38 @@ export default function ChatView({
                 ) : null}
                 {visibleThreads.map((thread) => {
                   const isActive = thread.id === activeThreadId;
+                  const isHovered = thread.id === hoveredThreadId;
+                  const isDeleting = thread.id === deletingThreadId;
                   return (
-                    <button
+                    <div
                       key={thread.id}
-                      type="button"
-                      onClick={() => handleSelectThread(thread.id)}
-                      style={{ width: '100%', minHeight: '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', marginBottom: '0.1rem', transition: 'background 0.12s ease' }}
-                      title={thread.title ?? '新对话'}
+                      style={{ position: 'relative', marginBottom: '0.1rem' }}
+                      onMouseEnter={() => setHoveredThreadId(thread.id)}
+                      onMouseLeave={() => setHoveredThreadId(null)}
                     >
-                      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? '新对话'}</span>
-                      {isActive ? <span style={{ width: '0.38rem', height: '0.38rem', borderRadius: '999px', background: 'var(--color-action-link)', flexShrink: 0 }} aria-hidden="true" /> : null}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSelectThread(thread.id)}
+                        style={{ width: '100%', minHeight: '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 1.8rem 0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
+                        title={thread.title ?? '新对话'}
+                      >
+                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? '新对话'}</span>
+                        {isActive && !isHovered ? <span style={{ width: '0.38rem', height: '0.38rem', borderRadius: '999px', background: 'var(--color-action-link)', flexShrink: 0 }} aria-hidden="true" /> : null}
+                      </button>
+                      {(isHovered || isDeleting) ? (
+                        <button
+                          type="button"
+                          onClick={(e) => void handleDeleteThread(e, thread.id)}
+                          disabled={isDeleting}
+                          title="删除对话"
+                          style={{ position: 'absolute', right: '0.3rem', top: '50%', transform: 'translateY(-50%)', width: '1.4rem', height: '1.4rem', border: 'none', borderRadius: '0.35rem', background: 'transparent', color: isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isDeleting ? 'not-allowed' : 'pointer', display: 'grid', placeItems: 'center', padding: 0, transition: 'background 0.12s ease, color 0.12s ease', flexShrink: 0 }}
+                          onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'color-mix(in srgb, var(--color-state-error) 12%, transparent)'; e.currentTarget.style.color = 'var(--color-state-error)'; } }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
+                        >
+                          <IconX style={{ width: '0.75rem', height: '0.75rem' }} />
+                        </button>
+                      ) : null}
+                    </div>
                   );
                 })}
               </div>
@@ -450,7 +537,7 @@ export default function ChatView({
           ) : null}
         </aside>
 
-        <FileSidebar sessionId={activeThreadId} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
+        <FileSidebar sessionId={activeThreadId ?? ''} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
       </div>
     </WorkspaceProvider>
   );
