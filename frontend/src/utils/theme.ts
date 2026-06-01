@@ -2,27 +2,29 @@
 // [Output] Theme token ('light' | 'dark') applied as data-theme on <html>, persisted to localStorage.
 // [Pos] theme utility in frontend/src/utils
 // [Sync] 2026-05-29: created; implements initTheme / getTheme / setTheme / toggleTheme.
+// [Sync] 2026-06-01: initTheme no longer persists system preference; removes data-theme when no explicit pref so CSS media query auto-follows system. Added onThemeChange() for live system updates.
 
-const STORAGE_KEY = 'ink-theme';
+import { STORAGE_KEYS } from '../constants/storageKeys';
 
 export type Theme = 'light' | 'dark';
 
-/** Read the active theme from localStorage, falling back to system preference. */
+/** Read the active theme: explicit user preference or current system preference. */
 export function getTheme(): Theme {
-  const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
+  const stored = localStorage.getItem(STORAGE_KEYS.THEME) as Theme | null;
   if (stored === 'light' || stored === 'dark') return stored;
   return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
-/** Apply a theme to the document root and persist it. */
+/** Whether the user has explicitly chosen a theme (vs. following system). */
+export function hasExplicitTheme(): boolean {
+  const stored = localStorage.getItem(STORAGE_KEYS.THEME);
+  return stored === 'light' || stored === 'dark';
+}
+
+/** Apply a theme to the document root and persist it as an explicit user preference. */
 export function setTheme(theme: Theme): void {
-  const root = document.documentElement;
-  if (theme === 'dark') {
-    root.setAttribute('data-theme', 'dark');
-  } else {
-    root.setAttribute('data-theme', 'light');
-  }
-  localStorage.setItem(STORAGE_KEY, theme);
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem(STORAGE_KEYS.THEME, theme);
 }
 
 /** Toggle between light and dark, return the new theme. */
@@ -32,7 +34,34 @@ export function toggleTheme(): Theme {
   return next;
 }
 
-/** Call once on app start to apply the persisted / system-preferred theme. */
+/**
+ * Subscribe to effective theme changes caused by system preference changes.
+ * Callback is only invoked when there is no explicit user preference in storage,
+ * so the UI icon can stay in sync when following the system.
+ * Returns a cleanup function to remove the listener.
+ */
+export function onSystemThemeChange(callback: (theme: Theme) => void): () => void {
+  const mq = window.matchMedia('(prefers-color-scheme: dark)');
+  const handler = (e: MediaQueryListEvent) => {
+    if (!hasExplicitTheme()) {
+      callback(e.matches ? 'dark' : 'light');
+    }
+  };
+  mq.addEventListener('change', handler);
+  return () => mq.removeEventListener('change', handler);
+}
+
+/**
+ * Call once on app start to apply the persisted theme.
+ * When no explicit user preference exists, data-theme is removed so that
+ * the CSS `@media (prefers-color-scheme: dark)` rule handles it automatically
+ * and continues to respond to system changes in real time.
+ */
 export function initTheme(): void {
-  setTheme(getTheme());
+  const stored = localStorage.getItem(STORAGE_KEYS.THEME) as Theme | null;
+  if (stored === 'light' || stored === 'dark') {
+    document.documentElement.setAttribute('data-theme', stored);
+  } else {
+    document.documentElement.removeAttribute('data-theme');
+  }
 }

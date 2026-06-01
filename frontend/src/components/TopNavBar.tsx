@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
-import { toggleTheme, getTheme } from '../utils/theme';
+import { toggleTheme, getTheme, onSystemThemeChange } from '../utils/theme';
 
 interface Props {
   currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat';
@@ -13,6 +13,12 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
   const { t } = useTranslation();
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
+
+  useEffect(() => {
+    return onSystemThemeChange((theme) => {
+      setIsDark(theme === 'dark');
+    });
+  }, []);
 
   const handleToggleTheme = () => {
     const next = toggleTheme();

@@ -37,7 +37,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 │   │   ├── 发现关联
 │   │   ├── 写作灵感
 │   │   └── 回顾反思
-│   └── ChatPanel（flex: 1，minHeight: 0，overflow: hidden）
+│   └── ChatPanel / DraftInputDock（flex: 1，minHeight: 0，overflow: hidden）
 │       ├── ChatMessageList（有消息或错误后加载，flex: 1，overflowY: auto）
 │       └── AIInputDock（flexShrink: 0）
 └── FileSidebar（右侧文件侧边栏，可收起）
@@ -123,7 +123,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 
 | 状态 | 设计要求 |
 |---|---|
-| 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据，也不显示空白消息纸面容器。 |
+| 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据，也不显示空白消息纸面容器；首次进入 Chat 不创建 thread。 |
 | 对话已触发 | 用户点击快捷指令或发送第一条消息后，QuickActions 区域隐藏，MainArea 仅展示 ChatPanel（消息流 + 输入 Dock）；页面不刷新、不跳转。 |
 | 加载态 | 消息区显示低对比 skeleton 或 pulse；输入区保持可见但根据能力禁用发送。 |
 | 错误态 | 使用 `color.state.error` 加明确错误文本；提供重试入口。 |
@@ -177,5 +177,6 @@ ChatDashboard（height: 100%，overflow: hidden）
 - `AIInputDock.tsx`：全面对齐颜色系统 token；发送/工具选择按钮激活态改用炭黑（`color.text.primary`）；停止按钮改用 `color.state.danger`；阴影改为 `color.shadow.soft`；附件按钮文案改为"附件"。
 - `const.ts`：快捷指令保持笔记系统场景。
 - `ChatPanel.tsx` / `ChatMessageList.tsx`：消息列表和输入 Dock 填满 Chat 主区域宽度。
+- 2026-06-01：`ChatView.tsx` 首次挂载不再调用 `POST /api/claude-agent/threads`。无线程时先渲染草稿输入区；用户发送首条消息或点击快捷指令后再创建 thread，并把首条 prompt、附件和工具模式传入 `ChatPanel.tsx`。
 
 后续如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。

@@ -1,7 +1,11 @@
-import { useState, useEffect, useRef } from 'react';
+// [Input] State config, selected emotional state, session timestamp, and user_session labels.
+// [Output] Render the emotional state chooser and compact writing-session metadata line.
+// [Pos] state-chooser component in frontend/src/components
+// [Sync] 2026-06-01: show current user_session.labels beside the collapsed state indicator.
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { StateCube } from './StateCube';
-import type { StateConfig } from '../api/voiceApi';
+import type { SessionLabels, StateConfig } from '../api/voiceApi';
 import { getDateLocale } from '../i18n';
 import { parseFlexibleTimestamp } from '../utils/timezone';
 
@@ -10,6 +14,7 @@ interface Props {
   selectedState: string | null;
   selectedStateLoading?: boolean;
   createdAt?: string;  // ISO timestamp recorded when the session was created
+  sessionLabels?: SessionLabels;
   onChoose: (stateId: string) => void;
 }
 
@@ -18,6 +23,7 @@ export default function StateChooser({
   selectedState,
   selectedStateLoading = false,
   createdAt,
+  sessionLabels = [],
   onChoose
 }: Props) {
   const { i18n } = useTranslation();
@@ -25,6 +31,12 @@ export default function StateChooser({
   const [shouldAnimate, setShouldAnimate] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
   const indicatorRef = useRef<HTMLDivElement>(null);
+  const visibleSessionLabels = useMemo(() => {
+    return sessionLabels
+      .map(label => String(label).trim())
+      .filter(label => label.length > 0);
+  }, [sessionLabels]);
+  const sessionLabelsTitle = visibleSessionLabels.join(', ');
 
   // @@@ Collapse when selectedState is set externally (skip while loading)
   useEffect(() => {
@@ -140,7 +152,9 @@ export default function StateChooser({
             display: 'flex',
             alignItems: 'center',
             gap: 16,
-            cursor: 'pointer'
+            cursor: 'pointer',
+            minWidth: 0,
+            width: '100%'
           }}
           onClick={() => setIsExpanded(true)}
           >
@@ -148,7 +162,8 @@ export default function StateChooser({
             <div style={{
               fontSize: 13,
               color: 'var(--color-text-secondary)',
-              fontWeight: 400
+              fontWeight: 400,
+              flexShrink: 0
             }}>
               {dateString}
             </div>
@@ -189,6 +204,45 @@ export default function StateChooser({
               {selectedStateData.name}
             </span>
           </div>
+
+          {visibleSessionLabels.length > 0 && (
+            <div
+              title={sessionLabelsTitle}
+              aria-label={`Session labels: ${sessionLabelsTitle}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                minWidth: 0,
+                flex: 1,
+                overflow: 'hidden',
+                whiteSpace: 'nowrap'
+              }}
+            >
+              {visibleSessionLabels.map((label, index) => (
+                <span
+                  key={`${label}-${index}`}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    maxWidth: 120,
+                    minWidth: 0,
+                    padding: '2px 6px',
+                    borderRadius: 4,
+                    border: '1px solid var(--color-shadow-soft)',
+                    background: 'color-mix(in srgb, var(--color-bg-surface-solid) 70%, transparent)',
+                    color: 'var(--color-text-secondary)',
+                    fontSize: 12,
+                    lineHeight: 1.3,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  {label}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         /* Expanded view - full-screen white overlay */

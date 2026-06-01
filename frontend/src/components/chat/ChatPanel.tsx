@@ -9,6 +9,7 @@
 // [Sync] 2026-05-30: fix shouldShowLoadingIndicator — include reasoning parts as visible so "Thinking…" footer doesn't show alongside inline reasoning block.
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatMessageList.
 // [Sync] 2026-05-29: let the input dock fill the available chat page width.
+// [Sync] 2026-06-01: accept queuedToolChoice so lazy-created first-turn ChatView sends preserve the selected tool mode.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -58,6 +59,7 @@ interface ChatPanelProps {
   inputPlaceholder?: string;
   queuedPrompt?: string;
   queuedAttachments?: Attachment[];
+  queuedToolChoice?: ToolChoice;
   queuedPromptNonce?: number;
   openFileDialogSignal?: number;
   onConversationStart?: () => void;
@@ -87,6 +89,7 @@ export default function ChatPanel({
   inputPlaceholder = 'Press i to chat',
   queuedPrompt,
   queuedAttachments = [],
+  queuedToolChoice = 'auto',
   queuedPromptNonce,
   openFileDialogSignal,
   onConversationStart,
@@ -217,10 +220,10 @@ export default function ChatPanel({
 
     void (async () => {
       onConversationStart?.();
-      setCurrentToolChoice('auto');
+      setCurrentToolChoice(queuedToolChoice);
       pendingDataRef.current = {
         rawAttachments: queuedAttachments,
-        toolChoice: 'auto',
+        toolChoice: queuedToolChoice,
       };
 
       const validFiles = queuedAttachments.filter((file) => file.storageKey);
@@ -240,7 +243,7 @@ export default function ChatPanel({
       }
       await sendMessage({ role: 'user', parts: queuedMessageParts });
     })();
-  }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, sendMessage]);
+  }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
 
   const chatLoading = status === 'streaming' || status === 'submitted' || isLoading;
   const shouldShowMessageSurface = messages.length > 0 || Boolean(error);

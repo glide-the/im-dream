@@ -1,5 +1,6 @@
 /**
  * API client for voice analysis backend - FastAPI sync API version
+ * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
  */
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -24,6 +25,20 @@ export interface StateConfig {
   greeting: string;
   states: Record<string, UserState>;
 }
+
+export type SessionLabels = string[];
+
+export interface UserSession {
+  id: string;
+  name?: string | null;
+  labels: SessionLabels;
+  editor_state?: any;
+  created_at: string;
+  updated_at: string;
+  date_key?: string | null;
+  first_line?: string;
+}
+
 export interface Voice {
   id: string;
   deck_id: string;
@@ -73,6 +88,21 @@ const API_BASE = '/ink-and-memory';
 function getUILanguage(): 'en' | 'zh' {
   const stored = localStorage.getItem(LANGUAGE_STORAGE_KEY);
   return stored === 'zh' ? 'zh' : 'en';
+}
+
+export function normalizeSessionLabels(labels: unknown): SessionLabels {
+  if (!Array.isArray(labels)) return [];
+
+  return labels
+    .map(label => String(label).trim())
+    .filter(label => label.length > 0);
+}
+
+function normalizeUserSession(session: any): UserSession {
+  return {
+    ...session,
+    labels: normalizeSessionLabels(session?.labels)
+  };
 }
 
 /**
@@ -531,7 +561,7 @@ type SessionRangeOptions = {
 /**
  * List sessions metadata, optionally scoped to a date range.
  */
-export async function listSessions(timezone?: string, options: SessionRangeOptions = {}): Promise<any[]> {
+export async function listSessions(timezone?: string, options: SessionRangeOptions = {}): Promise<UserSession[]> {
   const params = new URLSearchParams();
   if (timezone) params.append('timezone', timezone);
   if (options.startDate) params.append('start_date', options.startDate);
@@ -549,7 +579,7 @@ export async function listSessions(timezone?: string, options: SessionRangeOptio
   }
 
   const data = await response.json();
-  return data.sessions;
+  return (data.sessions || []).map(normalizeUserSession);
 }
 
 export async function fetchSessionsAggregate(timezone: string): Promise<{
@@ -572,7 +602,7 @@ export async function fetchSessionsAggregate(timezone: string): Promise<{
 /**
  * Get a specific session
  */
-export async function getSession(sessionId: string): Promise<any> {
+export async function getSession(sessionId: string): Promise<UserSession> {
   const response = await fetch(`${API_BASE}/api/sessions/${sessionId}`, {
     headers: getAuthHeaders()
   });
@@ -582,13 +612,13 @@ export async function getSession(sessionId: string): Promise<any> {
     throw new Error(error.detail || 'Get session failed');
   }
 
-  return await response.json();
+  return normalizeUserSession(await response.json());
 }
 
 /**
  * Fetch multiple sessions (with editor_state) in a single request.
  */
-export async function getSessionsBatch(sessionIds: string[]): Promise<any[]> {
+export async function getSessionsBatch(sessionIds: string[]): Promise<UserSession[]> {
   if (!sessionIds || sessionIds.length === 0) return [];
 
   const response = await fetch(`${API_BASE}/api/sessions/batch`, {
@@ -603,7 +633,7 @@ export async function getSessionsBatch(sessionIds: string[]): Promise<any[]> {
   }
 
   const data = await response.json();
-  return data.sessions;
+  return (data.sessions || []).map(normalizeUserSession);
 }
 
 /**
