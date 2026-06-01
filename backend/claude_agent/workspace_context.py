@@ -14,6 +14,8 @@
 # [Sync] 2026-05-29: rename session_id → editor_session_id throughout to eliminate
 #                    ambiguity with workspace_id (cwd basename / Claude thread ID);
 #                    editor_session_id is the user_sessions.id from /api/sessions.
+# [Sync] 2026-06-01: add switch_editor to Writing section with context-switch note;
+#                    add Step 0 (switch context if needed) to Document editing workflow.
 
 """Workspace context prompt for the Ink & Memory Claude Agent.
 
@@ -78,6 +80,14 @@ Editor virtual index (.editor/):
 Reading document content:
   read_file(".editor/<resource>.json")                      — intercepted; returns live snapshot
 
+Switching workspace context (no human confirmation required):
+  switch_editor(editor_session_id)                                 — switch to a different session
+
+  If the Editor Session ID shown above is NOT the document you want to work on,
+  call switch_editor(editor_session_id="<target-session-id>") FIRST before reading
+  or writing any .editor/ content.  Subsequent .editor/ reads will reflect the new
+  session automatically.
+
 Writing document content (all require human confirmation):
   write_segment(editor_session_id, cellId, text, reason)          — replace a cell's full text
   delete_segment(editor_session_id, cellId, reason)               — remove a cell (irreversible)
@@ -92,6 +102,9 @@ Writing document content (all require human confirmation):
   All document mutations must go through the MCP write tools listed above.
 
 Document editing workflow (follow this order every editing session):
+  Step 0 — Switch context if needed: if the Editor Session ID above is NOT the target
+           document, call switch_editor(editor_session_id="<target-id>") first.
+           After switching, all .editor/ reads will automatically reflect the new session.
   Step 1 — Orient: read_file(".editor/cells.json") to load the full cell array.
            Optionally read ".editor/session.json" for mood / metadata context.
   Step 2 — Analyse: digest content, then share observations or draft proposals

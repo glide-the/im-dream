@@ -34,20 +34,22 @@ def save_session(request: dict, current_user: dict = Depends(get_current_user)):
     {
         "session_id": "string",
         "name": "optional string",
-        "editor_state": {...}
+        "editor_state": {...},
+        "labels": ["optional", "list", "of", "tags"]
     }
     """
     user_id = current_user["user_id"]
     session_id = request.get("session_id")
     editor_state = request.get("editor_state")
     name = request.get("name")
+    labels = request.get("labels")
 
     if not session_id or not editor_state:
         raise HTTPException(
             status_code=400, detail="session_id and editor_state required"
         )
 
-    database.save_session(user_id, session_id, editor_state, name)
+    database.save_session(user_id, session_id, editor_state, name, labels=labels)
 
     return {"success": True}
 

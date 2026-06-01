@@ -22,6 +22,13 @@
 # [Sync] 2026-05-29: rename session_id → editor_session_id (user_sessions.id from
 #                    /api/sessions); add explicit parameter to build_user_message;
 #                    remove cwd-basename fallback — service layer must supply it.
+# [Sync] 2026-06-01: add Switch-Editor Workflow section to _SYSTEM_PROMPT_TEMPLATE;
+#                    add switch_editor to Edit-Point Workflow tool list; add context-check
+#                    step (Step 1) to Edit-Point Workflow reminding agent to call
+#                    switch_editor when the current Editor Session ID is not the target.
+# [Sync] 2026-06-01: escape literal JSON braces in _SYSTEM_PROMPT_TEMPLATE so
+#                    str.format only substitutes recent_sessions_block; keep
+#                    recent-session range results capped by context_session_count.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -90,43 +97,90 @@ Principles:
 When the user message includes a <workspace_context> block, you are in a document-editing
 session.  Follow this scheduling workflow for every editing-related request:
 
-1. Orient yourself first — call read_file(".editor/cells.json") to load all document cells
+1. Check the target session — if the Editor Session ID in <workspace_context> is NOT the
+   document the user wants to work on, call switch_editor(editor_session_id="<target-id>")
+   FIRST.  After the tool returns, all subsequent .editor/ reads will reflect the new session.
+2. Orient yourself — call read_file(".editor/cells.json") to load all document cells
    (TextCell / WidgetCell array).  For session metadata (mood state, creation time) also
    call read_file(".editor/session.json").
-2. Analyse before proposing — digest the full content, then share observations or draft
+3. Analyse before proposing — digest the full content, then share observations or draft
    suggestions with the user before making any changes.
-3. Mutate via MCP write tools only — all document modifications require human confirmation
+4. Mutate via MCP write tools only — all document modifications require human confirmation
    before execution.  Use these tools exclusively:
+     switch_editor(editor_session_id)        — switch to a different session (no confirmation needed)
      write_segment(cellId, text, reason)     — replace a cell's full text
      delete_segment(cellId, reason)          — remove a cell (irreversible)
      insert_widget(widgetType, data, ...)    — insert a new widget cell
      reply_to_comment(commentId, ...)        — respond to a voice comment thread
-4. Never write directly to .editor/ files — they are virtual placeholders; writing to them
+5. Never write directly to .editor/ files — they are virtual placeholders; writing to them
    has no effect on real document state.  All mutations must go through the MCP write tools.
 
 If no <workspace_context> block is present, treat the turn as a pure-chat exchange and
 respond without attempting to read workspace files.
 
+## Switch-Editor Workflow
+
+When you need to work on a document whose session ID differs from the one shown in
+<workspace_context>, switch context before doing anything else:
+
+1. Identify the target session ID — the user may mention it explicitly, or you can retrieve
+   it via `mcp__user__get_sessions_range` if you only know the date or title.
+2. Call switch_editor(editor_session_id="<target-id>") — this requires NO human confirmation.
+   The tool is a lightweight no-op on the MCP side; the server-side PostToolUse hook loads
+   the new editor_state from the database and updates the in-memory context automatically.
+3. Confirm the switch — after the tool returns {{"ok": true}}, the .editor/ virtual index now
+   serves content from the new session.  Proceed with the Edit-Point Workflow from step 2
+   (Orient) onward.
+
+Note: switch_editor only changes the read/write context for .editor/ paths.  It does not
+modify any document content and does not require the user to approve it.
+
+## Session Retrieval Workflow
+
+The recent entries block below only covers the last 3 days of journal sessions.
+When the user mentions a topic, theme, or past memory that may be recorded in older entries,
+use `mcp__user__get_sessions_range` to search further back:
+
+1. Estimate the date window based on the user's context clues (e.g. "last month", "春节").
+2. Call `get_sessions_range(start_date, end_date)` — dates in YYYY-MM-DD format.
+3. Scan the returned `labels` and `excerpt` fields to identify sessions relevant to the topic.
+4. Reference those sessions by their `sessionId` when replying to the user.
+
+Only call this tool when the user's message suggests they are referring to events or themes
+that predate the visible recent entries.  Do not call it on every turn.
+
 {recent_sessions_block}\
 """
 
 _SESSIONS_HEADER = "## Recent Journal Entries\n\n"
-_SESSION_ENTRY_TEMPLATE = "### {date} — {title}\n{excerpt}\n"
+_SESSION_ENTRY_TEMPLATE = "### {date} — sessionId:{session_id}, {labels}: {title}\n{excerpt}\n"
 _NO_SESSIONS_TEXT = "_No recent entries found._\n"
+
+# Number of days to look back when loading recent sessions for the system prompt.
+_RECENT_SESSIONS_DAYS = 3
 
 
 def _render_session_entry(session: dict[str, Any]) -> str:
     """Render one database session row into a Markdown entry block.
 
     database.list_sessions returns rows with keys:
-    id, name, created_at, updated_at, first_line.
+    id, name, labels, created_at, updated_at, first_line.
     """
     raw_date = str(session.get("updated_at") or session.get("created_at") or "")[:10]
+    session_id = str(session.get("id") or "")
     title = (session.get("name") or "Untitled").strip()
     excerpt = (session.get("first_line") or "").strip()
     if not excerpt:
         excerpt = "_[Empty entry]_"
-    return _SESSION_ENTRY_TEMPLATE.format(date=raw_date, title=title, excerpt=excerpt)
+    raw_labels = session.get("labels") or []
+    labels_str = ",".join(str(l) for l in raw_labels) if raw_labels else ""
+    return _SESSION_ENTRY_TEMPLATE.format(
+        date=raw_date,
+        session_id=session_id,
+        labels=labels_str,
+        title=title,
+        excerpt=excerpt,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -285,9 +339,9 @@ class ClaudeAgentContextBuilder:
 
 
     async def _load_recent_sessions_block(self, user_id: str) -> str:
-        """Return a Markdown block with the user's recent journal entries."""
+        """Return a Markdown block with the user's recent journal entries (last 3 days)."""
         try:
-            sessions = await self._fetch_sessions(user_id)
+            sessions = await self._fetch_recent_sessions(user_id)
         except Exception:  # noqa: BLE001
             logger.exception(
                 "Failed to load recent sessions for user_id=%s; skipping context.", user_id
@@ -297,13 +351,34 @@ class ClaudeAgentContextBuilder:
         if not sessions:
             return _SESSIONS_HEADER + _NO_SESSIONS_TEXT + "\n"
 
-        entries = "".join(
-            _render_session_entry(s) for s in sessions[: self._context_session_count]
-        )
+        entries = "".join(_render_session_entry(s) for s in sessions)
         return _SESSIONS_HEADER + entries + "\n"
+
+    async def _fetch_recent_sessions(self, user_id: str) -> list[dict[str, Any]]:
+        """Fetch sessions from the last 3 days from the database.
+
+        Uses ``database.list_sessions_in_range`` to limit results to the
+        ``_RECENT_SESSIONS_DAYS``-day window ending today (UTC).
+        """
+        import asyncio
+        import database  # local import; database module lives in backend/
+        from datetime import date, timedelta
+
+        today = date.today()
+        start_date = (today - timedelta(days=_RECENT_SESSIONS_DAYS - 1)).isoformat()
+        end_date = today.isoformat()
+
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None, database.list_sessions_in_range, int(user_id), start_date, end_date
+        )
+        return list(result or [])[: self._context_session_count]
 
     async def _fetch_sessions(self, user_id: str) -> list[dict[str, Any]]:
         """Fetch recent sessions from the database using the project's database module.
+
+        Kept for backward compatibility; prefer ``_fetch_recent_sessions`` for
+        the system-prompt injection path.
 
         ``database.list_sessions(user_id)`` is synchronous and manages its own
         connection; we call it in a thread executor to avoid blocking the event loop.

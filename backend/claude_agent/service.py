@@ -406,13 +406,17 @@ class ClaudeAgentService:
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
-            mcp_env=user_env_vars,
+            mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,
             editor_state=active_editor_state,
             # Live getter: agent_runner._pre_tool_use_hook calls this instead of
             # reading opts.editor_state so it always sees the AgentRunState
             # flyweight's latest value (updated after each write-tool DB refresh).
             editor_state_getter=(lambda s=state: s.editor_state) if active_editor_state is not None else None,
+            # Live setter: agent_runner._post_tool_use_hook calls this after a
+            # successful switch_editor tool call to update the flyweight with the
+            # new session's editor_state loaded from the database.
+            editor_state_setter=(lambda v, s=state: s.with_editor_state(v, s.editor_user_id)) if active_editor_state is not None else None,
         )
 
         confirmation_store = ToolConfirmationStore()

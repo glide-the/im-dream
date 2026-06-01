@@ -182,6 +182,7 @@ export async function chatWithVoiceSSE({
   threadId,
   message,
   systemPrompt,
+  editorState,
   onDelta,
   onReasoningDelta,
   onReasoningEnd,
@@ -191,6 +192,8 @@ export async function chatWithVoiceSSE({
   threadId: string;
   message: string;
   systemPrompt: string;
+  /** Current EditorState snapshot forwarded to the backend agent runner as editor_state. */
+  editorState?: Record<string, unknown> | null;
   onDelta: (delta: string) => void;
   /** Called for each incremental reasoning/thinking chunk. */
   onReasoningDelta?: (delta: string) => void;
@@ -224,6 +227,7 @@ export async function chatWithVoiceSSE({
         allowedMcpServers: {},
         attachments: [],
         systemPrompt,
+        ...(editorState != null ? { editor_state: editorState } : {}),
       }),
     });
   } catch (err) {

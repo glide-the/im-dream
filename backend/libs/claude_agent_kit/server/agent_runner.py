@@ -94,7 +94,8 @@ from ..types import (
 from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
-from .editor_tool import allowed_editor_tool_names
+from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
+from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import apply_project_sdk_runtime_options, apply_user_sdk_env_to_options
 
 logger = logging.getLogger(__name__)
@@ -116,6 +117,7 @@ except NameError:
 
 DEFAULT_ALLOWED_TOOLS: list[str] = [
     "mcp__user__touch_animation",
+    f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
@@ -124,6 +126,7 @@ _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
+_SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
 
 # Tools that must always go through the on_tool_confirmation_request side-channel
 # regardless of tool_choice mode (i.e. even in "auto" mode).  These are
@@ -477,14 +480,18 @@ def _stdio_env(
     return env
 
 
-def _user_mcp_stdio_config() -> McpStdioServerConfig:
-    """Build the external stdio MCP config for the user animation tool server."""
+def _user_mcp_stdio_config(extra_env: Optional[dict[str, str]] = None) -> McpStdioServerConfig:
+    """Build the external stdio MCP config for the user animation + session tool server.
+
+    *extra_env* is forwarded to ``_stdio_env`` so that session-scoped bindings
+    (e.g. ``INK_AGENT_USER_ID``) reach the subprocess.
+    """
 
     return McpStdioServerConfig(
         type="stdio",
         command=sys.executable,
         args=["-m", "libs.claude_agent_kit.server.user_mcp_stdio"],
-        env=_stdio_env(),
+        env=_stdio_env(extra_env=extra_env),
     )
 
 
@@ -1006,6 +1013,71 @@ class ClaudeAgentRunner:
             )
 
         # ------------------------------------------------------------------
+        # PostToolUse hook
+        # Fired by the SDK after a tool has executed and its result is
+        # available.  Used exclusively to intercept the switch_editor
+        # context-switch tool: after the no-op MCP handler returns ok, this
+        # hook reads the target editor_session_id from the tool input, loads
+        # the new editor_state from the database, and writes it into the
+        # AgentRunState flyweight via opts.editor_state_setter.  Subsequent
+        # .editor/ reads in the same turn will see the new document context
+        # because PreToolUse reads live_editor_state via opts.editor_state_getter
+        # which is bound to the same flyweight.
+        # ------------------------------------------------------------------
+
+        async def _post_tool_use_hook(
+            hook_input: dict[str, Any],
+            tool_use_id: Optional[str],
+            context: HookContext,
+        ) -> HookJSONOutput:
+            del context
+            tool_name = str(hook_input.get("tool_name") or "")
+
+            # Only act on the switch_editor context-switch tool.
+            if tool_name != _SWITCH_EDITOR_MCP_TOOL_NAME:
+                return HookJSONOutput()
+
+            if opts.editor_state_setter is None:
+                logger.warning(
+                    "PostToolUse: switch_editor fired but editor_state_setter is None; "
+                    "skipping context switch."
+                )
+                return HookJSONOutput()
+
+            tool_input: dict[str, Any] = hook_input.get("tool_input") or {}
+            new_session_id: str = str(tool_input.get("editor_session_id") or "").strip()
+            if not new_session_id:
+                logger.warning(
+                    "PostToolUse: switch_editor missing editor_session_id; "
+                    "context switch skipped."
+                )
+                return HookJSONOutput()
+
+            try:
+                new_state = await asyncio.to_thread(load_editor_state_from_db, new_session_id)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "PostToolUse: switch_editor DB load failed for session %r",
+                    new_session_id,
+                    exc_info=True,
+                )
+                return HookJSONOutput()
+
+            if new_state:
+                opts.editor_state_setter(new_state)
+                logger.debug(
+                    "PostToolUse: editor context switched to session %r", new_session_id
+                )
+            else:
+                logger.warning(
+                    "PostToolUse: switch_editor found no editor_state for session %r; "
+                    "context switch skipped.",
+                    new_session_id,
+                )
+
+            return HookJSONOutput()
+
+        # ------------------------------------------------------------------
         # Build SDK options
         # ------------------------------------------------------------------
         mcp_servers: dict[str, McpServerConfig] = {}
@@ -1018,7 +1090,7 @@ class ClaudeAgentRunner:
             # reaches EOF, later control writes can fail with
             # "ProcessTransport is not ready for writing".  Stdio MCP gives the
             # tool protocol its own child-process stdin/stdout.
-            mcp_servers["user"] = _user_mcp_stdio_config()
+            mcp_servers["user"] = _user_mcp_stdio_config(extra_env=mcp_env)
         if _memory_mcp_enabled() and any(
             tool.startswith(_MEMORY_MCP_TOOL_PREFIX) for tool in effective_allowed_tools
         ):
@@ -1048,7 +1120,8 @@ class ClaudeAgentRunner:
                 allowed_tools=effective_allowed_tools,
                 include_partial_messages=include_partial_messages,
                 hooks={
-                    "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])]
+                    "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])],
+                    "PostToolUse": [HookMatcher(matcher=None, hooks=[_post_tool_use_hook])],
                 },
                 cwd=cwd or os.getcwd(),
                 mcp_servers=mcp_servers,

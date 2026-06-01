@@ -99,7 +99,16 @@ The factory is responsible for session locking, runner caching, lifecycle observ
    The final task text enters through `request.message_parts`. For planning tasks, the text should already be transformed by the Expert Prompt Architect flow in [`claude-agent-prompt-optimization.md`](./claude-agent-prompt-optimization.md). `assemble_context` treats that optimized text as the user turn payload and does not call the optimizer itself.
 
 3. **Historical writing context**
-   On the first initialized turn for a state, `ClaudeAgentContextBuilder.build_system_prompt(user_id)` loads recent writing sessions through `database.list_sessions`. The number of sessions is controlled by `INK_AGENT_CONTEXT_SESSIONS`. The rendered block is cached in `state.system_prompt` and reused until the state is rebuilt.
+   On the first initialized turn for a state, `ClaudeAgentContextBuilder.build_system_prompt(user_id)` loads recent writing sessions through `database.list_sessions`. Only sessions from the **last 3 days** are included in the system prompt. The rendered block is cached in `state.system_prompt` and reused until the state is rebuilt.
+
+   Each entry in the recent sessions block uses the format:
+   ```
+   ### {date} — sessionId:{sessionId}, {labels}: {title}
+   {excerpt}
+   ```
+   where `labels` is the comma-joined list of session labels (from `user_sessions.labels`), and `sessionId` allows the agent to reference a session when calling `mcp__user__get_sessions_range`.
+
+   For sessions **older than 3 days**, the agent must call `mcp__user__get_sessions_range(start_date, end_date)` to retrieve them on demand. The system prompt's Session Retrieval Workflow section explains when and how to use this tool.
 
 4. **Rules and assistant behavior**
    Current behavior rules live in `ClaudeAgentContextBuilder`'s system prompt template. Future prompt assets must be loaded through the project's prompt/config pattern rather than embedded in route handlers.
