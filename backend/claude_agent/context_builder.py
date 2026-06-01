@@ -22,6 +22,10 @@
 # [Sync] 2026-05-29: rename session_id → editor_session_id (user_sessions.id from
 #                    /api/sessions); add explicit parameter to build_user_message;
 #                    remove cwd-basename fallback — service layer must supply it.
+# [Sync] 2026-06-01: add Switch-Editor Workflow section to _SYSTEM_PROMPT_TEMPLATE;
+#                    add switch_editor to Edit-Point Workflow tool list; add context-check
+#                    step (Step 1) to Edit-Point Workflow reminding agent to call
+#                    switch_editor when the current Editor Session ID is not the target.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -90,22 +94,43 @@ Principles:
 When the user message includes a <workspace_context> block, you are in a document-editing
 session.  Follow this scheduling workflow for every editing-related request:
 
-1. Orient yourself first — call read_file(".editor/cells.json") to load all document cells
+1. Check the target session — if the Editor Session ID in <workspace_context> is NOT the
+   document the user wants to work on, call switch_editor(editor_session_id="<target-id>")
+   FIRST.  After the tool returns, all subsequent .editor/ reads will reflect the new session.
+2. Orient yourself — call read_file(".editor/cells.json") to load all document cells
    (TextCell / WidgetCell array).  For session metadata (mood state, creation time) also
    call read_file(".editor/session.json").
-2. Analyse before proposing — digest the full content, then share observations or draft
+3. Analyse before proposing — digest the full content, then share observations or draft
    suggestions with the user before making any changes.
-3. Mutate via MCP write tools only — all document modifications require human confirmation
+4. Mutate via MCP write tools only — all document modifications require human confirmation
    before execution.  Use these tools exclusively:
+     switch_editor(editor_session_id)        — switch to a different session (no confirmation needed)
      write_segment(cellId, text, reason)     — replace a cell's full text
      delete_segment(cellId, reason)          — remove a cell (irreversible)
      insert_widget(widgetType, data, ...)    — insert a new widget cell
      reply_to_comment(commentId, ...)        — respond to a voice comment thread
-4. Never write directly to .editor/ files — they are virtual placeholders; writing to them
+5. Never write directly to .editor/ files — they are virtual placeholders; writing to them
    has no effect on real document state.  All mutations must go through the MCP write tools.
 
 If no <workspace_context> block is present, treat the turn as a pure-chat exchange and
 respond without attempting to read workspace files.
+
+## Switch-Editor Workflow
+
+When you need to work on a document whose session ID differs from the one shown in
+<workspace_context>, switch context before doing anything else:
+
+1. Identify the target session ID — the user may mention it explicitly, or you can retrieve
+   it via `mcp__user__get_sessions_range` if you only know the date or title.
+2. Call switch_editor(editor_session_id="<target-id>") — this requires NO human confirmation.
+   The tool is a lightweight no-op on the MCP side; the server-side PostToolUse hook loads
+   the new editor_state from the database and updates the in-memory context automatically.
+3. Confirm the switch — after the tool returns {"ok": true}, the .editor/ virtual index now
+   serves content from the new session.  Proceed with the Edit-Point Workflow from step 2
+   (Orient) onward.
+
+Note: switch_editor only changes the read/write context for .editor/ paths.  It does not
+modify any document content and does not require the user to approve it.
 
 ## Session Retrieval Workflow
 
