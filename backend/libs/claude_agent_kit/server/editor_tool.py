@@ -22,6 +22,8 @@
 # [Sync] 2026-05-29: remove _load_session_context / os.getenv; session_id now arrives via
 #                    MCP tool call arguments (agent reads it from <workspace_context> prompt).
 #                    DB helpers use session_id-only queries (no user_id — trusted subprocess).
+# [Sync] 2026-06-01: add switch_editor context-switching tool (no-op MCP handler; actual
+#                    state switch performed by PostToolUse hook in agent_runner.py).
 
 """EditorEngine write MCP tool handlers.
 
@@ -68,6 +70,12 @@ class EditorToolSpec:
     # JSON Schema for the input object.
     input_schema: dict[str, Any]
 
+
+# ---------------------------------------------------------------------------
+# Context-switch tool name constant (used by editor_runner.py PostToolUse hook)
+# ---------------------------------------------------------------------------
+
+SWITCH_EDITOR_TOOL_NAME = "switch_editor"
 
 # ``editor_session_id`` is a required system argument in every write tool.
 # Claude reads it from the ``<workspace_context>`` prompt block (the "Editor Session ID"
@@ -180,6 +188,31 @@ EDITOR_WRITE_TOOL_SPECS: dict[str, EditorToolSpec] = {
             "required": ["editor_session_id", "commentId", "content", "reason"],
         },
     ),
+    # Context-switch tool: the MCP handler is intentionally a no-op.
+    # The actual editor_state switch is performed by the PostToolUse hook in
+    # agent_runner.py, which loads the new state from the database and updates
+    # the AgentRunState flyweight so subsequent .editor/ reads reflect the new
+    # document context.  No human confirmation is required for a context switch.
+    SWITCH_EDITOR_TOOL_NAME: EditorToolSpec(
+        description=(
+            "切换当前对话的工作空间上下文至指定会话。调用成功后，智能体通过 .editor/ 路径读取的"
+            "内容将来自新的目标会话文档。此操作不修改任何文档内容；状态切换在服务端由 PostToolUse"
+            "钩子异步完成，无需用户确认。"
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "editor_session_id": {
+                    "type": "string",
+                    "description": (
+                        "要切换到的目标会话 ID（user_sessions.id from /api/sessions）。"
+                        "切换后智能体将在该会话的文档上下文中继续工作。"
+                    ),
+                },
+            },
+            "required": ["editor_session_id"],
+        },
+    ),
 }
 
 
@@ -262,6 +295,16 @@ def _save_editor_state_to_db(
         return False
 
 
+def load_editor_state_from_db(editor_session_id: str) -> dict[str, Any]:
+    """Public alias for loading editor_state by session ID.
+
+    Used by :mod:`agent_runner` PostToolUse hook to load the new context
+    after a ``switch_editor`` tool call completes.  Delegates to the private
+    ``_load_editor_state_from_db`` helper.
+    """
+    return _load_editor_state_from_db(editor_session_id)
+
+
 # ---------------------------------------------------------------------------
 # Tool dispatch
 # ---------------------------------------------------------------------------
@@ -280,6 +323,13 @@ def handle_editor_write_tool(
     the Claude thread / conversation ID.
     """
     args = arguments or {}
+
+    # switch_editor is a context-switch tool whose MCP handler is intentionally a
+    # no-op; the actual state update is performed by the PostToolUse hook in
+    # agent_runner.py.  It does not carry the standard editor_session_id validation
+    # block (the session_id represents the *target*, not the current session).
+    if tool_name == SWITCH_EDITOR_TOOL_NAME:
+        return _switch_editor(str(args.get("editor_session_id") or "").strip())
 
     # editor_session_id comes from the agent context (prompt), not from env vars.
     editor_session_id: str = str(args.get("editor_session_id") or "").strip()
@@ -479,3 +529,14 @@ def _reply_to_comment(
         "commentId": comment_id,
         "reason": reason,
     }, ensure_ascii=False)
+
+
+def _switch_editor(editor_session_id: str) -> str:
+    """No-op MCP handler for the ``switch_editor`` context-switch tool.
+
+    The actual editor_state switch is performed by the PostToolUse hook in
+    ``agent_runner.py``, which fires *after* this handler returns.  This
+    handler exists only to satisfy the MCP tool protocol: it returns a
+    success acknowledgement so Claude can observe that the call completed.
+    """
+    return json.dumps({"ok": True, "switched": True, "editor_session_id": editor_session_id})

@@ -175,6 +175,14 @@ class AgentRunOptions:
     # the tool-event callback writes back after a confirmed MCP write-tool
     # result.  Falls back to ``editor_state`` when not set (e.g. unit tests).
     editor_state_getter: Optional[Any] = None
+    # Optional setter that writes a new editor_state into the AgentRunState
+    # flyweight.  Called by the PostToolUse hook after a successful
+    # ``switch_editor`` tool call: the hook loads the target session's
+    # editor_state from the database and passes it to this setter so that
+    # subsequent .editor/ reads via ``editor_state_getter`` reflect the new
+    # document context.
+    # Signature: ``(new_editor_state: dict) -> None``.
+    editor_state_setter: Optional[Any] = None
 
 
 @dataclass
