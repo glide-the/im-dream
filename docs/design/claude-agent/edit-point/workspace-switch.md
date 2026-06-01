@@ -41,7 +41,7 @@ PreToolUse 钩子（agent_runner.py）
 ```
 
 若要在单次对话中切换到另一个会话的文档，需要一种机制动态更新 `AgentRunState.editor_state`
-飞享元缓存，让后续的 `.editor/` 读取自动看到新内容。
+享元缓存，让后续的 `.editor/` 读取自动看到新内容。
 
 ---
 
@@ -54,7 +54,7 @@ PreToolUse 钩子（agent_runner.py）
 | 组件 | 职责 |
 |------|------|
 | `editor_tool.py` 中的 MCP 处理器 | **空操作（no-op）**：仅返回 `{"ok": true}` |
-| `agent_runner.py` 中的 `PostToolUse` 钩子 | **实际切换逻辑**：读取工具参数 → 从数据库加载新 `editor_state` → 通过 `opts.editor_state_setter` 更新飞享元 |
+| `agent_runner.py` 中的 `PostToolUse` 钩子 | **实际切换逻辑**：读取工具参数 → 从数据库加载新 `editor_state` → 通过 `opts.editor_state_setter` 更新享元 |
 | `AgentRunOptions.editor_state_setter` | **写入通道**：由 `service.py` 注入，绑定到 `AgentRunState.with_editor_state()` |
 
 ### 2.2 为何选用 PostToolUse 而非 PreToolUse
@@ -67,9 +67,9 @@ PreToolUse 钩子（agent_runner.py）
 
 ### 2.3 为何 MCP 处理器是空操作
 
-- 真正的切换逻辑（数据库查询 + 飞享元写入）发生在 `agent_runner.py`（主进程），
+- 真正的切换逻辑（数据库查询 + 享元写入）发生在 `agent_runner.py`（主进程），
   而不是 MCP 子进程。
-- MCP 子进程中没有对 `AgentRunState` 飞享元的引用，无法直接修改它。
+- MCP 子进程中没有对 `AgentRunState` 享元的引用，无法直接修改它。
 - 空操作处理器的存在只是为了满足 MCP 工具协议：Claude 需要看到一个合法的工具调用结果，
   才能确认切换已生效。
 
@@ -143,7 +143,7 @@ MCP 子进程的 `_switch_editor()` 处理器始终返回：
            │      → 返回新 editor_state dict
            └─ opts.editor_state_setter(new_state)
                   → state.with_editor_state(new_state, state.editor_user_id)
-                  → AgentRunState.editor_state = new_state（飞享元已更新）
+                  → AgentRunState.editor_state = new_state（享元已更新）
 
 下次 .editor/ 读取时：
     PreToolUse hook
@@ -153,11 +153,11 @@ MCP 子进程的 `_switch_editor()` 处理器始终返回：
         → 智能体读到新文档
 ```
 
-### 4.1 飞享元更新链
+### 4.1 享元更新链
 
 ```
 opts.editor_state_setter(v)          # service.py 注入的 lambda
-  → state.with_editor_state(v, uid)  # AgentRunState 飞享元写入
+  → state.with_editor_state(v, uid)  # AgentRunState 享元写入
     → state.editor_state = v
 
 opts.editor_state_getter()           # agent_runner.py PreToolUse 读取
@@ -175,7 +175,7 @@ opts.editor_state_getter()           # agent_runner.py PreToolUse 读取
 | state 更新时机 | `tool_result` 回调（service.py） | `PostToolUse` 钩子（agent_runner.py） |
 | state 更新方式 | `state.editor_state = fresh_state`（直接赋值） | `opts.editor_state_setter(new_state)`（通过注入的 setter） |
 | MCP 处理器职责 | 实际修改数据库中的文档内容 | 空操作，仅返回 ok |
-| 钩子类型 | PreToolUse（确认） + tool_result（DB 刷新） | PostToolUse（DB 加载 + 飞享元写入） |
+| 钩子类型 | PreToolUse（确认） + tool_result（DB 刷新） | PostToolUse（DB 加载 + 享元写入） |
 
 ---
 
@@ -188,7 +188,7 @@ sequenceDiagram
     participant MCP as Editor MCP 子进程<br/>(editor_tool.py)
     participant PostHook as PostToolUse Hook<br/>(agent_runner.py)
     participant DB as Database
-    participant State as AgentRunState<br/>（飞享元缓存）
+    participant State as AgentRunState<br/>（享元缓存）
 
     Agent->>PreHook: switch_editor(editor_session_id="sess-new")
     Note over PreHook: 不在 _ALWAYS_CONFIRM_TOOL_NAMES 中<br/>直接允许（auto 模式）
@@ -201,7 +201,7 @@ sequenceDiagram
     PostHook->>DB: asyncio.to_thread(load_editor_state_from_db, "sess-new")
     DB-->>PostHook: new_editor_state (来自 user_sessions WHERE id = "sess-new")
     PostHook->>State: opts.editor_state_setter(new_editor_state)
-    Note over State: state.editor_state = new_editor_state<br/>飞享元已更新
+    Note over State: state.editor_state = new_editor_state<br/>享元已更新
 
     Agent->>PreHook: Read(.editor/cells.json)
     Note over PreHook: live_editor_state = opts.editor_state_getter()<br/>= state.editor_state = new_editor_state
