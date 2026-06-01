@@ -1,10 +1,14 @@
+// [Input] Auth state, browser timezone, editor engine, session API helpers, and voice preference setters.
+// [Output] Provide editor session lifecycle state, persistence helpers, and current user_session metadata.
+// [Pos] session-lifecycle hook in frontend/src/hooks
+// [Sync] 2026-06-01: expose current user_session.labels for the writing view StateChooser.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorEngine } from '../engine/EditorEngine';
 import type { EditorState, TextCell } from '../engine/EditorEngine';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getLocalDayKey, getTodayKeyInTimezone } from '../utils/timezone';
 import { saveMetaPrompt, getStateConfig as loadStateConfig } from '../utils/voiceStorage';
-import type { VoiceConfig } from '../api/voiceApi';
+import type { SessionLabels, VoiceConfig } from '../api/voiceApi';
 
 function createSessionId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -35,6 +39,7 @@ export function useSessionLifecycle({
   const [selectedState, setSelectedState] = useState<string | null>(null);
   const [selectedStateLoading, setSelectedStateLoading] = useState(true);
   const [userTimezone, setUserTimezone] = useState(browserTimezone);
+  const [currentSessionLabels, setCurrentSessionLabels] = useState<SessionLabels>([]);
 
   const ensuredSessionForDayRef = useRef<string | null>(null);
   const userTimezoneRef = useRef(userTimezone);
@@ -123,6 +128,7 @@ export function useSessionLifecycle({
     engineRef.current.loadState(blankState);
     setState(blankState);
     setLocalTexts(new Map());
+    setCurrentSessionLabels([]);
 
     if (!isAuthenticated) {
       localStorage.setItem(STORAGE_KEYS.EDITOR_STATE, JSON.stringify(blankState));
@@ -156,6 +162,7 @@ export function useSessionLifecycle({
     engineRef.current.loadState(emptyState);
     setState(emptyState);
     setLocalTexts(new Map());
+    setCurrentSessionLabels([]);
 
     if (!isAuthenticated) {
       localStorage.removeItem(STORAGE_KEYS.EDITOR_STATE);
@@ -170,6 +177,7 @@ export function useSessionLifecycle({
     engineRef.current.loadState(emptyState);
     setState(emptyState);
     setLocalTexts(new Map());
+    setCurrentSessionLabels([]);
 
     if (isAuthenticated) {
       try {
@@ -314,6 +322,7 @@ export function useSessionLifecycle({
 
             let sessionToLoad = null;
             let loadedSessionId: string | undefined = undefined;
+            let loadedSessionLabels: SessionLabels = [];
             let startedFreshForToday = false;
             const currentSessionId = 'current-session';
             const currentSession = sessions.find(s => s.id === currentSessionId);
@@ -322,6 +331,7 @@ export function useSessionLifecycle({
               const fullSession = await getSession(currentSessionId);
               sessionToLoad = fullSession.editor_state;
               loadedSessionId = currentSessionId;
+              loadedSessionLabels = fullSession.labels;
             } else if (sessions.length > 0) {
               const mostRecent = sessions.sort((a, b) =>
                 new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()
@@ -335,6 +345,7 @@ export function useSessionLifecycle({
                 const fullSession = await getSession(mostRecent.id);
                 sessionToLoad = fullSession.editor_state;
                 loadedSessionId = mostRecent.id;
+                loadedSessionLabels = fullSession.labels;
               } else {
                 console.log(`📅 New day detected. Last session was from ${sessionDate}, today is ${today}. Starting fresh.`);
                 if (engineRef.current) {
@@ -354,6 +365,7 @@ export function useSessionLifecycle({
                   engineRef.current.loadState(blankState);
                   setState(blankState);
                   setLocalTexts(new Map());
+                  setCurrentSessionLabels([]);
                   ensuredSessionForDayRef.current = today;
                   startedFreshForToday = true;
                   // @@@ New Day Guard - hand the fresh state to the loader so nothing older overwrites it below
@@ -374,6 +386,7 @@ export function useSessionLifecycle({
               };
               engineRef.current?.loadState(normalizedState);
               setState(engineRef.current?.getState() || normalizedState);
+              setCurrentSessionLabels(loadedSessionLabels);
 
               const texts = new Map<string, string>();
               sessionToLoad.cells?.filter((c: any) => c.type === 'text').forEach((c: any) => {
@@ -382,6 +395,7 @@ export function useSessionLifecycle({
               setLocalTexts(texts);
             } else if (!startedFreshForToday) {
               setState(engineRef.current?.getState() || null);
+              setCurrentSessionLabels([]);
             }
 
             try {
@@ -426,6 +440,7 @@ export function useSessionLifecycle({
               const parsed = JSON.parse(saved);
               engineRef.current?.loadState(parsed);
               setState(engineRef.current?.getState() || parsed);
+              setCurrentSessionLabels([]);
 
               const texts = new Map<string, string>();
               parsed.cells?.filter((c: any) => c.type === 'text').forEach((c: any) => {
@@ -437,6 +452,7 @@ export function useSessionLifecycle({
             }
           } else {
             setState(engineRef.current?.getState() || null);
+            setCurrentSessionLabels([]);
           }
 
           const savedState = localStorage.getItem(STORAGE_KEYS.SELECTED_STATE);
@@ -526,6 +542,8 @@ export function useSessionLifecycle({
     setState,
     localTexts,
     setLocalTexts,
+    currentSessionLabels,
+    setCurrentSessionLabels,
     selectedState,
     setSelectedState,
     selectedStateLoading,

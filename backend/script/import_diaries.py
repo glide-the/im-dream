@@ -8,6 +8,7 @@
 # [Sync] 2026-05-31: same-name folder docs like 临时记事本-5-13/临时记事本-5-13.md resolve dates from the folder/file stem.
 # [Sync] 2026-05-31: top-level stems like 思考笔记本-5-17.md resolve dates from the filename stem before creation time.
 # [Sync] 2026-05-31: imported sessions default selectedState to ok.
+# [Sync] 2026-06-01: imported sessions can infer and persist labels before writing user_sessions.
 """
 Import Markdown diary/note files into user_sessions.
 
@@ -19,9 +20,10 @@ Filename dates remain available through --date-source filename for files named l
 - 日记-2026-5-26.md
 
 It strips YAML front matter, prefixes the source filename as the first text
-line, writes a single text-cell editor state through database.save_session(),
-defaults the imported session mood to OK, and keeps repeated runs idempotent
-by deriving a stable session UUID per user/source file/day.
+line, infers primary labels from front matter, hashtags, paths, and content,
+writes a single text-cell editor state through database.save_session(), defaults
+the imported session mood to OK, and keeps repeated runs idempotent by deriving
+a stable session UUID per user/source file/day.
 """
 
 from __future__ import annotations
@@ -54,6 +56,8 @@ DEFAULT_TIMEZONE = "Asia/Shanghai"
 DEFAULT_IMPORT_TIME = "09:00"
 DEFAULT_DATE_SOURCE = "created-first"
 DEFAULT_SELECTED_STATE = "ok"
+DEFAULT_LABEL_MODE = "auto"
+DEFAULT_MAX_LABELS = 5
 DATE_SOURCE_CHOICES = (
     "created-first",
     "folder-name",
@@ -61,6 +65,30 @@ DATE_SOURCE_CHOICES = (
     "created",
     "modified",
     "filename",
+)
+LABEL_MODE_CHOICES = ("auto", "frontmatter", "none")
+HASHTAG_RE = re.compile(r"(?<!\w)#([\w\u4e00-\u9fff-]{1,24})")
+INLINE_LABEL_LIST_RE = re.compile(r"^\[(.*)\]$")
+
+LABEL_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("PDST-CHAT", ("PDST-CHAT", "PDST", "chat项目")),
+    ("Paperclip", ("paperclip",)),
+    ("智能体协作", ("智能体", "agent", "claude", "codex", "mcp")),
+    ("Issue Lifecycle", ("issue lifecycle", "issue-lifecycle", "lifecycle", "生命周期")),
+    ("工程管理", ("工程管理", "架构", "workflow", "工作流", "验收", "版本", "ci", "pr")),
+    ("出海", ("出海", "海外", "国外", "跨境")),
+    ("SEO", ("seo", "关键词", "搜索", "流量")),
+    ("账号注册", ("账户注册", "账号注册", "注册账号")),
+    ("增长", ("增长", "人效", "获客", "转化")),
+    ("产品设计", ("产品设计", "项目设计", "用户体验", "产品定位")),
+    ("情绪", ("情绪", "心情", "焦虑", "孤独", "难过", "痛苦", "抑郁", "燥热")),
+    ("认知行为疗法", ("认知行为", "cbt", "疗法", "治疗")),
+    ("康复训练", ("康复训练", "康复", "边界", "红线")),
+    ("关系", ("关系", "亲密", "小谷", "距离", "爱", "想你")),
+    ("自我观察", ("自我观察", "觉察", "反思", "复盘", "我发现", "意识到")),
+    ("写作整理", ("笔记整理", "提示词", "整理", "总结")),
+    ("棋盘", ("棋盘",)),
+    ("战略", ("策略", "定位", "规划", "路线")),
 )
 
 
@@ -75,6 +103,7 @@ class DiaryEntry:
     created_at_db: str
     created_at_state: str
     date_source: str
+    labels: list[str]
     title: str = ""
     action: str = "insert"
     skip_reason: str = ""
@@ -148,6 +177,22 @@ def parse_args() -> argparse.Namespace:
             "Editor selectedState for imported sessions. Use an empty string to omit it "
             f"(default {DEFAULT_SELECTED_STATE}, displayed as OK by the default state config)."
         ),
+    )
+    parser.add_argument(
+        "--label-mode",
+        choices=LABEL_MODE_CHOICES,
+        default=os.environ.get("INK_MEMORY_IMPORT_LABEL_MODE", DEFAULT_LABEL_MODE),
+        help=(
+            "How to populate user_sessions.labels. auto infers front matter, hashtags, "
+            "path subjects, and content keywords; frontmatter only uses explicit labels; "
+            "none writes an empty label list."
+        ),
+    )
+    parser.add_argument(
+        "--max-labels",
+        type=int,
+        default=int(os.environ.get("INK_MEMORY_IMPORT_MAX_LABELS", DEFAULT_MAX_LABELS)),
+        help=f"Maximum labels per imported session (default {DEFAULT_MAX_LABELS}).",
     )
     parser.add_argument(
         "--replace",
@@ -323,6 +368,153 @@ def strip_yaml_front_matter(raw: str) -> str:
     return text.strip()
 
 
+def normalize_label(value: str) -> str:
+    label = value.strip().strip("#").strip()
+    label = re.sub(r"\s+", " ", label)
+    label = label.strip(" ,，、;；[]")
+    return label[:40]
+
+
+def add_label(labels: list[str], label: str, max_labels: int) -> None:
+    normalized = normalize_label(label)
+    if not normalized:
+        return
+    if normalized.lower() in {existing.lower() for existing in labels}:
+        return
+    if len(labels) < max_labels:
+        labels.append(normalized)
+
+
+def split_inline_labels(value: str) -> list[str]:
+    stripped = value.strip()
+    bracketed = INLINE_LABEL_LIST_RE.match(stripped)
+    if bracketed:
+        stripped = bracketed.group(1)
+    return [
+        item.strip().strip("'\"")
+        for item in re.split(r"[,，、]", stripped)
+        if item.strip().strip("'\"")
+    ]
+
+
+def explicit_labels_from_front_matter(raw: str) -> list[str]:
+    text = raw.replace("\r\n", "\n").replace("\r", "\n")
+    if not text.startswith("---\n"):
+        return []
+
+    lines = text.split("\n")
+    end_index = None
+    for index in range(1, len(lines)):
+        if lines[index].strip() == "---":
+            end_index = index
+            break
+    if end_index is None:
+        return []
+
+    labels: list[str] = []
+    index = 1
+    while index < end_index:
+        line = lines[index]
+        key_match = re.match(r"^\s*(tags|labels)\s*:\s*(.*)$", line, re.IGNORECASE)
+        if not key_match:
+            index += 1
+            continue
+
+        value = key_match.group(2).strip()
+        if value:
+            labels.extend(split_inline_labels(value))
+            index += 1
+            continue
+
+        index += 1
+        while index < end_index:
+            item_match = re.match(r"^\s*-\s+(.+)$", lines[index])
+            if not item_match:
+                break
+            labels.append(item_match.group(1).strip().strip("'\""))
+            index += 1
+    return labels
+
+
+def explicit_labels_from_hashtags(body: str) -> list[str]:
+    labels: list[str] = []
+    for match in HASHTAG_RE.finditer(body):
+        label = normalize_label(match.group(1))
+        if re.fullmatch(r"\d+", label):
+            continue
+        if re.fullmatch(r"[A-Za-z]\d+", label):
+            continue
+        labels.append(label)
+    return labels
+
+
+def path_subject_labels(path: Path) -> list[str]:
+    stem = path.stem
+    labels: list[str] = []
+
+    if DIARY_FILE_RE.match(path.name):
+        labels.append("日记")
+    if "临时记事本" in path.as_posix():
+        labels.append("临时记事本")
+    if "思考笔记本" in stem:
+        labels.append("思考笔记")
+    if stem.startswith("PDST-CHAT"):
+        labels.append("PDST-CHAT")
+    if stem == "ISSUE-LIFECYCLE-ANALYSIS":
+        labels.append("Issue Lifecycle")
+    if stem == "智能体协作工程管理":
+        labels.extend(["智能体协作", "工程管理"])
+
+    if stem.startswith("PDST-CHAT") or stem in {
+        "ISSUE-LIFECYCLE-ANALYSIS",
+        "智能体协作工程管理",
+    }:
+        cleaned = ""
+    else:
+        cleaned = re.sub(r"^日记-?\d{4}-\d{1,2}-\d{1,2}$", "", stem)
+        cleaned = re.sub(r"^.+-\d{1,2}-\d{1,2}$", "", cleaned)
+        cleaned = re.sub(r"\s*\(\d+\)$", "", cleaned)
+    cleaned = cleaned.strip(" -_")
+    if cleaned and cleaned not in {"临时记事本", "思考笔记本"} and len(cleaned) <= 12:
+        labels.append(cleaned)
+    return labels
+
+
+def keyword_label_scores(path: Path, body: str) -> list[tuple[int, int, str]]:
+    search_text = f"{path.as_posix()}\n{body[:12000]}".lower()
+    scored: list[tuple[int, int, str]] = []
+    for order, (label, keywords) in enumerate(LABEL_RULES):
+        score = 0
+        for keyword in keywords:
+            score += search_text.count(keyword.lower())
+        if score:
+            scored.append((-score, order, label))
+    return sorted(scored)
+
+
+def infer_labels(path: Path, raw: str, body: str, mode: str, max_labels: int) -> list[str]:
+    if max_labels < 1:
+        raise SystemExit("--max-labels must be a positive integer.")
+    if mode == "none":
+        return []
+
+    labels: list[str] = []
+    for label in explicit_labels_from_front_matter(raw):
+        add_label(labels, label, max_labels)
+    for label in explicit_labels_from_hashtags(body):
+        add_label(labels, label, max_labels)
+
+    if mode == "frontmatter":
+        return labels
+
+    for label in path_subject_labels(path):
+        add_label(labels, label, max_labels)
+    for _, _, label in keyword_label_scores(path, body):
+        add_label(labels, label, max_labels)
+
+    return labels
+
+
 def normalized_text_hash(text: str) -> str:
     normalized = "\n".join(line.rstrip() for line in text.strip().splitlines()).strip()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
@@ -479,6 +671,8 @@ def collect_diary_entries(
     default_year: int,
     diary_filenames_only: bool,
     same_name_folder_docs_only: bool,
+    label_mode: str,
+    max_labels: int,
 ) -> list[DiaryEntry]:
     dated_paths: list[tuple[date, str, str, str, Path]] = []
     per_day_counts: dict[date, int] = {}
@@ -518,6 +712,7 @@ def collect_diary_entries(
         if not body:
             continue
         text = content_with_filename_first_line(path, body)
+        labels = infer_labels(path, raw, body, label_mode, max_labels)
 
         entries.append(
             DiaryEntry(
@@ -530,6 +725,7 @@ def collect_diary_entries(
                 created_at_db=created_at_db,
                 created_at_state=created_at_state,
                 date_source=resolved_source,
+                labels=labels,
             )
         )
 
@@ -724,15 +920,19 @@ def import_entries(
 ) -> None:
     for entry in entries:
         relative = entry.path.as_posix()
+        labels_text = ", ".join(entry.labels) if entry.labels else "-"
         if entry.action == "skip":
             print(
                 f"SKIP    {entry.day.isoformat()}  [{entry.date_source}]  {entry.base_title}  "
-                f"{relative}  ({entry.skip_reason})"
+                f"{relative}  labels=[{labels_text}]  ({entry.skip_reason})"
             )
             continue
 
         verb = "REPLACE" if entry.action == "replace" else "INSERT "
-        print(f"{verb} {entry.day.isoformat()}  [{entry.date_source}]  {entry.title}  {relative}")
+        print(
+            f"{verb} {entry.day.isoformat()}  [{entry.date_source}]  {entry.title}  "
+            f"{relative}  labels=[{labels_text}]"
+        )
         if dry_run:
             continue
 
@@ -742,6 +942,7 @@ def import_entries(
             build_editor_state(entry, selected_state),
             name=entry.title,
             created_at=entry.created_at_db,
+            labels=entry.labels,
         )
         preserve_import_timestamps(user_id, entry)
 
@@ -779,6 +980,8 @@ def main() -> None:
         default_year=default_year,
         diary_filenames_only=args.diary_filenames_only,
         same_name_folder_docs_only=args.same_name_folder_docs_only,
+        label_mode=args.label_mode,
+        max_labels=args.max_labels,
     )
     existing = fetch_existing_sessions(user_id, tz)
     planned = plan_entries(entries, existing, replace=args.replace)
@@ -790,6 +993,8 @@ def main() -> None:
     print(f"Date source: {args.date_source}")
     print(f"Default year: {default_year}")
     print(f"Selected state: {selected_state or '(none)'}")
+    print(f"Label mode: {args.label_mode}")
+    print(f"Max labels: {args.max_labels}")
     if args.same_name_folder_docs_only:
         file_scope = "same-name folder docs only"
     elif args.diary_filenames_only:

@@ -26,7 +26,10 @@ export const STORAGE_KEYS = {
   RECENT_FRIENDS: 'ink-recent-friends',
 
   // Analysis
-  ANALYSIS_REPORTS: 'analysisReports'
+  ANALYSIS_REPORTS: 'analysisReports',
+
+  // Theme
+  THEME: 'ink-theme'
 } as const;
 
 // Type for autocomplete
