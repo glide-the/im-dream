@@ -26,6 +26,9 @@
 #                    add switch_editor to Edit-Point Workflow tool list; add context-check
 #                    step (Step 1) to Edit-Point Workflow reminding agent to call
 #                    switch_editor when the current Editor Session ID is not the target.
+# [Sync] 2026-06-01: escape literal JSON braces in _SYSTEM_PROMPT_TEMPLATE so
+#                    str.format only substitutes recent_sessions_block; keep
+#                    recent-session range results capped by context_session_count.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -125,7 +128,7 @@ When you need to work on a document whose session ID differs from the one shown 
 2. Call switch_editor(editor_session_id="<target-id>") — this requires NO human confirmation.
    The tool is a lightweight no-op on the MCP side; the server-side PostToolUse hook loads
    the new editor_state from the database and updates the in-memory context automatically.
-3. Confirm the switch — after the tool returns {"ok": true}, the .editor/ virtual index now
+3. Confirm the switch — after the tool returns {{"ok": true}}, the .editor/ virtual index now
    serves content from the new session.  Proceed with the Edit-Point Workflow from step 2
    (Orient) onward.
 
@@ -369,7 +372,7 @@ class ClaudeAgentContextBuilder:
         result = await loop.run_in_executor(
             None, database.list_sessions_in_range, int(user_id), start_date, end_date
         )
-        return list(result or [])
+        return list(result or [])[: self._context_session_count]
 
     async def _fetch_sessions(self, user_id: str) -> list[dict[str, Any]]:
         """Fetch recent sessions from the database using the project's database module.

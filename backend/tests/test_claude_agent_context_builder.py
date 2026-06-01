@@ -1,11 +1,14 @@
 # [Input] Consume ClaudeAgentContextBuilder from backend/claude_agent/context_builder.py.
-#         Mock database.list_sessions to provide writing session fixtures.
+#         Mock database.list_sessions_in_range to provide writing session fixtures.
 # [Output] Verify system_prompt assembly: header, recent sessions block, runtime context,
 #          session count cap, empty-sessions fallback, and DB error graceful degradation.
 # [Pos] test node in backend/tests
 # [Sync] 2026-05-22: fresh implementation for Ink & Memory writing-session context.
 #                    (Pawkeyland's context_builder tested pet persona / sticker / necklace —
 #                     all removed; replaced with writing-session-based context.)
+# [Sync] 2026-06-01: cover escaped literal JSON in the system prompt template so
+#                    switch_editor guidance cannot break str.format rendering;
+#                    align system-prompt fixtures with list_sessions_in_range.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -99,36 +102,36 @@ class TestBuildSystemPrompt(unittest.TestCase):
         return ClaudeAgentContextBuilder(context_session_count=n)
 
     def _mock_db(self, sessions):
-        """Return a patcher that makes database.list_sessions return sessions."""
+        """Return a patcher that makes database.list_sessions_in_range return sessions."""
         import database as _db  # noqa: PLC0415 — local import, backend path
-        return unittest.mock.patch.object(_db, "list_sessions", return_value=sessions)
+        return unittest.mock.patch.object(_db, "list_sessions_in_range", return_value=sessions)
 
     def test_prompt_contains_sessions_header(self):
         with self._mock_db(_fake_sessions(2)):
-            prompt = _run(self._builder().build_system_prompt("user_1"))
+            prompt = _run(self._builder().build_system_prompt("1"))
         self.assertIn(_SESSIONS_HEADER.strip(), prompt)
 
     def test_prompt_contains_session_names(self):
         sessions = _fake_sessions(2)
         with self._mock_db(sessions):
-            prompt = _run(self._builder().build_system_prompt("user_1"))
+            prompt = _run(self._builder().build_system_prompt("1"))
         for s in sessions:
             self.assertIn(s["name"], prompt)
 
     def test_prompt_contains_writing_assistant_role(self):
         with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("user_1"))
+            prompt = _run(self._builder().build_system_prompt("1"))
         self.assertIn("writing assistant", prompt.lower())
 
     def test_empty_sessions_uses_fallback(self):
         with self._mock_db([]):
-            prompt = _run(self._builder().build_system_prompt("user_1"))
+            prompt = _run(self._builder().build_system_prompt("1"))
         self.assertIn(_NO_SESSIONS_TEXT.strip(), prompt)
 
     def test_respects_context_session_count_cap(self):
         sessions = _fake_sessions(10)
         with self._mock_db(sessions):
-            prompt = _run(ClaudeAgentContextBuilder(context_session_count=3).build_system_prompt("u"))
+            prompt = _run(ClaudeAgentContextBuilder(context_session_count=3).build_system_prompt("1"))
         # Only first 3 session names should appear
         for s in sessions[:3]:
             self.assertIn(s["name"], prompt)
@@ -137,12 +140,19 @@ class TestBuildSystemPrompt(unittest.TestCase):
 
     def test_db_error_gracefully_degrades_to_no_sessions(self):
         import database as _db
-        with unittest.mock.patch.object(_db, "list_sessions", side_effect=RuntimeError("db down")):
-            prompt = _run(self._builder().build_system_prompt("user_1"))
+        with unittest.mock.patch.object(_db, "list_sessions_in_range", side_effect=RuntimeError("db down")):
+            prompt = _run(self._builder().build_system_prompt("1"))
         self.assertIn(_NO_SESSIONS_TEXT.strip(), prompt)
         # Prompt should still be a valid string (not raise)
         self.assertIsInstance(prompt, str)
         self.assertGreater(len(prompt), 50)
+
+    def test_switch_editor_json_example_survives_template_formatting(self):
+        with self._mock_db([]):
+            prompt = _run(self._builder().build_system_prompt("1"))
+
+        self.assertIn('returns {"ok": true}', prompt)
+        self.assertIn(_NO_SESSIONS_TEXT.strip(), prompt)
 
 
 # ---------------------------------------------------------------------------
