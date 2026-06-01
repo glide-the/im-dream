@@ -15,6 +15,7 @@ Scope: 智能体在单次对话中切换 `.editor` 工作空间上下文的完�
 5. [与现有 write 工具的对比](#5-与现有-write-工具的对比)
 6. [时序图](#6-时序图)
 7. [实现文件索引](#7-实现文件索引)
+8. [Agent 提示工程集成](#8-agent-提示工程集成)
 
 ---
 
@@ -226,3 +227,94 @@ sequenceDiagram
 - [workspace-adapter.md](./workspace-adapter.md) — `.editor/` 虚拟索引读取机制
 - [mcp-tools.md](./mcp-tools.md) — 写工具目录与确认流程
 - [editor-state-lifecycle.md](./editor-state-lifecycle.md) — `editor_state` 生命周期
+
+---
+
+## 8. Agent 提示工程集成
+
+> **新增（2026-06-01）**：在系统提示模板和工作空间上下文模板中补充 `switch_editor` 的调用时机与行为规范，确保 Agent 在需要切换文档时能正确触发本工具。
+
+### 8.1 系统提示模板（`context_builder.py`）
+
+#### 8.1.1 Edit-Point Workflow 变更
+
+`## Edit-Point Workflow` 原有步骤 1～4 调整为步骤 2～5，并在首位插入**步骤 1（上下文检查）**：
+
+```
+1. Check the target session — if the Editor Session ID in <workspace_context> is NOT the
+   document the user wants to work on, call switch_editor(editor_session_id="<target-id>")
+   FIRST.  After the tool returns, all subsequent .editor/ reads will reflect the new session.
+```
+
+`switch_editor` 同时加入该节的工具清单：
+
+```
+switch_editor(editor_session_id)        — switch to a different session (no confirmation needed)
+```
+
+#### 8.1.2 新增 `## Switch-Editor Workflow` 章节
+
+在系统提示中新增一个专项 Workflow 章节，补充以下要点：
+
+| 步骤 | 说明 |
+|------|------|
+| 1. 确定目标 session ID | 用户可能显式给出，也可通过 `mcp__user__get_sessions_range` 按日期检索 |
+| 2. 调用 `switch_editor` | 不需要人类确认；MCP 侧为空操作，服务端 `PostToolUse` 钩子完成实际加载 |
+| 3. 确认切换 | 工具返回 `{"ok": true}` 后，`.editor/` 虚拟索引自动指向新 session；从步骤 2（Orient）继续 Edit-Point Workflow |
+
+关键说明：`switch_editor` 仅变更 `.editor/` 读写上下文，不修改任何文档内容，也不需要用户审批。
+
+### 8.2 工作空间上下文模板（`workspace_context.py`）
+
+#### 8.2.1 新增"切换工作空间上下文"条目
+
+在 `WORKSPACE_CONTEXT_TEMPLATE` 的 Writing 章节中，在"Writing document content"之前插入：
+
+```
+Switching workspace context (no human confirmation required):
+  switch_editor(editor_session_id)  — switch to a different session
+
+  If the Editor Session ID shown above is NOT the document you want to work on,
+  call switch_editor(editor_session_id="<target-session-id>") FIRST before reading
+  or writing any .editor/ content.  Subsequent .editor/ reads will reflect the new
+  session automatically.
+```
+
+#### 8.2.2 Document editing workflow 新增 Step 0
+
+文档编辑 Workflow 在 Step 1（Orient）之前插入前置步骤：
+
+```
+Step 0 — Switch context if needed: if the Editor Session ID above is NOT the target
+         document, call switch_editor(editor_session_id="<target-id>") first.
+         After switching, all .editor/ reads will automatically reflect the new session.
+```
+
+### 8.3 与 `get_sessions_range` 的协同
+
+典型跨文档工作流：
+
+```
+用户："帮我看看上个月写的那篇关于成长的日记"
+     │
+     ├─ Agent 当前 workspace_context 的 Editor Session ID 不匹配
+     │
+     ├─ Step 1（系统提示）：检查 Editor Session ID
+     │      → 不匹配，需先找到目标 session
+     │
+     ├─ 调用 mcp__user__get_sessions_range(start_date, end_date)
+     │      → 找到 sessionId:"sess-xyz", labels:["成长"]
+     │
+     ├─ 调用 mcp__editor__switch_editor(editor_session_id="sess-xyz")
+     │      → PostToolUse 钩子加载新 editor_state，享元已更新
+     │
+     └─ 继续 Edit-Point Workflow Step 2（Orient）
+            → read_file(".editor/cells.json") 读到 sess-xyz 的文档内容
+```
+
+### 8.4 变更文件
+
+| 文件 | 变更内容 |
+|------|---------|
+| `backend/claude_agent/context_builder.py` | Edit-Point Workflow 步骤重编号；Step 1 上下文检查；`switch_editor` 加入工具清单；新增 `## Switch-Editor Workflow` 章节 |
+| `backend/claude_agent/workspace_context.py` | 新增"切换工作空间上下文"条目；Document editing workflow 新增 Step 0 |
