@@ -32,7 +32,11 @@ RUN apt-get update \
 WORKDIR /app
 
 COPY requirements.txt ./
-RUN python -m pip install --timeout 180 --retries 10 -r requirements.txt
+# Use aliyun mirror as primary, PyPI as fallback for packages not yet mirrored
+# (e.g. claude-code-sdk which is newly published by Anthropic).
+RUN python -m pip install --no-cache-dir --timeout 180 --retries 10 \
+    --extra-index-url https://pypi.org/simple/ \
+    -r requirements.txt
 
 COPY . .
 

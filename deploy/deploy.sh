@@ -89,7 +89,7 @@ gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
 # ── Step 5: build both images in parallel ────────────────────────────────────
 log "Building backend and frontend images in parallel..."
-docker build --platform linux/amd64 --tag "${BACKEND_IMAGE}" "${REPO_ROOT}/backend/" &
+docker build --no-cache --platform linux/amd64 --tag "${BACKEND_IMAGE}" "${REPO_ROOT}/backend/" &
 docker build --platform linux/amd64 --tag "${FRONTEND_IMAGE}" "${REPO_ROOT}/frontend/" &
 wait
 log "Both images built."
