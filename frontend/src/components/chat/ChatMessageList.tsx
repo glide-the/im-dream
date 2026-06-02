@@ -1,4 +1,4 @@
-// [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, FileMessagePart sub-components.
+// [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components.
 // [Output] Scrollable chat message list with tool, text, reasoning, and file part rendering.
 // [Pos] chat-message-list component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
@@ -10,13 +10,13 @@
 // [Sync] 2026-05-29: fix history-replay regression — history-loaded DynamicToolUIPart may lack toolName field causing getToolName() to return 'invocation'; add resolveToolName() with direct field fallback and hoist editor write completed check above Terminal block, decoupled from outputText.
 // [Sync] 2026-05-30: fix reasoning SSE display — auto-expand reasoning when state==='streaming'; show spin loader + blinking cursor during stream; border dims when done; hide manual expand toggle while streaming.
 // [Sync] 2026-05-30: reasoning blocks default to expanded (isExpandedActual ?? true) so thinking content stays visible after streaming ends; user can click to collapse; toggle flips isExpandedActual.
+// [Sync] 2026-06-02: delegate user text bubbles to UserMessagePart so user prompts render through the shared GFM Markdown path.
 import { useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
+import UserMessagePart from './UserMessagePart';
 import ToolMessagePart from './ToolMessagePart';
 import { isEditorWriteTool, EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
 
@@ -196,15 +196,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
               if (part.type === 'text' && part.text) {
                 const isUser = message.role === 'user';
                 if (isUser) {
-                  return (
-                    <div key={partKey} style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                      <div style={{ maxWidth: '85%', borderRadius: '18px', padding: '0.9rem 1rem', background: 'var(--color-bg-paper)', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-                        <div className="prose prose-chat" style={{ color: 'var(--color-text-primary)', fontSize: '0.92rem', lineHeight: 1.7 }}>
-                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
-                        </div>
-                      </div>
-                    </div>
-                  );
+                  return <UserMessagePart key={partKey} text={part.text} />;
                 }
 
                 const isLastPart = partIndex === (message.parts?.length ?? 0) - 1;
