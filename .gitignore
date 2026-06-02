@@ -40,3 +40,5 @@ CLAUDE.md
 logs/*
 backend/uv.lock
 **/.env
+.storage-env
+.cloud-env

@@ -169,6 +169,21 @@ This creates an organic rhythm—voices chime in naturally rather than constantl
 
 ---
 
+## Deployment
+
+To deploy Ink & Memory to **Google Cloud Run** (frontend + backend as separate services, with Cloud Storage FUSE persistence for SQLite):
+
+```bash
+export GCP_PROJECT_ID=your-project-id
+./deploy/setup-storage.sh   # one-time: GCS bucket + service account
+./deploy/setup-env.sh       # one-time: secrets + env vars
+./deploy/deploy.sh          # every release
+```
+
+See [docs/deploy/overview.md](docs/deploy/overview.md) for the full guide.
+
+---
+
 ## Contributing
 
 This is open source. We'd love your help.

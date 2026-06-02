@@ -1,0 +1,67 @@
+# BACKEND_URL is injected at container startup via envsubst.
+# Local docker-compose: BACKEND_URL=http://ink-backend:8765
+# Cloud Run:            BACKEND_URL=https://<backend-cloud-run-url>
+server {
+    listen 80;
+    server_name _;
+
+    # Required for resolving Cloud Run's dynamic hostname at runtime.
+    # Uses Google's public DNS; adjust if running in a private VPC.
+    resolver 8.8.8.8 8.8.4.4 valid=60s ipv6=off;
+
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript
+               text/xml application/xml application/xml+rss text/javascript;
+    gzip_min_length 1024;
+
+    # ── API proxy ──────────────────────────────────────────────────────────
+    location /ink-and-memory/api/ {
+        # Variable assignment forces nginx to resolve host at request time,
+        # which is necessary for Cloud Run URLs.
+        set $backend "${BACKEND_URL}";
+        proxy_pass         $backend/api/;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header   Host              $proxy_host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+
+        # SSE / long-polling
+        proxy_set_header   Connection        "";
+        proxy_buffering    off;
+        proxy_cache        off;
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    location /ink-and-memory/polycli/ {
+        set $backend "${BACKEND_URL}";
+        proxy_pass         $backend/polycli/;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header   Host              $proxy_host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+        proxy_read_timeout 3600s;
+        proxy_send_timeout 3600s;
+    }
+
+    # ── Static SPA ─────────────────────────────────────────────────────────
+    location /ink-and-memory/ {
+        alias /usr/share/nginx/html/ink-and-memory/;
+        try_files $uri $uri/ /ink-and-memory/index.html;
+
+        location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+    }
+
+    location = / {
+        return 301 /ink-and-memory/;
+    }
+}
