@@ -15,11 +15,13 @@ server {
     gzip_min_length 1024;
 
     # ── API proxy ──────────────────────────────────────────────────────────
+    # Using rewrite + variable proxy_pass (no path) so nginx passes the
+    # rewritten URI correctly. Static proxy_pass with path doesn't work
+    # when the upstream hostname is dynamic (Cloud Run URL).
     location /ink-and-memory/api/ {
-        # Variable assignment forces nginx to resolve host at request time,
-        # which is necessary for Cloud Run URLs.
         set $backend "${BACKEND_URL}";
-        proxy_pass         $backend/api/;
+        rewrite ^/ink-and-memory/(.*)$ /$1 break;
+        proxy_pass         $backend;
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
         proxy_set_header   Host              $proxy_host;
@@ -37,7 +39,8 @@ server {
 
     location /ink-and-memory/polycli/ {
         set $backend "${BACKEND_URL}";
-        proxy_pass         $backend/polycli/;
+        rewrite ^/ink-and-memory/(.*)$ /$1 break;
+        proxy_pass         $backend;
         proxy_http_version 1.1;
         proxy_ssl_server_name on;
         proxy_set_header   Host              $proxy_host;
