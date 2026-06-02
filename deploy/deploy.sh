@@ -117,7 +117,7 @@ BACKEND_FLAGS=(
   --min-instances=1
   --max-instances=1
   --timeout=3600
-  --startup-cpu-boost
+  --cpu-boost
   --service-account="${SA_EMAIL}"
   --add-volume="name=ink-data,type=cloud-storage,bucket=${GCS_BUCKET}"
   --add-volume-mount="volume=ink-data,mount-path=/app/data"
