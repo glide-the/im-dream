@@ -35,7 +35,7 @@ import AgentDropdown from './components/AgentDropdown';
 import ChatWidgetUI from './components/ChatWidgetUI';
 import StateChooser from './components/StateChooser';
 import type { VoiceConfig } from './api/voiceApi';
-import { getVoices, getMetaPrompt, getStateConfig } from './utils/voiceStorage';
+import { getVoices, getStateConfig } from './utils/voiceStorage';
 import { getDefaultVoices, chatWithVoiceSSE, importLocalData, loadVoicesFromDecks, ensureVoiceThread } from './api/voiceApi';
 import { useMobile } from './utils/mobileDetect';
 import { CommentGroupCard } from './components/CommentCard';

@@ -5,7 +5,7 @@
 // [Sync] 2026-05-29: keep foldable rail behavior while restoring theme colors and the original icon set.
 // [Sync] 2026-05-29: expanded state becomes a full ChatGPT-style sidebar with new-chat button, search input, and inline thread list.
 // [Sync] 2026-05-29: action buttons (new chat, files, history) moved to ChatView top-right floating bar; sidebar is now pure navigation/history panel.
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useState } from 'react';
 import { IconChevronLeft, IconGrid, IconTrash } from '../chat/Icons';
 
 interface ThreadItem {
@@ -16,75 +16,13 @@ interface ThreadItem {
 
 interface VerticalNavProps {
   onExpandedChange?: (expanded: boolean) => void;
+  onToggleFileSidebar?: () => void;
   threads?: ThreadItem[];
   activeThreadId?: string | null;
   onSelectThread?: (id: string) => void;
   onDeleteThread?: (id: string, e: React.MouseEvent) => void;
 }
 
-interface NavButtonProps {
-  icon: ReactNode;
-  label: string;
-  expanded: boolean;
-  active?: boolean;
-  disabled?: boolean;
-  badge?: number;
-  onClick?: () => void;
-}
-
-function NavButton({ icon, label, expanded, active = false, disabled = false, badge = 0, onClick }: NavButtonProps) {
-  const [hovered, setHovered] = useState(false);
-  const color = active
-    ? 'var(--color-action-link)'
-    : hovered
-      ? 'var(--color-text-primary)'
-      : 'var(--color-text-secondary)';
-  const background = active
-    ? 'var(--color-bg-paper)'
-    : hovered
-      ? 'var(--color-bg-surface)'
-      : 'transparent';
-  const buttonStyle: CSSProperties = {
-    position: 'relative',
-    width: '100%',
-    height: '2.5rem',
-    border: active ? '1px solid var(--color-border-paper)' : '1px solid transparent',
-    borderRadius: '0.75rem',
-    background,
-    color,
-    cursor: disabled ? 'not-allowed' : 'pointer',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: expanded ? 'flex-start' : 'center',
-    gap: '0.7rem',
-    padding: expanded ? '0 0.75rem' : 0,
-    opacity: disabled ? 0.45 : 1,
-    transition: 'background 0.16s ease, border-color 0.16s ease, color 0.16s ease, opacity 0.16s ease',
-    boxSizing: 'border-box',
-  };
-
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      aria-pressed={active}
-      disabled={disabled}
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      style={buttonStyle}
-    >
-      <span style={{ position: 'relative', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', flexShrink: 0 }}>
-        {icon}
-        {badge > 0 ? (
-          <span style={{ position: 'absolute', top: '-0.4rem', right: '-0.55rem', minWidth: '1rem', height: '1rem', padding: '0 0.2rem', borderRadius: '999px', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontSize: '0.58rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{badge}</span>
-        ) : null}
-      </span>
-      {expanded ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.86rem' }}>{label}</span> : null}
-    </button>
-  );
-}
 
 export default function VerticalNav({
   onExpandedChange,
