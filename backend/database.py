@@ -228,6 +228,13 @@ def create_tables(db):
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # @@@ Migration: add memory_workspace_config column for per-voice memory workspace configuration
+    try:
+        db.execute("ALTER TABLE voices ADD COLUMN memory_workspace_config TEXT")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     # @@@ Friendships table - bidirectional friend relationships
     db.execute("""
     CREATE TABLE IF NOT EXISTS friendships (
@@ -564,6 +571,18 @@ def increment_deck_install_count(deck_id: str):
     finally:
         db.close()
 
+
+def _parse_voice_row(row: dict) -> dict:
+    """Parse a raw voices DB row, deserialising JSON columns."""
+    raw_config = row.get("memory_workspace_config")
+    if raw_config and isinstance(raw_config, str):
+        try:
+            row["memory_workspace_config"] = json.loads(raw_config)
+        except (json.JSONDecodeError, ValueError):
+            row["memory_workspace_config"] = None
+    return row
+
+
 def get_deck_with_voices(user_id: int, deck_id: str):
     """
     Get full deck details with all voices.
@@ -591,7 +610,7 @@ def get_deck_with_voices(user_id: int, deck_id: str):
         ORDER BY order_index, created_at
         """, (deck_id,)).fetchall()
 
-        deck['voices'] = [dict(row) for row in voice_rows]
+        deck['voices'] = [_parse_voice_row(dict(row)) for row in voice_rows]
         return deck
     finally:
         db.close()
@@ -933,7 +952,8 @@ def load_voices_from_user_decks(user_id: int) -> dict:
 def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
                 name_zh: str = None, name_en: str = None,
                 icon: str = None, color: str = None,
-                order_index: int = None) -> str:
+                order_index: int = None,
+                memory_workspace_config: dict = None) -> str:
     """
     Create a new voice in a user's deck.
     Returns voice_id.
@@ -961,12 +981,15 @@ def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
             ).fetchone()['max_order']
             order_index = (max_order or 0) + 1
 
+        memory_config_json = json.dumps(memory_workspace_config) if memory_workspace_config else None
+
         db.execute("""
         INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
-                           icon, color, is_system, owner_id, enabled, has_local_changes, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0, ?)
+                           icon, color, is_system, owner_id, enabled, has_local_changes,
+                           order_index, memory_workspace_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0, ?, ?)
         """, (voice_id, deck_id, name, name_zh, name_en, system_prompt,
-              icon, color, user_id, order_index))
+              icon, color, user_id, order_index, memory_config_json))
 
         db.commit()
         return voice_id
@@ -997,7 +1020,8 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
 
         # Build update query
         allowed_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
-                         'icon', 'color', 'enabled', 'order_index', 'thread_id']
+                         'icon', 'color', 'enabled', 'order_index', 'thread_id',
+                         'memory_workspace_config']
         content_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
                          'icon', 'color']
 
@@ -1005,8 +1029,12 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
         params = []
         for field in allowed_fields:
             if field in updates:
+                value = updates[field]
+                # Serialise memory_workspace_config dict to JSON string.
+                if field == 'memory_workspace_config' and isinstance(value, dict):
+                    value = json.dumps(value)
                 update_fields.append(f"{field} = ?")
-                params.append(updates[field])
+                params.append(value)
 
         if not update_fields:
             return True  # No updates

@@ -87,6 +87,7 @@ class ClaudeAgentRequestBody(BaseModel):
     attachments: List[ChatAttachment] = []
     editor_state: Optional[dict] = None
     system_prompt: Optional[str] = Field(default=None, validation_alias=AliasChoices("system_prompt", "systemPrompt"))
+    memory_config: Optional[dict] = Field(default=None, validation_alias=AliasChoices("memory_config", "memoryConfig"))
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id
@@ -220,6 +221,7 @@ async def claude_agent_stream(
         attachments=attachment_payloads or None,
         editor_state=body.editor_state,
         system_prompt=body.system_prompt or None,
+        memory_config=body.memory_config or None,
     )
 
     async def generate():
