@@ -1,1073 +1,894 @@
-import { useState, useEffect } from 'react';
+/**
+ * [Input] voiceApi: analyzeEchoes, analyzeTraits, analyzePatterns, saveAnalysisReport,
+ *         getAnalysisReports, listSessions, fetchSessionsAggregate
+ * [Output] Reflections page — Ciridae authentic dark-noir design
+ * [Pos] components/AnalysisView — full-page Reflections (Analysis) view
+ * [Sync] 2026-06-05: Interaction redesign — dashboard shows analysis cards as primary;
+ *         clicking any analysis item opens a "related notes" detail panel showing
+ *         sessions filtered by label relevance to the clicked item.
+ */
+
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { analyzeEchoes, analyzeTraits, analyzePatterns, saveAnalysisReport, getAnalysisReports } from '../api/voiceApi';
+import {
+  analyzeEchoes,
+  analyzeTraits,
+  analyzePatterns,
+  saveAnalysisReport,
+  getAnalysisReports,
+  listSessions,
+  fetchSessionsAggregate,
+  type UserSession
+} from '../api/voiceApi';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { getDateLocale } from '../i18n';
 import { useMobile } from '../utils/mobileDetect';
 
-// @@@ Constants
+// ──────────────────────────────────────────────
+// Ciridae design tokens
+// ──────────────────────────────────────────────
+const C = {
+  void: '#0b0b0b',
+  ash: '#858585',
+  fog: '#cecece',
+  pure: '#ffffff',
+  ember: '#cc6437',
+  glass: 'rgba(255,255,255,0.04)',
+  glassBorder: 'rgba(255,255,255,0.08)',
+  glassBorderHover: 'rgba(255,255,255,0.18)',
+  fontCond: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+  fontMono: "'Roboto Mono', ui-monospace, monospace",
+} as const;
+
 const MAX_SAVED_REPORTS = 10;
 
-// @@@ Types
-interface Echo {
-  title: string;
-  description: string;
-  examples?: string[];
-}
+// ──────────────────────────────────────────────
+// Types
+// ──────────────────────────────────────────────
+interface Echo { title: string; description: string; examples?: string[] }
+interface Trait { trait: string; strength: number; evidence: string }
+interface Pattern { pattern: string; description: string; frequency: string }
 
-interface Trait {
-  trait: string;
-  strength: number;
-  evidence: string;
-}
-
-interface Pattern {
-  pattern: string;
-  description: string;
-  frequency: string;
-}
+type AnalysisItem =
+  | { kind: 'echo'; data: Echo }
+  | { kind: 'trait'; data: Trait }
+  | { kind: 'pattern'; data: Pattern }
 
 interface AnalysisReport {
   id: number;
-  echoes: Echo[];
-  traits: Trait[];
-  patterns: Pattern[];
+  echoes: Echo[]; traits: Trait[]; patterns: Pattern[];
   timestamp: number;
-  stats: {
-    days: number;
-    entries: number;
-    words: number;
-  };
+  stats: { days: number; entries: number; words: number };
 }
 
+// ──────────────────────────────────────────────
+// Helpers
+// ──────────────────────────────────────────────
+
+/** Returns keywords from an analysis item for label matching */
+function itemKeywords(item: AnalysisItem): string[] {
+  const raw =
+    item.kind === 'echo' ? `${item.data.title} ${item.data.description}` :
+    item.kind === 'trait' ? `${item.data.trait} ${item.data.evidence}` :
+    `${item.data.pattern} ${item.data.description}`;
+  return raw.toLowerCase().split(/[\s,，。.!?、]+/).filter(w => w.length > 1);
+}
+
+function itemTitle(item: AnalysisItem): string {
+  return item.kind === 'echo' ? item.data.title :
+    item.kind === 'trait' ? item.data.trait :
+    item.data.pattern;
+}
+
+function itemDesc(item: AnalysisItem): string {
+  return item.kind === 'echo' ? item.data.description :
+    item.kind === 'trait' ? item.data.evidence :
+    item.data.description;
+}
+
+/** Score a session's relevance to an analysis item by label keyword overlap */
+function sessionRelevance(session: UserSession, keywords: string[]): number {
+  if (!session.labels.length) return 0;
+  const labelText = session.labels.join(' ').toLowerCase();
+  return keywords.filter(kw => labelText.includes(kw)).length;
+}
+
+// ──────────────────────────────────────────────
+// Primitive UI components
+// ──────────────────────────────────────────────
+
+function FontInject() {
+  return (
+    <style>{`@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400&family=Roboto+Mono:wght@400&display=swap');`}</style>
+  );
+}
+
+function Eyebrow({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontFamily: C.fontCond, fontWeight: 400,
+      fontSize: '11px', letterSpacing: '0.10em',
+      textTransform: 'uppercase', color: C.ash,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function NumBadge({ n }: { n: number }) {
+  return (
+    <div style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      borderRadius: '1440px', border: `1px solid ${C.glassBorder}`,
+      padding: '2px 9px',
+      fontFamily: C.fontMono, fontSize: '10px', color: C.ash, letterSpacing: '-0.01em',
+      userSelect: 'none', flexShrink: 0,
+    }}>
+      {String(n).padStart(2, '0')}
+    </div>
+  );
+}
+
+function StarMark({ size = 48, glow = false }: { size?: number; glow?: boolean }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden
+      style={glow ? { filter: 'drop-shadow(0 0 10px rgba(255,255,255,0.3))' } : undefined}>
+      <path d="M50 10L53 47L90 50L53 53L50 90L47 53L10 50L47 47Z" fill={C.pure} />
+      <path d="M75 18L76.5 25L84 26L76.5 27L75 34L73.5 27L66 26L73.5 25Z" fill={C.pure} opacity="0.6" />
+      <path d="M25 66L26.2 71L32 72L26.2 73L25 78L23.8 73L18 72L23.8 71Z" fill={C.pure} opacity="0.4" />
+      <path d="M65 8L65.8 11L69 11.5L65.8 12L65 15L64.2 12L61 11.5L64.2 11Z" fill={C.pure} opacity="0.35" />
+    </svg>
+  );
+}
+
+function PillBtn({
+  children, onClick, disabled, accent, small,
+}: {
+  children: React.ReactNode; onClick?: () => void;
+  disabled?: boolean; accent?: boolean; small?: boolean;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        borderRadius: '1440px',
+        border: `1px solid ${
+          disabled ? C.ash + '44' :
+          accent ? C.ember :
+          hov ? C.pure + 'cc' : C.fog + '88'
+        }`,
+        background: hov && !disabled ? 'rgba(255,255,255,0.05)' : 'transparent',
+        color: disabled ? C.ash : accent ? (hov ? C.pure : C.ember) : C.pure,
+        fontFamily: C.fontCond, fontWeight: 400,
+        fontSize: small ? '11px' : '13px',
+        letterSpacing: '-0.01em', textTransform: 'uppercase',
+        padding: small ? '4px 14px' : '7px 22px',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'border-color 0.2s, background 0.2s, color 0.2s',
+        display: 'inline-flex', alignItems: 'center', gap: '6px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function GlassCard({
+  children, style, onClick, hoverable = true,
+}: {
+  children: React.ReactNode; style?: React.CSSProperties;
+  onClick?: () => void; hoverable?: boolean;
+}) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      onClick={onClick}
+      onMouseEnter={() => hoverable && setHov(true)}
+      onMouseLeave={() => hoverable && setHov(false)}
+      style={{
+        background: hov ? 'rgba(255,255,255,0.07)' : C.glass,
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border: `1px solid ${hov ? C.glassBorderHover : C.glassBorder}`,
+        borderRadius: '10px',
+        transition: 'background 0.2s, border-color 0.2s',
+        cursor: onClick ? 'pointer' : undefined,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════
+// Main component
+// ══════════════════════════════════════════════
 export default function AnalysisView() {
   const { isAuthenticated } = useAuth();
   const { t, i18n } = useTranslation();
   const dateLocale = getDateLocale(i18n.language);
   const isMobile = useMobile();
-  const formatDaysLabel = (count: number) => t('analysis.statsLabels.daysCount', { count });
-  const formatEntriesLabel = (count: number) => t('analysis.statsLabels.entriesCount', { count });
-  const formatWordsLabel = (value: number) => t('analysis.statsLabels.wordsCount', { value: value.toLocaleString() });
+
+  // ── State ──
+  const [sessions, setSessions] = useState<UserSession[]>([]);
   const [echoes, setEchoes] = useState<Echo[]>([]);
   const [traits, setTraits] = useState<Trait[]>([]);
   const [patterns, setPatterns] = useState<Pattern[]>([]);
   const [loading, setLoading] = useState({ echoes: false, traits: false, patterns: false });
   const [error, setError] = useState('');
-  const [currentPaper, setCurrentPaper] = useState(0); // @@@ Track which paper is on top
-  const [viewMode, setViewMode] = useState<'dashboard' | 'report'>('dashboard'); // @@@ Track dashboard vs report view
-
-  // Stats
-  const [stats, setStats] = useState({
-    totalDays: 0,
-    totalWords: 0,
-    totalEntries: 0
-  });
-
-  // @@@ Saved reports history
+  const [stats, setStats] = useState({ totalDays: 0, totalWords: 0, totalEntries: 0 });
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
 
-  // Collect all notes when component mounts
+  // View: 'dashboard' = analysis list; 'notes' = related notes for clicked item
+  const [selectedItem, setSelectedItem] = useState<AnalysisItem | null>(null);
+
+  // ── Load data ──
+  const loadSessions = useCallback(async () => {
+    try {
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+      const data = await listSessions(tz);
+      setSessions([...data].sort((a, b) =>
+        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      ));
+    } catch (e) { console.error('Failed to load sessions:', e); }
+  }, []);
+
   useEffect(() => {
-    const loadNotesData = async () => {
+    const loadStats = async () => {
       try {
-        const { fetchSessionsAggregate } = await import('../api/voiceApi');
-        const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
-        const aggregate = await fetchSessionsAggregate(timezone);
-        setStats({
-          totalDays: aggregate.stats.total_days,
-          totalWords: aggregate.stats.total_words,
-          totalEntries: aggregate.stats.total_entries
-        });
-      } catch (e) {
-        console.error('Failed to load aggregate stats:', e);
-        // Fallback to zeroed stats for now
-        setStats({ totalDays: 0, totalWords: 0, totalEntries: 0 });
-      }
+        const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+        const agg = await fetchSessionsAggregate(tz);
+        setStats({ totalDays: agg.stats.total_days, totalWords: agg.stats.total_words, totalEntries: agg.stats.total_entries });
+      } catch (e) { console.error(e); }
     };
 
-    loadNotesData();
-
-    // @@@ Load saved reports history from database if authenticated, localStorage if guest
     const loadReports = async () => {
       if (isAuthenticated) {
         try {
-          const dbReports = await getAnalysisReports(MAX_SAVED_REPORTS);
-          // Convert database format to app format
-          const formattedReports = dbReports.map((r: any) => ({
-            id: r.id,
-            echoes: r.report_data?.echoes || [],
-            traits: r.report_data?.traits || [],
-            patterns: r.report_data?.patterns || [],
+          const db = await getAnalysisReports(MAX_SAVED_REPORTS);
+          const fmt = db.map((r: any) => ({
+            id: r.id, echoes: r.report_data?.echoes || [],
+            traits: r.report_data?.traits || [], patterns: r.report_data?.patterns || [],
             timestamp: new Date(r.created_at).getTime(),
             stats: r.report_data?.stats || { days: 0, entries: 0, words: 0 }
           }));
-          setSavedReports(formattedReports);
-
-          // Load most recent report into state
-          if (formattedReports.length > 0) {
-            const mostRecent = formattedReports[0];
-            setEchoes(mostRecent.echoes || []);
-            setTraits(mostRecent.traits || []);
-            setPatterns(mostRecent.patterns || []);
+          setSavedReports(fmt);
+          if (fmt.length > 0) {
+            setEchoes(fmt[0].echoes); setTraits(fmt[0].traits); setPatterns(fmt[0].patterns);
           }
-        } catch (e) {
-          console.error('Failed to load reports from database:', e);
-        }
+        } catch (e) { console.error(e); }
       } else {
-        // Guest mode: load from localStorage
-        const savedReportsData = localStorage.getItem(STORAGE_KEYS.ANALYSIS_REPORTS);
-        if (savedReportsData) {
+        const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_REPORTS);
+        if (saved) {
           try {
-            const reports = JSON.parse(savedReportsData);
-            setSavedReports(reports);
-
-            // Load most recent report into state
-            if (reports.length > 0) {
-              const mostRecent = reports[0];
-              setEchoes(mostRecent.echoes || []);
-              setTraits(mostRecent.traits || []);
-              setPatterns(mostRecent.patterns || []);
-            }
-          } catch (e) {
-            console.error('Failed to load saved reports:', e);
-          }
+            const r = JSON.parse(saved);
+            setSavedReports(r);
+            if (r.length > 0) { setEchoes(r[0].echoes); setTraits(r[0].traits); setPatterns(r[0].patterns); }
+          } catch (e) { console.error(e); }
         }
       }
     };
 
-    loadReports();
-  }, [isAuthenticated]);
+    loadStats(); loadReports(); loadSessions();
+  }, [isAuthenticated, loadSessions]);
 
+  // ── Generate analysis ──
   const handleAnalyzeAll = async () => {
-    // @@@ Block analysis for guests
-    if (!isAuthenticated) {
-      setError('Please log in to use reflections. This feature requires authentication.');
+    if (!isAuthenticated) { setError('Please log in to use reflections.'); return; }
+    setError('');
+    let er: Echo[] = [], tr: Trait[] = [], pr: Pattern[] = [];
+
+    // @@@ Run one analysis task: set loading, call fn, update state, surface error
+    const run = async <T extends any[]>(
+      fn: () => Promise<T>,
+      key: 'echoes' | 'traits' | 'patterns',
+      cb: (r: T) => void,
+    ): Promise<T> => {
+      setLoading(p => ({ ...p, [key]: true }));
+      try {
+        const result = await fn();
+        cb(result);
+        return result;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(prev => prev ? `${prev} | ${key}: ${msg}` : `${key}: ${msg}`);
+        console.error(`[Reflections] ${key} analysis failed:`, e);
+        return [] as unknown as T;
+      } finally {
+        setLoading(p => ({ ...p, [key]: false }));
+      }
+    };
+
+    [er, tr, pr] = await Promise.all([
+      run(() => analyzeEchoes() as Promise<Echo[]>, 'echoes', r => setEchoes(r)),
+      run(() => analyzeTraits() as Promise<Trait[]>, 'traits', r => setTraits(r)),
+      run(() => analyzePatterns() as Promise<Pattern[]>, 'patterns', r => setPatterns(r)),
+    ]);
+
+    // @@@ Warn if all three came back empty (likely JSON parse failure)
+    if (er.length === 0 && tr.length === 0 && pr.length === 0) {
+      setError(prev => prev || 'Analysis returned no results — the agent response may not have been valid JSON. Check the browser console for details.');
       return;
     }
 
-    setError('');
-
-    // @@@ Capture results to save to localStorage (state updates are async!)
-    let echoesResult: Echo[] = [];
-    let traitsResult: Trait[] = [];
-    let patternsResult: Pattern[] = [];
-
-    // @@@ Helper to wrap analysis calls with loading state and error handling
-    const analyzeWithState = <T,>(
-      analyzeFn: () => Promise<T>,
-      loadingKey: 'echoes' | 'traits' | 'patterns',
-      onSuccess: (result: T) => void
-    ) => {
-      setLoading(prev => ({ ...prev, [loadingKey]: true }));
-      return analyzeFn()
-        .then(result => {
-          onSuccess(result);
-          return result;
-        })
-        .catch(err => {
-          console.error(`Failed to analyze ${loadingKey}:`, err);
-          return [] as T;
-        })
-        .finally(() => setLoading(prev => ({ ...prev, [loadingKey]: false })));
-    };
-
-    // Analyze all three in parallel
-    [echoesResult, traitsResult, patternsResult] = await Promise.all([
-      analyzeWithState(
-        () => analyzeEchoes(),
-        'echoes',
-        result => setEchoes(result)
-      ),
-      analyzeWithState(
-        () => analyzeTraits(),
-        'traits',
-        result => setTraits(result)
-      ),
-      analyzeWithState(
-        () => analyzePatterns(),
-        'patterns',
-        result => setPatterns(result)
-      )
-    ]);
-
-    // @@@ Save report to database if authenticated, localStorage if guest
-    const newReport: AnalysisReport = {
-      id: Date.now(),
-      echoes: echoesResult,
-      traits: traitsResult,
-      patterns: patternsResult,
+    const report: AnalysisReport = {
+      id: Date.now(), echoes: er, traits: tr, patterns: pr,
       timestamp: Date.now(),
-      stats: {
-        days: stats.totalDays,
-        entries: stats.totalEntries,
-        words: stats.totalWords
-      }
+      stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords }
     };
 
     if (isAuthenticated) {
       try {
-        // Save to database
         await saveAnalysisReport('full_analysis', {
-          echoes: echoesResult,
-          traits: traitsResult,
-          patterns: patternsResult,
-          stats: {
-            days: stats.totalDays,
-            entries: stats.totalEntries,
-            words: stats.totalWords
-          }
+          echoes: er, traits: tr, patterns: pr,
+          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords }
         });
-
-        // Reload reports from database
-        const dbReports = await getAnalysisReports(MAX_SAVED_REPORTS);
-        const formattedReports = dbReports.map((r: any) => ({
-          id: r.id,
-          echoes: r.report_data?.echoes || [],
-          traits: r.report_data?.traits || [],
-          patterns: r.report_data?.patterns || [],
-          timestamp: new Date(r.created_at).getTime(),
+        const db = await getAnalysisReports(MAX_SAVED_REPORTS);
+        setSavedReports(db.map((r: any) => ({
+          id: r.id, echoes: r.report_data?.echoes || [], traits: r.report_data?.traits || [],
+          patterns: r.report_data?.patterns || [], timestamp: new Date(r.created_at).getTime(),
           stats: r.report_data?.stats || { days: 0, entries: 0, words: 0 }
-        }));
-        setSavedReports(formattedReports);
-      } catch (error) {
-        console.error('Failed to save report to database:', error);
-      }
+        })));
+      } catch (e) { console.error(e); }
     } else {
-      // Guest mode: save to localStorage
-      const updatedReports = [newReport, ...savedReports];
-      const limitedReports = updatedReports.slice(0, MAX_SAVED_REPORTS);
-      localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(limitedReports));
-      setSavedReports(limitedReports);
+      const updated = [report, ...savedReports].slice(0, MAX_SAVED_REPORTS);
+      localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
+      setSavedReports(updated);
     }
-
-    // @@@ Switch to report view after analysis completes
-    setViewMode('report');
-    setCurrentPaper(0); // Reset to first paper
   };
 
   const anyLoading = loading.echoes || loading.traits || loading.patterns;
-  const hasAnyData = echoes.length > 0 || traits.length > 0 || patterns.length > 0;
+  const hasData = echoes.length > 0 || traits.length > 0 || patterns.length > 0;
 
-  // @@@ Full-page report view
-  if (viewMode === 'report' && hasAnyData) {
+  // ──────────────────────────────────────────────
+  // NOTES DETAIL VIEW — shown when user clicks an analysis item
+  // ──────────────────────────────────────────────
+  if (selectedItem) {
+    const keywords = itemKeywords(selectedItem);
+    const scored = sessions
+      .map(s => ({ session: s, score: sessionRelevance(s, keywords) }))
+      .sort((a, b) => b.score - a.score || new Date(b.session.created_at).getTime() - new Date(a.session.created_at).getTime());
+
+    const related = scored.filter(x => x.score > 0).map(x => x.session);
+    const others = scored.filter(x => x.score === 0 && x.session.labels.length > 0).map(x => x.session);
+
     return (
-      <div style={{
-        width: '100%',
-        height: '100%',
-        background: 'linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg-paper) 100%)',
-        fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-        position: 'relative',
-        overflow: 'hidden',
-        display: 'flex',
-        flexDirection: 'column'
-      }}>
-        {/* Back button - top left corner */}
-        <button
-          onClick={() => setViewMode('dashboard')}
-          style={{
-            position: 'absolute',
-            top: isMobile ? '1rem' : '2rem',
-            left: isMobile ? '1rem' : '2rem',
-            padding: isMobile ? '10px 16px' : '12px 24px',
-            borderRadius: '24px',
-            background: 'var(--color-bg-surface-solid)',
-            border: '1px solid var(--color-border-paper)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '8px',
-            fontSize: '14px',
-            fontWeight: 500,
-            color: 'var(--color-text-body)',
-            transition: 'all 0.3s',
-            boxShadow: '0 4px 16px var(--color-shadow-soft)',
-            zIndex: 30,
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-            letterSpacing: '0.3px'
-          }}
-          onMouseEnter={e => {
-            e.currentTarget.style.transform = 'translateY(-2px)';
-            e.currentTarget.style.boxShadow = '0 8px 24px var(--color-shadow-medium)';
-            e.currentTarget.style.background = 'var(--color-bg-hover)';
-          }}
-          onMouseLeave={e => {
-            e.currentTarget.style.transform = 'translateY(0)';
-            e.currentTarget.style.boxShadow = '0 4px 16px var(--color-shadow-soft)';
-            e.currentTarget.style.background = 'var(--color-bg-surface-solid)';
-          }}
-          title={t('analysis.backTitle')}
-        >
-          <span style={{ fontSize: '16px' }}>←</span>
-          <span>{t('analysis.backButton')}</span>
-        </button>
+      <>
+        <FontInject />
+        <div style={{ width: '100%', height: '100%', background: C.void, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: C.fontCond, color: C.pure }}>
 
-        <DecorativeInkSpots />
-
-        {/* Centered paper stack - moved up slightly */}
-        <div style={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: isMobile ? '1rem' : '2rem',
-          marginTop: isMobile ? '0' : '-60px'
-        }}>
-          <PaperStack
-            echoes={echoes}
-            traits={traits}
-            patterns={patterns}
-            currentPaper={currentPaper}
-            onPaperChange={setCurrentPaper}
-            isMobile={isMobile}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // @@@ Dashboard view
-  return (
-    <div style={{
-      width: '100%',
-      height: '100%',
-      overflowY: 'auto',
-      background: 'linear-gradient(180deg, var(--color-bg-app) 0%, var(--color-bg-paper) 100%)',
-      fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
-      padding: isMobile ? '1.75rem 1rem 2.5rem' : '3rem 2rem',
-      position: 'relative'
-    }}>
-      <DecorativeInkSpots />
-
-      <div style={{ maxWidth: '1100px', margin: '0 auto', position: 'relative' }}>
-        {/* Header - Hand-drawn style */}
-        <div style={{
-          marginBottom: '3rem',
-          textAlign: 'center',
-          position: 'relative'
-        }}>
-          <h1 style={{
-            fontSize: isMobile ? '32px' : '48px',
-            fontWeight: 400,
-            color: 'var(--color-text-primary)',
-            marginBottom: '0.75rem',
-            fontFamily: 'Georgia, serif',
-            fontStyle: 'italic',
-            letterSpacing: '-0.5px',
-            textShadow: '2px 2px 0px var(--color-shadow-soft)'
-          }}>
-            {t('analysis.title')}
-          </h1>
+          {/* Top bar */}
           <div style={{
-            width: '80px',
-            height: '3px',
-            background: 'linear-gradient(90deg, transparent, var(--color-text-muted), transparent)',
-            margin: '0 auto 1rem',
-            opacity: 0.4
-          }} />
-          <p style={{
-            fontSize: isMobile ? '14px' : '15px',
-            color: 'var(--color-text-secondary)',
-            lineHeight: 1.8,
-            fontStyle: 'italic',
-            maxWidth: '500px',
-            margin: '0 auto'
+            padding: isMobile ? '0.75rem 1rem' : '1rem 2rem',
+            borderBottom: `1px solid ${C.glassBorder}`,
+            display: 'flex', alignItems: 'center', gap: '1rem', flexShrink: 0,
           }}>
-            {t('analysis.subtitle')}
-          </p>
-        </div>
+            <PillBtn onClick={() => setSelectedItem(null)}>← {t('analysis.backButton')}</PillBtn>
+            <Eyebrow>
+              {selectedItem.kind === 'echo' ? t('analysis.papers.echoes.subtitle') :
+               selectedItem.kind === 'trait' ? t('analysis.papers.traits.subtitle') :
+               t('analysis.papers.patterns.subtitle')}
+              &nbsp;/ RELATED NOTES
+            </Eyebrow>
+          </div>
 
-        {/* Stats - Vintage label style */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          gap: isMobile ? '1rem' : '2rem',
-          marginBottom: '3rem',
-          flexWrap: 'wrap'
-        }}>
-          <VintageStatLabel label={t('analysis.stats.days')} value={stats.totalDays} />
-          <VintageStatLabel label={t('analysis.stats.entries')} value={stats.totalEntries} />
-          <VintageStatLabel label={t('analysis.stats.words')} value={stats.totalWords.toLocaleString()} />
-        </div>
+          <div style={{ flex: 1, overflowY: 'auto', padding: isMobile ? '1.5rem 1rem' : '2rem 2.5rem' }}>
+            <div style={{ maxWidth: '1100px', margin: '0 auto' }}>
 
-        {/* Saved Reports History */}
-        {savedReports.length > 0 && (
-          <div style={{ marginBottom: '3rem' }}>
-            <h2 style={{
-              fontSize: '20px',
-              fontWeight: 500,
-              color: 'var(--color-text-body)',
-              marginBottom: '1.5rem',
-              textAlign: 'center',
-              fontFamily: 'Georgia, serif',
-              fontStyle: 'italic'
-            }}>
-              {t('analysis.pastReflections')}
-            </h2>
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-              gap: isMobile ? '1rem' : '1.5rem',
-              marginBottom: '2rem'
-            }}>
-              {savedReports.slice(0, 3).map((report, idx) => (
-                <div
-                  key={report.id}
-                  onClick={() => {
-                    setEchoes(report.echoes);
-                    setTraits(report.traits);
-                    setPatterns(report.patterns);
-                    setViewMode('report');
-                    setCurrentPaper(0);
-                  }}
-                  style={{
-                    padding: '1.5rem',
-                    background: 'var(--color-bg-surface)',
-                    borderRadius: '16px',
-                    border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
-                    cursor: 'pointer',
-                    transition: 'all 0.3s',
-                    backdropFilter: 'blur(10px)'
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.transform = 'translateY(-4px)';
-                    e.currentTarget.style.boxShadow = '0 8px 24px color-mix(in srgb, var(--color-border-paper) 60%, transparent)';
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = 'none';
-                  }}
-                >
-                  <div style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'flex-start',
-                    marginBottom: '1rem'
-                  }}>
-                    <div style={{
-                      fontSize: '13px',
-                      color: 'var(--color-text-muted)',
-                      fontWeight: 500
+              {/* Selected item card — large, prominent */}
+              <div style={{
+                position: 'relative', overflow: 'hidden',
+                borderRadius: '10px',
+                border: `1px solid ${C.glassBorder}`,
+                background: C.glass,
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+                padding: isMobile ? '1.5rem' : '2.5rem 3rem',
+                marginBottom: isMobile ? '2rem' : '3rem',
+              }}>
+                {/* Atmospheric glow */}
+                <div style={{
+                  position: 'absolute', top: '-40%', right: '-10%',
+                  width: '60%', height: '200%', pointerEvents: 'none',
+                  background: 'radial-gradient(ellipse 60% 60% at 60% 50%, rgba(100,65,30,0.22) 0%, transparent 70%)',
+                }} />
+
+                <div style={{ position: 'relative', zIndex: 1, display: 'flex', gap: '2rem', alignItems: 'flex-start', flexWrap: isMobile ? 'wrap' : 'nowrap' }}>
+                  <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+                    <StarMark size={isMobile ? 40 : 56} glow />
+                    <NumBadge n={
+                      selectedItem.kind === 'echo'
+                        ? echoes.indexOf(selectedItem.data as Echo) + 1
+                        : selectedItem.kind === 'trait'
+                        ? traits.indexOf(selectedItem.data as Trait) + 1
+                        : patterns.indexOf(selectedItem.data as Pattern) + 1
+                    } />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Eyebrow>
+                      {selectedItem.kind === 'echo' ? t('analysis.papers.echoes.title') :
+                       selectedItem.kind === 'trait' ? t('analysis.papers.traits.title') :
+                       t('analysis.papers.patterns.title')}
+                    </Eyebrow>
+                    <h2 style={{
+                      fontFamily: C.fontCond, fontWeight: 400,
+                      fontSize: isMobile ? '28px' : '40px', lineHeight: 0.95,
+                      letterSpacing: '-0.03em', textTransform: 'uppercase',
+                      color: C.pure, margin: '0.5rem 0 1rem',
                     }}>
-                      {new Date(report.timestamp).toLocaleDateString(dateLocale, {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </div>
-                    {idx === 0 && (
+                      {itemTitle(selectedItem)}
+                    </h2>
+                    <p style={{
+                      fontFamily: C.fontCond, fontSize: '15px',
+                      color: C.fog, lineHeight: 1.55, letterSpacing: '-0.01em',
+                      margin: 0, maxWidth: '600px',
+                    }}>
+                      {itemDesc(selectedItem)}
+                    </p>
+
+                    {/* Extra: echo examples */}
+                    {selectedItem.kind === 'echo' && selectedItem.data.examples && selectedItem.data.examples.length > 0 && (
+                      <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                        {selectedItem.data.examples.map((ex, i) => (
+                          <div key={i} style={{
+                            borderLeft: `1px solid ${C.ash}`,
+                            paddingLeft: '14px',
+                            fontFamily: C.fontCond, fontSize: '13px',
+                            color: C.ash, fontStyle: 'italic', lineHeight: 1.55,
+                          }}>
+                            "{ex}"
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Extra: trait strength bar */}
+                    {selectedItem.kind === 'trait' && (
+                      <div style={{ display: 'flex', gap: '4px', marginTop: '1.25rem', maxWidth: '160px' }}>
+                        {[1,2,3,4,5].map(i => (
+                          <div key={i} style={{
+                            flex: 1, height: '2px',
+                            background: i <= (selectedItem.data as Trait).strength ? C.pure : C.ash + '33',
+                          }} />
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Extra: pattern frequency */}
+                    {selectedItem.kind === 'pattern' && (
                       <div style={{
-                        fontSize: '10px',
-                        fontWeight: 600,
-                        color: 'var(--color-state-success)',
-                        background: 'color-mix(in srgb, var(--color-state-success) 10%, transparent)',
-                        padding: '4px 8px',
-                        borderRadius: '8px',
-                        textTransform: 'uppercase',
-                        letterSpacing: '0.5px'
+                        display: 'inline-flex', alignItems: 'center', gap: '6px',
+                        borderRadius: '1440px', border: `1px solid ${C.glassBorder}`,
+                        padding: '4px 14px', marginTop: '1.25rem',
+                        fontFamily: C.fontMono, fontSize: '10px',
+                        color: C.ash, textTransform: 'uppercase', letterSpacing: '0.04em',
                       }}>
-                        {t('analysis.report.latest')}
+                        FREQ · {(selectedItem.data as Pattern).frequency}
                       </div>
                     )}
                   </div>
-                  <div style={{
-                    display: 'flex',
-                    gap: '1rem',
-                    fontSize: '12px',
-                    color: 'var(--color-text-secondary)',
-                    marginBottom: '0.75rem'
-                  }}>
-                    <div>{formatDaysLabel(report.stats?.days || 0)}</div>
-                    <div>·</div>
-                    <div>{formatEntriesLabel(report.stats?.entries || 0)}</div>
-                    <div>·</div>
-                    <div>{formatWordsLabel(report.stats?.words || 0)}</div>
+                </div>
+              </div>
+
+              {/* Related notes */}
+              {related.length > 0 && (
+                <div style={{ marginBottom: '2.5rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                    <Eyebrow>Related Notes — {related.length}</Eyebrow>
+                    <div style={{ flex: 1, height: '1px', background: C.glassBorder }} />
                   </div>
                   <div style={{
-                    display: 'flex',
-                    gap: '0.5rem',
-                    flexWrap: 'wrap'
+                    display: 'grid',
+                    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(320px, 1fr))',
+                    gap: '1px', background: C.glassBorder,
+                    borderRadius: '10px', overflow: 'hidden',
                   }}>
-                    {report.echoes?.length > 0 && (
-                      <span style={{
-                        fontSize: '11px',
-                        padding: '4px 10px',
-                        background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
-                        borderRadius: '12px',
-                        color: 'var(--color-text-body)'
-                      }}>
-                        {t('analysis.reportCounts.echoes', { count: report.echoes.length })}
-                      </span>
-                    )}
-                    {report.traits?.length > 0 && (
-                      <span style={{
-                        fontSize: '11px',
-                        padding: '4px 10px',
-                        background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
-                        borderRadius: '12px',
-                        color: 'var(--color-text-body)'
-                      }}>
-                        {t('analysis.reportCounts.traits', { count: report.traits.length })}
-                      </span>
-                    )}
-                    {report.patterns?.length > 0 && (
-                      <span style={{
-                        fontSize: '11px',
-                        padding: '4px 10px',
-                        background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
-                        borderRadius: '12px',
-                        color: 'var(--color-text-body)'
-                      }}>
-                        {t('analysis.reportCounts.patterns', { count: report.patterns.length })}
-                      </span>
-                    )}
+                    {related.map((s, i) => (
+                      <NoteCard key={s.id} session={s} idx={i} dateLocale={dateLocale} highlightKeywords={keywords} />
+                    ))}
                   </div>
                 </div>
-              ))}
+              )}
+
+              {/* Other labeled notes */}
+              {others.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                    <Eyebrow>{related.length > 0 ? 'Other Notes' : `All Notes — ${others.length}`}</Eyebrow>
+                    <div style={{ flex: 1, height: '1px', background: C.glassBorder }} />
+                  </div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(320px, 1fr))',
+                    gap: '1px', background: C.glassBorder,
+                    borderRadius: '10px', overflow: 'hidden',
+                    opacity: 0.6,
+                  }}>
+                    {others.slice(0, 12).map((s, i) => (
+                      <NoteCard key={s.id} session={s} idx={i} dateLocale={dateLocale} highlightKeywords={[]} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {related.length === 0 && others.length === 0 && (
+                <div style={{ textAlign: 'center', padding: '4rem 0' }}>
+                  <StarMark size={36} />
+                  <p style={{ fontFamily: C.fontCond, fontSize: '16px', color: C.ash, textTransform: 'uppercase', letterSpacing: '-0.01em', marginTop: '1rem' }}>
+                    No labeled notes yet
+                  </p>
+                </div>
+              )}
             </div>
           </div>
-        )}
-
-        {/* Analyze Button - Ink stamp style */}
-        <div style={{ marginBottom: '3rem', textAlign: 'center' }}>
-          <button
-            onClick={handleAnalyzeAll}
-            disabled={anyLoading}
-            style={{
-              padding: '16px 48px',
-              background: anyLoading ? 'color-mix(in srgb, var(--color-text-muted) 50%, transparent)' : 'transparent',
-              color: anyLoading ? '#999' : 'var(--color-text-body)',
-              border: '2px solid',
-              borderColor: anyLoading ? '#ccc' : 'var(--color-text-muted)',
-              borderRadius: '30px',
-              cursor: anyLoading ? 'not-allowed' : 'pointer',
-              fontSize: '15px',
-              fontWeight: 500,
-              fontFamily: 'Georgia, serif',
-              transition: 'all 0.3s',
-              letterSpacing: '1px',
-              textTransform: 'uppercase',
-              position: 'relative',
-              overflow: 'hidden'
-            }}
-            onMouseEnter={e => {
-              if (!anyLoading) {
-                e.currentTarget.style.background = 'color-mix(in srgb, var(--color-border-paper) 36%, transparent)';
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 20px color-mix(in srgb, var(--color-border-paper) 60%, transparent)';
-              }
-            }}
-            onMouseLeave={e => {
-              if (!anyLoading) {
-                e.currentTarget.style.background = 'transparent';
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = 'none';
-              }
-            }}
-          >
-            {anyLoading ? t('analysis.actions.generating') : t('analysis.actions.generate')}
-          </button>
         </div>
+      </>
+    );
+  }
 
-        {error && (
-          <div style={{
-            padding: '1rem',
-            background: 'color-mix(in srgb, var(--color-state-danger) 8%, transparent)',
-            border: '1px solid color-mix(in srgb, var(--color-state-danger) 25%, transparent)',
-            borderRadius: '8px',
-            color: 'var(--color-state-danger)',
-            marginBottom: '2rem',
-            textAlign: 'center'
-          }}>
-            {error}
-          </div>
-        )}
-
-        {/* Empty State - Journal page aesthetic */}
-        {!hasAnyData && !anyLoading && (
-          <div style={{
-            textAlign: 'center',
-            padding: '5rem 2rem',
-            position: 'relative'
-          }}>
-            {/* Decorative watercolor wash */}
-            <div style={{
-              position: 'absolute',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              width: '300px',
-              height: '300px',
-              borderRadius: '50%',
-              background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 18%, transparent) 0%, transparent 70%)',
-              filter: 'blur(40px)',
-              pointerEvents: 'none'
-            }} />
-
-            <div style={{
-              fontSize: '72px',
-              marginBottom: '1.5rem',
-              opacity: 0.3,
-              filter: 'grayscale(100%)'
-            }}>
-              📖
-            </div>
-            <p style={{
-              fontSize: '20px',
-              marginBottom: '0.75rem',
-              color: 'var(--color-text-body)',
-              fontFamily: 'Georgia, serif',
-              fontStyle: 'italic',
-              fontWeight: 300
-            }}>
-              {t('analysis.empty.title')}
-            </p>
-            <p style={{
-              fontSize: '14px',
-              color: 'var(--color-text-muted)',
-              maxWidth: '400px',
-              margin: '0 auto',
-              lineHeight: 1.7
-            }}>
-              {t('analysis.empty.description')}
-            </p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// @@@ Reusable Components
-
-// @@@ Decorative ink spot background elements
-function DecorativeInkSpots() {
+  // ──────────────────────────────────────────────
+  // DASHBOARD VIEW — analysis as primary content
+  // ──────────────────────────────────────────────
   return (
     <>
+      <FontInject />
       <div style={{
-        position: 'absolute',
-        top: '10%',
-        right: '5%',
-        width: '120px',
-        height: '120px',
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 24%, transparent) 0%, rgba(139,115,85,0) 70%)',
-        filter: 'blur(20px)',
-        pointerEvents: 'none'
-      }} />
-      <div style={{
-        position: 'absolute',
-        bottom: '20%',
-        left: '8%',
-        width: '150px',
-        height: '150px',
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 18%, transparent) 0%, rgba(160,130,109,0) 70%)',
-        filter: 'blur(25px)',
-        pointerEvents: 'none'
-      }} />
+        width: '100%', height: '100%', overflowY: 'auto',
+        background: C.void, color: C.pure, fontFamily: C.fontCond,
+      }}>
+
+        {/* ── Atmospheric header ── */}
+        <div style={{
+          position: 'relative', overflow: 'hidden',
+          padding: isMobile ? '2.5rem 1.25rem 2rem' : '4rem 3rem 2.5rem',
+          borderBottom: `1px solid ${C.glassBorder}`,
+        }}>
+          <div style={{
+            position: 'absolute', inset: 0, pointerEvents: 'none',
+            background: `
+              radial-gradient(ellipse 65% 90% at 75% 50%, rgba(110,68,35,0.30) 0%, transparent 65%),
+              radial-gradient(ellipse 35% 55% at 15% 25%, rgba(55,35,15,0.18) 0%, transparent 55%)
+            `,
+          }} />
+
+          <div style={{ position: 'relative', zIndex: 1, maxWidth: '1200px', margin: '0 auto' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+              <Eyebrow>INK &amp; MEMORY</Eyebrow>
+              <StarMark size={isMobile ? 32 : 48} glow />
+            </div>
+
+            <h1 style={{
+              fontFamily: C.fontCond, fontWeight: 400,
+              fontSize: isMobile ? '48px' : '72px', lineHeight: 0.9,
+              letterSpacing: '-0.03em', textTransform: 'uppercase',
+              color: C.pure, margin: '0 0 1.25rem',
+            }}>
+              {t('analysis.title')}
+            </h1>
+
+            {/* Stats */}
+            <div style={{ display: 'flex', gap: isMobile ? '2rem' : '3.5rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
+              <StatItem n={stats.totalDays} label={t('analysis.stats.days')} />
+              <StatItem n={stats.totalEntries} label={t('analysis.stats.entries')} />
+              <StatItem n={stats.totalWords.toLocaleString()} label={t('analysis.stats.words')} />
+            </div>
+
+            {/* Controls row */}
+            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <PillBtn onClick={handleAnalyzeAll} disabled={anyLoading}>
+                {anyLoading ? `◌  ${t('analysis.actions.generating')}` : t('analysis.actions.generate')}
+              </PillBtn>
+
+              {/* Past report pills */}
+              {savedReports.slice(0, 5).map((r, i) => (
+                <PillBtn
+                  key={r.id}
+                  small
+                  onClick={() => { setEchoes(r.echoes); setTraits(r.traits); setPatterns(r.patterns); }}
+                >
+                  <span style={{ fontFamily: C.fontMono, fontSize: '9px' }}>
+                    {new Date(r.timestamp).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
+                  </span>
+                  {i === 0 && <span style={{ color: C.ember, fontSize: '10px' }}>●</span>}
+                </PillBtn>
+              ))}
+            </div>
+
+            {error && (
+              <p style={{ fontFamily: C.fontMono, fontSize: '11px', color: C.ember, margin: '1rem 0 0', letterSpacing: '-0.01em' }}>
+                {error}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* ── Analysis content ── */}
+        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: isMobile ? '2rem 1.25rem 4rem' : '3rem 3rem 5rem' }}>
+
+          {!hasData && !anyLoading && (
+            <EmptyState />
+          )}
+
+          {anyLoading && (
+            <div style={{ padding: '4rem 0', textAlign: 'center' }}>
+              <StarMark size={40} glow />
+              <p style={{ fontFamily: C.fontCond, fontSize: '16px', color: C.ash, textTransform: 'uppercase', letterSpacing: '-0.01em', marginTop: '1.5rem' }}>
+                {t('analysis.actions.generating')}
+              </p>
+            </div>
+          )}
+
+          {/* Echoes */}
+          {echoes.length > 0 && (
+            <AnalysisSection
+              eyebrow={t('analysis.papers.echoes.subtitle')}
+              title={t('analysis.papers.echoes.title')}
+              hint="Click any card to see related notes →"
+            >
+              {echoes.map((echo, i) => (
+                <AnalysisCard
+                  key={i} idx={i}
+                  title={echo.title}
+                  desc={echo.description}
+                  onClick={() => setSelectedItem({ kind: 'echo', data: echo })}
+                />
+              ))}
+            </AnalysisSection>
+          )}
+
+          {/* Traits */}
+          {traits.length > 0 && (
+            <AnalysisSection
+              eyebrow={t('analysis.papers.traits.subtitle')}
+              title={t('analysis.papers.traits.title')}
+            >
+              {traits.map((trait, i) => (
+                <AnalysisCard
+                  key={i} idx={i}
+                  title={trait.trait}
+                  desc={trait.evidence}
+                  extra={
+                    <div style={{ display: 'flex', gap: '3px', marginTop: '10px', maxWidth: '120px' }}>
+                      {[1,2,3,4,5].map(n => (
+                        <div key={n} style={{ flex: 1, height: '1px', background: n <= trait.strength ? C.pure : C.ash + '33' }} />
+                      ))}
+                    </div>
+                  }
+                  onClick={() => setSelectedItem({ kind: 'trait', data: trait })}
+                />
+              ))}
+            </AnalysisSection>
+          )}
+
+          {/* Patterns */}
+          {patterns.length > 0 && (
+            <AnalysisSection
+              eyebrow={t('analysis.papers.patterns.subtitle')}
+              title={t('analysis.papers.patterns.title')}
+            >
+              {patterns.map((pattern, i) => (
+                <AnalysisCard
+                  key={i} idx={i}
+                  title={pattern.pattern}
+                  desc={pattern.description}
+                  extra={
+                    <div style={{
+                      display: 'inline-flex', gap: '6px', alignItems: 'center',
+                      borderRadius: '1440px', border: `1px solid ${C.glassBorder}`,
+                      padding: '3px 12px', marginTop: '10px',
+                      fontFamily: C.fontMono, fontSize: '9px',
+                      color: C.ash, textTransform: 'uppercase', letterSpacing: '0.04em',
+                    }}>
+                      FREQ · {pattern.frequency}
+                    </div>
+                  }
+                  onClick={() => setSelectedItem({ kind: 'pattern', data: pattern })}
+                />
+              ))}
+            </AnalysisSection>
+          )}
+        </div>
+      </div>
     </>
   );
 }
 
-// @@@ Stacked Paper Component - Realistic paper effect with navigation
-function PaperStack({
-  echoes,
-  traits,
-  patterns,
-  currentPaper,
-  onPaperChange,
-  isMobile
-}: {
-  echoes: Echo[];
-  traits: Trait[];
-  patterns: Pattern[];
-  currentPaper: number;
-  onPaperChange: (index: number) => void;
-  isMobile: boolean;
+// ──────────────────────────────────────────────
+// Section wrapper
+// ──────────────────────────────────────────────
+function AnalysisSection({ eyebrow, title, hint, children }: {
+  eyebrow: string; title: string; hint?: string;
+  children: React.ReactNode;
 }) {
-  const { t } = useTranslation();
-  const contentMaxHeight = isMobile ? '42vh' : '500px';
-  // @@@ Build papers array (only include non-empty ones)
-  const papers = [];
-
-  if (echoes.length > 0) {
-    papers.push({
-      title: t('analysis.papers.echoes.title'),
-      subtitle: t('analysis.papers.echoes.subtitle'),
-      icon: '🔄',
-      content: (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1rem',
-          maxHeight: contentMaxHeight,
-          overflowY: 'auto',
-          paddingRight: isMobile ? '0.5rem' : '1rem'
-        }}>
-          {echoes.map((echo, idx) => (
-            <EchoCard key={idx} echo={echo} />
-          ))}
-        </div>
-      )
-    });
-  }
-
-  if (traits.length > 0) {
-    papers.push({
-      title: t('analysis.papers.traits.title'),
-      subtitle: t('analysis.papers.traits.subtitle'),
-      icon: '⭐',
-      content: (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fill, minmax(280px, 1fr))',
-          gap: '1rem',
-          maxHeight: contentMaxHeight,
-          overflowY: 'auto',
-          paddingRight: isMobile ? '0.5rem' : '1rem'
-        }}>
-          {traits.map((trait, idx) => (
-            <TraitCard key={idx} trait={trait} />
-          ))}
-        </div>
-      )
-    });
-  }
-
-  if (patterns.length > 0) {
-    papers.push({
-      title: t('analysis.papers.patterns.title'),
-      subtitle: t('analysis.papers.patterns.subtitle'),
-      icon: '🌀',
-      content: (
-        <div style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1rem',
-          maxHeight: contentMaxHeight,
-          overflowY: 'auto',
-          paddingRight: isMobile ? '0.5rem' : '1rem'
-        }}>
-          {patterns.map((pattern, idx) => (
-            <PatternCard key={idx} pattern={pattern} />
-          ))}
-        </div>
-      )
-    });
-  }
-
-  const totalPapers = papers.length;
-  if (totalPapers === 0) return null;
-
   return (
-    <div style={{
-      position: 'relative',
-      width: '100%',
-      maxWidth: isMobile ? '520px' : '1100px',
-      height: isMobile ? '520px' : '650px',
-      margin: '0 auto',
-      perspective: '1200px'
-    }}>
-      {/* Stack of papers */}
-      <div style={{
-        position: 'absolute',
-        top: '50%',
-        left: '50%',
-        transform: 'translate(-50%, -50%)',
-        marginLeft: isMobile ? '0' : '-30px',
-        width: '100%',
-        maxWidth: isMobile ? '520px' : '900px',
-        height: isMobile ? '480px' : '600px'
-      }}>
-        {papers.map((paper, idx) => {
-          const isActive = idx === currentPaper;
-          const isBehind = idx < currentPaper;
-          const offset = isActive ? 0 : isBehind ? -10 : 10;
-          const zIndex = isActive ? 10 : isBehind ? totalPapers - idx : idx;
-
-          return (
-            <div
-              key={idx}
-              style={{
-                position: 'absolute',
-                top: 0,
-                left: '50%',
-                transform: `translateX(-50%) translateY(${offset}px) rotate(${isActive ? 0 : isBehind ? -0.5 : 0.5}deg)`,
-                width: '100%',
-                height: '100%',
-                transition: 'all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)',
-                opacity: isActive ? 1 : 0.4,
-                pointerEvents: isActive ? 'auto' : 'none',
-                zIndex
-              }}
-            >
-              {/* Paper sheet with realistic effects */}
-              <div style={{
-                width: '100%',
-                height: '100%',
-                background: `linear-gradient(135deg,
-                    var(--color-bg-surface-solid) 0%,
-                    var(--color-bg-paper) 100%
-                  )`,
-                borderRadius: '3px',
-                boxShadow: `
-                  0 1px 3px var(--color-shadow-soft),
-                  0 4px 12px var(--color-shadow-soft),
-                  0 10px 30px var(--color-shadow-medium),
-                  inset 0 1px 0 var(--color-bg-surface-solid),
-                  inset 0 -1px 0 var(--color-shadow-soft)
-                `,
-                border: '1px solid var(--color-border-paper)',
-                padding: isMobile ? '1.5rem' : '3rem',
-                overflow: 'hidden',
-                position: 'relative'
-              }}>
-                {/* Paper texture overlay */}
-                <div style={{
-                  position: 'absolute',
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  backgroundImage: `
-                    repeating-linear-gradient(
-                      0deg,
-                      color-mix(in srgb, var(--color-border-paper) 3%, transparent) 0px,
-                      color-mix(in srgb, var(--color-border-paper) 5%, transparent) 1px,
-                      transparent 1px,
-                      transparent 2px
-                    ),
-                    repeating-linear-gradient(
-                      90deg,
-                      color-mix(in srgb, var(--color-border-paper) 2%, transparent) 0px,
-                      color-mix(in srgb, var(--color-border-paper) 4%, transparent) 1px,
-                      transparent 1px,
-                      transparent 2px
-                    )
-                  `,
-                  pointerEvents: 'none',
-                  opacity: 0.7
-                }} />
-
-                {/* Decorative watercolor wash */}
-                <div style={{
-                  position: 'absolute',
-                  top: '10%',
-                  right: '5%',
-                  width: '150px',
-                  height: '150px',
-                  borderRadius: '50%',
-                  background: 'radial-gradient(circle, color-mix(in srgb, var(--color-border-paper) 18%, transparent) 0%, transparent 70%)',
-                  filter: 'blur(30px)',
-                  pointerEvents: 'none'
-                }} />
-
-                {/* Paper content */}
-                <div style={{ position: 'relative', zIndex: 1 }}>
-                  {/* Paper header */}
-                  <div style={{
-                    marginBottom: '2rem',
-                    borderBottom: '2px solid color-mix(in srgb, var(--color-border-paper) 45%, transparent)',
-                    paddingBottom: '1rem'
-                  }}>
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.75rem',
-                      marginBottom: '0.5rem'
-                    }}>
-                      <span style={{ fontSize: '32px' }}>{paper.icon}</span>
-                      <div>
-                        <h2 style={{
-                          fontSize: isMobile ? '22px' : '28px',
-                          fontWeight: 400,
-                          color: 'var(--color-text-primary)',
-                          fontFamily: 'Georgia, serif',
-                          fontStyle: 'italic',
-                          letterSpacing: '-0.3px',
-                          margin: 0,
-                          lineHeight: 1.2
-                        }}>
-                          {paper.title}
-                        </h2>
-                        <div style={{
-                          fontSize: '12px',
-                          color: 'var(--color-text-muted)',
-                          textTransform: 'uppercase',
-                          letterSpacing: '1.5px',
-                          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                          fontWeight: 500
-                        }}>
-                          {paper.subtitle}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Paper body */}
-                  {paper.content}
-                </div>
-              </div>
-            </div>
-          );
-        })}
+    <div style={{ marginBottom: '3.5rem' }}>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <Eyebrow>{eyebrow}</Eyebrow>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '6px', flexWrap: 'wrap', gap: '0.5rem' }}>
+          <h2 style={{
+            fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+            fontWeight: 400, fontSize: '24px', lineHeight: 1.05,
+            letterSpacing: '-0.02em', textTransform: 'uppercase',
+            color: '#ffffff', margin: 0,
+          }}>
+            {title}
+          </h2>
+          {hint && (
+            <span style={{ fontFamily: "'Roboto Mono', ui-monospace, monospace", fontSize: '10px', color: '#858585', letterSpacing: '-0.01em' }}>
+              {hint}
+            </span>
+          )}
+        </div>
+        <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', marginTop: '1rem' }} />
       </div>
 
-      {/* Navigation arrows */}
-      {totalPapers > 1 && (
-        <>
-          <button
-            onClick={() => onPaperChange(Math.max(0, currentPaper - 1))}
-            disabled={currentPaper === 0}
-            style={{
-              position: 'absolute',
-              left: isMobile ? '12px' : '50%',
-              marginLeft: isMobile ? 0 : '-540px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              width: isMobile ? '40px' : '48px',
-              height: isMobile ? '40px' : '48px',
-              borderRadius: '50%',
-              background: currentPaper === 0 ? 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)' : 'rgba(255,255,255,0.95)',
-              border: '2px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
-              cursor: currentPaper === 0 ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: isMobile ? '18px' : '20px',
-              color: currentPaper === 0 ? '#ccc' : 'var(--color-text-body)',
-              transition: 'all 0.3s',
-              boxShadow: currentPaper === 0 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)',
-              zIndex: 20
-            }}
-            onMouseEnter={e => {
-              if (currentPaper !== 0) {
-                e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
-                e.currentTarget.style.boxShadow = '0 6px 20px color-mix(in srgb, var(--color-shadow-medium) 60%, transparent)';
-              }
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
-              e.currentTarget.style.boxShadow = currentPaper === 0 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)';
-            }}
-          >
-            ←
-          </button>
-
-          <button
-            onClick={() => onPaperChange(Math.min(totalPapers - 1, currentPaper + 1))}
-            disabled={currentPaper === totalPapers - 1}
-            style={{
-              position: 'absolute',
-              left: isMobile ? 'auto' : '50%',
-              right: isMobile ? '12px' : 'auto',
-              marginLeft: isMobile ? 0 : '530px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              width: isMobile ? '40px' : '48px',
-              height: isMobile ? '40px' : '48px',
-              borderRadius: '50%',
-              background: currentPaper === totalPapers - 1 ? 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)' : 'rgba(255,255,255,0.95)',
-              border: '2px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
-              cursor: currentPaper === totalPapers - 1 ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: isMobile ? '18px' : '20px',
-              color: currentPaper === totalPapers - 1 ? '#ccc' : 'var(--color-text-body)',
-              transition: 'all 0.3s',
-              boxShadow: currentPaper === totalPapers - 1 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)',
-              zIndex: 20
-            }}
-            onMouseEnter={e => {
-              if (currentPaper !== totalPapers - 1) {
-                e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
-                e.currentTarget.style.boxShadow = '0 6px 20px color-mix(in srgb, var(--color-shadow-medium) 60%, transparent)';
-              }
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
-              e.currentTarget.style.boxShadow = currentPaper === totalPapers - 1 ? 'none' : '0 4px 12px color-mix(in srgb, var(--color-border-paper) 45%, transparent)';
-            }}
-          >
-            →
-          </button>
-
-          {/* Paper indicators */}
-          <div style={{
-            position: 'absolute',
-            bottom: isMobile ? '-24px' : '-40px',
-            left: '50%',
-            transform: 'translateX(-50%)',
-            display: 'flex',
-            gap: '10px',
-            zIndex: 20
-          }}>
-            {papers.map((_, idx) => (
-              <button
-                key={idx}
-                onClick={() => onPaperChange(idx)}
-                style={{
-                  width: '12px',
-                  height: '12px',
-                  borderRadius: '50%',
-                  background: idx === currentPaper ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-text-muted) 50%, transparent)',
-                  border: 'none',
-                  cursor: 'pointer',
-                  transition: 'all 0.3s',
-                  padding: 0
-                }}
-                onMouseEnter={e => {
-                  if (idx !== currentPaper) {
-                    e.currentTarget.style.background = 'color-mix(in srgb, var(--color-text-muted) 70%, transparent)';
-                    e.currentTarget.style.transform = 'scale(1.2)';
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (idx !== currentPaper) {
-                    e.currentTarget.style.background = 'color-mix(in srgb, var(--color-text-muted) 50%, transparent)';
-                    e.currentTarget.style.transform = 'scale(1)';
-                  }
-                }}
-              />
-            ))}
-          </div>
-        </>
-      )}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+        gap: '12px',
+      }}>
+        {children}
+      </div>
     </div>
   );
 }
 
-function VintageStatLabel({ label, value }: { label: string; value: number | string }) {
+// ──────────────────────────────────────────────
+// Clickable analysis card
+// ──────────────────────────────────────────────
+function AnalysisCard({ idx, title, desc, extra, onClick }: {
+  idx: number; title: string; desc: string;
+  extra?: React.ReactNode; onClick: () => void;
+}) {
+  const [hov, setHov] = useState(false);
   return (
-    <div style={{
-      display: 'inline-flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '0.5rem'
-    }}>
-      <div style={{
-        fontSize: '36px',
-        fontWeight: 300,
-        color: 'var(--color-text-body)',
-        fontFamily: 'Georgia, serif',
-        lineHeight: 1
+    <div
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        background: hov ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.03)',
+        backdropFilter: 'blur(20px)',
+        WebkitBackdropFilter: 'blur(20px)',
+        border: `1px solid ${hov ? 'rgba(255,255,255,0.20)' : 'rgba(255,255,255,0.08)'}`,
+        borderRadius: '10px',
+        padding: '20px',
+        cursor: 'pointer',
+        transition: 'background 0.2s, border-color 0.2s',
+        display: 'flex', flexDirection: 'column', gap: 0,
+        position: 'relative',
+      }}
+    >
+      {/* Number + arrow row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+        <NumBadge n={idx + 1} />
+        <span style={{
+          fontFamily: "'Roboto Mono', ui-monospace, monospace",
+          fontSize: '11px', color: hov ? '#cecece' : '#858585',
+          transition: 'color 0.2s, transform 0.2s',
+          transform: hov ? 'translateX(2px)' : 'none',
+        }}>
+          →
+        </span>
+      </div>
+
+      {/* Title */}
+      <h3 style={{
+        fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+        fontWeight: 400, fontSize: '18px', lineHeight: 1.1,
+        letterSpacing: '-0.02em', textTransform: 'uppercase',
+        color: '#ffffff', margin: '0 0 8px',
       }}>
-        {value}
+        {title}
+      </h3>
+
+      {/* Description */}
+      <p style={{
+        fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+        fontSize: '13px', color: '#858585', lineHeight: 1.55,
+        letterSpacing: '-0.01em', margin: 0,
+        display: '-webkit-box',
+        WebkitLineClamp: 3,
+        WebkitBoxOrient: 'vertical' as any,
+        overflow: 'hidden',
+      }}>
+        {desc}
+      </p>
+
+      {extra}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Note card (in the detail panel)
+// ──────────────────────────────────────────────
+function NoteCard({ session, idx, dateLocale, highlightKeywords }: {
+  session: UserSession; idx: number; dateLocale: string; highlightKeywords: string[];
+}) {
+  const [hov, setHov] = useState(false);
+  const title = session.name || session.first_line || '—';
+  const dateStr = new Date(session.created_at).toLocaleDateString(dateLocale, {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+
+  return (
+    <div
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        padding: '16px 20px',
+        background: hov ? 'rgba(255,255,255,0.04)' : '#0b0b0b',
+        transition: 'background 0.18s',
+        display: 'flex', flexDirection: 'column', gap: '10px',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <NumBadge n={idx + 1} />
+        <span style={{ fontFamily: "'Roboto Mono', ui-monospace, monospace", fontSize: '10px', color: '#858585' }}>
+          {dateStr}
+        </span>
+      </div>
+
+      <div style={{
+        fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+        fontSize: '14px', letterSpacing: '-0.01em',
+        color: '#cecece',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {title}
+      </div>
+
+      {/* Labels — highlight matching ones */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+        {session.labels.map(lbl => {
+          const matched = highlightKeywords.length > 0 &&
+            highlightKeywords.some(kw => lbl.toLowerCase().includes(kw));
+          return (
+            <span
+              key={lbl}
+              style={{
+                borderRadius: '1440px',
+                border: `1px solid ${matched ? C.ember + 'aa' : 'rgba(255,255,255,0.12)'}`,
+                background: matched ? `${C.ember}14` : 'transparent',
+                color: matched ? C.ember : '#858585',
+                fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+                fontSize: '11px', letterSpacing: '-0.01em',
+                textTransform: 'uppercase', padding: '3px 10px',
+              }}
+            >
+              {lbl}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// Misc small components
+// ──────────────────────────────────────────────
+function StatItem({ n, label }: { n: number | string; label: string }) {
+  return (
+    <div>
+      <div style={{
+        fontFamily: "'Roboto Mono', ui-monospace, monospace",
+        fontSize: '32px', lineHeight: 1, letterSpacing: '-0.04em', color: '#ffffff',
+      }}>
+        {n}
       </div>
       <div style={{
-        fontSize: '11px',
-        color: 'var(--color-text-muted)',
-        fontWeight: 500,
-        textTransform: 'uppercase',
-        letterSpacing: '1.5px',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        borderTop: '1px solid color-mix(in srgb, var(--color-text-muted) 50%, transparent)',
-        paddingTop: '0.5rem'
+        fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+        fontSize: '10px', letterSpacing: '0.08em', textTransform: 'uppercase',
+        color: '#858585', marginTop: '5px',
       }}>
         {label}
       </div>
@@ -1075,194 +896,25 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
   );
 }
 
-function EchoCard({ echo }: { echo: Echo }) {
+function EmptyState() {
+  const { t } = useTranslation();
   return (
-    <div style={{
-      background: 'var(--color-bg-surface)',
-      padding: '1.75rem',
-      borderRadius: '16px',
-      border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
-      transition: 'all 0.3s',
-      position: 'relative',
-      backdropFilter: 'blur(10px)'
-    }}>
-      <h3 style={{
-        fontSize: '19px',
-        fontWeight: 500,
-        color: 'var(--color-text-primary)',
-        marginBottom: '1rem',
-        fontFamily: 'Georgia, serif',
-        fontStyle: 'italic',
-        position: 'relative'
-      }}>
-        {echo.title}
-      </h3>
+    <div style={{ padding: '5rem 0', textAlign: 'center' }}>
+      <StarMark size={44} />
       <p style={{
-        color: 'var(--color-text-body)',
-        lineHeight: 1.8,
-        marginBottom: '1.25rem',
-        fontSize: '14px'
+        fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
+        fontWeight: 400, fontSize: '20px', letterSpacing: '-0.02em',
+        color: '#858585', textTransform: 'uppercase', margin: '1.5rem 0 0.5rem',
       }}>
-        {echo.description}
+        {t('analysis.empty.title')}
       </p>
-      {echo.examples && echo.examples.length > 0 && (
-        <div>
-          <div style={{
-            fontSize: '10px',
-            fontWeight: 600,
-            color: 'var(--color-text-muted)',
-            marginBottom: '0.75rem',
-            textTransform: 'uppercase',
-            letterSpacing: '1px',
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-          }}>
-            Echoes
-          </div>
-          {echo.examples.map((ex: string, i: number) => (
-            <div
-              key={i}
-              style={{
-                padding: '1rem',
-                background: 'color-mix(in srgb, var(--color-bg-surface-solid) 70%, transparent)',
-                borderLeft: '4px solid var(--color-border-paper)',
-                marginBottom: '0.75rem',
-                fontSize: '13px',
-                fontStyle: 'italic',
-                color: 'var(--color-text-body)',
-                borderRadius: '0 8px 8px 0',
-                lineHeight: 1.6
-              }}
-            >
-              "{ex}"
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function TraitCard({ trait }: { trait: Trait }) {
-  return (
-    <div style={{
-      background: 'var(--color-bg-surface)',
-      padding: '1.75rem',
-      borderRadius: '18px',
-      border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
-      transition: 'all 0.3s',
-      position: 'relative',
-      backdropFilter: 'blur(8px)'
-    }}>
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: '1.25rem'
-      }}>
-        <h3 style={{
-          fontSize: '18px',
-          fontWeight: 500,
-          color: 'var(--color-text-primary)',
-          fontFamily: 'Georgia, serif',
-          fontStyle: 'italic',
-          flex: 1
-        }}>
-          {trait.trait}
-        </h3>
-        <div style={{
-          fontSize: '12px',
-          fontWeight: 600,
-          color: 'var(--color-text-muted)',
-          background: 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
-          padding: '6px 12px',
-          borderRadius: '20px',
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-          border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
-          marginLeft: '1rem'
-        }}>
-          {trait.strength}/5
-        </div>
-      </div>
-
-      {/* Organic strength indicator */}
-      <div style={{
-        display: 'flex',
-        gap: '6px',
-        marginBottom: '1.25rem'
-      }}>
-        {[1, 2, 3, 4, 5].map(i => (
-          <div
-            key={i}
-            style={{
-              flex: 1,
-              height: '6px',
-              borderRadius: '3px',
-              background: i <= trait.strength
-                ? 'linear-gradient(90deg, var(--color-text-muted), color-mix(in srgb, var(--color-text-muted) 50%, transparent))'
-                : 'color-mix(in srgb, var(--color-border-paper) 30%, transparent)',
-              transition: 'all 0.4s',
-              opacity: i <= trait.strength ? 1 : 0.4
-            }}
-          />
-        ))}
-      </div>
-
       <p style={{
-        color: 'var(--color-text-body)',
-        lineHeight: 1.8,
-        fontSize: '13px'
+        fontFamily: "'Roboto Mono', ui-monospace, monospace",
+        fontSize: '11px', color: '#858585' + '77',
+        maxWidth: '360px', margin: '0 auto', lineHeight: 1.6,
       }}>
-        {trait.evidence}
+        {t('analysis.empty.description')}
       </p>
-    </div>
-  );
-}
-
-function PatternCard({ pattern }: { pattern: Pattern }) {
-  return (
-    <div style={{
-      background: 'var(--color-bg-surface)',
-      padding: '1.75rem',
-      borderRadius: '16px',
-      border: '1px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
-      transition: 'all 0.3s',
-      position: 'relative',
-      backdropFilter: 'blur(10px)'
-    }}>
-      <h3 style={{
-        fontSize: '19px',
-        fontWeight: 500,
-        color: 'var(--color-text-primary)',
-        marginBottom: '1rem',
-        fontFamily: 'Georgia, serif',
-        fontStyle: 'italic',
-        position: 'relative'
-      }}>
-        {pattern.pattern}
-      </h3>
-      <p style={{
-        color: 'var(--color-text-body)',
-        lineHeight: 1.8,
-        marginBottom: '1.25rem',
-        fontSize: '14px'
-      }}>
-        {pattern.description}
-      </p>
-      <div style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        fontSize: '12px',
-        color: 'var(--color-text-muted)',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-        background: 'color-mix(in srgb, var(--color-border-paper) 24%, transparent)',
-        padding: '6px 14px',
-        borderRadius: '20px',
-        border: '1px solid color-mix(in srgb, var(--color-border-paper) 45%, transparent)'
-      }}>
-        <span style={{ fontWeight: 600 }}>Frequency:</span>
-        <span style={{ fontStyle: 'italic' }}>{pattern.frequency}</span>
-      </div>
     </div>
   );
 }
