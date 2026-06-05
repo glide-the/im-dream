@@ -54,11 +54,11 @@
 #                    _EDITOR_WRITE_TOOL_NAMES it reloads editor_state from DB and updates
 #                    state.editor_state — getter propagates change to PreToolUse instantly.
 #                    _TurnContext gains tool_name_by_id dict for tool_result name lookup.
-# [Sync] 2026-06-05: assemble_context calls init_memory_workspace + apply_memory_config
-#                    from memory_workspace.py after resolving cwd so the memory/ directory
-#                    is always present before the agent turn starts.
-#                    ClaudeAgentRunRequest gains memory_config optional field for per-voice
-#                    memory workspace configuration.
+# [Sync] 2026-06-05: assemble_context calls init_memory_workspace from memory_workspace.py
+#                    after resolving cwd so the memory/ directory is always present before
+#                    the agent turn starts.  Template files are sourced from the partition
+#                    (voice) configuration table (voices.memory_workspace_config) fetched
+#                    from the DB by thread_id; .claude/memory/ is the filesystem fallback.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -304,18 +304,17 @@ class ClaudeAgentService:
             cwd = str(workspace_path)
             state.with_cwd(cwd)
 
-        # Apply per-voice memory workspace configuration (first-turn or on config change).
-        # init_memory_workspace is idempotent; apply_memory_config is safe to call every turn.
-        from libs.claude_agent_kit.server.memory_workspace import (
-            apply_memory_config,
-            init_memory_workspace,
-        )
+        # Apply per-voice memory workspace: fetch partition config from DB and initialise.
+        # init_memory_workspace is idempotent; templates are sourced from
+        # voices.memory_workspace_config (the partition config table) with a
+        # fallback to .claude/memory/ for files absent from the config.
+        from libs.claude_agent_kit.server.memory_workspace import init_memory_workspace
+        import database as _db
         from pathlib import Path as _Path
         _workspace_path = _Path(cwd)
         try:
-            init_memory_workspace(_workspace_path)
-            if request.memory_config:
-                apply_memory_config(_workspace_path, request.memory_config)
+            _memory_config = _db.get_voice_memory_config_by_thread(request.thread_id)
+            init_memory_workspace(_workspace_path, _memory_config)
         except Exception:
             logger.warning(
                 "Failed to initialise memory workspace for session_id=%s; continuing.",

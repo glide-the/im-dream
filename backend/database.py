@@ -2365,6 +2365,39 @@ def list_chat_messages(thread_id: str) -> list[dict]:
         db.close()
 
 
+def get_voice_memory_config_by_thread(thread_id: str) -> Optional[dict]:
+    """Return the parsed memory_workspace_config for the voice associated with *thread_id*.
+
+    Voices are linked to threads via the ``voices.thread_id`` column that is
+    set when ``ensureVoiceThread`` creates or reuses a thread for a voice.
+
+    Returns:
+        dict  — parsed JSON config when the voice has a non-empty config.
+        None  — when no matching voice is found or its config is empty/invalid.
+    """
+    if not thread_id:
+        return None
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT memory_workspace_config FROM voices WHERE thread_id = ? LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        raw = row["memory_workspace_config"]
+        if not raw:
+            return None
+        if isinstance(raw, dict):
+            return raw
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return None
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     # Initialize database
     init_db()
