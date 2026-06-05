@@ -88,13 +88,16 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from pathlib import Path as _Path
 from typing import Any, AsyncGenerator, Mapping, Optional
 from uuid import uuid4
 
+import database as _db
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
 from libs.claude_agent_kit.server.workspace import get_or_create_workspace
+from libs.claude_agent_kit.server.memory_workspace import init_memory_workspace
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
@@ -308,9 +311,6 @@ class ClaudeAgentService:
         # init_memory_workspace is idempotent; templates are sourced from
         # voices.memory_workspace_config (the partition config table) with a
         # fallback to .claude/memory/ for files absent from the config.
-        from libs.claude_agent_kit.server.memory_workspace import init_memory_workspace
-        import database as _db
-        from pathlib import Path as _Path
         _workspace_path = _Path(cwd)
         try:
             _memory_config = _db.get_voice_memory_config_by_thread(request.thread_id)
