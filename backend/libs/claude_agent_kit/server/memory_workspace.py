@@ -100,6 +100,38 @@ def _project_root() -> Path:
     return _PROJECT_ROOT
 
 
+def _resolve_safe_memory_dir(workspace: Path) -> Optional[Path]:
+    """Resolve and verify the ``memory/`` path is safely inside the workspace root.
+
+    Returns the resolved absolute ``memory/`` Path, or ``None`` when:
+    - the workspace cannot be resolved, or
+    - the resolved workspace lies outside the configured workspace root.
+
+    This follows the same guard pattern as ``_init_editor_index`` in workspace.py
+    to prevent path-traversal attacks when *workspace* contains a user-controlled
+    session_id component.
+    """
+    try:
+        from .workspace import get_workspace_root  # local import avoids circular
+        workspace_root_abs = get_workspace_root().resolve()
+        workspace_abs = workspace.resolve()
+        if not workspace_abs.is_relative_to(workspace_root_abs):
+            logger.warning(
+                "_resolve_safe_memory_dir: workspace %r is outside workspace root %r; aborting.",
+                workspace_abs,
+                workspace_root_abs,
+            )
+            return None
+        # "memory" is a fixed subdirectory name — no user input involved.
+        return workspace_abs / "memory"
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "_resolve_safe_memory_dir: could not resolve workspace path; aborting.",
+            exc_info=True,
+        )
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -118,8 +150,14 @@ def init_memory_workspace(workspace: Path) -> Path:
     5. Write ``memory/long_term_memory.md`` starter (first-init only).
 
     Returns the absolute ``memory/`` directory path.
+    Raises ``ValueError`` when *workspace* resolves outside the configured workspace root.
     """
-    memory_dir = workspace / "memory"
+    memory_dir = _resolve_safe_memory_dir(workspace)
+    if memory_dir is None:
+        raise ValueError(
+            f"init_memory_workspace: workspace {workspace!r} is outside the configured "
+            "workspace root or could not be resolved."
+        )
     memory_dir.mkdir(exist_ok=True)
 
     # Sync prompt template files from project .claude/memory/.
@@ -140,7 +178,7 @@ def init_memory_workspace(workspace: Path) -> Path:
                 encoding="utf-8",
             )
             logger.debug("Created memory/procedural/%s", filename)
-        except Exception:  # noqa: BLE001
+        except OSError:
             logger.warning(
                 "Failed to create memory/procedural/%s; skipping.",
                 filename,
@@ -153,7 +191,7 @@ def init_memory_workspace(workspace: Path) -> Path:
         try:
             long_term.write_text(_LONG_TERM_MEMORY_DEFAULT, encoding="utf-8")
             logger.debug("Created memory/long_term_memory.md")
-        except Exception:  # noqa: BLE001
+        except OSError:
             logger.warning(
                 "Failed to create memory/long_term_memory.md; skipping.",
                 exc_info=True,
@@ -183,10 +221,10 @@ def apply_memory_config(
     if not memory_config:
         return
 
-    memory_dir = workspace / "memory"
-    if not memory_dir.is_dir():
+    memory_dir = _resolve_safe_memory_dir(workspace)
+    if memory_dir is None or not memory_dir.is_dir():
         logger.warning(
-            "apply_memory_config: memory/ dir not found at %s; skipping.", memory_dir
+            "apply_memory_config: memory/ dir not reachable at %s; skipping.", workspace
         )
         return
 
@@ -194,13 +232,14 @@ def apply_memory_config(
         override_content = memory_config.get(config_key)
         if not override_content or not isinstance(override_content, str):
             continue
+        # filename is from the fixed _CONFIG_KEY_TO_FILE dict — no user input involved.
         dest = memory_dir / filename
         try:
             dest.write_text(override_content.strip() + "\n", encoding="utf-8")
             logger.debug(
                 "Applied memory_workspace_config override: %s → %s", config_key, filename
             )
-        except Exception:  # noqa: BLE001
+        except OSError:
             logger.warning(
                 "Failed to write memory config override %s; skipping.",
                 filename,
@@ -215,19 +254,22 @@ def get_memory_context_block(workspace: Path) -> str:
     prompt files, and whether runtime memory files (long_term_memory.md,
     procedural/*.json) exist so the agent can decide whether to read them.
 
-    Returns an empty string when the ``memory/`` directory does not exist.
+    Returns an empty string when the ``memory/`` directory does not exist or
+    when *workspace* resolves outside the configured workspace root.
     """
-    memory_dir = workspace / "memory"
-    if not memory_dir.is_dir():
+    memory_dir = _resolve_safe_memory_dir(workspace)
+    if memory_dir is None or not memory_dir.is_dir():
         return ""
 
     long_term_exists = (memory_dir / "long_term_memory.md").is_file()
     procedural_dir = memory_dir / "procedural"
-    procedural_files = sorted(
-        f.name
-        for f in procedural_dir.iterdir()
-        if f.suffix == ".json"
-    ) if procedural_dir.is_dir() else []
+    procedural_files: list[str] = []
+    if procedural_dir.is_dir():
+        procedural_files = sorted(
+            f.name
+            for f in procedural_dir.iterdir()
+            if f.is_file() and f.suffix == ".json"
+        )
 
     lines: list[str] = [
         "<memory_context>",
@@ -291,7 +333,7 @@ def _sync_memory_templates(memory_dir: Path) -> None:
         try:
             shutil.copy2(str(src), str(dest))
             logger.debug("Synced memory template: %s", filename)
-        except Exception:  # noqa: BLE001
+        except OSError:
             logger.warning(
                 "Failed to sync memory template %s → %s; skipping.",
                 src,
