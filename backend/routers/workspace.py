@@ -4,9 +4,13 @@
 # [Output] Register workspace file management endpoints:
 #          GET/POST/DELETE/PATCH /api/workspace/files
 #          GET /api/workspace/files/download
+#          POST /api/workspace/memory-init
 # [Pos] workspace route node in backend/routers
 # [Sync] 2026-05-25: initial implementation — ported from claude-agent-next-kit
 #         app/api/workspace/files/route.ts and app/api/workspace/files/download/route.ts.
+# [Sync] 2026-06-05: add POST /api/workspace/memory-init — explicit memory workspace
+#         initialisation via the file interface using the partition (voice) config
+#         from the voices DB table.
 
 """Workspace file management API.
 
@@ -17,6 +21,8 @@ POST   /api/workspace/files          — upload file(s) to a workspace
 DELETE /api/workspace/files          — delete a file or directory
 PATCH  /api/workspace/files          — move / rename a file
 GET    /api/workspace/files/download — download a single workspace file
+POST   /api/workspace/memory-init    — initialise the memory/ procedural workspace
+                                       from the partition (voice) configuration table
 """
 
 from __future__ import annotations
@@ -489,4 +495,93 @@ async def download_workspace_file(
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff",
         },
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /api/workspace/memory-init
+# ---------------------------------------------------------------------------
+
+
+class _MemoryInitRequest(BaseModel):
+    sessionId: str
+    threadId: str
+
+
+@router.post("/api/workspace/memory-init")
+async def memory_init_endpoint(
+    body: _MemoryInitRequest,
+    current_user: dict = Depends(_require_workspace_auth),
+) -> Response:
+    """Initialise the procedural memory workspace for a session.
+
+    Fetches the per-voice partition configuration from the ``voices`` DB table
+    (via *threadId*) and calls :func:`init_memory_workspace` to create or
+    refresh the ``memory/`` directory inside the session workspace.
+
+    This is the **file-interface** entry point for memory initialisation.
+    The ``POST /api/claude-agent/threads`` endpoint does not initialise memory;
+    callers that need memory available before the first agent turn should call
+    this endpoint explicitly.
+
+    Body: ``{ "sessionId": "…", "threadId": "…" }``
+
+    Returns ``{ "memoryPath": "…", "initialised": true }`` on success.
+    """
+    import json as _json
+    import database as _db
+    from libs.claude_agent_kit.server.memory_workspace import init_memory_workspace
+
+    del current_user
+
+    if not body.sessionId or not body.threadId:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": "sessionId and threadId are required"},
+        )
+    _validate_session_id(body.sessionId)
+
+    try:
+        workspace_path = get_or_create_workspace(body.sessionId)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+
+    try:
+        memory_config = _db.get_voice_memory_config_by_thread(body.threadId)
+    except Exception:
+        logger.warning(
+            "memory_init_endpoint: failed to fetch partition config for threadId=%s; "
+            "proceeding without config (only WORKFLOW.md will be written).",
+            body.threadId,
+            exc_info=True,
+        )
+        memory_config = None
+
+    try:
+        memory_dir = init_memory_workspace(workspace_path, memory_config)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
+    except Exception as exc:
+        logger.exception(
+            "memory_init_endpoint: unexpected error initialising memory workspace "
+            "for session=%s thread=%s",
+            body.sessionId,
+            body.threadId,
+        )
+        return Response(
+            content=_json.dumps({"error": "Internal server error"}),
+            status_code=500,
+            media_type="application/json",
+            headers=_debug_headers(),
+        )
+
+    return Response(
+        content=_json.dumps({
+            "initialised": True,
+            "memoryPath": str(memory_dir),
+            "sessionId": body.sessionId,
+            "threadId": body.threadId,
+        }),
+        media_type="application/json",
+        headers=_debug_headers(),
     )

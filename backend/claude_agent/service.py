@@ -56,9 +56,10 @@
 #                    _TurnContext gains tool_name_by_id dict for tool_result name lookup.
 # [Sync] 2026-06-05: assemble_context calls init_memory_workspace from memory_workspace.py
 #                    after resolving cwd so the memory/ directory is always present before
-#                    the agent turn starts.  Template files are sourced from the partition
-#                    (voice) configuration table (voices.memory_workspace_config) fetched
-#                    from the DB by thread_id; .claude/memory/ is the filesystem fallback.
+#                    the agent turn starts.  Template files are sourced exclusively from the
+#                    partition (voice) configuration table (voices.memory_workspace_config)
+#                    fetched from the DB by thread_id; .claude/memory/ is only used for
+#                    WORKFLOW.md (shared workflow logic).
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -308,9 +309,9 @@ class ClaudeAgentService:
             state.with_cwd(cwd)
 
         # Apply per-voice memory workspace: fetch partition config from DB and initialise.
-        # init_memory_workspace is idempotent; templates are sourced from
-        # voices.memory_workspace_config (the partition config table) with a
-        # fallback to .claude/memory/ for files absent from the config.
+        # init_memory_workspace is idempotent; template files are sourced exclusively
+        # from voices.memory_workspace_config (the partition config table).
+        # Only WORKFLOW.md uses the shared filesystem source (.claude/memory/).
         _workspace_path = Path(cwd)
         try:
             _memory_config = _db.get_voice_memory_config_by_thread(request.thread_id)

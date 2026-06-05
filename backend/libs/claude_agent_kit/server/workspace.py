@@ -9,7 +9,9 @@
 # [Sync] 2026-05-08: call sync_skills_symlinks() at the end of init_workspace so skills are linked on first init.
 # [Sync] 2026-05-09: seed workspace/skills/ from project .claude/skills/ on init so bundled skills are available.
 # [Sync] 2026-05-28: add _init_editor_index() — create .editor/ virtual index placeholder directory.
-# [Sync] 2026-06-05: call init_memory_workspace() at the end of init_workspace to create memory/ directory.
+# [Sync] 2026-06-05: remove init_memory_workspace() from init_workspace; memory/ is now
+#                    initialised by the agent service (assemble_context) with the partition
+#                    (voice) config, or explicitly via the workspace file interface endpoint.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -19,10 +21,15 @@ Each conversation gets an isolated working directory under the workspace root:
         files/          – user-uploaded or agent-produced files
         logs/           – agent execution logs
         skills/         – installable skill packages / files
-        memory/         – Memory workspace (prompts + long-term + procedural memories)
         .editor/        – EditorState virtual index (placeholder files; see workspace-adapter.md)
         .claude/        – Claude project config (synced from repo template)
         .claude/skills/ – symlinks → ../skills/* (managed by workspace_file_sync)
+
+The ``memory/`` procedural memory subdirectory is **not** created by
+``init_workspace``.  It is initialised by the agent service layer
+(``ClaudeAgentService.assemble_context``) with the per-voice partition config
+from the ``voices`` DB table, or explicitly via the workspace file-interface
+endpoint (``POST /api/workspace/memory-init``).
 
 Archive extraction (WSK-04)
 ---------------------------
@@ -125,10 +132,6 @@ def init_workspace(session_id: str) -> Path:
 
     # Initialise the .editor/ virtual index placeholder directory.
     _init_editor_index(workspace)
-
-    # Initialise the memory/ workspace directory.
-    from .memory_workspace import init_memory_workspace  # local import avoids circular
-    init_memory_workspace(workspace)
 
     logger.debug("Workspace initialised: %s", workspace)
     return workspace

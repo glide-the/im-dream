@@ -1,32 +1,39 @@
-# [Input] None — reads partition memory_workspace_config from the voices DB table;
-#          falls back to project .claude/memory/ template directory when no config is set.
+# [Input] None — reads partition memory_workspace_config from the voices DB table.
+#          Template files for the four configurable prompts are sourced exclusively
+#          from the partition config; .claude/memory/ is used ONLY for WORKFLOW.md.
 # [Output] Provide init_memory_workspace, apply_memory_config, get_memory_context_block
-#          to workspace.py and claude_agent/service.py.
+#          to claude_agent/service.py (and any explicit file-interface callers).
 # [Pos] memory-workspace node in libs/claude_agent_kit/server
 # [Sync] 2026-06-05: initial implementation — Memory Workspace initialization,
 #                    per-voice config application, and memory context injection.
-# [Sync] 2026-06-05: template files now sourced from the partition (voice) configuration
-#                    table (voices.memory_workspace_config) instead of .claude/memory/.
-#                    .claude/memory/ is retained as a fallback for files not in the config
-#                    and for the shared WORKFLOW.md which is never partition-specific.
+# [Sync] 2026-06-05: template files now sourced exclusively from the partition (voice)
+#                    configuration table (voices.memory_workspace_config).
+#                    The filesystem fallback to .claude/memory/ is removed for the four
+#                    configurable prompt files; only WORKFLOW.md still uses the filesystem
+#                    source (shared workflow logic, never partition-specific).
+#                    Memory workspace is classified as the "procedural" memory type.
 
 """Memory Workspace manager for Claude Agent session directories.
 
+Memory workspace type: **procedural** — stores structured behavioural rules and
+accumulated session history (prompts, long-term summary, event/preference JSON).
+
 Each session workspace gains a ``memory/`` subdirectory that holds:
 
-- Five prompt template files whose content is sourced from the partition
-  (voice) configuration table (``voices.memory_workspace_config``).  The
-  project-level ``.claude/memory/`` directory is used as a fallback for any
-  file not present in the partition config, and is always used for
-  ``WORKFLOW.md`` which encodes shared workflow logic.
+- Four prompt template files sourced exclusively from the partition (voice)
+  configuration table (``voices.memory_workspace_config``).  Files absent from
+  the partition config are simply not written — there is no fallback to the
+  filesystem.
+- ``WORKFLOW.md`` — always sourced from ``{project_root}/.claude/memory/``
+  because it encodes shared workflow logic that is never partition-specific.
 - A ``long_term_memory.md`` file (created/updated at runtime) that accumulates
   conversation summaries across sessions.
 - A ``procedural/`` subdirectory containing structured JSON files for user
   preferences, important events, and a session timeline.
 
 Per-voice configuration (``memory_workspace_config`` JSON from the ``voices``
-DB table) is the primary template source.  It maps the four configurable
-prompt files via the keys also used by :func:`apply_memory_config`.
+DB table) is the sole source for the four configurable template files.  It maps
+them via the keys also used by :func:`apply_memory_config`.
 
 Usage::
 
@@ -152,14 +159,18 @@ def _resolve_safe_memory_dir(workspace: Path) -> Optional[Path]:
 def init_memory_workspace(workspace: Path, memory_config: Optional[dict[str, Any]] = None) -> Path:
     """Create (or repair) the ``memory/`` subdirectory in *workspace*.
 
+    Memory workspace type: **procedural** — stores structured behavioural
+    rules, prompt templates, and accumulated session history.
+
     Steps:
     1. Create ``memory/`` (idempotent).
-    2. Sync prompt template files using *memory_config* (the partition's
-       ``memory_workspace_config`` from the ``voices`` DB table) as the
-       primary source.  For each of the four configurable template files the
-       config content is used when present; files absent from the config and
-       the shared ``WORKFLOW.md`` always fall back to
-       ``{project_root}/.claude/memory/`` (refreshed on every init).
+    2. Sync prompt template files from *memory_config* (the partition's
+       ``memory_workspace_config`` from the ``voices`` DB table).
+       - Four configurable template files are written exclusively from
+         *memory_config*; files absent from the config are simply skipped
+         (no filesystem fallback).
+       - ``WORKFLOW.md`` is always copied from
+         ``{project_root}/.claude/memory/`` (shared workflow logic).
     3. Create ``memory/procedural/`` subdirectory (idempotent).
     4. Write starter procedural JSON files (first-init only — existing files
        are preserved to avoid losing runtime-accumulated memories).
@@ -167,12 +178,12 @@ def init_memory_workspace(workspace: Path, memory_config: Optional[dict[str, Any
 
     Args:
         workspace:     Session workspace root directory.
-        memory_config: Optional partition (voice) ``memory_workspace_config``
-                       dict fetched from the ``voices`` DB table.  When
-                       provided the four configurable template files are
-                       written from this config; missing keys fall back to
-                       ``.claude/memory/``.  When ``None`` all five files
-                       fall back to ``.claude/memory/``.
+        memory_config: Partition (voice) ``memory_workspace_config`` dict
+                       fetched from the ``voices`` DB table.  The four
+                       configurable template files are written only when
+                       present in this config; missing keys are skipped.
+                       When ``None`` only ``WORKFLOW.md`` is written (from
+                       the shared filesystem source).
 
     Returns the absolute ``memory/`` directory path.
     Raises ``ValueError`` when *workspace* resolves outside the configured workspace root.
@@ -275,9 +286,10 @@ def apply_memory_config(
 def get_memory_context_block(workspace: Path) -> str:
     """Return a ``<memory_context>`` text block for injection into user messages.
 
-    The block tells the agent about the memory workspace layout, the available
-    prompt files, and whether runtime memory files (long_term_memory.md,
-    procedural/*.json) exist so the agent can decide whether to read them.
+    The block tells the agent about the memory workspace layout (type:
+    **procedural**), the available prompt files, and whether runtime memory
+    files (long_term_memory.md, procedural/*.json) exist so the agent can
+    decide whether to read them.
 
     Returns an empty string when the ``memory/`` directory does not exist or
     when *workspace* resolves outside the configured workspace root.
@@ -298,7 +310,7 @@ def get_memory_context_block(workspace: Path) -> str:
 
     lines: list[str] = [
         "<memory_context>",
-        f"Memory workspace: {memory_dir}",
+        f"Memory workspace (type: procedural): {memory_dir}",
         "",
         "Memory prompt files (read for instructions):",
         "  memory/WORKFLOW.md                     — memory decision tree",
@@ -336,12 +348,13 @@ def _sync_memory_templates(
 ) -> None:
     """Write prompt template files into *memory_dir* from the partition config or filesystem.
 
-    Template source priority:
+    Template source rules:
     - ``WORKFLOW.md`` — always copied from ``{project_root}/.claude/memory/``
       (shared workflow logic, never partition-specific).
-    - The four configurable files — written from *memory_config* when the
-      corresponding override key is present and non-empty; otherwise copied
-      from ``{project_root}/.claude/memory/`` as a fallback.
+    - The four configurable files — written exclusively from *memory_config*
+      when the corresponding override key is present and non-empty.  If the
+      key is absent from the config the file is **not** written; there is no
+      filesystem fallback.
 
     ``memory_config`` keys that map to template files:
 
@@ -358,21 +371,14 @@ def _sync_memory_templates(
     by this function.
     """
     src_memory = _project_root() / ".claude" / "memory"
-    filesystem_available = src_memory.is_dir()
-    if not filesystem_available:
-        logger.debug(
-            "_sync_memory_templates: project .claude/memory/ not found; "
-            "will use partition config only (no filesystem fallback)."
-        )
 
     for filename in MEMORY_PROMPT_FILES:
         dest = memory_dir / filename
         config_key = _FILE_TO_CONFIG_KEY.get(filename)
 
-        # WORKFLOW.md is always sourced from the filesystem (shared logic).
-        # The four configurable files prefer the partition config when available.
-        if config_key and memory_config:
-            content = memory_config.get(config_key)
+        if config_key is not None:
+            # Configurable file: write from partition config only.
+            content = (memory_config or {}).get(config_key)
             if content and isinstance(content, str):
                 try:
                     dest.write_text(content.strip() + "\n", encoding="utf-8")
@@ -381,40 +387,44 @@ def _sync_memory_templates(
                         filename,
                         config_key,
                     )
-                    continue
                 except OSError:
                     logger.warning(
                         "_sync_memory_templates: failed to write %s from partition config; "
-                        "falling back to filesystem.",
+                        "skipping (no filesystem fallback).",
                         filename,
                         exc_info=True,
                     )
-
-        # Filesystem fallback (or always for WORKFLOW.md).
-        if not filesystem_available:
-            logger.debug(
-                "_sync_memory_templates: %s not in partition config and no filesystem "
-                "fallback available; skipping.",
-                filename,
-            )
-            continue
-        src = src_memory / filename
-        if not src.is_file():
-            logger.debug(
-                "_sync_memory_templates: template %s not found in .claude/memory/; skipping.",
-                filename,
-            )
-            continue
-        try:
-            shutil.copy2(str(src), str(dest))
-            logger.debug("_sync_memory_templates: copied %s from .claude/memory/", filename)
-        except OSError:
-            logger.warning(
-                "_sync_memory_templates: failed to copy %s → %s; skipping.",
-                src,
-                dest,
-                exc_info=True,
-            )
+            else:
+                logger.debug(
+                    "_sync_memory_templates: %s not present in partition config; skipping.",
+                    filename,
+                )
+        else:
+            # WORKFLOW.md: always sourced from the project filesystem.
+            if not src_memory.is_dir():
+                logger.debug(
+                    "_sync_memory_templates: project .claude/memory/ not found; "
+                    "cannot write %s.",
+                    filename,
+                )
+                continue
+            src = src_memory / filename
+            if not src.is_file():
+                logger.debug(
+                    "_sync_memory_templates: template %s not found in .claude/memory/; skipping.",
+                    filename,
+                )
+                continue
+            try:
+                shutil.copy2(str(src), str(dest))
+                logger.debug("_sync_memory_templates: copied %s from .claude/memory/", filename)
+            except OSError:
+                logger.warning(
+                    "_sync_memory_templates: failed to copy %s → %s; skipping.",
+                    src,
+                    dest,
+                    exc_info=True,
+                )
 
 
 __all__ = [
