@@ -2385,15 +2385,9 @@ def get_voice_memory_config_by_thread(thread_id: str) -> Optional[dict]:
         ).fetchone()
         if row is None:
             return None
-        raw = row["memory_workspace_config"]
-        if not raw:
-            return None
-        if isinstance(raw, dict):
-            return raw
-        try:
-            return json.loads(raw)
-        except (json.JSONDecodeError, ValueError):
-            return None
+        parsed = _parse_voice_row(dict(row))
+        config = parsed.get("memory_workspace_config")
+        return config if isinstance(config, dict) else None
     finally:
         db.close()
 

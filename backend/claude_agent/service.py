@@ -88,7 +88,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from pathlib import Path as _Path
+from pathlib import Path
 from typing import Any, AsyncGenerator, Mapping, Optional
 from uuid import uuid4
 
@@ -311,7 +311,7 @@ class ClaudeAgentService:
         # init_memory_workspace is idempotent; templates are sourced from
         # voices.memory_workspace_config (the partition config table) with a
         # fallback to .claude/memory/ for files absent from the config.
-        _workspace_path = _Path(cwd)
+        _workspace_path = Path(cwd)
         try:
             _memory_config = _db.get_voice_memory_config_by_thread(request.thread_id)
             init_memory_workspace(_workspace_path, _memory_config)

@@ -72,6 +72,9 @@ _CONFIG_KEY_TO_FILE: dict[str, str] = {
     "update_prompt_override": "DEFAULT_UPDATE_MEMORY_PROMPT.md",
 }
 
+# Reverse mapping: file name → config key (for the four configurable files).
+_FILE_TO_CONFIG_KEY: dict[str, str] = {v: k for k, v in _CONFIG_KEY_TO_FILE.items()}
+
 # Names of the runtime-generated procedural memory JSON files.
 PROCEDURAL_MEMORY_FILES: tuple[str, ...] = (
     "user_preferences.json",
@@ -354,9 +357,6 @@ def _sync_memory_templates(
     Runtime files (``long_term_memory.md``, ``procedural/``) are never touched
     by this function.
     """
-    # Reverse mapping: file name → config key (for the four configurable files).
-    _FILE_TO_CONFIG_KEY: dict[str, str] = {v: k for k, v in _CONFIG_KEY_TO_FILE.items()}
-
     src_memory = _project_root() / ".claude" / "memory"
     filesystem_available = src_memory.is_dir()
     if not filesystem_available:
