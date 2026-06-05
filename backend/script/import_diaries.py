@@ -9,6 +9,7 @@
 # [Sync] 2026-05-31: top-level stems like 思考笔记本-5-17.md resolve dates from the filename stem before creation time.
 # [Sync] 2026-05-31: imported sessions default selectedState to ok.
 # [Sync] 2026-06-01: imported sessions can infer and persist labels before writing user_sessions.
+# [Sync] 2026-06-05: add --label-mode agent: create thread via POST /api/claude-agent/threads then call POST /api/claude-agent; token auto-generated from user DB record via auth.create_access_token; --backend-url / INK_MEMORY_BACKEND_URL / --api-token configure the connection.
 """
 Import Markdown diary/note files into user_sessions.
 
@@ -35,6 +36,7 @@ import os
 import re
 import sys
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -46,6 +48,14 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 import database  # noqa: E402
+import auth as _auth  # noqa: E402
+
+try:
+    import httpx as _httpx  # noqa: E402
+except ImportError:  # pragma: no cover
+    _httpx = None  # type: ignore[assignment]
+
+from tqdm import tqdm  # noqa: E402
 
 
 DIARY_FILE_RE = re.compile(
@@ -58,6 +68,7 @@ DEFAULT_DATE_SOURCE = "created-first"
 DEFAULT_SELECTED_STATE = "ok"
 DEFAULT_LABEL_MODE = "auto"
 DEFAULT_MAX_LABELS = 5
+DEFAULT_BACKEND_URL = "http://localhost:8000"
 DATE_SOURCE_CHOICES = (
     "created-first",
     "folder-name",
@@ -66,30 +77,195 @@ DATE_SOURCE_CHOICES = (
     "modified",
     "filename",
 )
-LABEL_MODE_CHOICES = ("auto", "frontmatter", "none")
+LABEL_MODE_CHOICES = ("auto", "agent", "none")
 HASHTAG_RE = re.compile(r"(?<!\w)#([\w\u4e00-\u9fff-]{1,24})")
 INLINE_LABEL_LIST_RE = re.compile(r"^\[(.*)\]$")
 
-LABEL_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("PDST-CHAT", ("PDST-CHAT", "PDST", "chat项目")),
-    ("Paperclip", ("paperclip",)),
-    ("智能体协作", ("智能体", "agent", "claude", "codex", "mcp")),
-    ("Issue Lifecycle", ("issue lifecycle", "issue-lifecycle", "lifecycle", "生命周期")),
-    ("工程管理", ("工程管理", "架构", "workflow", "工作流", "验收", "版本", "ci", "pr")),
-    ("出海", ("出海", "海外", "国外", "跨境")),
-    ("SEO", ("seo", "关键词", "搜索", "流量")),
-    ("账号注册", ("账户注册", "账号注册", "注册账号")),
-    ("增长", ("增长", "人效", "获客", "转化")),
-    ("产品设计", ("产品设计", "项目设计", "用户体验", "产品定位")),
-    ("情绪", ("情绪", "心情", "焦虑", "孤独", "难过", "痛苦", "抑郁", "燥热")),
-    ("认知行为疗法", ("认知行为", "cbt", "疗法", "治疗")),
-    ("康复训练", ("康复训练", "康复", "边界", "红线")),
-    ("关系", ("关系", "亲密", "小谷", "距离", "爱", "想你")),
-    ("自我观察", ("自我观察", "觉察", "反思", "复盘", "我发现", "意识到")),
-    ("写作整理", ("笔记整理", "提示词", "整理", "总结")),
-    ("棋盘", ("棋盘",)),
-    ("战略", ("策略", "定位", "规划", "路线")),
+AGENT_LABEL_SYSTEM_PROMPT = (
+    "你是日记/笔记内容分类助手。\n"
+    "任务：根据用户发来的笔记正文，输出最多 {max_labels} 个最相关的主题标签。\n\n"
+    "输出格式（严格遵守）：\n"
+    "- 只输出标签列表，每行一个标签\n"
+    "- 不要编号、符号、括号或任何修饰\n"
+    "- 不要输出分析过程、思考过程或解释\n"
+    "- 不要输出除标签以外的任何内容\n"
+    "- 直接给出最终标签列表，立即结束"
 )
+
+AGENT_LABEL_PROMPT = "{text}"
+
+
+
+@dataclass(frozen=True)
+class AgentLabelContext:
+    """Connection context for calling the Claude Agent service to infer labels."""
+
+    backend_url: str
+    token: str
+    max_labels: int
+
+
+@dataclass
+class _EntryTask:
+    """All inputs needed to process a single diary file into a DiaryEntry."""
+
+    day: date
+    created_at_db: str
+    created_at_state: str
+    resolved_source: str
+    path: Path
+    user_id: int
+    source_dir: Path
+    label_mode: str
+    max_labels: int
+    agent_ctx: AgentLabelContext | None
+    existing_session_ids: set[str] | None
+    replace: bool
+    force_labels: bool
+
+
+def _process_entry_task(task: _EntryTask) -> DiaryEntry | None:
+    """Read one Markdown file, infer labels, and return a DiaryEntry (or None if empty)."""
+    raw = task.path.read_text(encoding="utf-8")
+    body = strip_yaml_front_matter(raw)
+    if not body:
+        return None
+    text = content_with_filename_first_line(task.path, body)
+    session_id = make_session_id(task.user_id, task.source_dir, task.path, task.day)
+
+    already_exists = (
+        task.existing_session_ids is not None
+        and session_id in task.existing_session_ids
+    )
+    if already_exists and not task.replace and not task.force_labels:
+        labels: list[str] = []
+    else:
+        labels = infer_labels(
+            task.path, raw, body, task.label_mode, task.max_labels, task.agent_ctx
+        )
+    return DiaryEntry(
+        path=task.path,
+        day=task.day,
+        base_title=title_for_path(task.day, task.path),
+        text=text,
+        text_hash=normalized_text_hash(text),
+        session_id=session_id,
+        created_at_db=task.created_at_db,
+        created_at_state=task.created_at_state,
+        date_source=task.resolved_source,
+        labels=labels,
+    )
+
+
+def _build_agent_token(user_id: int) -> str:
+    """Generate a short-lived JWT for internal script-to-service calls."""
+    db = database.get_db()
+    try:
+        row = db.execute("SELECT email FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row:
+            raise SystemExit(f"Cannot build agent token: user {user_id} not found.")
+        email = row["email"]
+    finally:
+        db.close()
+    return _auth.create_access_token(user_id, email)
+
+
+def _agent_create_thread(backend_url: str, token: str, title: str | None = None) -> str:
+    """POST /api/claude-agent/threads and return the new thread_id.
+
+    If *title* is given, set it immediately via the local database so the
+    thread appears with a meaningful name in chat history.
+    """
+    if _httpx is None:
+        raise SystemExit("httpx is required for --label-mode agent (pip install httpx).")
+    url = f"{backend_url.rstrip('/')}/api/claude-agent/threads"
+    with _httpx.Client(timeout=30) as client:
+        resp = client.post(url, headers={"Authorization": f"Bearer {token}"})
+        resp.raise_for_status()
+        thread_id = resp.json()["thread_id"]
+    if title:
+        database.update_chat_thread_title(thread_id, title)
+    return thread_id
+
+
+def _agent_infer_labels(
+    text: str,
+    backend_url: str,
+    token: str,
+    max_labels: int,
+    thread_title: str | None = None,
+) -> list[str]:
+    """Send diary text to the Claude Agent service and parse returned label lines.
+
+    Creates a new thread, streams the SSE response to wait for completion
+    (ignoring reasoning frames), then fetches the final assistant message via
+    GET /api/claude-agent/threads/{id}/messages and extracts only ``text``-type
+    parts to avoid mixing in thinking / reasoning content.
+    """
+    if _httpx is None:
+        raise SystemExit("httpx is required for --label-mode agent (pip install httpx).")
+
+    base = backend_url.rstrip("/")
+    thread_id = _agent_create_thread(backend_url, token, title=thread_title)
+    system_prompt = AGENT_LABEL_SYSTEM_PROMPT.format(max_labels=max_labels)
+    message = AGENT_LABEL_PROMPT.format(text=text)
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "text/event-stream",
+        "Content-Type": "application/json",
+    }
+    msg_id = uuid.uuid4().hex[:12]
+    payload = {
+        "id": thread_id,
+        "message": {
+            "role": "user",
+            "parts": [{"type": "text", "text": message}],
+            "id": msg_id,
+        },
+        "toolChoice": "auto",
+        "attachments": [],
+        "system_prompt": system_prompt,
+    }
+
+    with _httpx.Client(timeout=120) as client:
+        # Drain SSE stream — only used to block until the agent finishes.
+        with client.stream("POST", f"{base}/api/claude-agent", json=payload, headers=headers) as resp:
+            resp.raise_for_status()
+            for raw_line in resp.iter_lines():
+                if not raw_line.startswith("data: "):
+                    continue
+                try:
+                    frame = json.loads(raw_line[len("data: "):])
+                except json.JSONDecodeError:
+                    continue
+                if frame.get("type") in ("finish", "error"):
+                    break
+
+        # Fetch the persisted messages and extract only text parts from the
+        # last assistant turn (reasoning parts are excluded).
+        msg_resp = client.get(
+            f"{base}/api/claude-agent/threads/{thread_id}/messages",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        msg_resp.raise_for_status()
+        messages = msg_resp.json().get("messages", [])
+
+    assistant_text = ""
+    for msg in reversed(messages):
+        if msg.get("role") != "assistant":
+            continue
+        parts = msg.get("parts") or []
+        assistant_text = "".join(
+            p.get("text", "") for p in parts if p.get("type") == "text"
+        )
+        break
+
+    labels: list[str] = []
+    for raw in assistant_text.strip().split("\n"):
+        label = raw.strip()
+        if label:
+            add_label(labels, label, max_labels)
+    return labels
 
 
 @dataclass
@@ -183,9 +359,28 @@ def parse_args() -> argparse.Namespace:
         choices=LABEL_MODE_CHOICES,
         default=os.environ.get("INK_MEMORY_IMPORT_LABEL_MODE", DEFAULT_LABEL_MODE),
         help=(
-            "How to populate user_sessions.labels. auto infers front matter, hashtags, "
-            "path subjects, and content keywords; frontmatter only uses explicit labels; "
+            "How to populate user_sessions.labels. "
+            "auto infers front matter, hashtags, path subjects, and content keywords; "
+            "agent calls the Claude Agent service (POST /api/claude-agent) for dynamic "
+            "label inference — requires --backend-url and a running backend; "
             "none writes an empty label list."
+        ),
+    )
+    parser.add_argument(
+        "--backend-url",
+        default=os.environ.get("INK_MEMORY_BACKEND_URL", DEFAULT_BACKEND_URL),
+        help=(
+            "Base URL of the running Ink & Memory backend, used with --label-mode agent "
+            f"(default {DEFAULT_BACKEND_URL}, env INK_MEMORY_BACKEND_URL)."
+        ),
+    )
+    parser.add_argument(
+        "--api-token",
+        default=os.environ.get("INK_MEMORY_IMPORT_API_TOKEN"),
+        help=(
+            "Bearer JWT to authenticate against the backend. "
+            "If omitted, a token is auto-generated from the resolved user record "
+            "(env INK_MEMORY_IMPORT_API_TOKEN)."
         ),
     )
     parser.add_argument(
@@ -198,6 +393,27 @@ def parse_args() -> argparse.Namespace:
         "--replace",
         action="store_true",
         help="Update an existing deterministic import session instead of skipping it.",
+    )
+    parser.add_argument(
+        "--force-labels",
+        action="store_true",
+        default=os.environ.get("INK_MEMORY_IMPORT_FORCE_LABELS", "").lower() in ("1", "true"),
+        help=(
+            "Always run label inference even when the session already exists in the database. "
+            "By default, existing sessions (without --replace) skip label inference to avoid "
+            "redundant agent calls (env INK_MEMORY_IMPORT_FORCE_LABELS)."
+        ),
+    )
+    parser.add_argument(
+        "--workers",
+        "-j",
+        type=int,
+        default=int(os.environ.get("INK_MEMORY_IMPORT_WORKERS", 1)),
+        help=(
+            "Number of parallel worker threads for file processing and label inference. "
+            "Values > 1 are most effective with --label-mode agent where each file makes "
+            "an HTTP call (default 1, env INK_MEMORY_IMPORT_WORKERS)."
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -480,38 +696,49 @@ def path_subject_labels(path: Path) -> list[str]:
     return labels
 
 
-def keyword_label_scores(path: Path, body: str) -> list[tuple[int, int, str]]:
-    search_text = f"{path.as_posix()}\n{body[:12000]}".lower()
-    scored: list[tuple[int, int, str]] = []
-    for order, (label, keywords) in enumerate(LABEL_RULES):
-        score = 0
-        for keyword in keywords:
-            score += search_text.count(keyword.lower())
-        if score:
-            scored.append((-score, order, label))
-    return sorted(scored)
-
-
-def infer_labels(path: Path, raw: str, body: str, mode: str, max_labels: int) -> list[str]:
+def infer_labels(
+    path: Path,
+    raw: str,
+    body: str,
+    mode: str,
+    max_labels: int,
+    agent_ctx: AgentLabelContext | None = None,
+) -> list[str]:
     if max_labels < 1:
         raise SystemExit("--max-labels must be a positive integer.")
     if mode == "none":
         return []
 
+    if mode == "agent":
+        if agent_ctx is None:
+            raise SystemExit(
+                "--label-mode agent requires --backend-url (or INK_MEMORY_BACKEND_URL) "
+                "and a running backend."
+            )
+        try:
+            labels = _agent_infer_labels(
+                body,
+                agent_ctx.backend_url,
+                agent_ctx.token,
+                agent_ctx.max_labels,
+                thread_title=f"label-inference: {path.name}",
+            )
+        except Exception as exc:
+            print(
+                f"WARNING: agent label inference failed for {path.name}: {exc}",
+                file=sys.stderr,
+            )
+            labels = []
+        return labels[:max_labels]
+
+    # auto mode: front matter + hashtags + path subjects
     labels: list[str] = []
     for label in explicit_labels_from_front_matter(raw):
         add_label(labels, label, max_labels)
     for label in explicit_labels_from_hashtags(body):
         add_label(labels, label, max_labels)
-
-    if mode == "frontmatter":
-        return labels
-
     for label in path_subject_labels(path):
         add_label(labels, label, max_labels)
-    for _, _, label in keyword_label_scores(path, body):
-        add_label(labels, label, max_labels)
-
     return labels
 
 
@@ -673,6 +900,11 @@ def collect_diary_entries(
     same_name_folder_docs_only: bool,
     label_mode: str,
     max_labels: int,
+    agent_ctx: AgentLabelContext | None = None,
+    existing_session_ids: set[str] | None = None,
+    replace: bool = False,
+    force_labels: bool = False,
+    workers: int = 1,
 ) -> list[DiaryEntry]:
     dated_paths: list[tuple[date, str, str, str, Path]] = []
     per_day_counts: dict[date, int] = {}
@@ -703,33 +935,57 @@ def collect_diary_entries(
         per_day_counts[day] = per_day_counts.get(day, 0) + 1
         dated_paths.append((day, created_at_db, created_at_state, resolved_source, path))
 
-    entries: list[DiaryEntry] = []
-    for day, created_at_db, created_at_state, resolved_source, path in sorted(
+    sorted_paths = sorted(
         dated_paths, key=lambda item: (item[0], item[1], item[4].as_posix())
-    ):
-        raw = path.read_text(encoding="utf-8")
-        body = strip_yaml_front_matter(raw)
-        if not body:
-            continue
-        text = content_with_filename_first_line(path, body)
-        labels = infer_labels(path, raw, body, label_mode, max_labels)
-
-        entries.append(
-            DiaryEntry(
-                path=path,
-                day=day,
-                base_title=title_for_path(day, path),
-                text=text,
-                text_hash=normalized_text_hash(text),
-                session_id=make_session_id(user_id, source_dir, path, day),
-                created_at_db=created_at_db,
-                created_at_state=created_at_state,
-                date_source=resolved_source,
-                labels=labels,
-            )
+    )
+    work_items = [
+        _EntryTask(
+            day=day,
+            created_at_db=created_at_db,
+            created_at_state=created_at_state,
+            resolved_source=resolved_source,
+            path=path,
+            user_id=user_id,
+            source_dir=source_dir,
+            label_mode=label_mode,
+            max_labels=max_labels,
+            agent_ctx=agent_ctx,
+            existing_session_ids=existing_session_ids,
+            replace=replace,
+            force_labels=force_labels,
         )
+        for day, created_at_db, created_at_state, resolved_source, path in sorted_paths
+    ]
 
-    return entries
+    bar_desc = "Labeling (agent)" if label_mode == "agent" else "Processing"
+    effective_workers = max(1, workers)
+
+    if effective_workers == 1:
+        results: list[DiaryEntry | None] = []
+        with tqdm(
+            work_items,
+            desc=bar_desc,
+            unit="file",
+            file=sys.stderr,
+            dynamic_ncols=True,
+        ) as bar:
+            for task in bar:
+                bar.set_postfix_str(task.path.name, refresh=False)
+                results.append(_process_entry_task(task))
+    else:
+        with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+            results = list(
+                tqdm(
+                    executor.map(_process_entry_task, work_items),
+                    total=len(work_items),
+                    desc=f"{bar_desc} (×{effective_workers})",
+                    unit="file",
+                    file=sys.stderr,
+                    dynamic_ncols=True,
+                )
+            )
+
+    return [r for r in results if r is not None]
 
 
 def parse_db_timestamp(raw: str | None) -> datetime | None:
@@ -918,33 +1174,41 @@ def import_entries(
     dry_run: bool,
     selected_state: str | None,
 ) -> None:
-    for entry in entries:
-        relative = entry.path.as_posix()
-        labels_text = ", ".join(entry.labels) if entry.labels else "-"
-        if entry.action == "skip":
-            print(
-                f"SKIP    {entry.day.isoformat()}  [{entry.date_source}]  {entry.base_title}  "
-                f"{relative}  labels=[{labels_text}]  ({entry.skip_reason})"
+    with tqdm(
+        entries,
+        desc="Importing",
+        unit="entry",
+        file=sys.stderr,
+        dynamic_ncols=True,
+    ) as bar:
+        for entry in bar:
+            bar.set_postfix_str(entry.base_title[:50], refresh=False)
+            relative = entry.path.as_posix()
+            labels_text = ", ".join(entry.labels) if entry.labels else "-"
+            if entry.action == "skip":
+                tqdm.write(
+                    f"SKIP    {entry.day.isoformat()}  [{entry.date_source}]  {entry.base_title}  "
+                    f"{relative}  labels=[{labels_text}]  ({entry.skip_reason})"
+                )
+                continue
+
+            verb = "REPLACE" if entry.action == "replace" else "INSERT "
+            tqdm.write(
+                f"{verb} {entry.day.isoformat()}  [{entry.date_source}]  {entry.title}  "
+                f"{relative}  labels=[{labels_text}]"
             )
-            continue
+            if dry_run:
+                continue
 
-        verb = "REPLACE" if entry.action == "replace" else "INSERT "
-        print(
-            f"{verb} {entry.day.isoformat()}  [{entry.date_source}]  {entry.title}  "
-            f"{relative}  labels=[{labels_text}]"
-        )
-        if dry_run:
-            continue
-
-        database.save_session(
-            user_id,
-            entry.session_id,
-            build_editor_state(entry, selected_state),
-            name=entry.title,
-            created_at=entry.created_at_db,
-            labels=entry.labels,
-        )
-        preserve_import_timestamps(user_id, entry)
+            database.save_session(
+                user_id,
+                entry.session_id,
+                build_editor_state(entry, selected_state),
+                name=entry.title,
+                created_at=entry.created_at_db,
+                labels=entry.labels,
+            )
+            preserve_import_timestamps(user_id, entry)
 
 
 def print_summary(entries: list[DiaryEntry], dry_run: bool) -> None:
@@ -969,6 +1233,17 @@ def main() -> None:
         raise SystemExit("--start-date must be on or before --end-date.")
     default_year = resolve_default_year(args.default_year, start_day, end_day, tz)
 
+    agent_ctx: AgentLabelContext | None = None
+    if args.label_mode == "agent":
+        backend_url = args.backend_url or DEFAULT_BACKEND_URL
+        token = args.api_token or _build_agent_token(user_id)
+        agent_ctx = AgentLabelContext(
+            backend_url=backend_url, token=token, max_labels=args.max_labels
+        )
+
+    existing = fetch_existing_sessions(user_id, tz)
+    existing_session_ids = {s.session_id for s in existing}
+
     entries = collect_diary_entries(
         source_dir=source_dir,
         user_id=user_id,
@@ -982,8 +1257,12 @@ def main() -> None:
         same_name_folder_docs_only=args.same_name_folder_docs_only,
         label_mode=args.label_mode,
         max_labels=args.max_labels,
+        agent_ctx=agent_ctx,
+        existing_session_ids=existing_session_ids,
+        replace=args.replace,
+        force_labels=args.force_labels,
+        workers=args.workers,
     )
-    existing = fetch_existing_sessions(user_id, tz)
     planned = plan_entries(entries, existing, replace=args.replace)
     selected_state = args.selected_state.strip() or None
 
@@ -994,6 +1273,10 @@ def main() -> None:
     print(f"Default year: {default_year}")
     print(f"Selected state: {selected_state or '(none)'}")
     print(f"Label mode: {args.label_mode}")
+    if agent_ctx:
+        print(f"Agent backend: {agent_ctx.backend_url}")
+    print(f"Workers: {args.workers}")
+    print(f"Force labels: {args.force_labels}")
     print(f"Max labels: {args.max_labels}")
     if args.same_name_folder_docs_only:
         file_scope = "same-name folder docs only"
