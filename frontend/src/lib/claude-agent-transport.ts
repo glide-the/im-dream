@@ -11,6 +11,8 @@
  * [Sync]   2026-05-24: add reasoning-start/reasoning-delta/reasoning-end event handling
  *                      for thinking mode (emitted by on_tool_event thinking_delta/thinking
  *                      branches in service.py).
+ * [Sync]   2026-06-06: map tool-approval-request to toolMetadata.approvalRequested
+ *                      so auto-mode backend confirmations render frontend approval UI.
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -179,6 +181,7 @@ function parseSSEChunk(raw: string): BackendEvent[] {
 
 interface ConversionState {
   started: boolean;
+  toolInputs: Record<string, unknown>;
 }
 
 /**
@@ -263,6 +266,7 @@ function convertEvent(
 
     case 'tool-input-available': {
       ensureStarted();
+      state.toolInputs[event.toolCallId] = event.input;
       chunks.push({
         type: 'tool-input-available',
         toolCallId: event.toolCallId,
@@ -297,11 +301,19 @@ function convertEvent(
     }
 
     // tool-approval-request: tool-input-start/available were already emitted
-    // by the backend before this event; the tool remains in running state
-    // which triggers the approval UI in ToolMessagePart.tsx.
+    // by the backend before this event. Re-emit the input with metadata so
+    // the UI can distinguish "waiting for approval" from a normal running tool
+    // even when the session is in auto mode.
     case 'tool-approval-request': {
-      // No additional chunks needed — ToolMessagePart.tsx detects pending
-      // approval from the running tool state (input received, no output yet).
+      ensureStarted();
+      chunks.push({
+        type: 'tool-input-available',
+        toolCallId: event.toolCallId,
+        toolName: event.toolName,
+        input: event.input !== undefined ? event.input : state.toolInputs[event.toolCallId] ?? {},
+        dynamic: true,
+        toolMetadata: { approvalRequested: true },
+      });
       break;
     }
 
@@ -355,7 +367,7 @@ export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
     stream: ReadableStream<Uint8Array>,
   ): ReadableStream<UIMessageChunk> {
     const decoder = new TextDecoder();
-    const conversionState: ConversionState = { started: false };
+    const conversionState: ConversionState = { started: false, toolInputs: {} };
 
     return stream.pipeThrough(
       new TransformStream<Uint8Array, UIMessageChunk>({

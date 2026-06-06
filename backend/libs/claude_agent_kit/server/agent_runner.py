@@ -24,7 +24,9 @@
 # [Sync] 2026-05-24: rename _REQUEST_MODEL_OVERRIDE_ENV_KEY from PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE; keep legacy key as fallback in _apply_request_model_override_if_allowed for zero-downtime migration.
 # [Sync] 2026-05-24: move _inject_mem0_session_hook_env and _verify_claude_sdk_env_for_query_stream calls inside run_streaming's try/except BaseException block so any raised exception is caught and routed to callbacks.on_error → SSE error frame; raise RuntimeError in _verify_claude_sdk_env_for_query_stream when no auth key is present instead of silently returning.
 # [Sync] 2026-05-27: migrate _pre_tool_use_hook hookSpecificOutput from old {"tool_input":...} format to CLI ≥2.1 format: hookEventName + permissionDecision:"allow" + updatedInput for input override; permissionDecision:"deny" + permissionDecisionReason for all block paths. The old "tool_input" key is silently ignored by the CLI, leaving AskUserQuestion without answers and returning isError:true / output:null.
-# [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; in auto mode, AskUserQuestion/mcp__user__ask_user still go through on_tool_confirmation_request so the frontend form collects answers before execution; all other tools are auto-approved.
+# [Sync] 2026-05-27: add _ALWAYS_CONFIRM_TOOL_NAMES constant; original auto mode
+#                    only confirmed AskUserQuestion/mcp__user__ask_user. Superseded
+#                    by 2026-06-06: non-files tools now use confirmation too.
 # [Sync] 2026-05-28: implement .editor/ virtual index read interception in _pre_tool_use_hook — detect is_editor_index_path, write tempfile from editor_state, return updatedInput redirect (CLI ≥2.1 format); cleanup tempfiles in finally block.
 # [Sync] 2026-05-29: extract .editor/ redirect block into module-level _apply_editor_index_redirect for unit-testability; _pre_tool_use_hook delegates to it.
 # [Sync] 2026-05-29: _editor_mcp_stdio_config now accepts editor_state dict and passes it
@@ -46,9 +48,16 @@
 #                    (supplied by service.py as lambda: state.editor_state) so PreToolUse
 #                    virtual-index reads see the flyweight's latest value after write-tool
 #                    DB refreshes; falls back to opts.editor_state when getter is absent.
-# [Sync] 2026-06-06: add workspace files/ PreToolUse permission allow for built-in
-#                    file tools in auto mode so agent-produced workspace files do
-#                    not stall on Claude Code's separate write-permission layer.
+# [Sync] 2026-06-07: refine auto-mode PreToolUse policy to product sensitivity:
+#                    workspace files/ built-in file tools and explicit low-risk
+#                    query tools receive hook-level allow; execution/write/state
+#                    tools fall through to frontend confirmation.
+# [Sync] 2026-06-07: add Bash+ls and mcp__editor__switch_editor to low-sensitivity
+#                    auto-allow class; _apply_low_sensitivity_query_permission now
+#                    accepts optional tool_input for command-level Bash inspection.
+# [Sync] 2026-06-07: expand _LOW_SENSITIVITY_BASH_PREFIXES from {ls} to full
+#                    read-only/navigation set: ls cd pwd echo cat head tail wc
+#                    find which type date whoami id groups env printenv uname hostname.
 
 """Claude Agent Runner.
 
@@ -66,6 +75,7 @@ import inspect
 import json
 import logging
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -136,15 +146,80 @@ _WORKSPACE_FILES_PERMISSION_TOOLS: frozenset[str] = frozenset({
     "Edit",
     "MultiEdit",
 })
+_LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
+    # Claude Code built-in read/search/query tools.
+    "Read",
+    "Glob",
+    "Grep",
+    "LS",
+    "NotebookRead",
+    "TodoRead",
+    "WebFetch",
+    "WebSearch",
+    "BashOutput",
+    # SDK / MCP resource discovery and reads, where available.
+    "ListMcpResources",
+    "ReadMcpResource",
+    # Product-owned read-only MCP tools.
+    f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
+    *allowed_memory_tool_names(),
+    *allowed_necklace_tool_names(),
+    # Editor context-switch — no-op MCP handler; state update happens in
+    # PostToolUse hook. Agent declares which document it's working on.
+    f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}",
+})
 
-# Tools that must always go through the on_tool_confirmation_request side-channel
-# regardless of tool_choice mode (i.e. even in "auto" mode).  These are
-# interactive Q&A tools whose answers can only come from the user — they cannot
-# be auto-approved because they need the frontend form to collect answers.
-# Note: mcp__user__touch_animation is intentionally excluded; in auto mode the
-# animation runs without user interaction.
-# Editor write tools are always confirmed: all document mutations require explicit
-# human approval before the MCP subprocess applies them to the database.
+# Shell metacharacters that would make a Bash command unsafe for auto-allow.
+_SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
+
+# Read-only / navigation shell commands that carry no filesystem side effects.
+# Any command whose first token matches one of these and contains no shell
+# metacharacters is considered low-sensitivity and receives hook-level allow.
+_LOW_SENSITIVITY_BASH_PREFIXES: frozenset[str] = frozenset({
+    "ls",       # list directory
+    "cd",       # change directory (no filesystem mutation)
+    "pwd",      # print working directory
+    "echo",     # print text (safe without redirection)
+    "cat",      # read file contents
+    "head",     # read first N lines
+    "tail",     # read last N lines
+    "wc",       # word/line/byte count
+    "find",     # locate files (read-only traversal)
+    "which",    # locate a command
+    "type",     # show command type
+    "date",     # print current date/time
+    "whoami",   # print current user
+    "id",       # print user/group identity
+    "groups",   # list group memberships
+    "env",      # print environment
+    "printenv", # print specific env vars
+    "uname",    # print system info
+    "hostname", # print hostname
+})
+
+
+def _is_low_sensitivity_bash_command(command: str) -> bool:
+    """Return True when *command* is a safe, read-only shell invocation.
+
+    Checks two conditions:
+    1. No shell metacharacters (``|`` ``&`` ``;`` ``<`` ``>`` `` ` `` ``$(`` ``${``).
+    2. The first token is one of :data:`_LOW_SENSITIVITY_BASH_PREFIXES`.
+
+    Examples that pass: ``ls -la``, ``cd /tmp``, ``cat notes.md``, ``echo hello``.
+    Examples that fail: ``ls | grep foo``, ``cat file > out``, ``rm -rf /``.
+    """
+    cmd = command.strip()
+    if not cmd:
+        return False
+    if _SHELL_METACHAR_RE.search(cmd):
+        return False
+    first_token = cmd.split()[0]
+    return first_token in _LOW_SENSITIVITY_BASH_PREFIXES
+
+# Tool names that have specialized confirmation semantics. Auto mode now uses
+# sensitivity classes: explicit query tools can run, while execution/write/state
+# tools confirm through the frontend. This set remains the explicit inventory of
+# Q&A and editor-write tools whose UI/result handling is special.
 _ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
     "AskUserQuestion",
     "mcp__user__ask_user",
@@ -684,6 +759,44 @@ def _apply_workspace_files_permission(
     )
 
 
+def _apply_low_sensitivity_query_permission(
+    tool_name: str,
+    tool_input: Optional[dict[str, Any]] = None,
+) -> Optional[HookJSONOutput]:
+    """Explicitly allow auto-mode tools whose product class is read/query-only.
+
+    Returning an empty ``HookJSONOutput()`` would merely decline to make a hook
+    decision and let Claude Code's own permission layer decide. These low-risk
+    query tools should skip both the frontend confirmation side-channel and
+    Claude Code's native permission prompt in auto mode, so the hook must return
+    an explicit ``permissionDecision: "allow"``.
+
+    Special case — ``Bash``: only ``ls`` invocations (with optional flags and
+    path arguments) qualify. Any command containing shell metacharacters is
+    treated as high-sensitivity and falls through to frontend confirmation.
+    """
+
+    if tool_name in _LOW_SENSITIVITY_QUERY_TOOL_NAMES:
+        return HookJSONOutput(
+            hookSpecificOutput={
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+            }
+        )
+
+    if tool_name == "Bash":
+        command = str((tool_input or {}).get("command") or "").strip()
+        if _is_low_sensitivity_bash_command(command):
+            return HookJSONOutput(
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                }
+            )
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Async helper
 # ---------------------------------------------------------------------------
@@ -909,9 +1022,11 @@ class ClaudeAgentRunner:
 
         # ------------------------------------------------------------------
         # PreToolUse hook
-        # Fired by the SDK before tool execution. Auto mode returns immediately
-        # so animation and necklace tools remain agent-autonomous; manual mode
-        # uses the frontend confirmation side-channel.
+        # Fired by the SDK before tool execution. Auto mode directly allows
+        # bounded workspace files/ file operations and explicit query tools;
+        # execution/write/state/interactive tools use the frontend confirmation
+        # side-channel. Manual mode uses the frontend confirmation side-channel
+        # for every non-.editor virtual-index read.
         #
         # Loop / thread contract (manual mode)
         # -----------------------------------
@@ -977,19 +1092,24 @@ class ClaudeAgentRunner:
             if redirect_result is not None:
                 return redirect_result
 
-            if tool_choice != "manual":
+            if tool_choice == "auto":
                 workspace_files_permission = _apply_workspace_files_permission(
                     tool_name, tool_input, cwd
                 )
                 if workspace_files_permission is not None:
                     return workspace_files_permission
 
-            # In auto mode, let all tools run immediately EXCEPT
-            # _ALWAYS_CONFIRM_TOOL_NAMES (AskUserQuestion and equivalents).
-            # Those must collect user answers through the frontend form before
-            # the SDK executes them, so they fall through to the confirmation path.
-            if tool_choice != "manual" and tool_name not in _ALWAYS_CONFIRM_TOOL_NAMES:
-                return HookJSONOutput()
+                low_sensitivity_permission = _apply_low_sensitivity_query_permission(
+                    tool_name, tool_input
+                )
+                if low_sensitivity_permission is not None:
+                    return low_sensitivity_permission
+
+            # In auto mode, workspace files/ built-in file tools and explicit
+            # read/query tools are allowed above. Execution, write, interactive,
+            # and state-changing tools fall through to the frontend confirmation
+            # side-channel so approval is visible and becomes an explicit
+            # Claude Code permission decision.
 
             if callbacks.on_tool_confirmation_request:
                 confirmation_payload = {
@@ -1064,7 +1184,12 @@ class ClaudeAgentRunner:
                                 }
                             )
 
-                        return HookJSONOutput()
+                        return HookJSONOutput(
+                            hookSpecificOutput={
+                                "hookEventName": "PreToolUse",
+                                "permissionDecision": "allow",
+                            }
+                        )
 
                     if confirmation_result["approved"] is False:
                         pending_tool_calls.pop(tool_call_id, None)

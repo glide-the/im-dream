@@ -6,6 +6,8 @@
 > [Sync] 2026-05-28: initial draft — captures Thread Engine 四阶段生命周期、状态机、
 >         上下文交互设计、TTL Sweeper、Observer 钩子，与 `docs/design/claude-agent/` 下
 >         相关设计稿同步。
+> [Sync] 2026-06-07: 工具确认侧路更新为敏感度策略：manual 全工具确认；auto
+>         仅高敏执行/写入/交互/状态切换工具确认，workspace files/ 内置文件工具与低敏查询显式 allow。
 
 # Claude Agent 上下文交互与线程引擎生命周期设计
 
@@ -210,7 +212,7 @@ message-metadata
 text-start → text-delta × N → text-end
 [reasoning-start → reasoning-delta × N → reasoning-end]     # thinking mode
 [tool-input-start → tool-input-available → tool-output-available]  # per tool call
-[tool-approval-request]                                      # manual / AskUserQuestion
+[tool-approval-request]                                      # manual / auto high-risk tools
 message-final
 finish
 ```
@@ -302,8 +304,8 @@ lock 已被持有，此时 state 仍为 IDLE；强行驱逐会导致竞态，因
 Phase 3 执行中
   │
   ├─ tool_choice=manual 所有工具，
-  │  或 tool_choice=auto 且工具名 ∈ _ALWAYS_CONFIRM_TOOL_NAMES
-  │    {AskUserQuestion, mcp__user__ask_user}
+  │  或 tool_choice=auto 且工具属于高敏执行/写入/交互/状态切换类
+  │    {Bash, Write/Edit outside files/, MCP 写入, AskUserQuestion, switch_editor, ...}
   │
   ├─ emit SSE: tool-approval-request {toolCallId, toolName, input}
   ├─ ToolConfirmationStore.begin_pending(tool_call_id)

@@ -13,8 +13,11 @@
 # [Sync] 2026-05-29: add TestEditorIndexRedirectHelper — 15 tests for _apply_editor_index_redirect
 #                    module-level helper (redirect creates tempfile, updatedInput, fallthrough
 #                    on None state / non-Read / non-.editor path, tmp_paths cleanup contract).
-# [Sync] 2026-06-06: add PreToolUse workspace files/ permission tests so built-in
-#                    Write under session files/ returns explicit allow in auto mode.
+# [Sync] 2026-06-07: add PreToolUse sensitivity-policy coverage: auto mode allows
+#                    explicit low-risk query tools without frontend confirmation
+#                    while execution/write/state tools continue to require it.
+# [Sync] 2026-06-07: add Bash low-sensitivity and switch_editor tests; expand
+#                    Bash safe-command set from {ls} to full navigation/read set.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -675,8 +678,8 @@ class TestClaudeAgentRunnerToolConfirmation(_RunnerBase):
         """
         pass  # skipped
 
-    async def test_tool_confirmation_not_called_when_tool_choice_is_auto(self):
-        """on_tool_confirmation_request is NOT invoked when tool_choice != 'manual'."""
+    async def test_post_execution_snapshot_does_not_trigger_pretool_confirmation(self):
+        """Mock AssistantMessage snapshots do not exercise PreToolUse hooks."""
         self.set_query([
             AssistantMessage([
                 _tool_use_block("Bash", {"command": "ls"}, tool_id="tu-auto-1"),
@@ -776,7 +779,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         specific = getattr(result, "hookSpecificOutput", {})
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
-    async def test_auto_write_outside_workspace_files_falls_through(self):
+    async def test_auto_write_outside_workspace_files_without_callback_denies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             (workspace / "files").mkdir()
@@ -794,9 +797,11 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        self.assertFalse(hasattr(result, "hookSpecificOutput"))
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertEqual(specific.get("permissionDecisionReason"), "需要用户确认但未收到响应")
 
-    async def test_auto_write_path_traversal_out_of_files_falls_through(self):
+    async def test_auto_write_path_traversal_out_of_files_without_callback_denies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             workspace = Path(temp_dir)
             (workspace / "files").mkdir()
@@ -814,7 +819,305 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        self.assertFalse(hasattr(result, "hookSpecificOutput"))
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertEqual(specific.get("permissionDecisionReason"), "需要用户确认但未收到响应")
+
+    async def test_auto_read_outside_workspace_files_gets_query_allow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            target = workspace / "notes.md"
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": str(target)},
+                },
+                "call-read-outside",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+        self.assertNotIn("updatedInput", specific)
+
+    async def test_auto_grep_gets_query_allow_without_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "should not ask"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Grep",
+                    "tool_input": {"pattern": "hello", "path": str(workspace)},
+                },
+                "call-grep-query",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(confirmation_requests, [])
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_sessions_range_mcp_gets_query_allow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "mcp__user__get_sessions_range",
+                    "tool_input": {"start": 0, "limit": 20},
+                },
+                "call-sessions-query",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_bash_uses_frontend_confirmation_and_approval_allows(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {
+                        "command": "echo hello > files/hello.md",
+                    },
+                },
+                "call-bash-auto-confirm",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(confirmation_requests[0]["tool_name"], "Bash")
+        self.assertEqual(
+            confirmation_requests[0]["input"],
+            {"command": "echo hello > files/hello.md"},
+        )
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_bash_confirmation_rejection_denies(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "needs review"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {
+                        "command": "echo hello > files/hello.md",
+                    },
+                },
+                "call-bash-auto-reject",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertEqual(specific.get("permissionDecisionReason"), "needs review")
+
+    async def test_auto_bash_low_sensitivity_commands_get_query_allow(self):
+        """Bash read-only/navigation commands bypass confirmation in auto mode."""
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "should not ask"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            safe_commands = [
+                "ls",
+                "ls -la",
+                "ls /tmp",
+                "cd /tmp",
+                "cd ..",
+                "pwd",
+                "echo hello",
+                "cat notes.md",
+                "head -n 20 file.txt",
+                "tail -f log.txt",
+                "wc -l file.txt",
+                "find . -name '*.py'",
+                "which python",
+                "date",
+                "whoami",
+                "uname -a",
+                "hostname",
+            ]
+            for command in safe_commands:
+                with self.subTest(command=command):
+                    result = await hook(
+                        {
+                            "tool_name": "Bash",
+                            "tool_input": {"command": command},
+                        },
+                        f"call-bash-safe-{command[:20]}",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(confirmation_requests, [], f"Should not confirm for: {command!r}")
+                    specific = getattr(result, "hookSpecificOutput", {})
+                    self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+                    self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_bash_with_metachar_uses_frontend_confirmation(self):
+        """Bash command with shell metachar is NOT low-sensitivity — falls to confirmation."""
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ls | grep foo"},
+                },
+                "call-bash-ls-pipe",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(confirmation_requests[0]["tool_name"], "Bash")
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_switch_editor_gets_query_allow_without_confirmation(self):
+        """mcp__editor__switch_editor is low-sensitivity and bypasses confirmation."""
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "should not ask"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "mcp__editor__switch_editor",
+                    "tool_input": {"editor_session_id": "sess-abc123"},
+                },
+                "call-switch-editor",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(confirmation_requests, [])
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_manual_read_still_uses_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "manual review"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="manual",
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": str(workspace / "notes.md")},
+                },
+                "call-read-manual",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(confirmation_requests[0]["tool_name"], "Read")
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertEqual(specific.get("permissionDecisionReason"), "manual review")
+
+    async def test_none_mode_does_not_apply_auto_query_allow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="none",
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": str(workspace / "notes.md")},
+                },
+                "call-read-none",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertEqual(specific.get("permissionDecisionReason"), "需要用户确认但未收到响应")
 
     async def test_manual_write_under_workspace_files_still_uses_confirmation(self):
         confirmation_requests: list[dict] = []

@@ -1,8 +1,10 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude Agent SDK 交互式工具时序图.md
 > SDK 工具确认交互模式的通用设计参考，与 Ink & Memory `backend/claude_agent/tool_confirmation_store.py` 对应实现。
 > **[Sync] 2026-05-24**: `_make_tool_confirm_cb` 新增 `turn_ctx` 参数，注册 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重；新增 `CancelledError` 处理（调 `store.cancel_pending` 后 re-raise）；`payload` 字段同时兼容 `tool_call_id`（runner）和 `toolCallId`（遗留）。
-> **[Sync] 2026-05-27**: `PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范；新增 `_ALWAYS_CONFIRM_TOOL_NAMES` 机制在 auto 模式下对 `AskUserQuestion` 触发确认；新增前端 `isManualToolInvocation` / `toolChoice` prop 逻辑说明（§6、§7）。
-> **[Sync] 2026-06-06**: auto 模式新增 workspace `files/` 内置文件工具权限策略：`Read` / `Write` / `Edit` / `MultiEdit` 仅在路径解析后位于当前 `{cwd}/files/` 下时返回显式 `permissionDecision:"allow"`，避免 Claude Code 独立文件写权限层阻塞 Agent 产物写入；manual 模式仍走前端确认。
+> **[Sync] 2026-05-27**: `PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范；新增 `_ALWAYS_CONFIRM_TOOL_NAMES` 机制在当时的 auto 模式下对 `AskUserQuestion` 触发确认；新增前端 `isManualToolInvocation` / `toolChoice` prop 逻辑说明（§6、§7）。
+> **[Sync] 2026-06-06**: auto 模式新增 workspace `files/` 内置文件工具权限策略：`Read` / `Write` / `Edit` / `MultiEdit` 仅在路径解析后位于当前 `{cwd}/files/` 下时返回显式 `permissionDecision:"allow"`；当时其他工具即使在 auto 模式下也进入前端确认侧路。该全量确认策略已被 2026-06-07 敏感度分流取代。
+> **[Sync] 2026-06-07**: auto 模式改为敏感度分流：workspace `files/` 内置文件工具和低敏查询工具显式 allow；执行/写入/交互工具进入前端确认侧路。
+> **[Sync] 2026-06-07**: 新增低敏工具：`Bash`（命令首词属于只读/导航安全集合且无 shell 元字符）和 `mcp__editor__switch_editor`（无副作用的上下文切换声明）。安全集合：`ls` `cd` `pwd` `echo` `cat` `head` `tail` `wc` `find` `which` `type` `date` `whoami` `id` `groups` `env` `printenv` `uname` `hostname`。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -171,7 +173,7 @@ const sdkOptions = {
 };
 ```
 
-> Python 落地注意：当前实现已从 Python SDK `can_use_tool` 迁移到 `PreToolUse` hook。`toolChoice="auto"` 默认允许 allowlist 内的动画和 necklace 工具自主执行；`toolChoice="manual"` 才通过 `PreToolUse` 进入确认侧路。
+> Python 落地注意：当前实现已从 Python SDK `can_use_tool` 迁移到 `PreToolUse` hook。`toolChoice="auto"` 对当前 workspace `files/` 下的内置文件工具以及明确低敏查询工具显式 allow；高敏工具与 `toolChoice="manual"` 一样进入确认侧路。
 
 ## 事件循环 / 线程 / 子进程边界（manual 模式）
 
@@ -363,7 +365,12 @@ return HookJSONOutput(
 )
 
 # ✅ 允许，不更新 input
-return HookJSONOutput()  # 空 dict，CLI 默认 allow
+return HookJSONOutput(
+    hookSpecificOutput={
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+    }
+)
 
 # ✅ 拒绝，附带 Claude 可见的原因
 return HookJSONOutput(
@@ -383,23 +390,25 @@ return HookJSONOutput(
 
 ---
 
-## 6. `_ALWAYS_CONFIRM_TOOL_NAMES` — auto 模式下强制确认的工具 **[2026-05-27]**
+## 6. Auto 模式 PreToolUse 权限策略 **[2026-06-07]**
 
-```python
-# backend/libs/claude_agent_kit/server/agent_runner.py
-_ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
-    "AskUserQuestion",
-    "mcp__user__ask_user",
-})
-```
+实现位置：`backend/libs/claude_agent_kit/server/agent_runner.py` 的
+`_apply_workspace_files_permission` 与 `_pre_tool_use_hook`。
 
 ### 6.1 决策逻辑
 
 ```python
 # _pre_tool_use_hook 内
-if tool_choice != "manual" and tool_name not in _ALWAYS_CONFIRM_TOOL_NAMES:
-    return HookJSONOutput()   # auto 模式下，普通工具立即放行
-# 否则（manual 模式，或 auto+AskUserQuestion）→ 进入确认侧路
+if tool_choice != "manual":
+    workspace_files_permission = _apply_workspace_files_permission(tool_name, tool_input, cwd)
+    if workspace_files_permission is not None:
+        return workspace_files_permission  # files/ 内置文件工具显式 allow
+
+    low_sensitivity_permission = _apply_low_sensitivity_query_permission(tool_name, tool_input)
+    if low_sensitivity_permission is not None:
+        return low_sensitivity_permission  # 查询类工具 / Bash-ls / switch_editor 显式 allow
+
+# 执行/写入/交互工具 → 进入 on_tool_confirmation_request 确认侧路
 ```
 
 ### 6.2 工具决策矩阵
@@ -408,15 +417,15 @@ if tool_choice != "manual" and tool_name not in _ALWAYS_CONFIRM_TOOL_NAMES:
 |------|:------------------:|:--------------------:|
 | `AskUserQuestion` | 走确认流 → 显示 AskUserQuestion 表单 | 走确认流 → 显示 AskUserQuestion 表单 |
 | `mcp__user__ask_user` | 走确认流 → 显示 AskUserQuestion 表单 | 走确认流 → 显示 AskUserQuestion 表单 |
-| `mcp__user__touch_animation` | **自动执行**（动画由 Agent 驱动） | 走确认流 → 显示 Approve/Cancel |
 | `Read` / `Write` / `Edit` / `MultiEdit` 且目标位于 `{cwd}/files/**` | 显式 allow → 自动执行 | 走确认流 → 显示 Approve/Cancel |
-| `Read` / `Bash` / 其他工具 | **自动执行**（不额外授予文件写权限） | 走确认流 → 显示 Approve/Cancel |
-
-> `mcp__user__touch_animation` 不在 `_ALWAYS_CONFIRM_TOOL_NAMES` 内，auto 模式下 Agent 自主触发动画，符合设计预期。
+| `Read` outside `files/` / `Glob` / `Grep` / `LS` / `TodoRead` / `WebFetch` / `WebSearch` / memory、necklace、session 查询 | 显式 allow → 自动执行 | 走确认流 → 显示 Approve/Cancel |
+| `Bash` 且 command 首词属于安全集合（`ls` `cd` `pwd` `echo` `cat` `head` `tail` `wc` `find` `which` `type` `date` `whoami` `id` `groups` `env` `printenv` `uname` `hostname`）且无 shell 元字符 | 显式 allow → 自动执行 | 走确认流 → 显示 Approve/Cancel |
+| `mcp__editor__switch_editor` | 显式 allow → 自动执行（MCP handler 无副作用，状态切换在 PostToolUse hook 完成）| 走确认流 → 显示 Approve/Cancel |
+| `Bash`（含管道 / 重定向 / 写入命令等）/ `Write` outside `files/` / `Edit` outside `files/` / MCP 写入 / 其他非查询工具 | 走确认流 → 显示 Approve/Cancel | 走确认流 → 显示 Approve/Cancel |
 
 ---
 
-## 7. 前端 `tool_choice` 路由逻辑 **[2026-05-27]**
+## 7. 前端工具确认路由逻辑 **[2026-05-27 / 2026-06-06]**
 
 ### 7.1 组件层级
 
@@ -430,6 +439,8 @@ ChatPanel
             └─ shouldShowApprovalUI  = isManualToolInvocation && !shouldShowAskUserUI && !isCompleted
 ```
 
+`frontend/src/lib/claude-agent-transport.ts` 在收到 `tool-approval-request` SSE frame 时，会把对应 tool input chunk 标记为 `toolMetadata.approvalRequested=true`。因此 UI 不再只依赖本地 `toolChoice` 判断，auto 模式下后端要求确认的普通工具也会显示 Approve/Cancel。
+
 ### 7.2 `ChatMessageList` 渲染决策
 
 ```typescript
@@ -442,11 +453,15 @@ if (isCompleted && outputText) { /* terminal view */ }
 const needsUserInput = isAskUserQuestionTool(toolPart) && !isCompleted;
 if (needsUserInput) { /* AskUserQuestion form */ }
 
-// 3. manual 模式 + 非 AskUserQuestion + 未完成 → Approve/Cancel UI
+// 3. 后端显式请求确认 + 未完成 → Approve/Cancel UI
+const needsRequestedApproval = toolPart.toolMetadata?.approvalRequested === true && !isCompleted;
+if (needsRequestedApproval) { /* isManualToolInvocation=true → Approve/Cancel */ }
+
+// 4. manual 模式 + 非 AskUserQuestion + 未完成 → Approve/Cancel UI
 const needsManualApproval = toolChoice === 'manual' && !isCompleted;
 if (needsManualApproval) { /* isManualToolInvocation=true → Approve/Cancel */ }
 
-// 4. 其他 → 折叠视图
+// 5. 其他 → 折叠视图
 ```
 
 ### 7.3 `shouldShowApprovalUI` 生命周期
