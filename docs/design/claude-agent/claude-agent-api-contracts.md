@@ -3,9 +3,10 @@
 > **[Sync] 2026-05-24**: SSE 报文格式已与 Pawkeyland 完全对齐：`text-delta.delta`（原 `text`）、`text-start/end`（原 `text-done`）、分离 tool 事件、`error.errorText`（原 `message`）、`finish.finishReason`（原 `reason`）。  
 > **[Sync] 2026-05-25**: 新增 §4.5.4 说明 SSE 事件收集机制：`collected_parts` 按发出顺序收集原始事件 dict，`_sse_events_to_ui_parts()` 在持久化时做线性转换。
 > **[Sync] 2026-05-24**: backend `_make_tool_event_cb` 改为 `event.type` 分发（原 `payload.state`）；修复 `result` 事件导致 `toolCallId=null` 的错误 SSE 帧；新增 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合到 `_TurnContext`；`_make_tool_confirm_cb` 增加 `turn_ctx` 参数与 `CancelledError` 处理。
-> **[Sync] 2026-05-24**: frontend `claude-agent-transport.ts` 完全重写：移除旧 `text-delta.text` / `text-done` / `tool-event.state` / `finish.reason` / `error.message`；新增 `text-start` / `text-delta(delta)` / `text-end` / `tool-input-start` / `tool-input-available` / `tool-output-available` 独立事件处理；`tool-approval-request` 不再重复 emit chunks（backend 已单独发 tool-input-start/available）。
+> **[Sync] 2026-05-24**: frontend `claude-agent-transport.ts` 完全重写：移除旧 `text-delta.text` / `text-done` / `tool-event.state` / `finish.reason` / `error.message`；新增 `text-start` / `text-delta(delta)` / `text-end` / `tool-input-start` / `tool-input-available` / `tool-output-available` 独立事件处理；当时 `tool-approval-request` 不重复 emit chunks（backend 已单独发 tool-input-start/available）。
 > **[Sync] 2026-05-24**: 启用 thinking 模式 — 迁移 Pawkeyland `thinking_delta` / `thinking` / `content_block_stop` 分支到 `_make_tool_event_cb`；`_TurnContext` 新增 `current_reasoning_id` / `has_thinking_delta` / `completed_streamed_reasoning_texts`；SSE 新增 `reasoning-start/delta/end` 三类事件；前端 transport 新增对应处理；`DISABLE_INTERLEAVED_THINKING` 未设置时 thinking 默认启用。
-> **[Sync] 2026-05-27**: `tool_choice` 字段新增 `"manual"` 合法值；`tool-approval-request` 出现条件扩展为"manual 模式全部工具 **或** auto 模式下工具名属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）"；新增 §4.6.4 auto+AskUserQuestion SSE 顺序；`PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范（`hookEventName` + `permissionDecision` + `updatedInput`）；前端 `ChatMessageList` 新增 `toolChoice` prop 在 manual 模式下为非 AskUserQuestion 工具显示 Approve/Cancel UI。
+> **[Sync] 2026-05-27**: `tool_choice` 字段新增 `"manual"` 合法值；当时 `tool-approval-request` 触发条件扩展为"manual 模式全部工具 **或** auto 模式下工具名属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）"；新增 §4.6.4 auto+AskUserQuestion SSE 顺序；`PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范（`hookEventName` + `permissionDecision` + `updatedInput`）；前端 `ChatMessageList` 新增 `toolChoice` prop 在 manual 模式下为非 AskUserQuestion 工具显示 Approve/Cancel UI。
+> **[Sync] 2026-06-07**: `tool-approval-request` 触发条件更新：auto 模式对当前 workspace `files/` 下的内置文件工具和低敏查询工具显式 allow；高敏执行/写入/交互/状态切换工具进入前端确认侧路。frontend transport 会把 `tool-approval-request` 映射为 `toolMetadata.approvalRequested=true`，让 `ChatMessageList` 在 auto 模式也显示通用 Approve/Cancel UI。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -48,7 +49,7 @@ Ink & Memory Claude Agent 业务主入口为 `POST /api/claude-agent`，SSE 协�
 - 请求模型是“强约束外层字段 + 弱约束上下文字典”的混合模式：外层字段由 `ClaudeAgentRequest` 明确约束，`pet_info` 与 `runtime` 保持开放字典，但服务层只消费其中少数字段。
 - 请求中不再传入 `conversation_id`；服务层以 `(user_id, persona_id)` 为键查询 DB 展开会话续接。首轮 情况 Runner 自动生成新 `session_id`，`onFinish` 后绑定到 `chat_session`。
 - SSE 事件分为 4 类：元数据类（`message-metadata`）、文本/思考类（`text-*` / `reasoning-*`）、工具类（`tool-*`）、结束/错误类（`finish` / `error`）。
-- Runner 注册 `PreToolUse` hook。`tool_choice=auto` 时，属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）的工具进入 `on_tool_confirmation_request` 侧路等待前端填写答案；其他工具立即放行，保证动画和文件系统工具由 Agent 自主调用。`tool_choice=manual` 时所有工具均进入确认侧路，前端显示 Approve/Cancel UI。
+- Runner 注册 `PreToolUse` hook。`tool_choice=auto` 时，目标位于当前 workspace `files/` 下的内置文件工具和低敏查询工具会被显式 allow；高敏执行/写入/交互/状态切换工具进入 `on_tool_confirmation_request` 侧路等待前端确认。`tool_choice=manual` 时所有工具均进入确认侧路，前端显示 Approve/Cancel UI。
 
 ## 4. 详细设计
 
@@ -78,7 +79,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `thread_id` | string | — | 是（或 id） | 同上，兼容别名。 |
 | `message` | string / UIMessage | `""` | 是 | 用户本轮输入；可为纯字符串或含 `parts` 数组的 UIMessage 对象。 |
 | `resume` | bool | `false` | 否 | 是否复用已有 Claude session。 |
-| `tool_choice` | string | `"auto"` | 否 | 工具模式：`auto` / `manual` / `none`。`manual` = 所有工具都需前端 Approve/Cancel 确认；`auto` = 仅 `AskUserQuestion` 类工具需前端填写答案，其余自动执行；`none` = 禁用工具。前端通过 AIInputDock「逐步确认」开关发送 `manual`。|
+| `tool_choice` | string | `"auto"` | 否 | 工具模式：`auto` / `manual` / `none`。`manual` = 所有工具都需前端 Approve/Cancel 确认；`auto` = workspace `files/` 内置文件工具与低敏查询工具自动 allow，高敏工具需前端确认；`none` = 禁用工具。前端通过 AIInputDock「逐步确认」开关发送 `manual`。|
 | `model` | string/null | `null` | 否 | 模型覆盖。 |
 | `max_turns` | integer | `100` | 否 | 本轮 agent 最大 turn 数（可由 `INK_AGENT_MAX_TURNS` 环境变量覆盖）。 |
 | `cwd` | string/null | `null` | 否 | agent 子进程工作目录；不传则由 thread_id 派生 workspace 目录。 |
@@ -146,7 +147,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `reasoning-end` | thinking 块结束 | `id` | 由 `content_block_stop`（流式）或 `thinking`（完整块）触发。 |
 | `tool-input-start` | 工具调用开始 | `toolCallId`, `toolName` | auto/manual 都会出现。 |
 | `tool-input-available` | 工具输入完整 | `toolCallId`, `toolName`, `input` | 紧跟 `tool-input-start`。 |
-| `tool-approval-request` | 工具等待确认 | `toolCallId`, `toolName`, `input` | 两种情况出现：① `tool_choice="manual"` 时所有工具；② `tool_choice="auto"` 时工具名属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）。前端需调用 `/api/claude-agent/tool-confirm`。**[2026-05-27]** |
+| `tool-approval-request` | 工具等待确认 | `toolCallId`, `toolName`, `input` | 两种情况出现：① `tool_choice="manual"` 时所有工具；② `tool_choice="auto"` 时高敏工具（执行/写入/交互/状态切换等）。workspace `files/` 内置文件工具和低敏查询工具不会触发该事件。前端 transport 将其转成同一 tool part 的 `toolMetadata.approvalRequested=true` 并显示 Approve/Cancel UI；用户操作后调用 `/api/claude-agent/tool-confirm`。**[2026-06-07]** |
 | `tool-output-available` | 工具结果返回 | `toolCallId`, `output`, `isError` | `isError=true` 时表示工具执行出错。 |
 | `message-final` | 流成功结束前 | `text`, `usage`, `sessionId` | 包含完整 assistant 文本和 token 用量。 |
 | `finish` | 流结束 | `finishReason` | 成功时为 `"stop"`，失败时为 `"error"`。 |
@@ -190,7 +191,7 @@ message-metadata(final)
 finish
 ```
 
-#### 4.6.2 带工具调用的 auto 模式
+#### 4.6.2 auto 模式 — workspace `files/` 内置文件工具和低敏查询自动执行
 
 ```text
 message-metadata(initial)
@@ -216,6 +217,8 @@ text-*
 message-final
 finish
 ```
+
+auto 模式下的高敏工具（例如 `Bash`、`Write` outside `files/`、MCP 写入工具、`switch_editor` 等非查询动作）也使用同一确认顺序。低敏查询工具（例如 `Read` outside `files/`、`Glob`、`Grep`、`LS`、`WebSearch`、会话查询、memory/necklace 查询）不会触发 `tool-approval-request`。
 
 #### 4.6.4 auto 模式 — AskUserQuestion 工具需填答案 **[2026-05-27]**
 
@@ -254,14 +257,16 @@ data: {"type":"text-end","id":"text-0"}
 
 ```
 
-#### 4.7.3 工具调用（auto 模式）
+#### 4.7.3 普通工具确认（auto 或 manual 模式）
 
 ```text
 data: {"type":"tool-input-start","toolCallId":"toolu_01","toolName":"Bash"}
 
-data: {"type":"tool-input-available","toolCallId":"toulu_01","toolName":"Bash","input":{"command":"ls"}}
+data: {"type":"tool-input-available","toolCallId":"toolu_01","toolName":"Bash","input":{"command":"ls"}}
 
-data: {"type":"tool-output-available","toolCallId":"toulu_01","output":"file1.txt","isError":false}
+data: {"type":"tool-approval-request","toolCallId":"toolu_01","toolName":"Bash","input":{"command":"ls"}}
+
+data: {"type":"tool-output-available","toolCallId":"toolu_01","output":"file1.txt","isError":false}
 
 ```
 
@@ -361,7 +366,7 @@ data: {"type":"finish","finishReason":"error"}
 - `tool-output-available` 的 `isError=true` 表示工具执行出错。
 - `finishReason` 成功时为 `"stop"`，失败时为 `"error"`。
 - `text-end` 与最近一次 `text-start` 对应；`id` 字段保证客户端能关联文本块。
-- 前端 `frontend/src/lib/claude-agent-transport.ts` 消费上述格式，将 SSE 事件转换为 `@ai-sdk/react` 的 `UIMessageChunk`。
+- 前端 `frontend/src/lib/claude-agent-transport.ts` 消费上述格式，将 SSE 事件转换为 `@ai-sdk/react` 的 `UIMessageChunk`；`tool-approval-request` 会更新对应 tool part 的 `toolMetadata.approvalRequested=true`。
 
 ## 5. 验收标准
 
