@@ -1,4 +1,5 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentRunner 模块设计.md — 路径已适配 Ink & Memory 工程规范。
+> **[Sync] 2026-06-06**: 补充 auto 模式 workspace `files/` 内置文件工具显式 allow 策略；区分 PreToolUse hook fall-through 与 Claude Code 文件权限授予。
 
 # ClaudeAgentRunner 模块设计
 
@@ -149,7 +150,7 @@ sequenceDiagram
 ## 5. 工具确认流程（PreToolUse hook）
 
 Claude Code 的 `allowed_tools` 是预批准规则，不是单纯的工具可见性列表。
-Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。默认 `auto` 模式立即放行，避免给动画和 necklace 工具增加确认延迟；只有 `manual` 模式会进入 `on_tool_confirmation_request` 等待前端确认。
+Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。默认 `auto` 模式对普通工具不进入前端确认侧路，避免给动画和 necklace 工具增加确认延迟；但 hook fall-through 不等价于授予 Claude Code 的内置文件写权限。因此 Runner 会对当前 workspace `files/` 下的内置文件工具返回显式 `permissionDecision:"allow"`。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -157,7 +158,7 @@ Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_u
 
 | tool_choice | `ClaudeCodeOptions.allowed_tools` | `PreToolUse` | 目的 |
 |---|---:|---|---|
-| `auto` | `DEFAULT_ALLOWED_TOOLS` / request override | 立即 allow | 默认工具预批准；动画和项圈工具由 Agent 自主调用 |
+| `auto` | `DEFAULT_ALLOWED_TOOLS` / request override | `files/` 内置文件工具显式 allow；其他普通工具 hook fall-through | 默认工具预批准；Agent 可生成 workspace 产物，但不授予源码或 `.editor/` 写权限 |
 | `manual` | `DEFAULT_ALLOWED_TOOLS` / request override | 等待 `on_tool_confirmation_request` | 调试或敏感工具确认侧路 |
 | `none` | `[]` + `extra_args["tools"] = ""` | 不暴露工具 | 通过 Claude CLI `--tools ""` 禁用可用工具 |
 

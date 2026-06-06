@@ -13,6 +13,8 @@
 # [Sync] 2026-05-29: add TestEditorIndexRedirectHelper — 15 tests for _apply_editor_index_redirect
 #                    module-level helper (redirect creates tempfile, updatedInput, fallthrough
 #                    on None state / non-Read / non-.editor path, tmp_paths cleanup contract).
+# [Sync] 2026-06-06: add PreToolUse workspace files/ permission tests so built-in
+#                    Write under session files/ returns explicit allow in auto mode.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -159,6 +161,7 @@ from libs.claude_agent_kit.types import (  # noqa: E402
 # ---------------------------------------------------------------------------
 
 _SDK_ASSISTANT = sys.modules["claude_code_sdk.types"].AssistantMessage
+_SDK_HOOK_CONTEXT = sys.modules["claude_code_sdk.types"].HookContext
 _SDK_OPTIONS = sys.modules["claude_code_sdk.types"].ClaudeCodeOptions
 _SDK_RESULT = sys.modules["claude_code_sdk.types"].ResultMessage
 _SDK_STREAM_EVENT = sys.modules["claude_code_sdk.types"].StreamEvent
@@ -236,11 +239,13 @@ class _MockSDKClient:
 
     def __init__(self):
         self._messages: list = []
+        self.last_options = None
 
     def set_messages(self, messages: list) -> None:
         self._messages = list(messages)
 
     async def query_stream(self, prompt, options=None):
+        self.last_options = options
         for msg in self._messages:
             yield msg
 
@@ -694,6 +699,156 @@ class TestClaudeAgentRunnerToolConfirmation(_RunnerBase):
 
         self.assertTrue(result.success)
         self.assertEqual(confirmation_requests, [])
+
+
+class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
+    """PreToolUse policy branches that can be exercised through SDK hooks."""
+
+    async def _capture_pre_tool_use_hook(
+        self,
+        *,
+        cwd: str,
+        tool_choice: str = "auto",
+        on_tool_confirmation_request=None,
+    ):
+        self.set_query([])
+        runner = self.make_runner()
+
+        await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="pretool-policy-001",
+                user_message="write a workspace file",
+                cwd=cwd,
+                tool_choice=tool_choice,  # type: ignore[arg-type]
+            ),
+            callbacks=AgentStreamingCallbacks(
+                on_text_delta=lambda d: None,
+                on_tool_confirmation_request=on_tool_confirmation_request,
+            ),
+        )
+
+        options = self._mock_client.last_options
+        matcher = options.hooks["PreToolUse"][0]
+        return matcher.hooks[0]
+
+    async def test_auto_write_under_workspace_files_gets_explicit_allow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            target = workspace / "files" / "hello.md"
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": str(target),
+                        "content": "# hello\n",
+                    },
+                },
+                "call-write-files",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+        self.assertNotIn("updatedInput", specific)
+
+    async def test_auto_relative_write_under_workspace_files_gets_explicit_allow(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": "files/hello.md",
+                        "content": "# hello\n",
+                    },
+                },
+                "call-write-relative-files",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_write_outside_workspace_files_falls_through(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": str(workspace / "outside.md"),
+                        "content": "# outside\n",
+                    },
+                },
+                "call-write-outside",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertFalse(hasattr(result, "hookSpecificOutput"))
+
+    async def test_auto_write_path_traversal_out_of_files_falls_through(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": "files/../outside.md",
+                        "content": "# outside\n",
+                    },
+                },
+                "call-write-traversal",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertFalse(hasattr(result, "hookSpecificOutput"))
+
+    async def test_manual_write_under_workspace_files_still_uses_confirmation(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "manual mode"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="manual",
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": str(workspace / "files" / "hello.md"),
+                        "content": "# hello\n",
+                    },
+                },
+                "call-write-manual-files",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(len(confirmation_requests), 1)
+        self.assertEqual(confirmation_requests[0]["tool_name"], "Write")
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertEqual(specific.get("permissionDecisionReason"), "manual mode")
 
 
 class TestClaudeAgentRunnerMemoryEnvAliases(unittest.TestCase):
