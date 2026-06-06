@@ -1,11 +1,19 @@
 /**
  * [Input] voiceApi: analyzeEchoes, analyzeTraits, analyzePatterns, saveAnalysisReport,
- *         getAnalysisReports, listSessions, fetchSessionsAggregate
+ *         getAnalysisReports, listSessions, fetchSessionsAggregate, ReflectionResult,
+ *         getReflectionsSectionConfig, saveReflectionsSectionConfig, resetReflectionsSectionConfig,
+ *         ReflectionSectionConfig
  * [Output] Reflections page — Ciridae authentic dark-noir design
  * [Pos] components/AnalysisView — full-page Reflections (Analysis) view
- * [Sync] 2026-06-05: Interaction redesign — dashboard shows analysis cards as primary;
- *         clicking any analysis item opens a "related notes" detail panel showing
- *         sessions filtered by label relevance to the clicked item.
+ * [Sync] 2026-06-05: Interaction redesign — dashboard shows analysis cards as primary.
+ * [Sync] 2026-06-06: Migrate analysis to per-section flow: create thread →
+ *         POST /api/reflections/memory-init → POST /api/claude-agent SSE
+ *         (tool_choice=auto so agent reads WORKFLOW.md) → parse JSON.
+ *         Per-section independent analyze buttons + streaming progress display.
+ *         ReflectionResult unified type; related notes driven by related_session_ids.
+ * [Sync] 2026-06-06: Add SectionConfigModal + ⚙ gear icon per section; users can view
+ *         and edit the 5 memory workspace prompt files from the UI (GET/PUT/DELETE
+ *         /api/reflections/config/{section}). CUSTOM badge when user config is active.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -18,7 +26,12 @@ import {
   getAnalysisReports,
   listSessions,
   fetchSessionsAggregate,
-  type UserSession
+  getReflectionsSectionConfig,
+  saveReflectionsSectionConfig,
+  resetReflectionsSectionConfig,
+  type UserSession,
+  type ReflectionResult,
+  type ReflectionSectionConfig,
 } from '../api/voiceApi';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -43,52 +56,81 @@ const C = {
 
 const MAX_SAVED_REPORTS = 10;
 
+// Ordered list of the 5 prompt files in memory workspace.
+const PROMPT_FILE_ORDER = [
+  'WORKFLOW.md',
+  'MEMORY_QUERY_PROMPT.md',
+  'MEMORY_Distiller_PROMPT.md',
+  'MEMORY_ANSWER_PROMPT.md',
+  'DEFAULT_UPDATE_MEMORY_PROMPT.md',
+] as const;
+
+const PROMPT_FILE_LABELS: Record<string, string> = {
+  'WORKFLOW.md': 'Analysis Workflow',
+  'MEMORY_QUERY_PROMPT.md': 'Signal Query',
+  'MEMORY_Distiller_PROMPT.md': 'Distillation Rules',
+  'MEMORY_ANSWER_PROMPT.md': 'Output Format',
+  'DEFAULT_UPDATE_MEMORY_PROMPT.md': 'Update Rules',
+};
+
 // ──────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────
-interface Echo { title: string; description: string; examples?: string[] }
-interface Trait { trait: string; strength: number; evidence: string }
-interface Pattern { pattern: string; description: string; frequency: string }
 
-type AnalysisItem =
-  | { kind: 'echo'; data: Echo }
-  | { kind: 'trait'; data: Trait }
-  | { kind: 'pattern'; data: Pattern }
+type SectionKind = 'echo' | 'trait' | 'pattern';
+
+interface AnalysisItem {
+  kind: SectionKind;
+  data: ReflectionResult;
+}
 
 interface AnalysisReport {
   id: number;
-  echoes: Echo[]; traits: Trait[]; patterns: Pattern[];
+  echoes: ReflectionResult[];
+  traits: ReflectionResult[];
+  patterns: ReflectionResult[];
   timestamp: number;
   stats: { days: number; entries: number; words: number };
+}
+
+/** Confidence dot color */
+function confidenceColor(confidence: string): string {
+  if (confidence === 'high') return '#6ee7b7';   // green
+  if (confidence === 'low') return '#858585';     // grey
+  return '#f59e0b';                               // amber for medium
 }
 
 // ──────────────────────────────────────────────
 // Helpers
 // ──────────────────────────────────────────────
 
-/** Returns keywords from an analysis item for label matching */
-function itemKeywords(item: AnalysisItem): string[] {
-  const raw =
-    item.kind === 'echo' ? `${item.data.title} ${item.data.description}` :
-    item.kind === 'trait' ? `${item.data.trait} ${item.data.evidence}` :
-    `${item.data.pattern} ${item.data.description}`;
-  return raw.toLowerCase().split(/[\s,，。.!?、]+/).filter(w => w.length > 1);
-}
-
 function itemTitle(item: AnalysisItem): string {
-  return item.kind === 'echo' ? item.data.title :
-    item.kind === 'trait' ? item.data.trait :
-    item.data.pattern;
+  return item.data.title;
 }
 
 function itemDesc(item: AnalysisItem): string {
-  return item.kind === 'echo' ? item.data.description :
-    item.kind === 'trait' ? item.data.evidence :
-    item.data.description;
+  return item.data.description;
 }
 
-/** Score a session's relevance to an analysis item by label keyword overlap */
-function sessionRelevance(session: UserSession, keywords: string[]): number {
+/**
+ * Keywords from the item for label-based fallback matching.
+ * Primary related notes come from related_session_ids; this is the fallback.
+ */
+function itemKeywords(item: AnalysisItem): string[] {
+  const raw = `${item.data.title} ${item.data.description} ${item.data.evidence}`;
+  return raw.toLowerCase().split(/[\s,，。.!?、]+/).filter(w => w.length > 1);
+}
+
+/** Score a session's relevance by matching against agent-provided session IDs first,
+ *  then by label keyword overlap as a fallback. */
+function sessionRelevance(
+  session: UserSession,
+  relatedIds: string[],
+  keywords: string[],
+): number {
+  // Exact ID match from agent analysis — strongest signal.
+  if (relatedIds.includes(session.id)) return 100;
+  // Fallback: keyword match on labels.
   if (!session.labels.length) return 0;
   const labelText = session.labels.join(' ').toLowerCase();
   return keywords.filter(kw => labelText.includes(kw)).length;
@@ -208,6 +250,141 @@ function GlassCard({
 }
 
 // ══════════════════════════════════════════════
+// Section config modal — view / edit prompt files
+// ══════════════════════════════════════════════
+type SectionKey = 'echoes' | 'traits' | 'patterns';
+
+interface SectionConfigModalProps {
+  open: boolean;
+  section: SectionKey;
+  displayName: string;
+  files: Record<string, string>;
+  loading: boolean;
+  saving: boolean;
+  isCustom: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: () => void;
+  onReset: () => void;
+  onFileChange: (filename: string, content: string) => void;
+}
+
+function SectionConfigModal({
+  open, section, displayName, files, loading, saving, isCustom, error,
+  onClose, onSave, onReset, onFileChange,
+}: SectionConfigModalProps) {
+  if (!open) return null;
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(0,0,0,0.88)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#111', border: `1px solid ${C.glassBorder}`,
+          borderRadius: '4px', width: '100%', maxWidth: '680px',
+          maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        }}
+      >
+        {/* Header */}
+        <div style={{
+          padding: '1.25rem 1.5rem', borderBottom: `1px solid ${C.glassBorder}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Eyebrow>CONFIGURE</Eyebrow>
+            <span style={{
+              fontFamily: C.fontCond, fontWeight: 400,
+              fontSize: '18px', letterSpacing: '-0.02em', textTransform: 'uppercase', color: C.pure,
+            }}>
+              {displayName}
+            </span>
+            {isCustom && (
+              <span style={{
+                fontFamily: C.fontMono, fontSize: '9px', letterSpacing: '0.08em',
+                textTransform: 'uppercase', color: C.ember,
+                border: `1px solid ${C.ember}55`, padding: '2px 7px', borderRadius: '2px',
+              }}>
+                CUSTOM
+              </span>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            style={{
+              background: 'none', border: 'none', cursor: 'pointer',
+              color: C.ash, fontSize: '20px', padding: '2px 6px', fontFamily: C.fontMono,
+            }}
+          >
+            ×
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ flex: 1, overflowY: 'auto', padding: '1.25rem 1.5rem' }}>
+          {loading ? (
+            <div style={{ fontFamily: C.fontMono, fontSize: '11px', color: C.ash, textAlign: 'center', padding: '2rem 0' }}>
+              Loading…
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              {PROMPT_FILE_ORDER.map(filename => (
+                <div key={filename}>
+                  <label style={{
+                    display: 'block', fontFamily: C.fontMono, fontSize: '10px',
+                    letterSpacing: '0.06em', textTransform: 'uppercase', color: C.ash, marginBottom: '6px',
+                  }}>
+                    {PROMPT_FILE_LABELS[filename] ?? filename}
+                    <span style={{ color: C.ash + '66', marginLeft: '6px', fontWeight: 400 }}>{filename}</span>
+                  </label>
+                  <textarea
+                    value={files[filename] ?? ''}
+                    onChange={e => onFileChange(filename, e.target.value)}
+                    rows={6}
+                    style={{
+                      width: '100%', background: C.glass, border: `1px solid ${C.glassBorder}`,
+                      borderRadius: '2px', color: C.fog, fontFamily: C.fontMono, fontSize: '11px',
+                      lineHeight: 1.6, padding: '10px 12px', resize: 'vertical', outline: 'none',
+                      boxSizing: 'border-box', transition: 'border-color 0.15s',
+                    }}
+                    onFocus={e => (e.currentTarget.style.borderColor = C.glassBorderHover)}
+                    onBlur={e => (e.currentTarget.style.borderColor = C.glassBorder)}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+          {error && (
+            <p style={{ fontFamily: C.fontMono, fontSize: '10px', color: '#f87171', marginTop: '1rem' }}>
+              {error}
+            </p>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          padding: '1rem 1.5rem', borderTop: `1px solid ${C.glassBorder}`,
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
+        }}>
+          <PillBtn onClick={saving ? undefined : onReset} disabled={saving || !isCustom} small>
+            Reset to Default
+          </PillBtn>
+          <PillBtn onClick={saving ? undefined : onSave} disabled={saving} accent small>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </PillBtn>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════
 // Main component
 // ══════════════════════════════════════════════
 export default function AnalysisView() {
@@ -218,13 +395,36 @@ export default function AnalysisView() {
 
   // ── State ──
   const [sessions, setSessions] = useState<UserSession[]>([]);
-  const [echoes, setEchoes] = useState<Echo[]>([]);
-  const [traits, setTraits] = useState<Trait[]>([]);
-  const [patterns, setPatterns] = useState<Pattern[]>([]);
+  const [echoes, setEchoes] = useState<ReflectionResult[]>([]);
+  const [traits, setTraits] = useState<ReflectionResult[]>([]);
+  const [patterns, setPatterns] = useState<ReflectionResult[]>([]);
+  // Per-section loading and streaming text (shows partial agent output)
   const [loading, setLoading] = useState({ echoes: false, traits: false, patterns: false });
-  const [error, setError] = useState('');
+  const [streaming, setStreaming] = useState({ echoes: '', traits: '', patterns: '' });
+  const [errors, setErrors] = useState({ echoes: '', traits: '', patterns: '' });
   const [stats, setStats] = useState({ totalDays: 0, totalWords: 0, totalEntries: 0 });
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
+
+  // Config modal state
+  const [configModal, setConfigModal] = useState<{
+    open: boolean;
+    section: SectionKey;
+    displayName: string;
+    config: ReflectionSectionConfig | null;
+    files: Record<string, string>;
+    loading: boolean;
+    saving: boolean;
+    error: string;
+  }>({
+    open: false,
+    section: 'echoes',
+    displayName: 'Recurring Themes',
+    config: null,
+    files: {},
+    loading: false,
+    saving: false,
+    error: '',
+  });
 
   // View: 'dashboard' = analysis list; 'notes' = related notes for clicked item
   const [selectedItem, setSelectedItem] = useState<AnalysisItem | null>(null);
@@ -240,6 +440,68 @@ export default function AnalysisView() {
     } catch (e) { console.error('Failed to load sessions:', e); }
   }, []);
 
+  // Load (or reload) saved reports from DB / localStorage and group by day.
+  const reloadSavedReports = useCallback(async () => {
+    if (isAuthenticated) {
+      try {
+        const db = await getAnalysisReports(MAX_SAVED_REPORTS);
+
+        // Each DB row may contain only one section (per-section saves).
+        // Map to individual records first, then group by calendar day so
+        // the history pills show one entry per analysis day with all
+        // sections that were run that day.
+        const individual = db.map((r: any) => ({
+          id: r.id as number,
+          echoes:   (r.report_data?.echoes   || []) as ReflectionResult[],
+          traits:   (r.report_data?.traits   || []) as ReflectionResult[],
+          patterns: (r.report_data?.patterns || []) as ReflectionResult[],
+          timestamp: new Date(r.created_at).getTime(),
+          stats: r.report_data?.stats || { days: 0, entries: 0, words: 0 },
+        }));
+
+        // Group by calendar day — DB is newest-first, so the first
+        // non-empty section we encounter per day is the most recent.
+        const byDay = new Map<string, AnalysisReport>();
+        for (const r of individual) {
+          const day = new Date(r.timestamp).toDateString();
+          const existing = byDay.get(day);
+          if (!existing) {
+            byDay.set(day, { ...r });
+          } else {
+            if (r.timestamp > existing.timestamp) existing.timestamp = r.timestamp;
+            if (existing.echoes.length === 0 && r.echoes.length > 0) existing.echoes = r.echoes;
+            if (existing.traits.length === 0 && r.traits.length > 0) existing.traits = r.traits;
+            if (existing.patterns.length === 0 && r.patterns.length > 0) existing.patterns = r.patterns;
+          }
+        }
+        const grouped = [...byDay.values()].sort((a, b) => b.timestamp - a.timestamp);
+        setSavedReports(grouped);
+
+        // Restore most recent result per section from individual rows.
+        const latestEchoes   = individual.find(r => r.echoes.length > 0);
+        const latestTraits   = individual.find(r => r.traits.length > 0);
+        const latestPatterns = individual.find(r => r.patterns.length > 0);
+        if (latestEchoes)   setEchoes(latestEchoes.echoes);
+        if (latestTraits)   setTraits(latestTraits.traits);
+        if (latestPatterns) setPatterns(latestPatterns.patterns);
+      } catch (e) { console.error(e); }
+    } else {
+      const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_REPORTS);
+      if (saved) {
+        try {
+          const r: AnalysisReport[] = JSON.parse(saved);
+          setSavedReports(r);
+          const latestEchoes   = r.find(x => x.echoes.length > 0);
+          const latestTraits   = r.find(x => x.traits.length > 0);
+          const latestPatterns = r.find(x => x.patterns.length > 0);
+          if (latestEchoes)   setEchoes(latestEchoes.echoes);
+          if (latestTraits)   setTraits(latestTraits.traits);
+          if (latestPatterns) setPatterns(latestPatterns.patterns);
+        } catch (e) { console.error(e); }
+      }
+    }
+  }, [isAuthenticated]);
+
   useEffect(() => {
     const loadStats = async () => {
       try {
@@ -249,111 +511,124 @@ export default function AnalysisView() {
       } catch (e) { console.error(e); }
     };
 
-    const loadReports = async () => {
-      if (isAuthenticated) {
-        try {
-          const db = await getAnalysisReports(MAX_SAVED_REPORTS);
-          const fmt = db.map((r: any) => ({
-            id: r.id, echoes: r.report_data?.echoes || [],
-            traits: r.report_data?.traits || [], patterns: r.report_data?.patterns || [],
-            timestamp: new Date(r.created_at).getTime(),
-            stats: r.report_data?.stats || { days: 0, entries: 0, words: 0 }
-          }));
-          setSavedReports(fmt);
-          if (fmt.length > 0) {
-            setEchoes(fmt[0].echoes); setTraits(fmt[0].traits); setPatterns(fmt[0].patterns);
-          }
-        } catch (e) { console.error(e); }
-      } else {
-        const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_REPORTS);
-        if (saved) {
-          try {
-            const r = JSON.parse(saved);
-            setSavedReports(r);
-            if (r.length > 0) { setEchoes(r[0].echoes); setTraits(r[0].traits); setPatterns(r[0].patterns); }
-          } catch (e) { console.error(e); }
-        }
-      }
-    };
+    loadStats(); reloadSavedReports(); loadSessions();
+  }, [isAuthenticated, loadSessions, reloadSavedReports]);
 
-    loadStats(); loadReports(); loadSessions();
-  }, [isAuthenticated, loadSessions]);
-
-  // ── Generate analysis ──
-  const handleAnalyzeAll = async () => {
-    if (!isAuthenticated) { setError('Please log in to use reflections.'); return; }
-    setError('');
-    let er: Echo[] = [], tr: Trait[] = [], pr: Pattern[] = [];
-
-    // @@@ Run one analysis task: set loading, call fn, update state, surface error
-    const run = async <T extends any[]>(
-      fn: () => Promise<T>,
-      key: 'echoes' | 'traits' | 'patterns',
-      cb: (r: T) => void,
-    ): Promise<T> => {
-      setLoading(p => ({ ...p, [key]: true }));
-      try {
-        const result = await fn();
-        cb(result);
-        return result;
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setError(prev => prev ? `${prev} | ${key}: ${msg}` : `${key}: ${msg}`);
-        console.error(`[Reflections] ${key} analysis failed:`, e);
-        return [] as unknown as T;
-      } finally {
-        setLoading(p => ({ ...p, [key]: false }));
-      }
-    };
-
-    [er, tr, pr] = await Promise.all([
-      run(() => analyzeEchoes() as Promise<Echo[]>, 'echoes', r => setEchoes(r)),
-      run(() => analyzeTraits() as Promise<Trait[]>, 'traits', r => setTraits(r)),
-      run(() => analyzePatterns() as Promise<Pattern[]>, 'patterns', r => setPatterns(r)),
-    ]);
-
-    // @@@ Warn if all three came back empty (likely JSON parse failure)
-    if (er.length === 0 && tr.length === 0 && pr.length === 0) {
-      setError(prev => prev || 'Analysis returned no results — the agent response may not have been valid JSON. Check the browser console for details.');
+  // ── Per-section analysis ──
+  /**
+   * Run analysis for one section.
+   * Streams partial output (streaming state) while the agent is working.
+   * On completion, saves the results and updates the section state.
+   */
+  const handleAnalyzeSection = async (section: 'echoes' | 'traits' | 'patterns') => {
+    if (!isAuthenticated) {
+      setErrors(p => ({ ...p, [section]: 'Please log in to use reflections.' }));
       return;
     }
+    setErrors(p => ({ ...p, [section]: '' }));
+    setStreaming(p => ({ ...p, [section]: '' }));
+    setLoading(p => ({ ...p, [section]: true }));
 
-    const report: AnalysisReport = {
-      id: Date.now(), echoes: er, traits: tr, patterns: pr,
-      timestamp: Date.now(),
-      stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords }
-    };
+    const setter = section === 'echoes' ? setEchoes : section === 'traits' ? setTraits : setPatterns;
+    const analysisFn = section === 'echoes' ? analyzeEchoes : section === 'traits' ? analyzeTraits : analyzePatterns;
 
-    if (isAuthenticated) {
-      try {
-        await saveAnalysisReport('full_analysis', {
-          echoes: er, traits: tr, patterns: pr,
-          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords }
-        });
-        const db = await getAnalysisReports(MAX_SAVED_REPORTS);
-        setSavedReports(db.map((r: any) => ({
-          id: r.id, echoes: r.report_data?.echoes || [], traits: r.report_data?.traits || [],
-          patterns: r.report_data?.patterns || [], timestamp: new Date(r.created_at).getTime(),
-          stats: r.report_data?.stats || { days: 0, entries: 0, words: 0 }
-        })));
-      } catch (e) { console.error(e); }
-    } else {
-      const updated = [report, ...savedReports].slice(0, MAX_SAVED_REPORTS);
-      localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
-      setSavedReports(updated);
+    try {
+      const results = await analysisFn((delta) => {
+        setStreaming(p => ({ ...p, [section]: p[section] + delta }));
+      });
+
+      setter(results);
+      setStreaming(p => ({ ...p, [section]: '' }));
+
+      if (results.length === 0) {
+        setErrors(p => ({ ...p, [section]: 'No results — the agent response may not have contained valid JSON.' }));
+        return;
+      }
+
+      // Persist section result.
+      if (isAuthenticated) {
+        try {
+          await saveAnalysisReport(`reflections_${section}`, {
+            [section]: results,
+            stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+          });
+          // Reload history pills from DB so the new report appears.
+          await reloadSavedReports();
+        } catch (e) { console.warn('[Reflections] save report failed:', e); }
+      } else {
+        const reportEntry: AnalysisReport = {
+          id: Date.now(),
+          echoes: section === 'echoes' ? results : [],
+          traits: section === 'traits' ? results : [],
+          patterns: section === 'patterns' ? results : [],
+          timestamp: Date.now(),
+          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+        };
+        const updated = [reportEntry, ...savedReports].slice(0, MAX_SAVED_REPORTS);
+        localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
+        setSavedReports(updated);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrors(p => ({ ...p, [section]: msg }));
+      console.error(`[Reflections] ${section} analysis failed:`, e);
+      setStreaming(p => ({ ...p, [section]: '' }));
+    } finally {
+      setLoading(p => ({ ...p, [section]: false }));
     }
   };
 
   const anyLoading = loading.echoes || loading.traits || loading.patterns;
   const hasData = echoes.length > 0 || traits.length > 0 || patterns.length > 0;
 
+  // ── Config modal handlers ──
+  const handleOpenConfig = useCallback(async (section: SectionKey) => {
+    const DISPLAY: Record<SectionKey, string> = {
+      echoes: 'Recurring Themes',
+      traits: 'Character Traits',
+      patterns: 'Behavioral Patterns',
+    };
+    setConfigModal(p => ({
+      ...p, open: true, section, displayName: DISPLAY[section],
+      loading: true, error: '', config: null, files: {},
+    }));
+    try {
+      const cfg = await getReflectionsSectionConfig(section);
+      setConfigModal(p => ({ ...p, config: cfg, files: { ...cfg.prompt_files }, loading: false }));
+    } catch (e) {
+      setConfigModal(p => ({ ...p, loading: false, error: String(e) }));
+    }
+  }, []);
+
+  const handleSaveConfig = useCallback(async () => {
+    setConfigModal(p => ({ ...p, saving: true, error: '' }));
+    try {
+      await saveReflectionsSectionConfig(configModal.section, configModal.files);
+      setConfigModal(p => ({ ...p, saving: false, open: false }));
+    } catch (e) {
+      setConfigModal(p => ({ ...p, saving: false, error: String(e) }));
+    }
+  }, [configModal.section, configModal.files]);
+
+  const handleResetConfig = useCallback(async () => {
+    setConfigModal(p => ({ ...p, saving: true, error: '' }));
+    try {
+      await resetReflectionsSectionConfig(configModal.section);
+      const cfg = await getReflectionsSectionConfig(configModal.section);
+      setConfigModal(p => ({ ...p, saving: false, config: cfg, files: { ...cfg.prompt_files } }));
+    } catch (e) {
+      setConfigModal(p => ({ ...p, saving: false, error: String(e) }));
+    }
+  }, [configModal.section]);
+
   // ──────────────────────────────────────────────
   // NOTES DETAIL VIEW — shown when user clicks an analysis item
   // ──────────────────────────────────────────────
   if (selectedItem) {
+    const relatedIds = selectedItem.data.related_session_ids || [];
     const keywords = itemKeywords(selectedItem);
     const scored = sessions
-      .map(s => ({ session: s, score: sessionRelevance(s, keywords) }))
+      .map(s => ({ session: s, score: sessionRelevance(s, relatedIds, keywords) }))
       .sort((a, b) => b.score - a.score || new Date(b.session.created_at).getTime() - new Date(a.session.created_at).getTime());
 
     const related = scored.filter(x => x.score > 0).map(x => x.session);
@@ -433,44 +708,35 @@ export default function AnalysisView() {
                       {itemDesc(selectedItem)}
                     </p>
 
-                    {/* Extra: echo examples */}
-                    {selectedItem.kind === 'echo' && selectedItem.data.examples && selectedItem.data.examples.length > 0 && (
-                      <div style={{ marginTop: '1.25rem', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        {selectedItem.data.examples.map((ex, i) => (
-                          <div key={i} style={{
-                            borderLeft: `1px solid ${C.ash}`,
-                            paddingLeft: '14px',
-                            fontFamily: C.fontCond, fontSize: '13px',
-                            color: C.ash, fontStyle: 'italic', lineHeight: 1.55,
-                          }}>
-                            "{ex}"
-                          </div>
-                        ))}
+                    {/* Evidence quote */}
+                    {selectedItem.data.evidence && (
+                      <div style={{
+                        borderLeft: `1px solid ${C.ash}`,
+                        paddingLeft: '14px',
+                        marginTop: '1.25rem',
+                        fontFamily: C.fontCond, fontSize: '13px',
+                        color: C.ash, fontStyle: 'italic', lineHeight: 1.55,
+                      }}>
+                        "{selectedItem.data.evidence}"
                       </div>
                     )}
 
-                    {/* Extra: trait strength bar */}
-                    {selectedItem.kind === 'trait' && (
-                      <div style={{ display: 'flex', gap: '4px', marginTop: '1.25rem', maxWidth: '160px' }}>
-                        {[1,2,3,4,5].map(i => (
-                          <div key={i} style={{
-                            flex: 1, height: '2px',
-                            background: i <= (selectedItem.data as Trait).strength ? C.pure : C.ash + '33',
-                          }} />
-                        ))}
-                      </div>
-                    )}
-
-                    {/* Extra: pattern frequency */}
-                    {selectedItem.kind === 'pattern' && (
+                    {/* Confidence badge */}
+                    {selectedItem.data.confidence && (
                       <div style={{
                         display: 'inline-flex', alignItems: 'center', gap: '6px',
                         borderRadius: '1440px', border: `1px solid ${C.glassBorder}`,
                         padding: '4px 14px', marginTop: '1.25rem',
                         fontFamily: C.fontMono, fontSize: '10px',
-                        color: C.ash, textTransform: 'uppercase', letterSpacing: '0.04em',
+                        color: confidenceColor(selectedItem.data.confidence),
+                        textTransform: 'uppercase', letterSpacing: '0.04em',
                       }}>
-                        FREQ · {(selectedItem.data as Pattern).frequency}
+                        <span style={{
+                          width: '6px', height: '6px', borderRadius: '50%',
+                          background: confidenceColor(selectedItem.data.confidence),
+                          display: 'inline-block', flexShrink: 0,
+                        }} />
+                        {selectedItem.data.confidence}
                       </div>
                     )}
                   </div>
@@ -534,7 +800,7 @@ export default function AnalysisView() {
   }
 
   // ──────────────────────────────────────────────
-  // DASHBOARD VIEW — analysis as primary content
+  // DASHBOARD VIEW — per-section analysis controls
   // ──────────────────────────────────────────────
   return (
     <>
@@ -574,144 +840,189 @@ export default function AnalysisView() {
             </h1>
 
             {/* Stats */}
-            <div style={{ display: 'flex', gap: isMobile ? '2rem' : '3.5rem', flexWrap: 'wrap', marginBottom: '2rem' }}>
+            <div style={{ display: 'flex', gap: isMobile ? '2rem' : '3.5rem', flexWrap: 'wrap', marginBottom: savedReports.length > 0 ? '1.5rem' : 0 }}>
               <StatItem n={stats.totalDays} label={t('analysis.stats.days')} />
               <StatItem n={stats.totalEntries} label={t('analysis.stats.entries')} />
               <StatItem n={stats.totalWords.toLocaleString()} label={t('analysis.stats.words')} />
             </div>
 
-            {/* Controls row */}
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'center' }}>
-              <PillBtn onClick={handleAnalyzeAll} disabled={anyLoading}>
-                {anyLoading ? `◌  ${t('analysis.actions.generating')}` : t('analysis.actions.generate')}
-              </PillBtn>
-
-              {/* Past report pills */}
-              {savedReports.slice(0, 5).map((r, i) => (
-                <PillBtn
-                  key={r.id}
-                  small
-                  onClick={() => { setEchoes(r.echoes); setTraits(r.traits); setPatterns(r.patterns); }}
-                >
-                  <span style={{ fontFamily: C.fontMono, fontSize: '9px' }}>
-                    {new Date(r.timestamp).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
-                  </span>
-                  {i === 0 && <span style={{ color: C.ember, fontSize: '10px' }}>●</span>}
-                </PillBtn>
-              ))}
-            </div>
-
-            {error && (
-              <p style={{ fontFamily: C.fontMono, fontSize: '11px', color: C.ember, margin: '1rem 0 0', letterSpacing: '-0.01em' }}>
-                {error}
-              </p>
+            {/* Past report pills — click to restore a historical snapshot across all sections */}
+            {savedReports.length > 0 && (
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                <span style={{
+                  fontFamily: C.fontMono, fontSize: '9px', color: C.ash,
+                  letterSpacing: '0.06em', textTransform: 'uppercase', flexShrink: 0,
+                }}>
+                  History
+                </span>
+                {savedReports.slice(0, 5).map((r, i) => (
+                  <PillBtn
+                    key={r.id}
+                    small
+                    onClick={() => {
+                      if (r.echoes.length) setEchoes(r.echoes);
+                      if (r.traits.length) setTraits(r.traits);
+                      if (r.patterns.length) setPatterns(r.patterns);
+                    }}
+                  >
+                    <span style={{ fontFamily: C.fontMono, fontSize: '9px' }}>
+                      {new Date(r.timestamp).toLocaleDateString(dateLocale, { month: 'short', day: 'numeric' })}
+                    </span>
+                    {i === 0 && <span style={{ color: C.ember, fontSize: '10px' }}>●</span>}
+                  </PillBtn>
+                ))}
+              </div>
             )}
           </div>
         </div>
 
-        {/* ── Analysis content ── */}
+        {/* ── Analysis sections ── */}
         <div style={{ maxWidth: '1200px', margin: '0 auto', padding: isMobile ? '2rem 1.25rem 4rem' : '3rem 3rem 5rem' }}>
 
           {!hasData && !anyLoading && (
             <EmptyState />
           )}
 
-          {anyLoading && (
-            <div style={{ padding: '4rem 0', textAlign: 'center' }}>
-              <StarMark size={40} glow />
-              <p style={{ fontFamily: C.fontCond, fontSize: '16px', color: C.ash, textTransform: 'uppercase', letterSpacing: '-0.01em', marginTop: '1.5rem' }}>
-                {t('analysis.actions.generating')}
-              </p>
-            </div>
-          )}
-
           {/* Echoes */}
-          {echoes.length > 0 && (
-            <AnalysisSection
-              eyebrow={t('analysis.papers.echoes.subtitle')}
-              title={t('analysis.papers.echoes.title')}
-              hint="Click any card to see related notes →"
-            >
-              {echoes.map((echo, i) => (
-                <AnalysisCard
-                  key={i} idx={i}
-                  title={echo.title}
-                  desc={echo.description}
-                  onClick={() => setSelectedItem({ kind: 'echo', data: echo })}
-                />
-              ))}
-            </AnalysisSection>
-          )}
+          <AnalysisSection
+            eyebrow={t('analysis.papers.echoes.subtitle')}
+            title={t('analysis.papers.echoes.title')}
+            hint={echoes.length > 0 ? 'Click any card to see related notes →' : undefined}
+            loading={loading.echoes}
+            streamingText={streaming.echoes}
+            error={errors.echoes}
+            onAnalyze={isAuthenticated ? () => handleAnalyzeSection('echoes') : undefined}
+            onConfigClick={isAuthenticated ? () => handleOpenConfig('echoes') : undefined}
+            hasResults={echoes.length > 0}
+          >
+            {echoes.map((echo, i) => (
+              <AnalysisCard
+                key={i} idx={i}
+                title={echo.title}
+                desc={echo.description}
+                confidence={echo.confidence}
+                relatedCount={echo.related_session_ids?.length || 0}
+                onClick={() => setSelectedItem({ kind: 'echo', data: echo })}
+              />
+            ))}
+          </AnalysisSection>
 
           {/* Traits */}
-          {traits.length > 0 && (
-            <AnalysisSection
-              eyebrow={t('analysis.papers.traits.subtitle')}
-              title={t('analysis.papers.traits.title')}
-            >
-              {traits.map((trait, i) => (
-                <AnalysisCard
-                  key={i} idx={i}
-                  title={trait.trait}
-                  desc={trait.evidence}
-                  extra={
-                    <div style={{ display: 'flex', gap: '3px', marginTop: '10px', maxWidth: '120px' }}>
-                      {[1,2,3,4,5].map(n => (
-                        <div key={n} style={{ flex: 1, height: '1px', background: n <= trait.strength ? C.pure : C.ash + '33' }} />
-                      ))}
-                    </div>
-                  }
-                  onClick={() => setSelectedItem({ kind: 'trait', data: trait })}
-                />
-              ))}
-            </AnalysisSection>
-          )}
+          <AnalysisSection
+            eyebrow={t('analysis.papers.traits.subtitle')}
+            title={t('analysis.papers.traits.title')}
+            loading={loading.traits}
+            streamingText={streaming.traits}
+            error={errors.traits}
+            onAnalyze={isAuthenticated ? () => handleAnalyzeSection('traits') : undefined}
+            onConfigClick={isAuthenticated ? () => handleOpenConfig('traits') : undefined}
+            hasResults={traits.length > 0}
+          >
+            {traits.map((trait, i) => (
+              <AnalysisCard
+                key={i} idx={i}
+                title={trait.title}
+                desc={trait.description}
+                confidence={trait.confidence}
+                relatedCount={trait.related_session_ids?.length || 0}
+                extra={
+                  <div style={{ display: 'flex', gap: '3px', marginTop: '10px', maxWidth: '120px' }}>
+                    {[1, 2, 3].map(n => {
+                      const filled = trait.confidence === 'high' ? 3 : trait.confidence === 'medium' ? 2 : 1;
+                      return <div key={n} style={{ flex: 1, height: '1px', background: n <= filled ? '#ffffff' : '#858585' + '33' }} />;
+                    })}
+                  </div>
+                }
+                onClick={() => setSelectedItem({ kind: 'trait', data: trait })}
+              />
+            ))}
+          </AnalysisSection>
 
           {/* Patterns */}
-          {patterns.length > 0 && (
-            <AnalysisSection
-              eyebrow={t('analysis.papers.patterns.subtitle')}
-              title={t('analysis.papers.patterns.title')}
-            >
-              {patterns.map((pattern, i) => (
-                <AnalysisCard
-                  key={i} idx={i}
-                  title={pattern.pattern}
-                  desc={pattern.description}
-                  extra={
-                    <div style={{
-                      display: 'inline-flex', gap: '6px', alignItems: 'center',
-                      borderRadius: '1440px', border: `1px solid ${C.glassBorder}`,
-                      padding: '3px 12px', marginTop: '10px',
-                      fontFamily: C.fontMono, fontSize: '9px',
-                      color: C.ash, textTransform: 'uppercase', letterSpacing: '0.04em',
-                    }}>
-                      FREQ · {pattern.frequency}
-                    </div>
-                  }
-                  onClick={() => setSelectedItem({ kind: 'pattern', data: pattern })}
-                />
-              ))}
-            </AnalysisSection>
-          )}
+          <AnalysisSection
+            eyebrow={t('analysis.papers.patterns.subtitle')}
+            title={t('analysis.papers.patterns.title')}
+            loading={loading.patterns}
+            streamingText={streaming.patterns}
+            error={errors.patterns}
+            onAnalyze={isAuthenticated ? () => handleAnalyzeSection('patterns') : undefined}
+            onConfigClick={isAuthenticated ? () => handleOpenConfig('patterns') : undefined}
+            hasResults={patterns.length > 0}
+          >
+            {patterns.map((pattern, i) => (
+              <AnalysisCard
+                key={i} idx={i}
+                title={pattern.title}
+                desc={pattern.description}
+                confidence={pattern.confidence}
+                relatedCount={pattern.related_session_ids?.length || 0}
+                extra={
+                  <div style={{
+                    display: 'inline-flex', gap: '6px', alignItems: 'center',
+                    borderRadius: '1440px', border: `1px solid rgba(255,255,255,0.08)`,
+                    padding: '3px 12px', marginTop: '10px',
+                    fontFamily: "'Roboto Mono', ui-monospace, monospace", fontSize: '9px',
+                    color: '#858585', textTransform: 'uppercase', letterSpacing: '0.04em',
+                  }}>
+                    CONF · {pattern.confidence}
+                  </div>
+                }
+                onClick={() => setSelectedItem({ kind: 'pattern', data: pattern })}
+              />
+            ))}
+          </AnalysisSection>
         </div>
       </div>
+
+      {/* Section config modal */}
+      <SectionConfigModal
+        open={configModal.open}
+        section={configModal.section}
+        displayName={configModal.displayName}
+        files={configModal.files}
+        loading={configModal.loading}
+        saving={configModal.saving}
+        isCustom={!!(configModal.config?.usedCustomConfig)}
+        error={configModal.error}
+        onClose={() => setConfigModal(p => ({ ...p, open: false }))}
+        onSave={handleSaveConfig}
+        onReset={handleResetConfig}
+        onFileChange={(filename, content) =>
+          setConfigModal(p => ({ ...p, files: { ...p.files, [filename]: content } }))
+        }
+      />
     </>
   );
 }
 
 // ──────────────────────────────────────────────
-// Section wrapper
+// Section wrapper — with independent analyze control
 // ──────────────────────────────────────────────
-function AnalysisSection({ eyebrow, title, hint, children }: {
+function AnalysisSection({
+  eyebrow, title, hint, children,
+  loading, streamingText, error, onAnalyze, onConfigClick, hasResults,
+}: {
   eyebrow: string; title: string; hint?: string;
   children: React.ReactNode;
+  loading?: boolean;
+  streamingText?: string;
+  error?: string;
+  onAnalyze?: () => void;
+  onConfigClick?: () => void;
+  hasResults?: boolean;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div style={{ marginBottom: '3.5rem' }}>
+      {/* Section header */}
       <div style={{ marginBottom: '1.5rem' }}>
         <Eyebrow>{eyebrow}</Eyebrow>
-        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', marginTop: '6px', flexWrap: 'wrap', gap: '0.5rem' }}>
+        <div style={{
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'space-between', marginTop: '6px',
+          flexWrap: 'wrap', gap: '0.75rem',
+        }}>
           <h2 style={{
             fontFamily: "'Barlow Condensed', 'Oswald', ui-sans-serif, sans-serif",
             fontWeight: 400, fontSize: '24px', lineHeight: 1.05,
@@ -720,22 +1031,105 @@ function AnalysisSection({ eyebrow, title, hint, children }: {
           }}>
             {title}
           </h2>
-          {hint && (
-            <span style={{ fontFamily: "'Roboto Mono', ui-monospace, monospace", fontSize: '10px', color: '#858585', letterSpacing: '-0.01em' }}>
-              {hint}
-            </span>
-          )}
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexShrink: 0 }}>
+            {hint && !loading && (
+              <span style={{
+                fontFamily: "'Roboto Mono', ui-monospace, monospace",
+                fontSize: '10px', color: '#858585', letterSpacing: '-0.01em',
+              }}>
+                {hint}
+              </span>
+            )}
+            {onConfigClick && (
+              <button
+                onClick={onConfigClick}
+                title="Configure analysis prompts"
+                style={{
+                  background: 'none', border: `1px solid rgba(255,255,255,0.15)`,
+                  borderRadius: '50%', width: '28px', height: '28px',
+                  cursor: 'pointer', color: '#858585',
+                  fontFamily: 'inherit', fontSize: '13px', lineHeight: 1,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                  transition: 'border-color 0.2s, color 0.2s', flexShrink: 0,
+                  padding: 0,
+                }}
+                onMouseEnter={e => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.4)';
+                  (e.currentTarget as HTMLButtonElement).style.color = '#ffffff';
+                }}
+                onMouseLeave={e => {
+                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'rgba(255,255,255,0.15)';
+                  (e.currentTarget as HTMLButtonElement).style.color = '#858585';
+                }}
+              >
+                ⚙
+              </button>
+            )}
+            {onAnalyze && (
+              <PillBtn onClick={loading ? undefined : onAnalyze} disabled={loading} small>
+                {loading
+                  ? <><span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>◌</span>&nbsp;{t('analysis.actions.generating')}</>
+                  : hasResults ? t('analysis.actions.reanalyze', 'Re-analyze') : t('analysis.actions.generate')}
+              </PillBtn>
+            )}
+          </div>
         </div>
         <div style={{ height: '1px', background: 'rgba(255,255,255,0.08)', marginTop: '1rem' }} />
       </div>
 
-      <div style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-        gap: '12px',
-      }}>
-        {children}
-      </div>
+      {/* Error */}
+      {error && (
+        <p style={{
+          fontFamily: "'Roboto Mono', ui-monospace, monospace",
+          fontSize: '11px', color: '#cc6437', margin: '0 0 1rem',
+          letterSpacing: '-0.01em',
+        }}>
+          {error}
+        </p>
+      )}
+
+      {/* Streaming progress */}
+      {loading && streamingText && (
+        <div style={{
+          background: 'rgba(255,255,255,0.02)',
+          border: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: '8px',
+          padding: '16px',
+          marginBottom: '1rem',
+          fontFamily: "'Roboto Mono', ui-monospace, monospace",
+          fontSize: '11px', color: '#858585',
+          lineHeight: 1.6,
+          whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          maxHeight: '160px', overflowY: 'auto',
+        }}>
+          {streamingText.slice(-1200)}
+          <span style={{ opacity: 0.4 }}>▌</span>
+        </div>
+      )}
+
+      {/* Loading placeholder (no streaming text yet) */}
+      {loading && !streamingText && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '12px',
+          padding: '2rem 0',
+          fontFamily: "'Roboto Mono', ui-monospace, monospace",
+          fontSize: '11px', color: '#858585', letterSpacing: '-0.01em',
+        }}>
+          <span>Reading memory workspace and analysing…</span>
+        </div>
+      )}
+
+      {/* Cards grid */}
+      {!loading && (
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+          gap: '12px',
+        }}>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
@@ -743,11 +1137,14 @@ function AnalysisSection({ eyebrow, title, hint, children }: {
 // ──────────────────────────────────────────────
 // Clickable analysis card
 // ──────────────────────────────────────────────
-function AnalysisCard({ idx, title, desc, extra, onClick }: {
+function AnalysisCard({ idx, title, desc, confidence, relatedCount, extra, onClick }: {
   idx: number; title: string; desc: string;
-  extra?: React.ReactNode; onClick: () => void;
+  confidence?: string; relatedCount?: number;
+  extra?: React.ReactNode;
+  onClick: () => void;
 }) {
   const [hov, setHov] = useState(false);
+  const confColor = confidence ? confidenceColor(confidence) : C.ash;
   return (
     <div
       onClick={onClick}
@@ -766,17 +1163,36 @@ function AnalysisCard({ idx, title, desc, extra, onClick }: {
         position: 'relative',
       }}
     >
-      {/* Number + arrow row */}
+      {/* Number + confidence + arrow row */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
-        <NumBadge n={idx + 1} />
-        <span style={{
-          fontFamily: "'Roboto Mono', ui-monospace, monospace",
-          fontSize: '11px', color: hov ? '#cecece' : '#858585',
-          transition: 'color 0.2s, transform 0.2s',
-          transform: hov ? 'translateX(2px)' : 'none',
-        }}>
-          →
-        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <NumBadge n={idx + 1} />
+          {confidence && (
+            <span style={{
+              width: '6px', height: '6px', borderRadius: '50%',
+              background: confColor, display: 'inline-block', flexShrink: 0,
+              title: confidence,
+            }} />
+          )}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {relatedCount != null && relatedCount > 0 && (
+            <span style={{
+              fontFamily: C.fontMono, fontSize: '9px', color: C.ash,
+              letterSpacing: '0.04em',
+            }}>
+              {relatedCount}↗
+            </span>
+          )}
+          <span style={{
+            fontFamily: C.fontMono,
+            fontSize: '11px', color: hov ? '#cecece' : '#858585',
+            transition: 'color 0.2s, transform 0.2s',
+            transform: hov ? 'translateX(2px)' : 'none',
+          }}>
+            →
+          </span>
+        </div>
       </div>
 
       {/* Title */}

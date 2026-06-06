@@ -6,6 +6,9 @@
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
 # [Sync] 2026-05-27: ClaudeAgentRequestBody.tool_choice uses AliasChoices("tool_choice","toolChoice") so frontend camelCase is accepted.
 # [Sync] 2026-05-28: remove planning_mode field and prompt_optimizer integration (unrelated code).
+# [Sync] 2026-06-06: stop forwarding client memoryConfig into ClaudeAgentRunRequest;
+#                    Memory workspace config is resolved from the partition table
+#                    by the workspace file-interface initializer.
 
 import base64
 import logging
@@ -87,7 +90,6 @@ class ClaudeAgentRequestBody(BaseModel):
     attachments: List[ChatAttachment] = []
     editor_state: Optional[dict] = None
     system_prompt: Optional[str] = Field(default=None, validation_alias=AliasChoices("system_prompt", "systemPrompt"))
-    memory_config: Optional[dict] = Field(default=None, validation_alias=AliasChoices("memory_config", "memoryConfig"))
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id
@@ -221,7 +223,6 @@ async def claude_agent_stream(
         attachments=attachment_payloads or None,
         editor_state=body.editor_state,
         system_prompt=body.system_prompt or None,
-        memory_config=body.memory_config or None,
     )
 
     async def generate():

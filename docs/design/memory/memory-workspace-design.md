@@ -1,230 +1,294 @@
-> [Input] `backend/libs/claude_agent_kit/server/memory_workspace.py`, `backend/libs/claude_agent_kit/server/workspace.py`, `backend/claude_agent/service.py`
-> [Output] Define Memory Workspace design: initialization flow, file structure, per-partition configuration, and agent analysis flow.
-> [Pos] design-doc node in `docs/design/memory`
-> [Sync] 2026-06-05: initial implementation
+> [Input] `backend/libs/claude_agent_kit/server/memory_workspace.py`,
+>         `backend/routers/reflections.py`, `backend/reflections_config.py`,
+>         `frontend/src/api/voiceApi.ts`,
+>         `frontend/src/components/AnalysisView.tsx`
+> [Output] 定义 procedural Memory Workspace 设计：Reflections 分析场景的分区配置、初始化边界、完整时序与验证清单。
+> [Pos] memory-workspace-design-doc node in `docs/design/memory`
+> [Sync] 2026-06-06: 重写为 procedural-only Memory Workspace 设计，移除 `.claude/memory/` 运行时来源。
+>            新增两类使用场景（Voice 对话记忆 / Reflections 分析）、Reflections 三分区配置设计、
+>            分区初始化端点对比、Reflections 完整时序图、输出格式 Contract、
+>            Polanyi 默会知识分区设计原则、前端 AnalysisView 交互变更、更新代码归属与验证清单。
 
-# Memory 工作空间设计文档
+# Memory Workspace 设计
 
-## 1. 概述
+## 1. 定位
 
-Memory 工作空间（Memory Workspace）是每个 Claude Agent 会话中负责**记忆管理**的专用目录。它通过三类记忆机制（短期、长期、程序性），使 AI 助手能够在跨会话中保持对用户的深度理解。
+Memory Workspace 是每个 Claude Agent thread 工作空间下的 `/memory/` 目录。它落地的是 **procedural memory（程序性记忆）**：用流程文件、提示词资源和结构化状态文件来规定 Agent 如何做记忆检索、蒸馏、回答和更新。
 
-### 三类记忆
+短期记忆、长期记忆、程序性记忆仍是理解 Agent 记忆行为的三种概念视角，但本次实现只把程序性记忆落地为 `/memory/` 工作空间。
 
-| 类型 | 含义 | 存储位置 | 更新时机 |
-|------|------|----------|----------|
-| **短期记忆** | 当前会话窗口内的上下文 | 对话上下文（内存） | 实时 |
-| **长期记忆** | 超出短期窗口后的摘要信息 | `memory/long_term_memory.md` | 每轮对话后（可配置） |
-| **程序性记忆** | 按业务规则写入的结构化记忆 | `memory/procedural/` 目录 | 业务规则触发时 |
+| 概念 | 含义 | 本次是否落地为 `/memory/` |
+|---|---|---|
+| 短期记忆 | 当前模型上下文窗口中的即时信息 | 否 |
+| 长期记忆 | 跨会话可召回的用户历史、摘要或索引 | 否 |
+| 程序性记忆 | 指导"如何检索、蒸馏、回答、更新"的规则、提示词与状态 | 是 |
+
+Polanyi 的默会知识提醒适用于这里：显性规则可以规定流程，但不能穷尽所有判断。Agent 在"是否值得检索""是否值得更新""何时保持沉默""旧记忆是否仍可信"等场景中，需要保留工程实践中的边界感和比例感。因此，系统不把每轮对话强制转成 summary，也不把 `/memory/` 当作对话窗口缓存或长期摘要桶。
 
 ---
 
-## 2. 目录结构
+## 2. 使用场景
 
-```
+Memory Workspace 当前用于一个功能：**Reflections 页面分区分析**。
+
+| 场景 | 触发方 | 配置来源 | 初始化端点 | thread 生命周期 |
+|---|---|---|---|---|
+| **Reflections 分析** | Reflections 页面分区按钮 | `reflections_config.py`（静态代码） | `POST /api/reflections/memory-init` | 一次性（每次新建） |
+
+---
+
+## 3. 目标目录结构
+
+```text
 {AGENT_CWD}/{thread_id}/
-├── memory/                            ← Memory 工作空间根目录
-│   ├── WORKFLOW.md                    ← 记忆工作流程决策树
-│   ├── MEMORY_QUERY_PROMPT.md         ← 7 大类记忆检索提示词
-│   ├── MEMORY_Distiller_PROMPT.md     ← 记忆蒸馏专业提示词
-│   ├── MEMORY_ANSWER_PROMPT.md        ← 基于记忆的回答提示词
-│   ├── DEFAULT_UPDATE_MEMORY_PROMPT.md ← 记忆更新规则（4 种操作）
-│   ├── long_term_memory.md            ← 长期记忆存储（运行时生成）
-│   └── procedural/                    ← 程序性记忆目录（运行时生成）
-│       ├── user_preferences.json      ← 用户偏好
-│       ├── important_events.json      ← 重要事件记录
-│       └── timeline.json              ← 会话时间线
-├── files/                             ← 用户文件区
-├── logs/                              ← 执行日志区
-├── skills/                            ← Skills 区
-├── .claude/                           ← Claude 配置
-├── .editor/                           ← EditorState 虚拟索引
-└── .mcp.json                          ← MCP 配置
+├── memory/
+│   ├── WORKFLOW.md
+│   ├── MEMORY_QUERY_PROMPT.md
+│   ├── MEMORY_Distiller_PROMPT.md
+│   ├── MEMORY_ANSWER_PROMPT.md
+│   ├── DEFAULT_UPDATE_MEMORY_PROMPT.md
+│   └── procedural/
+│       └── analysis_state.json
+├── files/
+├── logs/
+├── skills/
+├── .claude/
+└── .editor/
+```
+
+五个 Markdown 文件是核心程序性资源：
+
+| 文件 | 职责（Reflections 分析场景） |
+|---|---|
+| `WORKFLOW.md` | 分区专属分析工作流决策树 |
+| `MEMORY_QUERY_PROMPT.md` | 该分区应寻找的信号类型 |
+| `MEMORY_Distiller_PROMPT.md` | 从信号到结构化洞察的提取规则 |
+| `MEMORY_ANSWER_PROMPT.md` | JSON array 输出规范 |
+| `DEFAULT_UPDATE_MEMORY_PROMPT.md` | 状态更新规则（ADD/NO_CHANGE） |
+
+---
+
+## 4. 模板来源
+
+配置存储于 `backend/reflections_config.py`（静态代码），三个分区各自独立：
+
+| 分区 Key | 显示名（EN） | 显示名（ZH） | 分析目标 |
+|---|---|---|---|
+| `echoes` | Recurring Themes | 回响 | 发现跨会话反复出现的情感主题与思想回响 |
+| `traits` | Character Traits | 性格特质 | 从行为与语言中推断稳定的性格倾向 |
+| `patterns` | Behavioral Patterns | 行为模式 | 识别写作、生活节奏与应对方式的规律 |
+
+每个分区的 `WORKFLOW.md` 末尾包含 **Tacit Boundary** 节，明确说明显性规则在哪里止步、Agent 的实践判断从哪里接管（Polanyi 原则）。
+
+---
+
+## 5. 初始化边界
+
+`POST /api/claude-agent/threads` 只创建 DB chat thread，不初始化 Memory。
+
+Memory 初始化端点（仅 Reflections 场景使用）：
+
+```
+POST /api/reflections/memory-init
+body: { "threadId": "<thread_id>", "section": "echoes" | "traits" | "patterns" }
+```
+
+执行步骤：
+
+1. 验证当前用户身份
+2. 验证 section 为合法值
+3. 通过 `chat_thread` 验证 thread 归属
+4. 从 `reflections_config.REFLECTIONS_SECTION_CONFIGS[section]` 读取分区配置
+5. 创建 `{AGENT_CWD}/{thread_id}/memory/`
+6. 写入五个核心提示词文件（分区专属内容）
+7. 创建 `memory/procedural/analysis_state.json` 状态文件
+
+---
+
+## 6. claude-agent 引擎与 Memory Workspace 的关系
+
+引擎层（`backend/claude_agent/`）对 Memory Workspace 的处理方式是：**发现即注入，不发现即忽略**。
+
+- `context_builder.py` 的 `build_user_message()` 检测 `cwd/memory/` 是否存在：
+  - 存在 → 注入 `<memory_context>` 块（包含 workspace 路径、文件列表）
+  - 不存在 → 跳过，分析正常继续
+- 引擎系统提示（`_SYSTEM_PROMPT_TEMPLATE`）**不嵌入**记忆操作指令——那是 `memory/WORKFLOW.md` 的职责
+- `service.py` 的 `assemble_context()` 不调用 `init_memory_workspace()`
+
+这一设计保证引擎对记忆语义透明：无论是 Voice 对话还是 Reflections 分析，Agent 都通过阅读 `WORKFLOW.md` 来了解当前会话的记忆规则，而非从系统提示中获取硬编码指令。
+
+---
+
+## 7. Reflections 分析流程
+
+用户点击某分区的「分析」按钮后，完整流程如下：
+
+```
+用户点击分区「分析」按钮
+        │
+        ▼
+1. POST /api/claude-agent/threads
+   → 获得 thread_id（一次性会话，分析完成后不再复用）
+        │
+        ▼
+2. POST /api/reflections/memory-init
+   body: { threadId, section: "echoes" | "traits" | "patterns" }
+   → 后端从 reflections_config 读取分区 5 个文件
+   → 写入 {AGENT_CWD}/{thread_id}/memory/
+   → 返回 { initialised: true, section, memoryPath }
+        │
+        ▼
+3. POST /api/claude-agent (SSE)
+   body:
+   - id: thread_id
+   - message: <sessions_context>[session-id] date title labels</sessions_context>
+              + 指令：读 memory/WORKFLOW.md，输出 JSON only
+   - tool_choice: "auto"   ← 允许 Agent 使用文件读取工具
+   - max_turns: 5          ← 允许多轮（读文件 → 分析 → 输出）
+        │
+        ▼
+4. claude-agent 引擎执行（多轮）
+   a. 读取 memory/WORKFLOW.md          → 了解分区分析工作流
+   b. 读取 memory/MEMORY_QUERY_PROMPT.md  → 了解信号类型
+   c. 读取 memory/MEMORY_Distiller_PROMPT.md → 了解提取规则
+   d. 输出结构化 JSON array
+        │
+        ▼
+5. 前端 drain SSE stream 直到 finish 事件
+   → text-delta 仅用于 UI 进度展示，不累积为解析来源
+   → 原因：SSE 混合输出 reasoning（思维链）和 text，直接拼接会污染 JSON
+        │
+        ▼
+5.5 GET /api/claude-agent/threads/{thread_id}/messages
+   → 取最后一条 assistant 消息
+   → 过滤 parts：只保留 type="text"，跳过 type="reasoning"
+   → 拼接 text parts → 干净的 JSON 字符串
+        │
+        ▼
+6. POST /api/reports
+   body: { report_type: "reflections_echoes", report_data: results }
+        │
+        ▼
+7. AnalysisView 对应分区展示多个卡片
+   每张卡片：title / description / confidence / relatedCount
+   点击卡片 → 关联笔记视图（related_session_ids 精确匹配）
+```
+
+```mermaid
+sequenceDiagram
+    participant FE as Frontend (AnalysisView)
+    participant ThreadAPI as "/api/claude-agent/threads"
+    participant MemInitAPI as "/api/reflections/memory-init"
+    participant ReflCfg as "reflections_config.py"
+    participant Workspace as "thread workspace"
+    participant AgentAPI as "/api/claude-agent (SSE)"
+
+    FE->>ThreadAPI: POST (create disposable thread)
+    ThreadAPI-->>FE: {thread_id}
+    FE->>MemInitAPI: POST {threadId, section: "echoes"}
+    MemInitAPI->>ReflCfg: get_section_config("echoes")
+    ReflCfg-->>MemInitAPI: 5 prompt files
+    MemInitAPI->>Workspace: write memory/WORKFLOW.md + 4 files
+    MemInitAPI-->>FE: {initialised: true}
+    FE->>AgentAPI: POST {id: thread_id, tool_choice: "auto", max_turns: 5}
+    AgentAPI->>Workspace: inject <memory_context>
+    AgentAPI->>Workspace: agent reads WORKFLOW.md (tool call)
+    AgentAPI->>Workspace: agent reads MEMORY_QUERY_PROMPT.md (tool call)
+    AgentAPI-->>FE: SSE stream (text-delta for UI progress + finish event)
+    FE->>FE: drain SSE until finish (onDelta → UI only, not for parsing)
+    FE->>AgentAPI: GET /api/claude-agent/threads/{thread_id}/messages
+    AgentAPI-->>FE: messages [{role:"assistant", parts:[{type:"reasoning",...},{type:"text",...}]}]
+    FE->>FE: filter parts type="text", skip reasoning → clean JSON string
+    FE->>FE: parse → ReflectionResult[]
+    FE->>FE: POST /api/reports (save)
+    FE->>FE: render section cards
 ```
 
 ---
 
-## 3. 智能体如何创建 Memory 工作空间资源文件
+## 9. 输出格式 Contract（Reflections 场景）
 
-### 3.1 初始化流程
-
-当分析会话通过 `thread_id` 启动时，系统自动执行以下步骤：
-
-```
-POST /api/claude-agent/threads
-  → build_session_id(request)              # 使用 thread_id 作为 session_id
-  → get_or_create_workspace(session_id)    # 创建/恢复工作空间
-      → init_workspace(session_id)
-          → 创建标准子目录 (files/, logs/, skills/)
-          → 同步 .claude/ 模板
-          → 初始化 .editor/ 虚拟索引
-          → [NEW] init_memory_workspace()  # 初始化 Memory 工作空间
-              → 创建 memory/ 目录
-              → 从 .claude/memory/ 复制提示词模板文件
-              → 上传已存储的程序性记忆文件（若存在）
-```
-
-### 3.2 提示词模板文件来源
-
-模板文件从项目根目录 `.claude/memory/` 复制到工作空间：
-
-```
-项目根: .claude/memory/WORKFLOW.md
-           ↓ 复制（每次 init 刷新）
-工作空间: {session_id}/memory/WORKFLOW.md
-```
-
-与 `.claude/` 同步逻辑相同：每次 `init_workspace` 刷新模板内容，但**不覆盖**运行时生成的 `long_term_memory.md` 和 `procedural/` 文件。
-
-### 3.3 程序性记忆上传
-
-分析开始时，通过 `thread_id` 从持久化存储中加载已存储的程序性记忆：
-
-```python
-# memory_workspace.py — init_memory_workspace()
-def init_memory_workspace(workspace: Path, thread_id: str, user_id: int) -> None:
-    memory_dir = workspace / "memory"
-    memory_dir.mkdir(exist_ok=True)
-
-    # 1. 复制提示词模板（从 .claude/memory/）
-    _sync_memory_templates(memory_dir)
-
-    # 2. 上传已存储的程序性记忆（从 DB 或文件存储）
-    _restore_procedural_memories(memory_dir, thread_id, user_id)
-```
-
----
-
-## 4. 每个分区的提示词配置 Memory 工作空间
-
-### 4.1 设计原则
-
-每个 **Voice（声音分区）** 可以通过 `memory_workspace_config` JSON 字段，自定义该分区的记忆工作空间行为：
-
-- 覆盖默认的 `MEMORY_QUERY_PROMPT.md` 内容（针对特定业务场景的记忆检索规则）
-- 覆盖默认的 `DEFAULT_UPDATE_MEMORY_PROMPT.md` 内容（定义哪些信息值得记录）
-- 指定启用的记忆类型（短期/长期/程序性）
-- 自定义程序性记忆 schema
-
-### 4.2 Voice memory_workspace_config Schema
+Agent 输出纯 JSON array，每个元素：
 
 ```json
 {
-  "enabled": true,
-  "memory_types": ["short_term", "long_term", "procedural"],
-  "query_prompt_override": null,
-  "update_prompt_override": null,
-  "distiller_prompt_override": null,
-  "answer_prompt_override": null,
-  "procedural_schema": {
-    "user_preferences": true,
-    "important_events": true,
-    "timeline": true,
-    "custom_fields": {}
-  }
+  "title": "3-6 词的简洁名称",
+  "description": "2-4 句描述，诚实捕捉发现",
+  "related_session_ids": ["session-id-1", "session-id-2"],
+  "evidence": "来自笔记的直接引用或 paraphrase",
+  "confidence": "high | medium | low"
 }
 ```
 
-### 4.3 配置注入流程
+**字段约束**：
 
-```
-Voice.memory_workspace_config
-  ↓ (via ClaudeAgentRunRequest.memory_config)
-  ↓
-service.assemble_context()
-  ↓
-_init_memory_workspace_with_config()
-  → 若 config.query_prompt_override 存在，写入 memory/MEMORY_QUERY_PROMPT.md
-  → 若 config.update_prompt_override 存在，写入 memory/DEFAULT_UPDATE_MEMORY_PROMPT.md
-  → 其余 prompt 文件使用默认模板
-```
-
-### 4.4 数据库字段
-
-在 `voices` 表新增迁移列：
-
-```sql
-ALTER TABLE voices ADD COLUMN memory_workspace_config TEXT;
--- 存储 JSON，NULL 表示使用默认配置
-```
+- `related_session_ids`：只引用 sessions_context 中真实存在的 ID，前缀格式为 `[session-id]`
+- `confidence: "low"` 不是错误，是诚实表达；比强制高置信更有价值（Polanyi 原则）
+- `evidence`：无确切引用时留空字符串，不捏造
 
 ---
 
-## 5. Claude Agent 分析流程
+## 10. Reflections 分区配置设计原则（Polanyi）
 
-### 5.1 整体流程图
+每个分区的 WORKFLOW.md 必须满足两个条件：
 
-```
-用户发起分析请求
-  ↓
-Phase 1: 上下文组装 (assemble_context)
-  ├── 构建 system_prompt（含 Memory 工作流程注入）
-  ├── 初始化 Memory 工作空间（init_memory_workspace）
-  │   ├── 复制 memory/ 提示词模板
-  │   ├── 应用 Voice memory_workspace_config 覆盖
-  │   └── 恢复程序性记忆文件
-  └── 构建 user_message（含 <memory_context> 块）
-  ↓
-Phase 3: 执行分析 (execute_session)
-  ├── Agent 读取 memory/WORKFLOW.md 了解工作流程
-  ├── Agent 读取 memory/MEMORY_QUERY_PROMPT.md 执行记忆检索
-  ├── Agent 读取 memory/long_term_memory.md（若存在）
-  ├── Agent 读取 memory/procedural/*.json（若相关）
-  ├── Agent 生成回应（参考记忆内容）
-  └── Agent 更新记忆（根据 DEFAULT_UPDATE_MEMORY_PROMPT.md 决定）
-  ↓
-分析结束 → 持久化记忆（可选：将 procedural/ 写回 DB）
-```
+1. **提供明确的显性框架**：告诉 Agent 寻找什么信号、如何结构化输出
+2. **留出默会判断空间**：通过 Tacit Boundary 节明确说明规则的边界
 
-### 5.2 System Prompt 中的 Memory 工作流程注入
+Tacit Boundary 示例（echoes 分区）：
+> 只出现 2 次的强烈模式可能比出现 10 次的弱信号更重要。规则提供脚手架，不提供机械替代。Agent 的实践边界感在这里负责填补规则未能覆盖的部分。
 
-在 `context_builder.py` 的 `_SYSTEM_PROMPT_TEMPLATE` 中新增 Memory 工作流程章节：
+三个分区的信号类型各有侧重：
 
-```
-## Memory Workflow
-
-The memory/ directory in your workspace contains memory management rules.
-When starting a session:
-1. Read memory/WORKFLOW.md for the memory decision tree
-2. Read memory/MEMORY_QUERY_PROMPT.md to retrieve relevant memories
-3. Use retrieved memories to personalize your responses
-4. After significant exchanges, update memories per DEFAULT_UPDATE_MEMORY_PROMPT.md
-```
-
-### 5.3 <memory_context> 用户消息块
-
-在 `build_user_message` 中，当 `memory/long_term_memory.md` 存在时，注入：
-
-```xml
-<memory_context>
-Memory workspace: {cwd}/memory/
-Long-term memory summary available: yes
-Procedural memory files: user_preferences.json, important_events.json
-Read memory/long_term_memory.md for conversation history summary.
-Read memory/WORKFLOW.md for memory management instructions.
-</memory_context>
-```
+| 分区 | 信号侧重 | Tacit Boundary 关注点 |
+|---|---|---|
+| `echoes` | 情感共鸣与思想回响 | 频率不等于重要性 |
+| `traits` | 行为中推断的稳定倾向 | 矛盾特质比单一特质更真实 |
+| `patterns` | 时间与条件规律 | 不规律本身也是信息 |
 
 ---
 
-## 6. 安全与隐私
+## 11. 前端 AnalysisView 设计
 
-- Memory 文件存储在工作空间内，受路径遍历防护（`resolve_safe_path`）
-- 程序性记忆文件不包含完整的对话记录，仅存储结构化摘要
-- 用户可通过对话指令要求删除特定记忆（DELETE 操作）
-- `memory/procedural/` 目录下的 JSON 文件有预定义 schema，防止随意注入
+### 11.1 交互对比
+
+| 改变前 | 改变后 |
+|---|---|
+| 一个「生成全部」按钮同时触发三个分区 | 每个分区独立的「分析 / Re-analyze」按钮 |
+| 全页 spinner，所有分区阻塞 | 各分区独立 loading 状态，可并发 |
+| 关联笔记由标签关键词匹配 | 优先 `related_session_ids` 精确匹配，关键词作为兜底 |
+| 无流式进度显示 | 分区内实时展示 SSE 流输出片段（光标 `▌` 指示工作中） |
+
+### 11.2 卡片字段
+
+每张分析卡片展示：
+
+- `confidence` 颜色指示点：绿（high）/ 琥珀（medium）/ 灰（low）
+- 关联笔记数量徽章（`related_session_ids.length`，来自 agent 精确引用）
+- Detail panel：`evidence` 直接引用块 + confidence badge
 
 ---
 
-## 7. 改动影响范围
+## 12. 代码归属
 
-| 文件 | 内容 |
-|------|------|
-| `backend/libs/claude_agent_kit/server/memory_workspace.py` | 核心 Memory 工作空间初始化和管理 |
-| `backend/libs/claude_agent_kit/server/workspace.py` | 在 `init_workspace` 中调用 `init_memory_workspace` |
-| `backend/database.py` | 迁移：`voices` 表新增 `memory_workspace_config` 列 |
-| `backend/routers/voices.py` | API：expose `memory_workspace_config` 字段 |
-| `backend/claude_agent/context_builder.py` | 注入 Memory 工作流程到 system prompt |
-| `backend/claude_agent/service.py` | 在 `assemble_context` 中应用 memory_workspace_config |
-| `.claude/memory/` | Memory 提示词模板文件目录 |
-| `docs/design/memory/` | 本设计文档目录 |
+| 区域 | 归属文件 |
+|---|---|
+| Reflections 三分区 procedural memory 配置 | `backend/reflections_config.py` |
+| Reflections Memory 初始化 endpoint | `backend/routers/reflections.py` |
+| Reflections 分析调用 + drain SSE + 取 messages + 解析 + 存储 | `frontend/src/api/voiceApi.ts` (`analyzeReflectionsSection`) |
+| Reflections 分析结果展示 | `frontend/src/components/AnalysisView.tsx` |
+| Agent 消费 `<memory_context>`（引擎层，无改动） | `backend/claude_agent/context_builder.py` |
+
+---
+
+## 13. 验证清单
+
+- [ ] `init_workspace()` 不创建 `/memory/`
+- [ ] `/api/claude-agent/threads` 不创建 `/memory/`
+- [ ] 引擎系统提示不包含记忆操作指令（`context_builder.py` 中已移除）
+- [ ] `/api/reflections/memory-init` 能从 `reflections_config.py` 按分区写入 5 个文件
+- [ ] 三个分区各自写入独立的 `WORKFLOW.md` 内容
+- [ ] Agent SSE 调用时 `tool_choice: "auto"`，允许读取 `WORKFLOW.md`
+- [ ] 前端 drain SSE → GET messages API → 过滤 text parts（跳过 reasoning）
+- [ ] `related_session_ids` 只引用 sessions_context 中真实存在的 session ID
+- [ ] 前端各分区独立 loading 状态，互不阻塞

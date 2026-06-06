@@ -1,18 +1,15 @@
-# [Input] Consume init_memory_workspace, apply_memory_config, get_memory_context_block,
-#         _sync_memory_templates, MEMORY_PROMPT_FILES from
-#         libs/claude_agent_kit/server/memory_workspace.py.
-# [Output] Validate memory workspace initialisation, template source rules,
-#          procedural-only starter files, context block labelling, and the
-#          no-filesystem-fallback contract for the four configurable prompts.
+# [Input] Consume memory_workspace.py and claude-agent routes.
+# [Output] Validate procedural Memory workspace source rules and initialization boundary.
 # [Pos] test node in backend/tests
-# [Sync] 2026-06-05: initial implementation — covers design fixes:
-#         (1) configurable template files sourced exclusively from partition config,
-#         (2) WORKFLOW.md still sourced from .claude/memory/ filesystem,
-#         (3) memory workspace labelled as "procedural" memory type.
+# [Sync] 2026-06-06: cover partition-config prompt sources, no .claude/memory fallback,
+#                    no implicit thread initialization.
+# [Sync] 2026-06-06: remove tests for POST /api/workspace/memory-init
+#                    (Voice scenario memory init endpoint deleted).
 
-"""Regression tests for libs/claude_agent_kit/server/memory_workspace.py."""
+"""Regression tests for procedural Memory workspace initialization."""
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import sys
@@ -30,29 +27,42 @@ from libs.claude_agent_kit.server.memory_workspace import (
     MEMORY_PROMPT_FILES,
     PROCEDURAL_MEMORY_FILES,
     _CONFIG_KEY_TO_FILE,
-    _FILE_TO_CONFIG_KEY,
     apply_memory_config,
     get_memory_context_block,
+    get_memory_prompt_files,
     init_memory_workspace,
 )
 
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
-
-
 def _make_workspace(tmp_dir: str) -> Path:
     """Create a minimal workspace directory and patch AGENT_CWD."""
+
     ws = Path(tmp_dir) / "test-session"
     ws.mkdir()
     os.environ["AGENT_CWD"] = tmp_dir
     return ws
 
 
-# ---------------------------------------------------------------------------
-# init_memory_workspace — basic structure
-# ---------------------------------------------------------------------------
+def _prompt_file_config(prefix: str = "CONFIG") -> dict:
+    return {
+        "enabled": True,
+        "workspace_type": "procedural",
+        "prompt_files": {
+            filename: f"{prefix}:{filename}"
+            for filename in MEMORY_PROMPT_FILES
+        },
+    }
+
+
+def _run(coro):
+    """Run a coroutine without leaking a process-global event loop."""
+
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 class TestInitMemoryWorkspaceStructure(unittest.TestCase):
@@ -65,27 +75,28 @@ class TestInitMemoryWorkspaceStructure(unittest.TestCase):
         self._tmp.cleanup()
 
     def test_memory_dir_created(self):
-        memory_dir = init_memory_workspace(self._ws)
+        memory_dir = init_memory_workspace(self._ws, _prompt_file_config())
         self.assertTrue(memory_dir.is_dir())
         self.assertEqual(memory_dir.name, "memory")
 
+    def test_core_prompt_files_created_from_partition_config(self):
+        init_memory_workspace(self._ws, _prompt_file_config())
+        for filename in MEMORY_PROMPT_FILES:
+            content = (self._ws / "memory" / filename).read_text(encoding="utf-8")
+            self.assertEqual(content.strip(), f"CONFIG:{filename}")
+
     def test_procedural_subdir_created(self):
-        init_memory_workspace(self._ws)
+        init_memory_workspace(self._ws, _prompt_file_config())
         self.assertTrue((self._ws / "memory" / "procedural").is_dir())
 
-    def test_long_term_memory_created(self):
-        init_memory_workspace(self._ws)
-        ltm = self._ws / "memory" / "long_term_memory.md"
-        self.assertTrue(ltm.is_file())
-
     def test_procedural_starter_files_created(self):
-        init_memory_workspace(self._ws)
+        init_memory_workspace(self._ws, _prompt_file_config())
         proc_dir = self._ws / "memory" / "procedural"
         for fname in PROCEDURAL_MEMORY_FILES:
             self.assertTrue((proc_dir / fname).is_file(), f"Missing {fname}")
 
     def test_procedural_json_files_are_valid_json(self):
-        init_memory_workspace(self._ws)
+        init_memory_workspace(self._ws, _prompt_file_config())
         proc_dir = self._ws / "memory" / "procedural"
         for fname in PROCEDURAL_MEMORY_FILES:
             content = (proc_dir / fname).read_text(encoding="utf-8")
@@ -94,34 +105,28 @@ class TestInitMemoryWorkspaceStructure(unittest.TestCase):
             except json.JSONDecodeError:
                 self.fail(f"{fname} is not valid JSON")
 
-    def test_idempotent_on_repeat_calls(self):
-        init_memory_workspace(self._ws)
-        ltm = self._ws / "memory" / "long_term_memory.md"
-        ltm.write_text("custom content", encoding="utf-8")
-        init_memory_workspace(self._ws)
-        # Existing runtime file must NOT be overwritten.
-        self.assertEqual(ltm.read_text(encoding="utf-8"), "custom content")
+    def test_long_term_summary_file_not_created(self):
+        init_memory_workspace(self._ws, _prompt_file_config())
+        self.assertFalse((self._ws / "memory" / "long_term_memory.md").exists())
 
-    def test_returns_memory_path(self):
-        memory_dir = init_memory_workspace(self._ws)
-        self.assertEqual(memory_dir, self._ws / "memory")
-
-
-# ---------------------------------------------------------------------------
-# Template source rules — configurable files from partition config only
-# ---------------------------------------------------------------------------
+    def test_idempotent_on_repeat_calls_preserves_state_files(self):
+        init_memory_workspace(self._ws, _prompt_file_config())
+        prefs = self._ws / "memory" / "procedural" / "user_preferences.json"
+        prefs.write_text('{"custom": true}', encoding="utf-8")
+        init_memory_workspace(self._ws, _prompt_file_config("UPDATED"))
+        self.assertEqual(prefs.read_text(encoding="utf-8"), '{"custom": true}')
+        self.assertEqual(
+            (self._ws / "memory" / "WORKFLOW.md").read_text(encoding="utf-8").strip(),
+            "UPDATED:WORKFLOW.md",
+        )
 
 
 class TestTemplateSources(unittest.TestCase):
-    """Verify template source contract:
-    - WORKFLOW.md: always from .claude/memory/ filesystem.
-    - 4 configurable files: partition config ONLY; no filesystem fallback.
-    """
+    """Verify all core templates are partition-config only."""
 
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._ws = _make_workspace(self._tmp.name)
-        # Create a fake project .claude/memory/ with all 5 files.
         self._fake_project_root = Path(self._tmp.name) / "project"
         fake_memory = self._fake_project_root / ".claude" / "memory"
         fake_memory.mkdir(parents=True)
@@ -134,133 +139,68 @@ class TestTemplateSources(unittest.TestCase):
         os.environ.pop("AGENT_CWD", None)
         self._tmp.cleanup()
 
-    def _init_with_config(self, memory_config=None):
-        with unittest.mock.patch(
-            "libs.claude_agent_kit.server.memory_workspace._project_root",
-            return_value=self._fake_project_root,
-        ):
-            return init_memory_workspace(self._ws, memory_config)
-
-    # --- WORKFLOW.md always from filesystem ---
-
-    def test_workflow_md_from_filesystem_when_no_config(self):
-        self._init_with_config(None)
-        content = (self._ws / "memory" / "WORKFLOW.md").read_text(encoding="utf-8")
-        self.assertEqual(content.strip(), "FILESYSTEM:WORKFLOW.md")
-
-    def test_workflow_md_from_filesystem_even_with_config(self):
-        # Partition config has no key for WORKFLOW.md — it is always filesystem.
-        config = {
-            "query_prompt_override": "CONFIG:MEMORY_QUERY_PROMPT.md",
-        }
-        self._init_with_config(config)
-        content = (self._ws / "memory" / "WORKFLOW.md").read_text(encoding="utf-8")
-        self.assertEqual(content.strip(), "FILESYSTEM:WORKFLOW.md")
-
-    # --- Configurable files: partition config only; no fallback ---
-
-    def test_configurable_files_written_from_partition_config(self):
-        config = {
-            "query_prompt_override": "CONFIG:query",
-            "distiller_prompt_override": "CONFIG:distiller",
-            "answer_prompt_override": "CONFIG:answer",
-            "update_prompt_override": "CONFIG:update",
-        }
-        self._init_with_config(config)
-        for config_key, filename in _CONFIG_KEY_TO_FILE.items():
-            content = (self._ws / "memory" / filename).read_text(encoding="utf-8")
-            expected = f"CONFIG:{config_key.split('_')[0]}"
-            self.assertIn("CONFIG:", content, f"{filename} should come from partition config")
-
-    def test_configurable_files_NOT_written_when_absent_from_config(self):
-        """When a configurable file is missing from partition config it must NOT
-        be sourced from the filesystem (no fallback)."""
-        self._init_with_config({})  # empty config — no override keys present
-        for config_key, filename in _CONFIG_KEY_TO_FILE.items():
-            dest = self._ws / "memory" / filename
+    def test_filesystem_templates_are_never_used(self):
+        init_memory_workspace(self._ws, {})
+        for filename in MEMORY_PROMPT_FILES:
             self.assertFalse(
-                dest.exists(),
-                f"{filename} should NOT be written when not in partition config",
+                (self._ws / "memory" / filename).exists(),
+                f"{filename} must not be copied from .claude/memory/",
             )
 
-    def test_configurable_files_NOT_written_when_config_is_none(self):
-        """When memory_config is None, only WORKFLOW.md is written."""
-        self._init_with_config(None)
-        for config_key, filename in _CONFIG_KEY_TO_FILE.items():
-            dest = self._ws / "memory" / filename
-            self.assertFalse(
-                dest.exists(),
-                f"{filename} should NOT be written when memory_config is None",
-            )
-
-    def test_partial_config_writes_only_present_keys(self):
-        """Only keys actually present in the config are written."""
-        config = {"query_prompt_override": "CONFIG:query_only"}
-        self._init_with_config(config)
-        # query should be written
-        self.assertTrue((self._ws / "memory" / "MEMORY_QUERY_PROMPT.md").is_file())
-        # others should NOT be written
-        for config_key, filename in _CONFIG_KEY_TO_FILE.items():
-            if config_key == "query_prompt_override":
+    def test_partial_prompt_files_config_writes_only_present_files(self):
+        config = {"prompt_files": {"WORKFLOW.md": "CONFIG:workflow"}}
+        init_memory_workspace(self._ws, config)
+        self.assertEqual(
+            (self._ws / "memory" / "WORKFLOW.md").read_text(encoding="utf-8").strip(),
+            "CONFIG:workflow",
+        )
+        for filename in MEMORY_PROMPT_FILES:
+            if filename == "WORKFLOW.md":
                 continue
-            dest = self._ws / "memory" / filename
-            self.assertFalse(
-                dest.exists(),
-                f"{filename} should NOT be written when its key is absent from config",
-            )
+            self.assertFalse((self._ws / "memory" / filename).exists())
 
-    def test_filesystem_fallback_never_used_for_configurable_files(self):
-        """Even when filesystem templates exist, configurable files must not use them."""
-        # All 5 filesystem templates exist (set up in setUp).
-        # Config has no override keys — configurable files must remain absent.
-        self._init_with_config({})
-        for config_key, filename in _CONFIG_KEY_TO_FILE.items():
-            dest = self._ws / "memory" / filename
-            self.assertFalse(
-                dest.exists(),
-                f"{filename}: filesystem must NOT be used as fallback; file should be absent",
-            )
-
-
-# ---------------------------------------------------------------------------
-# apply_memory_config
-# ---------------------------------------------------------------------------
+    def test_legacy_override_keys_still_supported_for_migration(self):
+        config = {
+            "workflow_prompt_override": "LEGACY:workflow",
+            "query_prompt_override": "LEGACY:query",
+            "distiller_prompt_override": "LEGACY:distiller",
+            "answer_prompt_override": "LEGACY:answer",
+            "update_prompt_override": "LEGACY:update",
+        }
+        prompt_files = get_memory_prompt_files(config)
+        self.assertEqual(set(prompt_files), set(MEMORY_PROMPT_FILES))
+        init_memory_workspace(self._ws, config)
+        self.assertEqual(
+            (self._ws / "memory" / "WORKFLOW.md").read_text(encoding="utf-8").strip(),
+            "LEGACY:workflow",
+        )
 
 
 class TestApplyMemoryConfig(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self._ws = _make_workspace(self._tmp.name)
-        memory_dir = self._ws / "memory"
-        memory_dir.mkdir()
+        (self._ws / "memory").mkdir()
 
     def tearDown(self):
         os.environ.pop("AGENT_CWD", None)
         self._tmp.cleanup()
 
-    def test_applies_override_keys(self):
-        config = {"query_prompt_override": "OVERRIDE:query"}
+    def test_applies_prompt_files(self):
+        apply_memory_config(self._ws, _prompt_file_config("OVERRIDE"))
+        for filename in MEMORY_PROMPT_FILES:
+            content = (self._ws / "memory" / filename).read_text(encoding="utf-8")
+            self.assertEqual(content.strip(), f"OVERRIDE:{filename}")
+
+    def test_applies_canonical_keys(self):
+        config = {key: f"CANONICAL:{filename}" for key, filename in _CONFIG_KEY_TO_FILE.items()}
         apply_memory_config(self._ws, config)
-        content = (self._ws / "memory" / "MEMORY_QUERY_PROMPT.md").read_text(encoding="utf-8")
-        self.assertIn("OVERRIDE:query", content)
+        for filename in MEMORY_PROMPT_FILES:
+            content = (self._ws / "memory" / filename).read_text(encoding="utf-8")
+            self.assertEqual(content.strip(), f"CANONICAL:{filename}")
 
     def test_noop_when_config_is_none(self):
-        apply_memory_config(self._ws, None)  # must not raise
-
-    def test_noop_when_config_is_empty(self):
-        apply_memory_config(self._ws, {})  # must not raise
-
-    def test_workflow_md_is_never_overridden(self):
-        """WORKFLOW.md must remain absent (or unchanged) after apply_memory_config."""
-        config = {"query_prompt_override": "OVERRIDE:query"}
-        apply_memory_config(self._ws, config)
-        # WORKFLOW.md was never created — it should still not exist.
-        self.assertFalse((self._ws / "memory" / "WORKFLOW.md").is_file())
-
-
-# ---------------------------------------------------------------------------
-# get_memory_context_block — procedural memory type label
-# ---------------------------------------------------------------------------
+        apply_memory_config(self._ws, None)
 
 
 class TestGetMemoryContextBlock(unittest.TestCase):
@@ -276,40 +216,20 @@ class TestGetMemoryContextBlock(unittest.TestCase):
         block = get_memory_context_block(self._ws)
         self.assertEqual(block, "")
 
-    def test_contains_procedural_type_label(self):
-        init_memory_workspace(self._ws)
+    def test_contains_procedural_only_label(self):
+        init_memory_workspace(self._ws, _prompt_file_config())
         block = get_memory_context_block(self._ws)
-        self.assertIn("procedural", block.lower())
+        self.assertIn("procedural only", block.lower())
+        self.assertNotIn("long_term_memory.md", block)
 
-    def test_contains_memory_context_tags(self):
-        init_memory_workspace(self._ws)
+    def test_mentions_prompt_and_state_files(self):
+        init_memory_workspace(self._ws, _prompt_file_config())
         block = get_memory_context_block(self._ws)
-        self.assertIn("<memory_context>", block)
-        self.assertIn("</memory_context>", block)
-
-    def test_mentions_long_term_memory_when_present(self):
-        init_memory_workspace(self._ws)
-        block = get_memory_context_block(self._ws)
-        self.assertIn("long_term_memory.md", block)
-
-    def test_mentions_procedural_files_when_present(self):
-        init_memory_workspace(self._ws)
-        block = get_memory_context_block(self._ws)
-        self.assertIn("procedural", block)
-
-
-# ---------------------------------------------------------------------------
-# workspace.py — memory/ NOT created by init_workspace
-# ---------------------------------------------------------------------------
+        self.assertIn("WORKFLOW.md", block)
+        self.assertIn("Procedural state files", block)
 
 
 class TestInitWorkspaceDoesNotCreateMemoryDir(unittest.TestCase):
-    """Verify that init_workspace no longer auto-creates the memory/ directory.
-
-    memory/ is now initialised by the agent service (assemble_context) or
-    explicitly via POST /api/workspace/memory-init.
-    """
-
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         os.environ["AGENT_CWD"] = self._tmp.name
@@ -320,12 +240,34 @@ class TestInitWorkspaceDoesNotCreateMemoryDir(unittest.TestCase):
 
     def test_memory_dir_not_created_by_init_workspace(self):
         from libs.claude_agent_kit.server.workspace import init_workspace
+
         ws = init_workspace("no-memory-auto-init")
         self.assertFalse(
             (ws / "memory").exists(),
-            "memory/ must NOT be created by init_workspace; "
-            "it requires a partition config and must be initialised separately",
+            "memory/ must be initialized through the workspace file interface",
         )
+
+
+class TestMemoryInitRouteBoundary(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["AGENT_CWD"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ.pop("AGENT_CWD", None)
+        self._tmp.cleanup()
+
+    def test_create_thread_route_does_not_initialize_memory(self):
+        from routers.claude_agent import claude_agent_create_thread
+
+        with unittest.mock.patch("database.create_chat_thread", return_value="thread-route"):
+            result = _run(
+                claude_agent_create_thread(current_user={"user_id": 1})
+            )
+
+        self.assertEqual(result["thread_id"], "thread-route")
+        self.assertFalse((Path(self._tmp.name) / "thread-route").exists())
+
 
 
 if __name__ == "__main__":

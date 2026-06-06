@@ -1,58 +1,58 @@
-# [Input] None — reads partition memory_workspace_config from the voices DB table.
-#          Template files for the four configurable prompts are sourced exclusively
-#          from the partition config; .claude/memory/ is used ONLY for WORKFLOW.md.
-# [Output] Provide init_memory_workspace, apply_memory_config, get_memory_context_block
-#          to claude_agent/service.py (and any explicit file-interface callers).
+# [Input] None - consumes caller-provided partition memory_workspace_config.
+#          Prompt template files are sourced exclusively from partition config.
+# [Output] Provide init_memory_workspace to the workspace file-interface route,
+#          and get_memory_context_block to claude_agent/context_builder.py.
 # [Pos] memory-workspace node in libs/claude_agent_kit/server
-# [Sync] 2026-06-05: initial implementation — Memory Workspace initialization,
+# [Sync] 2026-06-05: initial implementation - Memory Workspace initialization,
 #                    per-voice config application, and memory context injection.
-# [Sync] 2026-06-05: template files now sourced exclusively from the partition (voice)
-#                    configuration table (voices.memory_workspace_config).
-#                    The filesystem fallback to .claude/memory/ is removed for the four
-#                    configurable prompt files; only WORKFLOW.md still uses the filesystem
-#                    source (shared workflow logic, never partition-specific).
-#                    Memory workspace is classified as the "procedural" memory type.
+# [Sync] 2026-06-06: all five core prompt files now come from the partition config
+#                    table; removed project .claude/memory/ fallback and long-term
+#                    summary starter creation. Memory workspace is procedural-only.
 
 """Memory Workspace manager for Claude Agent session directories.
 
-Memory workspace type: **procedural** — stores structured behavioural rules and
-accumulated session history (prompts, long-term summary, event/preference JSON).
+Memory workspace type: **procedural**.  The directory stores structured
+operating rules, prompt resources, and state files that teach the agent how to
+perform memory work.  It is not a short-term chat cache and not a long-term
+summary bucket.
 
-Each session workspace gains a ``memory/`` subdirectory that holds:
+Each session workspace may gain a ``memory/`` subdirectory that holds five core
+prompt/rule files.  All five are sourced from the caller-provided partition
+configuration, normally ``voices.memory_workspace_config``.  Files absent from
+the config are not written, and there is no fallback to project
+``.claude/memory/`` templates.
 
-- Four prompt template files sourced exclusively from the partition (voice)
-  configuration table (``voices.memory_workspace_config``).  Files absent from
-  the partition config are simply not written — there is no fallback to the
-  filesystem.
-- ``WORKFLOW.md`` — always sourced from ``{project_root}/.claude/memory/``
-  because it encodes shared workflow logic that is never partition-specific.
-- A ``long_term_memory.md`` file (created/updated at runtime) that accumulates
-  conversation summaries across sessions.
-- A ``procedural/`` subdirectory containing structured JSON files for user
-  preferences, important events, and a session timeline.
+The preferred config shape is::
 
-Per-voice configuration (``memory_workspace_config`` JSON from the ``voices``
-DB table) is the sole source for the four configurable template files.  It maps
-them via the keys also used by :func:`apply_memory_config`.
+    {
+        "workspace_type": "procedural",
+        "prompt_files": {
+            "WORKFLOW.md": "...",
+            "MEMORY_QUERY_PROMPT.md": "...",
+            "MEMORY_Distiller_PROMPT.md": "...",
+            "MEMORY_ANSWER_PROMPT.md": "...",
+            "DEFAULT_UPDATE_MEMORY_PROMPT.md": "..."
+        }
+    }
+
+Legacy ``*_prompt_override`` keys are still accepted for one migration window.
 
 Usage::
 
     from libs.claude_agent_kit.server.memory_workspace import (
         init_memory_workspace,
-        apply_memory_config,
         get_memory_context_block,
     )
 
     workspace = get_or_create_workspace(session_id)
     memory_config = database.get_voice_memory_config_by_thread(thread_id)
-    init_memory_workspace(workspace, memory_config)
+    init_memory_workspace(workspace, memory_config)  # /api/workspace/memory-init
     block = get_memory_context_block(workspace)
 """
 from __future__ import annotations
 
 import json
 import logging
-import shutil
 from pathlib import Path
 from typing import Any, Optional
 
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-# Names of the five prompt template files in the memory/ directory.
+# Names of the five core prompt/rule files in the memory/ directory.
 MEMORY_PROMPT_FILES: tuple[str, ...] = (
     "WORKFLOW.md",
     "MEMORY_QUERY_PROMPT.md",
@@ -71,15 +71,26 @@ MEMORY_PROMPT_FILES: tuple[str, ...] = (
     "DEFAULT_UPDATE_MEMORY_PROMPT.md",
 )
 
-# Map from memory_workspace_config JSON key → file name in memory/.
+# Canonical memory_workspace_config JSON key -> file name in memory/.
 _CONFIG_KEY_TO_FILE: dict[str, str] = {
+    "workflow_prompt": "WORKFLOW.md",
+    "query_prompt": "MEMORY_QUERY_PROMPT.md",
+    "distiller_prompt": "MEMORY_Distiller_PROMPT.md",
+    "answer_prompt": "MEMORY_ANSWER_PROMPT.md",
+    "update_prompt": "DEFAULT_UPDATE_MEMORY_PROMPT.md",
+}
+
+# Legacy config key aliases kept so rows written by the 2026-06-05 prototype
+# migrate without requiring immediate DB rewrites.
+_LEGACY_CONFIG_KEY_TO_FILE: dict[str, str] = {
+    "workflow_prompt_override": "WORKFLOW.md",
     "query_prompt_override": "MEMORY_QUERY_PROMPT.md",
     "distiller_prompt_override": "MEMORY_Distiller_PROMPT.md",
     "answer_prompt_override": "MEMORY_ANSWER_PROMPT.md",
     "update_prompt_override": "DEFAULT_UPDATE_MEMORY_PROMPT.md",
 }
 
-# Reverse mapping: file name → config key (for the four configurable files).
+# Reverse mapping: file name -> canonical config key.
 _FILE_TO_CONFIG_KEY: dict[str, str] = {v: k for k, v in _CONFIG_KEY_TO_FILE.items()}
 
 # Names of the runtime-generated procedural memory JSON files.
@@ -104,21 +115,6 @@ _PROCEDURAL_DEFAULTS: dict[str, Any] = {
     "timeline.json": [],
 }
 
-# Starter content for the long-term memory file (first-init only).
-_LONG_TERM_MEMORY_DEFAULT = """\
-# Long-term Memory
-
-_No entries yet. This file will be populated by the memory distillation workflow._
-"""
-
-# Project root (four levels above this file: server/ → claude_agent_kit/ → libs/ → backend/ → project)
-_PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
-
-
-def _project_root() -> Path:
-    return _PROJECT_ROOT
-
-
 def _resolve_safe_memory_dir(workspace: Path) -> Optional[Path]:
     """Resolve and verify the ``memory/`` path is safely inside the workspace root.
 
@@ -141,7 +137,7 @@ def _resolve_safe_memory_dir(workspace: Path) -> Optional[Path]:
                 workspace_root_abs,
             )
             return None
-        # "memory" is a fixed subdirectory name — no user input involved.
+        # "memory" is a fixed subdirectory name; no user input involved.
         return workspace_abs / "memory"
     except Exception:  # noqa: BLE001
         logger.warning(
@@ -159,31 +155,23 @@ def _resolve_safe_memory_dir(workspace: Path) -> Optional[Path]:
 def init_memory_workspace(workspace: Path, memory_config: Optional[dict[str, Any]] = None) -> Path:
     """Create (or repair) the ``memory/`` subdirectory in *workspace*.
 
-    Memory workspace type: **procedural** — stores structured behavioural
-    rules, prompt templates, and accumulated session history.
+    Memory workspace type: **procedural** - stores structured behavioural
+    rules, prompt templates, and state files.
 
     Steps:
     1. Create ``memory/`` (idempotent).
-    2. Sync prompt template files from *memory_config* (the partition's
-       ``memory_workspace_config`` from the ``voices`` DB table).
-       - Four configurable template files are written exclusively from
-         *memory_config*; files absent from the config are simply skipped
-         (no filesystem fallback).
-       - ``WORKFLOW.md`` is always copied from
-         ``{project_root}/.claude/memory/`` (shared workflow logic).
+    2. Sync all prompt/rule files from *memory_config* (the partition's
+       ``memory_workspace_config`` from the ``voices`` DB table). Files absent
+       from the config are skipped; there is no filesystem fallback.
     3. Create ``memory/procedural/`` subdirectory (idempotent).
-    4. Write starter procedural JSON files (first-init only — existing files
+    4. Write starter procedural JSON files (first-init only - existing files
        are preserved to avoid losing runtime-accumulated memories).
-    5. Write ``memory/long_term_memory.md`` starter (first-init only).
 
     Args:
         workspace:     Session workspace root directory.
-        memory_config: Partition (voice) ``memory_workspace_config`` dict
-                       fetched from the ``voices`` DB table.  The four
-                       configurable template files are written only when
-                       present in this config; missing keys are skipped.
-                       When ``None`` only ``WORKFLOW.md`` is written (from
-                       the shared filesystem source).
+        memory_config: Partition (voice) ``memory_workspace_config`` dict.
+                       Prompt files are written only when present in this
+                       config; missing keys are skipped.
 
     Returns the absolute ``memory/`` directory path.
     Raises ``ValueError`` when *workspace* resolves outside the configured workspace root.
@@ -196,7 +184,7 @@ def init_memory_workspace(workspace: Path, memory_config: Optional[dict[str, Any
         )
     memory_dir.mkdir(exist_ok=True)
 
-    # Sync prompt template files from partition config or .claude/memory/ fallback.
+    # Sync prompt/rule files from partition config only.
     _sync_memory_templates(memory_dir, memory_config)
 
     # Ensure procedural/ subdirectory exists.
@@ -221,18 +209,6 @@ def init_memory_workspace(workspace: Path, memory_config: Optional[dict[str, Any
                 exc_info=True,
             )
 
-    # Write long_term_memory.md starter (first-init only).
-    long_term = memory_dir / "long_term_memory.md"
-    if not long_term.exists():
-        try:
-            long_term.write_text(_LONG_TERM_MEMORY_DEFAULT, encoding="utf-8")
-            logger.debug("Created memory/long_term_memory.md")
-        except OSError:
-            logger.warning(
-                "Failed to create memory/long_term_memory.md; skipping.",
-                exc_info=True,
-            )
-
     logger.debug("Memory workspace initialised: %s", memory_dir)
     return memory_dir
 
@@ -245,14 +221,9 @@ def apply_memory_config(
 
     When *memory_config* is ``None`` or empty, this function is a no-op.
 
-    Supported override keys (all optional):
-    - ``query_prompt_override``     → overwrites ``MEMORY_QUERY_PROMPT.md``
-    - ``distiller_prompt_override`` → overwrites ``MEMORY_Distiller_PROMPT.md``
-    - ``answer_prompt_override``    → overwrites ``MEMORY_ANSWER_PROMPT.md``
-    - ``update_prompt_override``    → overwrites ``DEFAULT_UPDATE_MEMORY_PROMPT.md``
-
-    The ``WORKFLOW.md`` file is never overridden — it defines the shared
-    workflow logic and should remain consistent across all voices.
+    Preferred config: ``{"prompt_files": {"WORKFLOW.md": "...", ...}}``.
+    Canonical ``*_prompt`` keys and legacy ``*_prompt_override`` aliases are
+    also accepted.
     """
     if not memory_config:
         return
@@ -264,16 +235,13 @@ def apply_memory_config(
         )
         return
 
-    for config_key, filename in _CONFIG_KEY_TO_FILE.items():
-        override_content = memory_config.get(config_key)
-        if not override_content or not isinstance(override_content, str):
-            continue
-        # filename is from the fixed _CONFIG_KEY_TO_FILE dict — no user input involved.
+    for filename, override_content in get_memory_prompt_files(memory_config).items():
+        # filename is from the fixed MEMORY_PROMPT_FILES whitelist.
         dest = memory_dir / filename
         try:
             dest.write_text(override_content.strip() + "\n", encoding="utf-8")
             logger.debug(
-                "Applied memory_workspace_config override: %s → %s", config_key, filename
+                "Applied memory_workspace_config prompt file: %s", filename
             )
         except OSError:
             logger.warning(
@@ -287,8 +255,7 @@ def get_memory_context_block(workspace: Path) -> str:
     """Return a ``<memory_context>`` text block for injection into user messages.
 
     The block tells the agent about the memory workspace layout (type:
-    **procedural**), the available prompt files, and whether runtime memory
-    files (long_term_memory.md, procedural/*.json) exist so the agent can
+    **procedural**) and the available prompt/state files so the agent can
     decide whether to read them.
 
     Returns an empty string when the ``memory/`` directory does not exist or
@@ -298,7 +265,6 @@ def get_memory_context_block(workspace: Path) -> str:
     if memory_dir is None or not memory_dir.is_dir():
         return ""
 
-    long_term_exists = (memory_dir / "long_term_memory.md").is_file()
     procedural_dir = memory_dir / "procedural"
     procedural_files: list[str] = []
     if procedural_dir.is_dir():
@@ -310,28 +276,23 @@ def get_memory_context_block(workspace: Path) -> str:
 
     lines: list[str] = [
         "<memory_context>",
-        f"Memory workspace (type: procedural): {memory_dir}",
+        f"Memory workspace (type: procedural only): {memory_dir}",
+        "This is a procedural memory workspace, not a short-term chat cache or long-term summary store.",
         "",
         "Memory prompt files (read for instructions):",
-        "  memory/WORKFLOW.md                     — memory decision tree",
-        "  memory/MEMORY_QUERY_PROMPT.md           — 7-category memory retrieval",
-        "  memory/MEMORY_Distiller_PROMPT.md       — memory distillation",
-        "  memory/MEMORY_ANSWER_PROMPT.md          — memory-informed responses",
-        "  memory/DEFAULT_UPDATE_MEMORY_PROMPT.md  — memory update rules (ADD/UPDATE/DELETE/NO_CHANGE)",
+        *[
+            f"  memory/{filename}  - {'available' if (memory_dir / filename).is_file() else 'missing'}"
+            for filename in MEMORY_PROMPT_FILES
+        ],
         "",
     ]
 
-    if long_term_exists:
-        lines.append("Long-term memory: memory/long_term_memory.md (available — read for context)")
-    else:
-        lines.append("Long-term memory: not yet created")
-
     if procedural_files:
         files_list = ", ".join(procedural_files)
-        lines.append(f"Procedural memory files: {files_list}")
-        lines.append("  → Located in memory/procedural/  (read for user preferences and events)")
+        lines.append(f"Procedural state files: {files_list}")
+        lines.append("  Located in memory/procedural/  (read only when relevant)")
     else:
-        lines.append("Procedural memory: not yet created")
+        lines.append("Procedural state files: none yet")
 
     lines.append("</memory_context>")
     return "\n".join(lines)
@@ -342,95 +303,76 @@ def get_memory_context_block(workspace: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
+def get_memory_prompt_files(memory_config: Optional[dict[str, Any]]) -> dict[str, str]:
+    """Return whitelisted prompt file contents from a partition config.
+
+    Preferred source:
+      ``memory_config["prompt_files"][<filename>]``
+
+    Migration-compatible sources:
+      canonical ``*_prompt`` keys and legacy ``*_prompt_override`` keys.
+
+    Values are returned as ``filename -> content`` for filenames present in
+    ``MEMORY_PROMPT_FILES`` only.  This keeps partition configuration flexible
+    without allowing arbitrary workspace paths.
+    """
+    if not memory_config or not isinstance(memory_config, dict):
+        return {}
+
+    prompt_files: dict[str, str] = {}
+    configured_files = memory_config.get("prompt_files")
+    if isinstance(configured_files, dict):
+        for filename in MEMORY_PROMPT_FILES:
+            content = configured_files.get(filename)
+            if isinstance(content, str) and content.strip():
+                prompt_files[filename] = content.strip()
+
+    for config_key, filename in {
+        **_CONFIG_KEY_TO_FILE,
+        **_LEGACY_CONFIG_KEY_TO_FILE,
+    }.items():
+        if filename in prompt_files:
+            continue
+        content = memory_config.get(config_key)
+        if isinstance(content, str) and content.strip():
+            prompt_files[filename] = content.strip()
+
+    return prompt_files
+
+
 def _sync_memory_templates(
     memory_dir: Path,
     memory_config: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Write prompt template files into *memory_dir* from the partition config or filesystem.
+    """Write prompt/rule files into *memory_dir* from the partition config.
 
     Template source rules:
-    - ``WORKFLOW.md`` — always copied from ``{project_root}/.claude/memory/``
-      (shared workflow logic, never partition-specific).
-    - The four configurable files — written exclusively from *memory_config*
-      when the corresponding override key is present and non-empty.  If the
-      key is absent from the config the file is **not** written; there is no
-      filesystem fallback.
+    - All five core files are written from *memory_config* only.
+    - Missing config values are skipped.
+    - There is no filesystem fallback to project ``.claude/memory/``.
 
-    ``memory_config`` keys that map to template files:
-
-    =========================  =====================================
-    Config key                  File
-    =========================  =====================================
-    ``query_prompt_override``   ``MEMORY_QUERY_PROMPT.md``
-    ``distiller_prompt_override`` ``MEMORY_Distiller_PROMPT.md``
-    ``answer_prompt_override``  ``MEMORY_ANSWER_PROMPT.md``
-    ``update_prompt_override``  ``DEFAULT_UPDATE_MEMORY_PROMPT.md``
-    =========================  =====================================
-
-    Runtime files (``long_term_memory.md``, ``procedural/``) are never touched
-    by this function.
+    Runtime state files (``procedural/``) are never touched by this function.
     """
-    src_memory = _project_root() / ".claude" / "memory"
-
-    for filename in MEMORY_PROMPT_FILES:
+    for filename, content in get_memory_prompt_files(memory_config).items():
         dest = memory_dir / filename
-        config_key = _FILE_TO_CONFIG_KEY.get(filename)
-
-        if config_key is not None:
-            # Configurable file: write from partition config only.
-            content = (memory_config or {}).get(config_key)
-            if content and isinstance(content, str):
-                try:
-                    dest.write_text(content.strip() + "\n", encoding="utf-8")
-                    logger.debug(
-                        "_sync_memory_templates: wrote %s from partition config key %s",
-                        filename,
-                        config_key,
-                    )
-                except OSError:
-                    logger.warning(
-                        "_sync_memory_templates: failed to write %s from partition config; "
-                        "skipping (no filesystem fallback).",
-                        filename,
-                        exc_info=True,
-                    )
-            else:
-                logger.debug(
-                    "_sync_memory_templates: %s not present in partition config; skipping.",
-                    filename,
-                )
-        else:
-            # WORKFLOW.md: always sourced from the project filesystem.
-            if not src_memory.is_dir():
-                logger.debug(
-                    "_sync_memory_templates: project .claude/memory/ not found; "
-                    "cannot write %s.",
-                    filename,
-                )
-                continue
-            src = src_memory / filename
-            if not src.is_file():
-                logger.debug(
-                    "_sync_memory_templates: template %s not found in .claude/memory/; skipping.",
-                    filename,
-                )
-                continue
-            try:
-                shutil.copy2(str(src), str(dest))
-                logger.debug("_sync_memory_templates: copied %s from .claude/memory/", filename)
-            except OSError:
-                logger.warning(
-                    "_sync_memory_templates: failed to copy %s → %s; skipping.",
-                    src,
-                    dest,
-                    exc_info=True,
-                )
+        try:
+            dest.write_text(content.strip() + "\n", encoding="utf-8")
+            logger.debug(
+                "_sync_memory_templates: wrote %s from partition config", filename
+            )
+        except OSError:
+            logger.warning(
+                "_sync_memory_templates: failed to write %s from partition config; skipping.",
+                filename,
+                exc_info=True,
+            )
 
 
 __all__ = [
     "init_memory_workspace",
     "apply_memory_config",
     "get_memory_context_block",
+    "get_memory_prompt_files",
     "MEMORY_PROMPT_FILES",
     "PROCEDURAL_MEMORY_FILES",
 ]

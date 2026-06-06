@@ -6,8 +6,9 @@
 # [Pos] test node in backend/tests
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_claude_agent_thread_factory.py.
 #                    Removed: pet/persona/mem0/IdentityService stubs.
-#                    session_id = user_id (no persona dimension).
 #                    ENV: PAWKEYLAND_RUNNER_TTL_S → INK_AGENT_TTL_S.
+# [Sync] 2026-06-06: align session_id expectations with current thread_id
+#                    strategy and ClaudeAgentRunRequest.message_parts.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -53,13 +54,18 @@ from claude_agent.observer import LoggingObserver, SessionObserverRegistry
 # ---------------------------------------------------------------------------
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
-def _make_request(user_id: str = "user_1", message: str = "hello", thread_id: str = "thread_1") -> ClaudeAgentRunRequest:
+def _make_request(user_id: str = "user_1", message: str = "hello", thread_id: Optional[str] = None) -> ClaudeAgentRunRequest:
     return ClaudeAgentRunRequest(
         user_id=user_id,
-        thread_id=thread_id,
+        thread_id=thread_id or f"thread_{user_id}",
         message_parts=[{"type": "text", "text": message}],
     )
 
@@ -75,23 +81,23 @@ def _make_factory() -> ClaudeAgentThreadFactory:
 # ---------------------------------------------------------------------------
 
 class TestBuildSessionId(unittest.TestCase):
-    def test_returns_user_id(self):
-        req = _make_request(user_id="alice")
-        self.assertEqual(build_session_id(req), "alice")
+    def test_returns_thread_id(self):
+        req = _make_request(user_id="alice", thread_id="thread_alice")
+        self.assertEqual(build_session_id(req), "thread_alice")
 
-    def test_rejects_slash_in_user_id(self):
-        req = _make_request(user_id="a/b")
+    def test_rejects_slash_in_thread_id(self):
+        req = _make_request(thread_id="a/b")
         with self.assertRaises(ValueError):
             build_session_id(req)
 
-    def test_rejects_double_dot_in_user_id(self):
-        req = _make_request(user_id="..evil")
+    def test_rejects_double_dot_in_thread_id(self):
+        req = _make_request(thread_id="..evil")
         with self.assertRaises(ValueError):
             build_session_id(req)
 
-    def test_different_users_get_different_ids(self):
-        r1 = _make_request(user_id="alice")
-        r2 = _make_request(user_id="bob")
+    def test_different_threads_get_different_ids(self):
+        r1 = _make_request(user_id="alice", thread_id="thread_alice")
+        r2 = _make_request(user_id="alice", thread_id="thread_bob")
         self.assertNotEqual(build_session_id(r1), build_session_id(r2))
 
 
@@ -303,7 +309,12 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             from libs.claude_agent_kit.types import AgentRunOptions
             state.is_context_initialized = True
             state.system_prompt = "stub"
-            opts = AgentRunOptions(thread_id=state.session_id, user_message=req.message)
+            text_parts = [
+                part.get("text", "")
+                for part in (req.message_parts or [])
+                if isinstance(part, dict) and part.get("type") == "text"
+            ]
+            opts = AgentRunOptions(thread_id=state.session_id, user_message="".join(text_parts))
             turn_ctx = _TurnContext(queue=queue, confirmation_store=unittest.mock.MagicMock())
             state.turn_context = turn_ctx
             return _TurnExecution(
@@ -371,24 +382,24 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         self.assertIsNot(instances[0], instances[1])
 
     def test_close_thread_destroys_session(self):
-        req = _make_request("user_close")
+        req = _make_request("user_close", thread_id="thread_close")
 
         async def _run_and_close():
             with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
                 await self._collect_gen(req)
-            self.factory.close_thread("user_close")
+            self.factory.close_thread("thread_close")
 
         _run(_run_and_close())
-        state = self.factory._pool._states.get("user_close")
+        state = self.factory._pool._states.get("thread_close")
         self.assertEqual(state.lifecycle, AgentRunLifecycle.DESTROYED)
 
     def test_session_snapshot_returns_dict(self):
-        req = _make_request("user_snap")
+        req = _make_request("user_snap", thread_id="thread_snap")
         with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
             _run(self._collect_gen(req))
-        snap = self.factory.session_snapshot("user_snap")
+        snap = self.factory.session_snapshot("thread_snap")
         self.assertIsNotNone(snap)
-        self.assertEqual(snap["session_id"], "user_snap")
+        self.assertEqual(snap["session_id"], "thread_snap")
 
     def test_session_snapshot_none_for_unknown(self):
         self.assertIsNone(self.factory.session_snapshot("nonexistent"))

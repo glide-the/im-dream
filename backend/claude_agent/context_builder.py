@@ -29,9 +29,11 @@
 # [Sync] 2026-06-01: escape literal JSON braces in _SYSTEM_PROMPT_TEMPLATE so
 #                    str.format only substitutes recent_sessions_block; keep
 #                    recent-session range results capped by context_session_count.
-# [Sync] 2026-06-05: add Memory Workflow section to _SYSTEM_PROMPT_TEMPLATE;
-#                    inject <memory_context> block into build_user_message when
-#                    memory/ workspace directory exists in cwd.
+# [Sync] 2026-06-06: remove Memory Workflow section from _SYSTEM_PROMPT_TEMPLATE;
+#                    memory workflow rules live in memory/WORKFLOW.md (workspace files),
+#                    not in the engine system prompt.  Retain <memory_context> block
+#                    injection in build_user_message — it tells the agent where the
+#                    workspace is; the WORKFLOW.md file provides the rules.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -151,24 +153,6 @@ use `mcp__user__get_sessions_range` to search further back:
 
 Only call this tool when the user's message suggests they are referring to events or themes
 that predate the visible recent entries.  Do not call it on every turn.
-
-## Memory Workflow
-
-When a <memory_context> block is present in the user message, the session has a dedicated
-memory workspace.  Use it to provide personalised, continuous responses across sessions:
-
-1. At session start — read ``memory/WORKFLOW.md`` for the full memory decision tree.
-2. Before responding — read ``memory/MEMORY_QUERY_PROMPT.md`` and retrieve relevant memories
-   from ``memory/long_term_memory.md`` and ``memory/procedural/*.json`` (when they exist).
-3. When responding — follow ``memory/MEMORY_ANSWER_PROMPT.md`` to naturally integrate
-   retrieved memories into your response without exposing raw memory records to the user.
-4. After significant exchanges — run the distillation check in ``memory/MEMORY_Distiller_PROMPT.md``
-   and decide whether to update memories per ``memory/DEFAULT_UPDATE_MEMORY_PROMPT.md``
-   (ADD / UPDATE / DELETE / NO_CHANGE operations).
-
-Do NOT read memory files on every single turn — only when the content warrants personalisation
-or when the user references past events.  When no <memory_context> block is present, skip
-all memory operations.
 
 {recent_sessions_block}\
 """
