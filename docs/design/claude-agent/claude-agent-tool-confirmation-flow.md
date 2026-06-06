@@ -2,6 +2,7 @@
 > SDK 工具确认交互模式的通用设计参考，与 Ink & Memory `backend/claude_agent/tool_confirmation_store.py` 对应实现。
 > **[Sync] 2026-05-24**: `_make_tool_confirm_cb` 新增 `turn_ctx` 参数，注册 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重；新增 `CancelledError` 处理（调 `store.cancel_pending` 后 re-raise）；`payload` 字段同时兼容 `tool_call_id`（runner）和 `toolCallId`（遗留）。
 > **[Sync] 2026-05-27**: `PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范；新增 `_ALWAYS_CONFIRM_TOOL_NAMES` 机制在 auto 模式下对 `AskUserQuestion` 触发确认；新增前端 `isManualToolInvocation` / `toolChoice` prop 逻辑说明（§6、§7）。
+> **[Sync] 2026-06-06**: auto 模式新增 workspace `files/` 内置文件工具权限策略：`Read` / `Write` / `Edit` / `MultiEdit` 仅在路径解析后位于当前 `{cwd}/files/` 下时返回显式 `permissionDecision:"allow"`，避免 Claude Code 独立文件写权限层阻塞 Agent 产物写入；manual 模式仍走前端确认。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -408,7 +409,8 @@ if tool_choice != "manual" and tool_name not in _ALWAYS_CONFIRM_TOOL_NAMES:
 | `AskUserQuestion` | 走确认流 → 显示 AskUserQuestion 表单 | 走确认流 → 显示 AskUserQuestion 表单 |
 | `mcp__user__ask_user` | 走确认流 → 显示 AskUserQuestion 表单 | 走确认流 → 显示 AskUserQuestion 表单 |
 | `mcp__user__touch_animation` | **自动执行**（动画由 Agent 驱动） | 走确认流 → 显示 Approve/Cancel |
-| `Read` / `Bash` / 其他工具 | **自动执行** | 走确认流 → 显示 Approve/Cancel |
+| `Read` / `Write` / `Edit` / `MultiEdit` 且目标位于 `{cwd}/files/**` | 显式 allow → 自动执行 | 走确认流 → 显示 Approve/Cancel |
+| `Read` / `Bash` / 其他工具 | **自动执行**（不额外授予文件写权限） | 走确认流 → 显示 Approve/Cancel |
 
 > `mcp__user__touch_animation` 不在 `_ALWAYS_CONFIRM_TOOL_NAMES` 内，auto 模式下 Agent 自主触发动画，符合设计预期。
 

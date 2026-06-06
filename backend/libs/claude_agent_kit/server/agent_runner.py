@@ -46,6 +46,9 @@
 #                    (supplied by service.py as lambda: state.editor_state) so PreToolUse
 #                    virtual-index reads see the flyweight's latest value after write-tool
 #                    DB refreshes; falls back to opts.editor_state when getter is absent.
+# [Sync] 2026-06-06: add workspace files/ PreToolUse permission allow for built-in
+#                    file tools in auto mode so agent-produced workspace files do
+#                    not stall on Claude Code's separate write-permission layer.
 
 """Claude Agent Runner.
 
@@ -127,6 +130,12 @@ _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
+_WORKSPACE_FILES_PERMISSION_TOOLS: frozenset[str] = frozenset({
+    "Read",
+    "Write",
+    "Edit",
+    "MultiEdit",
+})
 
 # Tools that must always go through the on_tool_confirmation_request side-channel
 # regardless of tool_choice mode (i.e. even in "auto" mode).  These are
@@ -613,6 +622,68 @@ def _apply_editor_index_redirect(
         return None
 
 
+def _extract_builtin_file_tool_path(tool_input: dict[str, Any]) -> str:
+    """Return the path argument from a built-in Claude file tool input."""
+
+    raw_path = tool_input.get("file_path") or tool_input.get("path") or ""
+    return str(raw_path).strip() if raw_path is not None else ""
+
+
+def _is_path_inside_workspace_files(raw_path: str, cwd: Optional[str]) -> bool:
+    """Return True when *raw_path* resolves below ``{cwd}/files/``.
+
+    ``raw_path`` may be absolute or relative to the Claude working directory.
+    ``Path.resolve(strict=False)`` keeps non-existent target files checkable
+    while resolving existing parent symlinks and ``..`` components.
+    """
+
+    if not raw_path or not cwd:
+        return False
+
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        files_dir = (workspace / "files").resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        if resolved == files_dir:
+            return False
+        resolved.relative_to(files_dir)
+        return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _apply_workspace_files_permission(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+) -> Optional[HookJSONOutput]:
+    """Explicitly allow built-in file tools for the session ``files/`` area.
+
+    Claude Code treats ``allowed_tools`` and PreToolUse hook success as separate
+    from some built-in file permission prompts. Returning an explicit
+    ``permissionDecision: allow`` for the sandboxed workspace files directory
+    lets agents create or edit normal workspace artifacts without granting
+    access to source code, ``.editor/``, or other workspace internals.
+    """
+
+    if tool_name not in _WORKSPACE_FILES_PERMISSION_TOOLS:
+        return None
+
+    raw_path = _extract_builtin_file_tool_path(tool_input)
+    if not _is_path_inside_workspace_files(raw_path, cwd):
+        return None
+
+    return HookJSONOutput(
+        hookSpecificOutput={
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+        }
+    )
+
+
 # ---------------------------------------------------------------------------
 # Async helper
 # ---------------------------------------------------------------------------
@@ -905,6 +976,13 @@ class ClaudeAgentRunner:
             )
             if redirect_result is not None:
                 return redirect_result
+
+            if tool_choice != "manual":
+                workspace_files_permission = _apply_workspace_files_permission(
+                    tool_name, tool_input, cwd
+                )
+                if workspace_files_permission is not None:
+                    return workspace_files_permission
 
             # In auto mode, let all tools run immediately EXCEPT
             # _ALWAYS_CONFIRM_TOOL_NAMES (AskUserQuestion and equivalents).
