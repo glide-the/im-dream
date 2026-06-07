@@ -54,6 +54,9 @@
 #                    _EDITOR_WRITE_TOOL_NAMES it reloads editor_state from DB and updates
 #                    state.editor_state — getter propagates change to PreToolUse instantly.
 #                    _TurnContext gains tool_name_by_id dict for tool_result name lookup.
+# [Sync] 2026-06-06: remove implicit Memory workspace initialization from
+#                    assemble_context. Memory is initialized only via the
+#                    workspace file interface before agent analysis starts.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -86,6 +89,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Mapping, Optional
 from uuid import uuid4
 
+import database as _db
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState

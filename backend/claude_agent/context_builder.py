@@ -29,6 +29,11 @@
 # [Sync] 2026-06-01: escape literal JSON braces in _SYSTEM_PROMPT_TEMPLATE so
 #                    str.format only substitutes recent_sessions_block; keep
 #                    recent-session range results capped by context_session_count.
+# [Sync] 2026-06-06: remove Memory Workflow section from _SYSTEM_PROMPT_TEMPLATE;
+#                    memory workflow rules live in memory/WORKFLOW.md (workspace files),
+#                    not in the engine system prompt.  Retain <memory_context> block
+#                    injection in build_user_message — it tells the agent where the
+#                    workspace is; the WORKFLOW.md file provides the rules.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -316,6 +321,15 @@ class ClaudeAgentContextBuilder:
         )
         if workspace_block:
             blocks.append({"type": "text", "text": workspace_block})
+
+        # Inject memory context block when cwd is known so the agent knows about
+        # the memory/ workspace and can read/update memory files.
+        if cwd:
+            from pathlib import Path as _Path
+            from libs.claude_agent_kit.server.memory_workspace import get_memory_context_block
+            memory_block = get_memory_context_block(_Path(cwd))
+            if memory_block:
+                blocks.append({"type": "text", "text": memory_block})
 
         # Inject voice / deck system prompt as context so the agent knows which
         # persona to adopt.  Appended before the user text ("拼接到message报文中").

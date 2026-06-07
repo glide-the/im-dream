@@ -9,6 +9,9 @@
 # [Sync] 2026-05-08: call sync_skills_symlinks() at the end of init_workspace so skills are linked on first init.
 # [Sync] 2026-05-09: seed workspace/skills/ from project .claude/skills/ on init so bundled skills are available.
 # [Sync] 2026-05-28: add _init_editor_index() — create .editor/ virtual index placeholder directory.
+# [Sync] 2026-06-06: memory/ remains outside init_workspace and is initialised
+#                    only by the workspace file interface endpoint using the
+#                    partition (voice) config.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -21,6 +24,11 @@ Each conversation gets an isolated working directory under the workspace root:
         .editor/        – EditorState virtual index (placeholder files; see workspace-adapter.md)
         .claude/        – Claude project config (synced from repo template)
         .claude/skills/ – symlinks → ../skills/* (managed by workspace_file_sync)
+
+The ``memory/`` procedural memory subdirectory is **not** created by
+``init_workspace``.  It is initialised explicitly through the workspace
+file-interface endpoint (``POST /api/workspace/memory-init``), which reads the
+per-voice partition config from the ``voices`` DB table.
 
 Archive extraction (WSK-04)
 ---------------------------

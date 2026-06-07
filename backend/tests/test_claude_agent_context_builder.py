@@ -9,6 +9,7 @@
 # [Sync] 2026-06-01: cover escaped literal JSON in the system prompt template so
 #                    switch_editor guidance cannot break str.format rendering;
 #                    align system-prompt fixtures with list_sessions_in_range.
+# [Sync] 2026-06-06: run coroutine tests with explicit per-call event loops.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -42,7 +43,12 @@ from claude_agent.workspace_context import (
 # ---------------------------------------------------------------------------
 
 def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def _fake_sessions(n: int = 3) -> list[dict]:

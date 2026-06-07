@@ -1,4 +1,5 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentRunner 模块设计.md — 路径已适配 Ink & Memory 工程规范。
+> **[Sync] 2026-06-07**: 补充 auto 模式敏感度分流策略：workspace `files/` 内置文件工具和明确低敏查询工具显式 allow；执行/写入/交互/状态切换类高敏工具进入前端确认侧路，批准后返回显式 Claude Code allow。
 
 # ClaudeAgentRunner 模块设计
 
@@ -149,7 +150,7 @@ sequenceDiagram
 ## 5. 工具确认流程（PreToolUse hook）
 
 Claude Code 的 `allowed_tools` 是预批准规则，不是单纯的工具可见性列表。
-Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。默认 `auto` 模式立即放行，避免给动画和 necklace 工具增加确认延迟；只有 `manual` 模式会进入 `on_tool_confirmation_request` 等待前端确认。
+Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。`auto` 模式先对当前 workspace `files/` 下的内置文件工具返回显式 `permissionDecision:"allow"`；随后对明确的低敏查询工具（内置 Read/Glob/Grep/LS/TodoRead/WebFetch/WebSearch、会话查询、memory/necklace 只读查询等）返回显式 allow；剩余执行/写入/交互/状态切换工具进入 `on_tool_confirmation_request` 侧路。用户批准后，Runner 返回显式 `permissionDecision:"allow"`，避免 hook fall-through 与 Claude Code 文件权限层语义不一致。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -157,7 +158,7 @@ Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_u
 
 | tool_choice | `ClaudeCodeOptions.allowed_tools` | `PreToolUse` | 目的 |
 |---|---:|---|---|
-| `auto` | `DEFAULT_ALLOWED_TOOLS` / request override | 立即 allow | 默认工具预批准；动画和项圈工具由 Agent 自主调用 |
+| `auto` | `DEFAULT_ALLOWED_TOOLS` / request override | `files/` 内置文件工具与低敏查询工具显式 allow；高敏工具等待 `on_tool_confirmation_request` | Agent 可生成 workspace 产物并查询上下文；执行/写入/状态动作需前端确认后才授予本次工具权限 |
 | `manual` | `DEFAULT_ALLOWED_TOOLS` / request override | 等待 `on_tool_confirmation_request` | 调试或敏感工具确认侧路 |
 | `none` | `[]` + `extra_args["tools"] = ""` | 不暴露工具 | 通过 Claude CLI `--tools ""` 禁用可用工具 |
 

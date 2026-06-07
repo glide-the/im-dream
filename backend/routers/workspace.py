@@ -7,6 +7,9 @@
 # [Pos] workspace route node in backend/routers
 # [Sync] 2026-05-25: initial implementation — ported from claude-agent-next-kit
 #         app/api/workspace/files/route.ts and app/api/workspace/files/download/route.ts.
+# [Sync] 2026-06-06: remove POST /api/workspace/memory-init (Voice scenario memory
+#         workspace initialisation removed; Reflections uses /api/reflections/memory-init).
+#         project .claude/memory/ filesystem fallback also removed from memory_workspace.py.
 
 """Workspace file management API.
 
@@ -490,3 +493,5 @@ async def download_workspace_file(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+

@@ -41,6 +41,13 @@
 | **API** | `GET/POST/DELETE/PATCH /api/workspace/files` |
 | **生命周期** | 随对话存在；对话删除时可选清理 |
 
+Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会对内置
+`Read` / `Write` / `Edit` / `MultiEdit` 工具做路径解析校验：只有目标路径位于
+当前工作空间 `{workspace}/files/` 下，才返回显式 `permissionDecision:"allow"`。
+这使 Agent 可以生成普通工作区产物，同时不授予源码、`.editor/` 或其他工作区内部目录的写权限。
+`tool_choice=auto` 下，明确只读查询工具（例如 `Read` outside `files/`、`Glob`、`Grep`、`LS`、`WebSearch`、会话查询、memory/necklace 查询）也会收到显式 allow；执行/写入/交互/状态切换工具进入前端确认侧路。
+`tool_choice=manual` 时仍由前端工具确认流审批。
+
 ### 3.2 `logs/` — 日志区
 
 | 属性 | 说明 |

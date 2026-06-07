@@ -1,11 +1,12 @@
 > **迁移来源**: Pawkeyland docs/app/design/workspace-filesystem.md — 路径已适配 Ink & Memory。
 > **Ink & Memory 简化说明**: skills 符号链接同步（workspace_file_sync）在 Ink & Memory 中未引入，`workspace.py` 仅保留 files/logs/.claude 骨架创建。
+> **[Sync] 2026-06-06**: Memory Workspace 不再由 `init_workspace()` 或 `ClaudeAgentService.assemble_context()` 初始化；`/memory/` 仅通过 `POST /api/workspace/memory-init` 文件接口从 `voices.memory_workspace_config` 写入。详见 [`../memory/memory-workspace-design.md`](../memory/memory-workspace-design.md)。
 
 # 工作空间文件系统设计方案
 
 > **来源对比**：参考 `glide-the/claude-agent-next-kit → app/lib/workspace.ts`（TypeScript/Node.js）迁移适配为 Python 设计。
 > **当前状态**：核心工作空间管理、Skills 软链接、项目内置 Skills 种子复制、压缩包提取与 `ClaudeAgentRunRequest.cwd` 接入已实现；本文保留设计约束与后续扩展说明。
-> **Thread Session 集成**：`cwd` 在 Thread Session 模式下作为 `AgentRunState` 的 intrinsic 享元字段，按 `session_id`（= `"{user_id}"` = `workspace_key`）按需缓存。首轮 `Service.assemble_context` 调用 `get_or_create_workspace(session_id)` 后写回 `state.cwd`；TTL（默认 600 s）内续轮直接复用，避免重复触发 `init_workspace` 的模板刷新；TTL 超时 / `close_thread` / `aclose` 销毁享元时 `state.cwd` 一并清空，下一轮重新初始化。详见 [claude-agent-thread-session-patterns.md §4.3](./claude-agent-thread-session-patterns.md#43-享元体agentrunstate)。
+> **Thread Session 集成**：`cwd` 在 Thread Session 模式下作为 `AgentRunState` 的 intrinsic 享元字段，按 `thread_id` 按需缓存。首轮 `Service.assemble_context` 调用 `get_or_create_workspace(thread_id)` 后写回 `state.cwd`；TTL（默认 600 s）内续轮直接复用。该流程只维护 workspace 骨架和 `.claude/.editor` 文件，不初始化 `/memory/`。详见 [claude-agent-thread-session-patterns.md §4.3](./claude-agent-thread-session-patterns.md#43-享元体agentrunstate)。
 
 ---
 
@@ -157,7 +158,7 @@ def init_workspace(session_id: str | None = None) -> str:
 
 ### 4.3 `sync_skills_symlinks(workspace_path)`
 
-Skills 软链接机制（详见 [workspace-skills-flow.md](workspace-skills-flow.md)）：
+Skills 软链接机制（详见 [workspace-skills-flow.md](../workspace/workspace-skills-flow.md)）：
 
 - 扫描 `{workspace}/skills/` 目录中所有非点开头条目
 - 为每个条目在 `{workspace}/.claude/skills/` 创建指向原路径的软链接
@@ -192,41 +193,36 @@ AGENT_CWD=/data/pawkeyland-workspaces
 
 ---
 
-## 6. 与 ClaudeAgentService / ClaudeAgentThreadFactory 的集成
+## 6. 与 ClaudeAgentService / ClaudeAgentThreadFactory 的集成边界
 
-工作空间管理器在 `ClaudeAgentService.assemble_context()` 内部自动调用，且作为 Thread Session 享元的 intrinsic 字段被 `AgentRunState` 缓存：
+工作空间骨架仍在 `ClaudeAgentService.assemble_context()` 内部按需创建，并作为 Thread Session 享元的 intrinsic 字段被 `AgentRunState` 缓存。该阶段只解析 `cwd`，不初始化 `/memory/`：
 
 ```python
 # backend/claude_agent/service.py — Phase 1 (Context Assembly)
 from libs.claude_agent_kit.server.workspace import get_or_create_workspace
 
 async def assemble_context(self, request, *, state, queue, runner=None):
-    # ... 先解析 resolved_identity / persisted_pet_info / mem0_user_id ...
-
-    # 三层享元短路：state 缓存 → request.cwd 显式覆盖 → 首轮 get_or_create_workspace
-    workspace_key = f"{request.user_id}__{request.persona_id}"
-    if state is not None and state.cwd:
-        cwd = state.cwd                                # 续轮 / TTL 内命中
+    # state 缓存 → request.cwd 显式覆盖 → 首轮 get_or_create_workspace
+    if state.cwd:
+        cwd = state.cwd
     elif request.cwd:
-        cwd = str(request.cwd)                         # 调试覆盖
+        cwd = request.cwd
     else:
-        cwd = get_or_create_workspace(workspace_key)   # 首轮 / TTL 重建后第一轮
-        if state is not None:
-            state.cwd = cwd                            # 写回享元
+        cwd = str(get_or_create_workspace(state.session_id))
+        state.with_cwd(cwd)
 
     opts = AgentRunOptions(
-        thread_id=existing_claude_session_id,           # from DB, None on first turn
-        user_message=enriched_message,
+        thread_id=existing_claude_session_id,
+        user_message=user_message_content,
         cwd=cwd,
-        system_prompt=state.system_prompt,              # 同样享元短路
+        system_prompt=state.system_prompt,
         # ...
     )
-    # ...
 ```
 
 > **生产 HTTP 路径**：通过 `ClaudeAgentThreadFactory.run_streaming(request)` 进入；Factory 持有 `AgentRunStatePool`，`get_or_create_workspace` 在首轮 / TTL 重建后第一轮被触发，TTL（默认 10 分钟）内复用享元 `state.cwd`。
 >
-> **bare Service 调用**（`state is None`）：每次都走重建路径，不写回；用于诊断脚本。
+> **Memory 路径**：调用方在发送首轮 Agent 消息前显式调用 `POST /api/workspace/memory-init`。该文件接口读取 `voices.memory_workspace_config` 并写入 `{cwd}/memory/`。`/api/claude-agent/threads` 和 `assemble_context()` 都不承担 Memory 初始化职责。
 
 ---
 

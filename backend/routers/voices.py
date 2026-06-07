@@ -46,6 +46,7 @@ class VoiceCreateRequest(BaseModel):
     name_en: str = None
     icon: str = None
     color: str = None
+    memory_workspace_config: dict = None
 
 
 class VoiceUpdateRequest(BaseModel):
@@ -58,6 +59,7 @@ class VoiceUpdateRequest(BaseModel):
     enabled: bool = None
     order_index: int = None
     thread_id: str = None
+    memory_workspace_config: dict = None
 
 
 class VoiceForkRequest(BaseModel):
@@ -198,6 +200,7 @@ def create_voice(
             name_en=request.name_en,
             icon=request.icon,
             color=request.color,
+            memory_workspace_config=request.memory_workspace_config,
         )
         return {"voice_id": voice_id}
     except ValueError as e:

@@ -11,6 +11,7 @@
 // [Sync] 2026-05-30: fix reasoning SSE display — auto-expand reasoning when state==='streaming'; show spin loader + blinking cursor during stream; border dims when done; hide manual expand toggle while streaming.
 // [Sync] 2026-05-30: reasoning blocks default to expanded (isExpandedActual ?? true) so thinking content stays visible after streaming ends; user can click to collapse; toggle flips isExpandedActual.
 // [Sync] 2026-06-02: delegate user text bubbles to UserMessagePart so user prompts render through the shared GFM Markdown path.
+// [Sync] 2026-06-06: render toolMetadata.approvalRequested tool parts directly with approval UI so auto-mode backend confirmations are visible.
 import { useState } from 'react';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -104,6 +105,11 @@ function resolveToolName(part: ToolUIPart | DynamicToolUIPart): string {
   const raw = part as unknown as Record<string, unknown>;
   if (typeof raw.toolName === 'string' && raw.toolName) return raw.toolName;
   return '';
+}
+
+function isApprovalRequestedTool(part: ToolUIPart | DynamicToolUIPart): boolean {
+  const raw = part as unknown as { toolMetadata?: Record<string, unknown> };
+  return raw.toolMetadata?.approvalRequested === true;
 }
 
 export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
@@ -284,6 +290,19 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   return (
                     <div key={partKey}>
                       <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} />
+                    </div>
+                  );
+                }
+
+                // Backend-driven confirmation requests must show approval UI
+                // regardless of the local toolChoice value. Auto mode uses this
+                // path for every non-files/ tool that needs an explicit Claude
+                // Code permission decision.
+                const needsRequestedApproval = isApprovalRequestedTool(toolPart) && !isCompleted;
+                if (needsRequestedApproval) {
+                  return (
+                    <div key={partKey}>
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} />
                     </div>
                   );
                 }
