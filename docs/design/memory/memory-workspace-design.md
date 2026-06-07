@@ -8,6 +8,7 @@
 >            新增两类使用场景（Voice 对话记忆 / Reflections 分析）、Reflections 三分区配置设计、
 >            分区初始化端点对比、Reflections 完整时序图、输出格式 Contract、
 >            Polanyi 默会知识分区设计原则、前端 AnalysisView 交互变更、更新代码归属与验证清单。
+> [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题与 PaperStack 报告视图，补充仪表盘 / 报告双视图结构、一键按钮与分区独立按钮交互差异、ResultCard 统一类型说明、历史报告按日合并策略。
 
 # Memory Workspace 设计
 
@@ -250,22 +251,40 @@ Tacit Boundary 示例（echoes 分区）：
 
 ## 11. 前端 AnalysisView 设计
 
-### 11.1 交互对比
+### 11.1 双视图架构
 
-| 改变前 | 改变后 |
-|---|---|
-| 一个「生成全部」按钮同时触发三个分区 | 每个分区独立的「分析 / Re-analyze」按钮 |
-| 全页 spinner，所有分区阻塞 | 各分区独立 loading 状态，可并发 |
-| 关联笔记由标签关键词匹配 | 优先 `related_session_ids` 精确匹配，关键词作为兜底 |
-| 无流式进度显示 | 分区内实时展示 SSE 流输出片段（光标 `▌` 指示工作中） |
+| 视图 | 切换条件 | 主题 |
+|---|---|---|
+| `dashboard`（仪表盘） | 默认入口 | 暖纸张：Georgia 斜体、`var(--color-bg-app)` 米色渐变、DecorativeInkSpots |
+| `report`（PaperStack） | 一键分析完成后自动切换 / 点击历史报告 / 点击「View Reflections →」 | 三维堆叠白纸动效，导航箭头 + 圆点 |
 
-### 11.2 卡片字段
+### 11.2 分析触发方式对比
 
-每张分析卡片展示：
+| 维度 | 一键「Generate Reflections」 | 分区独立「Analyze / Re-analyze」|
+|---|---|---|
+| 位置 | 仪表盘头部 stamp 风格按钮 | 仪表盘 SectionControlsRow + PaperStack 纸张头部 |
+| 触发范围 | 三分区同时（Promise.all，无 onDelta） | 单分区，带 SSE streaming |
+| 完成行为 | 自动切换到报告视图 | 留在当前视图，按分区更新内容 |
+| 进度展示 | 分区独立 loading indicator | SSE 实时文字流（最后 800 字符 + `▌`）|
 
-- `confidence` 颜色指示点：绿（high）/ 琥珀（medium）/ 灰（low）
-- 关联笔记数量徽章（`related_session_ids.length`，来自 agent 精确引用）
-- Detail panel：`evidence` 直接引用块 + confidence badge
+### 11.3 结果卡片（ResultCard — 三分区统一格式）
+
+采用 `ReflectionResult` 统一类型（替代旧的 `Echo / Trait / Pattern` 分离类型）：
+
+| 字段 | 展示位置 | 视觉处理 |
+|---|---|---|
+| `title` | 卡片标题 | Georgia 斜体 17px，`var(--color-text-primary)` |
+| `description` | echoes / patterns 主要描述 | 系统字体，`var(--color-text-body)` |
+| `evidence` | traits 主要描述（替代 description） | 同上 |
+| `confidence` | traits：5 格进度条；patterns：Confidence pill | 替代旧的 `strength`（1–5）/ `frequency` 字段 |
+
+### 11.4 历史报告加载策略
+
+`reloadSavedReports`（useCallback）按**日历日**合并 DB 记录：分区独立保存的多行在同一天合并为一张 pill；各分区当前展示内容从 individual rows 中分别取最新含该分区的一条。
+
+### 11.5 ⚙ SectionConfigModal
+
+每个分区在仪表盘控制行和 PaperStack 纸张头部均有齿轮按钮，点击打开配置弹窗：可查看/编辑该分区的 5 个 memory workspace 提示词文件，支持保存（PUT）与重置（DELETE → GET），用户自定义激活时显示 CUSTOM 徽章。
 
 ---
 

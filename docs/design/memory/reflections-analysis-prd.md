@@ -4,6 +4,7 @@
 > [Output] Reflections 页面分区记忆系统工作空间配置的完整 PRD：分区定义、配置文件内容、初始化流程、Agent 执行协议、输出格式、前端交互设计。
 > [Pos] reflections-analysis-prd node in `docs/design/memory`
 > [Sync] 2026-06-06: 初版 PRD，补全三分区配置内容、sessions_context 格式、结果获取方式、工作空间结构、扩展性设计。
+> [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题（Georgia + CSS 设计 tokens），新增 PaperStack 报告视图，保留一键「Generate Reflections」按钮，更新卡片字段（ReflectionResult 统一类型，confidence 替代 strength/frequency），补充历史报告按日期合并策略。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
 
@@ -750,38 +751,130 @@ POST /api/reports
 
 ## 11. 前端 AnalysisView 设计
 
-### 11.1 交互对比
+### 11.1 视图层级
 
-| 维度 | 改造前 | 改造后 |
+AnalysisView 包含两个视图，通过 `viewMode` state 切换：
+
+```
+viewMode = 'dashboard'  →  仪表盘视图（入口）
+viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳转）
+```
+
+### 11.2 仪表盘视图（dashboard）
+
+**主题**：暖纸张 / 复古日记风格
+- 背景：`linear-gradient(var(--color-bg-app) → var(--color-bg-paper))`（米色渐变，随系统亮/暗模式自动适配）
+- 字体：`Georgia, serif`（标题）+ 系统 sans-serif（元数据、按钮）
+- 装饰：DecorativeInkSpots 背景光晕
+
+**布局结构**：
+
+```
+仪表盘头部（标题 + 副标题）
+├── VintageStatLabel × 3（Days / Entries / Words）
+├── 历史报告网格（最近 3 条，点击进入报告视图）
+│   └── 报告卡片：日期 + LATEST 徽章 + 分区数量标签
+├── 一键「Generate Reflections」按钮（stamp 风格，同时触发三分区）
+│   └── 分析完成后自动切换 viewMode → 'report'
+├── SectionControlsRow（分区控制行）
+│   ├── echoes 分区：[⚙] + [Analyze] + 流式进度
+│   ├── traits 分区：[⚙] + [Analyze] + 流式进度
+│   └── patterns 分区：[⚙] + [Analyze] + 流式进度
+├── 全局错误提示（汇总三分区错误，仅在非加载中时显示）
+├── Empty State（无数据时：📖 + 提示文字）
+└── 「View Reflections →」按钮（有数据时显示，切换到报告视图）
+```
+
+**触发方式对比**：
+
+| 维度 | 一键按钮 | 分区独立按钮（SectionControlsRow）|
 |---|---|---|
-| 触发方式 | 一个「生成全部」按钮同时触发三个分区 | 每个分区独立的「分析 / Re-analyze」按钮 |
-| 加载状态 | 全页 spinner，三分区阻塞 | 各分区独立 loading，可并发 |
-| 进度展示 | 无 | 分区内实时显示 SSE 流输出片段（光标 `▌` 指示） |
-| 关联笔记 | 关键词匹配（标签文本） | 优先 `related_session_ids` 精确匹配，关键词作为兜底 |
-| 恢复展示 | 取最新报告，三分区用同一条 | 按分区分别取最新报告恢复 |
+| 触发范围 | 三分区同时（Promise.all） | 单分区独立 |
+| 完成后跳转 | 是（自动切换到报告视图） | 否（留在仪表盘） |
+| 流式进度 | 无（以 loading 状态表示） | 有（实时 SSE 文字片段）|
+| 适用场景 | 首次全量生成 | 按需刷新单分区 |
 
-### 11.2 各分区 loading 层级
+**加载状态（分区独立）**：
 
 ```
-Section Header
-├── [分析] 按钮（disabled 时显示 ◌ loading）
-├── 进度面板（loading && streamingText）
-│   └── 实时拼接的 SSE 文字片段（最后 1200 字符）+ ▌
-├── 读取中提示（loading && !streamingText）
-│   └── "Reading memory workspace and analysing…"
-└── 卡片网格（!loading）
-    └── AnalysisCard × n
+分区控制行每个分区：
+├── [Analyze] 按钮（loading 时显示 ◌，disabled）
+├── [⚙] 齿轮按钮（打开 SectionConfigModal）
+├── 流式进度面板（loading && streamingText）
+│   └── SSE 文字片段（最后 800 字符）+ ▌
+└── 读取中提示（loading && !streamingText）
+    └── "Reading memory workspace…"（斜体，灰色）
 ```
 
-### 11.3 卡片字段
+### 11.3 PaperStack 报告视图（report）
+
+**主题**：三维堆叠纸张动效，暖白纸背景
+- 纸张背景：`linear-gradient(var(--color-bg-surface-solid) → var(--color-bg-paper))`
+- 纸张阴影：多层 box-shadow 模拟真实纸张厚度
+- 纸面纹理：细密网格叠加层（opacity: 0.7）
+- 水彩光晕：右上角模糊圆形装饰
+
+**交互**：
+- 纸张切换：左右箭头 + 小圆点导航（最多三张：echoes / traits / patterns）
+- 激活纸张：全不透明，前置（z-index 10），正角度
+- 非激活纸张：opacity 0.4，偏移 ±10px，微旋转 ±0.5°
+
+**每张纸的结构**：
+
+```
+纸张 Header
+├── 图标 + 分区名（Georgia 斜体）+ 副标题（uppercase）
+└── 控制区（仅登录用户）
+    ├── [⚙] 齿轮按钮 → 打开 SectionConfigModal
+    ├── [Re-analyze] 按钮 → 触发该分区单独分析
+    └── 分析中：显示流式进度或"Reading memory workspace…"
+
+纸张 Body
+└── ResultCard × n（echoes / traits / patterns 统一格式）
+```
+
+**结果卡片（ResultCard，三分区统一 ReflectionResult 类型）**：
 
 | 字段 | 展示位置 | 视觉处理 |
 |---|---|---|
-| `title` | 卡片标题 | 大写，18px Barlow Condensed |
-| `description` | 卡片正文 | 截3行，灰色 |
-| `confidence` | 卡片左上角色点 | 绿（high）/ 琥珀（medium）/ 灰（low） |
-| `related_session_ids.length` | 卡片右上角 | `{n}↗` 关联笔记数量徽章 |
-| `evidence` | 关联笔记视图（detail panel）| 左边框引用块，斜体 |
+| `title` | 卡片标题 | Georgia 斜体，17px，`var(--color-text-primary)` |
+| `description` | 卡片正文（echoes / patterns） | 系统字体，13px，`var(--color-text-body)`，line-height 1.75 |
+| `evidence` | 卡片正文（traits）| 同上，作为主要描述替代 description |
+| `confidence` | traits：5 格进度条；patterns：Confidence 标签 | 进度条：`var(--color-text-muted)` 渐变；标签：圆角 pill |
+
+> **注**：`ReflectionResult` 为三分区统一类型（替代旧的 `Echo/Trait/Pattern` 分离类型），confidence 替代 traits 的 `strength`（1–5）和 patterns 的 `frequency` 字段。
+
+### 11.4 历史报告恢复策略
+
+`reloadSavedReports`（`useCallback`）从 DB 加载最多 `MAX_SAVED_REPORTS`（10）条记录：
+
+1. 每条 DB 记录可能只包含一个分区（分区独立保存时）
+2. 按**日历日**分组，同一天的多条记录合并为一张历史报告 pill
+3. 恢复当前展示的各分区内容时，从全部行中分别取**最新含该分区**的一条
+
+```
+DB rows（individual）
+    │ 按 toDateString() 分组
+    ▼
+byDay Map（每天最多一条，合并 echoes/traits/patterns）
+    │ 排序（最新在前）
+    ▼
+savedReports 数组（Dashboard 历史报告网格）
+
+分区当前展示：
+  echoes   ← individual.find(r => r.echoes.length > 0)   ← 最新行
+  traits   ← individual.find(r => r.traits.length > 0)
+  patterns ← individual.find(r => r.patterns.length > 0)
+```
+
+### 11.5 SectionConfigModal
+
+每个分区在仪表盘控制行和 PaperStack 纸张头部各有一个 **⚙ 齿轮按钮**，点击打开 `SectionConfigModal`：
+
+- 显示该分区当前使用的 5 个 memory workspace 提示词文件（可编辑 textarea）
+- 文件保存：`PUT /api/reflections/config/{section}`
+- 重置默认：`DELETE /api/reflections/config/{section}` → 重新 `GET` 展示
+- 用户自定义激活时：弹窗标题区显示 `CUSTOM` 徽章（`usedCustomConfig === true`）
 
 ---
 
@@ -854,7 +947,7 @@ REFLECTIONS_SECTION_CONFIGS["new_section"] = {
 | 配置读写端点 | `backend/routers/reflections.py` → `GET/PUT/DELETE /api/reflections/config/{section}` |
 | 分析编排 + system_prompt 构造 + 解析 | `frontend/src/api/voiceApi.ts` → `analyzeReflectionsSection` |
 | 配置读写客户端函数 | `frontend/src/api/voiceApi.ts` → `getReflectionsSectionConfig / saveReflectionsSectionConfig / resetReflectionsSectionConfig` |
-| 结果展示（分区独立按钮 + 卡片 + 关联笔记） | `frontend/src/components/AnalysisView.tsx` |
-| 配置编辑 UI（待实现） | `frontend/src/components/AnalysisView.tsx` |
+| 结果展示（仪表盘 + PaperStack 报告视图 + 卡片）| `frontend/src/components/AnalysisView.tsx` |
+| 配置编辑 UI（SectionConfigModal，每分区 ⚙ 齿轮按钮） | `frontend/src/components/AnalysisView.tsx` |
 | memory_context 注入（引擎层，无改动） | `backend/claude_agent/context_builder.py` |
 | 分析报告存储 | `backend/routers/reports.py` + `backend/database.py` |
