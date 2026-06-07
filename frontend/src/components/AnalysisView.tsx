@@ -1302,8 +1302,7 @@ function NavArrow({ direction, disabled, onClick, isMobile }: {
   const arrowStyle: React.CSSProperties = {
     position: 'absolute',
     left: isLeft ? (isMobile ? '12px' : 'calc(50% - 540px)') : 'auto',
-    right: isLeft ? 'auto' : (isMobile ? '12px' : 'auto'),
-    marginLeft: (!isMobile && !isLeft) ? '530px' : undefined,
+    right: isLeft ? 'auto' : (isMobile ? '12px' : 'calc(50% - 540px)'),
     top: '50%', transform: 'translateY(-50%)',
     width: size, height: size, borderRadius: '50%',
     background: disabled
