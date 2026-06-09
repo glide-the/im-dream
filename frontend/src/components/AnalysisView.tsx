@@ -10,9 +10,12 @@
  *         Types migrated to unified ReflectionResult[]; confidence replaces strength/frequency.
  *         Per-section streaming analyze + ⚙ SectionConfigModal retained.
  *         One-click 「Generate Reflections」 button in dashboard header retained.
+ * [Sync] 2026-06-09: Past Reflections cards now open a full-page blog view (ReflectionBlogPage)
+ *         instead of the PaperStack popup. viewMode extends to 'blog'; selectedReport state tracks
+ *         which report is being read. Color spec: docs/prd/color_system/reflection-blog.md
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   analyzeEchoes,
@@ -275,8 +278,9 @@ export default function AnalysisView() {
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
 
   // View modes
-  const [viewMode, setViewMode] = useState<'dashboard' | 'report'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'report' | 'blog'>('dashboard');
   const [currentPaper, setCurrentPaper] = useState(0);
+  const [selectedReport, setSelectedReport] = useState<AnalysisReport | null>(null);
 
   // Section config modal
   const [configModal, setConfigModal] = useState<{
@@ -518,6 +522,24 @@ export default function AnalysisView() {
   const anyError = errors.echoes || errors.traits || errors.patterns;
 
   // ──────────────────────────────────────────────
+  // BLOG VIEW — full-page editorial layout for a single Past Reflection
+  // ──────────────────────────────────────────────
+  if (viewMode === 'blog' && selectedReport) {
+    return (
+      <ReflectionBlogPage
+        report={selectedReport}
+        onBack={() => setViewMode('dashboard')}
+        isMobile={isMobile}
+        t={t}
+        dateLocale={dateLocale}
+        formatDaysLabel={formatDaysLabel}
+        formatEntriesLabel={formatEntriesLabel}
+        formatWordsLabel={formatWordsLabel}
+      />
+    );
+  }
+
+  // ──────────────────────────────────────────────
   // REPORT VIEW — PaperStack 3D stacked-paper display
   // ──────────────────────────────────────────────
   if (viewMode === 'report' && hasAnyData) {
@@ -639,10 +661,8 @@ export default function AnalysisView() {
                 <div
                   key={report.id}
                   onClick={() => {
-                    if (report.echoes.length) setEchoes(report.echoes);
-                    if (report.traits.length) setTraits(report.traits);
-                    if (report.patterns.length) setPatterns(report.patterns);
-                    setViewMode('report'); setCurrentPaper(0);
+                    setSelectedReport(report);
+                    setViewMode('blog');
                   }}
                   style={{
                     padding: '1.5rem', background: 'var(--color-bg-surface)',
@@ -1302,8 +1322,7 @@ function NavArrow({ direction, disabled, onClick, isMobile }: {
   const arrowStyle: React.CSSProperties = {
     position: 'absolute',
     left: isLeft ? (isMobile ? '12px' : 'calc(50% - 540px)') : 'auto',
-    right: isLeft ? 'auto' : (isMobile ? '12px' : 'auto'),
-    marginLeft: (!isMobile && !isLeft) ? '530px' : undefined,
+    right: isLeft ? 'auto' : (isMobile ? '12px' : 'calc(50% - 540px)'),
     top: '50%', transform: 'translateY(-50%)',
     width: size, height: size, borderRadius: '50%',
     background: disabled
@@ -1425,6 +1444,441 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
         paddingTop: '0.5rem',
       }}>
         {label}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════
+// ReflectionBlogPage — full-page editorial blog layout
+// Nav right: section tabs (switch which section is shown)
+// Main area: single scrollable page — hero + item list + detail below on click
+// Detail view (image2 layout) renders BELOW the list, no mode switching
+// Player bar: sticky at viewport bottom when an item is selected
+// Color spec: docs/prd/color_system/reflection-blog.md
+// Feature PRD: docs/prd/reflection-blog.md
+// ══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════
+// ReflectionBlogPage — left-right split layout
+// Left panel: section nav (Recurring Themes / Traits / Patterns)
+// Right panel: title list for active section; click title → detail below
+// Detail area (image2): description left | related notes right | player bar
+// Color spec: docs/prd/color_system/reflection-blog.md
+// Feature PRD: docs/prd/reflection-blog.md
+// ══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════
+// ReflectionBlogPage — left/right split layout (PRD v3)
+// Left  : Hero (cover art + date + stats)
+// Right : Section tabs (top) + title-only list (below)
+// Below : Detail area (description | related notes + player bar)
+// Color spec : docs/prd/color_system/reflection-blog.md
+// Feature PRD: docs/prd/reflection-blog.md
+// ══════════════════════════════════════════════
+
+// ══════════════════════════════════════════════
+// ReflectionBlogPage — fixed-height flex layout (PRD v4)
+// Layout: flex column, overflow hidden, no outer page scroll
+// Left  : Hero (cover art + date + stats), overflow-y auto
+// Right : Section tabs (flex-shrink:0) + title list (flex:1, overflow-y:auto)
+// Detail: fixed height below split, internal scroll per column
+// Player: flex-shrink:0 at very bottom, floats above content
+// Refs  : docs/prd/reflection-blog.md, docs/prd/color_system/reflection-blog.md
+// ══════════════════════════════════════════════
+function ReflectionBlogPage({
+  report, onBack, isMobile, t, dateLocale,
+  formatDaysLabel, formatEntriesLabel, formatWordsLabel,
+}: {
+  report: AnalysisReport;
+  onBack: () => void;
+  isMobile: boolean;
+  t: (k: string, opts?: any) => string;
+  dateLocale: string;
+  formatDaysLabel: (n: number) => string;
+  formatEntriesLabel: (n: number) => string;
+  formatWordsLabel: (n: number) => string;
+}) {
+  const date = new Date(report.timestamp);
+
+  const blogSections: { key: SectionKey; icon: string; items: ReflectionResult[]; kind: 'echo' | 'trait' | 'pattern' }[] = [
+    ...(report.echoes.length > 0 ? [{ key: 'echoes' as SectionKey, icon: '🔄', items: report.echoes, kind: 'echo' as const }] : []),
+    ...(report.traits.length > 0 ? [{ key: 'traits' as SectionKey, icon: '⭐', items: report.traits, kind: 'trait' as const }] : []),
+    ...(report.patterns.length > 0 ? [{ key: 'patterns' as SectionKey, icon: '🌀', items: report.patterns, kind: 'pattern' as const }] : []),
+  ];
+
+  const firstKey = (blogSections[0]?.key ?? 'echoes') as SectionKey;
+  const [activeSection, setActiveSection] = useState<SectionKey>(firstKey);
+  const [selectedItemIdx, setSelectedItemIdx] = useState<number | null>(null);
+
+  const activeSectionObj = blogSections.find(s => s.key === activeSection) ?? blogSections[0];
+  const activeItems = activeSectionObj?.items ?? [];
+  const selectedItem = selectedItemIdx !== null ? (activeItems[selectedItemIdx] ?? null) : null;
+
+  const monthStr    = date.toLocaleDateString('en', { month: 'short' }).toUpperCase();
+  const dayStr      = date.getDate();
+  const yearStr     = date.getFullYear();
+  const fullDateStr = date.toLocaleDateString(dateLocale, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+
+  const handleSectionChange = (key: SectionKey) => { setActiveSection(key); setSelectedItemIdx(null); };
+  const goToPrev = () => { if (selectedItemIdx !== null && selectedItemIdx > 0) setSelectedItemIdx(selectedItemIdx - 1); };
+  const goToNext = () => { if (selectedItemIdx !== null && selectedItemIdx < activeItems.length - 1) setSelectedItemIdx(selectedItemIdx + 1); };
+  const cfill = (c?: string) => c === 'high' ? 5 : c === 'low' ? 1 : 3;
+
+  const coverArt = (size: number) => (
+    <div style={{
+      flexShrink: 0, width: size, height: size,
+      background: 'linear-gradient(145deg, var(--color-bg-surface-solid) 0%, color-mix(in srgb, var(--color-border-paper) 40%, var(--color-bg-surface-solid)) 100%)',
+      border: '1px solid var(--color-border-paper)', borderRadius: '8px',
+      boxShadow: '0 4px 16px var(--color-shadow-medium), 0 1px 4px var(--color-shadow-soft)',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      gap: size > 80 ? '4px' : '2px', position: 'relative', overflow: 'hidden',
+    }}>
+      <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-border-paper) 5%, transparent) 0px, transparent 2px)', pointerEvents: 'none' }} />
+      <span style={{ fontSize: size > 80 ? '11px' : '8px', letterSpacing: '3px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, position: 'relative' }}>{monthStr}</span>
+      <span style={{ fontSize: size > 80 ? '44px' : '24px', fontWeight: 300, fontFamily: 'Georgia, serif', lineHeight: 1, color: 'var(--color-text-primary)', position: 'relative' }}>{dayStr}</span>
+      <span style={{ fontSize: size > 80 ? '11px' : '8px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', position: 'relative' }}>{yearStr}</span>
+    </div>
+  );
+
+  return (
+    <div style={{
+      width: '100%', height: '100%',
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+      background: 'var(--color-bg-app)',
+      fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif",
+    }}>
+
+      {/* ── Sticky Nav ── */}
+      <div style={{
+        flexShrink: 0, zIndex: 100,
+        background: 'color-mix(in srgb, var(--color-bg-surface-solid) 92%, transparent)',
+        backdropFilter: 'blur(16px)',
+        borderBottom: '1px solid var(--color-border-paper)',
+        padding: isMobile ? '0.5rem 1rem' : '0.5rem 1.5rem',
+        display: 'flex', alignItems: 'center',
+      }}>
+        <button
+          onClick={onBack}
+          style={{ background: 'none', border: '1px solid var(--color-border-paper)', borderRadius: '20px', padding: '4px 14px', cursor: 'pointer', color: 'var(--color-text-body)', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', transition: 'all 0.2s', whiteSpace: 'nowrap' }}
+          onMouseEnter={e => { e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+          onMouseLeave={e => { e.currentTarget.style.background = 'none'; }}
+        >
+          <span>←</span>
+          <span>{t('analysis.pastReflections')}</span>
+        </button>
+      </div>
+
+      {/* ── Main content area (flex:1, no outer scroll) ── */}
+      <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+        {/* ── Left / Right split (flex:1, shrinks when detail opens) ── */}
+        <div style={{
+          flex: 1, overflow: 'hidden', minHeight: 0,
+          display: 'flex', flexDirection: isMobile ? 'column' : 'row',
+        }}>
+
+          {/* LEFT: Hero */}
+          <div style={{
+            flexShrink: 0,
+            width: isMobile ? '100%' : '240px',
+            overflowY: isMobile ? 'hidden' : 'auto',
+            borderRight: isMobile ? 'none' : '1px solid var(--color-border-paper)',
+            borderBottom: isMobile ? '1px solid var(--color-border-paper)' : 'none',
+            background: 'linear-gradient(180deg, var(--color-bg-surface-solid) 0%, var(--color-bg-app) 100%)',
+            padding: isMobile ? '0.875rem 1.25rem' : '2rem 1.75rem',
+            display: 'flex',
+            flexDirection: isMobile ? 'row' : 'column',
+            alignItems: isMobile ? 'center' : 'flex-start',
+            gap: isMobile ? '1rem' : '0',
+          }}>
+            {coverArt(isMobile ? 56 : 120)}
+
+            <div style={{ marginTop: isMobile ? 0 : '1.25rem', minWidth: 0 }}>
+              <div style={{ fontSize: '9px', letterSpacing: '2.5px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, marginBottom: isMobile ? '0.25rem' : '0.4rem' }}>
+                Reflection
+              </div>
+              <div style={{ fontSize: isMobile ? '14px' : '18px', fontFamily: 'Georgia, serif', fontStyle: 'italic', color: 'var(--color-text-primary)', lineHeight: 1.3, marginBottom: isMobile ? '0.375rem' : '0.875rem' }}>
+                {fullDateStr}
+              </div>
+              <div style={{
+                display: 'flex', flexDirection: isMobile ? 'row' : 'column',
+                gap: isMobile ? '0.375rem' : '0.2rem',
+                flexWrap: isMobile ? 'wrap' : undefined,
+                fontSize: '11px', color: 'var(--color-text-secondary)',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              }}>
+                <span>{formatDaysLabel(report.stats?.days || 0)}</span>
+                {isMobile && <span style={{ color: 'var(--color-border-paper)' }}>·</span>}
+                <span>{formatEntriesLabel(report.stats?.entries || 0)}</span>
+                {isMobile && <span style={{ color: 'var(--color-border-paper)' }}>·</span>}
+                <span>{formatWordsLabel(report.stats?.words || 0)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* RIGHT: Section tabs + title list */}
+          <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+
+            {/* Section tabs */}
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', flexShrink: 0 }}>
+              {blogSections.map(s => {
+                const isActive = s.key === activeSection;
+                return (
+                  <button
+                    key={s.key}
+                    onClick={() => handleSectionChange(s.key)}
+                    style={{
+                      flex: isMobile ? '1' : 'none',
+                      padding: isMobile ? '0.5rem 0.375rem' : '0.75rem 1.25rem',
+                      background: 'transparent',
+                      borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+                      borderBottom: `2px solid ${isActive ? 'var(--color-text-muted)' : 'transparent'}`,
+                      cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: isMobile ? 'center' : 'flex-start',
+                      gap: '5px',
+                      transition: 'all 0.2s',
+                      color: isActive ? 'var(--color-text-body)' : 'var(--color-text-muted)',
+                    }}
+                    onMouseEnter={e => { if (!isActive) e.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+                    onMouseLeave={e => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ fontSize: isMobile ? '14px' : '13px' }}>{s.icon}</span>
+                    {!isMobile && <span style={{ fontSize: '12px', fontWeight: isActive ? 600 : 400, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', whiteSpace: 'nowrap' }}>{t(`analysis.papers.${s.key}.title`)}</span>}
+                    <span style={{ fontSize: '10px', fontWeight: 600, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', background: isActive ? 'color-mix(in srgb, var(--color-border-paper) 50%, transparent)' : 'color-mix(in srgb, var(--color-border-paper) 28%, transparent)', padding: '1px 5px', borderRadius: '10px' }}>{s.items.length}</span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Title-only list — independent scroll */}
+            <div style={{ flex: 1, overflowY: 'auto', minHeight: 0, padding: isMobile ? '0.25rem 1.25rem' : '0.25rem 1.75rem' }}>
+              {activeItems.map((item, i) => {
+                const isSelected = selectedItemIdx === i;
+                const num = String(i + 1).padStart(2, '0');
+                return (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedItemIdx(isSelected ? null : i)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: '0.875rem',
+                      padding: '0.8rem 0',
+                      width: '100%', textAlign: 'left',
+                      background: isSelected ? 'color-mix(in srgb, var(--color-border-paper) 7%, transparent)' : 'transparent',
+                      borderTop: 'none', borderLeft: 'none', borderRight: 'none',
+                      borderBottom: `1px solid color-mix(in srgb, var(--color-border-paper) 35%, transparent)`,
+                      cursor: 'pointer', transition: 'all 0.15s',
+                    }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'color-mix(in srgb, var(--color-border-paper) 6%, transparent)'; }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ flexShrink: 0, fontSize: '11px', fontWeight: 600, letterSpacing: '1px', color: 'var(--color-text-muted)', fontFamily: 'Georgia, serif', minWidth: '20px', opacity: isSelected ? 1 : 0.5 }}>{num}</span>
+                    <span style={{ flex: 1, minWidth: 0, fontSize: isMobile ? '14px' : '15px', fontFamily: 'Georgia, serif', fontStyle: 'italic', color: isSelected ? 'var(--color-text-primary)' : 'var(--color-text-body)', fontWeight: isSelected ? 500 : 400, lineHeight: 1.4, transition: 'color 0.2s' }}>
+                      {item.title}
+                    </span>
+                    <span style={{ flexShrink: 0, fontSize: '13px', color: 'var(--color-text-muted)', display: 'inline-block', transition: 'transform 0.25s', transform: isSelected ? 'rotate(90deg)' : 'rotate(0deg)' }}>→</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Detail area: fixed height, below split ── */}
+        {selectedItem !== null && (
+          <div style={{
+            flexShrink: 0,
+            height: isMobile ? '52vh' : '45vh',
+            overflow: 'hidden',
+            display: 'flex', flexDirection: 'column',
+            borderTop: '2px solid var(--color-border-paper)',
+            background: 'var(--color-bg-surface)',
+          }}>
+            {/* Detail header */}
+            <div style={{ flexShrink: 0, padding: isMobile ? '0.625rem 1.25rem' : '0.875rem 2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid color-mix(in srgb, var(--color-border-paper) 50%, transparent)' }}>
+              <div style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span>{activeSectionObj?.icon}</span>
+                <span>{t(`analysis.papers.${activeSection}.title`)}</span>
+                <span style={{ color: 'var(--color-border-paper)' }}>·</span>
+                <span>{selectedItemIdx! + 1} / {activeItems.length}</span>
+              </div>
+              <button onClick={() => setSelectedItemIdx(null)} style={{ background: 'none', border: '1px solid var(--color-border-paper)', borderRadius: '50%', width: '22px', height: '22px', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', padding: 0, transition: 'all 0.2s', flexShrink: 0 }} onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--color-text-muted)'; }} onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--color-border-paper)'; }}>×</button>
+            </div>
+
+            {/* Two-column content with independent scroll */}
+            <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: 0 }}>
+              {/* Left: description */}
+              <div style={{ flex: isMobile ? 'none' : '6', overflowY: 'auto', minHeight: 0, padding: isMobile ? '1rem 1.25rem' : '1.25rem 2rem', borderRight: isMobile ? 'none' : '1px solid var(--color-border-paper)', borderBottom: isMobile ? '1px solid var(--color-border-paper)' : 'none', height: isMobile ? '50%' : '100%' }}>
+                <h2 style={{ fontSize: isMobile ? '17px' : '22px', fontWeight: 400, fontFamily: 'Georgia, serif', fontStyle: 'italic', color: 'var(--color-text-primary)', margin: '0 0 0.875rem', lineHeight: 1.3 }}>{selectedItem.title}</h2>
+                <p style={{ fontSize: '13px', lineHeight: 1.85, color: 'var(--color-text-body)', margin: '0 0 1rem', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+                  {activeSectionObj?.kind === 'trait' ? selectedItem.evidence : selectedItem.description}
+                </p>
+                {activeSectionObj?.kind === 'trait' && (() => {
+                  const fill = cfill(selectedItem.confidence);
+                  return (
+                    <>
+                      <div style={{ display: 'flex', gap: '4px', marginBottom: '0.5rem' }}>
+                        {[1, 2, 3, 4, 5].map(n => (<div key={n} style={{ flex: 1, height: '3px', borderRadius: '2px', background: n <= fill ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-border-paper) 40%, transparent)', opacity: n <= fill ? 0.8 : 0.4 }} />))}
+                      </div>
+                      <p style={{ fontSize: '12px', color: 'var(--color-text-muted)', lineHeight: 1.7, margin: 0, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>{selectedItem.evidence}</p>
+                    </>
+                  );
+                })()}
+                {(activeSectionObj?.kind === 'echo' || activeSectionObj?.kind === 'pattern') && selectedItem.confidence && (
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '11px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', background: 'color-mix(in srgb, var(--color-border-paper) 20%, transparent)', padding: '3px 10px', borderRadius: '12px', border: '1px solid color-mix(in srgb, var(--color-border-paper) 40%, transparent)' }}>
+                    <span style={{ fontWeight: 600 }}>Confidence</span><span>·</span><span style={{ fontStyle: 'italic' }}>{selectedItem.confidence}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Right: related notes */}
+              <div style={{ flex: isMobile ? 'none' : '4', overflowY: 'auto', minHeight: 0, padding: isMobile ? '1rem 1.25rem' : '1.25rem 1.75rem', height: isMobile ? '50%' : '100%' }}>
+                <div style={{ fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, marginBottom: '0.875rem' }}>Related Notes</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.625rem' }}>
+                  {[75, 60, 68].map((w, idx) => (
+                    <div key={idx} style={{ padding: '0.75rem', background: 'var(--color-bg-surface-solid)', borderRadius: '8px', border: '1px solid color-mix(in srgb, var(--color-border-paper) 50%, transparent)', opacity: 0.45 }}>
+                      <div style={{ height: '8px', borderRadius: '4px', background: 'color-mix(in srgb, var(--color-border-paper) 60%, transparent)', marginBottom: '0.35rem', width: `${w}%` }} />
+                      <div style={{ height: '6px', borderRadius: '3px', background: 'color-mix(in srgb, var(--color-border-paper) 40%, transparent)', width: `${w - 15}%` }} />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ color: 'var(--color-text-muted)', fontSize: '11px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontStyle: 'italic' }}>Related notes coming soon</div>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Player Bar: floating at bottom (outside scroll area) ── */}
+      {selectedItem !== null && (
+        <div style={{
+          flexShrink: 0,
+          background: 'var(--color-bg-surface-solid)',
+          borderTop: '1px solid var(--color-border-paper)',
+          padding: isMobile ? '0.5rem 1rem' : '0.625rem 1.75rem',
+          display: 'flex', alignItems: 'center', gap: isMobile ? '0.5rem' : '1.25rem',
+          boxShadow: '0 -3px 12px var(--color-shadow-soft)',
+          zIndex: 10,
+        }}>
+          {/* Track info */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
+            <div style={{ width: '32px', height: '32px', flexShrink: 0, background: 'linear-gradient(135deg, var(--color-bg-surface-solid) 0%, color-mix(in srgb, var(--color-border-paper) 40%, var(--color-bg-surface-solid)) 100%)', border: '1px solid var(--color-border-paper)', borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>
+              {activeSectionObj?.icon}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: '12px', fontWeight: 500, color: 'var(--color-text-body)', fontFamily: 'Georgia, serif', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{selectedItem.title}</div>
+              <div style={{ fontSize: '10px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>{t(`analysis.papers.${activeSection}.title`)}</div>
+            </div>
+          </div>
+          {/* Controls */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem', flexShrink: 0 }}>
+            <button onClick={goToPrev} disabled={selectedItemIdx === 0} style={{ background: 'none', border: '1px solid var(--color-border-paper)', borderRadius: '50%', width: '28px', height: '28px', cursor: selectedItemIdx === 0 ? 'not-allowed' : 'pointer', color: selectedItemIdx === 0 ? 'var(--color-border-paper)' : 'var(--color-text-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', transition: 'all 0.2s', padding: 0 }}>◀</button>
+            <div style={{ display: 'flex', gap: '3px', alignItems: 'center' }}>
+              {activeItems.map((_, n) => (
+                <button key={n} onClick={() => setSelectedItemIdx(n)} style={{ width: n === selectedItemIdx ? '14px' : '5px', height: '5px', borderRadius: '3px', background: n === selectedItemIdx ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-text-muted) 35%, transparent)', border: 'none', cursor: 'pointer', padding: 0, transition: 'all 0.3s', flexShrink: 0 }} />
+              ))}
+            </div>
+            <button onClick={goToNext} disabled={selectedItemIdx === activeItems.length - 1} style={{ background: 'none', border: '1px solid var(--color-border-paper)', borderRadius: '50%', width: '28px', height: '28px', cursor: selectedItemIdx === activeItems.length - 1 ? 'not-allowed' : 'pointer', color: selectedItemIdx === activeItems.length - 1 ? 'var(--color-border-paper)' : 'var(--color-text-body)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px', transition: 'all 0.2s', padding: 0 }}>▶</button>
+          </div>
+          {/* Counter */}
+          <span style={{ fontSize: '11px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', letterSpacing: '0.5px', flexShrink: 0 }}>
+            {selectedItemIdx! + 1} / {activeItems.length}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+function BlogResultCard({
+  result, kind, index, onClick, isSelected,
+}: {
+  result: ReflectionResult;
+  kind: 'echo' | 'trait' | 'pattern';
+  index: number;
+  onClick?: () => void;
+  isSelected?: boolean;
+}) {
+  const confidenceFill = result.confidence === 'high' ? 5 : result.confidence === 'low' ? 1 : 3;
+  const indexLabel = String(index + 1).padStart(2, '0');
+
+  return (
+    <div
+      onClick={onClick}
+      style={{
+        background: isSelected
+          ? 'linear-gradient(135deg, color-mix(in srgb, var(--color-border-paper) 18%, var(--color-bg-surface-solid)) 0%, color-mix(in srgb, var(--color-border-paper) 10%, var(--color-bg-surface)) 100%)'
+          : 'linear-gradient(135deg, var(--color-bg-surface-solid) 0%, var(--color-bg-surface) 100%)',
+        padding: kind === 'trait' ? '1.75rem' : '2rem 2.25rem',
+        borderRadius: '12px',
+        border: isSelected
+          ? '1px solid var(--color-border-paper)'
+          : '1px solid color-mix(in srgb, var(--color-border-paper) 55%, transparent)',
+        position: 'relative', overflow: 'hidden',
+        transition: 'all 0.25s',
+        cursor: onClick ? 'pointer' : 'default',
+        boxShadow: isSelected ? '0 4px 16px var(--color-shadow-soft)' : 'none',
+      }}
+      onMouseEnter={e => {
+        if (!isSelected) {
+          e.currentTarget.style.boxShadow = '0 6px 24px var(--color-shadow-soft)';
+          e.currentTarget.style.borderColor = 'var(--color-border-paper)';
+          if (onClick) e.currentTarget.style.transform = 'translateY(-2px)';
+        }
+      }}
+      onMouseLeave={e => {
+        if (!isSelected) {
+          e.currentTarget.style.boxShadow = 'none';
+          e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--color-border-paper) 55%, transparent)';
+        }
+        e.currentTarget.style.transform = 'translateY(0)';
+      }}
+    >
+      {/* Paper texture */}
+      <div style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-border-paper) 3%, transparent) 0px, transparent 2px)`, pointerEvents: 'none' }} />
+
+      {/* Index + toggle arrow */}
+      <div style={{ position: 'absolute', top: '1.25rem', right: '1.5rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        {onClick && (
+          <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', opacity: 0.7, transition: 'transform 0.2s', display: 'inline-block', transform: isSelected ? 'rotate(90deg)' : 'rotate(0deg)' }}>→</span>
+        )}
+        <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '1px', color: 'color-mix(in srgb, var(--color-border-paper) 70%, transparent)', fontFamily: 'Georgia, serif' }}>
+          {indexLabel}
+        </span>
+      </div>
+
+      <div style={{ position: 'relative' }}>
+        <h3 style={{ fontSize: '19px', fontWeight: 500, fontFamily: 'Georgia, serif', fontStyle: 'italic', color: 'var(--color-text-primary)', margin: '0 0 0.875rem', lineHeight: 1.35, paddingRight: '3rem' }}>
+          {result.title}
+        </h3>
+        <p style={{ color: 'var(--color-text-body)', lineHeight: 1.85, fontSize: '14px', margin: '0 0 1rem', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+          {kind === 'trait' ? result.evidence : result.description}
+        </p>
+
+        {kind === 'trait' && (
+          <>
+            <div style={{ display: 'flex', gap: '5px', marginBottom: '0.625rem' }}>
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} style={{ flex: 1, height: '4px', borderRadius: '2px', background: i <= confidenceFill ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-border-paper) 40%, transparent)', opacity: i <= confidenceFill ? 0.8 : 0.4 }} />
+              ))}
+            </div>
+            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', lineHeight: 1.6 }}>
+              {result.evidence}
+            </div>
+          </>
+        )}
+
+        {(kind === 'echo' || kind === 'pattern') && result.confidence && (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '11px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', background: 'color-mix(in srgb, var(--color-border-paper) 20%, transparent)', padding: '4px 12px', borderRadius: '14px', border: '1px solid color-mix(in srgb, var(--color-border-paper) 40%, transparent)' }}>
+            <span style={{ fontWeight: 600 }}>Confidence</span>
+            <span>·</span>
+            <span style={{ fontStyle: 'italic' }}>{result.confidence}</span>
+          </div>
+        )}
       </div>
     </div>
   );

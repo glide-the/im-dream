@@ -50,14 +50,23 @@
 #                    DB refreshes; falls back to opts.editor_state when getter is absent.
 # [Sync] 2026-06-07: refine auto-mode PreToolUse policy to product sensitivity:
 #                    workspace files/ built-in file tools and explicit low-risk
-#                    query tools receive hook-level allow; execution/write/state
-#                    tools fall through to frontend confirmation.
+#                    query tools receive hook-level allow; execution/write/
+#                    interaction tools fall through to frontend confirmation.
 # [Sync] 2026-06-07: add Bash+ls and mcp__editor__switch_editor to low-sensitivity
 #                    auto-allow class; _apply_low_sensitivity_query_permission now
 #                    accepts optional tool_input for command-level Bash inspection.
 # [Sync] 2026-06-07: expand _LOW_SENSITIVITY_BASH_PREFIXES from {ls} to full
 #                    read-only/navigation set: ls cd pwd echo cat head tail wc
 #                    find which type date whoami id groups env printenv uname hostname.
+# [Sync] 2026-06-09: classify Claude Code's built-in Skill tool as low-sensitivity
+#                    after confirming SKILL_TOOL_NAME == "Skill" in restored source;
+#                    keep switch_editor in the low-sensitivity class.
+# [Sync] 2026-06-09: normalize PreToolUse/PostToolUse hook payload keys across
+#                    snake_case and camelCase shapes so inputs like
+#                    {"toolName": "Skill"} still hit the low-sensitivity allow path.
+# [Sync] 2026-06-09: add Settings-controlled IM full-access mode: after safe
+#                    .editor/ redirects, every exposed tool gets explicit
+#                    PreToolUse permissionDecision:"allow".
 
 """Claude Agent Runner.
 
@@ -124,17 +133,25 @@ except NameError:
 # Default tool allowlist.
 #
 # Pet chat is the product-facing path, so the default surface is intentionally
-# narrow: expose only the user MCP touch-animation tool and no built-in
-# filesystem/web/Bash-style tools.
+# narrow: expose only the Skill tool plus product-owned MCP tools and no
+# built-in filesystem/web/Bash-style tools.
 # ---------------------------------------------------------------------------
 
 DEFAULT_ALLOWED_TOOLS: list[str] = [
+    "Skill",
     "mcp__user__touch_animation",
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
 ]
+
+_AUTO_MODE_REQUIRED_ALLOWED_TOOLS: frozenset[str] = frozenset({
+    # SkillTool has its own Claude Code permission prompt for non-safe skill
+    # metadata. Keep the tool in auto-mode allowed_tools even when callers pass
+    # a custom allowed_tools list so our PreToolUse allow can own the decision.
+    "Skill",
+})
 _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
@@ -157,6 +174,10 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
     "WebFetch",
     "WebSearch",
     "BashOutput",
+    # Claude Code built-in SkillTool expands/executes a named skill prompt.
+    # Source check: restored-src/src/tools/SkillTool/constants.ts exports
+    # SKILL_TOOL_NAME = "Skill".
+    "Skill",
     # SDK / MCP resource discovery and reads, where available.
     "ListMcpResources",
     "ReadMcpResource",
@@ -217,9 +238,10 @@ def _is_low_sensitivity_bash_command(command: str) -> bool:
     return first_token in _LOW_SENSITIVITY_BASH_PREFIXES
 
 # Tool names that have specialized confirmation semantics. Auto mode now uses
-# sensitivity classes: explicit query tools can run, while execution/write/state
-# tools confirm through the frontend. This set remains the explicit inventory of
-# Q&A and editor-write tools whose UI/result handling is special.
+# sensitivity classes: explicit query/context-selection/Skill tools can run,
+# while execution/write/interactive tools confirm through the frontend. This
+# set remains the explicit inventory of Q&A and editor-write tools whose
+# UI/result handling is special.
 _ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
     "AskUserQuestion",
     "mcp__user__ask_user",
@@ -763,7 +785,7 @@ def _apply_low_sensitivity_query_permission(
     tool_name: str,
     tool_input: Optional[dict[str, Any]] = None,
 ) -> Optional[HookJSONOutput]:
-    """Explicitly allow auto-mode tools whose product class is read/query-only.
+    """Explicitly allow auto-mode tools whose product class is low-sensitivity.
 
     Returning an empty ``HookJSONOutput()`` would merely decline to make a hook
     decision and let Claude Code's own permission layer decide. These low-risk
@@ -771,9 +793,9 @@ def _apply_low_sensitivity_query_permission(
     Claude Code's native permission prompt in auto mode, so the hook must return
     an explicit ``permissionDecision: "allow"``.
 
-    Special case — ``Bash``: only ``ls`` invocations (with optional flags and
-    path arguments) qualify. Any command containing shell metacharacters is
-    treated as high-sensitivity and falls through to frontend confirmation.
+    Special case — ``Bash``: only read-only/navigation commands qualify. Any
+    command containing shell metacharacters is treated as high-sensitivity and
+    falls through to frontend confirmation.
     """
 
     if tool_name in _LOW_SENSITIVITY_QUERY_TOOL_NAMES:
@@ -795,6 +817,41 @@ def _apply_low_sensitivity_query_permission(
             )
 
     return None
+
+
+def _explicit_pre_tool_use_allow() -> HookJSONOutput:
+    """Return the CLI 2.1+ explicit allow shape for PreToolUse hooks."""
+
+    return HookJSONOutput(
+        hookSpecificOutput={
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+        }
+    )
+
+
+def _extract_hook_tool_name(hook_input: dict[str, Any]) -> str:
+    """Return tool name from Claude hook payloads.
+
+    Claude Code hook JSON is documented as ``tool_name`` / ``tool_input``, but
+    adjacent SDK/control-protocol surfaces and frontend events use camelCase.
+    Accept both so a payload shaped like ``{"toolName": "Skill"}`` still uses
+    the low-sensitivity policy instead of falling through as an unknown tool.
+    """
+
+    value = hook_input.get("tool_name")
+    if value is None:
+        value = hook_input.get("toolName")
+    return str(value or "")
+
+
+def _extract_hook_tool_input(hook_input: dict[str, Any]) -> dict[str, Any]:
+    """Return tool input from Claude hook payloads in snake or camel case."""
+
+    value = hook_input.get("tool_input")
+    if value is None:
+        value = hook_input.get("toolInput")
+    return value if isinstance(value, dict) else {}
 
 
 # ---------------------------------------------------------------------------
@@ -968,6 +1025,10 @@ class ClaudeAgentRunner:
             else _default_allowed_tools()
         )
         tool_choice: ToolChoiceMode = opts.tool_choice
+        if tool_choice == "auto":
+            for required_tool in _AUTO_MODE_REQUIRED_ALLOWED_TOOLS:
+                if required_tool not in allowed_tools:
+                    allowed_tools.append(required_tool)
         system_prompt = opts.system_prompt
         mcp_env = dict(opts.mcp_env or {})
         turn_runtime = dict(opts.turn_runtime or {})
@@ -1056,8 +1117,8 @@ class ClaudeAgentRunner:
             context: HookContext,
         ) -> HookJSONOutput:
             del context
-            tool_name = str(hook_input.get("tool_name") or "")
-            tool_input: dict[str, Any] = hook_input.get("tool_input") or {}
+            tool_name = _extract_hook_tool_name(hook_input)
+            tool_input = _extract_hook_tool_input(hook_input)
             tool_call_id = tool_use_id or str(uuid4())
             pending_tool_calls[tool_call_id] = {
                 "tool_name": tool_name,
@@ -1092,6 +1153,9 @@ class ClaudeAgentRunner:
             if redirect_result is not None:
                 return redirect_result
 
+            if opts.im_full_access_enabled and tool_choice != "none":
+                return _explicit_pre_tool_use_allow()
+
             if tool_choice == "auto":
                 workspace_files_permission = _apply_workspace_files_permission(
                     tool_name, tool_input, cwd
@@ -1105,11 +1169,11 @@ class ClaudeAgentRunner:
                 if low_sensitivity_permission is not None:
                     return low_sensitivity_permission
 
-            # In auto mode, workspace files/ built-in file tools and explicit
-            # read/query tools are allowed above. Execution, write, interactive,
-            # and state-changing tools fall through to the frontend confirmation
-            # side-channel so approval is visible and becomes an explicit
-            # Claude Code permission decision.
+            # In auto mode, workspace files/ built-in file tools plus explicit
+            # low-sensitivity query/context-selection/Skill tools are allowed
+            # above. Execution, write, and interactive tools fall through to
+            # the frontend confirmation side-channel so approval is visible and
+            # becomes an explicit Claude Code permission decision.
 
             if callbacks.on_tool_confirmation_request:
                 confirmation_payload = {
@@ -1234,7 +1298,7 @@ class ClaudeAgentRunner:
             context: HookContext,
         ) -> HookJSONOutput:
             del context
-            tool_name = str(hook_input.get("tool_name") or "")
+            tool_name = _extract_hook_tool_name(hook_input)
 
             # Only act on the switch_editor context-switch tool.
             if tool_name != _SWITCH_EDITOR_MCP_TOOL_NAME:
@@ -1247,7 +1311,7 @@ class ClaudeAgentRunner:
                 )
                 return HookJSONOutput()
 
-            tool_input: dict[str, Any] = hook_input.get("tool_input") or {}
+            tool_input = _extract_hook_tool_input(hook_input)
             new_session_id: str = str(tool_input.get("editor_session_id") or "").strip()
             if not new_session_id:
                 logger.warning(

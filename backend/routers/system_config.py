@@ -3,6 +3,8 @@
 # [Output] Register GET/PUT /api/system-config endpoints.
 # [Pos] system-config route node in backend/routers
 # [Sync] 2026-05-27: initial implementation — system config (model, theme, env_vars, etc.).
+# [Sync] 2026-06-09: accept im_full_access_enabled for Settings-controlled
+#                    Claude-agent full-access tool approval.
 
 """System configuration API.
 
@@ -17,6 +19,8 @@ The system config is a freeform dict stored per user.  Known fields:
   model            : str  — model name
   system_prompt    : str  — custom system prompt for the AI agent
   workspace_enabled: bool — whether the workspace file sidebar is active
+  im_full_access_enabled: bool — whether Claude-agent PreToolUse approvals
+                            should allow every exposed tool automatically
   theme            : str  — UI theme ("light" | "dark" | "system")
   env_vars         : dict — user-supplied env vars forwarded to skills/MCP servers
                             as key→value string pairs
@@ -73,8 +77,8 @@ def put_system_config(
     """Merge *request* into the caller's system configuration.
 
     Accepted keys: ``provider``, ``model``, ``system_prompt``,
-    ``workspace_enabled``, ``theme``, ``env_vars``.
-    Unknown keys are stored but not used by the server.
+    ``workspace_enabled``, ``im_full_access_enabled``, ``theme``, ``env_vars``.
+    Unknown keys are ignored.
     """
     user_id = current_user["user_id"]
 
@@ -88,6 +92,8 @@ def put_system_config(
         patch["system_prompt"] = str(request["system_prompt"])[:16_384]
     if "workspace_enabled" in request:
         patch["workspace_enabled"] = bool(request["workspace_enabled"])
+    if "im_full_access_enabled" in request:
+        patch["im_full_access_enabled"] = bool(request["im_full_access_enabled"])
     if "theme" in request:
         theme = str(request["theme"])
         if theme in ("light", "dark", "system"):

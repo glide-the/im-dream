@@ -1,6 +1,14 @@
+// [Input] System config API, chat icons, AuthContext token, dashboard design tokens.
+// [Output] Render Settings AI model/theme/system-prompt/workspace/full-access/env controls.
+// [Pos] settings-model-config component node in frontend/src/components/dashboard
+// [Sync] 2026-06-09: add IM full-access approval toggle backed by
+//                    system_config.im_full_access_enabled.
+// [Sync] 2026-06-09: emit same-tab IM full-access change events so Chat UI
+//                    updates without a page refresh.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
+import { emitImFullAccessChanged } from '../../lib/system-config-events';
 
 const API_BASE = '/ink-and-memory';
 
@@ -16,6 +24,7 @@ interface SystemConfigData {
   model?: string;
   system_prompt?: string;
   workspace_enabled?: boolean;
+  im_full_access_enabled?: boolean;
   theme?: ThemeMode;
   env_vars?: Record<string, string>;
 }
@@ -54,6 +63,7 @@ export default function ModelConfigSection() {
   });
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [workspaceMode, setWorkspaceMode] = useState(true);
+  const [imFullAccessEnabled, setImFullAccessEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [dirty, setDirty] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
@@ -76,6 +86,7 @@ export default function ModelConfigSection() {
         setTheme(config.theme ?? 'system');
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
+        setImFullAccessEnabled(config.im_full_access_enabled ?? false);
         const match = MODEL_OPTIONS.find((option) => option.model === config.model);
         setSelectedModel(match?.value ?? 'auto');
         const savedEnvVars = config.env_vars ?? {};
@@ -115,11 +126,14 @@ export default function ModelConfigSection() {
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>) => {
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/api/system-config`, {
+      const response = await fetch(`${API_BASE}/api/system-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
         body: JSON.stringify(patch),
       });
+      return response.ok;
+    } catch {
+      return false;
     } finally {
       setSaving(false);
     }
@@ -141,6 +155,20 @@ export default function ModelConfigSection() {
     setWorkspaceMode(next);
     void updateConfig({ workspace_enabled: next });
   }, [updateConfig, workspaceMode]);
+
+  const handleImFullAccessToggle = useCallback(() => {
+    const next = !imFullAccessEnabled;
+    setImFullAccessEnabled(next);
+    emitImFullAccessChanged(next);
+    void (async () => {
+      const saved = await updateConfig({ im_full_access_enabled: next });
+      if (saved) {
+        return;
+      }
+      setImFullAccessEnabled(!next);
+      emitImFullAccessChanged(!next);
+    })();
+  }, [imFullAccessEnabled, updateConfig]);
 
   const handleSavePrompt = useCallback(() => {
     void updateConfig({ system_prompt: systemPrompt });
@@ -335,6 +363,41 @@ export default function ModelConfigSection() {
               transition: 'left 0.2s ease',
             }}
           />
+        </button>
+      </div>
+
+      {/* IM approval mode */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
+        <div>
+          <p style={{ margin: 0, fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+            应如何批准 IM
+          </p>
+          <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+            开启后，Claude-agent 的工具调用将自动获得完全访问权限。
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleImFullAccessToggle}
+          aria-pressed={imFullAccessEnabled}
+          title={imFullAccessEnabled ? '完全访问已开启' : '完全访问已关闭'}
+          style={{
+            flexShrink: 0,
+            minWidth: '6.25rem',
+            height: '1.9rem',
+            border: 'none',
+            borderRadius: '999px',
+            padding: '0 0.85rem',
+            background: imFullAccessEnabled ? 'var(--color-text-primary)' : 'var(--color-disabled-bg)',
+            color: imFullAccessEnabled ? 'var(--color-bg-paper)' : 'var(--color-text-secondary)',
+            cursor: 'pointer',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+            transition: 'background 0.2s ease, color 0.2s ease',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          完全访问
         </button>
       </div>
 
