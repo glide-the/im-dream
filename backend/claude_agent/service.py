@@ -54,6 +54,11 @@
 #                    _EDITOR_WRITE_TOOL_NAMES it reloads editor_state from DB and updates
 #                    state.editor_state — getter propagates change to PreToolUse instantly.
 #                    _TurnContext gains tool_name_by_id dict for tool_result name lookup.
+# [Sync] 2026-06-06: remove implicit Memory workspace initialization from
+#                    assemble_context. Memory is initialized only via the
+#                    workspace file interface before agent analysis starts.
+# [Sync] 2026-06-09: read system_config.im_full_access_enabled and pass it to
+#                    AgentRunOptions so Settings can enable full-access tool approval.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -86,6 +91,7 @@ from dataclasses import dataclass, field
 from typing import Any, AsyncGenerator, Mapping, Optional
 from uuid import uuid4
 
+import database as _db
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
@@ -387,15 +393,18 @@ class ClaudeAgentService:
             voice_system_prompt=request.system_prompt or None,
         )
 
-        # Load user-configured env vars (skills / MCP environment) from system config.
+        # Load user-configured agent settings from system config.
+        sys_cfg: dict[str, Any] = {}
         user_env_vars: dict[str, str] = {}
+        im_full_access_enabled = False
         try:
             sys_cfg = _db.get_system_config(int(request.user_id))
             raw_env = sys_cfg.get("env_vars") or {}
             if isinstance(raw_env, dict):
                 user_env_vars = {str(k).strip(): str(v) for k, v in raw_env.items() if str(k).strip() and v is not None}
+            im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
         except Exception:
-            logger.warning("Failed to load user env_vars from system_config; skipping.")
+            logger.warning("Failed to load user agent settings from system_config; skipping.")
 
         run_options = AgentRunOptions(
             thread_id=thread_id_for_agent,
@@ -405,6 +414,7 @@ class ClaudeAgentService:
             cwd=cwd or None,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
+            im_full_access_enabled=im_full_access_enabled,
             system_prompt=state.system_prompt,
             mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,

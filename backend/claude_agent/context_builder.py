@@ -29,6 +29,14 @@
 # [Sync] 2026-06-01: escape literal JSON braces in _SYSTEM_PROMPT_TEMPLATE so
 #                    str.format only substitutes recent_sessions_block; keep
 #                    recent-session range results capped by context_session_count.
+# [Sync] 2026-06-06: remove Memory Workflow section from _SYSTEM_PROMPT_TEMPLATE;
+#                    memory workflow rules live in memory/WORKFLOW.md (workspace files),
+#                    not in the engine system prompt.  Retain <memory_context> block
+#                    injection in build_user_message — it tells the agent where the
+#                    workspace is; the WORKFLOW.md file provides the rules.
+# [Sync] 2026-06-09: add Planning Prompt Optimization workflow to the system prompt
+#                    so planning turns first transform the raw task through the
+#                    Expert Prompt Architect template before planning execution.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -92,6 +100,37 @@ Principles:
 - Respect privacy: treat all journal content as confidential.
 - Respond in the same language the user writes in.
 
+## Planning Prompt Optimization Workflow
+
+Before every planning task, first transform the user's raw requirement into a clear,
+copy-paste-ready planning prompt using this Expert Prompt Architect template. Use the
+resulting "Optimized Prompt" as the basis for the task plan; do not skip this step for
+multi-step coding, editing, research, or document-production work.
+
+```text
+You are an Expert Prompt Architect.
+Convert the user's requirement into a highly detailed, optimized,
+ready-to-use prompt for ANY purpose (image, video, writing, SEO, coding,
+learning, research, etc.).
+
+Instructions
+Identify what the user is trying to achieve.
+Without asking questions (unless unclear), transform it into a precise,
+high-value, professional prompt tailored to the correct output type.
+Add missing but useful details (style, tone, constraints, structure, clarity).
+Ensure the prompt is copy-paste ready for the intended AI tool.
+
+Deliver:
+Optimized Prompt - the final refined prompt
+Optional Enhancers - optional add-ons that the user can include
+
+OUTPUT FORMAT
+Optimized Prompt:
+[Expert-level prompt based on the requirement]
+
+USER REQUIREMENT: {{{{task}}}}
+```
+
 ## Edit-Point Workflow
 
 When the user message includes a <workspace_context> block, you are in a document-editing
@@ -105,8 +144,9 @@ session.  Follow this scheduling workflow for every editing-related request:
    call read_file(".editor/session.json").
 3. Analyse before proposing — digest the full content, then share observations or draft
    suggestions with the user before making any changes.
-4. Mutate via MCP write tools only — all document modifications require human confirmation
-   before execution.  Use these tools exclusively:
+4. Use the editor tools by sensitivity — switch_editor only changes context and does not
+   require confirmation in auto mode; document modifications require human confirmation
+   before execution.  Available tools:
      switch_editor(editor_session_id)        — switch to a different session (no confirmation needed)
      write_segment(cellId, text, reason)     — replace a cell's full text
      delete_segment(cellId, reason)          — remove a cell (irreversible)
@@ -316,6 +356,15 @@ class ClaudeAgentContextBuilder:
         )
         if workspace_block:
             blocks.append({"type": "text", "text": workspace_block})
+
+        # Inject memory context block when cwd is known so the agent knows about
+        # the memory/ workspace and can read/update memory files.
+        if cwd:
+            from pathlib import Path as _Path
+            from libs.claude_agent_kit.server.memory_workspace import get_memory_context_block
+            memory_block = get_memory_context_block(_Path(cwd))
+            if memory_block:
+                blocks.append({"type": "text", "text": memory_block})
 
         # Inject voice / deck system prompt as context so the agent knows which
         # persona to adopt.  Appended before the user text ("拼接到message报文中").

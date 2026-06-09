@@ -751,6 +751,7 @@ from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
 from routers.system_config import router as system_config_router
 from routers.workspace import router as workspace_router
+from routers.reflections import router as reflections_router
 from routers.voices import (
     DeckCreateRequest,
     DeckUpdateRequest,
@@ -805,6 +806,7 @@ app.include_router(claude_agent_router)
 app.include_router(storage_router)
 app.include_router(system_config_router)
 app.include_router(workspace_router)
+app.include_router(reflections_router)
 
 
 @app.websocket("/ws/speech-recognition")

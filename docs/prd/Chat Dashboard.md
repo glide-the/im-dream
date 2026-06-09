@@ -1,6 +1,7 @@
 # Chat Dashboard PRD
 
 > 对话工作台首页的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
+> **[Sync] 2026-06-09**: Chat 输入区的权限切换受 Settings「应如何批准 IM」控制；完全访问开启时隐藏「逐步确认」并显示「完全访问」。
 
 ## 1. 文档范围
 
@@ -105,6 +106,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 - AIInputDock 在 ChatPanel 内部 sticky，不触发外层滚动。
 - 视觉沿用 [Chat Send](<./Chat Send.md>)：纸面容器、柔和边框、底部操作行。
 - `Ask Ink & Memory…` placeholder 使用 `color.text.muted`。
+- 当 Settings 中「应如何批准 IM」为完全访问时，AIInputDock 不显示手动「逐步确认」入口，只显示「完全访问」状态徽标。
 
 ## 5. 色彩与视觉规范
 

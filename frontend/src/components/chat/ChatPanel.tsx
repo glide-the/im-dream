@@ -10,6 +10,10 @@
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; forward to ChatMessageList.
 // [Sync] 2026-05-29: let the input dock fill the available chat page width.
 // [Sync] 2026-06-01: accept queuedToolChoice so lazy-created first-turn ChatView sends preserve the selected tool mode.
+// [Sync] 2026-06-09: read system_config.im_full_access_enabled; hide manual
+//                    approvals by forcing chat UI tool mode to auto when enabled.
+// [Sync] 2026-06-09: subscribe to same-tab IM full-access config events so
+//                    Settings changes update active Chat panels immediately.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -35,6 +39,7 @@ import {
 import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
 import { getAuthToken } from '../../contexts/AuthContext';
+import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 
 const API_BASE = '/ink-and-memory';
 
@@ -42,6 +47,7 @@ interface SystemConfigData {
   provider?: string;
   model?: string;
   system_prompt?: string;
+  im_full_access_enabled?: boolean;
 }
 
 interface SystemConfigResponse {
@@ -49,6 +55,7 @@ interface SystemConfigResponse {
   provider?: string;
   model?: string;
   system_prompt?: string;
+  im_full_access_enabled?: boolean;
 }
 
 interface ChatPanelProps {
@@ -75,7 +82,12 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
   if (payload.data) {
     return payload.data;
   }
-  if (payload.provider || payload.model || payload.system_prompt) {
+  if (
+    payload.provider ||
+    payload.model ||
+    payload.system_prompt ||
+    payload.im_full_access_enabled !== undefined
+  ) {
     return payload;
   }
   return undefined;
@@ -133,7 +145,20 @@ export default function ChatPanel({
     };
   }, []);
 
+  useEffect(() => {
+    return subscribeImFullAccessChanged((enabled) => {
+      setSystemConfig((current) => ({
+        ...(current ?? {}),
+        im_full_access_enabled: enabled,
+      }));
+      if (enabled) {
+        setCurrentToolChoice('auto');
+      }
+    });
+  }, []);
+
   const getPendingData = () => pendingDataRef.current;
+  const imFullAccessEnabled = systemConfig?.im_full_access_enabled === true;
 
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
     id: threadId,
@@ -164,12 +189,16 @@ export default function ChatPanel({
           ? { provider: systemConfig.provider, model: systemConfig.model }
           : DEFAULT_CHAT_MODEL;
 
+        const requestToolChoice: ToolChoice = imFullAccessEnabled
+          ? 'auto'
+          : getPendingData()?.toolChoice ?? currentToolChoice;
+
         const requestBody: ChatApiSchemaRequestBody = {
           id,
           resume: true,
           message: lastMessage,
           chatModel: resolvedChatModel,
-          toolChoice: getPendingData()?.toolChoice ?? currentToolChoice,
+          toolChoice: requestToolChoice,
           allowedAppDefaultToolkit: [],
           allowedMcpServers: {},
           attachments,
@@ -286,7 +315,7 @@ export default function ChatPanel({
             error={error}
             addToolResult={addToolResult}
             shouldShowLoadingIndicator={shouldShowLoadingIndicator}
-            toolChoice={currentToolChoice}
+            toolChoice={imFullAccessEnabled ? 'auto' : currentToolChoice}
             setMessages={setMessages}
             sendMessage={sendMessage}
             onEditorWriteConfirmed={onEditorWriteConfirmed}
@@ -298,6 +327,7 @@ export default function ChatPanel({
       <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
         <AIInputDock
           openFileDialogSignal={openFileDialogSignal}
+          fullAccessEnabled={imFullAccessEnabled}
           onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
             onConversationStart?.();
             setCurrentToolChoice(toolChoice);

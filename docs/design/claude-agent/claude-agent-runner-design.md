@@ -1,5 +1,7 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentRunner 模块设计.md — 路径已适配 Ink & Memory 工程规范。
-> **[Sync] 2026-06-07**: 补充 auto 模式敏感度分流策略：workspace `files/` 内置文件工具和明确低敏查询工具显式 allow；执行/写入/交互/状态切换类高敏工具进入前端确认侧路，批准后返回显式 Claude Code allow。
+> **[Sync] 2026-06-07**: 补充 auto 模式敏感度分流策略：workspace `files/` 内置文件工具和明确低敏查询工具显式 allow；当时状态切换类工具也归入高敏确认，该分类已被 2026-06-09 的 `switch_editor` 低敏策略取代。
+> **[Sync] 2026-06-09**: 权限策略独立为 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)；`Skill` 和 `switch_editor` 归入低敏 auto allow。
+> **[Sync] 2026-06-09**: Settings `im_full_access_enabled` 接入 Runner；开启后在 `.editor/` 虚拟索引重定向之后，对所有已暴露工具返回显式 PreToolUse allow。
 
 # ClaudeAgentRunner 模块设计
 
@@ -150,7 +152,7 @@ sequenceDiagram
 ## 5. 工具确认流程（PreToolUse hook）
 
 Claude Code 的 `allowed_tools` 是预批准规则，不是单纯的工具可见性列表。
-Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。`auto` 模式先对当前 workspace `files/` 下的内置文件工具返回显式 `permissionDecision:"allow"`；随后对明确的低敏查询工具（内置 Read/Glob/Grep/LS/TodoRead/WebFetch/WebSearch、会话查询、memory/necklace 只读查询等）返回显式 allow；剩余执行/写入/交互/状态切换工具进入 `on_tool_confirmation_request` 侧路。用户批准后，Runner 返回显式 `permissionDecision:"allow"`，避免 hook fall-through 与 Claude Code 文件权限层语义不一致。
+Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。先处理 `.editor/` 虚拟索引读取重定向；如果 Settings `im_full_access_enabled=true`，则对所有已暴露工具返回显式 `permissionDecision:"allow"`。否则 `auto` 模式先对当前 workspace `files/` 下的内置文件工具返回显式 allow；随后对明确的低敏工具（内置 Read/Glob/Grep/LS/TodoRead/WebFetch/WebSearch、会话查询、memory/necklace 只读查询、`Skill`、`switch_editor` 等）返回显式 allow；剩余执行/写入/交互工具进入 `on_tool_confirmation_request` 侧路。用户批准后，Runner 返回显式 allow，避免 hook fall-through 与 Claude Code 文件权限层语义不一致。完整矩阵见 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -158,9 +160,11 @@ Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_u
 
 | tool_choice | `ClaudeCodeOptions.allowed_tools` | `PreToolUse` | 目的 |
 |---|---:|---|---|
-| `auto` | `DEFAULT_ALLOWED_TOOLS` / request override | `files/` 内置文件工具与低敏查询工具显式 allow；高敏工具等待 `on_tool_confirmation_request` | Agent 可生成 workspace 产物并查询上下文；执行/写入/状态动作需前端确认后才授予本次工具权限 |
+| `auto` | `DEFAULT_ALLOWED_TOOLS` / request override | `files/` 内置文件工具、低敏查询工具、`Skill`、`switch_editor` 显式 allow；高敏工具等待 `on_tool_confirmation_request` | Agent 可生成 workspace 产物并查询/选择上下文；执行/写入/交互动作需前端确认后才授予本次工具权限 |
 | `manual` | `DEFAULT_ALLOWED_TOOLS` / request override | 等待 `on_tool_confirmation_request` | 调试或敏感工具确认侧路 |
 | `none` | `[]` + `extra_args["tools"] = ""` | 不暴露工具 | 通过 Claude CLI `--tools ""` 禁用可用工具 |
+
+当 `im_full_access_enabled=true` 且 `tool_choice!="none"` 时，`PreToolUse` 在 `.editor/` 安全重定向之后跳过上表矩阵并直接返回显式 allow；`tool_choice="none"` 仍不暴露工具。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 

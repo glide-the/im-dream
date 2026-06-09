@@ -6,6 +6,9 @@
 # [Sync] 2026-05-25: add attachment processing — download from file storage and sync to workspace.
 # [Sync] 2026-05-27: ClaudeAgentRequestBody.tool_choice uses AliasChoices("tool_choice","toolChoice") so frontend camelCase is accepted.
 # [Sync] 2026-05-28: remove planning_mode field and prompt_optimizer integration (unrelated code).
+# [Sync] 2026-06-06: stop forwarding client memoryConfig into ClaudeAgentRunRequest;
+#                    Memory workspace config is resolved from the partition table
+#                    by the workspace file-interface initializer.
 
 import base64
 import logging

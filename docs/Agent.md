@@ -24,11 +24,14 @@ User types `@` → `AgentDropdown` appears → user selects a voice.
 ### What happens
 1. `handleAgentSelect` in `App.tsx` inserts a `ChatWidgetUI` at the cursor.
 2. A Claude-agent thread is created asynchronously (`POST /api/claude-agent/threads`).
-3. The widget's `threadId` is updated once the thread exists.
-4. **The user stays in the Writing view.**
+3. The thread is persisted to `voice.thread_id`.
+4. The procedural Memory workspace is initialized explicitly (`POST /api/workspace/memory-init`).
+5. The widget's `threadId` is updated once the thread exists.
+6. **The user stays in the Writing view.**
 
 ### ChatWidgetUI responsibilities
 - Maintain local `InlineMessage[]` state (not persisted to editor state).
+- Before voice-bound sends, ensure `/memory/` exists via `/api/workspace/memory-init`.
 - On each send: POST to `/api/claude-agent` with `systemPrompt = voiceConfig.tagline`.
 - Read the SSE response stream (`text-delta` events) and display streaming text inline.
 - Expose a **"Chat →"** button to open the full Chat view for the same thread.
@@ -81,7 +84,8 @@ for Deck voice interactions.
 
 1. Decide: inline widget or full Chat view?
 2. If inline: follow the `ChatWidgetUI` pattern — create/reuse a thread, POST to
-   `/api/claude-agent` with `systemPrompt`, stream SSE response.
+   `/api/workspace/memory-init`, then POST to `/api/claude-agent` with `systemPrompt`,
+   stream SSE response.
 3. If full Chat view: call `handleOpenChatThread(threadId, voiceInfo)` in `App.tsx`.
 4. Always pass the voice system prompt.  Never omit it.
 5. Update this document and `docs/Claude.md`.

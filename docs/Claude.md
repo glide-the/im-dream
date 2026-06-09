@@ -38,6 +38,10 @@ Key rules:
   **must always be forwarded** as `systemPrompt` in the request body.
 - The widget uses the same `thread_id` that was created for the voice via
   `POST /api/claude-agent/threads`.
+- Voice-bound threads initialize procedural Memory through
+  `POST /api/workspace/memory-init` after `voice.thread_id` is known. The
+  endpoint reads `voices.memory_workspace_config`; the client does not upload
+  prompt contents directly.
 - **No automatic navigation** to the Chat page occurs when `@` is used.  The user stays
   in the Writing view.  The "Chat →" button in the widget is the opt-in path to the full
   Chat view.
@@ -67,8 +71,10 @@ breaks the Deck voice experience.
 
 1. Thread creation: `POST /api/claude-agent/threads` → `{ thread_id }`
 2. Thread is stored in `voice.thread_id` (lazily, on first use).
-3. All messages to that voice use the same `thread_id` — history is preserved.
-4. The inline widget and the full Chat view share the same thread; both reflect the
+3. Procedural Memory initialization: `POST /api/workspace/memory-init` with
+   `{ "sessionId": thread_id, "threadId": thread_id }`.
+4. All messages to that voice use the same `thread_id` — history is preserved.
+5. The inline widget and the full Chat view share the same thread; both reflect the
    same conversation.
 
 ---
@@ -81,3 +87,7 @@ breaks the Deck voice experience.
 - ❌ Do not auto-navigate to the Chat view when the user selects a voice via `@`.
   The interaction must remain inline in the editor.
 - ❌ Do not strip or omit the `systemPrompt` field from Deck voice messages.
+- ❌ Do not make `/api/claude-agent/threads` initialize Memory. Thread creation
+  creates only `chat_thread`; Memory belongs to the workspace file interface.
+- ❌ Do not copy prompt templates from project `.claude/memory/` into thread
+  workspaces at runtime. Use `voices.memory_workspace_config`.

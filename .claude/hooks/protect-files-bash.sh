@@ -13,7 +13,6 @@ fi
 
 # Protected file patterns
 PROTECTED_PATTERNS=(
-  ".claude/"
   ".claude/settings.json"
   ".claude/settings.local.json"
   ".claude/index.json"

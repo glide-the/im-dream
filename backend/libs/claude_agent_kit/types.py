@@ -5,6 +5,8 @@
 # [Sync] 2026-05-09: add MCP subprocess env bindings for current pet context.
 # [Sync] 2026-05-10: add include_runtime_context for specialized callers; pet chat uses the default SDK runtime block.
 # [Sync] 2026-05-10: add turn_runtime for app local time enrichment in SDK runtime_context.
+# [Sync] 2026-06-09: add im_full_access_enabled to allow Settings-controlled
+#                    explicit PreToolUse approval for every exposed tool.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -144,6 +146,10 @@ class AgentRunOptions:
     allowed_tools: Optional[list[str]] = None
     # Tool choice mode.
     tool_choice: ToolChoiceMode = "auto"
+    # Settings-controlled full access mode. When true, the runner returns an
+    # explicit PreToolUse permissionDecision:"allow" for every exposed tool
+    # after safe virtual-index redirects have had a chance to rewrite inputs.
+    im_full_access_enabled: bool = False
     # System prompt override.
     system_prompt: Optional[str] = None
     # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.

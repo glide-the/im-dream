@@ -1,6 +1,23 @@
+// [Input] Consume backend REST/SSE endpoints, auth token storage, language storage, and session/deck request data.
+// [Output] Provide frontend API helpers for sessions, decks, voices, Claude Agent SSE calls, analysis reports,
+//          Reflections section analysis, and Reflections section config (GET/PUT/DELETE).
+// [Pos] voice-api client node in frontend/src/api
+// [Sync] 2026-06-06: remove Voice scenario memory workspace initialization (initializeMemoryWorkspace removed).
+// [Sync] 2026-06-06: migrate Reflections section analysis to procedural memory workspace flow:
+//         create thread → POST /api/reflections/memory-init → POST /api/claude-agent SSE
+//         (system_prompt: section identity + memoryPath) → drain SSE (progress only)
+//         → GET /api/claude-agent/threads/{id}/messages → extract text parts (skip reasoning) → parse JSON.
+// [Sync] 2026-06-06: add ReflectionSectionConfig type + getReflectionsSectionConfig /
+//         saveReflectionsSectionConfig / resetReflectionsSectionConfig API helpers for
+//         frontend prompt-file editing (GET/PUT/DELETE /api/reflections/config/{section}).
 /**
  * API client for voice analysis backend - FastAPI sync API version
  * [Sync] 2026-06-01: normalize user_sessions.labels in session API responses for frontend display.
+ * [Sync] 2026-06-05: analyzeEchoes/analyzeTraits/analyzePatterns migrated from polycli trigger-sync
+ *         to claude-agent SSE stream. Added callAgentAndCollectText + extractJSONArray helpers.
+ * [Sync] 2026-06-06: analyzeEchoes/analyzeTraits/analyzePatterns now delegate to
+ *         analyzeReflectionsSection which calls /api/reflections/analyze with
+ *         procedural memory workspace guidance.
  */
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -14,6 +31,7 @@ export interface VoiceConfig {
   icon: string;
   color: string;
   thread_id?: string;
+  memory_workspace_config?: Record<string, unknown>;
 }
 
 export interface UserState {
@@ -54,6 +72,7 @@ export interface Voice {
   enabled: boolean;
   order_index?: number;
   thread_id?: string;
+  memory_workspace_config?: Record<string, unknown>;
   created_at?: string;
   updated_at?: string;
 }
@@ -118,6 +137,7 @@ function getAuthHeaders(): HeadersInit {
     'Authorization': `Bearer ${token}`
   };
 }
+
 
 /**
  * Get default voices from backend
@@ -363,91 +383,606 @@ export async function chatWithVoice(
   return data.result?.response || 'Sorry, I could not respond.';
 }
 
+// ─────────────────────────────────────────────────────────────
+// Claude-Agent helpers for one-shot analysis calls
+// ─────────────────────────────────────────────────────────────
+
 /**
- * Analyze echoes (recurring themes) from all notes (PolyCLI direct call)
+ * Fetch all sessions and format them as a compact text block
+ * to embed directly in analysis prompts, so the agent
+ * does not need tool calls to access session data.
  */
-export async function analyzeEchoes(): Promise<any[]> {
-  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  const language = getUILanguage();
+async function buildSessionsContext(): Promise<string> {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
+    const sessions = await listSessions(tz);
+    if (sessions.length === 0) return '(no writing sessions found)';
 
-  const response = await fetch(`${API_BASE}/polycli/api/trigger-sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      session_id: 'analyze_echoes',
-      params: { language },
-      timeout: 60
-    })
-  });
-
-  const data: SyncResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || 'Echoes analysis failed');
+    return sessions
+      .slice(0, 80)
+      .map(s => {
+        const date = new Date(s.created_at).toLocaleDateString();
+        const title = (s.name || s.first_line || '').slice(0, 120);
+        const labels = s.labels.length > 0 ? `  labels: [${s.labels.join(', ')}]` : '';
+        return `[${s.id}]  ${date}  ${title}${labels}`;
+      })
+      .join('\n');
+  } catch {
+    return '(could not fetch sessions)';
   }
+}
 
-  return data.result?.echoes || [];
+// ─────────────────────────────────────────────────────────────
+// Reflections section analysis — procedural memory workspace + claude-agent
+// ─────────────────────────────────────────────────────────────
+
+// ─────────────────────────────────────────────────────────────
+// Reflections section config — read / write / reset
+// ─────────────────────────────────────────────────────────────
+
+export interface ReflectionSectionConfig {
+  section: string;
+  display_name: string;
+  display_name_zh: string;
+  usedCustomConfig: boolean;
+  prompt_files: Record<string, string>;
 }
 
 /**
- * Analyze traits (personality characteristics) from all notes (PolyCLI direct call)
+ * Fetch the effective section config for the current user.
+ * Returns the user's custom config if set, merged over the static default.
  */
-export async function analyzeTraits(): Promise<any[]> {
+export async function getReflectionsSectionConfig(
+  section: 'echoes' | 'traits' | 'patterns'
+): Promise<ReflectionSectionConfig> {
   const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  const language = getUILanguage();
+  if (!token) throw new Error('Not authenticated');
 
-  const response = await fetch(`${API_BASE}/polycli/api/trigger-sync`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
-    },
-    body: JSON.stringify({
-      session_id: 'analyze_traits',
-      params: { language },
-      timeout: 60
-    })
+  const res = await fetch(`${API_BASE}/api/reflections/config/${section}`, {
+    headers: { Authorization: `Bearer ${token}` },
   });
-
-  const data: SyncResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || 'Traits analysis failed');
-  }
-
-  return data.result?.traits || [];
+  if (!res.ok) throw new Error(`Failed to fetch section config (${res.status})`);
+  return await res.json() as ReflectionSectionConfig;
 }
 
 /**
- * Analyze patterns (behavioral patterns) from all notes (PolyCLI direct call)
+ * Save user's custom prompt files for a section.
+ * Partial updates are supported — only provided filenames are overridden.
  */
-export async function analyzePatterns(): Promise<any[]> {
+export async function saveReflectionsSectionConfig(
+  section: 'echoes' | 'traits' | 'patterns',
+  promptFiles: Record<string, string>
+): Promise<{ saved: boolean; updatedFiles: string[] }> {
   const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  const language = getUILanguage();
+  if (!token) throw new Error('Not authenticated');
 
-  const response = await fetch(`${API_BASE}/polycli/api/trigger-sync`, {
+  const res = await fetch(`${API_BASE}/api/reflections/config/${section}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ prompt_files: promptFiles }),
+  });
+  if (!res.ok) {
+    const err = await res.text().catch(() => '');
+    throw new Error(`Failed to save section config (${res.status}): ${err}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Reset a section's config back to the static default (removes user customization).
+ */
+export async function resetReflectionsSectionConfig(
+  section: 'echoes' | 'traits' | 'patterns'
+): Promise<void> {
+  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (!token) throw new Error('Not authenticated');
+
+  const res = await fetch(`${API_BASE}/api/reflections/config/${section}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error(`Failed to reset section config (${res.status})`);
+}
+
+export interface ReflectionResult {
+  title: string;
+  description: string;
+  related_session_ids: string[];
+  evidence: string;
+  confidence: 'high' | 'medium' | 'low';
+}
+
+/**
+ * Extract the first JSON array from text, stripping markdown fences if present.
+ */
+function extractReflectionResults(text: string): ReflectionResult[] {
+  let candidate = text.trim();
+
+  // Strip markdown code fence.
+  const fenceMatch = candidate.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenceMatch) candidate = fenceMatch[1].trim();
+
+  // Find outermost [ ... ] span.
+  const start = candidate.indexOf('[');
+  const end = candidate.lastIndexOf(']');
+  if (start === -1 || end <= start) return [];
+
+  try {
+    const items: unknown[] = JSON.parse(candidate.slice(start, end + 1));
+    return items
+      .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+      .map(item => ({
+        title: String(item.title ?? ''),
+        description: String(item.description ?? ''),
+        related_session_ids: Array.isArray(item.related_session_ids)
+          ? (item.related_session_ids as unknown[]).filter(s => typeof s === 'string') as string[]
+          : [],
+        evidence: String(item.evidence ?? ''),
+        confidence: (['high', 'medium', 'low'].includes(String(item.confidence))
+          ? item.confidence
+          : 'medium') as 'high' | 'medium' | 'low',
+      }));
+  } catch {
+    console.warn('[Reflections] JSON parse failed for section analysis output.');
+    return [];
+  }
+}
+
+/**
+ * Drain a claude-agent SSE stream until finish or error.
+ *
+ * Does NOT collect text — the caller fetches the clean result from the
+ * messages API after the stream ends (to avoid mixing text-delta with
+ * reasoning/thinking chunks that claude-agent emits when extended thinking
+ * is active).
+ *
+ * Calls onDelta for each text-delta so the UI can show a progress indicator.
+ * Throws on agent-reported errors.
+ */
+async function drainAgentSSE(
+  response: Response,
+  onDelta?: (delta: string) => void,
+): Promise<void> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let errorText = '';
+
+  outer: while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() ?? '';
+
+    for (const frame of frames) {
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice('data: '.length).trim();
+        if (!raw) continue;
+
+        let evt: Record<string, unknown>;
+        try { evt = JSON.parse(raw) as Record<string, unknown>; }
+        catch { continue; }
+
+        if (evt.type === 'text-delta' && typeof evt.delta === 'string') {
+          // Forward progress to UI only — do NOT accumulate for parsing.
+          onDelta?.(evt.delta);
+        } else if (evt.type === 'finish') {
+          break outer;
+        } else if (evt.type === 'error') {
+          errorText = String(evt.errorText ?? 'Agent stream error');
+          break outer;
+        }
+      }
+    }
+  }
+
+  if (errorText) throw new Error(errorText);
+}
+
+/**
+ * Fetch the last assistant message from a thread and extract the text parts.
+ *
+ * The messages API returns parts separated by type; reasoning/thinking parts
+ * are excluded — only `type: "text"` parts are joined and returned.
+ *
+ * Response shape (from GET /api/claude-agent/threads/{id}/messages):
+ * {
+ *   messages: [
+ *     { role: "user",      parts: [{ type: "text", text: "..." }] },
+ *     { role: "assistant", parts: [
+ *         { type: "reasoning", text: "..." },   // skip
+ *         { type: "text",      text: "..." }    // use this
+ *       ]
+ *     }
+ *   ]
+ * }
+ */
+async function fetchLastAssistantText(threadId: string, token: string): Promise<string> {
+  const res = await fetch(`${API_BASE}/api/claude-agent/threads/${threadId}/messages`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch thread messages (${res.status})`);
+  }
+
+  const data = await res.json() as { messages: Array<{ role: string; parts: Array<{ type: string; text?: string }> }> };
+  const messages = data.messages ?? [];
+
+  // Find the last assistant message.
+  const lastAssistant = [...messages].reverse().find(m => m.role === 'assistant');
+  if (!lastAssistant) throw new Error('No assistant message found in thread');
+
+  // Join all text parts, ignoring reasoning/thinking parts.
+  const textParts = (lastAssistant.parts ?? [])
+    .filter(p => p.type === 'text' && typeof p.text === 'string')
+    .map(p => p.text as string);
+
+  return textParts.join('\n').trim();
+}
+
+/**
+ * Run a Reflections section analysis using the full claude-agent engine flow:
+ *
+ *  1. POST /api/claude-agent/threads  → disposable thread_id
+ *  2. POST /api/reflections/memory-init { threadId, section }
+ *     → writes section WORKFLOW.md and companion files into memory/
+ *     → returns { initialised, section, threadId, memoryPath, usedCustomConfig }
+ *  3. POST /api/claude-agent (SSE)
+ *     system_prompt: section identity ("{display_name} analysis") + memoryPath from Step 2
+ *       (injected as <voice_context> by the engine — gives agent orientation before it
+ *        reads WORKFLOW.md; falls back gracefully when memory-init failed)
+ *     message: <sessions_context> … </sessions_context> + instruction to read WORKFLOW.md
+ *     tool_choice: "auto" | max_turns: 5
+ *  4. Drain SSE until finish (onDelta → UI progress only, not for parsing)
+ *  5. GET /api/claude-agent/threads/{thread_id}/messages
+ *     → extract last assistant message text parts (reasoning excluded)
+ *  6. Parse JSON → ReflectionResult[]
+ *
+ * The memory workspace provides the explicit procedural scaffold (Polanyi);
+ * the agent supplies tacit judgment about signal strength and confidence.
+ *
+ * Using the messages API (step 5) instead of accumulating SSE text-delta avoids
+ * the problem of reasoning/thinking chunks corrupting the JSON output.
+ */
+export async function analyzeReflectionsSection(
+  section: 'echoes' | 'traits' | 'patterns',
+  onDelta?: (delta: string) => void,
+): Promise<ReflectionResult[]> {
+  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (!token) throw new Error('Not authenticated');
+
+  // ── Step 1: create a disposable thread ──
+  const threadRes = await fetch(`${API_BASE}/api/claude-agent/threads`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!threadRes.ok) {
+    throw new Error(`Failed to create agent thread: ${threadRes.status}`);
+  }
+  const { thread_id } = await threadRes.json() as { thread_id: string };
+
+  // ── Step 2: initialise section memory workspace ──
+  // Parse response to get memoryPath and section display name for system_prompt.
+  const SECTION_DISPLAY: Record<string, string> = {
+    echoes: 'Recurring Themes (回响)',
+    traits: 'Character Traits (性格特质)',
+    patterns: 'Behavioral Patterns (行为模式)',
+  };
+  let memoryPath: string | null = null;
+
+  const memInitRes = await fetch(`${API_BASE}/api/reflections/memory-init`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ threadId: thread_id, section }),
+  });
+  if (memInitRes.ok) {
+    const memInitData = await memInitRes.json() as { memoryPath?: string };
+    memoryPath = memInitData.memoryPath ?? null;
+  } else {
+    // Non-fatal: agent continues without memory_context (uses embedded prompt only).
+    const errBody = await memInitRes.text().catch(() => '');
+    console.warn(`[Reflections] memory-init failed (${memInitRes.status}): ${errBody}`);
+  }
+
+  // ── Step 3: build sessions context, system_prompt, and analysis message ──
+  // system_prompt tells the agent which section analysis is being performed
+  // and where the memory workspace is. It is injected as <voice_context> by
+  // the engine and gives the agent orientation before it reads WORKFLOW.md.
+  const systemPrompt = [
+    `You are performing a "${SECTION_DISPLAY[section] ?? section}" analysis for the Ink & Memory Reflections page.`,
+    memoryPath
+      ? `The procedural memory workspace has been initialised at: ${memoryPath}`
+      : 'No memory workspace was initialised — use the embedded analysis instructions only.',
+    'Follow memory/WORKFLOW.md for the analysis procedure if the workspace is available.',
+    'Output ONLY a JSON array as your final response — no preamble, no explanation.',
+  ].join('\n');
+
+  const sessionsContext = await buildSessionsContext();
+  const analysisMessage = [
+    '<sessions_context>',
+    sessionsContext,
+    '</sessions_context>',
+    '',
+    'Start by reading memory/WORKFLOW.md to understand the analysis procedure for this section.',
+    'Then analyse the sessions above and output ONLY a JSON array — no other text.',
+  ].join('\n');
+
+  // ── Step 4: call claude-agent SSE ──
+  const agentRes = await fetch(`${API_BASE}/api/claude-agent`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${token}`
+      Authorization: `Bearer ${token}`,
+      Accept: 'text/event-stream',
     },
     body: JSON.stringify({
-      session_id: 'analyze_patterns',
-      params: { language },
-      timeout: 60
-    })
+      id: thread_id,
+      resume: false,
+      message: {
+        id: `reflections-${section}-${Date.now()}`,
+        role: 'user',
+        parts: [{ type: 'text', text: analysisMessage }],
+      },
+      // system_prompt carries section identity and memory workspace location.
+      // It is injected as <voice_context> in the user message by the engine.
+      system_prompt: systemPrompt,
+      // Allow tool calls so the agent can read memory/WORKFLOW.md.
+      tool_choice: 'auto',
+      max_turns: 5,
+    }),
   });
 
-  const data: SyncResponse = await response.json();
-
-  if (!data.success) {
-    throw new Error(data.error || 'Patterns analysis failed');
+  if (!agentRes.ok || !agentRes.body) {
+    const errBody = await agentRes.text().catch(() => '');
+    throw new Error(`claude-agent request failed (${agentRes.status}): ${errBody}`);
   }
 
-  return data.result?.patterns || [];
+  // ── Step 5: drain SSE (progress only) ──
+  // We do NOT accumulate text here because SSE mixes text-delta with
+  // reasoning/thinking chunks. The clean result comes from the messages API.
+  await drainAgentSSE(agentRes, onDelta);
+
+  // ── Step 6: fetch final result from messages API ──
+  const finalText = await fetchLastAssistantText(thread_id, token);
+
+  // ── Step 7: parse JSON output ──
+  return extractReflectionResults(finalText);
+}
+
+/**
+ * Create a disposable claude-agent thread, send one message with session context
+ * already embedded in the prompt, collect the full assistant text via SSE.
+ *
+ * Uses tool_choice="none" + max_turns=1 because data is provided inline —
+ * no tool round-trips needed, making responses fast and predictable.
+ */
+async function callAgentAndCollectText(prompt: string): Promise<string> {
+  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (!token) throw new Error('Not authenticated');
+
+  // 1. Create a fresh thread
+  const threadRes = await fetch(`${API_BASE}/api/claude-agent/threads`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${token}` },
+  });
+  if (!threadRes.ok) {
+    throw new Error(`Failed to create agent thread: ${threadRes.status}`);
+  }
+  const { thread_id } = await threadRes.json() as { thread_id: string };
+
+  // 2. Stream the agent response
+  //    message MUST be a UIMessage dict with parts[] — plain string leaves
+  //    message_parts=null in the router which causes extract_text_from_parts()
+  //    to return "" and the agent receives an empty user turn.
+  //    system_prompt (request field) becomes <voice_context> in the user message,
+  //    NOT a replacement for the server-built writing-assistant system prompt.
+  const agentRes = await fetch(`${API_BASE}/api/claude-agent`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'text/event-stream',
+    },
+    body: JSON.stringify({
+      id: thread_id,
+      message: {
+        id: `analysis-${Date.now()}`,
+        role: 'user',
+        parts: [{ type: 'text', text: prompt }],
+      },
+      system_prompt: 'You are a data analyst. When asked to analyze journal entries, respond ONLY with the requested JSON array. No preamble, no explanation, no markdown — raw JSON only.',
+      tool_choice: 'none',
+      max_turns: 1,
+    }),
+  });
+  if (!agentRes.ok) {
+    const errBody = await agentRes.text().catch(() => '');
+    throw new Error(`Agent request failed (${agentRes.status}): ${errBody}`);
+  }
+
+  // 3. Read SSE stream — collect text-delta events
+  //    IMPORTANT: parse JSON first, then check type — never throw inside
+  //    the same try-catch used to parse JSON, or the error gets swallowed.
+  const reader = agentRes.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let fullText = '';
+  let agentErrorText = '';
+
+  outer: while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() ?? '';
+
+    for (const frame of frames) {
+      for (const line of frame.split('\n')) {
+        if (!line.startsWith('data: ')) continue;
+        const raw = line.slice('data: '.length).trim();
+        if (!raw) continue;
+
+        // Step A: parse JSON (may fail for malformed lines)
+        let event: Record<string, unknown>;
+        try {
+          event = JSON.parse(raw) as Record<string, unknown>;
+        } catch {
+          continue; // skip malformed SSE line
+        }
+
+        // Step B: handle event type — outside the JSON try-catch
+        if (event.type === 'text-delta' && typeof event.delta === 'string') {
+          fullText += event.delta;
+        } else if (event.type === 'message-final' && typeof event.text === 'string') {
+          fullText = event.text; // authoritative complete text
+        } else if (event.type === 'error') {
+          agentErrorText = String(event.errorText ?? 'Agent stream error');
+          break outer;
+        }
+      }
+    }
+  }
+
+  if (agentErrorText) throw new Error(agentErrorText);
+  return fullText;
+}
+
+/**
+ * Extract the first JSON array from agent response text.
+ * The agent may wrap JSON in ```json ... ``` code fences.
+ */
+function extractJSONArray(text: string): any[] {
+  // Try markdown code fence first
+  const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const candidate = fenceMatch ? fenceMatch[1].trim() : text.trim();
+
+  // Try parsing directly if it starts with [
+  if (candidate.startsWith('[')) {
+    try { return JSON.parse(candidate); } catch { /* fall through */ }
+  }
+
+  // Find the outermost [...] span in the text
+  const start = text.indexOf('[');
+  const end = text.lastIndexOf(']');
+  if (start !== -1 && end > start) {
+    try { return JSON.parse(text.slice(start, end + 1)); } catch { /* fall through */ }
+  }
+
+  return [];
+}
+
+// ─────────────────────────────────────────────────────────────
+// Analysis prompts (language-aware, session-context-embedded)
+// ─────────────────────────────────────────────────────────────
+
+function echoesPrompt(lang: 'zh' | 'en', ctx: string): string {
+  if (lang === 'zh') return `以下是我的写作/日记记录列表：
+
+${ctx}
+
+请根据以上内容，找出反复出现的情感主题或思想回响（echoes）。
+
+严格只输出一个 JSON 数组，不要任何额外说明、标题或 markdown 格式。
+[
+  {"title": "主题名称", "description": "对该主题的2-3句描述", "examples": ["具体例子1", "例子2"]},
+  ...
+]
+要求：找3-6个最重要的主题，examples 每项最多3条。直接输出 JSON，不要任何其他文字。`;
+  return `Here is my writing/journal history:
+
+${ctx}
+
+Based on the above, identify recurring emotional themes or thought patterns (echoes).
+
+Output ONLY a raw JSON array. No explanation, no markdown, no code fences.
+[
+  {"title": "Theme name", "description": "2-3 sentence description", "examples": ["specific example 1", "example 2"]},
+  ...
+]
+Requirements: 3-6 most significant themes, max 3 examples each. Output JSON only.`;
+}
+
+function traitsPrompt(lang: 'zh' | 'en', ctx: string): string {
+  if (lang === 'zh') return `以下是我的写作/日记记录列表：
+
+${ctx}
+
+请根据以上内容，识别我的性格特质。
+
+严格只输出一个 JSON 数组，不要任何额外说明。
+[
+  {"trait": "特质名称", "strength": 4, "evidence": "从记录中找到的具体证据（1-2句）"},
+  ...
+]
+要求：找3-6个最突出的特质，strength 是1-5的整数（5最强）。直接输出 JSON，不要任何其他文字。`;
+  return `Here is my writing/journal history:
+
+${ctx}
+
+Based on the above, identify personality traits revealed by my writing.
+
+Output ONLY a raw JSON array. No explanation, no markdown, no code fences.
+[
+  {"trait": "Trait name", "strength": 4, "evidence": "specific evidence from the notes (1-2 sentences)"},
+  ...
+]
+Requirements: 3-6 most prominent traits, strength integer 1-5. Output JSON only.`;
+}
+
+function patternsPrompt(lang: 'zh' | 'en', ctx: string): string {
+  if (lang === 'zh') return `以下是我的写作/日记记录列表：
+
+${ctx}
+
+请根据以上内容，识别我在写作、思考或行为上的规律性模式。
+
+严格只输出一个 JSON 数组，不要任何额外说明。
+[
+  {"pattern": "模式名称", "description": "对该模式的描述（1-2句）", "frequency": "出现频率（如：经常、偶尔、每周等）"},
+  ...
+]
+要求：找3-5个最明显的模式。直接输出 JSON，不要任何其他文字。`;
+  return `Here is my writing/journal history:
+
+${ctx}
+
+Based on the above, identify recurring behavioral, writing, or thinking patterns.
+
+Output ONLY a raw JSON array. No explanation, no markdown, no code fences.
+[
+  {"pattern": "Pattern name", "description": "1-2 sentence description", "frequency": "how often (e.g. often, weekly, occasionally)"},
+  ...
+]
+Requirements: 3-5 most notable patterns. Output JSON only.`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Public analysis functions — claude-agent with inline session context
+// ─────────────────────────────────────────────────────────────
+
+/**
+ * Analyze echoes (recurring themes) via claude-agent + procedural memory workspace.
+ */
+export async function analyzeEchoes(onDelta?: (d: string) => void): Promise<ReflectionResult[]> {
+  return analyzeReflectionsSection('echoes', onDelta);
+}
+
+/**
+ * Analyze traits (personality characteristics) via claude-agent + procedural memory workspace.
+ */
+export async function analyzeTraits(onDelta?: (d: string) => void): Promise<ReflectionResult[]> {
+  return analyzeReflectionsSection('traits', onDelta);
+}
+
+/**
+ * Analyze patterns (behavioral patterns) via claude-agent + procedural memory workspace.
+ */
+export async function analyzePatterns(onDelta?: (d: string) => void): Promise<ReflectionResult[]> {
+  return analyzeReflectionsSection('patterns', onDelta);
 }
 
 /**
@@ -1079,7 +1614,9 @@ export async function updateVoice(voiceId: string, data: {
  * Otherwise creates a new thread, persists it on the voice, and returns the id.
  */
 export async function ensureVoiceThread(voiceId: string, existingThreadId?: string): Promise<string> {
-  if (existingThreadId) return existingThreadId;
+  if (existingThreadId) {
+    return existingThreadId;
+  }
 
   const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
   if (!token) throw new Error('Not authenticated');
@@ -1165,7 +1702,8 @@ export async function loadVoicesFromDecks(): Promise<Record<string, VoiceConfig>
               enabled: voice.enabled,
               icon: voice.icon,
               color: voice.color,
-              thread_id: voice.thread_id
+              thread_id: voice.thread_id,
+              memory_workspace_config: voice.memory_workspace_config
             };
           }
         }

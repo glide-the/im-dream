@@ -1,4 +1,10 @@
 #!/usr/bin/env python3
+# [Input] Consume SQLite, filesystem paths, JSON data, and memory workspace defaults.
+# [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
+#          Claude Agent threads/messages, and voice partition Memory configs.
+# [Pos] database node in backend
+# [Sync] 2026-06-06: add procedural Memory workspace default config seeding,
+#                    backfill, and voice fork/sync propagation.
 """
 SQLite database setup and migrations for Ink & Memory.
 
@@ -25,6 +31,47 @@ logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
 DB_DIR.mkdir(exist_ok=True)
+
+
+def _default_memory_workspace_config() -> dict:
+    """Return the default procedural Memory config for voice partition rows."""
+
+    from memory_workspace_defaults import default_memory_workspace_config
+
+    return default_memory_workspace_config()
+
+
+def _default_memory_workspace_config_json() -> str:
+    return json.dumps(_default_memory_workspace_config(), ensure_ascii=False)
+
+
+def _memory_workspace_config_json(memory_workspace_config: Optional[dict]) -> str:
+    """Serialize an explicit config or the default procedural config."""
+
+    config = memory_workspace_config if memory_workspace_config else _default_memory_workspace_config()
+    return json.dumps(config, ensure_ascii=False)
+
+
+def _backfill_default_memory_workspace_config(db) -> None:
+    """Backfill voices that predate voices.memory_workspace_config.
+
+    This writes the default config into the partition table so runtime Memory
+    workspace initialization still reads from ``voices.memory_workspace_config``
+    rather than from project template files.
+    """
+
+    try:
+        db.execute(
+            """
+            UPDATE voices
+            SET memory_workspace_config = ?
+            WHERE memory_workspace_config IS NULL OR TRIM(memory_workspace_config) = ''
+            """,
+            (_default_memory_workspace_config_json(),),
+        )
+        db.commit()
+    except Exception as exc:
+        logger.warning("Memory workspace config backfill skipped: %s", exc)
 
 def get_db():
     """Get database connection with WAL mode enabled."""
@@ -228,6 +275,14 @@ def create_tables(db):
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # @@@ Migration: add memory_workspace_config column for per-voice memory workspace configuration
+    try:
+        db.execute("ALTER TABLE voices ADD COLUMN memory_workspace_config TEXT")
+        db.commit()
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    _backfill_default_memory_workspace_config(db)
+
     # @@@ Friendships table - bidirectional friend relationships
     db.execute("""
     CREATE TABLE IF NOT EXISTS friendships (
@@ -363,6 +418,25 @@ def create_tables(db):
         else:
             logger.warning("Drop parts_json column warning (non-fatal): %s", exc)
 
+    # Reflections section configs — per-user custom prompt files for each section.
+    # Falls back to reflections_config.py defaults when no row exists.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS reflections_section_configs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      section TEXT NOT NULL CHECK(section IN ('echoes', 'traits', 'patterns')),
+      prompt_files TEXT NOT NULL DEFAULT '{}',
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(user_id, section),
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_reflections_cfg_user "
+        "ON reflections_section_configs(user_id, section)"
+    )
+    db.commit()
+
     print("✅ Tables created")
 
 def seed_system_decks():
@@ -388,6 +462,7 @@ def seed_system_decks():
 
     # Import config to get existing voice prompts
     import config
+    memory_config_json = _default_memory_workspace_config_json()
 
     # Introspection voices (from existing VOICE_ARCHETYPES)
     introspection_voices = [
@@ -405,9 +480,9 @@ def seed_system_decks():
 
     for voice_id, name, name_zh, name_en, prompt, icon, color, order in introspection_voices:
         db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-        """, (voice_id, 'introspection_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order))
+        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        """, (voice_id, 'introspection_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order, memory_config_json))
 
     # ========== Deck 2: Scholar Deck ==========
     db.execute("""
@@ -435,9 +510,9 @@ def seed_system_decks():
 
     for voice_id, name, name_zh, name_en, prompt, icon, color, order in scholar_voices:
         db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-        """, (voice_id, 'scholar_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order))
+        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        """, (voice_id, 'scholar_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order, memory_config_json))
 
     # ========== Deck 3: Philosophy Deck ==========
     db.execute("""
@@ -461,9 +536,9 @@ def seed_system_decks():
 
     for voice_id, name, name_zh, name_en, prompt, icon, color, order in philosophy_voices:
         db.execute("""
-        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-        """, (voice_id, 'philosophy_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order))
+        INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt, icon, color, is_system, enabled, has_local_changes, order_index, memory_workspace_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        """, (voice_id, 'philosophy_deck', name, name_zh, name_en, prompt, icon, color, 1, 1, order, memory_config_json))
 
     db.commit()
     db.close()
@@ -564,6 +639,18 @@ def increment_deck_install_count(deck_id: str):
     finally:
         db.close()
 
+
+def _parse_voice_row(row: dict) -> dict:
+    """Parse a raw voices DB row, deserialising JSON columns."""
+    raw_config = row.get("memory_workspace_config")
+    if raw_config and isinstance(raw_config, str):
+        try:
+            row["memory_workspace_config"] = json.loads(raw_config)
+        except (json.JSONDecodeError, ValueError):
+            row["memory_workspace_config"] = None
+    return row
+
+
 def get_deck_with_voices(user_id: int, deck_id: str):
     """
     Get full deck details with all voices.
@@ -591,7 +678,7 @@ def get_deck_with_voices(user_id: int, deck_id: str):
         ORDER BY order_index, created_at
         """, (deck_id,)).fetchall()
 
-        deck['voices'] = [dict(row) for row in voice_rows]
+        deck['voices'] = [_parse_voice_row(dict(row)) for row in voice_rows]
         return deck
     finally:
         db.close()
@@ -780,10 +867,11 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
 
         for voice in source_voices:
             new_voice_id = str(uuid.uuid4())
+            memory_config_json = voice["memory_workspace_config"] or _default_memory_workspace_config_json()
             db.execute("""
             INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
-                              icon, color, is_system, parent_id, owner_id, enabled, has_local_changes, order_index)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, 0, ?)
+                              icon, color, is_system, parent_id, owner_id, enabled, has_local_changes, order_index, memory_workspace_config)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, 0, ?, ?)
             """, (new_voice_id,
                   new_deck_id,
                   voice['name'],
@@ -794,7 +882,8 @@ def fork_deck(user_id: int, deck_id: str, enabled: bool = True) -> str:
                   voice['color'],
                   voice['id'],  # parent_id tracks fork source
                   user_id,
-                  voice['order_index']))
+                  voice['order_index'],
+                  memory_config_json))
 
         db.commit()
         return new_deck_id
@@ -862,10 +951,11 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
         synced_count = 0
         for parent_voice in parent_voices:
             new_voice_id = str(uuid.uuid4())
+            memory_config_json = parent_voice["memory_workspace_config"] or _default_memory_workspace_config_json()
             db.execute("""
             INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
-                              icon, color, is_system, parent_id, owner_id, enabled, has_local_changes, order_index)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, 0, ?)
+                              icon, color, is_system, parent_id, owner_id, enabled, has_local_changes, order_index, memory_workspace_config)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, 0, ?, ?)
             """, (new_voice_id,
                   deck_id,  # User's deck
                   parent_voice['name'],
@@ -876,7 +966,8 @@ def sync_deck_with_parent(user_id: int, deck_id: str, force: bool = False) -> di
                   parent_voice['color'],
                   parent_voice['id'],  # parent_id tracks original
                   user_id,
-                  parent_voice['order_index']))
+                  parent_voice['order_index'],
+                  memory_config_json))
             synced_count += 1
 
         db.commit()
@@ -933,7 +1024,8 @@ def load_voices_from_user_decks(user_id: int) -> dict:
 def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
                 name_zh: str = None, name_en: str = None,
                 icon: str = None, color: str = None,
-                order_index: int = None) -> str:
+                order_index: int = None,
+                memory_workspace_config: dict = None) -> str:
     """
     Create a new voice in a user's deck.
     Returns voice_id.
@@ -961,12 +1053,15 @@ def create_voice(user_id: int, deck_id: str, name: str, system_prompt: str,
             ).fetchone()['max_order']
             order_index = (max_order or 0) + 1
 
+        memory_config_json = _memory_workspace_config_json(memory_workspace_config)
+
         db.execute("""
         INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
-                           icon, color, is_system, owner_id, enabled, has_local_changes, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0, ?)
+                           icon, color, is_system, owner_id, enabled, has_local_changes,
+                           order_index, memory_workspace_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, 1, 0, ?, ?)
         """, (voice_id, deck_id, name, name_zh, name_en, system_prompt,
-              icon, color, user_id, order_index))
+              icon, color, user_id, order_index, memory_config_json))
 
         db.commit()
         return voice_id
@@ -997,7 +1092,8 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
 
         # Build update query
         allowed_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
-                         'icon', 'color', 'enabled', 'order_index', 'thread_id']
+                         'icon', 'color', 'enabled', 'order_index', 'thread_id',
+                         'memory_workspace_config']
         content_fields = ['name', 'name_zh', 'name_en', 'system_prompt',
                          'icon', 'color']
 
@@ -1005,8 +1101,12 @@ def update_voice(user_id: int, voice_id: str, updates: dict) -> bool:
         params = []
         for field in allowed_fields:
             if field in updates:
+                value = updates[field]
+                # Serialise memory_workspace_config dict to JSON string.
+                if field == 'memory_workspace_config' and isinstance(value, dict):
+                    value = json.dumps(value, ensure_ascii=False)
                 update_fields.append(f"{field} = ?")
-                params.append(updates[field])
+                params.append(value)
 
         if not update_fields:
             return True  # No updates
@@ -1082,11 +1182,12 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
             (target_deck_id,)
         ).fetchone()['max_order']
         order_index = (max_order or 0) + 1
+        memory_config_json = source_voice["memory_workspace_config"] or _default_memory_workspace_config_json()
 
         db.execute("""
         INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
-                           icon, color, is_system, parent_id, owner_id, enabled, order_index)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?)
+                           icon, color, is_system, parent_id, owner_id, enabled, order_index, memory_workspace_config)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 1, ?, ?)
         """, (new_voice_id,
               target_deck_id,
               source_voice['name'],
@@ -1097,7 +1198,8 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
               source_voice['color'],
               voice_id,  # parent_id tracks fork source
               user_id,
-              order_index))
+              order_index,
+              memory_config_json))
 
         db.commit()
         return new_voice_id
@@ -2337,7 +2439,114 @@ def list_chat_messages(thread_id: str) -> list[dict]:
         db.close()
 
 
+def get_voice_memory_config_by_thread(thread_id: str) -> Optional[dict]:
+    """Return the parsed memory_workspace_config for the voice associated with *thread_id*.
+
+    Voices are linked to threads via the ``voices.thread_id`` column that is
+    set when ``ensureVoiceThread`` creates or reuses a thread for a voice.
+
+    Returns:
+        dict  — parsed JSON config, self-healed to the default procedural config
+                when the row exists but config is empty/invalid.
+        None  — when no matching voice is found.
+    """
+    if not thread_id:
+        return None
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT id, memory_workspace_config FROM voices WHERE thread_id = ? LIMIT 1",
+            (thread_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        parsed = _parse_voice_row(dict(row))
+        config = parsed.get("memory_workspace_config")
+        if isinstance(config, dict):
+            return config
+
+        config = _default_memory_workspace_config()
+        db.execute(
+            "UPDATE voices SET memory_workspace_config = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (json.dumps(config, ensure_ascii=False), parsed["id"]),
+        )
+        db.commit()
+        return config
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Reflections section config helpers
+# ---------------------------------------------------------------------------
+
+
+def get_reflections_section_config(user_id: int, section: str) -> Optional[dict]:
+    """Return the user's custom prompt_files for *section*, or None if not set.
+
+    Returns the parsed ``prompt_files`` dict on success, or ``None`` when the
+    user has no custom config for this section (caller should fall back to the
+    static default in ``reflections_config.py``).
+    """
+    db = get_db()
+    try:
+        row = db.execute(
+            "SELECT prompt_files FROM reflections_section_configs "
+            "WHERE user_id = ? AND section = ? LIMIT 1",
+            (user_id, section),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            parsed = json.loads(row["prompt_files"] or "{}")
+            return parsed if isinstance(parsed, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+    finally:
+        db.close()
+
+
+def save_reflections_section_config(user_id: int, section: str, prompt_files: dict) -> None:
+    """Upsert user's custom prompt_files for *section*.
+
+    ``prompt_files`` is a dict of ``{filename: content}`` for the five memory
+    workspace prompt files.  Only known filenames are accepted by the route
+    layer; this function stores whatever is provided without validation.
+    """
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO reflections_section_configs (user_id, section, prompt_files, updated_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, section) DO UPDATE SET
+                prompt_files = excluded.prompt_files,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, section, json.dumps(prompt_files, ensure_ascii=False)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def delete_reflections_section_config(user_id: int, section: str) -> bool:
+    """Delete user's custom config for *section*, reverting to the static default.
+
+    Returns True if a row was deleted, False if none existed.
+    """
+    db = get_db()
+    try:
+        cursor = db.execute(
+            "DELETE FROM reflections_section_configs WHERE user_id = ? AND section = ?",
+            (user_id, section),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        db.close()
+
+
 if __name__ == "__main__":
     # Initialize database
     init_db()
-
