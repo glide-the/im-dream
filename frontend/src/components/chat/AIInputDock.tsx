@@ -3,6 +3,10 @@
 // [Pos] chat-input-dock component node in frontend/src/components/chat
 // [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
 // [Sync] 2026-05-27: add internal toolChoice state with Auto/逐步确认 segmented toggle; sends selected toolChoice via onSendMessage.
+// [Sync] 2026-06-09: hide the manual approval switch when IM full-access mode
+//                    is enabled; show static "完全访问" and send auto mode.
+// [Sync] 2026-06-09: subscribe to same-tab IM full-access config events so
+//                    draft chat input updates immediately after Settings changes.
 import {
   useCallback,
   useEffect,
@@ -26,6 +30,7 @@ import {
 } from './AIInputDock.helpers';
 import { shouldSendMessageOnKeyDown } from './interaction-utils';
 import { getAuthToken } from '../../contexts/AuthContext';
+import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 
 const API_BASE = '/ink-and-memory';
 
@@ -45,6 +50,7 @@ interface AIInputDockProps {
   onStop?: () => void;
   mode?: AIInputDockMode;
   workspaceSessionId?: string;
+  fullAccessEnabled?: boolean;
 }
 
 const QUERY_INPUT_MAX_HEIGHT = 320;
@@ -100,6 +106,7 @@ export default function AIInputDock({
   onStop,
   mode = 'simple',
   workspaceSessionId,
+  fullAccessEnabled,
 }: AIInputDockProps) {
   const [query, setQuery] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
@@ -107,10 +114,44 @@ export default function AIInputDock({
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
+  const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
   const { upload, error: uploadHookError } = useFileUpload();
+
+  useEffect(() => {
+    if (fullAccessEnabled !== undefined) {
+      setResolvedFullAccessEnabled(fullAccessEnabled);
+      return undefined;
+    }
+
+    let active = true;
+    const unsubscribe = subscribeImFullAccessChanged((enabled) => {
+      setResolvedFullAccessEnabled(enabled);
+    });
+
+    void (async () => {
+      try {
+        const response = await fetch(`${API_BASE}/api/system-config`, {
+          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { data?: { im_full_access_enabled?: boolean }; im_full_access_enabled?: boolean };
+        const config = payload.data ?? payload;
+        if (active) {
+          setResolvedFullAccessEnabled(config.im_full_access_enabled === true);
+        }
+      } catch {
+        // Keep default non-full-access UI on config fetch failures.
+      }
+    })();
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [fullAccessEnabled]);
 
   const openAttachmentDialog = useCallback(() => {
     runWithFileDialogTaskLock(() => {
@@ -355,12 +396,13 @@ export default function AIInputDock({
     onSendMessage(
       trimmedQuery,
       uploadedFiles.length > 0 ? uploadedFiles : undefined,
-      toolChoice,
+      resolvedFullAccessEnabled ? 'auto' : toolChoice,
     );
     setQuery('');
     uploadedFiles.forEach((file) => revokeObjectPreviewUrl(file.previewUrl));
     setUploadedFiles([]);
   }, [
+    resolvedFullAccessEnabled,
     toolChoice,
     loading,
     onSendMessage,
@@ -545,43 +587,65 @@ export default function AIInputDock({
             + 附件
           </button>
 
-          <div
-            role="group"
-            aria-label="工具调用模式"
-            style={{
-              display: 'flex',
-              borderRadius: '999px',
-              border: '1px solid var(--color-border-paper)',
-              overflow: 'hidden',
-              fontSize: '0.76rem',
-              background: 'var(--color-bg-app)',
-            }}
-          >
-            {TOOL_CHOICE_OPTIONS.map((option) => {
-              const isActive = toolChoice === option.value;
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  title={option.title}
-                  disabled={disabled || loading}
-                  onClick={() => setToolChoice(option.value)}
-                  style={{
-                    border: 'none',
-                    padding: '0.35rem 0.7rem',
-                    background: isActive ? 'var(--color-text-primary)' : 'transparent',
-                    color: isActive ? 'var(--color-bg-paper)' : 'var(--color-text-muted)',
-                    cursor: disabled || loading ? 'not-allowed' : 'pointer',
-                    fontWeight: isActive ? 600 : 400,
-                    transition: 'background 0.15s ease, color 0.15s ease',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {option.label}
-                </button>
-              );
-            })}
-          </div>
+          {resolvedFullAccessEnabled ? (
+            <div
+              aria-label="工具调用权限"
+              title="完全访问"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                minHeight: '1.75rem',
+                borderRadius: '999px',
+                border: '1px solid var(--color-border-paper)',
+                padding: '0 0.75rem',
+                fontSize: '0.76rem',
+                fontWeight: 600,
+                background: 'var(--color-text-primary)',
+                color: 'var(--color-bg-paper)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              完全访问
+            </div>
+          ) : (
+            <div
+              role="group"
+              aria-label="工具调用模式"
+              style={{
+                display: 'flex',
+                borderRadius: '999px',
+                border: '1px solid var(--color-border-paper)',
+                overflow: 'hidden',
+                fontSize: '0.76rem',
+                background: 'var(--color-bg-app)',
+              }}
+            >
+              {TOOL_CHOICE_OPTIONS.map((option) => {
+                const isActive = toolChoice === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    title={option.title}
+                    disabled={disabled || loading}
+                    onClick={() => setToolChoice(option.value)}
+                    style={{
+                      border: 'none',
+                      padding: '0.35rem 0.7rem',
+                      background: isActive ? 'var(--color-text-primary)' : 'transparent',
+                      color: isActive ? 'var(--color-bg-paper)' : 'var(--color-text-muted)',
+                      cursor: disabled || loading ? 'not-allowed' : 'pointer',
+                      fontWeight: isActive ? 600 : 400,
+                      transition: 'background 0.15s ease, color 0.15s ease',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {loading && onStop ? (

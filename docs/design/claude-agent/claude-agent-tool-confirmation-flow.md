@@ -6,6 +6,7 @@
 > **[Sync] 2026-06-07**: auto 模式改为敏感度分流：workspace `files/` 内置文件工具和低敏查询工具显式 allow；执行/写入/交互工具进入前端确认侧路。
 > **[Sync] 2026-06-07**: 新增低敏工具：`Bash`（命令首词属于只读/导航安全集合且无 shell 元字符）和 `mcp__editor__switch_editor`（无副作用的上下文切换声明）。安全集合：`ls` `cd` `pwd` `echo` `cat` `head` `tail` `wc` `find` `which` `type` `date` `whoami` `id` `groups` `env` `printenv` `uname` `hostname`。
 > **[Sync] 2026-06-09**: 新增低敏工具 `Skill`（Claude Code restored source 确认为 `SKILL_TOOL_NAME = "Skill"`）；完整策略抽取到 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
+> **[Sync] 2026-06-09**: Settings「应如何批准 IM」写入 `system_config.im_full_access_enabled`；开启后 Runner 在 `.editor/` 重定向之后对所有已暴露工具返回显式 PreToolUse allow，不触发前端确认流。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -174,7 +175,7 @@ const sdkOptions = {
 };
 ```
 
-> Python 落地注意：当前实现已从 Python SDK `can_use_tool` 迁移到 `PreToolUse` hook。`toolChoice="auto"` 对当前 workspace `files/` 下的内置文件工具以及明确低敏工具（查询、`Skill`、`switch_editor`、只读 Bash 子集）显式 allow；高敏工具与 `toolChoice="manual"` 一样进入确认侧路。
+> Python 落地注意：当前实现已从 Python SDK `can_use_tool` 迁移到 `PreToolUse` hook。`toolChoice="auto"` 对当前 workspace `files/` 下的内置文件工具以及明确低敏工具（查询、`Skill`、`switch_editor`、只读 Bash 子集）显式 allow；高敏工具与 `toolChoice="manual"` 一样进入确认侧路。若 Settings `im_full_access_enabled=true`，则 `.editor/` 重定向之后的已暴露工具全部显式 allow。
 
 ## 事件循环 / 线程 / 子进程边界（manual 模式）
 
@@ -400,6 +401,14 @@ return HookJSONOutput(
 
 ```python
 # _pre_tool_use_hook 内
+if opts.im_full_access_enabled and tool_choice != "none":
+    return HookJSONOutput(
+        hookSpecificOutput={
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+        }
+    )
+
 if tool_choice == "auto":
     workspace_files_permission = _apply_workspace_files_permission(tool_name, tool_input, cwd)
     if workspace_files_permission is not None:
@@ -424,6 +433,8 @@ if tool_choice == "auto":
 | `mcp__editor__switch_editor` | 显式 allow → 自动执行（MCP handler 无副作用，状态切换在 PostToolUse hook 完成）| 走确认流 → 显示 Approve/Cancel |
 | `Skill` | 显式 allow → 自动执行（展开/执行已发现 Skill prompt）| 走确认流 → 显示 Approve/Cancel |
 | `Bash`（含管道 / 重定向 / 写入命令等）/ `Write` outside `files/` / `Edit` outside `files/` / MCP 写入 / 其他非查询工具 | 走确认流 → 显示 Approve/Cancel | 走确认流 → 显示 Approve/Cancel |
+
+若 `im_full_access_enabled=true`，上述矩阵在已暴露工具范围内整体变为显式 allow；`tool_choice=none` 仍不暴露工具，因此不会进入该 hook 分支。
 
 ---
 

@@ -1,7 +1,8 @@
 # Settings PRD
 
-> Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
+> Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
 > **[Sync] 2026-05-27**: 新增 4.3.5 用户 API 配置区域（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 等按用户存储并注入 Claude SDK 子进程）；关联设计文档 [用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)。
+> **[Sync] 2026-06-09**: AI 模型配置新增「应如何批准 IM」操作开关；打开后保存 `system_config.im_full_access_enabled=true`，Claude-agent 对所有已暴露工具的 `PreToolUse` 返回显式 allow，Chat 输入区隐藏「逐步确认」并显示「完全访问」；同页切换通过前端事件实时同步，无需刷新。
 
 ## 1. 文档范围
 
@@ -10,7 +11,7 @@ Settings 是应用的全局配置页面，作为顶部导航栏（`TopNavBar`）
 该页面包含：
 - 语言偏好设置
 - 界面展示选项（如能量条开关）
-- **AI 模型配置**（主题、模型选择、系统提示词、工作区模式）
+- **AI 模型配置**（主题、模型选择、系统提示词、工作区模式、IM 审批模式）
 - **用户 API 配置**（Anthropic API 密钥、自定义端点、默认模型等 env 变量）
 - 关于 Ink & Memory（`AboutView`）
 
@@ -37,6 +38,7 @@ SettingsView（position: fixed，overflow: auto）
     │   ├── ModelSelect（模型下拉选择）
     │   ├── SystemPromptTextarea（系统提示词，含保存/重置）
     │   ├── WorkspaceModeToggle
+    │   ├── IMApprovalModeToggle（应如何批准 IM：完全访问）
     │   └── UserApiConfigGroup（用户 API 配置）
     │       ├── ANTHROPIC_AUTH_TOKEN 输入框（password 类型）
     │       ├── ANTHROPIC_BASE_URL 输入框
@@ -99,7 +101,29 @@ SettingsView（position: fixed，overflow: auto）
 - 过渡 `0.2s ease`。
 - 立即同步到 `/api/system-config`。
 
-#### 4.3.5 用户 API 配置 / User API Config
+#### 4.3.5 应如何批准 IM / IM Approval Mode
+
+- flex 横向排列：左侧标题「应如何批准 IM」+ 描述说明，右侧操作切换按钮。
+- 开关文案固定显示「完全访问」。
+- 开启态：按钮使用 `color.text.primary` 背景、`color.bg.paper` 文案，表示所有已暴露工具调用由 IM 自动批准。
+- 关闭态：按钮使用 `color.disabled.bg` 背景、`color.text.secondary` 文案。
+- 立即同步到 `/api/system-config`，字段为 `im_full_access_enabled`。
+- 切换时必须立即广播同页配置变更，已打开的 Chat 输入区无需刷新即可更新显示。
+- 开启后，后端 Claude-agent runner 在 `PreToolUse` 中对所有已暴露工具返回：
+
+```python
+HookJSONOutput(
+    hookSpecificOutput={
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
+    }
+)
+```
+
+- `tool_choice="none"` 仍不暴露工具；该开关只影响已经进入 `PreToolUse` 的工具调用审批。
+- Chat 页面输入区的工具调用模式不再显示「逐步确认」按钮，改为静态显示「完全访问」；关闭后恢复自动/逐步确认分段控件。
+
+#### 4.3.6 用户 API 配置 / User API Config
 
 > 关联设计文档：[用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)
 
@@ -173,6 +197,7 @@ SettingsView（position: fixed，overflow: auto）
 
 - 页面挂载时调用 `GET /api/system-config` 加载当前配置。
 - Theme、Model、Workspace Mode 变更后立即调用 `PUT /api/system-config` 保存。
+- IM Approval Mode 变更后立即调用 `PUT /api/system-config` 保存 `im_full_access_enabled`。
 - System Prompt 在用户点击"保存"后调用 `PUT /api/system-config`。
 - **用户 API 配置**在用户点击"保存"后调用 `PUT /api/system-config`，将三个 env key 作为 `env_vars` 字典传入。留空的字段通过传入空字符串或在前端过滤后不包含该 key 来实现删除（与服务端 `_sanitize_env_vars` 保持一致：空字符串 key 会被过滤；value 为空字符串则保留 key，建议前端在保存前将空值字段从 `env_vars` 中省略）。
 - 请求失败时保留 UI 状态，不清除用户输入，可选添加错误提示。
@@ -193,7 +218,7 @@ Settings 页面通过以下入口访问：
 
 ## 11. 验收标准
 
-- Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式）。
+- Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式、IM 审批模式）。
 - Settings 页面包含用户 API 配置区域（API 密钥、API 端点、默认模型三个输入项）。
 - Chat 页面不再渲染模型配置侧边栏，也不在左侧 `VerticalNav` 中提供 Settings 入口。
 - 所有颜色引用 [Color System](<./color_system/README.md>) token，无孤立十六进制值。
@@ -202,6 +227,7 @@ Settings 页面通过以下入口访问：
 - 语言、展示选项、AI 模型配置、用户 API 配置、关于内容分区清晰，各自有标题说明。
 - `ANTHROPIC_AUTH_TOKEN` 输入框已保存的值以掩码形式展示，不反向暴露明文。
 - 用户 API 配置保存后，该用户的后续 Agent 会话使用用户配置的 API 密钥和端点（而非全局 `backend/.env`）。
+- 「应如何批准 IM」开启后，该用户后续 Agent 工具调用自动获得完全访问；Chat 输入区隐藏「逐步确认」并显示「完全访问」。
 - 清空字段并保存后，该 key 从 `env_vars` 中移除，回退到服务器默认配置。
 
 ## 12. 前端实现备注

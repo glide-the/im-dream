@@ -3,6 +3,7 @@
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
 > [Sync] 2026-06-09: initial standalone policy extracted from runner implementation and product rule: query-like tools are low-sensitivity; execution/write/interactive tools are high-sensitivity unless explicitly listed.
 > [Sync] 2026-06-09: implementation note added for hook payload normalization (`tool_name`/`toolName`, `tool_input`/`toolInput`) and auto-mode retention of `Skill` in effective `allowed_tools`.
+> [Sync] 2026-06-09: Settings-controlled `im_full_access_enabled` added; when enabled, every exposed tool receives explicit PreToolUse allow after `.editor/` virtual-index redirects.
 
 # Claude-Agent Permission Policy
 
@@ -23,6 +24,8 @@ It describes the product policy, not Claude Code's internal classifier.
 | `auto` | Low-sensitivity tools return explicit `permissionDecision:"allow"` from `PreToolUse`. High-sensitivity tools emit `tool-approval-request` and wait for frontend confirmation. |
 | `manual` | All non-special tools go through frontend confirmation. `.editor/` virtual-index `Read` redirects still run because they only replace placeholder reads with a safe tempfile snapshot. |
 | `none` | No tools are exposed; auto allow rules do not apply. |
+
+When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
 
 ## 3. Low-Sensitivity Tools
 
@@ -91,10 +94,11 @@ HookJSONOutput(
 `agent_runner.py::_pre_tool_use_hook` applies decisions in this order:
 
 1. `.editor/` virtual-index `Read` redirect, all modes.
-2. In `auto` only: workspace `files/` built-in file permission.
-3. In `auto` only: explicit low-sensitivity tool allow.
-4. Frontend confirmation callback.
-5. Deny by default when confirmation is required but unavailable.
+2. If `im_full_access_enabled` is true and tools are exposed: explicit allow.
+3. In `auto` only: workspace `files/` built-in file permission.
+4. In `auto` only: explicit low-sensitivity tool allow.
+5. Frontend confirmation callback.
+6. Deny by default when confirmation is required but unavailable.
 
 ## 7. Frontend Confirmation
 

@@ -1,6 +1,7 @@
 # Chat Send PRD
 
-> 对话输入 Dock、发送行为、已发送消息与反馈状态的视觉和交互规范。本文引用 [Color System](<./color_system/README.md>)，仅更新 PRD，不修改产品代码。
+> 对话输入 Dock、发送行为、已发送消息与反馈状态的视觉和交互规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
+> **[Sync] 2026-06-09**: 当 Settings 中「应如何批准 IM」开启时，AIInputDock 隐藏「逐步确认」按钮，显示静态「完全访问」权限徽标，并按 auto 工具模式发送；Settings 切换通过同页事件实时同步到已打开的 Chat 输入区。
 
 ## 1. 文档范围
 
@@ -25,6 +26,7 @@ ChatPanel
     │   └── CharacterCounter
     └── ActionRow
         ├── AddButton
+        ├── PermissionMode
         ├── ShortcutHint
         └── SendButton
 ```
@@ -56,7 +58,16 @@ ChatPanel
 - 点击打开附件菜单，菜单项包括上传文件、最近文件、工作区文件。
 - 有上传中附件时 AddButton 仍可打开附件托盘，但不应导致重复上传。
 
-### 5.3 SendButton
+### 5.3 PermissionMode
+
+- 默认模式显示工具调用模式分段控件：`自动` / `逐步确认`。
+- 当 Settings 的 `im_full_access_enabled` 开启时，不显示 `逐步确认` 按钮，也不显示可切换的分段控件。
+- 完全访问模式显示一个静态胶囊徽标，文本为「完全访问」。
+- Settings 中切换该模式时，当前页面已挂载的 AIInputDock 必须即时更新，不要求刷新页面或重新进入 Chat。
+- 「完全访问」徽标使用 `color.text.primary` 背景、`color.bg.paper` 文案，表达当前会话工具调用由 IM 自动批准。
+- 完全访问模式下发送请求仍使用 `toolChoice='auto'`，实际审批由后端 Settings 控制的 PreToolUse 策略完成。
+
+### 5.4 SendButton
 
 - 可发送时使用 `color.action.link` 或 `color.action.primary` 的小面积按钮。
 - 不可发送时使用 `color.disabled.bg` 和禁用光标。

@@ -64,6 +64,9 @@
 # [Sync] 2026-06-09: normalize PreToolUse/PostToolUse hook payload keys across
 #                    snake_case and camelCase shapes so inputs like
 #                    {"toolName": "Skill"} still hit the low-sensitivity allow path.
+# [Sync] 2026-06-09: add Settings-controlled IM full-access mode: after safe
+#                    .editor/ redirects, every exposed tool gets explicit
+#                    PreToolUse permissionDecision:"allow".
 
 """Claude Agent Runner.
 
@@ -816,6 +819,17 @@ def _apply_low_sensitivity_query_permission(
     return None
 
 
+def _explicit_pre_tool_use_allow() -> HookJSONOutput:
+    """Return the CLI 2.1+ explicit allow shape for PreToolUse hooks."""
+
+    return HookJSONOutput(
+        hookSpecificOutput={
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+        }
+    )
+
+
 def _extract_hook_tool_name(hook_input: dict[str, Any]) -> str:
     """Return tool name from Claude hook payloads.
 
@@ -1138,6 +1152,9 @@ class ClaudeAgentRunner:
             )
             if redirect_result is not None:
                 return redirect_result
+
+            if opts.im_full_access_enabled and tool_choice != "none":
+                return _explicit_pre_tool_use_allow()
 
             if tool_choice == "auto":
                 workspace_files_permission = _apply_workspace_files_permission(
