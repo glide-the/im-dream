@@ -120,6 +120,18 @@ metadata:
 
 ## 使用方式
 
+### 必需环境变量
+
+使用本 skill 前，必须先确认当前进程环境中存在 `STOCK_MONITOR_DB_PATH`，并且它指向一个可写的 SQLite 数据库文件路径。
+
+如果用户没有提供 `STOCK_MONITOR_DB_PATH`，停止使用本 skill，不要继续调用市场情绪、选股、Web 服务或数据更新脚本；提示用户先设置这个变量。
+
+示例：
+```bash
+export STOCK_MONITOR_DB_PATH=/absolute/path/stock_cache.db
+python3 scripts/market_sentiment.py
+```
+
 ### 快速开始
 
 1. **安装依赖**
@@ -245,10 +257,10 @@ TRADING_HOURS = {
 ```
 
 ### 数据缓存配置
-SQLite数据库：`stock_cache.db`
+SQLite数据库路径由 `STOCK_MONITOR_DB_PATH` 指定。
 默认缓存时间：30分钟
 
-修改 `stock_cache_db.py`：
+缓存有效期可在调用侧或脚本逻辑中调整：
 ```python
 MAX_AGE_MINUTES = 30  # 缓存有效期
 ```

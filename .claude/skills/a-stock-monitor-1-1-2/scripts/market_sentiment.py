@@ -3,11 +3,11 @@
 """
 市场情绪计算模块
 基于全市场A股数据，多维度计算市场情绪评分
+非演示模式依赖 StockCache，并要求配置 STOCK_MONITOR_DB_PATH。
 """
 
 from stock_cache_db import StockCache
 from datetime import datetime
-import pandas as pd
 
 
 def calculate_market_sentiment(use_demo_data=False):

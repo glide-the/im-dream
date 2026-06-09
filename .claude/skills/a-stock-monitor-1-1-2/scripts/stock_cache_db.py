@@ -2,18 +2,52 @@
 # -*- coding: utf-8 -*-
 """
 A股数据缓存管理 - SQLite数据库
+
+数据库路径必须由 STOCK_MONITOR_DB_PATH 环境变量提供，避免使用不可写的
+上游示例路径。
 """
 
+import os
 import sqlite3
 import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-DB_PATH = '/Users/jamemei/.openclaw/workspace/crypto_quant_sim/stock-monitor/stock_cache.db'
+DB_PATH_ENV_VAR = 'STOCK_MONITOR_DB_PATH'
+DB_PATH = os.environ.get(DB_PATH_ENV_VAR)
+
+
+def resolve_db_path(db_path: Optional[str] = None) -> str:
+    """Return a writable SQLite path, or fail with the required env contract."""
+    configured_path = db_path or os.environ.get(DB_PATH_ENV_VAR) or DB_PATH
+    if not configured_path:
+        raise RuntimeError(
+            f"a-stock-monitor requires {DB_PATH_ENV_VAR} before using this skill. "
+            "Set it to a writable SQLite file path, for example: "
+            f"export {DB_PATH_ENV_VAR}=/absolute/path/stock_cache.db"
+        )
+
+    resolved_path = os.path.abspath(
+        os.path.expandvars(os.path.expanduser(configured_path))
+    )
+    parent_dir = os.path.dirname(resolved_path)
+    if parent_dir:
+        try:
+            os.makedirs(parent_dir, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f"{DB_PATH_ENV_VAR} parent directory cannot be created: {parent_dir}"
+            ) from exc
+        if not os.access(parent_dir, os.W_OK):
+            raise RuntimeError(
+                f"{DB_PATH_ENV_VAR} parent directory is not writable: {parent_dir}"
+            )
+    return resolved_path
+
 
 class StockCache:
-    def __init__(self, db_path=DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        self.db_path = resolve_db_path(db_path)
         self.conn = None
         self._init_db()
     
