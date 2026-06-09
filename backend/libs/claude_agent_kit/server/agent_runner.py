@@ -61,6 +61,9 @@
 # [Sync] 2026-06-09: classify Claude Code's built-in Skill tool as low-sensitivity
 #                    after confirming SKILL_TOOL_NAME == "Skill" in restored source;
 #                    keep switch_editor in the low-sensitivity class.
+# [Sync] 2026-06-09: normalize PreToolUse/PostToolUse hook payload keys across
+#                    snake_case and camelCase shapes so inputs like
+#                    {"toolName": "Skill"} still hit the low-sensitivity allow path.
 
 """Claude Agent Runner.
 
@@ -139,6 +142,13 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
 ]
+
+_AUTO_MODE_REQUIRED_ALLOWED_TOOLS: frozenset[str] = frozenset({
+    # SkillTool has its own Claude Code permission prompt for non-safe skill
+    # metadata. Keep the tool in auto-mode allowed_tools even when callers pass
+    # a custom allowed_tools list so our PreToolUse allow can own the decision.
+    "Skill",
+})
 _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
@@ -806,6 +816,30 @@ def _apply_low_sensitivity_query_permission(
     return None
 
 
+def _extract_hook_tool_name(hook_input: dict[str, Any]) -> str:
+    """Return tool name from Claude hook payloads.
+
+    Claude Code hook JSON is documented as ``tool_name`` / ``tool_input``, but
+    adjacent SDK/control-protocol surfaces and frontend events use camelCase.
+    Accept both so a payload shaped like ``{"toolName": "Skill"}`` still uses
+    the low-sensitivity policy instead of falling through as an unknown tool.
+    """
+
+    value = hook_input.get("tool_name")
+    if value is None:
+        value = hook_input.get("toolName")
+    return str(value or "")
+
+
+def _extract_hook_tool_input(hook_input: dict[str, Any]) -> dict[str, Any]:
+    """Return tool input from Claude hook payloads in snake or camel case."""
+
+    value = hook_input.get("tool_input")
+    if value is None:
+        value = hook_input.get("toolInput")
+    return value if isinstance(value, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Async helper
 # ---------------------------------------------------------------------------
@@ -977,6 +1011,10 @@ class ClaudeAgentRunner:
             else _default_allowed_tools()
         )
         tool_choice: ToolChoiceMode = opts.tool_choice
+        if tool_choice == "auto":
+            for required_tool in _AUTO_MODE_REQUIRED_ALLOWED_TOOLS:
+                if required_tool not in allowed_tools:
+                    allowed_tools.append(required_tool)
         system_prompt = opts.system_prompt
         mcp_env = dict(opts.mcp_env or {})
         turn_runtime = dict(opts.turn_runtime or {})
@@ -1065,8 +1103,8 @@ class ClaudeAgentRunner:
             context: HookContext,
         ) -> HookJSONOutput:
             del context
-            tool_name = str(hook_input.get("tool_name") or "")
-            tool_input: dict[str, Any] = hook_input.get("tool_input") or {}
+            tool_name = _extract_hook_tool_name(hook_input)
+            tool_input = _extract_hook_tool_input(hook_input)
             tool_call_id = tool_use_id or str(uuid4())
             pending_tool_calls[tool_call_id] = {
                 "tool_name": tool_name,
@@ -1243,7 +1281,7 @@ class ClaudeAgentRunner:
             context: HookContext,
         ) -> HookJSONOutput:
             del context
-            tool_name = str(hook_input.get("tool_name") or "")
+            tool_name = _extract_hook_tool_name(hook_input)
 
             # Only act on the switch_editor context-switch tool.
             if tool_name != _SWITCH_EDITOR_MCP_TOOL_NAME:
@@ -1256,7 +1294,7 @@ class ClaudeAgentRunner:
                 )
                 return HookJSONOutput()
 
-            tool_input: dict[str, Any] = hook_input.get("tool_input") or {}
+            tool_input = _extract_hook_tool_input(hook_input)
             new_session_id: str = str(tool_input.get("editor_session_id") or "").strip()
             if not new_session_id:
                 logger.warning(

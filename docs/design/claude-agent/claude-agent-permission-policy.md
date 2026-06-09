@@ -2,6 +2,7 @@
 > [Output] Claude-agent tool permission policy for `tool_choice` modes, sensitivity classes, and PreToolUse hook decisions.
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
 > [Sync] 2026-06-09: initial standalone policy extracted from runner implementation and product rule: query-like tools are low-sensitivity; execution/write/interactive tools are high-sensitivity unless explicitly listed.
+> [Sync] 2026-06-09: implementation note added for hook payload normalization (`tool_name`/`toolName`, `tool_input`/`toolInput`) and auto-mode retention of `Skill` in effective `allowed_tools`.
 
 # Claude-Agent Permission Policy
 
@@ -43,6 +44,8 @@ Current auto-allow inventory:
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
 
 `Skill` is low-sensitivity because Claude Code exposes skills through the built-in `Skill` tool, whose job is to expand or run a named skill prompt. The exact tool name was confirmed in restored Claude Code source: `src/tools/SkillTool/constants.ts` exports `SKILL_TOOL_NAME = 'Skill'`. Do not use a broad `skill*` prefix. Allowing `Skill` does not allow later tool calls made by that skill; those calls are evaluated again by this policy.
+
+Implementation detail: hook payloads are normalized before policy lookup. The runner accepts both Claude hook JSON keys (`tool_name`, `tool_input`) and adjacent SDK/frontend camelCase keys (`toolName`, `toolInput`) so a payload such as `{"toolName": "Skill"}` cannot fall through as an unknown tool. In `auto` mode, `Skill` is also retained in effective `allowed_tools` even if a caller passes a custom allowlist, because Claude Code's SkillTool has its own permission path that otherwise defaults to ask for some skill metadata.
 
 ## 4. High-Sensitivity Tools
 

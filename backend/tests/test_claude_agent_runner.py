@@ -18,6 +18,8 @@
 #                    while execution/write/state tools continue to require it.
 # [Sync] 2026-06-09: cover Claude Code Skill tool low-sensitivity allow and default
 #                    allowed-tools exposure.
+# [Sync] 2026-06-09: cover camelCase hook payloads such as {"toolName": "Skill"}
+#                    and auto-mode reinjection of required low-sensitivity tools.
 # [Sync] 2026-06-07: add Bash low-sensitivity and switch_editor tests; expand
 #                    Bash safe-command set from {ls} to full navigation/read set.
 
@@ -714,6 +716,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         *,
         cwd: str,
         tool_choice: str = "auto",
+        allowed_tools: Optional[list[str]] = None,
         on_tool_confirmation_request=None,
     ):
         self.set_query([])
@@ -725,6 +728,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 user_message="write a workspace file",
                 cwd=cwd,
                 tool_choice=tool_choice,  # type: ignore[arg-type]
+                allowed_tools=allowed_tools,
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -1097,8 +1101,64 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
+    async def test_auto_skill_tool_camel_case_hook_payload_gets_allow(self):
+        """SDK/control payloads with toolName/toolInput still bypass confirmation."""
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "should not ask"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "toolName": "Skill",
+                    "toolInput": {"skill": "doc-coauthoring", "args": ""},
+                },
+                "call-skill-tool",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(confirmation_requests, [])
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+
     async def test_skill_tool_is_in_default_allowed_tools(self):
         self.assertIn("Skill", agent_runner_module.DEFAULT_ALLOWED_TOOLS)
+
+    async def test_auto_mode_reinserts_skill_when_allowed_tools_override_omits_it(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                allowed_tools=[],
+            )
+
+        options = self._mock_client.last_options
+        self.assertIn("Skill", options.allowed_tools)
+
+    async def test_none_mode_does_not_reinsert_skill(self):
+        self.set_query([])
+        runner = self.make_runner()
+
+        await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="pretool-policy-none-skill",
+                user_message="no tools",
+                tool_choice="none",
+                allowed_tools=[],
+            ),
+            callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
+        )
+
+        options = self._mock_client.last_options
+        self.assertEqual(options.allowed_tools, [])
 
     async def test_manual_read_still_uses_confirmation(self):
         confirmation_requests: list[dict] = []

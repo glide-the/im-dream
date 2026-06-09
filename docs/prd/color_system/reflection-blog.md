@@ -114,6 +114,57 @@ Reflection Blog Page 是一个全页「博客阅读」视图，用于展示单�
 
 ---
 
+## 详情模式 (Detail Mode) 补充规范
+
+### 左右分栏
+
+| 区域 | Token |
+|---|---|
+| 左栏背景 | `var(--color-bg-app)`（继承页面底色） |
+| 右栏背景 | `var(--color-bg-surface)`（轻微区分） |
+| 左右分隔线（桌面） | `var(--color-border-paper)` |
+| 上下分隔线（移动） | `var(--color-border-paper)` |
+
+### 右栏占位卡
+
+| 元素 | Token |
+|---|---|
+| 卡片背景 | `var(--color-bg-surface-solid)`，opacity 0.5 |
+| 卡片边框 | `color-mix(var(--color-border-paper) 50%, transparent)` |
+| 骨架条（长行） | `color-mix(var(--color-border-paper) 60%, transparent)` |
+| 骨架条（短行） | `color-mix(var(--color-border-paper) 40%, transparent)` |
+
+### Player Bar
+
+| 元素 | Token |
+|---|---|
+| 背景 | `var(--color-bg-surface-solid)` |
+| 上边框 | `var(--color-border-paper)` |
+| 阴影 | `0 -4px 16px var(--color-shadow-soft)` |
+| 封面小图标块 | 渐变 `var(--color-bg-surface-solid)` → `color-mix(var(--color-border-paper) 40%, var(--color-bg-surface-solid))` |
+| 条目标题 | `var(--color-text-body)`，Georgia italic |
+| Section 副标题 | `var(--color-text-muted)` |
+| 控制按钮（激活） | `var(--color-border-paper)` 边框，`var(--color-text-body)` 前景 |
+| 控制按钮（禁用） | `var(--color-border-paper)` 前景（灰化） |
+| 当前位置圆点（激活） | `var(--color-text-muted)` |
+| 其他位置圆点 | `color-mix(var(--color-text-muted) 35%, transparent)` |
+| 计数文字 | `var(--color-text-muted)` |
+| × 关闭按钮 | `var(--color-text-muted)` 前景，`var(--color-border-paper)` 边框 |
+
+### Section Tab（Sticky Nav 右侧）
+
+| 状态 | Token |
+|---|---|
+| 激活背景 | `var(--color-bg-surface-solid)` |
+| 激活边框 | `var(--color-border-paper)` |
+| 激活阴影 | `0 1px 4px var(--color-shadow-soft)` |
+| 激活文字 | `var(--color-text-body)` |
+| 非激活文字 | `var(--color-text-muted)` |
+| 计数徽章背景（激活） | `color-mix(var(--color-border-paper) 50%, transparent)` |
+| 计数徽章背景（非激活） | `color-mix(var(--color-border-paper) 30%, transparent)` |
+
+---
+
 ## 与父组件 token 的一致性
 
 `ReflectionBlogPage` **不引入任何孤立十六进制颜色**；  
