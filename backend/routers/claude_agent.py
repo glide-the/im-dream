@@ -9,6 +9,10 @@
 # [Sync] 2026-06-06: stop forwarding client memoryConfig into ClaudeAgentRunRequest;
 #                    Memory workspace config is resolved from the partition table
 #                    by the workspace file-interface initializer.
+# [Sync] 2026-06-09: P3 fix — add GET /api/claude-agent/threads/{thread_id}/status
+#                    endpoint returning {running, lifecycle, turn_count} via
+#                    claude_agent_thread_factory.session_snapshot().
+# [Sync] 2026-06-09: SSE reconnect — GET /threads/{id}/stream; POST body reconnect=true.
 
 import base64
 import logging
@@ -80,7 +84,8 @@ class ChatAttachment(BaseModel):
 class ClaudeAgentRequestBody(BaseModel):
     thread_id: Optional[str] = None
     id: Optional[str] = None
-    message: Any
+    message: Any = None
+    reconnect: bool = False
     resume: bool = False
     tool_choice: str = Field(default="auto", validation_alias=AliasChoices("tool_choice", "toolChoice"))
     chatModel: Optional[dict] = None
@@ -130,6 +135,24 @@ async def claude_agent_stream(
     thread = database.get_chat_thread(thread_id, user_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    if body.reconnect:
+        snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+        if snapshot is None or snapshot.get("lifecycle") != "running":
+            raise HTTPException(status_code=409, detail="Thread is not running")
+
+        request = ClaudeAgentRunRequest(
+            user_id=str(user_id),
+            thread_id=thread_id,
+            reconnect=True,
+            resume=body.resume,
+        )
+
+        async def generate_reconnect():
+            async for frame in claude_agent_thread_factory.run_streaming(request):
+                yield frame
+
+        return StreamingResponse(generate_reconnect(), media_type="text/event-stream")
 
     message_text = body.get_message_text()
     if not message_text:
@@ -286,6 +309,69 @@ async def claude_agent_thread_messages(
         raise HTTPException(status_code=404, detail="Thread not found")
     messages = database.list_chat_messages(thread_id)
     return {"thread": thread, "messages": messages}
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/stream")
+async def claude_agent_thread_stream(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """SSE reconnect endpoint — subscribe to an in-flight turn's EventBus.
+
+    Replays buffered frames then streams live events until the turn completes.
+    Returns 409 when the thread is not currently running.
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    if snapshot is None or snapshot.get("lifecycle") != "running":
+        raise HTTPException(status_code=409, detail="Thread is not running")
+
+    async def generate():
+        async for frame in claude_agent_thread_factory.subscribe_stream(thread_id):
+            yield frame
+
+    return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/status")
+async def claude_agent_thread_status(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the live inference lifecycle state of *thread_id*.
+
+    Response body::
+
+        {
+          "running": true,           // true when AgentRunState.lifecycle == "running"
+          "lifecycle": "running",    // "idle" | "running" | "destroyed" | "not_found"
+          "turn_count": 3            // completed turn count (0 when not found)
+        }
+
+    Ownership is validated: returns 404 when the thread does not belong to the
+    caller.  When the thread exists but has no in-memory session (idle / never
+    started / TTL evicted) ``running`` is ``false`` and ``lifecycle`` is
+    ``"not_found"``.
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    if snapshot is None:
+        return {"running": False, "lifecycle": "not_found", "turn_count": 0}
+
+    lifecycle: str = snapshot.get("lifecycle", "idle")
+    return {
+        "running": lifecycle == "running",
+        "lifecycle": lifecycle,
+        "turn_count": snapshot.get("turn_count", 0),
+    }
 
 
 @router.delete("/api/claude-agent/threads/{thread_id}")

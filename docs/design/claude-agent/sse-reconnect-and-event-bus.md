@@ -1,6 +1,6 @@
 # SSE 断线重连与 EventBus 设计
 
-> **版本**: 2026-06-09 v2 — 新增 Port/Adapter 模式支持 MQ 后端  
+> **版本**: 2026-06-09 v2.1 — Port/Adapter + 部署环境变量（`backend/.env.example` § EventBus）  
 > **关联文件**: `backend/claude_agent/thread_factory.py`, `backend/claude_agent/thread_pool.py`,  
 > `backend/claude_agent/event_bus.py`（新建），`frontend/src/components/chat/ChatView.tsx`
 
@@ -533,9 +533,42 @@ sequenceDiagram
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `INK_AGENT_EVENT_BUS_BACKEND` | `memory` | `memory` 或 `redis` |
-| `INK_AGENT_REDIS_URL` | `redis://localhost:6379/0` | Redis 连接 URL（redis 模式下必填）|
-| `INK_AGENT_EVENT_BUS_TTL_S` | `3600` | Redis Stream 自动过期时间（秒）|
+| `INK_AGENT_EVENT_BUS_BACKEND` | `memory` | EventBus 后端：`memory`（进程内 asyncio）或 `redis`（Redis Streams，多 Worker/Pod） |
+| `INK_AGENT_REDIS_URL` | `redis://localhost:6379/0` | Redis 连接 URL；仅 `INK_AGENT_EVENT_BUS_BACKEND=redis` 时生效 |
+| `INK_AGENT_EVENT_BUS_TTL_S` | `3600` | Redis Stream key 过期时间（秒）；仅 redis 模式生效 |
+| `INK_AGENT_SSE_KEEPALIVE_S` | `15` | SSE 空闲 keepalive 注释帧间隔（秒）；`service.py` 与 `InMemoryEventBus.read()` 共用 |
+
+**配置来源（单一真相）**
+
+- 模板：`backend/.env.example`（EventBus 段位于 `INK_AGENT_CONTEXT_SESSIONS` 之后）
+- 运行时加载：`backend/server.py` 在 import 路由前 `load_dotenv(backend/.env)`；`_drop_unsupported_agent_env()` 白名单保留上述 `INK_AGENT_*` 键
+- 工厂入口：`backend/claude_agent/event_bus.py::create_event_bus()` 读取 `INK_AGENT_EVENT_BUS_BACKEND`
+- Redis 适配器：`backend/claude_agent/event_bus_redis.py` 读取 `INK_AGENT_REDIS_URL` / `INK_AGENT_EVENT_BUS_TTL_S`
+
+**`backend/.env.example` 片段**
+
+```dotenv
+# SSE EventBus backend for Claude Agent stream reconnect (memory | redis).
+# memory: single-process InMemoryEventBus (default, no extra deps).
+# redis:  RedisStreamEventBus for multi-worker / multi-pod deployments.
+INK_AGENT_EVENT_BUS_BACKEND=memory
+
+# Redis connection URL — required when INK_AGENT_EVENT_BUS_BACKEND=redis.
+INK_AGENT_REDIS_URL=redis://localhost:6379/0
+
+# Redis Stream key TTL (seconds) for per-turn event buffers.
+INK_AGENT_EVENT_BUS_TTL_S=3600
+```
+
+**行为说明**
+
+| `INK_AGENT_EVENT_BUS_BACKEND` | 依赖 | 适用场景 |
+|------------------------------|------|---------|
+| `memory`（默认）| 无 | 开发、单机、单 uvicorn worker |
+| `redis` | `redis` PyPI 包 + 可连通的 Redis | 多 Worker（`uvicorn -w N`）、K8s 多 Pod |
+
+- `redis` 模式下若 `redis-py` 未安装或 import 失败，`create_event_bus()` **降级**为 `InMemoryEventBus` 并打 warning 日志。
+- `INK_AGENT_SSE_KEEPALIVE_S` 控制消费者长时间无事件时发送的 `: keepalive\n\n` 注释帧，避免代理/负载均衡因空闲断开 SSE。
 
 ### 11.2 部署选型矩阵
 

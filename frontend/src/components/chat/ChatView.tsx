@@ -1,5 +1,7 @@
 // [Input] Consume WorkspaceContext, dashboard file/nav/quick-action components, AIInputDock, ChatPanel, auth token, and AI SDK message types.
+//         /api/claude-agent/threads/{id}/status, reconnectStreamNonce to ChatPanel.
 // [Output] Render chat workspace with lazy thread creation, history/file sidebars, quick actions, and ChatPanel.
+//          When /status reports running, bump reconnectStreamNonce so ChatPanel attaches SSE stream.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
 // [Sync] 2026-05-25: remove customer-context props from ChatView and ChatPanel composition.
@@ -12,6 +14,8 @@
 // [Sync] 2026-05-30: accept activeVoice prop to display deck/voice badge in top-right and forward system prompt to ChatPanel.
 // [Sync] 2026-06-01: stop creating a thread on first Chat view mount; create lazily on first send, quick action, or explicit New Chat.
 // [Sync] 2026-06-01: add delete button to thread list items; hover shows × button; calls DELETE /api/claude-agent/threads/{id}; clears workspace when active thread is deleted.
+// [Sync] 2026-06-09: SSE reconnect — fetch /status on thread switch; trigger stream reconnect via reconnectStreamNonce.
+// [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -98,6 +102,25 @@ async function deleteThread(threadId: string): Promise<boolean> {
   }
 }
 
+interface ThreadStatusResult {
+  running: boolean;
+  lifecycle: 'idle' | 'running' | 'destroyed' | 'not_found';
+  turn_count: number;
+}
+
+async function fetchThreadStatus(threadId: string): Promise<ThreadStatusResult | null> {
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
+      { headers: { 'Authorization': `Bearer ${getAuthToken()}` } },
+    );
+    if (!res.ok) return null;
+    return (await res.json()) as ThreadStatusResult;
+  } catch {
+    return null;
+  }
+}
+
 async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
   try {
     const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
@@ -151,6 +174,8 @@ export default function ChatView({
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
+  // Bump to signal ChatPanel to attach GET /threads/{id}/stream when backend is still running.
+  const [reconnectStreamNonce, setReconnectStreamNonce] = useState(0);
 
   // Load thread list
   const reloadThreads = useCallback(async () => {
@@ -177,24 +202,42 @@ export default function ChatView({
   }, [requestedThreadId]);
 
   // Fetch messages for the active thread (following better-chatbot pattern:
-  // parent fetches history and passes as initialMessages to the chat component)
+  // parent fetches history and passes as initialMessages to the chat component).
+  // Load history, then reconnect SSE when the backend turn is still running.
   useEffect(() => {
     if (!activeThreadId) return;
     let cancelled = false;
     setIsLoadingMessages(true);
     setThreadMessages(null);
+
     void (async () => {
       const msgs = await fetchThreadMessages(activeThreadId);
-      if (!cancelled) {
-        setThreadMessages(msgs);
-        if (msgs.length > 0) {
-          setHasConversationStarted(true);
-        }
-        setIsLoadingMessages(false);
+      if (cancelled) return;
+      setThreadMessages(msgs);
+      if (msgs.length > 0) setHasConversationStarted(true);
+      setIsLoadingMessages(false);
+
+      const status = await fetchThreadStatus(activeThreadId);
+      if (cancelled) return;
+      if (status?.running) {
+        setReconnectStreamNonce((value) => value + 1);
       }
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, [activeThreadId]);
+
+  const handleReconnectComplete = useCallback(async () => {
+    if (!activeThreadId) return;
+    const msgs = await fetchThreadMessages(activeThreadId);
+    setThreadMessages(msgs);
+  }, [activeThreadId]);
+
+  const notifyReconnectComplete = useCallback(() => {
+    void handleReconnectComplete();
+  }, [handleReconnectComplete]);
 
   const queuePromptForThread = useCallback((
     threadId: string,
@@ -445,6 +488,8 @@ export default function ChatView({
                   threadId={activeThreadId}
                   initialMessages={threadMessages ?? undefined}
                   isLoading={isLoadingMessages}
+                  reconnectStreamNonce={reconnectStreamNonce}
+                  onReconnectComplete={notifyReconnectComplete}
                   queuedPrompt={queuedPrompt}
                   queuedAttachments={queuedAttachments}
                   queuedToolChoice={queuedToolChoice}

@@ -59,6 +59,14 @@
 #                    workspace file interface before agent analysis starts.
 # [Sync] 2026-06-09: read system_config.im_full_access_enabled and pass it to
 #                    AgentRunOptions so Settings can enable full-access tool approval.
+# [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
+#                    before inference), _persist_assistant_turn (called on success),
+#                    and _persist_partial_assistant (called on CancelledError/error).
+#                    execute_session saves user message immediately so thread-switches
+#                    do not lose the user's turn; partial assistant content is flushed
+#                    when the SSE stream is cancelled mid-flight.
+# [Sync] 2026-06-09: EventBus — assemble_context accepts bus param; BusProxyQueue
+#                    adapts IEventBus.publish to _TurnContext.queue.put.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -175,10 +183,14 @@ class ClaudeAgentRunRequest:
     ``message_parts`` carries the AI-SDK UIMessage parts list (e.g.
     ``[{"type": "text", "text": "..."}]``); plain text is derived from it as
     needed — the raw ``message_text`` string is never stored here.
+
+    When ``reconnect`` is True the factory subscribes to an in-flight EventBus
+    instead of starting a new inference turn.
     """
 
     user_id: str
     thread_id: str
+    reconnect: bool = False
     resume: bool = False
     tool_choice: str = "auto"
     model: Optional[str] = None
@@ -226,7 +238,7 @@ class _TurnContext:
     ``_persist_turn`` calls ``_sse_events_to_ui_parts(collected_parts)`` once.
     """
 
-    queue: asyncio.Queue
+    queue: Any  # asyncio.Queue or BusProxyQueue
     confirmation_store: ToolConfirmationStore
     pending_tool_call_ids: set = field(default_factory=set)
     turn_start_ts: float = field(default_factory=time.monotonic)
@@ -272,7 +284,7 @@ class ClaudeAgentService:
         request: ClaudeAgentRunRequest,
         *,
         state: AgentRunState,
-        queue: asyncio.Queue,
+        bus: "Any",
         runner: ClaudeAgentRunner,
     ) -> "_TurnExecution":
         """Build context for the upcoming turn.
@@ -429,9 +441,11 @@ class ClaudeAgentService:
             editor_state_setter=(lambda v, s=state: s.with_editor_state(v, s.editor_user_id)) if active_editor_state is not None else None,
         )
 
+        from claude_agent.event_bus import BusProxyQueue
+
         confirmation_store = ToolConfirmationStore()
         turn_ctx = _TurnContext(
-            queue=queue,
+            queue=BusProxyQueue(bus),
             confirmation_store=confirmation_store,
         )
         state.turn_context = turn_ctx
@@ -450,9 +464,18 @@ class ClaudeAgentService:
     # ------------------------------------------------------------------
 
     async def execute_session(self, execution: "_TurnExecution") -> None:
-        """Stream the agent turn and emit SSE events via the queue."""
+        """Stream the agent turn and emit SSE events via the queue.
+
+        User message is persisted immediately before inference starts so that
+        thread-switching in the frontend (which disconnects the SSE stream) does
+        not lose the user's turn.  Partial assistant content is flushed on
+        CancelledError so resumed views can show in-progress tool invocations.
+        """
         queue = execution.turn_context.queue
         store = execution.turn_context.confirmation_store
+
+        # --- P2 fix: save user message immediately before inference ---
+        await self._persist_user_message(execution)
 
         # Emit session metadata header
         await queue.put(
@@ -469,7 +492,13 @@ class ClaudeAgentService:
             on_error=self._make_error_cb(queue),
         )
 
-        result = await execution.runner.run_streaming(execution.run_options, callbacks)
+        try:
+            result = await execution.runner.run_streaming(execution.run_options, callbacks)
+        except asyncio.CancelledError:
+            # Frontend disconnected mid-stream — flush partial assistant content
+            # so the next load of this thread shows any completed tool calls / text.
+            await self._persist_partial_assistant(execution)
+            raise
 
         if result.success:
             full_text = result.full_text
@@ -481,57 +510,112 @@ class ClaudeAgentService:
                 })
             )
             await queue.put(_sse("finish", {"finishReason": "stop"}))
-            # Persist user and assistant messages to the database
-            await self._persist_turn(execution, result)
+            # Persist assistant message (user message already saved above).
+            await self._persist_assistant_turn(execution, result)
         else:
             error_msg = str(result.error) if result.error else "Unknown error"
             await queue.put(_sse("error", {"errorText": error_msg}))
             await queue.put(_sse("finish", {"finishReason": "error"}))
+            # Even on error, flush whatever partial assistant content was collected.
+            await self._persist_partial_assistant(execution)
 
         await queue.put(None)  # Sentinel: end of stream
 
-    async def _persist_turn(
-        self, execution: "_TurnExecution", result: Any
-    ) -> None:
-        """Save user and assistant messages to the database after a successful turn.
+    async def _persist_user_message(self, execution: "_TurnExecution") -> None:
+        """Persist the user message immediately before inference starts (P2 fix).
 
-        Aligned with better-chatbot onFinish / chatRepository.upsertMessage pattern:
-        - user message: parts list (from frontend AI-SDK message.parts, or text fallback)
-        - assistant message: parts list (reasoning + tool-invocations + text) + metadata dict
-        Serialisation (JSON) is handled inside database.save_chat_message.
+        Saving the user turn before calling runner.run_streaming ensures the
+        message is visible in the thread history even when the SSE stream is
+        cancelled mid-flight (e.g. the user switches threads).
         """
-        import asyncio
         import database
 
         thread_id = execution.request.thread_id
-        user_message_id = execution.request.message_id  # original AI-SDK ID or None
-        user_parts = execution.request.message_parts     # original parts list or None
-        assistant_text: str = result.full_text if result else ""
-        turn_ctx = execution.turn_context
+        user_message_id = execution.request.message_id
+        user_parts = execution.request.message_parts
 
-        loop = asyncio.get_running_loop()
-
-        def _save() -> None:
-            # --- User message ---
-            # Mirror better-chatbot: store message.parts from the frontend AI SDK.
-            # Fall back to an empty parts list when message_parts is not provided.
+        def _save_user() -> None:
             resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": ""}]
             database.save_chat_message(
                 thread_id, "user",
                 parts=resolved_user_parts,
                 message_id=user_message_id,
             )
+            # Auto-fill thread title from first user message if still NULL.
+            thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
+            if thread and not thread.get("title"):
+                title = _extract_text_from_parts(user_parts).strip()[:MAX_THREAD_TITLE_LENGTH]
+                database.update_chat_thread_title(thread_id, title)
 
-            # --- Assistant message ---
-            # Convert the collected raw SSE events to UIMessage-compatible parts.
-            # This is the server-side equivalent of the Vercel AI SDK assembling
-            # responseMessage.parts from UIMessageChunks in better-chatbot.
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, _save_user)
+        except Exception:
+            logger.exception(
+                "Failed to persist user message for thread_id=%s", thread_id
+            )
+
+    async def _persist_partial_assistant(self, execution: "_TurnExecution") -> None:
+        """Flush partial assistant content collected so far (called on cancel/error).
+
+        Converts whatever SSE events were collected before cancellation into
+        UIMessage parts and upserts an assistant row.  The row is marked with
+        ``is_partial=True`` in metadata so the frontend can show an appropriate
+        indicator.  If no collectible events exist the call is a no-op.
+        """
+        import database
+
+        turn_ctx = execution.turn_context
+        if not turn_ctx or not turn_ctx.collected_parts:
+            return
+
+        asst_parts = _sse_events_to_ui_parts(turn_ctx.collected_parts)
+        if not asst_parts:
+            return
+
+        thread_id = execution.request.thread_id
+        asst_metadata: dict = {"is_partial": True}
+        if execution.request.model:
+            asst_metadata["chatModel"] = {"provider": "anthropic", "model": execution.request.model}
+        tool_count = sum(1 for p in asst_parts if p.get("type") == "tool-invocation")
+        if tool_count:
+            asst_metadata["toolCount"] = tool_count
+
+        def _save_partial() -> None:
+            database.save_chat_message(
+                thread_id, "assistant",
+                parts=asst_parts,
+                metadata=asst_metadata,
+            )
+
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, _save_partial)
+        except Exception:
+            logger.exception(
+                "Failed to persist partial assistant for thread_id=%s", thread_id
+            )
+
+    async def _persist_assistant_turn(
+        self, execution: "_TurnExecution", result: Any
+    ) -> None:
+        """Save the completed assistant message after a successful turn.
+
+        User message was already saved by _persist_user_message.  This method
+        saves the assistant message + updates claude_session_id on chat_thread.
+        Aligned with better-chatbot onFinish / chatRepository.upsertMessage.
+        """
+        import database
+
+        thread_id = execution.request.thread_id
+        assistant_text: str = result.full_text if result else ""
+        turn_ctx = execution.turn_context
+
+        def _save_assistant() -> None:
             asst_parts: list = _sse_events_to_ui_parts(turn_ctx.collected_parts)
             if not asst_parts:
-                # Fallback: no collectible SSE events (e.g. test stubs / empty run).
                 asst_parts = [{"type": "text", "text": assistant_text}] if assistant_text else []
 
-            # Build metadata (model + usage + toolCount) — same as better-chatbot metadata
             asst_metadata: dict = {}
             if result and result.usage:
                 input_t = result.usage.get("input_tokens")
@@ -557,16 +641,7 @@ class ClaudeAgentService:
                 parts=asst_parts,
                 metadata=asst_metadata or None,
             )
-            # Auto-fill thread title from first user message if still NULL
-            thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
-            if thread and not thread.get("title"):
-                title = _extract_text_from_parts(user_parts).strip()[:MAX_THREAD_TITLE_LENGTH]
-                database.update_chat_thread_title(thread_id, title)
 
-            # Persist the Claude SDK session ID so subsequent turns can resume.
-            # result.session_id is the SDK-assigned session ID (e.g. "abc123");
-            # writing it here means the next turn's assemble_context will find it
-            # in chat_thread and pass it as thread_id_for_agent.
             captured_session_id = result.session_id if result else None
             if captured_session_id:
                 database.update_chat_thread_claude_session(
@@ -575,12 +650,24 @@ class ClaudeAgentService:
                     _AGENT_RUNTIME_CONTRACT_VERSION,
                 )
 
+        loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, _save)
+            await loop.run_in_executor(None, _save_assistant)
         except Exception:
             logger.exception(
-                "Failed to persist messages for thread_id=%s", thread_id
+                "Failed to persist assistant message for thread_id=%s", thread_id
             )
+
+    # Keep _persist_turn as a legacy alias used by test stubs / older callers.
+    async def _persist_turn(
+        self, execution: "_TurnExecution", result: Any
+    ) -> None:
+        """Deprecated: use _persist_user_message + _persist_assistant_turn instead.
+
+        Kept for backward compatibility with any test stubs that call this directly.
+        """
+        await self._persist_user_message(execution)
+        await self._persist_assistant_turn(execution, result)
 
     # ------------------------------------------------------------------
     # Tool confirmation (called from HTTP endpoint via factory)
