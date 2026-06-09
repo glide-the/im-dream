@@ -10,6 +10,9 @@
  *         Types migrated to unified ReflectionResult[]; confidence replaces strength/frequency.
  *         Per-section streaming analyze + ⚙ SectionConfigModal retained.
  *         One-click 「Generate Reflections」 button in dashboard header retained.
+ * [Sync] 2026-06-09: Past Reflections cards now open a full-page blog view (ReflectionBlogPage)
+ *         instead of the PaperStack popup. viewMode extends to 'blog'; selectedReport state tracks
+ *         which report is being read. Color spec: docs/prd/color_system/reflection-blog.md
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -275,8 +278,9 @@ export default function AnalysisView() {
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
 
   // View modes
-  const [viewMode, setViewMode] = useState<'dashboard' | 'report'>('dashboard');
+  const [viewMode, setViewMode] = useState<'dashboard' | 'report' | 'blog'>('dashboard');
   const [currentPaper, setCurrentPaper] = useState(0);
+  const [selectedReport, setSelectedReport] = useState<AnalysisReport | null>(null);
 
   // Section config modal
   const [configModal, setConfigModal] = useState<{
@@ -518,6 +522,24 @@ export default function AnalysisView() {
   const anyError = errors.echoes || errors.traits || errors.patterns;
 
   // ──────────────────────────────────────────────
+  // BLOG VIEW — full-page editorial layout for a single Past Reflection
+  // ──────────────────────────────────────────────
+  if (viewMode === 'blog' && selectedReport) {
+    return (
+      <ReflectionBlogPage
+        report={selectedReport}
+        onBack={() => setViewMode('dashboard')}
+        isMobile={isMobile}
+        t={t}
+        dateLocale={dateLocale}
+        formatDaysLabel={formatDaysLabel}
+        formatEntriesLabel={formatEntriesLabel}
+        formatWordsLabel={formatWordsLabel}
+      />
+    );
+  }
+
+  // ──────────────────────────────────────────────
   // REPORT VIEW — PaperStack 3D stacked-paper display
   // ──────────────────────────────────────────────
   if (viewMode === 'report' && hasAnyData) {
@@ -639,10 +661,8 @@ export default function AnalysisView() {
                 <div
                   key={report.id}
                   onClick={() => {
-                    if (report.echoes.length) setEchoes(report.echoes);
-                    if (report.traits.length) setTraits(report.traits);
-                    if (report.patterns.length) setPatterns(report.patterns);
-                    setViewMode('report'); setCurrentPaper(0);
+                    setSelectedReport(report);
+                    setViewMode('blog');
                   }}
                   style={{
                     padding: '1.5rem', background: 'var(--color-bg-surface)',
@@ -1424,6 +1444,465 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
         paddingTop: '0.5rem',
       }}>
         {label}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════
+// ReflectionBlogPage — full-page editorial blog layout
+// Color spec: docs/prd/color_system/reflection-blog.md
+// ══════════════════════════════════════════════
+function ReflectionBlogPage({
+  report, onBack, isMobile, t, dateLocale,
+  formatDaysLabel, formatEntriesLabel, formatWordsLabel,
+}: {
+  report: AnalysisReport;
+  onBack: () => void;
+  isMobile: boolean;
+  t: (k: string, opts?: any) => string;
+  dateLocale: string;
+  formatDaysLabel: (n: number) => string;
+  formatEntriesLabel: (n: number) => string;
+  formatWordsLabel: (n: number) => string;
+}) {
+  const date = new Date(report.timestamp);
+
+  const blogSections: { key: SectionKey; icon: string; items: ReflectionResult[]; kind: 'echo' | 'trait' | 'pattern' }[] = [
+    ...(report.echoes.length > 0 ? [{ key: 'echoes' as SectionKey, icon: '🔄', items: report.echoes, kind: 'echo' as const }] : []),
+    ...(report.traits.length > 0 ? [{ key: 'traits' as SectionKey, icon: '⭐', items: report.traits, kind: 'trait' as const }] : []),
+    ...(report.patterns.length > 0 ? [{ key: 'patterns' as SectionKey, icon: '🌀', items: report.patterns, kind: 'pattern' as const }] : []),
+  ];
+
+  const monthStr = date.toLocaleDateString('en', { month: 'short' }).toUpperCase();
+  const dayStr   = date.getDate();
+  const yearStr  = date.getFullYear();
+  const fullDateStr = date.toLocaleDateString(dateLocale, {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
+  });
+
+  return (
+    <div style={{
+      width: '100%', height: '100%', overflowY: 'auto',
+      background: 'var(--color-bg-app)',
+      fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif",
+    }}>
+      {/* ── Sticky navigation bar ── */}
+      <div style={{
+        position: 'sticky', top: 0, zIndex: 100,
+        background: 'color-mix(in srgb, var(--color-bg-surface-solid) 90%, transparent)',
+        backdropFilter: 'blur(16px)',
+        borderBottom: '1px solid var(--color-border-paper)',
+        padding: isMobile ? '0.75rem 1rem' : '0.75rem 2rem',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <button
+          onClick={onBack}
+          style={{
+            background: 'none', border: '1px solid var(--color-border-paper)',
+            borderRadius: '20px', padding: '6px 16px',
+            cursor: 'pointer', color: 'var(--color-text-body)', fontSize: '13px',
+            display: 'flex', alignItems: 'center', gap: '6px',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg-hover)';
+            e.currentTarget.style.borderColor = 'var(--color-text-muted)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'none';
+            e.currentTarget.style.borderColor = 'var(--color-border-paper)';
+          }}
+        >
+          <span>←</span>
+          <span>{t('analysis.pastReflections')}</span>
+        </button>
+        <span style={{
+          fontSize: '12px', color: 'var(--color-text-muted)',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          letterSpacing: '0.5px',
+        }}>
+          {date.toLocaleDateString(dateLocale, { month: 'short', day: 'numeric', year: 'numeric' })}
+        </span>
+      </div>
+
+      {/* ── Hero / Masthead ── */}
+      <div style={{
+        borderBottom: '1px solid var(--color-border-paper)',
+        background: 'linear-gradient(180deg, var(--color-bg-surface-solid) 0%, var(--color-bg-app) 100%)',
+      }}>
+        <div style={{
+          maxWidth: '1100px', margin: '0 auto',
+          padding: isMobile ? '2rem 1rem 1.75rem' : '3rem 3rem 2.5rem',
+          display: 'flex', gap: isMobile ? '1.25rem' : '2.5rem',
+          alignItems: isMobile ? 'flex-start' : 'center',
+          flexDirection: isMobile ? 'row' : 'row',
+        }}>
+          {/* Cover art — stylized date block */}
+          <div style={{
+            flexShrink: 0,
+            width: isMobile ? '88px' : '160px',
+            height: isMobile ? '88px' : '160px',
+            background: 'linear-gradient(145deg, var(--color-bg-surface-solid) 0%, color-mix(in srgb, var(--color-border-paper) 40%, var(--color-bg-surface-solid)) 100%)',
+            border: '1px solid var(--color-border-paper)',
+            borderRadius: '8px',
+            boxShadow: '0 8px 28px var(--color-shadow-medium), 0 2px 6px var(--color-shadow-soft)',
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center',
+            gap: isMobile ? '2px' : '6px',
+            position: 'relative', overflow: 'hidden',
+          }}>
+            {/* paper texture */}
+            <div style={{
+              position: 'absolute', inset: 0,
+              backgroundImage: `repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-border-paper) 5%, transparent) 0px, transparent 2px)`,
+              pointerEvents: 'none',
+            }} />
+            <span style={{
+              fontSize: isMobile ? '10px' : '13px', letterSpacing: '3px',
+              textTransform: 'uppercase', color: 'var(--color-text-muted)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontWeight: 600, position: 'relative',
+            }}>
+              {monthStr}
+            </span>
+            <span style={{
+              fontSize: isMobile ? '32px' : '56px', fontWeight: 300,
+              fontFamily: 'Georgia, serif', lineHeight: 1,
+              color: 'var(--color-text-primary)', position: 'relative',
+            }}>
+              {dayStr}
+            </span>
+            <span style={{
+              fontSize: isMobile ? '10px' : '12px', color: 'var(--color-text-muted)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              position: 'relative',
+            }}>
+              {yearStr}
+            </span>
+          </div>
+
+          {/* Title & meta */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontSize: isMobile ? '10px' : '11px', letterSpacing: '2.5px',
+              textTransform: 'uppercase', color: 'var(--color-text-muted)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontWeight: 600, marginBottom: '0.5rem',
+            }}>
+              Reflection
+            </div>
+            <h1 style={{
+              fontSize: isMobile ? '22px' : '38px', fontWeight: 400,
+              fontFamily: 'Georgia, serif', fontStyle: 'italic',
+              color: 'var(--color-text-primary)', lineHeight: 1.2,
+              margin: '0 0 1rem', letterSpacing: '-0.3px',
+            }}>
+              {fullDateStr}
+            </h1>
+
+            {/* Stats row */}
+            <div style={{
+              display: 'flex', gap: isMobile ? '0.75rem' : '1.25rem',
+              flexWrap: 'wrap', alignItems: 'center',
+              fontSize: '13px', color: 'var(--color-text-secondary)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              marginBottom: '1rem',
+            }}>
+              <span>{formatDaysLabel(report.stats?.days || 0)}</span>
+              <span style={{ color: 'var(--color-border-paper)' }}>·</span>
+              <span>{formatEntriesLabel(report.stats?.entries || 0)}</span>
+              <span style={{ color: 'var(--color-border-paper)' }}>·</span>
+              <span>{formatWordsLabel(report.stats?.words || 0)}</span>
+            </div>
+
+            {/* Section badges */}
+            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+              {report.echoes?.length > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '5px',
+                  fontSize: '12px', padding: '5px 12px',
+                  background: 'color-mix(in srgb, var(--color-border-paper) 22%, transparent)',
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '20px', color: 'var(--color-text-body)',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                }}>
+                  🔄 {t('analysis.reportCounts.echoes', { count: report.echoes.length })}
+                </span>
+              )}
+              {report.traits?.length > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '5px',
+                  fontSize: '12px', padding: '5px 12px',
+                  background: 'color-mix(in srgb, var(--color-border-paper) 22%, transparent)',
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '20px', color: 'var(--color-text-body)',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                }}>
+                  ⭐ {t('analysis.reportCounts.traits', { count: report.traits.length })}
+                </span>
+              )}
+              {report.patterns?.length > 0 && (
+                <span style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '5px',
+                  fontSize: '12px', padding: '5px 12px',
+                  background: 'color-mix(in srgb, var(--color-border-paper) 22%, transparent)',
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '20px', color: 'var(--color-text-body)',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                }}>
+                  🌀 {t('analysis.reportCounts.patterns', { count: report.patterns.length })}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Section divider / Table of contents ── */}
+      <div style={{
+        background: 'var(--color-bg-surface)',
+        borderBottom: '1px solid var(--color-border-paper)',
+      }}>
+        <div style={{
+          maxWidth: '1100px', margin: '0 auto',
+          padding: isMobile ? '0.75rem 1rem' : '0.75rem 3rem',
+          display: 'flex', gap: '1.5rem', alignItems: 'center', overflowX: 'auto',
+        }}>
+          <span style={{
+            fontSize: '10px', letterSpacing: '1.5px', textTransform: 'uppercase',
+            color: 'var(--color-text-muted)',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            fontWeight: 600, whiteSpace: 'nowrap', flexShrink: 0,
+          }}>
+            On this page
+          </span>
+          {blogSections.map(s => (
+            <a
+              key={s.key}
+              href={`#blog-section-${s.key}`}
+              style={{
+                fontSize: '12px', color: 'var(--color-text-secondary)',
+                textDecoration: 'none', whiteSpace: 'nowrap',
+                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                display: 'flex', alignItems: 'center', gap: '5px',
+                padding: '4px 0',
+                borderBottom: '2px solid transparent',
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.color = 'var(--color-text-body)';
+                e.currentTarget.style.borderBottomColor = 'var(--color-text-muted)';
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.color = 'var(--color-text-secondary)';
+                e.currentTarget.style.borderBottomColor = 'transparent';
+              }}
+            >
+              <span>{s.icon}</span>
+              <span>{t(`analysis.papers.${s.key}.title`)}</span>
+            </a>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Main blog content ── */}
+      <div style={{ maxWidth: '1100px', margin: '0 auto', padding: isMobile ? '2rem 1rem 4rem' : '3rem 3rem 5rem' }}>
+        {blogSections.map((section, sIdx) => (
+          <section
+            key={section.key}
+            id={`blog-section-${section.key}`}
+            style={{ marginBottom: sIdx < blogSections.length - 1 ? '4rem' : '0' }}
+          >
+            {/* Section header */}
+            <div style={{
+              display: 'flex', alignItems: 'flex-end', gap: '1rem',
+              marginBottom: '2rem',
+              paddingBottom: '1rem',
+              borderBottom: '2px solid color-mix(in srgb, var(--color-border-paper) 60%, transparent)',
+            }}>
+              <span style={{ fontSize: isMobile ? '28px' : '36px', lineHeight: 1 }}>{section.icon}</span>
+              <div>
+                <h2 style={{
+                  fontSize: isMobile ? '20px' : '28px', fontWeight: 400,
+                  fontFamily: 'Georgia, serif', fontStyle: 'italic',
+                  color: 'var(--color-text-primary)', margin: '0 0 4px', lineHeight: 1.2,
+                }}>
+                  {t(`analysis.papers.${section.key}.title`)}
+                </h2>
+                <div style={{
+                  fontSize: '11px', color: 'var(--color-text-muted)',
+                  letterSpacing: '1.5px', textTransform: 'uppercase',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  fontWeight: 500,
+                }}>
+                  {t(`analysis.papers.${section.key}.subtitle`)}
+                  <span style={{
+                    marginLeft: '10px',
+                    background: 'color-mix(in srgb, var(--color-border-paper) 40%, transparent)',
+                    padding: '2px 8px', borderRadius: '10px',
+                  }}>
+                    {section.items.length}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Section items */}
+            <div style={{
+              display: section.key === 'traits' && !isMobile ? 'grid' : 'flex',
+              flexDirection: section.key !== 'traits' || isMobile ? 'column' : undefined,
+              gridTemplateColumns: section.key === 'traits' && !isMobile ? 'repeat(auto-fill, minmax(320px, 1fr))' : undefined,
+              gap: '1.25rem',
+            }}>
+              {section.items.map((item, i) => (
+                <BlogResultCard key={i} result={item} kind={section.kind} index={i} />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+
+      {/* ── Footer ── */}
+      <div style={{
+        borderTop: '1px solid var(--color-border-paper)',
+        padding: isMobile ? '1.5rem 1rem' : '2rem 3rem',
+        textAlign: 'center',
+      }}>
+        <button
+          onClick={onBack}
+          style={{
+            background: 'none', border: '1px solid var(--color-border-paper)',
+            borderRadius: '24px', padding: '10px 28px',
+            cursor: 'pointer', color: 'var(--color-text-body)', fontSize: '14px',
+            fontFamily: 'Georgia, serif', fontStyle: 'italic',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={e => {
+            e.currentTarget.style.background = 'var(--color-bg-hover)';
+            e.currentTarget.style.transform = 'translateY(-1px)';
+          }}
+          onMouseLeave={e => {
+            e.currentTarget.style.background = 'none';
+            e.currentTarget.style.transform = 'translateY(0)';
+          }}
+        >
+          ← {t('analysis.pastReflections')}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ──────────────────────────────────────────────
+// BlogResultCard — expanded card for blog reading view
+// More spacious and readable than the compact ResultCard
+// ──────────────────────────────────────────────
+function BlogResultCard({
+  result, kind, index,
+}: {
+  result: ReflectionResult;
+  kind: 'echo' | 'trait' | 'pattern';
+  index: number;
+}) {
+  const confidenceFill = result.confidence === 'high' ? 5 : result.confidence === 'low' ? 1 : 3;
+  const indexLabel = String(index + 1).padStart(2, '0');
+
+  return (
+    <div style={{
+      background: 'linear-gradient(135deg, var(--color-bg-surface-solid) 0%, var(--color-bg-surface) 100%)',
+      padding: kind === 'trait' ? '1.75rem' : '2rem 2.25rem',
+      borderRadius: '12px',
+      border: '1px solid color-mix(in srgb, var(--color-border-paper) 55%, transparent)',
+      position: 'relative', overflow: 'hidden',
+      transition: 'all 0.25s',
+    }}
+      onMouseEnter={e => {
+        e.currentTarget.style.boxShadow = '0 6px 24px var(--color-shadow-soft)';
+        e.currentTarget.style.borderColor = 'var(--color-border-paper)';
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.boxShadow = 'none';
+        e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--color-border-paper) 55%, transparent)';
+      }}
+    >
+      {/* Subtle paper texture */}
+      <div style={{
+        position: 'absolute', inset: 0,
+        backgroundImage: `repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-border-paper) 3%, transparent) 0px, transparent 2px)`,
+        pointerEvents: 'none',
+      }} />
+      {/* Index number */}
+      <div style={{
+        position: 'absolute', top: '1.25rem', right: '1.5rem',
+        fontSize: '13px', fontWeight: 600, letterSpacing: '1px',
+        color: 'color-mix(in srgb, var(--color-border-paper) 70%, transparent)',
+        fontFamily: 'Georgia, serif',
+      }}>
+        {indexLabel}
+      </div>
+
+      <div style={{ position: 'relative' }}>
+        <h3 style={{
+          fontSize: '19px', fontWeight: 500,
+          fontFamily: 'Georgia, serif', fontStyle: 'italic',
+          color: 'var(--color-text-primary)',
+          margin: '0 0 0.875rem',
+          lineHeight: 1.35, paddingRight: '2.5rem',
+        }}>
+          {result.title}
+        </h3>
+
+        {/* Body text */}
+        <p style={{
+          color: 'var(--color-text-body)', lineHeight: 1.85,
+          fontSize: '14px', margin: '0 0 1rem',
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        }}>
+          {kind === 'trait' ? result.evidence : result.description}
+        </p>
+
+        {/* Confidence bar for traits */}
+        {kind === 'trait' && (
+          <>
+            <div style={{ display: 'flex', gap: '5px', marginBottom: '0.625rem' }}>
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} style={{
+                  flex: 1, height: '4px', borderRadius: '2px',
+                  background: i <= confidenceFill
+                    ? 'var(--color-text-muted)'
+                    : 'color-mix(in srgb, var(--color-border-paper) 40%, transparent)',
+                  opacity: i <= confidenceFill ? 0.8 : 0.4,
+                  transition: 'background 0.2s',
+                }} />
+              ))}
+            </div>
+            <div style={{
+              fontSize: '12px', color: 'var(--color-text-muted)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              lineHeight: 1.6,
+            }}>
+              {result.evidence}
+            </div>
+          </>
+        )}
+
+        {/* Echo / Pattern confidence pill */}
+        {(kind === 'echo' || kind === 'pattern') && result.confidence && (
+          <div style={{
+            display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
+            fontSize: '11px', color: 'var(--color-text-muted)',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            background: 'color-mix(in srgb, var(--color-border-paper) 20%, transparent)',
+            padding: '4px 12px', borderRadius: '14px',
+            border: '1px solid color-mix(in srgb, var(--color-border-paper) 40%, transparent)',
+          }}>
+            <span style={{ fontWeight: 600 }}>Confidence</span>
+            <span>·</span>
+            <span style={{ fontStyle: 'italic' }}>{result.confidence}</span>
+          </div>
+        )}
       </div>
     </div>
   );
