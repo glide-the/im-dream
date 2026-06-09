@@ -304,7 +304,8 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
 
     def _patch_service(self):
         """Replace service methods with stubs that emit a minimal SSE stream."""
-        async def _assemble(req, *, state, queue, runner):
+        async def _assemble(req, *, state, bus, runner):
+            from claude_agent.event_bus import BusProxyQueue
             from claude_agent.service import _TurnExecution, _TurnContext
             from libs.claude_agent_kit.types import AgentRunOptions
             state.is_context_initialized = True
@@ -315,7 +316,10 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
                 if isinstance(part, dict) and part.get("type") == "text"
             ]
             opts = AgentRunOptions(thread_id=state.session_id, user_message="".join(text_parts))
-            turn_ctx = _TurnContext(queue=queue, confirmation_store=unittest.mock.MagicMock())
+            turn_ctx = _TurnContext(
+                queue=BusProxyQueue(bus),
+                confirmation_store=unittest.mock.MagicMock(),
+            )
             state.turn_context = turn_ctx
             return _TurnExecution(
                 request=req, state=state, runner=runner,

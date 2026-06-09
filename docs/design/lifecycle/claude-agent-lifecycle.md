@@ -346,3 +346,6 @@ Phase 3 执行中
 | `INK_AGENT_MAX_TURNS` | `100` | 单轮最大 Agent turn 数 |
 | `INK_AGENT_SSE_KEEPALIVE_S` | `15` | SSE keepalive 注释帧间隔（秒）|
 | `INK_AGENT_CONTEXT_SESSIONS` | — | Phase 1 读取的历史 session 数量上限 |
+| `INK_AGENT_EVENT_BUS_BACKEND` | `memory` | SSE EventBus 后端：`memory` 或 `redis`（见 `sse-reconnect-and-event-bus.md` §11）|
+| `INK_AGENT_REDIS_URL` | `redis://localhost:6379/0` | Redis 连接 URL（redis 模式）|
+| `INK_AGENT_EVENT_BUS_TTL_S` | `3600` | Redis Stream key TTL（秒，redis 模式）|

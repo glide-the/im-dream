@@ -1618,3 +1618,58 @@ await factory.close_thread(session_id)
 - `tool-input-available` 跨进程一致性：当未来部署多 worker / 横向扩展时，`asyncio.Lock per session_id` 单消费者保障仅在单进程内成立。需要新增 worker 路由层（基于 `session_id` 一致性哈希）或迁移到分布式锁，使 Thread Session 享元仍按 `session_id` 单消费者运行
 - `apply_project_sdk_runtime_options` 享元化：参见 ClaudeSDKClient 项目 env 注入方案设计 §11（外部引用，Pawkeyland 专属文档）
 - 享元缓存指标暴露：在 `sweep_stats()` 基础上补充每个 `session_id` 的 `turn_count` / `idle_seconds` / `is_runner_cached` / `is_intrinsic_cached`，对接 Prometheus 看板
+
+
+---
+
+## 11. EventBus 与 Phase 3 生命周期解耦（2026-06-09）
+
+> **完整设计**：见 [`sse-reconnect-and-event-bus.md`](./sse-reconnect-and-event-bus.md)
+
+### 11.1 问题根源
+
+原架构中 `run_streaming.finally` 无条件调用 `bg_task.cancel()`，导致  
+**SSE 消费者断开 = 后端推理取消**。前端切换 thread 后推理中断，切回后看不到进行中的消息。
+
+### 11.2 解耦方案：IEventBus Port/Adapter
+
+| 原架构 | 新架构 |
+|--------|--------|
+| `asyncio.Queue`（单生产者+单消费者）| `IEventBus`（广播总线，多消费者）|
+| SSE 断开 → `bg_task.cancel()` | SSE 断开 → `bus.unsubscribe(token)`（bg_task 继续）|
+| 无历史帧缓冲 | `bus.buffer[]` 缓存本轮全部帧，支持回放 |
+| 固定 asyncio 实现 | Port/Adapter 可替换为 Redis Streams（多 Pod 生产）|
+
+### 11.3 新增字段（AgentRunState）
+
+| 字段 | 类型 | 生命周期 | 说明 |
+|------|------|---------|------|
+| `event_bus` | `Optional[IEventBus]` | RUNNING 时非 None，mark_idle 时清空 | 当前推理 turn 的广播总线 |
+| `current_turn_id` | `str` | 每轮重建 | 用于 Redis Stream key 区分轮次 |
+
+### 11.4 BusProxyQueue（零改造适配）
+
+`execute_session` 的所有 `await queue.put(frame)` 保持不变；  
+`assemble_context` 将 `_TurnContext.queue` 设置为 `BusProxyQueue(bus)`，  
+`put()` 自动转发到 `bus.publish()`。
+
+```
+execute_session ──put──→ BusProxyQueue ──publish──→ IEventBus
+                                                        ├── buffer[]
+                                                        ├── subscriber q1
+                                                        └── subscriber q2 (重连)
+```
+
+### 11.5 run_streaming 重连分支
+
+```python
+# state.lifecycle == RUNNING → 订阅已有 bus，回放历史帧 + 实时接收
+if state.lifecycle == AgentRunLifecycle.RUNNING and state.event_bus:
+    token = await state.event_bus.subscribe()
+    try:
+        async for frame in state.event_bus.read(token):
+            yield frame
+    finally:
+        await state.event_bus.unsubscribe(token)
+    return
+```

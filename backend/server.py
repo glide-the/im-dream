@@ -5,6 +5,7 @@
 # [Sync] 2026-05-24: load backend/.env before importing config and route modules.
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 # [Sync] 2026-05-25: split REST API routes into backend/routers modules; keep PolyCLI session defs, root, websocket, scheduler, and mounts here.
+# [Sync] 2026-06-09: allowlist INK_AGENT_EVENT_BUS_* / INK_AGENT_REDIS_URL for SSE EventBus config.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -27,6 +28,9 @@ def _drop_unsupported_agent_env() -> None:
         "INK_AGENT_SSE_KEEPALIVE_S",
         "INK_AGENT_MAX_TURNS",
         "INK_AGENT_CONTEXT_SESSIONS",
+        "INK_AGENT_EVENT_BUS_BACKEND",
+        "INK_AGENT_REDIS_URL",
+        "INK_AGENT_EVENT_BUS_TTL_S",
     }
     os.environ.pop("ANTHROPIC_API_KEY", None)
     for key in list(os.environ):

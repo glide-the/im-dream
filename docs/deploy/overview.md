@@ -102,6 +102,9 @@ export GCP_PROJECT_ID=your-project-id
 | `INK_AGENT_MAX_TURNS` | `100` | Agent 最大对话轮数 |
 | `INK_AGENT_TTL_S` | `600` | Agent 会话 TTL（秒） |
 | `INK_AGENT_CONTEXT_SESSIONS` | — | Agent 上下文会话数 |
+| `INK_AGENT_EVENT_BUS_BACKEND` | `memory` | SSE EventBus 后端（`memory` / `redis`）|
+| `INK_AGENT_REDIS_URL` | `redis://localhost:6379/0` | Redis URL（多 Worker 重连，redis 模式）|
+| `INK_AGENT_EVENT_BUS_TTL_S` | `3600` | Redis Stream TTL（秒）|
 | `FILE_STORAGE_LOCAL_DIR` | `/app/data/file-storage` | 文件存储路径（GCS 挂载子目录） |
 | `AGENT_CWD` | `/app/data/agent-workspace` | Agent 工作区路径（GCS 挂载子目录） |
 

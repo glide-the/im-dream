@@ -1,4 +1,5 @@
 // [Input] Consume ClaudeAgentChatTransport, WorkspaceContext, chat schema/types, file proxy utilities, AIInputDock/helpers, ChatMessageList, and auth token.
+//         reconnectStreamNonce from ChatView; claude-agent-sse-utils for stream replay.
 // [Output] Coordinate chat transport, pending attachments/tool choice, message state, scrolling, and input/message layout.
 // [Pos] chat-panel component node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop forwarding frontend customer context into chat requests.
@@ -14,6 +15,9 @@
 //                    approvals by forcing chat UI tool mode to auto when enabled.
 // [Sync] 2026-06-09: subscribe to same-tab IM full-access config events so
 //                    Settings changes update active Chat panels immediately.
+// [Sync] 2026-06-09: SSE reconnect — subscribe GET /threads/{id}/stream when reconnectStreamNonce bumps.
+// [Sync] 2026-06-09: keep reconnect effect deps stable (threadId/nonce only) so parent re-renders do not abort stream.
+// [Sync] 2026-06-09: agentBusy drives input dock stop button (streaming/submitted/reconnect).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -40,6 +44,10 @@ import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
+import {
+  applyBackendEventToMessages,
+  consumeClaudeAgentSseStream,
+} from '../../lib/claude-agent-sse-utils';
 
 const API_BASE = '/ink-and-memory';
 
@@ -62,6 +70,10 @@ interface ChatPanelProps {
   threadId: string;
   initialMessages?: UIMessage[];
   isLoading?: boolean;
+  /** Incremented by ChatView when /status reports lifecycle=running — triggers SSE reconnect. */
+  reconnectStreamNonce?: number;
+  /** Called after reconnect stream finishes so parent can reload persisted messages. */
+  onReconnectComplete?: () => void;
   className?: string;
   inputPlaceholder?: string;
   queuedPrompt?: string;
@@ -97,6 +109,8 @@ export default function ChatPanel({
   threadId,
   initialMessages,
   isLoading = false,
+  reconnectStreamNonce = 0,
+  onReconnectComplete,
   className,
   inputPlaceholder = 'Press i to chat',
   queuedPrompt,
@@ -120,7 +134,16 @@ export default function ChatPanel({
   const isNearBottomRef = useRef(true);
   const hasInitializedRef = useRef(false);
   const lastQueuedNonceRef = useRef<number | undefined>(undefined);
+  const lastReconnectNonceRef = useRef(0);
+  const onReconnectCompleteRef = useRef(onReconnectComplete);
+  const setMessagesRef = useRef<
+    ((value: UIMessage[] | ((messages: UIMessage[]) => UIMessage[])) => void) | null
+  >(null);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const reconnectAbortRef = useRef<AbortController | null>(null);
   const { setActiveSessionId } = useWorkspaceSession();
+
+  onReconnectCompleteRef.current = onReconnectComplete;
 
   useEffect(() => {
     let active = true;
@@ -216,6 +239,8 @@ export default function ChatPanel({
     experimental_throttle: 100,
   });
 
+  setMessagesRef.current = setMessages;
+
   useEffect(() => {
     setActiveSessionId(threadId);
     return () => {
@@ -274,11 +299,90 @@ export default function ChatPanel({
     })();
   }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
 
-  const chatLoading = status === 'streaming' || status === 'submitted' || isLoading;
-  const shouldShowMessageSurface = messages.length > 0 || Boolean(error);
+  useEffect(() => {
+    if (!reconnectStreamNonce || reconnectStreamNonce === lastReconnectNonceRef.current) {
+      return;
+    }
+    lastReconnectNonceRef.current = reconnectStreamNonce;
+
+    const abort = new AbortController();
+    reconnectAbortRef.current = abort;
+    const activeThreadId = threadId;
+    let finished = false;
+
+    const finishReconnect = () => {
+      if (finished) return;
+      finished = true;
+      setIsReconnecting(false);
+      onReconnectCompleteRef.current?.();
+    };
+
+    setIsReconnecting(true);
+
+    void (async () => {
+      try {
+        const response = await fetch(
+          `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(activeThreadId)}/stream`,
+          {
+            headers: { Authorization: `Bearer ${getAuthToken()}` },
+            signal: abort.signal,
+          },
+        );
+        if (!response.ok || !response.body) {
+          finishReconnect();
+          return;
+        }
+
+        const reader = response.body.getReader();
+        await consumeClaudeAgentSseStream(reader, (event) => {
+          if (event.type === 'finish' || event.type === 'error') {
+            finishReconnect();
+            return false;
+          }
+          const applyMessages = setMessagesRef.current;
+          if (!applyMessages) {
+            return;
+          }
+          applyMessages((current) => applyBackendEventToMessages(current, event));
+        });
+        finishReconnect();
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          setIsReconnecting(false);
+          return;
+        }
+        finishReconnect();
+      } finally {
+        if (reconnectAbortRef.current === abort) {
+          reconnectAbortRef.current = null;
+        }
+      }
+    })();
+
+    return () => {
+      abort.abort();
+      if (reconnectAbortRef.current === abort) {
+        reconnectAbortRef.current = null;
+      }
+      if (!finished) {
+        setIsReconnecting(false);
+      }
+    };
+  }, [reconnectStreamNonce, threadId]);
+
+  const agentBusy = status === 'streaming' || status === 'submitted' || isReconnecting;
+  const chatLoading = agentBusy || isLoading;
+
+  const handleStop = useCallback(() => {
+    reconnectAbortRef.current?.abort();
+    reconnectAbortRef.current = null;
+    setIsReconnecting(false);
+    stop();
+  }, [stop]);
+  const shouldShowMessageSurface = messages.length > 0 || Boolean(error) || chatLoading;
 
   const shouldShowLoadingIndicator = useMemo(() => {
-    if (!chatLoading || messages.length === 0) {
+    if (!agentBusy || messages.length === 0) {
       return false;
     }
     const lastMessage = messages.at(-1);
@@ -286,7 +390,7 @@ export default function ChatPanel({
       (part) => part.type === 'text' || part.type === 'reasoning' || isToolUIPart(part),
     );
     return !hasVisibleParts;
-  }, [chatLoading, messages]);
+  }, [agentBusy, messages]);
 
   const handleScroll = useCallback(() => {
     const element = chatContainerRef.current;
@@ -352,8 +456,8 @@ export default function ChatPanel({
             await sendMessage({ role: 'user', parts });
           }}
           placeholder={inputPlaceholder}
-          loading={chatLoading}
-          onStop={status === 'streaming' ? stop : undefined}
+          loading={agentBusy}
+          onStop={agentBusy ? handleStop : undefined}
           workspaceSessionId={threadId}
           mode="full"
         />

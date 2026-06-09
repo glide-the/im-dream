@@ -7,6 +7,7 @@
 //                    is enabled; show static "完全访问" and send auto mode.
 // [Sync] 2026-06-09: subscribe to same-tab IM full-access config events so
 //                    draft chat input updates immediately after Settings changes.
+// [Sync] 2026-06-09: show stop button when loading+onStop; spinner when loading without onStop.
 import {
   useCallback,
   useEffect,
@@ -667,6 +668,26 @@ export default function AIInputDock({
             }}
           >
             <IconStop style={{ width: '0.9rem', height: '0.9rem' }} />
+          </button>
+        ) : loading ? (
+          <button
+            type="button"
+            disabled
+            title="生成中"
+            aria-label="生成中"
+            style={{
+              display: 'grid',
+              placeItems: 'center',
+              width: '2.25rem',
+              height: '2.25rem',
+              borderRadius: '999px',
+              border: 'none',
+              background: 'var(--color-disabled-bg)',
+              color: 'var(--color-text-muted)',
+              cursor: 'not-allowed',
+            }}
+          >
+            <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} className="spin" />
           </button>
         ) : (
           <button

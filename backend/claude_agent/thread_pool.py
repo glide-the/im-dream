@@ -10,6 +10,9 @@
 #                    to AgentRunState intrinsic state so the session flyweight survives
 #                    across turns and MCP write-tool results can refresh in-place.
 #                    Added with_editor_state() builder helper.
+# [Sync] 2026-06-09: add event_bus (IEventBus), current_turn_id (str), bg_task (asyncio.Task)
+#                    extrinsic fields to AgentRunState for EventBus reconnect support.
+#                    mark_destroyed now cancels bg_task and clears event_bus.
 
 """Claude Agent Thread Session Pool.
 
@@ -41,12 +44,14 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Optional, TYPE_CHECKING
+from uuid import uuid4
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks
     from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
+    from claude_agent.event_bus import IEventBus
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +154,14 @@ class AgentRunState:
     callbacks: Optional[Any] = field(default=None, repr=False)
     run_options: Optional[Any] = field(default=None, repr=False)
     turn_context: Optional[Any] = field(default=None, repr=False)
+    # EventBus for the current turn — set at Phase 3 start, cleared on mark_idle.
+    # Type is IEventBus but imported lazily to avoid circular imports.
+    event_bus: Optional[Any] = field(default=None, repr=False)
+    # Stable ID for the current inference turn (used as Redis Stream key suffix).
+    current_turn_id: str = field(default_factory=lambda: str(uuid4()), repr=False)
+    # Background asyncio.Task running execute_session for this turn.
+    # Used by close_thread to cancel in-flight inference.
+    bg_task: Optional[Any] = field(default=None, repr=False)
 
     # ------------------------------------------------------------------
     # Lifecycle state
@@ -179,6 +192,11 @@ class AgentRunState:
         self.turn_context = None
         self.callbacks = None
         self.run_options = None
+        self.event_bus = None
+        bg_task = self.bg_task
+        self.bg_task = None
+        if bg_task is not None and not bg_task.done():
+            bg_task.cancel()
 
     def touch(self) -> None:
         """Refresh the keepalive timestamp without changing lifecycle state."""
