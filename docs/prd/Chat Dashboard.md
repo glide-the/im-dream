@@ -2,6 +2,7 @@
 
 > 对话工作台首页的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
 > **[Sync] 2026-06-09**: Chat 输入区的权限切换受 Settings「应如何批准 IM」控制；完全访问开启时隐藏「逐步确认」并显示「完全访问」。
+> **[Sync] 2026-06-09**: ChatPanel 在用户上滑离开消息底部时，于 AIInputDock 上方显示悬浮「滚动到底部」箭头；点击后平滑回到底部并恢复自动贴底。
 
 ## 1. 文档范围
 
@@ -40,6 +41,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 │   │   └── 回顾反思
 │   └── ChatPanel / DraftInputDock（flex: 1，minHeight: 0，overflow: hidden）
 │       ├── ChatMessageList（有消息或错误后加载，flex: 1，overflowY: auto）
+│       ├── ScrollToBottomButton（仅当消息流离底部较远时悬浮显示）
 │       └── AIInputDock（flexShrink: 0）
 └── FileSidebar（右侧文件侧边栏，可收起）
 ```
@@ -51,6 +53,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 | MoreMenu 下拉 | `color.bg.surfaceSolid` + `color.border.paper` + `color.shadow.medium`，圆角 `0.85rem`；点击外部透明蒙层关闭 | 同左 |
 | 快捷入口 | 2 到 3 列纸面卡片，`flexShrink: 0` | 纵向列表或横滑 |
 | ChatPanel | `flex: 1`，`minHeight: 0`，消息流内部滚动 | 单列，左右留 16px 内边距 |
+| 到底部按钮 | 悬浮于 AIInputDock 上方居中，只在用户离开消息底部时出现 | 同桌面端，避开安全区和输入框 |
 | 输入 Dock | 底部 sticky，宽度与消息流对齐 | 固定底部，避开系统安全区 |
 
 ## 4. 组件层级
@@ -103,6 +106,8 @@ ChatDashboard（height: 100%，overflow: hidden）
 
 - ChatPanel 占剩余所有高度（`flex: 1`，`minHeight: 0`），内部消息列表独立滚动。
 - 默认空会话不渲染空的消息纸面容器；只有已有消息、发送后产生消息或错误需要展示时，才加载 ChatMessageList 区域。
+- 当消息流较长且用户上滑离开底部时，ChatPanel 显示一个圆形悬浮向下箭头，位置固定在 AIInputDock 上方，不参与消息流布局。
+- 点击该箭头后消息列表平滑滚动到 `ChatMessageList` 底部；到达底部或列表不可滚动时箭头隐藏。
 - AIInputDock 在 ChatPanel 内部 sticky，不触发外层滚动。
 - 视觉沿用 [Chat Send](<./Chat Send.md>)：纸面容器、柔和边框、底部操作行。
 - `Ask Ink & Memory…` placeholder 使用 `color.text.muted`。
@@ -127,6 +132,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 |---|---|
 | 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据，也不显示空白消息纸面容器；首次进入 Chat 不创建 thread。 |
 | 对话已触发 | 用户点击快捷指令或发送第一条消息后，QuickActions 区域隐藏，MainArea 仅展示 ChatPanel（消息流 + 输入 Dock）；页面不刷新、不跳转。 |
+| 历史上滑 | 用户离开消息底部时显示到底部悬浮箭头；新消息不强行抢回滚动位置，直到用户主动回到底部。 |
 | 加载态 | 消息区显示低对比 skeleton 或 pulse；输入区保持可见但根据能力禁用发送。 |
 | 错误态 | 使用 `color.state.error` 加明确错误文本；提供重试入口。 |
 | 禁用态 | 按钮使用 `color.disabled.bg`，光标和说明同步变化。 |
@@ -157,6 +163,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 - 空状态、错误态、加载态需要有文本说明。
 - 快捷卡标题和描述不得依赖颜色区分。
 - 移动端输入 Dock 不遮挡消息末尾内容。
+- 到底部悬浮箭头必须提供明确 `aria-label` / `title`，且点击区域不小于常规图标按钮尺寸。
 
 ## 10. 验收标准
 
@@ -164,6 +171,7 @@ ChatDashboard（height: 100%，overflow: hidden）
 - 所有颜色描述均引用 [Color System](<./color_system/README.md>) token。
 - Light/Dark、空/加载/错误/禁用/选中/悬停状态均有明确要求。
 - Chat 页面无外层垂直滚动，消息区自行滚动。
+- 当长对话中用户滚动到上方时，AIInputDock 上方出现到底部箭头；回到底部后该箭头隐藏。
 - 模型配置侧边栏已从 Chat 页面移除，迁移至 [Settings PRD](<./Settings.md>)。
 - 快捷指令与笔记系统场景一致，不含业务销售类内容。
 - `image.png` 被保留为视觉参考，未被覆盖。
@@ -180,5 +188,6 @@ ChatDashboard（height: 100%，overflow: hidden）
 - `const.ts`：快捷指令保持笔记系统场景。
 - `ChatPanel.tsx` / `ChatMessageList.tsx`：消息列表和输入 Dock 填满 Chat 主区域宽度。
 - 2026-06-01：`ChatView.tsx` 首次挂载不再调用 `POST /api/claude-agent/threads`。无线程时先渲染草稿输入区；用户发送首条消息或点击快捷指令后再创建 thread，并把首条 prompt、附件和工具模式传入 `ChatPanel.tsx`。
+- 2026-06-09：`ChatPanel.tsx` 复用消息滚动容器状态，新增 AIInputDock 上方的悬浮到底部按钮；`Icons.tsx` 新增共享 `IconArrowDown`。
 
 后续如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。

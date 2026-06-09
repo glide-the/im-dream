@@ -2,6 +2,7 @@
 // [Output] SVG icon components used by chat, dashboard, file, and settings UI.
 // [Pos] chat-icons component node in frontend/src/components/chat
 // [Sync] 2026-05-29: add share and more icons for the theme-adaptive chat status bar.
+// [Sync] 2026-06-09: add downward arrow icon for the ChatPanel scroll-to-bottom floating action.
 import type { CSSProperties, ReactNode } from 'react';
 
 type IconProps = { className?: string; style?: CSSProperties };
@@ -67,6 +68,7 @@ export const IconSun = createIcon('0 0 24 24', <><circle cx="12" cy="12" r="5" /
 export const IconMoon = createIcon('0 0 24 24', <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />);
 export const IconMonitor = createIcon('0 0 24 24', <><rect x="2" y="3" width="20" height="14" rx="2" /><line x1="8" y1="21" x2="16" y2="21" /><line x1="12" y1="17" x2="12" y2="21" /></>);
 export const IconArrowUp = createIcon('0 0 24 24', <><line x1="12" y1="19" x2="12" y2="5" /><polyline points="5 12 12 5 19 12" /></>);
+export const IconArrowDown = createIcon('0 0 24 24', <><line x1="12" y1="5" x2="12" y2="19" /><polyline points="5 12 12 19 19 12" /></>);
 
 export function IconStop({ className, style }: IconProps) {
   return (

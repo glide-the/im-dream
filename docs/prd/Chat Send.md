@@ -2,6 +2,7 @@
 
 > 对话输入 Dock、发送行为、已发送消息与反馈状态的视觉和交互规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
 > **[Sync] 2026-06-09**: 当 Settings 中「应如何批准 IM」开启时，AIInputDock 隐藏「逐步确认」按钮，显示静态「完全访问」权限徽标，并按 auto 工具模式发送；Settings 切换通过同页事件实时同步到已打开的 Chat 输入区。
+> **[Sync] 2026-06-09**: 长对话上滑阅读历史时，AIInputDock 上方显示悬浮到底部箭头；按钮由 ChatPanel 根据消息滚动位置控制，不改变输入 Dock 内部布局。
 
 ## 1. 文档范围
 
@@ -42,6 +43,14 @@ ChatPanel
 | 阴影 | 默认轻阴影，hover/focus 时增强到 `color.shadow.soft`。 |
 | 圆角 | 12px 到 16px，保持纸张柔和感。 |
 | 字体 | 输入内容使用当前产品手写/衬线体系；功能提示可用系统无衬线。 |
+
+### 4.1 Dock 上方浮动控件
+
+- AIInputDock 上方允许承载与消息滚动相关的浮动控件，但控件不得嵌入 Dock 内部操作行。
+- 当用户滚动到长消息列表上方时，显示一个圆形向下箭头按钮，视觉使用 `color.bg.surfaceSolid`、`color.border.paper`、`color.text.primary` 和 `color.shadow.soft`。
+- 按钮居中悬浮在 Dock 上方，z-index 高于消息流但低于全局模态，不遮挡输入内容、附件托盘或发送按钮。
+- 点击后平滑滚动到消息底部；到达底部、消息流不可滚动或空会话草稿输入状态时隐藏。
+- 按钮必须提供 `aria-label="滚动到底部"` 或等价本地化文本，并保留 tooltip/title。
 
 ## 5. 输入与发送规则
 
@@ -111,6 +120,7 @@ ChatPanel
 | Sent | 清空输入区和附件托盘，消息进入历史。 |
 | Failed | 输入 Dock 或消息旁显示错误和重试。 |
 | Disabled | 输入区整体降级，但保留原因说明。 |
+| Reading History | 用户上滑查看历史消息时，Dock 上方出现到底部按钮；发送/停止/附件控件继续保持原位。 |
 
 ## 9. 色彩规范
 
@@ -138,10 +148,12 @@ ChatPanel
 - SendButton 和 AddButton 的禁用原因要能被读屏或提示文本理解。
 - 快捷键提示不是唯一发送方式。
 - Focus 状态必须可见，不得只靠 placeholder 变化。
+- Dock 上方悬浮按钮必须可键盘聚焦，读屏名称应描述目的而不是只读出图标。
 
 ## 12. 验收标准
 
 - 输入 Dock、Add、附件、发送按钮、已发送消息均有统一视觉规范。
+- 长消息列表上滑时，输入 Dock 上方可出现到底部悬浮箭头，且不改变 Dock 的高度或操作行布局。
 - 空、聚焦、输入中、上传中、发送中、失败、禁用、已发送状态均可验收。
 - 文档颜色全部映射到 [Color System](<./color_system/README.md>)。
 - 未引入 Tailwind、外部 app 路径或源码实现要求。

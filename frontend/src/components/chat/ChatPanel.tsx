@@ -18,6 +18,7 @@
 // [Sync] 2026-06-09: SSE reconnect — subscribe GET /threads/{id}/stream when reconnectStreamNonce bumps.
 // [Sync] 2026-06-09: keep reconnect effect deps stable (threadId/nonce only) so parent re-renders do not abort stream.
 // [Sync] 2026-06-09: agentBusy drives input dock stop button (streaming/submitted/reconnect).
+// [Sync] 2026-06-09: show a floating scroll-to-bottom arrow above AIInputDock when the message list is scrolled away from the bottom.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -48,8 +49,10 @@ import {
   applyBackendEventToMessages,
   consumeClaudeAgentSseStream,
 } from '../../lib/claude-agent-sse-utils';
+import { IconArrowDown } from './Icons';
 
 const API_BASE = '/ink-and-memory';
+const CHAT_BOTTOM_PROXIMITY_PX = 120;
 
 interface SystemConfigData {
   provider?: string;
@@ -129,6 +132,7 @@ export default function ChatPanel({
   } | null>(null);
   const [currentToolChoice, setCurrentToolChoice] = useState<ToolChoice>('auto');
   const [systemConfig, setSystemConfig] = useState<SystemConfigData>();
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
@@ -392,21 +396,54 @@ export default function ChatPanel({
     return !hasVisibleParts;
   }, [agentBusy, messages]);
 
+  const updateScrollToBottomVisibility = useCallback((element: HTMLDivElement) => {
+    const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
+    const isScrollable = element.scrollHeight - element.clientHeight > CHAT_BOTTOM_PROXIMITY_PX;
+    const isNearBottom = distanceFromBottom < CHAT_BOTTOM_PROXIMITY_PX;
+    isNearBottomRef.current = isNearBottom;
+    setShowScrollToBottom(isScrollable && !isNearBottom);
+  }, []);
+
   const handleScroll = useCallback(() => {
     const element = chatContainerRef.current;
     if (!element) {
       return;
     }
-    isNearBottomRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
+    updateScrollToBottomVisibility(element);
+  }, [updateScrollToBottomVisibility]);
+
+  const handleScrollToBottom = useCallback(() => {
+    const element = chatContainerRef.current;
+    if (!element) {
+      return;
+    }
+    isNearBottomRef.current = true;
+    setShowScrollToBottom(false);
+    if (bottomRef.current) {
+      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
+      return;
+    }
+    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
   }, []);
 
   useEffect(() => {
+    const element = chatContainerRef.current;
+    if (!element) {
+      setShowScrollToBottom(false);
+      return undefined;
+    }
     if (isNearBottomRef.current) {
-      requestAnimationFrame(() => {
+      setShowScrollToBottom(false);
+      const frameId = requestAnimationFrame(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
       });
+      return () => cancelAnimationFrame(frameId);
     }
-  }, [messages, status]);
+    const frameId = requestAnimationFrame(() => {
+      updateScrollToBottomVisibility(element);
+    });
+    return () => cancelAnimationFrame(frameId);
+  }, [messages, status, shouldShowMessageSurface, updateScrollToBottomVisibility]);
 
   return (
     <div className={className} style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: shouldShowMessageSurface ? 'flex-start' : 'flex-end', overflow: 'hidden' }}>
@@ -429,6 +466,33 @@ export default function ChatPanel({
       ) : null}
 
       <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
+        {shouldShowMessageSurface && showScrollToBottom ? (
+          <button
+            type="button"
+            aria-label="滚动到底部"
+            title="滚动到底部"
+            onClick={handleScrollToBottom}
+            style={{
+              position: 'absolute',
+              left: '50%',
+              bottom: 'calc(100% + 0.6rem)',
+              transform: 'translateX(-50%)',
+              width: '2.5rem',
+              height: '2.5rem',
+              borderRadius: '999px',
+              border: '1px solid var(--color-border-paper)',
+              background: 'var(--color-bg-surface-solid)',
+              color: 'var(--color-text-primary)',
+              boxShadow: '0 8px 20px var(--color-shadow-soft)',
+              cursor: 'pointer',
+              display: 'grid',
+              placeItems: 'center',
+              transition: 'transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease',
+            }}
+          >
+            <IconArrowDown style={{ width: '1.05rem', height: '1.05rem' }} />
+          </button>
+        ) : null}
         <AIInputDock
           openFileDialogSignal={openFileDialogSignal}
           fullAccessEnabled={imFullAccessEnabled}
