@@ -50,14 +50,17 @@
 #                    DB refreshes; falls back to opts.editor_state when getter is absent.
 # [Sync] 2026-06-07: refine auto-mode PreToolUse policy to product sensitivity:
 #                    workspace files/ built-in file tools and explicit low-risk
-#                    query tools receive hook-level allow; execution/write/state
-#                    tools fall through to frontend confirmation.
+#                    query tools receive hook-level allow; execution/write/
+#                    interaction tools fall through to frontend confirmation.
 # [Sync] 2026-06-07: add Bash+ls and mcp__editor__switch_editor to low-sensitivity
 #                    auto-allow class; _apply_low_sensitivity_query_permission now
 #                    accepts optional tool_input for command-level Bash inspection.
 # [Sync] 2026-06-07: expand _LOW_SENSITIVITY_BASH_PREFIXES from {ls} to full
 #                    read-only/navigation set: ls cd pwd echo cat head tail wc
 #                    find which type date whoami id groups env printenv uname hostname.
+# [Sync] 2026-06-09: classify Claude Code's built-in Skill tool as low-sensitivity
+#                    after confirming SKILL_TOOL_NAME == "Skill" in restored source;
+#                    keep switch_editor in the low-sensitivity class.
 
 """Claude Agent Runner.
 
@@ -124,11 +127,12 @@ except NameError:
 # Default tool allowlist.
 #
 # Pet chat is the product-facing path, so the default surface is intentionally
-# narrow: expose only the user MCP touch-animation tool and no built-in
-# filesystem/web/Bash-style tools.
+# narrow: expose only the Skill tool plus product-owned MCP tools and no
+# built-in filesystem/web/Bash-style tools.
 # ---------------------------------------------------------------------------
 
 DEFAULT_ALLOWED_TOOLS: list[str] = [
+    "Skill",
     "mcp__user__touch_animation",
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
     *allowed_memory_tool_names(),
@@ -157,6 +161,10 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
     "WebFetch",
     "WebSearch",
     "BashOutput",
+    # Claude Code built-in SkillTool expands/executes a named skill prompt.
+    # Source check: restored-src/src/tools/SkillTool/constants.ts exports
+    # SKILL_TOOL_NAME = "Skill".
+    "Skill",
     # SDK / MCP resource discovery and reads, where available.
     "ListMcpResources",
     "ReadMcpResource",
@@ -217,9 +225,10 @@ def _is_low_sensitivity_bash_command(command: str) -> bool:
     return first_token in _LOW_SENSITIVITY_BASH_PREFIXES
 
 # Tool names that have specialized confirmation semantics. Auto mode now uses
-# sensitivity classes: explicit query tools can run, while execution/write/state
-# tools confirm through the frontend. This set remains the explicit inventory of
-# Q&A and editor-write tools whose UI/result handling is special.
+# sensitivity classes: explicit query/context-selection/Skill tools can run,
+# while execution/write/interactive tools confirm through the frontend. This
+# set remains the explicit inventory of Q&A and editor-write tools whose
+# UI/result handling is special.
 _ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
     "AskUserQuestion",
     "mcp__user__ask_user",
@@ -763,7 +772,7 @@ def _apply_low_sensitivity_query_permission(
     tool_name: str,
     tool_input: Optional[dict[str, Any]] = None,
 ) -> Optional[HookJSONOutput]:
-    """Explicitly allow auto-mode tools whose product class is read/query-only.
+    """Explicitly allow auto-mode tools whose product class is low-sensitivity.
 
     Returning an empty ``HookJSONOutput()`` would merely decline to make a hook
     decision and let Claude Code's own permission layer decide. These low-risk
@@ -771,9 +780,9 @@ def _apply_low_sensitivity_query_permission(
     Claude Code's native permission prompt in auto mode, so the hook must return
     an explicit ``permissionDecision: "allow"``.
 
-    Special case — ``Bash``: only ``ls`` invocations (with optional flags and
-    path arguments) qualify. Any command containing shell metacharacters is
-    treated as high-sensitivity and falls through to frontend confirmation.
+    Special case — ``Bash``: only read-only/navigation commands qualify. Any
+    command containing shell metacharacters is treated as high-sensitivity and
+    falls through to frontend confirmation.
     """
 
     if tool_name in _LOW_SENSITIVITY_QUERY_TOOL_NAMES:
@@ -1105,11 +1114,11 @@ class ClaudeAgentRunner:
                 if low_sensitivity_permission is not None:
                     return low_sensitivity_permission
 
-            # In auto mode, workspace files/ built-in file tools and explicit
-            # read/query tools are allowed above. Execution, write, interactive,
-            # and state-changing tools fall through to the frontend confirmation
-            # side-channel so approval is visible and becomes an explicit
-            # Claude Code permission decision.
+            # In auto mode, workspace files/ built-in file tools plus explicit
+            # low-sensitivity query/context-selection/Skill tools are allowed
+            # above. Execution, write, and interactive tools fall through to
+            # the frontend confirmation side-channel so approval is visible and
+            # becomes an explicit Claude Code permission decision.
 
             if callbacks.on_tool_confirmation_request:
                 confirmation_payload = {

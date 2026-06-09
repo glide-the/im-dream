@@ -24,9 +24,9 @@
 #                    DB helpers use session_id-only queries (no user_id — trusted subprocess).
 # [Sync] 2026-06-01: add switch_editor context-switching tool (no-op MCP handler; actual
 #                    state switch performed by PostToolUse hook in agent_runner.py).
-# [Sync] 2026-06-07: switch_editor remains a no-op MCP handler, but runner
-#                    sensitivity policy treats context switching as state-changing
-#                    and routes it through frontend confirmation.
+# [Sync] 2026-06-09: switch_editor remains a no-op MCP handler; product
+#                    permission policy treats context switching as low-sensitivity
+#                    because it does not modify document content.
 
 """EditorEngine write MCP tool handlers.
 
@@ -195,13 +195,13 @@ EDITOR_WRITE_TOOL_SPECS: dict[str, EditorToolSpec] = {
     # The actual editor_state switch is performed by the PostToolUse hook in
     # agent_runner.py, which loads the new state from the database and updates
     # the AgentRunState flyweight so subsequent .editor/ reads reflect the new
-    # document context. Runner PreToolUse policy treats this as a state-changing
-    # operation and routes it through frontend confirmation.
+    # document context. Runner PreToolUse policy treats this as low-sensitivity
+    # because it does not modify document content.
     SWITCH_EDITOR_TOOL_NAME: EditorToolSpec(
         description=(
             "切换当前对话的工作空间上下文至指定会话。调用成功后，智能体通过 .editor/ 路径读取的"
             "内容将来自新的目标会话文档。此操作不修改任何文档内容；状态切换在服务端由 PostToolUse"
-            "钩子异步完成，并需要前端确认后执行。"
+            "钩子异步完成，无需前端确认。"
         ),
         input_schema={
             "type": "object",

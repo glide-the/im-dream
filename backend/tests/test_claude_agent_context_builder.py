@@ -10,6 +10,8 @@
 #                    switch_editor guidance cannot break str.format rendering;
 #                    align system-prompt fixtures with list_sessions_in_range.
 # [Sync] 2026-06-06: run coroutine tests with explicit per-call event loops.
+# [Sync] 2026-06-09: cover Planning Prompt Optimization workflow and escaped
+#                    {{task}} placeholder in the system prompt.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -159,6 +161,14 @@ class TestBuildSystemPrompt(unittest.TestCase):
 
         self.assertIn('returns {"ok": true}', prompt)
         self.assertIn(_NO_SESSIONS_TEXT.strip(), prompt)
+
+    def test_planning_prompt_architect_template_survives_formatting(self):
+        with self._mock_db([]):
+            prompt = _run(self._builder().build_system_prompt("1"))
+
+        self.assertIn("You are an Expert Prompt Architect.", prompt)
+        self.assertIn("Optimized Prompt:", prompt)
+        self.assertIn("USER REQUIREMENT: {{task}}", prompt)
 
 
 # ---------------------------------------------------------------------------

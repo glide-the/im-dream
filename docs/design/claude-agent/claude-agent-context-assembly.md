@@ -3,13 +3,14 @@
 > [Pos] context-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
 > [Sync] 2026-05-29: add existing_session / resume resolution design — `assemble_context` now loads `chat_thread` from DB, gates resume on `_has_usable_claude_resume` (contract-version check) + local JSONL file probe, derives `thread_id_for_agent` / `should_resume`; `_TurnExecution` gains `resume_existing_session` field; `_persist_turn` writes back `claude_session_id` + `agent_contract_version` so the DB self-heals across deployments.
+> [Sync] 2026-06-09: `claude-agent-prompt-optimization.md` now exists as the planning prompt optimization contract; `context_builder.py` also carries the Expert Prompt Architect template for agent-side planning turns.
 
 # Claude Agent Context Assembly Design
 
 This document is the implementation contract for `ClaudeAgentService.assemble_context`.
 It covers the Phase 1 context boundary only: what context can enter a turn, how it is ordered and filtered, what the method returns, and what must remain outside this stage.
 
-Prompt optimization for planning turns is specified separately in [`claude-agent-prompt-optimization.md`](./claude-agent-prompt-optimization.md). That optimizer prepares the task text before `assemble_context`; it does not replace the runtime system prompt or workspace context described here.
+Prompt optimization for planning turns is specified separately in [`claude-agent-prompt-optimization.md`](./claude-agent-prompt-optimization.md). That optimizer prepares the task text before `assemble_context`; it does not replace the runtime system prompt or workspace context described here. The same Expert Prompt Architect template is also embedded in `ClaudeAgentContextBuilder` so agent-side planning turns follow the contract even when upstream optimization is unavailable.
 
 ## 1. Scope
 

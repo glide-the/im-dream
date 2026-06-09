@@ -1,10 +1,11 @@
 # 工作空间上下文切换设计方案
 
 Status: Implemented  
-Updated: 2026-06-07
+Updated: 2026-06-09
 Scope: 智能体在单次对话中切换 `.editor` 工作空间上下文的完整设计与实现
 
-> [Sync] 2026-06-07: Runner auto-mode 敏感度策略将 `switch_editor` 视为状态切换工具；它不修改文档内容，但需要通过前端确认后执行。
+> [Sync] 2026-06-07: 当时 Runner auto-mode 敏感度策略将 `switch_editor` 视为状态切换工具并要求确认；该策略已被 2026-06-09 低敏策略取代。
+> [Sync] 2026-06-09: 产品权限策略将 `switch_editor` 改为低敏感工具；它不修改文档内容，auto 模式下由 PreToolUse 显式 allow。
 
 ---
 
@@ -91,7 +92,7 @@ mcp__editor__switch_editor
 ```json
 {
   "name": "switch_editor",
-  "description": "切换当前对话的工作空间上下文至指定会话。调用成功后，智能体通过 .editor/ 路径读取的内容将来自新的目标会话文档。此操作不修改任何文档内容；状态切换在服务端由 PostToolUse 钩子异步完成，并需要前端确认后执行。",
+  "description": "切换当前对话的工作空间上下文至指定会话。调用成功后，智能体通过 .editor/ 路径读取的内容将来自新的目标会话文档。此操作不修改任何文档内容；状态切换在服务端由 PostToolUse 钩子异步完成，auto 模式下无需前端确认。",
   "input_schema": {
     "type": "object",
     "properties": {
@@ -119,10 +120,10 @@ MCP 子进程的 `_switch_editor()` 处理器始终返回：
 
 | 模式 | 行为 |
 |------|------|
-| auto | 走确认流 → 显示 Approve/Cancel；批准后执行 |
+| auto | 显式 allow → 自动执行 |
 | manual | 走确认流 → 显示 Approve/Cancel；批准后执行 |
 
-> `switch_editor` 不在 `_ALWAYS_CONFIRM_TOOL_NAMES` 的特殊问答/写入工具清单中，但它不是查询工具；Runner 的通用高敏策略会把该状态切换工具送入前端确认侧路。
+> `switch_editor` 不在 `_ALWAYS_CONFIRM_TOOL_NAMES` 的特殊问答/写入工具清单中；它作为低敏感上下文选择工具进入 `_LOW_SENSITIVITY_QUERY_TOOL_NAMES`，auto 模式下直接返回显式 allow。
 
 ---
 
@@ -131,7 +132,7 @@ MCP 子进程的 `_switch_editor()` 处理器始终返回：
 ```
 智能体调用：mcp__editor__switch_editor(editor_session_id="sess-new")
     │
-    ├─ PreToolUse hook：进入前端确认；批准后允许工具执行
+    ├─ PreToolUse hook：低敏感工具，auto 模式下返回显式 allow
     │
     ├─ MCP 子进程（editor_tool.py）
     │      _switch_editor("sess-new")
@@ -173,7 +174,7 @@ opts.editor_state_getter()           # agent_runner.py PreToolUse 读取
 | 特性 | write_segment / delete_segment 等 | switch_editor |
 |------|----------------------------------|---------------|
 | 是否修改文档内容 | ✅ 是 | ❌ 否 |
-| 是否需要用户确认 | 🔐 必须确认 | 🔐 必须确认 |
+| 是否需要用户确认 | 🔐 必须确认 | ✅ auto 模式自动执行；manual 模式确认 |
 | state 更新时机 | `tool_result` 回调（service.py） | `PostToolUse` 钩子（agent_runner.py） |
 | state 更新方式 | `state.editor_state = fresh_state`（直接赋值） | `opts.editor_state_setter(new_state)`（通过注入的 setter） |
 | MCP 处理器职责 | 实际修改数据库中的文档内容 | 空操作，仅返回 ok |
@@ -193,8 +194,7 @@ sequenceDiagram
     participant State as AgentRunState<br/>（享元缓存）
 
     Agent->>PreHook: switch_editor(editor_session_id="sess-new")
-    Note over PreHook: 状态切换属于高敏工具<br/>进入前端确认侧路
-    PreHook-->>Agent: 等待用户 Approve/Cancel
+    Note over PreHook: switch_editor 属于低敏感上下文选择工具<br/>auto 模式直接显式 allow
     PreHook->>Agent: { permissionDecision: "allow" }
 
     Agent->>MCP: 执行 switch_editor("sess-new")
@@ -251,7 +251,7 @@ sequenceDiagram
 `switch_editor` 同时加入该节的工具清单：
 
 ```
-switch_editor(editor_session_id)        — switch to a different session (requires confirmation)
+switch_editor(editor_session_id)        — switch to a different session (auto mode: no confirmation needed)
 ```
 
 #### 8.1.2 新增 `## Switch-Editor Workflow` 章节
@@ -261,10 +261,10 @@ switch_editor(editor_session_id)        — switch to a different session (requi
 | 步骤 | 说明 |
 |------|------|
 | 1. 确定目标 session ID | 用户可能显式给出，也可通过 `mcp__user__get_sessions_range` 按日期检索 |
-| 2. 调用 `switch_editor` | 需要前端确认；批准后 MCP 侧为空操作，服务端 `PostToolUse` 钩子完成实际加载 |
+| 2. 调用 `switch_editor` | auto 模式无需前端确认；MCP 侧为空操作，服务端 `PostToolUse` 钩子完成实际加载 |
 | 3. 确认切换 | 工具返回 `{"ok": true}` 后，`.editor/` 虚拟索引自动指向新 session；从步骤 2（Orient）继续 Edit-Point Workflow |
 
-关键说明：`switch_editor` 仅变更 `.editor/` 读写上下文，不修改任何文档内容；按当前产品定义，它仍属于状态切换类高敏工具，需要用户审批。
+关键说明：`switch_editor` 仅变更 `.editor/` 读写上下文，不修改任何文档内容；按当前产品定义，它属于低敏感上下文选择工具。
 
 ### 8.2 工作空间上下文模板（`workspace_context.py`）
 
