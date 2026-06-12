@@ -23,7 +23,7 @@
 - 已安装并启动 Docker。
 - 已安装 `docker-compose` 命令。
 - 部署用户有权限运行 `docker-compose` 和访问 Docker daemon。
-- 防火墙放行前端端口，默认 `80`。
+- 防火墙放行主机 nginx 的 `80` / `443`；Docker 前端容器默认仅绑定 `127.0.0.1:8080`。
 
 ## 主机 Nginx 反向代理
 
@@ -103,8 +103,8 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 | `REMOTE_SSH_PORT` | `22` | SSH 端口 |
 | `REMOTE_SSH_KEY` | 空 | SSH 私钥路径 |
 | `REMOTE_DOCKER_COMPOSE_BIN` | `docker-compose` | 远端 Compose 命令 |
-| `REMOTE_FRONTEND_PORT` | `80` | 远端前端端口；使用主机 nginx 时改为 `8080` |
-| `REMOTE_FRONTEND_BIND_HOST` | `0.0.0.0` | 使用主机 nginx 时改为 `127.0.0.1` |
+| `REMOTE_FRONTEND_PORT` | `8080` | 远端前端容器端口，主机 nginx 转发到 `127.0.0.1:8080` |
+| `REMOTE_FRONTEND_BIND_HOST` | `127.0.0.1` | 默认仅允许主机 nginx 访问前端容器 |
 | `REMOTE_BACKEND_PORT` | `8765` | 远端后端端口 |
 | `REMOTE_BACKEND_BIND_HOST` | `127.0.0.1` | 默认只让远端本机访问后端端口 |
 | `REMOTE_BACKEND_CPUS` | `1.0` | 对齐 Cloud Run backend `--cpu=1` |
@@ -113,8 +113,10 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 | `REMOTE_FRONTEND_MEMORY` | `256m` | 对齐 Cloud Run frontend `--memory=256Mi` |
 | `REMOTE_AGENT_CWD` | `/app/data/agent-workspace` | 容器内 Agent 工作区，挂载自远端文件系统 |
 | `REMOTE_FILE_STORAGE_LOCAL_DIR` | `/app/data/file-storage` | 容器内文件存储目录，挂载自远端文件系统 |
-| `REMOTE_API_BASE_URL` | 空 | 空值表示前端走 nginx 同源代理 fallback |
-| `REMOTE_CORS_ALLOW_ORIGINS` | 本地 origin 列表 | 使用域名时需包含 `https://ink-frontend.suoxya.com` |
+| `REMOTE_BACKEND_PUBLIC_ORIGIN` | `https://ink-backend.suoxya.com` | 后端公网域名，作为默认浏览器 API base URL |
+| `REMOTE_FRONTEND_PUBLIC_ORIGIN` | `https://ink-frontend.suoxya.com` | 前端公网域名，会进入默认 CORS allowlist |
+| `REMOTE_API_BASE_URL` | `https://ink-backend.suoxya.com` | 前端浏览器请求后端的公网地址，登录接口会请求该域名下的 `/api/login` |
+| `REMOTE_CORS_ALLOW_ORIGINS` | 前后端公网域名 + localhost | 默认允许 `https://ink-frontend.suoxya.com` 等来源 |
 | `REMOTE_SYNC_DATA` | `0` | 默认不 rsync `backend/data/`，保护远端数据库 |
 
 ## 资源规格
@@ -130,14 +132,21 @@ Cloud Run 的 `min-instances`、`max-instances`、`cpu-boost` 不直接映射到
 
 ## 默认请求模式
 
-默认不设置 `REMOTE_API_BASE_URL`。前端运行时配置为空，浏览器请求会回退到 `/ink-and-memory` 同源路径，再由远端 nginx 代理到 `http://ink-backend:8765`。
+Remote SSH 默认使用“双域名 + 主机 nginx”模式：
 
-如果需要浏览器直接跨域请求后端，需要同时暴露后端端口并配置 CORS：
+- `ink-frontend.suoxya.com` 由主机 nginx 转发到 `127.0.0.1:8080` 的前端容器。
+- `ink-backend.suoxya.com` 由主机 nginx 转发到 `127.0.0.1:8765` 的后端容器。
+- 前端 runtime config 默认写入 `API_BASE_URL=https://ink-backend.suoxya.com`，因此登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会把浏览器导向 Docker 内部地址 `http://ink-backend:8765/api/login`。
+
+`BACKEND_URL=http://ink-backend:8765` 仍保留在前端容器内部 nginx 中，只作为容器内同源代理 fallback；它不应作为浏览器端 API base URL。
+
+如果部署到其他域名，只需要覆盖公网 origin，而不需要暴露后端容器到公网：
 
 ```bash
-export REMOTE_BACKEND_BIND_HOST=0.0.0.0
-export REMOTE_API_BASE_URL=http://<server-host-or-domain>:8765
-export REMOTE_CORS_ALLOW_ORIGINS=http://<server-host-or-domain>
+export REMOTE_BACKEND_PUBLIC_ORIGIN=https://api.example.com
+export REMOTE_FRONTEND_PUBLIC_ORIGIN=https://app.example.com
+export REMOTE_API_BASE_URL=${REMOTE_BACKEND_PUBLIC_ORIGIN}
+export REMOTE_CORS_ALLOW_ORIGINS=${REMOTE_FRONTEND_PUBLIC_ORIGIN}
 ```
 
 ## 部署流程
@@ -149,13 +158,14 @@ export REMOTE_SSH_HOST=39.97.252.88
 export REMOTE_SSH_USER=root
 export REMOTE_APP_DIR=/srv/ink-and-memory
 
-# 使用主机 nginx 时，前端端口改到 8080 并仅绑定 localhost
+# 默认即为主机 nginx 推荐值：前端 127.0.0.1:8080，后端 127.0.0.1:8765
 export REMOTE_FRONTEND_PORT=8080
 export REMOTE_FRONTEND_BIND_HOST=127.0.0.1
 export REMOTE_BACKEND_BIND_HOST=127.0.0.1
 
-# CORS 允许前端域名
-export REMOTE_CORS_ALLOW_ORIGINS=https://ink-frontend.suoxya.com,https://ink-backend.suoxya.com
+# 默认即为 suoxya 双域名；其他域名部署时再覆盖
+export REMOTE_BACKEND_PUBLIC_ORIGIN=https://ink-backend.suoxya.com
+export REMOTE_FRONTEND_PUBLIC_ORIGIN=https://ink-frontend.suoxya.com
 ```
 
 然后执行：
@@ -187,7 +197,7 @@ export REMOTE_CORS_ALLOW_ORIGINS=https://ink-frontend.suoxya.com,https://ink-bac
 默认验证地址在远端本机执行：
 
 - `http://127.0.0.1:8765/api/health`
-- `http://127.0.0.1:80/ink-and-memory/`
+- `http://127.0.0.1:8080/ink-and-memory/`
 
 可用 `REMOTE_VERIFY_BACKEND_URL` / `REMOTE_VERIFY_FRONTEND_URL` 覆盖。
 
@@ -199,7 +209,8 @@ Remote SSH 的后端 `/app/data` 来自远端服务器的 `${REMOTE_APP_DIR}/bac
 ${REMOTE_APP_DIR}/backend/data/
 ├── ink-and-memory.db
 ├── file-storage/
-└── agent-workspace/
+├── agent-workspace/
+└── backups/
 ```
 
 Compose 会覆盖 `backend/.env` 里可能存在的本机路径，将容器内路径固定为：
@@ -210,11 +221,24 @@ FILE_STORAGE_LOCAL_DIR=/app/data/file-storage
 FILE_STORAGE_TYPE=local
 ```
 
-默认 `REMOTE_SYNC_DATA=0`，不会同步本地 `backend/data/` 到服务器，避免覆盖远端 SQLite 数据。只有明确要用本地数据覆盖远端时才设置：
+默认 `REMOTE_SYNC_DATA=0`，部署流程不会同步本地 `backend/data/` 到服务器，避免覆盖远端 SQLite 数据。首次创建远端持久化目录时执行：
 
 ```bash
-export REMOTE_SYNC_DATA=1
-./deploy/remote-ssh/deploy.sh deploy
+./deploy/remote-ssh/deploy.sh setup-storage
+# 或直接执行：./deploy/remote-ssh/setup-storage.sh
+```
+
+需要单独同步数据时使用 Remote SSH 数据脚本。`sync-data` 会先把远端 `backend/data/` 下载到本地 `backend/data/bak_remote_YYYYMMDD_HHMMSS/`，再上传本地 `backend/data/`；不会上传本地备份目录：
+
+```bash
+./deploy/remote-ssh/deploy.sh backup-data  # 只下载远端备份
+./deploy/remote-ssh/deploy.sh sync-data    # 先备份远端，再上传本地数据
+```
+
+如需上传前停掉远端 Compose 以降低 SQLite 文件复制风险，可设置：
+
+```bash
+REMOTE_SYNC_STOP_CONTAINERS=1 ./deploy/remote-ssh/deploy.sh sync-data
 ```
 
 部署前脚本会把当前远端镜像打成 rollback image。回滚只切回上一版镜像，不回滚数据库文件：

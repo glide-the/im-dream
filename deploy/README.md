@@ -12,6 +12,8 @@
 | Docker 发布 | [`docker/deploy.sh`](docker/deploy.sh) | 包装根目录 [`../docker-compose.yml`](../docker-compose.yml) 的构建、启动、验证、清理 |
 | Remote SSH 发布 | [`remote-ssh/deploy.sh`](remote-ssh/deploy.sh) | 通过 SSH/rsync 同步到已安装 Docker 的远程服务器，并在远端执行 [`remote-ssh/docker-compose.yml`](remote-ssh/docker-compose.yml)；默认资源对齐 Cloud Run，数据使用远端文件系统 |
 | Host 级 nginx 安装 | [`remote-ssh/setup-nginx.sh`](remote-ssh/setup-nginx.sh) | 在远端服务器安装 nginx，部署域名反向代理配置（`ink-backend.suoxya.com` / `ink-frontend.suoxya.com`）；可选 Let's Encrypt SSL |
+| Remote SSH 存储初始化 | [`remote-ssh/setup-storage.sh`](remote-ssh/setup-storage.sh) | 创建远端 `backend/data`、`file-storage`、`agent-workspace` 与备份目录 |
+| Remote SSH 数据同步 | [`remote-ssh/sync-data.sh`](remote-ssh/sync-data.sh) | 备份远端 `backend/data`，并按需上传本地数据到远端服务器 |
 | Google Cloud 发布 | [`google-cloud/deploy.sh`](google-cloud/deploy.sh) | 完整 Cloud Run 发布入口，默认使用 `ink-backend.suoxya.com` / `ink-frontend.suoxya.com`，提供构建、推送、部署、CORS 回写、dry-run/check/verify/rollback |
 
 ## 兼容入口

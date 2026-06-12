@@ -18,8 +18,8 @@ REMOTE_DOCKER_COMPOSE_BIN="${REMOTE_DOCKER_COMPOSE_BIN:-docker-compose}"
 REMOTE_COMPOSE_FILE="${REMOTE_COMPOSE_FILE:-deploy/remote-ssh/docker-compose.yml}"
 REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME:-ink-and-memory}"
 
-REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-0.0.0.0}"
-REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-80}"
+REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}"
+REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-8080}"
 REMOTE_BACKEND_BIND_HOST="${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}"
 REMOTE_BACKEND_PORT="${REMOTE_BACKEND_PORT:-8765}"
 REMOTE_BACKEND_IMAGE="${REMOTE_BACKEND_IMAGE:-ink-backend:remote}"
@@ -37,14 +37,16 @@ REMOTE_AGENT_CWD="${REMOTE_AGENT_CWD:-/app/data/agent-workspace}"
 REMOTE_FILE_STORAGE_TYPE="${REMOTE_FILE_STORAGE_TYPE:-local}"
 REMOTE_FILE_STORAGE_LOCAL_DIR="${REMOTE_FILE_STORAGE_LOCAL_DIR:-/app/data/file-storage}"
 REMOTE_FILE_STORAGE_PREFIX="${REMOTE_FILE_STORAGE_PREFIX:-uploads}"
-REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-}"
+REMOTE_BACKEND_PUBLIC_ORIGIN="${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}"
+REMOTE_FRONTEND_PUBLIC_ORIGIN="${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}"
+REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-${REMOTE_BACKEND_PUBLIC_ORIGIN}}"
 REMOTE_WS_BASE_URL="${REMOTE_WS_BASE_URL:-}"
-REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}"
+REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN},${REMOTE_BACKEND_PUBLIC_ORIGIN},http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}"
 REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-false}"
 REMOTE_SYNC_DATA="${REMOTE_SYNC_DATA:-0}"
 REMOTE_CLEAN_IMAGES="${REMOTE_CLEAN_IMAGES:-0}"
 REMOTE_CLEAN_VOLUMES="${REMOTE_CLEAN_VOLUMES:-0}"
-REMOTE_FRONTEND_SCHEME="${REMOTE_FRONTEND_SCHEME:-http}"
+REMOTE_FRONTEND_SCHEME="${REMOTE_FRONTEND_SCHEME:-https}"
 REMOTE_FRONTEND_PATH="${REMOTE_FRONTEND_PATH:-/ink-and-memory/}"
 REMOTE_PUBLIC_HOST="${REMOTE_PUBLIC_HOST:-${REMOTE_SSH_HOST:-REMOTE_SSH_HOST}}"
 REMOTE_VERIFY_FRONTEND_URL="${REMOTE_VERIFY_FRONTEND_URL:-http://127.0.0.1:${REMOTE_FRONTEND_PORT}${REMOTE_FRONTEND_PATH}}"
@@ -74,6 +76,9 @@ Commands:
   rollback  Restart Compose with the previous image snapshot tags.
   stop      Stop and remove remote Compose containers/networks.
   clean     Stop and remove remote Compose containers/networks. Set REMOTE_CLEAN_IMAGES=1 or REMOTE_CLEAN_VOLUMES=1 for broader cleanup.
+  setup-storage  Create/repair remote backend data, file-storage, agent-workspace, and backup directories.
+  sync-data      Back up remote data locally, then upload local backend/data to the remote server.
+  backup-data    Download a timestamped remote backend/data backup without uploading local data.
 
 Required environment:
   REMOTE_SSH_HOST       remote SSH host or IP
@@ -84,7 +89,7 @@ Optional environment:
   REMOTE_SSH_PORT       default: 22
   REMOTE_SSH_KEY        optional private key path
   REMOTE_DOCKER_COMPOSE_BIN  default: docker-compose
-  REMOTE_FRONTEND_PORT  default: 80
+  REMOTE_FRONTEND_PORT  default: 8080, bound to localhost for host nginx
   REMOTE_BACKEND_PORT   default: 8765
   REMOTE_BACKEND_CPUS   default: 1.0, matching Cloud Run backend CPU
   REMOTE_BACKEND_MEMORY default: 1g, matching Cloud Run backend memory
@@ -92,8 +97,10 @@ Optional environment:
   REMOTE_FRONTEND_MEMORY default: 256m, matching Cloud Run frontend memory
   REMOTE_AGENT_CWD      default: /app/data/agent-workspace
   REMOTE_FILE_STORAGE_LOCAL_DIR default: /app/data/file-storage
-  REMOTE_API_BASE_URL   optional browser-facing backend URL; empty uses nginx same-origin proxy fallback
-  REMOTE_CORS_ALLOW_ORIGINS  required when REMOTE_API_BASE_URL is a cross-origin URL
+  REMOTE_BACKEND_PUBLIC_ORIGIN default: https://ink-backend.suoxya.com
+  REMOTE_FRONTEND_PUBLIC_ORIGIN default: https://ink-frontend.suoxya.com
+  REMOTE_API_BASE_URL   browser-facing backend URL; default: REMOTE_BACKEND_PUBLIC_ORIGIN
+  REMOTE_CORS_ALLOW_ORIGINS  default includes frontend/backend public domains and localhost dev origins
   REMOTE_SYNC_DATA      default: 0; when 1, sync backend/data to the remote server
 EOF
 }
@@ -197,7 +204,8 @@ remote_env_prefix() {
     REMOTE_BACKEND_CONTAINER REMOTE_FRONTEND_CONTAINER
     REMOTE_BACKEND_CPUS REMOTE_BACKEND_MEMORY
     REMOTE_FRONTEND_CPUS REMOTE_FRONTEND_MEMORY
-    REMOTE_TZ REMOTE_API_BASE_URL REMOTE_WS_BASE_URL
+    REMOTE_TZ REMOTE_BACKEND_PUBLIC_ORIGIN REMOTE_FRONTEND_PUBLIC_ORIGIN
+    REMOTE_API_BASE_URL REMOTE_WS_BASE_URL
     REMOTE_AGENT_CWD REMOTE_FILE_STORAGE_TYPE
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
@@ -271,11 +279,13 @@ Data:
   REMOTE_SYNC_DATA=0 by default, so remote backend/data is preserved.
   Container /app/data is backed by REMOTE_APP_DIR/backend/data on the remote server.
   AGENT_CWD and FILE_STORAGE_LOCAL_DIR default to /app/data/agent-workspace and /app/data/file-storage.
-  Set REMOTE_SYNC_DATA=1 only when you intentionally want local backend/data to overwrite/sync to the server.
+  Run setup-storage once to create remote file-storage, agent-workspace, and backup directories.
+  Use sync-data only when you intentionally want local backend/data to overwrite/sync to the server.
 
 API mode:
-  Default REMOTE_API_BASE_URL is empty, so the frontend uses nginx same-origin proxy fallback.
-  For direct browser-to-backend requests, set REMOTE_API_BASE_URL and REMOTE_CORS_ALLOW_ORIGINS.
+  Default REMOTE_API_BASE_URL is https://ink-backend.suoxya.com, so browser login/API calls never use the internal Docker hostname.
+  Host-level nginx should route ink-backend.suoxya.com to 127.0.0.1:8765 and ink-frontend.suoxya.com to 127.0.0.1:8080.
+  Override REMOTE_API_BASE_URL only when deploying to a different public backend origin.
 EOF
 }
 
@@ -402,5 +412,8 @@ case "${COMMAND:-help}" in
   rollback) command_rollback ;;
   stop) remote_compose down ;;
   clean) command_clean ;;
+  setup-storage) exec env DRY_RUN="${DRY_RUN}" "${SCRIPT_DIR}/setup-storage.sh" ;;
+  sync-data) exec env DRY_RUN="${DRY_RUN}" "${SCRIPT_DIR}/sync-data.sh" upload ;;
+  backup-data|backup-remote) exec env DRY_RUN="${DRY_RUN}" "${SCRIPT_DIR}/sync-data.sh" backup-remote ;;
   *) err "Unknown command: ${COMMAND}. Run --help." ;;
 esac
