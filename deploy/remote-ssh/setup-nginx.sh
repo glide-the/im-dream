@@ -10,7 +10,7 @@ NGINX_CONF_SRC="${SCRIPT_DIR}/nginx/ink-and-memory.conf"
 NGINX_CONF_NAME="ink-and-memory"
 
 REMOTE_SSH_HOST="${REMOTE_SSH_HOST:-}"
-REMOTE_SSH_USER="${REMOTE_SSH_USER:-root}"
+REMOTE_SSH_USER="${REMOTE_SSH_USER:-}"
 REMOTE_SSH_PORT="${REMOTE_SSH_PORT:-22}"
 REMOTE_SSH_KEY="${REMOTE_SSH_KEY:-}"
 WITH_SSL="${WITH_SSL:-0}"
@@ -27,7 +27,7 @@ and enables the site.  Optionally provisions Let's Encrypt SSL certificates.
 
 Environment:
   REMOTE_SSH_HOST        required — remote server host or IP
-  REMOTE_SSH_USER        SSH user (default: root)
+  REMOTE_SSH_USER        SSH user; omitted means use your local SSH default
   REMOTE_SSH_PORT        SSH port (default: 22)
   REMOTE_SSH_KEY         optional private key path
   WITH_SSL               default: 0; set to 1 to run certbot after nginx setup
@@ -264,10 +264,9 @@ main() {
 
   cat <<EOF
 
-Done. Before deploying Docker containers, make sure the frontend port does NOT
-conflict with nginx on port 80:
+Done. The main deploy script now runs nginx setup automatically in auto mode.
+For a complete install/deploy, run:
 
-    export REMOTE_FRONTEND_PORT=8080   # nginx proxies to 127.0.0.1:8080
     export REMOTE_SSH_HOST=39.97.252.88
     export REMOTE_APP_DIR=/srv/ink-and-memory
     ./deploy/remote-ssh/deploy.sh deploy
