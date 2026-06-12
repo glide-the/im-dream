@@ -95,6 +95,12 @@ export REMOTE_CORS_ALLOW_ORIGINS=${REMOTE_FRONTEND_PUBLIC_ORIGIN}
 REMOTE_SETUP_NGINX=0 ./deploy/remote-ssh/deploy.sh deploy
 ```
 
+`setup-nginx` 会在安装或启动 nginx 前检查主机 `80` 端口：
+
+- `80` 未占用：继续安装/启动 nginx。
+- `80` 已由 nginx 占用：继续刷新配置，并在 `nginx.service` 未激活时尝试 `nginx -s reload`。
+- `80` 已由非 nginx 进程占用：中止并打印监听进程；需要先释放端口，或确认由其他反向代理管理域名后设置 `REMOTE_SETUP_NGINX=0`。
+
 ## 数据维护
 
 `deploy` 默认保护远端数据：`REMOTE_SYNC_DATA=0` 时不会 rsync 本地 `backend/data/` 到服务器。
