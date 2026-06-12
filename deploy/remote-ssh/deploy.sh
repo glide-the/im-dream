@@ -4,6 +4,7 @@
 # [Pos] platform release entry in deploy/remote-ssh/
 # [Sync] 2026-06-12: add Remote SSH docker-compose deployment path for Docker-enabled servers.
 # [Sync] 2026-06-12: align default container resources and filesystem paths with Cloud Run deployment.
+# [Sync] 2026-06-12: propagate backend/frontend host ports into nginx setup and pin backend container port.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,10 +19,13 @@ REMOTE_DOCKER_COMPOSE_BIN="${REMOTE_DOCKER_COMPOSE_BIN:-docker-compose}"
 REMOTE_COMPOSE_FILE="${REMOTE_COMPOSE_FILE:-deploy/remote-ssh/docker-compose.yml}"
 REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME:-ink-and-memory}"
 
-REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-0.0.0.0}"
-REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-80}"
+REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}"
+REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-8080}"
+REMOTE_FRONTEND_NGINX_HOST="${REMOTE_FRONTEND_NGINX_HOST:-}"
 REMOTE_BACKEND_BIND_HOST="${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}"
 REMOTE_BACKEND_PORT="${REMOTE_BACKEND_PORT:-8765}"
+REMOTE_BACKEND_CONTAINER_PORT="${REMOTE_BACKEND_CONTAINER_PORT:-8765}"
+REMOTE_BACKEND_NGINX_HOST="${REMOTE_BACKEND_NGINX_HOST:-}"
 REMOTE_BACKEND_IMAGE="${REMOTE_BACKEND_IMAGE:-ink-backend:remote}"
 REMOTE_FRONTEND_IMAGE="${REMOTE_FRONTEND_IMAGE:-ink-frontend:remote}"
 REMOTE_BACKEND_ROLLBACK_IMAGE="${REMOTE_BACKEND_ROLLBACK_IMAGE:-ink-backend:remote-rollback}"
@@ -37,14 +41,19 @@ REMOTE_AGENT_CWD="${REMOTE_AGENT_CWD:-/app/data/agent-workspace}"
 REMOTE_FILE_STORAGE_TYPE="${REMOTE_FILE_STORAGE_TYPE:-local}"
 REMOTE_FILE_STORAGE_LOCAL_DIR="${REMOTE_FILE_STORAGE_LOCAL_DIR:-/app/data/file-storage}"
 REMOTE_FILE_STORAGE_PREFIX="${REMOTE_FILE_STORAGE_PREFIX:-uploads}"
-REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-}"
+REMOTE_BACKEND_PUBLIC_ORIGIN="${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}"
+REMOTE_FRONTEND_PUBLIC_ORIGIN="${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}"
+REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-${REMOTE_BACKEND_PUBLIC_ORIGIN}}"
 REMOTE_WS_BASE_URL="${REMOTE_WS_BASE_URL:-}"
-REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}"
+REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN},${REMOTE_BACKEND_PUBLIC_ORIGIN},http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}"
 REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-false}"
 REMOTE_SYNC_DATA="${REMOTE_SYNC_DATA:-0}"
+REMOTE_SETUP_NGINX="${REMOTE_SETUP_NGINX:-auto}"
+REMOTE_SETUP_STORAGE="${REMOTE_SETUP_STORAGE:-1}"
+REMOTE_SETUP_SSL="${REMOTE_SETUP_SSL:-0}"
 REMOTE_CLEAN_IMAGES="${REMOTE_CLEAN_IMAGES:-0}"
 REMOTE_CLEAN_VOLUMES="${REMOTE_CLEAN_VOLUMES:-0}"
-REMOTE_FRONTEND_SCHEME="${REMOTE_FRONTEND_SCHEME:-http}"
+REMOTE_FRONTEND_SCHEME="${REMOTE_FRONTEND_SCHEME:-https}"
 REMOTE_FRONTEND_PATH="${REMOTE_FRONTEND_PATH:-/ink-and-memory/}"
 REMOTE_PUBLIC_HOST="${REMOTE_PUBLIC_HOST:-${REMOTE_SSH_HOST:-REMOTE_SSH_HOST}}"
 REMOTE_VERIFY_FRONTEND_URL="${REMOTE_VERIFY_FRONTEND_URL:-http://127.0.0.1:${REMOTE_FRONTEND_PORT}${REMOTE_FRONTEND_PATH}}"
@@ -66,7 +75,8 @@ Commands:
   sync      rsync repository files to REMOTE_APP_DIR without starting containers.
   config    Sync files, then run remote docker-compose config.
   build     Sync files, snapshot current images, then run remote docker-compose build.
-  deploy    Sync files, snapshot current images, then run remote docker-compose up --build -d.
+  deploy    One-command path: ensure nginx/storage when needed, sync files, build, start, and verify.
+  install   Alias for deploy; kept for first-time one-command setup.
   start     Alias for deploy.
   verify    Run remote curl checks for backend health and frontend HTML.
   logs      Follow remote docker-compose logs.
@@ -74,6 +84,10 @@ Commands:
   rollback  Restart Compose with the previous image snapshot tags.
   stop      Stop and remove remote Compose containers/networks.
   clean     Stop and remove remote Compose containers/networks. Set REMOTE_CLEAN_IMAGES=1 or REMOTE_CLEAN_VOLUMES=1 for broader cleanup.
+  setup-nginx    Install/update host nginx reverse proxy for the backend/frontend domains.
+  setup-storage  Create/repair remote backend data, file-storage, agent-workspace, and backup directories.
+  sync-data      Back up remote data locally, then upload local backend/data to the remote server.
+  backup-data    Download a timestamped remote backend/data backup without uploading local data.
 
 Required environment:
   REMOTE_SSH_HOST       remote SSH host or IP
@@ -84,16 +98,24 @@ Optional environment:
   REMOTE_SSH_PORT       default: 22
   REMOTE_SSH_KEY        optional private key path
   REMOTE_DOCKER_COMPOSE_BIN  default: docker-compose
-  REMOTE_FRONTEND_PORT  default: 80
+  REMOTE_FRONTEND_PORT  default: 8080, bound to localhost for host nginx
+  REMOTE_FRONTEND_NGINX_HOST optional nginx upstream host override; defaults from REMOTE_FRONTEND_BIND_HOST
   REMOTE_BACKEND_PORT   default: 8765
+  REMOTE_BACKEND_CONTAINER_PORT default: 8765, exported as backend PORT inside the container
+  REMOTE_BACKEND_NGINX_HOST optional nginx upstream host override; defaults from REMOTE_BACKEND_BIND_HOST
   REMOTE_BACKEND_CPUS   default: 1.0, matching Cloud Run backend CPU
   REMOTE_BACKEND_MEMORY default: 1g, matching Cloud Run backend memory
   REMOTE_FRONTEND_CPUS  default: 1.0, matching Cloud Run frontend CPU
   REMOTE_FRONTEND_MEMORY default: 256m, matching Cloud Run frontend memory
   REMOTE_AGENT_CWD      default: /app/data/agent-workspace
   REMOTE_FILE_STORAGE_LOCAL_DIR default: /app/data/file-storage
-  REMOTE_API_BASE_URL   optional browser-facing backend URL; empty uses nginx same-origin proxy fallback
-  REMOTE_CORS_ALLOW_ORIGINS  required when REMOTE_API_BASE_URL is a cross-origin URL
+  REMOTE_BACKEND_PUBLIC_ORIGIN default: https://ink-backend.suoxya.com
+  REMOTE_FRONTEND_PUBLIC_ORIGIN default: https://ink-frontend.suoxya.com
+  REMOTE_API_BASE_URL   browser-facing backend URL; default: REMOTE_BACKEND_PUBLIC_ORIGIN
+  REMOTE_CORS_ALLOW_ORIGINS  default includes frontend/backend public domains and localhost dev origins
+  REMOTE_SETUP_NGINX    default: auto; deploy installs/updates host nginx when localhost-bound ports need it
+  REMOTE_SETUP_STORAGE  default: 1; deploy creates persistent backend/data directories before rsync
+  REMOTE_SETUP_SSL      default: 0; set to 1 to let setup-nginx request certbot certificates
   REMOTE_SYNC_DATA      default: 0; when 1, sync backend/data to the remote server
 EOF
 }
@@ -157,6 +179,10 @@ remote_frontend_url() {
     printf '%s\n' "${REMOTE_FRONTEND_URL}"
     return 0
   fi
+  if [[ -n "${REMOTE_FRONTEND_PUBLIC_ORIGIN}" ]]; then
+    printf '%s%s\n' "${REMOTE_FRONTEND_PUBLIC_ORIGIN%/}" "${REMOTE_FRONTEND_PATH}"
+    return 0
+  fi
   local port_suffix=""
   if [[ ! ( "${REMOTE_FRONTEND_SCHEME}" == "http" && "${REMOTE_FRONTEND_PORT}" == "80" ) \
         && ! ( "${REMOTE_FRONTEND_SCHEME}" == "https" && "${REMOTE_FRONTEND_PORT}" == "443" ) ]]; then
@@ -176,6 +202,14 @@ require_remote_config() {
   [[ "${REMOTE_APP_DIR}" == /* ]] || err "REMOTE_APP_DIR must be an absolute path."
 }
 
+require_remote_host_config() {
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    [[ -n "${REMOTE_SSH_HOST}" ]] || log "Would require REMOTE_SSH_HOST."
+    return 0
+  fi
+  [[ -n "${REMOTE_SSH_HOST}" ]] || err "REMOTE_SSH_HOST is required."
+}
+
 ssh_run() {
   local cmd="$1"
   local target
@@ -192,15 +226,17 @@ ssh_run() {
 remote_env_prefix() {
   local names=(
     REMOTE_FRONTEND_BIND_HOST REMOTE_FRONTEND_PORT
-    REMOTE_BACKEND_BIND_HOST REMOTE_BACKEND_PORT
+    REMOTE_BACKEND_BIND_HOST REMOTE_BACKEND_PORT REMOTE_BACKEND_CONTAINER_PORT
     REMOTE_BACKEND_IMAGE REMOTE_FRONTEND_IMAGE
     REMOTE_BACKEND_CONTAINER REMOTE_FRONTEND_CONTAINER
     REMOTE_BACKEND_CPUS REMOTE_BACKEND_MEMORY
     REMOTE_FRONTEND_CPUS REMOTE_FRONTEND_MEMORY
-    REMOTE_TZ REMOTE_API_BASE_URL REMOTE_WS_BASE_URL
+    REMOTE_TZ REMOTE_BACKEND_PUBLIC_ORIGIN REMOTE_FRONTEND_PUBLIC_ORIGIN
+    REMOTE_API_BASE_URL REMOTE_WS_BASE_URL
     REMOTE_AGENT_CWD REMOTE_FILE_STORAGE_TYPE
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
+    REMOTE_SETUP_NGINX REMOTE_SETUP_STORAGE REMOTE_SETUP_SSL
   )
   local output="env" name
   for name in "${names[@]}"; do
@@ -226,6 +262,8 @@ check_local_prereqs() {
   require_command ssh || { warn "ssh not found."; failed=1; }
   require_command rsync || { warn "rsync not found."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/docker-compose.yml" || { warn "Missing remote compose file."; failed=1; }
+  require_file "${REPO_ROOT}/deploy/remote-ssh/setup-nginx.sh" || { warn "Missing remote nginx setup script."; failed=1; }
+  require_file "${REPO_ROOT}/deploy/remote-ssh/setup-storage.sh" || { warn "Missing remote storage setup script."; failed=1; }
   require_file "${REPO_ROOT}/backend/.env" || { warn "Missing backend/.env. Remote Compose env_file requires it."; failed=1; }
   require_file "${REPO_ROOT}/backend/models.json" || { warn "Missing backend/models.json. Remote Compose mounts it read-only."; failed=1; }
   require_file "${REPO_ROOT}/backend/Dockerfile" || { warn "Missing backend/Dockerfile."; failed=1; }
@@ -258,24 +296,28 @@ Remote SSH docker-compose deploy:
 Sequence:
   1. Check local ssh/rsync and required repository files.
   2. Check remote ${REMOTE_DOCKER_COMPOSE_BIN} and Docker daemon.
-  3. rsync repository files to REMOTE_APP_DIR, excluding backend/data by default.
-  4. Tag current remote images as rollback images when they exist.
-  5. Run remote docker-compose up --build -d.
-  6. Verify backend and frontend from the remote server.
+  3. Decide whether host nginx is needed; auto mode installs/updates it for localhost-bound frontend/backend ports.
+  4. Create/repair remote backend/data, file-storage, agent-workspace, and backup directories.
+  5. rsync repository files to REMOTE_APP_DIR, excluding backend/data by default.
+  6. Tag current remote images as rollback images when they exist.
+  7. Run remote docker-compose up --build -d.
+  8. Verify backend and frontend from the remote server.
 
 Resources:
   Backend defaults match Cloud Run backend: 1 CPU, 1g memory.
   Frontend defaults match Cloud Run frontend: 1 CPU, 256m memory.
 
 Data:
-  REMOTE_SYNC_DATA=0 by default, so remote backend/data is preserved.
+  REMOTE_SETUP_STORAGE=1 by default, so deploy creates/repairs remote backend/data automatically.
+  REMOTE_SYNC_DATA=0 by default, so remote backend/data contents are preserved during code deploys.
   Container /app/data is backed by REMOTE_APP_DIR/backend/data on the remote server.
-  AGENT_CWD and FILE_STORAGE_LOCAL_DIR default to /app/data/agent-workspace and /app/data/file-storage.
-  Set REMOTE_SYNC_DATA=1 only when you intentionally want local backend/data to overwrite/sync to the server.
+  Use sync-data only when you intentionally want local backend/data to overwrite/sync to the server.
 
-API mode:
-  Default REMOTE_API_BASE_URL is empty, so the frontend uses nginx same-origin proxy fallback.
-  For direct browser-to-backend requests, set REMOTE_API_BASE_URL and REMOTE_CORS_ALLOW_ORIGINS.
+API/nginx mode:
+  REMOTE_SETUP_NGINX=auto by default; deploy installs/updates host nginx when the frontend is localhost-bound.
+  Default REMOTE_API_BASE_URL is https://ink-backend.suoxya.com, so browser login/API calls never use the internal Docker hostname.
+  Host-level nginx should route ink-backend.suoxya.com to 127.0.0.1:${REMOTE_BACKEND_PORT} and ink-frontend.suoxya.com to 127.0.0.1:${REMOTE_FRONTEND_PORT}.
+  Override REMOTE_API_BASE_URL only when deploying to a different public backend origin.
 EOF
 }
 
@@ -323,8 +365,67 @@ snapshot_images() {
   ssh_run "${cmd}"
 }
 
+should_setup_nginx() {
+  case "${REMOTE_SETUP_NGINX}" in
+    1|true|yes|on) return 0 ;;
+    0|false|no|off) return 1 ;;
+    auto)
+      [[ "${REMOTE_FRONTEND_BIND_HOST}" == "127.0.0.1" || "${REMOTE_BACKEND_BIND_HOST}" == "127.0.0.1" ]]
+      ;;
+    *) err "REMOTE_SETUP_NGINX must be auto, 1, or 0." ;;
+  esac
+}
+
+should_setup_storage() {
+  case "${REMOTE_SETUP_STORAGE}" in
+    1|true|yes|on|auto) return 0 ;;
+    0|false|no|off) return 1 ;;
+    *) err "REMOTE_SETUP_STORAGE must be 1, 0, or auto." ;;
+  esac
+}
+
+command_setup_nginx() {
+  require_remote_host_config
+  if should_setup_nginx; then
+    log "Ensuring host nginx reverse proxy for ${REMOTE_BACKEND_PUBLIC_ORIGIN} and ${REMOTE_FRONTEND_PUBLIC_ORIGIN}."
+    env DRY_RUN="${DRY_RUN}" \
+      REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
+      REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
+      REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
+      REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST}" \
+      REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT}" \
+      REMOTE_FRONTEND_NGINX_HOST="${REMOTE_FRONTEND_NGINX_HOST}" \
+      REMOTE_BACKEND_BIND_HOST="${REMOTE_BACKEND_BIND_HOST}" \
+      REMOTE_BACKEND_PORT="${REMOTE_BACKEND_PORT}" \
+      REMOTE_BACKEND_NGINX_HOST="${REMOTE_BACKEND_NGINX_HOST}" \
+      WITH_SSL="${REMOTE_SETUP_SSL}" \
+      "${SCRIPT_DIR}/setup-nginx.sh"
+  else
+    log "Skipping host nginx setup because REMOTE_SETUP_NGINX=${REMOTE_SETUP_NGINX}."
+  fi
+}
+
+command_setup_storage() {
+  require_remote_config
+  if should_setup_storage; then
+    log "Ensuring remote persistent storage under ${REMOTE_APP_DIR%/}/backend/data."
+    env DRY_RUN="${DRY_RUN}" \
+      REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
+      REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
+      REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
+      REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
+      "${SCRIPT_DIR}/setup-storage.sh"
+  else
+    log "Skipping remote storage setup because REMOTE_SETUP_STORAGE=${REMOTE_SETUP_STORAGE}."
+  fi
+}
+
 command_deploy() {
   check_prereqs
+  command_setup_nginx
+  command_setup_storage
   sync_files
   snapshot_images
   remote_compose up --build -d
@@ -395,12 +496,40 @@ case "${COMMAND:-help}" in
   sync) sync_files ;;
   config) check_prereqs; sync_files; remote_compose config ;;
   build) check_prereqs; sync_files; snapshot_images; remote_compose build ;;
-  deploy|start|up) command_deploy ;;
+  deploy|install|start|up) command_deploy ;;
   verify) command_verify ;;
   logs) remote_compose logs -f --tail=100 ;;
   ps) remote_compose ps ;;
   rollback) command_rollback ;;
   stop) remote_compose down ;;
   clean) command_clean ;;
+  setup-nginx) command_setup_nginx ;;
+  setup-storage)
+    exec env DRY_RUN="${DRY_RUN}" \
+      REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
+      REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
+      REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
+      REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
+      "${SCRIPT_DIR}/setup-storage.sh"
+    ;;
+  sync-data)
+    exec env DRY_RUN="${DRY_RUN}" \
+      REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
+      REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
+      REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
+      REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
+      "${SCRIPT_DIR}/sync-data.sh" upload
+    ;;
+  backup-data|backup-remote)
+    exec env DRY_RUN="${DRY_RUN}" \
+      REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
+      REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
+      REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
+      REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
+      "${SCRIPT_DIR}/sync-data.sh" backup-remote
+    ;;
   *) err "Unknown command: ${COMMAND}. Run --help." ;;
 esac
