@@ -1,5 +1,5 @@
-# [Input] Consume backend/.env and ClaudeCodeOptions-like objects.
-# [Output] Provide helpers that merge project env vars into ClaudeCodeOptions.env
+# [Input] Consume backend/.env, process env, and ClaudeCodeOptions-like objects.
+# [Output] Provide helpers that merge project/runtime env vars into ClaudeCodeOptions.env
 #          and force Claude Code to read project settings only.
 # [Pos] SDK environment helper node in libs/claude_agent_kit/server
 # [Sync] 2026-05-08: centralize .env injection for ClaudeSDKClient subprocess options.
@@ -9,10 +9,13 @@
 # [Sync] 2026-05-24: add INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to allowlist (renamed from
 #                    PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE); legacy key kept
 #                    for zero-downtime migration.
+# [Sync] 2026-06-12: merge Cloud Run/process SDK env after backend/.env so Secret
+#                    Manager-injected ANTHROPIC_AUTH_TOKEN reaches the subprocess.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -63,12 +66,31 @@ def project_dotenv_env(env_file: Optional[Path | str] = None) -> dict[str, str]:
     }
 
 
+def process_sdk_env(process_env: Optional[Mapping[str, str]] = None) -> dict[str, str]:
+    """Return process env values suitable for ``ClaudeCodeOptions.env``.
+
+    Cloud Run injects Secret Manager values as regular environment variables,
+    not as a ``backend/.env`` file.  These values still need to be copied into
+    ``ClaudeCodeOptions.env`` because setting that field makes the SDK
+    subprocess use the explicit map instead of inheriting the whole parent env.
+    """
+
+    source = os.environ if process_env is None else process_env
+    return {
+        str(key): str(value)
+        for key, value in source.items()
+        if key and value is not None and _is_project_dotenv_sdk_env_key(str(key))
+    }
+
+
 def merge_project_dotenv_env(
     existing_env: Optional[Mapping[str, str]] = None,
     env_file: Optional[Path | str] = None,
+    process_env: Optional[Mapping[str, str]] = None,
 ) -> dict[str, str]:
-    """Merge backend ``.env`` with caller-provided SDK env overrides."""
+    """Merge backend ``.env``, process env, and caller-provided SDK env overrides."""
     merged = project_dotenv_env(env_file)
+    merged.update(process_sdk_env(process_env))
     if existing_env:
         merged.update(
             {
@@ -86,7 +108,7 @@ def apply_project_dotenv_to_options(
     options: Any,
     env_file: Optional[Path | str] = None,
 ) -> Any:
-    """Ensure a ClaudeCodeOptions-like object carries backend ``.env`` vars."""
+    """Ensure a ClaudeCodeOptions-like object carries project/runtime SDK vars."""
     existing_env = getattr(options, "env", None) or {}
     options.env = merge_project_dotenv_env(existing_env, env_file)
     return options

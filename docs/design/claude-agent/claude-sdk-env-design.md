@@ -1,16 +1,17 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 > **[Sync] 2026-05-24**: 迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
+> **[Sync] 2026-06-12**: SDK 子进程 env 来源扩展为 `backend/.env` + 当前进程环境；Cloud Run Secret Manager 注入的 `ANTHROPIC_AUTH_TOKEN` 会在启动子进程前显式写入 `ClaudeCodeOptions.env`。
 
 # ClaudeSDKClient 项目 env 注入方案设计
 
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeSDKClient 项目 env 注入方案设计.md — 路径和环境变量已适配 Ink & Memory 工程规范。
 
-> **Ink & Memory 简化说明**：`server.py` 启动时先加载 `backend/.env` 到进程环境；Claude Code SDK 子进程每次运行时也从 `backend/.env` 合并 `ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL` 等直接 SDK 变量。Ink & Memory 不再维护 Agent runtime 别名映射。
+> **Ink & Memory 简化说明**：`server.py` 启动时先加载 `backend/.env` 到进程环境，且不覆盖 Cloud Run 等平台已注入的变量；Claude Code SDK 子进程每次运行时从 `backend/.env` + 当前进程环境合并 `ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL / ANTHROPIC_MODEL` 等直接 SDK 变量。Ink & Memory 不再维护 Agent runtime 别名映射。
 
 > 落地路径：`backend/claude_agent/`
 > 影响入口：`ClaudeAgentRunner`、`SimpleClaudeAgentSDKClient`、`IClaudeAgentSDKClient.query_stream()`
-> 目标：确保服务进程和 Claude Code SDK 子进程都可以读取 `backend/.env` 中 Claude Code / Anthropic SDK 相关环境变量，并只加载项目级 Claude Code settings。
-> Thread Session 兼容性：env 注入策略与 Thread Session 享元层完全正交。`ClaudeAgentRunner` 实例被 `AgentRunState.runner` 享元缓存（`session_id` 维度，TTL 默认 600 s）后，每次 `runner.run_streaming(opts, callbacks)` 仍走 §5.2 的 `apply_project_sdk_runtime_options(...)` 重新合并 `backend/.env` + project-only settings source；`backend/libs/claude_agent_kit/server/workspace.py::init_workspace` 在每次 Phase 1 享元未命中时刷新 `.claude` 模板，保证享元复用 runner 不会让 settings 落后于项目根模板。
+> 目标：确保服务进程和 Claude Code SDK 子进程都可以读取 `backend/.env` 或平台进程环境中的 Claude Code / Anthropic SDK 相关环境变量，并只加载项目级 Claude Code settings。
+> Thread Session 兼容性：env 注入策略与 Thread Session 享元层完全正交。`ClaudeAgentRunner` 实例被 `AgentRunState.runner` 享元缓存（`session_id` 维度，TTL 默认 600 s）后，每次 `runner.run_streaming(opts, callbacks)` 仍走 §5.2 的 `apply_project_sdk_runtime_options(...)` 重新合并 `backend/.env` + 当前进程环境 + project-only settings source；`backend/libs/claude_agent_kit/server/workspace.py::init_workspace` 在每次 Phase 1 享元未命中时刷新 `.claude` 模板，保证享元复用 runner 不会让 settings 落后于项目根模板。
 
 ---
 
@@ -25,7 +26,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 5. `claude_code_sdk.ClaudeSDKClient`
 6. Claude Code CLI 子进程
 
-`backend/.env` 中维护 Claude Code / Anthropic SDK 运行所需环境变量，例如：
+本地 `backend/.env` 和 Cloud Run / Secret Manager 注入的进程环境中维护 Claude Code / Anthropic SDK 运行所需环境变量，例如：
 
 - `ANTHROPIC_BASE_URL`
 - `ANTHROPIC_AUTH_TOKEN`
@@ -67,7 +68,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 ### 3.1 目标
 
 - `server.py` 启动时加载 `backend/.env`，让 import-time env 配置生效。
-- Claude Code SDK 子进程启动时一定能获得 `backend/.env` 中 `ANTHROPIC_*` 变量。
+- Claude Code SDK 子进程启动时一定能获得 `backend/.env` 或当前进程环境中的 `ANTHROPIC_*` 变量。
 - 通过 `ClaudeCodeOptions.env` 向 Claude Code SDK 子进程注入 Claude Code / Anthropic 相关环境变量。
 - 将 `.env` 合并逻辑下沉为共享 helper，避免散落在 runner 中。
 - `ClaudeAgentRunner` 与 `SimpleClaudeAgentSDKClient` 两条路径都覆盖。
@@ -92,11 +93,11 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 
 ### 4.2 import-time 缓存不适合运行时 env
 
-如果 `.env` 在进程启动后被修改，import-time 缓存会造成后续运行仍使用旧值。Claude Code 子进程环境应在子进程启动前合并，避免运行时配置变更无法反映。
+如果 `.env` 在进程启动后被修改，import-time 缓存会造成后续运行仍使用旧值。Claude Code 子进程环境应在子进程启动前合并；helper 每次会重读 `backend/.env`，但同名当前进程环境变量优先，因此平台 env / Secret Manager 变更仍需要重启或重新部署服务后才会生效。
 
 ### 4.3 父进程环境与子进程环境边界不清
 
-服务进程需要在导入 `claude_agent` / `config` 等模块前加载 `backend/.env`，否则 `INK_AGENT_TTL_S`、`INK_AGENT_MAX_TURNS`、`INK_AGENT_CONTEXT_SESSIONS` 等 import-time 配置只能看到默认值。SDK 子进程通过 `ClaudeCodeOptions.env` 显式携带同一个 `backend/.env` 中的 Claude Code / Anthropic 相关值。
+服务进程需要在导入 `claude_agent` / `config` 等模块前加载 `backend/.env`，否则 `INK_AGENT_TTL_S`、`INK_AGENT_MAX_TURNS`、`INK_AGENT_CONTEXT_SESSIONS` 等 import-time 配置只能看到默认值。Cloud Run 上，`ANTHROPIC_AUTH_TOKEN` 等 Secret Manager 值以进程环境变量形式出现，不会落盘到 `backend/.env`；SDK 子进程通过 `ClaudeCodeOptions.env` 显式携带 `backend/.env` 与当前进程环境中允许透传的 Claude Code / Anthropic 相关值。
 
 ### 4.4 direct client 路径缺少兜底
 
@@ -109,18 +110,20 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 在 `backend/libs/claude_agent_kit/server/sdk_env.py` 中维护 SDK 环境合并 helper：
 
 - `project_dotenv_env()`：读取 `backend/.env`，返回适合 `ClaudeCodeOptions.env` 使用的 `dict[str, str]`。
-- `merge_project_dotenv_env(existing_env)`：以 `backend/.env` 为基础，叠加调用方显式传入的 `existing_env`。
+- `process_sdk_env()`：读取当前进程环境，返回适合 `ClaudeCodeOptions.env` 使用的白名单 SDK key。
+- `merge_project_dotenv_env(existing_env)`：以 `backend/.env` 为基础，叠加当前进程环境和调用方显式传入的 `existing_env`。
 - `apply_project_dotenv_to_options(options)`：读取 options 上已有的 `env`，合并后写回 `options.env`。
 - `apply_project_setting_sources_to_options(options)`：设置 `extra_args["setting-sources"] = "project"`。
-- `apply_project_sdk_runtime_options(options)`：同时应用 `backend/.env` 和 project-only settings source。
+- `apply_project_sdk_runtime_options(options)`：同时应用 `backend/.env`、当前进程环境和 project-only settings source。
 
 合并策略：
 
 1. 先读取 `backend/.env`。
-2. 再叠加 `options.env`。
-3. 相同 key 下，`options.env` 覆盖 `backend/.env`。
-4. 保持变量契约以 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` 为准。
-5. SDK helper 不写入 `os.environ`；服务进程启动阶段由 `server.py` 负责加载 `backend/.env`，并移除不属于当前 Ink Agent 契约的旧 Agent env。
+2. 再叠加当前进程环境中的白名单 SDK key（Cloud Run Secret Manager 注入值在这里生效）。
+3. 再叠加 `options.env`。
+4. 相同 key 下，`options.env` 覆盖当前进程环境，当前进程环境覆盖 `backend/.env`。
+5. 保持变量契约以 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL` 为准。
+6. SDK helper 不写入 `os.environ`；服务进程启动阶段由 `server.py` 负责加载 `backend/.env`，并移除不属于当前 Ink Agent 契约的旧 Agent env。
 
 ### 5.2 Runner 层使用 helper
 
@@ -137,7 +140,7 @@ Ink & Memory 的 Claude Agent 能力通过 `backend/claude_agent/` 封装 Claude
 - `system_prompt`
 - `resume`
 
-构造完成后调用 `apply_project_sdk_runtime_options(...)`，让 runner 标准路径显式携带 `backend/.env`，并强制 Claude Code 只加载项目 settings。
+构造完成后调用 `apply_project_sdk_runtime_options(...)`，让 runner 标准路径显式携带 `backend/.env` 与当前进程环境中的 SDK key，并强制 Claude Code 只加载项目 settings。
 
 在传入 `_sdk_client.query_stream(...)` 前，`ClaudeAgentRunner` 还会执行一次调用链检查：
 
@@ -226,6 +229,7 @@ sequenceDiagram
 
 - 定位 `backend/.env`。
 - 使用 `dotenv_values()` 读取环境变量。
+- 读取当前进程环境中的白名单 SDK key，覆盖同名 `.env` 值。
 - 过滤空 key、`None` 值和非 Claude Code / Anthropic SDK key。
 - 合并 caller-provided `options.env`。
 - 将 TypeScript `settingSources: ["project"]` 映射为 Python SDK `options.extra_args["setting-sources"] = "project"`。
@@ -251,7 +255,7 @@ sequenceDiagram
 
 - 在创建 `ClaudeSDKClient` 前构造 `effective_options`。
 - 如果调用方没有传 options，则创建默认 `ClaudeCodeOptions()`。
-- 对 `effective_options` 应用 `backend/.env` 合并和 project-only settings source。
+- 对 `effective_options` 应用 `backend/.env`、当前进程环境合并和 project-only settings source。
 - 再传入 `ClaudeSDKClient(options=effective_options)`。
 
 ### 6.4 修改 `workspace.py`
@@ -271,7 +275,7 @@ sequenceDiagram
 - 保持 `IClaudeAgentSDKClient.query_stream(prompt, options)` 接口不变。
 - 保持 `SimpleClaudeAgentSDKClient` 对外行为不变，只增强 options 环境。
 - 保持 `ClaudeAgentRunner` SSE、tool confirmation、MCP server、session persistence 行为不变。
-- `options.env` 原有显式覆盖能力保留，并优先于 `backend/.env`。
+- `options.env` 原有显式覆盖能力保留，并优先于当前进程环境和 `backend/.env`。
 - 不派生额外 auth key，避免引入未约定的环境变量。
 - 默认模型来源为 Claude Code env 配置，避免 HTTP `request.model` 意外覆盖。
 - Python SDK 缺少 `settingSources` typed 字段时，通过 `extra_args` 兼容当前版本；未来 SDK 增加 typed 字段后可替换实现，外部接口不变。
@@ -285,7 +289,7 @@ sequenceDiagram
 
 ### 7.3 配置边界
 
-该方案负责把 `backend/.env` 合并到 Claude Code SDK 子进程 options 中。Claude Code SDK 最终如何使用这些变量，仍由 SDK 和 Claude Code CLI 自身定义。
+该方案负责把 `backend/.env` 与当前进程环境中的白名单 SDK key 合并到 Claude Code SDK 子进程 options 中。Claude Code SDK 最终如何使用这些变量，仍由 SDK 和 Claude Code CLI 自身定义。
 
 ## 8. 测试与验证方案
 
@@ -300,8 +304,8 @@ python -m unittest scripts.test_claude_agent_runner scripts.test_workspace_manag
 预期：
 
 - 测试退出码为 0。
-- runner 路径可以捕获 `ClaudeCodeOptions.env` 中的 `backend/.env` key。
-- simple client 路径创建 `ClaudeSDKClient` 前已经合并 `backend/.env`。
+- runner 路径可以捕获 `ClaudeCodeOptions.env` 中的 `backend/.env` 和进程环境 key。
+- simple client 路径创建 `ClaudeSDKClient` 前已经合并 `backend/.env` 与进程环境。
 - 显式 env override 测试通过。
 - Runner 缺少 auth key 时的诊断日志不包含任何 env 值。
 - SDK options 会携带 `extra_args["setting-sources"] = "project"`。
@@ -323,10 +327,10 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 ## 9. 验收标准
 
 - [ ] `server.py` 启动时加载 `backend/.env`。
-- [ ] Claude Code SDK 子进程启动时可以读取 `backend/.env` 中 `ANTHROPIC_*` 变量。
-- [ ] `ClaudeAgentRunner` 标准调用路径携带 `backend/.env`。
-- [ ] `SimpleClaudeAgentSDKClient` direct client 调用路径携带 `backend/.env`。
-- [ ] `options.env` 显式变量优先于 `backend/.env`。
+- [ ] Claude Code SDK 子进程启动时可以读取 `backend/.env` 或当前进程环境中的 `ANTHROPIC_*` 变量。
+- [ ] `ClaudeAgentRunner` 标准调用路径携带 `backend/.env` 与进程环境 SDK key。
+- [ ] `SimpleClaudeAgentSDKClient` direct client 调用路径携带 `backend/.env` 与进程环境 SDK key。
+- [ ] `options.env` 显式变量优先于当前进程环境和 `backend/.env`。
 - [ ] Runner 在调用 `query_stream()` 前能诊断关键 env key 是否进入调用链。
 - [ ] SDK options 会携带 Claude Code CLI 参数 `--setting-sources project`。
 - [ ] Claude Code 读取 workspace 项目 `.claude/settings.json`，不依赖用户目录 settings。
@@ -339,8 +343,8 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 
 ### 10.1 风险
 
-- `backend/.env` 中非 Claude Code / Anthropic SDK key 不再进入 Claude Code 子进程环境；服务进程仍在启动时加载完整 `.env`，供 session 和 Mem0 等 backend 配置读取。
-- 如果调用方显式传入错误的 `options.env`，会覆盖 `backend/.env` 同名 key。该行为是设计要求，用于支持测试、临时切换或调用方定制。
+- `backend/.env` 和进程环境中非 Claude Code / Anthropic SDK key 不再进入 Claude Code 子进程环境；服务进程仍在启动时加载完整 `.env`，供 session 和 Mem0 等 backend 配置读取。
+- 如果调用方显式传入错误的 `options.env`，会覆盖进程环境或 `backend/.env` 同名 key。该行为是设计要求，用于支持测试、临时切换或调用方定制。
 - 如果 backend 目录判断错误，`.env` 读取会失败。helper 以 `backend/libs/claude_agent_kit/server/sdk_env.py` 向上定位 backend 目录，需要测试覆盖。
 - 如果 Claude Code CLI 版本不支持 `--setting-sources`，子进程会启动失败。当前本地 `claude --help` 已包含 `--setting-sources <sources>`。
 
@@ -378,4 +382,4 @@ python -m py_compile backend/libs/claude_agent_kit/server/sdk_env.py backend/lib
 2. 或等待 `INK_AGENT_TTL_S`（默认 600 s）TTL 自然超时由 `AgentRunStateSweeper` 驱逐（reason=`ttl_expired`）；
 3. 进程级强制刷新可调 `factory.aclose()` → 重新建 Factory，配合滚动重启策略生效。
 
-> Runner 实例本身不缓存 dotenv 解析结果；`apply_project_sdk_runtime_options` 在每次 `runner.run_streaming` 调用时重读 `backend/.env`，因此享元复用 `state.runner` 不会让 `.env` 变更被冻结到旧值 —— 只是 `init_workspace` 模板刷新仍受享元 `state.cwd` 影响，需要按上面三种方式之一兜底。
+> Runner 实例本身不缓存 SDK env 解析结果；`apply_project_sdk_runtime_options` 在每次 `runner.run_streaming` 调用时重读 `backend/.env` 并读取当前进程环境，因此享元复用 `state.runner` 不会冻结 helper 结果。若当前进程环境中已有同名 key，则仍按进程环境优先；平台 env / Secret Manager 变更需要服务重启。`init_workspace` 模板刷新仍受享元 `state.cwd` 影响，需要按上面三种方式之一兜底。

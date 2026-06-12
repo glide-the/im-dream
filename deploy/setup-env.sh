@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # deploy/setup-env.sh — Initialize Cloud Run environment variables for the backend.
+# [Sync] 2026-06-12: point follow-up release guidance to deploy/google-cloud/deploy.sh.
 #
 # Behavior:
 #   - Prompts to confirm 8 specific keys (stored in Secret Manager)
@@ -127,7 +128,10 @@ SECRET_REFS=""
 # Pass through all .env keys not in the secret list
 while IFS='=' read -r key value; do
   is_secret_key "${key}" && continue
-  [[ "${key}" == "TZ" ]] && continue   # already set
+  case "${key}" in
+    TZ) continue ;; # already set
+    INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS) continue ;; # owned by deploy/google-cloud/deploy.sh
+  esac
   ENV_VARS+=",${key}=${value}"
 done < "${DEFAULTS_FILE}"
 
@@ -189,5 +193,5 @@ fi
 
 echo ""
 info "════════════════════════════════════════════════════════"
-info "  Done. Next step: ./deploy/deploy.sh"
+info "  Done. Next step: ./deploy/google-cloud/deploy.sh deploy"
 info "════════════════════════════════════════════════════════"

@@ -1,6 +1,6 @@
 /**
  * [Input] voiceApi: analyzeEchoes, analyzeTraits, analyzePatterns, saveAnalysisReport,
- *         getAnalysisReports, listSessions, fetchSessionsAggregate, ReflectionResult,
+ *         getAnalysisReports, fetchSessionsAggregate, ReflectionResult,
  *         getReflectionsSectionConfig, saveReflectionsSectionConfig, resetReflectionsSectionConfig,
  *         ReflectionSectionConfig
  * [Output] Reflections page — warm paper / vintage journal design (CSS design tokens)
@@ -13,9 +13,11 @@
  * [Sync] 2026-06-09: Past Reflections cards now open a full-page blog view (ReflectionBlogPage)
  *         instead of the PaperStack popup. viewMode extends to 'blog'; selectedReport state tracks
  *         which report is being read. Color spec: docs/prd/color_system/reflection-blog.md
+ * [Sync] 2026-06-12: remove obsolete session cache and unused blog card after saved-report flow moved
+ *         to aggregate/report APIs.
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   analyzeEchoes,
@@ -23,12 +25,10 @@ import {
   analyzePatterns,
   saveAnalysisReport,
   getAnalysisReports,
-  listSessions,
   fetchSessionsAggregate,
   getReflectionsSectionConfig,
   saveReflectionsSectionConfig,
   resetReflectionsSectionConfig,
-  type UserSession,
   type ReflectionResult,
   type ReflectionSectionConfig,
 } from '../api/voiceApi';
@@ -267,7 +267,6 @@ export default function AnalysisView() {
   const formatWordsLabel   = (n: number) => t('analysis.statsLabels.wordsCount', { value: n.toLocaleString() });
 
   // ── State ──
-  const [sessions, setSessions]   = useState<UserSession[]>([]);
   const [echoes, setEchoes]       = useState<ReflectionResult[]>([]);
   const [traits, setTraits]       = useState<ReflectionResult[]>([]);
   const [patterns, setPatterns]   = useState<ReflectionResult[]>([]);
@@ -298,16 +297,6 @@ export default function AnalysisView() {
   });
 
   // ── Load data ──
-  const loadSessions = useCallback(async () => {
-    try {
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
-      const data = await listSessions(tz);
-      setSessions([...data].sort((a, b) =>
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      ));
-    } catch (e) { console.error('Failed to load sessions:', e); }
-  }, []);
-
   const reloadSavedReports = useCallback(async () => {
     if (isAuthenticated) {
       try {
@@ -369,8 +358,7 @@ export default function AnalysisView() {
     };
     loadStats();
     reloadSavedReports();
-    loadSessions();
-  }, [isAuthenticated, loadSessions, reloadSavedReports]);
+  }, [isAuthenticated, reloadSavedReports]);
 
   // ── Config modal handlers ──
   const handleOpenConfig = useCallback(async (section: SectionKey) => {
@@ -585,7 +573,7 @@ export default function AnalysisView() {
             echoes={echoes} traits={traits} patterns={patterns}
             currentPaper={currentPaper} onPaperChange={setCurrentPaper}
             isMobile={isMobile} t={t}
-            loading={loading} streaming={streaming} errors={errors}
+            loading={loading} streaming={streaming}
             isAuthenticated={isAuthenticated}
             onAnalyzeSection={handleAnalyzeSection}
             onConfigClick={handleOpenConfig}
@@ -1033,7 +1021,7 @@ function DecorativeInkSpots() {
 // ──────────────────────────────────────────────
 function PaperStack({
   echoes, traits, patterns, currentPaper, onPaperChange, isMobile, t,
-  loading, streaming, errors, isAuthenticated, onAnalyzeSection, onConfigClick,
+  loading, streaming, isAuthenticated, onAnalyzeSection, onConfigClick,
 }: {
   echoes: ReflectionResult[];
   traits: ReflectionResult[];
@@ -1044,7 +1032,6 @@ function PaperStack({
   t: (k: string, opts?: any) => string;
   loading: Record<string, boolean>;
   streaming: Record<string, string>;
-  errors: Record<string, string>;
   isAuthenticated: boolean;
   onAnalyzeSection: (s: SectionKey) => void;
   onConfigClick: (s: SectionKey) => void;
@@ -1789,97 +1776,6 @@ function ReflectionBlogPage({
           </span>
         </div>
       )}
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────
-function BlogResultCard({
-  result, kind, index, onClick, isSelected,
-}: {
-  result: ReflectionResult;
-  kind: 'echo' | 'trait' | 'pattern';
-  index: number;
-  onClick?: () => void;
-  isSelected?: boolean;
-}) {
-  const confidenceFill = result.confidence === 'high' ? 5 : result.confidence === 'low' ? 1 : 3;
-  const indexLabel = String(index + 1).padStart(2, '0');
-
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        background: isSelected
-          ? 'linear-gradient(135deg, color-mix(in srgb, var(--color-border-paper) 18%, var(--color-bg-surface-solid)) 0%, color-mix(in srgb, var(--color-border-paper) 10%, var(--color-bg-surface)) 100%)'
-          : 'linear-gradient(135deg, var(--color-bg-surface-solid) 0%, var(--color-bg-surface) 100%)',
-        padding: kind === 'trait' ? '1.75rem' : '2rem 2.25rem',
-        borderRadius: '12px',
-        border: isSelected
-          ? '1px solid var(--color-border-paper)'
-          : '1px solid color-mix(in srgb, var(--color-border-paper) 55%, transparent)',
-        position: 'relative', overflow: 'hidden',
-        transition: 'all 0.25s',
-        cursor: onClick ? 'pointer' : 'default',
-        boxShadow: isSelected ? '0 4px 16px var(--color-shadow-soft)' : 'none',
-      }}
-      onMouseEnter={e => {
-        if (!isSelected) {
-          e.currentTarget.style.boxShadow = '0 6px 24px var(--color-shadow-soft)';
-          e.currentTarget.style.borderColor = 'var(--color-border-paper)';
-          if (onClick) e.currentTarget.style.transform = 'translateY(-2px)';
-        }
-      }}
-      onMouseLeave={e => {
-        if (!isSelected) {
-          e.currentTarget.style.boxShadow = 'none';
-          e.currentTarget.style.borderColor = 'color-mix(in srgb, var(--color-border-paper) 55%, transparent)';
-        }
-        e.currentTarget.style.transform = 'translateY(0)';
-      }}
-    >
-      {/* Paper texture */}
-      <div style={{ position: 'absolute', inset: 0, backgroundImage: `repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-border-paper) 3%, transparent) 0px, transparent 2px)`, pointerEvents: 'none' }} />
-
-      {/* Index + toggle arrow */}
-      <div style={{ position: 'absolute', top: '1.25rem', right: '1.5rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-        {onClick && (
-          <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', opacity: 0.7, transition: 'transform 0.2s', display: 'inline-block', transform: isSelected ? 'rotate(90deg)' : 'rotate(0deg)' }}>→</span>
-        )}
-        <span style={{ fontSize: '12px', fontWeight: 600, letterSpacing: '1px', color: 'color-mix(in srgb, var(--color-border-paper) 70%, transparent)', fontFamily: 'Georgia, serif' }}>
-          {indexLabel}
-        </span>
-      </div>
-
-      <div style={{ position: 'relative' }}>
-        <h3 style={{ fontSize: '19px', fontWeight: 500, fontFamily: 'Georgia, serif', fontStyle: 'italic', color: 'var(--color-text-primary)', margin: '0 0 0.875rem', lineHeight: 1.35, paddingRight: '3rem' }}>
-          {result.title}
-        </h3>
-        <p style={{ color: 'var(--color-text-body)', lineHeight: 1.85, fontSize: '14px', margin: '0 0 1rem', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-          {kind === 'trait' ? result.evidence : result.description}
-        </p>
-
-        {kind === 'trait' && (
-          <>
-            <div style={{ display: 'flex', gap: '5px', marginBottom: '0.625rem' }}>
-              {[1, 2, 3, 4, 5].map(i => (
-                <div key={i} style={{ flex: 1, height: '4px', borderRadius: '2px', background: i <= confidenceFill ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-border-paper) 40%, transparent)', opacity: i <= confidenceFill ? 0.8 : 0.4 }} />
-              ))}
-            </div>
-            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', lineHeight: 1.6 }}>
-              {result.evidence}
-            </div>
-          </>
-        )}
-
-        {(kind === 'echo' || kind === 'pattern') && result.confidence && (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '11px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', background: 'color-mix(in srgb, var(--color-border-paper) 20%, transparent)', padding: '4px 12px', borderRadius: '14px', border: '1px solid color-mix(in srgb, var(--color-border-paper) 40%, transparent)' }}>
-            <span style={{ fontWeight: 600 }}>Confidence</span>
-            <span>·</span>
-            <span style={{ fontStyle: 'italic' }}>{result.confidence}</span>
-          </div>
-        )}
-      </div>
     </div>
   );
 }

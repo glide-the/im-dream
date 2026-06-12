@@ -3,15 +3,22 @@
 # [Pos] deployment image spec in backend/
 # [Sync] 2026-06-03: rewrite based on Pawkeyland Dockerfile — python 3.10-bookworm,
 #        pip mirror, Node.js + claude-code CLI, HEALTHCHECK, --proxy-headers.
+# [Sync] 2026-06-12: add configurable Debian/PyPI/npm mirror build args for faster China builds.
 
 FROM python:3.10-slim-bookworm
+
+ARG DEBIAN_MIRROR=https://mirrors.aliyun.com/debian
+ARG DEBIAN_SECURITY_MIRROR=https://mirrors.aliyun.com/debian-security
+ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG PYPI_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/
+ARG PYPI_TRUSTED_HOST=mirrors.aliyun.com
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     TZ=UTC \
     PIP_NO_CACHE_DIR=1 \
-    PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
-    PIP_TRUSTED_HOST=mirrors.aliyun.com \
+    PIP_INDEX_URL=${PYPI_INDEX_URL} \
+    PIP_TRUSTED_HOST=${PYPI_TRUSTED_HOST} \
     PIP_DEFAULT_TIMEOUT=180 \
     PIP_RETRIES=10 \
     PIP_PROGRESS_BAR=off
@@ -20,11 +27,19 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - gcc / libffi / libssl / libjpeg / zlib: cryptography + Pillow
 #   - curl jq: runtime utilities
 #   - nodejs npm: required by @anthropic-ai/claude-code (Claude agent SDK)
-RUN apt-get update \
+RUN set -eux; \
+    if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
+        sed -i \
+            -e "s|http://deb.debian.org/debian|${DEBIAN_MIRROR}|g" \
+            -e "s|http://deb.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+            -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
+            /etc/apt/sources.list.d/debian.sources; \
+    fi; \
+    apt-get -o Acquire::Retries=5 update \
     && apt-get install -y --no-install-recommends \
         gcc libffi-dev libssl-dev libjpeg62-turbo-dev zlib1g-dev \
         curl jq ca-certificates nodejs npm \
-    && npm config set registry https://registry.npmmirror.com \
+    && npm config set registry "${NPM_REGISTRY}" \
     && npm install -g @anthropic-ai/claude-code \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*

@@ -1,3 +1,7 @@
+// [Input] Runtime API base config, auth token storage, and backend auth/profile endpoints.
+// [Output] React auth context with login/register/logout/profile verification helpers.
+// [Pos] frontend auth context node
+// [Sync] 2026-06-12: use centralized API_BASE so deployed frontend can call backend cross-origin.
 /**
  * Authentication context and hooks
  *
@@ -7,8 +11,7 @@
 import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { STORAGE_KEYS } from '../constants/storageKeys';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../lib/apiBase';
 
 interface User {
   id: number;

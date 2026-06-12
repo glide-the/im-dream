@@ -175,9 +175,9 @@ To deploy Ink & Memory to **Google Cloud Run** (frontend + backend as separate s
 
 ```bash
 export GCP_PROJECT_ID=your-project-id
-./deploy/setup-storage.sh   # one-time: GCS bucket + service account
-./deploy/setup-env.sh       # one-time: secrets + env vars
-./deploy/deploy.sh          # every release
+./deploy/google-cloud/deploy.sh setup-storage  # one-time: GCS bucket + service account
+./deploy/google-cloud/deploy.sh setup-env      # one-time: secrets + env vars
+./deploy/google-cloud/deploy.sh deploy         # every release
 ```
 
 See [docs/deploy/overview.md](docs/deploy/overview.md) for the full guide.

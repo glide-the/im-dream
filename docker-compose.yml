@@ -42,6 +42,8 @@ services:
       # nginx.conf.template uses this to proxy /api/ and /polycli/ requests.
       # Matches the internal service name defined above.
       BACKEND_URL: http://ink-backend:8765
+      # runtime-config.js uses this browser-facing URL for direct CORS requests.
+      API_BASE_URL: http://127.0.0.1:8765
     depends_on:
       ink-backend:
         condition: service_healthy

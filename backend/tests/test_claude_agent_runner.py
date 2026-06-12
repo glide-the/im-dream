@@ -24,6 +24,8 @@
 #                    explicit PreToolUse allow for high-sensitivity tools.
 # [Sync] 2026-06-07: add Bash low-sensitivity and switch_editor tests; expand
 #                    Bash safe-command set from {ls} to full navigation/read set.
+# [Sync] 2026-06-12: cover Cloud Run/process env injection into Claude SDK
+#                    subprocess options.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -1380,9 +1382,78 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
         loaded = sdk_env_module.merge_project_dotenv_env(
             {"ANTHROPIC_API_KEY": "legacy-test", "ANTHROPIC_AUTH_TOKEN": "sk-test"},
             env_file=Path("/tmp/does-not-exist"),
+            process_env={},
         )
 
         self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "sk-test"})
+
+    def test_merge_project_dotenv_env_includes_process_sdk_env(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            env_file = Path(temp_dir) / ".env"
+            env_file.write_text(
+                "\n".join(
+                    [
+                        "ANTHROPIC_MODEL=dotenv-model",
+                        "ANTHROPIC_BASE_URL=https://dotenv.example",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            loaded = sdk_env_module.merge_project_dotenv_env(
+                {"API_TIMEOUT_MS": "5000"},
+                env_file=env_file,
+                process_env={
+                    "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
+                    "ANTHROPIC_BASE_URL": "https://cloud.example",
+                    "INK_AGENT_TTL_S": "600",
+                    "ANTHROPIC_API_KEY": "legacy-test",
+                },
+            )
+
+        self.assertEqual(
+            loaded,
+            {
+                "ANTHROPIC_MODEL": "dotenv-model",
+                "ANTHROPIC_BASE_URL": "https://cloud.example",
+                "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
+                "API_TIMEOUT_MS": "5000",
+            },
+        )
+
+    def test_merge_project_dotenv_env_keeps_existing_env_highest_priority(self):
+        loaded = sdk_env_module.merge_project_dotenv_env(
+            {"ANTHROPIC_AUTH_TOKEN": "explicit-token"},
+            env_file=Path("/tmp/does-not-exist"),
+            process_env={"ANTHROPIC_AUTH_TOKEN": "cloud-secret-token"},
+        )
+
+        self.assertEqual(loaded, {"ANTHROPIC_AUTH_TOKEN": "explicit-token"})
+
+    def test_apply_project_dotenv_to_options_reads_process_env_by_default(self):
+        options = _SDK_OPTIONS()
+
+        with patch.dict(
+            os.environ,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
+                "ANTHROPIC_MODEL": "cloud-model",
+                "INK_AGENT_TTL_S": "600",
+            },
+            clear=True,
+        ):
+            sdk_env_module.apply_project_dotenv_to_options(
+                options,
+                env_file=Path("/tmp/does-not-exist"),
+            )
+
+        self.assertEqual(
+            options.env,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "cloud-secret-token",
+                "ANTHROPIC_MODEL": "cloud-model",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

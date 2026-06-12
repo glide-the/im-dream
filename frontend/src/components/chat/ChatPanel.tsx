@@ -19,6 +19,7 @@
 // [Sync] 2026-06-09: keep reconnect effect deps stable (threadId/nonce only) so parent re-renders do not abort stream.
 // [Sync] 2026-06-09: agentBusy drives input dock stop button (streaming/submitted/reconnect).
 // [Sync] 2026-06-09: show a floating scroll-to-bottom arrow above AIInputDock when the message list is scrolled away from the bottom.
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin chat transport and SSE reconnect.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -50,8 +51,7 @@ import {
   consumeClaudeAgentSseStream,
 } from '../../lib/claude-agent-sse-utils';
 import { IconArrowDown } from './Icons';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../../lib/apiBase';
 const CHAT_BOTTOM_PROXIMITY_PX = 120;
 
 interface SystemConfigData {

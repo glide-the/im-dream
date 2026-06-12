@@ -5,12 +5,12 @@
 //                    system_config.im_full_access_enabled.
 // [Sync] 2026-06-09: emit same-tab IM full-access change events so Chat UI
 //                    updates without a page refresh.
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config requests.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { emitImFullAccessChanged } from '../../lib/system-config-events';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../../lib/apiBase';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
 

@@ -1,8 +1,11 @@
+// [Input] Runtime API base config, AuthContext token, storage upload endpoints, and file proxy utility.
+// [Output] File upload hook that supports server/direct upload and cross-origin backend URLs.
+// [Pos] file-upload hook node in frontend/src/hooks
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin deployments.
 import { useCallback, useEffect, useState } from 'react';
 import { toFileProxyUrl } from '../lib/toFileProxyUrl';
 import { getAuthToken } from '../contexts/AuthContext';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../lib/apiBase';
 
 interface StorageInfo {
   type: 's3' | 'vercel-blob' | 'unknown';

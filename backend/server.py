@@ -6,6 +6,7 @@
 # [Sync] 2026-05-24: keep only current Ink Agent env keys after dotenv loading.
 # [Sync] 2026-05-25: split REST API routes into backend/routers modules; keep PolyCLI session defs, root, websocket, scheduler, and mounts here.
 # [Sync] 2026-06-09: allowlist INK_AGENT_EVENT_BUS_* / INK_AGENT_REDIS_URL for SSE EventBus config.
+# [Sync] 2026-06-12: make CORS origin/credential policy environment-driven for cross-origin deployments.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -110,6 +111,31 @@ SUPPORTED_LANGUAGES = {"en", "zh"}
 DEFAULT_LANGUAGE = "en"
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
 PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/")
+
+
+def _split_csv_env(name: str, default: str) -> list[str]:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        raw = default
+    values = [value.strip() for value in raw.split(",") if value.strip()]
+    return values
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+DEFAULT_CORS_ALLOW_ORIGINS = (
+    "http://localhost,"
+    "http://localhost:5173,"
+    "http://127.0.0.1,"
+    "http://127.0.0.1:5173"
+)
+CORS_ALLOW_ORIGINS = _split_csv_env("INK_CORS_ALLOW_ORIGINS", DEFAULT_CORS_ALLOW_ORIGINS)
+CORS_ALLOW_CREDENTIALS = _bool_env("INK_CORS_ALLOW_CREDENTIALS", False)
 
 
 def normalize_language_code(language: Optional[str]) -> str:
@@ -677,8 +703,8 @@ print(f"🧾 Backend version: {BACKEND_VERSION}")
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict to specific origins
-    allow_credentials=True,
+    allow_origins=CORS_ALLOW_ORIGINS,
+    allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -796,6 +822,16 @@ def root():
     )
 
 
+@app.get("/api/health")
+def health():
+    """Health endpoint for deploy scripts, Compose healthchecks, and Cloud Run probes."""
+    return {
+        "status": "ok",
+        "version": BACKEND_VERSION,
+        "cors_allow_origins": CORS_ALLOW_ORIGINS,
+    }
+
+
 # ========== Router Registration ==========
 
 app.include_router(auth_router)
@@ -836,6 +872,7 @@ if __name__ == "__main__":
     print(f"🧾 Version: {BACKEND_VERSION}")
     print("=" * 60)
     print("\n📚 API Endpoints:")
+    print("    GET  /api/health         - Health check")
     print("  Auth & User:")
     print("    POST /api/register        - Register new user")
     print("    POST /api/login           - Login")

@@ -16,6 +16,7 @@
 // [Sync] 2026-06-01: add delete button to thread list items; hover shows × button; calls DELETE /api/claude-agent/threads/{id}; clears workspace when active thread is deleted.
 // [Sync] 2026-06-09: SSE reconnect — fetch /status on thread switch; trigger stream reconnect via reconnectStreamNonce.
 // [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin thread APIs.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -34,8 +35,7 @@ import { getAuthToken } from '../../contexts/AuthContext';
 import { IconClock, IconFolder, IconMoreHorizontal, IconPlus, IconShare, IconX } from './Icons';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../../lib/apiBase';
 
 interface ChatThread {
   id: string;

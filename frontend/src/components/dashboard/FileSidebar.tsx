@@ -1,8 +1,11 @@
+// [Input] Runtime API base config, AuthContext token, workspace file APIs, and dashboard file UI state.
+// [Output] Workspace file sidebar with list/upload/delete/download behavior.
+// [Pos] dashboard file-sidebar component node
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin workspace file requests.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { IconChevronDown, IconChevronRight, IconDownload, IconFile, IconFolder, IconLoader, IconPlus, IconTrash, IconX } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../../lib/apiBase';
 
 export interface FileInfo {
   name: string;

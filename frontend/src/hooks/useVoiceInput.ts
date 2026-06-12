@@ -1,6 +1,11 @@
+// [Input] Runtime WebSocket base config, editor engine refs, browser audio APIs, and speech-recognition websocket endpoint.
+// [Output] Voice input hook that streams microphone audio to backend speech recognition.
+// [Pos] voice-input hook node in frontend/src/hooks
+// [Sync] 2026-06-12: derive speech-recognition websocket URL from runtime API base instead of localhost.
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { RefObject } from 'react';
 import type { EditorEngine, TextCell } from '../engine/EditorEngine';
+import { webSocketUrl } from '../lib/apiBase';
 
 export interface UseVoiceInputOptions {
   engineRef: RefObject<EditorEngine | null>;
@@ -142,7 +147,7 @@ export function useVoiceInput({
         voiceInputModal.className = 'voice-input-modal';
         document.body.append(voiceInputModal);
 
-        ws = new WebSocket('ws://127.0.0.1:8765/ws/speech-recognition');
+        ws = new WebSocket(webSocketUrl('/ws/speech-recognition'));
         ws.binaryType = 'arraybuffer';
         ws.onerror = (e) => {
           console.error('WS err', e);

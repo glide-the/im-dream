@@ -8,6 +8,7 @@
 // [Sync] 2026-06-09: subscribe to same-tab IM full-access config events so
 //                    draft chat input updates immediately after Settings changes.
 // [Sync] 2026-06-09: show stop button when loading+onStop; spinner when loading without onStop.
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config and workspace file APIs.
 import {
   useCallback,
   useEffect,
@@ -32,8 +33,7 @@ import {
 import { shouldSendMessageOnKeyDown } from './interaction-utils';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../../lib/apiBase';
 
 type AIInputDockMode = 'simple' | 'full';
 

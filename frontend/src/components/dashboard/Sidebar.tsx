@@ -1,8 +1,11 @@
+// [Input] Runtime API base config, AuthContext token, system config endpoint, and dashboard icons.
+// [Output] Dashboard sidebar settings UI backed by backend system config.
+// [Pos] dashboard sidebar component node
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config requests.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../../lib/apiBase';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
 

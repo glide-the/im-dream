@@ -1,6 +1,7 @@
 # BACKEND_URL is injected at container startup via envsubst.
 # Local docker-compose: BACKEND_URL=http://ink-backend:8765
-# Cloud Run:            BACKEND_URL=https://<backend-cloud-run-url>
+# Cloud Run:            BACKEND_URL=<backend run.app service URL> as proxy fallback.
+# Browser API calls use runtime-config API_BASE_URL=https://ink-backend.suoxya.com.
 server {
     listen 80;
     server_name _;
@@ -13,6 +14,17 @@ server {
     gzip_types text/plain text/css application/json application/javascript
                text/xml application/xml application/xml+rss text/javascript;
     gzip_min_length 1024;
+
+    # Runtime API config and SPA HTML must never be cached; they change per
+    # deployment and control whether the browser calls the Cloud Run backend
+    # directly. Fingerprinted assets stay immutable below.
+    location = /ink-and-memory/runtime-config.js {
+        alias /usr/share/nginx/html/ink-and-memory/runtime-config.js;
+        default_type application/javascript;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
+    }
 
     # ── API proxy ──────────────────────────────────────────────────────────
     # Using rewrite + variable proxy_pass (no path) so nginx passes the
@@ -57,10 +69,13 @@ server {
     location /ink-and-memory/ {
         alias /usr/share/nginx/html/ink-and-memory/;
         try_files $uri $uri/ /ink-and-memory/index.html;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
+        add_header Expires "0" always;
 
         location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
             expires 1y;
-            add_header Cache-Control "public, immutable";
+            add_header Cache-Control "public, immutable" always;
         }
     }
 

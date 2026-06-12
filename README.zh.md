@@ -175,9 +175,9 @@ npm run dev  # 运行在 http://localhost:5173
 
 ```bash
 export GCP_PROJECT_ID=your-project-id
-./deploy/setup-storage.sh   # 一次性：GCS bucket + 服务账号
-./deploy/setup-env.sh       # 一次性：secrets + 环境变量
-./deploy/deploy.sh          # 每次发版执行
+./deploy/google-cloud/deploy.sh setup-storage  # 一次性：GCS bucket + 服务账号
+./deploy/google-cloud/deploy.sh setup-env      # 一次性：secrets + 环境变量
+./deploy/google-cloud/deploy.sh deploy         # 每次发版执行
 ```
 
 完整说明见 [docs/deploy/overview.md](docs/deploy/overview.md)。

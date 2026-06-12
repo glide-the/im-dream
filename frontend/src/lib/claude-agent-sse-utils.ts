@@ -4,9 +4,10 @@
  * [Pos]    shared SSE helpers in frontend/src/lib
  * [Sync]   2026-06-09: extracted from claude-agent-transport for thread SSE reconnect.
  * [Sync]   2026-06-09: add consumeClaudeAgentSseStream with incremental frame buffering.
+ * [Sync]   2026-06-12: emit AI SDK 6 dynamic-tool and reasoning parts during reconnect replay.
  */
 
-import { isToolUIPart, type UIMessage } from 'ai';
+import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
 
 export type BackendEvent = {
   type: string;
@@ -71,16 +72,35 @@ function appendTextDelta(parts: UIMessage['parts'], delta: string): UIMessage['p
   return next;
 }
 
-function appendReasoningDelta(parts: UIMessage['parts'], id: string, delta: string): UIMessage['parts'] {
+function appendReasoningDelta(parts: UIMessage['parts'], delta: string): UIMessage['parts'] {
   const next = [...parts];
-  const idx = next.findIndex((p) => p.type === 'reasoning' && (p as { id?: string }).id === id);
+  let idx = -1;
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    if (next[i]?.type === 'reasoning') {
+      idx = i;
+      break;
+    }
+  }
   if (idx >= 0) {
-    const part = next[idx] as { type: 'reasoning'; id: string; text: string };
+    const part = next[idx] as Extract<UIMessage['parts'][number], { type: 'reasoning' }>;
     next[idx] = { ...part, text: `${part.text}${delta}` };
     return next;
   }
-  next.push({ type: 'reasoning', id, text: delta });
+  next.push({ type: 'reasoning', text: delta, state: 'streaming' });
   return next;
+}
+
+function stringifyToolError(output: unknown): string {
+  if (typeof output === 'string') return output;
+  try {
+    return JSON.stringify(output ?? '');
+  } catch {
+    return String(output);
+  }
+}
+
+function getToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
+  return 'input' in part ? part.input : undefined;
 }
 
 export function applyBackendEventToMessages(
@@ -98,9 +118,8 @@ export function applyBackendEventToMessages(
       return base;
     }
     case 'reasoning-delta': {
-      const id = String(event.id ?? 'reasoning');
       const delta = String(event.delta ?? '');
-      base[index] = { ...target, parts: appendReasoningDelta(parts, id, delta) };
+      base[index] = { ...target, parts: appendReasoningDelta(parts, delta) };
       return base;
     }
     case 'tool-input-available':
@@ -110,13 +129,12 @@ export function applyBackendEventToMessages(
       const existing = parts.findIndex(
         (p) => isToolUIPart(p) && p.toolCallId === toolCallId,
       );
-      const invocation = {
-        type: 'tool-invocation' as const,
+      const invocation: DynamicToolUIPart = {
+        type: 'dynamic-tool',
         toolCallId,
         toolName,
-        state: 'call' as const,
+        state: 'input-available',
         input: event.input ?? {},
-        dynamic: true as const,
         ...(event.type === 'tool-approval-request'
           ? { toolMetadata: { approvalRequested: true } }
           : {}),
@@ -135,12 +153,29 @@ export function applyBackendEventToMessages(
         (p) => isToolUIPart(p) && p.toolCallId === toolCallId,
       );
       if (idx >= 0) {
-        const prev = parts[idx] as Extract<UIMessage['parts'][number], { type: 'tool-invocation' }>;
-        parts[idx] = {
-          ...prev,
-          state: event.isError ? 'output-error' : 'output-available',
-          output: event.output,
-        };
+        const prev = parts[idx] as ToolUIPart | DynamicToolUIPart;
+        const input = getToolInput(prev);
+        const toolName = getToolName(prev);
+        const baseTool = {
+          type: 'dynamic-tool',
+          toolCallId,
+          toolName,
+          input,
+          title: prev.title,
+          toolMetadata: prev.toolMetadata,
+          providerExecuted: prev.providerExecuted,
+        } satisfies Partial<DynamicToolUIPart> & Pick<DynamicToolUIPart, 'type' | 'toolCallId' | 'toolName'>;
+        parts[idx] = event.isError
+          ? {
+              ...baseTool,
+              state: 'output-error',
+              errorText: stringifyToolError(event.output),
+            }
+          : {
+              ...baseTool,
+              state: 'output-available',
+              output: event.output,
+            };
         base[index] = { ...target, parts };
       }
       return base;

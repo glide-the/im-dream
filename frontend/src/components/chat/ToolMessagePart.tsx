@@ -6,14 +6,14 @@
 // [Sync] 2026-05-27: add !isCompleted guard to shouldShowApprovalUI so Approve/Cancel disappears after tool completes in manual mode.
 // [Sync] 2026-05-29: integrate EditorWriteApprovalUI for mcp__editor__ write tools; detect by isEditorWriteTool().
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; call after successful editor write approve to trigger Writing view reload.
+// [Sync] 2026-06-12: use centralized API_BASE for cross-origin tool confirmation requests.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import EditorWriteApprovalUI, { isEditorWriteTool } from './EditorWriteApprovalUI';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
-
-const API_BASE = '/ink-and-memory';
+import { API_BASE } from '../../lib/apiBase';
 
 type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 
