@@ -4,6 +4,7 @@
 # [Pos] platform release entry in deploy/remote-ssh/
 # [Sync] 2026-06-12: add Remote SSH docker-compose deployment path for Docker-enabled servers.
 # [Sync] 2026-06-12: align default container resources and filesystem paths with Cloud Run deployment.
+# [Sync] 2026-06-12: propagate backend/frontend host ports into nginx setup and pin backend container port.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,8 +21,11 @@ REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME:-ink-and-memory}"
 
 REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}"
 REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-8080}"
+REMOTE_FRONTEND_NGINX_HOST="${REMOTE_FRONTEND_NGINX_HOST:-}"
 REMOTE_BACKEND_BIND_HOST="${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}"
 REMOTE_BACKEND_PORT="${REMOTE_BACKEND_PORT:-8765}"
+REMOTE_BACKEND_CONTAINER_PORT="${REMOTE_BACKEND_CONTAINER_PORT:-8765}"
+REMOTE_BACKEND_NGINX_HOST="${REMOTE_BACKEND_NGINX_HOST:-}"
 REMOTE_BACKEND_IMAGE="${REMOTE_BACKEND_IMAGE:-ink-backend:remote}"
 REMOTE_FRONTEND_IMAGE="${REMOTE_FRONTEND_IMAGE:-ink-frontend:remote}"
 REMOTE_BACKEND_ROLLBACK_IMAGE="${REMOTE_BACKEND_ROLLBACK_IMAGE:-ink-backend:remote-rollback}"
@@ -95,7 +99,10 @@ Optional environment:
   REMOTE_SSH_KEY        optional private key path
   REMOTE_DOCKER_COMPOSE_BIN  default: docker-compose
   REMOTE_FRONTEND_PORT  default: 8080, bound to localhost for host nginx
+  REMOTE_FRONTEND_NGINX_HOST optional nginx upstream host override; defaults from REMOTE_FRONTEND_BIND_HOST
   REMOTE_BACKEND_PORT   default: 8765
+  REMOTE_BACKEND_CONTAINER_PORT default: 8765, exported as backend PORT inside the container
+  REMOTE_BACKEND_NGINX_HOST optional nginx upstream host override; defaults from REMOTE_BACKEND_BIND_HOST
   REMOTE_BACKEND_CPUS   default: 1.0, matching Cloud Run backend CPU
   REMOTE_BACKEND_MEMORY default: 1g, matching Cloud Run backend memory
   REMOTE_FRONTEND_CPUS  default: 1.0, matching Cloud Run frontend CPU
@@ -219,7 +226,7 @@ ssh_run() {
 remote_env_prefix() {
   local names=(
     REMOTE_FRONTEND_BIND_HOST REMOTE_FRONTEND_PORT
-    REMOTE_BACKEND_BIND_HOST REMOTE_BACKEND_PORT
+    REMOTE_BACKEND_BIND_HOST REMOTE_BACKEND_PORT REMOTE_BACKEND_CONTAINER_PORT
     REMOTE_BACKEND_IMAGE REMOTE_FRONTEND_IMAGE
     REMOTE_BACKEND_CONTAINER REMOTE_FRONTEND_CONTAINER
     REMOTE_BACKEND_CPUS REMOTE_BACKEND_MEMORY
@@ -309,7 +316,7 @@ Data:
 API/nginx mode:
   REMOTE_SETUP_NGINX=auto by default; deploy installs/updates host nginx when the frontend is localhost-bound.
   Default REMOTE_API_BASE_URL is https://ink-backend.suoxya.com, so browser login/API calls never use the internal Docker hostname.
-  Host-level nginx should route ink-backend.suoxya.com to 127.0.0.1:8765 and ink-frontend.suoxya.com to 127.0.0.1:8080.
+  Host-level nginx should route ink-backend.suoxya.com to 127.0.0.1:${REMOTE_BACKEND_PORT} and ink-frontend.suoxya.com to 127.0.0.1:${REMOTE_FRONTEND_PORT}.
   Override REMOTE_API_BASE_URL only when deploying to a different public backend origin.
 EOF
 }
@@ -386,6 +393,12 @@ command_setup_nginx() {
       REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
       REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
       REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST}" \
+      REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT}" \
+      REMOTE_FRONTEND_NGINX_HOST="${REMOTE_FRONTEND_NGINX_HOST}" \
+      REMOTE_BACKEND_BIND_HOST="${REMOTE_BACKEND_BIND_HOST}" \
+      REMOTE_BACKEND_PORT="${REMOTE_BACKEND_PORT}" \
+      REMOTE_BACKEND_NGINX_HOST="${REMOTE_BACKEND_NGINX_HOST}" \
       WITH_SSL="${REMOTE_SETUP_SSL}" \
       "${SCRIPT_DIR}/setup-nginx.sh"
   else

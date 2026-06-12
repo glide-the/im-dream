@@ -5,6 +5,8 @@
 # [Sync] 2026-06-12: initial nginx setup script for ink-backend.suoxya.com / ink-frontend.suoxya.com.
 # [Sync] 2026-06-12: use SCP-specific port args so REMOTE_SSH_PORT is not treated as a local file.
 # [Sync] 2026-06-12: preflight host port 80 and reload unmanaged nginx listeners safely.
+# [Sync] 2026-06-12: render upstream ports from Remote SSH deploy env instead of static defaults.
+# [Sync] 2026-06-12: disable stale same-domain nginx configs before testing the deployed site.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,6 +17,12 @@ REMOTE_SSH_HOST="${REMOTE_SSH_HOST:-}"
 REMOTE_SSH_USER="${REMOTE_SSH_USER:-}"
 REMOTE_SSH_PORT="${REMOTE_SSH_PORT:-22}"
 REMOTE_SSH_KEY="${REMOTE_SSH_KEY:-}"
+REMOTE_FRONTEND_BIND_HOST="${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}"
+REMOTE_FRONTEND_PORT="${REMOTE_FRONTEND_PORT:-8080}"
+REMOTE_FRONTEND_NGINX_HOST="${REMOTE_FRONTEND_NGINX_HOST:-}"
+REMOTE_BACKEND_BIND_HOST="${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}"
+REMOTE_BACKEND_PORT="${REMOTE_BACKEND_PORT:-8765}"
+REMOTE_BACKEND_NGINX_HOST="${REMOTE_BACKEND_NGINX_HOST:-}"
 WITH_SSL="${WITH_SSL:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 
@@ -32,6 +40,10 @@ Environment:
   REMOTE_SSH_USER        SSH user; omitted means use your local SSH default
   REMOTE_SSH_PORT        SSH port (default: 22)
   REMOTE_SSH_KEY         optional private key path
+  REMOTE_BACKEND_PORT    backend host port used by nginx upstream (default: 8765)
+  REMOTE_FRONTEND_PORT   frontend host port used by nginx upstream (default: 8080)
+  REMOTE_BACKEND_NGINX_HOST   optional backend upstream host override
+  REMOTE_FRONTEND_NGINX_HOST  optional frontend upstream host override
   WITH_SSL               default: 0; set to 1 to run certbot after nginx setup
   DRY_RUN                default: 0; set to 1 to print commands without executing
 EOF
@@ -53,6 +65,59 @@ ssh_target() {
   else
     printf '%s\n' "${host}"
   fi
+}
+
+nginx_upstream_host() {
+  local bind_host="$1"
+  case "${bind_host}" in
+    ""|"0.0.0.0"|"::"|"[::]")
+      bind_host="127.0.0.1"
+      ;;
+  esac
+  if [[ "${bind_host}" == *:* && "${bind_host}" != \[*\] ]]; then
+    printf '[%s]\n' "${bind_host}"
+  else
+    printf '%s\n' "${bind_host}"
+  fi
+}
+
+validate_port() {
+  local label="$1"
+  local port="$2"
+  if [[ ! "${port}" =~ ^[0-9]+$ ]]; then
+    err "${label} must be a numeric TCP port, got: ${port}"
+  fi
+  local port_number=$((10#${port}))
+  if (( port_number < 1 || port_number > 65535 )); then
+    err "${label} must be between 1 and 65535, got: ${port}"
+  fi
+}
+
+validate_nginx_host() {
+  local label="$1"
+  local host="$2"
+  if [[ ! "${host}" =~ ^[A-Za-z0-9._-]+$ && ! "${host}" =~ ^\[[0-9A-Fa-f:]+\]$ ]]; then
+    err "${label} contains unsupported characters for an nginx upstream host: ${host}"
+  fi
+}
+
+render_nginx_conf() {
+  local output="$1"
+  local backend_host="${REMOTE_BACKEND_NGINX_HOST:-}"
+  local frontend_host="${REMOTE_FRONTEND_NGINX_HOST:-}"
+  [[ -n "${backend_host}" ]] || backend_host="$(nginx_upstream_host "${REMOTE_BACKEND_BIND_HOST}")"
+  [[ -n "${frontend_host}" ]] || frontend_host="$(nginx_upstream_host "${REMOTE_FRONTEND_BIND_HOST}")"
+
+  validate_port "REMOTE_BACKEND_PORT" "${REMOTE_BACKEND_PORT}"
+  validate_port "REMOTE_FRONTEND_PORT" "${REMOTE_FRONTEND_PORT}"
+  validate_nginx_host "REMOTE_BACKEND_NGINX_HOST" "${backend_host}"
+  validate_nginx_host "REMOTE_FRONTEND_NGINX_HOST" "${frontend_host}"
+
+  log "Rendering nginx upstreams: backend=${backend_host}:${REMOTE_BACKEND_PORT}, frontend=${frontend_host}:${REMOTE_FRONTEND_PORT}"
+  sed \
+    -e "s|127\\.0\\.0\\.1:8765|${backend_host}:${REMOTE_BACKEND_PORT}|g" \
+    -e "s|127\\.0\\.0\\.1:8080|${frontend_host}:${REMOTE_FRONTEND_PORT}|g" \
+    "${NGINX_CONF_SRC}" >"${output}"
 }
 
 # ── Prerequisites check ───────────────────────────────────────────────────────
@@ -114,8 +179,16 @@ scp_file() {
 setup_nginx() {
   log "Deploying nginx config to $(ssh_target)..."
 
-  # 1) Copy the nginx config to remote server /tmp
-  scp_file "${NGINX_CONF_SRC}" "/tmp/${NGINX_CONF_NAME}.conf"
+  # 1) Render the nginx config from the same host ports used by remote Compose,
+  # then copy it to the remote server /tmp.
+  local rendered_conf
+  rendered_conf="$(mktemp "${TMPDIR:-/tmp}/ink-and-memory-nginx.XXXXXX")"
+  render_nginx_conf "${rendered_conf}"
+  if ! scp_file "${rendered_conf}" "/tmp/${NGINX_CONF_NAME}.conf"; then
+    rm -f "${rendered_conf}"
+    return 1
+  fi
+  rm -f "${rendered_conf}"
 
   # 2) Install nginx, enable config, test, and reload via a single remote script
   remote_script <<'REMOTE'
@@ -237,6 +310,23 @@ warn_conflicting_domain_configs() {
   fi
 }
 
+disable_conflicting_domain_configs() {
+  local conflicts
+  conflicts="$(list_conflicting_domain_configs || true)"
+  [[ -n "${conflicts}" ]] || return 0
+
+  local backup_dir="/etc/nginx/disabled-ink-and-memory-$(date +%Y%m%d%H%M%S)"
+  echo "[setup-nginx] Disabling stale Ink & Memory nginx configs into ${backup_dir}:"
+  mkdir -p "${backup_dir}"
+
+  local path
+  while IFS= read -r path; do
+    [[ -n "${path}" ]] || continue
+    echo "[setup-nginx]   ${path}"
+    mv "${path}" "${backup_dir}/$(basename "${path}")"
+  done <<<"${conflicts}"
+}
+
 activate_nginx() {
   if command -v systemctl >/dev/null 2>&1; then
     systemctl enable nginx
@@ -346,6 +436,7 @@ fi
 # Test configuration
 echo "[setup-nginx] Testing nginx configuration..."
 warn_conflicting_domain_configs
+disable_conflicting_domain_configs
 nginx -t
 
 # Enable and start nginx

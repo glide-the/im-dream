@@ -52,9 +52,11 @@ Internet :80/:443
 
 - 前端容器绑定 `127.0.0.1:8080`，避免占用主机 nginx 的 80 端口。
 - 后端容器绑定 `127.0.0.1:8765`，避免绕过主机 nginx 暴露到公网。
+- 主机 nginx 上游由 `setup-nginx` 根据 `REMOTE_BACKEND_PORT` / `REMOTE_FRONTEND_PORT` 渲染，端口覆盖时不会继续使用静态默认值。
+- 后端容器内部 `PORT` 默认固定为 `REMOTE_BACKEND_CONTAINER_PORT=8765`，避免 `backend/.env` 中的 `PORT` 让 uvicorn 监听端口与 Compose 映射脱节。
 - 前端 runtime `API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`。
-- 浏览器登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会访问 Docker 内部地址 `http://ink-backend:8765/api/login`。
-- `BACKEND_URL=http://ink-backend:8765` 只保留给前端容器内部 nginx fallback 使用。
+- 浏览器登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会访问 Docker 内部地址 `http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}/api/login`。
+- `BACKEND_URL=http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}` 只保留给前端容器内部 nginx fallback 使用。
 
 ## 常用配置
 
@@ -70,8 +72,11 @@ Internet :80/:443
 | `REMOTE_SETUP_STORAGE` | `1` | `deploy` 自动创建/修复远端持久化目录；设为 `0` 可跳过 |
 | `REMOTE_SETUP_SSL` | `0` | 设为 `1` 时让 nginx setup 尝试执行 certbot |
 | `REMOTE_FRONTEND_PORT` | `8080` | 前端容器映射到远端 localhost 的端口 |
+| `REMOTE_FRONTEND_NGINX_HOST` | 空 | 可选 nginx 前端上游 host；为空时从 `REMOTE_FRONTEND_BIND_HOST` 推导 |
 | `REMOTE_FRONTEND_BIND_HOST` | `127.0.0.1` | 默认仅允许主机 nginx 访问前端容器 |
 | `REMOTE_BACKEND_PORT` | `8765` | 后端容器映射到远端 localhost 的端口 |
+| `REMOTE_BACKEND_CONTAINER_PORT` | `8765` | 后端容器内部 uvicorn `PORT`，Compose 映射和 healthcheck 使用同一值 |
+| `REMOTE_BACKEND_NGINX_HOST` | 空 | 可选 nginx 后端上游 host；为空时从 `REMOTE_BACKEND_BIND_HOST` 推导 |
 | `REMOTE_BACKEND_BIND_HOST` | `127.0.0.1` | 默认仅允许主机 nginx/本机访问后端容器 |
 | `REMOTE_BACKEND_PUBLIC_ORIGIN` | `https://ink-backend.suoxya.com` | 浏览器访问后端的公网 origin |
 | `REMOTE_FRONTEND_PUBLIC_ORIGIN` | `https://ink-frontend.suoxya.com` | 前端公网 origin |
@@ -100,6 +105,8 @@ REMOTE_SETUP_NGINX=0 ./deploy/remote-ssh/deploy.sh deploy
 - `80` 未占用：继续安装/启动 nginx。
 - `80` 已由 nginx 占用：继续刷新配置，并在 `nginx.service` 未激活时尝试 `nginx -s reload`。
 - `80` 已由非 nginx 进程占用：中止并打印监听进程；需要先释放端口，或确认由其他反向代理管理域名后设置 `REMOTE_SETUP_NGINX=0`。
+
+部署配置前，`setup-nginx` 还会扫描 `/etc/nginx/sites-enabled` 和 `/etc/nginx/conf.d`。如果发现其他已启用文件也声明 `ink-backend.suoxya.com` 或 `ink-frontend.suoxya.com`，会把这些旧文件移动到 `/etc/nginx/disabled-ink-and-memory-YYYYMMDDHHMMSS/` 后再执行 `nginx -t`，避免旧代理端口继续覆盖新配置。
 
 ## 数据维护
 

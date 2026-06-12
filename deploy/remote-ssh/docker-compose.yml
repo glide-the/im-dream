@@ -1,3 +1,7 @@
+# [Input] Remote SSH REMOTE_* deployment env, backend/frontend Dockerfiles, backend/.env.
+# [Output] Two-service remote Compose stack with host-published frontend/backend ports.
+# [Pos] Remote SSH Compose template in deploy/remote-ssh/
+# [Sync] 2026-06-12: pin backend container PORT to the mapped container port so env_file cannot desync uvicorn and Compose.
 version: "3.8"
 
 services:
@@ -13,13 +17,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}:${REMOTE_BACKEND_PORT:-8765}:8765"
+      - "${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}:${REMOTE_BACKEND_PORT:-8765}:${REMOTE_BACKEND_CONTAINER_PORT:-8765}"
     volumes:
       - ../../backend/data:/app/data
       - ../../backend/models.json:/app/models.json:ro
     env_file:
       - ../../backend/.env
     environment:
+      PORT: ${REMOTE_BACKEND_CONTAINER_PORT:-8765}
       TZ: ${REMOTE_TZ:-UTC}
       AGENT_CWD: ${REMOTE_AGENT_CWD:-/app/data/agent-workspace}
       FILE_STORAGE_TYPE: ${REMOTE_FILE_STORAGE_TYPE:-local}
@@ -28,7 +33,7 @@ services:
       INK_CORS_ALLOW_ORIGINS: ${REMOTE_CORS_ALLOW_ORIGINS:-https://ink-frontend.suoxya.com,https://ink-backend.suoxya.com,http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}
       INK_CORS_ALLOW_CREDENTIALS: ${REMOTE_CORS_ALLOW_CREDENTIALS:-false}
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/api/health')"]
+      test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT', '8765') + '/api/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -46,7 +51,7 @@ services:
     ports:
       - "${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}:${REMOTE_FRONTEND_PORT:-8080}:80"
     environment:
-      BACKEND_URL: http://ink-backend:8765
+      BACKEND_URL: http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT:-8765}
       API_BASE_URL: ${REMOTE_API_BASE_URL:-https://ink-backend.suoxya.com}
       WS_BASE_URL: ${REMOTE_WS_BASE_URL:-}
     depends_on:
