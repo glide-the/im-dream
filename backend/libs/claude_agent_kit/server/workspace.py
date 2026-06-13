@@ -242,8 +242,6 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
     """
 
     workspace_abs = workspace.resolve(strict=False)
-    workspace_root_abs = get_workspace_root().resolve(strict=False)
-    project_root_abs = _project_root().resolve(strict=False)
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
