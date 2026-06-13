@@ -17,6 +17,7 @@
 #                    from AGENT_CWD/{session_id}.
 # [Sync] 2026-06-14: cover read-only runtime dependency allowlist in sandbox
 #                    settings without adding the project root as a default read path.
+# [Sync] 2026-06-14: cover automatic Docker nested Bash sandbox detection.
 
 """Regression tests for backend/claude_agent/workspace.py."""
 from __future__ import annotations
@@ -70,8 +71,14 @@ class TestInitWorkspace(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         os.environ["AGENT_CWD"] = self._tmp.name
+        self._container_patch = unittest.mock.patch(
+            "libs.claude_agent_kit.server.workspace._running_in_linux_container",
+            return_value=False,
+        )
+        self._container_patch.start()
 
     def tearDown(self):
+        self._container_patch.stop()
         os.environ.pop("AGENT_CWD", None)
         self._tmp.cleanup()
 
@@ -118,6 +125,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertTrue(sandbox["failIfUnavailable"])
         self.assertTrue(sandbox["autoAllowBashIfSandboxed"])
         self.assertFalse(sandbox["allowUnsandboxedCommands"])
+        self.assertNotIn("enableWeakerNestedSandbox", sandbox)
         self.assertEqual(sandbox["filesystem"]["denyRead"], ["/"])
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
         self.assertEqual(sandbox["filesystem"]["allowWrite"], [str(ws.resolve())])
@@ -134,6 +142,19 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertFalse(sandbox["failIfUnavailable"])
         self.assertFalse(sandbox["autoAllowBashIfSandboxed"])
         self.assertTrue(sandbox["allowUnsandboxedCommands"])
+        self.assertNotIn("enableWeakerNestedSandbox", sandbox)
+
+    def test_can_enable_weaker_nested_sandbox_for_docker(self):
+        with unittest.mock.patch(
+            "libs.claude_agent_kit.server.workspace._running_in_linux_container",
+            return_value=True,
+        ):
+            ws = init_workspace("sandbox-docker-nested")
+
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        sandbox = settings["sandbox"]
+        self.assertTrue(sandbox["enabled"])
+        self.assertTrue(sandbox["enableWeakerNestedSandbox"])
 
     def test_sandbox_allow_read_includes_runtime_deps_but_not_project_root(self):
         ws = init_workspace("sandbox-runtime-read")

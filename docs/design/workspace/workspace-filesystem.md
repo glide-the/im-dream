@@ -5,6 +5,9 @@
 > **[Sync] 2026-06-13**: Workspace Mode 现在会在每个 thread 的
 > `.claude/settings.json` 写入 Claude Code `sandbox` 配置；Bash 目录隔离由
 > Claude Code 原生 sandbox 执行，PreToolUse 不解析复杂 shell 语法。
+> **[Sync] 2026-06-14**: Docker 部署由后端自动检测 Linux 容器环境并写入
+> Claude Code `enableWeakerNestedSandbox`，解决容器内 bubblewrap nested
+> sandbox 启动问题；无需用户配置额外 env。
 
 ## 1. 概述
 
@@ -83,6 +86,7 @@ Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会�
 
 - `sandbox.enabled=true`
 - `sandbox.failIfUnavailable=true`
+- `sandbox.enableWeakerNestedSandbox=true`（仅后端检测到 Linux 容器运行时）
 - `sandbox.autoAllowBashIfSandboxed=true`
 - `sandbox.allowUnsandboxedCommands=false`
 - `sandbox.filesystem.denyRead` 覆盖共享 `{AGENT_CWD}`、项目根与常见凭证目录

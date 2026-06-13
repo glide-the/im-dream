@@ -6,6 +6,10 @@
 > [Sync] 2026-06-13: initial design and implementation contract.
 > [Sync] 2026-06-14: add runtime dependency read allowlist and clarify that
 > built-in file/search tool `input-available` is not proof of execution.
+> [Sync] 2026-06-14: document Docker nested sandbox mode for Remote SSH
+> deployments.
+> [Sync] 2026-06-14: remove user-facing nested sandbox env switch; backend
+> auto-detects Linux containers.
 
 # Claude-Agent Workspace Sandbox
 
@@ -69,6 +73,25 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
 When `workspace_enabled=false`, the same per-thread settings file is kept in
 sync but `sandbox.enabled=false`, `failIfUnavailable=false`, and
 `allowUnsandboxedCommands=true`.
+
+`enableWeakerNestedSandbox` is emitted automatically when the backend detects
+that it is running inside a Linux container. Remote SSH Docker deployments do
+not require a user-facing env switch for this. Claude Code's Linux sandbox uses
+bubblewrap, and unprivileged containers may not allow bubblewrap to mount a
+fresh `/proc`; the weaker nested mode is acceptable only because the outer
+Docker container is the primary isolation boundary. Local and non-container
+deployments do not write this key.
+
+Docker-enabled settings therefore add this sibling key to the same `sandbox`
+object:
+
+```json
+{
+  "sandbox": {
+    "enableWeakerNestedSandbox": true
+  }
+}
+```
 
 ## 3. Access Semantics
 
@@ -182,6 +205,8 @@ performs the search.
 | `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox flag before file sync. |
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |
 | `frontend/src/components/dashboard/ModelConfigSection.tsx` | Describes Workspace Mode as enabling workspace context plus Bash sandbox. |
+| `backend/Dockerfile` | Installs Claude Code Linux sandbox dependencies (`bubblewrap`, `socat`) plus runtime tools needed by agent commands. |
+| `deploy/remote-ssh/docker-compose.yml` | Enables Docker nested Bash sandbox mode for the backend container. |
 
 ## 7. Non-Goals
 
@@ -204,7 +229,8 @@ Required checks for this design:
 
 - Workspace tests confirm enabled/disabled sandbox settings are written,
   non-sandbox settings are preserved, runtime dependency paths are read-allowed,
-  and the project root is not default read-allowed.
+  Docker nested sandbox mode is auto-detected, and the project root is not
+  default read-allowed.
 - Python compile checks cover `workspace.py`, service and route integration.
 - `bash -n .claude/hooks/protect-files-bash.sh` confirms the existing sensitive
   file hook remains syntactically valid.

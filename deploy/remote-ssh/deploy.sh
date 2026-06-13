@@ -6,6 +6,7 @@
 # [Sync] 2026-06-12: align default container resources and filesystem paths with Cloud Run deployment.
 # [Sync] 2026-06-12: propagate backend/frontend host ports into nginx setup and pin backend container port.
 # [Sync] 2026-06-13: split deploy into explicit no-cache remote build and force-recreate up steps.
+# [Sync] 2026-06-14: document Claude Code Docker nested sandbox behavior.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -316,6 +317,9 @@ Data:
   REMOTE_SETUP_STORAGE=1 by default, so deploy creates/repairs remote backend/data automatically.
   REMOTE_SYNC_DATA=0 by default, so remote backend/data contents are preserved during code deploys.
   Container /app/data is backed by REMOTE_APP_DIR/backend/data on the remote server.
+  The backend auto-detects Linux container runtime and writes Claude Code's
+  weaker nested Bash sandbox setting when the outer Docker container is the
+  primary isolation boundary.
   Use sync-data only when you intentionally want local backend/data to overwrite/sync to the server.
 
 API/nginx mode:

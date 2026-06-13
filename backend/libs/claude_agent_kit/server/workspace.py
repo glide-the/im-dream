@@ -18,6 +18,8 @@
 # [Sync] 2026-06-14: add read-only runtime dependency allowlist so sandboxed
 #                    Bash can execute Python/Node/system tools without exposing
 #                    project source directories outside the thread workspace.
+# [Sync] 2026-06-14: auto-enable Claude Code Docker nested Bash sandbox mode
+#                    when the backend runs inside a Linux container.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -95,6 +97,24 @@ def _append_existing_sandbox_read_path(paths: list[Path], raw_path: str | os.Pat
     if not path.exists() or path in paths:
         return
     paths.append(path)
+
+
+def _running_in_linux_container() -> bool:
+    """Return True when this backend process appears to run inside a container."""
+
+    if not sys.platform.startswith("linux"):
+        return False
+    for marker in ("/.dockerenv", "/run/.containerenv"):
+        try:
+            if Path(marker).exists():
+                return True
+        except OSError:
+            pass
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="ignore")
+    except OSError:
+        return False
+    return any(token in cgroup for token in ("docker", "containerd", "kubepods"))
 
 
 def _runtime_root_for_executable(raw_path: Optional[str]) -> Optional[Path]:
@@ -246,7 +266,7 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
 
-    return {
+    sandbox_config = {
         "enabled": enabled,
         "failIfUnavailable": enabled,
         "autoAllowBashIfSandboxed": enabled,
@@ -269,6 +289,12 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
             ],
         },
     }
+    if enabled and _running_in_linux_container():
+        # Claude Code's Linux sandbox uses bubblewrap.  Inside Docker, a fresh
+        # /proc mount may be unavailable, so Claude Code supports this weaker
+        # nested mode when the outer container is the primary isolation layer.
+        sandbox_config["enableWeakerNestedSandbox"] = True
+    return sandbox_config
 
 
 def sync_workspace_sandbox_settings(workspace: Path, *, enabled: bool = True) -> None:

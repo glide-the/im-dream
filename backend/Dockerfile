@@ -4,6 +4,7 @@
 # [Sync] 2026-06-03: rewrite based on Pawkeyland Dockerfile — python 3.10-bookworm,
 #        pip mirror, Node.js + claude-code CLI, HEALTHCHECK, --proxy-headers.
 # [Sync] 2026-06-12: add configurable Debian/PyPI/npm mirror build args for faster China builds.
+# [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
 
 FROM python:3.10-slim-bookworm
 
@@ -25,8 +26,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # System deps:
 #   - gcc / libffi / libssl / libjpeg / zlib: cryptography + Pillow
-#   - curl jq: runtime utilities
+#   - curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - nodejs npm: required by @anthropic-ai/claude-code (Claude agent SDK)
+#   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
@@ -38,9 +40,10 @@ RUN set -eux; \
     apt-get -o Acquire::Retries=5 update \
     && apt-get install -y --no-install-recommends \
         gcc libffi-dev libssl-dev libjpeg62-turbo-dev zlib1g-dev \
-        curl jq ca-certificates nodejs npm \
+        curl jq git ripgrep ca-certificates nodejs npm \
+        bubblewrap socat \
     && npm config set registry "${NPM_REGISTRY}" \
-    && npm install -g @anthropic-ai/claude-code \
+    && npm install -g @anthropic-ai/claude-code @anthropic-ai/sandbox-runtime \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
 

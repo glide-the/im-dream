@@ -3,6 +3,7 @@
 # [Pos] Remote SSH Compose template in deploy/remote-ssh/
 # [Sync] 2026-06-12: pin backend container PORT to the mapped container port so env_file cannot desync uvicorn and Compose.
 # [Sync] 2026-06-13: remove obsolete version field for Docker Compose v2 compatibility.
+# [Sync] 2026-06-14: allow Claude Code nested Bash sandbox in backend Docker runtime.
 
 services:
   ink-backend:
@@ -16,6 +17,12 @@ services:
     mem_limit: "${REMOTE_BACKEND_MEMORY:-1g}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    security_opt:
+      # Claude Code's Linux Bash sandbox uses bubblewrap. Docker's default
+      # seccomp profile can block nested namespace operations; the thread
+      # workspace remains mounted under /app/data and Claude Code uses weaker
+      # nested sandbox mode inside this outer container boundary.
+      - seccomp=unconfined
     ports:
       - "${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}:${REMOTE_BACKEND_PORT:-8765}:${REMOTE_BACKEND_CONTAINER_PORT:-8765}"
     volumes:

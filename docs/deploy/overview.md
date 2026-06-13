@@ -221,7 +221,7 @@ docker build \
 
 ### 后端（`backend/Dockerfile`）
 
-基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、nodejs、npm），安装 Python 依赖与 `@anthropic-ai/claude-code` CLI，暴露端口 8765。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
+基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
 
 ### 前端（`frontend/Dockerfile`）
 

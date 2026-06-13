@@ -31,6 +31,11 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 7. 执行 `docker-compose up -d --force-recreate`，每次用新镜像重建容器。
 8. 在远端执行后端 health 与前端 HTML 验证。
 
+Remote SSH Docker 默认使用 Claude Code 的 nested Bash sandbox 兼容路径：
+后端检测到 Linux 容器运行时后，会在每个 thread 的 `.claude/settings.json`
+写入 `sandbox.enableWeakerNestedSandbox=true`。不需要额外环境变量；外层
+Docker 容器仍是主隔离边界。
+
 如需只预览流程：
 
 ```bash
@@ -161,6 +166,25 @@ REMOTE_SYNC_STOP_CONTAINERS=1 ./deploy/remote-ssh/deploy.sh sync-data
 ./deploy/remote-ssh/deploy.sh sync
 ./deploy/remote-ssh/deploy.sh config
 ```
+
+## Claude-agent Docker Sandbox 排障
+
+如果后端健康检查通过但 Claude-agent 首次调用失败，优先看后端日志：
+
+```bash
+./deploy/remote-ssh/deploy.sh logs
+```
+
+常见原因：
+
+- 镜像缺少 `bubblewrap` / `socat`：Claude Code Linux Bash sandbox 无法启动。
+  当前 `backend/Dockerfile` 已安装这两个包。
+- Docker nested sandbox 无法挂载新的 `/proc`：后端会自动检测 Linux 容器运行时，
+  并写入 `enableWeakerNestedSandbox=true`。
+- Docker 默认 seccomp profile 拦截 nested namespace syscall：Remote SSH
+  Compose 对 backend 设置 `security_opt: seccomp=unconfined`。
+- `ANTHROPIC_AUTH_TOKEN` 没有进入 SDK 子进程：确认远端 `backend/.env` 或
+  Settings 的用户级模型配置包含该 token。
 
 ## 前置条件与边界
 
