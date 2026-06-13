@@ -12,6 +12,9 @@
 # [Sync] 2026-06-06: memory/ remains outside init_workspace and is initialised
 #                    only by the workspace file interface endpoint using the
 #                    partition (voice) config.
+# [Sync] 2026-06-13: sync per-thread Claude Code sandbox settings into
+#                    {workspace}/.claude/settings.json so Bash is OS-confined
+#                    to the current thread workspace when workspace mode is on.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -40,6 +43,7 @@ failure the original ``skills/`` content is preserved unchanged.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
@@ -70,7 +74,7 @@ _PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
 
 
 def _project_root() -> Path:
-    """Return the repository root (three levels above this file)."""
+    """Return the repository root used for workspace template assets."""
     return _PROJECT_ROOT
 
 
@@ -102,7 +106,106 @@ def get_workspace_root() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def init_workspace(session_id: str) -> Path:
+def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
+    """Return Claude Code sandbox settings for a single thread workspace.
+
+    ``AGENT_CWD`` points to the parent workspace root.  The actual isolation
+    target for a conversation is the resolved ``workspace`` path
+    (``{AGENT_CWD}/{thread_id}``).
+    """
+
+    workspace_abs = workspace.resolve(strict=False)
+    workspace_root_abs = get_workspace_root().resolve(strict=False)
+    project_root_abs = _project_root().resolve(strict=False)
+    enabled = bool(enabled)
+
+    return {
+        "enabled": enabled,
+        "failIfUnavailable": enabled,
+        "autoAllowBashIfSandboxed": enabled,
+        "allowUnsandboxedCommands": not enabled,
+        "filesystem": {
+            # sandbox-runtime read policy is deny-then-allow. Deny the shared
+            # workspace root and repo root, then re-allow only this thread cwd.
+            "denyRead": [
+                str(workspace_root_abs),
+                str(project_root_abs),
+                "~/.ssh",
+                "~/.aws",
+                "~/.config",
+                "~/.npmrc",
+            ],
+            "allowRead": [str(workspace_abs)],
+            # Write policy is allow-only; keep Bash writes inside the thread
+            # workspace and deny config/index internals explicitly.
+            "allowWrite": [str(workspace_abs)],
+            "denyWrite": [
+                str(workspace_abs / ".claude"),
+                str(workspace_abs / ".editor"),
+                str(workspace_abs / ".mcp.json"),
+            ],
+        },
+    }
+
+
+def sync_workspace_sandbox_settings(workspace: Path, *, enabled: bool = True) -> None:
+    """Merge per-thread sandbox settings into ``{workspace}/.claude/settings.json``.
+
+    Existing non-sandbox settings copied from the project template are preserved.
+    The ``sandbox`` block is owned by workspace initialisation because it is
+    derived from the resolved per-thread workspace path.
+    """
+
+    try:
+        workspace_root_abs = get_workspace_root().resolve(strict=False)
+        workspace_abs = workspace.resolve(strict=False)
+        if not workspace_abs.is_relative_to(workspace_root_abs):
+            logger.warning(
+                "sync_workspace_sandbox_settings: workspace %r is outside "
+                "workspace root %r; aborting.",
+                workspace_abs,
+                workspace_root_abs,
+            )
+            return
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "sync_workspace_sandbox_settings: could not resolve workspace path; aborting.",
+            exc_info=True,
+        )
+        return
+
+    claude_dir = workspace_abs / ".claude"
+    settings_path = claude_dir / "settings.json"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+
+    settings: dict = {}
+    if settings_path.is_file():
+        try:
+            parsed = json.loads(settings_path.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                settings = parsed
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not parse %s; rewriting with template-compatible sandbox settings.",
+                settings_path,
+                exc_info=True,
+            )
+
+    settings["sandbox"] = _workspace_sandbox_config(workspace_abs, enabled)
+    try:
+        settings_path.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to write sandbox settings to %s",
+            settings_path,
+            exc_info=True,
+        )
+
+
+def init_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
     """Create (or repair) the workspace skeleton for *session_id*.
 
     This function is **idempotent**:
@@ -122,6 +225,11 @@ def init_workspace(session_id: str) -> Path:
     # Copy template assets from project root (only on first init).
     _copy_template_assets(workspace)
 
+    # Keep per-thread Bash sandbox settings current. The sandbox block depends
+    # on this workspace's resolved path, so it cannot live in the project
+    # template unchanged.
+    sync_workspace_sandbox_settings(workspace, enabled=sandbox_enabled)
+
     # Ensure .claude/skills/ exists so symlink sync has a target directory.
     (workspace / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
 
@@ -136,7 +244,7 @@ def init_workspace(session_id: str) -> Path:
     return workspace
 
 
-def get_or_create_workspace(session_id: str) -> Path:
+def get_or_create_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
     """Return the workspace path for *session_id*, creating it if needed.
 
     This is the primary entry point for the service layer.  It calls
@@ -148,7 +256,7 @@ def get_or_create_workspace(session_id: str) -> Path:
     """
     if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
         raise ValueError(f"Invalid session_id: {session_id!r}")
-    return init_workspace(session_id)
+    return init_workspace(session_id, sandbox_enabled=sandbox_enabled)
 
 
 # ---------------------------------------------------------------------------

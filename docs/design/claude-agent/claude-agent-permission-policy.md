@@ -3,7 +3,12 @@
 > [Pos] permission-policy-doc in `docs/design/claude-agent`
 > [Sync] 2026-06-09: initial standalone policy extracted from runner implementation and product rule: query-like tools are low-sensitivity; execution/write/interactive tools are high-sensitivity unless explicitly listed.
 > [Sync] 2026-06-09: implementation note added for hook payload normalization (`tool_name`/`toolName`, `tool_input`/`toolInput`) and auto-mode retention of `Skill` in effective `allowed_tools`.
-> [Sync] 2026-06-09: Settings-controlled `im_full_access_enabled` added; when enabled, every exposed tool receives explicit PreToolUse allow after `.editor/` virtual-index redirects.
+> [Sync] 2026-06-09: Settings-controlled `im_full_access_enabled` added; when enabled, exposed non-answer-form tools receive explicit PreToolUse allow after `.editor/` virtual-index redirects.
+> [Sync] 2026-06-13: clarify separation from Claude Code Bash sandbox; per-thread
+> workspace filesystem confinement is configured through `.claude/settings.json`,
+> not by parsing shell paths in `PreToolUse`.
+> [Sync] 2026-06-13: full-access mode now excludes AskUserQuestion-style tools;
+> they still use frontend confirmation so answers can be collected.
 
 # Claude-Agent Permission Policy
 
@@ -25,7 +30,14 @@ It describes the product policy, not Claude Code's internal classifier.
 | `manual` | All non-special tools go through frontend confirmation. `.editor/` virtual-index `Read` redirects still run because they only replace placeholder reads with a safe tempfile snapshot. |
 | `none` | No tools are exposed; auto allow rules do not apply. |
 
-When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
+When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`). Those tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
+
+Settings `system_config.workspace_enabled=true` additionally enables the
+per-thread Claude Code Bash sandbox described in
+[`claude-agent-workspace-sandbox.md`](./claude-agent-workspace-sandbox.md).
+That sandbox is a runtime filesystem boundary for Bash and child
+processes. It is deliberately not implemented as a shell path parser in
+`_pre_tool_use_hook`.
 
 ## 3. Low-Sensitivity Tools
 
@@ -94,11 +106,15 @@ HookJSONOutput(
 `agent_runner.py::_pre_tool_use_hook` applies decisions in this order:
 
 1. `.editor/` virtual-index `Read` redirect, all modes.
-2. If `im_full_access_enabled` is true and tools are exposed: explicit allow.
+2. If `im_full_access_enabled` is true, tools are exposed, and the tool is not an answer-form tool: explicit allow.
 3. In `auto` only: workspace `files/` built-in file permission.
 4. In `auto` only: explicit low-sensitivity tool allow.
 5. Frontend confirmation callback.
 6. Deny by default when confirmation is required but unavailable.
+
+Bash sandboxing is not a step in this order. Claude Code loads the sandbox
+settings from the current thread workspace and enforces them when a Bash command
+actually runs.
 
 ## 7. Frontend Confirmation
 
@@ -109,6 +125,7 @@ Approval returns explicit `permissionDecision:"allow"`.
 Rejection returns explicit `permissionDecision:"deny"` with the user-visible reason.
 
 AskUserQuestion-style tools additionally merge frontend `answers` into `updatedInput`.
+This remains true in full-access mode.
 
 ## 8. Matrix
 
@@ -122,6 +139,7 @@ AskUserQuestion-style tools additionally merge frontend `answers` into `updatedI
 | `mcp__editor__switch_editor` | Allow | Confirm | Not exposed |
 | Editor write MCP tools | Confirm | Confirm | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` | Confirm with form | Confirm with form | Not exposed |
+| `AskUserQuestion` / `mcp__user__ask_user` with full access | Confirm with form | Confirm with form | Not exposed |
 | Read-only Bash subset | Allow | Confirm | Not exposed |
 | Complex or mutating Bash | Confirm | Confirm | Not exposed |
 | Unknown tool | Confirm | Confirm | Not exposed |

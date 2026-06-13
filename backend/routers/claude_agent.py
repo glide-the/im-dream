@@ -13,6 +13,9 @@
 #                    endpoint returning {running, lifecycle, turn_count} via
 #                    claude_agent_thread_factory.session_snapshot().
 # [Sync] 2026-06-09: SSE reconnect — GET /threads/{id}/stream; POST body reconnect=true.
+# [Sync] 2026-06-13: initialize attachment workspaces with Settings-backed
+#                    workspace sandbox mode so per-thread .claude/settings.json
+#                    is correct before Claude Code starts.
 
 import base64
 import logging
@@ -165,7 +168,11 @@ async def claude_agent_stream(
     attachment_payloads: list[AttachmentPayload] = []
     if body.attachments:
         try:
-            workspace_path = get_or_create_workspace(thread_id)
+            system_config = database.get_system_config(user_id)
+            workspace_path = get_or_create_workspace(
+                thread_id,
+                sandbox_enabled=bool(system_config.get("workspace_enabled", True)),
+            )
         except Exception as exc:
             raise HTTPException(status_code=500, detail="Failed to initialize workspace") from exc
 

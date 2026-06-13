@@ -2,6 +2,9 @@
 
 > **迁移来源**: `glide-the/claude-agent-next-kit → docs/design/workspace-filesystem.md`
 > **适配说明**: 从 Next.js / TypeScript 迁移到 Python / FastAPI 架构。
+> **[Sync] 2026-06-13**: Workspace Mode 现在会在每个 thread 的
+> `.claude/settings.json` 写入 Claude Code `sandbox` 配置；Bash 目录隔离由
+> Claude Code 原生 sandbox 执行，PreToolUse 不解析复杂 shell 语法。
 
 ## 1. 概述
 
@@ -73,6 +76,20 @@ Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会�
 
 从项目根目录的 `.claude/` 同步，包含 `settings.json`、`index.json`、`commands/` 等。
 每次 `init_workspace` 调用时刷新（`skills/` 子目录除外，由软链接机制维护）。
+
+`init_workspace()` 会在复制模板后合并当前 thread 专属的
+`sandbox` 配置到 `{workspace}/.claude/settings.json`。当 Settings 的
+`workspace_enabled=true` 时，Claude Code Bash sandbox 被启用：
+
+- `sandbox.enabled=true`
+- `sandbox.failIfUnavailable=true`
+- `sandbox.autoAllowBashIfSandboxed=true`
+- `sandbox.allowUnsandboxedCommands=false`
+- `sandbox.filesystem.denyRead` 覆盖共享 `{AGENT_CWD}`、项目根与常见凭证目录
+- `sandbox.filesystem.allowRead/allowWrite` 只包含当前 `{AGENT_CWD}/{sessionId}`
+
+这层只约束 Bash 及其子进程。内置 `Read` / `Write` / `Edit` / `Grep`
+等非 Bash 工具仍由 Claude Agent 的 PreToolUse 权限策略和前端确认流控制。
 
 ### 3.5 `.mcp.json` — MCP 配置
 

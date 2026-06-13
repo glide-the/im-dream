@@ -59,6 +59,11 @@
 #                    workspace file interface before agent analysis starts.
 # [Sync] 2026-06-09: read system_config.im_full_access_enabled and pass it to
 #                    AgentRunOptions so Settings can enable full-access tool approval.
+# [Sync] 2026-06-13: read workspace_enabled before cwd resolution and force
+#                    Claude Code cwd to the server-owned thread workspace whose
+#                    .claude/settings.json carries the sandbox block.
+# [Sync] 2026-06-13: remove assemble_context local database import that shadowed
+#                    module-level _db before system_config lookup.
 # [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
 #                    before inference), _persist_assistant_turn (called on success),
 #                    and _persist_partial_assistant (called on CancelledError/error).
@@ -309,11 +314,42 @@ class ClaudeAgentService:
                 "Phase 1: reusing cached system_prompt for session_id=%s", state.session_id
             )
 
-        cwd = request.cwd or state.cwd
-        if not cwd:
-            workspace_path = get_or_create_workspace(state.session_id)
-            cwd = str(workspace_path)
-            state.with_cwd(cwd)
+        # Load user-configured agent settings from system config before cwd
+        # resolution so the workspace sandbox can track Settings workspace mode.
+        sys_cfg: dict[str, Any] = {}
+        user_env_vars: dict[str, str] = {}
+        im_full_access_enabled = False
+        workspace_sandbox_enabled = True
+        try:
+            sys_cfg = _db.get_system_config(int(request.user_id))
+            raw_env = sys_cfg.get("env_vars") or {}
+            if isinstance(raw_env, dict):
+                user_env_vars = {
+                    str(k).strip(): str(v)
+                    for k, v in raw_env.items()
+                    if str(k).strip() and v is not None
+                }
+            im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
+            workspace_sandbox_enabled = bool(sys_cfg.get("workspace_enabled", True))
+        except Exception as e:
+            logger.warning(
+                "Failed to load user agent settings from system_config; skipping. Error: %s",
+                e,
+            )
+
+        workspace_path = get_or_create_workspace(
+            state.session_id,
+            sandbox_enabled=workspace_sandbox_enabled,
+        )
+        cwd = str(workspace_path)
+        if request.cwd and os.path.abspath(request.cwd) != os.path.abspath(cwd):
+            logger.warning(
+                "Ignoring client-provided Claude Agent cwd outside the "
+                "server-owned thread workspace. requested=%s resolved=%s",
+                request.cwd,
+                cwd,
+            )
+        state.with_cwd(cwd)
 
         # ---------------------------------------------------------------
         # Resolve resume: load existing chat_thread to get claude_session_id.
@@ -333,7 +369,6 @@ class ClaudeAgentService:
             get_projects_root,
             locate_session_file,
         )
-        import database as _db
 
         existing_session: Optional[dict] = None
         try:
@@ -404,19 +439,6 @@ class ClaudeAgentService:
             editor_session_id=editor_session_id,
             voice_system_prompt=request.system_prompt or None,
         )
-
-        # Load user-configured agent settings from system config.
-        sys_cfg: dict[str, Any] = {}
-        user_env_vars: dict[str, str] = {}
-        im_full_access_enabled = False
-        try:
-            sys_cfg = _db.get_system_config(int(request.user_id))
-            raw_env = sys_cfg.get("env_vars") or {}
-            if isinstance(raw_env, dict):
-                user_env_vars = {str(k).strip(): str(v) for k, v in raw_env.items() if str(k).strip() and v is not None}
-            im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
-        except Exception:
-            logger.warning("Failed to load user agent settings from system_config; skipping.")
 
         run_options = AgentRunOptions(
             thread_id=thread_id_for_agent,

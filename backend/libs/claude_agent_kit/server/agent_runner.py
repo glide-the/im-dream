@@ -65,8 +65,11 @@
 #                    snake_case and camelCase shapes so inputs like
 #                    {"toolName": "Skill"} still hit the low-sensitivity allow path.
 # [Sync] 2026-06-09: add Settings-controlled IM full-access mode: after safe
-#                    .editor/ redirects, every exposed tool gets explicit
+#                    .editor/ redirects, exposed tools can receive explicit
 #                    PreToolUse permissionDecision:"allow".
+# [Sync] 2026-06-13: full-access mode keeps AskUserQuestion-style tools on the
+#                    frontend confirmation path so user answers can be collected
+#                    and merged into updatedInput.
 
 """Claude Agent Runner.
 
@@ -250,6 +253,10 @@ _ALWAYS_CONFIRM_TOOL_NAMES: frozenset[str] = frozenset({
     "mcp__editor__delete_segment",
     "mcp__editor__insert_widget",
     "mcp__editor__reply_to_comment",
+})
+_ANSWER_FORM_TOOL_NAMES: frozenset[str] = frozenset({
+    "AskUserQuestion",
+    "mcp__user__ask_user",
 })
 _TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 _FALSE_ENV_VALUES = {"0", "false", "no", "off"}
@@ -1153,7 +1160,11 @@ class ClaudeAgentRunner:
             if redirect_result is not None:
                 return redirect_result
 
-            if opts.im_full_access_enabled and tool_choice != "none":
+            if (
+                opts.im_full_access_enabled
+                and tool_choice != "none"
+                and tool_name not in _ANSWER_FORM_TOOL_NAMES
+            ):
                 return _explicit_pre_tool_use_allow()
 
             if tool_choice == "auto":

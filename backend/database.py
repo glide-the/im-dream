@@ -1765,7 +1765,11 @@ def get_preferences(user_id: int):
         db.close()
 
 def get_system_config(user_id: int) -> dict:
-    """Get per-user system config (model, provider, system_prompt, workspace_enabled, theme, env_vars).
+    """Get per-user system config.
+
+    Known keys include model/provider/system_prompt, workspace_enabled
+    (file workspace + per-thread Bash sandbox), im_full_access_enabled,
+    theme, and env_vars.
 
     Returns an empty dict when no config has been saved yet.
     """

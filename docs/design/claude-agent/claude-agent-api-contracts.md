@@ -8,6 +8,7 @@
 > **[Sync] 2026-05-27**: `tool_choice` 字段新增 `"manual"` 合法值；当时 `tool-approval-request` 触发条件扩展为"manual 模式全部工具 **或** auto 模式下工具名属于 `_ALWAYS_CONFIRM_TOOL_NAMES`（`AskUserQuestion`、`mcp__user__ask_user`）"；新增 §4.6.4 auto+AskUserQuestion SSE 顺序；`PreToolUse` hook `hookSpecificOutput` 格式迁移至 CLI ≥2.1 规范（`hookEventName` + `permissionDecision` + `updatedInput`）；前端 `ChatMessageList` 新增 `toolChoice` prop 在 manual 模式下为非 AskUserQuestion 工具显示 Approve/Cancel UI。
 > **[Sync] 2026-06-07**: `tool-approval-request` 触发条件更新：auto 模式对当前 workspace `files/` 下的内置文件工具和低敏查询工具显式 allow；当时状态切换工具也进入前端确认侧路。该分类已被 2026-06-09 的 `switch_editor` 低敏策略取代。
 > **[Sync] 2026-06-09**: 权限策略抽取为 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)；`Skill` 与 `mcp__editor__switch_editor` 归入 auto 低敏显式 allow。
+> **[Sync] 2026-06-13**: Settings 完全访问模式仍会为 `AskUserQuestion` / `mcp__user__ask_user` 发送 `tool-approval-request`，以便前端显示问答表单并回传 answers。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -80,7 +81,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `thread_id` | string | — | 是（或 id） | 同上，兼容别名。 |
 | `message` | string / UIMessage | `""` | 是 | 用户本轮输入；可为纯字符串或含 `parts` 数组的 UIMessage 对象。 |
 | `resume` | bool | `false` | 否 | 是否复用已有 Claude session。 |
-| `tool_choice` | string | `"auto"` | 否 | 工具模式：`auto` / `manual` / `none`。`manual` = 所有工具都需前端 Approve/Cancel 确认；`auto` = workspace `files/` 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 自动 allow，高敏工具需前端确认；`none` = 禁用工具。前端通过 AIInputDock「逐步确认」开关发送 `manual`。|
+| `tool_choice` | string | `"auto"` | 否 | 工具模式：`auto` / `manual` / `none`。`manual` = 所有工具都需前端 Approve/Cancel 确认；`auto` = workspace `files/` 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 自动 allow，高敏工具需前端确认；`none` = 禁用工具。Settings 完全访问模式由后端配置控制，不改变请求字段；其仍保留 `AskUserQuestion` / `mcp__user__ask_user` 问答确认。前端通过 AIInputDock「逐步确认」开关发送 `manual`。|
 | `model` | string/null | `null` | 否 | 模型覆盖。 |
 | `max_turns` | integer | `100` | 否 | 本轮 agent 最大 turn 数（可由 `INK_AGENT_MAX_TURNS` 环境变量覆盖）。 |
 | `cwd` | string/null | `null` | 否 | agent 子进程工作目录；不传则由 thread_id 派生 workspace 目录。 |
@@ -148,7 +149,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `reasoning-end` | thinking 块结束 | `id` | 由 `content_block_stop`（流式）或 `thinking`（完整块）触发。 |
 | `tool-input-start` | 工具调用开始 | `toolCallId`, `toolName` | auto/manual 都会出现。 |
 | `tool-input-available` | 工具输入完整 | `toolCallId`, `toolName`, `input` | 紧跟 `tool-input-start`。 |
-| `tool-approval-request` | 工具等待确认 | `toolCallId`, `toolName`, `input` | 两种情况出现：① `tool_choice="manual"` 时所有工具；② `tool_choice="auto"` 时高敏工具（执行/写入/交互等）。workspace `files/` 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 不会触发该事件。前端 transport 将其转成同一 tool part 的 `toolMetadata.approvalRequested=true` 并显示 Approve/Cancel UI；用户操作后调用 `/api/claude-agent/tool-confirm`。**[2026-06-09]** |
+| `tool-approval-request` | 工具等待确认 | `toolCallId`, `toolName`, `input` | 三种情况出现：① `tool_choice="manual"` 时所有工具；② `tool_choice="auto"` 时高敏工具（执行/写入/交互等）；③ Settings 完全访问模式下的 `AskUserQuestion` / `mcp__user__ask_user` 问答表单。workspace `files/` 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 不会触发该事件。前端 transport 将其转成同一 tool part 的 `toolMetadata.approvalRequested=true` 并显示 Approve/Cancel 或问答表单 UI；用户操作后调用 `/api/claude-agent/tool-confirm`。**[2026-06-13]** |
 | `tool-output-available` | 工具结果返回 | `toolCallId`, `output`, `isError` | `isError=true` 时表示工具执行出错。 |
 | `message-final` | 流成功结束前 | `text`, `usage`, `sessionId` | 包含完整 assistant 文本和 token 用量。 |
 | `finish` | 流结束 | `finishReason` | 成功时为 `"stop"`，失败时为 `"error"`。 |
@@ -223,6 +224,11 @@ auto 模式下的高敏工具（例如复杂/写入型 `Bash`、`Write` outside 
 
 #### 4.6.4 auto 模式 — AskUserQuestion 工具需填答案 **[2026-05-27]**
 
+当 Settings「应如何批准 IM」为完全访问时，本节顺序仍适用。
+完全访问只跳过普通权限审批，不能跳过问答表单，因为 answers 必须经
+`POST /api/claude-agent/tool-confirm` 回传并合并到 PreToolUse
+`updatedInput`。
+
 ```text
 message-metadata(initial)
 text-*
@@ -271,7 +277,7 @@ data: {"type":"tool-output-available","toolCallId":"toolu_01","output":"file1.tx
 
 ```
 
-#### 4.7.4 AskUserQuestion 确认（auto 或 manual 模式均适用）**[2026-05-27]**
+#### 4.7.4 AskUserQuestion 确认（auto、manual 或完全访问模式均适用）**[2026-06-13]**
 
 ```text
 data: {"type":"tool-input-start","toolCallId":"call_abc","toolName":"AskUserQuestion"}
