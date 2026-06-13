@@ -5,6 +5,8 @@
 # [Sync] 2026-05-27: initial implementation — system config (model, theme, env_vars, etc.).
 # [Sync] 2026-06-09: accept im_full_access_enabled for Settings-controlled
 #                    Claude-agent full-access tool approval.
+# [Sync] 2026-06-13: workspace_enabled also controls per-thread Claude Code
+#                    Bash sandbox settings written into .claude/settings.json.
 
 """System configuration API.
 
@@ -18,9 +20,11 @@ The system config is a freeform dict stored per user.  Known fields:
   provider         : str  — LLM provider ("anthropic" | "openai")
   model            : str  — model name
   system_prompt    : str  — custom system prompt for the AI agent
-  workspace_enabled: bool — whether the workspace file sidebar is active
+  workspace_enabled: bool — whether the workspace file sidebar and per-thread
+                            Bash sandbox are active
   im_full_access_enabled: bool — whether Claude-agent PreToolUse approvals
-                            should allow every exposed tool automatically
+                            should allow exposed tools automatically except
+                            AskUserQuestion-style answer forms
   theme            : str  — UI theme ("light" | "dark" | "system")
   env_vars         : dict — user-supplied env vars forwarded to skills/MCP servers
                             as key→value string pairs

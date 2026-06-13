@@ -1,3 +1,32 @@
+// [Input] frontend/src/components/.folder.md (about-view node)
+// [Output] Static About page with project summary, team members, timeline, and repository links.
+// [Pos] about-view node
+// [Sync] 2026-06-13: add structured team member data and include glide-the as a contributor.
+
+type TeamMember = {
+  name: string;
+  role: string;
+  description: string;
+};
+
+const teamMembers: TeamMember[] = [
+  {
+    name: 'F2J',
+    role: 'Creator & Developer',
+    description: 'A solo developer exploring the intersection of AI, writing tools, and reflective thinking.'
+  },
+  {
+    name: 'Sage',
+    role: 'Creator & Designer',
+    description: 'A designer with a keen eye for aesthetics and user experience, bringing thoughtful design to the intersection of AI and reflective writing.'
+  },
+  {
+    name: 'glide-the',
+    role: 'Contributor',
+    description: "Contributes to Ink & Memory's development and product iteration."
+  }
+];
+
 export default function AboutView() {
   return (
     <div style={{
@@ -82,78 +111,46 @@ export default function AboutView() {
             The Team
           </h2>
 
-          {/* F2J Card */}
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.5)',
-            border: '1px solid var(--color-border-paper)',
-            borderRadius: 8,
-            padding: 24,
-            marginBottom: 16
-          }}>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{
-                fontSize: 18,
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-                marginBottom: 4,
+          {teamMembers.map((member, index) => (
+            <div
+              key={member.name}
+              style={{
+                background: 'rgba(255, 255, 255, 0.5)',
+                border: '1px solid var(--color-border-paper)',
+                borderRadius: 8,
+                padding: 24,
+                marginBottom: index === teamMembers.length - 1 ? 0 : 16
+              }}
+            >
+              <div style={{ marginBottom: 12 }}>
+                <div style={{
+                  fontSize: 18,
+                  fontWeight: 600,
+                  color: 'var(--color-text-primary)',
+                  marginBottom: 4,
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}>
+                  {member.name}
+                </div>
+                <div style={{
+                  fontSize: 14,
+                  color: 'var(--color-text-secondary)',
+                  fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+                }}>
+                  {member.role}
+                </div>
+              </div>
+              <p style={{
+                fontSize: 15,
+                color: '#555',
+                lineHeight: 1.6,
+                margin: 0,
                 fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
               }}>
-                F2J
-              </div>
-              <div style={{
-                fontSize: 14,
-                color: 'var(--color-text-secondary)',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-              }}>
-                Creator & Developer
-              </div>
+                {member.description}
+              </p>
             </div>
-            <p style={{
-              fontSize: 15,
-              color: '#555',
-              lineHeight: 1.6,
-              margin: 0,
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-            }}>
-              A solo developer exploring the intersection of AI, writing tools, and reflective thinking.
-            </p>
-          </div>
-
-          {/* Sage Card */}
-          <div style={{
-            background: 'rgba(255, 255, 255, 0.5)',
-            border: '1px solid var(--color-border-paper)',
-            borderRadius: 8,
-            padding: 24
-          }}>
-            <div style={{ marginBottom: 12 }}>
-              <div style={{
-                fontSize: 18,
-                fontWeight: 600,
-                color: 'var(--color-text-primary)',
-                marginBottom: 4,
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-              }}>
-                Sage
-              </div>
-              <div style={{
-                fontSize: 14,
-                color: 'var(--color-text-secondary)',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-              }}>
-                Creator & Designer
-              </div>
-            </div>
-            <p style={{
-              fontSize: 15,
-              color: '#555',
-              lineHeight: 1.6,
-              margin: 0,
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
-            }}>
-              A designer with a keen eye for aesthetics and user experience, bringing thoughtful design to the intersection of AI and reflective writing.
-            </p>
-          </div>
+          ))}
         </section>
 
         {/* Timeline Section */}

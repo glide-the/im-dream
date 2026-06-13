@@ -2,7 +2,14 @@
 
 > Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
 > **[Sync] 2026-05-27**: 新增 4.3.5 用户 API 配置区域（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 等按用户存储并注入 Claude SDK 子进程）；关联设计文档 [用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)。
-> **[Sync] 2026-06-09**: AI 模型配置新增「应如何批准 IM」操作开关；打开后保存 `system_config.im_full_access_enabled=true`，Claude-agent 对所有已暴露工具的 `PreToolUse` 返回显式 allow，Chat 输入区隐藏「逐步确认」并显示「完全访问」；同页切换通过前端事件实时同步，无需刷新。
+> **[Sync] 2026-06-09**: AI 模型配置新增「应如何批准 IM」操作开关；打开后保存 `system_config.im_full_access_enabled=true`，Claude-agent 对除问答表单外的已暴露工具的 `PreToolUse` 返回显式 allow，Chat 输入区隐藏「逐步确认」并显示「完全访问」；同页切换通过前端事件实时同步，无需刷新。
+> **[Sync] 2026-06-13**: 「工作区模式」开启后同时启用每个 thread
+> workspace 的 Claude Code Bash sandbox；后端写入
+> `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的 `sandbox` 配置。
+> **[Sync] 2026-06-13**: 「完全访问」不跳过 AskUserQuestion 类问答确认；
+> 该类工具仍显示前端确认窗口以收集用户答案。
+> **[Sync] 2026-06-14**: Workspace sandbox 的 Bash 读权限包含必要运行时依赖目录；
+> 项目源码目录不会因 runtime allowlist 被默认放行。
 
 ## 1. 文档范围
 
@@ -100,16 +107,25 @@ SettingsView（position: fixed，overflow: auto）
 - 开关激活：`background: color.action.link`，未激活：`background: color.disabled.bg`。
 - 过渡 `0.2s ease`。
 - 立即同步到 `/api/system-config`。
+- 开启后，后端在每个对话 thread workspace 的 `.claude/settings.json`
+  写入 `sandbox.enabled=true`、`failIfUnavailable=true`、
+  `autoAllowBashIfSandboxed=true`、`allowUnsandboxedCommands=false`，并将
+  Bash filesystem 写范围约束到当前 `{AGENT_CWD}/{thread_id}`。
+- Bash read policy 先 deny `/`，再 allow 当前 thread workspace 与必要只读运行时依赖目录（Python/Node/system libs/temp 等）；不默认放行项目源码根目录。
+- 关闭后，后端保留 settings 文件同步但写入 `sandbox.enabled=false`；
+  Bash 不再使用该工作区沙箱策略。
+- 该沙箱只约束 Claude Code `Bash` 工具及其子进程；非 Bash 工具仍由
+  Claude-agent 的权限策略和前端确认流控制。
 
 #### 4.3.5 应如何批准 IM / IM Approval Mode
 
 - flex 横向排列：左侧标题「应如何批准 IM」+ 描述说明，右侧操作切换按钮。
 - 开关文案固定显示「完全访问」。
-- 开启态：按钮使用 `color.text.primary` 背景、`color.bg.paper` 文案，表示所有已暴露工具调用由 IM 自动批准。
+- 开启态：按钮使用 `color.text.primary` 背景、`color.bg.paper` 文案，表示除问答表单外的已暴露工具调用由 IM 自动批准。
 - 关闭态：按钮使用 `color.disabled.bg` 背景、`color.text.secondary` 文案。
 - 立即同步到 `/api/system-config`，字段为 `im_full_access_enabled`。
 - 切换时必须立即广播同页配置变更，已打开的 Chat 输入区无需刷新即可更新显示。
-- 开启后，后端 Claude-agent runner 在 `PreToolUse` 中对所有已暴露工具返回：
+- 开启后，后端 Claude-agent runner 在 `PreToolUse` 中对除问答表单外的已暴露工具返回：
 
 ```python
 HookJSONOutput(
@@ -121,6 +137,9 @@ HookJSONOutput(
 ```
 
 - `tool_choice="none"` 仍不暴露工具；该开关只影响已经进入 `PreToolUse` 的工具调用审批。
+- `AskUserQuestion` / `mcp__user__ask_user` 仍需要显示前端确认窗口；
+  这些工具不是单纯权限审批，还需要用户填写/确认答案，并由后端把
+  `answers` 合并进 `updatedInput` 后再 allow。
 - Chat 页面输入区的工具调用模式不再显示「逐步确认」按钮，改为静态显示「完全访问」；关闭后恢复自动/逐步确认分段控件。
 
 #### 4.3.6 用户 API 配置 / User API Config
@@ -197,6 +216,9 @@ HookJSONOutput(
 
 - 页面挂载时调用 `GET /api/system-config` 加载当前配置。
 - Theme、Model、Workspace Mode 变更后立即调用 `PUT /api/system-config` 保存。
+- Workspace Mode 变更保存字段为 `workspace_enabled`；后端在下一次
+  Claude Agent turn 或附件 workspace 初始化时同步 thread-local
+  `.claude/settings.json` sandbox 配置。
 - IM Approval Mode 变更后立即调用 `PUT /api/system-config` 保存 `im_full_access_enabled`。
 - System Prompt 在用户点击"保存"后调用 `PUT /api/system-config`。
 - **用户 API 配置**在用户点击"保存"后调用 `PUT /api/system-config`，将三个 env key 作为 `env_vars` 字典传入。留空的字段通过传入空字符串或在前端过滤后不包含该 key 来实现删除（与服务端 `_sanitize_env_vars` 保持一致：空字符串 key 会被过滤；value 为空字符串则保留 key，建议前端在保存前将空值字段从 `env_vars` 中省略）。
@@ -227,7 +249,7 @@ Settings 页面通过以下入口访问：
 - 语言、展示选项、AI 模型配置、用户 API 配置、关于内容分区清晰，各自有标题说明。
 - `ANTHROPIC_AUTH_TOKEN` 输入框已保存的值以掩码形式展示，不反向暴露明文。
 - 用户 API 配置保存后，该用户的后续 Agent 会话使用用户配置的 API 密钥和端点（而非全局 `backend/.env`）。
-- 「应如何批准 IM」开启后，该用户后续 Agent 工具调用自动获得完全访问；Chat 输入区隐藏「逐步确认」并显示「完全访问」。
+- 「应如何批准 IM」开启后，该用户后续 Agent 普通工具调用自动获得完全访问；Chat 输入区隐藏「逐步确认」并显示「完全访问」；AskUserQuestion 类工具仍显示问答确认窗口。
 - 清空字段并保存后，该 key 从 `env_vars` 中移除，回退到服务器默认配置。
 
 ## 12. 前端实现备注

@@ -6,6 +6,10 @@
 // [Sync] 2026-06-09: emit same-tab IM full-access change events so Chat UI
 //                    updates without a page refresh.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config requests.
+// [Sync] 2026-06-13: clarify Workspace Mode as the frontend control for
+//                    per-thread Claude Code Bash sandbox settings.
+// [Sync] 2026-06-13: full-access copy clarifies AskUserQuestion forms still
+//                    require confirmation.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -332,7 +336,7 @@ export default function ModelConfigSection() {
             工作区模式 / Workspace Mode
           </p>
           <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-            对话时启用文件侧边栏上下文。
+            对话时启用文件侧边栏上下文，并为当前 thread 开启 Bash 沙箱。
           </p>
         </div>
         <button
@@ -373,7 +377,7 @@ export default function ModelConfigSection() {
             应如何批准 IM
           </p>
           <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
-            开启后，Claude-agent 的工具调用将自动获得完全访问权限。
+            开启后普通工具自动批准，问答表单仍需用户确认。
           </p>
         </div>
         <button

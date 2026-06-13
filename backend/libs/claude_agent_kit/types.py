@@ -6,7 +6,9 @@
 # [Sync] 2026-05-10: add include_runtime_context for specialized callers; pet chat uses the default SDK runtime block.
 # [Sync] 2026-05-10: add turn_runtime for app local time enrichment in SDK runtime_context.
 # [Sync] 2026-06-09: add im_full_access_enabled to allow Settings-controlled
-#                    explicit PreToolUse approval for every exposed tool.
+#                    explicit PreToolUse approval for exposed tools.
+# [Sync] 2026-06-13: im_full_access_enabled excludes AskUserQuestion-style tools
+#                    because they must collect frontend answers before allow.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -147,8 +149,9 @@ class AgentRunOptions:
     # Tool choice mode.
     tool_choice: ToolChoiceMode = "auto"
     # Settings-controlled full access mode. When true, the runner returns an
-    # explicit PreToolUse permissionDecision:"allow" for every exposed tool
-    # after safe virtual-index redirects have had a chance to rewrite inputs.
+    # explicit PreToolUse permissionDecision:"allow" for exposed tools after
+    # safe virtual-index redirects, except AskUserQuestion-style tools that
+    # must collect frontend answers first.
     im_full_access_enabled: bool = False
     # System prompt override.
     system_prompt: Optional[str] = None

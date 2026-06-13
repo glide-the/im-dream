@@ -3,6 +3,7 @@
 > 对话输入 Dock、发送行为、已发送消息与反馈状态的视觉和交互规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
 > **[Sync] 2026-06-09**: 当 Settings 中「应如何批准 IM」开启时，AIInputDock 隐藏「逐步确认」按钮，显示静态「完全访问」权限徽标，并按 auto 工具模式发送；Settings 切换通过同页事件实时同步到已打开的 Chat 输入区。
 > **[Sync] 2026-06-09**: 长对话上滑阅读历史时，AIInputDock 上方显示悬浮到底部箭头；按钮由 ChatPanel 根据消息滚动位置控制，不改变输入 Dock 内部布局。
+> **[Sync] 2026-06-13**: 完全访问模式下 AskUserQuestion 类工具仍显示前端问答表单；「完全访问」只隐藏全局逐步确认切换，不隐藏问题确认窗口。
 
 ## 1. 文档范围
 
@@ -73,8 +74,9 @@ ChatPanel
 - 当 Settings 的 `im_full_access_enabled` 开启时，不显示 `逐步确认` 按钮，也不显示可切换的分段控件。
 - 完全访问模式显示一个静态胶囊徽标，文本为「完全访问」。
 - Settings 中切换该模式时，当前页面已挂载的 AIInputDock 必须即时更新，不要求刷新页面或重新进入 Chat。
-- 「完全访问」徽标使用 `color.text.primary` 背景、`color.bg.paper` 文案，表达当前会话工具调用由 IM 自动批准。
+- 「完全访问」徽标使用 `color.text.primary` 背景、`color.bg.paper` 文案，表达当前会话普通工具调用由 IM 自动批准。
 - 完全访问模式下发送请求仍使用 `toolChoice='auto'`，实际审批由后端 Settings 控制的 PreToolUse 策略完成。
+- 完全访问模式不隐藏 `AskUserQuestion` / `mcp__user__ask_user` 的问题表单；这些工具仍要求用户提交答案后才执行。
 
 ### 5.4 SendButton
 

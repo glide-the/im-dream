@@ -1,17 +1,22 @@
-# [Input] Consume ClaudeAgentService callback factories and ToolEventPayload.
-# [Output] Verify service-level SSE event mapping for Claude Agent turns.
-# [Pos] service test node in backend/tests
-# [Sync] 2026-06-13: cover tool_input_delta -> tool-input-delta SSE forwarding
-#                    for built-in Write terminal previews.
+# [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState,
+#         service callback factories, and ToolEventPayload.
+# [Output] Verify context assembly maps system_config into AgentRunOptions and
+#          service-level SSE event mapping remains correct.
+# [Pos] test node in backend/tests
+# [Sync] 2026-06-14: combine system_config assembly coverage with tool_input_delta
+#                    -> tool-input-delta SSE forwarding coverage.
 
-"""Tests for ClaudeAgentService SSE event mapping."""
+"""Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
 
 import asyncio
 import json
 import sys
+import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
@@ -19,9 +24,91 @@ if str(ROOT) not in sys.path:
 
 import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before service import
 
-from claude_agent.service import ClaudeAgentService, _TurnContext
+import claude_agent.service as service_module
+from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService, _TurnContext
+from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from libs.claude_agent_kit.types import ToolEventPayload
+
+
+class _FakeContextBuilder:
+    async def build_system_prompt(self, user_id: str) -> str:
+        return f"system-prompt:{user_id}"
+
+    def build_user_message(self, message_parts: list | None, **kwargs: Any) -> list[dict[str, Any]]:
+        return [{"type": "text", "text": "assembled"}]
+
+
+class _FakeBus:
+    async def publish(self, frame: str | None) -> None:
+        pass
+
+
+class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
+    async def test_system_config_is_loaded_before_resume_db_lookup(self):
+        service = ClaudeAgentService(context_builder=_FakeContextBuilder())
+        state = AgentRunState(session_id="thread_service_config")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_service_config",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / "thread_service_config"
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={
+                        "im_full_access_enabled": True,
+                        "workspace_enabled": False,
+                        "env_vars": {
+                            "ANTHROPIC_AUTH_TOKEN": "user-token",
+                            "EMPTY": None,
+                            "  CUSTOM_KEY  ": "custom-value",
+                        },
+                    },
+                ) as get_system_config,
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value=None,
+                ) as get_chat_thread,
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ) as get_or_create_workspace,
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        get_system_config.assert_called_once_with(7)
+        get_chat_thread.assert_called_once_with("thread_service_config", 7)
+        get_or_create_workspace.assert_called_once_with(
+            "thread_service_config",
+            sandbox_enabled=False,
+        )
+
+        self.assertTrue(execution.run_options.im_full_access_enabled)
+        self.assertEqual(str(workspace_path), execution.run_options.cwd)
+        self.assertEqual(
+            execution.run_options.mcp_env,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "user-token",
+                "CUSTOM_KEY": "custom-value",
+                "INK_AGENT_USER_ID": "7",
+            },
+        )
+        self.assertEqual(
+            execution.run_options.user_sdk_env["ANTHROPIC_AUTH_TOKEN"],
+            "user-token",
+        )
 
 
 def _run(coro):

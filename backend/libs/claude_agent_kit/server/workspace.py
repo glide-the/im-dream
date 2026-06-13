@@ -12,6 +12,12 @@
 # [Sync] 2026-06-06: memory/ remains outside init_workspace and is initialised
 #                    only by the workspace file interface endpoint using the
 #                    partition (voice) config.
+# [Sync] 2026-06-13: sync per-thread Claude Code sandbox settings into
+#                    {workspace}/.claude/settings.json so Bash is OS-confined
+#                    to the current thread workspace when workspace mode is on.
+# [Sync] 2026-06-14: add read-only runtime dependency allowlist so sandboxed
+#                    Bash can execute Python/Node/system tools without exposing
+#                    project source directories outside the thread workspace.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -40,9 +46,11 @@ failure the original ``skills/`` content is preserved unchanged.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import shutil
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -61,6 +69,7 @@ WORKSPACE_SUBDIRS: tuple[str, ...] = ("files", "logs", "skills")
 ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(
     {".zip", ".skill", ".tar.gz", ".tgz", ".tar"}
 )
+SANDBOX_EXTRA_ALLOW_READ_ENV = "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -70,8 +79,130 @@ _PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
 
 
 def _project_root() -> Path:
-    """Return the repository root (three levels above this file)."""
+    """Return the repository root used for workspace template assets."""
     return _PROJECT_ROOT
+
+
+def _append_existing_sandbox_read_path(paths: list[Path], raw_path: str | os.PathLike[str]) -> None:
+    """Append *raw_path* when it exists and is not already present."""
+
+    if not raw_path:
+        return
+    try:
+        path = Path(raw_path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return
+    if not path.exists() or path in paths:
+        return
+    paths.append(path)
+
+
+def _runtime_root_for_executable(raw_path: Optional[str]) -> Optional[Path]:
+    """Return the narrow read root needed to execute *raw_path* inside sandbox."""
+
+    if not raw_path:
+        return None
+    try:
+        executable = Path(raw_path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not executable.exists():
+        return None
+
+    parent = executable.parent
+    if parent.name == "bin":
+        grandparent = parent.parent
+        # Version-managed runtimes keep libraries beside bin/.
+        if any(part in {".pyenv", ".nvm", ".bun", ".asdf", "node", "versions"} for part in grandparent.parts):
+            return grandparent
+        # Homebrew and language installs usually need lib/ or Cellar/ beside bin/.
+        if str(grandparent).startswith(("/opt/homebrew", "/usr/local", "/home/linuxbrew")):
+            return grandparent
+
+    return parent
+
+
+def _sandbox_runtime_read_allow_paths() -> list[str]:
+    """Return read-only runtime dependency paths for Bash sandbox execution.
+
+    The thread workspace remains the only product data root. These paths are
+    deliberately limited to interpreters, system libraries, package-manager
+    runtime roots, and temp directories needed to start common developer tools.
+    Additional deployment-specific runtime paths can be supplied through
+    ``INK_AGENT_SANDBOX_EXTRA_ALLOW_READ`` using ``os.pathsep`` separators.
+    """
+
+    paths: list[Path] = []
+    home = Path.home()
+
+    for raw_path in (
+        tempfile.gettempdir(),
+        os.getenv("TMPDIR", ""),
+        "/tmp",
+        "/private/tmp",
+        home / ".pyenv",
+        home / ".nvm" / "versions" / "node",
+        home / ".bun",
+        home / ".local" / "bin",
+        home / "miniconda3",
+        "/opt/miniconda3",
+        "/opt/conda",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/opt",
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar",
+        "/home/linuxbrew/.linuxbrew/bin",
+        "/home/linuxbrew/.linuxbrew/opt",
+        "/home/linuxbrew/.linuxbrew/lib",
+        "/home/linuxbrew/.linuxbrew/Cellar",
+        "/bin",
+        "/usr/bin",
+        "/usr/local/bin",
+        "/usr/lib",
+        "/usr/lib64",
+        "/lib",
+        "/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+        "/etc/ssl",
+        "/System/Library/OpenSSL",
+        "/System/Library/Frameworks",
+        "/Library/Apple",
+        "/usr/local/go",
+        "/usr/lib/go",
+        "/usr/share/go",
+        "/usr/lib/jvm",
+        "/opt/homebrew/opt/openjdk@17",
+    ):
+        _append_existing_sandbox_read_path(paths, raw_path)
+
+    for executable in (
+        sys.executable,
+        *(shutil.which(name) for name in (
+            "python3",
+            "python",
+            "node",
+            "npm",
+            "npx",
+            "bash",
+            "sh",
+            "rg",
+            "grep",
+            "git",
+            "go",
+            "java",
+            "make",
+            "gcc",
+            "g++",
+        )),
+    ):
+        runtime_root = _runtime_root_for_executable(executable)
+        if runtime_root is not None:
+            _append_existing_sandbox_read_path(paths, runtime_root)
+
+    for raw_path in os.getenv(SANDBOX_EXTRA_ALLOW_READ_ENV, "").split(os.pathsep):
+        _append_existing_sandbox_read_path(paths, raw_path.strip())
+
+    return [str(path) for path in paths]
 
 
 # ---------------------------------------------------------------------------
@@ -102,7 +233,102 @@ def get_workspace_root() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def init_workspace(session_id: str) -> Path:
+def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
+    """Return Claude Code sandbox settings for a single thread workspace.
+
+    ``AGENT_CWD`` points to the parent workspace root.  The actual isolation
+    target for a conversation is the resolved ``workspace`` path
+    (``{AGENT_CWD}/{thread_id}``).
+    """
+
+    workspace_abs = workspace.resolve(strict=False)
+    enabled = bool(enabled)
+
+    allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
+
+    return {
+        "enabled": enabled,
+        "failIfUnavailable": enabled,
+        "autoAllowBashIfSandboxed": enabled,
+        "allowUnsandboxedCommands": not enabled,
+        "filesystem": {
+            # sandbox-runtime read policy is deny-then-allow.  The product
+            # goal is stricter than Claude Code's default (which can read most
+            # of the host): deny the filesystem root and re-allow only this
+            # thread cwd.  This prevents sibling workspaces and unrelated host
+            # paths from being readable by Bash subprocesses.
+            "denyRead": ["/"],
+            "allowRead": allow_read,
+            # Write policy is allow-only; keep Bash writes inside the thread
+            # workspace and deny config/index internals explicitly.
+            "allowWrite": [str(workspace_abs)],
+            "denyWrite": [
+                str(workspace_abs / ".claude"),
+                str(workspace_abs / ".editor"),
+                str(workspace_abs / ".mcp.json"),
+            ],
+        },
+    }
+
+
+def sync_workspace_sandbox_settings(workspace: Path, *, enabled: bool = True) -> None:
+    """Merge per-thread sandbox settings into ``{workspace}/.claude/settings.json``.
+
+    Existing non-sandbox settings copied from the project template are preserved.
+    The ``sandbox`` block is owned by workspace initialisation because it is
+    derived from the resolved per-thread workspace path.
+    """
+
+    try:
+        workspace_root_abs = get_workspace_root().resolve(strict=False)
+        workspace_abs = workspace.resolve(strict=False)
+        if not workspace_abs.is_relative_to(workspace_root_abs):
+            logger.warning(
+                "sync_workspace_sandbox_settings: workspace %r is outside "
+                "workspace root %r; aborting.",
+                workspace_abs,
+                workspace_root_abs,
+            )
+            return
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "sync_workspace_sandbox_settings: could not resolve workspace path; aborting.",
+            exc_info=True,
+        )
+        return
+
+    claude_dir = workspace_abs / ".claude"
+    settings_path = claude_dir / "settings.json"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+
+    settings: dict = {}
+    if settings_path.is_file():
+        try:
+            parsed = json.loads(settings_path.read_text(encoding="utf-8"))
+            if isinstance(parsed, dict):
+                settings = parsed
+        except Exception:  # noqa: BLE001
+            logger.warning(
+                "Could not parse %s; rewriting with template-compatible sandbox settings.",
+                settings_path,
+                exc_info=True,
+            )
+
+    settings["sandbox"] = _workspace_sandbox_config(workspace_abs, enabled)
+    try:
+        settings_path.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning(
+            "Failed to write sandbox settings to %s",
+            settings_path,
+            exc_info=True,
+        )
+
+
+def init_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
     """Create (or repair) the workspace skeleton for *session_id*.
 
     This function is **idempotent**:
@@ -122,6 +348,11 @@ def init_workspace(session_id: str) -> Path:
     # Copy template assets from project root (only on first init).
     _copy_template_assets(workspace)
 
+    # Keep per-thread Bash sandbox settings current. The sandbox block depends
+    # on this workspace's resolved path, so it cannot live in the project
+    # template unchanged.
+    sync_workspace_sandbox_settings(workspace, enabled=sandbox_enabled)
+
     # Ensure .claude/skills/ exists so symlink sync has a target directory.
     (workspace / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
 
@@ -136,7 +367,7 @@ def init_workspace(session_id: str) -> Path:
     return workspace
 
 
-def get_or_create_workspace(session_id: str) -> Path:
+def get_or_create_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
     """Return the workspace path for *session_id*, creating it if needed.
 
     This is the primary entry point for the service layer.  It calls
@@ -148,7 +379,7 @@ def get_or_create_workspace(session_id: str) -> Path:
     """
     if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
         raise ValueError(f"Invalid session_id: {session_id!r}")
-    return init_workspace(session_id)
+    return init_workspace(session_id, sandbox_enabled=sandbox_enabled)
 
 
 # ---------------------------------------------------------------------------

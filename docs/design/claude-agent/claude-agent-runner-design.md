@@ -1,7 +1,13 @@
 > **迁移来源**: Pawkeyland docs/app/design/ClaudeAgentRunner 模块设计.md — 路径已适配 Ink & Memory 工程规范。
 > **[Sync] 2026-06-07**: 补充 auto 模式敏感度分流策略：workspace `files/` 内置文件工具和明确低敏查询工具显式 allow；当时状态切换类工具也归入高敏确认，该分类已被 2026-06-09 的 `switch_editor` 低敏策略取代。
 > **[Sync] 2026-06-09**: 权限策略独立为 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)；`Skill` 和 `switch_editor` 归入低敏 auto allow。
-> **[Sync] 2026-06-09**: Settings `im_full_access_enabled` 接入 Runner；开启后在 `.editor/` 虚拟索引重定向之后，对所有已暴露工具返回显式 PreToolUse allow。
+> **[Sync] 2026-06-13**: Bash workspace confinement is delegated to Claude
+> Code's native `sandbox` settings in each thread `.claude/settings.json`;
+> Runner `PreToolUse` does not parse shell paths for sandboxing.
+> **[Sync] 2026-06-13**: Settings full-access mode keeps
+> `AskUserQuestion` / `mcp__user__ask_user` on the frontend confirmation path
+> so answer forms can populate `updatedInput`.
+> **[Sync] 2026-06-09**: Settings `im_full_access_enabled` 接入 Runner；开启后在 `.editor/` 虚拟索引重定向之后，对除问答表单外的已暴露工具返回显式 PreToolUse allow。
 
 # ClaudeAgentRunner 模块设计
 
@@ -152,7 +158,7 @@ sequenceDiagram
 ## 5. 工具确认流程（PreToolUse hook）
 
 Claude Code 的 `allowed_tools` 是预批准规则，不是单纯的工具可见性列表。
-Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。先处理 `.editor/` 虚拟索引读取重定向；如果 Settings `im_full_access_enabled=true`，则对所有已暴露工具返回显式 `permissionDecision:"allow"`。否则 `auto` 模式先对当前 workspace `files/` 下的内置文件工具返回显式 allow；随后对明确的低敏工具（内置 Read/Glob/Grep/LS/TodoRead/WebFetch/WebSearch、会话查询、memory/necklace 只读查询、`Skill`、`switch_editor` 等）返回显式 allow；剩余执行/写入/交互工具进入 `on_tool_confirmation_request` 侧路。用户批准后，Runner 返回显式 allow，避免 hook fall-through 与 Claude Code 文件权限层语义不一致。完整矩阵见 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
+Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。先处理 `.editor/` 虚拟索引读取重定向；如果 Settings `im_full_access_enabled=true`，则对除 `AskUserQuestion` / `mcp__user__ask_user` 外的已暴露工具返回显式 `permissionDecision:"allow"`。问答工具必须继续进入 `on_tool_confirmation_request`，因为前端确认窗口负责收集用户答案并写回 `updatedInput`。否则 `auto` 模式先对当前 workspace `files/` 下的内置文件工具返回显式 allow；随后对明确的低敏工具（内置 Read/Glob/Grep/LS/TodoRead/WebFetch/WebSearch、会话查询、memory/necklace 只读查询、`Skill`、`switch_editor` 等）返回显式 allow；剩余执行/写入/交互工具进入 `on_tool_confirmation_request` 侧路。用户批准后，Runner 返回显式 allow，避免 hook fall-through 与 Claude Code 文件权限层语义不一致。完整矩阵见 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
@@ -164,7 +170,14 @@ Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_u
 | `manual` | `DEFAULT_ALLOWED_TOOLS` / request override | 等待 `on_tool_confirmation_request` | 调试或敏感工具确认侧路 |
 | `none` | `[]` + `extra_args["tools"] = ""` | 不暴露工具 | 通过 Claude CLI `--tools ""` 禁用可用工具 |
 
-当 `im_full_access_enabled=true` 且 `tool_choice!="none"` 时，`PreToolUse` 在 `.editor/` 安全重定向之后跳过上表矩阵并直接返回显式 allow；`tool_choice="none"` 仍不暴露工具。
+当 `im_full_access_enabled=true` 且 `tool_choice!="none"` 时，`PreToolUse` 在 `.editor/` 安全重定向之后跳过上表矩阵并直接返回显式 allow；`AskUserQuestion` / `mcp__user__ask_user` 是例外，仍进入前端确认窗口收集答案；`tool_choice="none"` 仍不暴露工具。
+
+Bash 的工作区隔离不在 Runner 中实现。Service/Workspace 层会在每个
+thread 的 `{cwd}/.claude/settings.json` 写入 Claude Code `sandbox` 配置；
+Runner 只负责把 `ClaudeCodeOptions.cwd` 指向该 thread workspace。复杂
+shell 语法进入 Claude Code Bash 后，由原生 sandbox 在运行时执行
+filesystem 边界。设计细节见
+[`claude-agent-workspace-sandbox.md`](./claude-agent-workspace-sandbox.md)。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 
