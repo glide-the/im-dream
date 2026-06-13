@@ -72,6 +72,9 @@
 #                    when the SSE stream is cancelled mid-flight.
 # [Sync] 2026-06-09: EventBus — assemble_context accepts bus param; BusProxyQueue
 #                    adapts IEventBus.publish to _TurnContext.queue.put.
+# [Sync] 2026-06-13: forward runner tool_input_delta events as SSE tool-input-delta
+#                    frames so frontend can render built-in Write tool terminal
+#                    previews while input_json_delta chunks stream.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -86,6 +89,7 @@ SSE event schema (aligned with Pawkeyland)::
     data: {"type": "text-delta",     "id": "...", "delta": "..."}
     data: {"type": "text-end",       "id": "..."}
     data: {"type": "tool-input-start",     "toolCallId": "...", "toolName": "..."}
+    data: {"type": "tool-input-delta",     "toolCallId": "...", "toolName": "...", "delta": "..."}
     data: {"type": "tool-input-available", "toolCallId": "...", "toolName": "...", "input": {...}}
     data: {"type": "tool-output-available","toolCallId": "...", "output": ..., "isError": false}
     data: {"type": "tool-approval-request","toolCallId": "...", "toolName": "...", "input": {...}}
@@ -758,10 +762,12 @@ class ClaudeAgentService:
           ``content_block_stop``           → reasoning-end
           ``thinking`` (atomic)            → reasoning-start, reasoning-delta, reasoning-end
           ``tool_use`` / ``tool_use_start``→ tool-input-available (when input present)
+          ``tool_input_delta``             → tool-input-delta (live preview only)
           ``tool_input_available``         → tool-input-available
           ``tool_result``                  → tool-output-available
 
-        Not collected: tool-input-start (no data payload), tool-approval-request.
+        Not collected: tool-input-start (no data payload), tool-input-delta
+        (live preview only), tool-approval-request.
         Ignored entirely: result, message_*, tool_progress, tool_use_summary, etc.
 
         After a successful ``tool_result`` for any tool in ``_EDITOR_WRITE_TOOL_NAMES``,
@@ -845,6 +851,17 @@ class ClaudeAgentService:
                     evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}
                     await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}))
                     turn_ctx.collected_parts.append(evt)
+                return
+
+            # --- tool_input_delta: streamed tool JSON input for live previews ---
+            if event_type == "tool_input_delta" and tool_call_id and tool_name:
+                turn_ctx.tool_name_by_id[tool_call_id] = tool_name
+                if tool_call_id not in turn_ctx.registered_tool_call_ids:
+                    turn_ctx.registered_tool_call_ids.add(tool_call_id)
+                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+                delta_text = "" if payload.output is None else str(payload.output)
+                if delta_text:
+                    await queue.put(_sse("tool-input-delta", {"toolCallId": tool_call_id, "toolName": tool_name, "delta": delta_text}))
                 return
 
             # --- tool_input_available: complete streamed JSON input ready ---

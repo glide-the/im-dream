@@ -6,6 +6,7 @@
 > **[Sync] 2026-05-25 v1**: 更新 `_TurnContext` 类图补充持久化字段；更新 `execute_session` 描述。  
 > **[Sync] 2026-05-25 v2**: 重大重构 — `collected_parts` 改为收集**原始 SSE 事件报文**（而非 UIMessage parts）；移除 `text_started` / `full_text_accumulator` / `tool_inv_by_id` 等状态字段；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做一次线性转换。
 > **[Sync] 2026-05-28**: 校准 `assemble_context` 边界：该阶段构建 `system_prompt` / `user_message` / `AgentRunOptions` / `_TurnContext`，但不发射 `message-metadata`、不创建 streaming callbacks；这些由 `execute_session` 执行。详细上下文接入规则见 [`claude-agent-context-assembly.md`](./claude-agent-context-assembly.md)。
+> **[Sync] 2026-06-13**: `_make_tool_event_cb()` 处理 runner 已有 `tool_input_delta`，发射 `tool-input-delta` SSE 供前端在内置 `Write` 工具写文件时做终端式增量预览；完整方案见 [`write-tool-terminal-preview.md`](./write-tool-terminal-preview.md)。
 
 # ClaudeAgentService 模块设计
 
@@ -293,6 +294,7 @@ sequenceDiagram
 | `reasoning-delta` | thinking 内容增量 | `id`, `delta` |
 | `reasoning-end` | thinking 块结束（`content_block_stop` / `thinking` 触发） | `id` |
 | `tool-input-start` | 工具调用开始（`tool_use_start` / `tool_input_available` 触发） | `toolCallId`, `toolName` |
+| `tool-input-delta` | 工具输入 JSON 增量（`tool_input_delta` 触发） | `toolCallId`, `toolName`, `delta` |
 | `tool-input-available` | 工具输入完整（`tool_input_available` 触发） | `toolCallId`, `toolName`, `input` |
 | `tool-approval-request` | 交互工具等待确认（`tool_choice="manual"`） | `toolCallId`, `toolName`, `input` |
 | `tool-output-available` | 工具执行结果（`tool_result` 触发） | `toolCallId`, `output`, `isError` |
@@ -308,7 +310,7 @@ sequenceDiagram
 > - `tool-input-available`（含 input 数据）
 > - `tool-output-available`（含 output 和 isError）
 > 
-> 不收集：`tool-input-start`（无数据载荷）、`tool-approval-request`、`message-metadata`、`message-final`、`finish`、`error`。
+> 不收集：`tool-input-start`（无数据载荷）、`tool-input-delta`（仅 live preview，完整 input 由 `tool-input-available` 持久化）、`tool-approval-request`、`message-metadata`、`message-final`、`finish`、`error`。
 > 
 > `_persist_turn` 调用 `_sse_events_to_ui_parts(collected_parts)` 做一次线性转换，输出 UIMessage-compatible parts 写入 DB。
 >

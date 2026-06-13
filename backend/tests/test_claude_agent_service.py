@@ -1,12 +1,16 @@
-# [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState.
-# [Output] Verify service context assembly maps system_config into AgentRunOptions.
+# [Input] Consume ClaudeAgentService, ClaudeAgentRunRequest, AgentRunState,
+#         service callback factories, and ToolEventPayload.
+# [Output] Verify context assembly maps system_config into AgentRunOptions and
+#          service-level SSE event mapping remains correct.
 # [Pos] test node in backend/tests
-# [Sync] 2026-06-13: cover assemble_context system_config lookup so module-level
-#                    database alias is not shadowed by local imports.
+# [Sync] 2026-06-14: combine system_config assembly coverage with tool_input_delta
+#                    -> tool-input-delta SSE forwarding coverage.
 
-"""Tests for ClaudeAgentService context assembly."""
+"""Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
 
+import asyncio
+import json
 import sys
 import tempfile
 import unittest
@@ -21,8 +25,10 @@ if str(ROOT) not in sys.path:
 import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before service import
 
 import claude_agent.service as service_module
-from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
+from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService, _TurnContext
 from claude_agent.thread_pool import AgentRunState
+from claude_agent.tool_confirmation_store import ToolConfirmationStore
+from libs.claude_agent_kit.types import ToolEventPayload
 
 
 class _FakeContextBuilder:
@@ -103,6 +109,56 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             execution.run_options.user_sdk_env["ANTHROPIC_AUTH_TOKEN"],
             "user-token",
         )
+
+
+def _run(coro):
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+        asyncio.set_event_loop(None)
+
+
+def _parse_sse(frame: str) -> dict:
+    assert frame.startswith("data: ")
+    return json.loads(frame[len("data: "):].strip())
+
+
+class TestClaudeAgentServiceToolInputDelta(unittest.TestCase):
+    def test_tool_input_delta_emits_start_then_delta_without_collecting(self):
+        async def scenario():
+            queue: asyncio.Queue[str] = asyncio.Queue()
+            turn_ctx = _TurnContext(
+                queue=queue,
+                confirmation_store=ToolConfirmationStore(),
+            )
+            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx)
+
+            await callback(
+                ToolEventPayload(
+                    type="tool_input_delta",
+                    tool_name="Write",
+                    tool_call_id="call-write",
+                    output='{"file_path":"files/note.md"',
+                )
+            )
+
+            first = _parse_sse(queue.get_nowait())
+            second = _parse_sse(queue.get_nowait())
+
+            return first, second, turn_ctx
+
+        first, second, turn_ctx = _run(scenario())
+
+        self.assertEqual(first["type"], "tool-input-start")
+        self.assertEqual(first["toolCallId"], "call-write")
+        self.assertEqual(first["toolName"], "Write")
+        self.assertEqual(second["type"], "tool-input-delta")
+        self.assertEqual(second["toolCallId"], "call-write")
+        self.assertEqual(second["toolName"], "Write")
+        self.assertEqual(second["delta"], '{"file_path":"files/note.md"')
+        self.assertEqual(turn_ctx.collected_parts, [])
 
 
 if __name__ == "__main__":
