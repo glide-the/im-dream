@@ -48,7 +48,7 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
     "autoAllowBashIfSandboxed": true,
     "allowUnsandboxedCommands": false,
     "filesystem": {
-      "denyRead": ["{AGENT_CWD}", "{PROJECT_ROOT}", "~/.ssh", "~/.aws", "~/.config", "~/.npmrc"],
+      "denyRead": ["/"],
       "allowRead": ["{AGENT_CWD}/{thread_id}"],
       "allowWrite": ["{AGENT_CWD}/{thread_id}"],
       "denyWrite": [
@@ -79,8 +79,7 @@ Because each Claude SDK process runs with `cwd={AGENT_CWD}/{thread_id}` and the
 SDK runtime is forced to project settings, the thread's
 `{cwd}/.claude/settings.json` is the project settings source for sandboxing.
 
-Read policy is deny-then-allow: deny the shared workspace root and project root,
-then re-allow only the current thread workspace. Write policy is allow-only:
+Read policy is deny-then-allow: deny the filesystem root, then re-allow only the current thread workspace. Write policy is allow-only:
 write access is granted to the current thread workspace and common sandbox temp
 locations added by Claude Code itself. We additionally deny writes to
 workspace-local config/index files that should not be mutated by Bash.

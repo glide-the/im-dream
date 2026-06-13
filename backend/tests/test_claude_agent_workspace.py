@@ -115,10 +115,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertTrue(sandbox["failIfUnavailable"])
         self.assertTrue(sandbox["autoAllowBashIfSandboxed"])
         self.assertFalse(sandbox["allowUnsandboxedCommands"])
-        self.assertIn(
-            str(Path(self._tmp.name).resolve()),
-            sandbox["filesystem"]["denyRead"],
-        )
+        self.assertEqual(sandbox["filesystem"]["denyRead"], ["/"])
         self.assertEqual(sandbox["filesystem"]["allowRead"], [str(ws.resolve())])
         self.assertEqual(sandbox["filesystem"]["allowWrite"], [str(ws.resolve())])
         self.assertIn(

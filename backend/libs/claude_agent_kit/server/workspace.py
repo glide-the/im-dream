@@ -125,16 +125,12 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
         "autoAllowBashIfSandboxed": enabled,
         "allowUnsandboxedCommands": not enabled,
         "filesystem": {
-            # sandbox-runtime read policy is deny-then-allow. Deny the shared
-            # workspace root and repo root, then re-allow only this thread cwd.
-            "denyRead": [
-                str(workspace_root_abs),
-                str(project_root_abs),
-                "~/.ssh",
-                "~/.aws",
-                "~/.config",
-                "~/.npmrc",
-            ],
+            # sandbox-runtime read policy is deny-then-allow.  The product
+            # goal is stricter than Claude Code's default (which can read most
+            # of the host): deny the filesystem root and re-allow only this
+            # thread cwd.  This prevents sibling workspaces and unrelated host
+            # paths from being readable by Bash subprocesses.
+            "denyRead": ["/"],
             "allowRead": [str(workspace_abs)],
             # Write policy is allow-only; keep Bash writes inside the thread
             # workspace and deny config/index internals explicitly.
