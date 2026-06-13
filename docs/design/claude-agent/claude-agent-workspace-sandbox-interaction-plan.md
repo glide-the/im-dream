@@ -23,10 +23,11 @@ Tasks:
 2. Design the minimal interaction and backend integration path.
 3. Verify the design directly matches the goal and avoids over-engineering.
 4. Implement only the necessary code and regression tests.
-Constraints: use Claude Code's built-in sandbox settings, keep PreToolUse as a
-permission layer rather than a shell parser, do not add a custom sandbox-runtime
-wrapper, preserve existing workspace initialization behavior, and keep the
-Settings `workspace_enabled` switch as the product control.
+Constraints: use Claude Code's built-in sandbox settings for Bash, use
+PreToolUse for built-in file/search tools such as Read/Grep/Glob, do not parse
+shell commands in Python, do not add a custom sandbox-runtime wrapper, preserve
+existing workspace initialization behavior, and keep the Settings
+`workspace_enabled` switch as the product control.
 Output: concise diagnosis, design, non-goal boundaries, implementation points,
 and validation commands.
 ```
@@ -57,9 +58,16 @@ root and re-allow only the resolved thread workspace:
 "allowRead": ["{AGENT_CWD}/{thread_id}"]
 ```
 
-Write isolation was already aligned with the goal because sandbox-runtime writes
-use an allow-only model, and the implementation only grants `allowWrite` to the
+Write isolation was already aligned for Bash because sandbox-runtime writes use
+an allow-only model, and the implementation only grants `allowWrite` to the
 thread workspace while denying workspace-local config/index files.
+
+A separate issue explains the reported `Grep` / `Read` examples: those are
+Claude Code built-in file/search tools, not Bash subprocesses. Claude's sandbox
+documentation says sandboxing applies to Bash and child processes, while
+Read/Edit-style permissions govern built-in file tools. Therefore the backend
+must also enforce the thread-workspace boundary in the SDK `PreToolUse` hook for
+`Read`, `Grep`, `Glob`, `LS`, `NotebookRead`, `Write`, `Edit`, and `MultiEdit`.
 
 ## 3. Interaction design
 
@@ -98,7 +106,24 @@ sequenceDiagram
     Workspace->>Workspace: write {cwd}/.claude/settings.json sandbox block
     Service->>CC: AgentRunOptions.cwd={AGENT_CWD}/{thread_id}
     CC->>SRT: run Bash with project sandbox settings
-    SRT-->>CC: only {AGENT_CWD}/{thread_id} is readable/writable
+    SRT-->>CC: Bash can only read/write {AGENT_CWD}/{thread_id}
+```
+
+Built-in file/search flow:
+
+```mermaid
+sequenceDiagram
+    participant CC as Claude Code built-in tool
+    participant Hook as agent_runner PreToolUse
+    participant Tool as Read/Grep/Glob/LS
+
+    CC->>Hook: tool + path
+    Hook->>Hook: resolve path against cwd={AGENT_CWD}/{thread_id}
+    alt path outside thread workspace
+      Hook-->>CC: permissionDecision=deny
+    else path inside thread workspace
+      Hook-->>Tool: allow or continue normal confirmation policy
+    end
 ```
 
 ### 3.3 Sandbox settings contract
@@ -140,14 +165,16 @@ This is intentionally not over-designed:
 - no Docker/container/VM layer;
 - no MCP gateway change;
 - no new frontend state beyond the existing `workspace_enabled` setting;
-- no change to built-in file-tool permission policy, because Claude Code's
-  sandbox is Bash-scoped.
+- no broad rewrite of built-in file-tool policy; only a path-boundary guard is
+  added because Claude Code's Bash sandbox is Bash-scoped.
 
 ## 5. Validation plan
 
 - Unit-test workspace initialization writes `denyRead: ["/"]` and `allowRead`
   equal to the resolved current thread workspace.
 - Unit-test disabled workspace mode still writes disabled sandbox flags.
+- Unit-test `Read` / `Grep` outside the thread workspace are hard-denied before
+  frontend confirmation or full-access allow paths can approve them.
 - Compile the touched backend modules.
 - Keep the existing design document as the canonical architecture reference and
   this document as the issue-specific interaction plan.

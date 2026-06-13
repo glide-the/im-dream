@@ -166,13 +166,26 @@ _WORKSPACE_FILES_PERMISSION_TOOLS: frozenset[str] = frozenset({
     "Edit",
     "MultiEdit",
 })
-_LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
-    # Claude Code built-in read/search/query tools.
+_WORKSPACE_BOUNDARY_FILE_TOOLS: frozenset[str] = frozenset({
     "Read",
-    "Glob",
+    "Write",
+    "Edit",
+    "MultiEdit",
     "Grep",
+    "Glob",
     "LS",
     "NotebookRead",
+})
+_WORKSPACE_QUERY_PERMISSION_TOOLS: frozenset[str] = frozenset({
+    "Read",
+    "Grep",
+    "Glob",
+    "LS",
+    "NotebookRead",
+})
+_LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
+    # Claude Code built-in query tools that do not accept arbitrary filesystem
+    # paths. File/search tools are handled by the workspace-boundary helper.
     "TodoRead",
     "WebFetch",
     "WebSearch",
@@ -726,6 +739,89 @@ def _apply_editor_index_redirect(
         return None
 
 
+def _extract_workspace_boundary_path(tool_name: str, tool_input: dict[str, Any]) -> str:
+    """Return the filesystem path argument used by a built-in file/search tool.
+
+    Claude Code built-ins use different input keys: Read/Write/Edit use
+    ``file_path``, Grep/Glob/LS use ``path``, and NotebookRead uses
+    ``notebook_path``.  Grep/Glob may omit ``path`` to mean the current working
+    directory; return an empty string so the caller resolves that as ``cwd``.
+    """
+
+    if tool_name == "NotebookRead":
+        raw_path = tool_input.get("notebook_path")
+    else:
+        raw_path = tool_input.get("file_path") or tool_input.get("path")
+    return str(raw_path).strip() if raw_path is not None else ""
+
+
+def _is_path_inside_workspace_root(raw_path: str, cwd: Optional[str]) -> bool:
+    """Return True when *raw_path* resolves inside the session workspace root."""
+
+    if not cwd:
+        return False
+
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        candidate = Path(raw_path).expanduser() if raw_path else workspace
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(workspace)
+        return True
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _workspace_boundary_deny(reason_path: str) -> HookJSONOutput:
+    """Return a hard deny for built-in file/search tools outside thread cwd."""
+
+    display_path = reason_path or "."
+    return HookJSONOutput(
+        hookSpecificOutput={
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "Workspace sandbox boundary: built-in file/search tools may "
+                f"only access the current thread workspace; rejected path {display_path!r}."
+            ),
+        }
+    )
+
+
+def _apply_workspace_boundary_permission(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+    *,
+    auto_allow_queries: bool,
+) -> Optional[HookJSONOutput]:
+    """Enforce the thread workspace boundary for built-in file/search tools.
+
+    Claude Code's Bash sandbox is Bash-scoped. Built-in tools such as Read,
+    Grep, Glob, and LS are governed by permissions/hooks instead, so enforce
+    the same ``{AGENT_CWD}/{thread_id}`` boundary before the generic
+    low-sensitivity allow or frontend confirmation paths can run.
+    """
+
+    if tool_name not in _WORKSPACE_BOUNDARY_FILE_TOOLS:
+        return None
+
+    raw_path = _extract_workspace_boundary_path(tool_name, tool_input)
+    if not _is_path_inside_workspace_root(raw_path, cwd):
+        return _workspace_boundary_deny(raw_path)
+
+    if auto_allow_queries and tool_name in _WORKSPACE_QUERY_PERMISSION_TOOLS:
+        return HookJSONOutput(
+            hookSpecificOutput={
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "allow",
+            }
+        )
+
+    return None
+
+
 def _extract_builtin_file_tool_path(tool_input: dict[str, Any]) -> str:
     """Return the path argument from a built-in Claude file tool input."""
 
@@ -1159,6 +1255,15 @@ class ClaudeAgentRunner:
             )
             if redirect_result is not None:
                 return redirect_result
+
+            workspace_boundary_permission = _apply_workspace_boundary_permission(
+                tool_name,
+                tool_input,
+                cwd,
+                auto_allow_queries=(tool_choice == "auto"),
+            )
+            if workspace_boundary_permission is not None:
+                return workspace_boundary_permission
 
             if (
                 opts.im_full_access_enabled

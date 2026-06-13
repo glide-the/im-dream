@@ -112,27 +112,45 @@ Sandboxing and permissions are separate layers:
 
 | Layer | Scope | Owner |
 |---|---|---|
-| `PreToolUse` permission policy | whether a tool call may run or needs frontend confirmation | `agent_runner.py` |
+| `PreToolUse` permission policy | whether a tool call may run or needs frontend confirmation; also blocks built-in file/search tools outside the thread workspace | `agent_runner.py` |
 | Claude Code Bash sandbox | what filesystem resources Bash and child processes can access after the tool is allowed | `.claude/settings.json` + Claude Code |
 
-This design intentionally does not add a `_pre_tool_use_hook` directory parser
-for Bash. Complex commands are allowed to reach Claude Code's Bash permission
-and sandbox path, where the OS-level sandbox enforces the boundary.
+Claude Code's own documentation separates these two layers: sandboxing applies
+to Bash and subprocesses, while Read/Edit permission rules are the layer for
+built-in file tools such as `Read`, `Grep`, and `Glob`. Therefore this design
+uses both mechanisms:
 
-Existing PreToolUse behavior remains:
+- Bash and child processes are OS-confined by the thread-local sandbox.
+- Built-in file/search tools are hard-denied by `_pre_tool_use_hook` when their
+  resolved path is outside `{AGENT_CWD}/{thread_id}`. This directly addresses
+  observations like `Grep(path=backend/libs)` or `Read(backend/libs/utils/.folder.md)`
+  succeeding: those are not Bash subprocesses, so the Bash sandbox alone cannot
+  be the enforcement point.
+
+This design intentionally does not add a `_pre_tool_use_hook` shell parser for
+Bash. Complex commands are allowed to reach Claude Code's Bash permission and
+sandbox path, where the OS-level sandbox enforces the boundary.
+
+Existing PreToolUse behavior remains with one stricter boundary:
 
 - `.editor/` virtual-index `Read` redirects to a safe temporary snapshot.
+- Built-in file/search tools (`Read`, `Grep`, `Glob`, `LS`, `NotebookRead`,
+  `Write`, `Edit`, `MultiEdit`) are denied if the resolved path is outside the
+  current thread workspace.
 - Workspace `files/` built-in file tools can receive explicit allow in auto
   mode after path validation.
-- Low-sensitivity query tools, `Skill`, and `switch_editor` can be auto-allowed.
+- Low-sensitivity non-filesystem query tools, `Skill`, and `switch_editor` can
+  be auto-allowed.
 - High-sensitivity execution/write/interactive tools still go through frontend
-  confirmation unless Settings full-access approval is enabled.
+  confirmation unless Settings full-access approval is enabled; full-access does
+  not bypass the hard workspace-boundary denial.
 
 ## 6. Implementation Points
 
 | File | Responsibility |
 |---|---|
 | `backend/libs/claude_agent_kit/server/workspace.py` | Merge the per-thread `sandbox` block into `{workspace}/.claude/settings.json` on every init. |
+| `backend/libs/claude_agent_kit/server/agent_runner.py` | Enforce the same thread-workspace boundary for built-in file/search tools, because the Bash sandbox does not cover `Read` / `Grep` / `Glob`. |
 | `backend/claude_agent/service.py` | Read `system_config.workspace_enabled` before cwd resolution; always resolve Claude Code cwd through the server-owned `{AGENT_CWD}/{thread_id}` workspace instead of trusting client-supplied cwd. |
 | `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox flag before file sync. |
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |
