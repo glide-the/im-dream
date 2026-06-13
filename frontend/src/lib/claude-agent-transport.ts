@@ -13,6 +13,8 @@
  *                      branches in service.py).
  * [Sync]   2026-06-06: map tool-approval-request to toolMetadata.approvalRequested
  *                      so auto-mode backend confirmations render frontend approval UI.
+ * [Sync]   2026-06-13: map tool-input-delta SSE frames to AI SDK 6
+ *                      tool-input-delta chunks for built-in Write previews.
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -25,6 +27,7 @@
  *   data: {"type": "reasoning-delta",       "id": "...", "delta": "..."}
  *   data: {"type": "reasoning-end",         "id": "..."}
  *   data: {"type": "tool-input-start",      "toolCallId": "...", "toolName": "..."}
+ *   data: {"type": "tool-input-delta",      "toolCallId": "...", "toolName": "...", "delta": "..."}
  *   data: {"type": "tool-input-available",  "toolCallId": "...", "toolName": "...", "input": {...}}
  *   data: {"type": "tool-output-available", "toolCallId": "...", "output": ..., "isError": false}
  *   data: {"type": "tool-approval-request", "toolCallId": "...", "toolName": "...", "input": {...}}
@@ -101,6 +104,13 @@ interface BackendToolInputAvailable {
   providerExecuted?: boolean;
 }
 
+interface BackendToolInputDelta {
+  type: 'tool-input-delta';
+  toolCallId: string;
+  toolName?: string;
+  delta: string;
+}
+
 interface BackendToolOutputAvailable {
   type: 'tool-output-available';
   toolCallId: string;
@@ -141,6 +151,7 @@ type BackendEvent =
   | BackendReasoningDelta
   | BackendReasoningEnd
   | BackendToolInputStart
+  | BackendToolInputDelta
   | BackendToolInputAvailable
   | BackendToolOutputAvailable
   | BackendToolApprovalRequest
@@ -189,7 +200,7 @@ interface ConversionState {
  *
  * Protocol contract (Pawkeyland-aligned):
  *   - text-start / text-delta(delta) / text-end   replace old text-delta(text) / text-done
- *   - tool-input-start + tool-input-available + tool-output-available  replace old tool-event
+ *   - tool-input-start + tool-input-delta + tool-input-available + tool-output-available  replace old tool-event
  *   - finish.finishReason   replaces old finish.reason
  *   - error.errorText       replaces old error.message
  */
@@ -260,6 +271,16 @@ function convertEvent(
         dynamic: true,
         ...(event.title ? { title: event.title } : {}),
         ...(event.providerExecuted !== undefined ? { providerExecuted: event.providerExecuted } : {}),
+      });
+      break;
+    }
+
+    case 'tool-input-delta': {
+      ensureStarted();
+      chunks.push({
+        type: 'tool-input-delta',
+        toolCallId: event.toolCallId,
+        inputTextDelta: event.delta,
       });
       break;
     }

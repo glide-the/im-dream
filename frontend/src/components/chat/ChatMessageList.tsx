@@ -12,6 +12,10 @@
 // [Sync] 2026-05-30: reasoning blocks default to expanded (isExpandedActual ?? true) so thinking content stays visible after streaming ends; user can click to collapse; toggle flips isExpandedActual.
 // [Sync] 2026-06-02: delegate user text bubbles to UserMessagePart so user prompts render through the shared GFM Markdown path.
 // [Sync] 2026-06-06: render toolMetadata.approvalRequested tool parts directly with approval UI so auto-mode backend confirmations are visible.
+// [Sync] 2026-06-13: render built-in Write tool input-streaming/input-complete states
+//                    as a terminal-style file write preview.
+// [Sync] 2026-06-14: collapse long built-in Write file previews by default while
+//                    keeping full-content copy and an inline expand/collapse control.
 import { useState } from 'react';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -40,6 +44,11 @@ type ToolStatus = 'executing' | 'completed' | 'error';
 
 const TOOL_COMPLETED_STATES = new Set(['output-available', 'output-error']);
 const REASONING_PREVIEW_LENGTH = 80;
+const WRITE_PREVIEW_COLLAPSE_CHAR_LIMIT = 1800;
+const WRITE_PREVIEW_COLLAPSE_LINE_LIMIT = 24;
+const WRITE_PREVIEW_COLLAPSED_MAX_HEIGHT = `${WRITE_PREVIEW_COLLAPSE_LINE_LIMIT * 1.65}em`;
+const WRITE_PREVIEW_DEFAULT_MAX_HEIGHT = '24rem';
+const WRITE_PREVIEW_EXPANDED_MAX_HEIGHT = '36rem';
 
 function getToolStatus(part: ToolUIPart | DynamicToolUIPart, isLoading: boolean): ToolStatus {
   if (part.state === 'output-error') return 'error';
@@ -80,10 +89,15 @@ function IconCopy() {
 }
 
 const ASK_USER_TOOL_NAMES = new Set(['askuserquestion', 'ask_user_question', 'ask_user', 'askuser']);
+const BUILTIN_WRITE_TOOL_NAMES = new Set(['write']);
 
 function isAskUserQuestionTool(part: ToolUIPart | DynamicToolUIPart): boolean {
   const name = getToolName(part).toLowerCase();
   return ASK_USER_TOOL_NAMES.has(name) || name.endsWith('__ask_user') || name.endsWith('__askuserquestion');
+}
+
+function isBuiltInWriteTool(toolName: string): boolean {
+  return BUILTIN_WRITE_TOOL_NAMES.has(toolName.toLowerCase());
 }
 
 /**
@@ -110,6 +124,123 @@ function resolveToolName(part: ToolUIPart | DynamicToolUIPart): string {
 function isApprovalRequestedTool(part: ToolUIPart | DynamicToolUIPart): boolean {
   const raw = part as unknown as { toolMetadata?: Record<string, unknown> };
   return raw.toolMetadata?.approvalRequested === true;
+}
+
+function readToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
+  return 'input' in part ? part.input : undefined;
+}
+
+function parsePartialInputJson(input: unknown): Record<string, unknown> {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  const raw = (input as Record<string, unknown>)._partialInputJson;
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function resolveWriteInput(input: unknown): { filePath: string; content: string; partialJson: string } {
+  const partial = parsePartialInputJson(input);
+  const value =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? { ...partial, ...(input as Record<string, unknown>) }
+      : partial;
+  return {
+    filePath: typeof value.file_path === 'string' ? value.file_path : '',
+    content: typeof value.content === 'string' ? value.content : '',
+    partialJson: typeof value._partialInputJson === 'string' ? value._partialInputJson : '',
+  };
+}
+
+function WriteToolTerminalCard({
+  part,
+  partKey,
+  isLoading,
+  isLastMessage,
+  onCopy,
+  copiedPartId,
+  isContentExpanded,
+  onToggleContent,
+}: {
+  part: ToolUIPart | DynamicToolUIPart;
+  partKey: string;
+  isLoading: boolean;
+  isLastMessage: boolean;
+  onCopy: (id: string, text: string) => void;
+  copiedPartId: string | null;
+  isContentExpanded: boolean;
+  onToggleContent: () => void;
+}) {
+  const input = readToolInput(part);
+  const outputText = getToolOutputText(part);
+  const { filePath, content, partialJson } = resolveWriteInput(input);
+  const status = getToolStatus(part, isLoading);
+  const isStreamingInput = part.state === 'input-streaming';
+  const isExecuting = status === 'executing' || (isLastMessage && isLoading && !TOOL_COMPLETED_STATES.has(part.state ?? ''));
+  const isError = status === 'error';
+  const isWritten = part.state === 'output-available';
+  const displayContent = content || (partialJson ? 'Receiving file content…' : '');
+  const contentLineCount = displayContent ? displayContent.split('\n').length : 0;
+  const shouldCollapseContent =
+    Boolean(displayContent) &&
+    (displayContent.length > WRITE_PREVIEW_COLLAPSE_CHAR_LIMIT ||
+      contentLineCount > WRITE_PREVIEW_COLLAPSE_LINE_LIMIT);
+  const contentMaxHeight =
+    shouldCollapseContent
+      ? isContentExpanded
+        ? WRITE_PREVIEW_EXPANDED_MAX_HEIGHT
+        : WRITE_PREVIEW_COLLAPSED_MAX_HEIGHT
+      : WRITE_PREVIEW_DEFAULT_MAX_HEIGHT;
+  const contentOverflow = shouldCollapseContent && !isContentExpanded ? 'hidden' : 'auto';
+  const contentSummary = contentLineCount > 1 ? `${contentLineCount} lines` : `${displayContent.length} chars`;
+  const copyText = [filePath ? `$ write ${filePath}` : '$ write', displayContent, outputText || ''].filter(Boolean).join('\n\n');
+  const statusLabel = isError ? 'Write failed' : isWritten ? 'Written' : isStreamingInput ? 'Receiving input' : isExecuting ? 'Writing' : 'Ready';
+
+  return (
+    <div style={{ overflow: 'hidden', borderRadius: '12px', background: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.65rem 1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+        <span>‹ Write</span>
+        <span style={{ marginLeft: 'auto', color: isError ? 'var(--color-state-error)' : isWritten ? 'var(--color-state-success)' : 'var(--color-action-link)' }}>{statusLabel}</span>
+        <button type="button" onClick={() => onCopy(partKey, copyText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? 'var(--color-state-success)' : 'var(--color-code-text)', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
+      </div>
+      <div style={{ padding: '0 1rem 0.9rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8rem', lineHeight: 1.65 }}>
+        <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>write {filePath || 'pending-path'}</span></p>
+        <div style={{ position: 'relative' }}>
+          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: contentMaxHeight, overflow: contentOverflow, color: 'var(--color-code-text)' }}>{displayContent}{isExecuting ? <span style={{ opacity: 0.5 }}>▌</span> : null}</pre>
+          {shouldCollapseContent && !isContentExpanded ? (
+            <div aria-hidden="true" style={{ position: 'absolute', left: 0, right: 0, bottom: 0, height: '2.5rem', pointerEvents: 'none', background: 'linear-gradient(to bottom, transparent, var(--color-code-bg))' }} />
+          ) : null}
+        </div>
+        {shouldCollapseContent ? (
+          <button
+            type="button"
+            onClick={onToggleContent}
+            style={{
+              marginTop: '0.65rem',
+              border: '1px solid rgba(255,255,255,0.14)',
+              borderRadius: '8px',
+              background: 'rgba(255,255,255,0.04)',
+              color: 'var(--color-code-text)',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              fontSize: '0.75rem',
+              padding: '0.35rem 0.55rem',
+            }}
+          >
+            {isContentExpanded ? 'Collapse file preview' : `Show full file (${contentSummary})`}
+          </button>
+        ) : null}
+      </div>
+      {outputText ? (
+        <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: isError ? 'var(--color-state-error)' : 'var(--color-state-success)', whiteSpace: 'pre-wrap' }}>{outputText}</div>
+      ) : null}
+    </div>
+  );
 }
 
 export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
@@ -233,6 +364,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const title = 'title' in toolPart ? (toolPart as { title?: string }).title : undefined;
                 const toolName = resolveToolName(toolPart);
                 const displayTitle = title || toolName || getToolName(toolPart);
+                const isBuiltInWrite = isBuiltInWriteTool(toolName);
 
                 // Editor write tools always render as EditorWriteCompletedCard when
                 // completed — this check is independent of outputText so that history-
@@ -247,6 +379,23 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                         toolName={toolName}
                         input={(rawInput ?? {}) as Record<string, unknown>}
                         output={(rawOutput ?? {}) as EditorWriteOutput}
+                      />
+                    </div>
+                  );
+                }
+
+                if (isCompleted && isBuiltInWrite) {
+                  return (
+                    <div key={partKey}>
+                      <WriteToolTerminalCard
+                        part={toolPart}
+                        partKey={partKey}
+                        isLoading={isLoading}
+                        isLastMessage={isLastMessage}
+                        onCopy={(id, text) => void handleCopy(id, text)}
+                        copiedPartId={copiedPartId}
+                        isContentExpanded={isExpanded}
+                        onToggleContent={toggleExpanded}
                       />
                     </div>
                   );
@@ -315,6 +464,23 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   return (
                     <div key={partKey}>
                       <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} />
+                    </div>
+                  );
+                }
+
+                if (isBuiltInWrite && !isCompleted) {
+                  return (
+                    <div key={partKey}>
+                      <WriteToolTerminalCard
+                        part={toolPart}
+                        partKey={partKey}
+                        isLoading={isLoading}
+                        isLastMessage={isLastMessage}
+                        onCopy={(id, text) => void handleCopy(id, text)}
+                        copiedPartId={copiedPartId}
+                        isContentExpanded={isExpanded}
+                        onToggleContent={toggleExpanded}
+                      />
                     </div>
                   );
                 }
