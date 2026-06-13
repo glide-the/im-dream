@@ -15,6 +15,9 @@
 # [Sync] 2026-06-13: sync per-thread Claude Code sandbox settings into
 #                    {workspace}/.claude/settings.json so Bash is OS-confined
 #                    to the current thread workspace when workspace mode is on.
+# [Sync] 2026-06-14: add read-only runtime dependency allowlist so sandboxed
+#                    Bash can execute Python/Node/system tools without exposing
+#                    project source directories outside the thread workspace.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -47,6 +50,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 import tarfile
 import tempfile
 import zipfile
@@ -65,6 +69,7 @@ WORKSPACE_SUBDIRS: tuple[str, ...] = ("files", "logs", "skills")
 ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(
     {".zip", ".skill", ".tar.gz", ".tgz", ".tar"}
 )
+SANDBOX_EXTRA_ALLOW_READ_ENV = "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -76,6 +81,128 @@ _PROJECT_ROOT: Path = Path(__file__).resolve().parents[4]
 def _project_root() -> Path:
     """Return the repository root used for workspace template assets."""
     return _PROJECT_ROOT
+
+
+def _append_existing_sandbox_read_path(paths: list[Path], raw_path: str | os.PathLike[str]) -> None:
+    """Append *raw_path* when it exists and is not already present."""
+
+    if not raw_path:
+        return
+    try:
+        path = Path(raw_path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return
+    if not path.exists() or path in paths:
+        return
+    paths.append(path)
+
+
+def _runtime_root_for_executable(raw_path: Optional[str]) -> Optional[Path]:
+    """Return the narrow read root needed to execute *raw_path* inside sandbox."""
+
+    if not raw_path:
+        return None
+    try:
+        executable = Path(raw_path).expanduser().resolve(strict=False)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if not executable.exists():
+        return None
+
+    parent = executable.parent
+    if parent.name == "bin":
+        grandparent = parent.parent
+        # Version-managed runtimes keep libraries beside bin/.
+        if any(part in {".pyenv", ".nvm", ".bun", ".asdf", "node", "versions"} for part in grandparent.parts):
+            return grandparent
+        # Homebrew and language installs usually need lib/ or Cellar/ beside bin/.
+        if str(grandparent).startswith(("/opt/homebrew", "/usr/local", "/home/linuxbrew")):
+            return grandparent
+
+    return parent
+
+
+def _sandbox_runtime_read_allow_paths() -> list[str]:
+    """Return read-only runtime dependency paths for Bash sandbox execution.
+
+    The thread workspace remains the only product data root. These paths are
+    deliberately limited to interpreters, system libraries, package-manager
+    runtime roots, and temp directories needed to start common developer tools.
+    Additional deployment-specific runtime paths can be supplied through
+    ``INK_AGENT_SANDBOX_EXTRA_ALLOW_READ`` using ``os.pathsep`` separators.
+    """
+
+    paths: list[Path] = []
+    home = Path.home()
+
+    for raw_path in (
+        tempfile.gettempdir(),
+        os.getenv("TMPDIR", ""),
+        "/tmp",
+        "/private/tmp",
+        home / ".pyenv",
+        home / ".nvm" / "versions" / "node",
+        home / ".bun",
+        home / ".local" / "bin",
+        home / "miniconda3",
+        "/opt/miniconda3",
+        "/opt/conda",
+        "/opt/homebrew/bin",
+        "/opt/homebrew/opt",
+        "/opt/homebrew/lib",
+        "/opt/homebrew/Cellar",
+        "/home/linuxbrew/.linuxbrew/bin",
+        "/home/linuxbrew/.linuxbrew/opt",
+        "/home/linuxbrew/.linuxbrew/lib",
+        "/home/linuxbrew/.linuxbrew/Cellar",
+        "/bin",
+        "/usr/bin",
+        "/usr/local/bin",
+        "/usr/lib",
+        "/usr/lib64",
+        "/lib",
+        "/lib64",
+        "/usr/lib/x86_64-linux-gnu",
+        "/etc/ssl",
+        "/System/Library/OpenSSL",
+        "/System/Library/Frameworks",
+        "/Library/Apple",
+        "/usr/local/go",
+        "/usr/lib/go",
+        "/usr/share/go",
+        "/usr/lib/jvm",
+        "/opt/homebrew/opt/openjdk@17",
+    ):
+        _append_existing_sandbox_read_path(paths, raw_path)
+
+    for executable in (
+        sys.executable,
+        *(shutil.which(name) for name in (
+            "python3",
+            "python",
+            "node",
+            "npm",
+            "npx",
+            "bash",
+            "sh",
+            "rg",
+            "grep",
+            "git",
+            "go",
+            "java",
+            "make",
+            "gcc",
+            "g++",
+        )),
+    ):
+        runtime_root = _runtime_root_for_executable(executable)
+        if runtime_root is not None:
+            _append_existing_sandbox_read_path(paths, runtime_root)
+
+    for raw_path in os.getenv(SANDBOX_EXTRA_ALLOW_READ_ENV, "").split(os.pathsep):
+        _append_existing_sandbox_read_path(paths, raw_path.strip())
+
+    return [str(path) for path in paths]
 
 
 # ---------------------------------------------------------------------------
@@ -119,23 +246,21 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
     project_root_abs = _project_root().resolve(strict=False)
     enabled = bool(enabled)
 
+    allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
+
     return {
         "enabled": enabled,
         "failIfUnavailable": enabled,
         "autoAllowBashIfSandboxed": enabled,
         "allowUnsandboxedCommands": not enabled,
         "filesystem": {
-            # sandbox-runtime read policy is deny-then-allow. Deny the shared
-            # workspace root and repo root, then re-allow only this thread cwd.
-            "denyRead": [
-                str(workspace_root_abs),
-                str(project_root_abs),
-                "~/.ssh",
-                "~/.aws",
-                "~/.config",
-                "~/.npmrc",
-            ],
-            "allowRead": [str(workspace_abs)],
+            # sandbox-runtime read policy is deny-then-allow.  The product
+            # goal is stricter than Claude Code's default (which can read most
+            # of the host): deny the filesystem root and re-allow only this
+            # thread cwd.  This prevents sibling workspaces and unrelated host
+            # paths from being readable by Bash subprocesses.
+            "denyRead": ["/"],
+            "allowRead": allow_read,
             # Write policy is allow-only; keep Bash writes inside the thread
             # workspace and deny config/index internals explicitly.
             "allowWrite": [str(workspace_abs)],

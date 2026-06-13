@@ -8,6 +8,8 @@
 > `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的 `sandbox` 配置。
 > **[Sync] 2026-06-13**: 「完全访问」不跳过 AskUserQuestion 类问答确认；
 > 该类工具仍显示前端确认窗口以收集用户答案。
+> **[Sync] 2026-06-14**: Workspace sandbox 的 Bash 读权限包含必要运行时依赖目录；
+> 项目源码目录不会因 runtime allowlist 被默认放行。
 
 ## 1. 文档范围
 
@@ -108,7 +110,8 @@ SettingsView（position: fixed，overflow: auto）
 - 开启后，后端在每个对话 thread workspace 的 `.claude/settings.json`
   写入 `sandbox.enabled=true`、`failIfUnavailable=true`、
   `autoAllowBashIfSandboxed=true`、`allowUnsandboxedCommands=false`，并将
-  Bash filesystem 读写范围约束到当前 `{AGENT_CWD}/{thread_id}`。
+  Bash filesystem 写范围约束到当前 `{AGENT_CWD}/{thread_id}`。
+- Bash read policy 先 deny `/`，再 allow 当前 thread workspace 与必要只读运行时依赖目录（Python/Node/system libs/temp 等）；不默认放行项目源码根目录。
 - 关闭后，后端保留 settings 文件同步但写入 `sandbox.enabled=false`；
   Bash 不再使用该工作区沙箱策略。
 - 该沙箱只约束 Claude Code `Bash` 工具及其子进程；非 Bash 工具仍由

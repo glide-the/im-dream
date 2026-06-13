@@ -24,6 +24,8 @@
 #                    explicit PreToolUse allow for high-sensitivity tools.
 # [Sync] 2026-06-13: cover full-access exception for AskUserQuestion-style tools
 #                    so frontend answer forms still appear and populate updatedInput.
+# [Sync] 2026-06-14: cover full-access/camelCase Grep workspace-boundary deny
+#                    for built-in file/search tools outside thread cwd.
 # [Sync] 2026-06-07: add Bash low-sensitivity and switch_editor tests; expand
 #                    Bash safe-command set from {ls} to full navigation/read set.
 # [Sync] 2026-06-12: cover Cloud Run/process env injection into Claude SDK
@@ -840,9 +842,10 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "需要用户确认但未收到响应")
 
-    async def test_auto_read_outside_workspace_files_gets_query_allow(self):
+    async def test_auto_read_inside_workspace_root_gets_query_allow(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            workspace = Path(temp_dir)
+            workspace = Path(temp_dir) / "thread-1"
+            workspace.mkdir()
             (workspace / "files").mkdir()
             target = workspace / "notes.md"
             hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
@@ -852,7 +855,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     "tool_name": "Read",
                     "tool_input": {"file_path": str(target)},
                 },
-                "call-read-outside",
+                "call-read-inside-workspace",
                 _SDK_HOOK_CONTEXT(),
             )
 
@@ -860,6 +863,129 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertNotIn("updatedInput", specific)
+
+    async def test_auto_read_outside_workspace_root_is_hard_denied(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace = root / "thread-1"
+            sibling = root / "thread-2"
+            workspace.mkdir()
+            sibling.mkdir()
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(cwd=str(workspace))
+
+            result = await hook(
+                {
+                    "tool_name": "Read",
+                    "tool_input": {"file_path": str(sibling / "notes.md")},
+                },
+                "call-read-outside-workspace",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
+
+    async def test_auto_grep_outside_workspace_root_is_hard_denied(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            workspace = root / "thread-1"
+            outside = root / "thread-2"
+            workspace.mkdir()
+            outside.mkdir()
+            (workspace / "files").mkdir()
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Grep",
+                    "tool_input": {"pattern": "hello", "path": str(outside)},
+                },
+                "call-grep-outside-workspace",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(confirmation_requests, [])
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
+
+    async def test_full_access_grep_outside_workspace_root_is_hard_denied(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "thread-1"
+            outside = Path(temp_dir) / "source-root" / "backend"
+            workspace.mkdir()
+            outside.mkdir(parents=True)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="auto",
+                im_full_access_enabled=True,
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Grep",
+                    "tool_input": {
+                        "pattern": "from.*libs",
+                        "path": str(outside),
+                        "glob": "*.py",
+                    },
+                },
+                "call-grep-full-access-outside-workspace",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(confirmation_requests, [])
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
+
+    async def test_camel_case_grep_outside_workspace_root_is_hard_denied(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir) / "thread-1"
+            outside = Path(temp_dir) / "source-root" / "backend"
+            workspace.mkdir()
+            outside.mkdir(parents=True)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="auto",
+                im_full_access_enabled=True,
+            )
+
+            result = await hook(
+                {
+                    "toolName": "Grep",
+                    "toolInput": {
+                        "pattern": "backend\\.libs",
+                        "path": str(outside),
+                    },
+                },
+                "call-grep-camel-outside-workspace",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
 
     async def test_auto_grep_gets_query_allow_without_confirmation(self):
         confirmation_requests: list[dict] = []
