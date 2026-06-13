@@ -15,6 +15,8 @@
 #                    initialisation step that enables the PreToolUse read-path redirect.
 # [Sync] 2026-06-13: cover per-thread .claude/settings.json sandbox config derived
 #                    from AGENT_CWD/{session_id}.
+# [Sync] 2026-06-14: cover read-only runtime dependency allowlist in sandbox
+#                    settings without adding the project root as a default read path.
 
 """Regression tests for backend/claude_agent/workspace.py."""
 from __future__ import annotations
@@ -34,6 +36,7 @@ if str(ROOT) not in sys.path:
 import tests._sdk_stubs  # noqa: F401
 from libs.claude_agent_kit.server.editor_index import EDITOR_RESOURCES
 from libs.claude_agent_kit.server.workspace import (
+    SANDBOX_EXTRA_ALLOW_READ_ENV,
     WORKSPACE_SUBDIRS,
     get_or_create_workspace,
     get_workspace_root,
@@ -116,7 +119,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertTrue(sandbox["autoAllowBashIfSandboxed"])
         self.assertFalse(sandbox["allowUnsandboxedCommands"])
         self.assertEqual(sandbox["filesystem"]["denyRead"], ["/"])
-        self.assertEqual(sandbox["filesystem"]["allowRead"], [str(ws.resolve())])
+        self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
         self.assertEqual(sandbox["filesystem"]["allowWrite"], [str(ws.resolve())])
         self.assertIn(
             str((ws / ".claude").resolve()),
@@ -131,6 +134,34 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertFalse(sandbox["failIfUnavailable"])
         self.assertFalse(sandbox["autoAllowBashIfSandboxed"])
         self.assertTrue(sandbox["allowUnsandboxedCommands"])
+
+    def test_sandbox_allow_read_includes_runtime_deps_but_not_project_root(self):
+        ws = init_workspace("sandbox-runtime-read")
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        allow_read = settings["sandbox"]["filesystem"]["allowRead"]
+        project_root = Path(__file__).resolve().parents[2].resolve()
+
+        self.assertEqual(allow_read[0], str(ws.resolve()))
+        self.assertIn(str(Path(tempfile.gettempdir()).resolve(strict=False)), allow_read)
+        self.assertNotIn(str(project_root), allow_read)
+
+    def test_sandbox_allow_read_accepts_explicit_extra_runtime_paths(self):
+        extra_dir = Path(self._tmp.name) / "runtime-extra"
+        extra_dir.mkdir()
+
+        with unittest.mock.patch.dict(
+            os.environ,
+            {
+                "AGENT_CWD": self._tmp.name,
+                SANDBOX_EXTRA_ALLOW_READ_ENV: str(extra_dir),
+            },
+            clear=False,
+        ):
+            ws = init_workspace("sandbox-extra-runtime")
+
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        allow_read = settings["sandbox"]["filesystem"]["allowRead"]
+        self.assertIn(str(extra_dir.resolve()), allow_read)
 
     def test_sandbox_settings_sync_preserves_non_sandbox_settings(self):
         ws = init_workspace("sandbox-preserve")
