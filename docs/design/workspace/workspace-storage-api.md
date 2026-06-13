@@ -242,9 +242,11 @@ GET /api/workspace/files/download
 |----|--------|
 | `Content-Type` | `application/pdf` |
 | `Content-Length` | `123456` |
-| `Content-Disposition` | `attachment; filename="report.pdf"` |
+| `Content-Disposition` | `attachment; filename="report.pdf"; filename*=UTF-8''report.pdf` |
 | `Cache-Control` | `private, no-store` |
 | `X-Content-Type-Options` | `nosniff` |
+
+`filename` 始终是 ASCII/Latin-1-safe fallback，`filename*` 使用 RFC 8187 UTF-8 percent-encoding 承载真实文件名；例如中文文件名会通过 `filename*` 保留给浏览器下载使用，避免 ASGI 响应头的 latin-1 编码错误。
 
 ---
 

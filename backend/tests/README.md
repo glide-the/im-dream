@@ -14,6 +14,7 @@ tests/
 │
 │ # Claude Agent module tests (migrated from Pawkeyland scripts/)
 ├── test_claude_agent_workspace.py       # Workspace lifecycle: root resolution, skeleton, idempotency
+├── test_workspace_router.py             # Workspace router: download header encoding
 ├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
 ├── test_claude_agent_runner.py          # Runner: streaming callbacks, session_id, error handling
 ├── test_claude_agent_thread_factory.py  # Factory: flyweight cache, TTL eviction, Phase 1-4 contracts
@@ -54,6 +55,12 @@ source .venv/bin/activate
 python tests/test_claude_agent_workspace.py -v
 ```
 
+**Workspace Router (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_workspace_router.py -v
+```
+
 **Claude Agent — Context Builder (no server/SDK needed):**
 ```bash
 source .venv/bin/activate
@@ -85,6 +92,9 @@ python tests/test_server_claude_agent.py -v
 - ✅ `init_workspace` — 创建 files/logs/.claude 骨架，幂等，自动修复
 - ✅ `get_or_create_workspace` — 同 session 返回相同路径
 - ✅ `_validate_session_id` — 拒绝 `/` `\\` `..` 路径穿越
+
+### Workspace Router (`test_workspace_router.py`)
+- ✅ `GET /api/workspace/files/download` — 中文等非 Latin 文件名使用 Latin-1-safe `filename` fallback + UTF-8 `filename*`
 
 ### Claude Agent — Context Builder (`test_claude_agent_context_builder.py`)
 - ✅ `_render_session_entry` — 日期/标题/摘要字段渲染

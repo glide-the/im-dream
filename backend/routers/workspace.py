@@ -10,6 +10,8 @@
 # [Sync] 2026-06-06: remove POST /api/workspace/memory-init (Voice scenario memory
 #         workspace initialisation removed; Reflections uses /api/reflections/memory-init).
 #         project .claude/memory/ filesystem fallback also removed from memory_workspace.py.
+# [Sync] 2026-06-13: download responses use ASCII Content-Disposition fallback
+#         plus RFC 8187 filename* so non-Latin filenames do not crash ASGI headers.
 
 """Workspace file management API.
 
@@ -29,6 +31,7 @@ import mimetypes
 import os
 import socket
 from typing import Annotated, List, Optional
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -148,6 +151,15 @@ def _tree_node_to_dict(node: WorkspaceFileTreeNode) -> dict:
 def _get_content_type(filename: str) -> str:
     mime, _ = mimetypes.guess_type(filename)
     return mime or "application/octet-stream"
+
+
+def _download_content_disposition(filename: str) -> str:
+    """Return a Latin-1-safe attachment disposition for any workspace filename."""
+    fallback = _re.sub(r"[^A-Za-z0-9._ -]+", "_", filename).strip()
+    if not fallback or fallback in {".", ".."}:
+        fallback = "download"
+    utf8_name = quote(filename, safe="")
+    return f'attachment; filename="{fallback}"; filename*=UTF-8\'\'{utf8_name}'
 
 
 # ---------------------------------------------------------------------------
@@ -479,9 +491,7 @@ async def download_workspace_file(
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
     content_type = _get_content_type(file_obj.file_name)
-    # RFC 6266 / RFC 8187 Content-Disposition
-    safe_name = file_obj.file_name.replace('"', '\\"')
-    disposition = f'attachment; filename="{safe_name}"'
+    disposition = _download_content_disposition(file_obj.file_name)
 
     return Response(
         content=file_obj.content,
@@ -493,5 +503,4 @@ async def download_workspace_file(
             "X-Content-Type-Options": "nosniff",
         },
     )
-
 
