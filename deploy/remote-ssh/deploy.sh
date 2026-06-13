@@ -5,6 +5,7 @@
 # [Sync] 2026-06-12: add Remote SSH docker-compose deployment path for Docker-enabled servers.
 # [Sync] 2026-06-12: align default container resources and filesystem paths with Cloud Run deployment.
 # [Sync] 2026-06-12: propagate backend/frontend host ports into nginx setup and pin backend container port.
+# [Sync] 2026-06-13: split deploy into explicit no-cache remote build and force-recreate up steps.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +54,7 @@ REMOTE_SETUP_STORAGE="${REMOTE_SETUP_STORAGE:-1}"
 REMOTE_SETUP_SSL="${REMOTE_SETUP_SSL:-0}"
 REMOTE_CLEAN_IMAGES="${REMOTE_CLEAN_IMAGES:-0}"
 REMOTE_CLEAN_VOLUMES="${REMOTE_CLEAN_VOLUMES:-0}"
+REMOTE_BUILD_PULL="${REMOTE_BUILD_PULL:-0}"
 REMOTE_FRONTEND_SCHEME="${REMOTE_FRONTEND_SCHEME:-https}"
 REMOTE_FRONTEND_PATH="${REMOTE_FRONTEND_PATH:-/ink-and-memory/}"
 REMOTE_PUBLIC_HOST="${REMOTE_PUBLIC_HOST:-${REMOTE_SSH_HOST:-REMOTE_SSH_HOST}}"
@@ -74,7 +76,7 @@ Commands:
   plan      Print the remote deployment sequence and required env vars.
   sync      rsync repository files to REMOTE_APP_DIR without starting containers.
   config    Sync files, then run remote docker-compose config.
-  build     Sync files, snapshot current images, then run remote docker-compose build.
+  build     Sync files, snapshot current images, then run remote docker-compose build --no-cache.
   deploy    One-command path: ensure nginx/storage when needed, sync files, build, start, and verify.
   install   Alias for deploy; kept for first-time one-command setup.
   start     Alias for deploy.
@@ -117,6 +119,7 @@ Optional environment:
   REMOTE_SETUP_STORAGE  default: 1; deploy creates persistent backend/data directories before rsync
   REMOTE_SETUP_SSL      default: 0; set to 1 to let setup-nginx request certbot certificates
   REMOTE_SYNC_DATA      default: 0; when 1, sync backend/data to the remote server
+  REMOTE_BUILD_PULL     default: 0; set to 1 to pull newer base images before build
 EOF
 }
 
@@ -237,6 +240,7 @@ remote_env_prefix() {
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
     REMOTE_SETUP_NGINX REMOTE_SETUP_STORAGE REMOTE_SETUP_SSL
+    REMOTE_BUILD_PULL
   )
   local output="env" name
   for name in "${names[@]}"; do
@@ -264,6 +268,7 @@ check_local_prereqs() {
   require_file "${REPO_ROOT}/deploy/remote-ssh/docker-compose.yml" || { warn "Missing remote compose file."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/setup-nginx.sh" || { warn "Missing remote nginx setup script."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/setup-storage.sh" || { warn "Missing remote storage setup script."; failed=1; }
+  require_file "${REPO_ROOT}/deploy/remote-ssh/sync-data.sh" || { warn "Missing remote data sync script."; failed=1; }
   require_file "${REPO_ROOT}/backend/.env" || { warn "Missing backend/.env. Remote Compose env_file requires it."; failed=1; }
   require_file "${REPO_ROOT}/backend/models.json" || { warn "Missing backend/models.json. Remote Compose mounts it read-only."; failed=1; }
   require_file "${REPO_ROOT}/backend/Dockerfile" || { warn "Missing backend/Dockerfile."; failed=1; }
@@ -300,7 +305,7 @@ Sequence:
   4. Create/repair remote backend/data, file-storage, agent-workspace, and backup directories.
   5. rsync repository files to REMOTE_APP_DIR, excluding backend/data by default.
   6. Tag current remote images as rollback images when they exist.
-  7. Run remote docker-compose up --build -d.
+  7. Run remote docker-compose build, then docker-compose up -d.
   8. Verify backend and frontend from the remote server.
 
 Resources:
@@ -318,6 +323,11 @@ API/nginx mode:
   Default REMOTE_API_BASE_URL is https://ink-backend.suoxya.com, so browser login/API calls never use the internal Docker hostname.
   Host-level nginx should route ink-backend.suoxya.com to 127.0.0.1:${REMOTE_BACKEND_PORT} and ink-frontend.suoxya.com to 127.0.0.1:${REMOTE_FRONTEND_PORT}.
   Override REMOTE_API_BASE_URL only when deploying to a different public backend origin.
+
+Rebuild controls:
+  deploy always runs remote docker-compose build --no-cache before up.
+  deploy always runs remote docker-compose up -d --force-recreate after build.
+  Set REMOTE_BUILD_PULL=1 only when you also want to pull updated base images before build.
 EOF
 }
 
@@ -363,6 +373,19 @@ snapshot_images() {
   cmd="docker image inspect $(quote "${REMOTE_BACKEND_IMAGE}") >/dev/null 2>&1 && docker tag $(quote "${REMOTE_BACKEND_IMAGE}") $(quote "${REMOTE_BACKEND_ROLLBACK_IMAGE}") || true"
   cmd+="; docker image inspect $(quote "${REMOTE_FRONTEND_IMAGE}") >/dev/null 2>&1 && docker tag $(quote "${REMOTE_FRONTEND_IMAGE}") $(quote "${REMOTE_FRONTEND_ROLLBACK_IMAGE}") || true"
   ssh_run "${cmd}"
+}
+
+remote_build() {
+  local args=(build --no-cache)
+  [[ "${REMOTE_BUILD_PULL}" == "1" ]] && args+=(--pull)
+  log "Building remote Compose images with --no-cache. Pull base images: ${REMOTE_BUILD_PULL}."
+  remote_compose "${args[@]}"
+}
+
+remote_up() {
+  local args=(up -d --force-recreate)
+  log "Starting remote Compose services with --force-recreate."
+  remote_compose "${args[@]}"
 }
 
 should_setup_nginx() {
@@ -428,7 +451,8 @@ command_deploy() {
   command_setup_storage
   sync_files
   snapshot_images
-  remote_compose up --build -d
+  remote_build
+  remote_up
   remote_compose ps
   command_verify
   log "Remote frontend: $(remote_frontend_url)"
@@ -495,7 +519,7 @@ case "${COMMAND:-help}" in
   plan) command_plan ;;
   sync) sync_files ;;
   config) check_prereqs; sync_files; remote_compose config ;;
-  build) check_prereqs; sync_files; snapshot_images; remote_compose build ;;
+  build) check_prereqs; sync_files; snapshot_images; remote_build ;;
   deploy|install|start|up) command_deploy ;;
   verify) command_verify ;;
   logs) remote_compose logs -f --tail=100 ;;

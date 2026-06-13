@@ -2,7 +2,7 @@
 # [Output] Two-service remote Compose stack with host-published frontend/backend ports.
 # [Pos] Remote SSH Compose template in deploy/remote-ssh/
 # [Sync] 2026-06-12: pin backend container PORT to the mapped container port so env_file cannot desync uvicorn and Compose.
-version: "3.8"
+# [Sync] 2026-06-13: remove obsolete version field for Docker Compose v2 compatibility.
 
 services:
   ink-backend:

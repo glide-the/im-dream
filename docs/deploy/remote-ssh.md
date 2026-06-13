@@ -27,8 +27,9 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 3. 自动创建/修复 `${REMOTE_APP_DIR}/backend/data`、`file-storage`、`agent-workspace`、`backups`。
 4. rsync 代码到 `${REMOTE_APP_DIR}`；默认不覆盖远端 `backend/data/`。
 5. 给当前远端镜像打 rollback tag。
-6. 执行 `docker-compose up --build -d`。
-7. 在远端执行后端 health 与前端 HTML 验证。
+6. 显式执行 `docker-compose build --no-cache`，每次重新打包镜像。
+7. 执行 `docker-compose up -d --force-recreate`，每次用新镜像重建容器。
+8. 在远端执行后端 health 与前端 HTML 验证。
 
 如需只预览流程：
 
@@ -71,6 +72,7 @@ Internet :80/:443
 | `REMOTE_SETUP_NGINX` | `auto` | `deploy` 自动判断是否安装/刷新主机 nginx；设为 `0` 可跳过 |
 | `REMOTE_SETUP_STORAGE` | `1` | `deploy` 自动创建/修复远端持久化目录；设为 `0` 可跳过 |
 | `REMOTE_SETUP_SSL` | `0` | 设为 `1` 时让 nginx setup 尝试执行 certbot |
+| `REMOTE_BUILD_PULL` | `0` | 设为 `1` 时构建前拉取更新的基础镜像；重新打包本身默认每次执行，无需开关 |
 | `REMOTE_FRONTEND_PORT` | `8080` | 前端容器映射到远端 localhost 的端口 |
 | `REMOTE_FRONTEND_NGINX_HOST` | 空 | 可选 nginx 前端上游 host；为空时从 `REMOTE_FRONTEND_BIND_HOST` 推导 |
 | `REMOTE_FRONTEND_BIND_HOST` | `127.0.0.1` | 默认仅允许主机 nginx 访问前端容器 |
@@ -107,6 +109,16 @@ REMOTE_SETUP_NGINX=0 ./deploy/remote-ssh/deploy.sh deploy
 - `80` 已由非 nginx 进程占用：中止并打印监听进程；需要先释放端口，或确认由其他反向代理管理域名后设置 `REMOTE_SETUP_NGINX=0`。
 
 部署配置前，`setup-nginx` 还会扫描 `/etc/nginx/sites-enabled` 和 `/etc/nginx/conf.d`。如果发现其他已启用文件也声明 `ink-backend.suoxya.com` 或 `ink-frontend.suoxya.com`，会把这些旧文件移动到 `/etc/nginx/disabled-ink-and-memory-YYYYMMDDHHMMSS/` 后再执行 `nginx -t`，避免旧代理端口继续覆盖新配置。
+
+## 重新打包策略
+
+`deploy` 每次都会先同步代码，然后在远端显式执行 `docker-compose build --no-cache`，再执行 `docker-compose up -d --force-recreate`。因此重复运行 `./deploy/remote-ssh/deploy.sh deploy` 也会重新打包后端和前端镜像，并用新镜像重建容器。
+
+需要同时拉取基础镜像更新时：
+
+```bash
+REMOTE_BUILD_PULL=1 ./deploy/remote-ssh/deploy.sh deploy
+```
 
 ## 数据维护
 
