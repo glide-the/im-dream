@@ -5,6 +5,8 @@
  * [Sync]   2026-06-09: extracted from claude-agent-transport for thread SSE reconnect.
  * [Sync]   2026-06-09: add consumeClaudeAgentSseStream with incremental frame buffering.
  * [Sync]   2026-06-12: emit AI SDK 6 dynamic-tool and reasoning parts during reconnect replay.
+ * [Sync]   2026-06-13: replay tool-input-start/delta as input-streaming parts for
+ *                      Write terminal previews until final input arrives.
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -99,6 +101,17 @@ function stringifyToolError(output: unknown): string {
   }
 }
 
+function appendPartialToolInput(input: unknown, delta: string): Record<string, unknown> {
+  const current =
+    input && typeof input === 'object' && !Array.isArray(input)
+      ? (input as Record<string, unknown>)
+      : {};
+  return {
+    ...current,
+    _partialInputJson: `${typeof current._partialInputJson === 'string' ? current._partialInputJson : ''}${delta}`,
+  };
+}
+
 function getToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
   return 'input' in part ? part.input : undefined;
 }
@@ -120,6 +133,27 @@ export function applyBackendEventToMessages(
     case 'reasoning-delta': {
       const delta = String(event.delta ?? '');
       base[index] = { ...target, parts: appendReasoningDelta(parts, delta) };
+      return base;
+    }
+    case 'tool-input-start': {
+      const toolCallId = String(event.toolCallId ?? '');
+      const toolName = String(event.toolName ?? 'tool');
+      const existing = parts.findIndex(
+        (p) => isToolUIPart(p) && p.toolCallId === toolCallId,
+      );
+      const invocation: DynamicToolUIPart = {
+        type: 'dynamic-tool',
+        toolCallId,
+        toolName,
+        state: 'input-streaming',
+        input: undefined,
+      };
+      if (existing >= 0) {
+        parts[existing] = invocation;
+      } else {
+        parts.push(invocation);
+      }
+      base[index] = { ...target, parts };
       return base;
     }
     case 'tool-input-available':
@@ -145,6 +179,29 @@ export function applyBackendEventToMessages(
         parts.push(invocation);
       }
       base[index] = { ...target, parts };
+      return base;
+    }
+    case 'tool-input-delta': {
+      const toolCallId = String(event.toolCallId ?? '');
+      if (!toolCallId) return messages;
+      const idx = parts.findIndex(
+        (p) => isToolUIPart(p) && p.toolCallId === toolCallId,
+      );
+      if (idx >= 0) {
+        const prev = parts[idx] as ToolUIPart | DynamicToolUIPart;
+        const toolName = getToolName(prev);
+        parts[idx] = {
+          type: 'dynamic-tool',
+          toolCallId,
+          toolName,
+          state: 'input-streaming',
+          input: appendPartialToolInput(getToolInput(prev), String(event.delta ?? '')),
+          title: prev.title,
+          toolMetadata: prev.toolMetadata,
+          providerExecuted: prev.providerExecuted,
+        };
+        base[index] = { ...target, parts };
+      }
       return base;
     }
     case 'tool-output-available': {
