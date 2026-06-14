@@ -17,6 +17,7 @@
 // [Sync] 2026-06-09: SSE reconnect — fetch /status on thread switch; trigger stream reconnect via reconnectStreamNonce.
 // [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin thread APIs.
+// [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
@@ -63,7 +64,7 @@ interface ChatViewProps {
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
   editorState?: Record<string, unknown> | null;
   /** Called when an editor write tool is confirmed so the Writing view can reload. */
-  onEditorWriteConfirmed?: () => void;
+  onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Active deck / voice info — displayed in the top-right badge and forwarded to the backend as voice context. */
   activeVoice?: ActiveChatVoice;
 }

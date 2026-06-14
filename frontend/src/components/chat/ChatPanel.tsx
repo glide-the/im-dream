@@ -20,6 +20,7 @@
 // [Sync] 2026-06-09: agentBusy drives input dock stop button (streaming/submitted/reconnect).
 // [Sync] 2026-06-09: show a floating scroll-to-bottom arrow above AIInputDock when the message list is scrolled away from the bottom.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin chat transport and SSE reconnect.
+// [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -88,7 +89,7 @@ interface ChatPanelProps {
   /** Current EditorState snapshot forwarded to the backend agent runner via editor_state request field. */
   editorState?: Record<string, unknown> | null;
   /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
-  onEditorWriteConfirmed?: () => void;
+  onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Voice / deck system prompt injected as voice_context into each user message. */
   voiceSystemPrompt?: string;
 }

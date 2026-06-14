@@ -1,7 +1,7 @@
 # 编辑器会话模块设计梳理
 
-Status: Draft  
-Updated: 2026-05-30  
+Status: Draft
+Updated: 2026-06-14
 Scope: Design only — 不含实现代码，不含重构建议
 
 ---
@@ -260,23 +260,31 @@ checkAnalysisTrigger:
 用户点击"批准"（Chat 视图 EditorWriteApprovalUI）
   → ToolMessagePart.handleEditorWriteApprove()
     → POST /api/claude-agent/tool-confirm {approved: true}
-    ← {ok: true}  ← 此时后端 DB 写入尚未完成（异步）
-    → onEditorWriteConfirmed()
-      → App.handleEditorWriteConfirmed()
-        → await setTimeout(2000ms)   ← 等待后端 DB 写入完成
-        → GET /api/sessions/{sessionId}
-          ← 最新 editor_state（包含 Agent 写入内容）
-        → engineRef.current.loadState(refreshed)
-        → setState({ ...engine.getState() })
-          → useTextCells useEffect（监听 state）
-            → setLocalTexts 同步更新
-          → Writing 视图 textarea 渲染新内容
+    ← {ok: true}  ← 确认已交给 Agent runner，不代表 MCP 写入已完成
+    → onEditorWriteConfirmed(toolCallId)
+      → App.handleEditorWriteConfirmed(toolCallId)
+        → 注册按 toolCallId 的超时 fallback
+
+Agent runner 继续执行 MCP 写工具
+  → mcp__editor__* 写入 user_sessions.editor_state_json
+  → ClaudeAgentService 收到成功 tool_result
+  → 从 DB reload editor_state 到 AgentRunState
+  → SessionEventBus 发布 session_updated {source:"agent", toolCallId}
+  → 前端 /api/sessions/events 收到事件
+  → 清除 fallback timer
+  → GET /api/sessions/{sessionId}
+    ← 最新 editor_state（包含 Agent 写入内容）
+  → engineRef.current.loadState(refreshed, {source:"remote"})
+  → Writing 视图 textarea 渲染新内容
+  → 自动保存 effect 消费 remote 标记并跳过本轮 POST
 ```
 
 **设计约束**：
-- 2000ms 延迟是经验值，保证后端 MCP 工具执行（DB 写入）在前端拉取前完成。
-- 延迟期间若 `engineRef.current` 变为 `null`（用户切换会话），直接返回，避免写入错误会话。
-- 拉取使用 `engineRef.current.getState().id` 而非闭包中的 `state.id`，保证拉取最新 live 会话 ID。
+- `POST /api/claude-agent/tool-confirm` 只表示确认已提交，不能作为 DB 写完成信号。
+- DB 写完成信号由 `SessionEventBus` 的 `source="agent"` 事件提供；事件发布点在 `ClaudeAgentService` 成功处理 editor write `tool_result` 后。
+- 前端按 `toolCallId` 去重，兼容“事件先到”和“确认回调先到”两种顺序。
+- 若 SSE 不可用，`App.handleEditorWriteConfirmed` 通过集中配置的 `EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS` 降级拉取一次当前 session。
+- 拉取前检查 `engineRef.current.getState().id`，避免用户切换会话后把远端状态载入错误会话。
 
 ---
 
@@ -434,7 +442,7 @@ flowchart LR
 | **无操作历史（Undo/Redo）** | EditorEngine 不维护操作栈，无法撤销 |
 | **无细粒度事件类型** | 状态变更以整体快照推送，无法区分"文本变更"vs"评论应用"vs"任务更新" |
 | **Agent 操作无入口** | 当前所有状态变更入口仅暴露给人类 UI（React Hooks），无 Agent 可调用的命令接口 |
-| **Agent MCP 写工具确认后前端状态未及时更新** | 用户在 Chat 视图批准 `mcp__editor__` 写工具时，`onEditorWriteConfirmed` 立即触发并调用 `/api/sessions/{id}` 拉取最新状态。但后端 MCP 工具执行（DB 写入）在工具确认 HTTP 响应返回后异步进行，导致前端拉到的仍是旧数据，Writing 视图无法反映 Agent 写入内容。**修复策略**：在 `handleEditorWriteConfirmed`（`App.tsx`）调用 `getSession()` 前插入 2000ms 延迟，保证 DB 写入先于前端拉取完成。 |
+| **Agent MCP 写工具确认后前端状态未及时更新** | 用户在 Chat 视图批准 `mcp__editor__` 写工具时，`POST /api/claude-agent/tool-confirm` 的响应不代表 DB 写入完成。现已通过 `SessionEventBus` 在成功 editor write `tool_result` 后发布 `session_updated source=agent`，前端按 `toolCallId` 收到事件后 reload 当前 Writing session；SSE 不可用时按配置超时 fallback。 |
 | **保存无重试机制** | 自动保存失败仅 console.error，无排队重试 |
 | **评论应用不可配置** | threshold=50 硬编码在 Engine 构造函数中 |
 | **跨设备同步** | 无冲突解决机制，最后写入覆盖（last-write-wins） |
@@ -447,7 +455,7 @@ flowchart LR
 ### 9.1 当前模块特征总结
 
 - **EditorEngine 是单一状态权威**：所有状态变更通过 Engine 方法入口，副作用在 Engine 内完成后以快照推送给订阅者。这是一个**命令模式（Command Pattern）的弱化版本**——命令存在（方法调用）但没有显式的命令对象。
-  
+
 - **能量模型是核心设计**：文本写作的"量感"通过 weight/delta/energy 积累来量化，驱动 AI 评论的节奏感。这是 Ink & Memory 区别于普通编辑器的核心设计。
 
 - **Hooks 层是用户意图到引擎命令的适配器**：React Hooks 承担了 UI 事件的适配、IME 保护、防抖、认证判断等横切关注点，使 Engine 保持纯粹。

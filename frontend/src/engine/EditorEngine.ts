@@ -4,6 +4,8 @@
  * [Sync] 2026-05-30: fix insertWidgetAfterLine to always ensure a text cell exists after any widget,
  *   even when inserting between two widgets (was only guarding the last-cell case).
  * [Sync] 2026-05-30: fix deleteCell to guarantee last cell is always text after widget removal.
+ * [Sync] 2026-06-14: add loadState source markers so remote Agent-write reloads
+ *   can skip the next automatic save cycle.
  */
 
 import { findNormalizedPhrase } from '../utils/textNormalize';
@@ -75,6 +77,8 @@ export interface WeightEntry {
   energy: number; // Accumulated energy at this point
 }
 
+export type EditorStateLoadSource = 'local' | 'remote';
+
 // @@@ Weight function implementation
 export function computeWeight(text: string): number {
   let weight = 0;
@@ -128,6 +132,7 @@ export class EditorEngine {
   private onStateChange?: (state: EditorState) => void;
   private isRequesting: boolean = false; // Track if request in progress
   private blankResetSubscribers: Set<() => void> = new Set();
+  private lastLoadSource: EditorStateLoadSource = 'local';
 
   constructor(sessionId: string) {
     this.state = {
@@ -719,10 +724,11 @@ export class EditorEngine {
   }
 
   // @@@ Load state from storage
-  loadState(state: EditorState) {
+  loadState(state: EditorState, options: { source?: EditorStateLoadSource } = {}) {
     if (!state.id) {
       throw new Error('EditorState.id is required when loading');
     }
+    this.lastLoadSource = options.source ?? 'local';
     this.state = { ...state };
     // @@@ Ensure overlappedPhrases field exists (migration for old state)
     if (!this.state.overlappedPhrases) {
@@ -734,6 +740,12 @@ export class EditorEngine {
     // Recompute used energy from applied commentors
     this.usedEnergy = this.state.commentors.filter(c => c.appliedAt).length * this.threshold;
     this.notifyChange();
+  }
+
+  consumeLastLoadSource(): EditorStateLoadSource {
+    const source = this.lastLoadSource;
+    this.lastLoadSource = 'local';
+    return source;
   }
 
   // @@@ Set current entry ID (for calendar overwrite tracking)

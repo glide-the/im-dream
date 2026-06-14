@@ -1,8 +1,8 @@
 # MCP 工具目录 — EditorEngine 资源接口
 
-Status: Updated  
-Updated: 2026-05-29  
-Scope: Design + 实现状态同步（含写工具后 editor_state DB 刷新）
+Status: Updated
+Updated: 2026-06-14
+Scope: Design + 实现状态同步（含写工具后 editor_state DB 刷新与前端事件通知）
 
 ---
 
@@ -45,7 +45,7 @@ EditorEngine 已具备清晰的命令接口，将写操作方法直接映射为 
 
 **数据源说明：**
 
-MCP 写工具子进程通过工具调用参数中的 `editor_session_id` 识别当前文档会话。  
+MCP 写工具子进程通过工具调用参数中的 `editor_session_id` 识别当前文档会话。
 `editor_session_id` 是 `/api/sessions` 接口的 `user_sessions.id`（文档编辑会话 ID），与下列 ID **不同**：
 
 | ID | 含义 | 来源 |
@@ -254,6 +254,8 @@ Agent 意图修改片段内容
       │               → asyncio.to_thread(database.get_session, user_id, editor_session_id)
       │               → state.editor_state = fresh_state（AgentRunState 享元更新）
       │               → run_options.editor_state = fresh_state（当轮 PreToolUse 立即生效）
+      │               → SessionEventBus 发布 session_updated(source=agent, toolCallId)
+      │                 → 前端 /api/sessions/events 收到后 reload Writing 视图
       └── Reject  → hook 返回 { permissionDecision: 'deny' }
                     → Agent 收到拒绝原因，继续对话或调整方案
 ```

@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
-# [Input] Consume database session storage APIs and shared auth/date helpers.
-# [Output] Register /api/sessions* endpoints.
+# [Input] Consume database session storage APIs, edit-session events, and shared auth/date helpers.
+# [Output] Register /api/sessions* endpoints and session event stream.
 # [Pos] session route node in backend/routers
 # [Sync] 2026-05-25: extracted session storage routes from backend/server.py.
+# [Sync] 2026-06-14: publish Edit Session update/delete events and expose
+#                    /api/sessions/events SSE for frontend Agent-write sync.
 
+import asyncio
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import database
+from session_events import EditSessionEvent, session_event_bus
 
 from .deps import (
     _clean_timestamp,
@@ -26,7 +31,7 @@ class SessionBatchRequest(BaseModel):
 
 
 @router.post("/api/sessions")
-def save_session(request: dict, current_user: dict = Depends(get_current_user)):
+async def save_session(request: dict, current_user: dict = Depends(get_current_user)):
     """
     Save or update a session.
 
@@ -49,9 +54,41 @@ def save_session(request: dict, current_user: dict = Depends(get_current_user)):
             status_code=400, detail="session_id and editor_state required"
         )
 
-    database.save_session(user_id, session_id, editor_state, name, labels=labels)
+    await asyncio.to_thread(
+        database.save_session,
+        user_id,
+        session_id,
+        editor_state,
+        name,
+        labels=labels,
+    )
+    asyncio.create_task(
+        session_event_bus.publish(
+            EditSessionEvent(
+                type="session_updated",
+                session_id=session_id,
+                user_id=str(user_id),
+                source="api",
+            )
+        )
+    )
 
     return {"success": True}
+
+
+@router.get("/api/sessions/events")
+async def session_events(current_user: dict = Depends(get_current_user)):
+    """Stream authenticated Edit Session persistence events for the current user."""
+
+    user_id = str(current_user["user_id"])
+    return StreamingResponse(
+        session_event_bus.read(user_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.get("/api/sessions")
@@ -198,10 +235,20 @@ def get_session(session_id: str, current_user: dict = Depends(get_current_user))
 
 
 @router.delete("/api/sessions/{session_id}")
-def delete_session_endpoint(
+async def delete_session_endpoint(
     session_id: str, current_user: dict = Depends(get_current_user)
 ):
     """Delete a session."""
     user_id = current_user["user_id"]
-    database.delete_session(user_id, session_id)
+    await asyncio.to_thread(database.delete_session, user_id, session_id)
+    asyncio.create_task(
+        session_event_bus.publish(
+            EditSessionEvent(
+                type="session_deleted",
+                session_id=session_id,
+                user_id=str(user_id),
+                source="api",
+            )
+        )
+    )
     return {"success": True}
