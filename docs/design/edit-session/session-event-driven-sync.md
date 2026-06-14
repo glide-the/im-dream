@@ -122,15 +122,24 @@
 engine.loadState(refreshed, { source: 'remote' });
 ```
 
-`useSessionLifecycle` 自动保存 effect 在检测到 `remote` 来源时跳过本轮：
+`useSessionLifecycle` 自动保存 effect 在检测到 `remote` 来源时跳过本轮，并把远端状态标记为已持久化：
 
 ```ts
 if (engineRef.current?.consumeLastLoadSource() === 'remote') {
+  markSessionPersisted(remoteState);
   return;
 }
 ```
 
 这样 Agent 写入后的前端 reload 不会立刻反向触发 `POST /api/sessions`。
+
+同一 effect 还维护 editor content signature：
+
+- `cells/commentors/tasks/weightPath/overlappedPhrases/notFoundPhrases/selectedState` 参与签名。
+- `session id/createdAt` 不作为内容变化判断依据，避免 ID 同步或重复 state 通知触发保存。
+- 当前签名等于已持久化签名时，不创建 debounce timer。
+- 当前签名等于已排队签名时，不重置已有 debounce timer。
+- 只有内容签名变化时，才按 `EDIT_SESSION_AUTO_SAVE_DEBOUNCE_MS` 创建或重置自动保存 timer。
 
 ## 4. 时序图
 
@@ -176,7 +185,7 @@ sequenceDiagram
 - 增加一个前端订阅 hook。
 - 修改 Agent 写工具成功回调发布事件。
 - 修改 App reload 逻辑。
-- 修改 Engine/source 标记和自动保存 skip。
+- 修改 Engine/source 标记、自动保存 skip、自动保存内容签名去重。
 
 暂不实现以下内容：
 
@@ -196,4 +205,5 @@ sequenceDiagram
 3. 前端收到对应 `toolCallId` 事件后，只 reload 当前 Writing session。
 4. SSE 不可用时，按 `EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS` 降级 reload。
 5. `loadState(source='remote')` 触发的 state change 不会立刻自动 `POST /api/sessions`。
-6. 单元测试覆盖事件总线用户隔离、SSE payload、Agent 写工具事件发布。
+6. 没有 editor content signature 变化时，不创建 3 秒自动保存 debounce timer，也不会调用 `POST /api/sessions`。
+7. 单元测试覆盖事件总线用户隔离、SSE payload、Agent 写工具事件发布。
