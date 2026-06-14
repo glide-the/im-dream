@@ -2,6 +2,7 @@
 // [Output] Provide editor session lifecycle state, persistence helpers, and current user_session metadata.
 // [Pos] session-lifecycle hook in frontend/src/hooks
 // [Sync] 2026-06-01: expose current user_session.labels for the writing view StateChooser.
+// [Sync] 2026-06-14: skip one automatic save after remote Agent-write session reload.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EditorEngine } from '../engine/EditorEngine';
 import type { EditorState, TextCell } from '../engine/EditorEngine';
@@ -501,6 +502,10 @@ export function useSessionLifecycle({
 
   useEffect(() => {
     if (!isAuthenticated) return;
+
+    if (engineRef.current?.consumeLastLoadSource() === 'remote') {
+      return;
+    }
 
     const autoSaveTimer = setTimeout(async () => {
       const stateSnapshot = ensureStateForPersistence();

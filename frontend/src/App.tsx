@@ -6,7 +6,7 @@
 // [Sync] 2026-05-29: add handleEditorWriteConfirmed callback; reloads session from DB after agent MCP write tool approved.
 // [Sync] 2026-05-29: keep ChatView mounted after first open so chat state survives app view switches.
 // [Sync] 2026-05-29: listen for editor:jump-to-cell custom event; switch to writing view and scroll+focus target textarea.
-// [Sync] 2026-05-30: add 2s delay in handleEditorWriteConfirmed before getSession to fix race condition where DB write had not completed.
+// [Sync] 2026-06-14: replace 2s MCP write blind wait with Edit Session SSE event sync plus timeout fallback.
 // [Sync] 2026-05-30: fix handleAgentSelect to focus text cell after inserted widget; fixes "cannot insert cells after widget" bug.
 // [Sync] 2026-05-30: restore inline Deck chat — handleAgentSelect inserts widget, stays in writing view; handleChatSend uses chatWithVoice with full context (allText, metaPrompt, statePrompt); "Chat →" button available when thread exists.
 // [Sync] 2026-06-01: pass state as editorState to chatWithVoiceSSE in handleChatSend so inline widget agent receives editor_state.
@@ -51,9 +51,14 @@ import { InspirationHint } from './components/Editor/InspirationHint';
 import { useComments } from './hooks/useComments';
 import { useTextCells } from './hooks/useTextCells';
 import { useVoiceInput } from './hooks/useVoiceInput';
+import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import type { ActiveChatVoice } from './lib/chat-schema';
+import {
+  EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
+  EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS,
+} from './constants/sessionSync';
 
 // @@@ Icon map with React Icons
 const iconMap = {
@@ -270,6 +275,79 @@ export default function App() {
     isMobile,
     engineRef,
   });
+
+  const pendingEditorWriteFallbacksRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const completedEditorWriteToolIdsRef = useRef<Set<string>>(new Set());
+  const completedEditorWriteCleanupRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  const rememberCompletedEditorWriteTool = useCallback((toolCallId: string) => {
+    completedEditorWriteToolIdsRef.current.add(toolCallId);
+
+    const existingTimer = completedEditorWriteCleanupRef.current.get(toolCallId);
+    if (existingTimer) clearTimeout(existingTimer);
+
+    const cleanupTimer = setTimeout(() => {
+      completedEditorWriteToolIdsRef.current.delete(toolCallId);
+      completedEditorWriteCleanupRef.current.delete(toolCallId);
+    }, EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS);
+    completedEditorWriteCleanupRef.current.set(toolCallId, cleanupTimer);
+  }, []);
+
+  const reloadEditorSessionFromDatabase = useCallback(async (sessionId: string) => {
+    if (!isAuthenticated || !engineRef.current) return;
+    const liveSessionId = engineRef.current.getState().id;
+    if (liveSessionId !== sessionId) return;
+
+    try {
+      const { getSession } = await import('./api/voiceApi');
+      const sessionData = await getSession(sessionId);
+      if (sessionData?.editor_state && engineRef.current?.getState().id === sessionId) {
+        const refreshed: EditorState = {
+          ...sessionData.editor_state,
+          id: sessionId,
+        };
+        engineRef.current.loadState(refreshed, { source: 'remote' });
+        setState({ ...engineRef.current.getState() });
+        setCurrentSessionLabels(sessionData.labels);
+        setRefsReady(prev => prev + 1);
+      }
+    } catch (error) {
+      console.error('Failed to reload editor state after agent write:', error);
+    }
+  }, [engineRef, isAuthenticated, setCurrentSessionLabels, setRefsReady, setState]);
+
+  useEditSessionEvents(isAuthenticated, {
+    onEvent: (event) => {
+      if (event.type !== 'session_updated' || event.source !== 'agent' || !event.sessionId) {
+        return;
+      }
+
+      if (event.toolCallId) {
+        const pendingTimeout = pendingEditorWriteFallbacksRef.current.get(event.toolCallId);
+        if (pendingTimeout) {
+          clearTimeout(pendingTimeout);
+          pendingEditorWriteFallbacksRef.current.delete(event.toolCallId);
+        }
+        rememberCompletedEditorWriteTool(event.toolCallId);
+      }
+
+      void reloadEditorSessionFromDatabase(event.sessionId);
+    },
+  });
+
+  useEffect(() => {
+    const pendingFallbacks = pendingEditorWriteFallbacksRef.current;
+    const completedCleanup = completedEditorWriteCleanupRef.current;
+    const completedToolIds = completedEditorWriteToolIdsRef.current;
+
+    return () => {
+      pendingFallbacks.forEach((timer) => clearTimeout(timer));
+      pendingFallbacks.clear();
+      completedCleanup.forEach((timer) => clearTimeout(timer));
+      completedCleanup.clear();
+      completedToolIds.clear();
+    };
+  }, []);
 
   const energyThreshold = 50;
   const appliedComments = state?.commentors.filter(c => c.appliedAt) ?? [];
@@ -685,31 +763,27 @@ export default function App() {
     setCommentsAligned(prev => !prev);
   }, []);
 
-  // @@@ Reload editor state from database after Agent MCP write tool is confirmed.
-  // Delay 2s before fetching to avoid a race condition where the DB write has not
-  // yet completed when the tool-confirm HTTP response returns.
-  const handleEditorWriteConfirmed = useCallback(async () => {
+  // @@@ Reload editor state after Agent MCP write completion.
+  // The primary path is /api/sessions/events (source=agent, keyed by toolCallId).
+  // If the stream is unavailable, a bounded fallback pulls the current session.
+  const handleEditorWriteConfirmed = useCallback((toolCallId?: string) => {
     if (!isAuthenticated || !state?.id || !engineRef.current) return;
-    try {
-      await new Promise<void>(resolve => setTimeout(resolve, 2000));
-      if (!engineRef.current) return;
-      const sessionId = engineRef.current.getState().id || state.id;
-      const { getSession } = await import('./api/voiceApi');
-      const sessionData = await getSession(sessionId);
-      if (sessionData?.editor_state) {
-        const refreshed: EditorState = {
-          ...sessionData.editor_state,
-          id: sessionId,
-        };
-        engineRef.current.loadState(refreshed);
-        setState({ ...engineRef.current.getState() });
-        setCurrentSessionLabels(sessionData.labels);
-        setRefsReady(prev => prev + 1);
-      }
-    } catch (error) {
-      console.error('Failed to reload editor state after agent write:', error);
+    const sessionId = engineRef.current.getState().id || state.id;
+    const fallbackKey = toolCallId || `session:${sessionId}`;
+
+    if (toolCallId && completedEditorWriteToolIdsRef.current.has(toolCallId)) {
+      return;
     }
-  }, [isAuthenticated, state?.id]);
+    if (pendingEditorWriteFallbacksRef.current.has(fallbackKey)) {
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      pendingEditorWriteFallbacksRef.current.delete(fallbackKey);
+      void reloadEditorSessionFromDatabase(sessionId);
+    }, EDITOR_WRITE_EVENT_FALLBACK_TIMEOUT_MS);
+    pendingEditorWriteFallbacksRef.current.set(fallbackKey, timeout);
+  }, [engineRef, isAuthenticated, reloadEditorSessionFromDatabase, state?.id]);
 
   // @@@ Jump to a specific cell in the writing view (triggered by editor:jump-to-cell custom event)
   const jumpToCellRef = useRef<string | null>(null);

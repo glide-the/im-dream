@@ -7,6 +7,7 @@
 // [Sync] 2026-05-29: integrate EditorWriteApprovalUI for mcp__editor__ write tools; detect by isEditorWriteTool().
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; call after successful editor write approve to trigger Writing view reload.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin tool confirmation requests.
+// [Sync] 2026-06-14: pass toolCallId to onEditorWriteConfirmed for event-driven reload de-duplication.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
@@ -58,7 +59,7 @@ interface ToolMessagePartProps {
   isManualToolInvocation?: boolean;
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
   /** Called after an editor write tool is successfully confirmed so the Writing view can reload. */
-  onEditorWriteConfirmed?: () => void;
+  onEditorWriteConfirmed?: (toolCallId: string) => void;
 }
 
 export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToolInvocation, addToolResult, onEditorWriteConfirmed }: ToolMessagePartProps) {
@@ -184,7 +185,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
       if (result.ok ?? result.success) {
         addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
         setConfirmationStatus('confirmed');
-        onEditorWriteConfirmed?.();
+        onEditorWriteConfirmed?.(toolCallId);
         return;
       }
     } catch {

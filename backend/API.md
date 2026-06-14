@@ -193,6 +193,28 @@ List all sessions for current user (metadata only, no editor_state).
 
 ---
 
+### GET `/api/sessions/events`
+
+Stream Edit Session update/delete events for the authenticated user.
+
+**Headers:** `Authorization: Bearer <token>`, `Accept: text/event-stream`
+
+**Response:** `text/event-stream`
+
+```text
+event: session_updated
+data: {"type":"session_updated","sessionId":"session-123","source":"agent","toolCallId":"tool-call-1","toolName":"mcp__editor__write_segment","timestamp":"2026-06-14T00:00:00Z"}
+```
+
+**Event sources:**
+- `api` - regular `/api/sessions` save/delete calls
+- `agent` - successful Agent MCP editor write tool results
+
+**Errors:**
+- `401` - Missing or invalid token
+
+---
+
 ### GET `/api/sessions/{session_id}`
 
 Get a specific session including full editor_state.

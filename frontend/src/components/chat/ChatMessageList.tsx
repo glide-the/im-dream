@@ -16,6 +16,7 @@
 //                    as a terminal-style file write preview.
 // [Sync] 2026-06-14: collapse long built-in Write file previews by default while
 //                    keeping full-content copy and an inline expand/collapse control.
+// [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
 import { useState } from 'react';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -37,7 +38,7 @@ interface ChatMessageListProps {
   setMessages?: UseChatHelpers<UIMessage>['setMessages'];
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
   /** Forwarded to ToolMessagePart for editor write tools — triggers Writing view reload. */
-  onEditorWriteConfirmed?: () => void;
+  onEditorWriteConfirmed?: (toolCallId: string) => void;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';

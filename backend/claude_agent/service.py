@@ -75,6 +75,9 @@
 # [Sync] 2026-06-13: forward runner tool_input_delta events as SSE tool-input-delta
 #                    frames so frontend can render built-in Write tool terminal
 #                    previews while input_json_delta chunks stream.
+# [Sync] 2026-06-14: publish Edit Session session_updated events after successful
+#                    editor MCP write tool results so the frontend can reload
+#                    without a fixed 2000ms wait.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -117,6 +120,7 @@ from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolCon
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
+from session_events import EditSessionEvent, session_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +149,14 @@ _EDITOR_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
 # ---------------------------------------------------------------------------
 # Resume helpers
 # ---------------------------------------------------------------------------
+
+
+def _tool_result_ok(output: Any) -> bool:
+    """Return False when an MCP tool returned a structured ``{"ok": false}``."""
+
+    if isinstance(output, dict) and output.get("ok") is False:
+        return False
+    return True
 
 
 def _has_usable_claude_resume(existing_session: Optional[Mapping[str, Any]]) -> bool:
@@ -903,6 +915,7 @@ class ClaudeAgentService:
                 resolved_tool_name = tool_name or turn_ctx.tool_name_by_id.get(tool_call_id, "")
                 if (
                     not is_error
+                    and _tool_result_ok(payload.output)
                     and resolved_tool_name in _EDITOR_WRITE_TOOL_NAMES
                     and state is not None
                     and state.editor_state is not None
@@ -929,6 +942,16 @@ class ClaudeAgentService:
                                 "editor_session_id=%s user_id=%s",
                                 resolved_tool_name, editor_session_id, user_id,
                             )
+                        await session_event_bus.publish(
+                            EditSessionEvent(
+                                type="session_updated",
+                                session_id=editor_session_id,
+                                user_id=str(user_id),
+                                source="agent",
+                                tool_call_id=tool_call_id,
+                                tool_name=resolved_tool_name,
+                            )
+                        )
                 return
 
         return on_tool_event

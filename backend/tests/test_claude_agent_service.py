@@ -5,6 +5,8 @@
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-14: combine system_config assembly coverage with tool_input_delta
 #                    -> tool-input-delta SSE forwarding coverage.
+# [Sync] 2026-06-14: cover Edit Session event publication after successful
+#                    editor MCP write tool results.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -159,6 +161,56 @@ class TestClaudeAgentServiceToolInputDelta(unittest.TestCase):
         self.assertEqual(second["toolName"], "Write")
         self.assertEqual(second["delta"], '{"file_path":"files/note.md"')
         self.assertEqual(turn_ctx.collected_parts, [])
+
+
+class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
+    def test_editor_write_tool_result_publishes_session_event(self):
+        async def scenario():
+            queue: asyncio.Queue[str] = asyncio.Queue()
+            turn_ctx = _TurnContext(
+                queue=queue,
+                confirmation_store=ToolConfirmationStore(),
+            )
+            state = AgentRunState(session_id="thread-editor-write")
+            state.with_editor_state({"id": "session-editor-write"}, 7)
+            callback = ClaudeAgentService._make_tool_event_cb(queue, turn_ctx, state)
+            subscription = await service_module.session_event_bus.subscribe("7")
+
+            try:
+                with unittest.mock.patch.object(
+                    service_module._db,
+                    "get_session",
+                    return_value={
+                        "id": "session-editor-write",
+                        "editor_state": {
+                            "id": "session-editor-write",
+                            "cells": [{"id": "cell-1", "type": "text", "content": "new"}],
+                        },
+                    },
+                ) as get_session:
+                    await callback(
+                        ToolEventPayload(
+                            type="tool_result",
+                            tool_name="mcp__editor__write_segment",
+                            tool_call_id="tool-call-1",
+                            output={"ok": True, "cellId": "cell-1"},
+                            is_error=False,
+                        )
+                    )
+
+                event = await asyncio.wait_for(subscription.get(), timeout=1.0)
+            finally:
+                await service_module.session_event_bus.unsubscribe("7", subscription)
+
+            self.assertEqual(get_session.call_args.args, (7, "session-editor-write"))
+            self.assertEqual(event.type, "session_updated")
+            self.assertEqual(event.session_id, "session-editor-write")
+            self.assertEqual(event.source, "agent")
+            self.assertEqual(event.tool_call_id, "tool-call-1")
+            self.assertEqual(event.tool_name, "mcp__editor__write_segment")
+            self.assertEqual(state.editor_state["cells"][0]["content"], "new")
+
+        _run(scenario())
 
 
 if __name__ == "__main__":
