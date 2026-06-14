@@ -2,12 +2,16 @@
 # [Output] Build the Vite SPA and serve it under /ink-and-memory/ with nginx.
 # [Pos] deployment image spec in frontend/
 # [Sync] 2026-06-12: add configurable npm mirror build arg for faster China builds.
+# [Sync] 2026-06-14: pass VITE_PUBLIC_SITE_URL into Vite build for static SEO metadata.
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
+ARG VITE_PUBLIC_SITE_URL=http://localhost/ink-and-memory/
 
 # ── Stage 1: build ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
 ARG NPM_REGISTRY
+ARG VITE_PUBLIC_SITE_URL
+ENV VITE_PUBLIC_SITE_URL="${VITE_PUBLIC_SITE_URL}"
 
 WORKDIR /app
 

@@ -1,7 +1,12 @@
 # Ink & Memory API Documentation
+<!--
+[Input] Backend FastAPI routes and deployment public URL configuration.
+[Output] Human-readable API reference for authenticated app APIs and public utility endpoints.
+[Sync] 2026-06-14: document public SEO endpoints generated from INK_PUBLIC_BASE_URL and INK_BACKEND_PUBLIC_BASE_URL.
+-->
 
 **Version:** 2.0.0
-**Base URL:** `http://localhost:8765` (dev) | `https://lexicalmathical.com/ink-and-memory` (prod)
+**Base URL:** `http://localhost:8765` (dev backend) | `https://ink-backend.suoxya.com` (prod backend). Public app URLs in crawler files come from `INK_PUBLIC_BASE_URL`; backend API links come from `INK_BACKEND_PUBLIC_BASE_URL`.
 
 ## Authentication
 
@@ -10,6 +15,24 @@ All endpoints except `/api/register`, `/api/login`, and `/api/default-voices` re
 **Header:** `Authorization: Bearer <JWT_TOKEN>`
 
 JWT tokens expire after 7 days.
+
+---
+
+## Public SEO Endpoints
+
+These endpoints do not require authentication. The frontend nginx service proxies root and `/ink-and-memory/` requests for these files to the backend so crawler content stays environment-driven.
+
+### GET `/robots.txt`
+
+Returns crawler policy for the public app. Search visibility crawlers such as `GPTBot`, `OAI-SearchBot`, `ChatGPT-User`, `ClaudeBot`, and `PerplexityBot` can access the public app path, while private API and websocket paths are excluded.
+
+### GET `/sitemap.xml`
+
+Returns an XML sitemap for the public SPA surface using `INK_PUBLIC_BASE_URL` as the canonical app URL.
+
+### GET `/llms.txt`
+
+Returns a structured AI-search summary describing Ink & Memory, primary public pages, product facts, keywords, backend API origin, and authenticated API boundaries.
 
 ---
 

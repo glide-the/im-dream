@@ -1,3 +1,7 @@
+# [Input] Local Docker build context, backend/.env, and optional public URL env overrides.
+# [Output] Two-container local stack with frontend SEO build URL and backend public app URL configured.
+# [Pos] root local Docker Compose stack
+# [Sync] 2026-06-14: pass public app/API URLs into frontend build and backend SEO generators.
 version: "3.8"
 
 services:
@@ -21,6 +25,8 @@ services:
       - ./backend/.env
     environment:
       TZ: UTC
+      INK_PUBLIC_BASE_URL: ${FRONTEND_PUBLIC_SITE_URL:-http://localhost/ink-and-memory/}
+      INK_BACKEND_PUBLIC_BASE_URL: ${BACKEND_PUBLIC_SITE_URL:-http://127.0.0.1:8765/}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8765/api/health')"]
       interval: 30s
@@ -33,6 +39,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        VITE_PUBLIC_SITE_URL: ${FRONTEND_PUBLIC_SITE_URL:-http://localhost/ink-and-memory/}
     image: ink-frontend:local
     container_name: ink-frontend
     restart: unless-stopped

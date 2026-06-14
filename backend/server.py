@@ -7,6 +7,8 @@
 # [Sync] 2026-05-25: split REST API routes into backend/routers modules; keep PolyCLI session defs, root, websocket, scheduler, and mounts here.
 # [Sync] 2026-06-09: allowlist INK_AGENT_EVENT_BUS_* / INK_AGENT_REDIS_URL for SSE EventBus config.
 # [Sync] 2026-06-12: make CORS origin/credential policy environment-driven for cross-origin deployments.
+# [Sync] 2026-06-14: expose robots.txt, sitemap.xml, and llms.txt from shared SEO content generators.
+# [Sync] 2026-06-14: separate frontend public app URL from backend public API origin for SEO files.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -55,7 +57,7 @@ from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 try:
     from polycli.orchestration.session_registry import session_def, get_registry
@@ -99,6 +101,7 @@ except ImportError:
         )
 
 import config
+from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
 from picture_service import _generate_picture_for_date, _today_in_tz
 from typing import Optional, List, Any
 from pydantic import BaseModel
@@ -111,6 +114,7 @@ SUPPORTED_LANGUAGES = {"en", "zh"}
 DEFAULT_LANGUAGE = "en"
 BACKEND_VERSION = os.environ.get("BACKEND_VERSION", "unknown")
 PUBLIC_BASE_URL = os.environ.get("INK_PUBLIC_BASE_URL", "/")
+BACKEND_PUBLIC_BASE_URL = os.environ.get("INK_BACKEND_PUBLIC_BASE_URL", PUBLIC_BASE_URL)
 
 
 def _split_csv_env(name: str, default: str) -> list[str]:
@@ -815,10 +819,37 @@ async def shutdown_claude_agent():
 @app.get("/")
 def root():
     """Root endpoint"""
-    base = PUBLIC_BASE_URL.rstrip("/") + "/"
+    base = BACKEND_PUBLIC_BASE_URL.rstrip("/") + "/"
     return PlainTextResponse(
         f"The server is configured with a public base URL of {base}"
         f" - did you mean to visit {base}api/claude-agent/threads instead?"
+    )
+
+
+@app.get("/robots.txt", include_in_schema=False)
+def robots_txt():
+    """Machine-readable crawler access policy for the public app."""
+    return PlainTextResponse(
+        build_robots_txt(PUBLIC_BASE_URL),
+        media_type="text/plain; charset=utf-8",
+    )
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+def sitemap_xml():
+    """XML sitemap for the public app surface."""
+    return Response(
+        build_sitemap_xml(PUBLIC_BASE_URL),
+        media_type="application/xml; charset=utf-8",
+    )
+
+
+@app.get("/llms.txt", include_in_schema=False)
+def llms_txt():
+    """Structured app summary for AI search and LLM crawlers."""
+    return PlainTextResponse(
+        build_llms_txt(PUBLIC_BASE_URL, BACKEND_PUBLIC_BASE_URL),
+        media_type="text/plain; charset=utf-8",
     )
 
 

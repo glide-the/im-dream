@@ -4,6 +4,7 @@
 # [Sync] 2026-06-12: pin backend container PORT to the mapped container port so env_file cannot desync uvicorn and Compose.
 # [Sync] 2026-06-13: remove obsolete version field for Docker Compose v2 compatibility.
 # [Sync] 2026-06-14: allow Claude Code nested Bash sandbox in backend Docker runtime.
+# [Sync] 2026-06-14: pass frontend/backend public URLs into backend SEO generators and frontend Vite build.
 
 services:
   ink-backend:
@@ -39,6 +40,8 @@ services:
       FILE_STORAGE_PREFIX: ${REMOTE_FILE_STORAGE_PREFIX:-uploads}
       INK_CORS_ALLOW_ORIGINS: ${REMOTE_CORS_ALLOW_ORIGINS:-https://ink-frontend.suoxya.com,https://ink-backend.suoxya.com,http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}
       INK_CORS_ALLOW_CREDENTIALS: ${REMOTE_CORS_ALLOW_CREDENTIALS:-false}
+      INK_PUBLIC_BASE_URL: ${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}/ink-and-memory/
+      INK_BACKEND_PUBLIC_BASE_URL: ${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}
     healthcheck:
       test: ["CMD", "python", "-c", "import os, urllib.request; urllib.request.urlopen('http://localhost:' + os.environ.get('PORT', '8765') + '/api/health')"]
       interval: 30s
@@ -50,6 +53,8 @@ services:
     build:
       context: ../../frontend
       dockerfile: Dockerfile
+      args:
+        VITE_PUBLIC_SITE_URL: ${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}/ink-and-memory/
     image: ${REMOTE_FRONTEND_IMAGE:-ink-frontend:remote}
     container_name: ${REMOTE_FRONTEND_CONTAINER:-ink-frontend}
     restart: unless-stopped

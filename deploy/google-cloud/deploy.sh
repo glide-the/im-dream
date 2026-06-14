@@ -6,6 +6,7 @@
 # [Sync] 2026-06-12: deployment summary prints original Cloud Run gateways separately from fixed public domains.
 # [Sync] 2026-06-12: add backup-data command for local bak_<date> cloud SQLite snapshots before maintenance.
 # [Sync] 2026-06-12: call setup-storage/sync-data implementations from deploy/google-cloud instead of deploy/ root.
+# [Sync] 2026-06-14: build frontend with public SEO URL and update backend SEO public URL envs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -94,14 +95,14 @@ run() {
 }
 
 run_parallel_builds() {
-  local backend_image="$1" frontend_image="$2"
+  local backend_image="$1" frontend_image="$2" frontend_public_site_url="$3"
   if [[ "${DRY_RUN}" == "1" ]]; then
     print_cmd docker build --no-cache --platform linux/amd64 --tag "${backend_image}" "${REPO_ROOT}/backend/"
-    print_cmd docker build --platform linux/amd64 --tag "${frontend_image}" "${REPO_ROOT}/frontend/"
+    print_cmd docker build --platform linux/amd64 --build-arg "VITE_PUBLIC_SITE_URL=${frontend_public_site_url}" --tag "${frontend_image}" "${REPO_ROOT}/frontend/"
     return 0
   fi
   docker build --no-cache --platform linux/amd64 --tag "${backend_image}" "${REPO_ROOT}/backend/" &
-  docker build --platform linux/amd64 --tag "${frontend_image}" "${REPO_ROOT}/frontend/" &
+  docker build --platform linux/amd64 --build-arg "VITE_PUBLIC_SITE_URL=${frontend_public_site_url}" --tag "${frontend_image}" "${REPO_ROOT}/frontend/" &
   wait
 }
 
@@ -308,11 +309,13 @@ command_deploy() {
   check_base
   load_generated_env
 
-  local project_id registry backend_image frontend_image
+  local project_id registry backend_image frontend_image frontend_public_origin frontend_public_site_url
   project_id="$(effective_project_id)"
   registry="${REGION}-docker.pkg.dev/${project_id}/${REPO_NAME}"
   backend_image="${registry}/ink-backend:${IMAGE_TAG}"
   frontend_image="${registry}/ink-frontend:${IMAGE_TAG}"
+  frontend_public_origin="$(normalize_origin_list "${FRONTEND_PUBLIC_ORIGIN}")"
+  frontend_public_site_url="${frontend_public_origin%/}/ink-and-memory/"
 
   log "Storage  : bucket=${GCS_BUCKET}, sa=${SA_EMAIL}"
   log "Env vars : ${CLOUD_ENV_VARS}"
@@ -335,7 +338,7 @@ command_deploy() {
   run gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
   log "Building backend and frontend images..."
-  run_parallel_builds "${backend_image}" "${frontend_image}"
+  run_parallel_builds "${backend_image}" "${frontend_image}" "${frontend_public_site_url}"
   log "Both images built."
 
   log "Pushing backend and frontend images..."
@@ -391,16 +394,17 @@ command_deploy() {
   local frontend_url
   frontend_url="$(describe_service_url "${FRONTEND_SERVICE}" "${project_id}" "https://${FRONTEND_SERVICE}-example.run.app")"
 
-  local frontend_public_origin cors_origins cors_credentials
-  frontend_public_origin="$(normalize_origin_list "${FRONTEND_PUBLIC_ORIGIN}")"
+  local cors_origins cors_credentials
   cors_origins="$(normalize_origin_list "${BACKEND_CORS_ALLOW_ORIGINS:-${frontend_public_origin}}")"
   cors_credentials="${INK_CORS_ALLOW_CREDENTIALS:-false}"
 
   log "Updating backend CORS origin to: ${cors_origins}"
+  log "Updating backend public SEO app URL to: ${frontend_public_site_url}"
+  log "Updating backend public SEO API origin to: ${backend_public_origin}"
   run gcloud run services update "${BACKEND_SERVICE}" \
     --region="${REGION}" \
     --project="${project_id}" \
-    --update-env-vars="^|^INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}" \
+    --update-env-vars="^|^INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}" \
     --quiet
 
   echo ""

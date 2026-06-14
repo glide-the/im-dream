@@ -18,7 +18,8 @@ tests/
 ├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
 ├── test_claude_agent_runner.py          # Runner: streaming callbacks, session_id, error handling
 ├── test_claude_agent_thread_factory.py  # Factory: flyweight cache, TTL eviction, Phase 1-4 contracts
-└── test_server_claude_agent.py          # Server smoke: route registration, auth enforcement, models
+├── test_server_claude_agent.py          # Server smoke: route registration, auth enforcement, models
+└── test_seo_content.py                  # SEO robots/sitemap/llms content generators
 ```
 
 ## Running Tests
@@ -85,6 +86,12 @@ source .venv/bin/activate
 python tests/test_server_claude_agent.py -v
 ```
 
+**SEO Content Generators (no server needed):**
+```bash
+source .venv/bin/activate
+python tests/test_seo_content.py -v
+```
+
 ## Test Coverage
 
 ### Claude Agent — Workspace (`test_claude_agent_workspace.py`)
@@ -135,6 +142,12 @@ python tests/test_server_claude_agent.py -v
 - ✅ `claude_agent_thread_factory` 实例已创建
 - ✅ startup/shutdown 钩子已注册
 - ✅ 无 JWT 时返回 401
+
+### SEO Content (`test_seo_content.py`)
+- ✅ Public URL normalization for `INK_PUBLIC_BASE_URL`
+- ✅ `robots.txt` allows AI search crawlers while excluding private API paths
+- ✅ `sitemap.xml` contains only public app URLs
+- ✅ `llms.txt` describes the app, backend API origin, health endpoint, and authenticated API boundary
 
 ### Database Layer (`test_database.py`)
 - ✅ Get system decks
