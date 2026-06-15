@@ -122,13 +122,13 @@ docker compose up --build
 启动后默认访问：
 
 ```text
-http://localhost/ink-and-memory/
+http://localhost/
 ```
 
 ### 验证流程
 
-- 浏览器访问 `/ink-and-memory/` 能加载前端。
-- 前端读取 `/ink-and-memory/runtime-config.js` 后，浏览器直接跨域请求 `API_BASE_URL`。
+- 浏览器访问 `/` 能加载前端。
+- 前端读取 `/runtime-config.js` 后，浏览器直接跨域请求 `API_BASE_URL`。
 - 后端健康检查通过 `http://localhost:8765/api/health`。
 - `backend/data/` 中生成或更新 SQLite 数据文件。
 
@@ -252,7 +252,7 @@ npm run dev
 
 - 面向团队或公开用户的线上发布。
 - 需要 Cloud Run 托管、Artifact Registry 镜像仓库、GCS 持久化、Secret Manager 管理密钥。
-- 需要通过固定前端域名 `https://ink-frontend.suoxya.com/ink-and-memory/` 访问。
+- 需要通过固定前端域名 `https://ink-frontend.suoxya.com/` 访问。
 
 ### 目标用户
 
@@ -314,7 +314,7 @@ export GCP_PROJECT_ID=your-project-id
 ### 验证流程
 
 - `gcloud run services describe` 能看到前后端服务 URL。
-- 前端 URL 加 `/ink-and-memory/` 能加载静态资源。
+- 前端根 URL 能加载静态资源。
 - 前端浏览器请求直接跨域访问 `https://ink-backend.suoxya.com`，后端 `INK_CORS_ALLOW_ORIGINS` 包含 `https://ink-frontend.suoxya.com` 后响应 CORS preflight 和实际请求。
 - 后端只有 1 个最大实例写入同一 GCS FUSE 路径，避免 SQLite 并发写风险。
 - GCS bucket 中能看到 `ink-and-memory.db`、`file-storage/`、`agent-workspace/`。
@@ -333,7 +333,7 @@ export GCP_PROJECT_ID=your-project-id
 | `.storage-env` 缺失 | 先运行 `./deploy/google-cloud/deploy.sh setup-storage` |
 | `.cloud-env` 缺失 | 先运行 `./deploy/google-cloud/deploy.sh setup-env` |
 | 前端 API 跨域失败 | 检查前端 `runtime-config.js` 中的 `apiBaseUrl` 是否为 `https://ink-backend.suoxya.com`，以及后端 `INK_CORS_ALLOW_ORIGINS` 是否包含 `https://ink-frontend.suoxya.com` |
-| 前端请求 `Method Not Allowed` | 检查请求 URL 是否仍是前端 `/ink-and-memory/...`；确认 `runtime-config.js` 未缓存且 `apiBaseUrl` 指向 `https://ink-backend.suoxya.com` |
+| 前端请求 `Method Not Allowed` | 检查请求 URL 是否仍打到前端同源 API fallback；确认 `runtime-config.js` 未缓存且 `apiBaseUrl` 指向 `https://ink-backend.suoxya.com` |
 | SQLite 数据异常 | 检查 Cloud Run backend `max-instances=1`，同步数据前先停写或选择维护窗口 |
 | 密钥未生效 | 检查 Secret Manager 版本和 Cloud Run secret ref |
 

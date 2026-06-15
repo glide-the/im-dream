@@ -148,6 +148,7 @@ python tests/test_seo_content.py -v
 - ✅ `robots.txt` allows AI search crawlers while excluding private API paths
 - ✅ `sitemap.xml` contains only public app URLs
 - ✅ `llms.txt` describes the app, backend API origin, health endpoint, and authenticated API boundary
+- ✅ Frontend public URL expectations use the origin root, not `/ink-and-memory/`
 
 ### Database Layer (`test_database.py`)
 - ✅ Get system decks

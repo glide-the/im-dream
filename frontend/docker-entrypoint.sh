@@ -3,6 +3,7 @@
 # [Output] Render nginx config plus frontend runtime config before starting nginx.
 # [Pos] frontend container entrypoint
 # [Sync] 2026-06-12: generate runtime-config.js so deployed frontend can call backend by cross-origin URL.
+# [Sync] 2026-06-15: render runtime-config.js at frontend root after removing /ink-and-memory/ prefix.
 set -eu
 
 # BACKEND_URL remains the nginx proxy fallback; API_BASE_URL is the browser-facing
@@ -17,10 +18,10 @@ envsubst '${BACKEND_URL}' \
   < /etc/nginx/templates/ink.conf.template \
   > /etc/nginx/conf.d/ink.conf
 
-if [ -f /usr/share/nginx/html/ink-and-memory/runtime-config.template.js ]; then
+if [ -f /usr/share/nginx/html/runtime-config.template.js ]; then
   envsubst '${API_BASE_URL} ${WS_BASE_URL}' \
-    < /usr/share/nginx/html/ink-and-memory/runtime-config.template.js \
-    > /usr/share/nginx/html/ink-and-memory/runtime-config.js
+    < /usr/share/nginx/html/runtime-config.template.js \
+    > /usr/share/nginx/html/runtime-config.js
 fi
 
 exec nginx -g 'daemon off;'

@@ -3,6 +3,7 @@
 // [Pos] frontend API base-url utility node
 // [Sync] 2026-06-12: add runtime API_BASE_URL / WS_BASE_URL support for cross-origin deployments.
 // [Sync] 2026-06-12: resolve API_BASE lazily so runtime-config load timing cannot lock the app to same-origin paths.
+// [Sync] 2026-06-15: remove /ink-and-memory same-origin fallback prefix; root deploy uses /api directly.
 
 type RuntimeConfig = {
   apiBaseUrl?: string;
@@ -15,7 +16,7 @@ declare global {
   }
 }
 
-const DEFAULT_API_BASE = '/ink-and-memory';
+const DEFAULT_API_BASE = '';
 
 function cleanBaseUrl(value: string | undefined | null): string | undefined {
   const trimmed = value?.trim();

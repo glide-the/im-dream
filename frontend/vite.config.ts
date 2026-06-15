@@ -1,12 +1,13 @@
 // [Input] Vite mode env, React plugin, and public site URL build configuration.
-// [Output] Build the SPA under /ink-and-memory/ with SEO HTML placeholders resolved.
+// [Output] Build the SPA at the frontend origin root with SEO HTML placeholders resolved.
 // [Pos] frontend build configuration
 // [Sync] 2026-06-14: add Codex SEO public URL replacement for canonical, OG, and JSON-LD metadata.
+// [Sync] 2026-06-15: remove /ink-and-memory/ deployment prefix; serve app at root.
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
-const BASE_PATH = '/ink-and-memory/'
-const DEFAULT_PUBLIC_SITE_URL = 'http://localhost:5173/ink-and-memory/'
+const BASE_PATH = '/'
+const DEFAULT_PUBLIC_SITE_URL = 'http://localhost:5173/'
 
 function withTrailingSlash(value: string): string {
   return value.endsWith('/') ? value : `${value}/`
@@ -57,15 +58,13 @@ export default defineConfig(({ mode }) => {
     base: BASE_PATH,
     server: {
       proxy: {
-        '/ink-and-memory/api': {
+        '/api': {
           target: 'http://localhost:8765',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/ink-and-memory/, '')
         },
-        '/ink-and-memory/polycli': {
+        '/polycli': {
           target: 'http://localhost:8765',
           changeOrigin: true,
-          rewrite: (path) => path.replace(/^\/ink-and-memory/, '')
         }
       }
     }

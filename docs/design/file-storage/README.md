@@ -1,7 +1,8 @@
 # File Storage — Design Document
 
 **Path**: `backend/libs/file_storage/` · `backend/server.py` (`/api/storage/*`)
-**Last updated**: 2026-05-25
+**Last updated**: 2026-06-15
+**Sync**: Client examples use root deployment API paths (`/api/...`).
 
 ---
 
@@ -307,10 +308,10 @@ async def save_generated_image(png_bytes: bytes, name: str) -> str:
 
 ```typescript
 // 1. Check storage config
-const info = await fetch('/ink-and-memory/api/storage', { headers: authHeaders }).then(r => r.json());
+const info = await fetch('/api/storage', { headers: authHeaders }).then(r => r.json());
 
 // 2. Try presigned URL first
-const uploadData = await fetch('/ink-and-memory/api/storage/upload-url', {
+const uploadData = await fetch('/api/storage/upload-url', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json', ...authHeaders },
   body: JSON.stringify({ filename: file.name, contentType: file.type }),
@@ -323,7 +324,7 @@ if (uploadData.directUploadSupported) {
   // 3b. Server upload fallback
   const form = new FormData();
   form.append('file', file);
-  await fetch('/ink-and-memory/api/storage/upload', { method: 'POST', body: form });
+  await fetch('/api/storage/upload', { method: 'POST', body: form });
 }
 ```
 

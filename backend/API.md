@@ -3,6 +3,7 @@
 [Input] Backend FastAPI routes and deployment public URL configuration.
 [Output] Human-readable API reference for authenticated app APIs and public utility endpoints.
 [Sync] 2026-06-14: document public SEO endpoints generated from INK_PUBLIC_BASE_URL and INK_BACKEND_PUBLIC_BASE_URL.
+[Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
 -->
 
 **Version:** 2.0.0
@@ -20,7 +21,7 @@ JWT tokens expire after 7 days.
 
 ## Public SEO Endpoints
 
-These endpoints do not require authentication. The frontend nginx service proxies root and `/ink-and-memory/` requests for these files to the backend so crawler content stays environment-driven.
+These endpoints do not require authentication. The frontend nginx service proxies root-level requests for these files to the backend so crawler content stays environment-driven.
 
 ### GET `/robots.txt`
 

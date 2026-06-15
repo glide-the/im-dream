@@ -3,12 +3,13 @@
 # [Output] Docker Compose check/build/start/verify/stop/clean workflow for Ink & Memory.
 # [Pos] platform release entry in deploy/docker/
 # [Sync] 2026-06-12: add platform-scoped Docker release helper with help, dry-run, and check modes.
+# [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from verification URL.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 COMPOSE_FILE="${DOCKER_COMPOSE_FILE:-${REPO_ROOT}/docker-compose.yml}"
-DOCKER_FRONTEND_URL="${DOCKER_FRONTEND_URL:-http://localhost/ink-and-memory/}"
+DOCKER_FRONTEND_URL="${DOCKER_FRONTEND_URL:-http://localhost/}"
 DOCKER_BACKEND_HEALTH_URL="${DOCKER_BACKEND_HEALTH_URL:-http://127.0.0.1:8765/api/health}"
 
 DRY_RUN=0
@@ -34,7 +35,7 @@ Commands:
 
 Environment overrides:
   DOCKER_COMPOSE_FILE         default: docker-compose.yml
-  DOCKER_FRONTEND_URL         default: http://localhost/ink-and-memory/
+  DOCKER_FRONTEND_URL         default: http://localhost/
   DOCKER_BACKEND_HEALTH_URL   default: http://127.0.0.1:8765/api/health
   CLEAN_IMAGES                default: 0; when 1, add --rmi local to clean
   CLEAN_VOLUMES               default: 0; when 1, add --volumes to clean

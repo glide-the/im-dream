@@ -7,6 +7,7 @@
 # [Sync] 2026-06-12: propagate backend/frontend host ports into nginx setup and pin backend container port.
 # [Sync] 2026-06-13: split deploy into explicit no-cache remote build and force-recreate up steps.
 # [Sync] 2026-06-14: document Claude Code Docker nested sandbox behavior.
+# [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from default verification URL.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -57,7 +58,7 @@ REMOTE_CLEAN_IMAGES="${REMOTE_CLEAN_IMAGES:-0}"
 REMOTE_CLEAN_VOLUMES="${REMOTE_CLEAN_VOLUMES:-0}"
 REMOTE_BUILD_PULL="${REMOTE_BUILD_PULL:-0}"
 REMOTE_FRONTEND_SCHEME="${REMOTE_FRONTEND_SCHEME:-https}"
-REMOTE_FRONTEND_PATH="${REMOTE_FRONTEND_PATH:-/ink-and-memory/}"
+REMOTE_FRONTEND_PATH="${REMOTE_FRONTEND_PATH:-/}"
 REMOTE_PUBLIC_HOST="${REMOTE_PUBLIC_HOST:-${REMOTE_SSH_HOST:-REMOTE_SSH_HOST}}"
 REMOTE_VERIFY_FRONTEND_URL="${REMOTE_VERIFY_FRONTEND_URL:-http://127.0.0.1:${REMOTE_FRONTEND_PORT}${REMOTE_FRONTEND_PATH}}"
 REMOTE_VERIFY_BACKEND_URL="${REMOTE_VERIFY_BACKEND_URL:-http://127.0.0.1:${REMOTE_BACKEND_PORT}/api/health}"

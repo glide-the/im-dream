@@ -7,6 +7,7 @@
 # [Sync] 2026-06-12: add backup-data command for local bak_<date> cloud SQLite snapshots before maintenance.
 # [Sync] 2026-06-12: call setup-storage/sync-data implementations from deploy/google-cloud instead of deploy/ root.
 # [Sync] 2026-06-14: build frontend with public SEO URL and update backend SEO public URL envs.
+# [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from Cloud Run public URLs.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -315,7 +316,7 @@ command_deploy() {
   backend_image="${registry}/ink-backend:${IMAGE_TAG}"
   frontend_image="${registry}/ink-frontend:${IMAGE_TAG}"
   frontend_public_origin="$(normalize_origin_list "${FRONTEND_PUBLIC_ORIGIN}")"
-  frontend_public_site_url="${frontend_public_origin%/}/ink-and-memory/"
+  frontend_public_site_url="${frontend_public_origin%/}/"
 
   log "Storage  : bucket=${GCS_BUCKET}, sa=${SA_EMAIL}"
   log "Env vars : ${CLOUD_ENV_VARS}"
@@ -410,9 +411,9 @@ command_deploy() {
   echo ""
   log "============================================"
   log "  Deployment complete!"
-  log "  Original Cloud Run frontend gateway : ${frontend_url}/ink-and-memory/"
+  log "  Original Cloud Run frontend gateway : ${frontend_url}/"
   log "  Original Cloud Run backend gateway  : ${backend_url}"
-  log "  Public frontend                     : ${frontend_public_origin}/ink-and-memory/"
+  log "  Public frontend                     : ${frontend_public_site_url}"
   log "  Public backend                      : ${backend_public_origin}"
   log "  API base                            : ${frontend_api_base_url}"
   log "  CORS                                : ${cors_origins}"

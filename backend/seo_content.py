@@ -4,6 +4,7 @@
 # [Pos] backend SEO content helper
 # [Sync] 2026-06-14: created for Codex SEO optimized crawler and AI-search content.
 # [Sync] 2026-06-14: split frontend app URL from backend API origin for llms.txt.
+# [Sync] 2026-06-15: remove /ink-and-memory public app prefix from crawler policies.
 """SEO content generators for public crawler and AI-search discovery files."""
 
 from __future__ import annotations
@@ -54,8 +55,6 @@ PRIVATE_PATHS = (
     "/api/",
     "/polycli/",
     "/ws/",
-    "/ink-and-memory/api/",
-    "/ink-and-memory/polycli/",
 )
 
 
@@ -93,7 +92,7 @@ def _crawler_policy_group(user_agent: str, *, block_all: bool = False) -> str:
     if block_all:
         lines.append("Disallow: /")
     else:
-        lines.append("Allow: /ink-and-memory/")
+        lines.append("Allow: /")
         for path in PRIVATE_PATHS:
             lines.append(f"Disallow: {path}")
     return "\n".join(lines)

@@ -14,7 +14,7 @@
 │  Cloud Run: ink-frontend            │
 │  Public: https://ink-frontend.suoxya.com │
 │  nginx 1.27-alpine                  │
-│  · 服务 /ink-and-memory/ 静态资源   │
+│  · 服务 / 静态资源                  │
 │  · runtime-config.js 注入 API_BASE_URL │
 └─────────────────────┬───────────────┘
                       │ 浏览器跨域 HTTPS (API_BASE_URL)
@@ -135,9 +135,9 @@ Step 7  部署后端服务 → 获取 BACKEND_URL（run.app 服务 URL，作为 
 
 部署完成后输出：
 ```
-Original Cloud Run frontend gateway : https://ink-frontend-xxxx-xx.a.run.app/ink-and-memory/
+Original Cloud Run frontend gateway : https://ink-frontend-xxxx-xx.a.run.app/
 Original Cloud Run backend gateway  : https://ink-backend-xxxx-xx.a.run.app
-Public frontend                     : https://ink-frontend.suoxya.com/ink-and-memory/
+Public frontend                     : https://ink-frontend.suoxya.com/
 Public backend                      : https://ink-backend.suoxya.com
 API base                            : https://ink-backend.suoxya.com
 CORS                                : https://ink-frontend.suoxya.com
@@ -227,12 +227,12 @@ docker build \
 
 两阶段构建：
 1. **构建阶段**：`node:22-alpine`，先用 `NPM_REGISTRY` 设置 npm registry，再执行 `npm install && npm run build`，输出到 `dist/`
-2. **服务阶段**：`nginx:1.27-alpine`，拷贝 `dist/` 到 `/usr/share/nginx/html/ink-and-memory/`，容器启动时生成 `runtime-config.js` 注入 `API_BASE_URL`，同时保留 `nginx.conf.template` 的 `BACKEND_URL` 同源代理 fallback
+2. **服务阶段**：`nginx:1.27-alpine`，拷贝 `dist/` 到 `/usr/share/nginx/html/`，容器启动时生成 `runtime-config.js` 注入 `API_BASE_URL`，同时保留 `nginx.conf.template` 的 `BACKEND_URL` 同源代理 fallback
 
 nginx 配置要点：
 - 前端默认通过 `runtime-config.js` 读取 `API_BASE_URL`，浏览器直接跨域请求固定后端域名 `https://ink-backend.suoxya.com`
 - `runtime-config.js` 和 SPA HTML 入口设置为 `no-store`，避免浏览器沿用旧入口或旧的空 `apiBaseUrl` 后把 POST/PUT 请求打回前端静态服务并触发 `Method Not Allowed`
-- `nginx.conf.template` 仍保留 `/ink-and-memory/api/` 和 `/ink-and-memory/polycli/` 反向代理，用作旧同源调用 fallback
+- `nginx.conf.template` 保留 `/api/` 和 `/polycli/` 反向代理，用作同源调用 fallback
 - 静态资源设置 1 年强缓存（`immutable`）
 
 ### 前端请求返回 Method Not Allowed
@@ -241,10 +241,10 @@ nginx 配置要点：
 
 ```bash
 curl -fsS https://ink-backend.suoxya.com/api/health
-curl -fsS https://ink-frontend.suoxya.com/ink-and-memory/runtime-config.js?runtime=1
+curl -fsS https://ink-frontend.suoxya.com/runtime-config.js?runtime=1
 ```
 
-`runtime-config.js` 中的 `apiBaseUrl` 应为 `https://ink-backend.suoxya.com`。如果为空，前端会回退到 `/ink-and-memory` 同源路径，POST/PUT 请求可能落到前端 nginx 静态服务，从而返回 `405 Method Not Allowed`。重新发布前端镜像并强制刷新浏览器缓存即可验证；新模板已对该文件禁用缓存。
+`runtime-config.js` 中的 `apiBaseUrl` 应为 `https://ink-backend.suoxya.com`。如果为空，前端会回退到同源 `/api` / `/polycli` 路径；若同源代理未正确指向后端，POST/PUT 请求可能落到前端静态服务，从而返回 `405 Method Not Allowed`。重新发布前端镜像并强制刷新浏览器缓存即可验证；新模板已对该文件禁用缓存。
 
 ---
 
@@ -255,7 +255,7 @@ curl -fsS https://ink-frontend.suoxya.com/ink-and-memory/runtime-config.js?runti
 cp backend/models.json.example backend/models.json
 
 docker compose up --build
-# 访问 http://localhost/ink-and-memory/
+# 访问 http://localhost/
 ```
 
 `docker-compose.yml` 中前端保留 `BACKEND_URL=http://ink-backend:8765` 作为 nginx fallback，同时设置 `API_BASE_URL=http://127.0.0.1:8765`，浏览器默认直接跨域请求本机后端端口。
