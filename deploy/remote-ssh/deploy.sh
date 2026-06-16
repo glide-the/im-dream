@@ -8,6 +8,7 @@
 # [Sync] 2026-06-13: split deploy into explicit no-cache remote build and force-recreate up steps.
 # [Sync] 2026-06-14: document Claude Code Docker nested sandbox behavior.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from default verification URL.
+# [Sync] 2026-06-16: align data maintenance wrappers with sync-data backup/upload/download commands.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -90,8 +91,9 @@ Commands:
   clean     Stop and remove remote Compose containers/networks. Set REMOTE_CLEAN_IMAGES=1 or REMOTE_CLEAN_VOLUMES=1 for broader cleanup.
   setup-nginx    Install/update host nginx reverse proxy for the backend/frontend domains.
   setup-storage  Create/repair remote backend data, file-storage, agent-workspace, and backup directories.
-  sync-data      Back up remote data locally, then upload local backend/data to the remote server.
+  sync-data      Back up remote data locally, upload local backend/data, then force-recreate Compose services.
   backup-data    Download a timestamped remote backend/data backup without uploading local data.
+  download-data  Back up current local backend/data, then download remote backend/data into local data.
 
 Required environment:
   REMOTE_SSH_HOST       remote SSH host or IP
@@ -307,7 +309,7 @@ Sequence:
   4. Create/repair remote backend/data, file-storage, agent-workspace, and backup directories.
   5. rsync repository files to REMOTE_APP_DIR, excluding backend/data by default.
   6. Tag current remote images as rollback images when they exist.
-  7. Run remote docker-compose build, then docker-compose up -d.
+  7. Run remote docker-compose build, then docker-compose up -d --force-recreate.
   8. Verify backend and frontend from the remote server.
 
 Resources:
@@ -549,16 +551,28 @@ case "${COMMAND:-help}" in
       REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
       REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
       REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
+      REMOTE_DOCKER_COMPOSE_BIN="${REMOTE_DOCKER_COMPOSE_BIN}" \
+      REMOTE_COMPOSE_FILE="${REMOTE_COMPOSE_FILE}" \
+      REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME}" \
       "${SCRIPT_DIR}/sync-data.sh" upload
     ;;
-  backup-data|backup-remote)
+  backup-data|backup)
     exec env DRY_RUN="${DRY_RUN}" \
       REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
       REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
       REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
       REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
       REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
-      "${SCRIPT_DIR}/sync-data.sh" backup-remote
+      "${SCRIPT_DIR}/sync-data.sh" backup
+    ;;
+  download-data|download)
+    exec env DRY_RUN="${DRY_RUN}" \
+      REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
+      REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
+      REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
+      REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
+      "${SCRIPT_DIR}/sync-data.sh" download
     ;;
   *) err "Unknown command: ${COMMAND}. Run --help." ;;
 esac

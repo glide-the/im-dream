@@ -129,7 +129,9 @@ REMOTE_BUILD_PULL=1 ./deploy/remote-ssh/deploy.sh deploy
 
 `deploy` 默认保护远端数据：`REMOTE_SYNC_DATA=0` 时不会 rsync 本地 `backend/data/` 到服务器。
 
-只备份远端数据到本地 `backend/data/bak_remote_YYYYMMDD_HHMMSS/`：
+Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`download`。
+
+只备份远端数据到本地 `backend/data/bak_remote_YYYYMMDD_HHMMSS/`，不覆盖本地根数据：
 
 ```bash
 ./deploy/remote-ssh/deploy.sh backup-data
@@ -141,10 +143,24 @@ REMOTE_BUILD_PULL=1 ./deploy/remote-ssh/deploy.sh deploy
 ./deploy/remote-ssh/deploy.sh sync-data
 ```
 
-如需降低 SQLite 热复制风险，可在同步前后自动停启 Compose：
+`sync-data` 会先执行远端数据备份，再上传本地 `backend/data/`，最后在远端执行
+`docker-compose up -d --force-recreate`，让后端重新加载上传后的 SQLite 数据库。
+
+需要把远端 `backend/data/` 下载回本地时：
 
 ```bash
-REMOTE_SYNC_STOP_CONTAINERS=1 ./deploy/remote-ssh/deploy.sh sync-data
+./deploy/remote-ssh/deploy.sh download-data
+```
+
+`download-data` 会先把当前本地 `backend/data/` 备份到
+`backend/data/bak_local_YYYYMMDD_HHMMSS/`，再下载远端数据到本地目录。
+
+也可以直接调用底层脚本：
+
+```bash
+./deploy/remote-ssh/sync-data.sh backup
+./deploy/remote-ssh/sync-data.sh upload
+./deploy/remote-ssh/sync-data.sh download
 ```
 
 ## 运维命令

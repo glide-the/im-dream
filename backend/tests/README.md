@@ -16,6 +16,7 @@ tests/
 ├── test_claude_agent_workspace.py       # Workspace lifecycle: root resolution, skeleton, idempotency
 ├── test_workspace_router.py             # Workspace router: download header encoding
 ├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
+├── test_sessions_tool.py                # Agent get_sessions_range retrieval params and vector boundary
 ├── test_claude_agent_runner.py          # Runner: streaming callbacks, session_id, error handling
 ├── test_claude_agent_thread_factory.py  # Factory: flyweight cache, TTL eviction, Phase 1-4 contracts
 ├── test_server_claude_agent.py          # Server smoke: route registration, auth enforcement, models
@@ -68,6 +69,12 @@ source .venv/bin/activate
 python tests/test_claude_agent_context_builder.py -v
 ```
 
+**Claude Agent — Session Retrieval Tool (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_sessions_tool.py -v
+```
+
 **Claude Agent — Runner (mocks SDK, no server needed):**
 ```bash
 source .venv/bin/activate
@@ -110,6 +117,13 @@ python tests/test_seo_content.py -v
 - ✅ `context_session_count` 截断（只取前 N 条）
 - ✅ DB 异常时优雅降级（不抛，返回无会话 prompt）
 - ✅ `build_user_message` — 运行时上下文前缀、时区注入
+
+### Claude Agent — Session Retrieval Tool (`test_sessions_tool.py`)
+- ✅ 日期范围旧调用保持兼容
+- ✅ `query` 使用正文文本做字符模糊匹配并过滤无关候选
+- ✅ `labels` 支持 `label_match=all`
+- ✅ `retrieval_mode=auto` 在未配置向量库时降级 fuzzy
+- ✅ `retrieval_mode=vector` 返回未配置错误且不访问数据库
 
 ### Claude Agent — Runner (`test_claude_agent_runner.py`)
 - ✅ `on_text_delta` — AssistantMessage 文本块触发，full_text 正确累积

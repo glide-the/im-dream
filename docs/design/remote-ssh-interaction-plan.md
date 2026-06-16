@@ -9,7 +9,7 @@
    - `ink-frontend.suoxya.com` → `127.0.0.1:8080`
 2. 前端浏览器登录接口默认访问 `https://ink-backend.suoxya.com/api/login`，不再访问 Docker 内部地址 `http://ink-backend:8765/api/login`。
 3. nginx 安装/更新、远端存储初始化和 Docker Compose 部署由 `deploy/remote-ssh/deploy.sh deploy` 统一编排，减少文档中的多步手工流程。
-4. 保留 `setup-nginx`、`setup-storage`、`sync-data`、`backup-data` 等高级子命令，便于单独运维。
+4. 保留 `setup-nginx`、`setup-storage`、`backup-data`、`sync-data`、`download-data` 等高级子命令，便于单独运维。
 
 ## 处理判断
 
@@ -44,7 +44,8 @@
 
 ## 数据维护交互
 
-- 仅备份远端数据：
+- 底层数据脚本只保留 `backup`、`upload`、`download` 三个动作。
+- 仅备份远端数据到本地快照目录，不覆盖本地根数据：
   ```bash
   ./deploy/remote-ssh/deploy.sh backup-data
   ```
@@ -52,9 +53,10 @@
   ```bash
   ./deploy/remote-ssh/deploy.sh sync-data
   ```
-- 为降低 SQLite 热复制风险，可在同步前后自动停启 Compose：
+  上传完成后按 `deploy.sh` 的启动语义执行 `docker-compose up -d --force-recreate`，让后端重新加载数据库。
+- 下载远端 `backend/data/` 到本地前，先自动备份当前本地数据：
   ```bash
-  REMOTE_SYNC_STOP_CONTAINERS=1 ./deploy/remote-ssh/deploy.sh sync-data
+  ./deploy/remote-ssh/deploy.sh download-data
   ```
 
 ## 验收标准
@@ -64,3 +66,4 @@
 - Remote SSH Compose 默认 `API_BASE_URL=https://ink-backend.suoxya.com`。
 - 后端 CORS 默认允许 `https://ink-frontend.suoxya.com`。
 - 文档主流程只保留一个部署入口，单独脚本降级为高级运维命令。
+- Remote SSH 数据维护只暴露 `backup`、`upload`、`download`，其中 `upload` 后必须 force-recreate Compose 服务。
