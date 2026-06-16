@@ -3,7 +3,9 @@
 # [Pos] root local Docker Compose stack
 # [Sync] 2026-06-14: pass public app/API URLs into frontend build and backend SEO generators.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from local Compose URLs.
-version: "3.8"
+# [Sync] 2026-06-17: grant backend container the Docker runtime privileges required by
+#                    Claude Code's bubblewrap Bash sandbox and persist AGENT_CWD.
+# [Sync] 2026-06-17: remove obsolete Compose version field for Docker Compose v2.
 
 services:
   # ── Backend (FastAPI + uvicorn) ────────────────────────────────────────────
@@ -16,6 +18,14 @@ services:
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    cap_add:
+      # Claude Code's Linux Bash sandbox uses bubblewrap. Docker must allow
+      # mount namespace setup or Bash fails with:
+      # `bwrap: Failed to make / slave: Permission denied`.
+      - SYS_ADMIN
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
     ports:
       # Expose only on localhost so only nginx (or local tools) can reach it
       - "127.0.0.1:8765:8765"
@@ -26,6 +36,7 @@ services:
       - ./backend/.env
     environment:
       TZ: UTC
+      AGENT_CWD: /app/data/agent-workspace
       INK_PUBLIC_BASE_URL: ${FRONTEND_PUBLIC_SITE_URL:-http://localhost}
       INK_BACKEND_PUBLIC_BASE_URL: ${BACKEND_PUBLIC_SITE_URL:-http://127.0.0.1:8765/}
     healthcheck:

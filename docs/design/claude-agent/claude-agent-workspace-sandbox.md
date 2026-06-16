@@ -12,6 +12,8 @@
 > auto-detects Linux containers.
 > [Sync] 2026-06-16: keep `.claude/skills/` writable; sandbox denyWrite
 > protects config/hook internals instead of the whole `.claude/` tree.
+> [Sync] 2026-06-17: document Docker Compose runtime privileges required by
+> bubblewrap mount namespace setup.
 > [Sync] 2026-06-16: direct real writes under `.claude/skills/` are imported
 > into `workspace/skills/` on the next workspace sync before symlinks rebuild.
 
@@ -83,12 +85,12 @@ sync but `sandbox.enabled=false`, `failIfUnavailable=false`, and
 `allowUnsandboxedCommands=true`.
 
 `enableWeakerNestedSandbox` is emitted automatically when the backend detects
-that it is running inside a Linux container. Remote SSH Docker deployments do
-not require a user-facing env switch for this. Claude Code's Linux sandbox uses
-bubblewrap, and unprivileged containers may not allow bubblewrap to mount a
-fresh `/proc`; the weaker nested mode is acceptable only because the outer
-Docker container is the primary isolation boundary. Local and non-container
-deployments do not write this key.
+that it is running inside a Linux container. Docker Compose and Remote SSH
+Docker deployments do not require a user-facing env switch for this. Claude
+Code's Linux sandbox uses bubblewrap, and unprivileged containers may not allow
+bubblewrap to mount a fresh `/proc`; the weaker nested mode is acceptable only
+because the outer Docker container is the primary isolation boundary. Local
+non-container deployments do not write this key.
 
 Docker-enabled settings therefore add this sibling key to the same `sandbox`
 object:
@@ -100,6 +102,12 @@ object:
   }
 }
 ```
+
+Docker Compose deployments also need container runtime support for bubblewrap.
+The backend service grants `SYS_ADMIN` and disables Docker's seccomp/AppArmor
+profiles for that container. Without those privileges, bubblewrap can fail
+before executing the command with errors such as
+`bwrap: Failed to make / slave: Permission denied`.
 
 ## 3. Access Semantics
 
@@ -223,7 +231,8 @@ performs the search.
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |
 | `frontend/src/components/dashboard/ModelConfigSection.tsx` | Describes Workspace Mode as enabling workspace context plus Bash sandbox. |
 | `backend/Dockerfile` | Installs Claude Code Linux sandbox dependencies (`bubblewrap`, `socat`) plus runtime tools needed by agent commands. |
-| `deploy/remote-ssh/docker-compose.yml` | Enables Docker nested Bash sandbox mode for the backend container. |
+| `docker-compose.yml` | Enables Docker nested Bash sandbox mode for local Compose backend and grants the runtime privileges bubblewrap needs (`SYS_ADMIN`, unconfined seccomp/AppArmor). |
+| `deploy/remote-ssh/docker-compose.yml` | Enables the same Docker nested Bash sandbox runtime privileges for Remote SSH backend. |
 
 ## 7. Non-Goals
 

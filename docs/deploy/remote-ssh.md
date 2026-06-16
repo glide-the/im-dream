@@ -197,8 +197,10 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
   当前 `backend/Dockerfile` 已安装这两个包。
 - Docker nested sandbox 无法挂载新的 `/proc`：后端会自动检测 Linux 容器运行时，
   并写入 `enableWeakerNestedSandbox=true`。
-- Docker 默认 seccomp profile 拦截 nested namespace syscall：Remote SSH
-  Compose 对 backend 设置 `security_opt: seccomp=unconfined`。
+- `bwrap: Failed to make / slave: Permission denied`：这是 bubblewrap 创建
+  mount namespace 时缺少 Docker 运行时权限。Remote SSH Compose 对 backend 设置
+  `cap_add: SYS_ADMIN`、`security_opt: seccomp=unconfined` 和
+  `security_opt: apparmor=unconfined`。
 - `ANTHROPIC_AUTH_TOKEN` 没有进入 SDK 子进程：确认远端 `backend/.env` 或
   Settings 的用户级模型配置包含该 token。
 

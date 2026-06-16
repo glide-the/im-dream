@@ -221,7 +221,7 @@ docker build \
 
 ### 后端（`backend/Dockerfile`）
 
-基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
+基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Docker Compose / Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式，并给 backend 容器授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 以允许 bubblewrap 创建 mount namespace。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
 
 ### 前端（`frontend/Dockerfile`）
 
@@ -259,3 +259,18 @@ docker compose up --build
 ```
 
 `docker-compose.yml` 中前端保留 `BACKEND_URL=http://ink-backend:8765` 作为 nginx fallback，同时设置 `API_BASE_URL=http://127.0.0.1:8765`，浏览器默认直接跨域请求本机后端端口。
+
+Claude-agent 的 Bash sandbox 在 Docker 中由 bubblewrap 创建 mount namespace。
+根目录 `docker-compose.yml` 的 backend 服务因此设置：
+
+```yaml
+cap_add:
+  - SYS_ADMIN
+security_opt:
+  - seccomp=unconfined
+  - apparmor=unconfined
+```
+
+这组权限只授予 backend 容器，用于避免 `bwrap: Failed to make / slave:
+Permission denied`。它不改变 Claude-agent 的 thread workspace 边界；
+业务文件访问仍由 `{AGENT_CWD}/{thread_id}` sandbox 配置和 PreToolUse 权限策略控制。

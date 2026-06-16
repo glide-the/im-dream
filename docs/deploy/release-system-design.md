@@ -106,6 +106,7 @@ flowchart TD
 | 前端 API 目标 | `docker-compose.yml` 的 `API_BASE_URL=http://127.0.0.1:8765` | 指向浏览器可访问的本机后端端口 |
 | nginx fallback 目标 | `docker-compose.yml` 的 `BACKEND_URL=http://ink-backend:8765` | 保留同源代理兼容路径 |
 | nginx 模板 | `frontend/nginx.conf.template` | 与 Cloud Run 共用，但运行目标不同 |
+| Claude-agent Bash sandbox | `docker-compose.yml` backend service | 授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined`，允许 bubblewrap 创建 mount namespace |
 
 ### 构建流程
 
@@ -146,6 +147,7 @@ http://localhost/
 | 80 端口占用 | 调整 Compose 端口映射，或停止占用 80 的服务 |
 | 前端能打开但 API 失败 | 检查 `API_BASE_URL` 是否为浏览器可访问地址；Compose 默认是 `http://127.0.0.1:8765` |
 | 后端缺少模型或密钥 | 检查 `backend/.env` 和 `backend/models.json` 是否挂载/传入 |
+| Claude-agent Bash 报 `bwrap: Failed to make / slave: Permission denied` | 确认 backend 容器使用根 Compose 的 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 设置，并已重新创建容器 |
 | 数据丢失 | 确认 `backend/data/` 被持久化挂载，不要删除本地目录 |
 
 ### 与其他发布方式的边界

@@ -63,7 +63,8 @@ flowchart TD
 | 配置来源 | `backend/.env`、`backend/models.json` | `backend/.env`、`backend/models.json`、Compose env、`API_BASE_URL` | `REMOTE_*` 环境变量、`backend/.env`、`backend/models.json` | shell export、`.storage-env`、`.cloud-env`、Secret Manager、`API_BASE_URL` |
 | 数据位置 | `backend/data/` | `./backend/data:/app/data` | 远端 `${REMOTE_APP_DIR}/backend/data` 挂载为 `/app/data`，默认不从本地覆盖 | GCS bucket 挂载到 `/app/data` |
 | API 访问 | Vite 同源代理 fallback | 浏览器直连 `http://127.0.0.1:8765`，nginx proxy 保留 fallback | 默认 nginx 同源代理 fallback；可用 `REMOTE_API_BASE_URL` 改为跨域直连 | 浏览器跨域直连 `https://ink-backend.suoxya.com` |
-| 边界 | 不构建镜像，不访问 GCS | 不创建云资源，不使用 Secret Manager | 不创建云资源，不使用 GCS/Secret Manager，资源默认对齐 Cloud Run，不默认同步数据库 | 不依赖本地端口和本地数据卷 |
+| Claude-agent Bash sandbox | 本机进程使用宿主运行时 | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | Cloud Run 不使用 Docker Compose runtime 权限模型 |
+| 边界 | 不构建镜像，不访问 GCS | 不创建云资源，不使用 Secret Manager；Docker 外层容器是主隔离边界 | 不创建云资源，不使用 GCS/Secret Manager，资源默认对齐 Cloud Run，不默认同步数据库；Docker 外层容器是主隔离边界 | 不依赖本地端口和本地数据卷 |
 
 ## 维护规则
 

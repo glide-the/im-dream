@@ -6,6 +6,8 @@
 # [Sync] 2026-06-14: allow Claude Code nested Bash sandbox in backend Docker runtime.
 # [Sync] 2026-06-14: pass frontend/backend public URLs into backend SEO generators and frontend Vite build.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public app URL.
+# [Sync] 2026-06-17: grant backend container the minimal Docker runtime privileges
+#                    bubblewrap needs to create mount namespaces.
 
 services:
   ink-backend:
@@ -19,12 +21,15 @@ services:
     mem_limit: "${REMOTE_BACKEND_MEMORY:-1g}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    cap_add:
+      # bubblewrap needs CAP_SYS_ADMIN for mount namespace setup inside Docker.
+      - SYS_ADMIN
     security_opt:
       # Claude Code's Linux Bash sandbox uses bubblewrap. Docker's default
-      # seccomp profile can block nested namespace operations; the thread
-      # workspace remains mounted under /app/data and Claude Code uses weaker
-      # nested sandbox mode inside this outer container boundary.
+      # seccomp/AppArmor profiles can block mount propagation operations such
+      # as `bwrap: Failed to make / slave: Permission denied`.
       - seccomp=unconfined
+      - apparmor=unconfined
     ports:
       - "${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}:${REMOTE_BACKEND_PORT:-8765}:${REMOTE_BACKEND_CONTAINER_PORT:-8765}"
     volumes:
