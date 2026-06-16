@@ -21,6 +21,9 @@
 # [Sync] 2026-06-16: assert .claude/skills stays writable in sandbox denyWrite.
 # [Sync] 2026-06-16: cover direct .claude/skills writes imported back into
 #                    workspace/skills before discovery symlinks are rebuilt.
+# [Sync] 2026-06-17: cover Linux sbin runtime allowlist needed by bubblewrap.
+# [Sync] 2026-06-17: cover preserving literal symlink aliases for rootfs mount
+#                    points such as /sbin.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -42,6 +45,7 @@ from libs.claude_agent_kit.server.editor_index import EDITOR_RESOURCES
 from libs.claude_agent_kit.server.workspace import (
     SANDBOX_EXTRA_ALLOW_READ_ENV,
     WORKSPACE_SUBDIRS,
+    _append_existing_sandbox_read_path,
     get_or_create_workspace,
     get_workspace_root,
     init_workspace,
@@ -183,6 +187,10 @@ class TestInitWorkspace(unittest.TestCase):
 
         self.assertEqual(allow_read[0], str(ws.resolve()))
         self.assertIn(str(Path(tempfile.gettempdir()).resolve(strict=False)), allow_read)
+        for raw_path in ("/sbin", "/usr/sbin", "/usr/local/sbin"):
+            system_path = Path(raw_path)
+            if system_path.exists():
+                self.assertIn(str(system_path.resolve(strict=False)), allow_read)
         self.assertNotIn(str(project_root), allow_read)
 
     def test_sandbox_allow_read_accepts_explicit_extra_runtime_paths(self):
@@ -202,6 +210,18 @@ class TestInitWorkspace(unittest.TestCase):
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         allow_read = settings["sandbox"]["filesystem"]["allowRead"]
         self.assertIn(str(extra_dir.resolve()), allow_read)
+
+    def test_sandbox_read_allow_preserves_literal_symlink_aliases(self):
+        target = Path(self._tmp.name) / "runtime-target"
+        alias = Path(self._tmp.name) / "runtime-alias"
+        target.mkdir()
+        alias.symlink_to(target, target_is_directory=True)
+
+        paths: list[Path] = []
+        _append_existing_sandbox_read_path(paths, alias, preserve_alias=True)
+
+        self.assertIn(alias, paths)
+        self.assertIn(target.resolve(strict=False), paths)
 
     def test_sandbox_settings_sync_preserves_non_sandbox_settings(self):
         ws = init_workspace("sandbox-preserve")

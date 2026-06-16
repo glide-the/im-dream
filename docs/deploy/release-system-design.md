@@ -148,6 +148,7 @@ http://localhost/
 | 前端能打开但 API 失败 | 检查 `API_BASE_URL` 是否为浏览器可访问地址；Compose 默认是 `http://127.0.0.1:8765` |
 | 后端缺少模型或密钥 | 检查 `backend/.env` 和 `backend/models.json` 是否挂载/传入 |
 | Claude-agent Bash 报 `bwrap: Failed to make / slave: Permission denied` | 确认 backend 容器使用根 Compose 的 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 设置，并已重新创建容器 |
+| Claude-agent Bash 报 `bwrap: Can't mount tmpfs on /newroot/sbin: No such file or directory` | 确认 backend 镜像包含 `/sbin`、`/usr/sbin`、`/usr/local/sbin` 目录兜底，且 workspace sandbox allowlist 包含这些已存在的系统运行时目录；重新构建并重建容器 |
 | 数据丢失 | 确认 `backend/data/` 被持久化挂载，不要删除本地目录 |
 
 ### 与其他发布方式的边界

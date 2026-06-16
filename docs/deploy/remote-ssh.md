@@ -201,6 +201,10 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
   mount namespace 时缺少 Docker 运行时权限。Remote SSH Compose 对 backend 设置
   `cap_add: SYS_ADMIN`、`security_opt: seccomp=unconfined` 和
   `security_opt: apparmor=unconfined`。
+- `bwrap: Can't mount tmpfs on /newroot/sbin: No such file or directory`：
+  这是 bubblewrap 已进入 sandbox rootfs 构造阶段，但标准系统目录没有进入
+  沙箱运行时视图。确认已使用包含 `/sbin`、`/usr/sbin`、`/usr/local/sbin`
+  allowlist 修复的 backend 镜像，并重新构建/重建 backend 容器。
 - `ANTHROPIC_AUTH_TOKEN` 没有进入 SDK 子进程：确认远端 `backend/.env` 或
   Settings 的用户级模型配置包含该 token。
 

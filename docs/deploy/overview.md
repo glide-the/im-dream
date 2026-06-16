@@ -221,7 +221,7 @@ docker build \
 
 ### 后端（`backend/Dockerfile`）
 
-基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Docker Compose / Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式，并给 backend 容器授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 以允许 bubblewrap 创建 mount namespace。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
+基于 `python:3.10-slim-bookworm`，安装系统依赖（gcc、libffi、openssl、libjpeg、zlib、curl、jq、git、ripgrep、nodejs、npm、bubblewrap、socat），安装 Python 依赖与 `@anthropic-ai/claude-code` / `@anthropic-ai/sandbox-runtime`，暴露端口 8765。`bubblewrap` / `socat` 是 Claude Code Linux Bash sandbox 依赖；Docker Compose / Remote SSH Docker 部署会额外启用 nested sandbox 兼容模式，并给 backend 容器授予 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 以允许 bubblewrap 创建 mount namespace。镜像还显式确保 `/sbin`、`/usr/sbin`、`/usr/local/sbin` 存在，避免 bubblewrap 构造 rootfs 时在 `/newroot/sbin` 挂载 tmpfs 失败。构建阶段会先用 `DEBIAN_MIRROR` / `DEBIAN_SECURITY_MIRROR` 替换 apt 源，并通过 `PYPI_INDEX_URL`、`NPM_REGISTRY` 加速 Python/npm 依赖安装。
 
 ### 前端（`frontend/Dockerfile`）
 
@@ -274,3 +274,9 @@ security_opt:
 这组权限只授予 backend 容器，用于避免 `bwrap: Failed to make / slave:
 Permission denied`。它不改变 Claude-agent 的 thread workspace 边界；
 业务文件访问仍由 `{AGENT_CWD}/{thread_id}` sandbox 配置和 PreToolUse 权限策略控制。
+
+若看到 `bwrap: Can't mount tmpfs on /newroot/sbin: No such file or directory`，
+说明 bubblewrap 已进入 rootfs 构造阶段，但标准系统目录没有出现在沙箱运行时视图中。
+当前后端会把存在的 `/sbin`、`/usr/sbin`、`/usr/local/sbin` 加入 sandbox
+只读运行时 allowlist；如果 `/sbin` 是 symlink，也会同时保留 literal
+alias 和 canonical target。镜像构建也会创建这些目录。

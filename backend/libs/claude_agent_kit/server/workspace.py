@@ -24,6 +24,8 @@
 #                    denyWrite to config/runtime internals instead of .claude/.
 # [Sync] 2026-06-16: workspace_file_sync imports direct .claude/skills writes
 #                    into workspace/skills before rebuilding discovery symlinks.
+# [Sync] 2026-06-17: include standard Linux sbin directories in sandbox runtime
+#                    read allowlist so bubblewrap can build its rootfs in Docker.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -77,6 +79,9 @@ ARCHIVE_EXTENSIONS: frozenset[str] = frozenset(
     {".zip", ".skill", ".tar.gz", ".tgz", ".tar"}
 )
 SANDBOX_EXTRA_ALLOW_READ_ENV = "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"
+SANDBOX_PRESERVE_ALIAS_READ_PATHS: frozenset[str] = frozenset(
+    {"/bin", "/sbin", "/lib", "/lib64"}
+)
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -90,13 +95,23 @@ def _project_root() -> Path:
     return _PROJECT_ROOT
 
 
-def _append_existing_sandbox_read_path(paths: list[Path], raw_path: str | os.PathLike[str]) -> None:
+def _append_existing_sandbox_read_path(
+    paths: list[Path],
+    raw_path: str | os.PathLike[str],
+    *,
+    preserve_alias: bool = False,
+) -> None:
     """Append *raw_path* when it exists and is not already present."""
 
     if not raw_path:
         return
     try:
-        path = Path(raw_path).expanduser().resolve(strict=False)
+        raw = Path(raw_path).expanduser()
+        if preserve_alias:
+            alias = raw if raw.is_absolute() else raw.resolve(strict=False)
+            if alias.exists() and alias not in paths:
+                paths.append(alias)
+        path = raw.resolve(strict=False)
     except (OSError, RuntimeError, ValueError):
         return
     if not path.exists() or path in paths:
@@ -182,7 +197,10 @@ def _sandbox_runtime_read_allow_paths() -> list[str]:
         "/home/linuxbrew/.linuxbrew/Cellar",
         "/bin",
         "/usr/bin",
+        "/sbin",
+        "/usr/sbin",
         "/usr/local/bin",
+        "/usr/local/sbin",
         "/usr/lib",
         "/usr/lib64",
         "/lib",
@@ -198,7 +216,15 @@ def _sandbox_runtime_read_allow_paths() -> list[str]:
         "/usr/lib/jvm",
         "/opt/homebrew/opt/openjdk@17",
     ):
-        _append_existing_sandbox_read_path(paths, raw_path)
+        preserve_alias = (
+            isinstance(raw_path, str)
+            and raw_path in SANDBOX_PRESERVE_ALIAS_READ_PATHS
+        )
+        _append_existing_sandbox_read_path(
+            paths,
+            raw_path,
+            preserve_alias=preserve_alias,
+        )
 
     for executable in (
         sys.executable,

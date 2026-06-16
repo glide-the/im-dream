@@ -14,6 +14,8 @@
 > protects config/hook internals instead of the whole `.claude/` tree.
 > [Sync] 2026-06-17: document Docker Compose runtime privileges required by
 > bubblewrap mount namespace setup.
+> [Sync] 2026-06-17: include standard Linux `sbin` directories in the runtime
+> read allowlist to avoid bubblewrap `/newroot/sbin` tmpfs mount failures.
 > [Sync] 2026-06-16: direct real writes under `.claude/skills/` are imported
 > into `workspace/skills/` on the next workspace sync before symlinks rebuild.
 
@@ -108,6 +110,16 @@ The backend service grants `SYS_ADMIN` and disables Docker's seccomp/AppArmor
 profiles for that container. Without those privileges, bubblewrap can fail
 before executing the command with errors such as
 `bwrap: Failed to make / slave: Permission denied`.
+
+The runtime read allowlist must also include existing standard system executable
+directories, including `/bin`, `/usr/bin`, `/sbin`, `/usr/sbin`,
+`/usr/local/bin`, and `/usr/local/sbin`. For top-level system directories that
+may be symlinks in container images, such as `/sbin -> /usr/sbin`, the backend
+keeps both the literal alias and the canonical target. These are not product
+data roots; they are required so bubblewrap can construct the sandbox root
+filesystem and so commands can resolve normal system binaries. If `/sbin` is
+hidden by the root deny policy, bubblewrap can fail during rootfs setup with
+`bwrap: Can't mount tmpfs on /newroot/sbin: No such file or directory`.
 
 ## 3. Access Semantics
 
@@ -230,7 +242,7 @@ performs the search.
 | `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox flag before file sync. |
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |
 | `frontend/src/components/dashboard/ModelConfigSection.tsx` | Describes Workspace Mode as enabling workspace context plus Bash sandbox. |
-| `backend/Dockerfile` | Installs Claude Code Linux sandbox dependencies (`bubblewrap`, `socat`) plus runtime tools needed by agent commands. |
+| `backend/Dockerfile` | Installs Claude Code Linux sandbox dependencies (`bubblewrap`, `socat`) plus runtime tools needed by agent commands; ensures standard `sbin` directories exist for bubblewrap rootfs mounts. |
 | `docker-compose.yml` | Enables Docker nested Bash sandbox mode for local Compose backend and grants the runtime privileges bubblewrap needs (`SYS_ADMIN`, unconfined seccomp/AppArmor). |
 | `deploy/remote-ssh/docker-compose.yml` | Enables the same Docker nested Bash sandbox runtime privileges for Remote SSH backend. |
 
@@ -255,8 +267,9 @@ Required checks for this design:
 
 - Workspace tests confirm enabled/disabled sandbox settings are written,
   non-sandbox settings are preserved, runtime dependency paths are read-allowed,
-  Docker nested sandbox mode is auto-detected, and the project root is not
-  default read-allowed.
+  standard Linux `sbin` runtime paths are read-allowed when present, Docker
+  nested sandbox mode is auto-detected, and the project root is not default
+  read-allowed.
 - Python compile checks cover `workspace.py`, service and route integration.
 - `bash -n .claude/hooks/protect-files-bash.sh` confirms the existing sensitive
   file hook remains syntactically valid.

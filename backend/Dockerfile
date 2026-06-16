@@ -5,6 +5,7 @@
 #        pip mirror, Node.js + claude-code CLI, HEALTHCHECK, --proxy-headers.
 # [Sync] 2026-06-12: add configurable Debian/PyPI/npm mirror build args for faster China builds.
 # [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
+# [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
 
 FROM python:3.10-slim-bookworm
 
@@ -42,6 +43,7 @@ RUN set -eux; \
         gcc libffi-dev libssl-dev libjpeg62-turbo-dev zlib1g-dev \
         curl jq git ripgrep ca-certificates nodejs npm \
         bubblewrap socat \
+    && mkdir -p /sbin /usr/sbin /usr/local/sbin \
     && npm config set registry "${NPM_REGISTRY}" \
     && npm install -g @anthropic-ai/claude-code @anthropic-ai/sandbox-runtime \
     && npm cache clean --force \
