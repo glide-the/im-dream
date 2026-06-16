@@ -20,6 +20,8 @@
 #                    project source directories outside the thread workspace.
 # [Sync] 2026-06-14: auto-enable Claude Code Docker nested Bash sandbox mode
 #                    when the backend runs inside a Linux container.
+# [Sync] 2026-06-16: keep .claude/skills fully writable by narrowing sandbox
+#                    denyWrite to config/runtime internals instead of .claude/.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -279,11 +281,17 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
             # paths from being readable by Bash subprocesses.
             "denyRead": ["/"],
             "allowRead": allow_read,
-            # Write policy is allow-only; keep Bash writes inside the thread
-            # workspace and deny config/index internals explicitly.
+            # Write policy is allow-only for the thread workspace.  Keep
+            # .claude/skills writable so skill symlinks and runtime-installed
+            # skills can be fully managed, but deny config/hook internals that
+            # should not be mutated by Bash.
             "allowWrite": [str(workspace_abs)],
             "denyWrite": [
-                str(workspace_abs / ".claude"),
+                str(workspace_abs / ".claude" / "settings.json"),
+                str(workspace_abs / ".claude" / "settings.local.json"),
+                str(workspace_abs / ".claude" / "hooks"),
+                str(workspace_abs / ".claude" / ".clawhub"),
+                str(workspace_abs / ".claude" / "worktrees"),
                 str(workspace_abs / ".editor"),
                 str(workspace_abs / ".mcp.json"),
             ],

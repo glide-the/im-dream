@@ -8,6 +8,8 @@
 > **[Sync] 2026-06-14**: Docker 部署由后端自动检测 Linux 容器环境并写入
 > Claude Code `enableWeakerNestedSandbox`，解决容器内 bubblewrap nested
 > sandbox 启动问题；无需用户配置额外 env。
+> **[Sync] 2026-06-16**: Workspace sandbox 不再 deny 整个 `.claude/`；
+> `.claude/skills/` 保持可完整操作，denyWrite 仅保护 settings/hooks/editor index。
 
 ## 1. 概述
 
@@ -90,10 +92,14 @@ Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会�
 - `sandbox.autoAllowBashIfSandboxed=true`
 - `sandbox.allowUnsandboxedCommands=false`
 - `sandbox.filesystem.denyRead` 覆盖共享 `{AGENT_CWD}`、项目根与常见凭证目录
-- `sandbox.filesystem.allowRead/allowWrite` 只包含当前 `{AGENT_CWD}/{sessionId}`
+- `sandbox.filesystem.allowRead/allowWrite` 包含当前 `{AGENT_CWD}/{sessionId}`
+- `sandbox.filesystem.denyWrite` 保护 `.claude/settings*.json`、`.claude/hooks/`、
+  `.editor/`、`.mcp.json` 等内部配置；不覆盖 `.claude/skills/`
 
 这层只约束 Bash 及其子进程。内置 `Read` / `Write` / `Edit` / `Grep`
 等非 Bash 工具仍由 Claude Agent 的 PreToolUse 权限策略和前端确认流控制。
+因此，`Write/Edit` 直接操作 `.claude/skills/` 时仍需按产品权限策略通过确认；
+通过后，Bash sandbox 不会再阻断该目录的创建、替换或删除操作。
 
 ### 3.5 `.mcp.json` — MCP 配置
 

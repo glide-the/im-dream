@@ -18,6 +18,7 @@
 # [Sync] 2026-06-14: cover read-only runtime dependency allowlist in sandbox
 #                    settings without adding the project root as a default read path.
 # [Sync] 2026-06-14: cover automatic Docker nested Bash sandbox detection.
+# [Sync] 2026-06-16: assert .claude/skills stays writable in sandbox denyWrite.
 
 """Regression tests for backend/claude_agent/workspace.py."""
 from __future__ import annotations
@@ -129,8 +130,24 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertEqual(sandbox["filesystem"]["denyRead"], ["/"])
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
         self.assertEqual(sandbox["filesystem"]["allowWrite"], [str(ws.resolve())])
-        self.assertIn(
+        self.assertNotIn(
             str((ws / ".claude").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
+        self.assertNotIn(
+            str((ws / ".claude" / "skills").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
+        self.assertIn(
+            str((ws / ".claude" / "settings.json").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
+        self.assertIn(
+            str((ws / ".claude" / "hooks").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
+        self.assertIn(
+            str((ws / ".editor").resolve()),
             sandbox["filesystem"]["denyWrite"],
         )
 

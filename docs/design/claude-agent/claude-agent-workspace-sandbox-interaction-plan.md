@@ -142,7 +142,11 @@ Enabled workspace mode writes this minimal strict contract:
       "allowRead": ["{AGENT_CWD}/{thread_id}"],
       "allowWrite": ["{AGENT_CWD}/{thread_id}"],
       "denyWrite": [
-        "{AGENT_CWD}/{thread_id}/.claude",
+        "{AGENT_CWD}/{thread_id}/.claude/settings.json",
+        "{AGENT_CWD}/{thread_id}/.claude/settings.local.json",
+        "{AGENT_CWD}/{thread_id}/.claude/hooks",
+        "{AGENT_CWD}/{thread_id}/.claude/.clawhub",
+        "{AGENT_CWD}/{thread_id}/.claude/worktrees",
         "{AGENT_CWD}/{thread_id}/.editor",
         "{AGENT_CWD}/{thread_id}/.mcp.json"
       ]
@@ -150,6 +154,10 @@ Enabled workspace mode writes this minimal strict contract:
   }
 }
 ```
+
+`.claude/skills/` is excluded from `denyWrite` on purpose: it is the canonical
+Claude Code skill discovery directory and must support full create/update/delete
+operations inside the thread workspace.
 
 ## 4. Fit-to-goal / over-design check
 
