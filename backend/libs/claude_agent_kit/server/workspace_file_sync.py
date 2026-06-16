@@ -9,17 +9,23 @@
 #         normalize_workspace_file_sync_error ported from claude-agent-next-kit workspace-file-sync.ts.
 # [Sync] 2026-05-25: add sync_attachments_to_workspace_files, inject_attachment_message_parts
 #         ported from claude-agent-next-kit chat-attachment-processing.ts (WeKnora excluded).
+# [Sync] 2026-06-16: import real files/directories created directly under
+#         .claude/skills back into workspace/skills before rebuilding symlinks.
 
 """Skills symlink synchronisation for Claude Agent workspaces.
 
-Maintains a 1-to-1 mapping from ``{workspace}/skills/*`` to
-``{workspace}/.claude/skills/*`` using filesystem symbolic links so that
-the Claude Agent always discovers skills at the canonical ``.claude/skills/``
-location.
+Maintains a 1-to-1 mapping between ``{workspace}/skills/*`` and
+``{workspace}/.claude/skills/*`` using filesystem symbolic links so that the
+Claude Agent always discovers skills at the canonical ``.claude/skills/``
+location while the workspace file browser can show the user-facing
+``skills/`` directory.
 
 Rules
 -----
 - Only non-dot-prefixed entries in ``skills/`` are exposed.
+- Real non-dot-prefixed files/directories created directly in
+  ``.claude/skills/`` are first moved into ``skills/`` so direct Claude Code
+  writes become visible in the workspace.
 - If a symlink in ``.claude/skills/`` already points to the correct source,
   it is left unchanged (no unnecessary re-creation).
 - If the target slot is occupied by a symlink pointing elsewhere, or by a
@@ -32,6 +38,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import shutil
 from enum import Enum
 from pathlib import Path
 from typing import Awaitable, Callable, Optional
@@ -40,10 +47,12 @@ logger = logging.getLogger(__name__)
 
 
 def sync_skills_symlinks(workspace_path: Path) -> None:
-    """Synchronise ``{workspace}/skills/`` → ``{workspace}/.claude/skills/``.
+    """Synchronise workspace skills with Claude's canonical skills directory.
 
-    Creates, updates, and cleans up symbolic links so that every non-hidden
-    entry in ``skills/`` has a matching symlink in ``.claude/skills/``.
+    First imports real files/directories written directly under
+    ``.claude/skills/`` into ``skills/``. Then creates, updates, and cleans up
+    symbolic links so that every non-hidden entry in ``skills/`` has a
+    matching symlink in ``.claude/skills/``.
 
     Raises ``OSError`` if the filesystem does not support symlinks (the error
     propagates so callers can log or surface it — no silent failure).
@@ -59,11 +68,10 @@ def sync_skills_symlinks(workspace_path: Path) -> None:
 
     skills_dst.mkdir(parents=True, exist_ok=True)
 
+    _import_real_claude_skill_entries(skills_dst, skills_src)
+
     # Build set of current source entries (excluding dot-prefixed names).
-    src_entries: dict[str, Path] = {}
-    for entry in skills_src.iterdir():
-        if not entry.name.startswith("."):
-            src_entries[entry.name] = entry
+    src_entries = _collect_skill_source_entries(skills_src)
 
     # -----------------------------------------------------------------------
     # Step 1: create / update symlinks for current source entries.
@@ -76,6 +84,65 @@ def sync_skills_symlinks(workspace_path: Path) -> None:
     # Step 2: remove stale symlinks (source entry was deleted or renamed).
     # -----------------------------------------------------------------------
     _clean_stale_skill_symlinks(skills_dst, src_entries)
+
+
+def _collect_skill_source_entries(skills_src: Path) -> dict[str, Path]:
+    """Return visible workspace skill entries keyed by basename."""
+    src_entries: dict[str, Path] = {}
+    for entry in skills_src.iterdir():
+        if not entry.name.startswith("."):
+            src_entries[entry.name] = entry
+    return src_entries
+
+
+def _import_real_claude_skill_entries(
+    skills_link_dir: Path,
+    skills_src_dir: Path,
+) -> None:
+    """Move real ``.claude/skills`` entries into ``workspace/skills``.
+
+    Claude Code may create or replace a skill directly in its canonical
+    discovery directory. Those entries must become workspace-owned sources
+    before symlinks are rebuilt, otherwise the next sync would hide or remove
+    the direct write.
+    """
+    if not skills_link_dir.is_dir():
+        return
+
+    skills_src_dir.mkdir(parents=True, exist_ok=True)
+
+    for entry in sorted(
+        list(skills_link_dir.iterdir()),
+        key=lambda item: item.name.lower(),
+    ):
+        if entry.name.startswith(".") or entry.is_symlink():
+            continue
+        if not entry.is_file() and not entry.is_dir():
+            logger.warning("Skipping unsupported .claude/skills entry: %s", entry)
+            continue
+
+        dst_entry = skills_src_dir / entry.name
+        if dst_entry.exists() or dst_entry.is_symlink():
+            _remove_path(dst_entry)
+            logger.debug(
+                "Replaced workspace skill source from direct .claude/skills write: %s",
+                dst_entry,
+            )
+
+        shutil.move(str(entry), str(dst_entry))
+        logger.debug(
+            "Imported direct .claude/skills entry: %s → %s",
+            entry,
+            dst_entry,
+        )
+
+
+def _remove_path(path: Path) -> None:
+    """Remove a file, symlink, or directory without following symlinks."""
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
+    else:
+        path.unlink()
 
 
 def _ensure_symlink(src: Path, dst_link: Path) -> None:
@@ -100,11 +167,7 @@ def _ensure_symlink(src: Path, dst_link: Path) -> None:
         logger.debug("Removed mismatched symlink: %s", dst_link)
     elif dst_link.exists():
         # Plain file or directory occupying the slot — clear it.
-        import shutil as _shutil
-        if dst_link.is_dir():
-            _shutil.rmtree(dst_link)
-        else:
-            dst_link.unlink()
+        _remove_path(dst_link)
         logger.warning(
             "Removed non-symlink occupying .claude/skills slot: %s", dst_link
         )

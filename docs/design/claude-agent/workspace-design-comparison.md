@@ -13,8 +13,8 @@
 | 语言 | TypeScript（Node.js 20+） | Python 3.12 |
 | 框架 | Next.js 15 App Router | FastAPI + server.py |
 | Agent SDK | `@anthropic-ai/claude-agent-sdk`（npm） | `claude-code-sdk`（pip） |
-| 工作空间模块 | `app/lib/workspace.ts`（已实现） | `backend/claude_agent/workspace.py`（规划） |
-| 文件管理 API | `app/api/workspace/files/route.ts`（已实现） | `api/workspace/files`（规划） |
+| 工作空间模块 | `app/lib/workspace.ts`（已实现） | `backend/libs/claude_agent_kit/server/workspace.py`（已实现） |
+| 文件管理 API | `app/api/workspace/files/route.ts`（已实现） | `backend/routers/workspace.py`（已实现） |
 | 会话上下文 | 无宠物上下文 | `ClaudeAgentContextBuilder` 注入宠物状态 |
 | 部署环境 | Docker / Vercel | Python 服务器进程 |
 
@@ -48,10 +48,10 @@ export function initWorkspace(sessionId?: string): string {
 }
 ```
 
-### Pawkeyland（Python，规划）
+### Ink & Memory（Python，已实现）
 
 ```python
-# backend/claude_agent/workspace.py
+# backend/libs/claude_agent_kit/server/workspace.py
 def init_workspace(session_id: str | None = None) -> str:
     workspace_root = get_workspace_root()  # os.environ.get("AGENT_CWD")
     workspace_id = session_id or str(uuid.uuid4())
@@ -246,7 +246,7 @@ enriched_message = context_builder.user_message(
 {AGENT_CWD}/{user_id}/{persona_id}/{chat_id}/
 ```
 
-> Thread Session 模式下 `session_id` 即 `workspace_key`：进程内享元（`AgentRunStatePool`）与磁盘上 workspace 目录、`asyncio.Lock` 完全 1:1 对齐，详见 [claude-agent上下文拼接设计.md §6.1](./claude-agent上下文拼接设计.md#61-三种-sessionid-的语义对比)。
+> Thread Session 模式下 `session_id` 即 `workspace_key`：进程内享元（`AgentRunStatePool`）与磁盘上 workspace 目录、`asyncio.Lock` 完全 1:1 对齐，详见 [claude-agent-thread-session-patterns.md](./claude-agent-thread-session-patterns.md)。
 
 ---
 
@@ -277,11 +277,11 @@ enriched_message = context_builder.user_message(
 
 | 优先级 | 任务 | 目标模块 | 状态 |
 |--------|------|----------|------|
-| P1 | 实现 `workspace.py` 核心模块 | `backend/claude_agent/workspace.py` | ⏳ 规划 |
+| P1 | 实现 `workspace.py` 核心模块 | `backend/libs/claude_agent_kit/server/workspace.py` | ✅ 已实现 |
 | P1 | 在 `ClaudeAgentService.assemble_context` (Phase 1) 中自动调用工作空间初始化并享元缓存 | `backend/claude_agent/service.py` | ✅ 已实现 |
-| P2 | 实现工作空间文件管理 API | `api/workspace/files.py` | ⏳ 规划 |
-| P2 | Skills 压缩包自动解压 | `backend/claude_agent/workspace.py` | ⏳ 规划 |
-| P3 | 宠物行为记录路径层级扩展 | `backend/claude_agent/workspace.py` | ⏳ 未来规划 |
+| P2 | 实现工作空间文件管理 API | `backend/routers/workspace.py` | ✅ 已实现 |
+| P2 | Skills 压缩包自动解压 | `backend/libs/claude_agent_kit/server/workspace.py` | ✅ 已实现 |
+| P3 | 宠物行为记录路径层级扩展 | `backend/libs/claude_agent_kit/server/workspace.py` | ⏳ 未来规划 |
 
 ---
 
@@ -289,9 +289,9 @@ enriched_message = context_builder.user_message(
 
 | 模块 | 参考项目路径 | Pawkeyland 规划路径 |
 |------|------------|-------------------|
-| 工作空间管理 | `app/lib/workspace.ts` | `backend/claude_agent/workspace.py` |
+| 工作空间管理 | `app/lib/workspace.ts` | `backend/libs/claude_agent_kit/server/workspace.py` |
 | 文件管理 API | `app/api/workspace/files/route.ts` | `api/workspace/files.py` |
-| 文件同步工具 | `app/lib/workspace-file-sync.ts` | `backend/claude_agent/workspace_file_sync.py` |
+| 文件同步工具 | `app/lib/workspace-file-sync.ts` | `backend/libs/claude_agent_kit/server/workspace_file_sync.py`（先导入 `.claude/skills/` 真实写入，再重建发现软链接） |
 | Agent 执行入口 | `app/api/claude-agent/route.ts` | `backend/claude_agent/thread_factory.py` (`ClaudeAgentThreadFactory.run_streaming`) → `backend/claude_agent/service.py` (Phase 1 / Phase 3) |
 | Agent Runner | `app/lib/claude-agent-kit/server/server/agent-runner.ts` | `backend/claude_agent/agent_runner.py`（已实现，被 `state.runner` 享元缓存） |
 | 上下文构建 | 无（参考项目无宠物上下文） | `backend/claude_agent/context_builder.py`（已实现，被 Phase 1 调用） |

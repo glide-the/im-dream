@@ -93,7 +93,8 @@ ThreadFactory (thread_factory.py)
 | `application/claude_agent/service.py` | `backend/claude_agent/service.py` | 大幅简化：移除 pet/persona/mem0/sticker_filter |
 | `libs/claude_agent_kit/types.py` | `backend/libs/claude_agent_kit/types.py` | 直接迁移，移除 Pawkeyland 特定注释 |
 | `libs/claude_agent_kit/server/agent_runner.py` | `backend/libs/claude_agent_kit/server/agent_runner.py` | 直接迁移，保留 streaming / tool confirmation / error handling |
-| `libs/claude_agent_kit/server/workspace.py` | `backend/libs/claude_agent_kit/server/workspace.py` | 简化：移除 skills 符号链接同步，保留工作区骨架 |
+| `libs/claude_agent_kit/server/workspace.py` | `backend/libs/claude_agent_kit/server/workspace.py` | 适配：保留工作区骨架、项目模板同步、sandbox settings，并接入 skills 同步 |
+| `libs/claude_agent_kit/server/workspace_file_sync.py` | `backend/libs/claude_agent_kit/server/workspace_file_sync.py` | 适配：维护 `workspace/skills` ↔ `.claude/skills`，导入 `.claude/skills` 真实写入后重建发现软链接 |
 | `libs/claude_agent_kit/server/sdk_env.py` | `backend/libs/claude_agent_kit/server/sdk_env.py` | 改为直接读取 `backend/.env` 中 Claude Code / Anthropic SDK key |
 | `libs/volcresource/cfg.py` | _(不迁移)_ | Volcengine 图像/OSS 与专属 runtime 配置均不属于 Ink & Memory 当前范围 |
 | `application/claude_agent/state_builder.py` | _(内联至 thread_pool.py)_ | 代码量极小（111行），直接内联 |
@@ -228,7 +229,6 @@ POST /api/claude-agent
 | 宠物 MCP (`mcp_server.py`) | Pawkeyland 宠物领域专属，与 Ink & Memory 无关 |
 | `state_builder.py` | 代码极少（111行），内联至 thread_pool.py |
 | `session_files.py` | JSONL 会话文件解析，当前版本通过 DB 替代 |
-| `workspace_file_sync.py` | skills 符号链接，当前不引入 skills 机制 |
 | `libs/volcresource/cfg.py` | Pawkeyland 专属资源和 runtime 配置，Ink & Memory 当前不迁移 |
 | `api/contracts.py` | Pawkeyland 路由契约，Ink & Memory 直接用 Pydantic 在 server.py |
 

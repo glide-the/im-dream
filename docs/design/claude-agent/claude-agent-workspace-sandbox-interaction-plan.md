@@ -156,8 +156,10 @@ Enabled workspace mode writes this minimal strict contract:
 ```
 
 `.claude/skills/` is excluded from `denyWrite` on purpose: it is the canonical
-Claude Code skill discovery directory and must support full create/update/delete
-operations inside the thread workspace.
+Claude Code skill discovery directory and must support create/update/replace
+operations inside the thread workspace. The next workspace sync imports real
+files/directories created there into `workspace/skills/`, then rebuilds the
+canonical entries as symlinks.
 
 ## 4. Fit-to-goal / over-design check
 

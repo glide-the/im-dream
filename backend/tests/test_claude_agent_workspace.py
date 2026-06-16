@@ -1,14 +1,14 @@
 # [Input] Consume get_workspace_root, init_workspace, get_or_create_workspace
-#         from backend/claude_agent/workspace.py.
+#         from libs/claude_agent_kit/server/workspace.py.
 # [Output] Validate workspace root resolution, skeleton creation, idempotency,
 #          path traversal rejection, AGENT_CWD env var handling, and .editor/
 #          virtual index initialisation (Hook execution order & read path), and
 #          per-thread Claude Code sandbox settings sync.
 # [Pos] test node in backend/tests
 # [Sync] 2026-05-22: migrated from Pawkeyland scripts/test_workspace_manager.py.
-#                    Removed: skills/symlink tests (workspace_file_sync not migrated),
+#                    Removed legacy skills/symlink tests during early migration,
 #                    resolve_safe_path tests (not in simplified workspace.py).
-#                    Adapted: module path backend/claude_agent/workspace.py,
+#                    Adapted: module path libs/claude_agent_kit/server/workspace.py,
 #                    default workspace dir renamed ink-agent-workspaces.
 # [Sync] 2026-05-28: add TestEditorIndexInit — covers .editor/ placeholder directory
 #                    creation driven by _init_editor_index(), which is the workspace
@@ -19,8 +19,10 @@
 #                    settings without adding the project root as a default read path.
 # [Sync] 2026-06-14: cover automatic Docker nested Bash sandbox detection.
 # [Sync] 2026-06-16: assert .claude/skills stays writable in sandbox denyWrite.
+# [Sync] 2026-06-16: cover direct .claude/skills writes imported back into
+#                    workspace/skills before discovery symlinks are rebuilt.
 
-"""Regression tests for backend/claude_agent/workspace.py."""
+"""Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
 
 import json
@@ -247,6 +249,53 @@ class TestGetOrCreateWorkspace(unittest.TestCase):
         ws = get_or_create_workspace("sandbox-off-entry", sandbox_enabled=False)
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         self.assertFalse(settings["sandbox"]["enabled"])
+
+
+class TestSkillsSync(unittest.TestCase):
+    """Workspace skill sync should accept both user-facing and Claude-facing writes."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        os.environ["AGENT_CWD"] = self._tmp.name
+
+    def tearDown(self):
+        os.environ.pop("AGENT_CWD", None)
+        self._tmp.cleanup()
+
+    def test_imports_new_directory_created_directly_in_claude_skills(self):
+        ws = init_workspace("skills-direct-create")
+        direct_skill = ws / ".claude" / "skills" / "direct-skill"
+        direct_skill.mkdir()
+        (direct_skill / "SKILL.md").write_text("direct create", encoding="utf-8")
+
+        init_workspace("skills-direct-create")
+
+        workspace_skill = ws / "skills" / "direct-skill"
+        claude_skill = ws / ".claude" / "skills" / "direct-skill"
+        self.assertTrue(workspace_skill.is_dir())
+        self.assertEqual(
+            (workspace_skill / "SKILL.md").read_text(encoding="utf-8"),
+            "direct create",
+        )
+        self.assertTrue(claude_skill.is_symlink())
+        self.assertEqual(claude_skill.resolve(), workspace_skill.resolve())
+
+    def test_replaces_workspace_skill_from_direct_claude_skill_file(self):
+        ws = init_workspace("skills-direct-replace")
+        workspace_skill = ws / "skills" / "replace-me.md"
+        workspace_skill.write_text("old", encoding="utf-8")
+        init_workspace("skills-direct-replace")
+
+        claude_skill = ws / ".claude" / "skills" / "replace-me.md"
+        self.assertTrue(claude_skill.is_symlink())
+        claude_skill.unlink()
+        claude_skill.write_text("new", encoding="utf-8")
+
+        init_workspace("skills-direct-replace")
+
+        self.assertEqual(workspace_skill.read_text(encoding="utf-8"), "new")
+        self.assertTrue(claude_skill.is_symlink())
+        self.assertEqual(claude_skill.resolve(), workspace_skill.resolve())
 
 
 class TestSessionIdValidation(unittest.TestCase):

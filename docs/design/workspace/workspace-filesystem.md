@@ -9,7 +9,10 @@
 > Claude Code `enableWeakerNestedSandbox`，解决容器内 bubblewrap nested
 > sandbox 启动问题；无需用户配置额外 env。
 > **[Sync] 2026-06-16**: Workspace sandbox 不再 deny 整个 `.claude/`；
-> `.claude/skills/` 保持可完整操作，denyWrite 仅保护 settings/hooks/editor index。
+> `.claude/skills/` 保持可创建/替换 skill，denyWrite 仅保护 settings/hooks/editor index。
+> **[Sync] 2026-06-16**: Skills 同步在重建软链接前会导入
+> `.claude/skills/` 下的真实文件/目录，使 Agent 直接创建的 skill 回写到
+> `workspace/skills/`。
 
 ## 1. 概述
 
@@ -23,7 +26,7 @@
 {AGENT_CWD}/
   └── {sessionId}/                   ← 每个对话的隔离工作空间
       ├── .claude/                   ← 从项目根 .claude/ 复制（包含 settings、commands）
-      │   └── skills/                ← 项目级 skills（不直接写入，通过软链接间接更新）
+      │   └── skills/                ← Claude Code 发现目录；软链接到 skills/，真实写入会导入
       ├── .mcp.json                  ← MCP 服务器配置（从项目根复制）
       ├── files/                     ← 用户文件区
       │   ├── report.pdf             ← 用户上传的文件
@@ -72,7 +75,7 @@ Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会�
 | **用途** | 存放对话专属的 Claude Code skills 文件 |
 | **写入者** | 用户手动放置、Agent 在对话中动态生成 |
 | **读取者** | Claude SDK（通过 `{workspace}/.claude/skills/` 软链接间接读取） |
-| **同步机制** | `sync_skills_symlinks()` 自动创建软链接到工作空间 `.claude/skills/` |
+| **同步机制** | `sync_skills_symlinks()` 先导入 `.claude/skills/` 真实写入，再自动创建软链接到工作空间 `.claude/skills/` |
 | **命名约定** | 软链接名称与源文件/文件夹同名（工作空间隔离，无需前缀） |
 | **支持类型** | 文件和文件夹均可软链接 |
 | **生命周期** | 随对话存在；过期链接自动清理 |
@@ -99,7 +102,9 @@ Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会�
 这层只约束 Bash 及其子进程。内置 `Read` / `Write` / `Edit` / `Grep`
 等非 Bash 工具仍由 Claude Agent 的 PreToolUse 权限策略和前端确认流控制。
 因此，`Write/Edit` 直接操作 `.claude/skills/` 时仍需按产品权限策略通过确认；
-通过后，Bash sandbox 不会再阻断该目录的创建、替换或删除操作。
+通过后，Bash sandbox 不会再阻断该目录的创建或替换操作。下一次
+`sync_skills_symlinks()` 会把 `.claude/skills/` 中的真实文件/目录移动回
+`workspace/skills/`，再把 `.claude/skills/` 恢复为发现用软链接。
 
 ### 3.5 `.mcp.json` — MCP 配置
 
@@ -119,8 +124,10 @@ Claude SDK 被调用时设置 `cwd = workspace_path`，因此它从
 
 ### 4.2 方案
 
-在每个工作空间创建 `skills/` 目录（用户友好的顶层位置），然后通过
-`sync_skills_symlinks()` 将其中的**文件和文件夹**软链接到同一工作空间的 `.claude/skills/`。
+在每个工作空间创建 `skills/` 目录（用户友好的顶层位置）。同步时先检查
+`.claude/skills/`：如果 Agent 在 Claude Code canonical 目录直接创建了真实文件或
+目录，则先移动到 `workspace/skills/`；随后通过 `sync_skills_symlinks()` 将
+`skills/` 中的**文件和文件夹**软链接到同一工作空间的 `.claude/skills/`。
 
 ```
 工作空间:   {workspace}/skills/research.md
@@ -130,6 +137,12 @@ Claude读取:  {workspace}/.claude/skills/research.md
 工作空间:   {workspace}/skills/analysis-tools/
                           ↓ symlink
 Claude读取:  {workspace}/.claude/skills/analysis-tools/
+
+Agent直接写入: {workspace}/.claude/skills/new-skill/
+                           ↓ import on sync
+工作空间:      {workspace}/skills/new-skill/
+                           ↓ symlink rebuilt
+Claude读取:     {workspace}/.claude/skills/new-skill/
 ```
 
 ### 4.3 隔离机制
@@ -147,6 +160,7 @@ Claude读取:  {workspace}/.claude/skills/analysis-tools/
 |------|------|
 | 工作空间初始化 | 扫描 `skills/` 并创建软链接 |
 | Skill 文件新增 | 下次 `sync_skills_symlinks()` 调用时自动链接（写入 skills/ 自动触发） |
+| `.claude/skills/` 真实文件/目录新增或替换 | 下次 `sync_skills_symlinks()` 调用时先导入 `workspace/skills/`，同名条目以 `.claude/skills/` 的真实写入为最新版本，再重建软链接 |
 | Skill 文件删除 | `_clean_stale_skill_symlinks()` 自动清理失效链接（删除 skills/ 自动触发） |
 | 对话删除 | 工作空间目录被删除后，源文件消失，下次同步时清理链接 |
 
@@ -187,6 +201,8 @@ candidate.relative_to(workspace_path.resolve())  # raises ValueError on escape
 ### 软链接安全
 
 - 软链接只指向同一工作空间 `skills/` 目录内的文件和文件夹
+- `.claude/skills/` 中非点开头的真实文件/目录会先移动进 `skills/`，避免直接创建的 skill 被下一次软链接重建隐藏或删除
+- 同名真实写入以 `.claude/skills/` 为最新版本，用于支持 Agent 直接替换 canonical skill 文件
 - 链接目标始终在工作空间 `.claude/skills/` 内，不触碰项目根或用户级 `~/.claude/`
 - 跳过 dotfiles/dotfolders（`.` 开头的条目）
 - 支持文件和文件夹两种类型的软链接

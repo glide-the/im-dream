@@ -2,6 +2,8 @@
 
 > **迁移来源**: `glide-the/claude-agent-next-kit → docs/design/workspace-skills-flow.md`
 > **适配说明**: 从 Next.js / TypeScript 迁移到 Python / FastAPI 架构。
+> **[Sync] 2026-06-16**: 同步入口会先导入 `.claude/skills/` 下真实文件/目录，
+> 再重建从 `workspace/skills/` 到 `.claude/skills/` 的软链接。
 
 ## 概述
 
@@ -29,7 +31,8 @@ flowchart TD
     H --> H4["同步 .claude/ 到工作空间"]
     H --> H5["复制 .mcp.json 到工作空间（首次）"]
     H3 --> H6["sync_skills_symlinks()"]
-    H6 --> H7["扫描 skills/ 中的文件和文件夹"]
+    H6 --> H6A["导入 .claude/skills/ 中的真实写入"]
+    H6A --> H7["扫描 skills/ 中的文件和文件夹"]
     H7 --> H8["为每个条目创建软链接"]
     H8 --> H9["{workspace}/.claude/skills/{name}"]
     H6 --> H10["清理过期软链接"]
@@ -51,6 +54,7 @@ flowchart TD
 
     style H3 fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
     style H6 fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
+    style H6A fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
     style H8 fill:#e8f5e9,stroke:#4caf50,stroke-width:2px
     style H9 fill:#fff3e0,stroke:#ff9800,stroke-width:2px
 ```
@@ -71,12 +75,14 @@ flowchart LR
         PS["skills/"]
         L1["my-skill.md → symlink"]
         L2["research-tools/ → symlink"]
+        R1["new-skill/ (real entry before sync)"]
     end
 
     WS --> S1
     WS --> S2
     S1 -.->|symlink| L1
     S2 -.->|symlink| L2
+    R1 -->|import then symlink rebuilt| WS
 
     style L1 fill:#e3f2fd,stroke:#2196f3
     style L2 fill:#e3f2fd,stroke:#2196f3
@@ -88,13 +94,16 @@ Claude SDK 被调用时设置 `cwd = workspace_path`，因此 Claude 从
 `{workspace_path}/.claude/skills/` 读取 skills。
 
 我们让用户/Agent 在更直观的 `{workspace}/skills/` 目录操作，然后自动软链接到
-`{workspace}/.claude/skills/` 供 Claude 发现。
+`{workspace}/.claude/skills/` 供 Claude 发现。若 Agent 直接在 Claude Code
+canonical 目录 `{workspace}/.claude/skills/` 创建真实文件或目录，下一次同步会先把
+该条目导入 `{workspace}/skills/`，再恢复为软链接。
 
 **关键优势**：
 1. 每个对话工作空间完全隔离，无命名冲突
 2. 同时支持**文件和文件夹**软链接
 3. 无需 sessionId 前缀 — 工作空间本身就是隔离边界
 4. 每次同步自动清理失效的链接
+5. 支持 Agent 直接写入 `.claude/skills/` 后回写到用户可见的 `skills/`
 
 ### 同步触发时机
 
@@ -103,6 +112,7 @@ Claude SDK 被调用时设置 `cwd = workspace_path`，因此 Claude 从
 | 工作空间初始化 | `init_workspace()` → `sync_skills_symlinks()` | 首次创建时自动同步 |
 | 访问已有工作空间 | `get_or_create_workspace()` → `init_workspace()` → `sync_skills_symlinks()` | 每次访问重新同步 |
 | 写入 skills/ | `write_workspace_file()` → `sync_skills_symlinks()` | 上传 skill 文件后自动同步 |
+| 直接写入 `.claude/skills/` | 下一次 `get_or_create_workspace()` / `init_workspace()` → `sync_skills_symlinks()` | 文件列表刷新或下一轮 workspace 初始化时导入真实写入 |
 | 删除 skills/ | `delete_workspace_file()` → `sync_skills_symlinks()` | 删除后清理链接 |
 | 移动涉及 skills/ | `move_workspace_file()` → `sync_skills_symlinks()` | 移动后更新链接 |
 
@@ -126,7 +136,7 @@ sequenceDiagram
     API->>WS: get_or_create_workspace(cid)
     WS->>DISK: mkdir files/ + logs/ + skills/
     WS->>DISK: sync .claude/ + .mcp.json
-    WS->>DISK: sync_skills_symlinks → symlink to .claude/skills/
+    WS->>DISK: sync_skills_symlinks → import .claude/skills real entries + symlink to .claude/skills/
     WS-->>API: workspace_path
     API-->>FS: 文件列表
 
@@ -138,7 +148,7 @@ sequenceDiagram
     U->>AGENT: 发送消息 (conversationId=cid)
     AGENT->>WS: get_or_create_workspace(cid) → 复用同一目录
     AGENT->>DISK: agent_runner.run_streaming(cwd=workspace_path)
-    Note over AGENT,DISK: Agent 可读写 {cid}/ 下所有文件
+    Note over AGENT,DISK: Agent 可读写 {cid}/ 下所有文件；直接写入 .claude/skills 会在下次同步导入 skills/
     AGENT-->>FS: 流式返回 → FileSidebar 自动刷新
 ```
 

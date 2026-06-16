@@ -1,6 +1,10 @@
 > **迁移来源**: Pawkeyland docs/app/design/workspace-filesystem.md — 路径已适配 Ink & Memory。
-> **Ink & Memory 简化说明**: skills 符号链接同步（workspace_file_sync）在 Ink & Memory 中未引入，`workspace.py` 仅保留 files/logs/.claude 骨架创建。
+> **Ink & Memory 适配说明**: skills 同步已由 `workspace_file_sync.py` 引入；
+> `sync_skills_symlinks()` 会先导入 `.claude/skills/` 的真实写入，再维护
+> `workspace/skills/` 到 `.claude/skills/` 的发现软链接。
 > **[Sync] 2026-06-06**: Memory Workspace 不再由 `init_workspace()` 或 `ClaudeAgentService.assemble_context()` 初始化；`/memory/` 仅通过 `POST /api/workspace/memory-init` 文件接口从 `voices.memory_workspace_config` 写入。详见 [`../memory/memory-workspace-design.md`](../memory/memory-workspace-design.md)。
+> **[Sync] 2026-06-16**: `.claude/skills/` 真实文件/目录会在下次 workspace
+> 同步时导入 `workspace/skills/`，支持 Agent 直接创建或替换 skill。
 
 # 工作空间文件系统设计方案
 
@@ -33,9 +37,9 @@
 |------|------|
 | `ClaudeAgentRunRequest.cwd` 参数 | ✅ 已实现（`backend/claude_agent/service.py`，由 Phase 1 `assemble_context` 在三层享元短路中使用） |
 | `AgentRunOptions.cwd` 传入 ClaudeAgentRunner | ✅ 已实现（`backend/claude_agent/agent_runner.py`） |
-| 工作空间初始化管理器 | ✅ 已实现（`backend/claude_agent/workspace.py`） |
+| 工作空间初始化管理器 | ✅ 已实现（`backend/libs/claude_agent_kit/server/workspace.py`） |
 | 项目内置 Skills 种子复制 | ✅ 已实现（`_seed_workspace_skills()`：首次 init 时将 `.claude/skills/` 复制到 `workspace/skills/`，现有条目跳过） |
-| Skills 目录软链接 | ✅ 已实现（`backend/claude_agent/workspace_file_sync.py`） |
+| Skills 目录软链接 | ✅ 已实现（`backend/libs/claude_agent_kit/server/workspace_file_sync.py`；同步前导入 `.claude/skills/` 真实写入） |
 | 工作空间文件管理 API | ✅ 已实现（`api/workspace/files.py`） |
 | 压缩包 Skills 提取 | ✅ 已实现（`extract_archive_in_skills()`） |
 
@@ -53,7 +57,7 @@
       ├── .mcp.json                       ← 从项目根复制（MCP 服务配置）
       ├── files/                          ← 用户上传 + Agent 生成文件
       ├── logs/                           ← Agent 执行日志
-      └── skills/                         ← 对话级 Skills；首次 init 时从项目 .claude/skills/ 种子复制，之后用户/Agent 可自由修改
+      └── skills/                         ← 对话级 Skills；首次 init 时从项目 .claude/skills/ 种子复制，之后用户/Agent 可自由修改；.claude/skills/ 真实写入也会导入这里
             ├── pet-context-assembly/       ← 项目内置 Skill（从 .claude/skills/ 种子复制而来）
             ├── my-skill.md
             └── research-tools/
@@ -160,6 +164,8 @@ def init_workspace(session_id: str | None = None) -> str:
 
 Skills 软链接机制（详见 [workspace-skills-flow.md](../workspace/workspace-skills-flow.md)）：
 
+- 扫描 `{workspace}/.claude/skills/`，将非点开头的真实文件/目录导入
+  `{workspace}/skills/`
 - 扫描 `{workspace}/skills/` 目录中所有非点开头条目
 - 为每个条目在 `{workspace}/.claude/skills/` 创建指向原路径的软链接
 - 若软链接已存在且目标相同，跳过；否则先删再建

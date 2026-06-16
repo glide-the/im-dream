@@ -22,6 +22,8 @@
 #                    when the backend runs inside a Linux container.
 # [Sync] 2026-06-16: keep .claude/skills fully writable by narrowing sandbox
 #                    denyWrite to config/runtime internals instead of .claude/.
+# [Sync] 2026-06-16: workspace_file_sync imports direct .claude/skills writes
+#                    into workspace/skills before rebuilding discovery symlinks.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -33,7 +35,8 @@ Each conversation gets an isolated working directory under the workspace root:
         skills/         – installable skill packages / files
         .editor/        – EditorState virtual index (placeholder files; see workspace-adapter.md)
         .claude/        – Claude project config (synced from repo template)
-        .claude/skills/ – symlinks → ../skills/* (managed by workspace_file_sync)
+        .claude/skills/ – symlinks → ../skills/*; direct writes are imported back
+                           into skills/ (managed by workspace_file_sync)
 
 The ``memory/`` procedural memory subdirectory is **not** created by
 ``init_workspace``.  It is initialised explicitly through the workspace
@@ -425,7 +428,9 @@ def _sync_claude_project_template(src_claude: Path, dst_claude: Path) -> None:
     """Sync project ``.claude`` template files into a workspace.
 
     Runtime-managed ``.claude/skills`` is intentionally excluded because it is
-    maintained by ``workspace_file_sync`` as symlinks to ``workspace/skills``.
+    maintained by ``workspace_file_sync`` as symlinks to ``workspace/skills``;
+    any direct real files/directories there are imported back into
+    ``workspace/skills`` before symlink rebuild.
     Other existing workspace-local files are preserved unless they conflict
     with a project template file or directory.
     """
