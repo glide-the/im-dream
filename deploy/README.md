@@ -10,7 +10,7 @@
 |------|------|------|
 | 本地发布 | [`local/deploy.sh`](local/deploy.sh) | 检查、构建、启动、验证、停止本地 backend/frontend 进程 |
 | Docker 发布 | [`docker/deploy.sh`](docker/deploy.sh) | 包装根目录 [`../docker-compose.yml`](../docker-compose.yml) 的构建、启动、验证、清理 |
-| Remote SSH 发布 | [`remote-ssh/deploy.sh`](remote-ssh/deploy.sh) | 一键编排 SSH/rsync、主机 nginx、远端存储初始化、Docker Compose 构建启动与验证；高级场景可用其 `setup-nginx` / `setup-storage` / `sync-data` 子命令 |
+| Remote SSH 发布 | [`remote-ssh/deploy.sh`](remote-ssh/deploy.sh) | 一键编排 SSH/rsync、主机 nginx、远端存储初始化、Docker Compose 构建启动与验证；高级场景可用其 `setup-nginx` / `setup-storage` / `backup-data` / `sync-data` / `download-data` 子命令 |
 | Google Cloud 发布 | [`google-cloud/deploy.sh`](google-cloud/deploy.sh) | 完整 Cloud Run 发布入口，默认使用 `ink-backend.suoxya.com` / `ink-frontend.suoxya.com`，提供构建、推送、部署、CORS 回写、dry-run/check/verify/rollback |
 
 ## 兼容入口

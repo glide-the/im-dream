@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
-# [Input] Consume SQLite, filesystem paths, JSON data, and memory workspace defaults.
+# [Input] Consume SQLite, filesystem paths, JSON data, optional session text extraction,
+#         and memory workspace defaults.
 # [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
 #          Claude Agent threads/messages, and voice partition Memory configs.
 # [Pos] database node in backend
 # [Sync] 2026-06-06: add procedural Memory workspace default config seeding,
 #                    backfill, and voice fork/sync propagation.
+# [Sync] 2026-06-16: list_sessions_in_range can include full text for Agent
+#                    fuzzy cross-session retrieval without changing existing
+#                    lightweight callers.
 """
 SQLite database setup and migrations for Ink & Memory.
 
@@ -1269,6 +1273,23 @@ def _parse_labels(raw: Optional[str]) -> list:
         return []
 
 
+def _extract_session_text(editor_state_json: str) -> tuple[str, str]:
+    """Return ``(first_line, full_text)`` from text cells in an editor state JSON."""
+    try:
+        state = json.loads(editor_state_json)
+        text_cells = [
+            c.get("content", "").strip()
+            for c in state.get("cells", [])
+            if c.get("type") == "text" and c.get("content", "").strip()
+        ]
+    except Exception:
+        return "", ""
+
+    full_text = "\n\n".join(text_cells).strip()
+    first_line = full_text.split("\n")[0][:30] if full_text else ""
+    return first_line, full_text
+
+
 def save_session(user_id: int, session_id: str, editor_state: dict, name: str = None,
                  created_at: Optional[Union[str, datetime]] = None,
                  labels: Optional[list] = None):
@@ -1364,17 +1385,7 @@ def list_sessions(user_id: int):
 
         results = []
         for row in rows:
-            first_line = ""
-            try:
-                state = json.loads(row["editor_state_json"])
-                first_text = next(
-                    (c.get("content", "").strip() for c in state.get("cells", []) if c.get("type") == "text" and c.get("content")),
-                    ""
-                )
-                if first_text:
-                    first_line = first_text.split("\n")[0][:30]
-            except Exception:
-                first_line = ""
+            first_line, _full_text = _extract_session_text(row["editor_state_json"])
 
             results.append(
                 {
@@ -1390,10 +1401,16 @@ def list_sessions(user_id: int):
     finally:
         db.close()
 
-def list_sessions_in_range(user_id: int, start_date: Optional[str], end_date: Optional[str]):
+def list_sessions_in_range(
+    user_id: int,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    include_text: bool = False,
+):
     """
     List sessions within an optional date range (UTC timestamps stored in DB).
     Dates are strings YYYY-MM-DD and compared against created_at/updated_at dates.
+    ``include_text=True`` adds full text-cell content for Agent-side fuzzy search.
     """
     db = get_db()
     try:
@@ -1408,28 +1425,19 @@ def list_sessions_in_range(user_id: int, start_date: Optional[str], end_date: Op
 
         results = []
         for row in rows:
-            first_line = ""
-            try:
-                state = json.loads(row["editor_state_json"])
-                first_text = next(
-                    (c.get("content", "").strip() for c in state.get("cells", []) if c.get("type") == "text" and c.get("content")),
-                    ""
-                )
-                if first_text:
-                    first_line = first_text.split("\n")[0][:30]
-            except Exception:
-                first_line = ""
+            first_line, full_text = _extract_session_text(row["editor_state_json"])
 
-            results.append(
-                {
-                    "id": row["id"],
-                    "name": row["name"],
-                    "created_at": row["created_at"],
-                    "updated_at": row["updated_at"],
-                    "labels": _parse_labels(row["labels"]),
-                    "first_line": first_line,
-                }
-            )
+            item = {
+                "id": row["id"],
+                "name": row["name"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "labels": _parse_labels(row["labels"]),
+                "first_line": first_line,
+            }
+            if include_text:
+                item["text"] = full_text
+            results.append(item)
         return results
     finally:
         db.close()

@@ -12,7 +12,7 @@
 |----------|--------------|------|
 | Google Cloud 发布 | [`../../deploy/google-cloud/deploy.sh`](../../deploy/google-cloud/deploy.sh)、[`../../deploy/google-cloud/setup-storage.sh`](../../deploy/google-cloud/setup-storage.sh)、[`../../deploy/google-cloud/sync-data.sh`](../../deploy/google-cloud/sync-data.sh)、旧 `deploy/*.sh` 兼容包装、`docs/deploy/overview.md`、`docs/deploy/data-sync.md` | 已形成完整目录化入口，旧根脚本保留兼容或作为辅助脚本 |
 | Docker 发布 | [`../../deploy/docker/deploy.sh`](../../deploy/docker/deploy.sh)、根目录 [`../../docker-compose.yml`](../../docker-compose.yml)、[`../../backend/Dockerfile`](../../backend/Dockerfile)、[`../../frontend/Dockerfile`](../../frontend/Dockerfile)、[`../../frontend/nginx.conf.template`](../../frontend/nginx.conf.template) | 已形成目录化入口，复用根 Compose |
-| Remote SSH 发布 | [`../../deploy/remote-ssh/deploy.sh`](../../deploy/remote-ssh/deploy.sh)、[`../../deploy/remote-ssh/docker-compose.yml`](../../deploy/remote-ssh/docker-compose.yml)、[`remote-ssh.md`](remote-ssh.md) | 新增远程 Docker 服务器入口，使用 SSH/rsync 和远端 `docker-compose` |
+| Remote SSH 发布 | [`../../deploy/remote-ssh/deploy.sh`](../../deploy/remote-ssh/deploy.sh)、[`../../deploy/remote-ssh/sync-data.sh`](../../deploy/remote-ssh/sync-data.sh)、[`../../deploy/remote-ssh/docker-compose.yml`](../../deploy/remote-ssh/docker-compose.yml)、[`remote-ssh.md`](remote-ssh.md) | 远程 Docker 服务器入口，使用 SSH/rsync 和远端 `docker-compose`；数据维护收敛为 `backup` / `upload` / `download`，上传后 force-recreate Compose 服务 |
 | 本地发布 | [`../../deploy/local/deploy.sh`](../../deploy/local/deploy.sh)、[`../../README.md`](../../README.md)、[`../../README.zh.md`](../../README.zh.md) 的后端 `python server.py` 与前端 `npm run dev` 指令 | 已形成目录化入口，复用本地启动方式 |
 
 结论：`deploy/` 脚本层应从 Google Cloud Run 专属目录升级为平台化发布入口；新的 `deploy/google-cloud/` 应承载完整 Cloud Run 发布实现，旧 Cloud Run 根脚本继续保留为兼容入口或辅助脚本，避免破坏既有调用路径。
@@ -439,6 +439,7 @@ deploy/
 | `deploy/docker/deploy.sh` | 已新增：Compose check/config/build/start/verify/stop/clean/logs，支持 `--help`、`--dry-run`、`--check` | 已完成 |
 | `deploy/google-cloud/deploy.sh` | 已调整为完整 Cloud Run 主发布脚本，提供 plan/check/setup/deploy/sync/verify/rollback/clean，并在部署后回写后端 `INK_CORS_ALLOW_ORIGINS` | 已完成 |
 | `deploy/remote-ssh/deploy.sh` | 新增 Remote SSH 发布脚本，通过 rsync 同步到远程 Docker 服务器并执行 `docker-compose`，默认资源规格对齐 Cloud Run，并保留远端 `backend/data/` 作为服务文件系统 | 已完成 |
+| `deploy/remote-ssh/sync-data.sh` | 已收敛为 `backup` / `upload` / `download` 三个数据维护动作；`upload` 先备份远端数据、上传本地 `backend/data/`，再执行 Compose `up -d --force-recreate` 让后端重新加载数据库；`download` 先备份本地数据再覆盖同步远端目录 | 已完成 |
 | `setup-env.sh` | 重做 secret 分类：API key、token、JWT、Mem0 key 等进 Secret Manager；路径、TTL、模型名、开关作为普通 env | 高 |
 | `setup-env.sh` | 不再把所有非 secret `.env` key 盲目透传，改为 allowlist 或带敏感名检测 | 高 |
 | `deploy/google-cloud/sync-data.sh` | 已明确自动脚本只同步 SQLite/WAL/SHM，并过滤旧 `.cloud-env` 中的 `INK_CORS_*` 后写回固定前端域名；根路径 `deploy/sync-data.sh` 仅兼容委托；后续可增加 `file-storage/`、`agent-workspace/` 同步选项 | 部分完成 |

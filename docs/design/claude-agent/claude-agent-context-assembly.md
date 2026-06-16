@@ -4,6 +4,7 @@
 > [Sync] 2026-05-28: cleaned duplicate migration headers and Pawkeyland-only context assumptions; aligned the design with Ink & Memory `thread_id`, `message_parts`, workspace-file attachments, and planning prompt optimization.
 > [Sync] 2026-05-29: add existing_session / resume resolution design — `assemble_context` now loads `chat_thread` from DB, gates resume on `_has_usable_claude_resume` (contract-version check) + local JSONL file probe, derives `thread_id_for_agent` / `should_resume`; `_TurnExecution` gains `resume_existing_session` field; `_persist_turn` writes back `claude_session_id` + `agent_contract_version` so the DB self-heals across deployments.
 > [Sync] 2026-06-09: `claude-agent-prompt-optimization.md` now exists as the planning prompt optimization contract; `context_builder.py` also carries the Expert Prompt Architect template for agent-side planning turns.
+> [Sync] 2026-06-16: Session Retrieval Workflow now tells the Agent to pass `query` / `labels` into `mcp__user__get_sessions_range`; default retrieval is character fuzzy matching, while vector mode is an interface boundary only.
 
 # Claude Agent Context Assembly Design
 
@@ -109,7 +110,7 @@ The factory is responsible for session locking, runner caching, lifecycle observ
    ```
    where `labels` is the comma-joined list of session labels (from `user_sessions.labels`), and `sessionId` allows the agent to reference a session when calling `mcp__user__get_sessions_range`.
 
-   For sessions **older than 3 days**, the agent must call `mcp__user__get_sessions_range(start_date, end_date)` to retrieve them on demand. The system prompt's Session Retrieval Workflow section explains when and how to use this tool.
+   For sessions **older than 3 days**, the agent must call `mcp__user__get_sessions_range(start_date, end_date, query, labels)` to retrieve them on demand. The system prompt's Session Retrieval Workflow section explains that `query` uses default character fuzzy matching over title, labels, excerpt, and note text. `retrieval_mode="vector"` is currently only a reserved interface and may return unavailable until a vector store is configured.
 
 4. **Rules and assistant behavior**
    Current behavior rules live in `ClaudeAgentContextBuilder`'s system prompt template. Future prompt assets must be loaded through the project's prompt/config pattern rather than embedded in route handlers.

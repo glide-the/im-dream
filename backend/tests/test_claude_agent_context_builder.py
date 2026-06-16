@@ -12,6 +12,7 @@
 # [Sync] 2026-06-06: run coroutine tests with explicit per-call event loops.
 # [Sync] 2026-06-09: cover Planning Prompt Optimization workflow and escaped
 #                    {{task}} placeholder in the system prompt.
+# [Sync] 2026-06-16: cover fuzzy query guidance in Session Retrieval Workflow.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -169,6 +170,14 @@ class TestBuildSystemPrompt(unittest.TestCase):
         self.assertIn("You are an Expert Prompt Architect.", prompt)
         self.assertIn("Optimized Prompt:", prompt)
         self.assertIn("USER REQUIREMENT: {{task}}", prompt)
+
+    def test_session_retrieval_workflow_mentions_fuzzy_query(self):
+        with self._mock_db([]):
+            prompt = _run(self._builder().build_system_prompt("1"))
+
+        self.assertIn('query="<topic or memory>"', prompt)
+        self.assertIn("Default retrieval is character fuzzy matching", prompt)
+        self.assertIn('retrieval_mode="vector"', prompt)
 
 
 # ---------------------------------------------------------------------------

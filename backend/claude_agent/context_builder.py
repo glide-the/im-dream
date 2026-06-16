@@ -1,4 +1,4 @@
-# [Input] Consume database.list_sessions (via database module import).
+# [Input] Consume database.list_sessions_in_range (via database module import).
 #         Reads INK_AGENT_CONTEXT_SESSIONS env var.
 #         Imports build_workspace_context_block from claude_agent.workspace_context —
 #           that module's template is sourced from the virtual index mapping rules
@@ -37,6 +37,8 @@
 # [Sync] 2026-06-09: add Planning Prompt Optimization workflow to the system prompt
 #                    so planning turns first transform the raw task through the
 #                    Expert Prompt Architect template before planning execution.
+# [Sync] 2026-06-16: update Session Retrieval Workflow for fuzzy query/labels
+#                    parameters and vector interface boundary.
 
 """Context builder for the Ink & Memory Claude Agent.
 
@@ -182,9 +184,14 @@ When the user mentions a topic, theme, or past memory that may be recorded in ol
 use `mcp__user__get_sessions_range` to search further back:
 
 1. Estimate the date window based on the user's context clues (e.g. "last month", "春节").
-2. Call `get_sessions_range(start_date, end_date)` — dates in YYYY-MM-DD format.
-3. Scan the returned `labels` and `excerpt` fields to identify sessions relevant to the topic.
-4. Reference those sessions by their `sessionId` when replying to the user.
+2. Call `get_sessions_range(start_date, end_date, query="<topic or memory>", labels=[...])`
+   when you know a topic, title clue, label, or fuzzy phrase. Dates use YYYY-MM-DD.
+3. Default retrieval is character fuzzy matching over title, labels, excerpt, and note text.
+   Prefer a `query` over labels-only search because labels can miss semantic details.
+4. Use `retrieval_mode="vector"` only as a reserved interface; the current runtime may report
+   vector retrieval unavailable until a vector store is configured.
+5. Review returned `match`, `labels`, and `excerpt` fields, then reference useful sessions by
+   their `sessionId` when replying to the user.
 
 Only call this tool when the user's message suggests they are referring to events or themes
 that predate the visible recent entries.  Do not call it on every turn.
