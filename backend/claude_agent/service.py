@@ -193,7 +193,7 @@ def _extract_text_from_parts(parts: Optional[list]) -> str:
     return extract_text_from_parts(parts)
 
 
-def _format_exception_for_sse(exc: BaseException | Exception | None) -> str:
+def _format_exception_for_sse(exc: BaseException | None) -> str:
     """Return SSE-safe error text, including PEP-678 notes when available."""
 
     if exc is None:

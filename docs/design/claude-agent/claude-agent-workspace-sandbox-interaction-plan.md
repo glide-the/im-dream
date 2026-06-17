@@ -211,7 +211,7 @@ This is intentionally not over-designed:
   error formatting with exception notes.
 - Compile the touched backend modules.
 - Local Docker verification checklist:
-  - `docker compose -f /home/runner/work/ink-and-memory/ink-and-memory/docker-compose.yml config`
+  - `docker compose -f <repo-root>/docker-compose.yml config`
     confirms backend `cap_add: [SYS_ADMIN]` and unconfined seccomp/AppArmor.
   - start stack and reproduce inside backend container:
     `bash -lc 'ls /app/data/agent-workspace && python --version && node --version'`.

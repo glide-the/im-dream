@@ -501,16 +501,16 @@ def _sandbox_runtime_failure_hint(
 ) -> Optional[str]:
     """Return remediation guidance for known sandbox-runtime startup failures."""
 
-    merged = f"{error_message}\n{stderr_snippet}".lower()
-    if "apply-seccomp" in merged and "permission denied" in merged:
+    error_content = f"{error_message}\n{stderr_snippet}".lower()
+    if "apply-seccomp" in error_content and "permission denied" in error_content:
         return (
             "Claude Bash sandbox could not apply seccomp in this runtime "
             "(apply-seccomp permission denied). For Docker backend runs, start "
             "the container with cap_add=SYS_ADMIN and security_opt "
             "seccomp=unconfined, apparmor=unconfined, then recreate containers."
         )
-    if "failed to make / slave: permission denied" in merged or (
-        "bubblewrap" in merged and "permission denied" in merged
+    if "failed to make / slave: permission denied" in error_content or (
+        "bubblewrap" in error_content and "permission denied" in error_content
     ):
         return (
             "Claude Bash sandbox bubblewrap mount setup was blocked by container "
