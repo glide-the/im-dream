@@ -10,6 +10,7 @@ services:
     image: ghcr.io/shuxueshuxue/ink-backend:latest
     container_name: ink-backend
     restart: unless-stopped
+    privileged: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     cap_add:
@@ -17,6 +18,7 @@ services:
       # mount namespace setup or Bash fails with:
       # `bwrap: Failed to make / slave: Permission denied`.
       - SYS_ADMIN
+      - SYS_PTRACE
       - NET_ADMIN
     security_opt:
       - seccomp=unconfined

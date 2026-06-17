@@ -19,11 +19,13 @@ services:
     restart: unless-stopped
     cpus: "${REMOTE_BACKEND_CPUS:-1.0}"
     mem_limit: "${REMOTE_BACKEND_MEMORY:-1g}"
+    privileged: true
     extra_hosts:
       - "host.docker.internal:host-gateway"
     cap_add:
       # bubblewrap needs CAP_SYS_ADMIN for mount namespace setup inside Docker.
       - SYS_ADMIN
+      - SYS_PTRACE
       - NET_ADMIN
     security_opt:
       # Claude Code's Linux Bash sandbox uses bubblewrap. Docker's default
