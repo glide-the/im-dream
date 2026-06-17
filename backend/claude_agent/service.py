@@ -78,6 +78,8 @@
 # [Sync] 2026-06-14: publish Edit Session session_updated events after successful
 #                    editor MCP write tool results so the frontend can reload
 #                    without a fixed 2000ms wait.
+# [Sync] 2026-06-17: include runner exception notes in SSE errorText so sandbox
+#                    startup diagnostics (e.g. seccomp-denied hints) reach UI.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -189,6 +191,21 @@ def _extract_text_from_parts(parts: Optional[list]) -> str:
     auto-fill where a compact string representation is needed.
     """
     return extract_text_from_parts(parts)
+
+
+def _format_exception_for_sse(exc: BaseException | Exception | None) -> str:
+    """Return SSE-safe error text, including PEP-678 notes when available."""
+
+    if exc is None:
+        return "Unknown error"
+    base = str(exc)
+    notes = getattr(exc, "__notes__", None)
+    if not isinstance(notes, list) or not notes:
+        return base
+    rendered_notes = [str(note).strip() for note in notes if str(note).strip()]
+    if not rendered_notes:
+        return base
+    return " | ".join([base, *rendered_notes])
 
 
 # ---------------------------------------------------------------------------
@@ -551,7 +568,7 @@ class ClaudeAgentService:
             # Persist assistant message (user message already saved above).
             await self._persist_assistant_turn(execution, result)
         else:
-            error_msg = str(result.error) if result.error else "Unknown error"
+            error_msg = _format_exception_for_sse(result.error)
             await queue.put(_sse("error", {"errorText": error_msg}))
             await queue.put(_sse("finish", {"finishReason": "error"}))
             # Even on error, flush whatever partial assistant content was collected.
@@ -1025,7 +1042,7 @@ class ClaudeAgentService:
     @staticmethod
     def _make_error_cb(queue: asyncio.Queue):
         async def on_error(exc: Exception) -> None:
-            await queue.put(_sse("error", {"errorText": str(exc)}))
+            await queue.put(_sse("error", {"errorText": _format_exception_for_sse(exc)}))
 
         return on_error
 
