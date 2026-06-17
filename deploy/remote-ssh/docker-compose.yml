@@ -41,6 +41,7 @@ services:
       PORT: ${REMOTE_BACKEND_CONTAINER_PORT:-8765}
       TZ: ${REMOTE_TZ:-UTC}
       AGENT_CWD: ${REMOTE_AGENT_CWD:-/app/data/agent-workspace}
+      INK_AGENT_SANDBOX_EXTRA_ALLOW_READ: ${REMOTE_SANDBOX_EXTRA_ALLOW_READ:-/app/claude_agent:/app/libs:/app/prompts}
       FILE_STORAGE_TYPE: ${REMOTE_FILE_STORAGE_TYPE:-local}
       FILE_STORAGE_LOCAL_DIR: ${REMOTE_FILE_STORAGE_LOCAL_DIR:-/app/data/file-storage}
       FILE_STORAGE_PREFIX: ${REMOTE_FILE_STORAGE_PREFIX:-uploads}

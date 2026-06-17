@@ -73,6 +73,9 @@
 # [Sync] 2026-06-17: detect seccomp-denied sandbox startup errors
 #                    (e.g. apply-seccomp Permission denied) and attach actionable
 #                    Docker runtime remediation notes to runner errors.
+# [Sync] 2026-06-17: expand DEFAULT_ALLOWED_TOOLS to include built-in filesystem,
+#                    notebook, todo and Bash tools so agents can read/write the
+#                    workspace without requiring a custom allowedTools override.
 
 """Claude Agent Runner.
 
@@ -138,12 +141,25 @@ except NameError:
 # ---------------------------------------------------------------------------
 # Default tool allowlist.
 #
-# Pet chat is the product-facing path, so the default surface is intentionally
-# narrow: expose only the Skill tool plus product-owned MCP tools and no
-# built-in filesystem/web/Bash-style tools.
+# Includes built-in filesystem/notebook/todo/Bash tools so agents can operate
+# on the workspace out of the box.  Sandbox policy (workspace.py) restricts
+# actual filesystem access to the thread workspace and any extra read-only
+# paths configured via INK_AGENT_SANDBOX_EXTRA_ALLOW_READ.
 # ---------------------------------------------------------------------------
 
 DEFAULT_ALLOWED_TOOLS: list[str] = [
+    "Read",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "Grep",
+    "Glob",
+    "LS",
+    "NotebookRead",
+    "TodoRead",
+    "TodoWrite",
+    "Bash",
+    "BashOutput",
     "Skill",
     "mcp__user__touch_animation",
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
