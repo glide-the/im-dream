@@ -7,6 +7,8 @@
 #                    -> tool-input-delta SSE forwarding coverage.
 # [Sync] 2026-06-14: cover Edit Session event publication after successful
 #                    editor MCP write tool results.
+# [Sync] 2026-06-17: cover SSE error formatting that includes exception notes
+#                    from runner diagnostics.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -211,6 +213,22 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             self.assertEqual(state.editor_state["cells"][0]["content"], "new")
 
         _run(scenario())
+
+
+class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
+    def test_make_error_cb_includes_exception_notes(self):
+        async def scenario():
+            queue: asyncio.Queue[str] = asyncio.Queue()
+            callback = ClaudeAgentService._make_error_cb(queue)
+            exc = RuntimeError("Command failed with exit code 1")
+            exc.add_note("[claude_agent_kit] sandbox_hint: apply-seccomp denied")
+            await callback(exc)
+            return _parse_sse(queue.get_nowait())
+
+        frame = _run(scenario())
+        self.assertEqual(frame["type"], "error")
+        self.assertIn("Command failed with exit code 1", frame["errorText"])
+        self.assertIn("sandbox_hint", frame["errorText"])
 
 
 if __name__ == "__main__":

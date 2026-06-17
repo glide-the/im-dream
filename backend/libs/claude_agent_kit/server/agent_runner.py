@@ -70,6 +70,12 @@
 # [Sync] 2026-06-13: full-access mode keeps AskUserQuestion-style tools on the
 #                    frontend confirmation path so user answers can be collected
 #                    and merged into updatedInput.
+# [Sync] 2026-06-17: detect seccomp-denied sandbox startup errors
+#                    (e.g. apply-seccomp Permission denied) and attach actionable
+#                    Docker runtime remediation notes to runner errors.
+# [Sync] 2026-06-17: expand DEFAULT_ALLOWED_TOOLS to include built-in filesystem,
+#                    notebook, todo and Bash tools so agents can read/write the
+#                    workspace without requiring a custom allowedTools override.
 
 """Claude Agent Runner.
 
@@ -135,12 +141,25 @@ except NameError:
 # ---------------------------------------------------------------------------
 # Default tool allowlist.
 #
-# Pet chat is the product-facing path, so the default surface is intentionally
-# narrow: expose only the Skill tool plus product-owned MCP tools and no
-# built-in filesystem/web/Bash-style tools.
+# Includes built-in filesystem/notebook/todo/Bash tools so agents can operate
+# on the workspace out of the box.  Sandbox policy (workspace.py) restricts
+# actual filesystem access to the thread workspace and any extra read-only
+# paths configured via INK_AGENT_SANDBOX_EXTRA_ALLOW_READ.
 # ---------------------------------------------------------------------------
 
 DEFAULT_ALLOWED_TOOLS: list[str] = [
+    "Read",
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "Grep",
+    "Glob",
+    "LS",
+    "NotebookRead",
+    "TodoRead",
+    "TodoWrite",
+    "Bash",
+    "BashOutput",
     "Skill",
     "mcp__user__touch_animation",
     f"mcp__user__{GET_SESSIONS_RANGE_TOOL_NAME}",
@@ -490,6 +509,34 @@ def _format_exception_message(exc: BaseException) -> str:
     if len(leaves) == 1 and leaves[0] is exc:
         return str(exc)
     return "; ".join(f"{type(leaf).__name__}: {leaf}" for leaf in leaves)
+
+
+def _sandbox_runtime_failure_hint(
+    error_message: str,
+    stderr_snippet: str,
+) -> Optional[str]:
+    """Return remediation guidance for known sandbox-runtime startup failures."""
+
+    error_content = f"{error_message}\n{stderr_snippet}"
+    error_content_lower = error_content.lower()
+    if "apply-seccomp" in error_content_lower and "permission denied" in error_content_lower:
+        return (
+            "Claude Bash sandbox could not apply seccomp in this runtime "
+            "(apply-seccomp permission denied). For Docker backend runs, start "
+            "the container with docker-compose keys "
+            "`cap_add: [SYS_ADMIN]` + `security_opt: [seccomp=unconfined, apparmor=unconfined]` "
+            "(or docker run `--cap-add=SYS_ADMIN --security-opt seccomp=unconfined "
+            "--security-opt apparmor=unconfined`), then recreate containers."
+        )
+    if "failed to make / slave: permission denied" in error_content_lower or (
+        "bubblewrap" in error_content_lower and "permission denied" in error_content_lower
+    ):
+        return (
+            "Claude Bash sandbox bubblewrap mount setup was blocked by container "
+            "security policy. Ensure Docker backend sets `cap_add: [SYS_ADMIN]` "
+            "and `security_opt: [seccomp=unconfined, apparmor=unconfined]`."
+        )
+    return None
 
 
 def _is_pure_cancellation(exc: BaseException) -> bool:
@@ -1661,6 +1708,12 @@ class ClaudeAgentRunner:
                 run_error.add_note(ctx_note)
                 if stderr_snippet:
                     run_error.add_note(f"[claude_agent_kit] cli_stderr: {stderr_snippet}")
+                sandbox_hint = _sandbox_runtime_failure_hint(
+                    _format_exception_message(exc),
+                    stderr_snippet,
+                )
+                if sandbox_hint:
+                    run_error.add_note(f"[claude_agent_kit] sandbox_hint: {sandbox_hint}")
             except AttributeError:
                 # PEP 678 add_note requires Python 3.11+; ignore on older runtimes.
                 pass

@@ -33,6 +33,8 @@
 # [Sync] 2026-06-13: message factory helpers read SDK stub classes from the
 #                    imported agent_runner module so runner tests remain
 #                    order-independent when another test imported shared stubs first.
+# [Sync] 2026-06-17: cover seccomp-denied sandbox hint detection for
+#                    apply-seccomp/bubblewrap startup failures.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -556,6 +558,23 @@ def _runner_with_exception_group(exceptions):
             yield  # pragma: no cover
 
     return ClaudeAgentRunner(sdk_client=_GroupClient())
+
+
+class TestSandboxFailureHintHelper(unittest.TestCase):
+    def test_apply_seccomp_permission_denied_returns_hint(self):
+        hint = agent_runner_module._sandbox_runtime_failure_hint(
+            "Command failed with exit code 1",
+            "apply-seccomp: Permission denied",
+        )
+        self.assertIsNotNone(hint)
+        self.assertIn("apply seccomp", hint.lower())
+
+    def test_unrelated_error_returns_none(self):
+        hint = agent_runner_module._sandbox_runtime_failure_hint(
+            "Command failed with exit code 1",
+            "npm: command not found",
+        )
+        self.assertIsNone(hint)
 
 
 class TestClaudeAgentRunnerErrorHandling(_RunnerBase):

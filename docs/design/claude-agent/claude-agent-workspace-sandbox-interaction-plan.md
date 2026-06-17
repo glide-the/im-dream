@@ -6,6 +6,8 @@
 > Settings and diagnosing why the previous config still allowed other paths.
 > [Pos] workspace-sandbox-interaction-plan in `docs/design/claude-agent`
 > [Sync] 2026-06-13: initial design for strict per-thread Bash read/write scope.
+> [Sync] 2026-06-17: add seccomp-denied (`apply-seccomp`) failure handling and
+> local Docker verification checklist.
 
 # Claude-Agent Workspace Sandbox Interaction Plan
 
@@ -68,6 +70,26 @@ documentation says sandboxing applies to Bash and child processes, while
 Read/Edit-style permissions govern built-in file tools. Therefore the backend
 must also enforce the thread-workspace boundary in the SDK `PreToolUse` hook for
 `Read`, `Grep`, `Glob`, `LS`, `NotebookRead`, `Write`, `Edit`, and `MultiEdit`.
+
+### 2.1 Current incident classification (`apply-seccomp: Permission denied`)
+
+When logs show `apply-seccomp: Permission denied`, this is not a language runtime
+problem and not a thread workspace routing bug. It is a container runtime policy
+failure while sandbox-runtime tries to install seccomp rules for Bash.
+
+- **Python blocked / Node blocked / Bash blocked together** ⇒ sandbox bootstrap
+  failed before language execution.
+- **`EPERM` on paths outside `{AGENT_CWD}/{thread_id}` with sandbox active** ⇒
+  expected isolation behavior.
+- **`apply-seccomp` denied for every command** ⇒ host/container security policy
+  currently cannot satisfy strict sandbox startup.
+
+Minimal handling in this phase:
+
+1. keep strict sandbox goal unchanged;
+2. expose actionable diagnostics in runner/service error output;
+3. require Docker runtime privileges (`SYS_ADMIN`, unconfined seccomp/AppArmor)
+   for local/remote Compose backends.
 
 ## 3. Interaction design
 
@@ -185,6 +207,15 @@ This is intentionally not over-designed:
 - Unit-test disabled workspace mode still writes disabled sandbox flags.
 - Unit-test `Read` / `Grep` outside the thread workspace are hard-denied before
   frontend confirmation or full-access allow paths can approve them.
+- Unit-test runner seccomp-denied error hinting (`apply-seccomp`) and service SSE
+  error formatting with exception notes.
 - Compile the touched backend modules.
-- Keep the existing design document as the canonical architecture reference and
-  this document as the issue-specific interaction plan.
+- Local Docker verification checklist:
+  - `docker compose -f <repo-root>/docker-compose.yml config`
+    confirms backend `cap_add: [SYS_ADMIN]` and unconfined seccomp/AppArmor.
+  - start stack and reproduce inside backend container:
+    `bash -lc 'ls /app/data/agent-workspace && python --version && node --version'`.
+  - verify workspace boundary by attempting access to sibling workspace / repo path
+    and expecting `EPERM`.
+  - if failure is `apply-seccomp: Permission denied`, treat as runtime policy
+    issue (container/host) rather than language/tooling issue.
