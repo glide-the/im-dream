@@ -20,6 +20,7 @@ services:
     cpus: "${REMOTE_BACKEND_CPUS:-1.0}"
     mem_limit: "${REMOTE_BACKEND_MEMORY:-1g}"
     privileged: true
+    user: "0:0"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     cap_add:
@@ -27,6 +28,9 @@ services:
       - SYS_ADMIN
       - SYS_PTRACE
       - NET_ADMIN
+      - SETUID
+      - SETGID
+      - SETPCAP
     security_opt:
       # Claude Code's Linux Bash sandbox uses bubblewrap. Docker's default
       # seccomp/AppArmor profiles can block mount propagation operations such

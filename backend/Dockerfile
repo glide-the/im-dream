@@ -30,6 +30,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 #   - curl jq git ripgrep: runtime utilities used by agent/tooling
 #   - nodejs npm: required by @anthropic-ai/claude-code (Claude agent SDK)
 #   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
+ARG CLAUDE_CODE_VERSION=2.1.108
+# System deps:
+#   - gcc / libffi / libssl / libjpeg / zlib: cryptography + Pillow
+#   - curl jq git ripgrep: runtime utilities used by agent/tooling
+#   - nodejs npm: required by @anthropic-ai/claude-code
+#   - bubblewrap socat: Claude Code sandboxed Bash runtime on Linux
 RUN set -eux; \
     if [ -f /etc/apt/sources.list.d/debian.sources ]; then \
         sed -i \
@@ -38,16 +44,39 @@ RUN set -eux; \
             -e "s|http://security.debian.org/debian-security|${DEBIAN_SECURITY_MIRROR}|g" \
             /etc/apt/sources.list.d/debian.sources; \
     fi; \
-    apt-get -o Acquire::Retries=5 update \
-    && apt-get install -y --no-install-recommends \
-        gcc libffi-dev libssl-dev libjpeg62-turbo-dev zlib1g-dev \
-        curl jq git ripgrep ca-certificates nodejs npm \
-        bubblewrap socat \
-    && mkdir -p /sbin /usr/sbin /usr/local/sbin \
-    && npm config set registry "${NPM_REGISTRY}" \
-    && npm install -g @anthropic-ai/claude-code @anthropic-ai/sandbox-runtime \
-    && npm cache clean --force \
-    && rm -rf /var/lib/apt/lists/*
+    apt-get -o Acquire::Retries=5 update; \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        libffi-dev \
+        libssl-dev \
+        libjpeg62-turbo-dev \
+        zlib1g-dev \
+        curl \
+        jq \
+        git \
+        ripgrep \
+        ca-certificates \
+        nodejs \
+        npm \
+        bubblewrap \
+        socat; \
+    mkdir -p /sbin /usr/sbin /usr/local/sbin; \
+    rm -rf /var/lib/apt/lists/*
+
+# Claude Code + sandbox-runtime.
+# Patch apply-seccomp to passthrough to avoid nested userns / setgroups failure in Docker.
+RUN set -eux; \
+    npm config set registry "${NPM_REGISTRY}"; \
+    npm install -g \
+        "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+        "@anthropic-ai/sandbox-runtime"; \
+    APPLY_SECCOMP_ROOT="$(npm root -g)/@anthropic-ai/claude-code/vendor/seccomp"; \
+    test -d "$APPLY_SECCOMP_ROOT"; \
+    find "$APPLY_SECCOMP_ROOT" -type f -name apply-seccomp -print \
+        -exec sh -c 'printf "%s\n" "#!/bin/sh" "exec \"\$@\"" > "$1"; chmod +x "$1"' sh {} \; ; \
+    echo "Patched Claude Code apply-seccomp passthrough:"; \
+    find "$APPLY_SECCOMP_ROOT" -type f -name apply-seccomp -print -exec head -n 2 {} \; ; \
+    npm cache clean --force
 
 WORKDIR /app
 
