@@ -293,9 +293,11 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
     """
 
     workspace_abs = workspace.resolve(strict=False)
+    
     enabled = bool(enabled)
 
-    allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
+    # allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
+    allow_read = [str(workspace_abs)]
 
     sandbox_config = {
         "enabled": enabled,
@@ -308,7 +310,7 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
             # of the host): deny the filesystem root and re-allow only this
             # thread cwd.  This prevents sibling workspaces and unrelated host
             # paths from being readable by Bash subprocesses.
-            "denyRead": ["/"],
+            "denyRead": ["/app", str(workspace_abs.parent)],
             "allowRead": allow_read,
             # Write policy is allow-only for the thread workspace.  Keep
             # .claude/skills writable so skill symlinks and runtime-installed
