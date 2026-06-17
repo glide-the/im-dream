@@ -501,21 +501,24 @@ def _sandbox_runtime_failure_hint(
 ) -> Optional[str]:
     """Return remediation guidance for known sandbox-runtime startup failures."""
 
-    error_content = f"{error_message}\n{stderr_snippet}".lower()
-    if "apply-seccomp" in error_content and "permission denied" in error_content:
+    error_content = f"{error_message}\n{stderr_snippet}"
+    error_content_lower = error_content.lower()
+    if "apply-seccomp" in error_content_lower and "permission denied" in error_content_lower:
         return (
             "Claude Bash sandbox could not apply seccomp in this runtime "
             "(apply-seccomp permission denied). For Docker backend runs, start "
-            "the container with cap_add=SYS_ADMIN and security_opt "
-            "seccomp=unconfined, apparmor=unconfined, then recreate containers."
+            "the container with docker-compose keys "
+            "`cap_add: [SYS_ADMIN]` + `security_opt: [seccomp=unconfined, apparmor=unconfined]` "
+            "(or docker run `--cap-add=SYS_ADMIN --security-opt seccomp=unconfined "
+            "--security-opt apparmor=unconfined`), then recreate containers."
         )
-    if "failed to make / slave: permission denied" in error_content or (
-        "bubblewrap" in error_content and "permission denied" in error_content
+    if "failed to make / slave: permission denied" in error_content_lower or (
+        "bubblewrap" in error_content_lower and "permission denied" in error_content_lower
     ):
         return (
             "Claude Bash sandbox bubblewrap mount setup was blocked by container "
-            "security policy. Ensure Docker backend uses cap_add=SYS_ADMIN and "
-            "security_opt seccomp=unconfined, apparmor=unconfined."
+            "security policy. Ensure Docker backend sets `cap_add: [SYS_ADMIN]` "
+            "and `security_opt: [seccomp=unconfined, apparmor=unconfined]`."
         )
     return None
 
