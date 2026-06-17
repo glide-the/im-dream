@@ -310,7 +310,7 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
             # of the host): deny the filesystem root and re-allow only this
             # thread cwd.  This prevents sibling workspaces and unrelated host
             # paths from being readable by Bash subprocesses.
-            # "denyRead": ["/app", str(workspace_abs.parent)],
+            "denyRead": ["/app", str(workspace_abs.parent)],
             "allowRead": allow_read,
             # Write policy is allow-only for the thread workspace.  Keep
             # .claude/skills writable so skill symlinks and runtime-installed
@@ -328,11 +328,11 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
             ],
         },
     }
-    if enabled and _running_in_linux_container():
-        # Claude Code's Linux sandbox uses bubblewrap.  Inside Docker, a fresh
-        # /proc mount may be unavailable, so Claude Code supports this weaker
-        # nested mode when the outer container is the primary isolation layer.
-        sandbox_config["enableWeakerNestedSandbox"] = True
+    # if enabled and _running_in_linux_container():
+    #     # Claude Code's Linux sandbox uses bubblewrap.  Inside Docker, a fresh
+    #     # /proc mount may be unavailable, so Claude Code supports this weaker
+    #     # nested mode when the outer container is the primary isolation layer.
+    #     sandbox_config["enableWeakerNestedSandbox"] = True
     return sandbox_config
 
 
