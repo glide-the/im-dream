@@ -254,6 +254,13 @@ _LOW_SENSITIVITY_BASH_PREFIXES: frozenset[str] = frozenset({
     "printenv", # print specific env vars
     "uname",    # print system info
     "hostname", # print hostname
+    
+    # network diagnostics
+    "curl",
+    "wget",
+    "ping",
+    "nslookup",
+    "dig",
 })
 
 
