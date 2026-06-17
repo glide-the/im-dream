@@ -24,6 +24,7 @@ services:
     cap_add:
       # bubblewrap needs CAP_SYS_ADMIN for mount namespace setup inside Docker.
       - SYS_ADMIN
+      - NET_ADMIN
     security_opt:
       # Claude Code's Linux Bash sandbox uses bubblewrap. Docker's default
       # seccomp/AppArmor profiles can block mount propagation operations such
