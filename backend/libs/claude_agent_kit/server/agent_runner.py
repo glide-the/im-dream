@@ -148,6 +148,9 @@ except NameError:
 # ---------------------------------------------------------------------------
 
 DEFAULT_ALLOWED_TOOLS: list[str] = [
+    
+    "WebFetch",
+    "WebSearch",
     "Read",
     "Write",
     "Edit",
