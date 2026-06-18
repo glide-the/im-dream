@@ -383,8 +383,8 @@ snapshot_images() {
 }
 
 remote_build() {
-  local args=(build --no-cache)
-  # local args=(build )
+  # local args=(build --no-cache)
+  local args=(build )
   [[ "${REMOTE_BUILD_PULL}" == "1" ]] && args+=(--pull)
   log "Building remote Compose images with --no-cache. Pull base images: ${REMOTE_BUILD_PULL}."
   remote_compose "${args[@]}"
