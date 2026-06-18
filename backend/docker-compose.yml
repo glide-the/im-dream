@@ -10,7 +10,7 @@ services:
     image: ghcr.io/shuxueshuxue/ink-backend:latest
     container_name: ink-backend
     restart: unless-stopped
-    privileged: true
+    # privileged: true
     user: "0:0"
     extra_hosts:
       - "host.docker.internal:host-gateway"

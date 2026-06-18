@@ -16,7 +16,7 @@ services:
     image: ink-backend:local
     container_name: ink-backend
     restart: unless-stopped
-    privileged: true
+    # privileged: true
     user: "0:0"
     extra_hosts:
       - "host.docker.internal:host-gateway"

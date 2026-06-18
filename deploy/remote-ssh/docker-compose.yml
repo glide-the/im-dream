@@ -19,7 +19,7 @@ services:
     restart: unless-stopped
     cpus: "${REMOTE_BACKEND_CPUS:-1.0}"
     mem_limit: "${REMOTE_BACKEND_MEMORY:-1g}"
-    privileged: true
+    # privileged: true
     user: "0:0"
     extra_hosts:
       - "host.docker.internal:host-gateway"
