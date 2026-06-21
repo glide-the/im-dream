@@ -2,10 +2,13 @@
 # [Output] Validate workspace router download headers and Unicode filename handling.
 # [Pos] test node in backend/tests
 # [Sync] 2026-06-13: initial coverage for RFC 8187 download Content-Disposition.
+# [Sync] 2026-06-21: cover workspace file APIs preserving Settings-backed
+#                    sandbox network policy during workspace refresh.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
@@ -69,6 +72,42 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         self.assertIn('filename="', disposition)
         self.assertIn(f"filename*=UTF-8''{quote(filename, safe='')}", disposition)
         self.assertNotIn("二轮问卷", disposition)
+
+    def test_list_refresh_preserves_disabled_sandbox_network_policy(self):
+        session_id = "network-disabled"
+        workspace = get_or_create_workspace(
+            session_id,
+            sandbox_network_mode="open",
+            sandbox_network_allowed_domains=["github.com"],
+        )
+        settings_path = workspace / ".claude" / "settings.json"
+        initial_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            initial_settings["sandbox"]["network"],
+            {"allowedDomains": ["*"]},
+        )
+
+        with unittest.mock.patch.object(
+            workspace_router.database,
+            "get_system_config",
+            return_value={
+                "workspace_enabled": True,
+                "sandbox_network_mode": "disabled",
+                "sandbox_network_allowed_domains": ["github.com"],
+            },
+        ):
+            response = self.client.get(
+                "/api/workspace/files",
+                params={"sessionId": session_id},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        refreshed_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            refreshed_settings["sandbox"]["network"],
+            {"allowedDomains": [], "deniedDomains": ["*"]},
+        )
 
 
 if __name__ == "__main__":

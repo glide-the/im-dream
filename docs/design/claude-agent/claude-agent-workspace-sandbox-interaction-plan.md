@@ -8,6 +8,8 @@
 > [Sync] 2026-06-13: initial design for strict per-thread Bash read/write scope.
 > [Sync] 2026-06-17: add seccomp-denied (`apply-seccomp`) failure handling and
 > local Docker verification checklist.
+> [Sync] 2026-06-21: note that sandbox network policy is covered by the
+> dedicated sandbox-network interaction plan.
 
 # Claude-Agent Workspace Sandbox Interaction Plan
 
@@ -196,7 +198,9 @@ This is intentionally not over-designed:
 - no separate `sandbox-runtime` wrapper around the whole SDK process;
 - no Docker/container/VM layer;
 - no MCP gateway change;
-- no new frontend state beyond the existing `workspace_enabled` setting;
+- no new frontend state beyond the existing `workspace_enabled` setting for
+  this filesystem-boundary task; sandbox network policy is covered separately
+  in [`claude-agent-sandbox-network-interaction-plan.md`](./claude-agent-sandbox-network-interaction-plan.md);
 - no broad rewrite of built-in file-tool policy; only a path-boundary guard is
   added because Claude Code's Bash sandbox is Bash-scoped.
 

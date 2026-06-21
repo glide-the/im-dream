@@ -26,6 +26,7 @@
 #                    into workspace/skills before rebuilding discovery symlinks.
 # [Sync] 2026-06-17: include standard Linux sbin directories in sandbox runtime
 #                    read allowlist so bubblewrap can build its rootfs in Docker.
+# [Sync] 2026-06-21: add Settings-backed sandbox network policy emission.
 
 """Workspace manager for Claude Agent session directories.
 
@@ -82,6 +83,9 @@ SANDBOX_EXTRA_ALLOW_READ_ENV = "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"
 SANDBOX_PRESERVE_ALIAS_READ_PATHS: frozenset[str] = frozenset(
     {"/bin", "/sbin", "/lib", "/lib64"}
 )
+SandboxNetworkMode = Literal["disabled", "allowlist", "open"]
+SANDBOX_NETWORK_MODES: frozenset[str] = frozenset({"disabled", "allowlist", "open"})
+SANDBOX_NETWORK_ALLOW_ALL_DOMAIN = "*"
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -256,6 +260,47 @@ def _sandbox_runtime_read_allow_paths() -> list[str]:
     return [str(path) for path in paths]
 
 
+def _normalize_sandbox_network_mode(mode: object) -> SandboxNetworkMode:
+    """Return a supported sandbox network mode."""
+
+    value = str(mode or "").strip().lower()
+    if value in SANDBOX_NETWORK_MODES:
+        return value  # type: ignore[return-value]
+    return "allowlist"
+
+
+def _normalize_sandbox_network_domains(domains: object) -> list[str]:
+    """Return de-duplicated domain patterns for sandbox network allowlists."""
+
+    if not isinstance(domains, list):
+        return []
+    result: list[str] = []
+    for raw_domain in domains:
+        domain = str(raw_domain).strip().lower()
+        if domain and domain not in result:
+            result.append(domain)
+    return result
+
+
+def _workspace_sandbox_network_config(
+    mode: object,
+    allowed_domains: object = None,
+) -> dict:
+    """Return Claude Code sandbox network settings for the selected mode."""
+
+    normalized_mode = _normalize_sandbox_network_mode(mode)
+    if normalized_mode == "disabled":
+        return {
+            "allowedDomains": [],
+            "deniedDomains": [SANDBOX_NETWORK_ALLOW_ALL_DOMAIN],
+        }
+    if normalized_mode == "open":
+        return {"allowedDomains": [SANDBOX_NETWORK_ALLOW_ALL_DOMAIN]}
+    return {
+        "allowedDomains": _normalize_sandbox_network_domains(allowed_domains),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Public API — workspace root resolution
 # ---------------------------------------------------------------------------
@@ -284,7 +329,13 @@ def get_workspace_root() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
+def _workspace_sandbox_config(
+    workspace: Path,
+    enabled: bool,
+    *,
+    network_mode: object = "allowlist",
+    network_allowed_domains: object = None,
+) -> dict:
     """Return Claude Code sandbox settings for a single thread workspace.
 
     ``AGENT_CWD`` points to the parent workspace root.  The actual isolation
@@ -296,8 +347,7 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
     
     enabled = bool(enabled)
 
-    # allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
-    allow_read = [str(workspace_abs)]
+    allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
 
     sandbox_config = {
         "enabled": enabled,
@@ -310,7 +360,7 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
             # of the host): deny the filesystem root and re-allow only this
             # thread cwd.  This prevents sibling workspaces and unrelated host
             # paths from being readable by Bash subprocesses.
-            "denyRead": ["/app", str(workspace_abs.parent)],
+            "denyRead": ["/"],
             "allowRead": allow_read,
             # Write policy is allow-only for the thread workspace.  Keep
             # .claude/skills writable so skill symlinks and runtime-installed
@@ -327,16 +377,26 @@ def _workspace_sandbox_config(workspace: Path, enabled: bool) -> dict:
                 str(workspace_abs / ".mcp.json"),
             ],
         },
+        "network": _workspace_sandbox_network_config(
+            network_mode,
+            network_allowed_domains,
+        ),
     }
-    # if enabled and _running_in_linux_container():
-    #     # Claude Code's Linux sandbox uses bubblewrap.  Inside Docker, a fresh
-    #     # /proc mount may be unavailable, so Claude Code supports this weaker
-    #     # nested mode when the outer container is the primary isolation layer.
-    #     sandbox_config["enableWeakerNestedSandbox"] = True
+    if enabled and _running_in_linux_container():
+        # Claude Code's Linux sandbox uses bubblewrap. Inside Docker, a fresh
+        # /proc mount may be unavailable, so Claude Code supports this weaker
+        # nested mode when the outer container is the primary isolation layer.
+        sandbox_config["enableWeakerNestedSandbox"] = True
     return sandbox_config
 
 
-def sync_workspace_sandbox_settings(workspace: Path, *, enabled: bool = True) -> None:
+def sync_workspace_sandbox_settings(
+    workspace: Path,
+    *,
+    enabled: bool = True,
+    network_mode: object = "allowlist",
+    network_allowed_domains: object = None,
+) -> None:
     """Merge per-thread sandbox settings into ``{workspace}/.claude/settings.json``.
 
     Existing non-sandbox settings copied from the project template are preserved.
@@ -379,7 +439,12 @@ def sync_workspace_sandbox_settings(workspace: Path, *, enabled: bool = True) ->
                 exc_info=True,
             )
 
-    settings["sandbox"] = _workspace_sandbox_config(workspace_abs, enabled)
+    settings["sandbox"] = _workspace_sandbox_config(
+        workspace_abs,
+        enabled,
+        network_mode=network_mode,
+        network_allowed_domains=network_allowed_domains,
+    )
     try:
         settings_path.write_text(
             json.dumps(settings, ensure_ascii=False, indent=2) + "\n",
@@ -393,7 +458,13 @@ def sync_workspace_sandbox_settings(workspace: Path, *, enabled: bool = True) ->
         )
 
 
-def init_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
+def init_workspace(
+    session_id: str,
+    *,
+    sandbox_enabled: bool = True,
+    sandbox_network_mode: object = "allowlist",
+    sandbox_network_allowed_domains: object = None,
+) -> Path:
     """Create (or repair) the workspace skeleton for *session_id*.
 
     This function is **idempotent**:
@@ -416,7 +487,12 @@ def init_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
     # Keep per-thread Bash sandbox settings current. The sandbox block depends
     # on this workspace's resolved path, so it cannot live in the project
     # template unchanged.
-    sync_workspace_sandbox_settings(workspace, enabled=sandbox_enabled)
+    sync_workspace_sandbox_settings(
+        workspace,
+        enabled=sandbox_enabled,
+        network_mode=sandbox_network_mode,
+        network_allowed_domains=sandbox_network_allowed_domains,
+    )
 
     # Ensure .claude/skills/ exists so symlink sync has a target directory.
     (workspace / ".claude" / "skills").mkdir(parents=True, exist_ok=True)
@@ -432,7 +508,13 @@ def init_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
     return workspace
 
 
-def get_or_create_workspace(session_id: str, *, sandbox_enabled: bool = True) -> Path:
+def get_or_create_workspace(
+    session_id: str,
+    *,
+    sandbox_enabled: bool = True,
+    sandbox_network_mode: object = "allowlist",
+    sandbox_network_allowed_domains: object = None,
+) -> Path:
     """Return the workspace path for *session_id*, creating it if needed.
 
     This is the primary entry point for the service layer.  It calls
@@ -444,7 +526,12 @@ def get_or_create_workspace(session_id: str, *, sandbox_enabled: bool = True) ->
     """
     if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
         raise ValueError(f"Invalid session_id: {session_id!r}")
-    return init_workspace(session_id, sandbox_enabled=sandbox_enabled)
+    return init_workspace(
+        session_id,
+        sandbox_enabled=sandbox_enabled,
+        sandbox_network_mode=sandbox_network_mode,
+        sandbox_network_allowed_domains=sandbox_network_allowed_domains,
+    )
 
 
 # ---------------------------------------------------------------------------

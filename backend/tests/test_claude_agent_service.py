@@ -9,6 +9,7 @@
 #                    editor MCP write tool results.
 # [Sync] 2026-06-17: cover SSE error formatting that includes exception notes
 #                    from runner diagnostics.
+# [Sync] 2026-06-21: cover sandbox network policy handoff to workspace init.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -67,6 +68,11 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     return_value={
                         "im_full_access_enabled": True,
                         "workspace_enabled": False,
+                        "sandbox_network_mode": "allowlist",
+                        "sandbox_network_allowed_domains": [
+                            "raw.githubusercontent.com",
+                            "*.npmjs.org",
+                        ],
                         "env_vars": {
                             "ANTHROPIC_AUTH_TOKEN": "user-token",
                             "EMPTY": None,
@@ -97,9 +103,15 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         get_or_create_workspace.assert_called_once_with(
             "thread_service_config",
             sandbox_enabled=False,
+            sandbox_network_mode="allowlist",
+            sandbox_network_allowed_domains=[
+                "raw.githubusercontent.com",
+                "*.npmjs.org",
+            ],
         )
 
         self.assertTrue(execution.run_options.im_full_access_enabled)
+        self.assertEqual(execution.run_options.sandbox_network_mode, "allowlist")
         self.assertEqual(str(workspace_path), execution.run_options.cwd)
         self.assertEqual(
             execution.run_options.mcp_env,

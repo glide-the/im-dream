@@ -7,6 +7,7 @@
 #                    Claude-agent full-access tool approval.
 # [Sync] 2026-06-13: workspace_enabled also controls per-thread Claude Code
 #                    Bash sandbox settings written into .claude/settings.json.
+# [Sync] 2026-06-21: accept sandbox network policy and allowed domains.
 
 """System configuration API.
 
@@ -22,6 +23,10 @@ The system config is a freeform dict stored per user.  Known fields:
   system_prompt    : str  — custom system prompt for the AI agent
   workspace_enabled: bool — whether the workspace file sidebar and per-thread
                             Bash sandbox are active
+  sandbox_network_mode: str — per-thread Bash sandbox network policy
+                            ("disabled" | "allowlist" | "open")
+  sandbox_network_allowed_domains: list[str] — domains pre-allowed when the
+                            sandbox network policy is "allowlist"
   im_full_access_enabled: bool — whether Claude-agent PreToolUse approvals
                             should allow exposed tools automatically except
                             AskUserQuestion-style answer forms
@@ -31,6 +36,9 @@ The system config is a freeform dict stored per user.  Known fields:
 """
 
 from __future__ import annotations
+
+import re
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends
 
@@ -43,6 +51,13 @@ router = APIRouter()
 _ENV_VAR_KEY_MAX_LEN = 256
 _ENV_VAR_VALUE_MAX_LEN = 4096
 _ENV_VARS_MAX_ENTRIES = 64
+_SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
+_SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_ENTRIES = 64
+_SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_LEN = 253
+_SANDBOX_DOMAIN_PATTERN = re.compile(
+    r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
+    r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+)
 
 
 def _sanitize_env_vars(raw: object) -> dict[str, str]:
@@ -66,6 +81,45 @@ def _sanitize_env_vars(raw: object) -> dict[str, str]:
     return result
 
 
+def _domain_candidate(raw: object) -> str:
+    """Extract a hostname-like sandbox domain pattern from user input."""
+
+    value = str(raw).strip().lower()
+    if not value:
+        return ""
+    parsed = urlparse(value if "://" in value else f"//{value}")
+    host = parsed.hostname or value.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
+    host = host.strip().rstrip(".")[:_SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_LEN]
+    if value.startswith("*.") and not host.startswith("*."):
+        host = f"*.{host}"
+    return host
+
+
+def _sanitize_sandbox_network_allowed_domains(raw: object) -> list[str]:
+    """Validate and normalize sandbox network allowed-domain patterns."""
+
+    if isinstance(raw, str):
+        items: list[object] = re.split(r"[\s,;]+", raw)
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        return []
+
+    result: list[str] = []
+    for item in items:
+        domain = _domain_candidate(item)
+        if (
+            domain
+            and domain != "*"
+            and _SANDBOX_DOMAIN_PATTERN.match(domain)
+            and domain not in result
+        ):
+            result.append(domain)
+        if len(result) >= _SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_ENTRIES:
+            break
+    return result
+
+
 @router.get("/api/system-config")
 def get_system_config(current_user: dict = Depends(get_current_user)):
     """Return the caller's system configuration."""
@@ -81,7 +135,9 @@ def put_system_config(
     """Merge *request* into the caller's system configuration.
 
     Accepted keys: ``provider``, ``model``, ``system_prompt``,
-    ``workspace_enabled``, ``im_full_access_enabled``, ``theme``, ``env_vars``.
+    ``workspace_enabled``, ``sandbox_network_mode``,
+    ``sandbox_network_allowed_domains``, ``im_full_access_enabled``,
+    ``theme``, ``env_vars``.
     Unknown keys are ignored.
     """
     user_id = current_user["user_id"]
@@ -96,6 +152,16 @@ def put_system_config(
         patch["system_prompt"] = str(request["system_prompt"])[:16_384]
     if "workspace_enabled" in request:
         patch["workspace_enabled"] = bool(request["workspace_enabled"])
+    if "sandbox_network_mode" in request:
+        mode = str(request["sandbox_network_mode"]).strip().lower()
+        if mode in _SANDBOX_NETWORK_MODES:
+            patch["sandbox_network_mode"] = mode
+    if "sandbox_network_allowed_domains" in request:
+        patch["sandbox_network_allowed_domains"] = (
+            _sanitize_sandbox_network_allowed_domains(
+                request["sandbox_network_allowed_domains"]
+            )
+        )
     if "im_full_access_enabled" in request:
         patch["im_full_access_enabled"] = bool(request["im_full_access_enabled"])
     if "theme" in request:

@@ -10,6 +10,7 @@
 //                    per-thread Claude Code Bash sandbox settings.
 // [Sync] 2026-06-13: full-access copy clarifies AskUserQuestion forms still
 //                    require confirmation.
+// [Sync] 2026-06-21: add sandbox network policy controls backed by system_config.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
@@ -17,6 +18,7 @@ import { emitImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
+export type SandboxNetworkMode = 'disabled' | 'allowlist' | 'open';
 
 interface EnvVar {
   key: string;
@@ -28,6 +30,8 @@ interface SystemConfigData {
   model?: string;
   system_prompt?: string;
   workspace_enabled?: boolean;
+  sandbox_network_mode?: SandboxNetworkMode;
+  sandbox_network_allowed_domains?: string[];
   im_full_access_enabled?: boolean;
   theme?: ThemeMode;
   env_vars?: Record<string, string>;
@@ -45,6 +49,14 @@ const MODEL_OPTIONS = [
   { label: 'GPT-4.1', value: 'gpt-4.1-2025-04-14', model: 'gpt-4.1-2025-04-14', provider: 'openai' },
 ] as const;
 
+const SANDBOX_NETWORK_ACCESS_OPTIONS: {
+  enabled: boolean;
+  label: string;
+}[] = [
+  { enabled: false, label: '关闭' },
+  { enabled: true, label: '启用' },
+];
+
 const DEFAULT_SYSTEM_PROMPT = 'You are a concise and practical AI assistant for note-taking and writing.';
 const THEME_STORAGE_KEY = 'dashboard-theme';
 
@@ -59,6 +71,32 @@ function isThemeMode(value: string | null): value is ThemeMode {
   return value === 'light' || value === 'dark' || value === 'system';
 }
 
+function isSandboxNetworkMode(value: unknown): value is SandboxNetworkMode {
+  return value === 'disabled' || value === 'allowlist' || value === 'open';
+}
+
+function formatSandboxNetworkDomains(domains: string[] | undefined): string {
+  return Array.isArray(domains) ? domains.join('\n') : '';
+}
+
+function parseSandboxNetworkDomains(value: string): string[] {
+  const domains: string[] = [];
+  for (const rawPart of value.split(/[\n,;]+/)) {
+    const part = rawPart.trim().toLowerCase();
+    if (!part || part === '*') continue;
+    const withoutProtocol = part.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+    const host = withoutProtocol.split('/')[0].split('?')[0].split('#')[0].replace(/:\d+$/, '').replace(/\.$/, '');
+    if (host && !domains.includes(host)) {
+      domains.push(host);
+    }
+  }
+  return domains;
+}
+
+function normalizeSandboxNetworkDomain(value: string): string | null {
+  return parseSandboxNetworkDomains(value)[0] ?? null;
+}
+
 export default function ModelConfigSection() {
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === 'undefined') return 'system';
@@ -67,6 +105,12 @@ export default function ModelConfigSection() {
   });
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [workspaceMode, setWorkspaceMode] = useState(true);
+  const [sandboxNetworkMode, setSandboxNetworkMode] = useState<SandboxNetworkMode>('allowlist');
+  const [sandboxNetworkDomains, setSandboxNetworkDomains] = useState('');
+  const [sandboxNetworkSaving, setSandboxNetworkSaving] = useState(false);
+  const [sandboxNetworkStatus, setSandboxNetworkStatus] = useState<string | null>(null);
+  const [sandboxNetworkAddingDomain, setSandboxNetworkAddingDomain] = useState(false);
+  const [sandboxNetworkNewDomain, setSandboxNetworkNewDomain] = useState('');
   const [imFullAccessEnabled, setImFullAccessEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [dirty, setDirty] = useState(false);
@@ -90,6 +134,9 @@ export default function ModelConfigSection() {
         setTheme(config.theme ?? 'system');
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
+        setSandboxNetworkMode(isSandboxNetworkMode(config.sandbox_network_mode) ? config.sandbox_network_mode : 'allowlist');
+        setSandboxNetworkDomains(formatSandboxNetworkDomains(config.sandbox_network_allowed_domains));
+        setSandboxNetworkStatus(null);
         setImFullAccessEnabled(config.im_full_access_enabled ?? false);
         const match = MODEL_OPTIONS.find((option) => option.model === config.model);
         setSelectedModel(match?.value ?? 'auto');
@@ -159,6 +206,71 @@ export default function ModelConfigSection() {
     setWorkspaceMode(next);
     void updateConfig({ workspace_enabled: next });
   }, [updateConfig, workspaceMode]);
+
+  const saveSandboxNetworkDomains = useCallback(async (domains: string[]) => {
+    setSandboxNetworkSaving(true);
+    const saved = await updateConfig({ sandbox_network_allowed_domains: domains });
+    if (saved) {
+      setSandboxNetworkDomains(formatSandboxNetworkDomains(domains));
+      setSandboxNetworkStatus('域名允许列表已保存。');
+    } else {
+      setSandboxNetworkStatus('域名允许列表保存失败，请稍后重试。');
+    }
+    setSandboxNetworkSaving(false);
+    return saved;
+  }, [updateConfig]);
+
+  const handleSandboxNetworkModeChange = useCallback((mode: SandboxNetworkMode) => {
+    setSandboxNetworkMode(mode);
+    setSandboxNetworkStatus(null);
+    void (async () => {
+      const saved = await updateConfig({ sandbox_network_mode: mode });
+      setSandboxNetworkStatus(saved ? '网络策略已保存。' : '网络策略保存失败，请稍后重试。');
+    })();
+  }, [updateConfig]);
+
+  const handleSandboxNetworkAccessToggle = useCallback((enabled: boolean) => {
+    const nextMode: SandboxNetworkMode = enabled
+      ? (sandboxNetworkMode === 'disabled' ? 'allowlist' : sandboxNetworkMode)
+      : 'disabled';
+    void handleSandboxNetworkModeChange(nextMode);
+  }, [handleSandboxNetworkModeChange, sandboxNetworkMode]);
+
+  const handleSandboxNetworkPolicySelect = useCallback((value: string) => {
+    const mode: SandboxNetworkMode = value === 'open' ? 'open' : 'allowlist';
+    void handleSandboxNetworkModeChange(mode);
+  }, [handleSandboxNetworkModeChange]);
+
+  const handleAddSandboxNetworkDomain = useCallback(() => {
+    if (!sandboxNetworkAddingDomain) {
+      setSandboxNetworkAddingDomain(true);
+      setSandboxNetworkStatus(null);
+      return;
+    }
+    const domain = normalizeSandboxNetworkDomain(sandboxNetworkNewDomain);
+    if (!domain) {
+      setSandboxNetworkStatus('请输入有效域名。');
+      return;
+    }
+    const domains = parseSandboxNetworkDomains(sandboxNetworkDomains);
+    if (!domains.includes(domain)) {
+      domains.push(domain);
+    }
+    setSandboxNetworkNewDomain('');
+    setSandboxNetworkAddingDomain(false);
+    void saveSandboxNetworkDomains(domains);
+  }, [
+    sandboxNetworkAddingDomain,
+    sandboxNetworkDomains,
+    sandboxNetworkNewDomain,
+    saveSandboxNetworkDomains,
+  ]);
+
+  const handleRemoveSandboxNetworkDomain = useCallback((domain: string) => {
+    const domains = parseSandboxNetworkDomains(sandboxNetworkDomains)
+      .filter((item) => item !== domain);
+    void saveSandboxNetworkDomains(domains);
+  }, [sandboxNetworkDomains, saveSandboxNetworkDomains]);
 
   const handleImFullAccessToggle = useCallback(() => {
     const next = !imFullAccessEnabled;
@@ -232,6 +344,9 @@ export default function ModelConfigSection() {
   if (configLoading) {
     return <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>Loading config…</p>;
   }
+
+  const sandboxNetworkEnabled = sandboxNetworkMode !== 'disabled';
+  const sandboxNetworkDomainsList = parseSandboxNetworkDomains(sandboxNetworkDomains);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -368,6 +483,228 @@ export default function ModelConfigSection() {
             }}
           />
         </button>
+      </div>
+
+      {/* Sandbox network */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div>
+          <p style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            沙箱网络 / Sandbox Network
+          </p>
+          <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+            控制 Bash、curl、git、npm 等沙箱子进程的出站网络；WebFetch 仍由工具权限和域名规则控制。
+          </p>
+        </div>
+
+        <div>
+          <p style={{ margin: '0 0 0.55rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            代理网络访问
+          </p>
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', padding: '0.25rem', borderRadius: '999px', background: 'var(--color-disabled-bg)' }}>
+            {SANDBOX_NETWORK_ACCESS_OPTIONS.map((option) => {
+              const active = sandboxNetworkEnabled === option.enabled;
+              return (
+                <button
+                  key={option.label}
+                  type="button"
+                  onClick={() => handleSandboxNetworkAccessToggle(option.enabled)}
+                  aria-pressed={active}
+                  style={{
+                    minWidth: '4.6rem',
+                    height: '2.25rem',
+                    border: 'none',
+                    borderRadius: '999px',
+                    background: active ? 'var(--color-bg-paper)' : 'transparent',
+                    color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                    fontSize: '0.86rem',
+                    fontWeight: 700,
+                    transition: 'background 0.2s ease, color 0.2s ease',
+                  }}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </div>
+          {!sandboxNetworkEnabled ? (
+            <p style={{ margin: '0.55rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+              设置完成后将禁用网络访问。
+            </p>
+          ) : null}
+        </div>
+
+        {sandboxNetworkEnabled ? (
+          <div style={{ borderLeft: '3px solid var(--color-border-paper)', paddingLeft: '1.35rem', display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div>
+              <p style={{ margin: '0 0 0.55rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                域允许列表
+              </p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <select
+                  value={sandboxNetworkMode === 'open' ? 'open' : 'allowlist'}
+                  onChange={(event) => handleSandboxNetworkPolicySelect(event.target.value)}
+                  style={{ ...fieldStyle, maxWidth: '24rem', height: '3.15rem', fontWeight: 700 }}
+                >
+                  <option value="allowlist">自定义域</option>
+                  <option value="open">所有域</option>
+                </select>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.78rem', color: 'var(--color-text-muted)' }}>
+                  <span aria-hidden="true" style={{ display: 'inline-grid', placeItems: 'center', width: '1rem', height: '1rem', borderRadius: '999px', border: '1px solid var(--color-text-muted)', fontSize: '0.68rem' }}>?</span>
+                  域详情
+                </span>
+              </div>
+            </div>
+
+            {sandboxNetworkMode === 'allowlist' ? (
+              <div>
+                <p style={{ margin: '0 0 0.55rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                  其他允许的域
+                </p>
+                {sandboxNetworkDomainsList.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '0.65rem' }}>
+                    {sandboxNetworkDomainsList.map((domain) => (
+                      <span
+                        key={domain}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          maxWidth: '100%',
+                          border: '1px solid var(--color-border-paper)',
+                          borderRadius: '999px',
+                          padding: '0.35rem 0.5rem 0.35rem 0.75rem',
+                          background: 'var(--color-bg-paper)',
+                          color: 'var(--color-text-primary)',
+                          fontSize: '0.76rem',
+                          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        }}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{domain}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSandboxNetworkDomain(domain)}
+                          aria-label={`Remove ${domain}`}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--color-text-muted)',
+                            cursor: 'pointer',
+                            fontSize: '0.85rem',
+                            lineHeight: 1,
+                            padding: 0,
+                          }}
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+
+                {sandboxNetworkAddingDomain ? (
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <input
+                      type="text"
+                      value={sandboxNetworkNewDomain}
+                      onChange={(event) => setSandboxNetworkNewDomain(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          handleAddSandboxNetworkDomain();
+                        }
+                      }}
+                      placeholder="example.com 或 *.example.com"
+                      autoFocus
+                      style={{ ...fieldStyle, maxWidth: '24rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.82rem' }}
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddSandboxNetworkDomain}
+                      disabled={sandboxNetworkSaving}
+                      style={{
+                        border: '1px solid var(--color-border-paper)',
+                        borderRadius: '999px',
+                        padding: '0.55rem 0.9rem',
+                        background: 'var(--color-bg-paper)',
+                        color: 'var(--color-text-primary)',
+                        cursor: sandboxNetworkSaving ? 'not-allowed' : 'pointer',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        opacity: sandboxNetworkSaving ? 0.55 : 1,
+                      }}
+                    >
+                      保存
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSandboxNetworkAddingDomain(false); setSandboxNetworkNewDomain(''); }}
+                      style={{ border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '0.82rem' }}
+                    >
+                      取消
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleAddSandboxNetworkDomain}
+                    style={{
+                      border: '1px solid var(--color-border-paper)',
+                      borderRadius: '999px',
+                      padding: '0.55rem 0.95rem',
+                      background: 'transparent',
+                      color: 'var(--color-text-primary)',
+                      cursor: 'pointer',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span aria-hidden="true" style={{ fontSize: '1.05rem', marginRight: '0.45rem' }}>+</span>
+                    添加域
+                  </button>
+                )}
+              </div>
+            ) : null}
+
+            <div>
+              <p style={{ margin: '0 0 0.55rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                允许的 HTTP 方法
+              </p>
+              <select
+                value="all"
+                disabled
+                title="Claude Code sandbox 当前按域名控制网络访问，不提供 HTTP 方法级策略。"
+                style={{ ...fieldStyle, maxWidth: '24rem', height: '3.15rem', fontWeight: 700, opacity: 0.72, cursor: 'not-allowed' }}
+              >
+                <option value="all">所有方法</option>
+              </select>
+            </div>
+          </div>
+        ) : null}
+
+        {sandboxNetworkEnabled ? (
+          <div style={{
+            border: '1px solid color-mix(in srgb, var(--color-action-link) 30%, var(--color-border-paper))',
+            borderRadius: '8px',
+            background: 'color-mix(in srgb, var(--color-action-link) 12%, var(--color-bg-paper))',
+            padding: '1rem',
+            color: 'var(--color-text-primary)',
+          }}>
+            <p style={{ margin: '0 0 0.55rem', fontSize: '0.84rem', fontWeight: 800, color: 'var(--color-text-primary)' }}>
+              <span style={{ display: 'inline-block', marginRight: '0.45rem', color: 'var(--color-action-link)' }}>高风险</span>
+              启用互联网访问会使你的环境暴露于安全风险之中
+            </p>
+            <p style={{ margin: 0, fontSize: '0.78rem', lineHeight: 1.65, color: 'var(--color-text-secondary)' }}>
+              这些风险包括提示注入、泄露代码或机密、添加恶意软件或漏洞，或者访问受许可证限制的内容。为了降低风险，请仅允许必要的域，并检查 Agent 的输出和工作日志。
+            </p>
+          </div>
+        ) : null}
+
+        {sandboxNetworkStatus ? (
+          <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+            {sandboxNetworkStatus}
+          </p>
+        ) : null}
       </div>
 
       {/* IM approval mode */}

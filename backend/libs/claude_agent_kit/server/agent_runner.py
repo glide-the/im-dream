@@ -76,6 +76,8 @@
 # [Sync] 2026-06-17: expand DEFAULT_ALLOWED_TOOLS to include built-in filesystem,
 #                    notebook, todo and Bash tools so agents can read/write the
 #                    workspace without requiring a custom allowedTools override.
+# [Sync] 2026-06-21: enforce Settings sandbox_network_mode="disabled" in
+#                    PreToolUse before full-access or low-sensitivity allows.
 
 """Claude Agent Runner.
 
@@ -94,6 +96,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import sys
 import tempfile
 from pathlib import Path
@@ -254,14 +257,41 @@ _LOW_SENSITIVITY_BASH_PREFIXES: frozenset[str] = frozenset({
     "printenv", # print specific env vars
     "uname",    # print system info
     "hostname", # print hostname
-    
-    # network diagnostics
+})
+
+_NETWORK_BASH_PREFIXES: frozenset[str] = frozenset({
     "curl",
     "wget",
     "ping",
     "nslookup",
     "dig",
+    "host",
+    "nc",
+    "netcat",
+    "telnet",
+    "ssh",
+    "scp",
+    "sftp",
+    "rsync",
 })
+_NETWORK_TOOL_NAMES: frozenset[str] = frozenset({
+    "WebFetch",
+    "WebSearch",
+})
+_PACKAGE_NETWORK_SUBCOMMANDS: dict[str, frozenset[str]] = {
+    "git": frozenset({"clone", "fetch", "pull", "push", "ls-remote", "submodule"}),
+    "npm": frozenset({"install", "i", "add", "update", "ci", "audit", "publish", "view", "pack"}),
+    "npx": frozenset({""}),
+    "pnpm": frozenset({"install", "i", "add", "update", "dlx", "publish"}),
+    "yarn": frozenset({"install", "add", "up", "upgrade", "publish", "dlx"}),
+    "bun": frozenset({"install", "add", "x", "pm"}),
+    "pip": frozenset({"install", "download", "wheel", "index"}),
+    "pip3": frozenset({"install", "download", "wheel", "index"}),
+    "uv": frozenset({"add", "sync", "pip", "tool"}),
+    "go": frozenset({"get", "install", "mod"}),
+    "cargo": frozenset({"install", "search", "publish", "update"}),
+}
+_COMMAND_WRAPPERS: frozenset[str] = frozenset({"command", "exec", "sudo", "time"})
 
 
 def _is_low_sensitivity_bash_command(command: str) -> bool:
@@ -281,6 +311,106 @@ def _is_low_sensitivity_bash_command(command: str) -> bool:
         return False
     first_token = cmd.split()[0]
     return first_token in _LOW_SENSITIVITY_BASH_PREFIXES
+
+
+def _split_shell_command(command: str) -> list[str]:
+    """Best-effort shell tokenization for policy classification."""
+
+    try:
+        return shlex.split(command, posix=True)
+    except ValueError:
+        return command.strip().split()
+
+
+def _command_name(token: str) -> str:
+    """Return the lower-case executable basename for a shell token."""
+
+    return Path(token).name.lower()
+
+
+def _unwrap_command_tokens(tokens: list[str]) -> list[str]:
+    """Skip common wrappers so policy sees the command being executed."""
+
+    index = 0
+    while index < len(tokens):
+        name = _command_name(tokens[index])
+        if name == "env":
+            index += 1
+            while index < len(tokens):
+                token = tokens[index]
+                if token.startswith("-") or ("=" in token and not token.startswith("=")):
+                    index += 1
+                    continue
+                break
+            continue
+        if name in _COMMAND_WRAPPERS:
+            index += 1
+            while index < len(tokens) and tokens[index].startswith("-"):
+                index += 1
+            continue
+        break
+    return tokens[index:]
+
+
+def _is_network_bash_command(command: str) -> bool:
+    """Return True when a Bash command is expected to use outbound network."""
+
+    tokens = _unwrap_command_tokens(_split_shell_command(command))
+    if not tokens:
+        return False
+
+    name = _command_name(tokens[0])
+    if name in _NETWORK_BASH_PREFIXES:
+        return True
+
+    if name in {"python", "python3"} and len(tokens) >= 4:
+        return (
+            tokens[1] == "-m"
+            and tokens[2] in {"pip", "pip3"}
+            and tokens[3].lower() in _PACKAGE_NETWORK_SUBCOMMANDS["pip"]
+        )
+
+    subcommands = _PACKAGE_NETWORK_SUBCOMMANDS.get(name)
+    if subcommands is None:
+        return False
+    if "" in subcommands:
+        return True
+    if len(tokens) < 2:
+        return False
+
+    if name == "uv" and tokens[1] == "pip" and len(tokens) >= 3:
+        return tokens[2].lower() in {"install", "download", "wheel"}
+    return tokens[1].lower() in subcommands
+
+
+def _apply_disabled_network_permission(
+    sandbox_network_mode: str,
+    tool_name: str,
+    tool_input: Optional[dict[str, Any]] = None,
+) -> Optional[HookJSONOutput]:
+    """Hard-deny known network tools when Settings disables network access."""
+
+    if sandbox_network_mode != "disabled":
+        return None
+    if tool_name in _NETWORK_TOOL_NAMES:
+        return HookJSONOutput(
+            hookSpecificOutput={
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "代理网络访问已关闭，禁止网络访问。",
+            }
+        )
+    if tool_name == "Bash":
+        command = str((tool_input or {}).get("command") or "").strip()
+        if _is_network_bash_command(command):
+            return HookJSONOutput(
+                hookSpecificOutput={
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "代理网络访问已关闭，禁止执行网络命令。",
+                }
+            )
+    return None
 
 # Tool names that have specialized confirmation semantics. Auto mode now uses
 # sensitivity classes: explicit query/context-selection/Skill tools can run,
@@ -1189,6 +1319,7 @@ class ClaudeAgentRunner:
             for required_tool in _AUTO_MODE_REQUIRED_ALLOWED_TOOLS:
                 if required_tool not in allowed_tools:
                     allowed_tools.append(required_tool)
+        sandbox_network_mode = str(opts.sandbox_network_mode or "allowlist")
         system_prompt = opts.system_prompt
         mcp_env = dict(opts.mcp_env or {})
         turn_runtime = dict(opts.turn_runtime or {})
@@ -1312,6 +1443,14 @@ class ClaudeAgentRunner:
             )
             if redirect_result is not None:
                 return redirect_result
+
+            disabled_network_permission = _apply_disabled_network_permission(
+                sandbox_network_mode,
+                tool_name,
+                tool_input,
+            )
+            if disabled_network_permission is not None:
+                return disabled_network_permission
 
             workspace_boundary_permission = _apply_workspace_boundary_permission(
                 tool_name,

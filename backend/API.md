@@ -4,6 +4,7 @@
 [Output] Human-readable API reference for authenticated app APIs and public utility endpoints.
 [Sync] 2026-06-14: document public SEO endpoints generated from INK_PUBLIC_BASE_URL and INK_BACKEND_PUBLIC_BASE_URL.
 [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
+[Sync] 2026-06-21: document system-config sandbox network policy fields.
 -->
 
 **Version:** 2.0.0
@@ -161,6 +162,43 @@ All fields are optional. Strings should be JSON-stringified.
 
 **Errors:**
 - `401` - Missing or invalid token
+
+---
+
+## System Config
+
+### GET `/api/system-config`
+
+Returns the current user's Settings configuration as a JSON object.
+
+Known fields include:
+
+```json
+{
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-20250514",
+  "system_prompt": "You are...",
+  "workspace_enabled": true,
+  "sandbox_network_mode": "allowlist",
+  "sandbox_network_allowed_domains": ["raw.githubusercontent.com", "github.com"],
+  "im_full_access_enabled": false,
+  "theme": "system",
+  "env_vars": {
+    "ANTHROPIC_MODEL": "claude-sonnet-4-20250514"
+  }
+}
+```
+
+### PUT `/api/system-config`
+
+Merges accepted fields into the current user's Settings configuration.
+Unknown keys are ignored. `sandbox_network_mode` accepts `disabled`,
+`allowlist`, or `open`. `sandbox_network_allowed_domains` is sanitized to a
+flat domain-pattern list; use `open` mode instead of sending a bare `*`.
+
+The sandbox network fields are consumed on the next Claude Agent workspace
+initialization and written to the thread-local `.claude/settings.json`
+`sandbox.network` block.
 
 ---
 

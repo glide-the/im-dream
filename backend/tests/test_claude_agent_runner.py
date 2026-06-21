@@ -35,6 +35,8 @@
 #                    order-independent when another test imported shared stubs first.
 # [Sync] 2026-06-17: cover seccomp-denied sandbox hint detection for
 #                    apply-seccomp/bubblewrap startup failures.
+# [Sync] 2026-06-21: cover sandbox_network_mode="disabled" denying network
+#                    tools before full-access or low-sensitivity allows.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -748,6 +750,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         tool_choice: str = "auto",
         allowed_tools: Optional[list[str]] = None,
         im_full_access_enabled: bool = False,
+        sandbox_network_mode: str = "allowlist",
         on_tool_confirmation_request=None,
     ):
         self.set_query([])
@@ -761,6 +764,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 tool_choice=tool_choice,  # type: ignore[arg-type]
                 allowed_tools=allowed_tools,
                 im_full_access_enabled=im_full_access_enabled,
+                sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -1168,6 +1172,89 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     specific = getattr(result, "hookSpecificOutput", {})
                     self.assertEqual(specific.get("hookEventName"), "PreToolUse")
                     self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_disabled_sandbox_network_denies_webfetch_before_full_access(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                im_full_access_enabled=True,
+                sandbox_network_mode="disabled",
+                on_tool_confirmation_request=confirm,
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "WebFetch",
+                    "tool_input": {"url": "https://example.com"},
+                },
+                "call-webfetch-network-disabled",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertEqual(confirmation_requests, [])
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "deny")
+        self.assertIn("代理网络访问已关闭", specific.get("permissionDecisionReason", ""))
+
+    async def test_disabled_sandbox_network_denies_network_bash_commands(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                sandbox_network_mode="disabled",
+            )
+
+            network_commands = [
+                "curl https://example.com",
+                "wget https://example.com/archive.tgz",
+                "git fetch origin",
+                "npm install",
+                "python -m pip install requests",
+                "env HTTPS_PROXY=http://proxy.local curl https://example.com",
+            ]
+            for command in network_commands:
+                with self.subTest(command=command):
+                    result = await hook(
+                        {
+                            "tool_name": "Bash",
+                            "tool_input": {"command": command},
+                        },
+                        f"call-bash-disabled-{command[:20]}",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    specific = getattr(result, "hookSpecificOutput", {})
+                    self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+                    self.assertEqual(specific.get("permissionDecision"), "deny")
+                    self.assertIn(
+                        "代理网络访问已关闭",
+                        specific.get("permissionDecisionReason", ""),
+                    )
+
+    async def test_disabled_sandbox_network_still_allows_local_safe_bash(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                sandbox_network_mode="disabled",
+            )
+
+            result = await hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ls -la"},
+                },
+                "call-local-bash-network-disabled",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = getattr(result, "hookSpecificOutput", {})
+        self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+        self.assertEqual(specific.get("permissionDecision"), "allow")
 
     async def test_auto_bash_with_metachar_uses_frontend_confirmation(self):
         """Bash command with shell metachar is NOT low-sensitivity — falls to confirmation."""

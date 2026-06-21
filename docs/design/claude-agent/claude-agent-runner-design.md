@@ -8,6 +8,9 @@
 > `AskUserQuestion` / `mcp__user__ask_user` on the frontend confirmation path
 > so answer forms can populate `updatedInput`.
 > **[Sync] 2026-06-09**: Settings `im_full_access_enabled` 接入 Runner；开启后在 `.editor/` 虚拟索引重定向之后，对除问答表单外的已暴露工具返回显式 PreToolUse allow。
+> **[Sync] 2026-06-21**: Settings `sandbox_network_mode="disabled"` is
+> enforced before full-access and low-sensitivity allow decisions; network
+> tools receive explicit PreToolUse deny.
 
 # ClaudeAgentRunner 模块设计
 
@@ -158,7 +161,7 @@ sequenceDiagram
 ## 5. 工具确认流程（PreToolUse hook）
 
 Claude Code 的 `allowed_tools` 是预批准规则，不是单纯的工具可见性列表。
-Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。先处理 `.editor/` 虚拟索引读取重定向；如果 Settings `im_full_access_enabled=true`，则对除 `AskUserQuestion` / `mcp__user__ask_user` 外的已暴露工具返回显式 `permissionDecision:"allow"`。问答工具必须继续进入 `on_tool_confirmation_request`，因为前端确认窗口负责收集用户答案并写回 `updatedInput`。否则 `auto` 模式先对当前 workspace `files/` 下的内置文件工具返回显式 allow；随后对明确的低敏工具（内置 Read/Glob/Grep/LS/TodoRead/WebFetch/WebSearch、会话查询、memory/necklace 只读查询、`Skill`、`switch_editor` 等）返回显式 allow；剩余执行/写入/交互工具进入 `on_tool_confirmation_request` 侧路。用户批准后，Runner 返回显式 allow，避免 hook fall-through 与 Claude Code 文件权限层语义不一致。完整矩阵见 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
+Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_use_id`、`tool_name` 和 `tool_input`。先处理 `.editor/` 虚拟索引读取重定向；如果 Settings `sandbox_network_mode="disabled"`，则对 `WebFetch` / `WebSearch` 和常见 Bash 网络命令返回显式 deny；随后才考虑 Settings `im_full_access_enabled=true` 的显式 allow。问答工具必须继续进入 `on_tool_confirmation_request`，因为前端确认窗口负责收集用户答案并写回 `updatedInput`。否则 `auto` 模式先对当前 workspace `files/` 下的内置文件工具返回显式 allow；随后对明确的低敏工具（内置 Read/Glob/Grep/LS/TodoRead/WebFetch/WebSearch、会话查询、memory/necklace 只读查询、`Skill`、`switch_editor` 等；关闭网络模式除外）返回显式 allow；剩余执行/写入/交互工具进入 `on_tool_confirmation_request` 侧路。用户批准后，Runner 返回显式 allow，避免 hook fall-through 与 Claude Code 文件权限层语义不一致。完整矩阵见 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_
 

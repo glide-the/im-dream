@@ -16,6 +16,7 @@
 # [Sync] 2026-06-13: initialize attachment workspaces with Settings-backed
 #                    workspace sandbox mode so per-thread .claude/settings.json
 #                    is correct before Claude Code starts.
+# [Sync] 2026-06-21: initialize attachment workspaces with sandbox network policy.
 
 import base64
 import logging
@@ -45,6 +46,19 @@ from .deps import get_current_user
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+_SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
+
+
+def _coerce_sandbox_network_mode(value: object) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in _SANDBOX_NETWORK_MODES else "allowlist"
+
+
+def _coerce_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _extract_message_text(message: Any) -> str:
@@ -172,6 +186,12 @@ async def claude_agent_stream(
             workspace_path = get_or_create_workspace(
                 thread_id,
                 sandbox_enabled=bool(system_config.get("workspace_enabled", True)),
+                sandbox_network_mode=_coerce_sandbox_network_mode(
+                    system_config.get("sandbox_network_mode")
+                ),
+                sandbox_network_allowed_domains=_coerce_string_list(
+                    system_config.get("sandbox_network_allowed_domains")
+                ),
             )
         except Exception as exc:
             raise HTTPException(status_code=500, detail="Failed to initialize workspace") from exc

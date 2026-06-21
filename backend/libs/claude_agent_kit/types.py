@@ -9,6 +9,8 @@
 #                    explicit PreToolUse approval for exposed tools.
 # [Sync] 2026-06-13: im_full_access_enabled excludes AskUserQuestion-style tools
 #                    because they must collect frontend answers before allow.
+# [Sync] 2026-06-21: add sandbox_network_mode so the runner can enforce
+#                    Settings "disabled" network policy in PreToolUse hooks.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -153,6 +155,9 @@ class AgentRunOptions:
     # safe virtual-index redirects, except AskUserQuestion-style tools that
     # must collect frontend answers first.
     im_full_access_enabled: bool = False
+    # Settings-controlled sandbox network mode. ``disabled`` is enforced by
+    # runner PreToolUse hooks before full-access or low-sensitivity allows.
+    sandbox_network_mode: Literal["disabled", "allowlist", "open"] = "allowlist"
     # System prompt override.
     system_prompt: Optional[str] = None
     # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.

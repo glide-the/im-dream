@@ -1776,8 +1776,8 @@ def get_system_config(user_id: int) -> dict:
     """Get per-user system config.
 
     Known keys include model/provider/system_prompt, workspace_enabled
-    (file workspace + per-thread Bash sandbox), im_full_access_enabled,
-    theme, and env_vars.
+    (file workspace + per-thread Bash sandbox), sandbox_network_mode,
+    sandbox_network_allowed_domains, im_full_access_enabled, theme, and env_vars.
 
     Returns an empty dict when no config has been saved yet.
     """

@@ -11,6 +11,8 @@
 > they still use frontend confirmation so answers can be collected.
 > [Sync] 2026-06-14: built-in file/search tools are hard-denied outside the
 > current thread workspace before full-access allow is considered.
+> [Sync] 2026-06-21: Settings `sandbox_network_mode="disabled"` now hard-denies
+> network tools before full-access and low-sensitivity allow decisions.
 
 # Claude-Agent Permission Policy
 
@@ -32,7 +34,7 @@ It describes the product policy, not Claude Code's internal classifier.
 | `manual` | All non-special tools go through frontend confirmation. `.editor/` virtual-index `Read` redirects still run because they only replace placeholder reads with a safe tempfile snapshot. |
 | `none` | No tools are exposed; auto allow rules do not apply. |
 
-When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`) and built-in file/search tools whose resolved path is outside the current thread workspace. Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; out-of-workspace file/search tools are hard-denied before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
+When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`), built-in file/search tools whose resolved path is outside the current thread workspace, and network tools when `sandbox_network_mode="disabled"`. Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; out-of-workspace file/search tools and disabled-network tools are hard-denied before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
 
 Settings `system_config.workspace_enabled=true` additionally enables the
 per-thread Claude Code Bash sandbox described in
@@ -40,6 +42,11 @@ per-thread Claude Code Bash sandbox described in
 That sandbox is a runtime filesystem boundary for Bash and child
 processes. It is deliberately not implemented as a shell path parser in
 `_pre_tool_use_hook`.
+
+When `system_config.sandbox_network_mode="disabled"`, `_pre_tool_use_hook`
+adds an execution-layer guard: `WebFetch`, `WebSearch`, and common Bash network
+commands (`curl`, `wget`, `git fetch`, `npm install`, `python -m pip install`,
+etc.) return explicit deny before full-access or low-sensitivity allow rules.
 
 ## 3. Low-Sensitivity Tools
 
@@ -109,11 +116,12 @@ HookJSONOutput(
 
 1. `.editor/` virtual-index `Read` redirect, all modes.
 2. Built-in file/search workspace-boundary check, all modes; outside current thread workspace is a hard deny.
-3. If `im_full_access_enabled` is true, tools are exposed, and the tool is not an answer-form tool: explicit allow.
-4. In `auto` only: workspace `files/` built-in file permission.
-5. In `auto` only: explicit low-sensitivity tool allow.
-6. Frontend confirmation callback.
-7. Deny by default when confirmation is required but unavailable.
+3. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network commands are hard-denied when `sandbox_network_mode="disabled"`.
+4. If `im_full_access_enabled` is true, tools are exposed, and the tool is not an answer-form tool: explicit allow.
+5. In `auto` only: workspace `files/` built-in file permission.
+6. In `auto` only: explicit low-sensitivity tool allow.
+7. Frontend confirmation callback.
+8. Deny by default when confirmation is required but unavailable.
 
 Bash sandboxing is not a step in this order. Claude Code loads the sandbox
 settings from the current thread workspace and enforces them when a Bash command

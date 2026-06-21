@@ -24,6 +24,7 @@
 # [Sync] 2026-06-17: cover Linux sbin runtime allowlist needed by bubblewrap.
 # [Sync] 2026-06-17: cover preserving literal symlink aliases for rootfs mount
 #                    points such as /sbin.
+# [Sync] 2026-06-21: cover Settings-backed sandbox network policy emission.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -136,6 +137,7 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertEqual(sandbox["filesystem"]["denyRead"], ["/"])
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
         self.assertEqual(sandbox["filesystem"]["allowWrite"], [str(ws.resolve())])
+        self.assertEqual(sandbox["network"]["allowedDomains"], [])
         self.assertNotIn(
             str((ws / ".claude").resolve()),
             sandbox["filesystem"]["denyWrite"],
@@ -166,6 +168,42 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertFalse(sandbox["autoAllowBashIfSandboxed"])
         self.assertTrue(sandbox["allowUnsandboxedCommands"])
         self.assertNotIn("enableWeakerNestedSandbox", sandbox)
+
+    def test_can_disable_sandbox_network_access(self):
+        ws = init_workspace(
+            "sandbox-network-disabled",
+            sandbox_network_mode="disabled",
+            sandbox_network_allowed_domains=["github.com"],
+        )
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        sandbox = settings["sandbox"]
+        self.assertEqual(
+            sandbox["network"],
+            {"allowedDomains": [], "deniedDomains": ["*"]},
+        )
+
+    def test_can_pre_allow_sandbox_network_domains(self):
+        ws = init_workspace(
+            "sandbox-network-allowlist",
+            sandbox_network_mode="allowlist",
+            sandbox_network_allowed_domains=["github.com", "*.npmjs.org", "github.com"],
+        )
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        sandbox = settings["sandbox"]
+        self.assertEqual(
+            sandbox["network"],
+            {"allowedDomains": ["github.com", "*.npmjs.org"]},
+        )
+
+    def test_can_open_sandbox_network_access(self):
+        ws = init_workspace(
+            "sandbox-network-open",
+            sandbox_network_mode="open",
+            sandbox_network_allowed_domains=["github.com"],
+        )
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        sandbox = settings["sandbox"]
+        self.assertEqual(sandbox["network"], {"allowedDomains": ["*"]})
 
     def test_can_enable_weaker_nested_sandbox_for_docker(self):
         with unittest.mock.patch(

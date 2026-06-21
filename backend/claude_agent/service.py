@@ -80,6 +80,8 @@
 #                    without a fixed 2000ms wait.
 # [Sync] 2026-06-17: include runner exception notes in SSE errorText so sandbox
 #                    startup diagnostics (e.g. seccomp-denied hints) reach UI.
+# [Sync] 2026-06-21: pass Settings sandbox network policy to workspace init
+#                    and AgentRunOptions PreToolUse enforcement.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -146,6 +148,23 @@ _EDITOR_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
     "mcp__editor__insert_widget",
     "mcp__editor__reply_to_comment",
 })
+
+_SANDBOX_NETWORK_MODES: frozenset[str] = frozenset({"disabled", "allowlist", "open"})
+
+
+def _coerce_sandbox_network_mode(value: object) -> str:
+    """Return the persisted sandbox network mode or the product default."""
+
+    mode = str(value or "").strip().lower()
+    return mode if mode in _SANDBOX_NETWORK_MODES else "allowlist"
+
+
+def _coerce_string_list(value: object) -> list[str]:
+    """Return non-empty strings from a stored list-like config value."""
+
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -353,6 +372,8 @@ class ClaudeAgentService:
         user_env_vars: dict[str, str] = {}
         im_full_access_enabled = False
         workspace_sandbox_enabled = True
+        sandbox_network_mode = "allowlist"
+        sandbox_network_allowed_domains: list[str] = []
         try:
             sys_cfg = _db.get_system_config(int(request.user_id))
             raw_env = sys_cfg.get("env_vars") or {}
@@ -364,6 +385,12 @@ class ClaudeAgentService:
                 }
             im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
             workspace_sandbox_enabled = bool(sys_cfg.get("workspace_enabled", True))
+            sandbox_network_mode = _coerce_sandbox_network_mode(
+                sys_cfg.get("sandbox_network_mode")
+            )
+            sandbox_network_allowed_domains = _coerce_string_list(
+                sys_cfg.get("sandbox_network_allowed_domains")
+            )
         except Exception as e:
             logger.warning(
                 "Failed to load user agent settings from system_config; skipping. Error: %s",
@@ -373,6 +400,8 @@ class ClaudeAgentService:
         workspace_path = get_or_create_workspace(
             state.session_id,
             sandbox_enabled=workspace_sandbox_enabled,
+            sandbox_network_mode=sandbox_network_mode,
+            sandbox_network_allowed_domains=sandbox_network_allowed_domains,
         )
         cwd = str(workspace_path)
         if request.cwd and os.path.abspath(request.cwd) != os.path.abspath(cwd):
@@ -482,6 +511,7 @@ class ClaudeAgentService:
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             im_full_access_enabled=im_full_access_enabled,
+            sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
             mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,

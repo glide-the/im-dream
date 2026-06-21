@@ -1,7 +1,7 @@
 # Settings PRD
 
 > Settings 页面的产品与视觉设计规范。本文引用 [Color System](<./color_system/README.md>)，并与当前产品实现保持同步。
-> **[Sync] 2026-05-27**: 新增 4.3.5 用户 API 配置区域（`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 等按用户存储并注入 Claude SDK 子进程）；关联设计文档 [用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)。
+> **[Sync] 2026-05-27**: 新增用户 API 配置区域（现 §4.3.7，`ANTHROPIC_AUTH_TOKEN`、`ANTHROPIC_BASE_URL`、`ANTHROPIC_MODEL` 等按用户存储并注入 Claude SDK 子进程）；关联设计文档 [用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)。
 > **[Sync] 2026-06-09**: AI 模型配置新增「应如何批准 IM」操作开关；打开后保存 `system_config.im_full_access_enabled=true`，Claude-agent 对除问答表单外的已暴露工具的 `PreToolUse` 返回显式 allow，Chat 输入区隐藏「逐步确认」并显示「完全访问」；同页切换通过前端事件实时同步，无需刷新。
 > **[Sync] 2026-06-13**: 「工作区模式」开启后同时启用每个 thread
 > workspace 的 Claude Code Bash sandbox；后端写入
@@ -10,6 +10,11 @@
 > 该类工具仍显示前端确认窗口以收集用户答案。
 > **[Sync] 2026-06-14**: Workspace sandbox 的 Bash 读权限包含必要运行时依赖目录；
 > 项目源码目录不会因 runtime allowlist 被默认放行。
+> **[Sync] 2026-06-21**: AI 模型配置新增「沙箱网络」策略，用于区分
+> WebFetch 域名权限、Bash/curl 出站网络和本机工具缺失三类失败；配置写入
+> `system_config.sandbox_network_mode` 与
+> `system_config.sandbox_network_allowed_domains`，并同步到 thread-local
+> `.claude/settings.json` 的 `sandbox.network`。
 
 ## 1. 文档范围
 
@@ -18,7 +23,7 @@ Settings 是应用的全局配置页面，作为顶部导航栏（`TopNavBar`）
 该页面包含：
 - 语言偏好设置
 - 界面展示选项（如能量条开关）
-- **AI 模型配置**（主题、模型选择、系统提示词、工作区模式、IM 审批模式）
+- **AI 模型配置**（主题、模型选择、系统提示词、工作区模式、沙箱网络、IM 审批模式）
 - **用户 API 配置**（Anthropic API 密钥、自定义端点、默认模型等 env 变量）
 - 关于 Ink & Memory（`AboutView`）
 
@@ -45,6 +50,7 @@ SettingsView（position: fixed，overflow: auto）
     │   ├── ModelSelect（模型下拉选择）
     │   ├── SystemPromptTextarea（系统提示词，含保存/重置）
     │   ├── WorkspaceModeToggle
+    │   ├── SandboxNetworkPolicy（沙箱网络模式 + 域名白名单）
     │   ├── IMApprovalModeToggle（应如何批准 IM：完全访问）
     │   └── UserApiConfigGroup（用户 API 配置）
     │       ├── ANTHROPIC_AUTH_TOKEN 输入框（password 类型）
@@ -117,7 +123,70 @@ SettingsView（position: fixed，overflow: auto）
 - 该沙箱只约束 Claude Code `Bash` 工具及其子进程；非 Bash 工具仍由
   Claude-agent 的权限策略和前端确认流控制。
 
-#### 4.3.5 应如何批准 IM / IM Approval Mode
+#### 4.3.5 沙箱网络 / Sandbox Network
+
+> 交互设计稿见
+> [Claude-Agent Sandbox Network Interaction Plan](../design/claude-agent/claude-agent-sandbox-network-interaction-plan.md)。
+
+此子区域用于控制 Claude Code Bash sandbox 的出站网络策略，解决
+`curl` / `git` / `npm` 等子进程不能对外建连的问题归因和配置入口。
+
+**问题分层**：
+
+| 方式 | 失败层级 | 处理位置 |
+|---|---|---|
+| WebFetch | 工具域名权限 | Claude-agent 权限规则 / WebFetch domain allow/deny |
+| curl / git / npm | Bash sandbox 网络层 | Settings「沙箱网络」→ `sandbox.network` |
+| gh CLI | 环境层 | 后端镜像或运行时工具安装 |
+
+**配置项**：
+
+| 模式 | `system_config.sandbox_network_mode` | 写入 `sandbox.network` | 说明 |
+|---|---|---|---|
+| 禁用网络 | `disabled` | `allowedDomains: []` + `deniedDomains: ["*"]` | 请求阻断沙箱子进程访问外网，并由 PreToolUse 拒绝网络工具 |
+| 白名单 | `allowlist` | `allowedDomains: [...]` | 预授权填写域名；非白名单域名仍受 Claude Code / managed policy 控制 |
+| 开放网络 | `open` | `allowedDomains: ["*"]` | 请求允许出站访问；仍受部署、后端和托管策略限制 |
+
+**UI 布局**：
+
+- 位于 Workspace Mode 之后、IM Approval Mode 之前。
+- 顶部显示标题「沙箱网络 / Sandbox Network」和一句说明：
+  该设置控制 Bash、curl、git、npm 等沙箱子进程；关闭态会拒绝网络工具，
+  启用态 WebFetch 仍由工具权限和域名规则控制。
+- 使用截图式纵向设置布局：
+  - 「代理网络访问」为关闭/启用胶囊分段控件。
+  - 关闭时在控件下方显示「设置完成后将禁用网络访问。」。
+  - 启用后显示左侧竖线分组，包含「域允许列表」「其他允许的域」「允许的 HTTP 方法」。
+  - 「域允许列表」使用下拉选择：自定义域（`allowlist`）或所有域（`open`）。
+  - 「其他允许的域」使用 `+ 添加域` 交互；点击后出现单行域名输入、保存、取消。
+  - 已保存域名以 pill 形式展示，可逐个移除。
+  - 「允许的 HTTP 方法」按截图布局展示为禁用下拉「所有方法」；当前 Claude Code sandbox 仅支持域名级策略，不保存方法级配置。
+- 添加域时支持粘贴完整 URL，保存前去重、去协议和路径；支持 `*.example.com` 通配域名。
+- 保存失败时保留用户输入并显示弱提示，不清空配置。
+
+**行为规范**：
+
+- 模式切换立即调用 `PUT /api/system-config` 保存 `sandbox_network_mode`。
+- 白名单域名通过「添加域」保存或移除 pill 时调用 `PUT /api/system-config`
+  保存 `sandbox_network_allowed_domains`。
+- 后端清洗规则不接受裸 `*` 作为白名单域名；全开放必须通过 `open` 模式表达。
+- 下一次 Claude Agent turn 或附件 workspace 初始化时，后端把配置写入
+  `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的 `sandbox.network`。
+- 当模式为 `disabled` 时，runner 在 PreToolUse 层拒绝 `WebFetch`、
+  `WebSearch` 和常见 Bash 网络命令（如 `curl`、`wget`、`git fetch`、
+  `npm install`），且优先级高于 IM full-access。
+- 该配置不安装缺失工具；WebFetch 在关闭态会被拒绝，启用态仍由工具权限和域名规则控制。
+
+**非目标 / 避免过度设计**：
+
+- 不做多角色权限系统。
+- 不新增审计后台或企业 managed settings 管理界面。
+- 不在前端承诺一定能联网；真实可用性仍取决于 Claude Code sandbox、
+  Docker/主机网络和上层托管策略。
+- 不把 `raw.githubusercontent.com` / `github.com` 写成默认业务策略；
+  用户按需加入白名单。
+
+#### 4.3.6 应如何批准 IM / IM Approval Mode
 
 - flex 横向排列：左侧标题「应如何批准 IM」+ 描述说明，右侧操作切换按钮。
 - 开关文案固定显示「完全访问」。
@@ -142,7 +211,7 @@ HookJSONOutput(
   `answers` 合并进 `updatedInput` 后再 allow。
 - Chat 页面输入区的工具调用模式不再显示「逐步确认」按钮，改为静态显示「完全访问」；关闭后恢复自动/逐步确认分段控件。
 
-#### 4.3.6 用户 API 配置 / User API Config
+#### 4.3.7 用户 API 配置 / User API Config
 
 > 关联设计文档：[用户 SDK Env 注入方案设计](../design/claude-agent/user-env-injection-design.md)
 
@@ -219,6 +288,10 @@ HookJSONOutput(
 - Workspace Mode 变更保存字段为 `workspace_enabled`；后端在下一次
   Claude Agent turn 或附件 workspace 初始化时同步 thread-local
   `.claude/settings.json` sandbox 配置。
+- Sandbox Network 变更后调用 `PUT /api/system-config` 保存
+  `sandbox_network_mode` 与 `sandbox_network_allowed_domains`；后端在下一次
+  Agent turn、附件同步或文件侧栏 workspace 刷新时同步到 thread-local
+  `.claude/settings.json` `sandbox.network`。
 - IM Approval Mode 变更后立即调用 `PUT /api/system-config` 保存 `im_full_access_enabled`。
 - System Prompt 在用户点击"保存"后调用 `PUT /api/system-config`。
 - **用户 API 配置**在用户点击"保存"后调用 `PUT /api/system-config`，将三个 env key 作为 `env_vars` 字典传入。留空的字段通过传入空字符串或在前端过滤后不包含该 key 来实现删除（与服务端 `_sanitize_env_vars` 保持一致：空字符串 key 会被过滤；value 为空字符串则保留 key，建议前端在保存前将空值字段从 `env_vars` 中省略）。
@@ -240,7 +313,7 @@ Settings 页面通过以下入口访问：
 
 ## 11. 验收标准
 
-- Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式、IM 审批模式）。
+- Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式、沙箱网络、IM 审批模式）。
 - Settings 页面包含用户 API 配置区域（API 密钥、API 端点、默认模型三个输入项）。
 - Chat 页面不再渲染模型配置侧边栏，也不在左侧 `VerticalNav` 中提供 Settings 入口。
 - 所有颜色引用 [Color System](<./color_system/README.md>) token，无孤立十六进制值。
@@ -250,6 +323,8 @@ Settings 页面通过以下入口访问：
 - `ANTHROPIC_AUTH_TOKEN` 输入框已保存的值以掩码形式展示，不反向暴露明文。
 - 用户 API 配置保存后，该用户的后续 Agent 会话使用用户配置的 API 密钥和端点（而非全局 `backend/.env`）。
 - 「应如何批准 IM」开启后，该用户后续 Agent 普通工具调用自动获得完全访问；Chat 输入区隐藏「逐步确认」并显示「完全访问」；AskUserQuestion 类工具仍显示问答确认窗口。
+- 「沙箱网络」保存后，该用户后续 Agent workspace 写入对应
+  `sandbox.network`，并能在 Settings 中回显模式和白名单域名。
 - 清空字段并保存后，该 key 从 `env_vars` 中移除，回退到服务器默认配置。
 
 ## 12. 前端实现备注
@@ -261,7 +336,7 @@ Settings 页面通过以下入口访问：
 - `ChatView.tsx` 移除 `Sidebar` 组件，不再触发模型配置侧边栏弹出。
 
 **用户 API 配置（待实现）**：
-- 在 `ModelConfigSection.tsx`（或提取后的 `UserApiConfigGroup.tsx`）中新增 §4.3.5 描述的三个输入框区域。
+- 在 `ModelConfigSection.tsx`（或提取后的 `UserApiConfigGroup.tsx`）中新增 §4.3.7 描述的三个输入框区域。
 - 页面挂载时从 `GET /api/system-config` 的 `env_vars` 字段读取初始值；`ANTHROPIC_AUTH_TOKEN` 有值时显示掩码，其余字段显示实际值。
 - 保存时将非空字段组成 `env_vars` dict 通过 `PUT /api/system-config` 提交；空字段对应 key 从 dict 中省略（服务端会保留旧值），如需清除则显式发送空字符串（服务端 `_sanitize_env_vars` 会写入空字符串，效果等同清除）。
 - 建议后续在 `GET /api/system-config` 路由层对 `ANTHROPIC_AUTH_TOKEN` 返回掩码，避免前端 JS 中出现明文密钥。

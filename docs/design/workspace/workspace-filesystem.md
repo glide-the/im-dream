@@ -13,6 +13,8 @@
 > **[Sync] 2026-06-16**: Skills 同步在重建软链接前会导入
 > `.claude/skills/` 下的真实文件/目录，使 Agent 直接创建的 skill 回写到
 > `workspace/skills/`。
+> **[Sync] 2026-06-21**: `.claude/settings.json` sandbox block now also
+> carries Settings-backed `sandbox.network` policy for Bash subprocess egress.
 
 ## 1. 概述
 
@@ -94,7 +96,11 @@ Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会�
 - `sandbox.enableWeakerNestedSandbox=true`（仅后端检测到 Linux 容器运行时）
 - `sandbox.autoAllowBashIfSandboxed=true`
 - `sandbox.allowUnsandboxedCommands=false`
-- `sandbox.filesystem.denyRead` 覆盖共享 `{AGENT_CWD}`、项目根与常见凭证目录
+- `sandbox.network` 根据 Settings「沙箱网络」写入
+  `allowedDomains: []` + `deniedDomains: ["*"]`、`allowedDomains: [...]`
+  或 `allowedDomains: ["*"]`；关闭态还由 runner PreToolUse 拒绝网络工具
+- `sandbox.filesystem.denyRead=["/"]`，再通过 `allowRead` 重新开放当前
+  workspace 与必要只读运行时依赖
 - `sandbox.filesystem.allowRead/allowWrite` 包含当前 `{AGENT_CWD}/{sessionId}`
 - `sandbox.filesystem.denyWrite` 保护 `.claude/settings*.json`、`.claude/hooks/`、
   `.editor/`、`.mcp.json` 等内部配置；不覆盖 `.claude/skills/`

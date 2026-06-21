@@ -12,6 +12,9 @@
 #         project .claude/memory/ filesystem fallback also removed from memory_workspace.py.
 # [Sync] 2026-06-13: download responses use ASCII Content-Disposition fallback
 #         plus RFC 8187 filename* so non-Latin filenames do not crash ASGI headers.
+# [Sync] 2026-06-21: workspace file APIs initialize workspaces with Settings-backed
+#                    sandbox filesystem and network policy, avoiding default-policy
+#                    rewrites after Settings changes.
 
 """Workspace file management API.
 
@@ -29,6 +32,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import os
+import re as _re
 import socket
 from typing import Annotated, List, Optional
 from urllib.parse import quote
@@ -41,6 +45,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 import auth
+import database
 from libs.claude_agent_kit.server.workspace import (
     WorkspaceFileAccessError,
     delete_workspace_file,
@@ -94,8 +99,8 @@ def _debug_headers() -> dict[str, str]:
     }
 
 
-import re as _re
 _SESSION_ID_RE = _re.compile(r'^[A-Za-z0-9_-]{1,128}$')
+_SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 
 
 def _validate_session_id(session_id: str) -> str:
@@ -110,6 +115,50 @@ def _validate_session_id(session_id: str) -> str:
             detail={"error": "Invalid sessionId: must be 1-128 alphanumeric, dash, or underscore characters"},
         )
     return session_id
+
+
+def _coerce_sandbox_network_mode(value: object) -> str:
+    mode = str(value or "").strip().lower()
+    return mode if mode in _SANDBOX_NETWORK_MODES else "allowlist"
+
+
+def _coerce_string_list(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _workspace_init_kwargs_for_user(current_user: dict) -> dict:
+    """Return Settings-backed workspace initialization kwargs for a user."""
+
+    try:
+        user_id = int(current_user.get("user_id"))
+        system_config = database.get_system_config(user_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Failed to load workspace settings from system_config; using defaults. Error: %s",
+            exc,
+        )
+        system_config = {}
+
+    return {
+        "sandbox_enabled": bool(system_config.get("workspace_enabled", True)),
+        "sandbox_network_mode": _coerce_sandbox_network_mode(
+            system_config.get("sandbox_network_mode")
+        ),
+        "sandbox_network_allowed_domains": _coerce_string_list(
+            system_config.get("sandbox_network_allowed_domains")
+        ),
+    }
+
+
+def _get_or_create_workspace_for_user(session_id: str, current_user: dict):
+    """Create or refresh a workspace without reverting user sandbox settings."""
+
+    return get_or_create_workspace(
+        session_id,
+        **_workspace_init_kwargs_for_user(current_user),
+    )
 
 
 def _normalize_incoming_relative_path(raw_path: str) -> str:
@@ -182,8 +231,6 @@ async def list_workspace_files_endpoint(
     path      : str   — subdirectory relative to workspace root (optional)
     recursive : str   — set to ``"1"`` or ``"true"`` to include a file tree
     """
-    del current_user
-
     if not session_id:
         raise HTTPException(status_code=400, detail={"error": "sessionId is required"})
     _validate_session_id(session_id)
@@ -194,7 +241,7 @@ async def list_workspace_files_endpoint(
         workspace_root = get_workspace_root()
         workspace_full_path = workspace_root / session_id
         workspace_existed_before = workspace_full_path.exists()
-        workspace_path = get_or_create_workspace(session_id)
+        workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
         files = [_file_info_to_dict(f) for f in list_workspace_files(workspace_path, path)]
         tree = (
             [_tree_node_to_dict(n) for n in list_workspace_file_tree(workspace_path, path)]
@@ -257,7 +304,6 @@ async def upload_workspace_files(
     file         : UploadFile+ — one or more files to upload (required)
     relativePath : str+        — per-file relative paths (optional; parallel to ``file``)
     """
-    del current_user
     import json
 
     if not session_id:
@@ -270,7 +316,7 @@ async def upload_workspace_files(
         workspace_root = get_workspace_root()
         workspace_full_path = workspace_root / session_id
         workspace_existed_before = workspace_full_path.exists()
-        workspace_path = get_or_create_workspace(session_id)
+        workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
         workspace_created = not workspace_existed_before
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
@@ -370,7 +416,6 @@ async def delete_workspace_file_endpoint(
 
     Body: ``{ "sessionId": "…", "path": "relative/path" }``
     """
-    del current_user
     import json
 
     if not body.sessionId or not body.path:
@@ -381,7 +426,7 @@ async def delete_workspace_file_endpoint(
     _validate_session_id(body.sessionId)
 
     try:
-        workspace_path = get_or_create_workspace(body.sessionId)
+        workspace_path = _get_or_create_workspace_for_user(body.sessionId, current_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -421,7 +466,6 @@ async def move_workspace_file_endpoint(
 
     Body: ``{ "sessionId": "…", "fromPath": "…", "toPath": "…" }``
     """
-    del current_user
     import json
 
     if not body.sessionId or not body.fromPath or not body.toPath:
@@ -432,7 +476,7 @@ async def move_workspace_file_endpoint(
     _validate_session_id(body.sessionId)
 
     try:
-        workspace_path = get_or_create_workspace(body.sessionId)
+        workspace_path = _get_or_create_workspace_for_user(body.sessionId, current_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail={"error": str(exc)}) from exc
 
@@ -470,8 +514,6 @@ async def download_workspace_file(
     sessionId : str — workspace session identifier (required)
     path      : str — relative path of the file to download (required)
     """
-    del current_user
-
     if not session_id or not path:
         raise HTTPException(
             status_code=400,
@@ -480,7 +522,7 @@ async def download_workspace_file(
     _validate_session_id(session_id)
 
     try:
-        workspace_path = get_or_create_workspace(session_id)
+        workspace_path = _get_or_create_workspace_for_user(session_id, current_user)
         file_obj = read_workspace_file_content(workspace_path, path)
     except WorkspaceFileAccessError as exc:
         raise HTTPException(
@@ -503,4 +545,3 @@ async def download_workspace_file(
             "X-Content-Type-Options": "nosniff",
         },
     )
-
