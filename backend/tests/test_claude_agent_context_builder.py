@@ -13,6 +13,8 @@
 # [Sync] 2026-06-09: cover Planning Prompt Optimization workflow and escaped
 #                    {{task}} placeholder in the system prompt.
 # [Sync] 2026-06-16: cover fuzzy query guidance in Session Retrieval Workflow.
+# [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT rendering as a lower-priority
+#                    configurable prompt block and empty-config fallback.
 
 """Unit tests for ClaudeAgentContextBuilder (Ink & Memory writing context)."""
 from __future__ import annotations
@@ -178,6 +180,37 @@ class TestBuildSystemPrompt(unittest.TestCase):
         self.assertIn('query="<topic or memory>"', prompt)
         self.assertIn("Default retrieval is character fuzzy matching", prompt)
         self.assertIn('retrieval_mode="vector"', prompt)
+
+    def test_configured_system_prompt_is_lower_priority_block(self):
+        with self._mock_db([]):
+            prompt = _run(
+                self._builder().build_system_prompt(
+                    "1",
+                    configured_system_prompt="Always answer with terse bullet points.",
+                )
+            )
+
+        self.assertIn("## Configurable Page System Prompt (Lower Priority)", prompt)
+        self.assertIn("Settings SYSTEM_PROMPT was loaded from system_config", prompt)
+        self.assertIn("<settings_system_prompt>", prompt)
+        self.assertIn("Always answer with terse bullet points.", prompt)
+        self.assertIn("follow the system template", prompt)
+        self.assertLess(
+            prompt.index("Principles:"),
+            prompt.index("## Configurable Page System Prompt"),
+        )
+
+    def test_empty_configured_system_prompt_is_omitted(self):
+        with self._mock_db([]):
+            prompt = _run(
+                self._builder().build_system_prompt(
+                    "1",
+                    configured_system_prompt="  \n  ",
+                )
+            )
+
+        self.assertNotIn("## Configurable Page System Prompt", prompt)
+        self.assertNotIn("<settings_system_prompt>", prompt)
 
 
 # ---------------------------------------------------------------------------

@@ -18,9 +18,11 @@
 // [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin thread APIs.
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
+// [Sync] 2026-06-22: hide the workspace file sidebar entry when Settings
+//                    Workspace Mode is disabled.
 import { useMemo, useState, useEffect, useCallback } from 'react';
 import '../../styles/markdown.css';
-import { WorkspaceProvider } from '../../contexts/WorkspaceContext';
+import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import QuickActionCard from '../dashboard/QuickActionCard';
 import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
@@ -148,7 +150,7 @@ async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
   }
 }
 
-export default function ChatView({
+function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
   onNewChat,
@@ -157,6 +159,7 @@ export default function ChatView({
   onEditorWriteConfirmed,
   activeVoice,
 }: ChatViewProps) {
+  const { workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
@@ -187,6 +190,12 @@ export default function ChatView({
   useEffect(() => {
     void reloadThreads();
   }, [reloadThreads]);
+
+  useEffect(() => {
+    if (!workspaceEnabled) {
+      setFileSidebarOpen(false);
+    }
+  }, [workspaceEnabled]);
 
   // @@@ External navigation: switch to a specific thread when requestedThreadId changes.
   useEffect(() => {
@@ -355,7 +364,6 @@ export default function ChatView({
   }, [threadSearchQuery, threads]);
 
   return (
-    <WorkspaceProvider>
       <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
         <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {/* 浮动操作按钮区 – 右上角：卡组信息 / 新建 / 更多（含下拉菜单） */}
@@ -436,14 +444,16 @@ export default function ChatView({
                       <IconClock style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
                       <span>历史对话</span>
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => { setFileSidebarOpen((v) => !v); setMoreMenuOpen(false); }}
-                      style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: fileSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
-                    >
-                      <IconFolder style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                      <span>工作空间</span>
-                    </button>
+                    {workspaceEnabled ? (
+                      <button
+                        type="button"
+                        onClick={() => { setFileSidebarOpen((v) => !v); setMoreMenuOpen(false); }}
+                        style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: fileSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
+                      >
+                        <IconFolder style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
+                        <span>工作空间</span>
+                      </button>
+                    ) : null}
                     <div style={{ height: '1px', background: 'var(--color-border-paper)', margin: '0.2rem 0.4rem' }} />
                     <button
                       type="button"
@@ -583,8 +593,17 @@ export default function ChatView({
           ) : null}
         </aside>
 
-        <FileSidebar sessionId={activeThreadId ?? ''} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
+        {workspaceEnabled ? (
+          <FileSidebar sessionId={activeThreadId ?? ''} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
+        ) : null}
       </div>
+  );
+}
+
+export default function ChatView(props: ChatViewProps) {
+  return (
+    <WorkspaceProvider>
+      <ChatViewContent {...props} />
     </WorkspaceProvider>
   );
 }
