@@ -306,31 +306,11 @@ Notion Device Connector:
 | `skills/notion-page-read.md` | 读取指定页面完整内容 |
 | `skills/notion-db-query.md` | 查询指定 Database 下的页面 |
 
-Skill 内容示例（`notion-search.md`）：
+各 Skill 文件的完整设计详见：[`skills/`](./skills/) 目录
 
-```markdown
-# Notion Search
-
-搜索用户 Notion 工作空间中的内容。
-
-## 使用方式
-
-通过 bash 执行 ntn api 命令：
-
-### 搜索所有 Database
-ntn api v1/search filter:='{"property":"object","value":"database"}'
-
-### 搜索所有 Page
-ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100
-
-### 关键词搜索
-ntn api v1/search --data '{"query":"<keyword>","page_size":10}'
-
-## 注意事项
-- ntn api 自动添加 Authorization 和 Notion-Version 请求头
-- 无需手动设置认证信息
-- NOTION_HOME 环境变量已由工作空间配置
-```
+- [`skills/notion-search.md`](./skills/notion-search.md) — 搜索 Notion 内容
+- [`skills/notion-page-read.md`](./skills/notion-page-read.md) — 读取页面完整内容
+- [`skills/notion-db-query.md`](./skills/notion-db-query.md) — 查询 Database 下的页面
 
 ---
 
