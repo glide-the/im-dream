@@ -6,10 +6,11 @@ Scope: 设计 — 资源连接器全链路业务流程图（含四层交互泳�
 
 > [Input] `docs/design/notion-session/overview.md`,
 >      `docs/design/notion-session/connector-interaction.md`,
->      `docs/design/notion-session/resource-connector-layer-design.md`
+>      `docs/design/claude-agent/notion-point/resource-connector-layer-design.md`
 > [Output] 资源连接器各核心业务流程的 Mermaid 流程图与泳道图
-> [Pos] resource-connector-flowcharts in `docs/design/notion-session`
+> [Pos] resource-connector-flowcharts in `docs/design/claude-agent/notion-point`
 > [Sync] 2026-06-22: 初始设计 — 业务流程图集
+> [Sync] 2026-06-22: 迁移至 claude-agent/notion-point — 工作空间映射相关设计独立管理
 
 ---
 
