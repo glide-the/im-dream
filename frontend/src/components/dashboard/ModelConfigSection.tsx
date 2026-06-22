@@ -11,10 +11,15 @@
 // [Sync] 2026-06-13: full-access copy clarifies AskUserQuestion forms still
 //                    require confirmation.
 // [Sync] 2026-06-21: add sandbox network policy controls backed by system_config.
+// [Sync] 2026-06-22: emit same-tab Workspace Mode changes so chat/file sidebar
+//                    entry points close immediately when disabled.
+// [Sync] 2026-06-22: hide Sandbox Network and user env var controls whenever
+//                    Workspace Mode is disabled because both rely on workspace
+//                    runtime initialization.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
-import { emitImFullAccessChanged } from '../../lib/system-config-events';
+import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
@@ -204,7 +209,15 @@ export default function ModelConfigSection() {
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
     setWorkspaceMode(next);
-    void updateConfig({ workspace_enabled: next });
+    emitWorkspaceModeChanged(next);
+    void (async () => {
+      const saved = await updateConfig({ workspace_enabled: next });
+      if (saved) {
+        return;
+      }
+      setWorkspaceMode(!next);
+      emitWorkspaceModeChanged(!next);
+    })();
   }, [updateConfig, workspaceMode]);
 
   const saveSandboxNetworkDomains = useCallback(async (domains: string[]) => {
@@ -486,6 +499,7 @@ export default function ModelConfigSection() {
       </div>
 
       {/* Sandbox network */}
+      {workspaceMode ? (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div>
           <p style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
@@ -706,6 +720,7 @@ export default function ModelConfigSection() {
           </p>
         ) : null}
       </div>
+      ) : null}
 
       {/* IM approval mode */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
@@ -743,6 +758,7 @@ export default function ModelConfigSection() {
       </div>
 
       {/* Environment Variables */}
+      {workspaceMode ? (
       <div>
         <p style={{ margin: '0 0 0.3rem', fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           环境变量 / Environment Variables
@@ -823,6 +839,7 @@ export default function ModelConfigSection() {
           </button>
         </div>
       </div>
+      ) : null}
     </div>
   );
 }

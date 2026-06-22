@@ -113,6 +113,7 @@ python tests/test_seo_content.py -v
 ### Claude Agent — Context Builder (`test_claude_agent_context_builder.py`)
 - ✅ `_render_session_entry` — 日期/标题/摘要字段渲染
 - ✅ `build_system_prompt` — 包含写作助手角色定位、近期会话块
+- ✅ `build_system_prompt(..., configured_system_prompt=...)` — Settings SYSTEM_PROMPT 作为低优先级配置块渲染
 - ✅ 空会话回退为 "No recent entries found"
 - ✅ `context_session_count` 截断（只取前 N 条）
 - ✅ DB 异常时优雅降级（不抛，返回无会话 prompt）
@@ -147,6 +148,12 @@ python tests/test_seo_content.py -v
 - ✅ Phase 1 extrinsic state：每 turn 写入后清空
 - ✅ Phase 4 observer hooks：`session_ended` 在销毁时触发
 - ✅ 不同 session_id 独立隔离
+
+### Claude Agent — Service / Route (`test_claude_agent_service.py`, `test_server_claude_agent.py`)
+- ✅ `get_system_config.system_prompt` 注入 Phase 1 system_prompt 组装
+- ✅ Settings SYSTEM_PROMPT 变化时重建 cached system_prompt
+- ✅ `workspace_enabled=false` 时跳过 `get_or_create_workspace`，`AgentRunOptions.cwd=None`
+- ✅ 附件请求在 Workspace Mode 关闭时不初始化 workspace、不调用 workspace file sync
 
 ### Claude Agent — Server (`test_server_claude_agent.py`)
 - ✅ 6 个 `/api/claude-agent/*` 路由已注册

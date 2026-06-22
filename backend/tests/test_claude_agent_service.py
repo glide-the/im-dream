@@ -10,6 +10,9 @@
 # [Sync] 2026-06-17: cover SSE error formatting that includes exception notes
 #                    from runner diagnostics.
 # [Sync] 2026-06-21: cover sandbox network policy handoff to workspace init.
+# [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT handoff into system_prompt
+#                    assembly, config-change cache rebuild, and config-load
+#                    failure fallback.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -37,10 +40,22 @@ from libs.claude_agent_kit.types import ToolEventPayload
 
 
 class _FakeContextBuilder:
-    async def build_system_prompt(self, user_id: str) -> str:
-        return f"system-prompt:{user_id}"
+    def __init__(self) -> None:
+        self.system_prompt_calls: list[tuple[str, str | None]] = []
+        self.user_message_calls: list[dict[str, Any]] = []
+
+    async def build_system_prompt(
+        self,
+        user_id: str,
+        *,
+        configured_system_prompt: str | None = None,
+    ) -> str:
+        self.system_prompt_calls.append((user_id, configured_system_prompt))
+        suffix = f":{configured_system_prompt}" if configured_system_prompt else ""
+        return f"system-prompt:{user_id}{suffix}"
 
     def build_user_message(self, message_parts: list | None, **kwargs: Any) -> list[dict[str, Any]]:
+        self.user_message_calls.append(kwargs)
         return [{"type": "text", "text": "assembled"}]
 
 
@@ -51,7 +66,8 @@ class _FakeBus:
 
 class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
     async def test_system_config_is_loaded_before_resume_db_lookup(self):
-        service = ClaudeAgentService(context_builder=_FakeContextBuilder())
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
         state = AgentRunState(session_id="thread_service_config")
         request = ClaudeAgentRunRequest(
             user_id="7",
@@ -66,8 +82,9 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                     service_module._db,
                     "get_system_config",
                     return_value={
+                        "system_prompt": "Settings page prompt",
                         "im_full_access_enabled": True,
-                        "workspace_enabled": False,
+                        "workspace_enabled": True,
                         "sandbox_network_mode": "allowlist",
                         "sandbox_network_allowed_domains": [
                             "raw.githubusercontent.com",
@@ -99,10 +116,11 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 )
 
         get_system_config.assert_called_once_with(7)
+        self.assertEqual(builder.system_prompt_calls, [("7", "Settings page prompt")])
         get_chat_thread.assert_called_once_with("thread_service_config", 7)
         get_or_create_workspace.assert_called_once_with(
             "thread_service_config",
-            sandbox_enabled=False,
+            sandbox_enabled=True,
             sandbox_network_mode="allowlist",
             sandbox_network_allowed_domains=[
                 "raw.githubusercontent.com",
@@ -112,6 +130,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(execution.run_options.im_full_access_enabled)
         self.assertEqual(execution.run_options.sandbox_network_mode, "allowlist")
+        self.assertEqual(
+            execution.run_options.system_prompt,
+            "system-prompt:7:Settings page prompt",
+        )
         self.assertEqual(str(workspace_path), execution.run_options.cwd)
         self.assertEqual(
             execution.run_options.mcp_env,
@@ -124,6 +146,137 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             execution.run_options.user_sdk_env["ANTHROPIC_AUTH_TOKEN"],
             "user-token",
+        )
+
+    async def test_workspace_mode_disabled_skips_workspace_initialization(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_workspace_disabled")
+        state.with_cwd("/tmp/stale-workspace")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_workspace_disabled",
+            cwd="/tmp/client-workspace",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with (
+            unittest.mock.patch.object(
+                service_module._db,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                service_module._db,
+                "get_chat_thread",
+                return_value=None,
+            ),
+            unittest.mock.patch.object(
+                service_module,
+                "get_or_create_workspace",
+            ) as get_or_create_workspace,
+        ):
+            execution = await service.assemble_context(
+                request,
+                state=state,
+                bus=_FakeBus(),
+                runner=unittest.mock.Mock(),
+            )
+
+        get_or_create_workspace.assert_not_called()
+        self.assertEqual(state.cwd, "")
+        self.assertIsNone(execution.run_options.cwd)
+        self.assertEqual(builder.user_message_calls[0]["cwd"], "")
+
+    async def test_settings_system_prompt_change_rebuilds_cached_system_prompt(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_service_prompt_change")
+        state.with_system_prompt(
+            "cached-old-prompt",
+            system_config_system_prompt="old settings prompt",
+        )
+        state.is_context_initialized = True
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_service_prompt_change",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / "thread_service_prompt_change"
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={"system_prompt": "new settings prompt"},
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value=None,
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertEqual(builder.system_prompt_calls, [("7", "new settings prompt")])
+        self.assertEqual(state.system_config_system_prompt, "new settings prompt")
+        self.assertEqual(
+            execution.run_options.system_prompt,
+            "system-prompt:7:new settings prompt",
+        )
+
+    async def test_system_config_load_failure_builds_prompt_without_settings_prompt(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_service_config_failure")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_service_config_failure",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / "thread_service_config_failure"
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    side_effect=RuntimeError("system_config unavailable"),
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value=None,
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertEqual(builder.system_prompt_calls, [("7", None)])
+        self.assertEqual(execution.run_options.system_prompt, "system-prompt:7")
+        self.assertEqual(
+            execution.run_options.mcp_env,
+            {"INK_AGENT_USER_ID": "7"},
         )
 
 
