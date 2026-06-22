@@ -7,6 +7,7 @@
 > **[Sync] 2026-05-25 v2**: 重大重构 — `collected_parts` 改为收集**原始 SSE 事件报文**（而非 UIMessage parts）；移除 `text_started` / `full_text_accumulator` / `tool_inv_by_id` 等状态字段；新增 `_sse_events_to_ui_parts()` 在 `_persist_turn` 时做一次线性转换。
 > **[Sync] 2026-05-28**: 校准 `assemble_context` 边界：该阶段构建 `system_prompt` / `user_message` / `AgentRunOptions` / `_TurnContext`，但不发射 `message-metadata`、不创建 streaming callbacks；这些由 `execute_session` 执行。详细上下文接入规则见 [`claude-agent-context-assembly.md`](./claude-agent-context-assembly.md)。
 > **[Sync] 2026-06-13**: `_make_tool_event_cb()` 处理 runner 已有 `tool_input_delta`，发射 `tool-input-delta` SSE 供前端在内置 `Write` 工具写文件时做终端式增量预览；完整方案见 [`write-tool-terminal-preview.md`](./write-tool-terminal-preview.md)。
+> **[Sync] 2026-06-22**: `assemble_context` 先读 `system_config`；Settings SYSTEM_PROMPT 作为 lower-priority block 进入 `build_system_prompt`，`workspace_enabled=false` 时不初始化 workspace、不传 `cwd`、不注入 workspace context。
 
 # ClaudeAgentService 模块设计
 
@@ -128,7 +129,7 @@ classDiagram
 
 `ClaudeAgentService` 不再暴露 all-in-one orchestrator，只提供两个 phase-aware 方法：
 
-- **`assemble_context(request, *, state, queue, runner)`** — Phase 1 单一所有者（Ink & Memory）。首轮调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id)` 构建 system prompt，写入 `state.system_prompt`（享元缓存）；后续轮复用缓存，跳过重建。构建 `user_message`、`AgentRunOptions`、`_TurnContext`（包含 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合），返回 `_TurnExecution` 载体。该阶段不发射 SSE，也不创建 streaming callbacks。
+- **`assemble_context(request, *, state, queue, runner)`** — Phase 1 单一所有者（Ink & Memory）。每轮先调用 `database.get_system_config(user_id)` 读取 Settings 配置；首轮调用 `ClaudeAgentContextBuilder.build_system_prompt(user_id, configured_system_prompt=...)` 构建 system prompt，写入 `state.system_prompt`（享元缓存）。后续轮复用缓存；当 Settings SYSTEM_PROMPT 与 `state.system_config_system_prompt` 不一致时重建。构建 `user_message`、`AgentRunOptions`、`_TurnContext`（包含 `registered_tool_call_ids` / `emitted_tool_input_ids` 去重集合），返回 `_TurnExecution` 载体。该阶段不发射 SSE，也不创建 streaming callbacks。`workspace_enabled=false` 时跳过 `get_or_create_workspace`，清空 `state.cwd`，并以 `cwd=None` 调用 runner。
 - **`execute_session(execution)`** — Phase 3 纯消费者。构造 5 个 `AgentStreamingCallbacks` 闭包，驱动 `runner.run_streaming(opts, callbacks)`，emit `message-final` / `finish` / `error`。每个 SSE 回调在发出事件到 `queue` 的同时，将**原始 SSE 事件 dict**追加到 `turn_ctx.collected_parts`。成功后调用 `_persist_turn`，通过 `_sse_events_to_ui_parts(collected_parts)` 做一次线性转换，将 SSE 事件流还原为 UIMessage-compatible parts 后写入 `chat_message.parts` 列。
 
 > _(Pawkeyland 专属，Ink & Memory 中不适用)_

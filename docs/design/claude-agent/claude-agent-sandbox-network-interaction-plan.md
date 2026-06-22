@@ -7,6 +7,7 @@
 > network policy.
 > [Pos] sandbox-network-interaction-plan in `docs/design/claude-agent`
 > [Sync] 2026-06-21: initial design for sandbox network settings.
+> [Sync] 2026-06-22: Settings shows Sandbox Network only when Workspace Mode is enabled.
 
 # Claude-Agent Sandbox Network Interaction Plan
 
@@ -178,7 +179,8 @@ allow/deny remains a permission-rule concern in enabled modes. See:
 
 ## 6. Acceptance criteria
 
-- Settings shows Sandbox Network under AI model configuration.
+- Settings shows Sandbox Network under AI model configuration only when
+  Workspace Mode is enabled.
 - Mode is loaded from and saved to `/api/system-config`.
 - Allowlist domains are cleaned and de-duplicated before persistence.
 - Thread workspace initialization writes `sandbox.network` according to the

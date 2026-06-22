@@ -21,6 +21,8 @@
 // [Sync] 2026-06-09: show a floating scroll-to-bottom arrow above AIInputDock when the message list is scrolled away from the bottom.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin chat transport and SSE reconnect.
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
+// [Sync] 2026-06-22: respect Workspace Mode by withholding workspaceSessionId
+//                    from the input dock when workspace is disabled.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -146,7 +148,7 @@ export default function ChatPanel({
   >(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const reconnectAbortRef = useRef<AbortController | null>(null);
-  const { setActiveSessionId } = useWorkspaceSession();
+  const { setActiveSessionId, workspaceEnabled } = useWorkspaceSession();
 
   onReconnectCompleteRef.current = onReconnectComplete;
 
@@ -523,7 +525,7 @@ export default function ChatPanel({
           placeholder={inputPlaceholder}
           loading={agentBusy}
           onStop={agentBusy ? handleStop : undefined}
-          workspaceSessionId={threadId}
+          workspaceSessionId={workspaceEnabled ? threadId : undefined}
           mode="full"
         />
       </div>
