@@ -1,7 +1,7 @@
 # Notion Device 资源连接器 — 交互方案设计
 
 Status: Draft  
-Updated: 2026-06-21  
+Updated: 2026-06-22  
 Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的完整交互流程
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -11,6 +11,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Output] 定义用户从创建资源连接器到 Agent 消费 `.notion/` 映射的完整业务交互流程
 > [Pos] connector-interaction-doc in `docs/design/notion-session`
 > [Sync] 2026-06-21: 初始设计 — 资源连接器交互方案
+> [Sync] 2026-06-22: 修正核心概念声明 — 依据 Notion API Reference 区分 Database/Row Page/Standalone Page/Block
 
 ---
 
@@ -50,21 +51,40 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 
 ## 2. 核心概念声明
 
+> 参考：[Notion API — Database](https://developers.notion.com/reference/database)
+
 | 概念 | 定义 | 关系 |
 |------|------|------|
 | **Resource Connector（资源连接器）** | 连接外部平台资源到 ink-and-memory 工作空间的抽象实体 | 一个用户可拥有多个连接器 |
-| **Database** | Notion 中的数据库（表格/看板/等），是 Page 的容器 | 一个连接器可关联多个 Database |
-| **PageID** | Notion 中 Database 下方的具体页面唯一标识 | 属于某个 Database |
+| **Database** | Notion 中定义属性 Schema（列/字段）的特殊对象。可以是 full-page database 或 inline database（内嵌于某个 Page 中）。Database 本身不包含内容块，仅定义 properties schema | 一个连接器可关联多个 Database |
+| **Page（页面）** | Notion 中的内容单元。分为两类：① **Database Row Page** — parent 为 database，属性值遵循所属 Database 的 schema；② **Standalone Page** — parent 为 workspace 或另一个 page，与 Database 无关联 | 一个 Database 下可包含多个 Row Page；Standalone Page 独立存在 |
+| **PageID** | Page 的唯一标识（UUID）。无论是 Database Row Page 还是 Standalone Page，均拥有独立的 PageID | — |
+| **Block** | Notion 中的最小内容单元（段落、标题、列表等）。Page 由 Block 组成；Database 不直接包含 Block | Page 的 children |
 | **`.notion/` 映射文件** | 工作空间内的虚拟索引目录，缓存连接器同步的数据 | 与连接器数据层强关联 |
 | **ntn api** | Notion 官方 CLI 提供的 API 直调命令 | 自动处理 Auth/Version 头 |
 
-### 2.1 概念层次
+### 2.1 Notion 对象层次（API 视角）
+
+```
+Workspace
+  ├── Database (定义 properties schema)
+  │     └── Page (Database Row — 属性值遵循 schema)
+  │           └── Block (段落/标题/列表等内容块)
+  └── Page (Standalone — 独立页面，无 Database 关联)
+        ├── Block (内容块)
+        └── Database (Inline — 内嵌数据库，parent 为此 Page)
+              └── Page (Database Row)
+```
+
+### 2.2 资源连接器映射层次
 
 ```
 Resource Connector (资源连接器)
-  └── Database (数据库)
-        └── PageID (页面)
-              └── .notion/pages/<page_id>.json (映射文件)
+  ├── Database (用户选定的数据库)
+  │     └── Page (Database Row)
+  │           └── .notion/pages/<page_id>.json
+  └── Standalone Page (独立页面，通过 v1/search 发现)
+        └── .notion/pages/<page_id>.json
 ```
 
 ---
@@ -80,11 +100,11 @@ Resource Connector (资源连接器)
     │
     ├─ 完成 ntn login 认证
     │
-    ├─ 用户选择可访问的 Database 信息
-    │     └─ 后端通过 ntn api v1/search 获取 database 列表
+    ├─ 用户选择可访问的 Database 及 Standalone Page
+    │     └─ 后端通过 ntn api v1/search 分别获取 database 和 page 列表
     │
     ├─ 后端同步数据层
-    │     └─ 将选定 Database 的 PageID 清单写入 .notion/ 映射文件
+    │     └─ 将选定 Database 的 Row Page 及 Standalone Page 清单写入 .notion/ 映射文件
     │
     └─ 用户 Chat 对话
           │
@@ -99,8 +119,8 @@ Resource Connector (资源连接器)
 |------|--------|------|---------|
 | 1. 创建连接器 | 用户（前端） | connector 实体 | 数据库 `resource_connectors` 表 |
 | 2. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
-| 3. Database 选择 | 用户（前端列表） | 选定的 database_id 列表 | `resource_connectors.databases` |
-| 4. 数据同步 | 后端（自动） | PageID 清单 | `.notion/index.json` |
+| 3. Database 及 Page 选择 | 用户（前端列表） | 选定的 database_id 及 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
+| 4. 数据同步 | 后端（自动） | Database Row Page + Standalone Page 清单 | `.notion/index.json` |
 | 5. 对话消费 | Agent（PreToolUse） | 页面内容 | `.notion/pages/<id>.json` |
 
 ---
@@ -121,11 +141,15 @@ Resource Connector (资源连接器)
 │   验证码: VAF-HWY                                           │
 │   [打开浏览器确认] ← 用户点击                                 │
 │     ↓                                                       │
-│ Step 3: 选择 Database                                        │
+│ Step 3: 选择 Database 及 Standalone Page                     │
 │                                                             │
+│   Databases:                                                │
 │   ☑ ink-and-memory 代办清单                                  │
 │   ☑ 阅读笔记                                                │
 │   ☐ 项目管理看板                                             │
+│                                                             │
+│   Standalone Pages:                                         │
+│   ☑ 产品设计文档                                             │
 │   ☐ 个人日记                                                 │
 │   [确认选择]                                                 │
 │     ↓                                                       │
@@ -144,7 +168,8 @@ Resource Connector (资源连接器)
 | `/api/connectors/:id/auth/login` | POST | 启动 ntn login 认证 |
 | `/api/connectors/:id/auth/poll` | POST | 轮询认证完成状态 |
 | `/api/connectors/:id/databases` | GET | 获取可访问的 database 列表 |
-| `/api/connectors/:id/databases/select` | POST | 用户选择要同步的 database |
+| `/api/connectors/:id/pages` | GET | 获取可访问的 standalone page 列表 |
+| `/api/connectors/:id/resources/select` | POST | 用户选择要同步的 database 和 standalone page |
 | `/api/connectors/:id/sync` | POST | 触发数据同步 |
 
 ### 4.3 数据模型
@@ -157,7 +182,8 @@ resource_connectors
 ├── auth_status: "pending" | "authenticated" | "expired"
 ├── config: JSON
 │     ├── notion_home: string
-│     └── selected_databases: string[]  ← 用户选定的 database_id 列表
+│     ├── selected_databases: string[]  ← 用户选定的 database_id 列表
+│     └── selected_pages: string[]      ← 用户选定的 standalone page_id 列表
 ├── last_synced_at: timestamp
 ├── created_at: timestamp
 └── updated_at: timestamp
@@ -171,7 +197,7 @@ resource_connectors
 
 | 时机 | 触发方式 | 同步范围 |
 |------|---------|---------|
-| 连接器创建完成 | 自动 | 全量：所有选定 Database 的 PageID |
+| 连接器创建完成 | 自动 | 全量：选定 Database 的 Row Page + Standalone Page |
 | 用户进入对话 | workspace init 时检测 | 增量：距上次同步有变更的页面 |
 | Agent 对话中显式请求 | Agent 调用 sync skill | 按需：指定 database 或 page |
 
@@ -209,16 +235,29 @@ resource_connectors
       "page_count": 15
     }
   ],
+  "selected_standalone_pages": [
+    {
+      "page_id": "page-xyz",
+      "title": "产品设计文档"
+    }
+  ],
   "last_synced_at": "2026-06-21T14:00:00Z"
 }
 ```
 
 ### 5.4 `databases/<db_id>.json` 内容
 
+> Database 下的每个 Page 是一个 Row Page，其属性值遵循该 Database 的 properties schema。
+
 ```json
 {
   "database_id": "db-001",
   "title": "ink-and-memory 代办清单",
+  "properties_schema": {
+    "Name": { "type": "title" },
+    "Status": { "type": "select" },
+    "Due": { "type": "date" }
+  },
   "pages": [
     {
       "page_id": "page-aaa",
@@ -301,9 +340,9 @@ ntn api v1/search --data '{"query":"<keyword>","page_size":10}'
 
 | 业务需求 | ntn api 命令 | 调用时机 |
 |---------|-------------|---------|
-| 获取 Database 列表 | `ntn api v1/search filter:='{"property":"object","value":"database"}'` | 连接器创建 Step 3 |
-| 获取 Database 下的 Page | `ntn api v1/databases/<db_id>/query` | 数据同步阶段 |
-| 搜索最近 Page | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 定期同步 / Agent 请求 |
+| 获取 Database 列表 | `ntn api v1/search filter:='{"property":"object","value":"database"}'` | 连接器创建 Step 3（Database 选择） |
+| 获取 Standalone Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 3（Page 选择） |
+| 获取 Database 下的 Row Page | `ntn api v1/databases/<db_id>/query` | 数据同步阶段 |
 | 获取 Data Source 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器初始化 |
 
 ### 7.2 后端封装
@@ -321,8 +360,12 @@ class NotionAPIBridge:
         """获取用户可访问的所有 Database。"""
         ...
 
+    async def list_standalone_pages(self) -> list[dict]:
+        """获取用户可访问的 Standalone Page（非 Database Row）。"""
+        ...
+
     async def query_database(self, database_id: str) -> list[dict]:
-        """查询指定 Database 下的 Page 列表。"""
+        """查询指定 Database 下的 Row Page 列表。"""
         ...
 ```
 
@@ -371,16 +414,23 @@ sequenceDiagram
     CLI-->>Back: JSON
     Back-->>Front: [{database_id, title}, ...]
 
-    User->>Front: 选择 Database
-    Front->>Back: POST /api/connectors/:id/databases/select
-    Back->>Back: 存储选定的 database_id 列表
+    Front->>Back: GET /api/connectors/:id/pages
+    Back->>CLI: ntn api v1/search filter:=page
+    CLI->>Notion: POST /v1/search
+    Notion-->>CLI: standalone page list
+    CLI-->>Back: JSON
+    Back-->>Front: [{page_id, title}, ...]
+
+    User->>Front: 选择 Database 及 Standalone Page
+    Front->>Back: POST /api/connectors/:id/resources/select
+    Back->>Back: 存储选定的 database_id 及 page_id 列表
 
     Back->>CLI: ntn api v1/databases/<db_id>/query (per db)
     CLI->>Notion: POST /v1/databases/:id/query
-    Notion-->>CLI: page list
+    Notion-->>CLI: row page list
     CLI-->>Back: JSON
-    Back->>Back: 写入 .notion/ 映射文件
-    Back-->>Front: {synced:true, page_count:47}
+    Back->>Back: 写入 .notion/ 映射文件（databases/ + pages/）
+    Back-->>Front: {synced:true, database_count:2, page_count:47}
 ```
 
 ### 8.2 Agent 对话中同步 `.notion/` 流程
