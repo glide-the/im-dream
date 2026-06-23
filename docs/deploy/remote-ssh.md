@@ -63,6 +63,8 @@ Internet :80/:443
 - 前端 runtime `API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`。
 - 浏览器登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会访问 Docker 内部地址 `http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}/api/login`。
 - `BACKEND_URL=http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}` 只保留给前端容器内部 nginx fallback 使用。
+- 后端 `WEBUI_URL` 默认为 `https://ink-frontend.suoxya.com`，`API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`，用于 Google OAuth callback 和登录成功跳转。
+- 后端生产 cookie 默认 `COOKIE_SECURE=true`、`COOKIE_SAMESITE=none`，CORS 默认只允许 `https://ink-frontend.suoxya.com` 且 `INK_CORS_ALLOW_CREDENTIALS=true`。
 
 ## 常用配置
 
@@ -88,7 +90,10 @@ Internet :80/:443
 | `REMOTE_BACKEND_PUBLIC_ORIGIN` | `https://ink-backend.suoxya.com` | 浏览器访问后端的公网 origin |
 | `REMOTE_FRONTEND_PUBLIC_ORIGIN` | `https://ink-frontend.suoxya.com` | 前端公网 origin |
 | `REMOTE_API_BASE_URL` | `REMOTE_BACKEND_PUBLIC_ORIGIN` | 前端 runtime API base URL |
-| `REMOTE_CORS_ALLOW_ORIGINS` | 前后端公网域名 + localhost | 后端 CORS allowlist |
+| `REMOTE_CORS_ALLOW_ORIGINS` | `REMOTE_FRONTEND_PUBLIC_ORIGIN` | 后端 CORS allowlist |
+| `REMOTE_CORS_ALLOW_CREDENTIALS` | `true` | 前后端分域 OAuth cookie 登录需要 |
+| `REMOTE_COOKIE_SECURE` | `true` | 生产 HTTPS cookie Secure |
+| `REMOTE_COOKIE_SAMESITE` | `none` | 前后端分域 cookie 策略 |
 | `REMOTE_SYNC_DATA` | `0` | 代码部署默认不上传本地 `backend/data/` |
 
 如果部署到其他域名，通常只需覆盖公网 origin：
@@ -100,6 +105,26 @@ export REMOTE_API_BASE_URL=${REMOTE_BACKEND_PUBLIC_ORIGIN}
 export REMOTE_CORS_ALLOW_ORIGINS=${REMOTE_FRONTEND_PUBLIC_ORIGIN}
 ./deploy/remote-ssh/deploy.sh deploy
 ```
+
+Google Console 必须配置：
+
+```text
+Authorized JavaScript origins:
+  https://ink-frontend.suoxya.com
+
+Authorized redirect URIs:
+  https://ink-backend.suoxya.com/oauth/google/callback
+```
+
+发布后验证：
+
+```bash
+curl -I https://ink-backend.suoxya.com/api/health
+curl -I 'https://ink-backend.suoxya.com/oauth/google/login?return_to=/'
+curl -I https://ink-frontend.suoxya.com/runtime-config.js
+```
+
+`/oauth/google/login` 应返回 `302` 到 `accounts.google.com`，`redirect_uri` 应为后端公网 callback。
 
 如果服务器已由其他系统管理 nginx，可跳过自动 nginx 步骤：
 

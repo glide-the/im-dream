@@ -29,6 +29,8 @@ attrs==25.4.0
     #   aiohttp
     #   jsonschema
     #   referencing
+authlib==1.6.10
+    # via ink-and-memory-backend
 bcrypt==4.3.0
     # via ink-and-memory-backend
 beautifulsoup4==4.14.3
@@ -112,6 +114,8 @@ idna==3.11
     #   yarl
 instructor==1.13.0
     # via polyagent
+itsdangerous==2.2.0
+    # via ink-and-memory-backend
 jinja2==3.1.6
     # via instructor
 jiter==0.11.1

@@ -5,6 +5,7 @@
 [Sync] 2026-06-14: document public SEO endpoints generated from INK_PUBLIC_BASE_URL and INK_BACKEND_PUBLIC_BASE_URL.
 [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public SEO endpoint notes.
 [Sync] 2026-06-21: document system-config sandbox network policy fields.
+[Sync] 2026-06-23: document Google OAuth, auth cookie aliases, and OAuth Device Flow endpoints.
 -->
 
 **Version:** 2.0.0
@@ -12,11 +13,15 @@
 
 ## Authentication
 
-All endpoints except `/api/register`, `/api/login`, and `/api/default-voices` require authentication.
+All endpoints except `/api/register`, `/api/login`, Google OAuth entry/callback, Device Flow code issuance, and `/api/default-voices` require authentication.
 
 **Header:** `Authorization: Bearer <JWT_TOKEN>`
 
-JWT tokens expire after 7 days.
+Browser clients may also authenticate with the backend-issued `access_token`
+HttpOnly cookie. Google `id_token` / `access_token` values are never accepted
+as business API credentials.
+
+JWT access token lifetime is configured by `JWT_EXPIRES_IN` and defaults to 7 days in this project.
 
 ---
 
@@ -119,6 +124,139 @@ Get current user info from token.
 **Errors:**
 - `401` - Missing or invalid token
 - `404` - User not found
+
+---
+
+### GET `/auth/me`
+
+Alias of `/api/me` for OAuth-oriented clients. Accepts either
+`Authorization: Bearer <token>` or the backend-issued `access_token` cookie.
+
+---
+
+### POST `/auth/logout`
+
+Revokes the current refresh token when present and clears auth cookies.
+
+**Headers:** `Authorization: Bearer <token>` or auth cookie
+
+**Response:**
+```json
+{
+  "success": true
+}
+```
+
+---
+
+### GET `/oauth/google/login`
+
+Starts Google OAuth/OIDC login through the Python backend Authlib client.
+
+**Query:**
+- `return_to` - Optional frontend-relative path to return to after login, for example `/` or `/oauth/device/verify?user_code=ABCD-1234`.
+
+**Response:** `302` redirect to Google.
+
+---
+
+### GET `/oauth/google/callback`
+
+OAuth callback registered in Google Cloud Console. The backend validates OAuth
+state through the session cookie, exchanges the Google code, binds or creates
+the local user, then issues this system's own access/refresh tokens.
+
+**Response:** `302` redirect to frontend with auth cookies set.
+
+**Errors:** redirects to the frontend with `auth_error`.
+
+---
+
+## OAuth Device Flow Endpoints
+
+### POST `/oauth/device/code`
+
+Create a Device Authorization request for CLI/Desktop/Agent/MCP clients.
+
+**Request:**
+```json
+{
+  "client_id": "ink-cli",
+  "scope": "profile"
+}
+```
+
+**Response:**
+```json
+{
+  "device_code": "opaque-device-code",
+  "user_code": "ABCD-1234",
+  "verification_uri": "http://localhost:5173/oauth/device/verify",
+  "verification_uri_complete": "http://localhost:5173/oauth/device/verify?user_code=ABCD-1234",
+  "expires_in": 600,
+  "interval": 5
+}
+```
+
+---
+
+### GET `/oauth/device/verify`
+
+Returns verification metadata for the browser confirmation page.
+
+**Query:** `user_code=ABCD-1234`
+
+---
+
+### POST `/oauth/device/verify`
+
+Approve or deny a pending user code. Requires the browser user to be logged in.
+
+**Headers:** `Authorization: Bearer <token>` or auth cookie
+
+**Request:**
+```json
+{
+  "user_code": "ABCD-1234",
+  "approve": true
+}
+```
+
+---
+
+### POST `/oauth/token`
+
+Supports Device Code Grant and refresh-token rotation.
+
+**Device Code Request:**
+```json
+{
+  "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+  "device_code": "opaque-device-code",
+  "client_id": "ink-cli"
+}
+```
+
+**Success:**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1...",
+  "refresh_token": "opaque-refresh-token",
+  "token_type": "Bearer",
+  "expires_in": 900
+}
+```
+
+**OAuth errors:**
+```json
+{
+  "error": "authorization_pending",
+  "error_description": "Authorization has not completed yet."
+}
+```
+
+Known Device Flow errors include `authorization_pending`, `slow_down`,
+`expired_token`, `access_denied`, `invalid_grant`, and `invalid_client`.
 
 ---
 

@@ -4,6 +4,7 @@
 # [Pos] data sync companion script in deploy/remote-ssh/
 # [Sync] 2026-06-12: add Remote SSH data backup/upload/download workflow for Docker Compose deployments.
 # [Sync] 2026-06-16: restrict commands to backup/upload/download and force-recreate Compose services after upload.
+# [Sync] 2026-06-23: preserve production OAuth/cookie env vars during data-sync restarts.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -40,8 +41,10 @@ REMOTE_BACKEND_PUBLIC_ORIGIN="${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backen
 REMOTE_FRONTEND_PUBLIC_ORIGIN="${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}"
 REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-${REMOTE_BACKEND_PUBLIC_ORIGIN}}"
 REMOTE_WS_BASE_URL="${REMOTE_WS_BASE_URL:-}"
-REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN},${REMOTE_BACKEND_PUBLIC_ORIGIN},http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}"
-REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-false}"
+REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN}}"
+REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-true}"
+REMOTE_COOKIE_SECURE="${REMOTE_COOKIE_SECURE:-true}"
+REMOTE_COOKIE_SAMESITE="${REMOTE_COOKIE_SAMESITE:-none}"
 REMOTE_SYNC_DELETE="${REMOTE_SYNC_DELETE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 COMMAND="${1:-upload}"
@@ -118,6 +121,7 @@ remote_env_prefix() {
     REMOTE_AGENT_CWD REMOTE_FILE_STORAGE_TYPE
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
+    REMOTE_COOKIE_SECURE REMOTE_COOKIE_SAMESITE
   )
   local output="env" name
   for name in "${names[@]}"; do

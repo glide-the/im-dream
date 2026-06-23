@@ -8,6 +8,7 @@
 # [Sync] 2026-06-12: call setup-storage/sync-data implementations from deploy/google-cloud instead of deploy/ root.
 # [Sync] 2026-06-14: build frontend with public SEO URL and update backend SEO public URL envs.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from Cloud Run public URLs.
+# [Sync] 2026-06-23: deploy production OAuth/cookie/session env defaults for split frontend/backend domains.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -26,7 +27,7 @@ IMAGE_TAG="${IMAGE_TAG:-latest}"
 BACKEND_PUBLIC_ORIGIN="${BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}"
 FRONTEND_PUBLIC_ORIGIN="${FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}"
 
-DRY_RUN=0
+DRY_RUN="${DRY_RUN:-0}"
 COMMAND=""
 
 usage() {
@@ -61,7 +62,9 @@ Environment overrides:
   FRONTEND_API_BASE_URL       default: BACKEND_PUBLIC_ORIGIN
   WS_BASE_URL                 optional explicit browser WebSocket origin
   BACKEND_CORS_ALLOW_ORIGINS  default: FRONTEND_PUBLIC_ORIGIN
-  INK_CORS_ALLOW_CREDENTIALS  default: false
+  INK_CORS_ALLOW_CREDENTIALS  default: true
+  BACKEND_COOKIE_SECURE       default: true
+  BACKEND_COOKIE_SAMESITE     default: none
   BACKEND_REVISION            required for backend rollback
   FRONTEND_REVISION           required for frontend rollback
 
@@ -133,6 +136,33 @@ normalize_origin_list() {
       result+=",${trimmed}"
     else
       result="${trimmed}"
+    fi
+  done
+  printf '%s\n' "${result}"
+}
+
+env_vars_to_delimited() {
+  local raw="$1"
+  shift || true
+  local result="" item key denied_key denied
+  local -a entries denied_keys
+  denied_keys=("$@")
+  IFS=',' read -ra entries <<< "${raw}"
+  for item in "${entries[@]}"; do
+    [[ -z "${item}" ]] && continue
+    key="${item%%=*}"
+    denied=0
+    for denied_key in "${denied_keys[@]}"; do
+      if [[ "${key}" == "${denied_key}" ]]; then
+        denied=1
+        break
+      fi
+    done
+    [[ "${denied}" == "1" ]] && continue
+    if [[ -n "${result}" ]]; then
+      result+="|${item}"
+    else
+      result="${item}"
     fi
   done
   printf '%s\n' "${result}"
@@ -317,10 +347,32 @@ command_deploy() {
   frontend_image="${registry}/ink-frontend:${IMAGE_TAG}"
   frontend_public_origin="$(normalize_origin_list "${FRONTEND_PUBLIC_ORIGIN}")"
   frontend_public_site_url="${frontend_public_origin%/}/"
+  local backend_public_origin frontend_api_base_url cors_origins cors_credentials backend_cookie_secure backend_cookie_samesite
+  backend_public_origin="$(normalize_origin_list "${BACKEND_PUBLIC_ORIGIN}")"
+  frontend_api_base_url="${FRONTEND_API_BASE_URL:-${backend_public_origin}}"
+  cors_origins="$(normalize_origin_list "${BACKEND_CORS_ALLOW_ORIGINS:-${frontend_public_origin}}")"
+  cors_credentials="${INK_CORS_ALLOW_CREDENTIALS:-true}"
+  backend_cookie_secure="${BACKEND_COOKIE_SECURE:-true}"
+  backend_cookie_samesite="${BACKEND_COOKIE_SAMESITE:-none}"
+
+  local backend_env_vars_delimited backend_runtime_env_vars
+  local -a deploy_owned_keys=(
+    WEBUI_URL API_BASE_URL COOKIE_SECURE COOKIE_SAMESITE
+    INK_CORS_ALLOW_ORIGINS INK_CORS_ALLOW_CREDENTIALS
+    INK_PUBLIC_BASE_URL INK_BACKEND_PUBLIC_BASE_URL
+  )
+  backend_env_vars_delimited="$(env_vars_to_delimited "${CLOUD_ENV_VARS:-TZ=UTC}" "${deploy_owned_keys[@]}")"
+  backend_runtime_env_vars="WEBUI_URL=${frontend_public_origin}|API_BASE_URL=${backend_public_origin}|COOKIE_SECURE=${backend_cookie_secure}|COOKIE_SAMESITE=${backend_cookie_samesite}|INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}"
+  if [[ -n "${backend_env_vars_delimited}" ]]; then
+    backend_env_vars_delimited+="|${backend_runtime_env_vars}"
+  else
+    backend_env_vars_delimited="${backend_runtime_env_vars}"
+  fi
 
   log "Storage  : bucket=${GCS_BUCKET}, sa=${SA_EMAIL}"
   log "Env vars : ${CLOUD_ENV_VARS}"
   log "Secrets  : ${CLOUD_SECRET_REFS:-}"
+  log "Runtime  : WEBUI_URL=${frontend_public_origin}, API_BASE_URL=${backend_public_origin}, COOKIE_SECURE=${backend_cookie_secure}, COOKIE_SAMESITE=${backend_cookie_samesite}"
 
   log "Setting GCP project to: ${project_id}"
   run gcloud config set project "${project_id}"
@@ -362,7 +414,7 @@ command_deploy() {
     --service-account="${SA_EMAIL}"
     --add-volume="name=ink-data,type=cloud-storage,bucket=${GCS_BUCKET}"
     --add-volume-mount="volume=ink-data,mount-path=/app/data"
-    --set-env-vars="${CLOUD_ENV_VARS}"
+    --set-env-vars="^|^${backend_env_vars_delimited}"
     --project="${project_id}"
   )
   [[ -n "${CLOUD_SECRET_REFS:-}" ]] && backend_flags+=(--set-secrets="${CLOUD_SECRET_REFS}")
@@ -373,9 +425,7 @@ command_deploy() {
   log "Backend live at: ${backend_url}"
 
   log "Deploying frontend service to Cloud Run (${REGION})..."
-  local backend_public_origin frontend_api_base_url frontend_env_vars
-  backend_public_origin="$(normalize_origin_list "${BACKEND_PUBLIC_ORIGIN}")"
-  frontend_api_base_url="${FRONTEND_API_BASE_URL:-${backend_public_origin}}"
+  local frontend_env_vars
   frontend_env_vars="BACKEND_URL=${backend_url},API_BASE_URL=${frontend_api_base_url}"
   [[ -n "${WS_BASE_URL:-}" ]] && frontend_env_vars+=",WS_BASE_URL=${WS_BASE_URL}"
 
@@ -395,17 +445,14 @@ command_deploy() {
   local frontend_url
   frontend_url="$(describe_service_url "${FRONTEND_SERVICE}" "${project_id}" "https://${FRONTEND_SERVICE}-example.run.app")"
 
-  local cors_origins cors_credentials
-  cors_origins="$(normalize_origin_list "${BACKEND_CORS_ALLOW_ORIGINS:-${frontend_public_origin}}")"
-  cors_credentials="${INK_CORS_ALLOW_CREDENTIALS:-false}"
-
   log "Updating backend CORS origin to: ${cors_origins}"
+  log "Updating backend OAuth public URLs and cookie policy."
   log "Updating backend public SEO app URL to: ${frontend_public_site_url}"
   log "Updating backend public SEO API origin to: ${backend_public_origin}"
   run gcloud run services update "${BACKEND_SERVICE}" \
     --region="${REGION}" \
     --project="${project_id}" \
-    --update-env-vars="^|^INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}" \
+    --update-env-vars="^|^WEBUI_URL=${frontend_public_origin}|API_BASE_URL=${backend_public_origin}|COOKIE_SECURE=${backend_cookie_secure}|COOKIE_SAMESITE=${backend_cookie_samesite}|INK_CORS_ALLOW_ORIGINS=${cors_origins}|INK_CORS_ALLOW_CREDENTIALS=${cors_credentials}|INK_PUBLIC_BASE_URL=${frontend_public_site_url}|INK_BACKEND_PUBLIC_BASE_URL=${backend_public_origin}" \
     --quiet
 
   echo ""

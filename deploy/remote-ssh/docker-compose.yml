@@ -8,6 +8,8 @@
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from public app URL.
 # [Sync] 2026-06-17: grant backend container the minimal Docker runtime privileges
 #                    bubblewrap needs to create mount namespaces.
+# [Sync] 2026-06-23: override local `.env` auth URLs/cookies with production
+#                    Remote SSH public origins.
 
 services:
   ink-backend:
@@ -52,8 +54,12 @@ services:
       FILE_STORAGE_TYPE: ${REMOTE_FILE_STORAGE_TYPE:-local}
       FILE_STORAGE_LOCAL_DIR: ${REMOTE_FILE_STORAGE_LOCAL_DIR:-/app/data/file-storage}
       FILE_STORAGE_PREFIX: ${REMOTE_FILE_STORAGE_PREFIX:-uploads}
-      INK_CORS_ALLOW_ORIGINS: ${REMOTE_CORS_ALLOW_ORIGINS:-https://ink-frontend.suoxya.com,https://ink-backend.suoxya.com,http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}
-      INK_CORS_ALLOW_CREDENTIALS: ${REMOTE_CORS_ALLOW_CREDENTIALS:-false}
+      WEBUI_URL: ${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}
+      API_BASE_URL: ${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}
+      COOKIE_SECURE: ${REMOTE_COOKIE_SECURE:-true}
+      COOKIE_SAMESITE: ${REMOTE_COOKIE_SAMESITE:-none}
+      INK_CORS_ALLOW_ORIGINS: ${REMOTE_CORS_ALLOW_ORIGINS:-https://ink-frontend.suoxya.com}
+      INK_CORS_ALLOW_CREDENTIALS: ${REMOTE_CORS_ALLOW_CREDENTIALS:-true}
       INK_PUBLIC_BASE_URL: ${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}
       INK_BACKEND_PUBLIC_BASE_URL: ${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}
     healthcheck:

@@ -1,8 +1,14 @@
 /**
+ * [Input] AuthContext register/google helpers and register form callbacks.
+ * [Output] Registration form with password signup and Google OAuth entry points.
+ * [Pos] register-form component node in frontend/src/components/Auth
+ * [Sync] 2026-06-23: add Continue with Google button backed by Python OAuth login.
+ *
  * Registration form component
  */
 
 import React, { useState } from 'react';
+import { FaGoogle } from 'react-icons/fa';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface RegisterFormProps {
@@ -11,7 +17,7 @@ interface RegisterFormProps {
 }
 
 export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFormProps) {
-  const { register } = useAuth();
+  const { register, loginWithGoogle } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -74,6 +80,45 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
           {error}
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={loginWithGoogle}
+        disabled={isSubmitting}
+        style={{
+          width: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '8px',
+          padding: '11px',
+          border: '1px solid var(--color-border-paper)',
+          borderRadius: '6px',
+          backgroundColor: 'var(--color-bg-surface-solid)',
+          color: 'var(--color-text-body)',
+          fontSize: '15px',
+          fontWeight: 600,
+          cursor: isSubmitting ? 'not-allowed' : 'pointer',
+          fontFamily: "'Excalifont', 'Xiaolai', 'Georgia', serif",
+          marginBottom: '18px'
+        }}
+      >
+        <FaGoogle aria-hidden="true" />
+        Continue with Google
+      </button>
+
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        marginBottom: '18px',
+        color: 'var(--color-text-muted)',
+        fontSize: '13px'
+      }}>
+        <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--color-border-paper)' }} />
+        <span>or</span>
+        <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--color-border-paper)' }} />
+      </div>
 
       <form onSubmit={handleSubmit}>
         <div style={{ marginBottom: '16px' }}>

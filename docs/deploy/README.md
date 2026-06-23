@@ -66,6 +66,22 @@ flowchart TD
 | Claude-agent Bash sandbox | 本机进程使用宿主运行时 | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | backend 容器启用 `SYS_ADMIN`、`seccomp=unconfined`、`apparmor=unconfined` 供 bubblewrap 创建 mount namespace | Cloud Run 不使用 Docker Compose runtime 权限模型 |
 | 边界 | 不构建镜像，不访问 GCS | 不创建云资源，不使用 Secret Manager；Docker 外层容器是主隔离边界 | 不创建云资源，不使用 GCS/Secret Manager，资源默认对齐 Cloud Run，不默认同步数据库；Docker 外层容器是主隔离边界 | 不依赖本地端口和本地数据卷 |
 
+## 生产认证配置
+
+发布到 `https://ink-frontend.suoxya.com` / `https://ink-backend.suoxya.com` 时，所有平台必须满足：
+
+| 项 | 生产值 |
+|----|--------|
+| `WEBUI_URL` | `https://ink-frontend.suoxya.com` |
+| `API_BASE_URL` | `https://ink-backend.suoxya.com` |
+| `COOKIE_SECURE` | `true` |
+| `COOKIE_SAMESITE` | `none` |
+| `INK_CORS_ALLOW_ORIGINS` | `https://ink-frontend.suoxya.com` |
+| `INK_CORS_ALLOW_CREDENTIALS` | `true` |
+| Google callback | `https://ink-backend.suoxya.com/oauth/google/callback` |
+
+Cloud Run 通过 `deploy/google-cloud/deploy.sh` 写入这些值；Remote SSH 通过 `deploy/remote-ssh/docker-compose.yml` 的 environment 覆盖本地 `.env`。
+
 ## 维护规则
 
 - 修改发布路径、脚本参数、配置来源或验证流程时，同步更新本目录文档。

@@ -9,6 +9,7 @@
 # [Sync] 2026-06-14: document Claude Code Docker nested sandbox behavior.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from default verification URL.
 # [Sync] 2026-06-16: align data maintenance wrappers with sync-data backup/upload/download commands.
+# [Sync] 2026-06-23: add production OAuth/cookie defaults for split frontend/backend domains.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,8 +50,10 @@ REMOTE_BACKEND_PUBLIC_ORIGIN="${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backen
 REMOTE_FRONTEND_PUBLIC_ORIGIN="${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}"
 REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-${REMOTE_BACKEND_PUBLIC_ORIGIN}}"
 REMOTE_WS_BASE_URL="${REMOTE_WS_BASE_URL:-}"
-REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN},${REMOTE_BACKEND_PUBLIC_ORIGIN},http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}"
-REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-false}"
+REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN}}"
+REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-true}"
+REMOTE_COOKIE_SECURE="${REMOTE_COOKIE_SECURE:-true}"
+REMOTE_COOKIE_SAMESITE="${REMOTE_COOKIE_SAMESITE:-none}"
 REMOTE_SYNC_DATA="${REMOTE_SYNC_DATA:-0}"
 REMOTE_SETUP_NGINX="${REMOTE_SETUP_NGINX:-auto}"
 REMOTE_SETUP_STORAGE="${REMOTE_SETUP_STORAGE:-1}"
@@ -64,7 +67,7 @@ REMOTE_PUBLIC_HOST="${REMOTE_PUBLIC_HOST:-${REMOTE_SSH_HOST:-REMOTE_SSH_HOST}}"
 REMOTE_VERIFY_FRONTEND_URL="${REMOTE_VERIFY_FRONTEND_URL:-http://127.0.0.1:${REMOTE_FRONTEND_PORT}${REMOTE_FRONTEND_PATH}}"
 REMOTE_VERIFY_BACKEND_URL="${REMOTE_VERIFY_BACKEND_URL:-http://127.0.0.1:${REMOTE_BACKEND_PORT}/api/health}"
 
-DRY_RUN=0
+DRY_RUN="${DRY_RUN:-0}"
 COMMAND=""
 
 usage() {
@@ -118,7 +121,10 @@ Optional environment:
   REMOTE_BACKEND_PUBLIC_ORIGIN default: https://ink-backend.suoxya.com
   REMOTE_FRONTEND_PUBLIC_ORIGIN default: https://ink-frontend.suoxya.com
   REMOTE_API_BASE_URL   browser-facing backend URL; default: REMOTE_BACKEND_PUBLIC_ORIGIN
-  REMOTE_CORS_ALLOW_ORIGINS  default includes frontend/backend public domains and localhost dev origins
+  REMOTE_CORS_ALLOW_ORIGINS  default: REMOTE_FRONTEND_PUBLIC_ORIGIN
+  REMOTE_CORS_ALLOW_CREDENTIALS default: true
+  REMOTE_COOKIE_SECURE  default: true
+  REMOTE_COOKIE_SAMESITE default: none
   REMOTE_SETUP_NGINX    default: auto; deploy installs/updates host nginx when localhost-bound ports need it
   REMOTE_SETUP_STORAGE  default: 1; deploy creates persistent backend/data directories before rsync
   REMOTE_SETUP_SSL      default: 0; set to 1 to let setup-nginx request certbot certificates
@@ -243,6 +249,7 @@ remote_env_prefix() {
     REMOTE_AGENT_CWD REMOTE_FILE_STORAGE_TYPE
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
+    REMOTE_COOKIE_SECURE REMOTE_COOKIE_SAMESITE
     REMOTE_SETUP_NGINX REMOTE_SETUP_STORAGE REMOTE_SETUP_SSL
     REMOTE_BUILD_PULL
   )
