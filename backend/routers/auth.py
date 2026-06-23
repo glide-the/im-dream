@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # [Input] Consume auth/database modules and shared current-user dependency.
-# [Output] Register authentication and first-login import routes.
+# [Output] Register authentication, logout, current-user, and first-login
+#          import routes.
 # [Pos] auth route node in backend/routers
 # [Sync] 2026-05-25: extracted auth and migration endpoints from backend/server.py.
+# [Sync] 2026-06-23: add /auth/me and /auth/logout aliases for OAuth and
+#                    Device Flow token clients while keeping /api/me.
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel
 
 import auth
@@ -111,23 +114,58 @@ def login(request: LoginRequest):
     }
 
 
+def _serialize_user(user: dict) -> dict:
+    return {
+        "id": user["id"],
+        "email": user["email"],
+        "display_name": user["display_name"],
+        "avatar_url": user.get("avatar_url"),
+        "role": user.get("role", "user"),
+        "created_at": user["created_at"],
+    }
+
+
+def _get_current_user_info(current_user: dict) -> dict:
+    user = database.get_user_by_id(current_user["user_id"])
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return _serialize_user(user)
+
+
 @router.get("/api/me")
 def get_current_user_info(current_user: dict = Depends(get_current_user)):
     """
     Get current user info from token.
 
-    Requires Authorization header with ******
+    Requires Authorization header or system auth cookie.
     """
-    user = database.get_user_by_id(current_user["user_id"])
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+    return _get_current_user_info(current_user)
 
-    return {
-        "id": user["id"],
-        "email": user["email"],
-        "display_name": user["display_name"],
-        "created_at": user["created_at"],
-    }
+
+@router.get("/auth/me")
+def get_auth_current_user_info(current_user: dict = Depends(get_current_user)):
+    """Alias for OAuth-oriented clients."""
+    return _get_current_user_info(current_user)
+
+
+@router.post("/auth/logout")
+def logout(
+    request: Request,
+    response: Response,
+    current_user: dict = Depends(get_current_user),
+):
+    """Clear auth cookies and revoke refresh tokens for the current session."""
+
+    refresh_token = request.cookies.get("refresh_token")
+    if refresh_token:
+        database.revoke_refresh_token(auth.hash_token(refresh_token))
+    else:
+        database.revoke_user_refresh_tokens(current_user["user_id"])
+
+    for cookie_name in ("access_token", "refresh_token", "token"):
+        response.delete_cookie(cookie_name, path="/")
+    return {"success": True}
 
 
 @router.post("/api/import-local-data")

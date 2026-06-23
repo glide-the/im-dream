@@ -12,6 +12,7 @@
 // [Sync] 2026-06-01: pass state as editorState to chatWithVoiceSSE in handleChatSend so inline widget agent receives editor_state.
 // [Sync] 2026-06-01: pass current user_session.labels into StateChooser for writing-session metadata display.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
+// [Sync] 2026-06-23: route /oauth/device/verify to the Device Flow verification page before the main app shell.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -43,6 +44,7 @@ import { findNormalizedPhrase } from './utils/textNormalize';
 import { useAuth } from './contexts/AuthContext';
 import LoginForm from './components/Auth/LoginForm';
 import RegisterForm from './components/Auth/RegisterForm';
+import DeviceVerificationPage from './components/Auth/DeviceVerificationPage';
 import { STORAGE_KEYS } from './constants/storageKeys';
 import { getLocalDayKey, getTodayKeyInTimezone } from './utils/timezone';
 import { useSessionLifecycle } from './hooks/useSessionLifecycle';
@@ -111,6 +113,7 @@ const colorMap: Record<string, { gradient: string; text: string; glow: string }>
 export default function App() {
   const isMobile = useMobile();
   const { isAuthenticated, isLoading } = useAuth();
+  const isDeviceVerificationRoute = window.location.pathname === '/oauth/device/verify';
   const { t, i18n } = useTranslation();
   const mobileNavHeight = 64;
   const mobileBottomOffset = isMobile
@@ -1221,6 +1224,10 @@ export default function App() {
 
   // @@@ Show auth screen if not authenticated
   const loginBannerUrl = `${import.meta.env.BASE_URL}login-banner.jpg`;
+
+  if (isDeviceVerificationRoute) {
+    return <DeviceVerificationPage />;
+  }
 
   if (!isAuthenticated) {
     return (
