@@ -22,7 +22,7 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 
 首次部署和后续更新都使用同一条命令。默认行为：
 
-1. 检查本地 `ssh` / `rsync`、仓库必需文件、远端 Docker 与 `docker-compose`。
+1. 检查本地 `ssh` / `rsync`、仓库必需文件、`deploy/clash/config.yaml`、远端 Docker、`docker-compose` 与 `/dev/net/tun`。
 2. 当 `REMOTE_SETUP_NGINX=auto` 且容器端口仅绑定 localhost 时，自动安装或刷新主机 nginx 配置。
 3. 自动创建/修复 `${REMOTE_APP_DIR}/backend/data`、`file-storage`、`agent-workspace`、`backups`。
 4. rsync 代码到 `${REMOTE_APP_DIR}`；默认不覆盖远端 `backend/data/`。
@@ -50,19 +50,20 @@ Docker 容器仍是主隔离边界。
 ```text
 Internet :80/:443
   └─ host nginx
-      ├─ ink-backend.suoxya.com  → 127.0.0.1:8765  → backend FastAPI
+      ├─ ink-backend.suoxya.com  → 127.0.0.1:8765  → tun-proxy network namespace → backend FastAPI
       └─ ink-frontend.suoxya.com → 127.0.0.1:8080  → frontend nginx
 ```
 
 关键默认值：
 
 - 前端容器绑定 `127.0.0.1:8080`，避免占用主机 nginx 的 80 端口。
-- 后端容器绑定 `127.0.0.1:8765`，避免绕过主机 nginx 暴露到公网。
+- `tun-proxy` 绑定 `127.0.0.1:8765` 并发布后端端口，避免绕过主机 nginx 暴露到公网。
+- 后端容器使用 `network_mode: service:tun-proxy`，所有后端出站流量通过 Mihomo TUN。
 - 主机 nginx 上游由 `setup-nginx` 根据 `REMOTE_BACKEND_PORT` / `REMOTE_FRONTEND_PORT` 渲染，端口覆盖时不会继续使用静态默认值。
 - 后端容器内部 `PORT` 默认固定为 `REMOTE_BACKEND_CONTAINER_PORT=8765`，避免 `backend/.env` 中的 `PORT` 让 uvicorn 监听端口与 Compose 映射脱节。
 - 前端 runtime `API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`。
 - 浏览器登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会访问 Docker 内部地址 `http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}/api/login`。
-- `BACKEND_URL=http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}` 只保留给前端容器内部 nginx fallback 使用。
+- `BACKEND_URL=http://tun-proxy:${REMOTE_BACKEND_CONTAINER_PORT}` 只保留给前端容器内部 nginx fallback 使用。
 - 后端 `WEBUI_URL` 默认为 `https://ink-frontend.suoxya.com`，`API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`，用于 Google OAuth callback 和登录成功跳转。
 - 后端生产 cookie 默认 `COOKIE_SECURE=true`、`COOKIE_SAMESITE=none`，CORS 默认只允许 `https://ink-frontend.suoxya.com` 且 `INK_CORS_ALLOW_CREDENTIALS=true`。
 
@@ -94,7 +95,17 @@ Internet :80/:443
 | `REMOTE_CORS_ALLOW_CREDENTIALS` | `true` | 前后端分域 OAuth cookie 登录需要 |
 | `REMOTE_COOKIE_SECURE` | `true` | 生产 HTTPS cookie Secure |
 | `REMOTE_COOKIE_SAMESITE` | `none` | 前后端分域 cookie 策略 |
+| `REMOTE_CLASH_CONFIG_FILE` | `../../deploy/clash/config.yaml` | Mihomo 配置文件，路径相对 `deploy/remote-ssh/docker-compose.yml` 解析 |
+| `REMOTE_CLASH_IMAGE` | `metacubex/mihomo:latest` | Mihomo TUN 容器镜像 |
 | `REMOTE_SYNC_DATA` | `0` | 代码部署默认不上传本地 `backend/data/` |
+
+Remote SSH Compose 默认需要 `deploy/clash/config.yaml`。准备方式：
+
+```bash
+mkdir -p deploy/clash
+cp /Users/dmeck/.config/clash/profiles/1754902792612.yml deploy/clash/config.yaml
+# 确认已合并 deploy/clash/config.tun-snippet.yaml 中的 tun 配置
+```
 
 如果部署到其他域名，通常只需覆盖公网 origin：
 

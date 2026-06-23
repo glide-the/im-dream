@@ -10,8 +10,30 @@
 #                    bubblewrap needs to create mount namespaces.
 # [Sync] 2026-06-23: override local `.env` auth URLs/cookies with production
 #                    Remote SSH public origins.
+# [Sync] 2026-06-23: route backend container egress through a Mihomo TUN proxy namespace.
+# [Sync] 2026-06-24: remove backend extra_hosts because Docker forbids custom
+#                    host mappings with network_mode: service:tun-proxy.
 
 services:
+  tun-proxy:
+    image: ${REMOTE_CLASH_IMAGE:-metacubex/mihomo:latest}
+    container_name: ${REMOTE_CLASH_CONTAINER:-tun-proxy}
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - ${REMOTE_CLASH_CONFIG_FILE:-../../deploy/clash/config.yaml}:/root/.config/mihomo/config.yaml:ro
+    ports:
+      # Backend shares this network namespace, so host nginx reaches backend
+      # through tun-proxy on REMOTE_BACKEND_PORT.
+      - "${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}:${REMOTE_BACKEND_PORT:-8765}:${REMOTE_BACKEND_CONTAINER_PORT:-8765}"
+      # Mihomo controller/dashboard. Keep localhost-bound unless protected.
+      - "${REMOTE_CLASH_CONTROLLER_BIND_HOST:-127.0.0.1}:${REMOTE_CLASH_CONTROLLER_PORT:-9090}:9090"
+      - "${REMOTE_CLASH_DASHBOARD_BIND_HOST:-127.0.0.1}:${REMOTE_CLASH_DASHBOARD_PORT:-3000}:3000"
+
   ink-backend:
     build:
       context: ../../backend
@@ -23,8 +45,6 @@ services:
     mem_limit: "${REMOTE_BACKEND_MEMORY:-1g}"
     # privileged: true
     user: "0:0"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     cap_add:
       # bubblewrap needs CAP_SYS_ADMIN for mount namespace setup inside Docker.
       - SYS_ADMIN
@@ -39,8 +59,7 @@ services:
       # as `bwrap: Failed to make / slave: Permission denied`.
       - seccomp=unconfined
       - apparmor=unconfined
-    ports:
-      - "${REMOTE_BACKEND_BIND_HOST:-127.0.0.1}:${REMOTE_BACKEND_PORT:-8765}:${REMOTE_BACKEND_CONTAINER_PORT:-8765}"
+    network_mode: "service:tun-proxy"
     volumes:
       - ../../backend/data:/app/data
       - ../../backend/models.json:/app/models.json:ro
@@ -68,6 +87,9 @@ services:
       timeout: 10s
       retries: 3
       start_period: 20s
+    depends_on:
+      tun-proxy:
+        condition: service_started
 
   ink-frontend:
     build:
@@ -83,7 +105,7 @@ services:
     ports:
       - "${REMOTE_FRONTEND_BIND_HOST:-127.0.0.1}:${REMOTE_FRONTEND_PORT:-8080}:80"
     environment:
-      BACKEND_URL: http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT:-8765}
+      BACKEND_URL: http://tun-proxy:${REMOTE_BACKEND_CONTAINER_PORT:-8765}
       API_BASE_URL: ${REMOTE_API_BASE_URL:-https://ink-backend.suoxya.com}
       WS_BASE_URL: ${REMOTE_WS_BASE_URL:-}
     depends_on:

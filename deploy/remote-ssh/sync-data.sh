@@ -5,6 +5,7 @@
 # [Sync] 2026-06-12: add Remote SSH data backup/upload/download workflow for Docker Compose deployments.
 # [Sync] 2026-06-16: restrict commands to backup/upload/download and force-recreate Compose services after upload.
 # [Sync] 2026-06-23: preserve production OAuth/cookie env vars during data-sync restarts.
+# [Sync] 2026-06-23: preserve Mihomo TUN env during data-sync restarts.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -45,6 +46,13 @@ REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC
 REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-true}"
 REMOTE_COOKIE_SECURE="${REMOTE_COOKIE_SECURE:-true}"
 REMOTE_COOKIE_SAMESITE="${REMOTE_COOKIE_SAMESITE:-none}"
+REMOTE_CLASH_CONFIG_FILE="${REMOTE_CLASH_CONFIG_FILE:-../../deploy/clash/config.yaml}"
+REMOTE_CLASH_IMAGE="${REMOTE_CLASH_IMAGE:-metacubex/mihomo:latest}"
+REMOTE_CLASH_CONTAINER="${REMOTE_CLASH_CONTAINER:-tun-proxy}"
+REMOTE_CLASH_CONTROLLER_BIND_HOST="${REMOTE_CLASH_CONTROLLER_BIND_HOST:-127.0.0.1}"
+REMOTE_CLASH_CONTROLLER_PORT="${REMOTE_CLASH_CONTROLLER_PORT:-9090}"
+REMOTE_CLASH_DASHBOARD_BIND_HOST="${REMOTE_CLASH_DASHBOARD_BIND_HOST:-127.0.0.1}"
+REMOTE_CLASH_DASHBOARD_PORT="${REMOTE_CLASH_DASHBOARD_PORT:-3000}"
 REMOTE_SYNC_DELETE="${REMOTE_SYNC_DELETE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 COMMAND="${1:-upload}"
@@ -74,6 +82,7 @@ Optional environment:
   REMOTE_DOCKER_COMPOSE_BIN default: docker-compose
   REMOTE_COMPOSE_FILE   default: deploy/remote-ssh/docker-compose.yml
   REMOTE_COMPOSE_PROJECT_NAME default: ink-and-memory
+  REMOTE_CLASH_CONFIG_FILE default: ../../deploy/clash/config.yaml, resolved from deploy/remote-ssh/docker-compose.yml
   REMOTE_SYNC_DELETE    default: 0; set to 1 to pass --delete during upload/download
   DRY_RUN               set to 1 to print commands without executing
 USAGE
@@ -122,6 +131,10 @@ remote_env_prefix() {
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
     REMOTE_COOKIE_SECURE REMOTE_COOKIE_SAMESITE
+    REMOTE_CLASH_CONFIG_FILE REMOTE_CLASH_IMAGE
+    REMOTE_CLASH_CONTAINER REMOTE_CLASH_CONTROLLER_BIND_HOST
+    REMOTE_CLASH_CONTROLLER_PORT REMOTE_CLASH_DASHBOARD_BIND_HOST
+    REMOTE_CLASH_DASHBOARD_PORT
   )
   local output="env" name
   for name in "${names[@]}"; do
