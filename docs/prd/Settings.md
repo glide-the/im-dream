@@ -145,7 +145,7 @@ SettingsView（position: fixed，overflow: auto）
 |---|---|---|---|
 | 禁用网络 | `disabled` | `allowedDomains: []` + `deniedDomains: ["*"]` | 请求阻断沙箱子进程访问外网，并由 PreToolUse 拒绝网络工具 |
 | 白名单 | `allowlist` | `allowedDomains: [...]` | 预授权填写域名；非白名单域名仍受 Claude Code / managed policy 控制 |
-| 开放网络 | `open` | `allowedDomains: ["*"]` | 请求允许出站访问；仍受部署、后端和托管策略限制 |
+| 开放网络 | `open` | 省略 `sandbox.network` | 请求允许所有域名访问；不向 sandbox runtime 写入不支持的裸 `*` allowlist，仍受部署、后端和托管策略限制 |
 
 **UI 布局**：
 
@@ -156,11 +156,12 @@ SettingsView（position: fixed，overflow: auto）
 - 使用截图式纵向设置布局：
   - 「代理网络访问」为关闭/启用胶囊分段控件。
   - 关闭时在控件下方显示「设置完成后将禁用网络访问。」。
-  - 启用后显示左侧竖线分组，包含「域允许列表」「其他允许的域」「允许的 HTTP 方法」。
+  - 启用后显示左侧竖线分组，包含「域允许列表」「其他允许的域」；仅在自定义域模式显示「允许的 HTTP 方法」。
   - 「域允许列表」使用下拉选择：自定义域（`allowlist`）或所有域（`open`）。
   - 「其他允许的域」使用 `+ 添加域` 交互；点击后出现单行域名输入、保存、取消。
   - 已保存域名以 pill 形式展示，可逐个移除。
-  - 「允许的 HTTP 方法」按截图布局展示为禁用下拉「所有方法」；当前 Claude Code sandbox 仅支持域名级策略，不保存方法级配置。
+  - 「允许的 HTTP 方法」在自定义域模式按截图布局展示为禁用下拉「所有方法」；当前 Claude Code sandbox 仅支持域名级策略，不保存方法级配置；所有域模式隐藏该控件。
+  - 网络启用状态始终显示「高风险 启用互联网访问会使你的环境暴露于安全风险之中」提示，包括所有域模式。
 - 添加域时支持粘贴完整 URL，保存前去重、去协议和路径；支持 `*.example.com` 通配域名。
 - 保存失败时保留用户输入并显示弱提示，不清空配置。
 
@@ -170,8 +171,9 @@ SettingsView（position: fixed，overflow: auto）
 - 白名单域名通过「添加域」保存或移除 pill 时调用 `PUT /api/system-config`
   保存 `sandbox_network_allowed_domains`。
 - 后端清洗规则不接受裸 `*` 作为白名单域名；全开放必须通过 `open` 模式表达。
-- 下一次 Claude Agent turn 或附件 workspace 初始化时，后端把配置写入
-  `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的 `sandbox.network`。
+- 下一次 Claude Agent turn 或附件 workspace 初始化时，后端把 disabled /
+  allowlist 配置写入 `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的
+  `sandbox.network`；`open` 模式删除/省略该配置块。
 - 当模式为 `disabled` 时，runner 在 PreToolUse 层拒绝 `WebFetch`、
   `WebSearch` 和常见 Bash 网络命令（如 `curl`、`wget`、`git fetch`、
   `npm install`），且优先级高于 IM full-access。

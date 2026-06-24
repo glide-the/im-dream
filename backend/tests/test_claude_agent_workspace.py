@@ -25,6 +25,8 @@
 # [Sync] 2026-06-17: cover preserving literal symlink aliases for rootfs mount
 #                    points such as /sbin.
 # [Sync] 2026-06-21: cover Settings-backed sandbox network policy emission.
+# [Sync] 2026-06-25: cover open sandbox network mode omitting sandbox.network
+#                    instead of writing unsupported allowedDomains ["*"].
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -203,7 +205,7 @@ class TestInitWorkspace(unittest.TestCase):
         )
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         sandbox = settings["sandbox"]
-        self.assertEqual(sandbox["network"], {"allowedDomains": ["*"]})
+        self.assertNotIn("network", sandbox)
 
     def test_can_enable_weaker_nested_sandbox_for_docker(self):
         with unittest.mock.patch(

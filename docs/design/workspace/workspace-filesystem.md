@@ -98,7 +98,7 @@ Claude Agent 运行在 `tool_choice=auto` 时，Runner 的 PreToolUse 策略会�
 - `sandbox.allowUnsandboxedCommands=false`
 - `sandbox.network` 根据 Settings「沙箱网络」写入
   `allowedDomains: []` + `deniedDomains: ["*"]`、`allowedDomains: [...]`
-  或 `allowedDomains: ["*"]`；关闭态还由 runner PreToolUse 拒绝网络工具
+  或在 open 模式下省略整个 `sandbox.network`；关闭态还由 runner PreToolUse 拒绝网络工具
 - `sandbox.filesystem.denyRead=["/"]`，再通过 `allowRead` 重新开放当前
   workspace 与必要只读运行时依赖
 - `sandbox.filesystem.allowRead/allowWrite` 包含当前 `{AGENT_CWD}/{sessionId}`

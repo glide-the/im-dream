@@ -4,6 +4,8 @@
 # [Sync] 2026-06-13: initial coverage for RFC 8187 download Content-Disposition.
 # [Sync] 2026-06-21: cover workspace file APIs preserving Settings-backed
 #                    sandbox network policy during workspace refresh.
+# [Sync] 2026-06-25: assert open sandbox network mode omits sandbox.network
+#                    before disabled refresh writes an explicit deny policy.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
@@ -82,10 +84,7 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
         )
         settings_path = workspace / ".claude" / "settings.json"
         initial_settings = json.loads(settings_path.read_text(encoding="utf-8"))
-        self.assertEqual(
-            initial_settings["sandbox"]["network"],
-            {"allowedDomains": ["*"]},
-        )
+        self.assertNotIn("network", initial_settings["sandbox"])
 
         with unittest.mock.patch.object(
             workspace_router.database,
