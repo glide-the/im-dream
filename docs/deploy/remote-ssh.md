@@ -241,6 +241,45 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
   这是 bubblewrap 已进入 sandbox rootfs 构造阶段，但标准系统目录没有进入
   沙箱运行时视图。确认已使用包含 `/sbin`、`/usr/sbin`、`/usr/local/sbin`
   allowlist 修复的 backend 镜像，并重新构建/重建 backend 容器。
+- Agent Bash/curl 返回 `HTTP/1.1 403 Forbidden` 且包含
+  `X-Proxy-Error: blocked-by-allowlist`：按 sandbox network allowlist
+  policy deny 处理。这说明请求已经到达 sandbox-runtime host proxy，
+  不是 Docker/TUN/DNS 的第一优先级问题。先检查当前 thread 实际生效的
+  `.claude/settings.json` 是否放行目标 host；`raw.githubusercontent.com`
+  需要精确条目 `raw.githubusercontent.com`，或 wildcard
+  `*.githubusercontent.com`，裸 `githubusercontent.com` 不覆盖子域名。
+  Settings 保存后要新发一条 Agent Bash 命令验证，不要复用正在运行的命令。
+  完整分层判断见
+  [`../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`](../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md)。
+- Agent Bash/curl 报 `curl exit code 56`、reset/502/timeout，且没有
+  `blocked-by-allowlist`：再按 sandbox 子进程代理出口或上游代理失败处理。
+  Linux sandbox 会通过 `bwrap --unshare-net` 创建无外网 network namespace，
+  再靠 sandbox-runtime 的 host proxy、Unix socket bridge、sandbox 内
+  `socat` listener 和 proxy env 提供受控出口。先在 Agent Bash 中检查
+  子进程是否拿到代理出口：
+
+  ```bash
+  env | grep -Ei '^(SANDBOX_RUNTIME|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|CLAUDE_CODE_HOST_)='
+  curl -Iv --connect-timeout 10 --noproxy '' --proxy http://127.0.0.1:3128 https://example.com/ 2>&1 | tail -80
+  curl -Iv --connect-timeout 10 --socks5-hostname 127.0.0.1:1080 https://example.com/ 2>&1 | tail -80
+  ```
+
+  若 Agent Bash 内 proxy env 缺失、`127.0.0.1:3128` / `1080` 不通，
+  或显式 proxy curl 出现 reset/502/timeout，则优先检查 sandbox-runtime
+  bridge、`socat` 和 parent proxy。外层 backend 容器 curl 只用于排除
+  TUN / DNS / 宿主机出口问题：
+
+  ```bash
+  docker exec ink-backend sh -lc '
+  set -eux
+  curl -Iv --connect-timeout 10 https://example.com/ 2>&1 | tail -80
+  curl -Iv --connect-timeout 10 https://raw.githubusercontent.com/ 2>&1 | tail -80
+  '
+  ```
+
+  只有看到 proxy `403` / `blocked-by-allowlist` 时，才回到上一条按域名策略或
+  allowlist 修正处理。完整分层判断见
+  [`../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`](../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md)。
 - `ANTHROPIC_AUTH_TOKEN` 没有进入 SDK 子进程：确认远端 `backend/.env` 或
   Settings 的用户级模型配置包含该 token。
 
