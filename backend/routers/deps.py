@@ -3,13 +3,15 @@
 # [Output] Provide shared auth/date/text helpers to backend router modules.
 # [Pos] shared dependency node in backend/routers
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
+# [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
+#                    Authorization headers or OAuth login cookies.
 
 import os
 from datetime import datetime
 import re
 from typing import Optional
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
@@ -44,6 +46,7 @@ def _count_mixed_words(text: str) -> int:
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> dict:
     """
@@ -53,6 +56,8 @@ def get_current_user(
         HTTPException 401 if token is missing or invalid
     """
     token = credentials.credentials if credentials else None
+    if not token:
+        token = request.cookies.get("access_token") or request.cookies.get("token")
     if not token:
         raise HTTPException(status_code=401, detail="Missing authorization token")
 

@@ -27,6 +27,8 @@
 > [Sync] 2026-06-22: Settings hides Sandbox Network and user environment
 > variable controls while Workspace Mode is disabled because both depend on the
 > workspace runtime path.
+> [Sync] 2026-06-25: `sandbox_network_mode="open"` omits `sandbox.network`
+> instead of writing unsupported `allowedDomains:["*"]`.
 
 # Claude-Agent Workspace Sandbox
 
@@ -156,7 +158,7 @@ and `system_config.sandbox_network_allowed_domains`:
 |---|---|---|
 | `disabled` | `allowedDomains: []` + `deniedDomains: ["*"]` | Request no outbound network from Bash sandbox subprocesses; runner PreToolUse also denies network tools. |
 | `allowlist` | `allowedDomains: [...]` | Pre-allow configured domains; non-listed domains still follow Claude Code or managed policy. |
-| `open` | `allowedDomains: ["*"]` | Request outbound access for all domains, subject to deployment and managed policy. |
+| `open` | omit `sandbox.network` | Request unrestricted/default sandbox-runtime egress without passing an unsupported bare `*` allowlist domain; still subject to deployment and managed policy. |
 
 This network policy covers Bash and child processes such as `curl`, `git`, and
 package managers. In `disabled` mode, `agent_runner.py` also rejects
@@ -305,7 +307,8 @@ performs the search.
 - No Docker/container/VM sandbox.
 - No Python parsing of arbitrary shell syntax for directory isolation.
 - No custom proxy, audit UI, or managed-settings admin UI in this phase; the
-  app writes Claude Code's supported `sandbox.network` settings and uses
+  app writes Claude Code's supported `sandbox.network` settings for disabled
+  and allowlist modes, omits `sandbox.network` for open mode, and uses
   PreToolUse only for the Settings disabled-network guard.
 - No attempt to sandbox non-Bash built-in Claude tools through
   `settings.sandbox`; Claude Code documents sandboxing as Bash-scoped.
@@ -323,7 +326,8 @@ Required checks for this design:
   non-sandbox settings are preserved, runtime dependency paths are read-allowed,
   standard Linux `sbin` runtime paths are read-allowed when present, Docker
   nested sandbox mode is auto-detected, the project root is not default
-  read-allowed, and disabled/allowlist/open network policies are emitted.
+  read-allowed, disabled/allowlist network policies are emitted, and open mode
+  omits `sandbox.network`.
 - Service tests confirm `workspace_enabled=false` does not call
   `get_or_create_workspace`, clears cached `cwd`, and produces
   `AgentRunOptions.cwd=None`.

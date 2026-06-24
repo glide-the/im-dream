@@ -27,6 +27,8 @@
 # [Sync] 2026-06-17: include standard Linux sbin directories in sandbox runtime
 #                    read allowlist so bubblewrap can build its rootfs in Docker.
 # [Sync] 2026-06-21: add Settings-backed sandbox network policy emission.
+# [Sync] 2026-06-25: omit sandbox.network for open mode so runtime default
+#                    egress applies without unsupported allowedDomains ["*"].
 
 """Workspace manager for Claude Agent session directories.
 
@@ -285,8 +287,12 @@ def _normalize_sandbox_network_domains(domains: object) -> list[str]:
 def _workspace_sandbox_network_config(
     mode: object,
     allowed_domains: object = None,
-) -> dict:
-    """Return Claude Code sandbox network settings for the selected mode."""
+) -> dict | None:
+    """Return Claude Code sandbox network settings for the selected mode.
+
+    ``None`` means omit ``sandbox.network`` and let Claude Code's sandbox
+    runtime use its default network behavior for unrestricted/open mode.
+    """
 
     normalized_mode = _normalize_sandbox_network_mode(mode)
     if normalized_mode == "disabled":
@@ -295,7 +301,7 @@ def _workspace_sandbox_network_config(
             "deniedDomains": [SANDBOX_NETWORK_ALLOW_ALL_DOMAIN],
         }
     if normalized_mode == "open":
-        return {"allowedDomains": [SANDBOX_NETWORK_ALLOW_ALL_DOMAIN]}
+        return None
     return {
         "allowedDomains": _normalize_sandbox_network_domains(allowed_domains),
     }
@@ -344,12 +350,11 @@ def _workspace_sandbox_config(
     """
 
     workspace_abs = workspace.resolve(strict=False)
-    
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
 
-    sandbox_config = {
+    sandbox_config: dict = {
         "enabled": enabled,
         "failIfUnavailable": enabled,
         "autoAllowBashIfSandboxed": enabled,
@@ -377,11 +382,13 @@ def _workspace_sandbox_config(
                 str(workspace_abs / ".mcp.json"),
             ],
         },
-        "network": _workspace_sandbox_network_config(
-            network_mode,
-            network_allowed_domains,
-        ),
     }
+    network_config = _workspace_sandbox_network_config(
+        network_mode,
+        network_allowed_domains,
+    )
+    if network_config is not None:
+        sandbox_config["network"] = network_config
     if enabled and _running_in_linux_container():
         # Claude Code's Linux sandbox uses bubblewrap. Inside Docker, a fresh
         # /proc mount may be unavailable, so Claude Code supports this weaker

@@ -9,6 +9,9 @@
 # [Sync] 2026-06-12: make CORS origin/credential policy environment-driven for cross-origin deployments.
 # [Sync] 2026-06-14: expose robots.txt, sitemap.xml, and llms.txt from shared SEO content generators.
 # [Sync] 2026-06-14: separate frontend public app URL from backend public API origin for SEO files.
+# [Sync] 2026-06-23: register Google OAuth and Device Flow routers, initialize
+#                    auth tables at startup, and add SessionMiddleware for
+#                    Authlib OAuth state.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -57,8 +60,9 @@ from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from starlette.middleware.sessions import SessionMiddleware
 try:
     from polycli.orchestration.session_registry import session_def, get_registry
     from polycli.integrations.fastapi import mount_control_panel
@@ -140,6 +144,16 @@ DEFAULT_CORS_ALLOW_ORIGINS = (
 )
 CORS_ALLOW_ORIGINS = _split_csv_env("INK_CORS_ALLOW_ORIGINS", DEFAULT_CORS_ALLOW_ORIGINS)
 CORS_ALLOW_CREDENTIALS = _bool_env("INK_CORS_ALLOW_CREDENTIALS", False)
+SESSION_SECRET_KEY = (
+    os.environ.get("SESSION_SECRET_KEY")
+    or os.environ.get("JWT_SECRET")
+    or os.environ.get("JWT_SECRET_KEY")
+    or "dev-session-secret-change-in-production"
+)
+COOKIE_SECURE = _bool_env("COOKIE_SECURE", False)
+COOKIE_SAMESITE = os.environ.get("COOKIE_SAMESITE", "lax").strip().lower()
+if COOKIE_SAMESITE not in {"lax", "strict", "none"}:
+    COOKIE_SAMESITE = "lax"
 
 
 def normalize_language_code(language: Optional[str]) -> str:
@@ -704,6 +718,13 @@ app = FastAPI(
 
 print(f"🧾 Backend version: {BACKEND_VERSION}")
 
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET_KEY,
+    same_site=COOKIE_SAMESITE,
+    https_only=COOKIE_SECURE,
+)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -720,6 +741,12 @@ import scheduler as timeline_scheduler
 
 # Create scheduler instance
 timeline_gen_scheduler = AsyncIOScheduler()
+
+
+@app.on_event("startup")
+async def startup_database():
+    """Initialize SQLite schema and idempotent auth migrations."""
+    database.init_db()
 
 
 @app.on_event("startup")
@@ -773,11 +800,13 @@ from routers.claude_agent import (
     ToolConfirmRequestBody,
     router as claude_agent_router,
 )
+from routers.device_oauth import OAuthProtocolError, router as device_oauth_router
 from routers.friends import (
     FriendRequestActionRequest,
     UseInviteCodeRequest,
     router as friends_router,
 )
+from routers.oauth import router as oauth_router
 from routers.pictures import GeneratePictureRequest, router as pictures_router
 from routers.preferences import router as preferences_router
 from routers.reports import router as reports_router
@@ -796,6 +825,20 @@ from routers.voices import (
 )
 
 admin_router_module.set_timeline_gen_scheduler(timeline_gen_scheduler)
+
+
+@app.exception_handler(OAuthProtocolError)
+async def oauth_protocol_error_handler(request, exc: OAuthProtocolError):
+    """Return Device Flow token errors in RFC-style top-level JSON shape."""
+
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": exc.error,
+            "error_description": exc.description,
+        },
+        headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
+    )
 
 
 @app.on_event("startup")
@@ -866,6 +909,8 @@ def health():
 # ========== Router Registration ==========
 
 app.include_router(auth_router)
+app.include_router(oauth_router)
+app.include_router(device_oauth_router)
 app.include_router(sessions_router)
 app.include_router(pictures_router)
 app.include_router(preferences_router)

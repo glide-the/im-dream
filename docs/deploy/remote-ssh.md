@@ -22,7 +22,7 @@ export REMOTE_APP_DIR=/srv/ink-and-memory  # 必须是远端绝对路径
 
 首次部署和后续更新都使用同一条命令。默认行为：
 
-1. 检查本地 `ssh` / `rsync`、仓库必需文件、远端 Docker 与 `docker-compose`。
+1. 检查本地 `ssh` / `rsync`、仓库必需文件、`deploy/clash/config.yaml`、远端 Docker、`docker-compose` 与 `/dev/net/tun`。
 2. 当 `REMOTE_SETUP_NGINX=auto` 且容器端口仅绑定 localhost 时，自动安装或刷新主机 nginx 配置。
 3. 自动创建/修复 `${REMOTE_APP_DIR}/backend/data`、`file-storage`、`agent-workspace`、`backups`。
 4. rsync 代码到 `${REMOTE_APP_DIR}`；默认不覆盖远端 `backend/data/`。
@@ -50,19 +50,22 @@ Docker 容器仍是主隔离边界。
 ```text
 Internet :80/:443
   └─ host nginx
-      ├─ ink-backend.suoxya.com  → 127.0.0.1:8765  → backend FastAPI
+      ├─ ink-backend.suoxya.com  → 127.0.0.1:8765  → tun-proxy network namespace → backend FastAPI
       └─ ink-frontend.suoxya.com → 127.0.0.1:8080  → frontend nginx
 ```
 
 关键默认值：
 
 - 前端容器绑定 `127.0.0.1:8080`，避免占用主机 nginx 的 80 端口。
-- 后端容器绑定 `127.0.0.1:8765`，避免绕过主机 nginx 暴露到公网。
+- `tun-proxy` 绑定 `127.0.0.1:8765` 并发布后端端口，避免绕过主机 nginx 暴露到公网。
+- 后端容器使用 `network_mode: service:tun-proxy`，所有后端出站流量通过 Mihomo TUN。
 - 主机 nginx 上游由 `setup-nginx` 根据 `REMOTE_BACKEND_PORT` / `REMOTE_FRONTEND_PORT` 渲染，端口覆盖时不会继续使用静态默认值。
 - 后端容器内部 `PORT` 默认固定为 `REMOTE_BACKEND_CONTAINER_PORT=8765`，避免 `backend/.env` 中的 `PORT` 让 uvicorn 监听端口与 Compose 映射脱节。
 - 前端 runtime `API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`。
 - 浏览器登录请求会访问 `https://ink-backend.suoxya.com/api/login`，不会访问 Docker 内部地址 `http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}/api/login`。
-- `BACKEND_URL=http://ink-backend:${REMOTE_BACKEND_CONTAINER_PORT}` 只保留给前端容器内部 nginx fallback 使用。
+- `BACKEND_URL=http://tun-proxy:${REMOTE_BACKEND_CONTAINER_PORT}` 只保留给前端容器内部 nginx fallback 使用。
+- 后端 `WEBUI_URL` 默认为 `https://ink-frontend.suoxya.com`，`API_BASE_URL` 默认为 `https://ink-backend.suoxya.com`，用于 Google OAuth callback 和登录成功跳转。
+- 后端生产 cookie 默认 `COOKIE_SECURE=true`、`COOKIE_SAMESITE=none`，CORS 默认只允许 `https://ink-frontend.suoxya.com` 且 `INK_CORS_ALLOW_CREDENTIALS=true`。
 
 ## 常用配置
 
@@ -88,8 +91,21 @@ Internet :80/:443
 | `REMOTE_BACKEND_PUBLIC_ORIGIN` | `https://ink-backend.suoxya.com` | 浏览器访问后端的公网 origin |
 | `REMOTE_FRONTEND_PUBLIC_ORIGIN` | `https://ink-frontend.suoxya.com` | 前端公网 origin |
 | `REMOTE_API_BASE_URL` | `REMOTE_BACKEND_PUBLIC_ORIGIN` | 前端 runtime API base URL |
-| `REMOTE_CORS_ALLOW_ORIGINS` | 前后端公网域名 + localhost | 后端 CORS allowlist |
+| `REMOTE_CORS_ALLOW_ORIGINS` | `REMOTE_FRONTEND_PUBLIC_ORIGIN` | 后端 CORS allowlist |
+| `REMOTE_CORS_ALLOW_CREDENTIALS` | `true` | 前后端分域 OAuth cookie 登录需要 |
+| `REMOTE_COOKIE_SECURE` | `true` | 生产 HTTPS cookie Secure |
+| `REMOTE_COOKIE_SAMESITE` | `none` | 前后端分域 cookie 策略 |
+| `REMOTE_CLASH_CONFIG_FILE` | `../../deploy/clash/config.yaml` | Mihomo 配置文件，路径相对 `deploy/remote-ssh/docker-compose.yml` 解析 |
+| `REMOTE_CLASH_IMAGE` | `metacubex/mihomo:latest` | Mihomo TUN 容器镜像 |
 | `REMOTE_SYNC_DATA` | `0` | 代码部署默认不上传本地 `backend/data/` |
+
+Remote SSH Compose 默认需要 `deploy/clash/config.yaml`。准备方式：
+
+```bash
+mkdir -p deploy/clash
+cp /Users/dmeck/.config/clash/profiles/1754902792612.yml deploy/clash/config.yaml
+# 确认已合并 deploy/clash/config.tun-snippet.yaml 中的 tun 配置
+```
 
 如果部署到其他域名，通常只需覆盖公网 origin：
 
@@ -100,6 +116,26 @@ export REMOTE_API_BASE_URL=${REMOTE_BACKEND_PUBLIC_ORIGIN}
 export REMOTE_CORS_ALLOW_ORIGINS=${REMOTE_FRONTEND_PUBLIC_ORIGIN}
 ./deploy/remote-ssh/deploy.sh deploy
 ```
+
+Google Console 必须配置：
+
+```text
+Authorized JavaScript origins:
+  https://ink-frontend.suoxya.com
+
+Authorized redirect URIs:
+  https://ink-backend.suoxya.com/oauth/google/callback
+```
+
+发布后验证：
+
+```bash
+curl -I https://ink-backend.suoxya.com/api/health
+curl -I 'https://ink-backend.suoxya.com/oauth/google/login?return_to=/'
+curl -I https://ink-frontend.suoxya.com/runtime-config.js
+```
+
+`/oauth/google/login` 应返回 `302` 到 `accounts.google.com`，`redirect_uri` 应为后端公网 callback。
 
 如果服务器已由其他系统管理 nginx，可跳过自动 nginx 步骤：
 
@@ -205,6 +241,45 @@ Remote SSH 数据维护脚本只保留三个动作：`backup`、`upload`、`down
   这是 bubblewrap 已进入 sandbox rootfs 构造阶段，但标准系统目录没有进入
   沙箱运行时视图。确认已使用包含 `/sbin`、`/usr/sbin`、`/usr/local/sbin`
   allowlist 修复的 backend 镜像，并重新构建/重建 backend 容器。
+- Agent Bash/curl 返回 `HTTP/1.1 403 Forbidden` 且包含
+  `X-Proxy-Error: blocked-by-allowlist`：按 sandbox network allowlist
+  policy deny 处理。这说明请求已经到达 sandbox-runtime host proxy，
+  不是 Docker/TUN/DNS 的第一优先级问题。先检查当前 thread 实际生效的
+  `.claude/settings.json` 是否放行目标 host；`raw.githubusercontent.com`
+  需要精确条目 `raw.githubusercontent.com`，或 wildcard
+  `*.githubusercontent.com`，裸 `githubusercontent.com` 不覆盖子域名。
+  Settings 保存后要新发一条 Agent Bash 命令验证，不要复用正在运行的命令。
+  完整分层判断见
+  [`../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`](../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md)。
+- Agent Bash/curl 报 `curl exit code 56`、reset/502/timeout，且没有
+  `blocked-by-allowlist`：再按 sandbox 子进程代理出口或上游代理失败处理。
+  Linux sandbox 会通过 `bwrap --unshare-net` 创建无外网 network namespace，
+  再靠 sandbox-runtime 的 host proxy、Unix socket bridge、sandbox 内
+  `socat` listener 和 proxy env 提供受控出口。先在 Agent Bash 中检查
+  子进程是否拿到代理出口：
+
+  ```bash
+  env | grep -Ei '^(SANDBOX_RUNTIME|HTTP_PROXY|HTTPS_PROXY|ALL_PROXY|NO_PROXY|CLAUDE_CODE_HOST_)='
+  curl -Iv --connect-timeout 10 --noproxy '' --proxy http://127.0.0.1:3128 https://example.com/ 2>&1 | tail -80
+  curl -Iv --connect-timeout 10 --socks5-hostname 127.0.0.1:1080 https://example.com/ 2>&1 | tail -80
+  ```
+
+  若 Agent Bash 内 proxy env 缺失、`127.0.0.1:3128` / `1080` 不通，
+  或显式 proxy curl 出现 reset/502/timeout，则优先检查 sandbox-runtime
+  bridge、`socat` 和 parent proxy。外层 backend 容器 curl 只用于排除
+  TUN / DNS / 宿主机出口问题：
+
+  ```bash
+  docker exec ink-backend sh -lc '
+  set -eux
+  curl -Iv --connect-timeout 10 https://example.com/ 2>&1 | tail -80
+  curl -Iv --connect-timeout 10 https://raw.githubusercontent.com/ 2>&1 | tail -80
+  '
+  ```
+
+  只有看到 proxy `403` / `blocked-by-allowlist` 时，才回到上一条按域名策略或
+  allowlist 修正处理。完整分层判断见
+  [`../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`](../design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md)。
 - `ANTHROPIC_AUTH_TOKEN` 没有进入 SDK 子进程：确认远端 `backend/.env` 或
   Settings 的用户级模型配置包含该 token。
 

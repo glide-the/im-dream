@@ -8,6 +8,8 @@
 # [Sync] 2026-06-13: workspace_enabled also controls per-thread Claude Code
 #                    Bash sandbox settings written into .claude/settings.json.
 # [Sync] 2026-06-21: accept sandbox network policy and allowed domains.
+# [Sync] 2026-06-25: return merged config from PUT so Settings can hydrate
+#                    sanitized sandbox-network values after save.
 
 """System configuration API.
 
@@ -174,4 +176,4 @@ def put_system_config(
     if patch:
         database.save_system_config(user_id, patch)
 
-    return {"success": True}
+    return {"success": True, "data": database.get_system_config(user_id)}

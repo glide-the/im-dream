@@ -5,6 +5,7 @@
 # [Sync] 2026-06-12: write fixed frontend public origin CORS defaults during data-sync restarts.
 # [Sync] 2026-06-12: download cloud SQLite files to backend/data/bak_<date>/ before upload or shutdown-style maintenance.
 # [Sync] 2026-06-12: move Google Cloud implementation from deploy/ to deploy/google-cloud/.
+# [Sync] 2026-06-23: preserve production OAuth/cookie env vars during data-sync restarts.
 #
 # Usage:
 #   export GCP_PROJECT_ID=your-project-id
@@ -22,8 +23,11 @@ PROJECT_ID="${GCP_PROJECT_ID:-}"
 REGION="${GCP_REGION:-asia-east1}"
 BACKEND_SERVICE="${BACKEND_SERVICE:-ink-backend}"
 FRONTEND_PUBLIC_ORIGIN="${FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}"
+BACKEND_PUBLIC_ORIGIN="${BACKEND_PUBLIC_ORIGIN:-https://ink-backend.suoxya.com}"
 BACKEND_CORS_ALLOW_ORIGINS="${BACKEND_CORS_ALLOW_ORIGINS:-${FRONTEND_PUBLIC_ORIGIN}}"
-INK_CORS_ALLOW_CREDENTIALS="${INK_CORS_ALLOW_CREDENTIALS:-false}"
+INK_CORS_ALLOW_CREDENTIALS="${INK_CORS_ALLOW_CREDENTIALS:-true}"
+BACKEND_COOKIE_SECURE="${BACKEND_COOKIE_SECURE:-true}"
+BACKEND_COOKIE_SAMESITE="${BACKEND_COOKIE_SAMESITE:-none}"
 DATA_DIR="${REPO_ROOT}/backend/data"
 COMMAND="${1:-upload}"
 SYNC_DATA_SKIP_CLOUD_BACKUP="${SYNC_DATA_SKIP_CLOUD_BACKUP:-0}"
@@ -62,13 +66,29 @@ sanitize_cloud_env_vars() {
     [[ -z "${item}" ]] && continue
     key="${item%%=*}"
     case "${key}" in
-      INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS)
-        warn "Ignoring ${key} from .cloud-env; deploy/google-cloud/deploy.sh owns backend CORS."
+      WEBUI_URL|API_BASE_URL|COOKIE_SECURE|COOKIE_SAMESITE|INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS|INK_PUBLIC_BASE_URL|INK_BACKEND_PUBLIC_BASE_URL)
+        warn "Ignoring ${key} from .cloud-env; deploy/google-cloud/deploy.sh owns public OAuth/CORS/cookie env."
         continue
         ;;
     esac
     if [[ -n "${result}" ]]; then
       result+=",${item}"
+    else
+      result="${item}"
+    fi
+  done
+  printf '%s\n' "${result}"
+}
+
+env_vars_to_delimited() {
+  local raw="$1"
+  local result="" item
+  local -a entries
+  IFS=',' read -ra entries <<< "${raw}"
+  for item in "${entries[@]}"; do
+    [[ -z "${item}" ]] && continue
+    if [[ -n "${result}" ]]; then
+      result+="|${item}"
     else
       result="${item}"
     fi
@@ -176,15 +196,21 @@ upload_local_data() {
   # ── Restart backend while preserving deploy-owned values such as CORS ──────
   log "Restarting ${BACKEND_SERVICE} with full config..."
   SANITIZED_CLOUD_ENV_VARS="$(sanitize_cloud_env_vars "${CLOUD_ENV_VARS:-}")"
+  SANITIZED_CLOUD_ENV_VARS_DELIMITED="$(env_vars_to_delimited "${SANITIZED_CLOUD_ENV_VARS}")"
   CORS_ORIGINS="$(normalize_origin_list "${BACKEND_CORS_ALLOW_ORIGINS}")"
-  UPDATE_ENV_VARS="${SANITIZED_CLOUD_ENV_VARS:+${SANITIZED_CLOUD_ENV_VARS},}FORCE_RESTART=$(date +%s),INK_CORS_ALLOW_ORIGINS=${CORS_ORIGINS},INK_CORS_ALLOW_CREDENTIALS=${INK_CORS_ALLOW_CREDENTIALS}"
+  UPDATE_RUNTIME_ENV_VARS="FORCE_RESTART=$(date +%s)|WEBUI_URL=${FRONTEND_PUBLIC_ORIGIN}|API_BASE_URL=${BACKEND_PUBLIC_ORIGIN}|COOKIE_SECURE=${BACKEND_COOKIE_SECURE}|COOKIE_SAMESITE=${BACKEND_COOKIE_SAMESITE}|INK_PUBLIC_BASE_URL=${FRONTEND_PUBLIC_ORIGIN%/}/|INK_BACKEND_PUBLIC_BASE_URL=${BACKEND_PUBLIC_ORIGIN}|INK_CORS_ALLOW_ORIGINS=${CORS_ORIGINS}|INK_CORS_ALLOW_CREDENTIALS=${INK_CORS_ALLOW_CREDENTIALS}"
+  if [[ -n "${SANITIZED_CLOUD_ENV_VARS_DELIMITED}" ]]; then
+    UPDATE_ENV_VARS="${SANITIZED_CLOUD_ENV_VARS_DELIMITED}|${UPDATE_RUNTIME_ENV_VARS}"
+  else
+    UPDATE_ENV_VARS="${UPDATE_RUNTIME_ENV_VARS}"
+  fi
   RESTART_FLAGS=(
     --region="${REGION}"
     --project="${PROJECT_ID}"
-    --update-env-vars="${UPDATE_ENV_VARS}"
+    --update-env-vars="^|^${UPDATE_ENV_VARS}"
     --quiet
   )
-  [[ -n "${CLOUD_SECRET_REFS}" ]] && RESTART_FLAGS+=(--set-secrets="${CLOUD_SECRET_REFS}")
+  [[ -n "${CLOUD_SECRET_REFS:-}" ]] && RESTART_FLAGS+=(--set-secrets="${CLOUD_SECRET_REFS}")
   gcloud run services update "${BACKEND_SERVICE}" "${RESTART_FLAGS[@]}"
 
   info "════════════════════════════════════════"
