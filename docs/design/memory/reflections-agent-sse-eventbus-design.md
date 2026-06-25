@@ -29,7 +29,7 @@ SSE/EventBus 是推荐首版实现顺序中的 Step 3，不应早于持久化和
 
 1. Step 1：`reflection_task` + `reflection_result` 先落地。
 2. Step 2：后端 Task Engine 四阶段先可独立运行。
-3. Step 3：接入 SSE/EventBus 做实时状态同步。
+3. Step 3：接入 SSE/EventBus 做实时状态同步，并调整前端顺序为 `create(auto_start=false) → subscribe → start`。
 4. Step 4：补 Observer 接口和最小 `TaskPersistenceObserver`。
 
 这个顺序保证：即使 SSE 暂时不可用，用户也能通过 task detail/results 恢复状态。
@@ -121,8 +121,8 @@ data: {"task_id":"task_...","sequence":12,"payload":{"section":"echoes","result_
 
 前端不应只依赖 SSE：
 
-1. 页面加载时先 `GET /api/reflections/tasks/{task_id}` 获取 task 当前状态。
-2. 再订阅 `/events` 获取增量事件。
+1. 创建任务时使用 `POST /api/reflections/tasks` 且 `auto_start=false`。
+2. 立即订阅 `/events`，收到 `reflection.stream.connected` 后再调用 `POST /tasks/{task_id}/start`。
 3. 如果 SSE 断开，使用 `Last-Event-ID` 重连。
 4. 如果 replay 不可用，降级调用 `/tasks/{task_id}` 和 `/results` 恢复页面。
 
@@ -191,21 +191,26 @@ sequenceDiagram
     participant Engine as Task Engine
     participant DB as SQLite DB
 
-    UI->>API: GET /tasks/{task_id}
-    API->>DB: read reflection_task
-    API-->>UI: current status
+    UI->>API: POST /tasks {auto_start:false}
+    API->>DB: create reflection_task(CREATED)
+    API->>Bus: create task bus
+    API-->>UI: 202 {task_id}
+
     UI->>API: GET /tasks/{task_id}/events Last-Event-ID=evt_000004
     API->>Bus: subscribe(task_id, after_event_id)
     Bus-->>API: replay buffered events after evt_000004
-    API-->>UI: SSE replay events
-    Engine->>Bus: publish new event
+    API-->>UI: SSE replay events + reflection.stream.connected
+
+    UI->>API: POST /tasks/{task_id}/start
+    API->>Engine: enqueue task
+    Engine->>Bus: publish reflection.task.started
     Bus-->>API: live event
     API-->>UI: SSE live event
 
     UI--xAPI: network disconnect
     API->>Bus: unsubscribe(token)
     Note over Engine: Task continues running
-    UI->>API: reconnect with Last-Event-ID
+    UI->>API: reconnect with Last-Event-ID or fallback to /task + /results
 ```
 
 ---
@@ -217,6 +222,7 @@ sequenceDiagram
 - task-scoped event envelope。
 - task/section started/completed/failed 事件。
 - SSE subscribe + basic reconnect。
+- `auto_start=false` + `/start` 控制，保证前端先订阅再启动任务。
 - 断线后不取消后端 task。
 - 降级查询 task detail/results。
 

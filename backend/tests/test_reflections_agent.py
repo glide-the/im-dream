@@ -142,6 +142,34 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
             self.assertEqual(latest_response.status_code, 200, latest_response.text)
             self.assertEqual(latest_response.json()["task"]["task_id"], task_id)
 
+    def test_router_can_create_without_autostart_then_start(self):
+        app = FastAPI()
+        app.include_router(reflections_router)
+        app.dependency_overrides[router_deps.get_current_user] = lambda: {"user_id": self.user_id}
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/reflections/tasks",
+                json={"sections": ["echoes"], "auto_start": False},
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            task_id = response.json()["task_id"]
+            created = database.get_reflection_task(task_id, self.user_id)
+            self.assertEqual(created["status"], "CREATED")
+
+            start_response = client.post(f"/api/reflections/tasks/{task_id}/start")
+            self.assertEqual(start_response.status_code, 202, start_response.text)
+
+            for _ in range(50):
+                task = database.get_reflection_task(task_id, self.user_id)
+                if task["status"] in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
+                    break
+                time.sleep(0.05)
+
+            self.assertEqual(database.get_reflection_task(task_id, self.user_id)["status"], "COMPLETED")
+            events = database.list_reflection_task_events(task_id, self.user_id)
+            self.assertIn("reflection.task.started", [event["event_type"] for event in events])
+
 
 if __name__ == "__main__":
     unittest.main()

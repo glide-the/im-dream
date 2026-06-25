@@ -103,7 +103,7 @@ Reflections 应从“前端页面动作”调整为“后端 Reflections-agent �
 必须包含：
 
 - task/section 基础事件发布。
-- 前端订阅任务事件。
+- 前端必须采用 `create(auto_start=false) → subscribe SSE → start task` 顺序，确保实时事件不是只靠完成后的 replay。
 - SSE 断开后可通过 task detail/results 恢复页面状态。
 
 首版可以先使用进程内 EventBus；多实例部署时再升级 Redis Stream。
@@ -225,7 +225,8 @@ assemble_context          create_executor          execute_reflection_task     f
 
 | API | 方法 | Step | 职责 |
 |---|---|---:|---|
-| `/api/reflections/tasks` | `POST` | 1/2 | 创建并启动 Reflections 异步任务 |
+| `/api/reflections/tasks` | `POST` | 1/2 | 创建 Reflections 异步任务；前端实时流场景使用 `auto_start=false` |
+| `/api/reflections/tasks/{task_id}/start` | `POST` | 2/3 | 在 SSE 订阅建立后启动任务，避免错过实时事件 |
 | `/api/reflections/tasks/{task_id}` | `GET` | 1 | 查询任务状态、sections 进度、错误摘要 |
 | `/api/reflections/tasks/{task_id}/results` | `GET` | 1 | 获取该任务的结构化结果 |
 | `/api/reflections/latest` | `GET` | 1 | 获取用户最近一次 completed/partial_failed 结果 |
@@ -245,51 +246,51 @@ sequenceDiagram
     participant DB as SQLite DB
     participant WS as Memory Workspace
     participant Runner as ReflectionsAgentRunner
-    participant Bus as EventBus/SSE (Step 3)
+    participant Bus as EventBus/SSE
 
-    UI->>API: POST /api/reflections/tasks {sections, filters}
+    UI->>API: POST /api/reflections/tasks {sections, filters, auto_start:false}
     API->>DB: create reflection_task(status=CREATED)
+    API->>Bus: create task-scoped EventBus
+    API-->>UI: 202 Accepted {task_id, status:CREATED}
+
+    UI->>API: GET /api/reflections/tasks/{task_id}/events
+    API->>Bus: subscribe(task_id)
+    API-->>UI: SSE reflection.stream.connected
+
+    UI->>API: POST /api/reflections/tasks/{task_id}/start
     API->>Engine: enqueue(task_id)
-    API-->>UI: 202 Accepted {task_id, status}
+    API-->>UI: 202 Accepted {task_id}
 
     Engine->>DB: update task status=ASSEMBLING
     Engine->>DB: read user sessions / notes
     Engine->>WS: write prompt files + sessions_context + analysis_state.json
     Engine->>DB: update task status=QUEUED
+    Engine->>Bus: publish reflection.context.ready
+    Bus-->>UI: SSE reflection.context.ready
 
     Engine->>DB: update task status=RUNNING
-    opt Step 3 enabled
-        UI->>API: GET /api/reflections/tasks/{task_id}/events
-        API->>Bus: subscribe(task_id)
-        Engine->>Bus: publish reflection.task.started
-        Bus-->>UI: SSE reflection.task.started
-    end
+    Engine->>Bus: publish reflection.task.started
+    Bus-->>UI: SSE reflection.task.started
 
     loop section in echoes, traits, patterns
-        opt Step 3 enabled
-            Engine->>Bus: publish reflection.section.started
-            Bus-->>UI: SSE reflection.section.started
-        end
+        Engine->>Bus: publish reflection.section.started
+        Bus-->>UI: SSE reflection.section.started
         Engine->>Runner: run_section(section, sessions_context, workspace)
         Runner-->>Engine: JSON insights
         Engine->>Engine: validate schema and related_session_ids
         Engine->>DB: insert reflection_result rows
         Engine->>WS: update analysis_state.json
-        opt Step 3 enabled
-            Engine->>Bus: publish reflection.section.completed
-            Bus-->>UI: SSE reflection.section.completed
-        end
+        Engine->>Bus: publish reflection.section.completed
+        Bus-->>UI: SSE reflection.section.completed
     end
 
     Engine->>DB: update task status=COMPLETED, completed_at=now
-    opt Step 3 enabled
-        Engine->>Bus: publish reflection.task.completed
-        Bus-->>UI: SSE reflection.task.completed
-    end
+    Engine->>Bus: publish reflection.task.completed
+    Bus-->>UI: SSE reflection.task.completed and stream closes
     UI->>API: GET /api/reflections/tasks/{task_id}/results
     API->>DB: list reflection_result by task_id
     API-->>UI: render Reflections report
-```
+``
 
 ---
 
@@ -297,7 +298,7 @@ sequenceDiagram
 
 | 检查项 | 结论 | 说明 |
 |---|---|---|
-| 是否以后端异步任务为准 | 符合 | task 创建后由 Engine 执行，前端只查询/订阅 |
+| 是否以后端异步任务为准 | 符合 | task 创建后由 Engine 执行，前端采用订阅后启动，避免错过实时 SSE |
 | 是否按推荐顺序组织 | 符合 | Step 1 持久化、Step 2 Task Engine、Step 3 SSE/EventBus、Step 4 Observer |
 | 是否拆分文档 | 符合 | 业务、设计模式、SSE/EventBus 三份文档职责分离 |
 | 是否参考 Claude Agent 四阶段 | 符合 | Reflections 四阶段对应上下文、执行器、执行、结束清理 |
