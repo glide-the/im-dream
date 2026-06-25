@@ -5,7 +5,7 @@
 > [Pos] reflections-analysis-prd node in `docs/design/memory`
 > [Sync] 2026-06-06: 初版 PRD，补全三分区配置内容、sessions_context 格式、结果获取方式、工作空间结构、扩展性设计。
 > [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题（Georgia + CSS 设计 tokens），新增 PaperStack 报告视图，保留一键「Generate Reflections」按钮，更新卡片字段（ReflectionResult 统一类型，confidence 替代 strength/frequency），补充历史报告按日期合并策略。
-> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；保留分区独立分析；ReflectionBlogPage 改为数字杂志式阅读页。
+> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；保留分区独立分析；ReflectionBlogPage 保持固定分栏 + 详情区 + 底部播放器布局，仅优化视觉与交互反馈。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
 
@@ -854,28 +854,33 @@ viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳�
 
 > **注**：`ReflectionResult` 为三分区统一类型（替代旧的 `Echo/Trait/Pattern` 分离类型），confidence 替代 traits 的 `strength`（1–5）和 patterns 的 `frequency` 字段。
 
-### 11.4 ReflectionBlogPage 数字杂志阅读页
+### 11.4 ReflectionBlogPage 固定布局播放器阅读页
 
-Past Reflections 卡片点击后进入 `ReflectionBlogPage`，页面定位从“工具详情面板”调整为“可收藏的数字杂志专题页”：
+Past Reflections 卡片点击后进入 `ReflectionBlogPage`。页面必须保留原有整体结构，不允许把页面改成全屏单列杂志长页，也不允许删除底部播放器：
 
 ```text
 ReflectionBlogPage
-├── 返回按钮（Past Reflections）
-├── Magazine Cover Spread
-│   ├── 日期 / Issue 标识 / Reflections 大标题
-│   └── Editor's Selection 引用 + Insights / Entries / Words 数据
-├── Section Tabs（echoes / traits / patterns）
-└── Main Grid
-    ├── Insight cards：序号、confidence tone、标题、描述、evidence quote
-    └── Editorial sidebar：Core Takeaways + Editor's Note
+├── Sticky Nav：返回 Past Reflections
+├── Main Content（固定高度、overflow hidden）
+│   ├── Split Area
+│   │   ├── Left Hero：日期封面、完整日期、days / entries / words
+│   │   └── Right Panel：Section Tabs + title-only list
+│   └── Detail Area（选中条目后展开）
+│       ├── Detail Header：分区、当前位置、关闭按钮
+│       ├── Description / Evidence
+│       └── Related Notes 占位
+└── Bottom Player Bar（选中条目后固定在底部）
+    ├── 当前条目信息
+    ├── 上一条 / 圆点队列 / 下一条
+    └── X / N 计数
 ```
 
 设计原则：
-- 日期区域必须成为封面视觉的一部分，而不是普通 metadata。
-- 引用只展示最核心 evidence，避免报告式长段落。
-- Core Takeaways 用标题列表快速提供阅读收获。
-- Editor's Note 使用边栏语气，给出阅读建议。
-- 删除旧版 Player Bar / Related Notes 占位等弱相关交互，避免杂志阅读被工具控件打断。
+- 保持“左侧封面 + 右侧列表 + 下方详情 + 底部播放器”的既有布局，避免破坏用户已熟悉的操作路径。
+- 视觉优化应服务于可读性和状态识别：封面更像数字杂志，选中项更像正在播放的 track。
+- 底部 Player Bar 是核心交互能力，负责在当前 section 内切换上一条/下一条和圆点跳转。
+- Related Notes 暂时保持占位，不做后端匹配，避免过度设计。
+- 不新增弹窗、不增加复杂动效、不引入外部 UI 依赖。
 
 ### 11.5 历史报告恢复策略
 

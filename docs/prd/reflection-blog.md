@@ -1,78 +1,73 @@
-# Reflection Blog Page — 数字杂志阅读页 PRD
+# Reflection Blog Page — 固定布局播放器交互优化 PRD
 
 > 文档类型：产品功能规格  
 > 组件路径：`frontend/src/components/AnalysisView.tsx` → `ReflectionBlogPage`  
-> 最后更新：2026-06-26（v5 — luxury digital magazine redesign）
+> 最后更新：2026-06-26（v5.1 — preserve layout, polish interaction）
 > 颜色规范：`docs/prd/color_system/reflection-blog.md`
 
 ---
 
 ## 1. 产品定位
 
-Reflection Blog Page 是 Past Reflections 的沉浸式阅读页。它不再像工具面板，而是像一份可收藏的数字杂志专题：用日期封面、编辑引语、栏目切换、核心要点和编辑笔记，把 echoes / traits / patterns 组织成一次有审美节奏的阅读体验。
+Reflection Blog Page 是 Past Reflections 的沉浸式阅读视图，用于展示单条历史分析中的 Echoes / Traits / Patterns。页面必须保留既有固定高度阅读结构：左侧日期封面、右侧分区标题列表、下方详情区，以及选中条目后出现的底部播放器控件。
+
+本次目标不是重做信息架构，而是在原有布局上增强“数字杂志 + 可播放阅读队列”的质感，让用户既能像读杂志一样浏览，也能像使用播放器一样在洞察之间前后切换。
 
 ---
 
-## 2. 核心交互目标
-
-| 目标 | 设计决策 |
-|---|---|
-| 降低阅读负担 | 默认显示一组激活栏目，卡片只展示标题、描述和最核心 evidence |
-| 提升杂志感 | Hero 使用深色封面、Issue 日期、Georgia italic 大标题、法语/英语装饰文字 |
-| 快速切换分区 | Section tabs 保留 echoes / traits / patterns，显示数量与图标 |
-| 保留读者收获感 | 右侧 Core Takeaways 自动提炼当前栏目标题列表 |
-| 补充编辑语气 | Editor's Note 作为边栏注释，给出阅读建议而不是功能提示 |
-
----
-
-## 3. 页面结构
+## 2. 必须保留的整体布局
 
 ```text
-ReflectionBlogPage
-├── Back pill：返回 Past Reflections
-└── Magazine Article Shell
-    ├── Header / Cover Spread
-    │   ├── Left Cover：日期、Issue 标识、Reflections 大标题、副标题
-    │   └── Right Lead：Editor's Selection 引用 + Insights / Entries / Words 数据
-    ├── Section Tabs：echoes / traits / patterns
-    └── Main Grid
-        ├── Insight Story List
-        │   ├── 序号 + confidence tone
-        │   ├── title
-        │   ├── description
-        │   └── evidence quote
-        └── Editorial Sidebar
-            ├── Core Takeaways
-            └── Editor's Note · Conseil
+ReflectionBlogPage（height: 100%; flex column; overflow hidden）
+├── Sticky Nav
+│   └── ← Past Reflections
+├── Main Content（flex: 1; overflow hidden）
+│   ├── Split Area（flex: 1; 左右/移动端上下）
+│   │   ├── Left Hero：日期封面、完整日期、days / entries / words
+│   │   └── Right Panel
+│   │       ├── Section Tabs：echoes / traits / patterns
+│   │       └── Title List：当前分区 title-only 列表，可独立滚动
+│   └── Detail Area（仅选中条目时显示，固定高度）
+│       ├── Detail Header：分区、当前位置、关闭按钮
+│       ├── Left Detail：标题、描述/evidence、confidence
+│       └── Right Related Notes：未来相关笔记占位
+└── Bottom Player Bar（仅选中条目时显示）
+    ├── 当前条目信息
+    ├── 上一条 / 圆点队列 / 下一条
+    └── X / N 计数
 ```
 
 ---
 
-## 4. 视觉规范
+## 3. 交互要求
 
-- **版面气质**：Vogue/Elle 数字专题感，强调留白、细边框、纸张阴影和 serif 斜体标题。
-- **日期区域**：深色封面块内使用大号日期数字 + issue date，强化杂志期刊感。
-- **标题与副标题**：`Reflections` 使用 Georgia italic，正文和元数据使用系统 sans-serif。
-- **引用区块**：Hero lead 使用大号 editorial quote；每张 insight card 内的 evidence 使用左边框 quote block。
-- **核心要点**：右侧边栏以编号列表呈现当前 section 的标题摘要。
-- **编辑笔记**：深色边栏卡片，使用 `Editor's Note · Conseil` 标题和短句提示。
-
----
-
-## 5. 响应式要求
-
-| 区域 | 桌面 | 移动 |
-|---|---|---|
-| Header | 左右双栏封面 | 单栏堆叠 |
-| Main Grid | 内容 1fr + Sidebar 300px | 单栏 |
-| Section Tabs | 横向 wrap | 横向 wrap |
-| Insight Cards | 大卡片列表 | 紧凑卡片 |
+| 场景 | 行为 |
+|---|---|
+| 点击 Past Reflections 卡片 | 进入 ReflectionBlogPage |
+| 点击 Section Tab | 切换当前分区，并清空已选条目，关闭详情区和播放器 |
+| 点击标题列表条目 | 展开下方详情区，同时显示底部播放器 |
+| 再次点击已选标题 | 收起详情区和播放器 |
+| 点击详情关闭按钮 | 收起详情区和播放器 |
+| 点击播放器上一条/下一条 | 在当前分区内切换条目，边界按钮 disabled |
+| 点击播放器圆点 | 跳转到当前分区对应条目 |
 
 ---
 
-## 6. 非目标
+## 4. 视觉优化方向
 
-- 不引入外部 CDN；沿用 React app 内现有字体和 CSS variables。
+- **保留结构**：不得把固定左右分栏改成整页滚动杂志，不得删除底部播放器。
+- **日期封面**：左侧 cover art 使用更强的深色封面、纸张内描边、Issue 日期感和细腻阴影。
+- **列表反馈**：选中标题使用渐变底色、序号强化和箭头旋转，让“正在播放的条目”更明确。
+- **详情区**：保留双栏详情 + Related Notes，占位态允许存在，但视觉要更轻，不抢主内容。
+- **播放器**：底部播放器是核心交互控件，需保持固定在底部，增强玻璃感、阴影和当前 track 识别。
+- **动效边界**：只使用轻微 hover、选中态、圆点宽度变化等低成本反馈，不引入复杂动画。
+
+---
+
+## 5. 非目标
+
 - 不实现 Related Notes 后端匹配。
-- 不保留旧版 Player Bar，因为该交互与杂志阅读心智不一致。
-- 不增加弹窗；阅读页所有信息都在页面内直接呈现。
+- 不改造为全屏单列杂志长页。
+- 不删除底部 Player Bar。
+- 不新增弹窗或遮罩层。
+- 不引入额外 UI 依赖或外部 CDN。
