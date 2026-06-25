@@ -298,7 +298,7 @@ def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions
         for filename, content in _effective_prompt_files(user_id, section).items():
             if isinstance(content, str) and content.strip():
                 prompt_content = content.strip()
-                if section == "patterns" and filename == "MEMORY_ANSWER_PROMPT.md":
+                if filename == "MEMORY_ANSWER_PROMPT.md":
                     prompt_content += _language_instruction(language_code)
                 (section_dir / filename).write_text(prompt_content + "\n", encoding="utf-8")
 

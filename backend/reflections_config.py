@@ -123,6 +123,12 @@ Do not add interpretation beyond what the notes support.
 Do not soften genuine recurring pain into something neutral.
 Do not exaggerate a faint pattern into a defining theme.
 The honesty of the analysis is more valuable than its polish.
+
+Language requirement:
+- Write all user-facing `title`, `description`, and `evidence` values in the
+  current frontend UI language provided by the Reflections task context.
+- Keep JSON keys and enum values (`confidence`, section names) in English.
+- If the task context does not provide a language, default to English.
 """
 
 _ECHOES_UPDATE = """\
@@ -204,6 +210,12 @@ _TRAITS_ANSWER = """\
 Output the JSON array from the Output Contract.
 Present traits as observations grounded in the notes, not judgments.
 The goal is a mirror the writer can use — honest, specific, and open to revision.
+
+Language requirement:
+- Write all user-facing `title`, `description`, and `evidence` values in the
+  current frontend UI language provided by the Reflections task context.
+- Keep JSON keys and enum values (`confidence`, section names) in English.
+- If the task context does not provide a language, default to English.
 """
 
 _TRAITS_UPDATE = """\

@@ -5,7 +5,7 @@
 > [Pos] reflections-analysis-prd node in `docs/design/memory`
 > [Sync] 2026-06-06: 初版 PRD，补全三分区配置内容、sessions_context 格式、结果获取方式、工作空间结构、扩展性设计。
 > [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题（Georgia + CSS 设计 tokens），新增 PaperStack 报告视图，保留一键「Generate Reflections」按钮，更新卡片字段（ReflectionResult 统一类型，confidence 替代 strength/frequency），补充历史报告按日期合并策略。
-> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；保留分区独立分析；分析完成后使用 ReflectionBlogPage wrapper 展示结果；ReflectionBlogPage 保持固定分栏 + 详情区 + 底部播放器布局，仅优化视觉与交互反馈；patterns 输出遵循当前前端语言。
+> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；保留分区独立分析；分析完成后使用 ReflectionBlogPage wrapper 展示结果；ReflectionBlogPage 保持固定分栏 + 详情区 + 底部播放器布局，仅优化视觉与交互反馈；echoes / traits / patterns 输出均遵循当前前端语言。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
 
@@ -795,7 +795,7 @@ viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳�
 | 流式进度 | 按钮下方显示 `Live editorial analysis` 进度面板；不弹窗 | 分区卡片内显示当前 section 事件 |
 | 适用场景 | 首次全量生成 | 按需刷新单分区 |
 | 重复点击 | `anyLoading` 时按钮 disabled，禁止重复提交 | 当前分区 loading 时按钮 disabled |
-| 输出语言 | 任务创建时携带当前前端 `i18n.language`，后端归一化为 `en` / `zh` | 同左，patterns answer prompt 使用该语言限定 |
+| 输出语言 | 任务创建时携带当前前端 `i18n.language`，后端归一化为 `en` / `zh` | 同左，三个 section 的 answer prompt 都使用该语言限定 |
 
 **加载状态（分区独立）**：
 
@@ -877,8 +877,8 @@ ReflectionBlogPage
 ```
 
 完成态入口与语言：
-- 前端创建 Reflections task 时传递当前 `i18n.language`；后端写入 `input_snapshot.language`，并在 patterns `MEMORY_ANSWER_PROMPT.md` 追加运行时语言限定。
-- `_PATTERNS_ANSWER` 要求 `title` / `description` / `evidence` 按当前前端语言输出，JSON keys 和 enum values 保持英文。
+- 前端创建 Reflections task 时传递当前 `i18n.language`；后端写入 `input_snapshot.language`，并在 echoes / traits / patterns 的 `MEMORY_ANSWER_PROMPT.md` 都追加运行时语言限定。
+- `_ECHOES_ANSWER`、`_TRAITS_ANSWER`、`_PATTERNS_ANSWER` 都要求 `title` / `description` / `evidence` 按当前前端语言输出，JSON keys 和 enum values 保持英文。
 - `handleAnalyzeAll` 完成后不再自动进入旧 PaperStack report 视图，而是将 echoes / traits / patterns 包装为 `AnalysisReport` 并设置 `selectedReport` + `viewMode='blog'`。
 - `handleAnalyzeSection` 对应 analyzeEchoes / analyzeTraits / analyzePatterns 的分区 wrapper：单分区 task 完成后只填充当前 section，其余 section 为空，并进入同一个 `ReflectionBlogPage`。
 - Dashboard 的 `View Reflections` 按钮也使用当前内存中的结果包装为 `ReflectionBlogPage` report，避免旧弹窗视觉不一致。

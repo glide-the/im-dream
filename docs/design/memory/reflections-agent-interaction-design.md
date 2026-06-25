@@ -313,8 +313,8 @@ sequenceDiagram
 - 不把 EventBus 当最终存储。
 
 
-## Language-bound Patterns Output
+## Language-bound Section Output
 
 - Frontend task creation passes the current UI language (`i18n.language`) as `language`.
 - Backend normalizes the language to `en` or `zh` and stores it in `reflection_task.input_snapshot`.
-- For the `patterns` section, `MEMORY_ANSWER_PROMPT.md` receives a runtime language requirement so user-facing `title`, `description`, and `evidence` match the current frontend language while JSON keys remain English.
+- For `echoes`, `traits`, and `patterns`, each `MEMORY_ANSWER_PROMPT.md` receives a runtime language requirement so user-facing `title`, `description`, and `evidence` match the current frontend language while JSON keys remain English.
