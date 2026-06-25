@@ -5,6 +5,7 @@
 > [Pos] reflections-analysis-prd node in `docs/design/memory`
 > [Sync] 2026-06-06: 初版 PRD，补全三分区配置内容、sessions_context 格式、结果获取方式、工作空间结构、扩展性设计。
 > [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题（Georgia + CSS 设计 tokens），新增 PaperStack 报告视图，保留一键「Generate Reflections」按钮，更新卡片字段（ReflectionResult 统一类型，confidence 替代 strength/frequency），补充历史报告按日期合并策略。
+> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；保留分区独立分析；ReflectionBlogPage 改为数字杂志式阅读页。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
 
@@ -789,21 +790,30 @@ viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳�
 
 | 维度 | 一键按钮 | 分区独立按钮（SectionControlsRow）|
 |---|---|---|
-| 触发范围 | 三分区同时（Promise.all） | 单分区独立 |
+| 触发范围 | 后端 Reflections-agent 单个 task 默认执行三分区 | 单分区独立 task |
 | 完成后跳转 | 是（自动切换到报告视图） | 否（留在仪表盘） |
-| 流式进度 | 无（以 loading 状态表示） | 有（实时 SSE 文字片段）|
+| 流式进度 | 按钮下方显示 `Live editorial analysis` 进度面板；不弹窗 | 分区卡片内显示当前 section 事件 |
 | 适用场景 | 首次全量生成 | 按需刷新单分区 |
+| 重复点击 | `anyLoading` 时按钮 disabled，禁止重复提交 | 当前分区 loading 时按钮 disabled |
 
 **加载状态（分区独立）**：
 
 ```
+一键按钮：
+├── [Generate New Analysis] 按钮（loading 时 disabled）
+├── 按钮下方进度面板（taskStatus）
+│   ├── Live editorial analysis eyebrow
+│   ├── 当前 SSE 事件状态
+│   └── 细线扫光动效
+└── 不允许弹窗或覆盖用户当前页面
+
 分区控制行每个分区：
 ├── [Analyze] 按钮（loading 时显示 ◌，disabled）
 ├── [⚙] 齿轮按钮（打开 SectionConfigModal）
 ├── 流式进度面板（loading && streamingText）
-│   └── SSE 文字片段（最后 800 字符）+ ▌
+│   └── 当前 SSE 事件状态 + ▌
 └── 读取中提示（loading && !streamingText）
-    └── "Reading memory workspace…"（斜体，灰色）
+    └── "Waiting for backend Reflections task…"（斜体，灰色）
 ```
 
 ### 11.3 PaperStack 报告视图（report）
@@ -844,7 +854,30 @@ viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳�
 
 > **注**：`ReflectionResult` 为三分区统一类型（替代旧的 `Echo/Trait/Pattern` 分离类型），confidence 替代 traits 的 `strength`（1–5）和 patterns 的 `frequency` 字段。
 
-### 11.4 历史报告恢复策略
+### 11.4 ReflectionBlogPage 数字杂志阅读页
+
+Past Reflections 卡片点击后进入 `ReflectionBlogPage`，页面定位从“工具详情面板”调整为“可收藏的数字杂志专题页”：
+
+```text
+ReflectionBlogPage
+├── 返回按钮（Past Reflections）
+├── Magazine Cover Spread
+│   ├── 日期 / Issue 标识 / Reflections 大标题
+│   └── Editor's Selection 引用 + Insights / Entries / Words 数据
+├── Section Tabs（echoes / traits / patterns）
+└── Main Grid
+    ├── Insight cards：序号、confidence tone、标题、描述、evidence quote
+    └── Editorial sidebar：Core Takeaways + Editor's Note
+```
+
+设计原则：
+- 日期区域必须成为封面视觉的一部分，而不是普通 metadata。
+- 引用只展示最核心 evidence，避免报告式长段落。
+- Core Takeaways 用标题列表快速提供阅读收获。
+- Editor's Note 使用边栏语气，给出阅读建议。
+- 删除旧版 Player Bar / Related Notes 占位等弱相关交互，避免杂志阅读被工具控件打断。
+
+### 11.5 历史报告恢复策略
 
 `reloadSavedReports`（`useCallback`）从 DB 加载最多 `MAX_SAVED_REPORTS`（10）条记录：
 
