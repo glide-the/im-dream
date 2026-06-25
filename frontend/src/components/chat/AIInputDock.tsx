@@ -9,6 +9,8 @@
 //                    draft chat input updates immediately after Settings changes.
 // [Sync] 2026-06-09: show stop button when loading+onStop; spinner when loading without onStop.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config and workspace file APIs.
+// [Sync] 2026-06-25: expose a stopPending state so backend stop requests cannot
+//                    be double-submitted from the stop button.
 import {
   useCallback,
   useEffect,
@@ -48,7 +50,8 @@ interface AIInputDockProps {
   loading?: boolean;
   defaultToolChoice?: ToolChoice;
   openFileDialogSignal?: number;
-  onStop?: () => void;
+  onStop?: () => void | Promise<void>;
+  stopPending?: boolean;
   mode?: AIInputDockMode;
   workspaceSessionId?: string;
   fullAccessEnabled?: boolean;
@@ -105,6 +108,7 @@ export default function AIInputDock({
   defaultToolChoice = 'auto',
   openFileDialogSignal,
   onStop,
+  stopPending = false,
   mode = 'simple',
   workspaceSessionId,
   fullAccessEnabled,
@@ -652,9 +656,10 @@ export default function AIInputDock({
         {loading && onStop ? (
           <button
             type="button"
-            onClick={onStop}
-            title="停止生成"
-            aria-label="停止生成"
+            onClick={() => { void onStop(); }}
+            disabled={stopPending}
+            title={stopPending ? '正在停止' : '停止生成'}
+            aria-label={stopPending ? '正在停止' : '停止生成'}
             style={{
               display: 'grid',
               placeItems: 'center',
@@ -662,12 +667,16 @@ export default function AIInputDock({
               height: '2.25rem',
               borderRadius: '999px',
               border: 'none',
-              background: 'var(--color-state-danger)',
-              color: 'var(--color-text-on-action)',
-              cursor: 'pointer',
+              background: stopPending ? 'var(--color-disabled-bg)' : 'var(--color-state-danger)',
+              color: stopPending ? 'var(--color-text-muted)' : 'var(--color-text-on-action)',
+              cursor: stopPending ? 'not-allowed' : 'pointer',
             }}
           >
-            <IconStop style={{ width: '0.9rem', height: '0.9rem' }} />
+            {stopPending ? (
+              <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} className="spin" />
+            ) : (
+              <IconStop style={{ width: '0.9rem', height: '0.9rem' }} />
+            )}
           </button>
         ) : loading ? (
           <button

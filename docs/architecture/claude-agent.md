@@ -50,6 +50,7 @@ backend/
 | `POST`   | `/api/claude-agent/message-latency` | `claude_agent_message_latency`| JWT  | 上报浏览器延迟指标               |
 | `GET`    | `/api/claude-agent/session`         | `claude_agent_session_status` | JWT  | 查询 Thread Session 保活快照     |
 | `DELETE` | `/api/claude-agent/session`         | `claude_agent_session_close`  | JWT  | 主动销毁会话                     |
+| `POST`   | `/api/claude-agent/threads/{thread_id}/stop` | `claude_agent_stop_thread` | JWT  | 主动停止当前运行 turn，不删除 thread |
 | `POST`   | `/api/claude-agent/tool-confirm`    | `claude_agent_tool_confirm`   | JWT  | 工具人工确认/拒绝                |
 
 ---

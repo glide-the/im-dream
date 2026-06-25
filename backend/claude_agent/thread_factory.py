@@ -9,12 +9,15 @@
 # [Sync] 2026-06-09: EventBus reconnect — SSE disconnect no longer cancels bg_task;
 #                    subscribe_stream / run_streaming(reconnect) replay live frames;
 #                    per-session lock held until bg_task completes.
+# [Sync] 2026-06-25: add stop_thread() for frontend-initiated current-turn
+#                    cancellation without destroying the chat thread.
 
 """Claude Agent Thread Factory — 四阶段会话编排入口."""
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
@@ -31,6 +34,19 @@ from claude_agent.thread_pool import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _stop_wait_seconds() -> float:
+    """Return the bounded wait for frontend stop requests."""
+
+    try:
+        raw = os.getenv("INK_AGENT_STOP_WAIT_S", "3") or "3"
+        return max(0.0, float(raw))
+    except (TypeError, ValueError):
+        return 3.0
+
+
+_STOP_WAIT_SECONDS: float = _stop_wait_seconds()
 
 
 def build_session_id(request: ClaudeAgentRunRequest) -> str:
@@ -222,6 +238,61 @@ class ClaudeAgentThreadFactory:
             self._fire_session_ended(session_id, reason="explicit_close", turn_count=turn_count),
             name=f"claude-agent-phase4-{session_id}",
         )
+
+    async def stop_thread(self, session_id: str) -> dict[str, Any]:
+        """Cancel the currently running turn without destroying the thread.
+
+        This is intentionally narrower than ``close_thread``: it stops the
+        in-flight ``bg_task`` while preserving the chat thread and reusable
+        flyweight session for future turns.
+        """
+
+        _validate_session_id(session_id)
+        state = self._pool.get(session_id)
+        if state is None:
+            return {
+                "stop_requested": False,
+                "running": False,
+                "lifecycle": "not_found",
+            }
+
+        bg_task = state.bg_task
+        if (
+            state.lifecycle != AgentRunLifecycle.RUNNING
+            or bg_task is None
+            or bg_task.done()
+        ):
+            snapshot = state.snapshot()
+            return {
+                "stop_requested": False,
+                "running": False,
+                "lifecycle": snapshot.get("lifecycle", "idle"),
+            }
+
+        bg_task.cancel()
+        if _STOP_WAIT_SECONDS > 0:
+            try:
+                await asyncio.wait_for(bg_task, timeout=_STOP_WAIT_SECONDS)
+            except asyncio.CancelledError:
+                pass
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "stop_thread timed out waiting for cancellation: session_id=%s",
+                    session_id,
+                )
+            except Exception:
+                logger.exception(
+                    "stop_thread observed task failure while stopping: session_id=%s",
+                    session_id,
+                )
+
+        snapshot = self.session_snapshot(session_id)
+        lifecycle = snapshot.get("lifecycle", "not_found") if snapshot else "not_found"
+        return {
+            "stop_requested": True,
+            "running": lifecycle == AgentRunLifecycle.RUNNING.value,
+            "lifecycle": lifecycle,
+        }
 
     def session_snapshot(self, session_id: str) -> Optional[dict[str, Any]]:
         return self._pool.snapshot_session(session_id)

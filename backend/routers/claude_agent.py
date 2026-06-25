@@ -19,6 +19,8 @@
 # [Sync] 2026-06-21: initialize attachment workspaces with sandbox network policy.
 # [Sync] 2026-06-22: when Settings Workspace Mode is disabled, attachment
 #                    handling no longer initializes or syncs a thread workspace.
+# [Sync] 2026-06-25: add thread-scoped stop endpoint so the frontend can cancel
+#                    the current Agent turn without deleting the chat thread.
 
 import base64
 import logging
@@ -413,6 +415,30 @@ async def claude_agent_thread_status(
         "lifecycle": lifecycle,
         "turn_count": snapshot.get("turn_count", 0),
     }
+
+
+@router.post("/api/claude-agent/threads/{thread_id}/stop")
+async def claude_agent_stop_thread(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancel the running Agent turn for *thread_id*.
+
+    The endpoint is idempotent: if the thread belongs to the caller but has no
+    running in-memory turn, it returns ``stop_requested=false``.
+    """
+
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        result = await claude_agent_thread_factory.stop_thread(thread_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "thread_id": thread_id, **result}
 
 
 @router.delete("/api/claude-agent/threads/{thread_id}")
