@@ -5,7 +5,7 @@
 > [Pos] reflections-analysis-prd node in `docs/design/memory`
 > [Sync] 2026-06-06: 初版 PRD，补全三分区配置内容、sessions_context 格式、结果获取方式、工作空间结构、扩展性设计。
 > [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题（Georgia + CSS 设计 tokens），新增 PaperStack 报告视图，保留一键「Generate Reflections」按钮，更新卡片字段（ReflectionResult 统一类型，confidence 替代 strength/frequency），补充历史报告按日期合并策略。
-> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；保留分区独立分析；ReflectionBlogPage 保持固定分栏 + 详情区 + 底部播放器布局，仅优化视觉与交互反馈。
+> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；保留分区独立分析；分析完成后使用 ReflectionBlogPage wrapper 展示结果；ReflectionBlogPage 保持固定分栏 + 详情区 + 底部播放器布局，仅优化视觉与交互反馈。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
 
@@ -791,7 +791,7 @@ viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳�
 | 维度 | 一键按钮 | 分区独立按钮（SectionControlsRow）|
 |---|---|---|
 | 触发范围 | 后端 Reflections-agent 单个 task 默认执行三分区 | 单分区独立 task |
-| 完成后跳转 | 是（自动切换到报告视图） | 否（留在仪表盘） |
+| 完成后跳转 | 是（将三分区结果包装为 `ReflectionBlogPage` report） | 是（将单分区结果包装为 `ReflectionBlogPage` report） |
 | 流式进度 | 按钮下方显示 `Live editorial analysis` 进度面板；不弹窗 | 分区卡片内显示当前 section 事件 |
 | 适用场景 | 首次全量生成 | 按需刷新单分区 |
 | 重复点击 | `anyLoading` 时按钮 disabled，禁止重复提交 | 当前分区 loading 时按钮 disabled |
@@ -874,6 +874,11 @@ ReflectionBlogPage
     ├── 上一条 / 圆点队列 / 下一条
     └── X / N 计数
 ```
+
+完成态入口：
+- `handleAnalyzeAll` 完成后不再自动进入旧 PaperStack report 视图，而是将 echoes / traits / patterns 包装为 `AnalysisReport` 并设置 `selectedReport` + `viewMode='blog'`。
+- `handleAnalyzeSection` 对应 analyzeEchoes / analyzeTraits / analyzePatterns 的分区 wrapper：单分区 task 完成后只填充当前 section，其余 section 为空，并进入同一个 `ReflectionBlogPage`。
+- Dashboard 的 `View Reflections` 按钮也使用当前内存中的结果包装为 `ReflectionBlogPage` report，避免旧弹窗视觉不一致。
 
 设计原则：
 - 保持“左侧封面 + 右侧列表 + 下方详情 + 底部播放器”的既有布局，避免破坏用户已熟悉的操作路径。

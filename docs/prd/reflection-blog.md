@@ -44,6 +44,9 @@ ReflectionBlogPage（height: 100%; flex column; overflow hidden）
 | 场景 | 行为 |
 |---|---|
 | 点击 Past Reflections 卡片 | 进入 ReflectionBlogPage |
+| analyzeEchoes / analyzeTraits / analyzePatterns 完成 | 将单分区结果包装成 ReflectionBlogPage report，直接进入同一阅读页，不再打开旧 PaperStack 弹窗 |
+| 一键 Generate New Analysis 完成 | 将三分区结果包装成 ReflectionBlogPage report，直接进入同一阅读页 |
+| 点击 Dashboard 的 View Reflections | 使用当前内存中的 echoes / traits / patterns 包装成 ReflectionBlogPage report |
 | 点击 Section Tab | 切换当前分区，并清空已选条目，关闭详情区和播放器 |
 | 点击标题列表条目 | 展开下方详情区，同时显示底部播放器 |
 | 再次点击已选标题 | 收起详情区和播放器 |
@@ -69,5 +72,5 @@ ReflectionBlogPage（height: 100%; flex column; overflow hidden）
 - 不实现 Related Notes 后端匹配。
 - 不改造为全屏单列杂志长页。
 - 不删除底部 Player Bar。
-- 不新增弹窗或遮罩层。
+- 不新增弹窗或遮罩层；分析完成后的自动呈现也必须使用 ReflectionBlogPage wrapper。
 - 不引入额外 UI 依赖或外部 CDN。

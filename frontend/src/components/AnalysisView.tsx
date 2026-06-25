@@ -438,6 +438,20 @@ export default function AnalysisView() {
     }
   }, []);
 
+  const openReflectionBlogReport = useCallback((report: Omit<AnalysisReport, 'id' | 'timestamp'> & Partial<Pick<AnalysisReport, 'id' | 'timestamp'>>) => {
+    const wrapped: AnalysisReport = {
+      id: report.id ?? Date.now(),
+      echoes: report.echoes,
+      traits: report.traits,
+      patterns: report.patterns,
+      timestamp: report.timestamp ?? Date.now(),
+      stats: report.stats,
+    };
+    setSelectedReport(wrapped);
+    setViewMode('blog');
+  }, []);
+
+
   // ── Per-section analysis with streaming ──
   const handleAnalyzeSection = async (section: SectionKey) => {
     if (!isAuthenticated) {
@@ -462,27 +476,28 @@ export default function AnalysisView() {
         setErrors(p => ({ ...p, [section]: 'No results — the Reflections task completed without section output.' }));
         return;
       }
+      const entry: AnalysisReport = {
+        id: Date.now(),
+        echoes:   section === 'echoes'   ? results : [],
+        traits:   section === 'traits'   ? results : [],
+        patterns: section === 'patterns' ? results : [],
+        timestamp: Date.now(),
+        stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+      };
       if (isAuthenticated) {
         try {
           await saveAnalysisReport(`reflections_${section}`, {
             [section]: results,
-            stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+            stats: entry.stats,
           });
           await reloadSavedReports();
         } catch (e) { console.warn('[Reflections] save failed:', e); }
       } else {
-        const entry: AnalysisReport = {
-          id: Date.now(),
-          echoes:   section === 'echoes'   ? results : [],
-          traits:   section === 'traits'   ? results : [],
-          patterns: section === 'patterns' ? results : [],
-          timestamp: Date.now(),
-          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
-        };
         const updated = [entry, ...savedReports].slice(0, MAX_SAVED_REPORTS);
         localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
         setSavedReports(updated);
       }
+      openReflectionBlogReport(entry);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setErrors(p => ({ ...p, [section]: msg }));
@@ -524,19 +539,18 @@ export default function AnalysisView() {
         echoes: er, traits: tr, patterns: pr,
         stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
       };
+      const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
       if (isAuthenticated) {
         try {
           await saveAnalysisReport('full_analysis', reportData);
           await reloadSavedReports();
         } catch (e) { console.error(e); }
       } else {
-        const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
         const updated = [entry, ...savedReports].slice(0, MAX_SAVED_REPORTS);
         localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
         setSavedReports(updated);
       }
-      setViewMode('report');
-      setCurrentPaper(0);
+      openReflectionBlogReport(entry);
     }
   };
 
@@ -900,7 +914,10 @@ export default function AnalysisView() {
         {hasAnyData && viewMode === 'dashboard' && (
           <div style={{ textAlign: 'center', marginTop: '2rem' }}>
             <button
-              onClick={() => { setViewMode('report'); setCurrentPaper(0); }}
+              onClick={() => openReflectionBlogReport({
+                echoes, traits, patterns,
+                stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+              })}
               style={{
                 padding: '12px 32px', borderRadius: '24px',
                 background: 'var(--color-bg-surface-solid)',
