@@ -2,9 +2,10 @@
 <html lang="en">
   <!--
     [Input] Vite base URL, SEO_PUBLIC_* replacements from vite.config.ts, and static public assets.
-    [Output] Initial HTML metadata, schema markup, and non-JS product overview for crawlers.
+    [Output] Initial HTML metadata, schema markup, and noscript-only product overview for non-JS clients.
     [Pos] frontend SPA HTML shell
     [Sync] 2026-06-14: add Codex SEO metadata, JSON-LD, Open Graph, and crawlable fallback content.
+    [Sync] 2026-06-25: move fallback product overview out of #root to prevent first-paint SEO text flash.
   -->
   <head>
     <meta charset="UTF-8" />
@@ -98,7 +99,8 @@
     <link rel="preload" href="%BASE_URL%Xiaolai-Regular.woff2" as="font" type="font/woff2" crossorigin />
   </head>
   <body>
-    <div id="root">
+    <div id="root"></div>
+    <noscript>
       <main aria-label="Ink & Memory overview">
         <h1>Ink & Memory</h1>
         <p>
@@ -122,7 +124,7 @@
           倾听不同内心声音的反馈，并通过时间线和反思分析发现自己的长期模式。
         </p>
       </main>
-    </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
