@@ -224,6 +224,30 @@ def _effective_prompt_files(user_id: int, section: str) -> dict[str, str]:
     return merged
 
 
+def _normalize_task_language(language: Any) -> tuple[str, str]:
+    code = str(language or "en").strip().lower()
+    if code.startswith("zh"):
+        return "zh", "Simplified Chinese"
+    return "en", "English"
+
+
+def _language_instruction(language: Any) -> str:
+    code, label = _normalize_task_language(language)
+    if code == "zh":
+        return (
+            "\n\n## Runtime Language Requirement\n"
+            "The current frontend UI language is Simplified Chinese (`zh`).\n"
+            "Write every user-facing `title`, `description`, and `evidence` value in Simplified Chinese.\n"
+            "Keep JSON keys and enum values such as `confidence` in English."
+        )
+    return (
+        "\n\n## Runtime Language Requirement\n"
+        f"The current frontend UI language is {label} (`en`).\n"
+        "Write every user-facing `title`, `description`, and `evidence` value in English.\n"
+        "Keep JSON keys and enum values such as `confidence` in English."
+    )
+
+
 def _build_sessions_context(sessions: list[dict[str, Any]]) -> str:
     parts: list[str] = []
     for session in sessions:
@@ -245,7 +269,7 @@ def _build_sessions_context(sessions: list[dict[str, Any]]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions: list[dict[str, Any]]) -> str:
+def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions: list[dict[str, Any]], language: str = "en") -> str:
     root = _workspace_root().resolve()
     task_dir = (root / task_id).resolve()
     if not str(task_dir).startswith(str(root)):
@@ -261,13 +285,22 @@ def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions
         json.dumps(sessions, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    language_code, language_label = _normalize_task_language(language)
+    (memory_dir / "language_context.md").write_text(
+        f"# Runtime Language Context\n\nFrontend UI language: {language_label} (`{language_code}`).\n"
+        "All user-facing Reflections output should follow this language unless a section prompt says otherwise.\n",
+        encoding="utf-8",
+    )
 
     for section in sections:
         section_dir = memory_dir / section
         section_dir.mkdir(exist_ok=True)
         for filename, content in _effective_prompt_files(user_id, section).items():
             if isinstance(content, str) and content.strip():
-                (section_dir / filename).write_text(content.strip() + "\n", encoding="utf-8")
+                prompt_content = content.strip()
+                if section == "patterns" and filename == "MEMORY_ANSWER_PROMPT.md":
+                    prompt_content += _language_instruction(language_code)
+                (section_dir / filename).write_text(prompt_content + "\n", encoding="utf-8")
 
     (procedural_dir / "analysis_state.json").write_text(
         json.dumps(
@@ -277,6 +310,7 @@ def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions
                 "completed_sections": [],
                 "failed_sections": [],
                 "results_count": 0,
+                "language": language_code,
             },
             ensure_ascii=False,
             indent=2,
@@ -304,23 +338,35 @@ class HeuristicReflectionsRunner:
     preserving the JSON result contract expected by the Reflections UI.
     """
 
-    async def run_section(self, section: str, sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    async def run_section(self, section: str, sessions: list[dict[str, Any]], language: str = "en") -> list[dict[str, Any]]:
         await asyncio.sleep(0)
         source_sessions = [s for s in sessions if (s.get("text") or "").strip()]
         related_ids = [str(s.get("id")) for s in source_sessions[:3] if s.get("id")]
         evidence = self._evidence(source_sessions)
         if not related_ids:
             return []
-        title_map = {
-            "echoes": "Recurring Emotional Echo",
-            "traits": "Reflective Self Awareness",
-            "patterns": "Writing Rhythm Pattern",
-        }
-        description_map = {
-            "echoes": "Repeated journal language suggests a recurring emotional theme across the selected notes.",
-            "traits": "The notes show a stable tendency to observe feelings and choices with care.",
-            "patterns": "The writing history indicates a recognizable reflective routine and response pattern.",
-        }
+        if _normalize_task_language(language)[0] == "zh":
+            title_map = {
+                "echoes": "反复出现的情绪回响",
+                "traits": "稳定的自我觉察",
+                "patterns": "可识别的写作节律",
+            }
+            description_map = {
+                "echoes": "这些笔记里反复出现的表达，显示出一个持续回到内心的情绪主题。",
+                "traits": "这些记录呈现出一种稳定倾向：认真观察自己的感受、选择与行动。",
+                "patterns": "写作历史显示出一种可识别的反思习惯与回应节奏。",
+            }
+        else:
+            title_map = {
+                "echoes": "Recurring Emotional Echo",
+                "traits": "Reflective Self Awareness",
+                "patterns": "Writing Rhythm Pattern",
+            }
+            description_map = {
+                "echoes": "Repeated journal language suggests a recurring emotional theme across the selected notes.",
+                "traits": "The notes show a stable tendency to observe feelings and choices with care.",
+                "patterns": "The writing history indicates a recognizable reflective routine and response pattern.",
+            }
         return [
             {
                 "title": title_map.get(section, f"{section.title()} Insight"),
@@ -384,6 +430,7 @@ class ReflectionsTaskEngine:
         snapshot = task.get("input_snapshot") or {}
         start_date = snapshot.get("start_date")
         end_date = snapshot.get("end_date")
+        language = snapshot.get("language") or "en"
         sessions = database.list_sessions_in_range(user_id, start_date, end_date, include_text=True)
         session_ids = snapshot.get("session_ids") or []
         if session_ids:
@@ -391,18 +438,18 @@ class ReflectionsTaskEngine:
             sessions = [s for s in sessions if str(s.get("id")) in allowed]
 
         sections = [s for s in (task.get("sections") or []) if s in set(list_sections())]
-        workspace_path = _prepare_workspace(task_id, user_id, sections, sessions)
+        workspace_path = _prepare_workspace(task_id, user_id, sections, sessions, language)
         database.update_reflection_task_status(
             task_id,
             "QUEUED",
             workspace_path=workspace_path,
-            input_snapshot={**snapshot, "session_count": len(sessions)},
+            input_snapshot={**snapshot, "language": _normalize_task_language(language)[0], "session_count": len(sessions)},
         )
         await bus.publish(
             "reflection.context.ready",
             {"workspace_path": workspace_path, "session_count": len(sessions)},
         )
-        return {"task_id": task_id, "user_id": user_id, "sections": sections, "sessions": sessions, "workspace_path": workspace_path}
+        return {"task_id": task_id, "user_id": user_id, "sections": sections, "sessions": sessions, "workspace_path": workspace_path, "language": _normalize_task_language(language)[0]}
 
     async def _create_executor(self, context: dict[str, Any], bus: ReflectionEventBus) -> None:
         database.update_reflection_task_status(
@@ -419,7 +466,7 @@ class ReflectionsTaskEngine:
         for section in context["sections"]:
             await bus.publish("reflection.section.started", {"section": section})
             try:
-                results = await self.runner.run_section(section, context["sessions"])
+                results = await self.runner.run_section(section, context["sessions"], context.get("language", "en"))
                 validated = self._validate_results(results, section, context["sessions"])
                 database.replace_reflection_section_results(
                     context["task_id"], context["user_id"], section, validated

@@ -285,6 +285,12 @@ Output the JSON array from the Output Contract.
 Present patterns as observable regularities the writer can verify.
 The goal is to make implicit rhythms visible so the writer can choose
 to continue, interrupt, or reframe them.
+
+Language requirement:
+- Write all user-facing `title`, `description`, and `evidence` values in the
+  current frontend UI language provided by the Reflections task context.
+- Keep JSON keys and enum values (`confidence`, section names) in English.
+- If the task context does not provide a language, default to English.
 """
 
 _PATTERNS_UPDATE = """\

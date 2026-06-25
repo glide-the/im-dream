@@ -479,7 +479,12 @@ export interface ReflectionTaskEvent {
 
 export interface RunReflectionsTaskOptions {
   sections?: ReflectionSectionKey[];
+  language?: string;
   onEvent?: (event: ReflectionTaskEvent) => void;
+}
+
+function currentFrontendLanguage(): string {
+  return localStorage.getItem(STORAGE_KEYS.LANGUAGE) || 'en';
 }
 
 function authHeaders(extra?: Record<string, string>): HeadersInit {
@@ -547,11 +552,12 @@ function reflectionResultsBySection(results: ReflectionResult[]): Record<Reflect
 export async function createReflectionTask(
   sections?: ReflectionSectionKey[],
   autoStart = true,
+  language = currentFrontendLanguage(),
 ): Promise<ReflectionTask> {
   const res = await fetch(`${API_BASE}/api/reflections/tasks`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ sections, auto_start: autoStart }),
+    body: JSON.stringify({ sections, auto_start: autoStart, language }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -669,7 +675,7 @@ async function waitForReflectionTaskResults(
 export async function runReflectionsTask(
   options: RunReflectionsTaskOptions = {},
 ): Promise<Record<ReflectionSectionKey, ReflectionResult[]>> {
-  const task = await createReflectionTask(options.sections, false);
+  const task = await createReflectionTask(options.sections, false, options.language ?? currentFrontendLanguage());
   options.onEvent?.({
     id: 'client-task-created',
     task_id: task.task_id,

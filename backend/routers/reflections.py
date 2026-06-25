@@ -85,7 +85,20 @@ class ReflectionsTaskCreateRequest(BaseModel):
     session_ids: Optional[list[str]] = None
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    language: Optional[str] = None
     auto_start: bool = True
+
+
+def _normalize_reflections_language(language: Optional[str]) -> str:
+    """Normalize frontend UI language codes to the Reflections prompt contract."""
+    code = (language or "en").strip().lower()
+    if code.startswith("zh"):
+        return "zh"
+    return "en"
+
+
+def _language_label(language: str) -> str:
+    return "Simplified Chinese" if language == "zh" else "English"
 
 
 # ---------------------------------------------------------------------------
@@ -282,10 +295,13 @@ async def create_reflections_task_endpoint(
             detail={"error": f"Invalid sections: {invalid}. Must be one of: {sorted(_VALID_SECTIONS)}"},
         )
 
+    language = _normalize_reflections_language(body.language)
     input_snapshot = {
         "session_ids": body.session_ids or [],
         "start_date": body.start_date,
         "end_date": body.end_date,
+        "language": language,
+        "language_label": _language_label(language),
     }
     task_id = create_reflections_task(user_id, requested_sections, input_snapshot)
     await get_or_create_reflection_event_bus(task_id)

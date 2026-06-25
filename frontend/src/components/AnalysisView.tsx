@@ -467,6 +467,7 @@ export default function AnalysisView() {
     try {
       const bySection = await runReflectionsTask({
         sections: [section],
+        language: i18n.language,
         onEvent: handleTaskEvent,
       });
       const results = bySection[section];
@@ -519,7 +520,7 @@ export default function AnalysisView() {
 
     let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
     try {
-      const bySection = await runReflectionsTask({ onEvent: handleTaskEvent });
+      const bySection = await runReflectionsTask({ language: i18n.language, onEvent: handleTaskEvent });
       er = bySection.echoes;
       tr = bySection.traits;
       pr = bySection.patterns;

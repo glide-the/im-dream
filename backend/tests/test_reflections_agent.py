@@ -142,6 +142,44 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
             self.assertEqual(latest_response.status_code, 200, latest_response.text)
             self.assertEqual(latest_response.json()["task"]["task_id"], task_id)
 
+
+    def test_patterns_task_uses_frontend_language(self):
+        app = FastAPI()
+        app.include_router(reflections_router)
+        app.dependency_overrides[router_deps.get_current_user] = lambda: {"user_id": self.user_id}
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/reflections/tasks",
+                json={"sections": ["patterns"], "language": "zh-CN"},
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            task_id = response.json()["task_id"]
+
+            task_payload = None
+            for _ in range(50):
+                task_response = client.get(f"/api/reflections/tasks/{task_id}")
+                self.assertEqual(task_response.status_code, 200, task_response.text)
+                task_payload = task_response.json()
+                if task_payload["status"] in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
+                    break
+                time.sleep(0.05)
+
+            self.assertIsNotNone(task_payload)
+            self.assertEqual(task_payload["input_snapshot"]["language"], "zh")
+
+            results_response = client.get(f"/api/reflections/tasks/{task_id}/results")
+            self.assertEqual(results_response.status_code, 200, results_response.text)
+            result = results_response.json()["results"][0]
+            self.assertEqual(result["section"], "patterns")
+            self.assertIn("写作", result["title"])
+
+            task = database.get_reflection_task(task_id, self.user_id)
+            prompt_path = Path(task["workspace_path"]) / "patterns" / "MEMORY_ANSWER_PROMPT.md"
+            prompt = prompt_path.read_text(encoding="utf-8")
+            self.assertIn("Runtime Language Requirement", prompt)
+            self.assertIn("Simplified Chinese", prompt)
+
     def test_router_can_create_without_autostart_then_start(self):
         app = FastAPI()
         app.include_router(reflections_router)

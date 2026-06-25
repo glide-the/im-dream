@@ -28,6 +28,9 @@ export const STORAGE_KEYS = {
   // Analysis
   ANALYSIS_REPORTS: 'analysisReports',
 
+  // Language
+  LANGUAGE: 'ink-language',
+
   // Theme
   THEME: 'ink-theme'
 } as const;
