@@ -221,15 +221,14 @@ function SectionConfigModal({
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
         }}>
           <button
-            onClick={saving ? undefined : onReset}
-            disabled={saving || !isCustom}
+            onClick={onReset}
             style={{
               padding: '8px 18px', borderRadius: '20px',
               border: `1px solid ${borderColor}`,
-              background: 'transparent', cursor: (saving || !isCustom) ? 'not-allowed' : 'pointer',
+              background: 'transparent', cursor: 'pointer',
               color: muted, fontSize: '13px',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-              opacity: (saving || !isCustom) ? 0.5 : 1,
+              opacity: 1,
             }}
           >
             Reset to Default
