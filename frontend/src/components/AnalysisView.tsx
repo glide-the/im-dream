@@ -20,17 +20,18 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  analyzeEchoes,
-  analyzeTraits,
-  analyzePatterns,
   saveAnalysisReport,
   getAnalysisReports,
   fetchSessionsAggregate,
+  getLatestReflections,
   getReflectionsSectionConfig,
+  runReflectionsTask,
   saveReflectionsSectionConfig,
   resetReflectionsSectionConfig,
   type ReflectionResult,
   type ReflectionSectionConfig,
+  type ReflectionSectionKey,
+  type ReflectionTaskEvent,
 } from '../api/voiceApi';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -61,7 +62,7 @@ const PROMPT_FILE_LABELS: Record<string, string> = {
 // ──────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────
-type SectionKey = 'echoes' | 'traits' | 'patterns';
+type SectionKey = ReflectionSectionKey;
 
 interface AnalysisReport {
   id: number;
@@ -275,6 +276,7 @@ export default function AnalysisView() {
   const [errors, setErrors]       = useState({ echoes: '', traits: '', patterns: '' });
   const [stats, setStats]         = useState({ totalDays: 0, totalWords: 0, totalEntries: 0 });
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
+  const [taskStatus, setTaskStatus] = useState('');
 
   // View modes
   const [viewMode, setViewMode] = useState<'dashboard' | 'report' | 'blog'>('dashboard');
@@ -330,6 +332,32 @@ export default function AnalysisView() {
         if (latestEchoes)   setEchoes(latestEchoes.echoes);
         if (latestTraits)   setTraits(latestTraits.traits);
         if (latestPatterns) setPatterns(latestPatterns.patterns);
+        try {
+          const latest = await getLatestReflections();
+          if (latest.results.length > 0) {
+            const latestEchoesFromTask = latest.results.filter(r => r.section === 'echoes');
+            const latestTraitsFromTask = latest.results.filter(r => r.section === 'traits');
+            const latestPatternsFromTask = latest.results.filter(r => r.section === 'patterns');
+            if (latestEchoesFromTask.length) setEchoes(latestEchoesFromTask);
+            if (latestTraitsFromTask.length) setTraits(latestTraitsFromTask);
+            if (latestPatternsFromTask.length) setPatterns(latestPatternsFromTask);
+            const taskTime = latest.task?.completed_at || latest.task?.updated_at || new Date().toISOString();
+            const taskReport: AnalysisReport = {
+              id: Number(new Date(taskTime)) || Date.now(),
+              echoes: latestEchoesFromTask,
+              traits: latestTraitsFromTask,
+              patterns: latestPatternsFromTask,
+              timestamp: new Date(taskTime).getTime() || Date.now(),
+              stats: { days: 0, entries: 0, words: 0 },
+            };
+            setSavedReports(prev => {
+              const withoutDuplicate = prev.filter(r => r.timestamp !== taskReport.timestamp);
+              return [taskReport, ...withoutDuplicate].slice(0, MAX_SAVED_REPORTS);
+            });
+          }
+        } catch (e) {
+          console.warn('[Reflections] latest task load failed:', e);
+        }
       } catch (e) { console.error(e); }
     } else {
       const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_REPORTS);
@@ -398,6 +426,18 @@ export default function AnalysisView() {
     }
   }, [configModal.section]);
 
+  const handleTaskEvent = useCallback((event: ReflectionTaskEvent) => {
+    const section = typeof event.payload?.section === 'string' ? event.payload.section as SectionKey : undefined;
+    const statusText = event.type
+      .replace('reflection.', '')
+      .replaceAll('.', ' · ')
+      .replace('client · task · created', 'task · created');
+    setTaskStatus(statusText);
+    if (section && ['echoes', 'traits', 'patterns'].includes(section)) {
+      setStreaming(p => ({ ...p, [section]: statusText }));
+    }
+  }, []);
+
   // ── Per-section analysis with streaming ──
   const handleAnalyzeSection = async (section: SectionKey) => {
     if (!isAuthenticated) {
@@ -409,16 +449,17 @@ export default function AnalysisView() {
     setLoading(p => ({ ...p, [section]: true }));
 
     const setter = section === 'echoes' ? setEchoes : section === 'traits' ? setTraits : setPatterns;
-    const fn = section === 'echoes' ? analyzeEchoes : section === 'traits' ? analyzeTraits : analyzePatterns;
 
     try {
-      const results = await fn((delta) => {
-        setStreaming(p => ({ ...p, [section]: p[section] + delta }));
+      const bySection = await runReflectionsTask({
+        sections: [section],
+        onEvent: handleTaskEvent,
       });
+      const results = bySection[section];
       setter(results);
       setStreaming(p => ({ ...p, [section]: '' }));
       if (results.length === 0) {
-        setErrors(p => ({ ...p, [section]: 'No results — the agent response may not have contained valid JSON.' }));
+        setErrors(p => ({ ...p, [section]: 'No results — the Reflections task completed without section output.' }));
         return;
       }
       if (isAuthenticated) {
@@ -458,31 +499,25 @@ export default function AnalysisView() {
       return;
     }
     setErrors({ echoes: '', traits: '', patterns: '' });
+    setStreaming({ echoes: '', traits: '', patterns: '' });
+    setLoading({ echoes: true, traits: true, patterns: true });
+
     let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
-
-    const run = async (
-      fn: () => Promise<ReflectionResult[]>,
-      key: SectionKey extends 'echo' ? never : 'echoes' | 'traits' | 'patterns',
-      cb: (r: ReflectionResult[]) => void,
-    ): Promise<ReflectionResult[]> => {
-      setLoading(p => ({ ...p, [key]: true }));
-      try {
-        const result = await fn();
-        cb(result);
-        return result;
-      } catch (e) {
-        setErrors(p => ({ ...p, [key]: e instanceof Error ? e.message : String(e) }));
-        return [];
-      } finally {
-        setLoading(p => ({ ...p, [key]: false }));
-      }
-    };
-
-    [er, tr, pr] = await Promise.all([
-      run(() => analyzeEchoes(), 'echoes', r => setEchoes(r)),
-      run(() => analyzeTraits(), 'traits',  r => setTraits(r)),
-      run(() => analyzePatterns(), 'patterns', r => setPatterns(r)),
-    ]);
+    try {
+      const bySection = await runReflectionsTask({ onEvent: handleTaskEvent });
+      er = bySection.echoes;
+      tr = bySection.traits;
+      pr = bySection.patterns;
+      setEchoes(er);
+      setTraits(tr);
+      setPatterns(pr);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrors({ echoes: msg, traits: '', patterns: '' });
+    } finally {
+      setLoading({ echoes: false, traits: false, patterns: false });
+      setStreaming({ echoes: '', traits: '', patterns: '' });
+    }
 
     if (er.length || tr.length || pr.length) {
       const reportData = {
@@ -766,6 +801,17 @@ export default function AnalysisView() {
           >
             {anyLoading ? t('analysis.actions.generating') : t('analysis.actions.generate')}
           </button>
+          {taskStatus && (
+            <div style={{
+              marginTop: '0.75rem',
+              fontSize: '12px',
+              color: 'var(--color-text-muted)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              fontStyle: 'italic',
+            }}>
+              Backend task: {taskStatus}
+            </div>
+          )}
         </div>
 
         {/* Per-section controls + streaming */}
@@ -977,7 +1023,7 @@ function SectionControlsRow({
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
               fontStyle: 'italic',
             }}>
-              Reading memory workspace…
+              Waiting for backend Reflections task…
             </div>
           )}
           {errors[key] && !loading[key] && (

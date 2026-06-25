@@ -478,11 +478,222 @@ export async function resetReflectionsSectionConfig(
 }
 
 export interface ReflectionResult {
+  id?: string;
+  task_id?: string;
+  section?: 'echoes' | 'traits' | 'patterns';
   title: string;
   description: string;
   related_session_ids: string[];
   evidence: string;
   confidence: 'high' | 'medium' | 'low';
+}
+
+export type ReflectionSectionKey = 'echoes' | 'traits' | 'patterns';
+
+export interface ReflectionTask {
+  id: string;
+  task_id: string;
+  status: 'CREATED' | 'ASSEMBLING' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'PARTIAL_FAILED' | 'FAILED';
+  sections: ReflectionSectionKey[];
+  input_snapshot: Record<string, unknown>;
+  workspace_path?: string | null;
+  agent_contract_version?: string | null;
+  error_summary?: string | null;
+  created_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+  updated_at?: string;
+  results?: ReflectionResult[];
+}
+
+export interface ReflectionTaskEvent {
+  id: string;
+  task_id: string;
+  type: string;
+  sequence: number;
+  created_at: string;
+  payload: Record<string, unknown>;
+}
+
+export interface RunReflectionsTaskOptions {
+  sections?: ReflectionSectionKey[];
+  onEvent?: (event: ReflectionTaskEvent) => void;
+}
+
+function authHeaders(extra?: Record<string, string>): HeadersInit {
+  const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
+  if (!token) throw new Error('Not authenticated');
+  return { ...(extra ?? {}), Authorization: `Bearer ${token}` };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function normalizeReflectionResult(item: unknown): ReflectionResult {
+  const record = isRecord(item) ? item : {};
+  return {
+    id: typeof record.id === 'string' ? record.id : undefined,
+    task_id: typeof record.task_id === 'string' ? record.task_id : undefined,
+    section: ['echoes', 'traits', 'patterns'].includes(String(record.section))
+      ? record.section as ReflectionSectionKey
+      : undefined,
+    title: String(record.title ?? ''),
+    description: String(record.description ?? ''),
+    related_session_ids: Array.isArray(record.related_session_ids)
+      ? record.related_session_ids.filter((s: unknown): s is string => typeof s === 'string')
+      : [],
+    evidence: String(record.evidence ?? ''),
+    confidence: (['high', 'medium', 'low'].includes(String(record.confidence))
+      ? record.confidence
+      : 'medium') as 'high' | 'medium' | 'low',
+  };
+}
+
+function normalizeReflectionTask(raw: unknown): ReflectionTask {
+  const record = isRecord(raw) ? raw : {};
+  return {
+    id: String(record.id ?? record.task_id ?? ''),
+    task_id: String(record.task_id ?? record.id ?? ''),
+    status: String(record.status ?? 'CREATED') as ReflectionTask['status'],
+    sections: Array.isArray(record.sections)
+      ? record.sections.filter((s: unknown): s is ReflectionSectionKey =>
+          s === 'echoes' || s === 'traits' || s === 'patterns')
+      : [],
+    input_snapshot: isRecord(record.input_snapshot)
+      ? record.input_snapshot
+      : {},
+    workspace_path: typeof record.workspace_path === 'string' ? record.workspace_path : null,
+    agent_contract_version: typeof record.agent_contract_version === 'string' ? record.agent_contract_version : null,
+    error_summary: typeof record.error_summary === 'string' ? record.error_summary : null,
+    created_at: typeof record.created_at === 'string' ? record.created_at : undefined,
+    started_at: typeof record.started_at === 'string' ? record.started_at : null,
+    completed_at: typeof record.completed_at === 'string' ? record.completed_at : null,
+    updated_at: typeof record.updated_at === 'string' ? record.updated_at : undefined,
+    results: Array.isArray(record.results) ? record.results.map(normalizeReflectionResult) : undefined,
+  };
+}
+
+function reflectionResultsBySection(results: ReflectionResult[]): Record<ReflectionSectionKey, ReflectionResult[]> {
+  return {
+    echoes: results.filter(r => r.section === 'echoes'),
+    traits: results.filter(r => r.section === 'traits'),
+    patterns: results.filter(r => r.section === 'patterns'),
+  };
+}
+
+export async function createReflectionTask(sections?: ReflectionSectionKey[]): Promise<ReflectionTask> {
+  const res = await fetch(`${API_BASE}/api/reflections/tasks`, {
+    method: 'POST',
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ sections }),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`Failed to create reflections task (${res.status}): ${text}`);
+  }
+  return normalizeReflectionTask(await res.json());
+}
+
+export async function getReflectionTask(taskId: string): Promise<ReflectionTask> {
+  const res = await fetch(`${API_BASE}/api/reflections/tasks/${taskId}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch reflections task (${res.status})`);
+  return normalizeReflectionTask(await res.json());
+}
+
+export async function getReflectionTaskResults(taskId: string): Promise<ReflectionResult[]> {
+  const res = await fetch(`${API_BASE}/api/reflections/tasks/${taskId}/results`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch reflections results (${res.status})`);
+  const data = await res.json() as { results?: unknown[] };
+  return Array.isArray(data.results) ? data.results.map(normalizeReflectionResult) : [];
+}
+
+export async function getLatestReflections(): Promise<{ task: ReflectionTask | null; results: ReflectionResult[] }> {
+  const res = await fetch(`${API_BASE}/api/reflections/latest`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`Failed to fetch latest reflections (${res.status})`);
+  const data = await res.json() as { task?: unknown; results?: unknown[] };
+  return {
+    task: data.task ? normalizeReflectionTask(data.task) : null,
+    results: Array.isArray(data.results) ? data.results.map(normalizeReflectionResult) : [],
+  };
+}
+
+function parseReflectionSseFrame(frame: string): ReflectionTaskEvent | null {
+  const dataLine = frame.split('\n').find(line => line.startsWith('data: '));
+  if (!dataLine) return null;
+  try {
+    return JSON.parse(dataLine.slice('data: '.length)) as ReflectionTaskEvent;
+  } catch {
+    return null;
+  }
+}
+
+async function streamReflectionTaskEvents(
+  taskId: string,
+  onEvent?: (event: ReflectionTaskEvent) => void,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/reflections/tasks/${taskId}/events`, {
+    headers: authHeaders({ Accept: 'text/event-stream' }),
+  });
+  if (!res.ok || !res.body) return;
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split('\n\n');
+    buffer = frames.pop() ?? '';
+    for (const frame of frames) {
+      const event = parseReflectionSseFrame(frame);
+      if (event) onEvent?.(event);
+    }
+  }
+}
+
+async function waitForReflectionTaskResults(
+  taskId: string,
+  onEvent?: (event: ReflectionTaskEvent) => void,
+): Promise<ReflectionResult[]> {
+  await streamReflectionTaskEvents(taskId, onEvent).catch(err => {
+    console.warn('[Reflections] SSE stream failed, falling back to polling:', err);
+  });
+
+  for (let i = 0; i < 30; i += 1) {
+    const task = await getReflectionTask(taskId);
+    if (['COMPLETED', 'PARTIAL_FAILED', 'FAILED'].includes(task.status)) {
+      if (task.status === 'FAILED') {
+        throw new Error(task.error_summary || 'Reflections task failed');
+      }
+      return task.results ?? await getReflectionTaskResults(taskId);
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw new Error('Reflections task did not finish in time');
+}
+
+export async function runReflectionsTask(
+  options: RunReflectionsTaskOptions = {},
+): Promise<Record<ReflectionSectionKey, ReflectionResult[]>> {
+  const task = await createReflectionTask(options.sections);
+  options.onEvent?.({
+    id: 'client-task-created',
+    task_id: task.task_id,
+    type: 'reflection.client.task.created',
+    sequence: 0,
+    created_at: new Date().toISOString(),
+    payload: { sections: task.sections },
+  });
+  const results = await waitForReflectionTaskResults(task.task_id, options.onEvent);
+  return reflectionResultsBySection(results);
 }
 
 /**
@@ -753,21 +964,33 @@ export async function analyzeReflectionsSection(
  * Analyze echoes (recurring themes) via claude-agent + procedural memory workspace.
  */
 export async function analyzeEchoes(onDelta?: (d: string) => void): Promise<ReflectionResult[]> {
-  return analyzeReflectionsSection('echoes', onDelta);
+  const bySection = await runReflectionsTask({
+    sections: ['echoes'],
+    onEvent: event => onDelta?.(event.type),
+  });
+  return bySection.echoes;
 }
 
 /**
  * Analyze traits (personality characteristics) via claude-agent + procedural memory workspace.
  */
 export async function analyzeTraits(onDelta?: (d: string) => void): Promise<ReflectionResult[]> {
-  return analyzeReflectionsSection('traits', onDelta);
+  const bySection = await runReflectionsTask({
+    sections: ['traits'],
+    onEvent: event => onDelta?.(event.type),
+  });
+  return bySection.traits;
 }
 
 /**
  * Analyze patterns (behavioral patterns) via claude-agent + procedural memory workspace.
  */
 export async function analyzePatterns(onDelta?: (d: string) => void): Promise<ReflectionResult[]> {
-  return analyzeReflectionsSection('patterns', onDelta);
+  const bySection = await runReflectionsTask({
+    sections: ['patterns'],
+    onEvent: event => onDelta?.(event.type),
+  });
+  return bySection.patterns;
 }
 
 /**

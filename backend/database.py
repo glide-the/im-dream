@@ -554,6 +554,63 @@ def create_tables(db):
         "CREATE INDEX IF NOT EXISTS idx_reflections_cfg_user "
         "ON reflections_section_configs(user_id, section)"
     )
+
+    # Reflections-agent async task metadata.  The Reflections page should read
+    # task/result truth from these tables instead of relying on frontend memory.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS reflection_task (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      sections TEXT NOT NULL DEFAULT '[]',
+      input_snapshot TEXT NOT NULL DEFAULT '{}',
+      workspace_path TEXT,
+      agent_contract_version TEXT,
+      error_summary TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      completed_at DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_user ON reflection_task(user_id, updated_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_status ON reflection_task(status)")
+
+    # Reflections-agent structured section results.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS reflection_result (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      section TEXT NOT NULL CHECK(section IN ('echoes', 'traits', 'patterns')),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      related_session_ids TEXT NOT NULL DEFAULT '[]',
+      evidence TEXT,
+      confidence TEXT NOT NULL CHECK(confidence IN ('high', 'medium', 'low')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (task_id) REFERENCES reflection_task (id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_result_task ON reflection_result(task_id, section)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_result_user ON reflection_result(user_id, created_at)")
+
+    # Reflections-agent lifecycle/event audit log, populated by the minimal
+    # TaskPersistenceObserver.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS reflection_task_event (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      sequence INTEGER,
+      event_type TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (task_id) REFERENCES reflection_task (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_event_task ON reflection_task_event(task_id, sequence, created_at)")
     db.commit()
 
     print("✅ Tables created")
@@ -2981,6 +3038,317 @@ def delete_reflections_section_config(user_id: int, section: str) -> bool:
         )
         db.commit()
         return cursor.rowcount > 0
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Reflections-agent async task persistence
+# ---------------------------------------------------------------------------
+
+
+def _parse_json_obj(value: Optional[str], fallback):
+    if not value:
+        return fallback
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, type(fallback)) else fallback
+    except (json.JSONDecodeError, TypeError):
+        return fallback
+
+
+def _reflection_task_from_row(row) -> Optional[dict]:
+    if row is None:
+        return None
+    item = dict(row)
+    item["sections"] = _parse_json_obj(item.get("sections"), [])
+    item["input_snapshot"] = _parse_json_obj(item.get("input_snapshot"), {})
+    return item
+
+
+def _reflection_result_from_row(row) -> dict:
+    item = dict(row)
+    item["related_session_ids"] = _parse_json_obj(item.get("related_session_ids"), [])
+    return item
+
+
+def _reflection_event_from_row(row) -> dict:
+    item = dict(row)
+    item["payload"] = _parse_json_obj(item.get("payload"), {})
+    return item
+
+
+def create_reflection_task(
+    user_id: int,
+    sections: list[str],
+    input_snapshot: Optional[dict] = None,
+    agent_contract_version: str = "reflections-agent-v1",
+    task_id: Optional[str] = None,
+) -> str:
+    """Create a Reflections-agent task and return its task id."""
+    import uuid
+
+    task_id = task_id or str(uuid.uuid4())
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO reflection_task (
+              id, user_id, status, sections, input_snapshot,
+              agent_contract_version, updated_at
+            )
+            VALUES (?, ?, 'CREATED', ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                task_id,
+                user_id,
+                json.dumps(sections, ensure_ascii=False),
+                json.dumps(input_snapshot or {}, ensure_ascii=False),
+                agent_contract_version,
+            ),
+        )
+        db.commit()
+        return task_id
+    finally:
+        db.close()
+
+
+def update_reflection_task_status(
+    task_id: str,
+    status: str,
+    *,
+    workspace_path: Optional[str] = None,
+    input_snapshot: Optional[dict] = None,
+    error_summary: Optional[str] = None,
+    started_at: Optional[str] = None,
+    completed_at: Optional[str] = None,
+) -> None:
+    """Update task lifecycle status and optional metadata fields."""
+    assignments = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+    params: list = [status]
+    optional_fields = {
+        "workspace_path": workspace_path,
+        "input_snapshot": json.dumps(input_snapshot, ensure_ascii=False) if input_snapshot is not None else None,
+        "error_summary": error_summary,
+        "started_at": started_at,
+        "completed_at": completed_at,
+    }
+    for field, value in optional_fields.items():
+        if value is not None:
+            assignments.append(f"{field} = ?")
+            params.append(value)
+    params.append(task_id)
+
+    db = get_db()
+    try:
+        db.execute(
+            f"UPDATE reflection_task SET {', '.join(assignments)} WHERE id = ?",
+            tuple(params),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_reflection_task(task_id: str, user_id: Optional[int] = None) -> Optional[dict]:
+    """Return a Reflections-agent task, optionally scoped to a user."""
+    db = get_db()
+    try:
+        if user_id is None:
+            row = db.execute("SELECT * FROM reflection_task WHERE id = ? LIMIT 1", (task_id,)).fetchone()
+        else:
+            row = db.execute(
+                "SELECT * FROM reflection_task WHERE id = ? AND user_id = ? LIMIT 1",
+                (task_id, user_id),
+            ).fetchone()
+        return _reflection_task_from_row(row)
+    finally:
+        db.close()
+
+
+def get_latest_reflection_task(user_id: int) -> Optional[dict]:
+    """Return the latest Reflections-agent task for a user."""
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT * FROM reflection_task
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        return _reflection_task_from_row(row)
+    finally:
+        db.close()
+
+
+def replace_reflection_section_results(
+    task_id: str,
+    user_id: int,
+    section: str,
+    results: list[dict],
+) -> None:
+    """Replace all persisted results for one task section."""
+    import uuid
+
+    db = get_db()
+    try:
+        db.execute(
+            "DELETE FROM reflection_result WHERE task_id = ? AND user_id = ? AND section = ?",
+            (task_id, user_id, section),
+        )
+        for item in results:
+            db.execute(
+                """
+                INSERT INTO reflection_result (
+                  id, task_id, user_id, section, title, description,
+                  related_session_ids, evidence, confidence
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    task_id,
+                    user_id,
+                    section,
+                    item.get("title") or "",
+                    item.get("description") or "",
+                    json.dumps(item.get("related_session_ids") or [], ensure_ascii=False),
+                    item.get("evidence") or "",
+                    item.get("confidence") or "low",
+                ),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def list_reflection_results(task_id: str, user_id: int) -> list[dict]:
+    """List structured Reflections results for a task."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT r.*
+            FROM reflection_result r
+            JOIN reflection_task t ON t.id = r.task_id
+            WHERE r.task_id = ? AND r.user_id = ? AND t.user_id = ?
+            ORDER BY r.section, r.created_at, r.id
+            """,
+            (task_id, user_id, user_id),
+        ).fetchall()
+        return [_reflection_result_from_row(row) for row in rows]
+    finally:
+        db.close()
+
+
+def list_latest_reflection_results(user_id: int) -> list[dict]:
+    """Return results for the latest completed or partially completed task."""
+    db = get_db()
+    try:
+        task_row = db.execute(
+            """
+            SELECT *
+            FROM reflection_task
+            WHERE user_id = ? AND status IN ('COMPLETED', 'PARTIAL_FAILED')
+            ORDER BY completed_at DESC, updated_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        task = _reflection_task_from_row(task_row)
+        if not task:
+            return []
+    finally:
+        db.close()
+    return list_reflection_results(task["id"], user_id)
+
+
+def append_reflection_task_event(
+    task_id: str,
+    event_type: str,
+    payload: Optional[dict] = None,
+    *,
+    event_id: Optional[str] = None,
+    sequence: Optional[int] = None,
+    created_at: Optional[str] = None,
+) -> str:
+    """Append a Reflections task event and return its id."""
+    import uuid
+
+    event_id = event_id or str(uuid.uuid4())
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT OR REPLACE INTO reflection_task_event (
+              id, task_id, sequence, event_type, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            (
+                event_id,
+                task_id,
+                sequence,
+                event_type,
+                json.dumps(payload or {}, ensure_ascii=False),
+                created_at,
+            ),
+        )
+        db.commit()
+        return event_id
+    finally:
+        db.close()
+
+
+def list_reflection_task_events(
+    task_id: str,
+    user_id: int,
+    after_event_id: Optional[str] = None,
+) -> list[dict]:
+    """List persisted task events, optionally after a specific event id."""
+    db = get_db()
+    try:
+        after_sequence = None
+        if after_event_id:
+            row = db.execute(
+                """
+                SELECT e.sequence
+                FROM reflection_task_event e
+                JOIN reflection_task t ON t.id = e.task_id
+                WHERE e.id = ? AND e.task_id = ? AND t.user_id = ?
+                LIMIT 1
+                """,
+                (after_event_id, task_id, user_id),
+            ).fetchone()
+            if row is not None:
+                after_sequence = row["sequence"]
+
+        if after_sequence is None:
+            rows = db.execute(
+                """
+                SELECT e.*
+                FROM reflection_task_event e
+                JOIN reflection_task t ON t.id = e.task_id
+                WHERE e.task_id = ? AND t.user_id = ?
+                ORDER BY e.sequence, e.created_at
+                """,
+                (task_id, user_id),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT e.*
+                FROM reflection_task_event e
+                JOIN reflection_task t ON t.id = e.task_id
+                WHERE e.task_id = ? AND t.user_id = ? AND e.sequence > ?
+                ORDER BY e.sequence, e.created_at
+                """,
+                (task_id, user_id, after_sequence),
+            ).fetchall()
+        return [_reflection_event_from_row(row) for row in rows]
     finally:
         db.close()
 
