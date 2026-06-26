@@ -479,6 +479,7 @@ export interface ReflectionTaskEvent {
 
 export interface RunReflectionsTaskOptions {
   sections?: ReflectionSectionKey[];
+  sessionIds?: string[];
   language?: string;
   onEvent?: (event: ReflectionTaskEvent) => void;
 }
@@ -553,11 +554,12 @@ export async function createReflectionTask(
   sections?: ReflectionSectionKey[],
   autoStart = true,
   language = currentFrontendLanguage(),
+  sessionIds?: string[],
 ): Promise<ReflectionTask> {
   const res = await fetch(`${API_BASE}/api/reflections/tasks`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify({ sections, auto_start: autoStart, language }),
+    body: JSON.stringify({ sections, auto_start: autoStart, language, session_ids: sessionIds }),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
@@ -654,10 +656,21 @@ async function waitForReflectionTaskResults(
   onEvent?: (event: ReflectionTaskEvent) => void,
   onConnected?: () => Promise<void> | void,
 ): Promise<ReflectionResult[]> {
-  await streamReflectionTaskEvents(taskId, onEvent, onConnected).catch(async err => {
-    console.warn('[Reflections] SSE stream failed, falling back to polling:', err);
+  let connectionStarted = false;
+  const connectOnce = async () => {
+    if (connectionStarted) return;
+    connectionStarted = true;
     await onConnected?.();
+  };
+  const startAfterSseGracePeriod = window.setTimeout(() => {
+    void connectOnce();
+  }, 1200);
+  await streamReflectionTaskEvents(taskId, onEvent, connectOnce).catch(async err => {
+    console.warn('[Reflections] SSE stream failed, falling back to polling:', err);
+    await connectOnce();
   });
+  await connectOnce();
+  window.clearTimeout(startAfterSseGracePeriod);
 
   for (let i = 0; i < 30; i += 1) {
     const task = await getReflectionTask(taskId);
@@ -675,7 +688,7 @@ async function waitForReflectionTaskResults(
 export async function runReflectionsTask(
   options: RunReflectionsTaskOptions = {},
 ): Promise<Record<ReflectionSectionKey, ReflectionResult[]>> {
-  const task = await createReflectionTask(options.sections, false, options.language ?? currentFrontendLanguage());
+  const task = await createReflectionTask(options.sections, false, options.language ?? currentFrontendLanguage(), options.sessionIds);
   options.onEvent?.({
     id: 'client-task-created',
     task_id: task.task_id,

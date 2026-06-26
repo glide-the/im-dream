@@ -73,6 +73,30 @@ interface AnalysisReport {
   stats: { days: number; entries: number; words: number };
 }
 
+type AnalysisSessionCandidate = {
+  id: string;
+  name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  first_line?: string;
+  date_key?: string | null;
+  has_text?: boolean;
+  word_count?: number;
+};
+
+interface ReanalysisDialogState {
+  open: boolean;
+  sessions: AnalysisSessionCandidate[];
+  selectedIds: string[];
+  error: string;
+}
+
+function localDateKey(value: string | number | Date, locale = 'en-CA'): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(locale);
+}
+
 // ──────────────────────────────────────────────
 // Section config modal
 // ──────────────────────────────────────────────
@@ -253,6 +277,188 @@ function SectionConfigModal({
   );
 }
 
+interface ReanalysisConfirmModalProps {
+  open: boolean;
+  sessions: AnalysisSessionCandidate[];
+  selectedIds: string[];
+  error: string;
+  isMobile: boolean;
+  onClose: () => void;
+  onToggleSession: (sessionId: string) => void;
+  onSelectAll: () => void;
+  onConfirm: () => void;
+}
+
+function ReanalysisConfirmModal({
+  open, sessions, selectedIds, error, isMobile,
+  onClose, onToggleSession, onSelectAll, onConfirm,
+}: ReanalysisConfirmModalProps) {
+  if (!open) return null;
+  const selected = new Set(selectedIds);
+  const selectedCount = selectedIds.length;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(33, 28, 21, 0.36)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem', backdropFilter: 'blur(6px)',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reflections-reanalysis-title"
+        style={{
+          width: '100%', maxWidth: '560px', maxHeight: '86vh', overflow: 'hidden',
+          borderRadius: '26px',
+          border: '1px solid color-mix(in srgb, var(--color-border-paper) 72%, transparent)',
+          background: 'linear-gradient(145deg, var(--color-bg-paper) 0%, var(--color-bg-surface-solid) 100%)',
+          boxShadow: '0 28px 80px rgba(32, 24, 14, 0.28)',
+          display: 'flex', flexDirection: 'column',
+        }}
+      >
+        <div style={{ padding: isMobile ? '1.35rem' : '1.75rem 1.9rem 1.25rem' }}>
+          <div style={{
+            fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase',
+            color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: '0.7rem',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          }}>
+            Re-analysis · Editorial choice
+          </div>
+          <h2 id="reflections-reanalysis-title" style={{
+            margin: 0, fontFamily: 'Georgia, serif', fontStyle: 'italic',
+            fontWeight: 400, color: 'var(--color-text-primary)',
+            fontSize: isMobile ? '24px' : '30px', lineHeight: 1.15,
+          }}>
+            Today already has a Reflections analysis.
+          </h2>
+          <p style={{
+            margin: '0.85rem 0 0', color: 'var(--color-text-secondary)',
+            fontSize: '13px', lineHeight: 1.7,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          }}>
+            Re-running will create a new analysis. Choose the diary entries that should be included this time.
+          </p>
+        </div>
+
+        <div style={{ padding: isMobile ? '0 1.35rem 1rem' : '0 1.9rem 1.2rem', overflowY: 'auto', flex: 1 }}>
+          <button
+            type="button"
+            onClick={onSelectAll}
+            style={{
+              border: '1px solid var(--color-border-paper)', background: 'transparent',
+              color: 'var(--color-text-body)', borderRadius: '999px',
+              padding: '7px 12px', fontSize: '12px', cursor: 'pointer',
+              marginBottom: '0.9rem',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            }}
+          >
+            {selectedCount === sessions.length ? 'Clear all' : 'Select all'} · {selectedCount}/{sessions.length}
+          </button>
+
+          <div style={{ display: 'grid', gap: '0.65rem' }}>
+            {sessions.map(session => {
+              const checked = selected.has(session.id);
+              const date = session.date_key || localDateKey(session.updated_at || session.created_at || Date.now());
+              return (
+                <label
+                  key={session.id}
+                  style={{
+                    display: 'grid', gridTemplateColumns: 'auto 1fr auto',
+                    gap: '0.85rem', alignItems: 'center', padding: '0.9rem 1rem',
+                    borderRadius: '18px',
+                    border: `1px solid ${checked ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-border-paper) 55%, transparent)'}`,
+                    background: checked
+                      ? 'color-mix(in srgb, var(--color-border-paper) 25%, transparent)'
+                      : 'color-mix(in srgb, var(--color-bg-surface) 70%, transparent)',
+                    cursor: 'pointer', transition: 'all 0.18s ease',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggleSession(session.id)}
+                    style={{ accentColor: 'var(--color-text-body)' }}
+                  />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{
+                      display: 'block', color: 'var(--color-text-body)',
+                      fontSize: '14px', fontFamily: 'Georgia, serif',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {session.first_line || session.name || 'Untitled diary'}
+                    </span>
+                    <span style={{
+                      display: 'block', marginTop: '3px',
+                      color: 'var(--color-text-muted)', fontSize: '11px',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    }}>
+                      {date}
+                    </span>
+                  </span>
+                  <span style={{
+                    color: 'var(--color-text-muted)', fontSize: '11px',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  }}>
+                    {session.word_count ? `${session.word_count} words` : ''}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+
+          {error && (
+            <p style={{
+              margin: '0.9rem 0 0', color: 'var(--color-state-danger)',
+              fontSize: '12px',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            }}>
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div style={{
+          padding: isMobile ? '1rem 1.35rem 1.35rem' : '1rem 1.9rem 1.75rem',
+          borderTop: '1px solid color-mix(in srgb, var(--color-border-paper) 55%, transparent)',
+          display: 'flex', justifyContent: 'flex-end', gap: '0.75rem',
+        }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              border: '1px solid var(--color-border-paper)', background: 'transparent',
+              color: 'var(--color-text-secondary)', borderRadius: '999px',
+              padding: '10px 18px', cursor: 'pointer', fontSize: '13px',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={selectedCount === 0}
+            style={{
+              border: '1px solid var(--color-text-body)',
+              background: selectedCount === 0 ? 'var(--color-border-neutral)' : 'var(--color-text-body)',
+              color: selectedCount === 0 ? 'var(--color-text-muted)' : 'var(--color-bg-paper)',
+              borderRadius: '999px', padding: '10px 20px',
+              cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+              fontSize: '13px', fontWeight: 600,
+            }}
+          >
+            Re-analyze selected
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════
 // Main component
 // ══════════════════════════════════════════════
@@ -275,7 +481,14 @@ export default function AnalysisView() {
   const [errors, setErrors]       = useState({ echoes: '', traits: '', patterns: '' });
   const [stats, setStats]         = useState({ totalDays: 0, totalWords: 0, totalEntries: 0 });
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
+  const [analyzableSessions, setAnalyzableSessions] = useState<AnalysisSessionCandidate[]>([]);
   const [taskStatus, setTaskStatus] = useState('');
+  const [reanalysisDialog, setReanalysisDialog] = useState<ReanalysisDialogState>({
+    open: false,
+    sessions: [],
+    selectedIds: [],
+    error: '',
+  });
 
   // View modes
   const [viewMode, setViewMode] = useState<'dashboard' | 'report' | 'blog'>('dashboard');
@@ -381,6 +594,18 @@ export default function AnalysisView() {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
         const agg = await fetchSessionsAggregate(tz);
         setStats({ totalDays: agg.stats.total_days, totalWords: agg.stats.total_words, totalEntries: agg.stats.total_entries });
+        setAnalyzableSessions((agg.sessions || [])
+          .filter(session => session.has_text)
+          .map(session => ({
+            id: session.id,
+            name: session.name,
+            created_at: session.created_at,
+            updated_at: session.updated_at,
+            date_key: undefined,
+            first_line: session.name,
+            has_text: session.has_text,
+            word_count: session.word_count,
+          })));
       } catch (e) { console.error(e); }
     };
     loadStats();
@@ -508,18 +733,24 @@ export default function AnalysisView() {
   };
 
   // ── One-click analyze all ──
-  const handleAnalyzeAll = async () => {
+  const runAnalyzeAll = async (sessionIds?: string[]) => {
     if (!isAuthenticated) {
       setErrors({ echoes: 'Please log in to use reflections.', traits: '', patterns: '' });
       return;
     }
     setErrors({ echoes: '', traits: '', patterns: '' });
     setStreaming({ echoes: '', traits: '', patterns: '' });
+    setTaskStatus('task · preparing');
+    localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(Date.now()));
     setLoading({ echoes: true, traits: true, patterns: true });
 
     let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
     try {
-      const bySection = await runReflectionsTask({ language: i18n.language, onEvent: handleTaskEvent });
+      const bySection = await runReflectionsTask({
+        language: i18n.language,
+        sessionIds,
+        onEvent: handleTaskEvent,
+      });
       er = bySection.echoes;
       tr = bySection.traits;
       pr = bySection.patterns;
@@ -552,6 +783,51 @@ export default function AnalysisView() {
       }
       openReflectionBlogReport(entry);
     }
+  };
+
+  const handleAnalyzeAll = async () => {
+    if (anyLoading) return;
+    const todayKey = localDateKey(Date.now());
+    const clickedToday = localStorage.getItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE) === todayKey;
+    const hasTodayReport = savedReports.some(report => localDateKey(report.timestamp) === todayKey);
+    if (clickedToday || hasTodayReport) {
+      const candidates = analyzableSessions.filter(session => session.has_text !== false);
+      setReanalysisDialog({
+        open: true,
+        sessions: candidates,
+        selectedIds: candidates.map(session => session.id),
+        error: candidates.length === 0 ? 'No analyzable diary entries are available.' : '',
+      });
+      return;
+    }
+    await runAnalyzeAll();
+  };
+
+  const handleToggleReanalysisSession = useCallback((sessionId: string) => {
+    setReanalysisDialog(prev => {
+      const selected = new Set(prev.selectedIds);
+      if (selected.has(sessionId)) selected.delete(sessionId);
+      else selected.add(sessionId);
+      return { ...prev, selectedIds: [...selected], error: '' };
+    });
+  }, []);
+
+  const handleToggleAllReanalysisSessions = useCallback(() => {
+    setReanalysisDialog(prev => ({
+      ...prev,
+      selectedIds: prev.selectedIds.length === prev.sessions.length ? [] : prev.sessions.map(session => session.id),
+      error: '',
+    }));
+  }, []);
+
+  const handleConfirmReanalysis = async () => {
+    const selectedIds = reanalysisDialog.selectedIds;
+    if (selectedIds.length === 0) {
+      setReanalysisDialog(prev => ({ ...prev, error: 'Select at least one diary entry before re-analyzing.' }));
+      return;
+    }
+    setReanalysisDialog(prev => ({ ...prev, open: false, error: '' }));
+    await runAnalyzeAll(selectedIds);
   };
 
   const anyLoading = loading.echoes || loading.traits || loading.patterns;
@@ -941,6 +1217,18 @@ export default function AnalysisView() {
           </div>
         )}
       </div>
+
+      <ReanalysisConfirmModal
+        open={reanalysisDialog.open}
+        sessions={reanalysisDialog.sessions}
+        selectedIds={reanalysisDialog.selectedIds}
+        error={reanalysisDialog.error}
+        isMobile={isMobile}
+        onClose={() => setReanalysisDialog(prev => ({ ...prev, open: false }))}
+        onToggleSession={handleToggleReanalysisSession}
+        onSelectAll={handleToggleAllReanalysisSessions}
+        onConfirm={handleConfirmReanalysis}
+      />
 
       {/* Section config modal */}
       <SectionConfigModal

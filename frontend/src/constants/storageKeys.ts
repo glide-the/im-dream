@@ -27,6 +27,7 @@ export const STORAGE_KEYS = {
 
   // Analysis
   ANALYSIS_REPORTS: 'analysisReports',
+  REFLECTIONS_ANALYSIS_CLICKED_DATE: 'reflections-analysis-clicked-date',
 
   // Language
   LANGUAGE: 'ink-language',
