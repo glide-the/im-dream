@@ -24,6 +24,7 @@ import {
   getAnalysisReports,
   fetchSessionsAggregate,
   getLatestReflections,
+  getReflectionTask,
   getReflectionsSectionConfig,
   resumeReflectionsTask,
   runReflectionsTask,
@@ -928,6 +929,66 @@ export default function AnalysisView() {
 
   const handleAnalyzeAll = async () => {
     if (anyLoading) return;
+
+    const active = readActiveReflectionTask();
+    if (active?.taskId) {
+      try {
+        const task = await getReflectionTask(active.taskId);
+        if (['COMPLETED', 'PARTIAL_FAILED', 'FAILED'].includes(task.status)) {
+          clearActiveReflectionTask(active.taskId);
+        } else {
+          const sections = active.sections.length > 0 ? active.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
+          setReanalysisDialog(prev => ({ ...prev, open: false, error: '' }));
+          setViewMode('dashboard');
+          setSelectedReport(null);
+          setTaskStatus('task · reconnecting');
+          setLoading({
+            echoes: sections.includes('echoes'),
+            traits: sections.includes('traits'),
+            patterns: sections.includes('patterns'),
+          });
+          setStreaming({ echoes: '', traits: '', patterns: '' });
+
+          try {
+            const bySection = await resumeReflectionsTask(active.taskId, {
+              lastEventId: active.lastEventId,
+              onEvent: handleTaskEvent,
+            });
+            const er = bySection.echoes;
+            const tr = bySection.traits;
+            const pr = bySection.patterns;
+            setEchoes(er);
+            setTraits(tr);
+            setPatterns(pr);
+            clearActiveReflectionTask(active.taskId);
+            setTaskStatus('task · restored');
+            if (er.length || tr.length || pr.length) {
+              const reportData = {
+                echoes: er, traits: tr, patterns: pr,
+                stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+              };
+              const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
+              await saveAnalysisReport('full_analysis', reportData);
+              await reloadSavedReports();
+              localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
+              openReflectionBlogReport(entry);
+            }
+          } catch (resumeError) {
+            const msg = resumeError instanceof Error ? resumeError.message : String(resumeError);
+            setErrors({ echoes: msg, traits: '', patterns: '' });
+            setTaskStatus('task · reconnect failed');
+          } finally {
+            setLoading({ echoes: false, traits: false, patterns: false });
+            setStreaming({ echoes: '', traits: '', patterns: '' });
+          }
+          return;
+        }
+      } catch (e) {
+        console.warn('[Reflections] active task validation failed before analysis start:', e);
+        clearActiveReflectionTask(active.taskId);
+      }
+    }
+
     const todayKey = localDateKey(Date.now());
     const hasTodayReport = savedReports.some(report => localDateKey(report.timestamp) === todayKey);
     if (hasTodayReport) {
