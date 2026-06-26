@@ -722,6 +722,7 @@ export default function AnalysisView() {
         localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
         setSavedReports(updated);
       }
+      localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
       openReflectionBlogReport(entry);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -741,7 +742,11 @@ export default function AnalysisView() {
     setErrors({ echoes: '', traits: '', patterns: '' });
     setStreaming({ echoes: '', traits: '', patterns: '' });
     setTaskStatus('task · preparing');
-    localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(Date.now()));
+    setViewMode('dashboard');
+    setSelectedReport(null);
+    setEchoes([]);
+    setTraits([]);
+    setPatterns([]);
     setLoading({ echoes: true, traits: true, patterns: true });
 
     let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
@@ -781,6 +786,7 @@ export default function AnalysisView() {
         localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
         setSavedReports(updated);
       }
+      localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
       openReflectionBlogReport(entry);
     }
   };
@@ -788,9 +794,8 @@ export default function AnalysisView() {
   const handleAnalyzeAll = async () => {
     if (anyLoading) return;
     const todayKey = localDateKey(Date.now());
-    const clickedToday = localStorage.getItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE) === todayKey;
     const hasTodayReport = savedReports.some(report => localDateKey(report.timestamp) === todayKey);
-    if (clickedToday || hasTodayReport) {
+    if (hasTodayReport) {
       const candidates = analyzableSessions.filter(session => session.has_text !== false);
       setReanalysisDialog({
         open: true,
