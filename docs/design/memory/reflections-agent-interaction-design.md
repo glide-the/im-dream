@@ -143,7 +143,7 @@ assemble_context          create_executor          execute_reflection_task     f
 
 - 校验用户身份和 session 访问权限。
 - 根据请求确定 sections，默认 `echoes/traits/patterns`。
-- 查询候选日记/写作记录，生成 `sessions_context`。
+- 查询候选日记/写作记录，生成轻量 `sessions_context`：只包含真实 session ID、日期、标题和 labels，不包含正文；Agent 后续按 ID/日期/labels 通过检索工具拉取正文。
 - 创建 `{AGENT_CWD}/{reflection_task_id}/memory/` 工作空间。
 - 写入分区 prompt 文件与 `analysis_state.json`。
 - 创建或更新 `reflection_task`，状态流转到 `ASSEMBLING` / `QUEUED`。
@@ -262,8 +262,8 @@ sequenceDiagram
     API-->>UI: 202 Accepted {task_id}
 
     Engine->>DB: update task status=ASSEMBLING
-    Engine->>DB: read user sessions / notes
-    Engine->>WS: write prompt files + sessions_context + analysis_state.json
+    Engine->>DB: read user session metadata
+    Engine->>WS: write prompt files + metadata-only sessions_context + analysis_state.json
     Engine->>DB: update task status=QUEUED
     Engine->>Bus: publish reflection.context.ready
     Bus-->>UI: SSE reflection.context.ready
@@ -275,7 +275,7 @@ sequenceDiagram
     loop section in echoes, traits, patterns
         Engine->>Bus: publish reflection.section.started
         Bus-->>UI: SSE reflection.section.started
-        Engine->>Runner: run_section(section, sessions_context, workspace)
+        Engine->>Runner: run_section(section, metadata-only sessions_context, workspace)
         Runner-->>Engine: JSON insights
         Engine->>Engine: validate schema and related_session_ids
         Engine->>DB: insert reflection_result rows

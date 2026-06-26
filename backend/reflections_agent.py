@@ -248,21 +248,25 @@ def _language_instruction(language: Any) -> str:
     )
 
 
+def _session_metadata(session: dict[str, Any]) -> dict[str, Any]:
+    labels = session.get("labels") if isinstance(session.get("labels"), list) else []
+    return {
+        "sessionId": str(session.get("id") or ""),
+        "date": str(session.get("created_at") or session.get("updated_at") or "")[:10],
+        "title": str(session.get("name") or "Untitled")[:120],
+        "labels": [str(label) for label in labels if str(label).strip()],
+    }
+
+
 def _build_sessions_context(sessions: list[dict[str, Any]]) -> str:
-    parts: list[str] = []
-    for session in sessions:
-        text = (session.get("text") or session.get("first_line") or "").strip()
-        if not text:
-            continue
-        parts.append(
-            "\n".join(
-                [
-                    f"[{session.get('id')}]  {session.get('created_at') or session.get('updated_at') or ''}  {session.get('name') or 'Untitled'}",
-                    text,
-                ]
-            )
-        )
-    return "<sessions_context>\n" + "\n\n---\n\n".join(parts) + "\n</sessions_context>"
+    metadata = [item for item in (_session_metadata(session) for session in sessions) if item["sessionId"]]
+    lines = [
+        "Full note bodies are intentionally omitted to keep this request small.",
+        "Use only these real session IDs in related_session_ids.",
+        "Before writing final insights, fetch needed note content by session ID with mcp__user__get_sessions_range using the listed date and labels, then match the returned sessionId.",
+    ]
+    lines.extend(json.dumps(item, ensure_ascii=False) for item in metadata)
+    return "<sessions_context>\n" + "\n".join(lines) + "\n</sessions_context>"
 
 
 def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions: list[dict[str, Any]], language: str = "en") -> str:
@@ -278,7 +282,7 @@ def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions
     sessions_context = _build_sessions_context(sessions)
     (memory_dir / "sessions_context.md").write_text(sessions_context + "\n", encoding="utf-8")
     (memory_dir / "sessions_context.json").write_text(
-        json.dumps(sessions, ensure_ascii=False, indent=2),
+        json.dumps([_session_metadata(session) for session in sessions], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     language_code, language_label = _normalize_task_language(language)
@@ -428,7 +432,9 @@ class ClaudeAgentReflectionsRunner:
             f"{_build_sessions_context(sessions)}\n\n"
             "Your memory workspace contains procedural analysis guidance.\n"
             "Start by reading memory/WORKFLOW.md to understand the analysis procedure.\n"
-            "Then analyse the sessions above and output ONLY a JSON array — no other text."
+            "The sessions_context lists only allowed session IDs and labels, not full note bodies. "
+            "Fetch the note content you need by session ID before final analysis.\n"
+            "Then output ONLY a JSON array — no other text."
         )
 
     @staticmethod

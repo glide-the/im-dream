@@ -101,6 +101,7 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
             {"cells": [{"type": "text", "content": "I keep returning to the same worry about creative work and courage."}]},
             name="Entry A",
             created_at="2026-06-01 10:00:00",
+            labels=["creative", "worry"],
         )
         database.save_session(
             self.user_id,
@@ -108,6 +109,7 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
             {"cells": [{"type": "text", "content": "Today I noticed another pattern: I reflect before acting and then write it down."}]},
             name="Entry B",
             created_at="2026-06-02 10:00:00",
+            labels=["reflection", "pattern"],
         )
         self.claude_stream_patch = patch(
             "reflections_agent._run_claude_agent_stream",
@@ -160,8 +162,12 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
         self.assertEqual(request.max_turns, 5)
         self.assertIn("Section key: echoes", request.system_prompt)
         self.assertIn("memory", request.system_prompt)
-        self.assertIn("<sessions_context>", request.message_parts[0]["text"])
-
+        user_message = request.message_parts[0]["text"]
+        self.assertIn("<sessions_context>", user_message)
+        self.assertIn('"sessionId": "session-a"', user_message)
+        self.assertIn('"labels": ["creative", "worry"]', user_message)
+        self.assertIn("mcp__user__get_sessions_range", user_message)
+        self.assertNotIn("I keep returning to the same worry", user_message)
         messages = database.list_chat_messages(request.thread_id)
         self.assertTrue(any(message["role"] == "assistant" for message in messages))
 
