@@ -143,5 +143,75 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
             self.assertEqual(latest_response.json()["task"]["task_id"], task_id)
 
 
+    def test_all_sections_use_frontend_language(self):
+        app = FastAPI()
+        app.include_router(reflections_router)
+        app.dependency_overrides[router_deps.get_current_user] = lambda: {"user_id": self.user_id}
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/reflections/tasks",
+                json={"sections": ["echoes", "traits", "patterns"], "language": "zh-CN"},
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            task_id = response.json()["task_id"]
+
+            task_payload = None
+            for _ in range(50):
+                task_response = client.get(f"/api/reflections/tasks/{task_id}")
+                self.assertEqual(task_response.status_code, 200, task_response.text)
+                task_payload = task_response.json()
+                if task_payload["status"] in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
+                    break
+                time.sleep(0.05)
+
+            self.assertIsNotNone(task_payload)
+            self.assertEqual(task_payload["input_snapshot"]["language"], "zh")
+
+            results_response = client.get(f"/api/reflections/tasks/{task_id}/results")
+            self.assertEqual(results_response.status_code, 200, results_response.text)
+            results = results_response.json()["results"]
+            by_section = {result["section"]: result for result in results}
+            self.assertEqual(set(by_section), {"echoes", "traits", "patterns"})
+            self.assertIn("情绪", by_section["echoes"]["title"])
+            self.assertIn("自我", by_section["traits"]["title"])
+            self.assertIn("写作", by_section["patterns"]["title"])
+
+            task = database.get_reflection_task(task_id, self.user_id)
+            for section in ("echoes", "traits", "patterns"):
+                prompt_path = Path(task["workspace_path"]) / section / "MEMORY_ANSWER_PROMPT.md"
+                prompt = prompt_path.read_text(encoding="utf-8")
+                self.assertIn("Runtime Language Requirement", prompt)
+                self.assertIn("Simplified Chinese", prompt)
+
+    def test_router_can_create_without_autostart_then_start(self):
+        app = FastAPI()
+        app.include_router(reflections_router)
+        app.dependency_overrides[router_deps.get_current_user] = lambda: {"user_id": self.user_id}
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/reflections/tasks",
+                json={"sections": ["echoes"], "auto_start": False},
+            )
+            self.assertEqual(response.status_code, 202, response.text)
+            task_id = response.json()["task_id"]
+            created = database.get_reflection_task(task_id, self.user_id)
+            self.assertEqual(created["status"], "CREATED")
+
+            start_response = client.post(f"/api/reflections/tasks/{task_id}/start")
+            self.assertEqual(start_response.status_code, 202, start_response.text)
+
+            for _ in range(50):
+                task = database.get_reflection_task(task_id, self.user_id)
+                if task["status"] in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
+                    break
+                time.sleep(0.05)
+
+            self.assertEqual(database.get_reflection_task(task_id, self.user_id)["status"], "COMPLETED")
+            events = database.list_reflection_task_events(task_id, self.user_id)
+            self.assertIn("reflection.task.started", [event["event_type"] for event in events])
+
+
 if __name__ == "__main__":
     unittest.main()
