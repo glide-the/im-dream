@@ -137,6 +137,10 @@ function clearActiveReflectionTask(taskId?: string): void {
   }
 }
 
+function isTerminalReflectionTaskStatus(status?: string): boolean {
+  return status === 'COMPLETED' || status === 'PARTIAL_FAILED' || status === 'FAILED';
+}
+
 // ──────────────────────────────────────────────
 // Section config modal
 // ──────────────────────────────────────────────
@@ -523,6 +527,7 @@ export default function AnalysisView() {
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
   const [analyzableSessions, setAnalyzableSessions] = useState<AnalysisSessionCandidate[]>([]);
   const [taskStatus, setTaskStatus] = useState('');
+  const [activeRecoveryTick, setActiveRecoveryTick] = useState(0);
   const recoveringTaskIdRef = useRef<string | null>(null);
   const [reanalysisDialog, setReanalysisDialog] = useState<ReanalysisDialogState>({
     open: false,
@@ -590,6 +595,25 @@ export default function AnalysisView() {
         }
         try {
           const latest = await getLatestReflections();
+          if (latest.task && !isTerminalReflectionTaskStatus(latest.task.status)) {
+            const sections = latest.task.sections.length > 0 ? latest.task.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
+            writeActiveReflectionTask({
+              taskId: latest.task.task_id,
+              sections,
+              startedAt: new Date(latest.task.started_at || latest.task.created_at || Date.now()).getTime() || Date.now(),
+            });
+            setViewMode('dashboard');
+            setSelectedReport(null);
+            setTaskStatus(`task · ${latest.task.status.toLowerCase()}`);
+            setLoading({
+              echoes: sections.includes('echoes'),
+              traits: sections.includes('traits'),
+              patterns: sections.includes('patterns'),
+            });
+            setStreaming({ echoes: '', traits: '', patterns: '' });
+            setActiveRecoveryTick(tick => tick + 1);
+            return;
+          }
           if (!hasActiveRecovery && latest.results.length > 0) {
             const latestEchoesFromTask = latest.results.filter(r => r.section === 'echoes');
             const latestTraitsFromTask = latest.results.filter(r => r.section === 'traits');
@@ -809,7 +833,7 @@ export default function AnalysisView() {
     return () => {
       cancelled = true;
     };
-  }, [handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, stats.totalDays, stats.totalEntries, stats.totalWords]);
+  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, stats.totalDays, stats.totalEntries, stats.totalWords]);
 
 
   // ── Per-section analysis with streaming ──
@@ -934,7 +958,7 @@ export default function AnalysisView() {
     if (active?.taskId) {
       try {
         const task = await getReflectionTask(active.taskId);
-        if (['COMPLETED', 'PARTIAL_FAILED', 'FAILED'].includes(task.status)) {
+        if (isTerminalReflectionTaskStatus(task.status)) {
           clearActiveReflectionTask(active.taskId);
         } else {
           const sections = active.sections.length > 0 ? active.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
