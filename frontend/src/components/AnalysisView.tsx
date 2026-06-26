@@ -17,7 +17,7 @@
  *         to aggregate/report APIs.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   saveAnalysisReport,
@@ -25,6 +25,7 @@ import {
   fetchSessionsAggregate,
   getLatestReflections,
   getReflectionsSectionConfig,
+  resumeReflectionsTask,
   runReflectionsTask,
   saveReflectionsSectionConfig,
   resetReflectionsSectionConfig,
@@ -91,10 +92,48 @@ interface ReanalysisDialogState {
   error: string;
 }
 
+interface ActiveReflectionTaskState {
+  taskId: string;
+  sections: SectionKey[];
+  lastEventId?: string;
+  startedAt: number;
+}
+
 function localDateKey(value: string | number | Date, locale = 'en-CA'): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleDateString(locale);
+}
+
+function readActiveReflectionTask(): ActiveReflectionTaskState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ActiveReflectionTaskState>;
+    if (!parsed.taskId) return null;
+    const sections = Array.isArray(parsed.sections)
+      ? parsed.sections.filter((s): s is SectionKey => s === 'echoes' || s === 'traits' || s === 'patterns')
+      : [];
+    return {
+      taskId: parsed.taskId,
+      sections,
+      lastEventId: parsed.lastEventId,
+      startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveReflectionTask(state: ActiveReflectionTaskState): void {
+  localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK, JSON.stringify(state));
+}
+
+function clearActiveReflectionTask(taskId?: string): void {
+  const active = readActiveReflectionTask();
+  if (!taskId || active?.taskId === taskId) {
+    localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK);
+  }
 }
 
 // ──────────────────────────────────────────────
@@ -483,6 +522,7 @@ export default function AnalysisView() {
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
   const [analyzableSessions, setAnalyzableSessions] = useState<AnalysisSessionCandidate[]>([]);
   const [taskStatus, setTaskStatus] = useState('');
+  const recoveringTaskIdRef = useRef<string | null>(null);
   const [reanalysisDialog, setReanalysisDialog] = useState<ReanalysisDialogState>({
     open: false,
     sessions: [],
@@ -512,6 +552,7 @@ export default function AnalysisView() {
 
   // ── Load data ──
   const reloadSavedReports = useCallback(async () => {
+    const hasActiveRecovery = Boolean(readActiveReflectionTask());
     if (isAuthenticated) {
       try {
         const db = await getAnalysisReports(MAX_SAVED_REPORTS);
@@ -541,12 +582,14 @@ export default function AnalysisView() {
         const latestEchoes   = individual.find(r => r.echoes.length > 0);
         const latestTraits   = individual.find(r => r.traits.length > 0);
         const latestPatterns = individual.find(r => r.patterns.length > 0);
-        if (latestEchoes)   setEchoes(latestEchoes.echoes);
-        if (latestTraits)   setTraits(latestTraits.traits);
-        if (latestPatterns) setPatterns(latestPatterns.patterns);
+        if (!hasActiveRecovery) {
+          if (latestEchoes)   setEchoes(latestEchoes.echoes);
+          if (latestTraits)   setTraits(latestTraits.traits);
+          if (latestPatterns) setPatterns(latestPatterns.patterns);
+        }
         try {
           const latest = await getLatestReflections();
-          if (latest.results.length > 0) {
+          if (!hasActiveRecovery && latest.results.length > 0) {
             const latestEchoesFromTask = latest.results.filter(r => r.section === 'echoes');
             const latestTraitsFromTask = latest.results.filter(r => r.section === 'traits');
             const latestPatternsFromTask = latest.results.filter(r => r.section === 'patterns');
@@ -580,9 +623,11 @@ export default function AnalysisView() {
           const le = r.find(x => x.echoes.length > 0);
           const lt = r.find(x => x.traits.length > 0);
           const lp = r.find(x => x.patterns.length > 0);
-          if (le) setEchoes(le.echoes);
-          if (lt) setTraits(lt.traits);
-          if (lp) setPatterns(lp.patterns);
+          if (!hasActiveRecovery) {
+            if (le) setEchoes(le.echoes);
+            if (lt) setTraits(lt.traits);
+            if (lp) setPatterns(lp.patterns);
+          }
         } catch (e) { console.error(e); }
       }
     }
@@ -657,6 +702,28 @@ export default function AnalysisView() {
       .replaceAll('.', ' · ')
       .replace('client · task · created', 'task · created');
     setTaskStatus(statusText);
+
+    if (event.type === 'reflection.client.task.created') {
+      const sections = Array.isArray(event.payload?.sections)
+        ? event.payload.sections.filter((s): s is SectionKey => s === 'echoes' || s === 'traits' || s === 'patterns')
+        : [];
+      writeActiveReflectionTask({
+        taskId: event.task_id,
+        sections,
+        lastEventId: event.id,
+        startedAt: Date.now(),
+      });
+    } else if (event.id && event.task_id) {
+      const active = readActiveReflectionTask();
+      if (active?.taskId === event.task_id) {
+        writeActiveReflectionTask({ ...active, lastEventId: event.id });
+      }
+    }
+
+    if (event.type === 'reflection.task.completed' || event.type === 'reflection.task.partial_failed' || event.type === 'reflection.task.failed') {
+      clearActiveReflectionTask(event.task_id);
+    }
+
     if (section && ['echoes', 'traits', 'patterns'].includes(section)) {
       setStreaming(p => ({ ...p, [section]: statusText }));
     }
@@ -674,6 +741,74 @@ export default function AnalysisView() {
     setSelectedReport(wrapped);
     setViewMode('blog');
   }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const active = readActiveReflectionTask();
+    if (!active || recoveringTaskIdRef.current === active.taskId) return;
+
+    let cancelled = false;
+    recoveringTaskIdRef.current = active.taskId;
+    setViewMode('dashboard');
+    setSelectedReport(null);
+    setTaskStatus('task · reconnecting');
+    const sections = active.sections.length > 0 ? active.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
+    setLoading({
+      echoes: sections.includes('echoes'),
+      traits: sections.includes('traits'),
+      patterns: sections.includes('patterns'),
+    });
+    setStreaming({ echoes: '', traits: '', patterns: '' });
+
+    const restore = async () => {
+      let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
+      try {
+        const bySection = await resumeReflectionsTask(active.taskId, {
+          lastEventId: active.lastEventId,
+          onEvent: handleTaskEvent,
+        });
+        if (cancelled) return;
+        er = bySection.echoes;
+        tr = bySection.traits;
+        pr = bySection.patterns;
+        setEchoes(er);
+        setTraits(tr);
+        setPatterns(pr);
+        clearActiveReflectionTask(active.taskId);
+        setTaskStatus('task · restored');
+      } catch (e) {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setErrors({ echoes: msg, traits: '', patterns: '' });
+          setTaskStatus('task · reconnect failed');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading({ echoes: false, traits: false, patterns: false });
+          setStreaming({ echoes: '', traits: '', patterns: '' });
+        }
+      }
+
+      if (!cancelled && (er.length || tr.length || pr.length)) {
+        const reportData = {
+          echoes: er, traits: tr, patterns: pr,
+          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+        };
+        const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
+        try {
+          await saveAnalysisReport('full_analysis', reportData);
+          await reloadSavedReports();
+        } catch (e) { console.error(e); }
+        localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
+        openReflectionBlogReport(entry);
+      }
+    };
+
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, stats.totalDays, stats.totalEntries, stats.totalWords]);
 
 
   // ── Per-section analysis with streaming ──

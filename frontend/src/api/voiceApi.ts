@@ -484,6 +484,11 @@ export interface RunReflectionsTaskOptions {
   onEvent?: (event: ReflectionTaskEvent) => void;
 }
 
+export interface ResumeReflectionsTaskOptions {
+  lastEventId?: string;
+  onEvent?: (event: ReflectionTaskEvent) => void;
+}
+
 function currentFrontendLanguage(): string {
   return localStorage.getItem(STORAGE_KEYS.LANGUAGE) || 'en';
 }
@@ -623,9 +628,14 @@ async function streamReflectionTaskEvents(
   taskId: string,
   onEvent?: (event: ReflectionTaskEvent) => void,
   onConnected?: () => Promise<void> | void,
+  lastEventId?: string,
 ): Promise<void> {
+  const headers = authHeaders({ Accept: 'text/event-stream' });
+  if (lastEventId) {
+    (headers as Record<string, string>)['Last-Event-ID'] = lastEventId;
+  }
   const res = await fetch(`${API_BASE}/api/reflections/tasks/${taskId}/events`, {
-    headers: authHeaders({ Accept: 'text/event-stream' }),
+    headers,
   });
   if (!res.ok || !res.body) return;
 
@@ -655,6 +665,7 @@ async function waitForReflectionTaskResults(
   taskId: string,
   onEvent?: (event: ReflectionTaskEvent) => void,
   onConnected?: () => Promise<void> | void,
+  lastEventId?: string,
 ): Promise<ReflectionResult[]> {
   let connectionStarted = false;
   const connectOnce = async () => {
@@ -665,7 +676,7 @@ async function waitForReflectionTaskResults(
   const startAfterSseGracePeriod = window.setTimeout(() => {
     void connectOnce();
   }, 1200);
-  await streamReflectionTaskEvents(taskId, onEvent, connectOnce).catch(async err => {
+  await streamReflectionTaskEvents(taskId, onEvent, connectOnce, lastEventId).catch(async err => {
     console.warn('[Reflections] SSE stream failed, falling back to polling:', err);
     await connectOnce();
   });
@@ -704,6 +715,20 @@ export async function runReflectionsTask(
     await startReflectionTask(task.task_id);
   };
   const results = await waitForReflectionTaskResults(task.task_id, options.onEvent, startOnce);
+  return reflectionResultsBySection(results);
+}
+
+export async function resumeReflectionsTask(
+  taskId: string,
+  options: ResumeReflectionsTaskOptions = {},
+): Promise<Record<ReflectionSectionKey, ReflectionResult[]>> {
+  const task = await getReflectionTask(taskId);
+  if (task.status === 'FAILED') {
+    throw new Error(task.error_summary || 'Reflections task failed');
+  }
+  const results = ['COMPLETED', 'PARTIAL_FAILED'].includes(task.status)
+    ? task.results ?? await getReflectionTaskResults(taskId)
+    : await waitForReflectionTaskResults(taskId, options.onEvent, undefined, options.lastEventId);
   return reflectionResultsBySection(results);
 }
 
