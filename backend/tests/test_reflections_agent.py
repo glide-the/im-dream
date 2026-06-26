@@ -13,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -26,6 +27,50 @@ import database
 from reflections_agent import ReflectionsTaskEngine, create_reflections_task, get_or_create_reflection_event_bus
 from routers import deps as router_deps
 from routers.reflections import router as reflections_router
+
+
+def _section_from_prompt(prompt: str) -> str:
+    for section in ("echoes", "traits", "patterns"):
+        if f"Section key: {section}" in prompt:
+            return section
+    return "echoes"
+
+
+def _fake_result(section: str, zh: bool = False) -> dict:
+    if zh:
+        titles = {"echoes": "反复出现的情绪回响", "traits": "稳定的自我觉察", "patterns": "可识别的写作节律"}
+    else:
+        titles = {"echoes": "Recurring Emotional Echo", "traits": "Reflective Self Awareness", "patterns": "Writing Rhythm Pattern"}
+    return {
+        "title": titles[section],
+        "description": "分析完成",
+        "related_session_ids": ["session-a", "session-b"],
+        "evidence": "I keep returning to the same worry about creative work and courage.",
+        "confidence": "medium",
+    }
+
+
+async def _fake_claude_run_streaming(request):
+    section = _section_from_prompt(request.system_prompt or "")
+    zh = False
+    prompt = request.system_prompt or ""
+    marker = "initialised at: "
+    if marker in prompt:
+        memory_path = prompt.split(marker, 1)[1].split("\n", 1)[0].strip()
+        answer_prompt = Path(memory_path) / "MEMORY_ANSWER_PROMPT.md"
+        zh = answer_prompt.exists() and "Simplified Chinese" in answer_prompt.read_text(encoding="utf-8")
+    database.save_chat_message(
+        request.thread_id,
+        "user",
+        request.message_parts or [],
+        message_id=request.message_id,
+    )
+    database.save_chat_message(
+        request.thread_id,
+        "assistant",
+        [{"type": "text", "text": __import__("json").dumps([_fake_result(section, zh)], ensure_ascii=False)}],
+    )
+    yield "event: finish\ndata: {}\n\n"
 
 
 def _run(coro):
@@ -64,8 +109,14 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
             name="Entry B",
             created_at="2026-06-02 10:00:00",
         )
+        self.claude_stream_patch = patch(
+            "reflections_agent._run_claude_agent_stream",
+            side_effect=lambda request: _fake_claude_run_streaming(request),
+        )
+        self.claude_stream_mock = self.claude_stream_patch.start()
 
     def tearDown(self) -> None:
+        self.claude_stream_patch.stop()
         database.DB_PATH = self.old_db_path
         if self.old_agent_cwd is None:
             os.environ.pop("AGENT_CWD", None)
@@ -90,6 +141,26 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
         event_types = [event["event_type"] for event in events]
         self.assertIn("reflection.context.ready", event_types)
         self.assertIn("reflection.task.completed", event_types)
+
+
+    def test_task_engine_uses_claude_agent_section_flow(self):
+        task_id = create_reflections_task(self.user_id, ["echoes"], {})
+        _run(ReflectionsTaskEngine().run(task_id))
+
+        self.assertTrue(self.claude_stream_mock.called)
+        request = self.claude_stream_mock.call_args.args[0]
+        self.assertEqual(request.tool_choice, "auto")
+        self.assertEqual(request.max_turns, 5)
+        self.assertIn("Section key: echoes", request.system_prompt)
+        self.assertIn("memory", request.system_prompt)
+        self.assertIn("<sessions_context>", request.message_parts[0]["text"])
+
+        messages = database.list_chat_messages(request.thread_id)
+        self.assertTrue(any(message["role"] == "assistant" for message in messages))
+
+        task = database.get_reflection_task(task_id, self.user_id)
+        self.assertEqual(task["status"], "COMPLETED")
+        self.assertEqual(len(database.list_reflection_results(task_id, self.user_id)), 1)
 
     def test_event_bus_replays_events_after_subscribe(self):
         async def _case():
