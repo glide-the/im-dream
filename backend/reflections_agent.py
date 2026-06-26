@@ -619,6 +619,8 @@ class ReflectionsTaskEngine:
             error_summary=error_summary,
             completed_at=_utcnow_iso(),
         )
+        if completed:
+            self._persist_analysis_report(context, completed)
         await bus.publish(
             event_type,
             {
@@ -627,6 +629,49 @@ class ReflectionsTaskEngine:
                 "result_count": outcome["total_results"],
             },
         )
+
+    @staticmethod
+    def _persist_analysis_report(context: dict[str, Any], completed_sections: list[str]) -> None:
+        """Mirror completed Reflections task output into the legacy analysis_reports table.
+
+        The frontend historically saved completed Reflections reports through
+        POST /api/reports after analysis.  Agent-backed tasks can now finish
+        while the page is refreshing or disconnected, so the backend must write
+        the same report shape after section results have been persisted.
+        """
+        task_id = context["task_id"]
+        user_id = int(context["user_id"])
+        persisted = database.list_reflection_results(task_id, user_id)
+        by_section = {
+            "echoes": [r for r in persisted if r.get("section") == "echoes"],
+            "traits": [r for r in persisted if r.get("section") == "traits"],
+            "patterns": [r for r in persisted if r.get("section") == "patterns"],
+        }
+        if not any(by_section.values()):
+            return
+
+        sessions = context.get("sessions") or []
+        day_keys = {str(s.get("created_at") or s.get("updated_at") or "")[:10] for s in sessions}
+        day_keys.discard("")
+        words = sum(len(str(s.get("text") or "").split()) for s in sessions)
+        report_data = {
+            "echoes": by_section["echoes"],
+            "traits": by_section["traits"],
+            "patterns": by_section["patterns"],
+            "stats": {
+                "days": len(day_keys),
+                "entries": len(sessions),
+                "words": words,
+            },
+        }
+        completed_set = set(completed_sections)
+        if completed_set == {"echoes", "traits", "patterns"}:
+            report_type = "full_analysis"
+        elif len(completed_sections) == 1:
+            report_type = f"reflections_{completed_sections[0]}"
+        else:
+            report_type = "reflections_partial"
+        database.save_analysis_report(user_id, report_type, report_data)
 
     @staticmethod
     def _validate_results(results: list[dict[str, Any]], section: str, sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:

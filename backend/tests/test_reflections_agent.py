@@ -137,6 +137,13 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
         self.assertEqual({r["section"] for r in results}, {"echoes", "traits"})
         self.assertTrue(all(r["related_session_ids"] for r in results))
 
+        reports = database.get_analysis_reports(self.user_id, limit=5)
+        self.assertEqual(len(reports), 1)
+        self.assertEqual(reports[0]["report_type"], "reflections_partial")
+        self.assertEqual(len(reports[0]["report_data"]["echoes"]), 1)
+        self.assertEqual(len(reports[0]["report_data"]["traits"]), 1)
+        self.assertEqual(reports[0]["report_data"]["stats"]["entries"], 2)
+
         events = database.list_reflection_task_events(task_id, self.user_id)
         event_types = [event["event_type"] for event in events]
         self.assertIn("reflection.context.ready", event_types)
