@@ -13,6 +13,7 @@
 # [Sync] 2026-06-22: cover Settings SYSTEM_PROMPT handoff into system_prompt
 #                    assembly, config-change cache rebuild, and config-load
 #                    failure fallback.
+# [Sync] 2026-06-25: cover CancelledError stop path emitting finish and stream sentinel.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -378,6 +379,66 @@ class TestClaudeAgentServiceEditorWriteEvents(unittest.TestCase):
             self.assertEqual(state.editor_state["cells"][0]["content"], "new")
 
         _run(scenario())
+
+
+class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
+    def test_execute_session_cancel_flushes_partial_and_closes_stream(self):
+        async def scenario():
+            service = ClaudeAgentService()
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            turn_ctx = _TurnContext(
+                queue=queue,
+                confirmation_store=ToolConfirmationStore(),
+            )
+            state = AgentRunState(session_id="thread-stop-service")
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id="thread-stop-service",
+                message_parts=[{"type": "text", "text": "hello"}],
+            )
+
+            class _CancelRunner:
+                async def run_streaming(self, opts, callbacks):
+                    del opts
+                    await callbacks.on_text_delta("partial")
+                    raise asyncio.CancelledError()
+
+            execution = service_module._TurnExecution(
+                request=request,
+                state=state,
+                runner=_CancelRunner(),
+                run_options=unittest.mock.Mock(),
+                turn_context=turn_ctx,
+            )
+
+            with (
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_user_message",
+                    new=unittest.mock.AsyncMock(),
+                ) as persist_user,
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_partial_assistant",
+                    new=unittest.mock.AsyncMock(),
+                ) as persist_partial,
+            ):
+                with self.assertRaises(asyncio.CancelledError):
+                    await service.execute_session(execution)
+
+            frames: list[str | None] = []
+            while not queue.empty():
+                frames.append(queue.get_nowait())
+            return persist_user, persist_partial, frames
+
+        persist_user, persist_partial, frames = _run(scenario())
+
+        persist_user.assert_awaited_once()
+        persist_partial.assert_awaited_once()
+        parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
+        self.assertEqual(parsed_frames[-1]["type"], "finish")
+        self.assertEqual(parsed_frames[-1]["finishReason"], "stop")
+        self.assertIsNone(frames[-1])
 
 
 class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):

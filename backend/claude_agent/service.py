@@ -88,6 +88,8 @@
 # [Sync] 2026-06-22: honor Settings Workspace Mode as the workspace lifecycle
 #                    gate; when disabled, Phase 1 does not initialize thread
 #                    workspace or pass cwd/workspace context to the runner.
+# [Sync] 2026-06-25: frontend stop requests cancel the current turn; CancelledError
+#                    now flushes partial assistant parts and closes EventBus with finish.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -634,9 +636,11 @@ class ClaudeAgentService:
         try:
             result = await execution.runner.run_streaming(execution.run_options, callbacks)
         except asyncio.CancelledError:
-            # Frontend disconnected mid-stream — flush partial assistant content
-            # so the next load of this thread shows any completed tool calls / text.
+            # Explicit stop / shutdown cancellation — flush partial assistant
+            # content so the next load of this thread shows completed pieces.
             await self._persist_partial_assistant(execution)
+            await queue.put(_sse("finish", {"finishReason": "stop"}))
+            await queue.put(None)
             raise
 
         if result.success:
