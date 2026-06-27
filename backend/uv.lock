@@ -894,6 +894,7 @@ dependencies = [
     { name = "eval-type-backport" },
     { name = "fastapi" },
     { name = "httpx", extra = ["socks"] },
+    { name = "json-repair" },
     { name = "mcp" },
     { name = "pillow" },
     { name = "polyagent" },
@@ -919,6 +920,7 @@ requires-dist = [
     { name = "eval-type-backport", specifier = ">=0.2,<1" },
     { name = "fastapi", specifier = ">=0.110,<1" },
     { name = "httpx", extras = ["socks"], specifier = ">=0.28,<0.29" },
+    { name = "json-repair", specifier = ">=0.35,<1" },
     { name = "mcp", specifier = ">=1.27.0" },
     { name = "pillow", specifier = ">=10,<11" },
     { name = "polyagent" },
@@ -1074,6 +1076,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d3/59/322338183ecda247fb5d1763a6cbe46eff7222eaeebafd9fa65d4bf5cb11/jmespath-1.1.0.tar.gz", hash = "sha256:472c87d80f36026ae83c6ddd0f1d05d4e510134ed462851fd5f754c8c3cbb88d", size = 27377, upload-time = "2026-01-22T16:35:26.279Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/2f/967ba146e6d58cf6a652da73885f52fc68001525b4197effc174321d70b4/jmespath-1.1.0-py3-none-any.whl", hash = "sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64", size = 20419, upload-time = "2026-01-22T16:35:24.919Z" },
+]
+
+[[package]]
+name = "json-repair"
+version = "0.61.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/59/c0/1cb689126eacd166fd5a78370f095c7d3a250808dabeda129300e5280110/json_repair-0.61.0.tar.gz", hash = "sha256:48759cc6c3052814c797d1d56787d9e1d451603a8760a55d619e97d2f49353d6", size = 50055, upload-time = "2026-06-16T12:18:33.320Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e2/b9/e996902245d5e12e55b0b2e667d3e83a4636dec3692e405e5b8ea0868263/json_repair-0.61.0-py3-none-any.whl", hash = "sha256:ee9fe5f95fcb2713d72d4495b67b794b62ff2cd24d6dba3bfb3173d9f7ab0f7d", size = 48490, upload-time = "2026-06-16T12:18:31.884Z" },
 ]
 
 [[package]]

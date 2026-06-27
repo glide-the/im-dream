@@ -145,7 +145,7 @@ body: { "threadId": "<thread_id>", "section": "echoes" | "traits" | "patterns" }
    - message: <sessions_context>[session-id] date title labels</sessions_context>
               + 指令：读 memory/WORKFLOW.md，输出 JSON only
    - tool_choice: "auto"   ← 允许 Agent 使用文件读取工具
-   - max_turns: 5          ← 允许多轮（读文件 → 分析 → 输出）
+   - max_turns: 1000          ← 允许多轮（读文件 → 分析 → 输出）
         │
         ▼
 4. claude-agent 引擎执行（多轮）
@@ -191,7 +191,7 @@ sequenceDiagram
     ReflCfg-->>MemInitAPI: 5 prompt files
     MemInitAPI->>Workspace: write memory/WORKFLOW.md + 4 files
     MemInitAPI-->>FE: {initialised: true}
-    FE->>AgentAPI: POST {id: thread_id, tool_choice: "auto", max_turns: 5}
+    FE->>AgentAPI: POST {id: thread_id, tool_choice: "auto", max_turns: 1000}
     AgentAPI->>Workspace: inject <memory_context>
     AgentAPI->>Workspace: agent reads WORKFLOW.md (tool call)
     AgentAPI->>Workspace: agent reads MEMORY_QUERY_PROMPT.md (tool call)

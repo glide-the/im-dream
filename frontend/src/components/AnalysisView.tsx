@@ -17,20 +17,23 @@
  *         to aggregate/report APIs.
  */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
-  analyzeEchoes,
-  analyzeTraits,
-  analyzePatterns,
   saveAnalysisReport,
   getAnalysisReports,
   fetchSessionsAggregate,
+  getLatestReflections,
+  getReflectionTask,
   getReflectionsSectionConfig,
+  resumeReflectionsTask,
+  runReflectionsTask,
   saveReflectionsSectionConfig,
   resetReflectionsSectionConfig,
   type ReflectionResult,
   type ReflectionSectionConfig,
+  type ReflectionSectionKey,
+  type ReflectionTaskEvent,
 } from '../api/voiceApi';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -61,7 +64,7 @@ const PROMPT_FILE_LABELS: Record<string, string> = {
 // ──────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────
-type SectionKey = 'echoes' | 'traits' | 'patterns';
+type SectionKey = ReflectionSectionKey;
 
 interface AnalysisReport {
   id: number;
@@ -70,6 +73,72 @@ interface AnalysisReport {
   patterns: ReflectionResult[];
   timestamp: number;
   stats: { days: number; entries: number; words: number };
+}
+
+type AnalysisSessionCandidate = {
+  id: string;
+  name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  first_line?: string;
+  date_key?: string | null;
+  has_text?: boolean;
+  word_count?: number;
+};
+
+interface ReanalysisDialogState {
+  open: boolean;
+  sessions: AnalysisSessionCandidate[];
+  selectedIds: string[];
+  error: string;
+}
+
+interface ActiveReflectionTaskState {
+  taskId: string;
+  sections: SectionKey[];
+  lastEventId?: string;
+  startedAt: number;
+}
+
+function localDateKey(value: string | number | Date, locale = 'en-CA'): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString(locale);
+}
+
+function readActiveReflectionTask(): ActiveReflectionTaskState | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<ActiveReflectionTaskState>;
+    if (!parsed.taskId) return null;
+    const sections = Array.isArray(parsed.sections)
+      ? parsed.sections.filter((s): s is SectionKey => s === 'echoes' || s === 'traits' || s === 'patterns')
+      : [];
+    return {
+      taskId: parsed.taskId,
+      sections,
+      lastEventId: parsed.lastEventId,
+      startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeActiveReflectionTask(state: ActiveReflectionTaskState): void {
+  localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK, JSON.stringify(state));
+}
+
+function clearActiveReflectionTask(taskId?: string): void {
+  const active = readActiveReflectionTask();
+  if (!taskId || active?.taskId === taskId) {
+    localStorage.removeItem(STORAGE_KEYS.REFLECTIONS_ACTIVE_TASK);
+  }
+}
+
+function isTerminalReflectionTaskStatus(status?: string): boolean {
+  return status === 'COMPLETED' || status === 'PARTIAL_FAILED' || status === 'FAILED';
 }
 
 // ──────────────────────────────────────────────
@@ -220,15 +289,14 @@ function SectionConfigModal({
           display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0,
         }}>
           <button
-            onClick={saving ? undefined : onReset}
-            disabled={saving || !isCustom}
+            onClick={onReset}
             style={{
               padding: '8px 18px', borderRadius: '20px',
               border: `1px solid ${borderColor}`,
-              background: 'transparent', cursor: (saving || !isCustom) ? 'not-allowed' : 'pointer',
+              background: 'transparent', cursor: 'pointer',
               color: muted, fontSize: '13px',
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-              opacity: (saving || !isCustom) ? 0.5 : 1,
+              opacity: 1,
             }}
           >
             Reset to Default
@@ -246,6 +314,188 @@ function SectionConfigModal({
             }}
           >
             {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ReanalysisConfirmModalProps {
+  open: boolean;
+  sessions: AnalysisSessionCandidate[];
+  selectedIds: string[];
+  error: string;
+  isMobile: boolean;
+  onClose: () => void;
+  onToggleSession: (sessionId: string) => void;
+  onSelectAll: () => void;
+  onConfirm: () => void;
+}
+
+function ReanalysisConfirmModal({
+  open, sessions, selectedIds, error, isMobile,
+  onClose, onToggleSession, onSelectAll, onConfirm,
+}: ReanalysisConfirmModalProps) {
+  if (!open) return null;
+  const selected = new Set(selectedIds);
+  const selectedCount = selectedIds.length;
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 1000,
+        background: 'rgba(33, 28, 21, 0.36)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: '1rem', backdropFilter: 'blur(6px)',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reflections-reanalysis-title"
+        style={{
+          width: '100%', maxWidth: '560px', maxHeight: '86vh', overflow: 'hidden',
+          borderRadius: '26px',
+          border: '1px solid color-mix(in srgb, var(--color-border-paper) 72%, transparent)',
+          background: 'linear-gradient(145deg, var(--color-bg-paper) 0%, var(--color-bg-surface-solid) 100%)',
+          boxShadow: '0 28px 80px rgba(32, 24, 14, 0.28)',
+          display: 'flex', flexDirection: 'column',
+        }}
+      >
+        <div style={{ padding: isMobile ? '1.35rem' : '1.75rem 1.9rem 1.25rem' }}>
+          <div style={{
+            fontSize: '10px', letterSpacing: '2px', textTransform: 'uppercase',
+            color: 'var(--color-text-muted)', fontWeight: 700, marginBottom: '0.7rem',
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          }}>
+            Re-analysis · Editorial choice
+          </div>
+          <h2 id="reflections-reanalysis-title" style={{
+            margin: 0, fontFamily: 'Georgia, serif', fontStyle: 'italic',
+            fontWeight: 400, color: 'var(--color-text-primary)',
+            fontSize: isMobile ? '24px' : '30px', lineHeight: 1.15,
+          }}>
+            Today already has a Reflections analysis.
+          </h2>
+          <p style={{
+            margin: '0.85rem 0 0', color: 'var(--color-text-secondary)',
+            fontSize: '13px', lineHeight: 1.7,
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+          }}>
+            Re-running will create a new analysis. Choose the diary entries that should be included this time.
+          </p>
+        </div>
+
+        <div style={{ padding: isMobile ? '0 1.35rem 1rem' : '0 1.9rem 1.2rem', overflowY: 'auto', flex: 1 }}>
+          <button
+            type="button"
+            onClick={onSelectAll}
+            style={{
+              border: '1px solid var(--color-border-paper)', background: 'transparent',
+              color: 'var(--color-text-body)', borderRadius: '999px',
+              padding: '7px 12px', fontSize: '12px', cursor: 'pointer',
+              marginBottom: '0.9rem',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            }}
+          >
+            {selectedCount === sessions.length ? 'Clear all' : 'Select all'} · {selectedCount}/{sessions.length}
+          </button>
+
+          <div style={{ display: 'grid', gap: '0.65rem' }}>
+            {sessions.map(session => {
+              const checked = selected.has(session.id);
+              const date = session.date_key || localDateKey(session.updated_at || session.created_at || Date.now());
+              return (
+                <label
+                  key={session.id}
+                  style={{
+                    display: 'grid', gridTemplateColumns: 'auto 1fr auto',
+                    gap: '0.85rem', alignItems: 'center', padding: '0.9rem 1rem',
+                    borderRadius: '18px',
+                    border: `1px solid ${checked ? 'var(--color-text-muted)' : 'color-mix(in srgb, var(--color-border-paper) 55%, transparent)'}`,
+                    background: checked
+                      ? 'color-mix(in srgb, var(--color-border-paper) 25%, transparent)'
+                      : 'color-mix(in srgb, var(--color-bg-surface) 70%, transparent)',
+                    cursor: 'pointer', transition: 'all 0.18s ease',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => onToggleSession(session.id)}
+                    style={{ accentColor: 'var(--color-text-body)' }}
+                  />
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{
+                      display: 'block', color: 'var(--color-text-body)',
+                      fontSize: '14px', fontFamily: 'Georgia, serif',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {session.first_line || session.name || 'Untitled diary'}
+                    </span>
+                    <span style={{
+                      display: 'block', marginTop: '3px',
+                      color: 'var(--color-text-muted)', fontSize: '11px',
+                      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                    }}>
+                      {date}
+                    </span>
+                  </span>
+                  <span style={{
+                    color: 'var(--color-text-muted)', fontSize: '11px',
+                    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  }}>
+                    {session.word_count ? `${session.word_count} words` : ''}
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+
+          {error && (
+            <p style={{
+              margin: '0.9rem 0 0', color: 'var(--color-state-danger)',
+              fontSize: '12px',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+            }}>
+              {error}
+            </p>
+          )}
+        </div>
+
+        <div style={{
+          padding: isMobile ? '1rem 1.35rem 1.35rem' : '1rem 1.9rem 1.75rem',
+          borderTop: '1px solid color-mix(in srgb, var(--color-border-paper) 55%, transparent)',
+          display: 'flex', justifyContent: 'flex-end', gap: '0.75rem',
+        }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              border: '1px solid var(--color-border-paper)', background: 'transparent',
+              color: 'var(--color-text-secondary)', borderRadius: '999px',
+              padding: '10px 18px', cursor: 'pointer', fontSize: '13px',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={selectedCount === 0}
+            style={{
+              border: '1px solid var(--color-text-body)',
+              background: selectedCount === 0 ? 'var(--color-border-neutral)' : 'var(--color-text-body)',
+              color: selectedCount === 0 ? 'var(--color-text-muted)' : 'var(--color-bg-paper)',
+              borderRadius: '999px', padding: '10px 20px',
+              cursor: selectedCount === 0 ? 'not-allowed' : 'pointer',
+              fontSize: '13px', fontWeight: 600,
+            }}
+          >
+            Re-analyze selected
           </button>
         </div>
       </div>
@@ -275,6 +525,16 @@ export default function AnalysisView() {
   const [errors, setErrors]       = useState({ echoes: '', traits: '', patterns: '' });
   const [stats, setStats]         = useState({ totalDays: 0, totalWords: 0, totalEntries: 0 });
   const [savedReports, setSavedReports] = useState<AnalysisReport[]>([]);
+  const [analyzableSessions, setAnalyzableSessions] = useState<AnalysisSessionCandidate[]>([]);
+  const [taskStatus, setTaskStatus] = useState('');
+  const [activeRecoveryTick, setActiveRecoveryTick] = useState(0);
+  const recoveringTaskIdRef = useRef<string | null>(null);
+  const [reanalysisDialog, setReanalysisDialog] = useState<ReanalysisDialogState>({
+    open: false,
+    sessions: [],
+    selectedIds: [],
+    error: '',
+  });
 
   // View modes
   const [viewMode, setViewMode] = useState<'dashboard' | 'report' | 'blog'>('dashboard');
@@ -298,6 +558,7 @@ export default function AnalysisView() {
 
   // ── Load data ──
   const reloadSavedReports = useCallback(async () => {
+    const hasActiveRecovery = Boolean(readActiveReflectionTask());
     if (isAuthenticated) {
       try {
         const db = await getAnalysisReports(MAX_SAVED_REPORTS);
@@ -327,9 +588,71 @@ export default function AnalysisView() {
         const latestEchoes   = individual.find(r => r.echoes.length > 0);
         const latestTraits   = individual.find(r => r.traits.length > 0);
         const latestPatterns = individual.find(r => r.patterns.length > 0);
-        if (latestEchoes)   setEchoes(latestEchoes.echoes);
-        if (latestTraits)   setTraits(latestTraits.traits);
-        if (latestPatterns) setPatterns(latestPatterns.patterns);
+        if (!hasActiveRecovery) {
+          if (latestEchoes)   setEchoes(latestEchoes.echoes);
+          if (latestTraits)   setTraits(latestTraits.traits);
+          if (latestPatterns) setPatterns(latestPatterns.patterns);
+        }
+        try {
+          const latest = await getLatestReflections();
+          if (latest.task && !isTerminalReflectionTaskStatus(latest.task.status)) {
+            const sections = latest.task.sections.length > 0 ? latest.task.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
+            writeActiveReflectionTask({
+              taskId: latest.task.task_id,
+              sections,
+              startedAt: new Date(latest.task.started_at || latest.task.created_at || Date.now()).getTime() || Date.now(),
+            });
+            setViewMode('dashboard');
+            setSelectedReport(null);
+            setTaskStatus(`task · ${latest.task.status.toLowerCase()}`);
+            setLoading({
+              echoes: sections.includes('echoes'),
+              traits: sections.includes('traits'),
+              patterns: sections.includes('patterns'),
+            });
+            setStreaming({ echoes: '', traits: '', patterns: '' });
+            setActiveRecoveryTick(tick => tick + 1);
+            return;
+          }
+          if (!hasActiveRecovery && latest.results.length > 0) {
+            const latestEchoesFromTask = latest.results.filter(r => r.section === 'echoes');
+            const latestTraitsFromTask = latest.results.filter(r => r.section === 'traits');
+            const latestPatternsFromTask = latest.results.filter(r => r.section === 'patterns');
+            if (latestEchoesFromTask.length) setEchoes(latestEchoesFromTask);
+            if (latestTraitsFromTask.length) setTraits(latestTraitsFromTask);
+            if (latestPatternsFromTask.length) setPatterns(latestPatternsFromTask);
+            const taskTime = latest.task?.completed_at || latest.task?.updated_at || new Date().toISOString();
+            const taskReport: AnalysisReport = {
+              id: Number(new Date(taskTime)) || Date.now(),
+              echoes: latestEchoesFromTask,
+              traits: latestTraitsFromTask,
+              patterns: latestPatternsFromTask,
+              timestamp: new Date(taskTime).getTime() || Date.now(),
+              stats: { days: 0, entries: 0, words: 0 },
+            };
+            setSavedReports(prev => {
+              const taskDay = localDateKey(taskReport.timestamp);
+              let mergedExisting = false;
+              const merged = prev.map(report => {
+                if (localDateKey(report.timestamp) !== taskDay) return report;
+                mergedExisting = true;
+                return {
+                  ...report,
+                  echoes: taskReport.echoes.length > 0 ? taskReport.echoes : report.echoes,
+                  traits: taskReport.traits.length > 0 ? taskReport.traits : report.traits,
+                  patterns: taskReport.patterns.length > 0 ? taskReport.patterns : report.patterns,
+                  timestamp: Math.max(report.timestamp, taskReport.timestamp),
+                  stats: report.stats.days || report.stats.entries || report.stats.words ? report.stats : taskReport.stats,
+                };
+              });
+              return (mergedExisting ? merged : [taskReport, ...merged])
+                .sort((a, b) => b.timestamp - a.timestamp)
+                .slice(0, MAX_SAVED_REPORTS);
+            });
+          }
+        } catch (e) {
+          console.warn('[Reflections] latest task load failed:', e);
+        }
       } catch (e) { console.error(e); }
     } else {
       const saved = localStorage.getItem(STORAGE_KEYS.ANALYSIS_REPORTS);
@@ -340,9 +663,11 @@ export default function AnalysisView() {
           const le = r.find(x => x.echoes.length > 0);
           const lt = r.find(x => x.traits.length > 0);
           const lp = r.find(x => x.patterns.length > 0);
-          if (le) setEchoes(le.echoes);
-          if (lt) setTraits(lt.traits);
-          if (lp) setPatterns(lp.patterns);
+          if (!hasActiveRecovery) {
+            if (le) setEchoes(le.echoes);
+            if (lt) setTraits(lt.traits);
+            if (lp) setPatterns(lp.patterns);
+          }
         } catch (e) { console.error(e); }
       }
     }
@@ -354,6 +679,18 @@ export default function AnalysisView() {
         const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai';
         const agg = await fetchSessionsAggregate(tz);
         setStats({ totalDays: agg.stats.total_days, totalWords: agg.stats.total_words, totalEntries: agg.stats.total_entries });
+        setAnalyzableSessions((agg.sessions || [])
+          .filter(session => session.has_text)
+          .map(session => ({
+            id: session.id,
+            name: session.name,
+            created_at: session.created_at,
+            updated_at: session.updated_at,
+            date_key: undefined,
+            first_line: session.name,
+            has_text: session.has_text,
+            word_count: session.word_count,
+          })));
       } catch (e) { console.error(e); }
     };
     loadStats();
@@ -398,6 +735,122 @@ export default function AnalysisView() {
     }
   }, [configModal.section]);
 
+  const handleTaskEvent = useCallback((event: ReflectionTaskEvent) => {
+    const section = typeof event.payload?.section === 'string' ? event.payload.section as SectionKey : undefined;
+    const statusText = event.type
+      .replace('reflection.', '')
+      .replaceAll('.', ' · ')
+      .replace('client · task · created', 'task · created');
+    setTaskStatus(statusText);
+
+    if (event.type === 'reflection.client.task.created') {
+      const sections = Array.isArray(event.payload?.sections)
+        ? event.payload.sections.filter((s): s is SectionKey => s === 'echoes' || s === 'traits' || s === 'patterns')
+        : [];
+      writeActiveReflectionTask({
+        taskId: event.task_id,
+        sections,
+        lastEventId: event.id,
+        startedAt: Date.now(),
+      });
+    } else if (event.id && event.task_id) {
+      const active = readActiveReflectionTask();
+      if (active?.taskId === event.task_id) {
+        writeActiveReflectionTask({ ...active, lastEventId: event.id });
+      }
+    }
+
+    if (event.type === 'reflection.task.completed' || event.type === 'reflection.task.partial_failed' || event.type === 'reflection.task.failed') {
+      clearActiveReflectionTask(event.task_id);
+    }
+
+    if (section && ['echoes', 'traits', 'patterns'].includes(section)) {
+      setStreaming(p => ({ ...p, [section]: statusText }));
+    }
+  }, []);
+
+  const openReflectionBlogReport = useCallback((report: Omit<AnalysisReport, 'id' | 'timestamp'> & Partial<Pick<AnalysisReport, 'id' | 'timestamp'>>) => {
+    const wrapped: AnalysisReport = {
+      id: report.id ?? Date.now(),
+      echoes: report.echoes,
+      traits: report.traits,
+      patterns: report.patterns,
+      timestamp: report.timestamp ?? Date.now(),
+      stats: report.stats,
+    };
+    setSelectedReport(wrapped);
+    setViewMode('blog');
+  }, []);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const active = readActiveReflectionTask();
+    if (!active || recoveringTaskIdRef.current === active.taskId) return;
+
+    let cancelled = false;
+    recoveringTaskIdRef.current = active.taskId;
+    setViewMode('dashboard');
+    setSelectedReport(null);
+    setTaskStatus('task · reconnecting');
+    const sections = active.sections.length > 0 ? active.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
+    setLoading({
+      echoes: sections.includes('echoes'),
+      traits: sections.includes('traits'),
+      patterns: sections.includes('patterns'),
+    });
+    setStreaming({ echoes: '', traits: '', patterns: '' });
+
+    const restore = async () => {
+      let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
+      try {
+        const bySection = await resumeReflectionsTask(active.taskId, {
+          lastEventId: active.lastEventId,
+          onEvent: handleTaskEvent,
+        });
+        if (cancelled) return;
+        er = bySection.echoes;
+        tr = bySection.traits;
+        pr = bySection.patterns;
+        setEchoes(er);
+        setTraits(tr);
+        setPatterns(pr);
+        clearActiveReflectionTask(active.taskId);
+        setTaskStatus('task · restored');
+      } catch (e) {
+        if (!cancelled) {
+          const msg = e instanceof Error ? e.message : String(e);
+          setErrors({ echoes: msg, traits: '', patterns: '' });
+          setTaskStatus('task · reconnect failed');
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading({ echoes: false, traits: false, patterns: false });
+          setStreaming({ echoes: '', traits: '', patterns: '' });
+        }
+      }
+
+      if (!cancelled && (er.length || tr.length || pr.length)) {
+        const reportData = {
+          echoes: er, traits: tr, patterns: pr,
+          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+        };
+        const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
+        try {
+          await saveAnalysisReport('full_analysis', reportData);
+          await reloadSavedReports();
+        } catch (e) { console.error(e); }
+        localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
+        openReflectionBlogReport(entry);
+      }
+    };
+
+    void restore();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeRecoveryTick, handleTaskEvent, isAuthenticated, openReflectionBlogReport, reloadSavedReports, stats.totalDays, stats.totalEntries, stats.totalWords]);
+
+
   // ── Per-section analysis with streaming ──
   const handleAnalyzeSection = async (section: SectionKey) => {
     if (!isAuthenticated) {
@@ -409,39 +862,43 @@ export default function AnalysisView() {
     setLoading(p => ({ ...p, [section]: true }));
 
     const setter = section === 'echoes' ? setEchoes : section === 'traits' ? setTraits : setPatterns;
-    const fn = section === 'echoes' ? analyzeEchoes : section === 'traits' ? analyzeTraits : analyzePatterns;
 
     try {
-      const results = await fn((delta) => {
-        setStreaming(p => ({ ...p, [section]: p[section] + delta }));
+      const bySection = await runReflectionsTask({
+        sections: [section],
+        language: i18n.language,
+        onEvent: handleTaskEvent,
       });
+      const results = bySection[section];
       setter(results);
       setStreaming(p => ({ ...p, [section]: '' }));
       if (results.length === 0) {
-        setErrors(p => ({ ...p, [section]: 'No results — the agent response may not have contained valid JSON.' }));
+        setErrors(p => ({ ...p, [section]: 'No results — the Reflections task completed without section output.' }));
         return;
       }
+      const entry: AnalysisReport = {
+        id: Date.now(),
+        echoes:   section === 'echoes'   ? results : [],
+        traits:   section === 'traits'   ? results : [],
+        patterns: section === 'patterns' ? results : [],
+        timestamp: Date.now(),
+        stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+      };
       if (isAuthenticated) {
         try {
           await saveAnalysisReport(`reflections_${section}`, {
             [section]: results,
-            stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+            stats: entry.stats,
           });
           await reloadSavedReports();
         } catch (e) { console.warn('[Reflections] save failed:', e); }
       } else {
-        const entry: AnalysisReport = {
-          id: Date.now(),
-          echoes:   section === 'echoes'   ? results : [],
-          traits:   section === 'traits'   ? results : [],
-          patterns: section === 'patterns' ? results : [],
-          timestamp: Date.now(),
-          stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
-        };
         const updated = [entry, ...savedReports].slice(0, MAX_SAVED_REPORTS);
         localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
         setSavedReports(updated);
       }
+      localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
+      openReflectionBlogReport(entry);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       setErrors(p => ({ ...p, [section]: msg }));
@@ -452,57 +909,165 @@ export default function AnalysisView() {
   };
 
   // ── One-click analyze all ──
-  const handleAnalyzeAll = async () => {
+  const runAnalyzeAll = async (sessionIds?: string[]) => {
     if (!isAuthenticated) {
       setErrors({ echoes: 'Please log in to use reflections.', traits: '', patterns: '' });
       return;
     }
     setErrors({ echoes: '', traits: '', patterns: '' });
+    setStreaming({ echoes: '', traits: '', patterns: '' });
+    setTaskStatus('task · preparing');
+    setViewMode('dashboard');
+    setSelectedReport(null);
+    setEchoes([]);
+    setTraits([]);
+    setPatterns([]);
+    setLoading({ echoes: true, traits: true, patterns: true });
+
     let er: ReflectionResult[] = [], tr: ReflectionResult[] = [], pr: ReflectionResult[] = [];
-
-    const run = async (
-      fn: () => Promise<ReflectionResult[]>,
-      key: SectionKey extends 'echo' ? never : 'echoes' | 'traits' | 'patterns',
-      cb: (r: ReflectionResult[]) => void,
-    ): Promise<ReflectionResult[]> => {
-      setLoading(p => ({ ...p, [key]: true }));
-      try {
-        const result = await fn();
-        cb(result);
-        return result;
-      } catch (e) {
-        setErrors(p => ({ ...p, [key]: e instanceof Error ? e.message : String(e) }));
-        return [];
-      } finally {
-        setLoading(p => ({ ...p, [key]: false }));
-      }
-    };
-
-    [er, tr, pr] = await Promise.all([
-      run(() => analyzeEchoes(), 'echoes', r => setEchoes(r)),
-      run(() => analyzeTraits(), 'traits',  r => setTraits(r)),
-      run(() => analyzePatterns(), 'patterns', r => setPatterns(r)),
-    ]);
+    try {
+      const bySection = await runReflectionsTask({
+        language: i18n.language,
+        sessionIds,
+        onEvent: handleTaskEvent,
+      });
+      er = bySection.echoes;
+      tr = bySection.traits;
+      pr = bySection.patterns;
+      setEchoes(er);
+      setTraits(tr);
+      setPatterns(pr);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setErrors({ echoes: msg, traits: '', patterns: '' });
+    } finally {
+      setLoading({ echoes: false, traits: false, patterns: false });
+      setStreaming({ echoes: '', traits: '', patterns: '' });
+    }
 
     if (er.length || tr.length || pr.length) {
       const reportData = {
         echoes: er, traits: tr, patterns: pr,
         stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
       };
+      const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
       if (isAuthenticated) {
         try {
           await saveAnalysisReport('full_analysis', reportData);
           await reloadSavedReports();
         } catch (e) { console.error(e); }
       } else {
-        const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
         const updated = [entry, ...savedReports].slice(0, MAX_SAVED_REPORTS);
         localStorage.setItem(STORAGE_KEYS.ANALYSIS_REPORTS, JSON.stringify(updated));
         setSavedReports(updated);
       }
-      setViewMode('report');
-      setCurrentPaper(0);
+      localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
+      openReflectionBlogReport(entry);
     }
+  };
+
+  const handleAnalyzeAll = async () => {
+    if (anyLoading) return;
+
+    const active = readActiveReflectionTask();
+    if (active?.taskId) {
+      try {
+        const task = await getReflectionTask(active.taskId);
+        if (isTerminalReflectionTaskStatus(task.status)) {
+          clearActiveReflectionTask(active.taskId);
+        } else {
+          const sections = active.sections.length > 0 ? active.sections : ['echoes', 'traits', 'patterns'] as SectionKey[];
+          setReanalysisDialog(prev => ({ ...prev, open: false, error: '' }));
+          setViewMode('dashboard');
+          setSelectedReport(null);
+          setTaskStatus('task · reconnecting');
+          setLoading({
+            echoes: sections.includes('echoes'),
+            traits: sections.includes('traits'),
+            patterns: sections.includes('patterns'),
+          });
+          setStreaming({ echoes: '', traits: '', patterns: '' });
+
+          try {
+            const bySection = await resumeReflectionsTask(active.taskId, {
+              lastEventId: active.lastEventId,
+              onEvent: handleTaskEvent,
+            });
+            const er = bySection.echoes;
+            const tr = bySection.traits;
+            const pr = bySection.patterns;
+            setEchoes(er);
+            setTraits(tr);
+            setPatterns(pr);
+            clearActiveReflectionTask(active.taskId);
+            setTaskStatus('task · restored');
+            if (er.length || tr.length || pr.length) {
+              const reportData = {
+                echoes: er, traits: tr, patterns: pr,
+                stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+              };
+              const entry: AnalysisReport = { id: Date.now(), ...reportData, timestamp: Date.now() };
+              await saveAnalysisReport('full_analysis', reportData);
+              await reloadSavedReports();
+              localStorage.setItem(STORAGE_KEYS.REFLECTIONS_ANALYSIS_CLICKED_DATE, localDateKey(entry.timestamp));
+              openReflectionBlogReport(entry);
+            }
+          } catch (resumeError) {
+            const msg = resumeError instanceof Error ? resumeError.message : String(resumeError);
+            setErrors({ echoes: msg, traits: '', patterns: '' });
+            setTaskStatus('task · reconnect failed');
+          } finally {
+            setLoading({ echoes: false, traits: false, patterns: false });
+            setStreaming({ echoes: '', traits: '', patterns: '' });
+          }
+          return;
+        }
+      } catch (e) {
+        console.warn('[Reflections] active task validation failed before analysis start:', e);
+        clearActiveReflectionTask(active.taskId);
+      }
+    }
+
+    const todayKey = localDateKey(Date.now());
+    const hasTodayReport = savedReports.some(report => localDateKey(report.timestamp) === todayKey);
+    if (hasTodayReport) {
+      const candidates = analyzableSessions.filter(session => session.has_text !== false);
+      setReanalysisDialog({
+        open: true,
+        sessions: candidates,
+        selectedIds: candidates.map(session => session.id),
+        error: candidates.length === 0 ? 'No analyzable diary entries are available.' : '',
+      });
+      return;
+    }
+    await runAnalyzeAll();
+  };
+
+  const handleToggleReanalysisSession = useCallback((sessionId: string) => {
+    setReanalysisDialog(prev => {
+      const selected = new Set(prev.selectedIds);
+      if (selected.has(sessionId)) selected.delete(sessionId);
+      else selected.add(sessionId);
+      return { ...prev, selectedIds: [...selected], error: '' };
+    });
+  }, []);
+
+  const handleToggleAllReanalysisSessions = useCallback(() => {
+    setReanalysisDialog(prev => ({
+      ...prev,
+      selectedIds: prev.selectedIds.length === prev.sessions.length ? [] : prev.sessions.map(session => session.id),
+      error: '',
+    }));
+  }, []);
+
+  const handleConfirmReanalysis = async () => {
+    const selectedIds = reanalysisDialog.selectedIds;
+    if (selectedIds.length === 0) {
+      setReanalysisDialog(prev => ({ ...prev, error: 'Select at least one diary entry before re-analyzing.' }));
+      return;
+    }
+    setReanalysisDialog(prev => ({ ...prev, open: false, error: '' }));
+    await runAnalyzeAll(selectedIds);
   };
 
   const anyLoading = loading.echoes || loading.traits || loading.patterns;
@@ -594,6 +1159,7 @@ export default function AnalysisView() {
       padding: isMobile ? '1.75rem 1rem 2.5rem' : '3rem 2rem',
       position: 'relative',
     }}>
+      <style>{`@keyframes reflection-progress-sweep{0%{transform:translateX(-120%)}100%{transform:translateX(260%)}}`}</style>
       <DecorativeInkSpots />
 
       <div style={{ maxWidth: '1100px', margin: '0 auto', position: 'relative' }}>
@@ -766,6 +1332,47 @@ export default function AnalysisView() {
           >
             {anyLoading ? t('analysis.actions.generating') : t('analysis.actions.generate')}
           </button>
+          {taskStatus && (
+            <div style={{
+              width: 'min(520px, 100%)',
+              margin: '1rem auto 0',
+              padding: '0.9rem 1.1rem',
+              borderRadius: '18px',
+              border: '1px solid color-mix(in srgb, var(--color-border-paper) 70%, transparent)',
+              background: 'linear-gradient(135deg, var(--color-bg-surface) 0%, color-mix(in srgb, var(--color-bg-surface-solid) 84%, transparent) 100%)',
+              boxShadow: '0 14px 40px color-mix(in srgb, var(--color-border-paper) 22%, transparent)',
+              fontSize: '12px',
+              color: 'var(--color-text-secondary)',
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              display: 'grid',
+              gap: '0.55rem',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '1rem', alignItems: 'center' }}>
+                <span style={{ letterSpacing: '1.6px', textTransform: 'uppercase', fontSize: '10px', color: 'var(--color-text-muted)', fontWeight: 700 }}>
+                  Live editorial analysis
+                </span>
+                <span style={{ fontFamily: 'Georgia, serif', fontStyle: 'italic', color: 'var(--color-text-body)' }}>
+                  {taskStatus}
+                </span>
+              </div>
+              {anyLoading && (
+                <div style={{
+                  height: '3px',
+                  overflow: 'hidden',
+                  borderRadius: '999px',
+                  background: 'color-mix(in srgb, var(--color-border-paper) 38%, transparent)',
+                }}>
+                  <div style={{
+                    width: '42%',
+                    height: '100%',
+                    borderRadius: '999px',
+                    background: 'linear-gradient(90deg, transparent, var(--color-text-muted), transparent)',
+                    animation: 'reflection-progress-sweep 1.5s ease-in-out infinite',
+                  }} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Per-section controls + streaming */}
@@ -823,7 +1430,10 @@ export default function AnalysisView() {
         {hasAnyData && viewMode === 'dashboard' && (
           <div style={{ textAlign: 'center', marginTop: '2rem' }}>
             <button
-              onClick={() => { setViewMode('report'); setCurrentPaper(0); }}
+              onClick={() => openReflectionBlogReport({
+                echoes, traits, patterns,
+                stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
+              })}
               style={{
                 padding: '12px 32px', borderRadius: '24px',
                 background: 'var(--color-bg-surface-solid)',
@@ -847,6 +1457,18 @@ export default function AnalysisView() {
           </div>
         )}
       </div>
+
+      <ReanalysisConfirmModal
+        open={reanalysisDialog.open}
+        sessions={reanalysisDialog.sessions}
+        selectedIds={reanalysisDialog.selectedIds}
+        error={reanalysisDialog.error}
+        isMobile={isMobile}
+        onClose={() => setReanalysisDialog(prev => ({ ...prev, open: false }))}
+        onToggleSession={handleToggleReanalysisSession}
+        onSelectAll={handleToggleAllReanalysisSessions}
+        onConfirm={handleConfirmReanalysis}
+      />
 
       {/* Section config modal */}
       <SectionConfigModal
@@ -977,7 +1599,7 @@ function SectionControlsRow({
               fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
               fontStyle: 'italic',
             }}>
-              Reading memory workspace…
+              Waiting for backend Reflections task…
             </div>
           )}
           {errors[key] && !loading[key] && (
@@ -1437,41 +2059,10 @@ function VintageStatLabel({ label, value }: { label: string; value: number | str
 }
 
 // ══════════════════════════════════════════════
-// ReflectionBlogPage — full-page editorial blog layout
-// Nav right: section tabs (switch which section is shown)
-// Main area: single scrollable page — hero + item list + detail below on click
-// Detail view (image2 layout) renders BELOW the list, no mode switching
-// Player bar: sticky at viewport bottom when an item is selected
-// Color spec: docs/prd/color_system/reflection-blog.md
-// Feature PRD: docs/prd/reflection-blog.md
-// ══════════════════════════════════════════════
-
-// ══════════════════════════════════════════════
-// ReflectionBlogPage — left-right split layout
-// Left panel: section nav (Recurring Themes / Traits / Patterns)
-// Right panel: title list for active section; click title → detail below
-// Detail area (image2): description left | related notes right | player bar
-// Color spec: docs/prd/color_system/reflection-blog.md
-// Feature PRD: docs/prd/reflection-blog.md
-// ══════════════════════════════════════════════
-
-// ══════════════════════════════════════════════
-// ReflectionBlogPage — left/right split layout (PRD v3)
-// Left  : Hero (cover art + date + stats)
-// Right : Section tabs (top) + title-only list (below)
-// Below : Detail area (description | related notes + player bar)
-// Color spec : docs/prd/color_system/reflection-blog.md
-// Feature PRD: docs/prd/reflection-blog.md
-// ══════════════════════════════════════════════
-
-// ══════════════════════════════════════════════
-// ReflectionBlogPage — fixed-height flex layout (PRD v4)
-// Layout: flex column, overflow hidden, no outer page scroll
-// Left  : Hero (cover art + date + stats), overflow-y auto
-// Right : Section tabs (flex-shrink:0) + title list (flex:1, overflow-y:auto)
-// Detail: fixed height below split, internal scroll per column
-// Player: flex-shrink:0 at very bottom, floats above content
-// Refs  : docs/prd/reflection-blog.md, docs/prd/color_system/reflection-blog.md
+// ReflectionBlogPage — fixed-height editorial layout with bottom player
+// Keep original structure: left hero, right section list, lower detail panel, bottom player.
+// Visual work is constrained to magazine-style polish and clearer selected/playing feedback.
+// Refs: docs/prd/reflection-blog.md, docs/prd/color_system/reflection-blog.md
 // ══════════════════════════════════════════════
 function ReflectionBlogPage({
   report, onBack, isMobile, t, dateLocale,
@@ -1517,16 +2108,16 @@ function ReflectionBlogPage({
   const coverArt = (size: number) => (
     <div style={{
       flexShrink: 0, width: size, height: size,
-      background: 'linear-gradient(145deg, var(--color-bg-surface-solid) 0%, color-mix(in srgb, var(--color-border-paper) 40%, var(--color-bg-surface-solid)) 100%)',
-      border: '1px solid var(--color-border-paper)', borderRadius: '8px',
-      boxShadow: '0 4px 16px var(--color-shadow-medium), 0 1px 4px var(--color-shadow-soft)',
+      background: 'linear-gradient(160deg, var(--color-text-primary) 0%, color-mix(in srgb, var(--color-text-primary) 72%, var(--color-bg-paper)) 100%)',
+      border: '1px solid color-mix(in srgb, var(--color-bg-paper) 42%, var(--color-border-paper))', borderRadius: '12px',
+      boxShadow: '0 14px 34px color-mix(in srgb, var(--color-text-primary) 24%, transparent), inset 0 0 0 1px color-mix(in srgb, var(--color-bg-paper) 18%, transparent)',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
       gap: size > 80 ? '4px' : '2px', position: 'relative', overflow: 'hidden',
     }}>
       <div style={{ position: 'absolute', inset: 0, backgroundImage: 'repeating-linear-gradient(0deg, color-mix(in srgb, var(--color-border-paper) 5%, transparent) 0px, transparent 2px)', pointerEvents: 'none' }} />
-      <span style={{ fontSize: size > 80 ? '11px' : '8px', letterSpacing: '3px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, position: 'relative' }}>{monthStr}</span>
-      <span style={{ fontSize: size > 80 ? '44px' : '24px', fontWeight: 300, fontFamily: 'Georgia, serif', lineHeight: 1, color: 'var(--color-text-primary)', position: 'relative' }}>{dayStr}</span>
-      <span style={{ fontSize: size > 80 ? '11px' : '8px', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', position: 'relative' }}>{yearStr}</span>
+      <span style={{ fontSize: size > 80 ? '11px' : '8px', letterSpacing: '3px', textTransform: 'uppercase', color: 'color-mix(in srgb, var(--color-bg-paper) 76%, transparent)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, position: 'relative' }}>{monthStr}</span>
+      <span style={{ fontSize: size > 80 ? '44px' : '24px', fontWeight: 300, fontFamily: 'Georgia, serif', lineHeight: 1, color: 'var(--color-bg-paper)', position: 'relative' }}>{dayStr}</span>
+      <span style={{ fontSize: size > 80 ? '11px' : '8px', color: 'color-mix(in srgb, var(--color-bg-paper) 68%, transparent)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', position: 'relative' }}>{yearStr}</span>
     </div>
   );
 
@@ -1535,15 +2126,16 @@ function ReflectionBlogPage({
       width: '100%', height: '100%',
       display: 'flex', flexDirection: 'column',
       overflow: 'hidden',
-      background: 'var(--color-bg-app)',
+      background: 'radial-gradient(circle at 18% 12%, color-mix(in srgb, var(--color-border-paper) 24%, transparent), transparent 28%), linear-gradient(135deg, var(--color-bg-app) 0%, var(--color-bg-paper) 100%)',
       fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif",
     }}>
 
       {/* ── Sticky Nav ── */}
       <div style={{
         flexShrink: 0, zIndex: 100,
-        background: 'color-mix(in srgb, var(--color-bg-surface-solid) 92%, transparent)',
-        backdropFilter: 'blur(16px)',
+        background: 'color-mix(in srgb, var(--color-bg-surface-solid) 86%, transparent)',
+        backdropFilter: 'blur(18px)',
+        boxShadow: '0 10px 28px color-mix(in srgb, var(--color-border-paper) 16%, transparent)',
         borderBottom: '1px solid var(--color-border-paper)',
         padding: isMobile ? '0.5rem 1rem' : '0.5rem 1.5rem',
         display: 'flex', alignItems: 'center',
@@ -1575,7 +2167,7 @@ function ReflectionBlogPage({
             overflowY: isMobile ? 'hidden' : 'auto',
             borderRight: isMobile ? 'none' : '1px solid var(--color-border-paper)',
             borderBottom: isMobile ? '1px solid var(--color-border-paper)' : 'none',
-            background: 'linear-gradient(180deg, var(--color-bg-surface-solid) 0%, var(--color-bg-app) 100%)',
+            background: 'linear-gradient(180deg, color-mix(in srgb, var(--color-bg-surface-solid) 96%, transparent) 0%, color-mix(in srgb, var(--color-bg-app) 92%, transparent) 100%)',
             padding: isMobile ? '0.875rem 1.25rem' : '2rem 1.75rem',
             display: 'flex',
             flexDirection: isMobile ? 'row' : 'column',
@@ -1586,7 +2178,7 @@ function ReflectionBlogPage({
 
             <div style={{ marginTop: isMobile ? 0 : '1.25rem', minWidth: 0 }}>
               <div style={{ fontSize: '9px', letterSpacing: '2.5px', textTransform: 'uppercase', color: 'var(--color-text-muted)', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif', fontWeight: 600, marginBottom: isMobile ? '0.25rem' : '0.4rem' }}>
-                Reflection
+                Édition Reflections
               </div>
               <div style={{ fontSize: isMobile ? '14px' : '18px', fontFamily: 'Georgia, serif', fontStyle: 'italic', color: 'var(--color-text-primary)', lineHeight: 1.3, marginBottom: isMobile ? '0.375rem' : '0.875rem' }}>
                 {fullDateStr}
@@ -1611,7 +2203,7 @@ function ReflectionBlogPage({
           <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
 
             {/* Section tabs */}
-            <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', flexShrink: 0 }}>
+            <div style={{ display: 'flex', borderBottom: '1px solid var(--color-border-paper)', background: 'color-mix(in srgb, var(--color-bg-surface) 82%, transparent)', flexShrink: 0 }}>
               {blogSections.map(s => {
                 const isActive = s.key === activeSection;
                 return (
@@ -1652,9 +2244,9 @@ function ReflectionBlogPage({
                     onClick={() => setSelectedItemIdx(isSelected ? null : i)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: '0.875rem',
-                      padding: '0.8rem 0',
+                      padding: '0.9rem 0.25rem',
                       width: '100%', textAlign: 'left',
-                      background: isSelected ? 'color-mix(in srgb, var(--color-border-paper) 7%, transparent)' : 'transparent',
+                      background: isSelected ? 'linear-gradient(90deg, color-mix(in srgb, var(--color-border-paper) 18%, transparent), transparent)' : 'transparent',
                       borderTop: 'none', borderLeft: 'none', borderRight: 'none',
                       borderBottom: `1px solid color-mix(in srgb, var(--color-border-paper) 35%, transparent)`,
                       cursor: 'pointer', transition: 'all 0.15s',
@@ -1682,7 +2274,8 @@ function ReflectionBlogPage({
             overflow: 'hidden',
             display: 'flex', flexDirection: 'column',
             borderTop: '2px solid var(--color-border-paper)',
-            background: 'var(--color-bg-surface)',
+            background: 'linear-gradient(180deg, var(--color-bg-surface) 0%, color-mix(in srgb, var(--color-bg-paper) 86%, var(--color-bg-surface)) 100%)',
+          boxShadow: '0 -18px 45px color-mix(in srgb, var(--color-border-paper) 16%, transparent)',
           }}>
             {/* Detail header */}
             <div style={{ flexShrink: 0, padding: isMobile ? '0.625rem 1.25rem' : '0.875rem 2rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid color-mix(in srgb, var(--color-border-paper) 50%, transparent)' }}>
@@ -1743,16 +2336,17 @@ function ReflectionBlogPage({
       {selectedItem !== null && (
         <div style={{
           flexShrink: 0,
-          background: 'var(--color-bg-surface-solid)',
-          borderTop: '1px solid var(--color-border-paper)',
+          background: 'linear-gradient(90deg, color-mix(in srgb, var(--color-bg-surface-solid) 96%, transparent), color-mix(in srgb, var(--color-bg-paper) 94%, transparent))',
+          borderTop: '1px solid color-mix(in srgb, var(--color-border-paper) 78%, transparent)',
           padding: isMobile ? '0.5rem 1rem' : '0.625rem 1.75rem',
           display: 'flex', alignItems: 'center', gap: isMobile ? '0.5rem' : '1.25rem',
-          boxShadow: '0 -3px 12px var(--color-shadow-soft)',
+          boxShadow: '0 -14px 36px color-mix(in srgb, var(--color-border-paper) 26%, transparent)',
+          backdropFilter: 'blur(18px)',
           zIndex: 10,
         }}>
           {/* Track info */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flex: 1, minWidth: 0 }}>
-            <div style={{ width: '32px', height: '32px', flexShrink: 0, background: 'linear-gradient(135deg, var(--color-bg-surface-solid) 0%, color-mix(in srgb, var(--color-border-paper) 40%, var(--color-bg-surface-solid)) 100%)', border: '1px solid var(--color-border-paper)', borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>
+            <div style={{ width: '32px', height: '32px', flexShrink: 0, background: 'linear-gradient(135deg, var(--color-text-primary) 0%, color-mix(in srgb, var(--color-text-primary) 74%, var(--color-bg-paper)) 100%)', border: '1px solid color-mix(in srgb, var(--color-bg-paper) 36%, var(--color-border-paper))', color: 'var(--color-bg-paper)', borderRadius: '5px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px' }}>
               {activeSectionObj?.icon}
             </div>
             <div style={{ minWidth: 0 }}>
