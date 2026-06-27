@@ -159,7 +159,7 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
         self.assertTrue(self.claude_stream_mock.called)
         request = self.claude_stream_mock.call_args.args[0]
         self.assertEqual(request.tool_choice, "auto")
-        self.assertEqual(request.max_turns, 5)
+        self.assertEqual(request.max_turns, 1000)
         self.assertIn("Section key: echoes", request.system_prompt)
         self.assertIn("memory", request.system_prompt)
         user_message = request.message_parts[0]["text"]

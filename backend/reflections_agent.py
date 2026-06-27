@@ -349,7 +349,7 @@ class ClaudeAgentReflectionsRunner:
             thread_id=thread_id,
             resume=False,
             tool_choice="auto",
-            max_turns=5,
+            max_turns=1000,
             message_id=f"reflections-{section}-{thread_id}",
             message_parts=[{"type": "text", "text": self._build_user_message(sessions)}],
             system_prompt=self._build_system_prompt(section, memory_path),

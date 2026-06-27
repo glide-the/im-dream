@@ -387,7 +387,7 @@ Step 3. POST /api/claude-agent (SSE)
                          ↳ 引擎注入为 <voice_context>，在用户消息前给 Agent 定向
           message.parts[0].text: <sessions_context> + 读 WORKFLOW.md 指令
           tool_choice: "auto"      ← 允许 Agent 用文件读取工具
-          max_turns: 5             ← 允许多轮（读文件 → 分析 → 输出）
+          max_turns: 1000             ← 允许多轮（读文件 → 分析 → 输出）
         ★ memoryPath 来自 Step 2 响应；若 Step 2 失败则 system_prompt 注明
           "No memory workspace was initialised"，Agent 使用内嵌指令继续。
         │
@@ -547,7 +547,7 @@ DEFAULT_UPDATE_MEMORY_PROMPT.md
 | 参数 | 值 | 说明 |
 |---|---|---|
 | `tool_choice` | `"auto"` | 允许 Agent 使用文件读取工具（Read）读取 WORKFLOW.md 等文件 |
-| `max_turns` | `5` | 足够完成：读 WORKFLOW.md → 读 QUERY → 读 DISTILLER → 分析 → 输出 |
+| `max_turns` | `1000` | 避免按需检索笔记和多轮读取 memory 文件时被旧的 5 轮限制截断 |
 | `resume` | `false` | 一次性分析，不恢复历史对话 |
 
 ### 7.2 memory_context 注入
@@ -725,7 +725,7 @@ Error 404: thread 不存在（需先 POST /api/claude-agent/threads）
     }]
   },
   "tool_choice": "auto",
-  "max_turns": 5
+  "max_turns": 1000
 }
 ```
 
