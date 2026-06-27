@@ -19,15 +19,15 @@ import asyncio
 import json
 import logging
 import os
-import re
 import tempfile
-import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, AsyncIterator, Protocol
 
 import database
+from llm_json_parser import try_parse_json_array, try_parse_json_object
 from reflections_config import get_section_config, list_sections
 
 logger = logging.getLogger(__name__)
@@ -248,25 +248,25 @@ def _language_instruction(language: Any) -> str:
     )
 
 
+def _session_metadata(session: dict[str, Any]) -> dict[str, Any]:
+    labels = session.get("labels") if isinstance(session.get("labels"), list) else []
+    return {
+        "sessionId": str(session.get("id") or ""),
+        "date": str(session.get("created_at") or session.get("updated_at") or "")[:10],
+        "title": str(session.get("name") or "Untitled")[:120],
+        "labels": [str(label) for label in labels if str(label).strip()],
+    }
+
+
 def _build_sessions_context(sessions: list[dict[str, Any]]) -> str:
-    parts: list[str] = []
-    for session in sessions:
-        text = (session.get("text") or session.get("first_line") or "").strip()
-        if not text:
-            continue
-        parts.append(
-            "\n".join(
-                [
-                    f"Session ID: {session.get('id')}",
-                    f"Name: {session.get('name') or 'Untitled'}",
-                    f"Created: {session.get('created_at') or ''}",
-                    f"Updated: {session.get('updated_at') or ''}",
-                    "Text:",
-                    text,
-                ]
-            )
-        )
-    return "\n\n---\n\n".join(parts)
+    metadata = [item for item in (_session_metadata(session) for session in sessions) if item["sessionId"]]
+    lines = [
+        "Full note bodies are intentionally omitted to keep this request small.",
+        "Use only these real session IDs in related_session_ids.",
+        "Before writing final insights, fetch needed note content by session ID with mcp__user__get_sessions_range using the listed date and labels, then match the returned sessionId.",
+    ]
+    lines.extend(json.dumps(item, ensure_ascii=False) for item in metadata)
+    return "<sessions_context>\n" + "\n".join(lines) + "\n</sessions_context>"
 
 
 def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions: list[dict[str, Any]], language: str = "en") -> str:
@@ -282,7 +282,7 @@ def _prepare_workspace(task_id: str, user_id: int, sections: list[str], sessions
     sessions_context = _build_sessions_context(sessions)
     (memory_dir / "sessions_context.md").write_text(sessions_context + "\n", encoding="utf-8")
     (memory_dir / "sessions_context.json").write_text(
-        json.dumps(sessions, ensure_ascii=False, indent=2),
+        json.dumps([_session_metadata(session) for session in sessions], ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
     language_code, language_label = _normalize_task_language(language)
@@ -331,66 +331,159 @@ def _update_analysis_state(workspace_path: str, **updates: Any) -> None:
     state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-class HeuristicReflectionsRunner:
-    """Deterministic local runner used for first-release functional behavior.
+class ClaudeAgentReflectionsRunner:
+    """Run each Reflections section through the Claude Agent workflow from the PRD."""
 
-    It keeps tests and local runs independent of external LLM credentials while
-    preserving the JSON result contract expected by the Reflections UI.
-    """
+    async def run_section(
+        self,
+        section: str,
+        sessions: list[dict[str, Any]],
+        language: str = "en",
+        *,
+        user_id: int,
+    ) -> list[dict[str, Any]]:
+        thread_id = database.create_chat_thread(user_id)
+        memory_path = self._init_memory_workspace(thread_id, user_id, section, language)
+        request = _build_claude_agent_run_request(
+            user_id=str(user_id),
+            thread_id=thread_id,
+            resume=False,
+            tool_choice="auto",
+            max_turns=1000,
+            message_id=f"reflections-{section}-{thread_id}",
+            message_parts=[{"type": "text", "text": self._build_user_message(sessions)}],
+            system_prompt=self._build_system_prompt(section, memory_path),
+        )
 
-    async def run_section(self, section: str, sessions: list[dict[str, Any]], language: str = "en") -> list[dict[str, Any]]:
-        await asyncio.sleep(0)
-        source_sessions = [s for s in sessions if (s.get("text") or "").strip()]
-        related_ids = [str(s.get("id")) for s in source_sessions[:3] if s.get("id")]
-        evidence = self._evidence(source_sessions)
-        if not related_ids:
-            return []
-        if _normalize_task_language(language)[0] == "zh":
-            title_map = {
-                "echoes": "反复出现的情绪回响",
-                "traits": "稳定的自我觉察",
-                "patterns": "可识别的写作节律",
-            }
-            description_map = {
-                "echoes": "这些笔记里反复出现的表达，显示出一个持续回到内心的情绪主题。",
-                "traits": "这些记录呈现出一种稳定倾向：认真观察自己的感受、选择与行动。",
-                "patterns": "写作历史显示出一种可识别的反思习惯与回应节奏。",
-            }
-        else:
-            title_map = {
-                "echoes": "Recurring Emotional Echo",
-                "traits": "Reflective Self Awareness",
-                "patterns": "Writing Rhythm Pattern",
-            }
-            description_map = {
-                "echoes": "Repeated journal language suggests a recurring emotional theme across the selected notes.",
-                "traits": "The notes show a stable tendency to observe feelings and choices with care.",
-                "patterns": "The writing history indicates a recognizable reflective routine and response pattern.",
-            }
-        return [
-            {
-                "title": title_map.get(section, f"{section.title()} Insight"),
-                "description": description_map.get(section, "A recurring signal was found in the selected writing sessions."),
-                "related_session_ids": related_ids,
-                "evidence": evidence,
-                "confidence": "medium" if len(related_ids) >= 2 else "low",
-            }
-        ]
+        async for _frame in _run_claude_agent_stream(request):
+            # Step 4 in the PRD requires draining the SSE stream before reading
+            # the persisted thread transcript.  Frames are intentionally not
+            # interpreted here; the transcript is the source of truth.
+            pass
+
+        return self._parse_thread_results(thread_id)
+
+    def _init_memory_workspace(self, thread_id: str, user_id: int, section: str, language: str) -> str | None:
+        try:
+            memory_dir = self._write_section_memory_workspace(
+                thread_id,
+                _effective_prompt_files(user_id, section),
+                language,
+            )
+            return str(memory_dir)
+        except Exception:
+            logger.exception(
+                "Reflections memory-init failed for section=%s thread_id=%s; continuing without memory",
+                section,
+                thread_id,
+            )
+            return None
 
     @staticmethod
-    def _evidence(sessions: list[dict[str, Any]]) -> str:
-        for session in sessions:
-            text = re.sub(r"\s+", " ", (session.get("text") or "").strip())
-            if text:
-                return text[:240]
-        return "No strong textual evidence available."
+    def _write_section_memory_workspace(
+        thread_id: str,
+        prompt_files: dict[str, str],
+        language: str,
+    ) -> Path:
+        workspace_root = _workspace_root().resolve()
+        workspace_path = (workspace_root / thread_id).resolve()
+        if not str(workspace_path).startswith(str(workspace_root)):
+            raise ValueError(f"thread_id resolves outside workspace root: {thread_id!r}")
+
+        memory_dir = workspace_path / "memory"
+        memory_dir.mkdir(parents=True, exist_ok=True)
+        language_code = _normalize_task_language(language)[0]
+        for filename, content in prompt_files.items():
+            if not isinstance(content, str) or not content.strip():
+                continue
+            prompt_content = content.strip()
+            if filename == "MEMORY_ANSWER_PROMPT.md":
+                prompt_content += _language_instruction(language_code)
+            (memory_dir / filename).write_text(prompt_content + "\n", encoding="utf-8")
+
+        proc_dir = memory_dir / "procedural"
+        proc_dir.mkdir(exist_ok=True)
+        (proc_dir / "analysis_state.json").write_text(
+            json.dumps({"completed": False, "results_count": 0}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        return memory_dir
+
+    @staticmethod
+    def _build_system_prompt(section: str, memory_path: str | None) -> str:
+        section_cfg = get_section_config(section)
+        display = section_cfg.get("display_name") or section
+        memory_line = (
+            f"The procedural memory workspace has been initialised at: {memory_path}"
+            if memory_path
+            else "No memory workspace was initialised; use the embedded Reflections instructions and session context."
+        )
+        return (
+            f'You are performing a "{display}" analysis for the Ink & Memory Reflections page.\n'
+            f"Section key: {section}.\n"
+            f"{memory_line}\n"
+            "Follow memory/WORKFLOW.md for the analysis procedure when the memory workspace is available.\n"
+            "Output ONLY a JSON array as your final response."
+        )
+
+    @staticmethod
+    def _build_user_message(sessions: list[dict[str, Any]]) -> str:
+        return (
+            f"{_build_sessions_context(sessions)}\n\n"
+            "Your memory workspace contains procedural analysis guidance.\n"
+            "Start by reading memory/WORKFLOW.md to understand the analysis procedure.\n"
+            "The sessions_context lists only allowed session IDs and labels, not full note bodies. "
+            "Fetch the note content you need by session ID before final analysis.\n"
+            "Then output ONLY a JSON array — no other text."
+        )
+
+    @staticmethod
+    def _parse_thread_results(thread_id: str) -> list[dict[str, Any]]:
+        messages = database.list_chat_messages(thread_id)
+        texts: list[str] = []
+        for message in messages:
+            if message.get("role") not in {"assistant", "system"}:
+                continue
+            for part in message.get("parts") or []:
+                if isinstance(part, dict) and part.get("type") == "text" and part.get("text"):
+                    texts.append(str(part["text"]))
+        for text in reversed(texts):
+            parsed = _parse_json_array_from_text(text)
+            if parsed is not None:
+                return parsed
+        return []
+
+
+def _build_claude_agent_run_request(**kwargs: Any) -> Any:
+    try:
+        from claude_agent import ClaudeAgentRunRequest
+
+        return ClaudeAgentRunRequest(**kwargs)
+    except ModuleNotFoundError:
+        return SimpleNamespace(**kwargs)
+
+
+async def _run_claude_agent_stream(request: Any) -> AsyncIterator[str]:
+    from agent_factory import claude_agent_thread_factory
+
+    async for frame in claude_agent_thread_factory.run_streaming(request):
+        yield frame
+
+
+def _parse_json_array_from_text(text: str) -> list[dict[str, Any]] | None:
+    _cleaned, value = try_parse_json_array(text)
+    if value:
+        parsed = [item for item in value if isinstance(item, dict)]
+        return parsed or None
+    _cleaned, obj = try_parse_json_object(text)
+    return [obj] if obj else None
 
 
 class ReflectionsTaskEngine:
     """Four-phase backend Task Engine for Reflections analysis."""
 
-    def __init__(self, runner: HeuristicReflectionsRunner | None = None) -> None:
-        self.runner = runner or HeuristicReflectionsRunner()
+    def __init__(self, runner: ClaudeAgentReflectionsRunner | None = None) -> None:
+        self.runner = runner or ClaudeAgentReflectionsRunner()
 
     async def run(self, task_id: str) -> None:
         lock = _TASK_LOCKS.setdefault(task_id, asyncio.Lock())
@@ -466,7 +559,12 @@ class ReflectionsTaskEngine:
         for section in context["sections"]:
             await bus.publish("reflection.section.started", {"section": section})
             try:
-                results = await self.runner.run_section(section, context["sessions"], context.get("language", "en"))
+                results = await self.runner.run_section(
+                    section,
+                    context["sessions"],
+                    context.get("language", "en"),
+                    user_id=context["user_id"],
+                )
                 validated = self._validate_results(results, section, context["sessions"])
                 database.replace_reflection_section_results(
                     context["task_id"], context["user_id"], section, validated
@@ -516,6 +614,8 @@ class ReflectionsTaskEngine:
             error_summary=error_summary,
             completed_at=_utcnow_iso(),
         )
+        if completed:
+            self._persist_analysis_report(context, completed)
         await bus.publish(
             event_type,
             {
@@ -524,6 +624,49 @@ class ReflectionsTaskEngine:
                 "result_count": outcome["total_results"],
             },
         )
+
+    @staticmethod
+    def _persist_analysis_report(context: dict[str, Any], completed_sections: list[str]) -> None:
+        """Mirror completed Reflections task output into the legacy analysis_reports table.
+
+        The frontend historically saved completed Reflections reports through
+        POST /api/reports after analysis.  Agent-backed tasks can now finish
+        while the page is refreshing or disconnected, so the backend must write
+        the same report shape after section results have been persisted.
+        """
+        task_id = context["task_id"]
+        user_id = int(context["user_id"])
+        persisted = database.list_reflection_results(task_id, user_id)
+        by_section = {
+            "echoes": [r for r in persisted if r.get("section") == "echoes"],
+            "traits": [r for r in persisted if r.get("section") == "traits"],
+            "patterns": [r for r in persisted if r.get("section") == "patterns"],
+        }
+        if not any(by_section.values()):
+            return
+
+        sessions = context.get("sessions") or []
+        day_keys = {str(s.get("created_at") or s.get("updated_at") or "")[:10] for s in sessions}
+        day_keys.discard("")
+        words = sum(len(str(s.get("text") or "").split()) for s in sessions)
+        report_data = {
+            "echoes": by_section["echoes"],
+            "traits": by_section["traits"],
+            "patterns": by_section["patterns"],
+            "stats": {
+                "days": len(day_keys),
+                "entries": len(sessions),
+                "words": words,
+            },
+        }
+        completed_set = set(completed_sections)
+        if completed_set == {"echoes", "traits", "patterns"}:
+            report_type = "full_analysis"
+        elif len(completed_sections) == 1:
+            report_type = f"reflections_{completed_sections[0]}"
+        else:
+            report_type = "reflections_partial"
+        database.save_analysis_report(user_id, report_type, report_data)
 
     @staticmethod
     def _validate_results(results: list[dict[str, Any]], section: str, sessions: list[dict[str, Any]]) -> list[dict[str, Any]]:

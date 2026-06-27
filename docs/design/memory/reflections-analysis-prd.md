@@ -316,32 +316,38 @@ two months is still a pattern.
 
 ## 5. sessions_context 格式
 
-前端在调用 claude-agent 前，将用户的会话数据格式化为以下文本块（最多 80 条，每条含 session ID 前缀）：
+后端在调用 claude-agent 前，将本次允许分析的会话格式化为轻量 `sessions_context`。为避免全部笔记正文塞进 `POST /api/claude-agent` SSE 请求导致上下文过长，`sessions_context` **只包含真实存在的 session ID、日期、标题和 labels，不包含正文 / first_line / excerpt / text**。Agent 必须按需通过 `mcp__user__get_sessions_range` 根据日期、labels 和返回的 `sessionId` 获取笔记内容，再进行分析。
 
 ```
-[session-id-1]  2026-01-15  标题或第一行内容  labels: [情绪, 工作]
-[session-id-2]  2026-01-20  今天感觉有些疲惫  labels: [身体, 日常]
-[session-id-3]  2026-02-03  新项目启动了      labels: [工作, 创作]
-...
+<sessions_context>
+Full note bodies are intentionally omitted to keep this request small.
+Use only these real session IDs in related_session_ids.
+Before writing final insights, fetch needed note content by session ID with mcp__user__get_sessions_range using the listed date and labels, then match the returned sessionId.
+{"sessionId":"session-id-1","date":"2026-01-15","title":"标题","labels":["情绪","工作"]}
+{"sessionId":"session-id-2","date":"2026-01-20","title":"今天感觉有些疲惫","labels":["身体","日常"]}
+{"sessionId":"session-id-3","date":"2026-02-03","title":"新项目启动了","labels":["工作","创作"]}
+</sessions_context>
 ```
 
 **格式规则**：
-- 每行以 `[session-id]` 开头（方括号包裹真实的 UUID），Agent 从这里提取 `related_session_ids`
-- 日期格式 `YYYY-MM-DD`
-- 标题截取前 120 字符
-- `labels` 为用户标记的分类标签（可为空）
+- 每条 session 使用一行 JSON，`sessionId` 必须来自本次 DB 查询结果，Agent 只能引用这些真实 ID 到 `related_session_ids`。
+- `date` 为 `YYYY-MM-DD`，用于调用 `mcp__user__get_sessions_range(start_date=date, end_date=date, labels=...)` 缩小检索范围。
+- `title` 截取前 120 字符，只作为定位线索，不替代正文证据。
+- `labels` 为用户标记的分类标签（可为空），用于按需检索正文。
+- 禁止在 `sessions_context` 和 `memory/sessions_context.json` 中写入正文、excerpt、first_line 或 full text。
 
 完整用户消息结构：
 
 ```
 <sessions_context>
-[session-id-1]  2026-01-15  ...
-[session-id-2]  2026-01-20  ...
+{"sessionId":"session-id-1","date":"2026-01-15","title":"...","labels":["..."]}
+{"sessionId":"session-id-2","date":"2026-01-20","title":"...","labels":[]}
 </sessions_context>
 
 Your memory workspace contains procedural analysis guidance.
 Start by reading memory/WORKFLOW.md to understand the analysis procedure.
-Then analyse the sessions above and output ONLY a JSON array — no other text.
+The sessions_context lists only allowed session IDs and labels, not full note bodies. Fetch the note content you need by session ID before final analysis.
+Then output ONLY a JSON array — no other text.
 ```
 
 ---
@@ -381,7 +387,7 @@ Step 3. POST /api/claude-agent (SSE)
                          ↳ 引擎注入为 <voice_context>，在用户消息前给 Agent 定向
           message.parts[0].text: <sessions_context> + 读 WORKFLOW.md 指令
           tool_choice: "auto"      ← 允许 Agent 用文件读取工具
-          max_turns: 5             ← 允许多轮（读文件 → 分析 → 输出）
+          max_turns: 1000             ← 允许多轮（读文件 → 分析 → 输出）
         ★ memoryPath 来自 Step 2 响应；若 Step 2 失败则 system_prompt 注明
           "No memory workspace was initialised"，Agent 使用内嵌指令继续。
         │
@@ -541,7 +547,7 @@ DEFAULT_UPDATE_MEMORY_PROMPT.md
 | 参数 | 值 | 说明 |
 |---|---|---|
 | `tool_choice` | `"auto"` | 允许 Agent 使用文件读取工具（Read）读取 WORKFLOW.md 等文件 |
-| `max_turns` | `5` | 足够完成：读 WORKFLOW.md → 读 QUERY → 读 DISTILLER → 分析 → 输出 |
+| `max_turns` | `1000` | 避免按需检索笔记和多轮读取 memory 文件时被旧的 5 轮限制截断 |
 | `resume` | `false` | 一次性分析，不恢复历史对话 |
 
 ### 7.2 memory_context 注入
@@ -715,11 +721,11 @@ Error 404: thread 不存在（需先 POST /api/claude-agent/threads）
     "role": "user",
     "parts": [{
       "type": "text",
-      "text": "<sessions_context>\n[id-1] date title labels\n...\n</sessions_context>\n\nStart by reading memory/WORKFLOW.md to understand the analysis procedure for this section.\nThen analyse the sessions above and output ONLY a JSON array — no other text."
+      "text": "<sessions_context>\n{\"sessionId\":\"id-1\",\"date\":\"2026-01-15\",\"title\":\"...\",\"labels\":[\"...\"]}\n...\n</sessions_context>\n\nStart by reading memory/WORKFLOW.md to understand the analysis procedure for this section.\nFetch note bodies by session ID with mcp__user__get_sessions_range before final analysis.\nThen output ONLY a JSON array — no other text."
     }]
   },
   "tool_choice": "auto",
-  "max_turns": 5
+  "max_turns": 1000
 }
 ```
 
@@ -966,7 +972,7 @@ savedReports 数组（Dashboard 历史报告网格）
 | Thread 生命周期 | 每次分析创建新 thread，不复用，不保留对话历史 |
 | 工作空间清理 | 分析完成后 workspace 保留（供调试），不主动删除 |
 | memory-init 失败 | 非致命：Agent 无 `<memory_context>` 时跳过 memory 操作，仍按嵌入指令分析 |
-| sessions_context 上限 | 最多 80 条会话，每条标题截取前 120 字符 |
+| sessions_context 上限 | 最多 80 条会话；每条只含 sessionId/date/title/labels，标题截取前 120 字符，不含正文 |
 | JSON 输出数量 | 3–6 个结果，多余的前端不做截断 |
 | 结果解析容错 | 支持剥离 markdown fence（```json ... ```），定位 `[...]` 区间 |
 | 历史报告恢复 | 按分区分别取最新一条，不要求同一次分析的三分区同时存在 |
