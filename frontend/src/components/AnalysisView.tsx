@@ -631,8 +631,23 @@ export default function AnalysisView() {
               stats: { days: 0, entries: 0, words: 0 },
             };
             setSavedReports(prev => {
-              const withoutDuplicate = prev.filter(r => r.timestamp !== taskReport.timestamp);
-              return [taskReport, ...withoutDuplicate].slice(0, MAX_SAVED_REPORTS);
+              const taskDay = localDateKey(taskReport.timestamp);
+              let mergedExisting = false;
+              const merged = prev.map(report => {
+                if (localDateKey(report.timestamp) !== taskDay) return report;
+                mergedExisting = true;
+                return {
+                  ...report,
+                  echoes: taskReport.echoes.length > 0 ? taskReport.echoes : report.echoes,
+                  traits: taskReport.traits.length > 0 ? taskReport.traits : report.traits,
+                  patterns: taskReport.patterns.length > 0 ? taskReport.patterns : report.patterns,
+                  timestamp: Math.max(report.timestamp, taskReport.timestamp),
+                  stats: report.stats.days || report.stats.entries || report.stats.words ? report.stats : taskReport.stats,
+                };
+              });
+              return (mergedExisting ? merged : [taskReport, ...merged])
+                .sort((a, b) => b.timestamp - a.timestamp)
+                .slice(0, MAX_SAVED_REPORTS);
             });
           }
         } catch (e) {

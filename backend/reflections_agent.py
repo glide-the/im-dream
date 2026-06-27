@@ -470,24 +470,115 @@ async def _run_claude_agent_stream(request: Any) -> AsyncIterator[str]:
         yield frame
 
 
-def _parse_json_array_from_text(text: str) -> list[dict[str, Any]] | None:
-    stripped = text.strip()
-    candidates = [stripped]
-    match = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", stripped, flags=re.DOTALL)
-    if match:
-        candidates.insert(0, match.group(1))
-    start = stripped.find("[")
-    end = stripped.rfind("]")
-    if start != -1 and end > start:
-        candidates.append(stripped[start : end + 1])
-    for candidate in candidates:
+def _json_fence_candidates(text: str) -> list[str]:
+    return [
+        match.group(1).strip()
+        for match in re.finditer(r"```(?:json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE)
+        if match.group(1).strip()
+    ]
+
+
+def _balanced_json_candidates(text: str) -> list[str]:
+    candidates: list[str] = []
+    for open_char, close_char in (("[", "]"), ("{", "}")):
+        start = text.find(open_char)
+        while start != -1:
+            depth = 0
+            in_string = False
+            escaped = False
+            for index in range(start, len(text)):
+                char = text[index]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == '"':
+                        in_string = False
+                    continue
+                if char == '"':
+                    in_string = True
+                elif char == open_char:
+                    depth += 1
+                elif char == close_char:
+                    depth -= 1
+                    if depth == 0:
+                        candidates.append(text[start : index + 1].strip())
+                        break
+            start = text.find(open_char, start + 1)
+    return candidates
+
+
+def _escape_unescaped_quotes_in_strings(candidate: str) -> str:
+    repaired: list[str] = []
+    in_string = False
+    escaped = False
+    length = len(candidate)
+    for index, char in enumerate(candidate):
+        if char != '"':
+            repaired.append(char)
+            if in_string and char == "\\" and not escaped:
+                escaped = True
+            else:
+                escaped = False
+            continue
+        if escaped:
+            repaired.append(char)
+            escaped = False
+            continue
+        if not in_string:
+            in_string = True
+            repaired.append(char)
+            continue
+        next_index = index + 1
+        while next_index < length and candidate[next_index].isspace():
+            next_index += 1
+        next_char = candidate[next_index] if next_index < length else ""
+        if next_char in {":", ",", "}", "]", ""}:
+            in_string = False
+            repaired.append(char)
+        else:
+            repaired.append('\\"')
+    return "".join(repaired)
+
+
+def _try_parse_json_candidate(candidate: str) -> Any | None:
+    cleaned = (
+        candidate.strip()
+        .replace("{{", "{")
+        .replace("}}", "}")
+        .replace('"[{', "[{")
+        .replace('}]"', "}]")
+    )
+    for attempt in (cleaned, _escape_unescaped_quotes_in_strings(cleaned)):
         try:
-            value = json.loads(candidate)
+            return json.loads(attempt)
         except Exception:
             continue
-        if isinstance(value, list):
-            return [item for item in value if isinstance(item, dict)]
     return None
+
+
+def _parse_json_array_from_text(text: str) -> list[dict[str, Any]] | None:
+    stripped = text.strip()
+    balanced = _balanced_json_candidates(stripped)
+    candidates = (
+        list(reversed(_json_fence_candidates(stripped)))
+        + [candidate for candidate in reversed(balanced) if candidate.startswith("[")]
+        + [stripped]
+        + [candidate for candidate in reversed(balanced) if candidate.startswith("{")]
+    )
+    # Prefer the latest valid array payload in a message, matching the final-answer
+    # convention used by Claude Agent turns. Keep a dict only as a fallback.
+    dict_fallback: list[dict[str, Any]] | None = None
+    for candidate in candidates:
+        value = _try_parse_json_candidate(candidate)
+        if isinstance(value, list):
+            parsed = [item for item in value if isinstance(item, dict)]
+            if parsed:
+                return parsed
+        if isinstance(value, dict) and dict_fallback is None:
+            dict_fallback = [value]
+    return dict_fallback
 
 
 class ReflectionsTaskEngine:

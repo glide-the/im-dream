@@ -24,7 +24,7 @@ if str(ROOT) not in sys.path:
 
 import auth
 import database
-from reflections_agent import ReflectionsTaskEngine, create_reflections_task, get_or_create_reflection_event_bus
+from reflections_agent import ReflectionsTaskEngine, _parse_json_array_from_text, create_reflections_task, get_or_create_reflection_event_bus
 from routers import deps as router_deps
 from routers.reflections import router as reflections_router
 
@@ -125,6 +125,14 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
         else:
             os.environ["AGENT_CWD"] = self.old_agent_cwd
         self.tmp.cleanup()
+
+
+    def test_parse_thread_results_repairs_fenced_json_with_inner_quotes(self):
+        text = 'Agent commentary before the final answer.\n\n```json\n[\n  {\n    "title": "多项目日常脉搏式并行追踪",\n    "description": "写作者同时维护着至少四个并行项目。",\n    "related_session_ids": ["session-a", "session-b"],\n    "evidence": "同一日期下，PDST-CHAT项目、智能体协作工程管理、Notion Device资源连接器设计方案各自拥有独立session；多个"日记"版本并行存在。",\n    "confidence": "high"\n  },\n  {\n    "title": ""小谷"作为跨月关系叙事的焦点人物",\n    "description": "围绕此人的记录呈现出清晰的叙事弧线。",\n    "related_session_ids": ["session-a"],\n    "evidence": "五月初日记标签含"小谷、精神分析与自我觉察、情感与关系"。",\n    "confidence": "medium"\n  }\n]\n```'
+        parsed = _parse_json_array_from_text(text)
+        self.assertIsNotNone(parsed)
+        self.assertEqual(len(parsed), 2)
+        self.assertEqual(parsed[1]["title"], '"小谷"作为跨月关系叙事的焦点人物')
 
     def test_task_engine_persists_results_and_events(self):
         task_id = create_reflections_task(self.user_id, ["echoes", "traits"], {})
