@@ -5,6 +5,8 @@
 # [Sync] 2026-06-25: implement first-release Reflections-agent flow: task/result
 #                    persistence, four-phase task engine, in-memory EventBus, and
 #                    TaskPersistenceObserver.
+#        2026-06-27: keep UTC timestamp generation compatible with the Python 3.10
+#                    backend container by using timezone.utc.
 """Backend Reflections-agent runtime.
 
 This module intentionally implements the first-release design only:
@@ -21,7 +23,7 @@ import logging
 import os
 import tempfile
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, AsyncIterator, Protocol
@@ -48,7 +50,7 @@ TERMINAL_TASK_STATUSES = {"COMPLETED", "PARTIAL_FAILED", "FAILED"}
 def _utcnow_iso() -> str:
     """Return a compact UTC ISO timestamp with a trailing Z."""
 
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 @dataclass(slots=True)
