@@ -8,6 +8,7 @@
 # [Sync] 2026-05-24: cover server startup cleanup of unsupported Agent env keys.
 # [Sync] 2026-06-22: cover Claude Agent route attachment handling when Settings
 #                    Workspace Mode is disabled.
+# [Sync] 2026-06-25: cover thread-scoped stop endpoint registration and routing.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -253,6 +254,9 @@ class TestClaudeAgentRouteRegistration(unittest.TestCase):
     def test_post_tool_confirm(self):
         self.assertTrue(self._has_route("POST", "/api/claude-agent/tool-confirm"))
 
+    def test_post_thread_stop(self):
+        self.assertTrue(self._has_route("POST", "/api/claude-agent/threads/{thread_id}/stop"))
+
 
 # ---------------------------------------------------------------------------
 # Pydantic model contract tests
@@ -376,6 +380,53 @@ class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
         self.assertEqual(response.media_type, "text/event-stream")
         get_or_create_workspace.assert_not_called()
         sync_attachments_to_workspace_files.assert_not_called()
+
+
+@_skip_if_no_server
+class TestClaudeAgentRouteStop(unittest.TestCase):
+    """Thread stop route should validate ownership before cancelling runtime state."""
+
+    def test_stop_thread_validates_owner_and_calls_factory(self):
+        import routers.claude_agent as route_module
+
+        async def _call_route():
+            return await route_module.claude_agent_stop_thread(
+                "thread-stop",
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-stop", "user_id": 7},
+            ) as get_chat_thread,
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "stop_thread",
+                new=unittest.mock.AsyncMock(
+                    return_value={
+                        "stop_requested": True,
+                        "running": False,
+                        "lifecycle": "idle",
+                    }
+                ),
+            ) as stop_thread,
+        ):
+            response = asyncio.run(_call_route())
+
+        get_chat_thread.assert_called_once_with("thread-stop", 7)
+        stop_thread.assert_awaited_once_with("thread-stop")
+        self.assertEqual(
+            response,
+            {
+                "ok": True,
+                "thread_id": "thread-stop",
+                "stop_requested": True,
+                "running": False,
+                "lifecycle": "idle",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

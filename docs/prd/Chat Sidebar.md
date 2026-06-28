@@ -1,10 +1,11 @@
 # Chat Sidebar PRD
 
 > 聊天侧边栏、会话导航、文件入口和设置入口的产品与视觉规范。本文引用 [Color System](<./color_system/README.md>)，并与前端实现保持同步。
+> **[Sync] 2026-06-28**: 当前 ChatView 不再使用左侧 rail/展开侧栏；历史对话由右上角「更多」菜单打开右侧 HistorySidePanel，搜索由面板标题栏按钮打开居中 HistorySearchDialog。
 
 ## 1. 文档范围
 
-Chat Sidebar 覆盖对话工作区中的导航、会话列表、状态入口、文件入口、设置入口、折叠态和移动端替代导航。Chat 工作区内的侧栏使用主题自适应折叠图标栏；展开面板和业务内容保持 Ink & Memory 的纸张式界面。
+Chat Sidebar 覆盖对话工作区中的历史会话面板、文件入口和移动端替代导航。当前 Chat 工作区不再使用左侧固定 rail；会话历史通过右上角「更多」菜单打开右侧 HistorySidePanel，文件通过同一菜单打开 FileSidebar。
 
 旧稿中的“玫瑰金”“高级灰调极简主义”“侧边栏设置 HTML 原型”不作为当前项目规范。
 
@@ -18,44 +19,42 @@ Chat Sidebar 覆盖对话工作区中的导航、会话列表、状态入口、�
 ## 3. 布局结构
 
 ```
-ChatSidebar
-├── BrandOrWorkspace
-├── PrimaryNav
-│   ├── Dashboard
-│   ├── Chats
-│   ├── Files
-│   └── Settings
-├── SessionList
-│   ├── Pinned/Recent group
-│   └── ChatSessionItem
-├── StatusArea
-│   ├── Sync/Ready/Error
-│   └── Storage/File hints
-└── UserOrUtilityArea
+ChatSidePanels
+├── MoreMenu（右上角）
+│   ├── 历史对话
+│   ├── 工作空间
+│   └── 分享
+├── HistorySidePanel（右侧展开）
+│   ├── Header（历史对话 / 搜索按钮 / 关闭按钮）
+│   └── SessionList
+│       └── ChatSessionItem
+├── HistorySearchDialog（居中弹窗）
+│   ├── SearchInput
+│   └── SearchResultList / GroupedDefaultHistory
+└── FileSidebar（右侧展开）
 ```
 
 ## 4. 桌面端规范
 
 | 区域 | 规范 |
 |---|---|
-| 宽度 | 默认窄栏 4rem；展开后约 12rem；会话历史面板展开宽度约 18rem。 |
-| 背景 | 导航窄栏使用 `color.bg.app`；展开业务面板使用 `color.bg.paper`。 |
-| 分隔 | 导航窄栏和业务面板均使用 `color.border.paper`。 |
-| 折叠态历史 | 会话历史入口打开 rail 右侧浮层，浮层不占用主内容布局宽度。 |
+| 宽度 | HistorySidePanel 约 `16rem`；FileSidebar 按文件工作区规范。 |
+| 背景 | 右侧业务面板使用 `color.bg.paper`。 |
+| 分隔 | 右侧业务面板左边框使用 `color.border.paper`。 |
+| 历史入口 | MoreMenu 中「历史对话」打开右侧 HistorySidePanel；面板会占用横向布局宽度。 |
 | 内边距 | 一级容器 16px 到 24px，列表项 8px 到 12px。 |
 | 字体 | 导航用系统无衬线，品牌/标题可使用 Georgia/Excalifont 气质。 |
 
 ## 5. 组件规范
 
-### 5.1 BrandOrWorkspace
+### 5.1 MoreMenu Entrypoints
 
-- 折叠态显示本地图标；点击用于展开/收起侧栏。
-- 展开态显示工作区标签，使用 `color.text.primary`。
-- 不使用远程头像作为必要设计资产。
-- 如需 Logo，保持简单文字或本地图标，避免高饱和块状品牌标。
-- 当前图标集使用 `IconGrid`、`IconFolder`、`IconClock`、`IconUser`，避免因参考图替换为不符合产品气质的新图标。
+- MoreMenu 位于 Chat 主界面右上角，由「更多」图标按钮触发。
+- 历史对话、工作空间、分享作为同一菜单中的低频入口展示。
+- 历史对话使用 `IconClock`，工作空间使用 `IconFolder`，分享使用 `IconShare`。
+- 菜单项 hover 使用 `color.bg.surface`，不使用高饱和填充。
 
-### 5.2 PrimaryNav
+### 5.2 Panel Header
 
 | 状态 | 视觉 |
 |---|---|
@@ -65,56 +64,70 @@ ChatSidebar
 | Focus | 可见边框或 ring。 |
 | Disabled | 降低对比并显示原因。 |
 
+- HistorySidePanel 头部左侧显示「历史对话」。
+- 右侧显示搜索按钮和关闭按钮；搜索按钮打开 HistorySearchDialog，不在侧栏内渲染输入框。
+- 关闭按钮只关闭 HistorySidePanel，不改变当前会话。
+
 ### 5.3 SessionList
 
-- 会话标题一行截断，保留最近消息摘要和时间。
+- 会话标题一行截断；默认历史侧栏不展示搜索摘要。
 - 当前会话使用 `color.border.focus` 或 `color.text.primary` 强化。
 - 未读或进行中状态使用小徽标，不使用大面积背景色。
-- 空列表显示“暂无会话”与新建入口。
-- 会话历史面板顶部包含搜索框；搜索过滤当前线程标题，不改变当前会话。
+- 打开 HistorySidePanel 时必须主动加载默认历史；加载中显示「加载历史中...」。
+- 空列表显示「暂无会话」，不在历史面板内显示新建入口。
+- hover 时可显示删除按钮；删除当前会话后清空当前 Chat 工作区。
 
-### 5.4 StatusArea
+### 5.4 HistorySearchDialog
+
+- 点击 HistorySidePanel 头部搜索按钮打开居中弹窗。
+- 顶部为无边框搜索输入和关闭按钮；输入为空时显示按时间分组的默认历史列表。
+- 弹窗不显示「新聊天」入口；新建会话只由 Chat 顶部「新建」按钮负责。
+- 输入后搜索 thread 标题和持久化对话正文；结果显示对话图标、标题、命中摘要和日期。
+- 无结果显示「未找到匹配会话」。
+- 点击结果关闭弹窗并切换会话。
+
+### 5.5 StatusArea
 
 - Ready 使用 `color.state.success` 小图标或文字。
 - Syncing 使用 `color.action.link` 或中性色 spinner。
 - Error 使用 `color.state.error` 和修复入口。
 - 存储、文件保留、权限等策略文案不得硬编码阈值，需引用产品策略。
 
-### 5.5 UserOrUtilityArea
+### 5.6 UserOrUtilityArea
 
 - 设置、账户、退出等低频操作放在底部或折叠菜单。
 - 破坏性操作使用 `color.state.danger`，需要确认或撤销路径。
 
-## 6. 折叠态与展开态交互设计
+## 6. 历史面板与搜索交互设计
 
-### 6.1 折叠态（4rem 窄轨，默认状态）
+### 6.1 HistorySidePanel
 
 | 模式 | 规范 |
 |---|---|
-| 窄侧边栏 | 默认 4rem，仅显示图标；鼠标悬浮显示 Tooltip（`color.bg.surfaceSolid` + `color.border.neutral`）。 |
-| 新建对话 | 点击 `+` 图标直接创建新线程，不展开侧边栏。 |
-| 文件入口 | 点击文件夹图标打开右侧文件侧栏，不展开侧边栏。 |
-| **折叠态历史浮层** | 点击时钟图标后，在 rail 右侧弹出 `最近聊天` 浮层（position absolute，不占主内容布局宽度）；再次点击关闭；点击浮层外部关闭。 |
-| 历史浮层内容 | 仅展示线程标题（一行截断）；当前会话右侧显示 `color.action.link` 小圆点；点击线程直接切换会话并关闭浮层。 |
-| 展开侧边栏 | 点击网格/品牌图标按钮展开侧边栏，切换为展开态。 |
+| 打开 | 点击 MoreMenu 中「历史对话」后右侧展开，打开即加载默认历史。 |
+| 关闭 | 点击头部关闭按钮；不清空当前会话。 |
+| 默认列表 | 展示所有 thread，按 `updated_at DESC`；标题一行截断。 |
+| 当前会话 | 右侧显示 `color.action.link` 小圆点。 |
+| 删除 | hover 显示删除按钮；删除动作不进入搜索弹窗。 |
+| 加载/空态 | 加载中显示「加载历史中...」；无数据后显示「暂无会话」。 |
 
-折叠态浮层规范：`color.bg.surfaceSolid`、`color.border.paper`、`color.shadow.medium`；圆角 `1.35rem`；空状态显示"暂无会话"。
-
-### 6.2 展开态（16rem 宽轨）
+### 6.2 HistorySearchDialog
 
 | 区域 | 规范 |
 |---|---|
-| 头部 | 左：品牌网格图标；右：折叠按钮（收回窄轨）；不显示文字标题，保持简洁。 |
-| 新建对话按钮 | 全宽主操作按钮，带 `+` 图标，颜色 `color.action.link`；创建中显示禁用态。 |
-| **内联历史列表** | 展开态直接在侧边栏内显示所有线程（可滚动 flex: 1 区域），无需浮层。当前线程高亮（`color.bg.paper` 底色 + `color.border.paper` 边框）；每条线程右侧有删除图标，hover 时显示。 |
-| 搜索 | 已移除（简化交互；如需恢复，在列表顶部添加带图标的搜索输入框）。 |
-| 底部 | 已移除用户区/文件按钮（由折叠态图标负责）。 |
+| 触发 | HistorySidePanel 标题栏搜索按钮。 |
+| 头部 | 搜索输入 + 关闭按钮；打开时输入框清空并聚焦。 |
+| 默认内容 | 输入为空时展示按时间分组的默认历史，不展示新建入口。 |
+| 搜索内容 | 输入后显示匹配 thread；摘要来自标题或对话正文命中片段。 |
+| 关闭 | 点击关闭、Esc 或遮罩关闭。 |
 
-折叠/展开不改变当前会话，不清空消息列表滚动位置。
+面板和弹窗开关不改变当前会话，不清空消息列表滚动位置。
 
 ## 7. 移动端适配
 
 - 不固定 280px 侧栏。
+- HistorySidePanel 在移动端优先变为右侧抽屉或全屏面板。
+- HistorySearchDialog 在移动端接近全屏，保留搜索输入和关闭按钮。
 - 优先使用顶部轻导航、底部 tab 或抽屉。
 - 抽屉打开时使用 `color.bg.overlay` 遮罩。
 - 输入 Dock 始终优先于侧栏入口，不被遮挡。
@@ -140,13 +153,15 @@ ChatSidebar
 ## 10. 可访问性
 
 - 所有导航项可键盘访问。
-- 折叠图标必须提供 Tooltip 和 aria-label。
+- MoreMenu、搜索、关闭、删除等图标按钮必须提供 Tooltip 或 aria-label。
 - 当前项需要同时通过语义状态和视觉表达。
 - 会话列表的时间、未读、错误不能只靠颜色。
 
 ## 11. 验收标准
 
-- Sidebar 的展开、折叠、隐藏、移动端抽屉均有设计要求。
+- HistorySidePanel 的打开、关闭、隐藏、移动端抽屉均有设计要求。
+- 历史侧栏初次打开必须显示真实历史或加载态，不得空白。
+- HistorySearchDialog 不显示「新聊天」入口。
 - 默认、hover、active、focus、disabled、loading、error、empty 状态均可验收。
 - 所有颜色引用 [Color System](<./color_system/README.md>)。
 - 不包含玫瑰金、Tailwind 原型或外部图标依赖作为必要实现。
@@ -155,10 +170,11 @@ ChatSidebar
 
 **`VerticalNav` 组件已从 `ChatView.tsx` 移除。** 侧边栏功能已重新分配：
 
-- 历史对话入口 → `ChatView.tsx` 右上角「更多」下拉菜单 → `RecentChatFlyout` 浮层
+- 历史对话入口 → `ChatView.tsx` 右上角「更多」下拉菜单 → 右侧 `HistorySidePanel`
+- 历史搜索入口 → `HistorySidePanel` 标题栏搜索按钮 → 居中 `HistorySearchDialog`
 - 文件/工作空间入口 → 「更多」菜单 → 右侧 `FileSidebar`
 - 新建对话 → 右上角常驻「新建」按钮
 
 `VerticalNav.tsx` 文件保留在代码库中但不再被 `ChatView.tsx` 引用，可在后续需要时复用其展开/折叠 + 内联线程列表的实现模式。
 
-当前 Chat 工作区已无左侧固定导航栏，页面全宽交给 ChatPanel 和内容区。
+当前 Chat 工作区已无左侧固定导航栏；HistorySidePanel 和 FileSidebar 作为右侧临时工作面板出现。

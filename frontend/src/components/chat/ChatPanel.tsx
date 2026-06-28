@@ -23,6 +23,8 @@
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
 // [Sync] 2026-06-22: respect Workspace Mode by withholding workspaceSessionId
 //                    from the input dock when workspace is disabled.
+// [Sync] 2026-06-25: stop button now calls the backend thread stop endpoint
+//                    instead of only aborting the local browser stream.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -147,6 +149,7 @@ export default function ChatPanel({
     ((value: UIMessage[] | ((messages: UIMessage[]) => UIMessage[])) => void) | null
   >(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const reconnectAbortRef = useRef<AbortController | null>(null);
   const { setActiveSessionId, workspaceEnabled } = useWorkspaceSession();
 
@@ -377,15 +380,34 @@ export default function ChatPanel({
     };
   }, [reconnectStreamNonce, threadId]);
 
-  const agentBusy = status === 'streaming' || status === 'submitted' || isReconnecting;
+  const agentBusy = status === 'streaming' || status === 'submitted' || isReconnecting || isStopping;
   const chatLoading = agentBusy || isLoading;
 
-  const handleStop = useCallback(() => {
+  const handleStop = useCallback(async () => {
+    if (isStopping) {
+      return;
+    }
+    setIsStopping(true);
     reconnectAbortRef.current?.abort();
     reconnectAbortRef.current = null;
     setIsReconnecting(false);
     stop();
-  }, [stop]);
+    try {
+      await fetch(
+        `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/stop`,
+        {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${getAuthToken()}` },
+        },
+      );
+    } catch {
+      // The local stream is already stopped; the next status check/reconnect
+      // will reconcile whether the backend turn is still running.
+    } finally {
+      setIsStopping(false);
+      onReconnectCompleteRef.current?.();
+    }
+  }, [isStopping, stop, threadId]);
   const shouldShowMessageSurface = messages.length > 0 || Boolean(error) || chatLoading;
 
   const shouldShowLoadingIndicator = useMemo(() => {
@@ -525,6 +547,7 @@ export default function ChatPanel({
           placeholder={inputPlaceholder}
           loading={agentBusy}
           onStop={agentBusy ? handleStop : undefined}
+          stopPending={isStopping}
           workspaceSessionId={workspaceEnabled ? threadId : undefined}
           mode="full"
         />

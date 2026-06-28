@@ -17,6 +17,7 @@ tests/
 ├── test_workspace_router.py             # Workspace router: download header encoding
 ├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
 ├── test_sessions_tool.py                # Agent get_sessions_range retrieval params and vector boundary
+├── test_chat_thread_retrieval.py        # Chat history thread search retrievers and vector boundary
 ├── test_claude_agent_runner.py          # Runner: streaming callbacks, session_id, error handling
 ├── test_claude_agent_thread_factory.py  # Factory: flyweight cache, TTL eviction, Phase 1-4 contracts
 ├── test_server_claude_agent.py          # Server smoke: route registration, auth enforcement, models
@@ -75,6 +76,12 @@ source .venv/bin/activate
 python tests/test_sessions_tool.py -v
 ```
 
+**Claude Agent — Chat History Retrieval (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_chat_thread_retrieval.py -v
+```
+
 **Claude Agent — Runner (mocks SDK, no server needed):**
 ```bash
 source .venv/bin/activate
@@ -125,6 +132,13 @@ python tests/test_seo_content.py -v
 - ✅ `labels` 支持 `label_match=all`
 - ✅ `retrieval_mode=auto` 在未配置向量库时降级 fuzzy
 - ✅ `retrieval_mode=vector` 返回未配置错误且不访问数据库
+
+### Claude Agent — Chat History Retrieval (`test_chat_thread_retrieval.py`)
+- ✅ Chat thread title fuzzy search
+- ✅ Persisted message-text fuzzy search
+- ✅ `search_scope=title` excludes message-only matches
+- ✅ `retrieval_mode=auto` downgrades unconfigured vector query to fuzzy
+- ✅ `retrieval_mode=vector` reports unavailable without a vector store
 
 ### Claude Agent — Runner (`test_claude_agent_runner.py`)
 - ✅ `on_text_delta` — AssistantMessage 文本块触发，full_text 正确累积

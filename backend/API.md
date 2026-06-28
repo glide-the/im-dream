@@ -455,6 +455,59 @@ Delete a session.
 
 ---
 
+## Claude Agent Chat Threads
+
+### GET `/api/claude-agent/threads`
+
+List Chat threads for the current user. Without search params, returns newest
+threads first. With `query`, searches thread titles and persisted conversation
+text through the configured Chat history retriever.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Query params:**
+- `query` (optional) - fuzzy title/message query
+- `search_scope` (optional, default `all`) - `all`, `title`, or `messages`
+- `retrieval_mode` (optional, default `fuzzy`) - `fuzzy`, `auto`, or `vector`
+- `vector_query` (optional) - JSON object string; reserved interface only
+- `min_score` (optional) - fuzzy threshold, `0` to `1`
+- `limit` (optional) - max result count
+
+**Response:**
+```json
+{
+  "threads": [
+    {
+      "id": "thread-123",
+      "title": "论文初筛流程",
+      "created_at": "2026-06-26 10:00:00",
+      "updated_at": "2026-06-27 09:00:00",
+      "match": {
+        "strategy": "fuzzy",
+        "retriever": "fuzzy",
+        "score": 1,
+        "fields": ["messages"],
+        "excerpt": "之前讨论过向量库先不接入，只保留接口。"
+      }
+    }
+  ],
+  "retrieval": {
+    "mode": "fuzzy",
+    "query": "向量库 接口",
+    "search_scope": "all",
+    "min_score": 0.35,
+    "limit": null,
+    "vector": "interface_only",
+    "retriever": "fuzzy"
+  }
+}
+```
+
+`retrieval_mode=vector` currently returns `ok=false`,
+`error="vector_retrieval_unavailable"`, and does not access a vector database.
+
+---
+
 ## Pictures
 
 ### GET `/api/pictures`
