@@ -12,6 +12,8 @@
 #                    lightweight callers.
 # [Sync] 2026-06-23: add Google OAuth, refresh-token, and Device Flow tables
 #                    plus helper functions while preserving the existing users table.
+# [Sync] 2026-06-27: add Chat thread search candidates with extracted message
+#                    text for Claude Agent history retrieval.
 """
 SQLite database setup and migrations for Ink & Memory.
 
@@ -1773,6 +1775,24 @@ def _extract_session_text(editor_state_json: str) -> tuple[str, str]:
     return first_line, full_text
 
 
+def _extract_chat_parts_text(parts_json: str) -> str:
+    """Return searchable plain text from a persisted UIMessage parts JSON."""
+    try:
+        parts = json.loads(parts_json) if parts_json else []
+    except Exception:
+        return ""
+
+    texts: list[str] = []
+    for part in parts if isinstance(parts, list) else []:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            text = str(part.get("text") or "").strip()
+            if text:
+                texts.append(text)
+    return "\n".join(texts).strip()
+
+
 def save_session(user_id: int, session_id: str, editor_state: dict, name: str = None,
                  created_at: Optional[Union[str, datetime]] = None,
                  labels: Optional[list] = None):
@@ -2791,6 +2811,52 @@ def list_chat_threads(user_id: int) -> list[dict]:
             (user_id,),
         ).fetchall()
         return [dict(row) for row in rows]
+    finally:
+        db.close()
+
+
+def list_chat_threads_for_search(user_id: int) -> list[dict]:
+    """List chat thread search candidates with aggregated message text."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT
+              t.id,
+              t.title,
+              t.created_at,
+              t.updated_at,
+              m.parts AS message_parts
+            FROM chat_thread t
+            LEFT JOIN chat_message m ON m.thread_id = t.id
+            WHERE t.user_id = ?
+            ORDER BY t.updated_at DESC, m.created_at ASC
+            """,
+            (user_id,),
+        ).fetchall()
+
+        by_thread: dict[str, dict] = {}
+        message_texts: dict[str, list[str]] = {}
+        for row in rows:
+            thread_id = row["id"]
+            if thread_id not in by_thread:
+                by_thread[thread_id] = {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "messages_text": "",
+                }
+                message_texts[thread_id] = []
+
+            message_text = _extract_chat_parts_text(row["message_parts"] or "")
+            if message_text:
+                message_texts[thread_id].append(message_text)
+
+        for thread_id, item in by_thread.items():
+            item["messages_text"] = "\n\n".join(message_texts.get(thread_id, []))
+
+        return list(by_thread.values())
     finally:
         db.close()
 

@@ -4,6 +4,7 @@
 > **[Sync] 2026-06-09**: Chat 输入区的权限切换受 Settings「应如何批准 IM」控制；完全访问开启时隐藏「逐步确认」并显示「完全访问」。
 > **[Sync] 2026-06-13**: 完全访问只隐藏全局逐步确认入口；`AskUserQuestion` / `mcp__user__ask_user` 仍显示问答确认窗口。
 > **[Sync] 2026-06-09**: ChatPanel 在用户上滑离开消息底部时，于 AIInputDock 上方显示悬浮「滚动到底部」箭头；点击后平滑回到底部并恢复自动贴底。
+> **[Sync] 2026-06-28**: 历史对话入口改为右侧历史面板；面板打开即加载默认历史，标题栏搜索按钮打开居中搜索弹窗。搜索弹窗只负责检索和切换会话，不显示「新聊天」入口。
 
 ## 1. 文档范围
 
@@ -28,10 +29,13 @@ ChatDashboard（height: 100%，overflow: hidden）
 ├── FloatingActionBar（右上角绝对定位，zIndex: 20）
 │   ├── NewChatButton（新建对话）
 │   └── MoreMenu（下拉菜单）
-│       ├── 历史对话（切换 RecentChatFlyout）
+│       ├── 历史对话（切换 HistorySidePanel）
 │       ├── 工作空间（切换 FileSidebar）
 │       └── 分享（复制当前页 URL）
-├── RecentChatFlyout（历史浮层，右上角下方弹出）
+├── HistorySidePanel（右侧历史对话面板，打开即显示默认历史）
+│   ├── Header（标题 + 搜索按钮 + 关闭按钮）
+│   └── ThreadList（默认历史列表）
+├── HistorySearchDialog（居中搜索弹窗，搜索标题和对话正文）
 ├── MainArea（flex: 1，flex-direction: column，overflow: hidden）
 │   ├── QuickActions（flexShrink: 0，未开始对话时显示）
 │   │   ├── 继续写作
@@ -52,6 +56,8 @@ ChatDashboard（height: 100%，overflow: hidden）
 | 页面画布 | `color.bg.app`，`height: 100%`，`overflow: hidden` | 全高，禁止外层滚动 |
 | FloatingActionBar | 绝对定位右上角，透明背景，按钮 hover 显示 `color.bg.surface` 轻底色；不占布局流 | 保持紧凑，不换行 |
 | MoreMenu 下拉 | `color.bg.surfaceSolid` + `color.border.paper` + `color.shadow.medium`，圆角 `0.85rem`；点击外部透明蒙层关闭 | 同左 |
+| HistorySidePanel | 右侧宽度约 `16rem`，`color.bg.paper`，左边框 `color.border.paper`，打开时必须主动加载默认历史 | 移动端宜改为抽屉或全屏面板 |
+| HistorySearchDialog | 居中弹窗，宽度约 `min(48rem, calc(100vw - 2rem))`，顶部无边框搜索输入，结果区独立滚动 | 小屏改为接近全屏，保留关闭按钮 |
 | 快捷入口 | 2 到 3 列纸面卡片，`flexShrink: 0` | 纵向列表或横滑 |
 | ChatPanel | `flex: 1`，`minHeight: 0`，消息流内部滚动 | 单列，左右留 16px 内边距 |
 | 到底部按钮 | 悬浮于 AIInputDock 上方居中，只在用户离开消息底部时出现 | 同桌面端，避开安全区和输入框 |
@@ -71,18 +77,28 @@ ChatDashboard（height: 100%，overflow: hidden）
 - 点击「更多」按钮弹出，点击外部透明蒙层（`position: fixed, inset: 0`）关闭。
 - 容器：`color.bg.surfaceSolid`、`color.border.paper`、`color.shadow.medium`，圆角 `0.85rem`，`padding: 0.35rem`。
 - 菜单项从上到下：
-  - **历史对话**（`IconClock`）：切换 RecentChatFlyout；激活态显示 `color.bg.surface` 底色。
+  - **历史对话**（`IconClock`）：切换右侧 HistorySidePanel；激活态显示 `color.bg.surface` 底色。
   - **工作空间**（`IconFolder`）：切换右侧 FileSidebar；激活态显示 `color.bg.surface` 底色。
   - 分隔线（`color.border.paper`）
   - **分享**（`IconShare`）：复制当前页 URL，点击后文案变为"已复制链接"。
 - 每个菜单项高 `2.2rem`，圆角 `0.55rem`，左侧图标 + 文字。
 
-### 4.1.2 RecentChatFlyout
+### 4.1.2 HistorySidePanel
 
-- 由 MoreMenu 中「历史对话」入口触发，弹出于 FloatingActionBar 下方（`right: 0.75rem, top: 3.25rem`），绝对定位，不推挤主内容。
-- 使用 `color.bg.surfaceSolid`、`color.border.paper`、`color.shadow.medium`，圆角 `1.25rem`。
-- 标题"最近聊天"，下方展示线程列表：当前线程右侧显示 `color.action.link` 小圆点；点击后切换会话并关闭浮层。
-- 空状态显示"暂无会话"。
+- 由 MoreMenu 中「历史对话」入口触发，作为右侧面板展开，宽度约 `16rem`，会占用横向布局空间。
+- 面板打开时必须主动请求默认历史列表；请求期间显示「加载历史中...」，不得在数据未返回前误显示「暂无会话」。
+- 面板头部左侧显示「历史对话」，右侧依次显示「搜索历史对话」图标按钮和「关闭」按钮。
+- 默认列表展示最新 thread 标题；当前会话右侧显示 `color.action.link` 小圆点；hover 时可显示删除按钮。
+- 空状态显示「暂无会话」。
+
+### 4.1.3 HistorySearchDialog
+
+- 由 HistorySidePanel 头部搜索按钮触发，居中覆盖在 Chat 页面上方，背景使用半透明 `color.bg.app` 混合遮罩。
+- 顶部为搜索输入和关闭按钮；输入框 placeholder 为「搜索聊天...」，打开时默认清空并自动聚焦。
+- 搜索范围覆盖 thread 标题和已持久化对话正文；输入后 debounce 请求 `/api/claude-agent/threads?query=...&search_scope=all&retrieval_mode=fuzzy`。
+- 输入为空时展示按更新时间分组的默认历史列表，不显示「新聊天」入口；新建会话由 FloatingActionBar 顶部「新建」按钮负责。
+- 输入有值时展示搜索结果：对话图标、标题、命中摘要、日期标签；无结果显示「未找到匹配会话」。
+- 点击搜索结果关闭弹窗并切换到对应会话。
 
 ### 4.2 QuickActions
 
@@ -174,6 +190,8 @@ ChatDashboard（height: 100%，overflow: hidden）
 - Chat 页面无外层垂直滚动，消息区自行滚动。
 - 当长对话中用户滚动到上方时，AIInputDock 上方出现到底部箭头；回到底部后该箭头隐藏。
 - 模型配置侧边栏已从 Chat 页面移除，迁移至 [Settings PRD](<./Settings.md>)。
+- 历史对话面板第一次打开必须显示真实历史或加载态；不得因搜索弹窗状态拆分而显示空白。
+- 搜索弹窗不包含「新聊天」按钮；新建会话入口只保留顶部「新建」。
 - 快捷指令与笔记系统场景一致，不含业务销售类内容。
 - `image.png` 被保留为视觉参考，未被覆盖。
 
@@ -182,7 +200,8 @@ ChatDashboard（height: 100%，overflow: hidden）
 - `ChatView.tsx`：移除独立 `VerticalNav` 侧边栏组件；改为右上角 `position: absolute` 浮动按钮区，常驻「新建对话」和「更多」两个按钮。
 - **FloatingActionBar**：`zIndex: 20`，按钮默认透明，hover 显示 `color.bg.surface`，无固定高度状态栏。
 - **MoreMenu**：「更多」按钮点击弹出下拉菜单，包含历史对话、工作空间、分享三项；使用 `position: fixed` 透明蒙层关闭。
-- **RecentChatFlyout**：由「更多 → 历史对话」触发，绝对定位于右上角下方（`right: 0.75rem, top: 3.25rem`）；`threadSidebarOpen` 状态控制显隐。
+- **HistorySidePanel**：由「更多 → 历史对话」触发，作为右侧面板展开；`threadSidebarOpen` 状态控制显隐，打开时刷新默认历史列表。
+- **HistorySearchDialog**：由 HistorySidePanel 标题栏搜索按钮触发；`threadSearchOpen` 状态控制显隐，负责标题和历史对话正文检索。
 - **FileSidebar**：由「更多 → 工作空间」触发，右侧可收起面板，`fileSidebarOpen` 状态控制。
 - `ChatPanel.tsx`：消息区背景改为 `color.bg.app`，移除边框，保持页面统一底色。
 - `AIInputDock.tsx`：全面对齐颜色系统 token；发送/工具选择按钮激活态改用炭黑（`color.text.primary`）；停止按钮改用 `color.state.danger`；阴影改为 `color.shadow.soft`；附件按钮文案改为"附件"。
@@ -190,5 +209,6 @@ ChatDashboard（height: 100%，overflow: hidden）
 - `ChatPanel.tsx` / `ChatMessageList.tsx`：消息列表和输入 Dock 填满 Chat 主区域宽度。
 - 2026-06-01：`ChatView.tsx` 首次挂载不再调用 `POST /api/claude-agent/threads`。无线程时先渲染草稿输入区；用户发送首条消息或点击快捷指令后再创建 thread，并把首条 prompt、附件和工具模式传入 `ChatPanel.tsx`。
 - 2026-06-09：`ChatPanel.tsx` 复用消息滚动容器状态，新增 AIInputDock 上方的悬浮到底部按钮；`Icons.tsx` 新增共享 `IconArrowDown`。
+- 2026-06-28：历史搜索从面板内联输入改为居中弹窗；删除弹窗内「新聊天」行；历史面板打开时主动加载默认历史并显示加载态。
 
 后续如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。

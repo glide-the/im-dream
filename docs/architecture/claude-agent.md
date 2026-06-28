@@ -47,6 +47,7 @@ backend/
 |----------|-------------------------------------|-------------------------------|------|----------------------------------|
 | `POST`   | `/api/claude-agent`                 | `claude_agent_stream`         | JWT  | SSE 流式聊天，委托 ThreadFactory |
 | `GET`    | `/api/claude-agent/chat-history`    | `claude_agent_chat_history`   | JWT  | 按 user_id 加载历史消息          |
+| `GET`    | `/api/claude-agent/threads`         | `claude_agent_list_threads`   | JWT  | 列出 Chat thread；可选 `query` / `retrieval_mode` 搜索标题与消息文本 |
 | `POST`   | `/api/claude-agent/message-latency` | `claude_agent_message_latency`| JWT  | 上报浏览器延迟指标               |
 | `GET`    | `/api/claude-agent/session`         | `claude_agent_session_status` | JWT  | 查询 Thread Session 保活快照     |
 | `DELETE` | `/api/claude-agent/session`         | `claude_agent_session_close`  | JWT  | 主动销毁会话                     |

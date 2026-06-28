@@ -21,19 +21,27 @@
 #                    handling no longer initializes or syncs a thread workspace.
 # [Sync] 2026-06-25: add thread-scoped stop endpoint so the frontend can cancel
 #                    the current Agent turn without deleting the chat thread.
+# [Sync] 2026-06-27: /api/claude-agent/threads accepts Chat history search
+#                    params backed by plugin-style fuzzy/vector retrievers.
 
 import base64
+import json
 import logging
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field
 
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
+from claude_agent.thread_retrieval import (
+    build_chat_thread_search_config,
+    is_chat_history_search_requested,
+    search_chat_threads,
+)
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.server.workspace import get_or_create_workspace
 from libs.claude_agent_kit.server.workspace_file_sync import (
@@ -63,6 +71,19 @@ def _coerce_string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _parse_vector_query_param(value: Optional[str]) -> dict[str, Any] | None:
+    """Parse the reserved vector_query query-param JSON object."""
+    if value is None or not value.strip():
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid vector_query JSON") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="vector_query must be a JSON object")
+    return parsed
 
 
 def _extract_message_text(message: Any) -> str:
@@ -329,12 +350,60 @@ async def claude_agent_create_thread(
 
 @router.get("/api/claude-agent/threads")
 async def claude_agent_list_threads(
+    query: Optional[str] = Query(default=None),
+    search_scope: str = Query(default="all"),
+    retrieval_mode: Optional[str] = Query(default=None),
+    vector_query: Optional[str] = Query(default=None),
+    min_score: Optional[float] = Query(default=None, ge=0, le=1),
+    limit: Optional[int] = Query(default=None, ge=1),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return all chat threads for the authenticated user, newest first."""
+    """Return chat threads, optionally searched by title and message content.
+
+    Default listing keeps the original newest-first behavior.  Search uses the
+    configured retriever registry; ``fuzzy`` is the default, while ``vector`` is
+    an interface-only placeholder aligned with get_sessions_range.vector_query.
+    """
     user_id = current_user["user_id"]
-    threads = database.list_chat_threads(user_id)
-    return {"threads": threads}
+    vector_query_obj = _parse_vector_query_param(vector_query)
+
+    if not is_chat_history_search_requested(
+        query,
+        retrieval_mode=retrieval_mode,
+        vector_query=vector_query_obj,
+    ):
+        threads = database.list_chat_threads(user_id)
+        return {"threads": threads}
+
+    config = build_chat_thread_search_config(
+        query=query,
+        retrieval_mode=retrieval_mode,
+        search_scope=search_scope,
+        min_score=min_score,
+        limit=limit,
+        vector_query=vector_query_obj,
+    )
+    if config is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid chat history retrieval_mode or search_scope",
+        )
+
+    candidates = []
+    if config.retrieval_mode != "vector":
+        candidates = database.list_chat_threads_for_search(user_id)
+    outcome = search_chat_threads(candidates, config)
+    payload: dict[str, Any] = {
+        "threads": outcome.threads,
+        "retrieval": outcome.retrieval,
+    }
+    if outcome.warnings:
+        payload["warnings"] = outcome.warnings
+    if not outcome.ok:
+        payload["ok"] = False
+        payload["error"] = outcome.error
+        payload["detail"] = outcome.detail
+    return payload
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/messages")

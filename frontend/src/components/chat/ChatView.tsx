@@ -20,7 +20,16 @@
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
 // [Sync] 2026-06-22: hide the workspace file sidebar entry when Settings
 //                    Workspace Mode is disabled.
-import { useMemo, useState, useEffect, useCallback } from 'react';
+// [Sync] 2026-06-27: add Chat history search over thread titles and persisted
+//                    conversation text via backend retriever params.
+// [Sync] 2026-06-28: move history search from sidebar input to centered search
+//                    dialog opened by the history header search button.
+// [Sync] 2026-06-28: reload default history whenever the history sidebar opens
+//                    so initial panel render is never empty because search is
+//                    now decoupled into a dialog.
+// [Sync] 2026-06-28: remove the New Chat row from the history search dialog;
+//                    top-level Chat chrome already owns new thread creation.
+import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
@@ -35,7 +44,7 @@ import {
 } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
-import { IconClock, IconFolder, IconMoreHorizontal, IconPlus, IconShare, IconX } from './Icons';
+import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
@@ -45,6 +54,13 @@ interface ChatThread {
   title: string | null;
   created_at: string;
   updated_at: string;
+  match?: {
+    strategy: string;
+    retriever?: string;
+    score: number;
+    fields: string[];
+    excerpt?: string;
+  };
 }
 
 interface RawChatMessage {
@@ -71,6 +87,42 @@ interface ChatViewProps {
   activeVoice?: ActiveChatVoice;
 }
 
+const THREAD_SEARCH_DEBOUNCE_MS = 180;
+
+function parseThreadDate(value: string): Date | null {
+  const date = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dayDiffFromToday(value: string): number | null {
+  const date = parseThreadDate(value);
+  if (!date) return null;
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  return Math.floor((todayStart - dateStart) / 86400000);
+}
+
+function formatThreadDateLabel(value: string): string {
+  const diff = dayDiffFromToday(value);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  if (diff !== null && diff > 1 && diff < 7) return `${diff} 天前`;
+
+  const date = parseThreadDate(value);
+  if (!date) return '';
+  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date);
+}
+
+function getThreadDateGroup(value: string): string {
+  const diff = dayDiffFromToday(value);
+  if (diff === 0) return '今天';
+  if (diff === 1) return '昨天';
+  if (diff !== null && diff > 1 && diff < 7) return '前 7 天';
+  if (diff !== null && diff < 30) return '前 30 天';
+  return '更早';
+}
+
 async function createThread(): Promise<string | null> {
   try {
     const res = await fetch(`${API_BASE}/api/claude-agent/threads`, { method: 'POST', headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
@@ -82,9 +134,23 @@ async function createThread(): Promise<string | null> {
   }
 }
 
-async function fetchThreads(): Promise<ChatThread[]> {
+interface ThreadSearchParams {
+  query?: string;
+  searchScope?: 'all' | 'title' | 'messages';
+  retrievalMode?: 'fuzzy' | 'auto' | 'vector';
+}
+
+async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread[]> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
+    const search = new URLSearchParams();
+    const query = params.query?.trim() ?? '';
+    if (query) {
+      search.set('query', query);
+      search.set('search_scope', params.searchScope ?? 'all');
+      search.set('retrieval_mode', params.retrievalMode ?? 'fuzzy');
+    }
+    const suffix = search.toString() ? `?${search.toString()}` : '';
+    const res = await fetch(`${API_BASE}/api/claude-agent/threads${suffix}`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
     if (!res.ok) return [];
     const data = await res.json() as { threads: ChatThread[] };
     return data.threads ?? [];
@@ -169,12 +235,19 @@ function ChatViewContent({
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(false);
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
-  const threadSearchQuery = '';
+  const [threadSearchOpen, setThreadSearchOpen] = useState(false);
+  const [threadSearchQuery, setThreadSearchQuery] = useState('');
+  const [threadSearchResults, setThreadSearchResults] = useState<ChatThread[]>([]);
+  const threadFetchRequestSeqRef = useRef(0);
+  const threadSearchRequestSeqRef = useRef(0);
+  const threadSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const [isSearchingThreads, setIsSearchingThreads] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
@@ -183,13 +256,67 @@ function ChatViewContent({
 
   // Load thread list
   const reloadThreads = useCallback(async () => {
+    const requestSeq = threadFetchRequestSeqRef.current + 1;
+    threadFetchRequestSeqRef.current = requestSeq;
+    setIsLoadingThreads(true);
     const list = await fetchThreads();
+    if (requestSeq !== threadFetchRequestSeqRef.current) return;
     setThreads(list);
+    setIsLoadingThreads(false);
   }, []);
 
   useEffect(() => {
+    if (!threadSidebarOpen) return;
     void reloadThreads();
-  }, [reloadThreads]);
+  }, [threadSidebarOpen, reloadThreads]);
+
+  useEffect(() => {
+    if (!threadSearchOpen) {
+      threadSearchRequestSeqRef.current += 1;
+      setIsSearchingThreads(false);
+      return;
+    }
+
+    const focusTimeout = window.setTimeout(() => {
+      threadSearchInputRef.current?.focus();
+    }, 0);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setThreadSearchOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.clearTimeout(focusTimeout);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [threadSearchOpen]);
+
+  useEffect(() => {
+    if (!threadSearchOpen) return;
+
+    const trimmedQuery = threadSearchQuery.trim();
+    if (!trimmedQuery) {
+      threadSearchRequestSeqRef.current += 1;
+      setThreadSearchResults([]);
+      setIsSearchingThreads(false);
+      return;
+    }
+
+    setIsSearchingThreads(true);
+    const requestSeq = threadSearchRequestSeqRef.current + 1;
+    threadSearchRequestSeqRef.current = requestSeq;
+    const timeout = window.setTimeout(() => {
+      void (async () => {
+        const list = await fetchThreads({ query: trimmedQuery, searchScope: 'all', retrievalMode: 'fuzzy' });
+        if (requestSeq !== threadSearchRequestSeqRef.current) return;
+        setThreadSearchResults(list);
+        setIsSearchingThreads(false);
+      })();
+    }, THREAD_SEARCH_DEBOUNCE_MS);
+    return () => window.clearTimeout(timeout);
+  }, [threadSearchOpen, threadSearchQuery]);
 
   useEffect(() => {
     if (!workspaceEnabled) {
@@ -319,6 +446,7 @@ function ChatViewContent({
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
     setThreadSidebarOpen(false);
+    setThreadSearchOpen(false);
     // Clear any pending queued prompt so the remounted ChatPanel doesn't
     // replay a previous quick-action when its lastQueuedNonceRef resets to
     // undefined on mount.
@@ -357,11 +485,23 @@ function ChatViewContent({
   }, [deletingThreadId, activeThreadId]);
 
   const quickActionsGrid = useMemo(() => quickActions.length > 0, [quickActions.length]);
-  const visibleThreads = useMemo(() => {
-    const query = threadSearchQuery.trim().toLowerCase();
-    if (!query) return threads;
-    return threads.filter((thread) => (thread.title ?? '新对话').toLowerCase().includes(query));
-  }, [threadSearchQuery, threads]);
+  const visibleThreads = threads;
+  const trimmedThreadSearchQuery = threadSearchQuery.trim();
+  const defaultThreadGroups = useMemo(() => {
+    const groups: Array<{ label: string; threads: ChatThread[] }> = [];
+    const byLabel = new Map<string, ChatThread[]>();
+
+    threads.forEach((thread) => {
+      const label = getThreadDateGroup(thread.updated_at);
+      if (!byLabel.has(label)) {
+        byLabel.set(label, []);
+        groups.push({ label, threads: byLabel.get(label) ?? [] });
+      }
+      byLabel.get(label)?.push(thread);
+    });
+
+    return groups;
+  }, [threads]);
 
   return (
       <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
@@ -544,18 +684,38 @@ function ChatViewContent({
             <>
               <div style={{ padding: '0.75rem 0.85rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border-paper)' }}>
                 <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>历史对话</span>
-                <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title="关闭">
-                  <IconX style={{ width: '0.85rem', height: '0.85rem' }} />
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.1rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setThreadSearchQuery('');
+                      setThreadSearchResults([]);
+                      setThreadSearchOpen(true);
+                      void reloadThreads();
+                    }}
+                    style={{ background: threadSearchOpen ? 'var(--color-bg-app)' : 'none', border: 'none', cursor: 'pointer', color: threadSearchOpen ? 'var(--color-text-primary)' : 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }}
+                    title="搜索历史对话"
+                    aria-label="搜索历史对话"
+                  >
+                    <IconSearch style={{ width: '0.86rem', height: '0.86rem' }} />
+                  </button>
+                  <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title="关闭">
+                    <IconX style={{ width: '0.85rem', height: '0.85rem' }} />
+                  </button>
+                </div>
               </div>
               <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
-                {visibleThreads.length === 0 ? (
+                {isLoadingThreads && visibleThreads.length === 0 ? (
+                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>加载历史中...</div>
+                ) : null}
+                {!isLoadingThreads && visibleThreads.length === 0 ? (
                   <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>暂无会话</div>
                 ) : null}
                 {visibleThreads.map((thread) => {
                   const isActive = thread.id === activeThreadId;
                   const isHovered = thread.id === hoveredThreadId;
                   const isDeleting = thread.id === deletingThreadId;
+                  const matchExcerpt = thread.match?.excerpt?.trim();
                   return (
                     <div
                       key={thread.id}
@@ -566,10 +726,15 @@ function ChatViewContent({
                       <button
                         type="button"
                         onClick={() => handleSelectThread(thread.id)}
-                        style={{ width: '100%', minHeight: '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 1.8rem 0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
+                        style={{ width: '100%', minHeight: matchExcerpt ? '3.05rem' : '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 1.8rem 0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
                         title={thread.title ?? '新对话'}
                       >
-                        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? '新对话'}</span>
+                        <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.12rem', overflow: 'hidden' }}>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? '新对话'}</span>
+                          {matchExcerpt ? (
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.66rem', color: 'var(--color-text-muted)', lineHeight: 1.25 }}>{matchExcerpt}</span>
+                          ) : null}
+                        </span>
                         {isActive && !isHovered ? <span style={{ width: '0.38rem', height: '0.38rem', borderRadius: '999px', background: 'var(--color-action-link)', flexShrink: 0 }} aria-hidden="true" /> : null}
                       </button>
                       {(isHovered || isDeleting) ? (
@@ -592,6 +757,112 @@ function ChatViewContent({
             </>
           ) : null}
         </aside>
+
+        {threadSearchOpen ? (
+          <div
+            role="presentation"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setThreadSearchOpen(false);
+              }
+            }}
+            style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'grid', placeItems: 'center', padding: 'clamp(1rem, 5vw, 4rem)', background: 'color-mix(in srgb, var(--color-bg-app) 64%, transparent)' }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-label="搜索历史对话"
+              style={{ width: 'min(48rem, calc(100vw - 2rem))', height: 'min(36rem, calc(100vh - 4rem))', minHeight: '24rem', display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid color-mix(in srgb, var(--color-border-paper) 84%, var(--color-text-muted))', borderRadius: '1rem', background: 'var(--color-bg-paper)', boxShadow: '0 30px 80px color-mix(in srgb, var(--color-shadow-medium) 72%, transparent)' }}
+            >
+              <div style={{ height: '4.15rem', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0 1.45rem', borderBottom: '1px solid var(--color-border-paper)' }}>
+                <input
+                  ref={threadSearchInputRef}
+                  value={threadSearchQuery}
+                  onChange={(event) => setThreadSearchQuery(event.target.value)}
+                  placeholder="搜索聊天..."
+                  aria-label="搜索历史对话"
+                  autoComplete="off"
+                  style={{ minWidth: 0, flex: 1, height: '100%', border: 'none', background: 'transparent', color: 'var(--color-text-primary)', outline: 'none', fontSize: '1.18rem', fontWeight: 600, fontFamily: 'inherit' }}
+                />
+                <button
+                  type="button"
+                  title="关闭"
+                  aria-label="关闭搜索"
+                  onClick={() => setThreadSearchOpen(false)}
+                  style={{ width: '2rem', height: '2rem', border: 'none', borderRadius: '0.5rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0 }}
+                >
+                  <IconX style={{ width: '1.05rem', height: '1.05rem' }} />
+                </button>
+              </div>
+
+              <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: trimmedThreadSearchQuery ? '1rem 0.75rem' : '0.75rem' }}>
+                {trimmedThreadSearchQuery ? (
+                  <>
+                    {isSearchingThreads ? (
+                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>搜索中...</div>
+                    ) : null}
+                    {!isSearchingThreads && threadSearchResults.length === 0 ? (
+                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>未找到匹配会话</div>
+                    ) : null}
+                    {threadSearchResults.map((thread) => {
+                      const matchExcerpt = thread.match?.excerpt?.trim();
+                      const isActive = thread.id === activeThreadId;
+                      return (
+                        <button
+                          key={thread.id}
+                          type="button"
+                          onClick={() => handleSelectThread(thread.id)}
+                          style={{ width: '100%', minHeight: matchExcerpt ? '4.35rem' : '3.3rem', border: 'none', borderRadius: '0.75rem', background: isActive ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'grid', gridTemplateColumns: '1.8rem minmax(0, 1fr) auto', alignItems: 'center', gap: '0.75rem', padding: '0.68rem 0.9rem', textAlign: 'left', transition: 'background 0.12s ease' }}
+                          title={thread.title ?? '新对话'}
+                          onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+                          onMouseLeave={(event) => { event.currentTarget.style.background = isActive ? 'var(--color-bg-hover)' : 'transparent'; }}
+                        >
+                          <IconMessageCircle style={{ width: '1.28rem', height: '1.28rem', color: 'var(--color-text-primary)' }} />
+                          <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '1rem', fontWeight: 600 }}>{thread.title ?? '新对话'}</span>
+                            {matchExcerpt ? (
+                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-text-secondary)', fontSize: '0.86rem', lineHeight: 1.35 }}>{matchExcerpt}</span>
+                            ) : null}
+                          </span>
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap', alignSelf: matchExcerpt ? 'center' : 'center' }}>{formatThreadDateLabel(thread.updated_at)}</span>
+                        </button>
+                      );
+                    })}
+                  </>
+                ) : (
+                  <>
+                    {defaultThreadGroups.length === 0 ? (
+                      <div style={{ padding: '1rem 0.25rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>暂无会话</div>
+                    ) : null}
+
+                    {defaultThreadGroups.map((group) => (
+                      <div key={group.label} style={{ paddingTop: '1rem' }}>
+                        <div style={{ padding: '0 1rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.82rem', fontWeight: 600 }}>{group.label}</div>
+                        {group.threads.map((thread) => {
+                          const isActive = thread.id === activeThreadId;
+                          return (
+                            <button
+                              key={thread.id}
+                              type="button"
+                              onClick={() => handleSelectThread(thread.id)}
+                              style={{ width: '100%', height: '2.8rem', border: 'none', borderRadius: '0.75rem', background: isActive ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.78rem', padding: '0 1rem', textAlign: 'left', transition: 'background 0.12s ease' }}
+                              title={thread.title ?? '新对话'}
+                              onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--color-bg-hover)'; }}
+                              onMouseLeave={(event) => { event.currentTarget.style.background = isActive ? 'var(--color-bg-hover)' : 'transparent'; }}
+                            >
+                              <IconMessageCircle style={{ width: '1.18rem', height: '1.18rem', flexShrink: 0, color: 'var(--color-text-primary)' }} />
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.96rem', fontWeight: 600 }}>{thread.title ?? '新对话'}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+            </section>
+          </div>
+        ) : null}
 
         {workspaceEnabled ? (
           <FileSidebar sessionId={activeThreadId ?? ''} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
