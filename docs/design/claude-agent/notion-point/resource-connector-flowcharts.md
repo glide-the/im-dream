@@ -1,7 +1,7 @@
 # Resource Connector — 业务流程图
 
 Status: Draft  
-Updated: 2026-06-22  
+Updated: 2026-06-28
 Scope: 设计 — 资源连接器全链路业务流程图（含四层交互泳道）
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -11,6 +11,7 @@ Scope: 设计 — 资源连接器全链路业务流程图（含四层交互泳�
 > [Pos] resource-connector-flowcharts in `docs/design/claude-agent/notion-point`
 > [Sync] 2026-06-22: 初始设计 — 业务流程图集
 > [Sync] 2026-06-22: 迁移至 claude-agent/notion-point — 工作空间映射相关设计独立管理
+> [Sync] 2026-06-28: 业务流程图收敛到 canonical snapshot 模型；Agent 消费不再以本地缓存/lazy load 作为权威数据来源。
 
 ---
 
@@ -49,13 +50,13 @@ flowchart TD
     I --> J[Operation Layer: 搜索 Standalone Pages]
     J --> K[用户选择要同步的资源]
     K --> L[Task Layer: 提交全量同步任务]
-    L --> M[Data Layer: 全量同步]
-    M --> N[Data Layer: 写入 .notion/ 映射文件]
+    L --> M[Data Layer: 全量同步远程数据]
+    M --> N[Data Layer: 物化 canonical snapshot]
     N --> O[连接器创建完成 ✓]
 
     O --> P[用户进入对话]
-    P --> Q[Agent 读取 .notion/ 虚拟索引]
-    Q --> R[Data Layer: PreToolUse 拦截]
+    P --> Q[Agent init attach current snapshot]
+    Q --> R[.notion/ 虚拟索引从同一 snapshotVersion 读取]
     R --> S[Agent 展示 Notion 内容]
 ```
 
@@ -67,8 +68,8 @@ flowchart TD
 | 认证 | Auth Layer | `AuthCredential` |
 | 资源发现 | Operation Layer | Database/Page 列表 |
 | 用户选择 | 前端 | `selected_databases` + `selected_pages` |
-| 数据同步 | Task Layer + Data Layer | `.notion/` 映射文件 |
-| Agent 消费 | Data Layer | PreToolUse → 缓存数据 |
+| 数据同步 | Task Layer + Data Layer | canonical snapshot |
+| Agent 消费 | Data Layer | PreToolUse → attached snapshot |
 
 ---
 
@@ -140,7 +141,7 @@ flowchart TD
     C -->|exit 0| D[状态保持 AUTHENTICATED]
     C -->|exit 1| E[标记 EXPIRED]
     E --> F[发布事件: AUTH_EXPIRED]
-    F --> G[Data Layer: 标记缓存为 stale]
+    F --> G[Data Layer: 标记 current snapshot 为 stale]
     F --> H[通知前端: 需要重新认证]
 ```
 
@@ -163,17 +164,17 @@ flowchart TD
 
     H -->|是| I[Operation Layer: query_database]
     I --> J[获取 DB 下 Row Pages]
-    J --> K[Data Layer: 写入 databases/<db_id>.json]
+    J --> K[Data Layer: 收集 DB row pages]
     K --> L[更新进度: completed_items++]
     L --> H
 
     H -->|否| M[Operation Layer: search pages]
     M --> N[获取 Standalone Pages]
     N --> O[过滤用户选定的 Pages]
-    O --> P[Data Layer: 写入 index.json]
-    P --> Q[Data Layer: 写入 connector.json]
+    O --> P[Data Layer: 物化 CanonicalWorkspaceSnapshot]
+    P --> Q[Data Layer: 更新 current snapshot pointer]
     Q --> R[任务完成 ✓]
-    R --> S[发布事件: SYNC_COMPLETED]
+    R --> S[发布事件: SNAPSHOT_MATERIALIZED]
 ```
 
 ### 3.2 增量同步流程
@@ -193,32 +194,26 @@ flowchart TD
     I -->|是 (>50%)| J[降级为全量同步]
     I -->|否| K[逐页同步变更]
 
-    K --> L[Operation Layer: get_page]
-    L --> M[Data Layer: 更新 cache]
-    M --> N[Data Layer: 更新 .notion/pages/<id>.json]
-    N --> O[更新 checkpoint]
+    K --> L[Operation Layer: get changed pages]
+    L --> M[Data Layer: 物化新 snapshotVersion]
+    M --> N[旧 snapshot → snapshot_superseded]
+    N --> O[更新 checkpoint/current pointer]
     O --> P[任务完成 ✓]
 ```
 
-### 3.3 Lazy Load 单页拉取
+### 3.3 快照缺页处理
 
 ```mermaid
 flowchart TD
     A[Agent: read_file .notion/pages/abc.json] --> B[PreToolUse 拦截]
-    B --> C[Data Layer: resolve_virtual_path]
-    C --> D{缓存命中?}
+    B --> C[Data Layer: resolve from attached snapshot]
+    C --> D{page 在当前 snapshot 中?}
 
-    D -->|命中且未过期| E[返回缓存数据]
-    D -->|命中但过期| F[标记 stale, 异步刷新]
-    F --> E
-    D -->|缓存缺失| G[Operation Layer: get_page]
-
-    G --> H{API 调用成功?}
-    H -->|是| I[Data Layer: put_page 写入缓存]
-    I --> J[返回页面数据]
-    H -->|否| K{是 401?}
-    K -->|是| L[触发 AUTH_EXPIRED]
-    K -->|否| M[返回错误信息]
+    D -->|是| E[返回 page + snapshot identity]
+    D -->|否| F[返回 snapshot-scoped miss]
+    F --> G[Agent 提示用户刷新连接器或选择已同步页面]
+    G --> H[前端可触发 Sync now]
+    H --> I[Data Layer 物化新 snapshotVersion]
 ```
 
 ---
@@ -240,15 +235,12 @@ flowchart TD
     F -->|是| H[创建 .notion/ 目录结构]
 
     H --> I[写入 README.md 引导文件]
-    I --> J[写入占位 index.json]
-    J --> K[写入占位 databases.json]
-    K --> L{距上次同步 > 5min?}
+    I --> J[写入占位 snapshot/index/databases JSON]
+    J --> K[Service: attach current canonical snapshot]
+    K --> L{snapshot_ready?}
 
-    L -->|是| M[Task Layer: 提交 INCREMENTAL_SYNC]
-    L -->|否| N[使用现有缓存]
-    M --> O[异步同步完成]
-    O --> N
-    N --> P[注入 workspace_context 段落]
+    L -->|否| M[注入提示: 需要同步或重新认证]
+    L -->|是| N[注入 workspace_context + snapshot identity]
 ```
 
 ### 4.2 Agent 对话中消费 Notion 数据
@@ -257,53 +249,35 @@ flowchart TD
 sequenceDiagram
     participant User as 用户
     participant Agent as Claude Agent
+    participant Service as ClaudeAgentService
     participant Hook as PreToolUse Hook
     participant Data as Data Layer
-    participant Ops as Operation Layer
-    participant CLI as ntn CLI
 
     User->>Agent: "帮我查看 Notion 阅读笔记"
-    Agent->>Agent: 解析意图 → 需要读取 .notion/ 数据
+    Service->>Data: get_current_snapshot(workspaceId, connectorId)
+    Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion}
+    Service-->>Agent: workspace_context + attached snapshot
+
+    Agent->>Hook: Read(".notion/snapshot.json")
+    Hook->>Data: resolve from attached snapshot
+    Data-->>Hook: snapshot identity
+    Hook-->>Agent: JSON 内容
 
     Agent->>Hook: Read(".notion/connector.json")
-    Hook->>Data: resolve_virtual_path("connector.json")
+    Hook->>Data: resolve from same snapshotVersion
     Data-->>Hook: connector 元信息
     Hook-->>Agent: JSON 内容
 
     Agent->>Hook: Read(".notion/databases/db-002.json")
-    Hook->>Data: resolve_virtual_path("databases/db-002.json")
-    Data->>Data: check cache (db-002)
-
-    alt 缓存有效
-        Data-->>Hook: cached database pages
-    else 缓存过期/缺失
-        Data->>Ops: query_database("db-002")
-        Ops->>CLI: ntn api v1/databases/db-002/query
-        CLI-->>Ops: JSON response
-        Ops-->>Data: query result
-        Data->>Data: update cache
-        Data-->>Hook: fresh database pages
-    end
-
+    Hook->>Data: resolve from same snapshotVersion
+    Data-->>Hook: database pages + snapshot identity
     Hook-->>Agent: db-002.json 内容
-    Agent->>Agent: 分析数据，生成回复
 
     Agent->>Hook: Read(".notion/pages/page-xyz.json")
-    Hook->>Data: resolve_virtual_path("pages/page-xyz.json")
-    Data->>Data: check page cache
-
-    alt 缓存命中
-        Data-->>Hook: cached page content
-    else 缓存缺失 (lazy load)
-        Data->>Ops: get_page("page-xyz")
-        Ops->>CLI: ntn api v1/pages/page-xyz + v1/blocks/page-xyz/children
-        CLI-->>Ops: page + blocks JSON
-        Ops-->>Data: OperationResult
-        Data->>Data: put_page("page-xyz", data)
-        Data-->>Hook: page content
-    end
-
+    Hook->>Data: resolve from same snapshotVersion
+    Data-->>Hook: page content or snapshot-scoped miss
     Hook-->>Agent: page-xyz.json 内容
+
     Agent-->>User: "阅读笔记中有 15 条记录，最近的是《xxx》..."
 ```
 
@@ -319,7 +293,7 @@ flowchart TD
     B --> C[注册 INCREMENTAL_SYNC: */30 * * * *]
     B --> D[注册 AUTH_VERIFY: 0 * * * *]
     B --> E[注册 FULL_SYNC: 0 3 * * *]
-    B --> F[注册 CACHE_CLEANUP: 0 4 * * *]
+    B --> F[注册 SNAPSHOT_ARCHIVE_CLEANUP: 0 4 * * *]
 
     C --> G{Cron 触发?}
     G -->|是| H[检查并发锁]
@@ -348,14 +322,14 @@ flowchart TD
     D -->|是| E[并发控制: Semaphore(5)]
     E --> F[逐资源提交子任务]
     F --> G[Operation: query_database / get_page]
-    G --> H[Data Layer: 写入缓存]
+    G --> H[Data Layer: 收集资源内容]
     H --> I[更新进度: completed++]
     I --> J{所有子任务完成?}
     J -->|否| F
-    J -->|是| K[更新 connector.json]
+    J -->|是| K[物化新 canonical snapshot]
 
-    D -->|有移除资源| L[Data Layer: 清理对应缓存]
-    L --> M[删除 .notion/databases/<removed_id>.json]
+    D -->|有移除资源| L[Data Layer: 从新 snapshot 中移除资源]
+    L --> M[旧 snapshot → snapshot_superseded]
 
     K --> N[任务完成]
     M --> N
@@ -401,10 +375,10 @@ sequenceDiagram
     Auth-->>Task: AuthCredential{AUTHENTICATED}
     Task->>Ops: query_database(db_id) × N
     Ops-->>Task: Row Pages[]
-    Task->>Data: sync_full(connector_id)
-    Data->>Data: 写入 .notion/ 映射文件
-    Data-->>Task: SyncResult{success}
-    Task->>Bus: publish(SYNC_COMPLETED)
+    Task->>Data: sync_full(workspace_id, connector_id)
+    Data->>Data: 物化 canonical snapshot
+    Data-->>Task: SyncResult{snapshot_identity}
+    Task->>Bus: publish(SNAPSHOT_MATERIALIZED)
     Task-->>FE: Task{COMPLETED}
 ```
 
@@ -413,47 +387,32 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Agent as Claude Agent
+    participant Service as ClaudeAgentService
     participant Hook as PreToolUse
     participant Data as Data Layer
-    participant Ops as Operation Layer
-    participant Auth as Auth Layer
     participant Bus as Event Bus
 
     Note over Agent,Bus: === Workspace Init ===
-    Agent->>Data: init_notion_index(workspace)
-    Data->>Auth: verify_status(user_id)
-    Auth-->>Data: AuthCredential{AUTHENTICATED}
-    Data->>Data: 创建 .notion/ 目录结构
+    Service->>Data: get_current_snapshot(workspaceId, connectorId)
+    Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion}
+    Service-->>Agent: workspace_context + attached snapshot
 
     Note over Agent,Bus: === Agent 读取 ===
+    Agent->>Hook: Read(".notion/snapshot.json")
+    Hook->>Data: resolve from attached snapshot
+    Data-->>Hook: snapshot identity
+    Hook-->>Agent: snapshot.json 内容
+
     Agent->>Hook: Read(".notion/index.json")
-    Hook->>Data: resolve_virtual_path("index.json")
-    Data->>Data: check cache TTL
-
-    alt Cache Hit
-        Data-->>Hook: cached index
-    else Cache Miss / Stale
-        Data->>Ops: search(filter=page)
-        Ops->>Auth: get_env(user_id)
-        Auth-->>Ops: env{NOTION_HOME}
-        Ops->>Ops: ntn api v1/search
-        Ops-->>Data: SearchResult
-        Data->>Data: update cache
-        Data-->>Hook: fresh index
-    end
-
+    Hook->>Data: resolve from same snapshotVersion
+    Data-->>Hook: index + snapshot identity
     Hook-->>Agent: index.json 内容
 
-    Note over Agent,Bus: === Lazy Load Page ===
+    Note over Agent,Bus: === Page Read ===
     Agent->>Hook: Read(".notion/pages/page-001.json")
-    Hook->>Data: resolve_virtual_path("pages/page-001.json")
-    Data->>Data: cache miss → lazy load
-    Data->>Ops: get_page("page-001")
-    Ops->>Ops: ntn api v1/pages/page-001 + v1/blocks
-    Ops-->>Data: OperationResult{page + blocks}
-    Data->>Data: put_page("page-001", data)
+    Hook->>Data: resolve from same snapshotVersion
     Data->>Bus: publish(PAGE_ACCESSED)
-    Data-->>Hook: page content
+    Data-->>Hook: page content or snapshot-scoped miss
     Hook-->>Agent: page-001.json 内容
 ```
 
@@ -471,7 +430,7 @@ flowchart TD
 
     D -->|AuthTokenExpiredError| E[Auth Layer: 标记 EXPIRED]
     E --> F[Event Bus: AUTH_EXPIRED]
-    F --> G[Data Layer: 标记缓存 stale]
+    F --> G[Data Layer: 标记 current snapshot stale]
     F --> H[通知前端: 需重新认证]
 
     D -->|RateLimitError| I{重试次数 < max?}
@@ -484,14 +443,14 @@ flowchart TD
     M -->|是| J
     M -->|否| N[任务失败: 超时]
 
-    D -->|ResourceNotFoundError| O[Data Layer: 移除缓存条目]
-    O --> P[更新 .notion/ 映射: 移除该资源]
+    D -->|ResourceNotFoundError| O[Data Layer: 物化移除该资源的新 snapshot]
+    O --> P[旧 snapshot → snapshot_superseded]
 
     D -->|AuthCLINotFoundError| Q[返回友好错误]
     Q --> R[提示用户安装 ntn CLI]
 
-    D -->|OperationConflictError| S[使用缓存数据]
-    S --> T[标记为 stale, 下次强制刷新]
+    D -->|OperationConflictError| S[保持旧 snapshot 只读]
+    S --> T[进入 conflict，要求刷新或重新生成 proposal]
 ```
 
 ### 7.2 认证降级策略
@@ -547,30 +506,28 @@ stateDiagram-v2
     Degraded --> [*]: 用户删除连接器
 ```
 
-### 8.2 缓存状态生命周期
+### 8.2 Snapshot 状态生命周期
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Empty: 首次访问
+    [*] --> pending_sync: 创建连接器
 
-    Empty --> Fetching: cache miss
-    Fetching --> Valid: API 调用成功
-    Fetching --> Error: API 调用失败
+    pending_sync --> synced: 远程同步成功
+    synced --> snapshot_ready: 物化 canonical snapshot
+    snapshot_ready --> agent_attached: Agent init / workspace attach
+    agent_attached --> derived_context_ready: Agent 裁剪/摘要
 
-    Valid --> Stale: TTL 过期
-    Valid --> Invalid: 收到 CACHE_INVALIDATED 事件
-    Valid --> Valid: 访问 (access_count++)
+    derived_context_ready --> write_proposed: 产生 proposal
+    write_proposed --> write_pending_remote: 用户批准
+    write_pending_remote --> write_confirmed: Notion 确认
+    write_confirmed --> synced: 重新同步
 
-    Stale --> Refreshing: 下次访问时异步刷新
-    Refreshing --> Valid: 刷新成功
-    Refreshing --> Stale: 刷新失败 (继续使用旧数据)
+    snapshot_ready --> snapshot_superseded: 新版本生成
+    agent_attached --> stale: sourceRevision 变化
+    write_proposed --> conflict: base identity 不匹配
 
-    Invalid --> Fetching: 下次访问时重新拉取
-    Error --> Fetching: 重试
-
-    Valid --> Evicted: LRU 淘汰 (max_cached_pages)
-    Stale --> Evicted: LRU 淘汰
-    Evicted --> [*]
+    snapshot_ready --> permission_denied: 权限不足
+    snapshot_ready --> connector_unavailable: 数据层不可用
 ```
 
 ### 8.3 任务状态全景
@@ -607,7 +564,7 @@ stateDiagram-v2
 | 2.3 Token 刷新 | Auth + Task | 定时校验 |
 | 3.1 全量同步 | Task + Ops + Data | 同步工作流 |
 | 3.2 增量同步 | Task + Data | 变更检测 |
-| 3.3 Lazy Load | Data + Ops | 按需拉取 |
+| 3.3 快照缺页 | Data | snapshot-scoped miss |
 | 4.1 Workspace Init | Data + Auth | 初始化 |
 | 4.2 Agent 消费 | 全部 | Agent 读取链路 |
 | 5.1 定时调度 | Task | Cron + 并发 |
@@ -617,7 +574,7 @@ stateDiagram-v2
 | 7.1 错误处理 | 全部 | 统一错误策略 |
 | 7.2 认证降级 | Auth + Task | 降级恢复 |
 | 8.1 连接器生命周期 | 全部 | 全局状态 |
-| 8.2 缓存生命周期 | Data | 缓存策略 |
+| 8.2 Snapshot 生命周期 | Data | 快照版本与冲突策略 |
 | 8.3 任务状态 | Task | 任务管理 |
 
 ---

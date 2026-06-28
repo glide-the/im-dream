@@ -1,8 +1,10 @@
 # UI 人机协作设计 — Agent 操作可视化与确认流
 
 Status: Updated  
-Updated: 2026-05-29  
+Updated: 2026-06-28
 Scope: Design + 实现对应前端组件
+
+> [Sync] 2026-06-28: 补充 Notion connector proposal 确认卡边界；Notion 写入必须携带 canonical snapshot identity 并等待事件驱动刷新。
 
 ---
 
@@ -18,6 +20,7 @@ Scope: Design + 实现对应前端组件
 8. [业务时序图](#8-业务时序图)
 9. [对象泳道图](#9-对象泳道图)
 10. [不变量与约束](#10-不变量与约束)
+11. [Notion Connector Proposal 确认卡](#11-notion-connector-proposal-确认卡)
 
 ---
 
@@ -703,3 +706,35 @@ flowchart LR
 3. **同一时刻只有一个 pending 操作**：若 Agent 连续调用多个写工具，第一个未确认时后续调用在 ToolConfirmationStore 中排队，UI 只显示当前最早的 pending 操作，避免用户被多个确认请求淹没。
 
 4. **Reject 不留痕迹**：被 Reject 的操作不修改 EditorState，不写文件系统，不显示在文档内。操作历史面板的记录是可选的，且仅对用户可见，不影响 Agent 的执行环境。
+
+---
+
+## 11. Notion Connector Proposal 确认卡
+
+Notion 是远程数据源，Agent 不直接修改 canonical snapshot。若后续启用 Notion 写回，UI 必须把 Agent 输出视为 `SnapshotWriteProposal`，而不是已执行操作。
+
+### 11.1 卡片信息结构
+
+| 区域 | 内容 |
+|---|---|
+| Header | Notion 页面标题、URL、操作类型 |
+| Snapshot identity | `base_snapshot_version`、`base_source_revision`、`base_sync_cursor` |
+| Diff preview | 将修改的 block 摘要、before/after 或 operation list |
+| Risk state | `ready` / `stale` / `conflict` / `permission_denied` |
+| Actions | `Approve write`、`Reject`、`Refresh first` |
+
+### 11.2 状态与动作
+
+| 状态 | UI 行为 |
+|---|---|
+| `ready` | 允许 `Approve write` |
+| `stale` | 禁用批准，主按钮为 `Refresh first` |
+| `conflict` | 显示当前 snapshot 与 proposal base identity，要求重新生成 proposal |
+| `permission_denied` | 显示重新授权入口 |
+| `write_pending_remote` | 显示提交中，禁用重复批准 |
+
+### 11.3 刷新约束
+
+批准写入后，前端不得在 tool-confirm HTTP 响应后直接读取 session，也不得固定 sleep。必须等待 `session_updated source="agent"` 且 `toolCallId` 匹配的事件；事件流不可用时使用集中 fallback。
+
+本节是设计边界，不表示当前前端已经实现 Notion 写回 UI。

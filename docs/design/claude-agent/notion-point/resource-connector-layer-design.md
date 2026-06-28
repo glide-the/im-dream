@@ -1,7 +1,7 @@
 # Resource Connector — 四层架构工程设计稿
 
 Status: Draft  
-Updated: 2026-06-22  
+Updated: 2026-06-28
 Scope: 工程设计 — 资源连接器认证层、数据层、操作层、任务层详细设计
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -10,6 +10,7 @@ Scope: 工程设计 — 资源连接器认证层、数据层、操作层、任�
 > [Pos] resource-connector-layer-design in `docs/design/claude-agent/notion-point`
 > [Sync] 2026-06-22: 初始设计 — 四层架构工程设计稿
 > [Sync] 2026-06-22: 迁移至 claude-agent/notion-point — 工作空间映射相关设计独立管理
+> [Sync] 2026-06-28: 数据层收敛为 canonical snapshot 权威状态；Agent 初始化读取连接器数据层快照，`NotionCache` 不再作为跨 Agent source of truth。
 
 ---
 
@@ -51,9 +52,9 @@ Scope: 工程设计 — 资源连接器认证层、数据层、操作层、任�
 │                           │ 依赖                                  │
 │  ┌────────────────────────┼───────────────────────────────────┐  │
 │  │               Data Layer (数据层)                            │  │
-│  │  数据缓存与映射 — .notion/ 虚拟索引 + 内存缓存                  │  │
-│  │  • NotionCache 管理     • PreToolUse 拦截                    │  │
-│  │  • 映射文件生成         • 增量/全量同步                       │  │
+│  │  数据与快照映射 — canonical snapshot + .notion/ 虚拟索引       │  │
+│  │  • SnapshotStore        • PreToolUse 只读解析                 │  │
+│  │  • 快照版本生成         • 增量/全量同步                       │  │
 │  └────────────────────────┬───────────────────────────────────┘  │
 │                           │ 依赖                                  │
 │  ┌────────────────────────┼───────────────────────────────────┐  │
@@ -296,41 +297,42 @@ class AuthRevokedError(AuthError):
 ### 3.1 职责边界
 
 数据层负责：
-- 管理 `.notion/` 虚拟索引文件的创建与更新
-- 维护 `NotionCache` 内存缓存
-- 通过 PreToolUse 拦截机制向 Agent 提供数据
-- 全量/增量同步策略执行
+
+- 从 Operation Layer 的 Notion 远程读取结果中物化 `CanonicalWorkspaceSnapshot`
+- 维护 current snapshot 指针、历史版本和审计字段
+- 为任意 Agent 初始化提供同一 `workspaceId + connectorId + snapshotVersion` 下的一致快照
+- 通过 `.notion/` 虚拟索引解析 snapshot 内容
+- 记录 `sourceRevision` / `syncCursor`，为写入 proposal 做乐观并发校验
 
 数据层**不**负责：
+
 - 认证管理（调用 Auth Layer 获取 env）
-- 业务逻辑判断（属于 Operation Layer）
+- Notion 业务 API 细节（属于 Operation Layer）
 - 调度触发（由 Task Layer 驱动）
+- Agent 本地摘要、排序或 prompt 裁剪
+- 在 Agent Read 时直接调用远程 Notion
 
 ### 3.2 数据架构
 
 ```
-┌───────────────────────────────────────────────────────────┐
-│                     Data Layer                              │
-│                                                           │
-│  ┌─────────────────┐     ┌──────────────────────────┐    │
-│  │  NotionCache    │     │  .notion/ 虚拟索引        │    │
-│  │  (内存缓存)      │────►│  (文件系统映射)           │    │
-│  │                 │     │                          │    │
-│  │  index[]        │     │  index.json              │    │
-│  │  databases[]    │     │  databases.json          │    │
-│  │  pages{}        │     │  connector.json          │    │
-│  │  synced_at      │     │  databases/<id>.json     │    │
-│  │  stale_keys[]   │     │  pages/<id>.json         │    │
-│  └────────┬────────┘     └──────────────────────────┘    │
-│           │                                               │
-│           │ PreToolUse 拦截                                │
-│           ▼                                               │
-│  ┌─────────────────┐                                     │
-│  │  Agent Read     │                                     │
-│  │  (read_file)    │                                     │
-│  └─────────────────┘                                     │
-│                                                           │
-└───────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                         Data Layer                            │
+│                                                              │
+│  ┌───────────────────────┐     ┌──────────────────────────┐  │
+│  │ Canonical Snapshot    │     │ .notion/ Virtual Index   │  │
+│  │ Store                 │────►│ read-only view           │  │
+│  │                       │     │                          │  │
+│  │ current pointer       │     │ snapshot.json            │  │
+│  │ snapshot history      │     │ connector.json           │  │
+│  │ sourceRevision        │     │ index.json               │  │
+│  │ syncCursor            │     │ databases/<id>.json      │  │
+│  │ audit metadata        │     │ pages/<id>.json          │  │
+│  └──────────┬────────────┘     └──────────┬───────────────┘  │
+│             │                             │                  │
+│             │ Agent init / attach          │ PreToolUse Read  │
+│             ▼                             ▼                  │
+│       ClaudeAgentService             Claude Agent            │
+└──────────────────────────────────────────────────────────────┘
 ```
 
 ### 3.3 接口定义
@@ -339,26 +341,17 @@ class AuthRevokedError(AuthError):
 # backend/notion/data.py
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional
+from dataclasses import dataclass
+from typing import Any
 
-@dataclass
-class PageMeta:
-    """页面元信息。"""
-    page_id: str
-    title: str
-    last_edited: str
-    url: str
-    parent_type: str  # "database" | "workspace" | "page"
-    parent_id: Optional[str] = None
-
-@dataclass
-class DatabaseMeta:
-    """数据库元信息。"""
-    database_id: str
-    title: str
-    properties_schema: dict
-    page_count: int = 0
+@dataclass(frozen=True)
+class SnapshotIdentity:
+    workspace_id: str
+    resource_connector_id: str
+    snapshot_version: str
+    source_revision: str
+    sync_cursor: str
+    fetched_at: str
 
 @dataclass
 class SyncResult:
@@ -368,123 +361,77 @@ class SyncResult:
     failed_items: list[str]
     duration_ms: int
     sync_type: str  # "full" | "incremental"
+    snapshot_identity: SnapshotIdentity
 
 class DataLayerProtocol(ABC):
     """数据层抽象接口。"""
 
     @abstractmethod
-    async def sync_full(self, connector_id: str) -> SyncResult:
-        """全量同步 — 拉取所有选定资源的最新数据。"""
+    async def sync_full(self, workspace_id: str, connector_id: str) -> SyncResult:
+        """全量同步并物化新的 canonical snapshot。"""
         ...
 
     @abstractmethod
-    async def sync_incremental(self, connector_id: str) -> SyncResult:
-        """增量同步 — 仅同步有变更的资源。"""
+    async def sync_incremental(self, workspace_id: str, connector_id: str) -> SyncResult:
+        """增量同步并在有变更时物化新的 canonical snapshot。"""
         ...
 
     @abstractmethod
-    async def get_index(self, connector_id: str) -> list[PageMeta]:
-        """获取页面索引列表。"""
+    async def get_current_snapshot(
+        self, workspace_id: str, connector_id: str
+    ) -> dict[str, Any]:
+        """返回当前 canonical snapshot；任意 Agent 初始化都通过此接口读取。"""
         ...
 
     @abstractmethod
-    async def get_databases(self, connector_id: str) -> list[DatabaseMeta]:
-        """获取数据库列表。"""
+    async def get_snapshot(
+        self, workspace_id: str, connector_id: str, snapshot_version: str
+    ) -> dict[str, Any]:
+        """返回指定版本 snapshot，用于审计、冲突和旧版本只读查看。"""
         ...
 
     @abstractmethod
-    async def get_page(self, connector_id: str, page_id: str) -> dict:
-        """获取单页内容（优先缓存，缓存缺失时远程拉取）。"""
-        ...
-
-    @abstractmethod
-    async def invalidate_cache(self, connector_id: str, keys: list[str]) -> None:
-        """使指定缓存失效。"""
-        ...
-
-    @abstractmethod
-    def resolve_virtual_path(self, path: str) -> Optional[dict]:
-        """解析虚拟路径，返回对应缓存数据。"""
+    def resolve_virtual_path(self, path: str, snapshot: dict[str, Any]) -> dict[str, Any] | None:
+        """从已 attach 的 snapshot 解析 `.notion/` 虚拟路径。"""
         ...
 ```
 
-### 3.4 缓存策略
+### 3.4 Snapshot 数据合同
 
-```python
-@dataclass
-class CachePolicy:
-    """缓存策略配置。"""
-    index_ttl_seconds: int = 300        # 页面索引 5 分钟
-    database_ttl_seconds: int = 600     # 数据库元信息 10 分钟
-    page_ttl_seconds: int = 900         # 页面内容 15 分钟
-    max_cached_pages: int = 100         # 最大缓存页面数
-    eviction_strategy: str = "lru"      # LRU 淘汰
+最小方案代码已落地在 `backend/libs/claude_agent_kit/server/notion_snapshot.py`：
 
-@dataclass
-class CacheEntry:
-    """带 TTL 的缓存条目。"""
-    data: dict
-    fetched_at: str         # ISO 8601
-    ttl_seconds: int
-    access_count: int = 0
+| 类型 / 函数 | 作用 |
+|---|---|
+| `SnapshotLifecycleState` | 定义 `pending_sync`、`snapshot_ready`、`stale`、`conflict` 等状态 |
+| `SnapshotMetadata` | 保存 `workspace_id`、`resource_connector_id`、`snapshot_version`、`source_revision`、`sync_cursor`、`fetched_at` |
+| `CanonicalWorkspaceSnapshot` | 连接器数据层返回给 Agent 的只读快照 |
+| `AgentDerivedContext` | Agent 本地派生视图，不作为权威状态 |
+| `SnapshotWriteProposal` | 写入 proposal 的 base snapshot identity |
+| `get_notion_snapshot_resource_data()` | 从 snapshot 解析 `.notion/` 虚拟路径 |
+| `write_proposal_is_stale()` | 判断 proposal 是否因快照变更而过期 |
 
-    @property
-    def is_stale(self) -> bool:
-        """判断缓存是否过期。"""
-        ...
-```
-
-### 3.5 NotionCache 完整实现设计
-
-```python
-@dataclass
-class NotionCache:
-    """Notion 数据缓存 — 内存结构。"""
-    connector_id: str
-    index: list[PageMeta] = field(default_factory=list)
-    databases: list[DatabaseMeta] = field(default_factory=list)
-    pages: dict[str, CacheEntry] = field(default_factory=dict)
-    synced_at: Optional[str] = None
-    policy: CachePolicy = field(default_factory=CachePolicy)
-
-    def get_page(self, page_id: str) -> Optional[dict]:
-        """获取缓存页面，更新访问计数，检测 TTL。"""
-        entry = self.pages.get(page_id)
-        if entry is None:
-            return None
-        if entry.is_stale:
-            del self.pages[page_id]
-            return None
-        entry.access_count += 1
-        return entry.data
-
-    def put_page(self, page_id: str, data: dict) -> None:
-        """写入页面缓存，执行 LRU 淘汰。"""
-        if len(self.pages) >= self.policy.max_cached_pages:
-            self._evict_lru()
-        self.pages[page_id] = CacheEntry(
-            data=data,
-            fetched_at=_now_iso(),
-            ttl_seconds=self.policy.page_ttl_seconds,
-        )
-
-    def _evict_lru(self) -> None:
-        """淘汰最少使用的缓存条目。"""
-        if not self.pages:
-            return
-        lru_key = min(self.pages, key=lambda k: self.pages[k].access_count)
-        del self.pages[lru_key]
-```
-
-### 3.6 PreToolUse 拦截映射表
+### 3.5 PreToolUse 拦截映射表
 
 | 虚拟路径 | 映射数据源 | 触发条件 |
 |---------|-----------|---------|
-| `.notion/connector.json` | 连接器元信息 | Agent Read |
-| `.notion/index.json` | `cache.index` 序列化 | Agent Read |
-| `.notion/databases.json` | `cache.databases` 序列化 | Agent Read |
-| `.notion/databases/<db_id>.json` | 指定 DB 的 Row Page 清单 | Agent Read |
-| `.notion/pages/<page_id>.json` | 单页内容（lazy load） | Agent Read |
+| `.notion/snapshot.json` | `snapshot.metadata` | Agent Read |
+| `.notion/connector.json` | `snapshot.connector + metadata` | Agent Read |
+| `.notion/index.json` | `snapshot.index + metadata` | Agent Read |
+| `.notion/databases.json` | `snapshot.databases + metadata` | Agent Read |
+| `.notion/databases/<db_id>.json` | `snapshot.database_pages[db_id] + metadata` | Agent Read |
+| `.notion/pages/<page_id>.json` | `snapshot.pages[page_id] + metadata` | Agent Read |
+
+如果页面未被物化在当前 snapshot 中，返回 snapshot-scoped miss，不在 Read hook 中远程 lazy load。
+
+### 3.6 快照版本策略
+
+| 事件 | 处理 |
+|---|---|
+| 首次连接器同步成功 | 创建 `snapshotVersion=1`，current pointer 指向该版本 |
+| 手动刷新或增量同步有变更 | 创建新版本，旧版本进入 `snapshot_superseded` |
+| Agent 初始化 | 读取 current pointer 指向的 snapshot；同版本多 Agent 必须一致 |
+| 写入 proposal 提交前 | 比较 base `snapshotVersion/sourceRevision/syncCursor` 与 current snapshot |
+| 远程写入确认后 | 重新 sync 并创建新 snapshot，而不是直接 patch 旧 snapshot |
 
 ### 3.7 增量同步设计
 
@@ -495,8 +442,7 @@ class SyncCheckpoint:
     connector_id: str
     last_sync_at: str               # ISO 8601
     last_cursor: Optional[str]      # Notion API 分页游标
-    synced_page_ids: set[str]       # 已同步的 page_id 集合
-    database_versions: dict[str, str]  # db_id → last_edited_time
+    source_revision: str
 
 class IncrementalSyncStrategy:
     """增量同步策略。"""
@@ -509,10 +455,8 @@ class IncrementalSyncStrategy:
         # 比较 checkpoint.last_sync_at，提取变更页面
         ...
 
-    async def sync_changed_pages(
-        self, changed_ids: list[str], cache: NotionCache, auth_env: dict
-    ) -> SyncResult:
-        """仅同步变更的页面。"""
+    async def materialize_snapshot(self, changed_ids: list[str]) -> SnapshotIdentity:
+        """将变更合并为新的 canonical snapshot。"""
         ...
 ```
 
@@ -523,8 +467,12 @@ class DataLayerError(Exception):
     """数据层基础异常。"""
     pass
 
-class CacheMissError(DataLayerError):
-    """缓存缺失，需要远程拉取。"""
+class SnapshotNotReadyError(DataLayerError):
+    """连接器尚未物化可用 snapshot。"""
+    pass
+
+class SnapshotConflictError(DataLayerError):
+    """写入 proposal 的 base identity 与 current snapshot 不匹配。"""
     pass
 
 class SyncError(DataLayerError):
@@ -550,7 +498,7 @@ class RateLimitError(DataLayerError):
 
 操作层**不**负责：
 - 认证管理（通过 Auth Layer 获取凭证）
-- 缓存管理（操作结果通知 Data Layer 更新缓存）
+- 快照版本管理（操作结果交给 Data Layer 物化 snapshot）
 - 调度编排（由 Task Layer 驱动批量操作）
 
 ### 4.2 操作类型分类
@@ -816,7 +764,7 @@ class ResourceNotFoundError(OperationError):
 
 任务层**不**负责：
 - 底层 API 调用（委托 Operation Layer）
-- 缓存管理（通知 Data Layer 更新）
+- 快照内容解析（通知 Data Layer 物化 snapshot）
 - 认证流程细节（委托 Auth Layer）
 
 ### 5.2 任务状态机
@@ -865,7 +813,7 @@ class TaskType(Enum):
     PAGE_FETCH = "page_fetch"
     BATCH_IMPORT = "batch_import"
     AUTH_VERIFY = "auth_verify"
-    CACHE_CLEANUP = "cache_cleanup"
+    SNAPSHOT_ARCHIVE_CLEANUP = "snapshot_archive_cleanup"
 
 @dataclass
 class TaskConfig:
@@ -974,8 +922,8 @@ class TaskOrchestrator:
         2. 获取 Database 列表
         3. 逐 DB 查询 Row Pages
         4. 获取 Standalone Pages
-        5. 更新 Data Layer 缓存
-        6. 刷新 .notion/ 映射文件
+        5. Data Layer 物化 canonical snapshot
+        6. 更新 current snapshot pointer
         """
         task.status = TaskStatus.RUNNING
         task.started_at = _now_iso()
@@ -994,22 +942,27 @@ class TaskOrchestrator:
             task.progress.total_items = len(databases) + 1  # +1 for standalone pages
 
             # Step 3: 逐 DB 查询 Row Pages
+            database_rows = {}
             for db in databases:
                 db_id = db["id"]
                 query_result = await self._ops.query_database(
                     DatabaseQuery(database_id=db_id)
                 )
-                await self._data.sync_database_pages(db_id, query_result.results)
+                database_rows[db_id] = query_result.results
                 task.progress.completed_items += 1
 
             # Step 4: 获取 Standalone Pages
             page_result = await self._ops.search(
                 SearchFilter(object_type="page")
             )
-            await self._data.sync_standalone_pages(page_result.results)
+            standalone_pages = page_result.results
             task.progress.completed_items += 1
 
-            # Step 5: 完成
+            # Step 5: 物化 canonical snapshot
+            sync_result = await self._data.sync_full(task.workspace_id, task.connector_id)
+            task.metadata["snapshot_version"] = sync_result.snapshot_identity.snapshot_version
+
+            # Step 6: 完成
             task.status = TaskStatus.COMPLETED
             task.completed_at = _now_iso()
 
@@ -1023,8 +976,8 @@ class TaskOrchestrator:
         增量同步工作流：
         1. 验证认证状态
         2. 检测变更页面
-        3. 仅同步变更内容
-        4. 更新缓存
+        3. 同步变更内容
+        4. 有变更时物化新 snapshot
         """
         ...
 
@@ -1063,8 +1016,8 @@ class ScheduleConfig:
     full_sync_cron: str = "0 3 * * *"
     # 认证校验：每小时
     auth_verify_cron: str = "0 * * * *"
-    # 缓存清理：每天凌晨 4 点
-    cache_cleanup_cron: str = "0 4 * * *"
+    # 快照归档清理：每天凌晨 4 点
+    snapshot_archive_cleanup_cron: str = "0 4 * * *"
 
 class TaskScheduler:
     """任务调度器 — 管理定时任务注册与触发。"""
@@ -1180,7 +1133,7 @@ class ScheduleConflictError(TaskError):
 | Task → Operation | 同步调用 | `await ops.search()` | `SearchResult` |
 | Operation → Auth | 同步调用 | `auth.get_env()` | `dict[str, str]` |
 | Data → Auth | 同步调用 | `auth.get_env()` | `dict[str, str]` |
-| Data → Operation | 事件通知 | `on_cache_miss → ops.get_page()` | `OperationResult` |
+| Data → Operation | 同步任务内调用 | `materialize_snapshot` 前由 Task/Ops 提供远程结果 | `OperationResult` |
 
 ### 6.3 事件总线（跨层通知）
 
@@ -1190,7 +1143,8 @@ class ConnectorEvent(Enum):
     AUTH_EXPIRED = "auth_expired"
     SYNC_COMPLETED = "sync_completed"
     SYNC_FAILED = "sync_failed"
-    CACHE_INVALIDATED = "cache_invalidated"
+    SNAPSHOT_MATERIALIZED = "snapshot_materialized"
+    SNAPSHOT_SUPERSEDED = "snapshot_superseded"
     PAGE_ACCESSED = "page_accessed"
 
 @dataclass
@@ -1273,7 +1227,7 @@ class ConnectorFactory:
 | 扩展点 | 新增平台需实现 | 说明 |
 |--------|--------------|------|
 | `AuthLayerProtocol` | 认证流程 | OAuth / API Key / Device Code |
-| `DataLayerProtocol` | 缓存结构 | 虚拟索引目录名（如 `.github/`） |
+| `DataLayerProtocol` | canonical snapshot 结构 | 虚拟索引目录名（如 `.github/`） |
 | `OperationLayerProtocol` | API 映射 | 平台特定 CRUD |
 | `TaskLayerProtocol` | 同步策略 | Webhook / Polling / Cursor |
 | `RESOURCES` 映射表 | 虚拟路径 | PreToolUse 拦截规则 |
@@ -1285,12 +1239,12 @@ class ConnectorFactory:
 | 文件路径 | 层 | 职责 |
 |---------|---|------|
 | `backend/notion/auth.py` | Auth | 认证接口定义 + Notion 实现 |
-| `backend/notion/data.py` | Data | 数据层接口 + NotionCache |
+| `backend/notion/data.py` | Data | 数据层接口 + canonical snapshot store |
 | `backend/notion/operations.py` | Operation | 操作层接口 + ntn api 封装 |
 | `backend/notion/tasks.py` | Task | 任务层接口 + 编排器 |
 | `backend/notion/events.py` | Cross | 事件总线 + 事件类型 |
 | `backend/notion/factory.py` | Cross | ConnectorFactory + Bundle |
 | `backend/notion/errors.py` | Cross | 各层异常类型汇总 |
-| `backend/libs/claude_agent_kit/server/notion_index.py` | Data | PreToolUse 拦截逻辑 |
+| `backend/libs/claude_agent_kit/server/notion_snapshot.py` | Data | snapshot 合同 + `.notion/` 虚拟路径解析 |
 
 ---

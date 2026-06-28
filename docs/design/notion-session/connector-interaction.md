@@ -1,7 +1,7 @@
 # Notion Device 资源连接器 — 交互方案设计
 
 Status: Draft  
-Updated: 2026-06-22  
+Updated: 2026-06-28
 Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的完整交互流程
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -12,6 +12,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Pos] connector-interaction-doc in `docs/design/notion-session`
 > [Sync] 2026-06-21: 初始设计 — 资源连接器交互方案
 > [Sync] 2026-06-22: 修正核心概念声明 — 依据 Notion API Reference 区分 Database/Row Page/Standalone Page/Block
+> [Sync] 2026-06-28: 修正 Agent 初始化一致性 — `.notion/` 映射由资源连接器数据层的 canonical snapshot 提供，不再以 Agent 本地 NotionCache 作为权威状态。
 
 ---
 
@@ -47,6 +48,16 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 
 本文档仅覆盖**交互方案设计**，不涉及代码实现。实现细节参考 `overview.md`。
 
+### 1.3 目标符合性判断
+
+| 现有设计 | 是否符合目标 | 调整 |
+|---|---|---|
+| 用户创建连接器、认证、选择 Database/Page | 符合 | 保留 |
+| `.notion/` 映射作为 Agent 读取入口 | 符合 | 数据源改为 canonical snapshot |
+| Agent 对话中触发 lazy load 并更新缓存 | 不符合 | Agent Read 不直接远程拉取；由连接器数据层刷新并生成新 snapshot |
+| `switch_editor(device="notion")` | 过度设计 | 不复用 editor session 切换；Notion connector 由 workspace resource selection 决定 |
+| Notion 写回 | 超出本期 | 仅保留 proposal/write pipeline 交互边界 |
+
 ---
 
 ## 2. 核心概念声明
@@ -60,7 +71,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 | **Page（页面）** | Notion 中的内容单元。分为两类：① **Database Row Page** — parent 为 database，属性值遵循所属 Database 的 schema；② **Standalone Page** — parent 为 workspace 或另一个 page，与 Database 无关联 | 一个 Database 下可包含多个 Row Page；Standalone Page 独立存在 |
 | **PageID** | Page 的唯一标识（UUID）。无论是 Database Row Page 还是 Standalone Page，均拥有独立的 PageID | — |
 | **Block** | Notion 中的最小内容单元（段落、标题、列表等）。Page 由 Block 组成；Database 不直接包含 Block | Page 的 children |
-| **`.notion/` 映射文件** | 工作空间内的虚拟索引目录，缓存连接器同步的数据 | 与连接器数据层强关联 |
+| **`.notion/` 映射文件** | 工作空间内的虚拟索引目录，呈现连接器数据层物化的 canonical snapshot | 与连接器数据层强关联 |
 | **ntn api** | Notion 官方 CLI 提供的 API 直调命令 | 自动处理 Auth/Version 头 |
 
 ### 2.1 Notion 对象层次（API 视角）
@@ -104,11 +115,12 @@ Resource Connector (资源连接器)
     │     └─ 后端通过 ntn api v1/search 分别获取 database 和 page 列表
     │
     ├─ 后端同步数据层
-    │     └─ 将选定 Database 的 Row Page 及 Standalone Page 清单写入 .notion/ 映射文件
+    │     └─ 将选定 Database 的 Row Page 及 Standalone Page 物化为 canonical snapshot
     │
     └─ 用户 Chat 对话
           │
-          ├─ 同步资源连接器的平台信息到 .notion/ 映射文件
+          ├─ Agent 初始化时 attach 当前 canonical snapshot
+          ├─ .notion/ 虚拟索引从同一 snapshotVersion 读取
           │
           └─ 同步常用 notion-cli skill 到工作空间
 ```
@@ -120,8 +132,8 @@ Resource Connector (资源连接器)
 | 1. 创建连接器 | 用户（前端） | connector 实体 | 数据库 `resource_connectors` 表 |
 | 2. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
 | 3. Database 及 Page 选择 | 用户（前端列表） | 选定的 database_id 及 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
-| 4. 数据同步 | 后端（自动） | Database Row Page + Standalone Page 清单 | `.notion/index.json` |
-| 5. 对话消费 | Agent（PreToolUse） | 页面内容 | `.notion/pages/<id>.json` |
+| 4. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
+| 5. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
 
 ---
 
@@ -185,35 +197,42 @@ resource_connectors
 │     ├── selected_databases: string[]  ← 用户选定的 database_id 列表
 │     └── selected_pages: string[]      ← 用户选定的 standalone page_id 列表
 ├── last_synced_at: timestamp
+├── current_snapshot_version: string | null
+├── current_source_revision: string | null
+├── current_sync_cursor: string | null
 ├── created_at: timestamp
 └── updated_at: timestamp
 ```
 
 ---
 
-## 5. 数据同步至 `.notion/` 映射
+## 5. 数据同步至 canonical snapshot，再通过 `.notion/` 映射读取
 
 ### 5.1 同步触发时机
 
 | 时机 | 触发方式 | 同步范围 |
 |------|---------|---------|
-| 连接器创建完成 | 自动 | 全量：选定 Database 的 Row Page + Standalone Page |
-| 用户进入对话 | workspace init 时检测 | 增量：距上次同步有变更的页面 |
-| Agent 对话中显式请求 | Agent 调用 sync skill | 按需：指定 database 或 page |
+| 连接器创建完成 | 自动 | 全量同步并物化首个 canonical snapshot |
+| 用户进入对话 | Agent init / workspace attach | 读取当前 canonical snapshot，不直接远程拉取 |
+| 用户点击刷新 | 前端触发连接器 sync | 生成新 snapshotVersion |
+| Agent 提出写入 | proposal/write pipeline | 远程确认后同步并生成新 snapshotVersion |
 
-### 5.2 `.notion/` 映射文件结构（扩展）
+### 5.2 `.notion/` 虚拟映射结构（扩展）
+
+`.notion/` 目录中的 JSON 是占位读入口。实际内容来自连接器数据层当前 attach 的 canonical snapshot。
 
 ```
 .notion/
 ├── README.md                    ← Agent 引导说明
 ├── connector.json               ← ★ 连接器元信息
+├── snapshot.json                ← 当前快照身份
 ├── index.json                   ← 所有已同步 Page 列表
 ├── databases.json               ← 选定的 Database 元信息
 ├── databases/
 │     ├── <db_id_1>.json         ← Database 1 的 Page 清单
 │     └── <db_id_2>.json         ← Database 2 的 Page 清单
 └── pages/
-      └── <page_id>.json         ← 单页内容（lazy load）
+      └── <page_id>.json         ← 当前 snapshot 已物化的单页内容
 ```
 
 ### 5.3 `connector.json` 内容
@@ -223,6 +242,14 @@ resource_connectors
   "connector_id": "conn-abc123",
   "platform": "notion",
   "auth_status": "authenticated",
+  "snapshot": {
+    "workspace_id": "workspace-001",
+    "resource_connector_id": "conn-abc123",
+    "snapshot_version": "snap-20260628-001",
+    "source_revision": "notion-rev-789",
+    "sync_cursor": "cursor-456",
+    "fetched_at": "2026-06-28T14:00:00Z"
+  },
   "selected_databases": [
     {
       "database_id": "db-001",
@@ -241,7 +268,7 @@ resource_connectors
       "title": "产品设计文档"
     }
   ],
-  "last_synced_at": "2026-06-21T14:00:00Z"
+  "last_synced_at": "2026-06-28T14:00:00Z"
 }
 ```
 
@@ -272,7 +299,12 @@ resource_connectors
       "status": "Done"
     }
   ],
-  "synced_at": "2026-06-21T14:00:00Z"
+  "snapshot": {
+    "snapshot_version": "snap-20260628-001",
+    "source_revision": "notion-rev-789",
+    "sync_cursor": "cursor-456"
+  },
+  "synced_at": "2026-06-28T14:00:00Z"
 }
 ```
 
@@ -289,8 +321,11 @@ Notion Device Connector:
   Status: authenticated
   Databases: 2 (ink-and-memory 代办清单, 阅读笔记)
   Total Pages: 47
-  Last Synced: 2026-06-21T14:00:00Z
+  Snapshot: snap-20260628-001
+  Source Revision: notion-rev-789
+  Last Synced: 2026-06-28T14:00:00Z
 
+  Read .notion/snapshot.json for the attached snapshot identity.
   Read .notion/connector.json for connector details.
   Read .notion/index.json for page listing.
   Read .notion/databases/<db_id>.json for database-specific pages.
@@ -356,7 +391,7 @@ class NotionAPIBridge:
 | Token 过期 | 标记 connector.auth_status = "expired"，提示用户重新认证 |
 | ntn CLI 不可用 | 返回友好错误，建议用户安装 ntn |
 | API 限流 | 指数退避重试，最多 3 次 |
-| 网络超时 | 使用缓存数据，标记 stale |
+| 网络超时 | 保留上一版 canonical snapshot，标记 `stale`，提示用户稍后刷新 |
 
 ---
 
@@ -409,35 +444,39 @@ sequenceDiagram
     CLI->>Notion: POST /v1/databases/:id/query
     Notion-->>CLI: row page list
     CLI-->>Back: JSON
-    Back->>Back: 写入 .notion/ 映射文件（databases/ + pages/）
-    Back-->>Front: {synced:true, database_count:2, page_count:47}
+    Back->>Back: 资源连接器数据层物化 canonical snapshot
+    Back-->>Front: {synced:true, snapshot_version:"snap-20260628-001", database_count:2, page_count:47}
 ```
 
-### 8.2 Agent 对话中同步 `.notion/` 流程
+### 8.2 Agent 对话中读取 `.notion/` 流程
 
 ```mermaid
 sequenceDiagram
     participant User as 用户
     participant Agent as Claude Agent
+    participant Service as ClaudeAgentService
+    participant Data as Connector Data Layer
     participant Hook as PreToolUse Hook
-    participant Cache as NotionCache
-    participant CLI as ntn CLI
 
     User->>Agent: "帮我看看 Notion 代办清单"
-    Agent->>Agent: 检查 workspace_context 中的连接器信息
+    Agent->>Service: attach workspace context
+    Service->>Data: get_current_snapshot(workspaceId, connectorId)
+    Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion}
+    Service-->>Agent: workspace_context + attached snapshot
+
+    Agent->>Hook: Read .notion/snapshot.json
+    Hook->>Data: resolve from attached snapshot
+    Data-->>Hook: snapshot identity
+    Hook-->>Agent: snapshot.json 内容
+
     Agent->>Hook: Read .notion/connector.json
-    Hook->>Cache: get connector metadata
-    Cache-->>Hook: connector info
+    Hook->>Data: resolve from same snapshotVersion
+    Data-->>Hook: connector info
     Hook-->>Agent: connector.json 内容
 
     Agent->>Hook: Read .notion/databases/db-001.json
-    Hook->>Cache: check db-001 cache
-    alt 缓存过期或缺失
-        Hook->>CLI: ntn api v1/databases/db-001/query
-        CLI-->>Hook: page list JSON
-        Hook->>Cache: 更新缓存
-    end
-    Cache-->>Hook: database pages
+    Hook->>Data: resolve from same snapshotVersion
+    Data-->>Hook: database pages + snapshot identity
     Hook-->>Agent: db-001.json 内容
 
     Agent-->>User: "代办清单中有 32 个页面，最近编辑的是..."
@@ -454,11 +493,11 @@ sequenceDiagram
 | workspace-adapter 模式 | Notion Connector 对应实现 |
 |------------------------|--------------------------|
 | `.editor/` 虚拟索引 | `.notion/` 虚拟索引 |
-| `editor_state` 内存快照 | `notion_cache` 内存缓存 |
-| `EDITOR_RESOURCES` 映射表 | `NOTION_RESOURCES` 映射表 |
+| `editor_state` 当前运行快照 | `CanonicalWorkspaceSnapshot` 连接器数据层快照 |
+| `EDITOR_RESOURCES` 映射表 | `NOTION_SNAPSHOT_RESOURCES` 映射表 |
 | PreToolUse 拦截 Read | PreToolUse 拦截 Read（相同机制） |
-| `switch_editor` 切换上下文 | `switch_editor(device="notion")` 切换设备 |
-| workspace init 初始化 `.editor/` | workspace init 初始化 `.notion/`（条件：已认证） |
+| `switch_editor` 切换 `.editor/` 上下文 | Notion connector 不复用 `switch_editor`；由 workspace resource selection 决定 |
+| workspace init 初始化 `.editor/` | workspace init 初始化 `.notion/` 占位符；snapshot attach 由连接器数据层提供 |
 
 ### 9.2 与 workspace-context 的集成
 
@@ -467,14 +506,17 @@ sequenceDiagram
 ```
 <!-- workspace_context 中新增段落 -->
 Notion Device (.notion/):
-  Connector: authenticated | 2 databases | 47 pages
+  Connector: authenticated | 2 databases | 47 pages | snapshot snap-20260628-001
+  Read .notion/snapshot.json for the attached snapshot identity.
   Read .notion/index.json for full page listing.
   Read .notion/databases/<db_id>.json for per-database view.
 ```
 
 ### 9.3 与 workspace-switch 的集成
 
-参考 `workspace-switch.md` 的 PostToolUse 钩子模式，Notion 设备切换复用相同的 `switch_editor` 工具，仅扩展参数（详见 `overview.md` 第 6 节）。
+Notion connector 不复用 `switch_editor`。`switch_editor` 只切换 `.editor/` 文档会话；Notion connector 的选择由前端 workspace resource selection 决定。下一轮 Agent init / workspace attach 时，service 从资源连接器数据层读取当前 canonical snapshot。
+
+如果后续需要同一 turn 内切换外部资源，应新增 workspace-level `switch_resource(resource_connector_id)`，并保持数据来源为连接器数据层 canonical snapshot。
 
 ---
 
@@ -485,9 +527,9 @@ Notion Device (.notion/):
 | 排除项 | 原因 |
 |--------|------|
 | 多平台资源连接器统一框架 | 先只做 Notion，后续再抽象 |
-| 实时 WebSocket 数据推送 | 轮询 + 按需加载足够 |
-| 页面内容全文索引/搜索 | 直接用 `ntn api v1/search` |
-| 双向写回 Notion | 写操作冲突策略未定义 |
+| 实时 WebSocket 数据推送 | 事件驱动刷新 + 手动 sync 足够 |
+| 页面内容全文索引/搜索 | 先依赖 snapshot index；全文检索后续单独设计 |
+| 双向写回 Notion | 本期只设计 proposal/write pipeline，不接真实写入 |
 | 连接器权限分级（只读/读写） | 本期仅只读 |
 | 前端可视化 Database Schema | 先仅展示标题列表 |
 | 自动检测 Schema 变更 | 先做全量同步 |
@@ -503,4 +545,4 @@ Notion Device (.notion/):
 | 同步方式 | 实时 / 定时 / 按需 | workspace init + 按需 | 避免后台常驻进程，简化部署 |
 | 映射存储 | 数据库 / 文件系统 | `.notion/` 虚拟索引 | 与 `.editor/` 模式对称，Agent 直接可读 |
 | Database 发现 | 硬编码 / 用户选择 | 用户选择 | 用户决定哪些数据对 Agent 可见 |
-| PageID 同步 | 全量 / 增量 | 全量（本期） | 实现简单，后续可优化 |
+| PageID 同步 | 全量 / 增量 | 全量生成 snapshot（本期） | 保证多 Agent 初始化读取同一版本 |

@@ -1,7 +1,7 @@
 # Notion Device 资源连接器设计方案
 
 Status: Draft
-Updated: 2026-06-21
+Updated: 2026-06-28
 Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空间
 
 > [Input] `docs/design/claude-agent/edit-point/workspace-adapter.md`,
@@ -12,6 +12,7 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 >      `backend/libs/claude_agent_kit/server/workspace.py`,
 >      `backend/libs/claude_agent_kit/types.py`,
 >      `backend/claude_agent/context_builder.py`
+> [Sync] 2026-06-28: 收敛 Notion 远程数据源的交互快照生命周期 — Agent 初始化读取资源连接器数据层物化的 canonical snapshot，不以 Agent 本地 notion_cache 作为权威状态；补齐 MVP 前端交互设计稿。
 
 ---
 
@@ -27,6 +28,7 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 8. [时序图](#8-时序图)
 9. [实现文件索引](#9-实现文件索引)
 10. [不实现清单](#10-不实现清单)
+11. [前端交互设计稿（MVP）](#11-前端交互设计稿mvp)
 
 ---
 
@@ -43,14 +45,15 @@ ink-and-memory 的工作空间模型目前仅管理**本地 EditorState**（`.ed
 - Notion 被视为一个**外部文档资源设备**，类似 `.editor/` 是内部文档资源
 - 使用 Notion 官方 CLI（`ntn`）作为通信桥梁
 - Agent 通过 `.notion/` 虚拟索引**只读浏览** Notion 内容
-- 认证由前端驱动，后端异步维护页面索引缓存
+- 认证由前端驱动，后端异步同步远程数据并物化 canonical snapshot
 
 ### 1.3 核心原则
 
 - **复用现有模式**：`.notion/` 镜像 `.editor/` 的虚拟索引 + PreToolUse 拦截模式
 - **ntn CLI 为唯一数据通道**：不引入 Notion SDK 依赖
-- **只读优先**：先实现浏览能力，操作能力留待后续设计
-- **认证与数据分离**：认证层由前端用户配置驱动，数据层由后端异步任务维护
+- **连接器数据层是内部权威状态**：Notion 是远程 source of truth；系统内部由资源连接器数据层物化 canonical snapshot，Agent 初始化只读取该快照
+- **只读优先**：先实现浏览能力；写入只设计 proposal/write pipeline 边界，不直接落地远程写回
+- **认证与数据分离**：认证层由前端用户配置驱动，数据层负责同步、版本化和快照发布
 
 ---
 
@@ -87,9 +90,9 @@ ink-and-memory 的工作空间模型目前仅管理**本地 EditorState**（`.ed
 | 层                  | 职责                                                         | 实现位置                                      | 本期实现   |
 | ------------------- | ------------------------------------------------------------ | --------------------------------------------- | ---------- |
 | **Auth Layer**      | `ntn login --no-browser` 流程编排、token 路径管理、NOTION_HOME 配置 | `backend/notion/auth.py`                      | ✅ 是       |
-| **Data Layer**      | `.notion/` 虚拟索引创建、异步 page 列表同步、PreToolUse 拦截注册 | `backend/notion/index.py` + `agent_runner.py` | ✅ 是       |
-| **Operation Layer** | `ntn page get/create/update` 等读写操作封装                  | `backend/notion/ops.py`                       | ❌ 暂不实现 |
-| **Task Layer**      | 定时 sync 调度、批量 import、增量变更检测                    | `backend/notion/tasks.py`                     | ❌ 暂不实现 |
+| **Data Layer**      | Notion 同步结果持久化、canonical snapshot 物化、`.notion/` 只读虚拟索引解析 | `backend/notion/index.py` + `backend/libs/claude_agent_kit/server/notion_snapshot.py` | ✅ 合同代码 |
+| **Operation Layer** | `ntn page get/create/update` 等读写操作封装；写入必须产出 proposal 并走远程确认 | `backend/notion/ops.py`                       | ❌ 暂不实现 |
+| **Task Layer**      | sync 调度、快照版本推进、冲突检测                            | `backend/notion/tasks.py`                     | ❌ 暂不实现 |
 
 ### 2.3 与 `.editor/` 的对称关系
 
@@ -100,13 +103,13 @@ ink-and-memory 的工作空间模型目前仅管理**本地 EditorState**（`.ed
   ├─ full_state.json ←→       └─ pages/
   └─ ...                           └─ <page_id>.json  (页面内容)
 
-editor_state (内存快照)        notion_cache (内存缓存, 由 async task 填充)
+editor_state (内存快照)        canonical_snapshot (连接器数据层物化)
        │                              │
        ▼                              ▼
 PreToolUse 拦截 Read           PreToolUse 拦截 Read
        │                              │
        ▼                              ▼
-写临时文件 → Agent 读取        写临时文件 → Agent 读取
+写临时文件 → Agent 读取        写临时文件 → Agent 读取同一 snapshotVersion
 ```
 
 ---
@@ -264,277 +267,127 @@ def get_notion_env(user_profile: dict) -> dict[str, str]:
 
 ---
 
-## 5. 数据层设计 — 异步同步 + PreToolUse 拦截
+## 5. 数据层设计 — canonical snapshot + PreToolUse 拦截
 
-### 5.1 数据流概览
+### 5.1 目标符合性修正
+
+Notion 是远程数据源，任意 Agent 在初始化访问同一个连接器时必须看到一致状态。
+因此 `.notion/` 的权威数据来源不是 Agent 本地 `notion_cache`，而是资源连接器数据层物化出的 `CanonicalWorkspaceSnapshot`。
 
 ```
-                    ┌──────────────────┐
-                    │   Async Task      │
-                    │   (定时触发)       │
-                    │                   │
-                    │ ntn search        │
-                    │ ntn database query│
-                    └────────┬─────────┘
-                             │ 更新
-                             ▼
-                    ┌──────────────────┐
-                    │  notion_cache     │  (内存 dict)
-                    │                   │
-                    │  index: [...]     │  ← 页面列表
-                    │  databases: [...] │  ← 数据库列表
-                    │  pages: {...}     │  ← page_id → 页面内容(lazy)
-                    └────────┬─────────┘
-                             │ PreToolUse 读取
-                             ▼
-                    ┌──────────────────┐
-                    │  Agent           │
-                    │  read_file(      │
-                    │   ".notion/      │
-                    │   index.json")   │
-                    └──────────────────┘
+Notion Remote Source
+  └─ Connector Sync (ntn api / Notion API)
+       └─ Resource Connector Data Layer
+            └─ CanonicalWorkspaceSnapshot
+                 ├─ metadata: workspaceId, connectorId, snapshotVersion, sourceRevision, syncCursor, fetchedAt
+                 ├─ connector
+                 ├─ index
+                 ├─ databases
+                 ├─ database_pages
+                 └─ pages
+                      └─ PreToolUse Read(".notion/...") → temporary JSON file
 ```
 
-### 5.2 NotionCache 数据结构
+### 5.2 快照身份
+
+每个 canonical snapshot 必须包含以下身份字段：
+
+| 字段 | 说明 |
+|---|---|
+| `workspace_id` | 当前 Ink & Memory 工作空间 |
+| `resource_connector_id` | Notion 资源连接器 ID |
+| `snapshot_version` | 系统内部快照版本 |
+| `source_revision` | Notion 远程版本摘要，可由 latest edited 时间、水位或同步批次生成 |
+| `sync_cursor` | 连接器同步游标 |
+| `fetched_at` | 连接器数据层拉取/物化时间 |
+
+同一 `snapshot_version` 下的 `.notion/connector.json`、`.notion/index.json`、`.notion/databases/<id>.json`、`.notion/pages/<id>.json` 必须来自同一个 snapshot object。
+
+### 5.3 数据结构合同
+
+方案代码位于 `backend/libs/claude_agent_kit/server/notion_snapshot.py`，只提供合同，不接真实 Notion API：
 
 ```python
-# backend/notion/cache.py
-from dataclasses import dataclass, field
-from typing import Optional
+@dataclass(frozen=True)
+class CanonicalWorkspaceSnapshot:
+    metadata: SnapshotMetadata
+    connector: dict[str, Any]
+    index: list[dict[str, Any]]
+    databases: list[dict[str, Any]]
+    database_pages: dict[str, list[dict[str, Any]]]
+    pages: dict[str, dict[str, Any]]
 
-@dataclass
-class NotionPageMeta:
-    page_id: str
-    title: str
-    last_edited: str  # ISO 8601
-    url: str
-
-@dataclass
-class NotionCache:
-    index: list[NotionPageMeta] = field(default_factory=list)
-    databases: list[dict] = field(default_factory=list)
-    pages: dict[str, dict] = field(default_factory=dict)  # page_id → page content
-    synced_at: Optional[str] = None
+@dataclass(frozen=True)
+class SnapshotWriteProposal:
+    proposal_id: str
+    workspace_id: str
+    resource_connector_id: str
+    base_snapshot_version: str
+    base_source_revision: str
+    base_sync_cursor: str
+    operations: tuple[dict[str, Any], ...]
 ```
 
-### 5.3 异步同步任务
+### 5.4 PreToolUse 拦截边界
+
+未来运行时接线时，`.notion/` Read 拦截必须遵守：
+
+1. 只从当前已 attach 的 `CanonicalWorkspaceSnapshot` 解析数据。
+2. 不在 Agent Read 时直接调用 Notion 远程 API。
+3. 不把 Agent 派生摘要写回 snapshot。
+4. 缺页返回 snapshot-scoped miss，例如 `reason:"not_materialized_in_snapshot"`，由前端或连接器触发刷新。
+
+示意：
 
 ```python
-# backend/notion/sync.py
-import asyncio
-import json
-import subprocess
-from pathlib import Path
-
-async def sync_notion_index(
-    notion_home: Path,
-    cache: NotionCache,
-    search_query: str = "",
-) -> None:
-    """通过 ntn CLI 同步近期页面列表到缓存。"""
-    env = {"NOTION_HOME": str(notion_home), **__import__("os").environ}
-
-    # ntn search 返回近期页面
-    args = ["ntn", "search", "--format", "json"]
-    if search_query:
-        args.extend(["--query", search_query])
-
-    proc = await asyncio.create_subprocess_exec(
-        *args,
-        env=env,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    stdout, stderr = await proc.communicate()
-
-    if proc.returncode != 0:
-        raise NotionSyncError(f"ntn search failed: {stderr.decode()}")
-
-    results = json.loads(stdout)
-    cache.index = [
-        NotionPageMeta(
-            page_id=item["id"],
-            title=item.get("title", "Untitled"),
-            last_edited=item.get("last_edited_time", ""),
-            url=item.get("url", ""),
-        )
-        for item in results.get("results", [])
-    ]
-    cache.synced_at = _now_iso()
+if tool_name == "Read" and attached_notion_snapshot is not None:
+    if is_notion_snapshot_path(file_path):
+        data = get_notion_snapshot_resource_data(file_path, attached_notion_snapshot)
+        return redirect_to_temporary_json(data)
 ```
 
-### 5.4 PreToolUse 拦截扩展
+### 5.5 Workspace 初始化集成
 
-在 `agent_runner.py` 的 `_pre_tool_use_hook` 中，在现有 `.editor/` 拦截之后新增 `.notion/` 拦截：
+Workspace init 只创建 `.notion/` 占位目录和说明文件，不负责同步远程数据。
+Agent 初始化或工作空间 attach 时，由 service 层向资源连接器数据层请求当前 snapshot：
 
-```python
-# agent_runner.py — _pre_tool_use_hook 内部
+```
+workspace.init_workspace(session_id)
+  ├─ _init_editor_index(workspace)
+  └─ _init_notion_index_placeholders(workspace)  # only README + placeholders
 
-if tool_name == "Read":
-    # 现有：.editor/ 虚拟索引拦截
-    if is_editor_index_path(file_path) and opts.editor_state is not None:
-        return _apply_notion_index_redirect(file_path, opts)
-    
-    # ★ 新增：.notion/ 虚拟索引拦截
-    if is_notion_index_path(file_path) and opts.notion_cache is not None:
-        return _apply_notion_index_redirect(file_path, opts)
+ClaudeAgentService.attach_workspace_context()
+  └─ connector_data_layer.get_current_snapshot(workspace_id, connector_id)
+       └─ AgentRunOptions / future snapshot holder receives canonical snapshot
 ```
 
-### 5.5 `.notion/` 拦截逻辑
+### 5.6 写入路径
 
-```python
-# backend/libs/claude_agent_kit/server/notion_index.py
+本期不直接实现 Notion 写回。设计边界如下：
 
-_NOTION_PREFIX = ".notion/"
-_PAGES_PREFIX = ".notion/pages/"
-
-NOTION_RESOURCES: dict[str, str] = {
-    "index": "__index__",
-    "databases": "__databases__",
-}
-
-def is_notion_index_path(path: str) -> bool:
-    """检测路径是否属于 .notion/ 虚拟索引。"""
-    if not path:
-        return False
-    normalised = path.replace("\\", "/")
-    idx = normalised.find(_NOTION_PREFIX)
-    if idx == -1:
-        return False
-    remainder = normalised[idx + len(_NOTION_PREFIX):]
-    
-    # .notion/pages/<page_id>.json
-    if remainder.startswith("pages/") and remainder.endswith(".json"):
-        page_id = remainder[len("pages/"):-len(".json")]
-        return bool(page_id)  # page_id 非空
-    
-    # .notion/index.json, .notion/databases.json
-    if "/" in remainder:
-        return False
-    stem = remainder.split(".")[0]
-    return stem in NOTION_RESOURCES
-
-
-def get_notion_resource_data(path: str, cache) -> dict:
-    """从 NotionCache 提取对应资源数据。"""
-    resource = resolve_notion_resource(path)
-    if resource is None:
-        return {}
-    
-    mapped = NOTION_RESOURCES.get(resource)
-    if mapped == "__index__":
-        return {
-            "pages": [
-                {"page_id": p.page_id, "title": p.title,
-                 "last_edited": p.last_edited, "url": p.url}
-                for p in cache.index
-            ],
-            "synced_at": cache.synced_at,
-        }
-    
-    if mapped == "__databases__":
-        return {"databases": cache.databases}
-    
-    # .notion/pages/<page_id>.json → 从缓存读取，或触发 ntn page get
-    if resource.startswith("pages/"):
-        page_id = resource[len("pages/"):]
-        return _get_page_data(page_id, cache)
-    
-    return {}
-```
-
-### 5.6 Workspace 初始化集成
-
-在 `workspace.py` 的 `init_workspace` 中，在 `_init_editor_index` 之后新增：
-
-```python
-# workspace.py — init_workspace 内部
-
-# ... 现有代码 ...
-_init_editor_index(workspace)
-
-# ★ 新增：初始化 .notion/ 虚拟索引
-_notion_config = _load_notion_config(session_id)
-if _notion_config and _notion_config.get("authenticated"):
-    _init_notion_index(workspace)
-```
+- Agent 只能生成 `SnapshotWriteProposal`。
+- Proposal 必须携带 base `snapshotVersion/sourceRevision/syncCursor`。
+- 连接器写入管线在远程提交前做乐观并发校验。
+- Notion 确认远程写入后，连接器数据层同步并生成新 snapshot；旧 snapshot 进入 `snapshot_superseded`。
+- 前端刷新沿用 `session_updated source="agent"` 事件驱动机制，不使用固定 sleep。
 
 ---
 
-## 6. switch_editor 扩展：Notion 外部文档切换
+## 6. Workspace switch 边界：不复用 `switch_editor` 承载 Notion 状态
 
-### 6.1 扩展现有工具
+`switch_editor` 当前语义是切换 `.editor/` 文档会话，并已在 `workspace-switch.md` 中实现。
+Notion 资源连接器不是另一个 EditorState，会话切换不应把 Notion 远程状态塞进 `editor_state` 或 AgentRunState 本地缓存。
 
-`switch_editor` 增加可选参数，用于切换到 Notion 上下文：
+MVP 交互边界：
 
-```json
-{
-  "name": "switch_editor",
-  "description": "...切换工作空间上下文。可切换到另一个 editor session，或切换到 Notion 设备上下文。",
-  "input_schema": {
-    "type": "object",
-    "properties": {
-      "editor_session_id": {
-        "type": "string",
-        "description": "目标 session ID；留空 + 传 device 参数表示切换设备。"
-      },
-      "device": {
-        "type": "string",
-        "enum": ["notion"],
-        "description": "设备类型。传 'notion' 时切换到 Notion 浏览模式。"
-      },
-      "device_page_id": {
-        "type": "string",
-        "description": "Notion page ID，切换后 Agent 默认浏览此页面。可选。"
-      }
-    },
-    "required": []
-  }
-}
-```
+| 场景 | 处理方式 |
+|---|---|
+| 用户在前端切换当前 workspace 的 Notion connector | 前端更新选中的 `resourceConnectorId`，下一轮 Agent init 从连接器数据层 attach 当前 canonical snapshot |
+| Agent 需要读取当前 Notion 内容 | 通过 `.notion/` 虚拟索引读取已 attach 的 snapshot |
+| Agent 需要切换到另一个 Editor session | 继续使用现有 `switch_editor(editor_session_id)` |
+| Agent 需要切换到另一个 Notion connector | 本期不在同一 turn 内自动切换；提示用户在前端切换或刷新连接器上下文 |
 
-### 6.2 PostToolUse 钩子扩展
-
-`agent_runner.py` 的 `_post_tool_use_hook` 中新增 Notion 设备切换逻辑：
-
-```python
-# 在现有 switch_editor 处理之后
-
-if tool_name == "mcp__editor__switch_editor":
-    tool_input = raw_input or {}
-    device = tool_input.get("device")
-    
-    if device == "notion":
-        # 切换到 Notion 设备上下文
-        page_id = tool_input.get("device_page_id")
-        opts.notion_context_setter({
-            "active": True,
-            "active_page_id": page_id,
-            "device": "notion",
-        })
-    elif tool_input.get("editor_session_id"):
-        # 现有逻辑：切换到另一个 editor session
-        ...
-```
-
-### 6.3 NotionContext 享元
-
-在 `AgentRunOptions` 中新增：
-
-```python
-# types.py — AgentRunOptions 新增字段
-notion_context: Optional[dict[str, Any]] = None
-notion_context_getter: Optional[Any] = None  # callable → notion_context
-notion_context_setter: Optional[Any] = None  # callable(dict) → None
-notion_cache: Optional[Any] = None  # NotionCache 实例
-```
-
-在 `AgentRunState` 享元中新增：
-
-```python
-# state.py
-notion_context: Optional[dict] = None
-```
+后续如果需要同一 turn 内切换外部资源，应新增独立的 `switch_resource(resource_connector_id)` 或 workspace-level 工具，而不是扩展 `switch_editor` 的 schema。该工具仍必须从连接器数据层读取 canonical snapshot。
 
 ---
 
@@ -547,31 +400,37 @@ notion_context: Optional[dict] = None
 ```
 Notion device index (.notion/):
   This directory holds Notion page index placeholder files. Reading them
-  returns cached Notion content synced via ntn CLI.
+  returns the canonical Notion snapshot materialized by the resource connector
+  data layer.  Agent-local summaries are derived views, not source of truth.
 
   .notion/index.json       — list of recent Notion pages (title, page_id, url)
   .notion/databases.json   — list of accessible Notion databases
   .notion/pages/<id>.json  — individual Notion page content (read-only)
+  .notion/snapshot.json    — snapshot identity {version, revision, cursor}
 
-  Reading these works the same way as .editor/ — use read_file() and the
-  PreToolUse hook will serve the cached/synced Notion content.
+  Reading these works the same way as .editor/ — use read_file(). The
+  PreToolUse hook serves the attached snapshot version; it does not call
+  Notion remotely during Agent reads.
 
 Notion CLI authentication:
   The ntn CLI is pre-authenticated via the NOTION_HOME configured for this
   session.  You do not need to handle login — just read .notion/ files.
 ```
 
-### 7.2 系统提示词 Edit-Point Workflow 变更
+### 7.2 系统提示词 Workflow 变更
 
-在 `context_builder.py` 的 `## Switch-Editor Workflow` 章节中新增：
+在系统提示中新增 Notion 读取约束，而不是扩展 `switch_editor`：
 
 ```
-Switching to Notion device:
-  switch_editor(device="notion", device_page_id="<page_id>")
-  
-  After switching, the .notion/ virtual index becomes the active browsing
-  context.  Use read_file(".notion/index.json") to list recent pages, and
-  read_file(".notion/pages/<page_id>.json") to read a specific page.
+Notion Connector Workflow:
+  When <workspace_context> lists a Notion connector, read .notion/snapshot.json
+  first to identify the attached snapshot version. Then read .notion/index.json
+  or .notion/pages/<page_id>.json as needed.
+
+  Do not treat derived summaries as canonical state. Do not call switch_editor
+  for Notion connector switching; switch_editor only changes .editor/ sessions.
+  If the user needs a different connector, ask them to switch the workspace
+  resource in the UI or refresh the connector snapshot.
 ```
 
 ---
@@ -610,34 +469,38 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     participant Agent as Claude Agent
+    participant Service as ClaudeAgentService
+    participant Data as Connector Data Layer
     participant Hook as PreToolUse Hook
-    participant Cache as NotionCache (内存)
-    participant CLI as ntn CLI
-    participant Notion as Notion API
+    participant Tmp as Temporary JSON
 
-    Note over Cache: Async task 已 sync index
+    Agent->>Service: init / attach workspace
+    Service->>Data: get_current_snapshot(workspaceId, connectorId)
+    Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion, sourceRevision, syncCursor}
+    Service-->>Agent: <workspace_context> includes snapshot identity
 
-    Agent->>Hook: Read .notion/index.json
-    Hook->>Hook: is_notion_index_path() → True
-    Hook->>Cache: get_notion_resource_data()
-    Cache-->>Hook: index 数据
-    Hook->>Hook: 写临时文件
-    Hook-->>Agent: updatedInput → 临时文件
+    Agent->>Hook: Read(".notion/snapshot.json")
+    Hook->>Data: resolve from attached snapshot
+    Data-->>Hook: snapshot identity
+    Hook->>Tmp: write one-shot JSON
+    Hook-->>Agent: updatedInput → tmp path
+
+    Agent->>Hook: Read(".notion/index.json")
+    Hook->>Data: resolve from same snapshotVersion
+    Data-->>Hook: index data + snapshot identity
+    Hook->>Tmp: write one-shot JSON
+    Hook-->>Agent: updatedInput → tmp path
     Agent->>Agent: 得到页面列表
 
-    Agent->>Hook: Read .notion/pages/abc123.json
-    Hook->>Cache: 检查 pages cache
-    alt 缓存命中
-        Cache-->>Hook: 页面数据
-    else 缓存未命中
-        Hook->>CLI: ntn page get abc123 --format json
-        CLI->>Notion: GET /v1/pages/abc123
-        Notion-->>CLI: page data
-        CLI-->>Hook: JSON
-        Hook->>Cache: 更新 pages cache
+    Agent->>Hook: Read(".notion/pages/abc123.json")
+    Hook->>Data: resolve from same snapshotVersion
+    alt page materialized in snapshot
+        Data-->>Hook: page data + snapshot identity
+    else page not materialized
+        Data-->>Hook: snapshot-scoped miss
     end
-    Hook->>Hook: 写临时文件
-    Hook-->>Agent: updatedInput → 临时文件
+    Hook->>Tmp: write one-shot JSON
+    Hook-->>Agent: updatedInput → tmp path
 ```
 
 ---
@@ -646,30 +509,25 @@ sequenceDiagram
 
 | 文件                                                         | 变更内容                                                     | 状态     |
 | ------------------------------------------------------------ | ------------------------------------------------------------ | -------- |
-| `backend/notion/__init__.py`                                 | 模块入口                                                     | 待实现   |
-| `backend/notion/auth.py`                                     | `ntn login` 流程编排、NOTION_HOME 管理、auth status 检测     | 待实现   |
-| `backend/notion/cache.py`                                    | `NotionCache` / `NotionPageMeta` 数据结构                    | 待实现   |
-| `backend/notion/sync.py`                                     | 异步同步任务：`sync_notion_index`、`sync_page_content`       | 待实现   |
-| `backend/libs/claude_agent_kit/server/notion_index.py`       | `NOTION_RESOURCES`、`is_notion_index_path`、`get_notion_resource_data` | 待实现   |
-| `backend/libs/claude_agent_kit/types.py`                     | `AgentRunOptions` 新增 `notion_context`、`notion_cache` 等字段 | 待实现   |
-| `backend/libs/claude_agent_kit/server/agent_runner.py`       | PreToolUse 新增 `.notion/` 拦截；PostToolUse 新增 device switch | 待实现   |
-| `backend/libs/claude_agent_kit/server/workspace.py`          | `init_workspace` 新增 `_init_notion_index`                   | 待实现   |
-| `backend/claude_agent/workspace_context.py`                  | `WORKSPACE_CONTEXT_TEMPLATE` 新增 `.notion/` 虚拟索引描述    | 待实现   |
-| `backend/claude_agent/context_builder.py`                    | 系统提示词新增 Notion Switch 指导                            | 待实现   |
-| `backend/claude_agent/service.py`                            | `assemble_context` 注入 `notion_cache`、`notion_context_setter` | 待实现   |
-| `backend/api/notion_routes.py`                               | API 路由：`POST /auth/login`、`POST /auth/poll`、`GET /auth/status` | 待实现   |
-| `docs/design/claude-agent/edit-point/notion-device-adapter.md` | 本设计文档                                                   | ✅ 本文档 |
+| `backend/libs/claude_agent_kit/server/notion_snapshot.py` | canonical snapshot 合同、状态枚举、`.notion/` 路径解析、write proposal stale 判断 | ✅ 已实现 |
+| `backend/tests/test_notion_snapshot_contract.py` | 验证快照路径解析、数据提取、缺页语义、proposal 版本判断 | ✅ 已实现 |
+| `backend/notion/auth.py` | `ntn login` 流程编排、NOTION_HOME 管理、auth status 检测 | 待实现 |
+| `backend/notion/sync.py` | 同步远程数据并物化 canonical snapshot | 待实现 |
+| `backend/notion/snapshot_store.py` | 持久化 current snapshot、历史版本和审计字段 | 待实现 |
+| `backend/libs/claude_agent_kit/server/agent_runner.py` | 未来接线：PreToolUse `.notion/` 读取从 attached snapshot 重定向 | 待实现 |
+| `backend/claude_agent/workspace_context.py` | 未来接线：`WORKSPACE_CONTEXT_TEMPLATE` 注入 snapshot identity 和 `.notion/` 读法 | 待实现 |
+| `backend/claude_agent/service.py` | 未来接线：Agent init 时从连接器数据层 attach current snapshot | 待实现 |
 
 ### 9.1 相关现有文件（需阅读，不需修改）
 
 | 文件                   | 作用                            |
 | ---------------------- | ------------------------------- |
-| `editor_index.py`      | `.notion_index.py` 的参考模板   |
+| `editor_index.py`      | `.notion/` snapshot path resolver 的参考模板 |
 | `workspace.py`         | `.notion/` 目录初始化入口       |
 | `agent_runner.py`      | PreToolUse / PostToolUse 扩展点 |
 | `workspace_context.py` | 工作空间上下文模板              |
 | `context_builder.py`   | 系统提示词模板                  |
-| `editor_tool.py`       | `switch_editor` handler 所在    |
+| `editor_tool.py`       | `switch_editor` handler 所在；Notion connector 不复用该工具 |
 
 ---
 
@@ -688,3 +546,61 @@ sequenceDiagram
 | 增量变更检测（`last_edited_time` 对比） | 先做全量 index 刷新                          |
 | 多 Notion workspace 切换                | 先支持单 workspace                           |
 
+---
+
+## 11. 前端交互设计稿（MVP）
+
+### 11.1 页面结构
+
+```
+Settings / Workspace resources
+  ├─ Resource connector list
+  │    └─ Notion connector row
+  │         Status: Not connected / Connected / Syncing / Needs auth / Conflict
+  │         Snapshot: version, fetchedAt, sourceRevision
+  │         Actions: Connect, Sync now, Refresh snapshot, Disconnect
+  ├─ Connector setup drawer
+  │    Step 1 Platform: Notion
+  │    Step 2 Auth: verification URL + code
+  │    Step 3 Resources: databases + standalone pages
+  │    Step 4 Snapshot ready: page count + version
+  └─ Snapshot detail panel
+       connector.json / index.json summary / selected resources
+
+Chat workspace
+  ├─ Context banner: "Using Notion snapshot <version>"
+  ├─ Agent message stream
+  └─ Proposal card: diff preview + base snapshot identity
+```
+
+### 11.2 状态模型
+
+| 状态 | UI 展示 | 用户动作 |
+|---|---|---|
+| `not_connected` | 空状态：连接 Notion 后可让 Agent 引用页面 | `Connect Notion` |
+| `pending_auth` | 验证码、打开浏览器按钮、轮询进度 | `Open browser` / `Cancel` |
+| `pending_sync` | 同步进度、资源选择锁定 | `Cancel` |
+| `snapshot_ready` | 资源数量、快照版本、最近同步时间 | `Start chat` / `Refresh snapshot` |
+| `stale` | 当前对话使用旧快照的提示 | `Refresh snapshot` |
+| `conflict` | 当前版本与 proposal 基线不一致 | `Review latest` / `Regenerate proposal` |
+| `permission_denied` | 说明缺失 Notion scope 或 token 失效 | `Reconnect` |
+| `connector_unavailable` | 数据层暂不可用 | `Retry` |
+
+### 11.3 Agent 写入确认卡
+
+写入确认卡只在后续启用 Notion 写回时出现，本期保留设计边界：
+
+- 显示 proposal 的 `base_snapshot_version`、`base_source_revision`、`base_sync_cursor`。
+- 显示将修改的页面标题、Notion URL 和 block 摘要。
+- 主按钮为 `Approve write`，次按钮为 `Reject`，冲突时主按钮变为 `Refresh first`。
+- 批准后等待 `session_updated source="agent"` 事件再刷新，不在确认响应后固定 sleep。
+
+### 11.4 不过度设计检查
+
+| 可能扩展 | 本期处理 |
+|---|---|
+| 多平台连接器市场 | 不做，只保留 Notion row 的结构可扩展性 |
+| Notion block 可视化编辑器 | 不做，只显示摘要和 diff |
+| 实时同步动画 | 不做，只显示状态和最近同步时间 |
+| 自动冲突合并 | 不做，冲突时让用户刷新并重新生成 proposal |
+| Agent 同 turn 切换多个 Notion connector | 不做，由前端选择当前 connector 后下一轮 attach |

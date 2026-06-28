@@ -1,8 +1,10 @@
 # EditorState 虚拟索引适配器
 
 Status: Updated  
-Updated: 2026-05-29  
+Updated: 2026-06-28
 Scope: Design + 实现状态同步
+
+> [Sync] 2026-06-28: 补充 Notion 资源连接器边界 — `.notion/` 读取来源为连接器数据层 canonical snapshot，不复用 `.editor/` 的 Agent 本地内存快照语义。
 
 ---
 
@@ -16,6 +18,9 @@ Scope: Design + 实现状态同步
 6. [读写路径分离](#6-读写路径分离)
 7. [设计决策：为何不写实际文件](#7-设计决策为何不写实际文件)
 8. [上下文接入说明](#8-上下文接入说明)
+9. [`.claude/settings.json` 与虚拟索引的设计关系](#9-claudesettingsjson-与虚拟索引的设计关系)
+10. [实现清单](#10-实现清单)
+11. [Notion 资源连接器边界](#11-notion-资源连接器边界)
 
 ---
 
@@ -480,3 +485,25 @@ Agent 运行后（finally 块）
 
 - [x] 更新 `docs/design/claude-agent/edit-point/.folder.md`
 - [x] 更新 `backend/libs/claude_agent_kit/.folder.md`
+
+---
+
+## 11. Notion 资源连接器边界
+
+`.editor/` 与 `.notion/` 都使用虚拟索引 + PreToolUse Read 重定向，但二者的数据所有权不同：
+
+| 维度 | `.editor/` | `.notion/` |
+|---|---|---|
+| 事实来源 | Ink & Memory `EditorState` | Notion 远程数据源 |
+| 系统内部权威状态 | 当前会话 `editor_state` / DB 刷新结果 | 资源连接器数据层的 `CanonicalWorkspaceSnapshot` |
+| Agent 初始化 | 可使用前端传入的当前编辑器快照 | 必须从连接器数据层读取 current snapshot |
+| Agent 本地状态 | 可通过 `editor_state_getter` 读取 live flyweight | 只能派生 `AgentDerivedContext`，不能成为 source of truth |
+| 写入方式 | `mcp__editor__*` 写工具 + 人类确认 + DB reload | `SnapshotWriteProposal` + connector write pipeline + 远程确认 |
+
+实现约束：
+
+- `.notion/` Read hook 不应在 Agent 读取时直接调用 Notion API。
+- `.notion/` Read hook 必须从已 attach 的 canonical snapshot 中解析数据。
+- 同一 `snapshotVersion` 下的所有 `.notion/` 文件必须来自同一个 snapshot object。
+- Notion 写入确认后必须生成新的 canonical snapshot，旧 snapshot 进入 `snapshot_superseded`。
+- 前端刷新继续遵守 `session_updated source="agent"` 事件驱动机制，不使用固定 sleep。
