@@ -82,6 +82,14 @@
 #                    startup diagnostics (e.g. seccomp-denied hints) reach UI.
 # [Sync] 2026-06-21: pass Settings sandbox network policy to workspace init
 #                    and AgentRunOptions PreToolUse enforcement.
+# [Sync] 2026-06-22: load Settings SYSTEM_PROMPT during Phase 1 via get_system_config,
+#                    pass it to ContextBuilder as lower-priority configurable prompt,
+#                    and rebuild cached system_prompt when that setting changes.
+# [Sync] 2026-06-22: honor Settings Workspace Mode as the workspace lifecycle
+#                    gate; when disabled, Phase 1 does not initialize thread
+#                    workspace or pass cwd/workspace context to the runner.
+# [Sync] 2026-06-25: frontend stop requests cancel the current turn; CancelledError
+#                    now flushes partial assistant parts and closes EventBus with finish.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -157,6 +165,12 @@ def _coerce_sandbox_network_mode(value: object) -> str:
 
     mode = str(value or "").strip().lower()
     return mode if mode in _SANDBOX_NETWORK_MODES else "allowlist"
+
+
+def _coerce_settings_system_prompt(value: object) -> str:
+    """Normalize Settings SYSTEM_PROMPT from system_config for cache comparison."""
+
+    return str(value).strip() if value is not None else ""
 
 
 def _coerce_string_list(value: object) -> list[str]:
@@ -352,30 +366,24 @@ class ClaudeAgentService:
 
         Returns a ``_TurnExecution`` ready to pass to ``execute_session``.
         """
-        if not state.is_context_initialized:
-            logger.debug(
-                "Phase 1: building system_prompt for session_id=%s", state.session_id
-            )
-            system_prompt = await self._context_builder.build_system_prompt(
-                request.user_id
-            )
-            state.with_system_prompt(system_prompt)
-            state.is_context_initialized = True
-        else:
-            logger.debug(
-                "Phase 1: reusing cached system_prompt for session_id=%s", state.session_id
-            )
-
-        # Load user-configured agent settings from system config before cwd
-        # resolution so the workspace sandbox can track Settings workspace mode.
+        # Load user-configured agent settings from system config before system
+        # prompt and cwd resolution.  Settings SYSTEM_PROMPT participates in the
+        # cached system_prompt, while the remaining flags feed AgentRunOptions
+        # and per-thread workspace sandbox settings.
         sys_cfg: dict[str, Any] = {}
+        system_config_loaded = False
+        settings_system_prompt = ""
         user_env_vars: dict[str, str] = {}
         im_full_access_enabled = False
-        workspace_sandbox_enabled = True
+        workspace_enabled = True
         sandbox_network_mode = "allowlist"
         sandbox_network_allowed_domains: list[str] = []
         try:
             sys_cfg = _db.get_system_config(int(request.user_id))
+            system_config_loaded = True
+            settings_system_prompt = _coerce_settings_system_prompt(
+                sys_cfg.get("system_prompt")
+            )
             raw_env = sys_cfg.get("env_vars") or {}
             if isinstance(raw_env, dict):
                 user_env_vars = {
@@ -384,7 +392,7 @@ class ClaudeAgentService:
                     if str(k).strip() and v is not None
                 }
             im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
-            workspace_sandbox_enabled = bool(sys_cfg.get("workspace_enabled", True))
+            workspace_enabled = bool(sys_cfg.get("workspace_enabled", True))
             sandbox_network_mode = _coerce_sandbox_network_mode(
                 sys_cfg.get("sandbox_network_mode")
             )
@@ -397,21 +405,69 @@ class ClaudeAgentService:
                 e,
             )
 
-        workspace_path = get_or_create_workspace(
-            state.session_id,
-            sandbox_enabled=workspace_sandbox_enabled,
-            sandbox_network_mode=sandbox_network_mode,
-            sandbox_network_allowed_domains=sandbox_network_allowed_domains,
+        settings_prompt_changed = (
+            system_config_loaded
+            and state.is_context_initialized
+            and state.system_config_system_prompt != settings_system_prompt
         )
-        cwd = str(workspace_path)
-        if request.cwd and os.path.abspath(request.cwd) != os.path.abspath(cwd):
-            logger.warning(
-                "Ignoring client-provided Claude Agent cwd outside the "
-                "server-owned thread workspace. requested=%s resolved=%s",
-                request.cwd,
-                cwd,
+        if not state.is_context_initialized or settings_prompt_changed:
+            if settings_prompt_changed:
+                logger.debug(
+                    "Phase 1: rebuilding system_prompt after Settings SYSTEM_PROMPT "
+                    "change for session_id=%s",
+                    state.session_id,
+                )
+            else:
+                logger.debug(
+                    "Phase 1: building system_prompt for session_id=%s",
+                    state.session_id,
+                )
+            system_prompt = await self._context_builder.build_system_prompt(
+                request.user_id,
+                configured_system_prompt=settings_system_prompt or None,
             )
-        state.with_cwd(cwd)
+            state.with_system_prompt(
+                system_prompt,
+                system_config_system_prompt=settings_system_prompt,
+            )
+            state.is_context_initialized = True
+        else:
+            logger.debug(
+                "Phase 1: reusing cached system_prompt for session_id=%s",
+                state.session_id,
+            )
+
+        if workspace_enabled:
+            workspace_path = get_or_create_workspace(
+                state.session_id,
+                sandbox_enabled=True,
+                sandbox_network_mode=sandbox_network_mode,
+                sandbox_network_allowed_domains=sandbox_network_allowed_domains,
+            )
+            cwd = str(workspace_path)
+            if request.cwd and os.path.abspath(request.cwd) != os.path.abspath(cwd):
+                logger.warning(
+                    "Ignoring client-provided Claude Agent cwd outside the "
+                    "server-owned thread workspace. requested=%s resolved=%s",
+                    request.cwd,
+                    cwd,
+                )
+            state.with_cwd(cwd)
+        else:
+            cwd = ""
+            if request.cwd:
+                logger.warning(
+                    "Ignoring client-provided Claude Agent cwd because Workspace "
+                    "Mode is disabled. requested=%s",
+                    request.cwd,
+                )
+            if state.cwd:
+                logger.debug(
+                    "Phase 1: clearing cached cwd because Workspace Mode is "
+                    "disabled for session_id=%s",
+                    state.session_id,
+                )
+            state.with_cwd("")
 
         # ---------------------------------------------------------------
         # Resolve resume: load existing chat_thread to get claude_session_id.
@@ -580,9 +636,11 @@ class ClaudeAgentService:
         try:
             result = await execution.runner.run_streaming(execution.run_options, callbacks)
         except asyncio.CancelledError:
-            # Frontend disconnected mid-stream — flush partial assistant content
-            # so the next load of this thread shows any completed tool calls / text.
+            # Explicit stop / shutdown cancellation — flush partial assistant
+            # content so the next load of this thread shows completed pieces.
             await self._persist_partial_assistant(execution)
+            await queue.put(_sse("finish", {"finishReason": "stop"}))
+            await queue.put(None)
             raise
 
         if result.success:

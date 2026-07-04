@@ -6,6 +6,9 @@
 #                    Adapted from Pawkeyland scripts/test_demo_server_import.py
 #                    (removed pet/persona/sticker/necklace contract tests).
 # [Sync] 2026-05-24: cover server startup cleanup of unsupported Agent env keys.
+# [Sync] 2026-06-22: cover Claude Agent route attachment handling when Settings
+#                    Workspace Mode is disabled.
+# [Sync] 2026-06-25: cover thread-scoped stop endpoint registration and routing.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -23,6 +26,7 @@ import sys
 import types
 import unittest
 import unittest.mock
+import asyncio
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
@@ -250,6 +254,9 @@ class TestClaudeAgentRouteRegistration(unittest.TestCase):
     def test_post_tool_confirm(self):
         self.assertTrue(self._has_route("POST", "/api/claude-agent/tool-confirm"))
 
+    def test_post_thread_stop(self):
+        self.assertTrue(self._has_route("POST", "/api/claude-agent/threads/{thread_id}/stop"))
+
 
 # ---------------------------------------------------------------------------
 # Pydantic model contract tests
@@ -315,6 +322,111 @@ class TestToolConfirmRequestModel(unittest.TestCase):
     def test_answers_optional(self):
         m = self.Model(thread_id="thread-1", tool_call_id="xyz", approved=False)
         self.assertIsNone(m.answers)
+
+
+# ---------------------------------------------------------------------------
+# Route behavior tests
+# ---------------------------------------------------------------------------
+
+@_skip_if_no_server
+class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
+    """Workspace Mode disabled should not initialize workspaces from attachments."""
+
+    def test_attachments_do_not_initialize_workspace_when_workspace_mode_disabled(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ClaudeAgentRequestBody(
+            thread_id="thread-no-workspace",
+            message="hello with attachment",
+            attachments=[
+                route_module.ChatAttachment(
+                    type="file",
+                    url="/api/files/file-1",
+                    storageKey="file-1",
+                    filename="note.txt",
+                    mediaType="text/plain",
+                )
+            ],
+        )
+
+        async def _call_route():
+            return await route_module.claude_agent_stream(
+                body,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-no-workspace"},
+            ),
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_system_config",
+                return_value={"workspace_enabled": False},
+            ),
+            unittest.mock.patch.object(
+                route_module,
+                "get_or_create_workspace",
+            ) as get_or_create_workspace,
+            unittest.mock.patch.object(
+                route_module,
+                "sync_attachments_to_workspace_files",
+            ) as sync_attachments_to_workspace_files,
+        ):
+            response = asyncio.run(_call_route())
+
+        self.assertEqual(response.media_type, "text/event-stream")
+        get_or_create_workspace.assert_not_called()
+        sync_attachments_to_workspace_files.assert_not_called()
+
+
+@_skip_if_no_server
+class TestClaudeAgentRouteStop(unittest.TestCase):
+    """Thread stop route should validate ownership before cancelling runtime state."""
+
+    def test_stop_thread_validates_owner_and_calls_factory(self):
+        import routers.claude_agent as route_module
+
+        async def _call_route():
+            return await route_module.claude_agent_stop_thread(
+                "thread-stop",
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-stop", "user_id": 7},
+            ) as get_chat_thread,
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "stop_thread",
+                new=unittest.mock.AsyncMock(
+                    return_value={
+                        "stop_requested": True,
+                        "running": False,
+                        "lifecycle": "idle",
+                    }
+                ),
+            ) as stop_thread,
+        ):
+            response = asyncio.run(_call_route())
+
+        get_chat_thread.assert_called_once_with("thread-stop", 7)
+        stop_thread.assert_awaited_once_with("thread-stop")
+        self.assertEqual(
+            response,
+            {
+                "ok": True,
+                "thread_id": "thread-stop",
+                "stop_requested": True,
+                "running": False,
+                "lifecycle": "idle",
+            },
+        )
 
 
 # ---------------------------------------------------------------------------

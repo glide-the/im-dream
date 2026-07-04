@@ -46,8 +46,8 @@ Google Cloud 部署脚本位于项目根目录下的 `deploy/` 文件夹。优�
 | 脚本 | 执行时机 | 作用 |
 |------|---------|------|
 | `deploy/google-cloud/deploy.sh setup-storage` | **首次部署前**（一次性） | 创建 GCS bucket、服务账号、IAM 授权 |
-| `deploy/google-cloud/deploy.sh setup-env` | **首次部署前及 secrets 变更时** | 配置 Secret Manager secrets 和 Cloud Run 环境变量 |
-| `deploy/google-cloud/deploy.sh deploy` | **每次发版** | 并行构建镜像、推送到 Artifact Registry、部署前后端并回写后端 CORS origin |
+| `deploy/google-cloud/deploy.sh setup-env` | **首次部署前及 secrets 变更时** | 配置 Secret Manager secrets、Google OAuth/JWT/session secrets 和 Cloud Run 环境变量 |
+| `deploy/google-cloud/deploy.sh deploy` | **每次发版** | 并行构建镜像、推送到 Artifact Registry、部署前后端并回写后端 OAuth URL、cookie policy 和 CORS origin |
 | `deploy/google-cloud/deploy.sh backup-data` | **停机、修复或同步前** | 下载云端 SQLite/WAL/SHM 到本地 `backend/data/bak_<date>/`，不上传、不重启 |
 | `deploy/deploy.sh` | **兼容入口** | 委托执行 `deploy/google-cloud/deploy.sh deploy` |
 
@@ -99,6 +99,10 @@ export GCP_PROJECT_ID=your-project-id
 | `ANTHROPIC_DEFAULT_OPUS_MODEL` | `ink-anthropic-opus-model` | Opus 默认模型 |
 | `AGENT_CWD` | `ink-agent-cwd` | Agent 工作区路径，Cloud Run 默认 `/app/data/agent-workspace` |
 | `FILE_STORAGE_LOCAL_DIR` | `ink-file-storage-dir` | 文件存储路径，Cloud Run 默认 `/app/data/file-storage` |
+| `GOOGLE_CLIENT_SECRET` | `ink-google-client-secret` | Google OAuth Web Client Secret |
+| `JWT_SECRET` | `ink-jwt-secret` | 本系统 access token 签名密钥 |
+| `SESSION_SECRET_KEY` | `ink-session-secret-key` | OAuth state/session cookie 签名密钥 |
+| `OAUTH_TOKEN_ENCRYPTION_KEY` | `ink-oauth-token-encryption-key` | 预留：如后续保存 Google token，必须用于加密 |
 
 **配置值 → Cloud Run 环境变量**
 
@@ -106,12 +110,27 @@ export GCP_PROJECT_ID=your-project-id
 |------|-------------|------|
 | `TZ` | `UTC` | `setup-env.sh` 固定写入 `.cloud-env` |
 | `backend/.env` 中非 Secret Manager key | 原值透传 | 除上表交互确认 key 和 `TZ` 外，其他 key 会写入 `.cloud-env` 的 `CLOUD_ENV_VARS` |
-| `INK_CORS_ALLOW_ORIGINS` | 本地前端 origin 列表 | 后端默认仅允许 `localhost` / `127.0.0.1` 本地服务；Cloud Run 部署默认写入固定前端域名 `https://ink-frontend.suoxya.com` |
-| `INK_CORS_ALLOW_CREDENTIALS` | `false` | 是否允许 cookie 等浏览器 credentials；Bearer Token 不需要开启 |
+| `GOOGLE_CLIENT_ID` | 来自 `backend/.env` | Google OAuth Web Client ID，非 secret |
+| `WEBUI_URL` | 部署脚本写入 `https://ink-frontend.suoxya.com` | OAuth callback 成功后的前端跳转目标 |
+| `API_BASE_URL` | 部署脚本写入 `https://ink-backend.suoxya.com` | Google OAuth callback URI 构造依据 |
+| `COOKIE_SECURE` | `true` | 生产 HTTPS cookie 必须开启 Secure |
+| `COOKIE_SAMESITE` | `none` | 前后端分域时允许跨站 cookie |
+| `INK_CORS_ALLOW_ORIGINS` | `https://ink-frontend.suoxya.com` | 生产后端只允许可信前端 origin |
+| `INK_CORS_ALLOW_CREDENTIALS` | `true` | Google OAuth cookie 登录需要允许浏览器 credentials |
 
 输出写入根目录 `.cloud-env`（已加入 `.gitignore`）。
 
-`setup-env` 不把 `INK_CORS_ALLOW_ORIGINS` / `INK_CORS_ALLOW_CREDENTIALS` 写入 `.cloud-env`。这两个变量由 `deploy/google-cloud/deploy.sh deploy` 按固定前端公开域名更新到后端，避免后续数据同步或普通环境变量刷新把生产 CORS origin 覆盖回本地默认值。
+`setup-env` 不把 `WEBUI_URL`、`API_BASE_URL`、`COOKIE_SECURE`、`COOKIE_SAMESITE`、`INK_CORS_ALLOW_ORIGINS` / `INK_CORS_ALLOW_CREDENTIALS` 写入 `.cloud-env`。这些变量由 `deploy/google-cloud/deploy.sh deploy` 按固定公开域名更新到后端，避免后续数据同步或普通环境变量刷新把生产 OAuth/CORS/cookie 配置覆盖回本地默认值。
+
+Google Console 必须配置：
+
+```text
+Authorized JavaScript origins:
+  https://ink-frontend.suoxya.com
+
+Authorized redirect URIs:
+  https://ink-backend.suoxya.com/oauth/google/callback
+```
 
 ### 3. 部署
 
@@ -130,7 +149,11 @@ Step 5  并行构建后端镜像 + 前端镜像
 Step 6  并行推送两个镜像
 Step 7  部署后端服务 → 获取 BACKEND_URL（run.app 服务 URL，作为 nginx fallback）
         部署前端服务（默认注入 API_BASE_URL=https://ink-backend.suoxya.com）
-        回写后端 INK_CORS_ALLOW_ORIGINS（默认 https://ink-frontend.suoxya.com）
+        回写后端 WEBUI_URL / API_BASE_URL / cookie policy / INK_CORS_ALLOW_ORIGINS
+        默认 WEBUI_URL=https://ink-frontend.suoxya.com
+        默认 API_BASE_URL=https://ink-backend.suoxya.com
+        默认 COOKIE_SECURE=true, COOKIE_SAMESITE=none
+        默认 INK_CORS_ALLOW_ORIGINS=https://ink-frontend.suoxya.com
 ```
 
 部署完成后输出：
@@ -174,10 +197,29 @@ export BACKEND_PUBLIC_ORIGIN=https://ink-backend.suoxya.com    # 默认固定后
 export FRONTEND_PUBLIC_ORIGIN=https://ink-frontend.suoxya.com  # 默认固定前端公开域名
 export FRONTEND_API_BASE_URL=https://api.example.com      # 可选覆盖；默认 BACKEND_PUBLIC_ORIGIN
 export BACKEND_CORS_ALLOW_ORIGINS=https://app.example.com # 可选覆盖；默认 FRONTEND_PUBLIC_ORIGIN
-export INK_CORS_ALLOW_CREDENTIALS=false                   # 默认 false
+export INK_CORS_ALLOW_CREDENTIALS=true                    # 默认 true，OAuth cookie 登录需要
+export BACKEND_COOKIE_SECURE=true                         # 默认 true
+export BACKEND_COOKIE_SAMESITE=none                       # 默认 none，前后端分域需要
 ```
 
 `FRONTEND_PUBLIC_ORIGIN` / `BACKEND_CORS_ALLOW_ORIGINS` 应填写浏览器 Origin（协议 + 主机 + 可选端口），不要包含路径；部署脚本会自动去掉末尾 `/`。
+
+## OAuth 发布验证
+
+发布完成后至少验证：
+
+```bash
+curl -I https://ink-backend.suoxya.com/api/health
+curl -I 'https://ink-backend.suoxya.com/oauth/google/login?return_to=/'
+curl -I https://ink-frontend.suoxya.com/runtime-config.js
+```
+
+预期：
+
+- `/api/health` 返回 `200`。
+- `/oauth/google/login` 返回 `302`，`Location` 指向 `accounts.google.com`，并包含 `redirect_uri=https%3A%2F%2Fink-backend.suoxya.com%2Foauth%2Fgoogle%2Fcallback`。
+- `runtime-config.js` 中 `apiBaseUrl` 为 `https://ink-backend.suoxya.com`。
+- 浏览器点击 `Continue with Google` 后能进入 Google，并在 callback 后回到 `https://ink-frontend.suoxya.com`。
 
 ### Docker 构建源覆盖
 

@@ -11,10 +11,19 @@
 // [Sync] 2026-06-13: full-access copy clarifies AskUserQuestion forms still
 //                    require confirmation.
 // [Sync] 2026-06-21: add sandbox network policy controls backed by system_config.
+// [Sync] 2026-06-22: emit same-tab Workspace Mode changes so chat/file sidebar
+//                    entry points close immediately when disabled.
+// [Sync] 2026-06-22: hide Sandbox Network and user env var controls whenever
+//                    Workspace Mode is disabled because both rely on workspace
+//                    runtime initialization.
+// [Sync] 2026-06-25: hydrate Sandbox Network controls from PUT response so
+//                    sanitized allowed domains and mode survive refresh.
+// [Sync] 2026-06-25: hide the HTTP method placeholder in open network mode
+//                    while keeping the high-risk internet access warning.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
-import { emitImFullAccessChanged } from '../../lib/system-config-events';
+import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
@@ -36,6 +45,8 @@ interface SystemConfigData {
   theme?: ThemeMode;
   env_vars?: Record<string, string>;
 }
+
+type SystemConfigResponse = { success?: boolean; data?: SystemConfigData } & SystemConfigData;
 
 const THEME_OPTIONS: { mode: ThemeMode; label: string; Icon: typeof IconSun }[] = [
   { mode: 'light', label: 'Light', Icon: IconSun },
@@ -97,6 +108,24 @@ function normalizeSandboxNetworkDomain(value: string): string | null {
   return parseSandboxNetworkDomains(value)[0] ?? null;
 }
 
+function readSystemConfigResponse(payload: SystemConfigResponse): SystemConfigData {
+  return payload.data ?? payload;
+}
+
+function hasSystemConfigFields(config: SystemConfigData): boolean {
+  return Boolean(
+    config.provider !== undefined
+    || config.model !== undefined
+    || config.system_prompt !== undefined
+    || config.workspace_enabled !== undefined
+    || config.sandbox_network_mode !== undefined
+    || config.sandbox_network_allowed_domains !== undefined
+    || config.im_full_access_enabled !== undefined
+    || config.theme !== undefined
+    || config.env_vars !== undefined
+  );
+}
+
 export default function ModelConfigSection() {
   const [theme, setTheme] = useState<ThemeMode>(() => {
     if (typeof window === 'undefined') return 'system';
@@ -128,8 +157,8 @@ export default function ModelConfigSection() {
           headers: { 'Authorization': `Bearer ${getAuthToken()}` },
         });
         if (!response.ok) return;
-        const payload = (await response.json()) as { data?: SystemConfigData } & SystemConfigData;
-        const config = payload.data ?? payload;
+        const payload = (await response.json()) as SystemConfigResponse;
+        const config = readSystemConfigResponse(payload);
         if (!active) return;
         setTheme(config.theme ?? 'system');
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
@@ -174,7 +203,7 @@ export default function ModelConfigSection() {
     return () => media.removeListener(handleChange);
   }, [theme]);
 
-  const updateConfig = useCallback(async (patch: Partial<SystemConfigData>) => {
+  const updateConfig = useCallback(async (patch: Partial<SystemConfigData>): Promise<SystemConfigData | null> => {
     setSaving(true);
     try {
       const response = await fetch(`${API_BASE}/api/system-config`, {
@@ -182,9 +211,13 @@ export default function ModelConfigSection() {
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
         body: JSON.stringify(patch),
       });
-      return response.ok;
+      if (!response.ok) return null;
+      const payload = (await response.json().catch(() => null)) as SystemConfigResponse | null;
+      if (!payload) return patch;
+      const config = readSystemConfigResponse(payload);
+      return hasSystemConfigFields(config) ? config : patch;
     } catch {
-      return false;
+      return null;
     } finally {
       setSaving(false);
     }
@@ -204,30 +237,52 @@ export default function ModelConfigSection() {
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
     setWorkspaceMode(next);
-    void updateConfig({ workspace_enabled: next });
+    emitWorkspaceModeChanged(next);
+    void (async () => {
+      const savedConfig = await updateConfig({ workspace_enabled: next });
+      if (savedConfig) {
+        const persisted = savedConfig.workspace_enabled ?? next;
+        setWorkspaceMode(persisted);
+        emitWorkspaceModeChanged(persisted);
+        return;
+      }
+      setWorkspaceMode(!next);
+      emitWorkspaceModeChanged(!next);
+    })();
   }, [updateConfig, workspaceMode]);
 
   const saveSandboxNetworkDomains = useCallback(async (domains: string[]) => {
     setSandboxNetworkSaving(true);
-    const saved = await updateConfig({ sandbox_network_allowed_domains: domains });
-    if (saved) {
-      setSandboxNetworkDomains(formatSandboxNetworkDomains(domains));
+    const savedConfig = await updateConfig({ sandbox_network_allowed_domains: domains });
+    if (savedConfig) {
+      setSandboxNetworkDomains(formatSandboxNetworkDomains(savedConfig.sandbox_network_allowed_domains ?? domains));
+      if (isSandboxNetworkMode(savedConfig.sandbox_network_mode)) {
+        setSandboxNetworkMode(savedConfig.sandbox_network_mode);
+      }
       setSandboxNetworkStatus('域名允许列表已保存。');
     } else {
       setSandboxNetworkStatus('域名允许列表保存失败，请稍后重试。');
     }
     setSandboxNetworkSaving(false);
-    return saved;
+    return Boolean(savedConfig);
   }, [updateConfig]);
 
   const handleSandboxNetworkModeChange = useCallback((mode: SandboxNetworkMode) => {
+    const previousMode = sandboxNetworkMode;
     setSandboxNetworkMode(mode);
     setSandboxNetworkStatus(null);
     void (async () => {
-      const saved = await updateConfig({ sandbox_network_mode: mode });
-      setSandboxNetworkStatus(saved ? '网络策略已保存。' : '网络策略保存失败，请稍后重试。');
+      const savedConfig = await updateConfig({ sandbox_network_mode: mode });
+      if (savedConfig) {
+        setSandboxNetworkMode(isSandboxNetworkMode(savedConfig.sandbox_network_mode) ? savedConfig.sandbox_network_mode : mode);
+        setSandboxNetworkDomains(formatSandboxNetworkDomains(savedConfig.sandbox_network_allowed_domains ?? parseSandboxNetworkDomains(sandboxNetworkDomains)));
+        setSandboxNetworkStatus('网络策略已保存。');
+        return;
+      }
+      setSandboxNetworkMode(previousMode);
+      setSandboxNetworkStatus('网络策略保存失败，请稍后重试。');
     })();
-  }, [updateConfig]);
+  }, [sandboxNetworkDomains, sandboxNetworkMode, updateConfig]);
 
   const handleSandboxNetworkAccessToggle = useCallback((enabled: boolean) => {
     const nextMode: SandboxNetworkMode = enabled
@@ -277,8 +332,11 @@ export default function ModelConfigSection() {
     setImFullAccessEnabled(next);
     emitImFullAccessChanged(next);
     void (async () => {
-      const saved = await updateConfig({ im_full_access_enabled: next });
-      if (saved) {
+      const savedConfig = await updateConfig({ im_full_access_enabled: next });
+      if (savedConfig) {
+        const persisted = savedConfig.im_full_access_enabled ?? next;
+        setImFullAccessEnabled(persisted);
+        emitImFullAccessChanged(persisted);
         return;
       }
       setImFullAccessEnabled(!next);
@@ -287,8 +345,13 @@ export default function ModelConfigSection() {
   }, [imFullAccessEnabled, updateConfig]);
 
   const handleSavePrompt = useCallback(() => {
-    void updateConfig({ system_prompt: systemPrompt });
-    setDirty(false);
+    void (async () => {
+      const savedConfig = await updateConfig({ system_prompt: systemPrompt });
+      if (savedConfig) {
+        setSystemPrompt(savedConfig.system_prompt ?? systemPrompt);
+        setDirty(false);
+      }
+    })();
   }, [systemPrompt, updateConfig]);
 
   const handleResetPrompt = useCallback(() => {
@@ -318,16 +381,16 @@ export default function ModelConfigSection() {
     }
     setEnvVarsSaving(true);
     try {
-      await fetch(`${API_BASE}/api/system-config`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
-        body: JSON.stringify({ env_vars: record }),
-      });
-      setEnvVarsDirty(false);
+      const savedConfig = await updateConfig({ env_vars: record });
+      if (savedConfig) {
+        const savedEnvVars = savedConfig.env_vars ?? record;
+        setEnvVars(Object.entries(savedEnvVars).map(([key, value]) => ({ key, value })));
+        setEnvVarsDirty(false);
+      }
     } finally {
       setEnvVarsSaving(false);
     }
-  }, [envVars]);
+  }, [envVars, updateConfig]);
 
   const fieldStyle: React.CSSProperties = {
     width: '100%',
@@ -486,6 +549,7 @@ export default function ModelConfigSection() {
       </div>
 
       {/* Sandbox network */}
+      {workspaceMode ? (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
         <div>
           <p style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
@@ -666,19 +730,21 @@ export default function ModelConfigSection() {
               </div>
             ) : null}
 
-            <div>
-              <p style={{ margin: '0 0 0.55rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                允许的 HTTP 方法
-              </p>
-              <select
-                value="all"
-                disabled
-                title="Claude Code sandbox 当前按域名控制网络访问，不提供 HTTP 方法级策略。"
-                style={{ ...fieldStyle, maxWidth: '24rem', height: '3.15rem', fontWeight: 700, opacity: 0.72, cursor: 'not-allowed' }}
-              >
-                <option value="all">所有方法</option>
-              </select>
-            </div>
+            {sandboxNetworkMode === 'allowlist' ? (
+              <div>
+                <p style={{ margin: '0 0 0.55rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+                  允许的 HTTP 方法
+                </p>
+                <select
+                  value="all"
+                  disabled
+                  title="Claude Code sandbox 当前按域名控制网络访问，不提供 HTTP 方法级策略。"
+                  style={{ ...fieldStyle, maxWidth: '24rem', height: '3.15rem', fontWeight: 700, opacity: 0.72, cursor: 'not-allowed' }}
+                >
+                  <option value="all">所有方法</option>
+                </select>
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -706,6 +772,7 @@ export default function ModelConfigSection() {
           </p>
         ) : null}
       </div>
+      ) : null}
 
       {/* IM approval mode */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
@@ -743,6 +810,7 @@ export default function ModelConfigSection() {
       </div>
 
       {/* Environment Variables */}
+      {workspaceMode ? (
       <div>
         <p style={{ margin: '0 0 0.3rem', fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           环境变量 / Environment Variables
@@ -823,6 +891,7 @@ export default function ModelConfigSection() {
           </button>
         </div>
       </div>
+      ) : null}
     </div>
   );
 }

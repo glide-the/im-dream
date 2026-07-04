@@ -7,6 +7,10 @@
 > network policy.
 > [Pos] sandbox-network-interaction-plan in `docs/design/claude-agent`
 > [Sync] 2026-06-21: initial design for sandbox network settings.
+> [Sync] 2026-06-22: Settings shows Sandbox Network only when Workspace Mode is enabled.
+> [Sync] 2026-06-25: open mode omits `sandbox.network` instead of writing
+> unsupported `allowedDomains:["*"]`; HTTP method placeholder is hidden in
+> open mode while the high-risk warning remains visible.
 
 # Claude-Agent Sandbox Network Interaction Plan
 
@@ -74,7 +78,7 @@ Controls use the reference layout supplied by the user:
 |---|---|---|---|
 | 禁用网络 | `disabled` | `sandbox.network.allowedDomains=[]` + `deniedDomains=["*"]`; PreToolUse denies network tools | Bash sandbox subprocesses and common network tools should not reach external domains. |
 | 白名单 | `allowlist` | `sandbox.network.allowedDomains=[...]` | Pre-allow listed domains; other domains still follow Claude Code or managed policy. |
-| 开放网络 | `open` | `sandbox.network.allowedDomains=["*"]` | Request outbound access for sandbox subprocesses, subject to runtime policy. |
+| 开放网络 | `open` | omit `sandbox.network` | Request unrestricted/default sandbox-runtime egress without passing an unsupported bare `*` allowlist domain; still subject to runtime policy. |
 
 Allowlist editing:
 
@@ -91,10 +95,15 @@ Allowlist editing:
 
 HTTP method control:
 
-- Render a disabled "所有方法" select to match the reference layout.
+- Render a disabled "所有方法" select only in allowlist mode to match the
+  reference layout where domain restrictions exist.
+- Hide this control in open mode because no domain/method-scoped runtime
+  network config is written.
 - Do not persist HTTP method policy in this phase; Claude Code sandbox network
   settings are domain-based, and adding an unused method field would be
   misleading over-design.
+- Keep the high-risk internet-access warning visible in every enabled network
+  mode, including open mode.
 
 Copy constraints:
 
@@ -128,7 +137,8 @@ The smallest sufficient implementation is:
 2. expose the control in the existing `ModelConfigSection`;
 3. pass the config through `ClaudeAgentService` and attachment workspace init;
 4. write `sandbox.network` into the existing thread-local
-   `.claude/settings.json` sandbox block.
+   `.claude/settings.json` sandbox block for disabled/allowlist modes, and
+   omit `sandbox.network` for open mode.
 
 ## 5. Runtime contract
 
@@ -160,12 +170,14 @@ The generated sandbox snippets are:
 ```json
 {
   "sandbox": {
-    "network": {
-      "allowedDomains": ["*"]
-    }
+    "enabled": true
   }
 }
 ```
+
+Open mode intentionally has no `sandbox.network` key. The backend does not
+write `allowedDomains:["*"]`, because the current sandbox-runtime schema does
+not support bare `*` inside `allowedDomains`.
 
 Claude Code documents `sandbox.network.allowedDomains` /
 `sandbox.network.deniedDomains` as Bash sandbox domain controls. This design
@@ -178,10 +190,11 @@ allow/deny remains a permission-rule concern in enabled modes. See:
 
 ## 6. Acceptance criteria
 
-- Settings shows Sandbox Network under AI model configuration.
+- Settings shows Sandbox Network under AI model configuration only when
+  Workspace Mode is enabled.
 - Mode is loaded from and saved to `/api/system-config`.
 - Allowlist domains are cleaned and de-duplicated before persistence.
-- Thread workspace initialization writes `sandbox.network` according to the
-  saved user config.
+- Thread workspace initialization writes `sandbox.network` for disabled and
+  allowlist modes, and omits it for open mode.
 - Attachment workspace initialization uses the same network config.
 - Tests cover disabled, allowlist, open, and service-to-workspace handoff.

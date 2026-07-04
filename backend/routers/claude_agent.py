@@ -17,19 +17,31 @@
 #                    workspace sandbox mode so per-thread .claude/settings.json
 #                    is correct before Claude Code starts.
 # [Sync] 2026-06-21: initialize attachment workspaces with sandbox network policy.
+# [Sync] 2026-06-22: when Settings Workspace Mode is disabled, attachment
+#                    handling no longer initializes or syncs a thread workspace.
+# [Sync] 2026-06-25: add thread-scoped stop endpoint so the frontend can cancel
+#                    the current Agent turn without deleting the chat thread.
+# [Sync] 2026-06-27: /api/claude-agent/threads accepts Chat history search
+#                    params backed by plugin-style fuzzy/vector retrievers.
 
 import base64
+import json
 import logging
 from pathlib import Path
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field
 
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
+from claude_agent.thread_retrieval import (
+    build_chat_thread_search_config,
+    is_chat_history_search_requested,
+    search_chat_threads,
+)
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.server.workspace import get_or_create_workspace
 from libs.claude_agent_kit.server.workspace_file_sync import (
@@ -59,6 +71,19 @@ def _coerce_string_list(value: object) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item).strip()]
+
+
+def _parse_vector_query_param(value: Optional[str]) -> dict[str, Any] | None:
+    """Parse the reserved vector_query query-param JSON object."""
+    if value is None or not value.strip():
+        return None
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="Invalid vector_query JSON") from exc
+    if not isinstance(parsed, dict):
+        raise HTTPException(status_code=400, detail="vector_query must be a JSON object")
+    return parsed
 
 
 def _extract_message_text(message: Any) -> str:
@@ -178,87 +203,99 @@ async def claude_agent_stream(
     _msg_dict = body.message if isinstance(body.message, dict) else None
     message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
 
-    # Process attachments: download from file storage and sync to workspace.
+    # Process attachments: download from file storage and sync to workspace when
+    # Workspace Mode is enabled.  When disabled, keep the turn chat-only and do
+    # not create a thread workspace as a side effect of attachments.
     attachment_payloads: list[AttachmentPayload] = []
     if body.attachments:
         try:
             system_config = database.get_system_config(user_id)
-            workspace_path = get_or_create_workspace(
-                thread_id,
-                sandbox_enabled=bool(system_config.get("workspace_enabled", True)),
-                sandbox_network_mode=_coerce_sandbox_network_mode(
-                    system_config.get("sandbox_network_mode")
-                ),
-                sandbox_network_allowed_domains=_coerce_string_list(
-                    system_config.get("sandbox_network_allowed_domains")
-                ),
-            )
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail="Failed to initialize workspace") from exc
-
-        async def _download_file(url: str, storage_key: Optional[str] = None):
-            if not storage_key:
-                raise WorkspaceFileSyncError(
-                    WorkspaceFileSyncErrorCode.INVALID_ATTACHMENT,
-                    f"Attachment storage key is required for file download: {url}",
-                    400,
-                    {"url": url},
+            workspace_enabled = bool(system_config.get("workspace_enabled", True))
+            workspace_path = None
+            if workspace_enabled:
+                workspace_path = get_or_create_workspace(
+                    thread_id,
+                    sandbox_enabled=True,
+                    sandbox_network_mode=_coerce_sandbox_network_mode(
+                        system_config.get("sandbox_network_mode")
+                    ),
+                    sandbox_network_allowed_domains=_coerce_string_list(
+                        system_config.get("sandbox_network_allowed_domains")
+                    ),
                 )
-            content = await server_file_storage.download(storage_key)
-            metadata = await server_file_storage.get_metadata(storage_key)
-            content_type = (metadata.content_type if metadata else None) or "application/octet-stream"
-            return content, content_type
-
-        workspace_sync_error = None
-        workspace_file_parts: list = []
-        try:
-            workspace_file_parts = await sync_attachments_to_workspace_files(
-                workspace_path=workspace_path,
-                attachments=[a.to_dict() for a in body.attachments],
-                download_file=_download_file,
-            )
-        except WorkspaceFileSyncError as exc:
-            workspace_sync_error = normalize_workspace_file_sync_error(exc)
-            logger.warning(
-                "[Claude Agent API] Workspace file sync degraded: %s", workspace_sync_error
-            )
+            else:
+                logger.info(
+                    "[Claude Agent API] Workspace Mode disabled; skipping "
+                    "attachment workspace sync for thread_id=%s",
+                    thread_id,
+                )
         except Exception as exc:
-            workspace_sync_error = normalize_workspace_file_sync_error(exc)
-            logger.warning(
-                "[Claude Agent API] Workspace file sync degraded: %s", workspace_sync_error
-            )
+            raise HTTPException(status_code=500, detail="Failed to load workspace settings") from exc
 
-        if workspace_file_parts:
-            message_parts = inject_attachment_message_parts(
-                message_parts,
-                workspace_file_parts,
-            )
-            logger.info(
-                "[Claude Agent API] Injected %d workspace file parts into message",
-                len(workspace_file_parts),
-            )
-
-        # Build AttachmentPayload list from synced workspace files so that
-        # images, PDFs, and text files are also passed as content blocks to Claude.
-        for part in workspace_file_parts:
-            rel_path = part.get("workspacePath")
-            if not rel_path:
-                continue
-            try:
-                file_bytes = (workspace_path / rel_path).read_bytes()
-                attachment_payloads.append(
-                    AttachmentPayload(
-                        name=part.get("fileName") or Path(rel_path).name,
-                        media_type=part.get("mimeType") or "application/octet-stream",
-                        data=base64.b64encode(file_bytes).decode("ascii"),
+        if workspace_path is not None:
+            async def _download_file(url: str, storage_key: Optional[str] = None):
+                if not storage_key:
+                    raise WorkspaceFileSyncError(
+                        WorkspaceFileSyncErrorCode.INVALID_ATTACHMENT,
+                        f"Attachment storage key is required for file download: {url}",
+                        400,
+                        {"url": url},
                     )
+                content = await server_file_storage.download(storage_key)
+                metadata = await server_file_storage.get_metadata(storage_key)
+                content_type = (metadata.content_type if metadata else None) or "application/octet-stream"
+                return content, content_type
+
+            workspace_sync_error = None
+            workspace_file_parts: list = []
+            try:
+                workspace_file_parts = await sync_attachments_to_workspace_files(
+                    workspace_path=workspace_path,
+                    attachments=[a.to_dict() for a in body.attachments],
+                    download_file=_download_file,
+                )
+            except WorkspaceFileSyncError as exc:
+                workspace_sync_error = normalize_workspace_file_sync_error(exc)
+                logger.warning(
+                    "[Claude Agent API] Workspace file sync degraded: %s", workspace_sync_error
                 )
             except Exception as exc:
+                workspace_sync_error = normalize_workspace_file_sync_error(exc)
                 logger.warning(
-                    "[Claude Agent API] Could not read workspace file for AttachmentPayload: %s — %s",
-                    rel_path,
-                    exc,
+                    "[Claude Agent API] Workspace file sync degraded: %s", workspace_sync_error
                 )
+
+            if workspace_file_parts:
+                message_parts = inject_attachment_message_parts(
+                    message_parts,
+                    workspace_file_parts,
+                )
+                logger.info(
+                    "[Claude Agent API] Injected %d workspace file parts into message",
+                    len(workspace_file_parts),
+                )
+
+            # Build AttachmentPayload list from synced workspace files so that
+            # images, PDFs, and text files are also passed as content blocks to Claude.
+            for part in workspace_file_parts:
+                rel_path = part.get("workspacePath")
+                if not rel_path:
+                    continue
+                try:
+                    file_bytes = (workspace_path / rel_path).read_bytes()
+                    attachment_payloads.append(
+                        AttachmentPayload(
+                            name=part.get("fileName") or Path(rel_path).name,
+                            media_type=part.get("mimeType") or "application/octet-stream",
+                            data=base64.b64encode(file_bytes).decode("ascii"),
+                        )
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[Claude Agent API] Could not read workspace file for AttachmentPayload: %s — %s",
+                        rel_path,
+                        exc,
+                    )
 
     request = ClaudeAgentRunRequest(
         user_id=str(user_id),
@@ -313,12 +350,60 @@ async def claude_agent_create_thread(
 
 @router.get("/api/claude-agent/threads")
 async def claude_agent_list_threads(
+    query: Optional[str] = Query(default=None),
+    search_scope: str = Query(default="all"),
+    retrieval_mode: Optional[str] = Query(default=None),
+    vector_query: Optional[str] = Query(default=None),
+    min_score: Optional[float] = Query(default=None, ge=0, le=1),
+    limit: Optional[int] = Query(default=None, ge=1),
     current_user: dict = Depends(get_current_user),
 ):
-    """Return all chat threads for the authenticated user, newest first."""
+    """Return chat threads, optionally searched by title and message content.
+
+    Default listing keeps the original newest-first behavior.  Search uses the
+    configured retriever registry; ``fuzzy`` is the default, while ``vector`` is
+    an interface-only placeholder aligned with get_sessions_range.vector_query.
+    """
     user_id = current_user["user_id"]
-    threads = database.list_chat_threads(user_id)
-    return {"threads": threads}
+    vector_query_obj = _parse_vector_query_param(vector_query)
+
+    if not is_chat_history_search_requested(
+        query,
+        retrieval_mode=retrieval_mode,
+        vector_query=vector_query_obj,
+    ):
+        threads = database.list_chat_threads(user_id)
+        return {"threads": threads}
+
+    config = build_chat_thread_search_config(
+        query=query,
+        retrieval_mode=retrieval_mode,
+        search_scope=search_scope,
+        min_score=min_score,
+        limit=limit,
+        vector_query=vector_query_obj,
+    )
+    if config is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid chat history retrieval_mode or search_scope",
+        )
+
+    candidates = []
+    if config.retrieval_mode != "vector":
+        candidates = database.list_chat_threads_for_search(user_id)
+    outcome = search_chat_threads(candidates, config)
+    payload: dict[str, Any] = {
+        "threads": outcome.threads,
+        "retrieval": outcome.retrieval,
+    }
+    if outcome.warnings:
+        payload["warnings"] = outcome.warnings
+    if not outcome.ok:
+        payload["ok"] = False
+        payload["error"] = outcome.error
+        payload["detail"] = outcome.detail
+    return payload
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/messages")
@@ -399,6 +484,30 @@ async def claude_agent_thread_status(
         "lifecycle": lifecycle,
         "turn_count": snapshot.get("turn_count", 0),
     }
+
+
+@router.post("/api/claude-agent/threads/{thread_id}/stop")
+async def claude_agent_stop_thread(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Cancel the running Agent turn for *thread_id*.
+
+    The endpoint is idempotent: if the thread belongs to the caller but has no
+    running in-memory turn, it returns ``stop_requested=false``.
+    """
+
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        result = await claude_agent_thread_factory.stop_thread(thread_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"ok": True, "thread_id": thread_id, **result}
 
 
 @router.delete("/api/claude-agent/threads/{thread_id}")

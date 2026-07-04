@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # deploy/setup-env.sh — Initialize Cloud Run environment variables for the backend.
 # [Sync] 2026-06-12: point follow-up release guidance to deploy/google-cloud/deploy.sh.
+# [Sync] 2026-06-23: store Google OAuth, JWT, and session secrets in Secret Manager.
 #
 # Behavior:
-#   - Prompts to confirm 8 specific keys (stored in Secret Manager)
+#   - Prompts to confirm selected Secret Manager keys
 #   - All other keys in backend/.env are passed through as plain env vars silently
 #   - Writes .cloud-env before any gcloud calls
 #
@@ -43,6 +44,10 @@ ANTHROPIC_DEFAULT_SONNET_MODEL ink-anthropic-sonnet-model
 ANTHROPIC_DEFAULT_OPUS_MODEL   ink-anthropic-opus-model
 AGENT_CWD                      ink-agent-cwd
 FILE_STORAGE_LOCAL_DIR         ink-file-storage-dir
+GOOGLE_CLIENT_SECRET           ink-google-client-secret
+JWT_SECRET                     ink-jwt-secret
+SESSION_SECRET_KEY             ink-session-secret-key
+OAUTH_TOKEN_ENCRYPTION_KEY     ink-oauth-token-encryption-key
 "
 
 # Cloud Run defaults for path keys (ignore local .env values)
@@ -100,7 +105,8 @@ while read -r env_key secret_name; do
   case "${env_key}" in
     AGENT_CWD)             default="${_DEFAULT_AGENT_CWD}" ;;
     FILE_STORAGE_LOCAL_DIR) default="${_DEFAULT_FILE_STORAGE}" ;;
-    ANTHROPIC_AUTH_TOKEN)  default="$(get_default "${env_key}")"
+    ANTHROPIC_AUTH_TOKEN|GOOGLE_CLIENT_SECRET|JWT_SECRET|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY)
+                           default="$(get_default "${env_key}")"
                            display="${default:+(set)}" ;;
     *)                     default="$(get_default "${env_key}")"
                            display="${default:-empty}" ;;
@@ -108,7 +114,8 @@ while read -r env_key secret_name; do
 
   # For auth token use masked display, others show actual value
   case "${env_key}" in
-    ANTHROPIC_AUTH_TOKEN) display="${default:+(set)}" ;;
+    ANTHROPIC_AUTH_TOKEN|GOOGLE_CLIENT_SECRET|JWT_SECRET|SESSION_SECRET_KEY|OAUTH_TOKEN_ENCRYPTION_KEY)
+                         display="${default:+(set)}" ;;
     *)                    display="${default:-empty}" ;;
   esac
 
@@ -130,7 +137,9 @@ while IFS='=' read -r key value; do
   is_secret_key "${key}" && continue
   case "${key}" in
     TZ) continue ;; # already set
-    INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS) continue ;; # owned by deploy/google-cloud/deploy.sh
+    # Owned by deploy/google-cloud/deploy.sh so localhost values from
+    # backend/.env never leak into the production Cloud Run revision.
+    WEBUI_URL|API_BASE_URL|COOKIE_SECURE|COOKIE_SAMESITE|INK_CORS_ALLOW_ORIGINS|INK_CORS_ALLOW_CREDENTIALS|INK_PUBLIC_BASE_URL|INK_BACKEND_PUBLIC_BASE_URL) continue ;;
   esac
   ENV_VARS+=",${key}=${value}"
 done < "${DEFAULTS_FILE}"

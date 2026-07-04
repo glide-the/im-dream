@@ -30,16 +30,23 @@ Flow (docs/design/memory/reflections-analysis-prd.md §6):
 from __future__ import annotations
 
 import json
+import asyncio
 import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 import database
+from reflections_agent import (
+    create_reflections_task,
+    get_or_create_reflection_event_bus,
+    get_reflection_event_bus,
+    start_reflections_task,
+)
 from reflections_config import REFLECTIONS_SECTION_CONFIGS, list_sections, get_section_config
 
 from .deps import get_current_user
@@ -71,6 +78,27 @@ class ReflectionsMemoryInitRequest(BaseModel):
 
 class SectionConfigUpdateRequest(BaseModel):
     prompt_files: dict[str, str]
+
+
+class ReflectionsTaskCreateRequest(BaseModel):
+    sections: Optional[list[str]] = None
+    session_ids: Optional[list[str]] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    language: Optional[str] = None
+    auto_start: bool = True
+
+
+def _normalize_reflections_language(language: Optional[str]) -> str:
+    """Normalize frontend UI language codes to the Reflections prompt contract."""
+    code = (language or "en").strip().lower()
+    if code.startswith("zh"):
+        return "zh"
+    return "en"
+
+
+def _language_label(language: str) -> str:
+    return "Simplified Chinese" if language == "zh" else "English"
 
 
 # ---------------------------------------------------------------------------
@@ -225,6 +253,199 @@ async def reflections_memory_init(
         }),
         media_type="application/json",
     )
+
+
+# ---------------------------------------------------------------------------
+# Reflections-agent async task endpoints
+# ---------------------------------------------------------------------------
+
+
+def _task_response(task: dict[str, Any], results: Optional[list[dict[str, Any]]] = None) -> dict[str, Any]:
+    payload = {
+        "id": task["id"],
+        "task_id": task["id"],
+        "status": task["status"],
+        "sections": task.get("sections") or [],
+        "input_snapshot": task.get("input_snapshot") or {},
+        "workspace_path": task.get("workspace_path"),
+        "agent_contract_version": task.get("agent_contract_version"),
+        "error_summary": task.get("error_summary"),
+        "created_at": task.get("created_at"),
+        "started_at": task.get("started_at"),
+        "completed_at": task.get("completed_at"),
+        "updated_at": task.get("updated_at"),
+    }
+    if results is not None:
+        payload["results"] = results
+    return payload
+
+
+@router.post("/api/reflections/tasks", status_code=202)
+async def create_reflections_task_endpoint(
+    body: ReflectionsTaskCreateRequest,
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    """Create and start a backend Reflections-agent async task."""
+    user_id = int(current_user["user_id"])
+    requested_sections = body.sections or list(list_sections())
+    invalid = [section for section in requested_sections if section not in _VALID_SECTIONS]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail={"error": f"Invalid sections: {invalid}. Must be one of: {sorted(_VALID_SECTIONS)}"},
+        )
+
+    language = _normalize_reflections_language(body.language)
+    input_snapshot = {
+        "session_ids": body.session_ids or [],
+        "start_date": body.start_date,
+        "end_date": body.end_date,
+        "language": language,
+        "language_label": _language_label(language),
+    }
+    task_id = create_reflections_task(user_id, requested_sections, input_snapshot)
+    await get_or_create_reflection_event_bus(task_id)
+    if body.auto_start:
+        await start_reflections_task(task_id)
+    task = database.get_reflection_task(task_id, user_id)
+    return Response(
+        content=json.dumps(_task_response(task), ensure_ascii=False),
+        media_type="application/json",
+        status_code=202,
+    )
+
+
+@router.post("/api/reflections/tasks/{task_id}/start", status_code=202)
+async def start_reflections_task_endpoint(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    """Start a previously-created Reflections task.
+
+    This endpoint lets the frontend establish its SSE subscription before the
+    task begins, which makes task/section events visible as a live stream
+    rather than only as replayed completed events.
+    """
+    user_id = int(current_user["user_id"])
+    task = database.get_reflection_task(task_id, user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
+    if task.get("status") in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
+        return Response(
+            content=json.dumps(_task_response(task), ensure_ascii=False),
+            media_type="application/json",
+            status_code=202,
+        )
+    await get_or_create_reflection_event_bus(task_id)
+    await start_reflections_task(task_id)
+    task = database.get_reflection_task(task_id, user_id) or task
+    return Response(
+        content=json.dumps(_task_response(task), ensure_ascii=False),
+        media_type="application/json",
+        status_code=202,
+    )
+
+
+@router.get("/api/reflections/tasks/{task_id}")
+async def get_reflections_task_endpoint(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    """Return the persisted status snapshot for a Reflections-agent task."""
+    user_id = int(current_user["user_id"])
+    task = database.get_reflection_task(task_id, user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
+    results = database.list_reflection_results(task_id, user_id)
+    return Response(
+        content=json.dumps(_task_response(task, results), ensure_ascii=False),
+        media_type="application/json",
+    )
+
+
+@router.get("/api/reflections/tasks/{task_id}/results")
+async def get_reflections_task_results_endpoint(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    """Return structured Reflections results for one task."""
+    user_id = int(current_user["user_id"])
+    task = database.get_reflection_task(task_id, user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
+    results = database.list_reflection_results(task_id, user_id)
+    return Response(
+        content=json.dumps({"task_id": task_id, "results": results}, ensure_ascii=False),
+        media_type="application/json",
+    )
+
+
+@router.get("/api/reflections/latest")
+async def get_latest_reflections_endpoint(
+    current_user: dict = Depends(get_current_user),
+) -> Response:
+    """Return the latest Reflections task and latest completed results for the user."""
+    user_id = int(current_user["user_id"])
+    task = database.get_latest_reflection_task(user_id)
+    results = database.list_latest_reflection_results(user_id)
+    return Response(
+        content=json.dumps(
+            {
+                "task": _task_response(task) if task else None,
+                "results": results,
+            },
+            ensure_ascii=False,
+        ),
+        media_type="application/json",
+    )
+
+
+@router.get("/api/reflections/tasks/{task_id}/events")
+async def stream_reflections_task_events_endpoint(
+    task_id: str,
+    current_user: dict = Depends(get_current_user),
+    last_event_id: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+) -> StreamingResponse:
+    """Subscribe to Reflections task events.
+
+    The stream replays in-memory events when the task is still present in this
+    process.  If no in-memory bus exists, it falls back to persisted
+    ``reflection_task_event`` rows and then closes.
+    """
+    user_id = int(current_user["user_id"])
+    task = database.get_reflection_task(task_id, user_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail={"error": "Reflection task not found"})
+
+    bus = await get_reflection_event_bus(task_id)
+    if bus is None and task.get("status") not in {"COMPLETED", "PARTIAL_FAILED", "FAILED"}:
+        bus = await get_or_create_reflection_event_bus(task_id)
+
+    async def _stream():
+        if bus is None:
+            for event in database.list_reflection_task_events(task_id, user_id, last_event_id):
+                yield (
+                    f"event: {event['event_type']}\n"
+                    f"id: {event['id']}\n"
+                    f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                )
+            return
+
+        token = await bus.subscribe(last_event_id)
+        try:
+            yield (
+                "event: reflection.stream.connected\n"
+                f"data: {json.dumps({'id': 'stream-connected', 'task_id': task_id, 'type': 'reflection.stream.connected', 'sequence': 0, 'created_at': None, 'payload': {}}, ensure_ascii=False)}\n\n"
+            )
+            async for event in bus.read(token):
+                yield event.to_sse_frame()
+        except asyncio.CancelledError:
+            await bus.unsubscribe(token)
+            raise
+        finally:
+            await bus.unsubscribe(token)
+
+    return StreamingResponse(_stream(), media_type="text/event-stream")
 
 
 # ---------------------------------------------------------------------------

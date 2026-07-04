@@ -9,6 +9,7 @@
 #                    ENV: PAWKEYLAND_RUNNER_TTL_S → INK_AGENT_TTL_S.
 # [Sync] 2026-06-06: align session_id expectations with current thread_id
 #                    strategy and ClaudeAgentRunRequest.message_parts.
+# [Sync] 2026-06-25: cover frontend stop flow cancelling a running background turn.
 
 """Unit tests for ClaudeAgentThreadFactory.
 
@@ -407,6 +408,51 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
 
     def test_session_snapshot_none_for_unknown(self):
         self.assertIsNone(self.factory.session_snapshot("nonexistent"))
+
+    def test_stop_thread_cancels_running_turn(self):
+        req = _make_request("user_stop", thread_id="thread_stop")
+
+        async def _execute_until_cancel(execution):
+            await execution.turn_context.queue.put(
+                'data: {"type":"text-start","id":"text-0"}\n\n'
+            )
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await execution.turn_context.queue.put(
+                    'data: {"type":"finish","finishReason":"stop"}\n\n'
+                )
+                await execution.turn_context.queue.put(None)
+                raise
+
+        async def _scenario():
+            self.factory._service.execute_session = _execute_until_cancel
+            frames: list[str] = []
+
+            with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner", self._FakeRunner):
+                consumer = asyncio.create_task(self._collect_frames(req, frames))
+                for _ in range(100):
+                    snapshot = self.factory.session_snapshot("thread_stop")
+                    if snapshot and snapshot.get("lifecycle") == "running":
+                        break
+                    await asyncio.sleep(0.01)
+
+                result = await self.factory.stop_thread("thread_stop")
+                await asyncio.wait_for(consumer, timeout=1.0)
+                return result, frames, self.factory.session_snapshot("thread_stop")
+
+        result, frames, snapshot = _run(_scenario())
+
+        self.assertTrue(result["stop_requested"])
+        self.assertFalse(result["running"])
+        self.assertEqual(result["lifecycle"], "idle")
+        self.assertIsNotNone(snapshot)
+        self.assertEqual(snapshot["lifecycle"], "idle")
+        self.assertTrue(any('"finishReason":"stop"' in frame for frame in frames))
+
+    async def _collect_frames(self, req, frames):
+        async for frame in self.factory.run_streaming(req):
+            frames.append(frame)
 
 
 # ---------------------------------------------------------------------------

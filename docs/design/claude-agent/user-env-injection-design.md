@@ -1,5 +1,6 @@
 > **关联文档**: [ClaudeSDKClient 项目 env 注入方案设计](./claude-sdk-env-design.md)
 > **[Sync] 2026-05-27**: 新增 — 按用户存储的 env 变量注入 Claude SDK 子进程方案。
+> **[Sync] 2026-06-22**: Settings 入口收束 — 用户环境变量控件只在 Workspace Mode 开启时显示，因为该配置面向 workspace runtime / Skills / MCP 工具上下文。
 
 # 按用户存储的 SDK Env 注入方案设计
 
@@ -38,6 +39,7 @@
 ### 2.1 目标
 
 - 用户通过 `PUT /api/system-config` 存储的 `env_vars` 中属于 `_PROJECT_DOTENV_SDK_ENV_NAMES` 白名单的 key，在该用户发起的 Claude Agent 会话中注入 `ClaudeCodeOptions.env`。
+- Settings UI 只在 Workspace Mode 开启时显示 `env_vars` 控件；关闭时保留已保存值但不显示编辑入口。
 - 用户 env 优先级高于 `backend/.env`，但低于调用方显式传入的 `options.env`（如测试场景）。
 - 不允许用户通过 `env_vars` 注入白名单以外的 env key 进入 SDK 子进程。
 - 不把任何 env 值写入日志、SSE 响应或错误信息。

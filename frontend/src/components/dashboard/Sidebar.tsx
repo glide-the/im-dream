@@ -2,10 +2,13 @@
 // [Output] Dashboard sidebar settings UI backed by backend system config.
 // [Pos] dashboard sidebar component node
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config requests.
+// [Sync] 2026-06-22: emit same-tab Workspace Mode changes when the legacy
+//                    sidebar toggles system_config.workspace_enabled.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
+import { emitWorkspaceModeChanged } from '../../lib/system-config-events';
 
 export type ThemeMode = 'light' | 'system' | 'dark';
 
@@ -116,11 +119,14 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>) => {
     setSaving(true);
     try {
-      await fetch(`${API_BASE}/api/system-config`, {
+      const response = await fetch(`${API_BASE}/api/system-config`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
         body: JSON.stringify(patch),
       });
+      return response.ok;
+    } catch {
+      return false;
     } finally {
       setSaving(false);
     }
@@ -140,7 +146,15 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
     setWorkspaceMode(next);
-    void updateConfig({ workspace_enabled: next });
+    emitWorkspaceModeChanged(next);
+    void (async () => {
+      const saved = await updateConfig({ workspace_enabled: next });
+      if (saved) {
+        return;
+      }
+      setWorkspaceMode(!next);
+      emitWorkspaceModeChanged(!next);
+    })();
   }, [updateConfig, workspaceMode]);
 
   const handleSavePrompt = useCallback(() => {

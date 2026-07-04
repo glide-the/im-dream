@@ -10,6 +10,7 @@
 > **[Sync] 2026-06-09**: 权限策略抽取为 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md)；`Skill` 与 `mcp__editor__switch_editor` 归入 auto 低敏显式 allow。
 > **[Sync] 2026-06-13**: Settings 完全访问模式仍会为 `AskUserQuestion` / `mcp__user__ask_user` 发送 `tool-approval-request`，以便前端显示问答表单并回传 answers。
 > **[Sync] 2026-06-13**: 新增 `tool-input-delta` SSE 事件，用于把 SDK `input_json_delta.partial_json` 转发给前端；前端对内置 `Write` 工具使用终端式写入预览，设计见 [`write-tool-terminal-preview.md`](./write-tool-terminal-preview.md)。
+> **[Sync] 2026-06-25**: 新增 `POST /api/claude-agent/threads/{thread_id}/stop`，作为前端主动停止当前运行 turn 的显式控制 API；普通 SSE 断线仍保持后台 turn 可重连。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -64,6 +65,7 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 |---|---|---|
 | `POST /api/claude-agent` | 启动 Claude Agent 一轮会话，并持续输出 SSE 事件 | `text/event-stream` |
 | `POST /api/claude-agent/tool-confirm` | 对交互工具（动画事件、问答等）的待确认调用做批准/拒绝 | `application/json` |
+| `POST /api/claude-agent/threads/{thread_id}/stop` | 用户主动停止当前运行中的 Agent turn，不删除 thread | `application/json` |
 
 其中：
 
@@ -243,6 +245,30 @@ text-*
 message-final
 finish
 ```
+
+#### 4.6.5 用户主动停止当前 turn **[2026-06-25]**
+
+前端停止按钮调用：
+
+```http
+POST /api/claude-agent/threads/{thread_id}/stop
+```
+
+该接口只取消当前运行中的 in-memory turn，不删除 `chat_thread`，也不销毁历史消息。
+服务端校验 thread 所有权后调用 ThreadFactory 取消 `state.bg_task`。
+取消路径复用 `_persist_partial_assistant()` 保存已收集 parts，并向 EventBus 发布
+`finish` 后关闭 sentinel：
+
+```text
+message-metadata(initial)
+text-* / reasoning-* / tool-*        ← 已经产生的事件可被收集
+POST /api/claude-agent/threads/{id}/stop
+finish { "finishReason": "stop" }
+```
+
+如果 thread 当前未运行，接口仍返回 200，并以 `stop_requested=false`
+表示没有可取消的 turn。普通 SSE 断线、切换 thread 或刷新页面不会触发该语义；
+它们仍只 unsubscribe，后台 turn 继续运行并支持 reconnect。
 
 ### 4.7 典型 SSE 报文示例
 

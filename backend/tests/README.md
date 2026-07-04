@@ -17,6 +17,7 @@ tests/
 ├── test_workspace_router.py             # Workspace router: download header encoding
 ├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
 ├── test_sessions_tool.py                # Agent get_sessions_range retrieval params and vector boundary
+├── test_chat_thread_retrieval.py        # Chat history thread search retrievers and vector boundary
 ├── test_claude_agent_runner.py          # Runner: streaming callbacks, session_id, error handling
 ├── test_claude_agent_thread_factory.py  # Factory: flyweight cache, TTL eviction, Phase 1-4 contracts
 ├── test_server_claude_agent.py          # Server smoke: route registration, auth enforcement, models
@@ -75,6 +76,12 @@ source .venv/bin/activate
 python tests/test_sessions_tool.py -v
 ```
 
+**Claude Agent — Chat History Retrieval (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_chat_thread_retrieval.py -v
+```
+
 **Claude Agent — Runner (mocks SDK, no server needed):**
 ```bash
 source .venv/bin/activate
@@ -113,6 +120,7 @@ python tests/test_seo_content.py -v
 ### Claude Agent — Context Builder (`test_claude_agent_context_builder.py`)
 - ✅ `_render_session_entry` — 日期/标题/摘要字段渲染
 - ✅ `build_system_prompt` — 包含写作助手角色定位、近期会话块
+- ✅ `build_system_prompt(..., configured_system_prompt=...)` — Settings SYSTEM_PROMPT 作为低优先级配置块渲染
 - ✅ 空会话回退为 "No recent entries found"
 - ✅ `context_session_count` 截断（只取前 N 条）
 - ✅ DB 异常时优雅降级（不抛，返回无会话 prompt）
@@ -124,6 +132,13 @@ python tests/test_seo_content.py -v
 - ✅ `labels` 支持 `label_match=all`
 - ✅ `retrieval_mode=auto` 在未配置向量库时降级 fuzzy
 - ✅ `retrieval_mode=vector` 返回未配置错误且不访问数据库
+
+### Claude Agent — Chat History Retrieval (`test_chat_thread_retrieval.py`)
+- ✅ Chat thread title fuzzy search
+- ✅ Persisted message-text fuzzy search
+- ✅ `search_scope=title` excludes message-only matches
+- ✅ `retrieval_mode=auto` downgrades unconfigured vector query to fuzzy
+- ✅ `retrieval_mode=vector` reports unavailable without a vector store
 
 ### Claude Agent — Runner (`test_claude_agent_runner.py`)
 - ✅ `on_text_delta` — AssistantMessage 文本块触发，full_text 正确累积
@@ -147,6 +162,12 @@ python tests/test_seo_content.py -v
 - ✅ Phase 1 extrinsic state：每 turn 写入后清空
 - ✅ Phase 4 observer hooks：`session_ended` 在销毁时触发
 - ✅ 不同 session_id 独立隔离
+
+### Claude Agent — Service / Route (`test_claude_agent_service.py`, `test_server_claude_agent.py`)
+- ✅ `get_system_config.system_prompt` 注入 Phase 1 system_prompt 组装
+- ✅ Settings SYSTEM_PROMPT 变化时重建 cached system_prompt
+- ✅ `workspace_enabled=false` 时跳过 `get_or_create_workspace`，`AgentRunOptions.cwd=None`
+- ✅ 附件请求在 Workspace Mode 关闭时不初始化 workspace、不调用 workspace file sync
 
 ### Claude Agent — Server (`test_server_claude_agent.py`)
 - ✅ 6 个 `/api/claude-agent/*` 路由已注册

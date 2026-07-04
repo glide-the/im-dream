@@ -13,6 +13,9 @@
 # [Sync] 2026-06-09: add event_bus (IEventBus), current_turn_id (str), bg_task (asyncio.Task)
 #                    extrinsic fields to AgentRunState for EventBus reconnect support.
 #                    mark_destroyed now cancels bg_task and clears event_bus.
+# [Sync] 2026-06-22: track the Settings SYSTEM_PROMPT value used to build cached
+#                    system_prompt so Phase 1 can rebuild when page configuration
+#                    changes during a live Thread Session.
 
 """Claude Agent Thread Session Pool.
 
@@ -23,8 +26,9 @@ Implements the **Flyweight + State** pattern for cross-turn session management.
 
 ``AgentRunState``
     Flyweight body with intrinsic state (session_id, cwd, system_prompt, runner,
-    is_context_initialized) cached across turns, and extrinsic state (user_message,
-    callbacks, run_options, turn_context) refreshed each turn.
+    system_config_system_prompt, is_context_initialized) cached across turns,
+    and extrinsic state (user_message, callbacks, run_options, turn_context)
+    refreshed each turn.
 
 ``AgentRunStatePool``
     In-process registry keyed by session_id.  Each session gets one
@@ -123,7 +127,8 @@ class AgentRunState:
     """Per-session flyweight combining Flyweight and State patterns.
 
     **Intrinsic state** (set once per session, reused across turns):
-        session_id, cwd, system_prompt, is_context_initialized, runner.
+        session_id, cwd, system_prompt, system_config_system_prompt,
+        is_context_initialized, runner.
 
     **Extrinsic state** (refreshed every turn by the Factory):
         user_message, callbacks, run_options, turn_context.
@@ -137,6 +142,7 @@ class AgentRunState:
     session_id: str
     cwd: str = ""
     system_prompt: str = ""
+    system_config_system_prompt: str = ""
     is_context_initialized: bool = False
     runner: Optional[Any] = field(default=None, repr=False)
     # Soft-cached EditorState dict.  Updated by assemble_context on each turn
@@ -238,8 +244,14 @@ class AgentRunState:
     # Inlined AgentRunStateBuilder helpers
     # ------------------------------------------------------------------
 
-    def with_system_prompt(self, system_prompt: str) -> "AgentRunState":
+    def with_system_prompt(
+        self,
+        system_prompt: str,
+        *,
+        system_config_system_prompt: str = "",
+    ) -> "AgentRunState":
         self.system_prompt = system_prompt
+        self.system_config_system_prompt = system_config_system_prompt
         return self
 
     def with_cwd(self, cwd: str) -> "AgentRunState":

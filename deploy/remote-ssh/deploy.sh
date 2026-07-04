@@ -9,6 +9,8 @@
 # [Sync] 2026-06-14: document Claude Code Docker nested sandbox behavior.
 # [Sync] 2026-06-15: remove /ink-and-memory frontend path prefix from default verification URL.
 # [Sync] 2026-06-16: align data maintenance wrappers with sync-data backup/upload/download commands.
+# [Sync] 2026-06-23: add production OAuth/cookie defaults for split frontend/backend domains.
+# [Sync] 2026-06-23: require Mihomo TUN config for the default backend proxy namespace.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,8 +51,17 @@ REMOTE_BACKEND_PUBLIC_ORIGIN="${REMOTE_BACKEND_PUBLIC_ORIGIN:-https://ink-backen
 REMOTE_FRONTEND_PUBLIC_ORIGIN="${REMOTE_FRONTEND_PUBLIC_ORIGIN:-https://ink-frontend.suoxya.com}"
 REMOTE_API_BASE_URL="${REMOTE_API_BASE_URL:-${REMOTE_BACKEND_PUBLIC_ORIGIN}}"
 REMOTE_WS_BASE_URL="${REMOTE_WS_BASE_URL:-}"
-REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN},${REMOTE_BACKEND_PUBLIC_ORIGIN},http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}"
-REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-false}"
+REMOTE_CORS_ALLOW_ORIGINS="${REMOTE_CORS_ALLOW_ORIGINS:-${REMOTE_FRONTEND_PUBLIC_ORIGIN}}"
+REMOTE_CORS_ALLOW_CREDENTIALS="${REMOTE_CORS_ALLOW_CREDENTIALS:-true}"
+REMOTE_COOKIE_SECURE="${REMOTE_COOKIE_SECURE:-true}"
+REMOTE_COOKIE_SAMESITE="${REMOTE_COOKIE_SAMESITE:-none}"
+REMOTE_CLASH_CONFIG_FILE="${REMOTE_CLASH_CONFIG_FILE:-../../deploy/clash/config.yaml}"
+REMOTE_CLASH_IMAGE="${REMOTE_CLASH_IMAGE:-metacubex/mihomo:latest}"
+REMOTE_CLASH_CONTAINER="${REMOTE_CLASH_CONTAINER:-tun-proxy}"
+REMOTE_CLASH_CONTROLLER_BIND_HOST="${REMOTE_CLASH_CONTROLLER_BIND_HOST:-127.0.0.1}"
+REMOTE_CLASH_CONTROLLER_PORT="${REMOTE_CLASH_CONTROLLER_PORT:-9090}"
+REMOTE_CLASH_DASHBOARD_BIND_HOST="${REMOTE_CLASH_DASHBOARD_BIND_HOST:-127.0.0.1}"
+REMOTE_CLASH_DASHBOARD_PORT="${REMOTE_CLASH_DASHBOARD_PORT:-3000}"
 REMOTE_SYNC_DATA="${REMOTE_SYNC_DATA:-0}"
 REMOTE_SETUP_NGINX="${REMOTE_SETUP_NGINX:-auto}"
 REMOTE_SETUP_STORAGE="${REMOTE_SETUP_STORAGE:-1}"
@@ -64,7 +75,7 @@ REMOTE_PUBLIC_HOST="${REMOTE_PUBLIC_HOST:-${REMOTE_SSH_HOST:-REMOTE_SSH_HOST}}"
 REMOTE_VERIFY_FRONTEND_URL="${REMOTE_VERIFY_FRONTEND_URL:-http://127.0.0.1:${REMOTE_FRONTEND_PORT}${REMOTE_FRONTEND_PATH}}"
 REMOTE_VERIFY_BACKEND_URL="${REMOTE_VERIFY_BACKEND_URL:-http://127.0.0.1:${REMOTE_BACKEND_PORT}/api/health}"
 
-DRY_RUN=0
+DRY_RUN="${DRY_RUN:-0}"
 COMMAND=""
 
 usage() {
@@ -118,7 +129,12 @@ Optional environment:
   REMOTE_BACKEND_PUBLIC_ORIGIN default: https://ink-backend.suoxya.com
   REMOTE_FRONTEND_PUBLIC_ORIGIN default: https://ink-frontend.suoxya.com
   REMOTE_API_BASE_URL   browser-facing backend URL; default: REMOTE_BACKEND_PUBLIC_ORIGIN
-  REMOTE_CORS_ALLOW_ORIGINS  default includes frontend/backend public domains and localhost dev origins
+  REMOTE_CORS_ALLOW_ORIGINS  default: REMOTE_FRONTEND_PUBLIC_ORIGIN
+  REMOTE_CORS_ALLOW_CREDENTIALS default: true
+  REMOTE_COOKIE_SECURE  default: true
+  REMOTE_COOKIE_SAMESITE default: none
+  REMOTE_CLASH_CONFIG_FILE default: ../../deploy/clash/config.yaml, resolved from deploy/remote-ssh/docker-compose.yml
+  REMOTE_CLASH_IMAGE    default: metacubex/mihomo:latest
   REMOTE_SETUP_NGINX    default: auto; deploy installs/updates host nginx when localhost-bound ports need it
   REMOTE_SETUP_STORAGE  default: 1; deploy creates persistent backend/data directories before rsync
   REMOTE_SETUP_SSL      default: 0; set to 1 to let setup-nginx request certbot certificates
@@ -243,6 +259,11 @@ remote_env_prefix() {
     REMOTE_AGENT_CWD REMOTE_FILE_STORAGE_TYPE
     REMOTE_FILE_STORAGE_LOCAL_DIR REMOTE_FILE_STORAGE_PREFIX
     REMOTE_CORS_ALLOW_ORIGINS REMOTE_CORS_ALLOW_CREDENTIALS
+    REMOTE_COOKIE_SECURE REMOTE_COOKIE_SAMESITE
+    REMOTE_CLASH_CONFIG_FILE REMOTE_CLASH_IMAGE
+    REMOTE_CLASH_CONTAINER REMOTE_CLASH_CONTROLLER_BIND_HOST
+    REMOTE_CLASH_CONTROLLER_PORT REMOTE_CLASH_DASHBOARD_BIND_HOST
+    REMOTE_CLASH_DASHBOARD_PORT
     REMOTE_SETUP_NGINX REMOTE_SETUP_STORAGE REMOTE_SETUP_SSL
     REMOTE_BUILD_PULL
   )
@@ -270,6 +291,11 @@ check_local_prereqs() {
   require_command ssh || { warn "ssh not found."; failed=1; }
   require_command rsync || { warn "rsync not found."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/docker-compose.yml" || { warn "Missing remote compose file."; failed=1; }
+  case "${REMOTE_CLASH_CONFIG_FILE}" in
+    ../../deploy/clash/config.yaml|./deploy/clash/config.yaml|deploy/clash/config.yaml)
+      require_file "${REPO_ROOT}/deploy/clash/config.yaml" || { warn "Missing Clash config: deploy/clash/config.yaml. Copy your profile there and merge deploy/clash/config.tun-snippet.yaml."; failed=1; }
+      ;;
+  esac
   require_file "${REPO_ROOT}/deploy/remote-ssh/setup-nginx.sh" || { warn "Missing remote nginx setup script."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/setup-storage.sh" || { warn "Missing remote storage setup script."; failed=1; }
   require_file "${REPO_ROOT}/deploy/remote-ssh/sync-data.sh" || { warn "Missing remote data sync script."; failed=1; }
@@ -285,7 +311,7 @@ check_local_prereqs() {
 
 check_remote_prereqs() {
   require_remote_config
-  ssh_run "command -v $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") >/dev/null && $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") version >/dev/null && docker info >/dev/null"
+  ssh_run "command -v $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") >/dev/null && $(quote "${REMOTE_DOCKER_COMPOSE_BIN}") version >/dev/null && docker info >/dev/null && test -c /dev/net/tun"
 }
 
 check_prereqs() {
@@ -330,6 +356,7 @@ API/nginx mode:
   Default REMOTE_API_BASE_URL is https://ink-backend.suoxya.com, so browser login/API calls never use the internal Docker hostname.
   Host-level nginx should route ink-backend.suoxya.com to 127.0.0.1:${REMOTE_BACKEND_PORT} and ink-frontend.suoxya.com to 127.0.0.1:${REMOTE_FRONTEND_PORT}.
   Override REMOTE_API_BASE_URL only when deploying to a different public backend origin.
+  Backend egress routes through the default Mihomo TUN sidecar; backend remains reachable on REMOTE_BACKEND_PORT through the proxy container.
 
 Rebuild controls:
   deploy always runs remote docker-compose build --no-cache before up.
@@ -555,6 +582,13 @@ case "${COMMAND:-help}" in
       REMOTE_DOCKER_COMPOSE_BIN="${REMOTE_DOCKER_COMPOSE_BIN}" \
       REMOTE_COMPOSE_FILE="${REMOTE_COMPOSE_FILE}" \
       REMOTE_COMPOSE_PROJECT_NAME="${REMOTE_COMPOSE_PROJECT_NAME}" \
+      REMOTE_CLASH_CONFIG_FILE="${REMOTE_CLASH_CONFIG_FILE}" \
+      REMOTE_CLASH_IMAGE="${REMOTE_CLASH_IMAGE}" \
+      REMOTE_CLASH_CONTAINER="${REMOTE_CLASH_CONTAINER}" \
+      REMOTE_CLASH_CONTROLLER_BIND_HOST="${REMOTE_CLASH_CONTROLLER_BIND_HOST}" \
+      REMOTE_CLASH_CONTROLLER_PORT="${REMOTE_CLASH_CONTROLLER_PORT}" \
+      REMOTE_CLASH_DASHBOARD_BIND_HOST="${REMOTE_CLASH_DASHBOARD_BIND_HOST}" \
+      REMOTE_CLASH_DASHBOARD_PORT="${REMOTE_CLASH_DASHBOARD_PORT}" \
       "${SCRIPT_DIR}/sync-data.sh" upload
     ;;
   backup-data|backup)

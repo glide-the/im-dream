@@ -20,6 +20,15 @@
 > [Sync] 2026-06-16: direct real writes under `.claude/skills/` are imported
 > into `workspace/skills/` on the next workspace sync before symlinks rebuild.
 > [Sync] 2026-06-21: add Settings-backed `sandbox.network` policy.
+> [Sync] 2026-06-22: Workspace Mode is now the workspace lifecycle gate:
+> when `workspace_enabled=false`, Claude Agent chat does not initialize a
+> thread workspace, does not pass `cwd`, and the frontend hides workspace file
+> sidebars/entry points.
+> [Sync] 2026-06-22: Settings hides Sandbox Network and user environment
+> variable controls while Workspace Mode is disabled because both depend on the
+> workspace runtime path.
+> [Sync] 2026-06-25: `sandbox_network_mode="open"` omits `sandbox.network`
+> instead of writing unsupported `allowedDomains:["*"]`.
 
 # Claude-Agent Workspace Sandbox
 
@@ -51,14 +60,20 @@ resolved per-thread workspace path, not the parent root.
 
 Settings → AI 模型配置 → 工作区模式 controls:
 
-- whether workspace file/sidebar context is active for the conversation; and
-- whether each thread workspace writes an enabled Claude Code Bash sandbox block.
+- whether workspace file/sidebar context is active for the conversation;
+- whether Claude Agent chat initializes a per-thread workspace and passes `cwd`
+  to Claude Code; and
+- whether each initialized thread workspace writes an enabled Claude Code Bash
+  sandbox block.
 
-Settings → AI 模型配置 → 沙箱网络 controls the sandbox network policy written
-into the same thread-local `sandbox` block. The network control is intentionally
-separate from Workspace Mode so users can keep workspace filesystem sandboxing
-on while choosing whether subprocesses should be offline, pre-authorized for a
-domain list, or open to outbound domains subject to runtime policy.
+When Workspace Mode is enabled, Settings → AI 模型配置 → 沙箱网络 controls the
+sandbox network policy written into the same thread-local `sandbox` block.
+When Workspace Mode is disabled, Settings hides Sandbox Network because no
+thread workspace or sandbox settings file is initialized for chat turns.
+
+The user environment-variable controls are also shown only while Workspace Mode
+is enabled. They are part of the same workspace-runtime surface used by Skills,
+MCP tools, and Claude Code subprocess configuration.
 
 When `system_config.workspace_enabled=true`, workspace initialization writes:
 
@@ -93,9 +108,13 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
 }
 ```
 
-When `workspace_enabled=false`, the same per-thread settings file is kept in
-sync but `sandbox.enabled=false`, `failIfUnavailable=false`, and
-`allowUnsandboxedCommands=true`.
+When `workspace_enabled=false`, Claude Agent chat does not initialize the
+thread workspace, does not write `.claude/settings.json`, does not pass
+`AgentRunOptions.cwd`, and does not inject `<workspace_context>` or
+`<memory_context>` into the user message. The route-level attachment path also
+skips workspace file sync so file uploads cannot create a workspace as a side
+effect. Existing workspaces on disk are left untouched; they are simply not used
+while the setting is off.
 
 `enableWeakerNestedSandbox` is emitted automatically when the backend detects
 that it is running inside a Linux container. Docker Compose and Remote SSH
@@ -139,7 +158,7 @@ and `system_config.sandbox_network_allowed_domains`:
 |---|---|---|
 | `disabled` | `allowedDomains: []` + `deniedDomains: ["*"]` | Request no outbound network from Bash sandbox subprocesses; runner PreToolUse also denies network tools. |
 | `allowlist` | `allowedDomains: [...]` | Pre-allow configured domains; non-listed domains still follow Claude Code or managed policy. |
-| `open` | `allowedDomains: ["*"]` | Request outbound access for all domains, subject to deployment and managed policy. |
+| `open` | omit `sandbox.network` | Request unrestricted/default sandbox-runtime egress without passing an unsupported bare `*` allowlist domain; still subject to deployment and managed policy. |
 
 This network policy covers Bash and child processes such as `curl`, `git`, and
 package managers. In `disabled` mode, `agent_runner.py` also rejects
@@ -203,12 +222,17 @@ sequenceDiagram
     UI->>API: PUT {workspace_enabled, sandbox_network_*}
     API->>API: save system_config
     Service->>API: get_system_config(user_id)
-    Service->>Workspace: get_or_create_workspace(thread_id, sandbox_enabled, sandbox_network_*)
-    Workspace->>Workspace: write {cwd}/.claude/settings.json sandbox block
-    Service->>CC: ClaudeCodeOptions(cwd={AGENT_CWD}/{thread_id})
-    CC->>CC: load project sandbox settings
-    CC->>OS: run Bash inside sandbox
-    OS-->>CC: allow only configured filesystem access
+    alt workspace_enabled=true
+        Service->>Workspace: get_or_create_workspace(thread_id, sandbox_enabled=true, sandbox_network_*)
+        Workspace->>Workspace: write {cwd}/.claude/settings.json sandbox block
+        Service->>CC: ClaudeCodeOptions(cwd={AGENT_CWD}/{thread_id})
+        CC->>CC: load project sandbox settings
+        CC->>OS: run Bash inside sandbox
+        OS-->>CC: allow only configured filesystem access
+    else workspace_enabled=false
+        Service->>Service: skip get_or_create_workspace; clear cached cwd
+        Service->>CC: ClaudeCodeOptions(cwd=None)
+    end
 ```
 
 ## 5. Relationship To Tool Permissions
@@ -263,13 +287,16 @@ performs the search.
 |---|---|
 | `backend/libs/claude_agent_kit/server/workspace.py` | Merge the per-thread `sandbox` block into `{workspace}/.claude/settings.json` on every init. |
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | Enforce the same thread-workspace boundary for built-in file/search tools, because the Bash sandbox does not cover `Read` / `Grep` / `Glob`. |
-| `backend/claude_agent/service.py` | Read `system_config.workspace_enabled` and sandbox network policy before cwd resolution; always resolve Claude Code cwd through the server-owned `{AGENT_CWD}/{thread_id}` workspace instead of trusting client-supplied cwd. |
+| `backend/claude_agent/service.py` | Read `system_config.workspace_enabled` and sandbox network policy before cwd resolution; when enabled, resolve Claude Code cwd through the server-owned `{AGENT_CWD}/{thread_id}` workspace; when disabled, skip workspace initialization, clear cached `state.cwd`, and pass `cwd=None`. |
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | Enforce `sandbox_network_mode="disabled"` in PreToolUse so network tools are denied even if sandbox domain wildcard semantics or fallback prompts would otherwise allow execution. |
 | `backend/routers/system_config.py` | Persist and sanitize `sandbox_network_mode` / `sandbox_network_allowed_domains`. |
-| `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox filesystem and network policy before file sync. |
+| `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox filesystem and network policy before file sync only when Workspace Mode is enabled; skip attachment workspace sync when disabled. |
 | `backend/routers/workspace.py` | Initialize file-sidebar workspaces with the same Settings-backed sandbox filesystem and network policy so listing/upload/download does not revert `.claude/settings.json` to defaults. |
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |
-| `frontend/src/components/dashboard/ModelConfigSection.tsx` | Describes Workspace Mode as enabling workspace context plus Bash sandbox. |
+| `frontend/src/components/dashboard/ModelConfigSection.tsx` | Describes Workspace Mode as enabling workspace context plus Bash sandbox and emits same-tab Workspace Mode events after toggles. |
+| `frontend/src/contexts/WorkspaceContext.tsx` | Loads `workspace_enabled` from system-config and broadcasts the value to chat/file UI. |
+| `frontend/src/components/chat/ChatView.tsx` | Hides and closes the workspace file sidebar entry when Workspace Mode is disabled. |
+| `frontend/src/components/chat/ChatPanel.tsx` | Withholds `workspaceSessionId` from `AIInputDock` when Workspace Mode is disabled. |
 | `backend/Dockerfile` | Installs Claude Code Linux sandbox dependencies (`bubblewrap`, `socat`) plus runtime tools needed by agent commands; ensures standard `sbin` directories exist for bubblewrap rootfs mounts. |
 | `docker-compose.yml` | Enables Docker nested Bash sandbox mode for local Compose backend and grants the runtime privileges bubblewrap needs (`SYS_ADMIN`, unconfined seccomp/AppArmor). |
 | `deploy/remote-ssh/docker-compose.yml` | Enables the same Docker nested Bash sandbox runtime privileges for Remote SSH backend. |
@@ -280,7 +307,8 @@ performs the search.
 - No Docker/container/VM sandbox.
 - No Python parsing of arbitrary shell syntax for directory isolation.
 - No custom proxy, audit UI, or managed-settings admin UI in this phase; the
-  app writes Claude Code's supported `sandbox.network` settings and uses
+  app writes Claude Code's supported `sandbox.network` settings for disabled
+  and allowlist modes, omits `sandbox.network` for open mode, and uses
   PreToolUse only for the Settings disabled-network guard.
 - No attempt to sandbox non-Bash built-in Claude tools through
   `settings.sandbox`; Claude Code documents sandboxing as Bash-scoped.
@@ -298,7 +326,15 @@ Required checks for this design:
   non-sandbox settings are preserved, runtime dependency paths are read-allowed,
   standard Linux `sbin` runtime paths are read-allowed when present, Docker
   nested sandbox mode is auto-detected, the project root is not default
-  read-allowed, and disabled/allowlist/open network policies are emitted.
+  read-allowed, disabled/allowlist network policies are emitted, and open mode
+  omits `sandbox.network`.
+- Service tests confirm `workspace_enabled=false` does not call
+  `get_or_create_workspace`, clears cached `cwd`, and produces
+  `AgentRunOptions.cwd=None`.
+- Route tests confirm attachment handling with `workspace_enabled=false` does
+  not initialize a workspace or call workspace file sync.
+- Frontend build/type checks confirm Workspace Mode-gated file sidebar UI
+  compiles.
 - Python compile checks cover `workspace.py`, service and route integration.
 - `bash -n .claude/hooks/protect-files-bash.sh` confirms the existing sensitive
   file hook remains syntactically valid.

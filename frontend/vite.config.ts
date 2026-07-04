@@ -3,6 +3,9 @@
 // [Pos] frontend build configuration
 // [Sync] 2026-06-14: add Codex SEO public URL replacement for canonical, OG, and JSON-LD metadata.
 // [Sync] 2026-06-15: remove /ink-and-memory/ deployment prefix; serve app at root.
+// [Sync] 2026-06-23: proxy local auth/OAuth API routes to the FastAPI auth
+//                    center during Vite dev while preserving the SPA Device
+//                    Flow verification route.
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -59,6 +62,23 @@ export default defineConfig(({ mode }) => {
     server: {
       proxy: {
         '/api': {
+          target: 'http://localhost:8765',
+          changeOrigin: true,
+        },
+        '/auth': {
+          target: 'http://localhost:8765',
+          changeOrigin: true,
+        },
+        '/oauth/device/verify': {
+          target: 'http://localhost:8765',
+          changeOrigin: true,
+          bypass(req) {
+            if (req.method === 'GET' && req.headers.accept?.includes('text/html')) {
+              return '/index.html'
+            }
+          },
+        },
+        '/oauth': {
           target: 'http://localhost:8765',
           changeOrigin: true,
         },

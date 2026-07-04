@@ -5,6 +5,8 @@
 # [Sync] 2026-06-14: proxy root/base robots.txt, sitemap.xml, and llms.txt to backend SEO generators.
 # [Sync] 2026-06-15: include Docker embedded DNS so variable proxy_pass can resolve ink-backend in Compose.
 # [Sync] 2026-06-15: remove /ink-and-memory/ deployment prefix; serve SPA and fallback APIs at root.
+# [Sync] 2026-06-23: add auth/OAuth same-origin fallback proxies while keeping
+#                    /oauth/device/verify as an SPA route.
 server {
     listen 80;
     server_name _;
@@ -62,6 +64,50 @@ server {
         proxy_cache        off;
         proxy_read_timeout 3600s;
         proxy_send_timeout 3600s;
+    }
+
+    location /auth/ {
+        set $backend "${BACKEND_URL}";
+        proxy_pass         $backend;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header   Host              $proxy_host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    location /oauth/google/ {
+        set $backend "${BACKEND_URL}";
+        proxy_pass         $backend;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header   Host              $proxy_host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    location = /oauth/device/code {
+        set $backend "${BACKEND_URL}";
+        proxy_pass         $backend;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header   Host              $proxy_host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+
+    location = /oauth/token {
+        set $backend "${BACKEND_URL}";
+        proxy_pass         $backend;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_set_header   Host              $proxy_host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
     }
 
     location /polycli/ {

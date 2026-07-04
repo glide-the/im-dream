@@ -5,6 +5,7 @@
 > [Pos] reflections-analysis-prd node in `docs/design/memory`
 > [Sync] 2026-06-06: 初版 PRD，补全三分区配置内容、sessions_context 格式、结果获取方式、工作空间结构、扩展性设计。
 > [Sync] 2026-06-07: 更新 §11 前端 AnalysisView 设计——恢复暖纸张主题（Georgia + CSS 设计 tokens），新增 PaperStack 报告视图，保留一键「Generate Reflections」按钮，更新卡片字段（ReflectionResult 统一类型，confidence 替代 strength/frequency），补充历史报告按日期合并策略。
+> [Sync] 2026-06-26: 更新 §11 前端业务交互——一键 Generate New Analysis 默认不弹窗，按钮下方显示后端任务进度且执行中禁止重复点击；如果当天已点击过或已有当天报告，再次点击必须弹窗确认是否重新分析并选择可分析日记；保留分区独立分析；分析完成后使用 ReflectionBlogPage wrapper 展示结果；ReflectionBlogPage 保持固定分栏 + 详情区 + 底部播放器布局，仅优化视觉与交互反馈；echoes / traits / patterns 输出均遵循当前前端语言。
 
 # Reflections 页面分区记忆系统工作空间配置 PRD
 
@@ -315,32 +316,38 @@ two months is still a pattern.
 
 ## 5. sessions_context 格式
 
-前端在调用 claude-agent 前，将用户的会话数据格式化为以下文本块（最多 80 条，每条含 session ID 前缀）：
+后端在调用 claude-agent 前，将本次允许分析的会话格式化为轻量 `sessions_context`。为避免全部笔记正文塞进 `POST /api/claude-agent` SSE 请求导致上下文过长，`sessions_context` **只包含真实存在的 session ID、日期、标题和 labels，不包含正文 / first_line / excerpt / text**。Agent 必须按需通过 `mcp__user__get_sessions_range` 根据日期、labels 和返回的 `sessionId` 获取笔记内容，再进行分析。
 
 ```
-[session-id-1]  2026-01-15  标题或第一行内容  labels: [情绪, 工作]
-[session-id-2]  2026-01-20  今天感觉有些疲惫  labels: [身体, 日常]
-[session-id-3]  2026-02-03  新项目启动了      labels: [工作, 创作]
-...
+<sessions_context>
+Full note bodies are intentionally omitted to keep this request small.
+Use only these real session IDs in related_session_ids.
+Before writing final insights, fetch needed note content by session ID with mcp__user__get_sessions_range using the listed date and labels, then match the returned sessionId.
+{"sessionId":"session-id-1","date":"2026-01-15","title":"标题","labels":["情绪","工作"]}
+{"sessionId":"session-id-2","date":"2026-01-20","title":"今天感觉有些疲惫","labels":["身体","日常"]}
+{"sessionId":"session-id-3","date":"2026-02-03","title":"新项目启动了","labels":["工作","创作"]}
+</sessions_context>
 ```
 
 **格式规则**：
-- 每行以 `[session-id]` 开头（方括号包裹真实的 UUID），Agent 从这里提取 `related_session_ids`
-- 日期格式 `YYYY-MM-DD`
-- 标题截取前 120 字符
-- `labels` 为用户标记的分类标签（可为空）
+- 每条 session 使用一行 JSON，`sessionId` 必须来自本次 DB 查询结果，Agent 只能引用这些真实 ID 到 `related_session_ids`。
+- `date` 为 `YYYY-MM-DD`，用于调用 `mcp__user__get_sessions_range(start_date=date, end_date=date, labels=...)` 缩小检索范围。
+- `title` 截取前 120 字符，只作为定位线索，不替代正文证据。
+- `labels` 为用户标记的分类标签（可为空），用于按需检索正文。
+- 禁止在 `sessions_context` 和 `memory/sessions_context.json` 中写入正文、excerpt、first_line 或 full text。
 
 完整用户消息结构：
 
 ```
 <sessions_context>
-[session-id-1]  2026-01-15  ...
-[session-id-2]  2026-01-20  ...
+{"sessionId":"session-id-1","date":"2026-01-15","title":"...","labels":["..."]}
+{"sessionId":"session-id-2","date":"2026-01-20","title":"...","labels":[]}
 </sessions_context>
 
 Your memory workspace contains procedural analysis guidance.
 Start by reading memory/WORKFLOW.md to understand the analysis procedure.
-Then analyse the sessions above and output ONLY a JSON array — no other text.
+The sessions_context lists only allowed session IDs and labels, not full note bodies. Fetch the note content you need by session ID before final analysis.
+Then output ONLY a JSON array — no other text.
 ```
 
 ---
@@ -380,7 +387,7 @@ Step 3. POST /api/claude-agent (SSE)
                          ↳ 引擎注入为 <voice_context>，在用户消息前给 Agent 定向
           message.parts[0].text: <sessions_context> + 读 WORKFLOW.md 指令
           tool_choice: "auto"      ← 允许 Agent 用文件读取工具
-          max_turns: 5             ← 允许多轮（读文件 → 分析 → 输出）
+          max_turns: 1000             ← 允许多轮（读文件 → 分析 → 输出）
         ★ memoryPath 来自 Step 2 响应；若 Step 2 失败则 system_prompt 注明
           "No memory workspace was initialised"，Agent 使用内嵌指令继续。
         │
@@ -540,7 +547,7 @@ DEFAULT_UPDATE_MEMORY_PROMPT.md
 | 参数 | 值 | 说明 |
 |---|---|---|
 | `tool_choice` | `"auto"` | 允许 Agent 使用文件读取工具（Read）读取 WORKFLOW.md 等文件 |
-| `max_turns` | `5` | 足够完成：读 WORKFLOW.md → 读 QUERY → 读 DISTILLER → 分析 → 输出 |
+| `max_turns` | `1000` | 避免按需检索笔记和多轮读取 memory 文件时被旧的 5 轮限制截断 |
 | `resume` | `false` | 一次性分析，不恢复历史对话 |
 
 ### 7.2 memory_context 注入
@@ -714,11 +721,11 @@ Error 404: thread 不存在（需先 POST /api/claude-agent/threads）
     "role": "user",
     "parts": [{
       "type": "text",
-      "text": "<sessions_context>\n[id-1] date title labels\n...\n</sessions_context>\n\nStart by reading memory/WORKFLOW.md to understand the analysis procedure for this section.\nThen analyse the sessions above and output ONLY a JSON array — no other text."
+      "text": "<sessions_context>\n{\"sessionId\":\"id-1\",\"date\":\"2026-01-15\",\"title\":\"...\",\"labels\":[\"...\"]}\n...\n</sessions_context>\n\nStart by reading memory/WORKFLOW.md to understand the analysis procedure for this section.\nFetch note bodies by session ID with mcp__user__get_sessions_range before final analysis.\nThen output ONLY a JSON array — no other text."
     }]
   },
   "tool_choice": "auto",
-  "max_turns": 5
+  "max_turns": 1000
 }
 ```
 
@@ -748,6 +755,22 @@ POST /api/reports
 ```
 
 ---
+
+### 11.x Generate New Analysis 问题整理与当天重复生成保护
+
+本次问题分为两类：
+
+1. 点击 `Generate New Analysis` 后，页面不应直接跳转到已有结果，而必须先启动后端 Reflections-agent 异步任务并显示进度。
+2. 如果用户当天已经点击过 `Generate New Analysis`，再次点击时必须弹窗确认是否重新分析，并选择可分析日记。
+
+正确时序：`create task(auto_start=false) → SSE 订阅/短暂 fallback grace timer → start task → EventBus 进度 → task completed → fetch results → ReflectionBlogPage wrapper`。
+
+当天重复点击判断由两部分组成：
+
+- `localStorage[REFLECTIONS_ANALYSIS_CLICKED_DATE]` 等于当前本地日期，表示今天已经点击过；
+- Past Reflections 中存在当前本地日期报告，表示今天已经有分析结果。
+
+弹窗只服务于重复分析确认，不替代分析结果页。用户至少选择一条有正文内容的日记后才能确认；确认后前端将所选 `sessionIds` 写入 task request，后端只用这些 sessions 组装分析上下文。
 
 ## 11. 前端 AnalysisView 设计
 
@@ -789,21 +812,31 @@ viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳�
 
 | 维度 | 一键按钮 | 分区独立按钮（SectionControlsRow）|
 |---|---|---|
-| 触发范围 | 三分区同时（Promise.all） | 单分区独立 |
-| 完成后跳转 | 是（自动切换到报告视图） | 否（留在仪表盘） |
-| 流式进度 | 无（以 loading 状态表示） | 有（实时 SSE 文字片段）|
+| 触发范围 | 后端 Reflections-agent 单个 task 默认执行三分区 | 单分区独立 task |
+| 完成后跳转 | 是（将三分区结果包装为 `ReflectionBlogPage` report） | 是（将单分区结果包装为 `ReflectionBlogPage` report） |
+| 流式进度 | 按钮下方显示 `Live editorial analysis` 进度面板；仅当天重复分析前弹窗确认 | 分区卡片内显示当前 section 事件 |
 | 适用场景 | 首次全量生成 | 按需刷新单分区 |
+| 重复点击 | `anyLoading` 时按钮 disabled，禁止重复提交 | 当前分区 loading 时按钮 disabled |
+| 输出语言 | 任务创建时携带当前前端 `i18n.language`，后端归一化为 `en` / `zh` | 同左，三个 section 的 answer prompt 都使用该语言限定 |
 
 **加载状态（分区独立）**：
 
 ```
+一键按钮：
+├── [Generate New Analysis] 按钮（loading 时 disabled）
+├── 按钮下方进度面板（taskStatus）
+│   ├── Live editorial analysis eyebrow
+│   ├── 当前 SSE 事件状态
+│   └── 细线扫光动效
+└── 首次分析不弹窗；当天重复分析先显示确认与日记选择弹窗
+
 分区控制行每个分区：
 ├── [Analyze] 按钮（loading 时显示 ◌，disabled）
 ├── [⚙] 齿轮按钮（打开 SectionConfigModal）
 ├── 流式进度面板（loading && streamingText）
-│   └── SSE 文字片段（最后 800 字符）+ ▌
+│   └── 当前 SSE 事件状态 + ▌
 └── 读取中提示（loading && !streamingText）
-    └── "Reading memory workspace…"（斜体，灰色）
+    └── "Waiting for backend Reflections task…"（斜体，灰色）
 ```
 
 ### 11.3 PaperStack 报告视图（report）
@@ -844,7 +877,42 @@ viewMode = 'report'     →  PaperStack 报告视图（分析完成后自动跳�
 
 > **注**：`ReflectionResult` 为三分区统一类型（替代旧的 `Echo/Trait/Pattern` 分离类型），confidence 替代 traits 的 `strength`（1–5）和 patterns 的 `frequency` 字段。
 
-### 11.4 历史报告恢复策略
+### 11.4 ReflectionBlogPage 固定布局播放器阅读页
+
+Past Reflections 卡片点击后进入 `ReflectionBlogPage`。页面必须保留原有整体结构，不允许把页面改成全屏单列杂志长页，也不允许删除底部播放器：
+
+```text
+ReflectionBlogPage
+├── Sticky Nav：返回 Past Reflections
+├── Main Content（固定高度、overflow hidden）
+│   ├── Split Area
+│   │   ├── Left Hero：日期封面、完整日期、days / entries / words
+│   │   └── Right Panel：Section Tabs + title-only list
+│   └── Detail Area（选中条目后展开）
+│       ├── Detail Header：分区、当前位置、关闭按钮
+│       ├── Description / Evidence
+│       └── Related Notes 占位
+└── Bottom Player Bar（选中条目后固定在底部）
+    ├── 当前条目信息
+    ├── 上一条 / 圆点队列 / 下一条
+    └── X / N 计数
+```
+
+完成态入口与语言：
+- 前端创建 Reflections task 时传递当前 `i18n.language`；后端写入 `input_snapshot.language`，并在 echoes / traits / patterns 的 `MEMORY_ANSWER_PROMPT.md` 都追加运行时语言限定。
+- `_ECHOES_ANSWER`、`_TRAITS_ANSWER`、`_PATTERNS_ANSWER` 都要求 `title` / `description` / `evidence` 按当前前端语言输出，JSON keys 和 enum values 保持英文。
+- `handleAnalyzeAll` 完成后不再自动进入旧 PaperStack report 视图，而是将 echoes / traits / patterns 包装为 `AnalysisReport` 并设置 `selectedReport` + `viewMode='blog'`。
+- `handleAnalyzeSection` 对应 analyzeEchoes / analyzeTraits / analyzePatterns 的分区 wrapper：单分区 task 完成后只填充当前 section，其余 section 为空，并进入同一个 `ReflectionBlogPage`。
+- Dashboard 的 `View Reflections` 按钮也使用当前内存中的结果包装为 `ReflectionBlogPage` report，避免旧弹窗视觉不一致。
+
+设计原则：
+- 保持“左侧封面 + 右侧列表 + 下方详情 + 底部播放器”的既有布局，避免破坏用户已熟悉的操作路径。
+- 视觉优化应服务于可读性和状态识别：封面更像数字杂志，选中项更像正在播放的 track。
+- 底部 Player Bar 是核心交互能力，负责在当前 section 内切换上一条/下一条和圆点跳转。
+- Related Notes 暂时保持占位，不做后端匹配，避免过度设计。
+- 不新增分析完成后的自动弹窗，不增加复杂动效，不引入外部 UI 依赖；当天重复分析确认弹窗是唯一例外。
+
+### 11.5 历史报告恢复策略
 
 `reloadSavedReports`（`useCallback`）从 DB 加载最多 `MAX_SAVED_REPORTS`（10）条记录：
 
@@ -904,7 +972,7 @@ savedReports 数组（Dashboard 历史报告网格）
 | Thread 生命周期 | 每次分析创建新 thread，不复用，不保留对话历史 |
 | 工作空间清理 | 分析完成后 workspace 保留（供调试），不主动删除 |
 | memory-init 失败 | 非致命：Agent 无 `<memory_context>` 时跳过 memory 操作，仍按嵌入指令分析 |
-| sessions_context 上限 | 最多 80 条会话，每条标题截取前 120 字符 |
+| sessions_context 上限 | 最多 80 条会话；每条只含 sessionId/date/title/labels，标题截取前 120 字符，不含正文 |
 | JSON 输出数量 | 3–6 个结果，多余的前端不做截断 |
 | 结果解析容错 | 支持剥离 markdown fence（```json ... ```），定位 `[...]` 区间 |
 | 历史报告恢复 | 按分区分别取最新一条，不要求同一次分析的三分区同时存在 |

@@ -2,13 +2,18 @@
 # [Input] Consume SQLite, filesystem paths, JSON data, optional session text extraction,
 #         and memory workspace defaults.
 # [Output] Provide persistence helpers for users, sessions, decks, voices, reports,
-#          Claude Agent threads/messages, and voice partition Memory configs.
+#          auth/OAuth state, Claude Agent threads/messages, and voice partition
+#          Memory configs.
 # [Pos] database node in backend
 # [Sync] 2026-06-06: add procedural Memory workspace default config seeding,
 #                    backfill, and voice fork/sync propagation.
 # [Sync] 2026-06-16: list_sessions_in_range can include full text for Agent
 #                    fuzzy cross-session retrieval without changing existing
 #                    lightweight callers.
+# [Sync] 2026-06-23: add Google OAuth, refresh-token, and Device Flow tables
+#                    plus helper functions while preserving the existing users table.
+# [Sync] 2026-06-27: add Chat thread search candidates with extracted message
+#                    text for Claude Agent history retrieval.
 """
 SQLite database setup and migrations for Ink & Memory.
 
@@ -19,10 +24,10 @@ Schema:
 - user_preferences: Voice configs, meta prompts, etc.
 """
 
-import sqlite3
-import os
 import logging
+import os
 from pathlib import Path
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional, Union
 import json
@@ -54,6 +59,38 @@ def _memory_workspace_config_json(memory_workspace_config: Optional[dict]) -> st
 
     config = memory_workspace_config if memory_workspace_config else _default_memory_workspace_config()
     return json.dumps(config, ensure_ascii=False)
+
+
+def _utcnow_sql() -> str:
+    """Return UTC timestamp in SQLite CURRENT_TIMESTAMP-compatible format."""
+
+    return datetime.utcnow().replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _datetime_to_sql(value: datetime) -> str:
+    """Serialize datetimes for SQLite text DATETIME columns."""
+
+    return value.replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _parse_sql_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse project DATETIME strings from SQLite."""
+
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except Exception:
+        try:
+            return datetime.strptime(str(value), "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return None
+
+
+def parse_sql_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse project DATETIME strings for route/service callers."""
+
+    return _parse_sql_datetime(value)
 
 
 def _backfill_default_memory_workspace_config(db) -> None:
@@ -110,9 +147,28 @@ def create_tables(db):
       email TEXT UNIQUE NOT NULL,
       password_hash TEXT NOT NULL,
       display_name TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      avatar_url TEXT,
+      role TEXT DEFAULT 'user',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
     """)
+    for column_sql in (
+        "ALTER TABLE users ADD COLUMN avatar_url TEXT",
+        "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'",
+        "ALTER TABLE users ADD COLUMN updated_at DATETIME",
+    ):
+        try:
+            db.execute(column_sql)
+        except Exception:
+            pass
+    db.execute(
+        """
+        UPDATE users
+        SET updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP),
+            role = COALESCE(role, 'user')
+        """
+    )
 
     # User sessions (editor states)
     db.execute("""
@@ -187,6 +243,67 @@ def create_tables(db):
     )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_auth_user ON auth_sessions(user_id)")
+
+    # OAuth account bindings. Google access/id/refresh tokens are optional and
+    # must be encrypted by the caller before storage.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS oauth_accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      provider TEXT NOT NULL,
+      provider_sub TEXT NOT NULL,
+      email TEXT NOT NULL,
+      access_token_encrypted TEXT,
+      refresh_token_encrypted TEXT,
+      id_token_encrypted TEXT,
+      expires_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(provider, provider_sub),
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_oauth_accounts_user ON oauth_accounts(user_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_oauth_accounts_email ON oauth_accounts(email)")
+
+    # Refresh tokens are opaque outside the server; only hashes are persisted.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS refresh_tokens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      expires_at DATETIME NOT NULL,
+      revoked_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user ON refresh_tokens(user_id)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_refresh_tokens_expires ON refresh_tokens(expires_at)")
+
+    # OAuth 2.0 Device Authorization Grant state.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS device_authorizations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_id TEXT NOT NULL,
+      device_code_hash TEXT UNIQUE NOT NULL,
+      user_code_hash TEXT UNIQUE NOT NULL,
+      user_id INTEGER,
+      scope TEXT,
+      status TEXT NOT NULL,
+      interval_seconds INTEGER NOT NULL,
+      last_poll_at DATETIME,
+      expires_at DATETIME NOT NULL,
+      approved_at DATETIME,
+      consumed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_device_authorizations_device_code_hash ON device_authorizations(device_code_hash)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_device_authorizations_user_code_hash ON device_authorizations(user_code_hash)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_device_authorizations_status_expires ON device_authorizations(status, expires_at)")
 
     # Analysis reports
     db.execute("""
@@ -439,6 +556,63 @@ def create_tables(db):
         "CREATE INDEX IF NOT EXISTS idx_reflections_cfg_user "
         "ON reflections_section_configs(user_id, section)"
     )
+
+    # Reflections-agent async task metadata.  The Reflections page should read
+    # task/result truth from these tables instead of relying on frontend memory.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS reflection_task (
+      id TEXT PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      sections TEXT NOT NULL DEFAULT '[]',
+      input_snapshot TEXT NOT NULL DEFAULT '{}',
+      workspace_path TEXT,
+      agent_contract_version TEXT,
+      error_summary TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      started_at DATETIME,
+      completed_at DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_user ON reflection_task(user_id, updated_at)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_status ON reflection_task(status)")
+
+    # Reflections-agent structured section results.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS reflection_result (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      section TEXT NOT NULL CHECK(section IN ('echoes', 'traits', 'patterns')),
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      related_session_ids TEXT NOT NULL DEFAULT '[]',
+      evidence TEXT,
+      confidence TEXT NOT NULL CHECK(confidence IN ('high', 'medium', 'low')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (task_id) REFERENCES reflection_task (id) ON DELETE CASCADE,
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_result_task ON reflection_result(task_id, section)")
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_result_user ON reflection_result(user_id, created_at)")
+
+    # Reflections-agent lifecycle/event audit log, populated by the minimal
+    # TaskPersistenceObserver.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS reflection_task_event (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      sequence INTEGER,
+      event_type TEXT NOT NULL,
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (task_id) REFERENCES reflection_task (id) ON DELETE CASCADE
+    )
+    """)
+    db.execute("CREATE INDEX IF NOT EXISTS idx_reflection_task_event_task ON reflection_task_event(task_id, sequence, created_at)")
     db.commit()
 
     print("✅ Tables created")
@@ -1212,13 +1386,23 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
 
 # ========== User Management ==========
 
-def create_user(email: str, password_hash: str, display_name: str = None) -> int:
+def create_user(
+    email: str,
+    password_hash: str,
+    display_name: str = None,
+    avatar_url: str = None,
+    role: str = "user",
+) -> int:
     """Create a new user. Returns user_id."""
     db = get_db()
     try:
+        normalized_email = email.strip().lower()
         cursor = db.execute(
-            "INSERT INTO users (email, password_hash, display_name) VALUES (?, ?, ?)",
-            (email, password_hash, display_name)
+            """
+            INSERT INTO users (email, password_hash, display_name, avatar_url, role, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (normalized_email, password_hash, display_name, avatar_url, role or "user")
         )
         user_id = cursor.lastrowid
         db.commit()
@@ -1232,9 +1416,14 @@ def get_user_by_email(email: str):
     """Get user by email. Returns dict or None."""
     db = get_db()
     try:
+        normalized_email = email.strip().lower()
         row = db.execute(
-            "SELECT id, email, password_hash, display_name, created_at FROM users WHERE email = ?",
-            (email,)
+            """
+            SELECT id, email, password_hash, display_name, avatar_url, role, created_at, updated_at
+            FROM users
+            WHERE email = ?
+            """,
+            (normalized_email,)
         ).fetchone()
         return dict(row) if row else None
     finally:
@@ -1245,12 +1434,308 @@ def get_user_by_id(user_id: int):
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, email, display_name, created_at FROM users WHERE id = ?",
+            """
+            SELECT id, email, display_name, avatar_url, role, created_at, updated_at
+            FROM users
+            WHERE id = ?
+            """,
             (user_id,)
         ).fetchone()
         return dict(row) if row else None
     finally:
         db.close()
+
+
+def get_user_by_oauth_account(provider: str, provider_sub: str) -> Optional[dict]:
+    """Return the local user bound to an OAuth provider subject."""
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT u.id, u.email, u.display_name, u.avatar_url, u.role, u.created_at, u.updated_at
+            FROM oauth_accounts oa
+            JOIN users u ON u.id = oa.user_id
+            WHERE oa.provider = ? AND oa.provider_sub = ?
+            LIMIT 1
+            """,
+            (provider, provider_sub),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def upsert_oauth_account(
+    user_id: int,
+    provider: str,
+    provider_sub: str,
+    email: str,
+    access_token_encrypted: Optional[str] = None,
+    refresh_token_encrypted: Optional[str] = None,
+    id_token_encrypted: Optional[str] = None,
+    expires_at: Optional[datetime] = None,
+) -> None:
+    """Create or update a user's OAuth account binding."""
+
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO oauth_accounts (
+              user_id, provider, provider_sub, email,
+              access_token_encrypted, refresh_token_encrypted, id_token_encrypted,
+              expires_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(provider, provider_sub) DO UPDATE SET
+              user_id = excluded.user_id,
+              email = excluded.email,
+              access_token_encrypted = COALESCE(excluded.access_token_encrypted, oauth_accounts.access_token_encrypted),
+              refresh_token_encrypted = COALESCE(excluded.refresh_token_encrypted, oauth_accounts.refresh_token_encrypted),
+              id_token_encrypted = COALESCE(excluded.id_token_encrypted, oauth_accounts.id_token_encrypted),
+              expires_at = COALESCE(excluded.expires_at, oauth_accounts.expires_at),
+              updated_at = CURRENT_TIMESTAMP
+            """,
+            (
+                user_id,
+                provider,
+                provider_sub,
+                email.strip().lower(),
+                access_token_encrypted,
+                refresh_token_encrypted,
+                id_token_encrypted,
+                _datetime_to_sql(expires_at) if expires_at else None,
+            ),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def create_refresh_token(user_id: int, token_hash: str, expires_at: datetime) -> None:
+    """Persist a hashed refresh token."""
+
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO refresh_tokens (user_id, token_hash, expires_at)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, token_hash, _datetime_to_sql(expires_at)),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_refresh_token(token_hash: str) -> Optional[dict]:
+    """Return a non-revoked refresh token row if present."""
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT id, user_id, token_hash, expires_at, revoked_at, created_at
+            FROM refresh_tokens
+            WHERE token_hash = ? AND revoked_at IS NULL
+            LIMIT 1
+            """,
+            (token_hash,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def revoke_refresh_token(token_hash: str) -> bool:
+    """Revoke a refresh token by hash."""
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = CURRENT_TIMESTAMP
+            WHERE token_hash = ? AND revoked_at IS NULL
+            """,
+            (token_hash,),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        db.close()
+
+
+def revoke_user_refresh_tokens(user_id: int) -> int:
+    """Revoke all active refresh tokens for a user."""
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE refresh_tokens
+            SET revoked_at = CURRENT_TIMESTAMP
+            WHERE user_id = ? AND revoked_at IS NULL
+            """,
+            (user_id,),
+        )
+        db.commit()
+        return cursor.rowcount
+    finally:
+        db.close()
+
+
+def create_device_authorization(
+    client_id: str,
+    device_code_hash: str,
+    user_code_hash: str,
+    scope: str,
+    interval_seconds: int,
+    expires_at: datetime,
+) -> int:
+    """Create a pending OAuth Device Authorization row."""
+
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            INSERT INTO device_authorizations (
+              client_id, device_code_hash, user_code_hash, scope,
+              status, interval_seconds, expires_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, 'pending', ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                client_id,
+                device_code_hash,
+                user_code_hash,
+                scope,
+                interval_seconds,
+                _datetime_to_sql(expires_at),
+            ),
+        )
+        db.commit()
+        return cursor.lastrowid
+    finally:
+        db.close()
+
+
+def get_device_authorization_by_device_code_hash(device_code_hash: str) -> Optional[dict]:
+    """Return a device authorization by hashed device_code."""
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT *
+            FROM device_authorizations
+            WHERE device_code_hash = ?
+            LIMIT 1
+            """,
+            (device_code_hash,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def get_device_authorization_by_user_code_hash(user_code_hash: str) -> Optional[dict]:
+    """Return a device authorization by hashed user_code."""
+
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT *
+            FROM device_authorizations
+            WHERE user_code_hash = ?
+            LIMIT 1
+            """,
+            (user_code_hash,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def update_device_authorization_status(
+    authorization_id: int,
+    status: str,
+    user_id: Optional[int] = None,
+) -> None:
+    """Set a device authorization status and relevant transition timestamps."""
+
+    timestamp_column = {
+        "approved": "approved_at",
+        "consumed": "consumed_at",
+    }.get(status)
+    assignments = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+    params: list[object] = [status]
+    if user_id is not None:
+        assignments.append("user_id = ?")
+        params.append(user_id)
+    if timestamp_column:
+        assignments.append(f"{timestamp_column} = CURRENT_TIMESTAMP")
+    params.append(authorization_id)
+
+    db = get_db()
+    try:
+        db.execute(
+            f"UPDATE device_authorizations SET {', '.join(assignments)} WHERE id = ?",
+            tuple(params),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def record_device_authorization_poll(authorization_id: int, interval_seconds: Optional[int] = None) -> None:
+    """Record a token polling attempt and optional new interval."""
+
+    db = get_db()
+    try:
+        if interval_seconds is None:
+            db.execute(
+                """
+                UPDATE device_authorizations
+                SET last_poll_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (authorization_id,),
+            )
+        else:
+            db.execute(
+                """
+                UPDATE device_authorizations
+                SET last_poll_at = CURRENT_TIMESTAMP,
+                    interval_seconds = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (interval_seconds, authorization_id),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def device_authorization_is_expired(authorization: dict) -> bool:
+    """Return whether a device authorization has expired."""
+
+    expires_at = _parse_sql_datetime(authorization.get("expires_at"))
+    return bool(expires_at and expires_at <= datetime.utcnow())
+
+
+def device_authorization_poll_too_fast(authorization: dict) -> bool:
+    """Return whether the current poll violates the authorization interval."""
+
+    last_poll_at = _parse_sql_datetime(authorization.get("last_poll_at"))
+    if not last_poll_at:
+        return False
+    interval = int(authorization.get("interval_seconds") or 5)
+    return datetime.utcnow() < last_poll_at + timedelta(seconds=interval)
 
 # ========== Session Storage ==========
 
@@ -1288,6 +1773,24 @@ def _extract_session_text(editor_state_json: str) -> tuple[str, str]:
     full_text = "\n\n".join(text_cells).strip()
     first_line = full_text.split("\n")[0][:30] if full_text else ""
     return first_line, full_text
+
+
+def _extract_chat_parts_text(parts_json: str) -> str:
+    """Return searchable plain text from a persisted UIMessage parts JSON."""
+    try:
+        parts = json.loads(parts_json) if parts_json else []
+    except Exception:
+        return ""
+
+    texts: list[str] = []
+    for part in parts if isinstance(parts, list) else []:
+        if not isinstance(part, dict):
+            continue
+        if part.get("type") == "text":
+            text = str(part.get("text") or "").strip()
+            if text:
+                texts.append(text)
+    return "\n".join(texts).strip()
 
 
 def save_session(user_id: int, session_id: str, editor_state: dict, name: str = None,
@@ -2312,6 +2815,52 @@ def list_chat_threads(user_id: int) -> list[dict]:
         db.close()
 
 
+def list_chat_threads_for_search(user_id: int) -> list[dict]:
+    """List chat thread search candidates with aggregated message text."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT
+              t.id,
+              t.title,
+              t.created_at,
+              t.updated_at,
+              m.parts AS message_parts
+            FROM chat_thread t
+            LEFT JOIN chat_message m ON m.thread_id = t.id
+            WHERE t.user_id = ?
+            ORDER BY t.updated_at DESC, m.created_at ASC
+            """,
+            (user_id,),
+        ).fetchall()
+
+        by_thread: dict[str, dict] = {}
+        message_texts: dict[str, list[str]] = {}
+        for row in rows:
+            thread_id = row["id"]
+            if thread_id not in by_thread:
+                by_thread[thread_id] = {
+                    "id": row["id"],
+                    "title": row["title"],
+                    "created_at": row["created_at"],
+                    "updated_at": row["updated_at"],
+                    "messages_text": "",
+                }
+                message_texts[thread_id] = []
+
+            message_text = _extract_chat_parts_text(row["message_parts"] or "")
+            if message_text:
+                message_texts[thread_id].append(message_text)
+
+        for thread_id, item in by_thread.items():
+            item["messages_text"] = "\n\n".join(message_texts.get(thread_id, []))
+
+        return list(by_thread.values())
+    finally:
+        db.close()
+
+
 def delete_chat_thread(thread_id: str, user_id: int) -> bool:
     """Delete a chat thread (cascades to messages). Returns True if deleted."""
     db = get_db()
@@ -2555,6 +3104,317 @@ def delete_reflections_section_config(user_id: int, section: str) -> bool:
         )
         db.commit()
         return cursor.rowcount > 0
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Reflections-agent async task persistence
+# ---------------------------------------------------------------------------
+
+
+def _parse_json_obj(value: Optional[str], fallback):
+    if not value:
+        return fallback
+    try:
+        parsed = json.loads(value)
+        return parsed if isinstance(parsed, type(fallback)) else fallback
+    except (json.JSONDecodeError, TypeError):
+        return fallback
+
+
+def _reflection_task_from_row(row) -> Optional[dict]:
+    if row is None:
+        return None
+    item = dict(row)
+    item["sections"] = _parse_json_obj(item.get("sections"), [])
+    item["input_snapshot"] = _parse_json_obj(item.get("input_snapshot"), {})
+    return item
+
+
+def _reflection_result_from_row(row) -> dict:
+    item = dict(row)
+    item["related_session_ids"] = _parse_json_obj(item.get("related_session_ids"), [])
+    return item
+
+
+def _reflection_event_from_row(row) -> dict:
+    item = dict(row)
+    item["payload"] = _parse_json_obj(item.get("payload"), {})
+    return item
+
+
+def create_reflection_task(
+    user_id: int,
+    sections: list[str],
+    input_snapshot: Optional[dict] = None,
+    agent_contract_version: str = "reflections-agent-v1",
+    task_id: Optional[str] = None,
+) -> str:
+    """Create a Reflections-agent task and return its task id."""
+    import uuid
+
+    task_id = task_id or str(uuid.uuid4())
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT INTO reflection_task (
+              id, user_id, status, sections, input_snapshot,
+              agent_contract_version, updated_at
+            )
+            VALUES (?, ?, 'CREATED', ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            (
+                task_id,
+                user_id,
+                json.dumps(sections, ensure_ascii=False),
+                json.dumps(input_snapshot or {}, ensure_ascii=False),
+                agent_contract_version,
+            ),
+        )
+        db.commit()
+        return task_id
+    finally:
+        db.close()
+
+
+def update_reflection_task_status(
+    task_id: str,
+    status: str,
+    *,
+    workspace_path: Optional[str] = None,
+    input_snapshot: Optional[dict] = None,
+    error_summary: Optional[str] = None,
+    started_at: Optional[str] = None,
+    completed_at: Optional[str] = None,
+) -> None:
+    """Update task lifecycle status and optional metadata fields."""
+    assignments = ["status = ?", "updated_at = CURRENT_TIMESTAMP"]
+    params: list = [status]
+    optional_fields = {
+        "workspace_path": workspace_path,
+        "input_snapshot": json.dumps(input_snapshot, ensure_ascii=False) if input_snapshot is not None else None,
+        "error_summary": error_summary,
+        "started_at": started_at,
+        "completed_at": completed_at,
+    }
+    for field, value in optional_fields.items():
+        if value is not None:
+            assignments.append(f"{field} = ?")
+            params.append(value)
+    params.append(task_id)
+
+    db = get_db()
+    try:
+        db.execute(
+            f"UPDATE reflection_task SET {', '.join(assignments)} WHERE id = ?",
+            tuple(params),
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def get_reflection_task(task_id: str, user_id: Optional[int] = None) -> Optional[dict]:
+    """Return a Reflections-agent task, optionally scoped to a user."""
+    db = get_db()
+    try:
+        if user_id is None:
+            row = db.execute("SELECT * FROM reflection_task WHERE id = ? LIMIT 1", (task_id,)).fetchone()
+        else:
+            row = db.execute(
+                "SELECT * FROM reflection_task WHERE id = ? AND user_id = ? LIMIT 1",
+                (task_id, user_id),
+            ).fetchone()
+        return _reflection_task_from_row(row)
+    finally:
+        db.close()
+
+
+def get_latest_reflection_task(user_id: int) -> Optional[dict]:
+    """Return the latest Reflections-agent task for a user."""
+    db = get_db()
+    try:
+        row = db.execute(
+            """
+            SELECT * FROM reflection_task
+            WHERE user_id = ?
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        return _reflection_task_from_row(row)
+    finally:
+        db.close()
+
+
+def replace_reflection_section_results(
+    task_id: str,
+    user_id: int,
+    section: str,
+    results: list[dict],
+) -> None:
+    """Replace all persisted results for one task section."""
+    import uuid
+
+    db = get_db()
+    try:
+        db.execute(
+            "DELETE FROM reflection_result WHERE task_id = ? AND user_id = ? AND section = ?",
+            (task_id, user_id, section),
+        )
+        for item in results:
+            db.execute(
+                """
+                INSERT INTO reflection_result (
+                  id, task_id, user_id, section, title, description,
+                  related_session_ids, evidence, confidence
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    str(uuid.uuid4()),
+                    task_id,
+                    user_id,
+                    section,
+                    item.get("title") or "",
+                    item.get("description") or "",
+                    json.dumps(item.get("related_session_ids") or [], ensure_ascii=False),
+                    item.get("evidence") or "",
+                    item.get("confidence") or "low",
+                ),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
+def list_reflection_results(task_id: str, user_id: int) -> list[dict]:
+    """List structured Reflections results for a task."""
+    db = get_db()
+    try:
+        rows = db.execute(
+            """
+            SELECT r.*
+            FROM reflection_result r
+            JOIN reflection_task t ON t.id = r.task_id
+            WHERE r.task_id = ? AND r.user_id = ? AND t.user_id = ?
+            ORDER BY r.section, r.created_at, r.id
+            """,
+            (task_id, user_id, user_id),
+        ).fetchall()
+        return [_reflection_result_from_row(row) for row in rows]
+    finally:
+        db.close()
+
+
+def list_latest_reflection_results(user_id: int) -> list[dict]:
+    """Return results for the latest completed or partially completed task."""
+    db = get_db()
+    try:
+        task_row = db.execute(
+            """
+            SELECT *
+            FROM reflection_task
+            WHERE user_id = ? AND status IN ('COMPLETED', 'PARTIAL_FAILED')
+            ORDER BY completed_at DESC, updated_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+        task = _reflection_task_from_row(task_row)
+        if not task:
+            return []
+    finally:
+        db.close()
+    return list_reflection_results(task["id"], user_id)
+
+
+def append_reflection_task_event(
+    task_id: str,
+    event_type: str,
+    payload: Optional[dict] = None,
+    *,
+    event_id: Optional[str] = None,
+    sequence: Optional[int] = None,
+    created_at: Optional[str] = None,
+) -> str:
+    """Append a Reflections task event and return its id."""
+    import uuid
+
+    event_id = event_id or str(uuid.uuid4())
+    db = get_db()
+    try:
+        db.execute(
+            """
+            INSERT OR REPLACE INTO reflection_task_event (
+              id, task_id, sequence, event_type, payload, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP))
+            """,
+            (
+                event_id,
+                task_id,
+                sequence,
+                event_type,
+                json.dumps(payload or {}, ensure_ascii=False),
+                created_at,
+            ),
+        )
+        db.commit()
+        return event_id
+    finally:
+        db.close()
+
+
+def list_reflection_task_events(
+    task_id: str,
+    user_id: int,
+    after_event_id: Optional[str] = None,
+) -> list[dict]:
+    """List persisted task events, optionally after a specific event id."""
+    db = get_db()
+    try:
+        after_sequence = None
+        if after_event_id:
+            row = db.execute(
+                """
+                SELECT e.sequence
+                FROM reflection_task_event e
+                JOIN reflection_task t ON t.id = e.task_id
+                WHERE e.id = ? AND e.task_id = ? AND t.user_id = ?
+                LIMIT 1
+                """,
+                (after_event_id, task_id, user_id),
+            ).fetchone()
+            if row is not None:
+                after_sequence = row["sequence"]
+
+        if after_sequence is None:
+            rows = db.execute(
+                """
+                SELECT e.*
+                FROM reflection_task_event e
+                JOIN reflection_task t ON t.id = e.task_id
+                WHERE e.task_id = ? AND t.user_id = ?
+                ORDER BY e.sequence, e.created_at
+                """,
+                (task_id, user_id),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                """
+                SELECT e.*
+                FROM reflection_task_event e
+                JOIN reflection_task t ON t.id = e.task_id
+                WHERE e.task_id = ? AND t.user_id = ? AND e.sequence > ?
+                ORDER BY e.sequence, e.created_at
+                """,
+                (task_id, user_id, after_sequence),
+            ).fetchall()
+        return [_reflection_event_from_row(row) for row in rows]
     finally:
         db.close()
 
