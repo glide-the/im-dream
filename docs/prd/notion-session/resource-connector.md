@@ -1,15 +1,15 @@
-# 资源连接器 — 前端 PRD & ER 设计
+# 资源连接器 — 前端 PRD
 
 Status: Draft  
 Updated: 2026-07-04  
-Scope: 产品设计 — 资源连接器功能定义、前端页面交互、ER 关系模型
+Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 > [Input] `docs/design/notion-session/connector-interaction.md`,
 >      `docs/design/notion-session/overview.md`,
 >      `docs/design/claude-agent/notion-point/resource-connector-layer-design.md`
-> [Output] 资源连接器前端 PRD：功能定义、页面交互设计、ER 模型、不实现清单
-> [Pos] resource-connector-prd in `docs/design/notion-session`
-> [Sync] 2026-07-04: 初版 — 资源连接器功能定义、页面 PRD、ER 关系设计
+> [Output] 资源连接器前端 PRD：功能定义、页面交互设计、交互流程、状态定义
+> [Pos] resource-connector-prd in `docs/prd/notion-session`
+> [Sync] 2026-07-04: 从 `docs/design/notion-session/resource-connector-prd.md` 拆分，前端 PRD 独立管理
 
 ---
 
@@ -17,11 +17,11 @@ Scope: 产品设计 — 资源连接器功能定义、前端页面交互、ER �
 
 1. [产品定位](#1-产品定位)
 2. [功能定义](#2-功能定义)
-3. [ER 关系模型](#3-er-关系模型)
-4. [页面结构设计](#4-页面结构设计)
-5. [交互流程设计](#5-交互流程设计)
-6. [状态定义](#6-状态定义)
-7. [不实现清单](#7-不实现清单)
+3. [页面结构设计](#3-页面结构设计)
+4. [交互流程设计](#4-交互流程设计)
+5. [状态定义](#5-状态定义)
+6. [不实现清单](#6-不实现清单)
+7. [API 端点汇总](#7-api-端点汇总)
 
 ---
 
@@ -76,108 +76,9 @@ Scope: 产品设计 — 资源连接器功能定义、前端页面交互、ER �
 
 ---
 
-## 3. ER 关系模型
+## 3. 页面结构设计
 
-### 3.1 ER 图
-
-```text
-users
-────────────────────────────────────────────────────────────
- PK  id              INTEGER
-
-        │ 1
-        │
-        │ N
-
-resource_connectors
-────────────────────────────────────────────────────────────
- PK  id              TEXT (UUID)
- FK  user_id         INTEGER → users.id ON DELETE CASCADE
-     name            TEXT NOT NULL          ← 连接器显示名称
-     platform        TEXT NOT NULL          ← "notion" | "github" | ...
-     auth_status     TEXT DEFAULT 'pending' ← "pending" | "authenticated" | "expired"
-     config          JSON                   ← 平台配置（notion_home 等）
-     last_synced_at  DATETIME NULL
-     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-     updated_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-────────────────────────────────────────────────────────────
- INDEX: (user_id, updated_at DESC)
-
-        │ 1
-        │
-        │ N
-
-connector_resources
-────────────────────────────────────────────────────────────
- PK  id              TEXT (UUID)
- FK  connector_id    TEXT → resource_connectors.id ON DELETE CASCADE
-     resource_type   TEXT NOT NULL          ← "notion_database" | "notion_page" | "file" | "deck"
-     external_id     TEXT NULL              ← 平台资源 ID（database_id / page_id）
-     title           TEXT NOT NULL          ← 资源显示标题
-     metadata        JSON NULL              ← 资源元信息（page_count, schema 等）
-     sync_status     TEXT DEFAULT 'synced'  ← "syncing" | "synced" | "error"
-     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-────────────────────────────────────────────────────────────
- INDEX: (connector_id, resource_type)
- UNIQUE: (connector_id, resource_type, external_id)
-
-        │ 1 (resource_type = "notion_database")
-        │
-        │ N
-
-connector_resource_pages
-────────────────────────────────────────────────────────────
- PK  id              TEXT (UUID)
- FK  resource_id     TEXT → connector_resources.id ON DELETE CASCADE
-     page_id         TEXT NOT NULL          ← Notion Page UUID
-     title           TEXT NOT NULL
-     last_edited     DATETIME NULL
-     properties_json JSON NULL              ← Row Page 属性值快照
-     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-────────────────────────────────────────────────────────────
- INDEX: (resource_id, last_edited DESC)
-
-        │ 1 (resource_connectors)
-        │
-        │ N
-
-connector_chat_threads
-────────────────────────────────────────────────────────────
- PK  id              TEXT (UUID)
- FK  connector_id    TEXT → resource_connectors.id ON DELETE CASCADE
- FK  thread_id       TEXT → chat_thread.id         ← 复用现有 chat_thread
-     created_at      DATETIME DEFAULT CURRENT_TIMESTAMP
-────────────────────────────────────────────────────────────
- INDEX: (connector_id, created_at DESC)
-```
-
-### 3.2 关系说明
-
-```
-users (1) ──→ (N) resource_connectors
-                    │
-                    ├── (1) ──→ (N) connector_resources
-                    │                   │
-                    │                   └── (1) ──→ (N) connector_resource_pages
-                    │                                    (仅 notion_database 类型)
-                    │
-                    └── (1) ──→ (N) connector_chat_threads ──→ chat_thread
-```
-
-### 3.3 关键约束
-
-| 约束 | 说明 |
-|------|------|
-| 连接器绑定单用户 | `resource_connectors.user_id` 不可共享 |
-| 资源去重 | `(connector_id, resource_type, external_id)` UNIQUE |
-| 级联删除 | 删除连接器 → 级联删除所有关联资源和页面索引 |
-| chat_thread 复用 | 连接器内的对话复用已有的 `chat_thread` 模型，通过中间表关联 |
-
----
-
-## 4. 页面结构设计
-
-### 4.1 主页面布局
+### 3.1 主页面布局
 
 参考 ChatGPT Projects 页面模式：
 
@@ -208,7 +109,7 @@ users (1) ──→ (N) resource_connectors
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 页面组件拆解
+### 3.2 页面组件拆解
 
 | 区域 | 组件 | 说明 |
 |------|------|------|
@@ -219,7 +120,7 @@ users (1) ──→ (N) resource_connectors
 | 来源列表 | SourceList | 已添加的资源卡片列表（连接后显示） |
 | 聊天列表 | ChatList | 该连接器下的历史对话列表 |
 
-### 4.3 "来源" Tab 详细设计
+### 3.3 "来源" Tab 详细设计
 
 #### 空状态（无来源时）
 
@@ -259,7 +160,7 @@ users (1) ──→ (N) resource_connectors
 - **排序**：最新 / 最早 / 名称
 - **类型筛选**：全部 / Notion / 文件 / Decks
 
-### 4.4 "聊天" Tab 设计
+### 3.4 "聊天" Tab 设计
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -280,9 +181,9 @@ users (1) ──→ (N) resource_connectors
 
 ---
 
-## 5. 交互流程设计
+## 4. 交互流程设计
 
-### 5.1 创建资源连接器
+### 4.1 创建资源连接器
 
 ```
 用户点击 "新建连接器"
@@ -293,7 +194,7 @@ users (1) ──→ (N) resource_connectors
     └─ 创建成功 → 跳转连接器主页面（空状态）
 ```
 
-### 5.2 添加来源（连接 Notion）
+### 4.2 添加来源（连接 Notion）
 
 ```
 用户点击 "添加来源"
@@ -317,7 +218,7 @@ users (1) ──→ (N) resource_connectors
     └─ 后端同步 → 来源 Tab 显示新资源卡片
 ```
 
-### 5.3 发起对话
+### 4.3 发起对话
 
 ```
 用户在输入栏输入消息
@@ -332,7 +233,7 @@ users (1) ──→ (N) resource_connectors
     └─ Agent 响应（可读取 .notion/ 下的资源数据）
 ```
 
-### 5.4 上传文件
+### 4.4 上传文件
 
 ```
 用户点击 "添加来源" → "上传文件"
@@ -344,7 +245,7 @@ users (1) ──→ (N) resource_connectors
     └─ 文件存储到工作空间文件系统
 ```
 
-### 5.5 关联 Deck
+### 4.5 关联 Deck
 
 ```
 用户点击 "添加来源" → "关联 Deck"
@@ -358,9 +259,9 @@ users (1) ──→ (N) resource_connectors
 
 ---
 
-## 6. 状态定义
+## 5. 状态定义
 
-### 6.1 连接器状态
+### 5.1 连接器状态
 
 | 状态 | 说明 | 前端展示 |
 |------|------|---------|
@@ -368,7 +269,7 @@ users (1) ──→ (N) resource_connectors
 | `authenticated` | 认证成功，资源已同步 | 正常展示来源 |
 | `expired` | Token 过期 | 显示"需重新认证"提示 |
 
-### 6.2 资源同步状态
+### 5.2 资源同步状态
 
 | 状态 | 说明 | 前端展示 |
 |------|------|---------|
@@ -376,7 +277,7 @@ users (1) ──→ (N) resource_connectors
 | `synced` | 同步完成 | 显示"已同步" + 页面数 |
 | `error` | 同步失败 | 显示错误提示 + 重试按钮 |
 
-### 6.3 来源类型图标映射
+### 5.3 来源类型图标映射
 
 | resource_type | 图标 | 显示格式 |
 |--------------|------|---------|
@@ -387,7 +288,7 @@ users (1) ──→ (N) resource_connectors
 
 ---
 
-## 7. 不实现清单
+## 6. 不实现清单
 
 防止过度设计，以下内容**明确排除**：
 
@@ -405,7 +306,7 @@ users (1) ──→ (N) resource_connectors
 
 ---
 
-## 附录 A：API 端点汇总
+## 7. API 端点汇总
 
 | 端点 | 方法 | 用途 |
 |------|------|------|
@@ -427,12 +328,17 @@ users (1) ──→ (N) resource_connectors
 
 ---
 
-## 附录 B：设计决策记录
+## 附录：设计决策记录
 
 | 决策 | 选项 | 选择 | 理由 |
 |------|------|------|------|
-| 连接器与对话关系 | 内嵌 / 中间表 | 中间表 `connector_chat_threads` | 复用现有 `chat_thread` 模型，不侵入原有表结构 |
-| 资源存储 | 平铺在连接器表 / 独立资源表 | 独立 `connector_resources` 表 | 支持多种资源类型，各类型可独立 CRUD |
-| 页面索引 | JSON 字段 / 独立表 | 独立 `connector_resource_pages` 表 | Database 下可能有数百个 Row Page，JSON 字段查询性能差 |
-| 文件上传 | 连接器内 / 全局文件系统 | 连接器内 + 关联全局文件系统 | 文件生命周期跟随连接器 |
 | 前端 Tab 设计 | 单页 / Tab 切换 | "聊天" + "来源" 双 Tab | 参考 ChatGPT Projects，用户无需离开页面即可管理资源 |
+| 文件上传 | 连接器内 / 全局文件系统 | 连接器内 + 关联全局文件系统 | 文件生命周期跟随连接器 |
+
+---
+
+## 相关文档
+
+- ER 关系模型设计：[`docs/design/notion-session/resource-connector-er.md`](../../design/notion-session/resource-connector-er.md)
+- 交互方案设计：[`docs/design/notion-session/connector-interaction.md`](../../design/notion-session/connector-interaction.md)
+- 总览设计：[`docs/design/notion-session/overview.md`](../../design/notion-session/overview.md)
