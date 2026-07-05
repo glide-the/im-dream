@@ -17,6 +17,10 @@ tests/
 ├── test_workspace_router.py             # Workspace router: download header encoding
 ├── test_claude_agent_context_builder.py # Context builder: system_prompt assembly, session rendering
 ├── test_sessions_tool.py                # Agent get_sessions_range retrieval params and vector boundary
+├── test_notion_snapshot_contract.py     # Notion canonical snapshot path resolution and staleness checks
+├── test_notion_auth.py                  # Notion CLI auth helpers and login polling
+├── test_notion_store.py                 # Notion connector persistence and snapshot identity
+├── test_notion_connector_router_flow.py # Notion connector router business flow (create/auth/discover/select/sync)
 ├── test_chat_thread_retrieval.py        # Chat history thread search retrievers and vector boundary
 ├── test_claude_agent_runner.py          # Runner: streaming callbacks, session_id, error handling
 ├── test_claude_agent_thread_factory.py  # Factory: flyweight cache, TTL eviction, Phase 1-4 contracts
@@ -70,10 +74,29 @@ source .venv/bin/activate
 python tests/test_claude_agent_context_builder.py -v
 ```
 
+**Notion Connector — Snapshot Contract (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_notion_snapshot_contract.py -v
+```
+
 **Claude Agent — Session Retrieval Tool (no server/SDK needed):**
 ```bash
 source .venv/bin/activate
 python tests/test_sessions_tool.py -v
+```
+
+**Notion Connector — Auth / Store (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_notion_auth.py -v
+python tests/test_notion_store.py -v
+```
+
+**Notion Connector — Router Flow (no server/SDK needed):**
+```bash
+source .venv/bin/activate
+python tests/test_notion_connector_router_flow.py -v
 ```
 
 **Claude Agent — Chat History Retrieval (no server/SDK needed):**
@@ -168,6 +191,8 @@ python tests/test_seo_content.py -v
 - ✅ Settings SYSTEM_PROMPT 变化时重建 cached system_prompt
 - ✅ `workspace_enabled=false` 时跳过 `get_or_create_workspace`，`AgentRunOptions.cwd=None`
 - ✅ 附件请求在 Workspace Mode 关闭时不初始化 workspace、不调用 workspace file sync
+- ✅ Workspace attach materializes canonical Notion snapshot into workspace-local `.notion/`
+- ✅ Notion connector router registration and auth enforcement remain exposed through `server.py`
 
 ### Claude Agent — Server (`test_server_claude_agent.py`)
 - ✅ 6 个 `/api/claude-agent/*` 路由已注册
@@ -177,6 +202,14 @@ python tests/test_seo_content.py -v
 - ✅ `claude_agent_thread_factory` 实例已创建
 - ✅ startup/shutdown 钩子已注册
 - ✅ 无 JWT 时返回 401
+
+### Notion Connector (`test_notion_snapshot_contract.py`, `test_notion_auth.py`, `test_notion_store.py`)
+- ✅ `.notion/` 虚拟路径解析和 snapshot-scoped miss 语义
+- ✅ Notion CLI home/env 解析以及 login/poll/auth status 辅助函数
+- ✅ SQLite connector CRUD、认证状态持久化、资源选择持久化、snapshot identity 存储和 thread attach
+
+### Notion Connector — Router Flow (`test_notion_connector_router_flow.py`)
+- ✅ FastAPI connector business flow covering create, auth/login, auth/poll, database discovery, page discovery, resource selection, and sync persistence
 
 ### SEO Content (`test_seo_content.py`)
 - ✅ Public URL normalization for `INK_PUBLIC_BASE_URL`

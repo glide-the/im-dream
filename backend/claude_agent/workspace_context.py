@@ -16,6 +16,11 @@
 #                    editor_session_id is the user_sessions.id from /api/sessions.
 # [Sync] 2026-06-01: add switch_editor to Writing section with context-switch note;
 #                    add Step 0 (switch context if needed) to Document editing workflow.
+# [Sync] 2026-07-04: append Notion connector context when `.notion/` snapshot
+#                    files are materialized in the workspace; the block is
+#                    derived from workspace-local canonical snapshot files.
+# [Sync] 2026-07-05: expose connector_id and sync cursor in the Notion block so
+#                    the workspace summary mirrors the attached snapshot identity.
 
 """Workspace context prompt for the Ink & Memory Claude Agent.
 
@@ -45,6 +50,9 @@ Usage::
     # Returns an empty string when cwd is falsy.
 """
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 # ---------------------------------------------------------------------------
 # Template
@@ -115,6 +123,74 @@ Document editing workflow (follow this order every editing session):
 </workspace_context>"""
 
 
+def _safe_read_json(path: Path) -> dict:
+    try:
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _render_notion_context_block(cwd: str) -> str:
+    """Render the Notion connector summary block from workspace-local files."""
+
+    if not cwd:
+        return ""
+
+    notion_dir = Path(cwd) / ".notion"
+    if not notion_dir.exists():
+        return ""
+
+    connector = _safe_read_json(notion_dir / "connector.json")
+    snapshot = _safe_read_json(notion_dir / "snapshot.json")
+    if not connector and not snapshot:
+        return ""
+
+    snapshot_meta = snapshot or connector.get("snapshot") or {}
+    if not isinstance(snapshot_meta, dict):
+        snapshot_meta = {}
+
+    connector_id = str(
+        connector.get("id")
+        or snapshot_meta.get("resource_connector_id")
+        or "(unknown)"
+    )
+    snapshot_state = str(snapshot_meta.get("state") or connector.get("auth_status") or "unknown")
+    selected_databases = connector.get("selected_databases") or []
+    selected_pages = connector.get("selected_pages") or []
+    database_count = len(snapshot.get("databases") or selected_databases or [])
+    page_count = len(snapshot.get("index") or selected_pages or [])
+    snapshot_version = str(snapshot_meta.get("snapshot_version") or "(not synced)")
+    source_revision = str(snapshot_meta.get("source_revision") or "")
+    sync_cursor = str(snapshot_meta.get("sync_cursor") or "")
+    fetched_at = str(snapshot_meta.get("fetched_at") or connector.get("last_synced_at") or "")
+
+    lines = [
+        "Notion device index (.notion/):",
+        f"  Status: {snapshot_state} | {database_count} databases | {page_count} pages | snapshot {snapshot_version}",
+        f"  Connector ID: {connector_id}",
+    ]
+    if source_revision:
+        lines.append(f"  Source Revision: {source_revision}")
+    if sync_cursor:
+        lines.append(f"  Sync Cursor: {sync_cursor}")
+    if fetched_at:
+        lines.append(f"  Last Synced: {fetched_at}")
+    lines.extend(
+        [
+            "  Read .notion/snapshot.json first for the attached snapshot identity.",
+            "  Read .notion/connector.json for connector details and selection state.",
+            "  Read .notion/index.json for the page listing.",
+            "  Read .notion/databases.json for database summaries.",
+            "  Read .notion/databases/<db_id>.json for database-specific pages.",
+            "  Read .notion/pages/<page_id>.json for individual page content.",
+        ]
+    )
+    return "\n".join(lines) + "\n"
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -137,8 +213,12 @@ def build_workspace_context_block(cwd: str, editor_session_id: str = "") -> str:
     """
     if not cwd:
         return ""
-    import os  # noqa: PLC0415
-    return WORKSPACE_CONTEXT_TEMPLATE.format(
+    workspace_block = WORKSPACE_CONTEXT_TEMPLATE.format(
         cwd=cwd,
         editor_session_id=editor_session_id or "(unknown — service layer must provide editor_session_id)",
     )
+    notion_block = _render_notion_context_block(cwd)
+    if notion_block:
+        workspace_block = workspace_block[:-len("</workspace_context>")]
+        workspace_block += "\n" + notion_block + "</workspace_context>"
+    return workspace_block

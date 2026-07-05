@@ -13,13 +13,23 @@
     - `docs/design/claude-agent/claude-agent-thread-session-patterns.md`
     - `docs/design/claude-agent/sse-reconnect-and-event-bus.md`
     - `docs/design/claude-agent/claude-agent-tool-confirmation-flow.md`
+    - `docs/design/claude-agent/claude-agent-permission-policy.md`
+    - `docs/design/claude-agent/claude-agent-runner-design.md`
     - `docs/design/claude-agent/claude-agent-workspace-sandbox.md`
+    - `docs/design/claude-agent/claude-agent-workspace-sandbox-interaction-plan.md`
+    - `docs/design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`
+    - `docs/design/claude-agent/claude-agent-sandbox-network-interaction-plan.md`
     - `docs/design/claude-agent/claude-sdk-env-design.md`
     - `docs/design/claude-agent/user-env-injection-design.md`
     - `docs/design/claude-agent/chat-history-search.md`
+    - `docs/design/claude-agent/session-labels-and-retrieval.md`
+    - `docs/design/claude-agent/chat-session-message-er-model.md`
+    - `docs/design/claude-agent/claude-agent-prompt-optimization.md`
     - `docs/design/claude-agent/claude-agent-stop-interaction.md`
     - `docs/design/claude-agent/write-tool-terminal-preview.md`
-    - `docs/design/workspace/workspace-filesystem.md`
+    - `docs/design/claude-agent/claude-sdk-message-types.md`
+    - `docs/design/claude-agent/workspace-filesystem.md`
+  - `docs/design/claude-agent/workspace-design-comparison.md`
 - 生成 Agent：`IssueDispatcher`
 - 所属流水线阶段：`issue`
 - 上游阶段：`design`
@@ -46,12 +56,18 @@
   - `docs/design/claude-agent/sse-reconnect-and-event-bus.md`
   - `docs/design/claude-agent/claude-agent-tool-confirmation-flow.md`
   - `docs/design/claude-agent/claude-agent-workspace-sandbox.md`
+  - `docs/design/claude-agent/claude-agent-workspace-sandbox-interaction-plan.md`
+  - `docs/design/claude-agent/claude-agent-docker-sandbox-egress-incident-plan.md`
   - `docs/design/claude-agent/claude-sdk-env-design.md`
   - `docs/design/claude-agent/user-env-injection-design.md`
   - `docs/design/claude-agent/chat-history-search.md`
+  - `docs/design/claude-agent/session-labels-and-retrieval.md`
+  - `docs/design/claude-agent/claude-agent-prompt-optimization.md`
   - `docs/design/claude-agent/claude-agent-stop-interaction.md`
   - `docs/design/claude-agent/write-tool-terminal-preview.md`
-  - `docs/design/workspace/workspace-filesystem.md`
+  - `docs/design/claude-agent/claude-sdk-message-types.md`
+  - `docs/design/claude-agent/workspace-filesystem.md`
+  - `docs/design/claude-agent/workspace-design-comparison.md`
 - 关联实现路径：
   - `backend/server.py`
   - `backend/routers/claude_agent.py`
@@ -78,11 +94,12 @@
 
 - 本清单覆盖范围：
   - Claude Agent 运行合同的 request / response / SSE 归一
-  - 会话持久化、resume 回写和历史检索
+  - 会话持久化、resume 回写、labels 协作检索和历史检索
   - Thread Session 生命周期、EventBus 重连与 stop 语义
   - 工具确认、问答回传、Write 预览和审批 UI
   - Workspace Mode、沙箱策略、SDK env 注入与前端联动
-  - Chat 历史搜索与前端消息回放
+  - Chat 历史搜索、labels 协作检索与前端消息回放
+  - Agent 跨 session 笔记检索（`labels` + `mcp__user__get_sessions_range`）
 
 - 明确排除范围：
   - `docs/design/deck-claude-agent.md` 的 Deck / voice 绑定流
@@ -95,9 +112,10 @@
 - 关键约束：
   - `POST /api/claude-agent` 必须由服务端统一组装系统 prompt，不接受客户端自定义 system prompt 作为权威输入
   - `workspace_enabled=false` 时，聊天路径不得初始化 thread workspace，也不得注入 workspace context
+  - `workspace_enabled=true` 时，Bash sandbox 的读边界必须收敛到当前 thread workspace 与必要 runtime 依赖，不能退化为宽松的父目录访问
   - `tool_choice="manual"` / 高敏 `auto` 工具必须走确认侧路，`AskUserQuestion` 需要 answers 回传
   - SSE 断线默认只取消消费者，不应等同于停止后台 turn
-  - 历史检索默认字符模糊匹配，`vector` 仅保留接口边界
+  - 历史检索默认字符模糊匹配，`labels` 仅作为过滤与排序辅助，`vector` 仅保留接口边界
 
 - 补充说明：
   - `claude-agent.md` 是本批主线合同，子设计稿用于细化具体子系统。
@@ -110,7 +128,7 @@
 |---|---|---|---|---|---|---|
 | `CA-SH-01` | 建立 Workspace Mode、沙箱策略与 SDK env 注入基座 | shared | P0 | `shared,workspace,sandbox,env,settings,claude-code` | 无 | `@BackendTaskAgent` + `@FrontendTaskAgent` |
 | `CA-BE-01` | 收敛 `POST /api/claude-agent` 的入参归一与 Phase 1 上下文组装 | backend | P0 | `backend,api-contract,context-assembly,session,resume,prompt` | `CA-SH-01` | `@BackendTaskAgent` |
-| `CA-BE-02` | 实现会话持久化、session 回写与历史检索接口 | backend | P0 | `backend,persistence,history,resume,sqlite,retrieval` | `CA-BE-01` | `@BackendTaskAgent` |
+| `CA-BE-02` | 实现会话持久化、labels 回写与历史检索接口 | backend | P0 | `backend,persistence,history,resume,sqlite,retrieval,labels,mcp` | `CA-BE-01` | `@BackendTaskAgent` |
 | `CA-SH-02` | 重构 Thread Session 生命周期、EventBus 与断线重连 | shared | P0 | `shared,thread-session,eventbus,reconnect,streaming,stop` | `CA-BE-02` | `@BackendTaskAgent` + `@FrontendTaskAgent` |
 | `CA-SH-03` | 落地工具确认、批准/拒绝与问答回传链路 | shared | P0 | `shared,tool-confirmation,approval,sse,manual,ask-user` | `CA-BE-01`, `CA-SH-02` | `@BackendTaskAgent` + `@FrontendTaskAgent` |
 | `CA-FE-01` | 落地 Chat 历史搜索面板与结果回放 | frontend | P1 | `frontend,history-search,chat,search,retrieval` | `CA-BE-02` | `@FrontendTaskAgent` |
@@ -157,9 +175,13 @@
   - `FrontendTaskAgent`
 - 设计决策引用：
   - `claude-agent-workspace-sandbox.md §1-5`
+  - `claude-agent-workspace-sandbox-interaction-plan.md §1-5`
+  - `claude-agent-docker-sandbox-egress-incident-plan.md §1-6`
+  - `claude-agent-sandbox-network-interaction-plan.md §1-6`
   - `claude-sdk-env-design.md §1-6`
   - `user-env-injection-design.md §1-5`
-  - `workspace/workspace-filesystem.md §1-5`
+  - `claude-agent/workspace-filesystem.md §1-5`
+  - `claude-agent/workspace-design-comparison.md §1-3`
 
 - 备注：
   - `[CLARIFICATION_NEEDED]` 无
@@ -172,12 +194,15 @@
 - 优先级：P0
 - 标签：`backend,api-contract,context-assembly,session,resume,prompt`
 - 描述：
-  按 `claude-agent-api-contracts.md` 与 `claude-agent-context-assembly.md`，实现请求规范化、系统 prompt 组装、resume 判定、runtime 上下文注入、附件 / workspace-file 规则、以及 `_TurnExecution` 载体构建。该 Issue 负责把客户端输入收敛为稳定的服务端 turn 合同。
+  按 `claude-agent-api-contracts.md` 与 `claude-agent-context-assembly.md`，实现请求规范化、系统 prompt 组装、resume 判定、runtime 上下文注入、近期 session block（含 `labels`）和 older-session retrieval workflow、附件 / workspace-file 规则、以及 `_TurnExecution` 载体构建。该 Issue 负责把客户端输入收敛为稳定的服务端 turn 合同。
 
 - 验收条件：
   - `id` / `thread_id` 别名、`message`、`resume`、`tool_choice`、`model`、`max_turns`、`cwd` 的服务端归一规则与设计一致。
   - 客户端不得以 `system_prompt` 或历史数组覆盖服务端权威上下文。
   - Settings `system_prompt` 作为低优先级块进入 system prompt，且与 `_SYSTEM_PROMPT_TEMPLATE` 冲突时以模板为准。
+  - 系统提示中的最近 session block 按 `### {date} — sessionId:{sessionId}, {labels}: {title}` 格式输出，`labels` 缺失时保持空展示但不破坏格式。
+  - 系统提示包含 `Session Retrieval Workflow`，明确 older-session 场景下使用 `mcp__user__get_sessions_range`，并保持 `query` 优先于 labels-only 搜索。
+  - `INK_AGENT_USER_ID` 被注入到用户 MCP 环境中，older-session 检索只作用于当前用户历史。
   - resume 仅在 `chat_thread.claude_session_id`、契约版本和本地 transcript probe 同时满足时启用。
   - workspace disabled 时，不初始化 workspace，也不注入 `<workspace_context>` / `<memory_context>`。
   - 生成的 `AgentRunOptions` 与 `_TurnExecution` 中字段可直接被 Phase 3 消费。
@@ -201,6 +226,8 @@
 - 设计决策引用：
   - `claude-agent-api-contracts.md §4.1-4.9`
   - `claude-agent-context-assembly.md §1-8`
+  - `claude-agent-prompt-optimization.md §1-4`
+  - `claude-agent.md §7.3-7.5`
   - `claude-agent-service-design.md §3-4`
 
 - 备注：
@@ -209,19 +236,22 @@
 
 ### `CA-BE-02`
 
-- 标题：实现会话持久化、session 回写与历史检索接口
+- 标题：实现会话持久化、labels 回写与历史检索接口
 - 类型：backend
 - 优先级：P0
-- 标签：`backend,persistence,history,resume,sqlite,retrieval`
+- 标签：`backend,persistence,history,resume,sqlite,retrieval,labels,mcp`
 - 描述：
-  按 `claude-agent-session-persistence.md` 与 `chat-history-search.md`，把 turn 结束后的 user / assistant 消息、metadata、thread title、Claude session id、以及历史检索候选加载全部落到数据库与后端检索层。这个 Issue 是前端历史回放、会话恢复和搜索能力的共同后端基座。
+  按 `claude-agent-session-persistence.md`、`chat-session-message-er-model.md`、`chat-history-search.md` 与设计稿第 7 节的 labels / get_sessions_range 约束，把 turn 结束后的 user / assistant 消息、metadata、thread title、Claude session id、labels，以及历史检索候选加载全部落到数据库与后端检索层；同时补齐 `mcp__user__get_sessions_range` 的日期范围检索、labels 过滤、fuzzy 默认口径和 vector 占位边界。这个 Issue 是前端历史回放、会话恢复和跨 session 协作检索能力的共同后端基座。
 
 - 验收条件：
   - `_persist_turn` 将 user / assistant 消息按 UIMessage-compatible parts 持久化到 `chat_message`。
+  - `user_sessions.labels` 以 JSON 数组语义写入、读取与回写，并可被后续检索消费者稳定消费。
   - assistant metadata、thread title、`claude_session_id`、`agent_contract_version` 在成功 turn 后回写。
   - `GET /api/claude-agent/threads/{thread_id}/messages` 返回已反序列化的 message parts。
   - `GET /api/claude-agent/threads` 的 `query/search_scope/retrieval_mode` 检索参数按设计工作。
   - `list_chat_threads_for_search` / retriever registry 的默认 fuzzy 行为可用，`vector` 仅返回接口占位。
+  - `mcp__user__get_sessions_range` 支持 `start_date` / `end_date` 范围、`query`、`labels`、`label_match`、`retrieval_mode`，并返回可用于定位结果的 `match` 元信息。
+  - `mcp__user__get_sessions_range` 以当前用户上下文为边界运行，`query` 优先于 labels-only 搜索，`retrieval_mode="vector"` 仅返回接口占位。
   - resume 失败时能通过 session write-back 自愈到新 session，而不会阻塞 turn。
 
 - 前置依赖：`CA-BE-01`
@@ -230,7 +260,11 @@
   - `backend/claude_agent/service.py`
   - `backend/claude_agent/thread_retrieval.py`
   - `backend/routers/claude_agent.py`
+  - `backend/libs/claude_agent_kit/server/session_files.py`
+  - `backend/libs/claude_agent_kit/server/sessions_tool.py`
+  - `backend/libs/claude_agent_kit/server/mcp_server.py`
   - `backend/tests/test_chat_thread_retrieval.py`
+  - `backend/tests/test_sessions_tool.py`
   - `backend/tests/test_claude_agent_service.py`
   - `backend/tests/test_database.py`
 
@@ -241,12 +275,15 @@
   - 无
 - 设计决策引用：
   - `claude-agent-session-persistence.md §2-5`
+  - `claude-agent.md §7.3-7.5`
   - `claude-agent-context-assembly.md §8`
+  - `chat-session-message-er-model.md §1-5`
+  - `session-labels-and-retrieval.md §1-9`
   - `chat-history-search.md §3-4`
 
 - 备注：
   - `[CLARIFICATION_NEEDED]` 无
-  - 搜索接口的目标不是引入向量检索，而是先把当前 fuzzy / interface-only 边界稳定下来。
+  - 搜索接口的目标不是引入向量检索，而是先把当前 fuzzy / labels-filter / interface-only 边界稳定下来。
 
 ### `CA-SH-02`
 
@@ -271,6 +308,7 @@
   - `backend/claude_agent/thread_pool.py`
   - `backend/claude_agent/event_bus.py`
   - `backend/claude_agent/event_bus_redis.py`
+  - `backend/claude_agent/observer.py`
   - `backend/routers/claude_agent.py`
   - `frontend/src/components/chat/ChatView.tsx`
   - `frontend/src/components/chat/ChatPanel.tsx`
@@ -287,6 +325,7 @@
   - `sse-reconnect-and-event-bus.md §1-7, §9-11`
   - `claude-agent-service-design.md §4, §10`
   - `claude-agent-api-contracts.md §4.6.5`
+  - `claude-agent-runner-design.md §4, §7, §11`
 
 - 备注：
   - `[CLARIFICATION_NEEDED]` 无
@@ -315,6 +354,7 @@
   - `backend/claude_agent/service.py`
   - `backend/routers/claude_agent.py`
   - `backend/claude_agent/thread_factory.py`
+  - `backend/libs/claude_agent_kit/server/agent_runner.py`
   - `frontend/src/components/chat/ChatMessageList.tsx`
   - `frontend/src/components/chat/AskUserQuestionUI.tsx`
   - `frontend/src/components/chat/EditorWriteApprovalUI.tsx`
@@ -331,6 +371,9 @@
   - `claude-agent-tool-confirmation-flow.md §1-7`
   - `claude-agent-api-contracts.md §4.5-4.8`
   - `claude-agent-service-design.md §5`
+  - `claude-agent-permission-policy.md §1-8`
+  - `claude-agent-runner-design.md §5-7`
+  - `claude-sdk-message-types.md §事件类型树形总览`
 
 - 备注：
   - `[CLARIFICATION_NEEDED]` 无

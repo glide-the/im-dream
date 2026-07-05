@@ -1,11 +1,12 @@
+// [Sync] 2026-07-04: add Resource Connector navigation entry alongside the existing dashboard views.
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import { toggleTheme, getTheme, onSystemThemeChange } from '../utils/theme';
 
 interface Props {
-  currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat';
-  onViewChange: (view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat') => void;
+  currentView: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector';
+  onViewChange: (view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => void;
 }
 
 export default function LeftSidebar({ currentView, onViewChange }: Props) {
@@ -184,6 +185,24 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           }}
         >
           {t('nav.chat')}
+        </button>
+
+        <button
+          onClick={() => onViewChange('connector')}
+          style={buttonStyle(currentView === 'connector')}
+          title={t('nav.connector')}
+          onMouseEnter={e => {
+            if (currentView !== 'connector') {
+              e.currentTarget.style.background = 'var(--color-bg-hover)';
+            }
+          }}
+          onMouseLeave={e => {
+            if (currentView !== 'connector') {
+              e.currentTarget.style.background = 'transparent';
+            }
+          }}
+        >
+          {t('nav.connector')}
         </button>
       </div>
 

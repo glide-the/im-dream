@@ -90,6 +90,9 @@
 #                    workspace or pass cwd/workspace context to the runner.
 # [Sync] 2026-06-25: frontend stop requests cancel the current turn; CancelledError
 #                    now flushes partial assistant parts and closes EventBus with finish.
+# [Sync] 2026-07-04: materialize connector-owned Notion snapshots into the
+#                    workspace-local `.notion/` files before user-message
+#                    assembly so workspace_context can read the canonical files.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -453,6 +456,40 @@ class ClaudeAgentService:
                     cwd,
                 )
             state.with_cwd(cwd)
+
+            try:
+                from notion import build_notion_facade  # noqa: PLC0415
+                from notion.errors import NotionConnectorNotFoundError  # noqa: PLC0415
+            except Exception as exc:  # noqa: BLE001
+                # Keep the turn alive even when Notion is not configured or the
+                # package is temporarily unavailable.
+                logger.debug(
+                    "Notion workspace materialization skipped for session_id=%s: %s",
+                    state.session_id,
+                    exc,
+                )
+            else:
+                try:
+                    notion_facade = build_notion_facade(int(request.user_id))
+                    notion_facade.materialize_workspace(
+                        workspace_path,
+                        workspace_id=state.session_id,
+                    )
+                except NotionConnectorNotFoundError:
+                    try:
+                        from notion import clear_workspace_snapshot  # noqa: PLC0415
+
+                        clear_workspace_snapshot(workspace_path)
+                    except Exception:
+                        pass
+                except Exception as exc:  # noqa: BLE001
+                    # Keep the turn alive even when Notion is not configured or the
+                    # snapshot layer is temporarily unavailable.
+                    logger.debug(
+                        "Notion workspace materialization skipped for session_id=%s: %s",
+                        state.session_id,
+                        exc,
+                    )
         else:
             cwd = ""
             if request.cwd:

@@ -5,6 +5,8 @@
  * Using const assertion for type safety and autocomplete.
  */
 
+// [Sync] 2026-07-04: add resource connector storage key for frontend fallback state.
+
 export const STORAGE_KEYS = {
   // Auth
   AUTH_TOKEN: 'auth_token',
@@ -24,6 +26,7 @@ export const STORAGE_KEYS = {
   DAILY_PICTURES: 'daily-pictures',
   SELECTED_FRIEND: 'ink-selected-friend',
   RECENT_FRIENDS: 'ink-recent-friends',
+  RESOURCE_CONNECTORS: 'ink-resource-connectors',
 
   // Analysis
   ANALYSIS_REPORTS: 'analysisReports',

@@ -13,6 +13,8 @@
 // [Sync] 2026-06-01: pass current user_session.labels into StateChooser for writing-session metadata display.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 // [Sync] 2026-06-23: route /oauth/device/verify to the Device Flow verification page before the main app shell.
+// [Sync] 2026-07-04: add Resource Connector view entry and mobile/desktop navigation affordance.
+// [Sync] 2026-07-05: make the connector viewport scrollable inside the fixed app shell so resource selection and source cards remain reachable.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -22,7 +24,7 @@ import './App.css';
 import {
   FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye,
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass,
-  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments,
+  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments, FaLink,
 } from 'react-icons/fa';
 import TopNavBar from './components/TopNavBar';
 import LeftToolbar from './components/LeftToolbar';
@@ -56,6 +58,7 @@ import { useVoiceInput } from './hooks/useVoiceInput';
 import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
+import ResourceConnectorPage from './components/dashboard/ResourceConnectorPage';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -144,7 +147,7 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
-  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat'>('writing');
+  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector'>('writing');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
   const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
@@ -371,6 +374,7 @@ export default function App() {
     { key: 'timeline' as const, label: t('nav.timeline'), icon: FaRegClock },
     { key: 'analysis' as const, label: t('nav.analysis'), icon: FaChartBar },
     { key: 'decks' as const, label: t('nav.decks'), icon: FaLayerGroup },
+    { key: 'connector' as const, label: t('nav.connector'), icon: FaLink },
     { key: 'chat' as const, label: t('nav.chat'), icon: FaComments },
     { key: 'settings' as const, label: t('nav.settings'), icon: FaCog },
   ];
@@ -1875,6 +1879,22 @@ export default function App() {
           }}
             onOpenChat={handleOpenChatThread}
           />
+        </div>
+      )}
+      {currentView === 'connector' && (
+        <div style={{
+          position: 'fixed',
+          top: viewTopOffset,
+          left: 0,
+          right: 0,
+          bottom: mobileBottomOffset,
+          background: 'var(--color-bg-app)',
+          display: 'flex',
+          overflowX: 'hidden',
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+        }}>
+          <ResourceConnectorPage isMobile={isMobile} />
         </div>
       )}
       {currentView === 'settings' && (
