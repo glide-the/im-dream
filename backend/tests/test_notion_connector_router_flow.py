@@ -324,6 +324,122 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertEqual(final_connector["selected_pages"], ["page-team"])
         self.assertEqual(len(self.snapshot_calls), 2)
 
+    def test_connector_auth_poll_no_pending_session_does_not_regress_auth(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={
+                "name": "Notion Resource Connector",
+                "platform": "notion",
+                "notion_home": self._notion_home,
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(create_response.status_code, 200, create_response.text)
+        connector_id = create_response.json()["connector"]["id"]
+
+        login_response = self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(login_response.status_code, 200, login_response.text)
+
+        polling_sequence = [
+            notion_auth.AuthStatusResult(
+                status="authenticated",
+                notion_home=self._notion_home,
+                detail="authenticated",
+            ),
+            notion_auth.AuthStatusResult(
+                status="pending",
+                notion_home=self._notion_home,
+                detail="No pending login session found.",
+            ),
+        ]
+        with patch.object(
+            notion_auth,
+            "poll_login",
+            new=AsyncMock(side_effect=polling_sequence),
+        ):
+            first_poll = self.client.post(
+                f"/api/connectors/{connector_id}/auth/poll",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            self.assertEqual(first_poll.status_code, 200, first_poll.text)
+            first_payload = first_poll.json()
+            self.assertEqual(first_payload["status"], "authenticated")
+            self.assertEqual(first_payload["auth_status"], "authenticated")
+
+            second_poll = self.client.post(
+                f"/api/connectors/{connector_id}/auth/poll",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            self.assertEqual(second_poll.status_code, 200, second_poll.text)
+            second_payload = second_poll.json()
+            self.assertEqual(second_payload["status"], "authenticated")
+            self.assertEqual(second_payload["auth_status"], "authenticated")
+
+        final_connector = self.client.get(
+            f"/api/connectors/{connector_id}",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(final_connector.status_code, 200, final_connector.text)
+        final_payload = final_connector.json()["connector"]
+        self.assertEqual(final_payload["auth_status"], "authenticated")
+        self.assertEqual(final_payload["config"].get("auth_session", {}).get("auth_session_status"), "authenticated")
+
+    def test_connector_auth_poll_no_pending_session_without_auth_marks_error(self):
+        create_response = self.client.post(
+            "/api/connectors",
+            json={
+                "name": "Notion Resource Connector",
+                "platform": "notion",
+                "notion_home": self._notion_home,
+            },
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(create_response.status_code, 200, create_response.text)
+        connector_id = create_response.json()["connector"]["id"]
+
+        login_response = self.client.post(
+            f"/api/connectors/{connector_id}/auth/login",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(login_response.status_code, 200, login_response.text)
+
+        with patch.object(
+            notion_auth,
+            "poll_login",
+            new=AsyncMock(
+                return_value=notion_auth.AuthStatusResult(
+                    status="pending",
+                    notion_home=self._notion_home,
+                    detail="No pending login session found.",
+                )
+            ),
+        ):
+            poll_response = self.client.post(
+                f"/api/connectors/{connector_id}/auth/poll",
+                headers={"Authorization": "Bearer test-token"},
+            )
+            self.assertEqual(poll_response.status_code, 200, poll_response.text)
+            poll_payload = poll_response.json()
+            self.assertEqual(poll_payload["status"], "error")
+            self.assertEqual(poll_payload["auth_status"], "error")
+
+        final_connector = self.client.get(
+            f"/api/connectors/{connector_id}",
+            headers={"Authorization": "Bearer test-token"},
+        )
+        self.assertEqual(final_connector.status_code, 200, final_connector.text)
+        final_payload = final_connector.json()["connector"]
+        self.assertEqual(final_payload["auth_status"], "error")
+        self.assertEqual(
+            final_payload.get("config", {})
+            .get("auth_session", {})
+            .get("auth_session_status"),
+            "consumed",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

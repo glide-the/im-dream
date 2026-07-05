@@ -17,6 +17,7 @@ Scope: 前端执行证据与最小修复归档 - Notion 资源连接器创建 / 
 | 执行 Agent | `ExecTaskAgent` |
 | 执行时间 | `2026-07-05` |
 | 执行前补充 | 任务允许范围聚焦在前端 connector 链路回归验证；live Notion auth 在本次浏览器环境中不可完成，因为登录页已跳转到外部 Notion 认证页面，且当前浏览器 profile 未提供可用的 Notion 会话。 |
+| 父级门禁影响 | 在当前 `stage_notion-resource-connector-e2e` 收口中，该阻塞被识别为 `local_or_contract_only` 边界，不作为 `SUO-172` 的 execute_gate 阻塞；父级需在 live-only 验收时再补外部会话。 |
 
 ## 2. TASK-REQUIREMENT-FORMAT.md 填充摘要
 
@@ -135,4 +136,5 @@ Scope: 前端执行证据与最小修复归档 - Notion 资源连接器创建 / 
   - 浏览器 smoke 中 source cards 与 refresh path 可达
 - 阻塞说明:
   - 真实 Notion auth 无法在当前浏览器会话中完成，因此本次只能给出“已修复并通过本地/后端合同验证”的结论，不能把 live E2E 标为完成。
-- 可进入 review / audit: 否，需先补齐 live Notion session 或明确接受 local fallback 作为验收边界
+  - 可进入 review / audit: 否，需先补齐 live Notion session 或明确接受 local fallback 作为验收边界
+  - 注：对 `SUO-172` 来说本次以 `local_or_contract_only` 收口已满足父级 execute_gate。

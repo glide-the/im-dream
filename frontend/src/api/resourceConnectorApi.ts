@@ -7,6 +7,8 @@
 // [Sync] 2026-07-05: send connector resource selections with the backend's selected_* field names so
 //                    selection persistence reaches /api/connectors/{id}/resources/select instead of collapsing
 //                    to empty lists.
+// [Sync] 2026-07-05: normalize backend auth_session terminal states (`consumed`/`failed`) so UI can stop
+//                    polling and surface actionable auth errors instead of indefinitely waiting.
 /**
  * Resource connector API helpers.
  *
@@ -187,6 +189,8 @@ function mutateLocalConnector(
 function hasBackendAuthSession(raw: any): boolean {
   const auth = raw?.auth ?? raw?.authentication ?? {};
   const config = raw?.config ?? {};
+  const authSession = auth?.auth_session ?? {};
+  const configSession = config?.auth_session ?? {};
   return Boolean(
     auth?.verificationUrl
       || auth?.verification_url
@@ -200,6 +204,14 @@ function hasBackendAuthSession(raw: any): boolean {
       || raw?.verification_code
       || raw?.pollIntervalSeconds
       || raw?.poll_interval_seconds
+      || authSession?.auth_session_id
+      || authSession?.auth_session_status
+      || authSession?.auth_session_started_at
+      || authSession?.auth_session_last_polled_at
+      || configSession?.auth_session_id
+      || configSession?.auth_session_status
+      || configSession?.auth_session_started_at
+      || configSession?.auth_session_last_polled_at
       || config?.verificationUrl
       || config?.verification_url
       || config?.verificationCode
@@ -210,12 +222,15 @@ function hasBackendAuthSession(raw: any): boolean {
 }
 
 function localizeAuthStatus(status?: string | null, hasSession = false): ConnectorAuthStatus {
-  switch (status) {
+  switch ((status || '').toLowerCase()) {
     case 'authenticated':
       return 'authenticated';
     case 'authenticating':
     case 'pending':
       return hasSession ? 'authenticating' : 'idle';
+    case 'consumed':
+    case 'failed':
+      return 'error';
     case 'expired':
       return 'expired';
     case 'error':
@@ -226,7 +241,7 @@ function localizeAuthStatus(status?: string | null, hasSession = false): Connect
 }
 
 function localizeConnectorStatus(status?: string | null, sourceCount = 0, hasSession = false): ConnectorStatus {
-  switch (status) {
+  switch ((status || '').toLowerCase()) {
     case 'authenticated':
     case 'synced':
       return 'synced';
@@ -235,12 +250,15 @@ function localizeConnectorStatus(status?: string | null, sourceCount = 0, hasSes
     case 'authenticating':
     case 'pending':
       return hasSession ? 'authenticating' : 'draft';
+    case 'consumed':
+    case 'failed':
+      return 'error';
     case 'expired':
       return 'expired';
     case 'error':
       return 'error';
     default:
-  return sourceCount > 0 ? 'synced' : 'draft';
+      return sourceCount > 0 ? 'synced' : 'draft';
   }
 }
 
@@ -283,8 +301,10 @@ function normalizeConnectorSource(raw: any): ConnectorSource {
 function normalizeConnectorAuth(raw: any): ConnectorAuthSession {
   const auth = raw?.auth ?? raw?.authentication ?? raw;
   const config = raw?.config ?? {};
+  const session = auth?.auth_session ?? config?.auth_session ?? {};
+  const resolvedStatus = session?.auth_session_status ?? auth?.status ?? raw?.auth_status ?? raw?.status;
   return {
-    status: localizeAuthStatus(auth?.status ?? raw?.auth_status ?? raw?.status, hasBackendAuthSession(raw)),
+    status: localizeAuthStatus(resolvedStatus, hasBackendAuthSession(raw)),
     verificationCode:
       auth?.verificationCode
       ?? auth?.verification_code
@@ -304,8 +324,14 @@ function normalizeConnectorAuth(raw: any): ConnectorAuthSession {
       : typeof auth?.poll_attempts === 'number'
         ? auth.poll_attempts
         : undefined,
-    expiresAt: auth?.expiresAt ?? auth?.expires_at ?? raw?.expires_at,
-    message: auth?.message ?? raw?.message,
+    expiresAt: auth?.expiresAt ?? auth?.expires_at ?? session?.auth_session_expires_at ?? raw?.expires_at,
+    message:
+      auth?.message
+      ?? auth?.detail
+      ?? raw?.message
+      ?? raw?.detail
+      ?? config?.auth_error
+      ?? session?.auth_error,
   };
 }
 
@@ -319,12 +345,18 @@ function normalizeConnector(raw: any): ResourceConnector {
   const auth = normalizeConnectorAuth(raw);
   const sourceCount = sources.length;
   const hasSession = hasBackendAuthSession(raw);
+  const connectorStatus =
+    raw?.status
+    ?? raw?.sync_status
+    ?? raw?.auth_status
+    ?? raw?.config?.auth_session?.auth_session_status
+    ?? auth?.status;
 
   return {
     id: String(raw?.id ?? raw?.connector_id ?? raw?.resource_connector_id ?? createId('connector')),
     name: String(raw?.name ?? raw?.title ?? DEFAULT_CONNECTOR_NAME),
     platform: (raw?.platform === 'notion' ? 'notion' : 'notion'),
-    status: localizeConnectorStatus(raw?.status ?? raw?.sync_status ?? raw?.auth_status, sourceCount, hasSession),
+    status: localizeConnectorStatus(connectorStatus, sourceCount, hasSession),
     createdAt: raw?.created_at ?? raw?.createdAt ?? now,
     updatedAt: raw?.updated_at ?? raw?.updatedAt ?? now,
     lastSyncedAt: raw?.last_synced_at ?? raw?.lastSyncedAt ?? raw?.synced_at ?? raw?.syncedAt,

@@ -3,6 +3,8 @@
 # [Pos] auth node in backend/notion
 # [Sync] 2026-07-04: initial Notion CLI auth flow — `ntn login --no-browser`,
 #                    `ntn login poll`, and `ntn auth status` wrappers.
+# [Sync] 2026-07-05: classify `no pending login session` and `authorization session already consumed`
+#                    as terminal-pending signals for idempotent poll behavior.
 
 """Notion authentication helpers backed by the `ntn` CLI."""
 from __future__ import annotations
@@ -27,6 +29,10 @@ _DEFAULT_POLL_TIMEOUT_S = 15.0
 _DEFAULT_STATUS_TIMEOUT_S = 10.0
 _URL_RE = re.compile(r"https?://\S+")
 _VERIFICATION_CODE_RE = re.compile(r"\b[A-Z0-9]{3,5}(?:-[A-Z0-9]{2,5})+\b")
+_NO_PENDING_SESSION_TOKENS = (
+    "no pending login session found",
+    "authorization session already consumed",
+)
 
 
 @dataclass(frozen=True)
@@ -174,6 +180,12 @@ async def poll_login(config: Any = None) -> AuthStatusResult:
     combined = f"{stdout}\n{stderr}".lower()
     if code == 0:
         return AuthStatusResult(status="authenticated", notion_home=str(notion_home))
+    if any(token in combined for token in _NO_PENDING_SESSION_TOKENS):
+        return AuthStatusResult(
+            status="pending",
+            notion_home=str(notion_home),
+            detail=stdout.strip() or stderr.strip() or "No pending login session found.",
+        )
     if "slow_down" in combined or "authorization_pending" in combined or "pending" in combined:
         return AuthStatusResult(status="pending", notion_home=str(notion_home), detail=stdout.strip() or stderr.strip())
     if "expired" in combined or "timeout" in combined:
@@ -233,4 +245,3 @@ def normalize_login_result(result: Any) -> dict[str, Any]:
 
 
 import contextlib  # noqa: E402  # imported late for the timeout cleanup path
-

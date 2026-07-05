@@ -1,18 +1,96 @@
 # [Input] Notion connector auth, operation, store, and sync helpers.
 # [Output] Provide a compact facade for routes and Claude Agent workspace attach.
 # [Pos] factory node in backend/notion
-# [Sync] 2026-07-04: initial Notion connector facade for auth, discovery,
-#                    selection, snapshot sync, and workspace materialization.
+# [Sync] 2026-07-04: initial Notion connector facade for auth, discovery, selection,
+#                    snapshot sync, and workspace materialization.
+# [Sync] 2026-07-05: add backend auth-session lifecycle tracking to avoid poll-induced
+#                    state regression and maintain frontend-safe auth session state.
 
 """Connector facade for the Notion resource connector backend."""
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
+from uuid import uuid4
 
 from . import auth, operations, store, sync
 from .errors import NotionConnectorNotFoundError, NotionSnapshotNotReadyError
+
+
+_SESSION_TTL_SECONDS = 15 * 60
+_SESSION_POLL_IN_FLIGHT_SECONDS = 20
+_NO_PENDING_TOKENS = (
+    "no pending login session found",
+    "authorization session already consumed",
+)
+_SESSION_VALID_STATUSES = {"running", "pending", "authenticated", "consumed", "expired", "failed"}
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _utcnow_iso() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _parse_iso(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _normalize_session(raw: Any) -> dict[str, Any]:
+    now = _utcnow_iso()
+    session = {
+        "auth_session_id": None,
+        "auth_session_status": "pending",
+        "auth_session_started_at": now,
+        "auth_session_last_polled_at": None,
+        "auth_session_poll_in_flight": False,
+        "auth_session_expires_at": now,
+    }
+    session.update(_mapping(raw))
+    if session["auth_session_status"] not in _SESSION_VALID_STATUSES:
+        session["auth_session_status"] = "pending"
+    if not session["auth_session_id"]:
+        session["auth_session_id"] = None
+    if isinstance(session["auth_session_poll_in_flight"], str):
+        session["auth_session_poll_in_flight"] = session["auth_session_poll_in_flight"].strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        session["auth_session_poll_in_flight"] = bool(session["auth_session_poll_in_flight"])
+    return session
+
+
+def _is_no_pending_message(detail: str) -> bool:
+    low = (detail or "").lower()
+    return any(token in low for token in _NO_PENDING_TOKENS)
+
+
+def _build_auth_session() -> dict[str, Any]:
+    now = datetime.now(timezone.utc).replace(microsecond=0)
+    return {
+        "auth_session_id": uuid4().hex,
+        "auth_session_status": "running",
+        "auth_session_started_at": now.isoformat().replace("+00:00", "Z"),
+        "auth_session_last_polled_at": None,
+        "auth_session_poll_in_flight": False,
+        "auth_session_expires_at": (now + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat().replace("+00:00", "Z"),
+    }
+
+
+def _session_expired(session: Mapping[str, Any]) -> bool:
+    expires_at = _parse_iso(session.get("auth_session_expires_at"))
+    if expires_at is None:
+        return False
+    return datetime.now(timezone.utc) >= expires_at
 
 
 @dataclass
@@ -39,6 +117,47 @@ class NotionConnectorFacade:
         self.connector_id = str(active["id"])
         return active
 
+    def _session(self, connector: Mapping[str, Any]) -> dict[str, Any]:
+        return _normalize_session(_mapping(connector.get("config")).get("auth_session"))
+
+    def _session_in_flight(self, session: Mapping[str, Any]) -> bool:
+        if not session.get("auth_session_poll_in_flight"):
+            return False
+        last_polled = _parse_iso(session.get("auth_session_last_polled_at"))
+        if last_polled is None:
+            return False
+        return (datetime.now(timezone.utc) - last_polled).total_seconds() < _SESSION_POLL_IN_FLIGHT_SECONDS
+
+    def _persist_auth_state(
+        self,
+        connector_id: str,
+        *,
+        auth_status: str,
+        session: Mapping[str, Any],
+        detail: Optional[str] = None,
+        verification_url: Optional[str] = None,
+        verification_code: Optional[str] = None,
+        poll_interval_seconds: Optional[int] = None,
+    ) -> dict[str, Any]:
+        config_patch: dict[str, Any] = {
+            "auth_session": dict(session),
+        }
+        if verification_url is not None:
+            config_patch["verification_url"] = verification_url
+        if verification_code is not None:
+            config_patch["verification_code"] = verification_code
+        if poll_interval_seconds is not None:
+            config_patch["poll_interval_seconds"] = poll_interval_seconds
+        if detail is not None:
+            config_patch["auth_error"] = detail
+        return store.save_auth_state(
+            connector_id,
+            self.user_id,
+            auth_status=auth_status,
+            config_patch=config_patch,
+            error_detail=detail,
+        )
+
     def create_connector(
         self,
         name: str,
@@ -63,12 +182,21 @@ class NotionConnectorFacade:
 
     async def start_auth(self, connector_id: Optional[str] = None) -> dict[str, Any]:
         connector = self._resolve_connector(connector_id)
+        session = _build_auth_session()
         result = await auth.start_login(connector.get("config"))
-        updated = store.save_auth_state(
+        session.update(
+            {
+                "auth_session_status": "pending",
+                "auth_session_started_at": _utcnow_iso(),
+                "auth_session_last_polled_at": None,
+                "auth_session_poll_in_flight": False,
+            }
+        )
+        updated = self._persist_auth_state(
             str(connector["id"]),
-            self.user_id,
             auth_status="pending",
-            config_patch={"notion_home": result.notion_home},
+            session=session,
+            detail="",
             verification_url=result.verification_url,
             verification_code=result.verification_code,
             poll_interval_seconds=result.poll_interval_seconds,
@@ -84,38 +212,181 @@ class NotionConnectorFacade:
 
     async def poll_auth(self, connector_id: Optional[str] = None) -> dict[str, Any]:
         connector = self._resolve_connector(connector_id)
-        result = await auth.poll_login(connector.get("config"))
-        updated = store.save_auth_state(
+        session = self._session(connector)
+
+        if session.get("auth_session_status") == "authenticated":
+            return {
+                "connector": connector,
+                "auth_status": "authenticated",
+                "status": "authenticated",
+                "detail": connector.get("config", {}).get("auth_error") or "Session already authenticated.",
+                "notionHome": _mapping(connector.get("config")).get("notion_home") or "",
+            }
+
+        if _session_expired(session) and str(connector.get("auth_status") or "") != "authenticated":
+            session["auth_session_status"] = "expired"
+            updated = self._persist_auth_state(
+                str(connector["id"]),
+                auth_status="expired",
+                session=session,
+                detail="Auth session expired.",
+            )
+            return {
+                "connector": updated,
+                "auth_status": "expired",
+                "status": "expired",
+                "detail": "Auth session expired.",
+                "notionHome": _mapping(connector.get("config")).get("notion_home") or "",
+            }
+
+        if self._session_in_flight(session):
+            return {
+                "connector": connector,
+                "auth_status": session.get("auth_session_status") or "pending",
+                "status": session.get("auth_session_status") or "pending",
+                "detail": "Authorization poll already in progress.",
+                "notionHome": _mapping(connector.get("config")).get("notion_home") or "",
+            }
+
+        session = dict(session)
+        session["auth_session_poll_in_flight"] = True
+        session["auth_session_last_polled_at"] = _utcnow_iso()
+        saved = self._persist_auth_state(
             str(connector["id"]),
-            self.user_id,
-            auth_status=result.status,
-            config_patch={"notion_home": result.notion_home},
-            error_detail=result.detail or None,
+            auth_status=str(connector.get("auth_status") or "pending"),
+            session=session,
+            detail=_mapping(connector.get("config")).get("auth_error") or "",
+        )
+
+        try:
+            poll_result = await auth.poll_login(connector.get("config"))
+        except Exception as exc:
+            session["auth_session_poll_in_flight"] = False
+            self._persist_auth_state(
+                str(connector["id"]),
+                auth_status=str(saved.get("auth_status") or "pending"),
+                session=session,
+                detail=str(exc),
+            )
+            raise
+
+        session["auth_session_last_polled_at"] = _utcnow_iso()
+        session["auth_session_poll_in_flight"] = False
+
+        detail = poll_result.detail or ""
+        auth_status = str(connector.get("auth_status") or "pending").strip().lower() or "pending"
+        if poll_result.status == "authenticated":
+            auth_status = "authenticated"
+            session["auth_session_status"] = "authenticated"
+            detail = detail or "authenticated"
+            saved = self._persist_auth_state(
+                str(connector["id"]),
+                auth_status=auth_status,
+                session=session,
+                detail=detail,
+            )
+            return {
+                "connector": saved,
+                "auth_status": auth_status,
+                "status": "authenticated",
+                "detail": detail,
+                "notionHome": poll_result.notion_home,
+            }
+
+        if poll_result.status == "pending" and _is_no_pending_message(detail):
+            # 已消费/无可用会话时不回退到未认证
+            if str(session.get("auth_session_status")) == "authenticated":
+                auth_status = "authenticated"
+            elif str(saved.get("auth_status") or "") == "authenticated":
+                auth_status = "authenticated"
+            else:
+                session["auth_session_status"] = "consumed"
+                auth_status = "error"
+            saved = self._persist_auth_state(
+                str(connector["id"]),
+                auth_status=auth_status,
+                session=session,
+                detail=detail or "No pending login session found.",
+            )
+            return {
+                "connector": saved,
+                "auth_status": auth_status,
+                "status": auth_status if auth_status == "authenticated" else "error",
+                "detail": detail or "No pending login session found.",
+                "notionHome": poll_result.notion_home,
+            }
+
+        if poll_result.status == "pending":
+            session["auth_session_status"] = session.get("auth_session_status") or "pending"
+            if auth_status != "authenticated":
+                auth_status = "pending"
+            saved = self._persist_auth_state(
+                str(connector["id"]),
+                auth_status=auth_status,
+                session=session,
+                detail=detail or "No pending authorization yet.",
+            )
+            return {
+                "connector": saved,
+                "auth_status": auth_status,
+                "status": poll_result.status,
+                "detail": detail or "No pending authorization yet.",
+                "notionHome": poll_result.notion_home,
+            }
+
+        if poll_result.status == "expired":
+            session["auth_session_status"] = "expired"
+            auth_status = "expired"
+            saved = self._persist_auth_state(
+                str(connector["id"]),
+                auth_status=auth_status,
+                session=session,
+                detail=detail or "Auth session expired.",
+            )
+            return {
+                "connector": saved,
+                "auth_status": auth_status,
+                "status": "expired",
+                "detail": detail or "Auth session expired.",
+                "notionHome": poll_result.notion_home,
+            }
+
+        # fail-open fallback
+        session["auth_session_status"] = "failed"
+        auth_status = "error"
+        saved = self._persist_auth_state(
+            str(connector["id"]),
+            auth_status=auth_status,
+            session=session,
+            detail=detail or "Authentication unknown error.",
         )
         return {
-            "connector": updated,
-            "auth_status": result.status,
-            "status": result.status,
-            "detail": result.detail,
-            "notionHome": result.notion_home,
+            "connector": saved,
+            "auth_status": auth_status,
+            "status": "error",
+            "detail": detail or "Authentication unknown error.",
+            "notionHome": poll_result.notion_home,
         }
 
     async def verify_auth(self, connector_id: Optional[str] = None) -> dict[str, Any]:
         connector = self._resolve_connector(connector_id)
-        result = await auth.verify_status(connector.get("config"))
-        updated = store.save_auth_state(
+        poll_result = await auth.verify_status(connector.get("config"))
+        session = self._session(connector)
+        if poll_result.status == "authenticated":
+            session["auth_session_status"] = "authenticated"
+        updated = self._persist_auth_state(
             str(connector["id"]),
-            self.user_id,
-            auth_status=result.status,
-            config_patch={"notion_home": result.notion_home},
-            error_detail=result.detail or None,
+            auth_status=poll_result.status,
+            session=session,
+            detail=poll_result.detail or "",
+            verification_url=poll_result.notion_home,
         )
         return {
             "connector": updated,
-            "auth_status": result.status,
-            "status": result.status,
-            "detail": result.detail,
-            "notionHome": result.notion_home,
+            "auth_status": poll_result.status,
+            "status": poll_result.status,
+            "detail": poll_result.detail,
+            "notionHome": poll_result.notion_home,
         }
 
     async def list_databases(self, connector_id: Optional[str] = None, query: Optional[str] = None) -> list[dict[str, Any]]:
@@ -223,4 +494,3 @@ def build_notion_facade(user_id: int, connector_id: Optional[str] = None) -> Not
     """Convenience constructor for router/service callers."""
 
     return NotionConnectorFacade(user_id=user_id, connector_id=connector_id)
-

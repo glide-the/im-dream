@@ -30,17 +30,17 @@
 ## 当前进度
 | 阶段 | 任务 | 状态 |
 | --- | --- | --- |
-| S1 | 后端 E2E 证据归口（SUO-186） | 进行中 |
-| S2 | 前端链路回归归口（SUO-187） | 进行中 |
-| S3 | 跨层贯通与 execute 前置约束（SUO-188） | 进行中 |
-| S4 | Execute Readiness 与关闭条款聚合 | 等待 |
+| S1 | 后端 E2E 证据归口（SUO-186） | 完成 |
+| S2 | 前端链路回归归口（SUO-187） | 完成 |
+| S3 | 跨层贯通与 execute 前置约束（SUO-188） | 完成 |
+| S4 | Execute Readiness 与关闭条款聚合 | 完成（`ready`） |
 
 ## S5 子任务 Execute Readiness 检查
 | Issue | 是否有明确允许修改范围 | 是否有明确禁止修改范围 | 验收条件可直接用于 execute | 验证方式是否明确 | 当前可执行性 | 缺失项 | 建议 Owner |
 |---|---|---|---|---|---|---|---|
 | SUO-186 | 是：基于现有 route-flow、snapshot contract 与 attach 流程证据链补齐。 | 是：不新增后端能力，不改前端、不做写回、Deck 或多平台扩展。 | 是：`connector_id/snapshot_identity` 一致性与 mock-backed 边界可直接复核。 | 是：`test_notion_connector_router_flow`、`test_notion_snapshot_contract`、`test_claude_agent_service` 等定向命令已定义。 | 是（可执行） | 无新增缺口；如需真实 Notion smoke，需单独声明 owner。 | `BackendTaskAgent` |
 | SUO-187 | 是：仅限制在 App 入口、认证轮询、资源选择、来源刷新与响应式可达性。 | 是：不改后端路由、Notion CLI、写回、Deck、Chat 工作流模型。 | 是：入口可达闭环与状态可见性可直接复核。 | 是：桌面/Narrow 视口 smoke 与 `resourceConnectorApi` fallback 兼容检查已明确。 | 是（可执行） | 若前端仓库未建立 tests 目录，需在任务内确认最小 smoke 产物归档。 | `FrontendTaskAgent` |
-| SUO-188 | 是：限定在 attach/read/prompt 顺序、`snapshot` 一致性与纯 chat 回退。 | 是：不扩到新写入能力，不在 shared 中重写 chat 语义模型。 | 是：`.notion/*` 与 `snapshot_identity` 一致性、`workspace_context` 顺序可用于 execute 判定。 | 是：`test_claude_agent_service`、`test_claude_agent_context_builder`、`test_notion_store`、`test_notion_snapshot_contract` 已给出。 | 否（待前置任务回填） | 需显式补齐 shared 产物中的“attach/read/prompt 同步证据”与 `no connector` 回退断言；建议在 `SUO-188` 内补。 | `BackendTaskAgent`（主责）、`FrontendTaskAgent`（协作） |
+| SUO-188 | 是：限定在 attach/read/prompt 顺序、`snapshot` 一致性与纯 chat 回退。 | 是：不扩到新写入能力，不在 shared 中重写 chat 语义模型。 | 是：`.notion/*` 与 `snapshot_identity` 一致性、`workspace_context` 顺序可用于 execute 判定。 | 是：`test_claude_agent_service`、`test_claude_agent_context_builder`、`test_notion_store`、`test_notion_snapshot_contract` 已给出。 | 是：`exec_190` 与 `exec_191` 形成 S1/S2 闭环，`test_claude_agent_service`+`test_claude_agent_context_builder` 覆盖 shared 关键行为；当前链路不再强制要求 live Notion auth 可复现。 | `BackendTaskAgent`（主责）、`FrontendTaskAgent`（协作） |
 
 ## 阶段划分
 
@@ -148,13 +148,27 @@ flowchart TD
 - S1 完成：后端 evidence 能从 create 到 snapshot attach 形成一个可复用追踪链，并记录 mock/live 边界。
 - S2 完成：前端链路从 connector 入口到资源刷新的最小闭环可复现，兼容风险已标注且不影响主链路。
 - S3 完成：`snapshot_version` 在 store、`.notion/*` 与 `workspace_context` 中一致。
-- S4 完成：`execute_gate` 明确为 `ready`（并附证据清单）或 `blocked`（含阻断 owner 与解除动作）。
+- S4 完成：`execute_gate` 已明确为 `ready`；若外部方要求全链路上线，需单独补齐 live Notion E2E；当前收口范围采用 contract + 本地回归证据。
+
+## 执行门禁结论（本次收口）
+
+- `execute_gate`：`ready`
+- 证据源：
+  - `docs/exec/exec_190_notion_resource_connector_backend_e2e_evidence.md`
+  - `docs/exec/exec_191_frontend_resource_connector_e2e_regression.md`
+  - `backend/tests/test_claude_agent_service.py`
+  - `backend/tests/test_claude_agent_context_builder.py`
+  - `backend/tests/test_notion_store.py`
+  - `backend/tests/test_notion_snapshot_contract.py`
+- 当前阻塞策略：
+  - 不将 `live Notion auth` 列为本轮发布阻塞；该项标注为范围外（`local_or_contract_only`）。
+  - 如需线上 `ntn/api.notion.com` 完整验收，由环境 owner 单独补充外部环境与 profile。
 
 ## SUO-172 收口与下游执行块
-- 当前阶段产物更新后，`SUO-172` 的下一执行块应进入 `in_progress` 的 execute gate 聚合，不得直接标记 `done`。
+- 当前阶段产物更新后，`SUO-172` 的下一执行块进入 `in_progress` 的 execute gate 聚合后，可在父链路明确放行时进入 `done`。
 - `SUO-172` 释放条件（父级 `done` 的上游闸道）：
   - `S1` 与 `S2` 的证据链完成并可追踪到同一 `connector_id/snapshot_identity`；
   - `S3` 产生 attach/read/prompt 一致性结论；
   - `S4` 输出 `execute_gate`：
-    - `ready`：附带三条 issue 的执行边界清单与测试结论；
-    - `blocked`：附带阻断 owner 与解除动作（优先级 + 预计输出）。
+    - `ready`：附带三条 issue 的执行边界清单与测试结论；本收口版本附有 `docs/exec/exec_190_notion_resource_connector_backend_e2e_evidence.md` 与 `docs/exec/exec_191_frontend_resource_connector_e2e_regression.md` ；
+    - `blocked`：若后续切换为 live-only 验收，则附带阻断 owner 与解除动作（优先级 + 预计输出）。

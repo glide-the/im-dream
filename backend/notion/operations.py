@@ -3,6 +3,8 @@
 # [Pos] operations node in backend/notion
 # [Sync] 2026-07-04: initial Notion CLI read-only operation layer for discovery,
 #                    page retrieval, and database query support.
+# [Sync] 2026-07-05: normalize database search filter value to `data_source` to match
+#                    Notion API schema while preserving high-level `database` input.
 
 """Notion read-only operations via the `ntn` CLI."""
 from __future__ import annotations
@@ -25,6 +27,11 @@ class SearchFilter:
     query: Optional[str] = None
     page_size: int = 100
     start_cursor: Optional[str] = None
+
+
+_SEARCH_FILTER_OBJECT_MAP = {
+    "database": "data_source",
+}
 
 
 @dataclass(frozen=True)
@@ -165,9 +172,11 @@ class NotionOperationClient:
             "page_size": search_filter.page_size,
         }
         if search_filter.object_type:
+            object_type = search_filter.object_type.strip().lower()
+            object_value = _SEARCH_FILTER_OBJECT_MAP.get(object_type, object_type)
             payload["filter"] = {
                 "property": "object",
-                "value": search_filter.object_type,
+                "value": object_value,
             }
         if search_filter.query:
             payload["query"] = search_filter.query
@@ -288,4 +297,3 @@ async def discover_pages(config: Any = None, query: Optional[str] = None, page_s
     """Discover accessible standalone pages with normalized records."""
 
     return await NotionOperationClient(config).discover_pages(query=query, page_size=page_size)
-

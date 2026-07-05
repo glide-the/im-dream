@@ -61,6 +61,18 @@ class TestNotionAuthHelpers(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "pending")
         self.assertEqual(result.notion_home, "/tmp/notion-home")
 
+    async def test_poll_login_classifies_no_pending_session_output(self):
+        async def fake_run(*args, **kwargs):
+            self.assertEqual(args, ("login", "poll"))
+            return 1, "", "No pending login session found."
+
+        with unittest.mock.patch.object(notion_auth, "_run_ntn_command", side_effect=fake_run):
+            result = await notion_auth.poll_login({"notion_home": "/tmp/notion-home"})
+
+        self.assertEqual(result.status, "pending")
+        self.assertEqual(result.notion_home, "/tmp/notion-home")
+        self.assertIn("No pending login session found", result.detail)
+
     async def test_verify_status_reports_authenticated(self):
         async def fake_run(*args, **kwargs):
             self.assertEqual(args, ("auth", "status"))
@@ -75,4 +87,3 @@ class TestNotionAuthHelpers(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

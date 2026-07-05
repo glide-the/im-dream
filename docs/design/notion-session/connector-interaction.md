@@ -1,7 +1,7 @@
 # Notion Device 资源连接器 — 交互方案设计
 
 Status: Draft  
-Updated: 2026-06-28
+Updated: 2026-07-05
 Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的完整交互流程
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -13,6 +13,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-06-21: 初始设计 — 资源连接器交互方案
 > [Sync] 2026-06-22: 修正核心概念声明 — 依据 Notion API Reference 区分 Database/Row Page/Standalone Page/Block
 > [Sync] 2026-06-28: 修正 Agent 初始化一致性 — `.notion/` 映射由资源连接器数据层的 canonical snapshot 提供，不再以 Agent 本地 NotionCache 作为权威状态。
+> [Sync] 2026-07-05: 增补认证会话保持语义，避免 `ntn login poll` 单次会话消费后前端重复轮询导致状态回退。
 
 ---
 
@@ -135,6 +136,24 @@ Resource Connector (资源连接器)
 | 4. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
 | 5. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
 
+### 3.3 认证会话保持（避免 `poll` 回退）
+
+`ntn login poll` 在授权完成后可能返回 `No pending login session found` 或 `authorization session already consumed`。
+这不是认证失败，而是会话消费后的正常状态。设计要求后端对每次认证启动持久化会话并做幂等判断。
+
+策略：
+
+- `auth/login` 先创建新的 `auth_session`：
+  - `auth_session_id`
+  - `auth_session_status`（`running`/`pending`）
+  - `auth_session_started_at`
+  - `auth_session_last_polled_at`
+  - `auth_session_poll_in_flight`
+  - `auth_session_expires_at`
+- `auth/poll` 读取会话状态；当状态已 `authenticated` 时，直接返回 `authenticated`，不再回退。
+- `auth/poll` 遇到 `No pending login session found` 时将会话标记 `consumed`，并保留认证成果。
+- 前端不应以“重复 pending”作为唯一阻塞根因；应改以 `connector.auth_status` + `config.auth_session` 进行 UI 判定。
+
 ---
 
 ## 4. 资源连接器创建流程
@@ -178,7 +197,7 @@ Resource Connector (资源连接器)
 |------|------|------|
 | `/api/connectors` | POST | 创建资源连接器 |
 | `/api/connectors/:id/auth/login` | POST | 启动 ntn login 认证 |
-| `/api/connectors/:id/auth/poll` | POST | 轮询认证完成状态 |
+| `/api/connectors/:id/auth/poll` | POST | 轮询认证完成状态（幂等：已认证直接返回 authenticated） |
 | `/api/connectors/:id/databases` | GET | 获取可访问的 database 列表 |
 | `/api/connectors/:id/pages` | GET | 获取可访问的 standalone page 列表 |
 | `/api/connectors/:id/resources/select` | POST | 用户选择要同步的 database 和 standalone page |
@@ -355,7 +374,7 @@ Notion Device Connector:
 
 | 业务需求 | ntn api 命令 | 调用时机 |
 |---------|-------------|---------|
-| 获取 Database 列表 | `ntn api v1/search filter:='{"property":"object","value":"database"}'` | 连接器创建 Step 3（Database 选择） |
+| 获取 Database 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器创建 Step 3（Database 选择） |
 | 获取 Standalone Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 3（Page 选择） |
 | 获取 Database 下的 Row Page | `ntn api v1/databases/<db_id>/query` | 数据同步阶段 |
 | 获取 Data Source 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器初始化 |
@@ -389,6 +408,7 @@ class NotionAPIBridge:
 | 错误类型 | 处理方式 |
 |---------|---------|
 | Token 过期 | 标记 connector.auth_status = "expired"，提示用户重新认证 |
+| Poll 已消费 / 无待处理会话 | 标记 `auth_session_status="consumed"`，不回退 `connector.auth_status` |
 | ntn CLI 不可用 | 返回友好错误，建议用户安装 ntn |
 | API 限流 | 指数退避重试，最多 3 次 |
 | 网络超时 | 保留上一版 canonical snapshot，标记 `stale`，提示用户稍后刷新 |

@@ -39,7 +39,7 @@ Scope: 后端任务规划 - Notion canonical snapshot attach / `.notion/` 读取
 | Title | `贯通 Notion 快照 attach、.notion/ 读取与聊天上下文 E2E` |
 | Type | `backend` |
 | Priority | `medium` |
-| Status | `in_progress` |
+| Status | `done` |
 | Work mode | `standard` |
 | Pending comments | `0` |
 | Labels | `backend, notion, snapshot, workspace, chat, e2e, regression` (按标题与设计范围推断) |
