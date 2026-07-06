@@ -1,7 +1,7 @@
 # 资源连接器 — 前端 PRD
 
 Status: Draft  
-Updated: 2026-07-04  
+Updated: 2026-07-06  
 Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 > [Input] `docs/design/notion-session/connector-interaction.md`,
@@ -233,19 +233,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
     └─ Agent 响应（可读取 .notion/ 下的资源数据）
 ```
 
-### 4.4 上传文件
-
-```
-用户点击 "添加来源" → "上传文件"
-    │
-    ├─ 文件选择器（支持 PDF、TXT、MD、DOCX）
-    ├─ POST /api/connectors/:id/files/upload
-    ├─ 创建 connector_resources (type="file")
-    │
-    └─ 文件存储到工作空间文件系统
-```
-
-### 4.5 关联 Deck
+### 4.4 关联 Deck
 
 ```
 用户点击 "添加来源" → "关联 Deck"
@@ -265,17 +253,26 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 | 状态 | 说明 | 前端展示 |
 |------|------|---------|
-| `pending` | 已创建，未认证 | 显示"未连接"标签 |
-| `authenticated` | 认证成功，资源已同步 | 正常展示来源 |
+| `draft` | 已创建，未开始配置 | 空状态 CTA（“新建连接器/连接 Notion”） |
+| `pending` | 已创建或已发起认证，未完成会话认证 | 显示"待认证"标签 + 验证码 |
+| `authenticating` | 认证进行中（浏览器未确认或轮询进行） | 显示 verification code + `打开浏览器确认` |
+| `authenticated` | 认证成功，尚未完成 sync | 显示“已认证”并进入资源选择 |
+| `synced` | 认证成功并完成资源同步 | 正常展示来源 |
 | `expired` | Token 过期 | 显示"需重新认证"提示 |
+| `stale` | 当前快照不新鲜（有更新可用） | 显示快照版本与 `立即刷新` |
+| `error` | 认证 / 同步发生报错 | 显示错误 banner + 重试按钮 |
+| `connector_unavailable` | 连接器后端服务不可用 | 显示全局降级提示 + 重试入口 |
 
 ### 5.2 资源同步状态
 
 | 状态 | 说明 | 前端展示 |
 |------|------|---------|
+| `pending` | 已选资源，等待 Sync 开始 | 资源卡片显示 `待同步` |
 | `syncing` | 正在同步中 | 资源卡片显示 loading |
 | `synced` | 同步完成 | 显示"已同步" + 页面数 |
+| `stale` | 资源页已过期 | 显示 `请刷新` |
 | `error` | 同步失败 | 显示错误提示 + 重试按钮 |
+| `missing` | 当前快照未包含该条资源（未 materialized） | 显示 `暂不可用` + `重新刷新` |
 
 ### 5.3 来源类型图标映射
 

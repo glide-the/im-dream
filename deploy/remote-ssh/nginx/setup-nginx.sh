@@ -19,6 +19,14 @@ NGINX_SITE_NAME="ink-and-memory"
 NGINX_AVAILABLE="/etc/nginx/sites-available/${NGINX_SITE_NAME}"
 NGINX_ENABLED="/etc/nginx/sites-enabled/${NGINX_SITE_NAME}"
 
+# Apex domain (suoxya.com) site — serves the same content as the frontend
+# subdomain by proxying to the real service behind it. Depends on the map and
+# upstream blocks defined in ink-and-memory.conf.
+APEX_CONF_SRC="${SCRIPT_DIR}/suoxya-root.conf"
+APEX_SITE_NAME="suoxya-root"
+APEX_AVAILABLE="/etc/nginx/sites-available/${APEX_SITE_NAME}"
+APEX_ENABLED="/etc/nginx/sites-enabled/${APEX_SITE_NAME}"
+
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -103,6 +111,14 @@ configure_nginx() {
     cp "${NGINX_CONF_SRC}" "${NGINX_AVAILABLE}"
     log "Copied nginx config to ${NGINX_AVAILABLE}"
 
+    # Copy the apex domain config (if present)
+    if [[ -f "${APEX_CONF_SRC}" ]]; then
+        cp "${APEX_CONF_SRC}" "${APEX_AVAILABLE}"
+        log "Copied apex nginx config to ${APEX_AVAILABLE}"
+    else
+        warn "Apex config not found at ${APEX_CONF_SRC}; skipping suoxya.com site"
+    fi
+
     # Remove default site
     if [ -f /etc/nginx/sites-enabled/default ]; then
         rm -f /etc/nginx/sites-enabled/default
@@ -116,6 +132,12 @@ configure_nginx() {
     # Enable our site
     ln -sf "${NGINX_AVAILABLE}" "${NGINX_ENABLED}"
     log "Enabled site: ${NGINX_SITE_NAME}"
+
+    # Enable the apex domain site (if it was copied)
+    if [[ -f "${APEX_AVAILABLE}" ]]; then
+        ln -sf "${APEX_AVAILABLE}" "${APEX_ENABLED}"
+        log "Enabled site: ${APEX_SITE_NAME}"
+    fi
 }
 
 # ── Open firewall ───────────────────────────────────────────────────────
@@ -201,9 +223,10 @@ print_ssl_instructions() {
     fi
     echo ""
     echo "  2. Obtain certificates (ensure DNS points to this server first):"
-    echo "     certbot --nginx -d ink-backend.suoxya.com -d ink-frontend.suoxya.com"
+    echo "     certbot --nginx -d suoxya.com -d ink-backend.suoxya.com -d ink-frontend.suoxya.com"
     echo ""
     echo "  3. Or obtain separately:"
+    echo "     certbot --nginx -d suoxya.com"
     echo "     certbot --nginx -d ink-backend.suoxya.com"
     echo "     certbot --nginx -d ink-frontend.suoxya.com"
     echo ""
@@ -223,7 +246,7 @@ enable_ssl() {
 
     # Check if certs exist
     local certs_ok=1
-    for domain in ink-backend.suoxya.com ink-frontend.suoxya.com; do
+    for domain in suoxya.com ink-backend.suoxya.com ink-frontend.suoxya.com; do
         if [ ! -f "/etc/letsencrypt/live/${domain}/fullchain.pem" ]; then
             warn "Certificate not found for ${domain}"
             certs_ok=0
@@ -312,6 +335,7 @@ main() {
 
     echo ""
     log "Nginx setup complete!"
+    log "Apex:     http://suoxya.com               → Docker frontend container"
     log "Frontend: http://ink-frontend.suoxya.com → Docker frontend container"
     log "Backend:  http://ink-backend.suoxya.com  → Docker backend container"
 }

@@ -1,7 +1,7 @@
 # Notion Device 资源连接器 — 交互方案设计
 
 Status: Draft  
-Updated: 2026-07-05
+Updated: 2026-07-06
 Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的完整交互流程
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -556,6 +556,59 @@ Notion connector 不复用 `switch_editor`。`switch_editor` 只切换 `.editor/
 | 多用户共享同一连接器 | 连接器绑定单用户 |
 
 ---
+
+## 11. 交互状态机与前后端协作边界（SUO-192 对齐）
+
+### 11.1 用户态状态映射（UI Contract）
+
+| UI 状态 | 触发条件（后端） | 关键数据 |
+|---|---|---|
+| `draft` | 已创建连接器，尚未发起认证 | `status="draft"`、无 `auth_session` |
+| `authenticating` | 发起 `auth/login` 或存在未完成 auth 会话 | `auth_session_status="running"/"pending"`、`verification_code` |
+| `authenticated` | `auth/poll` 返回已认证 | `auth_status="authenticated"`、`auth_session_status="consumed"` 或 `authenticated` |
+| `syncing` | 资源选择后触发同步 | `status="syncing"`、`current_snapshot_version` 不变 |
+| `synced` | 同步完成，快照写入成功 | 返回 `snapshot_version/source_revision/sync_cursor/fetched_at` |
+| `stale` | 后端返回 `is_stale=true` 或 source_revision 落后 | `snapshot_version` 与当前不一致 / 已过期 |
+| `error` | `error` / `failed` 状态或 poll 异常 | `message`、`error_code`、下一步建议动作 |
+
+### 11.2 认证会话保活规则（避免“重复 pending”）
+
+`POST /auth/poll` 的语义应满足：
+
+- 当会话已消费，返回 `status="consumed"` 或 `error code="already_consumed"` 时，前端应**立即收敛到 authenticated** 展示（若 connector 已有 token）
+- 当会话过期返回 `status="expired"` 时，前端应只显示 `Re-auth`，并保留最近快照但明确“仅历史只读”
+- 当会话失败（`failed`）时，前端必须止损到 `error` 并给出 `Retry auth`。
+
+### 11.3 来源列表与快照一致性规则
+
+| 数据读取目标 | 成功态 | 失败态 |
+|---|---|---|
+| `.notion/snapshot.json` | 返回当前 snapshot identity | 失败：在前端提示 `snapshot missing` 并建议 `Refresh snapshot` |
+| `.notion/index.json` | 返回最近页面清单 | 失败：展示空态骨架 + `刷新来源` |
+| `.notion/databases/<id>.json` | 返回 db 与 page 列表 | 缺页：`reason=not_materialized_in_snapshot`（不触发远端拉取） |
+| `.notion/pages/<page_id>.json` | 返回 page JSON | 缺页：`reason=not_materialized_in_snapshot` + 同步入口 |
+
+### 11.4 状态流转最小事件图
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft
+    draft --> authenticating: create connector + auth/login
+    authenticating --> error: auth/error
+    authenticating --> authenticated: poll(authenticated or consumed)
+    authenticating --> expired: poll(expired)
+    authenticated --> syncing: select resources + sync
+    syncing --> synced: sync success + snapshot ready
+    synced --> stale: snapshot identity changed
+    stale --> syncing: manual refresh
+    syncing --> error: sync failed
+    error --> authenticating: retry auth
+    error --> syncing: retry sync
+    authenticated --> [*]: delete connector
+    error --> [*]: delete connector
+```
+
+--- 
 
 ## 附录 A：设计决策记录
 
