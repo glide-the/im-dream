@@ -1,7 +1,7 @@
 # Notion Device 资源连接器设计方案
 
 Status: Draft
-Updated: 2026-06-28
+Updated: 2026-07-07
 Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空间
 
 > [Input] `docs/design/claude-agent/edit-point/workspace-adapter.md`,
@@ -13,6 +13,7 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 >      `backend/libs/claude_agent_kit/types.py`,
 >      `backend/claude_agent/context_builder.py`
 > [Sync] 2026-06-28: 收敛 Notion 远程数据源的交互快照生命周期 — Agent 初始化读取资源连接器数据层物化的 canonical snapshot，不以 Agent 本地 notion_cache 作为权威状态；补齐 MVP 前端交互设计稿。
+> [Sync] 2026-07-07: Chat 入口改为主落点，历史对话与连接器工作台下沉到输入框下方，输入框下方增加快捷功能 secondary action strip，并保留可恢复的 `shell_error` 态；连接器不再以独立主页面承载。
 
 ---
 
@@ -553,25 +554,26 @@ sequenceDiagram
 ### 11.1 页面结构
 
 ```
-Settings / Workspace resources
-  ├─ Resource connector list
-  │    └─ Notion connector row
-  │         Status: Not connected / Connected / Syncing / Needs auth / Conflict
-  │         Snapshot: version, fetchedAt, sourceRevision
-  │         Actions: Connect, Sync now, Refresh snapshot, Disconnect
-  ├─ Connector setup drawer
-  │    Step 1 Platform: Notion
-  │    Step 2 Auth: verification URL + code
-  │    Step 3 Resources: databases + standalone pages
-  │    Step 4 Snapshot ready: page count + version
-  └─ Snapshot detail panel
-       connector.json / index.json summary / selected resources
-
 Chat workspace
+  ├─ Centered AIInputDock
+  ├─ QuickActionStrip: 生成图片 / 撰写或编辑 / 查找资料
+  ├─ Landing tabs: 历史对话 / 连接器
+  │    ├─ 历史对话 panel
+  │    │    ├─ thread list
+  │    │    └─ search dialog trigger
+  │    └─ 连接器 panel
+  │         ├─ embedded ResourceConnectorPage
+  │         ├─ create / auth / select / sync
+  │         └─ source list + delete
   ├─ Context banner: "Using Notion snapshot <version>"
-  ├─ Agent message stream
   └─ Proposal card: diff preview + base snapshot identity
 ```
+
+> 注：`历史对话` / `连接器` 是 Chat landing 的视图状态，不是连接器生命周期状态。连接器生命周期仍由下方的 connector state model 管理。
+>
+> `QuickActionStrip` 是输入框下方的二级动作带，对应参考图中红框标注的区域。它属于 Chat shell 的辅助入口，不承载 connector 生命周期状态；当 shell 层短暂不可交互时，应优先保留该区域的可恢复提示，而不是把它折叠进 connector 状态里。
+>
+> 视觉上它必须保持 pill / capsule 形态，只渲染一次，顺序固定为 `AIInputDock` → `QuickActionStrip` → `历史对话 / 连接器` tabs → 对应 panel，不能把快捷动作再渲染到输入框上方。
 
 ### 11.2 状态模型
 
@@ -585,6 +587,7 @@ Chat workspace
 | `conflict` | 当前版本与 proposal 基线不一致 | `Review latest` / `Regenerate proposal` |
 | `permission_denied` | 说明缺失 Notion scope 或 token 失效 | `Reconnect` |
 | `connector_unavailable` | 数据层暂不可用 | `Retry` |
+| `shell_error` | `ChatViewContent`、QuickActionStrip 或 landing tabs 渲染失败，导致 Chat shell 失去交互能力 | 显示可恢复错误条并保留 tab / connector 入口，避免把入口直接折叠成空白页 | `Reload shell` / `Retry` |
 
 ### 11.3 Agent 写入确认卡
 

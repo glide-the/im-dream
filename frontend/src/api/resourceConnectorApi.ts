@@ -9,6 +9,10 @@
 //                    to empty lists.
 // [Sync] 2026-07-05: normalize backend auth_session terminal states (`consumed`/`failed`) so UI can stop
 //                    polling and surface actionable auth errors instead of indefinitely waiting.
+// [Sync] 2026-07-07: keep normalized auth/session status ahead of stale top-level connector status so consumed
+//                    sessions do not regress an already authenticated connector back to pending/error in the UI.
+// [Sync] 2026-07-07: expose the connector normalizer for UI-only fallback workbench state so mock/fallback data
+//                    follows the same client shape as backend and localStorage responses.
 /**
  * Resource connector API helpers.
  *
@@ -142,6 +146,14 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
 function createId(prefix: string): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return `${prefix}_${crypto.randomUUID()}`;
@@ -186,38 +198,39 @@ function mutateLocalConnector(
   return nextConnector;
 }
 
-function hasBackendAuthSession(raw: any): boolean {
-  const auth = raw?.auth ?? raw?.authentication ?? {};
-  const config = raw?.config ?? {};
-  const authSession = auth?.auth_session ?? {};
-  const configSession = config?.auth_session ?? {};
+function hasBackendAuthSession(raw: unknown): boolean {
+  const record = asRecord(raw);
+  const auth = asRecord(record.auth ?? record.authentication);
+  const config = asRecord(record.config);
+  const authSession = asRecord(auth.auth_session);
+  const configSession = asRecord(config.auth_session);
   return Boolean(
-    auth?.verificationUrl
-      || auth?.verification_url
-      || auth?.verificationCode
-      || auth?.verification_code
-      || auth?.pollIntervalSeconds
-      || auth?.poll_interval_seconds
-      || raw?.verificationUrl
-      || raw?.verification_url
-      || raw?.verificationCode
-      || raw?.verification_code
-      || raw?.pollIntervalSeconds
-      || raw?.poll_interval_seconds
-      || authSession?.auth_session_id
-      || authSession?.auth_session_status
-      || authSession?.auth_session_started_at
-      || authSession?.auth_session_last_polled_at
-      || configSession?.auth_session_id
-      || configSession?.auth_session_status
-      || configSession?.auth_session_started_at
-      || configSession?.auth_session_last_polled_at
-      || config?.verificationUrl
-      || config?.verification_url
-      || config?.verificationCode
-      || config?.verification_code
-      || config?.pollIntervalSeconds
-      || config?.poll_interval_seconds,
+    auth.verificationUrl
+      || auth.verification_url
+      || auth.verificationCode
+      || auth.verification_code
+      || auth.pollIntervalSeconds
+      || auth.poll_interval_seconds
+      || record.verificationUrl
+      || record.verification_url
+      || record.verificationCode
+      || record.verification_code
+      || record.pollIntervalSeconds
+      || record.poll_interval_seconds
+      || authSession.auth_session_id
+      || authSession.auth_session_status
+      || authSession.auth_session_started_at
+      || authSession.auth_session_last_polled_at
+      || configSession.auth_session_id
+      || configSession.auth_session_status
+      || configSession.auth_session_started_at
+      || configSession.auth_session_last_polled_at
+      || config.verificationUrl
+      || config.verification_url
+      || config.verificationCode
+      || config.verification_code
+      || config.pollIntervalSeconds
+      || config.poll_interval_seconds,
   );
 }
 
@@ -279,87 +292,108 @@ function normalizeSourceStatus(value?: string | null): ConnectorSourceStatus {
   }
 }
 
-function normalizeConnectorSource(raw: any): ConnectorSource {
-  const updatedAt = raw?.updated_at ?? raw?.updatedAt ?? nowIso();
+function normalizeConnectorSource(raw: unknown): ConnectorSource {
+  const record = asRecord(raw);
+  const updatedAt = typeof record.updated_at === 'string'
+    ? record.updated_at
+    : typeof record.updatedAt === 'string'
+      ? record.updatedAt
+      : nowIso();
   return {
-    id: String(raw?.id ?? raw?.source_id ?? raw?.resource_id ?? createId('source')),
-    title: String(raw?.title ?? raw?.name ?? raw?.label ?? 'Untitled source'),
-    type: normalizeSourceType(raw?.type ?? raw?.resource_type ?? raw?.kind),
-    status: normalizeSourceStatus(raw?.status ?? raw?.sync_status),
+    id: String(record.id ?? record.source_id ?? record.resource_id ?? createId('source')),
+    title: String(record.title ?? record.name ?? record.label ?? 'Untitled source'),
+    type: normalizeSourceType(asString(record.type ?? record.resource_type ?? record.kind)),
+    status: normalizeSourceStatus(asString(record.status ?? record.sync_status)),
     updatedAt,
-    syncedAt: raw?.synced_at ?? raw?.syncedAt ?? raw?.last_synced_at ?? raw?.lastSyncedAt,
-    pageCount: typeof raw?.page_count === 'number'
-      ? raw.page_count
-      : typeof raw?.pageCount === 'number'
-        ? raw.pageCount
+    syncedAt: asString(record.synced_at)
+      ?? asString(record.syncedAt)
+      ?? asString(record.last_synced_at)
+      ?? asString(record.lastSyncedAt),
+    pageCount: typeof record.page_count === 'number'
+      ? record.page_count
+      : typeof record.pageCount === 'number'
+        ? record.pageCount
         : undefined,
-    description: raw?.description ?? raw?.subtitle ?? raw?.summary,
-    url: raw?.url ?? raw?.source_url ?? raw?.sourceUrl,
+    description: asString(record.description) ?? asString(record.subtitle) ?? asString(record.summary),
+    url: asString(record.url) ?? asString(record.source_url) ?? asString(record.sourceUrl),
   };
 }
 
-function normalizeConnectorAuth(raw: any): ConnectorAuthSession {
-  const auth = raw?.auth ?? raw?.authentication ?? raw;
-  const config = raw?.config ?? {};
-  const session = auth?.auth_session ?? config?.auth_session ?? {};
-  const resolvedStatus = session?.auth_session_status ?? auth?.status ?? raw?.auth_status ?? raw?.status;
+function normalizeConnectorAuth(raw: unknown): ConnectorAuthSession {
+  const record = asRecord(raw);
+  const auth = asRecord(record.auth ?? record.authentication ?? record);
+  const config = asRecord(record.config);
+  const session = asRecord(auth.auth_session ?? config.auth_session);
+  const resolvedStatus = asString(auth.status)
+    ?? asString(record.auth_status)
+    ?? asString(record.status)
+    ?? asString(session.auth_session_status);
   return {
     status: localizeAuthStatus(resolvedStatus, hasBackendAuthSession(raw)),
     verificationCode:
-      auth?.verificationCode
-      ?? auth?.verification_code
-      ?? raw?.verification_code
-      ?? raw?.code
-      ?? config?.verificationCode
-      ?? config?.verification_code,
+      asString(auth.verificationCode)
+      ?? asString(auth.verification_code)
+      ?? asString(record.verification_code)
+      ?? asString(record.code)
+      ?? asString(config.verificationCode)
+      ?? asString(config.verification_code),
     verificationUrl:
-      auth?.verificationUrl
-      ?? auth?.verification_url
-      ?? raw?.verification_url
-      ?? config?.verificationUrl
-      ?? config?.verification_url
+      asString(auth.verificationUrl)
+      ?? asString(auth.verification_url)
+      ?? asString(record.verification_url)
+      ?? asString(config.verificationUrl)
+      ?? asString(config.verification_url)
       ?? DEFAULT_NOTION_VERIFICATION_URL,
-    pollAttempts: typeof auth?.pollAttempts === 'number'
+    pollAttempts: typeof auth.pollAttempts === 'number'
       ? auth.pollAttempts
-      : typeof auth?.poll_attempts === 'number'
+      : typeof auth.poll_attempts === 'number'
         ? auth.poll_attempts
         : undefined,
-    expiresAt: auth?.expiresAt ?? auth?.expires_at ?? session?.auth_session_expires_at ?? raw?.expires_at,
+    expiresAt: asString(auth.expiresAt)
+      ?? asString(auth.expires_at)
+      ?? asString(session.auth_session_expires_at)
+      ?? asString(record.expires_at),
     message:
-      auth?.message
-      ?? auth?.detail
-      ?? raw?.message
-      ?? raw?.detail
-      ?? config?.auth_error
-      ?? session?.auth_error,
+      asString(auth.message)
+      ?? asString(auth.detail)
+      ?? asString(record.message)
+      ?? asString(record.detail)
+      ?? asString(config.auth_error)
+      ?? asString(session.auth_error),
   };
 }
 
-function normalizeConnector(raw: any): ResourceConnector {
+function normalizeConnector(raw: unknown): ResourceConnector {
+  const record = asRecord(raw);
   const now = nowIso();
-  const sources = Array.isArray(raw?.sources)
-    ? raw.sources.map(normalizeConnectorSource)
-    : Array.isArray(raw?.resources)
-      ? raw.resources.map(normalizeConnectorSource)
+  const sources = Array.isArray(record.sources)
+    ? record.sources.map(normalizeConnectorSource)
+    : Array.isArray(record.resources)
+      ? record.resources.map(normalizeConnectorSource)
       : [];
   const auth = normalizeConnectorAuth(raw);
+  const config = asRecord(record.config);
+  const authSession = asRecord(config.auth_session);
   const sourceCount = sources.length;
   const hasSession = hasBackendAuthSession(raw);
   const connectorStatus =
-    raw?.status
-    ?? raw?.sync_status
-    ?? raw?.auth_status
-    ?? raw?.config?.auth_session?.auth_session_status
-    ?? auth?.status;
+    asString(record.auth_status)
+    ?? auth.status
+    ?? asString(record.status)
+    ?? asString(record.sync_status)
+    ?? asString(authSession.auth_session_status);
 
   return {
-    id: String(raw?.id ?? raw?.connector_id ?? raw?.resource_connector_id ?? createId('connector')),
-    name: String(raw?.name ?? raw?.title ?? DEFAULT_CONNECTOR_NAME),
-    platform: (raw?.platform === 'notion' ? 'notion' : 'notion'),
+    id: String(record.id ?? record.connector_id ?? record.resource_connector_id ?? createId('connector')),
+    name: String(record.name ?? record.title ?? DEFAULT_CONNECTOR_NAME),
+    platform: 'notion',
     status: localizeConnectorStatus(connectorStatus, sourceCount, hasSession),
-    createdAt: raw?.created_at ?? raw?.createdAt ?? now,
-    updatedAt: raw?.updated_at ?? raw?.updatedAt ?? now,
-    lastSyncedAt: raw?.last_synced_at ?? raw?.lastSyncedAt ?? raw?.synced_at ?? raw?.syncedAt,
+    createdAt: asString(record.created_at) ?? asString(record.createdAt) ?? now,
+    updatedAt: asString(record.updated_at) ?? asString(record.updatedAt) ?? now,
+    lastSyncedAt: asString(record.last_synced_at)
+      ?? asString(record.lastSyncedAt)
+      ?? asString(record.synced_at)
+      ?? asString(record.syncedAt),
     auth,
     sources,
   };
@@ -384,6 +418,10 @@ function normalizeConnectorResponse(response: unknown): ResourceConnector {
       ? (response as { connector?: unknown }).connector
       : response,
   );
+}
+
+export function normalizeResourceConnectorFallback(raw: unknown): ResourceConnector {
+  return normalizeConnector(raw);
 }
 
 async function fetchJson<T>(path: string, init: RequestInit = {}): Promise<T> {

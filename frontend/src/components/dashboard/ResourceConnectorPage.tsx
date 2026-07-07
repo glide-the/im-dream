@@ -1,9 +1,12 @@
 // [Input] Resource connector API client, dashboard design tokens, modal shell, and shared icon set.
-// [Output] Warm-paper resource connector page with create/auth/select/source flows and status cards.
+// [Output] Warm-paper resource connector page with create/auth/select/source flows, status cards, and a minimal embedded dark mode for Chat shell reuse.
 // [Pos] resource-connector-page component node in frontend/src/components/dashboard
 // [Sync] 2026-07-04: initial frontend shell for Notion resource connector create/auth/resources/source states.
 // [Sync] 2026-07-04: warm the connector palette to match the paper-workbench design and soften the page shell contrast.
 // [Sync] 2026-07-05: keep the connector workbench compatible with a scrollable app shell so lower resource and source sections remain reachable.
+// [Sync] 2026-07-07: embedded connector shell now uses a dark Chat-adjacent layout with share/more header actions and list-style source rows to match the connector landing screenshot.
+// [Sync] 2026-07-07: split embedded chat fallback workbench from the real source-selection empty state and keep the shell viewport-contained.
+// [Sync] 2026-07-07: remove duplicate embedded title/description/tab chrome so Chat owns the page entry and the workbench starts at source actions.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   IconArrowUp,
@@ -11,6 +14,7 @@ import {
   IconDatabase,
   IconEdit,
   IconLoader,
+  IconFile,
   IconMoreHorizontal,
   IconPlus,
   IconSettings,
@@ -25,6 +29,7 @@ import {
   listConnectorDatabases,
   listConnectorPages,
   listConnectors,
+  normalizeResourceConnectorFallback,
   pollConnectorAuth,
   refreshConnectorSources,
   selectConnectorResources,
@@ -40,11 +45,87 @@ import {
 
 interface ResourceConnectorPageProps {
   isMobile?: boolean;
+  embedded?: boolean;
+  variant?: 'page' | 'embedded';
+  mode?: 'page' | 'embedded';
 }
+
+type ConnectorSurfaceTheme = 'light' | 'dark';
 
 type StatusTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 const DEFAULT_CONNECTOR_NAME = 'Resource Connector';
+const EMBEDDED_FALLBACK_CONNECTOR_NAME = 'Ink&Memory开发';
+
+type EmbeddedConnectorView = 'chat' | 'sources';
+
+interface EmbeddedConnectorViewModel {
+  chatConnector: ResourceConnector;
+}
+
+function buildEmbeddedFallbackConnector(): ResourceConnector {
+  const now = new Date().toISOString();
+  return normalizeResourceConnectorFallback({
+    id: 'embedded-fallback-connector',
+    name: EMBEDDED_FALLBACK_CONNECTOR_NAME,
+    platform: 'notion',
+    status: 'synced',
+    createdAt: now,
+    updatedAt: now,
+    lastSyncedAt: now,
+    auth: {
+      status: 'authenticated',
+      message: 'Fallback connector workbench is available while connector data is unavailable.',
+    },
+    sources: [
+      {
+        id: 'embedded-fallback-roadmap',
+        title: '路线图',
+        type: 'notion_database',
+        status: 'synced',
+        updatedAt: now,
+        syncedAt: now,
+        pageCount: 9,
+        description: 'Milestones and release planning',
+      },
+      {
+        id: 'embedded-fallback-brand-guide',
+        title: '品牌规范',
+        type: 'notion_page',
+        status: 'synced',
+        updatedAt: now,
+        syncedAt: now,
+        description: 'Standalone page',
+      },
+    ],
+  });
+}
+
+function connectorTheme(theme: ConnectorSurfaceTheme) {
+  if (theme === 'dark') {
+    return {
+      shellSurface: 'rgba(17, 17, 17, 0.94)',
+      textPrimary: 'rgba(255,255,255,0.95)',
+      textSecondary: 'rgba(255,255,255,0.66)',
+      border: 'rgba(255,255,255,0.12)',
+      borderStrong: 'rgba(255,255,255,0.2)',
+      borderFocus: 'rgba(255,255,255,0.32)',
+      cardBackground: 'rgba(255,255,255,0.05)',
+      cardShadow: '0 14px 34px rgba(0, 0, 0, 0.34)',
+    } as const;
+  }
+
+  return {
+    shellSurface: 'var(--color-bg-paper)',
+    textPrimary: 'var(--color-text-primary)',
+    textSecondary: 'var(--color-text-secondary)',
+    border: 'var(--color-border-paper)',
+    borderStrong: 'var(--color-border-focus)',
+    borderFocus: 'var(--color-border-focus)',
+    cardBackground: 'rgba(255,250,242,0.68)',
+    cardShadow: '0 10px 20px rgba(91, 69, 44, 0.05)',
+  } as const;
+}
 
 function formatDateTime(value?: string): string {
   if (!value) return '未更新';
@@ -123,37 +204,67 @@ function mergeConnector(connectors: ResourceConnector[], nextConnector: Resource
 
 function ConnectorStatusPill({
   status,
+  theme = 'light',
 }: {
   status: ConnectorStatus | ConnectorSource['status'] | ConnectorAuthStatus | 'idle';
+  theme?: ConnectorSurfaceTheme;
 }) {
   const tone = statusTone(status);
-  const palette = {
-    neutral: {
-      background: 'rgba(91, 69, 44, 0.08)',
-      color: 'var(--color-text-secondary)',
-      border: 'rgba(91, 69, 44, 0.14)',
-    },
-    success: {
-      background: 'rgba(126, 148, 104, 0.16)',
-      color: 'var(--color-state-success)',
-      border: 'rgba(126, 148, 104, 0.24)',
-    },
-    warning: {
-      background: 'rgba(199, 136, 85, 0.16)',
-      color: 'var(--color-state-warning)',
-      border: 'rgba(199, 136, 85, 0.24)',
-    },
-    danger: {
-      background: 'rgba(168, 102, 82, 0.16)',
-      color: 'var(--color-state-error)',
-      border: 'rgba(168, 102, 82, 0.24)',
-    },
-    info: {
-      background: 'rgba(95, 74, 54, 0.12)',
-      color: 'var(--color-text-primary)',
-      border: 'rgba(95, 74, 54, 0.18)',
-    },
-  }[tone];
+  const palette = theme === 'dark'
+    ? {
+        neutral: {
+          background: 'rgba(255,255,255,0.06)',
+          color: 'rgba(255,255,255,0.74)',
+          border: 'rgba(255,255,255,0.12)',
+        },
+        success: {
+          background: 'rgba(141, 167, 112, 0.16)',
+          color: '#d9efd1',
+          border: 'rgba(141, 167, 112, 0.26)',
+        },
+        warning: {
+          background: 'rgba(199, 136, 85, 0.18)',
+          color: '#f0c79f',
+          border: 'rgba(199, 136, 85, 0.26)',
+        },
+        danger: {
+          background: 'rgba(168, 102, 82, 0.18)',
+          color: '#f3b7a8',
+          border: 'rgba(168, 102, 82, 0.28)',
+        },
+        info: {
+          background: 'rgba(255,255,255,0.08)',
+          color: 'rgba(255,255,255,0.92)',
+          border: 'rgba(255,255,255,0.16)',
+        },
+      }[tone]
+    : {
+        neutral: {
+          background: 'rgba(91, 69, 44, 0.08)',
+          color: 'var(--color-text-secondary)',
+          border: 'rgba(91, 69, 44, 0.14)',
+        },
+        success: {
+          background: 'rgba(126, 148, 104, 0.16)',
+          color: 'var(--color-state-success)',
+          border: 'rgba(126, 148, 104, 0.24)',
+        },
+        warning: {
+          background: 'rgba(199, 136, 85, 0.16)',
+          color: 'var(--color-state-warning)',
+          border: 'rgba(199, 136, 85, 0.24)',
+        },
+        danger: {
+          background: 'rgba(168, 102, 82, 0.16)',
+          color: 'var(--color-state-error)',
+          border: 'rgba(168, 102, 82, 0.24)',
+        },
+        info: {
+          background: 'rgba(95, 74, 54, 0.12)',
+          color: 'var(--color-text-primary)',
+          border: 'rgba(95, 74, 54, 0.18)',
+        },
+      }[tone];
 
   return (
     <span
@@ -191,34 +302,44 @@ function SectionCard({
   subtitle,
   action,
   children,
+  compact = false,
+  theme = 'light',
 }: {
   title: string;
   subtitle?: string;
   action?: ReactNode;
   children: ReactNode;
+  compact?: boolean;
+  theme?: ConnectorSurfaceTheme;
 }) {
+  const palette = connectorTheme(theme);
   return (
     <section
       style={{
-        border: '1px solid var(--color-border-paper)',
-        borderRadius: '24px',
-        background: 'var(--color-bg-paper)',
-        boxShadow: '0 14px 34px rgba(91, 69, 44, 0.08)',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        border: `1px solid ${palette.border}`,
+        borderRadius: compact ? '20px' : '24px',
+        background: theme === 'dark' ? palette.shellSurface : 'var(--color-bg-paper)',
+        boxShadow: theme === 'dark' ? '0 18px 44px rgba(0, 0, 0, 0.34)' : '0 14px 34px rgba(91, 69, 44, 0.08)',
         overflow: 'hidden',
       }}
     >
       <div
         style={{
-          padding: '1rem 1.15rem 0.85rem',
-          borderBottom: '1px solid var(--color-border-paper)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.32), rgba(255,255,255,0))',
+          padding: compact ? '0.85rem 0.95rem 0.72rem' : '1rem 1.15rem 0.85rem',
+          borderBottom: `1px solid ${palette.border}`,
+          background: theme === 'dark'
+            ? 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0))'
+            : 'linear-gradient(180deg, rgba(255,255,255,0.32), rgba(255,255,255,0))',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem' }}>
           <div>
-            <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{title}</h3>
+            <h3 style={{ margin: 0, fontSize: compact ? '0.9rem' : '0.96rem', fontWeight: 700, color: palette.textPrimary }}>{title}</h3>
             {subtitle ? (
-              <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
+              <p style={{ margin: '0.35rem 0 0', fontSize: compact ? '0.76rem' : '0.8rem', lineHeight: 1.55, color: palette.textSecondary }}>
                 {subtitle}
               </p>
             ) : null}
@@ -226,7 +347,7 @@ function SectionCard({
           {action}
         </div>
       </div>
-      <div style={{ padding: '1rem 1.15rem 1.15rem' }}>{children}</div>
+      <div style={{ padding: compact ? '0.85rem 0.95rem 0.95rem' : '1rem 1.15rem 1.15rem' }}>{children}</div>
     </section>
   );
 }
@@ -313,6 +434,7 @@ function ToggleRow({
   onToggle,
   disabled,
   meta,
+  theme = 'light',
 }: {
   label: string;
   helper?: string;
@@ -320,7 +442,9 @@ function ToggleRow({
   onToggle: () => void;
   disabled?: boolean;
   meta?: string;
+  theme?: ConnectorSurfaceTheme;
 }) {
+  const palette = connectorTheme(theme);
   return (
     <button
       type="button"
@@ -328,16 +452,24 @@ function ToggleRow({
       disabled={disabled}
       style={{
         width: '100%',
-        border: '1px solid var(--color-border-paper)',
+        border: `1px solid ${palette.border}`,
         borderRadius: '18px',
         background: checked
-          ? 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(242, 232, 216, 0.74))'
-          : 'rgba(255,250,242,0.54)',
+          ? theme === 'dark'
+            ? 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.05))'
+            : 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(242, 232, 216, 0.74))'
+          : theme === 'dark'
+            ? 'rgba(255,255,255,0.03)'
+            : 'rgba(255,250,242,0.54)',
         padding: '0.9rem 0.95rem',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.66 : 1,
         textAlign: 'left',
-        boxShadow: checked ? '0 12px 26px rgba(91, 69, 44, 0.08)' : 'none',
+        boxShadow: checked
+          ? theme === 'dark'
+            ? '0 12px 28px rgba(0,0,0,0.24)'
+            : '0 12px 26px rgba(91, 69, 44, 0.08)'
+          : 'none',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.85rem' }}>
@@ -348,12 +480,12 @@ function ToggleRow({
             height: '1.15rem',
             marginTop: '0.15rem',
             borderRadius: '0.35rem',
-            border: '1px solid var(--color-border-paper)',
-            background: checked ? 'var(--color-text-primary)' : 'transparent',
+            border: `1px solid ${palette.border}`,
+            background: checked ? (theme === 'dark' ? 'rgba(255,255,255,0.94)' : 'var(--color-text-primary)') : 'transparent',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--color-text-on-action)',
+            color: theme === 'dark' ? '#090909' : 'var(--color-text-on-action)',
             flexShrink: 0,
           }}
         >
@@ -361,11 +493,11 @@ function ToggleRow({
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem' }}>
-            <span style={{ fontSize: '0.92rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{label}</span>
-            {meta ? <span style={{ fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>{meta}</span> : null}
+            <span style={{ fontSize: '0.92rem', fontWeight: 600, color: palette.textPrimary }}>{label}</span>
+            {meta ? <span style={{ fontSize: '0.72rem', color: palette.textSecondary }}>{meta}</span> : null}
           </div>
           {helper ? (
-            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', lineHeight: 1.5, color: 'var(--color-text-secondary)' }}>{helper}</p>
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', lineHeight: 1.5, color: palette.textSecondary }}>{helper}</p>
           ) : null}
         </div>
       </div>
@@ -373,103 +505,171 @@ function ToggleRow({
   );
 }
 
-function SourceCard({ source }: { source: ConnectorSource }) {
+function SourceCard({ source, theme = 'light' }: { source: ConnectorSource; theme?: ConnectorSurfaceTheme }) {
+  const palette = connectorTheme(theme);
+  const SourceIcon = source.type === 'notion_page' ? IconFile : IconDatabase;
   return (
     <article
       style={{
-        border: '1px solid var(--color-border-paper)',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        border: `1px solid ${palette.border}`,
         borderRadius: '18px',
-        background: 'rgba(255,250,242,0.68)',
+        background: theme === 'dark' ? palette.cardBackground : 'rgba(255,250,242,0.68)',
         padding: '0.9rem 0.95rem',
-        boxShadow: '0 10px 20px rgba(91, 69, 44, 0.05)',
+        boxShadow: theme === 'dark' ? palette.cardShadow : '0 10px 20px rgba(91, 69, 44, 0.05)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.85rem' }}>
-        <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-secondary)' }}>
-              {sourceKindLabel(source.type)}
-            </span>
-            <ConnectorStatusPill status={source.status} />
-          </div>
-          <h5
+      {theme === 'dark' ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <div
             style={{
-              margin: '0.4rem 0 0',
-              fontSize: '0.94rem',
-              lineHeight: 1.4,
-              color: 'var(--color-text-primary)',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              width: '3rem',
+              height: '3rem',
+              borderRadius: '0.9rem',
+              display: 'grid',
+              placeItems: 'center',
+              background: 'rgba(255,255,255,0.12)',
+              border: `1px solid ${palette.border}`,
+              color: palette.textPrimary,
+              flexShrink: 0,
             }}
           >
-            {source.title}
-          </h5>
-          <p style={{ margin: '0.35rem 0 0', fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
-            {source.description || 'Source synced from Notion'}
-          </p>
-        </div>
-        <div style={{ textAlign: 'right', flexShrink: 0 }}>
-          {typeof source.pageCount === 'number' ? (
-            <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{source.pageCount} pages</div>
-          ) : null}
-          <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: 'var(--color-text-secondary)' }}>
-            {formatDateTime(source.syncedAt || source.updatedAt)}
+            <SourceIcon style={{ width: '1rem', height: '1rem' }} />
+          </div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <h5
+              style={{
+                margin: 0,
+                fontSize: '0.95rem',
+                lineHeight: 1.35,
+                color: palette.textPrimary,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {source.title}
+            </h5>
+            <p style={{ margin: '0.22rem 0 0', fontSize: '0.78rem', lineHeight: 1.45, color: palette.textSecondary }}>
+              {sourceKindLabel(source.type)} · {formatDateTime(source.syncedAt || source.updatedAt)}
+            </p>
+            {source.description ? (
+              <p style={{ margin: '0.28rem 0 0', fontSize: '0.75rem', lineHeight: 1.45, color: palette.textSecondary }}>
+                {source.description}
+              </p>
+            ) : null}
+          </div>
+          <div style={{ display: 'grid', gap: '0.35rem', justifyItems: 'end', flexShrink: 0 }}>
+            <ConnectorStatusPill status={source.status} theme={theme} />
+            {typeof source.pageCount === 'number' ? (
+              <span style={{ fontSize: '0.72rem', color: palette.textSecondary }}>{source.pageCount} pages</span>
+            ) : null}
           </div>
         </div>
-      </div>
+      ) : (
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.85rem' }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: palette.textSecondary }}>
+                {sourceKindLabel(source.type)}
+              </span>
+              <ConnectorStatusPill status={source.status} theme={theme} />
+            </div>
+            <h5
+              style={{
+                margin: '0.4rem 0 0',
+                fontSize: '0.94rem',
+                lineHeight: 1.4,
+                color: palette.textPrimary,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {source.title}
+            </h5>
+            <p style={{ margin: '0.35rem 0 0', fontSize: '0.76rem', color: palette.textSecondary }}>
+              {source.description || 'Source synced from Notion'}
+            </p>
+          </div>
+          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+            {typeof source.pageCount === 'number' ? (
+              <div style={{ fontSize: '0.78rem', fontWeight: 700, color: palette.textPrimary }}>{source.pageCount} pages</div>
+            ) : null}
+            <div style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: palette.textSecondary }}>
+              {formatDateTime(source.syncedAt || source.updatedAt)}
+            </div>
+          </div>
+        </div>
+      )}
     </article>
   );
 }
 
-function ConnectorEmptyState({ onCreate }: { onCreate: () => void }) {
+function ConnectorEmptyState({
+  onCreate,
+  compact = false,
+  theme = 'light',
+}: {
+  onCreate: () => void;
+  compact?: boolean;
+  theme?: ConnectorSurfaceTheme;
+}) {
+  const palette = connectorTheme(theme);
   return (
     <div
       style={{
-        border: '1px dashed var(--color-border-paper)',
-        borderRadius: '28px',
-        background: 'linear-gradient(180deg, rgba(255,250,242,0.84), rgba(242,232,216,0.42))',
-        padding: '2rem 1.5rem',
+        width: '100%',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        border: `1px dashed ${palette.border}`,
+        borderRadius: compact ? '24px' : '28px',
+        background: theme === 'dark'
+          ? 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03))'
+          : 'linear-gradient(180deg, rgba(255,250,242,0.84), rgba(242,232,216,0.42))',
+        padding: compact ? '1.35rem 1.15rem' : '2rem 1.5rem',
         textAlign: 'center',
-        boxShadow: '0 18px 40px rgba(91, 69, 44, 0.06)',
+        boxShadow: theme === 'dark' ? '0 18px 44px rgba(0,0,0,0.28)' : '0 18px 40px rgba(91, 69, 44, 0.06)',
       }}
     >
       <div
         style={{
-          width: '4rem',
-          height: '4rem',
+          width: compact ? '3.2rem' : '4rem',
+          height: compact ? '3.2rem' : '4rem',
           margin: '0 auto',
-          borderRadius: '1.4rem',
+          borderRadius: compact ? '1.15rem' : '1.4rem',
           display: 'grid',
           placeItems: 'center',
-          background: 'rgba(95, 74, 54, 0.08)',
-          border: '1px solid var(--color-border-paper)',
-          color: 'var(--color-text-primary)',
+          background: theme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(95, 74, 54, 0.08)',
+          border: `1px solid ${palette.border}`,
+          color: palette.textPrimary,
         }}
       >
-        <IconSparkles style={{ width: '1.35rem', height: '1.35rem' }} />
+        <IconSparkles style={{ width: compact ? '1.1rem' : '1.35rem', height: compact ? '1.1rem' : '1.35rem' }} />
       </div>
-      <h3 style={{ margin: '1rem 0 0', fontSize: '1.15rem', color: 'var(--color-text-primary)' }}>为工作区添加 Notion 连接器</h3>
-      <p style={{ margin: '0.55rem auto 0', maxWidth: '34rem', fontSize: '0.9rem', lineHeight: 1.65, color: 'var(--color-text-secondary)' }}>
+      <h3 style={{ margin: compact ? '0.75rem 0 0' : '1rem 0 0', fontSize: compact ? '1rem' : '1.15rem', color: palette.textPrimary }}>为工作区添加 Notion 连接器</h3>
+      <p style={{ margin: compact ? '0.4rem auto 0' : '0.55rem auto 0', maxWidth: '34rem', fontSize: compact ? '0.84rem' : '0.9rem', lineHeight: 1.65, color: palette.textSecondary }}>
         创建一个资源连接器，完成 Notion 认证，选择可访问的数据库和页面，然后在同一张卡片里查看来源状态与同步信息。
       </p>
       <button
         type="button"
         onClick={onCreate}
         style={{
-          marginTop: '1.25rem',
+          marginTop: compact ? '1rem' : '1.25rem',
           border: 'none',
           borderRadius: '999px',
-          background: 'var(--color-text-primary)',
-          color: 'var(--color-text-on-action)',
-          padding: '0.8rem 1.2rem',
-          fontSize: '0.92rem',
+          background: theme === 'dark' ? 'rgba(255,255,255,0.92)' : 'var(--color-text-primary)',
+          color: theme === 'dark' ? '#090909' : 'var(--color-text-on-action)',
+          padding: compact ? '0.72rem 1rem' : '0.8rem 1.2rem',
+          fontSize: compact ? '0.86rem' : '0.92rem',
           fontWeight: 700,
           cursor: 'pointer',
           display: 'inline-flex',
           alignItems: 'center',
           gap: '0.5rem',
-          boxShadow: '0 16px 30px rgba(91, 69, 44, 0.16)',
+          boxShadow: theme === 'dark' ? '0 16px 30px rgba(0,0,0,0.28)' : '0 16px 30px rgba(91, 69, 44, 0.16)',
         }}
       >
         <IconPlus style={{ width: '1rem', height: '1rem' }} />
@@ -479,7 +679,14 @@ function ConnectorEmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-export default function ResourceConnectorPage({ isMobile = false }: ResourceConnectorPageProps) {
+export default function ResourceConnectorPage({
+  isMobile = false,
+  embedded,
+  variant,
+  mode,
+}: ResourceConnectorPageProps) {
+  const isEmbedded = embedded ?? (variant === 'embedded' || mode === 'embedded');
+  const compact = isEmbedded;
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -500,11 +707,22 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
   const [resourceSaving, setResourceSaving] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
+  const [embeddedView, setEmbeddedView] = useState<EmbeddedConnectorView>('chat');
+  const [embeddedShareCopied, setEmbeddedShareCopied] = useState(false);
+  const [embeddedMenuOpen, setEmbeddedMenuOpen] = useState(false);
+  const embeddedFallbackConnector = useMemo(() => buildEmbeddedFallbackConnector(), []);
 
   const selectedConnector = useMemo(
     () => connectors.find((connector) => connector.id === selectedConnectorId) ?? null,
     [connectors, selectedConnectorId],
   );
+
+  const embeddedViewModel = useMemo<EmbeddedConnectorViewModel>(() => {
+    const chatConnector = selectedConnector ?? embeddedFallbackConnector;
+    return {
+      chatConnector,
+    };
+  }, [embeddedFallbackConnector, selectedConnector]);
 
   const activeSelection = useMemo<ConnectorResourceSelection>(
     () => ({
@@ -763,34 +981,1084 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
     return { sourceCount, databases, pages };
   }, [selectedConnector?.sources]);
 
+  const handleEmbeddedShare = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setEmbeddedShareCopied(true);
+      window.setTimeout(() => setEmbeddedShareCopied(false), 1600);
+    } catch {
+      setEmbeddedShareCopied(false);
+    }
+  }, []);
+
+  if (isEmbedded) {
+    const embeddedPalette = connectorTheme('dark');
+    const { chatConnector } = embeddedViewModel;
+    const chatSources = chatConnector.sources;
+
+    return (
+      <>
+        <div
+          style={{
+            minHeight: '100%',
+            height: '100%',
+            width: '100%',
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            padding: isMobile ? '0.7rem' : '0.9rem',
+            boxSizing: 'border-box',
+            background: '#050505',
+            color: embeddedPalette.textPrimary,
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              minWidth: 0,
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              border: `1px solid ${embeddedPalette.border}`,
+              borderRadius: isMobile ? '28px' : '32px',
+              background: 'linear-gradient(180deg, rgba(18,18,18,0.98), rgba(8,8,8,0.96))',
+              boxShadow: '0 28px 80px rgba(0,0,0,0.58)',
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                padding: isMobile ? '0.72rem 0.85rem 0.2rem' : '0.82rem 1rem 0.25rem',
+                flexShrink: 0,
+                boxSizing: 'border-box',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.75rem', minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap', position: 'relative' }}>
+                  <button
+                    type="button"
+                    onClick={() => void handleEmbeddedShare()}
+                    style={{
+                      border: `1px solid ${embeddedPalette.border}`,
+                      borderRadius: '999px',
+                      padding: '0.62rem 0.9rem',
+                      background: 'rgba(255,255,255,0.06)',
+                      color: embeddedPalette.textPrimary,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      fontSize: '0.84rem',
+                      fontWeight: 600,
+                    }}
+                  >
+                    <IconShare style={{ width: '0.92rem', height: '0.92rem' }} />
+                    {embeddedShareCopied ? '已复制链接' : '分享'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEmbeddedMenuOpen((current) => !current)}
+                    style={{
+                      border: `1px solid ${embeddedPalette.border}`,
+                      borderRadius: '999px',
+                      width: '2.35rem',
+                      height: '2.35rem',
+                      background: embeddedMenuOpen ? 'rgba(255,255,255,0.12)' : 'rgba(255,255,255,0.06)',
+                      color: embeddedPalette.textPrimary,
+                      cursor: 'pointer',
+                      display: 'grid',
+                      placeItems: 'center',
+                      flexShrink: 0,
+                    }}
+                    title="更多"
+                  >
+                    <IconMoreHorizontal style={{ width: '1rem', height: '1rem' }} />
+                  </button>
+                  {embeddedMenuOpen ? (
+                    <>
+                      <div
+                        aria-hidden="true"
+                        style={{ position: 'fixed', inset: 0, zIndex: 14 }}
+                        onClick={() => setEmbeddedMenuOpen(false)}
+                      />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          top: '2.9rem',
+                          right: 0,
+                          zIndex: 15,
+                          minWidth: '12rem',
+                          padding: '0.35rem',
+                          border: `1px solid ${embeddedPalette.border}`,
+                          borderRadius: '0.95rem',
+                          background: 'rgba(8, 8, 8, 0.96)',
+                          boxShadow: '0 20px 36px rgba(0, 0, 0, 0.36)',
+                          backdropFilter: 'blur(12px)',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmbeddedMenuOpen(false);
+                            openCreateModal();
+                          }}
+                          style={{
+                            width: '100%',
+                            border: 'none',
+                            borderRadius: '0.7rem',
+                            padding: '0.72rem 0.8rem',
+                            background: 'transparent',
+                            color: embeddedPalette.textPrimary,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                            fontSize: '0.84rem',
+                            fontWeight: 600,
+                            textAlign: 'left',
+                          }}
+                        >
+                          <span>新建</span>
+                          <IconPlus style={{ width: '0.9rem', height: '0.9rem', color: embeddedPalette.textSecondary }} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmbeddedMenuOpen(false);
+                            void reloadConnectors();
+                          }}
+                          style={{
+                            width: '100%',
+                            border: 'none',
+                            borderRadius: '0.7rem',
+                            padding: '0.72rem 0.8rem',
+                            background: 'transparent',
+                            color: embeddedPalette.textPrimary,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                            fontSize: '0.84rem',
+                            fontWeight: 600,
+                            textAlign: 'left',
+                          }}
+                        >
+                          <span>刷新列表</span>
+                          <IconArrowUp style={{ width: '0.9rem', height: '0.9rem', color: embeddedPalette.textSecondary }} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmbeddedMenuOpen(false);
+                            if (selectedConnector) {
+                              void handleSyncSources();
+                            }
+                          }}
+                          disabled={!selectedConnector}
+                          style={{
+                            width: '100%',
+                            border: 'none',
+                            borderRadius: '0.7rem',
+                            padding: '0.72rem 0.8rem',
+                            background: 'transparent',
+                            color: embeddedPalette.textPrimary,
+                            cursor: selectedConnector ? 'pointer' : 'not-allowed',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                            fontSize: '0.84rem',
+                            fontWeight: 600,
+                            textAlign: 'left',
+                            opacity: selectedConnector ? 1 : 0.55,
+                          }}
+                        >
+                          <span>{syncLoading ? '刷新中…' : '刷新来源'}</span>
+                          <IconLoader style={{ width: '0.9rem', height: '0.9rem', color: embeddedPalette.textSecondary }} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEmbeddedMenuOpen(false);
+                            void handleDeleteSelected();
+                          }}
+                          disabled={!selectedConnector}
+                          style={{
+                            width: '100%',
+                            border: 'none',
+                            borderRadius: '0.7rem',
+                            padding: '0.72rem 0.8rem',
+                            background: 'transparent',
+                            color: selectedConnector ? '#f3b7a8' : embeddedPalette.textSecondary,
+                            cursor: selectedConnector ? 'pointer' : 'not-allowed',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                            fontSize: '0.84rem',
+                            fontWeight: 600,
+                            textAlign: 'left',
+                            opacity: selectedConnector ? 1 : 0.55,
+                          }}
+                        >
+                          <span>删除当前连接器</span>
+                          <IconTrash style={{ width: '0.9rem', height: '0.9rem', color: selectedConnector ? '#f3b7a8' : embeddedPalette.textSecondary }} />
+                        </button>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                overflowX: 'hidden',
+                padding: isMobile ? '0.9rem' : '1rem 1.15rem 1.15rem',
+                boxSizing: 'border-box',
+                overscrollBehavior: 'contain',
+              }}
+            >
+              {embeddedView === 'chat' ? (
+                <div style={{ display: 'grid', gap: '0.95rem', minWidth: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => setEmbeddedView('sources')}
+                    style={{
+                      width: '100%',
+                      border: 'none',
+                      borderRadius: '18px',
+                      padding: '0.2rem 0',
+                      background: 'transparent',
+                      color: embeddedPalette.textPrimary,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.95rem',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '3rem',
+                        height: '3rem',
+                        borderRadius: '999px',
+                        border: `1px solid ${embeddedPalette.border}`,
+                        background: 'rgba(255,255,255,0.14)',
+                        display: 'grid',
+                        placeItems: 'center',
+                        color: embeddedPalette.textPrimary,
+                        flexShrink: 0,
+                      }}
+                    >
+                      <IconPlus style={{ width: '1.1rem', height: '1.1rem' }} />
+                    </span>
+                    <span style={{ fontSize: '0.95rem', fontWeight: 700, letterSpacing: '0.01em' }}>添加源</span>
+                  </button>
+                  <div style={{ height: '1px', background: embeddedPalette.border }} />
+
+                  {loading && connectors.length === 0 ? (
+                    <div
+                      style={{
+                        border: `1px solid ${embeddedPalette.border}`,
+                        borderRadius: '18px',
+                        background: 'rgba(255,255,255,0.05)',
+                        padding: '1rem',
+                        color: embeddedPalette.textSecondary,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.65rem',
+                      }}
+                    >
+                      <IconLoader style={{ width: '1rem', height: '1rem' }} />
+                      正在加载连接器…
+                    </div>
+                  ) : error ? (
+                    <div
+                      style={{
+                        border: '1px solid rgba(243, 183, 168, 0.28)',
+                        borderRadius: '18px',
+                        background: 'rgba(168, 102, 82, 0.12)',
+                        padding: '1rem',
+                        color: embeddedPalette.textPrimary,
+                        lineHeight: 1.6,
+                      }}
+                    >
+                      {error}
+                    </div>
+                  ) : chatSources.length === 0 ? (
+                      <div
+                        style={{
+                          color: embeddedPalette.textSecondary,
+                          fontSize: '0.84rem',
+                          lineHeight: 1.65,
+                          padding: '0.25rem 0 0',
+                        }}
+                      >
+                        当前连接器还没有来源。点击「添加源」完成 Notion 认证、资源选择和同步后，这里会显示来源列表。
+                      </div>
+                  ) : (
+                    <div style={{ display: 'grid', gap: '0.75rem', minWidth: 0 }}>
+                      {chatSources.map((source) => (
+                        <SourceCard key={source.id} source={source} theme="dark" />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : !selectedConnector ? (
+                <ConnectorEmptyState onCreate={openCreateModal} compact theme="dark" />
+              ) : (
+                <div style={{ display: 'grid', gap: '1rem', minWidth: 0 }}>
+                  <SectionCard
+                    title="连接器概览"
+                    subtitle="可编辑名称、认证状态和基础操作都在这里。"
+                    compact={compact}
+                    theme="dark"
+                    action={
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => setRenameEditing((current) => !current)}
+                          style={{
+                            border: `1px solid ${embeddedPalette.border}`,
+                            borderRadius: '999px',
+                            padding: '0.5rem 0.75rem',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: embeddedPalette.textPrimary,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          <IconEdit style={{ width: '0.85rem', height: '0.85rem' }} />
+                          {renameEditing ? '取消编辑' : '编辑名称'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDeleteSelected}
+                          style={{
+                            border: '1px solid rgba(243, 183, 168, 0.24)',
+                            borderRadius: '999px',
+                            padding: '0.5rem 0.75rem',
+                            background: 'rgba(168, 102, 82, 0.14)',
+                            color: embeddedPalette.textPrimary,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          <IconTrash style={{ width: '0.85rem', height: '0.85rem' }} />
+                          删除
+                        </button>
+                      </div>
+                    }
+                  >
+                    <div style={{ display: 'grid', gap: '0.9rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          {renameEditing ? (
+                            <div style={{ display: 'grid', gap: '0.5rem', maxWidth: '34rem' }}>
+                              <label style={{ fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: embeddedPalette.textSecondary }}>
+                                Connector name
+                              </label>
+                              <input
+                                value={renameDraft}
+                                onChange={(event) => setRenameDraft(event.target.value)}
+                                onBlur={() => {
+                                  void handleSaveRename();
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    void handleSaveRename();
+                                  }
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    setRenameEditing(false);
+                                    setRenameDraft(selectedConnector.name);
+                                  }
+                                }}
+                                autoFocus
+                                style={{
+                                  width: '100%',
+                                  border: `1px solid ${embeddedPalette.border}`,
+                                  borderRadius: '18px',
+                                  padding: '0.9rem 1rem',
+                                  background: 'rgba(255,255,255,0.08)',
+                                  color: embeddedPalette.textPrimary,
+                                  fontSize: '1.05rem',
+                                  fontWeight: 700,
+                                  outline: 'none',
+                                }}
+                              />
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => void handleSaveRename()}
+                                  disabled={renameSaving}
+                                  style={{
+                                    border: 'none',
+                                    borderRadius: '999px',
+                                    padding: '0.6rem 0.9rem',
+                                    background: 'rgba(255,255,255,0.92)',
+                                    color: '#090909',
+                                    cursor: 'pointer',
+                                    fontSize: '0.82rem',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  {renameSaving ? 'Saving…' : 'Save name'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRenameEditing(false);
+                                    setRenameDraft(selectedConnector.name);
+                                  }}
+                                  style={{
+                                    border: `1px solid ${embeddedPalette.border}`,
+                                    borderRadius: '999px',
+                                    padding: '0.6rem 0.9rem',
+                                    background: 'rgba(255,255,255,0.05)',
+                                    color: embeddedPalette.textPrimary,
+                                    cursor: 'pointer',
+                                    fontSize: '0.82rem',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div>
+                              <h2
+                                style={{
+                                  margin: 0,
+                                  fontSize: isMobile ? '1.35rem' : '1.65rem',
+                                  fontFamily: 'Georgia, "Times New Roman", serif',
+                                  color: embeddedPalette.textPrimary,
+                                  lineHeight: 1.15,
+                                }}
+                              >
+                                {selectedConnector.name}
+                              </h2>
+                              <p style={{ margin: '0.45rem 0 0', fontSize: '0.84rem', color: embeddedPalette.textSecondary }}>
+                                {selectedConnector.platform.toUpperCase()} · {selectedConnector.sources.length} source
+                                {selectedConnector.sources.length === 1 ? '' : 's'} · 最近更新 {formatDateTime(selectedConnector.updatedAt)}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          <ConnectorStatusPill status={selectedConnector.status} theme="dark" />
+                          <ConnectorStatusPill status={selectedConnector.auth.status} theme="dark" />
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, minmax(0, 1fr))',
+                          gap: '0.75rem',
+                        }}
+                      >
+                        <div
+                          style={{
+                            border: `1px solid ${embeddedPalette.border}`,
+                            borderRadius: '18px',
+                            background: 'rgba(255,255,255,0.05)',
+                            padding: '0.9rem',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: embeddedPalette.textSecondary }}>
+                            Sources
+                          </div>
+                          <div style={{ marginTop: '0.35rem', fontSize: '1.25rem', fontWeight: 700, color: embeddedPalette.textPrimary }}>
+                            {sourceStats.sourceCount}
+                          </div>
+                          <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: embeddedPalette.textSecondary }}>
+                            {sourceStats.databases} databases · {sourceStats.pages} pages
+                          </p>
+                        </div>
+                        <div
+                          style={{
+                            border: `1px solid ${embeddedPalette.border}`,
+                            borderRadius: '18px',
+                            background: 'rgba(255,255,255,0.05)',
+                            padding: '0.9rem',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: embeddedPalette.textSecondary }}>
+                            Auth
+                          </div>
+                          <div style={{ marginTop: '0.35rem', fontSize: '1.25rem', fontWeight: 700, color: embeddedPalette.textPrimary }}>
+                            {formatStatusLabel(selectedConnector.auth.status)}
+                          </div>
+                          <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: embeddedPalette.textSecondary }}>
+                            {selectedConnector.auth.message || 'Notion auth state is managed by the connector flow.'}
+                          </p>
+                        </div>
+                        <div
+                          style={{
+                            border: `1px solid ${embeddedPalette.border}`,
+                            borderRadius: '18px',
+                            background: 'rgba(255,255,255,0.05)',
+                            padding: '0.9rem',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: embeddedPalette.textSecondary }}>
+                            Snapshot
+                          </div>
+                          <div style={{ marginTop: '0.35rem', fontSize: '1.25rem', fontWeight: 700, color: embeddedPalette.textPrimary }}>
+                            {selectedConnector.lastSyncedAt ? 'Ready' : 'Pending'}
+                          </div>
+                          <p style={{ margin: '0.3rem 0 0', fontSize: '0.78rem', color: embeddedPalette.textSecondary }}>
+                            {selectedConnector.lastSyncedAt ? formatDateTime(selectedConnector.lastSyncedAt) : '等待第一次同步'}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => void handleStartAuth()}
+                          disabled={authLoading || selectedConnector.auth.status === 'authenticating'}
+                          style={{
+                            border: 'none',
+                            borderRadius: '999px',
+                            padding: '0.78rem 1rem',
+                            background: 'rgba(255,255,255,0.92)',
+                            color: '#090909',
+                            cursor: authLoading || selectedConnector.auth.status === 'authenticating' ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            fontSize: '0.88rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <IconShare style={{ width: '0.95rem', height: '0.95rem' }} />
+                          {selectedConnector.auth.status === 'authenticated'
+                            ? '重新认证 Notion'
+                            : selectedConnector.auth.status === 'authenticating'
+                              ? '认证进行中'
+                              : '连接 Notion'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSyncSources()}
+                          disabled={syncLoading || !canEditResources}
+                          style={{
+                            border: `1px solid ${embeddedPalette.border}`,
+                            borderRadius: '999px',
+                            padding: '0.78rem 1rem',
+                            background: 'rgba(255,255,255,0.05)',
+                            color: embeddedPalette.textPrimary,
+                            cursor: syncLoading || !canEditResources ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.5rem',
+                            fontSize: '0.88rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          <IconArrowUp style={{ width: '0.95rem', height: '0.95rem' }} />
+                          {syncLoading ? '同步中…' : '刷新来源'}
+                        </button>
+                      </div>
+                    </div>
+                  </SectionCard>
+
+                  {selectedConnector.auth.status === 'authenticating' ? (
+                    <SectionCard
+                      title="Notion 认证"
+                      subtitle="打开浏览器完成确认后，这里会自动轮询认证状态直到成功。"
+                      compact={compact}
+                      theme="dark"
+                    >
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: isMobile ? '1fr' : '1.1fr 0.9fr',
+                          gap: '0.9rem',
+                        }}
+                      >
+                        <div
+                          style={{
+                            border: `1px solid ${embeddedPalette.border}`,
+                            borderRadius: '20px',
+                            background: 'rgba(255,255,255,0.05)',
+                            padding: '1rem',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: embeddedPalette.textSecondary }}>
+                            Verification code
+                          </div>
+                          <div
+                            style={{
+                              marginTop: '0.55rem',
+                              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                              fontSize: '1.3rem',
+                              fontWeight: 700,
+                              letterSpacing: '0.08em',
+                              color: embeddedPalette.textPrimary,
+                            }}
+                          >
+                            {selectedConnector.auth.verificationCode || '等待生成'}
+                          </div>
+                          <p style={{ margin: '0.65rem 0 0', fontSize: '0.84rem', lineHeight: 1.6, color: embeddedPalette.textSecondary }}>
+                            {selectedConnector.auth.message || '在 Notion 中确认访问权限。'}
+                          </p>
+                        </div>
+                        <div
+                          style={{
+                            border: `1px solid ${embeddedPalette.border}`,
+                            borderRadius: '20px',
+                            background: 'rgba(255,255,255,0.05)',
+                            padding: '1rem',
+                          }}
+                        >
+                          <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.12em', color: embeddedPalette.textSecondary }}>
+                            Browser step
+                          </div>
+                          <p style={{ margin: '0.55rem 0 0', fontSize: '0.84rem', lineHeight: 1.65, color: embeddedPalette.textSecondary }}>
+                            打开浏览器确认后，认证状态会自动刷新。当前页面只负责展示状态与轮询，不处理 Notion CLI 逻辑。
+                          </p>
+                          {selectedConnector.auth.verificationUrl ? (
+                            <a
+                              href={selectedConnector.auth.verificationUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.45rem',
+                                marginTop: '0.8rem',
+                                color: embeddedPalette.textPrimary,
+                                fontSize: '0.84rem',
+                                fontWeight: 700,
+                                textDecoration: 'none',
+                              }}
+                            >
+                              <IconShare style={{ width: '0.9rem', height: '0.9rem' }} />
+                              打开 Notion 验证页
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+                    </SectionCard>
+                  ) : null}
+
+                  <SectionCard
+                    title="资源选择"
+                    subtitle="认证完成后，从这里选择可访问的 Notion databases 和 standalone pages。"
+                    compact={compact}
+                    theme="dark"
+                    action={
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                        <ConnectorStatusPill status={selectedConnector.auth.status} theme="dark" />
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveResources()}
+                          disabled={!canEditResources || resourceSaving}
+                          style={{
+                            border: 'none',
+                            borderRadius: '999px',
+                            padding: '0.55rem 0.82rem',
+                            background: 'rgba(255,255,255,0.92)',
+                            color: '#090909',
+                            cursor: !canEditResources || resourceSaving ? 'not-allowed' : 'pointer',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {resourceSaving ? '保存中…' : '保存选择'}
+                        </button>
+                      </div>
+                    }
+                  >
+                    {!canEditResources ? (
+                      <div
+                        style={{
+                          border: `1px dashed ${embeddedPalette.border}`,
+                          borderRadius: '20px',
+                          background: 'rgba(255,255,255,0.04)',
+                          padding: '1rem',
+                          color: embeddedPalette.textSecondary,
+                          lineHeight: 1.65,
+                        }}
+                      >
+                        完成 Notion 认证后，这里会列出可访问的数据库和页面。当前 connector 还未认证，资源选择会保持禁用。
+                      </div>
+                    ) : resourceLoading ? (
+                      <div
+                        style={{
+                          border: `1px solid ${embeddedPalette.border}`,
+                          borderRadius: '20px',
+                          background: 'rgba(255,255,255,0.05)',
+                          padding: '1rem',
+                          color: embeddedPalette.textSecondary,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.65rem',
+                        }}
+                      >
+                        <IconLoader style={{ width: '1rem', height: '1rem' }} />
+                        正在加载可访问资源…
+                      </div>
+                    ) : resourceError ? (
+                      <div
+                        style={{
+                          border: '1px solid rgba(243, 183, 168, 0.24)',
+                          borderRadius: '20px',
+                          background: 'rgba(168, 102, 82, 0.14)',
+                          padding: '1rem',
+                          color: embeddedPalette.textPrimary,
+                          lineHeight: 1.6,
+                        }}
+                      >
+                        {resourceError}
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gap: '1rem' }}>
+                        <div style={{ display: 'grid', gap: '0.85rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: '0.93rem', fontWeight: 700, color: embeddedPalette.textPrimary }}>Databases</h4>
+                              <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: embeddedPalette.textSecondary }}>
+                                勾选连接器要同步的数据库。
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedDatabaseIds(databaseOptions.map((option) => option.id))}
+                              style={{
+                                border: `1px solid ${embeddedPalette.border}`,
+                                borderRadius: '999px',
+                                padding: '0.48rem 0.72rem',
+                                background: 'rgba(255,255,255,0.05)',
+                                color: embeddedPalette.textPrimary,
+                                cursor: 'pointer',
+                                fontSize: '0.76rem',
+                                fontWeight: 600,
+                              }}
+                            >
+                              全选数据库
+                            </button>
+                          </div>
+                          {databaseOptions.length === 0 ? (
+                            <div
+                              style={{
+                                border: `1px dashed ${embeddedPalette.border}`,
+                                borderRadius: '18px',
+                                background: 'rgba(255,255,255,0.04)',
+                                padding: '0.9rem',
+                                color: embeddedPalette.textSecondary,
+                              }}
+                            >
+                              没有可访问的 database。
+                            </div>
+                          ) : (
+                            <div style={{ display: 'grid', gap: '0.65rem' }}>
+                              {databaseOptions.map((option) => (
+                                <ToggleRow
+                                  key={option.id}
+                                  label={option.title}
+                                  helper={option.subtitle || 'Notion database'}
+                                  checked={selectedDatabaseIds.includes(option.id)}
+                                  onToggle={() => {
+                                    setSelectedDatabaseIds((current) =>
+                                      current.includes(option.id)
+                                        ? current.filter((id) => id !== option.id)
+                                        : [...current, option.id],
+                                    );
+                                  }}
+                                  meta={typeof option.pageCount === 'number' ? `${option.pageCount} pages` : undefined}
+                                  theme="dark"
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div style={{ display: 'grid', gap: '0.85rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: '0.93rem', fontWeight: 700, color: embeddedPalette.textPrimary }}>Standalone Pages</h4>
+                              <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: embeddedPalette.textSecondary }}>
+                                勾选连接器要同步的独立页面。
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPageIds(pageOptions.map((option) => option.id))}
+                              style={{
+                                border: `1px solid ${embeddedPalette.border}`,
+                                borderRadius: '999px',
+                                padding: '0.48rem 0.72rem',
+                                background: 'rgba(255,255,255,0.05)',
+                                color: embeddedPalette.textPrimary,
+                                cursor: 'pointer',
+                                fontSize: '0.76rem',
+                                fontWeight: 600,
+                              }}
+                            >
+                              全选页面
+                            </button>
+                          </div>
+                          {pageOptions.length === 0 ? (
+                            <div
+                              style={{
+                                border: `1px dashed ${embeddedPalette.border}`,
+                                borderRadius: '18px',
+                                background: 'rgba(255,255,255,0.04)',
+                                padding: '0.9rem',
+                                color: embeddedPalette.textSecondary,
+                              }}
+                            >
+                              没有可访问的 standalone page。
+                            </div>
+                          ) : (
+                            <div style={{ display: 'grid', gap: '0.65rem' }}>
+                              {pageOptions.map((option) => (
+                                <ToggleRow
+                                  key={option.id}
+                                  label={option.title}
+                                  helper={option.subtitle || 'Standalone page'}
+                                  checked={selectedPageIds.includes(option.id)}
+                                  onToggle={() => {
+                                    setSelectedPageIds((current) =>
+                                      current.includes(option.id)
+                                        ? current.filter((id) => id !== option.id)
+                                        : [...current, option.id],
+                                    );
+                                  }}
+                                  theme="dark"
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </SectionCard>
+
+                  <SectionCard
+                    title="来源列表"
+                    subtitle="这里显示 connector 已挂载的来源、同步状态和最近更新时间。"
+                    compact={compact}
+                    theme="dark"
+                    action={
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <span style={{ fontSize: '0.76rem', color: embeddedPalette.textSecondary }}>{selectedConnector.sources.length} items</span>
+                        <IconSettings style={{ width: '0.95rem', height: '0.95rem', color: embeddedPalette.textSecondary }} />
+                      </div>
+                    }
+                  >
+                    {selectedConnector.sources.length === 0 ? (
+                      <div
+                        style={{
+                          border: `1px dashed ${embeddedPalette.border}`,
+                          borderRadius: '20px',
+                          background: 'rgba(255,255,255,0.04)',
+                          padding: '1rem',
+                          color: embeddedPalette.textSecondary,
+                          lineHeight: 1.65,
+                        }}
+                      >
+                        当前还没有来源。完成认证并保存资源选择后，这里会出现 source cards。
+                      </div>
+                    ) : (
+                      <div style={{ display: 'grid', gap: '0.75rem' }}>
+                        {selectedConnector.sources.map((source) => (
+                          <SourceCard key={source.id} source={source} theme="dark" />
+                        ))}
+                      </div>
+                    )}
+                  </SectionCard>
+
+                  {selectedConnector.auth.status !== 'authenticated' ? (
+                    <div
+                      style={{
+                        border: '1px solid rgba(243, 183, 168, 0.22)',
+                        borderRadius: '20px',
+                        background: 'rgba(199, 136, 85, 0.1)',
+                        padding: '0.95rem 1rem',
+                        color: embeddedPalette.textPrimary,
+                        fontSize: '0.88rem',
+                        lineHeight: 1.65,
+                      }}
+                    >
+                      认证完成前，资源选择和来源刷新会保持禁用。点击上方按钮启动 Notion auth 后，页面会轮询状态直到完成或过期。
+                    </div>
+                  ) : null}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <Modal
+          open={createModalOpen}
+          title="新建 Notion 连接器"
+          onClose={() => {
+            if (createSaving) return;
+            setCreateModalOpen(false);
+          }}
+        >
+          <div style={{ display: 'grid', gap: '0.9rem' }}>
+            <div>
+              <label style={{ display: 'block', marginBottom: '0.45rem', fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-secondary)' }}>
+                Connector name
+              </label>
+              <input
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+                placeholder={DEFAULT_CONNECTOR_NAME}
+                autoFocus
+                style={{
+                  width: '100%',
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '16px',
+                  background: 'rgba(255,250,242,0.9)',
+                  padding: '0.9rem 1rem',
+                  fontSize: '0.95rem',
+                  color: 'var(--color-text-primary)',
+                  outline: 'none',
+                }}
+              />
+            </div>
+            <div
+              style={{
+                border: '1px dashed var(--color-border-paper)',
+                borderRadius: '18px',
+                background: 'rgba(255,250,242,0.64)',
+                padding: '0.9rem 1rem',
+                fontSize: '0.84rem',
+                lineHeight: 1.65,
+                color: 'var(--color-text-secondary)',
+              }}
+            >
+              当前只创建 Notion connector。创建后会自动进入同一工作台，接着发起认证、选择数据库和页面。
+            </div>
+            {createError ? (
+              <div
+                style={{
+                  border: '1px solid rgba(168, 102, 82, 0.22)',
+                  borderRadius: '18px',
+                  background: 'rgba(168, 102, 82, 0.08)',
+                  padding: '0.9rem 1rem',
+                  color: 'var(--color-state-error)',
+                  fontSize: '0.84rem',
+                  lineHeight: 1.6,
+                }}
+              >
+                {createError}
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.6rem' }}>
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                disabled={createSaving}
+                style={{
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '999px',
+                  padding: '0.68rem 0.95rem',
+                  background: 'var(--color-bg-paper)',
+                  color: 'var(--color-text-secondary)',
+                  cursor: createSaving ? 'not-allowed' : 'pointer',
+                  fontSize: '0.84rem',
+                  fontWeight: 600,
+                }}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleCreateConnector()}
+                disabled={createSaving}
+                style={{
+                  border: 'none',
+                  borderRadius: '999px',
+                  padding: '0.68rem 1rem',
+                  background: 'var(--color-text-primary)',
+                  color: 'var(--color-text-on-action)',
+                  cursor: createSaving ? 'not-allowed' : 'pointer',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
+                }}
+              >
+                {createSaving ? '创建中…' : '创建连接器'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      </>
+    );
+  }
+
   return (
     <div
       style={{
         minHeight: '100%',
-        padding: isMobile ? '1rem 1rem 5rem' : '1.5rem 1.5rem 2rem',
-        background:
-          'radial-gradient(circle at top left, rgba(214, 194, 168, 0.22), transparent 26%), radial-gradient(circle at top right, rgba(198, 176, 148, 0.16), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.18), transparent 18%), var(--color-bg-app)',
+        height: isEmbedded ? '100%' : 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: isEmbedded ? 'auto' : 'visible',
+        padding: isEmbedded
+          ? (isMobile ? '0.75rem 0.75rem 1rem' : '0.9rem')
+          : (isMobile ? '1rem 1rem 5rem' : '1.5rem 1.5rem 2rem'),
+        background: isEmbedded
+          ? 'transparent'
+          : 'radial-gradient(circle at top left, rgba(214, 194, 168, 0.22), transparent 26%), radial-gradient(circle at top right, rgba(198, 176, 148, 0.16), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.18), transparent 18%), var(--color-bg-app)',
         color: 'var(--color-text-primary)',
       }}
     >
       <div
         style={{
-          maxWidth: '1220px',
-          margin: '0 auto',
+          width: '100%',
+          maxWidth: isEmbedded ? 'none' : '1220px',
+          margin: isEmbedded ? 0 : '0 auto',
           border: '1px solid var(--color-border-paper)',
-          borderRadius: '32px',
+          borderRadius: isEmbedded ? '24px' : '32px',
           overflow: 'hidden',
-          background: 'linear-gradient(180deg, rgba(255, 250, 242, 0.96), rgba(247, 239, 227, 0.9))',
-          boxShadow: '0 30px 72px rgba(82, 61, 40, 0.12)',
-          backdropFilter: 'blur(16px)',
+          background: isEmbedded
+            ? 'linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(247, 239, 227, 0.94))'
+            : 'linear-gradient(180deg, rgba(255, 250, 242, 0.96), rgba(247, 239, 227, 0.9))',
+          boxShadow: isEmbedded ? '0 18px 40px rgba(82, 61, 40, 0.1)' : '0 30px 72px rgba(82, 61, 40, 0.12)',
+          backdropFilter: isEmbedded ? 'none' : 'blur(16px)',
+          display: 'flex',
+          flexDirection: 'column',
+          minHeight: 0,
+          flex: 1,
         }}
       >
         <div
           style={{
-            padding: isMobile ? '1rem' : '1.2rem 1.25rem',
+            padding: isEmbedded
+              ? (isMobile ? '0.85rem' : '1rem 1.05rem')
+              : (isMobile ? '1rem' : '1.2rem 1.25rem'),
             borderBottom: '1px solid var(--color-border-paper)',
             background:
-              'linear-gradient(180deg, rgba(255,255,255,0.82), rgba(244,234,220,0.56))',
+              isEmbedded
+                ? 'linear-gradient(180deg, rgba(255,255,255,0.88), rgba(244,234,220,0.5))'
+                : 'linear-gradient(180deg, rgba(255,255,255,0.82), rgba(244,234,220,0.56))',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
@@ -819,9 +2087,11 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
               </div>
               <h1
                 style={{
-                  margin: '0.8rem 0 0',
+                  margin: isEmbedded ? '0.6rem 0 0' : '0.8rem 0 0',
                   fontFamily: 'Georgia, "Times New Roman", serif',
-                  fontSize: isMobile ? '1.65rem' : '2.15rem',
+                  fontSize: isEmbedded
+                    ? (isMobile ? '1.35rem' : '1.7rem')
+                    : (isMobile ? '1.65rem' : '2.15rem'),
                   fontWeight: 700,
                   lineHeight: 1.15,
                   color: 'var(--color-text-primary)',
@@ -831,10 +2101,10 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
               </h1>
               <p
                 style={{
-                  margin: '0.65rem 0 0',
-                  maxWidth: '56rem',
-                  fontSize: '0.95rem',
-                  lineHeight: 1.65,
+                  margin: isEmbedded ? '0.45rem 0 0' : '0.65rem 0 0',
+                  maxWidth: isEmbedded ? '42rem' : '56rem',
+                  fontSize: isEmbedded ? '0.84rem' : '0.95rem',
+                  lineHeight: 1.6,
                   color: 'var(--color-text-secondary)',
                 }}
               >
@@ -849,14 +2119,14 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
                 style={{
                   border: 'none',
                   borderRadius: '999px',
-                  padding: '0.82rem 1.1rem',
+                  padding: isEmbedded ? '0.72rem 0.95rem' : '0.82rem 1.1rem',
                   background: 'var(--color-text-primary)',
                   color: 'var(--color-text-on-action)',
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.5rem',
-                  fontSize: '0.9rem',
+                  fontSize: isEmbedded ? '0.84rem' : '0.9rem',
                   fontWeight: 700,
                   boxShadow: '0 16px 34px rgba(91, 69, 44, 0.16)',
                 }}
@@ -870,14 +2140,14 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
                 style={{
                   border: '1px solid var(--color-border-paper)',
                   borderRadius: '999px',
-                  padding: '0.82rem 1rem',
+                  padding: isEmbedded ? '0.72rem 0.9rem' : '0.82rem 1rem',
                   background: 'var(--color-bg-paper)',
                   color: 'var(--color-text-secondary)',
                   cursor: 'pointer',
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.45rem',
-                  fontSize: '0.88rem',
+                  fontSize: isEmbedded ? '0.82rem' : '0.88rem',
                   fontWeight: 600,
                 }}
               >
@@ -891,16 +2161,18 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: isMobile ? '1fr' : '320px minmax(0, 1fr)',
-            minHeight: isMobile ? 'auto' : 'calc(100vh - 10rem)',
+            gridTemplateColumns: isMobile ? '1fr' : isEmbedded ? '300px minmax(0, 1fr)' : '320px minmax(0, 1fr)',
+            minHeight: isEmbedded ? 0 : (isMobile ? 'auto' : 'calc(100vh - 10rem)'),
+            flex: isEmbedded ? 1 : undefined,
+            overflow: isEmbedded ? 'hidden' : 'visible',
           }}
         >
           <aside
             style={{
               borderRight: isMobile ? 'none' : '1px solid var(--color-border-paper)',
               borderBottom: isMobile ? '1px solid var(--color-border-paper)' : 'none',
-              padding: '1rem',
-              background: 'rgba(255,255,255,0.3)',
+              padding: isEmbedded ? '0.85rem' : '1rem',
+              background: isEmbedded ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.3)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.9rem' }}>
@@ -983,14 +2255,15 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
             )}
           </aside>
 
-          <main style={{ padding: '1rem', background: 'rgba(255,255,255,0.2)' }}>
+          <main style={{ padding: isEmbedded ? '0.85rem' : '1rem', background: isEmbedded ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.2)', minHeight: 0 }}>
             {!selectedConnector ? (
-              <ConnectorEmptyState onCreate={openCreateModal} />
+              <ConnectorEmptyState onCreate={openCreateModal} compact={compact} />
             ) : (
               <div style={{ display: 'grid', gap: '1rem' }}>
                 <SectionCard
                   title="连接器概览"
                   subtitle="可编辑名称、认证状态和基础操作都在这里。"
+                  compact={compact}
                   action={
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
                       <button
@@ -1258,6 +2531,7 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
                   <SectionCard
                     title="Notion 认证"
                     subtitle="打开浏览器完成确认后，这里会自动轮询认证状态直到成功。"
+                    compact={compact}
                   >
                     <div
                       style={{
@@ -1335,6 +2609,7 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
                 <SectionCard
                   title="资源选择"
                   subtitle="认证完成后，从这里选择可访问的 Notion databases 和 standalone pages。"
+                  compact={compact}
                   action={
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
                       <ConnectorStatusPill status={selectedConnector.auth.status} />
@@ -1525,6 +2800,7 @@ export default function ResourceConnectorPage({ isMobile = false }: ResourceConn
                 <SectionCard
                   title="来源列表"
                   subtitle="这里显示 connector 已挂载的来源、同步状态和最近更新时间。"
+                  compact={compact}
                   action={
                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                       <span style={{ fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>{selectedConnector.sources.length} items</span>

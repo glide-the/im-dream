@@ -15,13 +15,18 @@
 
 | 模块 | 名称 | 作用 | 关键视觉表现 |
 | --- | --- | --- | --- |
-| RC-A | ConnectorHeader | 显示连接器身份，并承载分享、更多菜单、主题切换 | 顶部单行、纸张标签式标题、细边按钮 |
+| RC-A | ChatLandingShell | 承载居中的输入框、快捷功能与 app-selected 面板容器 | 入口区整体留白、层级分明、可横向伸展 |
 | RC-B | ChatInputBar | 发起新聊天，控制模型、语音与发送 | 大圆角输入槽、内嵌工具按钮、暖底描边 |
-| RC-C | TabSwitch | 切换“聊天 / 来源”主视图 | 手账胶囊标签、当前态有底色与内阴影 |
-| RC-D | EmptySourcePanel | 在无来源时解释价值并给出 CTA | 大面积虚线框、居中图标组、卡片纸板感 |
-| RC-E | SourceList | 展示已接入来源与同步状态 | 纵向资源卡、状态胶囊、细分隔线 |
-| RC-F | ChatList | 展示历史对话与时间线 | 轻量列表卡、时间标记、摘要层级 |
+| RC-C | AppLandingState | 由应用导航切换“历史对话 / 连接器”主视图 | 不在输入框下方重复渲染二级 pill |
+| RC-D | HistoryPanel | 在历史对话 state 下展示会话列表、搜索和继续上下文入口 | 轻量列表卡、时间标记、摘要层级 |
+| RC-E | EmbeddedConnectorWorkbench | 在连接器 state 下嵌入 `ResourceConnectorPage` | 纸张工台、连接器列表、创建 / 认证 / 来源卡片 |
+| RC-F | SourceList | 展示已接入来源与同步状态 | 纵向资源卡、状态胶囊、细分隔线 |
 | RC-G | AddSourceModal | 选择来源接入方式 | 底部 ActionSheet、三类来源入口、柔和遮罩 |
+
+> `EmbeddedConnectorWorkbench` 复用 `frontend/src/components/dashboard/ResourceConnectorPage.tsx`，把连接器管理保留在 Chat 入口页下方，而不是单独主页面。
+> 嵌入态按最新点击页布局呈现为深色工作台：右上角保留 `分享 / 更多`，不再渲染重复标题说明或内部 `聊天 / 来源` tab；内容区先显示 `添加源` 行和分隔线，再展示来源列表。
+> 嵌入态状态分支需要保持隔离：created workbench 以已创建连接器为默认语义，真实数据不可用时使用经过 connector normalizer 的 fallback；`添加源` 进入的来源管理视图没有真实 connector context 时只显示默认无连接器空态。
+> 页面壳必须被锁定在浏览器 viewport 内。Chat shell、connector shell、历史列表和来源列表通过连续 `min-height: 0` 与内部 `overflow-auto` 管理滚动，禁止让 body/window 成为连接器页面的主要滚动容器。
 
 ---
 
@@ -71,7 +76,7 @@ html[data-theme='dark'] {
 | --- | --- | --- |
 | 顶栏按钮 | Hover / Focus | 背景由透明过渡为纸卡底色，边框略微加深，整体上浮 1px。 |
 | 输入框容器 | Focus within | 外圈出现暖棕色柔和 ring，阴影略加深，强化“可以开始提问”的入口感。 |
-| Tab 标签 | Switch | 胶囊背景在 180ms 内滑入，未选中态文字降低对比度。 |
+| 应用导航状态 | Switch | 应用级导航切换历史/连接器 landing state；Chat 输入区下方不再重复显示切换 pill。 |
 | 空状态按钮 | Hover | 轻微上浮并出现更深纸影，箭头图标向右移动 2px。 |
 | 来源卡片 | Hover | 卡片整体上移 2px，标题变深，右上角状态标签更清晰。 |
 | ActionSheet | Open / Close | 遮罩淡入，底部面板由下向上平滑滑入，关闭时反向执行。 |
@@ -80,4 +85,6 @@ html[data-theme='dark'] {
 ---
 
 ## ✅ 说明
-- 页面支持 **Light / Dark** 模式切换、连接器名称行内编辑、更多菜单展开、来源 ActionSheet 打开/关闭。
+- 页面支持 **Light / Dark** 模式切换、应用级历史对话 / 连接器 landing state、连接器名称行内编辑、更多菜单展开、来源 ActionSheet 打开/关闭。
+- `ResourceConnectorPage` 仅作为 Chat shell 的 `连接器` state 内嵌工作台使用，不再承担独立主入口职责；输入框下方的 `QuickActionStrip` 属于 Chat shell，不属于连接器页本体。
+- `添加源` 进入来源管理后应保持 quick actions 只有输入框下方一组，connector fallback 不得写入真实 `selectedConnector`，来源空态也不得污染 created workbench。

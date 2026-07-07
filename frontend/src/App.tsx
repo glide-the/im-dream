@@ -15,6 +15,8 @@
 // [Sync] 2026-06-23: route /oauth/device/verify to the Device Flow verification page before the main app shell.
 // [Sync] 2026-07-04: add Resource Connector view entry and mobile/desktop navigation affordance.
 // [Sync] 2026-07-05: make the connector viewport scrollable inside the fixed app shell so resource selection and source cards remain reachable.
+// [Sync] 2026-07-07: route the connector entry into ChatView so the connector workbench lives under the chat shell instead of a standalone page.
+// [Sync] 2026-07-07: mount ChatView in a fixed flex viewport so embedded connector panels cannot force page-level overflow.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -58,7 +60,6 @@ import { useVoiceInput } from './hooks/useVoiceInput';
 import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
-import ResourceConnectorPage from './components/dashboard/ResourceConnectorPage';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -149,7 +150,7 @@ export default function App() {
 
   const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector'>('writing');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
-  const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
+  const shouldRenderChatView = hasOpenedChatView || currentView === 'chat' || currentView === 'connector';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
 
@@ -430,7 +431,7 @@ export default function App() {
 
   // @@@ Preserve ChatView local state after the first visit while avoiding eager thread creation on app load.
   useEffect(() => {
-    if (currentView === 'chat') {
+    if (currentView === 'chat' || currentView === 'connector') {
       setHasOpenedChatView(true);
     }
   }, [currentView]);
@@ -1881,22 +1882,6 @@ export default function App() {
           />
         </div>
       )}
-      {currentView === 'connector' && (
-        <div style={{
-          position: 'fixed',
-          top: viewTopOffset,
-          left: 0,
-          right: 0,
-          bottom: mobileBottomOffset,
-          background: 'var(--color-bg-app)',
-          display: 'flex',
-          overflowX: 'hidden',
-          overflowY: 'auto',
-          WebkitOverflowScrolling: 'touch',
-        }}>
-          <ResourceConnectorPage isMobile={isMobile} />
-        </div>
-      )}
       {currentView === 'settings' && (
         <div style={{
           flex: 1,
@@ -2115,7 +2100,9 @@ export default function App() {
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
-          display: currentView === 'chat' ? 'block' : 'none',
+          display: currentView === 'chat' || currentView === 'connector' ? 'flex' : 'none',
+          minHeight: 0,
+          minWidth: 0,
           overflow: 'hidden'
         }}>
           <ChatView
@@ -2123,6 +2110,8 @@ export default function App() {
             onEditorWriteConfirmed={handleEditorWriteConfirmed}
             requestedThreadId={requestedChatThreadId}
             activeVoice={activeChatVoice}
+            isMobile={isMobile}
+            landingTab={currentView === 'connector' ? 'connector' : 'history'}
           />
         </div>
       )}

@@ -1,7 +1,7 @@
 # Resource Connector — 业务流程图
 
 Status: Draft  
-Updated: 2026-06-28
+Updated: 2026-07-07
 Scope: 设计 — 资源连接器全链路业务流程图（含四层交互泳道）
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -12,6 +12,7 @@ Scope: 设计 — 资源连接器全链路业务流程图（含四层交互泳�
 > [Sync] 2026-06-22: 初始设计 — 业务流程图集
 > [Sync] 2026-06-22: 迁移至 claude-agent/notion-point — 工作空间映射相关设计独立管理
 > [Sync] 2026-06-28: 业务流程图收敛到 canonical snapshot 模型；Agent 消费不再以本地缓存/lazy load 作为权威数据来源。
+> [Sync] 2026-07-07: 业务起点改为 Chat 入口页，下方 landing tabs 承载历史对话与连接器工作台。
 
 ---
 
@@ -34,30 +35,31 @@ Scope: 设计 — 资源连接器全链路业务流程图（含四层交互泳�
 
 ```mermaid
 flowchart TD
-    A[用户打开设置页面] --> B{选择平台}
-    B -->|Notion| C[创建 Notion 资源连接器]
-    B -->|GitHub| Z1[Future: GitHub 连接器]
-    B -->|Google Drive| Z2[Future: GDrive 连接器]
+    A[用户打开 Chat 入口页] --> B{切换到连接器 Tab}
+    B --> C{选择平台}
+    C -->|Notion| D[创建 Notion 资源连接器]
+    C -->|GitHub| Z1[Future: GitHub 连接器]
+    C -->|Google Drive| Z2[Future: GDrive 连接器]
 
-    C --> D[Auth Layer: 发起 ntn login]
-    D --> E[用户浏览器确认]
-    E --> F{认证成功?}
-    F -->|是| G[Auth Layer: 状态→AUTHENTICATED]
-    F -->|否/超时| H[Auth Layer: 状态→EXPIRED]
-    H --> D
+    D --> E[Auth Layer: 发起 ntn login]
+    E --> F[用户浏览器确认]
+    F --> G{认证成功?}
+    G -->|是| H[Auth Layer: 状态→AUTHENTICATED]
+    G -->|否/超时| I[Auth Layer: 状态→EXPIRED]
+    I --> E
 
-    G --> I[Operation Layer: 搜索可访问 Database]
-    I --> J[Operation Layer: 搜索 Standalone Pages]
-    J --> K[用户选择要同步的资源]
-    K --> L[Task Layer: 提交全量同步任务]
-    L --> M[Data Layer: 全量同步远程数据]
-    M --> N[Data Layer: 物化 canonical snapshot]
-    N --> O[连接器创建完成 ✓]
+    H --> J[Operation Layer: 搜索可访问 Database]
+    J --> K[Operation Layer: 搜索 Standalone Pages]
+    K --> L[用户选择要同步的资源]
+    L --> M[Task Layer: 提交全量同步任务]
+    M --> N[Data Layer: 全量同步远程数据]
+    N --> O[Data Layer: 物化 canonical snapshot]
+    O --> P[连接器创建完成 ✓]
 
-    O --> P[用户进入对话]
-    P --> Q[Agent init attach current snapshot]
-    Q --> R[.notion/ 虚拟索引从同一 snapshotVersion 读取]
-    R --> S[Agent 展示 Notion 内容]
+    P --> Q[用户进入对话]
+    Q --> R[Agent init attach current snapshot]
+    R --> S[.notion/ 虚拟索引从同一 snapshotVersion 读取]
+    S --> T[Agent 展示 Notion 内容]
 ```
 
 ### 1.2 核心业务节点
@@ -350,6 +352,7 @@ sequenceDiagram
     participant Data as Data Layer
     participant Bus as Event Bus
 
+    Note over FE,Bus: === Entry: Chat landing connector tab ===
     Note over FE,Bus: === Phase 1: 认证 ===
     FE->>Auth: init_login(user_id)
     Auth->>Auth: ntn login --no-browser
