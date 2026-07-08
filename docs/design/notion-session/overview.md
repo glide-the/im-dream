@@ -194,7 +194,7 @@ NOTION_RESOURCES: dict[str, str] = {
 
 ### 4.1 配置入口
 
-前端在 Settings 内 `ConnectorNotionDetailPage` 中提供 Notion 配置入口，并由内嵌的 `ResourceConnectorPage` 复用现有认证 / 资源选择流程：
+前端在 Settings 内 `ConnectorNotionDetailPage` 中提供 Notion 配置入口。该页直接复用现有 connector API helpers 完成认证 / 资源选择流程，不再嵌入集合型 `ResourceConnectorPage`：
 
 | 字段 | 说明 | 存储位置 |
 | ------------- | ------------------------------------------------- | ---------------------------- |
@@ -572,9 +572,9 @@ Chat workspace
   ├─ ConnectorNotionDetailPage
   │    ├─ TopNavigation
   │    ├─ ConnectorHeader
-  │    ├─ ConnectorOverviewSection
-  │    ├─ StrategySection [暂不实现]
-  │    ├─ ResourceSourceSection
+  │    ├─ NotionAccountStatusSection
+  │    ├─ ResourceScopeSection
+  │    ├─ MountedSourcesSection
   │    └─ ConnectionStateCard
   ├─ Context banner: "Using Notion snapshot <version>"
   └─ Proposal card: diff preview + base snapshot identity

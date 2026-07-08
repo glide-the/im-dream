@@ -13,6 +13,8 @@
 //                    sessions do not regress an already authenticated connector back to pending/error in the UI.
 // [Sync] 2026-07-07: expose the connector normalizer for UI-only fallback workbench state so mock/fallback data
 //                    follows the same client shape as backend and localStorage responses.
+// [Sync] 2026-07-08: local fallback create now replaces same-platform connectors so the frontend preserves
+//                    the single-account-per-platform business rule while backend enforcement lands separately.
 /**
  * Resource connector API helpers.
  *
@@ -551,8 +553,9 @@ export async function listConnectors(): Promise<ResourceConnector[]> {
 export async function createConnector(input: CreateConnectorInput): Promise<ResourceConnector> {
   const localFallback = () => {
     const connector = buildLocalConnector(input);
-    const connectors = readLocalConnectors();
-    writeLocalConnectors([connector, ...connectors.filter((item) => item.id !== connector.id)]);
+    const platform = input.platform ?? 'notion';
+    const connectors = readLocalConnectors().filter((item) => item.platform !== platform);
+    writeLocalConnectors([connector, ...connectors]);
     return connector;
   };
 

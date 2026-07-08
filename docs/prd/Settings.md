@@ -264,11 +264,12 @@ HookJSONOutput(
 - `本地资源链接` 只保留 CLI 执行器占位，当前版本不设计完整交互。
 - **点击 Notion「管理」是页面级导航，不是原地展开**：App 级 `showNotionConnectorDetail` 状态置 `true`，Settings 视图整体切换为 `ConnectorNotionDetailPage`，替换掉 Energy Bar / AI 模型配置等其它设置分区（而不是在资源链接卡片内叠加显示）。
   - `ConnectorNotionDetailPage` 顶部渲染「← 资源连接器 > Notion Connector」轻量导航（对应《链接器概念的交互设计稿》「具体配置页面 / 最上方导航」骨架屏），返回按钮回到 Settings 资源链接索引卡片。
-  - 页面主体按草图固定为 `ConnectorHeader`、`ConnectorOverviewSection`、`StrategySection`、`ResourceSourceSection`、`ConnectionStateCard`。
-  - `ConnectorHeader` 展示 Notion 图标、标题、说明、状态 badge，以及「查看设计稿」「关闭连接」两个操作位。
-  - `ConnectorOverviewSection` 用行级概览卡展示图标、描述、状态、设计稿和连接控制。
-  - `StrategySection` 只显示 `[暂不实现]` 占位，不开放策略表单。
-  - `ResourceSourceSection` 承载现有 `ResourceConnectorPage` 的非 embedded / warm-paper page mode，用于保留 Notion 认证、资源选择、来源列表、同步和删除流程。
+  - 同一平台只允许认证一个账号；Notion 详情页不得出现「新建连接器」「刷新列表」「连接器列表」等集合级入口。
+  - 页面主体按单账号资源配置固定为 `ConnectorHeader`、`NotionAccountStatusSection`、`ResourceScopeSection`、`MountedSourcesSection`、`ConnectionStateCard`。
+  - `ConnectorHeader` 展示 Notion 图标、标题、说明、状态 badge，以及「连接 / 重新连接 Notion」「关闭连接」两个真实操作位。
+  - `NotionAccountStatusSection` 集中展示账号模型、授权状态、挂载来源数量、最近同步时间；原 `ResourceConnectorPage` 中的状态卡上移到这里。
+  - `ResourceScopeSection` 直接调用现有 connector API 完成认证后的 database / standalone page 选择和保存，不嵌入集合型 `ResourceConnectorPage`。
+  - `MountedSourcesSection` 只展示当前 Notion 账号已挂载来源，不展示连接器列表或多实例切换。
   - `ConnectionStateCard` 解释当前页面受限原因：未认证、认证中、已连接、同步中、同步失败或已关闭。
   - 返回时重新聚焦资源链接索引卡片，与从 Chat 跳转过来的聚焦行为保持一致。
 - `ConnectorSettingsSection` 本身只负责入口、摘要和触发页面导航，不承载创建、认证、资源选择或同步逻辑。
@@ -363,7 +364,7 @@ Settings 页面通过以下入口访问：
 本轮已完成以下前端实现：
 - 新建 `ModelConfigSection.tsx`，封装主题、模型、系统提示词、工作区模式的配置 UI 与 API 交互逻辑。
 - 新建 `ConnectorSettingsSection.tsx`，封装 Settings 里的资源链接索引卡片以及远程/本地资源占位。
-- 新建 `ConnectorNotionDetailPage.tsx`，作为 Notion「具体配置页面」的独立导航页面（面包屑 + 复用 `ResourceConnectorPage` page mode）。
+- 新建 `ConnectorNotionDetailPage.tsx`，作为 Notion「具体配置页面」的独立导航页面；该页直接承载单账号认证、资源选择、来源列表、同步和关闭流程，不再复用集合型 `ResourceConnectorPage` page mode。
 - 新建 `ConnectorLandingPanel.tsx`，作为 Chat 中的轻量 connector 摘要和 Settings 跳转 CTA。
 - 在 `App.tsx` Settings 视图中注入 `<ModelConfigSection />`，作为独立区域显示。
 - 在 `App.tsx` 新增 `showNotionConnectorDetail` 状态；点击 Notion「管理」时把 Settings 视图整体切换为 `<ConnectorNotionDetailPage />`，不再与其它设置分区混排。

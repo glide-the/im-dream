@@ -16,6 +16,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 > [Sync] 2026-07-08: 入口描述曾短暂偏离 Chat 主工作区，本稿已回收为 Chat `WorkspaceTabBar` 主入口，并撤销仅摘要化的连接器路径表述。
 > [Sync] 2026-07-08: Notion 详情页统一采用 Settings 内 `ConnectorNotionDetailPage` 结构与 `资源连接器 > Notion Connector` 面包屑；详情层级、状态词汇、骨架屏说明与两份最新草图重新对齐。
 > [Sync] 2026-07-08: 根据最新反馈修正入口边界：Chat `ResourceConnectorTabPanel` 只做摘要和跳转，点击「选择连接器」或连接器卡片进入 Settings 的「资源链接」区；Notion 详情页由 Settings 内 `ConnectorNotionDetailPage` 承载，保留现有认证 / 资源选择流程。
+> [Sync] 2026-07-08: 详情页业务模型收敛为“同一平台只能认证一个账号”；`ConnectorNotionDetailPage` 不再嵌入集合型 `ResourceConnectorPage`，也不展示新建 / 刷新 / 连接器列表等多实例入口。
 
 ---
 
@@ -39,6 +40,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 **资源连接器**（Resource Connector）在 Chat 工作区中是一级摘要视图，在 Settings 中是完整管理视图。用户进入 Chat Dashboard 后，先看到居中的 `ChatInputDock`，其下方通过 `WorkspaceTabBar` 在 `聊天历史` 与 `资源连接器` 之间切换；点击「选择连接器」或连接器卡片后进入 Settings 的「资源链接」区，再通过 Notion「管理」进入 `ConnectorNotionDetailPage` 完成认证、来源选择与同步管理。
 
 > 本期只落地 Notion Connector 的完整详情页；飞书与本地 CLI 执行器仍保留为入口级占位，不展开完整配置流。
+> 同一平台只允许认证一个账号；Notion 详情页是单账号资源配置页，不是连接器集合管理台。
 
 ### 1.2 核心价值
 
@@ -53,7 +55,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 | ChatGPT Projects 聊天主页面 | `ChatInputDock` + `WorkspaceTabBar` + `MainContentArea` |
 | ChatGPT Projects 来源入口 | Chat 内 `ResourceConnectorTabPanel` |
 | Slack / Google Drive 连接器详情 | Settings 内的 `ConnectorNotionDetailPage` |
-| 数据源选择 / 索引配置 | `ResourceSourceSection` |
+| 数据源选择 / 索引配置 | `ResourceScopeSection` |
 
 ---
 
@@ -66,7 +68,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 | 连接器主入口 | 用户在 Chat 页面通过 `WorkspaceTabBar` 进入 `资源连接器` 视图 | P0 |
 | 连接外部平台 | 在 Notion Connector 详情页发起 OAuth / CLI 认证 | P0 |
 | 选择资源 | 用户勾选可访问的 Database 与 Standalone Page | P0 |
-| 查看来源状态 | 在 Chat 的连接器 Tab 查看当前连接器列表、筛选、排序与异常态 | P0 |
+| 查看来源状态 | 在 Chat 的连接器 Tab 查看摘要；在 Settings Notion 详情页查看当前账号来源 | P0 |
 | 发起对话 | 在 Chat 中继续提问，Agent 自动感知已连接资源 | P0 |
 | 刷新同步 | 在详情页或后续卡片操作中触发同步 | P1 |
 | 上传工作空间文件 | 后续迭代，不在本轮详情页实现 | 后续迭代 |
@@ -91,12 +93,12 @@ ChatDashboardPage
 SettingsView
   ├── ConnectorSettingsSection
   └── ConnectorNotionDetailPage
-  ├── TopNavigation
-  ├── ConnectorHeader
-  ├── ConnectorOverviewSection
-  ├── StrategySection（[暂不实现] 占位）
-  ├── ResourceSourceSection
-  └── ConnectionStateCard
+        ├── TopNavigation
+        ├── ConnectorHeader
+        ├── NotionAccountStatusSection
+        ├── ResourceScopeSection
+        ├── MountedSourcesSection
+        └── ConnectionStateCard
 ```
 
 ---
@@ -161,20 +163,20 @@ ResourceConnectorTabPanel
 │ ← 资源连接器 > Notion Connector                                     │
 ├────────────────────────────────────────────────────────────────────┤
 │ ConnectorHeader                                                    │
-│ [连接器图标] Notion Resource Connector                  [查看链接器设计稿] [关闭连接] │
-│            Notion 远程资源连接器说明                                │
+│ [Notion图标] Notion Resource Connector              [连接/重新连接 Notion] [关闭连接] │
+│            单平台单账号配置页                                        │
 │            [未认证 / 认证中 / 已连接 / 同步中 / 同步失败 / 已关闭]    │
 ├────────────────────────────────────────────────────────────────────┤
-│ ConnectorOverviewSection                                           │
-│  图标 / 描述 / 状态 / 设计稿 / 连接控制                             │
+│ NotionAccountStatusSection                                          │
+│  账号模型 / 授权状态 / 挂载来源 / 最近同步                          │
 ├────────────────────────────────────────────────────────────────────┤
-│ StrategySection [暂不实现]                                          │
-│  当前版本暂不开放策略配置                                            │
-├────────────────────────────────────────────────────────────────────┤
-│ ResourceSourceSection                                              │
-│  资源选择 / 来源列表                                       [+ 添加] │
+│ ResourceScopeSection                                                │
+│  资源范围                                             [保存资源] [刷新同步] │
 │  ├─ 未认证：禁用态 + 虚线空说明                                      │
-│  └─ 已认证：数据库 → 页面树（可展开 / 选择）                         │
+│  └─ 已认证：Databases / Standalone Pages 勾选列表                   │
+├────────────────────────────────────────────────────────────────────┤
+│ MountedSourcesSection                                               │
+│  当前 Notion 账号已挂载来源和同步状态                                │
 ├────────────────────────────────────────────────────────────────────┤
 │ ConnectionStateCard                                                │
 │  ⚠ 授权 / 同步状态                                         [开关]   │
@@ -190,10 +192,10 @@ ResourceConnectorTabPanel
 | Chat 连接器内容 | `ResourceConnectorTabPanel` | 承载筛选排序、空态、连接器列表与错误提示 |
 | 连接器详情页 | `ConnectorNotionDetailPage` | Settings 内点击 Notion「管理」后进入的独立配置页 |
 | 顶部导航 | `TopNavigation` | 固定使用 `← 资源连接器 > Notion Connector` |
-| 连接器头部 | `ConnectorHeader` | 图标 / 名称 / 描述 / 状态 badge / 设计稿按钮 / 关闭连接 |
-| 连接器概览 | `ConnectorOverviewSection` | 行级概览卡，展示状态、设计稿链接和关闭动作 |
-| 策略占位 | `StrategySection` | 明确标注 `[暂不实现]` |
-| 来源列表 | `ResourceSourceSection` | 未认证时禁用说明；已认证时展示 database → page 展开树 |
+| 连接器头部 | `ConnectorHeader` | 图标 / 名称 / 单账号说明 / 状态 badge / 连接或关闭动作 |
+| 账号状态 | `NotionAccountStatusSection` | 展示账号模型、授权状态、来源数量与最近同步；承接原 Resource Connector 状态信息 |
+| 资源范围 | `ResourceScopeSection` | 未认证时禁用说明；已认证时展示 databases / standalone pages 勾选列表 |
+| 来源列表 | `MountedSourcesSection` | 只展示当前 Notion 账号已挂载来源，不提供连接器列表或多实例切换 |
 | 底部状态卡 | `ConnectionStateCard` | 解释“为什么当前页面受限”并提供开关 |
 
 ---
@@ -235,8 +237,8 @@ ResourceConnectorTabPanel
 用户进入 ConnectorNotionDetailPage
     │
     ├─ 未认证
-    │   ├─ ConnectorHeader / ConnectorOverviewSection 可查看
-    │   ├─ ResourceSourceSection 禁用并显示「请先完成 Notion 授权」
+    │   ├─ ConnectorHeader / NotionAccountStatusSection 可查看
+    │   ├─ ResourceScopeSection 禁用并显示「请先完成 Notion 授权」
     │   └─ ConnectionStateCard 解释当前限制原因
     │
     ├─ 点击认证入口
@@ -254,7 +256,7 @@ ResourceConnectorTabPanel
 ### 4.4 关闭连接
 
 ```txt
-用户点击 ConnectorHeader / ConnectorOverviewSection 中的「关闭连接」
+用户点击 ConnectorHeader 中的「关闭连接」
     │
     ├─ 弹出二次确认
     │   ├─ 说明关闭后将停止对话中调用该连接器
@@ -262,7 +264,7 @@ ResourceConnectorTabPanel
     │
     ├─ 确认关闭
     │   ├─ 状态改为「已关闭」
-    │   ├─ ResourceSourceSection 改为禁用态
+    │   ├─ ResourceScopeSection 改为禁用态
     │   └─ ConnectionStateCard 显示关闭原因与恢复入口
     │
     └─ 取消关闭 → 保持原状态
@@ -296,9 +298,9 @@ ResourceConnectorTabPanel
 
 | 状态词 | 触发条件 | 详情页表现 |
 |--------|----------|------------|
-| `未认证` | 尚未完成认证 | `ResourceSourceSection` 禁用；`ConnectionStateCard` 解释需先授权 |
+| `未认证` | 尚未完成认证 | `ResourceScopeSection` 禁用；`ConnectionStateCard` 解释需先授权 |
 | `认证中` | 已发起认证，等待用户确认或轮询 | 显示验证码、浏览器确认提示与轮询反馈 |
-| `已连接` | 认证成功且可读取当前连接器配置 | `ConnectorHeader` / `ConnectorOverviewSection` 显示正常态 |
+| `已连接` | 认证成功且可读取当前连接器配置 | `ConnectorHeader` / `NotionAccountStatusSection` 显示正常态 |
 | `同步中` | 已选择资源并触发同步 | 状态 badge 与资源列表行显示 loading |
 | `同步失败` | 同步任务失败 | 保留已有资源展示并提供重试 |
 | `已关闭` | 用户确认关闭连接 | 保留历史资源记录但禁用操作，提示不可在对话中调用 |
@@ -332,9 +334,18 @@ ResourceConnectorTabPanel
 | 项 | 方案 |
 |---|---|
 | 问题 | `ConnectorNotionDetailPage` 只有简单面包屑和嵌入页，缺少草图里的头部、概览、策略占位、资源区和状态解释。 |
-| 处理 | 在 Settings 内重建页面骨架：`TopNavigation`、`ConnectorHeader`、`ConnectorOverviewSection`、`StrategySection`、`ResourceSourceSection`、`ConnectionStateCard`；下方继续复用 `ResourceConnectorPage` 承载 Notion 认证、资源选择、同步和删除流程。 |
-| 判断 | 符合目标：保留认证整体流程，同时让页面主体结构与草图一致。 |
-| 避免过度设计 | 不复制 `ResourceConnectorPage` 的内部业务状态，不重写 Notion API 调用。 |
+| 处理 | 在 Settings 内重建单账号页面骨架：`TopNavigation`、`ConnectorHeader`、`NotionAccountStatusSection`、`ResourceScopeSection`、`MountedSourcesSection`、`ConnectionStateCard`；直接复用现有 connector API helpers 承载认证、资源选择、同步和删除流程。 |
+| 判断 | 符合目标：保留认证整体流程，同时移除多连接器集合心智。 |
+| 避免过度设计 | 不新增后端模型、不新增路由系统、不做多平台抽象，只在 Notion 详情页收敛单平台单账号交互。 |
+
+### 6.4 单平台单账号约束
+
+| 项 | 方案 |
+|---|---|
+| 问题 | Notion 详情页嵌入集合型 `ResourceConnectorPage` 后，会暴露「新建连接器」「刷新列表」「连接器列表」和多个 connector 选择，违背“同一平台只能认证一个账号”。 |
+| 处理 | `ConnectorNotionDetailPage` 自己加载当前用户最新的 Notion connector；无 connector 时点击「连接 Notion」隐式创建唯一 connector 并立即进入认证；有 connector 时只允许重新连接、保存资源、刷新同步或关闭连接。 |
+| 判断 | 符合目标：页面任务从“管理连接器集合”变成“管理 Notion 这个平台账号的资源范围”。 |
+| 避免过度设计 | 不批量迁移历史重复 connector，不引入账号切换器；前端只展示最新 Notion connector，本地 fallback 创建时替换同平台旧记录。 |
 
 ### 6.3 暗色模式
 

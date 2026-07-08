@@ -31,7 +31,7 @@
 //                    now decoupled into a dialog.
 // [Sync] 2026-06-28: remove the New Chat row from the history search dialog;
 //                    top-level Chat chrome already owns new thread creation.
-// [Sync] 2026-07-07: add the history/connector landing tabs under the AI composer and embed ResourceConnectorPage in the connector tab so the connector workbench sits below the chat entry point.
+// [Sync] 2026-07-07: add the history/connector landing tabs under the AI composer and temporarily embed the connector workbench below the chat entry point.
 // [Sync] 2026-07-07: keep the landing connector workbench inside the viewport by tightening the Chat shell flex/min-height chain.
 // [Sync] 2026-07-07: remove the duplicate landing tab pill row once the app navigation owns history/connector switching.
 // [Sync] 2026-07-08: replace the Chat-embedded connector workbench with a lightweight landing panel; Settings now owns full connector management.

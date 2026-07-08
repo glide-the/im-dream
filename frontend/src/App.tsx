@@ -88,8 +88,8 @@ const iconMap = {
 const LANGUAGE_CODES: Array<'en' | 'zh'> = ['en', 'zh'];
 
 // [Sync] 2026-07-08: Settings default sections use a narrower reading-width column;
-// the Notion ConnectorNotionDetailPage reuses ResourceConnectorPage's wider workbench
-// layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
+// the Notion ConnectorNotionDetailPage owns a wider single-account resource
+// configuration layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
 const SETTINGS_MAX_WIDTH_PX = 800;
 const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
 

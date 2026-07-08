@@ -19,7 +19,8 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `聊天历史` / `资源连接器` 视图，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
 > [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天历史` 使用会话与空态语义，`资源连接器` 只由真实 connector context 驱动空态 / 认证 / 资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
 > [Sync] 2026-07-08: 纠正曾偏移的入口叙述，统一以 Chat `WorkspaceTabBar` 为资源连接器主入口，废弃仅摘要化的路径表述。
-> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `ConnectorOverviewSection` / `StrategySection` / `ResourceSourceSection` / `ConnectionStateCard`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `NotionAccountStatusSection` / `ResourceScopeSection` / `MountedSourcesSection` / `ConnectionStateCard`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-08: Notion 详情页按“同一平台只能认证一个账号”重构，不再嵌入集合型 `ResourceConnectorPage`，也不暴露新建 / 刷新 / 连接器列表入口。
 > [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
 > [Sync] 2026-07-08: 修正 Chat 资源连接器跳转错位：`ConnectorLandingPanel` 的「选择连接器」和连接器卡片统一进入 Settings「资源链接」区；Chat 不再打开内部配置页。
 
@@ -76,7 +77,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 
 | 概念 | 定义 | 关系 |
 |------|------|------|
-| **Resource Connector（资源连接器）** | 连接外部平台资源到 ink-and-memory 工作空间的抽象实体 | 一个用户可拥有多个连接器 |
+| **Resource Connector（资源连接器）** | 连接外部平台资源到 ink-and-memory 工作空间的抽象实体 | 一个用户可拥有多个平台连接器，但同一平台只允许一个认证账号 |
 | **Database** | Notion 中定义属性 Schema（列/字段）的特殊对象。可以是 full-page database 或 inline database（内嵌于某个 Page 中）。Database 本身不包含内容块，仅定义 properties schema | 一个连接器可关联多个 Database |
 | **Page（页面）** | Notion 中的内容单元。分为两类：① **Database Row Page** — parent 为 database，属性值遵循所属 Database 的 schema；② **Standalone Page** — parent 为 workspace 或另一个 page，与 Database 无关联 | 一个 Database 下可包含多个 Row Page；Standalone Page 独立存在 |
 | **PageID** | Page 的唯一标识（UUID）。无论是 Database Row Page 还是 Standalone Page，均拥有独立的 PageID | — |
@@ -134,7 +135,7 @@ Resource Connector (资源连接器)
     │       顶部显示「← 资源连接器 > Notion Connector」
     │
     ├─ 在 ConnectorNotionDetailPage 中完成认证、来源选择与同步
-    │   └─ ResourceSourceSection 在已认证后展示 database → page tree
+    │   └─ ResourceScopeSection 在已认证后展示 databases / standalone pages 勾选列表
     │
     └─ 返回 Chat 并继续提问
           ├─ Agent 初始化时 attach 当前 canonical snapshot
@@ -150,7 +151,7 @@ Resource Connector (资源连接器)
 | 2. 进入资源链接设置区 | 用户（点击 `ConnectorCard` / `选择连接器`） | `ConnectorSettingsSection` | App 视图状态 |
 | 3. 进入 Notion 详情页 | 用户（Settings 点击 Notion「管理」） | `ConnectorNotionDetailPage` | App 视图状态 |
 | 3. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
-| 4. Database 及 Page 选择 | 用户（`ResourceSourceSection`） | 选定的 database_id 与 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
+| 4. Database 及 Page 选择 | 用户（`ResourceScopeSection`） | 选定的 database_id 与 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
 | 5. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
 | 6. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
 
@@ -187,8 +188,8 @@ Resource Connector (资源连接器)
 - 规则：
   1. `HistoryTab` 首次加载（`isLoadingThreads && visibleThreads.length === 0`）时，显示 `HistorySkeletonList`：3~5 条历史条目骨架，包含标题条、摘要条、时间占位。
   2. `ResourceConnectorTab` 首次加载时，显示 `ConnectorToolbar` 的筛选 / 排序 pill 骨架，以及 2~3 张连接器卡片骨架；在结果返回前不得先渲染“暂无资源连接器”。
-  3. `ConnectorNotionDetailPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`ConnectorOverviewSection` skeleton、`ResourceSourceSection` skeleton；`StrategySection` 可直接显示静态占位文案，不必使用动态 skeleton。
-  4. 当 `ResourceSourceSection` 已进入已认证态但尚未拉到来源数据时，展示 database 列表骨架 + page list 骨架，而不是“读取连接器状态…”之类纯文本。
+  3. `ConnectorNotionDetailPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`NotionAccountStatusSection` skeleton、`ResourceScopeSection` skeleton。
+  4. 当 `ResourceScopeSection` 已进入已认证态但尚未拉到来源数据时，展示 database 列表骨架 + page list 骨架，而不是“读取连接器状态…”之类纯文本。
   5. 骨架只用于首次加载，不覆盖错误态、空态、已关闭态或已有数据后的增量刷新态。
 
 ---
@@ -638,3 +639,4 @@ stateDiagram-v2
 | 映射存储 | 数据库 / 文件系统 | `.notion/` 虚拟索引 | 与 `.editor/` 模式对称，Agent 直接可读 |
 | Database 发现 | 硬编码 / 用户选择 | 用户选择 | 用户决定哪些数据对 Agent 可见 |
 | 页面入口 | Chat 内完整配置 / Settings 资源链接 | Chat `WorkspaceTabBar` → Settings `ConnectorSettingsSection` → `ConnectorNotionDetailPage` | 与最新草图一致，避免 Chat 主流程承载复杂配置 |
+| 同平台账号数量 | 多账号列表 / 单账号配置 | 单账号配置 | 避免 Notion 详情页出现集合管理心智，符合当前业务约束 |
