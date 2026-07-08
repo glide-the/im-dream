@@ -87,6 +87,12 @@ const iconMap = {
 
 const LANGUAGE_CODES: Array<'en' | 'zh'> = ['en', 'zh'];
 
+// [Sync] 2026-07-08: Settings default sections use a narrower reading-width column;
+// the Notion ConnectorNotionDetailPage reuses ResourceConnectorPage's wider workbench
+// layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
+const SETTINGS_MAX_WIDTH_PX = 800;
+const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
+
 // @@@ Color map with gradient colors for watercolor effect
 const colorMap: Record<string, { gradient: string; text: string; glow: string }> = {
   blue: {
@@ -1929,12 +1935,12 @@ export default function App() {
           background: 'var(--color-bg-app)'
         }}>
           {showNotionConnectorDetail ? (
-            <div style={{ maxWidth: 1220, width: '100%' }}>
+            <div style={{ maxWidth: SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX, width: '100%' }}>
               <ConnectorNotionDetailPage onBack={closeNotionConnectorDetail} isMobile={isMobile} />
             </div>
           ) : (
           <div style={{
-            maxWidth: 800,
+            maxWidth: SETTINGS_MAX_WIDTH_PX,
             width: '100%'
           }}>
             <section style={{ marginBottom: 48 }}>

@@ -7,8 +7,7 @@
 // [Sync] 2026-07-08: remove the inline Notion detail toggle; 管理 now calls onOpenNotionDetail so
 //                    App navigates to a dedicated 具体配置页面 page, matching the connector
 //                    interaction design's page-navigation requirement.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import {
   IconChevronRight,
