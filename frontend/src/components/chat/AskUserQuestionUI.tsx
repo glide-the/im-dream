@@ -2,6 +2,7 @@
 // [Output] Interactive question form rendered inline in the chat message list.
 // [Pos] ask-user-question component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add null guard for undefined input at useMemo start to prevent crash when tool is in input-streaming state.
+// [Sync] 2026-07-08: use the semantic on-action text token for dark-mode-safe submit buttons.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { IconCheck, IconX } from './Icons';
 
@@ -214,7 +215,7 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
         })}
 
         <div style={{ display: 'flex', gap: '0.75rem', paddingTop: '0.25rem' }}>
-          <button type="submit" disabled={isProcessing || !isValid} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: 'var(--color-action-link)', color: '#fff', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing || !isValid ? 'not-allowed' : 'pointer', opacity: isProcessing || !isValid ? 0.55 : 1 }}>
+          <button type="submit" disabled={isProcessing || !isValid} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing || !isValid ? 'not-allowed' : 'pointer', opacity: isProcessing || !isValid ? 0.55 : 1 }}>
             <IconCheck style={{ width: '1rem', height: '1rem' }} />
             Submit
           </button>

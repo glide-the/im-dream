@@ -7,6 +7,8 @@
 // [Sync] 2026-07-08: remove the inline Notion detail toggle; 管理 now calls onOpenNotionDetail so
 //                    App navigates to a dedicated 具体配置页面 page, matching the connector
 //                    interaction design's page-navigation requirement.
+// [Sync] 2026-07-08: replace light-only Settings connector card/status fills with semantic theme
+//                    tokens and state color mixes so resource-link settings adapt to dark mode.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import {
@@ -72,25 +74,25 @@ function toneStyles(tone: ConnectorTone) {
   switch (tone) {
     case 'success':
       return {
-        background: 'rgba(126, 148, 104, 0.14)',
-        border: 'rgba(126, 148, 104, 0.24)',
+        background: 'color-mix(in srgb, var(--color-state-success) 16%, var(--color-bg-paper))',
+        border: 'color-mix(in srgb, var(--color-state-success) 34%, var(--color-border-paper))',
         color: 'var(--color-state-success)',
       };
     case 'warning':
       return {
-        background: 'rgba(199, 136, 85, 0.14)',
-        border: 'rgba(199, 136, 85, 0.24)',
+        background: 'color-mix(in srgb, var(--color-state-warning) 16%, var(--color-bg-paper))',
+        border: 'color-mix(in srgb, var(--color-state-warning) 34%, var(--color-border-paper))',
         color: 'var(--color-state-warning)',
       };
     case 'danger':
       return {
-        background: 'rgba(168, 102, 82, 0.14)',
-        border: 'rgba(168, 102, 82, 0.24)',
+        background: 'color-mix(in srgb, var(--color-state-error) 16%, var(--color-bg-paper))',
+        border: 'color-mix(in srgb, var(--color-state-error) 34%, var(--color-border-paper))',
         color: 'var(--color-state-error)',
       };
     default:
       return {
-        background: 'rgba(91, 69, 44, 0.08)',
+        background: 'var(--color-bg-hover)',
         border: 'var(--color-border-paper)',
         color: 'var(--color-text-secondary)',
       };
@@ -119,7 +121,7 @@ function ConnectorOptionCard({
         width: '100%',
         border: `1px solid ${palette.border}`,
         borderRadius: '1rem',
-        background: disabled ? 'rgba(255,250,242,0.56)' : 'rgba(255,250,242,0.9)',
+        background: disabled ? 'var(--color-bg-surface)' : 'var(--color-bg-surface-solid)',
         padding: '0.9rem 0.95rem',
         cursor: disabled || !onAction ? 'not-allowed' : 'pointer',
         textAlign: 'left',
@@ -128,7 +130,7 @@ function ConnectorOptionCard({
         gap: '0.85rem',
         alignItems: 'center',
         opacity: disabled ? 0.74 : 1,
-        boxShadow: '0 10px 24px rgba(91, 69, 44, 0.05)',
+        boxShadow: '0 10px 24px var(--color-shadow-soft)',
       }}
     >
       <div
@@ -137,7 +139,7 @@ function ConnectorOptionCard({
           height: '2.4rem',
           borderRadius: '0.85rem',
           border: `1px solid ${palette.border}`,
-          background: disabled ? 'rgba(91, 69, 44, 0.05)' : 'rgba(95, 74, 54, 0.08)',
+          background: disabled ? 'var(--color-bg-surface)' : 'var(--color-bg-hover)',
           color: 'var(--color-text-primary)',
           display: 'grid',
           placeItems: 'center',
@@ -263,7 +265,7 @@ export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = fa
         borderRadius: '1.15rem',
         background: 'var(--color-bg-surface)',
         padding: isMobile ? '1rem' : '1.15rem',
-        boxShadow: '0 12px 28px rgba(91, 69, 44, 0.06)',
+        boxShadow: '0 12px 28px var(--color-shadow-soft)',
       }}
     >
       <header style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>

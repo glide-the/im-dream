@@ -14,7 +14,7 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 >      `backend/claude_agent/context_builder.py`
 > [Sync] 2026-06-28: 收敛 Notion 远程数据源的交互快照生命周期 — Agent 初始化读取资源连接器数据层物化的 canonical snapshot，不以 Agent 本地 notion_cache 作为权威状态；补齐 MVP 前端交互设计稿。
 > [Sync] 2026-07-07: Chat 入口改为主落点，历史对话与连接器工作台下沉到输入框下方，输入框下方增加快捷功能 secondary action strip，并保留可恢复的 `shell_error` 态；连接器不再以独立主页面承载。
-> [Sync] 2026-07-08: 依据最新版 Chat 入口页与连接器详情草图复核主路径：主入口仍是 Chat `WorkspaceTabBar`，连接器详情下钻统一为 `ConnectorConfigPage`，并再次确认连接器不是独立主导航页。
+> [Sync] 2026-07-08: 依据最新版 Chat 入口页与连接器详情草图复核主路径：主入口仍是 Chat `WorkspaceTabBar` 的轻量摘要，复杂配置进入 Settings「资源链接」里的 `ConnectorNotionDetailPage`，并再次确认连接器不是独立主导航页。
 
 ---
 
@@ -194,7 +194,7 @@ NOTION_RESOURCES: dict[str, str] = {
 
 ### 4.1 配置入口
 
-前端在 `ConnectorConfigPage` 中提供 Notion 配置表单：
+前端在 Settings 内 `ConnectorNotionDetailPage` 中提供 Notion 配置入口，并由内嵌的 `ResourceConnectorPage` 复用现有认证 / 资源选择流程：
 
 | 字段 | 说明 | 存储位置 |
 | ------------- | ------------------------------------------------- | ---------------------------- |
@@ -204,7 +204,7 @@ NOTION_RESOURCES: dict[str, str] = {
 ### 4.2 认证流程
 
 ```
-用户在 ConnectorConfigPage 点击"连接 Notion"
+用户在 ConnectorNotionDetailPage 点击"连接 Notion"
   │
   ├─ 前端 → POST /api/notion/auth/login
   │
@@ -568,8 +568,8 @@ Chat workspace
   │              ├─ ConnectorToolbar
   │              ├─ ConnectorEmptyState
   │              ├─ ConnectorList / ConnectorListSkeleton
-  │              └─ ConnectorCard → ConnectorConfigPage
-  ├─ ConnectorConfigPage
+  │              └─ ConnectorCard / 选择连接器 → Settings ConnectorSettingsSection
+  ├─ ConnectorNotionDetailPage
   │    ├─ TopNavigation
   │    ├─ ConnectorHeader
   │    ├─ ConnectorOverviewSection
@@ -582,7 +582,7 @@ Chat workspace
 
 > 注：`HistoryTab` / `ResourceConnectorTab` 是 Chat 工作区的视图状态，不是连接器生命周期状态。连接器生命周期仍由下方的 connector state model 管理。
 >
-> 命名统一使用 `WorkspaceTabBar` / `HistoryTab` / `ResourceConnectorTab` / `ConnectorConfigPage`，不再使用“landing tabs”之类别名。
+> 命名统一使用 `WorkspaceTabBar` / `HistoryTab` / `ResourceConnectorTab` / `ConnectorNotionDetailPage`，不再使用“landing tabs”之类别名。
 
 ### 11.2 状态模型
 

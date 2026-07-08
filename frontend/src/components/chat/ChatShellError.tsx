@@ -2,6 +2,7 @@
 // [Output] Render a warm-paper shell-level fallback with retry/reload actions and preserved Chat entry tabs.
 // [Pos] chat-shell-error component node in frontend/src/components/chat
 // [Sync] 2026-07-07: add a recoverable shell fallback so ChatViewContent failures do not white-screen the page.
+// [Sync] 2026-07-08: replace light-only fallback gradients with semantic theme surfaces for dark mode.
 import { IconClock, IconDatabase, IconX } from './Icons';
 
 export type ChatLandingTab = 'history' | 'connector';
@@ -43,7 +44,7 @@ function LandingTabButton({
         cursor: 'pointer',
         fontSize: '0.84rem',
         fontWeight: 700,
-        boxShadow: active ? '0 10px 24px rgba(91, 69, 44, 0.08)' : 'none',
+        boxShadow: active ? '0 10px 24px var(--color-shadow-soft)' : 'none',
       }}
     >
       <Icon style={{ width: '0.9rem', height: '0.9rem' }} />
@@ -67,7 +68,7 @@ export default function ChatShellError({
         display: 'grid',
         placeItems: 'center',
         padding: isMobile ? '1rem' : '1.5rem',
-        background: 'linear-gradient(180deg, rgba(255,255,255,0.2), rgba(255,255,255,0))',
+        background: 'var(--color-bg-app)',
         color: 'var(--color-text-primary)',
       }}
     >
@@ -76,8 +77,8 @@ export default function ChatShellError({
           width: 'min(52rem, 100%)',
           border: '1px solid var(--color-border-paper)',
           borderRadius: '28px',
-          background: 'linear-gradient(180deg, rgba(255,250,242,0.98), rgba(247,239,227,0.92))',
-          boxShadow: '0 24px 60px rgba(82, 61, 40, 0.12)',
+          background: 'var(--color-bg-surface)',
+          boxShadow: '0 24px 60px var(--color-shadow-medium)',
           padding: isMobile ? '1rem' : '1.25rem 1.25rem 1.15rem',
         }}
       >
@@ -100,7 +101,7 @@ export default function ChatShellError({
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  background: 'rgba(168, 102, 82, 0.12)',
+                  background: 'color-mix(in srgb, var(--color-state-error) 14%, var(--color-bg-paper))',
                   color: 'var(--color-state-error)',
                   flexShrink: 0,
                 }}

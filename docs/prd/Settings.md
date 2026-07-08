@@ -263,8 +263,13 @@ HookJSONOutput(
   - 飞书只保留禁用占位，不调用不存在的 API。
 - `本地资源链接` 只保留 CLI 执行器占位，当前版本不设计完整交互。
 - **点击 Notion「管理」是页面级导航，不是原地展开**：App 级 `showNotionConnectorDetail` 状态置 `true`，Settings 视图整体切换为 `ConnectorNotionDetailPage`，替换掉 Energy Bar / AI 模型配置等其它设置分区（而不是在资源链接卡片内叠加显示）。
-  - `ConnectorNotionDetailPage` 顶部渲染「设置 › 资源链接 › Notion 具体配置页面」导航面包屑（对应《链接器概念的交互设计稿》「具体配置页面 / 最上方导航」骨架屏），面包屑上的「设置」「资源链接」均可点击返回。
-  - 面包屑下方复用现有 `ResourceConnectorPage` 的非 embedded / warm-paper page mode，承载连接器概览（含重命名 / 断开连接）、资源选择、来源列表。
+  - `ConnectorNotionDetailPage` 顶部渲染「← 资源连接器 > Notion Connector」轻量导航（对应《链接器概念的交互设计稿》「具体配置页面 / 最上方导航」骨架屏），返回按钮回到 Settings 资源链接索引卡片。
+  - 页面主体按草图固定为 `ConnectorHeader`、`ConnectorOverviewSection`、`StrategySection`、`ResourceSourceSection`、`ConnectionStateCard`。
+  - `ConnectorHeader` 展示 Notion 图标、标题、说明、状态 badge，以及「查看设计稿」「关闭连接」两个操作位。
+  - `ConnectorOverviewSection` 用行级概览卡展示图标、描述、状态、设计稿和连接控制。
+  - `StrategySection` 只显示 `[暂不实现]` 占位，不开放策略表单。
+  - `ResourceSourceSection` 承载现有 `ResourceConnectorPage` 的非 embedded / warm-paper page mode，用于保留 Notion 认证、资源选择、来源列表、同步和删除流程。
+  - `ConnectionStateCard` 解释当前页面受限原因：未认证、认证中、已连接、同步中、同步失败或已关闭。
   - 返回时重新聚焦资源链接索引卡片，与从 Chat 跳转过来的聚焦行为保持一致。
 - `ConnectorSettingsSection` 本身只负责入口、摘要和触发页面导航，不承载创建、认证、资源选择或同步逻辑。
 
@@ -339,7 +344,7 @@ Settings 页面通过以下入口访问：
 ## 11. 验收标准
 
 - Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式、沙箱网络、IM 审批模式）。
-- Settings 页面包含资源链接区域（Notion / 飞书 / 本地 CLI 执行器占位）；点击 Notion「管理」会导航到独立的 `ConnectorNotionDetailPage`（带「设置 › 资源链接 › Notion 具体配置页面」面包屑），而不是在资源链接卡片内原地展开。
+- Settings 页面包含资源链接区域（Notion / 飞书 / 本地 CLI 执行器占位）；点击 Notion「管理」会导航到独立的 `ConnectorNotionDetailPage`（带「← 资源连接器 > Notion Connector」面包屑），而不是在资源链接卡片内原地展开。
 - Settings 页面包含用户 API 配置区域（API 密钥、API 端点、默认模型三个输入项）。
 - Chat 页面不再渲染模型配置侧边栏，也不再承载完整 connector workbench；顶部导航栏与移动端底部导航栏不再展示 `Connector` 入口，Connector 管理只能通过 Settings 资源链接区或 Chat 轻量摘要面板的跳转按钮进入。
 - 所有颜色引用 [Color System](<./color_system/README.md>) token，无孤立十六进制值。

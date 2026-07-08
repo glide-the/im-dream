@@ -19,8 +19,9 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `聊天历史` / `资源连接器` 视图，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
 > [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天历史` 使用会话与空态语义，`资源连接器` 只由真实 connector context 驱动空态 / 认证 / 资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
 > [Sync] 2026-07-08: 纠正曾偏移的入口叙述，统一以 Chat `WorkspaceTabBar` 为资源连接器主入口，废弃仅摘要化的路径表述。
-> [Sync] 2026-07-08: 详情页组件树统一收敛为 `ConnectorConfigPage` / `TopNavigation` / `ConnectorHeader` / `ConnectorOverviewSection` / `StrategySection` / `ResourceSourceSection` / `ConnectionStateCard`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `ConnectorOverviewSection` / `StrategySection` / `ResourceSourceSection` / `ConnectionStateCard`，并固定面包屑为 `资源连接器 > Notion Connector`。
 > [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
+> [Sync] 2026-07-08: 修正 Chat 资源连接器跳转错位：`ConnectorLandingPanel` 的「选择连接器」和连接器卡片统一进入 Settings「资源链接」区；Chat 不再打开内部配置页。
 
 ---
 
@@ -125,11 +126,14 @@ Resource Connector (资源连接器)
     │   ├─ 无连接器 → 虚线空态：远程资源 / 本地资源 / 更多图标 + 暂无资源连接器 + 选择连接器
     │   └─ 有连接器 → ConnectorList
     │
-    ├─ 点击 Notion Connector 卡片
-    │   └─ 页面级导航到 ConnectorConfigPage
+    ├─ 点击「选择连接器」或 Notion Connector 卡片
+    │   └─ 页面级导航到 Settings，并聚焦「资源链接」
+    │
+    ├─ 在 Settings 点击 Notion「管理」
+    │   └─ 页面级导航到 ConnectorNotionDetailPage
     │       顶部显示「← 资源连接器 > Notion Connector」
     │
-    ├─ 在 ConnectorConfigPage 中完成认证、来源选择与同步
+    ├─ 在 ConnectorNotionDetailPage 中完成认证、来源选择与同步
     │   └─ ResourceSourceSection 在已认证后展示 database → page tree
     │
     └─ 返回 Chat 并继续提问
@@ -142,8 +146,9 @@ Resource Connector (资源连接器)
 
 | 阶段 | 触发者 | 输出 | 存储位置 |
 |------|--------|------|---------|
-| 1. 进入连接器工作台 | 用户（Chat `ResourceConnectorTab`） | 当前连接器列表或空态 | 前端工作区状态 |
-| 2. 进入 Notion 详情页 | 用户（点击 `ConnectorCard`） | `ConnectorConfigPage` | 前端导航状态 |
+| 1. 进入连接器摘要面板 | 用户（Chat `ResourceConnectorTab`） | 当前连接器列表或空态 | 前端工作区状态 |
+| 2. 进入资源链接设置区 | 用户（点击 `ConnectorCard` / `选择连接器`） | `ConnectorSettingsSection` | App 视图状态 |
+| 3. 进入 Notion 详情页 | 用户（Settings 点击 Notion「管理」） | `ConnectorNotionDetailPage` | App 视图状态 |
 | 3. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
 | 4. Database 及 Page 选择 | 用户（`ResourceSourceSection`） | 选定的 database_id 与 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
 | 5. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
@@ -173,8 +178,8 @@ Resource Connector (资源连接器)
 - `shell_error` 只表示 Chat shell 级故障，不表示 connector 认证、同步或 snapshot 状态异常。
 - 在 `shell_error` 下，用户仍应看到 `ChatInputDock` 与 `WorkspaceTabBar`，并能明确知道当前停留在 `HistoryTab` 还是 `ResourceConnectorTab`。
 - shell 恢复后应回到上一次选中的 tab，并保留该 tab 内最后一次已成功读取的数据快照。
-- `ConnectorConfigPage` 是下钻页，不应在 shell 降级时被替换为其它入口；若详情页自身接口失败，只能在详情页内容区内显示错误卡并保留 `TopNavigation`。
-- Chat shell 与 `ConnectorConfigPage` 都要保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；滚动只允许发生在历史列表、消息流、连接器列表或来源树内部。
+- `ConnectorNotionDetailPage` 属于 Settings 视图，不受 Chat shell 降级替换；若详情页自身接口失败，只能在详情页内容区内显示错误卡并保留 `TopNavigation`。
+- Chat shell 要保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；Settings 详情页允许页面级滚动，但来源树 / 连接器工作台内部应保持自身滚动边界。
 
 ### 3.5 骨架屏要求（对齐两份最新草图）
 
@@ -182,7 +187,7 @@ Resource Connector (资源连接器)
 - 规则：
   1. `HistoryTab` 首次加载（`isLoadingThreads && visibleThreads.length === 0`）时，显示 `HistorySkeletonList`：3~5 条历史条目骨架，包含标题条、摘要条、时间占位。
   2. `ResourceConnectorTab` 首次加载时，显示 `ConnectorToolbar` 的筛选 / 排序 pill 骨架，以及 2~3 张连接器卡片骨架；在结果返回前不得先渲染“暂无资源连接器”。
-  3. `ConnectorConfigPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`ConnectorOverviewSection` skeleton、`ResourceSourceSection` skeleton；`StrategySection` 可直接显示静态占位文案，不必使用动态 skeleton。
+  3. `ConnectorNotionDetailPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`ConnectorOverviewSection` skeleton、`ResourceSourceSection` skeleton；`StrategySection` 可直接显示静态占位文案，不必使用动态 skeleton。
   4. 当 `ResourceSourceSection` 已进入已认证态但尚未拉到来源数据时，展示 database 列表骨架 + page list 骨架，而不是“读取连接器状态…”之类纯文本。
   5. 骨架只用于首次加载，不覆盖错误态、空态、已关闭态或已有数据后的增量刷新态。
 
@@ -197,7 +202,8 @@ Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连�
     │
     ├─ 看到 ConnectorToolbar + 空态或连接器列表
     ├─ 点击「选择连接器」或某个 Notion Connector 卡片
-    └─ 导航到 ConnectorConfigPage（← 资源连接器 > Notion Connector）
+    └─ 导航到 Settings「资源链接」
+        └─ 点击 Notion「管理」后进入 ConnectorNotionDetailPage（← 资源连接器 > Notion Connector）
 
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 1: 认证                                                 │
@@ -447,7 +453,7 @@ sequenceDiagram
     participant CLI as ntn CLI
     participant Notion as Notion API
 
-    User->>Front: 在 ConnectorConfigPage 点击"连接 Notion"
+    User->>Front: 在 ConnectorNotionDetailPage 点击"连接 Notion"
     Front->>Back: POST /api/notion/auth/login
     Back->>CLI: ntn login --no-browser
     CLI-->>Back: verificationUrl + verificationCode
@@ -619,7 +625,7 @@ stateDiagram-v2
 |---|---|---|---|---|
 | `HistoryTabPanel` | 当前 thread / 历史列表 / 空聊天态 | 显示 `EmptyChatState` | 保持 `ChatInputDock` + `WorkspaceTabBar`，内容区显示可恢复错误条 | 历史列表或消息流内部滚动 |
 | `ResourceConnectorTabPanel` | 连接器列表 / 空态 / 错误态 | 显示 `ConnectorEmptyState`，引导 `选择连接器` | 保持 toolbar 锚点与错误卡，不白屏 | 连接器列表或空态卡内部滚动 |
-| `ConnectorConfigPage` | 连接器详情接口 | 顶部导航仍可返回，内容区显示未认证禁用态 | 保留 `TopNavigation` + 错误卡 + 重试入口 | 来源树或详情内容区内部滚动 |
+| `ConnectorNotionDetailPage` | 连接器详情接口 | 顶部导航仍可返回，内容区显示未认证禁用态 | 保留 `TopNavigation` + 错误卡 + 重试入口 | 来源树或详情内容区内部滚动 |
 
 ---
 
@@ -631,4 +637,4 @@ stateDiagram-v2
 | 同步方式 | 实时 / 定时 / 按需 | workspace init + 按需 | 避免后台常驻进程，简化部署 |
 | 映射存储 | 数据库 / 文件系统 | `.notion/` 虚拟索引 | 与 `.editor/` 模式对称，Agent 直接可读 |
 | Database 发现 | 硬编码 / 用户选择 | 用户选择 | 用户决定哪些数据对 Agent 可见 |
-| 页面入口 | Chat 主工作区 / 独立设置页 | Chat `WorkspaceTabBar` → `ConnectorConfigPage` | 与最新草图一致，避免主流程分裂 |
+| 页面入口 | Chat 内完整配置 / Settings 资源链接 | Chat `WorkspaceTabBar` → Settings `ConnectorSettingsSection` → `ConnectorNotionDetailPage` | 与最新草图一致，避免 Chat 主流程承载复杂配置 |

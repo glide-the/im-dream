@@ -1,3 +1,8 @@
+// [Input] Voice deck API client, i18n labels, and deck editor modal.
+// [Output] Deck management surface for local and community voice decks.
+// [Pos] deck-manager-view node in frontend/src/components
+// [Sync] 2026-07-08: replace light-only Decks cards, loading/error states, and publish modal colors
+//                    with semantic theme tokens so the Decks surface adapts to dark mode.
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -22,6 +27,10 @@ import type { ActiveChatVoice } from '../lib/chat-schema';
 interface Props {
   onUpdate?: () => void;
   onOpenChat?: (threadId: string, voiceInfo: ActiveChatVoice) => void;
+}
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 export default function DeckManager({ onUpdate, onOpenChat }: Props) {
@@ -110,9 +119,9 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
           }
         }, 0);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load decks:', err);
-      setError(err.message || 'Failed to load decks');
+      setError(getErrorMessage(err, 'Failed to load decks'));
     } finally {
       if (!preserveScroll) {
         setLoading(false);
@@ -129,8 +138,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await forkDeck(deckId);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to fork deck: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to fork deck: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -139,8 +148,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await updateDeck(deckId, { enabled: !currentEnabled });
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to toggle deck: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to toggle deck: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -149,8 +158,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await updateDeck(deckId, data);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to update deck: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to update deck: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -161,8 +170,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await deleteDeck(deckId);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to delete deck: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to delete deck: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -174,8 +183,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       alert(`✅ Synced ${result.synced_voices} voices with original template`);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to sync deck: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to sync deck: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -184,8 +193,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await updateVoice(voiceId, { enabled: !currentEnabled });
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to toggle voice: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to toggle voice: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -194,8 +203,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await updateVoice(voiceId, data);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to update voice: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to update voice: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -206,8 +215,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await deleteVoice(voiceId);
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to delete voice: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to delete voice: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -215,7 +224,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
     try {
       const published = await listDecks(true);
       setCommunityDecks(published);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Failed to load community decks:', err);
     }
   }
@@ -232,8 +241,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await loadDecks(true);
       setActiveDeckId(newDeck.deck_id);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to create deck: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to create deck: ${getErrorMessage(err, 'Unknown error')}`);
     } finally {
       setCreatingDeck(false);
     }
@@ -252,8 +261,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       setSelectedVoiceByDeck(prev => ({ ...prev, [deckId]: newVoiceId }));
       await loadDecks(true);
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to create voice: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to create voice: ${getErrorMessage(err, 'Unknown error')}`);
     } finally {
       setCreatingVoice(null);
     }
@@ -274,8 +283,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await loadDecks(true);
       await loadCommunityDecks();
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed: ${getErrorMessage(err, 'Unknown error')}`);
     } finally {
       setPublishWarning(null);
     }
@@ -288,8 +297,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
       await loadDecks(true);
       await loadCommunityDecks();
       onUpdate?.();
-    } catch (err: any) {
-      alert(`Failed to install deck: ${err.message}`);
+    } catch (err: unknown) {
+      alert(`Failed to install deck: ${getErrorMessage(err, 'Unknown error')}`);
     }
   }
 
@@ -318,7 +327,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
             width: '18px',
             height: '18px',
             borderRadius: '50%',
-            border: '2px solid rgba(0,0,0,0.1)',
+            border: '2px solid var(--color-border-neutral)',
             borderTopColor: 'var(--color-text-secondary)',
             animation: 'deck-spin 0.9s linear infinite'
           }} />
@@ -339,13 +348,13 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
         background: 'var(--color-bg-app)',
         gap: 16
       }}>
-        <div style={{ fontSize: 18, color: '#e74c3c' }}>❌ {error}</div>
+        <div style={{ fontSize: 18, color: 'var(--color-state-error)' }}>❌ {error}</div>
         <button
           onClick={() => loadDecks()}
           style={{
             padding: '8px 16px',
             background: 'var(--color-text-primary)',
-            color: '#fff',
+            color: 'var(--color-text-on-action)',
             border: 'none',
             borderRadius: 6,
             cursor: 'pointer'
@@ -395,8 +404,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
             style={{
               padding: '14px 28px',
               marginBottom: '8px',
-              background: 'linear-gradient(135deg, #f9a875 0%, #f89560 100%)',
-              color: 'white',
+              background: 'linear-gradient(135deg, var(--color-state-warning) 0%, var(--color-action-link) 100%)',
+              color: 'var(--color-text-on-action)',
               border: 'none',
               borderRadius: '12px',
               cursor: creatingDeck ? 'not-allowed' : 'pointer',
@@ -405,19 +414,19 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
               opacity: creatingDeck ? 0.6 : 1,
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               alignSelf: 'flex-start',
-              boxShadow: '0 4px 12px rgba(249, 168, 117, 0.3)',
+              boxShadow: '0 4px 12px var(--color-shadow-soft)',
               letterSpacing: '0.3px'
             }}
             onMouseEnter={(e) => {
               if (!creatingDeck) {
                 e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 20px rgba(249, 168, 117, 0.4)';
+                e.currentTarget.style.boxShadow = '0 6px 20px var(--color-shadow-medium)';
               }
             }}
             onMouseLeave={(e) => {
               if (!creatingDeck) {
                 e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(249, 168, 117, 0.3)';
+                e.currentTarget.style.boxShadow = '0 4px 12px var(--color-shadow-soft)';
               }
             }}
           >
@@ -452,7 +461,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                   key={deck.id}
                   onClick={() => toggleDeck(deck.id)}
                   style={{
-                    background: '#fff',
+                    background: 'var(--color-bg-surface-solid)',
                     border: `2px solid ${isSystem ? 'var(--color-border-paper)' : colorHex}`,
                     borderRadius: 10,
                     boxShadow: '0 3px 10px var(--color-shadow-soft)',
@@ -468,7 +477,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow = '0 6px 14px rgba(0,0,0,0.12)';
+                    e.currentTarget.style.boxShadow = '0 6px 14px var(--color-shadow-medium)';
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = 'translateY(0)';
@@ -496,7 +505,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          color: '#fff',
+                          color: 'var(--color-text-on-action)',
                           flexShrink: 0,
                           boxShadow: `0 3px 8px ${colorHex}40`,
                           cursor: isSystem ? 'default' : 'pointer',
@@ -516,8 +525,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                           <span style={{
                             fontSize: 10,
                             fontWeight: 700,
-                            color: '#777',
-                            background: '#ededed',
+                            color: 'var(--color-text-secondary)',
+                            background: 'var(--color-bg-hover)',
                             padding: '2px 6px',
                             borderRadius: 6
                           }}>
@@ -525,10 +534,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                           </span>
                         )}
                       </div>
-                      <div style={{ fontSize: 12, color: '#555', lineHeight: 1.4, maxHeight: 36, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', lineHeight: 1.4, maxHeight: 36, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                         {deck.description || t('deck.labels.noDescription')}
                       </div>
-                      <div style={{ fontSize: 11, color: '#888' }}>{voiceCountLabel}</div>
+                      <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>{voiceCountLabel}</div>
                     </div>
 
                     <div
@@ -540,7 +549,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         width: 42,
                         height: 20,
                         borderRadius: 10,
-                        background: deck.enabled ? colorHex : '#ccc',
+                        background: deck.enabled ? colorHex : 'var(--color-disabled-bg)',
                         position: 'relative',
                         cursor: 'pointer',
                         transition: 'background 0.3s',
@@ -555,9 +564,9 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         width: 16,
                         height: 16,
                         borderRadius: 8,
-                        background: '#fff',
+                        background: 'var(--color-text-on-action)',
                         transition: 'left 0.3s',
-                        boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                        boxShadow: '0 2px 4px var(--color-shadow-medium)'
                       }} />
                     </div>
                   </div>
@@ -569,7 +578,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         style={{
                           padding: '6px 10px',
                           background: colorHex,
-                          color: '#fff',
+                          color: 'var(--color-text-on-action)',
                           border: 'none',
                           borderRadius: 6,
                           cursor: 'pointer',
@@ -586,8 +595,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                             onClick={() => handleSyncDeck(deck.id)}
                             style={{
                               padding: '6px 10px',
-                              background: '#81b7d2',
-                              color: '#fff',
+                              background: 'var(--color-action-link)',
+                              color: 'var(--color-text-on-action)',
                               border: 'none',
                               borderRadius: 6,
                               cursor: 'pointer',
@@ -602,8 +611,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                           onClick={() => handlePublishClick(deck)}
                           style={{
                             padding: '6px 10px',
-                            background: deck.published ? '#f39c7a' : '#b47ed7',
-                            color: '#fff',
+                            background: deck.published ? 'var(--color-state-warning)' : 'var(--color-voice-purple)',
+                            color: 'var(--color-text-on-action)',
                             border: 'none',
                             borderRadius: 6,
                             cursor: 'pointer',
@@ -617,8 +626,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                           onClick={() => handleDeleteDeck(deck.id)}
                           style={{
                             padding: '6px 10px',
-                            background: '#e8956c',
-                            color: '#fff',
+                            background: 'var(--color-state-danger)',
+                            color: 'var(--color-text-on-action)',
                             border: 'none',
                             borderRadius: 6,
                             cursor: 'pointer',
@@ -650,7 +659,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
 
           {communityDecks.length === 0 ? (
             <p style={{
-              color: '#999',
+              color: 'var(--color-text-muted)',
               fontSize: '14px',
               fontStyle: 'italic',
               textAlign: 'center',
@@ -673,7 +682,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                   <div
                     key={deck.id}
                     style={{
-                      background: '#fff',
+                      background: 'var(--color-bg-surface-solid)',
                       border: `2px solid ${colorHex}`,
                       borderRadius: 10,
                       padding: 12,
@@ -688,7 +697,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-1px)';
-                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 14px rgba(0,0,0,0.12)';
+                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 14px var(--color-shadow-medium)';
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
@@ -704,7 +713,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: '#fff',
+                        color: 'var(--color-text-on-action)',
                         flexShrink: 0,
                         boxShadow: `0 3px 8px ${colorHex}40`
                       }}>
@@ -725,7 +734,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         </div>
                         <div style={{
                           fontSize: 12,
-                          color: '#555',
+                          color: 'var(--color-text-secondary)',
                           marginBottom: 4,
                           lineHeight: 1.4,
                           maxHeight: 32,
@@ -735,7 +744,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         </div>
                         <div style={{
                           fontSize: 11,
-                          color: '#888'
+                          color: 'var(--color-text-muted)'
                         }}>
                           {t('deck.communityMeta', {
                             author: deck.author_name || t('deck.labels.anonymous'),
@@ -751,8 +760,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         onClick={() => handleInstallDeck(deck.id)}
                         style={{
                           padding: '6px 12px',
-                          background: '#27ae60',
-                          color: '#fff',
+                          background: 'var(--color-state-success)',
+                          color: 'var(--color-text-on-action)',
                           border: 'none',
                           borderRadius: 6,
                           fontSize: 12,
@@ -800,7 +809,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
             left: 0,
             right: 0,
             bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
+            background: 'var(--color-bg-overlay)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -811,7 +820,9 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
           <div
             className="modal-content"
             style={{
-              background: 'white',
+              background: 'var(--color-bg-paper)',
+              color: 'var(--color-text-primary)',
+              border: '1px solid var(--color-border-paper)',
               padding: '24px',
               borderRadius: '8px',
               maxWidth: '400px',
@@ -827,7 +838,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
               <span dangerouslySetInnerHTML={{ __html: t('deck.publishWarning.body') }} />
             </p>
 
-            <p style={{ marginBottom: '16px', color: '#e74c3c', fontSize: '13px', lineHeight: '1.5' }}>
+            <p style={{ marginBottom: '16px', color: 'var(--color-state-error)', fontSize: '13px', lineHeight: '1.5' }}>
               {t('deck.publishWarning.note')}
             </p>
 
@@ -836,9 +847,9 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                 onClick={() => setPublishWarning(null)}
                 style={{
                   padding: '8px 16px',
-                  background: '#ccc',
+                  background: 'var(--color-bg-surface)',
                   color: 'var(--color-text-primary)',
-                  border: 'none',
+                  border: '1px solid var(--color-border-paper)',
                   borderRadius: '4px',
                   cursor: 'pointer',
                   fontSize: '14px',
@@ -851,8 +862,8 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                 onClick={() => handlePublishToggle(publishWarning)}
                 style={{
                   padding: '8px 16px',
-                  background: '#9b59b6',
-                  color: 'white',
+                  background: 'var(--color-voice-purple)',
+                  color: 'var(--color-text-on-action)',
                   border: 'none',
                   borderRadius: '4px',
                   cursor: 'pointer',

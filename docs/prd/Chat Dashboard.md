@@ -6,20 +6,22 @@
 > **[Sync] 2026-06-09**: ChatPanel 在用户上滑离开消息底部时，于 AIInputDock 上方显示悬浮「滚动到底部」箭头；点击后平滑回到底部并恢复自动贴底。
 > **[Sync] 2026-06-28**: 历史对话入口改为右侧历史面板；面板打开即加载默认历史，标题栏搜索按钮打开居中搜索弹窗。搜索弹窗只负责检索和切换会话，不显示「新聊天」入口。
 > **[Sync] 2026-07-08**: 依据《Chat 工作区入口页》与《连接器具体配置页面结构草图》重写 Chat 主工作区：以居中 `ChatInputDock` + `WorkspaceTabBar` 为准，历史与资源连接器都在主内容区切换，旧的侧边历史入口不再作为主路径。
+> **[Sync] 2026-07-08**: 修正资源连接器入口策略：Chat 只承载轻量 `ResourceConnectorTabPanel`，点击「选择连接器」或连接器卡片必须进入 Settings 的「资源链接」区；Notion 具体配置页由 Settings 内的 `ConnectorNotionDetailPage` 承载。
 
 ## 1. 文档范围
 
-Chat Dashboard 是用户进入对话工作区后的首屏，用于创建新会话、查看聊天历史、切换到资源连接器工作台，并承载底部 / 居中的输入 Dock。
+Chat Dashboard 是用户进入对话工作区后的首屏，用于创建新会话、查看聊天历史、查看资源连接器摘要，并承载底部 / 居中的输入 Dock。
 
 本次版本以 `docs/prd/Chat 工作区入口页.md` 为首屏草图，以 `docs/prd/notion-session/连接器具体配置页面结构草图.md` 为连接器下钻页草图。Chat 不再以右侧历史侧栏作为主要入口，`WorkspaceTabBar` 成为唯一的主内容切换器。
 
-模型配置（主题、AI 模型、系统提示词、工作区模式）仍位于独立的 Settings 页面，参见 [Settings PRD](<./Settings.md>)。
+模型配置（主题、AI 模型、系统提示词、工作区模式）与资源链接管理仍位于独立的 Settings 页面，参见 [Settings PRD](<./Settings.md>)。Chat 里的资源连接器 Tab 不实现 Notion 认证、资源选择或同步配置。
 
 ## 2. 设计目标
 
 - 保持“暖纸张、手写、安静工具台”的产品气质。
 - 让用户在首屏立即理解：**先输入、再切换内容区**。
-- 让 `聊天历史` 与 `资源连接器` 共享同一 Chat 工作区框架，避免再分裂为侧边面板或独立设置入口。
+- 让 `聊天历史` 与 `资源连接器` 共享同一 Chat 工作区框架，但资源连接器在 Chat 中只展示摘要、空态与跳转入口。
+- 让连接器的认证、资源选择、同步和关闭操作统一进入 Settings 的「资源链接」区，避免 Chat 内出现第二套配置流程。
 - 明确空状态、加载态、错误态与已连接态，尤其是连接器 Tab 的空 / 骨架 / 异常表现。
 - 页面不出现外层垂直滚动；历史列表、消息流、连接器列表各自内部滚动。
 
@@ -123,8 +125,8 @@ ResourceConnectorTabPanel
 ```
 
 - 空态采用**虚线边框容器**，不可退化为纯文本。
-- `SelectConnectorButton` 的主文案统一为 `选择连接器`；若原型阶段保留 `前往设置 / 选择连接器` 复合文案，也必须保持行为为“进入连接器选择 / 列表”，而不是跳转到独立设置页。
-- 点击 `ConnectorCard` 后进入对应连接器详情页 `ConnectorConfigPage`。
+- `SelectConnectorButton` 的主文案统一为 `选择连接器`；点击后必须打开 Settings 页面并聚焦「资源链接」区。
+- 点击 `ConnectorCard` 后进入同一 Settings 资源链接路径；若用户继续点击 Notion「管理」，再进入 Settings 内的 `ConnectorNotionDetailPage`。
 
 ## 5. 状态设计
 
@@ -189,9 +191,38 @@ ResourceConnectorTabPanel
 - `ResourceConnectorTabPanel` 的空态具备虚线边框、三枚资源类型图标、标题、描述和 CTA。
 - `HistoryTab` 与 `ResourceConnectorTab` 首次加载都使用骨架屏，而不是纯文本 loading。
 - `connector_empty` / `connector_connected` / `connector_error` 三种连接器态互斥且切换清晰。
-- 点击连接器卡片后进入 `ConnectorConfigPage`，而不是在 Chat 内原地展开复杂配置。
+- 点击连接器卡片后进入 Settings 的「资源链接」区，而不是在 Chat 内原地展开复杂配置。
 
-## 10. 前端实现备注（2026-07-08 对齐稿）
+## 10. 任务解决方案设计稿（2026-07-08）
+
+### 10.1 Chat 连接器跳转错位
+
+| 项 | 方案 |
+|---|---|
+| 根因 | Chat 侧曾把 `ConnectorLandingPanel` 的 CTA / 卡片接入 Chat 内 `ConnectorConfigPage`，与最新设计稿“资源连接器空态点击跳转设置页链接器功能选择位置”不一致。 |
+| 最小修复 | `ConnectorLandingPanel` 继续展示 toolbar、骨架、虚线空态和连接器卡片；所有选择动作统一调用 App 层 `openConnectorSettings()`。 |
+| 非目标 | 不在 Chat 中实现认证、资源选择、同步、关闭连接或 Notion 详情页下钻。 |
+| 验收 | 点击「选择连接器」或连接器卡片后进入 Settings，并滚动 / 聚焦到 `ConnectorSettingsSection`。 |
+
+### 10.2 Chat 骨架屏
+
+| 项 | 方案 |
+|---|---|
+| 根因 | 旧实现容易退化为文本 loading，弱化了设计稿里的黑色 / 暗色骨架结构。 |
+| 最小修复 | 保留 `SkeletonList` / `ConnectorToolbarSkeleton`，在列表结果返回前不显示空态文案。 |
+| 非目标 | 不新增全局 skeleton 系统，不重写 ChatPanel 消息流。 |
+| 验收 | 历史和连接器首次加载均有结构化占位。 |
+
+### 10.3 暗色主题
+
+| 项 | 方案 |
+|---|---|
+| 根因 | Chat / Settings / Decks 的局部组件存在硬编码浅色背景或白字色。 |
+| 最小修复 | 替换确定影响暗色模式的硬编码浅色面为语义 token 或 `color-mix()`。 |
+| 非目标 | 不引入新的主题框架，不重做色彩系统。 |
+| 验收 | 暗色模式下页面背景、卡片、边框、按钮和文本均使用可读的语义色。 |
+
+## 11. 前端实现备注（2026-07-08 对齐稿）
 
 - Chat 首页的首要视觉锚点是 `ChatInputDock`，不是 marketing hero，也不是右侧历史侧栏。
 - 历史对话与资源连接器共用 `WorkspaceTabBar`，推荐实现成稳定的 content switch，而不是 overlay / drawer。

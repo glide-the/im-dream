@@ -14,7 +14,8 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 > [Sync] 2026-07-04: 从 `docs/design/notion-session/resource-connector-prd.md` 拆分，前端 PRD 独立管理
 > [Sync] 2026-07-07: Chat 入口页成为主落点，历史对话与连接器工作台下沉到输入框下方，嵌入式资源视图负责连接器管理。
 > [Sync] 2026-07-08: 入口描述曾短暂偏离 Chat 主工作区，本稿已回收为 Chat `WorkspaceTabBar` 主入口，并撤销仅摘要化的连接器路径表述。
-> [Sync] 2026-07-08: Notion 详情页统一采用 `ConnectorConfigPage` 结构与 `资源连接器 > Notion Connector` 面包屑；详情层级、状态词汇、骨架屏说明与两份最新草图重新对齐。
+> [Sync] 2026-07-08: Notion 详情页统一采用 Settings 内 `ConnectorNotionDetailPage` 结构与 `资源连接器 > Notion Connector` 面包屑；详情层级、状态词汇、骨架屏说明与两份最新草图重新对齐。
+> [Sync] 2026-07-08: 根据最新反馈修正入口边界：Chat `ResourceConnectorTabPanel` 只做摘要和跳转，点击「选择连接器」或连接器卡片进入 Settings 的「资源链接」区；Notion 详情页由 Settings 内 `ConnectorNotionDetailPage` 承载，保留现有认证 / 资源选择流程。
 
 ---
 
@@ -25,8 +26,9 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 3. [页面结构设计](#3-页面结构设计)
 4. [交互流程设计](#4-交互流程设计)
 5. [状态定义](#5-状态定义)
-6. [不实现清单](#6-不实现清单)
-7. [API 端点汇总](#7-api-端点汇总)
+6. [任务解决方案设计稿](#6-任务解决方案设计稿2026-07-08)
+7. [不实现清单](#7-不实现清单)
+8. [API 端点汇总](#8-api-端点汇总)
 
 ---
 
@@ -34,14 +36,14 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 ### 1.1 是什么
 
-**资源连接器**（Resource Connector）是 Chat 工作区中的一级工作台视图。用户进入 Chat Dashboard 后，先看到居中的 `ChatInputDock`，其下方通过 `WorkspaceTabBar` 在 `聊天历史` 与 `资源连接器` 之间切换；点击某个连接器后，再进入该连接器的独立详情页 `ConnectorConfigPage` 完成认证、来源选择与同步管理。
+**资源连接器**（Resource Connector）在 Chat 工作区中是一级摘要视图，在 Settings 中是完整管理视图。用户进入 Chat Dashboard 后，先看到居中的 `ChatInputDock`，其下方通过 `WorkspaceTabBar` 在 `聊天历史` 与 `资源连接器` 之间切换；点击「选择连接器」或连接器卡片后进入 Settings 的「资源链接」区，再通过 Notion「管理」进入 `ConnectorNotionDetailPage` 完成认证、来源选择与同步管理。
 
 > 本期只落地 Notion Connector 的完整详情页；飞书与本地 CLI 执行器仍保留为入口级占位，不展开完整配置流。
 
 ### 1.2 核心价值
 
-- 在 **不离开 Chat 工作区心智** 的前提下完成资源连接、认证与来源选择。
-- 让用户先在 Chat 内感知“可供对话使用的资源”，再按需下钻到 `ConnectorConfigPage` 进行细配置。
+- 在 Chat 中让用户感知“可供对话使用的资源”，但把认证、资源选择和同步集中到 Settings，避免 Chat 工作台承担复杂设置。
+- 让用户先在 Chat 内看到资源连接器入口，再按需跳转到 Settings 的 `ConnectorNotionDetailPage` 进行细配置。
 - 为 Agent 提供结构化外部背景信息，并将其同步为统一的 `.notion/` canonical snapshot 读取入口。
 
 ### 1.3 类比理解
@@ -50,7 +52,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 |---------|---------|
 | ChatGPT Projects 聊天主页面 | `ChatInputDock` + `WorkspaceTabBar` + `MainContentArea` |
 | ChatGPT Projects 来源入口 | Chat 内 `ResourceConnectorTabPanel` |
-| Slack / Google Drive 连接器详情 | `ConnectorConfigPage` |
+| Slack / Google Drive 连接器详情 | Settings 内的 `ConnectorNotionDetailPage` |
 | 数据源选择 / 索引配置 | `ResourceSourceSection` |
 
 ---
@@ -84,9 +86,11 @@ ChatDashboardPage
         └── ResourceConnectorTabPanel
               ├── ConnectorToolbar
               ├── ConnectorEmptyState / ConnectorList
-              └── ConnectorCard → ConnectorConfigPage
+              └── ConnectorCard / SelectConnectorButton → Settings ConnectorSettingsSection
 
-ConnectorConfigPage
+SettingsView
+  ├── ConnectorSettingsSection
+  └── ConnectorNotionDetailPage
   ├── TopNavigation
   ├── ConnectorHeader
   ├── ConnectorOverviewSection
@@ -142,15 +146,15 @@ ResourceConnectorTabPanel
 │   │   └── SelectConnectorButton
 │   └── ConnectorList
 │       └── ConnectorCard（名称 / 简介 / 状态 / 最近同步）
-└── ConnectorCard click
-    └── Navigate → ConnectorConfigPage
+└── ConnectorCard / SelectConnectorButton click
+    └── Navigate → Settings / ConnectorSettingsSection
 ```
 
 > `ConnectorToolbar` 即使在空状态下也保留位置；加载时显示骨架占位，空态时显示真实筛选 / 排序控件。
 
-### 3.3 `ConnectorConfigPage` 详情页
+### 3.3 Settings 内 `ConnectorNotionDetailPage` 详情页
 
-点击某个连接器卡片后进入独立详情页：
+用户从 Chat 进入 Settings 的「资源链接」区，或在 Settings 里点击 Notion「管理」后进入独立详情页：
 
 ```txt
 ┌────────────────────────────────────────────────────────────────────┐
@@ -184,7 +188,7 @@ ResourceConnectorTabPanel
 | Chat 主切换条 | `WorkspaceTabBar` | Chat 级唯一主切换，固定只有 `HistoryTab` / `ResourceConnectorTab` 两项 |
 | Chat 历史内容 | `HistoryTabPanel` | 默认承载空聊天态、历史列表、会话切换后的消息流 |
 | Chat 连接器内容 | `ResourceConnectorTabPanel` | 承载筛选排序、空态、连接器列表与错误提示 |
-| 连接器详情页 | `ConnectorConfigPage` | 点击连接器后进入的独立配置页 |
+| 连接器详情页 | `ConnectorNotionDetailPage` | Settings 内点击 Notion「管理」后进入的独立配置页 |
 | 顶部导航 | `TopNavigation` | 固定使用 `← 资源连接器 > Notion Connector` |
 | 连接器头部 | `ConnectorHeader` | 图标 / 名称 / 描述 / 状态 badge / 设计稿按钮 / 关闭连接 |
 | 连接器概览 | `ConnectorOverviewSection` | 行级概览卡，展示状态、设计稿链接和关闭动作 |
@@ -216,18 +220,19 @@ ResourceConnectorTabPanel
 用户位于 ResourceConnectorTabPanel
     │
     ├─ 点击「选择连接器」
-    │   └─ 打开连接器选择入口（本期重点为 Notion）
+    │   └─ 打开 Settings，并滚动 / 聚焦到 ConnectorSettingsSection
     │
     ├─ 点击 Notion Connector 卡片
-    │   └─ 页面级导航到 ConnectorConfigPage
+    │   └─ 同样打开 Settings 的 ConnectorSettingsSection
     │
-    └─ ConnectorConfigPage 顶部显示：← 资源连接器 > Notion Connector
+    └─ 在 Settings 点击 Notion「管理」
+        └─ 页面级导航到 ConnectorNotionDetailPage，顶部显示：← 资源连接器 > Notion Connector
 ```
 
 ### 4.3 认证与资源选择
 
 ```txt
-用户进入 ConnectorConfigPage
+用户进入 ConnectorNotionDetailPage
     │
     ├─ 未认证
     │   ├─ ConnectorHeader / ConnectorOverviewSection 可查看
@@ -311,7 +316,38 @@ ResourceConnectorTabPanel
 
 ---
 
-## 6. 不实现清单
+## 6. 任务解决方案设计稿（2026-07-08）
+
+### 6.1 入口与路由
+
+| 项 | 方案 |
+|---|---|
+| 问题 | Chat 的「选择连接器」和连接器卡片不应进入 Chat 内配置页。 |
+| 处理 | Chat 只触发 App 层 Settings 导航，并通过 `focusNonce` 聚焦 `ConnectorSettingsSection`。 |
+| 判断 | 符合目标：Chat 入口页保持轻量，复杂连接器配置回到 Settings。 |
+| 避免过度设计 | 不新增路由库、不新增 URL query/anchor 体系；沿用现有 App 视图状态。 |
+
+### 6.2 Notion 具体配置页
+
+| 项 | 方案 |
+|---|---|
+| 问题 | `ConnectorNotionDetailPage` 只有简单面包屑和嵌入页，缺少草图里的头部、概览、策略占位、资源区和状态解释。 |
+| 处理 | 在 Settings 内重建页面骨架：`TopNavigation`、`ConnectorHeader`、`ConnectorOverviewSection`、`StrategySection`、`ResourceSourceSection`、`ConnectionStateCard`；下方继续复用 `ResourceConnectorPage` 承载 Notion 认证、资源选择、同步和删除流程。 |
+| 判断 | 符合目标：保留认证整体流程，同时让页面主体结构与草图一致。 |
+| 避免过度设计 | 不复制 `ResourceConnectorPage` 的内部业务状态，不重写 Notion API 调用。 |
+
+### 6.3 暗色模式
+
+| 项 | 方案 |
+|---|---|
+| 问题 | Chat、Settings、Decks 局部存在硬编码浅色背景或白色文字，在暗色模式下破坏主题。 |
+| 处理 | 将确定影响的浅色面替换为 `var(--color-*)` 语义 token 或 `color-mix()`；保留现有色彩系统。 |
+| 判断 | 符合目标：修复主题错误，不重做视觉体系。 |
+| 避免过度设计 | 不新增 token 命名空间，不重构全部 inline style。 |
+
+---
+
+## 7. 不实现清单
 
 防止过度设计，以下内容**明确排除**：
 
@@ -328,7 +364,7 @@ ResourceConnectorTabPanel
 
 ---
 
-## 7. API 端点汇总
+## 8. API 端点汇总
 
 | 端点 | 方法 | 用途 |
 |------|------|------|
@@ -354,7 +390,7 @@ ResourceConnectorTabPanel
 | 决策 | 选项 | 选择 | 理由 |
 |------|------|------|------|
 | 主入口位置 | Chat / 独立设置页 | Chat `WorkspaceTabBar` | 让资源选择保持在对话工作区心智内 |
-| 详情页导航 | 内嵌展开 / 独立下钻 | `ConnectorConfigPage` | 复杂配置与 Chat 入口解耦 |
+| 详情页导航 | Chat 内下钻 / Settings 内管理页 | `ConnectorNotionDetailPage` | 复杂配置与 Chat 入口解耦，Settings 保持配置归属 |
 | 详情页组件树 | 自定义散装模块 / 草图组件树 | 复用 `TopNavigation`~`ConnectionStateCard` 命名 | 与草图和后续实现保持一一对应 |
 | 文件上传 | 连接器内 / 全局文件系统 | 后续迭代再定 | 本轮只聚焦远程资源连接 |
 

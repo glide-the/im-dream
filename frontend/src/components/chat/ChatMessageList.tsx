@@ -24,7 +24,8 @@ import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
 import UserMessagePart from './UserMessagePart';
 import ToolMessagePart from './ToolMessagePart';
-import { isEditorWriteTool, EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
+import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
+import { isEditorWriteTool } from './editorWriteTools';
 
 interface ChatMessageListProps {
   messages: UIMessage[];

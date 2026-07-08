@@ -1,15 +1,19 @@
-// [Input] Connector API client and a callback that opens the full-page `ConnectorConfigPage`.
+// [Input] Connector API client and a callback that opens Settings' resource-link connector section.
 // [Output] Chat `ResourceConnectorTab` content — `ConnectorToolbar` (filter/sort placeholders),
 //          a dashed `ConnectorEmptyState` (三枚资源类型图标 + 标题 + 描述 + CTA), skeleton loading,
-//          and a `ConnectorList` of connector cards. Selecting the CTA or a card navigates (page-level,
-//          not a Settings redirect) into `ConnectorConfigPage`.
+//          and a `ConnectorList` of connector cards. Selecting the CTA or a card navigates to
+//          Settings' resource-link section; Chat never owns the Notion configuration flow.
 // [Pos] chat connector landing panel (ResourceConnectorTabPanel) in frontend/src/components/chat
 // [Sync] 2026-07-08: initial Chat-to-Settings connector landing panel for the resource-link migration.
 // [Sync] 2026-07-08: replace text-only loading state with a skeleton-screen placeholder, aligning
 //                    with 《链接器概念的交互设计稿》 Chat 入口页「无资源链接」骨架屏 default state.
 // [Sync] 2026-07-08: rebuild into `ResourceConnectorTabPanel` per docs/prd/notion-session/resource-connector.md
 //                    §3.2 — add `ConnectorToolbar` (filter/sort), dashed三图标 empty state with「选择连接器」
-//                    CTA, and route connector selection into the in-Chat `ConnectorConfigPage` instead of Settings.
+//                    CTA.
+// [Sync] 2026-07-08: route connector CTA/card selection back to Settings resource-link management,
+//                    matching 《链接器概念的交互设计稿》 Chat 入口页.
+// [Sync] 2026-07-08: replace light-only card/empty-state fills with semantic theme tokens so the Chat
+//                    resource connector tab renders correctly under dark mode.
 import { useCallback, useEffect, useState } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import {
@@ -22,7 +26,7 @@ import {
 import { SkeletonBar, SkeletonList } from './Skeleton';
 
 interface ConnectorLandingPanelProps {
-  /** Opens the full `ConnectorConfigPage` for the given connector (or the default Notion connector when none supplied yet). */
+  /** Opens Settings and focuses the resource-link connector section. */
   onOpenConnector?: (connector: ResourceConnector | null) => void;
 }
 
@@ -124,9 +128,9 @@ function ConnectorCard({ connector, onOpen }: { connector: ResourceConnector; on
         gap: '0.85rem',
         border: '1px solid var(--color-border-paper)',
         borderRadius: '1rem',
-        background: 'rgba(255,250,242,0.86)',
+        background: 'var(--color-bg-surface-solid)',
         padding: '0.85rem 0.9rem',
-        boxShadow: '0 10px 24px rgba(91, 69, 44, 0.05)',
+        boxShadow: '0 10px 24px var(--color-shadow-soft)',
         cursor: 'pointer',
         textAlign: 'left',
         width: '100%',
@@ -140,7 +144,7 @@ function ConnectorCard({ connector, onOpen }: { connector: ResourceConnector; on
           height: '2.4rem',
           borderRadius: '0.85rem',
           border: '1px solid var(--color-border-paper)',
-          background: 'rgba(95, 74, 54, 0.08)',
+          background: 'var(--color-bg-hover)',
           color: 'var(--color-text-primary)',
           display: 'grid',
           placeItems: 'center',
@@ -162,8 +166,8 @@ function ConnectorCard({ connector, onOpen }: { connector: ResourceConnector; on
               gap: '0.32rem',
               padding: '0.28rem 0.55rem',
               borderRadius: '999px',
-              border: `1px solid ${healthy ? 'rgba(126, 148, 104, 0.22)' : 'var(--color-border-paper)'}`,
-              background: healthy ? 'rgba(126, 148, 104, 0.12)' : 'rgba(91, 69, 44, 0.06)',
+              border: `1px solid ${healthy ? 'color-mix(in srgb, var(--color-state-success) 30%, var(--color-border-paper))' : 'var(--color-border-paper)'}`,
+              background: healthy ? 'color-mix(in srgb, var(--color-state-success) 16%, var(--color-bg-paper))' : 'var(--color-bg-hover)',
               color: healthy ? 'var(--color-state-success)' : 'var(--color-text-secondary)',
               fontSize: '0.72rem',
               fontWeight: 700,
@@ -204,19 +208,19 @@ function ConnectorEmptyState({ onSelectConnector }: { onSelectConnector: () => v
       style={{
         border: '1px dashed var(--color-border-paper)',
         borderRadius: '1rem',
-        background: 'rgba(255,250,242,0.72)',
+        background: 'var(--color-bg-surface)',
         padding: '1.6rem 1.2rem',
         textAlign: 'center',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}>
-        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'rgba(95, 74, 54, 0.06)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
           <IconDatabase style={{ width: '1rem', height: '1rem' }} />
         </span>
-        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'rgba(95, 74, 54, 0.06)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
           <IconFolder style={{ width: '1rem', height: '1rem' }} />
         </span>
-        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'rgba(95, 74, 54, 0.06)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
           <IconGrid style={{ width: '1rem', height: '1rem' }} />
         </span>
       </div>
@@ -301,8 +305,8 @@ export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLand
         gap: '0.75rem',
         border: '1px solid var(--color-border-paper)',
         borderRadius: '1.15rem',
-        background: 'linear-gradient(180deg, rgba(255,250,242,0.96), rgba(247,239,227,0.9))',
-        boxShadow: '0 16px 36px rgba(91, 69, 44, 0.08)',
+        background: 'var(--color-bg-surface)',
+        boxShadow: '0 16px 36px var(--color-shadow-soft)',
         overflow: 'hidden',
         padding: '0.95rem 1rem',
       }}

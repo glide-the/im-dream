@@ -8,10 +8,12 @@
 // [Sync] 2026-05-29: add onEditorWriteConfirmed prop; call after successful editor write approve to trigger Writing view reload.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin tool confirmation requests.
 // [Sync] 2026-06-14: pass toolCallId to onEditorWriteConfirmed for event-driven reload de-duplication.
+// [Sync] 2026-07-08: use semantic error/on-action color tokens in generic tool cards for dark mode.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
-import EditorWriteApprovalUI, { isEditorWriteTool } from './EditorWriteApprovalUI';
+import EditorWriteApprovalUI from './EditorWriteApprovalUI';
+import { isEditorWriteTool } from './editorWriteTools';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
@@ -303,7 +305,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
             {outputDisplay ? (
               <section style={{ borderRadius: '10px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', padding: '0.85rem' }}>
                 <h5 style={{ margin: '0 0 0.5rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{isError ? 'Error' : 'Output'}</h5>
-                <pre style={{ margin: 0, fontSize: '0.76rem', whiteSpace: 'pre-wrap', overflowX: 'auto', color: isError ? '#d9534f' : 'var(--color-text-secondary)' }}>{outputDisplay}</pre>
+                <pre style={{ margin: 0, fontSize: '0.76rem', whiteSpace: 'pre-wrap', overflowX: 'auto', color: isError ? 'var(--color-state-error)' : 'var(--color-text-secondary)' }}>{outputDisplay}</pre>
               </section>
             ) : null}
           </div>
@@ -311,7 +313,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
 
         {shouldShowApprovalUI && confirmationStatus === 'idle' ? (
           <div style={{ display: 'flex', gap: '0.75rem', padding: '0 0.9rem 0.9rem' }}>
-            <button type="button" onClick={() => void handleApprove()} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: 'var(--color-action-link)', color: '#fff', fontWeight: 600, cursor: 'pointer' }}><IconCheck style={{ width: '1rem', height: '1rem' }} />Approve</button>
+            <button type="button" onClick={() => void handleApprove()} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: 'pointer' }}><IconCheck style={{ width: '1rem', height: '1rem' }} />Approve</button>
             <button type="button" onClick={() => void handleReject()} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', borderRadius: '999px', padding: '0.8rem 1rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontWeight: 600, cursor: 'pointer' }}><IconX style={{ width: '1rem', height: '1rem' }} />Cancel</button>
           </div>
         ) : null}

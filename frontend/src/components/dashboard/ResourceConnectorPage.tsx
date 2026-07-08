@@ -11,6 +11,8 @@
 // [Sync] 2026-07-08: replace text-only "正在加载连接器…" first-load states (embedded and page mode
 //                    connector list) with skeleton-screen placeholders, aligning with 《链接器概念的
 //                    交互设计稿》「具体配置页面」骨架屏。
+// [Sync] 2026-07-08: page-mode connector workbench now uses semantic surface, shadow, and state
+//                    tokens so Settings/Chat detail pages render coherently in dark mode.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   IconArrowUp,
@@ -127,8 +129,8 @@ function connectorTheme(theme: ConnectorSurfaceTheme) {
     border: 'var(--color-border-paper)',
     borderStrong: 'var(--color-border-focus)',
     borderFocus: 'var(--color-border-focus)',
-    cardBackground: 'rgba(255,250,242,0.68)',
-    cardShadow: '0 10px 20px rgba(91, 69, 44, 0.05)',
+    cardBackground: 'var(--color-bg-surface)',
+    cardShadow: '0 10px 20px var(--color-shadow-soft)',
   } as const;
 }
 
@@ -245,29 +247,29 @@ function ConnectorStatusPill({
       }[tone]
     : {
         neutral: {
-          background: 'rgba(91, 69, 44, 0.08)',
+          background: 'var(--color-bg-hover)',
           color: 'var(--color-text-secondary)',
-          border: 'rgba(91, 69, 44, 0.14)',
+          border: 'var(--color-border-paper)',
         },
         success: {
-          background: 'rgba(126, 148, 104, 0.16)',
+          background: 'color-mix(in srgb, var(--color-state-success) 18%, var(--color-bg-paper))',
           color: 'var(--color-state-success)',
-          border: 'rgba(126, 148, 104, 0.24)',
+          border: 'color-mix(in srgb, var(--color-state-success) 34%, var(--color-border-paper))',
         },
         warning: {
-          background: 'rgba(199, 136, 85, 0.16)',
+          background: 'color-mix(in srgb, var(--color-state-warning) 18%, var(--color-bg-paper))',
           color: 'var(--color-state-warning)',
-          border: 'rgba(199, 136, 85, 0.24)',
+          border: 'color-mix(in srgb, var(--color-state-warning) 34%, var(--color-border-paper))',
         },
         danger: {
-          background: 'rgba(168, 102, 82, 0.16)',
+          background: 'color-mix(in srgb, var(--color-state-error) 18%, var(--color-bg-paper))',
           color: 'var(--color-state-error)',
-          border: 'rgba(168, 102, 82, 0.24)',
+          border: 'color-mix(in srgb, var(--color-state-error) 34%, var(--color-border-paper))',
         },
         info: {
-          background: 'rgba(95, 74, 54, 0.12)',
+          background: 'var(--color-bg-active)',
           color: 'var(--color-text-primary)',
-          border: 'rgba(95, 74, 54, 0.18)',
+          border: 'var(--color-border-paper)',
         },
       }[tone];
 
@@ -327,7 +329,7 @@ function SectionCard({
         border: `1px solid ${palette.border}`,
         borderRadius: compact ? '20px' : '24px',
         background: theme === 'dark' ? palette.shellSurface : 'var(--color-bg-paper)',
-        boxShadow: theme === 'dark' ? '0 18px 44px rgba(0, 0, 0, 0.34)' : '0 14px 34px rgba(91, 69, 44, 0.08)',
+        boxShadow: theme === 'dark' ? '0 18px 44px rgba(0, 0, 0, 0.34)' : '0 14px 34px var(--color-shadow-soft)',
         overflow: 'hidden',
       }}
     >
@@ -337,7 +339,7 @@ function SectionCard({
           borderBottom: `1px solid ${palette.border}`,
           background: theme === 'dark'
             ? 'linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0))'
-            : 'linear-gradient(180deg, rgba(255,255,255,0.32), rgba(255,255,255,0))',
+            : 'var(--color-bg-surface)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem' }}>
@@ -374,14 +376,12 @@ function ConnectorListItem({
         width: '100%',
         border: '1px solid',
         borderColor: isActive ? 'var(--color-border-focus)' : 'var(--color-border-paper)',
-        background: isActive
-          ? 'linear-gradient(180deg, rgba(255,250,242,0.92), rgba(242, 232, 216, 0.76))'
-          : 'rgba(255,250,242,0.9)',
+        background: isActive ? 'var(--color-bg-surface-solid)' : 'var(--color-bg-surface)',
         borderRadius: '18px',
         padding: '0.9rem',
         textAlign: 'left',
         cursor: 'pointer',
-        boxShadow: isActive ? '0 16px 30px rgba(91, 69, 44, 0.08)' : '0 10px 24px rgba(91, 69, 44, 0.05)',
+        boxShadow: isActive ? '0 16px 30px var(--color-shadow-soft)' : '0 10px 24px var(--color-shadow-soft)',
         color: 'var(--color-text-primary)',
         transition: 'transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease',
       }}
@@ -394,7 +394,7 @@ function ConnectorListItem({
             borderRadius: '0.9rem',
             display: 'grid',
             placeItems: 'center',
-            background: 'rgba(95, 74, 54, 0.08)',
+            background: 'var(--color-bg-hover)',
             border: '1px solid var(--color-border-paper)',
             color: 'var(--color-text-primary)',
             flexShrink: 0,
@@ -462,10 +462,10 @@ function ToggleRow({
         background: checked
           ? theme === 'dark'
             ? 'linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.05))'
-            : 'linear-gradient(180deg, rgba(255,255,255,0.9), rgba(242, 232, 216, 0.74))'
+            : 'var(--color-bg-surface-solid)'
           : theme === 'dark'
             ? 'rgba(255,255,255,0.03)'
-            : 'rgba(255,250,242,0.54)',
+            : 'var(--color-bg-surface)',
         padding: '0.9rem 0.95rem',
         cursor: disabled ? 'not-allowed' : 'pointer',
         opacity: disabled ? 0.66 : 1,
@@ -473,7 +473,7 @@ function ToggleRow({
         boxShadow: checked
           ? theme === 'dark'
             ? '0 12px 28px rgba(0,0,0,0.24)'
-            : '0 12px 26px rgba(91, 69, 44, 0.08)'
+            : '0 12px 26px var(--color-shadow-soft)'
           : 'none',
       }}
     >
@@ -521,9 +521,9 @@ function SourceCard({ source, theme = 'light' }: { source: ConnectorSource; them
         boxSizing: 'border-box',
         border: `1px solid ${palette.border}`,
         borderRadius: '18px',
-        background: theme === 'dark' ? palette.cardBackground : 'rgba(255,250,242,0.68)',
+        background: palette.cardBackground,
         padding: '0.9rem 0.95rem',
-        boxShadow: theme === 'dark' ? palette.cardShadow : '0 10px 20px rgba(91, 69, 44, 0.05)',
+        boxShadow: palette.cardShadow,
       }}
     >
       {theme === 'dark' ? (
@@ -633,10 +633,10 @@ function ConnectorEmptyState({
         borderRadius: compact ? '24px' : '28px',
         background: theme === 'dark'
           ? 'linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03))'
-          : 'linear-gradient(180deg, rgba(255,250,242,0.84), rgba(242,232,216,0.42))',
+          : 'var(--color-bg-surface)',
         padding: compact ? '1.35rem 1.15rem' : '2rem 1.5rem',
         textAlign: 'center',
-        boxShadow: theme === 'dark' ? '0 18px 44px rgba(0,0,0,0.28)' : '0 18px 40px rgba(91, 69, 44, 0.06)',
+        boxShadow: theme === 'dark' ? '0 18px 44px rgba(0,0,0,0.28)' : '0 18px 40px var(--color-shadow-soft)',
       }}
     >
       <div
@@ -647,7 +647,7 @@ function ConnectorEmptyState({
           borderRadius: compact ? '1.15rem' : '1.4rem',
           display: 'grid',
           placeItems: 'center',
-          background: theme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(95, 74, 54, 0.08)',
+          background: theme === 'dark' ? 'rgba(255,255,255,0.08)' : 'var(--color-bg-hover)',
           border: `1px solid ${palette.border}`,
           color: palette.textPrimary,
         }}
@@ -674,7 +674,7 @@ function ConnectorEmptyState({
           display: 'inline-flex',
           alignItems: 'center',
           gap: '0.5rem',
-          boxShadow: theme === 'dark' ? '0 16px 30px rgba(0,0,0,0.28)' : '0 16px 30px rgba(91, 69, 44, 0.16)',
+          boxShadow: theme === 'dark' ? '0 16px 30px rgba(0,0,0,0.28)' : '0 16px 30px var(--color-shadow-medium)',
         }}
       >
         <IconPlus style={{ width: '1rem', height: '1rem' }} />
@@ -1935,7 +1935,7 @@ export default function ResourceConnectorPage({
                   width: '100%',
                   border: '1px solid var(--color-border-paper)',
                   borderRadius: '16px',
-                  background: 'rgba(255,250,242,0.9)',
+                  background: 'var(--color-bg-paper)',
                   padding: '0.9rem 1rem',
                   fontSize: '0.95rem',
                   color: 'var(--color-text-primary)',
@@ -1947,7 +1947,7 @@ export default function ResourceConnectorPage({
               style={{
                 border: '1px dashed var(--color-border-paper)',
                 borderRadius: '18px',
-                background: 'rgba(255,250,242,0.64)',
+                background: 'var(--color-bg-surface)',
                 padding: '0.9rem 1rem',
                 fontSize: '0.84rem',
                 lineHeight: 1.65,
@@ -1959,9 +1959,9 @@ export default function ResourceConnectorPage({
             {createError ? (
               <div
                 style={{
-                  border: '1px solid rgba(168, 102, 82, 0.22)',
+                  border: '1px solid color-mix(in srgb, var(--color-state-error) 34%, var(--color-border-paper))',
                   borderRadius: '18px',
-                  background: 'rgba(168, 102, 82, 0.08)',
+                  background: 'color-mix(in srgb, var(--color-state-error) 12%, var(--color-bg-paper))',
                   padding: '0.9rem 1rem',
                   color: 'var(--color-state-error)',
                   fontSize: '0.84rem',
@@ -2026,7 +2026,7 @@ export default function ResourceConnectorPage({
           : (isMobile ? '1rem 1rem 5rem' : '1.5rem 1.5rem 2rem'),
         background: isEmbedded
           ? 'transparent'
-          : 'radial-gradient(circle at top left, rgba(214, 194, 168, 0.22), transparent 26%), radial-gradient(circle at top right, rgba(198, 176, 148, 0.16), transparent 24%), linear-gradient(180deg, rgba(255,255,255,0.18), transparent 18%), var(--color-bg-app)',
+          : 'var(--color-bg-app)',
         color: 'var(--color-text-primary)',
       }}
     >
@@ -2039,9 +2039,9 @@ export default function ResourceConnectorPage({
           borderRadius: isEmbedded ? '24px' : '32px',
           overflow: 'hidden',
           background: isEmbedded
-            ? 'linear-gradient(180deg, rgba(255, 250, 242, 0.98), rgba(247, 239, 227, 0.94))'
-            : 'linear-gradient(180deg, rgba(255, 250, 242, 0.96), rgba(247, 239, 227, 0.9))',
-          boxShadow: isEmbedded ? '0 18px 40px rgba(82, 61, 40, 0.1)' : '0 30px 72px rgba(82, 61, 40, 0.12)',
+            ? 'var(--color-bg-surface-solid)'
+            : 'var(--color-bg-surface)',
+          boxShadow: isEmbedded ? '0 18px 40px var(--color-shadow-soft)' : '0 30px 72px var(--color-shadow-medium)',
           backdropFilter: isEmbedded ? 'none' : 'blur(16px)',
           display: 'flex',
           flexDirection: 'column',
@@ -2057,8 +2057,8 @@ export default function ResourceConnectorPage({
             borderBottom: '1px solid var(--color-border-paper)',
             background:
               isEmbedded
-                ? 'linear-gradient(180deg, rgba(255,255,255,0.88), rgba(244,234,220,0.5))'
-                : 'linear-gradient(180deg, rgba(255,255,255,0.82), rgba(244,234,220,0.56))',
+                ? 'var(--color-bg-surface-solid)'
+                : 'var(--color-bg-surface)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
@@ -2072,7 +2072,7 @@ export default function ResourceConnectorPage({
                     padding: '0.34rem 0.72rem',
                     borderRadius: '999px',
                     border: '1px solid var(--color-border-paper)',
-                    background: 'rgba(95, 74, 54, 0.08)',
+                    background: 'var(--color-bg-hover)',
                     color: 'var(--color-text-secondary)',
                     fontSize: '0.72rem',
                     fontWeight: 700,
@@ -2128,7 +2128,7 @@ export default function ResourceConnectorPage({
                   gap: '0.5rem',
                   fontSize: isEmbedded ? '0.84rem' : '0.9rem',
                   fontWeight: 700,
-                  boxShadow: '0 16px 34px rgba(91, 69, 44, 0.16)',
+                  boxShadow: '0 16px 34px var(--color-shadow-medium)',
                 }}
               >
                 <IconPlus style={{ width: '1rem', height: '1rem' }} />
@@ -2172,7 +2172,7 @@ export default function ResourceConnectorPage({
               borderRight: isMobile ? 'none' : '1px solid var(--color-border-paper)',
               borderBottom: isMobile ? '1px solid var(--color-border-paper)' : 'none',
               padding: isEmbedded ? '0.85rem' : '1rem',
-              background: isEmbedded ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.3)',
+              background: 'var(--color-bg-surface)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.9rem' }}>
@@ -2190,7 +2190,7 @@ export default function ResourceConnectorPage({
                   placeItems: 'center',
                   borderRadius: '0.8rem',
                   border: '1px solid var(--color-border-paper)',
-                  background: 'rgba(95, 74, 54, 0.06)',
+                  background: 'var(--color-bg-hover)',
                   color: 'var(--color-text-secondary)',
                 }}
               >
@@ -2203,7 +2203,7 @@ export default function ResourceConnectorPage({
                 style={{
                   border: '1px solid var(--color-border-paper)',
                   borderRadius: '20px',
-                  background: 'rgba(255,250,242,0.66)',
+                  background: 'var(--color-bg-surface)',
                   padding: '1rem',
                 }}
               >
@@ -2212,9 +2212,9 @@ export default function ResourceConnectorPage({
             ) : error ? (
               <div
                 style={{
-                  border: '1px solid rgba(168, 102, 82, 0.22)',
+                  border: '1px solid color-mix(in srgb, var(--color-state-error) 34%, var(--color-border-paper))',
                   borderRadius: '20px',
-                  background: 'rgba(168, 102, 82, 0.08)',
+                  background: 'color-mix(in srgb, var(--color-state-error) 12%, var(--color-bg-paper))',
                   padding: '1rem',
                   color: 'var(--color-state-error)',
                   fontSize: '0.88rem',
@@ -2228,7 +2228,7 @@ export default function ResourceConnectorPage({
                 style={{
                   border: '1px dashed var(--color-border-paper)',
                   borderRadius: '20px',
-                  background: 'rgba(255,250,242,0.6)',
+                  background: 'var(--color-bg-surface)',
                   padding: '1rem',
                   color: 'var(--color-text-secondary)',
                   lineHeight: 1.6,
@@ -2250,7 +2250,7 @@ export default function ResourceConnectorPage({
             )}
           </aside>
 
-          <main style={{ padding: isEmbedded ? '0.85rem' : '1rem', background: isEmbedded ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.2)', minHeight: 0 }}>
+          <main style={{ padding: isEmbedded ? '0.85rem' : '1rem', background: 'var(--color-bg-paper)', minHeight: 0 }}>
             {!selectedConnector ? (
               <ConnectorEmptyState onCreate={openCreateModal} compact={compact} />
             ) : (
@@ -2285,10 +2285,10 @@ export default function ResourceConnectorPage({
                         type="button"
                         onClick={handleDeleteSelected}
                         style={{
-                          border: '1px solid rgba(168, 102, 82, 0.18)',
+                          border: '1px solid color-mix(in srgb, var(--color-state-error) 30%, var(--color-border-paper))',
                           borderRadius: '999px',
                           padding: '0.5rem 0.75rem',
-                          background: 'rgba(168, 102, 82, 0.08)',
+                          background: 'color-mix(in srgb, var(--color-state-error) 12%, var(--color-bg-paper))',
                           color: 'var(--color-state-error)',
                           cursor: 'pointer',
                           display: 'inline-flex',
@@ -2335,12 +2335,12 @@ export default function ResourceConnectorPage({
                                 border: '1px solid var(--color-border-paper)',
                                 borderRadius: '18px',
                                 padding: '0.9rem 1rem',
-                                background: 'rgba(255,255,255,0.8)',
+                                background: 'var(--color-bg-paper)',
                                 color: 'var(--color-text-primary)',
                                 fontSize: '1.05rem',
                                 fontWeight: 700,
                                 outline: 'none',
-                                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.55)',
+                                boxShadow: 'inset 0 1px 0 var(--color-shadow-soft)',
                               }}
                             />
                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
@@ -2419,7 +2419,7 @@ export default function ResourceConnectorPage({
                         style={{
                           border: '1px solid var(--color-border-paper)',
                           borderRadius: '18px',
-                        background: 'rgba(255,250,242,0.76)',
+                        background: 'var(--color-bg-surface)',
                           padding: '0.9rem',
                         }}
                       >
@@ -2437,7 +2437,7 @@ export default function ResourceConnectorPage({
                         style={{
                           border: '1px solid var(--color-border-paper)',
                           borderRadius: '18px',
-                        background: 'rgba(255,250,242,0.76)',
+                        background: 'var(--color-bg-surface)',
                           padding: '0.9rem',
                         }}
                       >
@@ -2455,7 +2455,7 @@ export default function ResourceConnectorPage({
                         style={{
                           border: '1px solid var(--color-border-paper)',
                           borderRadius: '18px',
-                        background: 'rgba(255,250,242,0.76)',
+                        background: 'var(--color-bg-surface)',
                           padding: '0.9rem',
                         }}
                       >
@@ -2539,7 +2539,7 @@ export default function ResourceConnectorPage({
                         style={{
                           border: '1px solid var(--color-border-paper)',
                           borderRadius: '20px',
-                          background: 'rgba(255,250,242,0.76)',
+                          background: 'var(--color-bg-surface)',
                           padding: '1rem',
                         }}
                       >
@@ -2566,7 +2566,7 @@ export default function ResourceConnectorPage({
                         style={{
                           border: '1px solid var(--color-border-paper)',
                           borderRadius: '20px',
-                          background: 'rgba(255,250,242,0.76)',
+                          background: 'var(--color-bg-surface)',
                           padding: '1rem',
                         }}
                       >
@@ -2633,7 +2633,7 @@ export default function ResourceConnectorPage({
                       style={{
                         border: '1px dashed var(--color-border-paper)',
                         borderRadius: '20px',
-                        background: 'rgba(255,250,242,0.72)',
+                        background: 'var(--color-bg-surface)',
                         padding: '1rem',
                         color: 'var(--color-text-secondary)',
                         lineHeight: 1.65,
@@ -2646,7 +2646,7 @@ export default function ResourceConnectorPage({
                       style={{
                         border: '1px solid var(--color-border-paper)',
                         borderRadius: '20px',
-                        background: 'rgba(255,250,242,0.72)',
+                        background: 'var(--color-bg-surface)',
                         padding: '1rem',
                         color: 'var(--color-text-secondary)',
                         display: 'flex',
@@ -2660,9 +2660,9 @@ export default function ResourceConnectorPage({
                   ) : resourceError ? (
                     <div
                       style={{
-                        border: '1px solid rgba(168, 102, 82, 0.22)',
+                        border: '1px solid color-mix(in srgb, var(--color-state-error) 34%, var(--color-border-paper))',
                         borderRadius: '20px',
-                        background: 'rgba(168, 102, 82, 0.08)',
+                        background: 'color-mix(in srgb, var(--color-state-error) 12%, var(--color-bg-paper))',
                         padding: '1rem',
                         color: 'var(--color-state-error)',
                         lineHeight: 1.6,
@@ -2702,7 +2702,7 @@ export default function ResourceConnectorPage({
                             style={{
                               border: '1px dashed var(--color-border-paper)',
                               borderRadius: '18px',
-                              background: 'rgba(255,250,242,0.54)',
+                              background: 'var(--color-bg-surface)',
                               padding: '0.9rem',
                               color: 'var(--color-text-secondary)',
                             }}
@@ -2761,7 +2761,7 @@ export default function ResourceConnectorPage({
                             style={{
                               border: '1px dashed var(--color-border-paper)',
                               borderRadius: '18px',
-                              background: 'rgba(255,250,242,0.54)',
+                              background: 'var(--color-bg-surface)',
                               padding: '0.9rem',
                               color: 'var(--color-text-secondary)',
                             }}
@@ -2808,7 +2808,7 @@ export default function ResourceConnectorPage({
                       style={{
                         border: '1px dashed var(--color-border-paper)',
                         borderRadius: '20px',
-                        background: 'rgba(255,250,242,0.6)',
+                        background: 'var(--color-bg-surface)',
                         padding: '1rem',
                         color: 'var(--color-text-secondary)',
                         lineHeight: 1.65,
@@ -2828,9 +2828,9 @@ export default function ResourceConnectorPage({
                 {selectedConnector.auth.status !== 'authenticated' ? (
                   <div
                     style={{
-                      border: '1px solid rgba(199, 136, 85, 0.22)',
+                      border: '1px solid color-mix(in srgb, var(--color-state-warning) 34%, var(--color-border-paper))',
                       borderRadius: '20px',
-                      background: 'rgba(199, 136, 85, 0.08)',
+                      background: 'color-mix(in srgb, var(--color-state-warning) 12%, var(--color-bg-paper))',
                       padding: '0.95rem 1rem',
                       color: 'var(--color-text-primary)',
                       fontSize: '0.88rem',
@@ -2868,7 +2868,7 @@ export default function ResourceConnectorPage({
                 width: '100%',
                 border: '1px solid var(--color-border-paper)',
                 borderRadius: '16px',
-                background: 'rgba(255,250,242,0.9)',
+                background: 'var(--color-bg-paper)',
                 padding: '0.9rem 1rem',
                 fontSize: '0.95rem',
                 color: 'var(--color-text-primary)',
@@ -2880,7 +2880,7 @@ export default function ResourceConnectorPage({
             style={{
               border: '1px dashed var(--color-border-paper)',
               borderRadius: '18px',
-              background: 'rgba(255,250,242,0.64)',
+              background: 'var(--color-bg-surface)',
               padding: '0.9rem 1rem',
               fontSize: '0.84rem',
               lineHeight: 1.65,
@@ -2892,9 +2892,9 @@ export default function ResourceConnectorPage({
           {createError ? (
             <div
               style={{
-                border: '1px solid rgba(168, 102, 82, 0.22)',
+                border: '1px solid color-mix(in srgb, var(--color-state-error) 34%, var(--color-border-paper))',
                 borderRadius: '16px',
-                background: 'rgba(168, 102, 82, 0.08)',
+                background: 'color-mix(in srgb, var(--color-state-error) 12%, var(--color-bg-paper))',
                 padding: '0.85rem 0.95rem',
                 color: 'var(--color-state-error)',
                 fontSize: '0.86rem',
