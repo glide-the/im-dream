@@ -7,6 +7,7 @@
 > **[Sync] 2026-06-28**: 历史对话入口改为右侧历史面板；面板打开即加载默认历史，标题栏搜索按钮打开居中搜索弹窗。搜索弹窗只负责检索和切换会话，不显示「新聊天」入口。
 > **[Sync] 2026-07-08**: 依据《Chat 工作区入口页》与《连接器具体配置页面结构草图》重写 Chat 主工作区：以居中 `ChatInputDock` + `WorkspaceTabBar` 为准，历史与资源连接器都在主内容区切换，旧的侧边历史入口不再作为主路径。
 > **[Sync] 2026-07-08**: 修正资源连接器入口策略：Chat 只承载轻量 `ResourceConnectorTabPanel`，点击「选择连接器」或连接器卡片必须进入 Settings 的「资源链接」区；Notion 具体配置页由 Settings 内的 `ConnectorNotionDetailPage` 承载。
+> **[Sync] 2026-07-08**: Notion 具体配置页最新交互归属 Settings：同一平台只认证一个账号；资源范围为统一 data_source / page 列表，搜索框与「保存资源」同一操作行，默认每页 10 条；保存后「已挂载来源」必须立即显示所选来源。
 
 ## 1. 文档范围
 
@@ -192,6 +193,7 @@ ResourceConnectorTabPanel
 - `HistoryTab` 与 `ResourceConnectorTab` 首次加载都使用骨架屏，而不是纯文本 loading。
 - `connector_empty` / `connector_connected` / `connector_error` 三种连接器态互斥且切换清晰。
 - 点击连接器卡片后进入 Settings 的「资源链接」区，而不是在 Chat 内原地展开复杂配置。
+- Chat 内不得出现 Notion 的资源搜索、分页、保存资源、已挂载来源或关闭连接操作；这些交互只允许出现在 Settings 的 `ConnectorNotionDetailPage`。
 
 ## 10. 任务解决方案设计稿（2026-07-08）
 

@@ -196,6 +196,12 @@ NOTION_RESOURCES: dict[str, str] = {
 
 前端在 Settings 内 `ConnectorNotionDetailPage` 中提供 Notion 配置入口。该页直接复用现有 connector API helpers 完成认证 / 资源选择流程，不再嵌入集合型 `ResourceConnectorPage`：
 
+- 同一平台只保留一个 Notion 认证账号；详情页不展示新建连接器、刷新列表或连接器列表。
+- `ResourceScopeSection` 使用统一 data_source / page 列表，不再拆成 Databases 与 Standalone Pages 两块。
+- 资源范围操作行固定为 `搜索资源`、`保存资源`、`刷新同步`；默认每页 10 条，提供上一页 / 下一页。
+- 点击「保存资源」后，`MountedSourcesSection` 必须立即显示所选来源；如果后端同步返回空 sources，前端用当前选择构造 optimistic sources 完成回显。
+- 底部“授权 / 同步状态”卡片移除，授权与同步解释统一放在 `NotionAccountStatusSection`。
+
 | 字段 | 说明 | 存储位置 |
 | ------------- | ------------------------------------------------- | ---------------------------- |
 | `NOTION_HOME` | `ntn` CLI 配置目录路径（默认 `~/.config/notion`） | `user_profile.notion_config` |
@@ -573,9 +579,8 @@ Chat workspace
   │    ├─ TopNavigation
   │    ├─ ConnectorHeader
   │    ├─ NotionAccountStatusSection
-  │    ├─ ResourceScopeSection
-  │    ├─ MountedSourcesSection
-  │    └─ ConnectionStateCard
+  │    ├─ ResourceScopeSection: search + save + refresh + paged unified resources
+  │    └─ MountedSourcesSection: selected sources immediately after save
   ├─ Context banner: "Using Notion snapshot <version>"
   └─ Proposal card: diff preview + base snapshot identity
 ```

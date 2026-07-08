@@ -12,10 +12,10 @@
 ntn api v1/search --data '{"query":"<关键词>","page_size":10}'
 ```
 
-### 搜索所有 Database
+### 搜索所有 Data source
 
 ```bash
-ntn api v1/search --data '{"filter":{"property":"object","value":"database"},"page_size":100}'
+ntn api v1/search --data '{"filter":{"property":"object","value":"data_source"},"page_size":100}'
 ```
 
 ### 搜索所有 Page
@@ -44,7 +44,7 @@ ntn api v1/search --data '{"query":"<关键词>","page_size":10,"start_cursor":"
 
 | 字段 | 说明 |
 |------|------|
-| `results` | 搜索结果数组，每项包含 `object`（"page" 或 "database"）、`id`、`properties` 等 |
+| `results` | 搜索结果数组，每项包含 `object`（"page" 或 "data_source"）、`id`、`properties` 等 |
 | `has_more` | 是否有更多结果 |
 | `next_cursor` | 下一页游标，用于分页 |
 

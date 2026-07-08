@@ -19,8 +19,9 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `聊天历史` / `资源连接器` 视图，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
 > [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天历史` 使用会话与空态语义，`资源连接器` 只由真实 connector context 驱动空态 / 认证 / 资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
 > [Sync] 2026-07-08: 纠正曾偏移的入口叙述，统一以 Chat `WorkspaceTabBar` 为资源连接器主入口，废弃仅摘要化的路径表述。
-> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `NotionAccountStatusSection` / `ResourceScopeSection` / `MountedSourcesSection` / `ConnectionStateCard`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `NotionAccountStatusSection` / `ResourceScopeSection` / `MountedSourcesSection`，并固定面包屑为 `资源连接器 > Notion Connector`。
 > [Sync] 2026-07-08: Notion 详情页按“同一平台只能认证一个账号”重构，不再嵌入集合型 `ResourceConnectorPage`，也不暴露新建 / 刷新 / 连接器列表入口。
+> [Sync] 2026-07-08: 资源范围选择合并为一个可搜索、每页 10 条的统一列表；保存资源后已挂载来源立即回显；底部授权 / 同步状态卡移除。
 > [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
 > [Sync] 2026-07-08: 修正 Chat 资源连接器跳转错位：`ConnectorLandingPanel` 的「选择连接器」和连接器卡片统一进入 Settings「资源链接」区；Chat 不再打开内部配置页。
 
@@ -135,7 +136,7 @@ Resource Connector (资源连接器)
     │       顶部显示「← 资源连接器 > Notion Connector」
     │
     ├─ 在 ConnectorNotionDetailPage 中完成认证、来源选择与同步
-    │   └─ ResourceScopeSection 在已认证后展示 databases / standalone pages 勾选列表
+    │   └─ ResourceScopeSection 在已认证后展示统一资源列表，支持搜索、每页 10 条分页和勾选
     │
     └─ 返回 Chat 并继续提问
           ├─ Agent 初始化时 attach 当前 canonical snapshot
@@ -151,7 +152,7 @@ Resource Connector (资源连接器)
 | 2. 进入资源链接设置区 | 用户（点击 `ConnectorCard` / `选择连接器`） | `ConnectorSettingsSection` | App 视图状态 |
 | 3. 进入 Notion 详情页 | 用户（Settings 点击 Notion「管理」） | `ConnectorNotionDetailPage` | App 视图状态 |
 | 3. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
-| 4. Database 及 Page 选择 | 用户（`ResourceScopeSection`） | 选定的 database_id 与 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
+| 4. 资源选择 | 用户（`ResourceScopeSection`） | 选定的 data_source_id 与 page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
 | 5. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
 | 6. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
 
@@ -189,7 +190,7 @@ Resource Connector (资源连接器)
   1. `HistoryTab` 首次加载（`isLoadingThreads && visibleThreads.length === 0`）时，显示 `HistorySkeletonList`：3~5 条历史条目骨架，包含标题条、摘要条、时间占位。
   2. `ResourceConnectorTab` 首次加载时，显示 `ConnectorToolbar` 的筛选 / 排序 pill 骨架，以及 2~3 张连接器卡片骨架；在结果返回前不得先渲染“暂无资源连接器”。
   3. `ConnectorNotionDetailPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`NotionAccountStatusSection` skeleton、`ResourceScopeSection` skeleton。
-  4. 当 `ResourceScopeSection` 已进入已认证态但尚未拉到来源数据时，展示 database 列表骨架 + page list 骨架，而不是“读取连接器状态…”之类纯文本。
+  4. 当 `ResourceScopeSection` 已进入已认证态但尚未拉到来源数据时，展示统一资源列表骨架，而不是“读取连接器状态…”之类纯文本。
   5. 骨架只用于首次加载，不覆盖错误态、空态、已关闭态或已有数据后的增量刷新态。
 
 ---
@@ -213,17 +214,15 @@ Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连�
 │   验证码: VAF-HWY                                           │
 │   [打开浏览器确认] ← 用户点击                                 │
 │     ↓                                                       │
-│ Step 2: 选择 Database 及 Standalone Page                     │
+│ Step 2: 搜索并选择资源                                       │
 │                                                             │
-│   Databases:                                                │
-│   ☑ ink-and-memory 代办清单                                  │
-│   ☑ 阅读笔记                                                │
-│   ☐ 项目管理看板                                             │
-│                                                             │
-│   Standalone Pages:                                         │
-│   ☑ 产品设计文档                                             │
-│   ☐ 个人日记                                                 │
-│   [确认选择]                                                 │
+│   [搜索资源: roadmap] [保存资源] [刷新同步]                  │
+│   ☑ Data source · ink-and-memory 代办清单                    │
+│   ☑ Data source · 阅读笔记                                   │
+│   ☐ Page · 产品设计文档                                      │
+│   ☐ Page · 个人日记                                          │
+│   [上一页] 第 1/3 页 [下一页]                                │
+│   保存资源后：已挂载来源立即显示所选 data_source / page        │
 │     ↓                                                       │
 │ Step 3: 同步完成                                             │
 │                                                             │
@@ -379,7 +378,7 @@ resource_connectors
 ```
 Notion Device Connector:
   Status: authenticated
-  Databases: 2 (ink-and-memory 代办清单, 阅读笔记)
+  Sources: 2 data_sources, 1 page
   Total Pages: 47
   Snapshot: snap-20260628-001
   Source Revision: notion-rev-789
@@ -415,10 +414,10 @@ Notion Device Connector:
 
 | 业务需求 | ntn api 命令 | 调用时机 |
 |---------|-------------|---------|
-| 获取 Database 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器创建 Step 2（Database 选择） |
-| 获取 Standalone Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 2（Page 选择） |
-| 获取 Database 下的 Row Page | `ntn api v1/databases/<db_id>/query` | 数据同步阶段 |
-| 获取 Data Source 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器初始化 |
+| 获取 Data source 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器创建 Step 2（统一资源选择） |
+| 获取 Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 2（统一资源选择） |
+| 关键词搜索资源 | `ntn api v1/search --data '{"query":"roadmap","page_size":10}'` | 资源范围搜索 |
+| 获取 Data source 下的 Row Page | `ntn api v1/data_sources/<data_source_id>/query` | 数据同步阶段 |
 
 ### 7.2 后端封装
 
@@ -431,8 +430,8 @@ class NotionAPIBridge:
         """调用 v1/search 端点。"""
         ...
 
-    async def list_databases(self) -> list[dict]:
-        """获取用户可访问的所有 Database。"""
+    async def list_data_sources(self) -> list[dict]:
+        """获取用户可访问的所有 Data source。"""
         ...
 
     async def list_standalone_pages(self) -> list[dict]:

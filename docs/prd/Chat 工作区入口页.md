@@ -1,6 +1,8 @@
 
 # 1. Chat Dashboard 默认空状态结构草图
 
+> [Sync] 2026-07-08: 资源连接器 Tab 只承载轻量摘要、空态、列表和跳转入口；点击「选择连接器」或连接器卡片进入 Settings「资源链接」，再由 Settings 内 `ConnectorNotionDetailPage` 完成 Notion 单账号认证、统一资源列表搜索 / 分页 / 保存和已挂载来源展示。
+
 对应图片 1：默认没有聊天内容时的首屏。
 
 ```txt
@@ -210,6 +212,23 @@ ChatConnectorTabView
    → 展示「前往设置 / 选择连接器」按钮
 → 如果已有资源连接
    → 展示资源列表
+   → 点击连接器卡片进入 Settings「资源链接」
+   → 不在 Chat 内展示 Notion 认证、资源范围、已挂载来源或关闭连接操作
+```
+
+## 进入 Notion 具体配置
+
+```txt
+点击「选择连接器」或连接器卡片
+→ App 视图切换到 Settings
+→ 聚焦「资源链接」区
+→ 用户点击 Notion「管理」
+→ 进入 ConnectorNotionDetailPage
+→ 保留 Notion 认证流程
+→ 资源范围使用统一 data_source / page 列表
+→ 搜索框与「保存资源」同在操作行
+→ 默认每页 10 条，支持上一页 / 下一页
+→ 保存后「已挂载来源」立即显示所选来源
 ```
 
 ---
@@ -251,4 +270,3 @@ ChatDashboardState
 └── connector_error
     └── 资源认证失效、同步失败、连接不可用
 ```
- 

@@ -2,6 +2,7 @@
 
 > [Sync] 2026-07-08: 组件命名回收到 Chat `WorkspaceTabBar` + Settings `ConnectorNotionDetailPage` 体系；保留纸张审美、色板与微交互定义，Chat 不再承载完整配置下钻。
 > [Sync] 2026-07-08: Settings 详情页改为单平台单账号资源配置页，不再使用 `ResourceConnectorPage` 的集合型新建、刷新、列表布局。
+> [Sync] 2026-07-08: ResourceScopeSection 合并 data_source / page 为统一资源列表，操作行包含搜索、保存、刷新；每页显示 10 条；保存后 MountedSourcesSection 立即显示所选来源；底部授权状态卡移除。
 
 | 维度 | 设计定义 |
 | --- | --- |
@@ -22,11 +23,12 @@
 | RC-B | `ResourceConnectorTabPanel` | Chat 内连接器内容区，承载 `ConnectorToolbar`、空态和列表 | 虚线空状态卡、筛选 / 排序工具栏、状态化连接器卡片 |
 | RC-C | `ConnectorNotionDetailPage` | Settings 内连接器详情 / 配置页的整体页面壳 | 顶部面包屑 `← 资源连接器 > Notion Connector`、连续纸面区块 |
 | RC-D | `TopNavigation` + `ConnectorHeader` + `NotionAccountStatusSection` | 详情页上半部分：导航、头卡、单账号状态概览 | Notion 图标、状态胶囊、连接 / 关闭真实操作、账号状态指标 |
-| RC-E | `ResourceScopeSection` + `MountedSourcesSection` + `ConnectionStateCard` | 详情页下半部分：资源范围、已挂载来源与底部授权 / 同步解释卡 | 禁用态虚线框、database/page 勾选列表、来源卡、警告卡 + 开关 |
+| RC-E | `ResourceScopeSection` + `MountedSourcesSection` | 详情页下半部分：资源范围与已挂载来源 | 禁用态虚线框、统一资源列表、搜索框、分页、来源卡 |
 
 > Chat 中的 `ResourceConnectorTabPanel` 负责“看见连接器、筛选连接器、跳转设置”；复杂配置全部进入 Settings 内的 `ConnectorNotionDetailPage`。
 > Notion 详情页不出现集合级的创建按钮、刷新列表按钮或连接器列表；无账号时「连接 Notion」隐式创建唯一 connector。
-> `ConnectionStateCard` 不是普通提示条，而是解释“为什么当前页面受限”的状态卡。
+> 授权 / 同步解释不再放到底部独立卡片，统一收敛到 `NotionAccountStatusSection`。
+> 「保存资源」不是静默动作：保存完成后，`MountedSourcesSection` 必须立刻从空态切换为来源卡片，展示标题、类型、同步状态和最近更新时间。
 
 ---
 
@@ -88,5 +90,5 @@ html[data-theme='dark'] {
 ## ✅ 说明
 - 页面支持 **Light / Dark** 模式切换，并统一服务于 Chat 内 `WorkspaceTabBar` 与 Settings 内 `ConnectorNotionDetailPage`。
 - `ResourceConnectorTabPanel` 要求默认保留筛选 / 排序工具栏位置；空态与加载态都不能挤掉该布局锚点。
-- `ConnectorNotionDetailPage` 必须复用同一纸面视觉语言，组件层级固定为 `TopNavigation` → `ConnectorHeader` → `NotionAccountStatusSection` → `ResourceScopeSection` → `MountedSourcesSection` → `ConnectionStateCard`。
+- `ConnectorNotionDetailPage` 必须复用同一纸面视觉语言，组件层级固定为 `TopNavigation` → `ConnectorHeader` → `NotionAccountStatusSection` → `ResourceScopeSection` → `MountedSourcesSection`。
 - 资源连接器入口在 Chat 工作区呈现为轻量摘要；完整配置归属于 Settings「资源链接」，详情页是 Settings 内管理层。

@@ -42,6 +42,8 @@ interface ConnectorNotionDetailPageProps {
   isMobile?: boolean;
 }
 
+const RESOURCE_PAGE_SIZE = 10;
+
 type DetailTone = 'neutral' | 'success' | 'warning' | 'danger' | 'info';
 
 interface DetailStatus {
@@ -53,6 +55,12 @@ interface DetailStatus {
 }
 
 const DEFAULT_NOTION_CONNECTOR_NAME = 'Notion Resource Connector';
+
+type UnifiedResourceKind = 'database' | 'page';
+
+interface UnifiedResourceOption extends NotionResourceOption {
+  kind: UnifiedResourceKind;
+}
 
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
@@ -213,6 +221,52 @@ function buildSelectionFromSources(sources: ConnectorSource[]): ConnectorResourc
     databaseIds: sources.filter((source) => source.type === 'notion_database').map((source) => source.id),
     pageIds: sources.filter((source) => source.type === 'notion_page').map((source) => source.id),
   };
+}
+
+function buildSelectedSources(
+  databaseOptions: NotionResourceOption[],
+  pageOptions: NotionResourceOption[],
+  databaseIds: string[],
+  pageIds: string[],
+  existingSources: ConnectorSource[] = [],
+): ConnectorSource[] {
+  const now = new Date().toISOString();
+  const existingById = new Map(existingSources.map((source) => [source.id, source]));
+  const databaseById = new Map(databaseOptions.map((option) => [option.id, option]));
+  const pageById = new Map(pageOptions.map((option) => [option.id, option]));
+
+  const databases = databaseIds.map((id): ConnectorSource => {
+    const option = databaseById.get(id);
+    const existing = existingById.get(id);
+    return {
+      id,
+      title: option?.title || existing?.title || 'Untitled database',
+      type: 'notion_database',
+      status: existing?.status === 'error' ? 'error' : 'synced',
+      updatedAt: existing?.updatedAt || now,
+      syncedAt: existing?.syncedAt || now,
+      pageCount: option?.pageCount ?? existing?.pageCount,
+      description: option?.subtitle || existing?.description || 'Notion data source',
+      url: existing?.url,
+    };
+  });
+
+  const pages = pageIds.map((id): ConnectorSource => {
+    const option = pageById.get(id);
+    const existing = existingById.get(id);
+    return {
+      id,
+      title: option?.title || existing?.title || 'Untitled page',
+      type: 'notion_page',
+      status: existing?.status === 'error' ? 'error' : 'synced',
+      updatedAt: existing?.updatedAt || now,
+      syncedAt: existing?.syncedAt || now,
+      description: option?.subtitle || existing?.description || 'Standalone page',
+      url: existing?.url,
+    };
+  });
+
+  return [...databases, ...pages];
 }
 
 function resolveSingleNotionConnector(connectors: ResourceConnector[]): ResourceConnector | null {
@@ -425,16 +479,19 @@ function ResourceOptionRow({
         {checked ? <IconCheck style={{ width: '0.75rem', height: '0.75rem' }} /> : <Icon style={{ width: '0.75rem', height: '0.75rem' }} />}
       </span>
       <span style={{ minWidth: 0, flex: 1 }}>
-        <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem' }}>
-          <span style={{ fontSize: '0.88rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {option.title}
-          </span>
-          {typeof option.pageCount === 'number' ? (
-            <span style={{ flexShrink: 0, color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
-              {option.pageCount} pages
+          <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem' }}>
+            <span style={{ fontSize: '0.88rem', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {option.title}
             </span>
-          ) : null}
-        </span>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', flexShrink: 0 }}>
+              <InlineStatusPill label={type === 'database' ? 'Data source' : 'Page'} tone="neutral" />
+              {typeof option.pageCount === 'number' ? (
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>
+                  {option.pageCount} pages
+                </span>
+              ) : null}
+            </span>
+          </span>
         <span style={{ display: 'block', marginTop: '0.28rem', color: 'var(--color-text-secondary)', fontSize: '0.76rem', lineHeight: 1.45 }}>
           {option.subtitle || (type === 'database' ? 'Notion database' : 'Standalone page')}
         </span>
@@ -550,6 +607,8 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
   const [pageOptions, setPageOptions] = useState<NotionResourceOption[]>([]);
   const [selectedDatabaseIds, setSelectedDatabaseIds] = useState<string[]>([]);
   const [selectedPageIds, setSelectedPageIds] = useState<string[]>([]);
+  const [resourceSearchQuery, setResourceSearchQuery] = useState('');
+  const [resourcePage, setResourcePage] = useState(1);
 
   const detailStatus = getDetailStatus(connector, loading);
   const statusPalette = toneStyles(detailStatus.tone);
@@ -569,6 +628,27 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
       pages: sources.length - databases,
     };
   }, [connector?.sources]);
+  const unifiedResourceOptions = useMemo<UnifiedResourceOption[]>(
+    () => [
+      ...databaseOptions.map((option) => ({ ...option, kind: 'database' as const })),
+      ...pageOptions.map((option) => ({ ...option, kind: 'page' as const })),
+    ],
+    [databaseOptions, pageOptions],
+  );
+  const filteredResourceOptions = useMemo(() => {
+    const query = resourceSearchQuery.trim().toLowerCase();
+    if (!query) return unifiedResourceOptions;
+    return unifiedResourceOptions.filter((option) => {
+      const haystack = `${option.title} ${option.subtitle ?? ''} ${option.kind}`.toLowerCase();
+      return haystack.includes(query);
+    });
+  }, [resourceSearchQuery, unifiedResourceOptions]);
+  const totalResourcePages = Math.max(1, Math.ceil(filteredResourceOptions.length / RESOURCE_PAGE_SIZE));
+  const visibleResourceOptions = useMemo(() => {
+    const start = (resourcePage - 1) * RESOURCE_PAGE_SIZE;
+    return filteredResourceOptions.slice(start, start + RESOURCE_PAGE_SIZE);
+  }, [filteredResourceOptions, resourcePage]);
+  const selectedResourceCount = selectedDatabaseIds.length + selectedPageIds.length;
 
   const upsertConnector = useCallback((nextConnector: ResourceConnector) => {
     setConnector(nextConnector);
@@ -580,6 +660,8 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
     setPageOptions([]);
     setSelectedDatabaseIds([]);
     setSelectedPageIds([]);
+    setResourceSearchQuery('');
+    setResourcePage(1);
     setResourceError(null);
     setResourceLoading(false);
   }, []);
@@ -640,6 +722,14 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
       active = false;
     };
   }, [connectorAuthStatus, connectorId, resetResourceState, sourceSelection]);
+
+  useEffect(() => {
+    setResourcePage(1);
+  }, [resourceSearchQuery]);
+
+  useEffect(() => {
+    setResourcePage((current) => Math.min(current, totalResourcePages));
+  }, [totalResourcePages]);
 
   useEffect(() => {
     if (!connectorId || connectorAuthStatus !== 'authenticating') {
@@ -717,15 +807,39 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
         databaseIds: selectedDatabaseIds,
         pageIds: selectedPageIds,
       });
+      const selectedSources = buildSelectedSources(
+        databaseOptions,
+        pageOptions,
+        selectedDatabaseIds,
+        selectedPageIds,
+        connector?.sources ?? [],
+      );
+      const now = new Date().toISOString();
       if (nextConnector) {
-        upsertConnector(nextConnector);
+        upsertConnector({
+          ...nextConnector,
+          status: selectedSources.length > 0 ? 'synced' : nextConnector.status,
+          updatedAt: now,
+          lastSyncedAt: selectedSources.length > 0 ? now : nextConnector.lastSyncedAt,
+          sources: nextConnector.sources.length > 0 || selectedSources.length === 0
+            ? nextConnector.sources
+            : selectedSources,
+        });
+      } else if (connector) {
+        upsertConnector({
+          ...connector,
+          status: selectedSources.length > 0 ? 'synced' : connector.status,
+          updatedAt: now,
+          lastSyncedAt: selectedSources.length > 0 ? now : connector.lastSyncedAt,
+          sources: selectedSources,
+        });
       }
     } catch (error) {
       setResourceError(getErrorMessage(error, '保存资源选择失败'));
     } finally {
       setResourceSaving(false);
     }
-  }, [canEditResources, connectorId, resourceSaving, selectedDatabaseIds, selectedPageIds, upsertConnector]);
+  }, [canEditResources, connector, connectorId, databaseOptions, pageOptions, resourceSaving, selectedDatabaseIds, selectedPageIds, upsertConnector]);
 
   const handleSyncSources = useCallback(async () => {
     if (!connectorId || !canEditResources || syncLoading) return;
@@ -1049,7 +1163,26 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
         title="资源范围"
         subtitle="选择这个 Notion 账号授权给 Chat 使用的数据库和页面。"
         action={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <input
+              type="search"
+              value={resourceSearchQuery}
+              onChange={(event) => setResourceSearchQuery(event.target.value)}
+              placeholder="搜索资源"
+              aria-label="搜索 Notion 资源"
+              disabled={!canEditResources}
+              style={{
+                width: isMobile ? '100%' : '13.5rem',
+                border: '1px solid var(--color-border-paper)',
+                borderRadius: '999px',
+                background: 'var(--color-bg-paper)',
+                color: 'var(--color-text-primary)',
+                padding: '0.58rem 0.82rem',
+                outline: 'none',
+                fontSize: '0.8rem',
+                opacity: canEditResources ? 1 : 0.62,
+              }}
+            />
             <button
               type="button"
               onClick={() => void handleSaveResources()}
@@ -1127,91 +1260,56 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
             {resourceError}
           </div>
         ) : (
-          <div style={{ display: 'grid', gap: '1.1rem' }}>
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-                <div>
-                  <h3 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.92rem', fontWeight: 700 }}>Databases</h3>
-                  <p style={{ margin: '0.3rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>
-                    勾选要纳入 Chat 上下文的 Notion 数据库。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedDatabaseIds((current) => current.length === databaseOptions.length ? [] : databaseOptions.map((option) => option.id))}
-                  style={{
-                    border: '1px solid var(--color-border-paper)',
-                    borderRadius: '999px',
-                    background: 'var(--color-bg-paper)',
-                    color: 'var(--color-text-primary)',
-                    padding: '0.46rem 0.7rem',
-                    cursor: 'pointer',
-                    fontSize: '0.76rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {selectedDatabaseIds.length === databaseOptions.length && databaseOptions.length > 0 ? '清空数据库' : '全选数据库'}
-                </button>
-              </div>
-              {databaseOptions.length === 0 ? (
-                <EmptyPanel title="没有可访问的 database">当前 Notion 授权没有返回可选择的数据库。</EmptyPanel>
-              ) : (
-                <div style={{ display: 'grid', gap: '0.65rem' }}>
-                  {databaseOptions.map((option) => (
-                    <ResourceOptionRow
-                      key={option.id}
-                      option={option}
-                      type="database"
-                      checked={selectedDatabaseIds.includes(option.id)}
-                      onToggle={() => {
-                        setSelectedDatabaseIds((current) =>
-                          current.includes(option.id)
-                            ? current.filter((id) => id !== option.id)
-                            : [...current, option.id],
-                        );
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
+          <div style={{ display: 'grid', gap: '0.85rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '0.75rem',
+                flexWrap: 'wrap',
+                color: 'var(--color-text-secondary)',
+                fontSize: '0.78rem',
+              }}
+            >
+              <span>
+                共 {filteredResourceOptions.length} 个资源，已选择 {selectedResourceCount} 个
+              </span>
+              <span>
+                第 {resourcePage} / {totalResourcePages} 页，每页 {RESOURCE_PAGE_SIZE} 个
+              </span>
             </div>
 
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-                <div>
-                  <h3 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.92rem', fontWeight: 700 }}>Standalone Pages</h3>
-                  <p style={{ margin: '0.3rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.78rem' }}>
-                    勾选要纳入 Chat 上下文的独立页面。
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedPageIds((current) => current.length === pageOptions.length ? [] : pageOptions.map((option) => option.id))}
-                  style={{
-                    border: '1px solid var(--color-border-paper)',
-                    borderRadius: '999px',
-                    background: 'var(--color-bg-paper)',
-                    color: 'var(--color-text-primary)',
-                    padding: '0.46rem 0.7rem',
-                    cursor: 'pointer',
-                    fontSize: '0.76rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {selectedPageIds.length === pageOptions.length && pageOptions.length > 0 ? '清空页面' : '全选页面'}
-                </button>
-              </div>
-              {pageOptions.length === 0 ? (
-                <EmptyPanel title="没有可访问的 standalone page">当前 Notion 授权没有返回可选择的独立页面。</EmptyPanel>
-              ) : (
-                <div style={{ display: 'grid', gap: '0.65rem' }}>
-                  {pageOptions.map((option) => (
+            {unifiedResourceOptions.length === 0 ? (
+              <EmptyPanel title="没有可访问的资源">
+                当前 Notion 授权没有返回可选择的 data_source 或 page。
+              </EmptyPanel>
+            ) : visibleResourceOptions.length === 0 ? (
+              <EmptyPanel title="没有匹配的资源">
+                调整搜索关键词后再选择资源。
+              </EmptyPanel>
+            ) : (
+              <div style={{ display: 'grid', gap: '0.65rem' }}>
+                {visibleResourceOptions.map((option) => {
+                  const isDatabase = option.kind === 'database';
+                  const checked = isDatabase
+                    ? selectedDatabaseIds.includes(option.id)
+                    : selectedPageIds.includes(option.id);
+                  return (
                     <ResourceOptionRow
-                      key={option.id}
+                      key={`${option.kind}-${option.id}`}
                       option={option}
-                      type="page"
-                      checked={selectedPageIds.includes(option.id)}
+                      type={option.kind}
+                      checked={checked}
                       onToggle={() => {
+                        if (isDatabase) {
+                          setSelectedDatabaseIds((current) =>
+                            current.includes(option.id)
+                              ? current.filter((id) => id !== option.id)
+                              : [...current, option.id],
+                          );
+                          return;
+                        }
                         setSelectedPageIds((current) =>
                           current.includes(option.id)
                             ? current.filter((id) => id !== option.id)
@@ -1219,9 +1317,56 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
                         );
                       }}
                     />
-                  ))}
-                </div>
-              )}
+                  );
+                })}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'flex-end',
+                gap: '0.5rem',
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setResourcePage((current) => Math.max(1, current - 1))}
+                disabled={resourcePage <= 1}
+                style={{
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '999px',
+                  background: 'var(--color-bg-paper)',
+                  color: 'var(--color-text-primary)',
+                  padding: '0.5rem 0.78rem',
+                  cursor: resourcePage <= 1 ? 'not-allowed' : 'pointer',
+                  opacity: resourcePage <= 1 ? 0.55 : 1,
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                }}
+              >
+                上一页
+              </button>
+              <button
+                type="button"
+                onClick={() => setResourcePage((current) => Math.min(totalResourcePages, current + 1))}
+                disabled={resourcePage >= totalResourcePages}
+                style={{
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '999px',
+                  background: 'var(--color-bg-paper)',
+                  color: 'var(--color-text-primary)',
+                  padding: '0.5rem 0.78rem',
+                  cursor: resourcePage >= totalResourcePages ? 'not-allowed' : 'pointer',
+                  opacity: resourcePage >= totalResourcePages ? 0.55 : 1,
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                }}
+              >
+                下一页
+              </button>
             </div>
           </div>
         )}
@@ -1245,79 +1390,6 @@ export default function ConnectorNotionDetailPage({ onBack, isMobile = false }: 
           </div>
         )}
       </DetailSection>
-
-      <section
-        style={{
-          display: 'grid',
-          gridTemplateColumns: isMobile ? '1fr' : 'minmax(0, 1fr) auto',
-          alignItems: 'center',
-          gap: '1rem',
-          border: `1px solid ${statusPalette.border}`,
-          borderRadius: '1rem',
-          background: statusPalette.background,
-          padding: '1rem 1.1rem',
-          color: 'var(--color-text-primary)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.8rem', minWidth: 0 }}>
-          <span
-            aria-hidden="true"
-            style={{
-              width: '2rem',
-              height: '2rem',
-              flexShrink: 0,
-              borderRadius: '0.7rem',
-              border: `1px solid ${statusPalette.border}`,
-              display: 'grid',
-              placeItems: 'center',
-              color: statusPalette.color,
-              fontWeight: 800,
-            }}
-          >
-            !
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
-              <h2 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '0.98rem', fontWeight: 700 }}>
-                授权 / 同步状态
-              </h2>
-              <StatusPill status={detailStatus} />
-            </div>
-            <p style={{ margin: '0.35rem 0 0', color: 'var(--color-text-secondary)', fontSize: '0.84rem', lineHeight: 1.65 }}>
-              {detailStatus.title}。{detailStatus.description}
-            </p>
-          </div>
-        </div>
-
-        <button
-          type="button"
-          aria-pressed={detailStatus.enabled}
-          disabled
-          title="该开关展示连接器可用状态，实际开启需完成 Notion 认证。"
-          style={{
-            width: '3.2rem',
-            height: '1.8rem',
-            borderRadius: '999px',
-            border: `1px solid ${statusPalette.border}`,
-            background: detailStatus.enabled ? statusPalette.color : 'var(--color-disabled-bg)',
-            padding: '0.18rem',
-            opacity: 0.88,
-            cursor: 'not-allowed',
-          }}
-        >
-          <span
-            style={{
-              display: 'block',
-              width: '1.35rem',
-              height: '1.35rem',
-              borderRadius: '999px',
-              background: 'var(--color-bg-paper)',
-              transform: detailStatus.enabled ? 'translateX(1.35rem)' : 'translateX(0)',
-              transition: 'transform 0.18s ease',
-            }}
-          />
-        </button>
-      </section>
     </div>
   );
 }
