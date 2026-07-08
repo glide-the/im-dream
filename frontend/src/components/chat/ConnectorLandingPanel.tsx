@@ -1,19 +1,33 @@
-// [Input] Connector API client and Settings navigation callback.
-// [Output] Lightweight Chat connector landing panel with status summary, empty state, and a Settings CTA.
-// [Pos] chat connector landing panel in frontend/src/components/chat
+// [Input] Connector API client and a callback that opens Settings' resource-link connector section.
+// [Output] Chat `ResourceConnectorTab` content — `ConnectorToolbar` (filter/sort placeholders),
+//          a dashed `ConnectorEmptyState` (三枚资源类型图标 + 标题 + 描述 + CTA), skeleton loading,
+//          and a `ConnectorList` of connector cards. Selecting the CTA or a card navigates to
+//          Settings' resource-link section; Chat never owns the Notion configuration flow.
+// [Pos] chat connector landing panel (ResourceConnectorTabPanel) in frontend/src/components/chat
 // [Sync] 2026-07-08: initial Chat-to-Settings connector landing panel for the resource-link migration.
+// [Sync] 2026-07-08: replace text-only loading state with a skeleton-screen placeholder, aligning
+//                    with 《链接器概念的交互设计稿》 Chat 入口页「无资源链接」骨架屏 default state.
+// [Sync] 2026-07-08: rebuild into `ResourceConnectorTabPanel` per docs/prd/notion-session/resource-connector.md
+//                    §3.2 — add `ConnectorToolbar` (filter/sort), dashed三图标 empty state with「选择连接器」
+//                    CTA.
+// [Sync] 2026-07-08: route connector CTA/card selection back to Settings resource-link management,
+//                    matching 《链接器概念的交互设计稿》 Chat 入口页.
+// [Sync] 2026-07-08: replace light-only card/empty-state fills with semantic theme tokens so the Chat
+//                    resource connector tab renders correctly under dark mode.
 import { useCallback, useEffect, useState } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import {
   IconChevronRight,
   IconClock,
   IconDatabase,
-  IconLoader,
-  IconSettings,
+  IconFolder,
+  IconGrid,
 } from './Icons';
+import { SkeletonBar, SkeletonList } from './Skeleton';
 
 interface ConnectorLandingPanelProps {
-  onOpenSettings?: () => void;
+  /** Opens Settings and focuses the resource-link connector section. */
+  onOpenConnector?: (connector: ResourceConnector | null) => void;
 }
 
 function formatLastInteraction(connector: ResourceConnector | null): string {
@@ -48,7 +62,55 @@ function getConnectorStatusLabel(connector: ResourceConnector | null): string {
   return '未连接';
 }
 
-function ConnectorSummaryRow({ connector }: { connector: ResourceConnector }) {
+function ConnectorToolbar() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', flexShrink: 0 }}>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          border: '1px solid var(--color-border-paper)',
+          borderRadius: '999px',
+          padding: '0.4rem 0.7rem',
+          background: 'var(--color-bg-surface)',
+          color: 'var(--color-text-secondary)',
+          fontSize: '0.76rem',
+          fontWeight: 600,
+        }}
+      >
+        筛选：全部
+      </span>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+          border: '1px solid var(--color-border-paper)',
+          borderRadius: '999px',
+          padding: '0.4rem 0.7rem',
+          background: 'var(--color-bg-surface)',
+          color: 'var(--color-text-secondary)',
+          fontSize: '0.76rem',
+          fontWeight: 600,
+        }}
+      >
+        排序：最近交互
+      </span>
+    </div>
+  );
+}
+
+function ConnectorToolbarSkeleton() {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', flexShrink: 0 }}>
+      <SkeletonBar width="5.4rem" height="1.7rem" style={{ borderRadius: '999px' }} />
+      <SkeletonBar width="6.6rem" height="1.7rem" style={{ borderRadius: '999px' }} />
+    </div>
+  );
+}
+
+function ConnectorCard({ connector, onOpen }: { connector: ResourceConnector; onOpen: () => void }) {
   const healthy = connector.status === 'authenticated'
     || connector.status === 'synced'
     || connector.auth.status === 'authenticated';
@@ -56,7 +118,9 @@ function ConnectorSummaryRow({ connector }: { connector: ResourceConnector }) {
   const lastInteraction = formatLastInteraction(connector);
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={onOpen}
       style={{
         display: 'grid',
         gridTemplateColumns: '2.4rem minmax(0, 1fr) auto',
@@ -64,9 +128,14 @@ function ConnectorSummaryRow({ connector }: { connector: ResourceConnector }) {
         gap: '0.85rem',
         border: '1px solid var(--color-border-paper)',
         borderRadius: '1rem',
-        background: 'rgba(255,250,242,0.86)',
+        background: 'var(--color-bg-surface-solid)',
         padding: '0.85rem 0.9rem',
-        boxShadow: '0 10px 24px rgba(91, 69, 44, 0.05)',
+        boxShadow: '0 10px 24px var(--color-shadow-soft)',
+        cursor: 'pointer',
+        textAlign: 'left',
+        width: '100%',
+        font: 'inherit',
+        color: 'inherit',
       }}
     >
       <div
@@ -75,7 +144,7 @@ function ConnectorSummaryRow({ connector }: { connector: ResourceConnector }) {
           height: '2.4rem',
           borderRadius: '0.85rem',
           border: '1px solid var(--color-border-paper)',
-          background: 'rgba(95, 74, 54, 0.08)',
+          background: 'var(--color-bg-hover)',
           color: 'var(--color-text-primary)',
           display: 'grid',
           placeItems: 'center',
@@ -97,8 +166,8 @@ function ConnectorSummaryRow({ connector }: { connector: ResourceConnector }) {
               gap: '0.32rem',
               padding: '0.28rem 0.55rem',
               borderRadius: '999px',
-              border: `1px solid ${healthy ? 'rgba(126, 148, 104, 0.22)' : 'var(--color-border-paper)'}`,
-              background: healthy ? 'rgba(126, 148, 104, 0.12)' : 'rgba(91, 69, 44, 0.06)',
+              border: `1px solid ${healthy ? 'color-mix(in srgb, var(--color-state-success) 30%, var(--color-border-paper))' : 'var(--color-border-paper)'}`,
+              background: healthy ? 'color-mix(in srgb, var(--color-state-success) 16%, var(--color-bg-paper))' : 'var(--color-bg-hover)',
               color: healthy ? 'var(--color-state-success)' : 'var(--color-text-secondary)',
               fontSize: '0.72rem',
               fontWeight: 700,
@@ -117,7 +186,7 @@ function ConnectorSummaryRow({ connector }: { connector: ResourceConnector }) {
           </span>
         </div>
         <p style={{ margin: '0.32rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-          {connector.platform.toUpperCase()} · 已连接平台资源会在这里显示最近交互时间
+          {connector.platform.toUpperCase()} · 点击管理认证与来源
         </p>
         <div style={{ marginTop: '0.4rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
           <IconClock style={{ width: '0.82rem', height: '0.82rem' }} />
@@ -129,11 +198,64 @@ function ConnectorSummaryRow({ connector }: { connector: ResourceConnector }) {
         <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>管理</span>
         <IconChevronRight style={{ width: '0.88rem', height: '0.88rem', color: 'var(--color-text-muted)' }} />
       </div>
+    </button>
+  );
+}
+
+function ConnectorEmptyState({ onSelectConnector }: { onSelectConnector: () => void }) {
+  return (
+    <div
+      style={{
+        border: '1px dashed var(--color-border-paper)',
+        borderRadius: '1rem',
+        background: 'var(--color-bg-surface)',
+        padding: '1.6rem 1.2rem',
+        textAlign: 'center',
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+          <IconDatabase style={{ width: '1rem', height: '1rem' }} />
+        </span>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+          <IconFolder style={{ width: '1rem', height: '1rem' }} />
+        </span>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+          <IconGrid style={{ width: '1rem', height: '1rem' }} />
+        </span>
+      </div>
+      <h3 style={{ margin: '0.9rem 0 0', fontSize: '0.96rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+        暂无资源连接器
+      </h3>
+      <p style={{ margin: '0.4rem auto 0', maxWidth: '28rem', fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
+        连接 Notion / 飞书 / CLI 后可在对话中使用资源
+      </p>
+      <button
+        type="button"
+        onClick={onSelectConnector}
+        style={{
+          marginTop: '1.1rem',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.45rem',
+          border: 'none',
+          borderRadius: '999px',
+          padding: '0.68rem 1rem',
+          background: 'var(--color-action-link)',
+          color: 'var(--color-text-on-action)',
+          fontSize: '0.84rem',
+          fontWeight: 700,
+          cursor: 'pointer',
+        }}
+      >
+        选择连接器
+        <IconChevronRight style={{ width: '0.9rem', height: '0.9rem' }} />
+      </button>
     </div>
   );
 }
 
-export default function ConnectorLandingPanel({ onOpenSettings }: ConnectorLandingPanelProps) {
+export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLandingPanelProps) {
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -166,9 +288,9 @@ export default function ConnectorLandingPanel({ onOpenSettings }: ConnectorLandi
     };
   }, []);
 
-  const handleOpenSettings = useCallback(() => {
-    onOpenSettings?.();
-  }, [onOpenSettings]);
+  const handleSelectConnector = useCallback((connector: ResourceConnector | null) => {
+    onOpenConnector?.(connector);
+  }, [onOpenConnector]);
 
   const hasConnectors = connectors.length > 0;
 
@@ -180,66 +302,26 @@ export default function ConnectorLandingPanel({ onOpenSettings }: ConnectorLandi
         minWidth: 0,
         display: 'flex',
         flexDirection: 'column',
+        gap: '0.75rem',
         border: '1px solid var(--color-border-paper)',
         borderRadius: '1.15rem',
-        background: 'linear-gradient(180deg, rgba(255,250,242,0.96), rgba(247,239,227,0.9))',
-        boxShadow: '0 16px 36px rgba(91, 69, 44, 0.08)',
+        background: 'var(--color-bg-surface)',
+        boxShadow: '0 16px 36px var(--color-shadow-soft)',
         overflow: 'hidden',
+        padding: '0.95rem 1rem',
       }}
     >
-      <div
-        style={{
-          padding: '0.95rem 1rem',
-          borderBottom: '1px solid var(--color-border-paper)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.5), rgba(255,255,255,0))',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '1rem' }}>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              <IconSettings style={{ width: '0.86rem', height: '0.86rem' }} />
-              资源链接器
-            </div>
-            <h2 style={{ margin: '0.4rem 0 0', fontSize: '0.98rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              Chat 只保留入口，完整管理放到 Settings
-            </h2>
-            <p style={{ margin: '0.32rem 0 0', fontSize: '0.8rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-              连接完成后，Agent 能读取外部资料；认证、资源选择和来源维护都在 Settings 里继续处理。
-            </p>
-          </div>
-        </div>
-      </div>
+      {loading ? <ConnectorToolbarSkeleton /> : <ConnectorToolbar />}
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.95rem 1rem', display: 'grid', gap: '0.8rem' }}>
-        {loading ? (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-muted)', fontSize: '0.82rem' }}>
-            <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} />
-            读取连接器状态…
-          </div>
-        ) : null}
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gap: '0.8rem' }}>
+        {loading ? <SkeletonList rows={2} /> : null}
 
         {!loading && hasConnectors ? connectors.map((connector) => (
-          <ConnectorSummaryRow key={connector.id} connector={connector} />
+          <ConnectorCard key={connector.id} connector={connector} onOpen={() => handleSelectConnector(connector)} />
         )) : null}
 
         {!loading && !hasConnectors ? (
-          <div
-            style={{
-              border: '1px dashed var(--color-border-paper)',
-              borderRadius: '1rem',
-              background: 'rgba(255,250,242,0.72)',
-              padding: '1.4rem 1rem',
-              textAlign: 'center',
-            }}
-          >
-            <IconDatabase style={{ width: '2rem', height: '2rem', color: 'var(--color-text-muted)' }} />
-            <h3 style={{ margin: '0.8rem 0 0', fontSize: '0.96rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-              还没有资源链接
-            </h3>
-            <p style={{ margin: '0.4rem auto 0', maxWidth: '28rem', fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
-              在 Settings 里创建和配置 Notion 连接器后，这里会显示一个轻量状态摘要。聊天区不再承担认证或来源维护。
-            </p>
-          </div>
+          <ConnectorEmptyState onSelectConnector={() => handleSelectConnector(null)} />
         ) : null}
 
         {error ? (
@@ -247,31 +329,6 @@ export default function ConnectorLandingPanel({ onOpenSettings }: ConnectorLandi
             {error}
           </div>
         ) : null}
-      </div>
-
-      <div style={{ padding: '0.9rem 1rem', borderTop: '1px solid var(--color-border-paper)', display: 'flex', justifyContent: 'flex-end' }}>
-        <button
-          type="button"
-          onClick={handleOpenSettings}
-          disabled={!onOpenSettings}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.45rem',
-            border: 'none',
-            borderRadius: '999px',
-            padding: '0.68rem 0.95rem',
-            background: onOpenSettings ? 'var(--color-action-link)' : 'var(--color-disabled-bg)',
-            color: 'var(--color-text-on-action)',
-            fontSize: '0.82rem',
-            fontWeight: 700,
-            cursor: onOpenSettings ? 'pointer' : 'not-allowed',
-            opacity: onOpenSettings ? 1 : 0.75,
-          }}
-        >
-          去设置添加来源
-          <IconChevronRight style={{ width: '0.9rem', height: '0.9rem' }} />
-        </button>
       </div>
     </section>
   );

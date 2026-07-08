@@ -3,20 +3,9 @@
 // [Pos] editor-write-approval component node in frontend/src/components/chat
 // [Sync] 2026-05-29: initial creation — 4 specialized editor write tool confirmation UIs + router component.
 // [Sync] 2026-05-29: remove decorative icons from editor write approval/completed cards in the chat message surface.
+// [Sync] 2026-07-08: use semantic on-action text tokens for editor write approval buttons in dark mode.
+// [Sync] 2026-07-08: move editor write tool name detection into editorWriteTools.ts so this file exports components only.
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-
-// ── Tool name constants ──────────────────────────────────────────────────────
-
-export const EDITOR_WRITE_TOOL_NAMES = new Set([
-  'mcp__editor__write_segment',
-  'mcp__editor__delete_segment',
-  'mcp__editor__insert_widget',
-  'mcp__editor__reply_to_comment',
-]);
-
-export function isEditorWriteTool(toolName: string): boolean {
-  return EDITOR_WRITE_TOOL_NAMES.has(toolName.toLowerCase());
-}
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -169,7 +158,7 @@ function ActionRow({
           type="button"
           onClick={onApprove}
           disabled={isProcessing}
-          style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: approveColor, color: '#fff', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}
+          style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: approveColor, color: 'var(--color-text-on-action)', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}
         >
           {approveLabel}
         </button>
@@ -598,7 +587,7 @@ export default function EditorWriteApprovalUI({ toolName, toolCallId, input, isP
         Agent 请求执行编辑器操作：<code>{toolName}</code>
       </p>
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.85rem' }}>
-        <button type="button" onClick={onApprove} disabled={isProcessing} style={{ flex: 1, border: 'none', borderRadius: '999px', padding: '0.75rem', background: 'var(--color-action-link)', color: '#fff', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>
+        <button type="button" onClick={onApprove} disabled={isProcessing} style={{ flex: 1, border: 'none', borderRadius: '999px', padding: '0.75rem', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>
           接受
         </button>
         <button type="button" onClick={() => onReject()} disabled={isProcessing} style={{ flex: 1, border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.75rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>

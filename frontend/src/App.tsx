@@ -27,7 +27,7 @@ import './App.css';
 import {
   FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye,
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass,
-  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments, FaLink,
+  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments,
 } from 'react-icons/fa';
 import TopNavBar from './components/TopNavBar';
 import LeftToolbar from './components/LeftToolbar';
@@ -62,6 +62,7 @@ import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
+import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -85,6 +86,12 @@ const iconMap = {
 };
 
 const LANGUAGE_CODES: Array<'en' | 'zh'> = ['en', 'zh'];
+
+// [Sync] 2026-07-08: Settings default sections use a narrower reading-width column;
+// the Notion ConnectorNotionDetailPage owns a wider single-account resource
+// configuration layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
+const SETTINGS_MAX_WIDTH_PX = 800;
+const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
 
 // @@@ Color map with gradient colors for watercolor effect
 const colorMap: Record<string, { gradient: string; text: string; glow: string }> = {
@@ -157,11 +164,25 @@ export default function App() {
   const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
+  // [Sync] 2026-07-08: track whether the dedicated Notion "具体配置页面" is open; navigating into it
+  //                    replaces the whole Settings viewport instead of expanding inline within the
+  //                    resource-link card, matching the connector interaction design's page navigation.
+  const [showNotionConnectorDetail, setShowNotionConnectorDetail] = useState(false);
 
   const openConnectorSettings = useCallback(() => {
     setCurrentView('settings');
+    setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
     setChatLandingTab('connector');
+  }, []);
+
+  const openNotionConnectorDetail = useCallback(() => {
+    setShowNotionConnectorDetail(true);
+  }, []);
+
+  const closeNotionConnectorDetail = useCallback(() => {
+    setShowNotionConnectorDetail(false);
+    setConnectorSettingsFocusNonce((value) => value + 1);
   }, []);
 
   const handleAppViewChange = useCallback((view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => {
@@ -393,7 +414,6 @@ export default function App() {
     { key: 'timeline' as const, label: t('nav.timeline'), icon: FaRegClock },
     { key: 'analysis' as const, label: t('nav.analysis'), icon: FaChartBar },
     { key: 'decks' as const, label: t('nav.decks'), icon: FaLayerGroup },
-    { key: 'connector' as const, label: t('nav.connector'), icon: FaLink },
     { key: 'chat' as const, label: t('nav.chat'), icon: FaComments },
     { key: 'settings' as const, label: t('nav.settings'), icon: FaCog },
   ];
@@ -1914,8 +1934,13 @@ export default function App() {
           bottom: mobileBottomOffset,
           background: 'var(--color-bg-app)'
         }}>
+          {showNotionConnectorDetail ? (
+            <div style={{ maxWidth: SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX, width: '100%' }}>
+              <ConnectorNotionDetailPage onBack={closeNotionConnectorDetail} isMobile={isMobile} />
+            </div>
+          ) : (
           <div style={{
-            maxWidth: 800,
+            maxWidth: SETTINGS_MAX_WIDTH_PX,
             width: '100%'
           }}>
             <section style={{ marginBottom: 48 }}>
@@ -2058,6 +2083,7 @@ export default function App() {
               <ConnectorSettingsSection
                 focusNonce={connectorSettingsFocusNonce}
                 isMobile={isMobile}
+                onOpenNotionDetail={openNotionConnectorDetail}
               />
             </section>
 
@@ -2085,6 +2111,7 @@ export default function App() {
             {/* About Content */}
             <AboutView />
           </div>
+          )}
         </div>
       )}
       {/* @@@ Always render timeline to pre-load data and position scroll */}

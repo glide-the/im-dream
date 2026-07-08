@@ -114,6 +114,17 @@
   animation: spin 1s linear infinite;
 }
 
+@keyframes skeletonPulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.skeleton-block {
+  animation: skeletonPulse 1.4s ease-in-out infinite;
+  background: var(--color-border-paper);
+  border-radius: 0.5rem;
+}
+
 @keyframes fadeIn {
   from {
     opacity: 0;

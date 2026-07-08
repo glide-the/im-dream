@@ -1,5 +1,8 @@
 ## ✨ 总体视觉风格（Aesthetic Style）
 
+> [Sync] 2026-07-08: 组件命名回收到 Chat `WorkspaceTabBar` + Settings `ConnectorNotionDetailPage` 体系；保留纸张审美、色板与微交互定义，Chat 不再承载完整配置下钻。
+> [Sync] 2026-07-08: Settings 详情页改为单平台单账号资源配置页，不再使用 `ResourceConnectorPage` 的集合型新建、刷新、列表布局。
+
 | 维度 | 设计定义 |
 | --- | --- |
 | 风格关键词 | 暖纸张、手写感、安静工具台、资料贴签、低饱和编辑台 |
@@ -15,15 +18,15 @@
 
 | 模块 | 名称 | 作用 | 关键视觉表现 |
 | --- | --- | --- | --- |
-| RC-A | ConnectorSettingsSection | 承载远程 / 本地资源链接与 Notion 管理入口 | Settings 资源卡片、结构化分区、管理按钮 |
-| RC-B | ConnectorLandingPanel | Chat 中的轻量 connector 摘要和 Settings CTA | 小型摘要卡、状态条、跳转按钮 |
-| RC-C | NotionManagerPage | 复用 `ResourceConnectorPage` 的 page mode | 纸张工台、资源列表、认证 / 选择 / 来源管理 |
-| RC-D | ResourceOptionCard | Notion / 飞书 / CLI 资源卡片 | 状态胶囊、禁用占位、管理按钮 |
-| RC-E | ResourceStatusBadge | 健康 / 未连接 / 认证中状态展示 | 小圆点 + 文字胶囊 |
+| RC-A | `WorkspaceTabBar` | Chat 工作区主切换，固定承载 `HistoryTab` / `ResourceConnectorTab` | 胶囊 tab、位于居中 Input Dock 下方、切换时不改变头部结构 |
+| RC-B | `ResourceConnectorTabPanel` | Chat 内连接器内容区，承载 `ConnectorToolbar`、空态和列表 | 虚线空状态卡、筛选 / 排序工具栏、状态化连接器卡片 |
+| RC-C | `ConnectorNotionDetailPage` | Settings 内连接器详情 / 配置页的整体页面壳 | 顶部面包屑 `← 资源连接器 > Notion Connector`、连续纸面区块 |
+| RC-D | `TopNavigation` + `ConnectorHeader` + `NotionAccountStatusSection` | 详情页上半部分：导航、头卡、单账号状态概览 | Notion 图标、状态胶囊、连接 / 关闭真实操作、账号状态指标 |
+| RC-E | `ResourceScopeSection` + `MountedSourcesSection` + `ConnectionStateCard` | 详情页下半部分：资源范围、已挂载来源与底部授权 / 同步解释卡 | 禁用态虚线框、database/page 勾选列表、来源卡、警告卡 + 开关 |
 
-> `ResourceConnectorPage` 作为 Notion 的 page mode 管理页保留；Chat 入口仅保留摘要和 CTA，不再直接承载完整工作台。
-> Settings 资源链接区分为远程资源与本地资源两个层级，Notion 管理页是唯一可进入的详细配置页。
-> 页面壳需要保留 Settings 侧的浅纸张感和 Chat 侧的轻量摘要感，不再继续强化黑底 workbench 作为默认连接器入口。
+> Chat 中的 `ResourceConnectorTabPanel` 负责“看见连接器、筛选连接器、跳转设置”；复杂配置全部进入 Settings 内的 `ConnectorNotionDetailPage`。
+> Notion 详情页不出现集合级的创建按钮、刷新列表按钮或连接器列表；无账号时「连接 Notion」隐式创建唯一 connector。
+> `ConnectionStateCard` 不是普通提示条，而是解释“为什么当前页面受限”的状态卡。
 
 ---
 
@@ -73,15 +76,17 @@ html[data-theme='dark'] {
 | --- | --- | --- |
 | 顶栏按钮 | Hover / Focus | 背景由透明过渡为纸卡底色，边框略微加深，整体上浮 1px。 |
 | 输入框容器 | Focus within | 外圈出现暖棕色柔和 ring，阴影略加深，强化“可以开始提问”的入口感。 |
-| 应用导航状态 | Switch | 应用级导航切换历史/连接器 landing state；Chat 输入区下方不再重复显示切换 pill。 |
+| `WorkspaceTabBar` | Switch | 活跃 tab 背景加深并切换 `MainContentArea`；输入区与头部不抖动。 |
 | 空状态按钮 | Hover | 轻微上浮并出现更深纸影，箭头图标向右移动 2px。 |
-| 来源卡片 | Hover | 卡片整体上移 2px，标题变深，右上角状态标签更清晰。 |
-| ActionSheet | Open / Close | 遮罩淡入，底部面板由下向上平滑滑入，关闭时反向执行。 |
+| 连接器卡片 | Hover | 卡片整体上移 2px，标题变深，右上角状态标签更清晰。 |
+| 来源树节点 | Expand / Select | 展开箭头旋转，子级以轻量缩进进入，不使用重动画。 |
+| 警告状态卡 | Toggle | 开关切换时保持文案区稳定，仅切换状态色与开关位置。 |
 | 深色模式 | Toggle | 页面变量切换并带 220ms 颜色过渡，不闪屏。 |
 
 ---
 
 ## ✅ 说明
-- 页面支持 **Light / Dark** 模式切换、Settings 资源链接分区、Notion 具体管理页和 Chat 轻量 connector 摘要面板。
-- `ResourceConnectorPage` 仅作为 Notion 的 page mode 管理页使用；Chat 中的 connector 面板只保留状态摘要和跳转 CTA，不承载创建 / 认证 / 来源选择。
-- `ConnectorSettingsSection` 管理远程 / 本地资源的入口分区，飞书和本地 CLI 执行器都保持占位，不调用不存在的 API。
+- 页面支持 **Light / Dark** 模式切换，并统一服务于 Chat 内 `WorkspaceTabBar` 与 Settings 内 `ConnectorNotionDetailPage`。
+- `ResourceConnectorTabPanel` 要求默认保留筛选 / 排序工具栏位置；空态与加载态都不能挤掉该布局锚点。
+- `ConnectorNotionDetailPage` 必须复用同一纸面视觉语言，组件层级固定为 `TopNavigation` → `ConnectorHeader` → `NotionAccountStatusSection` → `ResourceScopeSection` → `MountedSourcesSection` → `ConnectionStateCard`。
+- 资源连接器入口在 Chat 工作区呈现为轻量摘要；完整配置归属于 Settings「资源链接」，详情页是 Settings 内管理层。

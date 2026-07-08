@@ -1,6 +1,8 @@
 // [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, ConnectorLandingPanel, auth token, and AI SDK message types.
 //         /api/claude-agent/threads/{id}/status, reconnectStreamNonce to ChatPanel.
-// [Output] Render the chat workspace with lazy thread creation, app-owned history/connector entry state, history/file sidebars, a single pill quick-action strip, ChatPanel, and a lightweight connector landing panel that routes management to Settings.
+// [Output] Render the chat workspace with lazy thread creation, a fully visible WorkspaceTabBar (聊天历史/资源连接器)
+//          under the composer, history/file sidebars, a single pill quick-action strip, ChatPanel, and the
+//          ResourceConnectorTabPanel (ConnectorLandingPanel) that jumps to Settings resource links for management.
 //          When /status reports running, bump reconnectStreamNonce so ChatPanel attaches SSE stream.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
@@ -29,10 +31,16 @@
 //                    now decoupled into a dialog.
 // [Sync] 2026-06-28: remove the New Chat row from the history search dialog;
 //                    top-level Chat chrome already owns new thread creation.
-// [Sync] 2026-07-07: add the history/connector landing tabs under the AI composer and embed ResourceConnectorPage in the connector tab so the connector workbench sits below the chat entry point.
+// [Sync] 2026-07-07: add the history/connector landing tabs under the AI composer and temporarily embed the connector workbench below the chat entry point.
 // [Sync] 2026-07-07: keep the landing connector workbench inside the viewport by tightening the Chat shell flex/min-height chain.
 // [Sync] 2026-07-07: remove the duplicate landing tab pill row once the app navigation owns history/connector switching.
 // [Sync] 2026-07-08: replace the Chat-embedded connector workbench with a lightweight landing panel; Settings now owns full connector management.
+// [Sync] 2026-07-08: replace text-only "加载历史中..." states with skeleton-screen placeholders,
+//                    aligning with 《链接器概念的交互设计稿》 Chat 入口页骨架屏。
+// [Sync] 2026-07-08: add a fully visible `聊天历史`/`资源连接器` pill switcher (WorkspaceTabBar) below
+//                    the composer.
+// [Sync] 2026-07-08: route connector-card / CTA selection to Settings resource-link management instead
+//                    of opening an in-Chat config page, matching the latest connector interaction draft.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
@@ -49,7 +57,8 @@ import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ConnectorLandingPanel from './ConnectorLandingPanel';
-import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
+import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
+import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
@@ -299,9 +308,9 @@ function ChatViewContent({
   editorState,
   onEditorWriteConfirmed,
   activeVoice,
-  onOpenConnectorSettings,
   landingTab,
   onLandingTabChange,
+  onOpenConnectorSettings,
 }: ChatViewContentProps) {
   const { workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
@@ -537,6 +546,14 @@ function ChatViewContent({
     setQueuedToolChoice('auto');
   }, [onLandingTabChange]);
 
+  const handleOpenConnectorSettings = useCallback(() => {
+    onOpenConnectorSettings?.();
+  }, [onOpenConnectorSettings]);
+
+  const handleSelectWorkspaceTab = useCallback((tab: ChatLandingTab) => {
+    onLandingTabChange(tab);
+  }, [onLandingTabChange]);
+
   const handleShare = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(window.location.href);
@@ -753,6 +770,57 @@ function ChatViewContent({
                       </div>
                     ) : null}
 
+                    <div
+                      role="tablist"
+                      aria-label="Chat 工作区切换"
+                      style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, display: 'flex', gap: '0.5rem' }}
+                    >
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={landingTab === 'history'}
+                        onClick={() => handleSelectWorkspaceTab('history')}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          border: `1px solid ${landingTab === 'history' ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
+                          borderRadius: '999px',
+                          padding: '0.55rem 0.9rem',
+                          background: landingTab === 'history' ? 'var(--color-bg-surface)' : 'transparent',
+                          color: 'var(--color-text-primary)',
+                          cursor: 'pointer',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                        }}
+                      >
+                        <IconClock style={{ width: '0.85rem', height: '0.85rem' }} />
+                        聊天历史
+                      </button>
+                      <button
+                        type="button"
+                        role="tab"
+                        aria-selected={landingTab === 'connector'}
+                        onClick={() => handleSelectWorkspaceTab('connector')}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
+                          border: `1px solid ${landingTab === 'connector' ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
+                          borderRadius: '999px',
+                          padding: '0.55rem 0.9rem',
+                          background: landingTab === 'connector' ? 'var(--color-bg-surface)' : 'transparent',
+                          color: 'var(--color-text-primary)',
+                          cursor: 'pointer',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                        }}
+                      >
+                        <IconDatabase style={{ width: '0.85rem', height: '0.85rem' }} />
+                        资源连接器
+                      </button>
+                    </div>
+
                     <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                       {landingTab === 'history' ? (
                         <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--color-border-paper)', borderRadius: '1.15rem', background: 'var(--color-bg-paper)' }}>
@@ -779,7 +847,7 @@ function ChatViewContent({
                           </div>
                           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.55rem 0.55rem 0.75rem' }}>
                             {isLoadingThreads && visibleThreads.length === 0 ? (
-                              <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>加载历史中...</div>
+                              <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>
                             ) : null}
                             {!isLoadingThreads && visibleThreads.length === 0 ? (
                               <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>暂无会话</div>
@@ -836,7 +904,7 @@ function ChatViewContent({
                           </div>
                         </div>
                       ) : (
-                        <ConnectorLandingPanel onOpenSettings={onOpenConnectorSettings} />
+                        <ConnectorLandingPanel onOpenConnector={handleOpenConnectorSettings} />
                       )}
                     </section>
                   </div>
@@ -874,7 +942,7 @@ function ChatViewContent({
               </div>
               <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
                 {isLoadingThreads && visibleThreads.length === 0 ? (
-                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>加载历史中...</div>
+                  <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={3} /></div>
                 ) : null}
                 {!isLoadingThreads && visibleThreads.length === 0 ? (
                   <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>暂无会话</div>
