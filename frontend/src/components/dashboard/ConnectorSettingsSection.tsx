@@ -1,11 +1,16 @@
 // [Input] Resource connector API client, shared dashboard icons, and App-level focus nonce.
-// [Output] Settings resource-link section with remote/local connector choices and Notion management reuse.
+// [Output] Settings resource-link index section with remote/local connector choices; the Notion
+//          "管理" action now navigates to the dedicated ConnectorNotionDetailPage instead of
+//          toggling an inline embedded panel.
 // [Pos] settings resource-link section in frontend/src/components/dashboard
 // [Sync] 2026-07-08: initial Settings resource-link section for the connector migration.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+// [Sync] 2026-07-08: remove the inline Notion detail toggle; 管理 now calls onOpenNotionDetail so
+//                    App navigates to a dedicated 具体配置页面 page, matching the connector
+//                    interaction design's page-navigation requirement.
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import {
-  IconChevronLeft,
   IconChevronRight,
   IconClock,
   IconDatabase,
@@ -13,13 +18,14 @@ import {
   IconLoader,
   IconSettings,
 } from '../chat/Icons';
-import ResourceConnectorPage from './ResourceConnectorPage';
 
 type ConnectorTone = 'neutral' | 'success' | 'warning' | 'danger';
 
 interface ConnectorSettingsSectionProps {
   focusNonce?: number;
   isMobile?: boolean;
+  /** Navigates to the dedicated Notion "具体配置页面" instead of expanding inline. */
+  onOpenNotionDetail?: () => void;
 }
 
 interface ConnectorOptionCardProps {
@@ -190,9 +196,8 @@ function ConnectorOptionCard({
   );
 }
 
-export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = false }: ConnectorSettingsSectionProps) {
+export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = false, onOpenNotionDetail }: ConnectorSettingsSectionProps) {
   const sectionRef = useRef<HTMLElement>(null);
-  const [detail, setDetail] = useState<'index' | 'notion'>('index');
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -212,15 +217,13 @@ export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = fa
 
   useEffect(() => {
     if (focusNonce <= 0) return;
-    setDetail('index');
     sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     sectionRef.current?.focus({ preventScroll: true });
   }, [focusNonce]);
 
   useEffect(() => {
-    if (detail !== 'index') return;
     void loadConnectors();
-  }, [detail, loadConnectors, focusNonce]);
+  }, [loadConnectors, focusNonce]);
 
   const notionConnector = useMemo(
     () => connectors.find((connector) => connector.platform === 'notion') ?? null,
@@ -247,11 +250,6 @@ export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = fa
   );
   const notionStatusTone = getResourceHealthTone(notionConnector);
   const notionLastInteraction = formatLastInteraction(notionConnector);
-
-  const handleBackToIndex = useCallback(() => {
-    setDetail('index');
-    void loadConnectors();
-  }, [loadConnectors]);
 
   return (
     <section
@@ -282,132 +280,80 @@ export default function ConnectorSettingsSection({ focusNonce = 0, isMobile = fa
             远程资源链接集中管理 Notion / 飞书，本地资源链接预留给 CLI 执行器。Chat 入口只保留状态摘要和跳转按钮。
           </p>
         </div>
-
-        {detail === 'notion' ? (
-          <button
-            type="button"
-            onClick={handleBackToIndex}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              border: '1px solid var(--color-border-paper)',
-              borderRadius: '999px',
-              padding: '0.65rem 0.9rem',
-              background: 'var(--color-bg-paper)',
-              color: 'var(--color-text-secondary)',
-              cursor: 'pointer',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-            }}
-          >
-            <IconChevronLeft style={{ width: '0.88rem', height: '0.88rem' }} />
-            返回资源链接
-          </button>
-        ) : null}
       </header>
 
-      {detail === 'index' ? (
-        <div style={{ display: 'grid', gap: '1rem' }}>
-          <section style={{ display: 'grid', gap: '0.7rem' }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                远程资源链接
-              </h3>
-              <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-                连接后可读取外部知识源。Notion 可继续管理资源，飞书先保留占位。
-              </p>
-            </div>
+      <div style={{ display: 'grid', gap: '1rem' }}>
+        <section style={{ display: 'grid', gap: '0.7rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              远程资源链接
+            </h3>
+            <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+              连接后可读取外部知识源。Notion 可继续管理资源，飞书先保留占位。
+            </p>
+          </div>
 
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              <ConnectorOptionCard
-                icon={<IconDatabase style={{ width: '1rem', height: '1rem' }} />}
-                title="Notion"
-                subtitle="可访问的数据库和页面会在这里管理，认证与同步仍复用现有 Notion connector 页面。"
-                detail={`${notionConnector ? `最近交互 ${notionLastInteraction}` : '暂无交互'} · ${notionConnector?.sources.length ?? 0} 个来源`}
-                statusLabel={notionStatusLabel}
-                tone={notionStatusTone}
-                actionLabel="管理"
-                onAction={() => setDetail('notion')}
-              />
-              <ConnectorOptionCard
-                icon={<IconSettings style={{ width: '1rem', height: '1rem' }} />}
-                title="飞书"
-                subtitle="远程资源链接预留位，不调用不存在的 API。"
-                detail="暂不实现"
-                statusLabel="禁用"
-                tone="neutral"
-                actionLabel="暂不可用"
-                disabled
-              />
-            </div>
-          </section>
-
-          <div style={{ height: '1px', background: 'var(--color-border-paper)' }} />
-
-          <section style={{ display: 'grid', gap: '0.7rem' }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                本地资源链接
-              </h3>
-              <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
-                本地资源由当前系统 CLI 执行器接入，当前版本只放占位，不在前端设计完整流程。
-              </p>
-            </div>
-
+          <div style={{ display: 'grid', gap: '0.75rem' }}>
             <ConnectorOptionCard
-              icon={<IconFile style={{ width: '1rem', height: '1rem' }} />}
-              title="CLI 执行器"
-              subtitle="用户下载后，这里显示本地可用资源入口。"
-              detail="暂不设计"
-              statusLabel="占位"
+              icon={<IconDatabase style={{ width: '1rem', height: '1rem' }} />}
+              title="Notion"
+              subtitle="可访问的数据库和页面会在这里管理，认证与同步仍复用现有 Notion connector 页面。"
+              detail={`${notionConnector ? `最近交互 ${notionLastInteraction}` : '暂无交互'} · ${notionConnector?.sources.length ?? 0} 个来源`}
+              statusLabel={notionStatusLabel}
+              tone={notionStatusTone}
+              actionLabel="管理"
+              onAction={onOpenNotionDetail}
+            />
+            <ConnectorOptionCard
+              icon={<IconSettings style={{ width: '1rem', height: '1rem' }} />}
+              title="飞书"
+              subtitle="远程资源链接预留位，不调用不存在的 API。"
+              detail="暂不实现"
+              statusLabel="禁用"
               tone="neutral"
               actionLabel="暂不可用"
               disabled
             />
-          </section>
+          </div>
+        </section>
 
-          {loading ? (
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
-              <IconLoader style={{ width: '0.9rem', height: '0.9rem' }} />
-              刷新连接器状态中…
-            </div>
-          ) : null}
+        <div style={{ height: '1px', background: 'var(--color-border-paper)' }} />
 
-          {error ? (
-            <div style={{ fontSize: '0.78rem', color: 'var(--color-state-error)' }}>
-              {error}
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <div style={{ display: 'grid', gap: '0.85rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem', flexWrap: 'wrap' }}>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--color-text-muted)' }}>
-                具体管理页
-              </div>
-              <h3 style={{ margin: '0.35rem 0 0', fontSize: '0.98rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-                Notion connector
-              </h3>
-              <p style={{ margin: '0.28rem 0 0', fontSize: '0.8rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-                认证、资源选择、来源列表和同步操作继续复用现有 warm-paper 页面，Settings 这里只做入口聚合。
-              </p>
-            </div>
+        <section style={{ display: 'grid', gap: '0.7rem' }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: '0.92rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+              本地资源链接
+            </h3>
+            <p style={{ margin: '0.28rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-secondary)' }}>
+              本地资源由当前系统 CLI 执行器接入，当前版本只放占位，不在前端设计完整流程。
+            </p>
           </div>
 
-          <div
-            style={{
-              border: '1px solid var(--color-border-paper)',
-              borderRadius: '1.15rem',
-              overflow: 'hidden',
-              background: 'var(--color-bg-paper)',
-            }}
-          >
-            <ResourceConnectorPage isMobile={isMobile} />
+          <ConnectorOptionCard
+            icon={<IconFile style={{ width: '1rem', height: '1rem' }} />}
+            title="CLI 执行器"
+            subtitle="用户下载后，这里显示本地可用资源入口。"
+            detail="暂不设计"
+            statusLabel="占位"
+            tone="neutral"
+            actionLabel="暂不可用"
+            disabled
+          />
+        </section>
+
+        {loading ? (
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+            <IconLoader style={{ width: '0.9rem', height: '0.9rem' }} />
+            刷新连接器状态中…
           </div>
-        </div>
-      )}
+        ) : null}
+
+        {error ? (
+          <div style={{ fontSize: '0.78rem', color: 'var(--color-state-error)' }}>
+            {error}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

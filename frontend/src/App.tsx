@@ -62,6 +62,7 @@ import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
+import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -157,11 +158,25 @@ export default function App() {
   const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
+  // [Sync] 2026-07-08: track whether the dedicated Notion "具体配置页面" is open; navigating into it
+  //                    replaces the whole Settings viewport instead of expanding inline within the
+  //                    resource-link card, matching the connector interaction design's page navigation.
+  const [showNotionConnectorDetail, setShowNotionConnectorDetail] = useState(false);
 
   const openConnectorSettings = useCallback(() => {
     setCurrentView('settings');
+    setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
     setChatLandingTab('connector');
+  }, []);
+
+  const openNotionConnectorDetail = useCallback(() => {
+    setShowNotionConnectorDetail(true);
+  }, []);
+
+  const closeNotionConnectorDetail = useCallback(() => {
+    setShowNotionConnectorDetail(false);
+    setConnectorSettingsFocusNonce((value) => value + 1);
   }, []);
 
   const handleAppViewChange = useCallback((view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => {
@@ -1913,6 +1928,11 @@ export default function App() {
           bottom: mobileBottomOffset,
           background: 'var(--color-bg-app)'
         }}>
+          {showNotionConnectorDetail ? (
+            <div style={{ maxWidth: 1220, width: '100%' }}>
+              <ConnectorNotionDetailPage onBack={closeNotionConnectorDetail} isMobile={isMobile} />
+            </div>
+          ) : (
           <div style={{
             maxWidth: 800,
             width: '100%'
@@ -2057,6 +2077,7 @@ export default function App() {
               <ConnectorSettingsSection
                 focusNonce={connectorSettingsFocusNonce}
                 isMobile={isMobile}
+                onOpenNotionDetail={openNotionConnectorDetail}
               />
             </section>
 
@@ -2084,6 +2105,7 @@ export default function App() {
             {/* About Content */}
             <AboutView />
           </div>
+          )}
         </div>
       )}
       {/* @@@ Always render timeline to pre-load data and position scroll */}
