@@ -20,6 +20,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-07: 移除 Chat 输入框下方重复的 `历史对话` / `连接器` pill row 和连接器 workbench 内部重复标题/tab chrome；嵌入态只保留右上 `分享 / 更多` 与内容区入口。
 > [Sync] 2026-07-08: Connector 入口迁移到 Settings 资源链接区，Chat 仅保留摘要面板；Notion 具体管理页继续复用 `ResourceConnectorPage` page mode。
 > [Sync] 2026-07-08: 修复设置页「管理」交互问题——不再是资源链接卡片内的原地展开，改为 App 级页面导航到独立的 `ConnectorNotionDetailPage`（面包屑：设置 › 资源链接 › Notion 具体配置页面），对齐《链接器概念的交互设计稿》「具体配置页面 / 最上方导航」骨架屏；顶部导航栏与移动端底部导航栏移除单独的 `Connector` 入口。
+> [Sync] 2026-07-08: 补充 §3.5 —— Chat 入口页、连接器摘要面板、`ResourceConnectorPage` 首次加载态改为骨架占位块，`ConnectorNotionDetailPage` 面包屑下方新增「连接器概览」描述行，对齐《链接器概念的交互设计稿》Chat 页与「具体配置页面」骨架屏及最上方导航文字描述。
 
 ---
 
@@ -178,6 +179,16 @@ Resource Connector (资源连接器)
 - `连接器` landing state 现在只作为 Chat shell 内的轻量摘要面板，不再渲染完整工作台；`QuickActionStrip` 仍只保留在输入框下方一次，不与 connector 生命周期状态重复表达。
 - `ConnectorSettingsSection` 只承载远程 / 本地资源入口索引卡片；点击 Notion「管理」触发 App 级 `showNotionConnectorDetail` 页面导航，而不是在卡片内原地展开。`ConnectorNotionDetailPage` 提供面包屑导航（设置 › 资源链接 › Notion 具体配置页面）并复用 `ResourceConnectorPage` page mode，不再以黑底嵌入态作为默认入口。
 - Chat shell、Settings 资源链接区、`ConnectorNotionDetailPage` 与 Notion page mode 仍需保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；需要滚动时只允许历史列表、摘要面板或 Notion page mode 内部 `overflow-auto`。
+
+### 3.5 骨架屏与「具体配置页面」上方描述（对齐《链接器概念的交互设计稿》）
+
+- 背景：`ChatView`、`ConnectorLandingPanel`、`ResourceConnectorPage` 此前用纯文字（如“加载历史中...”“读取连接器状态…”“正在加载连接器…”）表达加载态，未落地 PDF 中定义的灰色占位骨架屏；`ConnectorNotionDetailPage` 的面包屑导航下方也缺少 PDF「具体配置页面 / 最上方导航」要求的概览描述行。
+- 规则：
+  1. Chat 入口页首次加载（`isLoadingThreads && visibleThreads.length === 0`）与连接器摘要面板首次加载（`ConnectorLandingPanel` 的 `loading` 态）必须使用统一的骨架占位块（图标占位 + 1~2 行文本占位），而不是纯文字提示；骨架块数量与布局对应 PDF 第 1 页「默认无聊内容状态」与第 2 页「默认无资源链接状态」示意图。
+  2. `ConnectorNotionDetailPage` 的面包屑导航下方必须新增一行「连接器概览」描述文本（图标 + 一句话说明该页用途），对应 PDF「具体配置页面 / 最上方导航 / 连接器概览 描述」的骨架屏位置；此描述独立于 `ResourceConnectorPage` 内部已有的「连接器概览」`SectionCard`（后者承载可编辑名称 / 状态 / 删除等具体操作，不替代页面级概览描述）。
+  3. `ResourceConnectorPage` 首次加载 connector 列表（`loading && connectors.length === 0`）时，列表区与详情区都必须显示骨架占位块（行占位 + 下拉占位），而不是纯文字「正在加载连接器…」。
+  4. 骨架占位块只用于首次加载（`loading && length === 0`）场景，不覆盖错误态、空态或已有数据的场景；错误态与空态维持现有文案与交互，不被骨架屏替代。
+  5. 本节改动范围仅限于加载态视觉与概览描述文案，不新增页面、路由或状态机分支，不改变现有的认证 / 同步 / 删除等业务逻辑。
 
 ---
 

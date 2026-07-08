@@ -8,6 +8,9 @@
 // [Sync] 2026-07-07: split embedded chat fallback workbench from the real source-selection empty state and keep the shell viewport-contained.
 // [Sync] 2026-07-07: remove duplicate embedded title/description/tab chrome so Chat owns the page entry and the workbench starts at source actions.
 // [Sync] 2026-07-08: embedded dark mode is compatibility-only; Settings now owns the connector entry and Chat keeps only the lightweight landing panel.
+// [Sync] 2026-07-08: replace text-only "正在加载连接器…" first-load states (embedded and page mode
+//                    connector list) with skeleton-screen placeholders, aligning with 《链接器概念的
+//                    交互设计稿》「具体配置页面」骨架屏。
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   IconArrowUp,
@@ -24,6 +27,7 @@ import {
   IconTrash,
 } from '../chat/Icons';
 import Modal from '../chat/Modal';
+import { SkeletonList } from '../chat/Skeleton';
 import {
   createConnector,
   deleteConnector,
@@ -1273,14 +1277,9 @@ export default function ResourceConnectorPage({
                         borderRadius: '18px',
                         background: 'rgba(255,255,255,0.05)',
                         padding: '1rem',
-                        color: embeddedPalette.textSecondary,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.65rem',
                       }}
                     >
-                      <IconLoader style={{ width: '1rem', height: '1rem' }} />
-                      正在加载连接器…
+                      <SkeletonList rows={2} />
                     </div>
                   ) : error ? (
                     <div
@@ -2206,14 +2205,9 @@ export default function ResourceConnectorPage({
                   borderRadius: '20px',
                   background: 'rgba(255,250,242,0.66)',
                   padding: '1rem',
-                  color: 'var(--color-text-secondary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.65rem',
                 }}
               >
-                <IconLoader style={{ width: '1rem', height: '1rem' }} />
-                正在加载连接器…
+                <SkeletonList rows={2} />
               </div>
             ) : error ? (
               <div

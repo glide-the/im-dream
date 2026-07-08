@@ -2,15 +2,17 @@
 // [Output] Lightweight Chat connector landing panel with status summary, empty state, and a Settings CTA.
 // [Pos] chat connector landing panel in frontend/src/components/chat
 // [Sync] 2026-07-08: initial Chat-to-Settings connector landing panel for the resource-link migration.
+// [Sync] 2026-07-08: replace text-only loading state with a skeleton-screen placeholder, aligning
+//                    with 《链接器概念的交互设计稿》 Chat 入口页「无资源链接」骨架屏 default state.
 import { useCallback, useEffect, useState } from 'react';
 import { listConnectors, type ResourceConnector } from '../../api/resourceConnectorApi';
 import {
   IconChevronRight,
   IconClock,
   IconDatabase,
-  IconLoader,
   IconSettings,
 } from './Icons';
+import { SkeletonList } from './Skeleton';
 
 interface ConnectorLandingPanelProps {
   onOpenSettings?: () => void;
@@ -211,12 +213,7 @@ export default function ConnectorLandingPanel({ onOpenSettings }: ConnectorLandi
       </div>
 
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.95rem 1rem', display: 'grid', gap: '0.8rem' }}>
-        {loading ? (
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: 'var(--color-text-muted)', fontSize: '0.82rem' }}>
-            <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} />
-            读取连接器状态…
-          </div>
-        ) : null}
+        {loading ? <SkeletonList rows={2} /> : null}
 
         {!loading && hasConnectors ? connectors.map((connector) => (
           <ConnectorSummaryRow key={connector.id} connector={connector} />

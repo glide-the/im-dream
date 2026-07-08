@@ -33,6 +33,8 @@
 // [Sync] 2026-07-07: keep the landing connector workbench inside the viewport by tightening the Chat shell flex/min-height chain.
 // [Sync] 2026-07-07: remove the duplicate landing tab pill row once the app navigation owns history/connector switching.
 // [Sync] 2026-07-08: replace the Chat-embedded connector workbench with a lightweight landing panel; Settings now owns full connector management.
+// [Sync] 2026-07-08: replace text-only "加载历史中..." states with skeleton-screen placeholders,
+//                    aligning with 《链接器概念的交互设计稿》 Chat 入口页骨架屏。
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
@@ -50,6 +52,7 @@ import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ConnectorLandingPanel from './ConnectorLandingPanel';
 import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
+import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
@@ -779,7 +782,7 @@ function ChatViewContent({
                           </div>
                           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.55rem 0.55rem 0.75rem' }}>
                             {isLoadingThreads && visibleThreads.length === 0 ? (
-                              <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>加载历史中...</div>
+                              <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>
                             ) : null}
                             {!isLoadingThreads && visibleThreads.length === 0 ? (
                               <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>暂无会话</div>
@@ -874,7 +877,7 @@ function ChatViewContent({
               </div>
               <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
                 {isLoadingThreads && visibleThreads.length === 0 ? (
-                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>加载历史中...</div>
+                  <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={3} /></div>
                 ) : null}
                 {!isLoadingThreads && visibleThreads.length === 0 ? (
                   <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>暂无会话</div>
