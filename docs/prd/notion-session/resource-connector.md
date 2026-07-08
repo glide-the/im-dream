@@ -12,6 +12,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 > [Sync] 2026-07-04: 从 `docs/design/notion-session/resource-connector-prd.md` 拆分，前端 PRD 独立管理
 > [Sync] 2026-07-07: Chat 入口页成为主落点，历史对话与连接器工作台下沉到输入框下方，嵌入式 `ResourceConnectorPage` 负责连接器管理。
 > [Sync] 2026-07-08: Connector 入口迁移到 Settings 的资源链接区，Chat 仅保留轻量摘要面板与跳转 CTA。
+> [Sync] 2026-07-08: 修复设置页「管理」交互——不再原地展开，改为导航到独立的 `ConnectorNotionDetailPage`（面包屑：设置 › 资源链接 › Notion 具体配置页面）；顶部导航栏与移动端底部导航栏移除单独的 `Connector` 入口，比对《链接器概念的交互设计稿》骨架屏核实 Chat 入口页布局（图标/描述/分享/更多、聊天文本框、历史与连接器切换栏）与现状一致。
 
 ---
 
@@ -31,7 +32,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 ### 1.1 是什么
 
-**资源连接器**（Resource Connector）是 Settings 中的资源链接管理入口。用户从顶部或移动端导航进入 Settings 的资源链接区，在这里管理 Notion / 飞书 / 本地 CLI 执行器等外部资源；Chat 页面只保留一个轻量摘要面板和跳转 CTA，不再承载完整管理流程。
+**资源连接器**（Resource Connector）是 Settings 中的资源链接管理入口。用户从顶部或移动端导航进入 Settings（Settings 页面本身仍在顶部导航栏和移动端底部导航栏），再到资源链接区管理 Notion / 飞书 / 本地 CLI 执行器等外部资源；Chat 页面只保留一个轻量摘要面板和跳转 CTA，不再承载完整管理流程。
 
 > 当前重构只落地 Notion 资源连接器的 Settings 管理页与 Chat 轻量入口；上传工作空间文件、Deck 关联等扩展能力保留为后续迭代，不作为本轮前端实现范围。
 
@@ -71,11 +72,11 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 ```
 资源链接区（Settings）
   ├── 远程资源链接
-  │     ├── Notion 管理入口
+  │     ├── Notion 管理入口（点击「管理」页面级导航到具体配置页面）
   │     └── 飞书占位
   ├── 本地资源链接
   │     └── CLI 执行器占位
-  └── Notion 具体管理页
+  └── Notion 具体配置页面（ConnectorNotionDetailPage，独立导航页）
         └── ResourceConnectorPage（page mode）
 ```
 
@@ -89,28 +90,38 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Settings view                          │
+│                    Settings view（资源链接索引）                │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │ 资源链接区（远程资源 / 本地资源）                        │    │
-│  │   Notion · 飞书 · CLI 执行器占位                         │    │
+│  │   Notion（管理 → 跳转下方独立页面）· 飞书 · CLI 执行器占位│    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+                              │ 点击「管理」= 页面级导航（替换整个视图）
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│           Settings view（ConnectorNotionDetailPage）             │
+│                                                                 │
+│  设置 › 资源链接 › Notion 具体配置页面   ← 面包屑导航             │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │ Notion 具体管理页（ResourceConnectorPage page mode）   │    │
+│  │ Notion 具体管理页（ResourceConnectorPage page mode）    │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+> 「管理」触发的是 App 级页面导航（`showNotionConnectorDetail=true`），不是在资源链接卡片内原地展开；`ConnectorNotionDetailPage` 会替换掉 Settings 里 Energy Bar / AI 模型配置等其它分区，只保留面包屑 + Notion 管理页本身。
+
 ### 3.2 页面组件拆解
 
 | 区域 | 组件 | 说明 |
 |------|------|------|
-| 资源链接入口 | ConnectorSettingsSection | 承载远程 / 本地资源卡片，并把 Notion 管理页切到 `ResourceConnectorPage` |
+| 资源链接入口 | ConnectorSettingsSection | 承载远程 / 本地资源索引卡片，「管理」触发 `onOpenNotionDetail` 页面导航 |
+| Notion 具体配置页面 | ConnectorNotionDetailPage | 面包屑导航 + 复用 `ResourceConnectorPage` page mode，替换整个 Settings 视图 |
 | 轻量摘要面板 | ConnectorLandingPanel | Chat 中的 Connector 摘要 + Settings CTA；不做创建 / 认证 / 资源选择 |
-| Notion 管理页 | ResourceConnectorPage | 复用现有 page mode 继续做创建 / 认证 / 来源管理 |
-| 入口跳转 | TopNavBar / MobileNav | `Connector` 入口跳转到 Settings 资源链接区并自动聚焦 |
+| Notion 管理页内容 | ResourceConnectorPage | 复用现有 page mode 继续做创建 / 认证 / 来源管理 |
+| 入口跳转 | ConnectorLandingPanel（Chat） | 跳转按钮打开 Settings 资源链接区并自动聚焦；顶部导航栏与移动端底部导航栏不再单独展示 `Connector` 入口 |
 
 > `ResourceConnectorPage` 作为 Notion 的 page mode 管理页保留；Chat 入口仅保留摘要和 CTA，不再直接承载完整工作台。
 

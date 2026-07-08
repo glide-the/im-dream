@@ -7,7 +7,8 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Input] `docs/design/notion-session/overview.md`,
 >      `docs/design/claude-agent/edit-point/workspace-adapter.md`,
 >      `docs/design/claude-agent/edit-point/workspace-context.md`,
->      `docs/design/claude-agent/edit-point/workspace-switch.md`
+>      `docs/design/claude-agent/edit-point/workspace-switch.md`,
+>      `docs/design/notion-session/链接器概念的交互设计稿.pdf`
 > [Output] 定义用户从创建资源连接器到 Agent 消费 `.notion/` 映射的完整业务交互流程
 > [Pos] connector-interaction-doc in `docs/design/notion-session`
 > [Sync] 2026-06-21: 初始设计 — 资源连接器交互方案
@@ -18,6 +19,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天` 使用已创建 workbench 语义与 normalized fallback，`来源` 只由真实 connector context 驱动空态/认证/资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
 > [Sync] 2026-07-07: 移除 Chat 输入框下方重复的 `历史对话` / `连接器` pill row 和连接器 workbench 内部重复标题/tab chrome；嵌入态只保留右上 `分享 / 更多` 与内容区入口。
 > [Sync] 2026-07-08: Connector 入口迁移到 Settings 资源链接区，Chat 仅保留摘要面板；Notion 具体管理页继续复用 `ResourceConnectorPage` page mode。
+> [Sync] 2026-07-08: 修复设置页「管理」交互问题——不再是资源链接卡片内的原地展开，改为 App 级页面导航到独立的 `ConnectorNotionDetailPage`（面包屑：设置 › 资源链接 › Notion 具体配置页面），对齐《链接器概念的交互设计稿》「具体配置页面 / 最上方导航」骨架屏；顶部导航栏与移动端底部导航栏移除单独的 `Connector` 入口。
 
 ---
 
@@ -117,7 +119,8 @@ Resource Connector (资源连接器)
     │
     ├─ 在 Notion 卡片点击「管理」
     │
-    ├─ 进入 Notion 具体管理页（复用 `ResourceConnectorPage` page mode）
+    ├─ 页面级导航到 Notion 具体配置页面（`ConnectorNotionDetailPage`，替换整个 Settings 视图，
+    │   顶部显示「设置 › 资源链接 › Notion 具体配置页面」面包屑，内部复用 `ResourceConnectorPage` page mode）
     │
     ├─ 选择或新建资源连接器
     │
@@ -173,8 +176,8 @@ Resource Connector (资源连接器)
 - `shell_error` 只表示 Chat shell 级故障，不表示 connector 认证、同步或 snapshot 状态异常。
 - 在 `shell_error` 下，用户仍应至少能看到重新加载入口，并在 shell 恢复后回到上一次选中的 `history` 或 `connector` 视图。
 - `连接器` landing state 现在只作为 Chat shell 内的轻量摘要面板，不再渲染完整工作台；`QuickActionStrip` 仍只保留在输入框下方一次，不与 connector 生命周期状态重复表达。
-- `ConnectorSettingsSection` 承载远程 / 本地资源入口与 Notion 管理页切换；Notion 的 page mode 继续复用 `ResourceConnectorPage`，但不再以黑底嵌入态作为默认入口。
-- Chat shell、Settings 资源链接区与 Notion page mode 仍需保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；需要滚动时只允许历史列表、摘要面板或 Notion page mode 内部 `overflow-auto`。
+- `ConnectorSettingsSection` 只承载远程 / 本地资源入口索引卡片；点击 Notion「管理」触发 App 级 `showNotionConnectorDetail` 页面导航，而不是在卡片内原地展开。`ConnectorNotionDetailPage` 提供面包屑导航（设置 › 资源链接 › Notion 具体配置页面）并复用 `ResourceConnectorPage` page mode，不再以黑底嵌入态作为默认入口。
+- Chat shell、Settings 资源链接区、`ConnectorNotionDetailPage` 与 Notion page mode 仍需保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；需要滚动时只允许历史列表、摘要面板或 Notion page mode 内部 `overflow-auto`。
 
 ---
 

@@ -15,14 +15,14 @@
 
 | 模块 | 名称 | 作用 | 关键视觉表现 |
 | --- | --- | --- | --- |
-| RC-A | ConnectorSettingsSection | 承载远程 / 本地资源链接与 Notion 管理入口 | Settings 资源卡片、结构化分区、管理按钮 |
+| RC-A | ConnectorSettingsSection | 承载远程 / 本地资源链接索引卡片，「管理」触发页面导航 | Settings 资源卡片、结构化分区、管理按钮 |
 | RC-B | ConnectorLandingPanel | Chat 中的轻量 connector 摘要和 Settings CTA | 小型摘要卡、状态条、跳转按钮 |
-| RC-C | NotionManagerPage | 复用 `ResourceConnectorPage` 的 page mode | 纸张工台、资源列表、认证 / 选择 / 来源管理 |
+| RC-C | ConnectorNotionDetailPage | Notion「具体配置页面」，独立导航页，替换整个 Settings 视图 | 面包屑导航（设置 › 资源链接 › Notion 具体配置页面）+ 复用 `ResourceConnectorPage` page mode |
 | RC-D | ResourceOptionCard | Notion / 飞书 / CLI 资源卡片 | 状态胶囊、禁用占位、管理按钮 |
 | RC-E | ResourceStatusBadge | 健康 / 未连接 / 认证中状态展示 | 小圆点 + 文字胶囊 |
 
-> `ResourceConnectorPage` 作为 Notion 的 page mode 管理页保留；Chat 入口仅保留摘要和 CTA，不再直接承载完整工作台。
-> Settings 资源链接区分为远程资源与本地资源两个层级，Notion 管理页是唯一可进入的详细配置页。
+> `ResourceConnectorPage` 作为 Notion 的 page mode 管理页保留，由 `ConnectorNotionDetailPage` 承载并加上面包屑导航；Chat 入口仅保留摘要和 CTA，不再直接承载完整工作台。
+> Settings 资源链接区分为远程资源与本地资源两个层级；点击 Notion「管理」是页面级导航（`showNotionConnectorDetail` 状态切换），不是在资源链接卡片内原地展开。
 > 页面壳需要保留 Settings 侧的浅纸张感和 Chat 侧的轻量摘要感，不再继续强化黑底 workbench 作为默认连接器入口。
 
 ---
@@ -82,6 +82,6 @@ html[data-theme='dark'] {
 ---
 
 ## ✅ 说明
-- 页面支持 **Light / Dark** 模式切换、Settings 资源链接分区、Notion 具体管理页和 Chat 轻量 connector 摘要面板。
-- `ResourceConnectorPage` 仅作为 Notion 的 page mode 管理页使用；Chat 中的 connector 面板只保留状态摘要和跳转 CTA，不承载创建 / 认证 / 来源选择。
-- `ConnectorSettingsSection` 管理远程 / 本地资源的入口分区，飞书和本地 CLI 执行器都保持占位，不调用不存在的 API。
+- 页面支持 **Light / Dark** 模式切换、Settings 资源链接分区、Notion 具体配置页面和 Chat 轻量 connector 摘要面板。
+- `ResourceConnectorPage` 仅作为 Notion 的 page mode 管理页使用，由 `ConnectorNotionDetailPage` 加面包屑导航后承载；Chat 中的 connector 面板只保留状态摘要和跳转 CTA，不承载创建 / 认证 / 来源选择。
+- `ConnectorSettingsSection` 只管理远程 / 本地资源的入口分区索引卡片，飞书和本地 CLI 执行器都保持占位，不调用不存在的 API；点击 Notion「管理」触发页面导航而非原地展开。
