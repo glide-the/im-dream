@@ -1,7 +1,7 @@
 # Notion Device 资源连接器设计方案
 
 Status: Draft
-Updated: 2026-07-08
+Updated: 2026-07-09
 Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空间
 
 > [Input] `docs/design/claude-agent/edit-point/workspace-adapter.md`,
@@ -15,6 +15,9 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 > [Sync] 2026-06-28: 收敛 Notion 远程数据源的交互快照生命周期 — Agent 初始化读取资源连接器数据层物化的 canonical snapshot，不以 Agent 本地 notion_cache 作为权威状态；补齐 MVP 前端交互设计稿。
 > [Sync] 2026-07-07: Chat 入口改为主落点，历史对话与连接器工作台下沉到输入框下方，输入框下方增加快捷功能 secondary action strip，并保留可恢复的 `shell_error` 态；连接器不再以独立主页面承载。
 > [Sync] 2026-07-08: 依据最新版 Chat 入口页与连接器详情草图复核主路径：主入口仍是 Chat `WorkspaceTabBar` 的轻量摘要，复杂配置进入 Settings「资源链接」里的 `ConnectorNotionDetailPage`，并再次确认连接器不是独立主导航页。
+> [Sync] 2026-07-08: 资源选择持久化收敛为 `connector_resources` / connector `sources`：Settings 已挂载来源、Chat 已链接资源和 Agent snapshot 入口读取同一份后端状态；Notion People 系统 data source 在 discovery 层过滤。
+> [Sync] 2026-07-09: Chat `ResourceConnectorTabPanel` 根内容区减少线框化，状态信息块使用虚线边界但无卡片底色 / 阴影，空态和已链接资源行用轻表面和留白承接摘要内容。
+> [Sync] 2026-07-09: Settings `ResourceOptionRow` 与 `MountedSourcesSection` 的页数元信息只在 `pageCount > 0` 时显示，避免 `0 pages` 占用资源行右侧状态区域。
 
 ---
 
@@ -54,6 +57,7 @@ ink-and-memory 的工作空间模型目前仅管理**本地 EditorState**（`.ed
 - **复用现有模式**：`.notion/` 镜像 `.editor/` 的虚拟索引 + PreToolUse 拦截模式
 - **ntn CLI 为唯一数据通道**：不引入 Notion SDK 依赖
 - **连接器数据层是内部权威状态**：Notion 是远程 source of truth；系统内部由资源连接器数据层物化 canonical snapshot，Agent 初始化只读取该快照
+- **已选择资源必须落库**：用户在 Settings 保存的 data_source / page 写入 `connector_resources`，并通过 connector `sources` 暴露给 Settings、Chat 和后续 snapshot 物化
 - **只读优先**：先实现浏览能力；写入只设计 proposal/write pipeline 边界，不直接落地远程写回
 - **认证与数据分离**：认证层由前端用户配置驱动，数据层负责同步、版本化和快照发布
 
@@ -199,8 +203,11 @@ NOTION_RESOURCES: dict[str, str] = {
 - 同一平台只保留一个 Notion 认证账号；详情页不展示新建连接器、刷新列表或连接器列表。
 - `ResourceScopeSection` 使用统一 data_source / page 列表，不再拆成 Databases 与 Standalone Pages 两块。
 - 资源范围操作行固定为 `搜索资源`、`保存资源`、`刷新同步`；默认每页 10 条，提供上一页 / 下一页。
-- 点击「保存资源」后，`MountedSourcesSection` 必须立即显示所选来源；如果后端同步返回空 sources，前端用当前选择构造 optimistic sources 完成回显。
-- 底部“授权 / 同步状态”卡片移除，授权与同步解释统一放在 `NotionAccountStatusSection`。
+- 点击「保存资源」后，后端把选定 data_source / page 写入 `connector_resources`，connector list/detail 响应必须返回 persisted `sources`；`MountedSourcesSection` 优先用 persisted `sources` 回显，如果后端短暂返回空 sources，前端才用当前选择构造 optimistic sources 完成即时反馈。
+- Chat `ResourceConnectorTabPanel` 的「已链接资源」与 Settings `MountedSourcesSection` 同源，均读取 connector `sources`，刷新页面后不得丢失已挂载来源。
+- Notion discovery 层过滤 Workspace People 等系统用户 data source；这类资源不进入 `ResourceScopeSection`，也不会进入 Chat 摘要或 Agent snapshot。
+- 资源行和已挂载来源的 page count 是辅助信息，只在 `pageCount > 0` 时展示；`0 pages` 不渲染，避免空统计误导为异常状态。
+- 底部“授权 / 同步状态”卡片移除，授权、同步、已链接资源数量、最近同步和限制提示统一放在顶部 `ConnectorHeader` 信息栏；策略设计只保留占位，不实现策略配置。
 
 | 字段 | 说明 | 存储位置 |
 | ------------- | ------------------------------------------------- | ---------------------------- |
@@ -574,13 +581,13 @@ Chat workspace
   │              ├─ ConnectorToolbar
   │              ├─ ConnectorEmptyState
   │              ├─ ConnectorList / ConnectorListSkeleton
-  │              └─ ConnectorCard / 选择连接器 → Settings ConnectorSettingsSection
+  │              └─ ConnectorStatusPanel / 选择连接器 → Settings ConnectorSettingsSection
   ├─ ConnectorNotionDetailPage
   │    ├─ TopNavigation
   │    ├─ ConnectorHeader
-  │    ├─ NotionAccountStatusSection
-  │    ├─ ResourceScopeSection: search + save + refresh + paged unified resources
-  │    └─ MountedSourcesSection: selected sources immediately after save
+  │    ├─ StrategyDesignPlaceholder
+  │    ├─ ResourceScopeSection: search + save + refresh + paged unified resources; pageCount only when > 0
+  │    └─ MountedSourcesSection: selected sources immediately after save; hide zero page counts
   ├─ Context banner: "Using Notion snapshot <version>"
   └─ Proposal card: diff preview + base snapshot identity
 ```
@@ -595,7 +602,7 @@ Chat workspace
 |---|---|---|
 | `empty_chat` | `HistoryTabPanel` 显示空聊天态，输入框保持中心主视觉 | `Start chat` |
 | `active_chat` | 历史内容切换为消息流，输入 Dock 贴近底部 | `Continue chat` |
-| `connector_empty` | `ResourceConnectorTabPanel` 显示虚线空态、三枚图标、标题与 CTA | `选择连接器` |
+| `connector_empty` | `ResourceConnectorTabPanel` 显示轻表面空态、三枚图标、标题与 CTA | `选择连接器` |
 | `connector_connected` | 显示 `ConnectorToolbar` + `ConnectorList` | `Open connector` |
 | `connector_error` | 连接器列表或状态拉取失败，显示错误卡 | `Retry` |
 | `shell_error` | Chat shell 或 `WorkspaceTabBar` 渲染失败，仍保留可恢复入口 | `Reload shell` / `Retry` |

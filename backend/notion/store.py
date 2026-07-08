@@ -4,6 +4,9 @@
 # [Sync] 2026-07-04: initial Notion connector persistence layer with selected
 #                    resource persistence, snapshot history, and workspace attach
 #                    helpers for canonical snapshot materialization.
+# [Sync] 2026-07-08: expose selected connector resources on connector rows so
+#                    Settings refreshes and Chat linked-resource summaries use
+#                    persisted database state instead of optimistic UI state.
 
 """SQLite-backed persistence for Notion resource connectors."""
 from __future__ import annotations
@@ -204,6 +207,14 @@ def _connector_from_row(row: sqlite3.Row | None) -> Optional[dict[str, Any]]:
     return data
 
 
+def _attach_connector_resources(connector: dict[str, Any] | None, user_id: int) -> dict[str, Any] | None:
+    if connector is None:
+        return None
+    connector = dict(connector)
+    connector["sources"] = _list_connector_resources_unchecked(str(connector["id"]))
+    return connector
+
+
 def _resource_from_row(row: sqlite3.Row) -> dict[str, Any]:
     data = dict(row)
     data["metadata"] = _json_loads(data.get("metadata_json"), {})
@@ -277,7 +288,13 @@ def list_connectors(user_id: int) -> list[dict[str, Any]]:
             """,
             (user_id,),
         ).fetchall()
-        return [c for row in rows if (c := _connector_from_row(row))]
+        connectors = []
+        for row in rows:
+            connector = _connector_from_row(row)
+            with_resources = _attach_connector_resources(connector, user_id)
+            if with_resources:
+                connectors.append(with_resources)
+        return connectors
     finally:
         db.close()
 
@@ -295,7 +312,12 @@ def get_connector(connector_id: str, user_id: Optional[int] = None) -> Optional[
                 "SELECT * FROM resource_connectors WHERE id = ? AND user_id = ? LIMIT 1",
                 (connector_id, user_id),
             ).fetchone()
-        return _connector_from_row(row)
+        connector = _connector_from_row(row)
+        if connector is None:
+            return None
+        if user_id is None:
+            user_id = int(connector["user_id"])
+        return _attach_connector_resources(connector, int(user_id))
     finally:
         db.close()
 
@@ -547,8 +569,7 @@ def replace_connector_resources(
         db.close()
 
 
-def list_connector_resources(connector_id: str, user_id: int) -> list[dict[str, Any]]:
-    _require_connector(connector_id, user_id)
+def _list_connector_resources_unchecked(connector_id: str) -> list[dict[str, Any]]:
     db = get_db()
     try:
         rows = db.execute(
@@ -568,6 +589,11 @@ def list_connector_resources(connector_id: str, user_id: int) -> list[dict[str, 
         return resources
     finally:
         db.close()
+
+
+def list_connector_resources(connector_id: str, user_id: int) -> list[dict[str, Any]]:
+    _require_connector(connector_id, user_id)
+    return _list_connector_resources_unchecked(connector_id)
 
 
 def delete_connector_resource(connector_id: str, user_id: int, resource_id: str) -> bool:

@@ -1,7 +1,7 @@
 # Notion Device 资源连接器 — 交互方案设计
 
 Status: Draft  
-Updated: 2026-07-08
+Updated: 2026-07-09
 Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的完整交互流程
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -19,12 +19,16 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `聊天历史` / `资源连接器` 视图，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
 > [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天历史` 使用会话与空态语义，`资源连接器` 只由真实 connector context 驱动空态 / 认证 / 资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
 > [Sync] 2026-07-08: 纠正曾偏移的入口叙述，统一以 Chat `WorkspaceTabBar` 为资源连接器主入口，废弃仅摘要化的路径表述。
-> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `NotionAccountStatusSection` / `ResourceScopeSection` / `MountedSourcesSection`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-08: 详情页组件树统一收敛为 Settings 内 `ConnectorNotionDetailPage` / `TopNavigation` / `ConnectorHeader` / `ResourceScopeSection` / `MountedSourcesSection`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-09: `ConnectorHeader` 改为无边框紧凑信息栏，授权 / 同步 / 已链接资源数量 / 最近同步 / 限制提示统一放入其中；其下仅保留 `StrategyDesignPlaceholder`，策略暂不实现。
 > [Sync] 2026-07-08: Notion 详情页按“同一平台只能认证一个账号”重构，不再嵌入集合型 `ResourceConnectorPage`，也不暴露新建 / 刷新 / 连接器列表入口。
 > [Sync] 2026-07-08: 资源范围选择合并为一个可搜索、每页 10 条的统一列表；保存资源后已挂载来源立即回显；底部授权 / 同步状态卡移除。
 > [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
-> [Sync] 2026-07-08: 修正 Chat 资源连接器跳转错位：`ConnectorLandingPanel` 的「选择连接器」和连接器卡片统一进入 Settings「资源链接」区；Chat 不再打开内部配置页。
+> [Sync] 2026-07-08: 修正 Chat 资源连接器跳转错位：`ConnectorLandingPanel` 的「选择连接器」和连接器状态面板管理入口统一进入 Settings「资源链接」区；Chat 不再打开内部配置页。
 > [Sync] 2026-07-08: 修正 Chat 入口比例与连接器已连接态表达：landing 主内容区与输入框 / `WorkspaceTabBar` 同宽居中，历史 tab 移除外层冗余边框；连接器列表改为非按钮状态面板，展示授权、同步和已链接资源摘要，只有小型「管理」入口跳转 Settings。
+> [Sync] 2026-07-08: 修复已挂载资源持久化链路：资源选择保存到 `connector_resources` 后必须随 connector `sources` 返回，Settings 刷新和 Chat 已链接资源共用 persisted sources；Notion People 系统 data source 在 discovery 层过滤。
+> [Sync] 2026-07-09: Chat `ConnectorLandingPanel` 减少卡片设计；根内容区无外框，状态信息块使用虚线边界但无卡片底色 / 阴影，空态和已链接资源行改用轻表面层级，仅管理入口保留弱边界。
+> [Sync] 2026-07-09: Settings `ResourceOptionRow` 和 `MountedSourcesSection` 不展示 `0 pages`；页数只有在 `pageCount > 0` 时作为右侧元信息出现。
 
 ---
 
@@ -126,7 +130,7 @@ Resource Connector (资源连接器)
     │
     ├─ 点击「资源连接器」
     │   ├─ 显示 ConnectorToolbar（筛选 / 排序）
-    │   ├─ 无连接器 → 虚线空态：远程资源 / 本地资源 / 更多图标 + 暂无资源连接器 + 选择连接器
+    │   ├─ 无连接器 → 轻表面空态：远程资源 / 本地资源 / 更多图标 + 暂无资源连接器 + 选择连接器
     │   └─ 有连接器 → ConnectorStatusPanel 列表（平台状态 + 已链接资源摘要）
     │
     ├─ 点击「选择连接器」或 Notion Connector 状态面板中的「管理」
@@ -137,11 +141,12 @@ Resource Connector (资源连接器)
     │       顶部显示「← 资源连接器 > Notion Connector」
     │
     ├─ 在 ConnectorNotionDetailPage 中完成认证、来源选择与同步
-    │   └─ ResourceScopeSection 在已认证后展示统一资源列表，支持搜索、每页 10 条分页和勾选
+    │   └─ ResourceScopeSection 在已认证后展示统一资源列表，支持搜索、每页 10 条分页和勾选；页数只在 pageCount > 0 时显示
     │
     └─ 返回 Chat 并继续提问
           ├─ Agent 初始化时 attach 当前 canonical snapshot
           ├─ `.notion/` 虚拟索引从同一 snapshotVersion 读取
+          ├─ Chat `ResourceConnectorTabPanel` 从 connector `sources` 展示已链接资源
           └─ notion-cli skill 可按需同步到工作空间
 ```
 
@@ -150,10 +155,10 @@ Resource Connector (资源连接器)
 | 阶段 | 触发者 | 输出 | 存储位置 |
 |------|--------|------|---------|
 | 1. 进入连接器摘要面板 | 用户（Chat `ResourceConnectorTab`） | 当前连接器列表或空态 | 前端工作区状态 |
-| 2. 进入资源链接设置区 | 用户（点击 `ConnectorCard` / `选择连接器`） | `ConnectorSettingsSection` | App 视图状态 |
+| 2. 进入资源链接设置区 | 用户（点击 `ConnectorStatusPanel` 管理入口 / `选择连接器`） | `ConnectorSettingsSection` | App 视图状态 |
 | 3. 进入 Notion 详情页 | 用户（Settings 点击 Notion「管理」） | `ConnectorNotionDetailPage` | App 视图状态 |
 | 3. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
-| 4. 资源选择 | 用户（`ResourceScopeSection`） | 选定的 data_source_id 与 page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
+| 4. 资源选择 | 用户（`ResourceScopeSection`） | 选定的 data_source_id 与 page_id 及资源元数据 | `connector_resources`，并随 connector `sources` 返回 |
 | 5. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
 | 6. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
 
@@ -175,7 +180,16 @@ Resource Connector (资源连接器)
 - `auth/poll` 遇到 `No pending login session found` 时将会话标记 `consumed`，并保留认证成果。
 - 前端不应以“重复 pending”作为唯一阻塞根因；应改以 `connector.auth_status` + `config.auth_session` 进行 UI 判定。
 
-### 3.4 Chat shell 降级与恢复
+### 3.4 已挂载来源持久化与回显
+
+- `POST /api/connectors/:id/resources/select` 接收完整 selected database / page 对象，至少包含外部 id、标题、URL、最近编辑时间和 page count。
+- 后端持久化到 `connector_resources` 后，`GET /api/connectors` 与 `GET /api/connectors/:id` 必须把这些记录作为 connector `sources` 返回。
+- 前端 source id 必须使用 Notion 外部 id（`external_id` / `database_id` / `page_id`），不能使用 DB 内部 `connector_resources.id`，否则刷新后选择态无法和 discovery 结果对齐。
+- `MountedSourcesSection`、Settings 资源范围选中态、Chat `ConnectorStatusPanel` 都以同一份 persisted `sources` 为准。
+- `ResourceOptionRow` 与 `MountedSourcesSection` 中的页数是辅助元信息，只在 `pageCount > 0` 时展示；`0 pages`、缺失值或不可用统计不进入 UI。
+- Notion `People` / Workspace user system data source 不进入用户可选资源列表；过滤在后端 discovery 层完成。
+
+### 3.5 Chat shell 降级与恢复
 
 - `ChatViewContent` 若因渲染异常、tab 初始化失败或连接器列表加载中断而不可交互，必须显示可恢复错误态，而不是整页留白。
 - `shell_error` 只表示 Chat shell 级故障，不表示 connector 认证、同步或 snapshot 状态异常。
@@ -184,13 +198,13 @@ Resource Connector (资源连接器)
 - `ConnectorNotionDetailPage` 属于 Settings 视图，不受 Chat shell 降级替换；若详情页自身接口失败，只能在详情页内容区内显示错误卡并保留 `TopNavigation`。
 - Chat shell 要保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；Settings 详情页允许页面级滚动，但来源树 / 连接器工作台内部应保持自身滚动边界。
 
-### 3.5 骨架屏要求（对齐两份最新草图）
+### 3.6 骨架屏要求（对齐两份最新草图）
 
 - 背景：历史列表、连接器 Tab 内容、以及 Notion 详情页都必须使用结构化 skeleton；不得退化为纯文字 loading。
 - 规则：
   1. `HistoryTab` 首次加载（`isLoadingThreads && visibleThreads.length === 0`）时，显示 `HistorySkeletonList`：3~5 条历史条目骨架，包含标题条、摘要条、时间占位。
   2. `ResourceConnectorTab` 首次加载时，显示 `ConnectorToolbar` 的筛选 / 排序 pill 骨架，以及 2~3 张连接器状态面板骨架；在结果返回前不得先渲染“暂无资源连接器”。
-  3. `ConnectorNotionDetailPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`NotionAccountStatusSection` skeleton、`ResourceScopeSection` skeleton。
+  3. `ConnectorNotionDetailPage` 首次加载时，至少同时出现三组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` 信息栏 skeleton、`ResourceScopeSection` skeleton。
   4. 当 `ResourceScopeSection` 已进入已认证态但尚未拉到来源数据时，展示统一资源列表骨架，而不是“读取连接器状态…”之类纯文本。
   5. 骨架只用于首次加载，不覆盖错误态、空态、已关闭态或已有数据后的增量刷新态。
 
@@ -218,10 +232,10 @@ Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连�
 │ Step 2: 搜索并选择资源                                       │
 │                                                             │
 │   [搜索资源: roadmap] [保存资源] [刷新同步]                  │
-│   ☑ Data source · ink-and-memory 代办清单                    │
-│   ☑ Data source · 阅读笔记                                   │
-│   ☐ Page · 产品设计文档                                      │
-│   ☐ Page · 个人日记                                          │
+│   Data source · ink-and-memory 代办清单                   ✓   │
+│   Data source · 阅读笔记 · 7 pages                        ✓   │
+│   Page · 产品设计文档                                          │
+│   Page · 个人日记                                              │
 │   [上一页] 第 1/3 页 [下一页]                                │
 │   保存资源后：已挂载来源立即显示所选 data_source / page        │
 │     ↓                                                       │
@@ -241,7 +255,7 @@ Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连�
 | `/api/connectors/:id/auth/poll` | POST | 轮询认证完成状态（幂等：已认证直接返回 authenticated） |
 | `/api/connectors/:id/databases` | GET | 获取可访问的 database 列表 |
 | `/api/connectors/:id/pages` | GET | 获取可访问的 standalone page 列表 |
-| `/api/connectors/:id/resources/select` | POST | 用户选择要同步的 database 和 standalone page |
+| `/api/connectors/:id/resources/select` | POST | 用户选择要同步的 database 和 standalone page，并持久化完整资源元数据到 `connector_resources` |
 | `/api/connectors/:id/sync` | POST | 触发数据同步 |
 
 ### 4.3 数据模型
@@ -253,16 +267,27 @@ resource_connectors
 ├── platform: "notion"
 ├── auth_status: "pending" | "authenticated" | "expired"
 ├── config: JSON
-│     ├── notion_home: string
-│     ├── selected_databases: string[]  ← 用户选定的 database_id 列表
-│     └── selected_pages: string[]      ← 用户选定的 standalone page_id 列表
+│     └── notion_home: string
 ├── last_synced_at: timestamp
 ├── current_snapshot_version: string | null
 ├── current_source_revision: string | null
 ├── current_sync_cursor: string | null
 ├── created_at: timestamp
 └── updated_at: timestamp
+
+connector_resources
+├── id: UUID
+├── connector_id: FK → resource_connectors.id
+├── resource_type: "notion_database" | "notion_page"
+├── external_id: string       ← Notion database_id / page_id
+├── title: string
+├── metadata: JSON            ← url、page_count、last_edited、properties_schema、raw 等
+├── sync_status: "syncing" | "synced" | "error"
+├── created_at: timestamp
+└── updated_at: timestamp
 ```
+
+`GET /api/connectors` 与 `GET /api/connectors/:id` 必须把 `connector_resources` 归一化为 connector `sources` 返回。前端使用 `external_id` / `database_id` / `page_id` 作为 source id，避免刷新后和 discovery 结果无法对齐。
 
 ---
 
@@ -310,20 +335,21 @@ resource_connectors
     "sync_cursor": "cursor-456",
     "fetched_at": "2026-06-28T14:00:00Z"
   },
-  "selected_databases": [
+  "sources": [
     {
+      "type": "notion_database",
       "database_id": "db-001",
       "title": "ink-and-memory 代办清单",
       "page_count": 32
     },
     {
+      "type": "notion_database",
       "database_id": "db-002",
       "title": "阅读笔记",
       "page_count": 15
-    }
-  ],
-  "selected_standalone_pages": [
+    },
     {
+      "type": "notion_page",
       "page_id": "page-xyz",
       "title": "产品设计文档"
     }
@@ -419,6 +445,12 @@ Notion Device Connector:
 | 获取 Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 2（统一资源选择） |
 | 关键词搜索资源 | `ntn api v1/search --data '{"query":"roadmap","page_size":10}'` | 资源范围搜索 |
 | 获取 Data source 下的 Row Page | `ntn api v1/data_sources/<data_source_id>/query` | 数据同步阶段 |
+
+Discovery 过滤规则：
+
+- `v1/search` 返回的 Workspace People / 用户成员系统 data source 不属于用户可挂载业务资源。
+- 过滤应在后端 `discover_databases` 边界完成，前端只接收可展示资源。
+- 识别条件要求同时具备系统库特征，例如标题为 People 且包含 `people:*` 属性、`Person` people 字段或 `Membership Type` 成员角色字段；不得只按标题 alone 过滤普通用户数据库。
 
 ### 7.2 后端封装
 

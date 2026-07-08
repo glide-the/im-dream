@@ -1,15 +1,15 @@
 // [Input] Connector API client and a callback that opens Settings' resource-link connector section.
-// [Output] Chat `ResourceConnectorTab` content — `ConnectorToolbar` (filter/sort placeholders),
-//          a dashed `ConnectorEmptyState` (三枚资源类型图标 + 标题 + 描述 + CTA), skeleton loading,
+// [Output] Chat `ResourceConnectorTab` content — a soft-surface `ConnectorEmptyState`
+//          (三枚资源类型图标 + 标题 + 描述 + CTA), skeleton loading,
 //          and non-button connector status panels with linked resource previews. Only explicit
 //          management actions navigate to Settings' resource-link section; Chat never owns the
-//          Notion configuration flow.
+//          Notion configuration flow. Toolbar actions live beside `WorkspaceTabBar` in ChatView.
 // [Pos] chat connector landing panel (ResourceConnectorTabPanel) in frontend/src/components/chat
 // [Sync] 2026-07-08: initial Chat-to-Settings connector landing panel for the resource-link migration.
 // [Sync] 2026-07-08: replace text-only loading state with a skeleton-screen placeholder, aligning
 //                    with 《链接器概念的交互设计稿》 Chat 入口页「无资源链接」骨架屏 default state.
 // [Sync] 2026-07-08: rebuild into `ResourceConnectorTabPanel` per docs/prd/notion-session/resource-connector.md
-//                    §3.2 — add `ConnectorToolbar` (filter/sort), dashed三图标 empty state with「选择连接器」
+//                    §3.2 — add `ConnectorToolbar` (filter/sort), 三图标 empty state with「选择连接器」
 //                    CTA.
 // [Sync] 2026-07-08: route connector CTA/card selection back to Settings resource-link management,
 //                    matching 《链接器概念的交互设计稿》 Chat 入口页.
@@ -17,8 +17,23 @@
 //                    resource connector tab renders correctly under dark mode.
 // [Sync] 2026-07-08: convert connector entries from full-card buttons to status panels with linked
 //                    resource previews and an explicit 管理 action.
-import { useCallback, useEffect, useState } from 'react';
-import { listConnectors, type ConnectorSource, type ResourceConnector } from '../../api/resourceConnectorApi';
+// [Sync] 2026-07-09: move scrolling into the linked-resource list and compress connector metadata
+//                    into compact chips so the status panel itself stays stable.
+// [Sync] 2026-07-09: remove the local filter/sort toolbar; ChatView renders active-tab actions
+//                    at the same hierarchy as the WorkspaceTabBar.
+// [Sync] 2026-07-09: render linked resources with scroll pagination so long source lists load
+//                    page-by-page inside the resource list viewport.
+// [Sync] 2026-07-09: listen for Settings resource saves and reload connector summaries so Chat
+//                    status panels reflect newly mounted sources.
+// [Sync] 2026-07-09: reduce Chat connector card styling; ConnectorStatusPanel keeps a dashed
+//                    boundary but removes card fill/shadow while inner rows use soft hierarchy.
+import { useCallback, useEffect, useState, type UIEvent } from 'react';
+import {
+  listConnectors,
+  RESOURCE_CONNECTORS_CHANGED_EVENT,
+  type ConnectorSource,
+  type ResourceConnector,
+} from '../../api/resourceConnectorApi';
 import {
   IconChevronRight,
   IconClock,
@@ -27,12 +42,19 @@ import {
   IconFolder,
   IconGrid,
 } from './Icons';
-import { SkeletonBar, SkeletonList } from './Skeleton';
+import { SkeletonList } from './Skeleton';
 
 interface ConnectorLandingPanelProps {
   /** Opens Settings and focuses the resource-link connector section. */
   onOpenConnector?: (connector: ResourceConnector | null) => void;
 }
+
+const LINKED_SOURCE_PAGE_SIZE = 6;
+const CONNECTOR_SOFT_SURFACE = 'color-mix(in srgb, var(--color-bg-surface) 78%, transparent)';
+const CONNECTOR_ROW_SURFACE = 'color-mix(in srgb, var(--color-bg-hover) 76%, var(--color-bg-surface))';
+const CONNECTOR_CHIP_SURFACE = 'color-mix(in srgb, var(--color-bg-surface) 72%, transparent)';
+const CONNECTOR_ROW_DIVIDER = '0 1px 0 color-mix(in srgb, var(--color-border-paper) 40%, transparent)';
+const CONNECTOR_CONTROL_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent)';
 
 function formatLastInteraction(connector: ResourceConnector | null): string {
   const value = connector?.lastSyncedAt ?? connector?.updatedAt ?? connector?.createdAt;
@@ -120,87 +142,57 @@ function getSourceStatusLabel(status: ConnectorSource['status']): string {
   }
 }
 
-function ConnectorToolbar() {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', flexShrink: 0 }}>
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.35rem',
-          border: '1px solid var(--color-border-paper)',
-          borderRadius: '999px',
-          padding: '0.4rem 0.7rem',
-          background: 'var(--color-bg-surface)',
-          color: 'var(--color-text-secondary)',
-          fontSize: '0.76rem',
-          fontWeight: 600,
-        }}
-      >
-        筛选：全部
-      </span>
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.35rem',
-          border: '1px solid var(--color-border-paper)',
-          borderRadius: '999px',
-          padding: '0.4rem 0.7rem',
-          background: 'var(--color-bg-surface)',
-          color: 'var(--color-text-secondary)',
-          fontSize: '0.76rem',
-          fontWeight: 600,
-        }}
-      >
-        排序：最近交互
-      </span>
-    </div>
-  );
-}
-
-function ConnectorToolbarSkeleton() {
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', flexShrink: 0 }}>
-      <SkeletonBar width="5.4rem" height="1.7rem" style={{ borderRadius: '999px' }} />
-      <SkeletonBar width="6.6rem" height="1.7rem" style={{ borderRadius: '999px' }} />
-    </div>
-  );
-}
-
 function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnector; onOpen: () => void }) {
+  const [visibleSourceCount, setVisibleSourceCount] = useState(LINKED_SOURCE_PAGE_SIZE);
   const healthy = connector.status === 'authenticated'
     || connector.status === 'synced'
     || connector.auth.status === 'authenticated';
   const statusLabel = getConnectorStatusLabel(connector);
   const lastInteraction = formatLastInteraction(connector);
-  const previewSources = connector.sources.slice(0, 3);
-  const remainingSourceCount = Math.max(0, connector.sources.length - previewSources.length);
+  const metaItems = [
+    ['授权', getAuthorizationStatusLabel(connector)],
+    ['同步', getSyncStatusLabel(connector)],
+    ['资源', `${connector.sources.length} 个`],
+  ];
+  const visibleSources = connector.sources.slice(0, visibleSourceCount);
+  const hasMoreSources = visibleSourceCount < connector.sources.length;
+
+  useEffect(() => {
+    setVisibleSourceCount(LINKED_SOURCE_PAGE_SIZE);
+  }, [connector.id, connector.sources.length]);
+
+  const handleSourceListScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    if (!hasMoreSources) return;
+    const target = event.currentTarget;
+    const nearBottom = target.scrollTop + target.clientHeight >= target.scrollHeight - 20;
+    if (!nearBottom) return;
+    setVisibleSourceCount((current) => Math.min(current + LINKED_SOURCE_PAGE_SIZE, connector.sources.length));
+  }, [connector.sources.length, hasMoreSources]);
 
   return (
     <article
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.85rem',
-        border: '1px solid var(--color-border-paper)',
-        borderRadius: '1rem',
-        background: 'var(--color-bg-surface-solid)',
-        padding: '0.85rem 0.9rem',
-        boxShadow: '0 10px 24px var(--color-shadow-soft)',
+        gap: '0.65rem',
+        border: '1px dashed color-mix(in srgb, var(--color-border-paper) 72%, transparent)',
+        borderRadius: '0.65rem',
+        background: 'transparent',
+        padding: '0.68rem 0.72rem',
+        boxShadow: 'none',
         textAlign: 'left',
         width: '100%',
         boxSizing: 'border-box',
       }}
     >
-      <div style={{ display: 'grid', gridTemplateColumns: '2.4rem minmax(0, 1fr) auto', alignItems: 'start', gap: '0.85rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '2.25rem minmax(0, 1fr) auto', alignItems: 'start', gap: '0.7rem' }}>
         <div
           style={{
-            width: '2.4rem',
-            height: '2.4rem',
-            borderRadius: '0.85rem',
-            border: '1px solid var(--color-border-paper)',
-            background: 'var(--color-bg-hover)',
+            width: '2.25rem',
+            height: '2.25rem',
+            borderRadius: '0.75rem',
+            border: 'none',
+            background: CONNECTOR_ROW_SURFACE,
             color: 'var(--color-text-primary)',
             display: 'grid',
             placeItems: 'center',
@@ -211,7 +203,7 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
         </div>
 
         <div style={{ minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.42rem', flexWrap: 'wrap' }}>
             <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
               {getPlatformLabel(connector)}
             </h3>
@@ -219,13 +211,13 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.32rem',
-                padding: '0.28rem 0.55rem',
+                gap: '0.3rem',
+                padding: '0.22rem 0.48rem',
                 borderRadius: '999px',
-                border: `1px solid ${healthy ? 'color-mix(in srgb, var(--color-state-success) 30%, var(--color-border-paper))' : 'var(--color-border-paper)'}`,
+                border: 'none',
                 background: healthy ? 'color-mix(in srgb, var(--color-state-success) 16%, var(--color-bg-paper))' : 'var(--color-bg-hover)',
                 color: healthy ? 'var(--color-state-success)' : 'var(--color-text-secondary)',
-                fontSize: '0.72rem',
+                fontSize: '0.68rem',
                 fontWeight: 700,
               }}
             >
@@ -241,12 +233,36 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
               {statusLabel}
             </span>
           </div>
-          <p style={{ margin: '0.32rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
+          <p style={{ margin: '0.24rem 0 0', fontSize: '0.76rem', lineHeight: 1.4, color: 'var(--color-text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {connector.name}
           </p>
-          <div style={{ marginTop: '0.4rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
-            <IconClock style={{ width: '0.82rem', height: '0.82rem' }} />
-            最近交互 {lastInteraction}
+          <div style={{ marginTop: '0.36rem', display: 'flex', alignItems: 'center', gap: '0.36rem', flexWrap: 'wrap' }}>
+            {metaItems.map(([label, value]) => (
+              <span
+                key={label}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.24rem',
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  border: 'none',
+                  borderRadius: '999px',
+                  background: CONNECTOR_CHIP_SURFACE,
+                  padding: '0.2rem 0.44rem',
+                  color: 'var(--color-text-secondary)',
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                }}
+              >
+                <span style={{ color: 'var(--color-text-muted)', fontWeight: 600 }}>{label}</span>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+              </span>
+            ))}
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.28rem', color: 'var(--color-text-muted)', fontSize: '0.7rem', minWidth: 0 }}>
+              <IconClock style={{ width: '0.76rem', height: '0.76rem', flexShrink: 0 }} />
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>最近交互 {lastInteraction}</span>
+            </span>
           </div>
         </div>
 
@@ -258,13 +274,13 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
             display: 'inline-flex',
             alignItems: 'center',
             gap: '0.35rem',
-            border: '1px solid var(--color-border-paper)',
+            border: CONNECTOR_CONTROL_BORDER,
             borderRadius: '999px',
-            padding: '0.42rem 0.68rem',
-            background: 'var(--color-bg-surface)',
+            padding: '0.36rem 0.58rem',
+            background: CONNECTOR_CHIP_SURFACE,
             color: 'var(--color-text-primary)',
             cursor: 'pointer',
-            fontSize: '0.76rem',
+            fontSize: '0.72rem',
             fontWeight: 700,
             whiteSpace: 'nowrap',
           }}
@@ -274,50 +290,54 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.55rem' }}>
-        {[
-          ['授权状态', getAuthorizationStatusLabel(connector)],
-          ['同步状态', getSyncStatusLabel(connector)],
-          ['已链接资源', `${connector.sources.length} 个`],
-        ].map(([label, value]) => (
-          <div key={label} style={{ border: '1px solid var(--color-border-paper)', borderRadius: '0.75rem', background: 'var(--color-bg-surface)', padding: '0.55rem 0.65rem', minWidth: 0 }}>
-            <div style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>{label}</div>
-            <div style={{ marginTop: '0.2rem', fontSize: '0.82rem', color: 'var(--color-text-primary)', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'grid', gap: '0.45rem' }}>
-        <div style={{ fontSize: '0.74rem', color: 'var(--color-text-muted)', fontWeight: 700 }}>已链接资源</div>
-        {previewSources.length > 0 ? previewSources.map((source) => {
-          const SourceIcon = source.type === 'notion_page' ? IconFile : IconDatabase;
-          return (
-            <div key={source.id} style={{ display: 'grid', gridTemplateColumns: '1.55rem minmax(0, 1fr) auto', alignItems: 'center', gap: '0.55rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.7rem', background: 'var(--color-bg-hover)', padding: '0.52rem 0.6rem' }}>
-              <span style={{ width: '1.55rem', height: '1.55rem', borderRadius: '0.5rem', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)', background: 'var(--color-bg-surface)' }}>
-                <SourceIcon style={{ width: '0.82rem', height: '0.82rem' }} />
-              </span>
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.8rem', color: 'var(--color-text-primary)', fontWeight: 650 }}>{source.title}</span>
-                <span style={{ display: 'block', marginTop: '0.12rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.7rem', color: 'var(--color-text-muted)' }}>
-                  {getSourceTypeLabel(source.type)} · {getSourceStatusLabel(source.status)}
-                  {typeof source.pageCount === 'number' ? ` · ${source.pageCount} pages` : ''}
+      <div style={{ display: 'grid', gap: '0.38rem', minHeight: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem' }}>
+          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', fontWeight: 700 }}>已链接资源</div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>{connector.sources.length} 个</div>
+        </div>
+        <div
+          onScroll={handleSourceListScroll}
+          style={{
+            display: 'grid',
+            gap: '0.36rem',
+            maxHeight: '11rem',
+            overflowY: connector.sources.length > 0 ? 'auto' : 'visible',
+            paddingRight: connector.sources.length > 3 ? '0.18rem' : 0,
+            scrollbarGutter: connector.sources.length > 3 ? 'stable' : 'auto',
+          }}
+        >
+          {connector.sources.length > 0 ? visibleSources.map((source) => {
+            const SourceIcon = source.type === 'notion_page' ? IconFile : IconDatabase;
+            return (
+              <div key={source.id} style={{ display: 'grid', gridTemplateColumns: '1.42rem minmax(0, 1fr) auto', alignItems: 'center', gap: '0.5rem', border: 'none', borderRadius: '0.62rem', background: CONNECTOR_ROW_SURFACE, padding: '0.42rem 0.5rem', boxShadow: CONNECTOR_ROW_DIVIDER }}>
+                <span style={{ width: '1.42rem', height: '1.42rem', borderRadius: '0.44rem', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)', background: CONNECTOR_CHIP_SURFACE }}>
+                  <SourceIcon style={{ width: '0.76rem', height: '0.76rem' }} />
                 </span>
-              </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                {formatLastInteraction({ ...connector, lastSyncedAt: source.syncedAt ?? source.updatedAt })}
-              </span>
+                <span style={{ minWidth: 0 }}>
+                  <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.76rem', color: 'var(--color-text-primary)', fontWeight: 650 }}>{source.title}</span>
+                  <span style={{ display: 'block', marginTop: '0.08rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.66rem', color: 'var(--color-text-muted)' }}>
+                    {getSourceTypeLabel(source.type)} · {getSourceStatusLabel(source.status)}
+                    {typeof source.pageCount === 'number' ? ` · ${source.pageCount} pages` : ''}
+                  </span>
+                </span>
+                <span style={{ fontSize: '0.66rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
+                  {formatLastInteraction({ ...connector, lastSyncedAt: source.syncedAt ?? source.updatedAt })}
+                </span>
+              </div>
+            );
+          }) : (
+            <div style={{ border: 'none', borderRadius: '0.68rem', background: CONNECTOR_ROW_SURFACE, padding: '0.55rem 0.62rem', color: 'var(--color-text-muted)', fontSize: '0.74rem' }}>
+              暂无已链接资源
             </div>
-          );
-        }) : (
-          <div style={{ border: '1px dashed var(--color-border-paper)', borderRadius: '0.75rem', padding: '0.62rem 0.7rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>
-            暂无已链接资源
-          </div>
-        )}
-        {remainingSourceCount > 0 ? (
-          <div style={{ color: 'var(--color-text-muted)', fontSize: '0.72rem', paddingLeft: '0.1rem' }}>
-            另有 {remainingSourceCount} 个资源，可进入管理查看
-          </div>
-        ) : null}
+          )}
+          {connector.sources.length > 0 ? (
+            <div style={{ padding: '0.2rem 0.1rem 0.05rem', color: 'var(--color-text-muted)', fontSize: '0.66rem', textAlign: 'center' }}>
+              {hasMoreSources
+                ? `已显示 ${visibleSources.length} / ${connector.sources.length}，继续向下滚动加载更多`
+                : `已显示全部 ${connector.sources.length} 个资源`}
+            </div>
+          ) : null}
+        </div>
       </div>
     </article>
   );
@@ -327,21 +347,22 @@ function ConnectorEmptyState({ onSelectConnector }: { onSelectConnector: () => v
   return (
     <div
       style={{
-        border: '1px dashed var(--color-border-paper)',
+        border: 'none',
         borderRadius: '1rem',
-        background: 'var(--color-bg-surface)',
+        background: CONNECTOR_SOFT_SURFACE,
         padding: '1.6rem 1.2rem',
         textAlign: 'center',
+        boxShadow: '0 10px 24px color-mix(in srgb, var(--color-shadow-soft) 68%, transparent)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.6rem' }}>
-        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: 'none', background: CONNECTOR_ROW_SURFACE, display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
           <IconDatabase style={{ width: '1rem', height: '1rem' }} />
         </span>
-        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: 'none', background: CONNECTOR_ROW_SURFACE, display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
           <IconFolder style={{ width: '1rem', height: '1rem' }} />
         </span>
-        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-hover)', display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
+        <span style={{ width: '2.2rem', height: '2.2rem', borderRadius: '0.7rem', border: 'none', background: CONNECTOR_ROW_SURFACE, display: 'grid', placeItems: 'center', color: 'var(--color-text-secondary)' }}>
           <IconGrid style={{ width: '1rem', height: '1rem' }} />
         </span>
       </div>
@@ -380,6 +401,7 @@ export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLand
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -407,6 +429,16 @@ export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLand
     return () => {
       active = false;
     };
+  }, [reloadNonce]);
+
+  useEffect(() => {
+    const handleConnectorsChanged = () => {
+      setReloadNonce((value) => value + 1);
+    };
+    window.addEventListener(RESOURCE_CONNECTORS_CHANGED_EVENT, handleConnectorsChanged);
+    return () => {
+      window.removeEventListener(RESOURCE_CONNECTORS_CHANGED_EVENT, handleConnectorsChanged);
+    };
   }, []);
 
   const handleSelectConnector = useCallback((connector: ResourceConnector | null) => {
@@ -424,16 +456,14 @@ export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLand
         display: 'flex',
         flexDirection: 'column',
         gap: '0.75rem',
-        border: '1px solid var(--color-border-paper)',
+        border: 'none',
         borderRadius: '1.15rem',
-        background: 'var(--color-bg-surface)',
-        boxShadow: '0 16px 36px var(--color-shadow-soft)',
+        background: 'transparent',
+        boxShadow: 'none',
         overflow: 'hidden',
-        padding: '0.95rem 1rem',
+        padding: '0.2rem 0 0',
       }}
     >
-      {loading ? <ConnectorToolbarSkeleton /> : <ConnectorToolbar />}
-
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'grid', gap: '0.8rem' }}>
         {loading ? <SkeletonList rows={2} /> : null}
 

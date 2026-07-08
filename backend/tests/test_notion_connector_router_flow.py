@@ -4,6 +4,8 @@
 # [Pos] test node in backend/tests
 # [Sync] 2026-07-04: route-level business flow coverage for Notion connector
 #                    create/auth/discovery/selection/sync.
+# [Sync] 2026-07-08: assert selected sources hydrate through connector responses so
+#                    Settings refresh and Chat linked-resource summaries stay in sync.
 
 from __future__ import annotations
 
@@ -322,6 +324,10 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.assertEqual(final_connector["current_source_revision"], self._source_revision)
         self.assertEqual(final_connector["selected_databases"], ["db-team"])
         self.assertEqual(final_connector["selected_pages"], ["page-team"])
+        self.assertEqual(
+            {source["external_id"] for source in final_connector["sources"]},
+            {"db-team", "page-team"},
+        )
         self.assertEqual(len(self.snapshot_calls), 2)
 
     def test_connector_auth_poll_no_pending_session_does_not_regress_auth(self):

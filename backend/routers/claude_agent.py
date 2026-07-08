@@ -23,6 +23,8 @@
 #                    the current Agent turn without deleting the chat thread.
 # [Sync] 2026-06-27: /api/claude-agent/threads accepts Chat history search
 #                    params backed by plugin-style fuzzy/vector retrievers.
+# [Sync] 2026-07-09: default /api/claude-agent/threads lists accept limit/offset
+#                    for frontend scroll pagination without loading all threads.
 
 import base64
 import json
@@ -356,6 +358,7 @@ async def claude_agent_list_threads(
     vector_query: Optional[str] = Query(default=None),
     min_score: Optional[float] = Query(default=None, ge=0, le=1),
     limit: Optional[int] = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
     current_user: dict = Depends(get_current_user),
 ):
     """Return chat threads, optionally searched by title and message content.
@@ -372,7 +375,7 @@ async def claude_agent_list_threads(
         retrieval_mode=retrieval_mode,
         vector_query=vector_query_obj,
     ):
-        threads = database.list_chat_threads(user_id)
+        threads = database.list_chat_threads(user_id, limit=limit, offset=offset)
         return {"threads": threads}
 
     config = build_chat_thread_search_config(

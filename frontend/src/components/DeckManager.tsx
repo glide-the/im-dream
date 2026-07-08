@@ -3,6 +3,10 @@
 // [Pos] deck-manager-view node in frontend/src/components
 // [Sync] 2026-07-08: replace light-only Decks cards, loading/error states, and publish modal colors
 //                    with semantic theme tokens so the Decks surface adapts to dark mode.
+// [Sync] 2026-07-09: replace the high-saturation create-deck gradient with the same theme-inverted
+//                    paper/ink primary button treatment used by Settings actions.
+// [Sync] 2026-07-09: align the Decks page with the light paper / dashed boundary color system;
+//                    deck items now use flat paper rows, weak boundaries, and small accent marks.
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
@@ -32,6 +36,12 @@ interface Props {
 function getErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback;
 }
+
+const DECK_PAGE_BORDER = '1px dashed color-mix(in srgb, var(--color-border-paper) 62%, transparent)';
+const DECK_CONTROL_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent)';
+const DECK_ITEM_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper) 36%, transparent)';
+const DECK_LIST_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 36%, transparent)';
+const DECK_ITEM_HOVER_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 58%, var(--color-bg-surface))';
 
 export default function DeckManager({ onUpdate, onOpenChat }: Props) {
   const { t } = useTranslation();
@@ -348,7 +358,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
         background: 'var(--color-bg-app)',
         gap: 16
       }}>
-        <div style={{ fontSize: 18, color: 'var(--color-state-error)' }}>❌ {error}</div>
+        <div style={{ fontSize: 18, color: 'var(--color-state-error)' }}>{error}</div>
         <button
           onClick={() => loadDecks()}
           style={{
@@ -356,7 +366,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
             background: 'var(--color-text-primary)',
             color: 'var(--color-text-on-action)',
             border: 'none',
-            borderRadius: 6,
+            borderRadius: '999px',
             cursor: 'pointer'
           }}
         >
@@ -372,11 +382,21 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: 'var(--color-bg-app)', overflow: 'hidden' }}>
       {/* Scrollable Content with embedded header */}
       <div ref={scrollContainerRef} style={{ flex: 1, overflowY: 'auto', padding: 'clamp(16px, 4vw, 32px)' }}>
-        <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
+        <div style={{
+          maxWidth: 1200,
+          margin: '0 auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 24,
+          border: DECK_PAGE_BORDER,
+          borderRadius: '1.05rem',
+          padding: 'clamp(14px, 3vw, 24px)',
+          background: 'transparent',
+          boxShadow: 'none'
+        }}>
           {/* Embedded Header */}
           <div style={{
-            padding: '0 0 24px 0',
-            borderBottom: '2px solid var(--color-border-paper)'
+            padding: '0 0 4px 0'
           }}>
             <h1 style={{
               margin: 0,
@@ -384,7 +404,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
               fontWeight: 700,
               color: 'var(--color-text-primary)',
               fontFamily: 'Georgia, serif',
-              letterSpacing: '-0.5px'
+              letterSpacing: 0
             }}>
               {t('deck.heading')}
             </h1>
@@ -404,33 +424,33 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
             style={{
               padding: '14px 28px',
               marginBottom: '8px',
-              background: 'linear-gradient(135deg, var(--color-state-warning) 0%, var(--color-action-link) 100%)',
-              color: 'var(--color-text-on-action)',
-              border: 'none',
-              borderRadius: '12px',
+              background: 'var(--color-text-primary)',
+              color: 'var(--color-bg-app)',
+              border: '1px solid color-mix(in srgb, var(--color-text-primary) 22%, var(--color-border-paper))',
+              borderRadius: '999px',
               cursor: creatingDeck ? 'not-allowed' : 'pointer',
               fontSize: '15px',
               fontWeight: '600',
               opacity: creatingDeck ? 0.6 : 1,
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
               alignSelf: 'flex-start',
-              boxShadow: '0 4px 12px var(--color-shadow-soft)',
-              letterSpacing: '0.3px'
+              boxShadow: 'none',
+              letterSpacing: 0
             }}
             onMouseEnter={(e) => {
               if (!creatingDeck) {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 20px var(--color-shadow-medium)';
+                e.currentTarget.style.transform = 'translateY(-1px)';
+                e.currentTarget.style.boxShadow = 'none';
               }
             }}
             onMouseLeave={(e) => {
               if (!creatingDeck) {
                 e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 12px var(--color-shadow-soft)';
+                e.currentTarget.style.boxShadow = 'none';
               }
             }}
           >
-            {creatingDeck ? t('deck.actions.creating') : `✨ ${t('deck.actions.create')}`}
+            {creatingDeck ? t('deck.actions.creating') : t('deck.actions.create')}
           </button>
 
           {/* My Decks Section Header */}
@@ -461,27 +481,28 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                   key={deck.id}
                   onClick={() => toggleDeck(deck.id)}
                   style={{
-                    background: 'var(--color-bg-surface-solid)',
-                    border: `2px solid ${isSystem ? 'var(--color-border-paper)' : colorHex}`,
-                    borderRadius: 10,
-                    boxShadow: '0 3px 10px var(--color-shadow-soft)',
-                    padding: 12,
+                    background: DECK_LIST_SURFACE,
+                    border: DECK_ITEM_BORDER,
+                    borderLeft: `3px solid ${isSystem ? 'color-mix(in srgb, var(--color-border-paper) 82%, transparent)' : colorHex}`,
+                    borderRadius: '0.75rem',
+                    boxShadow: 'none',
+                    padding: '0.82rem 0.9rem',
                     display: 'flex',
                     flexDirection: 'column',
                     gap: 10,
                     cursor: 'pointer',
-                    transition: 'transform 0.15s, box-shadow 0.15s',
+                    transition: 'transform 0.15s, background 0.15s',
                     flex: '1 1 320px',
                     minWidth: 0,
                     maxWidth: '100%'
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.transform = 'translateY(-1px)';
-                    e.currentTarget.style.boxShadow = '0 6px 14px var(--color-shadow-medium)';
+                    e.currentTarget.style.background = DECK_ITEM_HOVER_SURFACE;
                   }}
                   onMouseLeave={(e) => {
                     e.currentTarget.style.transform = 'translateY(0)';
-                    e.currentTarget.style.boxShadow = '0 3px 10px var(--color-shadow-soft)';
+                    e.currentTarget.style.background = DECK_LIST_SURFACE;
                   }}
                 >
                   <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -500,16 +521,17 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         style={{
                           width: 46,
                           height: 46,
-                          borderRadius: 23,
-                          background: `linear-gradient(135deg, ${colorHex} 0%, ${colorHex}cc 100%)`,
+                          borderRadius: '0.72rem',
+                          border: `1px solid color-mix(in srgb, ${colorHex} 24%, var(--color-border-paper))`,
+                          background: `color-mix(in srgb, ${colorHex} 12%, var(--color-bg-paper))`,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          color: 'var(--color-text-on-action)',
+                          color: colorHex,
                           flexShrink: 0,
-                          boxShadow: `0 3px 8px ${colorHex}40`,
+                          boxShadow: 'none',
                           cursor: isSystem ? 'default' : 'pointer',
-                          transition: 'transform 0.2s, box-shadow 0.2s'
+                          transition: 'transform 0.2s, background 0.2s'
                         }}
                       >
                         <Icon size={22} />
@@ -549,7 +571,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         width: 42,
                         height: 20,
                         borderRadius: 10,
-                        background: deck.enabled ? colorHex : 'var(--color-disabled-bg)',
+                        background: deck.enabled
+                          ? `color-mix(in srgb, ${colorHex} 38%, var(--color-bg-surface))`
+                          : 'color-mix(in srgb, var(--color-border-paper) 32%, transparent)',
+                        border: DECK_CONTROL_BORDER,
                         position: 'relative',
                         cursor: 'pointer',
                         transition: 'background 0.3s',
@@ -564,9 +589,9 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         width: 16,
                         height: 16,
                         borderRadius: 8,
-                        background: 'var(--color-text-on-action)',
+                        background: 'var(--color-bg-paper)',
                         transition: 'left 0.3s',
-                        boxShadow: '0 2px 4px var(--color-shadow-medium)'
+                        boxShadow: 'none'
                       }} />
                     </div>
                   </div>
@@ -577,10 +602,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         onClick={() => handleForkDeck(deck.id)}
                         style={{
                           padding: '6px 10px',
-                          background: colorHex,
-                          color: 'var(--color-text-on-action)',
-                          border: 'none',
-                          borderRadius: 6,
+                          background: 'transparent',
+                          color: 'var(--color-text-primary)',
+                          border: DECK_CONTROL_BORDER,
+                          borderRadius: '999px',
                           cursor: 'pointer',
                           fontSize: 12,
                           fontWeight: 600
@@ -595,10 +620,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                             onClick={() => handleSyncDeck(deck.id)}
                             style={{
                               padding: '6px 10px',
-                              background: 'var(--color-action-link)',
-                              color: 'var(--color-text-on-action)',
-                              border: 'none',
-                              borderRadius: 6,
+                              background: 'transparent',
+                              color: 'var(--color-text-primary)',
+                              border: DECK_CONTROL_BORDER,
+                              borderRadius: '999px',
                               cursor: 'pointer',
                               fontSize: 12,
                               fontWeight: 600
@@ -611,10 +636,12 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                           onClick={() => handlePublishClick(deck)}
                           style={{
                             padding: '6px 10px',
-                            background: deck.published ? 'var(--color-state-warning)' : 'var(--color-voice-purple)',
-                            color: 'var(--color-text-on-action)',
-                            border: 'none',
-                            borderRadius: 6,
+                            background: deck.published
+                              ? 'color-mix(in srgb, var(--color-state-warning) 14%, var(--color-bg-surface))'
+                              : 'transparent',
+                            color: deck.published ? 'var(--color-state-warning)' : 'var(--color-text-primary)',
+                            border: DECK_CONTROL_BORDER,
+                            borderRadius: '999px',
                             cursor: 'pointer',
                             fontSize: 12,
                             fontWeight: 600
@@ -626,10 +653,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                           onClick={() => handleDeleteDeck(deck.id)}
                           style={{
                             padding: '6px 10px',
-                            background: 'var(--color-state-danger)',
-                            color: 'var(--color-text-on-action)',
-                            border: 'none',
-                            borderRadius: 6,
+                            background: 'transparent',
+                            color: 'var(--color-state-danger)',
+                            border: '1px solid color-mix(in srgb, var(--color-state-danger) 38%, var(--color-border-paper))',
+                            borderRadius: '999px',
                             cursor: 'pointer',
                             fontSize: 12,
                             fontWeight: 600
@@ -646,7 +673,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
           </div>
 
           {/* @@@ Community Decks Section */}
-          <hr style={{ margin: '32px 0', border: '1px solid var(--color-border-paper)' }} />
+          <hr style={{ margin: '1rem 0 0', border: 0, borderTop: DECK_ITEM_BORDER }} />
 
           <h3 style={{
             margin: '16px 0',
@@ -663,7 +690,9 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
               fontSize: '14px',
               fontStyle: 'italic',
               textAlign: 'center',
-              padding: '32px 0'
+              padding: '1.2rem',
+              borderRadius: '0.75rem',
+              background: DECK_LIST_SURFACE
             }}>
               {t('deck.communityEmpty')}
             </p>
@@ -682,12 +711,13 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                   <div
                     key={deck.id}
                     style={{
-                      background: 'var(--color-bg-surface-solid)',
-                      border: `2px solid ${colorHex}`,
-                      borderRadius: 10,
-                      padding: 12,
-                      boxShadow: '0 3px 10px var(--color-shadow-soft)',
-                      transition: 'transform 0.15s, box-shadow 0.15s',
+                      background: DECK_LIST_SURFACE,
+                      border: DECK_ITEM_BORDER,
+                      borderLeft: `3px solid ${colorHex}`,
+                      borderRadius: '0.75rem',
+                      padding: '0.82rem 0.9rem',
+                      boxShadow: 'none',
+                      transition: 'transform 0.15s, background 0.15s',
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 10,
@@ -697,25 +727,26 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                     }}
                     onMouseEnter={(e) => {
                       (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-1px)';
-                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 6px 14px var(--color-shadow-medium)';
+                      (e.currentTarget as HTMLDivElement).style.background = DECK_ITEM_HOVER_SURFACE;
                     }}
                     onMouseLeave={(e) => {
                       (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)';
-                      (e.currentTarget as HTMLDivElement).style.boxShadow = '0 3px 10px var(--color-shadow-soft)';
+                      (e.currentTarget as HTMLDivElement).style.background = DECK_LIST_SURFACE;
                     }}
                   >
                     <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
                       <div style={{
                         width: 50,
                         height: 50,
-                        borderRadius: 25,
-                        background: `linear-gradient(135deg, ${colorHex} 0%, ${colorHex}cc 100%)`,
+                        borderRadius: '0.72rem',
+                        border: `1px solid color-mix(in srgb, ${colorHex} 24%, var(--color-border-paper))`,
+                        background: `color-mix(in srgb, ${colorHex} 12%, var(--color-bg-paper))`,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        color: 'var(--color-text-on-action)',
+                        color: colorHex,
                         flexShrink: 0,
-                        boxShadow: `0 3px 8px ${colorHex}40`
+                        boxShadow: 'none'
                       }}>
                         <Icon size={24} />
                       </div>
@@ -760,10 +791,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                         onClick={() => handleInstallDeck(deck.id)}
                         style={{
                           padding: '6px 12px',
-                          background: 'var(--color-state-success)',
-                          color: 'var(--color-text-on-action)',
+                          background: 'var(--color-text-primary)',
+                          color: 'var(--color-bg-app)',
                           border: 'none',
-                          borderRadius: 6,
+                          borderRadius: '999px',
                           fontSize: 12,
                           fontWeight: 600,
                           cursor: 'pointer',
@@ -820,11 +851,11 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
           <div
             className="modal-content"
             style={{
-              background: 'var(--color-bg-paper)',
+              background: 'var(--color-bg-surface-solid)',
               color: 'var(--color-text-primary)',
-              border: '1px solid var(--color-border-paper)',
+              border: DECK_CONTROL_BORDER,
               padding: '24px',
-              borderRadius: '8px',
+              borderRadius: '0.9rem',
               maxWidth: '400px',
               boxShadow: '0 4px 12px var(--color-shadow-medium)'
             }}
@@ -847,10 +878,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                 onClick={() => setPublishWarning(null)}
                 style={{
                   padding: '8px 16px',
-                  background: 'var(--color-bg-surface)',
+                  background: 'transparent',
                   color: 'var(--color-text-primary)',
-                  border: '1px solid var(--color-border-paper)',
-                  borderRadius: '4px',
+                  border: DECK_CONTROL_BORDER,
+                  borderRadius: '999px',
                   cursor: 'pointer',
                   fontSize: '14px',
                   fontWeight: 500
@@ -862,10 +893,10 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
                 onClick={() => handlePublishToggle(publishWarning)}
                 style={{
                   padding: '8px 16px',
-                  background: 'var(--color-voice-purple)',
-                  color: 'var(--color-text-on-action)',
+                  background: 'var(--color-text-primary)',
+                  color: 'var(--color-bg-app)',
                   border: 'none',
-                  borderRadius: '4px',
+                  borderRadius: '999px',
                   cursor: 'pointer',
                   fontSize: '14px',
                   fontWeight: 500

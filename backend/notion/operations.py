@@ -5,6 +5,8 @@
 #                    page retrieval, and database query support.
 # [Sync] 2026-07-05: normalize database search filter value to `data_source` to match
 #                    Notion API schema while preserving high-level `database` input.
+# [Sync] 2026-07-08: filter Notion workspace People system data sources from user-selectable
+#                    resource discovery results.
 
 """Notion read-only operations via the `ntn` CLI."""
 from __future__ import annotations
@@ -146,6 +148,42 @@ def normalize_database_item(item: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _is_people_system_database(item: Mapping[str, Any]) -> bool:
+    raw = _mapping(item)
+    title = _extract_title(raw).strip().lower()
+    properties = raw.get("properties")
+    if not isinstance(properties, Mapping):
+        properties = raw.get("properties_schema")
+    if not isinstance(properties, Mapping):
+        return False
+
+    person_field = False
+    membership_field = False
+    people_property_ids = 0
+    for prop in properties.values():
+        if not isinstance(prop, Mapping):
+            continue
+        prop_id = str(prop.get("id") or "").lower()
+        prop_name = str(prop.get("name") or "").strip().lower()
+        prop_type = str(prop.get("type") or "").strip().lower()
+        if prop_id.startswith("people") or prop_id.startswith("people%3a"):
+            people_property_ids += 1
+        if prop_name == "person" and prop_type == "people":
+            person_field = True
+        if prop_name == "membership type" and prop_type == "select":
+            select = prop.get("select")
+            options = select.get("options") if isinstance(select, Mapping) else []
+            option_names = {
+                str(option.get("name") or "").strip().lower()
+                for option in options
+                if isinstance(option, Mapping)
+            }
+            if {"workspace owner", "membership admin", "member"} & option_names:
+                membership_field = True
+
+    return title == "people" and (person_field or membership_field or people_property_ids >= 2)
+
+
 def normalize_page_item(item: Mapping[str, Any]) -> dict[str, Any]:
     """Return a compact page discovery record."""
 
@@ -193,7 +231,11 @@ class NotionOperationClient:
         result = await self.search(
             SearchFilter(object_type="database", query=query, page_size=page_size)
         )
-        return [normalize_database_item(item) for item in result.results]
+        return [
+            normalize_database_item(item)
+            for item in result.results
+            if not _is_people_system_database(item)
+        ]
 
     async def discover_pages(self, query: Optional[str] = None, page_size: int = 100) -> list[dict[str, Any]]:
         result = await self.search(

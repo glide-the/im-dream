@@ -460,7 +460,8 @@ Delete a session.
 ### GET `/api/claude-agent/threads`
 
 List Chat threads for the current user. Without search params, returns newest
-threads first. With `query`, searches thread titles and persisted conversation
+threads first and supports `limit`/`offset` pagination for scroll-loaded
+history panes. With `query`, searches thread titles and persisted conversation
 text through the configured Chat history retriever.
 
 **Headers:** `Authorization: Bearer <token>`
@@ -472,6 +473,7 @@ text through the configured Chat history retriever.
 - `vector_query` (optional) - JSON object string; reserved interface only
 - `min_score` (optional) - fuzzy threshold, `0` to `1`
 - `limit` (optional) - max result count
+- `offset` (optional, default `0`) - default-list page offset; ignored by search retrieval
 
 **Response:**
 ```json

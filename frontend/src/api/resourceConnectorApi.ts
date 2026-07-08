@@ -15,6 +15,10 @@
 //                    follows the same client shape as backend and localStorage responses.
 // [Sync] 2026-07-08: local fallback create now replaces same-platform connectors so the frontend preserves
 //                    the single-account-per-platform business rule while backend enforcement lands separately.
+// [Sync] 2026-07-08: persist selected resource metadata by posting full selected Notion resource objects and
+//                    normalize backend connector_resources with external Notion ids for refresh-safe selection.
+// [Sync] 2026-07-09: expose a browser-local connector change event so Settings saves can refresh
+//                    Chat connector status panels without adding another backend endpoint.
 /**
  * Resource connector API helpers.
  *
@@ -29,6 +33,18 @@ import { STORAGE_KEYS } from '../constants/storageKeys';
 import { apiUrl } from '../lib/apiBase';
 
 export type ConnectorPlatform = 'notion';
+
+export const RESOURCE_CONNECTORS_CHANGED_EVENT = 'ink-and-memory:resource-connectors-changed';
+
+export interface ResourceConnectorsChangedDetail {
+  connectorId?: string;
+  reason: 'resources-selected' | 'sources-refreshed' | 'auth-updated' | 'connector-updated';
+}
+
+export function notifyResourceConnectorsChanged(detail: ResourceConnectorsChangedDetail): void {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent<ResourceConnectorsChangedDetail>(RESOURCE_CONNECTORS_CHANGED_EVENT, { detail }));
+}
 
 export type ConnectorStatus =
   | 'draft'
@@ -84,11 +100,17 @@ export interface NotionResourceOption {
   subtitle?: string;
   pageCount?: number;
   selected?: boolean;
+  url?: string;
+  lastEdited?: string;
+  propertiesSchema?: Record<string, unknown>;
+  raw?: unknown;
 }
 
 export interface ConnectorResourceSelection {
   databaseIds: string[];
   pageIds: string[];
+  databaseOptions?: NotionResourceOption[];
+  pageOptions?: NotionResourceOption[];
 }
 
 export interface CreateConnectorInput {
@@ -296,13 +318,16 @@ function normalizeSourceStatus(value?: string | null): ConnectorSourceStatus {
 
 function normalizeConnectorSource(raw: unknown): ConnectorSource {
   const record = asRecord(raw);
+  const metadata = asRecord(record.metadata);
   const updatedAt = typeof record.updated_at === 'string'
     ? record.updated_at
     : typeof record.updatedAt === 'string'
       ? record.updatedAt
+      : typeof metadata.last_edited === 'string'
+        ? metadata.last_edited
       : nowIso();
   return {
-    id: String(record.id ?? record.source_id ?? record.resource_id ?? createId('source')),
+    id: String(record.external_id ?? record.database_id ?? record.page_id ?? record.source_id ?? record.resource_id ?? record.id ?? createId('source')),
     title: String(record.title ?? record.name ?? record.label ?? 'Untitled source'),
     type: normalizeSourceType(asString(record.type ?? record.resource_type ?? record.kind)),
     status: normalizeSourceStatus(asString(record.status ?? record.sync_status)),
@@ -315,9 +340,11 @@ function normalizeConnectorSource(raw: unknown): ConnectorSource {
       ? record.page_count
       : typeof record.pageCount === 'number'
         ? record.pageCount
-        : undefined,
+        : typeof metadata.page_count === 'number'
+          ? metadata.page_count
+          : undefined,
     description: asString(record.description) ?? asString(record.subtitle) ?? asString(record.summary),
-    url: asString(record.url) ?? asString(record.source_url) ?? asString(record.sourceUrl),
+    url: asString(record.url) ?? asString(record.source_url) ?? asString(record.sourceUrl) ?? asString(metadata.url),
   };
 }
 
@@ -698,6 +725,7 @@ export async function listConnectorDatabases(connectorId: string): Promise<Notio
       return items.map((raw): NotionResourceOption => {
         const record = raw as Record<string, unknown>;
         const pageCountValue = record.page_count ?? record.pageCount;
+        const propertiesSchema = asRecord(record.properties_schema ?? record.propertiesSchema);
 
         return {
           id: String(record.id ?? record.database_id ?? createId('database')),
@@ -708,6 +736,15 @@ export async function listConnectorDatabases(connectorId: string): Promise<Notio
               ? record.description
               : 'Notion database',
           pageCount: typeof pageCountValue === 'number' ? pageCountValue : undefined,
+          selected: Boolean(record.selected),
+          url: typeof record.url === 'string' ? record.url : undefined,
+          lastEdited: typeof record.last_edited === 'string'
+            ? record.last_edited
+            : typeof record.lastEdited === 'string'
+              ? record.lastEdited
+              : undefined,
+          propertiesSchema,
+          raw: record.raw,
         };
       });
     },
@@ -739,6 +776,14 @@ export async function listConnectorPages(connectorId: string): Promise<NotionRes
             : typeof record.description === 'string'
               ? record.description
               : 'Standalone page',
+          selected: Boolean(record.selected),
+          url: typeof record.url === 'string' ? record.url : undefined,
+          lastEdited: typeof record.last_edited === 'string'
+            ? record.last_edited
+            : typeof record.lastEdited === 'string'
+              ? record.lastEdited
+              : undefined,
+          raw: record.raw,
         };
       });
     },
@@ -750,13 +795,46 @@ export async function selectConnectorResources(
   connectorId: string,
   selection: ConnectorResourceSelection,
 ): Promise<ResourceConnector | null> {
+  const selectedDatabaseIdSet = new Set(selection.databaseIds);
+  const selectedPageIdSet = new Set(selection.pageIds);
+  const databaseOptions = selection.databaseOptions ?? FALLBACK_DATABASES;
+  const pageOptions = selection.pageOptions ?? FALLBACK_PAGES;
+  const databaseOptionById = new Map(databaseOptions.map((item) => [item.id, item]));
+  const pageOptionById = new Map(pageOptions.map((item) => [item.id, item]));
+  const selectedDatabasePayload = selection.databaseIds.map((id) => {
+    const option = databaseOptionById.get(id);
+    if (!option) return id;
+    return {
+      database_id: option.id,
+      title: option.title,
+      subtitle: option.subtitle,
+      page_count: option.pageCount,
+      url: option.url,
+      last_edited: option.lastEdited,
+      properties_schema: option.propertiesSchema,
+      raw: option.raw,
+    };
+  });
+  const selectedPagePayload = selection.pageIds.map((id) => {
+    const option = pageOptionById.get(id);
+    if (!option) return id;
+    return {
+      page_id: option.id,
+      title: option.title,
+      subtitle: option.subtitle,
+      url: option.url,
+      last_edited: option.lastEdited,
+      raw: option.raw,
+    };
+  });
+
   const localFallback = () => {
     const connectors = readLocalConnectors();
     const connector = connectors.find((item) => item.id === connectorId);
     if (!connector) return null;
 
-    const databases = FALLBACK_DATABASES;
-    const pages = FALLBACK_PAGES;
+    const databases = databaseOptions.filter((item) => selectedDatabaseIdSet.has(item.id));
+    const pages = pageOptions.filter((item) => selectedPageIdSet.has(item.id));
     const nextConnector = {
       ...connector,
       ...mergeSelectedSources(connector, databases, pages, selection),
@@ -772,8 +850,8 @@ export async function selectConnectorResources(
       const response = await fetchJson<unknown>(`/api/connectors/${encodeURIComponent(connectorId)}/resources/select`, {
         method: 'POST',
         body: JSON.stringify({
-          selected_databases: selection.databaseIds,
-          selected_pages: selection.pageIds,
+          selected_databases: selectedDatabasePayload,
+          selected_pages: selectedPagePayload,
         }),
       });
       const normalized = normalizeConnectorResponse(response);

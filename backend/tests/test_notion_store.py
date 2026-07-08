@@ -3,6 +3,8 @@
 #          identity storage.
 # [Pos] test node in backend/tests
 # [Sync] 2026-07-04: initial store coverage for Notion connector persistence.
+# [Sync] 2026-07-08: cover connector list/detail sources hydration for refresh-safe
+#                    resource selections.
 
 from __future__ import annotations
 
@@ -137,6 +139,10 @@ class TestNotionStore(unittest.TestCase):
         self.assertEqual(len(selected["resources"]), 2)
         self.assertEqual(selected["connector"]["selected_databases"], ["db-1"])
         self.assertEqual(selected["connector"]["selected_pages"], ["page-standalone"])
+        self.assertEqual(len(selected["connector"]["sources"]), 2)
+        self.assertEqual(selected["connector"]["sources"][0]["external_id"], "db-1")
+        self.assertEqual(store.list_connectors(7)[0]["sources"][0]["external_id"], "db-1")
+        self.assertEqual(store.get_connector(connector["id"], 7)["sources"][1]["external_id"], "page-standalone")
 
         snapshot = self._sample_snapshot(connector["id"])
         saved = store.save_snapshot(connector["id"], 7, "workspace-1", snapshot)
@@ -161,4 +167,3 @@ class TestNotionStore(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

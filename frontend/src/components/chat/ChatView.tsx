@@ -14,7 +14,7 @@
 // [Sync] 2026-05-29: make status bar and collapsible sidebar-panel chrome theme-adaptive.
 // [Sync] 2026-05-29: move thread list into VerticalNav expanded sidebar; remove separate thread sidebar and flyout; remove header bar; float share+more buttons.
 // [Sync] 2026-05-30: accept activeVoice prop to display deck/voice badge in top-right and forward system prompt to ChatPanel.
-// [Sync] 2026-06-01: stop creating a thread on first Chat view mount; create lazily on first send, quick action, or explicit New Chat.
+// [Sync] 2026-06-01: stop creating a thread on first Chat view mount; create lazily on first send or quick action.
 // [Sync] 2026-06-01: add delete button to thread list items; hover shows × button; calls DELETE /api/claude-agent/threads/{id}; clears workspace when active thread is deleted.
 // [Sync] 2026-06-09: SSE reconnect — fetch /status on thread switch; trigger stream reconnect via reconnectStreamNonce.
 // [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
@@ -43,7 +43,18 @@
 //                    of opening an in-Chat config page, matching the latest connector interaction draft.
 // [Sync] 2026-07-08: align the landing tab content width with the Chat composer/tab bar and remove
 //                    redundant history-panel outer chrome.
-import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+// [Sync] 2026-07-09: lift history search and connector filter/sort controls into the same control
+//                    row as WorkspaceTabBar instead of rendering them inside tab content panels.
+// [Sync] 2026-07-09: refresh the default history list every time the user switches back to
+//                    `聊天历史` or lands on the Chat history panel, so empty-state rendering never
+//                    relies on stale thread data.
+// [Sync] 2026-07-09: make the top-level 新建 action return to the default landing state without
+//                    pre-creating an empty backend thread.
+// [Sync] 2026-07-09: soften WorkspaceTabBar tab outlines so active state uses quiet surface
+//                    contrast instead of a heavy focus-colored border.
+// [Sync] 2026-07-09: page default history lists via scroll-triggered limit/offset
+//                    fetches instead of loading every thread up front.
+import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
@@ -174,6 +185,8 @@ const DEFAULT_LANDING_QUICK_ACTIONS: QuickActionStripItem[] = [
 ];
 
 const THREAD_SEARCH_DEBOUNCE_MS = 180;
+const THREAD_HISTORY_PAGE_SIZE = 20;
+const THREAD_HISTORY_FETCH_LIMIT = THREAD_HISTORY_PAGE_SIZE + 1;
 
 function parseThreadDate(value: string): Date | null {
   const date = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
@@ -224,6 +237,8 @@ interface ThreadSearchParams {
   query?: string;
   searchScope?: 'all' | 'title' | 'messages';
   retrievalMode?: 'fuzzy' | 'auto' | 'vector';
+  limit?: number;
+  offset?: number;
 }
 
 async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread[]> {
@@ -234,6 +249,12 @@ async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread
       search.set('query', query);
       search.set('search_scope', params.searchScope ?? 'all');
       search.set('retrieval_mode', params.retrievalMode ?? 'fuzzy');
+    }
+    if (typeof params.limit === 'number') {
+      search.set('limit', String(params.limit));
+    }
+    if (typeof params.offset === 'number' && params.offset > 0) {
+      search.set('offset', String(params.offset));
     }
     const suffix = search.toString() ? `?${search.toString()}` : '';
     const res = await fetch(`${API_BASE}/api/claude-agent/threads${suffix}`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
@@ -325,6 +346,8 @@ function ChatViewContent({
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
+  const [isLoadingMoreThreads, setIsLoadingMoreThreads] = useState(false);
+  const [hasMoreThreads, setHasMoreThreads] = useState(false);
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
@@ -334,6 +357,7 @@ function ChatViewContent({
   const [threadSearchQuery, setThreadSearchQuery] = useState('');
   const [threadSearchResults, setThreadSearchResults] = useState<ChatThread[]>([]);
   const threadFetchRequestSeqRef = useRef(0);
+  const threadLoadMoreInFlightRef = useRef(false);
   const threadSearchRequestSeqRef = useRef(0);
   const threadSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [isSearchingThreads, setIsSearchingThreads] = useState(false);
@@ -347,17 +371,75 @@ function ChatViewContent({
   const reloadThreads = useCallback(async () => {
     const requestSeq = threadFetchRequestSeqRef.current + 1;
     threadFetchRequestSeqRef.current = requestSeq;
+    threadLoadMoreInFlightRef.current = false;
     setIsLoadingThreads(true);
-    const list = await fetchThreads();
-    if (requestSeq !== threadFetchRequestSeqRef.current) return;
-    setThreads(list);
-    setIsLoadingThreads(false);
+    setIsLoadingMoreThreads(false);
+    setHasMoreThreads(false);
+    try {
+      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset: 0 });
+      if (requestSeq !== threadFetchRequestSeqRef.current) return;
+      setThreads(list.slice(0, THREAD_HISTORY_PAGE_SIZE));
+      setHasMoreThreads(list.length > THREAD_HISTORY_PAGE_SIZE);
+    } finally {
+      if (requestSeq === threadFetchRequestSeqRef.current) {
+        setIsLoadingThreads(false);
+      }
+    }
   }, []);
+
+  const loadMoreThreads = useCallback(async () => {
+    if (isLoadingThreads || isLoadingMoreThreads || threadLoadMoreInFlightRef.current || !hasMoreThreads) return;
+
+    const requestSeq = threadFetchRequestSeqRef.current;
+    const offset = threads.length;
+    threadLoadMoreInFlightRef.current = true;
+    setIsLoadingMoreThreads(true);
+    try {
+      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset });
+      if (requestSeq !== threadFetchRequestSeqRef.current) return;
+      const existingIds = new Set(threads.map((thread) => thread.id));
+      const nextPage = list
+        .slice(0, THREAD_HISTORY_PAGE_SIZE)
+        .filter((thread) => !existingIds.has(thread.id));
+      if (nextPage.length === 0) {
+        setHasMoreThreads(false);
+        return;
+      }
+      setThreads((prev) => {
+        const latestExistingIds = new Set(prev.map((thread) => thread.id));
+        const latestNextPage = list
+          .slice(0, THREAD_HISTORY_PAGE_SIZE)
+          .filter((thread) => !latestExistingIds.has(thread.id));
+        return latestNextPage.length > 0 ? [...prev, ...latestNextPage] : prev;
+      });
+      setHasMoreThreads(list.length > THREAD_HISTORY_PAGE_SIZE);
+    } finally {
+      if (requestSeq === threadFetchRequestSeqRef.current) {
+        threadLoadMoreInFlightRef.current = false;
+        setIsLoadingMoreThreads(false);
+      }
+    }
+  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads, threads]);
+
+  const handleThreadListScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    if (isLoadingThreads || isLoadingMoreThreads || !hasMoreThreads) return;
+
+    const target = event.currentTarget;
+    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (remaining <= 48) {
+      void loadMoreThreads();
+    }
+  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads, loadMoreThreads]);
 
   useEffect(() => {
     if (!threadSidebarOpen) return;
     void reloadThreads();
   }, [threadSidebarOpen, reloadThreads]);
+
+  useEffect(() => {
+    if (activeThreadId || landingTab !== 'history') return;
+    void reloadThreads();
+  }, [activeThreadId, landingTab, reloadThreads]);
 
   useEffect(() => {
     if (!threadSearchOpen) {
@@ -503,29 +585,21 @@ function ChatViewContent({
     queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
   }, [isCreatingThread, queuePromptForThread]);
 
-  const handleNewChat = useCallback(async () => {
+  const handleNewChat = useCallback(() => {
     if (isCreatingThread) return;
 
     setDraftInputError(null);
-    setIsCreatingThread(true);
-    const id = await createThread();
-    setIsCreatingThread(false);
-    if (id) {
-      // Reset messages before switching so the new ChatPanel (remounted via
-      // key={activeThreadId}) never sees stale messages from the previous thread.
-      setThreadMessages(null);
-      setIsLoadingMessages(false);
-      setActiveThreadId(id);
-      setHasConversationStarted(false);
-      onLandingTabChange('history');
-      setQueuedPrompt('');
-      setQueuedAttachments([]);
-      setQueuedToolChoice('auto');
-      void reloadThreads();
-    }
-    if (!id) {
-      setDraftInputError('创建对话失败，请稍后再试。');
-    }
+    setThreadMessages(null);
+    setIsLoadingMessages(false);
+    setActiveThreadId(null);
+    setHasConversationStarted(false);
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+    setThreadSidebarOpen(false);
+    setThreadSearchOpen(false);
+    onLandingTabChange('history');
+    void reloadThreads();
     onNewChat?.();
   }, [isCreatingThread, onLandingTabChange, onNewChat, reloadThreads]);
 
@@ -554,7 +628,10 @@ function ChatViewContent({
 
   const handleSelectWorkspaceTab = useCallback((tab: ChatLandingTab) => {
     onLandingTabChange(tab);
-  }, [onLandingTabChange]);
+    if (tab === 'history') {
+      void reloadThreads();
+    }
+  }, [onLandingTabChange, reloadThreads]);
 
   const handleShare = useCallback(async () => {
     try {
@@ -772,55 +849,113 @@ function ChatViewContent({
                       </div>
                     ) : null}
 
-                    <div
-                      role="tablist"
-                      aria-label="Chat 工作区切换"
-                      style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, display: 'flex', gap: '0.5rem' }}
-                    >
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={landingTab === 'history'}
-                        onClick={() => handleSelectWorkspaceTab('history')}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          border: `1px solid ${landingTab === 'history' ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
-                          borderRadius: '999px',
-                          padding: '0.55rem 0.9rem',
-                          background: landingTab === 'history' ? 'var(--color-bg-surface)' : 'transparent',
-                          color: 'var(--color-text-primary)',
-                          cursor: 'pointer',
-                          fontSize: '0.82rem',
-                          fontWeight: 700,
-                        }}
+                    <div style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <div
+                        role="tablist"
+                        aria-label="Chat 工作区切换"
+                        style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}
                       >
-                        <IconClock style={{ width: '0.85rem', height: '0.85rem' }} />
-                        聊天历史
-                      </button>
-                      <button
-                        type="button"
-                        role="tab"
-                        aria-selected={landingTab === 'connector'}
-                        onClick={() => handleSelectWorkspaceTab('connector')}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          border: `1px solid ${landingTab === 'connector' ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
-                          borderRadius: '999px',
-                          padding: '0.55rem 0.9rem',
-                          background: landingTab === 'connector' ? 'var(--color-bg-surface)' : 'transparent',
-                          color: 'var(--color-text-primary)',
-                          cursor: 'pointer',
-                          fontSize: '0.82rem',
-                          fontWeight: 700,
-                        }}
-                      >
-                        <IconDatabase style={{ width: '0.85rem', height: '0.85rem' }} />
-                        资源连接器
-                      </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={landingTab === 'history'}
+                          onClick={() => handleSelectWorkspaceTab('history')}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            border: `1px solid ${landingTab === 'history' ? 'color-mix(in srgb, var(--color-border-paper) 72%, var(--color-text-muted))' : 'transparent'}`,
+                            borderRadius: '999px',
+                            padding: '0.55rem 0.9rem',
+                            background: landingTab === 'history' ? 'var(--color-bg-surface)' : 'color-mix(in srgb, var(--color-bg-surface) 32%, transparent)',
+                            color: 'var(--color-text-primary)',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            boxShadow: landingTab === 'history' ? '0 1px 4px var(--color-shadow-soft)' : 'none',
+                          }}
+                        >
+                          <IconClock style={{ width: '0.85rem', height: '0.85rem' }} />
+                          聊天历史
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={landingTab === 'connector'}
+                          onClick={() => handleSelectWorkspaceTab('connector')}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            border: `1px solid ${landingTab === 'connector' ? 'color-mix(in srgb, var(--color-border-paper) 72%, var(--color-text-muted))' : 'transparent'}`,
+                            borderRadius: '999px',
+                            padding: '0.55rem 0.9rem',
+                            background: landingTab === 'connector' ? 'var(--color-bg-surface)' : 'color-mix(in srgb, var(--color-bg-surface) 32%, transparent)',
+                            color: 'var(--color-text-primary)',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            boxShadow: landingTab === 'connector' ? '0 1px 4px var(--color-shadow-soft)' : 'none',
+                          }}
+                        >
+                          <IconDatabase style={{ width: '0.85rem', height: '0.85rem' }} />
+                          资源连接器
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', minWidth: 0, marginLeft: 'auto' }}>
+                        {landingTab === 'history' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setThreadSearchQuery('');
+                              setThreadSearchResults([]);
+                              setThreadSearchOpen(true);
+                              void reloadThreads();
+                            }}
+                            style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.5rem 0.75rem', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
+                          >
+                            <IconSearch style={{ width: '0.85rem', height: '0.85rem' }} />
+                            搜索
+                          </button>
+                        ) : (
+                          <>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                border: '1px solid var(--color-border-paper)',
+                                borderRadius: '999px',
+                                padding: '0.45rem 0.72rem',
+                                background: 'var(--color-bg-surface)',
+                                color: 'var(--color-text-secondary)',
+                                fontSize: '0.76rem',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              筛选：全部
+                            </span>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                border: '1px solid var(--color-border-paper)',
+                                borderRadius: '999px',
+                                padding: '0.45rem 0.72rem',
+                                background: 'var(--color-bg-surface)',
+                                color: 'var(--color-text-secondary)',
+                                fontSize: '0.76rem',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              排序：最近交互
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
 
                     <section style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -833,21 +968,8 @@ function ChatViewContent({
                                 选择一条对话继续上下文。
                               </div>
                             </div>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setThreadSearchQuery('');
-                                setThreadSearchResults([]);
-                                setThreadSearchOpen(true);
-                                void reloadThreads();
-                              }}
-                              style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.5rem 0.75rem', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600 }}
-                            >
-                              <IconSearch style={{ width: '0.85rem', height: '0.85rem' }} />
-                              搜索
-                            </button>
                           </div>
-                          <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.55rem 0.55rem 0.75rem' }}>
+                          <div onScroll={handleThreadListScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.55rem 0.55rem 0.75rem' }}>
                             {isLoadingThreads && visibleThreads.length === 0 ? (
                               <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>
                             ) : null}
@@ -903,6 +1025,12 @@ function ChatViewContent({
                                 </div>
                               </div>
                             ))}
+                            {isLoadingMoreThreads ? (
+                              <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={2} /></div>
+                            ) : null}
+                            {!hasMoreThreads && visibleThreads.length > 0 ? (
+                              <div style={{ padding: '0.55rem 0.45rem 0.2rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', textAlign: 'center' }}>已显示全部会话</div>
+                            ) : null}
                           </div>
                         </div>
                       ) : (
@@ -942,7 +1070,7 @@ function ChatViewContent({
                   </button>
                 </div>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
+              <div onScroll={handleThreadListScroll} style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
                 {isLoadingThreads && visibleThreads.length === 0 ? (
                   <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={3} /></div>
                 ) : null}
@@ -991,6 +1119,12 @@ function ChatViewContent({
                     </div>
                   );
                 })}
+                {isLoadingMoreThreads ? (
+                  <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={2} /></div>
+                ) : null}
+                {!hasMoreThreads && visibleThreads.length > 0 ? (
+                  <div style={{ padding: '0.45rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>已显示全部会话</div>
+                ) : null}
               </div>
             </>
           ) : null}
