@@ -188,25 +188,7 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
           {t('nav.chat')}
         </button>
 
-        <button
-          onClick={() => onViewChange('connector')}
-          style={buttonStyle(currentView === 'connector')}
-          title={t('nav.connector')}
-          onMouseEnter={e => {
-            if (currentView !== 'connector') {
-              e.currentTarget.style.background = 'var(--color-bg-hover)';
-            }
-          }}
-          onMouseLeave={e => {
-            if (currentView !== 'connector') {
-              e.currentTarget.style.background = 'transparent';
-            }
-          }}
-        >
-          {t('nav.connector')}
-        </button>
-
-        {/* App.tsx intercepts `connector` and opens Settings -> resource links. */}
+      {/* Connector is no longer a standalone nav entry; it is reached via Settings -> resource links. */}
       </div>
 
       <div style={{ flex: 1 }} />

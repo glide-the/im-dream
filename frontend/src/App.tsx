@@ -27,7 +27,7 @@ import './App.css';
 import {
   FaBrain, FaHeart, FaQuestion, FaCloud, FaTheaterMasks, FaEye,
   FaFistRaised, FaLightbulb, FaShieldAlt, FaWind, FaFire, FaCompass,
-  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments, FaLink,
+  FaPenNib, FaRegClock, FaChartBar, FaLayerGroup, FaCog, FaComments,
 } from 'react-icons/fa';
 import TopNavBar from './components/TopNavBar';
 import LeftToolbar from './components/LeftToolbar';
@@ -393,7 +393,6 @@ export default function App() {
     { key: 'timeline' as const, label: t('nav.timeline'), icon: FaRegClock },
     { key: 'analysis' as const, label: t('nav.analysis'), icon: FaChartBar },
     { key: 'decks' as const, label: t('nav.decks'), icon: FaLayerGroup },
-    { key: 'connector' as const, label: t('nav.connector'), icon: FaLink },
     { key: 'chat' as const, label: t('nav.chat'), icon: FaComments },
     { key: 'settings' as const, label: t('nav.settings'), icon: FaCog },
   ];
