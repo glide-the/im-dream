@@ -1,7 +1,7 @@
 # Notion Device 资源连接器设计方案
 
 Status: Draft
-Updated: 2026-07-07
+Updated: 2026-07-08
 Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空间
 
 > [Input] `docs/design/claude-agent/edit-point/workspace-adapter.md`,
@@ -14,6 +14,7 @@ Scope: 设计 — Notion 作为外部设备资源接入 ink-and-memory 工作空
 >      `backend/claude_agent/context_builder.py`
 > [Sync] 2026-06-28: 收敛 Notion 远程数据源的交互快照生命周期 — Agent 初始化读取资源连接器数据层物化的 canonical snapshot，不以 Agent 本地 notion_cache 作为权威状态；补齐 MVP 前端交互设计稿。
 > [Sync] 2026-07-07: Chat 入口改为主落点，历史对话与连接器工作台下沉到输入框下方，输入框下方增加快捷功能 secondary action strip，并保留可恢复的 `shell_error` 态；连接器不再以独立主页面承载。
+> [Sync] 2026-07-08: 依据最新版 Chat 入口页与连接器详情草图复核主路径：主入口仍是 Chat `WorkspaceTabBar`，连接器详情下钻统一为 `ConnectorConfigPage`，并再次确认连接器不是独立主导航页。
 
 ---
 
@@ -88,12 +89,12 @@ ink-and-memory 的工作空间模型目前仅管理**本地 EditorState**（`.ed
 
 ### 2.2 各层职责
 
-| 层                  | 职责                                                         | 实现位置                                      | 本期实现   |
+| 层 | 职责 | 实现位置 | 本期实现 |
 | ------------------- | ------------------------------------------------------------ | --------------------------------------------- | ---------- |
-| **Auth Layer**      | `ntn login --no-browser` 流程编排、token 路径管理、NOTION_HOME 配置 | `backend/notion/auth.py`                      | ✅ 是       |
-| **Data Layer**      | Notion 同步结果持久化、canonical snapshot 物化、`.notion/` 只读虚拟索引解析 | `backend/notion/index.py` + `backend/libs/claude_agent_kit/server/notion_snapshot.py` | ✅ 合同代码 |
-| **Operation Layer** | `ntn page get/create/update` 等读写操作封装；写入必须产出 proposal 并走远程确认 | `backend/notion/ops.py`                       | ❌ 暂不实现 |
-| **Task Layer**      | sync 调度、快照版本推进、冲突检测                            | `backend/notion/tasks.py`                     | ❌ 暂不实现 |
+| **Auth Layer** | `ntn login --no-browser` 流程编排、token 路径管理、NOTION_HOME 配置 | `backend/notion/auth.py` | ✅ 是 |
+| **Data Layer** | Notion 同步结果持久化、canonical snapshot 物化、`.notion/` 只读虚拟索引解析 | `backend/notion/index.py` + `backend/libs/claude_agent_kit/server/notion_snapshot.py` | ✅ 合同代码 |
+| **Operation Layer** | `ntn page get/create/update` 等读写操作封装；写入必须产出 proposal 并走远程确认 | `backend/notion/ops.py` | ❌ 暂不实现 |
+| **Task Layer** | sync 调度、快照版本推进、冲突检测 | `backend/notion/tasks.py` | ❌ 暂不实现 |
 
 ### 2.3 与 `.editor/` 的对称关系
 
@@ -193,17 +194,17 @@ NOTION_RESOURCES: dict[str, str] = {
 
 ### 4.1 配置入口
 
-前端设置页面提供 Notion 配置表单：
+前端在 `ConnectorConfigPage` 中提供 Notion 配置表单：
 
-| 字段          | 说明                                              | 存储位置                     |
+| 字段 | 说明 | 存储位置 |
 | ------------- | ------------------------------------------------- | ---------------------------- |
 | `NOTION_HOME` | `ntn` CLI 配置目录路径（默认 `~/.config/notion`） | `user_profile.notion_config` |
-| 认证状态      | 是否已完成 `ntn login`                            | 后端检测 `ntn auth status`   |
+| 认证状态 | 是否已完成 `ntn login` | 后端检测 `ntn auth status` |
 
 ### 4.2 认证流程
 
 ```
-用户点击"连接 Notion"
+用户在 ConnectorConfigPage 点击"连接 Notion"
   │
   ├─ 前端 → POST /api/notion/auth/login
   │
@@ -508,7 +509,7 @@ sequenceDiagram
 
 ## 9. 实现文件索引
 
-| 文件                                                         | 变更内容                                                     | 状态     |
+| 文件 | 变更内容 | 状态 |
 | ------------------------------------------------------------ | ------------------------------------------------------------ | -------- |
 | `backend/libs/claude_agent_kit/server/notion_snapshot.py` | canonical snapshot 合同、状态枚举、`.notion/` 路径解析、write proposal stale 判断 | ✅ 已实现 |
 | `backend/tests/test_notion_snapshot_contract.py` | 验证快照路径解析、数据提取、缺页语义、proposal 版本判断 | ✅ 已实现 |
@@ -521,14 +522,14 @@ sequenceDiagram
 
 ### 9.1 相关现有文件（需阅读，不需修改）
 
-| 文件                   | 作用                            |
+| 文件 | 作用 |
 | ---------------------- | ------------------------------- |
-| `editor_index.py`      | `.notion/` snapshot path resolver 的参考模板 |
-| `workspace.py`         | `.notion/` 目录初始化入口       |
-| `agent_runner.py`      | PreToolUse / PostToolUse 扩展点 |
-| `workspace_context.py` | 工作空间上下文模板              |
-| `context_builder.py`   | 系统提示词模板                  |
-| `editor_tool.py`       | `switch_editor` handler 所在；Notion connector 不复用该工具 |
+| `editor_index.py` | `.notion/` snapshot path resolver 的参考模板 |
+| `workspace.py` | `.notion/` 目录初始化入口 |
+| `agent_runner.py` | PreToolUse / PostToolUse 扩展点 |
+| `workspace_context.py` | 工作空间上下文模板 |
+| `context_builder.py` | 系统提示词模板 |
+| `editor_tool.py` | `switch_editor` handler 所在；Notion connector 不复用该工具 |
 
 ---
 
@@ -536,16 +537,16 @@ sequenceDiagram
 
 以下功能**明确不在本期范围内**，防止过度设计：
 
-| 不实现项                                | 原因                                         |
+| 不实现项 | 原因 |
 | --------------------------------------- | -------------------------------------------- |
-| `mcp__notion__*` MCP 查询工具           | 用户尚未确定操作交互模型                     |
-| `ntn page create/update` 写操作         | 写操作的冲突策略、权限模型未定义             |
-| Notion → EditorState 自动导入           | 导入映射规则未确定                           |
-| 双向实时同步                            | 需要单独的冲突处理设计                       |
-| Notion OAuth Web 流程                   | 当前用 `ntn login --no-browser` CLI 认证足够 |
-| 定时 sync 任务调度框架                  | 先用 workspace init 时触发的一次性 sync      |
-| 增量变更检测（`last_edited_time` 对比） | 先做全量 index 刷新                          |
-| 多 Notion workspace 切换                | 先支持单 workspace                           |
+| `mcp__notion__*` MCP 查询工具 | 用户尚未确定操作交互模型 |
+| `ntn page create/update` 写操作 | 写操作的冲突策略、权限模型未定义 |
+| Notion → EditorState 自动导入 | 导入映射规则未确定 |
+| 双向实时同步 | 需要单独的冲突处理设计 |
+| Notion OAuth Web 流程 | 当前用 `ntn login --no-browser` CLI 认证足够 |
+| 定时 sync 任务调度框架 | 先用 workspace init 时触发的一次性 sync |
+| 增量变更检测（`last_edited_time` 对比） | 先做全量 index 刷新 |
+| 多 Notion workspace 切换 | 先支持单 workspace |
 
 ---
 
@@ -555,39 +556,44 @@ sequenceDiagram
 
 ```
 Chat workspace
-  ├─ Centered AIInputDock
-  ├─ QuickActionStrip: 生成图片 / 撰写或编辑 / 查找资料
-  ├─ Landing tabs: 历史对话 / 连接器
-  │    ├─ 历史对话 panel
-  │    │    ├─ thread list
-  │    │    └─ search dialog trigger
-  │    └─ 连接器 panel
-  │         ├─ embedded ResourceConnectorPage
-  │         ├─ create / auth / select / sync
-  │         └─ source list + delete
+  ├─ Centered ChatInputDock
+  ├─ WorkspaceTabBar
+  │    ├─ HistoryTab
+  │    │    └─ HistoryTabPanel
+  │    │         ├─ EmptyChatState
+  │    │         ├─ HistoryThreadList / ChatMessageList
+  │    │         └─ HistorySkeletonList
+  │    └─ ResourceConnectorTab
+  │         └─ ResourceConnectorTabPanel
+  │              ├─ ConnectorToolbar
+  │              ├─ ConnectorEmptyState
+  │              ├─ ConnectorList / ConnectorListSkeleton
+  │              └─ ConnectorCard → ConnectorConfigPage
+  ├─ ConnectorConfigPage
+  │    ├─ TopNavigation
+  │    ├─ ConnectorHeader
+  │    ├─ ConnectorOverviewSection
+  │    ├─ StrategySection [暂不实现]
+  │    ├─ ResourceSourceSection
+  │    └─ ConnectionStateCard
   ├─ Context banner: "Using Notion snapshot <version>"
   └─ Proposal card: diff preview + base snapshot identity
 ```
 
-> 注：`历史对话` / `连接器` 是 Chat landing 的视图状态，不是连接器生命周期状态。连接器生命周期仍由下方的 connector state model 管理。
+> 注：`HistoryTab` / `ResourceConnectorTab` 是 Chat 工作区的视图状态，不是连接器生命周期状态。连接器生命周期仍由下方的 connector state model 管理。
 >
-> `QuickActionStrip` 是输入框下方的二级动作带，对应参考图中红框标注的区域。它属于 Chat shell 的辅助入口，不承载 connector 生命周期状态；当 shell 层短暂不可交互时，应优先保留该区域的可恢复提示，而不是把它折叠进 connector 状态里。
->
-> 视觉上它必须保持 pill / capsule 形态，只渲染一次，顺序固定为 `AIInputDock` → `QuickActionStrip` → `历史对话 / 连接器` tabs → 对应 panel，不能把快捷动作再渲染到输入框上方。
+> 命名统一使用 `WorkspaceTabBar` / `HistoryTab` / `ResourceConnectorTab` / `ConnectorConfigPage`，不再使用“landing tabs”之类别名。
 
 ### 11.2 状态模型
 
 | 状态 | UI 展示 | 用户动作 |
 |---|---|---|
-| `not_connected` | 空状态：连接 Notion 后可让 Agent 引用页面 | `Connect Notion` |
-| `pending_auth` | 验证码、打开浏览器按钮、轮询进度 | `Open browser` / `Cancel` |
-| `pending_sync` | 同步进度、资源选择锁定 | `Cancel` |
-| `snapshot_ready` | 资源数量、快照版本、最近同步时间 | `Start chat` / `Refresh snapshot` |
-| `stale` | 当前对话使用旧快照的提示 | `Refresh snapshot` |
-| `conflict` | 当前版本与 proposal 基线不一致 | `Review latest` / `Regenerate proposal` |
-| `permission_denied` | 说明缺失 Notion scope 或 token 失效 | `Reconnect` |
-| `connector_unavailable` | 数据层暂不可用 | `Retry` |
-| `shell_error` | `ChatViewContent`、QuickActionStrip 或 landing tabs 渲染失败，导致 Chat shell 失去交互能力 | 显示可恢复错误条并保留 tab / connector 入口，避免把入口直接折叠成空白页 | `Reload shell` / `Retry` |
+| `empty_chat` | `HistoryTabPanel` 显示空聊天态，输入框保持中心主视觉 | `Start chat` |
+| `active_chat` | 历史内容切换为消息流，输入 Dock 贴近底部 | `Continue chat` |
+| `connector_empty` | `ResourceConnectorTabPanel` 显示虚线空态、三枚图标、标题与 CTA | `选择连接器` |
+| `connector_connected` | 显示 `ConnectorToolbar` + `ConnectorList` | `Open connector` |
+| `connector_error` | 连接器列表或状态拉取失败，显示错误卡 | `Retry` |
+| `shell_error` | Chat shell 或 `WorkspaceTabBar` 渲染失败，仍保留可恢复入口 | `Reload shell` / `Retry` |
 
 ### 11.3 Agent 写入确认卡
 

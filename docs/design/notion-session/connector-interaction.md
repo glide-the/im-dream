@@ -8,19 +8,19 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 >      `docs/design/claude-agent/edit-point/workspace-adapter.md`,
 >      `docs/design/claude-agent/edit-point/workspace-context.md`,
 >      `docs/design/claude-agent/edit-point/workspace-switch.md`,
->      `docs/design/notion-session/链接器概念的交互设计稿.pdf`
+>      `docs/prd/Chat 工作区入口页.md`,
+>      `docs/prd/notion-session/连接器具体配置页面结构草图.md`
 > [Output] 定义用户从创建资源连接器到 Agent 消费 `.notion/` 映射的完整业务交互流程
 > [Pos] connector-interaction-doc in `docs/design/notion-session`
 > [Sync] 2026-06-21: 初始设计 — 资源连接器交互方案
 > [Sync] 2026-06-22: 修正核心概念声明 — 依据 Notion API Reference 区分 Database/Row Page/Standalone Page/Block
 > [Sync] 2026-06-28: 修正 Agent 初始化一致性 — `.notion/` 映射由资源连接器数据层的 canonical snapshot 提供，不再以 Agent 本地 NotionCache 作为权威状态。
 > [Sync] 2026-07-05: 增补认证会话保持语义，避免 `ntn login poll` 单次会话消费后前端重复轮询导致状态回退。
-> [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `历史对话` / `连接器` landing state，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
-> [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天` 使用已创建 workbench 语义与 normalized fallback，`来源` 只由真实 connector context 驱动空态/认证/资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
-> [Sync] 2026-07-07: 移除 Chat 输入框下方重复的 `历史对话` / `连接器` pill row 和连接器 workbench 内部重复标题/tab chrome；嵌入态只保留右上 `分享 / 更多` 与内容区入口。
-> [Sync] 2026-07-08: Connector 入口迁移到 Settings 资源链接区，Chat 仅保留摘要面板；Notion 具体管理页继续复用 `ResourceConnectorPage` page mode。
-> [Sync] 2026-07-08: 修复设置页「管理」交互问题——不再是资源链接卡片内的原地展开，改为 App 级页面导航到独立的 `ConnectorNotionDetailPage`（面包屑：设置 › 资源链接 › Notion 具体配置页面），对齐《链接器概念的交互设计稿》「具体配置页面 / 最上方导航」骨架屏；顶部导航栏与移动端底部导航栏移除单独的 `Connector` 入口。
-> [Sync] 2026-07-08: 补充 §3.5 —— Chat 入口页、连接器摘要面板、`ResourceConnectorPage` 首次加载态改为骨架占位块，`ConnectorNotionDetailPage` 面包屑下方新增「连接器概览」描述行，对齐《链接器概念的交互设计稿》Chat 页与「具体配置页面」骨架屏及最上方导航文字描述。
+> [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `聊天历史` / `资源连接器` 视图，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
+> [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天历史` 使用会话与空态语义，`资源连接器` 只由真实 connector context 驱动空态 / 认证 / 资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
+> [Sync] 2026-07-08: 纠正曾偏移的入口叙述，统一以 Chat `WorkspaceTabBar` 为资源连接器主入口，废弃仅摘要化的路径表述。
+> [Sync] 2026-07-08: 详情页组件树统一收敛为 `ConnectorConfigPage` / `TopNavigation` / `ConnectorHeader` / `ConnectorOverviewSection` / `StrategySection` / `ResourceSourceSection` / `ConnectionStateCard`，并固定面包屑为 `资源连接器 > Notion Connector`。
+> [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
 
 ---
 
@@ -65,7 +65,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 | Agent 对话中触发 lazy load 并更新缓存 | 不符合 | Agent Read 不直接远程拉取；由连接器数据层刷新并生成新 snapshot |
 | `switch_editor(device="notion")` | 过度设计 | 不复用 editor session 切换；Notion connector 由 workspace resource selection 决定 |
 | Notion 写回 | 超出本期 | 仅保留 proposal/write pipeline 交互边界 |
-| Chat landing 快捷功能与 shell fallback | 现状未明确 | 增补输入框下方的 secondary action strip，并定义可恢复的 `shell_error` 态，避免 `ChatViewContent` 渲染失败时把入口整体吞掉 |
+| Chat landing 快捷功能与 shell fallback | 现状未明确 | 保留 shell 级 `shell_error` 与内部滚动边界，但资源入口以 `WorkspaceTabBar` 为主 |
 
 ---
 
@@ -113,45 +113,41 @@ Resource Connector (资源连接器)
 
 ### 3.1 全局流程概览
 
-```
-用户从顶部 / 移动端导航进入 Settings 的资源链接区
+```txt
+用户进入 Chat Dashboard
     │
-    ├─ 看到远程资源链接与本地资源链接分区
+    ├─ 看到 ChatTopHeader + 居中的 ChatInputDock
     │
-    ├─ 在 Notion 卡片点击「管理」
+    ├─ WorkspaceTabBar 默认选中「聊天历史」
     │
-    ├─ 页面级导航到 Notion 具体配置页面（`ConnectorNotionDetailPage`，替换整个 Settings 视图，
-    │   顶部显示「设置 › 资源链接 › Notion 具体配置页面」面包屑，内部复用 `ResourceConnectorPage` page mode）
+    ├─ 点击「资源连接器」
+    │   ├─ 显示 ConnectorToolbar（筛选 / 排序）
+    │   ├─ 无连接器 → 虚线空态：远程资源 / 本地资源 / 更多图标 + 暂无资源连接器 + 选择连接器
+    │   └─ 有连接器 → ConnectorList
     │
-    ├─ 选择或新建资源连接器
+    ├─ 点击 Notion Connector 卡片
+    │   └─ 页面级导航到 ConnectorConfigPage
+    │       顶部显示「← 资源连接器 > Notion Connector」
     │
-    ├─ 选择认证平台服务 (Notion)
+    ├─ 在 ConnectorConfigPage 中完成认证、来源选择与同步
+    │   └─ ResourceSourceSection 在已认证后展示 database → page tree
     │
-    ├─ 完成 ntn login 认证
-    │
-    ├─ 用户选择可访问的 Database 及 Standalone Page
-    │     └─ 后端通过 ntn api v1/search 分别获取 database 和 page 列表
-    │
-    ├─ 后端同步数据层
-    │     └─ 将选定 Database 的 Row Page 及 Standalone Page 物化为 canonical snapshot
-    │
-    └─ 用户回到 Chat 对话
-          │
+    └─ 返回 Chat 并继续提问
           ├─ Agent 初始化时 attach 当前 canonical snapshot
-          ├─ .notion/ 虚拟索引从同一 snapshotVersion 读取
-          │
-          └─ 同步常用 notion-cli skill 到工作空间
+          ├─ `.notion/` 虚拟索引从同一 snapshotVersion 读取
+          └─ notion-cli skill 可按需同步到工作空间
 ```
 
 ### 3.2 流程阶段定义
 
 | 阶段 | 触发者 | 输出 | 存储位置 |
 |------|--------|------|---------|
-| 1. 创建连接器 | 用户（Settings 的资源链接区 / Notion 管理页） | connector 实体 | 数据库 `resource_connectors` 表 |
-| 2. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
-| 3. Database 及 Page 选择 | 用户（前端列表） | 选定的 database_id 及 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
-| 4. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
-| 5. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
+| 1. 进入连接器工作台 | 用户（Chat `ResourceConnectorTab`） | 当前连接器列表或空态 | 前端工作区状态 |
+| 2. 进入 Notion 详情页 | 用户（点击 `ConnectorCard`） | `ConnectorConfigPage` | 前端导航状态 |
+| 3. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
+| 4. Database 及 Page 选择 | 用户（`ResourceSourceSection`） | 选定的 database_id 与 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
+| 5. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
+| 6. 对话消费 | Agent（PreToolUse） | 同一 snapshotVersion 下的页面内容 | `.notion/pages/<id>.json` 虚拟读取 |
 
 ### 3.3 认证会话保持（避免 `poll` 回退）
 
@@ -173,22 +169,22 @@ Resource Connector (资源连接器)
 
 ### 3.4 Chat shell 降级与恢复
 
-- `ChatViewContent` 若因渲染异常、快捷功能区域挂载失败或 landing state 初始化失败而不可交互，必须显示可恢复错误态，而不是整页留白。
+- `ChatViewContent` 若因渲染异常、tab 初始化失败或连接器列表加载中断而不可交互，必须显示可恢复错误态，而不是整页留白。
 - `shell_error` 只表示 Chat shell 级故障，不表示 connector 认证、同步或 snapshot 状态异常。
-- 在 `shell_error` 下，用户仍应至少能看到重新加载入口，并在 shell 恢复后回到上一次选中的 `history` 或 `connector` 视图。
-- `连接器` landing state 现在只作为 Chat shell 内的轻量摘要面板，不再渲染完整工作台；`QuickActionStrip` 仍只保留在输入框下方一次，不与 connector 生命周期状态重复表达。
-- `ConnectorSettingsSection` 只承载远程 / 本地资源入口索引卡片；点击 Notion「管理」触发 App 级 `showNotionConnectorDetail` 页面导航，而不是在卡片内原地展开。`ConnectorNotionDetailPage` 提供面包屑导航（设置 › 资源链接 › Notion 具体配置页面）并复用 `ResourceConnectorPage` page mode，不再以黑底嵌入态作为默认入口。
-- Chat shell、Settings 资源链接区、`ConnectorNotionDetailPage` 与 Notion page mode 仍需保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；需要滚动时只允许历史列表、摘要面板或 Notion page mode 内部 `overflow-auto`。
+- 在 `shell_error` 下，用户仍应看到 `ChatInputDock` 与 `WorkspaceTabBar`，并能明确知道当前停留在 `HistoryTab` 还是 `ResourceConnectorTab`。
+- shell 恢复后应回到上一次选中的 tab，并保留该 tab 内最后一次已成功读取的数据快照。
+- `ConnectorConfigPage` 是下钻页，不应在 shell 降级时被替换为其它入口；若详情页自身接口失败，只能在详情页内容区内显示错误卡并保留 `TopNavigation`。
+- Chat shell 与 `ConnectorConfigPage` 都要保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；滚动只允许发生在历史列表、消息流、连接器列表或来源树内部。
 
-### 3.5 骨架屏与「具体配置页面」上方描述（对齐《链接器概念的交互设计稿》）
+### 3.5 骨架屏要求（对齐两份最新草图）
 
-- 背景：`ChatView`、`ConnectorLandingPanel`、`ResourceConnectorPage` 此前用纯文字（如“加载历史中...”“读取连接器状态…”“正在加载连接器…”）表达加载态，未落地 PDF 中定义的灰色占位骨架屏；`ConnectorNotionDetailPage` 的面包屑导航下方也缺少 PDF「具体配置页面 / 最上方导航」要求的概览描述行。
+- 背景：历史列表、连接器 Tab 内容、以及 Notion 详情页都必须使用结构化 skeleton；不得退化为纯文字 loading。
 - 规则：
-  1. Chat 入口页首次加载（`isLoadingThreads && visibleThreads.length === 0`）与连接器摘要面板首次加载（`ConnectorLandingPanel` 的 `loading` 态）必须使用统一的骨架占位块（图标占位 + 1~2 行文本占位），而不是纯文字提示；骨架块数量与布局对应 PDF 第 1 页「默认无聊内容状态」与第 2 页「默认无资源链接状态」示意图。
-  2. `ConnectorNotionDetailPage` 的面包屑导航下方必须新增一行「连接器概览」描述文本（图标 + 一句话说明该页用途），对应 PDF「具体配置页面 / 最上方导航 / 连接器概览 描述」的骨架屏位置；此描述独立于 `ResourceConnectorPage` 内部已有的「连接器概览」`SectionCard`（后者承载可编辑名称 / 状态 / 删除等具体操作，不替代页面级概览描述）。
-  3. `ResourceConnectorPage` 首次加载 connector 列表（`loading && connectors.length === 0`）时，列表区与详情区都必须显示骨架占位块（行占位 + 下拉占位），而不是纯文字「正在加载连接器…」。
-  4. 骨架占位块只用于首次加载（`loading && length === 0`）场景，不覆盖错误态、空态或已有数据的场景；错误态与空态维持现有文案与交互，不被骨架屏替代。
-  5. 本节改动范围仅限于加载态视觉与概览描述文案，不新增页面、路由或状态机分支，不改变现有的认证 / 同步 / 删除等业务逻辑。
+  1. `HistoryTab` 首次加载（`isLoadingThreads && visibleThreads.length === 0`）时，显示 `HistorySkeletonList`：3~5 条历史条目骨架，包含标题条、摘要条、时间占位。
+  2. `ResourceConnectorTab` 首次加载时，显示 `ConnectorToolbar` 的筛选 / 排序 pill 骨架，以及 2~3 张连接器卡片骨架；在结果返回前不得先渲染“暂无资源连接器”。
+  3. `ConnectorConfigPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`ConnectorOverviewSection` skeleton、`ResourceSourceSection` skeleton；`StrategySection` 可直接显示静态占位文案，不必使用动态 skeleton。
+  4. 当 `ResourceSourceSection` 已进入已认证态但尚未拉到来源数据时，展示 database 列表骨架 + page list 骨架，而不是“读取连接器状态…”之类纯文本。
+  5. 骨架只用于首次加载，不覆盖错误态、空态、已关闭态或已有数据后的增量刷新态。
 
 ---
 
@@ -196,23 +192,21 @@ Resource Connector (资源连接器)
 
 ### 4.1 前端交互步骤
 
-```
-Step 0: 进入 Settings 的资源链接区，或从 Chat 的 Connector CTA 跳转过去
+```txt
+Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连接器」
     │
-    ├─ 看到远程资源链接与本地资源链接分区
-    │
+    ├─ 看到 ConnectorToolbar + 空态或连接器列表
+    ├─ 点击「选择连接器」或某个 Notion Connector 卡片
+    └─ 导航到 ConnectorConfigPage（← 资源连接器 > Notion Connector）
+
 ┌─────────────────────────────────────────────────────────────┐
-│ Step 1: 选择平台                                             │
-│                                                             │
-│   [Notion]  [GitHub]  [Google Drive]  ...                   │
-│     ↓                                                       │
-│ Step 2: 认证                                                 │
+│ Step 1: 认证                                                 │
 │                                                             │
 │   "正在连接 Notion..."                                       │
 │   验证码: VAF-HWY                                           │
 │   [打开浏览器确认] ← 用户点击                                 │
 │     ↓                                                       │
-│ Step 3: 选择 Database 及 Standalone Page                     │
+│ Step 2: 选择 Database 及 Standalone Page                     │
 │                                                             │
 │   Databases:                                                │
 │   ☑ ink-and-memory 代办清单                                  │
@@ -224,7 +218,7 @@ Step 0: 进入 Settings 的资源链接区，或从 Chat 的 Connector CTA 跳�
 │   ☐ 个人日记                                                 │
 │   [确认选择]                                                 │
 │     ↓                                                       │
-│ Step 4: 同步完成                                             │
+│ Step 3: 同步完成                                             │
 │                                                             │
 │   "已同步 2 个数据库，共 47 个页面"                           │
 │   [完成]                                                     │
@@ -414,8 +408,8 @@ Notion Device Connector:
 
 | 业务需求 | ntn api 命令 | 调用时机 |
 |---------|-------------|---------|
-| 获取 Database 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器创建 Step 3（Database 选择） |
-| 获取 Standalone Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 3（Page 选择） |
+| 获取 Database 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器创建 Step 2（Database 选择） |
+| 获取 Standalone Page 列表 | `ntn api v1/search filter:='{"property":"object","value":"page"}' page_size:=100` | 连接器创建 Step 2（Page 选择） |
 | 获取 Database 下的 Row Page | `ntn api v1/databases/<db_id>/query` | 数据同步阶段 |
 | 获取 Data Source 列表 | `ntn api v1/search filter:='{"property":"object","value":"data_source"}'` | 连接器初始化 |
 
@@ -437,27 +431,13 @@ class NotionAPIBridge:
     async def list_standalone_pages(self) -> list[dict]:
         """获取用户可访问的 Standalone Page（非 Database Row）。"""
         ...
-
-    async def query_database(self, database_id: str) -> list[dict]:
-        """查询指定 Database 下的 Row Page 列表。"""
-        ...
 ```
-
-### 7.3 错误处理策略
-
-| 错误类型 | 处理方式 |
-|---------|---------|
-| Token 过期 | 标记 connector.auth_status = "expired"，提示用户重新认证 |
-| Poll 已消费 / 无待处理会话 | 标记 `auth_session_status="consumed"`，不回退 `connector.auth_status` |
-| ntn CLI 不可用 | 返回友好错误，建议用户安装 ntn |
-| API 限流 | 指数退避重试，最多 3 次 |
-| 网络超时 | 保留上一版 canonical snapshot，标记 `stale`，提示用户稍后刷新 |
 
 ---
 
 ## 8. 时序图
 
-### 8.1 资源连接器创建完整流程
+### 8.1 认证流程
 
 ```mermaid
 sequenceDiagram
@@ -467,97 +447,87 @@ sequenceDiagram
     participant CLI as ntn CLI
     participant Notion as Notion API
 
-    User->>Front: 创建资源连接器
-    Front->>Back: POST /api/connectors {platform:"notion"}
-    Back-->>Front: {connector_id, status:"pending"}
-
-    User->>Front: 开始认证
-    Front->>Back: POST /api/connectors/:id/auth/login
+    User->>Front: 在 ConnectorConfigPage 点击"连接 Notion"
+    Front->>Back: POST /api/notion/auth/login
     Back->>CLI: ntn login --no-browser
-    CLI-->>Back: verificationUrl + code
-    Back-->>Front: {verificationUrl, code}
-    User->>Notion: 浏览器确认
-    Front->>Back: POST /api/connectors/:id/auth/poll
+    CLI-->>Back: verificationUrl + verificationCode
+    Back-->>Front: { verificationUrl, verificationCode }
+    Front->>User: 展示 URL
+    User->>Notion: 浏览器打开 URL 确认
+    Front->>Back: POST /api/notion/auth/poll
     Back->>CLI: ntn login poll
-    CLI-->>Back: exit 0 (认证成功)
-    Back-->>Front: {auth_status:"authenticated"}
-
-    Front->>Back: GET /api/connectors/:id/databases
-    Back->>CLI: ntn api v1/search filter:=database
-    CLI->>Notion: POST /v1/search
-    Notion-->>CLI: database list
-    CLI-->>Back: JSON
-    Back-->>Front: [{database_id, title}, ...]
-
-    Front->>Back: GET /api/connectors/:id/pages
-    Back->>CLI: ntn api v1/search filter:=page
-    CLI->>Notion: POST /v1/search
-    Notion-->>CLI: standalone page list
-    CLI-->>Back: JSON
-    Back-->>Front: [{page_id, title}, ...]
-
-    User->>Front: 选择 Database 及 Standalone Page
-    Front->>Back: POST /api/connectors/:id/resources/select
-    Back->>Back: 存储选定的 database_id 及 page_id 列表
-
-    Back->>CLI: ntn api v1/databases/<db_id>/query (per db)
-    CLI->>Notion: POST /v1/databases/:id/query
-    Notion-->>CLI: row page list
-    CLI-->>Back: JSON
-    Back->>Back: 资源连接器数据层物化 canonical snapshot
-    Back-->>Front: {synced:true, snapshot_version:"snap-20260628-001", database_count:2, page_count:47}
+    CLI->>Notion: 等待用户确认
+    Notion-->>CLI: token
+    CLI-->>Back: exit 0
+    Back->>CLI: ntn auth status
+    CLI-->>Back: authenticated
+    Back-->>Front: { authenticated: true }
 ```
 
-### 8.2 Agent 对话中读取 `.notion/` 流程
+### 8.2 Agent 读取 Notion 内容流程
 
 ```mermaid
 sequenceDiagram
-    participant User as 用户
     participant Agent as Claude Agent
     participant Service as ClaudeAgentService
     participant Data as Connector Data Layer
     participant Hook as PreToolUse Hook
+    participant Tmp as Temporary JSON
 
-    User->>Agent: "帮我看看 Notion 代办清单"
-    Agent->>Service: attach workspace context
+    Agent->>Service: init / attach workspace
     Service->>Data: get_current_snapshot(workspaceId, connectorId)
-    Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion}
-    Service-->>Agent: workspace_context + attached snapshot
+    Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion, sourceRevision, syncCursor}
+    Service-->>Agent: <workspace_context> includes snapshot identity
 
-    Agent->>Hook: Read .notion/snapshot.json
+    Agent->>Hook: Read(".notion/snapshot.json")
     Hook->>Data: resolve from attached snapshot
     Data-->>Hook: snapshot identity
-    Hook-->>Agent: snapshot.json 内容
+    Hook->>Tmp: write one-shot JSON
+    Hook-->>Agent: updatedInput → tmp path
 
-    Agent->>Hook: Read .notion/connector.json
+    Agent->>Hook: Read(".notion/index.json")
     Hook->>Data: resolve from same snapshotVersion
-    Data-->>Hook: connector info
-    Hook-->>Agent: connector.json 内容
+    Data-->>Hook: index data + snapshot identity
+    Hook->>Tmp: write one-shot JSON
+    Hook-->>Agent: updatedInput → tmp path
+    Agent->>Agent: 得到页面列表
 
-    Agent->>Hook: Read .notion/databases/db-001.json
+    Agent->>Hook: Read(".notion/pages/abc123.json")
     Hook->>Data: resolve from same snapshotVersion
-    Data-->>Hook: database pages + snapshot identity
-    Hook-->>Agent: db-001.json 内容
-
-    Agent-->>User: "代办清单中有 32 个页面，最近编辑的是..."
+    alt page materialized in snapshot
+        Data-->>Hook: page data + snapshot identity
+    else page not materialized
+        Data-->>Hook: snapshot-scoped miss
+    end
+    Hook->>Tmp: write one-shot JSON
+    Hook-->>Agent: updatedInput → tmp path
 ```
 
 ---
 
-## 9. 与 workspace-adapter 模式的映射关系
+## 9. 实现文件索引
 
-### 9.1 模式对称性
+| 文件 | 变更内容 | 状态 |
+| ------------------------------------------------------------ | ------------------------------------------------------------ | -------- |
+| `backend/libs/claude_agent_kit/server/notion_snapshot.py` | canonical snapshot 合同、状态枚举、`.notion/` 路径解析、write proposal stale 判断 | ✅ 已实现 |
+| `backend/tests/test_notion_snapshot_contract.py` | 验证快照路径解析、数据提取、缺页语义、proposal 版本判断 | ✅ 已实现 |
+| `backend/notion/auth.py` | `ntn login` 流程编排、NOTION_HOME 管理、auth status 检测 | 待实现 |
+| `backend/notion/sync.py` | 同步远程数据并物化 canonical snapshot | 待实现 |
+| `backend/notion/snapshot_store.py` | 持久化 current snapshot、历史版本和审计字段 | 待实现 |
+| `backend/libs/claude_agent_kit/server/agent_runner.py` | 未来接线：PreToolUse `.notion/` 读取从 attached snapshot 重定向 | 待实现 |
+| `backend/claude_agent/workspace_context.py` | 未来接线：`WORKSPACE_CONTEXT_TEMPLATE` 注入 snapshot identity 和 `.notion/` 读法 | 待实现 |
+| `backend/claude_agent/service.py` | 未来接线：Agent init 时从连接器数据层 attach current snapshot | 待实现 |
 
-本设计严格遵循 `workspace-adapter.md` 确立的虚拟索引模式：
+### 9.1 相关现有文件（需阅读，不需修改）
 
-| workspace-adapter 模式 | Notion Connector 对应实现 |
-|------------------------|--------------------------|
-| `.editor/` 虚拟索引 | `.notion/` 虚拟索引 |
-| `editor_state` 当前运行快照 | `CanonicalWorkspaceSnapshot` 连接器数据层快照 |
-| `EDITOR_RESOURCES` 映射表 | `NOTION_SNAPSHOT_RESOURCES` 映射表 |
-| PreToolUse 拦截 Read | PreToolUse 拦截 Read（相同机制） |
-| `switch_editor` 切换 `.editor/` 上下文 | Notion connector 不复用 `switch_editor`；由 workspace resource selection 决定 |
-| workspace init 初始化 `.editor/` | workspace init 初始化 `.notion/` 占位符；snapshot attach 由连接器数据层提供 |
+| 文件 | 作用 |
+| ---------------------- | ------------------------------- |
+| `editor_index.py` | `.notion/` snapshot path resolver 的参考模板 |
+| `workspace.py` | `.notion/` 目录初始化入口 |
+| `agent_runner.py` | PreToolUse / PostToolUse 扩展点 |
+| `workspace_context.py` | 工作空间上下文模板 |
+| `context_builder.py` | 系统提示词模板 |
+| `editor_tool.py` | `switch_editor` handler 所在；Notion connector 不复用该工具 |
 
 ### 9.2 与 workspace-context 的集成
 
@@ -603,21 +573,20 @@ Notion connector 不复用 `switch_editor`。`switch_editor` 只切换 `.editor/
 
 | UI 状态 | 触发条件（后端） | 关键数据 |
 |---|---|---|
-| `draft` | 已创建连接器，尚未发起认证 | `status="draft"`、无 `auth_session` |
-| `authenticating` | 发起 `auth/login` 或存在未完成 auth 会话 | `auth_session_status="running"/"pending"`、`verification_code` |
-| `authenticated` | `auth/poll` 返回已认证 | `auth_status="authenticated"`、`auth_session_status="consumed"` 或 `authenticated` |
-| `syncing` | 资源选择后触发同步 | `status="syncing"`、`current_snapshot_version` 不变 |
-| `synced` | 同步完成，快照写入成功 | 返回 `snapshot_version/source_revision/sync_cursor/fetched_at` |
-| `stale` | 后端返回 `is_stale=true` 或 source_revision 落后 | `snapshot_version` 与当前不一致 / 已过期 |
-| `error` | `error` / `failed` 状态或 poll 异常 | `message`、`error_code`、下一步建议动作 |
+| `未认证` | 已有连接器但未完成认证 | `status="draft"` 或 `auth_status="pending"` |
+| `认证中` | 发起 `auth/login` 或存在未完成 auth 会话 | `auth_session_status="running"/"pending"`、`verification_code` |
+| `已连接` | `auth/poll` 返回已认证，且当前详情页可读配置 | `auth_status="authenticated"` |
+| `同步中` | 资源选择后触发同步 | `status="syncing"`、`current_snapshot_version` 暂未更新 |
+| `同步失败` | `sync failed` / `error` | `message`、`error_code` |
+| `已关闭` | 用户确认关闭连接 | `status="closed"`、保留历史来源 |
 
 ### 11.2 认证会话保活规则（避免“重复 pending”）
 
 `POST /auth/poll` 的语义应满足：
 
-- 当会话已消费，返回 `status="consumed"` 或 `error code="already_consumed"` 时，前端应**立即收敛到 authenticated** 展示（若 connector 已有 token）
-- 当会话过期返回 `status="expired"` 时，前端应只显示 `Re-auth`，并保留最近快照但明确“仅历史只读”
-- 当会话失败（`failed`）时，前端必须止损到 `error` 并给出 `Retry auth`。
+- 当会话已消费，返回 `status="consumed"` 或 `error code="already_consumed"` 时，前端应**立即收敛到已连接** 展示（若 connector 已有 token）。
+- 当会话过期返回 `status="expired"` 时，前端应只显示重新认证入口，并保留最近快照但明确“当前不可继续同步”。
+- 当会话失败（`failed`）时，前端必须止损到 `同步失败` 或认证错误态，并给出 `Retry auth`。
 
 ### 11.3 来源列表与快照一致性规则
 
@@ -632,28 +601,25 @@ Notion connector 不复用 `switch_editor`。`switch_editor` 只切换 `.editor/
 
 ```mermaid
 stateDiagram-v2
-    [*] --> draft
-    draft --> authenticating: create connector + auth/login
-    authenticating --> error: auth/error
-    authenticating --> authenticated: poll(authenticated or consumed)
-    authenticating --> expired: poll(expired)
-    authenticated --> syncing: select resources + sync
-    syncing --> synced: sync success + snapshot ready
-    synced --> stale: snapshot identity changed
-    stale --> syncing: manual refresh
-    syncing --> error: sync failed
-    error --> authenticating: retry auth
-    error --> syncing: retry sync
-    authenticated --> [*]: delete connector
-    error --> [*]: delete connector
+    [*] --> 未认证
+    未认证 --> 认证中: auth/login
+    认证中 --> 同步失败: auth/error
+    认证中 --> 已连接: poll(authenticated or consumed)
+    已连接 --> 同步中: select resources + sync
+    同步中 --> 已连接: sync success + snapshot ready
+    同步中 --> 同步失败: sync failed
+    已连接 --> 已关闭: confirm disconnect
+    同步失败 --> 认证中: retry auth
+    同步失败 --> 同步中: retry sync
 ```
 
 ### 11.5 Chat 嵌入态状态边界
 
 | View | 默认状态来源 | 无真实 connector 时 | 401 / 后端不可用时 | 滚动边界 |
 |---|---|---|---|---|
-| Created workbench | `selectedConnector ?? normalizedFallbackConnector` | 显示 created connector workbench 与 fallback 来源列表 | 保持黑底 workbench 可见，不白屏、不跳错误空态 | connector 内容区内部滚动 |
-| Source management (`添加源`) | `selectedConnector` | 显示 `ConnectorEmptyState`，引导新建连接器 | local fallback 若无真实 connector 仍保持空态 | 空态或资源选择内容区内部滚动 |
+| `HistoryTabPanel` | 当前 thread / 历史列表 / 空聊天态 | 显示 `EmptyChatState` | 保持 `ChatInputDock` + `WorkspaceTabBar`，内容区显示可恢复错误条 | 历史列表或消息流内部滚动 |
+| `ResourceConnectorTabPanel` | 连接器列表 / 空态 / 错误态 | 显示 `ConnectorEmptyState`，引导 `选择连接器` | 保持 toolbar 锚点与错误卡，不白屏 | 连接器列表或空态卡内部滚动 |
+| `ConnectorConfigPage` | 连接器详情接口 | 顶部导航仍可返回，内容区显示未认证禁用态 | 保留 `TopNavigation` + 错误卡 + 重试入口 | 来源树或详情内容区内部滚动 |
 
 ---
 
@@ -665,4 +631,4 @@ stateDiagram-v2
 | 同步方式 | 实时 / 定时 / 按需 | workspace init + 按需 | 避免后台常驻进程，简化部署 |
 | 映射存储 | 数据库 / 文件系统 | `.notion/` 虚拟索引 | 与 `.editor/` 模式对称，Agent 直接可读 |
 | Database 发现 | 硬编码 / 用户选择 | 用户选择 | 用户决定哪些数据对 Agent 可见 |
-| PageID 同步 | 全量 / 增量 | 全量生成 snapshot（本期） | 保证多 Agent 初始化读取同一版本 |
+| 页面入口 | Chat 主工作区 / 独立设置页 | Chat `WorkspaceTabBar` → `ConnectorConfigPage` | 与最新草图一致，避免主流程分裂 |
