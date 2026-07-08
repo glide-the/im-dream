@@ -1,6 +1,8 @@
-// [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, ConnectorLandingPanel, auth token, and AI SDK message types.
+// [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, ConnectorLandingPanel, ConnectorConfigPage, auth token, and AI SDK message types.
 //         /api/claude-agent/threads/{id}/status, reconnectStreamNonce to ChatPanel.
-// [Output] Render the chat workspace with lazy thread creation, app-owned history/connector entry state, history/file sidebars, a single pill quick-action strip, ChatPanel, and a lightweight connector landing panel that routes management to Settings.
+// [Output] Render the chat workspace with lazy thread creation, a fully visible WorkspaceTabBar (聊天历史/资源连接器)
+//          under the composer, history/file sidebars, a single pill quick-action strip, ChatPanel, the
+//          ResourceConnectorTabPanel (ConnectorLandingPanel), and the in-Chat ConnectorConfigPage drill-down.
 //          When /status reports running, bump reconnectStreamNonce so ChatPanel attaches SSE stream.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
@@ -35,6 +37,10 @@
 // [Sync] 2026-07-08: replace the Chat-embedded connector workbench with a lightweight landing panel; Settings now owns full connector management.
 // [Sync] 2026-07-08: replace text-only "加载历史中..." states with skeleton-screen placeholders,
 //                    aligning with 《链接器概念的交互设计稿》 Chat 入口页骨架屏。
+// [Sync] 2026-07-08: add a fully visible `聊天历史`/`资源连接器` pill switcher (WorkspaceTabBar) below
+//                    the composer, and route connector-card selection into the new in-Chat
+//                    `ConnectorConfigPage` instead of `onOpenConnectorSettings`, per the confirmed
+//                    docs/prd/notion-session/resource-connector.md realignment.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
@@ -51,7 +57,8 @@ import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ConnectorLandingPanel from './ConnectorLandingPanel';
-import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
+import ConnectorConfigPage from './ConnectorConfigPage';
+import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
 import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
@@ -302,7 +309,6 @@ function ChatViewContent({
   editorState,
   onEditorWriteConfirmed,
   activeVoice,
-  onOpenConnectorSettings,
   landingTab,
   onLandingTabChange,
 }: ChatViewContentProps) {
@@ -334,6 +340,9 @@ function ChatViewContent({
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   // Bump to signal ChatPanel to attach GET /threads/{id}/stream when backend is still running.
   const [reconnectStreamNonce, setReconnectStreamNonce] = useState(0);
+  // Whether the full-page ConnectorConfigPage (Notion connector detail) is open, replacing the
+  // ResourceConnectorTab content in place; back navigation returns here without leaving Chat.
+  const [connectorConfigOpen, setConnectorConfigOpen] = useState(false);
 
   // Load thread list
   const reloadThreads = useCallback(async () => {
@@ -538,6 +547,22 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
+  }, [onLandingTabChange]);
+
+  // Opens the ConnectorConfigPage in place of the ResourceConnectorTab content — a page-level
+  // navigation within Chat, not a redirect to Settings (docs/prd/notion-session/resource-connector.md §3.3).
+  const handleOpenConnectorConfig = useCallback(() => {
+    setConnectorConfigOpen(true);
+  }, []);
+
+  const handleCloseConnectorConfig = useCallback(() => {
+    setConnectorConfigOpen(false);
+  }, []);
+
+  // Selecting either landing tab exits the connector detail drill-down.
+  const handleSelectWorkspaceTab = useCallback((tab: ChatLandingTab) => {
+    setConnectorConfigOpen(false);
+    onLandingTabChange(tab);
   }, [onLandingTabChange]);
 
   const handleShare = useCallback(async () => {
@@ -756,8 +781,63 @@ function ChatViewContent({
                       </div>
                     ) : null}
 
+                    {!connectorConfigOpen ? (
+                      <div
+                        role="tablist"
+                        aria-label="Chat 工作区切换"
+                        style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, display: 'flex', gap: '0.5rem' }}
+                      >
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={landingTab === 'history'}
+                          onClick={() => handleSelectWorkspaceTab('history')}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            border: `1px solid ${landingTab === 'history' ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
+                            borderRadius: '999px',
+                            padding: '0.55rem 0.9rem',
+                            background: landingTab === 'history' ? 'var(--color-bg-surface)' : 'transparent',
+                            color: 'var(--color-text-primary)',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <IconClock style={{ width: '0.85rem', height: '0.85rem' }} />
+                          聊天历史
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={landingTab === 'connector'}
+                          onClick={() => handleSelectWorkspaceTab('connector')}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            border: `1px solid ${landingTab === 'connector' ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
+                            borderRadius: '999px',
+                            padding: '0.55rem 0.9rem',
+                            background: landingTab === 'connector' ? 'var(--color-bg-surface)' : 'transparent',
+                            color: 'var(--color-text-primary)',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          <IconDatabase style={{ width: '0.85rem', height: '0.85rem' }} />
+                          资源连接器
+                        </button>
+                      </div>
+                    ) : null}
+
                     <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                      {landingTab === 'history' ? (
+                      {connectorConfigOpen ? (
+                        <ConnectorConfigPage onBack={handleCloseConnectorConfig} />
+                      ) : landingTab === 'history' ? (
                         <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--color-border-paper)', borderRadius: '1.15rem', background: 'var(--color-bg-paper)' }}>
                           <div style={{ padding: '0.8rem 0.95rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', borderBottom: '1px solid var(--color-border-paper)' }}>
                             <div>
@@ -839,7 +919,7 @@ function ChatViewContent({
                           </div>
                         </div>
                       ) : (
-                        <ConnectorLandingPanel onOpenSettings={onOpenConnectorSettings} />
+                        <ConnectorLandingPanel onOpenConnector={handleOpenConnectorConfig} />
                       )}
                     </section>
                   </div>
