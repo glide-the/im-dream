@@ -182,7 +182,7 @@ function ConnectorCard({ connector, onOpen }: { connector: ResourceConnector; on
           </span>
         </div>
         <p style={{ margin: '0.32rem 0 0', fontSize: '0.78rem', lineHeight: 1.55, color: 'var(--color-text-secondary)' }}>
-          {connector.platform.toUpperCase()} · 点击进入详情页管理认证与来源
+          {connector.platform.toUpperCase()} · 点击管理认证与来源
         </p>
         <div style={{ marginTop: '0.4rem', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', color: 'var(--color-text-muted)', fontSize: '0.75rem' }}>
           <IconClock style={{ width: '0.82rem', height: '0.82rem' }} />

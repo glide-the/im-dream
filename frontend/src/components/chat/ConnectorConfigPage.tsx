@@ -77,7 +77,7 @@ export default function ConnectorConfigPage({ onBack, isMobile = false }: Connec
               连接器概览
             </h1>
             <p style={{ margin: '0.3rem 0 0', fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
-              管理 Notion 资源链接的认证状态、资源选择和来源列表；下方保留可编辑名称与关闭连接等操作。
+              管理 Notion 资源链接的认证状态、资源选择和来源列表；下方保留可编辑名称与断开连接等操作。
             </p>
           </div>
         </div>
