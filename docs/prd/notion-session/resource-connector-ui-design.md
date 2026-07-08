@@ -80,7 +80,7 @@ html[data-theme='dark'] {
 | 输入框容器 | Focus within | 外圈出现暖棕色柔和 ring，阴影略加深，强化“可以开始提问”的入口感。 |
 | `WorkspaceTabBar` | Switch | 活跃 tab 背景加深并切换 `MainContentArea`；输入区与头部不抖动。 |
 | 空状态按钮 | Hover | 轻微上浮并出现更深纸影，箭头图标向右移动 2px。 |
-| 连接器卡片 | Hover | 卡片整体上移 2px，标题变深，右上角状态标签更清晰。 |
+| 连接器状态面板 | Hover | 仅小型「管理」入口强化可点击反馈；面板正文保持信息展示属性，不做整卡按钮。 |
 | 来源树节点 | Expand / Select | 展开箭头旋转，子级以轻量缩进进入，不使用重动画。 |
 | 警告状态卡 | Toggle | 开关切换时保持文案区稳定，仅切换状态色与开关位置。 |
 | 深色模式 | Toggle | 页面变量切换并带 220ms 颜色过渡，不闪屏。 |
@@ -90,5 +90,6 @@ html[data-theme='dark'] {
 ## ✅ 说明
 - 页面支持 **Light / Dark** 模式切换，并统一服务于 Chat 内 `WorkspaceTabBar` 与 Settings 内 `ConnectorNotionDetailPage`。
 - `ResourceConnectorTabPanel` 要求默认保留筛选 / 排序工具栏位置；空态与加载态都不能挤掉该布局锚点。
+- 已连接态使用非按钮状态面板，正文展示平台、授权 / 同步状态、已链接资源数量和来源摘要；只有明确的「管理」入口跳转 Settings。
 - `ConnectorNotionDetailPage` 必须复用同一纸面视觉语言，组件层级固定为 `TopNavigation` → `ConnectorHeader` → `NotionAccountStatusSection` → `ResourceScopeSection` → `MountedSourcesSection`。
 - 资源连接器入口在 Chat 工作区呈现为轻量摘要；完整配置归属于 Settings「资源链接」，详情页是 Settings 内管理层。

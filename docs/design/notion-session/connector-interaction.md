@@ -24,6 +24,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-08: 资源范围选择合并为一个可搜索、每页 10 条的统一列表；保存资源后已挂载来源立即回显；底部授权 / 同步状态卡移除。
 > [Sync] 2026-07-08: 骨架屏规则重新对齐两份最新草图：Chat 历史加载、Chat 连接器加载、以及详情页 breadcrumb/header/overview/resource list 都改用结构化 skeleton，而非纯文字提示。
 > [Sync] 2026-07-08: 修正 Chat 资源连接器跳转错位：`ConnectorLandingPanel` 的「选择连接器」和连接器卡片统一进入 Settings「资源链接」区；Chat 不再打开内部配置页。
+> [Sync] 2026-07-08: 修正 Chat 入口比例与连接器已连接态表达：landing 主内容区与输入框 / `WorkspaceTabBar` 同宽居中，历史 tab 移除外层冗余边框；连接器列表改为非按钮状态面板，展示授权、同步和已链接资源摘要，只有小型「管理」入口跳转 Settings。
 
 ---
 
@@ -126,9 +127,9 @@ Resource Connector (资源连接器)
     ├─ 点击「资源连接器」
     │   ├─ 显示 ConnectorToolbar（筛选 / 排序）
     │   ├─ 无连接器 → 虚线空态：远程资源 / 本地资源 / 更多图标 + 暂无资源连接器 + 选择连接器
-    │   └─ 有连接器 → ConnectorList
+    │   └─ 有连接器 → ConnectorStatusPanel 列表（平台状态 + 已链接资源摘要）
     │
-    ├─ 点击「选择连接器」或 Notion Connector 卡片
+    ├─ 点击「选择连接器」或 Notion Connector 状态面板中的「管理」
     │   └─ 页面级导航到 Settings，并聚焦「资源链接」
     │
     ├─ 在 Settings 点击 Notion「管理」
@@ -188,7 +189,7 @@ Resource Connector (资源连接器)
 - 背景：历史列表、连接器 Tab 内容、以及 Notion 详情页都必须使用结构化 skeleton；不得退化为纯文字 loading。
 - 规则：
   1. `HistoryTab` 首次加载（`isLoadingThreads && visibleThreads.length === 0`）时，显示 `HistorySkeletonList`：3~5 条历史条目骨架，包含标题条、摘要条、时间占位。
-  2. `ResourceConnectorTab` 首次加载时，显示 `ConnectorToolbar` 的筛选 / 排序 pill 骨架，以及 2~3 张连接器卡片骨架；在结果返回前不得先渲染“暂无资源连接器”。
+  2. `ResourceConnectorTab` 首次加载时，显示 `ConnectorToolbar` 的筛选 / 排序 pill 骨架，以及 2~3 张连接器状态面板骨架；在结果返回前不得先渲染“暂无资源连接器”。
   3. `ConnectorNotionDetailPage` 首次加载时，至少同时出现四组骨架：`TopNavigation` breadcrumb skeleton、`ConnectorHeader` skeleton、`NotionAccountStatusSection` skeleton、`ResourceScopeSection` skeleton。
   4. 当 `ResourceScopeSection` 已进入已认证态但尚未拉到来源数据时，展示统一资源列表骨架，而不是“读取连接器状态…”之类纯文本。
   5. 骨架只用于首次加载，不覆盖错误态、空态、已关闭态或已有数据后的增量刷新态。
@@ -202,8 +203,8 @@ Resource Connector (资源连接器)
 ```txt
 Step 0: 进入 Chat Dashboard，并在 WorkspaceTabBar 中切换到「资源连接器」
     │
-    ├─ 看到 ConnectorToolbar + 空态或连接器列表
-    ├─ 点击「选择连接器」或某个 Notion Connector 卡片
+    ├─ 看到 ConnectorToolbar + 空态或连接器状态面板列表
+    ├─ 点击「选择连接器」或某个 Notion Connector 状态面板中的「管理」
     └─ 导航到 Settings「资源链接」
         └─ 点击 Notion「管理」后进入 ConnectorNotionDetailPage（← 资源连接器 > Notion Connector）
 

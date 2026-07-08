@@ -8,6 +8,7 @@
 > **[Sync] 2026-07-08**: 依据《Chat 工作区入口页》与《连接器具体配置页面结构草图》重写 Chat 主工作区：以居中 `ChatInputDock` + `WorkspaceTabBar` 为准，历史与资源连接器都在主内容区切换，旧的侧边历史入口不再作为主路径。
 > **[Sync] 2026-07-08**: 修正资源连接器入口策略：Chat 只承载轻量 `ResourceConnectorTabPanel`，点击「选择连接器」或连接器卡片必须进入 Settings 的「资源链接」区；Notion 具体配置页由 Settings 内的 `ConnectorNotionDetailPage` 承载。
 > **[Sync] 2026-07-08**: Notion 具体配置页最新交互归属 Settings：同一平台只认证一个账号；资源范围为统一 data_source / page 列表，搜索框与「保存资源」同一操作行，默认每页 10 条；保存后「已挂载来源」必须立即显示所选来源。
+> **[Sync] 2026-07-08**: 根据 Chat 入口比例反馈收紧实现边界：`MainContentArea` 与输入框 / `WorkspaceTabBar` 同宽居中；历史窗体移除外层冗余边框；Chat 连接器已连接态改为状态信息面板，展示授权 / 同步 / 已链接资源摘要，只有小型「管理」入口可跳转 Settings。
 
 ## 1. 文档范围
 
@@ -121,13 +122,13 @@ ResourceConnectorTabPanel
     │   ├── EmptyDescription：连接 Notion / 飞书 / CLI 后可在对话中使用资源
     │   └── SelectConnectorButton（主 CTA）
     ├── ConnectorList
-    │   └── ConnectorCard（名称 / 描述 / 状态 / 更新时间）
+    │   └── ConnectorStatusPanel（平台 / 授权状态 / 同步状态 / 已链接资源 / 管理入口）
     └── ConnectorErrorState
 ```
 
 - 空态采用**虚线边框容器**，不可退化为纯文本。
 - `SelectConnectorButton` 的主文案统一为 `选择连接器`；点击后必须打开 Settings 页面并聚焦「资源链接」区。
-- 点击 `ConnectorCard` 后进入同一 Settings 资源链接路径；若用户继续点击 Notion「管理」，再进入 Settings 内的 `ConnectorNotionDetailPage`。
+- 已连接态不把整张连接器信息做成按钮；`ConnectorStatusPanel` 主要展示平台状态与已链接资源摘要，只保留小型「管理」入口进入 Settings 资源链接路径。若用户继续点击 Notion「管理」，再进入 Settings 内的 `ConnectorNotionDetailPage`。
 
 ## 5. 状态设计
 
@@ -138,7 +139,7 @@ ResourceConnectorTabPanel
 | `empty_chat` | 默认落在 `HistoryTab`，主内容区显示空聊天状态；空状态不得抢过 `ChatInputDock` 的视觉权重。 |
 | `active_chat` | 有消息内容时，`ChatMessageList` 成为主要内容区；`ScrollToBottomButton` 在用户离开底部时出现。 |
 | `connector_empty` | 切到 `ResourceConnectorTab` 但没有任何资源连接器时，显示虚线空态、三枚资源类型图标、标题“暂无资源连接器”、描述文案和 CTA。 |
-| `connector_connected` | 有连接器时显示 `ConnectorToolbar` + `ConnectorList`，卡片内展示状态 badge、名称、描述、最近同步信息。 |
+| `connector_connected` | 有连接器时显示 `ConnectorToolbar` + `ConnectorStatusPanel` 列表，面板内展示平台、授权状态、同步状态、已链接资源数量、最近同步和资源摘要；整块面板不是按钮。 |
 | `connector_error` | 连接器列表读取失败、认证失效或同步失败时，在 tab 内容区内显示错误卡和重试入口，不影响 Header / Input Dock。 |
 
 ### 5.2 首次加载骨架屏
@@ -224,9 +225,28 @@ ResourceConnectorTabPanel
 | 非目标 | 不引入新的主题框架，不重做色彩系统。 |
 | 验收 | 暗色模式下页面背景、卡片、边框、按钮和文本均使用可读的语义色。 |
 
+### 10.4 Chat 入口比例与历史窗体边框
+
+| 项 | 方案 |
+|---|---|
+| 根因 | `MainContentArea` 曾横向铺满 Chat shell，和居中的输入框 / `WorkspaceTabBar` 比例不一致；历史 tab 外层又叠加一层纸面边框，形成多余窗体感。 |
+| 最小修复 | 将 landing 主内容区限制为与输入框一致的 `max-width` 并居中；历史 tab 外层移除边框和分隔线，只保留列表内部滚动、搜索按钮、空态和骨架。 |
+| 非目标 | 不重写消息态 `ChatPanel` 布局，不移除历史搜索弹窗，不新增右侧抽屉主入口。 |
+| 验收 | 默认 Chat 入口与设计稿保持“输入框 → tab → 同宽内容区”的比例；历史列表不出现额外外框。 |
+
+### 10.5 连接器已连接态信息表达
+
+| 项 | 方案 |
+|---|---|
+| 根因 | `ConnectorCard` 使用整卡 `<button>`，内容强调“点击管理”，未体现不同平台连接器状态和已链接资源。 |
+| 最小修复 | 改为非按钮 `ConnectorStatusPanel`，展示平台名称、授权状态、同步状态、已链接资源数量、最近同步和来源摘要；仅右上小型「管理」按钮跳转 Settings。 |
+| 非目标 | 不在 Chat 内实现资源选择、同步刷新、筛选排序真实逻辑或多实例连接器管理。 |
+| 验收 | 连接器窗体主要是状态信息和已链接资源列表，而不是按钮列表；Settings 仍是唯一详细配置入口。 |
+
 ## 11. 前端实现备注（2026-07-08 对齐稿）
 
 - Chat 首页的首要视觉锚点是 `ChatInputDock`，不是 marketing hero，也不是右侧历史侧栏。
 - 历史对话与资源连接器共用 `WorkspaceTabBar`，推荐实现成稳定的 content switch，而不是 overlay / drawer。
 - `MoreButton` 可保留，但不得与 `WorkspaceTabBar` 重复提供“历史主入口”。
 - 长对话中的到底部箭头逻辑继续保留，与本轮布局对齐不冲突。
+- landing 主内容区必须和输入框 / tab 使用同一横向比例；连接器已连接态必须优先表达状态和已链接资源，管理动作只是附属入口。

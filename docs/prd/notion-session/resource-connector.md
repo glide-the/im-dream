@@ -18,6 +18,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 > [Sync] 2026-07-08: 根据最新反馈修正入口边界：Chat `ResourceConnectorTabPanel` 只做摘要和跳转，点击「选择连接器」或连接器卡片进入 Settings 的「资源链接」区；Notion 详情页由 Settings 内 `ConnectorNotionDetailPage` 承载，保留现有认证 / 资源选择流程。
 > [Sync] 2026-07-08: 详情页业务模型收敛为“同一平台只能认证一个账号”；`ConnectorNotionDetailPage` 不再嵌入集合型 `ResourceConnectorPage`，也不展示新建 / 刷新 / 连接器列表等多实例入口。
 > [Sync] 2026-07-08: ResourceScopeSection 合并 Databases 与 Standalone Pages 为统一资源列表，搜索框与保存按钮同一工具行，默认每页 10 条；保存资源后“已挂载来源”必须立即显示所选来源；底部授权 / 同步状态卡移除，状态集中到账号状态区。
+> [Sync] 2026-07-08: Chat `ResourceConnectorTabPanel` 已连接态收紧为非按钮状态面板：展示平台、授权状态、同步状态、已链接资源数量和来源摘要；仅小型「管理」入口跳转 Settings。landing 内容区与输入框同宽，历史 tab 移除冗余外框。
 
 ---
 
@@ -89,7 +90,7 @@ ChatDashboardPage
         └── ResourceConnectorTabPanel
               ├── ConnectorToolbar
               ├── ConnectorEmptyState / ConnectorList
-              └── ConnectorCard / SelectConnectorButton → Settings ConnectorSettingsSection
+              └── ConnectorStatusPanel / SelectConnectorButton → Settings ConnectorSettingsSection
 
 SettingsView
   ├── ConnectorSettingsSection
@@ -147,12 +148,13 @@ ResourceConnectorTabPanel
 │   │   ├── EmptyDescription：连接 Notion / 飞书 / CLI 后可在对话中使用资源
 │   │   └── SelectConnectorButton
 │   └── ConnectorList
-│       └── ConnectorCard（名称 / 简介 / 状态 / 最近同步）
-└── ConnectorCard / SelectConnectorButton click
+│       └── ConnectorStatusPanel（平台 / 授权 / 同步 / 已链接资源 / 最近同步 / 来源摘要）
+└── ConnectorStatusPanel 管理入口 / SelectConnectorButton click
     └── Navigate → Settings / ConnectorSettingsSection
 ```
 
 > `ConnectorToolbar` 即使在空状态下也保留位置；加载时显示骨架占位，空态时显示真实筛选 / 排序控件。
+> 已连接态中，连接器信息面板不是整卡按钮。面板正文必须优先表达平台状态和已链接资源；跳转 Settings 只能由明确的「管理」小按钮承担。
 
 ### 3.3 Settings 内 `ConnectorNotionDetailPage` 详情页
 
@@ -220,7 +222,7 @@ ResourceConnectorTabPanel
     ├─ 点击「选择连接器」
     │   └─ 打开 Settings，并滚动 / 聚焦到 ConnectorSettingsSection
     │
-    ├─ 点击 Notion Connector 卡片
+    ├─ 点击 Notion Connector 状态面板中的「管理」
     │   └─ 同样打开 Settings 的 ConnectorSettingsSection
     │
     └─ 在 Settings 点击 Notion「管理」
@@ -369,6 +371,15 @@ ResourceConnectorTabPanel
 | 处理 | 将确定影响的浅色面替换为 `var(--color-*)` 语义 token 或 `color-mix()`；保留现有色彩系统。 |
 | 判断 | 符合目标：修复主题错误，不重做视觉体系。 |
 | 避免过度设计 | 不新增 token 命名空间，不重构全部 inline style。 |
+
+### 6.7 Chat 入口比例、历史边框与连接器状态面板
+
+| 项 | 方案 |
+|---|---|
+| 问题 | Chat landing 主内容区曾比输入框 / tab 更宽；历史 tab 有额外外层边框；连接器已连接态用整卡按钮表达，弱化了平台状态和已链接资源。 |
+| 处理 | landing 主内容区同输入框 `max-width` 居中；历史 tab 移除外层 border / header divider；连接器列表项改为非按钮状态面板，展示授权、同步、来源数量、最近同步和来源预览。 |
+| 判断 | 符合目标：只修正 Chat 入口比例和信息表达，Settings 仍是唯一详细配置入口。 |
+| 避免过度设计 | 不新增 API，不实现真实筛选排序，不在 Chat 内做认证 / 资源选择 / 同步刷新，不恢复多连接器实例入口。 |
 
 ---
 

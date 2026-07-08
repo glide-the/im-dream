@@ -41,6 +41,8 @@
 //                    the composer.
 // [Sync] 2026-07-08: route connector-card / CTA selection to Settings resource-link management instead
 //                    of opening an in-Chat config page, matching the latest connector interaction draft.
+// [Sync] 2026-07-08: align the landing tab content width with the Chat composer/tab bar and remove
+//                    redundant history-panel outer chrome.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
@@ -821,10 +823,10 @@ function ChatViewContent({
                       </button>
                     </div>
 
-                    <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                    <section style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                       {landingTab === 'history' ? (
-                        <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden', border: '1px solid var(--color-border-paper)', borderRadius: '1.15rem', background: 'var(--color-bg-paper)' }}>
-                          <div style={{ padding: '0.8rem 0.95rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', borderBottom: '1px solid var(--color-border-paper)' }}>
+                        <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                          <div style={{ padding: '0.8rem 0.95rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
                             <div>
                               <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>历史对话</div>
                               <div style={{ marginTop: '0.22rem', fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
