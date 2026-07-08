@@ -1,7 +1,7 @@
 # 资源连接器 — 前端 PRD
 
 Status: Draft  
-Updated: 2026-07-07
+Updated: 2026-07-08
 Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 > [Input] `docs/design/notion-session/connector-interaction.md`,
@@ -11,6 +11,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 > [Pos] resource-connector-prd in `docs/prd/notion-session`
 > [Sync] 2026-07-04: 从 `docs/design/notion-session/resource-connector-prd.md` 拆分，前端 PRD 独立管理
 > [Sync] 2026-07-07: Chat 入口页成为主落点，历史对话与连接器工作台下沉到输入框下方，嵌入式 `ResourceConnectorPage` 负责连接器管理。
+> [Sync] 2026-07-08: Connector 入口迁移到 Settings 的资源链接区，Chat 仅保留轻量摘要面板与跳转 CTA。
 
 ---
 
@@ -30,9 +31,9 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 ### 1.1 是什么
 
-**资源连接器**（Resource Connector）是 Chat 入口页下方的连接器工作台。用户先进入 Chat 页面，在输入框下方切换 `历史对话` / `连接器`，其中连接器面板负责创建与管理外部平台资源连接，并在同一工作台内发起对话、上传工作空间文件、选择 Decks。
+**资源连接器**（Resource Connector）是 Settings 中的资源链接管理入口。用户从顶部或移动端导航进入 Settings 的资源链接区，在这里管理 Notion / 飞书 / 本地 CLI 执行器等外部资源；Chat 页面只保留一个轻量摘要面板和跳转 CTA，不再承载完整管理流程。
 
-> 当前重构只落地 Notion 资源连接器的嵌入式工作台与状态流转；上传工作空间文件、Deck 关联等扩展能力保留为后续迭代，不作为本轮前端实现范围。
+> 当前重构只落地 Notion 资源连接器的 Settings 管理页与 Chat 轻量入口；上传工作空间文件、Deck 关联等扩展能力保留为后续迭代，不作为本轮前端实现范围。
 
 ### 1.2 核心价值
 
@@ -43,10 +44,10 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 | 类比对象 | 对应关系 |
 |---------|---------|
-| ChatGPT Projects "聊天" Tab | Chat 入口页的输入框 + 历史对话面板 |
+| ChatGPT Projects "聊天" Tab | Chat 入口页的输入框 + 历史对话面板 + 轻量 connector 摘要 |
 | Slack / Google Drive 连接 | Notion 资源连接器 |
-| ChatGPT Projects "来源" Tab | Chat 入口页下方的连接器工作台 |
-| 上传数据源 / 链接云端硬盘 | 连接器的多资源挂载 |
+| ChatGPT Projects "来源" Tab | Settings 中的资源链接管理页 |
+| 上传数据源 / 链接云端硬盘 | Settings 里的多资源挂载 |
 
 ---
 
@@ -59,7 +60,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 | 创建资源连接器 | 用户在工作空间中创建一个命名的连接器空间 | P0 |
 | 连接外部平台 | 选择平台（Notion）→ 完成 OAuth 认证 | P0 |
 | 选择资源 | 用户勾选可访问的 Database 及 Standalone Page | P0 |
-| 发起对话 | 在连接器空间内直接 Chat，Agent 自动感知已连接资源 | P0 |
+| 发起对话 | 在 Chat 入口页发起对话，Agent 自动感知已连接资源 | P0 |
 | 查看来源 | 查看已连接的所有资源列表及同步状态 | P0 |
 | 上传工作空间文件 | 上传本地文件作为补充背景 | 后续迭代 |
 | 选择 Decks | 关联已有的 Deck 知识卡片集 | 后续迭代 |
@@ -68,15 +69,14 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 ### 2.2 连接器空间内的子功能
 
 ```
-资源连接器空间
-  ├── Chat 入口       → 中间的对话输入框，发起新对话
-  ├── 历史对话 Tab    → 查看、搜索、切换历史会话
-  ├── 连接器 Tab      → 展示已创建连接器、创建/删除连接器
-  │     └── ResourceConnectorPage 工作台
-  │           ├── 已连接平台资源（Notion Database/Page）
-  │           ├── 上传文件
-  │           └── 关联 Decks
-  └── 设置           → 连接器名称、删除、权限
+资源链接区（Settings）
+  ├── 远程资源链接
+  │     ├── Notion 管理入口
+  │     └── 飞书占位
+  ├── 本地资源链接
+  │     └── CLI 执行器占位
+  └── Notion 具体管理页
+        └── ResourceConnectorPage（page mode）
 ```
 
 ---
@@ -85,23 +85,19 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 ### 3.1 主页面布局
 
-参考 Chat 入口页 + 下方连接器工作台的双层布局：
+参考 Settings 资源链接区 + Chat 轻量摘要面板的双层布局：
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Chat workspace                         │
+│                         Settings view                          │
 │                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │              中间对话输入框 / AIInputDock               │    │
+│  │ 资源链接区（远程资源 / 本地资源）                        │    │
+│  │   Notion · 飞书 · CLI 执行器占位                         │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
-│            [ 历史对话 ]   [ 连接器 ]                            │
-│                                                                 │
 │  ┌─────────────────────────────────────────────────────────┐    │
-│  │ 历史对话面板 / 连接器工作台                                │    │
-│  │                                                         │    │
-│  │ 历史对话: thread list + search                          │    │
-│  │ 连接器: ResourceConnectorPage（创建 / 认证 / 来源管理） │    │
+│  │ Notion 具体管理页（ResourceConnectorPage page mode）   │    │
 │  └─────────────────────────────────────────────────────────┘    │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -111,18 +107,16 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 | 区域 | 组件 | 说明 |
 |------|------|------|
-| 入口壳 | ChatLandingShell | 承载居中的输入框、下方页签、历史面板和连接器工作台 |
-| 输入栏 | AIInputDock | 中间对话输入框，附带模型选择、语音、发送按钮 |
-| Tab 栏 | LandingTabSwitch | `历史对话` / `连接器` 切换；当前态高亮并保持在输入框下方 |
-| 历史面板 | HistoryPanel | 连接器下的历史对话列表、搜索按钮、空状态与继续上下文入口 |
-| 连接器面板 | EmbeddedConnectorWorkbench | 复用 `ResourceConnectorPage` 的创建/认证/来源管理工作台 |
-| 空状态 | EmptySourcePanel | 虚线框引导，3 个图标 + 文案 + "添加来源"按钮 |
-| 来源列表 | SourceList | 已添加的资源卡片列表（连接后显示） |
-| 聊天列表 | ChatList | 该连接器下的历史对话列表 |
+| 资源链接入口 | ConnectorSettingsSection | 承载远程 / 本地资源卡片，并把 Notion 管理页切到 `ResourceConnectorPage` |
+| 轻量摘要面板 | ConnectorLandingPanel | Chat 中的 Connector 摘要 + Settings CTA；不做创建 / 认证 / 资源选择 |
+| Notion 管理页 | ResourceConnectorPage | 复用现有 page mode 继续做创建 / 认证 / 来源管理 |
+| 入口跳转 | TopNavBar / MobileNav | `Connector` 入口跳转到 Settings 资源链接区并自动聚焦 |
 
-> `EmbeddedConnectorWorkbench` 直接复用 `frontend/src/components/dashboard/ResourceConnectorPage.tsx`，只是在 Chat 入口页下方以嵌入式面板呈现。
+> `ResourceConnectorPage` 作为 Notion 的 page mode 管理页保留；Chat 入口仅保留摘要和 CTA，不再直接承载完整工作台。
 
-### 3.3 "连接器" Tab 详细设计
+### 3.3 资源链接首页（Settings）
+
+> 本节后续的空状态、Tab 与来源列表布局内容保留旧版嵌入式方案的归档，现行实现以 `ConnectorSettingsSection` / `ConnectorLandingPanel` / `ResourceConnectorPage` page mode 为准。
 
 #### 空状态（无连接器或无来源时）
 
@@ -162,7 +156,9 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 - **排序**：最新 / 最早 / 名称
 - **类型筛选**：全部 / Notion / 文件 / Decks
 
-### 3.4 "历史对话" Tab 设计
+> 下列 Tab 设计保留为旧嵌入式方案的历史归档，不作为本次 Settings-managed 入口的主实现路径。
+
+### 3.4 "历史对话" Tab 设计（归档）
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -180,6 +176,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 ```
 
 点击某条对话 → 进入标准聊天页面，Agent 自动 attach 当前连接器的 canonical snapshot。
+> 归档说明：现行实现不再将连接器工作台挂在 Chat 下方；Chat 只保留轻量摘要面板。
 
 ---
 
@@ -333,7 +330,7 @@ Scope: 产品设计 — 资源连接器前端功能定义、页面交互设计
 
 | 决策 | 选项 | 选择 | 理由 |
 |------|------|------|------|
-| 前端 Tab 设计 | 单页 / Tab 切换 | "历史对话" + "连接器" 双 Tab | 参考 Chat 入口页布局，用户无需离开页面即可管理资源 |
+| 前端入口设计 | Settings / 轻量摘要 | Settings 资源链接区 + Chat 轻量摘要面板 | 入口与管理分离，避免 Chat 承担完整工作台 |
 | 文件上传 | 连接器内 / 全局文件系统 | 连接器内 + 关联全局文件系统 | 文件生命周期跟随连接器 |
 
 ---

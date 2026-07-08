@@ -1,7 +1,7 @@
 # Notion Device 资源连接器 — 交互方案设计
 
 Status: Draft  
-Updated: 2026-07-07
+Updated: 2026-07-08
 Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的完整交互流程
 
 > [Input] `docs/design/notion-session/overview.md`,
@@ -17,6 +17,7 @@ Scope: 设计 — 智能体创建工作空间 Notion Device 资源连接器的�
 > [Sync] 2026-07-07: 交互入口迁移到 Chat 入口页，应用导航控制 `历史对话` / `连接器` landing state，连接器工作台嵌入 Chat shell；同页新增输入框下方的快捷功能 strip，并定义 shell 级 `shell_error` 降级。
 > [Sync] 2026-07-07: 明确嵌入态状态隔离：`聊天` 使用已创建 workbench 语义与 normalized fallback，`来源` 只由真实 connector context 驱动空态/认证/资源选择；外层 shell 锁定 viewport，滚动只发生在内部区域。
 > [Sync] 2026-07-07: 移除 Chat 输入框下方重复的 `历史对话` / `连接器` pill row 和连接器 workbench 内部重复标题/tab chrome；嵌入态只保留右上 `分享 / 更多` 与内容区入口。
+> [Sync] 2026-07-08: Connector 入口迁移到 Settings 资源链接区，Chat 仅保留摘要面板；Notion 具体管理页继续复用 `ResourceConnectorPage` page mode。
 
 ---
 
@@ -110,11 +111,13 @@ Resource Connector (资源连接器)
 ### 3.1 全局流程概览
 
 ```
-用户进入 Chat 入口页
+用户从顶部 / 移动端导航进入 Settings 的资源链接区
     │
-    ├─ 看到输入框下方的快捷功能 strip（生成图片 / 撰写或编辑 / 查找资料）
+    ├─ 看到远程资源链接与本地资源链接分区
     │
-    ├─ 通过应用导航进入 "连接器" landing state
+    ├─ 在 Notion 卡片点击「管理」
+    │
+    ├─ 进入 Notion 具体管理页（复用 `ResourceConnectorPage` page mode）
     │
     ├─ 选择或新建资源连接器
     │
@@ -128,7 +131,7 @@ Resource Connector (资源连接器)
     ├─ 后端同步数据层
     │     └─ 将选定 Database 的 Row Page 及 Standalone Page 物化为 canonical snapshot
     │
-    └─ 用户 Chat 对话
+    └─ 用户回到 Chat 对话
           │
           ├─ Agent 初始化时 attach 当前 canonical snapshot
           ├─ .notion/ 虚拟索引从同一 snapshotVersion 读取
@@ -140,7 +143,7 @@ Resource Connector (资源连接器)
 
 | 阶段 | 触发者 | 输出 | 存储位置 |
 |------|--------|------|---------|
-| 1. 创建连接器 | 用户（Chat 入口页的连接器 landing state） | connector 实体 | 数据库 `resource_connectors` 表 |
+| 1. 创建连接器 | 用户（Settings 的资源链接区 / Notion 管理页） | connector 实体 | 数据库 `resource_connectors` 表 |
 | 2. 认证 | 用户（浏览器确认） | ntn token | `NOTION_HOME/` |
 | 3. Database 及 Page 选择 | 用户（前端列表） | 选定的 database_id 及 standalone page_id 列表 | `resource_connectors.databases` / `.selected_pages` |
 | 4. 数据同步 | 后端（自动） | Database Row Page + Standalone Page canonical snapshot | 资源连接器数据层 |
@@ -169,11 +172,9 @@ Resource Connector (资源连接器)
 - `ChatViewContent` 若因渲染异常、快捷功能区域挂载失败或 landing state 初始化失败而不可交互，必须显示可恢复错误态，而不是整页留白。
 - `shell_error` 只表示 Chat shell 级故障，不表示 connector 认证、同步或 snapshot 状态异常。
 - 在 `shell_error` 下，用户仍应至少能看到重新加载入口，并在 shell 恢复后回到上一次选中的 `history` 或 `connector` 视图。
-- `连接器` landing state 仅作为 Chat shell 内嵌工作台入口，不再渲染单独的页面级大标题/导航；`QuickActionStrip` 仍只保留在输入框下方一次，不与 connector 生命周期状态重复表达。
-- 嵌入态 connector workbench 采用深色页面壳，右上角保留 `分享 / 更多`，内容区首先呈现 `添加源` 行 + 分隔线 + 列表项的密度，避免重复标题说明或内部 tab 打断“点击连接器即进入工作台”的连续感。
-- 嵌入态 created workbench 的 view model 为 `selectedConnector ?? normalizedFallbackConnector`，因此真实 connector API 401 或 localStorage 为空时仍保持“已创建连接器后的工作台”可见；该 fallback 不写回 connector 选择状态。
-- `添加源` 进入来源管理视图，该视图只读取真实 `selectedConnector`。没有 connector context 时展示 `ConnectorEmptyState`，创建 connector 后再进入认证、资源选择和来源列表，避免被 created-workbench fallback 污染。
-- Chat shell、嵌入 connector shell 和来源/历史列表必须构成连续 `height: 100%` / `min-height: 0` / `overflow: hidden` 链路；需要滚动时只允许历史列表、connector 内容区或来源列表内部 `overflow-auto`。
+- `连接器` landing state 现在只作为 Chat shell 内的轻量摘要面板，不再渲染完整工作台；`QuickActionStrip` 仍只保留在输入框下方一次，不与 connector 生命周期状态重复表达。
+- `ConnectorSettingsSection` 承载远程 / 本地资源入口与 Notion 管理页切换；Notion 的 page mode 继续复用 `ResourceConnectorPage`，但不再以黑底嵌入态作为默认入口。
+- Chat shell、Settings 资源链接区与 Notion page mode 仍需保持 `height: 100%` / `min-height: 0` / `overflow: hidden` 的连续链路；需要滚动时只允许历史列表、摘要面板或 Notion page mode 内部 `overflow-auto`。
 
 ---
 
@@ -182,9 +183,9 @@ Resource Connector (资源连接器)
 ### 4.1 前端交互步骤
 
 ```
-Step 0: 进入 Chat 入口页，通过应用导航进入 "连接器"
+Step 0: 进入 Settings 的资源链接区，或从 Chat 的 Connector CTA 跳转过去
     │
-    ├─ 输入框下方保留快捷功能 strip，不再渲染重复的历史/连接器 pill row
+    ├─ 看到远程资源链接与本地资源链接分区
     │
 ┌─────────────────────────────────────────────────────────────┐
 │ Step 1: 选择平台                                             │

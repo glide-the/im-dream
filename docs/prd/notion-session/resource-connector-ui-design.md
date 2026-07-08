@@ -15,18 +15,15 @@
 
 | 模块 | 名称 | 作用 | 关键视觉表现 |
 | --- | --- | --- | --- |
-| RC-A | ChatLandingShell | 承载居中的输入框、快捷功能与 app-selected 面板容器 | 入口区整体留白、层级分明、可横向伸展 |
-| RC-B | ChatInputBar | 发起新聊天，控制模型、语音与发送 | 大圆角输入槽、内嵌工具按钮、暖底描边 |
-| RC-C | AppLandingState | 由应用导航切换“历史对话 / 连接器”主视图 | 不在输入框下方重复渲染二级 pill |
-| RC-D | HistoryPanel | 在历史对话 state 下展示会话列表、搜索和继续上下文入口 | 轻量列表卡、时间标记、摘要层级 |
-| RC-E | EmbeddedConnectorWorkbench | 在连接器 state 下嵌入 `ResourceConnectorPage` | 纸张工台、连接器列表、创建 / 认证 / 来源卡片 |
-| RC-F | SourceList | 展示已接入来源与同步状态 | 纵向资源卡、状态胶囊、细分隔线 |
-| RC-G | AddSourceModal | 选择来源接入方式 | 底部 ActionSheet、三类来源入口、柔和遮罩 |
+| RC-A | ConnectorSettingsSection | 承载远程 / 本地资源链接与 Notion 管理入口 | Settings 资源卡片、结构化分区、管理按钮 |
+| RC-B | ConnectorLandingPanel | Chat 中的轻量 connector 摘要和 Settings CTA | 小型摘要卡、状态条、跳转按钮 |
+| RC-C | NotionManagerPage | 复用 `ResourceConnectorPage` 的 page mode | 纸张工台、资源列表、认证 / 选择 / 来源管理 |
+| RC-D | ResourceOptionCard | Notion / 飞书 / CLI 资源卡片 | 状态胶囊、禁用占位、管理按钮 |
+| RC-E | ResourceStatusBadge | 健康 / 未连接 / 认证中状态展示 | 小圆点 + 文字胶囊 |
 
-> `EmbeddedConnectorWorkbench` 复用 `frontend/src/components/dashboard/ResourceConnectorPage.tsx`，把连接器管理保留在 Chat 入口页下方，而不是单独主页面。
-> 嵌入态按最新点击页布局呈现为深色工作台：右上角保留 `分享 / 更多`，不再渲染重复标题说明或内部 `聊天 / 来源` tab；内容区先显示 `添加源` 行和分隔线，再展示来源列表。
-> 嵌入态状态分支需要保持隔离：created workbench 以已创建连接器为默认语义，真实数据不可用时使用经过 connector normalizer 的 fallback；`添加源` 进入的来源管理视图没有真实 connector context 时只显示默认无连接器空态。
-> 页面壳必须被锁定在浏览器 viewport 内。Chat shell、connector shell、历史列表和来源列表通过连续 `min-height: 0` 与内部 `overflow-auto` 管理滚动，禁止让 body/window 成为连接器页面的主要滚动容器。
+> `ResourceConnectorPage` 作为 Notion 的 page mode 管理页保留；Chat 入口仅保留摘要和 CTA，不再直接承载完整工作台。
+> Settings 资源链接区分为远程资源与本地资源两个层级，Notion 管理页是唯一可进入的详细配置页。
+> 页面壳需要保留 Settings 侧的浅纸张感和 Chat 侧的轻量摘要感，不再继续强化黑底 workbench 作为默认连接器入口。
 
 ---
 
@@ -85,6 +82,6 @@ html[data-theme='dark'] {
 ---
 
 ## ✅ 说明
-- 页面支持 **Light / Dark** 模式切换、应用级历史对话 / 连接器 landing state、连接器名称行内编辑、更多菜单展开、来源 ActionSheet 打开/关闭。
-- `ResourceConnectorPage` 仅作为 Chat shell 的 `连接器` state 内嵌工作台使用，不再承担独立主入口职责；输入框下方的 `QuickActionStrip` 属于 Chat shell，不属于连接器页本体。
-- `添加源` 进入来源管理后应保持 quick actions 只有输入框下方一组，connector fallback 不得写入真实 `selectedConnector`，来源空态也不得污染 created workbench。
+- 页面支持 **Light / Dark** 模式切换、Settings 资源链接分区、Notion 具体管理页和 Chat 轻量 connector 摘要面板。
+- `ResourceConnectorPage` 仅作为 Notion 的 page mode 管理页使用；Chat 中的 connector 面板只保留状态摘要和跳转 CTA，不承载创建 / 认证 / 来源选择。
+- `ConnectorSettingsSection` 管理远程 / 本地资源的入口分区，飞书和本地 CLI 执行器都保持占位，不调用不存在的 API。

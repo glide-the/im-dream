@@ -1,4 +1,5 @@
 // [Sync] 2026-07-04: add Resource Connector navigation entry alongside the existing dashboard views.
+// [Sync] 2026-07-08: Connector navigation now opens Settings -> resource links instead of the old chat-embedded workbench.
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
@@ -204,6 +205,8 @@ export default function LeftSidebar({ currentView, onViewChange }: Props) {
         >
           {t('nav.connector')}
         </button>
+
+        {/* App.tsx intercepts `connector` and opens Settings -> resource links. */}
       </div>
 
       <div style={{ flex: 1 }} />

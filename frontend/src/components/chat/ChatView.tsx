@@ -1,6 +1,6 @@
-// [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, ResourceConnectorPage, auth token, and AI SDK message types.
+// [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, ConnectorLandingPanel, auth token, and AI SDK message types.
 //         /api/claude-agent/threads/{id}/status, reconnectStreamNonce to ChatPanel.
-// [Output] Render the chat workspace with lazy thread creation, app-owned history/connector entry state, history/file sidebars, a single pill quick-action strip, ChatPanel, and the embedded connector workbench.
+// [Output] Render the chat workspace with lazy thread creation, app-owned history/connector entry state, history/file sidebars, a single pill quick-action strip, ChatPanel, and a lightweight connector landing panel that routes management to Settings.
 //          When /status reports running, bump reconnectStreamNonce so ChatPanel attaches SSE stream.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
@@ -32,11 +32,11 @@
 // [Sync] 2026-07-07: add the history/connector landing tabs under the AI composer and embed ResourceConnectorPage in the connector tab so the connector workbench sits below the chat entry point.
 // [Sync] 2026-07-07: keep the landing connector workbench inside the viewport by tightening the Chat shell flex/min-height chain.
 // [Sync] 2026-07-07: remove the duplicate landing tab pill row once the app navigation owns history/connector switching.
+// [Sync] 2026-07-08: replace the Chat-embedded connector workbench with a lightweight landing panel; Settings now owns full connector management.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
-import ResourceConnectorPage from '../dashboard/ResourceConnectorPage';
 import AIInputDock from './AIInputDock';
 import ChatPanel from './ChatPanel';
 import {
@@ -48,6 +48,7 @@ import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
+import ConnectorLandingPanel from './ConnectorLandingPanel';
 import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
@@ -89,13 +90,15 @@ interface ChatViewProps {
   onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Active deck / voice info — displayed in the top-right badge and forwarded to the backend as voice context. */
   activeVoice?: ActiveChatVoice;
-  /** Mobile layout hint used by the embedded connector panel. */
+  /** Mobile layout hint used by the connector landing panel and Settings-reused manager. */
   isMobile?: boolean;
   /** Controls the default landing tab when no thread is open. */
   landingTab?: ChatLandingTab;
+  /** Opens Settings and focuses the resource-link connector section. */
+  onOpenConnectorSettings?: () => void;
 }
 
-type ChatViewContentProps = Omit<ChatViewProps, 'landingTab'> & {
+type ChatViewContentProps = Omit<ChatViewProps, 'landingTab' | 'isMobile'> & {
   landingTab: ChatLandingTab;
   onLandingTabChange: (tab: ChatLandingTab) => void;
 };
@@ -296,7 +299,7 @@ function ChatViewContent({
   editorState,
   onEditorWriteConfirmed,
   activeVoice,
-  isMobile = false,
+  onOpenConnectorSettings,
   landingTab,
   onLandingTabChange,
 }: ChatViewContentProps) {
@@ -833,9 +836,7 @@ function ChatViewContent({
                           </div>
                         </div>
                       ) : (
-                        <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', overflow: 'hidden' }}>
-                          <ResourceConnectorPage isMobile={isMobile} embedded />
-                        </div>
+                        <ConnectorLandingPanel onOpenSettings={onOpenConnectorSettings} />
                       )}
                     </section>
                   </div>

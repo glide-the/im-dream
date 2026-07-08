@@ -17,6 +17,7 @@
 // [Sync] 2026-07-05: make the connector viewport scrollable inside the fixed app shell so resource selection and source cards remain reachable.
 // [Sync] 2026-07-07: route the connector entry into ChatView so the connector workbench lives under the chat shell instead of a standalone page.
 // [Sync] 2026-07-07: mount ChatView in a fixed flex viewport so embedded connector panels cannot force page-level overflow.
+// [Sync] 2026-07-08: route Connector navigation to Settings resource-link management and keep Chat on the lightweight landing panel only.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -60,6 +61,7 @@ import { useVoiceInput } from './hooks/useVoiceInput';
 import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
+import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -149,10 +151,26 @@ export default function App() {
   }, [currentLanguage, i18n]);
 
   const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector'>('writing');
+  const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
+  const [chatLandingTab, setChatLandingTab] = useState<'history' | 'connector'>('history');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
-  const shouldRenderChatView = hasOpenedChatView || currentView === 'chat' || currentView === 'connector';
+  const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
+
+  const openConnectorSettings = useCallback(() => {
+    setCurrentView('settings');
+    setConnectorSettingsFocusNonce((value) => value + 1);
+    setChatLandingTab('connector');
+  }, []);
+
+  const handleAppViewChange = useCallback((view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => {
+    if (view === 'connector') {
+      openConnectorSettings();
+      return;
+    }
+    setCurrentView(view);
+  }, [openConnectorSettings]);
 
   const browserTimezone = useMemo(() => {
     try {
@@ -431,7 +449,7 @@ export default function App() {
 
   // @@@ Preserve ChatView local state after the first visit while avoiding eager thread creation on app load.
   useEffect(() => {
-    if (currentView === 'chat' || currentView === 'connector') {
+    if (currentView === 'chat') {
       setHasOpenedChatView(true);
     }
   }, [currentView]);
@@ -1370,7 +1388,7 @@ export default function App() {
       )}
 
       {/* @@@ Hide top nav on mobile */}
-      {!isMobile && <TopNavBar currentView={currentView} onViewChange={setCurrentView} />}
+      {!isMobile && <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />}
 
       {currentView === 'writing' && (
         <div style={{
@@ -2035,6 +2053,14 @@ export default function App() {
               </div>
             </section>
 
+            {/* Resource Connector Settings */}
+            <section style={{ marginBottom: 48 }}>
+              <ConnectorSettingsSection
+                focusNonce={connectorSettingsFocusNonce}
+                isMobile={isMobile}
+              />
+            </section>
+
             {/* AI Model Configuration */}
             <section style={{ marginBottom: 48 }}>
               <h2 style={{
@@ -2100,7 +2126,7 @@ export default function App() {
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
-          display: currentView === 'chat' || currentView === 'connector' ? 'flex' : 'none',
+          display: currentView === 'chat' ? 'flex' : 'none',
           minHeight: 0,
           minWidth: 0,
           overflow: 'hidden'
@@ -2111,7 +2137,8 @@ export default function App() {
             requestedThreadId={requestedChatThreadId}
             activeVoice={activeChatVoice}
             isMobile={isMobile}
-            landingTab={currentView === 'connector' ? 'connector' : 'history'}
+            landingTab={chatLandingTab}
+            onOpenConnectorSettings={openConnectorSettings}
           />
         </div>
       )}
@@ -2137,7 +2164,7 @@ export default function App() {
             return (
               <button
                 key={item.key}
-                onClick={() => setCurrentView(item.key)}
+                onClick={() => handleAppViewChange(item.key)}
                 aria-pressed={isActive}
                 style={{
                   flex: 1,

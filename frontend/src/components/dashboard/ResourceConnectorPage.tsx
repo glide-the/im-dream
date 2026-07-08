@@ -1,5 +1,5 @@
 // [Input] Resource connector API client, dashboard design tokens, modal shell, and shared icon set.
-// [Output] Warm-paper resource connector page with create/auth/select/source flows, status cards, and a minimal embedded dark mode for Chat shell reuse.
+// [Output] Warm-paper resource connector page with create/auth/select/source flows, status cards, and a legacy embedded mode that remains available for compatibility only.
 // [Pos] resource-connector-page component node in frontend/src/components/dashboard
 // [Sync] 2026-07-04: initial frontend shell for Notion resource connector create/auth/resources/source states.
 // [Sync] 2026-07-04: warm the connector palette to match the paper-workbench design and soften the page shell contrast.
@@ -7,6 +7,7 @@
 // [Sync] 2026-07-07: embedded connector shell now uses a dark Chat-adjacent layout with share/more header actions and list-style source rows to match the connector landing screenshot.
 // [Sync] 2026-07-07: split embedded chat fallback workbench from the real source-selection empty state and keep the shell viewport-contained.
 // [Sync] 2026-07-07: remove duplicate embedded title/description/tab chrome so Chat owns the page entry and the workbench starts at source actions.
+// [Sync] 2026-07-08: embedded dark mode is compatibility-only; Settings now owns the connector entry and Chat keeps only the lightweight landing panel.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   IconArrowUp,
