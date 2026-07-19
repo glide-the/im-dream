@@ -10,6 +10,29 @@
 # [Sync] 2026-05-31: imported sessions default selectedState to ok.
 # [Sync] 2026-06-01: imported sessions can infer and persist labels before writing user_sessions.
 # [Sync] 2026-06-05: add --label-mode agent: create thread via POST /api/claude-agent/threads then call POST /api/claude-agent; token auto-generated from user DB record via auth.create_access_token; --backend-url / INK_MEMORY_BACKEND_URL / --api-token configure the connection.
+# [Sync] 2026-07-19: _agent_infer_labels now reads the final assistant text from
+#                    the "message-final" SSE frame instead of a follow-up
+#                    GET /api/claude-agent/threads/{id}/messages call, which
+#                    could race the backend's async assistant-message
+#                    persistence (finish is enqueued before persistence
+#                    completes) and intermittently return empty labels.
+# [Sync] 2026-07-19: load backend/.env (same as server.py) before importing auth
+#                    so the auto-generated --label-mode agent JWT is signed with
+#                    the running backend's real JWT_SECRET instead of auth.py's
+#                    dev-secret fallback; fixes 401 Unauthorized on
+#                    POST /api/claude-agent/threads when the script's shell
+#                    doesn't already export JWT_SECRET.
+# [Sync] 2026-07-19: --label-mode agent now sends toolChoice "none" (label
+#                    inference never needs tools) and enforces a wall-clock
+#                    AGENT_LABEL_STREAM_TIMEOUT_S deadline around the SSE read
+#                    loop; the previous "auto" value let turns wander into
+#                    multi-turn tool use, each frame resetting httpx's per-read
+#                    timeout, so a single file's call could hang for many
+#                    minutes and require a manual Ctrl-C.
+# [Sync] 2026-07-19: restored GET /api/claude-agent/threads/{id}/messages
+#                    (_agent_fetch_final_assistant_text) as a retried fallback
+#                    in _agent_infer_labels when "message-final".text comes
+#                    back empty, instead of dropping the endpoint entirely.
 """
 Import Markdown diary/note files into user_sessions.
 
@@ -35,6 +58,7 @@ import json
 import os
 import re
 import sys
+import time as _time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -46,6 +70,16 @@ from zoneinfo import ZoneInfo
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
+
+# Load backend/.env the same way server.py does *before* importing auth, so a
+# locally auto-generated JWT (see _build_agent_token) is signed with the same
+# JWT_SECRET the running backend process verifies against. Without this, auth
+# falls back to its dev-secret default whenever the script's shell doesn't
+# already export JWT_SECRET, and every --label-mode agent call fails with
+# 401 Unauthorized against a real backend.
+from dotenv import load_dotenv  # noqa: E402
+
+load_dotenv(BACKEND_DIR / ".env", override=False)
 
 import database  # noqa: E402
 import auth as _auth  # noqa: E402
@@ -69,6 +103,18 @@ DEFAULT_SELECTED_STATE = "ok"
 DEFAULT_LABEL_MODE = "auto"
 DEFAULT_MAX_LABELS = 5
 DEFAULT_BACKEND_URL = "http://localhost:8000"
+# Wall-clock cap for a single --label-mode agent HTTP call (thread create +
+# streamed turn). httpx's per-call timeout only bounds the gap between reads,
+# so a turn that keeps streaming frames (e.g. tool-input/tool-event chunks
+# from unexpected tool use) never trips it and the script appears to hang.
+AGENT_LABEL_STREAM_TIMEOUT_S = 120.0
+# Fallback retry policy for GET /api/claude-agent/threads/{id}/messages when
+# the "message-final" frame's text comes back empty. The backend enqueues the
+# SSE "finish" frame before _persist_assistant_turn() finishes writing the
+# assistant message (claude_agent/service.py execute_session), so a single
+# immediate GET can still race that write; a couple of short retries absorb it.
+AGENT_LABEL_MESSAGES_FALLBACK_ATTEMPTS = 3
+AGENT_LABEL_MESSAGES_FALLBACK_DELAY_S = 0.3
 DATE_SOURCE_CHOICES = (
     "created-first",
     "folder-name",
@@ -188,6 +234,31 @@ def _agent_create_thread(backend_url: str, token: str, title: str | None = None)
     return thread_id
 
 
+def _agent_fetch_final_assistant_text(backend_url: str, token: str, thread_id: str) -> str:
+    """GET /api/claude-agent/threads/{id}/messages and return the last
+    assistant message's concatenated text parts.
+
+    This is the pre-2026-07-19 primary lookup for the final label text; it is
+    kept (not removed) as a fallback for ``_agent_infer_labels`` when the
+    "message-final" SSE frame's ``text`` comes back empty, so this endpoint
+    stays in active use by the script rather than being dropped entirely.
+    """
+    base = backend_url.rstrip("/")
+    headers = {"Authorization": f"Bearer {token}"}
+    with _httpx.Client(timeout=30) as client:
+        resp = client.get(f"{base}/api/claude-agent/threads/{thread_id}/messages", headers=headers)
+        resp.raise_for_status()
+        messages = resp.json().get("messages", [])
+    for message in reversed(messages):
+        if message.get("role") != "assistant":
+            continue
+        parts = message.get("parts") or []
+        text = "".join(part.get("text", "") for part in parts if part.get("type") == "text")
+        if text:
+            return text
+    return ""
+
+
 def _agent_infer_labels(
     text: str,
     backend_url: str,
@@ -197,10 +268,32 @@ def _agent_infer_labels(
 ) -> list[str]:
     """Send diary text to the Claude Agent service and parse returned label lines.
 
-    Creates a new thread, streams the SSE response to wait for completion
-    (ignoring reasoning frames), then fetches the final assistant message via
-    GET /api/claude-agent/threads/{id}/messages and extracts only ``text``-type
-    parts to avoid mixing in thinking / reasoning content.
+    Creates a new thread, then streams POST /api/claude-agent and reads the
+    final assistant text primarily from the ``message-final`` frame's ``text``
+    field. That field is assembled server-side from ``text-delta`` events only
+    (thinking/reasoning content is streamed as separate ``tool-event`` frames
+    and never mixed in), so it can be used as-is without an extra round trip
+    in the common case.
+
+    If ``message-final.text`` comes back empty, falls back to
+    ``_agent_fetch_final_assistant_text`` (GET
+    /api/claude-agent/threads/{id}/messages), retried a few times
+    (``AGENT_LABEL_MESSAGES_FALLBACK_ATTEMPTS`` / ``_DELAY_S``) because the
+    backend enqueues the SSE ``finish`` frame before
+    ``_persist_assistant_turn()`` finishes writing the assistant message (see
+    ``claude_agent/service.py`` ``execute_session``), so an immediate GET can
+    still race that write. This keeps the endpoint in active use rather than
+    dropping it outright.
+
+    Sends ``toolChoice: "none"`` — label inference is pure text classification
+    and never needs tools; the backend fully disables tool exposure in this
+    mode (``agent_runner.py``: ``effective_allowed_tools = [] if tool_choice ==
+    "none" else allowed_tools``). With the previous ``"auto"`` value, the model
+    could wander into multi-turn tool use (filesystem/bash exploration) on an
+    unrelated ``cwd``, and each such tool-event frame resets httpx's per-read
+    timeout, so a single file's call could run for many minutes instead of
+    erroring out. A wall-clock deadline (``AGENT_LABEL_STREAM_TIMEOUT_S``) is
+    enforced on top of that as a second line of defense.
     """
     if _httpx is None:
         raise SystemExit("httpx is required for --label-mode agent (pip install httpx).")
@@ -222,43 +315,41 @@ def _agent_infer_labels(
             "parts": [{"type": "text", "text": message}],
             "id": msg_id,
         },
-        "toolChoice": "auto",
+        "toolChoice": "none",
         "attachments": [],
         "system_prompt": system_prompt,
     }
 
-    with _httpx.Client(timeout=120) as client:
-        # Drain SSE stream — only used to block until the agent finishes.
+    assistant_text = ""
+    deadline = _time.monotonic() + AGENT_LABEL_STREAM_TIMEOUT_S
+    with _httpx.Client(timeout=AGENT_LABEL_STREAM_TIMEOUT_S) as client:
         with client.stream("POST", f"{base}/api/claude-agent", json=payload, headers=headers) as resp:
             resp.raise_for_status()
             for raw_line in resp.iter_lines():
+                if _time.monotonic() > deadline:
+                    raise TimeoutError(
+                        f"No finish/error frame from thread {thread_id} within "
+                        f"{AGENT_LABEL_STREAM_TIMEOUT_S:.0f}s"
+                    )
                 if not raw_line.startswith("data: "):
                     continue
                 try:
                     frame = json.loads(raw_line[len("data: "):])
                 except json.JSONDecodeError:
                     continue
-                if frame.get("type") in ("finish", "error"):
+                frame_type = frame.get("type")
+                if frame_type == "message-final":
+                    assistant_text = frame.get("text", "")
+                elif frame_type in ("finish", "error"):
                     break
 
-        # Fetch the persisted messages and extract only text parts from the
-        # last assistant turn (reasoning parts are excluded).
-        msg_resp = client.get(
-            f"{base}/api/claude-agent/threads/{thread_id}/messages",
-            headers={"Authorization": f"Bearer {token}"},
-        )
-        msg_resp.raise_for_status()
-        messages = msg_resp.json().get("messages", [])
-
-    assistant_text = ""
-    for msg in reversed(messages):
-        if msg.get("role") != "assistant":
-            continue
-        parts = msg.get("parts") or []
-        assistant_text = "".join(
-            p.get("text", "") for p in parts if p.get("type") == "text"
-        )
-        break
+    if not assistant_text.strip():
+        for attempt in range(AGENT_LABEL_MESSAGES_FALLBACK_ATTEMPTS):
+            if attempt:
+                _time.sleep(AGENT_LABEL_MESSAGES_FALLBACK_DELAY_S)
+            assistant_text = _agent_fetch_final_assistant_text(base, token, thread_id)
+            if assistant_text.strip():
+                break
 
     labels: list[str] = []
     for raw in assistant_text.strip().split("\n"):
