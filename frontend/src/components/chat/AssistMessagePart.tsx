@@ -1,11 +1,16 @@
+// [Input] Assistant text message part from the chat message stream/history.
+// [Output] Assistant message body with GFM Markdown (Mermaid diagrams included) plus message actions.
+// [Pos] assistant-message-part component node in frontend/src/components/chat
+// [Sync] 2026-07-20: Markdown rendering delegated to shared ChatMarkdown, which routes ```mermaid
+//                    blocks to MermaidBlock and unwraps their <pre> wrapper (fixes the
+//                    "[<pre /> in Markdown ...]" invalid-nesting error).
 import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import { useCopy } from '../../hooks/useCopy';
 import type { ChatMetadata } from '../../lib/chat-schema';
 import { IconCheck, IconLoader, IconTrash } from './Icons';
+import ChatMarkdown from './ChatMarkdown';
 
 interface AssistMessagePartProps {
   part: { type: 'text'; text: string };
@@ -125,7 +130,7 @@ export const AssistMessagePart = memo(function AssistMessagePart({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', opacity: isError ? 0.6 : 1, minHeight: isLast && isStreamLoading ? '2rem' : undefined }}>
       <div style={{ color: 'var(--color-text-primary)', fontSize: '0.95rem', lineHeight: 1.75 }}>
         <div className="prose prose-chat">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+          <ChatMarkdown text={part.text} />
         </div>
       </div>
 

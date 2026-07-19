@@ -10,11 +10,12 @@
 // [Sync] 2026-07-20: 交互方案变更 — 取消常驻面板，改为浮动控制栏内的「计划」按钮 +
 //                    锚定弹层（PlanButton + PlanPopoverContent）；按钮仅在有计划时渲染，
 //                    弹层直接受控渲染（不再嵌套 CollapsibleSection 折叠头）。
+// [Sync] 2026-07-20: Markdown 渲染切换到共享 ChatMarkdown，计划内容中的 ```mermaid 块
+//                    与会话消息一样渲染为 SVG 图表。
 
 import { useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { IconChecklist } from './Icons';
+import ChatMarkdown from './ChatMarkdown';
 import { hydrateThreadPlan, useThreadPlan, type ThreadPlanMode, type ThreadPlanState } from '../../hooks/useThreadPlan';
 
 interface PlanButtonProps {
@@ -96,7 +97,7 @@ function PlanPopoverContent({ threadId, plan }: { threadId: string; plan: Thread
       ) : null}
       <div style={{ maxHeight: '16rem', overflowY: 'auto', color: 'var(--color-text-primary)', fontSize: '0.9rem', lineHeight: 1.7 }}>
         <div className="prose prose-chat">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{plan.content ?? ''}</ReactMarkdown>
+          <ChatMarkdown text={plan.content ?? ''} />
         </div>
       </div>
       {plan.truncated ? (
