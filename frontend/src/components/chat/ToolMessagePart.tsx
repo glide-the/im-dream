@@ -9,11 +9,13 @@
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin tool confirmation requests.
 // [Sync] 2026-06-14: pass toolCallId to onEditorWriteConfirmed for event-driven reload de-duplication.
 // [Sync] 2026-07-08: use semantic error/on-action color tokens in generic tool cards for dark mode.
+// [Sync] 2026-07-19: show task summary (input.description/target) and shell command lines in the generic tool card header so approvals and collapsed cards explain what the tool is doing.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import EditorWriteApprovalUI from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
+import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
@@ -90,6 +92,10 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
   // Only show Approve/Cancel while the tool is still pending — once the output
   // arrives (isCompleted) the card transitions to the normal completed view.
   const shouldShowApprovalUI = Boolean(isManualToolInvocation) && !shouldShowAskUserUI && !shouldShowEditorWriteUI && !isCompleted;
+  // One-line "what is this tool doing" summary for the card header: task
+  // description when the model provides one, otherwise the command/target.
+  const toolSummaryText = useMemo(() => summarizeToolInvocation(toolName, input), [toolName, input]);
+  const toolCommandText = useMemo(() => (isShellTool(toolName) ? resolveToolInputSummary(input).command : ''), [toolName, input]);
 
   const inputDisplay = useMemo(() => {
     try { return JSON.stringify(input, null, 2); } catch { return String(input); }
@@ -281,6 +287,12 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{title || toolName}</div>
+            {toolSummaryText ? (
+              <div style={{ marginTop: '0.15rem', fontSize: '0.78rem', color: 'var(--color-text-secondary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{toolSummaryText}</div>
+            ) : null}
+            {toolCommandText && toolCommandText !== toolSummaryText ? (
+              <div style={{ marginTop: '0.15rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.72rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>$ {toolCommandText}</div>
+            ) : null}
             <div style={{ marginTop: '0.15rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{partType}{providerExecuted !== undefined ? ` • ${providerExecuted ? 'provider' : 'local'} execution` : ''}</div>
           </div>
           <div style={{ color: 'var(--color-text-muted)' }}>{expanded ? <IconChevronUp style={{ width: '1rem', height: '1rem' }} /> : <IconChevronDown style={{ width: '1rem', height: '1rem' }} />}</div>

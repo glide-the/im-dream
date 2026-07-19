@@ -1,4 +1,4 @@
-// [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components.
+// [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components; toolInputSummary helpers.
 // [Output] Scrollable chat message list with tool, text, reasoning, and file part rendering.
 // [Pos] chat-message-list component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
@@ -17,6 +17,7 @@
 // [Sync] 2026-06-14: collapse long built-in Write file previews by default while
 //                    keeping full-content copy and an inline expand/collapse control.
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
+// [Sync] 2026-07-19: show per-tool task summaries — the Terminal card header displays input.description and prefers input.command for the $ line; collapsed tool rows append the description/target so running tools are recognizable (shared helpers from toolInputSummary.ts).
 import { useState } from 'react';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
@@ -26,6 +27,7 @@ import UserMessagePart from './UserMessagePart';
 import ToolMessagePart from './ToolMessagePart';
 import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
+import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -130,20 +132,6 @@ function isApprovalRequestedTool(part: ToolUIPart | DynamicToolUIPart): boolean 
 
 function readToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
   return 'input' in part ? part.input : undefined;
-}
-
-function parsePartialInputJson(input: unknown): Record<string, unknown> {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
-  const raw = (input as Record<string, unknown>)._partialInputJson;
-  if (typeof raw !== 'string' || !raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
 }
 
 function resolveWriteInput(input: unknown): { filePath: string; content: string; partialJson: string } {
@@ -406,14 +394,23 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 if (isCompleted && outputText) {
                   const { command, output, exitCode } = parseTerminalOutput(outputText);
                   const exitCodeNumber = exitCode != null ? Number(exitCode) : null;
+                  const terminalToolInput = readToolInput(toolPart);
+                  const terminalSummary = summarizeToolInvocation(toolName, terminalToolInput);
+                  // Prefer the command from the tool input itself — the output text
+                  // only carries a `$ command` echo for some backends, so relying on
+                  // parseTerminalOutput alone leaves the card showing only results.
+                  const displayCommand = resolveToolInputSummary(terminalToolInput).command || command;
                   return (
                     <div key={partKey} style={{ overflow: 'hidden', borderRadius: '12px', background: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                        <span>‹ Terminal</span>
-                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? 'var(--color-state-success)' : 'var(--color-code-text)', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.65rem 1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                        <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: '0.55rem' }}>
+                          <span style={{ flexShrink: 0 }}>‹ Terminal</span>
+                          {terminalSummary ? <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-code-text)' }}>{terminalSummary}</span> : null}
+                        </span>
+                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ flexShrink: 0, border: 'none', background: 'transparent', color: copiedPartId === partKey ? 'var(--color-state-success)' : 'var(--color-code-text)', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
                       </div>
                       <div style={{ padding: '0 1rem 0.9rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8rem', lineHeight: 1.65 }}>
-                        {command ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>{command}</span></p> : null}
+                        {displayCommand ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>{displayCommand}</span></p> : null}
                         <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', color: 'var(--color-code-text)' }}>{output || outputText}</pre>
                       </div>
                       {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? 'var(--color-state-success)' : 'var(--color-state-error)' }}>Exit code: {exitCode}</div> : null}
@@ -487,11 +484,12 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   );
                 }
 
+                const toolRowSummary = summarizeToolInvocation(toolName, readToolInput(toolPart));
                 return (
                   <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-action-link)' }}>
                     <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.55rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-secondary)', fontSize: '0.88rem', cursor: 'pointer' }}>
                       {toolStatus === 'executing' ? <span style={{ width: '0.7rem', height: '0.7rem', borderRadius: '999px', border: '2px solid var(--color-action-link)', borderTopColor: 'transparent', display: 'inline-block' }} /> : null}
-                      <span style={{ flex: 1, textAlign: 'left', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayTitle}</span>
+                      <span style={{ flex: 1, textAlign: 'left', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayTitle}{toolRowSummary ? ` — ${toolRowSummary}` : ''}</span>
                       <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>
                     </button>
                     {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} /></div> : null}
