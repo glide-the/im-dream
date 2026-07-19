@@ -11,6 +11,9 @@
 #                    because they must collect frontend answers before allow.
 # [Sync] 2026-06-21: add sandbox_network_mode so the runner can enforce
 #                    Settings "disabled" network policy in PreToolUse hooks.
+# [Sync] 2026-07-20: add on_plan_file_changed streaming callback — fires after
+#                    built-in Write/Edit/MultiEdit lands in the thread workspace
+#                    plans dir (claude-plan §5.3).
 
 """Type definitions for ClaudeAgentKit.
 
@@ -97,6 +100,8 @@ _ToolConfirmationCallback = Callable[
 ]
 _ErrorCallback = Callable[[Exception], Union[Awaitable[None], None]]
 _MessageCallback = Callable[[Any], Union[Awaitable[None], None]]
+# Plan file observer: payload is the resolved plan file path (str).
+_PlanFileChangedCallback = Callable[[str], Union[Awaitable[None], None]]
 
 
 @dataclass
@@ -115,6 +120,10 @@ class AgentStreamingCallbacks:
     on_tool_confirmation_request: Optional[_ToolConfirmationCallback] = None
     on_error: Optional[_ErrorCallback] = None
     on_message: Optional[_MessageCallback] = None
+    # Fires after a built-in Write/Edit/MultiEdit tool call whose resolved
+    # path lands inside the thread workspace plans dir (claude-plan §5.3).
+    # Debounced per file per turn via INK_AGENT_PLAN_EMIT_DEBOUNCE_MS.
+    on_plan_file_changed: Optional[_PlanFileChangedCallback] = None
 
 
 # ---------------------------------------------------------------------------

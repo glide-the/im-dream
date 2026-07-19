@@ -78,6 +78,14 @@
 #                    workspace without requiring a custom allowedTools override.
 # [Sync] 2026-06-21: enforce Settings sandbox_network_mode="disabled" in
 #                    PreToolUse before full-access or low-sensitivity allows.
+# [Sync] 2026-07-20: claude-plan — inject per-thread CLAUDE_CONFIG_DIR via
+#                    apply_plan_mode_env_to_options after sdk_options
+#                    construction; classify EnterPlanMode/ExitPlanMode as
+#                    low-sensitivity auto-allow (official ExitPlanMode ask
+#                    semantics deviation recorded in
+#                    claude-agent-permission-policy.md); add PostToolUse
+#                    plan-file observer hook with INK_AGENT_PLAN_EMIT_DEBOUNCE_MS
+#                    debounce firing callbacks.on_plan_file_changed.
 
 """Claude Agent Runner.
 
@@ -99,6 +107,7 @@ import re
 import shlex
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 from uuid import uuid4
@@ -130,7 +139,12 @@ from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
-from .sdk_env import apply_project_sdk_runtime_options, apply_user_sdk_env_to_options
+from .sdk_env import (
+    apply_plan_mode_env_to_options,
+    apply_project_sdk_runtime_options,
+    apply_user_sdk_env_to_options,
+)
+from .workspace import get_plans_dir, get_workspace_root
 
 logger = logging.getLogger(__name__)
 
@@ -219,6 +233,12 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
     # Source check: restored-src/src/tools/SkillTool/constants.ts exports
     # SKILL_TOOL_NAME = "Skill".
     "Skill",
+    # Claude Code Plan Mode session-state tools.  Neither mutates user
+    # content directly; official ExitPlanMode ask semantics are downgraded
+    # to low-sensitivity per claude-agent-permission-policy.md §3 deviation
+    # record (claude-plan §5.7, 2026-07-20).
+    "EnterPlanMode",
+    "ExitPlanMode",
     # SDK / MCP resource discovery and reads, where available.
     "ListMcpResources",
     "ReadMcpResource",
@@ -1042,6 +1062,84 @@ def _is_path_inside_workspace_files(raw_path: str, cwd: Optional[str]) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Plan Mode plan-file observation (claude-plan §5.3)
+# ---------------------------------------------------------------------------
+
+# Built-in file-mutation tools whose writes can land in the plans directory.
+_PLAN_FILE_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
+    "Write",
+    "Edit",
+    "MultiEdit",
+})
+
+
+def _plan_emit_debounce_seconds() -> float:
+    """Return the plan-file emit debounce window (seconds) from env config."""
+
+    try:
+        raw = os.getenv("INK_AGENT_PLAN_EMIT_DEBOUNCE_MS", "500") or "500"
+        return max(0.0, float(raw)) / 1000.0
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _resolve_plans_dir_for_cwd(cwd: Optional[str]) -> Optional[Path]:
+    """Return the current run's plans dir, delegating to ``get_plans_dir()``.
+
+    The service layer always sets cwd to the per-thread workspace root
+    (``{workspace_root}/{thread_id}``), so the workspace session_id is the
+    resolved cwd basename.  Returns ``None`` when cwd is empty (Workspace
+    Mode disabled), lies outside the workspace root (e.g. ad-hoc unit-test
+    dirs), or no plans directory exists yet.
+    """
+
+    if not cwd:
+        return None
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        workspace.relative_to(get_workspace_root().resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    try:
+        return get_plans_dir(workspace.name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _plan_file_path_for_hook(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+) -> Optional[Path]:
+    """Return the resolved plan file path when a write tool targets the plans dir.
+
+    Only built-in ``Write``/``Edit``/``MultiEdit`` calls whose resolved path
+    stays inside ``get_plans_dir()`` and ends in ``.md`` qualify; everything
+    else returns ``None`` so the PostToolUse hook no-ops.
+    """
+
+    if tool_name not in _PLAN_FILE_WRITE_TOOL_NAMES or not cwd:
+        return None
+    raw_path = _extract_builtin_file_tool_path(tool_input)
+    if not raw_path:
+        return None
+    plans_dir = _resolve_plans_dir_for_cwd(cwd)
+    if plans_dir is None:
+        return None
+    try:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path(cwd).expanduser().resolve(strict=False) / candidate
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(plans_dir)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if resolved.suffix.lower() != ".md":
+        return None
+    return resolved
+
+
 def _apply_workspace_files_permission(
     tool_name: str,
     tool_input: dict[str, Any],
@@ -1657,6 +1755,46 @@ class ClaudeAgentRunner:
             return HookJSONOutput()
 
         # ------------------------------------------------------------------
+        # PostToolUse hook — Plan Mode plan-file observer (claude-plan §5.3)
+        # Fired after built-in Write/Edit/MultiEdit calls; when the resolved
+        # target path lands inside the thread workspace plans dir, notify the
+        # service layer via callbacks.on_plan_file_changed so it can re-read
+        # the plan and emit a plan-updated SSE frame.  Emissions are debounced
+        # per resolved file path per turn (INK_AGENT_PLAN_EMIT_DEBOUNCE_MS,
+        # default 500ms, leading-edge) — the ExitPlanMode final read in the
+        # service layer always captures the terminal version.  This hook never
+        # blocks or alters the tool flow.
+        # ------------------------------------------------------------------
+        _plan_emit_last_ts: dict[str, float] = {}
+        plan_debounce_s = _plan_emit_debounce_seconds()
+
+        async def _plan_file_post_tool_use_hook(
+            hook_input: dict[str, Any],
+            tool_use_id: Optional[str],
+            context: HookContext,
+        ) -> HookJSONOutput:
+            del tool_use_id, context
+            try:
+                tool_name = _extract_hook_tool_name(hook_input)
+                tool_input = _extract_hook_tool_input(hook_input)
+                plan_path = _plan_file_path_for_hook(tool_name, tool_input, cwd)
+                if plan_path is None or callbacks.on_plan_file_changed is None:
+                    return HookJSONOutput()
+                key = str(plan_path)
+                now = time.monotonic()
+                last_emit = _plan_emit_last_ts.get(key)
+                if last_emit is not None and (now - last_emit) < plan_debounce_s:
+                    return HookJSONOutput()
+                _plan_emit_last_ts[key] = now
+                await _call(callbacks.on_plan_file_changed, key)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "PostToolUse: plan-file observer failed; skipping emit.",
+                    exc_info=True,
+                )
+            return HookJSONOutput()
+
+        # ------------------------------------------------------------------
         # Build SDK options
         # ------------------------------------------------------------------
         mcp_servers: dict[str, McpServerConfig] = {}
@@ -1700,12 +1838,23 @@ class ClaudeAgentRunner:
                 include_partial_messages=include_partial_messages,
                 hooks={
                     "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])],
-                    "PostToolUse": [HookMatcher(matcher=None, hooks=[_post_tool_use_hook])],
+                    "PostToolUse": [
+                        HookMatcher(
+                            matcher=None,
+                            hooks=[_post_tool_use_hook, _plan_file_post_tool_use_hook],
+                        )
+                    ],
                 },
                 cwd=cwd or os.getcwd(),
                 mcp_servers=mcp_servers,
             )
         )
+        # Plan Mode: point CLAUDE_CONFIG_DIR at {cwd}/.claude-home so CLI plan
+        # files land in the per-thread workspace (claude-plan §5.1).  Lowest
+        # priority in the env chain: an explicit CLAUDE_CONFIG_DIR already on
+        # options.env is preserved, and the user_sdk_env merge below still
+        # overlays on top.  No-op when cwd is falsy (Workspace Mode disabled).
+        apply_plan_mode_env_to_options(sdk_options, cwd)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
         existing_extra_args = getattr(sdk_options, "extra_args", None)

@@ -13,6 +13,9 @@
 > current thread workspace before full-access allow is considered.
 > [Sync] 2026-06-21: Settings `sandbox_network_mode="disabled"` now hard-denies
 > network tools before full-access and low-sensitivity allow decisions.
+> [Sync] 2026-07-20: `EnterPlanMode` / `ExitPlanMode` added to the
+> low-sensitivity auto-allow class (claude-plan §5.7); official `ExitPlanMode`
+> ask-semantics deviation recorded in §3.
 
 # Claude-Agent Permission Policy
 
@@ -63,6 +66,7 @@ Current auto-allow inventory:
 | Necklace query | `mcp__necklace__*` names returned by `allowed_necklace_tool_names()` |
 | Editor context switch | `mcp__editor__switch_editor` |
 | Skill invocation | `Skill` |
+| Plan Mode session state | `EnterPlanMode`, `ExitPlanMode` **[2026-07-20]** |
 | Read-only Bash subset | `Bash` only when the command has no shell metacharacters and the first token is in the read-only/navigation allowlist (`ls`, `cd`, `pwd`, `echo`, `cat`, `head`, `tail`, `wc`, `find`, `which`, `type`, `date`, `whoami`, `id`, `groups`, `env`, `printenv`, `uname`, `hostname`) |
 
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
@@ -70,6 +74,10 @@ Current auto-allow inventory:
 `Skill` is low-sensitivity because Claude Code exposes skills through the built-in `Skill` tool, whose job is to expand or run a named skill prompt. The exact tool name was confirmed in restored Claude Code source: `src/tools/SkillTool/constants.ts` exports `SKILL_TOOL_NAME = 'Skill'`. Do not use a broad `skill*` prefix. Allowing `Skill` does not allow later tool calls made by that skill; those calls are evaluated again by this policy.
 
 Implementation detail: hook payloads are normalized before policy lookup. The runner accepts both Claude hook JSON keys (`tool_name`, `tool_input`) and adjacent SDK/frontend camelCase keys (`toolName`, `toolInput`) so a payload such as `{"toolName": "Skill"}` cannot fall through as an unknown tool. In `auto` mode, `Skill` is also retained in effective `allowed_tools` even if a caller passes a custom allowlist, because Claude Code's SkillTool has its own permission path that otherwise defaults to ask for some skill metadata.
+
+`EnterPlanMode` / `ExitPlanMode` are low-sensitivity because both are session-state meta operations: neither mutates user content directly (`EnterPlanMode` is read-only; `ExitPlanMode` only flips the session back to execution). Classification name: `low_sensitivity_permission` via `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (claude-plan §5.7, 2026-07-20).
+
+**Deviation record (2026-07-20) — official `ExitPlanMode` ask semantics downgraded.** In official Claude Code, `ExitPlanMode` runs `checkPermissions → ask`: an interactive human confirms the plan before execution resumes. This deployment has no TUI approval scenario; keeping ask semantics would pop a frontend confirmation on every plan exit and block the product's "plans flow automatically" requirement. Consequence: the model's self-authored plan enters execution without per-item human confirmation. Risk is bounded by (a) the workspace-boundary permission (`_apply_workspace_boundary_permission`), which hard-denies built-in file/search tools outside the thread workspace, and (b) high-sensitivity write tools (`Write`/`Edit`/`MultiEdit` outside `files/`, mutating `Bash`, editor MCP writes), which still route through the frontend confirmation side-channel. In `tool_choice="manual"` mode both tools keep the high-sensitivity confirmation path unchanged. Fallback: remove the two names from `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (or gate them behind a future Settings switch) to restore official ask semantics.
 
 ## 4. High-Sensitivity Tools
 
@@ -149,6 +157,7 @@ This remains true in full-access mode.
 | `Write` outside `{cwd}/files/**` | Confirm | Confirm | Not exposed |
 | `Skill` | Allow | Confirm | Not exposed |
 | `mcp__editor__switch_editor` | Allow | Confirm | Not exposed |
+| `EnterPlanMode` / `ExitPlanMode` | Allow | Confirm | Not exposed |
 | Editor write MCP tools | Confirm | Confirm | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` | Confirm with form | Confirm with form | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` with full access | Confirm with form | Confirm with form | Not exposed |

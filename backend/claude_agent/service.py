@@ -93,6 +93,13 @@
 # [Sync] 2026-07-04: materialize connector-owned Notion snapshots into the
 #                    workspace-local `.notion/` files before user-message
 #                    assembly so workspace_context can read the canonical files.
+# [Sync] 2026-07-20: claude-plan — add memory-only PlanState on AgentRunState;
+#                    observe tool-input-available for EnterPlanMode/ExitPlanMode
+#                    and emit plan-mode-changed (not collected); wire runner
+#                    on_plan_file_changed to read the plan file (capped by
+#                    INK_AGENT_PLAN_MAX_CONTENT_BYTES) and emit plan-updated
+#                    (not collected); add build_thread_plan_payload() REST
+#                    helper backed by get_plans_dir().
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -111,6 +118,9 @@ SSE event schema (aligned with Pawkeyland)::
     data: {"type": "tool-input-available", "toolCallId": "...", "toolName": "...", "input": {...}}
     data: {"type": "tool-output-available","toolCallId": "...", "output": ..., "isError": false}
     data: {"type": "tool-approval-request","toolCallId": "...", "toolName": "...", "input": {...}}
+    data: {"type": "plan-mode-changed", "planMode": "planning"|"exited", "toolCallId": "..."}
+    data: {"type": "plan-updated", "slug": "...", "fileName": "...", "content": "...",
+           "contentBytes": 1832, "truncated": false, "updatedAt": "..."}
     data: {"type": "message-final",  "text": "...", "usage": {...}, "sessionId": "..."}
     data: {"type": "finish",         "finishReason": "stop"|"error"}
     data: {"type": "error",          "errorText": "..."}
@@ -123,6 +133,8 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncGenerator, Mapping, Optional
 from uuid import uuid4
 
@@ -130,7 +142,11 @@ import database as _db
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
-from libs.claude_agent_kit.server.workspace import get_or_create_workspace
+from libs.claude_agent_kit.server.workspace import (
+    get_or_create_workspace,
+    get_plans_dir,
+    get_workspace_root,
+)
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
@@ -161,6 +177,240 @@ _EDITOR_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
 })
 
 _SANDBOX_NETWORK_MODES: frozenset[str] = frozenset({"disabled", "allowlist", "open"})
+
+# ---------------------------------------------------------------------------
+# Plan Mode capture (claude-plan §5.2–§5.5)
+# ---------------------------------------------------------------------------
+
+# Plan Mode tool → plan_mode transition (§5.2 state machine).
+_PLAN_MODE_BY_TOOL: dict[str, str] = {
+    "EnterPlanMode": "planning",
+    "ExitPlanMode": "exited",
+}
+
+_PLAN_MAX_CONTENT_BYTES_DEFAULT: int = 262144
+
+
+def _plan_max_content_bytes() -> int:
+    """Return the plan content cap (bytes) from env config.
+
+    Oversized plan content is truncated in plan-updated frames / REST
+    responses and flagged ``truncated:true`` (claude-plan §5.4).
+    """
+
+    try:
+        raw = os.getenv("INK_AGENT_PLAN_MAX_CONTENT_BYTES", "") or ""
+        value = int(raw) if raw else _PLAN_MAX_CONTENT_BYTES_DEFAULT
+        return value if value > 0 else _PLAN_MAX_CONTENT_BYTES_DEFAULT
+    except (TypeError, ValueError):
+        return _PLAN_MAX_CONTENT_BYTES_DEFAULT
+
+
+@dataclass
+class PlanState:
+    """In-memory Plan Mode state for a thread (claude-plan §5.2).
+
+    Memory-only, attached to the AgentRunState flyweight — the workspace
+    plans directory is the sole persistent layer; refresh/reconnect always
+    rebuilds via the REST endpoint.
+    """
+
+    plan_mode: str = "none"  # "none" | "planning" | "exited"
+    slug: Optional[str] = None
+    file_name: Optional[str] = None
+    updated_at: Optional[str] = None
+    content_bytes: int = 0
+
+
+def _ensure_plan_state(state: Optional[Any]) -> PlanState:
+    """Return the live PlanState for *state*, creating it on first use."""
+
+    plan_state = getattr(state, "plan_state", None) if state is not None else None
+    if plan_state is None:
+        plan_state = PlanState()
+        if state is not None:
+            state.plan_state = plan_state
+    return plan_state
+
+
+def _read_plan_file_payload(path: Path) -> Optional[dict[str, Any]]:
+    """Read a plan markdown file into the plan-updated / REST payload shape.
+
+    Returns ``None`` on IO/encoding errors — callers log and skip the
+    plan-updated emission (claude-plan §5.4 error boundary).  Content is
+    capped at ``INK_AGENT_PLAN_MAX_CONTENT_BYTES`` (default 262144);
+    oversized files are truncated with ``truncated:true`` so the frontend
+    can fetch full content via REST.  ``contentBytes`` always reports the
+    on-disk byte size.
+    """
+
+    try:
+        stat = path.stat()
+        size = stat.st_size
+        cap = _plan_max_content_bytes()
+        with open(path, "rb") as fh:
+            data = fh.read(min(size, cap))
+        updated_at = (
+            datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+        return {
+            "slug": path.stem,
+            "fileName": path.name,
+            "content": data.decode("utf-8", errors="replace"),
+            "contentBytes": size,
+            "truncated": size > cap,
+            "updatedAt": updated_at,
+        }
+    except (OSError, ValueError):
+        return None
+
+
+def _find_newest_plan_file(plans_dir: Path) -> Optional[Path]:
+    """Return the most recently modified ``.md`` file in *plans_dir*.
+
+    Non-``.md`` suffixes and entries that resolve outside the plans dir
+    (symlink escape) are rejected (claude-plan §5.1 constraints).
+    """
+
+    try:
+        resolved_dir = plans_dir.resolve(strict=False)
+        candidates: list[Path] = []
+        for entry in plans_dir.iterdir():
+            if entry.suffix.lower() != ".md":
+                continue
+            try:
+                resolved = entry.resolve(strict=False)
+                resolved.relative_to(resolved_dir)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            if resolved.is_file():
+                candidates.append(resolved)
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    try:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _thread_workspace_exists(thread_id: str) -> bool:
+    """Return True when the per-thread workspace directory exists.
+
+    Uses the same traversal guard as ``get_or_create_workspace``.  A missing
+    workspace means Workspace Mode is disabled (or the thread never ran), so
+    the plan endpoint must not probe the global ``~/.claude/plans``.
+    """
+
+    if not thread_id or "/" in thread_id or "\\" in thread_id or ".." in thread_id:
+        return False
+    try:
+        root = get_workspace_root().resolve(strict=False)
+        workspace = (root / thread_id).resolve(strict=False)
+        workspace.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return workspace.is_dir()
+
+
+def build_thread_plan_payload(thread_id: str, plan_mode: str = "none") -> dict[str, Any]:
+    """Build the ``GET /threads/{thread_id}/plan`` response body (claude-plan §5.5).
+
+    The filesystem is the source of truth: scan ``get_plans_dir(thread_id)``
+    for the newest ``.md`` plan file.  *plan_mode* comes from in-memory run
+    state when the thread is running, else ``"none"``.  Missing workspace
+    (Workspace Mode disabled) → fixed ``exists:false`` + ``plan_mode:"none"``;
+    an existing workspace without plans keeps the in-memory *plan_mode*.
+    """
+
+    payload: dict[str, Any] = {
+        "thread_id": thread_id,
+        "plan_mode": plan_mode or "none",
+        "exists": False,
+        "slug": None,
+        "file_name": None,
+        "content": None,
+        "content_bytes": None,
+        "truncated": False,
+        "updated_at": None,
+    }
+    if not _thread_workspace_exists(thread_id):
+        payload["plan_mode"] = "none"
+        return payload
+    plans_dir = get_plans_dir(thread_id)
+    newest = _find_newest_plan_file(plans_dir) if plans_dir is not None else None
+    if newest is None:
+        return payload
+    data = _read_plan_file_payload(newest)
+    if data is None:
+        logger.warning("build_thread_plan_payload: failed to read plan file %s", newest)
+        return payload
+    payload.update(
+        {
+            "exists": True,
+            "slug": data["slug"],
+            "file_name": data["fileName"],
+            "content": data["content"],
+            "content_bytes": data["contentBytes"],
+            "truncated": data["truncated"],
+            "updated_at": data["updatedAt"],
+        }
+    )
+    return payload
+
+
+async def _emit_plan_updated(
+    queue: Any, plan_state: PlanState, path: Path
+) -> None:
+    """Read *path* and emit a plan-updated frame; update *plan_state*.
+
+    Lifecycle frame — NOT collected into ``collected_parts`` (claude-plan
+    §5.4).  IO/read failures skip the emission and only log.
+    """
+
+    data = _read_plan_file_payload(path)
+    if data is None:
+        logger.warning("plan file read failed; skipping plan-updated: %s", path)
+        return
+    plan_state.slug = data["slug"]
+    plan_state.file_name = data["fileName"]
+    plan_state.updated_at = data["updatedAt"]
+    plan_state.content_bytes = data["contentBytes"]
+    await queue.put(_sse("plan-updated", data))
+
+
+async def _observe_plan_mode_transition(
+    queue: Any,
+    state: Optional[Any],
+    tool_call_id: Optional[str],
+    tool_name: Optional[str],
+) -> None:
+    """Transition PlanState on EnterPlanMode/ExitPlanMode tool-input-available.
+
+    Emits ``plan-mode-changed`` (lifecycle frame — not collected).  On
+    ExitPlanMode also performs the final plan-file read so the panel freezes
+    on the approved version (claude-plan §5.3/§6.2).  Plan mode transitions
+    are decoupled from file reads: a failed read never blocks
+    ``plan-mode-changed``.
+    """
+
+    plan_mode = _PLAN_MODE_BY_TOOL.get(tool_name or "")
+    if plan_mode is None:
+        return
+    plan_state = _ensure_plan_state(state)
+    plan_state.plan_mode = plan_mode
+    await queue.put(
+        _sse("plan-mode-changed", {"planMode": plan_mode, "toolCallId": tool_call_id})
+    )
+    if tool_name == "ExitPlanMode" and state is not None:
+        plans_dir = get_plans_dir(getattr(state, "session_id", "") or "")
+        newest = _find_newest_plan_file(plans_dir) if plans_dir is not None else None
+        if newest is not None:
+            await _emit_plan_updated(queue, plan_state, newest)
+
 
 
 def _coerce_sandbox_network_mode(value: object) -> str:
@@ -668,6 +918,7 @@ class ClaudeAgentService:
             ),
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
             on_error=self._make_error_cb(queue),
+            on_plan_file_changed=self._make_plan_file_changed_cb(queue, execution.state),
         )
 
         try:
@@ -1005,6 +1256,7 @@ class ClaudeAgentService:
                     evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}
                     await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}))
                     turn_ctx.collected_parts.append(evt)
+                    await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
                 return
 
             # --- tool_input_delta: streamed tool JSON input for live previews ---
@@ -1030,6 +1282,7 @@ class ClaudeAgentService:
                     evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}
                     await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}))
                     turn_ctx.collected_parts.append(evt)
+                    await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
                 return
 
             # --- tool_result: tool execution result ---
@@ -1170,6 +1423,22 @@ class ClaudeAgentService:
             await queue.put(_sse("error", {"errorText": _format_exception_for_sse(exc)}))
 
         return on_error
+
+    @staticmethod
+    def _make_plan_file_changed_cb(queue: asyncio.Queue, state: Optional[Any]):
+        """Build the runner on_plan_file_changed callback (claude-plan §5.3).
+
+        Fired by the runner PostToolUse hook (debounced per file per turn)
+        after a built-in Write/Edit/MultiEdit lands in the thread workspace
+        plans dir.  Reads the plan file and emits plan-updated; IO failures
+        skip the emission and only log.
+        """
+
+        async def on_plan_file_changed(file_path: str) -> None:
+            plan_state = _ensure_plan_state(state)
+            await _emit_plan_updated(queue, plan_state, Path(file_path))
+
+        return on_plan_file_changed
 
 
 

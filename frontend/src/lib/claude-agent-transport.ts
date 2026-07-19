@@ -15,6 +15,9 @@
  *                      so auto-mode backend confirmations render frontend approval UI.
  * [Sync]   2026-06-13: map tool-input-delta SSE frames to AI SDK 6
  *                      tool-input-delta chunks for built-in Write previews.
+ * [Sync]   2026-07-20: forward plan-mode-changed / plan-updated lifecycle frames to the
+ *                      useThreadPlan store without mapping them to UIMessageChunks
+ *                      (claude-plan.md §5.4: 不收集，不产生消息气泡).
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -43,6 +46,7 @@
  */
 
 import { HttpChatTransport, type HttpChatTransportInitOptions, type UIMessage, type UIMessageChunk } from 'ai';
+import { applyPlanEvent } from '../hooks/useThreadPlan';
 
 // ---------------------------------------------------------------------------
 // Backend event shapes (Pawkeyland-aligned)
@@ -125,6 +129,22 @@ interface BackendToolApprovalRequest {
   input?: unknown;
 }
 
+interface BackendPlanModeChanged {
+  type: 'plan-mode-changed';
+  planMode: 'planning' | 'exited';
+  toolCallId?: string;
+}
+
+interface BackendPlanUpdated {
+  type: 'plan-updated';
+  slug: string;
+  fileName: string;
+  content: string;
+  contentBytes: number;
+  truncated?: boolean;
+  updatedAt?: string;
+}
+
 interface BackendMessageFinal {
   type: 'message-final';
   text: string;
@@ -155,6 +175,8 @@ type BackendEvent =
   | BackendToolInputAvailable
   | BackendToolOutputAvailable
   | BackendToolApprovalRequest
+  | BackendPlanModeChanged
+  | BackendPlanUpdated
   | BackendMessageFinal
   | BackendFinish
   | BackendError;
@@ -193,6 +215,8 @@ function parseSSEChunk(raw: string): BackendEvent[] {
 interface ConversionState {
   started: boolean;
   toolInputs: Record<string, unknown>;
+  /** Chat/thread id used to route plan-* lifecycle frames to the plan store. */
+  threadId?: string;
 }
 
 /**
@@ -339,6 +363,19 @@ function convertEvent(
     }
 
     // -----------------------------------------------------------------------
+    // Plan lifecycle frames (claude-plan.md §5.4)
+    // 不收集：plan-* 帧是面板状态而非对话消息，不映射为 UIMessageChunk，
+    // 只转发到按 threadId 键控的 plan store（useThreadPlan）。
+    // -----------------------------------------------------------------------
+    case 'plan-mode-changed':
+    case 'plan-updated': {
+      if (state.threadId) {
+        applyPlanEvent(state.threadId, event);
+      }
+      break;
+    }
+
+    // -----------------------------------------------------------------------
     // Session metadata & lifecycle
     // -----------------------------------------------------------------------
     case 'message-metadata': {
@@ -377,18 +414,29 @@ function convertEvent(
 // Transport class
 // ---------------------------------------------------------------------------
 
+export interface ClaudeAgentChatTransportInitOptions<UI_MESSAGE extends UIMessage = UIMessage>
+  extends HttpChatTransportInitOptions<UI_MESSAGE>
+{
+  /** Chat/thread id; plan-* SSE frames are forwarded to the plan store under this key. */
+  threadId?: string;
+}
+
 export class ClaudeAgentChatTransport<UI_MESSAGE extends UIMessage = UIMessage>
   extends HttpChatTransport<UI_MESSAGE>
 {
-  constructor(options: HttpChatTransportInitOptions<UI_MESSAGE> = {}) {
-    super(options);
+  private readonly threadId?: string;
+
+  constructor(options: ClaudeAgentChatTransportInitOptions<UI_MESSAGE> = {}) {
+    const { threadId, ...transportOptions } = options;
+    super(transportOptions);
+    this.threadId = threadId;
   }
 
   protected processResponseStream(
     stream: ReadableStream<Uint8Array>,
   ): ReadableStream<UIMessageChunk> {
     const decoder = new TextDecoder();
-    const conversionState: ConversionState = { started: false, toolInputs: {} };
+    const conversionState: ConversionState = { started: false, toolInputs: {}, threadId: this.threadId };
 
     return stream.pipeThrough(
       new TransformStream<Uint8Array, UIMessageChunk>({

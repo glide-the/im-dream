@@ -29,6 +29,10 @@
 # [Sync] 2026-06-21: add Settings-backed sandbox network policy emission.
 # [Sync] 2026-06-25: omit sandbox.network for open mode so runtime default
 #                    egress applies without unsupported allowedDomains ["*"].
+# [Sync] 2026-07-20: add get_plans_dir() — per-thread Plan Mode plans directory
+#                    resolver ({workspace}/.claude-home/plans primary,
+#                    {workspace}/plans fallback) with resolve()-based workspace
+#                    containment guard (claude-plan §5.1).
 
 """Workspace manager for Claude Agent session directories.
 
@@ -539,6 +543,56 @@ def get_or_create_workspace(
         sandbox_network_mode=sandbox_network_mode,
         sandbox_network_allowed_domains=sandbox_network_allowed_domains,
     )
+
+
+def get_plans_dir(session_id: str) -> Optional[Path]:
+    """Return the Plan Mode plans directory for *session_id*, or ``None``.
+
+    Resolution order (claude-plan §5.1):
+    1. ``{workspace}/.claude-home/plans`` — primary, written by the CLI when
+       the runner injects ``CLAUDE_CONFIG_DIR={workspace}/.claude-home``.
+    2. ``{workspace}/plans`` — fallback probe for the ``plansDirectory``
+       settings-key alternative.
+
+    Every candidate must ``resolve()`` to a path still contained in the
+    resolved workspace root — the same traversal / symlink-escape policy as
+    ``get_or_create_workspace``.  ``None`` means "no plans directory":
+    invalid *session_id*, workspace disabled/missing, a candidate that
+    escapes the workspace, or no plans written yet.  Callers map ``None``
+    to the ``exists:false`` contract and must never fall back to the global
+    ``~/.claude/plans`` (cross-user escape risk).
+    """
+    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
+        logger.warning("get_plans_dir: invalid session_id: %r", session_id)
+        return None
+    try:
+        root = get_workspace_root().resolve(strict=False)
+        workspace = (root / session_id).resolve(strict=False)
+        workspace.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        logger.warning(
+            "get_plans_dir: workspace path escapes root for session_id=%r", session_id
+        )
+        return None
+    if not workspace.is_dir():
+        return None
+    for candidate in (
+        workspace / ".claude-home" / "plans",
+        workspace / "plans",
+    ):
+        try:
+            resolved = candidate.resolve(strict=False)
+            resolved.relative_to(workspace)
+        except (OSError, RuntimeError, ValueError):
+            logger.warning(
+                "get_plans_dir: plans candidate %s escapes workspace %s; skipped.",
+                candidate,
+                workspace,
+            )
+            continue
+        if resolved.is_dir():
+            return resolved
+    return None
 
 
 # ---------------------------------------------------------------------------

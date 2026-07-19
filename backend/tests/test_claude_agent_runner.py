@@ -37,6 +37,9 @@
 #                    apply-seccomp/bubblewrap startup failures.
 # [Sync] 2026-06-21: cover sandbox_network_mode="disabled" denying network
 #                    tools before full-access or low-sensitivity allows.
+# [Sync] 2026-07-20: cover EnterPlanMode/ExitPlanMode low-sensitivity allow in
+#                    auto mode and frontend-confirmation side-channel in manual
+#                    mode (claude-plan §5.7).
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -1314,6 +1317,70 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         specific = getattr(result, "hookSpecificOutput", {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_auto_plan_mode_tools_get_query_allow_without_confirmation(self):
+        """EnterPlanMode/ExitPlanMode are low-sensitivity in auto mode (claude-plan §5.7)."""
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": False, "reason": "should not ask"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                on_tool_confirmation_request=confirm,
+            )
+
+            for tool_name in ("EnterPlanMode", "ExitPlanMode"):
+                with self.subTest(tool_name=tool_name):
+                    result = await hook(
+                        {
+                            "tool_name": tool_name,
+                            "tool_input": {},
+                        },
+                        f"call-{tool_name.lower()}-auto",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(confirmation_requests, [])
+                    specific = getattr(result, "hookSpecificOutput", {})
+                    self.assertEqual(specific.get("hookEventName"), "PreToolUse")
+                    self.assertEqual(specific.get("permissionDecision"), "allow")
+
+    async def test_manual_plan_mode_tools_use_frontend_confirmation(self):
+        """manual mode keeps EnterPlanMode/ExitPlanMode on the confirmation side-channel."""
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                tool_choice="manual",
+                on_tool_confirmation_request=confirm,
+            )
+
+            for tool_name in ("EnterPlanMode", "ExitPlanMode"):
+                with self.subTest(tool_name=tool_name):
+                    result = await hook(
+                        {
+                            "tool_name": tool_name,
+                            "tool_input": {},
+                        },
+                        f"call-{tool_name.lower()}-manual",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    specific = getattr(result, "hookSpecificOutput", {})
+                    self.assertEqual(specific.get("permissionDecision"), "allow")
+
+        self.assertEqual(
+            [p["tool_name"] for p in confirmation_requests],
+            ["EnterPlanMode", "ExitPlanMode"],
+        )
 
     async def test_auto_skill_tool_gets_query_allow_without_confirmation(self):
         """Claude Code's built-in Skill tool is low-sensitivity in auto mode."""

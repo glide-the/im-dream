@@ -54,6 +54,11 @@
 //                    contrast instead of a heavy focus-colored border.
 // [Sync] 2026-07-09: page default history lists via scroll-triggered limit/offset
 //                    fetches instead of loading every thread up front.
+// [Sync] 2026-07-20: mount the claude-plan PlanPanel beside the top-right floating
+//                    control bar and hydrate the plan store alongside the thread
+//                    status check so refresh/reconnect restores the panel (§5.6).
+// [Sync] 2026-07-20: 交互方案变更 — 移除独立挂载的常驻计划面板，改为在浮动控制栏内
+//                    「新建对话」按钮旁渲染 PlanButton（有计划时才出现，点击弹层展示）。
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
@@ -68,6 +73,8 @@ import {
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
+import PlanButton from './PlanPanel';
+import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ConnectorLandingPanel from './ConnectorLandingPanel';
 import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
@@ -531,6 +538,9 @@ function ChatViewContent({
       if (status?.running) {
         setReconnectStreamNonce((value) => value + 1);
       }
+
+      // claude-plan §5.6: 初始加载/重连时经 REST 水合 plan store，恢复 PlanPanel。
+      void hydrateThreadPlan(activeThreadId);
     })();
 
     return () => {
@@ -735,6 +745,9 @@ function ChatViewContent({
               <IconPlus style={{ width: '0.95rem', height: '0.95rem' }} />
               <span>{isCreatingThread ? '创建中' : '新建'}</span>
             </button>
+
+            {/* claude-plan 计划按钮 – 仅当计划被触发或存在计划文件时渲染；点击切换锚定弹层 */}
+            {activeThreadId ? <PlanButton threadId={activeThreadId} /> : null}
 
             {/* 更多 */}
             <div style={{ position: 'relative' }}>

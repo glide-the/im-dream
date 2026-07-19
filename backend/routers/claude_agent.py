@@ -25,6 +25,8 @@
 #                    params backed by plugin-style fuzzy/vector retrievers.
 # [Sync] 2026-07-09: default /api/claude-agent/threads lists accept limit/offset
 #                    for frontend scroll pagination without loading all threads.
+# [Sync] 2026-07-20: add GET /api/claude-agent/threads/{thread_id}/plan —
+#                    current Plan Mode plan per thread (claude-plan §5.5).
 
 import base64
 import json
@@ -39,6 +41,7 @@ from pydantic import AliasChoices, BaseModel, Field
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
+from claude_agent.service import build_thread_plan_payload
 from claude_agent.thread_retrieval import (
     build_chat_thread_search_config,
     is_chat_history_search_requested,
@@ -487,6 +490,47 @@ async def claude_agent_thread_status(
         "lifecycle": lifecycle,
         "turn_count": snapshot.get("turn_count", 0),
     }
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/plan")
+async def claude_agent_thread_plan(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the current Plan Mode plan for *thread_id* (claude-plan §5.5).
+
+    Response body::
+
+        {
+          "thread_id": "thread-abc123",
+          "plan_mode": "none" | "planning" | "exited",
+          "exists": true,
+          "slug": "amber-churn-otter",
+          "file_name": "amber-churn-otter.md",
+          "content": "# 计划\\n...",
+          "content_bytes": 1832,
+          "truncated": false,
+          "updated_at": "2026-07-20T01:23:45.678Z"
+        }
+
+    Ownership is validated like ``/status``: 404 when the thread does not
+    belong to the caller.  ``plan_mode`` comes from in-memory run state while
+    the thread is running, else ``"none"``.  Plan data is rebuilt from the
+    workspace plans directory (the only persistent layer); ``exists:false``
+    returns null ``slug``/``file_name``/``content``/``content_bytes``/
+    ``updated_at``.  Workspace Mode disabled → fixed ``exists:false`` +
+    ``plan_mode:"none"`` (never probes the global ``~/.claude/plans``).
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    plan_mode = "none"
+    if snapshot and snapshot.get("lifecycle") == "running":
+        plan_mode = str(snapshot.get("plan_mode") or "none")
+    return build_thread_plan_payload(thread_id, plan_mode=plan_mode)
 
 
 @router.post("/api/claude-agent/threads/{thread_id}/stop")

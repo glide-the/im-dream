@@ -11,6 +11,10 @@
 #                    for zero-downtime migration.
 # [Sync] 2026-06-12: merge Cloud Run/process SDK env after backend/.env so Secret
 #                    Manager-injected ANTHROPIC_AUTH_TOKEN reaches the subprocess.
+# [Sync] 2026-07-20: add apply_plan_mode_env_to_options() — inject per-thread
+#                    CLAUDE_CONFIG_DIR={cwd}/.claude-home at the lowest env
+#                    priority so Plan Mode files land in the thread workspace
+#                    (claude-plan §5.1); key stays out of the dotenv allowlist.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -44,6 +48,12 @@ _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
     }
 )
 _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
+
+# Plan Mode config-home injection (claude-plan §5.1).  CLAUDE_CONFIG_DIR is
+# deliberately NOT in ``_PROJECT_DOTENV_SDK_ENV_NAMES`` so backend/.env cannot
+# relocate the global Claude config home.
+_CLAUDE_CONFIG_DIR_ENV_NAME = "CLAUDE_CONFIG_DIR"
+_PLAN_MODE_CONFIG_HOME_DIRNAME = ".claude-home"
 
 
 def _is_project_dotenv_sdk_env_key(key: str) -> bool:
@@ -140,6 +150,38 @@ def apply_project_sdk_runtime_options(
     """Apply all project-level Claude SDK runtime defaults."""
     apply_project_dotenv_to_options(options, env_file)
     apply_project_setting_sources_to_options(options)
+    return options
+
+
+def apply_plan_mode_env_to_options(
+    options: Any,
+    cwd: Optional[str | Path] = None,
+) -> Any:
+    """Point the Claude Code config home at the per-thread workspace.
+
+    Sets ``CLAUDE_CONFIG_DIR={cwd}/.claude-home`` so Plan Mode plan files
+    land under ``{workspace}/.claude-home/plans/`` (claude-plan §5.1).
+
+    Priority: lowest in the SDK env chain — call *after*
+    ``apply_project_sdk_runtime_options`` and *before*
+    ``apply_user_sdk_env_to_options``.  An explicitly provided
+    ``CLAUDE_CONFIG_DIR`` already present in ``options.env`` is preserved.
+    No-op when *cwd* is falsy (Workspace Mode disabled).
+    """
+    if not cwd:
+        return options
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    if existing_env.get(_CLAUDE_CONFIG_DIR_ENV_NAME):
+        options.env = existing_env
+        return options
+    options.env = {
+        **existing_env,
+        _CLAUDE_CONFIG_DIR_ENV_NAME: str(
+            Path(str(cwd)) / _PLAN_MODE_CONFIG_HOME_DIRNAME
+        ),
+    }
     return options
 
 

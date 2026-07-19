@@ -25,6 +25,8 @@
 //                    from the input dock when workspace is disabled.
 // [Sync] 2026-06-25: stop button now calls the backend thread stop endpoint
 //                    instead of only aborting the local browser stream.
+// [Sync] 2026-07-20: pass threadId into ClaudeAgentChatTransport so plan-* SSE
+//                    frames route to the useThreadPlan store (claude-plan feature).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -55,6 +57,7 @@ import {
   applyBackendEventToMessages,
   consumeClaudeAgentSseStream,
 } from '../../lib/claude-agent-sse-utils';
+import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
 import { IconArrowDown } from './Icons';
 import { API_BASE } from '../../lib/apiBase';
 const CHAT_BOTTOM_PROXIMITY_PX = 120;
@@ -196,6 +199,7 @@ export default function ChatPanel({
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
     id: threadId,
     transport: new ClaudeAgentChatTransport({
+      threadId,
       api: `${API_BASE}/api/claude-agent`,
       headers: () => ({ 'Authorization': `Bearer ${getAuthToken()}` }),
       prepareSendMessagesRequest: ({ messages: outgoingMessages, body, id }) => {
@@ -348,6 +352,11 @@ export default function ChatPanel({
           if (event.type === 'finish' || event.type === 'error') {
             finishReconnect();
             return false;
+          }
+          // plan-* 生命周期帧不产生消息气泡，转发 plan store（claude-plan.md §5.4）。
+          if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
+            applyPlanEvent(activeThreadId, event as unknown as ThreadPlanEvent);
+            return;
           }
           const applyMessages = setMessagesRef.current;
           if (!applyMessages) {
