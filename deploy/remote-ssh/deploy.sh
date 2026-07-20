@@ -65,6 +65,9 @@ REMOTE_CLASH_DASHBOARD_PORT="${REMOTE_CLASH_DASHBOARD_PORT:-3000}"
 REMOTE_SYNC_DATA="${REMOTE_SYNC_DATA:-0}"
 REMOTE_SETUP_NGINX="${REMOTE_SETUP_NGINX:-auto}"
 REMOTE_SETUP_STORAGE="${REMOTE_SETUP_STORAGE:-1}"
+REMOTE_SETUP_SWAP="${REMOTE_SETUP_SWAP:-auto}"
+REMOTE_SWAP_FILE="${REMOTE_SWAP_FILE:-/swapfile}"
+REMOTE_SWAP_SIZE_MB="${REMOTE_SWAP_SIZE_MB:-2048}"
 REMOTE_SETUP_SSL="${REMOTE_SETUP_SSL:-0}"
 REMOTE_CLEAN_IMAGES="${REMOTE_CLEAN_IMAGES:-0}"
 REMOTE_CLEAN_VOLUMES="${REMOTE_CLEAN_VOLUMES:-0}"
@@ -102,6 +105,7 @@ Commands:
   clean     Stop and remove remote Compose containers/networks. Set REMOTE_CLEAN_IMAGES=1 or REMOTE_CLEAN_VOLUMES=1 for broader cleanup.
   setup-nginx    Install/update host nginx reverse proxy for the backend/frontend domains.
   setup-storage  Create/repair remote backend data, file-storage, agent-workspace, and backup directories.
+  setup-swap     Ensure REMOTE_SWAP_SIZE_MB swap exists so the frontend build survives a 1G-RAM host.
   sync-data      Back up remote data locally, upload local backend/data, then force-recreate Compose services.
   backup-data    Download a timestamped remote backend/data backup without uploading local data.
   download-data  Back up current local backend/data, then download remote backend/data into local data.
@@ -442,6 +446,14 @@ should_setup_storage() {
   esac
 }
 
+should_setup_swap() {
+  case "${REMOTE_SETUP_SWAP}" in
+    1|true|yes|on|auto) return 0 ;;
+    0|false|no|off) return 1 ;;
+    *) err "REMOTE_SETUP_SWAP must be 1, 0, or auto." ;;
+  esac
+}
+
 command_setup_nginx() {
   require_remote_host_config
   if should_setup_nginx; then
@@ -480,10 +492,28 @@ command_setup_storage() {
   fi
 }
 
+command_setup_swap() {
+  require_remote_host_config
+  if should_setup_swap; then
+    log "Ensuring at least ${REMOTE_SWAP_SIZE_MB}MB remote swap so the frontend build does not OOM."
+    env DRY_RUN="${DRY_RUN}" \
+      REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
+      REMOTE_SSH_USER="${REMOTE_SSH_USER}" \
+      REMOTE_SSH_PORT="${REMOTE_SSH_PORT}" \
+      REMOTE_SSH_KEY="${REMOTE_SSH_KEY}" \
+      REMOTE_SWAP_FILE="${REMOTE_SWAP_FILE}" \
+      REMOTE_SWAP_SIZE_MB="${REMOTE_SWAP_SIZE_MB}" \
+      "${SCRIPT_DIR}/setup-swap.sh"
+  else
+    log "Skipping remote swap setup because REMOTE_SETUP_SWAP=${REMOTE_SETUP_SWAP}."
+  fi
+}
+
 command_deploy() {
   check_prereqs
   command_setup_nginx
   command_setup_storage
+  command_setup_swap
   sync_files
   snapshot_images
   remote_build
@@ -572,6 +602,7 @@ case "${COMMAND:-help}" in
       REMOTE_APP_DIR="${REMOTE_APP_DIR}" \
       "${SCRIPT_DIR}/setup-storage.sh"
     ;;
+  setup-swap) command_setup_swap ;;
   sync-data)
     exec env DRY_RUN="${DRY_RUN}" \
       REMOTE_SSH_HOST="${REMOTE_SSH_HOST}" \
