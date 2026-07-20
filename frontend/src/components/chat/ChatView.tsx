@@ -61,7 +61,13 @@
 //                    「新建对话」按钮旁渲染 PlanButton（有计划时才出现，点击弹层展示）。
 // [Sync] 2026-07-20: claude-todo §5.6 — 与 hydrateThreadPlan 并行水合 useThreadTodos
 //                    store，刷新/重连后恢复 PlanButton 弹层「待办」分区。
+// [Sync] 2026-07-20: i18n — route all chat UI copy (quick actions, history sidebar,
+//                    search dialog, WorkspaceTabBar, aria labels) through the chat
+//                    namespace in i18n.ts (en + zh); date group/label helpers now take
+//                    t() and format via getDateLocale(i18n.language).
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
@@ -85,6 +91,7 @@ import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
+import { getDateLocale } from '../../i18n';
 
 interface ChatThread {
   id: string;
@@ -170,29 +177,31 @@ class ChatShellBoundary extends Component<ChatShellBoundaryProps, ChatShellBound
   }
 }
 
-const DEFAULT_LANDING_QUICK_ACTIONS: QuickActionStripItem[] = [
-  {
-    id: 'generate-image',
-    label: '生成图片',
-    prompt: '请根据当前内容生成一张风格统一、适合插入文档的图片。',
-    icon: 'image',
-    description: '根据当前主题快速生成配图。',
-  },
-  {
-    id: 'write-edit',
-    label: '撰写或编辑',
-    prompt: '请帮我撰写、改写或润色当前内容，保持自然语气和上下文一致。',
-    icon: 'edit',
-    description: '继续写作、改写或润色。',
-  },
-  {
-    id: 'find-info',
-    label: '查找资料',
-    prompt: '请围绕当前主题查找相关资料、参考信息和可用线索。',
-    icon: 'search',
-    description: '检索相关资料和参考。',
-  },
-];
+function buildDefaultLandingQuickActions(t: TFunction): QuickActionStripItem[] {
+  return [
+    {
+      id: 'generate-image',
+      label: t('chat.quickActions.generateImage.label'),
+      prompt: t('chat.quickActions.generateImage.prompt'),
+      icon: 'image',
+      description: t('chat.quickActions.generateImage.description'),
+    },
+    {
+      id: 'write-edit',
+      label: t('chat.quickActions.writeEdit.label'),
+      prompt: t('chat.quickActions.writeEdit.prompt'),
+      icon: 'edit',
+      description: t('chat.quickActions.writeEdit.description'),
+    },
+    {
+      id: 'find-info',
+      label: t('chat.quickActions.findInfo.label'),
+      prompt: t('chat.quickActions.findInfo.prompt'),
+      icon: 'search',
+      description: t('chat.quickActions.findInfo.description'),
+    },
+  ];
+}
 
 const THREAD_SEARCH_DEBOUNCE_MS = 180;
 const THREAD_HISTORY_PAGE_SIZE = 20;
@@ -212,24 +221,24 @@ function dayDiffFromToday(value: string): number | null {
   return Math.floor((todayStart - dateStart) / 86400000);
 }
 
-function formatThreadDateLabel(value: string): string {
+function formatThreadDateLabel(value: string, t: TFunction, language?: string): string {
   const diff = dayDiffFromToday(value);
-  if (diff === 0) return '今天';
-  if (diff === 1) return '昨天';
-  if (diff !== null && diff > 1 && diff < 7) return `${diff} 天前`;
+  if (diff === 0) return t('chat.dateGroup.today');
+  if (diff === 1) return t('chat.dateGroup.yesterday');
+  if (diff !== null && diff > 1 && diff < 7) return t('chat.dateGroup.daysAgo', { count: diff });
 
   const date = parseThreadDate(value);
   if (!date) return '';
-  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(getDateLocale(language), { month: 'numeric', day: 'numeric' }).format(date);
 }
 
-function getThreadDateGroup(value: string): string {
+function getThreadDateGroup(value: string, t: TFunction): string {
   const diff = dayDiffFromToday(value);
-  if (diff === 0) return '今天';
-  if (diff === 1) return '昨天';
-  if (diff !== null && diff > 1 && diff < 7) return '前 7 天';
-  if (diff !== null && diff < 30) return '前 30 天';
-  return '更早';
+  if (diff === 0) return t('chat.dateGroup.today');
+  if (diff === 1) return t('chat.dateGroup.yesterday');
+  if (diff !== null && diff > 1 && diff < 7) return t('chat.dateGroup.last7Days');
+  if (diff !== null && diff < 30) return t('chat.dateGroup.last30Days');
+  return t('chat.dateGroup.earlier');
 }
 
 async function createThread(): Promise<string | null> {
@@ -337,7 +346,7 @@ function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
   onNewChat,
-  quickActions = DEFAULT_LANDING_QUICK_ACTIONS,
+  quickActions,
   editorState,
   onEditorWriteConfirmed,
   activeVoice,
@@ -345,6 +354,7 @@ function ChatViewContent({
   onLandingTabChange,
   onOpenConnectorSettings,
 }: ChatViewContentProps) {
+  const { t, i18n } = useTranslation();
   const { workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
@@ -593,12 +603,12 @@ function ChatViewContent({
     const id = await createThread();
     setIsCreatingThread(false);
     if (!id) {
-      setDraftInputError('创建对话失败，请稍后再试。');
+      setDraftInputError(t('chat.history.createFailed'));
       return;
     }
 
     queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
-  }, [isCreatingThread, queuePromptForThread]);
+  }, [isCreatingThread, queuePromptForThread, t]);
 
   const handleNewChat = useCallback(() => {
     if (isCreatingThread) return;
@@ -677,7 +687,8 @@ function ChatViewContent({
     setThreads((prev) => prev.filter((t) => t.id !== threadId));
   }, [deletingThreadId, activeThreadId]);
 
-  const landingQuickActions = quickActions.length > 0 ? quickActions : DEFAULT_LANDING_QUICK_ACTIONS;
+  const defaultLandingQuickActions = useMemo(() => buildDefaultLandingQuickActions(t), [t]);
+  const landingQuickActions = quickActions && quickActions.length > 0 ? quickActions : defaultLandingQuickActions;
   const visibleThreads = threads;
   const trimmedThreadSearchQuery = threadSearchQuery.trim();
   const showLandingQuickActions = landingQuickActions.length > 0 && !hasConversationStarted;
@@ -686,7 +697,7 @@ function ChatViewContent({
     const byLabel = new Map<string, ChatThread[]>();
 
     threads.forEach((thread) => {
-      const label = getThreadDateGroup(thread.updated_at);
+      const label = getThreadDateGroup(thread.updated_at, t);
       if (!byLabel.has(label)) {
         byLabel.set(label, []);
         groups.push({ label, threads: byLabel.get(label) ?? [] });
@@ -695,7 +706,7 @@ function ChatViewContent({
     });
 
     return groups;
-  }, [threads]);
+  }, [threads, t]);
 
   return (
       <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
@@ -743,12 +754,12 @@ function ChatViewContent({
               onClick={() => void handleNewChat()}
               disabled={isCreatingThread}
               style={{ height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: 'transparent', color: isCreatingThread ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isCreatingThread ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0 0.55rem', fontSize: '0.82rem', opacity: isCreatingThread ? 0.6 : 1, transition: 'background 0.14s ease, color 0.14s ease' }}
-              title="新建对话"
+              title={t('chat.history.newChat')}
               onMouseEnter={(e) => { if (!isCreatingThread) { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; } }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isCreatingThread ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
             >
               <IconPlus style={{ width: '0.95rem', height: '0.95rem' }} />
-              <span>{isCreatingThread ? '创建中' : '新建'}</span>
+              <span>{isCreatingThread ? t('chat.history.creating') : t('chat.history.newShort')}</span>
             </button>
 
             {/* claude-plan 计划按钮 – 仅当计划被触发或存在计划文件时渲染；点击切换锚定弹层 */}
@@ -760,7 +771,7 @@ function ChatViewContent({
                 type="button"
                 onClick={() => setMoreMenuOpen((v) => !v)}
                 style={{ width: '2rem', height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: moreMenuOpen ? 'var(--color-bg-surface)' : 'transparent', color: moreMenuOpen ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center', transition: 'background 0.14s ease, color 0.14s ease' }}
-                title="更多"
+                title={t('chat.history.more')}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
                 onMouseLeave={(e) => { if (!moreMenuOpen) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; } }}
               >
@@ -786,7 +797,7 @@ function ChatViewContent({
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: threadSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                     >
                       <IconClock style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                      <span>历史对话</span>
+                      <span>{t('chat.history.title')}</span>
                     </button>
                     {workspaceEnabled ? (
                       <button
@@ -795,7 +806,7 @@ function ChatViewContent({
                         style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: fileSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                       >
                         <IconFolder style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                        <span>工作空间</span>
+                        <span>{t('chat.history.workspace')}</span>
                       </button>
                     ) : null}
                     <div style={{ height: '1px', background: 'var(--color-border-paper)', margin: '0.2rem 0.4rem' }} />
@@ -805,7 +816,7 @@ function ChatViewContent({
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                     >
                       <IconShare style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                      <span>{shareCopied ? '已复制链接' : '分享'}</span>
+                      <span>{shareCopied ? t('chat.history.linkCopied') : t('chat.history.share')}</span>
                     </button>
                   </div>
                 </>
@@ -870,7 +881,7 @@ function ChatViewContent({
                     <div style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
                       <div
                         role="tablist"
-                        aria-label="Chat 工作区切换"
+                        aria-label={t('chat.tabs.switcherAria')}
                         style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}
                       >
                         <button
@@ -894,7 +905,7 @@ function ChatViewContent({
                           }}
                         >
                           <IconClock style={{ width: '0.85rem', height: '0.85rem' }} />
-                          聊天历史
+                          {t('chat.tabs.history')}
                         </button>
                         <button
                           type="button"
@@ -917,7 +928,7 @@ function ChatViewContent({
                           }}
                         >
                           <IconDatabase style={{ width: '0.85rem', height: '0.85rem' }} />
-                          资源连接器
+                          {t('chat.tabs.connector')}
                         </button>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', minWidth: 0, marginLeft: 'auto' }}>
@@ -933,7 +944,7 @@ function ChatViewContent({
                             style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.5rem 0.75rem', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
                           >
                             <IconSearch style={{ width: '0.85rem', height: '0.85rem' }} />
-                            搜索
+                            {t('chat.search.button')}
                           </button>
                         ) : (
                           <>
@@ -952,7 +963,7 @@ function ChatViewContent({
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              筛选：全部
+                              {t('chat.filters.filterAll')}
                             </span>
                             <span
                               style={{
@@ -969,7 +980,7 @@ function ChatViewContent({
                                 whiteSpace: 'nowrap',
                               }}
                             >
-                              排序：最近交互
+                              {t('chat.filters.sortRecent')}
                             </span>
                           </>
                         )}
@@ -981,9 +992,9 @@ function ChatViewContent({
                         <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
                           <div style={{ padding: '0.8rem 0.95rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
                             <div>
-                              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>历史对话</div>
+                              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.history.title')}</div>
                               <div style={{ marginTop: '0.22rem', fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
-                                选择一条对话继续上下文。
+                                {t('chat.history.subtitle')}
                               </div>
                             </div>
                           </div>
@@ -992,7 +1003,7 @@ function ChatViewContent({
                               <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>
                             ) : null}
                             {!isLoadingThreads && visibleThreads.length === 0 ? (
-                              <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>暂无会话</div>
+                              <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>{t('chat.history.empty')}</div>
                             ) : null}
                             {defaultThreadGroups.map((group) => (
                               <div key={group.label} style={{ paddingTop: '0.85rem' }}>
@@ -1014,10 +1025,10 @@ function ChatViewContent({
                                           type="button"
                                           onClick={() => handleSelectThread(thread.id)}
                                           style={{ width: '100%', minHeight: matchExcerpt ? '3.1rem' : '2.4rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.8rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', padding: '0.45rem 1.9rem 0.45rem 0.75rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
-                                          title={thread.title ?? '新对话'}
+                                          title={thread.title ?? t('chat.history.fallbackTitle')}
                                         >
                                           <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.14rem', overflow: 'hidden' }}>
-                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem', fontWeight: 600 }}>{thread.title ?? '新对话'}</span>
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem', fontWeight: 600 }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
                                             {matchExcerpt ? (
                                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.68rem', color: 'var(--color-text-muted)', lineHeight: 1.25 }}>{matchExcerpt}</span>
                                             ) : null}
@@ -1029,7 +1040,7 @@ function ChatViewContent({
                                             type="button"
                                             onClick={(e) => void handleDeleteThread(e, thread.id)}
                                             disabled={isDeleting}
-                                            title="删除对话"
+                                            title={t('chat.history.deleteThread')}
                                             style={{ position: 'absolute', right: '0.38rem', top: '50%', transform: 'translateY(-50%)', width: '1.4rem', height: '1.4rem', border: 'none', borderRadius: '0.4rem', background: 'transparent', color: isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isDeleting ? 'not-allowed' : 'pointer', display: 'grid', placeItems: 'center', padding: 0, transition: 'background 0.12s ease, color 0.12s ease', flexShrink: 0 }}
                                             onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'color-mix(in srgb, var(--color-state-error) 12%, transparent)'; e.currentTarget.style.color = 'var(--color-state-error)'; } }}
                                             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
@@ -1047,7 +1058,7 @@ function ChatViewContent({
                               <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={2} /></div>
                             ) : null}
                             {!hasMoreThreads && visibleThreads.length > 0 ? (
-                              <div style={{ padding: '0.55rem 0.45rem 0.2rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', textAlign: 'center' }}>已显示全部会话</div>
+                              <div style={{ padding: '0.55rem 0.45rem 0.2rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', textAlign: 'center' }}>{t('chat.history.allShown')}</div>
                             ) : null}
                           </div>
                         </div>
@@ -1067,7 +1078,7 @@ function ChatViewContent({
           {threadSidebarOpen ? (
             <>
               <div style={{ padding: '0.75rem 0.85rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border-paper)' }}>
-                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>历史对话</span>
+                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{t('chat.history.title')}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.1rem' }}>
                   <button
                     type="button"
@@ -1078,12 +1089,12 @@ function ChatViewContent({
                       void reloadThreads();
                     }}
                     style={{ background: threadSearchOpen ? 'var(--color-bg-app)' : 'none', border: 'none', cursor: 'pointer', color: threadSearchOpen ? 'var(--color-text-primary)' : 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }}
-                    title="搜索历史对话"
-                    aria-label="搜索历史对话"
+                    title={t('chat.search.ariaLabel')}
+                    aria-label={t('chat.search.ariaLabel')}
                   >
                     <IconSearch style={{ width: '0.86rem', height: '0.86rem' }} />
                   </button>
-                  <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title="关闭">
+                  <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title={t('chat.history.close')}>
                     <IconX style={{ width: '0.85rem', height: '0.85rem' }} />
                   </button>
                 </div>
@@ -1093,7 +1104,7 @@ function ChatViewContent({
                   <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={3} /></div>
                 ) : null}
                 {!isLoadingThreads && visibleThreads.length === 0 ? (
-                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>暂无会话</div>
+                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{t('chat.history.empty')}</div>
                 ) : null}
                 {visibleThreads.map((thread) => {
                   const isActive = thread.id === activeThreadId;
@@ -1111,10 +1122,10 @@ function ChatViewContent({
                         type="button"
                         onClick={() => handleSelectThread(thread.id)}
                         style={{ width: '100%', minHeight: matchExcerpt ? '3.05rem' : '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 1.8rem 0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
-                        title={thread.title ?? '新对话'}
+                        title={thread.title ?? t('chat.history.fallbackTitle')}
                       >
                         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.12rem', overflow: 'hidden' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? '新对话'}</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
                           {matchExcerpt ? (
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.66rem', color: 'var(--color-text-muted)', lineHeight: 1.25 }}>{matchExcerpt}</span>
                           ) : null}
@@ -1126,7 +1137,7 @@ function ChatViewContent({
                           type="button"
                           onClick={(e) => void handleDeleteThread(e, thread.id)}
                           disabled={isDeleting}
-                          title="删除对话"
+                          title={t('chat.history.deleteThread')}
                           style={{ position: 'absolute', right: '0.3rem', top: '50%', transform: 'translateY(-50%)', width: '1.4rem', height: '1.4rem', border: 'none', borderRadius: '0.35rem', background: 'transparent', color: isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isDeleting ? 'not-allowed' : 'pointer', display: 'grid', placeItems: 'center', padding: 0, transition: 'background 0.12s ease, color 0.12s ease', flexShrink: 0 }}
                           onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'color-mix(in srgb, var(--color-state-error) 12%, transparent)'; e.currentTarget.style.color = 'var(--color-state-error)'; } }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
@@ -1141,7 +1152,7 @@ function ChatViewContent({
                   <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={2} /></div>
                 ) : null}
                 {!hasMoreThreads && visibleThreads.length > 0 ? (
-                  <div style={{ padding: '0.45rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>已显示全部会话</div>
+                  <div style={{ padding: '0.45rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>{t('chat.history.allShown')}</div>
                 ) : null}
               </div>
             </>
@@ -1161,7 +1172,7 @@ function ChatViewContent({
             <section
               role="dialog"
               aria-modal="true"
-              aria-label="搜索历史对话"
+              aria-label={t('chat.search.ariaLabel')}
               style={{ width: 'min(48rem, calc(100vw - 2rem))', height: 'min(36rem, calc(100vh - 4rem))', minHeight: '24rem', display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid color-mix(in srgb, var(--color-border-paper) 84%, var(--color-text-muted))', borderRadius: '1rem', background: 'var(--color-bg-paper)', boxShadow: '0 30px 80px color-mix(in srgb, var(--color-shadow-medium) 72%, transparent)' }}
             >
               <div style={{ height: '4.15rem', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0 1.45rem', borderBottom: '1px solid var(--color-border-paper)' }}>
@@ -1169,15 +1180,15 @@ function ChatViewContent({
                   ref={threadSearchInputRef}
                   value={threadSearchQuery}
                   onChange={(event) => setThreadSearchQuery(event.target.value)}
-                  placeholder="搜索聊天..."
-                  aria-label="搜索历史对话"
+                  placeholder={t('chat.search.placeholder')}
+                  aria-label={t('chat.search.ariaLabel')}
                   autoComplete="off"
                   style={{ minWidth: 0, flex: 1, height: '100%', border: 'none', background: 'transparent', color: 'var(--color-text-primary)', outline: 'none', fontSize: '1.18rem', fontWeight: 600, fontFamily: 'inherit' }}
                 />
                 <button
                   type="button"
-                  title="关闭"
-                  aria-label="关闭搜索"
+                  title={t('chat.history.close')}
+                  aria-label={t('chat.search.closeAria')}
                   onClick={() => setThreadSearchOpen(false)}
                   style={{ width: '2rem', height: '2rem', border: 'none', borderRadius: '0.5rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0 }}
                 >
@@ -1189,10 +1200,10 @@ function ChatViewContent({
                 {trimmedThreadSearchQuery ? (
                   <>
                     {isSearchingThreads ? (
-                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>搜索中...</div>
+                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.search.searching')}</div>
                     ) : null}
                     {!isSearchingThreads && threadSearchResults.length === 0 ? (
-                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>未找到匹配会话</div>
+                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.search.noResults')}</div>
                     ) : null}
                     {threadSearchResults.map((thread) => {
                       const matchExcerpt = thread.match?.excerpt?.trim();
@@ -1203,18 +1214,18 @@ function ChatViewContent({
                           type="button"
                           onClick={() => handleSelectThread(thread.id)}
                           style={{ width: '100%', minHeight: matchExcerpt ? '4.35rem' : '3.3rem', border: 'none', borderRadius: '0.75rem', background: isActive ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'grid', gridTemplateColumns: '1.8rem minmax(0, 1fr) auto', alignItems: 'center', gap: '0.75rem', padding: '0.68rem 0.9rem', textAlign: 'left', transition: 'background 0.12s ease' }}
-                          title={thread.title ?? '新对话'}
+                          title={thread.title ?? t('chat.history.fallbackTitle')}
                           onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--color-bg-hover)'; }}
                           onMouseLeave={(event) => { event.currentTarget.style.background = isActive ? 'var(--color-bg-hover)' : 'transparent'; }}
                         >
                           <IconMessageCircle style={{ width: '1.28rem', height: '1.28rem', color: 'var(--color-text-primary)' }} />
                           <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '1rem', fontWeight: 600 }}>{thread.title ?? '新对话'}</span>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '1rem', fontWeight: 600 }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
                             {matchExcerpt ? (
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-text-secondary)', fontSize: '0.86rem', lineHeight: 1.35 }}>{matchExcerpt}</span>
                             ) : null}
                           </span>
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap', alignSelf: matchExcerpt ? 'center' : 'center' }}>{formatThreadDateLabel(thread.updated_at)}</span>
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap', alignSelf: matchExcerpt ? 'center' : 'center' }}>{formatThreadDateLabel(thread.updated_at, t, i18n.language)}</span>
                         </button>
                       );
                     })}
@@ -1222,7 +1233,7 @@ function ChatViewContent({
                 ) : (
                   <>
                     {defaultThreadGroups.length === 0 ? (
-                      <div style={{ padding: '1rem 0.25rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>暂无会话</div>
+                      <div style={{ padding: '1rem 0.25rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.history.empty')}</div>
                     ) : null}
 
                     {defaultThreadGroups.map((group) => (
@@ -1236,12 +1247,12 @@ function ChatViewContent({
                               type="button"
                               onClick={() => handleSelectThread(thread.id)}
                               style={{ width: '100%', height: '2.8rem', border: 'none', borderRadius: '0.75rem', background: isActive ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.78rem', padding: '0 1rem', textAlign: 'left', transition: 'background 0.12s ease' }}
-                              title={thread.title ?? '新对话'}
+                              title={thread.title ?? t('chat.history.fallbackTitle')}
                               onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--color-bg-hover)'; }}
                               onMouseLeave={(event) => { event.currentTarget.style.background = isActive ? 'var(--color-bg-hover)' : 'transparent'; }}
                             >
                               <IconMessageCircle style={{ width: '1.18rem', height: '1.18rem', flexShrink: 0, color: 'var(--color-text-primary)' }} />
-                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.96rem', fontWeight: 600 }}>{thread.title ?? '新对话'}</span>
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.96rem', fontWeight: 600 }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
                             </button>
                           );
                         })}

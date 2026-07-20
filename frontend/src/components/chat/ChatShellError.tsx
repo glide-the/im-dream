@@ -3,6 +3,8 @@
 // [Pos] chat-shell-error component node in frontend/src/components/chat
 // [Sync] 2026-07-07: add a recoverable shell fallback so ChatViewContent failures do not white-screen the page.
 // [Sync] 2026-07-08: replace light-only fallback gradients with semantic theme surfaces for dark mode.
+// [Sync] 2026-07-20: i18n — landing tab labels resolve through the chat.shellError namespace (en + zh).
+import { useTranslation } from 'react-i18next';
 import { IconClock, IconDatabase, IconX } from './Icons';
 
 export type ChatLandingTab = 'history' | 'connector';
@@ -61,6 +63,7 @@ export default function ChatShellError({
   onReload,
   isMobile = false,
 }: ChatShellErrorProps) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -167,7 +170,7 @@ export default function ChatShellError({
         >
           <LandingTabButton
             active={landingTab === 'history'}
-            label="历史对话"
+            label={t('chat.shellError.history')}
             icon="history"
             onClick={() => {
               onSelectLandingTab('history');
@@ -175,7 +178,7 @@ export default function ChatShellError({
           />
           <LandingTabButton
             active={landingTab === 'connector'}
-            label="连接器"
+            label={t('chat.shellError.connector')}
             icon="connector"
             onClick={() => {
               onSelectLandingTab('connector');

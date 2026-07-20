@@ -33,7 +33,9 @@
 //                    ToolConfirmationDock while a confirmation is pending (the composer
 //                    hides until the user decides); inline approval/askuser UIs removed
 //                    from the message list (design: claude-agent-tool-confirmation-flow.md §8).
+// [Sync] 2026-07-20: i18n — scroll-to-bottom aria/title resolves through chat.panel.scrollToBottom.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
 import {
   getToolName,
@@ -150,6 +152,7 @@ export default function ChatPanel({
   onEditorWriteConfirmed,
   voiceSystemPrompt,
 }: ChatPanelProps) {
+  const { t } = useTranslation();
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
     toolChoice: ToolChoice;
@@ -551,8 +554,8 @@ export default function ChatPanel({
         {shouldShowMessageSurface && showScrollToBottom ? (
           <button
             type="button"
-            aria-label="滚动到底部"
-            title="滚动到底部"
+            aria-label={t('chat.panel.scrollToBottom')}
+            title={t('chat.panel.scrollToBottom')}
             onClick={handleScrollToBottom}
             style={{
               position: 'absolute',

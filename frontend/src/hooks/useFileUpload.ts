@@ -2,10 +2,13 @@
 // [Output] File upload hook that supports server/direct upload and cross-origin backend URLs.
 // [Pos] file-upload hook node in frontend/src/hooks
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin deployments.
+// [Sync] 2026-07-20: i18n — upload error messages resolve through the chat.upload namespace
+//        (en + zh) via the shared i18n instance (module-level helpers cannot call hooks).
 import { useCallback, useEffect, useState } from 'react';
 import { toFileProxyUrl } from '../lib/toFileProxyUrl';
 import { getAuthToken } from '../contexts/AuthContext';
 import { API_BASE } from '../lib/apiBase';
+import i18n from '../i18n';
 
 interface StorageInfo {
   type: 's3' | 'vercel-blob' | 'unknown';
@@ -53,9 +56,9 @@ async function uploadWithXHR(
       if (xhr.status < 200 || xhr.status >= 300) {
         try {
           const errorBody = JSON.parse(xhr.responseText) as { error?: string };
-          reject(new Error(errorBody.error || '服务器上传失败'));
+          reject(new Error(errorBody.error || i18n.t('chat.upload.serverFailed')));
         } catch {
-          reject(new Error('服务器上传失败'));
+          reject(new Error(i18n.t('chat.upload.serverFailed')));
         }
         return;
       }
@@ -67,7 +70,7 @@ async function uploadWithXHR(
           metadata?: { contentType?: string; size?: number };
         };
         if (!result.key) {
-          reject(new Error('服务器未返回文件 key'));
+          reject(new Error(i18n.t('chat.upload.noFileKey')));
           return;
         }
         resolve({
@@ -77,10 +80,10 @@ async function uploadWithXHR(
           size: result.metadata?.size,
         });
       } catch {
-        reject(new Error('解析上传结果失败'));
+        reject(new Error(i18n.t('chat.upload.parseFailed')));
       }
     };
-    xhr.onerror = () => reject(new Error('上传失败'));
+    xhr.onerror = () => reject(new Error(i18n.t('chat.upload.failed')));
     const token = getAuthToken();
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     xhr.send(body);
@@ -107,7 +110,7 @@ async function serverUpload(
 
   if (!response.ok) {
     const errorBody = (await response.json().catch(() => ({}))) as { error?: string };
-    throw new Error(errorBody.error || '服务器上传失败');
+    throw new Error(errorBody.error || i18n.t('chat.upload.serverFailed'));
   }
 
   const result = (await response.json()) as {
@@ -117,7 +120,7 @@ async function serverUpload(
   };
 
   if (!result.key) {
-    throw new Error('服务器未返回文件 key');
+    throw new Error(i18n.t('chat.upload.noFileKey'));
   }
 
   return {
@@ -169,7 +172,7 @@ export function useFileUpload() {
   const upload = useCallback(
     async (file: File, options: UploadOptions = {}) => {
       if (!(file instanceof File)) {
-        setError('上传需要一个文件');
+        setError(i18n.t('chat.upload.fileRequired'));
         return undefined;
       }
 
@@ -178,12 +181,12 @@ export function useFileUpload() {
       const contentType = options.contentType || file.type || 'application/octet-stream';
 
       if (isLoadingStorageInfo) {
-        setError('存储服务正在加载，请稍后再试');
+        setError(i18n.t('chat.upload.storageLoading'));
         return undefined;
       }
 
       if (!info.isConfigured) {
-        setError(info.error || '存储服务未配置');
+        setError(info.error || i18n.t('chat.upload.storageNotConfigured'));
         return undefined;
       }
 
@@ -234,7 +237,7 @@ export function useFileUpload() {
 
         return await serverUpload(file, filename, options.onProgress);
       } catch (uploadError) {
-        const message = uploadError instanceof Error ? uploadError.message : '上传失败';
+        const message = uploadError instanceof Error ? uploadError.message : i18n.t('chat.upload.failed');
         setError(message);
         return undefined;
       } finally {

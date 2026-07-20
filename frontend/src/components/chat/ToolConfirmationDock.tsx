@@ -10,7 +10,10 @@
 // [Sync] 2026-07-20: the dock now RENDERS IN PLACE OF AIInputDock (input dock hidden while a
 //        confirmation is pending) instead of floating above it — the panel occupies the
 //        composer slot in normal flow.
+// [Sync] 2026-07-20: i18n — titles, status badges, button labels, and rejection reasons now
+//        resolve through the chat.toolConfirmation namespace (en + zh) via useTranslation.
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import { confirmToolCall, type PendingToolConfirmation } from './toolConfirmation';
 import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
@@ -31,6 +34,7 @@ function KbdHint({ label }: { label: string }) {
 }
 
 export default function ToolConfirmationDock({ confirmation, threadId, addToolResult }: ToolConfirmationDockProps) {
+  const { t } = useTranslation();
   const [status, setStatus] = useState<DockStatus>('idle');
   const { kind, toolCallId, toolName, input } = confirmation;
 
@@ -68,9 +72,9 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   }, [addToolResult, status, threadId, toolCallId, toolName]);
 
   const handleApprove = useCallback(() => void runConfirm(true), [runConfirm]);
-  const handleReject = useCallback(() => void runConfirm(false, '用户拒绝执行工具'), [runConfirm]);
+  const handleReject = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userRejectedTool')), [runConfirm, t]);
   const handleAskUserSubmit = useCallback((answers: Record<string, unknown>) => void runConfirm(true, undefined, answers), [runConfirm]);
-  const handleAskUserCancel = useCallback(() => void runConfirm(false, '用户取消了问题回答'), [runConfirm]);
+  const handleAskUserCancel = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userCancelledAnswer')), [runConfirm, t]);
 
   // Keyboard shortcuts for the generic confirm variant: Esc = 拒绝, ⌘/Ctrl+⏎ = 同意.
   // The askuser variant keeps its own shortcuts inside AskUserQuestionUI.
@@ -91,8 +95,9 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
 
   const isAskUser = kind === 'askuser';
   const title = isAskUser
-    ? 'I&M 需要你的回答'
-    : `是否允许 I&M 调用 ${toolName || '未知'} 工具${summaryText ? `，${summaryText}` : ''}`;
+    ? t('chat.toolConfirmation.askUserTitle')
+    : t('chat.toolConfirmation.confirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
+      + (summaryText ? t('chat.toolConfirmation.withSummary', { summary: summaryText }) : '');
 
   return (
     <div
@@ -121,7 +126,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
           {title}
         </div>
         <span style={{ flexShrink: 0, borderRadius: '999px', padding: '0.15rem 0.55rem', fontSize: '0.72rem', fontWeight: 600, color: '#b45309', background: 'color-mix(in srgb, #f59e0b 16%, transparent)' }}>
-          {isAskUser ? '待回答' : '待授权'}
+          {isAskUser ? t('chat.toolConfirmation.pendingAnswer') : t('chat.toolConfirmation.pendingApproval')}
         </span>
       </div>
 
@@ -134,8 +139,6 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
           framed={false}
           showHeader={false}
           compact
-          submitLabel="提交"
-          cancelLabel="取消"
           onSubmit={handleAskUserSubmit}
           onCancel={handleAskUserCancel}
         />
@@ -153,7 +156,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
             overflow: 'hidden',
           }}
         >
-          {commandText ? `命令：${detailText}` : `参数：${detailText}`}
+          {commandText ? `${t('chat.toolConfirmation.commandPrefix')}${detailText}` : `${t('chat.toolConfirmation.paramsPrefix')}${detailText}`}
         </div>
       ) : null}
 
@@ -164,7 +167,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
             onClick={handleReject}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', borderRadius: '999px', padding: '0.5rem 1.05rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', fontSize: '0.86rem', fontWeight: 600, cursor: 'pointer' }}
           >
-            拒绝
+            {t('chat.toolConfirmation.reject')}
             <KbdHint label="ESC" />
           </button>
           <button
@@ -172,7 +175,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
             onClick={handleApprove}
             style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', borderRadius: '999px', padding: '0.5rem 1.05rem', border: 'none', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontSize: '0.86rem', fontWeight: 600, cursor: 'pointer' }}
           >
-            同意
+            {t('chat.toolConfirmation.approve')}
             <KbdHint label="⌘⏎" />
           </button>
         </div>
@@ -181,19 +184,19 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
       {status === 'confirming' ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--color-action-link)', fontSize: '0.85rem' }}>
           <IconLoader style={{ width: '1rem', height: '1rem' }} />
-          {isAskUser ? '提交中…' : '处理中…'}
+          {isAskUser ? t('chat.toolConfirmation.submitting') : t('chat.toolConfirmation.processing')}
         </div>
       ) : null}
       {status === 'confirmed' ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: '#22c55e', fontSize: '0.85rem' }}>
           <IconCheck style={{ width: '1rem', height: '1rem' }} />
-          {isAskUser ? '答案已提交' : '已同意'}
+          {isAskUser ? t('chat.toolConfirmation.answerSubmitted') : t('chat.toolConfirmation.approved')}
         </div>
       ) : null}
       {status === 'rejected' ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', color: 'var(--color-state-error)', fontSize: '0.85rem' }}>
           <IconX style={{ width: '1rem', height: '1rem' }} />
-          {isAskUser ? '已取消' : '已拒绝'}
+          {isAskUser ? t('chat.toolConfirmation.cancelled') : t('chat.toolConfirmation.rejected')}
         </div>
       ) : null}
     </div>

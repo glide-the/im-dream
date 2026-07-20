@@ -22,7 +22,10 @@
 //                    AskUserQuestion forms — those moved to ToolConfirmationDock above AIInputDock.
 //                    Pending parts now render as collapsed rows with an amber 「待确认」 badge;
 //                    shared classifiers moved to toolConfirmation.ts (design §8).
+// [Sync] 2026-07-20: i18n — pending confirmation badge copy resolves through the
+//                    chat.toolConfirmation namespace (en + zh) via useTranslation.
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
@@ -207,6 +210,7 @@ function WriteToolTerminalCard({
 }
 
 export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
+  const { t } = useTranslation();
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
 
@@ -438,7 +442,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       <span style={{ flex: 1, textAlign: 'left', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayTitle}{toolRowSummary ? ` — ${toolRowSummary}` : ''}</span>
                       {pendingConfirmationKind ? (
                         <span style={{ flexShrink: 0, borderRadius: '999px', padding: '0.1rem 0.5rem', fontSize: '0.72rem', fontWeight: 600, fontStyle: 'normal', color: '#b45309', background: 'color-mix(in srgb, #f59e0b 16%, transparent)' }}>
-                          {pendingConfirmationKind === 'askuser' ? '待回答' : '待确认'}
+                          {pendingConfirmationKind === 'askuser' ? t('chat.toolConfirmation.pendingAnswer') : t('chat.toolConfirmation.pendingConfirm')}
                         </span>
                       ) : null}
                       <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>

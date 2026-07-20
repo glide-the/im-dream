@@ -27,7 +27,11 @@
 //                    status panels reflect newly mounted sources.
 // [Sync] 2026-07-09: reduce Chat connector card styling; ConnectorStatusPanel keeps a dashed
 //                    boundary but removes card fill/shadow while inner rows use soft hierarchy.
+// [Sync] 2026-07-20: i18n — status/auth/sync labels, stat chips, empty state, and pagination
+//                    hints resolve through the chat.connector namespace (en + zh) via useTranslation.
 import { useCallback, useEffect, useState, type UIEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   listConnectors,
   RESOURCE_CONNECTORS_CHANGED_EVENT,
@@ -56,9 +60,9 @@ const CONNECTOR_CHIP_SURFACE = 'color-mix(in srgb, var(--color-bg-surface) 72%, 
 const CONNECTOR_ROW_DIVIDER = '0 1px 0 color-mix(in srgb, var(--color-border-paper) 40%, transparent)';
 const CONNECTOR_CONTROL_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper) 58%, transparent)';
 
-function formatLastInteraction(connector: ResourceConnector | null): string {
+function formatLastInteraction(connector: ResourceConnector | null, t: TFunction): string {
   const value = connector?.lastSyncedAt ?? connector?.updatedAt ?? connector?.createdAt;
-  if (!value) return '暂无交互';
+  if (!value) return t('chat.connector.noInteraction');
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
@@ -71,57 +75,57 @@ function formatLastInteraction(connector: ResourceConnector | null): string {
   }).format(date);
 }
 
-function getConnectorStatusLabel(connector: ResourceConnector | null): string {
-  if (!connector) return '未连接';
+function getConnectorStatusLabel(connector: ResourceConnector | null, t: TFunction): string {
+  if (!connector) return t('chat.connector.status.notConnected');
   if (connector.status === 'authenticated' || connector.status === 'synced' || connector.auth.status === 'authenticated') {
-    return '健康';
+    return t('chat.connector.status.healthy');
   }
   if (connector.status === 'authenticating' || connector.auth.status === 'authenticating') {
-    return '认证中';
+    return t('chat.connector.status.authenticating');
   }
   if (connector.status === 'expired' || connector.auth.status === 'expired') {
-    return '已过期';
+    return t('chat.connector.status.expired');
   }
   if (connector.status === 'error' || connector.auth.status === 'error') {
-    return '异常';
+    return t('chat.connector.status.error');
   }
-  return '未连接';
+  return t('chat.connector.status.notConnected');
 }
 
 function getPlatformLabel(connector: ResourceConnector): string {
   return connector.platform === 'notion' ? 'Notion' : connector.platform;
 }
 
-function getAuthorizationStatusLabel(connector: ResourceConnector): string {
+function getAuthorizationStatusLabel(connector: ResourceConnector, t: TFunction): string {
   switch (connector.auth.status) {
     case 'authenticated':
-      return '已授权';
+      return t('chat.connector.auth.authenticated');
     case 'authenticating':
-      return '授权中';
+      return t('chat.connector.auth.authenticating');
     case 'expired':
-      return '授权过期';
+      return t('chat.connector.auth.expired');
     case 'error':
-      return '授权异常';
+      return t('chat.connector.auth.error');
     default:
-      return '未授权';
+      return t('chat.connector.auth.unauthorized');
   }
 }
 
-function getSyncStatusLabel(connector: ResourceConnector): string {
+function getSyncStatusLabel(connector: ResourceConnector, t: TFunction): string {
   switch (connector.status) {
     case 'syncing':
-      return '同步中';
+      return t('chat.connector.sync.syncing');
     case 'synced':
     case 'authenticated':
-      return '已同步';
+      return t('chat.connector.sync.synced');
     case 'authenticating':
-      return '等待授权';
+      return t('chat.connector.sync.waitingAuth');
     case 'expired':
-      return '待重新授权';
+      return t('chat.connector.sync.reauthNeeded');
     case 'error':
-      return '同步异常';
+      return t('chat.connector.sync.error');
     default:
-      return connector.sources.length > 0 ? '已挂载' : '未同步';
+      return connector.sources.length > 0 ? t('chat.connector.sync.mounted') : t('chat.connector.sync.notSynced');
   }
 }
 
@@ -129,30 +133,31 @@ function getSourceTypeLabel(type: ConnectorSource['type']): string {
   return type === 'notion_database' ? 'Database' : 'Page';
 }
 
-function getSourceStatusLabel(status: ConnectorSource['status']): string {
+function getSourceStatusLabel(status: ConnectorSource['status'], t: TFunction): string {
   switch (status) {
     case 'syncing':
-      return '同步中';
+      return t('chat.connector.sync.syncing');
     case 'synced':
-      return '已同步';
+      return t('chat.connector.sync.synced');
     case 'error':
-      return '异常';
+      return t('chat.connector.status.error');
     default:
-      return '待同步';
+      return t('chat.connector.sync.pendingSync');
   }
 }
 
 function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnector; onOpen: () => void }) {
+  const { t } = useTranslation();
   const [visibleSourceCount, setVisibleSourceCount] = useState(LINKED_SOURCE_PAGE_SIZE);
   const healthy = connector.status === 'authenticated'
     || connector.status === 'synced'
     || connector.auth.status === 'authenticated';
-  const statusLabel = getConnectorStatusLabel(connector);
-  const lastInteraction = formatLastInteraction(connector);
+  const statusLabel = getConnectorStatusLabel(connector, t);
+  const lastInteraction = formatLastInteraction(connector, t);
   const metaItems = [
-    ['授权', getAuthorizationStatusLabel(connector)],
-    ['同步', getSyncStatusLabel(connector)],
-    ['资源', `${connector.sources.length} 个`],
+    [t('chat.connector.statAuth'), getAuthorizationStatusLabel(connector, t)],
+    [t('chat.connector.statSync'), getSyncStatusLabel(connector, t)],
+    [t('chat.connector.statResources'), t('chat.connector.resourceCount', { count: connector.sources.length })],
   ];
   const visibleSources = connector.sources.slice(0, visibleSourceCount);
   const hasMoreSources = visibleSourceCount < connector.sources.length;
@@ -261,7 +266,7 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
             ))}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.28rem', color: 'var(--color-text-muted)', fontSize: '0.7rem', minWidth: 0 }}>
               <IconClock style={{ width: '0.76rem', height: '0.76rem', flexShrink: 0 }} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>最近交互 {lastInteraction}</span>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t('chat.connector.lastInteraction', { time: lastInteraction })}</span>
             </span>
           </div>
         </div>
@@ -285,15 +290,15 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
             whiteSpace: 'nowrap',
           }}
         >
-          管理
+          {t('chat.connector.manage')}
           <IconChevronRight style={{ width: '0.78rem', height: '0.78rem', color: 'var(--color-text-muted)' }} />
         </button>
       </div>
 
       <div style={{ display: 'grid', gap: '0.38rem', minHeight: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem' }}>
-          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', fontWeight: 700 }}>已链接资源</div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>{connector.sources.length} 个</div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', fontWeight: 700 }}>{t('chat.connector.linkedResources')}</div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--color-text-muted)', fontWeight: 600 }}>{t('chat.connector.resourceCount', { count: connector.sources.length })}</div>
         </div>
         <div
           onScroll={handleSourceListScroll}
@@ -316,25 +321,25 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
                 <span style={{ minWidth: 0 }}>
                   <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.76rem', color: 'var(--color-text-primary)', fontWeight: 650 }}>{source.title}</span>
                   <span style={{ display: 'block', marginTop: '0.08rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.66rem', color: 'var(--color-text-muted)' }}>
-                    {getSourceTypeLabel(source.type)} · {getSourceStatusLabel(source.status)}
+                    {getSourceTypeLabel(source.type)} · {getSourceStatusLabel(source.status, t)}
                     {typeof source.pageCount === 'number' ? ` · ${source.pageCount} pages` : ''}
                   </span>
                 </span>
                 <span style={{ fontSize: '0.66rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                  {formatLastInteraction({ ...connector, lastSyncedAt: source.syncedAt ?? source.updatedAt })}
+                  {formatLastInteraction({ ...connector, lastSyncedAt: source.syncedAt ?? source.updatedAt }, t)}
                 </span>
               </div>
             );
           }) : (
             <div style={{ border: 'none', borderRadius: '0.68rem', background: CONNECTOR_ROW_SURFACE, padding: '0.55rem 0.62rem', color: 'var(--color-text-muted)', fontSize: '0.74rem' }}>
-              暂无已链接资源
+              {t('chat.connector.noLinkedResources')}
             </div>
           )}
           {connector.sources.length > 0 ? (
             <div style={{ padding: '0.2rem 0.1rem 0.05rem', color: 'var(--color-text-muted)', fontSize: '0.66rem', textAlign: 'center' }}>
               {hasMoreSources
-                ? `已显示 ${visibleSources.length} / ${connector.sources.length}，继续向下滚动加载更多`
-                : `已显示全部 ${connector.sources.length} 个资源`}
+                ? t('chat.connector.showingProgress', { shown: visibleSources.length, total: connector.sources.length })
+                : t('chat.connector.showingAll', { count: connector.sources.length })}
             </div>
           ) : null}
         </div>
@@ -344,6 +349,7 @@ function ConnectorStatusPanel({ connector, onOpen }: { connector: ResourceConnec
 }
 
 function ConnectorEmptyState({ onSelectConnector }: { onSelectConnector: () => void }) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -367,10 +373,10 @@ function ConnectorEmptyState({ onSelectConnector }: { onSelectConnector: () => v
         </span>
       </div>
       <h3 style={{ margin: '0.9rem 0 0', fontSize: '0.96rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
-        暂无资源连接器
+        {t('chat.connector.emptyTitle')}
       </h3>
       <p style={{ margin: '0.4rem auto 0', maxWidth: '28rem', fontSize: '0.82rem', lineHeight: 1.6, color: 'var(--color-text-secondary)' }}>
-        连接 Notion / 飞书 / CLI 后可在对话中使用资源
+        {t('chat.connector.emptyDescription')}
       </p>
       <button
         type="button"
@@ -390,7 +396,7 @@ function ConnectorEmptyState({ onSelectConnector }: { onSelectConnector: () => v
           cursor: 'pointer',
         }}
       >
-        选择连接器
+        {t('chat.connector.selectConnector')}
         <IconChevronRight style={{ width: '0.9rem', height: '0.9rem' }} />
       </button>
     </div>
@@ -398,6 +404,7 @@ function ConnectorEmptyState({ onSelectConnector }: { onSelectConnector: () => v
 }
 
 export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLandingPanelProps) {
+  const { t } = useTranslation();
   const [connectors, setConnectors] = useState<ResourceConnector[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -417,7 +424,7 @@ export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLand
         }
       } catch (err) {
         if (active) {
-          setError(err instanceof Error ? err.message : '连接器状态读取失败');
+          setError(err instanceof Error ? err.message : t('chat.connector.loadFailed'));
         }
       } finally {
         if (active) {
@@ -429,7 +436,7 @@ export default function ConnectorLandingPanel({ onOpenConnector }: ConnectorLand
     return () => {
       active = false;
     };
-  }, [reloadNonce]);
+  }, [reloadNonce, t]);
 
   useEffect(() => {
     const handleConnectorsChanged = () => {

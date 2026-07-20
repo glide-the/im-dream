@@ -13,7 +13,10 @@
 // [Sync] 2026-07-20: remove inline Approve/Cancel + AskUserQuestion rendering and the
 //        isManualToolInvocation prop — pending confirmations moved to ToolConfirmationDock;
 //        confirmToolCall moved to toolConfirmation.ts (design: claude-agent-tool-confirmation-flow.md §8).
+// [Sync] 2026-07-20: i18n — editor write status rows and the default reject reason resolve
+//        through the chat.editorWrite namespace (en + zh) via useTranslation.
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import EditorWriteApprovalUI from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
@@ -52,6 +55,7 @@ interface ToolMessagePartProps {
 }
 
 export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResult, onEditorWriteConfirmed }: ToolMessagePartProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
   const toolCallId = part.toolCallId;
@@ -102,7 +106,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
     if (confirmationStatus !== 'idle') return;
     setConfirmationStatus('confirming');
     try {
-      const result = await confirmToolCall(threadId, toolCallId, false, reason || '用户拒绝了编辑器写操作');
+      const result = await confirmToolCall(threadId, toolCallId, false, reason || t('chat.editorWrite.userRejected'));
       if (result.ok ?? result.success) {
         addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
         setConfirmationStatus('rejected');
@@ -112,7 +116,7 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
       // fall through
     }
     setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
+  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName, t]);
 
   // Editor write tools (write_segment, delete_segment, insert_widget, reply_to_comment)
   // are always-confirm tools; render the specialized approval UI directly.
@@ -131,14 +135,14 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResu
         ) : confirmationStatus === 'idle' ? (
           <div style={{ borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1.25rem', color: 'var(--color-text-muted)', fontSize: '0.85rem', textAlign: 'center' }}>
             <IconLoader style={{ width: '1rem', height: '1rem', display: 'inline-block', marginRight: '0.5rem' }} />
-            加载中…
+            {t('chat.editorWrite.loading')}
           </div>
         ) : confirmationStatus === 'confirming' ? (
-          <StatusRow tone="warning" label="处理中…" />
+          <StatusRow tone="warning" label={t('chat.editorWrite.processing')} />
         ) : confirmationStatus === 'confirmed' ? (
-          <StatusRow tone="success" label="操作已接受" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} />
+          <StatusRow tone="success" label={t('chat.editorWrite.accepted')} icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} />
         ) : (
-          <StatusRow tone="danger" label="操作已拒绝" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} />
+          <StatusRow tone="danger" label={t('chat.editorWrite.rejected')} icon={<IconX style={{ width: '1rem', height: '1rem' }} />} />
         )}
       </div>
     );

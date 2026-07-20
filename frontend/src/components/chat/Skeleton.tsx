@@ -4,7 +4,9 @@
 //          first-load state and 链接器具体配置页面 first-load state.
 // [Pos] skeleton primitives in frontend/src/components/chat
 // [Sync] 2026-07-08: initial skeleton primitives, replacing plain "加载中..." text loading states.
+// [Sync] 2026-07-20: i18n — SkeletonList aria-label resolves through chat.skeleton.loading.
 import type { CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 
 interface SkeletonBarProps {
   width?: string;
@@ -48,8 +50,9 @@ export function SkeletonRow({ lines = 2 }: { lines?: number }) {
 
 /** Skeleton screen for a first-load list (Chat 历史对话 / 连接器摘要面板 / 连接器列表). */
 export function SkeletonList({ rows = 3 }: { rows?: number }) {
+  const { t } = useTranslation();
   return (
-    <div role="status" aria-label="加载中" style={{ display: 'grid', gap: '0.85rem' }}>
+    <div role="status" aria-label={t('chat.skeleton.loading')} style={{ display: 'grid', gap: '0.85rem' }}>
       {Array.from({ length: rows }, (_, index) => (
         <SkeletonRow key={index} />
       ))}

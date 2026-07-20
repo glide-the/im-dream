@@ -8,7 +8,11 @@
 //        unframed with Chinese 取消/提交 buttons inside ToolConfirmationDock (design §8).
 // [Sync] 2026-07-20: add compact density prop (smaller fonts, tighter gaps/padding, 3-row
 //        textarea) so the dock-mounted form does not dominate the chat viewport.
+// [Sync] 2026-07-20: i18n — submit/cancel defaults and form copy (header, select placeholder,
+//        fallback question, Yes option) resolve through chat.toolConfirmation / chat.askUser
+//        namespaces (en + zh) via useTranslation.
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 import { IconCheck, IconX } from './Icons';
 
 export type QuestionOption =
@@ -78,7 +82,10 @@ const compactFieldStyle: CSSProperties = {
   borderRadius: '8px',
 };
 
-export default function AskUserQuestionUI({ input, toolCallId, toolName, isProcessing = false, framed = true, showHeader = true, submitLabel = 'Submit', cancelLabel = 'Cancel', compact = false, onSubmit, onCancel }: AskUserQuestionUIProps) {
+export default function AskUserQuestionUI({ input, toolCallId, toolName, isProcessing = false, framed = true, showHeader = true, submitLabel, cancelLabel, compact = false, onSubmit, onCancel }: AskUserQuestionUIProps) {
+  const { t } = useTranslation();
+  const resolvedSubmitLabel = submitLabel ?? t('chat.toolConfirmation.submit');
+  const resolvedCancelLabel = cancelLabel ?? t('chat.toolConfirmation.cancel');
   const effectiveFieldStyle = compact ? compactFieldStyle : fieldStyle;
   const questionGap = compact ? '0.3rem' : '0.5rem';
   const formGap = compact ? '0.6rem' : '1rem';
@@ -89,14 +96,14 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
     : { borderRadius: '999px', padding: '0.8rem 1rem', fontSize: '0.88rem' };
   const questions = useMemo<QuestionField[]>(() => {
     if (!input) {
-      return [{ id: 'answer', question: '请回答问题', type: 'text', required: true }];
+      return [{ id: 'answer', question: t('chat.askUser.fallbackQuestion'), type: 'text', required: true }];
     }
     if (input.questions?.length) {
       return input.questions.map((question, index) => {
         const hasOptions = Array.isArray(question.options) && question.options.length > 0;
         return {
           id: question.id || `q${index}`,
-          question: question.question || question.label || question.header || `Question ${index + 1}`,
+          question: question.question || question.label || question.header || t('chat.askUser.questionNumber', { number: index + 1 }),
           type: question.type || (hasOptions ? 'radio' : 'text'),
           options: question.options,
           required: question.required ?? true,
@@ -114,8 +121,8 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
       return [{ id: 'answer', question: questionText, type: options?.length ? 'radio' : 'text', options, required: true, default: input.default }];
     }
 
-    return [{ id: 'answer', question: 'Please answer the question', type: 'text', required: true }];
-  }, [input]);
+    return [{ id: 'answer', question: t('chat.askUser.fallbackQuestion'), type: 'text', required: true }];
+  }, [input, t]);
 
   const [answers, setAnswers] = useState<Record<string, unknown>>(() => {
     const initial: Record<string, unknown> = {};
@@ -184,7 +191,7 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
         <div style={{ padding: '0.95rem 1rem', borderBottom: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
             <span style={{ fontSize: '1rem' }}>❓</span>
-            <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Your input is needed</h3>
+            <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{t('chat.askUser.header')}</h3>
           </div>
           <p style={{ margin: '0.25rem 0 0', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>{toolName} · {toolCallId}</p>
         </div>
@@ -208,7 +215,7 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
                 <textarea id={fieldId} value={String(value || '')} onChange={(event) => handleChange(answerKey, event.target.value)} placeholder={question.placeholder} rows={compact ? 3 : 4} style={{ ...effectiveFieldStyle, resize: 'vertical' }} required={question.required} disabled={isProcessing} />
               ) : question.type === 'select' && question.options ? (
                 <select id={fieldId} value={String(value || '')} onChange={(event) => handleChange(answerKey, event.target.value)} style={effectiveFieldStyle} required={question.required} disabled={isProcessing}>
-                  <option value="">Select an option…</option>
+                  <option value="">{t('chat.askUser.selectOption')}</option>
                   {question.options.map((option) => {
                     const optionValue = typeof option === 'string' ? option : option.value || option.label;
                     const optionLabel = typeof option === 'string' ? option : option.label;
@@ -235,7 +242,7 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
               ) : question.type === 'checkbox' ? (
                 <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: labelFontSize, color: 'var(--color-text-primary)', cursor: 'pointer' }}>
                   <input type="checkbox" id={fieldId} checked={Boolean(value)} onChange={(event) => handleChange(answerKey, event.target.checked)} disabled={isProcessing} />
-                  Yes
+                  {t('chat.askUser.yes')}
                 </label>
               ) : question.type === 'number' ? (
                 <input type="number" id={fieldId} value={String(value || '')} onChange={(event) => handleChange(answerKey, event.target.value === '' ? '' : Number(event.target.value))} placeholder={question.placeholder} style={effectiveFieldStyle} required={question.required} disabled={isProcessing} />
@@ -249,11 +256,11 @@ export default function AskUserQuestionUI({ input, toolCallId, toolName, isProce
         <div style={{ display: 'flex', gap: compact ? '0.5rem' : '0.75rem', paddingTop: compact ? 0 : '0.25rem' }}>
           <button type="submit" disabled={isProcessing || !isValid} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', border: 'none', ...buttonStyle, background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: isProcessing || !isValid ? 'not-allowed' : 'pointer', opacity: isProcessing || !isValid ? 0.55 : 1 }}>
             <IconCheck style={{ width: compact ? '0.85rem' : '1rem', height: compact ? '0.85rem' : '1rem' }} />
-            {submitLabel}
+            {resolvedSubmitLabel}
           </button>
           <button type="button" onClick={onCancel} disabled={isProcessing} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem', ...buttonStyle, border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}>
             <IconX style={{ width: compact ? '0.85rem' : '1rem', height: compact ? '0.85rem' : '1rem' }} />
-            {cancelLabel}
+            {resolvedCancelLabel}
           </button>
         </div>
       </form>

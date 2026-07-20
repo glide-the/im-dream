@@ -5,7 +5,10 @@
 // [Sync] 2026-05-29: remove decorative icons from editor write approval/completed cards in the chat message surface.
 // [Sync] 2026-07-08: use semantic on-action text tokens for editor write approval buttons in dark mode.
 // [Sync] 2026-07-08: move editor write tool name detection into editorWriteTools.ts so this file exports components only.
+// [Sync] 2026-07-20: i18n — all approval card copy (titles, labels, buttons, completed
+//        states) resolves through the chat.editorWrite namespace (en + zh) via useTranslation.
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -104,9 +107,10 @@ function PreviewBox({ text, mono = false }: { text: string; mono?: boolean }) {
 }
 
 function ReasonBox({ reason }: { reason: string }) {
+  const { t } = useTranslation();
   return (
     <div>
-      <LabelRow>操作理由</LabelRow>
+      <LabelRow>{t('chat.editorWrite.reasonLabel')}</LabelRow>
       <div style={reasonBoxStyle}>{reason}</div>
     </div>
   );
@@ -137,16 +141,17 @@ function ActionRow({
   onApprove,
   onReject,
 }: ActionRowProps) {
+  const { t } = useTranslation();
   const approveColor = approveDanger ? 'var(--color-state-danger, #d9534f)' : 'var(--color-action-link)';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', paddingTop: '0.1rem' }}>
       {showRejectInput ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-          <LabelRow>拒绝理由（可选）</LabelRow>
+          <LabelRow>{t('chat.editorWrite.rejectReasonLabel')}</LabelRow>
           <textarea
             value={rejectReason}
             onChange={(e) => onRejectReasonChange(e.target.value)}
-            placeholder="说明拒绝原因，帮助 Agent 调整方案…"
+            placeholder={t('chat.editorWrite.rejectReasonPlaceholder')}
             rows={2}
             style={fieldStyle}
             disabled={isProcessing}
@@ -168,16 +173,16 @@ function ActionRow({
           disabled={isProcessing}
           style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '999px', padding: '0.8rem 1rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontSize: '0.88rem', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer', opacity: isProcessing ? 0.55 : 1 }}
         >
-          {showRejectInput ? '确认拒绝' : rejectLabel}
+          {showRejectInput ? t('chat.editorWrite.confirmReject') : rejectLabel}
         </button>
       </div>
       {!showRejectInput ? (
         <button type="button" onClick={onToggleRejectInput} disabled={isProcessing} style={{ alignSelf: 'center', border: 'none', background: 'transparent', color: 'var(--color-text-muted)', fontSize: '0.76rem', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
-          添加拒绝说明
+          {t('chat.editorWrite.addRejectNote')}
         </button>
       ) : (
         <button type="button" onClick={onToggleRejectInput} disabled={isProcessing} style={{ alignSelf: 'center', border: 'none', background: 'transparent', color: 'var(--color-text-muted)', fontSize: '0.76rem', cursor: 'pointer', textDecoration: 'underline', padding: 0 }}>
-          不添加说明，直接拒绝
+          {t('chat.editorWrite.rejectDirectly')}
         </button>
       )}
     </div>
@@ -208,6 +213,7 @@ interface WriteSegmentInput {
 }
 
 export function WriteSegmentApprovalUI({ toolCallId, isProcessing, onApprove, onReject, input }: EditorWriteApprovalBaseProps & { input: WriteSegmentInput }) {
+  const { t } = useTranslation();
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -220,28 +226,28 @@ export function WriteSegmentApprovalUI({ toolCallId, isProcessing, onApprove, on
     <div style={cardStyle}>
       <div style={headerStyle}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Agent 建议修改文字内容</h3>
+          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{t('chat.editorWrite.writeSegmentTitle')}</h3>
         </div>
         <p style={metaStyle}>mcp__editor__write_segment · {toolCallId}</p>
       </div>
       <div style={bodyStyle}>
         {input.cellId ? (
           <div>
-            <LabelRow>目标片段 ID</LabelRow>
+            <LabelRow>{t('chat.editorWrite.targetSegmentId')}</LabelRow>
             <code style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', background: 'var(--color-bg-surface)', padding: '0.2rem 0.5rem', borderRadius: '6px' }}>{input.cellId}</code>
           </div>
         ) : null}
         {input.text != null ? (
           <div>
-            <LabelRow>新内容预览</LabelRow>
+            <LabelRow>{t('chat.editorWrite.newContentPreview')}</LabelRow>
             <PreviewBox text={input.text} />
           </div>
         ) : null}
         {input.reason ? <ReasonBox reason={input.reason} /> : null}
         <ActionRow
           isProcessing={isProcessing}
-          approveLabel="接受修改"
-          rejectLabel="拒绝"
+          approveLabel={t('chat.editorWrite.acceptChange')}
+          rejectLabel={t('chat.editorWrite.reject')}
           rejectReason={rejectReason}
           showRejectInput={showRejectInput}
           onToggleRejectInput={() => setShowRejectInput((v) => !v)}
@@ -263,6 +269,7 @@ interface DeleteSegmentInput {
 }
 
 export function DeleteSegmentApprovalUI({ toolCallId, isProcessing, onApprove, onReject, input }: EditorWriteApprovalBaseProps & { input: DeleteSegmentInput }) {
+  const { t } = useTranslation();
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -275,25 +282,25 @@ export function DeleteSegmentApprovalUI({ toolCallId, isProcessing, onApprove, o
     <div style={{ ...cardStyle, borderColor: 'rgba(217,83,79,0.35)' }}>
       <div style={{ ...headerStyle, background: 'rgba(217,83,79,0.06)', borderBottomColor: 'rgba(217,83,79,0.2)' }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: '#c0392b' }}>Agent 建议删除片段（不可逆操作）</h3>
+          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: '#c0392b' }}>{t('chat.editorWrite.deleteSegmentTitle')}</h3>
         </div>
         <p style={metaStyle}>mcp__editor__delete_segment · {toolCallId}</p>
       </div>
       <div style={bodyStyle}>
         {input.cellId ? (
           <div>
-            <LabelRow>将删除片段 ID</LabelRow>
+            <LabelRow>{t('chat.editorWrite.segmentToDeleteId')}</LabelRow>
             <code style={{ fontSize: '0.82rem', color: '#c0392b', background: 'rgba(217,83,79,0.08)', padding: '0.2rem 0.5rem', borderRadius: '6px' }}>{input.cellId}</code>
           </div>
         ) : null}
         <div style={{ borderRadius: '10px', border: '1px solid rgba(217,83,79,0.3)', background: 'rgba(217,83,79,0.06)', padding: '0.65rem 0.85rem', fontSize: '0.85rem', color: '#c0392b' }}>
-          此操作不可逆，片段删除后无法通过工具恢复。
+          {t('chat.editorWrite.irreversibleWarning')}
         </div>
         {input.reason ? <ReasonBox reason={input.reason} /> : null}
         <ActionRow
           isProcessing={isProcessing}
-          approveLabel="确认删除"
-          rejectLabel="取消"
+          approveLabel={t('chat.editorWrite.confirmDelete')}
+          rejectLabel={t('chat.editorWrite.cancel')}
           approveDanger
           rejectReason={rejectReason}
           showRejectInput={showRejectInput}
@@ -318,6 +325,7 @@ interface InsertWidgetInput {
 }
 
 export function InsertWidgetApprovalUI({ toolCallId, isProcessing, onApprove, onReject, input }: EditorWriteApprovalBaseProps & { input: InsertWidgetInput }) {
+  const { t } = useTranslation();
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
   const [dataExpanded, setDataExpanded] = useState(false);
@@ -334,29 +342,29 @@ export function InsertWidgetApprovalUI({ toolCallId, isProcessing, onApprove, on
     <div style={cardStyle}>
       <div style={headerStyle}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Agent 建议插入组件</h3>
+          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{t('chat.editorWrite.insertWidgetTitle')}</h3>
         </div>
         <p style={metaStyle}>mcp__editor__insert_widget · {toolCallId}</p>
       </div>
       <div style={bodyStyle}>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
           <div>
-            <LabelRow>组件类型</LabelRow>
+            <LabelRow>{t('chat.editorWrite.widgetType')}</LabelRow>
             <code style={{ fontSize: '0.85rem', color: 'var(--color-action-link)', background: 'var(--color-bg-surface)', padding: '0.2rem 0.5rem', borderRadius: '6px' }}>{input.widgetType ?? '—'}</code>
           </div>
           <div>
-            <LabelRow>插入位置</LabelRow>
+            <LabelRow>{t('chat.editorWrite.insertPosition')}</LabelRow>
             <span style={{ fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
-              {input.afterCellId ? `片段 ${input.afterCellId} 之后` : '文档末尾'}
+              {input.afterCellId ? t('chat.editorWrite.afterSegment', { id: input.afterCellId }) : t('chat.editorWrite.documentEnd')}
             </span>
           </div>
         </div>
         {dataPreview ? (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem' }}>
-              <span style={labelStyle}>组件数据</span>
+              <span style={labelStyle}>{t('chat.editorWrite.widgetData')}</span>
               <button type="button" onClick={() => setDataExpanded((v) => !v)} style={{ border: 'none', background: 'transparent', color: 'var(--color-action-link)', fontSize: '0.75rem', cursor: 'pointer', padding: 0 }}>
-                {dataExpanded ? '收起' : `展开（${dataKeys.length} 个字段）`}
+                {dataExpanded ? t('chat.editorWrite.collapse') : t('chat.editorWrite.expandFields', { count: dataKeys.length })}
               </button>
             </div>
             {dataExpanded ? (
@@ -371,8 +379,8 @@ export function InsertWidgetApprovalUI({ toolCallId, isProcessing, onApprove, on
         {input.reason ? <ReasonBox reason={input.reason} /> : null}
         <ActionRow
           isProcessing={isProcessing}
-          approveLabel="接受插入"
-          rejectLabel="拒绝"
+          approveLabel={t('chat.editorWrite.acceptInsert')}
+          rejectLabel={t('chat.editorWrite.reject')}
           rejectReason={rejectReason}
           showRejectInput={showRejectInput}
           onToggleRejectInput={() => setShowRejectInput((v) => !v)}
@@ -395,6 +403,7 @@ interface ReplyToCommentInput {
 }
 
 export function ReplyToCommentApprovalUI({ toolCallId, isProcessing, onApprove, onReject, input }: EditorWriteApprovalBaseProps & { input: ReplyToCommentInput }) {
+  const { t } = useTranslation();
   const [showRejectInput, setShowRejectInput] = useState(false);
   const [rejectReason, setRejectReason] = useState('');
 
@@ -407,28 +416,28 @@ export function ReplyToCommentApprovalUI({ toolCallId, isProcessing, onApprove, 
     <div style={cardStyle}>
       <div style={headerStyle}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Agent 建议回复语音评论</h3>
+          <h3 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{t('chat.editorWrite.replyCommentTitle')}</h3>
         </div>
         <p style={metaStyle}>mcp__editor__reply_to_comment · {toolCallId}</p>
       </div>
       <div style={bodyStyle}>
         {input.commentId ? (
           <div>
-            <LabelRow>目标评论 ID</LabelRow>
+            <LabelRow>{t('chat.editorWrite.targetCommentId')}</LabelRow>
             <code style={{ fontSize: '0.82rem', color: 'var(--color-text-secondary)', background: 'var(--color-bg-surface)', padding: '0.2rem 0.5rem', borderRadius: '6px' }}>{input.commentId}</code>
           </div>
         ) : null}
         {input.content ? (
           <div>
-            <LabelRow>回复内容</LabelRow>
+            <LabelRow>{t('chat.editorWrite.replyContent')}</LabelRow>
             <PreviewBox text={input.content} />
           </div>
         ) : null}
         {input.reason ? <ReasonBox reason={input.reason} /> : null}
         <ActionRow
           isProcessing={isProcessing}
-          approveLabel="发送回复"
-          rejectLabel="拒绝"
+          approveLabel={t('chat.editorWrite.sendReply')}
+          rejectLabel={t('chat.editorWrite.reject')}
           rejectReason={rejectReason}
           showRejectInput={showRejectInput}
           onToggleRejectInput={() => setShowRejectInput((v) => !v)}
@@ -456,11 +465,11 @@ interface EditorWriteCompletedCardProps {
   output: EditorWriteOutput;
 }
 
-const COMPLETED_LABEL: Record<string, string> = {
-  'mcp__editor__write_segment': '已写入内容',
-  'mcp__editor__delete_segment': '已删除片段',
-  'mcp__editor__insert_widget': '已插入组件',
-  'mcp__editor__reply_to_comment': '已回复评论',
+const COMPLETED_LABEL_KEY: Record<string, string> = {
+  'mcp__editor__write_segment': 'chat.editorWrite.completed.writeSegment',
+  'mcp__editor__delete_segment': 'chat.editorWrite.completed.deleteSegment',
+  'mcp__editor__insert_widget': 'chat.editorWrite.completed.insertWidget',
+  'mcp__editor__reply_to_comment': 'chat.editorWrite.completed.replyComment',
 };
 
 function resolveTargetCellId(toolName: string, input: Record<string, unknown>, output: EditorWriteOutput): string | null {
@@ -471,8 +480,10 @@ function resolveTargetCellId(toolName: string, input: Record<string, unknown>, o
 }
 
 export function EditorWriteCompletedCard({ toolName, input, output }: EditorWriteCompletedCardProps) {
+  const { t } = useTranslation();
   const name = toolName.toLowerCase();
-  const label = COMPLETED_LABEL[name] ?? toolName;
+  const labelKey = COMPLETED_LABEL_KEY[name];
+  const label = labelKey ? t(labelKey) : toolName;
   const isSuccess = output.ok !== false;
   const targetCellId = resolveTargetCellId(name, input, output);
   const reason = output.reason ?? (typeof input.reason === 'string' ? input.reason : undefined);
@@ -505,13 +516,13 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
           background: isSuccess ? 'rgba(34,197,94,0.12)' : 'rgba(217,83,79,0.12)',
           color: isSuccess ? '#166534' : '#c0392b',
         }}>
-          {isSuccess ? '成功' : '失败'}
+          {isSuccess ? t('chat.editorWrite.success') : t('chat.editorWrite.failure')}
         </span>
       </div>
       <div style={{ padding: '0.65rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
         {targetCellId ? (
           <div style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
-            片段 ID：<code style={{ fontSize: '0.78rem', background: 'var(--color-bg-surface)', padding: '0.1rem 0.4rem', borderRadius: '4px', color: 'var(--color-text-secondary)' }}>{targetCellId}</code>
+            {t('chat.editorWrite.segmentIdPrefix')}<code style={{ fontSize: '0.78rem', background: 'var(--color-bg-surface)', padding: '0.1rem 0.4rem', borderRadius: '4px', color: 'var(--color-text-secondary)' }}>{targetCellId}</code>
           </div>
         ) : null}
         {reason ? (
@@ -545,7 +556,7 @@ export function EditorWriteCompletedCard({ toolName, input, output }: EditorWrit
             onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.14)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.06)'; }}
           >
-            跳转到笔记
+            {t('chat.editorWrite.jumpToNote')}
           </button>
         </div>
       ) : null}
@@ -564,6 +575,7 @@ interface EditorWriteApprovalUIProps {
 }
 
 export default function EditorWriteApprovalUI({ toolName, toolCallId, input, isProcessing, onApprove, onReject }: EditorWriteApprovalUIProps) {
+  const { t } = useTranslation();
   const name = toolName.toLowerCase();
   const base = { toolCallId, isProcessing, onApprove, onReject };
 
@@ -584,14 +596,14 @@ export default function EditorWriteApprovalUI({ toolName, toolCallId, input, isP
   return (
     <div style={{ ...cardStyle, padding: '1rem' }}>
       <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.85rem' }}>
-        Agent 请求执行编辑器操作：<code>{toolName}</code>
+        {t('chat.editorWrite.fallbackTitle')}<code>{toolName}</code>
       </p>
       <div style={{ display: 'flex', gap: '0.75rem', marginTop: '0.85rem' }}>
         <button type="button" onClick={onApprove} disabled={isProcessing} style={{ flex: 1, border: 'none', borderRadius: '999px', padding: '0.75rem', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>
-          接受
+          {t('chat.editorWrite.accept')}
         </button>
         <button type="button" onClick={() => onReject()} disabled={isProcessing} style={{ flex: 1, border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.75rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontWeight: 600, cursor: isProcessing ? 'not-allowed' : 'pointer' }}>
-          拒绝
+          {t('chat.editorWrite.reject')}
         </button>
       </div>
     </div>

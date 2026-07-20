@@ -27,20 +27,26 @@
 //                    去除 #id 与文字徽章，改为圆点状态图标（completed 实心+白勾+删除线、
 //                    in_progress 描边+中心点、pending 空心圆），默认展示前 3 条，
 //                    超出经「展开 N 个 / 收起」折叠控制（TODO_VISIBLE_COUNT=3）。
+// [Sync] 2026-07-20: i18n — plan/todo popover copy, plan-mode badges, and the relative-time
+//                    helper resolve through the chat.planPanel namespace (en + zh);
+//                    formatRelativeTime now takes t() and formats via getDateLocale.
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { IconChevronDown, IconChevronUp, IconList, IconPlanTasks } from './Icons';
 import ChatMarkdown from './ChatMarkdown';
 import { hydrateThreadPlan, useThreadPlan, type ThreadPlanMode, type ThreadPlanState } from '../../hooks/useThreadPlan';
 import { useThreadTodos, type ThreadTodoItem, type ThreadTodoState, type ThreadTodoStatus } from '../../hooks/useThreadTodos';
+import { getDateLocale } from '../../i18n';
 
 interface PlanButtonProps {
   threadId: string;
 }
 
-const PLAN_MODE_BADGE: Record<Exclude<ThreadPlanMode, 'none'>, { label: string; color: string }> = {
-  planning: { label: '规划中', color: '#f9a875' },
-  exited: { label: '已退出规划', color: '#52c77e' },
+const PLAN_MODE_BADGE: Record<Exclude<ThreadPlanMode, 'none'>, { labelKey: string; color: string }> = {
+  planning: { labelKey: 'chat.planPanel.planning', color: '#f9a875' },
+  exited: { labelKey: 'chat.planPanel.exited', color: '#52c77e' },
 };
 
 /** 弹层双卡片（计划 / 待办）共享的卡片样式：圆角纸面 + 细边 + 柔和投影。 */
@@ -55,23 +61,24 @@ const POPOVER_CARD_STYLE: CSSProperties = {
   gap: '0.6rem',
 };
 
-/** Relative timestamp label consistent with ChatView 的历史时间分组风格（zh-CN）。 */
-function formatRelativeTime(value: string): string {
+/** Relative timestamp label consistent with ChatView 的历史时间分组风格（i18n-aware）。 */
+function formatRelativeTime(value: string, t: TFunction, language?: string): string {
   const date = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
   if (Number.isNaN(date.getTime())) return '';
   const diffMs = Date.now() - date.getTime();
-  if (diffMs < 0) return '刚刚';
+  if (diffMs < 0) return t('chat.planPanel.justNow');
   const minutes = Math.floor(diffMs / 60000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes} 分钟前`;
+  if (minutes < 1) return t('chat.planPanel.justNow');
+  if (minutes < 60) return t('chat.planPanel.minutesAgo', { count: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} 小时前`;
+  if (hours < 24) return t('chat.planPanel.hoursAgo', { count: hours });
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days} 天前`;
-  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date);
+  if (days < 7) return t('chat.planPanel.daysAgo', { count: days });
+  return new Intl.DateTimeFormat(getDateLocale(language), { month: 'numeric', day: 'numeric' }).format(date);
 }
 
 function PlanModeBadge({ planMode }: { planMode: ThreadPlanMode }) {
+  const { t } = useTranslation();
   if (planMode === 'none') return null;
   const badge = PLAN_MODE_BADGE[planMode];
   return (
@@ -92,20 +99,21 @@ function PlanModeBadge({ planMode }: { planMode: ThreadPlanMode }) {
       }}
     >
       <IconPlanTasks style={{ width: '0.75rem', height: '0.75rem' }} />
-      {badge.label}
+      {t(badge.labelKey)}
     </span>
   );
 }
 
 /** 弹层正文：沿用原常驻 PlanPanel 的全部内容能力；exists:false 时不渲染内容区。 */
 function PlanPopoverContent({ threadId, plan }: { threadId: string; plan: ThreadPlanState }) {
+  const { t } = useTranslation();
   const [isLoadingFull, setIsLoadingFull] = useState(false);
 
   if (!plan.exists) {
     // 已进入/退出规划态但尚未捕获计划文件（plan-mode-changed 先于 plan-updated）。
     return (
       <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-        {plan.planMode === 'planning' ? '规划已触发，等待计划内容…' : '未找到计划内容。'}
+        {plan.planMode === 'planning' ? t('chat.planPanel.waitingContent') : t('chat.planPanel.noContent')}
       </div>
     );
   }
@@ -145,7 +153,7 @@ function PlanPopoverContent({ threadId, plan }: { threadId: string; plan: Thread
             opacity: isLoadingFull ? 0.6 : 1,
           }}
         >
-          {isLoadingFull ? '加载中…' : '内容已截断，点击加载完整'}
+          {isLoadingFull ? t('chat.planPanel.loading') : t('chat.planPanel.loadFull')}
         </button>
       ) : null}
     </div>
@@ -221,12 +229,13 @@ const TODO_VISIBLE_COUNT = 3;
 
 /** 弹层「待办」分区：exists:false 时显示「暂无待办」占位。 */
 function TodoPopoverContent({ todos }: { todos: ThreadTodoState }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   if (!todos.exists) {
     return (
       <div style={{ fontSize: '0.82rem', color: 'var(--color-text-muted)' }}>
-        暂无待办
+        {t('chat.planPanel.noTodos')}
       </div>
     );
   }
@@ -270,9 +279,9 @@ function TodoPopoverContent({ todos }: { todos: ThreadTodoState }) {
           }}
         >
           {expanded ? (
-            <><IconChevronUp style={{ width: '0.85rem', height: '0.85rem' }} /> 收起</>
+            <><IconChevronUp style={{ width: '0.85rem', height: '0.85rem' }} /> {t('chat.planPanel.collapse')}</>
           ) : (
-            <><IconChevronDown style={{ width: '0.85rem', height: '0.85rem' }} /> 展开 {hiddenCount} 个</>
+            <><IconChevronDown style={{ width: '0.85rem', height: '0.85rem' }} /> {t('chat.planPanel.expandMore', { count: hiddenCount })}</>
           )}
         </button>
       ) : null}
@@ -281,6 +290,7 @@ function TodoPopoverContent({ todos }: { todos: ThreadTodoState }) {
 }
 
 export default function PlanButton({ threadId }: PlanButtonProps) {
+  const { t, i18n } = useTranslation();
   const plan = useThreadPlan(threadId);
   const todos = useThreadTodos(threadId);
   const [open, setOpen] = useState(false);
@@ -339,7 +349,7 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
     });
   };
 
-  const updatedLabel = plan.updatedAt ? formatRelativeTime(plan.updatedAt) : '';
+  const updatedLabel = plan.updatedAt ? formatRelativeTime(plan.updatedAt, t, i18n.language) : '';
 
   return (
     <div ref={containerRef} style={{ position: 'relative' }}>
@@ -360,7 +370,7 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
           transition: 'background 0.14s ease, color 0.14s ease',
           position: 'relative',
         }}
-        aria-label="计划与待办"
+        aria-label={t('chat.planPanel.buttonAria')}
         aria-expanded={open}
         onMouseEnter={(e) => { setHovered(true); e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
         onMouseLeave={(e) => { setHovered(false); if (!open) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; } }}
@@ -401,7 +411,7 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
             pointerEvents: 'none',
           }}
         >
-          计划与待办
+          {t('chat.planPanel.tooltip')}
         </div>
       ) : null}
 
@@ -420,7 +430,7 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
         >
           <div style={POPOVER_CARD_STYLE}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
-              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>计划</span>
+              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.planPanel.planTitle')}</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <PlanModeBadge planMode={plan.planMode} />
                 {updatedLabel ? (
@@ -434,10 +444,10 @@ export default function PlanButton({ threadId }: PlanButtonProps) {
           </div>
           <div style={POPOVER_CARD_STYLE}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
-              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>待办</span>
+              <span style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.planPanel.todosTitle')}</span>
               {todos.updatedAt ? (
                 <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-                  {formatRelativeTime(todos.updatedAt)}
+                  {formatRelativeTime(todos.updatedAt, t, i18n.language)}
                 </span>
               ) : null}
             </div>

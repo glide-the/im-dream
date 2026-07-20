@@ -8,7 +8,10 @@
 // [Sync] 2026-07-20: 新增图表工具栏（设计文档 §2.6）— 预览/源码分段切换、复用 useCopy 复制
 //                    完整 ```mermaid 围栏文本、viewBox 尺寸 + 2x scale canvas 栅格化导出 PNG；
 //                    渲染失败时强制源码视图。
+// [Sync] 2026-07-20: i18n — toolbar labels/titles and render status copy resolve through the
+//                    chat.mermaid namespace (en + zh) via useTranslation.
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useCopy } from '../../hooks/useCopy';
 import { IconCheck, IconDownload, IconLoader } from './Icons';
 
@@ -152,6 +155,7 @@ interface MermaidBlockProps {
 }
 
 export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
+  const { t } = useTranslation();
   const { copied, copy } = useCopy();
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -212,7 +216,7 @@ export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', padding: '0.35rem 0.5rem', borderBottom: '1px solid var(--color-border-paper)' }}>
         <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)', marginRight: 'auto' }}>
-          {failed ? 'Mermaid · 渲染失败' : svg ? 'Mermaid' : 'Mermaid · 渲染中…'}
+          {failed ? t('chat.mermaid.renderFailed') : svg ? 'Mermaid' : t('chat.mermaid.rendering')}
         </span>
         <div style={{ display: 'flex', borderRadius: '0.5rem', border: '1px solid var(--color-border-paper)', overflow: 'hidden' }}>
           {(['preview', 'source'] as const).map((mode) => {
@@ -234,15 +238,15 @@ export default memo(function MermaidBlock({ chart }: MermaidBlockProps) {
                   opacity: disabled ? 0.45 : 1,
                 }}
               >
-                {mode === 'preview' ? '预览' : '源码'}
+                {mode === 'preview' ? t('chat.mermaid.preview') : t('chat.mermaid.source')}
               </button>
             );
           })}
         </div>
-        <ToolbarButton title="复制 Markdown 源码" onClick={() => copy(fencedMarkdown)}>
+        <ToolbarButton title={t('chat.mermaid.copySource')} onClick={() => copy(fencedMarkdown)}>
           {copied ? <IconCheck style={{ width: '0.95rem', height: '0.95rem' }} /> : <IconCopy />}
         </ToolbarButton>
-        <ToolbarButton title="导出 PNG" onClick={handleExport} disabled={!svg || isExporting}>
+        <ToolbarButton title={t('chat.mermaid.exportPng')} onClick={handleExport} disabled={!svg || isExporting}>
           {isExporting ? <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} /> : <IconDownload style={{ width: '0.95rem', height: '0.95rem' }} />}
         </ToolbarButton>
       </div>
