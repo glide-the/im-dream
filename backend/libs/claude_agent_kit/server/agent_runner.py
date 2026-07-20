@@ -86,6 +86,16 @@
 #                    claude-agent-permission-policy.md); add PostToolUse
 #                    plan-file observer hook with INK_AGENT_PLAN_EMIT_DEBOUNCE_MS
 #                    debounce firing callbacks.on_plan_file_changed.
+# [Sync] 2026-07-20: claude-todo — DEFAULT_ALLOWED_TOOLS gains the v2 task
+#                    tools (TaskCreate/TaskUpdate/TaskList/TaskGet); all five
+#                    todo tools (+TodoWrite) classified low-sensitivity
+#                    auto-allow (TaskUpdate non-read-only deviation recorded in
+#                    claude-agent-permission-policy.md §3); INK_AGENT_TASK_V2_ENABLED-
+#                    gated apply_task_v2_env_to_options injects
+#                    CLAUDE_CODE_ENABLE_TASKS/CLAUDE_CODE_TASK_LIST_ID; add
+#                    PostToolUse task observer hook with
+#                    INK_AGENT_TODO_EMIT_DEBOUNCE_MS debounce firing
+#                    callbacks.on_tasks_changed with derived TodoItem dicts.
 
 """Claude Agent Runner.
 
@@ -142,9 +152,10 @@ from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
     apply_plan_mode_env_to_options,
     apply_project_sdk_runtime_options,
+    apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
 )
-from .workspace import get_plans_dir, get_workspace_root
+from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +189,13 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "NotebookRead",
     "TodoRead",
     "TodoWrite",
+    # Claude Code v2 file-task tools (claude-todo §5.7).  Whether the CLI
+    # actually exposes them is decided by the official isTodoV2Enabled()
+    # (mutually exclusive with TodoWrite); listing them here is harmless.
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskList",
+    "TaskGet",
     "Bash",
     "BashOutput",
     "Skill",
@@ -239,6 +257,15 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
     # record (claude-plan §5.7, 2026-07-20).
     "EnterPlanMode",
     "ExitPlanMode",
+    # Claude Code todo/task-list tools (v1 TodoWrite + v2 file tasks).
+    # All five are session-metadata operations confined to the per-thread
+    # workspace; the TaskUpdate non-read-only deviation is recorded in
+    # claude-agent-permission-policy.md §3 (claude-todo §5.7, 2026-07-20).
+    "TodoWrite",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskList",
+    "TaskGet",
     # SDK / MCP resource discovery and reads, where available.
     "ListMcpResources",
     "ReadMcpResource",
@@ -1107,6 +1134,50 @@ def _resolve_plans_dir_for_cwd(cwd: Optional[str]) -> Optional[Path]:
         return None
 
 
+# ---------------------------------------------------------------------------
+# Task v2 file-task observation (claude-todo §5.3)
+# ---------------------------------------------------------------------------
+
+# Built-in v2 task tools whose execution mutates the tasks directory.
+# TaskList/TaskGet are read-only and never trigger an emission.
+_TASK_V2_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
+    "TaskCreate",
+    "TaskUpdate",
+})
+
+
+def _todo_emit_debounce_seconds() -> float:
+    """Return the todo emit debounce window (seconds) from env config."""
+
+    try:
+        raw = os.getenv("INK_AGENT_TODO_EMIT_DEBOUNCE_MS", "500") or "500"
+        return max(0.0, float(raw)) / 1000.0
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _resolve_tasks_dir_for_cwd(cwd: Optional[str]) -> Optional[Path]:
+    """Return the current run's tasks dir, delegating to ``get_tasks_dir()``.
+
+    Mirrors ``_resolve_plans_dir_for_cwd``: the workspace session_id is the
+    resolved cwd basename.  Returns ``None`` when cwd is empty (Workspace
+    Mode disabled), lies outside the workspace root, or no v2 tasks have
+    been written yet.
+    """
+
+    if not cwd:
+        return None
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        workspace.relative_to(get_workspace_root().resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    try:
+        return get_tasks_dir(workspace.name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _plan_file_path_for_hook(
     tool_name: str,
     tool_input: dict[str, Any],
@@ -1795,6 +1866,49 @@ class ClaudeAgentRunner:
             return HookJSONOutput()
 
         # ------------------------------------------------------------------
+        # PostToolUse hook — Task v2 file-task observer (claude-todo §5.3)
+        # Fired after TaskCreate/TaskUpdate calls; re-reads the thread
+        # workspace tasks dir, derives the full TodoItem list (read-time
+        # semantics: metadata._internal filtered, resolved blockers dropped)
+        # and notifies the service layer via callbacks.on_tasks_changed so it
+        # can emit a todo-updated SSE frame.  Emissions are debounced per
+        # tasks dir per turn (INK_AGENT_TODO_EMIT_DEBOUNCE_MS, default 500ms,
+        # leading-edge).  This hook never blocks or alters the tool flow.
+        # ------------------------------------------------------------------
+        _todo_emit_last_ts: dict[str, float] = {}
+        todo_debounce_s = _todo_emit_debounce_seconds()
+
+        async def _tasks_changed_post_tool_use_hook(
+            hook_input: dict[str, Any],
+            tool_use_id: Optional[str],
+            context: HookContext,
+        ) -> HookJSONOutput:
+            del tool_use_id, context
+            try:
+                tool_name = _extract_hook_tool_name(hook_input)
+                if tool_name not in _TASK_V2_WRITE_TOOL_NAMES:
+                    return HookJSONOutput()
+                if callbacks.on_tasks_changed is None:
+                    return HookJSONOutput()
+                tasks_dir = _resolve_tasks_dir_for_cwd(cwd)
+                if tasks_dir is None:
+                    return HookJSONOutput()
+                key = str(tasks_dir)
+                now = time.monotonic()
+                last_emit = _todo_emit_last_ts.get(key)
+                if last_emit is not None and (now - last_emit) < todo_debounce_s:
+                    return HookJSONOutput()
+                items, _mtime = read_task_items(tasks_dir)
+                _todo_emit_last_ts[key] = now
+                await _call(callbacks.on_tasks_changed, items)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "PostToolUse: task observer failed; skipping emit.",
+                    exc_info=True,
+                )
+            return HookJSONOutput()
+
+        # ------------------------------------------------------------------
         # Build SDK options
         # ------------------------------------------------------------------
         mcp_servers: dict[str, McpServerConfig] = {}
@@ -1841,7 +1955,11 @@ class ClaudeAgentRunner:
                     "PostToolUse": [
                         HookMatcher(
                             matcher=None,
-                            hooks=[_post_tool_use_hook, _plan_file_post_tool_use_hook],
+                            hooks=[
+                                _post_tool_use_hook,
+                                _plan_file_post_tool_use_hook,
+                                _tasks_changed_post_tool_use_hook,
+                            ],
                         )
                     ],
                 },
@@ -1855,6 +1973,11 @@ class ClaudeAgentRunner:
         # options.env is preserved, and the user_sdk_env merge below still
         # overlays on top.  No-op when cwd is falsy (Workspace Mode disabled).
         apply_plan_mode_env_to_options(sdk_options, cwd)
+        # Task v2 (claude-todo §5.1): when INK_AGENT_TASK_V2_ENABLED is on,
+        # inject CLAUDE_CODE_ENABLE_TASKS=1 / CLAUDE_CODE_TASK_LIST_ID=main at
+        # the same lowest priority (explicit values preserved; user_sdk_env
+        # below still overlays on top).  No-op by default.
+        apply_task_v2_env_to_options(sdk_options)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
         existing_extra_args = getattr(sdk_options, "extra_args", None)

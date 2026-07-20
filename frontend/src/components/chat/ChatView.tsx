@@ -59,6 +59,8 @@
 //                    status check so refresh/reconnect restores the panel (§5.6).
 // [Sync] 2026-07-20: 交互方案变更 — 移除独立挂载的常驻计划面板，改为在浮动控制栏内
 //                    「新建对话」按钮旁渲染 PlanButton（有计划时才出现，点击弹层展示）。
+// [Sync] 2026-07-20: claude-todo §5.6 — 与 hydrateThreadPlan 并行水合 useThreadTodos
+//                    store，刷新/重连后恢复 PlanButton 弹层「待办」分区。
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
@@ -75,6 +77,7 @@ import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import PlanButton from './PlanPanel';
 import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
+import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ConnectorLandingPanel from './ConnectorLandingPanel';
 import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
@@ -541,6 +544,8 @@ function ChatViewContent({
 
       // claude-plan §5.6: 初始加载/重连时经 REST 水合 plan store，恢复 PlanPanel。
       void hydrateThreadPlan(activeThreadId);
+      // claude-todo §5.6: 并行水合 todos store，恢复弹层「待办」分区。
+      void hydrateThreadTodos(activeThreadId);
     })();
 
     return () => {

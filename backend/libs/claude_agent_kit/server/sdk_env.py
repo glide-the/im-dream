@@ -15,6 +15,11 @@
 #                    CLAUDE_CONFIG_DIR={cwd}/.claude-home at the lowest env
 #                    priority so Plan Mode files land in the thread workspace
 #                    (claude-plan §5.1); key stays out of the dotenv allowlist.
+# [Sync] 2026-07-20: add apply_task_v2_env_to_options() — gated by
+#                    INK_AGENT_TASK_V2_ENABLED (default off), injects
+#                    CLAUDE_CODE_ENABLE_TASKS=1 / CLAUDE_CODE_TASK_LIST_ID=main
+#                    at the lowest env priority so v2 task files land in
+#                    {workspace}/.claude-home/tasks/main/ (claude-todo §5.1).
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -54,6 +59,30 @@ _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
 # relocate the global Claude config home.
 _CLAUDE_CONFIG_DIR_ENV_NAME = "CLAUDE_CONFIG_DIR"
 _PLAN_MODE_CONFIG_HOME_DIRNAME = ".claude-home"
+
+# Task v2 (file tasks) injection (claude-todo §5.1).  Both keys stay out of
+# ``_PROJECT_DOTENV_SDK_ENV_NAMES`` so neither backend/.env nor user_sdk_env
+# can flip the v1/v2 tool family or relocate the task list.
+_TASK_V2_ENABLED_ENV_NAME = "INK_AGENT_TASK_V2_ENABLED"
+_CLAUDE_CODE_ENABLE_TASKS_ENV_NAME = "CLAUDE_CODE_ENABLE_TASKS"
+_CLAUDE_CODE_TASK_LIST_ID_ENV_NAME = "CLAUDE_CODE_TASK_LIST_ID"
+# Fixed taskListId (claude-todo §5.1): without it the CLI falls back to its
+# own sessionId, scattering one thread's tasks across per-session subdirs.
+# workspace.get_tasks_dir() resolves the same constant — single source.
+CLAUDE_CODE_TASK_LIST_ID_VALUE = "main"
+_TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
+
+
+def task_v2_enabled() -> bool:
+    """Return whether Claude Code v2 file tasks are enabled (claude-todo §5.1).
+
+    Default off: enabling v2 makes the CLI expose ``TaskCreate``/``TaskUpdate``/
+    ``TaskList``/``TaskGet`` and disable v1 ``TodoWrite`` (official mutual
+    exclusion), so it is an explicit opt-in via ``INK_AGENT_TASK_V2_ENABLED``.
+    """
+
+    raw = os.getenv(_TASK_V2_ENABLED_ENV_NAME, "").strip().lower()
+    return raw in _TRUE_ENV_VALUES
 
 
 def _is_project_dotenv_sdk_env_key(key: str) -> bool:
@@ -182,6 +211,37 @@ def apply_plan_mode_env_to_options(
             Path(str(cwd)) / _PLAN_MODE_CONFIG_HOME_DIRNAME
         ),
     }
+    return options
+
+
+def apply_task_v2_env_to_options(options: Any) -> Any:
+    """Enable Claude Code v2 file tasks when gated on (claude-todo §5.1).
+
+    Sets ``CLAUDE_CODE_ENABLE_TASKS=1`` and ``CLAUDE_CODE_TASK_LIST_ID=main``
+    so v2 task JSON lands under ``{CLAUDE_CONFIG_DIR}/tasks/main/`` — i.e.
+    ``{workspace}/.claude-home/tasks/main/`` once
+    ``apply_plan_mode_env_to_options`` has redirected the config home.
+    Fixing taskListId prevents the CLI's sessionId fallback from scattering
+    one thread's tasks across per-session subdirectories.
+
+    Priority: lowest in the SDK env chain — call *after*
+    ``apply_plan_mode_env_to_options`` and *before*
+    ``apply_user_sdk_env_to_options``.  Explicit values already present in
+    ``options.env`` are preserved.  No-op unless
+    ``INK_AGENT_TASK_V2_ENABLED`` is truthy (default off).
+    """
+
+    if not task_v2_enabled():
+        return options
+    existing_env = getattr(options, "env", None) or {}
+    if not isinstance(existing_env, dict):
+        existing_env = dict(existing_env)
+    merged = dict(existing_env)
+    merged.setdefault(_CLAUDE_CODE_ENABLE_TASKS_ENV_NAME, "1")
+    merged.setdefault(
+        _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME, CLAUDE_CODE_TASK_LIST_ID_VALUE
+    )
+    options.env = merged
     return options
 
 

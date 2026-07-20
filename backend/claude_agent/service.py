@@ -100,6 +100,13 @@
 #                    INK_AGENT_PLAN_MAX_CONTENT_BYTES) and emit plan-updated
 #                    (not collected); add build_thread_plan_payload() REST
 #                    helper backed by get_plans_dir().
+# [Sync] 2026-07-20: claude-todo — add memory-only TodoState on AgentRunState;
+#                    observe tool-input-available for TodoWrite (v1) and emit
+#                    todo-updated (not collected, capped by
+#                    INK_AGENT_TODO_MAX_ITEMS with truncated:true); wire runner
+#                    on_tasks_changed (v2) to the same frame; add
+#                    build_thread_todos_payload() REST helper backed by
+#                    get_tasks_dir()/read_task_items() with memory fallback.
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -121,6 +128,8 @@ SSE event schema (aligned with Pawkeyland)::
     data: {"type": "plan-mode-changed", "planMode": "planning"|"exited", "toolCallId": "..."}
     data: {"type": "plan-updated", "slug": "...", "fileName": "...", "content": "...",
            "contentBytes": 1832, "truncated": false, "updatedAt": "..."}
+    data: {"type": "todo-updated", "source": "todo_write"|"task_v2", "todos": [...],
+           "truncated": false, "updatedAt": "..."}
     data: {"type": "message-final",  "text": "...", "usage": {...}, "sessionId": "..."}
     data: {"type": "finish",         "finishReason": "stop"|"error"}
     data: {"type": "error",          "errorText": "..."}
@@ -145,7 +154,9 @@ from claude_agent.thread_pool import AgentRunState
 from libs.claude_agent_kit.server.workspace import (
     get_or_create_workspace,
     get_plans_dir,
+    get_tasks_dir,
     get_workspace_root,
+    read_task_items,
 )
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
@@ -410,6 +421,217 @@ async def _observe_plan_mode_transition(
         newest = _find_newest_plan_file(plans_dir) if plans_dir is not None else None
         if newest is not None:
             await _emit_plan_updated(queue, plan_state, newest)
+
+
+# ---------------------------------------------------------------------------
+# Todo capture — v1 TodoWrite stream observation + v2 file tasks (claude-todo §5.2–§5.5)
+# ---------------------------------------------------------------------------
+
+_TODO_MAX_ITEMS_DEFAULT: int = 200
+
+_TODO_STATUSES: frozenset[str] = frozenset({"pending", "in_progress", "completed"})
+
+
+def _todo_max_items() -> int:
+    """Return the todo list cap from env config.
+
+    Lists larger than the cap are truncated in todo-updated frames / REST
+    responses and flagged ``truncated:true`` (claude-todo §5.4).
+    """
+
+    try:
+        raw = os.getenv("INK_AGENT_TODO_MAX_ITEMS", "") or ""
+        value = int(raw) if raw else _TODO_MAX_ITEMS_DEFAULT
+        return value if value > 0 else _TODO_MAX_ITEMS_DEFAULT
+    except (TypeError, ValueError):
+        return _TODO_MAX_ITEMS_DEFAULT
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time in the SSE/REST ISO-8601 Z format."""
+
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+@dataclass
+class TodoState:
+    """In-memory todo list state for a thread (claude-todo §5.2).
+
+    Memory-only, attached to the AgentRunState flyweight — same pattern as
+    PlanState.  ``source`` records which capture path produced the current
+    list (``"todo_write"`` for v1 stream capture, ``"task_v2"`` for file
+    tasks); a later capture overwrites the earlier one.  There is no v1
+    persistent layer: refresh/reconnect rebuilds v2 from the workspace
+    tasks directory and falls back to this memory state for v1.
+    """
+
+    source: Optional[str] = None  # None | "todo_write" | "task_v2"
+    todos: list = field(default_factory=list)
+    updated_at: Optional[str] = None
+
+
+def _ensure_todo_state(state: Optional[Any]) -> TodoState:
+    """Return the live TodoState for *state*, creating it on first use."""
+
+    todo_state = getattr(state, "todo_state", None) if state is not None else None
+    if todo_state is None:
+        todo_state = TodoState()
+        if state is not None:
+            state.todo_state = todo_state
+    return todo_state
+
+
+def _truncate_todos(todos: list) -> tuple[list, bool]:
+    """Apply the INK_AGENT_TODO_MAX_ITEMS cap; return (items, truncated)."""
+
+    cap = _todo_max_items()
+    if len(todos) <= cap:
+        return list(todos), False
+    return list(todos[:cap]), True
+
+
+async def _emit_todo_updated(queue: Any, todo_state: TodoState) -> None:
+    """Emit a todo-updated frame from *todo_state*.
+
+    Lifecycle frame — NOT collected into ``collected_parts`` (claude-todo
+    §5.4).  Payload: ``source`` / ``todos`` / ``updatedAt``; lists beyond
+    ``INK_AGENT_TODO_MAX_ITEMS`` (default 200) are truncated with
+    ``truncated:true``.
+    """
+
+    todos, truncated = _truncate_todos(todo_state.todos)
+    await queue.put(
+        _sse(
+            "todo-updated",
+            {
+                "source": todo_state.source,
+                "todos": todos,
+                "truncated": truncated,
+                "updatedAt": todo_state.updated_at,
+            },
+        )
+    )
+
+
+async def _observe_todo_write(
+    queue: Any,
+    state: Optional[Any],
+    tool_name: Optional[str],
+    tool_input: Optional[dict[str, Any]],
+) -> None:
+    """Capture the v1 TodoWrite full list from tool-input-available (§5.3).
+
+    ``input.todos`` is the complete replacement list; each entry maps to a
+    TodoItem with ``id`` = 1-based array index, ``content``/``status``/
+    ``activeForm`` taken directly, ``owner`` = None and ``blocked_by`` = [].
+    Schema mismatches skip the emission and only log (§5.4 error boundary).
+    """
+
+    if tool_name != "TodoWrite":
+        return
+    raw_todos = (tool_input or {}).get("todos")
+    if not isinstance(raw_todos, list):
+        logger.warning(
+            "TodoWrite capture skipped: input.todos missing or not a list."
+        )
+        return
+    todos: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_todos):
+        if not isinstance(raw, dict) or not isinstance(raw.get("content"), str):
+            logger.warning(
+                "TodoWrite capture skipped: todos[%d] schema mismatch.", index
+            )
+            return
+        status = str(raw.get("status") or "pending")
+        if status not in _TODO_STATUSES:
+            status = "pending"
+        todos.append(
+            {
+                "id": str(index + 1),
+                "content": raw["content"],
+                "status": status,
+                "active_form": (
+                    str(raw["activeForm"]) if raw.get("activeForm") else None
+                ),
+                "owner": None,
+                "blocked_by": [],
+            }
+        )
+    todo_state = _ensure_todo_state(state)
+    todo_state.source = "todo_write"
+    todo_state.todos = todos
+    todo_state.updated_at = _utc_now_iso()
+    await _emit_todo_updated(queue, todo_state)
+
+
+def build_thread_todos_payload(
+    thread_id: str, todo_state: Optional[TodoState] = None
+) -> dict[str, Any]:
+    """Build the ``GET /threads/{thread_id}/todos`` response body (claude-todo §5.5).
+
+    Priority: when the v2 tasks directory holds task JSON, the filesystem is
+    the source of truth — the list is rebuilt via ``read_task_items`` and the
+    in-memory *todo_state* (when provided) is corrected to match.  Otherwise
+    the in-memory state (v1 TodoWrite capture) is returned.  Missing
+    workspace (Workspace Mode disabled) → fixed ``exists:false``; the global
+    ``~/.claude/tasks`` is never probed.
+    """
+
+    payload: dict[str, Any] = {
+        "thread_id": thread_id,
+        "source": None,
+        "exists": False,
+        "todos": [],
+        "truncated": False,
+        "updated_at": None,
+    }
+    if not _thread_workspace_exists(thread_id):
+        return payload
+
+    tasks_dir = get_tasks_dir(thread_id)
+    if tasks_dir is not None:
+        items, newest_mtime = read_task_items(tasks_dir)
+        if items:
+            updated_at = (
+                datetime.fromtimestamp(newest_mtime, timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+                if newest_mtime is not None
+                else _utc_now_iso()
+            )
+            if todo_state is not None:
+                # Filesystem wins — correct the in-memory state (§5.5).
+                todo_state.source = "task_v2"
+                todo_state.todos = items
+                todo_state.updated_at = updated_at
+            todos, truncated = _truncate_todos(items)
+            payload.update(
+                {
+                    "source": "task_v2",
+                    "exists": True,
+                    "todos": todos,
+                    "truncated": truncated,
+                    "updated_at": updated_at,
+                }
+            )
+            return payload
+
+    if todo_state is not None and todo_state.source:
+        todos, truncated = _truncate_todos(todo_state.todos)
+        payload.update(
+            {
+                "source": todo_state.source,
+                "exists": True,
+                "todos": todos,
+                "truncated": truncated,
+                "updated_at": todo_state.updated_at,
+            }
+        )
+    return payload
 
 
 
@@ -919,6 +1141,7 @@ class ClaudeAgentService:
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
             on_error=self._make_error_cb(queue),
             on_plan_file_changed=self._make_plan_file_changed_cb(queue, execution.state),
+            on_tasks_changed=self._make_tasks_changed_cb(queue, execution.state),
         )
 
         try:
@@ -1257,6 +1480,7 @@ class ClaudeAgentService:
                     await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}))
                     turn_ctx.collected_parts.append(evt)
                     await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
+                    await _observe_todo_write(queue, state, tool_name, payload.input)
                 return
 
             # --- tool_input_delta: streamed tool JSON input for live previews ---
@@ -1283,6 +1507,7 @@ class ClaudeAgentService:
                     await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}))
                     turn_ctx.collected_parts.append(evt)
                     await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
+                    await _observe_todo_write(queue, state, tool_name, payload.input or {})
                 return
 
             # --- tool_result: tool execution result ---
@@ -1439,6 +1664,28 @@ class ClaudeAgentService:
             await _emit_plan_updated(queue, plan_state, Path(file_path))
 
         return on_plan_file_changed
+
+    @staticmethod
+    def _make_tasks_changed_cb(queue: asyncio.Queue, state: Optional[Any]):
+        """Build the runner on_tasks_changed callback (claude-todo §5.3).
+
+        Fired by the runner PostToolUse hook (debounced per tasks dir per
+        turn) after TaskCreate/TaskUpdate; the payload is the full TodoItem
+        list already derived from the tasks dir.  Emits todo-updated with
+        source "task_v2"; the frame is never collected into collected_parts.
+        """
+
+        async def on_tasks_changed(todos: list) -> None:
+            if not isinstance(todos, list):
+                logger.warning("on_tasks_changed: non-list payload; skipping emit.")
+                return
+            todo_state = _ensure_todo_state(state)
+            todo_state.source = "task_v2"
+            todo_state.todos = todos
+            todo_state.updated_at = _utc_now_iso()
+            await _emit_todo_updated(queue, todo_state)
+
+        return on_tasks_changed
 
 
 

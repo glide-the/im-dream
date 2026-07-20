@@ -2,6 +2,7 @@
 > [Output] 定义 Chat 会话 Markdown 中 Mermaid 代码块的 SVG 渲染方案，并消除 `<pre>` 内嵌块级元素导致的 React DOM 嵌套报错。
 > [Pos] interaction-design-doc in `docs/design/claude-agent`
 > [Sync] 2026-07-20: 初版 — Mermaid 按需加载渲染、共享 `ChatMarkdown` 渲染链、流式降级与 `<pre>` 嵌套修正。
+> [Sync] 2026-07-20: 新增 §2.6 图表工具栏 — 预览/源码模式切换、复制源码、导出 PNG 图片。
 
 # Chat Markdown Mermaid 渲染设计
 
@@ -50,6 +51,22 @@ Claude Agent 的回答经常包含 ```` ```mermaid ```` 围栏代码块（流程
 
 应用颜色体系基于语义化 CSS 变量（`--color-text-primary`、`--color-bg-paper` 等）。`mermaid.initialize()` 使用 `theme: 'base'`，`themeVariables` 在初始化时从 `getComputedStyle(document.documentElement)` 读取上述变量并映射（主色、文字色、边框色、背景色），读取失败时使用内置回退值。图表容器样式沿用既有 `prose prose-chat` 代码块视觉（圆角、纸面背景、横向滚动）。
 
+### 2.6 图表工具栏
+
+`MermaidBlock` 容器顶部提供工具栏，右侧为操作区：
+
+| 功能 | 交互 | 说明 |
+|---|---|---|
+| 预览 / 源码切换 | 分段按钮（segmented），与 `AIInputDock` 的「自动 / 逐步确认」切换同风格 | 默认预览；预览模式显示 SVG，源码模式显示原始 Mermaid 文本；渲染失败且无可用 SVG 时强制停留源码视图 |
+| 复制源码 | 图标按钮，复用 `useCopy` hook | 任意模式下复制**完整 Markdown 围栏文本**（` ```mermaid ```` 开头、` ``` ` 收尾，含图表源码），成功后图标变为对勾（2s 复位） |
+| 导出图片 | 图标按钮，仅预览可用时启用 | 将当前 SVG 栅格化为 PNG 下载，文件名 `mermaid-diagram-{timestamp}.png` |
+
+PNG 导出实现要点：
+
+- 从 SVG 的 `viewBox` 解析逻辑尺寸（缺失时回退 800×600），序列化时写入显式 `width`/`height`。
+- 按 2 倍 scale 绘制到 `<canvas>`，先以 `--color-bg-paper` 填充背景（SVG 本身是透明的），再 `drawImage`。
+- `canvas.toBlob('image/png')` → 临时 `<a download>` 触发下载；全程不离开当前页面，失败时仅控制台告警并复位按钮状态。
+
 ## 3. 错误处理
 
 | 场景 | 行为 |
@@ -58,6 +75,7 @@ Claude Agent 的回答经常包含 ```` ```mermaid ```` 围栏代码块（流程
 | 语法不完整（流式中） | 展示原始代码块；防抖后重试 |
 | 语法错误（最终态） | 展示原始代码块 + 错误角标，控制台保留 mermaid 原始错误 |
 | 多个图表并发渲染 | 单例初始化 + 串行化 `render()` 调用，避免 mermaid 内部状态竞争 |
+| PNG 导出失败（canvas/编码异常） | 按钮复位、控制台告警，图表本身不受影响 |
 
 ## 4. 影响面与验证
 

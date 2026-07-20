@@ -10,6 +10,10 @@
 > **[Sync] 2026-06-13**: full-access 模式保留 `AskUserQuestion` /
 > `mcp__user__ask_user` 的前端确认窗口，因为这些工具必须收集 answers
 > 并通过 `updatedInput` 传回 Claude。
+> **[Sync] 2026-07-20**: 前端确认交互从消息列表内联渲染迁移为**确认面板**
+> （`ToolConfirmationDock`）：待确认期间**隐藏输入栏，面板直接占据输入栏位置**
+> （in-flow 替换渲染）；消息列表中的待确认工具调用退化为带「待确认」标记的
+> 折叠行。详见 §8。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -447,6 +451,10 @@ if tool_choice == "auto":
 
 ## 7. 前端工具确认路由逻辑 **[2026-05-27 / 2026-06-06]**
 
+> **[已更新 2026-07-20]** 本节 §7.2 中「待确认工具在消息列表内直接展开
+> Approve/Cancel 或 AskUserQuestion 表单」的渲染方式已被 §8 的悬浮确认面板
+> 取代；判定规则（哪些 part 需要确认）保持不变，仅渲染位置与组件层级变化。
+
 ### 7.1 组件层级
 
 ```
@@ -494,3 +502,74 @@ if (needsManualApproval) { /* isManualToolInvocation=true → Approve/Cancel */ 
   ↓ 工具执行 → tool-output-available
   isCompleted=true → shouldShowApprovalUI=false → 恢复折叠/终端视图
 ```
+
+---
+
+## 8. 前端确认面板（ToolConfirmationDock） **[2026-07-20]**
+
+### 8.1 背景与目标
+
+原实现（§7.2）把待确认工具的 Approve/Cancel 按钮和 AskUserQuestion 表单直接
+渲染在消息列表中：表单卡片打断消息流、历史回填后位置漂移、长命令把列表撑得
+很乱。2026-07-20 起，所有**待用户决策的确认交互**统一收敛到一块确认面板：
+**待确认期间隐藏 `AIInputDock` 输入栏，面板以正常文档流占据输入栏位置**，
+用户做出决策后输入栏恢复；消息列表只保留带「待确认」标记的折叠行。
+
+### 8.2 组件层级
+
+```
+ChatPanel
+  ├─ pendingConfirmation = useMemo(messages, effectiveToolChoice)
+  │     └─ resolvePendingToolConfirmation(part, toolChoice)   // toolConfirmation.ts
+  │           ├─ 'askuser'  — AskUserQuestion / mcp__user__ask_user 且未完成且 input 已就绪
+  │           ├─ 'confirm'  — toolMetadata.approvalRequested===true 或 toolChoice==='manual'
+  │           │             且未完成且 input 已就绪（editor write 工具除外）
+  │           └─ null       — 已完成 / input 未就绪 / editor write 工具 / 无需确认
+  ├─ ChatMessageList
+  │     └─ 待确认 part → 折叠行 + 琥珀色「待确认」标记（不再内联渲染按钮/表单）
+  └─ 输入区容器 (position: relative)
+        ├─ 回到底部按钮          ← 维持 absolute 悬浮，位于面板/输入栏上方
+        └─ pendingConfirmation
+              ├─ 存在 → ToolConfirmationDock（替换输入栏，in-flow）
+              │         ├─ kind='confirm' → 标题 + 命令/参数摘要 + 拒绝 / 同意
+              │         └─ kind='askuser' → AskUserQuestionUI（无框紧凑变体）+ 取消 / 提交
+              └─ 不存在 → AIInputDock (mode="full")
+```
+
+### 8.3 交互契约
+
+| 场景 | 标题区 | 按钮 | 快捷键 | 确认请求 |
+| --- | --- | --- | --- | --- |
+| 普通工具确认（`confirm`） | `是否允许 I&M 调用 {tool} 工具，{summary}` + 「待授权」徽章 | **拒绝** / **同意** | `Esc` 拒绝、`⌘/Ctrl+⏎` 同意 | `POST /api/claude-agent/tool-confirm` `{approved}` |
+| 用户提问（`askuser`） | `I&M 需要你的回答` + 「待回答」徽章 | **取消** / **提交**（选项表单内） | `Esc` 取消、`⌘/Ctrl+⏎` 提交 | 同上，`approved:true` + `answers` |
+| 编辑器写入工具 | —（不进入确认面板） | 沿用消息列表内 `EditorWriteApprovalUI` | — | 同上 |
+
+- 待确认期间 `AIInputDock` 整体隐藏，确认面板占据输入栏位置；用户做出决策后
+  输入栏立即恢复。回到底部按钮维持 absolute 悬浮，不受替换影响。
+- 按钮**只有**拒绝/同意（或取消/提交）两个选项，不提供「本会话内允许」等
+  第三态；授权粒度与后端 `PreToolUse` 决策保持一致。
+- 面板高度上限 `min(46vh, 24rem)`，超出内部滚动；AskUserQuestion 表单以
+  `compact` 紧凑密度渲染（更小字体、更窄间距），避免面板占满聊天视口。
+- 面板按 `partKey` 作为 React key 挂载：同一确认在被 resolve/超时移除后状态
+  自动复位；多个待确认项串行展示（取消息序最早的一项），与后端一次只阻塞
+  一个 `PreToolUse` 回调的事实对齐。
+- 确认成功后仍调用 `addToolResult` 乐观标记 part 完成，面板随
+  `pendingConfirmation` 变为 null 自动消失、输入栏恢复，消息列表折叠行恢复常态。
+- `input` 尚未就绪（`input-streaming` 早期）时不挂载面板，避免基于半截 JSON
+  渲染表单；下一帧 input 到达后自动出现。
+
+### 8.4 涉及文件
+
+- `frontend/src/components/chat/toolConfirmation.ts`（新增）— `confirmToolCall`
+  请求、`resolveToolName`、`isAskUserQuestionPart`、`resolvePendingToolConfirmation`。
+- `frontend/src/components/chat/ToolConfirmationDock.tsx`（新增）— 确认面板本体。
+- `frontend/src/components/chat/AskUserQuestionUI.tsx` — 新增 `framed` /
+  `showHeader` / `submitLabel` / `cancelLabel` / `compact` props，支持无框紧凑
+  中文按钮变体。
+- `frontend/src/components/chat/ToolMessagePart.tsx` — 移除内联 Approve/Cancel
+  与 AskUserQuestion 渲染路径及 `isManualToolInvocation` prop；保留折叠详情卡与
+  编辑器写入审批 UI。
+- `frontend/src/components/chat/ChatMessageList.tsx` — 待确认 part 渲染为折叠
+  行 + 「待确认」标记。
+- `frontend/src/components/chat/ChatPanel.tsx` — 派生 `pendingConfirmation`，
+  待确认时在输入区容器内用确认面板替换 `AIInputDock`。

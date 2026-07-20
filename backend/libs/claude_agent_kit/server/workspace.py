@@ -33,6 +33,12 @@
 #                    resolver ({workspace}/.claude-home/plans primary,
 #                    {workspace}/plans fallback) with resolve()-based workspace
 #                    containment guard (claude-plan §5.1).
+# [Sync] 2026-07-20: add get_tasks_dir() + read_task_items() — per-thread
+#                    Claude Code v2 file-task directory resolver
+#                    ({workspace}/.claude-home/tasks/main) with the same
+#                    containment guard, and the read-time derivation of
+#                    TodoItem dicts (filter metadata._internal, drop blockers
+#                    already completed) (claude-todo §5.1/§5.2).
 
 """Workspace manager for Claude Agent session directories.
 
@@ -73,7 +79,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -593,6 +599,154 @@ def get_plans_dir(session_id: str) -> Optional[Path]:
         if resolved.is_dir():
             return resolved
     return None
+
+
+# ---------------------------------------------------------------------------
+# Claude Code v2 file tasks (claude-todo §5.1/§5.2)
+# ---------------------------------------------------------------------------
+
+# Task files live at {CLAUDE_CONFIG_DIR}/tasks/{taskListId}/{id}.json; the
+# runner fixes taskListId via CLAUDE_CODE_TASK_LIST_ID (sdk_env.py), so the
+# per-thread tasks directory is stable across SDK resume / new sessions.
+_TASKS_DIR_NAME = "tasks"
+
+_TODO_STATUSES = frozenset({"pending", "in_progress", "completed"})
+
+
+def get_tasks_dir(session_id: str) -> Optional[Path]:
+    """Return the Claude Code v2 tasks directory for *session_id*, or ``None``.
+
+    Resolves ``{workspace}/.claude-home/tasks/main`` — the fixed taskListId
+    (``sdk_env.CLAUDE_CODE_TASK_LIST_ID_VALUE``) injected by the runner when
+    ``INK_AGENT_TASK_V2_ENABLED`` is on (claude-todo §5.1).
+
+    Same containment policy as ``get_plans_dir``: the candidate must
+    ``resolve()`` to a path still inside the resolved workspace root; symlink
+    escapes are rejected.  ``None`` means "no tasks directory": invalid
+    *session_id*, workspace disabled/missing, an escaping candidate, or no
+    tasks written yet.  Callers map ``None`` to the ``exists:false`` contract
+    and must never fall back to the global ``~/.claude/tasks``.
+    """
+
+    from .sdk_env import CLAUDE_CODE_TASK_LIST_ID_VALUE  # local import avoids cycles
+
+    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
+        logger.warning("get_tasks_dir: invalid session_id: %r", session_id)
+        return None
+    try:
+        root = get_workspace_root().resolve(strict=False)
+        workspace = (root / session_id).resolve(strict=False)
+        workspace.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        logger.warning(
+            "get_tasks_dir: workspace path escapes root for session_id=%r", session_id
+        )
+        return None
+    if not workspace.is_dir():
+        return None
+    candidate = workspace / ".claude-home" / _TASKS_DIR_NAME / CLAUDE_CODE_TASK_LIST_ID_VALUE
+    try:
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(workspace)
+    except (OSError, RuntimeError, ValueError):
+        logger.warning(
+            "get_tasks_dir: tasks candidate %s escapes workspace %s.",
+            candidate,
+            workspace,
+        )
+        return None
+    if resolved.is_dir():
+        return resolved
+    return None
+
+
+def read_task_items(tasks_dir: Path) -> tuple[list[dict[str, Any]], Optional[float]]:
+    """Read all v2 task JSON files into unified TodoItem dicts (claude-todo §5.2).
+
+    Replicates the official read-time derivation: only ``*.json`` files are
+    read (``.lock`` / ``.highwatermark`` and other dotfiles are ignored);
+    tasks with truthy ``metadata._internal`` are filtered out; ``blockedBy``
+    references to tasks whose own status is ``completed`` are dropped.
+    Field mapping: ``id`` ← numeric filename stem, ``content`` ← ``subject``,
+    ``active_form`` ← ``activeForm``, ``status``/``owner``/``blockedBy`` →
+    ``status``/``owner``/``blocked_by``.
+
+    Unreadable or schema-mismatched files are skipped with a warning and never
+    abort the whole read (claude-todo §5.4 error boundary).  Returns
+    ``(items, newest_mtime_epoch)`` sorted by numeric id; the mtime is ``None``
+    when no task file was readable.
+    """
+
+    try:
+        resolved_dir = tasks_dir.resolve(strict=False)
+        entries = sorted(tasks_dir.iterdir())
+    except OSError:
+        return [], None
+
+    raw_items: list[dict[str, Any]] = []
+    newest_mtime: Optional[float] = None
+    for entry in entries:
+        if entry.name.startswith(".") or entry.suffix.lower() != ".json":
+            continue
+        try:
+            resolved = entry.resolve(strict=False)
+            resolved.relative_to(resolved_dir)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not resolved.is_file():
+            continue
+        try:
+            data = json.loads(resolved.read_text(encoding="utf-8"))
+            mtime = resolved.stat().st_mtime
+        except (OSError, ValueError, UnicodeDecodeError):
+            logger.warning("read_task_items: skipping unreadable task file %s", resolved)
+            continue
+        if not isinstance(data, dict):
+            logger.warning("read_task_items: skipping non-object task file %s", resolved)
+            continue
+        metadata = data.get("metadata")
+        if isinstance(metadata, dict) and metadata.get("_internal"):
+            continue
+        status = str(data.get("status") or "pending")
+        if status not in _TODO_STATUSES:
+            status = "pending"
+        blocked_by_raw = data.get("blockedBy")
+        blocked_by = (
+            [str(item) for item in blocked_by_raw if item is not None]
+            if isinstance(blocked_by_raw, list)
+            else []
+        )
+        raw_items.append(
+            {
+                "id": entry.stem,
+                "content": str(data.get("subject") or ""),
+                "status": status,
+                "active_form": (
+                    str(data["activeForm"]) if data.get("activeForm") else None
+                ),
+                "owner": str(data["owner"]) if data.get("owner") else None,
+                "blocked_by": blocked_by,
+            }
+        )
+        if newest_mtime is None or mtime > newest_mtime:
+            newest_mtime = mtime
+
+    # Read-time derivation: blockers that are already completed no longer
+    # block anything (official tasks.ts display semantics, claude-todo §5.1).
+    completed_ids = {item["id"] for item in raw_items if item["status"] == "completed"}
+    for item in raw_items:
+        item["blocked_by"] = [
+            blocker for blocker in item["blocked_by"] if blocker not in completed_ids
+        ]
+
+    def _sort_key(item: dict[str, Any]) -> tuple[int, Any]:
+        try:
+            return (0, int(item["id"]))
+        except (TypeError, ValueError):
+            return (1, item["id"])
+
+    raw_items.sort(key=_sort_key)
+    return raw_items, newest_mtime
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,8 @@
 #                    for frontend scroll pagination without loading all threads.
 # [Sync] 2026-07-20: add GET /api/claude-agent/threads/{thread_id}/plan —
 #                    current Plan Mode plan per thread (claude-plan §5.5).
+# [Sync] 2026-07-20: add GET /api/claude-agent/threads/{thread_id}/todos —
+#                    current todo list per thread (claude-todo §5.5).
 
 import base64
 import json
@@ -41,7 +43,7 @@ from pydantic import AliasChoices, BaseModel, Field
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
-from claude_agent.service import build_thread_plan_payload
+from claude_agent.service import build_thread_plan_payload, build_thread_todos_payload
 from claude_agent.thread_retrieval import (
     build_chat_thread_search_config,
     is_chat_history_search_requested,
@@ -531,6 +533,45 @@ async def claude_agent_thread_plan(
     if snapshot and snapshot.get("lifecycle") == "running":
         plan_mode = str(snapshot.get("plan_mode") or "none")
     return build_thread_plan_payload(thread_id, plan_mode=plan_mode)
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/todos")
+async def claude_agent_thread_todos(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the current todo list for *thread_id* (claude-todo §5.5).
+
+    Response body::
+
+        {
+          "thread_id": "thread-abc123",
+          "source": "todo_write" | "task_v2" | null,
+          "exists": true,
+          "todos": [
+            {"id": "1", "content": "...", "status": "pending",
+             "active_form": null, "owner": null, "blocked_by": []}
+          ],
+          "truncated": false,
+          "updated_at": "2026-07-20T06:30:00.000Z"
+        }
+
+    Ownership is validated like ``/plan``: 404 when the thread does not
+    belong to the caller.  When the v2 tasks directory holds task JSON the
+    filesystem is the source of truth (and the in-memory state is corrected);
+    otherwise the in-memory v1 TodoWrite capture from the session snapshot is
+    returned.  ``exists:false`` returns ``source:null``, ``todos:[]`` and
+    ``updated_at:null``.  Workspace Mode disabled → fixed ``exists:false``
+    (never probes the global ``~/.claude/tasks``).
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    todo_state = snapshot.get("todo_state") if snapshot else None
+    return build_thread_todos_payload(thread_id, todo_state=todo_state)
 
 
 @router.post("/api/claude-agent/threads/{thread_id}/stop")

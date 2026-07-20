@@ -18,6 +18,9 @@
  * [Sync]   2026-07-20: forward plan-mode-changed / plan-updated lifecycle frames to the
  *                      useThreadPlan store without mapping them to UIMessageChunks
  *                      (claude-plan.md §5.4: 不收集，不产生消息气泡).
+ * [Sync]   2026-07-20: forward todo-updated lifecycle frames to the useThreadTodos
+ *                      store without mapping them to UIMessageChunks
+ *                      (claude-todo.md §5.4: 不收集，不产生消息气泡).
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -47,6 +50,7 @@
 
 import { HttpChatTransport, type HttpChatTransportInitOptions, type UIMessage, type UIMessageChunk } from 'ai';
 import { applyPlanEvent } from '../hooks/useThreadPlan';
+import { applyTodoEvent, type ThreadTodoItem } from '../hooks/useThreadTodos';
 
 // ---------------------------------------------------------------------------
 // Backend event shapes (Pawkeyland-aligned)
@@ -145,6 +149,14 @@ interface BackendPlanUpdated {
   updatedAt?: string;
 }
 
+interface BackendTodoUpdated {
+  type: 'todo-updated';
+  source: 'todo_write' | 'task_v2' | null;
+  todos: ThreadTodoItem[];
+  truncated?: boolean;
+  updatedAt?: string | null;
+}
+
 interface BackendMessageFinal {
   type: 'message-final';
   text: string;
@@ -177,6 +189,7 @@ type BackendEvent =
   | BackendToolApprovalRequest
   | BackendPlanModeChanged
   | BackendPlanUpdated
+  | BackendTodoUpdated
   | BackendMessageFinal
   | BackendFinish
   | BackendError;
@@ -371,6 +384,18 @@ function convertEvent(
     case 'plan-updated': {
       if (state.threadId) {
         applyPlanEvent(state.threadId, event);
+      }
+      break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Todo lifecycle frames (claude-todo.md §5.4)
+    // 不收集：todo-updated 帧是面板状态而非对话消息，不映射为 UIMessageChunk，
+    // 只转发到按 threadId 键控的 todos store（useThreadTodos）。
+    // -----------------------------------------------------------------------
+    case 'todo-updated': {
+      if (state.threadId) {
+        applyTodoEvent(state.threadId, event);
       }
       break;
     }

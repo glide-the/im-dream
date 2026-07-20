@@ -14,6 +14,10 @@
 # [Sync] 2026-07-20: add on_plan_file_changed streaming callback — fires after
 #                    built-in Write/Edit/MultiEdit lands in the thread workspace
 #                    plans dir (claude-plan §5.3).
+# [Sync] 2026-07-20: add on_tasks_changed streaming callback — fires after
+#                    TaskCreate/TaskUpdate PostToolUse with the full TodoItem
+#                    list re-read from the thread workspace tasks dir
+#                    (claude-todo §5.3).
 
 """Type definitions for ClaudeAgentKit.
 
@@ -102,6 +106,10 @@ _ErrorCallback = Callable[[Exception], Union[Awaitable[None], None]]
 _MessageCallback = Callable[[Any], Union[Awaitable[None], None]]
 # Plan file observer: payload is the resolved plan file path (str).
 _PlanFileChangedCallback = Callable[[str], Union[Awaitable[None], None]]
+# Task v2 observer: payload is the full TodoItem dict list re-read from the
+# thread workspace tasks dir (claude-todo §5.2 field shape: id/content/
+# status/active_form/owner/blocked_by).
+_TasksChangedCallback = Callable[[list], Union[Awaitable[None], None]]
 
 
 @dataclass
@@ -124,6 +132,10 @@ class AgentStreamingCallbacks:
     # path lands inside the thread workspace plans dir (claude-plan §5.3).
     # Debounced per file per turn via INK_AGENT_PLAN_EMIT_DEBOUNCE_MS.
     on_plan_file_changed: Optional[_PlanFileChangedCallback] = None
+    # Fires after a TaskCreate/TaskUpdate tool call once the tasks dir has
+    # been re-read and derived into TodoItem dicts (claude-todo §5.3).
+    # Debounced per tasks dir per turn via INK_AGENT_TODO_EMIT_DEBOUNCE_MS.
+    on_tasks_changed: Optional[_TasksChangedCallback] = None
 
 
 # ---------------------------------------------------------------------------

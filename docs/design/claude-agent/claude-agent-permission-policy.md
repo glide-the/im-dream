@@ -16,6 +16,9 @@
 > [Sync] 2026-07-20: `EnterPlanMode` / `ExitPlanMode` added to the
 > low-sensitivity auto-allow class (claude-plan §5.7); official `ExitPlanMode`
 > ask-semantics deviation recorded in §3.
+> [Sync] 2026-07-20: `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` /
+> `TaskGet` added to the low-sensitivity auto-allow class (claude-todo §5.7);
+> `TaskUpdate` non-read-only deviation recorded in §3.
 
 # Claude-Agent Permission Policy
 
@@ -67,6 +70,7 @@ Current auto-allow inventory:
 | Editor context switch | `mcp__editor__switch_editor` |
 | Skill invocation | `Skill` |
 | Plan Mode session state | `EnterPlanMode`, `ExitPlanMode` **[2026-07-20]** |
+| Todo / task list session state | `TodoWrite`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet` **[2026-07-20]** |
 | Read-only Bash subset | `Bash` only when the command has no shell metacharacters and the first token is in the read-only/navigation allowlist (`ls`, `cd`, `pwd`, `echo`, `cat`, `head`, `tail`, `wc`, `find`, `which`, `type`, `date`, `whoami`, `id`, `groups`, `env`, `printenv`, `uname`, `hostname`) |
 
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
@@ -78,6 +82,10 @@ Implementation detail: hook payloads are normalized before policy lookup. The ru
 `EnterPlanMode` / `ExitPlanMode` are low-sensitivity because both are session-state meta operations: neither mutates user content directly (`EnterPlanMode` is read-only; `ExitPlanMode` only flips the session back to execution). Classification name: `low_sensitivity_permission` via `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (claude-plan §5.7, 2026-07-20).
 
 **Deviation record (2026-07-20) — official `ExitPlanMode` ask semantics downgraded.** In official Claude Code, `ExitPlanMode` runs `checkPermissions → ask`: an interactive human confirms the plan before execution resumes. This deployment has no TUI approval scenario; keeping ask semantics would pop a frontend confirmation on every plan exit and block the product's "plans flow automatically" requirement. Consequence: the model's self-authored plan enters execution without per-item human confirmation. Risk is bounded by (a) the workspace-boundary permission (`_apply_workspace_boundary_permission`), which hard-denies built-in file/search tools outside the thread workspace, and (b) high-sensitivity write tools (`Write`/`Edit`/`MultiEdit` outside `files/`, mutating `Bash`, editor MCP writes), which still route through the frontend confirmation side-channel. In `tool_choice="manual"` mode both tools keep the high-sensitivity confirmation path unchanged. Fallback: remove the two names from `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (or gate them behind a future Settings switch) to restore official ask semantics.
+
+The five todo/task tools are low-sensitivity because all of them are session-state task-list operations: none mutates user content directly. `TodoWrite` is officially approval-free (an SDK default-allowed tool); `TaskCreate`/`TaskUpdate` write task JSON, but the write scope is confined by `CLAUDE_CONFIG_DIR` to the per-thread workspace `.claude-home/tasks/` directory — equivalent to session metadata. Classification name: `low_sensitivity_permission` via `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (claude-todo §5.7, 2026-07-20).
+
+**Deviation record (2026-07-20) — `TaskUpdate` is not strictly read-only.** `TaskUpdate` can trigger `blockTask` bidirectional rewrites and `deleteTask` cascading deletion of task JSON files. This downgrade means task-list creation, mutation, and deletion proceed without per-item human confirmation. Risk is bounded by (a) the write scope being confined to the per-thread workspace `.claude-home/tasks/` directory (session metadata, not user content), and (b) high-sensitivity write tools, which still route through the frontend confirmation side-channel. In `tool_choice="manual"` mode all five tools keep the high-sensitivity confirmation path unchanged. Fallback: remove the five names from `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` to restore confirmation gating.
 
 ## 4. High-Sensitivity Tools
 
@@ -158,6 +166,7 @@ This remains true in full-access mode.
 | `Skill` | Allow | Confirm | Not exposed |
 | `mcp__editor__switch_editor` | Allow | Confirm | Not exposed |
 | `EnterPlanMode` / `ExitPlanMode` | Allow | Confirm | Not exposed |
+| `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` | Allow | Confirm | Not exposed |
 | Editor write MCP tools | Confirm | Confirm | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` | Confirm with form | Confirm with form | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` with full access | Confirm with form | Confirm with form | Not exposed |

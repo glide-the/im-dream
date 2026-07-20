@@ -1,24 +1,25 @@
-// [Input] AskUserQuestionUI, EditorWriteApprovalUI, Icons, AuthContext token; part shape from @ai-sdk/react DynamicToolUIPart/ToolUIPart.
-// [Output] Rendered tool invocation card with inline AskUserQuestion form, EditorWriteApproval UI, or generic Approve/Reject UI.
+// [Input] EditorWriteApprovalUI, Icons, toolConfirmation helpers; part shape from @ai-sdk/react DynamicToolUIPart/ToolUIPart.
+// [Output] Collapsed tool detail card (header + expandable input/output), plus the inline
+//          EditorWriteApproval UI for mcp__editor__ write tools. Generic approvals and
+//          AskUserQuestion prompts are NOT rendered here — they live in ToolConfirmationDock
+//          floating above AIInputDock.
 // [Pos] tool-message-part component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; fix confirmToolCall body to send thread_id+tool_call_id (snake_case) matching ToolConfirmRequestBody; accept ok|success response flag.
-// [Sync] 2026-05-27: when shouldShowAskUserUI is true, render only AskUserQuestionUI (no collapsible header) for clean UX.
-// [Sync] 2026-05-27: add !isCompleted guard to shouldShowApprovalUI so Approve/Cancel disappears after tool completes in manual mode.
 // [Sync] 2026-05-29: integrate EditorWriteApprovalUI for mcp__editor__ write tools; detect by isEditorWriteTool().
-// [Sync] 2026-05-29: add onEditorWriteConfirmed prop; call after successful editor write approve to trigger Writing view reload.
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin tool confirmation requests.
 // [Sync] 2026-06-14: pass toolCallId to onEditorWriteConfirmed for event-driven reload de-duplication.
 // [Sync] 2026-07-08: use semantic error/on-action color tokens in generic tool cards for dark mode.
 // [Sync] 2026-07-19: show task summary (input.description/target) and shell command lines in the generic tool card header so approvals and collapsed cards explain what the tool is doing.
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+// [Sync] 2026-07-20: remove inline Approve/Cancel + AskUserQuestion rendering and the
+//        isManualToolInvocation prop — pending confirmations moved to ToolConfirmationDock;
+//        confirmToolCall moved to toolConfirmation.ts (design: claude-agent-tool-confirmation-flow.md §8).
+import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
-import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import EditorWriteApprovalUI from './EditorWriteApprovalUI';
 import { isEditorWriteTool } from './editorWriteTools';
+import { confirmToolCall } from './toolConfirmation';
 import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { IconCheck, IconChevronDown, IconChevronUp, IconLoader, IconX } from './Icons';
-import { getAuthToken } from '../../contexts/AuthContext';
-import { API_BASE } from '../../lib/apiBase';
 
 type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 
@@ -40,33 +41,17 @@ function IconAlert() {
   );
 }
 
-async function confirmToolCall(
-  threadId: string,
-  toolCallId: string,
-  approved: boolean,
-  reason?: string,
-  answers?: Record<string, unknown>,
-) {
-  const response = await fetch(`${API_BASE}/api/claude-agent/tool-confirm`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
-    body: JSON.stringify({ thread_id: threadId, tool_call_id: toolCallId, approved, reason, answers }),
-  });
-  return (await response.json()) as { ok?: boolean; success?: boolean; message?: string };
-}
-
 interface ToolMessagePartProps {
   part: AnyToolUIPart;
   threadId: string;
   isLast?: boolean;
   isLoading?: boolean;
-  isManualToolInvocation?: boolean;
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
   /** Called after an editor write tool is successfully confirmed so the Writing view can reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
 }
 
-export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToolInvocation, addToolResult, onEditorWriteConfirmed }: ToolMessagePartProps) {
+export function ToolMessagePart({ part, threadId, isLast, isLoading, addToolResult, onEditorWriteConfirmed }: ToolMessagePartProps) {
   const [expanded, setExpanded] = useState(false);
   const [confirmationStatus, setConfirmationStatus] = useState<'idle' | 'confirming' | 'confirmed' | 'rejected'>('idle');
   const toolCallId = part.toolCallId;
@@ -81,17 +66,8 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
   const isCompleted = useMemo(() => state === 'output-available' || state === 'output-error', [state]);
   const isExecuting = useMemo(() => !isCompleted && Boolean(isLast && isLoading), [isCompleted, isLast, isLoading]);
   const isError = useMemo(() => state === 'output-error', [state]);
-  const isAskUserQuestion = useMemo(() => {
-    const normalizedType = partType?.toLowerCase() || '';
-    const normalizedName = toolName?.toLowerCase() || '';
-    return normalizedType === 'tool-askuserquestion' || ['askuserquestion', 'ask_user_question', 'ask_user', 'askuser'].includes(normalizedName) || normalizedName.endsWith('__ask_user') || normalizedName.endsWith('__askuserquestion');
-  }, [partType, toolName]);
-  const shouldShowAskUserUI = useMemo(() => isAskUserQuestion && !isCompleted && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isAskUserQuestion, isCompleted, state]);
   const isEditorWrite = useMemo(() => isEditorWriteTool(toolName), [toolName]);
   const shouldShowEditorWriteUI = useMemo(() => isEditorWrite && !isCompleted && (state === 'input-available' || state === 'approval-requested' || !state || state === 'input-streaming'), [isEditorWrite, isCompleted, state]);
-  // Only show Approve/Cancel while the tool is still pending — once the output
-  // arrives (isCompleted) the card transitions to the normal completed view.
-  const shouldShowApprovalUI = Boolean(isManualToolInvocation) && !shouldShowAskUserUI && !shouldShowEditorWriteUI && !isCompleted;
   // One-line "what is this tool doing" summary for the card header: task
   // description when the model provides one, otherwise the command/target.
   const toolSummaryText = useMemo(() => summarizeToolInvocation(toolName, input), [toolName, input]);
@@ -104,86 +80,6 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
     if (output == null) return null;
     try { return JSON.stringify(output, null, 2); } catch { return String(output); }
   }, [output]);
-
-  const handleApprove = useCallback(async () => {
-    if (confirmationStatus !== 'idle') return;
-    setConfirmationStatus('confirming');
-    try {
-      const result = await confirmToolCall(threadId, toolCallId, true);
-      if (result.ok ?? result.success) {
-        addToolResult?.({ tool: toolName, toolCallId, output: { approved: true } });
-        setConfirmationStatus('confirmed');
-        return;
-      }
-    } catch {
-      // fall through
-    }
-    setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
-
-  const handleReject = useCallback(async () => {
-    if (confirmationStatus !== 'idle') return;
-    setConfirmationStatus('confirming');
-    try {
-      const result = await confirmToolCall(threadId, toolCallId, false, '用户拒绝执行工具');
-      if (result.ok ?? result.success) {
-        addToolResult?.({ tool: toolName, toolCallId, output: { approved: false } });
-        setConfirmationStatus('rejected');
-        return;
-      }
-    } catch {
-      // fall through
-    }
-    setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
-
-  useEffect(() => {
-    if (!shouldShowApprovalUI) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-        event.preventDefault();
-        void handleApprove();
-      }
-      if ((event.metaKey || event.ctrlKey) && event.key === 'Escape') {
-        event.preventDefault();
-        void handleReject();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleApprove, handleReject, shouldShowApprovalUI]);
-
-  const handleAskUserSubmit = useCallback(async (answers: Record<string, unknown>) => {
-    if (confirmationStatus !== 'idle') return;
-    setConfirmationStatus('confirming');
-    try {
-      const result = await confirmToolCall(threadId, toolCallId, true, undefined, answers);
-      if (result.ok ?? result.success) {
-        addToolResult?.({ tool: toolName, toolCallId, output: answers });
-        setConfirmationStatus('confirmed');
-        return;
-      }
-    } catch {
-      // fall through
-    }
-    setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
-
-  const handleAskUserCancel = useCallback(async () => {
-    if (confirmationStatus !== 'idle') return;
-    setConfirmationStatus('confirming');
-    try {
-      const result = await confirmToolCall(threadId, toolCallId, false, '用户取消了问题回答');
-      if (result.ok ?? result.success) {
-        addToolResult?.({ tool: toolName, toolCallId, output: { cancelled: true } });
-        setConfirmationStatus('rejected');
-        return;
-      }
-    } catch {
-      // fall through
-    }
-    setConfirmationStatus('idle');
-  }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
 
   const handleEditorWriteApprove = useCallback(async () => {
     if (confirmationStatus !== 'idle') return;
@@ -217,36 +113,6 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
     }
     setConfirmationStatus('idle');
   }, [addToolResult, confirmationStatus, threadId, toolCallId, toolName]);
-
-  // When the AskUserQuestion form is active, render only the question UI (no
-  // collapsible header) so the user sees the clean form immediately.
-  if (shouldShowAskUserUI) {
-    return (
-      <div style={{ width: '100%' }}>
-        {confirmationStatus === 'idle' && input !== undefined ? (
-          <AskUserQuestionUI
-            input={input as AskUserQuestionInput}
-            toolCallId={toolCallId}
-            toolName={toolName}
-            isProcessing={false}
-            onSubmit={handleAskUserSubmit}
-            onCancel={handleAskUserCancel}
-          />
-        ) : confirmationStatus === 'idle' ? (
-          <div style={{ borderRadius: '14px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', padding: '1.25rem', color: 'var(--color-text-muted)', fontSize: '0.85rem', textAlign: 'center' }}>
-            <IconLoader style={{ width: '1rem', height: '1rem', display: 'inline-block', marginRight: '0.5rem' }} />
-            加载中…
-          </div>
-        ) : confirmationStatus === 'confirming' ? (
-          <StatusRow tone="warning" label="提交中…" />
-        ) : confirmationStatus === 'confirmed' ? (
-          <StatusRow tone="success" label="答案已提交" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} />
-        ) : (
-          <StatusRow tone="danger" label="已取消" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} />
-        )}
-      </div>
-    );
-  }
 
   // Editor write tools (write_segment, delete_segment, insert_widget, reply_to_comment)
   // are always-confirm tools; render the specialized approval UI directly.
@@ -323,15 +189,6 @@ export function ToolMessagePart({ part, threadId, isLast, isLoading, isManualToo
           </div>
         ) : null}
 
-        {shouldShowApprovalUI && confirmationStatus === 'idle' ? (
-          <div style={{ display: 'flex', gap: '0.75rem', padding: '0 0.9rem 0.9rem' }}>
-            <button type="button" onClick={() => void handleApprove()} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', border: 'none', borderRadius: '999px', padding: '0.8rem 1rem', background: 'var(--color-action-link)', color: 'var(--color-text-on-action)', fontWeight: 600, cursor: 'pointer' }}><IconCheck style={{ width: '1rem', height: '1rem' }} />Approve</button>
-            <button type="button" onClick={() => void handleReject()} style={{ flex: 1, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', borderRadius: '999px', padding: '0.8rem 1rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-secondary)', fontWeight: 600, cursor: 'pointer' }}><IconX style={{ width: '1rem', height: '1rem' }} />Cancel</button>
-          </div>
-        ) : null}
-        {shouldShowApprovalUI && confirmationStatus === 'confirming' ? <StatusRow tone="warning" label="Processing…" /> : null}
-        {shouldShowApprovalUI && confirmationStatus === 'confirmed' ? <StatusRow tone="success" label="Confirmed" icon={<IconCheck style={{ width: '1rem', height: '1rem' }} />} /> : null}
-        {shouldShowApprovalUI && confirmationStatus === 'rejected' ? <StatusRow tone="danger" label="Cancelled" icon={<IconX style={{ width: '1rem', height: '1rem' }} />} /> : null}
         {isExecuting ? <StatusRow tone="warning" label="Executing…" /> : null}
       </div>
     </div>
