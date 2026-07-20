@@ -6,6 +6,13 @@
 // [Sync] 2026-06-23: proxy local auth/OAuth API routes to the FastAPI auth
 //                    center during Vite dev while preserving the SPA Device
 //                    Flow verification route.
+// [Sync] 2026-07-20: upgrade to Vite 8 (rolldown/Rust bundler) so production
+//                    builds fit 1G Docker build hosts — measured ~605MB peak RSS
+//                    with a 512MB heap vs ~1.25GB RSS / 1024MB heap minimum on
+//                    Vite 7+Rollup; disable gzip size reporting and sourcemaps,
+//                    and split heavy static vendor chunks (react/tiptap/markdown/
+//                    ai-sdk) while keeping mermaid and its d3/dagre/katex graph
+//                    out of static chunks so MermaidBlock stays lazily loaded.
 import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
 
@@ -59,6 +66,46 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react(), seoHtmlReplacementPlugin(publicSiteUrl)],
     base: BASE_PATH,
+    build: {
+      // Low-memory profile: the builder stage runs on hosts with ~1G RAM.
+      // Skip gzip-size reporting and sourcemaps to cut the output-phase peak.
+      sourcemap: false,
+      reportCompressedSize: false,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return
+            // mermaid is dynamically imported by MermaidBlock; never hoist it
+            // (or anything only reachable through it) into a static chunk.
+            if (id.includes('/mermaid/') || id.includes('/@mermaid-js/')) return
+            if (id.includes('/d3-') || id.includes('/dagre') || id.includes('/katex')) return
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')
+              || id.includes('/react-i18next/') || id.includes('/i18next/')) {
+              return 'vendor-react'
+            }
+            if (id.includes('/@tiptap/') || id.includes('/prosemirror-')) {
+              return 'vendor-editor'
+            }
+            if (id.includes('/react-markdown/') || id.includes('/remark-') || id.includes('/rehype-')
+              || id.includes('/micromark') || id.includes('/mdast-') || id.includes('/hast-')
+              || id.includes('/highlight.js') || id.includes('/lowlight') || id.includes('/unist-')
+              || id.includes('/unified/') || id.includes('/vfile') || id.includes('/decode-named')
+              || id.includes('/devlop') || id.includes('/estree-') || id.includes('/comma-separated')
+              || id.includes('/property-information') || id.includes('/space-separated')
+              || id.includes('/html-url-attributes') || id.includes('/trim-lines')
+              || id.includes('/markdown-table') || id.includes('/ccount') || id.includes('/zwitch')
+              || id.includes('/bail') || id.includes('/trough') || id.includes('/extend')
+              || id.includes('/is-plain-obj') || id.includes('/longest-streak')
+              || id.includes('/stringify-entities') || id.includes('/character-entities')) {
+              return 'vendor-markdown'
+            }
+            if (id.includes('/@ai-sdk/') || id.includes('/ai/') || id.includes('/zod/')) {
+              return 'vendor-ai'
+            }
+          },
+        },
+      },
+    },
     server: {
       proxy: {
         '/api': {

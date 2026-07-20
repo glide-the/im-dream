@@ -13,10 +13,14 @@
 #                    leaves no headroom on a 1G-RAM host: pair this with
 #                    `deploy/remote-ssh/setup-swap.sh` (wired into `deploy.sh deploy`)
 #                    so the build survives instead of being OOM-killed.
+# [Sync] 2026-07-20: Vite 8 (rolldown/Rust bundler) cuts the build's peak RSS
+#                    from ~1.25GB to ~605MB, so the default builder heap drops
+#                    from 1024MB to 512MB and the build finishes comfortably on
+#                    a 1G-RAM host without swap thrashing.
 
 ARG NPM_REGISTRY=https://registry.npmmirror.com
 ARG VITE_PUBLIC_SITE_URL=http://localhost/
-ARG NODE_BUILD_MAX_OLD_SPACE_MB=1024
+ARG NODE_BUILD_MAX_OLD_SPACE_MB=512
 
 # ── Stage 1: build ──────────────────────────────────────────────────────────
 FROM node:22-alpine AS builder
