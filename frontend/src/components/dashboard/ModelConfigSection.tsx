@@ -20,13 +20,20 @@
 //                    sanitized allowed domains and mode survive refresh.
 // [Sync] 2026-06-25: hide the HTTP method placeholder in open network mode
 //                    while keeping the high-risk internet access warning.
+// [Sync] 2026-07-23: theme control now reads/writes the unified theme store
+//                    (utils/theme) instead of its own 'dashboard-theme' key and
+//                    private data-theme effect, fixing the two-click toggle and
+//                    stale navbar icon caused by the two competing theme systems.
+//                    Backend config.theme is applied only when explicitly set,
+//                    so opening Settings no longer stomps a local toggle.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
+import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
 
-export type ThemeMode = 'light' | 'system' | 'dark';
+export type { ThemeMode };
 export type SandboxNetworkMode = 'disabled' | 'allowlist' | 'open';
 
 interface EnvVar {
@@ -69,18 +76,6 @@ const SANDBOX_NETWORK_ACCESS_OPTIONS: {
 ];
 
 const DEFAULT_SYSTEM_PROMPT = 'You are a concise and practical AI assistant for note-taking and writing.';
-const THEME_STORAGE_KEY = 'dashboard-theme';
-
-function resolveTheme(mode: ThemeMode, prefersDark: boolean): 'light' | 'dark' {
-  if (mode === 'system') {
-    return prefersDark ? 'dark' : 'light';
-  }
-  return mode;
-}
-
-function isThemeMode(value: string | null): value is ThemeMode {
-  return value === 'light' || value === 'dark' || value === 'system';
-}
 
 function isSandboxNetworkMode(value: unknown): value is SandboxNetworkMode {
   return value === 'disabled' || value === 'allowlist' || value === 'open';
@@ -127,11 +122,7 @@ function hasSystemConfigFields(config: SystemConfigData): boolean {
 }
 
 export default function ModelConfigSection() {
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    if (typeof window === 'undefined') return 'system';
-    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-    return isThemeMode(savedTheme) ? savedTheme : 'system';
-  });
+  const [theme, setTheme] = useState<ThemeMode>(() => getThemeMode());
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [workspaceMode, setWorkspaceMode] = useState(true);
   const [sandboxNetworkMode, setSandboxNetworkMode] = useState<SandboxNetworkMode>('allowlist');
@@ -160,7 +151,11 @@ export default function ModelConfigSection() {
         const payload = (await response.json()) as SystemConfigResponse;
         const config = readSystemConfigResponse(payload);
         if (!active) return;
-        setTheme(config.theme ?? 'system');
+        // Apply the backend theme only when it is explicitly configured, so a
+        // local toggle made via the navbar is not stomped by opening Settings.
+        if (config.theme === 'light' || config.theme === 'dark' || config.theme === 'system') {
+          setThemeMode(config.theme);
+        }
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
         setSandboxNetworkMode(isSandboxNetworkMode(config.sandbox_network_mode) ? config.sandbox_network_mode : 'allowlist');
@@ -182,26 +177,12 @@ export default function ModelConfigSection() {
     return () => { active = false; };
   }, []);
 
+  // Keep the segmented control in sync with the unified theme store; applying
+  // data-theme / colorScheme and following the system preference is handled
+  // centrally by utils/theme.
   useEffect(() => {
-    const root = document.documentElement;
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const applyTheme = () => {
-      const resolvedTheme = resolveTheme(theme, media.matches);
-      root.dataset.themeMode = theme;
-      root.dataset.theme = resolvedTheme;
-      root.style.colorScheme = resolvedTheme;
-    };
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-    applyTheme();
-    if (theme !== 'system') return undefined;
-    const handleChange = () => applyTheme();
-    if (typeof media.addEventListener === 'function') {
-      media.addEventListener('change', handleChange);
-      return () => media.removeEventListener('change', handleChange);
-    }
-    media.addListener(handleChange);
-    return () => media.removeListener(handleChange);
-  }, [theme]);
+    return onThemeChange((_resolved, mode) => setTheme(mode));
+  }, []);
 
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>): Promise<SystemConfigData | null> => {
     setSaving(true);
@@ -224,7 +205,7 @@ export default function ModelConfigSection() {
   }, []);
 
   const handleThemeChange = useCallback((mode: ThemeMode) => {
-    setTheme(mode);
+    setThemeMode(mode);
     void updateConfig({ theme: mode });
   }, [updateConfig]);
 

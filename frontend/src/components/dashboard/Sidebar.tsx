@@ -4,13 +4,17 @@
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config requests.
 // [Sync] 2026-06-22: emit same-tab Workspace Mode changes when the legacy
 //                    sidebar toggles system_config.workspace_enabled.
+// [Sync] 2026-07-23: theme control now reads/writes the unified theme store
+//                    (utils/theme) instead of its own 'dashboard-theme' key and
+//                    private data-theme effect, matching ModelConfigSection.
 import { useCallback, useEffect, useState } from 'react';
 import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
 import { emitWorkspaceModeChanged } from '../../lib/system-config-events';
+import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
 
-export type ThemeMode = 'light' | 'system' | 'dark';
+export type { ThemeMode };
 
 interface SystemConfigData {
   provider?: string;
@@ -33,25 +37,9 @@ const MODEL_OPTIONS = [
 ] as const;
 
 const DEFAULT_SYSTEM_PROMPT = 'You are a concise and practical AI sales assistant.';
-const THEME_STORAGE_KEY = 'dashboard-theme';
-
-function resolveTheme(mode: ThemeMode, prefersDark: boolean): 'light' | 'dark' {
-  if (mode === 'system') {
-    return prefersDark ? 'dark' : 'light';
-  }
-  return mode;
-}
-
-function isThemeMode(value: string | null): value is ThemeMode {
-  return value === 'light' || value === 'dark' || value === 'system';
-}
 
 export default function Sidebar({ open, desktopCollapsed = false, onClose }: { open: boolean; desktopCollapsed?: boolean; onClose: () => void }) {
-  const [theme, setTheme] = useState<ThemeMode>(() => {
-    if (typeof window === 'undefined') return 'system';
-    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
-    return isThemeMode(savedTheme) ? savedTheme : 'system';
-  });
+  const [theme, setTheme] = useState<ThemeMode>(() => getThemeMode());
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [workspaceMode, setWorkspaceMode] = useState(true);
   const [selectedModel, setSelectedModel] = useState('auto');
@@ -74,7 +62,11 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
         if (!active) {
           return;
         }
-        setTheme(config.theme ?? 'system');
+        // Apply the backend theme only when explicitly configured; otherwise
+        // keep the local preference from the unified theme store.
+        if (config.theme === 'light' || config.theme === 'dark' || config.theme === 'system') {
+          setThemeMode(config.theme);
+        }
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
         const match = MODEL_OPTIONS.find((option) => option.model === config.model);
@@ -93,28 +85,12 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
     };
   }, []);
 
+  // Keep the segmented control in sync with the unified theme store; applying
+  // data-theme / colorScheme and following the system preference is handled
+  // centrally by utils/theme.
   useEffect(() => {
-    const root = document.documentElement;
-    const media = window.matchMedia('(prefers-color-scheme: dark)');
-    const applyTheme = () => {
-      const resolvedTheme = resolveTheme(theme, media.matches);
-      root.dataset.themeMode = theme;
-      root.dataset.theme = resolvedTheme;
-      root.style.colorScheme = resolvedTheme;
-    };
-    localStorage.setItem(THEME_STORAGE_KEY, theme);
-    applyTheme();
-    if (theme !== 'system') {
-      return undefined;
-    }
-    const handleChange = () => applyTheme();
-    if (typeof media.addEventListener === 'function') {
-      media.addEventListener('change', handleChange);
-      return () => media.removeEventListener('change', handleChange);
-    }
-    media.addListener(handleChange);
-    return () => media.removeListener(handleChange);
-  }, [theme]);
+    return onThemeChange((_resolved, mode) => setTheme(mode));
+  }, []);
 
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>) => {
     setSaving(true);
@@ -133,7 +109,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
   }, []);
 
   const handleThemeChange = useCallback((mode: ThemeMode) => {
-    setTheme(mode);
+    setThemeMode(mode);
     void updateConfig({ theme: mode });
   }, [updateConfig]);
 
