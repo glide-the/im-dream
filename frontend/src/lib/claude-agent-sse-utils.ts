@@ -7,6 +7,9 @@
  * [Sync]   2026-06-12: emit AI SDK 6 dynamic-tool and reasoning parts during reconnect replay.
  * [Sync]   2026-06-13: replay tool-input-start/delta as input-streaming parts for
  *                      Write terminal previews until final input arrives.
+ * [Sync]   2026-07-23: SandboxPermissionRequest — replayed tool-approval-request
+ *                      frames also forward confirmationKind / networkRequest into
+ *                      toolMetadata (claude-agent-sandbox-network-permission-tool.md §5).
  */
 
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -170,7 +173,18 @@ export function applyBackendEventToMessages(
         state: 'input-available',
         input: event.input ?? {},
         ...(event.type === 'tool-approval-request'
-          ? { toolMetadata: { approvalRequested: true } }
+          ? {
+              toolMetadata: {
+                approvalRequested: true,
+                // SandboxPermissionRequest pass-through (see claude-agent-transport.ts).
+                ...(typeof event.confirmationKind === 'string' && event.confirmationKind
+                  ? { confirmationKind: event.confirmationKind }
+                  : {}),
+                ...(event.networkRequest && typeof event.networkRequest === 'object'
+                  ? { networkRequest: event.networkRequest }
+                  : {}),
+              } as DynamicToolUIPart['toolMetadata'],
+            }
           : {}),
       };
       if (existing >= 0) {

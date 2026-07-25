@@ -107,6 +107,13 @@
 #                    on_tasks_changed (v2) to the same frame; add
 #                    build_thread_todos_payload() REST helper backed by
 #                    get_tasks_dir()/read_task_items() with memory fallback.
+# [Sync] 2026-07-23: SandboxPermissionRequest — pass system_config
+#                    sandbox_network_allowed_domains into AgentRunOptions and
+#                    transparently forward confirmationKind/networkRequest from
+#                    the runner confirmation payload onto the SSE
+#                    tool-approval-request frame so the frontend can render the
+#                    network-variant confirmation card
+#                    (claude-agent-sandbox-network-permission-tool.md §5/§6).
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -1077,6 +1084,7 @@ class ClaudeAgentService:
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             im_full_access_enabled=im_full_access_enabled,
             sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
+            sandbox_network_allowed_domains=sandbox_network_allowed_domains,
             system_prompt=state.system_prompt,
             mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,
@@ -1621,7 +1629,16 @@ class ClaudeAgentService:
                 turn_ctx.collected_parts.append(evt)
 
             # Step 2: emit tool-approval-request (lifecycle frame — not collected).
-            await queue.put(_sse("tool-approval-request", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
+            # SandboxPermissionRequest frames carry the sandbox_network
+            # discriminator + networkRequest metadata so the frontend renders
+            # the network-variant confirmation card; generic confirmations omit
+            # both keys (backward compatible).
+            approval_event: dict[str, Any] = {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
+            if payload.get("confirmationKind"):
+                approval_event["confirmationKind"] = payload["confirmationKind"]
+            if isinstance(payload.get("networkRequest"), dict):
+                approval_event["networkRequest"] = payload["networkRequest"]
+            await queue.put(_sse("tool-approval-request", approval_event))
 
             # Step 3 & 4: block until user responds.
             try:

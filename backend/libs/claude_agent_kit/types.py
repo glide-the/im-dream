@@ -18,6 +18,10 @@
 #                    TaskCreate/TaskUpdate PostToolUse with the full TodoItem
 #                    list re-read from the thread workspace tasks dir
 #                    (claude-todo §5.3).
+# [Sync] 2026-07-23: add sandbox_network_allowed_domains to AgentRunOptions —
+#                    Settings allowlist consumed by the PreToolUse
+#                    SandboxPermissionRequest step (claude-agent-sandbox-network-
+#                    permission-tool.md §6).
 
 """Type definitions for ClaudeAgentKit.
 
@@ -29,7 +33,7 @@ Python translation of the TypeScript interfaces from:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator, Awaitable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional, Union
 
@@ -179,6 +183,18 @@ class AgentRunOptions:
     # Settings-controlled sandbox network mode. ``disabled`` is enforced by
     # runner PreToolUse hooks before full-access or low-sensitivity allows.
     sandbox_network_mode: Literal["disabled", "allowlist", "open"] = "allowlist"
+    # Settings-controlled sandbox network allowlist (system_config
+    # ``sandbox_network_allowed_domains``).  Used by the runner PreToolUse
+    # SandboxPermissionRequest step: in ``allowlist`` mode a WebFetch/WebSearch
+    # request whose host matches one of these domain patterns receives an
+    # explicit allow (low-sensitivity subclass ``sandbox_network_allowed``);
+    # unmatched hosts and every network-class Bash command fall through to the
+    # frontend confirmation side-channel.  Domain matching mirrors
+    # sandbox-runtime: exact case-insensitive match; ``*.example.com`` matches
+    # strict subdomains only (not the bare domain, not IP literals); a bare
+    # ``*`` is invalid and never matches.  Ignored in ``disabled``/``open``
+    # modes.
+    sandbox_network_allowed_domains: Optional[Sequence[str]] = None
     # System prompt override.
     system_prompt: Optional[str] = None
     # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.

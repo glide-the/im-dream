@@ -190,3 +190,93 @@ settings.json  sandbox.network.allowedDomains: ["*"]
 - 拦截弹窗"放行并记住"后，同域名后续请求无需再次询问，且规则可在 settings.local.json 中查验；
 - Docker 缺依赖启动时，用户能在首屏看到明确的 fail-open 警告而非仅被动提示；
 - 所有诊断信息可通过 `file:line` 级来源（schema 错误信息、代理 403 头）回溯。
+
+---
+
+## 5. 网络 Hook 现状分析（源码实证）
+
+> 调研问题：Claude Code 源码中是否存在网络 Hook，能在请求初次发生时提示用户如何配置 `allowedDomains` / `deniedDomains`？
+>
+> **结论：Hook 存在且链路完整，但弹窗只做"放行/拒绝"决策，全程不向用户提及 `sandbox.network.allowedDomains` / `deniedDomains` 配置项。**
+
+### 5.1 Hook 三层触发链路
+
+**第 1 层：运行时钩子（sandbox-runtime 侧）**
+
+`filterNetworkRequest`（`sandbox-manager.ts:154-176`）：域名不命中 allow/deny 清单时，调用宿主注入的 `sandboxAskCallback({host, port})` —— 这就是"请求初次发生时"的拦截点。无回调或设置了 `strictAllowlist` 时直接 fail-closed 拒绝。
+
+**第 2 层：REPL 回调（Claude Code 侧）**
+
+`REPL.tsx:2216` 的 `sandboxAskCallback` 按运行模式分三条分支：
+
+| 分支 | 行为 |
+|---|---|
+| 普通交互 | 请求入队 `sandboxPermissionRequestQueue`，弹出本地对话框 |
+| Swarm worker | 通过 mailbox 转发给 leader 审批（`sendSandboxPermissionRequestViaMailbox`） |
+| Bridge 模式（远程控制 / claude.ai） | 作为 `can_use_tool` 控制请求转发给远端用户；响应会一次性解决同 host 的所有挂起请求 |
+
+Headless / SDK 模式对应 `cli/structuredIO.ts:731-753` 的 `createSandboxAskCallback`（出错时 fail-closed 返回 false）。
+
+**第 3 层：弹窗组件**
+
+`REPL.tsx:4609` 渲染 `SandboxPermissionRequest`（`components/permissions/SandboxPermissionRequest.tsx:154`），标题 **"Network request outside of sandbox"**，实际 UI 内容：
+
+```
+Network request outside of sandbox
+
+Host: raw.githubusercontent.com
+
+Do you want to allow this connection?
+  ❯ Yes
+    Yes, and don't ask again for raw.githubusercontent.com
+    No, and tell Claude what to do differently (esc)
+```
+
+**组件源码（15-162 行）中没有任何文案提到 `allowedDomains`、`deniedDomains` 或 settings.json** —— 没有任何配置引导。
+
+### 5.2 持久化路径：写的是 permissions，不是 allowedDomains
+
+选 "Yes, and don't ask again" 后的处理（`REPL.tsx:4620-4639`）：
+
+```ts
+rules: [{ toolName: WEB_FETCH_TOOL_NAME, ruleContent: `domain:${approvedHost}` }],
+behavior: allow ? 'allow' : 'deny',
+destination: 'localSettings'   // → .claude/settings.local.json
+```
+
+写入的是 `permissions.allow: ["WebFetch(domain:raw.githubusercontent.com)"]`，随后 `SandboxManager.refreshConfig()` 热生效。它能生效是因为 `convertToSandboxRuntimeConfig`（`sandbox-adapter.ts:201-209`）会把 `WebFetch(domain:X)` 规则**合并进** `allowedDomains` —— 殊途同归，但用户从 UI 上永远感知不到 `sandbox.network.allowedDomains` 的存在。
+
+### 5.3 现状的三个缺口
+
+| # | 缺口 | 证据 |
+|---|---|---|
+| 1 | **弹窗缺配置引导**：用户不知道存在 `sandbox.network.allowedDomains` 这个批量管理入口 | `SandboxPermissionRequest.tsx` 全文无配置相关文案 |
+| 2 | **deny 不可持久化**：弹窗 "No" 只拒绝本次，没有 "No, and always deny" 选项；运行时机制完全支持（`deniedDomains` 优先检查），只是 UI 未暴露 | `SandboxPermissionRequest.tsx:68-106` 选项数组中 persist 仅绑定在 "Yes" 分支 |
+| 3 | **双轨写入易困惑**：交互放行写 permissions，手工配置写 sandbox.network，两处来源只能靠读 `sandbox-adapter.ts` 合并逻辑才能理解 | `sandbox-adapter.ts:198-209` |
+
+> 已存在的企业管控分支：`shouldAllowManagedSandboxDomainsOnly()`（组件 61 行）开启时隐藏 "don't ask again"，managed 策略下不落地本地规则 —— 后续交互改造必须保留该分支。
+
+### 5.4 对 §4 交互方案的修订
+
+基于以上实证，修订 §4.2"触发点 A"的弹窗设计：
+
+```
+[拦截提示卡] "Network request outside of sandbox"
+  Host: raw.githubusercontent.com
+  Do you want to allow this connection?
+
+  ❯ Yes
+    Yes, and don't ask again for raw.githubusercontent.com
+    No, and always deny this host                    ← 新增：deny 持久化
+    No, and tell Claude what to do differently (esc)
+
+  ─────────────────────────────────────────────
+  💡 已写入 permissions 规则；批量管理域名请使用
+     sandbox.network.allowedDomains，详见 /sandbox   ← 新增：配置引导（dim 文案）
+```
+
+对应验收标准补充（并入 §4.5）：
+
+- 弹窗 deny 持久化选项选中后，规则写入 `permissions.deny: ["WebFetch(domain:host)"]`，同域名后续请求直接拦截不再询问；
+- 弹窗底部配置引导文案在 managed 模式（`shouldAllowManagedSandboxDomainsOnly()` 为 true）下自动隐藏；
+- `/sandbox` 面板能同时展示两类来源（`sandbox.network.allowedDomains` 与 permissions `WebFetch(domain:)` 规则）的合并视图，消除双轨困惑。

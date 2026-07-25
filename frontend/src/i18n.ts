@@ -286,7 +286,13 @@ const resources = {
           answerSubmitted: 'Answer submitted',
           approved: 'Approved',
           cancelled: 'Cancelled',
-          rejected: 'Rejected'
+          rejected: 'Rejected',
+          networkConfirmTitle: 'Allow I&M to make a network request via {{tool}}',
+          networkHostLabel: 'Host: ',
+          networkHostUnknown: 'unknown (network shell command)',
+          networkPolicyLabel: 'Network policy: ',
+          networkPolicyAllowlist: 'Allowlist (domain not matched)',
+          networkPolicyOpen: 'Open network (ask every time)'
         },
         askUser: {
           header: 'Your input is needed',
@@ -743,7 +749,13 @@ const resources = {
           answerSubmitted: '答案已提交',
           approved: '已同意',
           cancelled: '已取消',
-          rejected: '已拒绝'
+          rejected: '已拒绝',
+          networkConfirmTitle: '是否允许 I&M 通过 {{tool}} 发起网络请求',
+          networkHostLabel: '目标主机：',
+          networkHostUnknown: '未知（网络类命令）',
+          networkPolicyLabel: '网络策略：',
+          networkPolicyAllowlist: '白名单（域名未命中）',
+          networkPolicyOpen: '开放网络（每次询问）'
         },
         askUser: {
           header: '需要你的输入',

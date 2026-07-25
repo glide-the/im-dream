@@ -14,6 +14,12 @@
 > （`ToolConfirmationDock`）：待确认期间**隐藏输入栏，面板直接占据输入栏位置**
 > （in-flow 替换渲染）；消息列表中的待确认工具调用退化为带「待确认」标记的
 > 折叠行。详见 §8。
+> **[Sync] 2026-07-23**: SandboxPermissionRequest —— PreToolUse 决策链新增步骤
+> ②.5 `_apply_sandbox_network_permission`：allowlist 命中显式 allow；未命中 /
+> 网络类 Bash / open 模式网络请求进入确认侧路并携带
+> `confirmationKind="sandbox_network"` + `networkRequest`；确认面板渲染网络变体
+> 卡片（host + 策略模式 + 二元 拒绝/同意）。详见 §6.1 / §6.2 / §8.3 与
+> `claude-agent-sandbox-network-permission-tool.md`。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -408,10 +414,25 @@ return HookJSONOutput(
 
 ```python
 # _pre_tool_use_hook 内
+# ②.5 SandboxPermissionRequest（2026-07-23，disabled 硬拒之后、full-access 之前）
+sandbox_network_confirmation = None
+if sandbox_network_mode in ("allowlist", "open") and is_network_request:
+    allow = _apply_sandbox_network_permission(
+        sandbox_network_mode, sandbox_network_allowed_domains, tool_name, tool_input
+    )
+    if allow is not None:
+        return allow  # allowlist 命中（WebFetch/WebSearch host 精确/严格子域匹配）→ 显式 allow
+    sandbox_network_confirmation = {
+        "host": host,                    # Bash 网络命令不解析 host → None
+        "policyMode": sandbox_network_mode,
+        "matchedAllowedDomain": None,    # 本期恒为 null（命中即 allow，不弹窗）
+    }
+
 if (
     opts.im_full_access_enabled
     and tool_choice != "none"
     and tool_name not in {"AskUserQuestion", "mcp__user__ask_user"}
+    and sandbox_network_confirmation is None   # 待沙箱网络审批的请求不被完全访问吞掉
 ):
     return HookJSONOutput(
         hookSpecificOutput={
@@ -425,11 +446,15 @@ if tool_choice == "auto":
     if workspace_files_permission is not None:
         return workspace_files_permission  # files/ 内置文件工具显式 allow
 
-    low_sensitivity_permission = _apply_low_sensitivity_query_permission(tool_name, tool_input)
-    if low_sensitivity_permission is not None:
-        return low_sensitivity_permission  # 查询类工具 / Bash 只读子集 / switch_editor / Skill 显式 allow
+    # 待沙箱网络审批的请求必须跳过低敏放行（WebFetch/WebSearch 在低敏白名单内）：
+    # open 模式每次询问、allowlist 未命中也要询问。
+    if sandbox_network_confirmation is None:
+        low_sensitivity_permission = _apply_low_sensitivity_query_permission(tool_name, tool_input)
+        if low_sensitivity_permission is not None:
+            return low_sensitivity_permission  # 查询类工具 / Bash 只读子集 / switch_editor / Skill 显式 allow
 
-# 执行/写入/交互工具 → 进入 on_tool_confirmation_request 确认侧路
+# 执行/写入/交互工具 + 待沙箱网络审批的网络请求 → 进入 on_tool_confirmation_request 确认侧路
+# （后者 payload 额外携带 confirmationKind="sandbox_network" + networkRequest）
 ```
 
 ### 6.2 工具决策矩阵
@@ -444,8 +469,10 @@ if tool_choice == "auto":
 | `mcp__editor__switch_editor` | 显式 allow → 自动执行（MCP handler 无副作用，状态切换在 PostToolUse hook 完成）| 走确认流 → 显示 Approve/Cancel |
 | `Skill` | 显式 allow → 自动执行（展开/执行已发现 Skill prompt）| 走确认流 → 显示 Approve/Cancel |
 | `Bash`（含管道 / 重定向 / 写入命令等）/ `Write` outside `files/` / `Edit` outside `files/` / MCP 写入 / 其他非查询工具 | 走确认流 → 显示 Approve/Cancel | 走确认流 → 显示 Approve/Cancel |
+| `WebFetch` / `WebSearch` 且 `sandbox_network_mode="allowlist"` 且 host 命中 `sandbox_network_allowed_domains` **[2026-07-23]** | 显式 allow → 自动执行（低敏子类 `sandbox_network_allowed`） | 显式 allow → 自动执行 |
+| `WebFetch` / `WebSearch` 且 allowlist 未命中 / 网络类 Bash（allowlist）/ 任意网络请求（`open` 模式，每次询问）**[2026-07-23]** | 走确认流 → 网络变体确认卡（host + 策略模式 + Approve/Cancel） | 走确认流 → 网络变体确认卡 |
 
-若 `im_full_access_enabled=true`，上述矩阵在已暴露工具范围内整体变为显式 allow；`AskUserQuestion` / `mcp__user__ask_user` 仍显示 AskUserQuestion 表单并等待用户提交 answers；`tool_choice=none` 仍不暴露工具，因此不会进入该 hook 分支。
+若 `im_full_access_enabled=true`，上述矩阵在已暴露工具范围内整体变为显式 allow；`AskUserQuestion` / `mcp__user__ask_user` 仍显示 AskUserQuestion 表单并等待用户提交 answers；`tool_choice=none` 仍不暴露工具，因此不会进入该 hook 分支。**[2026-07-23]** 例外：待 SandboxPermissionRequest 审批的网络请求（allowlist 未命中 / `open` 模式每次询问）不被完全访问放行吞掉，仍进入确认侧路。
 
 ---
 
@@ -521,7 +548,9 @@ if (needsManualApproval) { /* isManualToolInvocation=true → Approve/Cancel */ 
 ChatPanel
   ├─ pendingConfirmation = useMemo(messages, effectiveToolChoice)
   │     └─ resolvePendingToolConfirmation(part, toolChoice)   // toolConfirmation.ts
-  │           ├─ 'askuser'  — AskUserQuestion / mcp__user__ask_user 且未完成且 input 已就绪
+  │           ├─ 'askuser'         — AskUserQuestion / mcp__user__ask_user 且未完成且 input 已就绪
+  │           ├─ 'sandbox-network' — toolMetadata.confirmationKind==='sandbox_network'
+  │           │                    （沙箱网络审批：allowlist 未命中 / open 模式）**[2026-07-23]**
   │           ├─ 'confirm'  — toolMetadata.approvalRequested===true 或 toolChoice==='manual'
   │           │             且未完成且 input 已就绪（editor write 工具除外）
   │           └─ null       — 已完成 / input 未就绪 / editor write 工具 / 无需确认
@@ -532,7 +561,9 @@ ChatPanel
         └─ pendingConfirmation
               ├─ 存在 → ToolConfirmationDock（替换输入栏，in-flow）
               │         ├─ kind='confirm' → 标题 + 命令/参数摘要 + 拒绝 / 同意
-              │         └─ kind='askuser' → AskUserQuestionUI（无框紧凑变体）+ 取消 / 提交
+              │         ├─ kind='askuser' → AskUserQuestionUI（无框紧凑变体）+ 取消 / 提交
+              │         └─ kind='sandbox-network' → 网络变体卡片（host + 策略模式
+              │                                    + 命令/参数摘要）+ 拒绝 / 同意 **[2026-07-23]**
               └─ 不存在 → AIInputDock (mode="full")
 ```
 
@@ -542,6 +573,7 @@ ChatPanel
 | --- | --- | --- | --- | --- |
 | 普通工具确认（`confirm`） | `是否允许 I&M 调用 {tool} 工具，{summary}` + 「待授权」徽章 | **拒绝** / **同意** | `Esc` 拒绝、`⌘/Ctrl+⏎` 同意 | `POST /api/claude-agent/tool-confirm` `{approved}` |
 | 用户提问（`askuser`） | `I&M 需要你的回答` + 「待回答」徽章 | **取消** / **提交**（选项表单内） | `Esc` 取消、`⌘/Ctrl+⏎` 提交 | 同上，`approved:true` + `answers` |
+| 沙箱网络请求（`sandbox-network`）**[2026-07-23]** | `是否允许 I&M 通过 {tool} 发起网络请求` + 「待授权」徽章；正文显示目标主机（Bash 网络命令为「未知（网络类命令）」）、网络策略（白名单未命中 / 开放网络每次询问）与命令/参数摘要 | **拒绝** / **同意** | `Esc` 拒绝、`⌘/Ctrl+⏎` 同意 | 同上，`{approved}`（本期二元决策，无「记住」） |
 | 编辑器写入工具 | —（不进入确认面板） | 沿用消息列表内 `EditorWriteApprovalUI` | — | 同上 |
 
 - 待确认期间 `AIInputDock` 整体隐藏，确认面板占据输入栏位置；用户做出决策后

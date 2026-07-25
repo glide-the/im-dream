@@ -19,6 +19,17 @@
 > [Sync] 2026-07-20: `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` /
 > `TaskGet` added to the low-sensitivity auto-allow class (claude-todo §5.7);
 > `TaskUpdate` non-read-only deviation recorded in §3.
+> [Sync] 2026-07-23: SandboxPermissionRequest — new decision-chain step ②.5
+> (`_apply_sandbox_network_permission`): allowlist hits on WebFetch/WebSearch
+> hosts get explicit allow (low-sensitivity subclass `sandbox_network_allowed`);
+> allowlist misses, all network-class Bash commands, and every `open`-mode
+> network request route to frontend confirmation with
+> `confirmationKind="sandbox_network"`, skipping the full-access and
+> low-sensitivity allows. `open` mode semantics change from "unrestricted
+> egress" to "ask every time" (intentional product change; see
+> `claude-agent-sandbox-network-permission-tool.md`). Decision order in §6
+> re-aligned with code order (disabled-network check runs before the
+> workspace-boundary check).
 
 # Claude-Agent Permission Policy
 
@@ -40,7 +51,7 @@ It describes the product policy, not Claude Code's internal classifier.
 | `manual` | All non-special tools go through frontend confirmation. `.editor/` virtual-index `Read` redirects still run because they only replace placeholder reads with a safe tempfile snapshot. |
 | `none` | No tools are exposed; auto allow rules do not apply. |
 
-When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`), built-in file/search tools whose resolved path is outside the current thread workspace, and network tools when `sandbox_network_mode="disabled"`. Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; out-of-workspace file/search tools and disabled-network tools are hard-denied before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
+When `system_config.im_full_access_enabled=true`, exposed tools bypass the sensitivity matrix and receive explicit `permissionDecision:"allow"` in `PreToolUse`, except answer-form tools (`AskUserQuestion`, `mcp__user__ask_user`), built-in file/search tools whose resolved path is outside the current thread workspace, network tools when `sandbox_network_mode="disabled"`, and network requests pending SandboxPermissionRequest approval (`allowlist` miss or `open` mode — these still ask every time). Answer-form tools still go through frontend confirmation because the form is the only place where user answers are collected and merged into `updatedInput`; out-of-workspace file/search tools and disabled-network tools are hard-denied before full-access is considered. This setting is controlled from Settings → AI model configuration → 「应如何批准 IM」. `tool_choice="none"` still exposes no tools.
 
 Settings `system_config.workspace_enabled=true` additionally enables the
 per-thread Claude Code Bash sandbox described in
@@ -54,6 +65,22 @@ adds an execution-layer guard: `WebFetch`, `WebSearch`, and common Bash network
 commands (`curl`, `wget`, `git fetch`, `npm install`, `python -m pip install`,
 etc.) return explicit deny before full-access or low-sensitivity allow rules.
 
+When `system_config.sandbox_network_mode="allowlist"`, `_pre_tool_use_hook`
+runs the SandboxPermissionRequest step (`_apply_sandbox_network_permission`,
+claude-agent-sandbox-network-permission-tool.md): a `WebFetch`/`WebSearch`
+request whose URL host matches `sandbox_network_allowed_domains` receives an
+explicit allow (low-sensitivity subclass `sandbox_network_allowed`) without any
+dialog; unmatched hosts and every network-class Bash command (Bash targets are
+never parsed — conservative) fall through to the frontend confirmation
+side-channel carrying `confirmationKind="sandbox_network"`.
+
+When `system_config.sandbox_network_mode="open"`, **every** network request
+(`WebFetch`/`WebSearch`/network-class Bash) goes to the frontend confirmation
+dialog every time. This is an intentional 2026-07-23 semantic change: `open`
+previously meant "unrestricted egress"; the Ink & Memory confirmation layer
+now owns per-request approval when no sandbox network policy is configured
+(claude-agent-sandbox-network-permission-tool.md §1).
+
 ## 3. Low-Sensitivity Tools
 
 Low-sensitivity tools are query-like or context-selection operations with no direct content mutation.
@@ -62,6 +89,7 @@ Current auto-allow inventory:
 | Tool class | Tool names / rule |
 |---|---|
 | Built-in read/search | `Read`, `Glob`, `Grep`, `LS`, `NotebookRead` only when resolved inside the current thread workspace; `TodoRead`, `WebFetch`, `WebSearch`, `BashOutput` |
+| Allowlisted network requests **[2026-07-23]** | `WebFetch` / `WebSearch` only when `sandbox_network_mode="allowlist"` and the URL host matches `sandbox_network_allowed_domains` (exact, case-insensitive; `*.suffix` matches strict subdomains only and never IP literals; bare `*` invalid → warning + never matches). Classification name: `sandbox_network_allowed` via `_apply_sandbox_network_permission`. Note: the generic `WebFetch`/`WebSearch` low-sensitivity entry above only applies when network policy is not `allowlist`/`open` — under those modes network tools leave the generic class and follow the SandboxPermissionRequest step |
 | MCP resource query | `ListMcpResources`, `ReadMcpResource` |
 | Workspace files area | `Read` / `Write` / `Edit` / `MultiEdit` only when the resolved target is inside `{cwd}/files/**` |
 | Session query | `mcp__user__get_sessions_range` |
@@ -131,13 +159,14 @@ HookJSONOutput(
 `agent_runner.py::_pre_tool_use_hook` applies decisions in this order:
 
 1. `.editor/` virtual-index `Read` redirect, all modes.
-2. Built-in file/search workspace-boundary check, all modes; outside current thread workspace is a hard deny.
-3. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network commands are hard-denied when `sandbox_network_mode="disabled"`.
-4. If `im_full_access_enabled` is true, tools are exposed, and the tool is not an answer-form tool: explicit allow.
-5. In `auto` only: workspace `files/` built-in file permission.
-6. In `auto` only: explicit low-sensitivity tool allow.
-7. Frontend confirmation callback.
-8. Deny by default when confirmation is required but unavailable.
+2. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network commands are hard-denied when `sandbox_network_mode="disabled"`.
+3. SandboxPermissionRequest (`_apply_sandbox_network_permission`, all modes when network policy is `allowlist`/`open`): allowlist host match on `WebFetch`/`WebSearch` → explicit allow (`sandbox_network_allowed`); allowlist miss, network-class Bash, or `open`-mode network request → mark the call as pending sandbox network approval and skip steps 5 and 7 so it cannot be swallowed by full-access or low-sensitivity allows. **[2026-07-23]**
+4. Built-in file/search workspace-boundary check, all modes; outside current thread workspace is a hard deny.
+5. If `im_full_access_enabled` is true, tools are exposed, the tool is not an answer-form tool, and no sandbox network approval is pending: explicit allow.
+6. In `auto` only: workspace `files/` built-in file permission.
+7. In `auto` only: explicit low-sensitivity tool allow (skipped while a sandbox network approval is pending).
+8. Frontend confirmation callback; sandbox-network confirmations carry `confirmationKind="sandbox_network"` + `networkRequest{host, policyMode, matchedAllowedDomain}`.
+9. Deny by default when confirmation is required but unavailable.
 
 Bash sandboxing is not a step in this order. Claude Code loads the sandbox
 settings from the current thread workspace and enforces them when a Bash command
@@ -147,6 +176,7 @@ actually runs.
 
 When a high-sensitivity tool reaches the confirmation branch, the backend emits `tool-approval-request`.
 The frontend maps that event to the existing tool part with `toolMetadata.approvalRequested=true` and renders Approve/Cancel UI.
+Sandbox network confirmations additionally carry `confirmationKind="sandbox_network"` and `networkRequest{host, policyMode, matchedAllowedDomain}`; the frontend renders a network-variant confirmation card (host + policy mode + binary Approve/Reject) when present and falls back to the generic card when absent (backward compatible). **[2026-07-23]**
 
 Approval returns explicit `permissionDecision:"allow"`.
 Rejection returns explicit `permissionDecision:"deny"` with the user-visible reason.
@@ -172,4 +202,8 @@ This remains true in full-access mode.
 | `AskUserQuestion` / `mcp__user__ask_user` with full access | Confirm with form | Confirm with form | Not exposed |
 | Read-only Bash subset | Allow | Confirm | Not exposed |
 | Complex or mutating Bash | Confirm | Confirm | Not exposed |
+| `WebFetch` / `WebSearch`, host matches `sandbox_network_allowed_domains` (`allowlist` mode) **[2026-07-23]** | Allow | Allow | Not exposed |
+| `WebFetch` / `WebSearch`, host not matched (`allowlist` mode) **[2026-07-23]** | Confirm (network card) | Confirm (network card) | Not exposed |
+| Any network request (`WebFetch` / `WebSearch` / network Bash) in `open` mode — asks every time **[2026-07-23]** | Confirm (network card) | Confirm (network card) | Not exposed |
+| Network-class Bash in `allowlist` mode (host never parsed) **[2026-07-23]** | Confirm (network card) | Confirm (network card) | Not exposed |
 | Unknown tool | Confirm | Confirm | Not exposed |

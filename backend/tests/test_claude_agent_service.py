@@ -137,6 +137,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(execution.run_options.im_full_access_enabled)
         self.assertEqual(execution.run_options.sandbox_network_mode, "allowlist")
         self.assertEqual(
+            list(execution.run_options.sandbox_network_allowed_domains or []),
+            ["raw.githubusercontent.com", "*.npmjs.org"],
+        )
+        self.assertEqual(
             execution.run_options.system_prompt,
             "system-prompt:7:Settings page prompt",
         )

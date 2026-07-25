@@ -34,6 +34,9 @@
 //                    hides until the user decides); inline approval/askuser UIs removed
 //                    from the message list (design: claude-agent-tool-confirmation-flow.md §8).
 // [Sync] 2026-07-20: i18n — scroll-to-bottom aria/title resolves through chat.panel.scrollToBottom.
+// [Sync] 2026-07-23: SandboxPermissionRequest — pendingConfirmation carries the backend
+//                    networkRequest metadata for kind==='sandbox-network' so ToolConfirmationDock
+//                    renders the network-variant card (claude-agent-sandbox-network-permission-tool.md §5).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -65,6 +68,7 @@ import ChatMessageList from './ChatMessageList';
 import ToolConfirmationDock from './ToolConfirmationDock';
 import {
   resolvePendingToolConfirmation,
+  resolveSandboxNetworkRequest,
   resolveToolName,
   type PendingToolConfirmation,
 } from './toolConfirmation';
@@ -464,6 +468,7 @@ export default function ChatPanel({
           toolName: resolveToolName(toolPart) || getToolName(toolPart),
           title: 'title' in toolPart ? (toolPart as { title?: string }).title : undefined,
           input: 'input' in toolPart ? toolPart.input : undefined,
+          networkRequest: kind === 'sandbox-network' ? resolveSandboxNetworkRequest(toolPart) : undefined,
         };
       }
     }

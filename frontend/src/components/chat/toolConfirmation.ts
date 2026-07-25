@@ -6,6 +6,9 @@
 // [Pos] tool-confirmation shared utility node in frontend/src/components/chat
 // [Sync] 2026-07-20: created for the floating ToolConfirmationDock — confirmation UI moved out of
 //        the message list into a dock floating above AIInputDock (design: claude-agent-tool-confirmation-flow.md §8).
+// [Sync] 2026-07-23: SandboxPermissionRequest — add the 'sandbox-network' PendingConfirmationKind
+//        driven by toolMetadata.confirmationKind==='sandbox_network' plus the
+//        resolveSandboxNetworkRequest() helper (design: claude-agent-sandbox-network-permission-tool.md §5).
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
@@ -63,7 +66,37 @@ export function isApprovalRequestedPart(part: AnyToolUIPart): boolean {
   return raw.toolMetadata?.approvalRequested === true;
 }
 
-export type PendingConfirmationKind = 'confirm' | 'askuser';
+/**
+ * SandboxPermissionRequest metadata attached by the backend when a network
+ * request (WebFetch / WebSearch / network-class Bash) needs per-request
+ * approval under sandbox_network_mode allowlist (miss) or open (every time).
+ * Mirrors the runner's confirmation payload `networkRequest` block.
+ */
+export interface SandboxNetworkRequestInfo {
+  host: string | null;
+  policyMode: string;
+  matchedAllowedDomain: string | null;
+}
+
+export const SANDBOX_NETWORK_CONFIRMATION_KIND = 'sandbox_network';
+
+/** Return the sandbox network request metadata when the backend marked this
+ * part as a SandboxPermissionRequest confirmation; null otherwise. */
+export function resolveSandboxNetworkRequest(part: AnyToolUIPart): SandboxNetworkRequestInfo | null {
+  const raw = part as unknown as { toolMetadata?: Record<string, unknown> };
+  const metadata = raw.toolMetadata;
+  if (metadata?.confirmationKind !== SANDBOX_NETWORK_CONFIRMATION_KIND) return null;
+  const networkRequest = metadata.networkRequest;
+  if (!networkRequest || typeof networkRequest !== 'object') return null;
+  const info = networkRequest as Record<string, unknown>;
+  return {
+    host: typeof info.host === 'string' ? info.host : null,
+    policyMode: typeof info.policyMode === 'string' ? info.policyMode : '',
+    matchedAllowedDomain: typeof info.matchedAllowedDomain === 'string' ? info.matchedAllowedDomain : null,
+  };
+}
+
+export type PendingConfirmationKind = 'confirm' | 'askuser' | 'sandbox-network';
 
 export interface PendingToolConfirmation {
   kind: PendingConfirmationKind;
@@ -72,6 +105,8 @@ export interface PendingToolConfirmation {
   toolName: string;
   title?: string;
   input: unknown;
+  /** Present only when kind === 'sandbox-network'. */
+  networkRequest?: SandboxNetworkRequestInfo | null;
 }
 
 /**
@@ -84,6 +119,8 @@ export interface PendingToolConfirmation {
  *   excluded from the floating dock;
  * - AskUserQuestion tools always pend as 'askuser' (answers must be collected even
  *   in auto / full-access modes);
+ * - network requests the backend flagged with confirmationKind 'sandbox_network'
+ *   pend as 'sandbox-network' (host/policy-mode network-variant card);
  * - everything else pends as 'confirm' when the backend explicitly requested
  *   approval (toolMetadata.approvalRequested) or the session runs in manual mode.
  */
@@ -97,6 +134,7 @@ export function resolvePendingToolConfirmation(
   const toolName = resolveToolName(part);
   if (toolName && isEditorWriteTool(toolName)) return null;
   if (isAskUserQuestionPart(part)) return 'askuser';
+  if (isApprovalRequestedPart(part) && resolveSandboxNetworkRequest(part)) return 'sandbox-network';
   if (isApprovalRequestedPart(part) || toolChoice === 'manual') return 'confirm';
   return null;
 }

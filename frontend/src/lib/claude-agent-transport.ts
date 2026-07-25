@@ -21,6 +21,11 @@
  * [Sync]   2026-07-20: forward todo-updated lifecycle frames to the useThreadTodos
  *                      store without mapping them to UIMessageChunks
  *                      (claude-todo.md §5.4: 不收集，不产生消息气泡).
+ * [Sync]   2026-07-23: SandboxPermissionRequest — pass confirmationKind /
+ *                      networkRequest from tool-approval-request through to
+ *                      toolMetadata so ToolConfirmationDock can render the
+ *                      network-variant confirmation card
+ *                      (claude-agent-sandbox-network-permission-tool.md §5).
  *
  * Custom ChatTransport for the /api/claude-agent SSE endpoint.
  *
@@ -131,6 +136,14 @@ interface BackendToolApprovalRequest {
   toolCallId: string;
   toolName: string;
   input?: unknown;
+  // SandboxPermissionRequest discriminator (claude-agent-sandbox-network-
+  // permission-tool.md §5). Absent for generic confirmations.
+  confirmationKind?: string;
+  networkRequest?: {
+    host: string | null;
+    policyMode: string;
+    matchedAllowedDomain: string | null;
+  };
 }
 
 interface BackendPlanModeChanged {
@@ -370,7 +383,14 @@ function convertEvent(
         toolName: event.toolName,
         input: event.input !== undefined ? event.input : state.toolInputs[event.toolCallId] ?? {},
         dynamic: true,
-        toolMetadata: { approvalRequested: true },
+        toolMetadata: {
+          approvalRequested: true,
+          // SandboxPermissionRequest pass-through — the dock renders a
+          // network-variant card when these are present, and falls back to
+          // the generic card when they are absent (backward compatible).
+          ...(event.confirmationKind ? { confirmationKind: event.confirmationKind } : {}),
+          ...(event.networkRequest ? { networkRequest: event.networkRequest } : {}),
+        },
       });
       break;
     }

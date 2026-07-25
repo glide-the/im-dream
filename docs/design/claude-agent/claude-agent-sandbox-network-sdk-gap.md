@@ -1,0 +1,114 @@
+# Claude Agent 沙箱网络审批 — SDK 通道缺口分析
+
+> 状态：现状分析（含弥合方案，未实施）
+> 关联文档：
+> - `claude-agent-sandbox-network-permission-tool.md`（已实现的 PreToolUse 层 SandboxPermissionRequest 模式）
+> - `claude-agent-sandbox-network-permission-sequence.md`（模块交互图）
+> - `../sandbox-wildcard-network-issue/interaction-design.md`（Claude Code 原生 Hook 现状分析，§5）
+> 日期：2026-07-23
+
+---
+
+## 1. 问题
+
+Ink & Memory 通过 `claude_code_sdk`（Python SDK，`ClaudeSDKClient`，见 `backend/libs/claude_agent_kit/server/simple_cas_client.py:24`）在本地以 headless 方式驱动 Claude Code。问题：**能否直接触达 Claude Code 原生的沙箱网络审批弹窗（SandboxPermissionRequest）？**
+
+**结论：触达不到，且是三层原因叠加。**
+
+## 2. 三层事实（源码/依赖实证）
+
+### 2.1 Ink 弹窗物理上不存在于 SDK 链路
+
+`SandboxPermissionRequest` 是交互式 REPL 的 Ink UI 组件（restored-src `REPL.tsx:4609` 渲染，组件 `components/permissions/SandboxPermissionRequest.tsx`）。SDK/headless 模式没有 Ink 渲染树，该弹窗不可能出现。
+
+### 2.2 SDK 模式的等价通道：can_use_tool 控制请求（后端未接）
+
+CLI 在 headless 模式的降级路径是 `createSandboxAskCallback`（restored-src `cli/structuredIO.ts:731-753`）：把沙箱网络询问包装为 `can_use_tool` 控制请求发给 SDK 消费方：
+
+```
+tool_name: SANDBOX_NETWORK_ACCESS_TOOL_NAME
+input:     { host }
+```
+
+回调出错或无应答时 fail-closed 返回 false（`structuredIO.ts:750`）。
+**实证：Ink & Memory backend 全库搜索 `can_use_tool` / `canUseTool` / `SANDBOX_NETWORK_ACCESS` —— 零命中，无任何处理。**
+
+### 2.3 当前 SDK 版本本身不具备该能力
+
+后端依赖 `claude_code_sdk 0.0.25`（`backend/.venv/lib/python3.12/site-packages/claude_code_sdk`）。**实证：包内搜索 `can_use_tool` / `canUseTool` / `tool_permission` —— 零命中。** 该版本没有 can_use_tool 回调能力，CLI 即使发出控制请求也无人应答，最终按 `structuredIO.ts:750` fail-closed 静默 deny。
+
+## 3. 为什么日常未暴露
+
+流量到不了 CLI 内部 ask 层，因为 Ink & Memory 的治理点在更上游：
+
+1. **PreToolUse 层**（`claude-agent-sandbox-network-permission-tool.md` 已实现）：执行前拦截 WebFetch / WebSearch / 网络类 Bash，弹 Ink & Memory 自己的确认卡；
+2. **每线程 settings 写入**（`backend/libs/claude_agent_kit/server/workspace.py:297-317`）：`allowedDomains` 写入 `.claude/settings.json`，沙箱代理对清单内域名直接放行，CLI 内部 `sandboxAskCallback` 不触发。
+
+## 4. 残留缺口
+
+唯一会掉入缺口的场景：**沙箱内 Bash 命令访问 `allowedDomains` 之外的域名**（如对未配置主机执行 `curl`）。链路：
+
+```
+sandboxed Bash → sandbox-runtime 代理拦截（403 blocked-by-allowlist）
+  → CLI 内部 sandboxAskCallback 触发
+  → can_use_tool 控制请求（无人应答）
+  → fail-closed deny
+```
+
+用户无任何弹窗，只能在工具输出中看到 403，排障体验为黑盒。
+
+## 5. 弥合方案
+
+| 方案 | 做法 | 代价 |
+|---|---|---|
+| A. 升级 SDK + 桥接 | 升级 `claude_code_sdk` 至支持 can_use_tool 的版本；将 `SANDBOX_NETWORK_ACCESS_TOOL_NAME` 请求桥接到现有 `on_tool_confirmation_request` 链（`backend/libs/claude_agent_kit/types.py:128`），统一弹窗 | 需评估新版 SDK 兼容性与升级风险 |
+| B. 保持 fail-closed + 收窄缺口 | 依赖 PreToolUse 预检 + "放行并记住"扩清单；在 deny 输出追加可诊断文案（提示到设置页追加域名） | 小，纯增量 |
+| C. 双层清单对齐 | 保证写入 CLI settings 的 allowlist 始终 ⊇ Ink & Memory 判定结果，消除判定漂移 | 小，配置层改动 |
+
+> 待决策：先做 A 的可行性评估（新版 SDK 的 can_use_tool 形态与 0.0.25 升级差异），或直接实施 B+C。
+
+## 6. 附：关联概念澄清（三处）
+
+### 6.1 持久化路径差异（permissions.allow 与本系统）
+
+Claude Code 原生 REPL 的 "don't ask again" 写 `.claude/settings.local.json` 的 `permissions.allow: ["WebFetch(domain:host)"]`（restored-src `REPL.tsx:4620-4639`），靠 `convertToSandboxRuntimeConfig` 把 `WebFetch(domain:X)` 合并进 allowedDomains 生效。本系统不照搬此路径：域名清单的权威存储是 system_config 的 `sandbox_network_allowed_domains`（`PUT /api/system-config`，`backend/routers/system_config.py:100-122`），PreToolUse 判定层直接读取。故"放行并记住"在本系统的落地方式为：弹窗第三选项 → `PUT /api/system-config` 追加域名（或扩展 `tool-confirm` 协议带 `remember: true` 由后端落库）。当前实现维持二元 批准/拒绝（`claude-agent-tool-confirmation-flow.md` 两态约束），持久化为后续迭代。
+
+### 6.2 Bridge 模式（远程控制 / claude.ai）
+
+Claude Code 的远程控制能力：本地 CLI 会话经 REPL bridge 桥接到 claude.ai 网页端，用户可从浏览器/手机操控本地会话。沙箱审批触发且 bridge 已连接时（restored-src `REPL.tsx:2254-2294`），系统同时：① 本地弹 `SandboxPermissionRequest`；② 将请求作为 `can_use_tool` 控制请求推给远端。两边竞争响应，先点先生效，另一方通过 `cancelRequest` 撤销；响应一次性解决同 host 所有挂起请求。Swarm worker 的 mailbox 转发（`sendSandboxPermissionRequestViaMailbox`）是同一思路在多智能体场景的变体。对本系统的启示：`on_tool_confirmation_request` → SSE `tool-approval-request` → Web 弹窗链路与 bridge 同构，协议设计（toolCallId、竞争解决、超时兜底）可直接对标。
+
+### 6.3 Swarm worker 路径（多智能体团队审批路由）
+
+Claude Code Agent Swarms（Teammate）场景下，worker 进程的沙箱网络审批不经本地弹窗，而是经 **mailbox** 转发给团队 leader（restored-src `REPL.tsx:2218` 第一分支）。
+
+**触发条件**（`permissionSync.ts:596-601`）：`isAgentSwarmsEnabled()` 且 `isSwarmWorker()` —— 进程环境注入 team name + agent ID 且非 `team-lead`。
+
+**完整链路**：
+
+```
+Worker 进程（沙箱内网络请求被拦）
+  └─ sendSandboxPermissionRequestViaMailbox(host, requestId)     permissionSync.ts:805
+       └─ sandbox_permission_request 消息
+          {requestId, workerId, workerName, workerColor, host}   teammateMailbox.ts:576
+       └─ writeToMailbox(leaderName, ...)：in-process（同进程 teammate）
+          或文件邮箱（.claude/teams/<team>/）
+  └─ registerSandboxPermissionCallback({requestId, resolve})     ← promise 挂起
+  └─ AppState.pendingSandboxRequest                              ← worker 侧等待指示
+
+Leader 进程（交互式 REPL）
+  └─ useInboxPoller 轮询收件箱（useInboxPoller.ts:398-420）
+       └─ isTeamLead() → workerSandboxPermissions 队列 → 审批 UI
+  └─ sendSandboxPermissionResponseViaMailbox(workerName, requestId, host, allow)
+
+Worker 进程
+  └─ 收到响应 → resolve(allow) → 沙箱 ask 回调返回
+```
+
+**容错**：邮箱发送失败（缺 team/leader/worker ID）时降级回本地弹窗队列（`REPL.tsx:2224-2230`）；请求 ID 为 `sandbox-<timestamp>-<random>`（`generateSandboxRequestId`）。
+
+**对 Ink & Memory 的相关性：双重不可达**——
+
+1. **前置条件不成立**：Swarm 要求以 teammate 方式启动 CLI 进程（注入 team name + agent ID 环境）。后端 `ClaudeSDKClient` 单进程驱动、无团队上下文，`isSwarmWorker()` 恒为 false，该分支为死代码；
+2. **终点依赖交互式 leader**：即使启用 swarm，worker 的审批请求最终落在 leader 邮箱，而 leader 审批 UI 仍是 Ink 组件（`useInboxPoller` → REPL 渲染）；headless 下无人轮询点击，请求堆积在 `.claude/teams/` 文件邮箱。
+
+**设计启示**：bridge（转发 claude.ai 远程用户）与 mailbox（转发团队 leader）是同一思想的两种投递——把审批权从"无交互能力的执行体"路由给"有交互能力的对端"。Ink & Memory 的 SSE `tool-approval-request` → Web 前端是第三种实现，且具天然优势：payload 带 `toolCallId`、每 thread 独立 SSE 通道；未来若做多 Agent（每 worker 一 thread），审批路由按 thread 天然隔离，无需 mailbox 的 requestId 注册/轮询机制——仅需在 payload 增加 `workerId` / `agentName` 展示字段，让审批人识别发起方。
