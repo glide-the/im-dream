@@ -1,143 +1,165 @@
 # Claude Agent 沙箱网络 SandboxPermissionRequest 权限工具设计
 
-> 状态：已实现（2026-07-23）
-> 实现备注：
-> - 步骤 ②.5 同时守卫 ④（full-access allow）与 ⑥（低敏 allow）——与本文件
->   §3 只点名 ⑥ 相比多守卫了 ④，与配套时序图
->   `claude-agent-sandbox-network-permission-sequence.md` §2（D→G 直连、
->   不经 E）一致；`open` 模式"每次询问"因此不被完全访问模式吞掉。
-> - `networkRequest.matchedAllowedDomain` 本期恒为 `null`（命中即显式
->   allow，不进入弹窗），字段为后续"放行并记住"迭代预留。
-> - `WebSearch` 的 input 通常不含 `url`（只有 `query`），无法提取 host，
->   在 allowlist 模式下按"未命中"处理 → 弹窗（保守，与 §4 提取规则一致）。
+> 状态：**已修订（2026-07-26）——现行架构为 can_use_tool 单一通道**
+> - 2026-07-23 初版在 PreToolUse 层实现网络门禁（步骤 ②.5），同日补充
+>   can_use_tool 运行时代理通道。
+> - **2026-07-26 架构反转：PreToolUse 层网络门禁已拆除。** 原因：网络策略
+>   是系统级控制，由 Claude Code 自身沙箱执行（workspace.py 写入每线程
+>   `.claude/settings.json` 的 `sandbox.network`），其询问只经 `can_use_tool`
+>   通道投递；PreToolUse 门禁属于错误层级的重复实现。被拆除的内容：
+>   步骤 ②.5 `_apply_sandbox_network_permission` 及其调用点、
+>   `_match_sandbox_network_allowed_domain` / `_extract_network_tool_host` /
+>   `_is_ip_literal` 辅助函数、full-access/低敏跳过守卫、步骤 ⑦ payload
+>   鉴别扩展、`AgentRunOptions.sandbox_network_allowed_domains` plumbing、
+>   `networkRequest.source` 字段（单一触发源后不再需要）。历史设计保留于
+>   附录 A。`sandbox_network_mode` plumbing 保留（can_use_tool payload 仍
+>   上报 `policyMode`）；system_config 键与 workspace.py 的 settings.json
+>   写入器不在拆除范围——它们配置 CLI 自身沙箱。
 > 关联文档：
 > - `claude-agent-permission-policy.md`（权限等级与决策顺序）
-> - `claude-agent-tool-confirmation-flow.md`（工具确认链路）
+> - `claude-agent-tool-confirmation-flow.md`（工具确认链路，§6.3）
+> - `claude-agent-sandbox-network-permission-sequence.md`（交互时序图）
 > - `claude-agent-sandbox-network-interaction-plan.md`（沙箱网络配置设计）
 > - `../sandbox-wildcard-network-issue/interaction-design.md`（Claude Code 原生 SandboxPermissionRequest 现状分析，§5）
-> 日期：2026-07-23
+> 日期：2026-07-23（初版）；2026-07-26（架构反转修订）
 
 ---
 
 ## 1. 背景与目标
 
-Claude Code 原生的 `SandboxPermissionRequest` 弹窗（restored-src `REPL.tsx:2216` → `SandboxPermissionRequest.tsx`）依赖 sandbox-runtime 的 `sandboxAskCallback`，在 headless/SDK 模式下该回调 fail-closed（`cli/structuredIO.ts:731-753`），因此 Ink & Memory 目前**没有任何按请求粒度的网络审批交互**——网络治理只有三档静态模式（`sandbox_network_mode`: `disabled` / `allowlist` / `open`，见 `backend/routers/system_config.py:56`）。
+Claude Code 原生的 `SandboxPermissionRequest` 弹窗（restored-src `REPL.tsx:2216` → `SandboxPermissionRequest.tsx`）依赖 sandbox-runtime 的 `sandboxAskCallback`，在 headless/SDK 模式下该回调 fail-closed（`cli/structuredIO.ts:731-753`），因此 Ink & Memory 需要自己的按请求粒度网络审批交互。
 
-本设计在 Ink & Memory 的 PreToolUse 权限层补上一个 **SandboxPermissionRequest 模式**，复用既有 `on_tool_confirmation_request` 确认链路（`backend/libs/claude_agent_kit/types.py:128`），实现：
+**架构定位（2026-07-26 明确）**：网络策略是**系统级控制**——
+`sandbox_network_mode` / `sandbox_network_allowed_domains` 由
+`backend/libs/claude_agent_kit/server/workspace.py` 写入每线程
+`.claude/settings.json` 的 `sandbox.network`，由 Claude Code 自身沙箱
+（bwrap `--unshare-net` + 过滤代理）强制执行。当 sandboxed Bash 在代理层
+命中未授权域名时，CLI 发起**系统级 control request**——不经 PreToolUse
+hook，只通过 SDK 的 `can_use_tool` 回调通道送达。本设计将该通道接入
+Ink & Memory 既有 `on_tool_confirmation_request` 确认链路，成为**唯一的
+网络确认通道**。
 
 | 业务配置 | 行为 |
 |---|---|
-| 网络策略关闭（`sandbox_network_mode = "open"`，不写 `sandbox.network`） | 每次网络请求触发确认弹窗 |
-| 网络策略开启（`sandbox_network_mode = "allowlist"`） | 命中 `allowedDomains` 的请求 → `low_sensitivity_permission` 自动放行；未命中 → 确认弹窗 |
-| 网络禁用（`sandbox_network_mode = "disabled"`） | 维持现状：硬拒绝（`_apply_disabled_network_permission`，`agent_runner.py:433-459`） |
+| 网络禁用（`sandbox_network_mode = "disabled"`） | 双层硬拒：PreToolUse 层 `_apply_disabled_network_permission` 拒绝 `WebFetch`/`WebSearch`/常见网络 Bash 命令（2026-06-21 既有行为，未变）；运行时 `sandbox.network` 配 `deniedDomains=["*"]` |
+| 白名单（`sandbox_network_mode = "allowlist"`） | CLI 沙箱代理按 `sandbox.network.allowedDomains` 放行清单内域名；清单外域名触发 `can_use_tool` 询问 → Ink & Memory 网络变体确认卡 |
+| 开放网络（`sandbox_network_mode = "open"`） | 不写 `sandbox.network` = 不限制出网；**无逐次询问**（语义已回退，见 `claude-agent-sandbox-network-interaction-plan.md`） |
 
-> **语义变更说明**：`"open"` 模式原定义为"不限制出网"（`claude-agent-sandbox-network-interaction-plan.md:81`）。本设计将其重定义为"每次询问"——沙箱不配置网络策略时，由 Ink & Memory 确认层接管逐次审批。这是产品层面的有意变更，须在变更日志与用户文档中显式声明。
+## 2. 现行机制：can_use_tool 确认通道
 
-## 2. 权限等级模型映射
+- 入参：`tool_name == "SandboxNetworkAccess"`，`input == {"host": <hostname>}`；
+- SDK 支持：`claude_code_sdk 0.0.25` 的 `ClaudeCodeOptions.can_use_tool: CanUseTool | None`（`types.py:308`），结果类型 `PermissionResultAllow(updated_input, updated_permissions)` / `PermissionResultDeny(message, interrupt)`；
+- 官方契约保证：`can_use_tool` 不会对权限流中已被解析的工具再次触发——本系统的 PreToolUse hook 对所有工具返回显式 allow/deny，因此接线后**不会重复弹窗**（含 AskUserQuestion，其由 hook 路径带 answers 解决）。
 
-系统现有两级分类（无枚举，按 helper 函数分类，`claude-agent-permission-policy.md:57-100`）：
+实现（`agent_runner.py`）：与 `_pre_tool_use_hook` 同闭包定义
+`_can_use_tool(tool_name, input_data, context)` 并传入
+`ClaudeCodeOptions(can_use_tool=...)`：
 
-- `low_sensitivity_permission` → 自动放行（`_apply_low_sensitivity_query_permission`，`agent_runner.py:1243`）；
-- 其余 → `on_tool_confirmation_request` 弹窗确认（`agent_runner.py:1659-1737`）。
-
-本设计新增第三条分类规则，挂入同一决策链：
-
-| 请求类别 | 分类 | 效果 |
-|---|---|---|
-| 命中 `allowedDomains` 的网络请求（policy ON） | **低敏感度子类**：`sandbox_network_allowed` | 显式 allow，不弹窗 |
-| 未命中 `allowedDomains` 的网络请求（policy ON） | 高敏感度 | `on_tool_confirmation_request` 弹窗 |
-| 任意网络请求（policy OFF / open） | 高敏感度 | `on_tool_confirmation_request` 弹窗（**每次**，不记忆） |
-| 非网络请求 | 维持现有分类不变 | — |
-
-## 3. 决策链插入点
-
-`_pre_tool_use_hook`（`agent_runner.py:1574`）现有顺序：① editor 重定向 → ② disabled 硬拒 → ③ 工作区边界 → ④ full-access → ⑤ workspace files → ⑥ 低敏感度 → ⑦ 前端确认 → ⑧ 失败兜底 deny。
-
-**插入新步骤 ②.5（`_apply_sandbox_network_permission`），位于 ② 之后、④ 之前**：
-
-```
-mode == "allowlist":
-    提取目标 host（见 §4）
-    host 命中 allowedDomains  → return allow（低敏感度子类，短路后续步骤）
-    host 未命中 / 无法提取    → return None（落入 ⑦ 确认弹窗）
-mode == "open":
-    是网络工具/网络 Bash 命令 → return None，且步骤 ⑥ 必须跳过网络类工具
-                                （否则 WebFetch/WebSearch 会被现有
-                                  _LOW_SENSITIVITY_QUERY_TOOL_NAMES 自动放行，
-                                  agent_runner.py:247-248）
-mode == "disabled":
-    不进入本步骤（② 已硬拒）
-```
-
-> 关键正确性约束：`WebFetch`/`WebSearch` 当前在低敏感度白名单内（`agent_runner.py:247-248`）。open 模式下若不改步骤 ⑥，新规则会被静默绕过。实现方式：步骤 ⑥ 执行低敏感度放行前，先判断 `sandbox_network_mode == "open"` 且为网络类工具 → 跳过。
-
-## 4. 域名匹配语义
-
-与 sandbox-runtime 对齐（`sandbox-runtime/src/sandbox/domain-pattern.ts:25-37`，语义记录于 `../sandbox-wildcard-network-issue/interaction-design.md:96`）：
-
-| 模式 | 语义 |
+| 触发 | 行为 |
 |---|---|
-| `example.com` | 精确匹配（大小写不敏感），**不含**子域 |
-| `*.example.com` | 严格子域（`a.example.com` ✓，`example.com` ✗），不匹配 IP 字面量 |
-| `*` | **非法值**，视为永不命中并记 warning（与上游 schema 禁止意图一致） |
+| `SandboxNetworkAccess` | 提取 `host`；走与 PreToolUse 步骤 ⑦ **相同**的 `on_tool_confirmation_request` 确认链路，payload 携带 `confirmationKind: "sandbox_network"` + `networkRequest: {host, policyMode, matchedAllowedDomain: null}`；批准 → `PermissionResultAllow(updated_input=input_data)`；拒绝/失败/超时 → `PermissionResultDeny(message=…)`，message 指明目标 host 并提示"可在设置中将该域名加入沙箱网络 allowedDomains" |
+| 其他 tool_name | 走同一通用确认链路（不带 discriminator），映射方式镜像步骤 ⑦（含 AskUserQuestion 的 answers 合并进 updated_input）；按官方契约此分支极少触发 |
+| 回调内任意异常 / 无确认回调 | 记录 warning 并 fail-closed → `PermissionResultDeny` |
 
-host 提取规则：
-
-| 工具 | 提取方式 | 可靠性 |
-|---|---|---|
-| `WebFetch` / `WebSearch` | `input.url` 的 host（`urllib.parse`） | 精确 |
-| 网络类 Bash 命令（`_is_network_bash_command`，`agent_runner.py:402-430`） | **不解析目标 host**（shell 命令中的 URL 提取是启发式的，不可靠） | 一律按"未命中"处理 → 弹窗 |
-
-即：`allowedDomains` 低敏感度放行**只对 WebFetch/WebSearch 生效**；Bash 网络命令在 allowlist 模式下始终弹窗。这是保守设计，文档化即可。
-
-## 5. 确认弹窗协议扩展
+## 3. 确认弹窗协议
 
 复用现有链路，零新通道：
 
 ```
-runner ⑦ → callbacks.on_tool_confirmation_request(payload)
-  → service._make_tool_confirm_cb（service.py:1580-1643）
-  → SSE tool-approval-request {toolCallId, toolName, input}
-  → 前端 ToolConfirmationDock
+CLI 沙箱代理拦截 → SDK can_use_tool
+  → runner._can_use_tool → callbacks.on_tool_confirmation_request(payload)
+  → service._make_tool_confirm_cb（service.py，~1580-1650 行）
+  → SSE tool-approval-request {toolCallId, toolName, input, confirmationKind, networkRequest}
+  → 前端 ToolConfirmationDock（网络变体卡片）
   → POST /api/claude-agent/tool-confirm {thread_id, tool_call_id, approved, reason?}
-  → ToolConfirmationStore.resolve → runner allow/deny
+  → ToolConfirmationStore.resolve → runner PermissionResultAllow/Deny
 ```
 
-**payload 新增鉴别字段**（`agent_runner.py:1660-1664` 的 `confirmation_payload` 与 `service.py:1624` 透传）：
+**payload 契约**：
 
 ```json
 {
   "toolCallId": "...",
-  "toolName": "WebFetch",
-  "input": { "url": "https://raw.githubusercontent.com/..." },
+  "toolName": "SandboxNetworkAccess",
+  "input": { "host": "cdn.example.com" },
   "confirmationKind": "sandbox_network",
   "networkRequest": {
-    "host": "raw.githubusercontent.com",
+    "host": "cdn.example.com",
     "policyMode": "allowlist",
     "matchedAllowedDomain": null
   }
 }
 ```
 
-前端 `toolConfirmation.ts:66-102` 新增 `'sandbox-network'` 的 `PendingConfirmationKind`（由 `confirmationKind` 鉴别），`ToolConfirmationDock.tsx` 渲染网络变体卡片：host、命中策略模式、放行/拒绝。`claude-agent-transport.ts:365-376` 透传 `confirmationKind`。
+前端 `toolConfirmation.ts` 的 `'sandbox-network'` `PendingConfirmationKind`
+（由 `confirmationKind` 鉴别）驱动 `ToolConfirmationDock.tsx` 渲染网络变体
+卡片：host、策略模式、二元 放行/拒绝。`claude-agent-transport.ts` 与
+`claude-agent-sse-utils.ts` 透传 `confirmationKind` / `networkRequest`；
+字段缺失时回退通用确认卡（向后兼容）。
 
-> "放行并记住"（写入 `sandbox_network_allowed_domains` → `PUT /api/system-config`）列为后续迭代；本期 Dock 维持二元 批准/拒绝（`tool-confirmation-flow.md:549-551` 的两态约束）。
+> "放行并记住"（写入 `sandbox_network_allowed_domains` → `PUT /api/system-config`）列为后续迭代；本期 Dock 维持二元 批准/拒绝（`tool-confirmation-flow.md` §8.3 的两态约束）。
 
-## 6. 配置 plumbing
+## 4. 行为矩阵（2026-07-26 现状）
 
-| 层 | 改动 |
+| 触发 | disabled | allowlist | open |
+|---|---|---|---|
+| `WebFetch` / `WebSearch` | PreToolUse 硬拒（既有） | **无 Ink & Memory 门禁**：遵循既有通用权限策略（auto 模式下低敏自动放行）；域名行为由 CLI 自身权限/沙箱层处理 | 同 allowlist——无逐次询问 |
+| 网络类 Bash（sandboxed） | PreToolUse 硬拒（既有）+ 运行时 `deniedDomains=["*"]` | 清单内域名沙箱代理放行；**清单外域名 → can_use_tool 网络确认卡** | 不写 `sandbox.network` = 不限制出网，无询问 |
+| 网络类 Bash（非沙箱，如 workspace 关闭） | PreToolUse 硬拒（既有） | 走既有通用确认策略（高敏 Bash 弹窗，无网络鉴别字段） | 同左 |
+| 非网络工具 | 现有分类不变 | 现有分类不变 | 现有分类不变 |
+
+关键权衡：PreToolUse 门禁拆除后，`open` 模式不再有任何逐次确认
+（`sandbox.network` 省略 = 不限制出网）；`allowlist` 模式下 `WebFetch`
+访问清单外域名不再被我们的确认卡前置拦截（它遵循 CLI 自身权限流），
+只有沙箱内 Bash 的运行时代理拦截会经 `can_use_tool` 弹卡。
+
+## 5. 配置 plumbing（现状）
+
+| 层 | 状态 |
 |---|---|
-| `backend/libs/claude_agent_kit/types.py`（`AgentRunOptions`，~181 行） | 新增 `sandbox_network_allowed_domains: Sequence[str] \| None` |
-| `backend/claude_agent/service.py`（~1079 行） | 值已在作用域（`service.py:874-875`），传入 `AgentRunOptions` |
-| `agent_runner.py` `run_streaming`（~1491 行） | 读取新选项，随 `sandbox_network_mode` 一起闭包进 hook |
-| `backend/routers/system_config.py` | 无需改动（键已存在） |
+| `backend/routers/system_config.py` | 不变——`sandbox_network_mode` / `sandbox_network_allowed_domains` 键为 CLI 沙箱配置的真相源 |
+| `backend/libs/claude_agent_kit/server/workspace.py` | 不变——把上述配置写入每线程 `.claude/settings.json` 的 `sandbox.network` |
+| `backend/claude_agent/service.py` | 读取配置用于 workspace 初始化（保留）；透传 `confirmationKind` / `networkRequest` 到 SSE（保留）；不再向 `AgentRunOptions` 传 allowed_domains（2026-07-26 移除） |
+| `backend/libs/claude_agent_kit/types.py`（`AgentRunOptions`） | 仅保留 `sandbox_network_mode`（can_use_tool payload 上报 `policyMode` 用） |
 
-## 7. 验收标准
+## 6. 验收标准（2026-07-26 修订）
 
-1. `allowlist` 模式下 `WebFetch` 请求命中 `allowedDomains`（含 `*.suffix` 严格子域语义）→ 无弹窗直接执行；
-2. `allowlist` 模式下未命中域名 → 弹出网络变体确认卡，批准后执行，拒绝后 deny 回传；
-3. `open` 模式下 `WebFetch`/`WebSearch`/网络 Bash 命令**每次**弹窗（同域名连续请求也弹），不再被低敏感度规则自动放行；
-4. `disabled` 模式行为与现状完全一致（回归测试）；
-5. Bash 网络命令在 `allowlist` 模式下始终弹窗（无论域名是否在清单中）；
-6. 配置 `"*"` 在 `allowedDomains` 中 → warning 日志 + 永不命中；
-7. 事件契约：`tool-approval-request` 携带 `confirmationKind: "sandbox_network"` 时前端渲染网络卡片，缺失时回退通用确认卡（向后兼容）。
+1. sandboxed Bash 命中清单外域名 → `can_use_tool` 收到 `SandboxNetworkAccess{host}` → 弹出网络变体确认卡；批准后 `PermissionResultAllow(updated_input)` 放行，拒绝后 `PermissionResultDeny` 回传且 message 含 host 与 allowedDomains 提示；
+2. 确认链路异常 / 无确认回调 → fail-closed `PermissionResultDeny` 并记 warning；
+3. 其他 tool_name 走同一通用确认链路（不带 discriminator），不重复弹窗；
+4. `disabled` 模式行为与现状完全一致（PreToolUse 硬拒回归测试）；
+5. 事件契约：`tool-approval-request` 携带 `confirmationKind: "sandbox_network"` 时前端渲染网络卡片，缺失时回退通用确认卡（向后兼容）；
+6. `open` 模式无逐次网络确认（语义回退）；`allowlist` 模式 `WebFetch` 清单外域名不再被 Ink & Memory 前置拦截。
+
+---
+
+## 附录 A：PreToolUse 门禁历史设计（2026-07-23 实现，2026-07-26 拆除）
+
+> 以下为被取代的初版设计，仅作历史记录保留。**勿再按本节实现。**
+
+初版在 `_pre_tool_use_hook` 插入步骤 ②.5 `_apply_sandbox_network_permission`
+（disabled 硬拒之后、full-access 之前）：
+
+```
+mode == "allowlist":
+    提取目标 host（WebFetch/WebSearch 经 urllib.parse input.url；Bash 不解析）
+    host 命中 allowedDomains  → return allow（低敏感度子类 sandbox_network_allowed）
+    host 未命中 / 无法提取    → return None（落入 ⑦ 确认弹窗）
+mode == "open":
+    任意网络请求 → 落入 ⑦ 确认弹窗（每次），且步骤 ⑥ 低敏放行跳过网络类工具
+mode == "disabled":
+    不进入本步骤（② 已硬拒）
+```
+
+域名匹配语义（与 sandbox-runtime `domain-pattern.ts:25-37` 对齐）：
+`example.com` 精确匹配（大小写不敏感，不含子域）；`*.example.com` 严格子域
+（不匹配裸域、不匹配 IP 字面量）；裸 `*` 非法 → warning + 永不命中。
+
+正确性约束：WebFetch/WebSearch 在 `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` 内，
+open 模式下步骤 ⑥ 必须跳过网络类工具，否则新规则被静默绕过；待审批网络
+请求同样跳过步骤 ④ full-access allow（防止被完全访问模式吞掉）。
+
+**拆除原因**：上述门控与 CLI 沙箱的系统级控制重复——`WebFetch`/Bash 的
+真实出网由 sandbox-runtime 代理强制执行，其询问只经 `can_use_tool` 投递；
+PreToolUse 层既看不到运行时代理拦截，又会对已被 CLI 沙箱放行的流量重复
+审批。`open` 模式"每次询问"的产品语义随之回退。

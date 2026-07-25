@@ -40,13 +40,21 @@
 # [Sync] 2026-07-20: cover EnterPlanMode/ExitPlanMode low-sensitivity allow in
 #                    auto mode and frontend-confirmation side-channel in manual
 #                    mode (claude-plan §5.7).
-# [Sync] 2026-07-23: cover SandboxPermissionRequest step ②.5 — allowlist hits
-#                    (exact / "*.suffix" strict subdomain) auto-allow; allowlist
-#                    misses, IP-literal wildcards, bare "*", network Bash, and
-#                    every open-mode network request reach the confirmation
-#                    side-channel with confirmationKind="sandbox_network" and
-#                    networkRequest metadata; open mode bypasses both the
-#                    low-sensitivity and full-access allows for network tools.
+# [Sync] 2026-07-23: cover the can_use_tool channel — SDK options receive a
+#                    non-None can_use_tool; SandboxNetworkAccess asks route
+#                    through the confirmation side-channel; approval →
+#                    PermissionResultAllow (updated_input passthrough),
+#                    rejection/chain failure/missing callback →
+#                    PermissionResultDeny fail-closed with the host and
+#                    Settings allowedDomains remedy in the message; generic
+#                    tool names route without the discriminator and merge
+#                    AskUserQuestion answers.
+# [Sync] 2026-07-26: remove the PreToolUse-layer network-gate tests (14 hook
+#                    tests + TestSandboxNetworkDomainMatcher) and the
+#                    sandbox_network_allowed_domains capture-helper param —
+#                    the gate was wrong-layer duplication; can_use_tool is the
+#                    single network-confirmation channel.  Disabled-mode
+#                    regression tests (pre-existing) are unchanged.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -145,6 +153,24 @@ def _make_sdk_stubs() -> None:
             for k, v in kwargs.items():
                 setattr(self, k, v)
 
+    # can_use_tool permission types (SDK 0.0.25+)
+    class PermissionResultAllow:
+        def __init__(self, behavior="allow", updated_input=None, updated_permissions=None, **kwargs):
+            self.behavior = behavior
+            self.updated_input = updated_input
+            self.updated_permissions = updated_permissions
+
+    class PermissionResultDeny:
+        def __init__(self, behavior="deny", message="", interrupt=False, **kwargs):
+            self.behavior = behavior
+            self.message = message
+            self.interrupt = interrupt
+
+    class ToolPermissionContext:
+        def __init__(self, signal=None, suggestions=None, **kwargs):
+            self.signal = signal
+            self.suggestions = suggestions or []
+
     for _cls in [
         AssistantMessage,
         UserMessage,
@@ -157,8 +183,13 @@ def _make_sdk_stubs() -> None:
         HookMatcher,
         McpServerConfig,
         McpStdioServerConfig,
+        PermissionResultAllow,
+        PermissionResultDeny,
+        ToolPermissionContext,
     ]:
         setattr(sdk_types, _cls.__name__, _cls)
+
+    sdk_types.PermissionResult = (PermissionResultAllow, PermissionResultDeny)
 
     async def _noop_query(*args, **kwargs):
         return
@@ -761,7 +792,6 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         allowed_tools: Optional[list[str]] = None,
         im_full_access_enabled: bool = False,
         sandbox_network_mode: str = "allowlist",
-        sandbox_network_allowed_domains: Optional[list[str]] = None,
         on_tool_confirmation_request=None,
     ):
         self.set_query([])
@@ -776,7 +806,6 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 allowed_tools=allowed_tools,
                 im_full_access_enabled=im_full_access_enabled,
                 sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
-                sandbox_network_allowed_domains=sandbox_network_allowed_domains,
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -1266,484 +1295,6 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
         specific = getattr(result, "hookSpecificOutput", {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    # ------------------------------------------------------------------
-    # SandboxPermissionRequest (step ②.5) — allowlist / open modes.
-    # Design: docs/design/claude-agent/claude-agent-sandbox-network-permission-tool.md
-    # ------------------------------------------------------------------
-
-    async def test_allowlist_hit_exact_domain_gets_explicit_allow(self):
-        """Allowlist mode: exact (case-insensitive) host match auto-allows WebFetch."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": False, "reason": "should not ask"}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                sandbox_network_allowed_domains=["example.com"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            for url in ("https://example.com/page", "https://EXAMPLE.com/page"):
-                with self.subTest(url=url):
-                    result = await hook(
-                        {
-                            "tool_name": "WebFetch",
-                            "tool_input": {"url": url},
-                        },
-                        f"call-webfetch-allow-{url}",
-                        _SDK_HOOK_CONTEXT(),
-                    )
-                    specific = getattr(result, "hookSpecificOutput", {})
-                    self.assertEqual(specific.get("hookEventName"), "PreToolUse")
-                    self.assertEqual(specific.get("permissionDecision"), "allow")
-
-        self.assertEqual(confirmation_requests, [])
-
-    async def test_allowlist_hit_wildcard_subdomain_gets_explicit_allow(self):
-        """Allowlist mode: `*.suffix` matches strict subdomains only."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": False, "reason": "should not ask"}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                sandbox_network_allowed_domains=["*.npmjs.org"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebFetch",
-                    "tool_input": {"url": "https://registry.npmjs.org/pkg"},
-                },
-                "call-webfetch-wildcard-subdomain",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_allowlist_wildcard_does_not_match_bare_domain(self):
-        """`*.example.com` must NOT match bare example.com → confirmation."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                sandbox_network_allowed_domains=["*.example.com"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebFetch",
-                    "tool_input": {"url": "https://example.com/"},
-                },
-                "call-webfetch-wildcard-bare-domain",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        payload = confirmation_requests[0]
-        self.assertEqual(payload.get("confirmationKind"), "sandbox_network")
-        self.assertEqual(
-            payload.get("networkRequest"),
-            {
-                "host": "example.com",
-                "policyMode": "allowlist",
-                "matchedAllowedDomain": None,
-            },
-        )
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_allowlist_wildcard_does_not_match_ip_literal(self):
-        """Wildcard patterns never match IP-literal hosts → confirmation."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                # "192.168.1.1" textually ends with ".168.1.1" — without the
-                # IP-literal guard this would be treated as a subdomain match.
-                sandbox_network_allowed_domains=["*.168.1.1"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebFetch",
-                    "tool_input": {"url": "http://192.168.1.1:8080/"},
-                },
-                "call-webfetch-wildcard-ip-literal",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        self.assertEqual(confirmation_requests[0].get("confirmationKind"), "sandbox_network")
-        self.assertEqual(
-            confirmation_requests[0].get("networkRequest", {}).get("host"),
-            "192.168.1.1",
-        )
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_allowlist_miss_uses_confirmation_with_network_metadata(self):
-        """Allowlist mode: unmatched host falls to confirmation; approval allows."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                sandbox_network_allowed_domains=["example.com"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebFetch",
-                    "tool_input": {"url": "https://other.com/data"},
-                },
-                "call-webfetch-allowlist-miss",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        payload = confirmation_requests[0]
-        self.assertEqual(payload.get("confirmationKind"), "sandbox_network")
-        self.assertEqual(
-            payload.get("networkRequest"),
-            {
-                "host": "other.com",
-                "policyMode": "allowlist",
-                "matchedAllowedDomain": None,
-            },
-        )
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_allowlist_miss_rejection_denies(self):
-        """Allowlist mode: rejecting the network confirmation denies the tool."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": False, "reason": "no egress"}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                sandbox_network_allowed_domains=["example.com"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebFetch",
-                    "tool_input": {"url": "https://other.com/data"},
-                },
-                "call-webfetch-allowlist-miss-reject",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "deny")
-        self.assertEqual(specific.get("permissionDecisionReason"), "no egress")
-
-    async def test_allowlist_network_bash_always_confirms(self):
-        """Bash network commands never get host matching — always confirm."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                # Even though the URL's domain is allowlisted, Bash targets
-                # are not parsed (conservative rule, design doc §4).
-                sandbox_network_allowed_domains=["example.com"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "Bash",
-                    "tool_input": {"command": "curl https://example.com"},
-                },
-                "call-bash-curl-allowlisted-domain",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        payload = confirmation_requests[0]
-        self.assertEqual(payload.get("confirmationKind"), "sandbox_network")
-        self.assertEqual(
-            payload.get("networkRequest"),
-            {"host": None, "policyMode": "allowlist", "matchedAllowedDomain": None},
-        )
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_allowlist_websearch_without_url_confirms(self):
-        """WebSearch carries no `url` input → host cannot be extracted → confirm."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                sandbox_network_allowed_domains=["example.com"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebSearch",
-                    "tool_input": {"query": "example.com docs"},
-                },
-                "call-websearch-allowlist-no-url",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        self.assertEqual(confirmation_requests[0].get("confirmationKind"), "sandbox_network")
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_open_mode_webfetch_confirms_every_time(self):
-        """Open mode: WebFetch asks EVERY time — the low-sensitivity auto-allow
-        must not swallow it, even for repeated requests to the same host."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="open",
-                on_tool_confirmation_request=confirm,
-            )
-
-            for index in range(2):
-                result = await hook(
-                    {
-                        "tool_name": "WebFetch",
-                        "tool_input": {"url": "https://example.com/page"},
-                    },
-                    f"call-webfetch-open-{index}",
-                    _SDK_HOOK_CONTEXT(),
-                )
-                specific = getattr(result, "hookSpecificOutput", {})
-                self.assertEqual(specific.get("permissionDecision"), "allow")
-
-        self.assertEqual(len(confirmation_requests), 2)
-        for payload in confirmation_requests:
-            self.assertEqual(payload.get("confirmationKind"), "sandbox_network")
-            self.assertEqual(
-                payload.get("networkRequest"),
-                {
-                    "host": "example.com",
-                    "policyMode": "open",
-                    "matchedAllowedDomain": None,
-                },
-            )
-
-    async def test_open_mode_websearch_and_network_bash_confirm(self):
-        """Open mode: WebSearch and network-class Bash commands also ask."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="open",
-                on_tool_confirmation_request=confirm,
-            )
-
-            for tool_name, tool_input in (
-                ("WebSearch", {"query": "ink and memory"}),
-                ("Bash", {"command": "curl https://example.com"}),
-            ):
-                with self.subTest(tool_name=tool_name):
-                    result = await hook(
-                        {"tool_name": tool_name, "tool_input": tool_input},
-                        f"call-open-{tool_name.lower()}",
-                        _SDK_HOOK_CONTEXT(),
-                    )
-                    specific = getattr(result, "hookSpecificOutput", {})
-                    self.assertEqual(specific.get("permissionDecision"), "allow")
-
-        self.assertEqual(len(confirmation_requests), 2)
-        for payload in confirmation_requests:
-            self.assertEqual(payload.get("confirmationKind"), "sandbox_network")
-            self.assertEqual(
-                payload.get("networkRequest", {}).get("policyMode"),
-                "open",
-            )
-
-    async def test_open_mode_non_network_tools_keep_low_sensitivity_allow(self):
-        """Open mode only affects network tools — other low-sensitivity tools
-        keep their auto-allow."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": False, "reason": "should not ask"}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="open",
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "Bash",
-                    "tool_input": {"command": "ls -la"},
-                },
-                "call-open-safe-bash",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_open_mode_network_request_bypasses_full_access(self):
-        """Open mode asks every time even when IM full-access is enabled —
-        the network confirmation must not be swallowed by the full-access allow."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                im_full_access_enabled=True,
-                sandbox_network_mode="open",
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebFetch",
-                    "tool_input": {"url": "https://example.com"},
-                },
-                "call-webfetch-open-full-access",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        self.assertEqual(confirmation_requests[0].get("confirmationKind"), "sandbox_network")
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_bare_star_never_matches_and_logs_warning(self):
-        """A bare "*" in the allowlist is invalid: warning + never matches."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                sandbox_network_mode="allowlist",
-                sandbox_network_allowed_domains=["*"],
-                on_tool_confirmation_request=confirm,
-            )
-
-            with self.assertLogs(agent_runner_module.logger, level="WARNING") as logs:
-                result = await hook(
-                    {
-                        "tool_name": "WebFetch",
-                        "tool_input": {"url": "https://example.com"},
-                    },
-                    "call-webfetch-bare-star",
-                    _SDK_HOOK_CONTEXT(),
-                )
-
-        self.assertTrue(
-            any("bare '*'" in message for message in logs.output),
-            f"expected bare-'*' warning, got: {logs.output}",
-        )
-        self.assertEqual(len(confirmation_requests), 1)
-        self.assertEqual(confirmation_requests[0].get("confirmationKind"), "sandbox_network")
-        specific = getattr(result, "hookSpecificOutput", {})
-        self.assertEqual(specific.get("permissionDecision"), "allow")
-
-    async def test_manual_mode_network_request_carries_network_metadata(self):
-        """Manual mode: network confirmations also carry the discriminator."""
-        confirmation_requests: list[dict] = []
-
-        async def confirm(payload: dict):
-            confirmation_requests.append(payload)
-            return {"approved": True}
-
-        with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(
-                cwd=temp_dir,
-                tool_choice="manual",
-                sandbox_network_mode="open",
-                on_tool_confirmation_request=confirm,
-            )
-
-            result = await hook(
-                {
-                    "tool_name": "WebFetch",
-                    "tool_input": {"url": "https://example.com"},
-                },
-                "call-webfetch-manual-open",
-                _SDK_HOOK_CONTEXT(),
-            )
-
-        self.assertEqual(len(confirmation_requests), 1)
-        self.assertEqual(confirmation_requests[0].get("confirmationKind"), "sandbox_network")
-        specific = getattr(result, "hookSpecificOutput", {})
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
     async def test_auto_bash_with_metachar_uses_frontend_confirmation(self):
@@ -2550,56 +2101,202 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Sandbox network domain matcher — pure-helper edge cases (design doc §4)
+# SDK can_use_tool channel — runtime sandbox-proxy network asks
 # ---------------------------------------------------------------------------
 
 
-class TestSandboxNetworkDomainMatcher(unittest.TestCase):
-    """Direct unit tests for _match_sandbox_network_allowed_domain semantics."""
+class TestCanUseToolPermissionChannel(_RunnerBase):
+    """SDK can_use_tool channel — runtime sandbox-proxy network asks.
 
-    def _match(self, host: str, pattern: str) -> bool:
-        return agent_runner_module._match_sandbox_network_allowed_domain(host, pattern)
+    The CLI's sandbox-runtime network ask ("SandboxNetworkAccess") is a
+    system-level control request invisible to PreToolUse; it arrives only via
+    ClaudeCodeOptions.can_use_tool and must route through the same frontend
+    confirmation side-channel (claude-agent-sandbox-network-permission-tool.md).
+    """
 
-    def test_exact_match_is_case_insensitive(self):
-        self.assertTrue(self._match("EXAMPLE.com", "example.com"))
-        self.assertTrue(self._match("example.com", "Example.COM"))
-        self.assertTrue(self._match("example.com.", "example.com"))
+    async def _capture_can_use_tool(
+        self,
+        *,
+        cwd: str,
+        sandbox_network_mode: str = "allowlist",
+        on_tool_confirmation_request=None,
+    ):
+        self.set_query([])
+        runner = self.make_runner()
 
-    def test_exact_match_excludes_subdomains(self):
-        self.assertFalse(self._match("a.example.com", "example.com"))
-        self.assertFalse(self._match("notexample.com", "example.com"))
-
-    def test_wildcard_matches_strict_subdomains_only(self):
-        self.assertTrue(self._match("a.example.com", "*.example.com"))
-        self.assertTrue(self._match("a.b.example.com", "*.example.com"))
-        self.assertFalse(self._match("example.com", "*.example.com"))
-        self.assertFalse(self._match("notexample.com", "*.example.com"))
-
-    def test_wildcard_never_matches_ip_literals(self):
-        self.assertFalse(self._match("192.168.1.1", "*.168.1.1"))
-        self.assertFalse(self._match("127.0.0.1", "*.0.0.1"))
-        self.assertFalse(self._match("::1", "*.1"))
-        # Exact patterns still match their own IP literal.
-        self.assertTrue(self._match("127.0.0.1", "127.0.0.1"))
-
-    def test_bare_star_never_matches(self):
-        self.assertFalse(self._match("example.com", "*"))
-        self.assertFalse(self._match("anything.at.all", "*"))
-
-    def test_empty_and_degenerate_patterns_never_match(self):
-        self.assertFalse(self._match("example.com", ""))
-        self.assertFalse(self._match("example.com", "*."))
-        self.assertFalse(self._match("", "example.com"))
-
-    def test_host_extraction_uses_url_parsing(self):
-        extract = agent_runner_module._extract_network_tool_host
-        self.assertEqual(
-            extract("WebFetch", {"url": "https://User:Pass@Example.COM:8443/a?b=c"}),
-            "example.com",
+        await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="can-use-tool-001",
+                user_message="run a sandboxed command",
+                cwd=cwd,
+                tool_choice="auto",
+                sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
+            ),
+            callbacks=AgentStreamingCallbacks(
+                on_text_delta=lambda d: None,
+                on_tool_confirmation_request=on_tool_confirmation_request,
+            ),
         )
-        self.assertEqual(extract("WebSearch", {"query": "no url here"}), None)
-        self.assertEqual(extract("Bash", {"command": "curl https://example.com"}), None)
-        self.assertEqual(extract("WebFetch", {"url": "not a url"}), None)
+
+        options = self._mock_client.last_options
+        return options.can_use_tool
+
+    async def test_can_use_tool_is_wired_into_sdk_options(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(cwd=temp_dir)
+        self.assertIsNotNone(can_use_tool)
+        self.assertTrue(callable(can_use_tool))
+
+    async def test_sandbox_network_ask_approval_returns_allow(self):
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await can_use_tool(
+                "SandboxNetworkAccess",
+                {"host": "cdn.example.com"},
+                agent_runner_module.ToolPermissionContext(),
+            )
+
+        self.assertIsInstance(result, agent_runner_module.PermissionResultAllow)
+        self.assertEqual(result.updated_input, {"host": "cdn.example.com"})
+        self.assertEqual(len(confirmation_requests), 1)
+        payload = confirmation_requests[0]
+        self.assertEqual(payload.get("tool_name"), "SandboxNetworkAccess")
+        self.assertEqual(payload.get("confirmationKind"), "sandbox_network")
+        self.assertEqual(
+            payload.get("networkRequest"),
+            {
+                "host": "cdn.example.com",
+                "policyMode": "allowlist",
+                "matchedAllowedDomain": None,
+            },
+        )
+
+    async def test_sandbox_network_ask_rejection_denies_with_host_in_message(self):
+        async def confirm(payload: dict):
+            return {"approved": False}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await can_use_tool(
+                "SandboxNetworkAccess",
+                {"host": "cdn.example.com"},
+                agent_runner_module.ToolPermissionContext(),
+            )
+
+        self.assertIsInstance(result, agent_runner_module.PermissionResultDeny)
+        self.assertIn("cdn.example.com", result.message)
+        self.assertIn("allowedDomains", result.message)
+
+    async def test_sandbox_network_ask_confirmation_failure_denies_fail_closed(self):
+        async def confirm(payload: dict):
+            raise RuntimeError("store exploded")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            with self.assertLogs(agent_runner_module.logger, level="WARNING"):
+                result = await can_use_tool(
+                    "SandboxNetworkAccess",
+                    {"host": "cdn.example.com"},
+                    agent_runner_module.ToolPermissionContext(),
+                )
+
+        self.assertIsInstance(result, agent_runner_module.PermissionResultDeny)
+        self.assertIn("cdn.example.com", result.message)
+
+    async def test_sandbox_network_ask_without_confirmation_callback_denies(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(cwd=temp_dir)
+            result = await can_use_tool(
+                "SandboxNetworkAccess",
+                {"host": "cdn.example.com"},
+                agent_runner_module.ToolPermissionContext(),
+            )
+
+        self.assertIsInstance(result, agent_runner_module.PermissionResultDeny)
+        self.assertIn("cdn.example.com", result.message)
+
+    async def test_generic_tool_routes_to_generic_confirmation(self):
+        """Non-sandbox tool names use the same chain WITHOUT the discriminator."""
+        confirmation_requests: list[dict] = []
+
+        async def confirm(payload: dict):
+            confirmation_requests.append(payload)
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await can_use_tool(
+                "mcp__foo__bar",
+                {"x": 1},
+                agent_runner_module.ToolPermissionContext(),
+            )
+
+        self.assertIsInstance(result, agent_runner_module.PermissionResultAllow)
+        self.assertEqual(result.updated_input, {"x": 1})
+        self.assertEqual(len(confirmation_requests), 1)
+        payload = confirmation_requests[0]
+        self.assertEqual(payload.get("tool_name"), "mcp__foo__bar")
+        self.assertNotIn("confirmationKind", payload)
+        self.assertNotIn("networkRequest", payload)
+
+    async def test_generic_tool_askuser_answers_merged_into_updated_input(self):
+        """AskUserQuestion-style tools merge frontend answers like step ⑦."""
+
+        async def confirm(payload: dict):
+            return {"approved": True, "answers": {"q1": "yes"}}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await can_use_tool(
+                "AskUserQuestion",
+                {"questions": [{"question": "q1"}]},
+                agent_runner_module.ToolPermissionContext(),
+            )
+
+        self.assertIsInstance(result, agent_runner_module.PermissionResultAllow)
+        self.assertEqual(
+            result.updated_input,
+            {"questions": [{"question": "q1"}], "answers": {"q1": "yes"}},
+        )
+
+    async def test_generic_tool_rejection_denies(self):
+        async def confirm(payload: dict):
+            return {"approved": False, "reason": "not today"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            can_use_tool = await self._capture_can_use_tool(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await can_use_tool(
+                "mcp__foo__bar",
+                {"x": 1},
+                agent_runner_module.ToolPermissionContext(),
+            )
+
+        self.assertIsInstance(result, agent_runner_module.PermissionResultDeny)
+        self.assertEqual(result.message, "not today")
 
 
 # ---------------------------------------------------------------------------

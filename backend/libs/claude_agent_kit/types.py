@@ -22,6 +22,11 @@
 #                    Settings allowlist consumed by the PreToolUse
 #                    SandboxPermissionRequest step (claude-agent-sandbox-network-
 #                    permission-tool.md §6).
+# [Sync] 2026-07-26: remove sandbox_network_allowed_domains again — the
+#                    PreToolUse network gate was wrong-layer duplication;
+#                    allowlists are enforced by the CLI sandbox
+#                    (sandbox.network via workspace.py) and asks arrive via
+#                    can_use_tool.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -33,7 +38,7 @@ Python translation of the TypeScript interfaces from:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import AsyncIterator, Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal, Optional, Union
 
@@ -181,20 +186,12 @@ class AgentRunOptions:
     # must collect frontend answers first.
     im_full_access_enabled: bool = False
     # Settings-controlled sandbox network mode. ``disabled`` is enforced by
-    # runner PreToolUse hooks before full-access or low-sensitivity allows.
+    # runner PreToolUse hooks before full-access or low-sensitivity allows;
+    # ``allowlist``/``open`` are enforced by Claude Code's own sandbox
+    # (sandbox.network in per-thread .claude/settings.json) whose runtime asks
+    # arrive via the SDK can_use_tool channel — there is no PreToolUse-layer
+    # network gate (removed 2026-07-26 as wrong-layer duplication).
     sandbox_network_mode: Literal["disabled", "allowlist", "open"] = "allowlist"
-    # Settings-controlled sandbox network allowlist (system_config
-    # ``sandbox_network_allowed_domains``).  Used by the runner PreToolUse
-    # SandboxPermissionRequest step: in ``allowlist`` mode a WebFetch/WebSearch
-    # request whose host matches one of these domain patterns receives an
-    # explicit allow (low-sensitivity subclass ``sandbox_network_allowed``);
-    # unmatched hosts and every network-class Bash command fall through to the
-    # frontend confirmation side-channel.  Domain matching mirrors
-    # sandbox-runtime: exact case-insensitive match; ``*.example.com`` matches
-    # strict subdomains only (not the bare domain, not IP literals); a bare
-    # ``*`` is invalid and never matches.  Ignored in ``disabled``/``open``
-    # modes.
-    sandbox_network_allowed_domains: Optional[Sequence[str]] = None
     # System prompt override.
     system_prompt: Optional[str] = None
     # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.

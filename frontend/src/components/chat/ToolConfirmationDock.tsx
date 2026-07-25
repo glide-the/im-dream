@@ -16,7 +16,7 @@
 // [Sync] 2026-07-23: SandboxPermissionRequest — render a network-variant confirmation card
 //        (target host + sandbox policy mode, binary 拒绝/同意, no "remember" in this iteration)
 //        when kind==='sandbox-network'; generic card unchanged when the discriminator is absent
-//        (design: claude-agent-sandbox-network-permission-tool.md §5).
+//        (design: claude-agent-sandbox-network-permission-tool.md §5A).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';

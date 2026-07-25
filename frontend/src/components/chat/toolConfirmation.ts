@@ -8,7 +8,9 @@
 //        the message list into a dock floating above AIInputDock (design: claude-agent-tool-confirmation-flow.md §8).
 // [Sync] 2026-07-23: SandboxPermissionRequest — add the 'sandbox-network' PendingConfirmationKind
 //        driven by toolMetadata.confirmationKind==='sandbox_network' plus the
-//        resolveSandboxNetworkRequest() helper (design: claude-agent-sandbox-network-permission-tool.md §5).
+//        resolveSandboxNetworkRequest() helper (design: claude-agent-sandbox-network-permission-tool.md §5A).
+// [Sync] 2026-07-26: drop the optional `source` field — the PreToolUse gate was removed;
+//        can_use_tool (runtime sandbox proxy) is the single network-confirmation channel.
 import { getToolName, type DynamicToolUIPart, type ToolUIPart } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
@@ -67,9 +69,9 @@ export function isApprovalRequestedPart(part: AnyToolUIPart): boolean {
 }
 
 /**
- * SandboxPermissionRequest metadata attached by the backend when a network
- * request (WebFetch / WebSearch / network-class Bash) needs per-request
- * approval under sandbox_network_mode allowlist (miss) or open (every time).
+ * SandboxPermissionRequest metadata attached by the backend when the CLI's
+ * sandbox-runtime proxy blocks a network egress to a non-allowlisted host
+ * (delivered via the SDK can_use_tool channel as "SandboxNetworkAccess").
  * Mirrors the runner's confirmation payload `networkRequest` block.
  */
 export interface SandboxNetworkRequestInfo {

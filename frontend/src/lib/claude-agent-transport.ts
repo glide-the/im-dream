@@ -137,7 +137,7 @@ interface BackendToolApprovalRequest {
   toolName: string;
   input?: unknown;
   // SandboxPermissionRequest discriminator (claude-agent-sandbox-network-
-  // permission-tool.md §5). Absent for generic confirmations.
+  // permission-tool.md §5A). Absent for generic confirmations.
   confirmationKind?: string;
   networkRequest?: {
     host: string | null;

@@ -26,16 +26,22 @@ Ink & Memory 通过 `claude_code_sdk`（Python SDK，`ClaudeSDKClient`，见 `ba
 CLI 在 headless 模式的降级路径是 `createSandboxAskCallback`（restored-src `cli/structuredIO.ts:731-753`）：把沙箱网络询问包装为 `can_use_tool` 控制请求发给 SDK 消费方：
 
 ```
-tool_name: SANDBOX_NETWORK_ACCESS_TOOL_NAME
+tool_name: SANDBOX_NETWORK_ACCESS_TOOL_NAME   # 常量值为 "SandboxNetworkAccess"（structuredIO.ts:62）
 input:     { host }
 ```
 
 回调出错或无应答时 fail-closed 返回 false（`structuredIO.ts:750`）。
 **实证：Ink & Memory backend 全库搜索 `can_use_tool` / `canUseTool` / `SANDBOX_NETWORK_ACCESS` —— 零命中，无任何处理。**
 
-### 2.3 当前 SDK 版本本身不具备该能力
+**关键分层认知（2026-07-26 修正，据官方文档 <https://code.claude.com/docs/en/agent-sdk/user-input>）**：PreToolUse 与 can_use_tool 是**两条独立的控制通道**。PreToolUse 是"发布到执行器之前"的工具权限 hook，只见得到工具调用评估；而沙箱网络询问是 CLI 内部系统级控制（sandbox-runtime 代理拦截 → `sandboxAskCallback`），不走工具权限评估，**PreToolUse 永远收不到它**——它只经 can_use_tool 控制请求投递。这解释了为什么已实现的 PreToolUse 层 SandboxPermissionRequest 模式（`claude-agent-sandbox-network-permission-tool.md`）覆盖不了 §4 的残留缺口：两者治理的是不同层面（执行前工具门控 vs 运行时代理拦截）。
 
-后端依赖 `claude_code_sdk 0.0.25`（`backend/.venv/lib/python3.12/site-packages/claude_code_sdk`）。**实证：包内搜索 `can_use_tool` / `canUseTool` / `tool_permission` —— 零命中。** 该版本没有 can_use_tool 回调能力，CLI 即使发出控制请求也无人应答，最终按 `structuredIO.ts:750` fail-closed 静默 deny。
+### 2.3 SDK 能力：0.0.25 已具备 can_use_tool（此前结论有误，已修正）
+
+后端依赖 `claude_code_sdk 0.0.25`（`backend/.venv/lib/python3.12/site-packages/claude_code_sdk`）。**修正后实证**：`types.py:308` 即 `ClaudeCodeOptions.can_use_tool: CanUseTool | None`，配套类型齐全——`PermissionResultAllow(updated_input, updated_permissions)`（types.py:66）、`PermissionResultDeny(message, interrupt)`（types.py:75）、`ToolPermissionContext(signal, suggestions)`（types.py:55）、`CanUseTool = Callable[[str, dict, ToolPermissionContext], Awaitable[PermissionResult]]`（types.py:85-87）。
+
+> 此前"包内搜索零命中、SDK 不具备该能力"的结论**有误**：当时 Grep 未开 `include_ignored`，`.venv` 被 `.gitignore` 静默跳过所致。真实根因不是"SDK 不支持"，而是**后端从未把 `can_use_tool` 参数接进 `ClaudeCodeOptions`**（构造点 `agent_runner.py:2164`），CLI 发出的 `SandboxNetworkAccess` 控制请求无人应答，按 `structuredIO.ts:750` fail-closed 静默 deny。
+>
+> 官方文档同时确认：can_use_tool 回调**不会为已被前置流程放行的工具触发**（"The callback never fires for auto-approved tools"），因此接线后不会与 PreToolUse 层已显式 allow/deny 的工具产生双重询问；沙箱网络询问不是工具调用，不受此前置去重影响。
 
 ## 3. 为什么日常未暴露
 
@@ -57,11 +63,13 @@ sandboxed Bash → sandbox-runtime 代理拦截（403 blocked-by-allowlist）
 
 用户无任何弹窗，只能在工具输出中看到 403，排障体验为黑盒。
 
+> **修复路径（2026-07-26 起实施）**：该缺口的正确治理点不是 PreToolUse（系统级控制请求不经过它），而是在 `ClaudeCodeOptions` 接线 `can_use_tool` 回调，把 `SandboxNetworkAccess` 控制请求桥接到 `on_tool_confirmation_request` 确认链——见 §5 方案 A。
+
 ## 5. 弥合方案
 
 | 方案 | 做法 | 代价 |
 |---|---|---|
-| A. 升级 SDK + 桥接 | 升级 `claude_code_sdk` 至支持 can_use_tool 的版本；将 `SANDBOX_NETWORK_ACCESS_TOOL_NAME` 请求桥接到现有 `on_tool_confirmation_request` 链（`backend/libs/claude_agent_kit/types.py:128`），统一弹窗 | 需评估新版 SDK 兼容性与升级风险 |
+| A. 接线 can_use_tool（已选定实施） | 在 `agent_runner.py` 构造 `ClaudeCodeOptions` 时传 `can_use_tool` 回调：`tool_name == "SandboxNetworkAccess"` 的请求桥接到现有 `on_tool_confirmation_request` 确认链（`backend/libs/claude_agent_kit/types.py:128`），复用 SSE `tool-approval-request` 与前端网络确认卡（`confirmationKind: "sandbox_network"`），返回 `PermissionResultAllow/Deny`。0.0.25 已具备该参数，**无需升级 SDK** | 小，纯接线；与 PreToolUse 层互补不冲突（官方保证 auto-approved 工具不重复触发） |
 | B. 保持 fail-closed + 收窄缺口 | 依赖 PreToolUse 预检 + "放行并记住"扩清单；在 deny 输出追加可诊断文案（提示到设置页追加域名） | 小，纯增量 |
 | C. 双层清单对齐 | 保证写入 CLI settings 的 allowlist 始终 ⊇ Ink & Memory 判定结果，消除判定漂移 | 小，配置层改动 |
 

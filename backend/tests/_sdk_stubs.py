@@ -5,6 +5,10 @@
 # [Sync] 2026-05-22: required because libs/claude_agent_kit/server/agent_runner.py
 #                    has a top-level hard import of claude_code_sdk.types.
 #                    Import this module BEFORE any libs.claude_agent_kit import.
+# [Sync] 2026-07-23: add can_use_tool permission types (PermissionResultAllow /
+#                    PermissionResultDeny / PermissionResult /
+#                    ToolPermissionContext) imported by agent_runner.py for the
+#                    sandbox-runtime network ask channel.
 
 """Pre-import stubs for claude_code_sdk.
 
@@ -67,6 +71,30 @@ class _StreamEvent(_KwargsBase):
     pass
 
 
+# can_use_tool permission types (SDK 0.0.25+), mirrored as kwargs classes.
+class _PermissionResultAllow(_KwargsBase):
+    def __init__(self, behavior="allow", updated_input=None, updated_permissions=None, **kwargs):
+        self.behavior = behavior
+        self.updated_input = updated_input
+        self.updated_permissions = updated_permissions
+        super().__init__(**kwargs)
+
+
+class _PermissionResultDeny(_KwargsBase):
+    def __init__(self, behavior="deny", message="", interrupt=False, **kwargs):
+        self.behavior = behavior
+        self.message = message
+        self.interrupt = interrupt
+        super().__init__(**kwargs)
+
+
+class _ToolPermissionContext(_KwargsBase):
+    def __init__(self, signal=None, suggestions=None, **kwargs):
+        self.signal = signal
+        self.suggestions = suggestions or []
+        super().__init__(**kwargs)
+
+
 _stub_module("claude_code_sdk",
     query=None,
     ClaudeSDKClient=_KwargsBase,
@@ -79,8 +107,12 @@ _stub_module("claude_code_sdk.types",
     HookMatcher=_HookMatcher,
     McpServerConfig=_KwargsBase,
     McpStdioServerConfig=_KwargsBase,
+    PermissionResult=(_PermissionResultAllow, _PermissionResultDeny),
+    PermissionResultAllow=_PermissionResultAllow,
+    PermissionResultDeny=_PermissionResultDeny,
     ResultMessage=_ResultMessage,
     StreamEvent=_StreamEvent,
     SystemMessage=_KwargsBase,
+    ToolPermissionContext=_ToolPermissionContext,
     UserMessage=_UserMessage,
 )

@@ -107,13 +107,18 @@
 #                    on_tasks_changed (v2) to the same frame; add
 #                    build_thread_todos_payload() REST helper backed by
 #                    get_tasks_dir()/read_task_items() with memory fallback.
-# [Sync] 2026-07-23: SandboxPermissionRequest — pass system_config
-#                    sandbox_network_allowed_domains into AgentRunOptions and
-#                    transparently forward confirmationKind/networkRequest from
-#                    the runner confirmation payload onto the SSE
-#                    tool-approval-request frame so the frontend can render the
-#                    network-variant confirmation card
-#                    (claude-agent-sandbox-network-permission-tool.md §5/§6).
+# [Sync] 2026-07-23: SandboxPermissionRequest — transparently forward
+#                    confirmationKind/networkRequest from the runner
+#                    confirmation payload onto the SSE tool-approval-request
+#                    frame so the frontend can render the network-variant
+#                    confirmation card
+#                    (claude-agent-sandbox-network-permission-tool.md §5/§5A).
+# [Sync] 2026-07-26: drop the AgentRunOptions sandbox_network_allowed_domains
+#                    pass-through — the PreToolUse network gate was removed as
+#                    wrong-layer duplication; the domains value stays in scope
+#                    only for workspace initialization (get_or_create_workspace
+#                    → CLI sandbox settings.json).  The confirmationKind /
+#                    networkRequest SSE pass-through stays (can_use_tool path).
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -1084,7 +1089,6 @@ class ClaudeAgentService:
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             im_full_access_enabled=im_full_access_enabled,
             sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
-            sandbox_network_allowed_domains=sandbox_network_allowed_domains,
             system_prompt=state.system_prompt,
             mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,

@@ -96,22 +96,35 @@
 #                    PostToolUse task observer hook with
 #                    INK_AGENT_TODO_EMIT_DEBOUNCE_MS debounce firing
 #                    callbacks.on_tasks_changed with derived TodoItem dicts.
-# [Sync] 2026-07-23: SandboxPermissionRequest — new PreToolUse step ②.5
-#                    (_apply_sandbox_network_permission) after the disabled
-#                    hard-deny and before full-access/low-sensitivity allows:
-#                    allowlist hits on WebFetch/WebSearch hosts get an explicit
-#                    allow (low-sensitivity subclass "sandbox_network_allowed");
-#                    allowlist misses, every network-class Bash command, and
-#                    every "open"-mode network request fall through to the
-#                    frontend confirmation side-channel, which now carries
-#                    confirmationKind="sandbox_network" + networkRequest
-#                    {host, policyMode, matchedAllowedDomain}.  Full-access and
-#                    low-sensitivity allow steps are skipped while a network
-#                    request is pending sandbox approval so "open" mode asks
-#                    every time.  Domain matching mirrors sandbox-runtime
-#                    (exact case-insensitive; "*.suffix" strict subdomains
-#                    only, no IP literals; bare "*" invalid → warning + never
-#                    matches).  Design: claude-agent-sandbox-network-permission-tool.md.
+# [Sync] 2026-07-23: SandboxPermissionRequest runtime-proxy channel — wire
+#                    ClaudeCodeOptions.can_use_tool=_can_use_tool: the CLI's
+#                    sandbox-runtime network ask ("SandboxNetworkAccess",
+#                    input {"host"}) is a system-level control request invisible
+#                    to PreToolUse; route it through the frontend confirmation
+#                    side-channel with confirmationKind="sandbox_network" +
+#                    networkRequest{host, policyMode, matchedAllowedDomain}.
+#                    Approved → PermissionResultAllow(updated_input);
+#                    rejected/failure/timeout → PermissionResultDeny mentioning
+#                    the host and the Settings allowedDomains remedy; any
+#                    exception fails closed.  Other tool names route through the
+#                    same generic chain (rare per official contract — the hook
+#                    resolves tools first, so no double-prompting).
+# [Sync] 2026-07-26: REMOVE the PreToolUse-layer network gate added 2026-07-23
+#                    (step ②.5 _apply_sandbox_network_permission plus the
+#                    _match_sandbox_network_allowed_domain /
+#                    _extract_network_tool_host / _is_ip_literal helpers, the
+#                    full-access/low-sensitivity skip guards, the step ⑦
+#                    payload discriminator, and the AgentRunOptions
+#                    sandbox_network_allowed_domains plumbing).  Rationale:
+#                    network policy is a system-level control enforced by
+#                    Claude Code's own sandbox (sandbox.network written into
+#                    per-thread .claude/settings.json by workspace.py) whose
+#                    asks arrive exclusively via can_use_tool — the PreToolUse
+#                    gate was wrong-layer duplication.  The hook's decision
+#                    flow returns to its pre-feature shape; can_use_tool is
+#                    now the single network-confirmation channel.  With one
+#                    trigger source left, the networkRequest.source field is
+#                    dropped entirely.
 
 """Claude Agent Runner.
 
@@ -126,7 +139,6 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-import ipaddress
 import json
 import logging
 import os
@@ -137,7 +149,6 @@ import tempfile
 import time
 from pathlib import Path
 from typing import Any, Callable, Optional
-from urllib.parse import urlparse
 from uuid import uuid4
 
 from claude_code_sdk.types import (  # type: ignore[import-untyped]
@@ -148,9 +159,13 @@ from claude_code_sdk.types import (  # type: ignore[import-untyped]
     HookMatcher,
     McpServerConfig,
     McpStdioServerConfig,
+    PermissionResult,
+    PermissionResultAllow,
+    PermissionResultDeny,
     ResultMessage,
     StreamEvent,
     SystemMessage,
+    ToolPermissionContext,
     UserMessage,
 )
 
@@ -479,16 +494,15 @@ def _apply_disabled_network_permission(
 
 
 # ---------------------------------------------------------------------------
-# SandboxPermissionRequest — per-request network approval (step ②.5)
+# SandboxPermissionRequest — runtime-proxy network approval (can_use_tool)
 #
 # Design: docs/design/claude-agent/claude-agent-sandbox-network-permission-tool.md
-# Disabled mode keeps the hard-deny helper above.  Allowlist mode grants an
-# explicit allow (low-sensitivity subclass ``sandbox_network_allowed``) to
-# WebFetch/WebSearch requests whose host matches
-# ``sandbox_network_allowed_domains``; unmatched hosts and every network-class
-# Bash command fall through to the frontend confirmation side-channel.  Open
-# mode sends every network request to confirmation — the low-sensitivity
-# auto-allow step must not swallow WebFetch/WebSearch there.
+# Network policy is a system-level control enforced by Claude Code's own
+# sandbox (sandbox.network written into per-thread .claude/settings.json by
+# workspace.py).  The CLI's runtime asks arrive exclusively via the SDK
+# ``can_use_tool`` control channel — there is deliberately NO PreToolUse-layer
+# network gate (the earlier step ②.5 was removed 2026-07-26 as wrong-layer
+# duplication).
 # ---------------------------------------------------------------------------
 
 # Discriminator attached to the confirmation payload (and the SSE
@@ -496,119 +510,11 @@ def _apply_disabled_network_permission(
 # network-variant confirmation card.  Absent for generic confirmations.
 SANDBOX_NETWORK_CONFIRMATION_KIND = "sandbox_network"
 
-
-def _is_ip_literal(host: str) -> bool:
-    """Return True when *host* is an IPv4/IPv6 literal (brackets allowed)."""
-
-    candidate = host.strip().strip("[]")
-    if not candidate:
-        return False
-    try:
-        ipaddress.ip_address(candidate)
-    except ValueError:
-        return False
-    return True
-
-
-def _match_sandbox_network_allowed_domain(host: str, pattern: str) -> bool:
-    """Return True when *host* matches one allowed-domain *pattern*.
-
-    Mirrors sandbox-runtime ``domain-pattern.ts`` semantics
-    (claude-agent-sandbox-network-permission-tool.md §4):
-
-    - ``example.com``   → exact match, case-insensitive; does NOT match
-      subdomains;
-    - ``*.example.com`` → strict subdomains only (``a.example.com`` matches,
-      bare ``example.com`` does not) and never matches IP literals;
-    - ``*``             → invalid value; never matches (callers log a warning).
-    """
-
-    normalized_host = host.strip().lower().rstrip(".")
-    normalized_pattern = pattern.strip().lower().rstrip(".")
-    if not normalized_host or not normalized_pattern:
-        return False
-    if normalized_pattern == "*":
-        return False
-    if normalized_pattern.startswith("*."):
-        if _is_ip_literal(normalized_host):
-            return False
-        suffix = normalized_pattern[2:]
-        if not suffix:
-            return False
-        # Strict subdomain: host must end with ".<suffix>" — this excludes the
-        # bare suffix itself and unrelated domains that merely share a tail.
-        return normalized_host.endswith(f".{suffix}")
-    return normalized_host == normalized_pattern
-
-
-def _extract_network_tool_host(
-    tool_name: str,
-    tool_input: Optional[dict[str, Any]] = None,
-) -> Optional[str]:
-    """Return the lowercase target host for WebFetch/WebSearch, else None.
-
-    Host extraction is only reliable for the built-in web tools whose input
-    carries a single ``url``.  Network-class Bash commands deliberately do NOT
-    get host extraction — pulling a URL out of a shell command is heuristic
-    and unreliable, so they always fall through to confirmation (conservative
-    rule, claude-agent-sandbox-network-permission-tool.md §4).
-    """
-
-    if tool_name not in _NETWORK_TOOL_NAMES:
-        return None
-    raw_url = str((tool_input or {}).get("url") or "").strip()
-    if not raw_url:
-        return None
-    try:
-        hostname = urlparse(raw_url).hostname
-    except ValueError:
-        return None
-    return hostname.lower() if hostname else None
-
-
-def _apply_sandbox_network_permission(
-    sandbox_network_mode: str,
-    sandbox_network_allowed_domains: Optional[list[str]],
-    tool_name: str,
-    tool_input: Optional[dict[str, Any]] = None,
-) -> Optional[HookJSONOutput]:
-    """Explicitly allow allowlisted network requests (PreToolUse step ②.5).
-
-    Only the ``allowlist`` mode can produce an explicit allow here, and only
-    for WebFetch/WebSearch requests whose extracted host matches
-    ``sandbox_network_allowed_domains`` — the low-sensitivity subclass
-    ``sandbox_network_allowed``.  Everything else returns None so the request
-    falls through to the frontend confirmation side-channel:
-
-    - unmatched hosts (allowlist mode);
-    - every network-class Bash command (host extraction is unreliable);
-    - every network request in ``open`` mode (ask every time).
-
-    ``disabled`` mode never reaches this helper — step ②
-    (:func:`_apply_disabled_network_permission`) hard-denies first.
-    """
-
-    if sandbox_network_mode != "allowlist":
-        return None
-    host = _extract_network_tool_host(tool_name, tool_input)
-    if host is None:
-        return None
-    for pattern in sandbox_network_allowed_domains or []:
-        if str(pattern).strip() == "*":
-            logger.warning(
-                "sandbox_network_allowed_domains contains bare '*', which is "
-                "invalid and never matches; use sandbox_network_mode='open' "
-                "for all-domain access instead."
-            )
-            continue
-        if _match_sandbox_network_allowed_domain(host, str(pattern)):
-            return HookJSONOutput(
-                hookSpecificOutput={
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "allow",
-                }
-            )
-    return None
+# Tool name used by the CLI's sandbox-runtime network ask, delivered through
+# the SDK ``can_use_tool`` control channel (not PreToolUse) when sandboxed Bash
+# hits a non-allowlisted host at the runtime proxy
+# (restored-src cli/structuredIO.ts).  Input shape: ``{"host": <hostname>}``.
+SANDBOX_NETWORK_ACCESS_TOOL_NAME = "SandboxNetworkAccess"
 
 # Tool names that have specialized confirmation semantics. Auto mode now uses
 # sensitivity classes: explicit query/context-selection/Skill tools can run,
@@ -1640,11 +1546,6 @@ class ClaudeAgentRunner:
                 if required_tool not in allowed_tools:
                     allowed_tools.append(required_tool)
         sandbox_network_mode = str(opts.sandbox_network_mode or "allowlist")
-        sandbox_network_allowed_domains = [
-            str(domain).strip()
-            for domain in (opts.sandbox_network_allowed_domains or [])
-            if str(domain).strip()
-        ]
         system_prompt = opts.system_prompt
         mcp_env = dict(opts.mcp_env or {})
         turn_runtime = dict(opts.turn_runtime or {})
@@ -1777,47 +1678,6 @@ class ClaudeAgentRunner:
             if disabled_network_permission is not None:
                 return disabled_network_permission
 
-            # ----------------------------------------------------------
-            # Step ②.5 SandboxPermissionRequest — per-request network
-            # approval (claude-agent-sandbox-network-permission-tool.md §3).
-            # Runs after the disabled-mode hard deny and before the
-            # full-access / low-sensitivity allows so a network request that
-            # needs approval can never be swallowed by either:
-            #   - allowlist + host matches allowed domains → explicit allow
-            #     (low-sensitivity subclass "sandbox_network_allowed");
-            #   - allowlist miss / network-class Bash / open mode → skip the
-            #     allow steps below and land on the frontend confirmation
-            #     side-channel with a "sandbox_network" discriminator.
-            # Non-network tools are unaffected (sandbox_network_confirmation
-            # stays None).
-            # ----------------------------------------------------------
-            sandbox_network_confirmation: Optional[dict[str, Any]] = None
-            if sandbox_network_mode in ("allowlist", "open"):
-                is_network_request = tool_name in _NETWORK_TOOL_NAMES or (
-                    tool_name == "Bash"
-                    and _is_network_bash_command(
-                        str((tool_input or {}).get("command") or "").strip()
-                    )
-                )
-                if is_network_request:
-                    sandbox_network_permission = _apply_sandbox_network_permission(
-                        sandbox_network_mode,
-                        sandbox_network_allowed_domains,
-                        tool_name,
-                        tool_input,
-                    )
-                    if sandbox_network_permission is not None:
-                        return sandbox_network_permission
-                    sandbox_network_confirmation = {
-                        "host": _extract_network_tool_host(tool_name, tool_input),
-                        "policyMode": sandbox_network_mode,
-                        # Always null in this iteration — a host match returns
-                        # the explicit allow above and never reaches the
-                        # confirmation payload.  Kept for the follow-up
-                        # "approve and remember" iteration.
-                        "matchedAllowedDomain": None,
-                    }
-
             workspace_boundary_permission = _apply_workspace_boundary_permission(
                 tool_name,
                 tool_input,
@@ -1831,7 +1691,6 @@ class ClaudeAgentRunner:
                 opts.im_full_access_enabled
                 and tool_choice != "none"
                 and tool_name not in _ANSWER_FORM_TOOL_NAMES
-                and sandbox_network_confirmation is None
             ):
                 return _explicit_pre_tool_use_allow()
 
@@ -1842,17 +1701,11 @@ class ClaudeAgentRunner:
                 if workspace_files_permission is not None:
                     return workspace_files_permission
 
-                # Network requests pending sandbox approval must NOT be
-                # swallowed by the low-sensitivity auto-allow (WebFetch /
-                # WebSearch are in _LOW_SENSITIVITY_QUERY_TOOL_NAMES): in
-                # "open" mode every network request asks every time, and in
-                # "allowlist" mode an unmatched host still asks.
-                if sandbox_network_confirmation is None:
-                    low_sensitivity_permission = _apply_low_sensitivity_query_permission(
-                        tool_name, tool_input
-                    )
-                    if low_sensitivity_permission is not None:
-                        return low_sensitivity_permission
+                low_sensitivity_permission = _apply_low_sensitivity_query_permission(
+                    tool_name, tool_input
+                )
+                if low_sensitivity_permission is not None:
+                    return low_sensitivity_permission
 
             # In auto mode, workspace files/ built-in file tools plus explicit
             # low-sensitivity query/context-selection/Skill tools are allowed
@@ -1866,17 +1719,6 @@ class ClaudeAgentRunner:
                     "tool_name": tool_name,
                     "input": tool_input,
                 }
-                # SandboxPermissionRequest discriminator — lets the service
-                # layer and frontend render the network-variant confirmation
-                # card (claude-agent-sandbox-network-permission-tool.md §5).
-                # Absent for generic confirmations (backward compatible).
-                if sandbox_network_confirmation is not None:
-                    confirmation_payload["confirmationKind"] = (
-                        SANDBOX_NETWORK_CONFIRMATION_KIND
-                    )
-                    confirmation_payload["networkRequest"] = (
-                        sandbox_network_confirmation
-                    )
                 try:
                     confirmation_result = await _await_confirmation(
                         callbacks.on_tool_confirmation_request,
@@ -1974,6 +1816,122 @@ class ClaudeAgentRunner:
                     "permissionDecisionReason": "需要用户确认但未收到响应",
                 }
             )
+
+        # ------------------------------------------------------------------
+        # can_use_tool callback (SDK control channel) — the SINGLE network
+        # confirmation channel.
+        #
+        # The CLI's sandbox-runtime network ask is a SYSTEM-LEVEL control
+        # request raised when sandboxed Bash hits a non-allowlisted host at
+        # the sandbox-runtime proxy.  It is NOT visible to PreToolUse — it
+        # arrives only through this channel as
+        #   tool_name == "SandboxNetworkAccess", input == {"host": <hostname>}
+        # (restored-src cli/structuredIO.ts).  Route it through the frontend
+        # confirmation side-channel with the sandbox_network discriminator.
+        # (The PreToolUse-layer network gate was removed 2026-07-26 — network
+        # policy is enforced by the CLI's own sandbox; this channel is the
+        # only place per-request network approval happens.)
+        #
+        # Other tool names: per the official contract, can_use_tool never
+        # fires for tools already resolved earlier in the permission flow —
+        # our PreToolUse hook returns explicit allow/deny for everything, so
+        # this branch should rarely fire (no double-prompting).  It still
+        # routes through the same generic confirmation chain for consistent
+        # UX and future-proofing.
+        #
+        # Always fail closed: any exception or missing callback denies.
+        # ------------------------------------------------------------------
+
+        async def _can_use_tool(
+            tool_name: str,
+            input_data: dict[str, Any],
+            context: ToolPermissionContext,
+        ) -> PermissionResult:
+            del context
+            is_sandbox_network_ask = tool_name == SANDBOX_NETWORK_ACCESS_TOOL_NAME
+            host = (
+                str(input_data.get("host") or "").strip().lower() or None
+                if is_sandbox_network_ask and isinstance(input_data, dict)
+                else None
+            )
+
+            def _sandbox_deny(reason: str) -> PermissionResultDeny:
+                target = host or "unknown host"
+                return PermissionResultDeny(
+                    message=(
+                        f"{reason}（目标主机：{target}。如需长期放行，"
+                        "可在设置中将该域名加入沙箱网络 allowedDomains。）"
+                    )
+                )
+
+            if not callbacks.on_tool_confirmation_request:
+                if is_sandbox_network_ask:
+                    return _sandbox_deny("网络访问需要用户确认，但确认通道不可用")
+                return PermissionResultDeny(message="需要用户确认但未收到响应")
+
+            tool_call_id = str(uuid4())
+            confirmation_payload: dict[str, Any] = {
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "input": input_data,
+            }
+            if is_sandbox_network_ask:
+                confirmation_payload["confirmationKind"] = (
+                    SANDBOX_NETWORK_CONFIRMATION_KIND
+                )
+                confirmation_payload["networkRequest"] = {
+                    "host": host,
+                    "policyMode": sandbox_network_mode,
+                    "matchedAllowedDomain": None,
+                }
+
+            try:
+                confirmation_result = await _await_confirmation(
+                    callbacks.on_tool_confirmation_request,
+                    confirmation_payload,
+                    host_loop=host_loop,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — fail closed
+                logger.warning(
+                    "can_use_tool confirmation failed: tool_name=%s host=%s",
+                    tool_name,
+                    host,
+                    exc_info=True,
+                )
+                if is_sandbox_network_ask:
+                    return _sandbox_deny("网络访问确认失败，已拦截")
+                return PermissionResultDeny(message="工具确认回调异常")
+
+            if (
+                confirmation_result
+                and isinstance(confirmation_result, dict)
+                and confirmation_result.get("approved") is True
+            ):
+                updated_input: dict[str, Any] = dict(input_data or {})
+                # Mirror PreToolUse step ⑦: merge frontend answers into the
+                # input for AskUserQuestion-style tools so Claude receives
+                # the collected responses.
+                if confirmation_result.get("answers") and tool_name in (
+                    "AskUserQuestion",
+                    "mcp__user__ask_user",
+                    "mcp__user__touch_animation",
+                ):
+                    updated_input = {
+                        **updated_input,
+                        "answers": confirmation_result["answers"],
+                    }
+                return PermissionResultAllow(updated_input=updated_input)
+
+            reason = (
+                (confirmation_result or {}).get("reason")
+                if isinstance(confirmation_result, dict)
+                else None
+            )
+            if is_sandbox_network_ask:
+                return _sandbox_deny(reason or "用户拒绝了该网络访问")
+            return PermissionResultDeny(message=reason or "用户拒绝执行该工具")
 
         # ------------------------------------------------------------------
         # PostToolUse hook
@@ -2178,6 +2136,11 @@ class ClaudeAgentRunner:
                         )
                     ],
                 },
+                # SDK control channel for system-level permission asks the
+                # PreToolUse hook cannot see — primarily the sandbox-runtime
+                # network ask ("SandboxNetworkAccess"); routed through the same
+                # frontend confirmation side-channel.
+                can_use_tool=_can_use_tool,
                 cwd=cwd or os.getcwd(),
                 mcp_servers=mcp_servers,
             )
