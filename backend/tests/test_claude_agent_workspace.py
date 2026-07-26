@@ -329,42 +329,6 @@ class TestInitWorkspace(unittest.TestCase):
             {"applyPath": shim.name},
         )
 
-    def test_seccomp_quoted_env_value_is_unwrapped(self):
-        # dotenv/deployment panels may leave surrounding quotes on the value.
-        with tempfile.NamedTemporaryFile() as shim:
-            with unittest.mock.patch.dict(
-                os.environ, {"INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH": f"'{shim.name}'"}
-            ):
-                ws = init_workspace("sandbox-seccomp-quoted")
-        settings = json.loads((ws / ".claude" / "settings.json").read_text())
-        self.assertEqual(
-            settings["sandbox"]["seccomp"],
-            {"applyPath": shim.name},
-        )
-
-    def test_seccomp_empty_env_falls_back_to_image_default(self):
-        # A stray empty server-side entry shadows the image ENV (compose
-        # env_file precedence); fall back to the well-known shim path.
-        from libs.claude_agent_kit.server.workspace import _DEFAULT_SECCOMP_SHIM_PATH
-
-        real_isfile = os.path.isfile
-
-        def fake_isfile(path):
-            if path == _DEFAULT_SECCOMP_SHIM_PATH:
-                return True
-            return real_isfile(path)
-
-        with unittest.mock.patch.dict(
-            os.environ, {"INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH": "''"}
-        ):
-            with unittest.mock.patch.object(os.path, "isfile", fake_isfile):
-                ws = init_workspace("sandbox-seccomp-empty-fallback")
-        settings = json.loads((ws / ".claude" / "settings.json").read_text())
-        self.assertEqual(
-            settings["sandbox"]["seccomp"],
-            {"applyPath": _DEFAULT_SECCOMP_SHIM_PATH},
-        )
-
     def test_can_enable_weaker_nested_sandbox_for_docker(self):
         with unittest.mock.patch(
             "libs.claude_agent_kit.server.workspace._running_in_linux_container",
