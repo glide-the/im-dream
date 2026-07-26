@@ -1,17 +1,25 @@
 # Claude Agent 沙箱网络审批 — SDK 通道缺口分析
 
-> 状态：现状分析（含弥合方案，未实施）
+> 状态：**方案 A 已实施（2026-07-26，含 SDK 迁移）**——§5 方案 A 已随
+> `claude-code-sdk 0.0.25 → claude-agent-sdk 0.2.128` 迁移一并落地：
+> `agent_runner.py` 接线 `can_use_tool=_can_use_tool`，`SandboxNetworkAccess`
+> 控制请求桥接至 `on_tool_confirmation_request` 确认链，前端网络变体确认卡
+> 上线。SDK 迁移是实施前提：0.0.25 的控制响应序列化为旧方言
+> `{"allow": true}` / `{"allow": false, "reason"}`，被部署的新版 CLI 按
+> `permissionToolOutputSchema`（`{behavior:'allow', updatedInput}` /
+> `{behavior:'deny', message}`）拒绝，导致审批 fail-closed（生产表现为
+> curl 403 blocked-by-allowlist）；0.2.128 序列化对齐已验证（见 §2.3 注）。
 > 关联文档：
-> - `claude-agent-sandbox-network-permission-tool.md`（已实现的 PreToolUse 层 SandboxPermissionRequest 模式）
+> - `claude-agent-sandbox-network-permission-tool.md`（SandboxPermissionRequest 现行设计）
 > - `claude-agent-sandbox-network-permission-sequence.md`（模块交互图）
 > - `../sandbox-wildcard-network-issue/interaction-design.md`（Claude Code 原生 Hook 现状分析，§5）
-> 日期：2026-07-23
+> 日期：2026-07-23；2026-07-26 实施方案 A（含 SDK 迁移）
 
 ---
 
 ## 1. 问题
 
-Ink & Memory 通过 `claude_code_sdk`（Python SDK，`ClaudeSDKClient`，见 `backend/libs/claude_agent_kit/server/simple_cas_client.py:24`）在本地以 headless 方式驱动 Claude Code。问题：**能否直接触达 Claude Code 原生的沙箱网络审批弹窗（SandboxPermissionRequest）？**
+Ink & Memory 通过 `claude_agent_sdk`（Python SDK，`ClaudeSDKClient`，见 `backend/libs/claude_agent_kit/server/simple_cas_client.py`；2026-07-26 前为 `claude_code_sdk`）在本地以 headless 方式驱动 Claude Code。问题：**能否直接触达 Claude Code 原生的沙箱网络审批弹窗（SandboxPermissionRequest）？**
 
 **结论：触达不到，且是三层原因叠加。**
 
@@ -35,13 +43,15 @@ input:     { host }
 
 **关键分层认知（2026-07-26 修正，据官方文档 <https://code.claude.com/docs/en/agent-sdk/user-input>）**：PreToolUse 与 can_use_tool 是**两条独立的控制通道**。PreToolUse 是"发布到执行器之前"的工具权限 hook，只见得到工具调用评估；而沙箱网络询问是 CLI 内部系统级控制（sandbox-runtime 代理拦截 → `sandboxAskCallback`），不走工具权限评估，**PreToolUse 永远收不到它**——它只经 can_use_tool 控制请求投递。这解释了为什么已实现的 PreToolUse 层 SandboxPermissionRequest 模式（`claude-agent-sandbox-network-permission-tool.md`）覆盖不了 §4 的残留缺口：两者治理的是不同层面（执行前工具门控 vs 运行时代理拦截）。
 
-### 2.3 SDK 能力：0.0.25 已具备 can_use_tool（此前结论有误，已修正）
+### 2.3 SDK 能力：0.0.25 已具备 can_use_tool（此前结论有误，已修正；2026-07-26 起依赖已迁移至 claude-agent-sdk 0.2.128）
 
-后端依赖 `claude_code_sdk 0.0.25`（`backend/.venv/lib/python3.12/site-packages/claude_code_sdk`）。**修正后实证**：`types.py:308` 即 `ClaudeCodeOptions.can_use_tool: CanUseTool | None`，配套类型齐全——`PermissionResultAllow(updated_input, updated_permissions)`（types.py:66）、`PermissionResultDeny(message, interrupt)`（types.py:75）、`ToolPermissionContext(signal, suggestions)`（types.py:55）、`CanUseTool = Callable[[str, dict, ToolPermissionContext], Awaitable[PermissionResult]]`（types.py:85-87）。
+后端当时依赖 `claude_code_sdk 0.0.25`（`backend/.venv/lib/python3.12/site-packages/claude_code_sdk`）。**修正后实证**：`types.py:308` 即 `ClaudeCodeOptions.can_use_tool: CanUseTool | None`，配套类型齐全——`PermissionResultAllow(updated_input, updated_permissions)`（types.py:66）、`PermissionResultDeny(message, interrupt)`（types.py:75）、`ToolPermissionContext(signal, suggestions)`（types.py:55）、`CanUseTool = Callable[[str, dict, ToolPermissionContext], Awaitable[PermissionResult]]`（types.py:85-87）。
 
 > 此前"包内搜索零命中、SDK 不具备该能力"的结论**有误**：当时 Grep 未开 `include_ignored`，`.venv` 被 `.gitignore` 静默跳过所致。真实根因不是"SDK 不支持"，而是**后端从未把 `can_use_tool` 参数接进 `ClaudeCodeOptions`**（构造点 `agent_runner.py:2164`），CLI 发出的 `SandboxNetworkAccess` 控制请求无人应答，按 `structuredIO.ts:750` fail-closed 静默 deny。
 >
 > 官方文档同时确认：can_use_tool 回调**不会为已被前置流程放行的工具触发**（"The callback never fires for auto-approved tools"），因此接线后不会与 PreToolUse 层已显式 allow/deny 的工具产生双重询问；沙箱网络询问不是工具调用，不受此前置去重影响。
+>
+> **后续注（2026-07-26，实际生产 bug）**：0.0.25 虽有 `can_use_tool` 参数，但其控制协议响应序列化是**旧方言**——`{"allow": true}` / `{"allow": false, "reason"}`；部署的新版 CLI 按 `permissionToolOutputSchema` 校验（期望 `{behavior:'allow', updatedInput}` / `{behavior:'deny', message}`），校验失败 → 审批 fail-closed（生产表现为 curl 403 blocked-by-allowlist）。因此"无需升级 SDK"的判断作废，**必须迁移到改名后的 `claude-agent-sdk`**（已落地 0.2.128：`_internal/query.py` 的 can_use_tool 分支输出 `{"behavior": "allow", "updatedInput": …}` / `{"behavior": "deny", "message": …}`，方言对齐已验证）。
 
 ## 3. 为什么日常未暴露
 
@@ -63,17 +73,17 @@ sandboxed Bash → sandbox-runtime 代理拦截（403 blocked-by-allowlist）
 
 用户无任何弹窗，只能在工具输出中看到 403，排障体验为黑盒。
 
-> **修复路径（2026-07-26 起实施）**：该缺口的正确治理点不是 PreToolUse（系统级控制请求不经过它），而是在 `ClaudeCodeOptions` 接线 `can_use_tool` 回调，把 `SandboxNetworkAccess` 控制请求桥接到 `on_tool_confirmation_request` 确认链——见 §5 方案 A。
+> **修复路径（2026-07-26 已实施）**：该缺口的正确治理点不是 PreToolUse（系统级控制请求不经过它），而是在 `ClaudeAgentOptions` 接线 `can_use_tool` 回调，把 `SandboxNetworkAccess` 控制请求桥接到 `on_tool_confirmation_request` 确认链——见 §5 方案 A。
 
 ## 5. 弥合方案
 
 | 方案 | 做法 | 代价 |
 |---|---|---|
-| A. 接线 can_use_tool（已选定实施） | 在 `agent_runner.py` 构造 `ClaudeCodeOptions` 时传 `can_use_tool` 回调：`tool_name == "SandboxNetworkAccess"` 的请求桥接到现有 `on_tool_confirmation_request` 确认链（`backend/libs/claude_agent_kit/types.py:128`），复用 SSE `tool-approval-request` 与前端网络确认卡（`confirmationKind: "sandbox_network"`），返回 `PermissionResultAllow/Deny`。0.0.25 已具备该参数，**无需升级 SDK** | 小，纯接线；与 PreToolUse 层互补不冲突（官方保证 auto-approved 工具不重复触发） |
+| A. 接线 can_use_tool（**已实施 2026-07-26**） | 在 `agent_runner.py` 构造 `ClaudeAgentOptions` 时传 `can_use_tool` 回调：`tool_name == "SandboxNetworkAccess"` 的请求桥接到现有 `on_tool_confirmation_request` 确认链（`backend/libs/claude_agent_kit/types.py`），复用 SSE `tool-approval-request` 与前端网络确认卡（`confirmationKind: "sandbox_network"`），返回 `PermissionResultAllow/Deny`。**实施前提：SDK 迁移 `claude-code-sdk 0.0.25` → `claude-agent-sdk 0.2.128`**——0.0.25 序列化方言过旧被新版 CLI 拒绝（§2.3 后续注） | 小，纯接线；与 PreToolUse 层互补不冲突（官方保证 auto-approved 工具不重复触发） |
 | B. 保持 fail-closed + 收窄缺口 | 依赖 PreToolUse 预检 + "放行并记住"扩清单；在 deny 输出追加可诊断文案（提示到设置页追加域名） | 小，纯增量 |
 | C. 双层清单对齐 | 保证写入 CLI settings 的 allowlist 始终 ⊇ Ink & Memory 判定结果，消除判定漂移 | 小，配置层改动 |
 
-> 待决策：先做 A 的可行性评估（新版 SDK 的 can_use_tool 形态与 0.0.25 升级差异），或直接实施 B+C。
+> 实施记录（2026-07-26）：方案 A 已落地，前提为 SDK 迁移至 `claude-agent-sdk 0.2.128`（`requirements.txt` / `pyproject.toml` 已更新；`backend/.venv` 已安装并卸载 `claude-code-sdk`）。序列化对齐证据：`claude_agent_sdk/_internal/query.py` can_use_tool 分支输出 `{"behavior": "allow", "updatedInput": …}` / `{"behavior": "deny", "message": …}`，无旧 `{"allow": true/false}` 方言。B/C 仍为可选增量，未实施。
 
 ## 6. 附：关联概念澄清（三处）
 

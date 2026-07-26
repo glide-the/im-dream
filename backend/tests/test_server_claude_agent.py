@@ -47,9 +47,9 @@ def _stub_module(name: str, **attrs) -> types.ModuleType:
     return mod
 
 
-# Stub claude_code_sdk so runner.py doesn't fail on import
-if "claude_code_sdk" not in sys.modules:
-    sdk_types = _stub_module("claude_code_sdk.types")
+# Stub claude_agent_sdk so runner.py doesn't fail on import
+if "claude_agent_sdk" not in sys.modules:
+    sdk_types = _stub_module("claude_agent_sdk.types")
 
     class _SdkStub:
         def __init__(self, **kwargs):
@@ -59,7 +59,7 @@ if "claude_code_sdk" not in sys.modules:
     class AssistantMessage(_SdkStub):
         pass
 
-    class ClaudeCodeOptions(_SdkStub):
+    class ClaudeAgentOptions(_SdkStub):
         pass
 
     class HookContext(_SdkStub):
@@ -91,7 +91,7 @@ if "claude_code_sdk" not in sys.modules:
 
     for _cls in [
         AssistantMessage,
-        ClaudeCodeOptions,
+        ClaudeAgentOptions,
         HookContext,
         HookJSONOutput,
         HookMatcher,
@@ -107,7 +107,7 @@ if "claude_code_sdk" not in sys.modules:
     class ClaudeSDKClient:
         pass
 
-    _stub_module("claude_code_sdk", ClaudeSDKClient=ClaudeSDKClient, query=None, types=sdk_types)
+    _stub_module("claude_agent_sdk", ClaudeSDKClient=ClaudeSDKClient, query=None, types=sdk_types)
 
 # Stub heavy optional dependencies so server.py can be imported in minimal envs.
 

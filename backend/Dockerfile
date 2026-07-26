@@ -82,7 +82,7 @@ WORKDIR /app
 
 COPY requirements.txt ./
 # Use aliyun mirror as primary, PyPI as fallback for packages not yet mirrored
-# (e.g. claude-code-sdk which is newly published by Anthropic).
+# (e.g. claude-agent-sdk, the renamed claude-code-sdk successor package).
 RUN python -m pip install --no-cache-dir --timeout 180 --retries 10 \
     --extra-index-url http://mirrors.cloud.aliyuncs.com \
     -r requirements.txt

@@ -11,6 +11,15 @@
 > **[Sync] 2026-06-21**: Settings `sandbox_network_mode="disabled"` is
 > enforced before full-access and low-sensitivity allow decisions; network
 > tools receive explicit PreToolUse deny.
+> **[Sync] 2026-07-26**: SDK 迁移 `claude-code-sdk 0.0.25` → `claude-agent-sdk
+> 0.2.128`——`ClaudeAgentOptions` 改名与依赖版本更新（§依赖表）；
+> `debug_stderr` 废弃改为 `options.stderr` 回调捕获 CLI stderr；
+> 新 transport 默认优先 bundled CLI（`cli_path` 可覆盖）；hooks /
+> extra_args / resume / partial messages / ClaudeSDKClient API 不变。
+> **[Sync] 2026-07-26**: HOTFIX — hook 输出改为纯字典字面量：
+> `HookJSONOutput` 在 0.2.128 为 TypedDict Union 不可调用，构造调用曾导致
+> PostToolUse 观察器崩溃与 PreToolUse 决策静默丢失（§5 异常映射、
+> §类型映射表已更新为 dict 契约）。
 
 # ClaudeAgentRunner 模块设计
 
@@ -26,7 +35,7 @@
 |------|------|
 | 源模块 | `glide-the/claude-agent-next-kit` 的 `app/lib/claude-agent-kit`（TypeScript / Next.js） |
 | 目标模块 | `backend/claude_agent/`（Python 3.12） |
-| 核心依赖 | `claude-code-sdk >= 0.0.25`（Anthropic 官方 Python Agent SDK） |
+| 核心依赖 | `claude-agent-sdk >= 0.2.128`（Anthropic 官方 Python Agent SDK，2026-07-26 自 `claude-code-sdk 0.0.25` 迁移——旧包 can_use_tool 控制响应序列化方言与新版 CLI 不兼容） |
 | 迁移目标 | 1. 等价功能的 Python 实现；2. 在 `docs/app/design/` 中完整记录模块设计 |
 
 ---
@@ -115,12 +124,12 @@ sequenceDiagram
     participant App as 应用层
     participant Runner as ClaudeAgentRunner
     participant Client as SimpleClaudeAgentSDKClient
-    participant SDK as claude_code_sdk.query()
+    participant SDK as claude_agent_sdk.query()
     participant Claude as Claude 子进程
 
     App->>Runner: run_streaming(opts, callbacks)
     Runner->>Runner: build_user_message_content()
-    Runner->>Runner: ClaudeCodeOptions 构建<br/>(allowed_tools + PreToolUse hooks + stdio MCP)
+    Runner->>Runner: ClaudeAgentOptions 构建<br/>(allowed_tools + PreToolUse hooks + stdio MCP)
     Runner->>Client: query_stream(generate_messages(), options)
     Client->>SDK: sdk_query(prompt, options)
     SDK->>Claude: 启动 Claude 子进程
@@ -167,7 +176,7 @@ Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_u
 
 当前 Runner 的 tool_choice 权限配置：
 
-| tool_choice | `ClaudeCodeOptions.allowed_tools` | `PreToolUse` | 目的 |
+| tool_choice | `ClaudeAgentOptions.allowed_tools` | `PreToolUse` | 目的 |
 |---|---:|---|---|
 | `auto` | `DEFAULT_ALLOWED_TOOLS` / request override | `files/` 内置文件工具、低敏查询工具、`Skill`、`switch_editor` 显式 allow；高敏工具等待 `on_tool_confirmation_request` | Agent 可生成 workspace 产物并查询/选择上下文；执行/写入/交互动作需前端确认后才授予本次工具权限 |
 | `manual` | `DEFAULT_ALLOWED_TOOLS` / request override | 等待 `on_tool_confirmation_request` | 调试或敏感工具确认侧路 |
@@ -177,7 +186,7 @@ Runner 注册 `PreToolUse` hook，在工具执行前拿到 SDK 提供的 `tool_u
 
 Bash 的工作区隔离不在 Runner 中实现。Service/Workspace 层会在每个
 thread 的 `{cwd}/.claude/settings.json` 写入 Claude Code `sandbox` 配置；
-Runner 只负责把 `ClaudeCodeOptions.cwd` 指向该 thread workspace。复杂
+Runner 只负责把 `ClaudeAgentOptions.cwd` 指向该 thread workspace。复杂
 shell 语法进入 Claude Code Bash 后，由原生 sandbox 在运行时执行
 filesystem 边界。设计细节见
 [`claude-agent-workspace-sandbox.md`](./claude-agent-workspace-sandbox.md)。
@@ -187,7 +196,7 @@ filesystem 边界。设计细节见
 ```mermaid
 sequenceDiagram
     participant Claude as Claude Agent
-    participant SDK as claude_code_sdk
+    participant SDK as claude_agent_sdk
     participant Runner as ClaudeAgentRunner PreToolUse
     participant App as 应用层 on_tool_confirmation_request
 
@@ -225,7 +234,7 @@ sequenceDiagram
   - `host_loop.is_running() is False` → 关闭未完成的 coroutine 并返回 `None`，让 hook fallback 到 deny 分支，避免悬挂。
 - 异常映射：
   - `CancelledError` 透传，让 SDK 的 anyio TaskGroup 正常取消。
-  - 任意其它异常 → `logger.exception` 记录，`pending_tool_calls.pop(...)`，返回 `HookJSONOutput(decision="block", systemMessage="工具确认回调异常")`，Runner 不会因为单次回调失败而僵死。
+  - 任意其它异常 → `logger.exception` 记录，`pending_tool_calls.pop(...)`，返回 `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "工具确认回调异常"}}`（纯字典字面量，2026-07-26 起），Runner 不会因为单次回调失败而僵死。
 
 ### 5.1 动画事件确认（AskUserQuestion 宠物动作场景）
 
@@ -282,14 +291,14 @@ LLM 读取 `answers.trigger` / `answers.choiceId` 决定下一步动作。
 | `randomUUID()` | `str(uuid4())` | `uuid.uuid4()` |
 | `Promise<void> \| void` | `Awaitable[None] \| None` | 支持 sync / async 回调 |
 | `PreToolUse` | `async def _pre_tool_use_hook(hook_input, tool_use_id, context)` | Python SDK hook 签名，优先使用 SDK 提供的 `tool_use_id` |
-| `HookJSONOutput { hookSpecificOutput.tool_input }` | `HookJSONOutput(hookSpecificOutput={"tool_input": updated_input})` | `updated_input = {**tool_input, answers: {...}}` 支持动画事件格式 |
-| `HookJSONOutput { decision: "block" }` | `HookJSONOutput(decision="block", systemMessage=reason)` | manual 模式拒绝或超时时阻断工具 |
+| `HookJSONOutput { hookSpecificOutput.tool_input }` | `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": updated_input}}` | 纯字典字面量（claude-agent-sdk 0.2.128 起 `HookJSONOutput` 为 TypedDict Union 不可调用）；`updated_input = {**tool_input, answers: {...}}` 支持动画事件格式 |
+| `HookJSONOutput { decision: "block" }` | `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}` | manual 模式拒绝或超时时阻断工具 |
 | `options.toolUseID` | `tool_use_id` | SDK hook 参数直接提供；缺失时才用 `uuid4()` fallback |
-| `SDKMessage` | `Message` (`UserMessage \| AssistantMessage \| SystemMessage \| ResultMessage \| StreamEvent`) | claude_code_sdk 联合类型 |
+| `SDKMessage` | `Message` (`UserMessage \| AssistantMessage \| SystemMessage \| ResultMessage \| StreamEvent`) | claude_agent_sdk 联合类型 |
 | `message.session_id` | `message.session_id`（仅 `ResultMessage` / `StreamEvent` 有此字段） | 需要 isinstance 判断 |
 | `process.cwd()` | `os.getcwd()` | — |
-| `import { query } from "@anthropic-ai/claude-agent-sdk"` | `from claude_code_sdk import query as sdk_query` | — |
-| `include_partial_messages: true` | `ClaudeCodeOptions.include_partial_messages = True` | — |
+| `import { query } from "@anthropic-ai/claude-agent-sdk"` | `from claude_agent_sdk import query as sdk_query` | — |
+| `include_partial_messages: true` | `ClaudeAgentOptions.include_partial_messages = True` | — |
 | `AbortController` | 暂未实现（Python SDK 暂无对等机制） | 可通过 `asyncio.CancelledError` 扩展 |
 
 ---
@@ -368,7 +377,7 @@ asyncio.run(main())
 
 | 包 | 版本 | 说明 |
 |----|------|------|
-| `claude-code-sdk` | `>=0.0.25` | Anthropic 官方 Python Agent SDK（运行 Claude 子进程） |
+| `claude-agent-sdk` | `>=0.2.128` | Anthropic 官方 Python Agent SDK（运行 Claude 子进程；2026-07-26 自 `claude-code-sdk` 改名包迁移） |
 | `python-dotenv` | `>=1.0.1` | 已在 requirements.txt 中 |
 
 ---

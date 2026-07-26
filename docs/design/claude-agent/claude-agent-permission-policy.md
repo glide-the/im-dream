@@ -119,29 +119,29 @@ High-sensitivity tools require frontend confirmation in `auto` and `manual` mode
 
 ## 5. Hook Output Contract
 
-Every backend allow decision must use the Claude Code CLI 2.1+ `PreToolUse` format:
+Every backend allow decision must use the Claude Code CLI 2.1+ `PreToolUse` format. Hook callbacks return **plain dict literals** — in claude-agent-sdk 0.2.128 `HookJSONOutput` is a Union of TypedDicts, NOT callable **[2026-07-26]**:
 
 ```python
-HookJSONOutput(
-    hookSpecificOutput={
+{
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
     }
-)
+}
 ```
 
-Do not use empty `HookJSONOutput()` to mean allow. Empty output only declines to make a hook-level decision; Claude Code then falls back to its own permission layer, which can still show a native permission prompt.
+Do not use empty `{}` to mean allow. Empty output only declines to make a hook-level decision; Claude Code then falls back to its own permission layer, which can still show a native permission prompt.
 
 Deny decisions use:
 
 ```python
-HookJSONOutput(
-    hookSpecificOutput={
+{
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,
     }
-)
+}
 ```
 
 ## 6. Decision Order

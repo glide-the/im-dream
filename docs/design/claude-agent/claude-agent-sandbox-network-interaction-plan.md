@@ -104,6 +104,13 @@ Controls use the reference layout supplied by the user:
 > (Docker networking, host firewalls) can still block outbound access
 > independently.
 
+> **[2026-07-26] Sibling key.** Filesystem write policy gained a parallel
+> Settings key `sandbox_fs_allowed_write_paths` (extra absolute writable
+> paths; Claude's sandbox TMPDIR is default-allowed). It shares this
+> plumbing pattern but is documented in
+> `claude-agent-workspace-sandbox.md` §2.1 — out of scope for this
+> network-focused plan.
+
 Allowlist editing:
 
 - Show only when proxy network access is enabled and "自定义域" is selected.

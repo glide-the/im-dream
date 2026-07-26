@@ -319,6 +319,7 @@ Known fields include:
   "workspace_enabled": true,
   "sandbox_network_mode": "allowlist",
   "sandbox_network_allowed_domains": ["raw.githubusercontent.com", "github.com"],
+  "sandbox_fs_allowed_write_paths": ["/data/out"],
   "im_full_access_enabled": false,
   "theme": "system",
   "env_vars": {
@@ -333,10 +334,15 @@ Merges accepted fields into the current user's Settings configuration.
 Unknown keys are ignored. `sandbox_network_mode` accepts `disabled`,
 `allowlist`, or `open`. `sandbox_network_allowed_domains` is sanitized to a
 flat domain-pattern list; use `open` mode instead of sending a bare `*`.
+`sandbox_fs_allowed_write_paths` is sanitized to absolute paths only
+(trailing slashes stripped, deduped, capped).
 
 The sandbox network fields are consumed on the next Claude Agent workspace
 initialization and written to the thread-local `.claude/settings.json`
-`sandbox.network` block.
+`sandbox.network` block; `sandbox_fs_allowed_write_paths` is appended to the
+`sandbox.filesystem.allowWrite` list after the thread workspace and Claude
+Code's own sandbox TMPDIR (`$CLAUDE_TMPDIR` or `/tmp/claude-$UID`, always
+allowed when the sandbox is enabled).
 
 ---
 

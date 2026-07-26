@@ -15,6 +15,13 @@
 >   附录 A。`sandbox_network_mode` plumbing 保留（can_use_tool payload 仍
 >   上报 `policyMode`）；system_config 键与 workspace.py 的 settings.json
 >   写入器不在拆除范围——它们配置 CLI 自身沙箱。
+> - **2026-07-26 SDK 迁移（can_use_tool 通道的生效前提）**：
+>   `claude-code-sdk 0.0.25` → `claude-agent-sdk 0.2.128`。0.0.25 虽有
+>   `can_use_tool` 参数，但控制响应序列化为旧方言 `{"allow": true}`，
+>   被部署的新版 CLI 按 `permissionToolOutputSchema` 拒绝 → 审批
+>   fail-closed（生产 bug）；0.2.128 输出 `{behavior:'allow', updatedInput}`
+>   / `{behavior:'deny', message}`，方言对齐已验证。见
+>   `claude-agent-sandbox-network-sdk-gap.md` §2.3 后续注与 §5 实施记录。
 > 关联文档：
 > - `claude-agent-permission-policy.md`（权限等级与决策顺序）
 > - `claude-agent-tool-confirmation-flow.md`（工具确认链路，§6.3）
@@ -48,12 +55,12 @@ Ink & Memory 既有 `on_tool_confirmation_request` 确认链路，成为**唯一
 ## 2. 现行机制：can_use_tool 确认通道
 
 - 入参：`tool_name == "SandboxNetworkAccess"`，`input == {"host": <hostname>}`；
-- SDK 支持：`claude_code_sdk 0.0.25` 的 `ClaudeCodeOptions.can_use_tool: CanUseTool | None`（`types.py:308`），结果类型 `PermissionResultAllow(updated_input, updated_permissions)` / `PermissionResultDeny(message, interrupt)`；
+- SDK 支持：`claude_agent_sdk 0.2.128` 的 `ClaudeAgentOptions.can_use_tool: CanUseTool | None`（2026-07-26 迁移；此前 `claude_code_sdk 0.0.25` 的序列化方言过旧被新版 CLI 拒绝，见状态头），结果类型 `PermissionResultAllow(updated_input, updated_permissions)` / `PermissionResultDeny(message, interrupt)`；
 - 官方契约保证：`can_use_tool` 不会对权限流中已被解析的工具再次触发——本系统的 PreToolUse hook 对所有工具返回显式 allow/deny，因此接线后**不会重复弹窗**（含 AskUserQuestion，其由 hook 路径带 answers 解决）。
 
 实现（`agent_runner.py`）：与 `_pre_tool_use_hook` 同闭包定义
 `_can_use_tool(tool_name, input_data, context)` 并传入
-`ClaudeCodeOptions(can_use_tool=...)`：
+`ClaudeAgentOptions(can_use_tool=...)`：
 
 | 触发 | 行为 |
 |---|---|

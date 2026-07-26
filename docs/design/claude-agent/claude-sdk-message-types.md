@@ -1,5 +1,5 @@
 > **迁移来源**: Pawkeyland docs/app/design/Claude SDK Message 事件类型层级.md
-> Claude Code SDK 返回的 SSE 消息事件类型参考，适用于所有使用 claude-code-sdk 的项目。
+> Claude Code SDK 返回的 SSE 消息事件类型参考，适用于所有使用 claude-agent-sdk 的项目。
 
 # Claude SDK Message 事件类型层级
 

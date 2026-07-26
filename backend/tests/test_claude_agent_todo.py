@@ -41,7 +41,7 @@ ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before kit imports
+import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before kit imports
 
 from libs.claude_agent_kit.server import sdk_env as sdk_env_module
 from libs.claude_agent_kit.server.agent_runner import (
@@ -617,7 +617,7 @@ class TestTodoToolPermission(unittest.TestCase):
             with self.subTest(tool=tool):
                 result = _apply_low_sensitivity_query_permission(tool, {})
                 self.assertIsNotNone(result)
-                specific = getattr(result, "hookSpecificOutput", {})
+                specific = (result.get("hookSpecificOutput", {}) if isinstance(result, dict) else getattr(result, "hookSpecificOutput", {}))
                 self.assertEqual(specific.get("hookEventName"), "PreToolUse")
                 self.assertEqual(specific.get("permissionDecision"), "allow")
 

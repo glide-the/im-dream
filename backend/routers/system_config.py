@@ -10,6 +10,9 @@
 # [Sync] 2026-06-21: accept sandbox network policy and allowed domains.
 # [Sync] 2026-06-25: return merged config from PUT so Settings can hydrate
 #                    sanitized sandbox-network values after save.
+# [Sync] 2026-07-26: accept sandbox_fs_allowed_write_paths — extra absolute
+#                    writable paths for the per-thread Bash sandbox
+#                    (absolute-only, trailing-slash stripped, deduped, capped).
 
 """System configuration API.
 
@@ -29,6 +32,10 @@ The system config is a freeform dict stored per user.  Known fields:
                             ("disabled" | "allowlist" | "open")
   sandbox_network_allowed_domains: list[str] — domains pre-allowed when the
                             sandbox network policy is "allowlist"
+  sandbox_fs_allowed_write_paths: list[str] — additional absolute paths the
+                            per-thread Bash sandbox may write (appended to
+                            filesystem.allowWrite after the thread workspace
+                            and Claude Code's own sandbox TMPDIR)
   im_full_access_enabled: bool — whether Claude-agent PreToolUse approvals
                             should allow exposed tools automatically except
                             AskUserQuestion-style answer forms
@@ -56,6 +63,8 @@ _ENV_VARS_MAX_ENTRIES = 64
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 _SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_ENTRIES = 64
 _SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_LEN = 253
+_SANDBOX_FS_ALLOWED_WRITE_PATH_MAX_ENTRIES = 32
+_SANDBOX_FS_ALLOWED_WRITE_PATH_MAX_LEN = 512
 _SANDBOX_DOMAIN_PATTERN = re.compile(
     r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
@@ -122,6 +131,35 @@ def _sanitize_sandbox_network_allowed_domains(raw: object) -> list[str]:
     return result
 
 
+def _sanitize_sandbox_fs_allowed_write_paths(raw: object) -> list[str]:
+    """Validate and normalize sandbox filesystem extra writable paths.
+
+    Mirrors the domains sanitizer's reject-silently policy: accepts a list
+    (or a whitespace/comma/semicolon separated string), keeps only absolute
+    paths, strips trailing slashes (except the root ``/``), dedupes
+    preserving order, and caps entry count / path length.
+    """
+
+    if isinstance(raw, str):
+        items: list[object] = re.split(r"[\n,;]+", raw)
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        return []
+
+    result: list[str] = []
+    for item in items:
+        path = str(item).strip()
+        if not path or not path.startswith("/"):
+            continue
+        path = (path.rstrip("/") or "/")[: _SANDBOX_FS_ALLOWED_WRITE_PATH_MAX_LEN]
+        if path not in result:
+            result.append(path)
+        if len(result) >= _SANDBOX_FS_ALLOWED_WRITE_PATH_MAX_ENTRIES:
+            break
+    return result
+
+
 @router.get("/api/system-config")
 def get_system_config(current_user: dict = Depends(get_current_user)):
     """Return the caller's system configuration."""
@@ -138,8 +176,8 @@ def put_system_config(
 
     Accepted keys: ``provider``, ``model``, ``system_prompt``,
     ``workspace_enabled``, ``sandbox_network_mode``,
-    ``sandbox_network_allowed_domains``, ``im_full_access_enabled``,
-    ``theme``, ``env_vars``.
+    ``sandbox_network_allowed_domains``, ``sandbox_fs_allowed_write_paths``,
+    ``im_full_access_enabled``, ``theme``, ``env_vars``.
     Unknown keys are ignored.
     """
     user_id = current_user["user_id"]
@@ -162,6 +200,12 @@ def put_system_config(
         patch["sandbox_network_allowed_domains"] = (
             _sanitize_sandbox_network_allowed_domains(
                 request["sandbox_network_allowed_domains"]
+            )
+        )
+    if "sandbox_fs_allowed_write_paths" in request:
+        patch["sandbox_fs_allowed_write_paths"] = (
+            _sanitize_sandbox_fs_allowed_write_paths(
+                request["sandbox_fs_allowed_write_paths"]
             )
         )
     if "im_full_access_enabled" in request:

@@ -55,6 +55,11 @@
 #                    the gate was wrong-layer duplication; can_use_tool is the
 #                    single network-confirmation channel.  Disabled-mode
 #                    regression tests (pre-existing) are unchanged.
+# [Sync] 2026-07-26: HOTFIX — add _hook_specific() dict-aware reader (34
+#                    getattr call sites replaced) and TestHookDictLiteralContract
+#                    (5 tests): claude-agent-sdk 0.2.128 makes HookJSONOutput a
+#                    non-callable TypedDict Union, so hooks return plain dicts;
+#                    the old stub class had masked the production TypeError.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -82,7 +87,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # ---------------------------------------------------------------------------
-# Minimal SDK stubs so tests run without claude_code_sdk installed.
+# Minimal SDK stubs so tests run without claude_agent_sdk installed.
 # These must be injected before importing libs.claude_agent_kit.server.agent_runner so that
 # isinstance() checks in the runner resolve to the same stub classes.
 # ---------------------------------------------------------------------------
@@ -91,10 +96,10 @@ import types as _types
 
 
 def _make_sdk_stubs() -> None:
-    """Inject lightweight stubs for claude_code_sdk into sys.modules."""
+    """Inject lightweight stubs for claude_agent_sdk into sys.modules."""
 
-    sdk = _types.ModuleType("claude_code_sdk")
-    sdk_types = _types.ModuleType("claude_code_sdk.types")
+    sdk = _types.ModuleType("claude_agent_sdk")
+    sdk_types = _types.ModuleType("claude_agent_sdk.types")
 
     class AssistantMessage:
         def __init__(self, content=None):
@@ -115,7 +120,7 @@ def _make_sdk_stubs() -> None:
             self.event = event or {}
             self.session_id = session_id
 
-    class ClaudeCodeOptions:
+    class ClaudeAgentOptions:
         def __init__(self, **kwargs):
             for k, v in kwargs.items():
                 setattr(self, k, v)
@@ -176,7 +181,7 @@ def _make_sdk_stubs() -> None:
         UserMessage,
         ResultMessage,
         StreamEvent,
-        ClaudeCodeOptions,
+        ClaudeAgentOptions,
         SystemMessage,
         HookContext,
         HookJSONOutput,
@@ -198,11 +203,26 @@ def _make_sdk_stubs() -> None:
     sdk.query = _noop_query
     sdk.ClaudeSDKClient = object
     sdk.types = sdk_types
-    sys.modules["claude_code_sdk"] = sdk
-    sys.modules["claude_code_sdk.types"] = sdk_types
+    sys.modules["claude_agent_sdk"] = sdk
+    sys.modules["claude_agent_sdk.types"] = sdk_types
 
 
 _make_sdk_stubs()
+
+
+def _hook_specific(result, default=None):
+    """Read ``hookSpecificOutput`` from a PreToolUse/PostToolUse hook result.
+
+    claude-agent-sdk 0.2.128 makes ``HookJSONOutput`` a Union of TypedDicts
+    (types.py:561) — NOT callable — so hook callbacks return plain dicts
+    (``{}`` no-op, ``{"hookSpecificOutput": {...}}`` for decisions).  Older
+    tests used stub class instances with attribute access; accept both so
+    assertions work regardless of which shape a helper produced.
+    """
+    if isinstance(result, dict):
+        return result.get("hookSpecificOutput", default)
+    return getattr(result, "hookSpecificOutput", default)
+
 
 # ---------------------------------------------------------------------------
 # Now import the modules under test (after stubs are in place)
@@ -225,7 +245,7 @@ from libs.claude_agent_kit.types import (  # noqa: E402
 
 _SDK_ASSISTANT = agent_runner_module.AssistantMessage
 _SDK_HOOK_CONTEXT = agent_runner_module.HookContext
-_SDK_OPTIONS = agent_runner_module.ClaudeCodeOptions
+_SDK_OPTIONS = agent_runner_module.ClaudeAgentOptions
 _SDK_RESULT = agent_runner_module.ResultMessage
 _SDK_STREAM_EVENT = agent_runner_module.StreamEvent
 _SDK_USER = agent_runner_module.UserMessage
@@ -836,7 +856,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertNotIn("updatedInput", specific)
@@ -859,7 +879,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
     async def test_auto_write_outside_workspace_files_without_callback_denies(self):
@@ -880,7 +900,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "需要用户确认但未收到响应")
 
@@ -902,7 +922,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "需要用户确认但未收到响应")
 
@@ -923,7 +943,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertNotIn("updatedInput", specific)
@@ -947,7 +967,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
@@ -981,7 +1001,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
 
@@ -1018,7 +1038,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
@@ -1047,7 +1067,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertIn("current thread workspace", specific.get("permissionDecisionReason", ""))
 
@@ -1076,7 +1096,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
     async def test_auto_sessions_range_mcp_gets_query_allow(self):
@@ -1094,7 +1114,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
     async def test_auto_bash_uses_frontend_confirmation_and_approval_allows(self):
@@ -1129,7 +1149,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             confirmation_requests[0]["input"],
             {"command": "echo hello > files/hello.md"},
         )
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1160,7 +1180,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(len(confirmation_requests), 1)
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "needs review")
 
@@ -1210,7 +1230,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                         _SDK_HOOK_CONTEXT(),
                     )
                     self.assertEqual(confirmation_requests, [], f"Should not confirm for: {command!r}")
-                    specific = getattr(result, "hookSpecificOutput", {})
+                    specific = _hook_specific(result, {})
                     self.assertEqual(specific.get("hookEventName"), "PreToolUse")
                     self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1239,7 +1259,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertIn("代理网络访问已关闭", specific.get("permissionDecisionReason", ""))
@@ -1269,7 +1289,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                         f"call-bash-disabled-{command[:20]}",
                         _SDK_HOOK_CONTEXT(),
                     )
-                    specific = getattr(result, "hookSpecificOutput", {})
+                    specific = _hook_specific(result, {})
                     self.assertEqual(specific.get("hookEventName"), "PreToolUse")
                     self.assertEqual(specific.get("permissionDecision"), "deny")
                     self.assertIn(
@@ -1293,7 +1313,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1324,7 +1344,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
         self.assertEqual(len(confirmation_requests), 1)
         self.assertEqual(confirmation_requests[0]["tool_name"], "Bash")
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
     async def test_auto_switch_editor_gets_query_allow_without_confirmation(self):
@@ -1352,7 +1372,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1382,7 +1402,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                         _SDK_HOOK_CONTEXT(),
                     )
                     self.assertEqual(confirmation_requests, [])
-                    specific = getattr(result, "hookSpecificOutput", {})
+                    specific = _hook_specific(result, {})
                     self.assertEqual(specific.get("hookEventName"), "PreToolUse")
                     self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1412,7 +1432,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                         f"call-{tool_name.lower()}-manual",
                         _SDK_HOOK_CONTEXT(),
                     )
-                    specific = getattr(result, "hookSpecificOutput", {})
+                    specific = _hook_specific(result, {})
                     self.assertEqual(specific.get("permissionDecision"), "allow")
 
         self.assertEqual(
@@ -1445,7 +1465,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1474,7 +1494,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1533,7 +1553,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             )
 
         self.assertEqual(confirmation_requests, [])
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
 
@@ -1570,7 +1590,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
         self.assertEqual(len(confirmation_requests), 1)
         self.assertEqual(confirmation_requests[0]["tool_name"], "AskUserQuestion")
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertEqual(
@@ -1616,7 +1636,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
         self.assertEqual(len(confirmation_requests), 1)
         self.assertEqual(confirmation_requests[0]["tool_name"], "mcp__user__ask_user")
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertEqual(
             specific.get("updatedInput", {}).get("answers"),
@@ -1650,7 +1670,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
         self.assertEqual(len(confirmation_requests), 1)
         self.assertEqual(confirmation_requests[0]["tool_name"], "Read")
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "manual review")
 
@@ -1672,7 +1692,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 _SDK_HOOK_CONTEXT(),
             )
 
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "需要用户确认但未收到响应")
 
@@ -1706,7 +1726,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
         self.assertEqual(len(confirmation_requests), 1)
         self.assertEqual(confirmation_requests[0]["tool_name"], "Write")
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         self.assertEqual(specific.get("permissionDecision"), "deny")
         self.assertEqual(specific.get("permissionDecisionReason"), "manual mode")
 
@@ -1937,7 +1957,7 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
 
     def test_redirect_hook_output_has_permission_allow(self):
         result = self._call_redirect("Read", ".editor/cells.json", self._SAMPLE_STATE)
-        specific = getattr(result, "hookSpecificOutput", None)
+        specific = _hook_specific(result, None)
         self.assertIsNotNone(specific)
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertEqual(specific.get("hookEventName"), "PreToolUse")
@@ -1947,7 +1967,7 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         result = self._call_redirect(
             "Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths
         )
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
         try:
             self.assertTrue(
@@ -1966,7 +1986,7 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         result = self._call_redirect(
             "Read", ".editor/cells.json", self._SAMPLE_STATE, tmp_paths
         )
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
         try:
             with open(tmp_path, encoding="utf-8") as fh:
@@ -1986,7 +2006,7 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         result = self._call_redirect(
             "Read", ".editor/session.json", self._SAMPLE_STATE, tmp_paths
         )
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
         try:
             with open(tmp_path, encoding="utf-8") as fh:
@@ -2006,7 +2026,7 @@ class TestEditorIndexRedirectHelper(unittest.TestCase):
         result = self._call_redirect(
             "Read", ".editor/full_state.json", self._SAMPLE_STATE, tmp_paths
         )
-        specific = getattr(result, "hookSpecificOutput", {})
+        specific = _hook_specific(result, {})
         tmp_path = (specific.get("updatedInput") or {}).get("file_path", "")
         try:
             with open(tmp_path, encoding="utf-8") as fh:
@@ -2110,7 +2130,7 @@ class TestCanUseToolPermissionChannel(_RunnerBase):
 
     The CLI's sandbox-runtime network ask ("SandboxNetworkAccess") is a
     system-level control request invisible to PreToolUse; it arrives only via
-    ClaudeCodeOptions.can_use_tool and must route through the same frontend
+    ClaudeAgentOptions.can_use_tool and must route through the same frontend
     confirmation side-channel (claude-agent-sandbox-network-permission-tool.md).
     """
 
@@ -2297,6 +2317,174 @@ class TestCanUseToolPermissionChannel(_RunnerBase):
 
         self.assertIsInstance(result, agent_runner_module.PermissionResultDeny)
         self.assertEqual(result.message, "not today")
+
+
+# ---------------------------------------------------------------------------
+# Hook dict-literal contract (claude-agent-sdk 0.2.128 regression)
+#
+# HookJSONOutput is a Union of TypedDicts in the new SDK — NOT callable.
+# Every hook path must return plain dicts ("{}" no-op /
+# {"hookSpecificOutput": {...}} decisions) without raising.  The old stub
+# class masked the production TypeError in tests; these tests pin the shape.
+# ---------------------------------------------------------------------------
+
+
+class TestHookDictLiteralContract(_RunnerBase):
+    """Hook callbacks return plain dict literals (no HookJSONOutput calls)."""
+
+    async def _capture_hooks(self, *, cwd: str, sandbox_network_mode: str = "allowlist", on_tool_confirmation_request=None):
+        self.set_query([])
+        runner = self.make_runner()
+
+        await runner.run_streaming(
+            opts=AgentRunOptions(
+                thread_id="hook-dict-contract-001",
+                user_message="exercise hooks",
+                cwd=cwd,
+                tool_choice="auto",
+                sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
+            ),
+            callbacks=AgentStreamingCallbacks(
+                on_text_delta=lambda d: None,
+                on_tool_confirmation_request=on_tool_confirmation_request,
+            ),
+        )
+        return self._mock_client.last_options.hooks
+
+    async def test_pre_tool_use_disabled_network_deny_returns_plain_dict(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hooks = await self._capture_hooks(
+                cwd=temp_dir, sandbox_network_mode="disabled"
+            )
+            pre_hook = hooks["PreToolUse"][0].hooks[0]
+
+            result = await pre_hook(
+                {
+                    "tool_name": "WebFetch",
+                    "tool_input": {"url": "https://example.com"},
+                },
+                "call-dict-deny",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(
+            result,
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "代理网络访问已关闭，禁止网络访问。",
+                }
+            },
+        )
+
+    async def test_pre_tool_use_low_sensitivity_allow_returns_plain_dict(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hooks = await self._capture_hooks(cwd=temp_dir)
+            pre_hook = hooks["PreToolUse"][0].hooks[0]
+
+            result = await pre_hook(
+                {"tool_name": "TodoRead", "tool_input": {}},
+                "call-dict-allow",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(
+            result,
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "allow",
+                }
+            },
+        )
+
+    async def test_pre_tool_use_user_rejection_returns_plain_dict(self):
+        async def confirm(payload: dict):
+            return {"approved": False, "reason": "no"}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            hooks = await self._capture_hooks(
+                cwd=str(workspace), on_tool_confirmation_request=confirm
+            )
+            pre_hook = hooks["PreToolUse"][0].hooks[0]
+
+            result = await pre_hook(
+                {
+                    "tool_name": "Bash",
+                    "tool_input": {"command": "ls | grep foo"},
+                },
+                "call-dict-reject",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        self.assertIsInstance(result, dict)
+        self.assertEqual(
+            result,
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "no",
+                }
+            },
+        )
+
+    async def test_post_tool_use_hooks_return_plain_empty_dicts(self):
+        """All three PostToolUse callbacks return {} for non-matching tools
+        without raising (production crash sites: plan-file and tasks
+        observers, agent_runner.py _plan_file/_tasks_changed hooks)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hooks = await self._capture_hooks(cwd=temp_dir)
+            post_hooks = hooks["PostToolUse"][0].hooks
+
+        self.assertEqual(len(post_hooks), 3)
+        for hook in post_hooks:
+            with self.subTest(hook=getattr(hook, "__name__", repr(hook))):
+                result = await hook(
+                    {
+                        "tool_name": "Bash",
+                        "tool_input": {"command": "ls"},
+                    },
+                    "call-dict-post-noop",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                self.assertIsInstance(result, dict)
+                self.assertEqual(result, {})
+
+    async def test_post_tool_use_observers_noop_on_non_workspace_write(self):
+        """Plan-file / tasks observers return {} (not raise) for built-in
+        Write/TaskCreate calls that do not hit their watched directories."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hooks = await self._capture_hooks(cwd=temp_dir)
+            post_hooks = hooks["PostToolUse"][0].hooks
+            plan_hook, tasks_hook = post_hooks[1], post_hooks[2]
+
+            plan_result = await plan_hook(
+                {
+                    "tool_name": "Write",
+                    "tool_input": {
+                        "file_path": str(Path(temp_dir) / "outside.md"),
+                        "content": "x",
+                    },
+                },
+                "call-dict-plan-noop",
+                _SDK_HOOK_CONTEXT(),
+            )
+            self.assertIsInstance(plan_result, dict)
+            self.assertEqual(plan_result, {})
+
+            tasks_result = await tasks_hook(
+                {"tool_name": "TaskCreate", "tool_input": {"subject": "x"}},
+                "call-dict-tasks-noop",
+                _SDK_HOOK_CONTEXT(),
+            )
+            self.assertIsInstance(tasks_result, dict)
+            self.assertEqual(tasks_result, {})
 
 
 # ---------------------------------------------------------------------------

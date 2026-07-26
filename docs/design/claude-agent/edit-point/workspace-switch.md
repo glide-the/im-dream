@@ -222,7 +222,7 @@ sequenceDiagram
 |------|---------|
 | `backend/libs/claude_agent_kit/server/editor_tool.py` | 新增 `SWITCH_EDITOR_TOOL_NAME` 常量、`switch_editor` 工具 spec、`load_editor_state_from_db` 公开函数、`_switch_editor()` 空操作处理器；`handle_editor_write_tool` 分派 |
 | `backend/libs/claude_agent_kit/types.py` | `AgentRunOptions` 新增 `editor_state_setter` 字段 |
-| `backend/libs/claude_agent_kit/server/agent_runner.py` | 新增 `_SWITCH_EDITOR_MCP_TOOL_NAME` 常量；在 `run_streaming` 闭包内定义 `_post_tool_use_hook`；在 `ClaudeCodeOptions.hooks` 中注册 `PostToolUse` |
+| `backend/libs/claude_agent_kit/server/agent_runner.py` | 新增 `_SWITCH_EDITOR_MCP_TOOL_NAME` 常量；在 `run_streaming` 闭包内定义 `_post_tool_use_hook`；在 `ClaudeAgentOptions.hooks` 中注册 `PostToolUse` |
 | `backend/claude_agent/service.py` | `assemble_context` 向 `AgentRunOptions` 注入 `editor_state_setter` lambda |
 | `docs/design/claude-agent/edit-point/workspace-switch.md` | 本设计文档 |
 

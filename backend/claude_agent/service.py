@@ -119,6 +119,11 @@
 #                    only for workspace initialization (get_or_create_workspace
 #                    → CLI sandbox settings.json).  The confirmationKind /
 #                    networkRequest SSE pass-through stays (can_use_tool path).
+# [Sync] 2026-07-26: read system_config sandbox_fs_allowed_write_paths and
+#                    pass it into get_or_create_workspace so per-thread
+#                    settings.json filesystem.allowWrite gains the user's extra
+#                    writable paths (mirrors the sandbox_network_allowed_domains
+#                    plumbing pattern).
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -865,6 +870,7 @@ class ClaudeAgentService:
         workspace_enabled = True
         sandbox_network_mode = "allowlist"
         sandbox_network_allowed_domains: list[str] = []
+        sandbox_fs_allowed_write_paths: list[str] = []
         try:
             sys_cfg = _db.get_system_config(int(request.user_id))
             system_config_loaded = True
@@ -885,6 +891,9 @@ class ClaudeAgentService:
             )
             sandbox_network_allowed_domains = _coerce_string_list(
                 sys_cfg.get("sandbox_network_allowed_domains")
+            )
+            sandbox_fs_allowed_write_paths = _coerce_string_list(
+                sys_cfg.get("sandbox_fs_allowed_write_paths")
             )
         except Exception as e:
             logger.warning(
@@ -930,6 +939,7 @@ class ClaudeAgentService:
                 sandbox_enabled=True,
                 sandbox_network_mode=sandbox_network_mode,
                 sandbox_network_allowed_domains=sandbox_network_allowed_domains,
+                sandbox_fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
             )
             cwd = str(workspace_path)
             if request.cwd and os.path.abspath(request.cwd) != os.path.abspath(cwd):

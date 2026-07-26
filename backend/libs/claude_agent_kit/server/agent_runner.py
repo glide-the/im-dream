@@ -19,7 +19,7 @@
 # [Sync] 2026-05-11: include Claude Code interleaved-thinking disable env in SDK propagation diagnostics.
 # [Sync] 2026-05-24: diagnose direct ANTHROPIC_AUTH_TOKEN auth.
 # [Sync] 2026-05-12: enrich the on_error path with SDK-call context **without changing the exception type** — the SDK's Query._read_messages strips the original ProcessError(message, exit_code, stderr) down to ``str(e)`` before re-raising, so by the time the runner's ``except Exception`` runs we only have a generic "Command failed with exit code 1" string.  The except block now (a) keeps the original exception object untouched (``run_error = exc`` for non-group exceptions, preserving downstream ``isinstance`` checks like ``test_sdk_error_sets_success_false``'s ``assertIsInstance(errors[0], RuntimeError)``); (b) attaches a structured ``[claude_agent_kit] sdk_call_context: resume=… thread_id=… cwd=… model=…`` PEP-678 note via ``run_error.add_note(...)`` so formatted tracebacks and ``getattr(exc, '__notes__', [])`` consumers see the failing session; (c) attaches a second ``[claude_agent_kit] cli_stderr: …`` note when the SDK ``debug_stderr`` buffer captured anything; (d) emits a single ``logger.exception`` with all the structured fields plus traceback for log aggregators.  ``ExceptionGroup`` is the only case that still gets re-wrapped into a plain Exception (its default ``str()`` is unreadable and downstream typed handlers gain nothing from the group wrapper).  The Service-side ``on_error`` SSE frame composes the user-facing ``errorText`` by joining ``str(error)`` with the notes via ``" | "`` so the rich context surfaces through the existing SSE schema unchanged.
-# [Sync] 2026-05-12: widen run_streaming's exception catch from ``except Exception`` to ``except BaseException`` so anyio TaskGroup ``BaseExceptionGroup`` wrappers actually fire ``callbacks.on_error`` and surface as ``AgentRunResult(success=False)``.  Root cause: ``claude_code_sdk._internal.query.Query._read_messages`` catches the CLI failure, logs ``ERROR Fatal error in message reader: Command failed with exit code 1``, and reshapes it into a synthetic ``{"type":"error"}`` stream message; ``Query.receive_messages`` raises a plain ``Exception`` from that sentinel; ``async with ClaudeSDKClient`` ``__aexit__`` then cancels the still-running write / control sibling tasks, raising ``CancelledError`` (a ``BaseException`` subclass), and the SDK's TaskGroup packages everything into a ``BaseExceptionGroup``.  ``BaseExceptionGroup`` is **not** an ``Exception`` subclass, so the previous ``except Exception`` silently let the failure propagate past the runner — ``on_error`` never fired, ``success`` kept its default ``True``, and the caller saw a half-finished stream with no error frame.  New ``_is_pure_cancellation(exc)`` helper distinguishes "every leaf is ``CancelledError``" (true outer cancel — re-raise so the FastAPI / pytest task hierarchy still unwinds) from "at least one non-cancelled leaf" (the typical CLI-failure-plus-sibling-cancel group — fall through to the existing diagnostic-enrichment + ``on_error`` path).  The group-flattening branch is also widened from ``_EXCEPTION_GROUP_TYPES`` to ``_BASE_EXCEPTION_GROUP_TYPES`` so ``BaseExceptionGroup`` (which ``ExceptionGroup`` is now a subclass of, per PEP 654) gets the same readable-message treatment instead of leaving the ugly default group ``str()`` in the SSE error frame.  Bare non-cancelled ``BaseException`` leaves (``KeyboardInterrupt`` / ``SystemExit``) are wrapped into a plain ``Exception`` for the same SSE-serialisation reason.  No service-side change required: ``execute_session`` already routes ``result.success is False`` to a ``{"type":"error","errorText":...}`` SSE frame, and the existing ``except BaseException`` + ``_exception_group_contains_cancelled`` re-raise stays as the *outer* cancel safety net for cases the runner re-raises from ``_is_pure_cancellation``.
+# [Sync] 2026-05-12: widen run_streaming's exception catch from ``except Exception`` to ``except BaseException`` so anyio TaskGroup ``BaseExceptionGroup`` wrappers actually fire ``callbacks.on_error`` and surface as ``AgentRunResult(success=False)``.  Root cause: ``claude_agent_sdk._internal.query.Query._read_messages`` catches the CLI failure, logs ``ERROR Fatal error in message reader: Command failed with exit code 1``, and reshapes it into a synthetic ``{"type":"error"}`` stream message; ``Query.receive_messages`` raises a plain ``Exception`` from that sentinel; ``async with ClaudeSDKClient`` ``__aexit__`` then cancels the still-running write / control sibling tasks, raising ``CancelledError`` (a ``BaseException`` subclass), and the SDK's TaskGroup packages everything into a ``BaseExceptionGroup``.  ``BaseExceptionGroup`` is **not** an ``Exception`` subclass, so the previous ``except Exception`` silently let the failure propagate past the runner — ``on_error`` never fired, ``success`` kept its default ``True``, and the caller saw a half-finished stream with no error frame.  New ``_is_pure_cancellation(exc)`` helper distinguishes "every leaf is ``CancelledError``" (true outer cancel — re-raise so the FastAPI / pytest task hierarchy still unwinds) from "at least one non-cancelled leaf" (the typical CLI-failure-plus-sibling-cancel group — fall through to the existing diagnostic-enrichment + ``on_error`` path).  The group-flattening branch is also widened from ``_EXCEPTION_GROUP_TYPES`` to ``_BASE_EXCEPTION_GROUP_TYPES`` so ``BaseExceptionGroup`` (which ``ExceptionGroup`` is now a subclass of, per PEP 654) gets the same readable-message treatment instead of leaving the ugly default group ``str()`` in the SSE error frame.  Bare non-cancelled ``BaseException`` leaves (``KeyboardInterrupt`` / ``SystemExit``) are wrapped into a plain ``Exception`` for the same SSE-serialisation reason.  No service-side change required: ``execute_session`` already routes ``result.success is False`` to a ``{"type":"error","errorText":...}`` SSE frame, and the existing ``except BaseException`` + ``_exception_group_contains_cancelled`` re-raise stays as the *outer* cancel safety net for cases the runner re-raises from ``_is_pure_cancellation``.
 # [Sync] 2026-05-24: keep run_streaming's BaseException diagnostic log on logger.exception so backend logs include the caught traceback while on_error still receives the enriched run_error.
 # [Sync] 2026-05-24: rename _REQUEST_MODEL_OVERRIDE_ENV_KEY from PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE; keep legacy key as fallback in _apply_request_model_override_if_allowed for zero-downtime migration.
 # [Sync] 2026-05-24: move _inject_mem0_session_hook_env and _verify_claude_sdk_env_for_query_stream calls inside run_streaming's try/except BaseException block so any raised exception is caught and routed to callbacks.on_error → SSE error frame; raise RuntimeError in _verify_claude_sdk_env_for_query_stream when no auth key is present instead of silently returning.
@@ -97,7 +97,7 @@
 #                    INK_AGENT_TODO_EMIT_DEBOUNCE_MS debounce firing
 #                    callbacks.on_tasks_changed with derived TodoItem dicts.
 # [Sync] 2026-07-23: SandboxPermissionRequest runtime-proxy channel — wire
-#                    ClaudeCodeOptions.can_use_tool=_can_use_tool: the CLI's
+#                    ClaudeAgentOptions.can_use_tool=_can_use_tool: the CLI's
 #                    sandbox-runtime network ask ("SandboxNetworkAccess",
 #                    input {"host"}) is a system-level control request invisible
 #                    to PreToolUse; route it through the frontend confirmation
@@ -125,6 +125,43 @@
 #                    now the single network-confirmation channel.  With one
 #                    trigger source left, the networkRequest.source field is
 #                    dropped entirely.
+# [Sync] 2026-07-26: SDK migration claude-code-sdk 0.0.25 → claude-agent-sdk
+#                    0.2.128 (package + ClaudeCodeOptions→ClaudeAgentOptions
+#                    rename).  Required for can_use_tool: 0.0.25 serializes
+#                    control responses in the old {"allow": true} dialect,
+#                    which the deployed CLI rejects (permissionToolOutputSchema
+#                    expects {behavior:"allow", updatedInput}); the new SDK
+#                    emits the correct shape.  Non-mechanical adaptations:
+#                    (1) debug_stderr file object is deprecated/unread — CLI
+#                    stderr capture now registers an options.stderr callback
+#                    via _make_cli_stderr_capture, so the
+#                    "debug-to-stderr" _StderrSentinelArgs hack is retired
+#                    (class kept for reference only); (2) the new transport
+#                    prefers its bundled CLI over system `claude`
+#                    (cli_path option overrides); (3) extra_args passthrough,
+#                    hooks dict format, include_partial_messages, resume, and
+#                    the ClaudeSDKClient query/receive_response API are
+#                    unchanged.  Advisory CanUseToolShadowedWarning may fire
+#                    once per process because allowed_tools contains
+#                    whole-tool entries alongside can_use_tool — intentional.
+# [Sync] 2026-07-26: HOTFIX — replace all ~25 HookJSONOutput(...) constructor
+#                    calls with plain dict literals.  In claude-agent-sdk
+#                    0.2.128 HookJSONOutput is a Union of TypedDicts
+#                    (types.py:561), NOT callable, so every constructor call
+#                    raised TypeError: 'types.UnionType' object is not
+#                    callable.  Two production symptoms, one root cause:
+#                    (a) PostToolUse plan-file/tasks observers crashed with
+#                    visible tracebacks; (b) PreToolUse allow/deny decisions
+#                    were silently dropped — the hook errored out, the CLI
+#                    received no decision and executed the tool even after the
+#                    user rejected it in the confirmation dialog.  Hook
+#                    callbacks now return plain dicts per the official
+#                    contract: {} for no-op, {"hookSpecificOutput":
+#                    {"hookEventName": ..., "permissionDecision": "allow|deny",
+#                    "permissionDecisionReason": ..., "updatedInput": ...}}
+#                    for decisions.  The import is kept for return-type
+#                    annotations only (the Union IS the correct type).  No
+#                    decision logic, key names, or behavior changed.
 
 """Claude Agent Runner.
 
@@ -151,9 +188,9 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from claude_code_sdk.types import (  # type: ignore[import-untyped]
+from claude_agent_sdk.types import (  # type: ignore[import-untyped]
     AssistantMessage,
-    ClaudeCodeOptions,
+    ClaudeAgentOptions,
     HookContext,
     HookJSONOutput,
     HookMatcher,
@@ -473,23 +510,23 @@ def _apply_disabled_network_permission(
     if sandbox_network_mode != "disabled":
         return None
     if tool_name in _NETWORK_TOOL_NAMES:
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": "代理网络访问已关闭，禁止网络访问。",
             }
-        )
+        }
     if tool_name == "Bash":
         command = str((tool_input or {}).get("command") or "").strip()
         if _is_network_bash_command(command):
-            return HookJSONOutput(
-                hookSpecificOutput={
+            return {
+                "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
                     "permissionDecisionReason": "代理网络访问已关闭，禁止执行网络命令。",
                 }
-            )
+            }
     return None
 
 
@@ -587,7 +624,7 @@ _REQUEST_MODEL_OVERRIDE_ENV_KEY_LEGACY = (
 )
 
 
-def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeCodeOptions) -> None:
+def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> None:
     """Log Claude SDK subprocess env propagation status without exposing secrets."""
 
     existing_env = getattr(sdk_options, "env", None)
@@ -657,7 +694,7 @@ def _set_env_aliases(
 
 
 def _apply_request_model_override_if_allowed(
-    sdk_options: ClaudeCodeOptions,
+    sdk_options: ClaudeAgentOptions,
     requested_model: Optional[str],
 ) -> None:
     """Apply request-level model only when explicitly enabled by project env."""
@@ -693,7 +730,7 @@ def _apply_request_model_override_if_allowed(
 
 
 def _inject_mem0_session_hook_env(
-    sdk_options: ClaudeCodeOptions,
+    sdk_options: ClaudeAgentOptions,
     request_env: Optional[dict[str, str]],
 ) -> None:
     """Expose the app-resolved Mem0 binding to Claude Code lifecycle hooks."""
@@ -733,10 +770,38 @@ def _inject_mem0_session_hook_env(
 
 
 class _StderrSentinelArgs(dict):  # type: ignore[type-arg]
-    """Enable SDK stderr capture without adding an unsupported CLI flag."""
+    """Enable SDK stderr capture without adding an unsupported CLI flag.
+
+    Only used with the legacy claude-code-sdk (<0.1) transport, which gates
+    stderr piping on ``"debug-to-stderr" in extra_args``.  Retained for
+    reference; the current claude-agent-sdk transport pipes stderr whenever an
+    ``options.stderr`` callback is registered, so new code must NOT rely on
+    this sentinel (see ``_make_cli_stderr_capture``).
+    """
 
     def __contains__(self, item: object) -> bool:  # type: ignore[override]
         return item == "debug-to-stderr" or super().__contains__(item)
+
+
+def _make_cli_stderr_capture(buf: Any) -> Callable[[str], None]:
+    """Return an SDK ``stderr`` callback appending CLI stderr lines to *buf*.
+
+    claude-agent-sdk (>=0.1) deprecates ``ClaudeAgentOptions.debug_stderr``
+    (no longer read by the transport); CLI stderr is piped only when an
+    ``options.stderr`` callback is registered, and delivered line-by-line.
+    The runner keeps its TemporaryFile buffer contract for the on_error
+    diagnostic notes by funnelling those lines through this callback.
+    Diagnostics must never break a run, so every failure is swallowed.
+    """
+
+    def _capture(line: str) -> None:
+        try:
+            buf.write(line.encode("utf-8", errors="replace") + b"\n")
+            buf.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    return _capture
 
 
 def _iter_exception_leaves(exc: BaseException) -> list[BaseException]:
@@ -963,8 +1028,8 @@ def _apply_editor_index_redirect(
 ) -> Optional[HookJSONOutput]:
     """Apply `.editor/` virtual-index redirect for a PreToolUse Read call.
 
-    Returns a :class:`HookJSONOutput` whose ``updatedInput`` points to a freshly
-    written tempfile when all three conditions are satisfied:
+    Returns a hook output dict whose ``hookSpecificOutput.updatedInput`` points
+    to a freshly written tempfile when all three conditions are satisfied:
 
     1. ``tool_name == "Read"``
     2. ``editor_state`` is not ``None``
@@ -1014,13 +1079,13 @@ def _apply_editor_index_redirect(
             raw_path,
             tmp_path,
         )
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
                 "updatedInput": {"file_path": tmp_path},
             }
-        )
+        }
     except Exception:  # noqa: BLE001
         logger.warning(
             "Failed to intercept .editor/ read for %r; falling through.",
@@ -1068,8 +1133,8 @@ def _workspace_boundary_deny(reason_path: str) -> HookJSONOutput:
     """Return a hard deny for built-in file/search tools outside thread cwd."""
 
     display_path = reason_path or "."
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": (
@@ -1077,7 +1142,7 @@ def _workspace_boundary_deny(reason_path: str) -> HookJSONOutput:
                 f"only access the current thread workspace; rejected path {display_path!r}."
             ),
         }
-    )
+    }
 
 
 def _apply_workspace_boundary_permission(
@@ -1103,12 +1168,12 @@ def _apply_workspace_boundary_permission(
         return _workspace_boundary_deny(raw_path)
 
     if auto_allow_queries and tool_name in _WORKSPACE_QUERY_PERMISSION_TOOLS:
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
             }
-        )
+        }
 
     return None
 
@@ -1289,12 +1354,12 @@ def _apply_workspace_files_permission(
     if not _is_path_inside_workspace_files(raw_path, cwd):
         return None
 
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
         }
-    )
+    }
 
 
 def _apply_low_sensitivity_query_permission(
@@ -1303,7 +1368,7 @@ def _apply_low_sensitivity_query_permission(
 ) -> Optional[HookJSONOutput]:
     """Explicitly allow auto-mode tools whose product class is low-sensitivity.
 
-    Returning an empty ``HookJSONOutput()`` would merely decline to make a hook
+    Returning an empty ``{}`` would merely decline to make a hook
     decision and let Claude Code's own permission layer decide. These low-risk
     query tools should skip both the frontend confirmation side-channel and
     Claude Code's native permission prompt in auto mode, so the hook must return
@@ -1315,22 +1380,22 @@ def _apply_low_sensitivity_query_permission(
     """
 
     if tool_name in _LOW_SENSITIVITY_QUERY_TOOL_NAMES:
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
             }
-        )
+        }
 
     if tool_name == "Bash":
         command = str((tool_input or {}).get("command") or "").strip()
         if _is_low_sensitivity_bash_command(command):
-            return HookJSONOutput(
-                hookSpecificOutput={
+            return {
+                "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "allow",
                 }
-            )
+            }
 
     return None
 
@@ -1338,12 +1403,12 @@ def _apply_low_sensitivity_query_permission(
 def _explicit_pre_tool_use_allow() -> HookJSONOutput:
     """Return the CLI 2.1+ explicit allow shape for PreToolUse hooks."""
 
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
         }
-    )
+    }
 
 
 def _extract_hook_tool_name(hook_input: dict[str, Any]) -> str:
@@ -1735,13 +1800,13 @@ class ClaudeAgentRunner:
                         tool_name,
                     )
                     pending_tool_calls.pop(tool_call_id, None)
-                    return HookJSONOutput(
-                        hookSpecificOutput={
+                    return {
+                        "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
                             "permissionDecision": "deny",
                             "permissionDecisionReason": "工具确认回调异常",
                         }
-                    )
+                    }
 
                 if (
                     confirmation_result
@@ -1778,20 +1843,20 @@ class ClaudeAgentRunner:
                             # longer recognised and causes the override to be silently
                             # ignored, leaving AskUserQuestion without answers and
                             # returning isError:true / output:null).
-                            return HookJSONOutput(
-                                hookSpecificOutput={
+                            return {
+                                "hookSpecificOutput": {
                                     "hookEventName": "PreToolUse",
                                     "permissionDecision": "allow",
                                     "updatedInput": updated_input,
                                 }
-                            )
+                            }
 
-                        return HookJSONOutput(
-                            hookSpecificOutput={
+                        return {
+                            "hookSpecificOutput": {
                                 "hookEventName": "PreToolUse",
                                 "permissionDecision": "allow",
                             }
-                        )
+                        }
 
                     if confirmation_result["approved"] is False:
                         pending_tool_calls.pop(tool_call_id, None)
@@ -1799,23 +1864,23 @@ class ClaudeAgentRunner:
                             confirmation_result.get("reason")
                             or "用户拒绝执行该工具"
                         )
-                        return HookJSONOutput(
-                            hookSpecificOutput={
+                        return {
+                            "hookSpecificOutput": {
                                 "hookEventName": "PreToolUse",
                                 "permissionDecision": "deny",
                                 "permissionDecisionReason": reason,
                             }
-                        )
+                        }
 
             # No callback or no result — deny by default
             pending_tool_calls.pop(tool_call_id, None)
-            return HookJSONOutput(
-                hookSpecificOutput={
+            return {
+                "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
                     "permissionDecisionReason": "需要用户确认但未收到响应",
                 }
-            )
+            }
 
         # ------------------------------------------------------------------
         # can_use_tool callback (SDK control channel) — the SINGLE network
@@ -1956,14 +2021,14 @@ class ClaudeAgentRunner:
 
             # Only act on the switch_editor context-switch tool.
             if tool_name != _SWITCH_EDITOR_MCP_TOOL_NAME:
-                return HookJSONOutput()
+                return {}
 
             if opts.editor_state_setter is None:
                 logger.warning(
                     "PostToolUse: switch_editor fired but editor_state_setter is None; "
                     "skipping context switch."
                 )
-                return HookJSONOutput()
+                return {}
 
             tool_input = _extract_hook_tool_input(hook_input)
             new_session_id: str = str(tool_input.get("editor_session_id") or "").strip()
@@ -1972,7 +2037,7 @@ class ClaudeAgentRunner:
                     "PostToolUse: switch_editor missing editor_session_id; "
                     "context switch skipped."
                 )
-                return HookJSONOutput()
+                return {}
 
             try:
                 new_state = await asyncio.to_thread(load_editor_state_from_db, new_session_id)
@@ -1982,7 +2047,7 @@ class ClaudeAgentRunner:
                     new_session_id,
                     exc_info=True,
                 )
-                return HookJSONOutput()
+                return {}
 
             if new_state:
                 opts.editor_state_setter(new_state)
@@ -1996,7 +2061,7 @@ class ClaudeAgentRunner:
                     new_session_id,
                 )
 
-            return HookJSONOutput()
+            return {}
 
         # ------------------------------------------------------------------
         # PostToolUse hook — Plan Mode plan-file observer (claude-plan §5.3)
@@ -2023,12 +2088,12 @@ class ClaudeAgentRunner:
                 tool_input = _extract_hook_tool_input(hook_input)
                 plan_path = _plan_file_path_for_hook(tool_name, tool_input, cwd)
                 if plan_path is None or callbacks.on_plan_file_changed is None:
-                    return HookJSONOutput()
+                    return {}
                 key = str(plan_path)
                 now = time.monotonic()
                 last_emit = _plan_emit_last_ts.get(key)
                 if last_emit is not None and (now - last_emit) < plan_debounce_s:
-                    return HookJSONOutput()
+                    return {}
                 _plan_emit_last_ts[key] = now
                 await _call(callbacks.on_plan_file_changed, key)
             except Exception:  # noqa: BLE001
@@ -2036,7 +2101,7 @@ class ClaudeAgentRunner:
                     "PostToolUse: plan-file observer failed; skipping emit.",
                     exc_info=True,
                 )
-            return HookJSONOutput()
+            return {}
 
         # ------------------------------------------------------------------
         # PostToolUse hook — Task v2 file-task observer (claude-todo §5.3)
@@ -2060,17 +2125,17 @@ class ClaudeAgentRunner:
             try:
                 tool_name = _extract_hook_tool_name(hook_input)
                 if tool_name not in _TASK_V2_WRITE_TOOL_NAMES:
-                    return HookJSONOutput()
+                    return {}
                 if callbacks.on_tasks_changed is None:
-                    return HookJSONOutput()
+                    return {}
                 tasks_dir = _resolve_tasks_dir_for_cwd(cwd)
                 if tasks_dir is None:
-                    return HookJSONOutput()
+                    return {}
                 key = str(tasks_dir)
                 now = time.monotonic()
                 last_emit = _todo_emit_last_ts.get(key)
                 if last_emit is not None and (now - last_emit) < todo_debounce_s:
-                    return HookJSONOutput()
+                    return {}
                 items, _mtime = read_task_items(tasks_dir)
                 _todo_emit_last_ts[key] = now
                 await _call(callbacks.on_tasks_changed, items)
@@ -2079,7 +2144,7 @@ class ClaudeAgentRunner:
                     "PostToolUse: task observer failed; skipping emit.",
                     exc_info=True,
                 )
-            return HookJSONOutput()
+            return {}
 
         # ------------------------------------------------------------------
         # Build SDK options
@@ -2119,7 +2184,7 @@ class ClaudeAgentRunner:
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = apply_project_sdk_runtime_options(
-            ClaudeCodeOptions(
+            ClaudeAgentOptions(
                 max_turns=max_turns,
                 allowed_tools=effective_allowed_tools,
                 include_partial_messages=include_partial_messages,
@@ -2159,12 +2224,12 @@ class ClaudeAgentRunner:
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
         existing_extra_args = getattr(sdk_options, "extra_args", None)
-        sdk_options.extra_args = _StderrSentinelArgs(
-            existing_extra_args if existing_extra_args is not None else {}
-        )
+        sdk_options.extra_args = dict(existing_extra_args or {})
         if tool_choice == "none":
             sdk_options.extra_args["tools"] = ""
-        sdk_options.debug_stderr = _stderr_buf
+        # claude-agent-sdk pipes CLI stderr only when an `stderr` callback is
+        # registered (the legacy debug_stderr file object is no longer read).
+        sdk_options.stderr = _make_cli_stderr_capture(_stderr_buf)
         if resume:
             sdk_options.resume = thread_id
         _apply_request_model_override_if_allowed(sdk_options, model)
@@ -2223,7 +2288,7 @@ class ClaudeAgentRunner:
             # non-zero, the message-reader task raises a plain
             # ``Exception`` (the SDK reshapes ``ProcessError`` into a
             # synthetic ``{"type":"error"}`` stream message; see
-            # ``claude_code_sdk._internal.query.Query._read_messages`` —
+            # ``claude_agent_sdk._internal.query.Query._read_messages`` —
             # the same place that emits the visible
             # ``ERROR Fatal error in message reader: Command failed with
             # exit code 1`` log line).  As that failure unwinds, the
@@ -2259,7 +2324,7 @@ class ClaudeAgentRunner:
             # ----------------------------------------------------------
             # SDK-side diagnostic enrichment.
             #
-            # claude_code_sdk's ``Query._read_messages`` catches the
+            # claude_agent_sdk's ``Query._read_messages`` catches the
             # original ``ProcessError`` from the CLI subprocess and
             # forwards only ``str(e)`` through its in-process message
             # stream — every structured field (``exit_code`` / actual

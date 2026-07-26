@@ -2282,7 +2282,8 @@ def get_system_config(user_id: int) -> dict:
 
     Known keys include model/provider/system_prompt, workspace_enabled
     (file workspace + per-thread Bash sandbox), sandbox_network_mode,
-    sandbox_network_allowed_domains, im_full_access_enabled, theme, and env_vars.
+    sandbox_network_allowed_domains, sandbox_fs_allowed_write_paths,
+    im_full_access_enabled, theme, and env_vars.
 
     Returns an empty dict when no config has been saved yet.
     """

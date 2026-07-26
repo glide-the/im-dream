@@ -200,7 +200,7 @@ assemble_context       if runner is None:    execute_session          close_thre
 1. Factory 调用 `state.mark_running()`（IDLE → RUNNING）。
 2. Factory spawn `execute_session` 后台 Task。
 3. `execute_session` 内：
-   - `runner.run_streaming(run_options, callbacks)` → `claude_code_sdk.query`
+   - `runner.run_streaming(run_options, callbacks)` → `claude_agent_sdk.query`
    - SDK 事件 → callbacks → `turn_context.queue.put(event)`
    - Factory 主协程从 queue drain，yield SSE 帧给 Browser
    - 流结束后：`_persist_turn()`（写 DB）→ `queue.put(None)` sentinel

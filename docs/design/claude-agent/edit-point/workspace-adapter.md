@@ -169,11 +169,11 @@ get_editor_resource_data(path, editor_state)  →  data = [...]
   /tmp/editor_XXXX.json  ←  json.dump(data, ensure_ascii=False)
   路径追加至 _editor_redirect_tmp_paths 列表
   ↓
-return HookJSONOutput(hookSpecificOutput={
+return {"hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "allow",
     "updatedInput": {"file_path": "/tmp/editor_XXXX.json"}
-})
+}}
   ↓
 Claude SDK 使用重定向后的路径执行 Read
   → Agent 得到实时的 cells 数据
@@ -336,7 +336,7 @@ Agent 修改文档内容：
 
 ### 9.2 Hook 执行顺序与读取路径
 
-`settings.json` 中的 `hooks` 配置（shell 脚本）由 **Claude Code CLI 子进程**执行，Python SDK 的 `_pre_tool_use_hook` 回调由 **claude_code_sdk 层**注册。两者执行顺序为：
+`settings.json` 中的 `hooks` 配置（shell 脚本）由 **Claude Code CLI 子进程**执行，Python SDK 的 `_pre_tool_use_hook` 回调由 **claude_agent_sdk 层**注册。两者执行顺序为：
 
 ```
 Agent 发出 Read { file_path: ".editor/cells.json" }
@@ -417,7 +417,7 @@ Agent 运行（每次请求）
   ├─ service.py::assemble_context()
   │    └─ 将 editor_state 注入 AgentRunOptions
   └─ agent_runner.py::run_streaming()
-       ├─ 构建 ClaudeCodeOptions（setting-sources=project → 读取 workspace/.claude/settings.json）
+       ├─ 构建 ClaudeAgentOptions（setting-sources=project → 读取 workspace/.claude/settings.json）
        ├─ 注册 Python _pre_tool_use_hook
        │    ├─ .editor/ Read 拦截：is_editor_index_path → 写临时文件 → updatedInput 重定向
        │    └─ 工具确认逻辑（AskUserQuestion 等）
@@ -448,7 +448,7 @@ Agent 运行后（finally 块）
   - `get_editor_resource_data(path, editor_state)` 提取数据
   - `tempfile.NamedTemporaryFile(delete=False)` 写入临时文件
   - 路径追加至 `_editor_redirect_tmp_paths`
-  - 返回 `HookJSONOutput(hookSpecificOutput={"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"file_path":tmp_path}})`
+  - 返回 `{"hookSpecificOutput": {"hookEventName":"PreToolUse","permissionDecision":"allow","updatedInput":{"file_path":tmp_path}}}`（纯字典字面量）
   - `except Exception` fall-through（记录 warning，不阻断 Agent）
 - [x] `finally` 块：`os.unlink(_editor_redirect_tmp_paths[*])` 逐一清理临时文件
 
