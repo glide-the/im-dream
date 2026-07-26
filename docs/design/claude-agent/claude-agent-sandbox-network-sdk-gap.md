@@ -84,6 +84,8 @@ sandboxed Bash → sandbox-runtime 代理拦截（403 blocked-by-allowlist）
 | C. 双层清单对齐 | 保证写入 CLI settings 的 allowlist 始终 ⊇ Ink & Memory 判定结果，消除判定漂移 | 小，配置层改动 |
 
 > 实施记录（2026-07-26）：方案 A 已落地，前提为 SDK 迁移至 `claude-agent-sdk 0.2.128`（`requirements.txt` / `pyproject.toml` 已更新；`backend/.venv` 已安装并卸载 `claude-code-sdk`）。序列化对齐证据：`claude_agent_sdk/_internal/query.py` can_use_tool 分支输出 `{"behavior": "allow", "updatedInput": …}` / `{"behavior": "deny", "message": …}`，无旧 `{"allow": true/false}` 方言。B/C 仍为可选增量，未实施。
+>
+> **CLI 配对决策（2026-07-26）**：0.2.128 transport `_find_cli` 内置优先会遮蔽生产 Docker 打过 apply-seccomp 补丁的 npm CLI（故障复发实证）。决策：**`cli_path` 锁定系统/npm CLI**（`sdk_env.apply_cli_path_to_options()`：`CLAUDE_CODE_CLI_PATH` → `shutil.which("claude")` → bundled 兜底），npm CLI 同步升级到 **2.1.220** 与内置线对齐；2.1.220 单一二进制布局使 vendor 补丁不可行，apply-seccomp passthrough 改为 `sandbox.seccomp.applyPath` settings 覆盖（详见 `claude-sdk-env-design.md` §5.5A 与 `claude-agent-workspace-sandbox.md`）。
 
 ## 6. 附：关联概念澄清（三处）
 

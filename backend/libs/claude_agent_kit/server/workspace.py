@@ -49,6 +49,12 @@
 #                    absolute paths appended to filesystem.allowWrite after the
 #                    workspace and claude-tmp entries; denyWrite still wins for
 #                    workspace internals per sandbox-runtime deny-precedence.
+# [Sync] 2026-07-26: sandbox.seccomp.applyPath override — the 2.1.220 CLI runs
+#                    embedded apply-seccomp via /proc/self/fd (no on-disk
+#                    vendor binary to patch), so the Docker nested-userns
+#                    passthrough moves to a settings override emitted when
+#                    INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH names an existing
+#                    shim; unset/missing → no key → CLI default.
 
 
 """Workspace manager for Claude Agent session directories.
@@ -401,6 +407,40 @@ def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
     return result
 
 
+# Docker nested-userns workaround (2026-07-26).  The 2.1.220 CLI ships as a
+# single self-contained binary and runs its embedded apply-seccomp via
+# /proc/self/fd — there is no on-disk vendor/seccomp file left to patch
+# (2.1.108 layout).  The passthrough therefore moved to a settings-driven
+# override: the Docker image ships a shim and points this variable at it.
+_SANDBOX_SECCOMP_APPLY_PATH_ENV = "INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH"
+
+
+def _sandbox_seccomp_config() -> Optional[dict]:
+    """Return the ``sandbox.seccomp`` override for Docker deployments.
+
+    When ``INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`` names an existing
+    executable (the image's passthrough shim), emit
+    ``{"applyPath": <shim>}`` so the CLI runs the shim instead of its
+    embedded apply-seccomp — dodging the nested-userns
+    ``/proc/self/setgroups`` failure (apply-seccomp Permission denied).
+    Unset → ``None`` → no ``sandbox.seccomp`` key → CLI default behaviour
+    (local/dev unaffected).  A set-but-missing path logs a warning and is
+    ignored so a stale override never breaks seccomp setup.
+    """
+
+    raw = os.environ.get(_SANDBOX_SECCOMP_APPLY_PATH_ENV, "").strip()
+
+    if not raw or not os.path.isfile(raw):
+        logger.warning(
+            "%s=%r is set but the file does not exist; sandbox.seccomp "
+            "override skipped.",
+            _SANDBOX_SECCOMP_APPLY_PATH_ENV,
+            raw,
+        )
+        return None
+    return {"applyPath": raw}
+
+
 # ---------------------------------------------------------------------------
 # Public API — workspace lifecycle
 # ---------------------------------------------------------------------------
@@ -473,6 +513,16 @@ def _workspace_sandbox_config(
     )
     if network_config is not None:
         sandbox_config["network"] = network_config
+    # Docker nested-userns workaround: point the CLI at the image's
+    # apply-seccomp passthrough shim (2.1.220 runs the embedded binary
+    # via /proc/self/fd — no on-disk vendor file left to patch).
+    # Emitted whenever the env var names an existing shim, regardless of
+    # `enabled`: the key is inert while the sandbox is off, and gating it
+    # behind `enabled` hid the override from the thread settings.json
+    # (production miss, 2026-07-26).
+    seccomp_config = _sandbox_seccomp_config()
+    if seccomp_config is not None:
+        sandbox_config["seccomp"] = seccomp_config
     if enabled and _running_in_linux_container():
         # Claude Code's Linux sandbox uses bubblewrap. Inside Docker, a fresh
         # /proc mount may be unavailable, so Claude Code supports this weaker

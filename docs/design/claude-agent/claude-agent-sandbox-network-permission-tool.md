@@ -56,6 +56,7 @@ Ink & Memory 既有 `on_tool_confirmation_request` 确认链路，成为**唯一
 
 - 入参：`tool_name == "SandboxNetworkAccess"`，`input == {"host": <hostname>}`；
 - SDK 支持：`claude_agent_sdk 0.2.128` 的 `ClaudeAgentOptions.can_use_tool: CanUseTool | None`（2026-07-26 迁移；此前 `claude_code_sdk 0.0.25` 的序列化方言过旧被新版 CLI 拒绝，见状态头），结果类型 `PermissionResultAllow(updated_input, updated_permissions)` / `PermissionResultDeny(message, interrupt)`；
+- CLI 配对（2026-07-26）：`cli_path` 经 `sdk_env.apply_cli_path_to_options()` 锁定系统/npm CLI（2.1.220，与内置线对齐；内置优先会遮蔽 Docker 的 apply-seccomp 补丁 CLI）；apply-seccomp passthrough 经 `sandbox.seccomp.applyPath` settings 覆盖实现（2.1.220 单一二进制，无 vendor 文件可补丁）；
 - 官方契约保证：`can_use_tool` 不会对权限流中已被解析的工具再次触发——本系统的 PreToolUse hook 对所有工具返回显式 allow/deny，因此接线后**不会重复弹窗**（含 AskUserQuestion，其由 hook 路径带 answers 解决）。
 
 实现（`agent_runner.py`）：与 `_pre_tool_use_hook` 同闭包定义

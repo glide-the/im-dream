@@ -2,6 +2,7 @@
 > **[Sync] 2026-05-24**: 迁移请求级模型覆盖开关：`PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE` → `INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE`；新 key 加入 `sdk_env.py` 白名单；旧 key 同时保留作为 fallback。
 > **[Sync] 2026-06-12**: SDK 子进程 env 来源扩展为 `backend/.env` + 当前进程环境；Cloud Run Secret Manager 注入的 `ANTHROPIC_AUTH_TOKEN` 会在启动子进程前显式写入 `ClaudeAgentOptions.env`。
 > **[Sync] 2026-07-26**: SDK 迁移 `claude-code-sdk 0.0.25` → `claude-agent-sdk 0.2.128`——全文档类型/包名更新（`ClaudeAgentOptions`）；env 注入链不变；新版 transport 优先使用内置（bundled）CLI，`cli_path` 可覆盖；`debug_stderr` 废弃，CLI stderr 改经 `options.stderr` 回调捕获（runner 侧已适配）。
+> **[Sync] 2026-07-26**: 新增 `apply_cli_path_to_options()` 与 `CLAUDE_CODE_CLI_PATH` 环境变量——CLI 二进制解析顺序：环境变量（存在才生效）→ `shutil.which("claude")`（系统/npm CLI）→ 不设置（SDK bundled 兜底）；`options.cli_path` 显式值永远优先。动机：0.2.128 transport `_find_cli` 内置优先，遮蔽了生产 Docker 打过 apply-seccomp passthrough 补丁的 npm CLI，导致嵌套 userns `setgroups` 失败复发（详见 §5.6）。
 
 # ClaudeSDKClient 项目 env 注入方案设计
 
@@ -191,6 +192,19 @@ options.extra_args["setting-sources"] = "project"
 > **[2026-07-26 注]** `claude-agent-sdk 0.2.128` 已新增 typed `setting_sources` 字段，但**保留** `extra_args` 路径：新 transport 仅在 `options.setting_sources` 被设置时才自行生成 `--setting-sources=` 旗标（本系统不设置该字段），二者不会重复；extra_args 透传行为与旧版一致。
 
 由于 Runner 的 `cwd` 是 workspace 路径，项目级 settings 实际读取路径是 `{workspace}/.claude/settings.json`。因此 `backend/libs/claude_agent_kit/server/workspace.py` 需要在每次 `init_workspace()` 时刷新项目根 `.claude` 模板文件到 workspace，但继续排除 `.claude/skills/`，因为该目录由 workspace skills 软链接机制运行时维护。
+
+### 5.5A CLI 二进制解析（cli_path）**[2026-07-26]**
+
+`claude-agent-sdk 0.2.128` 的 transport `_find_cli` **优先使用 wheel 内置 CLI**（`_bundled/claude`），其次才是 PATH 上的系统安装。生产 Dockerfile 对 npm CLI 打过 apply-seccomp passthrough 补丁（规避 Docker 嵌套 userns 的 `/proc/self/setgroups` 失败），内置 CLI 遮蔽补丁二进制后该故障复发。因此新增 `sdk_env.apply_cli_path_to_options()`，在 `agent_runner.run_streaming` 组装 options 时（plan/task env 注入之前）固定 `options.cli_path`：
+
+| 优先级 | 来源 | 语义 |
+|---|---|---|
+| 0 | `options.cli_path` 已显式设置 | 代码显式值永远优先，helper 直接返回 |
+| 1 | `CLAUDE_CODE_CLI_PATH` 环境变量 | 仅当路径存在时采用；设置了但文件不存在 → 记 warning 并继续下探（过期覆盖不得遮蔽可用 CLI） |
+| 2 | `shutil.which("claude")` | 系统/npm CLI——生产为 Docker 打过补丁的运行时，本地开发为开发者自己的 npm claude |
+| 3 | 不设置 | 文档化逃生舱：SDK 回退到内置 CLI（无系统 claude 的环境仍可用） |
+
+配套 Docker 侧（2026-07-26 调整）：npm CLI 升级到 2.1.220（与 SDK 内置线对齐）。**2.1.220 将 CLI 打包为单一自包含二进制**，内嵌 apply-seccomp 经 `/proc/self/fd` 执行——磁盘上不再有 `vendor/seccomp/` 可补丁（2.1.108 布局已消亡），因此 passthrough 改为 settings 驱动：镜像内置 shim（`/usr/local/share/claude-agent/apply-seccomp-passthrough`）并设置 `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`；`workspace.py` 在该变量指向存在的可执行文件时向每线程 `.claude/settings.json` 写入 `sandbox.seccomp.applyPath`（未设置/缺失 → 不写 → CLI 默认行为，本地/非 Docker 不受影响）。
 
 ### 5.6 时序图
 

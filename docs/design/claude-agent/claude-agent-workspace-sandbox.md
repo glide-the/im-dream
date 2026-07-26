@@ -35,6 +35,10 @@
 > the `zsh: operation not permitted: .../cwd-*` noise, and add the
 > `sandbox_fs_allowed_write_paths` Settings key for user extra writable
 > absolute paths; denyWrite precedence documented.
+> [Sync] 2026-07-26: apply-seccomp passthrough revision — bundled-CLI shadowing
+> recurrence story documented; `sandbox.seccomp.applyPath` settings override
+> (2.1.220 single-binary layout) emitted when
+> `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` names an existing shim.
 
 # Claude-Agent Workspace Sandbox
 
@@ -133,6 +137,25 @@ Code's Linux sandbox uses bubblewrap, and unprivileged containers may not allow
 bubblewrap to mount a fresh `/proc`; the weaker nested mode is acceptable only
 because the outer Docker container is the primary isolation boundary. Local
 non-container deployments do not write this key.
+
+**apply-seccomp passthrough (2026-07-26 revision).** Docker images additionally
+need the apply-seccomp passthrough to survive the nested-userns
+`/proc/self/setgroups` failure. History: the Dockerfile originally patched the
+npm CLI's `vendor/seccomp/apply-seccomp` file in place (2.1.108 layout). The
+claude-agent-sdk 0.2.128 migration made the SDK prefer its **bundled** CLI,
+which silently shadowed the patched npm binary — the `apply-seccomp Permission
+denied` failure recurred. Two coordinated fixes: (1) the backend pins
+`cli_path` to the system/npm CLI via `sdk_env.apply_cli_path_to_options()`
+(see `claude-sdk-env-design.md` §5.5A); (2) the npm CLI was bumped to 2.1.220
+(bundled-line parity), which packages the CLI as a single self-contained
+binary running embedded apply-seccomp via `/proc/self/fd` — no on-disk vendor
+file left to patch — so the passthrough moved to a settings-driven override:
+the image ships `/usr/local/share/claude-agent/apply-seccomp-passthrough` and
+sets `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`; when that variable names an
+existing executable, `sandbox.seccomp.applyPath` is emitted here — regardless
+of `sandbox.enabled` (the key is inert while the sandbox is off; the earlier
+`enabled` gate hid the override from thread settings.json, production miss
+2026-07-26). Unset/missing → no `seccomp` key → CLI default behaviour.
 
 Docker-enabled settings therefore add this sibling key to the same `sandbox`
 object:
