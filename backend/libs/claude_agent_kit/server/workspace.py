@@ -697,8 +697,9 @@ def get_tasks_dir(session_id: str) -> Optional[Path]:
     """Return the Claude Code v2 tasks directory for *session_id*, or ``None``.
 
     Resolves ``{workspace}/.claude-home/tasks/main`` — the fixed taskListId
-    (``sdk_env.CLAUDE_CODE_TASK_LIST_ID_VALUE``) injected by the runner when
-    ``INK_AGENT_TASK_V2_ENABLED`` is on (claude-todo §5.1).
+    (``sdk_env.CLAUDE_CODE_TASK_LIST_ID_VALUE``) injected by the runner on
+    every run (claude-todo §5.1; unconditional since 2026-07-26 because the
+    new CLI enables task tools by default).
 
     Same containment policy as ``get_plans_dir``: the candidate must
     ``resolve()`` to a path still inside the resolved workspace root; symlink

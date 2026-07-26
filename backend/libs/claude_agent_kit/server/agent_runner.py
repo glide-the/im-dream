@@ -2216,10 +2216,12 @@ class ClaudeAgentRunner:
         # options.env is preserved, and the user_sdk_env merge below still
         # overlays on top.  No-op when cwd is falsy (Workspace Mode disabled).
         apply_plan_mode_env_to_options(sdk_options, cwd)
-        # Task v2 (claude-todo §5.1): when INK_AGENT_TASK_V2_ENABLED is on,
-        # inject CLAUDE_CODE_ENABLE_TASKS=1 / CLAUDE_CODE_TASK_LIST_ID=main at
-        # the same lowest priority (explicit values preserved; user_sdk_env
-        # below still overlays on top).  No-op by default.
+        # Task v2 (claude-todo §5.1): always pin CLAUDE_CODE_TASK_LIST_ID=main
+        # at the same lowest priority (explicit values preserved; user_sdk_env
+        # below still overlays on top) so the new CLI's default-on task tools
+        # write to the list dir get_tasks_dir() resolves; the legacy
+        # INK_AGENT_TASK_V2_ENABLED gate only adds an explicit
+        # CLAUDE_CODE_ENABLE_TASKS=1.
         apply_task_v2_env_to_options(sdk_options)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})

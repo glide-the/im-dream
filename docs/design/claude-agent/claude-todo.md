@@ -83,10 +83,12 @@ flowchart LR
 
 **路径二（P1，配置开启）— v2 文件任务：**
 
-- 启用条件：新增配置 `INK_AGENT_TASK_V2_ENABLED`（默认 off）。开启时由 `sdk_env.py` 追加注入两个 env：
-  - `CLAUDE_CODE_ENABLE_TASKS=1` — 使 CLI 启用 v2 工具组（同时禁用 v1 TodoWrite，官方互斥语义）；
-  - `CLAUDE_CODE_TASK_LIST_ID=main` — **固定 taskListId 为常量**。
-- **taskListId 隔离决策**：`CLAUDE_CONFIG_DIR` 已是 per-thread（`{workspace}/.claude-home`），tasks 根目录天然按 thread 隔离；但若不固定 taskListId，官方兜底取 CLI `sessionId`，SDK resume / 新会话会产生新 sessionId，导致同一 thread 的任务清单散落在多个子目录、REST 无法定位。固定为 `main` 后路径稳定为 `{workspace}/.claude-home/tasks/main/`，随 workspace TTL 一并清理。注入点复用 `apply_plan_mode_env_to_options` 同处（`agent_runner.py:1852-1857` 调用链），优先级同样最低、允许 `user_sdk_env` 覆盖。
+> **[2026-07-26 契约修订]** claude-agent-sdk 0.2.128 内置 CLI 的行为变更：任务工具**默认启用**（`CLAUDE_CODE_ENABLE_TASKS !== "0"` 即启用），不再依赖本系统注入；`taskListId` 未设置时官方兜底为 teamName / `sessionId`。由此产生的真实线上 bug：旧部署未开 `INK_AGENT_TASK_V2_ENABLED` 时，CLI 的 TaskCreate/TaskUpdate 照常生效，但任务 JSON 写入 `{CLAUDE_CONFIG_DIR}/tasks/{sessionId 兜底}/` 而非 `tasks/main`，`get_tasks_dir()` 定位失败 → 弹层永空。修复：**`CLAUDE_CODE_TASK_LIST_ID=main` 改为无条件注入**（最低优先级，显式值保留）；`INK_AGENT_TASK_V2_ENABLED` 退化为仅追加显式 `CLAUDE_CODE_ENABLE_TASKS=1` 的遗留开关（CLI 默认已启用，一般无需设置；显式关闭可走 CLI 原生 `CLAUDE_CODE_ENABLE_TASKS=0`）。
+
+- 启用条件（修订后）：无需任何开关。`sdk_env.py` 每次运行都注入：
+  - `CLAUDE_CODE_TASK_LIST_ID=main` — **固定 taskListId 为常量**（无条件，最低优先级）；
+  - `CLAUDE_CODE_ENABLE_TASKS=1` — 仅当遗留 `INK_AGENT_TASK_V2_ENABLED` 为真时追加注入（与 CLI 默认启用一致，属冗余保险）。
+- **taskListId 隔离决策**：`CLAUDE_CONFIG_DIR` 已是 per-thread（`{workspace}/.claude-home`），tasks 根目录天然按 thread 隔离；但若不固定 taskListId，官方兜底取 CLI `sessionId`，SDK resume / 新会话会产生新 sessionId，导致同一 thread 的任务清单散落在多个子目录、REST 无法定位。固定为 `main` 后路径稳定为 `{workspace}/.claude-home/tasks/main/`，随 workspace TTL 一并清理。注入点复用 `apply_plan_mode_env_to_options` 同处（`agent_runner.py` run_streaming 调用链），优先级同样最低、允许 `user_sdk_env` 覆盖。
 - 捕获：PostToolUse hook 匹配 `TaskCreate/TaskUpdate`（写操作），防抖后读取 tasks 目录全量 JSON 组装清单（复刻官方"读时派生"语义：过滤 `metadata._internal`、`blockedBy` 剔除已 completed）；`TaskList/TaskGet` 为只读，不触发发射。
 
 **两路径互斥保证**：由 CLI 官方 `isTodoV2Enabled()` 保证同一进程只暴露一族工具；后端 `todo_state` 记录 `source: "todo_write" | "task_v2"`，后到的捕获覆盖先前的（同一会话内实际上只会出现一种）。
@@ -204,7 +206,7 @@ sequenceDiagram
     FE->>P: store 更新 → Todo 区重渲染 + 未读红点
 ```
 
-### 6.2 v2 文件任务链路（INK_AGENT_TASK_V2_ENABLED=on）
+### 6.2 v2 文件任务链路（taskListId 固定注入，2026-07-26 起无条件）
 
 ```mermaid
 sequenceDiagram
@@ -267,7 +269,7 @@ sequenceDiagram
 | 文件 | 变更类型 | 说明 |
 |------|----------|------|
 | `backend/libs/claude_agent_kit/server/workspace.py` | 修改 | 新增 `get_tasks_dir()`（§5.1），路径越界校验 |
-| `backend/libs/claude_agent_kit/server/sdk_env.py` | 修改 | `apply_plan_mode_env_to_options` 内或并列新增 v2 env 注入（`CLAUDE_CODE_ENABLE_TASKS` / `CLAUDE_CODE_TASK_LIST_ID`，受 `INK_AGENT_TASK_V2_ENABLED` 门控） |
+| `backend/libs/claude_agent_kit/server/sdk_env.py` | 修改 | `apply_plan_mode_env_to_options` 内或并列新增 v2 env 注入（`CLAUDE_CODE_TASK_LIST_ID` 无条件固定为 `main`；`CLAUDE_CODE_ENABLE_TASKS` 仅在遗留 `INK_AGENT_TASK_V2_ENABLED` 为真时注入 — 2026-07-26 修订） |
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | 修改 | 调用 v2 env 注入；新增 v2 PostToolUse hook 与去抖；`DEFAULT_ALLOWED_TOOLS` +3；`_LOW_SENSITIVITY_QUERY_TOOL_NAMES` +5（Phase C） |
 | `backend/libs/claude_agent_kit/types.py` | 修改 | `AgentStreamingCallbacks` 增加 `on_tasks_changed` |
 | `backend/claude_agent/service.py` | 修改 | `TodoState` 内存态；v1 流观察；`_emit_todo_updated()`；`build_thread_todos_payload()` |
@@ -305,7 +307,7 @@ python -m py_compile backend/libs/claude_agent_kit/server/workspace.py backend/l
 npx tsc -b && npm run lint && npm run build
 ```
 
-关键用例：① v1 `tool-input-available(TodoWrite)` → `todo-updated` 帧且不入 `collected_parts`；② v2 env 仅在 `INK_AGENT_TASK_V2_ENABLED` on 时注入；③ `get_tasks_dir` 越界/无 workspace 返回 `None`；④ v2 目录含 `_internal` 任务与已解决 blocker 时过滤正确；⑤ REST 归属校验 404 与 `exists:false` 契约；⑥ 五工具 PreToolUse 在 auto 模式返回显式 allow；⑦ 超出 `INK_AGENT_TODO_MAX_ITEMS` 截断置 `truncated:true`。
+关键用例：① v1 `tool-input-available(TodoWrite)` → `todo-updated` 帧且不入 `collected_parts`；② v2 env 注入：`CLAUDE_CODE_TASK_LIST_ID=main` 无条件固定、`CLAUDE_CODE_ENABLE_TASKS=1` 仅在 `INK_AGENT_TASK_V2_ENABLED` on 时注入（2026-07-26 语义）；③ `get_tasks_dir` 越界/无 workspace 返回 `None`；④ v2 目录含 `_internal` 任务与已解决 blocker 时过滤正确；⑤ REST 归属校验 404 与 `exists:false` 契约；⑥ 五工具 PreToolUse 在 auto 模式返回显式 allow；⑦ 超出 `INK_AGENT_TODO_MAX_ITEMS` 截断置 `truncated:true`。
 
 ## 10. 验收标准
 
@@ -321,7 +323,7 @@ npx tsc -b && npm run lint && npm run build
 | 风险 | 影响 | 缓解/回退 |
 |------|------|-----------|
 | v1 TodoWrite 无文件持久层，后端重启/重连后内存态丢失 | 重连后 Todo 区短暂为空，直至下一次 TodoWrite | 契约显式记录；CLI transcript resume 由官方重建的是 CLI 侧状态，本系统面板等下一次工具调用自愈 |
-| 开启 v2 后 TodoWrite 被官方禁用，模型需适应 TaskCreate 族 | 行为差异 | `INK_AGENT_TASK_V2_ENABLED` 默认 off，v2 为显式 opt-in；回退即摘除 env |
+| 开启 v2 后 TodoWrite 被官方禁用，模型需适应 TaskCreate 族 | 行为差异 | 2026-07-26 起 CLI 默认启用任务工具（新版内置 CLI 行为），两族并存与否由官方决定；显式关闭可走 CLI 原生 `CLAUDE_CODE_ENABLE_TASKS=0` |
 | TaskUpdate 低敏降级使任务增删改未经人工确认 | 清单被模型自主变更 | 仅影响会话元数据；高敏写工具仍走确认侧路；policy 文档显式记录偏差 |
 | CLI 版本差异导致 `input.todos` 字段名漂移 | v1 捕获失效 | schema 校验失败时不发射只记日志；测试锁定当前字段契约 |
 | v2 任务 JSON 被外部（非工具流）修改 | 面板与文件不一致 | 本系统无该场景（无 teammate）；REST 每次以文件系统为准自愈 |
@@ -337,6 +339,7 @@ npx tsc -b && npm run lint && npm run build
 | 2026-07-20 | `todo-updated` 不映射 UIMessageChunk、不入 `collected_parts` | Todo 是面板状态而非对话消息 | 历史回放不含 todo 帧，依赖 REST 水合 |
 | 2026-07-20 | PlanButton 升级为"计划与待办"双区弹层，新增 `IconPlanTasks` | 单一入口承载两类会话面板状态；`IconTasks` 语义不足以覆盖双区 | 图标库 +1，弹层结构分区 |
 | 2026-07-20 | 五工具降级低敏并记录 TaskUpdate 非只读偏差 | 会话元数据操作，写入范围限定 per-thread workspace | 须同步 policy 文档与测试 |
+| 2026-07-26 | `CLAUDE_CODE_TASK_LIST_ID=main` 改为**无条件注入**；`INK_AGENT_TASK_V2_ENABLED` 退化为仅追加显式 `CLAUDE_CODE_ENABLE_TASKS=1` 的遗留开关 | 0.2.128 内置 CLI 默认启用任务工具（`CLAUDE_CODE_ENABLE_TASKS !== "0"`），未开门控的旧部署任务照跑但写入 sessionId 兜底目录，`get_tasks_dir("main")` 定位失败 → 弹层永空（真实线上 bug） | 修复任务面板空态；回退：恢复门控判断（`if not task_v2_enabled(): return options`） |
 
 ## 13. 工作流规则：规划前提示词优化（Phase F 固化）
 
