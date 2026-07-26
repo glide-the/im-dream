@@ -27,6 +27,10 @@
 # [Sync] 2026-06-21: cover Settings-backed sandbox network policy emission.
 # [Sync] 2026-06-25: cover open sandbox network mode omitting sandbox.network
 #                    instead of writing unsupported allowedDomains ["*"].
+# [Sync] 2026-07-26: cover sandbox fs write policy — default Claude TMPDIR
+#                    allowWrite (cwd-* zsh noise fix), CLAUDE_TMPDIR override,
+#                    sandbox_fs_allowed_write_paths append + denyWrite
+#                    unchanged, disabled-sandbox shape unchanged.
 
 """Regression tests for libs/claude_agent_kit/server/workspace.py."""
 from __future__ import annotations
@@ -49,6 +53,7 @@ from libs.claude_agent_kit.server.workspace import (
     SANDBOX_EXTRA_ALLOW_READ_ENV,
     WORKSPACE_SUBDIRS,
     _append_existing_sandbox_read_path,
+    _sandbox_claude_tmp_write_paths,
     get_or_create_workspace,
     get_workspace_root,
     init_workspace,
@@ -138,7 +143,10 @@ class TestInitWorkspace(unittest.TestCase):
         self.assertNotIn("enableWeakerNestedSandbox", sandbox)
         self.assertEqual(sandbox["filesystem"]["denyRead"], ["/"])
         self.assertEqual(sandbox["filesystem"]["allowRead"][0], str(ws.resolve()))
-        self.assertEqual(sandbox["filesystem"]["allowWrite"], [str(ws.resolve())])
+        self.assertEqual(
+            sandbox["filesystem"]["allowWrite"],
+            [str(ws.resolve()), *_sandbox_claude_tmp_write_paths()],
+        )
         self.assertEqual(sandbox["network"]["allowedDomains"], [])
         self.assertNotIn(
             str((ws / ".claude").resolve()),
@@ -206,6 +214,73 @@ class TestInitWorkspace(unittest.TestCase):
         settings = json.loads((ws / ".claude" / "settings.json").read_text())
         sandbox = settings["sandbox"]
         self.assertNotIn("network", sandbox)
+
+    def test_enabled_sandbox_allows_claude_tmpdir_writes(self):
+        """Claude Code's sandbox TMPDIR (cwd-* shell-hook files) is writable
+        by default — kills the zsh operation-not-permitted noise."""
+        ws = init_workspace("sandbox-claude-tmp")
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        allow_write = settings["sandbox"]["filesystem"]["allowWrite"]
+        self.assertEqual(allow_write[0], str(ws.resolve()))
+        self.assertEqual(allow_write[1:], _sandbox_claude_tmp_write_paths())
+
+    def test_claude_tmpdir_env_override_is_honored(self):
+        with unittest.mock.patch.dict(
+            os.environ, {"CLAUDE_TMPDIR": "/custom/claude-tmp"}
+        ):
+            ws = init_workspace("sandbox-claude-tmp-env")
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        allow_write = settings["sandbox"]["filesystem"]["allowWrite"]
+        self.assertIn("/custom/claude-tmp", allow_write)
+
+    def test_extra_fs_write_paths_appended_after_workspace_and_tmp(self):
+        ws = init_workspace(
+            "sandbox-fs-extra",
+            sandbox_fs_allowed_write_paths=[
+                "/data/out",
+                "relative/bad",
+                "/data/out/",
+                "/var/cache",
+            ],
+        )
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        sandbox = settings["sandbox"]
+        allow_write = sandbox["filesystem"]["allowWrite"]
+        # Relative paths dropped, trailing-slash dedupe, order preserved:
+        # workspace → claude tmp → user extras.
+        self.assertEqual(
+            allow_write,
+            [
+                str(ws.resolve()),
+                *_sandbox_claude_tmp_write_paths(),
+                "/data/out",
+                "/var/cache",
+            ],
+        )
+        # denyWrite list is unchanged (deny always wins over allow).
+        self.assertEqual(
+            sandbox["filesystem"]["denyWrite"],
+            [
+                str(ws.resolve() / ".claude" / "settings.json"),
+                str(ws.resolve() / ".claude" / "settings.local.json"),
+                str(ws.resolve() / ".claude" / "hooks"),
+                str(ws.resolve() / ".claude" / ".clawhub"),
+                str(ws.resolve() / ".claude" / "worktrees"),
+                str(ws.resolve() / ".editor"),
+                str(ws.resolve() / ".mcp.json"),
+            ],
+        )
+
+    def test_disabled_sandbox_write_policy_unchanged(self):
+        """sandbox_enabled=False keeps the pre-feature allowWrite shape."""
+        ws = init_workspace("sandbox-fs-disabled", sandbox_enabled=False)
+        settings = json.loads((ws / ".claude" / "settings.json").read_text())
+        sandbox = settings["sandbox"]
+        self.assertFalse(sandbox["enabled"])
+        self.assertEqual(
+            sandbox["filesystem"]["allowWrite"],
+            [str(ws.resolve())],
+        )
 
     def test_can_enable_weaker_nested_sandbox_for_docker(self):
         with unittest.mock.patch(

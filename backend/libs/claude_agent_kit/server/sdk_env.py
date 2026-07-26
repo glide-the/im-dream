@@ -1,5 +1,5 @@
-# [Input] Consume backend/.env, process env, and ClaudeCodeOptions-like objects.
-# [Output] Provide helpers that merge project/runtime env vars into ClaudeCodeOptions.env
+# [Input] Consume backend/.env, process env, and ClaudeAgentOptions-like objects.
+# [Output] Provide helpers that merge project/runtime env vars into ClaudeAgentOptions.env
 #          and force Claude Code to read project settings only.
 # [Pos] SDK environment helper node in libs/claude_agent_kit/server
 # [Sync] 2026-05-08: centralize .env injection for ClaudeSDKClient subprocess options.
@@ -20,6 +20,22 @@
 #                    CLAUDE_CODE_ENABLE_TASKS=1 / CLAUDE_CODE_TASK_LIST_ID=main
 #                    at the lowest env priority so v2 task files land in
 #                    {workspace}/.claude-home/tasks/main/ (claude-todo §5.1).
+# [Sync] 2026-07-26: SDK migration claude-code-sdk → claude-agent-sdk 0.2.128 —
+#                    docstring/type-name updates only (ClaudeAgentOptions);
+#                    extra_args["setting-sources"]="project" passthrough is
+#                    still correct because the new transport only emits its own
+#                    --setting-sources flag when options.setting_sources is set
+#                    (we never set it).
+# [Sync] 2026-07-26: HOTFIX task-list divergence — the 0.2.128 bundled CLI
+#                    enables task tools by default (CLAUDE_CODE_ENABLE_TASKS
+#                    !== "0") and falls back to sessionId/teamName taskListId
+#                    when CLAUDE_CODE_TASK_LIST_ID is unset, so runs with the
+#                    legacy INK_AGENT_TASK_V2_ENABLED gate off wrote tasks to
+#                    per-session dirs that get_tasks_dir("main") never found
+#                    (empty 计划与待办 panel despite working task tools).
+#                    apply_task_v2_env_to_options now ALWAYS pins
+#                    CLAUDE_CODE_TASK_LIST_ID=main (lowest priority); the gate
+#                    only forces an explicit CLAUDE_CODE_ENABLE_TASKS=1.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
@@ -74,11 +90,17 @@ _TRUE_ENV_VALUES = frozenset({"1", "true", "yes", "on"})
 
 
 def task_v2_enabled() -> bool:
-    """Return whether Claude Code v2 file tasks are enabled (claude-todo §5.1).
+    """Return whether the legacy v2 opt-in gate is set (claude-todo §5.1).
 
-    Default off: enabling v2 makes the CLI expose ``TaskCreate``/``TaskUpdate``/
-    ``TaskList``/``TaskGet`` and disable v1 ``TodoWrite`` (official mutual
-    exclusion), so it is an explicit opt-in via ``INK_AGENT_TASK_V2_ENABLED``.
+    Historical note: enabling v2 used to make the CLI expose
+    ``TaskCreate``/``TaskUpdate``/``TaskList``/``TaskGet`` and disable v1
+    ``TodoWrite`` (official mutual exclusion), so it was an explicit opt-in
+    via ``INK_AGENT_TASK_V2_ENABLED``.  The claude-agent-sdk 0.2.128 bundled
+    CLI enables task tools **by default** (``CLAUDE_CODE_ENABLE_TASKS !==
+    "0"``), so the gate no longer controls tool availability — it only
+    forces an explicit ``CLAUDE_CODE_ENABLE_TASKS=1`` injection.  The fixed
+    taskListId pinning no longer depends on this gate (see
+    :func:`apply_task_v2_env_to_options`).
     """
 
     raw = os.getenv(_TASK_V2_ENABLED_ENV_NAME, "").strip().lower()
@@ -92,7 +114,7 @@ def _is_project_dotenv_sdk_env_key(key: str) -> bool:
 
 
 def project_dotenv_env(env_file: Optional[Path | str] = None) -> dict[str, str]:
-    """Return backend ``.env`` values suitable for ``ClaudeCodeOptions.env``."""
+    """Return backend ``.env`` values suitable for ``ClaudeAgentOptions.env``."""
     path = Path(env_file) if env_file is not None else _PROJECT_ENV_FILE
     if not path.exists():
         return {}
@@ -106,11 +128,11 @@ def project_dotenv_env(env_file: Optional[Path | str] = None) -> dict[str, str]:
 
 
 def process_sdk_env(process_env: Optional[Mapping[str, str]] = None) -> dict[str, str]:
-    """Return process env values suitable for ``ClaudeCodeOptions.env``.
+    """Return process env values suitable for ``ClaudeAgentOptions.env``.
 
     Cloud Run injects Secret Manager values as regular environment variables,
     not as a ``backend/.env`` file.  These values still need to be copied into
-    ``ClaudeCodeOptions.env`` because setting that field makes the SDK
+    ``ClaudeAgentOptions.env`` because setting that field makes the SDK
     subprocess use the explicit map instead of inheriting the whole parent env.
     """
 
@@ -147,7 +169,7 @@ def apply_project_dotenv_to_options(
     options: Any,
     env_file: Optional[Path | str] = None,
 ) -> Any:
-    """Ensure a ClaudeCodeOptions-like object carries project/runtime SDK vars."""
+    """Ensure a ClaudeAgentOptions-like object carries project/runtime SDK vars."""
     existing_env = getattr(options, "env", None) or {}
     options.env = merge_project_dotenv_env(existing_env, env_file)
     return options
@@ -215,32 +237,41 @@ def apply_plan_mode_env_to_options(
 
 
 def apply_task_v2_env_to_options(options: Any) -> Any:
-    """Enable Claude Code v2 file tasks when gated on (claude-todo §5.1).
+    """Pin the v2 file-task list location for every run (claude-todo §5.1).
 
-    Sets ``CLAUDE_CODE_ENABLE_TASKS=1`` and ``CLAUDE_CODE_TASK_LIST_ID=main``
-    so v2 task JSON lands under ``{CLAUDE_CONFIG_DIR}/tasks/main/`` — i.e.
+    Always injects ``CLAUDE_CODE_TASK_LIST_ID=main`` (lowest priority) so v2
+    task JSON lands under ``{CLAUDE_CONFIG_DIR}/tasks/main/`` — i.e.
     ``{workspace}/.claude-home/tasks/main/`` once
     ``apply_plan_mode_env_to_options`` has redirected the config home.
-    Fixing taskListId prevents the CLI's sessionId fallback from scattering
-    one thread's tasks across per-session subdirectories.
+    Fixing taskListId prevents the CLI's sessionId/teamName fallback from
+    scattering one thread's tasks across per-session subdirectories that
+    ``workspace.get_tasks_dir()`` never finds.
+
+    Why unconditional: the claude-agent-sdk 0.2.128 bundled CLI enables task
+    tools **by default** (``CLAUDE_CODE_ENABLE_TASKS !== "0"``), so without
+    this injection a run with the legacy ``INK_AGENT_TASK_V2_ENABLED`` gate
+    off would still execute TaskCreate/TaskUpdate but write them to a
+    per-session list dir — the panel then shows nothing (2026-07-26
+    production bug).  ``CLAUDE_CODE_ENABLE_TASKS=1`` is additionally injected
+    when the legacy gate is truthy (belt-and-braces with the CLI default;
+    preserves an explicit opt-out path via the CLI's own
+    ``CLAUDE_CODE_ENABLE_TASKS=0``).
 
     Priority: lowest in the SDK env chain — call *after*
     ``apply_plan_mode_env_to_options`` and *before*
     ``apply_user_sdk_env_to_options``.  Explicit values already present in
-    ``options.env`` are preserved.  No-op unless
-    ``INK_AGENT_TASK_V2_ENABLED`` is truthy (default off).
+    ``options.env`` are preserved.
     """
 
-    if not task_v2_enabled():
-        return options
     existing_env = getattr(options, "env", None) or {}
     if not isinstance(existing_env, dict):
         existing_env = dict(existing_env)
     merged = dict(existing_env)
-    merged.setdefault(_CLAUDE_CODE_ENABLE_TASKS_ENV_NAME, "1")
     merged.setdefault(
         _CLAUDE_CODE_TASK_LIST_ID_ENV_NAME, CLAUDE_CODE_TASK_LIST_ID_VALUE
     )
+    if task_v2_enabled():
+        merged.setdefault(_CLAUDE_CODE_ENABLE_TASKS_ENV_NAME, "1")
     options.env = merged
     return options
 

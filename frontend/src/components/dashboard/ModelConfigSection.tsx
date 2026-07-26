@@ -18,6 +18,13 @@
 //                    runtime initialization.
 // [Sync] 2026-06-25: hydrate Sandbox Network controls from PUT response so
 //                    sanitized allowed domains and mode survive refresh.
+// [Sync] 2026-07-26: add Sandbox File Writes control backed by
+//                    system_config.sandbox_fs_allowed_write_paths — tag-list of
+//                    extra absolute writable paths (same Workspace Mode gating
+//                    as Sandbox Network), with hint covering the default-allowed
+//                    Claude TMPDIR and denyWrite precedence. Hardcoded zh copy
+//                    matches this section's existing convention (no i18n infra
+//                    in this component).
 // [Sync] 2026-06-25: hide the HTTP method placeholder in open network mode
 //                    while keeping the high-risk internet access warning.
 // [Sync] 2026-07-23: theme control now reads/writes the unified theme store
@@ -48,6 +55,7 @@ interface SystemConfigData {
   workspace_enabled?: boolean;
   sandbox_network_mode?: SandboxNetworkMode;
   sandbox_network_allowed_domains?: string[];
+  sandbox_fs_allowed_write_paths?: string[];
   im_full_access_enabled?: boolean;
   theme?: ThemeMode;
   env_vars?: Record<string, string>;
@@ -103,6 +111,27 @@ function normalizeSandboxNetworkDomain(value: string): string | null {
   return parseSandboxNetworkDomains(value)[0] ?? null;
 }
 
+function formatSandboxFsWritePaths(paths: string[] | undefined): string {
+  return Array.isArray(paths) ? paths.join('\n') : '';
+}
+
+function parseSandboxFsWritePaths(value: string): string[] {
+  const paths: string[] = [];
+  for (const rawPart of value.split(/[\n,;]+/)) {
+    const part = rawPart.trim();
+    if (!part || !part.startsWith('/')) continue;
+    const normalized = part.replace(/\/+$/, '') || '/';
+    if (!paths.includes(normalized)) {
+      paths.push(normalized);
+    }
+  }
+  return paths;
+}
+
+function normalizeSandboxFsWritePath(value: string): string | null {
+  return parseSandboxFsWritePaths(value)[0] ?? null;
+}
+
 function readSystemConfigResponse(payload: SystemConfigResponse): SystemConfigData {
   return payload.data ?? payload;
 }
@@ -115,6 +144,7 @@ function hasSystemConfigFields(config: SystemConfigData): boolean {
     || config.workspace_enabled !== undefined
     || config.sandbox_network_mode !== undefined
     || config.sandbox_network_allowed_domains !== undefined
+    || config.sandbox_fs_allowed_write_paths !== undefined
     || config.im_full_access_enabled !== undefined
     || config.theme !== undefined
     || config.env_vars !== undefined
@@ -131,6 +161,11 @@ export default function ModelConfigSection() {
   const [sandboxNetworkStatus, setSandboxNetworkStatus] = useState<string | null>(null);
   const [sandboxNetworkAddingDomain, setSandboxNetworkAddingDomain] = useState(false);
   const [sandboxNetworkNewDomain, setSandboxNetworkNewDomain] = useState('');
+  const [sandboxFsPaths, setSandboxFsPaths] = useState('');
+  const [sandboxFsSaving, setSandboxFsSaving] = useState(false);
+  const [sandboxFsStatus, setSandboxFsStatus] = useState<string | null>(null);
+  const [sandboxFsAddingPath, setSandboxFsAddingPath] = useState(false);
+  const [sandboxFsNewPath, setSandboxFsNewPath] = useState('');
   const [imFullAccessEnabled, setImFullAccessEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('auto');
   const [dirty, setDirty] = useState(false);
@@ -160,6 +195,8 @@ export default function ModelConfigSection() {
         setWorkspaceMode(config.workspace_enabled ?? true);
         setSandboxNetworkMode(isSandboxNetworkMode(config.sandbox_network_mode) ? config.sandbox_network_mode : 'allowlist');
         setSandboxNetworkDomains(formatSandboxNetworkDomains(config.sandbox_network_allowed_domains));
+        setSandboxFsPaths(formatSandboxFsWritePaths(config.sandbox_fs_allowed_write_paths));
+        setSandboxFsStatus(null);
         setSandboxNetworkStatus(null);
         setImFullAccessEnabled(config.im_full_access_enabled ?? false);
         const match = MODEL_OPTIONS.find((option) => option.model === config.model);
@@ -308,6 +345,50 @@ export default function ModelConfigSection() {
     void saveSandboxNetworkDomains(domains);
   }, [sandboxNetworkDomains, saveSandboxNetworkDomains]);
 
+  const saveSandboxFsWritePaths = useCallback(async (paths: string[]) => {
+    setSandboxFsSaving(true);
+    const savedConfig = await updateConfig({ sandbox_fs_allowed_write_paths: paths });
+    if (savedConfig) {
+      setSandboxFsPaths(formatSandboxFsWritePaths(savedConfig.sandbox_fs_allowed_write_paths ?? paths));
+      setSandboxFsStatus('可写路径已保存。');
+    } else {
+      setSandboxFsStatus('可写路径保存失败，请稍后重试。');
+    }
+    setSandboxFsSaving(false);
+    return Boolean(savedConfig);
+  }, [updateConfig]);
+
+  const handleAddSandboxFsPath = useCallback(() => {
+    if (!sandboxFsAddingPath) {
+      setSandboxFsAddingPath(true);
+      setSandboxFsStatus(null);
+      return;
+    }
+    const path = normalizeSandboxFsWritePath(sandboxFsNewPath);
+    if (!path) {
+      setSandboxFsStatus('请输入以 / 开头的绝对路径。');
+      return;
+    }
+    const paths = parseSandboxFsWritePaths(sandboxFsPaths);
+    if (!paths.includes(path)) {
+      paths.push(path);
+    }
+    setSandboxFsNewPath('');
+    setSandboxFsAddingPath(false);
+    void saveSandboxFsWritePaths(paths);
+  }, [
+    sandboxFsAddingPath,
+    sandboxFsNewPath,
+    sandboxFsPaths,
+    saveSandboxFsWritePaths,
+  ]);
+
+  const handleRemoveSandboxFsPath = useCallback((path: string) => {
+    const paths = parseSandboxFsWritePaths(sandboxFsPaths)
+      .filter((item) => item !== path);
+    void saveSandboxFsWritePaths(paths);
+  }, [sandboxFsPaths, saveSandboxFsWritePaths]);
+
   const handleImFullAccessToggle = useCallback(() => {
     const next = !imFullAccessEnabled;
     setImFullAccessEnabled(next);
@@ -391,6 +472,7 @@ export default function ModelConfigSection() {
 
   const sandboxNetworkEnabled = sandboxNetworkMode !== 'disabled';
   const sandboxNetworkDomainsList = parseSandboxNetworkDomains(sandboxNetworkDomains);
+  const sandboxFsPathsList = parseSandboxFsWritePaths(sandboxFsPaths);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
@@ -750,6 +832,131 @@ export default function ModelConfigSection() {
         {sandboxNetworkStatus ? (
           <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
             {sandboxNetworkStatus}
+          </p>
+        ) : null}
+      </div>
+      ) : null}
+
+      {/* Sandbox filesystem extra write paths */}
+      {workspaceMode ? (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+        <div>
+          <p style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>
+            沙箱文件写入 / Sandbox File Writes
+          </p>
+          <p style={{ margin: '0.2rem 0 0', fontSize: '0.78rem', color: 'var(--color-text-muted)', lineHeight: 1.65 }}>
+            除线程工作区外，额外允许沙箱内 Bash 写入的绝对路径。Claude Code 自身的临时目录（/tmp/claude-$UID 或 $CLAUDE_TMPDIR）已默认放行；工作区内部配置（.claude/settings、.editor 等）仍始终禁止写入。
+          </p>
+        </div>
+
+        {sandboxFsPathsList.length ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
+            {sandboxFsPathsList.map((path) => (
+              <span
+                key={path}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  maxWidth: '100%',
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '999px',
+                  padding: '0.35rem 0.5rem 0.35rem 0.75rem',
+                  background: 'var(--color-bg-paper)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '0.76rem',
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{path}</span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSandboxFsPath(path)}
+                  aria-label={`Remove ${path}`}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--color-text-muted)',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem',
+                    lineHeight: 1,
+                    padding: 0,
+                  }}
+                >
+                  x
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+
+        <div>
+          {sandboxFsAddingPath ? (
+            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <input
+                type="text"
+                value={sandboxFsNewPath}
+                onChange={(event) => setSandboxFsNewPath(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    handleAddSandboxFsPath();
+                  }
+                }}
+                placeholder="/absolute/path"
+                autoFocus
+                style={{ ...fieldStyle, maxWidth: '24rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.82rem' }}
+              />
+              <button
+                type="button"
+                onClick={handleAddSandboxFsPath}
+                disabled={sandboxFsSaving}
+                style={{
+                  border: '1px solid var(--color-border-paper)',
+                  borderRadius: '999px',
+                  padding: '0.55rem 0.9rem',
+                  background: 'var(--color-bg-paper)',
+                  color: 'var(--color-text-primary)',
+                  cursor: sandboxFsSaving ? 'not-allowed' : 'pointer',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  opacity: sandboxFsSaving ? 0.55 : 1,
+                }}
+              >
+                保存
+              </button>
+              <button
+                type="button"
+                onClick={() => { setSandboxFsAddingPath(false); setSandboxFsNewPath(''); }}
+                style={{ border: 'none', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: '0.82rem' }}
+              >
+                取消
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleAddSandboxFsPath}
+              style={{
+                border: '1px solid var(--color-border-paper)',
+                borderRadius: '999px',
+                padding: '0.55rem 0.95rem',
+                background: 'transparent',
+                color: 'var(--color-text-primary)',
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+              }}
+            >
+              <span aria-hidden="true" style={{ fontSize: '1.05rem', marginRight: '0.45rem' }}>+</span>
+              添加可写路径
+            </button>
+          )}
+        </div>
+
+        {sandboxFsStatus ? (
+          <p style={{ margin: 0, fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+            {sandboxFsStatus}
           </p>
         ) : null}
       </div>

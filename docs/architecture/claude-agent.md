@@ -184,7 +184,7 @@ POST /api/claude-agent
     │   │
     │   └─ Phase 3: service.py
     │       ├─ runner.run_streaming(opts, callbacks)
-    │       │   └─ claude_code_sdk.query() → AsyncGenerator[SDKMessage]
+    │       │   └─ claude_agent_sdk.query() → AsyncGenerator[SDKMessage]
     │       ├─ 写 SSE 事件流
     │       │   ├─ text-delta, text-done
     │       │   ├─ tool-event
@@ -241,7 +241,7 @@ POST /api/claude-agent
 | 维度 | PolyCLI agent（现有）| claude_agent（新增）|
 |------|----------------------|---------------------|
 | 注册方式 | `@session_def(...)` → `/polycli` 挂载 | `@app.post/get/delete(...)` → `/api/claude-agent/*` |
-| SDK | PolyCLI / PolyAgent | claude_code_sdk |
+| SDK | PolyCLI / PolyAgent | claude_agent_sdk |
 | 会话管理 | PolyCLI session registry | AgentRunStatePool（Flyweight）|
 | 鉴权 | `auth_callback=auth.verify_access_token` | `Depends(get_current_user)`（同现有 REST 路由）|
 | 数据库 | `server.py` 内直接调用 database | `service.py` 内调用 database（只读写作会话）|

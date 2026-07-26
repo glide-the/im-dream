@@ -34,7 +34,7 @@ ToolEventPayload
     Payload passed to ``on_tool_event`` callbacks.
 
 SimpleClaudeAgentSDKClient
-    Thin ``claude_code_sdk.query`` adapter.  Swap it out to inject a custom
+    Thin ``claude_agent_sdk.query`` adapter.  Swap it out to inject a custom
     transport in tests.
 
 IClaudeAgentSDKClient

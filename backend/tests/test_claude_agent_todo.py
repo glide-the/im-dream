@@ -9,13 +9,20 @@
 # [Pos] test node in backend/tests
 # [Sync] 2026-07-20: initial — claude-todo §5.1/§5.4/§5.5/§5.7 backend coverage
 #                    (design §9 key cases ①-⑦).
+# [Sync] 2026-07-26: HOTFIX — v2 env injection semantics change: the 0.2.128
+#                    bundled CLI enables task tools by default, so
+#                    CLAUDE_CODE_TASK_LIST_ID=main is now ALWAYS pinned
+#                    (gate-independent); the legacy gate only forces explicit
+#                    CLAUDE_CODE_ENABLE_TASKS=1.
 
 """Tests for the claude-todo backend half (todo list capture & contracts).
 
 Covers (claude-todo §9 key cases):
 - ① v1 ``tool-input-available(TodoWrite)`` → ``todo-updated`` frame, never
   collected into ``collected_parts`` (§5.3/§5.4).
-- ② v2 env injection only when ``INK_AGENT_TASK_V2_ENABLED`` is on (§5.1).
+- ② v2 env injection: ``CLAUDE_CODE_TASK_LIST_ID=main`` always pinned;
+  ``CLAUDE_CODE_ENABLE_TASKS=1`` only when ``INK_AGENT_TASK_V2_ENABLED`` is
+  on (§5.1, 2026-07-26 semantics).
 - ③ ``get_tasks_dir`` traversal / missing-workspace → ``None`` (§5.1).
 - ④ ``read_task_items`` filters ``metadata._internal`` tasks and drops
   blockers that are already completed (§5.1/§5.2).
@@ -41,7 +48,7 @@ ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before kit imports
+import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before kit imports
 
 from libs.claude_agent_kit.server import sdk_env as sdk_env_module
 from libs.claude_agent_kit.server.agent_runner import (
@@ -133,24 +140,27 @@ class TestGetTasksDir(unittest.TestCase):
 
 
 class TestApplyTaskV2EnvToOptions(unittest.TestCase):
-    def test_noop_when_gate_unset(self):
+    def test_task_list_id_pinned_when_gate_unset(self):
+        """2026-07-26 fix: CLAUDE_CODE_TASK_LIST_ID=main is always pinned —
+        the new CLI enables task tools by default, so an unpinned run writes
+        tasks to a per-session list dir the panel never finds."""
         with unittest.mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("INK_AGENT_TASK_V2_ENABLED", None)
             options = _make_options({"ANTHROPIC_AUTH_TOKEN": "tok"})
             result = apply_task_v2_env_to_options(options)
         self.assertIs(result, options)
         self.assertNotIn("CLAUDE_CODE_ENABLE_TASKS", options.env)
-        self.assertNotIn("CLAUDE_CODE_TASK_LIST_ID", options.env)
+        self.assertEqual(options.env["CLAUDE_CODE_TASK_LIST_ID"], "main")
         self.assertEqual(options.env["ANTHROPIC_AUTH_TOKEN"], "tok")
 
-    def test_noop_when_gate_falsey(self):
+    def test_task_list_id_pinned_when_gate_falsey(self):
         with unittest.mock.patch.dict(
             os.environ, {"INK_AGENT_TASK_V2_ENABLED": "0"}
         ):
             options = _make_options()
             apply_task_v2_env_to_options(options)
         self.assertNotIn("CLAUDE_CODE_ENABLE_TASKS", options.env)
-        self.assertNotIn("CLAUDE_CODE_TASK_LIST_ID", options.env)
+        self.assertEqual(options.env["CLAUDE_CODE_TASK_LIST_ID"], "main")
 
     def test_injects_env_when_gate_on(self):
         with unittest.mock.patch.dict(
@@ -617,7 +627,7 @@ class TestTodoToolPermission(unittest.TestCase):
             with self.subTest(tool=tool):
                 result = _apply_low_sensitivity_query_permission(tool, {})
                 self.assertIsNotNone(result)
-                specific = getattr(result, "hookSpecificOutput", {})
+                specific = (result.get("hookSpecificOutput", {}) if isinstance(result, dict) else getattr(result, "hookSpecificOutput", {}))
                 self.assertEqual(specific.get("hookEventName"), "PreToolUse")
                 self.assertEqual(specific.get("permissionDecision"), "allow")
 

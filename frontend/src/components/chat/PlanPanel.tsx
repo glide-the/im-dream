@@ -30,6 +30,10 @@
 // [Sync] 2026-07-20: i18n — plan/todo popover copy, plan-mode badges, and the relative-time
 //                    helper resolve through the chat.planPanel namespace (en + zh);
 //                    formatRelativeTime now takes t() and formats via getDateLocale.
+// [Sync] 2026-07-26: harden 待办区 render against payload-shape drift (2026-07-26
+//                    React warning investigation): TodoListItem tolerates
+//                    missing content/active_form/blocked_by fields and the list
+//                    key falls back to the index when todo.id is absent.
 
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -191,8 +195,14 @@ function TodoStatusIcon({ status }: { status: ThreadTodoStatus }) {
 }
 
 function TodoListItem({ todo }: { todo: ThreadTodoItem }) {
+  // Defensive against payload-shape drift (raw SSE/REST items): the v1/v2
+  // backend always sends these fields, but a malformed item must never
+  // crash the popover render (2026-07-26 React warning investigation).
+  const blockedBy = Array.isArray(todo.blocked_by) ? todo.blocked_by : [];
+  const content = typeof todo.content === 'string' ? todo.content : '';
+  const activeForm = typeof todo.active_form === 'string' ? todo.active_form : null;
   // in_progress 时优先展示 active_form（进行态描述），其余状态展示 content。
-  const text = todo.status === 'in_progress' && todo.active_form ? todo.active_form : todo.content;
+  const text = todo.status === 'in_progress' && activeForm ? activeForm : content;
   return (
     <li
       style={{
@@ -214,9 +224,9 @@ function TodoListItem({ todo }: { todo: ThreadTodoItem }) {
             @{todo.owner}
           </span>
         ) : null}
-        {todo.blocked_by.length > 0 ? (
+        {blockedBy.length > 0 ? (
           <span style={{ marginLeft: '0.4rem', fontSize: '0.72rem', color: 'var(--color-text-muted)', whiteSpace: 'nowrap' }}>
-            ⛔ {todo.blocked_by.map((blocker) => `#${blocker}`).join(' ')}
+            ⛔ {blockedBy.map((blocker) => `#${blocker}`).join(' ')}
           </span>
         ) : null}
       </span>
@@ -257,8 +267,10 @@ function TodoPopoverContent({ todos }: { todos: ThreadTodoState }) {
           overflowY: expanded ? 'auto' : undefined,
         }}
       >
-        {visibleTodos.map((todo) => (
-          <TodoListItem key={todo.id} todo={todo} />
+        {visibleTodos.map((todo, index) => (
+          // Fallback key guards the React unique-key warning if an item ever
+          // arrives without an id (payload-shape drift).
+          <TodoListItem key={todo.id ?? `todo-${index}`} todo={todo} />
         ))}
       </ul>
       {hiddenCount > 0 ? (

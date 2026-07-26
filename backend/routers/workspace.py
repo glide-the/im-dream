@@ -15,6 +15,9 @@
 # [Sync] 2026-06-21: workspace file APIs initialize workspaces with Settings-backed
 #                    sandbox filesystem and network policy, avoiding default-policy
 #                    rewrites after Settings changes.
+# [Sync] 2026-07-26: pass sandbox_fs_allowed_write_paths through workspace
+#                    init kwargs so file-API refreshes do not drop user fs
+#                    write paths from settings.json.
 
 """Workspace file management API.
 
@@ -148,6 +151,9 @@ def _workspace_init_kwargs_for_user(current_user: dict) -> dict:
         ),
         "sandbox_network_allowed_domains": _coerce_string_list(
             system_config.get("sandbox_network_allowed_domains")
+        ),
+        "sandbox_fs_allowed_write_paths": _coerce_string_list(
+            system_config.get("sandbox_fs_allowed_write_paths")
         ),
     }
 

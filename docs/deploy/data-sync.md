@@ -76,7 +76,7 @@ export GCP_PROJECT_ID=your-project-id
 ./deploy/google-cloud/deploy.sh deploy
 ```
 
-Cloud Run 中 Secret Manager 会把 `ANTHROPIC_AUTH_TOKEN` 注入为后端进程环境变量；后端 SDK env helper 会在启动 Claude Code 子进程前，把该进程环境变量显式合并到 `ClaudeCodeOptions.env`。
+Cloud Run 中 Secret Manager 会把 `ANTHROPIC_AUTH_TOKEN` 注入为后端进程环境变量；后端 SDK env helper 会在启动 Claude Code 子进程前，把该进程环境变量显式合并到 `ClaudeAgentOptions.env`。
 
 如需完整同步 `file-storage/` 和 `agent-workspace/`，仍使用下面的手动命令。
 

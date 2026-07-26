@@ -185,6 +185,15 @@ SettingsView（position: fixed，overflow: auto）
   `npm install`），且优先级高于 IM full-access。
 - 该配置不安装缺失工具；WebFetch 在关闭态会被拒绝，启用态仍由工具权限和域名规则控制。
 
+**沙箱文件写入（2026-07-26 新增）**：
+
+- 位于「沙箱网络」之后、IM Approval Mode 之前，仅在 Workspace Mode 开启时显示。
+- 配置项 `system_config.sandbox_fs_allowed_write_paths`：除线程工作区外额外允许沙箱内 Bash 写入的绝对路径列表，以 pill 形式展示、`+ 添加可写路径` 单行输入保存（复用域允许列表的交互样式）。
+- 后端清洗规则仅接受绝对路径（去尾随斜杠、去重、上限 32 条 / 512 字符）。
+- Claude Code 自身沙箱临时目录（`$CLAUDE_TMPDIR` 或 `/tmp/claude-$UID`）始终默认放行——其 shell hook 会向该目录写入 `cwd-*` 文件，之前因工作区独占的 `allowWrite` 被拒绝并产生 `zsh: operation not permitted` 噪音；UI 提示文案需说明该默认值。
+- 工作区内部配置（`.claude/settings*`、`.editor` 等）仍在 `denyWrite` 中，按 sandbox-runtime 语义 deny 始终优先于 allow，用户路径不可覆盖。
+- 下一次 workspace 初始化时写入 `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的 `sandbox.filesystem.allowWrite`（顺序：工作区 → Claude 临时目录 → 用户路径）。
+
 **非目标 / 避免过度设计**：
 
 - 不做多角色权限系统。
@@ -202,15 +211,15 @@ SettingsView（position: fixed，overflow: auto）
 - 关闭态：按钮使用 `color.disabled.bg` 背景、`color.text.secondary` 文案。
 - 立即同步到 `/api/system-config`，字段为 `im_full_access_enabled`。
 - 切换时必须立即广播同页配置变更，已打开的 Chat 输入区无需刷新即可更新显示。
-- 开启后，后端 Claude-agent runner 在 `PreToolUse` 中对除问答表单外的已暴露工具返回：
+- 开启后，后端 Claude-agent runner 在 `PreToolUse` 中对除问答表单外的已暴露工具返回（纯字典字面量）：
 
 ```python
-HookJSONOutput(
-    hookSpecificOutput={
+{
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
     }
-)
+}
 ```
 
 - `tool_choice="none"` 仍不暴露工具；该开关只影响已经进入 `PreToolUse` 的工具调用审批。

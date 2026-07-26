@@ -34,7 +34,7 @@ sequenceDiagram
     participant Service as ClaudeAgentService
     participant Builder as ClaudeAgentContextBuilder
     participant Runner as ClaudeAgentRunner
-    participant SDK as claude_code_sdk
+    participant SDK as claude_agent_sdk
 
     Browser->>FastAPI: POST /api/claude-agent {message, resume}
     FastAPI->>FastAPI: JWT verify (get_current_user)
@@ -55,7 +55,7 @@ sequenceDiagram
     end
 
     Factory->>Service: assemble_context → execute_session
-    Service->>SDK: claude_code_sdk.query(message, opts)
+    Service->>SDK: claude_agent_sdk.query(message, opts)
     SDK-->>Service: SSE stream (text_delta, tool_use, result)
     Service-->>FastAPI: SSE frames via asyncio.Queue
     FastAPI-->>Browser: StreamingResponse (text/event-stream)
@@ -193,7 +193,7 @@ data: {"type": "finish", "reason": "error"}
 | `thread_pool.py / AgentRunStateSweeper` | 后台定时清理过期会话 |
 | `service.py / ClaudeAgentService` | Phase 1（上下文组装）+ Phase 3（流式执行 + SSE 发送）|
 | `context_builder.py / ClaudeAgentContextBuilder` | 读取 `database.list_sessions`，渲染 system_prompt |
-| `runner.py / ClaudeAgentRunner` | `claude_code_sdk.query` 封装；SDK env 配置；回调分发 |
+| `runner.py / ClaudeAgentRunner` | `claude_agent_sdk.query` 封装；SDK env 配置；回调分发 |
 | `tool_confirmation_store.py` | asyncio.Future 工具确认；跨 loop 安全 |
 | `observer.py / SessionObserverRegistry` | 生命周期事件广播（Phase 1–4）|
 | `workspace.py` | 每 session 隔离工作区目录（`{AGENT_CWD}/{session_id}/`）|

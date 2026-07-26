@@ -6,6 +6,8 @@
 #                    sandbox network policy during workspace refresh.
 # [Sync] 2026-06-25: assert open sandbox network mode omits sandbox.network
 #                    before disabled refresh writes an explicit deny policy.
+# [Sync] 2026-07-26: cover refresh preserving sandbox_fs_allowed_write_paths
+#                    from Settings during workspace file API init.
 
 """Regression tests for the workspace file router."""
 from __future__ import annotations
@@ -107,6 +109,35 @@ class TestWorkspaceDownloadHeaders(unittest.TestCase):
             refreshed_settings["sandbox"]["network"],
             {"allowedDomains": [], "deniedDomains": ["*"]},
         )
+
+    def test_list_refresh_preserves_sandbox_fs_allowed_write_paths(self):
+        session_id = "fs-extra-paths"
+        workspace = get_or_create_workspace(session_id)
+        settings_path = workspace / ".claude" / "settings.json"
+        initial_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        self.assertNotIn(
+            "/data/out",
+            initial_settings["sandbox"]["filesystem"]["allowWrite"],
+        )
+
+        with unittest.mock.patch.object(
+            workspace_router.database,
+            "get_system_config",
+            return_value={
+                "workspace_enabled": True,
+                "sandbox_fs_allowed_write_paths": ["/data/out", "/var/cache"],
+            },
+        ):
+            response = self.client.get(
+                "/api/workspace/files",
+                params={"sessionId": session_id},
+                headers={"Authorization": "Bearer test-token"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        refreshed_settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        allow_write = refreshed_settings["sandbox"]["filesystem"]["allowWrite"]
+        self.assertEqual(allow_write[-2:], ["/data/out", "/var/cache"])
 
 
 if __name__ == "__main__":

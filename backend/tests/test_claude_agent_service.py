@@ -18,6 +18,9 @@
 #                    workspace_context Notion block rendering.
 # [Sync] 2026-07-05: cover explicit Notion connector identity / sync cursor
 #                    rendering in the workspace context summary.
+# [Sync] 2026-07-26: assert sandbox_fs_allowed_write_paths passes from
+#                    system_config through assemble_context into
+#                    get_or_create_workspace.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -35,7 +38,7 @@ ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before service import
+import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before service import
 
 import claude_agent.service as service_module
 import claude_agent.workspace_context as workspace_context_module
@@ -96,6 +99,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                             "raw.githubusercontent.com",
                             "*.npmjs.org",
                         ],
+                        "sandbox_fs_allowed_write_paths": [
+                            "/data/out",
+                            "/var/cache",
+                        ],
                         "env_vars": {
                             "ANTHROPIC_AUTH_TOKEN": "user-token",
                             "EMPTY": None,
@@ -131,6 +138,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             sandbox_network_allowed_domains=[
                 "raw.githubusercontent.com",
                 "*.npmjs.org",
+            ],
+            sandbox_fs_allowed_write_paths=[
+                "/data/out",
+                "/var/cache",
             ],
         )
 

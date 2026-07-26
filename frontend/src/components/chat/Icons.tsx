@@ -8,6 +8,8 @@
 //                    "计划与待办" dual-section semantics (claude-todo §5.6).
 // [Sync] 2026-07-20: add IconList (bulleted list) — PlanButton 改为纯图标按钮，
 //                    文字经悬浮 tooltip 展示（claude-todo §5.6 交互修订）。
+// [Sync] 2026-07-26: add shared IconCopy (lifted from AssistMessagePart) so user and
+//                    assistant message bubbles reuse the same copy affordance.
 import type { CSSProperties, ReactNode } from 'react';
 
 type IconProps = { className?: string; style?: CSSProperties };
@@ -56,6 +58,11 @@ export const IconTrash = createIcon('0 0 24 24', <><path d="M3 6h18" /><path d="
 export const IconEdit = createIcon('0 0 24 24', <><path d="M12 20h9" /><path d="M16.5 3.5l4 4L7 21H3v-4L16.5 3.5z" /></>);
 export const IconX = createIcon('0 0 24 24', <><path d="M18 6L6 18" /><path d="M6 6l12 12" /></>);
 export const IconCheck = createIcon('0 0 24 24', <polyline points="20 6 9 17 4 12" />);
+// 复制图标（双矩形）：用户/助手消息气泡共用。
+export const IconCopy = createIcon('0 0 24 24', <>
+  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+</>);
 export const IconFile = createIcon('0 0 24 24', <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>);
 export const IconDownload = createIcon('0 0 24 24', <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>);
 export const IconLoader = createIcon('0 0 24 24', <path d="M21 12a9 9 0 1 1-6.219-8.56" />);

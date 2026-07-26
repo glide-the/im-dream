@@ -27,6 +27,10 @@
 #                    allowlists are enforced by the CLI sandbox
 #                    (sandbox.network via workspace.py) and asks arrive via
 #                    can_use_tool.
+# [Sync] 2026-07-26: SDK migration — guarded re-export now sources
+#                    ClaudeAgentOptions from claude_agent_sdk (renamed
+#                    package, 0.2.128); the old claude_code_sdk /
+#                    ClaudeCodeOptions names are gone.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -48,16 +52,16 @@ from .messages.build_user_message_content import AttachmentPayload
 # Convenience re-export so callers can import the SDK Message type from here.
 # ---------------------------------------------------------------------------
 try:
-    from claude_code_sdk.types import (  # type: ignore[import-untyped]
-        ClaudeCodeOptions as _ClaudeCodeOptions,
+    from claude_agent_sdk.types import (  # type: ignore[import-untyped]
+        ClaudeAgentOptions as _ClaudeAgentOptions,
     )
-    from claude_code_sdk import query as _sdk_query  # noqa: F401  (ensure importable)
+    from claude_agent_sdk import query as _sdk_query  # noqa: F401  (ensure importable)
 
     SDKMessage = Any  # SDK message union type (resolved at runtime)
-    ClaudeCodeOptions = _ClaudeCodeOptions
+    ClaudeAgentOptions = _ClaudeAgentOptions
 except ImportError:  # pragma: no cover
     SDKMessage = Any
-    ClaudeCodeOptions = Any
+    ClaudeAgentOptions = Any
 
 # Tool choice mode — determines how tool calls are handled
 ToolChoiceMode = Literal["auto", "none", "manual"]
@@ -203,7 +207,7 @@ class AgentRunOptions:
     # Environment passed to project-owned MCP subprocesses for current-session bindings.
     mcp_env: dict[str, str] = field(default_factory=dict)
     # User-scoped SDK env vars from system_config.env_vars.
-    # Allowlist-filtered before injection into ClaudeCodeOptions.env.
+    # Allowlist-filtered before injection into ClaudeAgentOptions.env.
     # Priority: higher than backend/.env, lower than explicit options.env.
     user_sdk_env: dict[str, str] = field(default_factory=dict)
     # Deprecated: attachments should be passed to build_user_message instead.

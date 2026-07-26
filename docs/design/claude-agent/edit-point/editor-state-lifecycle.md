@@ -250,11 +250,11 @@ tempfile.NamedTemporaryFile(prefix="editor_", suffix=".json")
   → tmp_path = /tmp/editor_XXXX.json
   → 追加到 _editor_redirect_tmp_paths
   ↓
-HookJSONOutput({
+{"hookSpecificOutput": {
     "hookEventName": "PreToolUse",
     "permissionDecision": "allow",
     "updatedInput": {"file_path": tmp_path}
-})
+}}
   ↓
 Claude Code CLI 使用重定向路径执行 Read
 Agent 读到实时 cells 数组

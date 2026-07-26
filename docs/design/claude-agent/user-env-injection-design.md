@@ -16,12 +16,12 @@
 
 `claude-sdk-env-design.md` 描述了从 `backend/.env` 向 Claude SDK 子进程注入全局 env 的机制：
 
-1. `sdk_env.py::apply_project_sdk_runtime_options()` 读取 `backend/.env`，过滤 `_PROJECT_DOTENV_SDK_ENV_NAMES` 白名单 key，合并到 `ClaudeCodeOptions.env`。
+1. `sdk_env.py::apply_project_sdk_runtime_options()` 读取 `backend/.env`，过滤 `_PROJECT_DOTENV_SDK_ENV_NAMES` 白名单 key，合并到 `ClaudeAgentOptions.env`。
 2. `ClaudeAgentRunner.run_streaming()` 在构造 `sdk_options` 后调用此 helper，再传给 `_sdk_client.query_stream()`。
 
 ### 1.2 现存缺口
 
-`ClaudeAgentService` 已从数据库加载用户级 `env_vars`（`database.get_system_config(user_id)["env_vars"]`），并以 `mcp_env` 字段传入 `AgentRunOptions`。但 `mcp_env` 目前**仅**用于 MCP 子进程（memory、necklace），**未注入** `ClaudeCodeOptions.env`。
+`ClaudeAgentService` 已从数据库加载用户级 `env_vars`（`database.get_system_config(user_id)["env_vars"]`），并以 `mcp_env` 字段传入 `AgentRunOptions`。但 `mcp_env` 目前**仅**用于 MCP 子进程（memory、necklace），**未注入** `ClaudeAgentOptions.env`。
 
 影响后果：
 
@@ -30,7 +30,7 @@
 
 ### 1.3 本文目标
 
-扩展现有注入链，在 `apply_project_sdk_runtime_options()` 之后再叠加用户级 env，使用户存储的 SDK 相关 env 变量最终进入 `ClaudeCodeOptions.env`，并优先于全局 `backend/.env`。
+扩展现有注入链，在 `apply_project_sdk_runtime_options()` 之后再叠加用户级 env，使用户存储的 SDK 相关 env 变量最终进入 `ClaudeAgentOptions.env`，并优先于全局 `backend/.env`。
 
 ---
 
@@ -38,7 +38,7 @@
 
 ### 2.1 目标
 
-- 用户通过 `PUT /api/system-config` 存储的 `env_vars` 中属于 `_PROJECT_DOTENV_SDK_ENV_NAMES` 白名单的 key，在该用户发起的 Claude Agent 会话中注入 `ClaudeCodeOptions.env`。
+- 用户通过 `PUT /api/system-config` 存储的 `env_vars` 中属于 `_PROJECT_DOTENV_SDK_ENV_NAMES` 白名单的 key，在该用户发起的 Claude Agent 会话中注入 `ClaudeAgentOptions.env`。
 - Settings UI 只在 Workspace Mode 开启时显示 `env_vars` 控件；关闭时保留已保存值但不显示编辑入口。
 - 用户 env 优先级高于 `backend/.env`，但低于调用方显式传入的 `options.env`（如测试场景）。
 - 不允许用户通过 `env_vars` 注入白名单以外的 env key 进入 SDK 子进程。
@@ -65,7 +65,7 @@
 backend/.env  →  user_sdk_env（用户存储）  →  options.env（调用方显式传入）
 ```
 
-`apply_project_sdk_runtime_options()` 处理第一层；新增 `apply_user_sdk_env_to_options()` 处理第二层；调用方在构造 `ClaudeCodeOptions` 时可自由传入第三层（目前 runner 不传，但接口预留）。
+`apply_project_sdk_runtime_options()` 处理第一层；新增 `apply_user_sdk_env_to_options()` 处理第二层；调用方在构造 `ClaudeAgentOptions` 时可自由传入第三层（目前 runner 不传，但接口预留）。
 
 ### 3.2 新增 sdk_env.py helper
 
@@ -107,7 +107,7 @@ def apply_user_sdk_env_to_options(
 
 ```python
 # User-scoped SDK env vars from system_config.env_vars.
-# Allowlist-filtered before injection into ClaudeCodeOptions.env.
+# Allowlist-filtered before injection into ClaudeAgentOptions.env.
 # Priority: higher than backend/.env, lower than explicit options.env.
 user_sdk_env: dict[str, str] = field(default_factory=dict)
 ```
@@ -117,14 +117,14 @@ user_sdk_env: dict[str, str] = field(default_factory=dict)
 | 字段 | 用途 |
 |------|------|
 | `mcp_env` | 注入 memory / necklace MCP 子进程环境（当前逻辑不变） |
-| `user_sdk_env` | 注入 `ClaudeCodeOptions.env`，进入 Claude SDK 子进程 |
+| `user_sdk_env` | 注入 `ClaudeAgentOptions.env`，进入 Claude SDK 子进程 |
 
 ### 3.4 ClaudeAgentRunner 修改
 
 `run_streaming()` 中，在 `apply_project_sdk_runtime_options()` 之后增加一次叠加：
 
 ```python
-sdk_options = apply_project_sdk_runtime_options(ClaudeCodeOptions(...))
+sdk_options = apply_project_sdk_runtime_options(ClaudeAgentOptions(...))
 # Overlay user-scoped SDK env vars (higher priority than backend/.env).
 apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
 ```
@@ -206,7 +206,7 @@ sequenceDiagram
 
 - key 和 value 由 `system_config` router 的 `_sanitize_env_vars()` 在写入 DB 时截断（key ≤ 256 chars，value ≤ 4096 chars，总条数 ≤ 64）。
 - 读取时再经 `apply_user_sdk_env_to_options()` 内白名单过滤。
-- 注入路径仅影响 `ClaudeCodeOptions.env`，不写入 `os.environ`，父进程环境不受影响。
+- 注入路径仅影响 `ClaudeAgentOptions.env`，不写入 `os.environ`，父进程环境不受影响。
 
 ### 4.3 安全边界
 

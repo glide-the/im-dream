@@ -20,6 +20,9 @@
 > **[Sync] 2026-07-26**: PreToolUse 步骤 ②.5 网络门禁拆除（错误层级重复，
 > §6.1 / §6.2 回退）；can_use_tool 成为唯一网络确认通道，
 > `networkRequest.source` 字段取消；`open` 模式"每次询问"语义回退。
+> **[Sync] 2026-07-26**: HOTFIX — `HookJSONOutput(...)` 构造调用全部改为纯字典
+> 字面量（0.2.128 中该类型为 TypedDict Union 不可调用；§5 头部注记两个生产
+> 症状与官方 dict 契约，§5.2 / §6.1 示例更新）。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -353,6 +356,14 @@ await asyncio.wait_for(event.wait(), timeout=300)  # 5分钟超时
 
 ## 5. `PreToolUse` Hook `hookSpecificOutput` 格式 — CLI ≥2.1 规范 **[2026-05-27]**
 
+> **[2026-07-26]** claude-agent-sdk 0.2.128 将 `HookJSONOutput` 改为 TypedDict
+> Union（types.py:561），**不可调用**——所有 `HookJSONOutput(...)` 构造调用抛
+> `TypeError: 'types.UnionType' object is not callable`，曾导致 (a) PostToolUse
+> 观察器崩溃、(b) PreToolUse allow/deny 被静默丢弃（用户在确认框拒绝后工具仍执行）。
+> 当前契约：hook 回调返回纯字典字面量——`{}` 为空操作，决策用
+> `{"hookSpecificOutput": {...}}`（官方 hooks 文档）。§5.1 的
+> `HookJSONOutput(...)` 仅为旧协议历史示例，现行代码见 §5.2。
+
 > **背景**：CLI v2.1+ 更改了 PreToolUse hook 的 `hookSpecificOutput` 协议。旧格式 `{"tool_input": ...}` 被 CLI 静默忽略，导致 `AskUserQuestion` 以无 `answers` 字段的原始 input 执行，返回 `isError:true / output:null`。
 
 ### 5.1 旧格式（CLI < 2.1，已废弃）
@@ -369,32 +380,35 @@ return HookJSONOutput(decision="block", systemMessage=reason)
 
 ### 5.2 新格式（CLI ≥2.1，当前实现）
 
+> **[2026-07-26]** claude-agent-sdk 0.2.128 中 `HookJSONOutput` 是 TypedDict Union、
+> 不可调用；hook 回调一律返回**纯字典字面量**（`{}` 空操作 / 决策字典）。
+
 ```python
 # ✅ 允许并更新 input（携带 answers）
-return HookJSONOutput(
-    hookSpecificOutput={
+return {
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
         "updatedInput": updated_input,   # 包含 answers 的完整 tool_input
     }
-)
+}
 
 # ✅ 允许，不更新 input
-return HookJSONOutput(
-    hookSpecificOutput={
+return {
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
     }
-)
+}
 
 # ✅ 拒绝，附带 Claude 可见的原因
-return HookJSONOutput(
-    hookSpecificOutput={
+return {
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,  # Claude 收到拒绝原因，避免无效重试
     }
-)
+}
 ```
 
 ### 5.3 关键规则
@@ -419,12 +433,12 @@ if (
     and tool_choice != "none"
     and tool_name not in {"AskUserQuestion", "mcp__user__ask_user"}
 ):
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
         }
-    )
+    }
 
 if tool_choice == "auto":
     workspace_files_permission = _apply_workspace_files_permission(tool_name, tool_input, cwd)
@@ -466,7 +480,7 @@ sandbox-runtime 过滤代理层命中未授权域名时，CLI 发起系统级 co
 （2026-07-23 曾另有 PreToolUse 步骤 ②.5 执行前门禁，2026-07-26 作为错误
 层级的重复实现拆除；`networkRequest.source` 字段随之取消。）
 
-`agent_runner.py` 将 `_can_use_tool` 传入 `ClaudeCodeOptions.can_use_tool`，
+`agent_runner.py` 将 `_can_use_tool` 传入 `ClaudeAgentOptions.can_use_tool`，
 该回调复用**同一条** `on_tool_confirmation_request` 确认链路（payload 携带
 `confirmationKind="sandbox_network"` + `networkRequest{host, policyMode, matchedAllowedDomain}`），
 因此前端时序（`tool-input-start` → `tool-approval-request` → POST `/tool-confirm`

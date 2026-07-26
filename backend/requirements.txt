@@ -14,7 +14,7 @@ annotated-types==0.7.0
     # via pydantic
 anyio==4.12.0
     # via
-    #   claude-code-sdk
+    #   claude-agent-sdk
     #   httpx
     #   mcp
     #   openai
@@ -53,7 +53,7 @@ cfgv==3.4.0
     # via pre-commit
 charset-normalizer==3.4.4
     # via requests
-claude-code-sdk==0.0.25
+claude-agent-sdk==0.2.128
     # via ink-and-memory-backend
 click==8.1.8
     # via
@@ -138,7 +138,7 @@ markupsafe==3.0.3
     # via jinja2
 mcp==1.27.1
     # via
-    #   claude-code-sdk
+    #   claude-agent-sdk
     #   ink-and-memory-backend
 mdurl==0.1.2
     # via markdown-it-py
@@ -254,7 +254,7 @@ typing-extensions==4.15.0
     #   aiosignal
     #   anyio
     #   beautifulsoup4
-    #   claude-code-sdk
+    #   claude-agent-sdk
     #   cryptography
     #   exceptiongroup
     #   fastapi

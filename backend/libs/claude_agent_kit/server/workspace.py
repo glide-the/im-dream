@@ -39,6 +39,17 @@
 #                    containment guard, and the read-time derivation of
 #                    TodoItem dicts (filter metadata._internal, drop blockers
 #                    already completed) (claude-todo §5.1/§5.2).
+# [Sync] 2026-07-26: sandbox filesystem write policy — (1) always allowWrite
+#                    Claude Code's own sandbox TMPDIR ($CLAUDE_TMPDIR or
+#                    /tmp/claude-$UID) when the sandbox is enabled, killing the
+#                    "zsh: operation not permitted: .../cwd-*" noise caused by
+#                    the CLI shell hook writing cwd-* files outside the
+#                    previously workspace-only allowWrite; (2) new Settings key
+#                    sandbox_fs_allowed_write_paths — user extra writable
+#                    absolute paths appended to filesystem.allowWrite after the
+#                    workspace and claude-tmp entries; denyWrite still wins for
+#                    workspace internals per sandbox-runtime deny-precedence.
+
 
 """Workspace manager for Claude Agent session directories.
 
@@ -340,6 +351,56 @@ def get_workspace_root() -> Path:
     return Path(tempfile.gettempdir()) / "ink-agent-workspaces"
 
 
+def _sandbox_claude_tmp_write_paths() -> list[str]:
+    """Return Claude Code's sandbox TMPDIR, which sandboxed Bash must write.
+
+    Claude Code's sandbox sets ``TMPDIR`` for sandboxed commands to
+    ``$CLAUDE_TMPDIR`` or a ``/tmp/claude*`` default, and its shell hook
+    writes ``cwd-*`` files there.  Without an ``allowWrite`` entry those
+    writes are denied and every sandboxed command prints
+    ``zsh: operation not permitted: /tmp/claude*/cwd-*`` noise.  This is
+    the CLI's own runtime scratch area, not user data, so it is always
+    allowed when the sandbox is enabled.
+
+    The default TMPDIR convention differs by CLI version: sandbox-runtime
+    uses ``$CLAUDE_TMPDIR || /tmp/claude`` (no uid — observed in production
+    on 2026-07-26), while other builds use ``/tmp/claude-{uid}`` (restored
+    ``filesystem.ts:331-346``).  Both are allowed defensively; the extra
+    entry is harmless because the path is CLI-owned scratch space either
+    way.  Evidence: bundled CLI strings (``CLAUDE_TMPDIR``, ``cwd-``) and
+    restored-source analysis (``claude-task-tools-source-analysis.md``).
+    """
+
+    override = os.environ.get("CLAUDE_TMPDIR")
+    if override:
+        return [override]
+    # Literal /tmp — NOT tempfile.gettempdir(): the CLI hardcodes /tmp/claude*
+    # (sandbox-runtime: TMPDIR=$CLAUDE_TMPDIR || /tmp/claude), it does not
+    # follow the platform tempdir (/var/folders/... on macOS).
+    return ["/tmp/claude", f"/tmp/claude-{os.getuid()}"]
+
+
+def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
+    """Sanitize user-configured extra writable paths (absolute-only, deduped).
+
+    Defense-in-depth mirror of the system_config sanitizer: the Settings PUT
+    route validates first, but workspace config must never write a relative
+    path into ``allowWrite`` regardless of caller.
+    """
+
+    if not isinstance(raw, list):
+        return []
+    result: list[str] = []
+    for item in raw:
+        path = str(item).strip()
+        if not path or not os.path.isabs(path):
+            continue
+        normalized = path.rstrip("/") or "/"
+        if normalized not in result:
+            result.append(normalized)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Public API — workspace lifecycle
 # ---------------------------------------------------------------------------
@@ -351,6 +412,7 @@ def _workspace_sandbox_config(
     *,
     network_mode: object = "allowlist",
     network_allowed_domains: object = None,
+    fs_allowed_write_paths: object = None,
 ) -> dict:
     """Return Claude Code sandbox settings for a single thread workspace.
 
@@ -363,6 +425,16 @@ def _workspace_sandbox_config(
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
+
+    # Write policy is allow-only for the thread workspace, plus Claude Code's
+    # own sandbox TMPDIR (runtime scratch, kills the cwd-* zsh noise), plus
+    # any user-configured extra writable paths (Settings
+    # ``sandbox_fs_allowed_write_paths``).  Only appended when the sandbox is
+    # enabled so a disabled config stays byte-identical to before.
+    allow_write = [str(workspace_abs)]
+    if enabled:
+        allow_write.extend(_sandbox_claude_tmp_write_paths())
+        allow_write.extend(_sandbox_fs_extra_write_paths(fs_allowed_write_paths))
 
     sandbox_config: dict = {
         "enabled": enabled,
@@ -377,11 +449,13 @@ def _workspace_sandbox_config(
             # paths from being readable by Bash subprocesses.
             "denyRead": ["/"],
             "allowRead": allow_read,
-            # Write policy is allow-only for the thread workspace.  Keep
-            # .claude/skills writable so skill symlinks and runtime-installed
-            # skills can be fully managed, but deny config/hook internals that
-            # should not be mutated by Bash.
-            "allowWrite": [str(workspace_abs)],
+            # Keep .claude/skills writable so skill symlinks and
+            # runtime-installed skills can be fully managed, but deny
+            # config/hook internals that should not be mutated by Bash.
+            # Per sandbox-runtime semantics deny always wins over allow, so
+            # these entries still take precedence even if a user-configured
+            # extra write path overlaps them.
+            "allowWrite": allow_write,
             "denyWrite": [
                 str(workspace_abs / ".claude" / "settings.json"),
                 str(workspace_abs / ".claude" / "settings.local.json"),
@@ -413,6 +487,7 @@ def sync_workspace_sandbox_settings(
     enabled: bool = True,
     network_mode: object = "allowlist",
     network_allowed_domains: object = None,
+    fs_allowed_write_paths: object = None,
 ) -> None:
     """Merge per-thread sandbox settings into ``{workspace}/.claude/settings.json``.
 
@@ -461,6 +536,7 @@ def sync_workspace_sandbox_settings(
         enabled,
         network_mode=network_mode,
         network_allowed_domains=network_allowed_domains,
+        fs_allowed_write_paths=fs_allowed_write_paths,
     )
     try:
         settings_path.write_text(
@@ -481,6 +557,7 @@ def init_workspace(
     sandbox_enabled: bool = True,
     sandbox_network_mode: object = "allowlist",
     sandbox_network_allowed_domains: object = None,
+    sandbox_fs_allowed_write_paths: object = None,
 ) -> Path:
     """Create (or repair) the workspace skeleton for *session_id*.
 
@@ -509,6 +586,7 @@ def init_workspace(
         enabled=sandbox_enabled,
         network_mode=sandbox_network_mode,
         network_allowed_domains=sandbox_network_allowed_domains,
+        fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
     )
 
     # Ensure .claude/skills/ exists so symlink sync has a target directory.
@@ -531,6 +609,7 @@ def get_or_create_workspace(
     sandbox_enabled: bool = True,
     sandbox_network_mode: object = "allowlist",
     sandbox_network_allowed_domains: object = None,
+    sandbox_fs_allowed_write_paths: object = None,
 ) -> Path:
     """Return the workspace path for *session_id*, creating it if needed.
 
@@ -548,6 +627,7 @@ def get_or_create_workspace(
         sandbox_enabled=sandbox_enabled,
         sandbox_network_mode=sandbox_network_mode,
         sandbox_network_allowed_domains=sandbox_network_allowed_domains,
+        sandbox_fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
     )
 
 
@@ -617,8 +697,9 @@ def get_tasks_dir(session_id: str) -> Optional[Path]:
     """Return the Claude Code v2 tasks directory for *session_id*, or ``None``.
 
     Resolves ``{workspace}/.claude-home/tasks/main`` — the fixed taskListId
-    (``sdk_env.CLAUDE_CODE_TASK_LIST_ID_VALUE``) injected by the runner when
-    ``INK_AGENT_TASK_V2_ENABLED`` is on (claude-todo §5.1).
+    (``sdk_env.CLAUDE_CODE_TASK_LIST_ID_VALUE``) injected by the runner on
+    every run (claude-todo §5.1; unconditional since 2026-07-26 because the
+    new CLI enables task tools by default).
 
     Same containment policy as ``get_plans_dir``: the candidate must
     ``resolve()`` to a path still inside the resolved workspace root; symlink
