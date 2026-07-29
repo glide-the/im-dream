@@ -93,6 +93,20 @@ Minimal handling in this phase:
 3. require Docker runtime privileges (`SYS_ADMIN`, unconfined seccomp/AppArmor)
    for local/remote Compose backends.
 
+> **2026-07-26 recurrence & Route A resolution.** The same failure recurred after
+> the claude-agent-sdk 0.2.128 migration: the SDK's bundled-first `_find_cli`
+> shadowed the Dockerfile-patched npm CLI (vendor apply-seccomp passthrough).
+> A settings-driven override (`sandbox.seccomp.applyPath` + shim) was tried and
+> **proven dead in production** — 2.1.220's embedded converter hardcodes its
+> seccomp config and never reads `sandbox.seccomp` (Linux binary strings: 0
+> settings-key hits vs 16 `/proc/self/fd/` hits; macOS converter returns
+> `seccomp: jCu()`; shim never invoked). Resolution (Route A): npm CLI reverted
+> to 2.1.108 with the vendor passthrough patch restored, `cli_path` pinned to
+> it via `sdk_env.apply_cli_path_to_options()`, build-time `claude --version`
+> assertion added, and the settings-seccomp machinery removed. Full evidence
+> chain in `claude-agent-workspace-sandbox.md` and
+> `claude-agent-env-allowlist-audit.md` §9.
+
 ## 3. Interaction design
 
 ### 3.1 User-facing switch

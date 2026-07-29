@@ -162,6 +162,10 @@
 #                    for decisions.  The import is kept for return-type
 #                    annotations only (the Union IS the correct type).  No
 #                    decision logic, key names, or behavior changed.
+# [Sync] 2026-07-26: wire apply_cli_path_to_options into options assembly
+#                    (before plan/task env injection) so the system/npm CLI —
+#                    Docker's apply-seccomp-patched runtime — is not shadowed
+#                    by the SDK bundled CLI (bundled-first _find_cli in 0.2.128).
 
 """Claude Agent Runner.
 
@@ -220,6 +224,7 @@ from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
+    apply_cli_path_to_options,
     apply_plan_mode_env_to_options,
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
@@ -2210,6 +2215,11 @@ class ClaudeAgentRunner:
                 mcp_servers=mcp_servers,
             )
         )
+        # CLI binary resolution: pin cli_path to the system/npm CLI when one
+        # exists (Docker's apply-seccomp-patched runtime; local npm claude),
+        # else leave unset so the SDK falls back to its bundled CLI.  An
+        # explicit cli_path on options always wins.
+        apply_cli_path_to_options(sdk_options)
         # Plan Mode: point CLAUDE_CONFIG_DIR at {cwd}/.claude-home so CLI plan
         # files land in the per-thread workspace (claude-plan §5.1).  Lowest
         # priority in the env chain: an explicit CLAUDE_CONFIG_DIR already on

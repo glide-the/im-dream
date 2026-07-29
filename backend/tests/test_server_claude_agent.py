@@ -212,6 +212,26 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
             self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
             self.assertNotIn("CLAUDE_CODE_UNUSED_TOKEN", os.environ)
 
+    def test_cleanup_preserves_sandbox_runtime_keys(self):
+        # Regression for the 2026-07-26 production miss: the extra sandbox
+        # read paths must survive startup cleanup or the sandbox silently
+        # loses the contract.  (The apply-seccomp settings override key
+        # briefly covered here was removed 2026-07-26 — proven dead in
+        # production; Route A reverted to the vendor passthrough patch.)
+        with unittest.mock.patch.dict(
+            os.environ,
+            {
+                "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ": "/app/claude_agent:/app/libs",
+            },
+            clear=True,
+        ):
+            _SERVER_MODULE._drop_unsupported_agent_env()
+
+            self.assertEqual(
+                os.environ["INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"],
+                "/app/claude_agent:/app/libs",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Route registration tests (import-level, no HTTP calls)

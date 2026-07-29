@@ -35,6 +35,15 @@
 > the `zsh: operation not permitted: .../cwd-*` noise, and add the
 > `sandbox_fs_allowed_write_paths` Settings key for user extra writable
 > absolute paths; denyWrite precedence documented.
+> [Sync] 2026-07-26: apply-seccomp passthrough revision — bundled-CLI shadowing
+> recurrence story documented; `sandbox.seccomp.applyPath` settings override
+> (2.1.220 single-binary layout) emitted when
+> `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` names an existing shim.
+> [Sync] 2026-07-26: Route A — settings seccomp override proven DEAD in
+> production (2.1.220 embedded converter hardcodes `seccomp: jCu()`, 0
+> settings-reader string hits; shim never invoked); mechanism removed,
+> reverted to the 2.1.108 vendor passthrough patch + `claude --version`
+> build assertion; seccomp section rewritten with the evidence chain.
 
 # Claude-Agent Workspace Sandbox
 
@@ -133,6 +142,29 @@ Code's Linux sandbox uses bubblewrap, and unprivileged containers may not allow
 bubblewrap to mount a fresh `/proc`; the weaker nested mode is acceptable only
 because the outer Docker container is the primary isolation boundary. Local
 non-container deployments do not write this key.
+
+**apply-seccomp passthrough (Route A, 2026-07-26).** Docker images need the
+apply-seccomp passthrough to survive the nested-userns
+`/proc/self/setgroups` failure (inherent to bwrap nested userns without
+caps; `kernel.apparmor_restrict_unprivileged_userns=0` is NOT the blocker).
+The Dockerfile patches the npm CLI's `vendor/seccomp/apply-seccomp` file in
+place (2.1.108 layout) with `#!/bin/sh` + `exec "$@"`, and the backend pins
+`cli_path` to that patched npm CLI via
+`sdk_env.apply_cli_path_to_options()` (see `claude-sdk-env-design.md` §5.5A)
+so the SDK's bundled CLI cannot shadow it. A build-time `claude --version`
+assertion guards against silent platform-binary misses.
+
+History of the dead alternative (do not retry): after the 0.2.128 migration
+we bumped the npm CLI to 2.1.220 (bundled-line parity) and, because 2.1.220
+packages the CLI as a single binary with no on-disk vendor file, tried a
+settings-driven override (`sandbox.seccomp.applyPath` + a passthrough shim
+via `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`). Production evidence proved the
+settings route dead: the Linux 2.1.220 binary contains **0** occurrences of
+the `sandbox?.seccomp` settings reader (vs **16** of `/proc/self/fd/` — the
+embedded executor), the macOS bundled converter hardcodes
+`seccomp: jCu()` instead of reading `e.sandbox?.*` like sibling fields, and
+shim logging confirmed the CLI never invoked the shim. Reverted to Route A;
+the settings-seccomp mechanism was removed entirely.
 
 Docker-enabled settings therefore add this sibling key to the same `sandbox`
 object:

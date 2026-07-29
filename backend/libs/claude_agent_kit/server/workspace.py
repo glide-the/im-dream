@@ -49,6 +49,21 @@
 #                    absolute paths appended to filesystem.allowWrite after the
 #                    workspace and claude-tmp entries; denyWrite still wins for
 #                    workspace internals per sandbox-runtime deny-precedence.
+# [Sync] 2026-07-26: sandbox.seccomp.applyPath override — the 2.1.220 CLI runs
+#                    embedded apply-seccomp via /proc/self/fd (no on-disk
+#                    vendor binary to patch), so the Docker nested-userns
+#                    passthrough moves to a settings override emitted when
+#                    INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH names an existing
+#                    shim; unset/missing → no key → CLI default.
+# [Sync] 2026-07-26: Route A — REMOVE the settings seccomp override entirely:
+#                    production evidence proved it dead (2.1.220's embedded
+#                    converter hardcodes its seccomp config and never reads
+#                    sandbox.seccomp — Linux binary strings 0 hits for the
+#                    settings key vs 16 for /proc/self/fd; the shim was never
+#                    invoked).  The Dockerfile reverts to the 2.1.108 vendor
+#                    apply-seccomp passthrough patch instead; cli_path pinning
+#                    (sdk_env.apply_cli_path_to_options) keeps the SDK paired
+#                    with that patched npm CLI.
 
 
 """Workspace manager for Claude Agent session directories.

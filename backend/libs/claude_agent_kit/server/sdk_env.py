@@ -36,11 +36,18 @@
 #                    apply_task_v2_env_to_options now ALWAYS pins
 #                    CLAUDE_CODE_TASK_LIST_ID=main (lowest priority); the gate
 #                    only forces an explicit CLAUDE_CODE_ENABLE_TASKS=1.
+# [Sync] 2026-07-26: add apply_cli_path_to_options() — pin options.cli_path to
+#                    the system/npm CLI (CLAUDE_CODE_CLI_PATH override →
+#                    shutil.which("claude") → leave unset for SDK bundled
+#                    fallback) so Docker's apply-seccomp-patched npm CLI is not
+#                    shadowed by the SDK bundled CLI; explicit cli_path wins.
 
 """Runtime option helpers for Claude Code SDK subprocesses."""
 from __future__ import annotations
 
+import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Any, Mapping, Optional
 
@@ -50,6 +57,8 @@ _BACKEND_ROOT = Path(__file__).resolve().parents[3]
 _PROJECT_ENV_FILE = _BACKEND_ROOT / ".env"
 _CLAUDE_SETTING_SOURCES_ARG = "setting-sources"
 _CLAUDE_PROJECT_SETTING_SOURCE = "project"
+
+logger = logging.getLogger(__name__)
 _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
     {
         "ANTHROPIC_AUTH_TOKEN",
@@ -273,6 +282,53 @@ def apply_task_v2_env_to_options(options: Any) -> Any:
     if task_v2_enabled():
         merged.setdefault(_CLAUDE_CODE_ENABLE_TASKS_ENV_NAME, "1")
     options.env = merged
+    return options
+
+
+# CLI binary resolution (2026-07-26, Docker apply-seccomp fix).  The
+# claude-agent-sdk transport prefers its bundled CLI over any system install
+# (``_find_cli``: bundled first).  Production Docker patches the npm CLI's
+# vendor apply-seccomp into a passthrough to survive nested userns, so the
+# patched binary must win over the bundled one.
+_CLAUDE_CODE_CLI_PATH_ENV_NAME = "CLAUDE_CODE_CLI_PATH"
+
+
+def apply_cli_path_to_options(options: Any) -> Any:
+    """Pin ``options.cli_path`` to the system/npm CLI when available.
+
+    Resolution order (first hit wins):
+
+    1. ``CLAUDE_CODE_CLI_PATH`` env var, when set and the path exists.
+       A set-but-missing path logs a warning and falls through — a stale
+       override must never shadow a working CLI.
+    2. ``shutil.which("claude")`` — the system/npm install.  Production
+       Docker ships the npm CLI with the vendor apply-seccomp passthrough
+       patch (nested-userns ``/proc/self/setgroups`` workaround); pinning it
+       prevents the SDK's bundled CLI from silently shadowing the patched
+       binary (2026-07-26 recurrence).  Local dev likewise stays on the
+       developer's own npm claude.
+    3. Leave ``cli_path`` unset — documented escape hatch: the SDK then
+       falls back to its bundled CLI (usable when no system claude exists).
+
+    An explicitly pre-set ``options.cli_path`` always wins over this helper.
+    """
+
+    if getattr(options, "cli_path", None):
+        return options
+    override = os.getenv(_CLAUDE_CODE_CLI_PATH_ENV_NAME, "").strip()
+    if override:
+        if os.path.isfile(override):
+            options.cli_path = override
+            return options
+        logger.warning(
+            "%s=%r is set but the file does not exist; falling back to "
+            "system/bundled CLI resolution.",
+            _CLAUDE_CODE_CLI_PATH_ENV_NAME,
+            override,
+        )
+    system_cli = shutil.which("claude")
+    if system_cli:
+        options.cli_path = system_cli
     return options
 
 
