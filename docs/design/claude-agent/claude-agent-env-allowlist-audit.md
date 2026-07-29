@@ -1,9 +1,9 @@
 # `INK_AGENT_*` 环境变量白名单清除机制审计报告
 
-> 状态：审计完成（B 类已修复，C/F 类待逐键决策）
+> 状态：审计完成（B 类已修复；`SANDBOX_SECCOMP_APPLY_PATH` 机制后被生产证伪并拆除——见 §9；C/F 类待逐键决策）
 > 触发事件：2026-07-26 生产环境 `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH=''` 告警导致沙箱 seccomp 覆盖失效
 > 关联文档：`claude-sdk-env-design.md`（§5.5A 生命周期警告）、`claude-agent-workspace-sandbox.md`、`claude-agent-sandbox-network-sdk-gap.md`
-> 日期：2026-07-26
+> 日期：2026-07-26；§9 补记 2026-07-26 Route A
 
 ---
 
@@ -65,7 +65,7 @@ Docker/Python 环境下环境变量存在**四个快照层**，逐层对比可�
 | 类 | 键 | 状态与证据 |
 |---|---|---|
 | **A. 白名单内（正常）** | `ENABLE_MEMORY_MCP`、`TTL_S`、`SWEEP_INTERVAL_S`、`SSE_KEEPALIVE_S`、`MAX_TURNS`、`CONTEXT_SESSIONS`、`EVENT_BUS_BACKEND`、`REDIS_URL`、`EVENT_BUS_TTL_S`、`MEM0_*`（前缀） | 不受清除影响 |
-| **B. 曾被清除·已修复** | `SANDBOX_SECCOMP_APPLY_PATH`、`SANDBOX_EXTRA_ALLOW_READ` | 2026-07-26 补入白名单 + 回归测试 `test_cleanup_preserves_sandbox_runtime_keys`；前者致本次事故，后者致 `/app/claude_agent:/app/libs:/app/prompts` 沙箱读路径静默失效 |
+| **B. 曾被清除·已修复** | `SANDBOX_EXTRA_ALLOW_READ` | 2026-07-26 补入白名单 + 回归测试 `test_cleanup_preserves_sandbox_runtime_keys`；修复前致 `/app/claude_agent:/app/libs:/app/prompts` 沙箱读路径静默失效。`SANDBOX_SECCOMP_APPLY_PATH` 曾同类修复，后因 settings-seccomp 路线被生产证伪而整体拆除（§9），不再是运行时配置键 |
 | **C. 进程内 `os.environ` 读取·非白名单（被静默清除，走默认值）** | `TODO_EMIT_DEBOUNCE_MS`、`TODO_MAX_ITEMS`、`PLAN_EMIT_DEBOUNCE_MS`、`PLAN_MAX_CONTENT_BYTES`、`STOP_WAIT_S`（均 `os.environ.get`，agent_runner/service 层）；`TASK_V2_ENABLED`（`os.getenv`，已降级为 legacy 闸门，默认 off 即预期） | **生产环境配置这些键不生效**，目前无人配置故无症状；调参需求出现时即踩坑 |
 | **D. dotenv 文件通道读取（不受进程清除影响）** | `ALLOW_REQUEST_MODEL_OVERRIDE`、SDK 子进程 env 装配相关键（`sdk_env.py` 经 `dotenv_values` 读文件、`options.env` 注入子进程） | 设计使然：文件通道绕过了进程级 pop——**证明清理点本应在子进程 env 装配处** |
 | **E. backend 输出给子进程的键（pop 无害）** | `SESSION_ID`、`USER_ID`、`EDITOR_SESSION_ID`、`USER_MESSAGE`、`CONTRACT_VERSION` | 由 backend 在运行时设置注入，启动时清除无影响 |
@@ -82,10 +82,21 @@ Docker/Python 环境下环境变量存在**四个快照层**，逐层对比可�
 
 ## 6. 已落地措施（2026-07-26）
 
-1. `server.py` 白名单补入 B 类两键（含注释说明事故）；
-2. 回归测试 `test_cleanup_preserves_sandbox_runtime_keys`（`test_server_claude_agent.py`，注意本机因缺 `itsdangerous` 该文件整体 skip，CI 执行）；
+1. `server.py` 白名单补入 B 类键（含注释说明事故；`SANDBOX_SECCOMP_APPLY_PATH` 后于同日 Route A 移除——见 §9）；
+2. 回归测试 `test_cleanup_preserves_sandbox_runtime_keys`（`test_server_claude_agent.py`，注意本机因缺 `itsdangerous` 该文件整体 skip，CI 执行；Route A 后该用例仅保留 `SANDBOX_EXTRA_ALLOW_READ` 断言）；
 3. `claude-sdk-env-design.md` §5.5A 新增**环境变量生命周期警告**：新增 `INK_AGENT_*` 运行时配置键必须同步登记白名单；
 4. 本审计报告存档。
+
+## 9. 补记：settings-seccomp 路线证伪与 Route A（2026-07-26）
+
+本报告 §2 事故链的修复（`sandbox.seccomp.applyPath` settings 覆盖 + shim）**当日即在生产被证伪**，证据链：
+
+1. Linux npm CLI 2.1.220 二进制 `strings | grep -c "sandbox?.seccomp"` → **0**（settings→runtime 转换器从不读取 `sandbox.seccomp`）；`grep -c "/proc/self/fd/"` → **16**（内嵌 apply-seccomp 执行器）；
+2. macOS bundled 2.1.220 转换器返回 `seccomp: jCu()`（硬编码内嵌配置，不像兄弟字段那样读 `e.sandbox?.*`）；
+3. shim 打日志实测：CLI 从未调用 `/usr/local/share/claude-agent/apply-seccomp-passthrough`；
+4. 宿主机 `kernel.apparmor_restrict_unprivileged_userns` 已为 0，排除宿主机拦截——setgroups 失败是 bwrap 嵌套 userns 无 caps 的固有问题，正是 2.1.108 vendor passthrough 存在的原因。
+
+**Route A（最终方案）**：npm CLI 回退 2.1.108 并恢复 vendor apply-seccomp passthrough 补丁；`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`、shim、`workspace.py` 的 `sandbox.seccomp` 发射逻辑全部拆除；Dockerfile 新增构建期 `claude --version` 断言。`cli_path` 锁定（`sdk_env.apply_cli_path_to_options`）保留——它保证 SDK 配对的正是这个打过补丁的 npm CLI。`SANDBOX_EXTRA_ALLOW_READ` 修复不受影响，继续有效。
 
 ## 7. 建议
 

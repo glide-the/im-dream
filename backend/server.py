@@ -40,12 +40,10 @@ def _drop_unsupported_agent_env() -> None:
         "INK_AGENT_EVENT_BUS_BACKEND",
         "INK_AGENT_REDIS_URL",
         "INK_AGENT_EVENT_BUS_TTL_S",
-        # Sandbox runtime env contracts (workspace.py).  Both were previously
-        # dropped here at startup, which silently disabled the Docker
-        # apply-seccomp override (production miss 2026-07-26:
-        # INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH='' warning) and the extra
-        # sandbox read paths.
-        "INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH",
+        # Sandbox runtime env contract (workspace.py).  Previously dropped
+        # here at startup, which silently disabled the extra sandbox read
+        # paths (the apply-seccomp settings override listed here briefly was
+        # removed 2026-07-26 — proven dead in production; see workspace.py).
         "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ",
     }
     os.environ.pop("ANTHROPIC_API_KEY", None)

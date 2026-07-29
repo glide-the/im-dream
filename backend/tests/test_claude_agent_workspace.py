@@ -282,53 +282,6 @@ class TestInitWorkspace(unittest.TestCase):
             [str(ws.resolve())],
         )
 
-    # ------------------------------------------------------------------
-    # sandbox.seccomp applyPath override (2026-07-26 Docker passthrough shim)
-    # ------------------------------------------------------------------
-
-    def test_no_seccomp_key_by_default(self):
-        env = {k: v for k, v in os.environ.items() if k != "INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH"}
-        with unittest.mock.patch.dict(os.environ, env, clear=True):
-            ws = init_workspace("sandbox-seccomp-default")
-        settings = json.loads((ws / ".claude" / "settings.json").read_text())
-        self.assertNotIn("seccomp", settings["sandbox"])
-
-    def test_seccomp_apply_path_emitted_when_shim_exists(self):
-        with tempfile.NamedTemporaryFile() as shim:
-            with unittest.mock.patch.dict(
-                os.environ, {"INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH": shim.name}
-            ):
-                ws = init_workspace("sandbox-seccomp-shim")
-        settings = json.loads((ws / ".claude" / "settings.json").read_text())
-        self.assertEqual(
-            settings["sandbox"]["seccomp"],
-            {"applyPath": shim.name},
-        )
-
-    def test_seccomp_apply_path_ignored_when_shim_missing(self):
-        with unittest.mock.patch.dict(
-            os.environ,
-            {"INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH": "/nonexistent/apply-seccomp"},
-        ):
-            ws = init_workspace("sandbox-seccomp-missing")
-        settings = json.loads((ws / ".claude" / "settings.json").read_text())
-        self.assertNotIn("seccomp", settings["sandbox"])
-
-    def test_seccomp_apply_path_emitted_even_when_sandbox_disabled(self):
-        # The enabled-gate was removed (production miss 2026-07-26): the
-        # override is inert while the sandbox is off, so it is emitted
-        # whenever the env var names an existing shim.
-        with tempfile.NamedTemporaryFile() as shim:
-            with unittest.mock.patch.dict(
-                os.environ, {"INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH": shim.name}
-            ):
-                ws = init_workspace("sandbox-seccomp-disabled", sandbox_enabled=False)
-        settings = json.loads((ws / ".claude" / "settings.json").read_text())
-        self.assertEqual(
-            settings["sandbox"]["seccomp"],
-            {"applyPath": shim.name},
-        )
-
     def test_can_enable_weaker_nested_sandbox_for_docker(self):
         with unittest.mock.patch(
             "libs.claude_agent_kit.server.workspace._running_in_linux_container",
