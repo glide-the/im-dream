@@ -336,8 +336,39 @@ def test_drop_story_workspace_tables():
 | **Migration 与现有数据冲突** | 低 | 使用 `CREATE TABLE IF NOT EXISTS` 和 `try/except` 模式，与项目现有 migration 风格一致 |
 | **chat_thread.id 类型不匹配** | 低 | `chat_thread.id` 是 TEXT，`agent_session_id` 也是 TEXT，类型一致。但 `users.id` 是 INTEGER，`author_id` 需匹配 INTEGER |
 
-## 11. 下游执行提示
+## 11. 允许与禁止修改范围
+
+- **仅允许修改**：`backend/database.py`、`backend/tests/test_database.py`。
+- **禁止修改**：`docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`、`docs/prd/` 以及任何前端代码或实现代码。
+- **禁止行为**：不得把本 task 文档当作 execute 授权直接实现；不得修改设计稿或 Issue 清单。
+
+## 12. 下游执行提示
 
 - **StagePlanner 注意**: 本任务是后端所有工作的前置基础。Stage 排期时应将本任务放在最前，且需等待完成后才能启动 `SUO-201-BE-002`（REST API）。
-- **共享类型对齐**: `SUO-201-SH-002`（命名规范与类型定义）可与本任务并行，但建议先完成本任务以确定最终字段名。
+- **共享类型对齐**: `SUO-201-SH-002`（命名规范与类型定义）可与本任务并行，但建议先完成本任务以确定最终字段名。后端类型模型是规范源，Schema 字段名应与其保持一致。
 - **前端消费边界**: 本任务完成后，前端可通过 `database.py` 的 schema 了解字段结构，但正式的类型定义在 `SUO-201-SH-002` 中产出。
+
+## 12. 执行边界
+
+### 允许修改范围
+- `backend/database.py` — 在 `create_tables()` 中追加 story-workspace 表的 `CREATE TABLE IF NOT EXISTS` 和 `CREATE INDEX IF NOT EXISTS` 语句；新增 `drop_story_workspace_tables()` 回滚函数。
+- `backend/tests/test_database.py` — 追加 schema 验证、索引验证、幂等性测试、回滚测试。
+- 如需新增独立的 migration 文件，仅允许放在 `backend/src/db/migrations/`（若项目存在该目录）。
+
+### 禁止修改范围
+- ❌ `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` — 任何设计阶段产物。
+- ❌ `docs/task/TASK-REQUIREMENT-FORMAT.md` — 提示词模板。
+- ❌ 前端代码、前端 task 文件 — 不在本 Agent 职责范围内。
+- ❌ 现有 `users`、`chat_thread` 等无关表的结构 — 仅新增 story-workspace 相关表，不修改现有表。
+- ❌ 实现代码（REST 路由、Service、UI）— 本任务仅为 Schema 与 Migration，不实现业务逻辑。
+
+### 明确排除项（本期不在范围）
+- **复杂画布编辑器** — 故事板/时间线可视化编辑的数据模型不在本期；本期仅数据表呈现。
+- **视频生成模块** — 镜头生成、视频预览相关字段不在本期 Schema 中。
+- **移动端适配** — 后端 API 不假设移动端消费者，但 Schema 本身与设备无关；本期明确排除移动端/平板端适配需求。
+- **用户手动创建内容** — 所有内容均由 Agent 生成，`agent_generated` 默认 `1`；本期不设计用户手动创建的数据模型。
+- **实时协作** — 无多创作者同时编辑的并发控制字段（如 `version`、`lock_owner_id`）。
+- **四视角转面图** — 角色表 `avatar_url` 仅支持单张头像，不扩展为多视角。
+- **历史版本管理** — 无版本快照表。
+- **@提及系统** — 无提及/通知相关表。
+- **计费/积分系统** — 无积分消耗、配额限制相关字段。

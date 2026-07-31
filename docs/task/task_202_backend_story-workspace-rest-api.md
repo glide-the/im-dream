@@ -408,8 +408,62 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 | **PATCH 字段越权修改** | 中 | 明确列出允许修改的字段白名单，拒绝 `review_status` / `agent_generated` 等敏感字段 |
 | **分页深度性能** | 低 | `per_page` 最大限制 100；大数据量时考虑游标分页 |
 
-## 11. 下游执行提示
+## 11. 允许与禁止修改范围
+
+- **仅允许修改**：`backend/routers/story-workspace.py`、`backend/server.py`、`backend/tests/test_story_workspace_api.py`；可复用 `backend/database.py` 的 `get_db()`。
+- **禁止修改**：`docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`、前端代码、数据库 schema 定义文件。
+- **禁止行为**：不得把本 task 文档当作 execute 授权直接实现；不得修改设计稿或 Issue 清单。
+
+## 12. 下游执行提示
 
 - **StagePlanner 注意**: 本任务依赖 `SUO-201-BE-001`（Schema）完成。Stage 排期时需确保 Schema 任务先完成。
 - **前端消费边界**: 前端通过 `GET /api/story-workspace/stories` 等接口消费数据。响应格式中的 `pagination` 结构是前后端共享契约，变更需同步通知 FrontendTaskAgent。
 - **与审阅工作流的关系**: 本任务仅实现 CRUD 和列表查询。审阅状态流转（confirm/reject/archive）在 `SUO-201-BE-003` 中实现，但本任务需确保 `review_status` 字段在 PATCH 中不可被直接修改。
+- **共享类型对齐**: API 请求/响应字段应与 `SUO-201-SH-002` 的 Python 规范源保持一致。
+
+## 13. 执行边界（补充修订）
+
+### 允许修改范围
+- `backend/routers/story-workspace.py` — **新文件**：Story Workspace REST API 路由（FastAPI `APIRouter`），包含工作区、故事、角色、场景的 CRUD 端点。
+- `backend/server.py` — 注册 `story_workspace_router`。
+- `backend/tests/test_story_workspace_api.py` — **新文件**：API 测试（列表查询、详情查询、PATCH 更新、权限、搜索、筛选、分页）。
+- 可在 `backend/routers/story-workspace.py` 中定义通用分页辅助函数（如 `paginate_query`）；若项目已有通用分页工具，优先复用。
+
+### 禁止修改范围
+- ❌ `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` — 任何设计阶段产物。
+- ❌ `docs/task/TASK-REQUIREMENT-FORMAT.md` — 提示词模板。
+- ❌ 前端代码、前端 task 文件 — 不在本 Agent 职责范围内。
+- ❌ `backend/database.py` — 本任务不复用 `database.py` 做 Schema 修改（Schema 在 `SUO-201-BE-001` 中完成），仅复用 `get_db()` 连接管理。
+- ❌ 现有 `claude-agent` 服务 — 不修改 SSE 流、thread 生命周期、Agent 调用逻辑。
+- ❌ 实现代码以外的任何文件 — 本 task 文档不是 execute 授权。
+
+### 明确排除项（本期不在范围）
+- **复杂画布编辑器** — REST API 仅提供结构化数据的 CRUD，不提供画布/时间线可视化数据的专用端点。
+- **视频生成模块** — API 不包含视频/镜头相关资源端点。
+- **移动端适配** — 后端 API 不假设移动端消费者；本期明确排除移动端/平板端适配需求，API 消费者假设为桌面端（≥1280px）。
+- **用户手动创建内容** — POST 创建端点不在本任务中；所有内容通过 Agent 集成通道（`SUO-201-BE-004`）写入，用户仅通过 PATCH 编辑 Agent 生成内容。
+- **实时协作** — 无 WebSocket/Socket.io 实时推送端点；前端通过轮询刷新数据。
+- **四视角转面图** — 角色 `avatar_url` 为单字符串，不上传/管理多视角资源。
+- **历史版本管理** — PATCH 更新直接覆盖，不保留历史版本。
+- **@提及系统** — 无提及解析、通知推送端点。
+- **计费/积分系统** — API 调用不触发积分消耗记录。
+- **DELETE 端点** — 本期不提供物理删除；归档通过 `status='archived'` 实现（在 `SUO-201-BE-003` 中处理）。
+- **文件上传** — 角色头像 `avatar_url` 为外部 URL，本 API 不提供文件上传/存储端点。
+
+---
+
+## 14. 归属审计记录
+
+> **审计事实**：本文件 `task_202_backend_story-workspace-rest-api.md` 最初由 `efe7040`（`task(story-workspace): SUO-202 前端任务文档家族`）并发提交，该 commit 同时包含了 9 份前端 task 文档和本份后端 task 文档。随后 `2b0f8ab`（`task(story-workspace): SUO-203 后端任务文档家族`）在生成后端 5 份 task 文档时，**未包含** `task_202` 的变更（该 commit 的 stat 仅显示 task_201、task_203、task_204、task_205）。
+>
+> **归属确认**：`SUO-201-BE-002`（Story Workspace REST API 实现）的主责 Agent 为 `BackendTaskAgent`。本 task 文档覆盖 BE-002 的全部后端职责：REST API 路由设计、CRUD 实现、分页/搜索/筛选逻辑、权限控制。FrontendTaskAgent 仅消费本 API，不负责 API 实现。
+>
+> **责任边界**：BackendTaskAgent 对以下 BE-002 内容承担明确责任：
+> - `backend/routers/story-workspace.py` 的完整实现
+> - `backend/server.py` 的路由注册
+> - API 响应格式（含 `PaginatedResponse` 结构）的定义与稳定
+> - 搜索/筛选/排序/分页的后端逻辑
+> - PATCH 更新的字段白名单控制
+> - API 测试 `backend/tests/test_story_workspace_api.py`
+>
+> 记录时间：2026-08-01 | 记录 Agent：BackendTaskAgent | Issue：SUO-205

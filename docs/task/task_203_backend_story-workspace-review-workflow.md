@@ -411,9 +411,44 @@ def test_status_transitions(client, auth_headers, story_factory, current_status,
 | **审计日志表不存在** | 低 | 审计日志为可选。若项目无审计日志基础设施，记录为技术债，后续迭代补充 |
 | **批量操作大量数据性能** | 低 | 限制 `ids` 最大 100 条；使用单条 `UPDATE ... WHERE id IN (...)` SQL |
 
-## 11. 下游执行提示
+## 11. 允许与禁止修改范围
+
+- **仅允许修改**：`backend/routers/story-workspace.py`、`backend/database.py`（如需审计日志表）、`backend/tests/test_story_workspace_review.py`。
+- **禁止修改**：`docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`、前端代码、数据库 schema 定义文件。
+- **禁止行为**：不得把本 task 文档当作 execute 授权直接实现；不得修改设计稿或 Issue 清单。
+
+## 12. 下游执行提示
 
 - **StagePlanner 注意**: 本任务依赖 `SUO-201-BE-002`（REST API）完成。审阅端点是追加在现有路由文件中的，不是独立文件。
 - **与前端协作点**: 前端审阅面板调用 `POST /.../confirm` 和 `POST /.../reject`。驳回时需传递 `review_notes`。批量操作时前端需收集选中项 ID 列表。
 - **与 E2E 联调的关系**: `SUO-201-SH-001`（E2E 联调）依赖本任务完成。Stage 排期时需确保本任务在 E2E 之前完成。
 - **数据合同稳定性**: `review_status` 枚举值（`pending` / `confirmed` / `rejected`）是前后端共享契约，变更需同步通知 FrontendTaskAgent。
+- **共享类型对齐**: `BatchReviewRequest` / `BatchReviewResponse` 等类型应与 `SUO-201-SH-002` 的 Python 规范源保持一致。
+
+## 12. 执行边界
+
+### 允许修改范围
+- `backend/routers/story-workspace.py` — 在 `SUO-201-BE-002` 已创建的 REST API 路由文件中追加审阅端点（confirm / reject / archive / batch）。
+- `backend/database.py` — 如需新增 `story_workspace_audit_log` 审计日志表（可选，视现有系统能力）。
+- `backend/tests/test_story_workspace_review.py` — **新文件**：审阅工作流的状态流转矩阵测试、批量操作测试、权限测试。
+
+### 禁止修改范围
+- ❌ `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` — 任何设计阶段产物。
+- ❌ `docs/task/TASK-REQUIREMENT-FORMAT.md` — 提示词模板。
+- ❌ 前端代码、前端 task 文件 — 不在本 Agent 职责范围内。
+- ❌ `backend/routers/story-workspace.py` 中已有 CRUD 端点 — 仅追加审阅端点，不修改现有列表/详情/PATCH 逻辑。
+- ❌ 现有 `claude-agent` 服务核心逻辑 — 本任务仅实现审阅状态流转，不修改 Agent SSE 流处理。
+- ❌ 实现代码以外的任何文件 — 本 task 文档不是 execute 授权。
+
+### 明确排除项（本期不在范围）
+- **复杂画布编辑器** — 审阅操作仅针对数据表中的故事/角色/场景条目，不涉及画布/时间线可视化。
+- **视频生成模块** — 审阅状态流转不涉及视频/镜头相关资源。
+- **移动端适配** — 后端 API 不区分设备类型；但本期明确排除移动端/平板端适配需求，API 消费者假设为桌面端。
+- **用户手动创建内容** — 审阅操作仅针对 `agent_generated=true` 的内容；用户手动创建的内容不在本期审阅工作流中（实际上本期不允许用户手动创建）。
+- **实时协作** — 无并发编辑冲突解决机制；同一用户同一时间对同一资源的操作由 SQLite 文件级锁天然串行化。
+- **四视角转面图** — 角色审阅不涉及多视角头像的审阅流程。
+- **历史版本管理** — 确认/驳回/编辑不保留历史版本快照。
+- **@提及系统** — 审阅备注为纯文本，不支持 @提及解析与通知。
+- **计费/积分系统** — 审阅操作不触发积分消耗或计费逻辑。
+- **驳回后自动触发 Agent 重新生成** — 本任务仅负责状态变更为 `rejected`，实际重新生成触发机制在后续迭代定义（设计稿 `[CLARIFICATION_NEEDED]`）。
+- **已确认内容的下游执行** — 确认后内容仅暂存，后续执行流程（如 Deck 生成、发布）在后续迭代定义。

@@ -8,581 +8,306 @@ Story Workspace Agent 产出数据接收与存储集成
 
 - **Issue ID**: `SUO-201-BE-004`
 - **Issue 标题**: Agent 产出数据接收与存储集成
-- **类型**: backend
+- **类型**: `backend`
 - **优先级**: P0
 - **标签**: `agent`, `integration`, `sse`
 - **来源设计稿**:
+  - `docs/design/story-workspace/story-workspace-layout-design.md` §5.1–5.5（数据表结构）
+  - `docs/design/story-workspace/story-workspace-layout-design.md` §6.1（API 路由设计）
   - `docs/design/story-workspace/story-workspace-layout-design.md` §10.2（与 claude-agent 服务的集成）
-  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-007`（核心工作流）
+  - `docs/design/story-workspace/story-workspace-prd.md` §3.1 `DEC-007`, `DEC-008`（核心工作流、用户不手动创建）
   - `docs/CLAUDE.md` §Thread Lifecycle
 - **Issue 清单**: `docs/issue/ISSUES_story-workspace.md` §3 Issue 明细
 
 ## 3. 任务目标
 
-实现 claude-agent 服务与 story-workspace 的数据集成。Agent 生成剧本/角色/场景后，通过内部 API 将数据存入 story-workspace 数据表，标记 `review_status='pending'` 和 `agent_generated=true`。需要复用现有 `claude-agent` 服务的 SSE 端点和 thread 机制。
+实现 `claude-agent` 服务与 `story-workspace` 数据表的集成通道：当 Agent 根据用户指令生成剧本、角色、场景后，将结构化数据安全地存入 story-workspace 表，并标记为 `review_status='pending'`、`agent_generated=true`，同时关联到对应的 Chat thread。Dashboard、故事/角色/场景列表随后可正确展示「待审阅」项。
 
 **核心约束**：
-- 与现有 `claude-agent` 服务集成不破坏现有 Chat / Deck 功能
-- 错误处理：Agent 生成失败时记录日志，不阻塞用户现有操作
-- 数据存入时自动设置 `agent_generated=true`，`review_status='pending'`
-- 关联 `agent_session_id` 到 Chat thread ID
-- 角色和场景数据与故事数据一并存入，自动建立关联
+- 不破坏现有 Chat / Deck 功能；Agent 集成是新增逻辑，不是替换。
+- 数据写入必须幂等：同一 Agent 会话重复生成时，避免产生重复故事（以 `agent_session_id` + `title` 为去重键）。
+- Agent 产出格式不固定，需定义最小数据契约（至少包含 `title` + 内容字段）。
+- 错误处理：Agent 生成失败时记录日志，不阻塞用户现有操作。
+- 项目使用 SQLite，所有写入通过 `database.py` 的 `get_db()` 连接完成。
+- 所有业务标识使用 `story-workspace` 前缀（DEC-004）。
 
 ## 4. 实现步骤
 
-### Step 1: 定义 Agent 最小数据契约
+### Step 1: 定义 Agent 产出最小数据契约
 
-Agent 生成内容格式不固定，需定义最小数据契约以确保可存储：
-
-**最小数据契约（Minimum Data Contract）**：
+在 `backend/services/story-workspace/agent_integration.py` 中定义 Pydantic 模型，作为 Agent 产出内容的接收合同：
 
 ```python
-class AgentStoryOutput(TypedDict):
-    """Minimum data contract for Agent-generated story content."""
-    title: str                    # 必填：故事标题
-    description: str              # 可选：故事描述
-    type: str                     # 可选：short / long / script / outline，默认 short
-    content: str                  # 可选：故事内容（Markdown）
-    characters: List[AgentCharacterOutput]  # 可选：角色列表
-    scenes: List[AgentSceneOutput]          # 可选：场景列表
+class AgentStoryPayload(BaseModel):
+    title: str
+    description: Optional[str] = None
+    type: Literal["short", "long", "script", "outline"] = "short"
+    content: Optional[str] = None
+    characters: list[AgentCharacterPayload] = []
+    scenes: list[AgentScenePayload] = []
 
-class AgentCharacterOutput(TypedDict):
-    """Minimum data contract for Agent-generated character."""
-    name: str                     # 必填：角色名称
-    identity: str                 # 可选：角色身份/职业
-    personality: str              # 可选：性格描述
-    background: str               # 可选：背景故事
-    catchphrase: str              # 可选：口头禅
-    tags: List[str]               # 可选：性格标签
+class AgentCharacterPayload(BaseModel):
+    name: str
+    identity: Optional[str] = None
+    personality: Optional[str] = None
+    background: Optional[str] = None
+    catchphrase: Optional[str] = None
+    tags: list[str] = []
 
-class AgentSceneOutput(TypedDict):
-    """Minimum data contract for Agent-generated scene."""
-    name: str                     # 必填：场景名称
-    description: str              # 可选：场景描述
-    order_index: int              # 可选：在故事中的顺序，默认 0
+class AgentScenePayload(BaseModel):
+    name: str
+    description: Optional[str] = None
+    order_index: int = 0
 ```
 
-**数据契约规则**：
-1. `title`（故事）和 `name`（角色/场景）是唯一必填字段
-2. 所有可选字段缺失时，使用数据库默认值
-3. Agent 输出超出契约的字段应被忽略（不报错）
-4. 契约字段类型不匹配时，尝试类型转换；转换失败则使用默认值
+- 字段为最小必需集；Agent 可额外返回字段，但多余字段应被忽略或记录为警告。
+- `title` / `name` 必填；缺失时整条记录应被拒绝并记录错误。
+- 本契约需与 `SUO-201-SH-002` 产出的 `AgentStoryOutput` 类型对齐。
 
-### Step 2: 创建内部接收端点
+### Step 2: 创建内部接收服务
 
-在 `backend/routers/story-workspace.py` 中追加内部端点（用于 Agent 服务调用）：
-
-#### `POST /api/story-workspace/internal/agent-output`
-
-**功能**：接收 Agent 生成的故事/角色/场景数据，存入数据库
-
-**请求体**：
-```json
-{
-  "agent_session_id": "chat-thread-uuid",
-  "user_id": 123,
-  "workspace_id": "ws-uuid",
-  "story": {
-    "title": "午夜咖啡馆",
-    "description": "一个发生在午夜咖啡馆的奇幻故事...",
-    "type": "short",
-    "content": "# 午夜咖啡馆\n\n深夜，咖啡馆里...",
-    "characters": [
-      {
-        "name": "林小雨",
-        "identity": "咖啡师",
-        "personality": "温柔、内向",
-        "tags": ["温柔", "内向", "细腻"]
-      },
-      {
-        "name": "阿默",
-        "identity": "记忆守护者",
-        "personality": "神秘、安静",
-        "tags": ["神秘", "安静", "古怪"]
-      }
-    ],
-    "scenes": [
-      {
-        "name": "开场·雨夜",
-        "description": "雨夜中的咖啡馆外景",
-        "order_index": 0
-      },
-      {
-        "name": "咖啡馆内景",
-        "description": "温暖的咖啡馆内部",
-        "order_index": 1
-      }
-    ]
-  }
-}
-```
-
-**实现逻辑**：
+新建 `backend/services/story-workspace/agent_integration.py`：
 
 ```python
-@router.post("/internal/agent-output")
-async def receive_agent_output(
-    request: AgentOutputRequest,
-    db: Database = Depends(get_db)
-):
-    """
-    Receive Agent-generated content and store it in story-workspace tables.
-    This endpoint is called by the claude-agent service after content generation.
-    """
-    try:
-        # 1. 验证用户和工作区
-        workspace = get_or_create_workspace(db, request.user_id, request.workspace_id)
-
-        # 2. 生成业务标识
-        story_identifier = generate_identifier("story")
-
-        # 3. 插入故事主记录
-        story_id = str(uuid.uuid4())
-        db.execute("""
-            INSERT INTO story_workspace_stories
-            (id, identifier, title, description, status, review_status, type,
-             content, author_id, workspace_id, character_count, scene_count,
-             agent_generated, agent_session_id, created_at, updated_at)
-            VALUES (?, ?, ?, ?, 'draft', 'pending', ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        """, (story_id, story_identifier, request.story.title,
-              request.story.description, request.story.type or 'short',
-              request.story.content, request.user_id, workspace['id'],
-              len(request.story.characters or []),
-              len(request.story.scenes or []),
-              request.agent_session_id))
-
-        # 4. 插入角色记录
-        character_ids = []
-        for char_data in (request.story.characters or []):
-            char_id = str(uuid.uuid4())
-            char_identifier = generate_identifier("character")
-            db.execute("""
-                INSERT INTO story_workspace_characters
-                (id, identifier, name, identity, personality, background,
-                 catchphrase, tags, author_id, workspace_id, review_status,
-                 agent_generated, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, (char_id, char_identifier, char_data.name, char_data.identity,
-                  char_data.personality, char_data.background,
-                  char_data.catchphrase, json.dumps(char_data.tags or []),
-                  request.user_id, workspace['id']))
-            character_ids.append(char_id)
-
-            # 4.1 建立故事-角色关联
-            db.execute("""
-                INSERT INTO story_workspace_story_characters
-                (story_id, character_id, role_type, created_at)
-                VALUES (?, ?, ' protagonist', CURRENT_TIMESTAMP)
-            """, (story_id, char_id))
-
-        # 5. 插入场景记录
-        scene_ids = []
-        for scene_data in (request.story.scenes or []):
-            scene_id = str(uuid.uuid4())
-            scene_identifier = generate_identifier("scene")
-            db.execute("""
-                INSERT INTO story_workspace_scenes
-                (id, identifier, name, description, story_id, author_id,
-                 workspace_id, order_index, review_status, agent_generated,
-                 created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """, (scene_id, scene_identifier, scene_data.name, scene_data.description,
-                  story_id, request.user_id, workspace['id'],
-                  scene_data.order_index or 0))
-            scene_ids.append(scene_id)
-
-        # 6. 提交事务
-        db.commit()
-
-        # 7. 返回创建的资源 ID
-        return {
-            "success": True,
-            "story_id": story_id,
-            "character_ids": character_ids,
-            "scene_ids": scene_ids
-        }
-
-    except Exception as e:
-        db.rollback()
-        logger.error(f"Failed to store Agent output: {e}")
-        raise HTTPException(status_code=500, detail="Failed to store Agent output")
-```
-
-### Step 3: 与 claude-agent 服务集成
-
-在 `backend/claude_agent/` 目录下，找到 Agent 生成内容后的回调点，调用 story-workspace 内部端点：
-
-**集成点分析**：
-
-根据 `docs/CLAUDE.md`，claude-agent 服务的核心入口是：
-- `POST /api/claude-agent` — SSE 流式端点
-- Thread 生命周期：`chat_thread` 表存储会话
-
-**集成方案**：
-
-在 Agent 完成内容生成后（SSE 流结束），解析生成的内容，提取故事/角色/场景数据，调用内部存储端点。
-
-```python
-# backend/claude_agent/story_workspace_integration.py
-
-import logging
-from typing import Optional
-from database import get_db
-
-logger = logging.getLogger(__name__)
-
-async def store_agent_output_to_workspace(
-    thread_id: str,
+def store_agent_story_output(
+    db: sqlite3.Connection,
     user_id: int,
-    generated_content: dict
-) -> Optional[dict]:
-    """
-    Store Agent-generated story content to story-workspace.
-    Called after Agent finishes generating content in a chat thread.
-
-    Args:
-        thread_id: The chat thread ID (maps to agent_session_id)
-        user_id: The user ID
-        generated_content: Parsed story/character/scene data from Agent output
-
-    Returns:
-        dict with story_id, character_ids, scene_ids or None on failure
-    """
-    try:
-        db = get_db()
-
-        # Build the internal request payload
-        payload = {
-            "agent_session_id": thread_id,
-            "user_id": user_id,
-            "workspace_id": None,  # Will use default workspace
-            "story": generated_content
-        }
-
-        # Direct database insertion (avoid HTTP loopback)
-        result = _insert_agent_output(db, payload)
-        db.commit()
-
-        logger.info(f"Agent output stored: story_id={result['story_id']}")
-        return result
-
-    except Exception as e:
-        logger.error(f"Failed to store Agent output to workspace: {e}")
-        # Do not raise — Agent generation should not fail due to storage issues
-        return None
-    finally:
-        db.close()
-
-def _insert_agent_output(db, payload: dict) -> dict:
-    """Direct database insertion logic (mirrors the internal endpoint)."""
-    # ... (same SQL as Step 2)
-    pass
+    workspace_id: str,
+    agent_session_id: str,
+    payload: AgentStoryPayload,
+) -> dict:
+    """Persist one Agent-generated story bundle into story-workspace tables."""
 ```
 
-### Step 4: 内容解析策略
+实现逻辑：
+1. 在事务中执行。
+2. 生成 `story_id`（UUID v4）与 `identifier`（如 `story-{short_uuid}`）。
+3. 先检查去重：
+   ```sql
+   SELECT id FROM story_workspace_stories
+   WHERE agent_session_id = ? AND title = ? AND author_id = ?
+   ```
+   若已存在，则更新现有记录（视为重新生成）而非新建。
+4. 插入 / 更新 `story_workspace_stories`。
+5. 对每个角色：
+   - 检查同一 `agent_session_id` + `name` 是否已存在，存在则更新，否则插入。
+   - 写入 `story_workspace_characters`。
+6. 对每个场景：
+   - 写入 `story_workspace_scenes`。
+7. 建立 `story_workspace_story_characters` 与 `story_workspace_scene_characters` 关联。
+8. 更新冗余计数：`story_workspace_stories.character_count`、`scene_count`；`story_workspace_characters.story_count`；`story_workspace_scenes.character_count`。
+9. 返回包含 `story_id`、`character_ids`、`scene_ids` 的结果字典。
 
-Agent 生成的内容是自然语言文本，需要解析提取结构化数据。
+### Step 3: 提供内部 REST 接收端点
 
-**解析策略选项**：
-
-| 策略 | 实现方式 | 优点 | 缺点 |
-|------|----------|------|------|
-| A. LLM 结构化输出 | 要求 Agent 输出 JSON | 结构化程度高 | 需要修改 Agent Prompt |
-| B. 文本解析 + 启发式 | 解析 Markdown/文本 | 无需修改 Agent | 解析不可靠 |
-| C. 混合策略 | Agent 输出带标记的文本，后端提取 | 平衡 | 需要约定标记格式 |
-
-**推荐策略 C（混合策略）**：
-
-在 Agent Prompt 中要求输出带标记的结构化内容：
-
-```
-当你生成剧本内容时，请在回复末尾附加以下格式的结构化数据：
-
-<STORY_WORKSPACE_OUTPUT>
-{
-  "title": "故事标题",
-  "description": "故事描述",
-  "type": "short",
-  "content": "完整故事内容（Markdown）",
-  "characters": [
-    {"name": "角色名", "identity": "身份", "personality": "性格", "tags": ["标签1"]}
-  ],
-  "scenes": [
-    {"name": "场景名", "description": "场景描述", "order_index": 0}
-  ]
-}
-</STORY_WORKSPACE_OUTPUT>
-```
-
-后端解析逻辑：
+在 `backend/routers/story-workspace.py` 中新增内部端点（仅由 claude-agent 服务调用，不建议前端直接调用）：
 
 ```python
-def parse_agent_output(message_text: str) -> Optional[dict]:
-    """Extract structured story data from Agent message text."""
-    import re
-    import json
-
-    # Look for <STORY_WORKSPACE_OUTPUT> tag
-    pattern = r'<STORY_WORKSPACE_OUTPUT>\s*(.*?)\s*</STORY_WORKSPACE_OUTPUT>'
-    match = re.search(pattern, message_text, re.DOTALL)
-
-    if not match:
-        return None
-
-    try:
-        data = json.loads(match.group(1))
-        return data
-    except json.JSONDecodeError:
-        logger.warning("Failed to parse STORY_WORKSPACE_OUTPUT JSON")
-        return None
+@router.post("/api/story-workspace/internal/agent-output")
+async def receive_agent_story_output(
+    body: AgentStoryPayload,
+    current_user: dict = Depends(get_current_user),
+    db: sqlite3.Connection = Depends(get_db),
+):
+    """Receive Agent-generated story bundle and persist it."""
 ```
 
-### Step 5: 错误处理与降级
+- 复用全局 Auth 中间件，确保 `user_id` 有效。
+- 自动获取或创建当前用户的默认 `workspace_id`。
+- `agent_session_id` 从请求 Header `X-Agent-Session-Id` 读取；缺失时返回 400。
+- 调用 `store_agent_story_output()` 完成写入。
+- 响应格式：
+  ```json
+  {
+    "story_id": "story-uuid",
+    "review_status": "pending",
+    "character_ids": ["char-uuid-1", "char-uuid-2"],
+    "scene_ids": ["scene-uuid-1", "scene-uuid-2"]
+  }
+  ```
+
+### Step 4: 在 claude-agent 服务中调用集成端点
+
+修改 `backend/claude_agent/service.py` 或 `backend/routers/claude_agent.py`：
+
+- 在 Agent SSE 流处理中识别「生成剧本」类指令（简单关键字匹配或工具调用）。
+- 当检测到 Agent 生成故事内容时，在流结束后（`message-final` 或 `finish`）调用内部 HTTP 客户端：
+  ```python
+  requests.post(
+      "http://localhost:8000/api/story-workspace/internal/agent-output",
+      json=parsed_payload,
+      headers={"X-Agent-Session-Id": thread_id},
+      timeout=30,
+  )
+  ```
+- **推荐**：优先采用服务内函数调用（直接 import `store_agent_story_output`）而非 HTTP 自调用，以减少延迟和失败面；若架构要求解耦，再使用内部 HTTP。
+- 记录调用结果与错误日志；错误不影响 SSE 流向用户返回的正常消息。
+
+### Step 5: 错误处理与日志
 
 ```python
-async def safe_store_agent_output(thread_id: str, user_id: int, message_text: str):
-    """
-    Safely store Agent output with full error handling.
-    Never raises — failures are logged but don't block the user.
-    """
-    try:
-        # 1. Parse structured data from message
-        parsed = parse_agent_output(message_text)
-        if not parsed:
-            logger.debug("No structured story data found in Agent output")
-            return None
-
-        # 2. Validate minimum data contract
-        if not parsed.get("title"):
-            logger.warning("Agent output missing required 'title' field")
-            return None
-
-        # 3. Store to database
-        result = await store_agent_output_to_workspace(thread_id, user_id, parsed)
-        return result
-
-    except Exception as e:
-        logger.error(f"Unexpected error storing Agent output: {e}", exc_info=True)
-        return None
+class AgentIntegrationError(Exception):
+    """Raised when Agent output cannot be persisted."""
 ```
 
-### Step 6: Dashboard 待审阅计数
+- JSON 解析失败：记录 `logger.warning`。
+- 最小契约校验失败：记录具体字段。
+- 数据库写入失败：记录异常并回滚事务；向 claude-agent 调用方返回 422，但不阻塞用户 Chat 体验。
+- 添加 metrics / counter（可选）：`agent_story_stored_total`、`agent_story_store_failed_total`。
 
-确保存入后 Dashboard 可正确显示「待审阅」计数：
+### Step 6: 幂等性与重新生成
 
-```python
-# 此查询由前端 Dashboard 调用
-# GET /api/story-workspace/stories?review_status=pending&per_page=1
-# 前端只需 total 字段
-
-# 或提供专用统计端点：
-@router.get("/workspace/stats")
-async def get_workspace_stats(db: Database = Depends(get_db), user = Depends(get_current_user)):
-    """Get workspace statistics for Dashboard."""
-    stats = db.execute("""
-        SELECT
-            COUNT(CASE WHEN review_status = 'pending' THEN 1 END) as pending_count,
-            COUNT(CASE WHEN review_status = 'confirmed' THEN 1 END) as confirmed_count,
-            COUNT(*) as total_count
-        FROM story_workspace_stories
-        WHERE author_id = ?
-    """, (user.id,)).fetchone()
-
-    return {
-        "pending_count": stats["pending_count"],
-        "confirmed_count": stats["confirmed_count"],
-        "total_count": stats["total_count"]
-    }
-```
+- 去重键：`agent_session_id` + `title`（同一 Chat 线程内同标题视为同一故事）。
+- 重新生成时：更新现有故事、角色的字段，删除旧关联并重建新关联。
+- 保留 `created_at`，更新 `updated_at`。
 
 ## 5. 涉及文件路径
 
 | 路径 | 说明 |
 |------|------|
-| `backend/routers/story-workspace.py` | 追加内部接收端点 `/internal/agent-output` 和统计端点 `/workspace/stats` |
-| `backend/claude_agent/story_workspace_integration.py` | **新文件**：Agent 产出解析与存储集成 |
-| `backend/claude_agent/service.py` | 在 Agent 生成完成后调用存储集成 |
-| `backend/database.py` | 复用现有数据库连接 |
+| `backend/services/story-workspace/agent_integration.py` | **新文件**：Agent 产出接收、解析、持久化服务 |
+| `backend/routers/story-workspace.py` | 追加 `/api/story-workspace/internal/agent-output` 内部接收端点 |
+| `backend/claude_agent/service.py` | 在 Agent SSE 流收尾处调用集成服务 |
+| `backend/claude_agent/context_builder.py` | 可选：在系统提示中增加「生成剧本」输出格式指导 |
+| `backend/database.py` | 复用 `get_db()` 连接 |
+| `backend/tests/test_story_workspace_agent_integration.py` | **新文件**：集成测试 |
 
 ## 6. 输入 / 输出说明
 
 ### 输入
 
-- Agent 生成的自然语言文本（含 `<STORY_WORKSPACE_OUTPUT>` 标记的 JSON）
-- `thread_id`: Chat thread ID（来自 `chat_thread` 表）
-- `user_id`: 当前用户 ID
-- 最小数据契约：至少包含 `title` 字段
+- Agent 生成的剧本结构化数据（JSON），至少包含 `title`。
+- 当前用户 `user_id`（从 Auth 中间件获取）。
+- Chat thread ID，作为 `agent_session_id`。
+- 现有数据表：`story_workspace_workspaces`, `story_workspace_stories`, `story_workspace_characters`, `story_workspace_scenes`, `story_workspace_story_characters`, `story_workspace_scene_characters`。
 
 ### 输出
 
-- 数据库记录：故事、角色、场景各一张表记录
-- 关联记录：`story_workspace_story_characters`、`story_workspace_scene_characters`
-- 响应：`{ success: true, story_id, character_ids, scene_ids }`
-- Dashboard 统计：`{ pending_count, confirmed_count, total_count }`
+- `backend/services/story-workspace/agent_integration.py`：数据解析、校验、持久化函数。
+- `backend/routers/story-workspace.py`：新增内部接收端点。
+- 数据库记录：标记为 `agent_generated=true`、`review_status='pending'` 的故事、角色、场景及关联。
+- Dashboard 可消费的「待审阅」计数数据。
 
 ## 7. 依赖项
 
 | 依赖 | Issue ID | 类型 | 说明 |
 |------|----------|------|------|
-| `SUO-201-BE-001` | 数据库 Schema | 硬依赖 | 需要数据表存在才能存储 |
-| `SUO-201-BE-002` | REST API | 软依赖 | 内部端点可独立实现，但建议在同一文件中 |
-| `claude-agent` 服务 | 现有系统 | 现有 | 复用现有 SSE 端点和 thread 机制 |
-| `chat_thread` 表 | 现有 | 现有 | `agent_session_id` 关联到 `chat_thread.id` |
+| `SUO-201-BE-001` | 数据库 Schema | 硬依赖 | 数据表必须已创建 |
+| `SUO-201-SH-002` | 共享类型定义 | 软依赖 | Agent 产出 payload 类型应与共享类型对齐 |
+| `claude-agent` 服务 | — | 现有 | 复用现有 SSE 端点和 thread 机制（`docs/CLAUDE.md`） |
+| 现有 Auth 中间件 | — | 现有 | 复用 `backend/routers/deps.py` 中的 `get_current_user` |
 
 ## 8. 测试策略
 
-### 8.1 Agent 输出解析测试
+### 8.1 最小契约校验测试
 
 ```python
-def test_parse_agent_output_with_tag():
-    """Test parsing structured data from Agent message."""
-    message = """
-    这是一个关于午夜咖啡馆的故事...
-
-    <STORY_WORKSPACE_OUTPUT>
-    {
-      "title": "午夜咖啡馆",
-      "description": "一个奇幻故事",
-      "characters": [{"name": "林小雨", "identity": "咖啡师"}]
-    }
-    </STORY_WORKSPACE_OUTPUT>
-    """
-    result = parse_agent_output(message)
-    assert result is not None
-    assert result["title"] == "午夜咖啡馆"
-    assert len(result["characters"]) == 1
-
-def test_parse_agent_output_without_tag():
-    """Test parsing message without structured data."""
-    message = "这是一个普通的故事描述，没有结构化数据。"
-    result = parse_agent_output(message)
-    assert result is None
+def test_agent_story_payload_requires_title():
+    with pytest.raises(ValidationError):
+        AgentStoryPayload(description="没有标题")
 ```
 
-### 8.2 数据存储集成测试
+### 8.2 幂等存储测试
 
 ```python
-def test_store_agent_output(client, db, sample_user):
-    """Test storing Agent output creates all records."""
-    payload = {
-        "agent_session_id": "thread-123",
-        "user_id": sample_user["id"],
-        "story": {
-            "title": "测试故事",
-            "description": "测试描述",
-            "characters": [
-                {"name": "角色A", "identity": "测试身份"}
-            ],
-            "scenes": [
-                {"name": "场景1", "description": "场景描述"}
-            ]
-        }
-    }
+def test_store_agent_story_output_idempotent(db, user_id, workspace_id):
+    payload = AgentStoryPayload(title="午夜咖啡馆", characters=[...], scenes=[...])
+    result1 = store_agent_story_output(db, user_id, workspace_id, "thread-001", payload)
+    result2 = store_agent_story_output(db, user_id, workspace_id, "thread-001", payload)
+    assert result1["story_id"] == result2["story_id"]
+```
 
-    response = client.post("/api/story-workspace/internal/agent-output", json=payload)
+### 8.3 关联关系测试
+
+```python
+def test_store_agent_story_output_creates_relations(db, user_id, workspace_id):
+    payload = AgentStoryPayload(title="午夜咖啡馆", characters=[AgentCharacterPayload(name="林小雨")], scenes=[])
+    result = store_agent_story_output(db, user_id, workspace_id, "thread-001", payload)
+    assert len(result["character_ids"]) == 1
+    rows = db.execute("SELECT * FROM story_workspace_story_characters WHERE story_id = ?", (result["story_id"],)).fetchall()
+    assert len(rows) == 1
+```
+
+### 8.4 端点测试
+
+```python
+def test_receive_agent_story_output(client, auth_headers):
+    response = client.post(
+        "/api/story-workspace/internal/agent-output",
+        json={"title": "午夜咖啡馆", "type": "short"},
+        headers={**auth_headers, "X-Agent-Session-Id": "thread-001"},
+    )
     assert response.status_code == 200
     data = response.json()
-    assert data["success"] is True
-    assert data["story_id"] is not None
-    assert len(data["character_ids"]) == 1
-    assert len(data["scene_ids"]) == 1
-
-    # Verify database state
-    story = db.execute("SELECT * FROM story_workspace_stories WHERE id = ?",
-                      (data["story_id"],)).fetchone()
-    assert story["review_status"] == "pending"
-    assert story["agent_generated"] == 1
-    assert story["agent_session_id"] == "thread-123"
+    assert data["review_status"] == "pending"
 ```
 
-### 8.3 最小数据契约测试
+### 8.5 错误隔离测试
 
 ```python
-def test_store_agent_output_minimal_data(client, sample_user):
-    """Test storing Agent output with only required fields."""
-    payload = {
-        "agent_session_id": "thread-456",
-        "user_id": sample_user["id"],
-        "story": {
-            "title": "仅标题的故事"
-        }
-    }
-
-    response = client.post("/api/story-workspace/internal/agent-output", json=payload)
-    assert response.status_code == 200
-    data = response.json()
-    assert data["success"] is True
-```
-
-### 8.4 错误处理测试
-
-```python
-def test_store_agent_output_missing_title(client, sample_user):
-    """Test that missing title is handled gracefully."""
-    payload = {
-        "agent_session_id": "thread-789",
-        "user_id": sample_user["id"],
-        "story": {
-            "description": "没有标题"
-        }
-    }
-
-    response = client.post("/api/story-workspace/internal/agent-output", json=payload)
-    # Should either fail gracefully or use a default title
-    assert response.status_code in [200, 400]
-
-def test_store_agent_output_invalid_json(client, sample_user):
-    """Test handling of invalid structured data."""
-    # This tests the parse_agent_output function's resilience
-    result = parse_agent_output("<STORY_WORKSPACE_OUTPUT>invalid json</STORY_WORKSPACE_OUTPUT>")
-    assert result is None
-```
-
-### 8.5 Dashboard 统计测试
-
-```python
-def test_workspace_stats(client, auth_headers, pending_story, confirmed_story):
-    """Test workspace statistics endpoint."""
-    response = client.get("/api/story-workspace/workspace/stats", headers=auth_headers)
-    assert response.status_code == 200
-    data = response.json()
-    assert "pending_count" in data
-    assert "confirmed_count" in data
-    assert "total_count" in data
-    assert data["pending_count"] >= 1
-    assert data["confirmed_count"] >= 1
+def test_agent_integration_error_does_not_break_chat():
+    """Simulate a store failure and verify the caller still returns a normal chat response."""
 ```
 
 ## 9. 完成标志
 
-- [ ] Agent 生成剧本内容后，可调用 story-workspace API 存入数据
-- [ ] 数据存入时自动设置 `agent_generated=true`，`review_status='pending'`
-- [ ] 关联 `agent_session_id` 到 Chat thread ID
-- [ ] 角色和场景数据与故事数据一并存入，自动建立关联
-- [ ] 存入后 Dashboard 可正确显示「待审阅」计数（通过 `/workspace/stats` 或列表查询）
-- [ ] 与现有 `claude-agent` 服务集成不破坏现有 Chat / Deck 功能
-- [ ] 错误处理：Agent 生成失败时记录日志，不阻塞用户现有操作
-- [ ] 最小数据契约定义并文档化（至少包含 title + 内容）
-- [ ] Agent 产出解析测试通过
-- [ ] 数据存储集成测试通过
-- [ ] Dashboard 统计测试通过
+- [ ] `AgentStoryPayload`、`AgentCharacterPayload`、`AgentScenePayload` 最小契约模型定义完成。
+- [ ] `store_agent_story_output()` 实现完整：故事、角色、场景写入 + 关联建立 + 冗余计数更新。
+- [ ] 同一 `agent_session_id` + `title` 重复生成时幂等更新，不产生重复记录。
+- [ ] `POST /api/story-workspace/internal/agent-output` 内部端点可用，要求 `X-Agent-Session-Id`。
+- [ ] claude-agent 服务在合适时机调用集成服务，且不破坏现有 Chat SSE 流程。
+- [ ] 写入的数据 `agent_generated=true`、`review_status='pending'`。
+- [ ] Dashboard 通过 `GET /api/story-workspace/stories?review_status=pending` 能正确显示待审阅计数。
+- [ ] 校验失败 / 写入失败时记录日志并返回明确错误，不阻塞用户现有操作。
+- [ ] 新增/更新测试全部通过。
 
 ## 10. 风险提示
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
-| **Agent 生成内容格式不固定** | 高 | 定义最小数据契约；使用 `<STORY_WORKSPACE_OUTPUT>` 标记约定；解析失败时优雅降级 |
-| **Agent 生成与页面渲染的时序问题** | 高 | 数据库存储是同步的，页面轮询获取新数据；Agent 生成中状态由前端通过 SSE 感知 |
-| **与现有 Chat/Deck 功能冲突** | 高 | 集成点为 Agent 生成完成后的回调，不影响现有 SSE 流；存储失败不阻塞用户操作 |
-| **Agent Prompt 修改影响** | 中 | 结构化输出标记是附加的，不影响自然语言回复；若 Agent 不输出标记，则跳过存储 |
-| **数据契约版本演进** | 中 | 契约字段使用可选设计；新增字段不影响旧数据；建议添加 `contract_version` 字段 |
-| **内部端点安全性** | 中 | `/internal/*` 端点应限制为内部调用（同一进程内或带内部认证）；生产环境考虑添加 API Key |
-| **同一 thread 多次生成** | 低 | 每次生成创建新故事记录（不覆盖）；`agent_session_id` 可重复，故事 ID 唯一 |
+| **Agent 输出格式不固定** | 高 | 定义最小数据契约，仅要求 `title`；多余字段忽略；校验失败时记录日志 |
+| **同一 thread 重新生成导致重复数据** | 中 | 以 `agent_session_id` + `title` 为去重键，更新而非插入 |
+| **Agent 生成与页面渲染的时序问题** | 中 | 数据落地即视为 pending；前端通过轮询获取；Agent 生成中状态由前端 Chat UI 承载 |
+| **claude-agent 服务调用失败影响 Chat 体验** | 中 | 集成调用使用 try/except 隔离；错误仅记录，不向用户暴露异常 |
+| **角色/场景关联错误** | 中 | 事务包裹写入；关联表主键防止重复关联 |
+| **SQLite 并发写入** | 低 | WAL 模式已启用；事务内批量写入减少锁竞争 |
+| **与 Deck 编辑器关系未明确** | 低 | 本期仅持久化 Agent 产出，不涉及 Deck 导出；后续迭代在独立任务中处理 |
+| **shared 类型不同步** | 中 | `SUO-201-SH-002` 产出 canonical 类型后，本任务模型需与其对齐 |
 
 ## 11. 下游执行提示
 
-- **StagePlanner 注意**: 本任务依赖 `SUO-201-BE-001`（Schema）完成，但可与 `SUO-201-BE-002`（REST API）并行开发。Agent 集成端点是独立的内部端点。
-- **与 claude-agent 服务的协作**: 本任务需要修改 `backend/claude_agent/service.py` 或相关文件，在 Agent 生成完成后调用存储逻辑。需与维护 claude-agent 服务的开发者协调集成点。
-- **前端消费边界**: 前端 Dashboard 通过 `GET /api/story-workspace/workspace/stats` 或 `GET /api/story-workspace/stories?review_status=pending` 获取待审阅计数。响应格式需与 FrontendTaskAgent 对齐。
-- **数据合同稳定性**: `agent_session_id` → `chat_thread.id` 的映射是核心契约。`chat_thread.id` 是 TEXT 类型，需确保类型一致。
-- **E2E 验证点**: `SUO-201-SH-001`（E2E 联调）需验证：Agent 生成 → 数据库存储 → Dashboard 显示待审阅计数 → 表格展示新项 的完整链路。
+- **StagePlanner 注意**: 本任务依赖 `SUO-201-BE-001`（Schema）完成，可与 `SUO-201-BE-002`（REST API）并行开发，但 E2E 验证需等待 `SUO-201-FE-004`（审阅面板）完成。
+- **与 FrontendTaskAgent 协作**: 前端 Dashboard 通过 `review_status=pending` 筛选待审阅项；本任务确保该筛选返回正确数据。
+- **与 claude-agent 团队协作**: 若未来 Agent 输出格式升级，需同步更新 `AgentStoryPayload` 契约。
+- **共享类型对齐**: `SUO-201-SH-002` 产出的类型定义应与本任务的 Pydantic 模型保持一致；本任务可基于设计稿先行开发，后续对齐。
+
+## 12. 执行边界
+
+### 允许修改范围
+- `backend/services/story-workspace/agent_integration.py` — **新文件**：Agent 产出接收、解析、持久化服务。
+- `backend/routers/story-workspace.py` — 追加 `/api/story-workspace/internal/agent-output` 内部接收端点。
+- `backend/claude_agent/service.py` 或 `backend/routers/claude_agent.py` — 在 Agent SSE 流收尾处增加调用集成服务的逻辑（优先采用服务内函数调用，而非 HTTP 自调用）。
+- `backend/claude_agent/context_builder.py` — 可选：在系统提示中增加「生成剧本」输出格式指导。
+- `backend/tests/test_story_workspace_agent_integration.py` — **新文件**：集成测试（最小契约校验、幂等存储、关联关系、错误隔离）。
+
+### 禁止修改范围
+- ❌ `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` — 任何设计阶段产物。
+- ❌ `docs/task/TASK-REQUIREMENT-FORMAT.md` — 提示词模板。
+- ❌ 前端代码、前端 task 文件 — 不在本 Agent 职责范围内。
+- ❌ 现有 `claude-agent` SSE 流核心协议 — 不修改 SSE 消息格式、thread 生命周期、`/api/claude-agent` 端点本身的行为。
+- ❌ 现有 Chat / Deck 功能 — Agent 集成是新增逻辑，不是替换；禁止破坏现有功能。
+- ❌ `backend/routers/story-workspace.py` 中已有 CRUD 和审阅端点 — 仅追加内部接收端点，不修改现有逻辑。
+- ❌ 实现代码以外的任何文件 — 本 task 文档不是 execute 授权。
+
+### 明确排除项（本期不在范围）
+- **复杂画布编辑器** — Agent 产出为结构化数据（故事/角色/场景），不生成画布/时间线可视化内容。
+- **视频生成模块** — Agent 产出不包含视频/镜头数据；视频生成为后续迭代。
+- **移动端适配** — Agent 集成通道与设备无关；但本期明确排除移动端/平板端适配需求。
+- **用户手动创建内容** — Agent 集成仅处理 Agent 生成的内容；用户手动创建的内容不走本通道（实际上本期不允许用户手动创建）。
+- **实时协作** — 同一 thread 的并发生成由 SQLite 事务串行化，无多用户协作机制。
+- **四视角转面图** — Agent 角色产出仅包含单张头像信息，不涉及多视角。
+- **历史版本管理** — 重新生成时更新现有记录，不保留旧版本。
+- **@提及系统** — Agent 产出内容中不解析 @提及。
+- **计费/积分系统** — Agent 生成不触发积分消耗记录。
+- **与 Deck 编辑器打通** — 已确认内容暂存，不自动导出到 Deck；后续迭代在独立任务中处理（设计稿 `[CLARIFICATION_NEEDED]`）。
+- **异步队列/消息中间件** — 使用同步调用（服务内函数调用或内部 HTTP），不引入 Redis/RabbitMQ 等中间件。
