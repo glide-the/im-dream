@@ -189,15 +189,44 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 
 ## 范围边界
 
-**✅ 范围内**：
+**✅ 范围内**（本 task 允许实现）：
 - 审阅面板 UI 和交互
 - 确认/驳回/编辑操作
 - 关联角色/场景列表展示和跳转
 - 修改意见输入
 - 状态流转反馈
 
-**❌ 范围外**：
+**❌ 范围外**（本 task 不实现）：
 - 后端审阅状态流转 API（BackendTaskAgent 负责）
 - Agent 重新生成流程（后续迭代）
 - 富文本编辑器（默认纯文本/Markdown）
 - 四视角头像（本期仅单张头像）
+
+---
+
+## 执行边界（增量修正）
+
+### 允许修改范围
+- 允许创建 `frontend/src/components/story-workspace/review/` 目录及组件文件
+- 允许修改 `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`（组装审阅面板容器）
+- 允许创建审阅操作相关的 Hooks（如 `useReviewActions.ts`）
+
+### 禁止修改范围
+- **禁止修改** `docs/design/` 目录下任何文件
+- **禁止修改** `docs/issue/` 目录下任何文件
+- **禁止修改** `docs/stage/` 目录下任何文件
+- **禁止修改** `docs/exec/` 目录下任何文件
+- **禁止修改** `docs/task/` 下其他 task 文件
+- **禁止修改** 后端代码（`backend/src/` 等）
+- **禁止修改** 审阅状态流转 API 接口定义（BackendTaskAgent 负责）
+- **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
+
+### 明确排除项
+- **复杂画布**：本 task 的审阅面板仅展示文本/Markdown 内容，不涉及 Canvas 渲染、富文本编辑器画布、图形绘制、思维导图等复杂画布功能
+- **视频**：本 task 审阅面板中不包含视频内容展示、视频播放器嵌入、视频审阅标注等功能
+- **移动端**：本 task 审阅面板固定宽度 360px，明确排除移动端下的面板行为（如全屏弹窗、底部 Sheet 等移动端适配）
+- **用户手动创建内容**：审阅面板中的「编辑模式」仅允许修改 Agent 已生成的内容字段，不提供从零创建新故事/角色/场景的功能。所有内容来源必须是 Agent 生成
+- **富文本编辑器**：编辑模式使用纯文本输入或简单 Markdown，不涉及富文本编辑器（如 Slate.js, ProseMirror, Quill 等）的集成
+- **版本历史**：不涉及内容版本历史、diff 对比、回滚到历史版本等功能
+- **评论/批注**：不涉及类似 Google Docs 的评论批注、@提及、线程回复等协作功能
+- **四视角头像**：角色头像仅展示单张图片，不涉及四视角头像展示（正面/侧面/背面/表情）

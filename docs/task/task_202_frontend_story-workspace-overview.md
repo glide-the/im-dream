@@ -127,6 +127,46 @@ Story Workspace 前端任务总览与验证边界
 
 ---
 
+## 范围边界
+
+**✅ 范围内**（本 overview 文档自身）：
+- 前端任务文档总览与依赖映射
+- 任务执行顺序建议
+- 前端 Issue 范围汇总
+
+**❌ 范围外**（本 overview 文档不涉及）：
+- 具体组件实现（由 task_202a~task_202h 负责）
+- 后端 API 设计
+- 数据库 Schema 设计
+
+---
+
+## 执行边界（增量修正）
+
+### 允许修改范围
+- 仅允许修改本文档自身（`docs/task/task_202_frontend_story-workspace-overview.md`）
+- 允许在评论中引用其他 task 文档的状态
+
+### 禁止修改范围
+- **禁止修改** `docs/design/` 目录下任何文件
+- **禁止修改** `docs/issue/` 目录下任何文件
+- **禁止修改** `docs/stage/` 目录下任何文件
+- **禁止修改** `docs/exec/` 目录下任何文件
+- **禁止修改** 任何实现代码（`frontend/src/`, `backend/src/` 等）
+- **禁止修改** 后端 task 文件（`task_202_backend_*.md`, `task_204_backend_*.md` 等）
+- **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
+- **禁止修改** 其他前端 task 文件（`task_202a_*.md` ~ `task_202h_*.md`）的内容
+
+### 明确排除项
+- **复杂画布**：本 overview 不涉及任何画布渲染、图形编辑、SVG 复杂操作相关内容
+- **视频**：本 overview 不涉及视频播放、视频编辑、流媒体相关内容
+- **移动端**：本 overview 仅关注桌面端（≥1280px）布局规划，不包含移动端/平板端适配策略
+- **用户手动创建内容**：本 overview 覆盖的 Story Workspace 定位为 Agent 产出内容的审阅工作台，不涉及用户手动创建故事/角色/场景的功能规划
+- **实时协作**：不涉及多用户实时协作、WebSocket 实时同步、Operational Transformation 等复杂协作功能
+- **富文本编辑器**：不涉及富文本/Markdown 编辑器实现规划（仅作为审阅面板的只读/简单编辑展示）
+
+---
+
 ## 附录：任务文档依赖图
 
 ```

@@ -180,14 +180,43 @@ const storyWorkspaceRoutes = [
 
 ## 范围边界
 
-**✅ 范围内**：
+**✅ 范围内**（本 task 允许实现）：
 - Sidebar 导航组件
 - 路由配置
 - 页面组件骨架
 - 与现有用户体系的集成
 
-**❌ 范围外**：
+**❌ 范围外**（本 task 不实现）：
 - 数据表格实现（FE-003 负责）
 - Dashboard 页面内容（FE-005 负责）
 - 全局 Settings 页面修改
 - 移动端导航适配
+
+---
+
+## 执行边界（增量修正）
+
+### 允许修改范围
+- 允许创建 `frontend/src/components/story-workspace/layout/StoryWorkspaceSidebar.tsx`
+- 允许创建 `frontend/src/router/story-workspace.tsx`（或等效路由配置位置）
+- 允许创建 `frontend/src/pages/story-workspace/` 目录及页面骨架文件
+- 允许修改 `frontend/src/App.tsx`（接入 Story Workspace 路由/视图切换）
+
+### 禁止修改范围
+- **禁止修改** `docs/design/` 目录下任何文件
+- **禁止修改** `docs/issue/` 目录下任何文件
+- **禁止修改** `docs/stage/` 目录下任何文件
+- **禁止修改** `docs/exec/` 目录下任何文件
+- **禁止修改** `docs/task/` 下其他 task 文件
+- **禁止修改** 后端代码（`backend/src/` 等）
+- **禁止修改** 现有用户认证体系核心逻辑（仅允许复用 `useAuth` hook）
+- **禁止修改** 现有全局 Settings 页面
+- **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
+
+### 明确排除项
+- **复杂画布**：本 task 的 Sidebar 导航仅包含文本链接和图标，不涉及 Canvas 渲染、SVG 复杂图形、图标动画绘制等画布相关技术
+- **视频**：本 task 不涉及视频播放器、视频缩略图、视频流处理等相关功能
+- **移动端**：本 task 明确排除移动端导航适配（如汉堡菜单、底部 Tab 栏、手势滑动等），Sidebar 始终固定 240px 宽度，不可折叠为图标栏
+- **用户手动创建内容**：本 task 导航项仅引导至 Agent 产出内容的展示页面，不包含用户手动创建故事/角色/场景的入口或表单
+- **路由守卫**：本 task 仅配置基础路由，不涉及复杂路由守卫、权限控制、懒加载策略
+- **面包屑导航**：本 task 不包含面包屑导航实现

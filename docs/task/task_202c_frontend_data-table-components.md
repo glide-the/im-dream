@@ -234,16 +234,45 @@ enum StoryType {
 
 ## 范围边界
 
-**✅ 范围内**：
+**✅ 范围内**（本 task 允许实现）：
 - 三个模块的数据表格
 - 搜索、筛选、排序、分页
 - 审阅状态视觉标记
 - 批量选择操作栏
 - 数据查询 Hooks
 
-**❌ 范围外**：
+**❌ 范围外**（本 task 不实现）：
 - 审阅面板内部实现（FE-004 负责）
 - 审阅操作 API 调用（FE-004 负责）
 - Dashboard 页面（FE-005 负责）
 - 空态/加载/错误组件（FE-006 负责）
 - 新建/创建功能（DEC-008 排除）
+
+---
+
+## 执行边界（增量修正）
+
+### 允许修改范围
+- 允许创建 `frontend/src/components/story-workspace/table/` 目录及组件文件
+- 允许创建 `frontend/src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx`
+- 允许创建 `frontend/src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx`
+- 允许创建 `frontend/src/hooks/story-workspace/` 目录及 Hooks 文件
+
+### 禁止修改范围
+- **禁止修改** `docs/design/` 目录下任何文件
+- **禁止修改** `docs/issue/` 目录下任何文件
+- **禁止修改** `docs/stage/` 目录下任何文件
+- **禁止修改** `docs/exec/` 目录下任何文件
+- **禁止修改** `docs/task/` 下其他 task 文件
+- **禁止修改** 后端代码（`backend/src/` 等）
+- **禁止修改** 现有全局表格组件（如有）的核心逻辑
+- **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
+
+### 明确排除项
+- **复杂画布**：本 task 的表格仅使用标准 HTML table 或 CSS Grid/Flexbox 布局，不涉及 Canvas 渲染、虚拟滚动 Canvas 实现、大数据量 Canvas 优化等
+- **视频**：本 task 表格单元格中不包含视频播放器、视频预览、视频缩略图展示
+- **移动端**：本 task 表格明确排除移动端适配，不包含横向滚动优化、卡片式布局转换、触摸手势支持等移动端表格特性
+- **用户手动创建内容**：本 task 的 Toolbar **明确排除**「新建」按钮（DEC-008 决策：用户不手动创建内容）。表格仅展示 Agent 生成的内容，不提供用户手动添加/创建故事/角色/场景的入口
+- **复杂表格功能**：不涉及树形表格、嵌套表格、行内编辑、拖拽排序、列宽拖拽调整、冻结列等高级表格功能
+- **实时更新**：表格数据刷新采用轮询机制，不涉及 WebSocket 实时推送、Server-Sent Events 等实时数据更新技术
+- **导出功能**：不涉及 Excel/CSV/PDF 导出功能

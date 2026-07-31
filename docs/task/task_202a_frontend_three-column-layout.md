@@ -167,15 +167,43 @@ interface StoryWorkspaceReviewPanelProps {
 
 ## 范围边界
 
-**✅ 范围内**：
+**✅ 范围内**（本 task 允许实现）：
 - 三栏布局骨架实现
 - 桌面端（≥1280px）布局
 - Review Panel 折叠行为
 - 全局样式 token 复用
 
-**❌ 范围外**：
+**❌ 范围外**（本 task 不实现）：
 - Sidebar 导航内容（FE-002 负责）
 - 数据表格内容（FE-003 负责）
 - 审阅面板内部内容（FE-004 负责）
 - 移动端/平板端适配
 - 响应式断点处理
+
+---
+
+## 执行边界（增量修正）
+
+### 允许修改范围
+- 允许创建 `frontend/src/components/story-workspace/layout/` 目录及子文件
+- 允许创建 `frontend/src/components/story-workspace/` 根目录
+- 允许修改 `frontend/src/styles/tokens.css`（如需补充新 token）
+- 允许修改 `frontend/src/App.tsx`（如需接入 Story Workspace 路由/视图）
+
+### 禁止修改范围
+- **禁止修改** `docs/design/` 目录下任何文件
+- **禁止修改** `docs/issue/` 目录下任何文件
+- **禁止修改** `docs/stage/` 目录下任何文件
+- **禁止修改** `docs/exec/` 目录下任何文件
+- **禁止修改** `docs/task/` 下其他 task 文件
+- **禁止修改** 后端代码（`backend/src/` 等）
+- **禁止修改** 现有全局组件（`AppLayout.tsx`, `TopNavBar.tsx`）的核心逻辑（仅允许参考/复用）
+- **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
+
+### 明确排除项
+- **复杂画布**：本 task 仅实现 CSS Flexbox/Grid 布局骨架，不涉及 Canvas 2D/3D 渲染、SVG 复杂图形操作、WebGL 等画布相关技术
+- **视频**：本 task 不涉及视频播放器嵌入、视频流处理、WebRTC 等相关功能
+- **移动端**：本 task 明确排除所有移动端（<768px）和平板端（768px-1279px）适配代码，不包含任何 `@media` 查询、响应式断点处理、触摸手势支持
+- **用户手动创建内容**：本 task 布局容器仅用于展示 Agent 生成的内容，不包含任何用户手动创建/编辑内容的输入区域或表单
+- **路由实现**：如项目无 react-router，本 task 仅提供布局组件，不强制要求实现路由切换逻辑（由 FE-002 负责）
+- **动画效果**：Review Panel 折叠仅使用 CSS transition，不涉及复杂动画库（Framer Motion 等）

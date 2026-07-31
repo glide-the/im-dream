@@ -149,14 +149,41 @@ Story Workspace 工作台首页 Dashboard 实现
 
 ## 范围边界
 
-**✅ 范围内**：
+**✅ 范围内**（本 task 允许实现）：
 - Dashboard 页面实现
 - 统计展示
 - 待审阅快捷入口
 - 已确认列表
 - 空态引导
 
-**❌ 范围外**：
+**❌ 范围外**（本 task 不实现）：
 - 后端统计聚合 API（BackendTaskAgent 负责）
 - Chat 触发 Agent 的实现（已有系统）
 - 实时数据推送（本期建议轮询）
+
+---
+
+## 执行边界（增量修正）
+
+### 允许修改范围
+- 允许修改 `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx`（填充 Dashboard 内容）
+- 允许创建 Dashboard 专用的展示组件（如统计卡片、快捷入口卡片等）
+
+### 禁止修改范围
+- **禁止修改** `docs/design/` 目录下任何文件
+- **禁止修改** `docs/issue/` 目录下任何文件
+- **禁止修改** `docs/stage/` 目录下任何文件
+- **禁止修改** `docs/exec/` 目录下任何文件
+- **禁止修改** `docs/task/` 下其他 task 文件
+- **禁止修改** 后端代码（`backend/src/` 等）
+- **禁止修改** 现有 Chat 系统代码（仅允许跳转/引导）
+- **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
+
+### 明确排除项
+- **复杂画布**：Dashboard 使用标准组件和卡片布局，不涉及 Canvas 渲染、数据可视化图表（如 D3.js, ECharts）、仪表盘图形绘制等
+- **视频**：Dashboard 中不包含视频内容展示、视频预览卡片、最近视频活动等功能
+- **移动端**：Dashboard 明确排除移动端适配，统计卡片和快捷入口在移动端下不做重新布局（如单列堆叠），保持桌面端设计
+- **用户手动创建内容**：Dashboard 的「待审阅快捷入口」仅展示 Agent 最新生成的内容，统计数字仅反映 Agent 产出数据。空态引导文案明确指向「在 Chat 中让 Agent 为你生成剧本」，不提供手动创建入口
+- **实时数据推送**：Dashboard 数据刷新采用轮询机制（如 30 秒间隔），不涉及 WebSocket、Server-Sent Events、GraphQL Subscription 等实时推送技术
+- **数据可视化图表**：不涉及折线图、柱状图、饼图等统计图表，仅使用数字卡片和列表展示
+- **通知中心**：不涉及全局通知中心、消息提醒、推送通知等功能
