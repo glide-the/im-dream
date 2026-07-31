@@ -1,34 +1,28 @@
 # TASK-REQUIREMENT-FORMAT
 
-Status: Filled Template for SUO-202
+Status: Filled Template for SUO-203
 Updated: 2026-08-01
-Scope: Frontend task prompt template for the story-workspace task family
+Scope: Backend task prompt template for the story-workspace task family
 
 > [Input] `docs/issue/ISSUES_story-workspace.md`,
 >      `docs/design/story-workspace/story-workspace-prd.md`,
 >      `docs/design/story-workspace/story-workspace-layout-design.md`,
->      `docs/CLAUDE.md`,
->      `frontend/src/styles/tokens.css`,
->      `frontend/src/components/AppLayout.tsx`
-> [Output] Generate:
->      `docs/task/task_202_frontend_story-workspace-overview.md`,
->      `docs/task/task_202a_frontend_three-column-layout.md`,
->      `docs/task/task_202b_frontend_sidebar-navigation.md`,
->      `docs/task/task_202c_frontend_data-table-components.md`,
->      `docs/task/task_202d_frontend_review-panel.md`,
->      `docs/task/task_202e_frontend_dashboard.md`,
->      `docs/task/task_202f_frontend_state-components.md`,
->      `docs/task/task_202g_frontend_e2e-integration.md`,
->      `docs/task/task_202h_frontend_user-documentation.md`
+>      `docs/CLAUDE.md`
+> [Output] Generate / update:
+>      `docs/task/task_201_backend_story-workspace-schema.md`,
+>      `docs/task/task_202_backend_story-workspace-rest-api.md`,
+>      `docs/task/task_203_backend_story-workspace-review-workflow.md`,
+>      `docs/task/task_204_backend_story-workspace-agent-integration.md`,
+>      `docs/task/task_205_backend_story-workspace-shared-types.md`
 > [Pos] task-requirement-template in `docs/task`
 
 ## Issue Snapshot
 
 | Field | Value |
 |---|---|
-| Issue ID | `SUO-202` |
-| Title | `[task][story-workspace][frontend] 形成前端任务文档与验证边界` |
-| Type | `frontend` |
+| Issue ID | `SUO-203` |
+| Title | `[task][story-workspace][backend] 形成后端任务文档与数据合同` |
+| Type | `backend` |
 | Priority | `medium` |
 | Status | `in_progress` |
 | Work mode | `standard` |
@@ -36,40 +30,41 @@ Scope: Frontend task prompt template for the story-workspace task family
 | Parent | `SUO-198` |
 | Parent title | `参考调研Dreem_创作者平台设计Ink-Dream的workspace` |
 | Parent status | `in_progress` |
-| Blocks | `SUO-203` (stage) |
 | Blocked by | `SUO-201` (issue dispatch) |
 | Blocker status | `done` |
-| Labels | `frontend`, `task-planning` |
-| Runtime note | `checkout claimed by harness for FrontendTaskAgent` |
+| Labels | `backend`, `task-planning` |
 
 ## Task Framing
 
-Use the source design docs above to generate a frontend task document family for the story-workspace module.
+Use the source design docs above to generate / verify the backend task document family for the story-workspace module.
+
+Backend responsibility scope:
+- `SUO-201-BE-001` 数据库 Schema 与数据表初始化
+- `SUO-201-BE-002` Story Workspace REST API 实现
+- `SUO-201-BE-003` 审阅状态流转与批量操作 API
+- `SUO-201-BE-004` Agent 产出数据接收与存储集成
+- `SUO-201-SH-002` 命名规范与类型定义共享包（BackendTaskAgent 主责，FrontendTaskAgent 协作）
 
 Hard constraints:
 
-- Keep the task family focused on the frontend chain: layout skeleton → sidebar navigation → data tables → review panel → dashboard → state components → E2E integration → user documentation.
-- Do not expand scope into backend schema changes, API implementation, Agent service internals, or database migrations.
-- Treat `SUO-201-SH-002` (naming/types shared package) as a cross-functional dependency; frontend docs may describe the type contract consumed, but should not define backend type implementation.
-- Reuse the existing frontend app shell (AppLayout, TopNavBar, tokens.css); do not invent a second layout system.
-- All business identifiers MUST use `story-workspace` prefix (DEC-004).
-- Desktop-only (≥1280px); no mobile/tablet responsive code.
+- Only add or incrementally update backend task artifacts under `docs/task/`.
+- Do not modify `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, or any implementation code.
+- Do not treat task documents as execute authorization; do not implement directly.
+- All business identifiers MUST use the `story-workspace` prefix (DEC-004).
+- Desktop-only (≥1280px); backend APIs must not assume mobile-specific consumers.
 - No user manual creation flows; all content is Agent-generated, user only reviews.
-- The generated docs must tell downstream implementation exactly what to verify, what minimal fixes are allowed, and what evidence to attach before stage execution.
+- The project backend uses SQLite (not PostgreSQL); do not assume `pg_trgm` / `gin_trgm_ops` availability.
+- Every task document must reference its source Issue ID, design decision IDs (DEC-001~DEC-008), dependencies, acceptance criteria, test/validation strategy, migration rollback requirements, and shared-type contract ownership.
 
 ## Required Output Shape
 
 The generated task family must include:
 
-1. One overview / manifest doc for the whole story-workspace frontend bundle
-2. A layout skeleton task doc (FE-001)
-3. A sidebar navigation & routing task doc (FE-002)
-4. A data table components task doc (FE-003)
-5. A review panel & review operations task doc (FE-004)
-6. A dashboard page task doc (FE-005)
-7. A state components task doc (FE-006)
-8. An E2E integration task doc (SH-001, frontend-led)
-9. A user documentation task doc (DO-001)
+1. `task_201_backend_story-workspace-schema.md` — `SUO-201-BE-001`
+2. `task_202_backend_story-workspace-rest-api.md` — `SUO-201-BE-002`
+3. `task_203_backend_story-workspace-review-workflow.md` — `SUO-201-BE-003`
+4. `task_204_backend_story-workspace-agent-integration.md` — `SUO-201-BE-004`
+5. `task_205_backend_story-workspace-shared-types.md` — `SUO-201-SH-002`
 
 Each task document must include:
 
@@ -86,20 +81,17 @@ Each task document must include:
 
 ## Suggested Implementation Surface
 
-- Layout components under `frontend/src/components/story-workspace/layout/`
-- Table components under `frontend/src/components/story-workspace/table/`
-- Review components under `frontend/src/components/story-workspace/review/`
-- State components under `frontend/src/components/story-workspace/state/`
-- Page components under `frontend/src/pages/story-workspace/`
-- Hooks under `frontend/src/hooks/story-workspace/`
-- Router config in `frontend/src/router/story-workspace.tsx` (new file)
-- Types under `frontend/src/types/story-workspace/` (consuming shared types)
-- Reuse existing: `AppLayout.tsx`, `tokens.css`, global Toast, Modal, Button, Input components
+- Database schema / migrations in `backend/database.py` (project convention)
+- REST routes in `backend/routers/story-workspace.py`
+- Agent integration service in `backend/services/story-workspace/agent_integration.py`
+- Shared types: define a single source-of-truth contract; recommend `shared/types/story-workspace/` if a monorepo shared package exists, otherwise document identical contracts in `backend/src/types/story-workspace/` and `frontend/src/types/story-workspace/` with a synchronization checklist.
+- Reuse existing: global auth middleware, `chat_thread` table, claude-agent SSE service, SQLite `database.py` patterns.
 
 ## Generation Notes
 
-- Keep the file naming convention `task_<序号>_frontend_<slug>.md`.
+- Keep the file naming convention `task_<序号>_backend_<slug>.md`.
 - Keep the documents concise enough for execution, but explicit enough that downstream implementation does not need to infer the E2E boundary.
 - All task docs must reference source Issue ID, design decision IDs (DEC-001~DEC-008), and clarify what is in-scope vs out-of-scope.
-- Make the parent/child relationship explicit in the overview doc so the downstream implementation understands how the frontend task family feeds stage execution.
+- Make the parent/child relationship and dependency chain explicit in each doc so StagePlanner can sequence work.
 - Explicitly exclude: complex canvas editor, video generation, mobile responsive, user manual creation, real-time collaboration, four-view character portraits, billing system.
+- For `SUO-201-SH-002`, specify the BackendTaskAgent as the sole owner of the canonical type contract; FrontendTaskAgent only consumes it.
