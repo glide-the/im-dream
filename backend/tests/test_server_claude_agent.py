@@ -1,6 +1,7 @@
 # [Input] Consume server.py (FastAPI app) and claude_agent module.
-# [Output] Verify that claude-agent routes are registered, factory is initialised,
-#          request/response models are correct, and authentication is enforced.
+# [Output] Verify that claude-agent and Notion connector routes are registered,
+#          factory is initialised, request/response models are correct, and
+#          authentication is enforced.
 # [Pos] test node in backend/tests
 # [Sync] 2026-05-22: initial — smoke tests for /api/claude-agent/* routes in server.py.
 #                    Adapted from Pawkeyland scripts/test_demo_server_import.py
@@ -9,6 +10,7 @@
 # [Sync] 2026-06-22: cover Claude Agent route attachment handling when Settings
 #                    Workspace Mode is disabled.
 # [Sync] 2026-06-25: cover thread-scoped stop endpoint registration and routing.
+# [Sync] 2026-07-04: cover Notion connector router registration and auth gating.
 
 """Smoke tests for the Claude Agent HTTP routes in server.py.
 
@@ -45,9 +47,9 @@ def _stub_module(name: str, **attrs) -> types.ModuleType:
     return mod
 
 
-# Stub claude_code_sdk so runner.py doesn't fail on import
-if "claude_code_sdk" not in sys.modules:
-    sdk_types = _stub_module("claude_code_sdk.types")
+# Stub claude_agent_sdk so runner.py doesn't fail on import
+if "claude_agent_sdk" not in sys.modules:
+    sdk_types = _stub_module("claude_agent_sdk.types")
 
     class _SdkStub:
         def __init__(self, **kwargs):
@@ -57,7 +59,7 @@ if "claude_code_sdk" not in sys.modules:
     class AssistantMessage(_SdkStub):
         pass
 
-    class ClaudeCodeOptions(_SdkStub):
+    class ClaudeAgentOptions(_SdkStub):
         pass
 
     class HookContext(_SdkStub):
@@ -89,7 +91,7 @@ if "claude_code_sdk" not in sys.modules:
 
     for _cls in [
         AssistantMessage,
-        ClaudeCodeOptions,
+        ClaudeAgentOptions,
         HookContext,
         HookJSONOutput,
         HookMatcher,
@@ -105,7 +107,7 @@ if "claude_code_sdk" not in sys.modules:
     class ClaudeSDKClient:
         pass
 
-    _stub_module("claude_code_sdk", ClaudeSDKClient=ClaudeSDKClient, query=None, types=sdk_types)
+    _stub_module("claude_agent_sdk", ClaudeSDKClient=ClaudeSDKClient, query=None, types=sdk_types)
 
 # Stub heavy optional dependencies so server.py can be imported in minimal envs.
 
@@ -210,6 +212,26 @@ class TestServerAgentEnvCleanup(unittest.TestCase):
             self.assertNotIn("ANTHROPIC_API_KEY", os.environ)
             self.assertNotIn("CLAUDE_CODE_UNUSED_TOKEN", os.environ)
 
+    def test_cleanup_preserves_sandbox_runtime_keys(self):
+        # Regression for the 2026-07-26 production miss: the extra sandbox
+        # read paths must survive startup cleanup or the sandbox silently
+        # loses the contract.  (The apply-seccomp settings override key
+        # briefly covered here was removed 2026-07-26 — proven dead in
+        # production; Route A reverted to the vendor passthrough patch.)
+        with unittest.mock.patch.dict(
+            os.environ,
+            {
+                "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ": "/app/claude_agent:/app/libs",
+            },
+            clear=True,
+        ):
+            _SERVER_MODULE._drop_unsupported_agent_env()
+
+            self.assertEqual(
+                os.environ["INK_AGENT_SANDBOX_EXTRA_ALLOW_READ"],
+                "/app/claude_agent:/app/libs",
+            )
+
 
 # ---------------------------------------------------------------------------
 # Route registration tests (import-level, no HTTP calls)
@@ -258,6 +280,65 @@ class TestClaudeAgentRouteRegistration(unittest.TestCase):
         self.assertTrue(self._has_route("POST", "/api/claude-agent/threads/{thread_id}/stop"))
 
 
+@_skip_if_no_server
+class TestNotionRouteRegistration(unittest.TestCase):
+    """Verify the Notion connector routes are registered in server.py."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.app = _SERVER_MODULE.app
+        cls.routes = {
+            (frozenset(r.methods or set()), r.path)
+            for r in cls.app.routes
+            if hasattr(r, "path") and r.path.startswith("/api/connectors")
+        }
+
+    def _has_route(self, method: str, path: str) -> bool:
+        return any(
+            method in (methods or set()) and p == path
+            for methods, p in self.routes
+        )
+
+    def test_get_connectors(self):
+        self.assertTrue(self._has_route("GET", "/api/connectors"))
+
+    def test_post_connectors(self):
+        self.assertTrue(self._has_route("POST", "/api/connectors"))
+
+    def test_get_connector(self):
+        self.assertTrue(self._has_route("GET", "/api/connectors/{connector_id}"))
+
+    def test_patch_connector(self):
+        self.assertTrue(self._has_route("PATCH", "/api/connectors/{connector_id}"))
+
+    def test_delete_connector(self):
+        self.assertTrue(self._has_route("DELETE", "/api/connectors/{connector_id}"))
+
+    def test_auth_login(self):
+        self.assertTrue(self._has_route("POST", "/api/connectors/{connector_id}/auth/login"))
+
+    def test_auth_poll(self):
+        self.assertTrue(self._has_route("POST", "/api/connectors/{connector_id}/auth/poll"))
+
+    def test_list_databases(self):
+        self.assertTrue(self._has_route("GET", "/api/connectors/{connector_id}/databases"))
+
+    def test_list_pages(self):
+        self.assertTrue(self._has_route("GET", "/api/connectors/{connector_id}/pages"))
+
+    def test_list_resources(self):
+        self.assertTrue(self._has_route("GET", "/api/connectors/{connector_id}/resources"))
+
+    def test_select_resources(self):
+        self.assertTrue(self._has_route("POST", "/api/connectors/{connector_id}/resources/select"))
+
+    def test_sync_connector(self):
+        self.assertTrue(self._has_route("POST", "/api/connectors/{connector_id}/sync"))
+
+    def test_delete_resource(self):
+        self.assertTrue(self._has_route("DELETE", "/api/connectors/{connector_id}/resources/{resource_id}"))
+
+
 # ---------------------------------------------------------------------------
 # Pydantic model contract tests
 # ---------------------------------------------------------------------------
@@ -272,9 +353,9 @@ class TestClaudeAgentRequestModel(unittest.TestCase):
             _srv = _SERVER_MODULE
             cls.Model = _srv.ClaudeAgentRequestBody
 
-    def test_message_required(self):
-        with self.assertRaises(Exception):
-            self.Model()  # message is required
+    def test_message_defaults_to_none(self):
+        m = self.Model()
+        self.assertIsNone(m.message)
 
     def test_default_resume_false(self):
         m = self.Model(message="hello")
@@ -505,6 +586,30 @@ class TestClaudeAgentAuth(unittest.TestCase):
         resp = self.client.post(
             "/api/claude-agent/tool-confirm",
             json={"tool_call_id": "x", "approved": True},
+        )
+        self.assertEqual(resp.status_code, 401)
+
+
+@_skip_if_no_server
+class TestNotionAuth(unittest.TestCase):
+    """Notion connector routes must require JWT authentication."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            raise unittest.SkipTest("httpx not installed — skipping HTTP auth tests")
+        cls.client = TestClient(_SERVER_MODULE.app, raise_server_exceptions=False)
+
+    def test_list_connectors_requires_auth(self):
+        resp = self.client.get("/api/connectors")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_create_connector_requires_auth(self):
+        resp = self.client.post(
+            "/api/connectors",
+            json={"name": "Notion"},
         )
         self.assertEqual(resp.status_code, 401)
 

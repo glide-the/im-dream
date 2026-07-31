@@ -13,6 +13,22 @@
 > current thread workspace before full-access allow is considered.
 > [Sync] 2026-06-21: Settings `sandbox_network_mode="disabled"` now hard-denies
 > network tools before full-access and low-sensitivity allow decisions.
+> [Sync] 2026-07-20: `EnterPlanMode` / `ExitPlanMode` added to the
+> low-sensitivity auto-allow class (claude-plan §5.7); official `ExitPlanMode`
+> ask-semantics deviation recorded in §3.
+> [Sync] 2026-07-20: `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` /
+> `TaskGet` added to the low-sensitivity auto-allow class (claude-todo §5.7);
+> `TaskUpdate` non-read-only deviation recorded in §3.
+> [Sync] 2026-07-23: SandboxPermissionRequest — decision-chain step ②.5 added
+> (network allowlist/open gate); `open` mode semantics changed to "ask every
+> time". Decision order in §6 re-aligned with code order.
+> [Sync] 2026-07-26: step ②.5 REMOVED — network policy is a system-level
+> control enforced by Claude Code's own sandbox (sandbox.network via
+> workspace.py); runtime asks arrive exclusively via the SDK can_use_tool
+> channel (see `claude-agent-sandbox-network-permission-tool.md`). The
+> PreToolUse decision chain returns to its pre-feature shape; `open` mode
+> reverts to "unrestricted egress"; the network-variant confirmation card
+> still exists but is only triggered by can_use_tool (`SandboxNetworkAccess`).
 
 # Claude-Agent Permission Policy
 
@@ -48,6 +64,14 @@ adds an execution-layer guard: `WebFetch`, `WebSearch`, and common Bash network
 commands (`curl`, `wget`, `git fetch`, `npm install`, `python -m pip install`,
 etc.) return explicit deny before full-access or low-sensitivity allow rules.
 
+The `allowlist` / `open` modes are NOT enforced in this PreToolUse layer: they
+configure Claude Code's own sandbox (`sandbox.network` written into per-thread
+`.claude/settings.json` by `workspace.py`), and any runtime ask arrives via
+the SDK `can_use_tool` channel (`SandboxNetworkAccess`), which routes through
+the same frontend confirmation side-channel with
+`confirmationKind="sandbox_network"` — see
+`claude-agent-sandbox-network-permission-tool.md`. **[2026-07-26]**
+
 ## 3. Low-Sensitivity Tools
 
 Low-sensitivity tools are query-like or context-selection operations with no direct content mutation.
@@ -63,6 +87,8 @@ Current auto-allow inventory:
 | Necklace query | `mcp__necklace__*` names returned by `allowed_necklace_tool_names()` |
 | Editor context switch | `mcp__editor__switch_editor` |
 | Skill invocation | `Skill` |
+| Plan Mode session state | `EnterPlanMode`, `ExitPlanMode` **[2026-07-20]** |
+| Todo / task list session state | `TodoWrite`, `TaskCreate`, `TaskUpdate`, `TaskList`, `TaskGet` **[2026-07-20]** |
 | Read-only Bash subset | `Bash` only when the command has no shell metacharacters and the first token is in the read-only/navigation allowlist (`ls`, `cd`, `pwd`, `echo`, `cat`, `head`, `tail`, `wc`, `find`, `which`, `type`, `date`, `whoami`, `id`, `groups`, `env`, `printenv`, `uname`, `hostname`) |
 
 `switch_editor` is low-sensitivity because the MCP handler is a no-op and the PostToolUse hook only changes which existing editor session `.editor/` reads resolve to. It does not modify document content.
@@ -70,6 +96,14 @@ Current auto-allow inventory:
 `Skill` is low-sensitivity because Claude Code exposes skills through the built-in `Skill` tool, whose job is to expand or run a named skill prompt. The exact tool name was confirmed in restored Claude Code source: `src/tools/SkillTool/constants.ts` exports `SKILL_TOOL_NAME = 'Skill'`. Do not use a broad `skill*` prefix. Allowing `Skill` does not allow later tool calls made by that skill; those calls are evaluated again by this policy.
 
 Implementation detail: hook payloads are normalized before policy lookup. The runner accepts both Claude hook JSON keys (`tool_name`, `tool_input`) and adjacent SDK/frontend camelCase keys (`toolName`, `toolInput`) so a payload such as `{"toolName": "Skill"}` cannot fall through as an unknown tool. In `auto` mode, `Skill` is also retained in effective `allowed_tools` even if a caller passes a custom allowlist, because Claude Code's SkillTool has its own permission path that otherwise defaults to ask for some skill metadata.
+
+`EnterPlanMode` / `ExitPlanMode` are low-sensitivity because both are session-state meta operations: neither mutates user content directly (`EnterPlanMode` is read-only; `ExitPlanMode` only flips the session back to execution). Classification name: `low_sensitivity_permission` via `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (claude-plan §5.7, 2026-07-20).
+
+**Deviation record (2026-07-20) — official `ExitPlanMode` ask semantics downgraded.** In official Claude Code, `ExitPlanMode` runs `checkPermissions → ask`: an interactive human confirms the plan before execution resumes. This deployment has no TUI approval scenario; keeping ask semantics would pop a frontend confirmation on every plan exit and block the product's "plans flow automatically" requirement. Consequence: the model's self-authored plan enters execution without per-item human confirmation. Risk is bounded by (a) the workspace-boundary permission (`_apply_workspace_boundary_permission`), which hard-denies built-in file/search tools outside the thread workspace, and (b) high-sensitivity write tools (`Write`/`Edit`/`MultiEdit` outside `files/`, mutating `Bash`, editor MCP writes), which still route through the frontend confirmation side-channel. In `tool_choice="manual"` mode both tools keep the high-sensitivity confirmation path unchanged. Fallback: remove the two names from `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (or gate them behind a future Settings switch) to restore official ask semantics.
+
+The five todo/task tools are low-sensitivity because all of them are session-state task-list operations: none mutates user content directly. `TodoWrite` is officially approval-free (an SDK default-allowed tool); `TaskCreate`/`TaskUpdate` write task JSON, but the write scope is confined by `CLAUDE_CONFIG_DIR` to the per-thread workspace `.claude-home/tasks/` directory — equivalent to session metadata. Classification name: `low_sensitivity_permission` via `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` (claude-todo §5.7, 2026-07-20).
+
+**Deviation record (2026-07-20) — `TaskUpdate` is not strictly read-only.** `TaskUpdate` can trigger `blockTask` bidirectional rewrites and `deleteTask` cascading deletion of task JSON files. This downgrade means task-list creation, mutation, and deletion proceed without per-item human confirmation. Risk is bounded by (a) the write scope being confined to the per-thread workspace `.claude-home/tasks/` directory (session metadata, not user content), and (b) high-sensitivity write tools, which still route through the frontend confirmation side-channel. In `tool_choice="manual"` mode all five tools keep the high-sensitivity confirmation path unchanged. Fallback: remove the five names from `_LOW_SENSITIVITY_QUERY_TOOL_NAMES` to restore confirmation gating.
 
 ## 4. High-Sensitivity Tools
 
@@ -85,29 +119,29 @@ High-sensitivity tools require frontend confirmation in `auto` and `manual` mode
 
 ## 5. Hook Output Contract
 
-Every backend allow decision must use the Claude Code CLI 2.1+ `PreToolUse` format:
+Every backend allow decision must use the Claude Code CLI 2.1+ `PreToolUse` format. Hook callbacks return **plain dict literals** — in claude-agent-sdk 0.2.128 `HookJSONOutput` is a Union of TypedDicts, NOT callable **[2026-07-26]**:
 
 ```python
-HookJSONOutput(
-    hookSpecificOutput={
+{
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
     }
-)
+}
 ```
 
-Do not use empty `HookJSONOutput()` to mean allow. Empty output only declines to make a hook-level decision; Claude Code then falls back to its own permission layer, which can still show a native permission prompt.
+Do not use empty `{}` to mean allow. Empty output only declines to make a hook-level decision; Claude Code then falls back to its own permission layer, which can still show a native permission prompt.
 
 Deny decisions use:
 
 ```python
-HookJSONOutput(
-    hookSpecificOutput={
+{
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,
     }
-)
+}
 ```
 
 ## 6. Decision Order
@@ -115,8 +149,8 @@ HookJSONOutput(
 `agent_runner.py::_pre_tool_use_hook` applies decisions in this order:
 
 1. `.editor/` virtual-index `Read` redirect, all modes.
-2. Built-in file/search workspace-boundary check, all modes; outside current thread workspace is a hard deny.
-3. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network commands are hard-denied when `sandbox_network_mode="disabled"`.
+2. Disabled-network check; `WebFetch`, `WebSearch`, and common Bash network commands are hard-denied when `sandbox_network_mode="disabled"`.
+3. Built-in file/search workspace-boundary check, all modes; outside current thread workspace is a hard deny.
 4. If `im_full_access_enabled` is true, tools are exposed, and the tool is not an answer-form tool: explicit allow.
 5. In `auto` only: workspace `files/` built-in file permission.
 6. In `auto` only: explicit low-sensitivity tool allow.
@@ -131,6 +165,7 @@ actually runs.
 
 When a high-sensitivity tool reaches the confirmation branch, the backend emits `tool-approval-request`.
 The frontend maps that event to the existing tool part with `toolMetadata.approvalRequested=true` and renders Approve/Cancel UI.
+Sandbox network confirmations additionally carry `confirmationKind="sandbox_network"` and `networkRequest{host, policyMode, matchedAllowedDomain}`; they originate exclusively from the SDK `can_use_tool` channel (`SandboxNetworkAccess` runtime-proxy asks — not from this PreToolUse layer **[2026-07-26]**). The frontend renders a network-variant confirmation card (host + policy mode + binary Approve/Reject) when present and falls back to the generic card when absent (backward compatible).
 
 Approval returns explicit `permissionDecision:"allow"`.
 Rejection returns explicit `permissionDecision:"deny"` with the user-visible reason.
@@ -149,6 +184,8 @@ This remains true in full-access mode.
 | `Write` outside `{cwd}/files/**` | Confirm | Confirm | Not exposed |
 | `Skill` | Allow | Confirm | Not exposed |
 | `mcp__editor__switch_editor` | Allow | Confirm | Not exposed |
+| `EnterPlanMode` / `ExitPlanMode` | Allow | Confirm | Not exposed |
+| `TodoWrite` / `TaskCreate` / `TaskUpdate` / `TaskList` / `TaskGet` | Allow | Confirm | Not exposed |
 | Editor write MCP tools | Confirm | Confirm | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` | Confirm with form | Confirm with form | Not exposed |
 | `AskUserQuestion` / `mcp__user__ask_user` with full access | Confirm with form | Confirm with form | Not exposed |

@@ -31,13 +31,13 @@ ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before libs.claude_agent_kit
+import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before libs.claude_agent_kit
 
 # Additional stubs already handled by _sdk_stubs; this comment left for clarity.
-if "claude_code_sdk" not in sys.modules:
-    _sdk_stub = types.ModuleType("claude_code_sdk")
-    sys.modules["claude_code_sdk"] = _sdk_stub
-    sys.modules["claude_code_sdk.types"] = types.ModuleType("claude_code_sdk.types")
+if "claude_agent_sdk" not in sys.modules:
+    _sdk_stub = types.ModuleType("claude_agent_sdk")
+    sys.modules["claude_agent_sdk"] = _sdk_stub
+    sys.modules["claude_agent_sdk.types"] = types.ModuleType("claude_agent_sdk.types")
 
 from claude_agent.thread_factory import ClaudeAgentThreadFactory, build_session_id
 from claude_agent.thread_pool import (

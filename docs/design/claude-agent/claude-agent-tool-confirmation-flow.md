@@ -10,6 +10,19 @@
 > **[Sync] 2026-06-13**: full-access 模式保留 `AskUserQuestion` /
 > `mcp__user__ask_user` 的前端确认窗口，因为这些工具必须收集 answers
 > 并通过 `updatedInput` 传回 Claude。
+> **[Sync] 2026-07-20**: 前端确认交互从消息列表内联渲染迁移为**确认面板**
+> （`ToolConfirmationDock`）：待确认期间**隐藏输入栏，面板直接占据输入栏位置**
+> （in-flow 替换渲染）；消息列表中的待确认工具调用退化为带「待确认」标记的
+> 折叠行。详见 §8。
+> **[Sync] 2026-07-23**: SandboxPermissionRequest —— `can_use_tool` 通道
+> （`SandboxNetworkAccess` 运行时沙箱代理询问）接入同一确认链路（§6.3）；
+> 确认面板渲染网络变体卡片（host + 策略模式 + 二元 拒绝/同意）。
+> **[Sync] 2026-07-26**: PreToolUse 步骤 ②.5 网络门禁拆除（错误层级重复，
+> §6.1 / §6.2 回退）；can_use_tool 成为唯一网络确认通道，
+> `networkRequest.source` 字段取消；`open` 模式"每次询问"语义回退。
+> **[Sync] 2026-07-26**: HOTFIX — `HookJSONOutput(...)` 构造调用全部改为纯字典
+> 字面量（0.2.128 中该类型为 TypedDict Union 不可调用；§5 头部注记两个生产
+> 症状与官方 dict 契约，§5.2 / §6.1 示例更新）。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -343,6 +356,14 @@ await asyncio.wait_for(event.wait(), timeout=300)  # 5分钟超时
 
 ## 5. `PreToolUse` Hook `hookSpecificOutput` 格式 — CLI ≥2.1 规范 **[2026-05-27]**
 
+> **[2026-07-26]** claude-agent-sdk 0.2.128 将 `HookJSONOutput` 改为 TypedDict
+> Union（types.py:561），**不可调用**——所有 `HookJSONOutput(...)` 构造调用抛
+> `TypeError: 'types.UnionType' object is not callable`，曾导致 (a) PostToolUse
+> 观察器崩溃、(b) PreToolUse allow/deny 被静默丢弃（用户在确认框拒绝后工具仍执行）。
+> 当前契约：hook 回调返回纯字典字面量——`{}` 为空操作，决策用
+> `{"hookSpecificOutput": {...}}`（官方 hooks 文档）。§5.1 的
+> `HookJSONOutput(...)` 仅为旧协议历史示例，现行代码见 §5.2。
+
 > **背景**：CLI v2.1+ 更改了 PreToolUse hook 的 `hookSpecificOutput` 协议。旧格式 `{"tool_input": ...}` 被 CLI 静默忽略，导致 `AskUserQuestion` 以无 `answers` 字段的原始 input 执行，返回 `isError:true / output:null`。
 
 ### 5.1 旧格式（CLI < 2.1，已废弃）
@@ -359,32 +380,35 @@ return HookJSONOutput(decision="block", systemMessage=reason)
 
 ### 5.2 新格式（CLI ≥2.1，当前实现）
 
+> **[2026-07-26]** claude-agent-sdk 0.2.128 中 `HookJSONOutput` 是 TypedDict Union、
+> 不可调用；hook 回调一律返回**纯字典字面量**（`{}` 空操作 / 决策字典）。
+
 ```python
 # ✅ 允许并更新 input（携带 answers）
-return HookJSONOutput(
-    hookSpecificOutput={
+return {
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
         "updatedInput": updated_input,   # 包含 answers 的完整 tool_input
     }
-)
+}
 
 # ✅ 允许，不更新 input
-return HookJSONOutput(
-    hookSpecificOutput={
+return {
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
     }
-)
+}
 
 # ✅ 拒绝，附带 Claude 可见的原因
-return HookJSONOutput(
-    hookSpecificOutput={
+return {
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "deny",
         "permissionDecisionReason": reason,  # Claude 收到拒绝原因，避免无效重试
     }
-)
+}
 ```
 
 ### 5.3 关键规则
@@ -409,12 +433,12 @@ if (
     and tool_choice != "none"
     and tool_name not in {"AskUserQuestion", "mcp__user__ask_user"}
 ):
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
         }
-    )
+    }
 
 if tool_choice == "auto":
     workspace_files_permission = _apply_workspace_files_permission(tool_name, tool_input, cwd)
@@ -427,6 +451,10 @@ if tool_choice == "auto":
 
 # 执行/写入/交互工具 → 进入 on_tool_confirmation_request 确认侧路
 ```
+
+> **[2026-07-26]** 曾插入的 PreToolUse 网络门禁（步骤 ②.5）已拆除——网络
+> 策略由 CLI 自身沙箱执行，运行时代理询问经 §6.3 的 `can_use_tool` 通道
+> 进入同一确认侧路。
 
 ### 6.2 工具决策矩阵
 
@@ -443,9 +471,33 @@ if tool_choice == "auto":
 
 若 `im_full_access_enabled=true`，上述矩阵在已暴露工具范围内整体变为显式 allow；`AskUserQuestion` / `mcp__user__ask_user` 仍显示 AskUserQuestion 表单并等待用户提交 answers；`tool_choice=none` 仍不暴露工具，因此不会进入该 hook 分支。
 
+### 6.3 运行时沙箱代理触发源（can_use_tool）**[2026-07-23 新增；2026-07-26 起为唯一网络确认通道]**
+
+沙箱网络确认的唯一触发源：sandboxed Bash 在
+sandbox-runtime 过滤代理层命中未授权域名时，CLI 发起系统级 control request，
+**不经 PreToolUse**，只通过 SDK `can_use_tool` 回调送达
+（`tool_name == "SandboxNetworkAccess"`，`input == {"host": ...}`）。
+（2026-07-23 曾另有 PreToolUse 步骤 ②.5 执行前门禁，2026-07-26 作为错误
+层级的重复实现拆除；`networkRequest.source` 字段随之取消。）
+
+`agent_runner.py` 将 `_can_use_tool` 传入 `ClaudeAgentOptions.can_use_tool`，
+该回调复用**同一条** `on_tool_confirmation_request` 确认链路（payload 携带
+`confirmationKind="sandbox_network"` + `networkRequest{host, policyMode, matchedAllowedDomain}`），
+因此前端时序（`tool-input-start` → `tool-approval-request` → POST `/tool-confirm`
+→ resolve）与普通工具确认完全一致，仅结果映射不同：批准 →
+`PermissionResultAllow(updated_input)`，拒绝/失败/超时 →
+`PermissionResultDeny(message)`（message 指明 host 并提示可在设置中加入
+allowedDomains）；回调异常一律 fail-closed deny。官方契约保证 `can_use_tool`
+不会对已被权限流解析的工具再次触发（本系统 hook 对一切工具返回显式
+allow/deny），因此不存在双重弹窗。
+
 ---
 
 ## 7. 前端工具确认路由逻辑 **[2026-05-27 / 2026-06-06]**
+
+> **[已更新 2026-07-20]** 本节 §7.2 中「待确认工具在消息列表内直接展开
+> Approve/Cancel 或 AskUserQuestion 表单」的渲染方式已被 §8 的悬浮确认面板
+> 取代；判定规则（哪些 part 需要确认）保持不变，仅渲染位置与组件层级变化。
 
 ### 7.1 组件层级
 
@@ -494,3 +546,79 @@ if (needsManualApproval) { /* isManualToolInvocation=true → Approve/Cancel */ 
   ↓ 工具执行 → tool-output-available
   isCompleted=true → shouldShowApprovalUI=false → 恢复折叠/终端视图
 ```
+
+---
+
+## 8. 前端确认面板（ToolConfirmationDock） **[2026-07-20]**
+
+### 8.1 背景与目标
+
+原实现（§7.2）把待确认工具的 Approve/Cancel 按钮和 AskUserQuestion 表单直接
+渲染在消息列表中：表单卡片打断消息流、历史回填后位置漂移、长命令把列表撑得
+很乱。2026-07-20 起，所有**待用户决策的确认交互**统一收敛到一块确认面板：
+**待确认期间隐藏 `AIInputDock` 输入栏，面板以正常文档流占据输入栏位置**，
+用户做出决策后输入栏恢复；消息列表只保留带「待确认」标记的折叠行。
+
+### 8.2 组件层级
+
+```
+ChatPanel
+  ├─ pendingConfirmation = useMemo(messages, effectiveToolChoice)
+  │     └─ resolvePendingToolConfirmation(part, toolChoice)   // toolConfirmation.ts
+  │           ├─ 'askuser'         — AskUserQuestion / mcp__user__ask_user 且未完成且 input 已就绪
+  │           ├─ 'sandbox-network' — toolMetadata.confirmationKind==='sandbox_network'
+  │           │                    （can_use_tool 运行时沙箱代理拦截）**[2026-07-26]**
+  │           ├─ 'confirm'  — toolMetadata.approvalRequested===true 或 toolChoice==='manual'
+  │           │             且未完成且 input 已就绪（editor write 工具除外）
+  │           └─ null       — 已完成 / input 未就绪 / editor write 工具 / 无需确认
+  ├─ ChatMessageList
+  │     └─ 待确认 part → 折叠行 + 琥珀色「待确认」标记（不再内联渲染按钮/表单）
+  └─ 输入区容器 (position: relative)
+        ├─ 回到底部按钮          ← 维持 absolute 悬浮，位于面板/输入栏上方
+        └─ pendingConfirmation
+              ├─ 存在 → ToolConfirmationDock（替换输入栏，in-flow）
+              │         ├─ kind='confirm' → 标题 + 命令/参数摘要 + 拒绝 / 同意
+              │         ├─ kind='askuser' → AskUserQuestionUI（无框紧凑变体）+ 取消 / 提交
+              │         └─ kind='sandbox-network' → 网络变体卡片（host + 策略模式
+              │                                    + 命令/参数摘要）+ 拒绝 / 同意 **[2026-07-23]**
+              └─ 不存在 → AIInputDock (mode="full")
+```
+
+### 8.3 交互契约
+
+| 场景 | 标题区 | 按钮 | 快捷键 | 确认请求 |
+| --- | --- | --- | --- | --- |
+| 普通工具确认（`confirm`） | `是否允许 I&M 调用 {tool} 工具，{summary}` + 「待授权」徽章 | **拒绝** / **同意** | `Esc` 拒绝、`⌘/Ctrl+⏎` 同意 | `POST /api/claude-agent/tool-confirm` `{approved}` |
+| 用户提问（`askuser`） | `I&M 需要你的回答` + 「待回答」徽章 | **取消** / **提交**（选项表单内） | `Esc` 取消、`⌘/Ctrl+⏎` 提交 | 同上，`approved:true` + `answers` |
+| 沙箱网络请求（`sandbox-network`）**[2026-07-23]** | `是否允许 I&M 通过 {tool} 发起网络请求` + 「待授权」徽章；正文显示目标主机、网络策略（白名单未命中 / 开放网络）与命令/参数摘要；触发源为 can_use_tool 运行时沙箱代理拦截（`SandboxNetworkAccess`）**[2026-07-26]** | **拒绝** / **同意** | `Esc` 拒绝、`⌘/Ctrl+⏎` 同意 | 同上，`{approved}`（本期二元决策，无「记住」） |
+| 编辑器写入工具 | —（不进入确认面板） | 沿用消息列表内 `EditorWriteApprovalUI` | — | 同上 |
+
+- 待确认期间 `AIInputDock` 整体隐藏，确认面板占据输入栏位置；用户做出决策后
+  输入栏立即恢复。回到底部按钮维持 absolute 悬浮，不受替换影响。
+- 按钮**只有**拒绝/同意（或取消/提交）两个选项，不提供「本会话内允许」等
+  第三态；授权粒度与后端 `PreToolUse` 决策保持一致。
+- 面板高度上限 `min(46vh, 24rem)`，超出内部滚动；AskUserQuestion 表单以
+  `compact` 紧凑密度渲染（更小字体、更窄间距），避免面板占满聊天视口。
+- 面板按 `partKey` 作为 React key 挂载：同一确认在被 resolve/超时移除后状态
+  自动复位；多个待确认项串行展示（取消息序最早的一项），与后端一次只阻塞
+  一个 `PreToolUse` 回调的事实对齐。
+- 确认成功后仍调用 `addToolResult` 乐观标记 part 完成，面板随
+  `pendingConfirmation` 变为 null 自动消失、输入栏恢复，消息列表折叠行恢复常态。
+- `input` 尚未就绪（`input-streaming` 早期）时不挂载面板，避免基于半截 JSON
+  渲染表单；下一帧 input 到达后自动出现。
+
+### 8.4 涉及文件
+
+- `frontend/src/components/chat/toolConfirmation.ts`（新增）— `confirmToolCall`
+  请求、`resolveToolName`、`isAskUserQuestionPart`、`resolvePendingToolConfirmation`。
+- `frontend/src/components/chat/ToolConfirmationDock.tsx`（新增）— 确认面板本体。
+- `frontend/src/components/chat/AskUserQuestionUI.tsx` — 新增 `framed` /
+  `showHeader` / `submitLabel` / `cancelLabel` / `compact` props，支持无框紧凑
+  中文按钮变体。
+- `frontend/src/components/chat/ToolMessagePart.tsx` — 移除内联 Approve/Cancel
+  与 AskUserQuestion 渲染路径及 `isManualToolInvocation` prop；保留折叠详情卡与
+  编辑器写入审批 UI。
+- `frontend/src/components/chat/ChatMessageList.tsx` — 待确认 part 渲染为折叠
+  行 + 「待确认」标记。
+- `frontend/src/components/chat/ChatPanel.tsx` — 派生 `pendingConfirmation`，
+  待确认时在输入区容器内用确认面板替换 `AIInputDock`。

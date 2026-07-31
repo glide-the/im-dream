@@ -90,6 +90,40 @@
 #                    workspace or pass cwd/workspace context to the runner.
 # [Sync] 2026-06-25: frontend stop requests cancel the current turn; CancelledError
 #                    now flushes partial assistant parts and closes EventBus with finish.
+# [Sync] 2026-07-04: materialize connector-owned Notion snapshots into the
+#                    workspace-local `.notion/` files before user-message
+#                    assembly so workspace_context can read the canonical files.
+# [Sync] 2026-07-20: claude-plan — add memory-only PlanState on AgentRunState;
+#                    observe tool-input-available for EnterPlanMode/ExitPlanMode
+#                    and emit plan-mode-changed (not collected); wire runner
+#                    on_plan_file_changed to read the plan file (capped by
+#                    INK_AGENT_PLAN_MAX_CONTENT_BYTES) and emit plan-updated
+#                    (not collected); add build_thread_plan_payload() REST
+#                    helper backed by get_plans_dir().
+# [Sync] 2026-07-20: claude-todo — add memory-only TodoState on AgentRunState;
+#                    observe tool-input-available for TodoWrite (v1) and emit
+#                    todo-updated (not collected, capped by
+#                    INK_AGENT_TODO_MAX_ITEMS with truncated:true); wire runner
+#                    on_tasks_changed (v2) to the same frame; add
+#                    build_thread_todos_payload() REST helper backed by
+#                    get_tasks_dir()/read_task_items() with memory fallback.
+# [Sync] 2026-07-23: SandboxPermissionRequest — transparently forward
+#                    confirmationKind/networkRequest from the runner
+#                    confirmation payload onto the SSE tool-approval-request
+#                    frame so the frontend can render the network-variant
+#                    confirmation card
+#                    (claude-agent-sandbox-network-permission-tool.md §5/§5A).
+# [Sync] 2026-07-26: drop the AgentRunOptions sandbox_network_allowed_domains
+#                    pass-through — the PreToolUse network gate was removed as
+#                    wrong-layer duplication; the domains value stays in scope
+#                    only for workspace initialization (get_or_create_workspace
+#                    → CLI sandbox settings.json).  The confirmationKind /
+#                    networkRequest SSE pass-through stays (can_use_tool path).
+# [Sync] 2026-07-26: read system_config sandbox_fs_allowed_write_paths and
+#                    pass it into get_or_create_workspace so per-thread
+#                    settings.json filesystem.allowWrite gains the user's extra
+#                    writable paths (mirrors the sandbox_network_allowed_domains
+#                    plumbing pattern).
 
 """Claude Agent Service — core business logic for Ink & Memory.
 
@@ -108,6 +142,11 @@ SSE event schema (aligned with Pawkeyland)::
     data: {"type": "tool-input-available", "toolCallId": "...", "toolName": "...", "input": {...}}
     data: {"type": "tool-output-available","toolCallId": "...", "output": ..., "isError": false}
     data: {"type": "tool-approval-request","toolCallId": "...", "toolName": "...", "input": {...}}
+    data: {"type": "plan-mode-changed", "planMode": "planning"|"exited", "toolCallId": "..."}
+    data: {"type": "plan-updated", "slug": "...", "fileName": "...", "content": "...",
+           "contentBytes": 1832, "truncated": false, "updatedAt": "..."}
+    data: {"type": "todo-updated", "source": "todo_write"|"task_v2", "todos": [...],
+           "truncated": false, "updatedAt": "..."}
     data: {"type": "message-final",  "text": "...", "usage": {...}, "sessionId": "..."}
     data: {"type": "finish",         "finishReason": "stop"|"error"}
     data: {"type": "error",          "errorText": "..."}
@@ -120,6 +159,8 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, AsyncGenerator, Mapping, Optional
 from uuid import uuid4
 
@@ -127,7 +168,13 @@ import database as _db
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.thread_pool import AgentRunState
-from libs.claude_agent_kit.server.workspace import get_or_create_workspace
+from libs.claude_agent_kit.server.workspace import (
+    get_or_create_workspace,
+    get_plans_dir,
+    get_tasks_dir,
+    get_workspace_root,
+    read_task_items,
+)
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
@@ -158,6 +205,451 @@ _EDITOR_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
 })
 
 _SANDBOX_NETWORK_MODES: frozenset[str] = frozenset({"disabled", "allowlist", "open"})
+
+# ---------------------------------------------------------------------------
+# Plan Mode capture (claude-plan §5.2–§5.5)
+# ---------------------------------------------------------------------------
+
+# Plan Mode tool → plan_mode transition (§5.2 state machine).
+_PLAN_MODE_BY_TOOL: dict[str, str] = {
+    "EnterPlanMode": "planning",
+    "ExitPlanMode": "exited",
+}
+
+_PLAN_MAX_CONTENT_BYTES_DEFAULT: int = 262144
+
+
+def _plan_max_content_bytes() -> int:
+    """Return the plan content cap (bytes) from env config.
+
+    Oversized plan content is truncated in plan-updated frames / REST
+    responses and flagged ``truncated:true`` (claude-plan §5.4).
+    """
+
+    try:
+        raw = os.getenv("INK_AGENT_PLAN_MAX_CONTENT_BYTES", "") or ""
+        value = int(raw) if raw else _PLAN_MAX_CONTENT_BYTES_DEFAULT
+        return value if value > 0 else _PLAN_MAX_CONTENT_BYTES_DEFAULT
+    except (TypeError, ValueError):
+        return _PLAN_MAX_CONTENT_BYTES_DEFAULT
+
+
+@dataclass
+class PlanState:
+    """In-memory Plan Mode state for a thread (claude-plan §5.2).
+
+    Memory-only, attached to the AgentRunState flyweight — the workspace
+    plans directory is the sole persistent layer; refresh/reconnect always
+    rebuilds via the REST endpoint.
+    """
+
+    plan_mode: str = "none"  # "none" | "planning" | "exited"
+    slug: Optional[str] = None
+    file_name: Optional[str] = None
+    updated_at: Optional[str] = None
+    content_bytes: int = 0
+
+
+def _ensure_plan_state(state: Optional[Any]) -> PlanState:
+    """Return the live PlanState for *state*, creating it on first use."""
+
+    plan_state = getattr(state, "plan_state", None) if state is not None else None
+    if plan_state is None:
+        plan_state = PlanState()
+        if state is not None:
+            state.plan_state = plan_state
+    return plan_state
+
+
+def _read_plan_file_payload(path: Path) -> Optional[dict[str, Any]]:
+    """Read a plan markdown file into the plan-updated / REST payload shape.
+
+    Returns ``None`` on IO/encoding errors — callers log and skip the
+    plan-updated emission (claude-plan §5.4 error boundary).  Content is
+    capped at ``INK_AGENT_PLAN_MAX_CONTENT_BYTES`` (default 262144);
+    oversized files are truncated with ``truncated:true`` so the frontend
+    can fetch full content via REST.  ``contentBytes`` always reports the
+    on-disk byte size.
+    """
+
+    try:
+        stat = path.stat()
+        size = stat.st_size
+        cap = _plan_max_content_bytes()
+        with open(path, "rb") as fh:
+            data = fh.read(min(size, cap))
+        updated_at = (
+            datetime.fromtimestamp(stat.st_mtime, timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
+        return {
+            "slug": path.stem,
+            "fileName": path.name,
+            "content": data.decode("utf-8", errors="replace"),
+            "contentBytes": size,
+            "truncated": size > cap,
+            "updatedAt": updated_at,
+        }
+    except (OSError, ValueError):
+        return None
+
+
+def _find_newest_plan_file(plans_dir: Path) -> Optional[Path]:
+    """Return the most recently modified ``.md`` file in *plans_dir*.
+
+    Non-``.md`` suffixes and entries that resolve outside the plans dir
+    (symlink escape) are rejected (claude-plan §5.1 constraints).
+    """
+
+    try:
+        resolved_dir = plans_dir.resolve(strict=False)
+        candidates: list[Path] = []
+        for entry in plans_dir.iterdir():
+            if entry.suffix.lower() != ".md":
+                continue
+            try:
+                resolved = entry.resolve(strict=False)
+                resolved.relative_to(resolved_dir)
+            except (OSError, RuntimeError, ValueError):
+                continue
+            if resolved.is_file():
+                candidates.append(resolved)
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    try:
+        return max(candidates, key=lambda p: p.stat().st_mtime)
+    except OSError:
+        return None
+
+
+def _thread_workspace_exists(thread_id: str) -> bool:
+    """Return True when the per-thread workspace directory exists.
+
+    Uses the same traversal guard as ``get_or_create_workspace``.  A missing
+    workspace means Workspace Mode is disabled (or the thread never ran), so
+    the plan endpoint must not probe the global ``~/.claude/plans``.
+    """
+
+    if not thread_id or "/" in thread_id or "\\" in thread_id or ".." in thread_id:
+        return False
+    try:
+        root = get_workspace_root().resolve(strict=False)
+        workspace = (root / thread_id).resolve(strict=False)
+        workspace.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return workspace.is_dir()
+
+
+def build_thread_plan_payload(thread_id: str, plan_mode: str = "none") -> dict[str, Any]:
+    """Build the ``GET /threads/{thread_id}/plan`` response body (claude-plan §5.5).
+
+    The filesystem is the source of truth: scan ``get_plans_dir(thread_id)``
+    for the newest ``.md`` plan file.  *plan_mode* comes from in-memory run
+    state when the thread is running, else ``"none"``.  Missing workspace
+    (Workspace Mode disabled) → fixed ``exists:false`` + ``plan_mode:"none"``;
+    an existing workspace without plans keeps the in-memory *plan_mode*.
+    """
+
+    payload: dict[str, Any] = {
+        "thread_id": thread_id,
+        "plan_mode": plan_mode or "none",
+        "exists": False,
+        "slug": None,
+        "file_name": None,
+        "content": None,
+        "content_bytes": None,
+        "truncated": False,
+        "updated_at": None,
+    }
+    if not _thread_workspace_exists(thread_id):
+        payload["plan_mode"] = "none"
+        return payload
+    plans_dir = get_plans_dir(thread_id)
+    newest = _find_newest_plan_file(plans_dir) if plans_dir is not None else None
+    if newest is None:
+        return payload
+    data = _read_plan_file_payload(newest)
+    if data is None:
+        logger.warning("build_thread_plan_payload: failed to read plan file %s", newest)
+        return payload
+    payload.update(
+        {
+            "exists": True,
+            "slug": data["slug"],
+            "file_name": data["fileName"],
+            "content": data["content"],
+            "content_bytes": data["contentBytes"],
+            "truncated": data["truncated"],
+            "updated_at": data["updatedAt"],
+        }
+    )
+    return payload
+
+
+async def _emit_plan_updated(
+    queue: Any, plan_state: PlanState, path: Path
+) -> None:
+    """Read *path* and emit a plan-updated frame; update *plan_state*.
+
+    Lifecycle frame — NOT collected into ``collected_parts`` (claude-plan
+    §5.4).  IO/read failures skip the emission and only log.
+    """
+
+    data = _read_plan_file_payload(path)
+    if data is None:
+        logger.warning("plan file read failed; skipping plan-updated: %s", path)
+        return
+    plan_state.slug = data["slug"]
+    plan_state.file_name = data["fileName"]
+    plan_state.updated_at = data["updatedAt"]
+    plan_state.content_bytes = data["contentBytes"]
+    await queue.put(_sse("plan-updated", data))
+
+
+async def _observe_plan_mode_transition(
+    queue: Any,
+    state: Optional[Any],
+    tool_call_id: Optional[str],
+    tool_name: Optional[str],
+) -> None:
+    """Transition PlanState on EnterPlanMode/ExitPlanMode tool-input-available.
+
+    Emits ``plan-mode-changed`` (lifecycle frame — not collected).  On
+    ExitPlanMode also performs the final plan-file read so the panel freezes
+    on the approved version (claude-plan §5.3/§6.2).  Plan mode transitions
+    are decoupled from file reads: a failed read never blocks
+    ``plan-mode-changed``.
+    """
+
+    plan_mode = _PLAN_MODE_BY_TOOL.get(tool_name or "")
+    if plan_mode is None:
+        return
+    plan_state = _ensure_plan_state(state)
+    plan_state.plan_mode = plan_mode
+    await queue.put(
+        _sse("plan-mode-changed", {"planMode": plan_mode, "toolCallId": tool_call_id})
+    )
+    if tool_name == "ExitPlanMode" and state is not None:
+        plans_dir = get_plans_dir(getattr(state, "session_id", "") or "")
+        newest = _find_newest_plan_file(plans_dir) if plans_dir is not None else None
+        if newest is not None:
+            await _emit_plan_updated(queue, plan_state, newest)
+
+
+# ---------------------------------------------------------------------------
+# Todo capture — v1 TodoWrite stream observation + v2 file tasks (claude-todo §5.2–§5.5)
+# ---------------------------------------------------------------------------
+
+_TODO_MAX_ITEMS_DEFAULT: int = 200
+
+_TODO_STATUSES: frozenset[str] = frozenset({"pending", "in_progress", "completed"})
+
+
+def _todo_max_items() -> int:
+    """Return the todo list cap from env config.
+
+    Lists larger than the cap are truncated in todo-updated frames / REST
+    responses and flagged ``truncated:true`` (claude-todo §5.4).
+    """
+
+    try:
+        raw = os.getenv("INK_AGENT_TODO_MAX_ITEMS", "") or ""
+        value = int(raw) if raw else _TODO_MAX_ITEMS_DEFAULT
+        return value if value > 0 else _TODO_MAX_ITEMS_DEFAULT
+    except (TypeError, ValueError):
+        return _TODO_MAX_ITEMS_DEFAULT
+
+
+def _utc_now_iso() -> str:
+    """Return the current UTC time in the SSE/REST ISO-8601 Z format."""
+
+    return (
+        datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
+@dataclass
+class TodoState:
+    """In-memory todo list state for a thread (claude-todo §5.2).
+
+    Memory-only, attached to the AgentRunState flyweight — same pattern as
+    PlanState.  ``source`` records which capture path produced the current
+    list (``"todo_write"`` for v1 stream capture, ``"task_v2"`` for file
+    tasks); a later capture overwrites the earlier one.  There is no v1
+    persistent layer: refresh/reconnect rebuilds v2 from the workspace
+    tasks directory and falls back to this memory state for v1.
+    """
+
+    source: Optional[str] = None  # None | "todo_write" | "task_v2"
+    todos: list = field(default_factory=list)
+    updated_at: Optional[str] = None
+
+
+def _ensure_todo_state(state: Optional[Any]) -> TodoState:
+    """Return the live TodoState for *state*, creating it on first use."""
+
+    todo_state = getattr(state, "todo_state", None) if state is not None else None
+    if todo_state is None:
+        todo_state = TodoState()
+        if state is not None:
+            state.todo_state = todo_state
+    return todo_state
+
+
+def _truncate_todos(todos: list) -> tuple[list, bool]:
+    """Apply the INK_AGENT_TODO_MAX_ITEMS cap; return (items, truncated)."""
+
+    cap = _todo_max_items()
+    if len(todos) <= cap:
+        return list(todos), False
+    return list(todos[:cap]), True
+
+
+async def _emit_todo_updated(queue: Any, todo_state: TodoState) -> None:
+    """Emit a todo-updated frame from *todo_state*.
+
+    Lifecycle frame — NOT collected into ``collected_parts`` (claude-todo
+    §5.4).  Payload: ``source`` / ``todos`` / ``updatedAt``; lists beyond
+    ``INK_AGENT_TODO_MAX_ITEMS`` (default 200) are truncated with
+    ``truncated:true``.
+    """
+
+    todos, truncated = _truncate_todos(todo_state.todos)
+    await queue.put(
+        _sse(
+            "todo-updated",
+            {
+                "source": todo_state.source,
+                "todos": todos,
+                "truncated": truncated,
+                "updatedAt": todo_state.updated_at,
+            },
+        )
+    )
+
+
+async def _observe_todo_write(
+    queue: Any,
+    state: Optional[Any],
+    tool_name: Optional[str],
+    tool_input: Optional[dict[str, Any]],
+) -> None:
+    """Capture the v1 TodoWrite full list from tool-input-available (§5.3).
+
+    ``input.todos`` is the complete replacement list; each entry maps to a
+    TodoItem with ``id`` = 1-based array index, ``content``/``status``/
+    ``activeForm`` taken directly, ``owner`` = None and ``blocked_by`` = [].
+    Schema mismatches skip the emission and only log (§5.4 error boundary).
+    """
+
+    if tool_name != "TodoWrite":
+        return
+    raw_todos = (tool_input or {}).get("todos")
+    if not isinstance(raw_todos, list):
+        logger.warning(
+            "TodoWrite capture skipped: input.todos missing or not a list."
+        )
+        return
+    todos: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_todos):
+        if not isinstance(raw, dict) or not isinstance(raw.get("content"), str):
+            logger.warning(
+                "TodoWrite capture skipped: todos[%d] schema mismatch.", index
+            )
+            return
+        status = str(raw.get("status") or "pending")
+        if status not in _TODO_STATUSES:
+            status = "pending"
+        todos.append(
+            {
+                "id": str(index + 1),
+                "content": raw["content"],
+                "status": status,
+                "active_form": (
+                    str(raw["activeForm"]) if raw.get("activeForm") else None
+                ),
+                "owner": None,
+                "blocked_by": [],
+            }
+        )
+    todo_state = _ensure_todo_state(state)
+    todo_state.source = "todo_write"
+    todo_state.todos = todos
+    todo_state.updated_at = _utc_now_iso()
+    await _emit_todo_updated(queue, todo_state)
+
+
+def build_thread_todos_payload(
+    thread_id: str, todo_state: Optional[TodoState] = None
+) -> dict[str, Any]:
+    """Build the ``GET /threads/{thread_id}/todos`` response body (claude-todo §5.5).
+
+    Priority: when the v2 tasks directory holds task JSON, the filesystem is
+    the source of truth — the list is rebuilt via ``read_task_items`` and the
+    in-memory *todo_state* (when provided) is corrected to match.  Otherwise
+    the in-memory state (v1 TodoWrite capture) is returned.  Missing
+    workspace (Workspace Mode disabled) → fixed ``exists:false``; the global
+    ``~/.claude/tasks`` is never probed.
+    """
+
+    payload: dict[str, Any] = {
+        "thread_id": thread_id,
+        "source": None,
+        "exists": False,
+        "todos": [],
+        "truncated": False,
+        "updated_at": None,
+    }
+    if not _thread_workspace_exists(thread_id):
+        return payload
+
+    tasks_dir = get_tasks_dir(thread_id)
+    if tasks_dir is not None:
+        items, newest_mtime = read_task_items(tasks_dir)
+        if items:
+            updated_at = (
+                datetime.fromtimestamp(newest_mtime, timezone.utc)
+                .isoformat(timespec="milliseconds")
+                .replace("+00:00", "Z")
+                if newest_mtime is not None
+                else _utc_now_iso()
+            )
+            if todo_state is not None:
+                # Filesystem wins — correct the in-memory state (§5.5).
+                todo_state.source = "task_v2"
+                todo_state.todos = items
+                todo_state.updated_at = updated_at
+            todos, truncated = _truncate_todos(items)
+            payload.update(
+                {
+                    "source": "task_v2",
+                    "exists": True,
+                    "todos": todos,
+                    "truncated": truncated,
+                    "updated_at": updated_at,
+                }
+            )
+            return payload
+
+    if todo_state is not None and todo_state.source:
+        todos, truncated = _truncate_todos(todo_state.todos)
+        payload.update(
+            {
+                "source": todo_state.source,
+                "exists": True,
+                "todos": todos,
+                "truncated": truncated,
+                "updated_at": todo_state.updated_at,
+            }
+        )
+    return payload
+
 
 
 def _coerce_sandbox_network_mode(value: object) -> str:
@@ -378,6 +870,7 @@ class ClaudeAgentService:
         workspace_enabled = True
         sandbox_network_mode = "allowlist"
         sandbox_network_allowed_domains: list[str] = []
+        sandbox_fs_allowed_write_paths: list[str] = []
         try:
             sys_cfg = _db.get_system_config(int(request.user_id))
             system_config_loaded = True
@@ -398,6 +891,9 @@ class ClaudeAgentService:
             )
             sandbox_network_allowed_domains = _coerce_string_list(
                 sys_cfg.get("sandbox_network_allowed_domains")
+            )
+            sandbox_fs_allowed_write_paths = _coerce_string_list(
+                sys_cfg.get("sandbox_fs_allowed_write_paths")
             )
         except Exception as e:
             logger.warning(
@@ -443,6 +939,7 @@ class ClaudeAgentService:
                 sandbox_enabled=True,
                 sandbox_network_mode=sandbox_network_mode,
                 sandbox_network_allowed_domains=sandbox_network_allowed_domains,
+                sandbox_fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
             )
             cwd = str(workspace_path)
             if request.cwd and os.path.abspath(request.cwd) != os.path.abspath(cwd):
@@ -453,6 +950,40 @@ class ClaudeAgentService:
                     cwd,
                 )
             state.with_cwd(cwd)
+
+            try:
+                from notion import build_notion_facade  # noqa: PLC0415
+                from notion.errors import NotionConnectorNotFoundError  # noqa: PLC0415
+            except Exception as exc:  # noqa: BLE001
+                # Keep the turn alive even when Notion is not configured or the
+                # package is temporarily unavailable.
+                logger.debug(
+                    "Notion workspace materialization skipped for session_id=%s: %s",
+                    state.session_id,
+                    exc,
+                )
+            else:
+                try:
+                    notion_facade = build_notion_facade(int(request.user_id))
+                    notion_facade.materialize_workspace(
+                        workspace_path,
+                        workspace_id=state.session_id,
+                    )
+                except NotionConnectorNotFoundError:
+                    try:
+                        from notion import clear_workspace_snapshot  # noqa: PLC0415
+
+                        clear_workspace_snapshot(workspace_path)
+                    except Exception:
+                        pass
+                except Exception as exc:  # noqa: BLE001
+                    # Keep the turn alive even when Notion is not configured or the
+                    # snapshot layer is temporarily unavailable.
+                    logger.debug(
+                        "Notion workspace materialization skipped for session_id=%s: %s",
+                        state.session_id,
+                        exc,
+                    )
         else:
             cwd = ""
             if request.cwd:
@@ -631,6 +1162,8 @@ class ClaudeAgentService:
             ),
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
             on_error=self._make_error_cb(queue),
+            on_plan_file_changed=self._make_plan_file_changed_cb(queue, execution.state),
+            on_tasks_changed=self._make_tasks_changed_cb(queue, execution.state),
         )
 
         try:
@@ -968,6 +1501,8 @@ class ClaudeAgentService:
                     evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}
                     await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}))
                     turn_ctx.collected_parts.append(evt)
+                    await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
+                    await _observe_todo_write(queue, state, tool_name, payload.input)
                 return
 
             # --- tool_input_delta: streamed tool JSON input for live previews ---
@@ -993,6 +1528,8 @@ class ClaudeAgentService:
                     evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}
                     await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}))
                     turn_ctx.collected_parts.append(evt)
+                    await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
+                    await _observe_todo_write(queue, state, tool_name, payload.input or {})
                 return
 
             # --- tool_result: tool execution result ---
@@ -1106,7 +1643,16 @@ class ClaudeAgentService:
                 turn_ctx.collected_parts.append(evt)
 
             # Step 2: emit tool-approval-request (lifecycle frame — not collected).
-            await queue.put(_sse("tool-approval-request", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
+            # SandboxPermissionRequest frames carry the sandbox_network
+            # discriminator + networkRequest metadata so the frontend renders
+            # the network-variant confirmation card; generic confirmations omit
+            # both keys (backward compatible).
+            approval_event: dict[str, Any] = {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
+            if payload.get("confirmationKind"):
+                approval_event["confirmationKind"] = payload["confirmationKind"]
+            if isinstance(payload.get("networkRequest"), dict):
+                approval_event["networkRequest"] = payload["networkRequest"]
+            await queue.put(_sse("tool-approval-request", approval_event))
 
             # Step 3 & 4: block until user responds.
             try:
@@ -1133,6 +1679,44 @@ class ClaudeAgentService:
             await queue.put(_sse("error", {"errorText": _format_exception_for_sse(exc)}))
 
         return on_error
+
+    @staticmethod
+    def _make_plan_file_changed_cb(queue: asyncio.Queue, state: Optional[Any]):
+        """Build the runner on_plan_file_changed callback (claude-plan §5.3).
+
+        Fired by the runner PostToolUse hook (debounced per file per turn)
+        after a built-in Write/Edit/MultiEdit lands in the thread workspace
+        plans dir.  Reads the plan file and emits plan-updated; IO failures
+        skip the emission and only log.
+        """
+
+        async def on_plan_file_changed(file_path: str) -> None:
+            plan_state = _ensure_plan_state(state)
+            await _emit_plan_updated(queue, plan_state, Path(file_path))
+
+        return on_plan_file_changed
+
+    @staticmethod
+    def _make_tasks_changed_cb(queue: asyncio.Queue, state: Optional[Any]):
+        """Build the runner on_tasks_changed callback (claude-todo §5.3).
+
+        Fired by the runner PostToolUse hook (debounced per tasks dir per
+        turn) after TaskCreate/TaskUpdate; the payload is the full TodoItem
+        list already derived from the tasks dir.  Emits todo-updated with
+        source "task_v2"; the frame is never collected into collected_parts.
+        """
+
+        async def on_tasks_changed(todos: list) -> None:
+            if not isinstance(todos, list):
+                logger.warning("on_tasks_changed: non-list payload; skipping emit.")
+                return
+            todo_state = _ensure_todo_state(state)
+            todo_state.source = "task_v2"
+            todo_state.todos = todos
+            todo_state.updated_at = _utc_now_iso()
+            await _emit_todo_updated(queue, todo_state)
+
+        return on_tasks_changed
 
 
 

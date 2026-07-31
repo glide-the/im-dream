@@ -1,6 +1,8 @@
-// [Input] Consume WorkspaceContext, dashboard file/nav/quick-action components, AIInputDock, ChatPanel, auth token, and AI SDK message types.
+// [Input] Consume WorkspaceContext, AIInputDock, ChatPanel, ConnectorLandingPanel, auth token, and AI SDK message types.
 //         /api/claude-agent/threads/{id}/status, reconnectStreamNonce to ChatPanel.
-// [Output] Render chat workspace with lazy thread creation, history/file sidebars, quick actions, and ChatPanel.
+// [Output] Render the chat workspace with lazy thread creation, a fully visible WorkspaceTabBar (聊天历史/资源连接器)
+//          under the composer, history/file sidebars, a single pill quick-action strip, ChatPanel, and the
+//          ResourceConnectorTabPanel (ConnectorLandingPanel) that jumps to Settings resource links for management.
 //          When /status reports running, bump reconnectStreamNonce so ChatPanel attaches SSE stream.
 // [Pos] chat-workspace view node in frontend/src/components/chat
 // [Sync] 2026-05-25: stop passing a Settings navigation callback to VerticalNav after removing the left-nav Settings button.
@@ -12,7 +14,7 @@
 // [Sync] 2026-05-29: make status bar and collapsible sidebar-panel chrome theme-adaptive.
 // [Sync] 2026-05-29: move thread list into VerticalNav expanded sidebar; remove separate thread sidebar and flyout; remove header bar; float share+more buttons.
 // [Sync] 2026-05-30: accept activeVoice prop to display deck/voice badge in top-right and forward system prompt to ChatPanel.
-// [Sync] 2026-06-01: stop creating a thread on first Chat view mount; create lazily on first send, quick action, or explicit New Chat.
+// [Sync] 2026-06-01: stop creating a thread on first Chat view mount; create lazily on first send or quick action.
 // [Sync] 2026-06-01: add delete button to thread list items; hover shows × button; calls DELETE /api/claude-agent/threads/{id}; clears workspace when active thread is deleted.
 // [Sync] 2026-06-09: SSE reconnect — fetch /status on thread switch; trigger stream reconnect via reconnectStreamNonce.
 // [Sync] 2026-06-09: stable onReconnectComplete callback so editorState re-renders do not abort SSE stream.
@@ -29,12 +31,46 @@
 //                    now decoupled into a dialog.
 // [Sync] 2026-06-28: remove the New Chat row from the history search dialog;
 //                    top-level Chat chrome already owns new thread creation.
-import { useMemo, useState, useEffect, useCallback, useRef } from 'react';
+// [Sync] 2026-07-07: add the history/connector landing tabs under the AI composer and temporarily embed the connector workbench below the chat entry point.
+// [Sync] 2026-07-07: keep the landing connector workbench inside the viewport by tightening the Chat shell flex/min-height chain.
+// [Sync] 2026-07-07: remove the duplicate landing tab pill row once the app navigation owns history/connector switching.
+// [Sync] 2026-07-08: replace the Chat-embedded connector workbench with a lightweight landing panel; Settings now owns full connector management.
+// [Sync] 2026-07-08: replace text-only "加载历史中..." states with skeleton-screen placeholders,
+//                    aligning with 《链接器概念的交互设计稿》 Chat 入口页骨架屏。
+// [Sync] 2026-07-08: add a fully visible `聊天历史`/`资源连接器` pill switcher (WorkspaceTabBar) below
+//                    the composer.
+// [Sync] 2026-07-08: route connector-card / CTA selection to Settings resource-link management instead
+//                    of opening an in-Chat config page, matching the latest connector interaction draft.
+// [Sync] 2026-07-08: align the landing tab content width with the Chat composer/tab bar and remove
+//                    redundant history-panel outer chrome.
+// [Sync] 2026-07-09: lift history search and connector filter/sort controls into the same control
+//                    row as WorkspaceTabBar instead of rendering them inside tab content panels.
+// [Sync] 2026-07-09: refresh the default history list every time the user switches back to
+//                    `聊天历史` or lands on the Chat history panel, so empty-state rendering never
+//                    relies on stale thread data.
+// [Sync] 2026-07-09: make the top-level 新建 action return to the default landing state without
+//                    pre-creating an empty backend thread.
+// [Sync] 2026-07-09: soften WorkspaceTabBar tab outlines so active state uses quiet surface
+//                    contrast instead of a heavy focus-colored border.
+// [Sync] 2026-07-09: page default history lists via scroll-triggered limit/offset
+//                    fetches instead of loading every thread up front.
+// [Sync] 2026-07-20: mount the claude-plan PlanPanel beside the top-right floating
+//                    control bar and hydrate the plan store alongside the thread
+//                    status check so refresh/reconnect restores the panel (§5.6).
+// [Sync] 2026-07-20: 交互方案变更 — 移除独立挂载的常驻计划面板，改为在浮动控制栏内
+//                    「新建对话」按钮旁渲染 PlanButton（有计划时才出现，点击弹层展示）。
+// [Sync] 2026-07-20: claude-todo §5.6 — 与 hydrateThreadPlan 并行水合 useThreadTodos
+//                    store，刷新/重连后恢复 PlanButton 弹层「待办」分区。
+// [Sync] 2026-07-20: i18n — route all chat UI copy (quick actions, history sidebar,
+//                    search dialog, WorkspaceTabBar, aria labels) through the chat
+//                    namespace in i18n.ts (en + zh); date group/label helpers now take
+//                    t() and format via getDateLocale(i18n.language).
+import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
-import QuickActionCard from '../dashboard/QuickActionCard';
-import { QUICK_ACTION_CARDS, type QuickActionCardItem } from '../dashboard/const';
 import AIInputDock from './AIInputDock';
 import ChatPanel from './ChatPanel';
 import {
@@ -44,10 +80,18 @@ import {
 } from './AIInputDock.helpers';
 import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
-import { IconClock, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
+import ChatShellError, { type ChatLandingTab } from './ChatShellError';
+import PlanButton from './PlanPanel';
+import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
+import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
+import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
+import ConnectorLandingPanel from './ConnectorLandingPanel';
+import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
+import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
+import { getDateLocale } from '../../i18n';
 
 interface ChatThread {
   id: string;
@@ -78,16 +122,90 @@ interface ChatViewProps {
   /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
   requestedThreadId?: string;
   onNewChat?: () => void;
-  quickActions?: QuickActionCardItem[];
+  quickActions?: QuickActionStripItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
   editorState?: Record<string, unknown> | null;
   /** Called when an editor write tool is confirmed so the Writing view can reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Active deck / voice info — displayed in the top-right badge and forwarded to the backend as voice context. */
   activeVoice?: ActiveChatVoice;
+  /** Mobile layout hint used by the connector landing panel and Settings-reused manager. */
+  isMobile?: boolean;
+  /** Controls the default landing tab when no thread is open. */
+  landingTab?: ChatLandingTab;
+  /** Opens Settings and focuses the resource-link connector section. */
+  onOpenConnectorSettings?: () => void;
+}
+
+type ChatViewContentProps = Omit<ChatViewProps, 'landingTab' | 'isMobile'> & {
+  landingTab: ChatLandingTab;
+  onLandingTabChange: (tab: ChatLandingTab) => void;
+};
+
+interface ChatShellBoundaryProps {
+  children: ReactNode;
+  fallback: (error: Error) => ReactNode;
+}
+
+interface ChatShellBoundaryState {
+  error: Error | null;
+}
+
+class ChatShellBoundary extends Component<ChatShellBoundaryProps, ChatShellBoundaryState> {
+  constructor(props: ChatShellBoundaryProps) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  static getDerivedStateFromError(error: Error): ChatShellBoundaryState {
+    return { error };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error('Chat shell render error:', error);
+  }
+
+  render() {
+    const { children, fallback } = this.props;
+    const { error } = this.state;
+
+    if (error) {
+      return fallback(error);
+    }
+
+    return children;
+  }
+}
+
+function buildDefaultLandingQuickActions(t: TFunction): QuickActionStripItem[] {
+  return [
+    {
+      id: 'generate-image',
+      label: t('chat.quickActions.generateImage.label'),
+      prompt: t('chat.quickActions.generateImage.prompt'),
+      icon: 'image',
+      description: t('chat.quickActions.generateImage.description'),
+    },
+    {
+      id: 'write-edit',
+      label: t('chat.quickActions.writeEdit.label'),
+      prompt: t('chat.quickActions.writeEdit.prompt'),
+      icon: 'edit',
+      description: t('chat.quickActions.writeEdit.description'),
+    },
+    {
+      id: 'find-info',
+      label: t('chat.quickActions.findInfo.label'),
+      prompt: t('chat.quickActions.findInfo.prompt'),
+      icon: 'search',
+      description: t('chat.quickActions.findInfo.description'),
+    },
+  ];
 }
 
 const THREAD_SEARCH_DEBOUNCE_MS = 180;
+const THREAD_HISTORY_PAGE_SIZE = 20;
+const THREAD_HISTORY_FETCH_LIMIT = THREAD_HISTORY_PAGE_SIZE + 1;
 
 function parseThreadDate(value: string): Date | null {
   const date = new Date(value.includes('T') ? value : value.replace(' ', 'T'));
@@ -103,24 +221,24 @@ function dayDiffFromToday(value: string): number | null {
   return Math.floor((todayStart - dateStart) / 86400000);
 }
 
-function formatThreadDateLabel(value: string): string {
+function formatThreadDateLabel(value: string, t: TFunction, language?: string): string {
   const diff = dayDiffFromToday(value);
-  if (diff === 0) return '今天';
-  if (diff === 1) return '昨天';
-  if (diff !== null && diff > 1 && diff < 7) return `${diff} 天前`;
+  if (diff === 0) return t('chat.dateGroup.today');
+  if (diff === 1) return t('chat.dateGroup.yesterday');
+  if (diff !== null && diff > 1 && diff < 7) return t('chat.dateGroup.daysAgo', { count: diff });
 
   const date = parseThreadDate(value);
   if (!date) return '';
-  return new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(date);
+  return new Intl.DateTimeFormat(getDateLocale(language), { month: 'numeric', day: 'numeric' }).format(date);
 }
 
-function getThreadDateGroup(value: string): string {
+function getThreadDateGroup(value: string, t: TFunction): string {
   const diff = dayDiffFromToday(value);
-  if (diff === 0) return '今天';
-  if (diff === 1) return '昨天';
-  if (diff !== null && diff > 1 && diff < 7) return '前 7 天';
-  if (diff !== null && diff < 30) return '前 30 天';
-  return '更早';
+  if (diff === 0) return t('chat.dateGroup.today');
+  if (diff === 1) return t('chat.dateGroup.yesterday');
+  if (diff !== null && diff > 1 && diff < 7) return t('chat.dateGroup.last7Days');
+  if (diff !== null && diff < 30) return t('chat.dateGroup.last30Days');
+  return t('chat.dateGroup.earlier');
 }
 
 async function createThread(): Promise<string | null> {
@@ -138,6 +256,8 @@ interface ThreadSearchParams {
   query?: string;
   searchScope?: 'all' | 'title' | 'messages';
   retrievalMode?: 'fuzzy' | 'auto' | 'vector';
+  limit?: number;
+  offset?: number;
 }
 
 async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread[]> {
@@ -148,6 +268,12 @@ async function fetchThreads(params: ThreadSearchParams = {}): Promise<ChatThread
       search.set('query', query);
       search.set('search_scope', params.searchScope ?? 'all');
       search.set('retrieval_mode', params.retrievalMode ?? 'fuzzy');
+    }
+    if (typeof params.limit === 'number') {
+      search.set('limit', String(params.limit));
+    }
+    if (typeof params.offset === 'number' && params.offset > 0) {
+      search.set('offset', String(params.offset));
     }
     const suffix = search.toString() ? `?${search.toString()}` : '';
     const res = await fetch(`${API_BASE}/api/claude-agent/threads${suffix}`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
@@ -220,11 +346,15 @@ function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
   onNewChat,
-  quickActions = QUICK_ACTION_CARDS,
+  quickActions,
   editorState,
   onEditorWriteConfirmed,
   activeVoice,
-}: ChatViewProps) {
+  landingTab,
+  onLandingTabChange,
+  onOpenConnectorSettings,
+}: ChatViewContentProps) {
+  const { t, i18n } = useTranslation();
   const { workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
@@ -236,6 +366,8 @@ function ChatViewContent({
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
+  const [isLoadingMoreThreads, setIsLoadingMoreThreads] = useState(false);
+  const [hasMoreThreads, setHasMoreThreads] = useState(false);
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
@@ -245,6 +377,7 @@ function ChatViewContent({
   const [threadSearchQuery, setThreadSearchQuery] = useState('');
   const [threadSearchResults, setThreadSearchResults] = useState<ChatThread[]>([]);
   const threadFetchRequestSeqRef = useRef(0);
+  const threadLoadMoreInFlightRef = useRef(false);
   const threadSearchRequestSeqRef = useRef(0);
   const threadSearchInputRef = useRef<HTMLInputElement | null>(null);
   const [isSearchingThreads, setIsSearchingThreads] = useState(false);
@@ -258,17 +391,75 @@ function ChatViewContent({
   const reloadThreads = useCallback(async () => {
     const requestSeq = threadFetchRequestSeqRef.current + 1;
     threadFetchRequestSeqRef.current = requestSeq;
+    threadLoadMoreInFlightRef.current = false;
     setIsLoadingThreads(true);
-    const list = await fetchThreads();
-    if (requestSeq !== threadFetchRequestSeqRef.current) return;
-    setThreads(list);
-    setIsLoadingThreads(false);
+    setIsLoadingMoreThreads(false);
+    setHasMoreThreads(false);
+    try {
+      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset: 0 });
+      if (requestSeq !== threadFetchRequestSeqRef.current) return;
+      setThreads(list.slice(0, THREAD_HISTORY_PAGE_SIZE));
+      setHasMoreThreads(list.length > THREAD_HISTORY_PAGE_SIZE);
+    } finally {
+      if (requestSeq === threadFetchRequestSeqRef.current) {
+        setIsLoadingThreads(false);
+      }
+    }
   }, []);
+
+  const loadMoreThreads = useCallback(async () => {
+    if (isLoadingThreads || isLoadingMoreThreads || threadLoadMoreInFlightRef.current || !hasMoreThreads) return;
+
+    const requestSeq = threadFetchRequestSeqRef.current;
+    const offset = threads.length;
+    threadLoadMoreInFlightRef.current = true;
+    setIsLoadingMoreThreads(true);
+    try {
+      const list = await fetchThreads({ limit: THREAD_HISTORY_FETCH_LIMIT, offset });
+      if (requestSeq !== threadFetchRequestSeqRef.current) return;
+      const existingIds = new Set(threads.map((thread) => thread.id));
+      const nextPage = list
+        .slice(0, THREAD_HISTORY_PAGE_SIZE)
+        .filter((thread) => !existingIds.has(thread.id));
+      if (nextPage.length === 0) {
+        setHasMoreThreads(false);
+        return;
+      }
+      setThreads((prev) => {
+        const latestExistingIds = new Set(prev.map((thread) => thread.id));
+        const latestNextPage = list
+          .slice(0, THREAD_HISTORY_PAGE_SIZE)
+          .filter((thread) => !latestExistingIds.has(thread.id));
+        return latestNextPage.length > 0 ? [...prev, ...latestNextPage] : prev;
+      });
+      setHasMoreThreads(list.length > THREAD_HISTORY_PAGE_SIZE);
+    } finally {
+      if (requestSeq === threadFetchRequestSeqRef.current) {
+        threadLoadMoreInFlightRef.current = false;
+        setIsLoadingMoreThreads(false);
+      }
+    }
+  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads, threads]);
+
+  const handleThreadListScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
+    if (isLoadingThreads || isLoadingMoreThreads || !hasMoreThreads) return;
+
+    const target = event.currentTarget;
+    const remaining = target.scrollHeight - target.scrollTop - target.clientHeight;
+    if (remaining <= 48) {
+      void loadMoreThreads();
+    }
+  }, [hasMoreThreads, isLoadingMoreThreads, isLoadingThreads, loadMoreThreads]);
 
   useEffect(() => {
     if (!threadSidebarOpen) return;
     void reloadThreads();
   }, [threadSidebarOpen, reloadThreads]);
+
+  useEffect(() => {
+    if (activeThreadId || landingTab !== 'history') return;
+    void reloadThreads();
+  }, [activeThreadId, landingTab, reloadThreads]);
 
   useEffect(() => {
     if (!threadSearchOpen) {
@@ -331,6 +522,7 @@ function ChatViewContent({
     setIsLoadingMessages(true);
     setActiveThreadId(requestedThreadId);
     setHasConversationStarted(true);
+    onLandingTabChange('history');
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
@@ -359,6 +551,11 @@ function ChatViewContent({
       if (status?.running) {
         setReconnectStreamNonce((value) => value + 1);
       }
+
+      // claude-plan §5.6: 初始加载/重连时经 REST 水合 plan store，恢复 PlanPanel。
+      void hydrateThreadPlan(activeThreadId);
+      // claude-todo §5.6: 并行水合 todos store，恢复弹层「待办」分区。
+      void hydrateThreadTodos(activeThreadId);
     })();
 
     return () => {
@@ -386,12 +583,13 @@ function ChatViewContent({
     setIsLoadingMessages(false);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
+    onLandingTabChange('history');
     setQueuedPrompt(prompt);
     setQueuedAttachments(attachments);
     setQueuedToolChoice(toolChoice);
     setQueuedPromptNonce((value) => value + 1);
     void reloadThreads();
-  }, [reloadThreads]);
+  }, [onLandingTabChange, reloadThreads]);
 
   const startThreadWithQueuedSend = useCallback(async (
     message: string,
@@ -405,37 +603,30 @@ function ChatViewContent({
     const id = await createThread();
     setIsCreatingThread(false);
     if (!id) {
-      setDraftInputError('创建对话失败，请稍后再试。');
+      setDraftInputError(t('chat.history.createFailed'));
       return;
     }
 
     queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
-  }, [isCreatingThread, queuePromptForThread]);
+  }, [isCreatingThread, queuePromptForThread, t]);
 
-  const handleNewChat = useCallback(async () => {
+  const handleNewChat = useCallback(() => {
     if (isCreatingThread) return;
 
     setDraftInputError(null);
-    setIsCreatingThread(true);
-    const id = await createThread();
-    setIsCreatingThread(false);
-    if (id) {
-      // Reset messages before switching so the new ChatPanel (remounted via
-      // key={activeThreadId}) never sees stale messages from the previous thread.
-      setThreadMessages(null);
-      setIsLoadingMessages(false);
-      setActiveThreadId(id);
-      setHasConversationStarted(false);
-      setQueuedPrompt('');
-      setQueuedAttachments([]);
-      setQueuedToolChoice('auto');
-      void reloadThreads();
-    }
-    if (!id) {
-      setDraftInputError('创建对话失败，请稍后再试。');
-    }
+    setThreadMessages(null);
+    setIsLoadingMessages(false);
+    setActiveThreadId(null);
+    setHasConversationStarted(false);
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+    setThreadSidebarOpen(false);
+    setThreadSearchOpen(false);
+    onLandingTabChange('history');
+    void reloadThreads();
     onNewChat?.();
-  }, [isCreatingThread, onNewChat, reloadThreads]);
+  }, [isCreatingThread, onLandingTabChange, onNewChat, reloadThreads]);
 
   const handleSelectThread = useCallback((threadId: string) => {
     // Reset messages synchronously so the incoming ChatPanel (remounted via
@@ -445,6 +636,7 @@ function ChatViewContent({
     setIsLoadingMessages(true);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
+    onLandingTabChange('history');
     setThreadSidebarOpen(false);
     setThreadSearchOpen(false);
     // Clear any pending queued prompt so the remounted ChatPanel doesn't
@@ -453,7 +645,18 @@ function ChatViewContent({
     setQueuedPrompt('');
     setQueuedAttachments([]);
     setQueuedToolChoice('auto');
-  }, []);
+  }, [onLandingTabChange]);
+
+  const handleOpenConnectorSettings = useCallback(() => {
+    onOpenConnectorSettings?.();
+  }, [onOpenConnectorSettings]);
+
+  const handleSelectWorkspaceTab = useCallback((tab: ChatLandingTab) => {
+    onLandingTabChange(tab);
+    if (tab === 'history') {
+      void reloadThreads();
+    }
+  }, [onLandingTabChange, reloadThreads]);
 
   const handleShare = useCallback(async () => {
     try {
@@ -484,15 +687,17 @@ function ChatViewContent({
     setThreads((prev) => prev.filter((t) => t.id !== threadId));
   }, [deletingThreadId, activeThreadId]);
 
-  const quickActionsGrid = useMemo(() => quickActions.length > 0, [quickActions.length]);
+  const defaultLandingQuickActions = useMemo(() => buildDefaultLandingQuickActions(t), [t]);
+  const landingQuickActions = quickActions && quickActions.length > 0 ? quickActions : defaultLandingQuickActions;
   const visibleThreads = threads;
   const trimmedThreadSearchQuery = threadSearchQuery.trim();
+  const showLandingQuickActions = landingQuickActions.length > 0 && !hasConversationStarted;
   const defaultThreadGroups = useMemo(() => {
     const groups: Array<{ label: string; threads: ChatThread[] }> = [];
     const byLabel = new Map<string, ChatThread[]>();
 
     threads.forEach((thread) => {
-      const label = getThreadDateGroup(thread.updated_at);
+      const label = getThreadDateGroup(thread.updated_at, t);
       if (!byLabel.has(label)) {
         byLabel.set(label, []);
         groups.push({ label, threads: byLabel.get(label) ?? [] });
@@ -501,11 +706,11 @@ function ChatViewContent({
     });
 
     return groups;
-  }, [threads]);
+  }, [threads, t]);
 
   return (
-      <div style={{ position: 'relative', display: 'flex', height: '100%', overflow: 'hidden', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <main style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
+        <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {/* 浮动操作按钮区 – 右上角：卡组信息 / 新建 / 更多（含下拉菜单） */}
           <div style={{ position: 'absolute', top: '0.65rem', right: '0.75rem', zIndex: 20, display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
             {/* 当前 Deck Voice 徽标 */}
@@ -549,13 +754,16 @@ function ChatViewContent({
               onClick={() => void handleNewChat()}
               disabled={isCreatingThread}
               style={{ height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: 'transparent', color: isCreatingThread ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isCreatingThread ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.35rem', padding: '0 0.55rem', fontSize: '0.82rem', opacity: isCreatingThread ? 0.6 : 1, transition: 'background 0.14s ease, color 0.14s ease' }}
-              title="新建对话"
+              title={t('chat.history.newChat')}
               onMouseEnter={(e) => { if (!isCreatingThread) { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; } }}
               onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isCreatingThread ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
             >
               <IconPlus style={{ width: '0.95rem', height: '0.95rem' }} />
-              <span>{isCreatingThread ? '创建中' : '新建'}</span>
+              <span>{isCreatingThread ? t('chat.history.creating') : t('chat.history.newShort')}</span>
             </button>
+
+            {/* claude-plan 计划按钮 – 仅当计划被触发或存在计划文件时渲染；点击切换锚定弹层 */}
+            {activeThreadId ? <PlanButton threadId={activeThreadId} /> : null}
 
             {/* 更多 */}
             <div style={{ position: 'relative' }}>
@@ -563,7 +771,7 @@ function ChatViewContent({
                 type="button"
                 onClick={() => setMoreMenuOpen((v) => !v)}
                 style={{ width: '2rem', height: '2rem', border: '1px solid transparent', borderRadius: '0.55rem', background: moreMenuOpen ? 'var(--color-bg-surface)' : 'transparent', color: moreMenuOpen ? 'var(--color-text-primary)' : 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center', transition: 'background 0.14s ease, color 0.14s ease' }}
-                title="更多"
+                title={t('chat.history.more')}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
                 onMouseLeave={(e) => { if (!moreMenuOpen) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; } }}
               >
@@ -578,11 +786,18 @@ function ChatViewContent({
                   <div style={{ position: 'absolute', top: '2.4rem', right: 0, zIndex: 20, minWidth: '10rem', padding: '0.35rem', border: '1px solid var(--color-border-paper)', borderRadius: '0.85rem', background: 'var(--color-bg-surface-solid)', boxShadow: '0 8px 24px var(--color-shadow-medium)', display: 'flex', flexDirection: 'column', gap: '0.05rem' }}>
                     <button
                       type="button"
-                      onClick={() => { setThreadSidebarOpen((v) => !v); setMoreMenuOpen(false); }}
+                      onClick={() => {
+                        if (activeThreadId) {
+                          setThreadSidebarOpen((v) => !v);
+                        } else {
+                          onLandingTabChange('history');
+                        }
+                        setMoreMenuOpen(false);
+                      }}
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: threadSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                     >
                       <IconClock style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                      <span>历史对话</span>
+                      <span>{t('chat.history.title')}</span>
                     </button>
                     {workspaceEnabled ? (
                       <button
@@ -591,7 +806,7 @@ function ChatViewContent({
                         style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: fileSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                       >
                         <IconFolder style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                        <span>工作空间</span>
+                        <span>{t('chat.history.workspace')}</span>
                       </button>
                     ) : null}
                     <div style={{ height: '1px', background: 'var(--color-border-paper)', margin: '0.2rem 0.4rem' }} />
@@ -601,7 +816,7 @@ function ChatViewContent({
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                     >
                       <IconShare style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                      <span>{shareCopied ? '已复制链接' : '分享'}</span>
+                      <span>{shareCopied ? t('chat.history.linkCopied') : t('chat.history.share')}</span>
                     </button>
                   </div>
                 </>
@@ -609,31 +824,9 @@ function ChatViewContent({
             </div>
           </div>
 
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden' }}>
-            {quickActionsGrid && !hasConversationStarted ? (
-              <div style={{ display: 'grid', gap: '0.75rem', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', flexShrink: 0 }}>
-                {quickActions.map((item) => (
-                  <QuickActionCard
-                    key={item.title}
-                    item={item}
-                    onClick={(prompt) => {
-                      if (activeThreadId) {
-                        setHasConversationStarted(true);
-                        setQueuedPrompt(prompt);
-                        setQueuedAttachments([]);
-                        setQueuedToolChoice('auto');
-                        setQueuedPromptNonce((value) => value + 1);
-                        return;
-                      }
-                      void startThreadWithQueuedSend(prompt);
-                    }}
-                  />
-                ))}
-              </div>
-            ) : null}
-
-            <section style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {activeThreadId ? (
+          <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden', boxSizing: 'border-box' }}>
+            <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              {activeThreadId && landingTab === 'history' ? (
                 <ChatPanel
                   key={activeThreadId}
                   threadId={activeThreadId}
@@ -655,22 +848,224 @@ function ChatViewContent({
                   }}
                 />
               ) : (
-                <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', justifyContent: 'flex-end', overflow: 'hidden' }}>
-                  {draftInputError ? (
-                    <div style={{ margin: '0 0 0.75rem', borderRadius: '0.75rem', border: '1px solid color-mix(in srgb, var(--color-state-error) 24%, transparent)', background: 'color-mix(in srgb, var(--color-state-error) 8%, var(--color-bg-paper))', color: 'var(--color-state-error)', padding: '0.65rem 0.85rem', fontSize: '0.84rem' }}>
-                      {draftInputError}
+                <div style={{ display: 'flex', minHeight: 0, minWidth: 0, flex: 1, flexDirection: 'column', gap: '0.9rem', overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', minHeight: 0, minWidth: 0, flex: 1, flexDirection: 'column', gap: '0.75rem', overflow: 'hidden' }}>
+                    {draftInputError ? (
+                      <div style={{ margin: '0 auto', width: '100%', maxWidth: '52rem', borderRadius: '0.9rem', border: '1px solid color-mix(in srgb, var(--color-state-error) 24%, transparent)', background: 'color-mix(in srgb, var(--color-state-error) 8%, var(--color-bg-paper))', color: 'var(--color-state-error)', padding: '0.7rem 0.9rem', fontSize: '0.84rem' }}>
+                        {draftInputError}
+                      </div>
+                    ) : null}
+                    <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, paddingBottom: '0.25rem' }}>
+                      <AIInputDock
+                        onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
+                          void startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
+                        }}
+                        placeholder="Ask Ink & Memory…"
+                        disabled={isCreatingThread}
+                        loading={isCreatingThread}
+                        mode="full"
+                      />
                     </div>
-                  ) : null}
-                  <div style={{ position: 'relative', zIndex: 10, width: '100%', margin: '0.75rem 0 0', flexShrink: 0, paddingBottom: 'calc(env(safe-area-inset-bottom) + 0.5rem)' }}>
-                    <AIInputDock
-                      onSendMessage={(message, uploadedFiles = [], toolChoice = 'auto') => {
-                        void startThreadWithQueuedSend(message, uploadedFiles, toolChoice);
-                      }}
-                      placeholder="Ask Ink & Memory…"
-                      disabled={isCreatingThread}
-                      loading={isCreatingThread}
-                      mode="full"
-                    />
+
+                    {showLandingQuickActions ? (
+                      <div style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0 }}>
+                        <QuickActionStrip
+                          items={landingQuickActions}
+                          onSelect={(item) => {
+                            void startThreadWithQueuedSend(item.prompt);
+                          }}
+                        />
+                      </div>
+                    ) : null}
+
+                    <div style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <div
+                        role="tablist"
+                        aria-label={t('chat.tabs.switcherAria')}
+                        style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}
+                      >
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={landingTab === 'history'}
+                          onClick={() => handleSelectWorkspaceTab('history')}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            border: `1px solid ${landingTab === 'history' ? 'color-mix(in srgb, var(--color-border-paper) 72%, var(--color-text-muted))' : 'transparent'}`,
+                            borderRadius: '999px',
+                            padding: '0.55rem 0.9rem',
+                            background: landingTab === 'history' ? 'var(--color-bg-surface)' : 'color-mix(in srgb, var(--color-bg-surface) 32%, transparent)',
+                            color: 'var(--color-text-primary)',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            boxShadow: landingTab === 'history' ? '0 1px 4px var(--color-shadow-soft)' : 'none',
+                          }}
+                        >
+                          <IconClock style={{ width: '0.85rem', height: '0.85rem' }} />
+                          {t('chat.tabs.history')}
+                        </button>
+                        <button
+                          type="button"
+                          role="tab"
+                          aria-selected={landingTab === 'connector'}
+                          onClick={() => handleSelectWorkspaceTab('connector')}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                            border: `1px solid ${landingTab === 'connector' ? 'color-mix(in srgb, var(--color-border-paper) 72%, var(--color-text-muted))' : 'transparent'}`,
+                            borderRadius: '999px',
+                            padding: '0.55rem 0.9rem',
+                            background: landingTab === 'connector' ? 'var(--color-bg-surface)' : 'color-mix(in srgb, var(--color-bg-surface) 32%, transparent)',
+                            color: 'var(--color-text-primary)',
+                            cursor: 'pointer',
+                            fontSize: '0.82rem',
+                            fontWeight: 700,
+                            boxShadow: landingTab === 'connector' ? '0 1px 4px var(--color-shadow-soft)' : 'none',
+                          }}
+                        >
+                          <IconDatabase style={{ width: '0.85rem', height: '0.85rem' }} />
+                          {t('chat.tabs.connector')}
+                        </button>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem', minWidth: 0, marginLeft: 'auto' }}>
+                        {landingTab === 'history' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setThreadSearchQuery('');
+                              setThreadSearchResults([]);
+                              setThreadSearchOpen(true);
+                              void reloadThreads();
+                            }}
+                            style={{ border: '1px solid var(--color-border-paper)', borderRadius: '999px', padding: '0.5rem 0.75rem', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
+                          >
+                            <IconSearch style={{ width: '0.85rem', height: '0.85rem' }} />
+                            {t('chat.search.button')}
+                          </button>
+                        ) : (
+                          <>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                border: '1px solid var(--color-border-paper)',
+                                borderRadius: '999px',
+                                padding: '0.45rem 0.72rem',
+                                background: 'var(--color-bg-surface)',
+                                color: 'var(--color-text-secondary)',
+                                fontSize: '0.76rem',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {t('chat.filters.filterAll')}
+                            </span>
+                            <span
+                              style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.35rem',
+                                border: '1px solid var(--color-border-paper)',
+                                borderRadius: '999px',
+                                padding: '0.45rem 0.72rem',
+                                background: 'var(--color-bg-surface)',
+                                color: 'var(--color-text-secondary)',
+                                fontSize: '0.76rem',
+                                fontWeight: 600,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {t('chat.filters.sortRecent')}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <section style={{ width: '100%', maxWidth: '52rem', margin: '0 auto', flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                      {landingTab === 'history' ? (
+                        <div style={{ display: 'flex', minHeight: 0, flex: 1, flexDirection: 'column', overflow: 'hidden' }}>
+                          <div style={{ padding: '0.8rem 0.95rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem' }}>
+                            <div>
+                              <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--color-text-primary)' }}>{t('chat.history.title')}</div>
+                              <div style={{ marginTop: '0.22rem', fontSize: '0.74rem', color: 'var(--color-text-secondary)' }}>
+                                {t('chat.history.subtitle')}
+                              </div>
+                            </div>
+                          </div>
+                          <div onScroll={handleThreadListScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '0.55rem 0.55rem 0.75rem' }}>
+                            {isLoadingThreads && visibleThreads.length === 0 ? (
+                              <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={3} /></div>
+                            ) : null}
+                            {!isLoadingThreads && visibleThreads.length === 0 ? (
+                              <div style={{ padding: '0.7rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>{t('chat.history.empty')}</div>
+                            ) : null}
+                            {defaultThreadGroups.map((group) => (
+                              <div key={group.label} style={{ paddingTop: '0.85rem' }}>
+                                <div style={{ padding: '0 0.4rem 0.45rem', color: 'var(--color-text-muted)', fontSize: '0.78rem', fontWeight: 600 }}>{group.label}</div>
+                                <div style={{ display: 'grid', gap: '0.4rem' }}>
+                                  {group.threads.map((thread) => {
+                                    const isActive = thread.id === activeThreadId;
+                                    const isHovered = thread.id === hoveredThreadId;
+                                    const isDeleting = thread.id === deletingThreadId;
+                                    const matchExcerpt = thread.match?.excerpt?.trim();
+                                    return (
+                                      <div
+                                        key={thread.id}
+                                        style={{ position: 'relative' }}
+                                        onMouseEnter={() => setHoveredThreadId(thread.id)}
+                                        onMouseLeave={() => setHoveredThreadId(null)}
+                                      >
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSelectThread(thread.id)}
+                                          style={{ width: '100%', minHeight: matchExcerpt ? '3.1rem' : '2.4rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.8rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.6rem', padding: '0.45rem 1.9rem 0.45rem 0.75rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
+                                          title={thread.title ?? t('chat.history.fallbackTitle')}
+                                        >
+                                          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.14rem', overflow: 'hidden' }}>
+                                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.82rem', fontWeight: 600 }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
+                                            {matchExcerpt ? (
+                                              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.68rem', color: 'var(--color-text-muted)', lineHeight: 1.25 }}>{matchExcerpt}</span>
+                                            ) : null}
+                                          </span>
+                                          {isActive && !isHovered ? <span style={{ width: '0.38rem', height: '0.38rem', borderRadius: '999px', background: 'var(--color-action-link)', flexShrink: 0 }} aria-hidden="true" /> : null}
+                                        </button>
+                                        {(isHovered || isDeleting) ? (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => void handleDeleteThread(e, thread.id)}
+                                            disabled={isDeleting}
+                                            title={t('chat.history.deleteThread')}
+                                            style={{ position: 'absolute', right: '0.38rem', top: '50%', transform: 'translateY(-50%)', width: '1.4rem', height: '1.4rem', border: 'none', borderRadius: '0.4rem', background: 'transparent', color: isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isDeleting ? 'not-allowed' : 'pointer', display: 'grid', placeItems: 'center', padding: 0, transition: 'background 0.12s ease, color 0.12s ease', flexShrink: 0 }}
+                                            onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'color-mix(in srgb, var(--color-state-error) 12%, transparent)'; e.currentTarget.style.color = 'var(--color-state-error)'; } }}
+                                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
+                                          >
+                                            <IconX style={{ width: '0.75rem', height: '0.75rem' }} />
+                                          </button>
+                                        ) : null}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            ))}
+                            {isLoadingMoreThreads ? (
+                              <div style={{ padding: '0.7rem 0.45rem' }}><SkeletonList rows={2} /></div>
+                            ) : null}
+                            {!hasMoreThreads && visibleThreads.length > 0 ? (
+                              <div style={{ padding: '0.55rem 0.45rem 0.2rem', color: 'var(--color-text-muted)', fontSize: '0.72rem', textAlign: 'center' }}>{t('chat.history.allShown')}</div>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : (
+                        <ConnectorLandingPanel onOpenConnector={handleOpenConnectorSettings} />
+                      )}
+                    </section>
                   </div>
                 </div>
               )}
@@ -683,7 +1078,7 @@ function ChatViewContent({
           {threadSidebarOpen ? (
             <>
               <div style={{ padding: '0.75rem 0.85rem', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid var(--color-border-paper)' }}>
-                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>历史对话</span>
+                <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>{t('chat.history.title')}</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.1rem' }}>
                   <button
                     type="button"
@@ -694,22 +1089,22 @@ function ChatViewContent({
                       void reloadThreads();
                     }}
                     style={{ background: threadSearchOpen ? 'var(--color-bg-app)' : 'none', border: 'none', cursor: 'pointer', color: threadSearchOpen ? 'var(--color-text-primary)' : 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }}
-                    title="搜索历史对话"
-                    aria-label="搜索历史对话"
+                    title={t('chat.search.ariaLabel')}
+                    aria-label={t('chat.search.ariaLabel')}
                   >
                     <IconSearch style={{ width: '0.86rem', height: '0.86rem' }} />
                   </button>
-                  <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title="关闭">
+                  <button type="button" onClick={() => setThreadSidebarOpen(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--color-text-muted)', display: 'grid', placeItems: 'center', width: '1.5rem', height: '1.5rem', borderRadius: '0.35rem' }} title={t('chat.history.close')}>
                     <IconX style={{ width: '0.85rem', height: '0.85rem' }} />
                   </button>
                 </div>
               </div>
-              <div style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
+              <div onScroll={handleThreadListScroll} style={{ flex: 1, overflowY: 'auto', padding: '0.4rem 0.5rem' }}>
                 {isLoadingThreads && visibleThreads.length === 0 ? (
-                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>加载历史中...</div>
+                  <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={3} /></div>
                 ) : null}
                 {!isLoadingThreads && visibleThreads.length === 0 ? (
-                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>暂无会话</div>
+                  <div style={{ padding: '0.55rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{t('chat.history.empty')}</div>
                 ) : null}
                 {visibleThreads.map((thread) => {
                   const isActive = thread.id === activeThreadId;
@@ -727,10 +1122,10 @@ function ChatViewContent({
                         type="button"
                         onClick={() => handleSelectThread(thread.id)}
                         style={{ width: '100%', minHeight: matchExcerpt ? '3.05rem' : '2.2rem', border: isActive ? '1px solid var(--color-border-paper)' : '1px solid transparent', borderRadius: '0.55rem', background: isActive ? 'var(--color-bg-app)' : isHovered ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', padding: '0.3rem 1.8rem 0.3rem 0.5rem', textAlign: 'left', boxSizing: 'border-box', transition: 'background 0.12s ease' }}
-                        title={thread.title ?? '新对话'}
+                        title={thread.title ?? t('chat.history.fallbackTitle')}
                       >
                         <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.12rem', overflow: 'hidden' }}>
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? '新对话'}</span>
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.78rem' }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
                           {matchExcerpt ? (
                             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.66rem', color: 'var(--color-text-muted)', lineHeight: 1.25 }}>{matchExcerpt}</span>
                           ) : null}
@@ -742,7 +1137,7 @@ function ChatViewContent({
                           type="button"
                           onClick={(e) => void handleDeleteThread(e, thread.id)}
                           disabled={isDeleting}
-                          title="删除对话"
+                          title={t('chat.history.deleteThread')}
                           style={{ position: 'absolute', right: '0.3rem', top: '50%', transform: 'translateY(-50%)', width: '1.4rem', height: '1.4rem', border: 'none', borderRadius: '0.35rem', background: 'transparent', color: isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)', cursor: isDeleting ? 'not-allowed' : 'pointer', display: 'grid', placeItems: 'center', padding: 0, transition: 'background 0.12s ease, color 0.12s ease', flexShrink: 0 }}
                           onMouseEnter={(e) => { if (!isDeleting) { e.currentTarget.style.background = 'color-mix(in srgb, var(--color-state-error) 12%, transparent)'; e.currentTarget.style.color = 'var(--color-state-error)'; } }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = isDeleting ? 'var(--color-text-muted)' : 'var(--color-text-secondary)'; }}
@@ -753,6 +1148,12 @@ function ChatViewContent({
                     </div>
                   );
                 })}
+                {isLoadingMoreThreads ? (
+                  <div style={{ padding: '0.55rem 0.35rem' }}><SkeletonList rows={2} /></div>
+                ) : null}
+                {!hasMoreThreads && visibleThreads.length > 0 ? (
+                  <div style={{ padding: '0.45rem 0.35rem', color: 'var(--color-text-muted)', fontSize: '0.7rem', textAlign: 'center' }}>{t('chat.history.allShown')}</div>
+                ) : null}
               </div>
             </>
           ) : null}
@@ -771,7 +1172,7 @@ function ChatViewContent({
             <section
               role="dialog"
               aria-modal="true"
-              aria-label="搜索历史对话"
+              aria-label={t('chat.search.ariaLabel')}
               style={{ width: 'min(48rem, calc(100vw - 2rem))', height: 'min(36rem, calc(100vh - 4rem))', minHeight: '24rem', display: 'flex', flexDirection: 'column', overflow: 'hidden', border: '1px solid color-mix(in srgb, var(--color-border-paper) 84%, var(--color-text-muted))', borderRadius: '1rem', background: 'var(--color-bg-paper)', boxShadow: '0 30px 80px color-mix(in srgb, var(--color-shadow-medium) 72%, transparent)' }}
             >
               <div style={{ height: '4.15rem', flexShrink: 0, display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0 1.45rem', borderBottom: '1px solid var(--color-border-paper)' }}>
@@ -779,15 +1180,15 @@ function ChatViewContent({
                   ref={threadSearchInputRef}
                   value={threadSearchQuery}
                   onChange={(event) => setThreadSearchQuery(event.target.value)}
-                  placeholder="搜索聊天..."
-                  aria-label="搜索历史对话"
+                  placeholder={t('chat.search.placeholder')}
+                  aria-label={t('chat.search.ariaLabel')}
                   autoComplete="off"
                   style={{ minWidth: 0, flex: 1, height: '100%', border: 'none', background: 'transparent', color: 'var(--color-text-primary)', outline: 'none', fontSize: '1.18rem', fontWeight: 600, fontFamily: 'inherit' }}
                 />
                 <button
                   type="button"
-                  title="关闭"
-                  aria-label="关闭搜索"
+                  title={t('chat.history.close')}
+                  aria-label={t('chat.search.closeAria')}
                   onClick={() => setThreadSearchOpen(false)}
                   style={{ width: '2rem', height: '2rem', border: 'none', borderRadius: '0.5rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center', flexShrink: 0 }}
                 >
@@ -799,10 +1200,10 @@ function ChatViewContent({
                 {trimmedThreadSearchQuery ? (
                   <>
                     {isSearchingThreads ? (
-                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>搜索中...</div>
+                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.search.searching')}</div>
                     ) : null}
                     {!isSearchingThreads && threadSearchResults.length === 0 ? (
-                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>未找到匹配会话</div>
+                      <div style={{ padding: '0.8rem 1rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.search.noResults')}</div>
                     ) : null}
                     {threadSearchResults.map((thread) => {
                       const matchExcerpt = thread.match?.excerpt?.trim();
@@ -813,18 +1214,18 @@ function ChatViewContent({
                           type="button"
                           onClick={() => handleSelectThread(thread.id)}
                           style={{ width: '100%', minHeight: matchExcerpt ? '4.35rem' : '3.3rem', border: 'none', borderRadius: '0.75rem', background: isActive ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'grid', gridTemplateColumns: '1.8rem minmax(0, 1fr) auto', alignItems: 'center', gap: '0.75rem', padding: '0.68rem 0.9rem', textAlign: 'left', transition: 'background 0.12s ease' }}
-                          title={thread.title ?? '新对话'}
+                          title={thread.title ?? t('chat.history.fallbackTitle')}
                           onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--color-bg-hover)'; }}
                           onMouseLeave={(event) => { event.currentTarget.style.background = isActive ? 'var(--color-bg-hover)' : 'transparent'; }}
                         >
                           <IconMessageCircle style={{ width: '1.28rem', height: '1.28rem', color: 'var(--color-text-primary)' }} />
                           <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '1rem', fontWeight: 600 }}>{thread.title ?? '新对话'}</span>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '1rem', fontWeight: 600 }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
                             {matchExcerpt ? (
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-text-secondary)', fontSize: '0.86rem', lineHeight: 1.35 }}>{matchExcerpt}</span>
                             ) : null}
                           </span>
-                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap', alignSelf: matchExcerpt ? 'center' : 'center' }}>{formatThreadDateLabel(thread.updated_at)}</span>
+                          <span style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem', whiteSpace: 'nowrap', alignSelf: matchExcerpt ? 'center' : 'center' }}>{formatThreadDateLabel(thread.updated_at, t, i18n.language)}</span>
                         </button>
                       );
                     })}
@@ -832,7 +1233,7 @@ function ChatViewContent({
                 ) : (
                   <>
                     {defaultThreadGroups.length === 0 ? (
-                      <div style={{ padding: '1rem 0.25rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>暂无会话</div>
+                      <div style={{ padding: '1rem 0.25rem', color: 'var(--color-text-muted)', fontSize: '0.86rem' }}>{t('chat.history.empty')}</div>
                     ) : null}
 
                     {defaultThreadGroups.map((group) => (
@@ -846,12 +1247,12 @@ function ChatViewContent({
                               type="button"
                               onClick={() => handleSelectThread(thread.id)}
                               style={{ width: '100%', height: '2.8rem', border: 'none', borderRadius: '0.75rem', background: isActive ? 'var(--color-bg-hover)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.78rem', padding: '0 1rem', textAlign: 'left', transition: 'background 0.12s ease' }}
-                              title={thread.title ?? '新对话'}
+                              title={thread.title ?? t('chat.history.fallbackTitle')}
                               onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--color-bg-hover)'; }}
                               onMouseLeave={(event) => { event.currentTarget.style.background = isActive ? 'var(--color-bg-hover)' : 'transparent'; }}
                             >
                               <IconMessageCircle style={{ width: '1.18rem', height: '1.18rem', flexShrink: 0, color: 'var(--color-text-primary)' }} />
-                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.96rem', fontWeight: 600 }}>{thread.title ?? '新对话'}</span>
+                              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '0.96rem', fontWeight: 600 }}>{thread.title ?? t('chat.history.fallbackTitle')}</span>
                             </button>
                           );
                         })}
@@ -871,10 +1272,58 @@ function ChatViewContent({
   );
 }
 
+function ChatViewShell(props: ChatViewProps) {
+  const [landingTab, setLandingTab] = useState<ChatLandingTab>(props.landingTab ?? 'history');
+  const [shellRetryNonce, setShellRetryNonce] = useState(0);
+
+  useEffect(() => {
+    setLandingTab(props.landingTab ?? 'history');
+  }, [props.landingTab]);
+
+  const handleSelectLandingTab = useCallback((tab: ChatLandingTab) => {
+    setLandingTab(tab);
+  }, []);
+
+  const handleRecoverLandingTab = useCallback((tab: ChatLandingTab) => {
+    setLandingTab(tab);
+    setShellRetryNonce((value) => value + 1);
+  }, []);
+
+  const handleRetryShell = useCallback(() => {
+    setShellRetryNonce((value) => value + 1);
+  }, []);
+
+  const handleReloadShell = useCallback(() => {
+    window.location.reload();
+  }, []);
+
+  return (
+    <ChatShellBoundary
+      key={shellRetryNonce}
+      fallback={(error) => (
+        <ChatShellError
+          error={error}
+          landingTab={landingTab}
+          isMobile={props.isMobile}
+          onSelectLandingTab={handleRecoverLandingTab}
+          onRetry={handleRetryShell}
+          onReload={handleReloadShell}
+        />
+      )}
+    >
+      <ChatViewContent
+        {...props}
+        landingTab={landingTab}
+        onLandingTabChange={handleSelectLandingTab}
+      />
+    </ChatShellBoundary>
+  );
+}
+
 export default function ChatView(props: ChatViewProps) {
   return (
     <WorkspaceProvider>
-      <ChatViewContent {...props} />
+      <ChatViewShell {...props} />
     </WorkspaceProvider>
   );
 }

@@ -7,11 +7,14 @@
 # [Sync] 2026-06-12: preflight host port 80 and reload unmanaged nginx listeners safely.
 # [Sync] 2026-06-12: render upstream ports from Remote SSH deploy env instead of static defaults.
 # [Sync] 2026-06-12: disable stale same-domain nginx configs before testing the deployed site.
+# [Sync] 2026-07-06: also render/upload/enable the apex suoxya.com site (nginx/suoxya-root.conf).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NGINX_CONF_SRC="${SCRIPT_DIR}/nginx/ink-and-memory.conf"
 NGINX_CONF_NAME="ink-and-memory"
+APEX_CONF_SRC="${SCRIPT_DIR}/nginx/suoxya-root.conf"
+APEX_CONF_NAME="suoxya-root"
 
 REMOTE_SSH_HOST="${REMOTE_SSH_HOST:-}"
 REMOTE_SSH_USER="${REMOTE_SSH_USER:-}"
@@ -103,6 +106,7 @@ validate_nginx_host() {
 
 render_nginx_conf() {
   local output="$1"
+  local source="${2:-${NGINX_CONF_SRC}}"
   local backend_host="${REMOTE_BACKEND_NGINX_HOST:-}"
   local frontend_host="${REMOTE_FRONTEND_NGINX_HOST:-}"
   [[ -n "${backend_host}" ]] || backend_host="$(nginx_upstream_host "${REMOTE_BACKEND_BIND_HOST}")"
@@ -117,7 +121,7 @@ render_nginx_conf() {
   sed \
     -e "s|127\\.0\\.0\\.1:8765|${backend_host}:${REMOTE_BACKEND_PORT}|g" \
     -e "s|127\\.0\\.0\\.1:8080|${frontend_host}:${REMOTE_FRONTEND_PORT}|g" \
-    "${NGINX_CONF_SRC}" >"${output}"
+    "${source}" >"${output}"
 }
 
 # ── Prerequisites check ───────────────────────────────────────────────────────
@@ -126,6 +130,7 @@ check_prereqs() {
   local failed=0
   [[ -n "${REMOTE_SSH_HOST}" ]] || { warn "REMOTE_SSH_HOST is required."; failed=1; }
   [[ -f "${NGINX_CONF_SRC}" ]] || { warn "Missing nginx config: ${NGINX_CONF_SRC}"; failed=1; }
+  [[ -f "${APEX_CONF_SRC}" ]] || { warn "Missing apex nginx config: ${APEX_CONF_SRC}"; failed=1; }
   command -v ssh >/dev/null 2>&1 || { warn "ssh not found."; failed=1; }
   command -v scp >/dev/null 2>&1 || { warn "scp not found."; failed=1; }
   [[ "${failed}" == "0" ]]
@@ -190,6 +195,16 @@ setup_nginx() {
   fi
   rm -f "${rendered_conf}"
 
+  # 1b) Render and upload the apex (suoxya.com) site config the same way.
+  local rendered_apex
+  rendered_apex="$(mktemp "${TMPDIR:-/tmp}/suoxya-root-nginx.XXXXXX")"
+  render_nginx_conf "${rendered_apex}" "${APEX_CONF_SRC}"
+  if ! scp_file "${rendered_apex}" "/tmp/${APEX_CONF_NAME}.conf"; then
+    rm -f "${rendered_apex}"
+    return 1
+  fi
+  rm -f "${rendered_apex}"
+
   # 2) Install nginx, enable config, test, and reload via a single remote script
   remote_script <<'REMOTE'
 set -euo pipefail
@@ -198,6 +213,10 @@ CONF_NAME="ink-and-memory"
 TMP_CONF="/tmp/${CONF_NAME}.conf"
 SITES_AVAILABLE="/etc/nginx/sites-available/${CONF_NAME}"
 SITES_ENABLED="/etc/nginx/sites-enabled/${CONF_NAME}"
+APEX_NAME="suoxya-root"
+TMP_APEX_CONF="/tmp/${APEX_NAME}.conf"
+APEX_AVAILABLE="/etc/nginx/sites-available/${APEX_NAME}"
+APEX_ENABLED="/etc/nginx/sites-enabled/${APEX_NAME}"
 DEFAULT_SITE="/etc/nginx/sites-enabled/default"
 DOMAIN_PATTERN="ink-backend\.suoxya\.com|ink-frontend\.suoxya\.com"
 POLICY_RC_D_CREATED=0
@@ -424,6 +443,19 @@ else
   echo "[setup-nginx] Site already enabled: ${SITES_ENABLED}"
 fi
 
+# Deploy apex (suoxya.com) config if it was uploaded
+if [[ -f "${TMP_APEX_CONF}" ]]; then
+  echo "[setup-nginx] Deploying ${APEX_AVAILABLE}..."
+  cp "${TMP_APEX_CONF}" "${APEX_AVAILABLE}"
+  rm -f "${TMP_APEX_CONF}"
+  if [[ ! -L "${APEX_ENABLED}" ]] && [[ ! -f "${APEX_ENABLED}" ]]; then
+    echo "[setup-nginx] Enabling site: ${APEX_ENABLED}"
+    ln -s "${APEX_AVAILABLE}" "${APEX_ENABLED}"
+  else
+    echo "[setup-nginx] Site already enabled: ${APEX_ENABLED}"
+  fi
+fi
+
 # Ensure sites-enabled include is in nginx.conf
 if ! grep -q 'include /etc/nginx/sites-enabled/\*' /etc/nginx/nginx.conf 2>/dev/null; then
   echo "[setup-nginx] Adding sites-enabled include to nginx.conf..."
@@ -445,6 +477,7 @@ activate_nginx
 echo "[setup-nginx] Nginx setup complete."
 echo "[setup-nginx] Verify: curl -H 'Host: ink-backend.suoxya.com' http://127.0.0.1/api/health"
 echo "[setup-nginx] Verify: curl -H 'Host: ink-frontend.suoxya.com' http://127.0.0.1/"
+echo "[setup-nginx] Verify: curl -H 'Host: suoxya.com' http://127.0.0.1/"
 
 REMOTE
 
@@ -472,11 +505,12 @@ else
   fi
 fi
 
-echo "[setup-ssl] Requesting certificates for both domains..."
+echo "[setup-ssl] Requesting certificates for all domains..."
 certbot --nginx \
   --non-interactive \
   --agree-tos \
   --email "${CERTBOT_EMAIL:-admin@suoxya.com}" \
+  -d suoxya.com \
   -d ink-backend.suoxya.com \
   -d ink-frontend.suoxya.com
 

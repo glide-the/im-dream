@@ -211,8 +211,17 @@ Streams the file content from storage.  The `base64-encoded-key` is a standard
 Base64 encoding of the storage key string (produced by `encode_key_to_base64`
 in `storage_utils.py`).
 
+Authentication accepts any of (first match wins):
+
+1. `Authorization: Bearer <token>` header
+2. `access_token` / `token` login cookie
+3. `?token=<access-token>` query parameter — required for browser-embedded
+   URLs (`<img src>`, `<a href download>`) that cannot send headers
+
 The frontend helper `toFileProxyUrl(key)` in
-`frontend/src/lib/toFileProxyUrl.ts` builds this URL automatically.
+`frontend/src/lib/toFileProxyUrl.ts` builds this URL automatically and appends
+the current auth token as `?token=`. `withStorageAuthToken(url)` re-attaches
+the token to persisted proxy URLs stored in message parts.
 
 ---
 

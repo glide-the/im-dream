@@ -13,6 +13,11 @@
 // [Sync] 2026-06-01: pass current user_session.labels into StateChooser for writing-session metadata display.
 // [Sync] 2026-05-29: fix bottom stats bar background from hardcoded #fafafa to var(--color-bg-paper) to match writing area.
 // [Sync] 2026-06-23: route /oauth/device/verify to the Device Flow verification page before the main app shell.
+// [Sync] 2026-07-04: add Resource Connector view entry and mobile/desktop navigation affordance.
+// [Sync] 2026-07-05: make the connector viewport scrollable inside the fixed app shell so resource selection and source cards remain reachable.
+// [Sync] 2026-07-07: route the connector entry into ChatView so the connector workbench lives under the chat shell instead of a standalone page.
+// [Sync] 2026-07-07: mount ChatView in a fixed flex viewport so embedded connector panels cannot force page-level overflow.
+// [Sync] 2026-07-08: route Connector navigation to Settings resource-link management and keep Chat on the lightweight landing panel only.
 import React, { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Commentor, EditorState, TextCell } from './engine/EditorEngine';
@@ -56,6 +61,8 @@ import { useVoiceInput } from './hooks/useVoiceInput';
 import { useEditSessionEvents } from './hooks/useEditSessionEvents';
 import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
+import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
+import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -79,6 +86,12 @@ const iconMap = {
 };
 
 const LANGUAGE_CODES: Array<'en' | 'zh'> = ['en', 'zh'];
+
+// [Sync] 2026-07-08: Settings default sections use a narrower reading-width column;
+// the Notion ConnectorNotionDetailPage owns a wider single-account resource
+// configuration layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
+const SETTINGS_MAX_WIDTH_PX = 800;
+const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
 
 // @@@ Color map with gradient colors for watercolor effect
 const colorMap: Record<string, { gradient: string; text: string; glow: string }> = {
@@ -144,11 +157,41 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
-  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat'>('writing');
+  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector'>('writing');
+  const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
+  const [chatLandingTab, setChatLandingTab] = useState<'history' | 'connector'>('history');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
   const shouldRenderChatView = hasOpenedChatView || currentView === 'chat';
   const [showCalendarPopup, setShowCalendarPopup] = useState(false);
   const [voiceConfigs, setVoiceConfigs] = useState<Record<string, VoiceConfig>>({});
+  // [Sync] 2026-07-08: track whether the dedicated Notion "具体配置页面" is open; navigating into it
+  //                    replaces the whole Settings viewport instead of expanding inline within the
+  //                    resource-link card, matching the connector interaction design's page navigation.
+  const [showNotionConnectorDetail, setShowNotionConnectorDetail] = useState(false);
+
+  const openConnectorSettings = useCallback(() => {
+    setCurrentView('settings');
+    setShowNotionConnectorDetail(false);
+    setConnectorSettingsFocusNonce((value) => value + 1);
+    setChatLandingTab('connector');
+  }, []);
+
+  const openNotionConnectorDetail = useCallback(() => {
+    setShowNotionConnectorDetail(true);
+  }, []);
+
+  const closeNotionConnectorDetail = useCallback(() => {
+    setShowNotionConnectorDetail(false);
+    setConnectorSettingsFocusNonce((value) => value + 1);
+  }, []);
+
+  const handleAppViewChange = useCallback((view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => {
+    if (view === 'connector') {
+      openConnectorSettings();
+      return;
+    }
+    setCurrentView(view);
+  }, [openConnectorSettings]);
 
   const browserTimezone = useMemo(() => {
     try {
@@ -1365,7 +1408,7 @@ export default function App() {
       )}
 
       {/* @@@ Hide top nav on mobile */}
-      {!isMobile && <TopNavBar currentView={currentView} onViewChange={setCurrentView} />}
+      {!isMobile && <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />}
 
       {currentView === 'writing' && (
         <div style={{
@@ -1891,8 +1934,13 @@ export default function App() {
           bottom: mobileBottomOffset,
           background: 'var(--color-bg-app)'
         }}>
+          {showNotionConnectorDetail ? (
+            <div style={{ maxWidth: SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX, width: '100%' }}>
+              <ConnectorNotionDetailPage onBack={closeNotionConnectorDetail} isMobile={isMobile} />
+            </div>
+          ) : (
           <div style={{
-            maxWidth: 800,
+            maxWidth: SETTINGS_MAX_WIDTH_PX,
             width: '100%'
           }}>
             <section style={{ marginBottom: 48 }}>
@@ -2030,6 +2078,15 @@ export default function App() {
               </div>
             </section>
 
+            {/* Resource Connector Settings */}
+            <section style={{ marginBottom: 48 }}>
+              <ConnectorSettingsSection
+                focusNonce={connectorSettingsFocusNonce}
+                isMobile={isMobile}
+                onOpenNotionDetail={openNotionConnectorDetail}
+              />
+            </section>
+
             {/* AI Model Configuration */}
             <section style={{ marginBottom: 48 }}>
               <h2 style={{
@@ -2054,6 +2111,7 @@ export default function App() {
             {/* About Content */}
             <AboutView />
           </div>
+          )}
         </div>
       )}
       {/* @@@ Always render timeline to pre-load data and position scroll */}
@@ -2095,7 +2153,9 @@ export default function App() {
           left: 0,
           right: 0,
           bottom: mobileBottomOffset,
-          display: currentView === 'chat' ? 'block' : 'none',
+          display: currentView === 'chat' ? 'flex' : 'none',
+          minHeight: 0,
+          minWidth: 0,
           overflow: 'hidden'
         }}>
           <ChatView
@@ -2103,6 +2163,9 @@ export default function App() {
             onEditorWriteConfirmed={handleEditorWriteConfirmed}
             requestedThreadId={requestedChatThreadId}
             activeVoice={activeChatVoice}
+            isMobile={isMobile}
+            landingTab={chatLandingTab}
+            onOpenConnectorSettings={openConnectorSettings}
           />
         </div>
       )}
@@ -2128,7 +2191,7 @@ export default function App() {
             return (
               <button
                 key={item.key}
-                onClick={() => setCurrentView(item.key)}
+                onClick={() => handleAppViewChange(item.key)}
                 aria-pressed={isActive}
                 style={{
                   flex: 1,

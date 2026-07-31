@@ -200,8 +200,21 @@ class TestAllowedEditorToolNames(unittest.TestCase):
         self.assertIn("mcp__editor__insert_widget", names)
         self.assertIn("mcp__editor__reply_to_comment", names)
 
-    def test_exactly_four_write_tools(self):
-        self.assertEqual(len(allowed_editor_tool_names()), 4)
+    def test_write_tools_match_expected_set(self):
+        # switch_editor was added to EDITOR_WRITE_TOOL_SPECS by the
+        # workspace-switch feature (editor_tool.py:200).  Assert the full
+        # name set instead of a bare count so future additions fail with a
+        # meaningful diff rather than "6 != 5".
+        self.assertEqual(
+            set(allowed_editor_tool_names()),
+            {
+                "mcp__editor__write_segment",
+                "mcp__editor__delete_segment",
+                "mcp__editor__insert_widget",
+                "mcp__editor__reply_to_comment",
+                "mcp__editor__switch_editor",
+            },
+        )
 
     def test_no_read_tools_present(self):
         names = allowed_editor_tool_names()

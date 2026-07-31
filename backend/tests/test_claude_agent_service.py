@@ -14,6 +14,13 @@
 #                    assembly, config-change cache rebuild, and config-load
 #                    failure fallback.
 # [Sync] 2026-06-25: cover CancelledError stop path emitting finish and stream sentinel.
+# [Sync] 2026-07-04: cover workspace-local Notion snapshot attach and
+#                    workspace_context Notion block rendering.
+# [Sync] 2026-07-05: cover explicit Notion connector identity / sync cursor
+#                    rendering in the workspace context summary.
+# [Sync] 2026-07-26: assert sandbox_fs_allowed_write_paths passes from
+#                    system_config through assemble_context into
+#                    get_or_create_workspace.
 
 """Tests for ClaudeAgentService context assembly and SSE event mapping."""
 from __future__ import annotations
@@ -31,9 +38,10 @@ ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before service import
+import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before service import
 
 import claude_agent.service as service_module
+import claude_agent.workspace_context as workspace_context_module
 from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService, _TurnContext
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
@@ -91,6 +99,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                             "raw.githubusercontent.com",
                             "*.npmjs.org",
                         ],
+                        "sandbox_fs_allowed_write_paths": [
+                            "/data/out",
+                            "/var/cache",
+                        ],
                         "env_vars": {
                             "ANTHROPIC_AUTH_TOKEN": "user-token",
                             "EMPTY": None,
@@ -126,6 +138,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             sandbox_network_allowed_domains=[
                 "raw.githubusercontent.com",
                 "*.npmjs.org",
+            ],
+            sandbox_fs_allowed_write_paths=[
+                "/data/out",
+                "/var/cache",
             ],
         )
 
@@ -279,6 +295,139 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             execution.run_options.mcp_env,
             {"INK_AGENT_USER_ID": "7"},
         )
+
+
+class TestClaudeAgentServiceNotionAttach(unittest.IsolatedAsyncioTestCase):
+    async def test_workspace_attach_materializes_notion_snapshot_into_workspace_files(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_notion_attach")
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_notion_attach",
+            message_parts=[{"type": "text", "text": "hello"}],
+        )
+
+        snapshot_metadata = {
+            "workspace_id": "thread_notion_attach",
+            "resource_connector_id": "connector-attach",
+            "snapshot_version": "snap-attach-001",
+            "source_revision": "rev-attach-001",
+            "sync_cursor": "cursor-attach-001",
+            "fetched_at": "2026-07-04T00:00:00Z",
+            "state": "snapshot_ready",
+        }
+        snapshot_payload = {
+            "metadata": snapshot_metadata,
+            "connector": {
+                "id": "connector-attach",
+                "platform": "notion",
+                "auth_status": "authenticated",
+            },
+            "index": [{"page_id": "page-attach", "title": "Attach Page"}],
+            "databases": [{"database_id": "db-attach", "title": "Attach Database"}],
+            "database_pages": {
+                "db-attach": [{"page_id": "page-attach", "title": "Attach Page"}],
+            },
+            "pages": {
+                "page-attach": {
+                    "page_id": "page-attach",
+                    "title": "Attach Page",
+                    "url": "https://www.notion.so/page-attach",
+                    "last_edited": "2026-07-04T00:00:00Z",
+                    "properties": {"Name": {"title": [{"plain_text": "Attach Page"}]}},
+                    "blocks": [{"type": "paragraph", "text": "Canonical snapshot"}],
+                }
+            },
+        }
+
+        class _FakeFacade:
+            def materialize_workspace(self, workspace_path: Path, connector_id=None, workspace_id=None):
+                del connector_id, workspace_id
+                notion_dir = workspace_path / ".notion"
+                notion_dir.mkdir(parents=True, exist_ok=True)
+                (notion_dir / "connector.json").write_text(
+                    json.dumps(
+                        {
+                            "id": "connector-attach",
+                            "platform": "notion",
+                            "auth_status": "authenticated",
+                            "selected_databases": ["db-attach"],
+                            "selected_pages": ["page-attach"],
+                            "snapshot": snapshot_metadata,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    ),
+                    encoding="utf-8",
+                )
+                (notion_dir / "snapshot.json").write_text(
+                    json.dumps(snapshot_metadata, ensure_ascii=False, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                (notion_dir / "index.json").write_text(
+                    json.dumps(
+                        {"pages": snapshot_payload["index"], "snapshot": snapshot_metadata},
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    ),
+                    encoding="utf-8",
+                )
+                (notion_dir / "databases.json").write_text(
+                    json.dumps(
+                        {"databases": snapshot_payload["databases"], "snapshot": snapshot_metadata},
+                        ensure_ascii=False,
+                        indent=2,
+                        sort_keys=True,
+                    ),
+                    encoding="utf-8",
+                )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / "thread_notion_attach"
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={"workspace_enabled": True},
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value=None,
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+                unittest.mock.patch(
+                    "notion.build_notion_facade",
+                    return_value=_FakeFacade(),
+                ) as build_notion_facade,
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+            build_notion_facade.assert_called_once_with(7)
+            self.assertEqual(execution.run_options.cwd, str(workspace_path))
+            self.assertEqual(builder.user_message_calls[0]["cwd"], str(workspace_path))
+            notion_block = workspace_context_module.build_workspace_context_block(
+                str(workspace_path),
+                editor_session_id="session-attach",
+            )
+            self.assertIn("Notion device index (.notion/):", notion_block)
+            self.assertIn("Connector ID: connector-attach", notion_block)
+            self.assertIn("snapshot snap-attach-001", notion_block)
+            self.assertIn("Source Revision: rev-attach-001", notion_block)
+            self.assertIn("Sync Cursor: cursor-attach-001", notion_block)
+            self.assertIn("Last Synced: 2026-07-04T00:00:00Z", notion_block)
 
 
 def _run(coro):

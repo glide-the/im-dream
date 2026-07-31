@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]  # backend/
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import tests._sdk_stubs  # noqa: F401 — stub claude_code_sdk before libs.claude_agent_kit
+import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before libs.claude_agent_kit
 
 from claude_agent.context_builder import (
     ClaudeAgentContextBuilder,

@@ -14,6 +14,8 @@
 #                    plus helper functions while preserving the existing users table.
 # [Sync] 2026-06-27: add Chat thread search candidates with extracted message
 #                    text for Claude Agent history retrieval.
+# [Sync] 2026-07-09: allow Chat thread lists to page newest-first with
+#                    limit/offset so the frontend history panel can scroll load.
 """
 SQLite database setup and migrations for Ink & Memory.
 
@@ -2280,7 +2282,8 @@ def get_system_config(user_id: int) -> dict:
 
     Known keys include model/provider/system_prompt, workspace_enabled
     (file workspace + per-thread Bash sandbox), sandbox_network_mode,
-    sandbox_network_allowed_domains, im_full_access_enabled, theme, and env_vars.
+    sandbox_network_allowed_domains, sandbox_fs_allowed_write_paths,
+    im_full_access_enabled, theme, and env_vars.
 
     Returns an empty dict when no config has been saved yet.
     """
@@ -2802,14 +2805,26 @@ def get_chat_thread(thread_id: str, user_id: int) -> Optional[dict]:
         db.close()
 
 
-def list_chat_threads(user_id: int) -> list[dict]:
-    """List all chat threads for a user, newest first."""
+def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0) -> list[dict]:
+    """List chat threads for a user, newest first, optionally paged."""
     db = get_db()
     try:
-        rows = db.execute(
-            "SELECT id, title, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
-            (user_id,),
-        ).fetchall()
+        if limit is not None:
+            rows = db.execute(
+                """
+                SELECT id, title, created_at, updated_at
+                FROM chat_thread
+                WHERE user_id = ?
+                ORDER BY updated_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (user_id, limit, max(0, offset)),
+            ).fetchall()
+        else:
+            rows = db.execute(
+                "SELECT id, title, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
+                (user_id,),
+            ).fetchall()
         return [dict(row) for row in rows]
     finally:
         db.close()

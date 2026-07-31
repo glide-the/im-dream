@@ -15,14 +15,17 @@
 > `system_config.sandbox_network_mode` 与
 > `system_config.sandbox_network_allowed_domains`，并同步到 thread-local
 > `.claude/settings.json` 的 `sandbox.network`。
+> **[Sync] 2026-07-08**: 新增资源链接设置区，Connector 入口改为进入 Settings 的资源链接管理；Chat 只保留轻量摘要面板和跳转按钮。
+> **[Sync] 2026-07-08**: 修复设置页问题——Notion「管理」不再原地展开，改为导航到独立的 `ConnectorNotionDetailPage`（带面包屑导航），并移除顶部/移动端导航栏里单独的 `Connector` 入口，统一由 Settings 资源链接区和 Chat 轻量摘要面板承载入口。
 
 ## 1. 文档范围
 
-Settings 是应用的全局配置页面，作为顶部导航栏（`TopNavBar`）和移动端底部导航栏中"设置"入口的对应视图。本次更新新增 **AI 模型配置区域**，将原本位于 Chat 页面侧边栏的模型配置迁移至此，并新增 **用户 API 配置区域**，支持每位用户存储自己的 Anthropic API 密钥及模型端点配置。
+Settings 是应用的全局配置页面，作为顶部导航栏（`TopNavBar`）和移动端底部导航栏中"设置"入口的对应视图。本次更新新增 **资源链接** 与 **AI 模型配置区域**，将原本位于 Chat 页面侧边栏的模型配置迁移至此，并新增 **用户 API 配置区域**，支持每位用户存储自己的 Anthropic API 密钥及模型端点配置。
 
 该页面包含：
 - 语言偏好设置
 - 界面展示选项（如能量条开关）
+- **资源链接**（Notion、飞书、本地 CLI 执行器占位）
 - **AI 模型配置**（主题、模型选择、系统提示词、工作区模式、沙箱网络、IM 审批模式）
 - **用户 API 配置**（Anthropic API 密钥、自定义端点、默认模型等 env 变量）
 - 关于 Ink & Memory（`AboutView`）
@@ -44,6 +47,9 @@ SettingsView（position: fixed，overflow: auto）
     │   └── LanguageGroup（语言选择按钮组）
     ├── DisplaySection
     │   └── EnergyBarToggle
+    ├── ConnectorSettingsSection（资源链接）
+    │   ├── 远程资源链接（Notion / 飞书）
+    │   └── 本地资源链接（CLI 执行器占位）
     ├── ModelConfigSection（AI 模型配置）
     │   ├── 标题：AI 模型配置
     │   ├── ThemeGroup（Light / System / Dark 切换）
@@ -179,6 +185,15 @@ SettingsView（position: fixed，overflow: auto）
   `npm install`），且优先级高于 IM full-access。
 - 该配置不安装缺失工具；WebFetch 在关闭态会被拒绝，启用态仍由工具权限和域名规则控制。
 
+**沙箱文件写入（2026-07-26 新增）**：
+
+- 位于「沙箱网络」之后、IM Approval Mode 之前，仅在 Workspace Mode 开启时显示。
+- 配置项 `system_config.sandbox_fs_allowed_write_paths`：除线程工作区外额外允许沙箱内 Bash 写入的绝对路径列表，以 pill 形式展示、`+ 添加可写路径` 单行输入保存（复用域允许列表的交互样式）。
+- 后端清洗规则仅接受绝对路径（去尾随斜杠、去重、上限 32 条 / 512 字符）。
+- Claude Code 自身沙箱临时目录（`$CLAUDE_TMPDIR` 或 `/tmp/claude-$UID`）始终默认放行——其 shell hook 会向该目录写入 `cwd-*` 文件，之前因工作区独占的 `allowWrite` 被拒绝并产生 `zsh: operation not permitted` 噪音；UI 提示文案需说明该默认值。
+- 工作区内部配置（`.claude/settings*`、`.editor` 等）仍在 `denyWrite` 中，按 sandbox-runtime 语义 deny 始终优先于 allow，用户路径不可覆盖。
+- 下一次 workspace 初始化时写入 `{AGENT_CWD}/{thread_id}/.claude/settings.json` 的 `sandbox.filesystem.allowWrite`（顺序：工作区 → Claude 临时目录 → 用户路径）。
+
 **非目标 / 避免过度设计**：
 
 - 不做多角色权限系统。
@@ -196,15 +211,15 @@ SettingsView（position: fixed，overflow: auto）
 - 关闭态：按钮使用 `color.disabled.bg` 背景、`color.text.secondary` 文案。
 - 立即同步到 `/api/system-config`，字段为 `im_full_access_enabled`。
 - 切换时必须立即广播同页配置变更，已打开的 Chat 输入区无需刷新即可更新显示。
-- 开启后，后端 Claude-agent runner 在 `PreToolUse` 中对除问答表单外的已暴露工具返回：
+- 开启后，后端 Claude-agent runner 在 `PreToolUse` 中对除问答表单外的已暴露工具返回（纯字典字面量）：
 
 ```python
-HookJSONOutput(
-    hookSpecificOutput={
+{
+    "hookSpecificOutput": {
         "hookEventName": "PreToolUse",
         "permissionDecision": "allow",
     }
-)
+}
 ```
 
 - `tool_choice="none"` 仍不暴露工具；该开关只影响已经进入 `PreToolUse` 的工具调用审批。
@@ -246,7 +261,28 @@ HookJSONOutput(
 - 用户点击"恢复默认"后，清空三个输入框并立即保存（`env_vars` 中移除这三个 key）。
 - 保存成功后 `dirty` 置 `false`，按钮恢复禁用态。
 
-### 4.4 AboutSection
+### 4.4 ConnectorSettingsSection（资源链接）与 ConnectorNotionDetailPage（Notion 具体配置页面）
+
+> 关联实现：[`frontend/src/components/dashboard/ConnectorSettingsSection.tsx`](../../frontend/src/components/dashboard/ConnectorSettingsSection.tsx)、[`frontend/src/components/dashboard/ConnectorNotionDetailPage.tsx`](../../frontend/src/components/dashboard/ConnectorNotionDetailPage.tsx)
+
+- `ConnectorSettingsSection` 是 Settings 里的独立资源链接索引卡片；Chat 侧 `ConnectorLandingPanel` 的跳转按钮会打开 Settings 并自动滚动、聚焦到这里。
+- 首页分成两个区域：`远程资源链接` 和 `本地资源链接`。
+- `远程资源链接` 下展示 Notion / 飞书：
+  - Notion 使用真实 connector 状态做摘要，显示绿色健康态、最近交互时间和「管理」按钮。
+  - 飞书只保留禁用占位，不调用不存在的 API。
+- `本地资源链接` 只保留 CLI 执行器占位，当前版本不设计完整交互。
+- **点击 Notion「管理」是页面级导航，不是原地展开**：App 级 `showNotionConnectorDetail` 状态置 `true`，Settings 视图整体切换为 `ConnectorNotionDetailPage`，替换掉 Energy Bar / AI 模型配置等其它设置分区（而不是在资源链接卡片内叠加显示）。
+  - `ConnectorNotionDetailPage` 顶部渲染「← 资源连接器 > Notion Connector」轻量导航（对应《链接器概念的交互设计稿》「具体配置页面 / 最上方导航」骨架屏），返回按钮回到 Settings 资源链接索引卡片。
+  - 同一平台只允许认证一个账号；Notion 详情页不得出现「新建连接器」「刷新列表」「连接器列表」等集合级入口。
+  - 页面主体按单账号资源配置固定为 `ConnectorHeader`、`StrategyDesignPlaceholder`、`ResourceScopeSection`、`MountedSourcesSection`。
+  - `ConnectorHeader` 是紧凑无边框信息栏：展示 Notion 图标、标题、说明、状态 badge、「连接 / 重新连接 Notion」「关闭连接」两个真实操作位，并把授权状态、同步状态、已链接资源数量、最近同步时间和受限提示集中在这里。
+  - `StrategyDesignPlaceholder` 只保留“策略设计暂不实现”的轻量位置，不展示表单、开关或策略配置。
+  - `ResourceScopeSection` 直接调用现有 connector API 完成认证后的 database / standalone page 选择和保存，不嵌入集合型 `ResourceConnectorPage`；资源选择合并为一个列表，顶部提供搜索框，默认每页 10 条并支持翻页。
+  - `MountedSourcesSection` 只展示当前 Notion 账号已挂载来源，不展示连接器列表或多实例切换。
+  - 返回时重新聚焦资源链接索引卡片，与从 Chat 跳转过来的聚焦行为保持一致。
+- `ConnectorSettingsSection` 本身只负责入口、摘要和触发页面导航，不承载创建、认证、资源选择或同步逻辑。
+
+### 4.5 AboutSection
 
 - 复用 `AboutView` 组件，不做额外样式包裹。
 
@@ -305,6 +341,7 @@ Settings 页面通过以下入口访问：
 
 - 桌面端顶部导航栏（`TopNavBar`）的 Settings 选项。
 - 移动端底部导航栏的 Settings 图标。
+- Chat 侧 `ConnectorLandingPanel` 的跳转按钮会打开 Settings 并自动滚动、聚焦到资源链接区（顶部导航栏与移动端底部导航栏不再单独展示 `Connector` 入口）。
 
 ## 10. 可访问性
 
@@ -316,8 +353,9 @@ Settings 页面通过以下入口访问：
 ## 11. 验收标准
 
 - Settings 页面包含 AI 模型配置区域（主题、模型、系统提示词、工作区模式、沙箱网络、IM 审批模式）。
+- Settings 页面包含资源链接区域（Notion / 飞书 / 本地 CLI 执行器占位）；点击 Notion「管理」会导航到独立的 `ConnectorNotionDetailPage`（带「← 资源连接器 > Notion Connector」面包屑），而不是在资源链接卡片内原地展开。
 - Settings 页面包含用户 API 配置区域（API 密钥、API 端点、默认模型三个输入项）。
-- Chat 页面不再渲染模型配置侧边栏，也不在左侧 `VerticalNav` 中提供 Settings 入口。
+- Chat 页面不再渲染模型配置侧边栏，也不再承载完整 connector workbench；顶部导航栏与移动端底部导航栏不再展示 `Connector` 入口，Connector 管理只能通过 Settings 资源链接区或 Chat 轻量摘要面板的跳转按钮进入。
 - 所有颜色引用 [Color System](<./color_system/README.md>) token，无孤立十六进制值。
 - Light/Dark 模式均可正常显示。
 - 配置变更后正确同步到 `/api/system-config`。
@@ -333,9 +371,13 @@ Settings 页面通过以下入口访问：
 
 本轮已完成以下前端实现：
 - 新建 `ModelConfigSection.tsx`，封装主题、模型、系统提示词、工作区模式的配置 UI 与 API 交互逻辑。
+- 新建 `ConnectorSettingsSection.tsx`，封装 Settings 里的资源链接索引卡片以及远程/本地资源占位。
+- 新建 `ConnectorNotionDetailPage.tsx`，作为 Notion「具体配置页面」的独立导航页面；该页直接承载单账号认证、资源选择、来源列表、同步和关闭流程，不再复用集合型 `ResourceConnectorPage` page mode。
+- 新建 `ConnectorLandingPanel.tsx`，作为 Chat 中的轻量 connector 摘要和 Settings 跳转 CTA。
 - 在 `App.tsx` Settings 视图中注入 `<ModelConfigSection />`，作为独立区域显示。
-- `VerticalNav.tsx` 不再渲染 Settings 图标；Settings 保留顶部导航栏和移动端底部导航栏入口。
-- `ChatView.tsx` 移除 `Sidebar` 组件，不再触发模型配置侧边栏弹出。
+- 在 `App.tsx` 新增 `showNotionConnectorDetail` 状态；点击 Notion「管理」时把 Settings 视图整体切换为 `<ConnectorNotionDetailPage />`，不再与其它设置分区混排。
+- `TopNavBar.tsx` 与移动端底部导航栏不再渲染独立的 `Connector` 按钮；`VerticalNav.tsx` 不再渲染 Settings 图标；Settings 保留顶部导航栏和移动端底部导航栏入口。
+- `ChatView.tsx` 只在 Chat 视图内渲染轻量 connector landing panel，不再挂载黑底 connector workbench。
 
 **用户 API 配置（待实现）**：
 - 在 `ModelConfigSection.tsx`（或提取后的 `UserApiConfigGroup.tsx`）中新增 §4.3.7 描述的三个输入框区域。

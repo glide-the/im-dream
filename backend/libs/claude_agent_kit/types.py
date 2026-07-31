@@ -11,6 +11,26 @@
 #                    because they must collect frontend answers before allow.
 # [Sync] 2026-06-21: add sandbox_network_mode so the runner can enforce
 #                    Settings "disabled" network policy in PreToolUse hooks.
+# [Sync] 2026-07-20: add on_plan_file_changed streaming callback — fires after
+#                    built-in Write/Edit/MultiEdit lands in the thread workspace
+#                    plans dir (claude-plan §5.3).
+# [Sync] 2026-07-20: add on_tasks_changed streaming callback — fires after
+#                    TaskCreate/TaskUpdate PostToolUse with the full TodoItem
+#                    list re-read from the thread workspace tasks dir
+#                    (claude-todo §5.3).
+# [Sync] 2026-07-23: add sandbox_network_allowed_domains to AgentRunOptions —
+#                    Settings allowlist consumed by the PreToolUse
+#                    SandboxPermissionRequest step (claude-agent-sandbox-network-
+#                    permission-tool.md §6).
+# [Sync] 2026-07-26: remove sandbox_network_allowed_domains again — the
+#                    PreToolUse network gate was wrong-layer duplication;
+#                    allowlists are enforced by the CLI sandbox
+#                    (sandbox.network via workspace.py) and asks arrive via
+#                    can_use_tool.
+# [Sync] 2026-07-26: SDK migration — guarded re-export now sources
+#                    ClaudeAgentOptions from claude_agent_sdk (renamed
+#                    package, 0.2.128); the old claude_code_sdk /
+#                    ClaudeCodeOptions names are gone.
 
 """Type definitions for ClaudeAgentKit.
 
@@ -32,16 +52,16 @@ from .messages.build_user_message_content import AttachmentPayload
 # Convenience re-export so callers can import the SDK Message type from here.
 # ---------------------------------------------------------------------------
 try:
-    from claude_code_sdk.types import (  # type: ignore[import-untyped]
-        ClaudeCodeOptions as _ClaudeCodeOptions,
+    from claude_agent_sdk.types import (  # type: ignore[import-untyped]
+        ClaudeAgentOptions as _ClaudeAgentOptions,
     )
-    from claude_code_sdk import query as _sdk_query  # noqa: F401  (ensure importable)
+    from claude_agent_sdk import query as _sdk_query  # noqa: F401  (ensure importable)
 
     SDKMessage = Any  # SDK message union type (resolved at runtime)
-    ClaudeCodeOptions = _ClaudeCodeOptions
+    ClaudeAgentOptions = _ClaudeAgentOptions
 except ImportError:  # pragma: no cover
     SDKMessage = Any
-    ClaudeCodeOptions = Any
+    ClaudeAgentOptions = Any
 
 # Tool choice mode — determines how tool calls are handled
 ToolChoiceMode = Literal["auto", "none", "manual"]
@@ -97,6 +117,12 @@ _ToolConfirmationCallback = Callable[
 ]
 _ErrorCallback = Callable[[Exception], Union[Awaitable[None], None]]
 _MessageCallback = Callable[[Any], Union[Awaitable[None], None]]
+# Plan file observer: payload is the resolved plan file path (str).
+_PlanFileChangedCallback = Callable[[str], Union[Awaitable[None], None]]
+# Task v2 observer: payload is the full TodoItem dict list re-read from the
+# thread workspace tasks dir (claude-todo §5.2 field shape: id/content/
+# status/active_form/owner/blocked_by).
+_TasksChangedCallback = Callable[[list], Union[Awaitable[None], None]]
 
 
 @dataclass
@@ -115,6 +141,14 @@ class AgentStreamingCallbacks:
     on_tool_confirmation_request: Optional[_ToolConfirmationCallback] = None
     on_error: Optional[_ErrorCallback] = None
     on_message: Optional[_MessageCallback] = None
+    # Fires after a built-in Write/Edit/MultiEdit tool call whose resolved
+    # path lands inside the thread workspace plans dir (claude-plan §5.3).
+    # Debounced per file per turn via INK_AGENT_PLAN_EMIT_DEBOUNCE_MS.
+    on_plan_file_changed: Optional[_PlanFileChangedCallback] = None
+    # Fires after a TaskCreate/TaskUpdate tool call once the tasks dir has
+    # been re-read and derived into TodoItem dicts (claude-todo §5.3).
+    # Debounced per tasks dir per turn via INK_AGENT_TODO_EMIT_DEBOUNCE_MS.
+    on_tasks_changed: Optional[_TasksChangedCallback] = None
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +190,11 @@ class AgentRunOptions:
     # must collect frontend answers first.
     im_full_access_enabled: bool = False
     # Settings-controlled sandbox network mode. ``disabled`` is enforced by
-    # runner PreToolUse hooks before full-access or low-sensitivity allows.
+    # runner PreToolUse hooks before full-access or low-sensitivity allows;
+    # ``allowlist``/``open`` are enforced by Claude Code's own sandbox
+    # (sandbox.network in per-thread .claude/settings.json) whose runtime asks
+    # arrive via the SDK can_use_tool channel — there is no PreToolUse-layer
+    # network gate (removed 2026-07-26 as wrong-layer duplication).
     sandbox_network_mode: Literal["disabled", "allowlist", "open"] = "allowlist"
     # System prompt override.
     system_prompt: Optional[str] = None
@@ -169,7 +207,7 @@ class AgentRunOptions:
     # Environment passed to project-owned MCP subprocesses for current-session bindings.
     mcp_env: dict[str, str] = field(default_factory=dict)
     # User-scoped SDK env vars from system_config.env_vars.
-    # Allowlist-filtered before injection into ClaudeCodeOptions.env.
+    # Allowlist-filtered before injection into ClaudeAgentOptions.env.
     # Priority: higher than backend/.env, lower than explicit options.env.
     user_sdk_env: dict[str, str] = field(default_factory=dict)
     # Deprecated: attachments should be passed to build_user_message instead.

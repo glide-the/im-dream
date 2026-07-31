@@ -11,6 +11,17 @@
 > [Sync] 2026-06-25: open mode omits `sandbox.network` instead of writing
 > unsupported `allowedDomains:["*"]`; HTTP method placeholder is hidden in
 > open mode while the high-risk warning remains visible.
+> [Sync] 2026-07-23: intentional product change — `open` mode redefined from
+> "unrestricted egress" to "ask every time" at the Ink & Memory PreToolUse
+> layer via the SandboxPermissionRequest permission tool (§3 table + note);
+> `allowlist` mode now auto-allows host-matched WebFetch/WebSearch and asks
+> on misses. See `claude-agent-sandbox-network-permission-tool.md`.
+> [Sync] 2026-07-26: semantic REVERT — the PreToolUse network gate was
+> wrong-layer duplication of the CLI sandbox's system-level control and was
+> removed; `open` mode returns to "unrestricted egress, no per-request ask"
+> (the ask-every-time behavior lived in the removed layer); runtime sandbox
+> blocks surface only via the can_use_tool channel (allowlist non-listed
+> domains). See `claude-agent-sandbox-network-permission-tool.md` status header.
 
 # Claude-Agent Sandbox Network Interaction Plan
 
@@ -77,8 +88,28 @@ Controls use the reference layout supplied by the user:
 | Label | Stored mode | Runtime settings | User meaning |
 |---|---|---|---|
 | 禁用网络 | `disabled` | `sandbox.network.allowedDomains=[]` + `deniedDomains=["*"]`; PreToolUse denies network tools | Bash sandbox subprocesses and common network tools should not reach external domains. |
-| 白名单 | `allowlist` | `sandbox.network.allowedDomains=[...]` | Pre-allow listed domains; other domains still follow Claude Code or managed policy. |
-| 开放网络 | `open` | omit `sandbox.network` | Request unrestricted/default sandbox-runtime egress without passing an unsupported bare `*` allowlist domain; still subject to runtime policy. |
+| 白名单 | `allowlist` | `sandbox.network.allowedDomains=[...]` | Pre-allow listed domains; other domains still follow Claude Code or managed policy. The CLI sandbox proxy enforces the list; runtime blocks surface through the SDK `can_use_tool` channel as a per-request confirmation card (see note below). |
+| 开放网络 | `open` | omit `sandbox.network` | Request unrestricted/default sandbox-runtime egress without passing an unsupported bare `*` allowlist domain; still subject to runtime policy. **[2026-07-26] Semantic revert: no per-request ask — see note below.** |
+
+> **[2026-07-26] Semantic revert — `open` mode.** Between 2026-07-23 and
+> 2026-07-26 the removed PreToolUse-layer network gate had redefined `open`
+> as "ask every time" at the Ink & Memory confirmation layer. That layer was
+> wrong-layer duplication of the CLI sandbox's system-level control and has
+> been removed; `open` returns to its original meaning: `sandbox.network` is
+> omitted = unrestricted/default sandbox-runtime egress with **no**
+> per-request confirmation. Rationale: the ask-every-time behavior lived
+> entirely in the removed PreToolUse gate; `can_use_tool` only fires when the
+> CLI sandbox itself blocks egress (i.e. in `allowlist` mode for non-listed
+> domains), so no Ink & Memory ask exists in `open` mode. Runtime policy
+> (Docker networking, host firewalls) can still block outbound access
+> independently.
+
+> **[2026-07-26] Sibling key.** Filesystem write policy gained a parallel
+> Settings key `sandbox_fs_allowed_write_paths` (extra absolute writable
+> paths; Claude's sandbox TMPDIR is default-allowed). It shares this
+> plumbing pattern but is documented in
+> `claude-agent-workspace-sandbox.md` §2.1 — out of scope for this
+> network-focused plan.
 
 Allowlist editing:
 

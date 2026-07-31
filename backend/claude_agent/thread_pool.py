@@ -16,6 +16,12 @@
 # [Sync] 2026-06-22: track the Settings SYSTEM_PROMPT value used to build cached
 #                    system_prompt so Phase 1 can rebuild when page configuration
 #                    changes during a live Thread Session.
+# [Sync] 2026-07-20: add plan_state (claude-plan §5.2 PlanState, memory-only) to
+#                    AgentRunState intrinsic state; snapshot() exposes plan_mode
+#                    for the GET /threads/{id}/plan endpoint.
+# [Sync] 2026-07-20: add todo_state (claude-todo §5.2 TodoState, memory-only) to
+#                    AgentRunState intrinsic state; snapshot() exposes the live
+#                    object for the GET /threads/{id}/todos endpoint.
 
 """Claude Agent Thread Session Pool.
 
@@ -152,6 +158,16 @@ class AgentRunState:
     editor_state: Optional[Any] = field(default=None, repr=False)
     # DB user_id needed to reload editor_state after write-tool execution.
     editor_user_id: int = 0
+    # In-memory Plan Mode state (claude-plan §5.2 PlanState from service.py;
+    # typed Any to avoid a circular import).  Memory-only — the workspace
+    # plans directory is the sole persistent layer.  None until the first
+    # plan-mode transition or plan-file write of this session.
+    plan_state: Optional[Any] = field(default=None, repr=False)
+    # In-memory todo list state (claude-todo §5.2 TodoState from service.py;
+    # typed Any to avoid a circular import).  Memory-only — v2 rebuilds from
+    # the workspace tasks directory, v1 has no persistent layer.  None until
+    # the first TodoWrite / TaskCreate / TaskUpdate of this session.
+    todo_state: Optional[Any] = field(default=None, repr=False)
 
     # ------------------------------------------------------------------
     # Extrinsic state (refreshed each turn)
@@ -199,6 +215,8 @@ class AgentRunState:
         self.callbacks = None
         self.run_options = None
         self.event_bus = None
+        self.plan_state = None
+        self.todo_state = None
         bg_task = self.bg_task
         self.bg_task = None
         if bg_task is not None and not bg_task.done():
@@ -238,6 +256,12 @@ class AgentRunState:
             "ttl_seconds": _RUNNER_TTL_SECONDS,
             "runner_present": self.runner is not None,
             "context_initialized": self.is_context_initialized,
+            "plan_mode": (
+                self.plan_state.plan_mode if self.plan_state is not None else "none"
+            ),
+            # Live TodoState object for the GET /threads/{id}/todos endpoint
+            # (internal consumer only; not a JSON-diagnostic field).
+            "todo_state": self.todo_state,
         }
 
     # ------------------------------------------------------------------

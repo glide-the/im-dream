@@ -11,6 +11,10 @@
 > **[Sync] 2026-06-13**: Settings 完全访问模式仍会为 `AskUserQuestion` / `mcp__user__ask_user` 发送 `tool-approval-request`，以便前端显示问答表单并回传 answers。
 > **[Sync] 2026-06-13**: 新增 `tool-input-delta` SSE 事件，用于把 SDK `input_json_delta.partial_json` 转发给前端；前端对内置 `Write` 工具使用终端式写入预览，设计见 [`write-tool-terminal-preview.md`](./write-tool-terminal-preview.md)。
 > **[Sync] 2026-06-25**: 新增 `POST /api/claude-agent/threads/{thread_id}/stop`，作为前端主动停止当前运行 turn 的显式控制 API；普通 SSE 断线仍保持后台 turn 可重连。
+> **[Sync] 2026-07-20**: 登记 claude-plan 两个新 SSE 事件 `plan-mode-changed` / `plan-updated`（§4.5.2 事件表 + §4.5.4 收集表 + §4.7.8 报文示例），均为生命周期帧、不入 `collected_parts`、不映射 UIMessageChunk；配套 `GET /api/claude-agent/threads/{thread_id}/plan` REST 端点契约见 [`claude-plan.md`](./claude-plan.md) §5.5。
+> **[Sync] 2026-07-20**: 登记 claude-todo 新 SSE 事件 `todo-updated`（§4.5.2 事件表 + §4.5.4 收集表 + §4.7.9 报文示例），生命周期帧、不入 `collected_parts`、不映射 UIMessageChunk；配套 `GET /api/claude-agent/threads/{thread_id}/todos` REST 端点契约见 [`claude-todo.md`](./claude-todo.md) §5.5。
+> **[Sync] 2026-07-23**: SandboxPermissionRequest——`tool-approval-request` 新增可选字段 `confirmationKind:"sandbox_network"` 与 `networkRequest:{host, policyMode, matchedAllowedDomain}`（§4.5.2 事件表）；字段缺失时前端回退通用确认卡，向后兼容。设计见 `claude-agent-sandbox-network-permission-tool.md`。
+> **[Sync] 2026-07-26**: 触发条件④修订——PreToolUse 网络门禁拆除后，沙箱网络确认仅来自 SDK `can_use_tool` 通道的 `SandboxNetworkAccess` 运行时沙箱代理询问（§4.5.2 事件表）；曾短暂存在的 `networkRequest.source` 字段取消。
 
 # Ink & Memory Claude Agent 服务入参与SSE响应报文整理
 
@@ -153,8 +157,11 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `tool-input-start` | 工具调用开始 | `toolCallId`, `toolName` | auto/manual 都会出现。 |
 | `tool-input-delta` | 工具输入 JSON 增量 | `toolCallId`, `toolName`, `delta` | SDK `input_json_delta.partial_json` 的透传。用于 live preview，不参与持久化；完整 input 仍以 `tool-input-available` 为准。 |
 | `tool-input-available` | 工具输入完整 | `toolCallId`, `toolName`, `input` | 紧跟 `tool-input-start`。 |
-| `tool-approval-request` | 工具等待确认 | `toolCallId`, `toolName`, `input` | 三种情况出现：① `tool_choice="manual"` 时所有工具；② `tool_choice="auto"` 时高敏工具（执行/写入/交互等）；③ Settings 完全访问模式下的 `AskUserQuestion` / `mcp__user__ask_user` 问答表单。workspace `files/` 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 不会触发该事件。前端 transport 将其转成同一 tool part 的 `toolMetadata.approvalRequested=true` 并显示 Approve/Cancel 或问答表单 UI；用户操作后调用 `/api/claude-agent/tool-confirm`。**[2026-06-13]** |
+| `tool-approval-request` | 工具等待确认 | `toolCallId`, `toolName`, `input`, `confirmationKind?`, `networkRequest?` | 四种情况出现：① `tool_choice="manual"` 时所有工具；② `tool_choice="auto"` 时高敏工具（执行/写入/交互等）；③ Settings 完全访问模式下的 `AskUserQuestion` / `mcp__user__ask_user` 问答表单；④ SandboxPermissionRequest——CLI 运行时沙箱代理拦截清单外域名时经 SDK `can_use_tool` 通道发起的 `SandboxNetworkAccess` 系统级询问（`input` 为 `{"host": ...}`，不经 PreToolUse）**[2026-07-26]**。workspace `files/` 内置文件工具、低敏查询、`Skill` 与 `switch_editor` 不会触发该事件。前端 transport 将其转成同一 tool part 的 `toolMetadata.approvalRequested=true` 并显示 Approve/Cancel 或问答表单 UI；用户操作后调用 `/api/claude-agent/tool-confirm`。**[2026-07-23]** 沙箱网络确认额外携带 `confirmationKind:"sandbox_network"` 与 `networkRequest:{host, policyMode, matchedAllowedDomain}`（`matchedAllowedDomain` 本期恒为 `null`，预留给「放行并记住」迭代）；前端据此渲染网络变体确认卡，字段缺失时回退通用确认卡（向后兼容）。**[2026-06-13]** |
 | `tool-output-available` | 工具结果返回 | `toolCallId`, `output`, `isError` | `isError=true` 时表示工具执行出错。 |
+| `plan-mode-changed` | Plan Mode 状态迁移 | `planMode`, `toolCallId` | 观察到 `tool-input-available` 且 `toolName` 为 `EnterPlanMode` / `ExitPlanMode` 时发射；`planMode` 取 `"planning"` / `"exited"`。生命周期帧，不入 `collected_parts`，不映射 UIMessageChunk；前端转发到 plan store（[`claude-plan.md`](./claude-plan.md) §5.4）。**[2026-07-20]** |
+| `plan-updated` | 计划内容快照 | `slug`, `fileName`, `content`, `contentBytes`, `truncated`, `updatedAt` | 计划文件写入（PostToolUse 观察 `Write`/`Edit`/`MultiEdit` 落入 plans 目录，防抖 `INK_AGENT_PLAN_EMIT_DEBOUNCE_MS` 默认 500ms）或 `ExitPlanMode` 终读时发射；内容超过 `INK_AGENT_PLAN_MAX_CONTENT_BYTES`（默认 262144）时截断并置 `truncated:true`，前端可经 `GET /api/claude-agent/threads/{thread_id}/plan` 拉全量。不收集、不映射 UIMessageChunk；读取失败仅记日志不发射。**[2026-07-20]** |
+| `todo-updated` | 待办清单快照 | `source`, `todos`, `truncated`, `updatedAt` | 观察到 `tool-input-available` 且 `toolName` 为 `TodoWrite`（v1 流内捕获，`source:"todo_write"`），或 PostToolUse 观察 `TaskCreate`/`TaskUpdate` 后重读 tasks 目录（v2 文件任务，`source:"task_v2"`，防抖 `INK_AGENT_TODO_EMIT_DEBOUNCE_MS` 默认 500ms）时发射；`todos` 为统一 TodoItem 全量快照（`id`/`content`/`status`/`active_form`/`owner`/`blocked_by`），超过 `INK_AGENT_TODO_MAX_ITEMS`（默认 200）截断并置 `truncated:true`。生命周期帧，不入 `collected_parts`，不映射 UIMessageChunk；前端转发到 todos store（[`claude-todo.md`](./claude-todo.md) §5.4）。schema 不符或读取失败仅记日志不发射。**[2026-07-20]** |
 | `message-final` | 流成功结束前 | `text`, `usage`, `sessionId` | 包含完整 assistant 文本和 token 用量。 |
 | `finish` | 流结束 | `finishReason` | 成功时为 `"stop"`，失败时为 `"error"`。 |
 | `error` | 任意异常 | `errorText` | 字段名 `errorText`（非 `message`）。 |
@@ -181,6 +188,8 @@ pet-agent 业务服务在当前仓库中由以下两个 HTTP 入口组成：
 | `reasoning-start/delta/end` | `tool-approval-request`（lifecycle） |
 | `tool-input-available` | `message-metadata`、`message-final` |
 | `tool-output-available` | `tool-input-delta`（live preview）、`finish`、`error` |
+| | `plan-mode-changed` / `plan-updated`（lifecycle，claude-plan） **[2026-07-20]** |
+| | `todo-updated`（lifecycle，claude-todo） **[2026-07-20]** |
 
 `_persist_turn` 调用 `_sse_events_to_ui_parts(collected_parts)` 做一次线性转换，输出 UIMessage-compatible parts 列表写入 `chat_message.parts`。见 [claude-agent-session-persistence.md §4](./claude-agent-session-persistence.md)。
 
@@ -373,6 +382,42 @@ data: {"type":"error","errorText":"Command failed with exit code 1"}
 data: {"type":"finish","finishReason":"error"}
 
 ```
+
+#### 4.7.8 Plan Mode 计划帧（claude-plan）**[2026-07-20]**
+
+`EnterPlanMode` 的 `tool-input-available` 到达后发射状态迁移帧；计划文件每次写入（防抖合并）发射内容快照；`ExitPlanMode` 时发射 `exited` 迁移帧与最终版快照：
+
+```text
+data: {"type":"tool-input-available","toolCallId":"call_plan1","toolName":"EnterPlanMode","input":{}}
+
+data: {"type":"plan-mode-changed","planMode":"planning","toolCallId":"call_plan1"}
+
+data: {"type":"plan-updated","slug":"amber-churn-otter","fileName":"amber-churn-otter.md","content":"# 计划\n...","contentBytes":1832,"truncated":false,"updatedAt":"2026-07-20T01:23:45.678Z"}
+
+data: {"type":"tool-input-available","toolCallId":"call_plan2","toolName":"ExitPlanMode","input":{}}
+
+data: {"type":"plan-mode-changed","planMode":"exited","toolCallId":"call_plan2"}
+
+data: {"type":"plan-updated","slug":"amber-churn-otter","fileName":"amber-churn-otter.md","content":"# 计划\n...最终版","contentBytes":1905,"truncated":false,"updatedAt":"2026-07-20T01:24:10.120Z"}
+
+```
+
+两类帧均为生命周期帧：不入 `collected_parts`，前端 transport 不映射为 UIMessageChunk，转发到按 threadId 键控的 plan store；初始加载/重连经 `GET /api/claude-agent/threads/{thread_id}/plan` 水合（契约见 [`claude-plan.md`](./claude-plan.md) §5.5）。
+
+#### 4.7.9 待办清单帧（claude-todo）**[2026-07-20]**
+
+v1：`TodoWrite` 的 `tool-input-available` 携带全量 `input.todos`，后端映射为统一 TodoItem 后发射快照；v2（`INK_AGENT_TASK_V2_ENABLED` 开启）：`TaskCreate`/`TaskUpdate` 的 PostToolUse 防抖重读 tasks 目录后发射快照：
+
+```text
+data: {"type":"tool-input-available","toolCallId":"call_todo1","toolName":"TodoWrite","input":{"todos":[{"content":"设计文档","status":"completed","activeForm":"正在编写设计文档"},{"content":"实现捕获逻辑","status":"in_progress"}]}}
+
+data: {"type":"todo-updated","source":"todo_write","todos":[{"id":"1","content":"设计文档","status":"completed","active_form":"正在编写设计文档","owner":null,"blocked_by":[]},{"id":"2","content":"实现捕获逻辑","status":"in_progress","active_form":null,"owner":null,"blocked_by":[]}],"truncated":false,"updatedAt":"2026-07-20T06:30:00.000Z"}
+
+data: {"type":"todo-updated","source":"task_v2","todos":[{"id":"1","content":"设计文档","status":"completed","active_form":null,"owner":"claude","blocked_by":[]},{"id":"2","content":"实现捕获逻辑","status":"pending","active_form":null,"owner":null,"blocked_by":[]}],"truncated":false,"updatedAt":"2026-07-20T06:31:05.120Z"}
+
+```
+
+`todo-updated` 为生命周期帧：不入 `collected_parts`，前端 transport 不映射为 UIMessageChunk，转发到按 threadId 键控的 todos store；初始加载/重连经 `GET /api/claude-agent/threads/{thread_id}/todos` 水合（契约见 [`claude-todo.md`](./claude-todo.md) §5.5）。
 
 ### 4.8 `POST /api/claude-agent/tool-confirm` 契约
 

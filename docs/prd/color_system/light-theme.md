@@ -2,6 +2,8 @@
 
 > Source of truth: `frontend/src/styles/tokens.css` `:root` 块。  
 > 触发方式：默认状态 / `[data-theme='light']` / `prefers-color-scheme` 无暗色偏好。
+> [Sync] 2026-07-09: Connector settings pages use a dashed paper page boundary plus flat light-list rows; selected resources use a right-side checkmark, and ordinary resource rows do not use card shadows or dark fills.
+> [Sync] 2026-07-09: Decks follows the same light paper rule: deck colors are small accents, not full-card borders, gradients, or hover shadows.
 
 ---
 
@@ -12,7 +14,7 @@ Ink & Memory 亮色主题的关键词是 **"暖纸张、手写笔记本、安静
 | 维度 | 规范 |
 |---|---|
 | 画布 | 暖米色 `#f8f0e6`，避免纯白全屏和冷灰渐变。 |
-| 承载面 | 奶油纸面 `#fffef9`，面板用半透明白或轻微纸张阴影。 |
+| 承载面 | 奶油纸面 `#fffef9`；设置详情页和 Decks 页面使用留白、轻纸面列表和单一虚线页边界，避免多层面板堆叠。 |
 | 文本 | 主文本炭黑 `#2c2c2c`，正文深灰 `#333`，辅助棕灰；禁止亮橙作正文强调。 |
 | 字体 | 英文优先 `Excalifont`/Georgia，中文优先 `Xiaolai`，控件用系统无衬线。 |
 | 边框 | 纸面分隔线 `#d0c4b0`（暖棕），控件线 `#e0e0e0`（中性灰）。 |
@@ -27,13 +29,13 @@ Ink & Memory 亮色主题的关键词是 **"暖纸张、手写笔记本、安静
 |---|---:|---|
 | Warm Canvas | `#f8f0e6` | App 整体背景。 |
 | Paper Surface | `#fffef9` | 编辑区、消息流、弹窗主体。 |
-| Soft Surface | `rgba(255,255,255,0.5)` | 设置卡片、文件信息组。 |
+| Soft Surface | `rgba(255,255,255,0.5)` | 设置轻分区、文件信息组、低强调列表容器。 |
 | Solid Surface | `#ffffff` | 菜单、Tooltip、Popover。 |
 | Charcoal | `#2c2c2c` | 主文本、主操作、焦点线。 |
 | Ink Text | `#333333` | 正文内容。 |
 | Secondary Text | `#666666` | 元信息、图标默认。 |
 | Muted Text | `#8a7a69` | placeholder、时间戳、说明。 |
-| Paper Border | `#d0c4b0` | 卡片、输入区、分隔线。 |
+| Paper Border | `#d0c4b0` | 纸面页边界、输入区、分隔线；可经 `color-mix` 派生虚线边界。 |
 | Neutral Border | `#e0e0e0` | 工具条按钮、文件卡边框。 |
 | Link Blue | `#4a90e2` | 链接、发送可用态。 |
 | Link Blue Hover | `#357abd` | 链接/发送按钮 hover 态。 |
@@ -57,7 +59,7 @@ Ink & Memory 亮色主题的关键词是 **"暖纸张、手写笔记本、安静
 |---|---:|---|
 | `--color-bg-app` | `#f8f0e6` | App 背景 |
 | `--color-bg-paper` | `#fffef9` | 主阅读/编辑面 |
-| `--color-bg-surface` | `rgba(255,255,255,0.5)` | 次级半透明面板 |
+| `--color-bg-surface` | `rgba(255,255,255,0.5)` | 次级半透明承载面 / 轻分区 |
 | `--color-bg-surface-solid` | `#ffffff` | 不透明浮层 |
 | `--color-bg-overlay` | `rgba(0,0,0,0.5)` | Modal 遮罩 |
 | `--color-bg-hover` | `rgba(0,0,0,0.05)` | 控件 hover 叠层 |
@@ -79,7 +81,7 @@ Ink & Memory 亮色主题的关键词是 **"暖纸张、手写笔记本、安静
 | `--color-state-danger` | `#dd4444` | 破坏性操作 |
 | `--color-state-danger-hover` | `#bb3333` | 破坏性操作 hover |
 | `--color-disabled-bg` | `#cccccc` | 禁用态背景 |
-| `--color-shadow-soft` | `rgba(0,0,0,0.08)` | 卡片轻阴影 |
+| `--color-shadow-soft` | `rgba(0,0,0,0.08)` | 少量卡片 / 浮层轻阴影；普通列表行不用 |
 | `--color-shadow-medium` | `rgba(0,0,0,0.15)` | Popover/菜单阴影 |
 | `--color-scrollbar-thumb` | `#cccccc` | 滚动条滑块 |
 | `--color-scrollbar-thumb-hover` | `#999999` | 滚动条滑块 hover |
@@ -121,11 +123,13 @@ Ink & Memory 亮色主题的关键词是 **"暖纸张、手写笔记本、安静
 
 ## 6. 使用规则
 
-- 页面背景 `--color-bg-app`；内容区 `--color-bg-paper`；轻面板 `--color-bg-surface`。
+- 页面背景 `--color-bg-app`；内容区 `--color-bg-paper`；轻分区 / 轻列表容器 `--color-bg-surface` 或 `--color-bg-paper` 透明混合。
 - 链接/发送可用 `--color-action-link`；hover 用 `--color-action-link-hover`。
 - 主操作按钮背景 `--color-action-primary`，前景 `--color-text-on-action`。
 - 状态色小面积使用，不单独用颜色传达信息（需配文字或图标）。
 - 不新增孤立十六进制；新需求先映射到现有 token。
+- Settings 连接器详情页只保留一个 `--color-border-paper` 派生的虚线页边界；资源行使用透明或浅纸面列表容器、细分隔线和右侧对勾表达选中态，不使用深色背景、外框卡片或投影。
+- Decks 页面只保留页面级虚线纸边界；deck item 使用浅纸面容器、细边界和小面积 accent，主按钮使用炭黑 / 纸面反差，不使用渐变图标、彩色整卡边框或普通 item 阴影。
 
 ---
 

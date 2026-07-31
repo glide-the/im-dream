@@ -19,7 +19,7 @@
 # [Sync] 2026-05-11: include Claude Code interleaved-thinking disable env in SDK propagation diagnostics.
 # [Sync] 2026-05-24: diagnose direct ANTHROPIC_AUTH_TOKEN auth.
 # [Sync] 2026-05-12: enrich the on_error path with SDK-call context **without changing the exception type** — the SDK's Query._read_messages strips the original ProcessError(message, exit_code, stderr) down to ``str(e)`` before re-raising, so by the time the runner's ``except Exception`` runs we only have a generic "Command failed with exit code 1" string.  The except block now (a) keeps the original exception object untouched (``run_error = exc`` for non-group exceptions, preserving downstream ``isinstance`` checks like ``test_sdk_error_sets_success_false``'s ``assertIsInstance(errors[0], RuntimeError)``); (b) attaches a structured ``[claude_agent_kit] sdk_call_context: resume=… thread_id=… cwd=… model=…`` PEP-678 note via ``run_error.add_note(...)`` so formatted tracebacks and ``getattr(exc, '__notes__', [])`` consumers see the failing session; (c) attaches a second ``[claude_agent_kit] cli_stderr: …`` note when the SDK ``debug_stderr`` buffer captured anything; (d) emits a single ``logger.exception`` with all the structured fields plus traceback for log aggregators.  ``ExceptionGroup`` is the only case that still gets re-wrapped into a plain Exception (its default ``str()`` is unreadable and downstream typed handlers gain nothing from the group wrapper).  The Service-side ``on_error`` SSE frame composes the user-facing ``errorText`` by joining ``str(error)`` with the notes via ``" | "`` so the rich context surfaces through the existing SSE schema unchanged.
-# [Sync] 2026-05-12: widen run_streaming's exception catch from ``except Exception`` to ``except BaseException`` so anyio TaskGroup ``BaseExceptionGroup`` wrappers actually fire ``callbacks.on_error`` and surface as ``AgentRunResult(success=False)``.  Root cause: ``claude_code_sdk._internal.query.Query._read_messages`` catches the CLI failure, logs ``ERROR Fatal error in message reader: Command failed with exit code 1``, and reshapes it into a synthetic ``{"type":"error"}`` stream message; ``Query.receive_messages`` raises a plain ``Exception`` from that sentinel; ``async with ClaudeSDKClient`` ``__aexit__`` then cancels the still-running write / control sibling tasks, raising ``CancelledError`` (a ``BaseException`` subclass), and the SDK's TaskGroup packages everything into a ``BaseExceptionGroup``.  ``BaseExceptionGroup`` is **not** an ``Exception`` subclass, so the previous ``except Exception`` silently let the failure propagate past the runner — ``on_error`` never fired, ``success`` kept its default ``True``, and the caller saw a half-finished stream with no error frame.  New ``_is_pure_cancellation(exc)`` helper distinguishes "every leaf is ``CancelledError``" (true outer cancel — re-raise so the FastAPI / pytest task hierarchy still unwinds) from "at least one non-cancelled leaf" (the typical CLI-failure-plus-sibling-cancel group — fall through to the existing diagnostic-enrichment + ``on_error`` path).  The group-flattening branch is also widened from ``_EXCEPTION_GROUP_TYPES`` to ``_BASE_EXCEPTION_GROUP_TYPES`` so ``BaseExceptionGroup`` (which ``ExceptionGroup`` is now a subclass of, per PEP 654) gets the same readable-message treatment instead of leaving the ugly default group ``str()`` in the SSE error frame.  Bare non-cancelled ``BaseException`` leaves (``KeyboardInterrupt`` / ``SystemExit``) are wrapped into a plain ``Exception`` for the same SSE-serialisation reason.  No service-side change required: ``execute_session`` already routes ``result.success is False`` to a ``{"type":"error","errorText":...}`` SSE frame, and the existing ``except BaseException`` + ``_exception_group_contains_cancelled`` re-raise stays as the *outer* cancel safety net for cases the runner re-raises from ``_is_pure_cancellation``.
+# [Sync] 2026-05-12: widen run_streaming's exception catch from ``except Exception`` to ``except BaseException`` so anyio TaskGroup ``BaseExceptionGroup`` wrappers actually fire ``callbacks.on_error`` and surface as ``AgentRunResult(success=False)``.  Root cause: ``claude_agent_sdk._internal.query.Query._read_messages`` catches the CLI failure, logs ``ERROR Fatal error in message reader: Command failed with exit code 1``, and reshapes it into a synthetic ``{"type":"error"}`` stream message; ``Query.receive_messages`` raises a plain ``Exception`` from that sentinel; ``async with ClaudeSDKClient`` ``__aexit__`` then cancels the still-running write / control sibling tasks, raising ``CancelledError`` (a ``BaseException`` subclass), and the SDK's TaskGroup packages everything into a ``BaseExceptionGroup``.  ``BaseExceptionGroup`` is **not** an ``Exception`` subclass, so the previous ``except Exception`` silently let the failure propagate past the runner — ``on_error`` never fired, ``success`` kept its default ``True``, and the caller saw a half-finished stream with no error frame.  New ``_is_pure_cancellation(exc)`` helper distinguishes "every leaf is ``CancelledError``" (true outer cancel — re-raise so the FastAPI / pytest task hierarchy still unwinds) from "at least one non-cancelled leaf" (the typical CLI-failure-plus-sibling-cancel group — fall through to the existing diagnostic-enrichment + ``on_error`` path).  The group-flattening branch is also widened from ``_EXCEPTION_GROUP_TYPES`` to ``_BASE_EXCEPTION_GROUP_TYPES`` so ``BaseExceptionGroup`` (which ``ExceptionGroup`` is now a subclass of, per PEP 654) gets the same readable-message treatment instead of leaving the ugly default group ``str()`` in the SSE error frame.  Bare non-cancelled ``BaseException`` leaves (``KeyboardInterrupt`` / ``SystemExit``) are wrapped into a plain ``Exception`` for the same SSE-serialisation reason.  No service-side change required: ``execute_session`` already routes ``result.success is False`` to a ``{"type":"error","errorText":...}`` SSE frame, and the existing ``except BaseException`` + ``_exception_group_contains_cancelled`` re-raise stays as the *outer* cancel safety net for cases the runner re-raises from ``_is_pure_cancellation``.
 # [Sync] 2026-05-24: keep run_streaming's BaseException diagnostic log on logger.exception so backend logs include the caught traceback while on_error still receives the enriched run_error.
 # [Sync] 2026-05-24: rename _REQUEST_MODEL_OVERRIDE_ENV_KEY from PAWKEYLAND_CLAUDE_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE to INK_AGENT_ALLOW_REQUEST_MODEL_OVERRIDE; keep legacy key as fallback in _apply_request_model_override_if_allowed for zero-downtime migration.
 # [Sync] 2026-05-24: move _inject_mem0_session_hook_env and _verify_claude_sdk_env_for_query_stream calls inside run_streaming's try/except BaseException block so any raised exception is caught and routed to callbacks.on_error → SSE error frame; raise RuntimeError in _verify_claude_sdk_env_for_query_stream when no auth key is present instead of silently returning.
@@ -78,6 +78,94 @@
 #                    workspace without requiring a custom allowedTools override.
 # [Sync] 2026-06-21: enforce Settings sandbox_network_mode="disabled" in
 #                    PreToolUse before full-access or low-sensitivity allows.
+# [Sync] 2026-07-20: claude-plan — inject per-thread CLAUDE_CONFIG_DIR via
+#                    apply_plan_mode_env_to_options after sdk_options
+#                    construction; classify EnterPlanMode/ExitPlanMode as
+#                    low-sensitivity auto-allow (official ExitPlanMode ask
+#                    semantics deviation recorded in
+#                    claude-agent-permission-policy.md); add PostToolUse
+#                    plan-file observer hook with INK_AGENT_PLAN_EMIT_DEBOUNCE_MS
+#                    debounce firing callbacks.on_plan_file_changed.
+# [Sync] 2026-07-20: claude-todo — DEFAULT_ALLOWED_TOOLS gains the v2 task
+#                    tools (TaskCreate/TaskUpdate/TaskList/TaskGet); all five
+#                    todo tools (+TodoWrite) classified low-sensitivity
+#                    auto-allow (TaskUpdate non-read-only deviation recorded in
+#                    claude-agent-permission-policy.md §3); INK_AGENT_TASK_V2_ENABLED-
+#                    gated apply_task_v2_env_to_options injects
+#                    CLAUDE_CODE_ENABLE_TASKS/CLAUDE_CODE_TASK_LIST_ID; add
+#                    PostToolUse task observer hook with
+#                    INK_AGENT_TODO_EMIT_DEBOUNCE_MS debounce firing
+#                    callbacks.on_tasks_changed with derived TodoItem dicts.
+# [Sync] 2026-07-23: SandboxPermissionRequest runtime-proxy channel — wire
+#                    ClaudeAgentOptions.can_use_tool=_can_use_tool: the CLI's
+#                    sandbox-runtime network ask ("SandboxNetworkAccess",
+#                    input {"host"}) is a system-level control request invisible
+#                    to PreToolUse; route it through the frontend confirmation
+#                    side-channel with confirmationKind="sandbox_network" +
+#                    networkRequest{host, policyMode, matchedAllowedDomain}.
+#                    Approved → PermissionResultAllow(updated_input);
+#                    rejected/failure/timeout → PermissionResultDeny mentioning
+#                    the host and the Settings allowedDomains remedy; any
+#                    exception fails closed.  Other tool names route through the
+#                    same generic chain (rare per official contract — the hook
+#                    resolves tools first, so no double-prompting).
+# [Sync] 2026-07-26: REMOVE the PreToolUse-layer network gate added 2026-07-23
+#                    (step ②.5 _apply_sandbox_network_permission plus the
+#                    _match_sandbox_network_allowed_domain /
+#                    _extract_network_tool_host / _is_ip_literal helpers, the
+#                    full-access/low-sensitivity skip guards, the step ⑦
+#                    payload discriminator, and the AgentRunOptions
+#                    sandbox_network_allowed_domains plumbing).  Rationale:
+#                    network policy is a system-level control enforced by
+#                    Claude Code's own sandbox (sandbox.network written into
+#                    per-thread .claude/settings.json by workspace.py) whose
+#                    asks arrive exclusively via can_use_tool — the PreToolUse
+#                    gate was wrong-layer duplication.  The hook's decision
+#                    flow returns to its pre-feature shape; can_use_tool is
+#                    now the single network-confirmation channel.  With one
+#                    trigger source left, the networkRequest.source field is
+#                    dropped entirely.
+# [Sync] 2026-07-26: SDK migration claude-code-sdk 0.0.25 → claude-agent-sdk
+#                    0.2.128 (package + ClaudeCodeOptions→ClaudeAgentOptions
+#                    rename).  Required for can_use_tool: 0.0.25 serializes
+#                    control responses in the old {"allow": true} dialect,
+#                    which the deployed CLI rejects (permissionToolOutputSchema
+#                    expects {behavior:"allow", updatedInput}); the new SDK
+#                    emits the correct shape.  Non-mechanical adaptations:
+#                    (1) debug_stderr file object is deprecated/unread — CLI
+#                    stderr capture now registers an options.stderr callback
+#                    via _make_cli_stderr_capture, so the
+#                    "debug-to-stderr" _StderrSentinelArgs hack is retired
+#                    (class kept for reference only); (2) the new transport
+#                    prefers its bundled CLI over system `claude`
+#                    (cli_path option overrides); (3) extra_args passthrough,
+#                    hooks dict format, include_partial_messages, resume, and
+#                    the ClaudeSDKClient query/receive_response API are
+#                    unchanged.  Advisory CanUseToolShadowedWarning may fire
+#                    once per process because allowed_tools contains
+#                    whole-tool entries alongside can_use_tool — intentional.
+# [Sync] 2026-07-26: HOTFIX — replace all ~25 HookJSONOutput(...) constructor
+#                    calls with plain dict literals.  In claude-agent-sdk
+#                    0.2.128 HookJSONOutput is a Union of TypedDicts
+#                    (types.py:561), NOT callable, so every constructor call
+#                    raised TypeError: 'types.UnionType' object is not
+#                    callable.  Two production symptoms, one root cause:
+#                    (a) PostToolUse plan-file/tasks observers crashed with
+#                    visible tracebacks; (b) PreToolUse allow/deny decisions
+#                    were silently dropped — the hook errored out, the CLI
+#                    received no decision and executed the tool even after the
+#                    user rejected it in the confirmation dialog.  Hook
+#                    callbacks now return plain dicts per the official
+#                    contract: {} for no-op, {"hookSpecificOutput":
+#                    {"hookEventName": ..., "permissionDecision": "allow|deny",
+#                    "permissionDecisionReason": ..., "updatedInput": ...}}
+#                    for decisions.  The import is kept for return-type
+#                    annotations only (the Union IS the correct type).  No
+#                    decision logic, key names, or behavior changed.
+# [Sync] 2026-07-26: wire apply_cli_path_to_options into options assembly
+#                    (before plan/task env injection) so the system/npm CLI —
+#                    Docker's apply-seccomp-patched runtime — is not shadowed
+#                    by the SDK bundled CLI (bundled-first _find_cli in 0.2.128).
 
 """Claude Agent Runner.
 
@@ -99,21 +187,26 @@ import re
 import shlex
 import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
-from claude_code_sdk.types import (  # type: ignore[import-untyped]
+from claude_agent_sdk.types import (  # type: ignore[import-untyped]
     AssistantMessage,
-    ClaudeCodeOptions,
+    ClaudeAgentOptions,
     HookContext,
     HookJSONOutput,
     HookMatcher,
     McpServerConfig,
     McpStdioServerConfig,
+    PermissionResult,
+    PermissionResultAllow,
+    PermissionResultDeny,
     ResultMessage,
     StreamEvent,
     SystemMessage,
+    ToolPermissionContext,
     UserMessage,
 )
 
@@ -130,7 +223,14 @@ from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
-from .sdk_env import apply_project_sdk_runtime_options, apply_user_sdk_env_to_options
+from .sdk_env import (
+    apply_cli_path_to_options,
+    apply_plan_mode_env_to_options,
+    apply_project_sdk_runtime_options,
+    apply_task_v2_env_to_options,
+    apply_user_sdk_env_to_options,
+)
+from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +264,13 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     "NotebookRead",
     "TodoRead",
     "TodoWrite",
+    # Claude Code v2 file-task tools (claude-todo §5.7).  Whether the CLI
+    # actually exposes them is decided by the official isTodoV2Enabled()
+    # (mutually exclusive with TodoWrite); listing them here is harmless.
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskList",
+    "TaskGet",
     "Bash",
     "BashOutput",
     "Skill",
@@ -219,6 +326,21 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
     # Source check: restored-src/src/tools/SkillTool/constants.ts exports
     # SKILL_TOOL_NAME = "Skill".
     "Skill",
+    # Claude Code Plan Mode session-state tools.  Neither mutates user
+    # content directly; official ExitPlanMode ask semantics are downgraded
+    # to low-sensitivity per claude-agent-permission-policy.md §3 deviation
+    # record (claude-plan §5.7, 2026-07-20).
+    "EnterPlanMode",
+    "ExitPlanMode",
+    # Claude Code todo/task-list tools (v1 TodoWrite + v2 file tasks).
+    # All five are session-metadata operations confined to the per-thread
+    # workspace; the TaskUpdate non-read-only deviation is recorded in
+    # claude-agent-permission-policy.md §3 (claude-todo §5.7, 2026-07-20).
+    "TodoWrite",
+    "TaskCreate",
+    "TaskUpdate",
+    "TaskList",
+    "TaskGet",
     # SDK / MCP resource discovery and reads, where available.
     "ListMcpResources",
     "ReadMcpResource",
@@ -393,24 +515,48 @@ def _apply_disabled_network_permission(
     if sandbox_network_mode != "disabled":
         return None
     if tool_name in _NETWORK_TOOL_NAMES:
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "deny",
                 "permissionDecisionReason": "代理网络访问已关闭，禁止网络访问。",
             }
-        )
+        }
     if tool_name == "Bash":
         command = str((tool_input or {}).get("command") or "").strip()
         if _is_network_bash_command(command):
-            return HookJSONOutput(
-                hookSpecificOutput={
+            return {
+                "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
                     "permissionDecisionReason": "代理网络访问已关闭，禁止执行网络命令。",
                 }
-            )
+            }
     return None
+
+
+# ---------------------------------------------------------------------------
+# SandboxPermissionRequest — runtime-proxy network approval (can_use_tool)
+#
+# Design: docs/design/claude-agent/claude-agent-sandbox-network-permission-tool.md
+# Network policy is a system-level control enforced by Claude Code's own
+# sandbox (sandbox.network written into per-thread .claude/settings.json by
+# workspace.py).  The CLI's runtime asks arrive exclusively via the SDK
+# ``can_use_tool`` control channel — there is deliberately NO PreToolUse-layer
+# network gate (the earlier step ②.5 was removed 2026-07-26 as wrong-layer
+# duplication).
+# ---------------------------------------------------------------------------
+
+# Discriminator attached to the confirmation payload (and the SSE
+# ``tool-approval-request`` frame) so the frontend can render the
+# network-variant confirmation card.  Absent for generic confirmations.
+SANDBOX_NETWORK_CONFIRMATION_KIND = "sandbox_network"
+
+# Tool name used by the CLI's sandbox-runtime network ask, delivered through
+# the SDK ``can_use_tool`` control channel (not PreToolUse) when sandboxed Bash
+# hits a non-allowlisted host at the runtime proxy
+# (restored-src cli/structuredIO.ts).  Input shape: ``{"host": <hostname>}``.
+SANDBOX_NETWORK_ACCESS_TOOL_NAME = "SandboxNetworkAccess"
 
 # Tool names that have specialized confirmation semantics. Auto mode now uses
 # sensitivity classes: explicit query/context-selection/Skill tools can run,
@@ -483,7 +629,7 @@ _REQUEST_MODEL_OVERRIDE_ENV_KEY_LEGACY = (
 )
 
 
-def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeCodeOptions) -> None:
+def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> None:
     """Log Claude SDK subprocess env propagation status without exposing secrets."""
 
     existing_env = getattr(sdk_options, "env", None)
@@ -553,7 +699,7 @@ def _set_env_aliases(
 
 
 def _apply_request_model_override_if_allowed(
-    sdk_options: ClaudeCodeOptions,
+    sdk_options: ClaudeAgentOptions,
     requested_model: Optional[str],
 ) -> None:
     """Apply request-level model only when explicitly enabled by project env."""
@@ -589,7 +735,7 @@ def _apply_request_model_override_if_allowed(
 
 
 def _inject_mem0_session_hook_env(
-    sdk_options: ClaudeCodeOptions,
+    sdk_options: ClaudeAgentOptions,
     request_env: Optional[dict[str, str]],
 ) -> None:
     """Expose the app-resolved Mem0 binding to Claude Code lifecycle hooks."""
@@ -629,10 +775,38 @@ def _inject_mem0_session_hook_env(
 
 
 class _StderrSentinelArgs(dict):  # type: ignore[type-arg]
-    """Enable SDK stderr capture without adding an unsupported CLI flag."""
+    """Enable SDK stderr capture without adding an unsupported CLI flag.
+
+    Only used with the legacy claude-code-sdk (<0.1) transport, which gates
+    stderr piping on ``"debug-to-stderr" in extra_args``.  Retained for
+    reference; the current claude-agent-sdk transport pipes stderr whenever an
+    ``options.stderr`` callback is registered, so new code must NOT rely on
+    this sentinel (see ``_make_cli_stderr_capture``).
+    """
 
     def __contains__(self, item: object) -> bool:  # type: ignore[override]
         return item == "debug-to-stderr" or super().__contains__(item)
+
+
+def _make_cli_stderr_capture(buf: Any) -> Callable[[str], None]:
+    """Return an SDK ``stderr`` callback appending CLI stderr lines to *buf*.
+
+    claude-agent-sdk (>=0.1) deprecates ``ClaudeAgentOptions.debug_stderr``
+    (no longer read by the transport); CLI stderr is piped only when an
+    ``options.stderr`` callback is registered, and delivered line-by-line.
+    The runner keeps its TemporaryFile buffer contract for the on_error
+    diagnostic notes by funnelling those lines through this callback.
+    Diagnostics must never break a run, so every failure is swallowed.
+    """
+
+    def _capture(line: str) -> None:
+        try:
+            buf.write(line.encode("utf-8", errors="replace") + b"\n")
+            buf.flush()
+        except Exception:  # noqa: BLE001
+            pass
+
+    return _capture
 
 
 def _iter_exception_leaves(exc: BaseException) -> list[BaseException]:
@@ -859,8 +1033,8 @@ def _apply_editor_index_redirect(
 ) -> Optional[HookJSONOutput]:
     """Apply `.editor/` virtual-index redirect for a PreToolUse Read call.
 
-    Returns a :class:`HookJSONOutput` whose ``updatedInput`` points to a freshly
-    written tempfile when all three conditions are satisfied:
+    Returns a hook output dict whose ``hookSpecificOutput.updatedInput`` points
+    to a freshly written tempfile when all three conditions are satisfied:
 
     1. ``tool_name == "Read"``
     2. ``editor_state`` is not ``None``
@@ -910,13 +1084,13 @@ def _apply_editor_index_redirect(
             raw_path,
             tmp_path,
         )
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
                 "updatedInput": {"file_path": tmp_path},
             }
-        )
+        }
     except Exception:  # noqa: BLE001
         logger.warning(
             "Failed to intercept .editor/ read for %r; falling through.",
@@ -964,8 +1138,8 @@ def _workspace_boundary_deny(reason_path: str) -> HookJSONOutput:
     """Return a hard deny for built-in file/search tools outside thread cwd."""
 
     display_path = reason_path or "."
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",
             "permissionDecisionReason": (
@@ -973,7 +1147,7 @@ def _workspace_boundary_deny(reason_path: str) -> HookJSONOutput:
                 f"only access the current thread workspace; rejected path {display_path!r}."
             ),
         }
-    )
+    }
 
 
 def _apply_workspace_boundary_permission(
@@ -999,12 +1173,12 @@ def _apply_workspace_boundary_permission(
         return _workspace_boundary_deny(raw_path)
 
     if auto_allow_queries and tool_name in _WORKSPACE_QUERY_PERMISSION_TOOLS:
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
             }
-        )
+        }
 
     return None
 
@@ -1042,6 +1216,128 @@ def _is_path_inside_workspace_files(raw_path: str, cwd: Optional[str]) -> bool:
         return False
 
 
+# ---------------------------------------------------------------------------
+# Plan Mode plan-file observation (claude-plan §5.3)
+# ---------------------------------------------------------------------------
+
+# Built-in file-mutation tools whose writes can land in the plans directory.
+_PLAN_FILE_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
+    "Write",
+    "Edit",
+    "MultiEdit",
+})
+
+
+def _plan_emit_debounce_seconds() -> float:
+    """Return the plan-file emit debounce window (seconds) from env config."""
+
+    try:
+        raw = os.getenv("INK_AGENT_PLAN_EMIT_DEBOUNCE_MS", "500") or "500"
+        return max(0.0, float(raw)) / 1000.0
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _resolve_plans_dir_for_cwd(cwd: Optional[str]) -> Optional[Path]:
+    """Return the current run's plans dir, delegating to ``get_plans_dir()``.
+
+    The service layer always sets cwd to the per-thread workspace root
+    (``{workspace_root}/{thread_id}``), so the workspace session_id is the
+    resolved cwd basename.  Returns ``None`` when cwd is empty (Workspace
+    Mode disabled), lies outside the workspace root (e.g. ad-hoc unit-test
+    dirs), or no plans directory exists yet.
+    """
+
+    if not cwd:
+        return None
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        workspace.relative_to(get_workspace_root().resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    try:
+        return get_plans_dir(workspace.name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Task v2 file-task observation (claude-todo §5.3)
+# ---------------------------------------------------------------------------
+
+# Built-in v2 task tools whose execution mutates the tasks directory.
+# TaskList/TaskGet are read-only and never trigger an emission.
+_TASK_V2_WRITE_TOOL_NAMES: frozenset[str] = frozenset({
+    "TaskCreate",
+    "TaskUpdate",
+})
+
+
+def _todo_emit_debounce_seconds() -> float:
+    """Return the todo emit debounce window (seconds) from env config."""
+
+    try:
+        raw = os.getenv("INK_AGENT_TODO_EMIT_DEBOUNCE_MS", "500") or "500"
+        return max(0.0, float(raw)) / 1000.0
+    except (TypeError, ValueError):
+        return 0.5
+
+
+def _resolve_tasks_dir_for_cwd(cwd: Optional[str]) -> Optional[Path]:
+    """Return the current run's tasks dir, delegating to ``get_tasks_dir()``.
+
+    Mirrors ``_resolve_plans_dir_for_cwd``: the workspace session_id is the
+    resolved cwd basename.  Returns ``None`` when cwd is empty (Workspace
+    Mode disabled), lies outside the workspace root, or no v2 tasks have
+    been written yet.
+    """
+
+    if not cwd:
+        return None
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        workspace.relative_to(get_workspace_root().resolve(strict=False))
+    except (OSError, RuntimeError, ValueError):
+        return None
+    try:
+        return get_tasks_dir(workspace.name)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _plan_file_path_for_hook(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+) -> Optional[Path]:
+    """Return the resolved plan file path when a write tool targets the plans dir.
+
+    Only built-in ``Write``/``Edit``/``MultiEdit`` calls whose resolved path
+    stays inside ``get_plans_dir()`` and ends in ``.md`` qualify; everything
+    else returns ``None`` so the PostToolUse hook no-ops.
+    """
+
+    if tool_name not in _PLAN_FILE_WRITE_TOOL_NAMES or not cwd:
+        return None
+    raw_path = _extract_builtin_file_tool_path(tool_input)
+    if not raw_path:
+        return None
+    plans_dir = _resolve_plans_dir_for_cwd(cwd)
+    if plans_dir is None:
+        return None
+    try:
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = Path(cwd).expanduser().resolve(strict=False) / candidate
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(plans_dir)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if resolved.suffix.lower() != ".md":
+        return None
+    return resolved
+
+
 def _apply_workspace_files_permission(
     tool_name: str,
     tool_input: dict[str, Any],
@@ -1063,12 +1359,12 @@ def _apply_workspace_files_permission(
     if not _is_path_inside_workspace_files(raw_path, cwd):
         return None
 
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
         }
-    )
+    }
 
 
 def _apply_low_sensitivity_query_permission(
@@ -1077,7 +1373,7 @@ def _apply_low_sensitivity_query_permission(
 ) -> Optional[HookJSONOutput]:
     """Explicitly allow auto-mode tools whose product class is low-sensitivity.
 
-    Returning an empty ``HookJSONOutput()`` would merely decline to make a hook
+    Returning an empty ``{}`` would merely decline to make a hook
     decision and let Claude Code's own permission layer decide. These low-risk
     query tools should skip both the frontend confirmation side-channel and
     Claude Code's native permission prompt in auto mode, so the hook must return
@@ -1089,22 +1385,22 @@ def _apply_low_sensitivity_query_permission(
     """
 
     if tool_name in _LOW_SENSITIVITY_QUERY_TOOL_NAMES:
-        return HookJSONOutput(
-            hookSpecificOutput={
+        return {
+            "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
                 "permissionDecision": "allow",
             }
-        )
+        }
 
     if tool_name == "Bash":
         command = str((tool_input or {}).get("command") or "").strip()
         if _is_low_sensitivity_bash_command(command):
-            return HookJSONOutput(
-                hookSpecificOutput={
+            return {
+                "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "allow",
                 }
-            )
+            }
 
     return None
 
@@ -1112,12 +1408,12 @@ def _apply_low_sensitivity_query_permission(
 def _explicit_pre_tool_use_allow() -> HookJSONOutput:
     """Return the CLI 2.1+ explicit allow shape for PreToolUse hooks."""
 
-    return HookJSONOutput(
-        hookSpecificOutput={
+    return {
+        "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "allow",
         }
-    )
+    }
 
 
 def _extract_hook_tool_name(hook_input: dict[str, Any]) -> str:
@@ -1509,13 +1805,13 @@ class ClaudeAgentRunner:
                         tool_name,
                     )
                     pending_tool_calls.pop(tool_call_id, None)
-                    return HookJSONOutput(
-                        hookSpecificOutput={
+                    return {
+                        "hookSpecificOutput": {
                             "hookEventName": "PreToolUse",
                             "permissionDecision": "deny",
                             "permissionDecisionReason": "工具确认回调异常",
                         }
-                    )
+                    }
 
                 if (
                     confirmation_result
@@ -1552,20 +1848,20 @@ class ClaudeAgentRunner:
                             # longer recognised and causes the override to be silently
                             # ignored, leaving AskUserQuestion without answers and
                             # returning isError:true / output:null).
-                            return HookJSONOutput(
-                                hookSpecificOutput={
+                            return {
+                                "hookSpecificOutput": {
                                     "hookEventName": "PreToolUse",
                                     "permissionDecision": "allow",
                                     "updatedInput": updated_input,
                                 }
-                            )
+                            }
 
-                        return HookJSONOutput(
-                            hookSpecificOutput={
+                        return {
+                            "hookSpecificOutput": {
                                 "hookEventName": "PreToolUse",
                                 "permissionDecision": "allow",
                             }
-                        )
+                        }
 
                     if confirmation_result["approved"] is False:
                         pending_tool_calls.pop(tool_call_id, None)
@@ -1573,23 +1869,139 @@ class ClaudeAgentRunner:
                             confirmation_result.get("reason")
                             or "用户拒绝执行该工具"
                         )
-                        return HookJSONOutput(
-                            hookSpecificOutput={
+                        return {
+                            "hookSpecificOutput": {
                                 "hookEventName": "PreToolUse",
                                 "permissionDecision": "deny",
                                 "permissionDecisionReason": reason,
                             }
-                        )
+                        }
 
             # No callback or no result — deny by default
             pending_tool_calls.pop(tool_call_id, None)
-            return HookJSONOutput(
-                hookSpecificOutput={
+            return {
+                "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
                     "permissionDecisionReason": "需要用户确认但未收到响应",
                 }
+            }
+
+        # ------------------------------------------------------------------
+        # can_use_tool callback (SDK control channel) — the SINGLE network
+        # confirmation channel.
+        #
+        # The CLI's sandbox-runtime network ask is a SYSTEM-LEVEL control
+        # request raised when sandboxed Bash hits a non-allowlisted host at
+        # the sandbox-runtime proxy.  It is NOT visible to PreToolUse — it
+        # arrives only through this channel as
+        #   tool_name == "SandboxNetworkAccess", input == {"host": <hostname>}
+        # (restored-src cli/structuredIO.ts).  Route it through the frontend
+        # confirmation side-channel with the sandbox_network discriminator.
+        # (The PreToolUse-layer network gate was removed 2026-07-26 — network
+        # policy is enforced by the CLI's own sandbox; this channel is the
+        # only place per-request network approval happens.)
+        #
+        # Other tool names: per the official contract, can_use_tool never
+        # fires for tools already resolved earlier in the permission flow —
+        # our PreToolUse hook returns explicit allow/deny for everything, so
+        # this branch should rarely fire (no double-prompting).  It still
+        # routes through the same generic confirmation chain for consistent
+        # UX and future-proofing.
+        #
+        # Always fail closed: any exception or missing callback denies.
+        # ------------------------------------------------------------------
+
+        async def _can_use_tool(
+            tool_name: str,
+            input_data: dict[str, Any],
+            context: ToolPermissionContext,
+        ) -> PermissionResult:
+            del context
+            is_sandbox_network_ask = tool_name == SANDBOX_NETWORK_ACCESS_TOOL_NAME
+            host = (
+                str(input_data.get("host") or "").strip().lower() or None
+                if is_sandbox_network_ask and isinstance(input_data, dict)
+                else None
             )
+
+            def _sandbox_deny(reason: str) -> PermissionResultDeny:
+                target = host or "unknown host"
+                return PermissionResultDeny(
+                    message=(
+                        f"{reason}（目标主机：{target}。如需长期放行，"
+                        "可在设置中将该域名加入沙箱网络 allowedDomains。）"
+                    )
+                )
+
+            if not callbacks.on_tool_confirmation_request:
+                if is_sandbox_network_ask:
+                    return _sandbox_deny("网络访问需要用户确认，但确认通道不可用")
+                return PermissionResultDeny(message="需要用户确认但未收到响应")
+
+            tool_call_id = str(uuid4())
+            confirmation_payload: dict[str, Any] = {
+                "tool_call_id": tool_call_id,
+                "tool_name": tool_name,
+                "input": input_data,
+            }
+            if is_sandbox_network_ask:
+                confirmation_payload["confirmationKind"] = (
+                    SANDBOX_NETWORK_CONFIRMATION_KIND
+                )
+                confirmation_payload["networkRequest"] = {
+                    "host": host,
+                    "policyMode": sandbox_network_mode,
+                    "matchedAllowedDomain": None,
+                }
+
+            try:
+                confirmation_result = await _await_confirmation(
+                    callbacks.on_tool_confirmation_request,
+                    confirmation_payload,
+                    host_loop=host_loop,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 — fail closed
+                logger.warning(
+                    "can_use_tool confirmation failed: tool_name=%s host=%s",
+                    tool_name,
+                    host,
+                    exc_info=True,
+                )
+                if is_sandbox_network_ask:
+                    return _sandbox_deny("网络访问确认失败，已拦截")
+                return PermissionResultDeny(message="工具确认回调异常")
+
+            if (
+                confirmation_result
+                and isinstance(confirmation_result, dict)
+                and confirmation_result.get("approved") is True
+            ):
+                updated_input: dict[str, Any] = dict(input_data or {})
+                # Mirror PreToolUse step ⑦: merge frontend answers into the
+                # input for AskUserQuestion-style tools so Claude receives
+                # the collected responses.
+                if confirmation_result.get("answers") and tool_name in (
+                    "AskUserQuestion",
+                    "mcp__user__ask_user",
+                    "mcp__user__touch_animation",
+                ):
+                    updated_input = {
+                        **updated_input,
+                        "answers": confirmation_result["answers"],
+                    }
+                return PermissionResultAllow(updated_input=updated_input)
+
+            reason = (
+                (confirmation_result or {}).get("reason")
+                if isinstance(confirmation_result, dict)
+                else None
+            )
+            if is_sandbox_network_ask:
+                return _sandbox_deny(reason or "用户拒绝了该网络访问")
+            return PermissionResultDeny(message=reason or "用户拒绝执行该工具")
 
         # ------------------------------------------------------------------
         # PostToolUse hook
@@ -1614,14 +2026,14 @@ class ClaudeAgentRunner:
 
             # Only act on the switch_editor context-switch tool.
             if tool_name != _SWITCH_EDITOR_MCP_TOOL_NAME:
-                return HookJSONOutput()
+                return {}
 
             if opts.editor_state_setter is None:
                 logger.warning(
                     "PostToolUse: switch_editor fired but editor_state_setter is None; "
                     "skipping context switch."
                 )
-                return HookJSONOutput()
+                return {}
 
             tool_input = _extract_hook_tool_input(hook_input)
             new_session_id: str = str(tool_input.get("editor_session_id") or "").strip()
@@ -1630,7 +2042,7 @@ class ClaudeAgentRunner:
                     "PostToolUse: switch_editor missing editor_session_id; "
                     "context switch skipped."
                 )
-                return HookJSONOutput()
+                return {}
 
             try:
                 new_state = await asyncio.to_thread(load_editor_state_from_db, new_session_id)
@@ -1640,7 +2052,7 @@ class ClaudeAgentRunner:
                     new_session_id,
                     exc_info=True,
                 )
-                return HookJSONOutput()
+                return {}
 
             if new_state:
                 opts.editor_state_setter(new_state)
@@ -1654,7 +2066,90 @@ class ClaudeAgentRunner:
                     new_session_id,
                 )
 
-            return HookJSONOutput()
+            return {}
+
+        # ------------------------------------------------------------------
+        # PostToolUse hook — Plan Mode plan-file observer (claude-plan §5.3)
+        # Fired after built-in Write/Edit/MultiEdit calls; when the resolved
+        # target path lands inside the thread workspace plans dir, notify the
+        # service layer via callbacks.on_plan_file_changed so it can re-read
+        # the plan and emit a plan-updated SSE frame.  Emissions are debounced
+        # per resolved file path per turn (INK_AGENT_PLAN_EMIT_DEBOUNCE_MS,
+        # default 500ms, leading-edge) — the ExitPlanMode final read in the
+        # service layer always captures the terminal version.  This hook never
+        # blocks or alters the tool flow.
+        # ------------------------------------------------------------------
+        _plan_emit_last_ts: dict[str, float] = {}
+        plan_debounce_s = _plan_emit_debounce_seconds()
+
+        async def _plan_file_post_tool_use_hook(
+            hook_input: dict[str, Any],
+            tool_use_id: Optional[str],
+            context: HookContext,
+        ) -> HookJSONOutput:
+            del tool_use_id, context
+            try:
+                tool_name = _extract_hook_tool_name(hook_input)
+                tool_input = _extract_hook_tool_input(hook_input)
+                plan_path = _plan_file_path_for_hook(tool_name, tool_input, cwd)
+                if plan_path is None or callbacks.on_plan_file_changed is None:
+                    return {}
+                key = str(plan_path)
+                now = time.monotonic()
+                last_emit = _plan_emit_last_ts.get(key)
+                if last_emit is not None and (now - last_emit) < plan_debounce_s:
+                    return {}
+                _plan_emit_last_ts[key] = now
+                await _call(callbacks.on_plan_file_changed, key)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "PostToolUse: plan-file observer failed; skipping emit.",
+                    exc_info=True,
+                )
+            return {}
+
+        # ------------------------------------------------------------------
+        # PostToolUse hook — Task v2 file-task observer (claude-todo §5.3)
+        # Fired after TaskCreate/TaskUpdate calls; re-reads the thread
+        # workspace tasks dir, derives the full TodoItem list (read-time
+        # semantics: metadata._internal filtered, resolved blockers dropped)
+        # and notifies the service layer via callbacks.on_tasks_changed so it
+        # can emit a todo-updated SSE frame.  Emissions are debounced per
+        # tasks dir per turn (INK_AGENT_TODO_EMIT_DEBOUNCE_MS, default 500ms,
+        # leading-edge).  This hook never blocks or alters the tool flow.
+        # ------------------------------------------------------------------
+        _todo_emit_last_ts: dict[str, float] = {}
+        todo_debounce_s = _todo_emit_debounce_seconds()
+
+        async def _tasks_changed_post_tool_use_hook(
+            hook_input: dict[str, Any],
+            tool_use_id: Optional[str],
+            context: HookContext,
+        ) -> HookJSONOutput:
+            del tool_use_id, context
+            try:
+                tool_name = _extract_hook_tool_name(hook_input)
+                if tool_name not in _TASK_V2_WRITE_TOOL_NAMES:
+                    return {}
+                if callbacks.on_tasks_changed is None:
+                    return {}
+                tasks_dir = _resolve_tasks_dir_for_cwd(cwd)
+                if tasks_dir is None:
+                    return {}
+                key = str(tasks_dir)
+                now = time.monotonic()
+                last_emit = _todo_emit_last_ts.get(key)
+                if last_emit is not None and (now - last_emit) < todo_debounce_s:
+                    return {}
+                items, _mtime = read_task_items(tasks_dir)
+                _todo_emit_last_ts[key] = now
+                await _call(callbacks.on_tasks_changed, items)
+            except Exception:  # noqa: BLE001
+                logger.warning(
+                    "PostToolUse: task observer failed; skipping emit.",
+                    exc_info=True,
+                )
+            return {}
 
         # ------------------------------------------------------------------
         # Build SDK options
@@ -1694,27 +2189,59 @@ class ClaudeAgentRunner:
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = apply_project_sdk_runtime_options(
-            ClaudeCodeOptions(
+            ClaudeAgentOptions(
                 max_turns=max_turns,
                 allowed_tools=effective_allowed_tools,
                 include_partial_messages=include_partial_messages,
                 hooks={
                     "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])],
-                    "PostToolUse": [HookMatcher(matcher=None, hooks=[_post_tool_use_hook])],
+                    "PostToolUse": [
+                        HookMatcher(
+                            matcher=None,
+                            hooks=[
+                                _post_tool_use_hook,
+                                _plan_file_post_tool_use_hook,
+                                _tasks_changed_post_tool_use_hook,
+                            ],
+                        )
+                    ],
                 },
+                # SDK control channel for system-level permission asks the
+                # PreToolUse hook cannot see — primarily the sandbox-runtime
+                # network ask ("SandboxNetworkAccess"); routed through the same
+                # frontend confirmation side-channel.
+                can_use_tool=_can_use_tool,
                 cwd=cwd or os.getcwd(),
                 mcp_servers=mcp_servers,
             )
         )
+        # CLI binary resolution: pin cli_path to the system/npm CLI when one
+        # exists (Docker's apply-seccomp-patched runtime; local npm claude),
+        # else leave unset so the SDK falls back to its bundled CLI.  An
+        # explicit cli_path on options always wins.
+        apply_cli_path_to_options(sdk_options)
+        # Plan Mode: point CLAUDE_CONFIG_DIR at {cwd}/.claude-home so CLI plan
+        # files land in the per-thread workspace (claude-plan §5.1).  Lowest
+        # priority in the env chain: an explicit CLAUDE_CONFIG_DIR already on
+        # options.env is preserved, and the user_sdk_env merge below still
+        # overlays on top.  No-op when cwd is falsy (Workspace Mode disabled).
+        apply_plan_mode_env_to_options(sdk_options, cwd)
+        # Task v2 (claude-todo §5.1): always pin CLAUDE_CODE_TASK_LIST_ID=main
+        # at the same lowest priority (explicit values preserved; user_sdk_env
+        # below still overlays on top) so the new CLI's default-on task tools
+        # write to the list dir get_tasks_dir() resolves; the legacy
+        # INK_AGENT_TASK_V2_ENABLED gate only adds an explicit
+        # CLAUDE_CODE_ENABLE_TASKS=1.
+        apply_task_v2_env_to_options(sdk_options)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
         existing_extra_args = getattr(sdk_options, "extra_args", None)
-        sdk_options.extra_args = _StderrSentinelArgs(
-            existing_extra_args if existing_extra_args is not None else {}
-        )
+        sdk_options.extra_args = dict(existing_extra_args or {})
         if tool_choice == "none":
             sdk_options.extra_args["tools"] = ""
-        sdk_options.debug_stderr = _stderr_buf
+        # claude-agent-sdk pipes CLI stderr only when an `stderr` callback is
+        # registered (the legacy debug_stderr file object is no longer read).
+        sdk_options.stderr = _make_cli_stderr_capture(_stderr_buf)
         if resume:
             sdk_options.resume = thread_id
         _apply_request_model_override_if_allowed(sdk_options, model)
@@ -1773,7 +2300,7 @@ class ClaudeAgentRunner:
             # non-zero, the message-reader task raises a plain
             # ``Exception`` (the SDK reshapes ``ProcessError`` into a
             # synthetic ``{"type":"error"}`` stream message; see
-            # ``claude_code_sdk._internal.query.Query._read_messages`` —
+            # ``claude_agent_sdk._internal.query.Query._read_messages`` —
             # the same place that emits the visible
             # ``ERROR Fatal error in message reader: Command failed with
             # exit code 1`` log line).  As that failure unwinds, the
@@ -1809,7 +2336,7 @@ class ClaudeAgentRunner:
             # ----------------------------------------------------------
             # SDK-side diagnostic enrichment.
             #
-            # claude_code_sdk's ``Query._read_messages`` catches the
+            # claude_agent_sdk's ``Query._read_messages`` catches the
             # original ``ProcessError`` from the CLI subprocess and
             # forwards only ``str(e)`` through its in-process message
             # stream — every structured field (``exit_code`` / actual

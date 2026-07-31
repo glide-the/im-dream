@@ -79,6 +79,9 @@ Internet :80/:443
 | `REMOTE_DOCKER_COMPOSE_BIN` | `docker-compose` | 远端 Compose 命令 |
 | `REMOTE_SETUP_NGINX` | `auto` | `deploy` 自动判断是否安装/刷新主机 nginx；设为 `0` 可跳过 |
 | `REMOTE_SETUP_STORAGE` | `1` | `deploy` 自动创建/修复远端持久化目录；设为 `0` 可跳过 |
+| `REMOTE_SETUP_SWAP` | `auto` | `deploy` 在 build 前自动确保远端有足够 swap；设为 `0` 可跳过 |
+| `REMOTE_SWAP_FILE` | `/swapfile` | `setup-swap` 使用的远端 swap 文件路径 |
+| `REMOTE_SWAP_SIZE_MB` | `2048` | `setup-swap` 确保的最小 swap 总量（MB）；前端 `vite build` 单独就需要 ~1G Node 堆（mermaid/tiptap/ai sdk 依赖图），1G 内存主机没有 swap 兜底会被 OOM Killer 杀掉 |
 | `REMOTE_SETUP_SSL` | `0` | 设为 `1` 时让 nginx setup 尝试执行 certbot |
 | `REMOTE_BUILD_PULL` | `0` | 设为 `1` 时构建前拉取更新的基础镜像；重新打包本身默认每次执行，无需开关 |
 | `REMOTE_FRONTEND_PORT` | `8080` | 前端容器映射到远端 localhost 的端口 |

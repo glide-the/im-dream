@@ -1,11 +1,12 @@
 # 工作空间上下文切换设计方案
 
 Status: Implemented  
-Updated: 2026-06-09
+Updated: 2026-06-28
 Scope: 智能体在单次对话中切换 `.editor` 工作空间上下文的完整设计与实现
 
 > [Sync] 2026-06-07: 当时 Runner auto-mode 敏感度策略将 `switch_editor` 视为状态切换工具并要求确认；该策略已被 2026-06-09 低敏策略取代。
 > [Sync] 2026-06-09: 产品权限策略将 `switch_editor` 改为低敏感工具；它不修改文档内容，auto 模式下由 PreToolUse 显式 allow。
+> [Sync] 2026-06-28: 明确 Notion connector 不复用 `switch_editor`；外部资源切换由 workspace resource selection 和连接器数据层 canonical snapshot 管理。
 
 ---
 
@@ -19,6 +20,7 @@ Scope: 智能体在单次对话中切换 `.editor` 工作空间上下文的完�
 6. [时序图](#6-时序图)
 7. [实现文件索引](#7-实现文件索引)
 8. [Agent 提示工程集成](#8-agent-提示工程集成)
+9. [外部资源切换边界](#9-外部资源切换边界)
 
 ---
 
@@ -220,7 +222,7 @@ sequenceDiagram
 |------|---------|
 | `backend/libs/claude_agent_kit/server/editor_tool.py` | 新增 `SWITCH_EDITOR_TOOL_NAME` 常量、`switch_editor` 工具 spec、`load_editor_state_from_db` 公开函数、`_switch_editor()` 空操作处理器；`handle_editor_write_tool` 分派 |
 | `backend/libs/claude_agent_kit/types.py` | `AgentRunOptions` 新增 `editor_state_setter` 字段 |
-| `backend/libs/claude_agent_kit/server/agent_runner.py` | 新增 `_SWITCH_EDITOR_MCP_TOOL_NAME` 常量；在 `run_streaming` 闭包内定义 `_post_tool_use_hook`；在 `ClaudeCodeOptions.hooks` 中注册 `PostToolUse` |
+| `backend/libs/claude_agent_kit/server/agent_runner.py` | 新增 `_SWITCH_EDITOR_MCP_TOOL_NAME` 常量；在 `run_streaming` 闭包内定义 `_post_tool_use_hook`；在 `ClaudeAgentOptions.hooks` 中注册 `PostToolUse` |
 | `backend/claude_agent/service.py` | `assemble_context` 向 `AgentRunOptions` 注入 `editor_state_setter` lambda |
 | `docs/design/claude-agent/edit-point/workspace-switch.md` | 本设计文档 |
 
@@ -320,3 +322,49 @@ Step 0 — Switch context if needed: if the Editor Session ID above is NOT the t
 |------|---------|
 | `backend/claude_agent/context_builder.py` | Edit-Point Workflow 步骤重编号；Step 1 上下文检查；`switch_editor` 加入工具清单；新增 `## Switch-Editor Workflow` 章节 |
 | `backend/claude_agent/workspace_context.py` | 新增"切换工作空间上下文"条目；Document editing workflow 新增 Step 0 |
+
+---
+
+## 9. 外部资源切换边界
+
+`switch_editor` 的语义保持不变：它只切换 `.editor/` 文档会话，并更新 `AgentRunState.editor_state`。Notion connector 不是 EditorState，不应通过以下方式接入：
+
+- 不给 `switch_editor` 增加 `device="notion"` 参数。
+- 不把 Notion 页面伪装成 `editor_session_id`。
+- 不把 Notion remote data 写入 `AgentRunState.editor_state`。
+- 不让 PostToolUse 钩子在切换时直接调用 Notion API。
+
+Notion connector 的切换属于 workspace resource selection：
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant FE as Frontend Workspace UI
+    participant Service as ClaudeAgentService
+    participant Data as Connector Data Layer
+    participant Agent as Claude Agent
+
+    User->>FE: 选择 Notion connector / 点击 Refresh snapshot
+    FE->>Service: 下一轮 Agent run 携带 workspace resource selection
+    Service->>Data: get_current_snapshot(workspaceId, resourceConnectorId)
+    Data-->>Service: CanonicalWorkspaceSnapshot{snapshotVersion}
+    Service-->>Agent: workspace_context + attached snapshot identity
+    Agent->>Agent: read_file(".notion/snapshot.json")
+```
+
+未来如果需要同一 turn 内切换外部资源，应新增独立工具：
+
+```json
+{
+  "name": "switch_resource",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "resource_connector_id": { "type": "string" }
+    },
+    "required": ["resource_connector_id"]
+  }
+}
+```
+
+该工具的成功结果也只能表示“已 attach 新 canonical snapshot”。它仍然不得把 Agent 本地派生视图作为权威状态。

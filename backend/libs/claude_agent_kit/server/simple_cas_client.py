@@ -2,8 +2,10 @@
 # [Output] Provide SimpleClaudeAgentSDKClient backed by ClaudeSDKClient.
 # [Pos] adapter node in libs/claude_agent_kit/server
 # [Sync] 2026-05-08: always use ClaudeSDKClient so permission and SDK MCP control responses keep stdin open.
-# [Sync] 2026-05-08: merge project .env into ClaudeCodeOptions.env before starting ClaudeSDKClient.
+# [Sync] 2026-05-08: merge project .env into ClaudeAgentOptions.env before starting ClaudeSDKClient.
 # [Sync] 2026-05-08: force Claude Code settings source to project via Python SDK extra_args.
+# [Sync] 2026-07-26: SDK migration claude-code-sdk → claude-agent-sdk 0.2.128;
+#                    ClaudeSDKClient query/receive_response semantics unchanged.
 
 """Simple Claude Agent SDK Client.
 
@@ -21,8 +23,8 @@ from collections.abc import AsyncIterable
 from collections.abc import AsyncIterator
 from typing import Any, Optional
 
-from claude_code_sdk import ClaudeSDKClient  # type: ignore[import-untyped]
-from claude_code_sdk.types import ClaudeCodeOptions  # type: ignore[import-untyped]
+from claude_agent_sdk import ClaudeSDKClient  # type: ignore[import-untyped]
+from claude_agent_sdk.types import ClaudeAgentOptions  # type: ignore[import-untyped]
 
 from ..types import IClaudeAgentSDKClient
 from .sdk_env import apply_project_sdk_runtime_options
@@ -37,7 +39,7 @@ from .session_files import (
 class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
     """Minimal Claude Agent SDK client.
 
-    Delegates query streaming to :class:`claude_code_sdk.ClaudeSDKClient` and
+    Delegates query streaming to :class:`claude_agent_sdk.ClaudeSDKClient` and
     message loading to the JSONL session-file utilities.  ``ClaudeSDKClient``
     keeps stdin open long enough for bidirectional control messages, which is
     required by permission callbacks and SDK MCP servers.
@@ -49,11 +51,11 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
     async def query_stream(
         self,
         prompt: Any,
-        options: Optional[ClaudeCodeOptions] = None,
+        options: Optional[ClaudeAgentOptions] = None,
     ) -> AsyncIterator[Any]:
         """Stream messages from the Claude agent subprocess."""
         effective_options = apply_project_sdk_runtime_options(
-            options or ClaudeCodeOptions()
+            options or ClaudeAgentOptions()
         )
         async with ClaudeSDKClient(options=effective_options) as client:
             if isinstance(prompt, AsyncIterable) or isinstance(prompt, str):

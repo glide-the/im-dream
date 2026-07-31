@@ -3,6 +3,8 @@
 > Source of truth: `frontend/src/styles/tokens.css` `[data-theme='dark']` 块。  
 > 触发方式：`[data-theme='dark']`（用户手动切换）；系统偏好暗色时 `prefers-color-scheme: dark` 自动生效（`:root:not([data-theme='light'])`）。  
 > 切换入口：`TopNavBar` 右侧 🌙/☀️ 按钮 → 调用 `utils/theme.ts` `toggleTheme()`，持久化到 `localStorage`（键名 `ink-theme`）。
+> [Sync] 2026-07-09: Connector settings pages use a dashed deep-paper boundary plus flat low-contrast list rows; selected resources use a right-side checkmark, and ordinary resource rows do not use stacked dark cards or dark selected fills.
+> [Sync] 2026-07-09: Decks follows the same low-contrast dark paper rule: deck colors are small accents, not full-card borders, gradients, or hover shadows.
 
 ---
 
@@ -13,7 +15,7 @@ Ink & Memory 暗色主题的关键词是 **"暖夜纸张、烛光书桌、深棕
 | 维度 | 规范 |
 |---|---|
 | 画布 | 深暖棕 `#1f1b16`，避免纯黑 `#000` 和冷蓝深色（`#0d1117` 只用于代码块）。 |
-| 承载面 | 深纸面 `#2a251e`，比画布亮一档，保持层次。 |
+| 承载面 | 深纸面 `#2a251e`，比画布亮一档；设置详情页和 Decks 页面以单一虚线页边界、轻列表和留白保持层次。 |
 | 文本 | 主文本暖白 `#f3eee6`，正文 `#eee8df`，辅助 `#c8bcae`；文字偏暖不偏冷。 |
 | 字体 | 与亮色完全一致（`Excalifont` / `Xiaolai` / 系统无衬线）。 |
 | 边框 | 纸面分隔线 `#5a4d3d`（深棕），控件线 `#4a4238`（深暖灰）。 |
@@ -30,13 +32,13 @@ Ink & Memory 暗色主题的关键词是 **"暖夜纸张、烛光书桌、深棕
 |---|---:|---|
 | Warm Night Canvas | `#1f1b16` | App 整体背景。 |
 | Night Paper | `#2a251e` | 编辑区、消息流、弹窗主体。 |
-| Dim Surface | `rgba(42,37,30,0.82)` | 设置卡片、文件信息组。 |
+| Dim Surface | `rgba(42,37,30,0.82)` | 设置轻分区、文件信息组、低强调列表容器。 |
 | Solid Night | `#332d25` | 菜单、Tooltip、Popover。 |
 | Warm White | `#f3eee6` | 主文本、主操作、焦点线。 |
 | Soft White | `#eee8df` | 正文内容。 |
 | Warm Gray | `#c8bcae` | 元信息、图标默认。 |
 | Dim Tan | `#9f9283` | placeholder、时间戳、说明。 |
-| Deep Paper Border | `#5a4d3d` | 卡片、输入区、分隔线。 |
+| Deep Paper Border | `#5a4d3d` | 深纸页边界、输入区、分隔线；可经 `color-mix` 派生虚线边界。 |
 | Deep Neutral Border | `#4a4238` | 工具条按钮、文件卡边框。 |
 | Muted Blue | `#81b7d2` | 链接、发送可用态。 |
 | Muted Blue Hover | `#6aa3bf` | 链接/发送按钮 hover 态。 |
@@ -60,7 +62,7 @@ Ink & Memory 暗色主题的关键词是 **"暖夜纸张、烛光书桌、深棕
 |---|---:|---|
 | `--color-bg-app` | `#1f1b16` | App 背景 |
 | `--color-bg-paper` | `#2a251e` | 主阅读/编辑面 |
-| `--color-bg-surface` | `rgba(42,37,30,0.82)` | 次级半透明面板 |
+| `--color-bg-surface` | `rgba(42,37,30,0.82)` | 次级半透明承载面 / 轻分区 |
 | `--color-bg-surface-solid` | `#332d25` | 不透明浮层 |
 | `--color-bg-overlay` | `rgba(0,0,0,0.72)` | Modal 遮罩（比亮色更重）|
 | `--color-bg-hover` | `rgba(255,255,255,0.08)` | 控件 hover 叠层 |
@@ -82,7 +84,7 @@ Ink & Memory 暗色主题的关键词是 **"暖夜纸张、烛光书桌、深棕
 | `--color-state-danger` | `#ff8a7f` | 破坏性操作 |
 | `--color-state-danger-hover` | `#e06060` | 破坏性操作 hover |
 | `--color-disabled-bg` | `#58504a` | 禁用态背景 |
-| `--color-shadow-soft` | `rgba(0,0,0,0.32)` | 卡片轻阴影（比亮色重）|
+| `--color-shadow-soft` | `rgba(0,0,0,0.32)` | 少量卡片 / 浮层轻阴影；普通列表行不用 |
 | `--color-shadow-medium` | `rgba(0,0,0,0.45)` | Popover/菜单阴影 |
 | `--color-scrollbar-thumb` | `#4a4238` | 滚动条滑块 |
 | `--color-scrollbar-thumb-hover` | `#6a5e52` | 滚动条滑块 hover |
@@ -142,10 +144,12 @@ Ink & Memory 暗色主题的关键词是 **"暖夜纸张、烛光书桌、深棕
 ## 7. 使用规则（暗色补充）
 
 - 暗色背景层级：`bg-app` (`#1f1b16`) < `bg-paper` (`#2a251e`) < `bg-surface-solid` (`#332d25`)，层次分明。
-- 阴影在暗色下需加重（`shadow-soft` 0.32、`shadow-medium` 0.45），弥补对比度不足。
+- 阴影在暗色下只用于浮层、菜单和真正卡片；设置资源行依靠深纸面透明混合、细分隔线和右侧对勾表达选中态，不用深色填充或投影堆层级。
 - `text-on-action` 在暗色下保持 `#ffffff`，确保主操作按钮文字可读（按钮背景为暖白，前景白色可能对比度不足 → 实际主按钮在暗色下背景为暖白 `#f3eee6`，前景应用 `--color-bg-app` 或使用深色字，此处按实际渲染验收）。
 - 水彩高亮全部使用 `rgba()` 半透明，不用不透明纯色，避免遮蔽背景层次。
 - 不新增孤立十六进制；新需求先映射到现有 token。
+- Settings 连接器详情页只保留一个 `--color-border-paper` 派生的虚线页边界；内部资源列表和已挂载来源列表保持无外框、无卡片底、无阴影。
+- Decks 页面只保留页面级虚线深纸边界；deck item 使用低对比轻分区、细边界和小面积 accent，避免彩色整卡边框、渐变图标和普通 item 阴影在暗色下堆叠。
 
 ---
 

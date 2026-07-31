@@ -2,6 +2,8 @@
 
 > 面向 `docs/prd` 下聊天、文件、侧边栏、Dashboard、历史记录、发送区和暗色模式 PRD 的统一色彩系统。  
 > 本文是索引入口，具体设计稿见子文档。不修改源码、不引入新业务逻辑。
+> [Sync] 2026-07-09: Settings / connector detail pages may use one dashed paper boundary, while inner sections and resource rows must stay flat, whitespace-led, and non-card-like; selected resources use a right-side checkmark, not dark fills.
+> [Sync] 2026-07-09: Decks uses the same paper-boundary rule: one dashed page boundary, flat deck items, small accent marks, and no gradient / shadow-heavy ordinary cards.
 
 ---
 
@@ -49,6 +51,7 @@ Ink & Memory 的视觉关键词是 **"纸张、笔记、手写、安静工具台
 |---|---|
 | 字体 | 英文优先 `Excalifont`/Georgia，中文优先 `Xiaolai`，功能控件用系统无衬线。 |
 | 圆角 | 文档、卡片、弹窗 4/6/8/12 px；聊天输入 Dock 约 16 px。 |
+| 分区 | 设置详情页和 Decks 页面优先使用留白、轻纸面列表和单一虚线页边界；避免在页面内叠加多层卡片面板。 |
 | 动效 | 0.2–0.3 s 的 hover、focus、展开过渡；避免大幅旋转、强 glow、持续闪烁。 |
 
 ---
@@ -60,6 +63,9 @@ Ink & Memory 的视觉关键词是 **"纸张、笔记、手写、安静工具台
 - 主操作按钮前景统一用 `--color-text-on-action`（`#ffffff`）。
 - 状态色只做小面积提示，不只用颜色表达状态（需配文字或图标）。
 - hover 态统一使用对应 `-hover` token，不自行叠加透明度或调色。
+- Settings / connector detail page 的页面级承载可用 `--color-border-paper` 经 `color-mix` 混合后的虚线边界；内部结构区块不再额外套实线卡片。
+- 资源列表、已挂载来源列表使用轻纸面容器和行分隔线表达层级；资源选中态使用右侧对勾，普通资源行不使用深色背景、外框、投影或卡片式按钮底。
+- Decks 页面使用同一套纸面分区：页面级虚线边界、轻纸面 deck item、弱控件边界；deck 颜色只作为小面积 icon / 左侧 accent，不作为整卡边框、渐变底或 hover 阴影。
 
 ---
 
@@ -72,7 +78,8 @@ Ink & Memory 的视觉关键词是 **"纸张、笔记、手写、安静工具台
 | Send | 输入 Dock 与已发送卡保持同一纸面语言；发送按钮用 link blue 或主操作色。 |
 | File Work | 上传、文件列表、预览都使用纸面层级，类型色只做辅助。 |
 | Sidebar | 使用 `bg.app` 或 `bg.surfaceSolid`；当前项以主文本/下划线/左线表示。 |
-| Settings | 设置组保持纸面层级，状态标记来自语义 token。 |
+| Settings | 设置组保持纸面层级；连接器详情页使用单一虚线页边界、轻列表和留白，状态标记来自语义 token。 |
+| Decks | Deck 管理页使用单一虚线页边界；deck item 是轻纸面条目，颜色只做小面积 accent，普通条目不使用渐变图标、强边框或阴影。 |
 
 ---
 

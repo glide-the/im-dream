@@ -29,6 +29,42 @@
 # [Sync] 2026-06-21: add Settings-backed sandbox network policy emission.
 # [Sync] 2026-06-25: omit sandbox.network for open mode so runtime default
 #                    egress applies without unsupported allowedDomains ["*"].
+# [Sync] 2026-07-20: add get_plans_dir() — per-thread Plan Mode plans directory
+#                    resolver ({workspace}/.claude-home/plans primary,
+#                    {workspace}/plans fallback) with resolve()-based workspace
+#                    containment guard (claude-plan §5.1).
+# [Sync] 2026-07-20: add get_tasks_dir() + read_task_items() — per-thread
+#                    Claude Code v2 file-task directory resolver
+#                    ({workspace}/.claude-home/tasks/main) with the same
+#                    containment guard, and the read-time derivation of
+#                    TodoItem dicts (filter metadata._internal, drop blockers
+#                    already completed) (claude-todo §5.1/§5.2).
+# [Sync] 2026-07-26: sandbox filesystem write policy — (1) always allowWrite
+#                    Claude Code's own sandbox TMPDIR ($CLAUDE_TMPDIR or
+#                    /tmp/claude-$UID) when the sandbox is enabled, killing the
+#                    "zsh: operation not permitted: .../cwd-*" noise caused by
+#                    the CLI shell hook writing cwd-* files outside the
+#                    previously workspace-only allowWrite; (2) new Settings key
+#                    sandbox_fs_allowed_write_paths — user extra writable
+#                    absolute paths appended to filesystem.allowWrite after the
+#                    workspace and claude-tmp entries; denyWrite still wins for
+#                    workspace internals per sandbox-runtime deny-precedence.
+# [Sync] 2026-07-26: sandbox.seccomp.applyPath override — the 2.1.220 CLI runs
+#                    embedded apply-seccomp via /proc/self/fd (no on-disk
+#                    vendor binary to patch), so the Docker nested-userns
+#                    passthrough moves to a settings override emitted when
+#                    INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH names an existing
+#                    shim; unset/missing → no key → CLI default.
+# [Sync] 2026-07-26: Route A — REMOVE the settings seccomp override entirely:
+#                    production evidence proved it dead (2.1.220's embedded
+#                    converter hardcodes its seccomp config and never reads
+#                    sandbox.seccomp — Linux binary strings 0 hits for the
+#                    settings key vs 16 for /proc/self/fd; the shim was never
+#                    invoked).  The Dockerfile reverts to the 2.1.108 vendor
+#                    apply-seccomp passthrough patch instead; cli_path pinning
+#                    (sdk_env.apply_cli_path_to_options) keeps the SDK paired
+#                    with that patched npm CLI.
+
 
 """Workspace manager for Claude Agent session directories.
 
@@ -69,7 +105,7 @@ import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -330,6 +366,56 @@ def get_workspace_root() -> Path:
     return Path(tempfile.gettempdir()) / "ink-agent-workspaces"
 
 
+def _sandbox_claude_tmp_write_paths() -> list[str]:
+    """Return Claude Code's sandbox TMPDIR, which sandboxed Bash must write.
+
+    Claude Code's sandbox sets ``TMPDIR`` for sandboxed commands to
+    ``$CLAUDE_TMPDIR`` or a ``/tmp/claude*`` default, and its shell hook
+    writes ``cwd-*`` files there.  Without an ``allowWrite`` entry those
+    writes are denied and every sandboxed command prints
+    ``zsh: operation not permitted: /tmp/claude*/cwd-*`` noise.  This is
+    the CLI's own runtime scratch area, not user data, so it is always
+    allowed when the sandbox is enabled.
+
+    The default TMPDIR convention differs by CLI version: sandbox-runtime
+    uses ``$CLAUDE_TMPDIR || /tmp/claude`` (no uid — observed in production
+    on 2026-07-26), while other builds use ``/tmp/claude-{uid}`` (restored
+    ``filesystem.ts:331-346``).  Both are allowed defensively; the extra
+    entry is harmless because the path is CLI-owned scratch space either
+    way.  Evidence: bundled CLI strings (``CLAUDE_TMPDIR``, ``cwd-``) and
+    restored-source analysis (``claude-task-tools-source-analysis.md``).
+    """
+
+    override = os.environ.get("CLAUDE_TMPDIR")
+    if override:
+        return [override]
+    # Literal /tmp — NOT tempfile.gettempdir(): the CLI hardcodes /tmp/claude*
+    # (sandbox-runtime: TMPDIR=$CLAUDE_TMPDIR || /tmp/claude), it does not
+    # follow the platform tempdir (/var/folders/... on macOS).
+    return ["/tmp/claude", f"/tmp/claude-{os.getuid()}"]
+
+
+def _sandbox_fs_extra_write_paths(raw: object) -> list[str]:
+    """Sanitize user-configured extra writable paths (absolute-only, deduped).
+
+    Defense-in-depth mirror of the system_config sanitizer: the Settings PUT
+    route validates first, but workspace config must never write a relative
+    path into ``allowWrite`` regardless of caller.
+    """
+
+    if not isinstance(raw, list):
+        return []
+    result: list[str] = []
+    for item in raw:
+        path = str(item).strip()
+        if not path or not os.path.isabs(path):
+            continue
+        normalized = path.rstrip("/") or "/"
+        if normalized not in result:
+            result.append(normalized)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Public API — workspace lifecycle
 # ---------------------------------------------------------------------------
@@ -341,6 +427,7 @@ def _workspace_sandbox_config(
     *,
     network_mode: object = "allowlist",
     network_allowed_domains: object = None,
+    fs_allowed_write_paths: object = None,
 ) -> dict:
     """Return Claude Code sandbox settings for a single thread workspace.
 
@@ -353,6 +440,16 @@ def _workspace_sandbox_config(
     enabled = bool(enabled)
 
     allow_read = [str(workspace_abs), *_sandbox_runtime_read_allow_paths()]
+
+    # Write policy is allow-only for the thread workspace, plus Claude Code's
+    # own sandbox TMPDIR (runtime scratch, kills the cwd-* zsh noise), plus
+    # any user-configured extra writable paths (Settings
+    # ``sandbox_fs_allowed_write_paths``).  Only appended when the sandbox is
+    # enabled so a disabled config stays byte-identical to before.
+    allow_write = [str(workspace_abs)]
+    if enabled:
+        allow_write.extend(_sandbox_claude_tmp_write_paths())
+        allow_write.extend(_sandbox_fs_extra_write_paths(fs_allowed_write_paths))
 
     sandbox_config: dict = {
         "enabled": enabled,
@@ -367,11 +464,13 @@ def _workspace_sandbox_config(
             # paths from being readable by Bash subprocesses.
             "denyRead": ["/"],
             "allowRead": allow_read,
-            # Write policy is allow-only for the thread workspace.  Keep
-            # .claude/skills writable so skill symlinks and runtime-installed
-            # skills can be fully managed, but deny config/hook internals that
-            # should not be mutated by Bash.
-            "allowWrite": [str(workspace_abs)],
+            # Keep .claude/skills writable so skill symlinks and
+            # runtime-installed skills can be fully managed, but deny
+            # config/hook internals that should not be mutated by Bash.
+            # Per sandbox-runtime semantics deny always wins over allow, so
+            # these entries still take precedence even if a user-configured
+            # extra write path overlaps them.
+            "allowWrite": allow_write,
             "denyWrite": [
                 str(workspace_abs / ".claude" / "settings.json"),
                 str(workspace_abs / ".claude" / "settings.local.json"),
@@ -403,6 +502,7 @@ def sync_workspace_sandbox_settings(
     enabled: bool = True,
     network_mode: object = "allowlist",
     network_allowed_domains: object = None,
+    fs_allowed_write_paths: object = None,
 ) -> None:
     """Merge per-thread sandbox settings into ``{workspace}/.claude/settings.json``.
 
@@ -451,6 +551,7 @@ def sync_workspace_sandbox_settings(
         enabled,
         network_mode=network_mode,
         network_allowed_domains=network_allowed_domains,
+        fs_allowed_write_paths=fs_allowed_write_paths,
     )
     try:
         settings_path.write_text(
@@ -471,6 +572,7 @@ def init_workspace(
     sandbox_enabled: bool = True,
     sandbox_network_mode: object = "allowlist",
     sandbox_network_allowed_domains: object = None,
+    sandbox_fs_allowed_write_paths: object = None,
 ) -> Path:
     """Create (or repair) the workspace skeleton for *session_id*.
 
@@ -499,6 +601,7 @@ def init_workspace(
         enabled=sandbox_enabled,
         network_mode=sandbox_network_mode,
         network_allowed_domains=sandbox_network_allowed_domains,
+        fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
     )
 
     # Ensure .claude/skills/ exists so symlink sync has a target directory.
@@ -521,6 +624,7 @@ def get_or_create_workspace(
     sandbox_enabled: bool = True,
     sandbox_network_mode: object = "allowlist",
     sandbox_network_allowed_domains: object = None,
+    sandbox_fs_allowed_write_paths: object = None,
 ) -> Path:
     """Return the workspace path for *session_id*, creating it if needed.
 
@@ -538,7 +642,207 @@ def get_or_create_workspace(
         sandbox_enabled=sandbox_enabled,
         sandbox_network_mode=sandbox_network_mode,
         sandbox_network_allowed_domains=sandbox_network_allowed_domains,
+        sandbox_fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
     )
+
+
+def get_plans_dir(session_id: str) -> Optional[Path]:
+    """Return the Plan Mode plans directory for *session_id*, or ``None``.
+
+    Resolution order (claude-plan §5.1):
+    1. ``{workspace}/.claude-home/plans`` — primary, written by the CLI when
+       the runner injects ``CLAUDE_CONFIG_DIR={workspace}/.claude-home``.
+    2. ``{workspace}/plans`` — fallback probe for the ``plansDirectory``
+       settings-key alternative.
+
+    Every candidate must ``resolve()`` to a path still contained in the
+    resolved workspace root — the same traversal / symlink-escape policy as
+    ``get_or_create_workspace``.  ``None`` means "no plans directory":
+    invalid *session_id*, workspace disabled/missing, a candidate that
+    escapes the workspace, or no plans written yet.  Callers map ``None``
+    to the ``exists:false`` contract and must never fall back to the global
+    ``~/.claude/plans`` (cross-user escape risk).
+    """
+    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
+        logger.warning("get_plans_dir: invalid session_id: %r", session_id)
+        return None
+    try:
+        root = get_workspace_root().resolve(strict=False)
+        workspace = (root / session_id).resolve(strict=False)
+        workspace.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        logger.warning(
+            "get_plans_dir: workspace path escapes root for session_id=%r", session_id
+        )
+        return None
+    if not workspace.is_dir():
+        return None
+    for candidate in (
+        workspace / ".claude-home" / "plans",
+        workspace / "plans",
+    ):
+        try:
+            resolved = candidate.resolve(strict=False)
+            resolved.relative_to(workspace)
+        except (OSError, RuntimeError, ValueError):
+            logger.warning(
+                "get_plans_dir: plans candidate %s escapes workspace %s; skipped.",
+                candidate,
+                workspace,
+            )
+            continue
+        if resolved.is_dir():
+            return resolved
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Claude Code v2 file tasks (claude-todo §5.1/§5.2)
+# ---------------------------------------------------------------------------
+
+# Task files live at {CLAUDE_CONFIG_DIR}/tasks/{taskListId}/{id}.json; the
+# runner fixes taskListId via CLAUDE_CODE_TASK_LIST_ID (sdk_env.py), so the
+# per-thread tasks directory is stable across SDK resume / new sessions.
+_TASKS_DIR_NAME = "tasks"
+
+_TODO_STATUSES = frozenset({"pending", "in_progress", "completed"})
+
+
+def get_tasks_dir(session_id: str) -> Optional[Path]:
+    """Return the Claude Code v2 tasks directory for *session_id*, or ``None``.
+
+    Resolves ``{workspace}/.claude-home/tasks/main`` — the fixed taskListId
+    (``sdk_env.CLAUDE_CODE_TASK_LIST_ID_VALUE``) injected by the runner on
+    every run (claude-todo §5.1; unconditional since 2026-07-26 because the
+    new CLI enables task tools by default).
+
+    Same containment policy as ``get_plans_dir``: the candidate must
+    ``resolve()`` to a path still inside the resolved workspace root; symlink
+    escapes are rejected.  ``None`` means "no tasks directory": invalid
+    *session_id*, workspace disabled/missing, an escaping candidate, or no
+    tasks written yet.  Callers map ``None`` to the ``exists:false`` contract
+    and must never fall back to the global ``~/.claude/tasks``.
+    """
+
+    from .sdk_env import CLAUDE_CODE_TASK_LIST_ID_VALUE  # local import avoids cycles
+
+    if not session_id or "/" in session_id or "\\" in session_id or ".." in session_id:
+        logger.warning("get_tasks_dir: invalid session_id: %r", session_id)
+        return None
+    try:
+        root = get_workspace_root().resolve(strict=False)
+        workspace = (root / session_id).resolve(strict=False)
+        workspace.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        logger.warning(
+            "get_tasks_dir: workspace path escapes root for session_id=%r", session_id
+        )
+        return None
+    if not workspace.is_dir():
+        return None
+    candidate = workspace / ".claude-home" / _TASKS_DIR_NAME / CLAUDE_CODE_TASK_LIST_ID_VALUE
+    try:
+        resolved = candidate.resolve(strict=False)
+        resolved.relative_to(workspace)
+    except (OSError, RuntimeError, ValueError):
+        logger.warning(
+            "get_tasks_dir: tasks candidate %s escapes workspace %s.",
+            candidate,
+            workspace,
+        )
+        return None
+    if resolved.is_dir():
+        return resolved
+    return None
+
+
+def read_task_items(tasks_dir: Path) -> tuple[list[dict[str, Any]], Optional[float]]:
+    """Read all v2 task JSON files into unified TodoItem dicts (claude-todo §5.2).
+
+    Replicates the official read-time derivation: only ``*.json`` files are
+    read (``.lock`` / ``.highwatermark`` and other dotfiles are ignored);
+    tasks with truthy ``metadata._internal`` are filtered out; ``blockedBy``
+    references to tasks whose own status is ``completed`` are dropped.
+    Field mapping: ``id`` ← numeric filename stem, ``content`` ← ``subject``,
+    ``active_form`` ← ``activeForm``, ``status``/``owner``/``blockedBy`` →
+    ``status``/``owner``/``blocked_by``.
+
+    Unreadable or schema-mismatched files are skipped with a warning and never
+    abort the whole read (claude-todo §5.4 error boundary).  Returns
+    ``(items, newest_mtime_epoch)`` sorted by numeric id; the mtime is ``None``
+    when no task file was readable.
+    """
+
+    try:
+        resolved_dir = tasks_dir.resolve(strict=False)
+        entries = sorted(tasks_dir.iterdir())
+    except OSError:
+        return [], None
+
+    raw_items: list[dict[str, Any]] = []
+    newest_mtime: Optional[float] = None
+    for entry in entries:
+        if entry.name.startswith(".") or entry.suffix.lower() != ".json":
+            continue
+        try:
+            resolved = entry.resolve(strict=False)
+            resolved.relative_to(resolved_dir)
+        except (OSError, RuntimeError, ValueError):
+            continue
+        if not resolved.is_file():
+            continue
+        try:
+            data = json.loads(resolved.read_text(encoding="utf-8"))
+            mtime = resolved.stat().st_mtime
+        except (OSError, ValueError, UnicodeDecodeError):
+            logger.warning("read_task_items: skipping unreadable task file %s", resolved)
+            continue
+        if not isinstance(data, dict):
+            logger.warning("read_task_items: skipping non-object task file %s", resolved)
+            continue
+        metadata = data.get("metadata")
+        if isinstance(metadata, dict) and metadata.get("_internal"):
+            continue
+        status = str(data.get("status") or "pending")
+        if status not in _TODO_STATUSES:
+            status = "pending"
+        blocked_by_raw = data.get("blockedBy")
+        blocked_by = (
+            [str(item) for item in blocked_by_raw if item is not None]
+            if isinstance(blocked_by_raw, list)
+            else []
+        )
+        raw_items.append(
+            {
+                "id": entry.stem,
+                "content": str(data.get("subject") or ""),
+                "status": status,
+                "active_form": (
+                    str(data["activeForm"]) if data.get("activeForm") else None
+                ),
+                "owner": str(data["owner"]) if data.get("owner") else None,
+                "blocked_by": blocked_by,
+            }
+        )
+        if newest_mtime is None or mtime > newest_mtime:
+            newest_mtime = mtime
+
+    # Read-time derivation: blockers that are already completed no longer
+    # block anything (official tasks.ts display semantics, claude-todo §5.1).
+    completed_ids = {item["id"] for item in raw_items if item["status"] == "completed"}
+    for item in raw_items:
+        item["blocked_by"] = [
+            blocker for blocker in item["blocked_by"] if blocker not in completed_ids
+        ]
+
+    def _sort_key(item: dict[str, Any]) -> tuple[int, Any]:
+        try:
+            return (0, int(item["id"]))
+        except (TypeError, ValueError):
+            return (1, item["id"])
+
+    raw_items.sort(key=_sort_key)
+    return raw_items, newest_mtime
 
 
 # ---------------------------------------------------------------------------

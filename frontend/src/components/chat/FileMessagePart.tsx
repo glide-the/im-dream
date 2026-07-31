@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import type { FileUIPart } from 'ai';
-import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
+import { toFileProxyUrl, withStorageAuthToken } from '../../lib/toFileProxyUrl';
 import { IconDownload, IconFile } from './Icons';
 
 interface FileMessagePartProps {
@@ -16,7 +16,12 @@ function formatFileSize(bytes: number): string {
 
 function resolveFileUrl(url?: string) {
   if (!url) return undefined;
-  if (url.startsWith('/') || url.startsWith('http') || url.startsWith('blob:') || url.startsWith('data:')) {
+  if (url.startsWith('/') || url.startsWith('http')) {
+    // Persisted proxy URLs carry no credentials; attach the current auth token
+    // so <img src> / download links pass backend storage auth.
+    return withStorageAuthToken(url);
+  }
+  if (url.startsWith('blob:') || url.startsWith('data:')) {
     return url;
   }
   return toFileProxyUrl(url);

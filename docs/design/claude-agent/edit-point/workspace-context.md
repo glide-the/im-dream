@@ -10,11 +10,12 @@
 > [Sync] 2026-05-29: rename session_id → editor_session_id throughout; §9.3 updated to show
 >         service.py extracts editor_session_id from request.editor_state["id"] — not from
 >         cwd basename; three-ID comparison table added.
+> [Sync] 2026-06-28: 补充 Notion connector workspace_context 扩展，要求 Agent 读取连接器数据层 canonical snapshot，而非维护本地 Notion 权威状态。
 
 # 工作空间上下文接入设计
 
 Status: Updated  
-Updated: 2026-05-29  
+Updated: 2026-06-28
 Scope: Design + 实现状态同步
 
 ---
@@ -31,6 +32,7 @@ Scope: Design + 实现状态同步
 8. [实现清单](#8-实现清单)
 9. [`editor_state` 的角色与加载路径](#9-editor_state-的角色与加载路径)
 10. [系统提示词 Edit-Point Workflow 指导](#10-系统提示词-edit-point-workflow-指导)
+11. [Notion Connector Context 扩展](#11-notion-connector-context-扩展)
 
 ---
 
@@ -466,3 +468,42 @@ exchange and respond without attempting to read workspace files.
 | `_read_session_meta` | 手工拼 `{id, selectedState, createdAt}` | `get_editor_resource_data(".editor/session.json", state)` |
 | `_list_comments` | `state.get("commentors") or []` | `state.get(EDITOR_RESOURCES["commentors"]) or []` |
 | `_read_comment` | `state.get("commentors") or []` | `state.get(EDITOR_RESOURCES["commentors"]) or []` |
+
+---
+
+## 11. Notion Connector Context 扩展
+
+Notion 资源连接器进入 `<workspace_context>` 时，只注入导航信息和 snapshot identity，不注入完整页面内容。页面内容仍由 Agent 按需读取 `.notion/` 虚拟索引。
+
+模板草案：
+
+```xml
+Notion connector (.notion/):
+  Connector ID: {resource_connector_id}
+  Status: snapshot_ready | stale | permission_denied | connector_unavailable
+  Snapshot Version: {snapshot_version}
+  Source Revision: {source_revision}
+  Sync Cursor: {sync_cursor}
+  Fetched At: {fetched_at}
+
+  .notion/snapshot.json           — attached snapshot identity
+  .notion/connector.json          — connector metadata and selected resources
+  .notion/index.json              — page listing in the attached snapshot
+  .notion/databases.json          — selected database metadata
+  .notion/databases/<db_id>.json  — database row pages in the attached snapshot
+  .notion/pages/<page_id>.json    — page content materialized in the attached snapshot
+
+  Read these files with read_file(). They resolve from the resource connector
+  data layer's canonical snapshot. Do not call switch_editor to change Notion
+  connectors; switch_editor only changes .editor/ sessions.
+</workspace_context>
+```
+
+Agent 调度规则：
+
+1. 先读 `.notion/snapshot.json`，确认当前快照版本。
+2. 再读 `.notion/index.json` 或具体 page/database 文件。
+3. 只把读取结果作为 `AgentDerivedContext` 使用；不要把摘要、排序或裁剪结果作为 canonical state。
+4. 如果返回 `stale`、`permission_denied`、`connector_unavailable` 或 `not_materialized_in_snapshot`，向用户解释状态并让前端刷新/重新授权，不在 Read 路径直接远程拉取。
+
+不过度设计边界：本节不新增 MCP 工具、不改现有 `switch_editor` schema、不要求当前 `workspace_context.py` 立即注入 Notion 段落；实现接线需等待资源连接器数据层落地。

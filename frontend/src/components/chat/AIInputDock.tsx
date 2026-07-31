@@ -11,6 +11,9 @@
 // [Sync] 2026-06-12: use centralized API_BASE for cross-origin system config and workspace file APIs.
 // [Sync] 2026-06-25: expose a stopPending state so backend stop requests cannot
 //                    be double-submitted from the stop button.
+// [Sync] 2026-07-20: i18n — tool-choice toggle, upload errors/hints, aria labels, and
+//                    send/stop button copy resolve through the chat.inputDock namespace
+//                    (en + zh) via useTranslation.
 import {
   useCallback,
   useEffect,
@@ -22,6 +25,8 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from 'react';
+import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { useFileUpload } from '../../hooks/useFileUpload';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
 import type { ToolChoice } from '../../lib/chat-schema';
@@ -95,10 +100,12 @@ function shouldSendWithKeyboard(
   return event.key === 'Enter' && !event.shiftKey;
 }
 
-const TOOL_CHOICE_OPTIONS: { value: ToolChoice; label: string; title: string }[] = [
-  { value: 'auto', label: '自动', title: 'Claude 自主决定是否调用工具' },
-  { value: 'manual', label: '逐步确认', title: '每次工具调用都需要手动确认' },
-];
+function buildToolChoiceOptions(t: TFunction): { value: ToolChoice; label: string; title: string }[] {
+  return [
+    { value: 'auto', label: t('chat.inputDock.toolChoiceAuto'), title: t('chat.inputDock.toolChoiceAutoTitle') },
+    { value: 'manual', label: t('chat.inputDock.toolChoiceManual'), title: t('chat.inputDock.toolChoiceManualTitle') },
+  ];
+}
 
 export default function AIInputDock({
   onSendMessage,
@@ -113,6 +120,8 @@ export default function AIInputDock({
   workspaceSessionId,
   fullAccessEnabled,
 }: AIInputDockProps) {
+  const { t } = useTranslation();
+  const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
   const [query, setQuery] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -209,7 +218,7 @@ export default function AIInputDock({
       };
 
       if (!response.ok) {
-        const message = responseBody.error || '工作空间文件同步失败';
+        const message = responseBody.error || t('chat.inputDock.workspaceSyncFailed');
         throw new Error(responseBody.code ? `${message} (${responseBody.code})` : message);
       }
 
@@ -225,7 +234,7 @@ export default function AIInputDock({
 
       return { workspacePath: fallbackPath, savedAt: new Date().toISOString() };
     },
-    [workspaceSessionId],
+    [workspaceSessionId, t],
   );
 
   const uploadFileToStorage = useCallback(
@@ -269,10 +278,10 @@ export default function AIInputDock({
           revokeObjectPreviewUrl(current?.previewUrl);
           return prev.filter((entry) => entry.id !== fileId);
         });
-        setUploadError(error instanceof Error ? error.message : '上传失败');
+        setUploadError(error instanceof Error ? error.message : t('chat.inputDock.uploadFailed'));
       }
     },
-    [syncFileToWorkspace, upload],
+    [syncFileToWorkspace, upload, t],
   );
 
   const handleFiles = useCallback(
@@ -286,7 +295,7 @@ export default function AIInputDock({
 
       Array.from(files).forEach((file) => {
         if (file.size > MAX_UPLOAD_FILE_SIZE_BYTES) {
-          setUploadError(`${file.name}: 文件过大 (最大 ${formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES)})`);
+          setUploadError(t('chat.inputDock.fileTooLarge', { name: file.name, max: formatFileSize(MAX_UPLOAD_FILE_SIZE_BYTES) }));
           return;
         }
 
@@ -316,7 +325,7 @@ export default function AIInputDock({
         void uploadFileToStorage(id, file);
       });
     },
-    [uploadFileToStorage],
+    [uploadFileToStorage, t],
   );
 
   const deleteFile = useCallback((fileId: string) => {
@@ -389,7 +398,7 @@ export default function AIInputDock({
       return;
     }
     if (uploadedFiles.some((file) => file.isUploading)) {
-      setUploadError('请等待文件上传完成');
+      setUploadError(t('chat.inputDock.waitForUpload'));
       return;
     }
 
@@ -413,6 +422,7 @@ export default function AIInputDock({
     onSendMessage,
     query,
     uploadedFiles,
+    t,
   ]);
 
   const hasUploadingFiles = uploadedFiles.some((file) => file.isUploading);
@@ -506,7 +516,7 @@ export default function AIInputDock({
                   type="button"
                   onClick={() => deleteFile(file.id)}
                   disabled={file.isUploading}
-                  aria-label={`删除文件 ${file.name}`}
+                  aria-label={t('chat.inputDock.deleteFileAria', { name: file.name })}
                   style={{
                     position: 'absolute',
                     top: '0.35rem',
@@ -532,15 +542,15 @@ export default function AIInputDock({
 
       {(showUploadHint || mode === 'full') ? (
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '0.4rem', fontSize: '0.73rem', color: 'var(--color-text-muted)' }}>
-          {showUploadHint ? <span id="chat-upload-hint">上传方式：粘贴 · 拖拽 · 点击选择</span> : null}
-          {mode === 'full' ? <span style={{ marginLeft: 'auto', letterSpacing: '0.01em' }}>⌘ / Ctrl + Enter 发送</span> : null}
+          {showUploadHint ? <span id="chat-upload-hint">{t('chat.inputDock.uploadHint')}</span> : null}
+          {mode === 'full' ? <span style={{ marginLeft: 'auto', letterSpacing: '0.01em' }}>{t('chat.inputDock.sendShortcut')}</span> : null}
         </div>
       ) : null}
 
       <textarea
         id="chat-input"
         ref={queryInputRef}
-        aria-label="聊天输入"
+        aria-label={t('chat.inputDock.inputAria')}
         aria-describedby={showUploadHint ? 'chat-upload-hint' : undefined}
         placeholder={placeholder}
         value={query}
@@ -575,7 +585,7 @@ export default function AIInputDock({
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
           <button
             type="button"
-            aria-label="添加附件"
+            aria-label={t('chat.inputDock.addAttachmentAria')}
             onClick={openAttachmentDialog}
             disabled={disabled}
             style={{
@@ -589,13 +599,13 @@ export default function AIInputDock({
               transition: 'background 0.15s ease, color 0.15s ease',
             }}
           >
-            + 附件
+            {t('chat.inputDock.addAttachment')}
           </button>
 
           {resolvedFullAccessEnabled ? (
             <div
-              aria-label="工具调用权限"
-              title="完全访问"
+              aria-label={t('chat.inputDock.toolAccessAria')}
+              title={t('chat.inputDock.fullAccess')}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -610,12 +620,12 @@ export default function AIInputDock({
                 whiteSpace: 'nowrap',
               }}
             >
-              完全访问
+              {t('chat.inputDock.fullAccess')}
             </div>
           ) : (
             <div
               role="group"
-              aria-label="工具调用模式"
+              aria-label={t('chat.inputDock.toolModeAria')}
               style={{
                 display: 'flex',
                 borderRadius: '999px',
@@ -625,7 +635,7 @@ export default function AIInputDock({
                 background: 'var(--color-bg-app)',
               }}
             >
-              {TOOL_CHOICE_OPTIONS.map((option) => {
+              {toolChoiceOptions.map((option) => {
                 const isActive = toolChoice === option.value;
                 return (
                   <button
@@ -658,8 +668,8 @@ export default function AIInputDock({
             type="button"
             onClick={() => { void onStop(); }}
             disabled={stopPending}
-            title={stopPending ? '正在停止' : '停止生成'}
-            aria-label={stopPending ? '正在停止' : '停止生成'}
+            title={stopPending ? t('chat.inputDock.stopping') : t('chat.inputDock.stopGenerating')}
+            aria-label={stopPending ? t('chat.inputDock.stopping') : t('chat.inputDock.stopGenerating')}
             style={{
               display: 'grid',
               placeItems: 'center',
@@ -682,8 +692,8 @@ export default function AIInputDock({
           <button
             type="button"
             disabled
-            title="生成中"
-            aria-label="生成中"
+            title={t('chat.inputDock.generating')}
+            aria-label={t('chat.inputDock.generating')}
             style={{
               display: 'grid',
               placeItems: 'center',
@@ -703,8 +713,8 @@ export default function AIInputDock({
             type="button"
             onClick={handleSend}
             disabled={!canSend}
-            title={hasUploadingFiles ? '等待上传完成…' : '发送'}
-            aria-label="发送消息"
+            title={hasUploadingFiles ? t('chat.inputDock.waitingUpload') : t('chat.inputDock.send')}
+            aria-label={t('chat.inputDock.sendAria')}
             style={{
               display: 'grid',
               placeItems: 'center',

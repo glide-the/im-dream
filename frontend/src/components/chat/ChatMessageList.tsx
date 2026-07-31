@@ -1,4 +1,4 @@
-// [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components.
+// [Input] UIMessage[] from useChat; ToolMessagePart, AssistMessagePart, UserMessagePart, FileMessagePart sub-components; toolInputSummary helpers.
 // [Output] Scrollable chat message list with tool, text, reasoning, and file part rendering.
 // [Pos] chat-message-list component node in frontend/src/components/chat
 // [Sync] 2026-05-27: add threadId prop; propagate to ToolMessagePart; render AskUserQuestion tool parts directly (not collapsed) so the question form is immediately visible.
@@ -17,14 +17,25 @@
 // [Sync] 2026-06-14: collapse long built-in Write file previews by default while
 //                    keeping full-content copy and an inline expand/collapse control.
 // [Sync] 2026-06-14: forward editor write toolCallId for event-driven Writing view reload de-duplication.
+// [Sync] 2026-07-19: show per-tool task summaries — the Terminal card header displays input.description and prefers input.command for the $ line; collapsed tool rows append the description/target so running tools are recognizable (shared helpers from toolInputSummary.ts).
+// [Sync] 2026-07-20: pending tool confirmations no longer render inline Approve/Cancel or
+//                    AskUserQuestion forms — those moved to ToolConfirmationDock above AIInputDock.
+//                    Pending parts now render as collapsed rows with an amber 「待确认」 badge;
+//                    shared classifiers moved to toolConfirmation.ts (design §8).
+// [Sync] 2026-07-20: i18n — pending confirmation badge copy resolves through the
+//                    chat.toolConfirmation namespace (en + zh) via useTranslation.
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import FileMessagePart from './FileMessagePart';
 import AssistMessagePart from './AssistMessagePart';
 import UserMessagePart from './UserMessagePart';
 import ToolMessagePart from './ToolMessagePart';
-import { isEditorWriteTool, EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
+import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteApprovalUI';
+import { isEditorWriteTool } from './editorWriteTools';
+import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
+import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -89,60 +100,14 @@ function IconCopy() {
   );
 }
 
-const ASK_USER_TOOL_NAMES = new Set(['askuserquestion', 'ask_user_question', 'ask_user', 'askuser']);
 const BUILTIN_WRITE_TOOL_NAMES = new Set(['write']);
-
-function isAskUserQuestionTool(part: ToolUIPart | DynamicToolUIPart): boolean {
-  const name = getToolName(part).toLowerCase();
-  return ASK_USER_TOOL_NAMES.has(name) || name.endsWith('__ask_user') || name.endsWith('__askuserquestion');
-}
 
 function isBuiltInWriteTool(toolName: string): boolean {
   return BUILTIN_WRITE_TOOL_NAMES.has(toolName.toLowerCase());
 }
 
-/**
- * Robustly resolve the tool name from a part.
- *
- * History-loaded DynamicToolUIPart objects can lose their `toolName` field after
- * DB serialization. When that happens, the AI SDK's `getToolName()` falls back to
- * stripping the 'tool-' prefix from `type`, yielding 'invocation' instead of the
- * real tool name. This helper retries with a direct field read so that
- * `isEditorWriteTool` works correctly for both live-stream and history-replay paths.
- */
-function resolveToolName(part: ToolUIPart | DynamicToolUIPart): string {
-  try {
-    const name = getToolName(part);
-    if (name && name !== 'invocation') return name;
-  } catch {
-    // getToolName may throw if the part has an unexpected structure
-  }
-  const raw = part as unknown as Record<string, unknown>;
-  if (typeof raw.toolName === 'string' && raw.toolName) return raw.toolName;
-  return '';
-}
-
-function isApprovalRequestedTool(part: ToolUIPart | DynamicToolUIPart): boolean {
-  const raw = part as unknown as { toolMetadata?: Record<string, unknown> };
-  return raw.toolMetadata?.approvalRequested === true;
-}
-
 function readToolInput(part: ToolUIPart | DynamicToolUIPart): unknown {
   return 'input' in part ? part.input : undefined;
-}
-
-function parsePartialInputJson(input: unknown): Record<string, unknown> {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
-  const raw = (input as Record<string, unknown>)._partialInputJson;
-  if (typeof raw !== 'string' || !raw.trim()) return {};
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
 }
 
 function resolveWriteInput(input: unknown): { filePath: string; content: string; partialJson: string } {
@@ -245,6 +210,7 @@ function WriteToolTerminalCard({
 }
 
 export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
+  const { t } = useTranslation();
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
 
@@ -405,14 +371,23 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 if (isCompleted && outputText) {
                   const { command, output, exitCode } = parseTerminalOutput(outputText);
                   const exitCodeNumber = exitCode != null ? Number(exitCode) : null;
+                  const terminalToolInput = readToolInput(toolPart);
+                  const terminalSummary = summarizeToolInvocation(toolName, terminalToolInput);
+                  // Prefer the command from the tool input itself — the output text
+                  // only carries a `$ command` echo for some backends, so relying on
+                  // parseTerminalOutput alone leaves the card showing only results.
+                  const displayCommand = resolveToolInputSummary(terminalToolInput).command || command;
                   return (
                     <div key={partKey} style={{ overflow: 'hidden', borderRadius: '12px', background: 'var(--color-code-bg)', color: 'var(--color-code-text)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.65rem 1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
-                        <span>‹ Terminal</span>
-                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ border: 'none', background: 'transparent', color: copiedPartId === partKey ? 'var(--color-state-success)' : 'var(--color-code-text)', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.65rem 1rem', fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>
+                        <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: '0.55rem' }}>
+                          <span style={{ flexShrink: 0 }}>‹ Terminal</span>
+                          {terminalSummary ? <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-code-text)' }}>{terminalSummary}</span> : null}
+                        </span>
+                        <button type="button" onClick={() => void handleCopy(partKey, outputText)} title="Copy" style={{ flexShrink: 0, border: 'none', background: 'transparent', color: copiedPartId === partKey ? 'var(--color-state-success)' : 'var(--color-code-text)', cursor: 'pointer' }}>{copiedPartId === partKey ? 'Copied!' : <IconCopy />}</button>
                       </div>
                       <div style={{ padding: '0 1rem 0.9rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.8rem', lineHeight: 1.65 }}>
-                        {command ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>{command}</span></p> : null}
+                        {displayCommand ? <p style={{ margin: '0 0 0.45rem' }}><span style={{ color: 'var(--color-action-link)' }}>$</span> <span>{displayCommand}</span></p> : null}
                         <pre style={{ margin: 0, whiteSpace: 'pre-wrap', maxHeight: '20rem', overflow: 'auto', color: 'var(--color-code-text)' }}>{output || outputText}</pre>
                       </div>
                       {exitCodeNumber != null ? <div style={{ borderTop: '1px solid rgba(255,255,255,0.1)', padding: '0.55rem 1rem', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: '0.75rem', color: exitCodeNumber === 0 ? 'var(--color-state-success)' : 'var(--color-state-error)' }}>Exit code: {exitCode}</div> : null}
@@ -421,50 +396,20 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   );
                 }
 
-                // AskUserQuestion tools that are waiting for user input are rendered
-                // directly (not collapsed) so the question form is immediately visible.
-                const needsUserInput = isAskUserQuestionTool(toolPart) && !isCompleted;
-                if (needsUserInput) {
-                  return (
-                    <div key={partKey}>
-                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} />
-                    </div>
-                  );
-                }
+                // Pending confirmations (AskUserQuestion forms, manual-mode and
+                // backend-requested approvals) are NOT rendered inline anymore —
+                // they surface in the ToolConfirmationDock floating above the input
+                // area. Here they fall through to the collapsed row with a 「待确认」
+                // badge (see pendingConfirmationKind below).
 
                 // Editor write tools (write_segment, delete_segment, insert_widget,
-                // reply_to_comment) are always-confirm tools — render directly with
-                // isManualToolInvocation=true so the specialized approval UI shows immediately.
+                // reply_to_comment) are always-confirm tools — render directly so
+                // the specialized approval UI shows immediately.
                 const needsEditorWriteApproval = isEditorWriteTool(toolName) && !isCompleted;
                 if (needsEditorWriteApproval) {
                   return (
                     <div key={partKey}>
-                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} />
-                    </div>
-                  );
-                }
-
-                // Backend-driven confirmation requests must show approval UI
-                // regardless of the local toolChoice value. Auto mode uses this
-                // path for every non-files/ tool that needs an explicit Claude
-                // Code permission decision.
-                const needsRequestedApproval = isApprovalRequestedTool(toolPart) && !isCompleted;
-                if (needsRequestedApproval) {
-                  return (
-                    <div key={partKey}>
-                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} />
-                    </div>
-                  );
-                }
-
-                // In manual mode, non-completed tool calls are waiting for user
-                // approval — render them directly (not collapsed) with the
-                // Approve/Cancel UI visible immediately.
-                const needsManualApproval = toolChoice === 'manual' && !isCompleted;
-                if (needsManualApproval) {
-                  return (
-                    <div key={partKey}>
-                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={true} addToolResult={addToolResult} />
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} />
                     </div>
                   );
                 }
@@ -486,14 +431,23 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                   );
                 }
 
+                const toolRowSummary = summarizeToolInvocation(toolName, readToolInput(toolPart));
+                const pendingConfirmationKind = resolvePendingToolConfirmation(toolPart, toolChoice);
                 return (
-                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: '2px solid var(--color-action-link)' }}>
+                  <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: `2px solid ${pendingConfirmationKind ? '#f59e0b' : 'var(--color-action-link)'}` }}>
                     <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.55rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-secondary)', fontSize: '0.88rem', cursor: 'pointer' }}>
-                      {toolStatus === 'executing' ? <span style={{ width: '0.7rem', height: '0.7rem', borderRadius: '999px', border: '2px solid var(--color-action-link)', borderTopColor: 'transparent', display: 'inline-block' }} /> : null}
-                      <span style={{ flex: 1, textAlign: 'left', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayTitle}</span>
+                      {pendingConfirmationKind ? (
+                        <span style={{ width: '0.55rem', height: '0.55rem', borderRadius: '999px', background: '#f59e0b', display: 'inline-block', flexShrink: 0 }} />
+                      ) : toolStatus === 'executing' ? <span style={{ width: '0.7rem', height: '0.7rem', borderRadius: '999px', border: '2px solid var(--color-action-link)', borderTopColor: 'transparent', display: 'inline-block' }} /> : null}
+                      <span style={{ flex: 1, textAlign: 'left', fontStyle: 'italic', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayTitle}{toolRowSummary ? ` — ${toolRowSummary}` : ''}</span>
+                      {pendingConfirmationKind ? (
+                        <span style={{ flexShrink: 0, borderRadius: '999px', padding: '0.1rem 0.5rem', fontSize: '0.72rem', fontWeight: 600, fontStyle: 'normal', color: '#b45309', background: 'color-mix(in srgb, #f59e0b 16%, transparent)' }}>
+                          {pendingConfirmationKind === 'askuser' ? t('chat.toolConfirmation.pendingAnswer') : t('chat.toolConfirmation.pendingConfirm')}
+                        </span>
+                      ) : null}
                       <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>
                     </button>
-                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} isManualToolInvocation={false} addToolResult={addToolResult} /></div> : null}
+                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} /></div> : null}
                   </div>
                 );
               }

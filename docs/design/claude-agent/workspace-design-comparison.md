@@ -12,7 +12,7 @@
 |------|----------------------------------|------------|
 | 语言 | TypeScript（Node.js 20+） | Python 3.12 |
 | 框架 | Next.js 15 App Router | FastAPI + server.py |
-| Agent SDK | `@anthropic-ai/claude-agent-sdk`（npm） | `claude-code-sdk`（pip） |
+| Agent SDK | `@anthropic-ai/claude-agent-sdk`（npm） | `claude-agent-sdk`（pip） |
 | 工作空间模块 | `app/lib/workspace.ts`（已实现） | `backend/libs/claude_agent_kit/server/workspace.py`（已实现） |
 | 文件管理 API | `app/api/workspace/files/route.ts`（已实现） | `backend/routers/workspace.py`（已实现） |
 | 会话上下文 | 无宠物上下文 | `ClaudeAgentContextBuilder` 注入宠物状态 |

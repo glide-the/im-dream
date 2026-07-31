@@ -1,11 +1,18 @@
+// [Input] Assistant text message part from the chat message stream/history.
+// [Output] Assistant message body with GFM Markdown (Mermaid diagrams included) plus message actions.
+// [Pos] assistant-message-part component node in frontend/src/components/chat
+// [Sync] 2026-07-20: Markdown rendering delegated to shared ChatMarkdown, which routes ```mermaid
+//                    blocks to MermaidBlock and unwraps their <pre> wrapper (fixes the
+//                    "[<pre /> in Markdown ...]" invalid-nesting error).
+// [Sync] 2026-07-26: local IconCopy replaced by the shared Icons.tsx export so user and
+//                    assistant bubbles reuse one copy affordance.
 import { memo, useCallback, useMemo, useState, type ReactNode } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import type { UIMessage } from 'ai';
 import type { UseChatHelpers } from '@ai-sdk/react';
 import { useCopy } from '../../hooks/useCopy';
 import type { ChatMetadata } from '../../lib/chat-schema';
-import { IconCheck, IconLoader, IconTrash } from './Icons';
+import { IconCheck, IconCopy, IconLoader, IconTrash } from './Icons';
+import ChatMarkdown from './ChatMarkdown';
 
 interface AssistMessagePartProps {
   part: { type: 'text'; text: string };
@@ -18,15 +25,6 @@ interface AssistMessagePartProps {
   readonly?: boolean;
   setMessages?: UseChatHelpers<UIMessage>['setMessages'];
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
-}
-
-function IconCopy() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ width: '0.95rem', height: '0.95rem' }}>
-      <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-    </svg>
-  );
 }
 
 function IconRefresh() {
@@ -125,14 +123,14 @@ export const AssistMessagePart = memo(function AssistMessagePart({
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', opacity: isError ? 0.6 : 1, minHeight: isLast && isStreamLoading ? '2rem' : undefined }}>
       <div style={{ color: 'var(--color-text-primary)', fontSize: '0.95rem', lineHeight: 1.75 }}>
         <div className="prose prose-chat">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{part.text}</ReactMarkdown>
+          <ChatMarkdown text={part.text} />
         </div>
       </div>
 
       {showActions ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
           <ActionButton title="Copy" onClick={() => copy(part.text)}>
-            {copied ? <IconCheck style={{ width: '0.95rem', height: '0.95rem' }} /> : <IconCopy />}
+            {copied ? <IconCheck style={{ width: '0.95rem', height: '0.95rem' }} /> : <IconCopy style={{ width: '0.95rem', height: '0.95rem' }} />}
           </ActionButton>
           {!readonly && prevMessage && sendMessage ? (
             <ActionButton title="Regenerate" onClick={() => void handleRetry()} disabled={isRetrying || isStreamLoading}>

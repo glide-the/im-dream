@@ -29,6 +29,21 @@
 > workspace runtime path.
 > [Sync] 2026-06-25: `sandbox_network_mode="open"` omits `sandbox.network`
 > instead of writing unsupported `allowedDomains:["*"]`.
+> [Sync] 2026-07-26: filesystem write policy revision (§2.1) — default-allow
+> Claude Code's sandbox TMPDIR (`$CLAUDE_TMPDIR` / `/tmp/claude*` — both
+> `/tmp/claude` and `/tmp/claude-{uid}` conventions are allowed) to kill
+> the `zsh: operation not permitted: .../cwd-*` noise, and add the
+> `sandbox_fs_allowed_write_paths` Settings key for user extra writable
+> absolute paths; denyWrite precedence documented.
+> [Sync] 2026-07-26: apply-seccomp passthrough revision — bundled-CLI shadowing
+> recurrence story documented; `sandbox.seccomp.applyPath` settings override
+> (2.1.220 single-binary layout) emitted when
+> `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` names an existing shim.
+> [Sync] 2026-07-26: Route A — settings seccomp override proven DEAD in
+> production (2.1.220 embedded converter hardcodes `seccomp: jCu()`, 0
+> settings-reader string hits; shim never invoked); mechanism removed,
+> reverted to the 2.1.108 vendor passthrough patch + `claude --version`
+> build assertion; seccomp section rewritten with the evidence chain.
 
 # Claude-Agent Workspace Sandbox
 
@@ -90,7 +105,11 @@ When `system_config.workspace_enabled=true`, workspace initialization writes:
         "{AGENT_CWD}/{thread_id}",
         "<runtime dependency read paths>"
       ],
-      "allowWrite": ["{AGENT_CWD}/{thread_id}"],
+      "allowWrite": [
+        "{AGENT_CWD}/{thread_id}",
+        "<Claude sandbox TMPDIR: $CLAUDE_TMPDIR or /tmp/claude[{-uid}]>",
+        "<user extra paths: system_config.sandbox_fs_allowed_write_paths>"
+      ],
       "denyWrite": [
         "{AGENT_CWD}/{thread_id}/.claude/settings.json",
         "{AGENT_CWD}/{thread_id}/.claude/settings.local.json",
@@ -123,6 +142,29 @@ Code's Linux sandbox uses bubblewrap, and unprivileged containers may not allow
 bubblewrap to mount a fresh `/proc`; the weaker nested mode is acceptable only
 because the outer Docker container is the primary isolation boundary. Local
 non-container deployments do not write this key.
+
+**apply-seccomp passthrough (Route A, 2026-07-26).** Docker images need the
+apply-seccomp passthrough to survive the nested-userns
+`/proc/self/setgroups` failure (inherent to bwrap nested userns without
+caps; `kernel.apparmor_restrict_unprivileged_userns=0` is NOT the blocker).
+The Dockerfile patches the npm CLI's `vendor/seccomp/apply-seccomp` file in
+place (2.1.108 layout) with `#!/bin/sh` + `exec "$@"`, and the backend pins
+`cli_path` to that patched npm CLI via
+`sdk_env.apply_cli_path_to_options()` (see `claude-sdk-env-design.md` §5.5A)
+so the SDK's bundled CLI cannot shadow it. A build-time `claude --version`
+assertion guards against silent platform-binary misses.
+
+History of the dead alternative (do not retry): after the 0.2.128 migration
+we bumped the npm CLI to 2.1.220 (bundled-line parity) and, because 2.1.220
+packages the CLI as a single binary with no on-disk vendor file, tried a
+settings-driven override (`sandbox.seccomp.applyPath` + a passthrough shim
+via `INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH`). Production evidence proved the
+settings route dead: the Linux 2.1.220 binary contains **0** occurrences of
+the `sandbox?.seccomp` settings reader (vs **16** of `/proc/self/fd/` — the
+embedded executor), the macOS bundled converter hardcodes
+`seccomp: jCu()` instead of reading `e.sandbox?.*` like sibling fields, and
+shim logging confirmed the CLI never invoked the shim. Reverted to Route A;
+the settings-seccomp mechanism was removed entirely.
 
 Docker-enabled settings therefore add this sibling key to the same `sandbox`
 object:
@@ -164,6 +206,38 @@ This network policy covers Bash and child processes such as `curl`, `git`, and
 package managers. In `disabled` mode, `agent_runner.py` also rejects
 `WebFetch`, `WebSearch`, and common Bash network commands before full-access or
 low-sensitivity allow decisions. It does not install missing binaries.
+
+### 2.1 Filesystem write policy **[2026-07-26]**
+
+`filesystem.allowWrite` is an ordered allow list; per sandbox-runtime
+semantics `denyWrite` always wins over `allowWrite`, so the workspace-internal
+deny entries above still take precedence even when a configured extra write
+path overlaps them.
+
+1. **`{AGENT_CWD}/{thread_id}`** — the thread workspace (product data root).
+2. **Claude sandbox TMPDIR (default-allowed)** — `$CLAUDE_TMPDIR` or
+   `/tmp/claude*`. Root cause of the sandboxed-Bash
+   `zsh: operation not permitted: /tmp/claude*/cwd-*` noise: Claude Code's
+   sandbox sets `TMPDIR` for sandboxed commands to this directory and its
+   shell hook writes `cwd-*` files there, but the previous workspace-only
+   `allowWrite` denied those writes. The default convention differs by CLI
+   version — sandbox-runtime uses `$CLAUDE_TMPDIR || /tmp/claude` (no uid;
+   observed in production), other builds use `/tmp/claude-{uid}` (restored
+   `filesystem.ts:331-346`) — so **both** `/tmp/claude` and
+   `/tmp/claude-{uid}` are allowed defensively. This is the CLI's own runtime
+   scratch area (evidence: bundled CLI `CLAUDE_TMPDIR` / `cwd-` strings;
+   restored-source analysis `claude-task-tools-source-analysis.md`), not
+   user data, so it is always appended when the sandbox is enabled. When
+   `sandbox_enabled=false` the `allowWrite` shape is unchanged (workspace
+   only).
+3. **User extra writable paths** — `system_config.sandbox_fs_allowed_write_paths`
+   (new Settings field 「沙箱文件写入」). Sanitized to absolute paths only
+   (trailing slashes stripped, deduped, capped at 32 entries / 512 chars),
+   appended after the two entries above. Mirrors the
+   `sandbox_network_allowed_domains` plumbing:
+   `system_config.py` sanitizer → `service.py` /
+   `routers/workspace.py` Settings read → `get_or_create_workspace` →
+   `_workspace_sandbox_config`.
 
 ## 3. Access Semantics
 
@@ -225,13 +299,13 @@ sequenceDiagram
     alt workspace_enabled=true
         Service->>Workspace: get_or_create_workspace(thread_id, sandbox_enabled=true, sandbox_network_*)
         Workspace->>Workspace: write {cwd}/.claude/settings.json sandbox block
-        Service->>CC: ClaudeCodeOptions(cwd={AGENT_CWD}/{thread_id})
+        Service->>CC: ClaudeAgentOptions(cwd={AGENT_CWD}/{thread_id})
         CC->>CC: load project sandbox settings
         CC->>OS: run Bash inside sandbox
         OS-->>CC: allow only configured filesystem access
     else workspace_enabled=false
         Service->>Service: skip get_or_create_workspace; clear cached cwd
-        Service->>CC: ClaudeCodeOptions(cwd=None)
+        Service->>CC: ClaudeAgentOptions(cwd=None)
     end
 ```
 
@@ -289,7 +363,7 @@ performs the search.
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | Enforce the same thread-workspace boundary for built-in file/search tools, because the Bash sandbox does not cover `Read` / `Grep` / `Glob`. |
 | `backend/claude_agent/service.py` | Read `system_config.workspace_enabled` and sandbox network policy before cwd resolution; when enabled, resolve Claude Code cwd through the server-owned `{AGENT_CWD}/{thread_id}` workspace; when disabled, skip workspace initialization, clear cached `state.cwd`, and pass `cwd=None`. |
 | `backend/libs/claude_agent_kit/server/agent_runner.py` | Enforce `sandbox_network_mode="disabled"` in PreToolUse so network tools are denied even if sandbox domain wildcard semantics or fallback prompts would otherwise allow execution. |
-| `backend/routers/system_config.py` | Persist and sanitize `sandbox_network_mode` / `sandbox_network_allowed_domains`. |
+| `backend/routers/system_config.py` | Persist and sanitize `sandbox_network_mode` / `sandbox_network_allowed_domains` / `sandbox_fs_allowed_write_paths`. |
 | `backend/routers/claude_agent.py` | Initialize attachment workspaces with the same Settings-backed sandbox filesystem and network policy before file sync only when Workspace Mode is enabled; skip attachment workspace sync when disabled. |
 | `backend/routers/workspace.py` | Initialize file-sidebar workspaces with the same Settings-backed sandbox filesystem and network policy so listing/upload/download does not revert `.claude/settings.json` to defaults. |
 | `backend/libs/claude_agent_kit/server/sdk_env.py` | Already forces project-only setting sources, so the thread-local settings file is authoritative for Claude Code. |

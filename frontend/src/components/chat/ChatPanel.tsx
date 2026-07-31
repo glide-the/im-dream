@@ -25,12 +25,28 @@
 //                    from the input dock when workspace is disabled.
 // [Sync] 2026-06-25: stop button now calls the backend thread stop endpoint
 //                    instead of only aborting the local browser stream.
+// [Sync] 2026-07-20: pass threadId into ClaudeAgentChatTransport so plan-* SSE
+//                    frames route to the useThreadPlan store (claude-plan feature).
+// [Sync] 2026-07-20: forward todo-updated SSE frames to the useThreadTodos store
+//                    on the reconnect path (claude-todo §5.6).
+// [Sync] 2026-07-20: derive pendingConfirmation from messages and swap AIInputDock for
+//                    ToolConfirmationDock while a confirmation is pending (the composer
+//                    hides until the user decides); inline approval/askuser UIs removed
+//                    from the message list (design: claude-agent-tool-confirmation-flow.md §8).
+// [Sync] 2026-07-20: i18n — scroll-to-bottom aria/title resolves through chat.panel.scrollToBottom.
+// [Sync] 2026-07-23: SandboxPermissionRequest — pendingConfirmation carries the backend
+//                    networkRequest metadata for kind==='sandbox-network' so ToolConfirmationDock
+//                    renders the network-variant card (claude-agent-sandbox-network-permission-tool.md §5).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
 import {
+  getToolName,
   isToolUIPart,
+  type DynamicToolUIPart,
   type FileUIPart,
   type TextUIPart,
+  type ToolUIPart,
   type UIMessage,
 } from 'ai';
 import { ClaudeAgentChatTransport } from '../../lib/claude-agent-transport';
@@ -49,12 +65,21 @@ import {
 } from './AIInputDock.helpers';
 import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
+import ToolConfirmationDock from './ToolConfirmationDock';
+import {
+  resolvePendingToolConfirmation,
+  resolveSandboxNetworkRequest,
+  resolveToolName,
+  type PendingToolConfirmation,
+} from './toolConfirmation';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import {
   applyBackendEventToMessages,
   consumeClaudeAgentSseStream,
 } from '../../lib/claude-agent-sse-utils';
+import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
+import { applyTodoEvent, type ThreadTodoEvent } from '../../hooks/useThreadTodos';
 import { IconArrowDown } from './Icons';
 import { API_BASE } from '../../lib/apiBase';
 const CHAT_BOTTOM_PROXIMITY_PX = 120;
@@ -131,6 +156,7 @@ export default function ChatPanel({
   onEditorWriteConfirmed,
   voiceSystemPrompt,
 }: ChatPanelProps) {
+  const { t } = useTranslation();
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
     toolChoice: ToolChoice;
@@ -196,6 +222,7 @@ export default function ChatPanel({
   const { messages, sendMessage, setMessages, status, error, addToolResult, stop } = useChat({
     id: threadId,
     transport: new ClaudeAgentChatTransport({
+      threadId,
       api: `${API_BASE}/api/claude-agent`,
       headers: () => ({ 'Authorization': `Bearer ${getAuthToken()}` }),
       prepareSendMessagesRequest: ({ messages: outgoingMessages, body, id }) => {
@@ -349,6 +376,16 @@ export default function ChatPanel({
             finishReconnect();
             return false;
           }
+          // plan-* 生命周期帧不产生消息气泡，转发 plan store（claude-plan.md §5.4）。
+          if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
+            applyPlanEvent(activeThreadId, event as unknown as ThreadPlanEvent);
+            return;
+          }
+          // todo-updated 生命周期帧不产生消息气泡，转发 todos store（claude-todo.md §5.4）。
+          if (event.type === 'todo-updated') {
+            applyTodoEvent(activeThreadId, event as unknown as ThreadTodoEvent);
+            return;
+          }
           const applyMessages = setMessagesRef.current;
           if (!applyMessages) {
             return;
@@ -409,6 +446,34 @@ export default function ChatPanel({
     }
   }, [isStopping, stop, threadId]);
   const shouldShowMessageSurface = messages.length > 0 || Boolean(error) || chatLoading;
+
+  const effectiveToolChoice: ToolChoice = imFullAccessEnabled ? 'auto' : currentToolChoice;
+
+  // Derive the earliest tool part that is waiting on a user decision. The
+  // confirmation UI (approve/reject or AskUserQuestion form) floats above the
+  // input dock instead of rendering inline in the message list.
+  const pendingConfirmation = useMemo<PendingToolConfirmation | null>(() => {
+    for (const message of messages) {
+      const parts = message.parts ?? [];
+      for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
+        const part = parts[partIndex];
+        if (!isToolUIPart(part)) continue;
+        const toolPart = part as ToolUIPart | DynamicToolUIPart;
+        const kind = resolvePendingToolConfirmation(toolPart, effectiveToolChoice);
+        if (!kind) continue;
+        return {
+          kind,
+          partKey: `${message.id}-${partIndex}`,
+          toolCallId: toolPart.toolCallId,
+          toolName: resolveToolName(toolPart) || getToolName(toolPart),
+          title: 'title' in toolPart ? (toolPart as { title?: string }).title : undefined,
+          input: 'input' in toolPart ? toolPart.input : undefined,
+          networkRequest: kind === 'sandbox-network' ? resolveSandboxNetworkRequest(toolPart) : undefined,
+        };
+      }
+    }
+    return null;
+  }, [messages, effectiveToolChoice]);
 
   const shouldShowLoadingIndicator = useMemo(() => {
     if (!agentBusy || messages.length === 0) {
@@ -481,7 +546,7 @@ export default function ChatPanel({
             error={error}
             addToolResult={addToolResult}
             shouldShowLoadingIndicator={shouldShowLoadingIndicator}
-            toolChoice={imFullAccessEnabled ? 'auto' : currentToolChoice}
+            toolChoice={effectiveToolChoice}
             setMessages={setMessages}
             sendMessage={sendMessage}
             onEditorWriteConfirmed={onEditorWriteConfirmed}
@@ -494,8 +559,8 @@ export default function ChatPanel({
         {shouldShowMessageSurface && showScrollToBottom ? (
           <button
             type="button"
-            aria-label="滚动到底部"
-            title="滚动到底部"
+            aria-label={t('chat.panel.scrollToBottom')}
+            title={t('chat.panel.scrollToBottom')}
             onClick={handleScrollToBottom}
             style={{
               position: 'absolute',
@@ -518,39 +583,50 @@ export default function ChatPanel({
             <IconArrowDown style={{ width: '1.05rem', height: '1.05rem' }} />
           </button>
         ) : null}
-        <AIInputDock
-          openFileDialogSignal={openFileDialogSignal}
-          fullAccessEnabled={imFullAccessEnabled}
-          onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
-            onConversationStart?.();
-            setCurrentToolChoice(toolChoice);
-            pendingDataRef.current = {
-              rawAttachments: uploadedFiles.map(toAttachment),
-              toolChoice,
-            };
+        {pendingConfirmation ? (
+          // While a tool confirmation is pending, the input dock is replaced by
+          // the confirmation panel — the composer returns once the user decides.
+          <ToolConfirmationDock
+            key={pendingConfirmation.partKey}
+            confirmation={pendingConfirmation}
+            threadId={threadId}
+            addToolResult={addToolResult}
+          />
+        ) : (
+          <AIInputDock
+            openFileDialogSignal={openFileDialogSignal}
+            fullAccessEnabled={imFullAccessEnabled}
+            onSendMessage={async (message, uploadedFiles = [], toolChoice = 'auto') => {
+              onConversationStart?.();
+              setCurrentToolChoice(toolChoice);
+              pendingDataRef.current = {
+                rawAttachments: uploadedFiles.map(toAttachment),
+                toolChoice,
+              };
 
-            const validFiles = uploadedFiles.filter((file) => file.storageKey);
-            const parts: Array<FileUIPart | TextUIPart> = validFiles.map((file) => ({
-              type: 'file',
-              url: toFileProxyUrl(file.storageKey!),
-              mediaType: file.mimeType,
-              filename: file.name,
-            } as FileUIPart));
-            if (message) {
-              parts.push({ type: 'text', text: message } as TextUIPart);
-            }
-            if (parts.length === 0) {
-              return;
-            }
-            await sendMessage({ role: 'user', parts });
-          }}
-          placeholder={inputPlaceholder}
-          loading={agentBusy}
-          onStop={agentBusy ? handleStop : undefined}
-          stopPending={isStopping}
-          workspaceSessionId={workspaceEnabled ? threadId : undefined}
-          mode="full"
-        />
+              const validFiles = uploadedFiles.filter((file) => file.storageKey);
+              const parts: Array<FileUIPart | TextUIPart> = validFiles.map((file) => ({
+                type: 'file',
+                url: toFileProxyUrl(file.storageKey!),
+                mediaType: file.mimeType,
+                filename: file.name,
+              } as FileUIPart));
+              if (message) {
+                parts.push({ type: 'text', text: message } as TextUIPart);
+              }
+              if (parts.length === 0) {
+                return;
+              }
+              await sendMessage({ role: 'user', parts });
+            }}
+            placeholder={inputPlaceholder}
+            loading={agentBusy}
+            onStop={agentBusy ? handleStop : undefined}
+            stopPending={isStopping}
+            workspaceSessionId={workspaceEnabled ? threadId : undefined}
+            mode="full"
+          />
+        )}
       </div>
     </div>
   );

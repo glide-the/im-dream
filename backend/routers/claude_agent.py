@@ -23,6 +23,12 @@
 #                    the current Agent turn without deleting the chat thread.
 # [Sync] 2026-06-27: /api/claude-agent/threads accepts Chat history search
 #                    params backed by plugin-style fuzzy/vector retrievers.
+# [Sync] 2026-07-09: default /api/claude-agent/threads lists accept limit/offset
+#                    for frontend scroll pagination without loading all threads.
+# [Sync] 2026-07-20: add GET /api/claude-agent/threads/{thread_id}/plan —
+#                    current Plan Mode plan per thread (claude-plan §5.5).
+# [Sync] 2026-07-20: add GET /api/claude-agent/threads/{thread_id}/todos —
+#                    current todo list per thread (claude-todo §5.5).
 
 import base64
 import json
@@ -37,6 +43,7 @@ from pydantic import AliasChoices, BaseModel, Field
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
+from claude_agent.service import build_thread_plan_payload, build_thread_todos_payload
 from claude_agent.thread_retrieval import (
     build_chat_thread_search_config,
     is_chat_history_search_requested,
@@ -356,6 +363,7 @@ async def claude_agent_list_threads(
     vector_query: Optional[str] = Query(default=None),
     min_score: Optional[float] = Query(default=None, ge=0, le=1),
     limit: Optional[int] = Query(default=None, ge=1),
+    offset: int = Query(default=0, ge=0),
     current_user: dict = Depends(get_current_user),
 ):
     """Return chat threads, optionally searched by title and message content.
@@ -372,7 +380,7 @@ async def claude_agent_list_threads(
         retrieval_mode=retrieval_mode,
         vector_query=vector_query_obj,
     ):
-        threads = database.list_chat_threads(user_id)
+        threads = database.list_chat_threads(user_id, limit=limit, offset=offset)
         return {"threads": threads}
 
     config = build_chat_thread_search_config(
@@ -484,6 +492,86 @@ async def claude_agent_thread_status(
         "lifecycle": lifecycle,
         "turn_count": snapshot.get("turn_count", 0),
     }
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/plan")
+async def claude_agent_thread_plan(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the current Plan Mode plan for *thread_id* (claude-plan §5.5).
+
+    Response body::
+
+        {
+          "thread_id": "thread-abc123",
+          "plan_mode": "none" | "planning" | "exited",
+          "exists": true,
+          "slug": "amber-churn-otter",
+          "file_name": "amber-churn-otter.md",
+          "content": "# 计划\\n...",
+          "content_bytes": 1832,
+          "truncated": false,
+          "updated_at": "2026-07-20T01:23:45.678Z"
+        }
+
+    Ownership is validated like ``/status``: 404 when the thread does not
+    belong to the caller.  ``plan_mode`` comes from in-memory run state while
+    the thread is running, else ``"none"``.  Plan data is rebuilt from the
+    workspace plans directory (the only persistent layer); ``exists:false``
+    returns null ``slug``/``file_name``/``content``/``content_bytes``/
+    ``updated_at``.  Workspace Mode disabled → fixed ``exists:false`` +
+    ``plan_mode:"none"`` (never probes the global ``~/.claude/plans``).
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    plan_mode = "none"
+    if snapshot and snapshot.get("lifecycle") == "running":
+        plan_mode = str(snapshot.get("plan_mode") or "none")
+    return build_thread_plan_payload(thread_id, plan_mode=plan_mode)
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/todos")
+async def claude_agent_thread_todos(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the current todo list for *thread_id* (claude-todo §5.5).
+
+    Response body::
+
+        {
+          "thread_id": "thread-abc123",
+          "source": "todo_write" | "task_v2" | null,
+          "exists": true,
+          "todos": [
+            {"id": "1", "content": "...", "status": "pending",
+             "active_form": null, "owner": null, "blocked_by": []}
+          ],
+          "truncated": false,
+          "updated_at": "2026-07-20T06:30:00.000Z"
+        }
+
+    Ownership is validated like ``/plan``: 404 when the thread does not
+    belong to the caller.  When the v2 tasks directory holds task JSON the
+    filesystem is the source of truth (and the in-memory state is corrected);
+    otherwise the in-memory v1 TodoWrite capture from the session snapshot is
+    returned.  ``exists:false`` returns ``source:null``, ``todos:[]`` and
+    ``updated_at:null``.  Workspace Mode disabled → fixed ``exists:false``
+    (never probes the global ``~/.claude/tasks``).
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    todo_state = snapshot.get("todo_state") if snapshot else None
+    return build_thread_todos_payload(thread_id, todo_state=todo_state)
 
 
 @router.post("/api/claude-agent/threads/{thread_id}/stop")

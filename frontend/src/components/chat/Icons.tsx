@@ -4,6 +4,12 @@
 // [Sync] 2026-05-29: add share and more icons for the theme-adaptive chat status bar.
 // [Sync] 2026-06-09: add downward arrow icon for the ChatPanel scroll-to-bottom floating action.
 // [Sync] 2026-06-28: add message-circle icon for the Chat history search dialog.
+// [Sync] 2026-07-20: add IconPlanTasks (document + check rows) for the PlanButton
+//                    "计划与待办" dual-section semantics (claude-todo §5.6).
+// [Sync] 2026-07-20: add IconList (bulleted list) — PlanButton 改为纯图标按钮，
+//                    文字经悬浮 tooltip 展示（claude-todo §5.6 交互修订）。
+// [Sync] 2026-07-26: add shared IconCopy (lifted from AssistMessagePart) so user and
+//                    assistant message bubbles reuse the same copy affordance.
 import type { CSSProperties, ReactNode } from 'react';
 
 type IconProps = { className?: string; style?: CSSProperties };
@@ -52,6 +58,11 @@ export const IconTrash = createIcon('0 0 24 24', <><path d="M3 6h18" /><path d="
 export const IconEdit = createIcon('0 0 24 24', <><path d="M12 20h9" /><path d="M16.5 3.5l4 4L7 21H3v-4L16.5 3.5z" /></>);
 export const IconX = createIcon('0 0 24 24', <><path d="M18 6L6 18" /><path d="M6 6l12 12" /></>);
 export const IconCheck = createIcon('0 0 24 24', <polyline points="20 6 9 17 4 12" />);
+// 复制图标（双矩形）：用户/助手消息气泡共用。
+export const IconCopy = createIcon('0 0 24 24', <>
+  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+</>);
 export const IconFile = createIcon('0 0 24 24', <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></>);
 export const IconDownload = createIcon('0 0 24 24', <><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></>);
 export const IconLoader = createIcon('0 0 24 24', <path d="M21 12a9 9 0 1 1-6.219-8.56" />);
@@ -62,6 +73,24 @@ export const IconEnvelope = createIcon('0 0 24 24', <><rect x="2" y="4" width="2
 export const IconCalendar = createIcon('0 0 24 24', <><rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" /></>);
 export const IconDatabase = createIcon('0 0 24 24', <><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M21 12c0 1.66-4.03 3-9 3s-9-1.34-9-3" /><path d="M3 5v14c0 1.66 4.03 3 9 3s9-1.34 9-3V5" /></>);
 export const IconTasks = createIcon('0 0 24 24', <><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></>);
+// 文档 + 勾选组合：表达 PlanButton「计划与待办」双区语义（claude-todo §5.6）。
+export const IconPlanTasks = createIcon('0 0 24 24', <>
+  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+  <polyline points="14 2 14 8 20 8" />
+  <path d="M7.5 12.5l1.5 1.5 2.5-2.5" />
+  <path d="M13.5 13h3.5" />
+  <path d="M7.5 17l1.5 1.5 2.5-2.5" />
+  <path d="M13.5 17.5h3.5" />
+</>);
+// 纯列表图标（圆点 + 三行）：PlanButton 纯图标按钮形态使用。
+export const IconList = createIcon('0 0 24 24', <>
+  <circle cx="4.5" cy="6" r="1" />
+  <circle cx="4.5" cy="12" r="1" />
+  <circle cx="4.5" cy="18" r="1" />
+  <path d="M9 6h11" />
+  <path d="M9 12h11" />
+  <path d="M9 18h11" />
+</>);
 export const IconTable = createIcon('0 0 24 24', <><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" /></>);
 export const IconMoreHorizontal = createIcon('0 0 24 24', <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>);
 export const IconMessageCircle = createIcon('0 0 24 24', <><path d="M21 11.5a8.4 8.4 0 0 1-.9 3.8 8.7 8.7 0 0 1-7.8 4.7 8.4 8.4 0 0 1-3.8-.9L3 21l1.9-5.5a8.4 8.4 0 0 1-.9-3.8 8.7 8.7 0 0 1 4.7-7.8 8.4 8.4 0 0 1 3.8-.9h.5a8.5 8.5 0 0 1 8 8v.5z" /></>);

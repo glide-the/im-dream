@@ -6,6 +6,16 @@
 # [Sync] 2026-06-12: add configurable Debian/PyPI/npm mirror build args for faster China builds.
 # [Sync] 2026-06-14: install Claude Code Linux sandbox dependencies for Docker deployments.
 # [Sync] 2026-06-17: ensure standard sbin directories exist for bubblewrap rootfs mounts.
+# [Sync] 2026-07-26: Route A — revert npm Claude Code to 2.1.108 and restore
+#        the vendor apply-seccomp passthrough patch.  The settings-driven
+#        override (sandbox.seccomp.applyPath + shim) tried for 2.1.220 was
+#        proven dead in production: the 2.1.220 embedded converter hardcodes
+#        its seccomp config and never reads sandbox.seccomp (Linux binary
+#        strings: 0 hits for the settings key, 16 for /proc/self/fd), and the
+#        shim was never invoked.  cli_path pinning
+#        (sdk_env.apply_cli_path_to_options) now pairs the SDK with this
+#        patched npm CLI; a build-time `claude --version` assertion guards
+#        against silent platform-binary misses (2.1.220 optional-deps lesson).
 
 FROM python:3.10-slim-bookworm
 
@@ -65,11 +75,14 @@ RUN set -eux; \
 
 # Claude Code + sandbox-runtime.
 # Patch apply-seccomp to passthrough to avoid nested userns / setgroups failure in Docker.
+# `claude --version` must succeed after install — 2.1.220 taught us the
+# platform binary can silently miss (optional deps), so fail the build loudly.
 RUN set -eux; \
     npm config set registry "${NPM_REGISTRY}"; \
     npm install -g \
         "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
         "@anthropic-ai/sandbox-runtime"; \
+    claude --version; \
     APPLY_SECCOMP_ROOT="$(npm root -g)/@anthropic-ai/claude-code/vendor/seccomp"; \
     test -d "$APPLY_SECCOMP_ROOT"; \
     find "$APPLY_SECCOMP_ROOT" -type f -name apply-seccomp -print \
@@ -82,7 +95,7 @@ WORKDIR /app
 
 COPY requirements.txt ./
 # Use aliyun mirror as primary, PyPI as fallback for packages not yet mirrored
-# (e.g. claude-code-sdk which is newly published by Anthropic).
+# (e.g. claude-agent-sdk, the renamed claude-code-sdk successor package).
 RUN python -m pip install --no-cache-dir --timeout 180 --retries 10 \
     --extra-index-url http://mirrors.cloud.aliyuncs.com \
     -r requirements.txt

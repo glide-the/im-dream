@@ -12,6 +12,9 @@
 # [Sync] 2026-06-23: register Google OAuth and Device Flow routers, initialize
 #                    auth tables at startup, and add SessionMiddleware for
 #                    Authlib OAuth state.
+# [Sync] 2026-07-04: register the Notion resource connector router so connector
+#                    auth, discovery, selection, and canonical snapshot sync
+#                    endpoints are exposed alongside the rest of the backend API.
 """FastAPI-based voice analysis server with sync API support."""
 
 import os
@@ -37,6 +40,11 @@ def _drop_unsupported_agent_env() -> None:
         "INK_AGENT_EVENT_BUS_BACKEND",
         "INK_AGENT_REDIS_URL",
         "INK_AGENT_EVENT_BUS_TTL_S",
+        # Sandbox runtime env contract (workspace.py).  Previously dropped
+        # here at startup, which silently disabled the extra sandbox read
+        # paths (the apply-seccomp settings override listed here briefly was
+        # removed 2026-07-26 — proven dead in production; see workspace.py).
+        "INK_AGENT_SANDBOX_EXTRA_ALLOW_READ",
     }
     os.environ.pop("ANTHROPIC_API_KEY", None)
     for key in list(os.environ):
@@ -809,6 +817,7 @@ from routers.friends import (
 from routers.oauth import router as oauth_router
 from routers.pictures import GeneratePictureRequest, router as pictures_router
 from routers.preferences import router as preferences_router
+from routers.notion import router as notion_router
 from routers.reports import router as reports_router
 from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
@@ -914,6 +923,7 @@ app.include_router(device_oauth_router)
 app.include_router(sessions_router)
 app.include_router(pictures_router)
 app.include_router(preferences_router)
+app.include_router(notion_router)
 app.include_router(reports_router)
 app.include_router(admin_router)
 app.include_router(voices_router)

@@ -42,3 +42,5 @@ backend/uv.lock
 **/.env
 .storage-env
 .cloud-env
+.playwright-mcp
+output/

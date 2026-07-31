@@ -27,11 +27,11 @@ touch_animation  (mcp__user__touch_animation)
 Usage
 -----
 Run the shared server through the stdio entrypoint and register it in
-``ClaudeCodeOptions.mcp_servers`` as an external server::
+``ClaudeAgentOptions.mcp_servers`` as an external server::
 
-    from claude_code_sdk.types import McpStdioServerConfig
+    from claude_agent_sdk.types import McpStdioServerConfig
 
-    sdk_options = ClaudeCodeOptions(
+    sdk_options = ClaudeAgentOptions(
         mcp_servers={
             "user": McpStdioServerConfig(
                 type="stdio",

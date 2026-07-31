@@ -5,210 +5,271 @@
 > **[Sync] 2026-06-13**: 完全访问只隐藏全局逐步确认入口；`AskUserQuestion` / `mcp__user__ask_user` 仍显示问答确认窗口。
 > **[Sync] 2026-06-09**: ChatPanel 在用户上滑离开消息底部时，于 AIInputDock 上方显示悬浮「滚动到底部」箭头；点击后平滑回到底部并恢复自动贴底。
 > **[Sync] 2026-06-28**: 历史对话入口改为右侧历史面板；面板打开即加载默认历史，标题栏搜索按钮打开居中搜索弹窗。搜索弹窗只负责检索和切换会话，不显示「新聊天」入口。
+> **[Sync] 2026-07-08**: 依据《Chat 工作区入口页》与《连接器具体配置页面结构草图》重写 Chat 主工作区：以居中 `ChatInputDock` + `WorkspaceTabBar` 为准，历史与资源连接器都在主内容区切换，旧的侧边历史入口不再作为主路径。
+> **[Sync] 2026-07-08**: 修正资源连接器入口策略：Chat 只承载轻量 `ResourceConnectorTabPanel`，点击「选择连接器」或连接器状态面板中的「管理」必须进入 Settings 的「资源链接」区；Notion 具体配置页由 Settings 内的 `ConnectorNotionDetailPage` 承载。
+> **[Sync] 2026-07-08**: Notion 具体配置页最新交互归属 Settings：同一平台只认证一个账号；资源范围为统一 data_source / page 列表，搜索框与「保存资源」同一操作行，默认每页 10 条；保存后「已挂载来源」必须立即显示所选来源。
+> **[Sync] 2026-07-08**: 根据 Chat 入口比例反馈收紧实现边界：`MainContentArea` 与输入框 / `WorkspaceTabBar` 同宽居中；历史窗体移除外层冗余边框；Chat 连接器已连接态改为状态信息面板，展示授权 / 同步 / 已链接资源摘要，只有小型「管理」入口可跳转 Settings。
+> **[Sync] 2026-07-08**: Chat 连接器面板的已链接资源必须来自后端 persisted `connector.sources`；Settings 保存资源后刷新页面仍可恢复，且 Notion People 系统数据源不会出现在资源范围或 Chat 摘要中。
+> **[Sync] 2026-07-09**: Chat `ConnectorLandingPanel` 继续减少卡片感：根内容区无外框，`ConnectorStatusPanel` 使用虚线边界但无卡片底色 / 阴影，空态、状态 chip 和已链接资源行使用轻表面承载，只在明确操作控件上保留弱边界。
 
 ## 1. 文档范围
 
-Chat Dashboard 是用户进入对话工作区后的首屏，用于创建新会话、查看当前对话状态、进入历史记录、管理附件入口，并承载底部输入 Dock。
+Chat Dashboard 是用户进入对话工作区后的首屏，用于创建新会话、查看聊天历史、查看资源连接器摘要，并承载底部 / 居中的输入 Dock。
 
-本次更新删除旧稿中的独立 Tailwind HTML 原型、外部头像、橙色主视觉和灰色营销式 Hero，改为与 Ink & Memory 当前纸张式界面统一。
+本次版本以 `docs/prd/Chat 工作区入口页.md` 为首屏草图，以 `docs/prd/notion-session/连接器具体配置页面结构草图.md` 为连接器下钻页草图。Chat 不再以右侧历史侧栏作为主要入口，`WorkspaceTabBar` 成为唯一的主内容切换器。
 
-模型配置（主题、AI 模型、系统提示词、工作区模式）已迁移至独立的 Settings 页面，参见 [Settings PRD](<./Settings.md>)。Chat 页面不再渲染模型配置侧边栏。
+模型配置（主题、AI 模型、系统提示词、工作区模式）与资源链接管理仍位于独立的 Settings 页面，参见 [Settings PRD](<./Settings.md>)。Chat 里的资源连接器 Tab 不实现 Notion 认证、资源选择或同步配置。
 
 ## 2. 设计目标
 
-- 保持"暖纸张、手写、安静工具台"的产品气质。
-- 让用户在首屏立即理解：当前是否有会话、能否输入、可否上传文件、如何新建对话。
-- 将快捷入口、状态反馈和输入区放在同一视觉层级内，避免首页变成营销页。
-- 为 Light/Dark 模式共用同一语义 token。
-- 页面不出现外层垂直滚动；消息流内部自行滚动。
+- 保持“暖纸张、手写、安静工具台”的产品气质。
+- 让用户在首屏立即理解：**先输入、再切换内容区**。
+- 让 `聊天历史` 与 `资源连接器` 共享同一 Chat 工作区框架，但资源连接器在 Chat 中只展示摘要、空态与跳转入口。
+- 让连接器的认证、资源选择、同步和关闭操作统一进入 Settings 的「资源链接」区，避免 Chat 内出现第二套配置流程。
+- 明确空状态、加载态、错误态与已连接态，尤其是连接器 Tab 的空 / 骨架 / 异常表现。
+- 页面不出现外层垂直滚动；历史列表、消息流、连接器列表各自内部滚动。
 
 ## 3. 页面布局
 
+```txt
+ChatDashboardPage
+├── ChatTopHeader
+│   ├── ModuleIcon
+│   ├── ModuleTitle
+│   ├── ModuleDescription
+│   ├── ShareButton
+│   └── MoreButton
+├── CenterStage
+│   ├── ChatInputDock（主视觉锚点）
+│   │   ├── AddButton
+│   │   ├── TextInput
+│   │   ├── AttachmentEntry
+│   │   ├── ModelOrToolEntry
+│   │   └── UserAvatar / SubmitEntry
+│   ├── WorkspaceTabBar
+│   │   ├── HistoryTab（default）
+│   │   └── ResourceConnectorTab
+│   └── MainContentArea
+│       ├── HistoryTabPanel
+│       │   ├── EmptyChatState
+│       │   ├── HistorySkeletonList
+│       │   ├── HistoryThreadList
+│       │   └── ChatMessageList
+│       └── ResourceConnectorTabPanel
+│           ├── ConnectorToolbar
+│           ├── ConnectorEmptyState
+│           ├── ConnectorListSkeleton
+│           ├── ConnectorList
+│           └── ConnectorErrorState
+└── ScrollToBottomButton（仅 active_chat）
 ```
-ChatDashboard（height: 100%，overflow: hidden）
-├── FloatingActionBar（右上角绝对定位，zIndex: 20）
-│   ├── NewChatButton（新建对话）
-│   └── MoreMenu（下拉菜单）
-│       ├── 历史对话（切换 HistorySidePanel）
-│       ├── 工作空间（切换 FileSidebar）
-│       └── 分享（复制当前页 URL）
-├── HistorySidePanel（右侧历史对话面板，打开即显示默认历史）
-│   ├── Header（标题 + 搜索按钮 + 关闭按钮）
-│   └── ThreadList（默认历史列表）
-├── HistorySearchDialog（居中搜索弹窗，搜索标题和对话正文）
-├── MainArea（flex: 1，flex-direction: column，overflow: hidden）
-│   ├── QuickActions（flexShrink: 0，未开始对话时显示）
-│   │   ├── 继续写作
-│   │   ├── 总结笔记
-│   │   ├── 整理大纲
-│   │   ├── 发现关联
-│   │   ├── 写作灵感
-│   │   └── 回顾反思
-│   └── ChatPanel / DraftInputDock（flex: 1，minHeight: 0，overflow: hidden）
-│       ├── ChatMessageList（有消息或错误后加载，flex: 1，overflowY: auto）
-│       ├── ScrollToBottomButton（仅当消息流离底部较远时悬浮显示）
-│       └── AIInputDock（flexShrink: 0）
-└── FileSidebar（右侧文件侧边栏，可收起）
-```
+
+### 3.1 布局原则
 
 | 区域 | 桌面端规范 | 移动端规范 |
 |---|---|---|
 | 页面画布 | `color.bg.app`，`height: 100%`，`overflow: hidden` | 全高，禁止外层滚动 |
-| FloatingActionBar | 绝对定位右上角，透明背景，按钮 hover 显示 `color.bg.surface` 轻底色；不占布局流 | 保持紧凑，不换行 |
-| MoreMenu 下拉 | `color.bg.surfaceSolid` + `color.border.paper` + `color.shadow.medium`，圆角 `0.85rem`；点击外部透明蒙层关闭 | 同左 |
-| HistorySidePanel | 右侧宽度约 `16rem`，`color.bg.paper`，左边框 `color.border.paper`，打开时必须主动加载默认历史 | 移动端宜改为抽屉或全屏面板 |
-| HistorySearchDialog | 居中弹窗，宽度约 `min(48rem, calc(100vw - 2rem))`，顶部无边框搜索输入，结果区独立滚动 | 小屏改为接近全屏，保留关闭按钮 |
-| 快捷入口 | 2 到 3 列纸面卡片，`flexShrink: 0` | 纵向列表或横滑 |
-| ChatPanel | `flex: 1`，`minHeight: 0`，消息流内部滚动 | 单列，左右留 16px 内边距 |
-| 到底部按钮 | 悬浮于 AIInputDock 上方居中，只在用户离开消息底部时出现 | 同桌面端，避开安全区和输入框 |
-| 输入 Dock | 底部 sticky，宽度与消息流对齐 | 固定底部，避开系统安全区 |
+| `ChatTopHeader` | 顶部固定信息条，显示模块信息、分享和更多 | 维持单行或双行压缩，不隐藏分享 / 更多 |
+| `ChatInputDock` | 页面中心视觉重心，初始位于内容区上半部居中 | 首屏优先可见，保持足够点击面积 |
+| `WorkspaceTabBar` | 位于输入框正下方，固定仅两项：`聊天历史` / `资源连接器` | 横向胶囊按钮，可横向压缩但不换组 |
+| `MainContentArea` | 位于 Tab 下方，内部独立滚动 | 占满剩余高度，内部滚动 |
+| `ConnectorToolbar` | 右上对齐筛选 / 排序 | 移动端可折叠为单行 dropdown |
+| `ScrollToBottomButton` | 悬浮于输入 Dock 上方，只在 `active_chat` 出现 | 同桌面端，避开安全区 |
 
-## 4. 组件层级
+### 3.2 与旧结构的关系
 
-### 4.1 FloatingActionBar
+- `WorkspaceTabBar` **取代** 旧的 `HistorySidePanel` 作为主历史入口。
+- `MoreButton` 不再承担“打开历史对话”的主职责；它只保留分享之外的溢出操作（例如工作区相关辅助动作）。
+- 历史与连接器都在 `MainContentArea` 内切换，避免“主内容区 + 右侧历史抽屉”双入口并存。
 
-- 绝对定位于 MainArea 右上角（`top: 0.65rem, right: 0.75rem`），`zIndex: 20`，不占用布局流。
-- 常驻两个按钮：**新建对话**（`IconPlus` + 文字"新建"）和 **更多**（`IconMoreHorizontal`）。
-- 按钮默认透明背景，hover 时显示 `color.bg.surface` 轻底色，颜色从 `color.text.secondary` 过渡到 `color.text.primary`，`0.14s ease`。
-- 新建对话按钮：创建中时显示"创建中"并禁用，`color.text.muted` + 降低透明度。
+## 4. 组件层级与功能描述
 
-### 4.1.1 MoreMenu 下拉菜单
+### 4.1 `ChatTopHeader`
 
-- 点击「更多」按钮弹出，点击外部透明蒙层（`position: fixed, inset: 0`）关闭。
-- 容器：`color.bg.surfaceSolid`、`color.border.paper`、`color.shadow.medium`，圆角 `0.85rem`，`padding: 0.35rem`。
-- 菜单项从上到下：
-  - **历史对话**（`IconClock`）：切换右侧 HistorySidePanel；激活态显示 `color.bg.surface` 底色。
-  - **工作空间**（`IconFolder`）：切换右侧 FileSidebar；激活态显示 `color.bg.surface` 底色。
-  - 分隔线（`color.border.paper`）
-  - **分享**（`IconShare`）：复制当前页 URL，点击后文案变为"已复制链接"。
-- 每个菜单项高 `2.2rem`，圆角 `0.55rem`，左侧图标 + 文字。
+- 左侧展示 `ModuleIcon`、`ModuleTitle`、`ModuleDescription`。
+- 右侧固定展示 `ShareButton` 与 `MoreButton`。
+- `MoreButton` 仅承载非主流程附加操作，不应再包含“历史对话主入口”。
 
-### 4.1.2 HistorySidePanel
+### 4.2 `ChatInputDock`
 
-- 由 MoreMenu 中「历史对话」入口触发，作为右侧面板展开，宽度约 `16rem`，会占用横向布局空间。
-- 面板打开时必须主动请求默认历史列表；请求期间显示「加载历史中...」，不得在数据未返回前误显示「暂无会话」。
-- 面板头部左侧显示「历史对话」，右侧依次显示「搜索历史对话」图标按钮和「关闭」按钮。
-- 默认列表展示最新 thread 标题；当前会话右侧显示 `color.action.link` 小圆点；hover 时可显示删除按钮。
-- 空状态显示「暂无会话」。
+- 页面初始主视觉重心。
+- `AddButton` 负责添加附件或资源入口；发送第一条消息后可继续保留，但视觉权重下降。
+- 在 `empty_chat` 与 `connector_empty` 下都保持可用，用户无需离开当前 tab 即可新建对话。
 
-### 4.1.3 HistorySearchDialog
+### 4.3 `WorkspaceTabBar`
 
-- 由 HistorySidePanel 头部搜索按钮触发，居中覆盖在 Chat 页面上方，背景使用半透明 `color.bg.app` 混合遮罩。
-- 顶部为搜索输入和关闭按钮；输入框 placeholder 为「搜索聊天...」，打开时默认清空并自动聚焦。
-- 搜索范围覆盖 thread 标题和已持久化对话正文；输入后 debounce 请求 `/api/claude-agent/threads?query=...&search_scope=all&retrieval_mode=fuzzy`。
-- 输入为空时展示按更新时间分组的默认历史列表，不显示「新聊天」入口；新建会话由 FloatingActionBar 顶部「新建」按钮负责。
-- 输入有值时展示搜索结果：对话图标、标题、命中摘要、日期标签；无结果显示「未找到匹配会话」。
-- 点击搜索结果关闭弹窗并切换到对应会话。
+- 固定只有两个 tab：`HistoryTab`、`ResourceConnectorTab`。
+- 默认选中 `HistoryTab`。
+- 切 tab 时只切换 `MainContentArea`，不重排 Header 和 Input Dock。
+- 文案使用中文：`聊天历史` / `资源连接器`。
 
-### 4.2 QuickActions
+### 4.4 `HistoryTabPanel`
 
-快捷指令应与 Ink & Memory 笔记系统场景一致：
+- 默认状态承载 `EmptyChatState`。
+- 若用户已有历史但未进入当前线程，可显示 `HistoryThreadList`。
+- 进入某个线程或发送首条消息后，切换为 `ChatMessageList`。
+- `ChatMessageList` 维持现有滚动到底部箭头逻辑：用户离开底部时显示 `ScrollToBottomButton`。
 
-| 快捷指令 | 说明 | 颜色 |
-|---|---|---|
-| 继续写作 | 从当前段落继续扩展，保持原有语气与风格 | `color.state.success` |
-| 总结笔记 | 提炼核心观点，生成简洁的笔记摘要 | `color.state.warning` |
-| 整理大纲 | 将零散想法重组为清晰的结构化大纲 | `color.voice.blue` |
-| 发现关联 | 找出笔记之间的联系与隐藏的共同主题 | `color.voice.purple` |
-| 写作灵感 | 基于当前主题，提供创意角度与扩展方向 | `color.voice.pink` |
-| 回顾反思 | 引导反思已有笔记，提出思考问题与行动建议 | `color.voice.green` |
+### 4.5 `ResourceConnectorTabPanel`
 
-- 卡片使用 `color.bg.surface` 或 `color.bg.surfaceSolid`。
-- 图标颜色来自 `color.voice.*` 或 `color.state.*`，只用于图标/徽标。
-- 卡片 hover 可增加 `color.shadow.soft`，位移不超过 3px。
-- 不使用 3D 翻转、强 glow、渐变装饰。
-- **触发后隐藏**：用户点击任意快捷指令卡片或在输入框发送第一条消息后，QuickActions 区域立即隐藏，MainArea 只显示 ChatPanel（消息流 + 输入 Dock）。新建会话（New Chat）后恢复显示。
+```txt
+ResourceConnectorTabPanel
+├── ConnectorToolbar
+│   ├── FilterDropdown
+│   └── SortDropdown
+└── ConnectorContentArea
+    ├── ConnectorEmptyState
+    │   ├── ConnectorTypeIcons（远程资源 / 本地资源 / 更多）
+    │   ├── EmptyTitle：暂无资源连接器
+    │   ├── EmptyDescription：连接 Notion / 飞书 / CLI 后可在对话中使用资源
+    │   └── SelectConnectorButton（主 CTA）
+    ├── ConnectorList
+    │   └── ConnectorStatusPanel（平台 / 授权状态 / 同步状态 / 已链接资源 / 管理入口）
+    └── ConnectorErrorState
+```
 
-### 4.3 ChatPanel + AIInputDock
+- 空态采用**轻表面容器**，不可退化为纯文本，也不依赖虚线边框表达层级。
+- `SelectConnectorButton` 的主文案统一为 `选择连接器`；点击后必须打开 Settings 页面并聚焦「资源链接」区。
+- 已连接态不把整张连接器信息做成按钮；`ConnectorStatusPanel` 主要展示平台状态与已链接资源摘要，只保留小型「管理」入口进入 Settings 资源链接路径。若用户继续点击 Notion「管理」，再进入 Settings 内的 `ConnectorNotionDetailPage`。
+- `ConnectorStatusPanel` 的资源数量和来源摘要只读取 connector `sources`，与 Settings「已挂载来源」共用同一份持久化数据；不从 `ConnectorNotionDetailPage` 的临时选择态派生。
 
-- ChatPanel 占剩余所有高度（`flex: 1`，`minHeight: 0`），内部消息列表独立滚动。
-- 默认空会话不渲染空的消息纸面容器；只有已有消息、发送后产生消息或错误需要展示时，才加载 ChatMessageList 区域。
-- 当消息流较长且用户上滑离开底部时，ChatPanel 显示一个圆形悬浮向下箭头，位置固定在 AIInputDock 上方，不参与消息流布局。
-- 点击该箭头后消息列表平滑滚动到 `ChatMessageList` 底部；到达底部或列表不可滚动时箭头隐藏。
-- AIInputDock 在 ChatPanel 内部 sticky，不触发外层滚动。
-- 视觉沿用 [Chat Send](<./Chat Send.md>)：纸面容器、柔和边框、底部操作行。
-- `Ask Ink & Memory…` placeholder 使用 `color.text.muted`。
-- 当 Settings 中「应如何批准 IM」为完全访问时，AIInputDock 不显示手动「逐步确认」入口，只显示「完全访问」状态徽标；`AskUserQuestion` / `mcp__user__ask_user` 的问答确认窗口仍正常显示。
+## 5. 状态设计
 
-## 5. 色彩与视觉规范
+### 5.1 主状态枚举
+
+| 状态 | 设计要求 |
+|---|---|
+| `empty_chat` | 默认落在 `HistoryTab`，主内容区显示空聊天状态；空状态不得抢过 `ChatInputDock` 的视觉权重。 |
+| `active_chat` | 有消息内容时，`ChatMessageList` 成为主要内容区；`ScrollToBottomButton` 在用户离开底部时出现。 |
+| `connector_empty` | 切到 `ResourceConnectorTab` 但没有任何资源连接器时，显示轻表面空态、三枚资源类型图标、标题“暂无资源连接器”、描述文案和 CTA。 |
+| `connector_connected` | 有连接器时显示 `ConnectorToolbar` + `ConnectorStatusPanel` 列表，虚线边界信息块内展示平台、授权状态、同步状态、已链接资源数量、最近同步和资源摘要；资源摘要来自 persisted `sources`，整块区域不是按钮也不是卡片。 |
+| `connector_error` | 连接器列表读取失败、认证失效或同步失败时，在 tab 内容区内显示错误卡和重试入口，不影响 Header / Input Dock。 |
+
+### 5.2 首次加载骨架屏
+
+| 场景 | 要求 |
+|---|---|
+| `HistoryTab` 首次加载 | 使用 `HistorySkeletonList`：3~5 条纸面行块骨架，占位标题、摘要和时间；**禁止**只显示“加载历史中...”。 |
+| `ResourceConnectorTab` 首次加载 | 显示 `ConnectorToolbar` 的 pill 骨架 + 2~3 个连接器状态面板骨架；若尚未拿到列表结果，不得提前显示空态文案。 |
+| 连接器空态预载 | 若接口返回为空，再从骨架切换到轻表面空态；空态不是加载占位。 |
+
+### 5.3 连接器空态文案
+
+```txt
+标题：暂无资源连接器
+描述：连接 Notion / 飞书 / CLI 后可在对话中使用资源
+主按钮：选择连接器
+辅助图标：远程资源 / 本地资源 / 更多
+```
+
+## 6. 色彩与视觉规范
 
 | 元素 | Token | 说明 |
 |---|---|---|
 | 页面背景 | `color.bg.app` | 暖纸张背景。 |
-| 主内容纸面 | `color.bg.paper` | 消息和输入承载层。 |
-| 卡片/浮层 | `color.bg.surface` | 快捷入口、状态摘要。 |
-| 边框 | `color.border.paper` | 保持棕灰纸张质感。 |
+| 主内容纸面 | `color.bg.paper` | 历史列表、连接器列表、消息区承载层。 |
+| 空状态 / 状态信息 | `color.bg.surface` / `color.bg.surfaceSolid` | 轻表面空态、状态 chip 和已链接资源行；状态信息块使用虚线边界，不做卡片化。 |
+| 弱控件边界 | `color.border.paper` | 只用于管理、搜索、分页等明确可操作控件。 |
 | 主文案 | `color.text.primary` | 标题、当前操作。 |
-| 正文 | `color.text.body` | 消息预览。 |
-| 链接/发送 | `color.action.link` | 小面积使用。 |
-| 工具步骤 | `color.state.warning` | 只用于左线、徽标或命令提示。 |
-
-## 6. 状态设计
-
-| 状态 | 设计要求 |
-|---|---|
-| 空状态 | 显示可输入的提示、快捷入口和 Add 入口；不显示虚构数据，也不显示空白消息纸面容器；首次进入 Chat 不创建 thread。 |
-| 对话已触发 | 用户点击快捷指令或发送第一条消息后，QuickActions 区域隐藏，MainArea 仅展示 ChatPanel（消息流 + 输入 Dock）；页面不刷新、不跳转。 |
-| 历史上滑 | 用户离开消息底部时显示到底部悬浮箭头；新消息不强行抢回滚动位置，直到用户主动回到底部。 |
-| 加载态 | 消息区显示低对比 skeleton 或 pulse；输入区保持可见但根据能力禁用发送。 |
-| 错误态 | 使用 `color.state.error` 加明确错误文本；提供重试入口。 |
-| 禁用态 | 按钮使用 `color.disabled.bg`，光标和说明同步变化。 |
-| 选中态 | 当前快捷入口或当前会话使用炭黑文本/边框加强。 |
-| 悬停态 | 背景轻微加深或阴影增强，0.2s ease。 |
+| 正文 | `color.text.body` | 描述与摘要。 |
+| 链接 / 发送 | `color.action.link` | 小面积使用。 |
+| 错误态 | `color.state.error` | `connector_error`、发送失败。 |
 
 ## 7. 暗色模式适配
 
 - 背景切换到 `color.bg.app` 的 Dark 值，保留暖黑纸张感。
-- 卡片和输入 Dock 使用 `color.bg.paper`/`color.bg.surface` 的 Dark 值。
-- Terminal 可保持更深背景，但边框和标题栏需符合 Dark 模式对比度。
-- 不使用霓虹橙作为暗色模式品牌色。
+- `WorkspaceTabBar`、连接器状态面板、轻表面空态、输入 Dock 都沿用统一的纸面语义色，不引入高饱和品牌色。
+- `ScrollToBottomButton`、状态 badge、MoreMenu 在暗色模式下只提升对比度，不改变信息层级。
 
-## 8. `image.png` 用途
+## 8. 可访问性与响应式
 
-`docs/prd/image.png` 当前是聊天工作台视觉参考，展示了暖灰页面、白色消息气泡、工具步骤、Terminal 和底部输入 Dock。本轮不覆盖该图片。
+- `WorkspaceTabBar` 必须支持键盘切换和可见 focus。
+- 空状态、错误态、加载态都需要文本说明。
+- 连接器空态中的三枚图标不得成为唯一语义来源；标题 / 描述必须同时存在。
+- 移动端输入 Dock 不遮挡 `MainContentArea` 的最后一条内容。
+- `ScrollToBottomButton` 必须提供明确 `aria-label` / `title`。
 
-建议后续若更新图片，应保持：
+## 9. 验收标准
 
-- 暖纸张背景和纸面输入 Dock。
-- 工具步骤使用细线提醒，不放大为高饱和主视觉。
-- Terminal 深色块与正文纸面形成清晰层级。
-- `New Chat` 顶部操作保持轻量。
+- Chat Dashboard 与《Chat 工作区入口页》保持一致：**居中输入框 → `WorkspaceTabBar` → `MainContentArea`**。
+- 历史入口不再以右侧历史面板作为主路径；`WorkspaceTabBar` 是唯一主切换。
+- `ResourceConnectorTabPanel` 的空态具备轻表面承载、三枚资源类型图标、标题、描述和 CTA。
+- `HistoryTab` 与 `ResourceConnectorTab` 首次加载都使用骨架屏，而不是纯文本 loading。
+- `connector_empty` / `connector_connected` / `connector_error` 三种连接器态互斥且切换清晰。
+- 点击「选择连接器」或连接器状态面板中的「管理」后进入 Settings 的「资源链接」区，而不是在 Chat 内原地展开复杂配置。
+- Settings 中保存的 Notion sources 刷新后仍出现在 Chat `ConnectorStatusPanel`，Chat 与 Settings 的资源数量和标题一致。
+- Notion People 系统数据源不会出现在 Chat 已链接资源摘要中。
+- Chat 内不得出现 Notion 的资源搜索、分页、保存资源、已挂载来源或关闭连接操作；这些交互只允许出现在 Settings 的 `ConnectorNotionDetailPage`。
 
-## 9. 可访问性与响应式
+## 10. 任务解决方案设计稿（2026-07-08）
 
-- Dashboard 所有按钮必须支持键盘 Tab 顺序和可见 focus。
-- 空状态、错误态、加载态需要有文本说明。
-- 快捷卡标题和描述不得依赖颜色区分。
-- 移动端输入 Dock 不遮挡消息末尾内容。
-- 到底部悬浮箭头必须提供明确 `aria-label` / `title`，且点击区域不小于常规图标按钮尺寸。
+### 10.1 Chat 连接器跳转错位
 
-## 10. 验收标准
+| 项 | 方案 |
+|---|---|
+| 根因 | Chat 侧曾把 `ConnectorLandingPanel` 的 CTA / 状态面板接入 Chat 内 `ConnectorConfigPage`，与最新设计稿“资源连接器空态点击跳转设置页链接器功能选择位置”不一致。 |
+| 最小修复 | `ConnectorLandingPanel` 继续展示 toolbar、骨架、轻表面空态和连接器状态面板；所有选择动作统一调用 App 层 `openConnectorSettings()`。 |
+| 非目标 | 不在 Chat 中实现认证、资源选择、同步、关闭连接或 Notion 详情页下钻。 |
+| 验收 | 点击「选择连接器」或连接器状态面板中的「管理」后进入 Settings，并滚动 / 聚焦到 `ConnectorSettingsSection`。 |
 
-- Dashboard PRD 不再包含可复制 HTML 原型、Tailwind 配置或外部头像依赖。
-- 所有颜色描述均引用 [Color System](<./color_system/README.md>) token。
-- Light/Dark、空/加载/错误/禁用/选中/悬停状态均有明确要求。
-- Chat 页面无外层垂直滚动，消息区自行滚动。
-- 当长对话中用户滚动到上方时，AIInputDock 上方出现到底部箭头；回到底部后该箭头隐藏。
-- 模型配置侧边栏已从 Chat 页面移除，迁移至 [Settings PRD](<./Settings.md>)。
-- 历史对话面板第一次打开必须显示真实历史或加载态；不得因搜索弹窗状态拆分而显示空白。
-- 搜索弹窗不包含「新聊天」按钮；新建会话入口只保留顶部「新建」。
-- 快捷指令与笔记系统场景一致，不含业务销售类内容。
-- `image.png` 被保留为视觉参考，未被覆盖。
+### 10.2 Chat 骨架屏
 
-## 11. 前端实现备注（2026-05-29 本轮）
+| 项 | 方案 |
+|---|---|
+| 根因 | 旧实现容易退化为文本 loading，弱化了设计稿里的黑色 / 暗色骨架结构。 |
+| 最小修复 | 保留 `SkeletonList` / `ConnectorToolbarSkeleton`，在列表结果返回前不显示空态文案。 |
+| 非目标 | 不新增全局 skeleton 系统，不重写 ChatPanel 消息流。 |
+| 验收 | 历史和连接器首次加载均有结构化占位。 |
 
-- `ChatView.tsx`：移除独立 `VerticalNav` 侧边栏组件；改为右上角 `position: absolute` 浮动按钮区，常驻「新建对话」和「更多」两个按钮。
-- **FloatingActionBar**：`zIndex: 20`，按钮默认透明，hover 显示 `color.bg.surface`，无固定高度状态栏。
-- **MoreMenu**：「更多」按钮点击弹出下拉菜单，包含历史对话、工作空间、分享三项；使用 `position: fixed` 透明蒙层关闭。
-- **HistorySidePanel**：由「更多 → 历史对话」触发，作为右侧面板展开；`threadSidebarOpen` 状态控制显隐，打开时刷新默认历史列表。
-- **HistorySearchDialog**：由 HistorySidePanel 标题栏搜索按钮触发；`threadSearchOpen` 状态控制显隐，负责标题和历史对话正文检索。
-- **FileSidebar**：由「更多 → 工作空间」触发，右侧可收起面板，`fileSidebarOpen` 状态控制。
-- `ChatPanel.tsx`：消息区背景改为 `color.bg.app`，移除边框，保持页面统一底色。
-- `AIInputDock.tsx`：全面对齐颜色系统 token；发送/工具选择按钮激活态改用炭黑（`color.text.primary`）；停止按钮改用 `color.state.danger`；阴影改为 `color.shadow.soft`；附件按钮文案改为"附件"。
-- `const.ts`：快捷指令保持笔记系统场景。
-- `ChatPanel.tsx` / `ChatMessageList.tsx`：消息列表和输入 Dock 填满 Chat 主区域宽度。
-- 2026-06-01：`ChatView.tsx` 首次挂载不再调用 `POST /api/claude-agent/threads`。无线程时先渲染草稿输入区；用户发送首条消息或点击快捷指令后再创建 thread，并把首条 prompt、附件和工具模式传入 `ChatPanel.tsx`。
-- 2026-06-09：`ChatPanel.tsx` 复用消息滚动容器状态，新增 AIInputDock 上方的悬浮到底部按钮；`Icons.tsx` 新增共享 `IconArrowDown`。
-- 2026-06-28：历史搜索从面板内联输入改为居中弹窗；删除弹窗内「新聊天」行；历史面板打开时主动加载默认历史并显示加载态。
+### 10.3 暗色主题
 
-后续如新增 Dashboard 组件，先抽取共享 token/样式，再落地模块。
+| 项 | 方案 |
+|---|---|
+| 根因 | Chat / Settings / Decks 的局部组件存在硬编码浅色背景或白字色。 |
+| 最小修复 | 替换确定影响暗色模式的硬编码浅色面为语义 token 或 `color-mix()`；Decks 页面使用单一虚线页边界、轻纸面 deck item 和小面积 accent，移除渐变图标、强彩色边框和普通 item 阴影。 |
+| 非目标 | 不引入新的主题框架，不重做色彩系统。 |
+| 验收 | 暗色模式下页面背景、卡片、边框、按钮和文本均使用可读的语义色。 |
+
+### 10.4 Chat 入口比例与历史窗体边框
+
+| 项 | 方案 |
+|---|---|
+| 根因 | `MainContentArea` 曾横向铺满 Chat shell，和居中的输入框 / `WorkspaceTabBar` 比例不一致；历史 tab 外层又叠加一层纸面边框，形成多余窗体感。 |
+| 最小修复 | 将 landing 主内容区限制为与输入框一致的 `max-width` 并居中；历史 tab 外层移除边框和分隔线，只保留列表内部滚动、搜索按钮、空态和骨架。 |
+| 非目标 | 不重写消息态 `ChatPanel` 布局，不移除历史搜索弹窗，不新增右侧抽屉主入口。 |
+| 验收 | 默认 Chat 入口与设计稿保持“输入框 → tab → 同宽内容区”的比例；历史列表不出现额外外框。 |
+
+### 10.5 连接器已连接态信息表达
+
+| 项 | 方案 |
+|---|---|
+| 根因 | `ConnectorCard` 使用整卡 `<button>`，内容强调“点击管理”，未体现不同平台连接器状态和已链接资源。 |
+| 最小修复 | 改为非按钮 `ConnectorStatusPanel`，展示平台名称、授权状态、同步状态、已链接资源数量、最近同步和来源摘要；仅右上小型「管理」按钮跳转 Settings。 |
+| 非目标 | 不在 Chat 内实现资源选择、同步刷新、筛选排序真实逻辑或多实例连接器管理。 |
+| 验收 | 连接器窗体主要是状态信息和已链接资源列表，而不是按钮列表；Settings 仍是唯一详细配置入口。 |
+
+### 10.6 已链接资源持久化回显
+
+| 项 | 方案 |
+|---|---|
+| 根因 | 连接器列表响应未携带 persisted `sources` 时，Chat 只能看到连接器本身，看不到 Settings 已保存的 Notion 资源。 |
+| 最小修复 | `ResourceConnectorTabPanel` 使用 connector `sources` 渲染已链接资源数量和来源摘要；后端 connector list/detail 响应必须附带 `connector_resources`。 |
+| 非目标 | 不在 Chat 内新增资源保存、删除、刷新或本地缓存同步逻辑。 |
+| 验收 | Settings 保存资源后刷新页面，切到 Chat 资源连接器 Tab 仍显示同一批已链接资源。 |
+
+### 10.7 People 系统数据过滤
+
+| 项 | 方案 |
+|---|---|
+| 根因 | Notion `v1/search` 可能把 Workspace People 系统 data source 返回给资源发现流程。 |
+| 最小修复 | 在 discovery 层过滤具有 People 系统库特征的结果，前端不展示也不允许保存。 |
+| 非目标 | 不实现前端黑名单、不暴露过滤配置、不按标题 alone 拦截普通数据库。 |
+| 验收 | Chat 已链接资源摘要和 Settings 资源范围列表均不会出现 Notion People 系统库。 |
+
+## 11. 前端实现备注（2026-07-08 对齐稿）
+
+- Chat 首页的首要视觉锚点是 `ChatInputDock`，不是 marketing hero，也不是右侧历史侧栏。
+- 历史对话与资源连接器共用 `WorkspaceTabBar`，推荐实现成稳定的 content switch，而不是 overlay / drawer。
+- `MoreButton` 可保留，但不得与 `WorkspaceTabBar` 重复提供“历史主入口”。
+- 长对话中的到底部箭头逻辑继续保留，与本轮布局对齐不冲突。
+- landing 主内容区必须和输入框 / tab 使用同一横向比例；连接器已连接态必须优先表达状态和 persisted 已链接资源，管理动作只是附属入口。
