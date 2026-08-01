@@ -1,6 +1,6 @@
 # task_230_backend_review-gate-aggregation.md
 
-> **Task ID**: `task_230`  
+> **Task ID**: `task_230_backend_review-gate-aggregation`  
 > **关联 Issue**: `SUO-230-BE-001` — `审阅 gate 服务端聚合与防绕过验证`  
 > **上游 Issue**: `SUO-230` (Issue 清单 §2.3 / §3.3)  
 > **父 Issue**: `SUO-198`  
@@ -32,7 +32,7 @@ Story Workspace 审阅 Gate 服务端聚合与防绕过验证
 **核心约束**：
 - 这是安全关键任务；客户端 UI 锁定不能替代服务端校验
 - `pending_review` 为 canonical 运行状态；不新增第二个 API 枚举
-- 确认幂等通过数据库唯一约束或分布式锁实现
+- 确认幂等使用 SQLite 事务与唯一约束实现，不引入分布式锁假设
 - 客户端直接请求继续/结束时，服务端以聚合审阅状态拒绝未全部确认的请求
 - 若内容已确认但后续继续失败，确认事实不回滚；页面进入失败态，幂等重试继续动作
 
@@ -118,7 +118,7 @@ POST /api/story-workspace/workflow-runs/:id/continue
 
 **幂等控制**：
 - 使用数据库唯一约束：`UNIQUE(workflow_run_id, action)` 在 `workflow_run_continuations` 表
-- 或使用分布式锁（Redis / 数据库行锁）
+- 在同一 SQLite 事务中完成聚合复核、唯一记录写入与状态迁移；不依赖 Redis 或分布式锁
 - 首次合法请求：执行继续/结束，记录 `continued_at`
 - 重复请求：返回 `200 OK` + 已执行状态（幂等）
 - 错误码：`CONTINUATION_ALREADY_EXECUTED`
@@ -150,16 +150,16 @@ POST /api/story-workspace/workflow-runs/:id/continue
 ## 5. 涉及文件路径
 
 **新增文件**：
-- `backend/src/routes/story-workspace/review-gate.ts`（或等效路径）— 审阅 gate 路由
-- `backend/src/services/story-workspace/review-gate.service.ts` — 聚合校验服务
+- `backend/routers/story_workspace_review_gate.py`（或等效 Python 模块）— FastAPI 审阅 gate 路由
+- `backend/services/story_workspace/review_gate.py` — 聚合校验服务
 
 **修改文件**（增量适配）：
-- `backend/src/routes/story-workspace/review.ts`（或等效路径）— 确认端点增强版本校验
-- `backend/src/services/story-workspace/workflow-run.service.ts` — 追加继续/结束幂等控制
+- `backend/routers/story_workspace.py`（对应 `task_202` 的 Story Workspace Router）— 注册 gate 子路由并增强确认端点版本校验
+- `backend/services/story_workspace/workflow_run.py` — 追加继续/结束幂等控制；由 SUO-226 的 run 合同落地后再接入
 
 **复用文件**（只读）：
-- `backend/src/routes/story-workspace/stories.ts` — 基线故事路由（`task_202`）
-- `backend/src/services/story-workspace/review.service.ts` — 基线审阅服务（`task_203`）
+- `backend/routers/story_workspace.py` — 基线故事路由合同（`task_202`）
+- `backend/services/story_workspace/review.py` — 基线审阅服务合同（`task_203`，若采用等效单文件实现则复用其模块）
 
 ---
 
@@ -278,7 +278,7 @@ POST /api/story-workspace/workflow-runs/:id/continue
 - [ ] 驳回只记录意见并保持锁定；重新生成创建新 run attempt
 - [ ] 若内容已确认但后续继续失败，确认事实不回滚；页面进入失败态，幂等重试继续
 - [ ] `pending_review` 为 canonical 运行状态；不新增第二个 API 枚举
-- [ ] 确认幂等通过数据库唯一约束或分布式锁实现
+- [ ] 确认幂等通过 SQLite 事务与 `UNIQUE(workflow_run_id, action)` 唯一约束实现
 
 ---
 
@@ -318,8 +318,9 @@ POST /api/story-workspace/workflow-runs/:id/continue
 ## 执行边界
 
 ### 允许修改范围
-- 允许创建 `backend/src/routes/story-workspace/review-gate.ts`（或等效路径）
-- 允许创建 `backend/src/services/story-workspace/review-gate.service.ts`
+- 允许创建 `backend/routers/story_workspace_review_gate.py`（或等效 Python 模块）
+- 允许创建 `backend/services/story_workspace/review_gate.py`
+- 允许在 SUO-226 run 合同完成后增量修改 `backend/services/story_workspace/workflow_run.py`
 - 允许修改确认端点（追加 `workflow_run_id` + `review_version` 校验）
 - 允许修改 workflow-run 服务（追加继续/结束幂等控制）
 

@@ -135,7 +135,8 @@ SUO-230-SH-001: Story Workspace 审阅 Gate 确认幂等、版本校验与防绕
 ### 步骤 7：E2E 测试基础设施
 
 7.1 前端测试工具：
-- 使用 Playwright / Cypress（项目现有 E2E 框架）。
+- 当前仓库未检测到 Playwright / Cypress 配置；StagePlanner 必须先安排 E2E harness 选型/引导任务，或明确批准等价的 agent-browser 可追溯验证方案，不得假定框架已经存在。
+- 自动化方案确定后，优先使用项目批准的 Playwright / Cypress harness，并把 bootstrap 与本 task 分开验收。
 - 提供测试辅助函数：
   - `createWorkflowRunFixture()` — 创建测试 run
   - `confirmItem(itemId, version)` — 确认产出项
@@ -183,10 +184,10 @@ frontend/src/hooks/story-workspace/useStoryWorkspaceStore.ts
 ### 后端被测文件（只读引用）
 
 ```
-backend/src/routes/story-workspace/review-gate.ts
-backend/src/services/story-workspace/review-gate.service.ts
-backend/src/services/story-workspace/workflow-run.service.ts
-backend/src/routes/story-workspace/review.ts
+backend/routers/story_workspace_review_gate.py
+backend/services/story_workspace/review_gate.py
+backend/services/story_workspace/workflow_run.py
+backend/routers/story_workspace.py
 ```
 
 ---
@@ -198,7 +199,7 @@ backend/src/routes/story-workspace/review.ts
 | 来源 | 内容 | 格式 |
 |---|---|---|
 | 前端 UI | ReviewGate 状态、按钮启用/禁用 | React 组件状态 |
-| 前端 API | `PUT /api/story-workspace/stories/:id/confirm`（带 `workflow_run_id` + `review_version`） | JSON |
+| 前端 API | `POST /api/story-workspace/stories/:id/confirm`（带 `workflow_run_id` + `review_version`） | JSON |
 | 后端 API | `GET /api/story-workspace/workflow-runs/:id/review-gate` | JSON |
 | 后端 API | `POST /api/story-workspace/workflow-runs/:id/continue` | JSON |
 | 测试固件 | 预创建 workflow run + story/character/scene | 数据库 seed |
@@ -262,6 +263,7 @@ POST /api/story-workspace/workflow-runs/:id/continue
 | `task_226_backend_workflow-binding-run-schema` | `SUO-226-BE-001` | ⏳ 需先完成 | workflow_run 数据模型 |
 | `task_226_backend_workflow-run-api` | `SUO-226-BE-004` | ⏳ 需先完成 | run 创建与管理 API |
 | `task_226_frontend_workflow-context-bar` | `SUO-226-FE-001` | ⏳ 需先完成 | 工作流上下文条（可用占位组件先行联调） |
+| E2E harness 选型/引导 | — | ⚠️ Stage 前置 gate | 当前仓库未发现 Playwright / Cypress 配置；先冻结自动化或等价可追溯验证方案 |
 
 **本任务被依赖**：
 - 无直接下游；是 SUO-230 增量家族的 shared 收口验证。
@@ -383,6 +385,7 @@ test('已确认但继续失败时不回滚确认状态', async ({ page, api }) =
 | Agent 重新生成难以在 E2E 中稳定触发 | 中 | 通过 API 直接修改 `review_version` 模拟重新生成，不依赖真实 Agent |
 | 绕过测试需要直接调用 API | 低 | 在 E2E helper 中封装，避免测试代码冗余 |
 | 多产出项场景数据准备复杂 | 低 | 使用 fixture factory 批量创建 story/character/scene |
+| 当前仓库无已配置 E2E harness | 中 | StagePlanner 先安排独立 bootstrap，或批准 agent-browser 可追溯验证方案；不得在本 task 内静默引入依赖 |
 
 ---
 

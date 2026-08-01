@@ -41,7 +41,7 @@ Story Workspace REST API 实现
 
 ### Step 1: 创建 Router 文件
 
-新建 `backend/routers/story-workspace.py`，使用 FastAPI `APIRouter`：
+新建 `backend/routers/story_workspace.py`，使用 FastAPI `APIRouter`：
 
 ```python
 from fastapi import APIRouter, Depends, Query, Request
@@ -280,7 +280,7 @@ def paginate_query(db, base_sql: str, count_sql: str, params: tuple,
 
 | 路径 | 说明 |
 |------|------|
-| `backend/routers/story-workspace.py` | **新文件**：Story Workspace REST API 路由 |
+| `backend/routers/story_workspace.py` | **新文件**：Story Workspace REST API 路由 |
 | `backend/server.py` | 路由注册 |
 | `backend/database.py` | 复用 `get_db()` 连接管理 |
 | `backend/tests/test_story_workspace_api.py` | **新文件**：API 测试 |
@@ -295,7 +295,7 @@ def paginate_query(db, base_sql: str, count_sql: str, params: tuple,
 
 ### 输出
 
-- `backend/routers/story-workspace.py`：完整的 FastAPI Router，包含所有 CRUD 端点
+- `backend/routers/story_workspace.py`：完整的 FastAPI Router，包含所有 CRUD 端点
 - 标准分页响应格式：`{ data: T[], pagination: { page, per_page, total, total_pages } }`
 - 详情响应：包含关联数据的完整对象
 
@@ -436,7 +436,7 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 
 ## 11. 允许与禁止修改范围
 
-- **仅允许修改**：`backend/routers/story-workspace.py`、`backend/server.py`、`backend/tests/test_story_workspace_api.py`；可复用 `backend/database.py` 的 `get_db()`。
+- **仅允许修改**：`backend/routers/story_workspace.py`、`backend/server.py`、`backend/tests/test_story_workspace_api.py`；可复用 `backend/database.py` 的 `get_db()`。
 - **禁止修改**：`docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`、前端代码、数据库 schema 定义文件。
 - **禁止行为**：不得把本 task 文档当作 execute 授权直接实现；不得修改设计稿或 Issue 清单。
 
@@ -451,10 +451,10 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 ## 13. 执行边界（补充修订）
 
 ### 允许修改范围
-- `backend/routers/story-workspace.py` — **新文件**：Story Workspace REST API 路由（FastAPI `APIRouter`），包含工作区、故事、角色、场景的 CRUD 端点。
+- `backend/routers/story_workspace.py` — **新文件**：Story Workspace REST API 路由（FastAPI `APIRouter`），包含工作区、故事、角色、场景的 CRUD 端点。
 - `backend/server.py` — 注册 `story_workspace_router`。
 - `backend/tests/test_story_workspace_api.py` — **新文件**：API 测试（列表查询、详情查询、PATCH 更新、权限、搜索、筛选、分页）。
-- 可在 `backend/routers/story-workspace.py` 中定义通用分页辅助函数（如 `paginate_query`）；若项目已有通用分页工具，优先复用。
+- 可在 `backend/routers/story_workspace.py` 中定义通用分页辅助函数（如 `paginate_query`）；若项目已有通用分页工具，优先复用。
 
 ### 禁止修改范围
 - ❌ `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` — 任何设计阶段产物。
@@ -488,7 +488,7 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 > **归属确认**：`SUO-201-BE-002`（Story Workspace REST API 实现）的主责 Agent 为 `BackendTaskAgent`。本 task 文档覆盖 BE-002 的全部后端职责：REST API 路由设计、CRUD 实现、分页/搜索/筛选逻辑、权限控制。FrontendTaskAgent 仅消费本 API，不负责 API 实现。
 >
 > **责任边界**：BackendTaskAgent 对以下 BE-002 内容承担明确责任：
-> - `backend/routers/story-workspace.py` 的完整实现
+> - `backend/routers/story_workspace.py` 的完整实现
 > - `backend/server.py` 的路由注册
 > - API 响应格式（含 `PaginatedResponse` 结构）的定义与稳定
 > - 搜索/筛选/排序/分页的后端逻辑

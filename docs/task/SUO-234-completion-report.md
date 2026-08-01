@@ -57,9 +57,10 @@ story-workspace-agent-running → story-workspace-rendering → story-workspace-
 
 | 依赖 | 状态 | 影响 |
 |------|------|------|
-| `SUO-226` (Workflow Binding/Run 数据模型) | 未完成 | `task_230_backend_review-gate-aggregation` 依赖 `workflow_run` 表结构；接口设计已预留兼容 |
+| [SUO-226](/SUO/issues/SUO-226) 传播单 | Issue 阶段已完成；其下游实现未完成 | `task_230_backend_review-gate-aggregation` 仍依赖 `SUO-226-BE-001` / `SUO-226-BE-004` 对应的 `workflow_run` 数据模型与 API；不得把传播单 `done` 误判为实现完成 |
 | `SUO-226-SH-001` (Deck/Desk 技术传输合同) | [CLARIFICATION_NEEDED] | 合同冻结前下游使用 mock/适配层；不影响 task 文档产出 |
 | `task_226_frontend_workflow-context-bar` | 未完成 | Dream 页面可先使用占位组件，待上下文条完成后替换 |
+| E2E harness | 未发现 Playwright / Cypress 配置 | StagePlanner 需先安排独立 bootstrap，或明确采用 agent-browser 可追溯验证；task 合同不假定框架已存在 |
 
 ---
 
@@ -70,6 +71,7 @@ story-workspace-agent-running → story-workspace-rendering → story-workspace-
 - ✅ 每份 task 明确标注允许/禁止修改范围、验收条件、测试策略
 - ✅ `/story-workspace/dream` canonical 路由、兼容重定向、运行级 ReviewGate、服务端防绕过、`workflow_run_id + review_version` 校验与幂等要求均已明确
 - ✅ 对尚未完成的 SUO-226 依赖已识别并记录，未擅自假定已实现
+- ✅ Backend 涉及路径已按仓库 Python/FastAPI 结构归一到 `backend/routers/`、`backend/services/` 与 `backend/tests/`，未保留 TypeScript `backend/src/*.ts` 假设
 - ✅ 未修改 `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`、应用代码或 `TASK-REQUIREMENT-FORMAT.md`
 - ✅ 所有业务标识使用 `story-workspace` 前缀（DEC-004）
 

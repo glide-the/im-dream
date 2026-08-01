@@ -1,6 +1,6 @@
 # task_230_frontend_dream-page-review-gate.md
 
-> **Task ID**: `task_230`  
+> **Task ID**: `task_230_frontend_dream-page-review-gate`  
 > **关联 Issue**: `SUO-230-FE-002` — `Dream 页面与 ReviewGate 组件`  
 > **上游 Issue**: `SUO-230` (Issue 清单 §2.3 / §3.3)  
 > **父 Issue**: `SUO-198`  
@@ -287,7 +287,7 @@ interface StoryWorkspaceState {
 - **禁止修改** `docs/stage/` 目录下任何文件
 - **禁止修改** `docs/exec/` 目录下任何文件
 - **禁止修改** `docs/task/` 下其他 task 文件（除本任务指定的 4 份同步更新外）
-- **禁止修改** 后端代码（`backend/src/` 等）
+- **禁止修改** 后端代码（`backend/`）
 - **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
 - **禁止修改** 数据表格核心组件（`task_202c` 基线）
 - **禁止修改** Sidebar 导航结构（`task_202b` 基线）
