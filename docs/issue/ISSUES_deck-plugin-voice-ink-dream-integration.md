@@ -21,7 +21,7 @@
   - 补充设计稿: `docs/design/plugin-remote-interaction.md`
   - 背景设计稿: `docs/design/story-workspace/story-workspace-prd.md`
   - 背景设计稿: `docs/design/story-workspace/story-workspace-layout-design.md`
-  - 背景设计稿: `docs/design/story-workspace/story-workspace-deck-desk-integration-delta.md`
+  - 背景设计稿: `docs/design/story-workspace/story-workspace-deck-integration-delta.md`
   - 参考设计稿: `docs/design/deck-claude-agent.md`
 - 生成 Agent: `IssueDispatcher`
 - 所属流水线阶段: `issue`
@@ -912,50 +912,16 @@
 
 ## 5. 分发去向说明
 
-### BackendTaskAgent
+- `TaskDesignAgent`:
+  - 统一领取 frontend / backend / full-stack / shared 类型 Issue。
+  - 根据 `type`、标签、关联路径与验收条件分别规划 UI、交互、状态、接口、数据、Schema、脚本、服务端逻辑和跨端联调。
+  - domain 必须写入 Issue/task 字段；不得再通过拆分 Agent 身份表达前后端边界。
 
-领取以下 Issue：
-- `DECK-001`: Deck Plugin Manifest 与发布版本模型
-- `DECK-002`: Deck Runtime Plugin Lock 生成与不可变合同
-- `DECK-003`: Deck Plugin Installation 生命周期管理
-- `DECK-004`: 兼容性判定与能力交集权限
-- `DECK-006`: Story Workspace Workflow Preflight
-- `DECK-007`: Workflow Run 创建、状态与幂等重试
-- `DECK-008`: ClaudeAgent 声明式 Reconcile 与 Load Receipt
-- `DECK-009`: ClaudeAgent Run-Scoped Session 与远程交互限制
-- `DECK-013`: 统一事件合同与审计
-- `DECK-014`: API 路由与错误码规范
-- `DECK-015`: 安全撤销、回滚与降级路径
-
-负责：接口、数据处理、Schema、脚本、路径规范、服务端逻辑、校验链路等任务规划。
-
-### FrontendTaskAgent
-
-领取以下 Issue：
-- `DECK-005`（shared，主责 FrontendTaskAgent）: Deck 创建/编辑的插件选择与版本绑定
-- `DECK-010`: 前端管理端插件目录与安装状态 UI
-- `DECK-011`: Deck Editor 插件选择与版本绑定 UI
-- `DECK-012`: Story Workspace 工作流状态与错误恢复体验
-
-负责：UI、交互、状态管理、前端接口消费、页面结构、测试交互等任务规划。
-
-### CEOOrchestrator
-
-领取以下决策单：
-- `DECK-016`: Deck Plugin catalog 与 Runtime Admin 物理服务边界
-- `DECK-017`: 生产 marketplace 签名、digest 与留存能力
-- `DECK-018`: 多节点/临时 ClaudeAgent runtime 分发策略
-- `DECK-019`: 安全撤销是否强制终止活动 run
-- `DECK-020`: Voice chat 到 run session 的可见 UX
-
-负责：路由 owner、确认决策、冻结边界。
-
-### Shared Issue 处理规则
-
-- `DECK-005` 是 shared 类型 Issue，主责 `FrontendTaskAgent`，协作 `BackendTaskAgent`。
-- 前端职责：版本列表 UI、状态展示、选择交互、revision 冲突处理、生效提示
-- 后端职责：binding 模型、保存校验、revision 并发控制、selection validation 逻辑
-- 不允许 shared Issue 无主责；若主责不清，必须标记 `[CLARIFICATION_NEEDED]`。
+- `Shared Issue` 处理规则：
+  - shared 类型 Issue 必须明确主责 Agent。
+  - 另一个 Agent 作为协作方。
+  - 不允许 shared Issue 无主责。
+  - 若主责不清，必须标记 `[CLARIFICATION_NEEDED]`。
 
 ---
 
