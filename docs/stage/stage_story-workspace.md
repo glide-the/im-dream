@@ -1,17 +1,20 @@
 # Story Workspace 实施阶段计划与 Execute 准入矩阵
 
 > **Stage ID**: `stage_001_story-workspace`  
-> **关联 Issue**: [SUO-208](/SUO/issues/SUO-208)  
+> **关联 Issue**: [SUO-208](/SUO/issues/SUO-208) / [SUO-240](/SUO/issues/SUO-240)  
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **关联设计稿**:
 > - `docs/design/story-workspace/story-workspace-prd.md` (SUO-199)
 > - `docs/design/story-workspace/story-workspace-layout-design.md` (SUO-199)
+> - `docs/design/story-workspace/story-workspace-deck-desk-integration-delta.md` (SUO-215)
 > **任务输入来源**:
 > - Issue 清单: `docs/issue/ISSUES_story-workspace.md` (SUO-201)
 > - 前端 task: `docs/task/task_202_frontend_story-workspace-overview.md` + task_202a ~ task_202h (9 份)
 > - 后端 task: `docs/task/task_201_backend_story-workspace-schema.md` + task_202_backend_*.md + task_203 ~ task_205 (5 份)
+> - **增量 task (SUO-230)**: `docs/task/task_230_frontend_dream-nav-item.md` + task_230_frontend_dream-page-review-gate.md + task_230_backend_review-gate-aggregation.md + task_230_shared_idempotency-e2e.md (4 份)
 > - 模板参考: `docs/task/TASK-REQUIREMENT-FORMAT.md` (只读)
 > **生成日期**: 2026-08-01  
+> **增量更新日期**: 2026-08-01  
 > **生成 Agent**: `StagePlanner`
 
 ---
@@ -20,17 +23,18 @@
 
 本文档基于 design → issue → task 阶段的全部产物，构建 story-workspace 模块的可执行阶段计划。核心目标：
 
-1. 将 14 份 task 文档编排为可并行的执行批次，明确前后端依赖与关键路径
+1. 将 **14 份基线 task + 4 份增量 task** 编排为可并行的执行批次，明确前后端依赖与关键路径
 2. 定义每个 task 的 execute 准入条件、阻塞原因与回滚策略
 3. 输出 single-assignee 分配建议与范围冲突检查
 4. 明确排除项（复杂画布、平台视频、移动端/平板端、用户手动创建内容）
 5. 定义 stage 完成后的 CEOOrchestrator execute readiness check 清单
+6. **(SUO-240 增量)** 编排 Dream 导航与审阅 Gate 增量 Stage，明确 E2E harness 前置 gate 与等价验证路径
 
 ---
 
-## 2. 14 份 Task 文档映射表
+## 2. Task 文档映射表
 
-### 2.1 Task ID ↔ 文档路径 ↔ Issue ID 映射
+### 2.1 基线 Task ID ↔ 文档路径 ↔ Issue ID 映射（14 份）
 
 | # | Task ID | 文档路径 | 关联 Issue ID | 类型 | 优先级 | 主责 Agent |
 |---|---------|----------|---------------|------|--------|-----------|
@@ -50,6 +54,17 @@
 | 14 | `task_202` | `docs/task/task_202_frontend_story-workspace-overview.md` | `SUO-202` | overview | medium | FrontendTaskAgent |
 
 > **说明**: 第 14 项 `task_202` (overview) 为任务总览文档，自身不进入 execute 阶段，仅作为依赖参考。
+
+### 2.2 增量 Task ID ↔ 文档路径 ↔ Issue ID 映射（4 份，SUO-230）
+
+| # | Task ID | 文档路径 | 关联 Issue ID | 类型 | 优先级 | 主责 Agent | 上游 Issue |
+|---|---------|----------|---------------|------|--------|-----------|------------|
+| 15 | `task_230-FE-001` | `docs/task/task_230_frontend_dream-nav-item.md` | `SUO-230-FE-001` | frontend | P0 | FrontendTaskAgent | [SUO-230](/SUO/issues/SUO-230) |
+| 16 | `task_230-FE-002` | `docs/task/task_230_frontend_dream-page-review-gate.md` | `SUO-230-FE-002` | frontend | P0 | FrontendTaskAgent | [SUO-230](/SUO/issues/SUO-230) |
+| 17 | `task_230-BE-001` | `docs/task/task_230_backend_review-gate-aggregation.md` | `SUO-230-BE-001` | backend | P0 | BackendTaskAgent | [SUO-230](/SUO/issues/SUO-230) |
+| 18 | `task_230-SH-001` | `docs/task/task_230_shared_idempotency-e2e.md` | `SUO-230-SH-001` | shared | P0 | FrontendTaskAgent (主责) + BackendTaskAgent (协作) | [SUO-230](/SUO/issues/SUO-230) |
+
+> **增量来源**: [SUO-232](/SUO/issues/SUO-232) 传播 → [SUO-234](/SUO/issues/SUO-234) task 合同 → SUO-240 stage 编排
 
 ---
 
@@ -108,6 +123,42 @@ graph TD
     classDef docs fill:#e8f5e9,stroke:#1b5e20
 ```
 
+### 3.1b 增量执行批次编排（SUO-230 — Dream 导航与审阅 Gate）
+
+```mermaid
+graph TD
+    %% 基线前置（来自 Phase 1-5）
+    T202b["task_202b<br/>FE-002 Sidebar 导航<br/>[P0] ✅ 基线"]:::frontend
+    T202c["task_202c<br/>FE-003 数据表格<br/>[P0] ✅ 基线"]:::frontend
+    T202d["task_202d<br/>FE-004 审阅面板<br/>[P0] ✅ 基线"]:::frontend
+    T202e["task_202e<br/>FE-005 Dashboard<br/>[P1] ✅ 基线"]:::frontend
+    T203["task_203<br/>BE-003 审阅状态流转<br/>[P0] ✅ 基线"]:::backend
+
+    %% SUO-230 增量 Phase A: 前端 Dream 导航与页面（可并行）
+    T230FE1["task_230-FE-001<br/>Dream 导航项<br/>[P0]"]:::frontend
+    T230FE2["task_230-FE-002<br/>Dream 页面 + ReviewGate<br/>[P0]"]:::frontend
+
+    %% SUO-230 增量 Phase B: 后端 Gate 聚合（依赖基线审阅工作流）
+    T230BE1["task_230-BE-001<br/>审阅 Gate 聚合 + 防绕过<br/>[P0]"]:::backend
+
+    %% SUO-230 增量 Phase C: E2E 联调（依赖 Phase A+B）
+    T230SH1["task_230-SH-001<br/>确认幂等 + 版本校验 E2E<br/>[P0]"]:::shared
+
+    %% 依赖边
+    T202b --> T230FE1
+    T202c --> T230FE2
+    T202d --> T230FE2
+    T202e --> T230FE2
+    T230FE1 --> T230FE2
+    T203 --> T230BE1
+    T230FE2 --> T230SH1
+    T230BE1 --> T230SH1
+
+    classDef backend fill:#e1f5fe,stroke:#01579b
+    classDef frontend fill:#fff3e0,stroke:#e65100
+    classDef shared fill:#f3e5f5,stroke:#4a148c
+```
+
 ### 3.2 详细阶段任务表
 
 | 阶段 | 任务 | 产出 | 依赖 | 风险 |
@@ -125,6 +176,21 @@ graph TD
 | **Phase 4**<br/>前端完善 | `task_202f` FE-006 空态/加载/错误/选中态组件 | `StoryWorkspaceEmptyState` + `StoryWorkspaceLoadingState` + `StoryWorkspaceErrorState` | `task_202c` (FE-003) | shimmer 动画性能（低） |
 | **Phase 5**<br/>联调验证 | `task_202g` SH-001 前端-后端联调：审阅工作流 E2E | E2E 联调报告 + 问题清单 + 验收通过确认 | `task_202d` (FE-004), `task_203` (BE-003) | 后端 API 未就绪；Agent 生成时序不确定 |
 | **Phase 6**<br/>文档 | `task_202h` DO-001 使用文档 | Story Workspace 使用文档（Markdown） | `task_202g` (SH-001) | 文档与最终实现不一致 |
+| **Phase 7**<br/>增量前端 (SUO-230) | `task_230-FE-001` Dream 导航项与 canonical 路由 | `StoryWorkspaceDreamNavItem` + TopNavBar 集成 + `/story-workspace/dream` 路由 | `task_202b` (FE-002) ✅ 基线 | 现有路由机制为状态切换而非 react-router；Dashboard 与 Dream 双状态风险 |
+| **Phase 7**<br/>增量前端 (SUO-230) | `task_230-FE-002` Dream 页面与 ReviewGate 组件 | `StoryWorkspaceDreamPage` + `StoryWorkspaceReviewGate` + gate 状态管理 + 版本校验 | `task_202d` (FE-004) ✅, `task_202e` (FE-005) ✅, `task_230-FE-001` ⏳ 并行 | `task_226` 工作流上下文条未完成（可用占位）；`SUO-230-BE-001` 服务端聚合未完成（可用 mock） |
+| **Phase 7**<br/>增量后端 (SUO-230) | `task_230-BE-001` 审阅 Gate 服务端聚合与防绕过 | 聚合查询 API + 确认版本校验 + 继续/结束幂等 + 防绕过验证 | `task_203` (BE-003) ✅ 基线 | `SUO-226` workflow_run 数据模型尚未完成；聚合查询性能；客户端绕过风险 |
+| **Phase 8**<br/>增量联调 (SUO-230) | `task_230-SH-001` 确认幂等与审阅版本校验 E2E | E2E 测试报告：幂等确认 + 版本过期拒绝 + 防绕过 + Gate 解锁 + 失败恢复 | `task_230-FE-002` (FE-002), `task_230-BE-001` (BE-001) | **E2E harness 未配置**（见 §5.3）；`SUO-226` 依赖；Agent 重新生成难以稳定触发 |
+
+### 3.3 增量阶段任务表（SUO-230 — Dream 导航与审阅 Gate）
+
+| 阶段 | 任务 | 产出 | 依赖 | 风险 |
+| --- | --- | --- | --- | --- |
+| **Phase A**<br/>前端 Dream 导航与页面 | `task_230-FE-001` TopNavBar Dream 导航项与 canonical 路由 | `StoryWorkspaceDreamNavItem` + 路由重定向 (`/story-workspace` → `/story-workspace/dream`) | `task_202b` (FE-002) 基线路由 | Dashboard 与 Dream 双状态风险；需明确 Dashboard 仅重定向 |
+| **Phase A**<br/>前端 Dream 页面 | `task_230-FE-002` Dream 页面与 ReviewGate 组件 | `StoryWorkspaceDreamPage` + `StoryWorkspaceReviewGate` (四步进度) + gate 状态管理 | `task_202c`~`task_202e` (FE-003~005) 基线 + `task_230-FE-001` | `task_226` 工作流上下文条未完成；可用占位组件先行 |
+| **Phase B**<br/>后端 Gate 聚合 | `task_230-BE-001` 审阅 Gate 服务端聚合与防绕过验证 | `GET /workflow-runs/:id/review-gate` + 增强 confirm (版本校验) + `POST /continue` (幂等) + 防绕过逻辑 | `task_203` (BE-003) 基线审阅流转 + `task_226` run 模型 | `workflow_run` 数据模型尚未完成 (SUO-226)；接口设计需对齐 |
+| **Phase C**<br/>增量 E2E 联调 | `task_230-SH-001` 确认幂等 + 审阅版本校验 + 防绕过 E2E | E2E 测试报告 (幂等/版本/绕过/生命周期) + 缺陷记录 | `task_230-FE-002` + `task_230-BE-001` | **E2E harness 未配置**；需 StagePlanner 前置 gate 或等价验证方案 |
+
+> **关键约束**: `task_230-SH-001` 显式声明当前仓库无 Playwright/Cypress 配置，要求 StagePlanner 先安排 E2E harness 选型/引导，或批准等价的 agent-browser 可追溯验证方案。此约束作为准入条件进入 §5.1。
 
 ---
 
@@ -145,6 +211,12 @@ graph TD
 | Phase 4 | `task_202f` FE-006 状态组件 | ⏳ 待执行 |
 | Phase 5 | `task_202g` SH-001 E2E 联调 | ⏳ 待执行 |
 | Phase 6 | `task_202h` DO-001 使用文档 | ⏳ 待执行 |
+| **Phase 7** | `task_230-FE-001` Dream 导航项 | ⏳ 待执行 |
+| **Phase 7** | `task_230-FE-002` Dream 页面 + ReviewGate | ⏳ 待执行 |
+| **Phase 7** | `task_230-BE-001` 审阅 Gate 聚合 | ⏳ 待执行 |
+| **Phase 8** | `task_230-SH-001` 确认幂等 E2E | ⏳ 待执行 |
+
+> **已完成任务（SUO-211/212/213）**: [SUO-211](/SUO/issues/SUO-211) `task_210` Shared Deck Plugin Binding、 [SUO-212](/SUO/issues/SUO-212) `task_211/212` Frontend Plugin Admin UI & Deck Editor Binding、 [SUO-213](/SUO/issues/SUO-213) `task_213` Frontend Story Workspace Status 均已完成，其产出作为基线被本 Stage 复用。
 
 ---
 
@@ -167,6 +239,10 @@ graph TD
 | `task_202f` (FE-006) | ⚠️ 条件准入 | 需 `task_202c` (FE-003) 表格骨架完成 | 骨架屏用于表格加载态 | FrontendTaskAgent |
 | `task_202g` (SH-001) | ❌ 阻塞 | 需 `task_202d` (FE-004) + `task_203` (BE-003) 均完成 | E2E 需审阅 UI 和审阅 API 均就绪 | FrontendTaskAgent (主责) + BackendTaskAgent (协作) |
 | `task_202h` (DO-001) | ❌ 阻塞 | 需 `task_202g` (SH-001) E2E 完成 | 文档需在验证后编写以确保准确性 | FrontendTaskAgent |
+| `task_230-FE-001` (Dream 导航) | ✅ **允许** | `task_202b` (FE-002) Sidebar 导航 ✅ 基线稳定；TopNavBar 已存在 | 无（基线已完成） | FrontendTaskAgent |
+| `task_230-FE-002` (Dream 页面) | ⚠️ **条件准入** | `task_202d` (FE-004) Review Panel ✅, `task_202e` (FE-005) Dashboard ✅, `task_230-FE-001` ⏳ 并行 | `task_226` 上下文条未完成（可用占位）；`SUO-230-BE-001` 未完成（可用 mock） | FrontendTaskAgent |
+| `task_230-BE-001` (Gate 聚合) | ⚠️ **条件准入** | `task_203` (BE-003) 审阅状态流转 ✅ 基线稳定 | `SUO-226` workflow_run 模型未完成；需接口对齐 | BackendTaskAgent |
+| `task_230-SH-001` (E2E 联调) | ❌ **阻塞** | 需 `task_230-FE-002` + `task_230-BE-001` 均完成；需 E2E harness 选型确定 | 无 Playwright/Cypress 配置；见 §5.3 | FrontendTaskAgent (主责) + BackendTaskAgent (协作) |
 
 ### 5.2 并行执行建议
 
@@ -193,7 +269,34 @@ Wave 5（Wave 3+4 完成后）:
 
 Wave 6（Wave 5 完成后）:
 └── FrontendTaskAgent → task_202h (DO-001) 使用文档
+
+Wave 7（基线 Waves 1-6 完成后，SUO-230 增量启动）:
+├── FrontendTaskAgent → task_230-FE-001 (Dream 导航项) ─→ task_230-FE-002 (Dream 页面 + ReviewGate)
+└── BackendTaskAgent → task_230-BE-001 (Gate 聚合 + 防绕过)
+
+Wave 8（Wave 7 完成后）:
+└── FrontendTaskAgent (主责) + BackendTaskAgent (协作) → task_230-SH-001 (增量 E2E 联调)
+  **前置条件**: E2E harness 已配置 或 已批准等价验证方案
 ```
+
+### 5.3 E2E Harness 前置 Gate（SUO-230-SH-001 准入条件）
+
+> **现状**: 仓库当前无既定 Playwright/Cypress 配置。`ls frontend/playwright.config.*` 与 `ls frontend/cypress.config.*` 均无命中；无 `e2e/` 目录。
+>
+> **StagePlanner 裁决**: 不得在 stage 阶段静默假设 E2E 框架已存在，也不得在 `task_230-SH-001` 内引入实现依赖（如安装 Playwright 作为该 task 的「产出」）。
+
+**可审计的 bootstrap/等价验证准入路径**（三选一，由 CEOOrchestrator 在 readiness check 中裁决）：
+
+| 路径 | 说明 | 准入条件 | 验收方式 |
+|------|------|----------|----------|
+| **A. Playwright bootstrap** | 新建 `e2e/` 目录 + Playwright 配置 + CI 集成 | 由独立 bootstrap task 完成；`task_230-SH-001` 仅编写测试用例 | `npx playwright test` 通过 |
+| **B. Cypress bootstrap** | 新建 `e2e/` 目录 + Cypress 配置 + CI 集成 | 同上 | `npx cypress run` 通过 |
+| **C. agent-browser 等价验证** | 使用 `agent-browser` skill 执行可追溯的手动验证脚本 | 当 A/B 均不可行时作为降级方案；需保留完整操作录屏/截图与断言日志 | 验证报告上传为 issue artifact |
+
+**阻塞规则**:
+- `task_230-SH-001` 进入 execute 前，必须确认上述路径之一已获批且 bootstrap 完成（路径 A/B）或等价验证方案已记录（路径 C）。
+- 若 E2E harness bootstrap 作为独立 task 执行，则 `task_230-SH-001` 需 `blockedBy` 该 bootstrap issue。
+- **本 stage 文档仅记录缺口与路径，不自行创建 bootstrap task**（超出 StagePlanner 写入边界）。
 
 ---
 
@@ -209,9 +312,12 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
                                                                     task_202h (DO-001 文档)
 ```
 
-**关键路径长度**: 6 个阶段（Wave 1 → Wave 2 → Wave 3/4 → Wave 5 → Wave 6）
+**关键路径长度**: 8 个阶段（Wave 1 → Wave 2 → Wave 3/4 → Wave 5 → Wave 6 → Wave 7 → Wave 8）
 
-**关键路径上的任务**: `task_201` → `task_202` → `task_203` → `task_202d` → `task_202g` → `task_202h`
+**基线关键路径**: `task_201` → `task_202` → `task_203` → `task_202d` → `task_202g` → `task_202h`
+
+**增量关键路径**: `task_203` → `task_230-BE-001` → `task_230-SH-001`（后端）
+**增量关键路径**: `task_202e` → `task_230-FE-001` → `task_230-FE-002` → `task_230-SH-001`（前端）
 
 ---
 
@@ -234,6 +340,10 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 | `task_202f` (FE-006) | `frontend/src/components/story-workspace/state/` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Toast/Modal 核心逻辑 | ✅ 无冲突 |
 | `task_202g` (SH-001) | `frontend/src/components/story-workspace/` (修复), `frontend/src/hooks/story-workspace/` (修复) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码 (问题反馈而非修改) | ✅ 无冲突 |
 | `task_202h` (DO-001) | `docs/task/story-workspace-user-guide.md` (或等效路径) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码 | ✅ 无冲突 |
+| `task_230-FE-001` (Dream 导航) | `frontend/src/components/story-workspace/navigation/StoryWorkspaceDreamNavItem.tsx`, `frontend/src/components/TopNavBar.tsx`, `frontend/src/router/story-workspace.tsx` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, Sidebar 结构 | ✅ 无冲突；与 task_202b 共用路由配置但为追加 |
+| `task_230-FE-002` (Dream 页面) | `frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`, `frontend/src/components/story-workspace/review/StoryWorkspaceReviewGate.tsx`, Zustand store | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 后端代码, 表格核心组件 | ✅ 无冲突；与 task_202e 共用 Dashboard 但为组合复用 |
+| `task_230-BE-001` (Gate 聚合) | `backend/routers/story_workspace_review_gate.py`, `backend/services/story_workspace/review_gate.py`, 确认端点增强 | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, Schema 定义 | ✅ 无冲突；与 task_202/203 共用路由但为追加 |
+| `task_230-SH-001` (E2E) | `e2e/tests/story-workspace/` (新建) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码修改 | ✅ 无冲突；仅新建测试文件 |
 
 ### 7.2 Single-Assignee 分配建议
 
@@ -247,6 +357,9 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 | Wave 4 | `task_202e` + `task_202f` | FrontendTaskAgent | 前端完善，与前段核心链路同一 Agent |
 | Wave 5 | `task_202g` | FrontendTaskAgent (主责) + BackendTaskAgent (协作) | E2E 联调需双方参与，FrontendTaskAgent 主导 |
 | Wave 6 | `task_202h` | FrontendTaskAgent | 使用文档，前端视角编写 |
+| Wave 7 | `task_230-FE-001` → `task_230-FE-002` | FrontendTaskAgent | Dream 导航与页面，同一 Agent 保证视觉一致性 |
+| Wave 7 | `task_230-BE-001` | BackendTaskAgent | Gate 聚合与防绕过，后端安全关键任务 |
+| Wave 8 | `task_230-SH-001` | FrontendTaskAgent (主责) + BackendTaskAgent (协作) | 增量 E2E 需双方参与；FrontendTaskAgent 主导 |
 
 ---
 
@@ -279,6 +392,14 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 #### Wave 6 验收
 - [ ] `task_202h`: 文档覆盖所有模块；API 速查准确；FAQ 完整
 
+#### Wave 7 验收（SUO-230 增量）
+- [ ] `task_230-FE-001`: Dream 导航项渲染正确；canonical 路由 `/story-workspace/dream` 可用；重定向不创建额外 store
+- [ ] `task_230-FE-002`: Dream 页面组合正确；ReviewGate 四步进度指示正确；gate 状态映射完整；确认带版本校验
+- [ ] `task_230-BE-001`: Gate 聚合查询正确；confirm 端点版本校验生效；continue 幂等控制可用；防绕过验证生效
+
+#### Wave 8 验收（SUO-230 E2E）
+- [ ] `task_230-SH-001`: 幂等确认 E2E 通过；过期版本拒绝 E2E 通过；客户端绕过被拒绝 E2E 通过；继续幂等 E2E 通过
+
 ### 8.2 回滚策略
 
 | 层级 | 回滚操作 | 负责人 |
@@ -288,6 +409,8 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 | 前端组件 | 删除 `frontend/src/components/story-workspace/` 目录；从 `App.tsx` 移除路由接入 | FrontendTaskAgent |
 | 类型定义 | 删除 `backend/types/story-workspace/` 和 `frontend/src/types/story-workspace/` | BackendTaskAgent + FrontendTaskAgent |
 | Agent 集成 | 从 `claude_agent/service.py` 移除集成调用；删除 `agent_integration.py` | BackendTaskAgent |
+| Gate 聚合 | 删除 `backend/routers/story_workspace_review_gate.py`；删除 `backend/services/story_workspace/review_gate.py`；恢复 confirm 端点至基线 | BackendTaskAgent |
+| Dream 导航/页面 | 删除 `StoryWorkspaceDreamNavItem`；恢复 `TopNavBar` 至基线；删除 `StoryWorkspaceDreamPage` 和 `StoryWorkspaceReviewGate` | FrontendTaskAgent |
 
 ### 8.3 完成信号
 
@@ -297,10 +420,11 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 3. 标记 Issue 状态为 `done`
 
 Stage 整体完成后：
-1. 所有 13 个 execute task 均标记 `done`
-2. 在 [SUO-208](/SUO/issues/SUO-208) 评论区回填阶段完成摘要
-3. 将 [SUO-208](/SUO/issues/SUO-208) 置为 `done`
-4. CEOOrchestrator 执行 execute readiness check（见 §9）
+1. 所有 13 个基线 execute task + 4 个增量 execute task 均标记 `done`
+2. 在 [SUO-208](/SUO/issues/SUO-208) 评论区回填基线阶段完成摘要
+3. 在 [SUO-240](/SUO/issues/SUO-240) 评论区回填增量阶段完成摘要
+4. 将 [SUO-208](/SUO/issues/SUO-208) 和 [SUO-240](/SUO/issues/SUO-240) 置为 `done`
+5. CEOOrchestrator 执行 execute readiness check（见 §9）
 
 ---
 
@@ -322,6 +446,11 @@ Stage 整体完成后：
 | 10 | Agent 分配明确 | 每个 task 有唯一 single-assignee | §7.2 矩阵验证 |
 | 11 | 共享类型就绪 | `task_205` (SH-002) 类型定义冻结，前后端一致 | 类型文件比对 |
 | 12 | E2E 准入条件 | `task_202g` (SH-001) 的前置依赖均已完成 | 依赖状态检查 |
+| 13 | **增量 Task 文档完整性** | 4 份 `task_230_*` 增量 task 文档均存在，每份含 10 个标准章节 | 文件系统扫描 |
+| 14 | **增量依赖无循环** | SUO-230 增量任务依赖图无环，与基线依赖无冲突 | 拓扑排序验证 |
+| 15 | **增量范围冲突检查** | 无两个增量 task 同时修改同一文件的冲突；增量与基线无冲突 | §7.1 矩阵验证 |
+| 16 | **E2E Harness 前置 Gate** | `task_230-SH-001` 的 E2E harness 已配置或已批准等价验证方案 | §5.3 路径确认 |
+| 17 | **SUO-226 依赖对齐** | `task_230-BE-001` 和 `task_230-FE-002` 的 `workflow_run` 接口已与 SUO-226 完成对齐 | 接口合同比对 |
 
 ---
 
@@ -337,6 +466,10 @@ Stage 整体完成后：
 | **SQLite 搜索性能** | 大数据量时列表查询慢 | 中 | 标题字段 B-tree 索引；per_page 限制 100 | 后续迭代考虑 FTS5 |
 | **驳回后重新生成流程未定义** | 用户驳回后无明确反馈 | 中 | 设计稿默认假设：通过同一 Chat 线程重新生成 | 标记为后续迭代需求 |
 | **已确认内容下游执行未定义** | 用户确认后无明确反馈 | 中 | 设计稿默认假设：暂存，后续迭代定义 | 标记为后续迭代需求 |
+| **SUO-226 workflow_run 模型未完成** | `task_230-BE-001` 和 `task_230-FE-002` 无法对接真实数据 | 高 | 使用占位组件/mock 数据先行开发；接口确定后切换 | 预留 1 轮接口对齐迭代 |
+| **E2E harness 未配置** | `task_230-SH-001` 无法自动化执行 | 中 | 明确 bootstrap 路径（Playwright/Cypress/agent-browser）；由 CEOOrchestrator 裁决 | 在 Wave 8 前完成 harness 选型 |
+| **Dashboard 与 Dream 双状态风险** | `task_230-FE-001` 重定向与 `task_202e` Dashboard 路由状态冲突 | 中 | 明确 Dashboard 仅重定向，不维护独立 store；`StoryWorkspaceDashboardPage` 保留复用 | Wave 7 前确认路由方案 |
+| **客户端绕过风险** | 恶意请求直接调用 continue API 绕过审阅 | 高 | 所有 continue/结束请求必须经过服务端聚合校验；不信任客户端任何状态标记 | `task_230-BE-001` 核心验收项 |
 
 ### 10.2 设计稿 [CLARIFICATION_NEEDED] 项追踪
 
@@ -391,9 +524,12 @@ Stage 整体完成后：
 | DEC-006 | 仅桌面端设计，排除移动端/平板端 | 所有前端 task |
 | DEC-007 | 核心工作流：Agent 产出 → 页面渲染 → 用户审阅确认 → 执行 | task_202d (FE-004), task_203 (BE-003), task_204 (BE-004), task_202g (SH-001) |
 | DEC-008 | 用户不手动创建内容，仅审阅 Agent 产出 | task_202c (FE-003), task_202d (FE-004) |
+| DEC-017 | Dream 为 story-workspace 全局入口；Sidebar 为域内二级导航；不得维护 Dashboard 与 Dream 双状态 | task_230-FE-001 |
+| DEC-018 | ReviewGate 四步进度指示（Agent 产出 → 页面渲染 → 用户审阅 → 继续/结束）；确认必须带运行 ID 与审阅版本校验；客户端 UI 锁定不能替代服务端校验 | task_230-FE-002, task_230-BE-001, task_230-SH-001 |
 
 ### 12.2 文档变更记录
 
 | 版本 | 日期 | 变更内容 | 作者 |
 |------|------|----------|------|
 | v1 | 2026-08-01 | 初始版本：14 份 task 映射、6 阶段编排、准入矩阵、风险追踪 | StagePlanner |
+| v2 | 2026-08-01 | SUO-240 增量：补入 4 份 `task_230_*` Task ID/Issue ID 映射；更新 SUO-211/212/213 真实依赖起点；追加 Wave 7~8 增量编排、Mermaid 依赖图、single-assignee 建议、范围冲突检查；输出 4 个增量 task 准入矩阵；明确 E2E harness 前置 gate 与 bootstrap/等价验证路径；追加 DEC-017/DEC-018；更新 Readiness Check 清单（#13~17） | StagePlanner |
