@@ -5,7 +5,7 @@
 > **关联 Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` (SUO-237)
 > **生成 Agent**: StagePlanner
 > **生成日期**: 2026-08-01
-> **状态**: completed (Stage 规划已完成；SUO-247 task 层准入修复已完成；首个 Wave 待执行)
+> **状态**: completed (Stage 规划已完成；SUO-247 task 层准入修复已完成；SUO-290 Stage 状态同步与冲突消除已完成；首个 Wave 待执行)
 
 ---
 
@@ -27,31 +27,31 @@
 | Task 文档 | 源 Issue | 类型 | 主责 Agent |
 |---|---|---|---|
 | `task_210_shared_deck_plugin_binding.md` | DECK-005 | shared（合同索引，不可执行） | TaskDesignAgent 设计 → **不可 checkout** |
-| `task_210a_backend_deck_plugin_binding.md` | DECK-005 | backend | BackendTaskAgent |
-| `task_211_frontend_plugin_admin_ui.md` | DECK-010 | frontend | FrontendTaskAgent |
-| `task_212_frontend_deck_editor_plugin_binding.md` | DECK-011 | frontend | FrontendTaskAgent |
-| `task_213_frontend_story_workspace_status.md` | DECK-012 | frontend | FrontendTaskAgent |
+| `task_210a_backend_deck_plugin_binding.md` | DECK-005 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_211_frontend_plugin_admin_ui.md` | DECK-010 | frontend | **ExecTaskAgent**（`frontend` 仅为 domain） |
+| `task_212_frontend_deck_editor_plugin_binding.md` | DECK-011 | frontend | **ExecTaskAgent**（`frontend` 仅为 domain） |
+| `task_213_frontend_story_workspace_status.md` | DECK-012 | frontend | **ExecTaskAgent**（`frontend` 仅为 domain） |
 
 > **注意**: 
 > - `task_210_shared_deck_plugin_binding.md` 为 **shared 合同索引**，只冻结跨端字段/API/依赖，**禁止 checkout、禁止直接执行**。
-> - 后端执行入口为 `task_210a_backend_deck_plugin_binding.md`（Stage 2 Wave 1，BackendTaskAgent 独立 checkout）。
-> - 前端执行入口为 `task_212_frontend_deck_editor_plugin_binding.md`（Stage 3 Wave 1，FrontendTaskAgent 独立 checkout，依赖 `task_210a` fixture 冻结）。
+> - 后端执行入口为 `task_210a_backend_deck_plugin_binding.md`（Stage 2 Wave 1，**ExecTaskAgent** 独立 checkout）。
+> - 前端执行入口为 `task_212_frontend_deck_editor_plugin_binding.md`（Stage 3 Wave 1，**ExecTaskAgent** 独立 checkout，依赖 `task_210a` fixture 冻结）。
 > - Stage 文档中的 `task_210` 节点在执行层面映射为后端 `task_210a`；前端继续按既有 `task_212` 节点执行。
 
 ### Backend Tasks（11 份）
 | Task 文档 | 源 Issue | 类型 | 主责 Agent |
 |---|---|---|---|
-| `task_deck_001_backend_manifest-model.md` | DECK-001 | backend | BackendTaskAgent |
-| `task_deck_002_backend_runtime-lock.md` | DECK-002 | backend | BackendTaskAgent |
-| `task_deck_003_backend_installation-lifecycle.md` | DECK-003 | backend | BackendTaskAgent |
-| `task_deck_004_backend_compatibility-capability.md` | DECK-004 | backend | BackendTaskAgent |
-| `task_deck_006_backend_workflow-preflight.md` | DECK-006 | backend | BackendTaskAgent |
-| `task_deck_007_backend_workflow-run.md` | DECK-007 | backend | BackendTaskAgent |
-| `task_deck_008_backend_reconcile-load-receipt.md` | DECK-008 | backend | BackendTaskAgent |
-| `task_deck_009_backend_run-scoped-session.md` | DECK-009 | backend | BackendTaskAgent |
-| `task_deck_013_backend_events-audit.md` | DECK-013 | backend | BackendTaskAgent |
-| `task_deck_014_backend_api-error-codes.md` | DECK-014 | backend | BackendTaskAgent |
-| `task_deck_015_backend_revocation-rollback.md` | DECK-015 | backend | BackendTaskAgent |
+| `task_deck_001_backend_manifest-model.md` | DECK-001 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_002_backend_runtime-lock.md` | DECK-002 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_003_backend_installation-lifecycle.md` | DECK-003 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_004_backend_compatibility-capability.md` | DECK-004 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_006_backend_workflow-preflight.md` | DECK-006 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_007_backend_workflow-run.md` | DECK-007 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_008_backend_reconcile-load-receipt.md` | DECK-008 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_009_backend_run-scoped-session.md` | DECK-009 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_013_backend_events-audit.md` | DECK-013 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_014_backend_api-error-codes.md` | DECK-014 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
+| `task_deck_015_backend_revocation-rollback.md` | DECK-015 | backend | **ExecTaskAgent**（`backend` 仅为 domain） |
 
 > **注意**: 
 > - DECK-007 对应 `task_deck_007_backend_workflow-run.md`（Workflow Run 创建、状态与幂等重试）。
@@ -158,8 +158,8 @@ task_001 ──→ task_002 ──→ task_003 ──→ task_004 ──→ task
 | Stage 1 | task_002 Runtime Lock | blocked (依赖 task_001) |
 | Stage 1 | task_003 Installation 生命周期 | blocked (依赖 task_001, task_002) |
 | Stage 1 | task_004 兼容性判定 | blocked (依赖 task_001, task_003) |
-| Stage 2 | task_210a Backend Deck Binding | blocked (依赖 Stage 1 Gate) |
-| Stage 2 | task_006 Workflow Preflight | blocked (依赖 Stage 1 Gate) |
+| Stage 2 | task_210a Backend Deck Binding | **ready_after_dependencies** (Stage 1 Gate 通过后启动) |
+| Stage 2 | task_006 Workflow Preflight | **ready_after_dependencies** (Stage 1 Gate 通过后启动) |
 | Stage 2 | task_007 Workflow Run | blocked (依赖 task_006) |
 | Stage 2 | task_008 Reconcile & Load Receipt | blocked (依赖 task_007) |
 | Stage 2 | task_009 Run-Scoped Session | blocked (依赖 task_008) |
@@ -171,10 +171,12 @@ task_001 ──→ task_002 ──→ task_003 ──→ task_004 ──→ task
 | Stage 4 | task_015 撤销回滚 | blocked (依赖 Stage 2 Gate) |
 
 > **说明**: 
-> - 仅 task_001 满足执行准入条件（无依赖、允许/禁止范围明确、验收标准清晰）。
-> - 其余 14 个 task 均因依赖未满足而阻塞，但准入条件本身已齐备（[SUO-247](/SUO/issues/SUO-247) 已完成 11 份 backend task 的允许/禁止范围补充，4 份 shared/frontend task 原已具备）。
+> - task_001 满足执行准入条件（无依赖、允许/禁止范围明确、验收标准清晰）。
+> - task_210a、task_006 已通过 readiness 检查（§7.3），待 Stage 1 Gate 通过后并行启动。
+> - 其余 12 个 task 均因依赖未满足而阻塞，但准入条件本身已齐备（[SUO-247](/SUO/issues/SUO-247) 已完成 11 份 backend task 的允许/禁止范围补充，4 份 shared/frontend task 原已具备）。
 > - **Shared Binding 拆分后**: `task_210` 不再作为可执行节点；后端执行入口为 `task_210a`，前端为 `task_212`。
 > - 首个可执行 Wave 为 **Stage 1 Wave 1: task_001 Manifest 模型**。
+> - Stage 2 Wave 1 为 **task_210a ∥ task_006**（Stage 1 Gate 通过后并行启动）。
 
 ---
 
@@ -434,7 +436,7 @@ task_015 → task_014 → task_013（可独立回滚）
 | 乐观锁正确性（#11） | ✅ 通过 | `expected_binding_revision` 原子比较已定义；409 冲突响应已定义 |
 | Selection Validation 边界（#12） | ✅ 通过 | 明确只编排权威服务，禁止复制 DECK-003/004 判定逻辑 |
 | 后端 API 合同冻结（#13） | ✅ 通过 | 四个 endpoint、请求/响应字段、错误码与 task_210 §6 一致 |
-| Single-Assignee 合规（#16） | ✅ 通过 | BackendTaskAgent 独立 checkout；task_210 未授权实现 |
+| Single-Assignee 合规（#16） | ✅ 通过 | **ExecTaskAgent** 独立 checkout；task_210 未授权实现 |
 | **综合判定** | **🟢 execute-ready-after-dependencies** | 待 Stage 1 Gate 通过后启动 |
 
 #### task_212_frontend_deck_editor_plugin_binding
@@ -443,7 +445,7 @@ task_015 → task_014 → task_013（可独立回滚）
 |---|---|---|
 | 前端消费唯一性（#14） | ✅ 通过 | 明确禁止客户端 selection validation、权限/兼容性裁决副本 |
 | 跨端合同一致性（#15） | ⏳ 待验证 | 需 task_210a fixture 冻结后联调验证 |
-| Single-Assignee 合规（#16） | ✅ 通过 | FrontendTaskAgent 独立 checkout；task_210 未授权实现 |
+| Single-Assignee 合规（#16） | ✅ 通过 | ExecTaskAgent 独立 checkout；task_210 未授权实现 |
 | **综合判定** | **🟡 execute-ready-after-task_210a** | 待 task_210a 后端 fixture 冻结后启动 |
 
 ---
@@ -524,27 +526,27 @@ flowchart TB
 
 | Task | 唯一 Owner | Checkout 语义 |
 |---|---|---|
-| task_001 | BackendTaskAgent | 独立 checkout，完成后释放 |
-| task_002 | BackendTaskAgent | 依赖 task_001 完成信号 |
-| task_003 | BackendTaskAgent | 依赖 task_002 完成信号 |
-| task_004 | BackendTaskAgent | 依赖 task_003 完成信号 |
+| task_001 | ExecTaskAgent | 独立 checkout，完成后释放 |
+| task_002 | ExecTaskAgent | 依赖 task_001 完成信号 |
+| task_003 | ExecTaskAgent | 依赖 task_002 完成信号 |
+| task_004 | ExecTaskAgent | 依赖 task_003 完成信号 |
 | **task_210** | **TaskDesignAgent（合同索引，禁止 checkout）** | **Shared 合同索引；执行已拆分至 task_210a / task_212** |
-| task_210a | BackendTaskAgent | 依赖 Stage 1 Gate 通过；独立 checkout |
-| task_006 | BackendTaskAgent | 依赖 Stage 1 Gate 通过 |
-| task_007 | BackendTaskAgent | 依赖 task_006 完成信号 |
-| task_008 | BackendTaskAgent | 依赖 task_007 完成信号 |
-| task_009 | BackendTaskAgent | 依赖 task_008 完成信号 |
-| task_211 | FrontendTaskAgent | 依赖 Stage 2 Gate 通过 |
-| task_212 | FrontendTaskAgent | 依赖 task_210a 完成信号（后端 fixture 冻结后） |
-| task_213 | FrontendTaskAgent | 依赖 Stage 2 Gate 通过 |
-| task_013 | BackendTaskAgent | 依赖 Stage 2 Gate 通过 |
-| task_014 | BackendTaskAgent | 依赖 Stage 2 Gate 通过 |
-| task_015 | BackendTaskAgent | 依赖 Stage 2 Gate 通过 |
+| task_210a | **ExecTaskAgent**（`backend` 仅为 domain，非 Agent 名称） | 依赖 Stage 1 Gate 通过；独立 checkout；single-assignee |
+| task_006 | ExecTaskAgent | 依赖 Stage 1 Gate 通过 |
+| task_007 | ExecTaskAgent | 依赖 task_006 完成信号 |
+| task_008 | ExecTaskAgent | 依赖 task_007 完成信号 |
+| task_009 | ExecTaskAgent | 依赖 task_008 完成信号 |
+| task_211 | ExecTaskAgent | 依赖 Stage 2 Gate 通过 |
+| task_212 | ExecTaskAgent | 依赖 task_210a 完成信号（后端 fixture 冻结后） |
+| task_213 | ExecTaskAgent | 依赖 Stage 2 Gate 通过 |
+| task_013 | ExecTaskAgent | 依赖 Stage 2 Gate 通过 |
+| task_014 | ExecTaskAgent | 依赖 Stage 2 Gate 通过 |
+| task_015 | ExecTaskAgent | 依赖 Stage 2 Gate 通过 |
 
 **禁止行为**:
 - 同一 task 不得同时被多个 Agent checkout
 - **task_210_shared_deck_plugin_binding.md 禁止 checkout、禁止直接执行**；后端执行入口为 task_210a，前端为 task_212
-- BackendTaskAgent 与 FrontendTaskAgent 各自独立 checkout task_210a / task_212，不得共用 checkout
+- ExecTaskAgent 按 domain（backend/frontend）独立 checkout 各 task，不得共用 checkout
 - 不得绕过 Issue 直接指派 ExecTaskAgent
 
 ---
@@ -642,8 +644,8 @@ flowchart TB
 | task_003 | ❌ 需 task_001, task_002 | ✅ 已补充 | ✅ 设计稿 §6.1 明确 | 🔴 阻塞 |
 | task_004 | ❌ 需 task_001, task_003 | ✅ 已补充 | ✅ 设计稿 §6.3 明确 | 🔴 阻塞 |
 | **task_210** | **N/A（合同索引，禁止执行）** | ✅ Shared 合同明确 | ✅ 合同索引完整 | **⚪ 不可 checkout** |
-| task_210a | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ task_210a §9 明确 | 🔴 阻塞 |
-| task_006 | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ 设计稿 §10.1 明确 | 🔴 阻塞 |
+| task_210a | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ task_210a §9 明确 | **🟡 execute-ready-after-stage1-gate** |
+| task_006 | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ 设计稿 §10.1 明确 | **🟡 execute-ready-after-stage1-gate** |
 | task_007 | ❌ 需 task_006 | ✅ 已补充 | ✅ 设计稿 §11.1 明确 | 🔴 阻塞 |
 | task_008 | ❌ 需 task_007 | ✅ 已补充 | ✅ 设计稿 §7.1 明确 | 🔴 阻塞 |
 | task_009 | ❌ 需 task_008 | ✅ 已补充 | ✅ 设计稿 §7.4 明确 | 🔴 阻塞 |
@@ -656,19 +658,20 @@ flowchart TB
 
 > **Shared Binding 拆分结论**（SUO-279）：
 > - `task_210_shared_deck_plugin_binding.md` 为**合同索引**，状态 `contract-only`，**禁止 checkout、禁止直接执行**。
-> - 后端执行入口：`task_210a_backend_deck_plugin_binding.md`（BackendTaskAgent 独立 checkout）。
-> - 前端执行入口：`task_212_frontend_deck_editor_plugin_binding.md`（FrontendTaskAgent 独立 checkout，依赖 task_210a fixture 冻结）。
+> - 后端执行入口：`task_210a_backend_deck_plugin_binding.md`（ExecTaskAgent 独立 checkout）。
+> - 前端执行入口：`task_212_frontend_deck_editor_plugin_binding.md`（ExecTaskAgent 独立 checkout，依赖 task_210a fixture 冻结）。
 > - task_210a 与 task_006 在 Stage 1 Gate 通过后均可启动，但各自前置链不同（task_210a 需 task_001+003+004；task_006 需 task_002+004）。
 
 ### 15.3 首个可执行 Task 明确结论
 
-**唯一可立即执行的 Task**: `task_deck_001_backend_manifest-model.md` (DECK-001)
+**可立即执行的 Task**: `task_deck_001_backend_manifest-model.md` (DECK-001)
+
+**Stage 1 Gate 通过后并行启动**: `task_210a_backend_deck_plugin_binding.md` ∥ `task_deck_006_backend_workflow-preflight.md`
 
 **执行条件**:
-- 无上游依赖
-- 允许修改范围明确：`backend/models/deck_plugin.py`（新建）、manifest schema、校验器、`deck_plugin_releases` 表迁移
-- 禁止修改范围明确：不得触碰现有 `claude_code_plugin` 模型、Paperclip Plugin 表结构、前端代码
-- 验收标准：设计稿 §5.1, §5.2, §5.4 已定义 `DeckPluginManifestV1` schema、发布状态机、命名隔离规则
+- task_001: 无上游依赖；允许/禁止范围明确；验收标准清晰
+- task_210a: Stage 1 Gate 通过（task_001 + task_003 + task_004 完成）；已通过 §7.3 readiness 检查
+- task_006: Stage 1 Gate 通过（task_002 + task_004 完成）；已通过 §7.3 readiness 检查
 
 **后续 Gate 链**:
 ```
@@ -700,7 +703,7 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 
 ### 15.5 重要约束
 
-- **不得绕过 Issue 直接指派 ExecTaskAgent**: 按 Single-Assignee 规则，task_001 应由 BackendTaskAgent 通过正常 Issue checkout 流程领取
+- **不得绕过 Issue 直接指派 ExecTaskAgent**: 按 Single-Assignee 规则，task_001 应由 ExecTaskAgent 通过正常 Issue checkout 流程领取
 - **Shared task (task_210) 已拆分，禁止 checkout**: `task_210_shared_deck_plugin_binding.md` 为合同索引，不可执行；后端执行入口为 `task_210a`，前端为 `task_212`
 - **决策单 DECK-016 ~ DECK-020 已按 `design_002` 附录更新状态**：DECK-016/018/019/020 已 `frozen`，DECK-017 仍为 `conditional_frozen`。默认假设下可推进实现，但不得把默认假设误写为已决策。
 
@@ -715,3 +718,79 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 | v1.2 | 2026-08-01 | SUO-239 一致性核验：修正 3 处 desk→Deck 术语残留（`desk_config_snapshots`→`deck_runtime_snapshot` 引用、`Desk`→`Deck` 兼容矩阵、stage_story-workspace 旧 delta 路径） | SUO-239 |
 | v1.3 | 2026-08-01 | SUO-239 一致性核验：按 `design_002` 附录更新 DECK-016~020 冻结状态（4/5 项已 frozen，DECK-017 仍为 conditional_frozen）；更新 §6 决策单表、§15.4 未满足 Gate 汇总、§15.5 约束说明 | SUO-239 |
 | v1.4 | 2026-08-01 | SUO-280 增量修正：按 SUO-279 shared binding 拆分结论，将 `task_210` 映射为合同索引（禁止 checkout），新增 `task_210a` 作为后端唯一执行单元；更新 DAG、阶段任务表、当前进度、关键路径、Mermaid 图、Single-Assignee 表、映射速查表、执行准入判定；明确 task_210a 与 task_006 的并行边界（Stage 1 Gate 通过后启动，各自前置链不同）；task_212 依赖从 task_210 修正为 task_210a | SUO-280 |
+| v1.6 | 2026-08-01 | SUO-290 Stage 状态同步：修正 §4 当前进度表中 task_210a/task_006 从 `blocked` 改为 `ready_after_dependencies`；修正 §15.2 执行准入判定表中 task_210a/task_006 从 `🔴 阻塞` 改为 `🟡 execute-ready-after-stage1-gate`；更新 §15.3 首个可执行 Wave 结论，明确 task_001 可立即执行，task_210a ∥ task_006 在 Stage 1 Gate 通过后并行启动；消除与 §7.3 readiness 判定的状态冲突 | SUO-290 |
+
+---
+
+## 17. SUO-290 Readiness 重跑结果
+
+### 17.1 执行摘要
+
+- **触发原因**: CEOOrchestrator 在 SUO-217 评论中发现 Stage 状态冲突，建立修复链 SUO-289 → SUO-290
+- **前置条件**: SUO-289（TaskDesignAgent 修正 task 文档状态残留）已完成确认
+- **执行 Agent**: StagePlanner (2091db7d-9da2-48b0-bc1c-089b75e354df)
+- **执行日期**: 2026-08-01
+
+### 17.2 已消除的冲突
+
+| 冲突点 | 修改前 | 修改后 | 位置 |
+|---|---|---|---|
+| task_210a Stage 进度状态 | `blocked` | `ready_after_dependencies` | §4 当前进度表 |
+| task_006 Stage 进度状态 | `blocked` | `ready_after_dependencies` | §4 当前进度表 |
+| task_210a 准入判定 | `🔴 阻塞` | `🟡 execute-ready-after-stage1-gate` | §15.2 执行准入判定表 |
+| task_006 准入判定 | `🔴 阻塞` | `🟡 execute-ready-after-stage1-gate` | §15.2 执行准入判定表 |
+| 可执行 Wave 结论 | 仅 task_001 | task_001 + Stage 1 Gate 后 task_210a ∥ task_006 | §15.3 |
+
+### 17.3 九项通用 Readiness 重跑结果
+
+| # | 检查项 | 涉及 Task | 结果 |
+|---|---|---|---|
+| 1 | Schema 完整性 | task_001, task_002, task_003 | ✅ 通过 |
+| 2 | 命名隔离 | 全部 15 个 task | ✅ 通过（`claude_code_plugin` 引用均为设计稿要求的显式区分） |
+| 3 | 状态机合法性 | task_001, task_003, task_007, task_009 | ✅ 通过 |
+| 4 | 兼容性判定链 | task_004, task_006 | ✅ 通过 |
+| 5 | Preflight 权威 | task_006 | ✅ 通过 |
+| 6 | Reconcile 主路径 | task_008 | ✅ 通过 |
+| 7 | Session 隔离 | task_009 | ✅ 通过 |
+| 8 | 幂等重试 | task_007 | ✅ 通过 |
+| 9 | 事件审计 | task_013 | ✅ 通过 |
+
+### 17.4 Shared Binding 拆分后新增 Readiness 重跑结果
+
+| # | 检查项 | 涉及 Task | 结果 |
+|---|---|---|---|
+| 10 | Binding 模型完整性 | task_210a | ✅ 通过 |
+| 11 | 乐观锁正确性 | task_210a | ✅ 通过 |
+| 12 | Selection Validation 边界 | task_210a | ✅ 通过 |
+| 13 | 后端 API 合同冻结 | task_210a | ✅ 通过 |
+| 14 | 前端消费唯一性 | task_212 | ✅ 通过 |
+| 15 | 跨端合同一致性 | task_210a + task_212 | ⏳ 待 task_210a fixture 冻结后联调验证 |
+| 16 | Single-Assignee 合规 | task_210a, task_212 | ✅ 通过 |
+
+### 17.5 综合判定
+
+| Task | Readiness 状态 | 依赖状态 | 综合判定 |
+|---|---|---|---|
+| task_001 | ✅ 全部通过 | 无依赖 | **🟢 可立即执行** |
+| task_210a | ✅ 全部通过 | 待 Stage 1 Gate | **🟡 execute-ready-after-stage1-gate** |
+| task_006 | ✅ 全部通过 | 待 Stage 1 Gate | **🟡 execute-ready-after-stage1-gate** |
+| task_002 ~ task_004 | ✅ 准入条件齐备 | 串行依赖未满足 | 🔴 阻塞（按序解锁） |
+| task_007 ~ task_015 | ✅ 准入条件齐备 | Stage 2 Gate 未满足 | 🔴 阻塞 |
+| task_212 | ✅ 准入条件齐备 | 待 task_210a fixture | 🟡 execute-ready-after-task_210a |
+
+### 17.6 解锁信号
+
+- **Stage 1 Wave 1**: task_001 可立即执行
+- **Stage 2 Wave 1**: task_210a ∥ task_006（Stage 1 Gate 通过后并行启动）
+- **Stage 3 Wave 1**: task_212（task_210a fixture 冻结后）
+
+### 17.7 剩余阻塞点
+
+| Gate | 未满足条件 | 阻塞 Task 数 |
+|---|---|---|
+| Stage 1 Gate | task_001 ~ task_004 全部完成 | 11 → 9（task_210a/task_006 已标记为 ready_after_dependencies） |
+| Stage 2 Gate | task_006 ~ task_009 全部完成 | 6 |
+| Stage 3 Gate | 前端组件渲染测试 + API 合同对齐 | 3 |
+| Stage 4 Gate | 事件审计 + 错误码 + 回滚验证 | 3 |
+
+> **注意**: 本重跑结果不改变任何 task 的实际依赖关系，仅修正了 Stage 文档中的状态表述冲突。task_210a 和 task_006 仍需等待 Stage 1 Gate 通过后方可实际启动执行。
