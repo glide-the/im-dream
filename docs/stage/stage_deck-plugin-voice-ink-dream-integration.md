@@ -5,7 +5,7 @@
 > **关联 Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` (SUO-237)
 > **生成 Agent**: StagePlanner
 > **生成日期**: 2026-08-01
-> **状态**: completed (Stage 规划已完成；SUO-247 task 层准入修复已完成；SUO-290 Stage 状态同步与冲突消除已完成；首个 Wave 待执行)
+> **状态**: completed (Stage 规划已完成；SUO-247 task 层准入修复已完成；SUO-290 Stage 状态同步与冲突消除已完成；SUO-303 Stage 2 Wave 2 同步与 task_007 readiness 复核已完成；Stage 1 Gate 已通过；Stage 2 Wave 1 已完成；Stage 2 Wave 2 ready_to_execute)
 
 ---
 
@@ -158,9 +158,9 @@ task_001 ──→ task_002 ──→ task_003 ──→ task_004 ──→ task
 | Stage 1 | task_002 Runtime Lock | blocked (依赖 task_001) |
 | Stage 1 | task_003 Installation 生命周期 | blocked (依赖 task_001, task_002) |
 | Stage 1 | task_004 兼容性判定 | blocked (依赖 task_001, task_003) |
-| Stage 2 | task_210a Backend Deck Binding | **ready_after_dependencies** (Stage 1 Gate 通过后启动) |
-| Stage 2 | task_006 Workflow Preflight | **ready_after_dependencies** (Stage 1 Gate 通过后启动) |
-| Stage 2 | task_007 Workflow Run | blocked (依赖 task_006) |
+| Stage 2 | task_210a Backend Deck Binding | **done** ([SUO-296](/SUO/issues/SUO-296)) |
+| Stage 2 | task_006 Workflow Preflight | **done** ([SUO-281](/SUO/issues/SUO-281)) |
+| Stage 2 | task_007 Workflow Run | **ready_to_execute**（本 Issue 复核后） |
 | Stage 2 | task_008 Reconcile & Load Receipt | blocked (依赖 task_007) |
 | Stage 2 | task_009 Run-Scoped Session | blocked (依赖 task_008) |
 | Stage 3 | task_211 Plugin Admin UI | blocked (依赖 Stage 2 Gate) |
@@ -644,9 +644,9 @@ flowchart TB
 | task_003 | ❌ 需 task_001, task_002 | ✅ 已补充 | ✅ 设计稿 §6.1 明确 | 🔴 阻塞 |
 | task_004 | ❌ 需 task_001, task_003 | ✅ 已补充 | ✅ 设计稿 §6.3 明确 | 🔴 阻塞 |
 | **task_210** | **N/A（合同索引，禁止执行）** | ✅ Shared 合同明确 | ✅ 合同索引完整 | **⚪ 不可 checkout** |
-| task_210a | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ task_210a §9 明确 | **🟡 execute-ready-after-stage1-gate** |
-| task_006 | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ 设计稿 §10.1 明确 | **🟡 execute-ready-after-stage1-gate** |
-| task_007 | ❌ 需 task_006 | ✅ 已补充 | ✅ 设计稿 §11.1 明确 | 🔴 阻塞 |
+| task_210a | ✅ 已完成 ([SUO-296](/SUO/issues/SUO-296)) | ✅ 已补充 | ✅ task_210a §9 明确 | **🟢 done** |
+| task_006 | ✅ 已完成 ([SUO-281](/SUO/issues/SUO-281)) | ✅ 已补充 | ✅ 设计稿 §10.1 明确 | **🟢 done** |
+| **task_007** | **✅ 依赖已满足** | **✅ 已补充** | **✅ 设计稿 §11.1 明确** | **🟢 ready_to_execute** |
 | task_008 | ❌ 需 task_007 | ✅ 已补充 | ✅ 设计稿 §7.1 明确 | 🔴 阻塞 |
 | task_009 | ❌ 需 task_008 | ✅ 已补充 | ✅ 设计稿 §7.4 明确 | 🔴 阻塞 |
 | task_211 | ❌ 需 Stage 2 Gate | ✅ 已补充 | ✅ 设计稿 §16.1 明确 | 🔴 阻塞 |
@@ -691,8 +691,8 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 
 | Gate | 未满足条件 | 阻塞 Task 数 | 预计解锁条件 |
 |---|---|---|---|
-| Stage 1 Gate | task_001 ~ task_004 全部完成 | 11 | task_004 完成信号 |
-| Stage 2 Gate | task_006 ~ task_009 全部完成 | 6 | task_009 完成信号 |
+| Stage 1 Gate | ✅ 已通过（task_001~004 全部完成） | 0 | — |
+| Stage 2 Gate | task_007~009 待完成 | 3 | task_009 完成信号 |
 | Stage 3 Gate | 前端组件渲染测试 + API 合同对齐 | 3 | Stage 2 Gate + E2E 通过 |
 | Stage 4 Gate | 事件审计 + 错误码 + 回滚验证 | 3 | Stage 2 Gate + 集成测试通过 |
 | DECK-016 | ~~物理服务边界未冻结~~ → **`frozen`**（[SUO-253](/SUO/issues/SUO-253)） | — | 设计已冻结；运行 rollout 仍须遵守三域单写合同 |
@@ -719,7 +719,7 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 | v1.3 | 2026-08-01 | SUO-239 一致性核验：按 `design_002` 附录更新 DECK-016~020 冻结状态（4/5 项已 frozen，DECK-017 仍为 conditional_frozen）；更新 §6 决策单表、§15.4 未满足 Gate 汇总、§15.5 约束说明 | SUO-239 |
 | v1.4 | 2026-08-01 | SUO-280 增量修正：按 SUO-279 shared binding 拆分结论，将 `task_210` 映射为合同索引（禁止 checkout），新增 `task_210a` 作为后端唯一执行单元；更新 DAG、阶段任务表、当前进度、关键路径、Mermaid 图、Single-Assignee 表、映射速查表、执行准入判定；明确 task_210a 与 task_006 的并行边界（Stage 1 Gate 通过后启动，各自前置链不同）；task_212 依赖从 task_210 修正为 task_210a | SUO-280 |
 | v1.5 | 2026-08-01 | SUO-285 统一执行路由：将全部 15 个可执行 task 的 checkout/assignee 从 `BackendTaskAgent`/`FrontendTaskAgent` 统一修正为 `ExecTaskAgent`（backend/frontend 仅为 domain 类型，非 Agent 名称）；更新 §2 任务输入来源表、§7.3 readiness 判定、§10 Single-Assignee 表、§15.2/15.5 约束说明；`git diff --check` 通过；task_210a 九项 readiness 全部通过，恢复 `ready_to_execute` | SUO-285 |
-| v1.6 | 2026-08-01 | SUO-290 Stage 状态同步：修正 §4 当前进度表中 task_210a/task_006 从 `blocked` 改为 `ready_after_dependencies`；修正 §15.2 执行准入判定表中 task_210a/task_006 从 `🔴 阻塞` 改为 `🟡 execute-ready-after-stage1-gate`；更新 §15.3 首个可执行 Wave 结论，明确 task_001 可立即执行，task_210a ∥ task_006 在 Stage 1 Gate 通过后并行启动；消除与 §7.3 readiness 判定的状态冲突 | SUO-290 |
+| v1.7 | 2026-08-01 | SUO-303 Stage 2 Wave 2 同步：task_006/task_210a 标记为 done；task_007 标记为 ready_to_execute；更新 Stage 1 Gate 状态为已通过；更新 §4/§15.2/§17.5/§17.6/§17.7；新增 §17.8 task_007 readiness 复核与四类冲突消除确认 | SUO-303 |
 
 ---
 
@@ -773,16 +773,16 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 | Task | Readiness 状态 | 依赖状态 | 综合判定 |
 |---|---|---|---|
 | task_001 | ✅ 全部通过 | 无依赖 | **🟢 可立即执行** |
-| task_210a | ✅ 全部通过 | 待 Stage 1 Gate | **🟡 execute-ready-after-stage1-gate** |
-| task_006 | ✅ 全部通过 | 待 Stage 1 Gate | **🟡 execute-ready-after-stage1-gate** |
-| task_002 ~ task_004 | ✅ 准入条件齐备 | 串行依赖未满足 | 🔴 阻塞（按序解锁） |
-| task_007 ~ task_015 | ✅ 准入条件齐备 | Stage 2 Gate 未满足 | 🔴 阻塞 |
+| task_210a | ✅ 全部通过 | ✅ 已完成 ([SUO-296](/SUO/issues/SUO-296)) | **🟢 done** |
+| task_006 | ✅ 全部通过 | ✅ 已完成 ([SUO-281](/SUO/issues/SUO-281)) | **🟢 done** |
+| **task_007** | **✅ 全部通过（§17.8 复核）** | **✅ 依赖已满足** | **🟢 ready_to_execute** |
 | task_212 | ✅ 准入条件齐备 | 待 task_210a fixture | 🟡 execute-ready-after-task_210a |
 
 ### 17.6 解锁信号
 
 - **Stage 1 Wave 1**: task_001 可立即执行
-- **Stage 2 Wave 1**: task_210a ∥ task_006（Stage 1 Gate 通过后并行启动）
+- **Stage 2 Wave 1**: task_210a ∥ task_006 ✅ **已完成** ([SUO-296](/SUO/issues/SUO-296) / [SUO-281](/SUO/issues/SUO-281))
+- **Stage 2 Wave 2**: task_007 **🟢 ready_to_execute**（本 Issue 复核后）
 - **Stage 3 Wave 1**: task_212（task_210a fixture 冻结后）
 
 ### 17.7 剩余阻塞点
@@ -795,3 +795,71 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 | Stage 4 Gate | 事件审计 + 错误码 + 回滚验证 | 3 |
 
 > **注意**: 本重跑结果不改变任何 task 的实际依赖关系，仅修正了 Stage 文档中的状态表述冲突。task_210a 和 task_006 仍需等待 Stage 1 Gate 通过后方可实际启动执行。
+
+---
+
+## 18. SUO-303 task_007 Readiness 复核与 Stage 2 Wave 2 准入
+
+### 18.1 复核范围
+
+本次复核（SUO-303）覆盖以下内容：
+1. ✅ task_006 完成证据确认（[SUO-281](/SUO/issues/SUO-281)，exec 报告 9/9 测试通过）
+2. ✅ task_210a 完成证据确认（[SUO-296](/SUO/issues/SUO-296)，exec 报告 12 项测试通过）
+3. ✅ task_007 依赖状态更新（唯一前置 task_006 已完成）
+4. ✅ task_007 文档内容、关联 Issue、关联 Stage、模板存在性复核
+5. ✅ 允许/禁止范围、验收标准、测试策略复核
+6. ✅ 四类历史冲突消除确认
+
+### 18.2 task_007 唯一依赖状态
+
+| 依赖项 | 状态 | 证据 |
+|---|---|---|
+| `DECK-006` / `task_006` Workflow Preflight | ✅ **已完成** | [SUO-281](/SUO/issues/SUO-281) exec 报告：9/9 定向测试通过，47/47 前序回归通过 |
+| `task_210a` Backend Deck Binding | ✅ **已完成** | [SUO-296](/SUO/issues/SUO-296) exec 报告：12 passed, 10 subtests passed |
+
+**结论**: task_007 唯一直接依赖 `task_006` 已完成；`task_210a` 完成进一步巩固 Stage 2 Wave 1 基础。Stage 2 / Wave 2 **允许进入 execute**。
+
+### 18.3 九项 Readiness 逐项复核（task_007）
+
+| # | 检查项 | 涉及 Task | 复核方式 | 结果 |
+|---|---|---|---|---|
+| 1 | **Schema 完整性** | task_007 | Task 文档 §4.1/§5 | ✅ `WorkflowRun` 模型字段覆盖设计稿 §11.1；`RunStatus` Enum 11 态完整；`workflow_run_transitions` / `workflow_run_token_consumptions` 辅助表定义完整 |
+| 2 | **命名隔离** | task_007 | Task 文档 §12 | ✅ 全部使用 `deck_plugin_*` / `workflow_*` / `runtime_*` 前缀；`workspace_id` / `idempotency_key` / `semantic_fingerprint` 为固定技术字段；无 `claude_code_plugin_*` 混用 |
+| 3 | **状态机合法性** | task_007 | Task 文档 §4.2 | ✅ 11 态状态机只允许规范流转；终态（`confirmed`/`rejected`/`completed`/`failed`/`cancelled`）不可复活；每次变化原子追加 transition |
+| 4 | **兼容性判定链** | task_007 | N/A（task_007 不实现判定链） | ✅ 本 task 只消费 `DECK-008` receipt 就绪投影，不实现兼容性判定；边界清晰 |
+| 5 | **Preflight 权威** | task_007 | Task 文档 §4.2 | ✅ `queued → running` 必须读取不可变 `runtime_load_receipt` 就绪投影并验证绑定；receipt 缺失/错绑/未 ready 时拒绝；不创建伪运行 |
+| 6 | **Reconcile 主路径** | task_007 | N/A（task_007 不实现 reconcile） | ✅ 本 task 只定义 receipt 驱动的状态守卫，真实 reconcile 由 `DECK-008` 实现；边界清晰 |
+| 7 | **Session 隔离** | task_007 | Task 文档 §4.1 | ✅ `agent_session_id` 为可选字段，由下游 `DECK-009` 填充；本 task 只保存受控快照 ID 与脱敏摘要 |
+| 8 | **幂等重试** | task_007 | Task 文档 §4.3/§4.4 | ✅ 同 `(workspace_id, actor_id, idempotency_key)` + 同 semantic fingerprint 返回原 run；同 key 不同语义 fail closed (409)；retry 创建新 run |
+| 9 | **事件审计** | task_007 | Task 文档 §4.5/§4.6 | ✅ 最小 append-only `workflow_run_transitions` 定义完整；通用事件 envelope/投递/消费由 `DECK-013` 实现；本 task 不越权实现 |
+
+### 18.4 四类历史冲突消除确认
+
+| 冲突类别 | 复核结果 | 证据位置 |
+|---|---|---|
+| **A. `workspace_id` 冲突** | ✅ **已消除** | Task §4.1 模型注释：`workspace_id: str # 从认证 workspace 上下文派生，禁止客户端覆盖`；Task §4.3 Step 1：`从认证上下文解析 workspace_id + actor_id；禁止信任请求体中的租户/actor`；DB schema 注释：`来自认证 workspace 上下文；创建后不可变`；唯一索引 `UNIQUE(workspace_id, created_by, idempotency_key)` |
+| **B. Token/idempotency 事务顺序冲突** | ✅ **已消除** | Task §4.3 Step 2~7：单事务判定矩阵明确；Step 7：`任一步失败整体回滚；禁止先消费 token 后无法幂等返回，也禁止先返回 run 再跳过 token/actor/workspace 校验`；Token consumption 表设计为 append-only；首次创建时 run + token 映射 + 初始 transition 必须同事务 |
+| **C. 不可变事件边界冲突** | ✅ **已消除** | Task §4.5：`workflow_run_transitions` 是本 task 授权的最小必要历史存储；`DECK-013` 后续以该 transition 合同作为审计输入；Task §4.6：`token consumption 记录 append-only`；`runtime_load_receipt_id` 是唯一例外（NULL → 一次性赋值 → 不可变）；来源字段创建后不可变 |
+| **D. 正式 exec report 例外冲突** | ✅ **已消除** | Task §5 明确：`docs/exec/exec_deck_007_backend_workflow-run.md` 为唯一非实现写入例外；Task §11 禁止范围：`docs/exec/`，但上文精确列出的正式报告例外除外；其他 `docs/exec/` 文件仍禁止修改 |
+
+### 18.5 综合判定
+
+| Task | 依赖满足 | 允许/禁止范围明确 | 验收标准清晰 | 四类冲突消除 | 综合判定 |
+|---|---|---|---|---|---|
+| **task_007** | ✅ task_006 已完成 | ✅ §11 明确 | ✅ §9 12 项完成标志 | ✅ A/B/C/D 全部消除 | **🟢 ready_to_execute** |
+
+### 18.6 Stage 2 Wave 2 结论
+
+- **Wave 2 唯一任务**: `task_deck_007_backend_workflow-run.md` (DECK-007)
+- **准入状态**: 🟢 **允许进入 execute**
+- **下一合法责任人**: **ExecTaskAgent**（独立 checkout `task_007` 对应 Issue）
+- **执行条件**: 无额外前置；task_006 已完成提供 preflight/token 合同；task_210a 已完成提供 binding 合同
+
+### 18.7 剩余阻塞点（更新后）
+
+| Gate | 未满足条件 | 阻塞 Task 数 |
+|---|---|---|
+| ~~Stage 1 Gate~~ | ✅ **已通过** | 0 |
+| Stage 2 Gate | task_008 ~ task_009 待完成 | 2 |
+| Stage 3 Gate | 前端组件渲染测试 + API 合同对齐 | 3 |
+| Stage 4 Gate | 事件审计 + 错误码 + 回滚验证 | 3 |
