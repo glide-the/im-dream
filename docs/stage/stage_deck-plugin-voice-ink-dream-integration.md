@@ -718,6 +718,7 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 | v1.2 | 2026-08-01 | SUO-239 一致性核验：修正 3 处 desk→Deck 术语残留（`desk_config_snapshots`→`deck_runtime_snapshot` 引用、`Desk`→`Deck` 兼容矩阵、stage_story-workspace 旧 delta 路径） | SUO-239 |
 | v1.3 | 2026-08-01 | SUO-239 一致性核验：按 `design_002` 附录更新 DECK-016~020 冻结状态（4/5 项已 frozen，DECK-017 仍为 conditional_frozen）；更新 §6 决策单表、§15.4 未满足 Gate 汇总、§15.5 约束说明 | SUO-239 |
 | v1.4 | 2026-08-01 | SUO-280 增量修正：按 SUO-279 shared binding 拆分结论，将 `task_210` 映射为合同索引（禁止 checkout），新增 `task_210a` 作为后端唯一执行单元；更新 DAG、阶段任务表、当前进度、关键路径、Mermaid 图、Single-Assignee 表、映射速查表、执行准入判定；明确 task_210a 与 task_006 的并行边界（Stage 1 Gate 通过后启动，各自前置链不同）；task_212 依赖从 task_210 修正为 task_210a | SUO-280 |
+| v1.5 | 2026-08-01 | SUO-285 统一执行路由：将全部 15 个可执行 task 的 checkout/assignee 从 `BackendTaskAgent`/`FrontendTaskAgent` 统一修正为 `ExecTaskAgent`（backend/frontend 仅为 domain 类型，非 Agent 名称）；更新 §2 任务输入来源表、§7.3 readiness 判定、§10 Single-Assignee 表、§15.2/15.5 约束说明；`git diff --check` 通过；task_210a 九项 readiness 全部通过，恢复 `ready_to_execute` | SUO-285 |
 | v1.6 | 2026-08-01 | SUO-290 Stage 状态同步：修正 §4 当前进度表中 task_210a/task_006 从 `blocked` 改为 `ready_after_dependencies`；修正 §15.2 执行准入判定表中 task_210a/task_006 从 `🔴 阻塞` 改为 `🟡 execute-ready-after-stage1-gate`；更新 §15.3 首个可执行 Wave 结论，明确 task_001 可立即执行，task_210a ∥ task_006 在 Stage 1 Gate 通过后并行启动；消除与 §7.3 readiness 判定的状态冲突 | SUO-290 |
 
 ---
