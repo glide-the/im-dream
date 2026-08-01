@@ -4,9 +4,10 @@
 > **关联 Issue**: `SUO-201-FE-005` — `工作台首页 Dashboard`  
 > **上游 Issue**: `SUO-201` (Issue 清单)  
 > **父 Issue**: `SUO-198`  
-> **设计决策**: `DEC-007`  
+> **设计决策**: `DEC-007`, **DEC-017**  
 > **生成日期**: 2026-08-01  
-> **生成 Agent**: `FrontendTaskAgent`
+> **生成 Agent**: `FrontendTaskAgent`  
+> **增量同步**: `task_230_frontend_dream-page-review-gate.md` (SUO-230-FE-002, DEC-017/DEC-018)
 
 ---
 
@@ -22,11 +23,23 @@ Story Workspace 工作台首页 Dashboard 实现
 |---|---|---|---|
 | `SUO-201-FE-005` | 工作台首页 Dashboard | frontend | P1 |
 
+**增量关联**：
+| Issue ID | 标题 | 类型 | 说明 |
+|---|---|---|---|
+| `SUO-230-FE-002` | Dream 页面与 ReviewGate 组件 | frontend | P0 | 本 task 提供 Dashboard 概览能力；`task_230` 将其组合为 Dream 页面并追加 ReviewGate |
+
 ---
 
 ## 3. 任务目标
 
 实现工作台首页 Dashboard 页面。展示 Agent 产出概览（待审阅剧本数、已确认剧本数、最近 Agent 生成活动）、待审阅快捷入口（Agent 最新生成的剧本/角色/场景，点击直达审阅）、已确认剧本列表（最近确认）。空态时引导用户前往 Chat 触发 Agent 生成。
+
+**SUO-230 增量影响**：
+- Dashboard 页面保留复用，不再拥有独立路由状态
+- `/story-workspace/dashboard` 重定向至 `/story-workspace/dream`
+- Dashboard 概览能力（统计、快捷入口、已确认列表）由 `StoryWorkspaceDreamPage` 组合复用
+- Dream 页面在 Dashboard 基础上追加：工作流上下文条、ReviewGate、确认版本校验
+- 空态引导文案更新：从"在 Chat 中让 Agent 为你生成剧本"改为"在 Dream 页面让 Agent 为你生成剧本"（与 DEC-017 一致）
 
 ---
 
@@ -55,9 +68,9 @@ Story Workspace 工作台首页 Dashboard 实现
    - 点击可查看详情
 
 5. **空态处理**
-   - 「还没有剧本内容，在 Chat 中让 Agent 为你生成剧本」
+   - 「还没有剧本内容，在 Dream 页面让 Agent 为你生成剧本」（SUO-230 更新：引导至 Dream 而非 Chat）
    - 空态图标：Charcoal Brown 线条 + Memory Yellow 点缀风格，64px
-   - 引导用户前往 Chat 触发 Agent
+   - 引导用户前往 Dream 页面触发 Agent（SUO-230：Dream 是 canonical 创作入口）
 
 6. **数据聚合**
    - 通过 `GET /api/story-workspace/stories` 等接口聚合统计
@@ -131,9 +144,11 @@ Story Workspace 工作台首页 Dashboard 实现
 - [ ] 顶部：页面标题 + 审阅状态统计（待审阅数 / 已确认数 / 总数）
 - [ ] 中部：待审阅项快捷入口卡片（Agent 最新产出）
 - [ ] 下部：已确认剧本列表（最近确认，最多 5 条）
-- [ ] 空态：「还没有剧本内容，在 Chat 中让 Agent 为你生成剧本」
+- [ ] 空态：「还没有剧本内容，在 Dream 页面让 Agent 为你生成剧本」（SUO-230 更新）
 - [ ] 统计数字实时更新
 - [ ] 快捷入口点击直达对应审阅面板
+- [ ] **Dashboard 组件可被 `StoryWorkspaceDreamPage` 复用组合（SUO-230）**
+- [ ] **Dashboard 不再拥有独立路由状态（SUO-230）**
 
 ---
 
@@ -144,6 +159,29 @@ Story Workspace 工作台首页 Dashboard 实现
 | Dashboard 数据需多次 API 调用 | 低 | 可合并为一次聚合请求，或并行发起 |
 | 空态引导到 Chat 的跳转路径 | 低 | 使用现有 Chat 视图切换机制 |
 | 快捷入口卡片信息密度 | 低 | 仅展示核心字段，点击后查看完整内容 |
+| **Dashboard 与 Dream 页面职责重叠** | 中 | Dashboard 降级为可复用组件；Dream 页面组合 Dashboard + ReviewGate + 工作流上下文条 |
+
+---
+
+## 增量差异说明（SUO-230）
+
+### 与 `task_230_frontend_dream-page-review-gate.md` 的协同
+
+| 维度 | 本 `task_202e` Dashboard 基线 | `task_230` Dream 页面增量 |
+|---|---|---|
+| 路由状态 | `/story-workspace/dashboard` 拥有独立路由 | `/story-workspace/dashboard` 重定向到 `/story-workspace/dream` |
+| 页面组件 | `StoryWorkspaceDashboardPage` 独立页面 | `StoryWorkspaceDreamPage` 组合 Dashboard + 工作流上下文条 + ReviewGate |
+| 空态引导 | "在 Chat 中让 Agent 生成" | "在 Dream 页面让 Agent 生成" |
+| 审阅 gate | 无 | 新增 `StoryWorkspaceReviewGate` 四步进度指示 |
+| 确认操作 | 基线 confirm（无版本校验） | 追加 `workflow_run_id` + `review_version` 校验 |
+
+**协同规则**：
+1. Dashboard 页面组件保留，但降级为可复用组件
+2. Dream 页面通过组合 Dashboard 概览能力 + 追加 ReviewGate + 工作流上下文条实现
+3. Dashboard 的统计展示、快捷入口、已确认列表能力全部保留
+4. 空态引导文案更新为指向 Dream 页面
+
+**无冲突声明**：本增量不删除 Dashboard 页面组件，仅将其降级为可复用组件。所有 Dashboard 功能保留。
 
 ---
 

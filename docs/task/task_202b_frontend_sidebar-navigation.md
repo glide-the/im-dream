@@ -4,9 +4,10 @@
 > **关联 Issue**: `SUO-201-FE-002` — `Sidebar 导航与路由配置`  
 > **上游 Issue**: `SUO-201` (Issue 清单)  
 > **父 Issue**: `SUO-198`  
-> **设计决策**: `DEC-003`, `DEC-004`  
+> **设计决策**: `DEC-003`, `DEC-004`, **DEC-017**  
 > **生成日期**: 2026-08-01  
-> **生成 Agent**: `FrontendTaskAgent`
+> **生成 Agent**: `FrontendTaskAgent`  
+> **增量同步**: `task_230_frontend_dream-nav-item.md` (SUO-230-FE-001, DEC-017)
 
 ---
 
@@ -22,11 +23,23 @@ Story Workspace Sidebar 导航与路由配置实现
 |---|---|---|---|
 | `SUO-201-FE-002` | Sidebar 导航与路由配置 | frontend | P0 |
 
+**增量关联**：
+| Issue ID | 标题 | 类型 | 说明 |
+|---|---|---|---|
+| `SUO-230-FE-001` | TopNavBar Dream 导航项与 canonical 路由 | frontend | P0 | 本 task 提供路由基线；`task_230` 增量追加 canonical `/story-workspace/dream` 与重定向 |
+
 ---
 
 ## 3. 任务目标
 
 实现 Story Workspace 的 Sidebar 导航组件和路由配置。Sidebar 包含工作台首页、故事管理、角色管理、场景管理导航项，以及底部设置入口。路由使用 `/story-workspace/*` 前缀。当前项使用 Memory Yellow 下划线指示。
+
+**SUO-230 增量影响**：
+- 本 task 的路由基线需与 `task_230_frontend_dream-nav-item.md` 的 canonical 路由协同：
+  - `/story-workspace` → `/story-workspace/dream`（原 `/story-workspace/dashboard` 重定向改为指向 Dream）
+  - `/story-workspace/dashboard` → `/story-workspace/dream`（新增兼容重定向）
+- Sidebar 的"工作台首页"导航项目标从 `/story-workspace/dashboard` 更新为 `/story-workspace/dream`
+- Dream 导航项（TopNavBar 一级入口）与 Sidebar 二级导航的职责边界保持不变
 
 ---
 
@@ -35,7 +48,7 @@ Story Workspace Sidebar 导航与路由配置实现
 1. **实现 `StoryWorkspaceSidebar` 组件**
    - 宽度 240px，背景 Paper Cream
    - Logo 区：「Ink & Memory 创作者工作台」
-   - 导航项：工作台首页、故事管理、角色管理、场景管理
+   - 导航项：工作台首页（指向 `/story-workspace/dream`，SUO-230 更新）、故事管理、角色管理、场景管理
    - 底部设置入口（跳转全局 Settings）
    - 用户信息区：头像和用户名（复用现有用户体系）
    - 当前项指示：Memory Yellow 下划线（2px，偏移 4px）
@@ -44,12 +57,14 @@ Story Workspace Sidebar 导航与路由配置实现
 2. **创建路由配置**
    - 新建 `frontend/src/router/story-workspace.tsx`（或等效路由配置）
    - 路由前缀：`/story-workspace`
-   - 子路由：`/dashboard`, `/stories`, `/characters`, `/scenes`
-   - 默认重定向：`/story-workspace` → `/story-workspace/dashboard`
+   - 子路由：`/dream`（canonical 入口，SUO-230 增量）, `/stories`, `/characters`, `/scenes`
+   - 默认重定向：`/story-workspace` → `/story-workspace/dream`（SUO-230 更新：原指向 `/dashboard`）
+   - 兼容重定向：`/story-workspace/dashboard` → `/story-workspace/dream`（SUO-230 新增）
 
 3. **创建页面组件骨架**
    - `frontend/src/pages/story-workspace/` 目录
-   - `StoryWorkspaceDashboardPage.tsx`（工作台首页骨架）
+   - `StoryWorkspaceDreamPage.tsx`（Dream 页面骨架，SUO-230 增量）
+   - `StoryWorkspaceDashboardPage.tsx`（Dashboard 保留复用，SUO-230：不再拥有独立路由状态）
    - `StoryWorkspaceStoriesPage.tsx`（故事列表骨架）
    - `StoryWorkspaceCharactersPage.tsx`（角色列表骨架）
    - `StoryWorkspaceScenesPage.tsx`（场景列表骨架）
@@ -125,7 +140,8 @@ Story Workspace Sidebar 导航与路由配置实现
    - 用户信息区头像和用户名显示正常
 
 3. **路由测试**：
-   - `/story-workspace` 重定向到 `/story-workspace/dashboard`
+   - `/story-workspace` 重定向到 `/story-workspace/dream`（SUO-230 更新）
+   - `/story-workspace/dashboard` 重定向到 `/story-workspace/dream`（SUO-230 新增）
    - 各子路由正确渲染对应页面骨架
 
 ---
@@ -137,11 +153,33 @@ Story Workspace Sidebar 导航与路由配置实现
 - [ ] 底部设置入口（跳转全局 Settings）
 - [ ] 当前项指示：Memory Yellow 下划线（2px，偏移 4px）
 - [ ] Hover 效果：背景色轻微变化
-- [ ] 路由配置：`/story-workspace` → redirect `/story-workspace/dashboard`
-- [ ] 子路由：`/dashboard`, `/stories`, `/characters`, `/scenes`
+- [ ] 路由配置：`/story-workspace` → redirect `/story-workspace/dream`（SUO-230 更新）
+- [ ] 兼容重定向：`/story-workspace/dashboard` → `/story-workspace/dream`（SUO-230 新增）
+- [ ] 子路由：`/dream`, `/stories`, `/characters`, `/scenes`
 - [ ] 路由文件：`frontend/src/router/story-workspace.tsx`（或等效位置）
 - [ ] Logo 区显示「Ink & Memory 创作者工作台」
 - [ ] 用户信息区显示头像和用户名（复用现有用户体系）
+
+---
+
+## 增量差异说明（SUO-230）
+
+### 与 `task_230_frontend_dream-nav-item.md` 的协同
+
+| 维度 | 本 `task_202b` Sidebar 基线 | `task_230` Dream 导航增量 |
+|---|---|---|
+| 导航层级 | Sidebar 二级导航（工作台首页/故事/角色/场景） | TopNavBar 一级入口（Dream） |
+| 路由 | `/story-workspace` → `/story-workspace/dream`（原 dashboard） | `/story-workspace/dream` canonical；`/story-workspace/dashboard` 重定向 |
+| 选中范围 | Sidebar 项按精确路由匹配 | Dream 项按 `/story-workspace/*` 前缀匹配 |
+| 页面组件 | `StoryWorkspaceDashboardPage` 保留复用 | `StoryWorkspaceDreamPage` 为 canonical 入口页面 |
+
+**协同规则**：
+1. 本 task 的路由配置需追加 `/dream` canonical 入口和 `/dashboard` 兼容重定向
+2. Sidebar "工作台首页"导航项目标从 `/dashboard` 更新为 `/dream`
+3. `StoryWorkspaceDashboardPage` 保留但降级为可复用组件，不再拥有独立路由状态
+4. Dream 导航项（TopNavBar）与 Sidebar 导航的职责边界不变：Dream 是业务域入口，Sidebar 是域内二级导航
+
+**无冲突声明**：本增量不修改 Sidebar 导航结构、不删除 Dashboard 页面组件、不破坏既有子路由。仅追加路由重定向和更新导航项目标。
 
 ---
 
@@ -164,8 +202,9 @@ const storyWorkspaceRoutes = [
     path: '/story-workspace',
     component: StoryWorkspaceLayout,
     children: [
-      { path: '', redirect: '/story-workspace/dashboard' },
-      { path: 'dashboard', component: StoryWorkspaceDashboardPage },
+      { path: '', redirect: '/story-workspace/dream' },           // ← SUO-230: 指向 dream
+      { path: 'dream', component: StoryWorkspaceDreamPage },      // ← SUO-230: canonical 入口
+      { path: 'dashboard', redirect: '/story-workspace/dream' },  // ← SUO-230: 兼容重定向
       { path: 'stories', component: StoryWorkspaceStoriesPage },
       { path: 'characters', component: StoryWorkspaceCharactersPage },
       { path: 'scenes', component: StoryWorkspaceScenesPage },

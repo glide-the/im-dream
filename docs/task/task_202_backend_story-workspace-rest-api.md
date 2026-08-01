@@ -11,21 +11,31 @@ Story Workspace REST API 实现
 - **类型**: backend
 - **优先级**: P0
 - **标签**: `api`, `rest`, `crud`
+- **增量 Issue**: `SUO-230-BE-001` — 审阅 gate 服务端聚合与防绕过验证
 - **来源设计稿**:
   - `docs/design/story-workspace/story-workspace-layout-design.md` §6.1–6.2（API 路由设计、查询参数规范）
   - `docs/design/story-workspace/story-workspace-prd.md` §4.2（命名映射）
   - `docs/design/story-workspace/story-workspace-prd.md` §6.1–6.2（API 路由设计）
+  - `docs/design/story-workspace/story-workspace-prd.md` §3.6.2（Gate 规则，SUO-230 增量）
 - **Issue 清单**: `docs/issue/ISSUES_story-workspace.md` §3 Issue 明细
+- **增量同步**: `task_230_backend_review-gate-aggregation.md` (SUO-230-BE-001, DEC-018)
 
 ## 3. 任务目标
 
 实现 story-workspace 的 REST API 路由，包括工作区、故事、角色、场景的 CRUD 操作。支持列表查询（搜索、筛选、排序、分页）和详情查询。所有路由使用 `/api/story-workspace/*` 前缀。
+
+**SUO-230 增量影响**：
+- 确认端点 `POST /stories/:id/confirm` 需增强：接收 `workflow_run_id` + `review_version`，校验版本未过期
+- 新增聚合查询端点：`GET /workflow-runs/:id/review-gate`（由 `task_230_backend_review-gate-aggregation.md` 定义，本 task 提供路由注册基线）
+- 新增继续/结束端点：`POST /workflow-runs/:id/continue`（由 `task_230_backend_review-gate-aggregation.md` 定义）
+- 所有继续/结束请求必须经过服务端聚合校验，不信任客户端状态
 
 **核心约束**：
 - 复用现有全局 Auth 中间件进行用户认证
 - 列表接口返回标准分页格式 `{ data, pagination: { page, per_page, total, total_pages } }`
 - PATCH 更新接口用于用户编辑 Agent 生成内容
 - 搜索使用 SQLite `LIKE`（项目使用 SQLite，无 `pg_trgm`）
+- 确认端点必须校验 `workflow_run_id` 匹配和 `review_version` 未过期（SUO-230）
 
 ## 4. 实现步骤
 
@@ -151,6 +161,18 @@ router = APIRouter(prefix="/api/story-workspace", tags=["story-workspace"])
 - Body: `{ title?: string, description?: string, content?: string, type?: string }`
 - 限制：不可修改 `review_status`、`agent_generated`、`agent_session_id`
 - 自动更新 `updated_at`
+
+#### `POST /api/story-workspace/stories/:id/confirm`（SUO-230 增强）
+
+- 确认故事审阅状态
+- Body: `{ workflow_run_id: string, review_version: string }`（SUO-230 新增必填字段）
+- 服务端校验：
+  1. `workflow_run_id` 与 story 的 `workflow_run_id` 匹配
+  2. `review_version` 与当前数据库版本一致（未过期）
+  3. story 当前 `review_status` 为 `pending`
+- 校验通过：更新 `review_status` → `confirmed`，记录 `confirmed_at`
+- 版本过期：返回 `409 CONFLICT`，错误码 `REVIEW_VERSION_EXPIRED`
+- 运行 ID 不匹配：返回 `400 BAD_REQUEST`
 
 ### Step 4: 实现角色列表与详情 API
 
@@ -283,6 +305,7 @@ def paginate_query(db, base_sql: str, count_sql: str, params: tuple,
 |------|----------|------|------|
 | `SUO-201-BE-001` | 数据库 Schema | 硬依赖 | 所有 API 依赖数据库表存在 |
 | `SUO-201-SH-002` | 共享类型定义 | 软依赖 | 类型定义对齐，但可基于设计稿先行开发 |
+| `task_230_backend_review-gate-aggregation` | `SUO-230-BE-001` | ⏳ 并行 | 审阅 gate 聚合 API（本 task 提供 confirm 端点基线增强） |
 | 现有 Auth 中间件 | — | 现有 | 复用 `backend/routers/deps.py` 中的 `get_current_user` |
 
 ## 8. 测试策略
@@ -386,6 +409,7 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 - [ ] `GET /api/story-workspace/stories` — 列表（支持 q/review_status/status/type/sort/order/page/per_page）
 - [ ] `GET /api/story-workspace/stories/:id` — 详情（含关联角色/场景）
 - [ ] `PATCH /api/story-workspace/stories/:id` — 更新（用户编辑 Agent 生成内容）
+- [ ] `POST /api/story-workspace/stories/:id/confirm` — 确认（SUO-230：携带 `workflow_run_id` + `review_version`，校验版本未过期）
 - [ ] `GET /api/story-workspace/characters` — 列表
 - [ ] `GET /api/story-workspace/characters/:id` — 详情
 - [ ] `PATCH /api/story-workspace/characters/:id` — 更新
@@ -396,6 +420,7 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 - [ ] API 认证复用现有全局 Auth 中间件
 - [ ] 搜索使用 SQLite `LIKE`（非 pg_trgm）
 - [ ] 所有测试通过
+- [ ] **路由注册为 `task_230` 新增端点预留扩展点（SUO-230：`/workflow-runs/:id/review-gate`、`/workflow-runs/:id/continue`）**
 
 ## 10. 风险提示
 
@@ -407,6 +432,7 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 | **并发更新冲突** | 低 | SQLite 文件级锁天然处理并发；如需乐观锁，后续添加 `version` 字段 |
 | **PATCH 字段越权修改** | 中 | 明确列出允许修改的字段白名单，拒绝 `review_status` / `agent_generated` 等敏感字段 |
 | **分页深度性能** | 低 | `per_page` 最大限制 100；大数据量时考虑游标分页 |
+| **确认版本校验实现** | 中 | `review_version` 使用简单版本号（如 `updated_at` 时间戳或整数版本）；过期返回 409 |
 
 ## 11. 允许与禁止修改范围
 
@@ -419,6 +445,7 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 - **StagePlanner 注意**: 本任务依赖 `SUO-201-BE-001`（Schema）完成。Stage 排期时需确保 Schema 任务先完成。
 - **前端消费边界**: 前端通过 `GET /api/story-workspace/stories` 等接口消费数据。响应格式中的 `pagination` 结构是前后端共享契约，变更需同步通知 FrontendTaskAgent。
 - **与审阅工作流的关系**: 本任务仅实现 CRUD 和列表查询。审阅状态流转（confirm/reject/archive）在 `SUO-201-BE-003` 中实现，但本任务需确保 `review_status` 字段在 PATCH 中不可被直接修改。
+- **SUO-230 增量边界**: 本任务为 confirm 端点提供基线实现；`task_230_backend_review-gate-aggregation.md` 负责追加 `workflow_run_id` + `review_version` 校验逻辑和聚合查询/继续端点。两者通过路由文件协同，不重复定义端点。
 - **共享类型对齐**: API 请求/响应字段应与 `SUO-201-SH-002` 的 Python 规范源保持一致。
 
 ## 13. 执行边界（补充修订）
@@ -449,6 +476,8 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 - **计费/积分系统** — API 调用不触发积分消耗记录。
 - **DELETE 端点** — 本期不提供物理删除；归档通过 `status='archived'` 实现（在 `SUO-201-BE-003` 中处理）。
 - **文件上传** — 角色头像 `avatar_url` 为外部 URL，本 API 不提供文件上传/存储端点。
+- **审阅 gate 聚合查询** — `GET /workflow-runs/:id/review-gate` 由 `task_230_backend_review-gate-aggregation.md` 定义。
+- **继续/结束幂等控制** — `POST /workflow-runs/:id/continue` 由 `task_230_backend_review-gate-aggregation.md` 定义。
 
 ---
 
@@ -464,6 +493,13 @@ def test_get_other_user_story(client, auth_headers, other_user_story):
 > - API 响应格式（含 `PaginatedResponse` 结构）的定义与稳定
 > - 搜索/筛选/排序/分页的后端逻辑
 > - PATCH 更新的字段白名单控制
+> - confirm 端点基线实现（`task_230` 负责追加版本校验增强）
 > - API 测试 `backend/tests/test_story_workspace_api.py`
+>
+> **SUO-230 增量边界**：`task_230_backend_review-gate-aggregation.md` 负责：
+> - confirm 端点的 `workflow_run_id` + `review_version` 校验逻辑增强
+> - `GET /workflow-runs/:id/review-gate` 聚合查询端点
+> - `POST /workflow-runs/:id/continue` 继续/结束幂等控制端点
+> - 防绕过验证逻辑
 >
 > 记录时间：2026-08-01 | 记录 Agent：BackendTaskAgent | Issue：SUO-205

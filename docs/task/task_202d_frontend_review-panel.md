@@ -4,9 +4,10 @@
 > **关联 Issue**: `SUO-201-FE-004` — `审阅面板（Review Panel）与审阅操作`  
 > **上游 Issue**: `SUO-201` (Issue 清单)  
 > **父 Issue**: `SUO-198`  
-> **设计决策**: `DEC-007`, `DEC-008`  
+> **设计决策**: `DEC-007`, `DEC-008`, **DEC-018**  
 > **生成日期**: 2026-08-01  
-> **生成 Agent**: `FrontendTaskAgent`
+> **生成 Agent**: `FrontendTaskAgent`  
+> **增量同步**: `task_230_frontend_dream-page-review-gate.md` (SUO-230-FE-002, DEC-018)
 
 ---
 
@@ -22,11 +23,23 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 |---|---|---|---|
 | `SUO-201-FE-004` | 审阅面板（Review Panel）与审阅操作 | frontend | P0 |
 
+**增量关联**：
+| Issue ID | 标题 | 类型 | 说明 |
+|---|---|---|---|
+| `SUO-230-FE-002` | Dream 页面与 ReviewGate 组件 | frontend | P0 | 本 task 提供 Review Panel 基线；`task_230` 追加 gate 联动、确认版本校验 |
+
 ---
 
 ## 3. 任务目标
 
 实现审阅面板组件，展示 Agent 生成的完整内容，支持用户审阅确认操作。面板内包含：Agent 生成内容展示（只读/可编辑切换）、审阅状态指示、关联角色/场景列表、修改意见输入区、确认/驳回/编辑操作按钮。编辑模式下字段可修改，保存后可确认或仅保存。
+
+**SUO-230 增量影响**：
+- 确认操作需追加 `workflow_run_id` + `review_version` 参数，用于防过期确认
+- Review Panel 需与 `StoryWorkspaceReviewGate` 联动，显示同一运行来源
+- 确认后需通知 ReviewGate 更新聚合状态（通过 Zustand store 或回调）
+- "保存"不等于确认；只有"确认通过"或"保存并确认"能确认当前版本
+- 驳回后 ReviewGate 进入红色阻断状态
 
 ---
 
@@ -62,11 +75,11 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
    - 审阅操作按钮组
 
 6. **实现审阅操作逻辑**
-   - 确认通过：调用 `POST /api/story-workspace/{type}/:id/confirm`
-   - 驳回：调用 `POST /api/story-workspace/{type}/:id/reject`，附带 review_notes
+   - 确认通过：调用 `POST /api/story-workspace/{type}/:id/confirm`，携带 `workflow_run_id` + `review_version`（SUO-230 增量）
+   - 驳回：调用 `POST /api/story-workspace/{type}/:id/reject`，附带 `review_notes`
    - 编辑后保存：调用 `PATCH /api/story-workspace/{type}/:id`
-   - 编辑后保存并确认：先 PATCH 再 confirm
-   - 操作完成后 Toast 通知 + 表格刷新
+   - 编辑后保存并确认：先 PATCH 再 confirm（携带 `workflow_run_id` + `review_version`）
+   - 操作完成后 Toast 通知 + 表格刷新 + 通知 ReviewGate 更新聚合状态（SUO-230 增量）
 
 7. **状态流转反馈**
    - 确认后：Toast「已确认」，状态变 confirmed，行标记消失
@@ -115,6 +128,7 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 | `task_202c` (FE-003 数据表格) | ⏳ 需先完成 | 表格行选中触发面板展示 |
 | `SUO-201-BE-003` (审阅状态流转 API) | ⏳ 需先完成 | confirm/reject API |
 | `SUO-201-SH-002` (共享类型包) | ⏳ 可选 | 类型定义 |
+| `task_230_frontend_dream-page-review-gate` | ⏳ 并行 | ReviewGate 联动（SUO-230 增量） |
 | 全局 Toast/Modal 组件 | ✅ 已存在 | 通知和弹窗 |
 
 **本任务被依赖**：
@@ -160,6 +174,9 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 - [ ] 驳回按钮：#E74C3C 背景，点击后弹出修改意见输入框，状态变为 rejected
 - [ ] 编辑按钮：Action Brown 背景，进入编辑模式
 - [ ] 操作完成后表格刷新
+- [ ] **确认操作携带 `workflow_run_id` + `review_version`（SUO-230 增量）**
+- [ ] **与 ReviewGate 联动，确认后通知聚合状态更新（SUO-230 增量）**
+- [ ] **过期版本被拒绝时展示刷新提示（SUO-230 增量）**
 
 ---
 
@@ -171,6 +188,29 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 | 编辑模式状态管理复杂 | 中 | 使用本地 state 管理编辑态，提交后同步到全局 store |
 | 关联跳转与路由同步 | 低 | 通过全局状态或 URL 参数传递选中项 ID |
 | 内容编辑器类型不确定 | 低 | 默认纯文本/Markdown，预留富文本扩展点 |
+| **确认版本校验增加交互复杂度** | 低 | 版本过期时明确提示用户刷新，不静默失败 |
+| **ReviewGate 联动状态同步** | 中 | 使用同一 Zustand store 管理，避免多源状态 |
+
+---
+
+## 增量差异说明（SUO-230）
+
+### 与 `task_230_frontend_dream-page-review-gate.md` 的协同
+
+| 维度 | 本 `task_202d` Review Panel 基线 | `task_230` 增量 |
+|---|---|---|
+| 确认端点 | `POST /{type}/:id/confirm`（无版本校验） | 追加 `workflow_run_id` + `review_version` 参数 |
+| Gate 联动 | 无 | Review Panel 操作需与 ReviewGate 状态同步 |
+| 来源展示 | 基线（无版本溯源） | 追加运行 ID 和审阅版本展示（与 `task_226-FE-002` 协同） |
+| 过期处理 | 无 | 版本过期时展示刷新提示 |
+
+**协同规则**：
+1. 确认操作追加 `workflow_run_id` + `review_version` 参数传递
+2. 确认成功后通知 ReviewGate 更新聚合状态（通过 Zustand store 事件或回调）
+3. 驳回后 ReviewGate 进入红色阻断状态
+4. 版本过期时（409 CONFLICT）展示明确刷新提示
+
+**无冲突声明**：本增量只追加参数和联动逻辑，不修改 Review Panel 基线的 UI 结构、编辑模式、驳回流程。
 
 ---
 
