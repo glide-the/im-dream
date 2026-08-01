@@ -187,8 +187,8 @@ POST /api/story-workspace/workflow-runs/:id/continue
 | `task_201` (BE-001 数据库 Schema) | `SUO-201-BE-001` | ✅ 基线稳定 | 提供数据表 |
 | `task_202` (BE-002 REST API) | `SUO-201-BE-002` | ✅ 基线稳定 | 提供 REST API 基线；本任务增强 confirm 端点 |
 | `task_203` (BE-003 审阅状态流转) | `SUO-201-BE-003` | ✅ 基线稳定 | 提供审阅状态流转基线；本任务追加 gate 聚合 |
-| `task_226_backend_workflow-binding-run-schema` | `SUO-226-BE-001` | ⏳ 需先完成 | 提供 workflow_run 数据模型 |
-| `task_226_backend_workflow-run-api` | `SUO-226-BE-004` | ⏳ 需先完成 | 提供 run 创建与管理 API |
+| `SUO-226-BE-001` Issue gate | `SUO-226-BE-001` | ⏳ 需先完成 | 提供 workflow binding/run 数据模型；gate 定义见 `docs/issue/ISSUES_story-workspace.md` |
+| `SUO-226-BE-004` Issue gate | `SUO-226-BE-004` | ⏳ 需先完成 | 提供 run 创建与执行上下文 API；gate 定义见 `docs/issue/ISSUES_story-workspace.md` |
 | `task_205` (SH-002 共享类型) | `SUO-201-SH-002` | ✅ 基线稳定 | 提供类型定义基线 |
 
 **本任务被依赖**：
@@ -305,11 +305,11 @@ POST /api/story-workspace/workflow-runs/:id/continue
 - 失败恢复（确认不回滚）
 
 **❌ 范围外**（本 task 不实现）：
-- Workflow Run 数据模型（由 `task_226_backend_workflow-binding-run-schema` 定义）
-- Workflow Run 创建/管理 API（由 `task_226_backend_workflow-run-api` 定义）
-- Agent 集成适配（由 `task_226_backend_agent-deck-desk-adapter` 定义）
-- Deck 插件目录 API（由 `task_226_backend_deck-plugin-directory-api` 定义）
-- Desk 配置预检 API（由 `task_226_backend_desk-preflight-api` 定义）
+- Workflow Run 数据模型（由 `SUO-226-BE-001` Issue gate 定义）
+- Workflow Run 创建/执行上下文 API（由 `SUO-226-BE-004` Issue gate 定义）
+- Agent 集成适配（由 `SUO-226-BE-005` Issue gate 定义，输入固定 Deck runtime snapshot）
+- Deck 插件目录 API（由 `SUO-226-BE-002` Issue gate 定义）
+- Deck 运行配置预检 API（由 `SUO-226-BE-003` Issue gate定义）
 - 前端 ReviewGate 组件（由 `task_230_frontend_dream-page-review-gate` 定义）
 - 前端路由和导航（由 `task_230_frontend_dream-nav-item` 定义）
 

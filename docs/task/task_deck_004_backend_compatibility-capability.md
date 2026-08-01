@@ -31,7 +31,7 @@ class CompatibilityCheck(str, Enum):
     DECK_HOST_COMPATIBLE = "deck_host_compatible"
     CLAUDE_AGENT_COMPATIBLE = "claude_agent_compatible"
     STORY_SCHEMA_COMPATIBLE = "story_schema_compatible"
-    DESK_CONFIG_COMPATIBLE = "desk_config_compatible"
+    DECK_RUNTIME_CONFIG_COMPATIBLE = "deck_runtime_config_compatible"
     RUNTIME_PLUGIN_RESOLVED = "runtime_plugin_resolved"
     WORKFLOW_PERMISSION = "workflow_permission"
     RUNTIME_PLUGIN_READY = "runtime_plugin_ready"
@@ -51,9 +51,9 @@ class CompatibilityResult(BaseModel):
 | 2 | Deck host API 与 manifest schema 兼容 | `DECK_HOST_INCOMPATIBLE` |
 | 3 | ClaudeAgent contract 与 Claude Code 版本兼容 | `CLAUDE_AGENT_INCOMPATIBLE` |
 | 4 | story-workspace input/output schema 兼容 | `STORY_SCHEMA_INCOMPATIBLE` |
-| 5 | Desk profile/snapshot contract 兼容 | `DESK_CONFIG_INCOMPATIBLE` |
+| 5 | Deck runtime profile/snapshot contract 兼容 | `DECK_RUNTIME_CONFIG_INCOMPATIBLE` |
 | 6 | runtime lock 中每个来源、版本、摘要可解析 | `RUNTIME_PLUGIN_UNRESOLVED` |
-| 7 | 管理员 grant、Desk policy、用户权限满足能力交集 | `WORKFLOW_PERMISSION_DENIED` |
+| 7 | 管理员 grant、Deck runtime policy、用户权限满足能力交集 | `WORKFLOW_PERMISSION_DENIED` |
 | 8 | required runtime plugin 已物化、可加载 | `RUNTIME_PLUGIN_NOT_READY` |
 
 ### Step 2: 实现能力交集计算
@@ -62,12 +62,12 @@ class CompatibilityResult(BaseModel):
 def compute_effective_capabilities(
     manifest_requested: set[str],
     installation_approved: set[str],
-    desk_snapshot_policy: set[str],
+    deck_runtime_snapshot_policy: set[str],
     user_and_workspace_grants: set[str],
     claude_agent_runtime_supported: set[str]
 ) -> set[str]:
     """
-    有效能力 = manifest_requested ∩ installation_approved ∩ desk_snapshot_policy
+    有效能力 = manifest_requested ∩ installation_approved ∩ deck_runtime_snapshot_policy
              ∩ user_and_workspace_grants ∩ claude_agent_runtime_supported
     未知能力默认拒绝。
     """
@@ -103,7 +103,7 @@ class CompatibilityService:
 - `error_code`: 规范错误码
 - `failed_check`: 失败的判定步骤
 - `recovery_action`: 可恢复动作（如"升级 host"、"申请授权"、"选择兼容版本"）
-- 禁止泄露敏感详情（manifest 内容、Desk prompt、secret 等）
+- 禁止泄露敏感详情（manifest 内容、Deck 运行配置 prompt、secret 等）
 
 ### Step 5: 能力扩张审批
 
@@ -181,12 +181,31 @@ async def approve_capability_expansion(
 | 能力交集计算性能（大量能力时） | 低 | set 交集操作 O(n)；能力数量通常 < 100 |
 | 权限服务不可用导致所有判定失败 | 中 | 优雅降级：返回 `WORKFLOW_PERMISSION_DENIED`，不崩溃 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/deck_plugin.py`（仅追加 CompatibilityResult / CapabilityDiff 模型）
+- `backend/services/deck_plugin/compatibility_service.py`（仅新增兼容性判定链）
+- `backend/services/deck_plugin/capability_evaluator.py`（仅新增能力交集计算）
+- `backend/tests/test_deck_plugin_compatibility.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、身份/权限服务内部实现和 Paperclip Plugin worker 实现
+- 除上述 4 个路径以外的任何实现、测试、依赖锁或部署配置
+- `backend/models/deck_plugin.py` 中与兼容性结果或能力差异无关的既有模型
+- 在客户端复制服务端兼容性/权限裁决，或借本 task 重写 Installation、Preflight 合同
+
+## 12. 命名隔离声明
 
 - 能力名称使用平台可审计的命名空间（如 `story.context.read`）
 - 未知能力默认拒绝，不得自动授权
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-016`: 物理服务边界未定 —— 兼容性判定由哪个服务执行需确认
 - `DECK-019`: 安全撤销策略 —— 影响权限判定中的撤销等级处理

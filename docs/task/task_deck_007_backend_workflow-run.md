@@ -33,7 +33,7 @@ class WorkflowRun(BaseModel):
     deck_plugin_id: str
     deck_plugin_version: str
     workflow_definition_ref: str
-    desk_config_snapshot_id: str
+    deck_runtime_snapshot_id: str
     status: RunStatus
     failed_step: Optional[str]
     error_code: Optional[str]
@@ -61,7 +61,10 @@ class RunStatus(str, Enum):
     PREFLIGHT = "preflight"
     QUEUED = "queued"
     RUNNING = "running"
-    AWAITING_REVIEW = "awaiting_review"
+    OUTPUT_VALIDATING = "output_validating"
+    PENDING_REVIEW = "pending_review"
+    CONFIRMED = "confirmed"
+    REJECTED = "rejected"
     CONTINUING = "continuing"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -71,17 +74,20 @@ class RunStatus(str, Enum):
 ### Step 2: 实现状态机
 
 ```text
-preflight → queued → running → awaiting_review → continuing → completed
-                │        │             │              │
-                ├────────┴─────────────┴──────────────┴──> failed
-                └────────────────────────────────────────> cancelled
+preflight → queued → running → output_validating → pending_review → confirmed
+                │              │                 │              ├→ continuing → completed
+                │              │                 │              └→ completed
+                │              │                 └→ rejected
+                ├──────────────┴────────────────────────────────→ failed
+                └───────────────────────────────────────────────→ cancelled
 ```
 
 状态规则：
 - `preflight` 失败通常留在独立 Preflight；若运行已原子创建，则只能转 `failed`
 - `queued → running` 需要 `runtime_load_receipt` 全部 required 项成功
-- `running → awaiting_review` 需要规范化结果完整校验并原子持久化
-- `awaiting_review → continuing` 由用户确认且工作流仍有后续步骤触发
+- `running → output_validating → pending_review` 需要规范化结果完整校验并原子持久化
+- `pending_review → confirmed → continuing/completed` 由用户确认触发；`pending_review → rejected` 终止当前 run，重新生成必须新建 run
+- `pending_review` 是唯一 API 审阅态；`awaiting review` 仅可作为 UI 文案
 - 任一终态不得恢复为非终态；重试创建新 run
 
 ### Step 3: 实现幂等启动
@@ -116,12 +122,12 @@ async def retry_run(
 ) -> WorkflowRun:
     """
     默认重试：
-    1. 读取原 run 的来源字段（release、Desk snapshot、runtime lock）
+    1. 读取原 run 的来源字段（release、Deck runtime snapshot、runtime lock）
     2. 创建新 run，设置 retry_of_run_id = 原 run id
-    3. 继承原 release、workflow ref、Desk snapshot 和 runtime lock
+    3. 继承原 release、workflow ref、Deck runtime snapshot 和 runtime lock
     4. 新 run 走完整 preflight → run 流程
 
-    若用户修改输入、选择其他 plugin/version、要求刷新 Desk snapshot 或变更能力，
+    若用户修改输入、选择其他 plugin/version、要求刷新 Deck runtime snapshot 或变更能力，
     属于新运行，不得伪装成同快照重试。
     """
 ```
@@ -136,7 +142,7 @@ CREATE TABLE IF NOT EXISTS workflow_runs (
     deck_plugin_id TEXT NOT NULL,
     deck_plugin_version TEXT NOT NULL,
     workflow_definition_ref TEXT NOT NULL,
-    desk_config_snapshot_id TEXT NOT NULL,
+    deck_runtime_snapshot_id TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'preflight',
     failed_step TEXT,
     error_code TEXT,
@@ -174,7 +180,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_retry
 - `workflow_run_id` 及所有来源/锁定字段创建后不可变
 - 运行当前 `status`、`failed_step`、`error_code` 可以随合法状态流转更新
 - 每次变化必须追加不可变事件
-- Deck binding、安装默认版本、Desk 当前配置的后续变化不得反写历史 run
+- Deck binding、安装默认版本、Deck 当前运行配置的后续变化不得反写历史 run
 
 ## 5. 涉及文件路径
 
@@ -200,7 +206,7 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_retry
 
 - **前置依赖**: `DECK-006`（Preflight）
 - **下游依赖**: `DECK-008`, `DECK-009`, `DECK-013`, `DECK-015`
-- 需要与 Desk snapshot、ClaudeAgent session 紧密集成
+- 需要与 Deck runtime snapshot、ClaudeAgent session 紧密集成；只保存受控快照 ID 与脱敏摘要
 
 ## 8. 测试策略
 
@@ -222,9 +228,9 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_retry
 - [ ] 状态机只允许规范流转；终态不可复活
 - [ ] 启动请求携带 `idempotency_key`；同 key、同 binding、同 input 返回原 run
 - [ ] 同 key 不同语义返回 `409 IDEMPOTENCY_CONFLICT`
-- [ ] 重试创建新 run，设置 `retry_of_run_id`，继承原 release/Desk snapshot/runtime lock
-- [ ] 改选插件/升级/Desk 变更属于新运行，不得伪装成重试
-- [ ] 运行来源、runtime lock/load receipt、Desk snapshot 创建后不可变
+- [ ] 重试创建新 run，设置 `retry_of_run_id`，继承原 release/Deck runtime snapshot/runtime lock
+- [ ] 改选插件、升级或 Deck 运行配置变更属于新运行，不得伪装成重试
+- [ ] 运行来源、runtime lock/load receipt、Deck runtime snapshot 创建后不可变
 - [ ] 单元测试覆盖状态流转、幂等启动、重试、并发创建
 
 ## 10. 风险提示
@@ -236,13 +242,32 @@ CREATE INDEX IF NOT EXISTS idx_workflow_runs_retry
 | 重试继承来源时参数被篡改 | 中 | 来源字段从原 run 复制，不接收客户端提交 |
 | 并发创建导致重复 run | 中 | 数据库唯一约束 `UNIQUE(workspace_id, created_by, idempotency_key)` |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/workflow_run.py`（仅新增 Workflow Run 模型与合法状态定义）
+- `backend/services/workflow/run_service.py`（仅新增创建、状态流转、幂等与重试服务）
+- `backend/database.py`（仅增量追加 `workflow_runs` 表及其幂等初始化）
+- `backend/tests/test_workflow_run.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、ClaudeAgent session/runtime 实现与 Deck Plugin binding/Preflight 服务
+- 除上述 4 个路径以外的任何实现、测试、依赖锁或部署配置
+- `backend/database.py` 中与 `workflow_runs` 无关的既有表或初始化逻辑
+- 借本 task 改绑历史来源、复用终态 run、实现 Reconcile/Session 或扩大客户端可提交来源字段
+
+## 12. 命名隔离声明
 
 - Run 模型保留 SUO-198 字段不变
 - 新增字段使用 `deck_plugin_*`、`runtime_plugin_*`、`workflow_*` 前缀
 - `agent_session_id` 为 ClaudeAgent 会话标识
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-019`: 安全撤销是否强制终止活动 run —— 影响 `CANCELLED` 状态的处理
 - `DECK-020`: Voice chat 到 run session 的可见 UX —— 影响 `source_voice_thread_id` 的使用

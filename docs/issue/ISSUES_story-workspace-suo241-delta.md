@@ -16,7 +16,7 @@
 - 来源设计稿：
   - 主设计稿：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`（DEC-020～DEC-025）
   - 稳定基线设计稿：`docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
-  - Deck 集成 Delta：`docs/design/story-workspace/story-workspace-deck-integration-delta.md`（DEC-009～DEC-019）
+  - Deck 集成 Delta：`docs/design/deck/deck-integration-delta.md`（DEC-009～DEC-019）
   - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
 - 生成 Agent：`IssueDispatcher`
 - 所属流水线阶段：`issue`
@@ -37,7 +37,7 @@
 
 - 主设计稿：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`
 - 稳定基线设计稿：`docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
-- Deck 集成 Delta：`docs/design/story-workspace/story-workspace-deck-integration-delta.md`
+- Deck 集成 Delta：`docs/design/deck/deck-integration-delta.md`
 - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
 
 - 本清单覆盖范围：
@@ -297,7 +297,7 @@
 
 - 备注：
   - PromptComposer 不是"新建故事"按钮，而是创作意图输入区
-  - 未选择 Deck 插件或 Desk 配置不完整时禁止提交
+  - 未选择 Deck 插件或 Deck 运行配置不完整时禁止提交
 
 ---
 

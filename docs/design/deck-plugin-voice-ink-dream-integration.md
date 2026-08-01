@@ -20,7 +20,7 @@ SUO-198 已在 story-workspace 设计中冻结了 Deck 工作流的运行追溯�
 
 - `docs/design/story-workspace/story-workspace-prd.md`
 - `docs/design/story-workspace/story-workspace-layout-design.md`
-- `docs/design/story-workspace/story-workspace-deck-integration-delta.md`
+- `docs/design/deck/deck-integration-delta.md`
 - `docs/design/plugin-remote-interaction.md`
 - `docs/design/deck-claude-agent.md`
 
@@ -928,7 +928,7 @@ Paperclip 的当前 UI/API/spec 仍处 alpha/演进状态，且类型、注释�
 
 - **初始版本 / SUO-218（2026-08-01）**：新建本文；此前无同主题稳定主文档。
 - 相对 SUO-198：保留全部稳定 Workflow Run 字段和历史不可改绑规则；新增发布 runtime lock、materialization、load receipt、权限交集和运行 session 语义。
-- 相对 `story-workspace-deck-integration-delta.md`：把 Deck/Ink Dream/Agent 边界细化为 Deck Plugin manifest、Deck 运行配置、生命周期、选择、preflight 和错误/API/事件合同。
+- 相对 `docs/design/deck/deck-integration-delta.md`：把 Deck/Ink Dream/Agent 边界细化为 Deck Plugin manifest、Deck 运行配置、生命周期、选择、preflight 和错误/API/事件合同。
 - 相对 `plugin-remote-interaction.md`：把“声明意图 + headless reconcile / CLI 备选 / 热刷新限制 / settings-first”落到 Deck release 与 Workflow Run 的端到端时序。
 - 相对 `deck-claude-agent.md`：保留 Voice chat/thread/Memory 能力，但规定 workflow run 使用独立 run-scoped session，不把内联聊天状态当运行审计。
 - 相对 Paperclip Settings → Plugins：复用列表、详情、能力、健康、配置、启停、升级和错误体验；明确 Paperclip worker、Deck workflow、Claude Code runtime 是不同模型。

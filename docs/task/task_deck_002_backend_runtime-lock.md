@@ -17,7 +17,7 @@ Deck Runtime Plugin Lock 生成与不可变合同
 
 ## 3. 任务目标
 
-实现 Deck Plugin 发布时生成 `DeckRuntimePluginLock` 的能力。将 manifest 中声明的 Claude Code Plugin 版本约束解析为精确版本和制品摘要，生成不可变的 runtime lock。确保同一 `deck_plugin_id + deck_plugin_version` 的工作流定义、运行时锁、能力请求、输入/输出 schema 和 Desk 合同发布后不可变。
+实现 Deck Plugin 发布时生成 `DeckRuntimePluginLock` 的能力。将 manifest 中声明的 Claude Code Plugin 版本约束解析为精确版本和制品摘要，生成不可变的 runtime lock。确保同一 `deck_plugin_id + deck_plugin_version` 的工作流定义、运行时锁、能力请求、输入/输出 schema 和 Deck 运行配置合同发布后不可变。
 
 ## 4. 实现步骤
 
@@ -171,12 +171,32 @@ draft → validating:
 | 同一版本多次发布（并发） | 中 | 数据库唯一约束 `UNIQUE(deck_plugin_id, deck_plugin_version)` + 事务保护 |
 | 历史制品清理导致不可复现 | 中 | 引用计数机制；`DECK-017` 决策单确认留存策略 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/deck_plugin.py`（仅追加 RuntimePluginLockEntry / DeckRuntimePluginLock 模型）
+- `backend/services/deck_plugin/lock_generator.py`（仅新增 lock 生成器）
+- `backend/services/deck_plugin/release_service.py`（仅集成发布时 lock 生成）
+- `backend/database.py`（仅增量追加 `deck_runtime_plugin_locks` 表及其幂等初始化）
+- `backend/tests/test_deck_plugin_lock.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、marketplace/制品存储的具体实现与 Paperclip Plugin worker 实现
+- 除上述 5 个路径以外的任何实现、测试、依赖锁或部署配置
+- 允许文件中与 runtime lock、发布原子关联和不可变性校验无关的既有逻辑
+- 借本 task 改写 manifest 合同、Installation 生命周期或其他 task 的责任范围
+
+## 12. 命名隔离声明
 
 - `DeckRuntimePluginLock` 中的字段使用 `runtime_plugin_*` 前缀
 - 内部条目使用 `claude_code_plugin_id`、`resolved_version`、`artifact_digest`
 - 禁止与 `deck_plugin_*` 字段混用
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-017`: 生产 marketplace 签名、digest 与留存能力 —— 默认假设：无不可变 digest 不得 production-ready；阻塞生产部署前必须解决

@@ -29,7 +29,7 @@
 | 安全撤销 | 阻止 | 取消 | 可以强制取消，记录 `SECURITY_REVOCATION` | 来源保留，制品使用受限 |
 | 升级中 | 旧 ready 可用，新版本阻止 | 按已锁旧版本执行 | 按已锁版本继续 | 不变 |
 | 物化失败 | 阻止依赖该制品的新 run | 不进入 session | 不影响已经成功加载的会话，除非安全策略要求 | 不变 |
-| Desk 当前配置修改 | 新 preflight 取新 snapshot | 已锁 snapshot 不变 | 不变 | 不变 |
+| Deck 当前运行配置修改 | 新 preflight 取新 snapshot | 已锁 snapshot 不变 | 不变 | 不变 |
 
 ### Step 2: 实现撤销服务
 
@@ -192,12 +192,31 @@ async def rollback_installation(
 | 回滚到已不兼容的旧版本 | 中 | 回滚前执行兼容性检查 |
 | 紧急撤销误触发 | 高 | 多重确认；仅特定角色可执行 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/services/deck_plugin/revocation_service.py`（仅新增禁用/撤销与审计编排）
+- `backend/services/deck_plugin/degradation_service.py`（仅新增 manifest 声明范围内的降级判定）
+- `backend/services/deck_plugin/rollback_manager.py`（仅新增显式回滚与兼容性前置检查）
+- `backend/tests/test_revocation_rollback.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、安全策略/身份服务内部实现与 Workflow Run 状态机实现
+- 除上述 4 个路径以外的任何实现、测试、依赖锁或部署配置
+- 未在 manifest 声明的自动降级、required 插件/权限/安全撤销场景的降级
+- 借本 task 重写历史 run、直接删除审计来源或扩大紧急撤销角色权限
+
+## 12. 命名隔离声明
 
 - 撤销等级：`DISABLE`、`REVOKE`、`EMERGENCY`
 - 审计事件：`workflow.run.security_cancelled`
 - 降级标识：`degraded_mode_id`
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-019`: 安全撤销是否强制终止活动 run —— 默认假设：普通禁用不终止；安全撤销允许强制终止并审计。本 task 实现该默认假设，待决策单确认后更新策略。

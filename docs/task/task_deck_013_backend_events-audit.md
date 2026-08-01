@@ -102,7 +102,7 @@ class EventConsumer:
 - 用户敏感信息（邮箱、密码等）
 
 允许包含：
-- ID 引用（`desk_config_snapshot_id` 而非内容）
+- ID 引用（`deck_runtime_snapshot_id` 而非内容）
 - 状态摘要（`load_status: loaded` 而非详细日志）
 - 非敏感元数据（版本号、时间戳、actor ID）
 
@@ -192,11 +192,31 @@ CREATE INDEX IF NOT EXISTS idx_events_correlation
 | 敏感信息泄露到事件负载 | 高 | 脱敏规则自动化检查；代码审查 |
 | 事件表无限增长 | 中 | 留存策略；分区/归档；`DECK-017` 决策单确认 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/events.py`（仅新增统一事件 envelope 与规范事件模型）
+- `backend/services/events/event_emitter.py`（仅新增事件发射与持久化衔接）
+- `backend/services/events/event_consumer.py`（仅新增去重与 aggregate 顺序处理）
+- `backend/database.py`（仅增量追加 `events` 表及其幂等初始化）
+- `backend/tests/test_events.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、消息中间件基础设施和其他业务域事件生产者/消费者实现
+- 除上述 5 个路径以外的任何实现、测试、依赖锁或部署配置
+- `backend/database.py` 中与 `events` 表无关的既有表或初始化逻辑
+- 在事件 payload 写入 prompt、secret、完整 settings，或借本 task 改写 Workflow Run / Session 业务状态机
+
+## 12. 命名隔离声明
 
 - 事件类型使用点分命名空间（`deck_plugin.release.published`）
 - 聚合 ID 根据聚合根类型区分（release ID、installation ID、run ID）
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-017`: 制品留存策略 —— 影响事件数据留存策略

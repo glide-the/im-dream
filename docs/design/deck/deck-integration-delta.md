@@ -1,11 +1,14 @@
-# Story Workspace × Deck × Claude Agent 集成设计 Delta
+# Deck Integration Canonical 设计 Delta
 
-> **Design ID**: `design_001_story-workspace-prd.delta.deck-integration`
-> **关联 Issue**: `SUO-215`、`SUO-236`
+> **Design ID**: `design_001_deck-integration-delta`
+> **关联 Issue**: `SUO-215`、`SUO-236`、`SUO-250`
 > **父级裁决**: `SUO-235`
-> **基线**: `story-workspace-prd.md`、`story-workspace-layout-design.md`
+> **基线**: `docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
 > **最后更新**: 2026-08-01
 > **设计阶段**: `design → issue → task → stage`
+> **当前 canonical 真相源**: `docs/design/deck/deck-integration-delta.md`
+
+本文是 Deck integration 的唯一当前设计真相源。设计稿已从原 story-workspace 子目录迁移至 Deck canonical 目录；原位置不保留副本或重定向，下游必须只读消费本路径。Git 历史与对应 Issue 线程保留迁移追溯。
 
 ---
 
@@ -32,7 +35,7 @@ Story Workspace 的稳定基线把核心流程定义为“Claude Agent 产出 �
 
 - `SUO-235` 的 Deck-only 裁决优先于本文早期的双域默认假设。
 - 早期设计中的配置版本、不可变快照、secret-ref、权限、preflight、审计和回滚合同全部保留，但归属 Deck，并采用本文件定义的类型、字段与错误码。
-- `DEC-009`～`DEC-011` 按当前语义修订；`DEC-019` 记录本次统一裁决。
+- `DEC-009`～`DEC-011` 按当前语义修订；`DEC-019` 记录统一 Deck-only 裁决，`DEC-026` 记录 canonical 真相源迁移。
 - 下游只能消费本文件及两份已同步基线，不得拼接被覆盖的旧所有权模型。
 
 ## 2. 范围界定
@@ -302,13 +305,16 @@ preflight → queued → running → output_validating → pending_review → co
 | `DEC-015` | 2026-08-01 | 既有下游产物只接受后续增量传播，不在本 design delta 中改写 | 保护流水线边界 |
 | `DEC-016` | 2026-08-01 | 保持数据表、无平台视频、桌面端、无完整第三方插件运行时 | 控制范围 |
 | `DEC-019` | 2026-08-01 | 按 `SUO-235` 裁决统一 Deck 术语，并将既有配置/快照/权限/审计合同归入 Deck | 本文件、PRD、layout 与 Deck Plugin 主设计同步修订 |
+| `DEC-026` | 2026-08-01 | `docs/design/deck/deck-integration-delta.md` 是 Deck integration 的唯一当前 canonical 真相源；原 story-workspace 子目录不再承载该设计 | 下游引用统一到 Deck 路径，禁止并行主文档与静默回退 |
 
 ## 14. 增量变更说明
 
 - **Delta 1 / SUO-215（2026-08-01）**：首次补充工作流选择、Agent 配置、binding/run、权限、错误和下游影响。
 - **Delta 2 / SUO-236（2026-08-01）**：执行 `SUO-235` 的 Deck-only 裁决；重写所有权、时序、数据模型、状态、错误码、权限、依赖和决策记录。
+- **Delta 3 / SUO-250（2026-08-01）**：将本文迁移至 Deck canonical 目录，并同步标题、Design ID、当前真相源声明与 design 内引用；原位置删除，不保留并行副本。
 - 运行配置、不可变快照、secret-ref、preflight、权限交集、审计、重试和回滚合同均保留，统一改为 Deck ownership 和规范字段。
-- 文件与 Design ID 同步改为 `story-workspace-deck-integration-delta.md` / `design_001_story-workspace-prd.delta.deck-integration`；旧文件不再是设计真相源。
+- canonical 文件与 Design ID 统一为 `docs/design/deck/deck-integration-delta.md` / `design_001_deck-integration-delta`；所有下游只能消费这一当前真相源。
+- 本次迁移只改变设计稿定位和引用，不改变 Deck-only 的运行配置、不可变快照、secret-ref、权限、preflight、审计或回滚语义，也不引入独立业务域。
 
 ## 15. 阻塞或澄清说明
 

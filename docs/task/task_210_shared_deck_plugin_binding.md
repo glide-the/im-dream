@@ -24,7 +24,7 @@ DECK-005: Deck 创建/编辑的插件选择与版本绑定（Shared — **TaskDe
 | Design Issue | `SUO-218` | Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计 |
 | Issue 清单 | `SUO-223` | Deck Plugin 前端/后端 Issue 拆解 |
 | 上游 design | `docs/design/deck-plugin-voice-ink-dream-integration.md` | 主设计稿 |
-| 上游 delta | `docs/design/story-workspace/story-workspace-deck-integration-delta.md` | Story Workspace 增量上下文 |
+| 上游 delta | `docs/design/deck/deck-integration-delta.md` | Deck integration 唯一当前 canonical |
 
 ---
 
@@ -89,7 +89,7 @@ created_at / updated_at
 1.4 实现 selection validation 逻辑（快速校验）：
 - release 为 `published`/策略允许的 `deprecated`
 - installation 为 `ready`
-- 静态兼容性通过（host API、schema、Desk contract）
+- 静态兼容性通过（host API、schema、Deck runtime contract）
 - 用户有选择权限
 - 已知 runtime readiness（不替代 preflight 的权威物化检查）
 

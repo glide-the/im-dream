@@ -201,7 +201,7 @@ Story Workspace 审阅面板（Review Panel）与审阅操作实现
 |---|---|---|
 | 确认端点 | `POST /{type}/:id/confirm`（无版本校验） | 追加 `workflow_run_id` + `review_version` 参数 |
 | Gate 联动 | 无 | Review Panel 操作需与 ReviewGate 状态同步 |
-| 来源展示 | 基线（无版本溯源） | 追加运行 ID 和审阅版本展示（与 `task_226-FE-002` 协同） |
+| 来源展示 | 基线（无版本溯源） | 追加运行 ID 和审阅版本展示（与 `SUO-226-FE-002` Issue gate 协同，定义见 `docs/issue/ISSUES_story-workspace.md`） |
 | 过期处理 | 无 | 版本过期时展示刷新提示 |
 
 **协同规则**：

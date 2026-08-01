@@ -25,7 +25,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 | Issue 清单 | `SUO-223` | Deck Plugin 前端/后端 Issue 拆解 |
 | 上游 design | `docs/design/deck-plugin-voice-ink-dream-integration.md` §13.1 | 前端负责范围 |
 | 上游 layout | `docs/design/story-workspace/story-workspace-layout-design.md` §2.3, §4.5 | 既有布局设计 |
-| 上游 delta | `docs/design/story-workspace/story-workspace-deck-integration-delta.md` §7.2 | 工作流运行状态 |
+| 上游 delta | `docs/design/deck/deck-integration-delta.md` §7.2 | 工作流运行状态 |
 
 ---
 
@@ -33,11 +33,11 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 
 实现 story-workspace 中工作流执行状态的完整展示和错误恢复体验：
 
-1. Dashboard/创作入口展示工作流上下文条（Deck 插件、Desk 状态、运行进度）。
-2. 覆盖所有运行状态：未选择、不可用、Desk 未就绪、预检中、运行中、待审阅、失败、完成。
+1. Dashboard/创作入口展示工作流上下文条（Deck 插件、Deck 运行配置状态、运行进度）。
+2. 覆盖所有运行状态：未选择、不可用、Deck 运行配置未就绪、预检中、运行中、待审阅、失败、完成。
 3. Preflight 进度可观察，失败时展示结构化错误和恢复入口。
 4. 运行中展示步骤进度与 `workflow_run_id`。
-5. 历史剧本可追溯来源（`workflow_run_id`、`deck_plugin_version`、`desk_config_snapshot_id`）。
+5. 历史剧本可追溯来源（`workflow_run_id`、`deck_plugin_version`、`deck_runtime_snapshot_id`）。
 6. 结构化错误码映射为用户可理解的恢复动作。
 
 本 task 与 story-workspace 既有布局、审阅 UI 增量集成，不推翻既有设计。
@@ -63,18 +63,18 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  🧩 悬疑短剧工作流 v3.1.0  │  Desk: ✅ Ready  │  运行: ⏳ 预检中...    │
+│  🧩 悬疑短剧工作流 v3.1.0  │  Deck 配置: ✅ Ready │ 运行: ⏳ 预检中...  │
 │  [更换工作流]              │  [查看配置]      │  [取消]               │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
 1.2 展示内容：
 - 当前绑定的 Deck Plugin：`display_name` + `deck_plugin_version`
-- Desk 就绪状态：基于 `desk_config_snapshot_id` 的校验结果
+- Deck 运行配置就绪状态：基于 `deck_runtime_snapshot_id` 的校验结果
 - 当前运行状态：
   - 未选择插件 → "未选择工作流"
   - 插件不可用 → "工作流不可用"
-  - Desk 未就绪 → "配置未就绪"
+  - Deck 运行配置未就绪 → "配置未就绪"
   - 预检中 → "预检中…" + 进度
   - 运行中 → "运行中…" + 步骤进度
   - 待审阅 → "待审阅"
@@ -83,7 +83,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 
 1.3 操作按钮（按状态条件展示）：
 - 「更换工作流」→ 跳转到 Deck 选择
-- 「查看配置」→ 展示 Desk 配置摘要（脱敏）
+- 「查看配置」→ 展示 Deck 运行配置摘要（脱敏；不展示 prompt、secret 或完整配置）
 - 「开始运行」→ 触发 preflight
 - 「取消」→ 取消当前运行（queued/running 时）
 - 「重试」→ 按原版本创建新 run
@@ -97,9 +97,9 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
   1. 身份、workspace、Deck 使用权限
   2. binding revision 与精确 release 可用性
   3. manifest/hash、workflow definition、输入/输出 schema
-  4. host、ClaudeAgent、Claude Code、Desk contract 兼容性
+  4. host、ClaudeAgent、Claude Code、Deck runtime contract 兼容性
   5. 能力交集与来源策略
-  6. 创建或复用不可变 `desk_config_snapshot_id`
+  6. 通过 Deck 创建或复用不可变 `deck_runtime_snapshot_id`
   7. 验证 runtime lock 的 declared/materialized/digest/load smoke
   8. 计算输入 hash、过期时间并签发 `preflight_token`
 
@@ -120,10 +120,10 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 |---|---|---|
 | `workflow_unselected` | 空状态卡片 | "选择工作流以开始创作" + 选择入口 |
 | `workflow_unavailable` | 警告卡片 | "当前工作流不可用" + reason + 更换入口 |
-| `desk_config_not_ready` | 警告卡片 | "Desk 配置未就绪" + 配置 owner + 修复入口 |
+| `deck_runtime_config_not_ready` | 警告卡片 | "Deck 运行配置未就绪" + Deck owner + 修复入口 |
 | `preflight_checking` | 进度面板 | PreflightProgressPanel |
 | `running` | 运行面板 | 步骤进度条、当前步骤、已运行时间、`workflow_run_id` |
-| `awaiting_review` | 成功面板 | 结果摘要 + 「开始审阅」按钮 |
+| `pending_review` | 成功面板 | 结果摘要 + 「开始审阅」按钮（“待审阅”仅为 UI 文案） |
 | `failed` | 错误面板 | 失败步骤、error_code、恢复动作（重试/更换/报告） |
 | `completed` | 完成面板 | 结果摘要 + 来源追溯 |
 
@@ -146,12 +146,14 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 | 错误码 | 用户可见文案 | 恢复动作 |
 |---|---|---|
 | `WORKFLOW_SELECTION_REQUIRED` | "请先选择工作流插件" | 「选择工作流」按钮 |
-| `PLUGIN_VERSION_UNAVAILABLE` | "工作流版本不可用" | 「更换版本」按钮 |
-| `DESK_CONFIG_INVALID` | "Desk 配置缺失或未激活" | 展示配置 owner + 「查看配置」 |
-| `DESK_UNAVAILABLE` | "Desk 暂时不可访问" | 「重试」按钮（保留输入） |
+| `DECK_PLUGIN_UNAVAILABLE` | "工作流版本不可用" | 「更换版本」按钮 |
+| `DECK_RUNTIME_CONFIG_INVALID` | "Deck 运行配置缺失、未激活或过期" | 展示 Deck owner + 「查看配置」 |
+| `DECK_RUNTIME_CONFIG_INCOMPATIBLE` | "Deck 运行快照合同不兼容" | 「选择兼容配置或版本」 |
+| `DECK_RUNTIME_CONFIG_UNAVAILABLE` | "Deck 运行配置暂时不可访问" | 「重试」按钮（保留输入并沿用幂等语义） |
 | `WORKFLOW_PERMISSION_DENIED` | "权限不足" | 「申请授权」或「选择其他插件」 |
 | `AGENT_EXECUTION_FAILED` | "运行失败" | 「重试」按钮（同版本新 run） |
-| `OUTPUT_VALIDATION_FAILED` | "结果格式不符合预期" | 「重试」或「更换工作流」 |
+| `OUTPUT_CONTRACT_INVALID` | "结果格式不符合预期" | 「重试」或「更换工作流」 |
+| `CONFIG_VERSION_DRIFT` | "配置版本已变化" | 保持已锁来源或由用户显式升级后创建新运行 |
 | `RUNTIME_PLUGIN_NOT_READY` | "运行时插件未就绪" | 「等待物化」或「联系管理员」 |
 | `BINDING_REVISION_CONFLICT` | "工作流选择已被修改" | 「刷新」按钮 |
 | `IDEMPOTENCY_CONFLICT` | "重复请求" | 「查看运行状态」 |
@@ -165,7 +167,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 
 4.3 重试流程：
 - 点击「重试」→ 携带 `idempotency_key` 创建新 run
-- 默认沿用原 `deck_plugin_version` + `desk_config_snapshot_id`
+- 默认沿用原 `deck_plugin_version` + `deck_runtime_snapshot_id` + `runtime_plugin_lock_id`
 - 显示新 `workflow_run_id`
 
 ### 步骤 5：历史来源追溯
@@ -173,7 +175,8 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 5.1 在故事/角色/场景数据表和 Review Panel 中展示来源：
 - `workflow_run_id`（可点击跳转运行详情）
 - `deck_plugin_id` + `deck_plugin_version`
-- `desk_config_snapshot_id`（脱敏摘要）
+- `deck_runtime_profile_id`（仅 ID / 版本摘要）
+- `deck_runtime_snapshot_id`（受控引用 + 脱敏摘要）
 - 生成时间
 - 运行状态（完成/失败）
 
@@ -293,12 +296,12 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 
 ## 9. 完成标志
 
-- [ ] Dashboard 工作流上下文条展示 Deck 插件名称/版本、工作流摘要、Desk 就绪标记
-- [ ] 各状态（未选择/不可用/Desk 未就绪/预检中/运行中/待审阅/失败/完成）均有明确 UI 表现
+- [ ] Dashboard 工作流上下文条展示 Deck 插件名称/版本、工作流摘要、Deck 运行配置就绪标记
+- [ ] 各状态（未选择/不可用/Deck 运行配置未就绪/预检中/运行中/待审阅/失败/完成）均有明确 UI 表现
 - [ ] Preflight 进度可观察（8 步检查，选择器只读 + Loading）
 - [ ] 运行中展示步骤进度与 `workflow_run_id`
 - [ ] 失败状态展示失败步骤/错误摘要和恢复动作
-- [ ] 历史剧本可追溯到 `workflow_run_id`、`deck_plugin_version` 与 `desk_config_snapshot_id`
+- [ ] 历史剧本可追溯到 `workflow_run_id`、`deck_plugin_version`、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`
 - [ ] 结构化错误码映射为用户可理解的恢复入口
 - [ ] 单元测试/E2E 测试覆盖各状态渲染、错误恢复交互
 - [ ] 与 story-workspace 既有布局、审阅 UI 增量集成，不推翻既有设计

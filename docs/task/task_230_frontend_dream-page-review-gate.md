@@ -46,7 +46,7 @@ Story Workspace Dream 页面（`StoryWorkspaceDreamPage`）与审阅 Gate（`Sto
 - 位置：`frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
 - 组合既有 Dashboard 概览能力（统计卡片、待审阅快捷入口、已确认列表）
 - 在 Dashboard 内容基础上追加：
-  - `StoryWorkspaceWorkflowContextBar`（来自 `task_226_frontend_workflow-context-bar` 或等效实现）
+  - `StoryWorkspaceWorkflowContextBar`（来自 `task_213_frontend_story_workspace_status.md` 或与 `SUO-226-FE-001` 对齐的等效实现）
   - `StoryWorkspaceReviewGate`（本任务 Step 2）
   - 产出数据表（复用 `StoryWorkspaceStoryTable` 等既有表格组件）
 
@@ -55,7 +55,7 @@ Story Workspace Dream 页面（`StoryWorkspaceDreamPage`）与审阅 Gate（`Sto
 ┌─ AppHeader：Dream（选中）────────────────────────────────────────────────────┐
 ├──────────────┬────────────────────────────────────────────┬─────────────────┤
 │ StoryWorkspace│ Dream / 创作工作流                         │ StoryWorkspace  │
-│ Sidebar       │ [Deck v3] [Desk 已就绪] [run id]           │ Review Panel    │
+│ Sidebar       │ [Deck v3] [Deck 配置已就绪] [run id]       │ Review Panel    │
 │               │                                            │                 │
 │ 概览          │ StoryWorkspaceReviewGate                   │ 来源/版本       │
 │ 故事          │ [✓ Agent 产出]─[✓ 页面渲染]─[审阅中]─[锁]  │ 完整产出        │
@@ -146,7 +146,7 @@ interface StoryWorkspaceState {
 **复用文件**（只读）：
 - `frontend/src/components/story-workspace/review/StoryWorkspaceReviewPanel.tsx` — 基线审阅面板（`task_202d`）
 - `frontend/src/components/story-workspace/table/StoryWorkspaceStoryTable.tsx` — 基线表格（`task_202c`）
-- `frontend/src/components/story-workspace/workflow/StoryWorkspaceWorkflowContextBar.tsx` — 工作流上下文条（`task_226`）
+- `frontend/src/components/story-workspace/workflow/StoryWorkspaceWorkflowContextBar.tsx` — 工作流上下文条（`task_213_frontend_story_workspace_status.md`）
 - `frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx` — Dashboard 基线（`task_202e`）
 
 ---
@@ -180,7 +180,7 @@ interface StoryWorkspaceState {
 | `task_202e` (FE-005 Dashboard) | `SUO-201-FE-005` | ✅ 基线稳定 | 提供 Dashboard 概览能力；本任务组合为 Dream 页面 |
 | `task_202f` (FE-006 状态组件) | `SUO-201-FE-006` | ✅ 基线稳定 | 提供空态/加载态组件 |
 | `task_230_frontend_dream-nav-item` | `SUO-230-FE-001` | ⏳ 并行 | 提供 canonical 路由配置 |
-| `task_226_frontend_workflow-context-bar` | `SUO-226-FE-001` | ⏳ 需先完成 | 提供 Deck 工作流上下文条；若尚未完成，使用占位组件 |
+| `task_213_frontend_story_workspace_status` | `DECK-012` / `SUO-226-FE-001` 传播合同 | ⏳ 需先完成 | 提供 Deck 工作流上下文条；若实现尚未完成，使用相同字段的占位组件 |
 | `SUO-230-BE-001` (审阅 gate 服务端聚合) | `SUO-230-BE-001` | ⏳ 需先完成 | 提供服务端聚合 API；前端可先用 mock 数据并行开发 |
 
 **本任务被依赖**：
@@ -243,7 +243,7 @@ interface StoryWorkspaceState {
 
 | 风险 | 影响 | 缓解措施 |
 |---|---|---|
-| `task_226_frontend_workflow-context-bar` 尚未完成 | 中 | Dream 页面可先使用占位组件，待上下文条完成后替换 |
+| `task_213_frontend_story_workspace_status` 对应实现尚未完成 | 中 | Dream 页面可先使用相同字段的占位组件，待上下文条实现完成后替换 |
 | `SUO-230-BE-001` 服务端聚合 API 尚未完成 | 中 | 前端可用 mock 数据并行开发，接口确定后切换 |
 | ReviewGate 与 Review Panel 状态同步复杂 | 中 | 使用同一 Zustand store 管理，避免多源状态 |
 | 确认版本校验增加交互复杂度 | 低 | 版本过期时明确提示用户刷新，不静默失败 |
@@ -262,13 +262,13 @@ interface StoryWorkspaceState {
 - Dashboard 概览能力的复用和组合
 
 **❌ 范围外**（本 task 不实现）：
-- `StoryWorkspaceWorkflowContextBar` 组件（由 `task_226_frontend_workflow-context-bar.md` 定义）
+- `StoryWorkspaceWorkflowContextBar` 组件（由 `task_213_frontend_story_workspace_status.md` 定义）
 - 数据表格组件（由 `task_202c` 基线定义）
 - 审阅面板基线 UI（由 `task_202d` 基线定义）
 - 服务端聚合 API（由 `task_230_backend_review-gate-aggregation.md` 定义）
 - 后端确认幂等逻辑（由 `task_230_backend_review-gate-aggregation.md` 定义）
-- Agent 重新生成流程（由 `task_226_backend_agent-deck-desk-adapter.md` 定义）
-- Deck/Desk 预检逻辑（由 `task_226` 系列定义）
+- Agent 重新生成流程（由 `SUO-226-BE-005` Issue gate 定义）
+- Deck 运行配置预检逻辑（由 `task_deck_006_backend_workflow-preflight.md` 与 `SUO-226-BE-003` Issue gate 定义）
 
 ---
 
@@ -323,6 +323,6 @@ interface StoryWorkspaceState {
 |---|---|---|
 | 确认操作 | `POST /api/story-workspace/{type}/:id/confirm` | 追加 `workflow_run_id` + `review_version` 参数 |
 | Gate 联动 | 无 | Review Panel 操作需与 ReviewGate 状态同步 |
-| 来源展示 | 基线（无版本溯源） | 追加运行 ID 和审阅版本展示（与 `task_226-FE-002` 协同） |
+| 来源展示 | 基线（无版本溯源） | 追加运行 ID 和审阅版本展示（与 `SUO-226-FE-002` Issue gate 协同） |
 
 **无冲突声明**：本增量只追加参数和联动逻辑，不修改 Review Panel 基线的 UI 结构、编辑模式、驳回流程。

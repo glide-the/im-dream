@@ -15,7 +15,7 @@
 - 来源设计稿：
   - 主设计稿：`docs/design/story-workspace/story-workspace-prd.md`（DEC-009～DEC-011、**DEC-017～DEC-018**）
   - 布局设计稿：`docs/design/story-workspace/story-workspace-layout-design.md`
-  - 增量 Delta 设计稿：`docs/design/story-workspace/story-workspace-deck-integration-delta.md`
+  - 增量 Delta 设计稿：`docs/design/deck/deck-integration-delta.md`
   - **SUO-230 增量设计稿**：`docs/design/story-workspace/story-workspace-prd.md` §3.6 / `docs/design/story-workspace/story-workspace-layout-design.md` §2.4
   - 背景设计稿：`docs/CLAUDE.md`（Agent 服务集成说明）
   - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
@@ -42,7 +42,7 @@
 
 - 主设计稿：`docs/design/story-workspace/story-workspace-prd.md`
 - 重点补充设计稿：`docs/design/story-workspace/story-workspace-layout-design.md`
-- **增量 Delta 设计稿**：`docs/design/story-workspace/story-workspace-deck-integration-delta.md`
+- **增量 Delta 设计稿**：`docs/design/deck/deck-integration-delta.md`
 - **SUO-230 增量设计稿**：`docs/design/story-workspace/story-workspace-prd.md` §3.6、`docs/design/story-workspace/story-workspace-layout-design.md` §2.4
 - 关联设计稿：`docs/CLAUDE.md`（claude-agent 服务集成）
 - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
@@ -286,7 +286,7 @@
   - [ ] `StoryWorkflowBinding` 类型定义
   - [ ] `StoryWorkflowRun` 类型定义
   - [ ] `DeckPluginManifest` 摘要类型
-  - [ ] `DeskConfigSnapshot` 引用类型
+  - [ ] `DeckRuntimeSnapshot` 引用类型
   - [ ] 工作流运行状态枚举：`configuring` | `ready` | `queued` | `running` | `output_validating` | `pending_review` | `confirmed` | `rejected` | `failed` | `cancelled`
   - [ ] 错误码类型：`WORKFLOW_SELECTION_REQUIRED` | `PLUGIN_VERSION_UNAVAILABLE` | `DECK_RUNTIME_CONFIG_INVALID` | `DECK_RUNTIME_CONFIG_UNAVAILABLE` | `WORKFLOW_PERMISSION_DENIED` | `AGENT_EXECUTION_FAILED` | `OUTPUT_CONTRACT_INVALID` | `CONFIG_VERSION_DRIFT`
 - 分发去向：`@TaskDesignAgent` + `@TaskDesignAgent`
@@ -1213,7 +1213,7 @@ SUO-201-BE-003 + SUO-226-BE-004 → SUO-230-BE-001 → SUO-230-SH-001
 - **歧义点**：Deck 内部 manifest、运行配置、secret provider 的组件边界尚未冻结
 - **可能解释 A**：Deck 统一存储，内部逻辑分层（manifest / runtime config / secret）
 - **可能解释 B**：Deck 保存 manifest；运行配置和密钥引用由内部子组件管理
-- **默认采用解释**：对外保持单一 Deck API/owner，内部可按安全边界拆组件（见 `story-workspace-deck-integration-delta.md` §4.2）
+- **默认采用解释**：对外保持单一 Deck API/owner，内部可按安全边界拆组件（见 `deck-integration-delta.md` §4.2）
 - **需要确认方**：`@CEOOrchestrator` 路由产品 owner
 - **是否阻塞 task 阶段**：**否**（可采用默认假设继续，但合同冻结前使用 mock/适配层）
 - **风险**：内部拓扑泄漏为重复业务域

@@ -25,7 +25,7 @@ SUO-230-SH-001: Story Workspace 审阅 Gate 确认幂等、版本校验与防绕
 | `SUO-230-FE-002` | Dream 页面与 ReviewGate 组件 | frontend | P0 |
 | `SUO-230-BE-001` | 审阅 gate 服务端聚合与防绕过验证 | backend | P0 |
 | `SUO-201-SH-001` | 前端-后端联调：审阅工作流 E2E | shared | P0 |
-| `SUO-226-SH-002` | 端到端工作流集成 E2E（Deck→Desk→Agent→审阅） | shared | P0 |
+| `SUO-226-SH-002` | 端到端工作流集成 E2E（Deck→Agent→审阅） | shared | P0 |
 
 ---
 
@@ -128,7 +128,7 @@ SUO-230-SH-001: Story Workspace 审阅 Gate 确认幂等、版本校验与防绕
 
 6.2 重新生成：
 - 点击「沿原快照重新生成」。
-- 期望：创建新 run attempt，默认沿用原 `deck_plugin_id` + `deck_plugin_version` + `desk_config_snapshot_id`。
+- 期望：创建新 run attempt，默认沿用原 `deck_plugin_id` + `deck_plugin_version` + `deck_runtime_snapshot_id` + `runtime_plugin_lock_id`。
 - 新 run 的产出项具有新的 `workflow_run_id` 和 `review_version`。
 - 旧 run 的驳回记录保留，不被覆盖。
 
@@ -260,9 +260,9 @@ POST /api/story-workspace/workflow-runs/:id/continue
 | `task_202d_frontend_review-panel` | `SUO-201-FE-004` | ✅ 基线稳定 | 审阅面板基线 |
 | `task_202_backend_story-workspace-rest-api` | `SUO-201-BE-002` | ✅ 基线稳定 | REST API 基线 |
 | `task_203_backend_story-workspace-review-workflow` | `SUO-201-BE-003` | ✅ 基线稳定 | 审阅状态流转基线 |
-| `task_226_backend_workflow-binding-run-schema` | `SUO-226-BE-001` | ⏳ 需先完成 | workflow_run 数据模型 |
-| `task_226_backend_workflow-run-api` | `SUO-226-BE-004` | ⏳ 需先完成 | run 创建与管理 API |
-| `task_226_frontend_workflow-context-bar` | `SUO-226-FE-001` | ⏳ 需先完成 | 工作流上下文条（可用占位组件先行联调） |
+| `task_deck_007_backend_workflow-run` | `DECK-007` / `SUO-226-BE-001,004` 传播合同 | ⏳ 需先完成 | workflow run 模型、状态、幂等与重试合同 |
+| `task_deck_014_backend_api-error-codes` | `DECK-014` / `SUO-226-BE-004` 传播合同 | ⏳ 需先完成 | run API 路由与规范错误码 |
+| `task_213_frontend_story_workspace_status` | `DECK-012` / `SUO-226-FE-001` 传播合同 | ⏳ 需先完成 | 工作流上下文条（可用同字段占位组件先行联调） |
 | E2E harness 选型/引导 | — | ⚠️ Stage 前置 gate | 当前仓库未发现 Playwright / Cypress 配置；先冻结自动化或等价可追溯验证方案 |
 
 **本任务被依赖**：
@@ -405,8 +405,8 @@ test('已确认但继续失败时不回滚确认状态', async ({ page, api }) =
 - `StoryWorkspaceDreamPage` 页面实现（由 `task_230_frontend_dream-page-review-gate.md` 负责）
 - `StoryWorkspaceReviewGate` 组件实现（同上）
 - 审阅 gate 服务端聚合 API 实现（由 `task_230_backend_review-gate-aggregation.md` 负责）
-- workflow_run 数据模型实现（由 `task_226_backend_workflow-binding-run-schema.md` 负责）
-- Deck/Desk 端到端集成（由 `task_226-SH-002` 负责）
+- workflow run 数据模型、状态与幂等实现（由 `task_deck_007_backend_workflow-run.md` 负责）
+- Deck→Agent→审阅端到端集成（由 `SUO-226-SH-002` Issue gate 负责，定义见 `docs/issue/ISSUES_story-workspace.md`）
 - 单元测试（本任务专注 E2E）
 
 ---

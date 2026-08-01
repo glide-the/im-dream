@@ -41,7 +41,7 @@ class DeckPluginManifestV1(BaseModel):
     status: DeckPluginReleaseStatus  # draft/validating/published/deprecated/revoked
     workflow: WorkflowSpec
     compatibility: CompatibilitySpec
-    desk: DeskContractSpec
+    runtime_configuration: DeckPluginRuntimeConfigSpec
     capabilities: list[str]
     runtime: RuntimeSpec
     dependencies: DependenciesSpec
@@ -49,8 +49,8 @@ class DeckPluginManifestV1(BaseModel):
 
 子模型：
 - `WorkflowSpec`: `workflow_definition_ref`, `input_schema_ref`, `output_schema_ref`, `steps`
-- `CompatibilitySpec`: `deck_host_api`, `claude_agent_contract`, `claude_code`, `story_output_schema`, `desk_snapshot_contract`
-- `DeskContractSpec`: `profile_contract`, `required_config_keys`, `secret_ref_kinds`, `allow_profile_versions`
+- `CompatibilitySpec`: `deck_host_api`, `claude_agent_contract`, `claude_code`, `story_output_schema`, `deck_runtime_snapshot_contract`
+- `DeckPluginRuntimeConfigSpec`: `profile_contract`, `required_config_keys`, `secret_ref_kinds`, `allow_profile_versions`
 - `RuntimeSpec`: `claude_code_plugins`（列表，每项含 `claude_code_plugin_id`, `source_ref`, `version_constraint`, `required`, `capability_bindings`）
 - `DependenciesSpec`: `deck_plugin_releases`（列表）
 
@@ -78,10 +78,10 @@ class DeckPluginReleaseStatus(str, Enum):
 | 标识唯一性 | `deck_plugin_id` 全局稳定；组合键 `deck_plugin_id + deck_plugin_version` 唯一 | `DECK_PLUGIN_MANIFEST_INVALID` |
 | SemVer 合规 | `deck_plugin_version` 必须符合 SemVer 2.0 | `DECK_PLUGIN_MANIFEST_INVALID` |
 | 工作流引用 | `workflow_definition_ref` 必须是受控、可按版本读取的引用；禁止指向 `latest` | `DECK_PLUGIN_MANIFEST_INVALID` |
-| schema 版本 | 输入、输出和 Desk snapshot contract 必须有显式版本 | `DECK_PLUGIN_MANIFEST_INVALID` |
+| schema 版本 | 输入、输出和 Deck runtime snapshot contract 必须有显式版本 | `DECK_PLUGIN_MANIFEST_INVALID` |
 | 能力子集 | 步骤 `required_capabilities` 必须是顶层 `capabilities` 的子集 | `DECK_PLUGIN_MANIFEST_INVALID` |
 | 来源 allowlist | 生产来源必须在管理员 allowlist 中 | `DECK_PLUGIN_SOURCE_DENIED` |
-| 完整性 | manifest 禁止包含密钥明文和完整 Desk prompt | `DECK_PLUGIN_MANIFEST_INVALID` |
+| 完整性 | manifest 禁止包含密钥明文和完整 Deck 运行配置 prompt | `DECK_PLUGIN_MANIFEST_INVALID` |
 | 降级声明 | optional runtime plugin 或 degraded mode 必须显式声明 | `DECK_PLUGIN_MANIFEST_INVALID` |
 
 ### Step 4: 数据库表设计
@@ -104,7 +104,7 @@ CREATE TABLE IF NOT EXISTS deck_plugin_releases (
     output_schema_ref TEXT,
     capabilities_json TEXT,                 -- JSON 数组
     compatibility_json TEXT,                -- JSON 对象
-    desk_contract_json TEXT,                -- JSON 对象
+    deck_runtime_contract_json TEXT,        -- JSON 对象
     runtime_spec_json TEXT,                 -- JSON 对象
     dependencies_json TEXT,                 -- JSON 对象
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -174,7 +174,7 @@ CREATE INDEX IF NOT EXISTS idx_deck_plugin_releases_status
 - [ ] `deck_plugin_id` 全局稳定，`deck_plugin_version` 遵循 SemVer
 - [ ] 发布版本状态机完整，已发布版本禁止回到 `draft`
 - [ ] manifest 校验覆盖：标识唯一性、schema 结构、能力子集、来源 allowlist、完整性
-- [ ] manifest 禁止包含密钥明文和完整 Desk prompt
+- [ ] manifest 禁止包含密钥明文和完整 Deck 运行配置 prompt
 - [ ] 单元测试覆盖合法/非法 manifest、SemVer 校验、重复标识检测
 - [ ] 数据库表创建幂等，支持回滚
 
@@ -187,13 +187,33 @@ CREATE INDEX IF NOT EXISTS idx_deck_plugin_releases_status
 | 来源 allowlist 配置缺失导致所有发布被拒绝 | 中 | 默认 allowlist 包含官方 marketplace；开发环境放宽 |
 | `deck_plugin_id` 命名冲突 | 中 | 采用反向域名风格（`voice-decks.*`），校验器检查格式 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/deck_plugin.py`（仅新增本 task 的 manifest / release 模型）
+- `backend/services/deck_plugin/manifest_validator.py`（仅新增 manifest 校验器）
+- `backend/services/deck_plugin/release_service.py`（仅新增本 task 的发布版本逻辑）
+- `backend/database.py`（仅增量追加 `deck_plugin_releases` 表及其幂等初始化）
+- `backend/tests/test_deck_plugin_manifest.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、ClaudeAgent runtime 与 Paperclip Plugin worker 实现
+- 除上述 5 个路径以外的任何实现、测试、依赖锁或部署配置
+- `backend/models/deck_plugin.py` 与 `backend/database.py` 中和 manifest / release 无关的既有模型、表或初始化逻辑
+- 借本 task 进行跨模块重构、全文件格式化或清理无关代码
+
+## 12. 命名隔离声明
 
 - 所有业务工作流字段使用 `deck_plugin_*` 前缀
 - 所有 Claude Code 运行时依赖字段使用 `claude_code_plugin_*` 或 `runtime_plugin_*` 前缀
 - 禁止在跨域 API 中使用无前缀的 `plugin_id`、`plugin_version`
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-016`: Deck Plugin catalog 与 Runtime Admin 物理服务边界 —— 默认假设：保持逻辑双边界，由 gateway 聚合
 - `DECK-017`: 生产 marketplace 签名、digest 与留存能力 —— 默认假设：无不可变 digest 不得 production-ready

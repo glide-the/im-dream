@@ -21,7 +21,7 @@
   - 补充设计稿: `docs/design/plugin-remote-interaction.md`
   - 背景设计稿: `docs/design/story-workspace/story-workspace-prd.md`
   - 背景设计稿: `docs/design/story-workspace/story-workspace-layout-design.md`
-  - 背景设计稿: `docs/design/story-workspace/story-workspace-deck-integration-delta.md`
+  - 背景设计稿: `docs/design/deck/deck-integration-delta.md`
   - 参考设计稿: `docs/design/deck-claude-agent.md`
 - 生成 Agent: `IssueDispatcher`
 - 所属流水线阶段: `issue`
@@ -46,7 +46,7 @@
 - 重点补充设计稿: `docs/design/plugin-remote-interaction.md`
 - 关联设计稿: `docs/design/story-workspace/story-workspace-prd.md`
 - 关联设计稿: `docs/design/story-workspace/story-workspace-layout-design.md`
-- 关联设计稿: `docs/design/story-workspace/story-workspace-deck-integration-delta.md`
+- 关联设计稿: `docs/design/deck/deck-integration-delta.md`
 - 参考设计稿: `docs/design/deck-claude-agent.md`
 
 - 本清单覆盖范围:
@@ -333,7 +333,7 @@
 
 - 关联路径:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §10.1, §10.2
-  - `docs/design/story-workspace/story-workspace-deck-integration-delta.md` §5.1, §7.2
+  - `docs/design/deck/deck-integration-delta.md` §5.1, §7.2
   - 后端: preflight service / token issuer
 
 - 分发去向: `@TaskDesignAgent`

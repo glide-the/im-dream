@@ -254,13 +254,33 @@ CREATE TABLE IF NOT EXISTS runtime_load_receipts (
 | 多节点场景 readiness 误报 | 高 | 默认按具体 runtime environment 判定；`DECK-018` 决策单确认后更新 |
 | `/plugin` 文本被误用 | 高 | 代码审查 + 测试断言：任何路径不得发送 `/plugin install` 文本 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/runtime_plugin.py`（仅新增 Runtime Plugin 三维状态与 load receipt 模型）
+- `backend/services/runtime_plugin/reconcile_service.py`（仅新增声明式 Reconcile 与受控 CLI 备选）
+- `backend/services/runtime_plugin/materialization_manager.py`（仅新增物化幂等与原子发布管理）
+- `backend/database.py`（仅增量追加 `runtime_plugin_materializations`、`runtime_load_receipts` 表及其幂等初始化）
+- `backend/tests/test_runtime_plugin_reconcile.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、Claude Code 二进制/SDK、marketplace 服务与 Paperclip Plugin worker 实现
+- 除上述 5 个路径以外的任何实现、测试、依赖锁或部署配置
+- `backend/database.py` 中与 materialization / load receipt 无关的既有表或初始化逻辑
+- 文本 `/plugin install` 成功路径、用户输入 shell 拼接、活动 run 热刷新或借本 task 实现 Session/Workflow Run 逻辑
+
+## 12. 命名隔离声明
 
 - 物化记录使用 `runtime_materialization_id` 前缀
 - 加载回执使用 `runtime_load_receipt_id` 前缀
 - Claude Code Plugin 字段使用 `claude_code_plugin_*` 前缀
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-017`: 生产 marketplace 签名、digest 与留存能力 —— 默认假设：无 digest 不得 production-ready
 - `DECK-018`: 多节点/临时 runtime 分发策略 —— 默认假设：readiness 按具体 persistent runtime environment 判定

@@ -114,7 +114,7 @@ DECK-011: Deck Editor 插件选择与版本绑定 UI
   - installation 状态
   - runtime readiness 指示
   - capability 数量
-  - Desk contract 兼容性
+  - Deck runtime contract 兼容性
   - 不可选时展示 reason code（非敏感）
 
 3.3 版本状态映射（设计稿 §9.1）：

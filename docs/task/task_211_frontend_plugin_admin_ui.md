@@ -105,7 +105,7 @@ DECK-010: 前端管理端插件目录与安装状态 UI
 - 工作流定义引用
 - 输入/输出 schema 版本
 - 能力列表（manifest_requested）
-- Desk contract 摘要
+- Deck runtime contract 摘要
 - 运行时依赖（Claude Code Plugin 列表 + 版本约束）
 
 **Status Tab**：

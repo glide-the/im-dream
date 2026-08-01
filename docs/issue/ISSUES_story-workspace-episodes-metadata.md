@@ -37,7 +37,7 @@
 
 - 主设计稿：`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md`
 - 稳定基线设计稿：`docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
-- 关联设计稿：`docs/design/story-workspace/story-workspace-deck-desk-integration-delta.md`
+- 关联设计稿：`docs/design/deck/deck-integration-delta.md`
 - 背景设计稿：`docs/CLAUDE.md`（claude-agent 服务集成）
 - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
 
@@ -380,7 +380,7 @@
   - [ ] 运行中状态：`StoryWorkspaceRuntimeProgress` 组件展示：
     - 当前运行步骤（queued → running → output_validating → pending_review）
     - 已到达的 artifact kind（script / storyboard / prompts / review / guide）
-    - 非敏感日志摘要（不含 Desk 密钥或提示词正文）
+    - 非敏感日志摘要（不含 Deck secret 或提示词正文）
     - `workflow_run_id` 可点击复制
   - [ ] 运行失败时展示失败阶段、错误码与重试入口
   - [ ] 运行成功且校验通过后，列表自动刷新显示新 episode

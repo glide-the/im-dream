@@ -58,8 +58,8 @@ story-workspace-agent-running → story-workspace-rendering → story-workspace-
 | 依赖 | 状态 | 影响 |
 |------|------|------|
 | [SUO-226](/SUO/issues/SUO-226) 传播单 | Issue 阶段已完成；其下游实现未完成 | `task_230_backend_review-gate-aggregation` 仍依赖 `SUO-226-BE-001` / `SUO-226-BE-004` 对应的 `workflow_run` 数据模型与 API；不得把传播单 `done` 误判为实现完成 |
-| `SUO-226-SH-001` (Deck/Desk 技术传输合同) | [CLARIFICATION_NEEDED] | 合同冻结前下游使用 mock/适配层；不影响 task 文档产出 |
-| `task_226_frontend_workflow-context-bar` | 未完成 | Dream 页面可先使用占位组件，待上下文条完成后替换 |
+| `SUO-226-SH-001`（Deck 运行配置技术传输合同） | [CLARIFICATION_NEEDED] | 合同冻结前下游使用 mock/适配层；不影响 task 文档产出 |
+| `task_213_frontend_story_workspace_status` | Task 合同已产出、实现状态待 Stage/Exec 核验 | Dream 页面可按该合同复用工作流上下文条；实现未就绪时使用同字段的占位组件 |
 | E2E harness | 未发现 Playwright / Cypress 配置 | StagePlanner 需先安排独立 bootstrap，或明确采用 agent-browser 可追溯验证；task 合同不假定框架已存在 |
 
 ---
@@ -91,5 +91,5 @@ StagePlanner 应按以下依赖顺序排期：
 
 - `DEC-017`: 全局 Dream 导航以 `/story-workspace/dream` 为 canonical 入口
 - `DEC-018`: 运行级审阅 gate 在全部必审项确认前禁止继续或结束
-- `DEC-010`: 单次运行锁定 Deck 插件版本与 Desk 配置快照
+- `DEC-010`: 单次运行锁定 Deck 插件版本、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`
 - `DEC-014`: 重试默认沿用固定版本

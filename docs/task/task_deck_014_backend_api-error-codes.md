@@ -81,7 +81,7 @@ Binding 保存请求：
 }
 ```
 
-**关键约束**：响应中的来源字段由服务端从 preflight 和发布锁复制，客户端不得直接提交 `deck_plugin_version` 或 `desk_config_snapshot_id` 覆盖它们。
+**关键约束**：响应中的来源字段由服务端从 preflight 和发布锁复制，客户端不得直接提交 `deck_plugin_version` 或 `deck_runtime_snapshot_id` 覆盖它们。
 
 ### Step 4: 错误码注册表
 
@@ -132,15 +132,20 @@ ERROR_REGISTRY = {
         "recovery": "发布兼容新 release；禁止部分写入"
     },
     # 配置阶段
-    "DESK_CONFIG_INVALID": {
+    "DECK_RUNTIME_CONFIG_INVALID": {
         "phase": "config",
         "meaning": "配置缺失、未激活、过期",
-        "recovery": "Desk owner 修复并重新 preflight"
+        "recovery": "Deck owner 修复并重新 preflight"
     },
-    "DESK_CONFIG_INCOMPATIBLE": {
+    "DECK_RUNTIME_CONFIG_INCOMPATIBLE": {
         "phase": "config",
         "meaning": "snapshot contract 不兼容",
-        "recovery": "选择兼容 Desk profile/release"
+        "recovery": "选择兼容 Deck runtime profile/release"
+    },
+    "DECK_RUNTIME_CONFIG_UNAVAILABLE": {
+        "phase": "config",
+        "meaning": "Deck 配置或快照解析暂时不可用",
+        "recovery": "保留输入，以同一幂等语义重新 preflight"
     },
     # 权限阶段
     "WORKFLOW_PERMISSION_DENIED": {
@@ -193,7 +198,7 @@ ERROR_REGISTRY = {
         "recovery": "记录公开摘要，按可重试性处理"
     },
     # 结果阶段
-    "OUTPUT_VALIDATION_FAILED": {
+    "OUTPUT_CONTRACT_INVALID": {
         "phase": "result",
         "meaning": "结果不符合输出 schema",
         "recovery": "不部分提交，修复工作流/能力包后新 run"
@@ -213,6 +218,11 @@ ERROR_REGISTRY = {
         "phase": "concurrency",
         "meaning": "同 key 携带不同请求语义",
         "recovery": "客户端生成新 key 或恢复原请求"
+    },
+    "CONFIG_VERSION_DRIFT": {
+        "phase": "concurrency",
+        "meaning": "选择后执行前引用发生变化",
+        "recovery": "使用已固定版本，或由用户显式升级后创建新 binding/run"
     }
 }
 ```
@@ -296,11 +306,31 @@ ERROR_REGISTRY = {
 | 敏感信息泄露到错误响应 | 高 | 自动化脱敏；代码审查 |
 | API 版本演进导致兼容性破坏 | 中 | 路由版本化（`/api/v1/...`） |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/routers/deck_plugins.py`（仅新增本 task 的管理端逻辑路由）
+- `backend/routers/voice_decks.py`（仅新增/修改 Deck plugin options / binding / validate 路由）
+- `backend/routers/story_workspace.py`（仅新增/修改 workflow preflight / run / retry / cancel 路由）
+- `backend/services/errors/error_registry.py`（仅新增规范错误码、含义与恢复动作）
+- `backend/tests/test_api_routes.py`（仅新增本 task 的 API / 错误响应测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、gateway/物理服务部署配置与底层业务服务实现
+- 除上述 5 个路径以外的任何实现、测试、依赖锁或部署配置
+- 三个允许 router 中与 Deck Plugin、Workflow Preflight/Run 无关的既有路由或认证行为
+- 在响应中泄露堆栈、路径、prompt、secret，或借本 task 改变服务层业务合同和来源不可变规则
+
+## 12. 命名隔离声明
 
 - API 路由使用 RESTful 命名
 - 错误码使用 `SNAKE_CASE`，按阶段分组
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-016`: 物理服务边界 —— 影响路由的物理归属

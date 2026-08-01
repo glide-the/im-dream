@@ -77,7 +77,7 @@ class InstallationService:
 
 升级流程：
 1. 下载并验证目标 Deck Plugin release，不停止旧版本服务能力
-2. 对比 manifest、Desk contract、输出 schema、Claude Code Plugin lock 和能力集合
+2. 对比 manifest、Deck runtime contract、输出 schema、Claude Code Plugin lock 和能力集合
 3. 新增能力或扩大权限时进入 `upgrade_pending`，必须由管理员显式审批
 4. 目标版本 runtime lock 全部物化并完成 load smoke 后才可成为 `default_version`
 5. 已有 Deck binding 不自动迁移；仅下一次运行生效
@@ -86,7 +86,7 @@ class InstallationService:
 ### Step 4: 回滚路径
 
 回滚规则：
-- 回滚前仍需执行权限、Desk、输出 schema 和 runtime materialization 检查
+- 回滚前仍需执行权限、Deck 运行配置、输出 schema 和 runtime materialization 检查
 - 旧制品必须通过 digest 校验
 - 进行中与历史 run 不随默认版本回滚
 - 若不存在兼容旧 release，则状态为 `blocked`，不自动选择"最近可用"
@@ -193,12 +193,31 @@ CREATE INDEX IF NOT EXISTS idx_installations_status
 | 并发升级导致状态不一致 | 中 | 数据库行锁 + 乐观并发控制 |
 | 卸载后历史审计丢失 | 中 | 软删除默认；强制 purge 需证明无留存义务 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/deck_plugin.py`（仅追加 Installation 模型和 Deck 域状态枚举）
+- `backend/services/deck_plugin/installation_service.py`（仅新增 Installation 生命周期服务）
+- `backend/database.py`（仅增量追加 `deck_plugin_installations` 表及其幂等初始化）
+- `backend/tests/test_deck_plugin_installation.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、Paperclip `PluginStatus` / Plugin worker 实现和 ClaudeAgent runtime 实现
+- 除上述 4 个路径以外的任何实现、测试、依赖锁或部署配置
+- `backend/models/deck_plugin.py` 与 `backend/database.py` 中和 Installation 生命周期无关的既有模型、表或初始化逻辑
+- 借本 task 改写发布 lock、兼容性判定或 Workflow Run 状态机
+
+## 12. 命名隔离声明
 
 - Installation 记录使用 `deck_plugin_installation_id` 前缀
 - 状态枚举为 Deck 业务域独立定义，禁止直接复用 Paperclip `PluginStatus`
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-016`: 物理服务边界未定 —— 默认假设：Installation 由 Voice Decks 逻辑域提供
 - `DECK-019`: 安全撤销是否强制终止活动 run —— 默认假设：普通禁用不终止；安全撤销允许强制终止并审计

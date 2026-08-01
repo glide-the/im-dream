@@ -53,12 +53,12 @@ class AgentSessionManager:
     async def create_run_session(
         self,
         workflow_run: WorkflowRun,
-        desk_snapshot: DeskConfigSnapshot,
+        deck_runtime_snapshot: DeckRuntimeSnapshot,
         runtime_lock: DeckRuntimePluginLock
     ) -> AgentSession:
         """
         为 Workflow Run 创建隔离的 run-scoped session：
-        1. 读取已冻结的 runtime_plugin_lock_id 和 desk_config_snapshot_id
+        1. 读取已冻结的 runtime_plugin_lock_id 和 deck_runtime_snapshot_id
         2. 生成隔离的 run settings：仅包含锁定插件、批准能力和 marketplace 引用
         3. 执行 headless reconcile（同步模式，完成前不得发送第一条 query）
         4. 校验加载结果并生成 runtime_load_receipt_id
@@ -111,7 +111,7 @@ class RemoteInteractionGuard:
     ) -> GuardResult:
         """
         活跃 Workflow Run 禁止调用 apply_flag_settings/reload_plugins 改变能力集合。
-        - 检查 workflow_run.status 是否为 running/awaiting_review/continuing
+        - 检查 workflow_run.status 是否为 running/pending_review/continuing
         - 若是，拒绝并返回 RUNTIME_PLUGIN_RELOAD_UNSUPPORTED
         - 已物化插件的空闲管理会话可热刷新以做 smoke
         """
@@ -157,7 +157,7 @@ async def terminate_session(
 
 **输入**：
 - `WorkflowRun`（来自 DECK-007）
-- `DeskConfigSnapshot`（来自 DECK-006）
+- `DeckRuntimeSnapshot` 受控引用（来自 DECK-006；完整配置由 Deck 权威解析）
 - `DeckRuntimePluginLock`（来自 DECK-002）
 - `source_voice_thread_id`（可选）
 
@@ -205,13 +205,32 @@ async def terminate_session(
 | Voice thread 与 run session 体验割裂 | 中 | UI 保留来源链接；`DECK-020` 决策单确认文案 |
 | 热刷新限制被绕过 | 高 | 服务端强制检查；代码审查 + 测试覆盖 |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/agent_session.py`（仅新增/修改 run-scoped Agent Session 模型）
+- `backend/services/claude_agent/session_manager.py`（仅新增/修改 run-scoped session 创建与生命周期逻辑）
+- `backend/services/claude_agent/remote_interaction_guard.py`（仅新增活动 run 远程交互限制守卫）
+- `backend/tests/test_agent_session.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、Voice chat UI、Claude Code 二进制/SDK 与 Deck Plugin 发布/安装服务
+- 除上述 4 个路径以外的任何实现、测试、依赖锁或部署配置
+- 允许文件中与 run-scoped session、load receipt 校验或热刷新守卫无关的既有会话行为
+- 把 `voice.thread_id` 复用为 `agent_session_id`、允许活动 run 改变插件集合，或借本 task 改写 Workflow Run 状态机
+
+## 12. 命名隔离声明
 
 - Session 使用 `agent_session_id` 标识
 - Voice thread 使用 `source_voice_thread_id` 标识（可选来源引用）
 - 禁止混用两者
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-018`: 多节点/临时 runtime 分发策略 —— 影响 session 的 runtime_environment_id 分配
 - `DECK-019`: 安全撤销是否强制终止活动 run —— 影响 session 终止策略

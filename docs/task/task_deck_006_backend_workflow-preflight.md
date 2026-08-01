@@ -13,12 +13,12 @@ Story Workspace Workflow Preflight
 - **标签**: `story-workspace`, `preflight`, `execution`
 - **来源设计稿**:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §10.1, §10.2
-  - `docs/design/story-workspace/story-workspace-deck-desk-integration-delta.md` §5.1, §7.2
+  - `docs/design/deck/deck-integration-delta.md` §5.1, §7.2
 - **Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 DECK-006
 
 ## 3. 任务目标
 
-实现 Story Workspace 的权威 Workflow Preflight。按固定顺序执行 preflight 检查，生成不可变的 Desk snapshot，验证 runtime lock 的物化状态，签发一次性 preflight token。只有未过期且与当前 binding revision、输入 hash 一致的 preflight 才可创建 Workflow Run。
+实现 Story Workspace 的权威 Workflow Preflight。按固定顺序执行 preflight 检查，通过 Deck 生成或复用不可变 `DeckRuntimeSnapshot`，验证 runtime lock 的物化状态，签发一次性 preflight token。只有未过期且与当前 binding revision、输入 hash 一致的 preflight 才可创建 Workflow Run。
 
 ## 4. 实现步骤
 
@@ -34,7 +34,8 @@ class WorkflowPreflight(BaseModel):
     deck_plugin_id: str
     deck_plugin_version: str
     runtime_plugin_lock_id: str
-    desk_config_snapshot_id: Optional[str]
+    deck_runtime_profile_id: str
+    deck_runtime_snapshot_id: Optional[str]
     input_hash: str
     status: PreflightStatus          # checking | passed | failed | expired
     error_code: Optional[str]
@@ -69,41 +70,31 @@ class PreflightService:
         1. 身份、workspace、Deck 使用权限
         2. binding revision 与精确 release 可用性
         3. manifest/hash、workflow definition、输入/输出 schema
-        4. host、ClaudeAgent、Claude Code、Desk contract 兼容性
+        4. host、ClaudeAgent、Claude Code、Deck runtime contract 兼容性
         5. 能力交集与来源策略
-        6. 创建或复用不可变 desk_config_snapshot_id
+        6. 通过 Deck 创建或复用不可变 deck_runtime_snapshot_id
         7. 验证 runtime lock 的 declared/materialized/digest/load smoke
         8. 计算 input hash、过期时间并签发 preflight_token
         """
 ```
 
-### Step 3: Desk Snapshot 创建/复用
+### Step 3: Deck Runtime Snapshot 创建/复用
 
 ```python
-async def _create_or_reuse_desk_snapshot(
+async def _create_or_reuse_deck_runtime_snapshot(
     self,
     deck_id: str,
-    desk_contract: DeskContractSpec
+    deck_runtime_profile_id: str,
+    deck_runtime_snapshot_contract: str
 ) -> str:
     """
-    根据 Desk contract 创建不可变 config snapshot。
-    相同输入参数可复用已有 snapshot（幂等）。
+    通过单一 Deck API owner 按 runtime contract 创建或复用不可变快照。
+    Story Workspace 只保存 deck_runtime_snapshot_id 与脱敏摘要，
+    不复制 prompt、secret 或完整高敏配置。
     """
 ```
 
-Desk snapshot 表：
-
-```sql
-CREATE TABLE IF NOT EXISTS desk_config_snapshots (
-    id TEXT PRIMARY KEY,            -- dcs_<uuid>
-    profile_contract TEXT NOT NULL,
-    config_json TEXT NOT NULL,      -- 非敏感配置（脱敏后）
-    secret_refs_json TEXT,          -- secret 引用列表
-    contract_version TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE(profile_contract, config_hash)
-);
-```
+`DeckRuntimeSnapshot` 由 Deck 权威存储。`workflow_preflights` 只持久化受控 `deck_runtime_snapshot_id`、必要的脱敏摘要 hash 和版本引用；不得在 Ink-Dream 创建第二份配置快照表或独立配置 service/API namespace。
 
 ### Step 4: Runtime Lock 物化验证
 
@@ -129,14 +120,14 @@ def _issue_preflight_token(
     preflight_id: str,
     binding_revision: int,
     input_hash: str,
-    desk_snapshot_id: str,
+    deck_runtime_snapshot_id: str,
     runtime_lock_id: str
 ) -> str:
     """
     签发一次性/有限次 token，绑定：
     - binding revision
     - input hash
-    - Desk snapshot
+    - Deck runtime snapshot
     - runtime lock
     有效期默认 5 分钟（可配置）。
     """
@@ -155,7 +146,7 @@ def _issue_preflight_token(
 |---|---|---|
 | `backend/models/workflow_preflight.py` | 新建 | Preflight 模型 |
 | `backend/services/workflow/preflight_service.py` | 新建 | Preflight 服务 |
-| `backend/database.py` | 修改 | 追加 `workflow_preflights`、`desk_config_snapshots` 表 |
+| `backend/database.py` | 修改 | 仅追加 `workflow_preflights` 表及其 Deck snapshot 引用字段 |
 | `backend/tests/test_workflow_preflight.py` | 新建 | Preflight 单元测试 |
 
 ## 6. 输入 / 输出说明
@@ -174,7 +165,7 @@ def _issue_preflight_token(
 
 - **前置依赖**: `DECK-002`（runtime lock）, `DECK-004`（兼容性判定）
 - **下游依赖**: `DECK-007`（Workflow Run 创建）
-- 需要 Desk snapshot 服务
+- 需要 Deck 提供不可变运行快照生成/读取能力；对外保持单一 Deck owner/API namespace
 - 需要 runtime materialization 状态查询
 
 ## 8. 测试策略
@@ -183,7 +174,7 @@ def _issue_preflight_token(
 |---|---|
 | 单元测试 | 8 步 preflight 各阶段失败（每步单独失败） |
 | 单元测试 | token 签发与验证（绑定关系、过期） |
-| 单元测试 | Desk snapshot 创建与复用（幂等） |
+| 单元测试 | Deck runtime snapshot 创建/复用调用（幂等）以及本地不复制敏感配置 |
 | 单元测试 | runtime lock 物化验证（declared/materialized/digest） |
 | 单元测试 | 并发 preflight（同一 deck + binding revision） |
 | 单元测试 | preflight 失败不创建伪运行记录 |
@@ -193,9 +184,9 @@ def _issue_preflight_token(
 
 - [ ] Preflight 顺序固定，失败即停止后续阶段
 - [ ] 8 步 preflight 覆盖设计稿 §10.2 所有检查项
-- [ ] 创建或复用不可变 `desk_config_snapshot_id`
+- [ ] 通过 Deck 创建或复用不可变 `deck_runtime_snapshot_id`
 - [ ] 验证 runtime lock 的 declared/materialized/digest/load smoke
-- [ ] 签发一次性/有限次 `preflight_token`，绑定 binding revision、input hash、Desk snapshot 和 runtime lock
+- [ ] 签发一次性/有限次 `preflight_token`，绑定 binding revision、input hash、Deck runtime snapshot 和 runtime lock
 - [ ] preflight 失败不启动 ClaudeAgent；不创建伪运行记录
 - [ ] 单元测试覆盖各 preflight 阶段失败、token 过期、并发 preflight
 
@@ -204,16 +195,35 @@ def _issue_preflight_token(
 | 风险 | 等级 | 缓解 |
 |---|---|---|
 | preflight 与 selection validation 逻辑重复 | 中 | selection validation 只做快速静态检查；preflight 做权威完整检查 |
-| Desk snapshot 创建失败阻塞所有运行 | 高 | 优雅降级：返回 `DESK_CONFIG_INVALID`，给出修复指引 |
+| Deck runtime snapshot 创建失败阻塞所有运行 | 高 | 返回 `DECK_RUNTIME_CONFIG_INVALID` 或 `DECK_RUNTIME_CONFIG_UNAVAILABLE`，保留输入并给出 Deck owner 修复/重试指引 |
 | token 泄露导致重放攻击 | 中 | token 一次性使用 + 短有效期 + 绑定所有关键参数 |
-| 并发 preflight 导致重复 Desk snapshot | 低 | 幂等创建：相同参数复用已有 snapshot |
+| 并发 preflight 导致重复 Deck runtime snapshot | 低 | Deck 端幂等创建：相同 profile/config/version/policy 输入复用已有 snapshot |
 
-## 11. 命名隔离声明
+## 11. 允许修改范围与禁止修改范围
+
+### 允许修改范围
+
+- `backend/models/workflow_preflight.py`（仅新增 Preflight 模型）
+- `backend/services/workflow/preflight_service.py`（仅新增固定顺序的 Preflight 服务与 token 校验）
+- `backend/database.py`（仅增量追加 `workflow_preflights` 表、`deck_runtime_snapshot_id` 引用及其幂等初始化）
+- `backend/tests/test_workflow_preflight.py`（仅新增本 task 的单元测试）
+
+以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+
+### 禁止修改范围
+
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `frontend/`、ClaudeAgent session/runtime 实现与 Deck Plugin 发布/安装服务
+- 除上述 4 个路径以外的任何实现、测试、依赖锁或部署配置
+- `backend/database.py` 中与本 task 两张表无关的既有表或初始化逻辑
+- 绕过固定检查顺序、在 Preflight 失败后启动 Agent，或借本 task 改写 Workflow Run 状态机
+
+## 12. 命名隔离声明
 
 - preflight 对象使用 `workflow_preflight_*` 前缀
-- Desk snapshot 使用 `desk_config_snapshot_*` 前缀
+- Deck 运行快照统一使用 `deck_runtime_snapshot_*` 前缀；禁止本地复制 Deck 高敏配置
 - 与 `deck_plugin_*`、`runtime_plugin_*` 保持隔离
 
-## 12. 未决决策引用
+## 13. 未决决策引用
 
 - `DECK-018`: 多节点/临时 runtime 分发策略 —— 影响 runtime lock 物化验证的判定范围
