@@ -28,7 +28,7 @@ Story Workspace 命名规范与类型定义共享包（后端主责）
 **核心约束**：
 - 所有业务标识必须使用 `story-workspace` 前缀（DEC-004）。
 - 后端 Python 模型是**唯一规范源**；前端 TypeScript 类型必须与其字段、类型、可选性保持一致。
-- 若项目暂无 monorepo shared package，则后端类型放在 `backend/types/story-workspace/`，前端镜像放在 `frontend/src/types/story-workspace/`，并在本任务文档中声明同步机制。
+- 若项目暂无 monorepo shared package，则后端类型放在 `backend/types/story_workspace/`，前端镜像放在 `frontend/src/types/story-workspace/`，并在本任务文档中声明同步机制。
 - 禁止在 task 文档中直接实现代码；仅定义类型合同与命名检查清单。
 - 本任务**不**负责 Agent 产出 prompt 模板或 UI 组件类型；仅负责业务数据类型与命名规范。
 
@@ -40,15 +40,15 @@ Story Workspace 命名规范与类型定义共享包（后端主责）
 
 | 位置 | 用途 | 说明 |
 |------|------|------|
-| `backend/types/story-workspace/` | **规范源（Canonical）** | Python dataclass / Pydantic 模型，BackendTaskAgent 主责 |
+| `backend/types/story_workspace/` | **规范源（Canonical）** | Python dataclass / Pydantic 模型，BackendTaskAgent 主责 |
 | `frontend/src/types/story-workspace/` | **消费端镜像** | TypeScript interfaces/types，FrontendTaskAgent 主责 |
 | `docs/task/task_205_backend_story-workspace-shared-types.md` | **合同文档** | 本任务文档，记录字段对照表与同步规则 |
 
-> 若项目后续引入 monorepo shared package，则迁移到 `shared/types/story-workspace/`，并废弃上述两个镜像目录。
+> 若项目后续引入 monorepo shared package，则迁移到 `shared/types/story_workspace/`，并废弃上述两个镜像目录。
 
 ### Step 2: 创建后端类型定义文件（规范源）
 
-新建 `backend/types/story-workspace/__init__.py`，使用 Python dataclass 定义：
+新建 `backend/types/story_workspace/__init__.py`，使用 Python dataclass 定义：
 
 ```python
 from dataclasses import dataclass, field
@@ -120,7 +120,7 @@ class StoryWorkspaceStory:
 
 ### Step 3: 创建命名规范检查清单
 
-新建 `backend/types/story-workspace/naming-checklist.md`：
+新建 `backend/types/story_workspace/naming-checklist.md`：
 
 ```markdown
 # Story Workspace 命名规范检查清单
@@ -223,7 +223,7 @@ export interface PaginatedResponse<T> {
 
 ### Step 6: 制定同步与变更流程
 
-1. **类型变更**：任何字段增删改由 BackendTaskAgent 先更新 `backend/types/story-workspace/`，再通知 FrontendTaskAgent 同步更新 `frontend/src/types/story-workspace/`。
+1. **类型变更**：任何字段增删改由 BackendTaskAgent 先更新 `backend/types/story_workspace/`，再通知 FrontendTaskAgent 同步更新 `frontend/src/types/story-workspace/`。
 2. **枚举变更**：`ReviewStatus`、`ContentStatus`、`StoryType` 是前后端共享契约，变更需双方同步。
 3. **检查工具**：建议在 CI 中增加命名前缀扫描（可选，本任务不实现，仅记录为建议）。
 4. **版本标记**：在类型文件顶部添加 `TYPE_CONTRACT_VERSION` 常量，便于追踪合同版本。
@@ -232,8 +232,8 @@ export interface PaginatedResponse<T> {
 
 | 路径 | 说明 |
 |------|------|
-| `backend/types/story-workspace/__init__.py` | **新文件**：后端 Python 类型规范源 |
-| `backend/types/story-workspace/naming-checklist.md` | **新文件**：命名规范检查清单 |
+| `backend/types/story_workspace/__init__.py` | **新文件**：后端 Python 类型规范源 |
+| `backend/types/story_workspace/naming-checklist.md` | **新文件**：命名规范检查清单 |
 | `frontend/src/types/story-workspace/index.ts` | **前端责任**：TypeScript 类型镜像（FrontendTaskAgent 消费） |
 | `backend/routers/story-workspace.py` | 引用上述类型 |
 | `backend/services/story-workspace/agent_integration.py` | 引用上述类型 |
@@ -251,8 +251,8 @@ export interface PaginatedResponse<T> {
 
 ### 输出
 
-- `backend/types/story-workspace/__init__.py`：后端 Python 类型规范模型
-- `backend/types/story-workspace/naming-checklist.md`：命名规范检查清单
+- `backend/types/story_workspace/__init__.py`：后端 Python 类型规范模型
+- `backend/types/story_workspace/naming-checklist.md`：命名规范检查清单
 - `frontend/src/types/story-workspace/index.ts`：前端 TypeScript 镜像类型（FrontendTaskAgent 消费）
 - 前后端字段对照表（记录于本任务文档 §Step 5）
 - 类型同步流程（记录于本任务文档 §Step 6）
@@ -273,7 +273,7 @@ export interface PaginatedResponse<T> {
 
 ```python
 def test_types_importable():
-    from types.story_workspace import (
+    from backend.types.story_workspace import (
         ReviewStatus, ContentStatus, StoryType,
         StoryWorkspaceStory, StoryWorkspaceCharacter, StoryWorkspaceScene,
         PaginatedResponse, StoryFilter, BatchReviewRequest,
@@ -287,7 +287,7 @@ def test_types_importable():
 
 ```python
 def test_story_type_creation():
-    from types.story_workspace import StoryWorkspaceStory, ReviewStatus, ContentStatus, StoryType
+    from backend.types.story_workspace import StoryWorkspaceStory, ReviewStatus, ContentStatus, StoryType
 
     story = StoryWorkspaceStory(
         id="test-id",
@@ -307,7 +307,7 @@ def test_story_type_creation():
 
 ```python
 def test_enum_values():
-    from types.story_workspace import ReviewStatus, ContentStatus, StoryType
+    from backend.types.story_workspace import ReviewStatus, ContentStatus, StoryType
 
     assert ReviewStatus.PENDING.value == "pending"
     assert ReviewStatus.CONFIRMED.value == "confirmed"
@@ -331,8 +331,8 @@ def test_enum_values():
 
 ## 9. 完成标志
 
-- [ ] 后端类型定义文件 `backend/types/story-workspace/__init__.py` 创建完成。
-- [ ] 命名规范检查清单 `backend/types/story-workspace/naming-checklist.md` 创建完成。
+- [ ] 后端类型定义文件 `backend/types/story_workspace/__init__.py` 创建完成。
+- [ ] 命名规范检查清单 `backend/types/story_workspace/naming-checklist.md` 创建完成。
 - [ ] 前端 TypeScript 镜像类型文件 `frontend/src/types/story-workspace/index.ts` 创建完成（由 FrontendTaskAgent 消费）。
 - [ ] 审阅状态枚举 `ReviewStatus = 'pending' | 'confirmed' | 'rejected'` 定义完成。
 - [ ] 内容状态枚举 `ContentStatus = 'draft' | 'published' | 'archived'` 定义完成。
@@ -351,7 +351,7 @@ def test_enum_values():
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
 | **前后端类型不同步** | 高 | BackendTaskAgent 作为唯一规范主责；建立字段对照表；变更时先改后端再同步前端 |
-| **项目无 monorepo shared package** | 中 | 采用后端规范源 + 前端镜像方案；文档化同步机制；未来可迁移到 `shared/types/story-workspace/` |
+| **项目无 monorepo shared package** | 中 | 采用后端规范源 + 前端镜像方案；文档化同步机制；未来可迁移到 `shared/types/story_workspace/` |
 | **Python dataclass 与 Pydantic 风格差异** | 中 | 后端模型使用 dataclass（与现有部分代码风格一致），FastAPI 路由中可包装为 Pydantic 或直接用 dict 校验 |
 | **日期类型前后端不一致** | 低 | 后端使用 `datetime`，API 序列化为 ISO 8601 字符串；前端使用 `string` 接收 |
 | **Agent 产出 payload 与共享类型偏差** | 中 | `SUO-201-BE-004` 的 Agent 集成服务引用本任务模型；偏差时在集成层做适配并记录 |
@@ -363,13 +363,13 @@ def test_enum_values():
 - **与 FrontendTaskAgent 协作**: FrontendTaskAgent 仅消费本任务产出的类型合同。BackendTaskAgent 需在类型变更时主动通知 FrontendTaskAgent，可通过 Issue 评论或子任务委派。
 - **与 BE-004 的关系**: `SUO-201-BE-004` 的 Agent 产出 payload 必须与本任务的 `AgentStoryOutput` 等模型字段对齐；若 Agent 输出字段少于模型，集成服务应提供默认值。
 - **合同稳定性**: `ReviewStatus` / `ContentStatus` / `StoryType` 一旦确定，后续 stage 变更成本较高，建议在实现前冻结。
-- **迁移路径**: 若未来引入 monorepo shared package，本任务文档应作为迁移依据，将 `backend/types/story-workspace/` 和 `frontend/src/types/story-workspace/` 合并到 `shared/types/story-workspace/`。
+- **迁移路径**: 若未来引入 monorepo shared package，本任务文档应作为迁移依据，将 `backend/types/story_workspace/` 和 `frontend/src/types/story-workspace/` 合并到 `shared/types/story_workspace/`。
 
 ## 12. 执行边界
 
 ### 允许修改范围
-- `backend/types/story-workspace/__init__.py` — **新文件**：Python 类型定义（dataclass / enum）。
-- `backend/types/story-workspace/naming-checklist.md` — **新文件**：命名规范检查清单。
+- `backend/types/story_workspace/__init__.py` — **新文件**：Python 类型定义（dataclass / enum）。
+- `backend/types/story_workspace/naming-checklist.md` — **新文件**：命名规范检查清单。
 - 若项目存在 `shared/types/` monorepo 共享包，优先放置其中；否则按方案 B（前后端各自维护）执行。
 - 本任务文档中可包含前端 TypeScript 类型定义的**参考模板**（供 FrontendTaskAgent 参考），但不实际写入前端目录。
 
