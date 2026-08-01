@@ -3,10 +3,163 @@
 
 import sys
 import os
+import sqlite3
+import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import database as db
 import auth
+
+
+STORY_WORKSPACE_COLUMNS = {
+    "story_workspace_workspaces": {
+        "id", "name", "owner_id", "settings", "created_at", "updated_at",
+    },
+    "story_workspace_stories": {
+        "id", "identifier", "title", "description", "status", "review_status",
+        "type", "content", "author_id", "workspace_id", "character_count",
+        "scene_count", "agent_generated", "agent_session_id", "review_notes",
+        "created_at", "updated_at", "confirmed_at", "published_at",
+    },
+    "story_workspace_characters": {
+        "id", "identifier", "name", "avatar_url", "identity", "personality",
+        "background", "catchphrase", "tags", "notes", "author_id",
+        "workspace_id", "story_count", "review_status", "agent_generated",
+        "created_at", "updated_at",
+    },
+    "story_workspace_scenes": {
+        "id", "identifier", "name", "description", "story_id", "author_id",
+        "workspace_id", "character_count", "order_index", "review_status",
+        "agent_generated", "created_at", "updated_at",
+    },
+    "story_workspace_story_characters": {
+        "story_id", "character_id", "role_type", "created_at",
+    },
+    "story_workspace_scene_characters": {
+        "scene_id", "character_id", "created_at",
+    },
+}
+
+STORY_WORKSPACE_INTEGER_COLUMNS = {
+    "story_workspace_workspaces": {"owner_id"},
+    "story_workspace_stories": {
+        "author_id", "character_count", "scene_count", "agent_generated",
+    },
+    "story_workspace_characters": {"author_id", "story_count", "agent_generated"},
+    "story_workspace_scenes": {
+        "author_id", "character_count", "order_index", "agent_generated",
+    },
+}
+
+STORY_WORKSPACE_DATETIME_COLUMNS = {
+    "story_workspace_workspaces": {"created_at", "updated_at"},
+    "story_workspace_stories": {
+        "created_at", "updated_at", "confirmed_at", "published_at",
+    },
+    "story_workspace_characters": {"created_at", "updated_at"},
+    "story_workspace_scenes": {"created_at", "updated_at"},
+    "story_workspace_story_characters": {"created_at"},
+    "story_workspace_scene_characters": {"created_at"},
+}
+
+STORY_WORKSPACE_NOT_NULL_COLUMNS = {
+    "story_workspace_workspaces": {
+        "name", "owner_id", "created_at", "updated_at",
+    },
+    "story_workspace_stories": {
+        "identifier", "title", "status", "review_status", "type", "author_id",
+        "workspace_id", "character_count", "scene_count", "agent_generated",
+        "created_at", "updated_at",
+    },
+    "story_workspace_characters": {
+        "identifier", "name", "author_id", "workspace_id", "story_count",
+        "review_status", "agent_generated", "created_at", "updated_at",
+    },
+    "story_workspace_scenes": {
+        "identifier", "name", "author_id", "workspace_id", "character_count",
+        "order_index", "review_status", "agent_generated", "created_at", "updated_at",
+    },
+    "story_workspace_story_characters": {
+        "story_id", "character_id", "created_at",
+    },
+    "story_workspace_scene_characters": {
+        "scene_id", "character_id", "created_at",
+    },
+}
+
+STORY_WORKSPACE_DEFAULTS = {
+    "story_workspace_workspaces": {
+        "settings": "'{}'", "created_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP",
+    },
+    "story_workspace_stories": {
+        "status": "'draft'", "review_status": "'pending'", "type": "'short'",
+        "character_count": "0", "scene_count": "0", "agent_generated": "1",
+        "created_at": "CURRENT_TIMESTAMP", "updated_at": "CURRENT_TIMESTAMP",
+    },
+    "story_workspace_characters": {
+        "tags": "'[]'", "story_count": "0", "review_status": "'pending'",
+        "agent_generated": "1", "created_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP",
+    },
+    "story_workspace_scenes": {
+        "character_count": "0", "order_index": "0", "review_status": "'pending'",
+        "agent_generated": "1", "created_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP",
+    },
+    "story_workspace_story_characters": {"created_at": "CURRENT_TIMESTAMP"},
+    "story_workspace_scene_characters": {"created_at": "CURRENT_TIMESTAMP"},
+}
+
+STORY_WORKSPACE_PRIMARY_KEYS = {
+    "story_workspace_workspaces": {"id": 1},
+    "story_workspace_stories": {"id": 1},
+    "story_workspace_characters": {"id": 1},
+    "story_workspace_scenes": {"id": 1},
+    "story_workspace_story_characters": {"story_id": 1, "character_id": 2},
+    "story_workspace_scene_characters": {"scene_id": 1, "character_id": 2},
+}
+
+STORY_WORKSPACE_FOREIGN_KEYS = {
+    "story_workspace_workspaces": {("owner_id", "users", "id")},
+    "story_workspace_stories": {
+        ("author_id", "users", "id"),
+        ("workspace_id", "story_workspace_workspaces", "id"),
+    },
+    "story_workspace_characters": {
+        ("author_id", "users", "id"),
+        ("workspace_id", "story_workspace_workspaces", "id"),
+    },
+    "story_workspace_scenes": {
+        ("story_id", "story_workspace_stories", "id"),
+        ("author_id", "users", "id"),
+        ("workspace_id", "story_workspace_workspaces", "id"),
+    },
+    "story_workspace_story_characters": {
+        ("story_id", "story_workspace_stories", "id"),
+        ("character_id", "story_workspace_characters", "id"),
+    },
+    "story_workspace_scene_characters": {
+        ("scene_id", "story_workspace_scenes", "id"),
+        ("character_id", "story_workspace_characters", "id"),
+    },
+}
+
+STORY_WORKSPACE_INDEXES = {
+    "idx_sw_workspaces_owner": (("owner_id", 0),),
+    "idx_sw_stories_author": (("author_id", 0), ("updated_at", 1)),
+    "idx_sw_stories_review_status": (("review_status", 0), ("updated_at", 1)),
+    "idx_sw_stories_status": (("status", 0), ("updated_at", 1)),
+    "idx_sw_stories_type": (("type", 0), ("updated_at", 1)),
+    "idx_sw_stories_search": (("title", 0),),
+    "idx_sw_stories_agent": (("agent_session_id", 0),),
+    "idx_sw_characters_author": (("author_id", 0), ("updated_at", 1)),
+    "idx_sw_characters_name": (("name", 0),),
+    "idx_sw_characters_review": (("review_status", 0), ("updated_at", 1)),
+    "idx_sw_scenes_story": (("story_id", 0), ("order_index", 0)),
+    "idx_sw_scenes_author": (("author_id", 0), ("updated_at", 1)),
+    "idx_sw_scenes_review": (("review_status", 0), ("updated_at", 1)),
+}
 
 def test_crud():
     print("🧪 Testing Deck & Voice CRUD functions...\n")
@@ -111,6 +264,223 @@ def test_crud():
     print(f"User now has {len(final_decks)} decks")
 
     print("\n✅ All CRUD tests passed!")
+
+
+class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
+    """Verify the Story Workspace SQLite migration contract in isolation."""
+
+    def setUp(self):
+        self.connection = sqlite3.connect(":memory:")
+        self.connection.row_factory = sqlite3.Row
+        self.connection.execute("PRAGMA foreign_keys=ON")
+        db.create_tables(self.connection)
+
+    def tearDown(self):
+        self.connection.close()
+
+    def _insert_required_parents(self):
+        cursor = self.connection.execute(
+            "INSERT INTO users (email, password_hash) VALUES (?, ?)",
+            ("story-schema@example.com", "test-hash"),
+        )
+        user_id = cursor.lastrowid
+        self.connection.execute(
+            "INSERT INTO story_workspace_workspaces (id, name, owner_id) VALUES (?, ?, ?)",
+            ("workspace-1", "Test Workspace", user_id),
+        )
+        return user_id
+
+    def test_story_workspace_tables_exist(self):
+        rows = self.connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'story_workspace_%'
+            """
+        ).fetchall()
+
+        self.assertEqual({row["name"] for row in rows}, set(STORY_WORKSPACE_COLUMNS))
+
+    def test_story_workspace_schema_contract(self):
+        for table, expected_columns in STORY_WORKSPACE_COLUMNS.items():
+            with self.subTest(table=table):
+                rows = self.connection.execute(f"PRAGMA table_info({table})").fetchall()
+                actual = {row["name"]: row for row in rows}
+                self.assertEqual(set(actual), expected_columns)
+
+                expected_not_null = STORY_WORKSPACE_NOT_NULL_COLUMNS[table]
+                expected_defaults = STORY_WORKSPACE_DEFAULTS[table]
+                expected_primary_keys = STORY_WORKSPACE_PRIMARY_KEYS[table]
+                integer_columns = STORY_WORKSPACE_INTEGER_COLUMNS.get(table, set())
+                datetime_columns = STORY_WORKSPACE_DATETIME_COLUMNS.get(table, set())
+
+                for column, row in actual.items():
+                    expected_type = "INTEGER" if column in integer_columns else (
+                        "DATETIME" if column in datetime_columns else "TEXT"
+                    )
+                    self.assertEqual(row["type"], expected_type, f"{table}.{column} type")
+                    self.assertEqual(
+                        bool(row["notnull"]), column in expected_not_null,
+                        f"{table}.{column} NOT NULL",
+                    )
+                    self.assertEqual(
+                        row["dflt_value"], expected_defaults.get(column),
+                        f"{table}.{column} default",
+                    )
+                    self.assertEqual(
+                        row["pk"], expected_primary_keys.get(column, 0),
+                        f"{table}.{column} primary-key position",
+                    )
+
+                foreign_key_rows = self.connection.execute(
+                    f"PRAGMA foreign_key_list({table})"
+                ).fetchall()
+                actual_foreign_keys = {
+                    (row["from"], row["table"], row["to"])
+                    for row in foreign_key_rows
+                }
+                self.assertEqual(actual_foreign_keys, STORY_WORKSPACE_FOREIGN_KEYS[table])
+
+    def test_story_workspace_indexes_exist(self):
+        rows = self.connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index'"
+        ).fetchall()
+        actual_names = {row["name"] for row in rows}
+        self.assertTrue(set(STORY_WORKSPACE_INDEXES).issubset(actual_names))
+
+        for index_name, expected_columns in STORY_WORKSPACE_INDEXES.items():
+            with self.subTest(index=index_name):
+                index_rows = self.connection.execute(
+                    f"PRAGMA index_xinfo({index_name})"
+                ).fetchall()
+                actual_columns = tuple(
+                    (row["name"], row["desc"])
+                    for row in index_rows
+                    if row["key"]
+                )
+                self.assertEqual(actual_columns, expected_columns)
+
+    def test_story_workspace_defaults_and_constraints(self):
+        user_id = self._insert_required_parents()
+        self.connection.execute(
+            """
+            INSERT INTO story_workspace_stories
+                (id, identifier, title, author_id, workspace_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("story-1", "story-001", "Test Story", user_id, "workspace-1"),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO story_workspace_characters
+                (id, identifier, name, author_id, workspace_id)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            ("character-1", "character-001", "Test Character", user_id, "workspace-1"),
+        )
+        self.connection.execute(
+            """
+            INSERT INTO story_workspace_scenes
+                (id, identifier, name, story_id, author_id, workspace_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("scene-1", "scene-001", "Test Scene", "story-1", user_id, "workspace-1"),
+        )
+
+        workspace = self.connection.execute(
+            "SELECT * FROM story_workspace_workspaces WHERE id = 'workspace-1'"
+        ).fetchone()
+        story = self.connection.execute(
+            "SELECT * FROM story_workspace_stories WHERE id = 'story-1'"
+        ).fetchone()
+        character = self.connection.execute(
+            "SELECT * FROM story_workspace_characters WHERE id = 'character-1'"
+        ).fetchone()
+        scene = self.connection.execute(
+            "SELECT * FROM story_workspace_scenes WHERE id = 'scene-1'"
+        ).fetchone()
+
+        self.assertEqual(workspace["settings"], "{}")
+        self.assertIsNotNone(workspace["created_at"])
+        self.assertEqual(
+            (story["status"], story["review_status"], story["type"]),
+            ("draft", "pending", "short"),
+        )
+        self.assertEqual(
+            (story["character_count"], story["scene_count"], story["agent_generated"]),
+            (0, 0, 1),
+        )
+        self.assertEqual(
+            (character["tags"], character["story_count"], character["review_status"],
+             character["agent_generated"]),
+            ("[]", 0, "pending", 1),
+        )
+        self.assertEqual(
+            (scene["character_count"], scene["order_index"], scene["review_status"],
+             scene["agent_generated"]),
+            (0, 0, "pending", 1),
+        )
+
+        invalid_story_values = (
+            ("status", "deleted"),
+            ("review_status", "approved"),
+            ("type", "video"),
+            ("agent_generated", 2),
+        )
+        for offset, (column, value) in enumerate(invalid_story_values, start=2):
+            with self.subTest(column=column, value=value):
+                with self.assertRaises(sqlite3.IntegrityError):
+                    self.connection.execute(
+                        f"""
+                        INSERT INTO story_workspace_stories
+                            (id, identifier, title, author_id, workspace_id, {column})
+                        VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (f"story-{offset}", f"story-{offset:03}", "Invalid Story",
+                         user_id, "workspace-1", value),
+                    )
+
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.connection.execute(
+                """
+                INSERT INTO story_workspace_workspaces (id, name, owner_id)
+                VALUES ('orphan-workspace', 'Orphan', -1)
+                """
+            )
+
+    def test_story_workspace_migration_idempotent(self):
+        db.create_tables(self.connection)
+        db.create_tables(self.connection)
+
+        table_count = self.connection.execute(
+            """
+            SELECT COUNT(*)
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'story_workspace_%'
+            """
+        ).fetchone()[0]
+        self.assertEqual(table_count, 6)
+
+    def test_drop_story_workspace_tables(self):
+        db.drop_story_workspace_tables(self.connection)
+        remaining = self.connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'story_workspace_%'
+            """
+        ).fetchall()
+        self.assertEqual(remaining, [])
+
+        db.create_tables(self.connection)
+        recreated = self.connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name LIKE 'story_workspace_%'
+            """
+        ).fetchall()
+        self.assertEqual(len(recreated), 6)
 
 if __name__ == "__main__":
     test_crud()

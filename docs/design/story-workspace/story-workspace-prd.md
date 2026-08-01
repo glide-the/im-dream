@@ -2,6 +2,7 @@
 
 > **Design ID**: `design_001_story-workspace-prd`  
 > **关联 Issue**: [SUO-199](/SUO/issues/SUO-199)  
+> **增量 Issue**: [SUO-214](/SUO/issues/SUO-214)、[SUO-230](/SUO/issues/SUO-230)、[SUO-236](/SUO/issues/SUO-236)
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **设计阶段**: design → issue → task → stage  
 > **最后更新**: 2026-08-01  
@@ -20,7 +21,8 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 ### 1.2 设计目标
 
 - 为创作者提供一个**审阅 Agent 产出的剧本工作空间**，而非手动创作工具
-- 核心工作流：**Agent 产出剧本 → 页面渲染剧本信息 → 用户审阅确认 → 后续执行**
+- 核心工作流：**创作者在 Deck 中配置并选择 Deck 插件 → story-workspace 执行 `WorkflowPreflight`（调用 Deck 解析运行配置并锁定快照）→ Claude Agent 按所选工作流产出剧本 → 页面渲染 → 用户审阅确认 → 所选工作流继续或结束**
+- 在现有全局顶部导航提供 **Dream** 入口，并把 Claude Agent 产出、页面渲染、用户审阅与确认 gate 收拢到同一个 `story-workspace` 页面域
 - 遵循 Ink & Memory UI Design v2 的视觉体系（暖纸张、轻纸面分区、无卡片设计）
 - 本期聚焦布局骨架与基础交互，复杂画布以数据表形式呈现
 - 所有业务路径、路由、包名、组件标识使用 `story-workspace` 前缀
@@ -34,8 +36,11 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | 模块 | 说明 |
 |------|------|
 | Workspace 布局骨架 | 三栏桌面端布局、导航、侧边栏、主内容区 |
+| **全局顶部 Dream 入口** | **在现有 AppHeader / TopNavBar 增加 Dream 导航项，定义目标路由及选中、未选中状态** |
 | **Agent 产出渲染** | **剧本/角色/场景由 Agent 自动生成，页面负责渲染展示** |
 | **审阅确认流程** | **用户查看 Agent 产出 → 确认通过 / 提出修改 / 重新生成** |
+| **Dream 页面审阅 gate** | **Dream 页面持续展示运行与审阅阶段；全部必审产出确认前，后续工作流保持锁定** |
+| **Deck 工作流选择与执行前校验** | **选择已发布、可用的 Deck 插件；展示其版本及 Deck 运行配置就绪状态；执行记录保留来源快照** |
 | 故事/剧本列表 | 数据表格呈现 Agent 产出的剧本，展示生成状态 |
 | 角色资产管理 | 展示 Agent 生成的角色列表，支持审阅编辑 |
 | 场景资产管理 | 展示 Agent 生成的场景列表，支持审阅编辑 |
@@ -52,6 +57,7 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | 计费/积分系统 | 积分消耗策略 | 后续迭代 |
 | 移动端适配 | 完整移动端交互 | 本期明确排除，仅桌面端 |
 | 实时协作 | 多创作者同时编辑 | 后续迭代 |
+| **Deck 编辑器内部编辑能力** | **Deck 插件的工作流编排、发布、版本管理，以及 Agent 提示词、模型/工具策略、secret-ref 和插件运行配置均由 Deck 负责；story-workspace 仅消费可选择版本、快照引用和脱敏状态** | **由 Deck 模块独立设计与实现** |
 
 ---
 
@@ -69,6 +75,12 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | DEC-006 | **仅桌面端设计，不包含任何移动端/平板端适配** | **2026-08-01 评论确认：「没有移动端设计，也没用移动端」** |
 | **DEC-007** | **核心工作流：Agent 产出 → 页面渲染 → 用户审阅确认 → 执行** | **2026-08-01 评论确认：「交互流程应该是 Agent 产出剧本工作空间，然后页面渲染剧本信息，用户确认，后续执行」** |
 | **DEC-008** | **用户不手动创建内容，仅对 Agent 产出进行审阅、编辑、确认** | **业务需求明确：页面渲染 Agent 产出，用户确认后执行** |
+| **DEC-009** | **Deck 是唯一业务模块；Deck Editor、Deck Plugin、Deck 运行配置与 binding 是其内部职责，story-workspace 只消费公开合同并保存运行/结果，不编辑 Deck 定义或配置** | **落实 Deck-only 领域边界，关闭独立配置 owner 假设** |
+| **DEC-010** | **每次创作锁定 Deck 插件版本、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`；切换只影响新执行** | **保证同一剧本可复现、历史产出可溯源** |
+| **DEC-011** | **Deck release、运行配置、权限或 runtime preflight 任一不通过时禁止启动 Claude Agent** | **避免以默认工作流或不完整配置静默执行** |
+| **DEC-019** | **按 SUO-235 将提示词、运行配置、secret-ref、权限与不可变快照统一归属 Deck** | **统一字段、错误码、participant 和下游 owner** |
+| **DEC-017** | **全局 Dream 导航以 `/story-workspace/dream` 为 canonical 入口，既有 `/story-workspace/dashboard` 只作兼容重定向** | **形成确定导航合同，同时保留已完成 story-workspace 路由的兼容性** |
+| **DEC-018** | **Dream 页面设置运行级审阅 gate；全部必审产出确认前禁止工作流继续或结束** | **让“用户确认后才执行”成为可见且不可绕过的业务约束** |
 
 ### 3.2 从 Dreem 提取的参考点与适配差异
 
@@ -193,6 +205,109 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | 分割线 | 实线细边框 | Border Paper #D8C7B3 虚线 |
 | 字体 | 系统无衬线 | 系统无衬线 + Excalifont 标题 |
 
+### 3.5 Deck / Ink-Dream 关系声明
+
+#### 3.5.1 术语映射（保留原始概念）
+
+| 用户原始术语 | 本设计中的明确含义 | 不等同于 |
+|--------------|-------------------|----------|
+| **Deck 模块** | 唯一业务模块和配置控制面；拥有插件工作流、Deck Plugin Binding、Agent profile、提示词、模型/工具策略、插件运行配置、secret-ref、权限和不可变运行快照 | story-workspace、Claude Agent |
+| **Deck 编辑器** | Deck 内部的创作、校验、发布和运行配置界面 | 可被选择执行的 Deck 插件实例及 Deck 运行配置 |
+| **Deck 插件** | Deck 发布的、可选择且带版本的创作工作流定义；描述步骤顺序、输入要求和运行配置合同 | 不是独立配置域，也不是 story-workspace 页面 |
+| **Ink-Dream 模块** | 本文中的 `story-workspace` 业务域；负责工作流选择上下文、preflight、执行状态、产出渲染、审阅与溯源 | Deck 配置编辑界面 |
+| **Claude Agent / `claude-agent`** | 运行时执行者；根据所选 Deck 插件和锁定的 Deck 运行快照生成剧本/角色/场景 | 工作流定义、配置存储或业务结果真相源 |
+
+> **关系结论**：Deck 同时定义“按什么工作流执行”“用什么提示词、插件配置及权限策略执行”，并权威保存下一次运行的 binding；story-workspace 提供选择交互并管理“发起哪次运行、运行到什么状态、产出了什么以及用户如何审阅”。两者通过不可变 Deck 运行快照协作，不复制敏感配置。
+
+#### 3.5.2 职责与数据所有权
+
+| 模块 | 负责 | 权威数据/配置来源 | 明确不负责 |
+|------|------|------------------|------------|
+| Deck | 维护 Agent 提示词、插件配置、权限策略及其版本；自定义、校验、发布 Deck 插件；权威保存 Deck Plugin Binding；为 preflight 生成不可变运行快照 | Deck 目录、binding、发布记录与运行配置存储 | 剧本产出和审阅状态 |
+| Deck Editor | 提供 Deck 工作流与运行配置的编辑/发布 UI | Deck 领域数据 | 独立业务模块或 API owner |
+| Deck Plugin | 定义版本化创作流程、输入约束、步骤和 Deck runtime contract | Deck 发布版本 | 持久化剧本资产、绕过 Deck 权限 |
+| story-workspace | 列出/选择可用 Deck 插件（选择写入 Deck 权威 binding），调用 preflight，记录运行与来源，渲染并审阅 Agent 产出 | Deck 目录/binding + runtime readiness + story-workspace 运行/内容数据 | 权威保存 Deck binding，编辑 Deck 工作流、提示词或运行配置 |
+| Claude Agent | 使用已锁定的工作流版本、Deck 运行快照与 runtime lock 执行 | 单次执行上下文 | 自行选择工作流、静默补齐缺失配置 |
+
+#### 3.5.3 数据与配置交互合同
+
+单次创作至少携带以下关联信息；字段名是跨模块语义合同，具体 API/存储形态由下游技术设计确定：
+
+| 信息 | 来源 | story-workspace 的处理 |
+|------|------|------------------------|
+| `deck_plugin_id` / `deck_plugin_version` | Deck 可用插件目录 | 选择时展示；启动时锁定；历史产出只读保留 |
+| `deck_plugin_binding_id` / `binding_revision` | Deck Plugin Binding | 选择时通过 Deck API 更新；运行时冻结精确 ID/revision，不在本域建立第二份 binding |
+| `workflow_definition_ref` | Deck Plugin 发布版本 | 传给 Claude Agent，不在 story-workspace 内编辑 |
+| `deck_runtime_snapshot_id` | `WorkflowPreflight` 调用 Deck 生成 | 仅保存受控引用与版本；不复制或展示敏感配置值 |
+| `runtime_plugin_lock_id` | Deck Plugin 发布锁 | preflight/run 保存不可变引用；历史来源只读展示 |
+| `deck_runtime_snapshot_contract` / 脱敏 readiness | Deck 运行快照 | 仅用于兼容判定和“已就绪/缺失/无权限”展示；提示词、插件配置及 secret-ref 由 Claude Agent 按 `deck_runtime_snapshot_id` 服务端解析 |
+| `workflow_run_id` / `status` | story-workspace / 执行服务 | 用于进度、失败重试、审计和产出关联；`pending_review` 为唯一 API 审阅态 |
+| 剧本、角色、场景及 `review_status` | Claude Agent → story-workspace | 持久化并进入现有审阅流程 |
+
+**版本规则**：创作者切换 Deck 插件或插件版本时，只改变下一次执行；既有剧本继续关联原 `deck_plugin_binding_id + binding_revision`、`deck_plugin_version`、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`。驳回后默认沿用原快照/锁并附加修改意见重试；若用户改选工作流，则创建新的 `workflow_run_id`，不得覆盖原运行来源。
+
+### 3.6 SUO-230 增量：顶部 Dream 入口与页面审阅 gate
+
+> 本节只定义 SUO-230 的新增/变化项；SUO-211/212/213 已完成结论、SUO-214/215 经 SUO-236 修订后的 Deck-only 关系、桌面三栏、复杂画布数据表化、排除平台视频与 UI Design v2 视觉约束均保持不变。
+
+#### 3.6.1 全局顶部 Dream 导航合同
+
+| 项 | 确定设计 |
+|----|----------|
+| 用户可见文案 | `Dream`；这是全局产品导航文案，不作为无前缀的代码标识 |
+| 导航标识 | `story-workspace-dream`；组件 `StoryWorkspaceDreamNavItem` |
+| Canonical 目标 | `/story-workspace/dream`，进入 Dream 概览与最近一次运行/待审阅上下文 |
+| 兼容路由 | `/story-workspace` 与 `/story-workspace/dashboard` 重定向至 `/story-workspace/dream`；既有 `/story-workspace/stories`、`characters`、`scenes` 保持不变 |
+| 选中判定 | 当前路径为 `/story-workspace/dream` 或任一 `/story-workspace/*` 子页时选中；进入 Writing、Timeline、Analysis、Decks、Chat、Settings 等其他平台页面时未选中 |
+| 选中表现 | `aria-current="page"`，Charcoal Brown 600 字重，Memory Yellow 3px 短下划线；不使用整块深色背景 |
+| 未选中/交互 | Warm Brown 常态、下划线透明；hover 使用现有 `--color-bg-hover` 与 Charcoal Brown，键盘 focus 使用可见 Action Brown 轮廓 |
+| 布局位置 | 沿用现有 AppHeader / `TopNavBar` 的 Logo 后横向导航组；不新增第二层顶部栏，不改变三栏宽度 |
+
+该路由是 `story-workspace` 业务域的全局入口。用户从 Dream 进入故事、角色、场景或详情审阅子页时，顶部 Dream 仍保持选中，避免把域内二级导航误表现为另一个顶级产品。
+
+#### 3.6.2 Dream 页面可见布局与审阅 gate
+
+```text
+AppHeader:  Ink & Memory  …  Dream（选中）  …  头像/设置
+└─ StoryWorkspaceThreeColumnLayout
+   ├─ StoryWorkspaceSidebar：概览 / 故事 / 角色 / 场景
+   ├─ Main Content
+   │  ├─ StoryWorkspaceWorkflowContextBar（Deck release / runtime snapshot / workflow_run_id）
+   │  ├─ StoryWorkspaceReviewGate（产出 → 渲染 → 审阅 → 继续/结束）
+   │  └─ StoryWorkspace*Table（复杂画布数据表化，待审阅项可见）
+   └─ StoryWorkspaceReviewPanel（完整内容、确认、编辑后确认、驳回）
+```
+
+`StoryWorkspaceReviewGate` 在存在活动 `workflow_run_id` 时固定显示于 Main Content 标题/工作流上下文条下方、数据表上方；选中待审阅行后，右侧 `StoryWorkspaceReviewPanel` 展示同一运行来源及操作。关闭面板或离开再返回不会改变 gate。
+
+| `StoryWorkspaceReviewGateState`（UI 状态） | 来源运行/审阅状态 | 页面表现 | 后续执行 gate |
+|---------------------------------------------|-------------------|----------|----------------|
+| `story-workspace-agent-running` | `queued` / `running` | 第一步“Claude Agent 产出”高亮，数据区骨架态 | 锁定 |
+| `story-workspace-rendering` | `output_validating`，完整结果尚未提交 | 第二步“页面渲染”高亮；不得展示部分结果为可确认内容 | 锁定 |
+| `story-workspace-pending-review` | canonical `pending_review`；必审项已完整持久化 | 第三步“用户审阅”高亮；待审阅行黄条，Review Panel 可操作 | 锁定 |
+| `story-workspace-rejected` | 任一必审项为 `rejected` | 第三步红色状态，显示修改意见与“沿原快照重新生成” | 锁定；驳回不触发后续步骤 |
+| `story-workspace-confirming` | 确认请求提交中 | 操作按钮 Loading 且防重复提交 | 锁定 |
+| `story-workspace-confirmed` | 当前运行的全部必审项为 `confirmed` | 第三步完成，第四步解锁 | 仅此状态可请求继续或结束 |
+| `story-workspace-continuing` / `story-workspace-completed` | 已确认后继续下一步 / 工作流终点 | 第四步显示执行中或已结束；来源信息只读 | 已解锁 |
+| `story-workspace-failed` | 产出、渲染、确认或继续失败 | 显示非敏感错误、失败步骤与可恢复动作 | 锁定；按幂等规则重试 |
+
+Gate 规则：
+
+1. `pending_review` 是与 SUO-215 运行状态机一致的 canonical API 状态；既有文案“待审阅/awaiting review”只是展示语义，不新增第二个 API 枚举。
+2. 运行级 gate 以该 `workflow_run_id` 的全部必审故事、角色、场景为聚合集合；任一项仍为 `pending` 或 `rejected` 时，不得进入 `confirmed`、`continuing` 或 `completed`。
+3. “保存”只更新内容并保持待审阅；只有“确认通过”或“保存并确认”可确认当前版本。确认必须校验运行 ID 与审阅版本，避免对过期 Agent 产出放行。
+4. 确认动作必须幂等：首次合法确认后只发出一次继续/结束信号；重复点击、刷新或网络重试不得重复推进 Claude Agent。
+5. 驳回只记录意见并锁住 gate；重新生成创建可审计的新 run attempt，默认沿用 DEC-010 的插件/配置快照，不能在原运行上静默覆盖。
+6. 若内容已确认但后续继续失败，确认事实不回滚；页面进入失败态，并以同一已确认运行幂等重试继续动作。
+
+#### 3.6.3 对下游 issue / task / stage 的影响（仅声明，不直接生成）
+
+| 下游层级 | 新增/变化合同 | 保持不变 |
+|----------|---------------|----------|
+| issue | 需由 `@CEOOrchestrator` 创建唯一 IssueDispatcher 传播单，确定覆盖全局 Dream 导航、canonical 路由/兼容重定向、Dream 页审阅 gate 与防绕过验证 | 不重拆 SUO-211/212/213，不复写既有 Deck Issue |
+| task | Frontend 增量需覆盖现有 `TopNavBar` / App 视图路由、`StoryWorkspaceDreamPage`、`StoryWorkspaceReviewGate` 及选中/可访问性测试；Backend/Shared 增量需覆盖“未全部确认禁止继续”、确认幂等与 canonical `pending_review` 合同 | 既有三栏、表格、Review Panel、Deck 选择与来源字段可复用；运行快照字段按本修订迁移 |
+| stage | 需在新增 task 收口后安排独立增量验证：顶部入口 → Agent 产出 → 页面渲染 → 确认/驳回 → gate 放行/阻断；旧 Stage 不能替代本差异验收 | 不重排已稳定 Stage，不进入平台视频、复杂画布或移动端验证 |
+
 ---
 
 ## 4. 详细设计
@@ -201,7 +316,8 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 
 ```
 story-workspace/
-├── /dashboard                    ← 工作台首页（Agent 产出概览 + 待审阅项）
+├── /dream                        ← 顶部 Dream 的 canonical 入口（工作流上下文 + 产出概览 + 审阅 gate）
+├── /dashboard                    ← 兼容入口，重定向至 /story-workspace/dream
 ├── /stories                      ← 故事/剧本列表（Agent 产出的剧本）
 │   ├── /stories/:storyId         ← 故事详情审阅（右侧审阅面板）
 │   └── /stories/:storyId/review  ← 审阅确认页面
@@ -216,12 +332,16 @@ story-workspace/
 
 **核心工作流路由**：
 ```
-Agent 产出触发
+Deck 编辑器自定义并发布 Deck 插件
     ↓
-/stories/:storyId/review  ← 审阅页面（用户确认/驳回/编辑）
+顶部 Dream → /story-workspace/dream → 选择 Deck 插件并执行 WorkflowPreflight（调用 Deck 校验）
+    ↓（校验通过；锁定插件版本与配置快照）
+Dream 页内输入携带所选工作流上下文，触发 Claude Agent
     ↓
-用户确认 → 状态变为「已确认」→ 进入后续执行流程
-用户驳回 → 附带修改意见 → Agent 重新生成
+/story-workspace/stories/:storyId/review  ← Dream 域内审阅（用户确认/驳回/编辑）
+    ↓
+全部必审项确认 → gate 解锁 → 按所选 Deck 插件的下一步继续或结束
+任一项驳回/待审阅 → gate 保持锁定 → 沿用原执行快照重新生成或继续审阅
 用户编辑 → 保存修改 → 再确认
 ```
 
@@ -230,20 +350,25 @@ Agent 产出触发
 | 类型 | 命名规范 | 示例 |
 |------|----------|------|
 | 路由路径 | `/story-workspace/*` | `/story-workspace/stories` |
-| 页面组件 | `StoryWorkspace*Page` | `StoryWorkspaceDashboardPage` |
+| 页面组件 | `StoryWorkspace*Page` | `StoryWorkspaceDreamPage` |
 | 布局组件 | `StoryWorkspace*Layout` | `StoryWorkspaceThreeColumnLayout` |
 | 业务组件 | `StoryWorkspace*` | `StoryWorkspaceStoryTable` |
 | API 路由 | `/api/story-workspace/*` | `/api/story-workspace/stories` |
 | 数据库表 | `story_workspace_*` | `story_workspace_stories` |
 | 类型/接口 | `StoryWorkspace*` | `StoryWorkspaceStory` |
 | 状态管理 | `useStoryWorkspace*` | `useStoryWorkspaceStore` |
+| 审阅 gate 状态 | `StoryWorkspace*State` / `story-workspace-*` | `StoryWorkspaceReviewGateState` / `story-workspace-pending-review` |
 | CSS 类名 | `.story-workspace-*` | `.story-workspace-table-row` |
 
 ### 4.3 页面/模块范围
 
-#### 4.3.1 工作台首页 (`/story-workspace/dashboard`)
+#### 4.3.1 Dream 入口页 (`/story-workspace/dream`)
+
+> `/story-workspace/dashboard` 仅作兼容重定向；不得维护两份平行页面状态。
 
 **功能**：
+- **Deck 工作流上下文**：选择已发布、可用的 Deck 插件，展示名称、版本、工作流摘要与 Deck 运行配置就绪状态；提供「在 Deck 编辑器中配置」跳转
+- **可见审阅 gate**：持续展示“Claude Agent 产出 → 页面渲染 → 用户审阅 → 继续/结束”；未全部确认时第四步锁定
 - **Agent 产出概览**：待审阅剧本数、已确认剧本数、最近 Agent 生成活动
 - **待审阅快捷入口**：Agent 最新生成的剧本/角色/场景，点击直达审阅
 - **空态**：首次进入时的引导（等待 Agent 产出）
@@ -277,7 +402,7 @@ Agent 产出触发
 
 **审阅状态流转**：
 ```
-Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
+WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已确认 → 所选工作流继续或结束
                 ↓
               用户驳回 → 附带修改意见 → Agent 重新生成 → 待审阅
                 ↓
@@ -343,7 +468,7 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│ App Header（全局）                                                           │
+│ App Header（全局）：Ink & Memory  …  Dream（选中）  …  用户/设置               │
 ├──────────┬──────────────────────────────────────────────┬───────────────────┤
 │          │                                              │                   │
 │  Sidebar │           Main Content Area                  │  Detail Panel     │
@@ -351,8 +476,10 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 │          │                                              │  （可折叠）        │
 │  - Logo  │                                              │                   │
 │  - Nav   │  ┌────────────────────────────────────────┐  │  - 详情表单       │
-│  - 用户  │  │ Toolbar（搜索/筛选/创建）                │  │  - 属性编辑       │
-│          │  └────────────────────────────────────────┘  │  - 关联信息       │
+│  - 用户  │  │ Review Gate（产出→渲染→审阅→继续/结束） │  │  - 属性编辑       │
+│          │  ├────────────────────────────────────────┤  │  - 关联信息       │
+│          │  │ Toolbar（搜索/筛选/排序）                │  │                   │
+│          │  └────────────────────────────────────────┘  │                   │
 │          │                                              │                   │
 │          │  ┌────────────────────────────────────────┐  │                   │
 │          │  │ Data Table                             │  │                   │
@@ -389,47 +516,54 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 
 ### 4.5 交互设计
 
-#### 4.5.1 核心工作流：Agent 产出 → 审阅确认
+#### 4.5.1 核心工作流：选择 Deck 工作流 → WorkflowPreflight → Agent 产出 → 审阅确认
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                     Agent 产出 → 审阅确认 核心工作流                          │
+│             Deck 选择 → 运行配置快照 → Agent 产出 → 审阅确认                 │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│   ┌──────────┐      ┌──────────┐      ┌──────────┐      ┌──────────┐       │
-│   │  Agent   │ ──→  │  页面    │ ──→  │  用户    │ ──→  │  后续    │       │
-│   │  产出    │      │  渲染    │      │  审阅    │      │  执行    │       │
-│   └──────────┘      └──────────┘      └──────────┘      └──────────┘       │
-│        │                 │                 │                 │             │
-│        ↓                 ↓                 ↓                 ↓             │
-│   生成剧本/角色    表格展示产出      查看详情面板         确认后触发        │
-│   /场景数据       审阅状态标记       编辑/确认/驳回        下游流程         │
+│  Deck Editor → 选择 Deck Plugin → WorkflowPreflight → Claude Agent → 页面 → 审阅 │
+│   自定义/发布     锁定 ID/版本       配置快照       执行工作流     渲染      │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **详细流程**：
 
-1. **Agent 产出阶段**（系统侧，非 UI）
-   - Agent 根据用户输入生成剧本、角色、场景数据
-   - 数据存入数据库，标记 `review_status = 'pending'`
-   - 可选：推送通知给用户
+1. **工作流准备与选择阶段**
+   - 创作者在 Deck 编辑器中自定义并发布 Deck 插件
+   - story-workspace 只列出当前用户/工作区有权限且已发布、启用的 Deck 插件
+   - 创作者选择 Deck 插件；页面显示插件名称、版本与工作流摘要
 
-2. **页面渲染阶段**（UI 侧）
+2. **执行前校验阶段**
+   - 根据所选 Deck 插件，由 Deck 解析所需的 Agent 提示词、插件配置和权限策略
+   - 校验发布/启用状态、访问权限、配置完整性与版本兼容性
+   - 校验通过后锁定 `deck_plugin_version`、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`；任一校验失败均不启动 Agent
+
+3. **Agent 产出阶段**（系统侧，Dream 页面内可见）
+   - Dream 页面内的创作输入复用现有 Chat 能力，但不跳离 Dream；请求连同已锁定的工作流上下文触发 Claude Agent
+   - Agent 按 Deck 插件定义的步骤，使用 Deck 运行快照生成剧本、角色、场景数据
+   - 数据存入数据库，标记 `review_status = 'pending'`
+   - 记录 `workflow_run_id`、来源版本与执行状态
+
+4. **页面渲染阶段**（UI 侧）
    - 用户进入 story-workspace
    - 页面加载 Agent 生成的数据，按审阅状态分组展示
    - 待审阅项高亮显示
 
-3. **用户审阅阶段**（UI 侧）
+5. **用户审阅阶段**（UI 侧）
    - 用户点击待审阅项 → 右侧审阅面板展开
    - 面板展示 Agent 生成的完整内容
    - 用户可：
-     - **确认**：点击「确认」→ 状态变为 `confirmed` → 进入后续执行
-     - **编辑后确认**：修改字段 → 点击「保存并确认」→ 状态变为 `confirmed`
+     - **确认**：点击「确认」→ 当前项变为 `confirmed`；只有全部必审项确认后 gate 才允许工作流继续或结束
+     - **编辑后确认**：修改字段 → 点击「保存并确认」→ 当前版本变为 `confirmed`，仍按运行级 gate 聚合判断
      - **驳回**：点击「驳回」→ 填写修改意见 → 状态变为 `rejected` → Agent 重新生成
 
-4. **后续执行阶段**（系统侧）
-   - 已确认的内容进入下游流程（如 Deck 生成、发布等）
+6. **工作流继续/结束阶段**（系统侧）
+   - 只有当前 `workflow_run_id` 的全部必审项确认后，运行级 gate 才解锁
+   - 已确认内容回写当前 `workflow_run_id`；待审阅或已驳回状态不得调用后续执行
+   - 若 Deck 插件定义确认后的下一步骤，则 Claude Agent 按同一锁定快照继续；若确认是终点，则该运行完成
 
 #### 4.5.2 表格交互
 
@@ -469,7 +603,8 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
         ↓                 ↓                 ↓
    状态→confirmed    状态→confirmed     状态→rejected
    Toast「已确认」    Toast「已确认」    Toast「已驳回」
-   进入后续执行       进入后续执行        Agent 重新生成
+   全部确认后放行       全部确认后放行        原快照下 Agent 重新生成
+```
 
 ---
 
@@ -479,11 +614,13 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 
 | 模块 | 空态文案 | 操作 |
 |------|----------|------|
-| **工作台首页（无 Agent 产出）** | **"还没有剧本内容，请先让 Agent 生成"** | **提示用户前往 Chat 触发 Agent** |
+| **Dream 入口页（无 Agent 产出）** | **"还没有剧本内容，请先让 Agent 生成"** | **在 Dream 页面选择工作流并发起创作** |
 | **故事列表（无待审阅）** | **"暂无待审阅的剧本"** | **显示已确认剧本列表 / 提示触发 Agent** |
 | **角色列表（无 Agent 生成角色）** | "还没有角色，等待 Agent 生成" | 提示触发 Agent |
 | **场景列表（无 Agent 生成场景）** | "还没有场景，等待 Agent 生成" | 提示触发 Agent |
 | 搜索结果 | "未找到匹配的结果" | 清除搜索条件 |
+| **无 Deck 插件** | **"还没有可用的 Deck 工作流"** | **前往 Deck 编辑器自定义并发布插件** |
+| **未选择 Deck 插件** | **"请先选择创作工作流"** | **打开 Deck 工作流选择器；不启动 Agent** |
 
 **空态视觉**：
 - 居中显示
@@ -509,6 +646,10 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 | 保存失败 | 表单字段级错误提示 + 全局错误提示 |
 | 网络错误 | 轻提示（Toast）+ 自动重试 |
 | 权限错误 | 错误页面 + 返回首页按钮 |
+| **Deck 插件不可用** | **保留当前选择信息并标记“已停用/无权限/版本不可用”，要求重新选择；不自动回退默认插件** |
+| **Deck 运行配置缺失或不兼容** | **展示缺失配置项类别与“前往 Deck 配置”入口；不展示敏感值，不启动 Agent** |
+| **工作流执行失败/超时** | **显示失败步骤、可安全重试提示与 `workflow_run_id`；默认沿用锁定快照重试** |
+| **产出持久化失败** | **运行标记为失败且不生成待审阅行；禁止把部分数据呈现为完整产出** |
 
 ### 5.4 选中态 (Selected)
 
@@ -519,6 +660,10 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 | 批量操作 | 顶部出现批量操作栏（固定） |
 | **待审阅项** | **行左侧 Memory Yellow 竖条标记（4px）提示待审阅** |
 | **已驳回项** | **行左侧红色竖条标记（4px）提示需重新生成** |
+
+### 5.5 Dream 审阅 gate 状态
+
+`StoryWorkspaceReviewGateState` 与可序列化的 `story-workspace-*` 状态值以 3.6.2 为唯一新增合同。页面关闭、路由切换或刷新只可重新读取 gate，不可将 `pending_review` 推进为 `confirmed`；任何绕过页面直接请求继续的行为都必须被服务端拒绝。
 
 ---
 
@@ -581,6 +726,14 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 - [ ] **批量审阅操作（批量确认/驳回）可用**
 - [ ] 空态、加载态、错误态、选中态均有实现
 - [ ] **Agent 生成中状态有 Loading 指示**
+- [ ] 可选择已发布、可用的 Deck 插件，并清楚展示插件名称与版本
+- [ ] 执行前能显示 Deck 运行配置就绪/缺失/不兼容状态；未就绪时 Agent 不会启动
+- [ ] 每个剧本产出可追溯到 `deck_plugin_binding_id + binding_revision`、`deck_plugin_version`、`deck_runtime_snapshot_id`、`runtime_plugin_lock_id` 与 `workflow_run_id`
+- [ ] 切换 Deck 插件只影响新运行，既有剧本来源不被改写
+- [ ] 全局顶部导航可见 Dream，点击进入 `/story-workspace/dream`；任一 `/story-workspace/*` 子页保持 Dream 选中，其他平台页面显示未选中
+- [ ] `/story-workspace` 与 `/story-workspace/dashboard` 只重定向至 canonical Dream 入口，不产生平行状态
+- [ ] Dream 页面同时可见工作流上下文、四步审阅 gate、产出数据表与右侧 Review Panel
+- [ ] 任一必审项待审阅或驳回时，后续继续/结束不可触发；全部确认后仅触发一次
 
 ### 7.2 视觉验收
 
@@ -617,11 +770,18 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 | **审阅流程的用户体验复杂度** | **中** | **简化审阅操作，提供明确的确认/驳回/编辑路径** |
 | 角色可视化模块（六模块）本期无法实现 | 低 | 以数据表呈现，后续迭代可视化 |
 | 复杂画布（故事板/时间线）本期无法实现 | 低 | 明确范围外，以表格状态字段替代 |
+| Deck 插件版本被停用或删除导致历史来源不可查询 | 中 | story-workspace 保留不可变版本标识与显示快照；历史产出不改绑新版本 |
+| Deck 运行配置缺失、无权限或与 Deck 插件不兼容 | 高 | 启动前强制校验，失败时阻断执行并给出 Deck 配置入口 |
+| 敏感插件配置被复制到 story-workspace | 高 | 仅保存受控快照引用与非敏感状态，不复制或渲染敏感配置值 |
+| 顶部 Dream 入口与既有 Dashboard 形成双状态 | 高 | 以 `/story-workspace/dream` 为 canonical，旧入口只重定向，不复制 store 或运行上下文 |
+| 客户端或重试绕过审阅 gate | 高 | 服务端以 `workflow_run_id` + 审阅版本校验全部必审项，确认与继续均幂等 |
 
 ### 依赖
 
 - [SUO-198](/SUO/issues/SUO-198) 父 Issue 的范围约束
 - **`claude-agent` 服务**：Agent 产出剧本内容的能力（见 CLAUDE.md）
+- **Deck 模块**：提供工作流编辑发布、版本化 Agent profile/提示词/插件配置、secret-ref、权限、执行前解析与不可变运行快照
+- **Deck 编辑器 / Deck 插件目录**：提供 Deck 内部编辑发布界面及可选择的已发布版本
 - `frontend/src/styles/tokens.css` 色彩系统
 - 现有 Workspace 文件管理 API（文件上传/下载能力复用）
 
@@ -640,6 +800,12 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 | DEC-006 | 2026-08-01 | **仅桌面端设计，排除移动端/平板端** | DesignArchitect + local-board | **明确排除所有移动端适配** |
 | **DEC-007** | **2026-08-01** | **核心工作流：Agent 产出 → 页面渲染 → 用户审阅确认 → 执行** | **DesignArchitect + local-board** | **重新定义业务模型：从手动 CRUD 改为审阅确认** |
 | **DEC-008** | **2026-08-01** | **用户不手动创建内容，仅审阅 Agent 产出** | **local-board** | **明确用户角色为审阅者而非创作者** |
+| **DEC-009** | **2026-08-01** | **Deck 是唯一业务模块；Deck Editor、Deck Plugin、Deck 运行配置与 binding 是其内部职责，story-workspace 只消费公开合同并保存运行/结果，不编辑 Deck 定义或配置** | **local-board + DesignArchitect** | **落实 SUO-235 裁决；见 3.5** |
+| **DEC-010** | **2026-08-01** | **单次运行锁定 Deck 插件版本、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`，切换只影响新运行** | **DesignArchitect** | **保证运行可复现和产出可溯源** |
+| **DEC-011** | **2026-08-01** | **Deck release、运行配置、权限或 runtime preflight 任一失败时禁止启动 Claude Agent** | **DesignArchitect** | **定义未配置、无权限、不兼容时的失败边界** |
+| **DEC-017** | **2026-08-01** | **全局 Dream 导航以 `/story-workspace/dream` 为 canonical 入口，Dashboard 仅兼容重定向** | **DesignArchitect + local-board** | **确定导航与选中态合同，保留既有路由兼容性** |
+| **DEC-018** | **2026-08-01** | **运行级审阅 gate 在全部必审项确认前禁止继续或结束** | **DesignArchitect + local-board** | **影响 Dream 页面状态、确认幂等与服务端防绕过合同** |
+| **DEC-019** | **2026-08-01** | **提示词、运行配置、secret-ref、权限与不可变快照统一归属 Deck，并使用 `deck_runtime_*` 合同** | **local-board + DesignArchitect** | **统一所有权、字段、错误码和 participant** |
 
 ---
 
@@ -648,6 +814,9 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 - **初始版本**（2026-08-01）：创建本文档，定义 story-workspace 的 PRD 设计
 - **修订 2**（2026-08-01）：根据评论「设计稿的主要属性，应该参考 Dreem 调研 PDF 中的截图」—— 新增 3.3「Dreem 截图视觉参考分析」章节
 - **修订 3**（2026-08-01）：**根据评论「交互流程应该是 Agent 产出剧本工作空间，然后页面渲染剧本信息，用户确认，后续执行」—— 重大业务模型修正：从「手动 CRUD」改为「Agent 产出 → 用户审阅确认」模式。影响范围：背景目标、范围内/外、信息架构、交互设计、状态设计、验收标准、风险依赖、关键决策**
+- **修订 4 / SUO-214**（2026-08-01）：根据 SUO-198 评论 `41db518b-006f-4289-a89b-dd722ffe8723`，首次补充 Deck Editor、Deck Plugin、运行配置与 story-workspace 的职责、选择/执行时序、失败状态和版本溯源；其中早期独立配置域解释已在修订 6 废弃。未改变桌面三栏、`story-workspace` 前缀、表格替代复杂画布和排除视频的稳定约束。
+- **修订 5 / SUO-230**（2026-08-01）：根据 SUO-198 评论 `2eff7996-aa5e-4371-a557-fb9a39037310` 与边界验收，新增全局顶部 Dream 导航、canonical `/story-workspace/dream` 路由、选中/未选中状态、Dream 页面四步可见审阅 gate、确认幂等/防绕过规则及 issue/task/stage 影响；不改写 SUO-211/212/213 的稳定结论。
+- **修订 6 / SUO-236**（2026-08-01）：按 SUO-235 将业务模块和设计元语统一为 Deck；保留运行配置、不可变快照、secret-ref、权限、preflight、审计、重试和回滚语义，并统一字段为 `deck_runtime_*`、错误码为 `DECK_RUNTIME_CONFIG_*`。
 
 ---
 
@@ -657,18 +826,19 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 |----|------|------|
 | [CLARIFICATION_NEEDED] 角色头像上传规格 | 待确认 | 是否需要四视角转面图？本期仅支持单张头像？ |
 | [CLARIFICATION_NEEDED] 故事/剧本内容编辑器 | 待确认 | 详情面板中故事内容的编辑方式（纯文本/Markdown/富文本）？ |
-| [CLARIFICATION_NEEDED] 与 Deck 编辑器的关系 | 待确认 | 故事内容是否与 Deck 系统打通？ |
-| **[CLARIFICATION_NEEDED] Agent 产出的触发方式** | **待确认** | **用户如何在 Chat 中触发 Agent 生成剧本？是否需要专门的指令或按钮？** |
-| **[CLARIFICATION_NEEDED] 驳回后的重新生成流程** | **待确认** | **用户驳回后，Agent 重新生成的时序和通知机制？** |
-| **[CLARIFICATION_NEEDED] 已确认内容的后续执行** | **待确认** | **用户确认后，内容进入什么下游流程？（Deck 生成？发布？）** |
+| 与 Deck 编辑器的关系 | **已关闭** | **按 DEC-009：Deck Editor 编辑/发布 Deck Plugin；story-workspace 选择插件并消费其工作流，不把剧本转成 Deck 卡片，也不在本模块编辑工作流** |
+| Agent 产出的触发方式 | **已收敛** | **先在 Dream 页面选择 Deck 插件并通过 story-workspace `WorkflowPreflight`（调用 Deck 校验），再由 Dream 页内创作输入复用现有 Chat 能力并携带工作流上下文触发 Claude Agent；不得跳离 Dream 完成该流程** |
+| 驳回后的重新生成流程 | **已收敛** | **默认沿用原 Deck 插件版本、Deck 运行快照与 runtime lock，附加审阅意见重试；改选工作流则创建新运行** |
+| 已确认内容的后续执行 | **已收敛** | **按所选 Deck 插件定义的确认后步骤继续；若确认是该工作流终点，则运行结束** |
+| **[CLARIFICATION_NEEDED] Deck 技术传输合同** | **不阻塞 design；下游 owner：IssueDispatcher → BackendTaskAgent** | **需在增量 Issue/Task 中明确可用插件查询、`WorkflowPreflight` 与 Deck 校验、运行创建及来源字段的 API/事件合同、权限和幂等；不得改变 DEC-009～DEC-011、DEC-019** |
 
 **默认假设**：
 - 角色头像本期仅支持单张图片上传，四视角转面图为后续迭代
 - 故事内容编辑本期为纯文本/Markdown，富文本编辑器后续迭代
-- 与 Deck 编辑器的关系在后续迭代中明确
-- **Agent 产出通过现有 Chat 对话中的指令触发（如「生成一个关于...的剧本」）**
-- **驳回后 Agent 重新生成通过同一 Chat 线程进行**
-- **已确认内容暂存，后续执行流程在后续迭代中定义**
+- **Deck 插件选择为工作区/用户当前创作上下文；单次运行以锁定快照为准，不能被后续选择覆盖**
+- **Agent 产出由 Dream 页内创作输入触发；可复用现有 Chat 会话能力，但页面上下文与审阅闭环始终留在 Dream，且请求必须携带已校验的 Deck release、运行快照与 runtime lock**
+- **驳回后默认在同一工作流快照下重新生成，并保留原运行与失败记录**
+- **已确认内容按所选 Deck 插件的后续步骤继续或结束，不再使用未定义的“Deck 生成”占位语义**
 
 ---
 
@@ -678,3 +848,5 @@ Agent 生成 → 待审阅 → 用户确认 → 已确认 → 后续执行
 2. **视觉一致性检查**：对照 `tokens.css` 验证色彩/字体应用
 3. **范围确认**：对照「范围内/范围外」清单确认实现边界
 4. **命名检查**：确认所有业务标识使用 `story-workspace` 前缀
+5. **关系与状态检查**：确认 Deck/story-workspace/Claude Agent 职责、选择/执行时序、版本溯源及未配置/失败状态在本文均可定位，且不存在独立配置 owner
+6. **Dream 入口与 gate 检查**：检索 `story-workspace-dream`、`/story-workspace/dream`、`StoryWorkspaceReviewGate`、`story-workspace-pending-review`、`DEC-017`、`DEC-018`，并确认待审阅/驳回时没有后续执行路径

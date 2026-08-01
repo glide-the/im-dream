@@ -16,6 +16,7 @@
 #                    text for Claude Agent history retrieval.
 # [Sync] 2026-07-09: allow Chat thread lists to page newest-first with
 #                    limit/offset so the frontend history panel can scroll load.
+# [Sync] 2026-08-01: add the Story Workspace schema, indexes, and rollback helper.
 """
 SQLite database setup and migrations for Ink & Memory.
 
@@ -541,6 +542,153 @@ def create_tables(db):
         else:
             logger.warning("Drop parts_json column warning (non-fatal): %s", exc)
 
+    # Story Workspace tables. Keep parent tables before their dependants so the
+    # same migration works with foreign-key enforcement enabled.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS story_workspace_workspaces (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      owner_id INTEGER NOT NULL,
+      settings TEXT DEFAULT '{}',
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (owner_id) REFERENCES users (id)
+    )
+    """)
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS story_workspace_stories (
+      id TEXT PRIMARY KEY,
+      identifier TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'draft'
+        CHECK(status IN ('draft', 'published', 'archived')),
+      review_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
+      type TEXT NOT NULL DEFAULT 'short'
+        CHECK(type IN ('short', 'long', 'script', 'outline')),
+      content TEXT,
+      author_id INTEGER NOT NULL,
+      workspace_id TEXT NOT NULL,
+      character_count INTEGER NOT NULL DEFAULT 0,
+      scene_count INTEGER NOT NULL DEFAULT 0,
+      agent_generated INTEGER NOT NULL DEFAULT 1
+        CHECK(agent_generated IN (0, 1)),
+      agent_session_id TEXT,
+      review_notes TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      confirmed_at DATETIME,
+      published_at DATETIME,
+      FOREIGN KEY (author_id) REFERENCES users (id),
+      FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
+    )
+    """)
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS story_workspace_characters (
+      id TEXT PRIMARY KEY,
+      identifier TEXT NOT NULL,
+      name TEXT NOT NULL,
+      avatar_url TEXT,
+      identity TEXT,
+      personality TEXT,
+      background TEXT,
+      catchphrase TEXT,
+      tags TEXT DEFAULT '[]',
+      notes TEXT,
+      author_id INTEGER NOT NULL,
+      workspace_id TEXT NOT NULL,
+      story_count INTEGER NOT NULL DEFAULT 0,
+      review_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
+      agent_generated INTEGER NOT NULL DEFAULT 1
+        CHECK(agent_generated IN (0, 1)),
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (author_id) REFERENCES users (id),
+      FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
+    )
+    """)
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS story_workspace_scenes (
+      id TEXT PRIMARY KEY,
+      identifier TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      story_id TEXT,
+      author_id INTEGER NOT NULL,
+      workspace_id TEXT NOT NULL,
+      character_count INTEGER NOT NULL DEFAULT 0,
+      order_index INTEGER NOT NULL DEFAULT 0,
+      review_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
+      agent_generated INTEGER NOT NULL DEFAULT 1
+        CHECK(agent_generated IN (0, 1)),
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (story_id) REFERENCES story_workspace_stories (id),
+      FOREIGN KEY (author_id) REFERENCES users (id),
+      FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
+    )
+    """)
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS story_workspace_story_characters (
+      story_id TEXT NOT NULL,
+      character_id TEXT NOT NULL,
+      role_type TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (story_id, character_id),
+      FOREIGN KEY (story_id) REFERENCES story_workspace_stories (id),
+      FOREIGN KEY (character_id) REFERENCES story_workspace_characters (id)
+    )
+    """)
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS story_workspace_scene_characters (
+      scene_id TEXT NOT NULL,
+      character_id TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (scene_id, character_id),
+      FOREIGN KEY (scene_id) REFERENCES story_workspace_scenes (id),
+      FOREIGN KEY (character_id) REFERENCES story_workspace_characters (id)
+    )
+    """)
+
+    story_workspace_indexes = (
+        "CREATE INDEX IF NOT EXISTS idx_sw_workspaces_owner "
+        "ON story_workspace_workspaces(owner_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_stories_author "
+        "ON story_workspace_stories(author_id, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_stories_review_status "
+        "ON story_workspace_stories(review_status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_stories_status "
+        "ON story_workspace_stories(status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_stories_type "
+        "ON story_workspace_stories(type, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_stories_search "
+        "ON story_workspace_stories(title)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_stories_agent "
+        "ON story_workspace_stories(agent_session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_characters_author "
+        "ON story_workspace_characters(author_id, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_characters_name "
+        "ON story_workspace_characters(name)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_characters_review "
+        "ON story_workspace_characters(review_status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_scenes_story "
+        "ON story_workspace_scenes(story_id, order_index)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_scenes_author "
+        "ON story_workspace_scenes(author_id, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_sw_scenes_review "
+        "ON story_workspace_scenes(review_status, updated_at DESC)",
+    )
+    for index_sql in story_workspace_indexes:
+        db.execute(index_sql)
+
     # Reflections section configs — per-user custom prompt files for each section.
     # Falls back to reflections_config.py defaults when no row exists.
     db.execute("""
@@ -618,6 +766,22 @@ def create_tables(db):
     db.commit()
 
     print("✅ Tables created")
+
+
+def drop_story_workspace_tables(db):
+    """Drop Story Workspace tables for migration rollback or isolated tests."""
+
+    tables = (
+        "story_workspace_scene_characters",
+        "story_workspace_story_characters",
+        "story_workspace_scenes",
+        "story_workspace_characters",
+        "story_workspace_stories",
+        "story_workspace_workspaces",
+    )
+    for table in tables:
+        db.execute(f"DROP TABLE IF EXISTS {table}")
+    db.commit()
 
 def seed_system_decks():
     """Seed system decks and voices. Idempotent - safe to call multiple times."""
