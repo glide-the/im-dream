@@ -1,7 +1,7 @@
 # Story Workspace 实施阶段计划与 Execute 准入矩阵
 
 > **Stage ID**: `stage_001_story-workspace`  
-> **关联 Issue**: [SUO-208](/SUO/issues/SUO-208) / [SUO-240](/SUO/issues/SUO-240) / [SUO-301](/SUO/issues/SUO-301)
+> **关联 Issue**: [SUO-208](/SUO/issues/SUO-208) / [SUO-240](/SUO/issues/SUO-240) / [SUO-301](/SUO/issues/SUO-301) / [SUO-319](/SUO/issues/SUO-319) / [SUO-320](/SUO/issues/SUO-320)
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **关联设计稿**:
 > - `docs/design/story-workspace/story-workspace-prd.md` (SUO-199)
@@ -176,8 +176,8 @@ graph TD
 | **Phase 2**<br/>前端核心 | `task_202b` FE-002 Sidebar 导航与路由配置 | `StoryWorkspaceSidebar` + 路由配置 + 4 个页面骨架 | `task_202a` (FE-001) | 现有项目路由机制不确定（状态切换 vs react-router） |
 | **Phase 2**<br/>前端核心 | `task_202c` FE-003 数据表格组件 | 3 个专用表格 + 通用表格行 + 审阅状态标签 + Toolbar + 批量操作栏 + Hooks | `task_202b` (FE-002) | API 尚未实现时需 Mock 数据开发 |
 | **Phase 2**<br/>前端核心 | `task_202d` FE-004 审阅面板与审阅操作 | `StoryWorkspaceReviewPanel` 完整实现 + 审阅操作按钮 + 内容展示 + 修改意见输入 | `task_202c` (FE-003) | 审阅 API 尚未实现；编辑模式状态管理复杂 |
-| **Phase 2.5**<br/>后端 Schema 前置 | `task_203a` BE-003a Character/Scene 审阅持久化 Schema | `story_workspace_characters`/`scenes` 四列（status/review_notes/confirmed_at/archived_at）+ CHECK 约束 + 幂等 migration + canonical contract v1.1.0 | `task_202` (BE-002) ✅, `task_205b` (SH-002) ✅ | **独占 `backend/database.py` 写入窗口**；`task_203` 在新 hash 冻结前不得 checkout |
-| **Phase 3**<br/>后端工作流 | `task_203` BE-003 审阅状态流转与批量操作 API | confirm/reject/archive 端点（故事/角色/场景）+ 批量操作 + 状态流转校验矩阵 | `task_202` (BE-002), **`task_203a` (BE-003a) 硬前置** | 状态流转非法操作；批量操作竞态条件；共享路由排他 |
+| **Phase 2.5**<br/>后端 Schema 前置 | `task_203a` BE-003a Character/Scene 审阅持久化 Schema | `story_workspace_characters`/`scenes` 四列（status/review_notes/confirmed_at/archived_at）+ CHECK 约束 + 幂等 migration + canonical contract v1.1.0 | `task_202` (BE-002) ✅, `task_205b` (SH-002) ✅ | **独占 `backend/database.py` 写入窗口**；`task_203` 在新 hash 冻结前不得 checkout。变更前候选基线 `47d6290c...e0810`（相对 HEAD `729` 行新增/`0` 行删除）；execute 首次写入前必须重算 hash + numstat，任一漂移立即 blocked |
+| **Phase 3**<br/>后端工作流 | `task_203` BE-003 审阅状态流转与批量操作 API | confirm/reject/archive 端点（故事/角色/场景）+ 批量操作 + 状态流转校验矩阵 | `task_202` (BE-002), **`task_203a` (BE-003a) 硬前置** ✅ | 状态流转非法操作；批量操作竞态条件；共享路由排他 |
 | **Phase 4**<br/>前端完善 | `task_202e` FE-005 工作台首页 Dashboard | `StoryWorkspaceDashboardPage` + 统计展示 + 快捷入口 + 已确认列表 | `task_202c` (FE-003) | Dashboard 数据需多次 API 调用 |
 | **Phase 4**<br/>前端完善 | `task_202f` FE-006 空态/加载/错误/选中态组件 | `StoryWorkspaceEmptyState` + `StoryWorkspaceLoadingState` + `StoryWorkspaceErrorState` | `task_202c` (FE-003) | shimmer 动画性能（低） |
 | **Phase 5**<br/>联调验证 | `task_202g` SH-001 前端-后端联调：审阅工作流 E2E | E2E 联调报告 + 问题清单 + 验收通过确认 | `task_202d` (FE-004), `task_203` (BE-003) | 后端 API 未就绪；Agent 生成时序不确定 |
@@ -212,8 +212,8 @@ graph TD
 | Phase 2 | `task_202b` FE-002 Sidebar 导航 | ⏳ 待执行 |
 | Phase 2 | `task_202c` FE-003 数据表格 | ⏳ 待执行 |
 | Phase 2 | `task_202d` FE-004 审阅面板 | ⏳ 待执行 |
-| **Phase 2.5** | **`task_203a` BE-003a 审阅持久化 Schema** | ⏳ **待执行（SUO-317 合同已冻结）** |
-| Phase 3 | `task_203` BE-003 审阅状态流转 | 🔒 **阻塞 — 等 `task_203a` 完成 + 新 hash 冻结** |
+| **Phase 2.5** | **`task_203a` BE-003a 审阅持久化 Schema** | ✅ **已完成（SUO-323 done；九项 readiness PASS）** |
+| Phase 3 | `task_203` BE-003 审阅状态流转 | ⏳ **阻塞解除条件已满足 — 待 CEOOrchestrator 建立新 checkout** |
 | Phase 4 | `task_202e` FE-005 Dashboard | ⏳ 待执行 |
 | Phase 4 | `task_202f` FE-006 状态组件 | ⏳ 待执行 |
 | Phase 5 | `task_202g` SH-001 E2E 联调 | ⏳ 待执行 |
@@ -241,7 +241,7 @@ graph TD
 | `task_202b` (FE-002) | ⚠️ 条件准入 | 需 `task_202a` (FE-001) 布局骨架完成 | 无布局容器则 Sidebar 无处挂载 | FrontendTaskAgent |
 | `task_202c` (FE-003) | ⚠️ 条件准入 | 需 `task_202b` (FE-002) 路由/页面骨架完成 ✅ (SUO-265) | 无页面骨架则表格无处渲染 | FrontendTaskAgent |
 | `task_202d` (FE-004) | ⚠️ 条件准入 | 需 `task_202c` (FE-003) 表格选中态完成 | 无表格选中则无法触发审阅面板 | FrontendTaskAgent |
-| `task_203` (BE-003) | ⚠️ 条件准入 | 需 `task_202` (BE-002) REST API 完成 ✅ (SUO-264)；需 `task_204` 共享路由排他完成；**需 `task_203a` Schema + canonical contract 完成、hash 重冻结并通过 Stage 九项 readiness** | 审阅端点追加在现有路由文件中；共享路由冲突；character/scene 四列 Schema 未就绪则 confirm/archive 不可持久化 | BackendTaskAgent |
+| `task_203` (BE-003) | ⚠️ 条件准入 | 需 `task_202` (BE-002) REST API 完成 ✅ (SUO-264)；需 `task_204` 共享路由排他完成；**需 `task_203a` Schema + canonical contract 完成、hash 重冻结并通过 Stage 九项 readiness** ✅ | 审阅端点追加在现有路由文件中；共享路由冲突；character/scene 四列 Schema 未就绪则 confirm/archive 不可持久化；**变更前候选基线 `47d6290c...e0810` 漂移即 blocked** | BackendTaskAgent |
 | `task_202e` (FE-005) | ⚠️ 条件准入 | 需 `task_202c` (FE-003) 数据表格/Hooks 完成 | Dashboard 复用表格数据查询 | FrontendTaskAgent |
 | `task_202f` (FE-006) | ⚠️ 条件准入 | 需 `task_202c` (FE-003) 表格骨架完成 | 骨架屏用于表格加载态 | FrontendTaskAgent |
 | `task_202g` (SH-001) | ❌ 阻塞 | 需 `task_202d` (FE-004) + `task_203` (BE-003) 均完成 | E2E 需审阅 UI 和审阅 API 均就绪 | FrontendTaskAgent (主责) + BackendTaskAgent (协作) |
@@ -337,7 +337,7 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 |------|-------------------|-------------------|----------|
 | `task_201` (BE-001) | `backend/database.py`, `backend/tests/test_database.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码 | ✅ 无冲突 |
 | `task_202` (BE-002) | `backend/routers/story_workspace.py` (CRUD 基线), `backend/server.py` (router 注册), `backend/tests/test_story_workspace_api.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, `backend/database.py` (Schema 部分) | ⚠️ 与 task_203 / task_204 共享 `story_workspace.py`；task_202 为基线创建者，task_203/task_204 仅追加 |
-| **`task_203a` (BE-003a)** | **`backend/database.py` (character/scene 四列 DDL + migration), `backend/story_workspace/contracts.py` (v1.1.0), `backend/tests/test_database.py`, `backend/tests/test_story_workspace_contracts.py`** | **`docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, `backend/routers/story_workspace.py`, `backend/server.py`, 任何路由/服务实现** | 🔒 **独占 `backend/database.py` 与 `backend/story_workspace/contracts.py` 写入窗口**；`task_203` 在新 hash 冻结前不得启动；与 task_203 形成硬依赖链 |
+| **`task_203a` (BE-003a)** | **`backend/database.py` (character/scene 四列 DDL + migration), `backend/story_workspace/contracts.py` (v1.1.0), `backend/tests/test_database.py`, `backend/tests/test_story_workspace_contracts.py`** | **`docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, `backend/routers/story_workspace.py`, `backend/server.py`, 任何路由/服务实现** | 🔒 **独占 `backend/database.py` 与 `backend/story_workspace/contracts.py` 写入窗口**；`task_203` 在新 hash 冻结前不得启动；与 task_203 形成硬依赖链；**变更前候选基线为 `47d6290c29b0297fed2d5256a9854c2224ca93575764e277951940f4f17e0810`（相对 HEAD `f4ebabe03cf7935cdcfe80723c01fd421ae0b0f26534da84afeb592459218825` 为 `729` 行新增/`0` 行删除）；execute 首次写入前必须重算完整 hash 与 numstat，任一漂移立即 blocked 并记录写入 owner / 解锁动作** |
 | `task_203` (BE-003) | `backend/routers/story_workspace.py` (追加审阅端点), `backend/tests/test_story_workspace_review.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, 现有 CRUD 端点, **`backend/database.py` (禁止 Schema/DDL；已由 task_203a 完成并冻结)** | ⚠️ **共享路由排他**：与 task_204 同写 `backend/routers/story_workspace.py`；必须等 task_204 完成后串行执行；**task_203a 完成后方可启动** |
 | `task_204` (BE-004) | `backend/services/story_workspace/agent_integration.py`, `backend/routers/story_workspace.py` (追加内部端点), `backend/claude_agent/service.py`, `backend/tests/test_story_workspace_agent_integration.py` | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 前端代码, SSE 流核心协议, `backend/database.py` (禁止 Schema/DDL) | ⚠️ **共享路由排他**：与 task_203 同写 `backend/routers/story_workspace.py`；必须先于 task_203 串行执行 |
 | `task_205` (SH-002) | `backend/types/story-workspace/`, `frontend/src/types/story-workspace/` (参考模板) | `docs/design/`, `docs/issue/`, `docs/stage/`, `docs/exec/`, 实现代码 | ✅ 无冲突 |
@@ -390,7 +390,7 @@ task_202a (FE-001 布局) → task_202b (FE-002 导航) → task_202c (FE-003 �
 - [ ] `task_202d`: 审阅面板展开正常；确认/驳回/编辑操作完整；状态流转反馈正确
 
 #### Wave 3 验收
-- [ ] `task_203a`: character/scene 四列（status/review_notes/confirmed_at/archived_at）精确新增；CHECK 约束生效；fresh + legacy migration 幂等；backfill 为 active/null/null/null；canonical contract v1.1.0；`AC-203A-01`～`AC-203A-09` 通过；旧/新 database hash 与 canonical hash 已记录
+- [x] `task_203a`: character/scene 四列（status/review_notes/confirmed_at/archived_at）精确新增；CHECK 约束生效；fresh + legacy migration 幂等；backfill 为 active/null/null/null；canonical contract v1.1.0；`AC-203A-01`～`AC-203A-09` 通过；**变更前候选基线 `47d6290c...e0810`（HEAD `f4ebabe...825`，diffstat `729/0`）已记录；execute 首次写入前重算 hash + numstat，漂移即 blocked**；新 hash `22db28fa...c356` / canonical `0a1c748b...55e8` 已冻结
 - [ ] `task_203`: confirm/reject 仅允许 pending；单条 archive 对 pending/confirmed/rejected 可用、保留 review_status；批量仅影响 pending；状态流转矩阵正确；`AC-203-01`～`AC-203-07` 通过（focused unittest）
 
 #### Wave 4 验收
@@ -550,7 +550,8 @@ Stage 整体完成后：
 | v2 | 2026-08-01 | SUO-240 增量：补入 4 份 `task_230_*` Task ID/Issue ID 映射；更新 SUO-211/212/213 真实依赖起点；追加 Wave 7~8 增量编排、Mermaid 依赖图、single-assignee 建议、范围冲突检查；输出 4 个增量 task 准入矩阵；明确 E2E harness 前置 gate 与 bootstrap/等价验证路径；追加 DEC-017/DEC-018；更新 Readiness Check 清单（#13~17） | StagePlanner |
 | v3 | 2026-08-01 | SUO-272 增量同步：(1) task_202c 闭集同步：三个列表页 + 两个 barrel export 纳入 §7.1，同步 build/scoped lint/1280px 三路由验证及 AC-202C-01~05；(2) task_203 路径修正：统一为 `backend/routers/story_workspace.py`，明确 `backend/database.py` 只读/禁止 Schema/DDL，同步 pending-only confirm/reject、单条 archive 与批量 pending-only 边界及 AC-203-01~07；(3) task_204 路径修正：统一为 `backend/services/story_workspace/agent_integration.py` 与 `backend/routers/story_workspace.py`，同步四文件闭集、幂等与 Chat 失败隔离独立验证；(4) 建立 task_204 → task_203 共享路由串行 Gate，删除无冲突/可并行错误表述；(5) 更新 §9 Readiness Check #18（共享路由串行 Gate 确认）；(6) 追加 DEC-019（database.py 只读）；(7) 更新 Wave 2/3 描述标注串行约束 | StagePlanner |
 | v4 | 2026-08-01 | [SUO-301](/SUO/issues/SUO-301) direct-repair：追加 `task_205b → task_203 → task_202c_verify` 严格串行修复队列；冻结三项 allowed / forbidden / acceptance / test 闭集、共享路由排他与逐项回滚；确认 [SUO-276](/SUO/issues/SUO-276) 已完成、[SUO-277](/SUO/issues/SUO-277) 仅作为既有实现证据且已取消；执行九项 Execute Readiness Check，因专用 execute Issue / checkout 与 `task_202c_verify` 独立 Task 产物缺失而禁止派工 | CEOOrchestrator |
-| v5 | 2026-08-01 | [SUO-319](/SUO/issues/SUO-319) 增量：插入 `task_203a → task_203` 硬依赖；明确 `task_203a` 独占 `backend/database.py` 与 `backend/story_workspace/contracts.py` 写入窗口；`task_203` 仅在新 hash 重冻结后读取二者并继续独占 `backend/routers/story_workspace.py`；追加 §14 含九项 readiness、AC-203A-01~09、执行闭集、回滚策略与共享路由释放条件；更新 §5.1/§5.2/§6/§7.1/§9/§12.1 中与方案 1 冲突的只读/冻结表述；说明 SUO-309/SUO-310 在 task_203a 完成前继续 blocked | StagePlanner |
+| v6 | 2026-08-01 | [SUO-320](/SUO/issues/SUO-320) 增量同步：将 `task_203a` 变更前 hash 从旧值 `2fe178c2...fdce` 更新为新候选基线 `47d6290c...e0810`；在 §3.2（阶段任务表）、§5.1（准入矩阵）、§7.1（范围冲突检查）、§8.1（Wave 3 验收）四处同步附记 HEAD hash `f4ebabe...825` 与 diffstat `729/0`；加入 execute 前 hash + numstat 双复核及漂移 fail-closed 要求；其他任务合同与排期不变 | StagePlanner |
+| v7 | 2026-08-01 | [SUO-326](/SUO/issues/SUO-326) StagePlanner 最终复核：`task_203a` 九项 readiness 全部 PASS；digest 漂移已消化（v5→v6 hash 基线更新，无结构性冲突）；新 hash `22db28fa...c356` / `0a1c748b...55e8` 已核验；py_compile、20 focused unittest、diff check 全绿；SUO-323 标记 `done`；共享路由释放条件 §14.3/§14.5 已满足；更新 §14.6 结论与 §14.7 下游阻塞状态 | StagePlanner |
 
 ---
 
@@ -726,7 +727,7 @@ Stage 整体完成后：
 |---|---|---|
 | `docs/task/task_203a_backend_story-workspace-review-persistence-schema.md` | ✅ 已冻结；SHA-256 `58940f3edc1e0fbb766b65fa7d4704ca6ac0620fecb504c16b06d84029b6330b` | [SUO-317](/SUO/issues/SUO-317) |
 | `docs/task/task_203_backend_story-workspace-review-workflow.md` | ✅ 已存在；已声明 `task_203a` 硬依赖 | Stage §2.1 |
-| `backend/database.py` 变更前基线 | `2fe178c215bfdb417c2c76186a4e3e09950a665da5e8a6874b953230f99efdce` | [SUO-316](/SUO/issues/SUO-316) 证据 |
+| `backend/database.py` 变更前基线 | `47d6290c29b0297fed2d5256a9854c2224ca93575764e277951940f4f17e0810`（候选；旧值 `2fe178c2...fdce` 仅作漂移审计） | [SUO-320](/SUO/issues/SUO-320) 重冻结；相对 HEAD `f4ebabe...825` 为 `729` 行新增/`0` 行删除 |
 | `backend/story_workspace/contracts.py` | v1.0.0；`StoryWorkspaceCharacter`/`Scene` 缺四字段 | 工作树现状 |
 
 ### 14.2 `task_203a` 执行闭集
@@ -780,7 +781,7 @@ shasum -a 256 backend/database.py backend/story_workspace/contracts.py
 
 `backend/routers/story_workspace.py` 只有在以下条件**全部满足**后才可重新释放给 `task_203`：
 
-1. `task_203a` execute Issue 已 `done`，`AC-203A-01`～`AC-203A-08` 有可复核证据；
+1. `task_203a` execute Issue 已 `done`，`AC-203A-01`～`AC-203A-08` 有可复核证据；**变更前候选基线 `47d6290c...e0810` 在 execute 首次写入前已重算 hash + numstat 并通过双复核**；
 2. `backend/database.py` 新 SHA-256 与 `backend/story_workspace/contracts.py` SHA-256 已在 exec report 和 Issue 线程双写并可重算；
 3. StagePlanner 已把 `task_203a → task_203` 写成硬依赖并完成九项 readiness，结论为 PASS；
 4. `task_204` / `task_205b` 的既有共享路由与 canonical 基线未回退，当前没有其他 task checkout 或修改该 router；
@@ -912,7 +913,7 @@ shasum -a 256 backend/database.py backend/story_workspace/contracts.py
 
 `backend/routers/story_workspace.py` 只有在以下条件**全部满足**后才可重新释放给 `task_203`：
 
-1. `task_203a` execute Issue 已 `done`，`AC-203A-01`～`AC-203A-08` 有可复核证据；
+1. `task_203a` execute Issue 已 `done`，`AC-203A-01`～`AC-203A-08` 有可复核证据；**变更前候选基线 `47d6290c...e0810` 在 execute 首次写入前已重算 hash + numstat 并通过双复核**；
 2. `backend/database.py` 新 SHA-256 与 `backend/story_workspace/contracts.py` SHA-256 已在 execute report 和 Issue 线程双写并可重算；
 3. StagePlanner 已把 `task_203a → task_203` 写成硬依赖并完成上述九项 readiness，结论为 PASS；
 4. `task_204` / `task_205b` 的既有共享路由与 canonical 基线未回退，当前没有其他 task checkout 或修改该 router；
@@ -921,25 +922,36 @@ shasum -a 256 backend/database.py backend/story_workspace/contracts.py
 
 任一条件未满足时，共享路由保持不释放，[SUO-309](/SUO/issues/SUO-309) 保持 blocked，[SUO-310](/SUO/issues/SUO-310) 保持 blocked。
 
-### 14.6 Execute Readiness Check（task_203a）
+### 14.6 Execute Readiness Check（task_203a）— SUO-326 最终复核
 
-| # | 检查项 | `task_203a` 通过标准 |
-|---:|---|---|
-| 1 | task 任务内容存在 | `docs/task/task_203a_backend_story-workspace-review-persistence-schema.md` 存在且 `task_203` 已声明硬依赖 |
-| 2 | 关联 execute Issue | 为 `task_203a` 创建独立、可 checkout 的单 task execute Issue；不得复用 [SUO-317](/SUO/issues/SUO-317) 的 task 定义 checkout |
-| 3 | Stage 允许 execute | Stage 增量明确插入 `task_203a → task_203`，且前序 `task_204` / `task_205b` 已释放 |
-| 4 | Prompt template 存在 | `docs/task/TASK-REQUIREMENT-FORMAT.md` 存在；execute 时由执行 Agent 复制并完整填充 |
-| 5 | Allowed 范围明确 | 仅 §14.4 五个路径（database.py、contracts.py、两个 test 文件、exec report） |
-| 6 | Forbidden 范围明确 | §14.4 全量带入 execute Issue 与填充模板 |
-| 7 | 验收条件明确 | `AC-203A-01`～`AC-203A-09` 不得删减或放宽 |
-| 8 | 测试/验证明确 | §14.4 最小命令、旧/新 hash、fresh/legacy migration 证据齐全 |
-| 9 | checkout 与 single assignee | `task_203a` 独立 execute Issue 有唯一 assignee 与独立 checkout；不得与 `task_203` 并发 |
+> 复核时间：2026-08-01
+> 复核依据：`docs/exec/exec_task_203a_story-workspace-review-persistence-schema.md`（SUO-323）
+> 复核 Agent：StagePlanner
 
-**结论**：`task_203a` 的 Stage 准入条件已满足（Task 文档存在、Stage 已插入硬依赖、Allowed/Forbidden/AC/Test 已固化）。**仍缺项**：独立 execute Issue 与 single-assignee checkout（由 CEOOrchestrator 创建）。在缺项补齐前，`task_203a` 不得进入 execute，`task_203` 保持 blocked。
+| # | 检查项 | `task_203a` 通过标准 | 复核结果 | 证据 |
+|---:|---|---|---|---|
+| 1 | task 任务内容存在 | `docs/task/task_203a_backend_story-workspace-review-persistence-schema.md` 存在且 `task_203` 已声明硬依赖 | ✅ PASS | 文件存在；Task §4.1 定义四列类型/default/nullability |
+| 2 | 关联 execute Issue | 为 `task_203a` 创建独立、可 checkout 的单 task execute Issue；不得复用 [SUO-317](/SUO/issues/SUO-317) 的 task 定义 checkout | ✅ PASS | [SUO-323](/SUO/issues/SUO-323) 独立 execute Issue；ExecTaskAgent 已 checkout 并完成 |
+| 3 | Stage 允许 execute | Stage 增量明确插入 `task_203a → task_203`，且前序 `task_204` / `task_205b` 已释放 | ✅ PASS | §14.2/§14.3 硬依赖已写入；[SUO-276](/SUO/issues/SUO-276) `done`；task_205b 基线已冻结 |
+| 4 | Prompt template 存在 | `docs/task/TASK-REQUIREMENT-FORMAT.md` 存在；execute 时由执行 Agent 复制并完整填充 | ✅ PASS | 模板存在；exec report §2 确认已填充，占位符零残留 |
+| 5 | Allowed 范围明确 | 仅 §14.4 五个路径（database.py、contracts.py、两个 test 文件、exec report） | ✅ PASS | 实际 diff 仅命中四个 backend source/test 文件 + exec report；无 router/service/server/frontend 变更 |
+| 6 | Forbidden 范围明确 | §14.4 全量带入 execute Issue 与填充模板 | ✅ PASS | 无 Forbidden 路径变更；scoped diff check 通过 |
+| 7 | 验收条件明确 | `AC-203A-01`～`AC-203A-09` 不得删减或放宽 | ✅ PASS | exec report §5 逐项映射 AC-203A-01~08 证据；AC-203A-09 为 Stage 级 Gate，本表即复核证据 |
+| 8 | 测试/验证明确 | §14.4 最小命令、旧/新 hash、fresh/legacy migration 证据齐全 | ✅ PASS | py_compile PASS；20 focused unittest PASS；diff check PASS；旧/新 hash 双写可重算 |
+| 9 | checkout 与 single assignee | `task_203a` 独立 execute Issue 有唯一 assignee 与独立 checkout；不得与 `task_203` 并发 | ✅ PASS | SUO-323 单一 assignee；ExecTaskAgent 独立完成；未与 task_203 并发 |
 
-### 14.7 下游阻塞说明
+**结论**：`task_203a` 九项 readiness **全部 PASS**。[SUO-323](/SUO/issues/SUO-323) 可标记 `done`；共享路由释放条件 §14.3 已满足。
 
-- [SUO-309](/SUO/issues/SUO-309)（`task_203` execute）：在 `task_203a` 完成、hash 重冻结、九项 readiness PASS 前继续 blocked。
-- [SUO-310](/SUO/issues/SUO-310)（后序审阅工作流）：在 `task_203a` 完成前继续 blocked。
+**digest 漂移说明**：工作树 stage doc 为 v6 (SUO-320)，HEAD 为 v5 (SUO-319)。差异仅限 hash 基线更新（`2fe178c2...fdce` → `47d6290c...e0810`），无任务依赖、执行闭集、AC 或共享路由释放条件的结构性变更。该漂移是 SUO-320 的合法审计追踪更新，不影响 task_203a 执行结论。
+
+**新冻结 hash**（已核验可重算）：
+- `backend/database.py`: `22db28fa6269a963c2537a85f648a00fb50e2827e22ccb5d181b581cc0edc356`
+- `backend/story_workspace/contracts.py`: `0a1c748b7fab1e2831d1f746f6ce12b6120ec3c66c049ad8cd6e0ff882fe55e8`
+
+### 14.7 下游阻塞状态更新
+
+- [SUO-323](/SUO/issues/SUO-323)（`task_203a` execute）：✅ **已完成**；九项 readiness 全部 PASS；新 hash 已冻结。
+- [SUO-309](/SUO/issues/SUO-309)（`task_203` execute）：⏳ **阻塞解除条件已满足** — `task_203a` done、hash 重冻结、九项 readiness PASS。待 CEOOrchestrator 显式解除 blocker 并建立新的单一 checkout 后进入 execute。
+- [SUO-310](/SUO/issues/SUO-310)（后序审阅工作流）：⏳ **间接依赖 `task_203`** — 在 `task_203` 完成前保持 blocked。
 - `task_230-BE-001`（Gate 聚合）：依赖 `task_203` 基线，间接依赖 `task_203a`；Stage 中保持其条件准入状态不变。
 - `task_202c_verify`：继承 §13.2 串行队列，仍需等待 `task_203` 完成后方可启动；不受 `task_203a` 插入直接影响（`task_203a` 在 `task_203` 之前，不改变 `task_202c_verify` 的相对位置）。
