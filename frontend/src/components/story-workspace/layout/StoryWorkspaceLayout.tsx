@@ -3,6 +3,11 @@
 // [Pos] Story Workspace root layout container.
 import { useCallback, useState, type ReactNode } from 'react';
 import { StoryWorkspaceReviewPanel } from './StoryWorkspaceReviewPanel';
+import {
+  WorkflowContextBar,
+  type ProvenanceBadgeProps,
+  type WorkflowContextBarProps,
+} from '../workflow';
 import './StoryWorkspaceLayout.css';
 
 export interface StoryWorkspaceLayoutProps {
@@ -13,6 +18,8 @@ export interface StoryWorkspaceLayoutProps {
   defaultReviewPanelOpen?: boolean;
   onReviewPanelOpenChange?: (open: boolean) => void;
   reviewPanelTitle?: string;
+  reviewProvenance?: ProvenanceBadgeProps | null;
+  workflowContext?: WorkflowContextBarProps | null;
 }
 
 export function StoryWorkspaceLayout({
@@ -23,6 +30,8 @@ export function StoryWorkspaceLayout({
   defaultReviewPanelOpen = true,
   onReviewPanelOpenChange,
   reviewPanelTitle,
+  reviewProvenance,
+  workflowContext,
 }: StoryWorkspaceLayoutProps) {
   const [uncontrolledReviewPanelOpen, setUncontrolledReviewPanelOpen] = useState(
     defaultReviewPanelOpen,
@@ -56,12 +65,18 @@ export function StoryWorkspaceLayout({
         className="story-workspace-layout__main"
         data-story-workspace-region="main"
       >
+        {workflowContext && (
+          <div className="story-workspace-layout__workflow-context">
+            <WorkflowContextBar {...workflowContext} />
+          </div>
+        )}
         {children}
       </main>
 
       <StoryWorkspaceReviewPanel
         open={isReviewPanelOpen}
         onClose={() => setReviewPanelOpen(false)}
+        provenance={reviewProvenance}
         title={reviewPanelTitle}
       >
         {reviewPanel}
@@ -69,4 +84,3 @@ export function StoryWorkspaceLayout({
     </div>
   );
 }
-

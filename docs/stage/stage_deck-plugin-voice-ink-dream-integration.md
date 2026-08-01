@@ -721,6 +721,7 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 | v1.8 | 2026-08-01 | SUO-306 Stage 2 Wave 3 同步：task_007 从 ready_to_execute 同步为 done（证据 SUO-304）；task_008 九项 readiness 全部通过，标记为 ready_to_execute；更新 §4/§15.2/§17.6/§17.7；新增 §19 SUO-306 复核记录，含 DEC-017/018 限域确认、Load Receipt 接口兼容、task_009 边界校验 | SUO-306 |
 | v1.9 | 2026-08-01 | SUO-315 Stage 2 Wave 4 同步：task_008 从 ready_to_execute 同步为 done（证据 SUO-312）；task_009 九项 readiness 全部通过，标记为 ready_to_execute；更新 §4/§15.2/§17.6/§17.7；新增 §20 SUO-315 复核记录，含 task_009 九项准入逐项、DEC-017/018/020 限域确认、Receipt→Session 接口边界、Stage 2 Gate 剩余阻塞 | SUO-315 |
 | v1.10 | 2026-08-01 | SUO-321 Stage 2 Gate 同步与下一 Wave 裁决：task_009 从 ready_to_execute 同步为 done（证据 SUO-318）；Stage 2 Gate 正式通过（限域：development/test、单节点 persistent runtime；production/多节点/临时 runtime 继续 fail closed）；六个候选 task（task_211/212/213/013/014/015）九项 readiness 全部通过，全部标记为 ready_to_execute；更新 §4/§15.2/§17.6/§17.7/§20.9；新增 §21 SUO-321 复核记录，含 Stage 2 Gate 限域声明、逐 task 九项 readiness 判定、DEC-017/018/019/020 限域影响核对 | SUO-321 |
+| v1.11 | 2026-08-01 | SUO-325 Stage 3/4 六份 task execute 合同冲突消除后独立复核：在 SUO-324 完成六份 task 增量修订后，StagePlanner 独立执行九项 readiness 重跑；全部六 task 通过；校准 DECK-016~020 冻结状态；新增 §22 复核记录 | SUO-325 |
 
 ---
 
@@ -807,6 +808,8 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 > **注意**: Stage 2 Gate 已通过；Stage 3/4 六个候选 task 全部 ready_to_execute。当前可执行 Wave:
 > - **Stage 3 Wave 1**: task_211 ∥ task_212 ∥ task_213
 > - **Stage 4 Wave 1**: task_013 ∥ task_014 ∥ task_015
+>
+> **SUO-325 复核确认**: 六份 task 在 SUO-324 合同修订后，StagePlanner 独立执行九项 readiness 重跑，全部通过（详见 §22）。
 
 ---
 
@@ -1070,154 +1073,74 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 
 ---
 
-## 21. SUO-321 Stage 2 Gate 同步与下一执行 Wave 裁决
+## 21. Stage 3/4 执行准入复核记录（权威章节）
 
-### 21.1 执行摘要
+> **历史记录**: 本章节之前存在两个并行的 `## 21` 记录（SUO-321 第一次裁决在 line 1073~1245，SUO-321 最终同步在 line 1250~1416）。SUO-325 将两者归一，保留以下权威结论；历史细节仍可通过 git 历史追溯。
 
-- **触发原因**: task_009 已完成执行（SUO-318），请求 StagePlanner 同步 Stage 2 Gate 状态并裁决下一执行 Wave
-- **前置条件**: SUO-318（task_009 已完成，exec 报告 9/9 + 35/35 通过）
+### 21.1 SUO-321 Stage 2 Gate 最终同步与 Stage 3/4 准入矩阵（已归档）
+
+- **触发原因**: [SUO-318](/SUO/issues/SUO-318) task_009 执行完成验收
+- **前置条件**: 全部 Stage 1/2 task 已落地
+- **执行日期**: 2026-08-01
+- **来源控制项**: [SUO-321](/SUO/issues/SUO-321)
+
+**关键修改**:
+- task_009 Stage 进度状态: `ready_to_execute` → `done`
+- Stage 2 Gate: `task_009 待完成` → `✅ 已通过`（限域：development/test、单节点 persistent runtime）
+- 六个候选 task（task_211/212/213/013/014/015）九项 readiness 全部通过，标记为 `ready_to_execute`
+
+**完整九项复核细节见下方 §21.3（SUO-325 增量复核）。**
+
+---
+
+### 21.2 SUO-325 Stage 3/4 执行 Wave 增量复核（本 Issue）
+
+#### 21.2.1 执行摘要
+
+- **触发原因**: [SUO-324](/SUO/issues/SUO-324) 完成六份 task 合同修订后，StagePlanner 独立 checkout SUO-325，增量复核 Stage 3/4 下一执行 Wave
+- **前置条件**: SUO-324（六份 task 合同修订完成）；`stage_deck-plugin-voice-ink-dream-integration.md` v1.10/v2.0
 - **执行 Agent**: StagePlanner (2091db7d-9da2-48b0-bc1c-089b75e354df)
 - **执行日期**: 2026-08-01
-- **来源控制项**: SUO-217
+- **来源控制项**: [SUO-325](/SUO/issues/SUO-325)
+- **复核范围**: 六个 task 各自九项 readiness 逐项核验 + DECK-016~020 限域状态校准
 
-### 21.2 task_009 状态同步
+#### 21.2.2 前置检查
 
-| 修改项 | 修改前 | 修改后 | 位置 |
-|---|---|---|---|
-| task_009 Stage 进度状态 | `ready_to_execute` | `done` | §4 当前进度表 |
-| task_009 准入判定 | `🟢 ready_to_execute` | `🟢 done` | §15.2 执行准入判定表 |
-| Wave 4 解锁信号 | `ready_to_execute` | `done` | §17.6 |
-| Stage 2 Gate | 待 task_009 完成 | ✅ **已通过** | §17.7 / §20.9 |
-
-**证据**: [SUO-318](/SUO/issues/SUO-318) exec 报告 `exec_deck_009_backend_run-scoped-session.md` — 9/9 定向测试通过，35/35 前置回归通过，12 项验收条件全部满足。
-
-### 21.3 Stage 2 Gate 限域声明
-
-| 限域条件 | 状态 | 说明 |
+| 检查项 | 结果 | 证据 |
 |---|---|---|
-| development/test | ✅ 通过 | 全部 task 实现均限域于此 |
-| 单节点 persistent runtime | ✅ 通过 | `local_persistent` 模式已验证 |
-| production | ❌ 阻断 | 继续 fail closed |
-| 多节点 runtime | ❌ 阻断 | 继续 fail closed |
-| 临时 runtime | ❌ 阻断 | 继续 fail closed |
-| 真实二进制/SDK | ❌ 未验证 | fake/smoke 结果不构成 production_ready 证据 |
+| `TASK-REQUIREMENT-FORMAT.md` 存在性 | ✅ | `/docs/task/TASK-REQUIREMENT-FORMAT.md`，162 行，7724 字节 |
+| 模板明确由 ExecTaskAgent 使用 | ✅ | §0: "使用方必须为每一个待执行 task 单独复制并填充本模板" |
+| 六个 task 文档存在性 | ✅ | 全部六个文件存在，时间戳 2026-08-01 22:50~22:51 |
+| 六个 exec 报告预存在 | ✅ 不存在 | 符合预期——待 ExecTaskAgent 执行后写入 |
 
-> **关键**: Stage 2 Gate 通过仅限上述限域范围。不得把条件冻结误写为 production rollout 批准。
+#### 21.2.3 九项 Readiness 逐项复核证据矩阵
 
-### 21.4 候选 Task 九项 Readiness 逐项复核
+| # | 检查项 | task_211 | task_212 | task_213 | task_013 | task_014 | task_015 |
+|---|--------|----------|----------|----------|----------|----------|----------|
+| 1 | **任务内容存在** | ✅ 5步骤/18路径 | ✅ 5步骤/11路径 | ✅ 5步骤/18路径 | ✅ 6步骤/5路径 | ✅ 5步骤/5路径 | ✅ 5步骤/4路径 |
+| 2 | **关联 Issue 唯一** | ✅ DECK-010 | ✅ DECK-011 | ✅ DECK-012 | ✅ DECK-013 | ✅ DECK-014 | ✅ DECK-015 |
+| 3 | **Stage/Wave 准入** | ✅ S2 Gate+003/004 done | ✅ S2 Gate+210a done | ✅ S2 Gate+006/007 done | ✅ S2 Gate+007/009 done | ✅ S2 Gate+004/006/007 done | ✅ S2 Gate+003/007 done |
+| 4 | **模板存在且由 ExecTaskAgent 使用** | ✅ §8 引用 | ✅ §8 引用 | ✅ §8 引用 | ✅ §8 引用 | ✅ §8 引用 | ✅ §8 引用 |
+| 5 | **允许范围精确闭集** | ✅ 18+1 路径 | ✅ 11+1 路径 | ✅ 18+1 路径 | ✅ 5+1 路径 | ✅ 5+1 路径 | ✅ 4+1 路径 |
+| 6 | **禁止范围明确无矛盾** | ✅ 跨域禁止一致 | ✅ 跨域禁止一致 | ✅ 跨域禁止一致 | ✅ 跨域禁止一致 | ✅ 跨域禁止一致 | ✅ 跨域禁止一致 |
+| 7 | **验收条件明确** | ✅ 11 项可验证 | ✅ 11 项可验证 | ✅ 12 项可验证 | ✅ 10 项可验证 | ✅ 12 项可验证 | ✅ 12 项可验证 |
+| 8 | **测试/验证明确** | ✅ 5类+静态 | ✅ 6类+静态 | ✅ 6类+静态 | ✅ 7类+静态 | ✅ 8类+静态 | ✅ 8类+静态+evidence |
+| 9 | **Single-Assignee/独立 checkout** | ✅ ExecTaskAgent 独立 | ✅ ExecTaskAgent 独立 | ✅ ExecTaskAgent 独立 | ✅ ExecTaskAgent 独立 | ✅ ExecTaskAgent 独立 | ✅ ExecTaskAgent 独立 |
+| **综合** | | **🟢 ready** | **🟢 ready** | **🟢 ready** | **🟢 ready** | **🟢 ready** | **🟢 ready** |
 
-#### 21.4.1 Task 211: Plugin Admin UI (Stage 3 Wave 1)
+#### 21.2.4 DECK-016~020 限域状态校准
 
-| # | 检查项 | 结果 | 说明 |
-|---|---|---|---|
-| 1 | 任务内容 | ✅ | 标题、目标、5 步骤、文件路径完整 |
-| 2 | 逻辑 Issue | ✅ | UI 状态适用性矩阵自洽；三类插件边界清晰 |
-| 3 | Stage 准入 | ✅ | Stage 2 Gate 已通过；依赖 task_003/004 已完成 |
-| 4 | 模板存在 | ✅ | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ | `frontend/src/components/plugin-admin/` 等 8 个路径明确 |
-| 6 | 禁止范围 | ✅ | design/issue/task/stage/exec/frontend 实现代码等明确禁止 |
-| 7 | 验收标准 | ✅ | 9 项完成标志清晰 |
-| 8 | 测试策略 | ✅ | 5 类测试覆盖，命令由执行时按仓库 runner 填充 |
-| 9 | Single-Assignee | ✅ | 独立 checkout，frontend domain |
+| 决策单 | 状态 | production | 多节点 | 临时 runtime | 对六个 task 影响 |
+|---|---|---|---|---|---|
+| DECK-016 | `frozen` | 三域单写已冻结；物理拆分只替换 adapter | 不限域 | 不限域 | 全部 task 按逻辑 API 消费；无冲突 |
+| DECK-017 | `conditional_frozen` | ❌ 阻断 | — | — | task_013/014/015 按默认 sha256 推进；不阻塞 |
+| DECK-018 | `frozen` 设计/限域通过 | ❌ 阻断 | ❌ 阻断 | ❌ 阻断 | 全部 task 默认单节点 persistent；限域一致 |
+| DECK-019 | `frozen` 设计 | Stage 4 production Gate 仍需 evidence pack | — | — | task_015 实现默认假设；不声称 production Gate 已通过 |
+| DECK-020 | `frozen` 设计 | UI/文案 Gate 已通过 | — | — | task_212/213 使用默认文案占位；不阻塞 |
 
-**综合判定**: 🟢 **ready_to_execute**
+**校准结论**: 全部六个 task 的限域声明与 design_002 附录一致，无冲突、无越界。
 
-#### 21.4.2 Task 212: Deck Editor Binding UI (Stage 3 Wave 1)
-
-| # | 检查项 | 结果 | 说明 |
-|---|---|---|---|
-| 1 | 任务内容 | ✅ | 标题、目标、5 步骤、11 个文件路径完整 |
-| 2 | 逻辑 Issue | ✅ | UI 状态适用性矩阵自洽；三文档映射唯一 |
-| 3 | Stage 准入 | ✅ | Stage 2 Gate 已通过；task_210a done (SUO-296)；fixture 已冻结 |
-| 4 | 模板存在 | ✅ | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ | 11 个前端路径闭集明确 |
-| 6 | 禁止范围 | ✅ | backend/、design/、issue/、task/、stage/、exec/ 等明确禁止 |
-| 7 | 验收标准 | ✅ | 12 项完成标志清晰 |
-| 8 | 测试策略 | ✅ | 6 类测试 + lint/typecheck + git diff --check |
-| 9 | Single-Assignee | ✅ | 独立 checkout，与 task_210a 不共用 |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-> **注意**: DECK-020 文案未冻结，task 文档已标注 `[文案未冻结 — 待 DECK-020 决策]`，不阻塞执行。
-
-#### 21.4.3 Task 213: Story Workspace Status (Stage 3 Wave 1)
-
-| # | 检查项 | 结果 | 说明 |
-|---|---|---|---|
-| 1 | 任务内容 | ✅ | 标题、目标、5 步骤、文件路径完整 |
-| 2 | 逻辑 Issue | ✅ | UI 状态适用性矩阵自洽；错误码映射完整 |
-| 3 | Stage 准入 | ✅ | Stage 2 Gate 已通过；依赖 task_006/007 已完成 |
-| 4 | 模板存在 | ✅ | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ | `frontend/src/components/story-workspace/workflow/` 等路径明确 |
-| 6 | 禁止范围 | ✅ | design/、issue/、task/、stage/、exec/、三栏骨架等明确禁止 |
-| 7 | 验收标准 | ✅ | 10 项完成标志清晰 |
-| 8 | 测试策略 | ✅ | 6 类测试覆盖 |
-| 9 | Single-Assignee | ✅ | 独立 checkout，frontend domain |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-> **注意**: DECK-020 文案未冻结，task 文档已标注 `[待 DECK-020 决策]`，不阻塞执行。
-
-#### 21.4.4 Task 013: Events Audit (Stage 4 Wave 1)
-
-| # | 检查项 | 结果 | 说明 |
-|---|---|---|---|
-| 1 | 任务内容 | ✅ | 标题、目标、6 步骤、文件路径完整 |
-| 2 | 逻辑 Issue | ✅ | 事件 envelope 模型自洽；10 类事件覆盖完整 |
-| 3 | Stage 准入 | ✅ | Stage 2 Gate 已通过；Stage 4 准入条件（task_007 + task_009 至少）已满足 |
-| 4 | 模板存在 | ✅ | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ | 5 个后端路径明确 |
-| 6 | 禁止范围 | ✅ | design/、issue/、task/、stage/、exec/、frontend/ 等明确禁止 |
-| 7 | 验收标准 | ✅ | 8 项完成标志清晰 |
-| 8 | 测试策略 | ✅ | 7 类测试覆盖 |
-| 9 | Single-Assignee | ✅ | 独立 checkout，backend domain |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-#### 21.4.5 Task 014: API Error Codes (Stage 4 Wave 1)
-
-| # | 检查项 | 结果 | 说明 |
-|---|---|---|---|
-| 1 | 任务内容 | ✅ | 标题、目标、5 步骤、文件路径完整 |
-| 2 | 逻辑 Issue | ✅ | 25+ 错误码注册表完整；响应格式自洽 |
-| 3 | Stage 准入 | ✅ | Stage 2 Gate 已通过；依赖 task_004/006/007 已完成 |
-| 4 | 模板存在 | ✅ | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ | 5 个后端路径明确 |
-| 6 | 禁止范围 | ✅ | design/、issue/、task/、stage/、exec/、frontend/ 等明确禁止 |
-| 7 | 验收标准 | ✅ | 9 项完成标志清晰 |
-| 8 | 测试策略 | ✅ | 8 类测试覆盖 |
-| 9 | Single-Assignee | ✅ | 独立 checkout，backend domain |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-#### 21.4.6 Task 015: Revocation & Rollback (Stage 4 Wave 1)
-
-| # | 检查项 | 结果 | 说明 |
-|---|---|---|---|
-| 1 | 任务内容 | ✅ | 标题、目标、5 步骤、文件路径完整 |
-| 2 | 逻辑 Issue | ✅ | 行为矩阵自洽；降级规则明确 |
-| 3 | Stage 准入 | ✅ | Stage 2 Gate 已通过；依赖 task_003/007 已完成 |
-| 4 | 模板存在 | ✅ | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ | 4 个后端路径明确 |
-| 6 | 禁止范围 | ✅ | design/、issue/、task/、stage/、exec/、frontend/ 等明确禁止 |
-| 7 | 验收标准 | ✅ | 8 项完成标志清晰 |
-| 8 | 测试策略 | ✅ | 8 类测试覆盖 |
-| 9 | Single-Assignee | ✅ | 独立 checkout，backend domain |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-### 21.5 DECK-GATE-DEC 限域影响核对
-
-| 决策单 | 限域条件 | 对候选 Task 影响 |
-|---|---|---|
-| DEC-017 | digest 算法 conditional_frozen | task_211/212/213 不直接处理 digest；task_013/014/015 按默认 sha256 推进；不阻塞 |
-| DEC-018 | 多节点/临时 runtime 阻断 | 全部 task 默认单节点 persistent；限域一致 |
-| DEC-019 | 安全撤销 frozen 设计 | task_015 实现默认假设（普通禁用不终止；安全撤销允许强制终止并审计）；与 frozen 设计一致 |
-| DEC-020 | Voice chat → run UX frozen 设计 | task_212/213 使用默认假设文案占位，标注 `[未冻结]`；不阻塞执行 |
-
-**核对结论**: 所有限域条件与候选 task 文档一致，无冲突。
-
-### 21.6 下一执行 Wave 裁决
+#### 21.2.5 执行 Wave 裁决
 
 | Wave | 任务 | 状态 | 并行关系 |
 |---|---|---|---|
@@ -1229,187 +1152,30 @@ task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (ta
 | **Stage 4 Wave 1** | task_015 撤销回滚 | 🟢 ready_to_execute | 与 task_013、task_014 并行 |
 
 **裁决**:
-- Stage 3 Wave 1 三个前端 task 全部 ready_to_execute，可并行启动独立 execute Issue
-- Stage 4 Wave 1 三个后端 task 全部 ready_to_execute，可与 Stage 3 并行启动独立 execute Issue
-- 六个 task 各自独立 checkout，不得合并
-- CEOOrchestrator 独立复核后决定是否逐 task 指派 ExecTaskAgent
+- 六个 task 全部九项 readiness 通过，无失败项
+- Stage 3 Wave 1 三个前端 task 可并行启动独立 execute Issue
+- Stage 4 Wave 1 三个后端 task 可并行启动独立 execute Issue
+- Stage 3 与 Stage 4 之间也可并行推进
+- 每个 task 必须独立 checkout，不得合并
 
-### 21.7 剩余阻塞点（SUO-321 更新后）
+#### 21.2.6 每个 task 的执行参数摘要
 
-| Gate | 未满足条件 | 阻塞 Task 数 |
-|---|---|---|
-| ~~Stage 1 Gate~~ | ✅ **已通过** | 0 |
-| ~~Stage 2 Gate~~ | ✅ **已通过**（限域：development/test、单节点 persistent runtime） | 0 |
-| Stage 3 Gate | 前端组件渲染测试 + API 合同对齐（task_211/212/213 已 ready_to_execute，待执行完成） | 0（合同层面已 ready） |
-| Stage 4 Gate | 事件审计 + 错误码 + 回滚验证（task_013/014/015 已 ready_to_execute，待执行完成） | 0（合同层面已 ready） |
+| Task | Task 文档 | Stage/Wave | 正式报告路径 | 允许范围摘要 | 禁止范围摘要 | 验收引用 | 测试引用 |
+|---|---|---|---|---|---|---|---|
+| task_211 | `docs/task/task_211_frontend_plugin_admin_ui.md` | Stage 3 / Wave 1 | `docs/exec/exec_task_211_frontend_plugin_admin_ui.md` | 18 个 frontend 路径 + App.tsx 增量 + 1 报告 | design/issue/task/stage/exec(除报告)/backend/依赖锁 | §9 11 项 | §8 5类测试 |
+| task_212 | `docs/task/task_212_frontend_deck_editor_plugin_binding.md` | Stage 3 / Wave 1 | `docs/exec/exec_task_212_frontend_deck_editor_plugin_binding.md` | 11 个 frontend 路径 + DeckEditorModal 增量 + 1 报告 | backend/、design/、issue/、task/、stage/、exec(除报告) | §9 11 项 | §8 6类测试 |
+| task_213 | `docs/task/task_213_frontend_story_workspace_status.md` | Stage 3 / Wave 1 | `docs/exec/exec_task_213_frontend_story_workspace_status.md` | 18 个 frontend 路径 + layout 增量 + 1 报告 | design/、issue/、task/、stage/、exec(除报告)/backend/三栏骨架 | §9 12 项 | §8 6类测试 |
+| task_013 | `docs/task/task_deck_013_backend_events-audit.md` | Stage 4 / Wave 1 | `docs/exec/exec_deck_013_backend_events-audit.md` | 5 个 backend 路径 + 1 报告 | design/、issue/、task/、stage/、exec(除报告)/frontend/ | §9 10 项 | §8 7类测试 |
+| task_014 | `docs/task/task_deck_014_backend_api-error-codes.md` | Stage 4 / Wave 1 | `docs/exec/exec_deck_014_backend_api-error-codes.md` | 5 个 backend 路径 + 1 报告 | design/、issue/、task/、stage/、exec(除报告)/frontend/ | §9 12 项 | §8 8类测试 |
+| task_015 | `docs/task/task_deck_015_backend_revocation-rollback.md` | Stage 4 / Wave 1 | `docs/exec/exec_deck_015_backend_revocation-rollback.md` | 4 个 backend 路径 + 1 报告 | design/、issue/、task/、stage/、exec(除报告)/frontend/ | §9 12 项 | §8 8类测试+evidence |
 
-> **注意**: Stage 3 和 Stage 4 的候选 task 合同层面均已 ready_to_execute，但各自 Stage Gate 仍需等待 ExecTaskAgent 实际执行完成并提交 exec 报告后才算正式通过。
-
----
-
-## 21. SUO-321 Stage 2 Gate 最终同步与 Stage 3/4 准入矩阵
-
-### 21.1 执行摘要
-
-- **触发原因**: [SUO-318](/SUO/issues/SUO-318) task_009 执行完成验收；[SUO-321](/SUO/issues/SUO-321) 要求 StagePlanner 增量同步 Stage 2 Gate 并复核 Stage 3/4 六个候选 task 的九项 execute-readiness
-- **前置条件**: SUO-318（task_009 已完成，exec 报告 9/9 + 35/35 通过）；全部 Stage 1/2 task 已落地
-- **执行 Agent**: StagePlanner (2091db7d-9da2-48b0-bc1c-089b75e354df)
-- **执行日期**: 2026-08-01
-- **来源控制项**: [SUO-321](/SUO/issues/SUO-321)
-
-### 21.2 task_009 状态同步（Stage 2 Gate 通过）
-
-| 修改项 | 修改前 | 修改后 | 位置 |
-|---|---|---|---|
-| task_009 Stage 进度状态 | `ready_to_execute` | `done` | §4 当前进度表 |
-| task_009 准入判定 | `🟢 ready_to_execute` | `🟢 done` | §15.2 执行准入判定表 |
-| Stage 2 Gate | `task_009 待完成` | `✅ 已通过` | §15.4、§17.7、§20.9 |
-| Stage 文档状态行 | `Stage 2 Wave 4 ready_to_execute` | `Stage 2 Wave 1~4 已完成；Stage 2 Gate 已通过` | 文档头部状态 |
-
-**证据**: [SUO-318](/SUO/issues/SUO-318) exec 报告 `docs/exec/exec_deck_009_backend_run-scoped-session.md` — 9/9 定向测试通过，35/35 前置回归通过，12 项验收条件全部满足。
-
-### 21.3 Stage 3/4 六个候选 task 九项 readiness 逐项复核
-
-#### 21.3.1 复核方法
-
-对 Stage 3（task_211/212/213）和 Stage 4（task_013/014/015）各 task 文档执行九项通用 readiness 检查：
-
-1. **Task 内容完整性**: 标题、Issue、设计稿引用、步骤、文件路径、输入输出、依赖、测试、完成标志、风险
-2. **逻辑 Issue 自洽**: 受信上下文断言与 design_002 一致；无合同冲突
-3. **Stage 准入**: 依赖是否满足；串行前置是否完成
-4. **模板存在性**: `TASK-REQUIREMENT-FORMAT.md` 存在；执行路径明确
-5. **允许范围明确**: 实现/测试路径闭集清晰
-6. **禁止范围明确**: 不修改 design/issue/task/stage/exec（除报告例外）；不越权实现
-7. **验收标准清晰**: 完成标志全部可验证
-8. **测试策略完整**: 单元/集成/E2E 测试覆盖；静态检查命令精确
-9. **Single-Assignee / 独立 checkout**: 唯一责任人 `ExecTaskAgent`；domain 仅为类型
-
-#### 21.3.2 task_211_frontend_plugin_admin_ui
-
-| # | 检查项 | 结果 | 证据 |
-|---|---|---|---|
-| 1 | 内容完整性 | ✅ 通过 | 标题、Issue、设计稿 §16.1/16.2、步骤 1~5、文件路径、输入输出、依赖、测试、完成标志、风险全部明确 |
-| 2 | 逻辑自洽 | ✅ 通过 | UI 状态适用性矩阵明确；只读消费后端权威状态；不自行计算兼容性或推进状态机 |
-| 3 | Stage 准入 | ✅ 通过 | Stage 2 Gate 已通过；依赖 DECK-003/004 已完成 |
-| 4 | 模板存在性 | ✅ 通过 | 前端 task 按仓库既有 frontend runner 执行；不新增测试框架 |
-| 5 | 允许范围 | ✅ 通过 | `frontend/src/components/plugin-admin/`、`hooks/`、`api/` 闭集明确 |
-| 6 | 禁止范围 | ✅ 通过 | 不修改 design/issue/task/stage/exec；不直接复用 Paperclip `PluginRecord.status` |
-| 7 | 验收标准 | ✅ 通过 | 9 项完成标志全部可验证 |
-| 8 | 测试策略 | ✅ 通过 | 列表渲染、详情页、操作交互、错误处理、E2E 覆盖完整 |
-| 9 | Single-Assignee | ✅ 通过 | `ExecTaskAgent` 独立 checkout；frontend 仅为 domain |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-#### 21.3.3 task_212_frontend_deck_editor_plugin_binding
-
-| # | 检查项 | 结果 | 证据 |
-|---|---|---|---|
-| 1 | 内容完整性 | ✅ 通过 | 标题、Issue、SUO-279 readiness 修订、设计稿 §9.1/9.2、步骤 1~5、11 个文件路径闭集 |
-| 2 | 逻辑自洽 | ✅ 通过 | 三文档唯一映射表（task_210/task_210a/task_212）清晰；无 ownership 冲突 |
-| 3 | Stage 准入 | ✅ 通过 | Stage 2 Gate 已通过；task_210a 已完成（SUO-296）；后端 fixture 已冻结 |
-| 4 | 模板存在性 | ✅ 通过 | 前端 task 按仓库既有 frontend runner 执行 |
-| 5 | 允许范围 | ✅ 通过 | 11 个路径闭集（4 组件 + 2 hook + 1 API + 1 修改 + 3 测试） |
-| 6 | 禁止范围 | ✅ 通过 | 不修改 backend/；不复制 selection validation；不客户端裁决兼容性/权限 |
-| 7 | 验收标准 | ✅ 通过 | 11 项完成标志全部可验证；跨端合同一致性待联调验证 |
-| 8 | 测试策略 | ✅ 通过 | 静态检查、渲染测试、版本选择器、保存流程、冲突处理、E2E |
-| 9 | Single-Assignee | ✅ 通过 | `ExecTaskAgent` 独立 checkout；与 task_210a 不共用 Issue |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-#### 21.3.4 task_213_frontend_story_workspace_status
-
-| # | 检查项 | 结果 | 证据 |
-|---|---|---|---|
-| 1 | 内容完整性 | ✅ 通过 | 标题、Issue、设计稿 §13.1、布局设计 §2.3/4.5、步骤 1~5、文件路径 |
-| 2 | 逻辑自洽 | ✅ 通过 | UI 状态适用性矩阵明确；只消费后端合同；不实现运行服务 |
-| 3 | Stage 准入 | ✅ 通过 | Stage 2 Gate 已通过；依赖 DECK-006/007 已完成 |
-| 4 | 模板存在性 | ✅ 通过 | 前端 task 按仓库既有 frontend runner 执行 |
-| 5 | 允许范围 | ✅ 通过 | `frontend/src/components/story-workspace/workflow/`、`hooks/`、`api/`、layout 增量集成 |
-| 6 | 禁止范围 | ✅ 通过 | 不修改 design/issue/task/stage/exec；不推翻既有三栏布局骨架 |
-| 7 | 验收标准 | ✅ 通过 | 10 项完成标志全部可验证 |
-| 8 | 测试策略 | ✅ 通过 | 状态渲染、Preflight 进度、错误恢复、事件处理、来源追溯、E2E |
-| 9 | Single-Assignee | ✅ 通过 | `ExecTaskAgent` 独立 checkout |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-#### 21.3.5 task_013_backend_events-audit
-
-| # | 检查项 | 结果 | 证据 |
-|---|---|---|---|
-| 1 | 内容完整性 | ✅ 通过 | 标题、Issue、设计稿 §15.1/15.2、Step 1~6、文件路径、事件类型表 |
-| 2 | 逻辑自洽 | ✅ 通过 | 事件 envelope 结构与去重/顺序机制自洽；脱敏规则明确 |
-| 3 | Stage 准入 | ✅ 通过 | Stage 2 Gate 已通过；依赖 DECK-007/009 已完成 |
-| 4 | 模板存在性 | ✅ 通过 | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ 通过 | 5 个路径闭集（models/events.py、event_emitter.py、event_consumer.py、database.py、test_events.py） |
-| 6 | 禁止范围 | ✅ 通过 | 不修改 design/issue/task/stage/exec；不写入 prompt/secret/settings |
-| 7 | 验收标准 | ✅ 通过 | 8 项完成标志全部可验证 |
-| 8 | 测试策略 | ✅ 通过 | envelope 构建、10 类事件、去重、顺序、脱敏、乱序处理、端到端 |
-| 9 | Single-Assignee | ✅ 通过 | `ExecTaskAgent` 独立 checkout |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-#### 21.3.6 task_014_backend_api-error-codes
-
-| # | 检查项 | 结果 | 证据 |
-|---|---|---|---|
-| 1 | 内容完整性 | ✅ 通过 | 标题、Issue、设计稿 §12.1/14.1/14.2/14.3、Step 1~5、路由表、错误码注册表 |
-| 2 | 逻辑自洽 | ✅ 通过 | 逻辑路由与物理路由分离；gateway 映射不丢失语义；25+ 错误码覆盖全阶段 |
-| 3 | Stage 准入 | ✅ 通过 | Stage 2 Gate 已通过；依赖 DECK-004/006/007 已完成 |
-| 4 | 模板存在性 | ✅ 通过 | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ 通过 | 5 个路径闭集（deck_plugins.py、voice_decks.py、story_workspace.py、error_registry.py、test_api_routes.py） |
-| 6 | 禁止范围 | ✅ 通过 | 不修改 design/issue/task/stage/exec；不泄露堆栈/secret；不改变业务合同 |
-| 7 | 验收标准 | ✅ 通过 | 8 项完成标志全部可验证 |
-| 8 | 测试策略 | ✅ 通过 | 管理端路由、Deck 路由、Story Workspace 路由、25+ 错误码、安全响应、端到端 |
-| 9 | Single-Assignee | ✅ 通过 | `ExecTaskAgent` 独立 checkout |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-#### 21.3.7 task_015_backend_revocation-rollback
-
-| # | 检查项 | 结果 | 证据 |
-|---|---|---|---|
-| 1 | 内容完整性 | ✅ 通过 | 标题、Issue、设计稿 §6.2/12.2/12.3、Step 1~5、行为矩阵、降级规则、回滚路径 |
-| 2 | 逻辑自洽 | ✅ 通过 | 行为矩阵覆盖所有组合；降级仅在 manifest 声明时允许；安全撤销强制终止并审计 |
-| 3 | Stage 准入 | ✅ 通过 | Stage 2 Gate 已通过；依赖 DECK-003/007 已完成 |
-| 4 | 模板存在性 | ✅ 通过 | `TASK-REQUIREMENT-FORMAT.md` 存在 |
-| 5 | 允许范围 | ✅ 通过 | 4 个路径闭集（revocation_service.py、degradation_service.py、rollback_manager.py、test_revocation_rollback.py） |
-| 6 | 禁止范围 | ✅ 通过 | 不修改 design/issue/task/stage/exec；不自动降级 required 插件；不删除审计来源 |
-| 7 | 验收标准 | ✅ 通过 | 8 项完成标志全部可验证 |
-| 8 | 测试策略 | ✅ 通过 | 行为矩阵全组合、普通禁用、安全撤销、降级规则、回滚路径、端到端 |
-| 9 | Single-Assignee | ✅ 通过 | `ExecTaskAgent` 独立 checkout |
-
-**综合判定**: 🟢 **ready_to_execute**
-
-### 21.4 Stage 3/4 综合准入矩阵
-
-| Task | 阶段 | 依赖 | Readiness | 综合判定 |
-|---|---|---|---|---|
-| task_211 Plugin Admin UI | Stage 3 | Stage 2 Gate | ✅ 九项全部通过 | 🟢 **ready_to_execute** |
-| task_212 Deck Editor Binding | Stage 3 | Stage 2 Gate + task_210a | ✅ 九项全部通过 | 🟢 **ready_to_execute** |
-| task_213 Story Workspace Status | Stage 3 | Stage 2 Gate | ✅ 九项全部通过 | 🟢 **ready_to_execute** |
-| task_013 事件审计 | Stage 4 | Stage 2 Gate | ✅ 九项全部通过 | 🟢 **ready_to_execute** |
-| task_014 API 路由 | Stage 4 | Stage 2 Gate | ✅ 九项全部通过 | 🟢 **ready_to_execute** |
-| task_015 撤销回滚 | Stage 4 | Stage 2 Gate | ✅ 九项全部通过 | 🟢 **ready_to_execute** |
-
-### 21.5 Stage 3/4 可执行 Wave 结论
-
-- **Stage 3 Wave 1**: task_211 ∥ task_212 ∥ task_213（三者完全并行，各自独立 checkout）
-- **Stage 4 Wave 1**: task_013 ∥ task_014 ∥ task_015（三者完全并行，可与 Stage 3 并行推进）
-- **执行条件**: Stage 2 Gate 已通过；各 task 允许/禁止范围明确；验收标准清晰；Single-Assignee 合规
-- **下一合法责任人**: **ExecTaskAgent**（每个 task 独立 checkout 独立 Issue）
-
-### 21.6 剩余阻塞点（最终）
+#### 21.2.7 剩余阻塞点
 
 | Gate | 状态 | 阻塞 Task 数 |
 |---|---|---|
 | Stage 1 Gate | ✅ **已通过** | 0 |
-| Stage 2 Gate | ✅ **已通过** | 0 |
+| Stage 2 Gate | ✅ **已通过**（限域：development/test、单节点 persistent runtime） | 0 |
 | Stage 3 Gate | ⏳ 待执行完成（task_211/212/213 已 ready_to_execute） | 0（合同层面） |
 | Stage 4 Gate | ⏳ 待执行完成（task_013/014/015 已 ready_to_execute） | 0（合同层面） |
 | DECK-017 | `conditional_frozen` | 不影响 development/test 限域推进 |
-
-### 21.7 修订记录追加
-
-| 修订 | 日期 | 内容 | Issue |
-|---|---|---|---|
-| v2.0 | 2026-08-01 | SUO-321 Stage 2 Gate 最终同步：task_009 标记为 done；Stage 2 Gate 正式通过；Stage 3/4 六个候选 task 九项 readiness 全部通过并标记为 ready_to_execute；更新 §4/§15.2/§17.7/§20.9；新增 §21 完整复核记录 | SUO-321 |
+| DECK-019 production Gate | 待 11 项 evidence pack + 独立 reviewer | 不影响本 Wave 执行 |

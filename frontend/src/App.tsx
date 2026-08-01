@@ -63,6 +63,11 @@ import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
 import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
+import { PluginAdminPage } from './components/plugin-admin';
+import {
+  resolveStoryWorkspacePath,
+  StoryWorkspaceRouter,
+} from './router/story-workspace';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -92,6 +97,9 @@ const LANGUAGE_CODES: Array<'en' | 'zh'> = ['en', 'zh'];
 // configuration layout, so it gets its own max width instead of sharing SETTINGS_MAX_WIDTH_PX.
 const SETTINGS_MAX_WIDTH_PX = 800;
 const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
+
+type AppView = 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector' | 'story-workspace';
+type GlobalAppView = Exclude<AppView, 'story-workspace'>;
 
 // @@@ Color map with gradient colors for watercolor effect
 const colorMap: Record<string, { gradient: string; text: string; glow: string }> = {
@@ -157,7 +165,9 @@ export default function App() {
     }
   }, [currentLanguage, i18n]);
 
-  const [currentView, setCurrentView] = useState<'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector'>('writing');
+  const [currentView, setCurrentView] = useState<AppView>(() => (
+    resolveStoryWorkspacePath(window.location.pathname) ? 'story-workspace' : 'writing'
+  ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
   const [chatLandingTab, setChatLandingTab] = useState<'history' | 'connector'>('history');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
@@ -185,13 +195,38 @@ export default function App() {
     setConnectorSettingsFocusNonce((value) => value + 1);
   }, []);
 
-  const handleAppViewChange = useCallback((view: 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector') => {
+  const handleAppViewChange = useCallback((view: GlobalAppView) => {
     if (view === 'connector') {
       openConnectorSettings();
       return;
     }
     setCurrentView(view);
   }, [openConnectorSettings]);
+
+  const handleStoryWorkspaceOpenSettings = useCallback(() => {
+    window.history.pushState({ inkDreamView: 'settings' }, '', '/');
+    setShowNotionConnectorDetail(false);
+    setCurrentView('settings');
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = (event: PopStateEvent) => {
+      if (resolveStoryWorkspacePath(window.location.pathname)) {
+        setCurrentView('story-workspace');
+        return;
+      }
+
+      if (event.state?.inkDreamView === 'settings') {
+        setCurrentView('settings');
+        return;
+      }
+
+      setCurrentView((view) => view === 'story-workspace' ? 'writing' : view);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const browserTimezone = useMemo(() => {
     try {
@@ -1408,7 +1443,21 @@ export default function App() {
       )}
 
       {/* @@@ Hide top nav on mobile */}
-      {!isMobile && <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />}
+      {!isMobile && currentView !== 'story-workspace' && (
+        <TopNavBar currentView={currentView} onViewChange={handleAppViewChange} />
+      )}
+
+      {currentView === 'story-workspace' && (
+        <div style={{
+          position: 'fixed',
+          inset: 0,
+          minWidth: 0,
+          minHeight: 0,
+          overflow: 'hidden',
+        }}>
+          <StoryWorkspaceRouter onOpenSettings={handleStoryWorkspaceOpenSettings} />
+        </div>
+      )}
 
       {currentView === 'writing' && (
         <div style={{
@@ -2087,6 +2136,11 @@ export default function App() {
               />
             </section>
 
+            {/* Deck Plugin Admin */}
+            <section style={{ marginBottom: 48 }}>
+              <PluginAdminPage isMobile={isMobile} />
+            </section>
+
             {/* AI Model Configuration */}
             <section style={{ marginBottom: 48 }}>
               <h2 style={{
@@ -2170,7 +2224,7 @@ export default function App() {
         </div>
       )}
 
-      {isMobile && (
+      {isMobile && currentView !== 'story-workspace' && (
         <nav style={{
           position: 'fixed',
           left: 0,

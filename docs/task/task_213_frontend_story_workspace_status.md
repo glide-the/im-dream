@@ -2,10 +2,13 @@
 
 > **Task ID**: `task_213_frontend_story_workspace_status`
 > **源 Issue**: `DECK-012` (from `SUO-223` / `SUO-218`)
-> **类型**: `frontend`（**TaskDesignAgent 负责 task 设计**，前端实现 Agent 负责代码实现）
+> **Readiness 修订 Issue**: [SUO-324](/SUO/issues/SUO-324)
+> **类型 / Domain**: `frontend`（domain 仅用于分类，不代表执行 Agent 身份）
 > **优先级**: `P1`
 > **生成日期**: 2026-08-01
-> **状态**: `draft`
+> **状态**: `pending_stage_recheck`
+> **唯一执行责任人**: `ExecTaskAgent`
+> **Stage 映射**: Stage 3 / Wave 1（独立 execute Issue、独立 checkout、独立验收）
 
 ---
 
@@ -20,6 +23,7 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 | 关联 | ID | 说明 |
 |---|---|---|
 | 源 Issue | `DECK-012` | Story Workspace 工作流状态与错误恢复体验 |
+| Readiness 修订 | `SUO-324` | 消除未来 execute 写入边界与冻结决策状态冲突 |
 | 父 Issue | `SUO-217` | 组织 Deck 插件业务设计与 ClaudeAgent 交互方案分派 |
 | Design Issue | `SUO-218` | Voice Decks × Ink Dream Deck Plugin 与 ClaudeAgent 集成设计 |
 | Issue 清单 | `SUO-223` | Deck Plugin 前端/后端 Issue 拆解 |
@@ -41,6 +45,8 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 6. 结构化错误码映射为用户可理解的恢复动作。
 
 本 task 与 story-workspace 既有布局、审阅 UI 增量集成，不推翻既有设计。
+
+未来实现仅由 `ExecTaskAgent` 在本 task 的独立 execute Issue 中执行；`frontend` 仅是 domain。本 task 不与其他 Stage 3/4 task 合并 checkout 或共享正式报告。
 
 > **命名隔离原则**：本 task 涉及的插件标识必须使用 `deck_plugin_id` + `deck_plugin_version` 前缀，禁止与 `claude_code_plugin_id` 混用。来源追溯展示必须区分 Deck Plugin（业务工作流）和 Claude Code Plugin（运行时能力包）。
 
@@ -185,38 +191,39 @@ DECK-012: Story Workspace 工作流状态与错误恢复体验
 - 运行状态历史（时间线）
 - 结果引用
 - 重试链（`retry_of_run_id` 追溯）
+- 有来源权限时展示「来源：Voice {voice_display_name} · {source_message_time}」与「返回来源对话」；不得回显消息正文、system prompt、secret 或 session settings
+- 无来源权限时只展示「来源：Voice 对话（无权查看）」，隐藏来源名称、时间和返回链接
 
 ---
 
 ## 5. 涉及文件路径
 
-### 前端（新增/修改）
+以下十八个路径是未来 execute 的完整实现/测试闭集；目录名不构成额外授权：
 
-```
-frontend/src/components/story-workspace/
-  workflow/
-    WorkflowContextBar.tsx           -- 工作流上下文条（新增）
-    PreflightProgressPanel.tsx       -- 预检进度面板（新增）
-    WorkflowRunStatusPanel.tsx       -- 运行状态面板（新增）
-    WorkflowErrorCard.tsx            -- 错误恢复卡片（新增）
-    WorkflowRunTimeline.tsx          -- 运行时间线（新增）
-    ProvenanceBadge.tsx              -- 来源追溯标签（新增）
-    index.ts
+| 路径 | 动作 | 最小变更 |
+|---|---|---|
+| `frontend/src/components/story-workspace/workflow/WorkflowContextBar.tsx` | 新建 | 工作流上下文条 |
+| `frontend/src/components/story-workspace/workflow/PreflightProgressPanel.tsx` | 新建 | 预检进度面板 |
+| `frontend/src/components/story-workspace/workflow/WorkflowRunStatusPanel.tsx` | 新建 | 运行状态面板 |
+| `frontend/src/components/story-workspace/workflow/WorkflowErrorCard.tsx` | 新建 | 错误恢复卡片 |
+| `frontend/src/components/story-workspace/workflow/WorkflowRunTimeline.tsx` | 新建 | 运行时间线 |
+| `frontend/src/components/story-workspace/workflow/ProvenanceBadge.tsx` | 新建 | 来源与权限降级展示 |
+| `frontend/src/components/story-workspace/workflow/index.ts` | 新建 | 受控导出 |
+| `frontend/src/hooks/useWorkflowPreflight.ts` | 新建 | preflight 状态管理 |
+| `frontend/src/hooks/useWorkflowRun.ts` | 新建 | run 状态管理 |
+| `frontend/src/hooks/useWorkflowEvents.ts` | 新建 | SSE/轮询事件消费 |
+| `frontend/src/api/storyWorkspaceApi.ts` | 新建/扩展 | story-workspace API client |
+| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.tsx` | 修改 | 仅集成上下文条 |
+| `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx` | 修改 | 仅集成来源追溯 |
+| `frontend/src/components/story-workspace/layout/StoryWorkspaceLayout.css` | 修改 | 仅新增本 task workflow 状态、来源与权限降级样式，不改三栏几何骨架 |
+| `frontend/src/components/story-workspace/workflow/WorkflowRunStatusPanel.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖状态、来源与权限降级渲染 |
+| `frontend/src/components/story-workspace/workflow/PreflightProgressPanel.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖八步 preflight 与失败停止 |
+| `frontend/src/components/story-workspace/workflow/WorkflowErrorCard.test.tsx` | 条件新建 | 已有兼容 runner 时覆盖错误码、恢复入口与脱敏 |
+| `frontend/src/hooks/useWorkflowEvents.test.ts` | 条件新建 | 已有兼容 runner 时覆盖事件去重、顺序和轮询降级 |
 
-frontend/src/hooks/
-  useWorkflowPreflight.ts          -- preflight 状态管理（新增）
-  useWorkflowRun.ts                -- run 状态管理（新增）
-  useWorkflowEvents.ts             -- SSE 事件消费（新增）
+四个测试路径是闭集内的条件授权：仅当 §8 runner 发现命令返回非空且现有依赖可直接运行时创建；若仍无 runner，则不得生成不可执行测试文件，改以浏览器 E2E/人工证据验收。这不授权修改 `package.json`、依赖锁或测试配置。
 
-frontend/src/api/
-  storyWorkspaceApi.ts             -- story-workspace API（新增/扩展）
-
-frontend/src/components/story-workspace/layout/
-  StoryWorkspaceLayout.tsx         -- 集成上下文条（修改）
-  StoryWorkspaceReviewPanel.tsx    -- 集成来源追溯（修改）
-```
-
-### 后端 API 消费（由 BackendTaskAgent 提供）
+### 后端 API 消费（由 backend domain 前置 task 提供；本 task 只读消费）
 
 ```
 POST /api/story-workspace/workflow-preflights
@@ -265,6 +272,10 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 
 ## 8. 测试策略
 
+0. **命令发现与静态验证**：
+   - execute Issue 先读取 `frontend/package.json` 的 `scripts` 与现有测试文件命名，逐字回填实际 runner、版本和命令；不得凭空假设 Vitest/Jest，也不得为本 task 新增测试框架、依赖锁或全局配置。
+   - 当前仓库已发现 `build`、`lint`，未发现 `test` script；从仓库根执行的最低静态验证为 `npm --prefix frontend run build`、`npm --prefix frontend run lint` 和 `git diff --check`。runner 发现命令固定为 `node -p "require('./frontend/package.json').scripts?.test ?? ''"`。若 execute 时仍无 test runner，必须在 execute Issue/正式报告记录发现输出，并以下述人工/E2E 场景补证；不得伪报单元测试已执行。
+
 1. **状态渲染测试**：
    - 各状态（未选择/不可用/预检中/运行中/待审阅/失败/完成）正确渲染
    - 状态切换动画平滑
@@ -291,6 +302,8 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 
 6. **E2E 测试**：
    - 选择工作流 → preflight → 运行 → 审阅 → 重试 完整流程
+   - 验证有权限来源可返回原 Voice 对话；无权限来源只显示批准的脱敏文案
+   - 逐项保留页面状态、网络请求/响应、事件与权限降级证据；正式命令和结果写入唯一 exec 报告
 
 ---
 
@@ -303,9 +316,11 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 - [ ] 失败状态展示失败步骤/错误摘要和恢复动作
 - [ ] 历史剧本可追溯到 `workflow_run_id`、`deck_plugin_version`、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`
 - [ ] 结构化错误码映射为用户可理解的恢复入口
-- [ ] 单元测试/E2E 测试覆盖各状态渲染、错误恢复交互
+- [ ] 已有 runner 时自动化测试覆盖状态/错误/事件；无 runner 时浏览器 E2E/人工证据覆盖同等场景并记录发现结果
 - [ ] 与 story-workspace 既有布局、审阅 UI 增量集成，不推翻既有设计
-- [ ] Voice chat → run 的 UX 文案和展示方式保持未冻结，使用默认假设占位 `[待 DECK-020 决策]`
+- [ ] run 详情按 §14 已批准合同展示双向来源；无来源权限时只显示「来源：Voice 对话（无权查看）」且不泄露名称、时间、正文或链接
+- [ ] 实际变更只位于 §5 十八个实现/测试路径及唯一正式报告路径
+- [ ] execute Issue/正式报告逐项回填验证命令、结果、验收、diff 与回滚说明；缺失 runner 时按 §8 记录发现证据
 
 ---
 
@@ -315,11 +330,11 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 |---|---|---|
 | 与既有布局集成复杂度 | 低 | 增量添加，不修改三栏骨架 |
 | SSE 事件基础设施 | 中 | 复用现有 claude-agent SSE 模式；无 SSE 时降级为轮询 |
-| DECK-016 未决（物理服务边界） | 中 | 按逻辑合同消费 API；物理拆分后 gateway 层适配 |
-| DECK-017 未决（marketplace 签名/digest） | 低 | 本 task 不直接处理 manifest 发布；runtime lock 完整性由后端校验 |
-| DECK-018 未决（多节点 runtime） | 中 | 默认假设：后台创建 run-scoped session；UI 展示来源链接；多节点决策后 readiness 按 environment 聚合 |
-| DECK-019 未决（安全撤销） | 中 | 默认假设：普通禁用不终止；安全撤销允许强制终止并审计；运行中状态可能收到强制取消事件 |
-| DECK-020 未决（Voice chat → run UX） | 中 | **Voice chat → run 的 UX 文案和展示方式保持未冻结**；当前使用默认假设（后台创建 run-scoped session，展示来源链接）；冻结 gate：产品 owner 确认（见下方 §14） |
+| DECK-016 已冻结（物理服务边界） | 低 | 只消费逻辑 API；无状态 gateway 只聚合/路由，不在前端假设新业务服务或写 owner |
+| DECK-017 条件冻结（marketplace 签名/digest） | 低 | runtime lock 完整性由后端校验；未验证制品不得显示为 production-ready |
+| DECK-018 已冻结但 rollout 限域 | 中 | 当前仅单节点 persistent 通过；多节点/临时 runtime 继续 fail closed，run-ready 只信任 session load receipt |
+| DECK-019 已冻结（安全撤销） | 中 | DISABLE 不终止既有 run；REVOKE/EMERGENCY 可触发确定性安全取消；Stage 4 production Gate 仍等待真实 evidence pack |
+| DECK-020 已冻结（Voice chat → run UX） | 中 | 严格使用 §14 批准的显式启动、独立 run/session、双向来源与权限降级合同 |
 | 错误文案安全 | 低 | 只展示安全文案；堆栈/secret 只进受限日志 |
 | 状态机复杂 | 低 | 严格按设计稿 §11.3 状态机；不自行添加状态 |
 
@@ -327,20 +342,24 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 
 ## 11. 允许修改范围与禁止修改范围
 
-### 允许修改
-- `frontend/src/components/story-workspace/workflow/` 目录（新建）
-- `frontend/src/hooks/useWorkflowPreflight.ts` 等（新建）
-- `frontend/src/api/storyWorkspaceApi.ts`（新建/扩展）
-- `frontend/src/components/story-workspace/layout/`（增量集成）
+### 11.1 未来 execute 允许闭集
 
-### 禁止修改
-- `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`
-- `docs/task/TASK-REQUIREMENT-FORMAT.md`
-- 后端 task 文档（后端实现 Agent 负责）
-- 任何实现代码（本阶段为 task 规划）
-- story-workspace 既有三栏布局骨架
-- 数据表渲染逻辑（task_202c）
-- Review Panel 审阅语义（task_202d）
+- §5 列出的十八个 frontend 实现/测试路径；每个路径仅限表中最小变更。
+- `docs/exec/exec_task_213_frontend_story_workspace_status.md`：仅允许 `ExecTaskAgent` 写入本 task 的唯一正式执行报告。
+
+以上十九个路径可直接复制到 execute 模板（十八个 frontend 路径 + 一个正式报告例外）；未列出的路径默认禁止。
+
+### 11.2 未来 execute 禁止范围
+
+- `docs/exec/` 下除 `docs/exec/exec_task_213_frontend_story_workspace_status.md` 之外的全部路径。
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`backend/`、依赖锁、测试/构建配置、生成物及 §11.1 未列出的任何实现或测试文件。
+- story-workspace 既有三栏布局骨架、数据表渲染逻辑（task_202c）和 Review Panel 审阅语义（task_202d）。
+- Voice chat 触发按钮或 `WorkflowRunLinkCard` 实现；本 task 只消费并展示 run 侧来源合同，不扩大到 chat 侧路径。
+- 前端自行推进 Preflight/Run 状态机、伪造服务端来源/权限结果、泄露 prompt/secret/session settings，或覆盖共享工作树既有差异。
+
+### 11.3 当前修订阶段约束
+
+[SUO-324](/SUO/issues/SUO-324) 只修订 task 合同，不授权实现 §11.1。未来 execute 必须由 `ExecTaskAgent` 在独立 Issue checkout 后实施；完成后由 StagePlanner 独立重跑 readiness，不得由本 task 自行宣布进入 execute 或通过 Stage 3 Gate。
 
 ---
 
@@ -356,29 +375,40 @@ POST /api/story-workspace/workflow-runs/{workflow_run_id}/cancel
 
 ---
 
-## 13. 未决项与默认假设
+## 13. 决策状态与剩余实现假设
 
-| 未决项 | 默认假设 | 影响 |
+| 决策/事项 | 权威状态或合同 | 本 task 影响 |
 |---|---|---|
-| DECK-016 物理服务边界 | 逻辑合同先行，gateway 聚合 | API 路径可能随物理拆分调整 |
-| DECK-017 marketplace 签名/digest | 无 digest 不标 production-ready | 来源追溯中 runtime lock 完整性由后端校验 |
-| DECK-018 多节点 runtime | 单节点 persistent 默认假设 | readiness 展示按 environment 聚合；多节点决策后适配 |
-| DECK-019 安全撤销 | 普通禁用不终止；安全撤销允许强制终止并审计 | 运行中状态可能收到强制取消事件 |
-| DECK-020 Voice chat → run UX | 后台创建 run-scoped session，展示来源链接 `[文案未冻结 — 待 DECK-020 决策]` | 上下文条需展示来源关系；Voice chat 发起 workflow run 的 UX 流程待产品 owner 确认 |
-| SSE vs 轮询 | 优先 SSE，降级轮询 | 事件消费实现需兼容两者 |
-| 步骤进度展示 | 按 manifest steps 展示 | 需要 manifest 中 steps 定义 |
+| DECK-016 物理服务边界 | `frozen`：三域单写、无状态 gateway 聚合；不新增第三业务服务 | 只消费逻辑 API，物理拆分不得改变来源/状态语义 |
+| DECK-017 marketplace 签名/digest | `conditional_frozen`：生产完整性仍受阻 | 来源追溯只展示服务端验证结果，不自行验签或放行 |
+| DECK-018 runtime 分发 | `frozen` 设计；当前仅单节点 persistent rollout 限域通过 | 多节点/临时 runtime 不得显示 ready；节点/会话来源按服务端 receipt 展示 |
+| DECK-019 安全撤销 | `frozen`：DISABLE 不终止；REVOKE 60 秒默认/300 秒上限后硬停；EMERGENCY 零 grace | 运行 UI 消费 `cancelling/cancelled/failed` 与 `SECURITY_REVOCATION`，不得显示 `completed` |
+| DECK-020 Voice chat → run UX | `frozen`；批准合同见 §14 | 本 task 实现 run 详情的来源/返回与权限降级侧，不实现 chat 卡片 |
+| SSE vs 轮询 | 实现选择仍可由现有基础设施决定 | 优先 SSE、可降级轮询；两者都要按 event_id/aggregate_version 保序去重 |
+| 步骤进度展示 | 按 manifest steps 展示 | 不自行发明服务端未声明步骤 |
 
 ---
 
-## 14. DECK-020 Voice chat → run UX 文案冻结 gate
+## 14. DECK-020 Voice chat → run UX 已冻结合同
 
-> **状态**：未冻结（默认假设下可推进，UI 文案冻结前必须解决）
+> **状态**：`frozen`；依据 [SUO-254](/SUO/issues/SUO-254) 的 CEO `approve`，Stage 3 UI/文案设计 Gate 已通过。设计冻结不代替 execute、E2E 或发布验收。
 
-| 项 | 说明 |
+| 项 | 已批准合同 / 本 task 边界 |
 |---|---|
-| 当前默认假设 | 后台创建 run-scoped session 并展示来源链接 |
-| 当前 task 影响 | WorkflowContextBar 的 "运行" 状态展示和来源追溯为默认假设行为，非最终 UX |
-| 冻结 gate | 产品 owner 确认 Voice chat 发起 workflow run 的 UX 流程、run-scoped session 展示方式、来源链接文案和位置 |
-| 冻结 owner | `@CEOOrchestrator` 路由产品 owner |
-| 下游影响 | DECK-009 (run-scoped session)、task_212 (Deck Editor 生效提示) |
-| 本 task 处理 | 使用默认假设文案占位，明确标注 `[文案未冻结]`，待 DECK-020 决策后统一替换 |
+| 启动方式 | 仅用户点击「创建工作流运行」时启动；普通聊天消息不得静默触发 |
+| 原 chat | 保持原位置并插入/更新 `WorkflowRunLinkCard`，不得自动跳转 |
+| run/session | 创建独立 `workflow_run_id` 与 run-scoped `agent_session_id`，不得复用 Voice `thread_id`；session 不进入普通 Chat 历史，重试创建新 run/session |
+| 双向来源 | chat 卡片主操作「查看运行」打开 `/story-workspace/runs/{workflow_run_id}`；run 详情有权限时显示来源并提供「返回来源对话」 |
+| 权限降级 | 无来源权限时固定显示「来源：Voice 对话（无权查看）」，隐藏来源名称、时间、正文和返回链接 |
+| 批准文案 | 入口「创建工作流运行」；卡片标题「已创建独立工作流运行」；说明「本次运行使用锁定的 Deck 工作流与 ClaudeAgent 运行时；当前 Voice 对话仅作为来源。」；主操作「查看运行」 |
+| 本 task 实现 | 仅实现 story-workspace run 侧状态、来源、返回链接与权限降级；Voice chat 触发按钮/卡片不在 §11.1 闭集内 |
+| 必留 E2E 证据 | 正确 run 跳转、有权限返回原对话、run/session 与 Voice thread 隔离、无权限脱敏、重试形成新 run/session 与可审计链 |
+
+---
+
+## 15. 回滚边界
+
+- 只回退 §11.1 中本 task 新增的 workflow 组件、hooks、client、测试，以及两个 layout 文件的最小集成区段。
+- 不回滚或删除后端 Workflow Run、Preflight、session、结果或来源记录；回滚后保留既有三栏布局、数据表和 Review Panel 审阅语义。
+- 若后端合同不可用，UI 回到只读/不可用安全状态并保留来源权限边界，不伪造运行成功、来源或返回链接。
+- 回滚前后均执行 §8 的静态验证与关键人工场景，并在 `docs/exec/exec_task_213_frontend_story_workspace_status.md` 记录触发条件、变更路径、验证结果与剩余影响；正式报告本身不得在代码回滚中删除。

@@ -84,6 +84,11 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
     - `useScenes()` — 场景数据查询
     - 支持搜索、筛选、排序、分页参数
 
+11. **接入现有列表页并补齐导出**
+    - 将 `StoryWorkspaceStoryTable`、`StoryWorkspaceCharacterTable`、`StoryWorkspaceSceneTable` 分别接入现有 Stories / Characters / Scenes 页面骨架，替换当前“后续数据表格任务中接入”的占位内容。
+    - 三个页面只组合本 task 的 Toolbar、Table、Pagination 与查询 Hook；不得在本 task 内实现 Review Panel、Dashboard 或路由逻辑。
+    - 更新 `layout/index.ts` 与 `components/story-workspace/index.ts` 的最小导出，使页面通过稳定 barrel 引用本 task 组件。
+
 ---
 
 ## 5. 涉及文件路径
@@ -104,6 +109,13 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 - `frontend/src/hooks/story-workspace/useCharacters.ts`
 - `frontend/src/hooks/story-workspace/useScenes.ts`
 - `frontend/src/hooks/story-workspace/index.ts`
+
+**修改文件（页面接入与导出闭环）**：
+- `frontend/src/components/story-workspace/layout/index.ts`
+- `frontend/src/components/story-workspace/index.ts`
+- `frontend/src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx`
+- `frontend/src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx`
+- `frontend/src/pages/story-workspace/StoryWorkspaceScenesPage.tsx`
 
 **复用文件**（只读）：
 - `frontend/src/styles/tokens.css` — 色彩 token
@@ -132,8 +144,8 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 
 | 依赖 | 状态 | 说明 |
 |---|---|---|
-| `task_202b` (FE-002 Sidebar 导航) | ⏳ 需先完成 | 提供页面骨架和路由 |
-| `SUO-201-BE-002` (REST API) | ⏳ 并行 | 数据 API 接口 |
+| `task_202b` (FE-002 Sidebar 导航) | ✅ 已完成（SUO-265） | 已提供三个列表页骨架和 canonical 路由 |
+| `SUO-201-BE-002` (REST API) | ✅ 已完成（SUO-264） | 已提供列表查询、搜索、筛选、排序与分页接口 |
 | `SUO-201-SH-002` (共享类型包) | ⏳ 可选 | TypeScript 类型定义 |
 | `frontend/src/styles/tokens.css` | ✅ 已存在 | 色彩系统 |
 
@@ -146,26 +158,32 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 
 ## 8. 测试策略
 
-1. **视觉测试**：
-   - 审阅状态标记正确（黄条/红条/竖线）
-   - 标签样式符合规范
-   - 行高 56px，Hover 效果正常
+### 8.1 可执行命令
 
-2. **交互测试**：
-   - 点击行选中，右侧出现 Action Brown 竖线
-   - 点击行后右侧 Review Panel 展开
-   - Checkbox 多选仅限待审阅项
-   - 多选后 Toolbar 替换为批量操作栏
+1. **构建**（从仓库根目录执行）：
+   ```bash
+   cd frontend && npm run build
+   ```
+   通过标准：TypeScript 构建与 Vite 打包均成功。
+2. **本 task scoped lint**（从仓库根目录执行）：
+   ```bash
+   cd frontend && npx eslint src/components/story-workspace/table src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx src/components/story-workspace/layout/index.ts src/components/story-workspace/index.ts src/hooks/story-workspace src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx src/pages/story-workspace/StoryWorkspaceScenesPage.tsx
+   ```
+   通过标准：本 task 闭集内无 ESLint error；若全仓历史 warning/error 不在闭集内，必须单独记录，不得越界修复。
+3. **单元测试**：`N/A`。当前 `frontend/package.json` 没有测试 runner 或 `test` script；本 task 禁止通过修改 `package.json`、lockfile 或新增依赖来引入测试框架。
+4. **浏览器验证**：以 1280px 桌面视口逐一访问 `/story-workspace/stories`、`/story-workspace/characters`、`/story-workspace/scenes`，保留三页截图、交互记录及相关列表请求的 Network 证据。
 
-3. **功能测试**：
-   - 搜索框输入后表格过滤
-   - 筛选下拉选择后表格过滤
-   - 点击表头排序（升序/降序/取消）
-   - 分页切换正确
+### 8.2 验收与验证映射
 
-4. **API 集成测试**：
-   - Hooks 正确调用 `/api/story-workspace/stories` 等接口
-   - 正确处理分页响应格式
+| 验收 ID | 验收条件 | 对应验证 |
+|---|---|---|
+| `AC-202C-01` | 三个页面不再显示占位文案，分别实际渲染 Story / Character / Scene 表格；页面可通过现有 Sidebar 和 canonical 路由到达 | 构建 + 三路由 1280px 截图 |
+| `AC-202C-02` | Hooks 使用 `/api/story-workspace/stories|characters|scenes`，正确处理 `{ data, pagination }`；搜索、筛选、排序、分页产生与 REST 基线一致的 `q`、`review_status`、`sort`、`order`、`page`、`per_page` 参数 | 浏览器交互 + Network 请求/响应证据 |
+| `AC-202C-03` | pending 黄条、rejected 红条、选中态右侧 Action Brown 竖线、56px 行高与 Hover 可见 | 三类状态 fixture/真实数据截图 |
+| `AC-202C-04` | Checkbox 仅允许 pending 项；选择后批量栏替换常规 Toolbar，取消后恢复；本 task 只验证批量栏状态，不调用审阅 API | 浏览器交互记录 |
+| `AC-202C-05` | scoped lint 与 build 通过，实际 diff 只命中允许闭集；未修改 Review Panel、Dashboard、router/App、依赖文件或排除能力 | 命令输出 + `git diff --name-only` / `git diff --check` |
+
+> 本 task 不把“点击行后 Review Panel 展开”作为验收条件；它属于 `task_202d`。若当前环境没有可用 API 数据，可使用浏览器网络层临时响应完成视觉/交互验证，但不得把 mock 文件写入仓库。
 
 ---
 
@@ -184,6 +202,9 @@ Story Workspace 数据表格组件实现（故事/角色/场景）
 - [ ] 分页：默认 20 条/页
 - [ ] 批量选择：Checkbox 多选（仅限待审阅项）
 - [ ] 批量操作栏在选中时替换常规 Toolbar
+- [ ] 三个现有列表页分别接入对应表格，不再渲染占位文案
+- [ ] `layout/index.ts` 与 `components/story-workspace/index.ts` 完成最小导出
+- [ ] `AC-202C-01`～`AC-202C-05` 均有对应验证证据，build 与 scoped lint 通过
 
 ---
 
@@ -253,10 +274,15 @@ enum StoryType {
 ## 执行边界（增量修正）
 
 ### 允许修改范围
-- 允许创建 `frontend/src/components/story-workspace/table/` 目录及组件文件
-- 允许创建 `frontend/src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx`
-- 允许创建 `frontend/src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx`
-- 允许创建 `frontend/src/hooks/story-workspace/` 目录及 Hooks 文件
+- `frontend/src/components/story-workspace/table/**` — 仅创建/修改本 task 的表格、表格样式、状态标签与分页组件。
+- `frontend/src/components/story-workspace/layout/StoryWorkspaceToolbar.tsx` — 仅实现搜索/筛选/排序 Toolbar。
+- `frontend/src/components/story-workspace/layout/StoryWorkspaceBatchReviewToolbar.tsx` — 仅实现 pending 多选后的批量栏视觉与回调合同。
+- `frontend/src/components/story-workspace/layout/index.ts` — 仅追加上述两个 Toolbar 的导出。
+- `frontend/src/components/story-workspace/index.ts` — 仅追加 table / layout 的必要导出，不重组既有导出。
+- `frontend/src/hooks/story-workspace/**` — 仅创建/修改三类列表查询 Hooks 及其本地类型/导出。
+- `frontend/src/pages/story-workspace/StoryWorkspaceStoriesPage.tsx` — 仅替换占位内容并组合 Story Toolbar/Table/Pagination/Hook。
+- `frontend/src/pages/story-workspace/StoryWorkspaceCharactersPage.tsx` — 仅替换占位内容并组合 Character Toolbar/Table/Pagination/Hook。
+- `frontend/src/pages/story-workspace/StoryWorkspaceScenesPage.tsx` — 仅替换占位内容并组合 Scene Toolbar/Table/Pagination/Hook。
 
 ### 禁止修改范围
 - **禁止修改** `docs/design/` 目录下任何文件
@@ -267,6 +293,9 @@ enum StoryType {
 - **禁止修改** 后端代码（`backend/src/` 等）
 - **禁止修改** 现有全局表格组件（如有）的核心逻辑
 - **禁止修改** `docs/task/TASK-REQUIREMENT-FORMAT.md`
+- **禁止修改** `frontend/src/components/story-workspace/layout/StoryWorkspaceReviewPanel.tsx`、`frontend/src/pages/story-workspace/StoryWorkspaceDashboardPage.tsx`、`frontend/src/pages/story-workspace/StoryWorkspaceDreamPage.tsx`
+- **禁止修改** `frontend/src/router/story-workspace.tsx`、`frontend/src/App.tsx`、`frontend/package.json`、任何 lockfile；现有路由已由 `task_202b` 提供
+- **禁止新增** 仓库内 mock、快照或测试 runner 配置；当前无前端测试框架，验证采用 build、scoped lint 与浏览器证据
 
 ### 明确排除项
 - **复杂画布**：本 task 的表格仅使用标准 HTML table 或 CSS Grid/Flexbox 布局，不涉及 Canvas 渲染、虚拟滚动 Canvas 实现、大数据量 Canvas 优化等
@@ -276,3 +305,23 @@ enum StoryType {
 - **复杂表格功能**：不涉及树形表格、嵌套表格、行内编辑、拖拽排序、列宽拖拽调整、冻结列等高级表格功能
 - **实时更新**：表格数据刷新采用轮询机制，不涉及 WebSocket 实时推送、Server-Sent Events 等实时数据更新技术
 - **导出功能**：不涉及 Excel/CSV/PDF 导出功能
+
+---
+
+## SUO-270 Execute Readiness Delta
+
+### 准入项
+
+- `SUO-264` REST API 与 `SUO-265` Sidebar/路由/页面骨架均已有完成回执和最小验证；本 task 的两项硬接入前提已满足。
+- 仓库现有 `build`、ESLint 与 1280px 浏览器路径足以形成最小充分验证，不依赖新增测试框架。
+
+### 本次修正项
+
+- 把三个列表页、两个 barrel export 纳入最小写入闭集，并增加页面接入步骤。
+- 删除跨 task 的 Review Panel 展开验收，建立 `AC-202C-01`～`AC-202C-05` 与可执行验证的一一映射。
+- 显式冻结 App/router、Dashboard/Dream、依赖与测试框架配置，保留数据表替代复杂画布及既有排除项。
+
+### 仍阻塞项
+
+- **task 文档自身：无。**
+- **StagePlanner 后续**：`docs/stage/stage_story-workspace.md` §7.1 仍只列 table/Toolbar/hooks，未列三个页面与两个 export；须由独立 StagePlanner 子单同步后，才能以 Task + Stage 联合作为 execute 最终准入证据。本 Issue 不修改 Stage。

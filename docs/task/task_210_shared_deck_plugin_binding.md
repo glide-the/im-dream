@@ -2,16 +2,18 @@
 
 > **Task ID**: `task_210_shared_deck_plugin_binding`
 > **源 Issue**: `DECK-005` (from `SUO-223` / `SUO-218`)
-> **类型**: `shared`（**TaskDesignAgent 主责设计**，后端 binding/API task 合同由已有后端 task 文档定义）
+> **类型**: `shared`（合同索引；**不可 checkout、不可直接执行**）
 > **优先级**: `P0`
+> **标签**: `deck-plugin`, `binding`, `selection`, `shared`, `contract`
 > **生成日期**: 2026-08-01
-> **状态**: `draft`
+> **状态**: `contract-only`（执行入口已拆分至 `task_210a` 与 `task_212`）
+> **合同维护责任人**: `TaskDesignAgent`
 
 ---
 
 ## 1. 任务标题
 
-DECK-005: Deck 创建/编辑的插件选择与版本绑定（Shared — **TaskDesignAgent 负责 task 设计**，前后端执行由对应实现 Agent 承担）
+DECK-005: Deck 创建/编辑的插件选择与版本绑定（Shared 合同索引）
 
 ---
 
@@ -35,9 +37,9 @@ DECK-005: Deck 创建/编辑的插件选择与版本绑定（Shared — **TaskDe
 1. Deck Editor 可展示已安装/可用的 Deck Plugin release 列表及状态。
 2. 用户选择精确版本后保存产生新的 `binding_revision`，仅影响下一次运行。
 3. 通过 `expected_binding_revision` 防止并发覆盖，冲突时返回 `409 BINDING_REVISION_CONFLICT`。
-4. 前端负责版本列表 UI、状态展示、选择交互、revision 冲突处理、生效提示。
-5. 后端负责 binding 模型、保存校验、revision 并发控制、selection validation 逻辑。
-6. **TaskDesignAgent 是 shared task 设计唯一责任人**：负责前后端合同对齐、字段定义、验收条件与依赖梳理；不负责具体代码实现。
+4. `task_210a_backend_deck_plugin_binding` 是后端 binding/API 唯一执行单元，由 `BackendTaskAgent` 单独 checkout、实现和验收。
+5. `task_212_frontend_deck_editor_plugin_binding` 是前端消费唯一执行单元，由 `FrontendTaskAgent` 单独 checkout、实现和验收。
+6. 本文只冻结跨端字段、API、依赖与集成 Gate；不授权任何前端或后端实现代码。
 
 > **命名与 UI 标签隔离**：Deck 业务工作流统一显示为「Deck 工作流插件」，只使用 `deck_plugin_id` / `deck_plugin_version`；ClaudeAgent 会话能力包统一显示为「ClaudeAgent 运行时插件」，只使用 `claude_code_plugin_id` / `resolved_version` / `artifact_digest` 及 `declared`、`materialized`、`loadable` 等运行时标签。禁止只显示笼统的「插件」，禁止用 `claude_code_plugin_id` 或运行时标签替代 Deck binding 的业务标识与发布状态。
 
@@ -50,11 +52,24 @@ DECK-005: Deck 创建/编辑的插件选择与版本绑定（Shared — **TaskDe
 | `preflight/run` | N/A（不在本 task 实现） | 仅展示“当前 run 来源不变/下一次运行生效”的只读语义；不触发或展示 preflight、run 状态、取消与重试 | `DECK-006` / `DECK-007` 提供服务，`task_213_frontend_story_workspace_status` 负责执行态 UI；selection validation 不等于权威 preflight |
 | `error/recovery` | 部分适用 | 处理列表加载、selection validation、保存失败与 `BINDING_REVISION_CONFLICT` 刷新确认；只提供配置/安装 owner 跳转 | 安装/物化恢复由 `task_211_frontend_plugin_admin_ui` 承担，preflight/run 恢复由 `task_213_frontend_story_workspace_status` 承担，避免暗示本 task 编排这些恢复流程 |
 
+### 3.2 唯一执行单元映射
+
+| 执行单元 | Domain | 唯一执行责任人 | 来源 | 独立 checkout / 验收 | 本文是否授权实现 |
+|---|---|---|---|---|---|
+| `task_210a_backend_deck_plugin_binding` | backend | `BackendTaskAgent` | `DECK-005` 后端子边界 | 是 | 否；以 `task_210a_backend_deck_plugin_binding.md` 为唯一授权 |
+| `task_212_frontend_deck_editor_plugin_binding` | frontend | `FrontendTaskAgent` | `DECK-011`，消费 `DECK-005` | 是 | 否；以 `task_212_frontend_deck_editor_plugin_binding.md` 为唯一授权 |
+
+- 禁止把本文 checkout 给两个实现 Agent；本文不是 execute task。
+- 禁止新增第二份 frontend binding 执行 task；Deck Editor 组件、hook 和 API client 的唯一 ownership 在 `task_212`。
+- Stage 中的 `task_210` Shared Binding 执行节点在落地时映射为后端 `task_210a`；前端仍按既有 `task_212` 节点执行。
+
 ---
 
-## 4. 实现步骤
+## 4. 合同维护与执行交接步骤
 
-### 步骤 1：后端 binding 模型与 API 合同（由已有后端 task 文档定义，TaskDesignAgent 引用合同）
+> 本节记录稳定合同和交接顺序，不是实现步骤，也不构成代码写入授权。
+
+### 步骤 1：冻结后端 binding 模型与 API 合同
 
 > **引用边界**：以下后端模型与 API 合同已在后端 task 文档中定义，本文仅引用消费，不重复定义也不改写。
 > - `task_deck_001_backend_manifest-model.md` — Manifest 模型
@@ -93,91 +108,38 @@ created_at / updated_at
 - 用户有选择权限
 - 已知 runtime readiness（不替代 preflight 的权威物化检查）
 
-### 步骤 2：前端 Deck Editor 插件选择区（前端实现 Agent 负责）
+### 步骤 2：交接后端独立执行单元
 
-2.1 在 `DeckEditorModal` 中新增「Deck 工作流插件」区：
-- 位置：Deck metadata 下方、voice list 上方（或作为独立 tab）
-- 展示已选择的 `display_name`、`deck_plugin_version`、发布状态、capability 摘要
+2.1 仅由 `task_210a_backend_deck_plugin_binding.md` 授权模型、持久化、binding service、selection validation、API 模块和后端测试。
 
-2.2 实现版本选择器组件 `DeckPluginVersionSelector`：
-- 调用 `GET /api/voice-decks/{deck_id}/plugin-options` 获取过滤后的 release 列表
-- 每个版本展示状态标签：`ready` / `materializing` / `configuration_required` / `deprecated` / `disabled` / `revoked` / `incompatible` / `permission_denied` / `upgrade_pending`
-- 不可选版本显示 reason code（非敏感）
-- 「推荐兼容版本」默认高亮
-- 「查看其他版本」展开全部
+2.2 `BackendTaskAgent` 必须在独立 execute Issue 上 checkout；完成后逐项回填后端验收与测试证据。
 
-2.3 实现选择变更 UI：
-- 选择后显示生效提示："仅影响下一次运行；历史和当前运行不变"
-- 配置/安装问题显示 owner 与恢复入口
-- 运行中可预选下一版本；当前 run 继续显示自己的锁定来源
+### 步骤 3：交接前端独立执行单元
 
-2.4 实现保存与并发处理：
-- 保存时携带 `expected_binding_revision`
-- 收到 `409 BINDING_REVISION_CONFLICT` 时刷新并提示用户确认
-- 禁止最后写入者静默覆盖
+3.1 仅由 `task_212_frontend_deck_editor_plugin_binding.md` 授权 Deck Editor 组件、hook、API client、冲突交互和前端测试。
 
-### 步骤 3：前端状态管理与数据流
+3.2 `FrontendTaskAgent` 必须在独立 execute Issue 上 checkout；不得复用后端 checkout，也不得把实现归回本文。
 
-3.1 创建 `useDeckPluginBinding` hook：
-- 管理 binding 状态、版本列表、加载状态、错误状态
-- 处理 revision 冲突刷新
-- 缓存版本列表（合理 TTL）
+### 步骤 4：执行跨端 Gate 验证
 
-3.2 集成到 `DeckEditorModal`：
-- 打开 modal 时加载当前 binding
-- 版本选择变更时本地预览，保存时提交
-- 保存成功后更新本地 binding revision
+4.1 后端单元先证明精确版本、revision 递增、冲突与 selection validation。
 
-### 步骤 4：测试策略
+4.2 前端单元再基于冻结响应 fixture 验证状态渲染、保存、冲突刷新和重新确认。
 
-4.1 前端单元测试：
-- `DeckPluginVersionSelector` 渲染各状态版本
-- 选择交互与状态变更
-- `409 BINDING_REVISION_CONFLICT` 处理
-- 生效提示文案
-
-4.2 后端单元测试：
-- binding 保存与 revision 递增
-- 乐观锁冲突检测
-- selection validation 各失败路径
-
-4.3 集成测试：
-- 前后端 binding 保存端到端
-- 并发编辑冲突场景
+4.3 联调只验证同一 `deck_plugin_binding_id`、字段兼容性和“仅影响下一次运行”；不在本文中产生第三份实现 ownership。
 
 ---
 
 ## 5. 涉及文件路径
 
-### 前端（新增/修改）
+本文不授权任何实现路径。执行路径仅在以下唯一执行文档中形成闭集：
 
-```
-frontend/src/components/deck/
-  DeckPluginSelector.tsx           -- 插件选择主组件（新增）
-  DeckPluginVersionList.tsx        -- 版本列表展示（新增）
-  DeckPluginVersionCard.tsx        -- 单个版本卡片（新增）
-  DeckBindingStatusBar.tsx         -- 绑定状态与生效提示（新增）
-  index.ts
+| Domain | 唯一执行文档 | 路径 ownership |
+|---|---|---|
+| backend | `docs/task/task_210a_backend_deck_plugin_binding.md` | binding 模型、持久化、服务、API 模块与后端测试 |
+| frontend | `docs/task/task_212_frontend_deck_editor_plugin_binding.md` | Deck Editor 组件、hooks、API client 与前端测试 |
 
-frontend/src/hooks/
-  useDeckPluginBinding.ts          -- binding 状态管理 hook（新增）
-  useDeckPluginOptions.ts          -- 版本列表查询 hook（新增）
-
-frontend/src/api/
-  deckPluginApi.ts                 -- Deck Plugin binding API（新增）
-
-frontend/src/components/
-  DeckEditorModal.tsx              -- 集成插件选择区（修改）
-```
-
-### 后端（由后端 task 文档定义，前端实现引用合同）
-
-```
-backend/routers/deck_plugin_binding.py    -- binding API 路由
-backend/services/deck_plugin_binding.py   -- binding 服务逻辑
-backend/models/deck_plugin_binding.py     -- binding 数据模型
-backend/services/selection_validation.py  -- selection validation
-```
+合同维护仅允许由 task 规划 Issue 增量修改本文；未来 execute Issue 不得以本文作为代码写入授权。
 
 ---
 
@@ -201,6 +163,13 @@ backend/services/selection_validation.py  -- selection validation
 | UI | 冲突提示 | 刷新 + 用户确认对话框 |
 
 ### 关键 API 合同
+
+| Method | Path | 合同边界 |
+|---|---|---|
+| `GET` | `/api/voice-decks/{deck_id}/plugin-options` | 权限过滤后的精确 release 列表与不可选原因 |
+| `GET` | `/api/voice-decks/{deck_id}/plugin-binding` | 当前下一次运行 binding/revision |
+| `PUT` | `/api/voice-decks/{deck_id}/plugin-binding` | 保存精确 release；必须传 `expected_binding_revision` |
+| `POST` | `/api/voice-decks/{deck_id}/plugin-binding/validate` | selection validation，不创建 Workflow Run |
 
 **GET /api/voice-decks/{deck_id}/plugin-binding**
 ```jsonc
@@ -256,56 +225,30 @@ backend/services/selection_validation.py  -- selection validation
 | `DECK-003` | 需稳定 | Installation 生命周期 — 版本列表依赖 installation 状态 |
 | `DECK-004` | 需稳定 | 兼容性判定 — selection validation 依赖兼容性服务 |
 | `task_202a` / `task_202e` | 已存在 | Deck Editor / Dashboard 基础 UI |
-| 后端 binding API | 由后端 task 文档定义 | TaskDesignAgent 引用合同，前端实现消费 |
+| `task_210a_backend_deck_plugin_binding` | Stage 2 独立执行单元 | 提供 binding/API 与 selection validation |
+| `task_212_frontend_deck_editor_plugin_binding` | Stage 3 独立执行单元 | 消费冻结 API 合同；拥有全部 Deck Editor binding UI |
 
 ---
 
 ## 8. 测试策略
 
-### 前端测试
-
-1. **组件渲染测试**：
-   - `DeckPluginVersionSelector` 正确渲染各状态版本
-   - 不可选版本显示正确 reason code
-   - `ready` 版本默认可选，`disabled`/`revoked` 不可选
-
-2. **交互测试**：
-   - 选择版本后本地状态更新
-   - 保存按钮触发 API 调用
-   - 生效提示文案正确显示
-
-3. **并发测试**：
-   - 模拟 `409 BINDING_REVISION_CONFLICT`
-   - 验证刷新提示和用户确认流程
-
-4. **边界测试**：
-   - 无可用版本时显示空状态
-   - 运行中预选下一版本不影响当前 run 展示
-
-### 后端测试（BackendTaskAgent 负责）
-
-1. **binding 保存测试**：
-   - 正确 revision 递增
-   - 乐观锁冲突检测
-   - 精确版本校验（拒绝 latest/范围）
-
-2. **selection validation 测试**：
-   - 各失败路径返回正确 error code
-   - 快速校验不替代 preflight
+| 验证层 | 唯一 owner | 方式 | 通过标准 |
+|---|---|---|---|
+| Shared 合同静态检查 | TaskDesignAgent | 检索 Task ID、来源、依赖、字段、API、ownership、闭集与禁止范围 | `task_210` 不含任何实现授权；后端与前端映射唯一 |
+| 后端单元/集成测试 | BackendTaskAgent | 按 `task_210a` §8 执行 | 精确版本、revision、冲突、validation 和持久化逐项通过 |
+| 前端单元/E2E | FrontendTaskAgent | 按 `task_212` §8 执行 | 状态渲染、选择、保存、冲突重新确认和生效提示逐项通过 |
+| 跨端合同验证 | 两个执行单元各自回填证据 | 后端响应 fixture + 最小联调 | 字段、错误码与 `next_run` 语义一致，无第二份 binding 存储 |
 
 ---
 
 ## 9. 完成标志
 
-- [ ] 前端 `DeckPluginVersionSelector` 组件实现并渲染版本列表
-- [ ] 前端 `useDeckPluginBinding` hook 管理 binding 状态与冲突处理
-- [ ] 前端集成到 `DeckEditorModal`，展示插件选择区
-- [ ] 后端 binding API 实现（由后端实现 Agent 完成或合同已冻结）
-- [ ] `expected_binding_revision` 乐观锁工作正常
-- [ ] `409 BINDING_REVISION_CONFLICT` 前端处理完整
-- [ ] 生效提示文案："仅影响下一次运行；历史和当前运行不变"
-- [ ] 单元测试覆盖版本列表渲染、选择交互、并发冲突
-- [ ] 与后端 API 合同对齐，无字段歧义
+- [ ] 后端唯一执行文档 `task_210a_backend_deck_plugin_binding.md` 存在且只授权 BackendTaskAgent
+- [ ] 前端唯一执行文档 `task_212_frontend_deck_editor_plugin_binding.md` 存在且只授权 FrontendTaskAgent
+- [ ] 本文不再授权前端组件、hook、API client 或后端实现路径
+- [ ] 两个执行单元均明确 Task ID、来源、依赖、输入/输出、闭集、禁止范围、验收、测试和回滚
+- [ ] `DeckPluginBinding` 字段、四个 API、`BINDING_REVISION_CONFLICT` 与 `next_run` 语义在三个文档中一致
+- [ ] Stage 的 Shared 节点可映射为后端 `task_210a` 独立 checkout，前端继续映射 `task_212`
 
 ---
 
@@ -313,7 +256,7 @@ backend/services/selection_validation.py  -- selection validation
 
 | 风险 | 等级 | 缓解 |
 |---|---|---|
-| 后端 binding API 合同未冻结 | 中 | TaskDesignAgent 按设计稿 §14.2 定义合同；后端实现确认或提出差异 |
+| 后端实现偏离已冻结 binding API 合同 | 中 | 后端以 `task_210a` 闭集实现；前端只消费本节四个 API 与冻结 fixture |
 | `DeckEditorModal` 当前无插件区 | 低 | 增量添加，不推翻既有 voice 编辑区 |
 | 版本列表数据量大 | 低 | 分页/折叠 deprecated 版本；默认只展示 ready + 推荐 |
 | DECK-016 未决（物理服务边界） | 中 | 按逻辑合同实现；物理拆分后 gateway 层适配 |
@@ -324,20 +267,25 @@ backend/services/selection_validation.py  -- selection validation
 
 ---
 
-## 11. 允许修改范围与禁止修改范围
+## 11. 规划边界与未来 execute 授权
 
-### 允许修改
-- `frontend/src/components/deck/` 目录（新建）
-- `frontend/src/hooks/useDeckPluginBinding.ts`（新建）
-- `frontend/src/api/deckPluginApi.ts`（新建）
-- `frontend/src/components/DeckEditorModal.tsx`（增量添加插件选择区）
+### 11.1 本次 task 规划修订
 
-### 禁止修改
-- `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` 目录
-- `docs/task/TASK-REQUIREMENT-FORMAT.md`
-- 后端 task 文档（后端实现 Agent 负责）
-- 任何实现代码（本阶段为 task 规划，非 execute）
-- `docs/task/` 下其他已稳定的 task 文档
+仅允许增量修改 `docs/task/task_210_shared_deck_plugin_binding.md`、`docs/task/task_212_frontend_deck_editor_plugin_binding.md`，并新增 `docs/task/task_210a_backend_deck_plugin_binding.md`。本次不得执行或修改任何实现代码。
+
+### 11.2 本文的未来 execute 规则
+
+- 本文允许实现路径闭集为：`N/A`。
+- 本文不可用于 checkout，不可指派 FrontendTaskAgent、BackendTaskAgent 或 ExecTaskAgent 执行代码。
+- 后端未来 execute 仅以 `task_210a_backend_deck_plugin_binding.md` §5/§11 为授权。
+- 前端未来 execute 仅以 `task_212_frontend_deck_editor_plugin_binding.md` §5/§11 为授权。
+- 未出现在对应执行单元允许闭集中的路径默认禁止。
+
+### 11.3 禁止范围
+
+- `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` 与 `docs/task/TASK-REQUIREMENT-FORMAT.md`
+- 任何实现代码、依赖锁、部署配置与生成物
+- `docs/task/` 下除本次三个授权文档外的稳定 task 文档
 
 ---
 
@@ -362,3 +310,12 @@ backend/services/selection_validation.py  -- selection validation
 | DECK-019 安全撤销 | 普通禁用不终止；安全撤销允许强制终止并审计 | revoked release 在版本列表中标记为不可选 |
 | DECK-020 Voice chat → run UX | 本 task 不涉及 | 仅 Deck Editor 内插件选择 |
 | 版本列表分页策略 | 默认折叠 deprecated，展示前 10 个 | UI 实现时可调 |
+
+---
+
+## 14. 回滚边界与交付顺序
+
+- 合同修订回滚：只回退本文关于 execute mapping、ownership 和授权边界的增量，不改写 §6 已冻结字段/API。
+- 后端执行回滚：只按 `task_210a` 的闭集回滚 binding/API 变更，不触碰前端。
+- 前端执行回滚：只按 `task_212` 的闭集撤销 Deck Editor binding UI，不删除或降级后端 binding 数据。
+- 交付顺序：`task_210a` 后端合同测试通过并冻结 fixture → `task_212` 前端消费与测试 → 最小跨端验证。

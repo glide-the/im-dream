@@ -178,10 +178,38 @@ from libs.claude_agent_kit.server.workspace import (
 from claude_agent.tool_confirmation_store import ToolConfirmationResult, ToolConfirmationStore
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
+from services.story_workspace.agent_integration import (
+    get_or_create_default_workspace,
+    parse_agent_story_output,
+    store_agent_story_output,
+)
+from story_workspace.contracts import StoryWorkspaceAgentStoryPayload
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 from session_events import EditSessionEvent, session_event_bus
 
 logger = logging.getLogger(__name__)
+
+
+def _store_story_workspace_output_sync(
+    user_id: int,
+    thread_id: str,
+    payload: StoryWorkspaceAgentStoryPayload,
+) -> dict[str, Any]:
+    """Run Story Workspace SQLite persistence on the service executor thread."""
+
+    db = _db.get_db()
+    try:
+        workspace_id = get_or_create_default_workspace(db, user_id)
+        return store_agent_story_output(
+            db,
+            user_id,
+            workspace_id,
+            thread_id,
+            payload,
+        )
+    finally:
+        db.close()
+
 
 # Keepalive interval for SSE comments (seconds).
 _SSE_KEEPALIVE_S: float = float(os.getenv("INK_AGENT_SSE_KEEPALIVE_S", "15") or "15")
@@ -1188,6 +1216,8 @@ class ClaudeAgentService:
             await queue.put(_sse("finish", {"finishReason": "stop"}))
             # Persist assistant message (user message already saved above).
             await self._persist_assistant_turn(execution, result)
+            # Story Workspace post-processing is isolated from successful Chat SSE.
+            await self._store_story_workspace_output(execution, full_text)
         else:
             error_msg = _format_exception_for_sse(result.error)
             await queue.put(_sse("error", {"errorText": error_msg}))
@@ -1196,6 +1226,43 @@ class ClaudeAgentService:
             await self._persist_partial_assistant(execution)
 
         await queue.put(None)  # Sentinel: end of stream
+
+    async def _store_story_workspace_output(
+        self,
+        execution: "_TurnExecution",
+        full_text: str,
+    ) -> Optional[dict[str, Any]]:
+        """Persist an explicit JSON story bundle without changing Chat outcome."""
+
+        thread_id = execution.request.thread_id
+        candidate = (full_text or "").strip()
+        is_structured_candidate = candidate.startswith("{") or (
+            candidate.startswith("```json") and candidate.endswith("```")
+        )
+        payload = parse_agent_story_output(full_text)
+        if payload is None:
+            if is_structured_candidate:
+                logger.warning(
+                    "Agent story integration skipped thread_id=%s stage=parse_or_validate",
+                    thread_id,
+                )
+            return None
+
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(
+                None,
+                _store_story_workspace_output_sync,
+                int(execution.request.user_id),
+                thread_id,
+                payload,
+            )
+        except Exception:
+            logger.exception(
+                "Agent story integration failed thread_id=%s stage=store",
+                thread_id,
+            )
+            return None
 
     async def _persist_user_message(self, execution: "_TurnExecution") -> None:
         """Persist the user message immediately before inference starts (P2 fix).

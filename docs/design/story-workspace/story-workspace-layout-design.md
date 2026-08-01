@@ -2,7 +2,7 @@
 
 > **Design ID**: `design_002_story-workspace-layout`  
 > **关联 Issue**: [SUO-199](/SUO/issues/SUO-199)  
-> **增量 Issue**: [SUO-214](/SUO/issues/SUO-214)、[SUO-230](/SUO/issues/SUO-230)、[SUO-236](/SUO/issues/SUO-236)
+> **增量 Issue**: [SUO-214](/SUO/issues/SUO-214)、[SUO-230](/SUO/issues/SUO-230)、[SUO-236](/SUO/issues/SUO-236)、[SUO-298](/SUO/issues/SUO-298)
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **关联 PRD**: [story-workspace-prd.md](./story-workspace-prd.md)  
 > **设计阶段**: design → issue → task → stage  
@@ -999,6 +999,7 @@ frontend/src/components/story-workspace/state/
 
 ```
 frontend/src/hooks/story-workspace/
+├── contracts.ts                        ← 本域局部 REST 合同；所有业务符号保留 StoryWorkspace* 前缀
 ├── useStoryWorkspaceStore.ts            ← Zustand 状态管理
 ├── useStories.ts                        ← 故事数据查询
 ├── useCharacters.ts                     ← 角色数据查询
@@ -1191,6 +1192,18 @@ Dream 页面内创作输入（复用现有 Chat 会话能力）
 | claude-agent 执行与 story-workspace 持久化 | 产出和状态一致性 | 完整持久化后才进入待审阅；失败保留运行记录 |
 | 客户端或网络重试绕过审阅 gate | 未审内容进入后续工作流或重复执行 | 服务端聚合全部必审项并校验审阅版本；确认/继续均幂等 |
 | Dream 与 Dashboard 产生双入口状态 | 运行上下文、选中态或数据请求分叉 | Dream 为 canonical；Dashboard 仅重定向并复用既有概览组件 |
+| 通用 `types` 路径承载 story-workspace 合同 | 后端顶层 `backend/types/` 可能遮蔽 Python 标准库 `types`，且前后端 owner 不清晰 | 按 10.5 迁入领域 canonical 路径；通用路径不保留 re-export、alias 或 shim |
+
+### 10.5 story-workspace 合同文件与兼容迁移边界（SUO-298 增量）
+
+| 合同类别 | 唯一 canonical 文件 | 约束 |
+|----------|---------------------|------|
+| 后端业务合同 | `backend/story_workspace/contracts.py` | 请求、响应、事件、运行/审阅值对象均归本域；禁止 `backend/types/`、顶层/共享 `types/` 或通用 `types.py` 承载 story-workspace 合同 |
+| 前端局部 REST 合同 | `frontend/src/hooks/story-workspace/contracts.ts` | 只服务本域 hooks/页面；禁止移动到全局/共享 `types` 目录 |
+| 符号命名 | 两个 canonical 文件内均使用 `StoryWorkspace*` | 不因目录已带 `story-workspace` 而省略业务前缀 |
+| 数据库接触面 | `backend/database.py` 只读 | 本增量及兼容迁移禁止新增审计 Schema / DDL；本文 5.6 等处的审计字段继续作为业务语义，不据此扩建数据库 |
+
+迁移顺序是：先建立或使用 canonical 合同 → 按消费者替换 import → 验证 REST payload、字段、状态机和现有数据表语义不变 → 移除旧业务合同承载点。不得以通用 `types` re-export、alias 或 shim 作为兼容层；确需短期适配时，只能封装在对应 canonical story-workspace 模块中并给出删除条件。本修订仅修复合同归属，不引入复杂画布或视频能力。
 
 ---
 
@@ -1249,6 +1262,15 @@ Dream 页面内创作输入（复用现有 Chat 会话能力）
 - [ ] 任一必审项为 `pending` 或 `rejected` 时继续/结束被 UI 与服务端共同阻断；全部确认后仅幂等放行一次
 - [ ] 驳回、关闭面板、刷新、路由切换或过期确认请求均不能绕过 gate
 
+### 11.7 合同归属与数据库边界验收
+
+- [ ] 后端业务合同只指向 `backend/story_workspace/contracts.py`，前端局部 REST 合同只指向 `frontend/src/hooks/story-workspace/contracts.ts`
+- [ ] `backend/types/` 及其他通用/共享 `types` 目录没有 story-workspace 业务 owner、兼容 re-export、alias 或 shim
+- [ ] 合同符号全部保留 `StoryWorkspace*` 前缀
+- [ ] 兼容迁移只替换 import/归属，不改变 REST payload、状态机、现有数据表语义或产品行为
+- [ ] `backend/database.py` 未修改，未新增审计 Schema / DDL
+- [ ] 仍以数据表/结构化详情替代复杂画布，且无视频能力
+
 ---
 
 ## 12. 关键决策记录
@@ -1269,6 +1291,7 @@ Dream 页面内创作输入（复用现有 Chat 会话能力）
 | **DEC-017** | **2026-08-01** | **全局 Dream 导航以 `/story-workspace/dream` 为 canonical 入口，Dashboard 仅兼容重定向** | **DesignArchitect + local-board** | **影响 TopNavBar、路由、选中态与页面组件** |
 | **DEC-018** | **2026-08-01** | **运行级审阅 gate 在全部必审项确认前禁止继续或结束** | **DesignArchitect + local-board** | **影响可见布局、UI 状态、确认幂等及服务端防绕过** |
 | **DEC-019** | **2026-08-01** | **提示词、运行配置、secret-ref、权限与不可变快照统一归属 Deck，并使用 `deck_runtime_*` 合同** | **local-board + DesignArchitect** | **统一 UI 文案、状态名、来源字段和 participant** |
+| **DEC-026** | **2026-08-01** | **后端合同归 `backend/story_workspace/contracts.py`，前端局部 REST 合同归 `frontend/src/hooks/story-workspace/contracts.ts`；禁止通用 `types` 业务归属，`backend/database.py` 只读且不新增审计 Schema / DDL** | **local-board + CEOOrchestrator** | **统一组件/API 合同 owner、迁移边界与验收扫描** |
 
 ---
 
@@ -1280,6 +1303,7 @@ Dream 页面内创作输入（复用现有 Chat 会话能力）
 - **修订 4 / SUO-214**（2026-08-01）：根据 SUO-198 评论 `41db518b-006f-4289-a89b-dd722ffe8723`，首次新增 Deck 工作流上下文条、运行配置关系、端到端选择/执行流程、运行来源字段及失败状态；其中早期独立配置域解释已在修订 6 废弃。桌面三栏、`story-workspace` 前缀、数据表替代复杂画布及排除视频保持不变。
 - **修订 5 / SUO-230**（2026-08-01）：根据 SUO-198 评论 `2eff7996-aa5e-4371-a557-fb9a39037310` 与边界验收，补齐 AppHeader Dream 入口、canonical 路由/兼容重定向、Dream 页内四步审阅 gate、`story-workspace-*` 状态命名、确认幂等与服务端防绕过合同；不推翻 SUO-211/212/213 稳定结论。
 - **修订 6 / SUO-236**（2026-08-01）：按 SUO-235 将业务模块和设计元语统一为 Deck；保留运行配置、不可变快照、secret-ref、权限、preflight、审计、重试和回滚语义，并同步 UI 文案、状态名、字段、职责边界和决策记录。
+- **修订 7 / SUO-298**（2026-08-01）：增量明确后端与前端局部 REST 合同的 canonical 文件，禁止通用 `types` 业务归属与兼容 re-export/alias/shim，固定 `StoryWorkspace*` 前缀及 `backend/database.py` 只读边界；布局、数据表替代复杂画布和排除视频的既有设计不变。
 
 ### 13.1 对下游 issue / task / stage 的影响（仅声明）
 
@@ -1304,6 +1328,8 @@ Dream 页面内创作输入（复用现有 Chat 会话能力）
 | API 路由 | `/api/story-workspace/` | `/api/story-workspace/stories` |
 | 数据库表 | `story_workspace_*` | `story_workspace_stories` |
 | TypeScript 类型 | `StoryWorkspace*` | `StoryWorkspaceStory` |
+| 后端业务合同 | `backend/story_workspace/contracts.py` | `StoryWorkspaceRunRecord` |
+| 前端局部 REST 合同 | `frontend/src/hooks/story-workspace/contracts.ts` | `StoryWorkspaceStory` |
 | Hooks | `useStoryWorkspace*` | `useStoryWorkspaceStore` |
 | CSS 类 | `.story-workspace-*` | `.story-workspace-table-row` |
 | 目录 | `story-workspace/` | `pages/story-workspace/` |

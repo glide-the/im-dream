@@ -2,6 +2,7 @@
 
 > **Design ID**: `design_003_story-workspace-episodes-metadata-review`  
 > **关联 Issue**: [SUO-241](/SUO/issues/SUO-241)  
+> **增量修订**: [SUO-298](/SUO/issues/SUO-298)
 > **父需求**: [SUO-198](/SUO/issues/SUO-198)  
 > **稳定基线**: [SUO-230](/SUO/issues/SUO-230)、[story-workspace-prd.md](./story-workspace-prd.md)、[story-workspace-layout-design.md](./story-workspace-layout-design.md)  
 > **样本来源**: `output/episodes/EP01`、`output/episodes/EP90`  
@@ -16,6 +17,7 @@
 - [SUO-230](/SUO/issues/SUO-230) 已确认的顶部 Dream 导航、canonical `/story-workspace/dream`、桌面三栏、`StoryWorkspaceReviewGate`、未确认不得继续、表格替代复杂画布、排除平台视频及 UI Design v2 均保持不变。
 - 本文只补充 `output/episodes` 元信息如何进入同一工作空间投影，以及“简单描述 → Agent 产出 → 页面渲染 → 用户审阅 → 后续执行”的页面与状态细节。
 - 若本文与稳定基线发生冲突，仅本文显式标记为“SUO-241 变化”的 episodes 元信息、运行版本及审阅规则生效；其余内容仍以稳定基线为准。
+- [SUO-298](/SUO/issues/SUO-298) 仅修复合同代码归属：后端为 `backend/story_workspace/contracts.py`，前端局部 REST 合同为 `frontend/src/hooks/story-workspace/contracts.ts`；不改变 episodes 投影、Gate、REST、数据表或产品范围。
 - 下游 `IssueDispatcher`、`TaskDesignAgent`、`StagePlanner` 只读消费本文；本文不直接拆 Issue、写 Task 或排 Stage。
 
 ---
@@ -52,6 +54,7 @@
 - 空态、加载态、部分产出态、失败态、过期版本态和元信息冲突态。
 - 确认、编辑后确认、驳回/退回修改、再次生成、进入后续执行的 Gate。
 - 审计最小合同，以及样本缺失字段的默认假设。
+- episodes 相关 story-workspace 合同的前后端 canonical 文件、符号前缀与兼容迁移边界。
 - Dreem PDF 截图的采用/舍弃说明及 Ink & Memory UI Design v2 的视觉约束。
 
 ### 2.2 范围外
@@ -59,6 +62,7 @@
 - 不设计节点画布、自由拖拽、空间定位或复杂可视化编排。
 - 不包含视频预览、上传、生成、播放器、模型计费或平台视频能力。
 - 不实现代码、数据库、API、Agent、导入器或 execute 流程。
+- 不修改 `backend/database.py`，不新增审计 Schema / DDL。
 - 不定义 Deck 插件内部工作流；仍复用基线中的 Deck owner、preflight 与运行快照语义。
 - 不新增移动端或平板端设计。
 
@@ -219,8 +223,12 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 | 运行记录 | `StoryWorkspaceRunHistory` |
 | UI 状态 | `story-workspace-*`，例如 `story-workspace-output-validating` |
 | 领域事件 | `story-workspace.episode.output-indexed`、`story-workspace.episode.review-confirmed` |
+| 后端业务合同文件 | `backend/story_workspace/contracts.py` |
+| 前端局部 REST 合同文件 | `frontend/src/hooks/story-workspace/contracts.ts` |
 
 `/story-workspace/stories` 仍可保留基线中的故事聚合语义；本增量的 episode 路径表达具体 episodes artifact bundle，不将二者静默合并成同一 ID。
+
+上述两个文件是本增量全部 `StoryWorkspace*` 请求、响应、事件、投影和审阅值对象的唯一合同 owner。禁止 `backend/types/`、顶层/共享 `types/`、通用 `types.py` 或全局 `types.ts` 承载 story-workspace 业务合同；也禁止在这些路径保留兼容 re-export、alias 或 shim。兼容迁移只按消费者替换 import，REST payload、字段、状态机、现有数据表语义和产品行为保持不变；确需短期适配时，只能封装在对应 story-workspace canonical 模块内并明确删除条件。所有业务符号继续保留 `StoryWorkspace*` 前缀。
 
 ### 5.2 Dream 页面骨架
 
@@ -341,6 +349,8 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 
 历史按时间倒序展示；默认只展开当前 attempt，旧 attempt 可比较但不可修改。审计日志只显示必要的非敏感来源，Deck secret/config 值仍不可进入页面。
 
+本节是业务语义合同，不授权新增数据库结构。`backend/database.py` 对 [SUO-298](/SUO/issues/SUO-298) 的合同归属修复和兼容迁移保持只读，禁止为上述记录新增审计 Schema / DDL；既有持久化能力不足时，应另行回到上游设计，不得在本增量中隐式扩表。
+
 ---
 
 ## 7. 调研截图取舍与 UI Design v2 适配
@@ -401,6 +411,8 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 - [ ] 截图采用/舍弃有依据，且交互落点可追踪到 PDF 页码。
 - [ ] 视觉符合 UI Design v2 的暖纸、少面板、多留白、小面积强调和无卡片规则。
 - [ ] 所有新增路由、包名、组件、状态和领域事件使用 `story-workspace` 前缀。
+- [ ] 后端合同只归 `backend/story_workspace/contracts.py`，前端局部 REST 合同只归 `frontend/src/hooks/story-workspace/contracts.ts`，所有业务符号保留 `StoryWorkspace*` 前缀。
+- [ ] 通用 `types` 路径没有 story-workspace 业务合同或兼容 re-export/alias/shim；`backend/database.py` 未修改且无新增审计 Schema / DDL。
 
 ---
 
@@ -416,6 +428,7 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 | 运行中覆盖同名文件 | 历史与当前版本不可区分 | content hash + artifact version + immutable attempt；禁止原地覆盖审计事实 |
 | 后续执行接口未在本设计定义 | Gate 后动作取决于 Deck workflow | 只输出已确认 run/version 与幂等键；由既有 Deck 合同决定继续或结束 |
 | 调研截图偏向视频/深色画布 | 容易偏离当前产品边界与视觉规范 | 仅借用信息层级、确认和历史模式；视频与画布明确排除 |
+| 通用 `types` 路径承载 episodes 合同 | Python 标准库遮蔽、前后端业务 owner 模糊 | 使用领域 canonical 文件并按消费者迁移 import，不在通用路径保留兼容层 |
 
 ---
 
@@ -429,6 +442,7 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 | DEC-023 | 2026-08-01 | 再次生成创建不可变新 attempt/version，旧产物、驳回意见和运行记录永久保留 | 支撑比较、审计和恢复 | 版本/运行历史 |
 | DEC-024 | 2026-08-01 | 对样本版本、时长、审查范围冲突采取“并列展示并阻断”，不得静默归一 | 保证来源真实性 | 校验、错误态、Review Panel |
 | DEC-025 | 2026-08-01 | 借用 Dreem 的一句话入口、主从详情、确认和历史模式，但用轻纸面表格替代黑色画布并排除视频 | 同时满足调研依据、范围和 UI v2 | 页面与视觉 |
+| DEC-026 | 2026-08-01 | story-workspace 后端合同归 `backend/story_workspace/contracts.py`，前端局部 REST 合同归 `frontend/src/hooks/story-workspace/contracts.ts`；禁止通用 `types` 业务归属，且 `backend/database.py` 只读 | 消除 Python 标准库遮蔽并明确合同 owner | 合同 import、迁移边界与定向验收 |
 
 ---
 
@@ -443,8 +457,9 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 | 待审阅/驳回/确认/继续/失败 | 增加 empty、validating、metadata incomplete、version conflict、stale review、regenerating | canonical `pending_review` 语义 |
 | 表格替代复杂画布 | 明确 Episode/Shot/Prompt/Findings 表与结构化 Tabs | 不实现复杂画布 |
 | 排除平台视频 | render-guide 只展示文本/结构化参考元信息 | 无视频预览、上传、生成或模型计费 |
+| 合同承载位置未指定 | [SUO-298](/SUO/issues/SUO-298) 固定前后端 canonical 文件、`StoryWorkspace*` 前缀及无通用 `types` 兼容层迁移 | episodes 投影、REST、状态机、数据表、复杂画布/视频边界均不变；`backend/database.py` 只读 |
 
-本文不全量改写 SUO-230，也不改变已传播的稳定结论。下游只需围绕本表的新增项做增量消费。
+本文不全量改写 SUO-230，也不改变已传播的稳定结论。下游只需围绕本表的新增项，以及 [SUO-298](/SUO/issues/SUO-298) 的合同归属修复做增量消费。
 
 ---
 
@@ -456,4 +471,3 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 - 样本未提供 manifest、schema version、run/audit ID，按“接入封装生成但不伪造源 frontmatter”的方案处理。
 - 后续执行的具体步骤不在本设计范围内；Gate 只输出已确认 run/version、aggregate hash 与幂等触发语义。
 - 若未来允许手工结构化编辑，任何保存都必须生成新 artifact version；不允许在已确认版本上原地修改。
-

@@ -821,6 +821,8 @@ from routers.notion import router as notion_router
 from routers.reports import router as reports_router
 from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
+from routers.deck_plugin_binding import router as deck_plugin_binding_router
+from routers.story_workspace import router as story_workspace_router
 from routers.system_config import router as system_config_router
 from routers.workspace import router as workspace_router
 from routers.reflections import router as reflections_router
@@ -930,6 +932,8 @@ app.include_router(voices_router)
 app.include_router(friends_router)
 app.include_router(claude_agent_router)
 app.include_router(storage_router)
+app.include_router(deck_plugin_binding_router)
+app.include_router(story_workspace_router)
 app.include_router(system_config_router)
 app.include_router(workspace_router)
 app.include_router(reflections_router)

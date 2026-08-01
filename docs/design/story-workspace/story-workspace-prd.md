@@ -2,7 +2,7 @@
 
 > **Design ID**: `design_001_story-workspace-prd`  
 > **关联 Issue**: [SUO-199](/SUO/issues/SUO-199)  
-> **增量 Issue**: [SUO-214](/SUO/issues/SUO-214)、[SUO-230](/SUO/issues/SUO-230)、[SUO-236](/SUO/issues/SUO-236)
+> **增量 Issue**: [SUO-214](/SUO/issues/SUO-214)、[SUO-230](/SUO/issues/SUO-230)、[SUO-236](/SUO/issues/SUO-236)、[SUO-298](/SUO/issues/SUO-298)
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **设计阶段**: design → issue → task → stage  
 > **最后更新**: 2026-08-01  
@@ -81,6 +81,7 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | **DEC-019** | **按 SUO-235 将提示词、运行配置、secret-ref、权限与不可变快照统一归属 Deck** | **统一字段、错误码、participant 和下游 owner** |
 | **DEC-017** | **全局 Dream 导航以 `/story-workspace/dream` 为 canonical 入口，既有 `/story-workspace/dashboard` 只作兼容重定向** | **形成确定导航合同，同时保留已完成 story-workspace 路由的兼容性** |
 | **DEC-018** | **Dream 页面设置运行级审阅 gate；全部必审产出确认前禁止工作流继续或结束** | **让“用户确认后才执行”成为可见且不可绕过的业务约束** |
+| **DEC-026** | **story-workspace 业务合同按领域归属：后端统一放在 `backend/story_workspace/contracts.py`，前端局部 REST 合同统一放在 `frontend/src/hooks/story-workspace/contracts.ts`；禁止用通用 `types` 目录承载** | **避免顶层 `backend/types/` 遮蔽 Python 标准库 `types`，并让合同 owner 可定位** |
 
 ### 3.2 从 Dreem 提取的参考点与适配差异
 
@@ -245,6 +246,17 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | 剧本、角色、场景及 `review_status` | Claude Agent → story-workspace | 持久化并进入现有审阅流程 |
 
 **版本规则**：创作者切换 Deck 插件或插件版本时，只改变下一次执行；既有剧本继续关联原 `deck_plugin_binding_id + binding_revision`、`deck_plugin_version`、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`。驳回后默认沿用原快照/锁并附加修改意见重试；若用户改选工作流，则创建新的 `workflow_run_id`，不得覆盖原运行来源。
+
+#### 3.5.4 story-workspace 业务合同归属（SUO-298 增量）
+
+| 边界 | Canonical 设计 | 禁止项 |
+|------|----------------|--------|
+| 后端业务合同 | `backend/story_workspace/contracts.py`；承载 story-workspace 的请求、响应、事件和值对象合同 | 禁止创建或继续使用 `backend/types/`、顶层/共享 `types/`、通用 `types.py` 承载 story-workspace 业务合同 |
+| 前端局部 REST 合同 | `frontend/src/hooks/story-workspace/contracts.ts`；由本域 hooks 与页面组件消费 | 禁止迁入全局/共享 `types` 目录，也不将其包装成无业务 owner 的通用合同 |
+| 业务符号 | 后端与前端均保留 `StoryWorkspace*` 前缀，例如 `StoryWorkspaceRunRecord` | 文件已位于领域目录也不得省略前缀或改成无领域限定的 `RunRecord`、`ReviewEvent` |
+| 数据库边界 | `backend/database.py` 对本增量及兼容迁移只读；现有审计语义只作为业务合同消费 | 禁止新增审计 Schema、DDL 或以数据库改造作为合同搬迁前置条件 |
+
+兼容迁移只改变**合同的代码归属与 import 来源**：新代码直接引用上述 canonical 文件；既有 story-workspace 调用方按消费者逐一迁移，不改变 REST payload、字段名、状态机、数据库表或产品行为。不得在通用 `types` 路径保留 re-export、alias 或 shim；如需短期兼容适配，只能置于对应 story-workspace canonical 模块内，并明确删除条件。该修订不扩展产品范围：复杂画布仍以数据表/结构化详情替代，视频仍不实现。
 
 ### 3.6 SUO-230 增量：顶部 Dream 入口与页面审阅 gate
 
@@ -758,6 +770,15 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 - [ ] 数据表结构明确
 - [ ] Issue 评论已回填路径、关键决策、未决项
 
+### 7.5 业务合同归属修复
+
+- [ ] 后端 story-workspace 业务合同唯一 canonical 路径为 `backend/story_workspace/contracts.py`
+- [ ] 前端局部 REST 合同唯一 canonical 路径为 `frontend/src/hooks/story-workspace/contracts.ts`
+- [ ] 不存在把 story-workspace 合同归入 `backend/types/` 或其他通用/共享 `types` 目录的有效设计或兼容指令
+- [ ] 所有业务符号保留 `StoryWorkspace*` 前缀，兼容迁移不改变 REST、状态机、数据库表或产品行为
+- [ ] `backend/database.py` 保持只读，未新增审计 Schema / DDL
+- [ ] 复杂画布继续以数据表/结构化详情替代，视频继续排除
+
 ---
 
 ## 8. 风险与依赖
@@ -775,6 +796,7 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 | 敏感插件配置被复制到 story-workspace | 高 | 仅保存受控快照引用与非敏感状态，不复制或渲染敏感配置值 |
 | 顶部 Dream 入口与既有 Dashboard 形成双状态 | 高 | 以 `/story-workspace/dream` 为 canonical，旧入口只重定向，不复制 store 或运行上下文 |
 | 客户端或重试绕过审阅 gate | 高 | 服务端以 `workflow_run_id` + 审阅版本校验全部必审项，确认与继续均幂等 |
+| 通用 `types` 目录承载 story-workspace 合同并遮蔽语言/标准库类型模块 | 高 | 合同按 DEC-026 迁回 story-workspace 领域路径；通用路径不保留 re-export 或 shim |
 
 ### 依赖
 
@@ -806,6 +828,7 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 | **DEC-017** | **2026-08-01** | **全局 Dream 导航以 `/story-workspace/dream` 为 canonical 入口，Dashboard 仅兼容重定向** | **DesignArchitect + local-board** | **确定导航与选中态合同，保留既有路由兼容性** |
 | **DEC-018** | **2026-08-01** | **运行级审阅 gate 在全部必审项确认前禁止继续或结束** | **DesignArchitect + local-board** | **影响 Dream 页面状态、确认幂等与服务端防绕过合同** |
 | **DEC-019** | **2026-08-01** | **提示词、运行配置、secret-ref、权限与不可变快照统一归属 Deck，并使用 `deck_runtime_*` 合同** | **local-board + DesignArchitect** | **统一所有权、字段、错误码和 participant** |
+| **DEC-026** | **2026-08-01** | **后端合同归 `backend/story_workspace/contracts.py`，前端局部 REST 合同归 `frontend/src/hooks/story-workspace/contracts.ts`；禁止通用 `types` 业务归属，`backend/database.py` 只读且不新增审计 Schema / DDL** | **local-board + CEOOrchestrator** | **统一合同 owner、兼容迁移与数据库写入边界** |
 
 ---
 
@@ -817,6 +840,7 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 - **修订 4 / SUO-214**（2026-08-01）：根据 SUO-198 评论 `41db518b-006f-4289-a89b-dd722ffe8723`，首次补充 Deck Editor、Deck Plugin、运行配置与 story-workspace 的职责、选择/执行时序、失败状态和版本溯源；其中早期独立配置域解释已在修订 6 废弃。未改变桌面三栏、`story-workspace` 前缀、表格替代复杂画布和排除视频的稳定约束。
 - **修订 5 / SUO-230**（2026-08-01）：根据 SUO-198 评论 `2eff7996-aa5e-4371-a557-fb9a39037310` 与边界验收，新增全局顶部 Dream 导航、canonical `/story-workspace/dream` 路由、选中/未选中状态、Dream 页面四步可见审阅 gate、确认幂等/防绕过规则及 issue/task/stage 影响；不改写 SUO-211/212/213 的稳定结论。
 - **修订 6 / SUO-236**（2026-08-01）：按 SUO-235 将业务模块和设计元语统一为 Deck；保留运行配置、不可变快照、secret-ref、权限、preflight、审计、重试和回滚语义，并统一字段为 `deck_runtime_*`、错误码为 `DECK_RUNTIME_CONFIG_*`。
+- **修订 7 / SUO-298**（2026-08-01）：按直接修订授权增量明确 story-workspace 合同的前后端 canonical 路径，禁止通用 `types` 业务归属，补充无行为变更的兼容迁移与 `backend/database.py` 只读边界；表格替代复杂画布、排除视频等产品范围保持不变。
 
 ---
 
@@ -850,3 +874,4 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 4. **命名检查**：确认所有业务标识使用 `story-workspace` 前缀
 5. **关系与状态检查**：确认 Deck/story-workspace/Claude Agent 职责、选择/执行时序、版本溯源及未配置/失败状态在本文均可定位，且不存在独立配置 owner
 6. **Dream 入口与 gate 检查**：检索 `story-workspace-dream`、`/story-workspace/dream`、`StoryWorkspaceReviewGate`、`story-workspace-pending-review`、`DEC-017`、`DEC-018`，并确认待审阅/驳回时没有后续执行路径
+7. **合同归属定向检查**：检索 `backend/types`、通用 `types`、`backend/story_workspace/contracts.py`、`frontend/src/hooks/story-workspace/contracts.ts`、`backend/database.py` 与 `DEC-026`；确认前两者仅出现在禁止/风险语境，canonical 路径、`StoryWorkspace*` 前缀、无 Schema / DDL 迁移和产品边界表述一致

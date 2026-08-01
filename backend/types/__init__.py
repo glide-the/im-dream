@@ -1,1 +1,0 @@
-"""Backend shared types package."""

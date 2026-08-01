@@ -1,11 +1,12 @@
 # Story Workspace Issue 清单（增量更新版）
 
-> **增量 Issue**: SUO-226、**SUO-230**  
+> **增量 Issue**: SUO-226、**SUO-230**、**SUO-299**
 > **父 Issue**: SUO-198 / SUO-235 / SUO-237
-> **设计增量来源**: SUO-214（DEC-009～DEC-011）、SUO-215（Deck/Claude Agent 集成 Delta）、**SUO-230（DEC-017～DEC-018：Dream 导航与审阅 Gate）**、**SUO-236（Deck-only 统一修订）**
+> **设计增量来源**: SUO-214（DEC-009～DEC-011）、SUO-215（Deck/Claude Agent 集成 Delta）、**SUO-230（DEC-017～DEC-018：Dream 导航与审阅 Gate）**、**SUO-236（Deck-only 统一修订）**、**SUO-298（DEC-026：story-workspace 合同归属）**
 > **生成 Agent**: IssueDispatcher
-> **最后更新**: 2026-08-01（SUO-236 Deck-only 修订完成）
-> **更新类型**: 增量差异，不重写稳定基线；按 SUO-235 将 Desk 引用统一为 Deck
+> **SUO-299 增量修订 Agent**: CEOOrchestrator（direct repair 授权）
+> **最后更新**: 2026-08-01（SUO-299 合同迁移工作单增量）
+> **更新类型**: 增量差异，不重写稳定基线；追加合同迁移与浏览器/Network 验证工作单
 
 ---
 
@@ -17,9 +18,11 @@
   - 布局设计稿：`docs/design/story-workspace/story-workspace-layout-design.md`
   - 增量 Delta 设计稿：`docs/design/deck/deck-integration-delta.md`
   - **SUO-230 增量设计稿**：`docs/design/story-workspace/story-workspace-prd.md` §3.6 / `docs/design/story-workspace/story-workspace-layout-design.md` §2.4
+  - **SUO-298 合同归属增量**：`docs/design/story-workspace/story-workspace-prd.md` §3.5.4、`docs/design/story-workspace/story-workspace-layout-design.md` §10.5 / §11.7、`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md` DEC-026
   - 背景设计稿：`docs/CLAUDE.md`（Agent 服务集成说明）
   - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
 - 生成 Agent：`IssueDispatcher`
+- SUO-299 增量修订 Agent：`CEOOrchestrator`（仅本次 direct repair）
 - 所属流水线阶段：`issue`
 - 上游阶段：`design`（SUO-199 → SUO-214 / SUO-215 → **SUO-230**）
 - 下游阶段：`task`
@@ -31,8 +34,9 @@
   - 本文档由设计稿拆解生成，经 SUO-236 按 SUO-235 Deck-only 裁决修订。
   - 所有 Desk 引用已统一为 Deck；运行配置、不可变快照、secret-ref、权限、preflight、审计和回滚合同归属 Deck。
   - 分发去向统一为 `@TaskDesignAgent`，由 `type`、标签和范围字段表达 domain。
-  - **本文档为增量更新版**：保留 SUO-211 / SUO-212 / SUO-213 已完成基线，仅追加/变更由 SUO-214 / SUO-215 / **SUO-230** 设计增量引入的新 Issue。
+  - **本文档为增量更新版**：保留 SUO-211 / SUO-212 / SUO-213 已完成基线，仅追加/变更由 SUO-214 / SUO-215 / **SUO-230** / **SUO-298** 设计增量引入的新 Issue。
   - **SUO-230 增量**：传播 DEC-017（Dream 导航）与 DEC-018（审阅 Gate）到既有 Issue 清单；新增 SUO-230-* 系列 Issue。
+  - **SUO-299 增量**：消费已完成的 SUO-298 / DEC-026，只新增合同 canonical 迁移与 task_202c 浏览器/Network 补证工作单；不反向改写 Design，不重开 task_202c 实现。
   - 若与设计稿冲突，以 `docs/design/story-workspace/` 中稳定设计稿为准。
   - 若与当前 API / 代码实现冲突，必须记录为阻塞或澄清项，不得静默覆盖。
 
@@ -44,6 +48,7 @@
 - 重点补充设计稿：`docs/design/story-workspace/story-workspace-layout-design.md`
 - **增量 Delta 设计稿**：`docs/design/deck/deck-integration-delta.md`
 - **SUO-230 增量设计稿**：`docs/design/story-workspace/story-workspace-prd.md` §3.6、`docs/design/story-workspace/story-workspace-layout-design.md` §2.4
+- **SUO-298 合同归属增量**：`docs/design/story-workspace/story-workspace-prd.md` §3.5.4、`docs/design/story-workspace/story-workspace-layout-design.md` §10.5 / §11.7、`docs/design/story-workspace/design_003_story-workspace-episodes-metadata-review.md` DEC-026
 - 关联设计稿：`docs/CLAUDE.md`（claude-agent 服务集成）
 - 参考设计稿：`docs/design/story-workspace/调研Dreem_app平台.pdf`
 
@@ -62,6 +67,8 @@
   - 场景资产管理：展示 Agent 生成的场景列表，支持审阅编辑
   - 空态/加载/错误/选中态：各模块的完整状态设计，含 Agent 生成中状态
   - 桌面端布局：固定三栏桌面端布局，无响应式适配需求
+  - **story-workspace 合同 canonical 迁移**：后端移除 `backend/types/` 业务包并迁入 `backend/story_workspace/contracts.py`；前端将局部 REST 合同由 `types.ts` 迁入 `contracts.ts`
+  - **task_202c 定向补证**：保留既有数据表实现，仅补 1280px 浏览器交互与 Network 请求/响应证据
 
 - 明确排除范围：
   - 用户手动创建故事/角色/场景（本期内容由 Agent 产出，用户仅审阅确认）
@@ -77,6 +84,8 @@
   - **Deck 编辑器内部编辑能力**（由 Deck 模块独立负责）
   - **Deck 运行配置管理界面**（由 Deck 模块独立负责）
   - **完整插件运行时/插件市场/第三方插件沙箱**
+  - **任何数据库 Schema / DDL 变更**；`backend/database.py` 对 SUO-299 全程只读
+  - **其他业务域的合同整理或通用类型重构**
 
 - 关键约束：
   - 所有业务路径、路由、包名、组件/模块/数据标识均采用 `story-workspace` 前缀
@@ -96,12 +105,17 @@
   - 未选择/不可用 Deck 插件或 Deck 运行配置不完整时禁止启动 Claude Agent（DEC-011）
   - Ink-Dream 不存储 Deck 运行配置密钥或完整提示词正文，只保存版本化引用和脱敏摘要（DEC-012）
   - 重试默认沿用固定版本；升级插件或配置必须创建新 run（DEC-014）
+  - **后端 story-workspace 请求、响应、事件、投影与审阅值对象唯一归属 `backend/story_workspace/contracts.py`；`backend/types/` 不保留业务合同、re-export、alias 或 shim（DEC-026）**
+  - **前端局部 REST 合同唯一归属 `frontend/src/hooks/story-workspace/contracts.ts`；旧 `types.ts` 不保留兼容层，所有消费者同步更新 import（DEC-026）**
+  - **合同符号继续使用 `StoryWorkspace*` 前缀；迁移不得改变 REST payload、状态机、现有数据表语义或产品行为**
+  - **`backend/database.py` 只读，不新增审计 Schema / DDL，不扩大至其他业务域**
 
 - 补充说明：
   - 本批 Issue 拆解基于已确认业务模型：Agent 产出剧本工作空间 → 页面渲染 → 用户审阅确认 → 后续执行
   - 复杂画布改为数据表呈现，排除平台视频、移动端/平板端、用户手动创建内容
   - SUO-214 / SUO-215 设计增量引入 Deck/Agent 端到端集成，需新增对应 Issue
   - **SUO-230 设计增量引入 Dream 导航与审阅 Gate，需增量更新既有 Issue 并新增 SUO-230-* 系列 Issue**
+  - **SUO-298 设计增量仅修复合同 owner；SUO-299 将迁移实现与 task_202c 的浏览器/Network 缺口拆成两个顺序工作单**
   - 设计文档中的 CLARIFICATION_NEEDED 已单列，采用默认假设时标注风险
 
 ---
@@ -149,6 +163,13 @@
 | `SUO-230-FE-002` | Dream 页面与 ReviewGate 组件 | frontend | P0 | `dream-page`,`review-gate`,`workflow-ui`,`delta` | `SUO-226-FE-001`, `SUO-201-FE-004` | `@TaskDesignAgent` |
 | `SUO-230-BE-001` | 审阅 gate 服务端聚合与防绕过验证 | backend | P0 | `api`,`review-gate`,`idempotency`,`security`,`delta` | `SUO-201-BE-003`, `SUO-226-BE-004` | `@TaskDesignAgent` |
 | `SUO-230-SH-001` | 确认幂等与审阅版本校验联调 | shared | P0 | `e2e`,`idempotency`,`review-gate`,`security` | `SUO-230-BE-001`, `SUO-230-FE-002` | `@TaskDesignAgent` |
+
+### 2.4 SUO-299 增量新增 Issue（由 SUO-298 / DEC-026 引入）
+
+| Issue ID | 标题 | 类型 | 优先级 | 标签 | 前置依赖 | 分发去向 |
+|---|---|---|---|---|---|---|
+| `SUO-299-SH-001` | Story Workspace 合同 canonical 迁移与运行恢复 | shared | P0 | `contract-migration`,`import-safety`,`runtime-recovery`,`delta` | `SUO-201-SH-002` | `@TaskDesignAgent` |
+| `SUO-299-SH-002` | task_202c 三路由浏览器与 Network 定向补证 | shared | P0 | `browser-validation`,`network`,`task-202c`,`evidence-only` | `SUO-299-SH-001`, `SUO-201-FE-003` | `@TaskDesignAgent` |
 
 ---
 
@@ -938,6 +959,127 @@
 
 ---
 
+### 3.4 SUO-299 合同迁移与验证恢复 Issue 明细（由 SUO-298 / DEC-026 引入）
+
+#### SUO-299-SH-001
+
+- 标题：Story Workspace 合同 canonical 迁移与运行恢复
+- 类型：shared
+- 优先级：P0
+- 标签：`contract-migration`,`import-safety`,`runtime-recovery`,`delta`
+- 描述：
+  按 SUO-298 / DEC-026 原子迁移 story-workspace 前后端业务合同。后端移除 `backend/types/` 业务包，将请求、响应、事件、投影与审阅值对象统一迁至 `backend/story_workspace/contracts.py`；前端将局部 REST 合同由 `frontend/src/hooks/story-workspace/types.ts` 迁至同目录 `contracts.ts`。同步更新全部消费者 import，恢复后端安全导入/启动和前端构建能力，但不改变任何业务合同或产品行为。
+
+- 增量影响：
+  - **新增独立迁移工作，不重写既有业务 Issue 或 exec 结论。**
+  - `task_202c` 的表格、Hooks、页面与交互实现保持原样；本 Issue 只允许因 `types.ts → contracts.ts` 产生的文件移动、导出与 import 更新。
+  - 后端顶层通用 `types` 业务归属被废止；迁移完成后只存在 story-workspace 领域 canonical owner。
+
+- 允许修改范围：
+  - `backend/story_workspace/contracts.py` 及建立该领域包所需的最小 `__init__.py`
+  - 现有 `backend/types/` 中仅属于 story-workspace 的业务合同及其消费者 import
+  - `frontend/src/hooks/story-workspace/contracts.ts`、旧 `types.ts` 及其消费者/barrel import
+  - 为证明迁移和运行恢复所必需的 story-workspace 定向测试；不得借机扩写业务行为
+
+- 禁止修改范围：
+  - `backend/database.py`，以及全部 Schema、DDL、migration 和数据库结构
+  - story-workspace 之外的其他业务域、通用合同整理或跨域类型重构
+  - REST payload、字段名、状态机、现有数据表语义、UI 行为和产品范围
+  - `task_202c` 既有表格/Toolbar/页面实现；除合同 import 路径外不得改写
+  - `docs/design/` 与既有 `docs/exec/` 结论
+
+- 验收条件：
+  - [ ] 后端 story-workspace 业务合同唯一位于 `backend/story_workspace/contracts.py`，业务符号全部保留 `StoryWorkspace*` 前缀
+  - [ ] `backend/types/` 业务包已移除；仓库中不存在指向其 story-workspace 合同的 import，也不存在 re-export、alias 或 shim
+  - [ ] 后端定向 import / 启动 smoke 通过，不再发生顶层 `types` 对 Python 标准库的遮蔽；现有 story-workspace 定向测试通过
+  - [ ] 前端局部 REST 合同唯一位于 `frontend/src/hooks/story-workspace/contracts.ts`；旧 `types.ts` 已移除，全部消费者与 barrel import 已更新且无兼容层
+  - [ ] 前端 build 与合同 import 定向检查通过；`task_202c` 既有页面行为和 REST payload 形状不变
+  - [ ] `backend/database.py` 对本工作单保持零 diff；没有 Schema / DDL / migration 变更
+  - [ ] 变更文件扫描仅命中上述允许范围，没有扩大到其他业务域
+
+- 测试或验证方式：
+  1. 使用静态扫描确认旧后端/前端合同路径、兼容 re-export/alias/shim 和无前缀业务符号均为零。
+  2. 执行后端 story-workspace 定向 import / 启动 smoke 与现有定向测试，证明运行恢复且无标准库遮蔽。
+  3. 执行前端 build 与合同消费者定向检查，证明 rename 后 import 闭合。
+  4. 对比迁移前后 REST payload、状态机和现有数据表语义；执行 `backend/database.py` 零 diff 与变更路径边界检查。
+
+- 前置依赖：
+  - `SUO-201-SH-002`（既有命名与类型基线）
+  - SUO-298 已完成的 DEC-026 设计增量
+
+- 分发去向：`@TaskDesignAgent`
+- 主责 Agent：`TaskDesignAgent`
+- 协作 Agent：无
+
+- 设计决策引用：
+  - `DEC-026`：前后端 canonical 合同文件、`StoryWorkspace*` 前缀、无通用 `types` 兼容层和 `backend/database.py` 只读
+  - `story-workspace-prd.md` §3.5.4
+  - `story-workspace-layout-design.md` §10.5 / §11.7
+
+- 回滚策略：
+  - 迁移按一个原子变更回滚：同时回退 canonical 文件、全部消费者 import 与旧路径删除，不允许只恢复旧路径形成双 owner。
+  - 回滚不得触碰 `backend/database.py`、数据库结构、其他业务域或 `task_202c` 业务实现。
+  - 若运行 smoke 失败，保留失败 import/命令证据并阻塞，不得以旧路径 shim 绕过验收。
+
+---
+
+#### SUO-299-SH-002
+
+- 标题：task_202c 三路由浏览器与 Network 定向补证
+- 类型：shared
+- 优先级：P0
+- 标签：`browser-validation`,`network`,`task-202c`,`evidence-only`
+- 描述：
+  在 SUO-299-SH-001 完成后，基于迁移后的最终合同路径，只验证 `task_202c` 已有三类数据表实现的 1280px 浏览器交互与 Network 请求/响应。该 Issue 是纯验证工作单，不重开、不覆盖、不顺手修订 `task_202c` 实现。
+
+- 增量影响：
+  - `task_202c_frontend_data-table-components.md` 与其既有实现保持稳定。
+  - 仅补浏览器截图、交互记录和 Network 证据；已具备的实现与静态验证不重复包装为新实现成果。
+  - 如发现真实缺陷，只记录可复现证据并另行拆分修复 Issue；本验证工作单不得直接改代码。
+
+- 允许范围：
+  - 使用现有 issue execution workspace 与既有前后端运行方式启动/访问应用
+  - 浏览器 viewport、页面操作、截图、Network 请求/响应检查和验证报告
+  - 临时网络层响应仅可存在于浏览器会话，不得写入仓库
+
+- 禁止范围：
+  - 任何前端/后端生产代码修改，包括 `task_202c` 表格、Hooks、页面与合同文件
+  - 仓库内 mock、快照、测试 runner、依赖、lockfile 或运行配置变更
+  - `backend/database.py`、Schema / DDL / migration 以及其他业务域
+  - 以验证名义修复缺陷或扩大产品范围
+
+- 验收条件：
+  - [ ] 在 1280px 桌面 viewport 访问 `/story-workspace/stories`、`/story-workspace/characters`、`/story-workspace/scenes`，分别保留可识别路由与表格状态的截图
+  - [ ] 三页完成搜索、审阅状态筛选、排序和分页交互；Stories 额外验证类型筛选
+  - [ ] 使用 pending / confirmed / rejected 数据验证状态样式、56px 行、hover、非 pending checkbox 禁用，以及 pending 选择后批量栏替换/取消恢复
+  - [ ] Network 证据证明列表请求命中对应 `/api/story-workspace/*` 端点，并按交互产生 `q`、`review_status`、`sort`、`order`、`page`、`per_page`；Stories 同时验证 `type`
+  - [ ] Network 响应证据证明继续使用 `{ data, pagination }`，合同迁移未改变 payload
+  - [ ] 仓库生产代码零 diff；验证报告逐项映射上述验收条件、未验证项和复现信息
+
+- 测试或验证方式：
+  1. 启动现有运行时并固定 1280px viewport，按三条 canonical 路由逐页截图。
+  2. 逐项操作搜索、筛选、排序、分页和 pending-only 批量选择，同时保存交互前后状态。
+  3. 在浏览器 Network 面板保存对应请求 URL/query 与响应结构证据。
+  4. 完成前后执行生产代码零 diff 检查；若失败，仅记录缺陷、责任边界和建议修复 Issue，不在本单实现。
+
+- 前置依赖：
+  - `SUO-299-SH-001`（必须先完成合同迁移与运行恢复，避免对旧路径补证）
+  - `SUO-201-FE-003` / `task_202c` 既有稳定实现
+
+- 分发去向：`@TaskDesignAgent`
+- 主责 Agent：`TaskDesignAgent`
+- 协作 Agent：无
+
+- 设计决策引用：
+  - `DEC-026`：合同迁移不改变 REST payload、数据表语义或产品行为
+  - story-workspace 既有桌面端、数据表和 REST 基线
+
+- 回滚策略：
+  - 本 Issue 不修改生产代码，无代码回滚项。
+  - 若证据采集错误，仅废弃对应验证产物并重新采集；不得回滚 SUO-299-SH-001 或恢复旧合同路径。
+
+---
+
 ## 4. 共享任务与依赖说明
 
 ### 4.1 基线共享任务（保持不变）
@@ -961,6 +1103,10 @@
   - `SUO-230-FE-002`（Dream 页面与 ReviewGate）依赖 `SUO-226-FE-001`（工作流上下文条）和 `SUO-201-FE-004`（审阅面板基线）。
   - `SUO-230-BE-001`（审阅 gate 服务端聚合）依赖 `SUO-201-BE-003`（审阅状态流转 API）和 `SUO-226-BE-004`（Run 创建 API）。
   - `SUO-230-SH-001`（确认幂等联调）依赖 `SUO-230-BE-001` 和 `SUO-230-FE-002`。
+- **SUO-299 增量依赖**：
+  - `SUO-299-SH-001`（合同 canonical 迁移）依赖已完成的 SUO-298 / DEC-026 与 `SUO-201-SH-002` 命名类型基线；不依赖任何数据库 Schema 工作。
+  - `SUO-299-SH-002`（浏览器/Network 补证）必须等待 `SUO-299-SH-001` 完成，确保基于最终合同路径验证；同时只读消费 `task_202c` 既有实现。
+  - 两个 Issue 必须串行：先迁移并恢复运行，再补浏览器证据；禁止用旧 `types` 路径的验证结果替代最终准入。
 - 若后续发现某个 Issue 的实现范围超出当前设计稿，必须回到 Issue 评论区记录澄清，不得直接下沉到 task 阶段。
 - 若某个 Issue 需要新增设计决策，必须标记 `[CLARIFICATION_NEEDED]`，由 `CEOOrchestrator` 判断是否回退到 `DesignArchitect`。
 
@@ -980,6 +1126,7 @@
 - **增量 Issue（SUO-230）**：
   - `SUO-230-BE-001`：审阅 gate 服务端聚合与防绕过验证
 - **Shared Issue（主责）**：`SUO-201-SH-002`（命名规范）、`SUO-226-SH-001`（技术传输合同）
+- **SUO-299 Shared Issue（主责）**：`SUO-299-SH-001`（合同 canonical 迁移与运行恢复）
 - **Shared Issue（协作）**：`SUO-230-SH-001`（确认幂等联调）
 - 负责接口、数据处理、Schema、Migration、服务端逻辑、校验链路、Agent 适配、审阅 gate 聚合与防绕过。
 
@@ -994,6 +1141,7 @@
   - `SUO-230-FE-001`：TopNavBar Dream 导航项与 canonical 路由
   - `SUO-230-FE-002`：Dream 页面与 ReviewGate 组件
 - **Shared Issue（主责）**：`SUO-201-SH-001`（审阅 E2E）、`SUO-226-SH-002`（端到端 E2E）、`SUO-230-SH-001`（确认幂等联调）
+- **SUO-299 Shared Issue（主责）**：`SUO-299-SH-002`（task_202c 浏览器与 Network 定向补证）
 - **Docs Issue**：`SUO-201-DO-001`（使用文档，增量补充插件选择、配置 owner、失败恢复、Dream 导航与 gate 说明）
 - 负责 UI、交互、状态管理、前端接口消费、页面结构、工作流选择器、错误状态、导航与路由。
 
@@ -1004,6 +1152,8 @@
 - `SUO-226-SH-001`（技术传输合同）：主责 `TaskDesignAgent`，协作 `TaskDesignAgent`。
 - `SUO-226-SH-002`（端到端 E2E）：主责 `TaskDesignAgent`，协作 `TaskDesignAgent`。
 - **`SUO-230-SH-001`（确认幂等联调）：主责 `TaskDesignAgent`，协作 `TaskDesignAgent`。**
+- `SUO-299-SH-001`（合同迁移）：主责 `TaskDesignAgent`，不设第二责任人；Task 阶段统一收敛前后端允许范围。
+- `SUO-299-SH-002`（浏览器/Network 补证）：主责 `TaskDesignAgent`，不设第二责任人；Execute 仅采集证据，不改生产代码。
 - 所有 shared Issue 均有唯一主责 Agent，不允许无主责状态。
 
 ---
@@ -1096,7 +1246,24 @@ Phase I: 幂等与防绕过联调（依赖 Phase H）
     └── 注意：需验证幂等、过期版本拒绝、客户端绕过阻断
 ```
 
-### 6.4 整体推进建议
+### 6.4 SUO-299 合同迁移与验证恢复顺序（新增，依赖 SUO-298）
+
+```text
+Phase J: 合同 canonical 迁移与运行恢复
+└── SUO-299-SH-001  前后端合同原子迁移
+    ├── 后端：backend/types/ → backend/story_workspace/contracts.py
+    ├── 前端：hooks/story-workspace/types.ts → contracts.ts
+    ├── 强约束：backend/database.py 只读；无 Schema / DDL；不扩大业务域
+    └── 完成信号：旧路径扫描为零，后端 import/启动与前端 build 恢复
+
+Phase K: task_202c 浏览器与 Network 定向补证（依赖 Phase J）
+└── SUO-299-SH-002  三路由 evidence-only 验证
+    ├── 1280px 截图与交互
+    ├── Network query / response 证据
+    └── 强约束：生产代码零 diff；发现缺陷另拆修复 Issue
+```
+
+### 6.5 整体推进建议
 
 ```text
 基线 Phase 1-3 与增量 Phase A-C 可部分并行：
@@ -1110,6 +1277,9 @@ SUO-201-SH-002 → SUO-226-SH-001 → SUO-226-BE-001～003 → SUO-226-BE-004 �
 SUO-230 关键路径（可部分与 SUO-226 并行）：
 SUO-201-FE-002 → SUO-230-FE-001 → SUO-230-FE-002 → SUO-230-SH-001
 SUO-201-BE-003 + SUO-226-BE-004 → SUO-230-BE-001 → SUO-230-SH-001
+
+SUO-299 恢复路径（严格串行）：
+SUO-298 / DEC-026 → SUO-299-SH-001 → SUO-299-SH-002
 ```
 
 ---
@@ -1144,7 +1314,7 @@ SUO-201-BE-003 + SUO-226-BE-004 → SUO-230-BE-001 → SUO-230-SH-001
 | `task_202_frontend_story-workspace-overview.md` | 概览文档，不受增量影响 |
 | `task_202a_frontend_three-column-layout.md` | 三栏骨架不变，仅可能挂载新组件 |
 | `task_202b_frontend_sidebar-navigation.md` | Sidebar 导航不变 |
-| `task_202c_frontend_data-table-components.md` | 表格核心不变，仅增加来源字段展示 |
+| `task_202c_frontend_data-table-components.md` | 既有表格/Hooks/页面实现保持稳定；SUO-299 只允许 `types.ts → contracts.ts` import 迁移，浏览器与 Network 缺口由 `SUO-299-SH-002` 单列补证 |
 | `task_202f_frontend_state-components.md` | 基础状态组件不变，新增状态由 SUO-226-FE-003 处理 |
 
 ### 7.4 需新建的 Task 文档（SUO-226）
@@ -1171,6 +1341,15 @@ SUO-201-BE-003 + SUO-226-BE-004 → SUO-230-BE-001 → SUO-230-SH-001
 | `task_230_backend_review-gate-aggregation.md` | 审阅 gate 服务端聚合与防绕过验证 | `@TaskDesignAgent` |
 | `task_230_shared_idempotency-e2e.md` | 确认幂等与审阅版本校验联调 | `@TaskDesignAgent` + `@TaskDesignAgent` |
 
+### 7.6 需新建的 Task 文档（SUO-299）
+
+| 建议 Task ID | 内容 | 允许范围摘要 | 负责 Agent |
+|---|---|---|---|
+| `task_299_shared_story-workspace-contract-migration.md` | 前后端 canonical 合同原子迁移与运行恢复 | 旧合同文件、canonical 文件、消费者 import 和定向测试；`backend/database.py` / Schema / DDL / 其他业务域禁止 | `@TaskDesignAgent` |
+| `task_299_shared_task-202c-browser-network-validation.md` | 1280px 三路由交互与 Network 补证 | 浏览器会话与验证报告；生产代码、mock、依赖和运行配置零修改 | `@TaskDesignAgent` |
+
+> TaskDesignAgent 必须将两项设计为不同 Task；后者依赖前者，禁止合并为“迁移时顺手验证/修复”的单一执行闭集。
+
 ---
 
 ## 8. design → issue → task → stage 影响矩阵
@@ -1188,12 +1367,14 @@ SUO-201-BE-003 + SUO-226-BE-004 → SUO-230-BE-001 → SUO-230-SH-001
 | Deck 运行配置集成 Delta | 新增 10 条增量 Issue | 新增 10+ task | 新增 2-3 waves | 新增实现范围 |
 | **DEC-017 Dream 导航** | **新增 SUO-230-FE-001** | **新增 Dream 导航 task** | **新增导航验收 wave** | **TopNavBar 组件 + 路由** |
 | **DEC-018 审阅 Gate** | **新增 SUO-230-FE-002 / SUO-230-BE-001 / SUO-230-SH-001** | **新增 gate UI / 服务端聚合 / E2E task** | **新增 gate 验收 wave** | **ReviewGate 组件 + 服务端校验** |
+| **DEC-026 合同归属** | **新增 SUO-299-SH-001 / SUO-299-SH-002** | **合同迁移 task + 独立浏览器/Network 补证 task** | **先迁移恢复、后 evidence-only 验证的串行 wave** | **canonical 文件/import 迁移；task_202c 实现不重开** |
 
 ### 8.2 旧 Stage 不得直接作为本次设计变化的 Execute 准入
 
 - `stage_story-workspace.md`（现有 Stage）基于 SUO-199 设计稿制定，**不含 Deck 运行配置 依赖和准入门**。
 - 本次设计增量（SUO-214/SUO-215）引入的 Deck 运行配置/Agent 端到端集成**必须在新的增量 Stage 中验证**。
 - **SUO-230 增量**引入的 Dream 导航与审阅 Gate**必须在另一独立增量 Stage 中验证**。
+- **SUO-299 增量**必须由 StagePlanner 形成“合同迁移与运行恢复 → task_202c 浏览器/Network 补证”的串行准入；旧 Stage 与既有 task_202c 静态执行结果均不能替代迁移后验证。
 - **建议**：
   - 保留现有 `stage_story-workspace.md` 作为基线 Stage
   - 新建 `stage_story-workspace-deck-runtime-integration.md` 作为 Deck 运行配置 增量 Stage
@@ -1201,6 +1382,7 @@ SUO-201-BE-003 + SUO-226-BE-004 → SUO-230-BE-001 → SUO-230-SH-001
   - Deck 运行配置 增量 Stage 置于配置/类型合同完成之后（SUO-226-SH-001 冻结后）
   - Dream/Gate 增量 Stage 置于 SUO-230-BE-001 和 SUO-230-FE-002 完成后
   - **旧 Stage 不能作为 SUO-230 增量的 execute 准入；SUO-230 增量 Stage 必须独立验证：顶部 Dream → 产出 → 渲染 → 确认/驳回 → 放行/阻断**
+  - **SUO-299 Stage 的迁移 wave 必须证明旧合同路径为零、`backend/database.py` 零 diff；验证 wave 必须证明生产代码零 diff并提供浏览器/Network 证据**
   - **不得直接以旧 Stage 作为本次设计变化的 execute 准入**
 
 ---
@@ -1271,7 +1453,7 @@ SUO-201-BE-003 + SUO-226-BE-004 → SUO-230-BE-001 → SUO-230-SH-001
 
 - Issue 是最小调度单元。
 - 同一 Issue 任一时刻只允许一个主责 Agent。
-- shared Issue 必须有主责 Agent 与协作 Agent。
+- shared Issue 必须有唯一主责 Agent；仅在确有跨域协作时记录协作 Agent，协作不构成第二责任人。
 - 必须通过 Issue 评论区补充上下文、阻塞、回退和评审意见。
 - 必须通过 `@mention` 唤醒目标 Agent。
 - 不假设 Agent 之间存在隐式共享内存。

@@ -2,12 +2,14 @@
 // [Output] Render the fixed-width review container without review business behavior.
 // [Pos] Story Workspace right-side layout region.
 import type { ReactNode } from 'react';
+import { ProvenanceBadge, type ProvenanceBadgeProps } from '../workflow/ProvenanceBadge';
 import './StoryWorkspaceLayout.css';
 
 export interface StoryWorkspaceReviewPanelProps {
   children?: ReactNode;
   open: boolean;
   onClose: () => void;
+  provenance?: ProvenanceBadgeProps | null;
   title?: string;
 }
 
@@ -15,6 +17,7 @@ export function StoryWorkspaceReviewPanel({
   children,
   open,
   onClose,
+  provenance,
   title = '审阅详情',
 }: StoryWorkspaceReviewPanelProps) {
   if (!open) {
@@ -38,8 +41,14 @@ export function StoryWorkspaceReviewPanel({
           <span aria-hidden="true">×</span>
         </button>
       </header>
-      <div className="story-workspace-review-panel__body">{children}</div>
+      <div className="story-workspace-review-panel__body">
+        {provenance && (
+          <div className="story-workspace-review-panel__provenance">
+            <ProvenanceBadge {...provenance} />
+          </div>
+        )}
+        {children}
+      </div>
     </aside>
   );
 }
-

@@ -1,5 +1,12 @@
 # task_deck_014_backend_api-error-codes
 
+> **Task ID**: `task_deck_014_backend_api-error-codes`
+> **Readiness 修订 Issue**: [SUO-324](/SUO/issues/SUO-324)
+> **Domain**: `backend`（仅用于分类，不代表执行 Agent 身份）
+> **状态**: `pending_stage_recheck`
+> **唯一执行责任人**: `ExecTaskAgent`
+> **Stage 映射**: Stage 4 / Wave 1（独立 execute Issue、独立 checkout、独立验收）
+
 ## 1. 任务标题
 
 API 路由与错误码规范
@@ -14,10 +21,13 @@ API 路由与错误码规范
 - **来源设计稿**:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §12.1, §14.1, §14.2, §14.3
 - **Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 DECK-014
+- **Readiness 修订**: [SUO-324](/SUO/issues/SUO-324)
 
 ## 3. 任务目标
 
-实现设计稿中定义的逻辑 API 路由和错误码规范。物理服务拆分未确认前，以下为规范逻辑路由；可以由 gateway 映射，但请求/响应语义和错误码不得丢失。
+实现设计稿中定义的逻辑 API 路由和错误码规范。`DECK-GATE-DEC-016` 已冻结：以下 router 是规范逻辑 API/gateway adapter，必须保留 Deck control plane、ClaudeAgent runtime control、story-workspace 三域单写；不得新增第三业务服务、让 gateway 持有权威状态或通过共享表双写。物理拆分不是本 task 的前置条件，未来拆分也只能替换 transport/deployment adapter，请求/响应语义和错误码不得丢失。
+
+未来实现仅由 `ExecTaskAgent` 在本 task 的独立 execute Issue 中执行；`backend` 仅是 domain。本 task 不与其他 Stage 3/4 task 合并 checkout 或共享正式报告。
 
 ## 4. 实现步骤
 
@@ -274,6 +284,8 @@ ERROR_REGISTRY = {
 
 ## 8. 测试策略
 
+execute Issue 必须从仓库根核对 Python 入口及依赖环境，并逐字回填实际解释器、runner 与命令。当前仓库测试采用 `unittest` 风格，可直接复制的最小目标命令为 `PYTHONDONTWRITEBYTECODE=1 backend/.venv/bin/python -m unittest backend.tests.test_api_routes -v`，同时执行 `git diff --check`；若 `.venv` 或命令不可用，必须在 execute Issue/正式报告记录通过 `backend/pyproject.toml`、现有 `backend/tests/test_*.py` 和既有 exec 报告发现 runner 的过程、失败输出及等价解释器命令，不得新增测试框架或伪报通过。
+
 | 测试类型 | 覆盖内容 |
 |---|---|
 | 单元测试 | 管理端 API 路由（所有 endpoint） |
@@ -296,12 +308,15 @@ ERROR_REGISTRY = {
 - [ ] 安装响应包含 `operation_id`、`capability_diff`、`runtime_readiness`
 - [ ] 创建运行响应中来源字段由服务端复制，客户端不得直接提交覆盖
 - [ ] 单元测试覆盖所有 API 路由和错误码响应
+- [ ] 三组逻辑 router 保持 DECK-016 三域单写与无状态 gateway 边界，不引入第三业务服务或共享表双写
+- [ ] 实际变更只位于 §5 五个实现/测试路径及本 task 唯一正式报告路径
+- [ ] execute Issue/正式报告逐项回填验证命令、结果、验收、diff 与回滚说明
 
 ## 10. 风险提示
 
 | 风险 | 等级 | 缓解 |
 |---|---|---|
-| 物理服务拆分后路由变更 | 中 | 逻辑路由与物理路由分离；gateway 映射 |
+| 物理服务拆分后路由变更 | 低 | DECK-016 已冻结三域单写与无状态 gateway；逻辑路由稳定，物理拆分只替换 transport/deployment adapter |
 | 错误码遗漏导致客户端无法处理 | 中 | 完整注册表；测试覆盖所有已知错误场景 |
 | 敏感信息泄露到错误响应 | 高 | 自动化脱敏；代码审查 |
 | API 版本演进导致兼容性破坏 | 中 | 路由版本化（`/api/v1/...`） |
@@ -315,22 +330,38 @@ ERROR_REGISTRY = {
 - `backend/routers/story_workspace.py`（仅新增/修改 workflow preflight / run / retry / cancel 路由）
 - `backend/services/errors/error_registry.py`（仅新增规范错误码、含义与恢复动作）
 - `backend/tests/test_api_routes.py`（仅新增本 task 的 API / 错误响应测试）
+- `docs/exec/exec_deck_014_backend_api-error-codes.md`（仅允许 `ExecTaskAgent` 写入本 task 的唯一正式执行报告）
 
-以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+以上六个路径构成未来 execute 完整闭集；前五个与 §5“涉及文件路径”一致，最后一个仅为正式报告例外。未列出的文件默认不授权。
 
 ### 禁止修改范围
 
-- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `docs/exec/` 下除 `docs/exec/exec_deck_014_backend_api-error-codes.md` 之外的全部路径
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`
 - `frontend/`、gateway/物理服务部署配置与底层业务服务实现
 - 除上述 5 个路径以外的任何实现、测试、依赖锁或部署配置
 - 三个允许 router 中与 Deck Plugin、Workflow Preflight/Run 无关的既有路由或认证行为
 - 在响应中泄露堆栈、路径、prompt、secret，或借本 task 改变服务层业务合同和来源不可变规则
+- 新增第三业务服务、gateway 权威状态、跨域共享表双写，或修改 transport/deployment 配置
+
+### 当前修订阶段约束
+
+[SUO-324](/SUO/issues/SUO-324) 只修订 task 合同，不授权执行上述闭集。未来 execute 必须由 `ExecTaskAgent` 在独立 Issue checkout 后实施；完成后由 StagePlanner 独立重跑 readiness，不得由本 task 自行宣布进入 execute 或通过 Stage 4 Gate。
 
 ## 12. 命名隔离声明
 
 - API 路由使用 RESTful 命名
 - 错误码使用 `SNAKE_CASE`，按阶段分组
 
-## 13. 未决决策引用
+## 13. 决策状态与物理边界
 
-- `DECK-016`: 物理服务边界 —— 影响路由的物理归属
+- `DECK-016 / DECK-GATE-DEC-016`：`frozen`。Deck control plane 权威写 release/installation/binding/lock/snapshot；ClaudeAgent runtime control 权威写 materialization/node/session/load receipt；story-workspace 权威写 preflight/run/result/review；API gateway/BFF 只聚合和路由。
+- Stage 2 服务边界设计 Gate 已通过。当前可同进程/同集群部署，不要求本 task 做物理拆分；未来物理拆分只能替换 gateway/transport/deployment adapter，不得改变逻辑资源、领域前缀、单写 owner 或错误语义。
+- 本 task 只实现 §5 router adapter 与错误注册表。若 execute Issue 发现需要修改 gateway、服务部署、共享数据库访问或底层业务服务，必须停止并创建具名 owner 的独立 follow-up，不得把“已冻结”误解为越界授权。
+
+## 14. 回滚边界
+
+- 只回退 §11 允许的三个 router 中本 task 路由区段、错误注册表和目标测试；不得改动同文件其他既有路由、认证或业务行为。
+- 回滚必须保持三域单写、逻辑错误语义和来源不可变规则；不得以 gateway 持有权威状态、共享表双写或泄露内部异常作为临时回退。
+- 若下游服务合同不可用，对应路由返回已注册的安全不可用错误，不伪造成功、不部分提交，也不删除既有业务/审计数据。
+- 回滚前后执行 §8 的目标测试和 `git diff --check`，并在 `docs/exec/exec_deck_014_backend_api-error-codes.md` 记录触发条件、变更路径、验证结果与剩余影响；正式报告本身不得在代码回滚中删除。

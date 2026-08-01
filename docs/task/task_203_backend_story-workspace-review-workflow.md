@@ -24,13 +24,13 @@ Story Workspace 审阅状态流转与批量操作 API
 **核心约束**：
 - 批量操作仅允许对 `review_status='pending'` 的项执行
 - 操作完成后返回更新后的数据列表
-- 所有操作记录审计日志（可选，视现有系统能力）
+- 所有操作至少记录结构化审计日志；复用持久化审计能力仅在现有 Schema 已提供时可选，本 task 不新建或修改审计表
 - 确认操作需记录 `confirmed_at` 时间戳
 - 驳回操作需保存 `review_notes`
 
 ## 4. 实现步骤
 
-### Step 1: 在 `backend/routers/story-workspace.py` 中追加审阅端点
+### Step 1: 在 `backend/routers/story_workspace.py` 中追加审阅端点
 
 在现有 REST API 路由文件（`SUO-201-BE-002` 产出）中追加以下端点：
 
@@ -187,17 +187,27 @@ WHERE id IN (?, ?, ?)
   AND review_status = 'pending'
 ```
 
-### Step 6: 实现审计日志（可选）
+### Step 6: 记录结构化审计信息（不修改 Schema）
 
-若现有系统有审计日志能力，在每次审阅操作后记录：
+每次审阅操作后记录以下结构化字段。当前仓库未提供可直接复用的 Story Workspace 持久化审计表，因此基线实现使用应用 logger；如果执行时已存在兼容的持久化 audit sink，只允许调用既有能力，不得在本 task 新增表、列、索引、migration 或初始化 DDL。
 
 ```python
 def log_review_action(db, user_id: int, resource_type: str, resource_id: str,
                       action: str, previous_status: str, new_status: str,
                       review_notes: Optional[str] = None):
     """Log a review action for audit purposes."""
-    # 若项目有 audit_log 表则写入，否则跳过
-    pass
+    logger.info(
+        "story_workspace_review",
+        extra={
+            "user_id": user_id,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "action": action,
+            "previous_status": previous_status,
+            "new_status": new_status,
+            "has_review_notes": bool(review_notes),
+        },
+    )
 ```
 
 **审计日志字段**：
@@ -217,20 +227,22 @@ def log_review_action(db, user_id: int, resource_type: str, resource_id: str,
 |----------|---------|--------|---------|
 | `pending` | ✅ → confirmed | ✅ → rejected | ✅ → archived（status 字段） |
 | `confirmed` | ❌ 400 | ❌ 400 | ✅ → archived |
-| `rejected` | ✅ → confirmed | ❌ 400 | ✅ → archived |
+| `rejected` | ❌ 400 | ❌ 400 | ✅ → archived |
 | `archived` | ❌ 400 | ❌ 400 | ❌ 400 |
 
 **注意**：
 - `archive` 操作修改 `status` 字段（draft/published → archived），不影响 `review_status`
-- `confirm` 和 `reject` 操作修改 `review_status` 字段
+- 单条与批量 `confirm` / `reject` 都只允许当前 `review_status='pending'`；`rejected` 必须经独立的 Agent 重新生成流程产生新的 pending 版本，不得在本 task 直接再次 confirm
+- 批量 `archive` 同样只处理请求集合中的 pending 项，以保持本 task 的“批量操作仅影响 pending”合同；单条 archive 可处理 pending / confirmed / rejected，但已 archived 返回 400
 
 ## 5. 涉及文件路径
 
 | 路径 | 说明 |
 |------|------|
-| `backend/routers/story-workspace.py` | 追加审阅端点（在 `SUO-201-BE-002` 基础上扩展） |
-| `backend/database.py` | 如需审计日志表，追加 `story_workspace_audit_log` 表 |
+| `backend/routers/story_workspace.py` | 追加审阅端点（在 `SUO-201-BE-002` 已交付的实际路由文件基础上扩展） |
 | `backend/tests/test_story_workspace_review.py` | **新文件**：审阅工作流测试 |
+
+**只读复用**：`backend/database.py` 的 `get_db()` 与既有 Schema；不得产生该文件 diff，不得新增 `story_workspace_audit_log` 或任何其他 DDL。
 
 ## 6. 输入 / 输出说明
 
@@ -253,9 +265,14 @@ def log_review_action(db, user_id: int, resource_type: str, resource_id: str,
 |------|----------|------|------|
 | `SUO-201-BE-002` | REST API 实现 | 硬依赖 | 审阅端点追加在现有 REST API 路由文件中 |
 | `SUO-201-BE-001` | 数据库 Schema | 硬依赖 | 依赖数据表存在 |
+| `task_203a` / [SUO-317](/SUO/issues/SUO-317) | Character / Scene 审阅持久化 Schema 与 canonical contract | **硬依赖** | `task_203a` 的独立 execute 必须先完成四列迁移、contract tests 与 database hash 重冻结；仅完成 Task 定义文档不能解除依赖 |
 | `SUO-201-SH-002` | 共享类型定义 | 软依赖 | 类型对齐，但可基于设计稿先行开发 |
 
+**共享文件排他约束**：`task_204` 也会追加 `backend/routers/story_workspace.py`。这不是业务依赖，但属于 execute 写入冲突；按当前 Stage 顺序必须先完成 `task_204` 的共享路由变更及验证，再完成 `task_203a` 并由 StagePlanner 通过九项 readiness、重冻结 `backend/database.py` hash，之后才可开始 `task_203`。三者不得以共享 checkout 或并发写入绕过该 Gate；`task_203` 执行期间 database 与 canonical contract 均为只读冻结输入。
+
 ## 8. 测试策略
+
+> §8.1～§8.6 的代码块用于固定行为断言；正式测试文件必须按 §8.7 的命名与仓库现有 `unittest.TestCase` 风格实现，并由所列命令实际发现和执行。
 
 ### 8.1 确认审阅测试
 
@@ -331,8 +348,8 @@ def test_batch_confirm_stories(client, auth_headers, pending_stories):
     assert data["total_updated"] == len(ids)
     assert len(data["skipped_ids"]) == 0
 
-def test_batch_reject_skips_non_pending(client, auth_headers, mixed_stories):
-    """Test batch operation skips non-pending items."""
+def test_batch_confirm_skips_non_pending(client, auth_headers, mixed_stories):
+    """Test batch confirm skips non-pending items."""
     ids = [s["id"] for s in mixed_stories]
     response = client.post(
         "/api/story-workspace/batch",
@@ -364,25 +381,45 @@ def test_review_other_user_story(client, auth_headers, other_user_pending_story)
 ### 8.6 状态流转矩阵测试
 
 ```python
-@pytest.mark.parametrize("current_status,action,expected_status,expected_code", [
+cases = [
     ("pending", "confirm", "confirmed", 200),
     ("pending", "reject", "rejected", 200),
     ("confirmed", "confirm", None, 400),  # Already confirmed
     ("confirmed", "reject", None, 400),   # Cannot reject confirmed
-    ("rejected", "confirm", "confirmed", 200),  # Can re-confirm rejected
+    ("rejected", "confirm", None, 400),   # Must regenerate to a new pending version
     ("rejected", "reject", None, 400),    # Already rejected
-])
-def test_status_transitions(client, auth_headers, story_factory, current_status, action, expected_status, expected_code):
-    """Test all valid and invalid status transitions."""
-    story = story_factory(review_status=current_status)
-    response = client.post(
-        f"/api/story-workspace/stories/{story['id']}/{action}",
-        headers=auth_headers
-    )
-    assert response.status_code == expected_code
-    if expected_status:
-        assert response.json()["review_status"] == expected_status
+]
+
+# 在 unittest.TestCase 中以 subTest 遍历 cases；角色与场景复用同一矩阵。
+for current_status, action, expected_status, expected_code in cases:
+    with self.subTest(current_status=current_status, action=action):
+        response = self.perform_review(current_status, action)
+        self.assertEqual(response.status_code, expected_code)
+        if expected_status:
+            self.assertEqual(response.json()["review_status"], expected_status)
 ```
+
+### 8.7 可执行命令与验收映射
+
+从仓库根目录执行：
+
+```bash
+python -m py_compile backend/routers/story_workspace.py backend/tests/test_story_workspace_review.py
+python -m unittest backend.tests.test_story_workspace_review -v
+git diff --check -- backend/routers/story_workspace.py backend/tests/test_story_workspace_review.py
+```
+
+| 验收 ID | 验收条件 | 唯一对应测试/证据 |
+|---|---|---|
+| `AC-203-01` | story / character / scene 的 pending 项可 confirm/reject，confirm 写 `confirmed_at`，reject 保存最长 2000 字的 `review_notes` | `test_pending_confirm_and_reject_for_all_resource_types` |
+| `AC-203-02` | confirmed / rejected / archived 均不可 confirm/reject；尤其 rejected → confirm 返回 400 | `test_non_pending_review_transition_matrix` |
+| `AC-203-03` | 单条 story archive 对 pending/confirmed/rejected 可用、保留 `review_status`；重复 archive 返回 400 | `test_story_archive_matrix_preserves_review_status` |
+| `AC-203-04` | batch 最多 100 项，只更新 pending，正确返回 `total_requested`、`total_updated`、`skipped_ids`、`updated_items` | `test_batch_pending_only_and_result_accounting` |
+| `AC-203-05` | 未认证请求为 401；其他用户资源不可见/不可审阅（403 或 404，遵循现有基线） | `test_review_authentication_and_owner_isolation` |
+| `AC-203-06` | 非法 action/resource_type、空 ids、超过 100 ids、超过 2000 字 review_notes 被拒绝且无部分写入 | `test_review_request_validation_is_atomic` |
+| `AC-203-07` | 每次成功/拒绝操作记录结构化审计字段；不修改 `backend/database.py`，无 Schema diff | `test_review_action_emits_structured_audit_log` + 路径/diff 检查 |
+
+测试文件采用仓库现有 `unittest` 风格；不得为了本 task 引入 pytest、修改依赖或从 `backend/` 目录执行会触发 `backend/types` 遮蔽 stdlib 的命令。
 
 ## 9. 完成标志
 
@@ -396,8 +433,9 @@ def test_status_transitions(client, auth_headers, story_factory, current_status,
 - [ ] `POST /api/story-workspace/batch` — 批量操作，支持 `action: 'confirm'|'reject'|'archive'`，`ids: []`，`review_notes?: string`
 - [ ] 批量操作仅允许对 `review_status='pending'` 的项执行
 - [ ] 操作完成后返回更新后的数据列表
-- [ ] 所有操作记录审计日志（可选，视现有系统能力）
-- [ ] 状态流转矩阵完整测试通过
+- [ ] `AC-203-01`～`AC-203-07` 均通过并在 execute report 中逐项回填证据
+- [ ] 所有操作至少记录结构化审计日志；未新增审计表，`backend/database.py` 与 Schema 均无 diff
+- [ ] 状态流转矩阵完整测试通过，`rejected -> confirm` 明确为 400
 - [ ] 权限测试通过
 
 ## 10. 风险提示
@@ -408,18 +446,18 @@ def test_status_transitions(client, auth_headers, story_factory, current_status,
 | **批量操作竞态条件** | 中 | 使用事务包裹批量更新；SQLite 文件级锁天然处理并发 |
 | **驳回后重新生成流程未定义** | 高 | 设计稿标记 `[CLARIFICATION_NEEDED]`。默认假设：通过同一 Chat 线程重新生成。本任务仅负责状态变更，不负责触发重新生成 |
 | **已确认内容的后续执行未定义** | 中 | 设计稿标记 `[CLARIFICATION_NEEDED]`。默认假设：暂存，后续迭代定义。本任务仅负责状态变更 |
-| **审计日志表不存在** | 低 | 审计日志为可选。若项目无审计日志基础设施，记录为技术债，后续迭代补充 |
+| **持久化审计能力不存在** | 低 | 本 task 使用结构化应用日志并测试字段；持久化 audit sink 留给独立 Schema/审计任务，本 task 不修改 `backend/database.py` |
 | **批量操作大量数据性能** | 低 | 限制 `ids` 最大 100 条；使用单条 `UPDATE ... WHERE id IN (...)` SQL |
 
 ## 11. 允许与禁止修改范围
 
-- **仅允许修改**：`backend/routers/story-workspace.py`、`backend/database.py`（如需审计日志表）、`backend/tests/test_story_workspace_review.py`。
+- **仅允许修改**：`backend/routers/story_workspace.py`（只追加审阅端点/最小共享 helper）、`backend/tests/test_story_workspace_review.py`。
 - **禁止修改**：`docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/`、前端代码、数据库 schema 定义文件。
 - **禁止行为**：不得把本 task 文档当作 execute 授权直接实现；不得修改设计稿或 Issue 清单。
 
 ## 12. 下游执行提示
 
-- **StagePlanner 注意**: 本任务依赖 `SUO-201-BE-002`（REST API）完成。审阅端点是追加在现有路由文件中的，不是独立文件。
+- **StagePlanner 注意**: 本任务依赖 `SUO-201-BE-002`（REST API）完成。审阅端点追加在实际文件 `backend/routers/story_workspace.py` 中，不是独立文件；并须与 `task_204` 对该共享文件的变更串行执行。
 - **与前端协作点**: 前端审阅面板调用 `POST /.../confirm` 和 `POST /.../reject`。驳回时需传递 `review_notes`。批量操作时前端需收集选中项 ID 列表。
 - **与 E2E 联调的关系**: `SUO-201-SH-001`（E2E 联调）依赖本任务完成。Stage 排期时需确保本任务在 E2E 之前完成。
 - **数据合同稳定性**: `review_status` 枚举值（`pending` / `confirmed` / `rejected`）是前后端共享契约，变更需同步通知 FrontendTaskAgent。
@@ -428,15 +466,15 @@ def test_status_transitions(client, auth_headers, story_factory, current_status,
 ## 12. 执行边界
 
 ### 允许修改范围
-- `backend/routers/story-workspace.py` — 在 `SUO-201-BE-002` 已创建的 REST API 路由文件中追加审阅端点（confirm / reject / archive / batch）。
-- `backend/database.py` — 如需新增 `story_workspace_audit_log` 审计日志表（可选，视现有系统能力）。
+- `backend/routers/story_workspace.py` — 在 `SUO-201-BE-002` 已创建的 REST API 路由文件中追加审阅端点（confirm / reject / archive / batch）与本 task 私有的最小结构化日志 helper；不得改写已有 CRUD。
 - `backend/tests/test_story_workspace_review.py` — **新文件**：审阅工作流的状态流转矩阵测试、批量操作测试、权限测试。
 
 ### 禁止修改范围
 - ❌ `docs/design/`、`docs/issue/`、`docs/stage/`、`docs/exec/` — 任何设计阶段产物。
 - ❌ `docs/task/TASK-REQUIREMENT-FORMAT.md` — 提示词模板。
 - ❌ 前端代码、前端 task 文件 — 不在本 Agent 职责范围内。
-- ❌ `backend/routers/story-workspace.py` 中已有 CRUD 端点 — 仅追加审阅端点，不修改现有列表/详情/PATCH 逻辑。
+- ❌ `backend/routers/story_workspace.py` 中已有 CRUD 端点 — 仅追加审阅端点，不修改现有列表/详情/PATCH 逻辑。
+- ❌ `backend/database.py` 与所有 Schema/migration — 仅允许读取并复用 `get_db()` 及既有表；不得新增/修改审计表、列、索引或初始化逻辑。
 - ❌ 现有 `claude-agent` 服务核心逻辑 — 本任务仅实现审阅状态流转，不修改 Agent SSE 流处理。
 - ❌ 实现代码以外的任何文件 — 本 task 文档不是 execute 授权。
 
@@ -452,3 +490,25 @@ def test_status_transitions(client, auth_headers, story_factory, current_status,
 - **计费/积分系统** — 审阅操作不触发积分消耗或计费逻辑。
 - **驳回后自动触发 Agent 重新生成** — 本任务仅负责状态变更为 `rejected`，实际重新生成触发机制在后续迭代定义（设计稿 `[CLARIFICATION_NEEDED]`）。
 - **已确认内容的下游执行** — 确认后内容仅暂存，后续执行流程（如 Deck 生成、发布）在后续迭代定义。
+
+---
+
+## 13. SUO-270 Execute Readiness Delta
+
+### 准入项
+
+- `SUO-264` 已交付并验证实际 `backend/routers/story_workspace.py`、11 条 Story Workspace 路由及 focused API tests；task_203 的 REST 基线硬依赖已满足。
+- 仓库现有根目录 `unittest` 运行方式可复用，避免 `backend/types` 对 stdlib `types` 的已知遮蔽问题。
+
+### 本次修正项
+
+- 全文将不存在的连字符版路由路径归一为实际下划线路径 `backend/routers/story_workspace.py`。
+- 将 rejected → confirm 统一为 400，并明确单条 archive 与 pending-only batch 的边界。
+- 从写入闭集移除 `backend/database.py`；审计采用结构化日志，持久化审计与 Schema 变更留给独立任务。
+- 建立 `AC-203-01`～`AC-203-07` 与单一测试/证据的一一映射及可执行命令。
+
+### 仍阻塞项
+
+- **task 文档自身：无。**
+- **执行串行 Gate**：`task_204` 与本 task 共享 `backend/routers/story_workspace.py`；按当前 Stage 的 Wave 2 → Wave 3 顺序，`task_204` 未完成前本 task 不得启动。
+- **StagePlanner 后续**：Stage §3/§7/§8/回滚文字仍使用连字符版 Python 路由路径，并未显式标注共享路由排他关系，且旧矩阵未表达 `backend/database.py` 只读边界；须由独立 StagePlanner 子单同步。本 Issue 不修改 Stage。

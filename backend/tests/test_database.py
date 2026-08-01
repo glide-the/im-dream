@@ -25,12 +25,14 @@ STORY_WORKSPACE_COLUMNS = {
         "id", "identifier", "name", "avatar_url", "identity", "personality",
         "background", "catchphrase", "tags", "notes", "author_id",
         "workspace_id", "story_count", "review_status", "agent_generated",
-        "created_at", "updated_at",
+        "created_at", "updated_at", "status", "review_notes", "confirmed_at",
+        "archived_at",
     },
     "story_workspace_scenes": {
         "id", "identifier", "name", "description", "story_id", "author_id",
         "workspace_id", "character_count", "order_index", "review_status",
-        "agent_generated", "created_at", "updated_at",
+        "agent_generated", "created_at", "updated_at", "status", "review_notes",
+        "confirmed_at", "archived_at",
     },
     "story_workspace_story_characters": {
         "story_id", "character_id", "role_type", "created_at",
@@ -56,8 +58,12 @@ STORY_WORKSPACE_DATETIME_COLUMNS = {
     "story_workspace_stories": {
         "created_at", "updated_at", "confirmed_at", "published_at",
     },
-    "story_workspace_characters": {"created_at", "updated_at"},
-    "story_workspace_scenes": {"created_at", "updated_at"},
+    "story_workspace_characters": {
+        "created_at", "updated_at", "confirmed_at", "archived_at",
+    },
+    "story_workspace_scenes": {
+        "created_at", "updated_at", "confirmed_at", "archived_at",
+    },
     "story_workspace_story_characters": {"created_at"},
     "story_workspace_scene_characters": {"created_at"},
 }
@@ -73,11 +79,12 @@ STORY_WORKSPACE_NOT_NULL_COLUMNS = {
     },
     "story_workspace_characters": {
         "identifier", "name", "author_id", "workspace_id", "story_count",
-        "review_status", "agent_generated", "created_at", "updated_at",
+        "review_status", "agent_generated", "created_at", "updated_at", "status",
     },
     "story_workspace_scenes": {
         "identifier", "name", "author_id", "workspace_id", "character_count",
         "order_index", "review_status", "agent_generated", "created_at", "updated_at",
+        "status",
     },
     "story_workspace_story_characters": {
         "story_id", "character_id", "created_at",
@@ -100,12 +107,12 @@ STORY_WORKSPACE_DEFAULTS = {
     "story_workspace_characters": {
         "tags": "'[]'", "story_count": "0", "review_status": "'pending'",
         "agent_generated": "1", "created_at": "CURRENT_TIMESTAMP",
-        "updated_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP", "status": "'active'",
     },
     "story_workspace_scenes": {
         "character_count": "0", "order_index": "0", "review_status": "'pending'",
         "agent_generated": "1", "created_at": "CURRENT_TIMESTAMP",
-        "updated_at": "CURRENT_TIMESTAMP",
+        "updated_at": "CURRENT_TIMESTAMP", "status": "'active'",
     },
     "story_workspace_story_characters": {"created_at": "CURRENT_TIMESTAMP"},
     "story_workspace_scene_characters": {"created_at": "CURRENT_TIMESTAMP"},
@@ -290,6 +297,78 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
         )
         return user_id
 
+    @staticmethod
+    def _legacy_review_connection():
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.executescript(
+            """
+            CREATE TABLE story_workspace_characters (
+              id TEXT PRIMARY KEY,
+              identifier TEXT NOT NULL,
+              name TEXT NOT NULL,
+              avatar_url TEXT,
+              identity TEXT,
+              personality TEXT,
+              background TEXT,
+              catchphrase TEXT,
+              tags TEXT DEFAULT '[]',
+              notes TEXT,
+              author_id INTEGER NOT NULL,
+              workspace_id TEXT NOT NULL,
+              story_count INTEGER NOT NULL DEFAULT 0,
+              review_status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
+              agent_generated INTEGER NOT NULL DEFAULT 1
+                CHECK(agent_generated IN (0, 1)),
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (author_id) REFERENCES users (id),
+              FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
+            );
+
+            CREATE TABLE story_workspace_scenes (
+              id TEXT PRIMARY KEY,
+              identifier TEXT NOT NULL,
+              name TEXT NOT NULL,
+              description TEXT,
+              story_id TEXT,
+              author_id INTEGER NOT NULL,
+              workspace_id TEXT NOT NULL,
+              character_count INTEGER NOT NULL DEFAULT 0,
+              order_index INTEGER NOT NULL DEFAULT 0,
+              review_status TEXT NOT NULL DEFAULT 'pending'
+                CHECK(review_status IN ('pending', 'confirmed', 'rejected')),
+              agent_generated INTEGER NOT NULL DEFAULT 1
+                CHECK(agent_generated IN (0, 1)),
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              FOREIGN KEY (story_id) REFERENCES story_workspace_stories (id),
+              FOREIGN KEY (author_id) REFERENCES users (id),
+              FOREIGN KEY (workspace_id) REFERENCES story_workspace_workspaces (id)
+            );
+            """
+        )
+        for resource in ("character", "scene"):
+            table = f"story_workspace_{resource}s"
+            for review_status in ("pending", "confirmed", "rejected"):
+                connection.execute(
+                    f"""
+                    INSERT INTO {table}
+                        (id, identifier, name, author_id, workspace_id, review_status)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        f"legacy-{resource}-{review_status}",
+                        f"legacy-{resource}-{review_status}",
+                        f"Legacy {resource} {review_status}",
+                        1,
+                        "legacy-workspace",
+                        review_status,
+                    ),
+                )
+        return connection
+
     def test_story_workspace_tables_exist(self):
         rows = self.connection.execute(
             """
@@ -340,6 +419,239 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
                     for row in foreign_key_rows
                 }
                 self.assertEqual(actual_foreign_keys, STORY_WORKSPACE_FOREIGN_KEYS[table])
+
+    def test_story_workspace_review_persistence_schema_contract(self):
+        expected = {
+            "status": ("TEXT", True, "'active'"),
+            "review_notes": ("TEXT", False, None),
+            "confirmed_at": ("DATETIME", False, None),
+            "archived_at": ("DATETIME", False, None),
+        }
+        for table in ("story_workspace_characters", "story_workspace_scenes"):
+            with self.subTest(table=table):
+                rows = {
+                    row["name"]: row
+                    for row in self.connection.execute(
+                        f"PRAGMA table_info({table})"
+                    ).fetchall()
+                }
+                actual = {
+                    column: (
+                        rows[column]["type"],
+                        bool(rows[column]["notnull"]),
+                        rows[column]["dflt_value"],
+                    )
+                    for column in expected
+                }
+                self.assertEqual(actual, expected)
+
+                table_sql = self.connection.execute(
+                    "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+                    (table,),
+                ).fetchone()[0]
+                normalized_sql = " ".join(table_sql.lower().split())
+                self.assertIn(
+                    "check(status in ('active', 'archived'))", normalized_sql
+                )
+                self.assertIn(
+                    "check(review_notes is null or length(review_notes) <= 2000)",
+                    normalized_sql,
+                )
+
+    def test_story_workspace_review_persistence_fresh_defaults(self):
+        user_id = self._insert_required_parents()
+        for resource in ("character", "scene"):
+            table = f"story_workspace_{resource}s"
+            self.connection.execute(
+                f"""
+                INSERT INTO {table}
+                    (id, identifier, name, author_id, workspace_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    f"fresh-{resource}",
+                    f"fresh-{resource}",
+                    f"Fresh {resource}",
+                    user_id,
+                    "workspace-1",
+                ),
+            )
+            row = self.connection.execute(
+                f"""
+                SELECT status, review_notes, confirmed_at, archived_at
+                FROM {table} WHERE id = ?
+                """,
+                (f"fresh-{resource}",),
+            ).fetchone()
+            self.assertEqual(tuple(row), ("active", None, None, None))
+
+    def test_story_workspace_review_persistence_migrates_legacy_rows(self):
+        legacy = self._legacy_review_connection()
+        self.addCleanup(legacy.close)
+        db.create_tables(legacy)
+
+        for table in ("story_workspace_characters", "story_workspace_scenes"):
+            with self.subTest(table=table):
+                fresh_schema = [
+                    tuple(row)
+                    for row in self.connection.execute(
+                        f"PRAGMA table_info({table})"
+                    ).fetchall()
+                ]
+                legacy_schema = [
+                    tuple(row)
+                    for row in legacy.execute(f"PRAGMA table_info({table})").fetchall()
+                ]
+                self.assertEqual(legacy_schema, fresh_schema)
+                self.assertEqual(
+                    [tuple(row) for row in legacy.execute(
+                        f"PRAGMA foreign_key_list({table})"
+                    ).fetchall()],
+                    [tuple(row) for row in self.connection.execute(
+                        f"PRAGMA foreign_key_list({table})"
+                    ).fetchall()],
+                )
+
+                rows = legacy.execute(
+                    f"""
+                    SELECT review_status, status, review_notes,
+                           confirmed_at, archived_at
+                    FROM {table}
+                    ORDER BY review_status
+                    """
+                ).fetchall()
+                self.assertEqual(
+                    {row["review_status"] for row in rows},
+                    {"pending", "confirmed", "rejected"},
+                )
+                self.assertTrue(
+                    all(
+                        tuple(row)[1:] == ("active", None, None, None)
+                        for row in rows
+                    )
+                )
+
+    def test_story_workspace_review_persistence_migration_idempotent(self):
+        legacy = self._legacy_review_connection()
+        self.addCleanup(legacy.close)
+        db.create_tables(legacy)
+        first_schema = {
+            table: [tuple(row) for row in legacy.execute(
+                f"PRAGMA table_info({table})"
+            ).fetchall()]
+            for table in ("story_workspace_characters", "story_workspace_scenes")
+        }
+        first_rows = {
+            table: [tuple(row) for row in legacy.execute(
+                f"SELECT * FROM {table} ORDER BY id"
+            ).fetchall()]
+            for table in ("story_workspace_characters", "story_workspace_scenes")
+        }
+
+        db.create_tables(legacy)
+
+        for table in ("story_workspace_characters", "story_workspace_scenes"):
+            self.assertEqual(
+                [tuple(row) for row in legacy.execute(
+                    f"PRAGMA table_info({table})"
+                ).fetchall()],
+                first_schema[table],
+            )
+            self.assertEqual(
+                [tuple(row) for row in legacy.execute(
+                    f"SELECT * FROM {table} ORDER BY id"
+                ).fetchall()],
+                first_rows[table],
+            )
+
+    def test_story_workspace_review_notes_length_constraint(self):
+        user_id = self._insert_required_parents()
+        valid_notes = "界" * 2000
+        invalid_notes = "界" * 2001
+        for resource in ("character", "scene"):
+            table = f"story_workspace_{resource}s"
+            row_id = f"notes-{resource}"
+            self.connection.execute(
+                f"""
+                INSERT INTO {table}
+                    (id, identifier, name, author_id, workspace_id, review_notes)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (row_id, row_id, f"Notes {resource}", user_id, "workspace-1", valid_notes),
+            )
+            with self.assertRaises(sqlite3.IntegrityError):
+                self.connection.execute(
+                    f"UPDATE {table} SET review_notes = ? WHERE id = ?",
+                    (invalid_notes, row_id),
+                )
+            stored = self.connection.execute(
+                f"SELECT review_notes FROM {table} WHERE id = ?", (row_id,)
+            ).fetchone()[0]
+            self.assertEqual(stored, valid_notes)
+
+    def test_story_workspace_asset_status_constraint(self):
+        user_id = self._insert_required_parents()
+        for resource in ("character", "scene"):
+            table = f"story_workspace_{resource}s"
+            row_id = f"status-{resource}"
+            self.connection.execute(
+                f"""
+                INSERT INTO {table}
+                    (id, identifier, name, author_id, workspace_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (row_id, row_id, f"Status {resource}", user_id, "workspace-1"),
+            )
+            self.connection.execute(
+                f"UPDATE {table} SET status = 'archived' WHERE id = ?", (row_id,)
+            )
+            for invalid_status in ("published", "deleted"):
+                with self.subTest(table=table, status=invalid_status):
+                    with self.assertRaises(sqlite3.IntegrityError):
+                        self.connection.execute(
+                            f"UPDATE {table} SET status = ? WHERE id = ?",
+                            (invalid_status, row_id),
+                        )
+                    stored = self.connection.execute(
+                        f"SELECT status FROM {table} WHERE id = ?", (row_id,)
+                    ).fetchone()[0]
+                    self.assertEqual(stored, "archived")
+
+    def test_story_workspace_review_persistence_round_trip(self):
+        user_id = self._insert_required_parents()
+        expected = (
+            "archived",
+            "需要补充细节",
+            "2026-08-01 12:00:00",
+            "2026-08-01 13:00:00",
+        )
+        for resource in ("character", "scene"):
+            table = f"story_workspace_{resource}s"
+            row_id = f"round-trip-{resource}"
+            self.connection.execute(
+                f"""
+                INSERT INTO {table}
+                    (id, identifier, name, author_id, workspace_id)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (row_id, row_id, f"Round trip {resource}", user_id, "workspace-1"),
+            )
+            self.connection.execute(
+                f"""
+                UPDATE {table}
+                SET status = ?, review_notes = ?, confirmed_at = ?, archived_at = ?
+                WHERE id = ?
+                """,
+                (*expected, row_id),
+            )
+            stored = self.connection.execute(
+                f"""
+                SELECT status, review_notes, confirmed_at, archived_at
+                FROM {table} WHERE id = ?
+                """,
+                (row_id,),
+            ).fetchone()
+            self.assertEqual(tuple(stored), expected)
 
     def test_story_workspace_indexes_exist(self):
         rows = self.connection.execute(

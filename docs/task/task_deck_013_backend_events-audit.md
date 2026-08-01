@@ -1,5 +1,12 @@
 # task_deck_013_backend_events-audit
 
+> **Task ID**: `task_deck_013_backend_events-audit`
+> **Readiness 修订 Issue**: [SUO-324](/SUO/issues/SUO-324)
+> **Domain**: `backend`（仅用于分类，不代表执行 Agent 身份）
+> **状态**: `pending_stage_recheck`
+> **唯一执行责任人**: `ExecTaskAgent`
+> **Stage 映射**: Stage 4 / Wave 1（独立 execute Issue、独立 checkout、独立验收）
+
 ## 1. 任务标题
 
 统一事件合同与审计
@@ -14,10 +21,13 @@
 - **来源设计稿**:
   - `docs/design/deck-plugin-voice-ink-dream-integration.md` §15.1, §15.2
 - **Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` §3 DECK-013
+- **Readiness 修订**: [SUO-324](/SUO/issues/SUO-324)
 
 ## 3. 任务目标
 
 实现统一的事件 envelope 和规范事件类型。事件至少一次投递，消费者按 `event_id` 去重，按 `aggregate_version` 处理顺序。事件禁止携带 prompt、secret 或完整 settings。
+
+未来实现仅由 `ExecTaskAgent` 在本 task 的独立 execute Issue 中执行；`backend` 仅是 domain。本 task 不与其他 Stage 3/4 task 合并 checkout 或共享正式报告。
 
 ## 4. 实现步骤
 
@@ -162,6 +172,8 @@ CREATE INDEX IF NOT EXISTS idx_events_correlation
 
 ## 8. 测试策略
 
+execute Issue 必须从仓库根核对 Python 入口及依赖环境，并逐字回填实际解释器、runner 与命令。当前仓库测试采用 `unittest` 风格，可直接复制的最小目标命令为 `PYTHONDONTWRITEBYTECODE=1 backend/.venv/bin/python -m unittest backend.tests.test_events -v`，同时执行 `git diff --check`；若 `.venv` 或命令不可用，必须在 execute Issue/正式报告记录通过 `backend/pyproject.toml`、现有 `backend/tests/test_*.py` 和既有 exec 报告发现 runner 的过程、失败输出及等价解释器命令，不得新增测试框架或伪报通过。
+
 | 测试类型 | 覆盖内容 |
 |---|---|
 | 单元测试 | 事件 envelope 构建（所有字段正确填充） |
@@ -177,11 +189,13 @@ CREATE INDEX IF NOT EXISTS idx_events_correlation
 - [ ] 统一事件 envelope 结构完整
 - [ ] 10 类规范事件覆盖设计稿 §15.2 所有事件类型
 - [ ] 事件至少一次投递，消费者可按 `event_id` 去重
-- [ ] 同 aggregate 的 `event_version` 单调递增
+- [ ] 同 aggregate 的 `aggregate_version` 单调递增
 - [ ] 事件禁止携带 prompt、secret 或完整 settings
 - [ ] 前端 SSE/WebSocket 可消费脱敏投影
 - [ ] 数据库审计事件是权威来源
 - [ ] 单元测试覆盖事件生成、投递、去重、顺序
+- [ ] 实际变更只位于 §5 五个实现/测试路径及本 task 唯一正式报告路径
+- [ ] execute Issue/正式报告逐项回填验证命令、结果、验收、diff 与回滚说明
 
 ## 10. 风险提示
 
@@ -190,7 +204,7 @@ CREATE INDEX IF NOT EXISTS idx_events_correlation
 | 事件丢失导致审计不完整 | 高 | 数据库持久化为权威来源；消息队列为异步投递 |
 | 事件顺序错乱导致状态不一致 | 中 | aggregate_version 唯一约束；乱序暂存机制 |
 | 敏感信息泄露到事件负载 | 高 | 脱敏规则自动化检查；代码审查 |
-| 事件表无限增长 | 中 | 留存策略；分区/归档；`DECK-017` 决策单确认 |
+| 事件表无限增长 | 中 | `DECK-017` 仍为 `conditional_frozen`；production 留存/恢复 owner 与证据未批准前不得自行引入 purge，开发/测试只做显式限域策略 |
 
 ## 11. 允许修改范围与禁止修改范围
 
@@ -201,22 +215,36 @@ CREATE INDEX IF NOT EXISTS idx_events_correlation
 - `backend/services/events/event_consumer.py`（仅新增去重与 aggregate 顺序处理）
 - `backend/database.py`（仅增量追加 `events` 表及其幂等初始化）
 - `backend/tests/test_events.py`（仅新增本 task 的单元测试）
+- `docs/exec/exec_deck_013_backend_events-audit.md`（仅允许 `ExecTaskAgent` 写入本 task 的唯一正式执行报告）
 
-以上闭集与 §5“涉及文件路径”一致；未列出的文件默认不授权。
+以上六个路径构成未来 execute 完整闭集；前五个与 §5“涉及文件路径”一致，最后一个仅为正式报告例外。未列出的文件默认不授权。
 
 ### 禁止修改范围
 
-- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/`
+- `docs/exec/` 下除 `docs/exec/exec_deck_013_backend_events-audit.md` 之外的全部路径
+- `docs/design/`、`docs/issue/`、`docs/task/`、`docs/stage/`
 - `frontend/`、消息中间件基础设施和其他业务域事件生产者/消费者实现
 - 除上述 5 个路径以外的任何实现、测试、依赖锁或部署配置
 - `backend/database.py` 中与 `events` 表无关的既有表或初始化逻辑
 - 在事件 payload 写入 prompt、secret、完整 settings，或借本 task 改写 Workflow Run / Session 业务状态机
+
+### 当前修订阶段约束
+
+[SUO-324](/SUO/issues/SUO-324) 只修订 task 合同，不授权执行上述闭集。未来 execute 必须由 `ExecTaskAgent` 在独立 Issue checkout 后实施；完成后由 StagePlanner 独立重跑 readiness，不得由本 task 自行宣布进入 execute 或通过 Stage 4 Gate。
 
 ## 12. 命名隔离声明
 
 - 事件类型使用点分命名空间（`deck_plugin.release.published`）
 - 聚合 ID 根据聚合根类型区分（release ID、installation ID、run ID）
 
-## 13. 未决决策引用
+## 13. 决策状态与剩余边界
 
-- `DECK-017`: 制品留存策略 —— 影响事件数据留存策略
+- `DECK-017 / DECK-GATE-DEC-017`：`conditional_frozen`。生产制品采用 SHA-256、受信签名包与引用感知留存，但安全、marketplace/制品平台、runtime owner 的具名审批与恢复证据仍未完成；本 task 不得据此宣告 production-ready。
+- 事件审计记录必须 append-only 并保留稳定引用；具体 production 保留期、归档介质和 purge 调度不在本闭集内。若 execute Issue 需要新增这些路径或策略，停止并创建具名 owner 的独立 follow-up，不得越界实现。
+
+## 14. 回滚边界
+
+- 只回退 §11 允许的事件模型、发射/消费实现、测试，以及 `backend/database.py` 中与 `events` 表初始化直接相关的最小代码区段。
+- 已持久化的事件和审计来源不得在回滚中删除、改写或降级为可变日志；数据库兼容回滚优先停止新写入/消费并保留既有表为只读审计证据。
+- 回滚不得改写 Workflow Run、Session 或其他业务状态机；跨 task 生产者/消费者由各自执行合同处置。
+- 回滚前后执行 §8 的目标测试和 `git diff --check`，并在 `docs/exec/exec_deck_013_backend_events-audit.md` 记录触发条件、变更路径、数据保留、验证结果与剩余影响；正式报告本身不得在代码回滚中删除。
