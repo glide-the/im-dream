@@ -5,7 +5,7 @@
 > **关联 Issue 清单**: `docs/issue/ISSUES_deck-plugin-voice-ink-dream-integration.md` (SUO-237)
 > **生成 Agent**: StagePlanner
 > **生成日期**: 2026-08-01
-> **状态**: draft
+> **状态**: completed (Stage 规划已完成；SUO-247 task 层准入修复已完成；首个 Wave 待执行)
 
 ---
 
@@ -15,7 +15,8 @@
 - **补充设计稿**: `docs/design/plugin-remote-interaction.md`
 - **背景设计稿**: `docs/design/story-workspace/story-workspace-prd.md`
 - **背景设计稿**: `docs/design/story-workspace/story-workspace-layout-design.md`
-- **背景设计稿**: `docs/design/story-workspace/story-workspace-deck-integration-delta.md`
+- **背景设计稿**: `docs/design/deck/deck-integration-delta.md`（原 `story-workspace/story-workspace-deck-integration-delta.md` 已迁移）
+- **补充设计稿**: `docs/design/deck/design_002_deck-plugin-decision-gates.md`
 - **参考设计稿**: `docs/design/deck-claude-agent.md`
 
 ## 2. 任务输入来源
@@ -38,14 +39,17 @@
 | `task_deck_003_backend_installation-lifecycle.md` | DECK-003 | backend | BackendTaskAgent |
 | `task_deck_004_backend_compatibility-capability.md` | DECK-004 | backend | BackendTaskAgent |
 | `task_deck_006_backend_workflow-preflight.md` | DECK-006 | backend | BackendTaskAgent |
-| `task_deck_007_backend_run-scoped-session.md` | DECK-007 | backend | BackendTaskAgent |
+| `task_deck_007_backend_workflow-run.md` | DECK-007 | backend | BackendTaskAgent |
 | `task_deck_008_backend_reconcile-load-receipt.md` | DECK-008 | backend | BackendTaskAgent |
 | `task_deck_009_backend_run-scoped-session.md` | DECK-009 | backend | BackendTaskAgent |
 | `task_deck_013_backend_events-audit.md` | DECK-013 | backend | BackendTaskAgent |
 | `task_deck_014_backend_api-error-codes.md` | DECK-014 | backend | BackendTaskAgent |
 | `task_deck_015_backend_revocation-rollback.md` | DECK-015 | backend | BackendTaskAgent |
 
-> **注意**: Issue 清单中 DECK-007 标题为「Workflow Run 创建、状态与幂等重试」，但 task 文档文件名使用了 `task_deck_007_backend_run-scoped-session.md`。经核对内容，该文档实际覆盖 Workflow Run 创建、状态与幂等重试（§3 任务目标明确），文件名中的 `run-scoped-session` 为命名偏差，实际对应 DECK-007。
+> **注意**: 
+> - DECK-007 对应 `task_deck_007_backend_workflow-run.md`（Workflow Run 创建、状态与幂等重试）。
+> - DECK-009 对应 `task_deck_009_backend_run-scoped-session.md`（Run-Scoped Session 与远程交互限制）。
+> - 两份 task 文件名与内容一致，无命名偏差。
 
 ---
 
@@ -137,21 +141,26 @@ task_001 ──→ task_002 ──→ task_003 ──→ task_004 ──→ task
 
 | 阶段 | 任务 | 状态 |
 | --- | --- | --- |
-| Stage 1 | task_001 Manifest 模型 | pending |
-| Stage 1 | task_002 Runtime Lock | pending |
-| Stage 1 | task_003 Installation 生命周期 | pending |
-| Stage 1 | task_004 兼容性判定 | pending |
-| Stage 2 | task_210 Shared Deck Binding | pending |
-| Stage 2 | task_006 Workflow Preflight | pending |
-| Stage 2 | task_007 Workflow Run | pending |
-| Stage 2 | task_008 Reconcile & Load Receipt | pending |
-| Stage 2 | task_009 Run-Scoped Session | pending |
-| Stage 3 | task_211 Plugin Admin UI | pending |
-| Stage 3 | task_212 Deck Editor Binding UI | pending |
-| Stage 3 | task_213 Story Workspace Status | pending |
-| Stage 4 | task_013 事件审计 | pending |
-| Stage 4 | task_014 API 路由 | pending |
-| Stage 4 | task_015 撤销回滚 | pending |
+| Stage 1 | task_001 Manifest 模型 | **ready_to_execute** |
+| Stage 1 | task_002 Runtime Lock | blocked (依赖 task_001) |
+| Stage 1 | task_003 Installation 生命周期 | blocked (依赖 task_001, task_002) |
+| Stage 1 | task_004 兼容性判定 | blocked (依赖 task_001, task_003) |
+| Stage 2 | task_210 Shared Deck Binding | blocked (依赖 Stage 1 Gate) |
+| Stage 2 | task_006 Workflow Preflight | blocked (依赖 Stage 1 Gate) |
+| Stage 2 | task_007 Workflow Run | blocked (依赖 task_006) |
+| Stage 2 | task_008 Reconcile & Load Receipt | blocked (依赖 task_007) |
+| Stage 2 | task_009 Run-Scoped Session | blocked (依赖 task_008) |
+| Stage 3 | task_211 Plugin Admin UI | blocked (依赖 Stage 2 Gate) |
+| Stage 3 | task_212 Deck Editor Binding UI | blocked (依赖 task_210) |
+| Stage 3 | task_213 Story Workspace Status | blocked (依赖 Stage 2 Gate) |
+| Stage 4 | task_013 事件审计 | blocked (依赖 Stage 2 Gate) |
+| Stage 4 | task_014 API 路由 | blocked (依赖 Stage 2 Gate) |
+| Stage 4 | task_015 撤销回滚 | blocked (依赖 Stage 2 Gate) |
+
+> **说明**: 
+> - 仅 task_001 满足执行准入条件（无依赖、允许/禁止范围明确、验收标准清晰）。
+> - 其余 14 个 task 均因依赖未满足而阻塞，但准入条件本身已齐备（[SUO-247](/SUO/issues/SUO-247) 已完成 11 份 backend task 的允许/禁止范围补充，4 份 shared/frontend task 原已具备）。
+> - 首个可执行 Wave 为 **Stage 1 Wave 1: task_001 Manifest 模型**。
 
 ---
 
@@ -192,6 +201,14 @@ task_001 ──→ task_002 ──→ task_003 ──→ task_004
 ```
 task_004 → task_003 → task_002 → task_001
 ```
+
+**允许/禁止修改范围**:
+| Task | 允许修改 | 禁止修改 |
+|---|---|---|
+| task_001 | `backend/models/deck_plugin.py`（新建）、manifest schema、校验器、`deck_plugin_releases` 表迁移 | 现有 `claude_code_plugin` 模型、Paperclip Plugin 表结构、前端代码 |
+| task_002 | `backend/services/deck_plugin/lock_generator.py`（新建）、版本约束解析器、`deck_runtime_plugin_locks` 表迁移 | marketplace 接口实现（仅定义抽象接口）、现有 runtime 加载逻辑 |
+| task_003 | `backend/models/deck_plugin.py`（追加 Installation 模型）、状态机实现、`deck_plugin_installations` 表迁移 | Claude Code Plugin cache 逻辑、Paperclip PluginStatus 状态机 |
+| task_004 | `backend/services/deck_plugin/compatibility_service.py`（新建）、兼容性判定链、能力交集计算 | 前端兼容性判定逻辑、现有权限系统核心代码 |
 
 ---
 
@@ -237,6 +254,15 @@ task_004 ──→ task_006 ──→ task_007 ──→ task_008 ──→ task
 task_009 → task_008 → task_007 → task_006 → task_210
 ```
 
+**允许/禁止修改范围**:
+| Task | 允许修改 | 禁止修改 |
+|---|---|---|
+| task_210 | `DeckPluginBinding` 模型定义（前后端共享合同）、API 合同文档、`expected_binding_revision` 乐观锁设计 | 后端 binding 持久化实现（由 BackendTaskAgent 执行）、前端 UI 组件代码 |
+| task_006 | `backend/models/workflow_preflight.py`（新建）、`backend/services/workflow/preflight_service.py`（新建）、`desk_config_snapshots` 表迁移 | 现有 ClaudeAgent session 创建逻辑、前端 preflight UI |
+| task_007 | `backend/models/workflow_run.py`（新建）、Workflow Run 状态机、幂等启动逻辑 | 现有 SSE 服务实现、前端运行状态展示 |
+| task_008 | `backend/models/runtime_plugin.py`（新建）、reconcile 服务、`runtime_load_receipts` 表迁移 | 现有 Claude Code CLI 核心逻辑、marketplace 下载实现 |
+| task_009 | `backend/models/agent_session.py`（新建/扩展）、session 管理器、run-scoped settings 生成 | 现有 SSE 服务端点协议、前端 chat 组件 |
+
 ---
 
 ### Stage 3: 前端体验层（Frontend Experience）
@@ -270,6 +296,13 @@ task_009 → task_008 → task_007 → task_006 → task_210
 ```
 task_213 → task_212 → task_211（可独立回滚）
 ```
+
+**允许/禁止修改范围**:
+| Task | 允许修改 | 禁止修改 |
+|---|---|---|
+| task_211 | 前端 Plugin Admin 页面/组件、三维状态展示 UI、安装/升级/卸载交互 | 后端 installation 状态机、后端 API 路由实现、Claude Code Plugin 管理逻辑 |
+| task_212 | Deck Editor 插件选择区 UI、`DeckPluginBindingCard`/`VersionPicker` 组件、版本选择交互 | 后端 binding 保存逻辑、`expected_binding_revision` 乐观锁实现、Preflight/Run 服务 |
+| task_213 | Story Workspace 工作流上下文条、`WorkflowContextBar` 组件、Preflight 进度展示、错误恢复 UI | 后端 Workflow Run 状态机、SSE 事件基础设施、ClaudeAgent session 管理 |
 
 ---
 
@@ -305,6 +338,13 @@ task_213 → task_212 → task_211（可独立回滚）
 ```
 task_015 → task_014 → task_013（可独立回滚）
 ```
+
+**允许/禁止修改范围**:
+| Task | 允许修改 | 禁止修改 |
+|---|---|---|
+| task_013 | `backend/models/events.py`（新建）、事件发射器、`events` 表迁移、事件 envelope 结构 | 现有日志系统核心、前端事件消费逻辑、非 Deck Plugin 相关事件类型 |
+| task_014 | `backend/routers/deck_plugins.py`（新建）、`backend/routers/voice_decks.py`（扩展）、错误码注册表 | 现有路由中间件核心、认证/授权系统、前端路由配置 |
+| task_015 | `backend/services/deck_plugin/revocation_service.py`（新建）、行为矩阵实现、降级规则 | 现有 ClaudeAgent 强制终止逻辑（仅调用接口）、数据备份/恢复系统 |
 
 ---
 
@@ -504,7 +544,7 @@ flowchart TB
 | `task_deck_004_backend_compatibility-capability.md` | Stage 1 | Wave 4 | 串行于 003 |
 | `task_210_shared_deck_plugin_binding.md` | Stage 2 | Wave 1 | 与 task_006 并行 |
 | `task_deck_006_backend_workflow-preflight.md` | Stage 2 | Wave 1 | 与 task_210 并行 |
-| `task_deck_007_backend_run-scoped-session.md` | Stage 2 | Wave 2 | 串行于 006 |
+| `task_deck_007_backend_workflow-run.md` | Stage 2 | Wave 2 | 串行于 006 |
 | `task_deck_008_backend_reconcile-load-receipt.md` | Stage 2 | Wave 3 | 串行于 007 |
 | `task_deck_009_backend_run-scoped-session.md` | Stage 2 | Wave 4 | 串行于 008 |
 | `task_211_frontend_plugin_admin_ui.md` | Stage 3 | Wave 1 | 与 task_212, task_213 并行 |
@@ -513,3 +553,85 @@ flowchart TB
 | `task_deck_013_backend_events-audit.md` | Stage 4 | Wave 1 | 与 task_014, task_015 并行 |
 | `task_deck_014_backend_api-error-codes.md` | Stage 4 | Wave 1 | 与 task_013, task_015 并行 |
 | `task_deck_015_backend_revocation-rollback.md` | Stage 4 | Wave 1 | 与 task_013, task_014 并行 |
+
+---
+
+## 15. 首个可执行 Wave 结论（SUO-248 复核结果）
+
+### 15.1 复核范围
+
+本次复核（SUO-248）覆盖以下内容：
+1. ✅ 15 份 task 路径逐一核对真实文件
+2. ✅ task_007 映射修正（`task_deck_007_backend_workflow-run.md`）
+3. ✅ Stage 文档状态更新（`draft` → `completed`）
+4. ✅ 11 份 backend task 补充允许/禁止修改范围
+5. ✅ 每个 task 的依赖、验收、测试与 Gate 重新核对
+
+### 15.2 执行准入判定
+
+| Task | 依赖满足 | 允许/禁止范围明确 | 验收标准清晰 | 综合判定 |
+|---|---|---|---|---|
+| task_001 | ✅ 无依赖 | ✅ 已补充 | ✅ 设计稿 §5.1 明确 | **🟢 可执行** |
+| task_002 | ❌ 需 task_001 | ✅ 已补充 | ✅ 设计稿 §5.3 明确 | 🔴 阻塞 |
+| task_003 | ❌ 需 task_001, task_002 | ✅ 已补充 | ✅ 设计稿 §6.1 明确 | 🔴 阻塞 |
+| task_004 | ❌ 需 task_001, task_003 | ✅ 已补充 | ✅ 设计稿 §6.3 明确 | 🔴 阻塞 |
+| task_210 | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ Shared 合同明确 | 🔴 阻塞 |
+| task_006 | ❌ 需 Stage 1 Gate | ✅ 已补充 | ✅ 设计稿 §10.1 明确 | 🔴 阻塞 |
+| task_007 | ❌ 需 task_006 | ✅ 已补充 | ✅ 设计稿 §11.1 明确 | 🔴 阻塞 |
+| task_008 | ❌ 需 task_007 | ✅ 已补充 | ✅ 设计稿 §7.1 明确 | 🔴 阻塞 |
+| task_009 | ❌ 需 task_008 | ✅ 已补充 | ✅ 设计稿 §7.4 明确 | 🔴 阻塞 |
+| task_211 | ❌ 需 Stage 2 Gate | ✅ 已补充 | ✅ 设计稿 §16.1 明确 | 🔴 阻塞 |
+| task_212 | ❌ 需 task_210 | ✅ 已补充 | ✅ 设计稿 §9.1 明确 | 🔴 阻塞 |
+| task_213 | ❌ 需 Stage 2 Gate | ✅ 已补充 | ✅ 设计稿 §13.1 明确 | 🔴 阻塞 |
+| task_013 | ❌ 需 Stage 2 Gate | ✅ 已补充 | ✅ 设计稿 §15.1 明确 | 🔴 阻塞 |
+| task_014 | ❌ 需 Stage 2 Gate | ✅ 已补充 | ✅ 设计稿 §12.1 明确 | 🔴 阻塞 |
+| task_015 | ❌ 需 Stage 2 Gate | ✅ 已补充 | ✅ 设计稿 §12.2 明确 | 🔴 阻塞 |
+
+### 15.3 首个可执行 Task 明确结论
+
+**唯一可立即执行的 Task**: `task_deck_001_backend_manifest-model.md` (DECK-001)
+
+**执行条件**:
+- 无上游依赖
+- 允许修改范围明确：`backend/models/deck_plugin.py`（新建）、manifest schema、校验器、`deck_plugin_releases` 表迁移
+- 禁止修改范围明确：不得触碰现有 `claude_code_plugin` 模型、Paperclip Plugin 表结构、前端代码
+- 验收标准：设计稿 §5.1, §5.2, §5.4 已定义 `DeckPluginManifestV1` schema、发布状态机、命名隔离规则
+
+**后续 Gate 链**:
+```
+task_001 完成 ──→ Stage 1 Wave 2 (task_002) ──→ Stage 1 Wave 3 (task_003) 
+  ──→ Stage 1 Wave 4 (task_004) ──→ Stage 1 Gate 通过
+  ──→ Stage 2 Wave 1 (task_210 ∥ task_006) ──→ Stage 2 Wave 2 (task_007)
+  ──→ Stage 2 Wave 3 (task_008) ──→ Stage 2 Wave 4 (task_009)
+  ──→ Stage 2 Gate 通过
+  ──→ Stage 3 (task_211 ∥ task_212 ∥ task_213) + Stage 4 (task_013 ∥ task_014 ∥ task_015)
+```
+
+### 15.4 未满足 Gate 汇总
+
+| Gate | 未满足条件 | 阻塞 Task 数 | 预计解锁条件 |
+|---|---|---|---|
+| Stage 1 Gate | task_001 ~ task_004 全部完成 | 11 | task_004 完成信号 |
+| Stage 2 Gate | task_006 ~ task_009 全部完成 | 6 | task_009 完成信号 |
+| Stage 3 Gate | 前端组件渲染测试 + API 合同对齐 | 3 | Stage 2 Gate + E2E 通过 |
+| Stage 4 Gate | 事件审计 + 错误码 + 回滚验证 | 3 | Stage 2 Gate + 集成测试通过 |
+| DECK-016 | 物理服务边界未冻结 | 全部 | CEOOrchestrator 路由 owner 决策 |
+| DECK-017 | digest 算法未标准化 | Stage 1, 4 | 安全/运行平台 owner 确认 |
+| DECK-018 | 多节点 runtime 分发未确认 | Stage 2, 3, 4 | 运维/架构决策 |
+| DECK-019 | 安全撤销是否强制终止未冻结 | Stage 2, 4 | 安全策略 owner 决策 |
+| DECK-020 | Voice chat → run UX 未冻结 | Stage 2, 3 | UI/UX owner 决策 |
+
+### 15.5 重要约束
+
+- **不得绕过 Issue 直接指派 ExecTaskAgent**: 按 Single-Assignee 规则，task_001 应由 BackendTaskAgent 通过正常 Issue checkout 流程领取
+- **Shared task (task_210) 设计与执行分离**: TaskDesignAgent 完成设计后，FrontendTaskAgent 和 BackendTaskAgent 分别 checkout 各自执行子任务
+- **决策单 DECK-016 ~ DECK-020 默认假设下可推进实现，但不得把默认假设误写为已决策**
+
+---
+
+## 16. 修订记录
+
+| 修订 | 日期 | 内容 | Issue |
+|---|---|---|---|
+| v1.0 | 2026-08-01 | 初始 Stage 计划生成 | SUO-244 |
+| v1.1 | 2026-08-01 | 修正 task_007 文件名映射；更新状态为 completed；补充 15 个 task 允许/禁止范围；添加首个可执行 Wave 结论 | SUO-248 |
