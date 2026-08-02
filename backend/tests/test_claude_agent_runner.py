@@ -400,6 +400,24 @@ class TestClaudeAgentRunnerBasicText(_RunnerBase):
         self.assertEqual(result.full_text, "Hello World")
         self.assertEqual(received, ["Hello", " World"])
 
+    async def test_server_resolved_local_plugins_are_forwarded_to_sdk(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with tempfile.TemporaryDirectory() as plugin_dir:
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="test-session-local-plugin",
+                    user_message="create a story proposal",
+                    tool_choice="none",
+                    local_plugin_paths=(plugin_dir,),
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
+            )
+        self.assertEqual(
+            self._mock_client.last_options.plugins,
+            [{"type": "local", "path": plugin_dir}],
+        )
+
 
 class TestClaudeAgentRunnerOnTextDone(_RunnerBase):
     """on_text_done receives the concatenated full text after streaming."""

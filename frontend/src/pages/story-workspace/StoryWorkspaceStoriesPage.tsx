@@ -1,7 +1,8 @@
 // [Input] Story Workspace stories REST list and local search/filter/sort/page state.
 // [Output] Render the stories route with pending-only selection and table controls.
 // [Pos] /story-workspace/stories page.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { batchReviewResources } from '../../api/storyWorkspaceReviewApi';
 import {
   StoryWorkspaceBatchReviewToolbar,
   StoryWorkspacePagination,
@@ -14,6 +15,7 @@ import {
   type StoryWorkspaceReviewStatus,
   type StoryWorkspaceSortOrder,
   type StoryWorkspaceStoryType,
+  type StoryWorkspaceStory,
 } from '../../hooks/story-workspace';
 
 const STORY_SORT_OPTIONS = [
@@ -24,7 +26,12 @@ const STORY_SORT_OPTIONS = [
   { label: '标题 Z–A', sort: 'title', order: 'desc' as const },
 ];
 
-export function StoryWorkspaceStoriesPage() {
+export interface StoryWorkspaceStoriesPageProps {
+  onReview?: (story: StoryWorkspaceStory) => void;
+  refreshNonce?: number;
+}
+
+export function StoryWorkspaceStoriesPage({ onReview, refreshNonce = 0 }: StoryWorkspaceStoriesPageProps = {}) {
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebounce(query, 300);
   const [reviewStatuses, setReviewStatuses] = useState<StoryWorkspaceReviewStatus[]>([]);
@@ -34,6 +41,8 @@ export function StoryWorkspaceStoriesPage() {
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchNotice, setBatchNotice] = useState('');
+  const [batchNotes, setBatchNotes] = useState('');
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
   const stories = useStories({
     q: debouncedQuery,
     reviewStatus: reviewStatuses,
@@ -43,6 +52,31 @@ export function StoryWorkspaceStoriesPage() {
     page,
     perPage: 20,
   });
+  const { refetch: refetchStories } = stories;
+
+  useEffect(() => {
+    if (refreshNonce > 0) refetchStories();
+  }, [refreshNonce, refetchStories]);
+
+  const runBatch = async (action: 'confirm' | 'reject') => {
+    if (batchSubmitting) return;
+    if (action === 'reject' && !batchNotes.trim()) {
+      setBatchNotice('批量驳回前请填写修改意见。');
+      return;
+    }
+    setBatchSubmitting(true);
+    try {
+      const result = await batchReviewResources('story', selectedIds, action, batchNotes.trim());
+      setBatchNotice(`已${action === 'confirm' ? '确认' : '驳回'} ${result.total_updated} 个故事提案。`);
+      setSelectedIds([]);
+      setBatchNotes('');
+      refetchStories();
+    } catch (reason) {
+      setBatchNotice(reason instanceof Error ? reason.message : '批量审阅失败。');
+    } finally {
+      setBatchSubmitting(false);
+    }
+  };
 
   const updateSort = (nextSort: string, nextOrder: StoryWorkspaceSortOrder) => {
     setSort(nextSort);
@@ -59,15 +93,19 @@ export function StoryWorkspaceStoriesPage() {
       </header>
 
       {selectedIds.length > 0 ? (
-        <StoryWorkspaceBatchReviewToolbar
-          onCancel={() => {
-            setSelectedIds([]);
-            setBatchNotice('');
-          }}
-          onConfirm={() => setBatchNotice('批量确认接口将在审阅流程任务中接入。')}
-          onReject={() => setBatchNotice('批量驳回接口将在审阅流程任务中接入。')}
-          selectedCount={selectedIds.length}
-        />
+        <div>
+          <StoryWorkspaceBatchReviewToolbar
+            onCancel={() => {
+              setSelectedIds([]);
+              setBatchNotes('');
+              setBatchNotice('');
+            }}
+            onConfirm={() => { void runBatch('confirm'); }}
+            onReject={() => { void runBatch('reject'); }}
+            selectedCount={selectedIds.length}
+          />
+          <textarea aria-label="批量驳回故事的修改意见" disabled={batchSubmitting} onChange={(event) => setBatchNotes(event.target.value)} placeholder="批量驳回时填写 Agent 修改意见" rows={2} value={batchNotes} style={{ width: '100%', marginTop: 8 }} />
+        </div>
       ) : (
         <StoryWorkspaceToolbar
           onOrderAndSortChange={updateSort}
@@ -104,6 +142,7 @@ export function StoryWorkspaceStoriesPage() {
       ) : (
         <StoryWorkspaceStoryTable
           items={stories.data}
+          onReview={onReview}
           onSelectionChange={setSelectedIds}
           onSortChange={updateSort}
           order={order}

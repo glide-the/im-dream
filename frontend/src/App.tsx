@@ -66,6 +66,7 @@ import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDet
 import { PluginAdminPage } from './components/plugin-admin';
 import {
   resolveStoryWorkspacePath,
+  STORY_WORKSPACE_PATHS,
   StoryWorkspaceRouter,
 } from './router/story-workspace';
 import type { ActiveChatVoice } from './lib/chat-schema';
@@ -99,7 +100,7 @@ const SETTINGS_MAX_WIDTH_PX = 800;
 const SETTINGS_CONNECTOR_DETAIL_MAX_WIDTH_PX = 1220;
 
 type AppView = 'writing' | 'settings' | 'timeline' | 'analysis' | 'decks' | 'chat' | 'connector' | 'story-workspace';
-type GlobalAppView = Exclude<AppView, 'story-workspace'>;
+type GlobalAppView = AppView;
 
 // @@@ Color map with gradient colors for watercolor effect
 const colorMap: Record<string, { gradient: string; text: string; glow: string }> = {
@@ -196,9 +197,21 @@ export default function App() {
   }, []);
 
   const handleAppViewChange = useCallback((view: GlobalAppView) => {
+    if (view === 'story-workspace') {
+      window.history.pushState(
+        { inkDreamView: 'story-workspace' },
+        '',
+        STORY_WORKSPACE_PATHS.dream,
+      );
+      setCurrentView('story-workspace');
+      return;
+    }
     if (view === 'connector') {
       openConnectorSettings();
       return;
+    }
+    if (resolveStoryWorkspacePath(window.location.pathname)) {
+      window.history.pushState({ inkDreamView: view }, '', '/');
     }
     setCurrentView(view);
   }, [openConnectorSettings]);
@@ -526,7 +539,7 @@ export default function App() {
     getDefaultVoices().then(async backendVoices => {
       const converted: Record<string, VoiceConfig> = {};
       for (const [name, data] of Object.entries(backendVoices)) {
-        const v = data as any;
+        const v = data as Omit<VoiceConfig, 'name' | 'enabled'>;
         converted[name] = {
           name,
           systemPrompt: v.systemPrompt,  // @@@ Fixed: was v.tagline (wrong field name)
@@ -939,19 +952,20 @@ export default function App() {
 
       // Show success message
       alert(`Migration successful! Imported:\n- ${result.imported.sessions} sessions\n- ${result.imported.pictures} pictures\n- ${result.imported.preferences} preferences\n- ${result.imported.reports} reports`);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Migration failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
       // Provide helpful error message based on error type
       let errorMsg = 'Migration failed: ';
-      if (error.message?.includes('413') || error.message?.includes('too large')) {
+      if (errorMessage.includes('413') || errorMessage.includes('too large')) {
         errorMsg += 'Your data is too large to migrate in one request.\n\n';
         errorMsg += 'This is a known issue that will be fixed soon.\n';
         errorMsg += 'For now, you can:\n';
         errorMsg += '1. Skip migration and start fresh, or\n';
         errorMsg += '2. Wait for the fix and try again later';
       } else {
-        errorMsg += error.message + '\n\nYou can try again later from Settings.';
+        errorMsg += errorMessage + '\n\nYou can try again later from Settings.';
       }
 
       alert(errorMsg);
@@ -1455,7 +1469,20 @@ export default function App() {
           minHeight: 0,
           overflow: 'hidden',
         }}>
-          <StoryWorkspaceRouter onOpenSettings={handleStoryWorkspaceOpenSettings} />
+          <StoryWorkspaceRouter
+            onOpenSettings={handleStoryWorkspaceOpenSettings}
+            dreamContent={(
+              <ChatView
+                editorState={state ? (state as unknown as Record<string, unknown>) : null}
+                onEditorWriteConfirmed={handleEditorWriteConfirmed}
+                requestedThreadId={requestedChatThreadId}
+                activeVoice={activeChatVoice}
+                isMobile={isMobile}
+                landingTab="history"
+                onOpenConnectorSettings={openConnectorSettings}
+              />
+            )}
+          />
         </div>
       )}
 

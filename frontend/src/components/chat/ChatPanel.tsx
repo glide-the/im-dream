@@ -37,7 +37,7 @@
 // [Sync] 2026-07-23: SandboxPermissionRequest — pendingConfirmation carries the backend
 //                    networkRequest metadata for kind==='sandbox-network' so ToolConfirmationDock
 //                    renders the network-variant card (claude-agent-sandbox-network-permission-tool.md §5).
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
 import {
@@ -74,6 +74,10 @@ import {
 } from './toolConfirmation';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
+import {
+  publishStoryWorkspaceOutput,
+  type StoryWorkspaceOutputReceipt,
+} from '../../lib/story-workspace-events';
 import {
   applyBackendEventToMessages,
   consumeClaudeAgentSseStream,
@@ -121,6 +125,10 @@ interface ChatPanelProps {
   onEditorWriteConfirmed?: (toolCallId: string) => void;
   /** Voice / deck system prompt injected as voice_context into each user message. */
   voiceSystemPrompt?: string;
+  /** Immutable Deck selection for this thread. */
+  deckId?: string;
+  /** Compact Deck provenance control rendered beside the composer controls. */
+  inputContextControl?: ReactNode;
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -155,6 +163,8 @@ export default function ChatPanel({
   editorState,
   onEditorWriteConfirmed,
   voiceSystemPrompt,
+  deckId,
+  inputContextControl,
 }: ChatPanelProps) {
   const { t } = useTranslation();
   const pendingDataRef = useRef<{
@@ -255,6 +265,7 @@ export default function ChatPanel({
 
         const requestBody: ChatApiSchemaRequestBody = {
           id,
+          ...(deckId ? { deckId } : {}),
           resume: true,
           message: lastMessage,
           chatModel: resolvedChatModel,
@@ -384,6 +395,10 @@ export default function ChatPanel({
           // todo-updated 生命周期帧不产生消息气泡，转发 todos store（claude-todo.md §5.4）。
           if (event.type === 'todo-updated') {
             applyTodoEvent(activeThreadId, event as unknown as ThreadTodoEvent);
+            return;
+          }
+          if (event.type === 'story-workspace-output') {
+            publishStoryWorkspaceOutput(event as unknown as StoryWorkspaceOutputReceipt);
             return;
           }
           const applyMessages = setMessagesRef.current;
@@ -624,6 +639,7 @@ export default function ChatPanel({
             onStop={agentBusy ? handleStop : undefined}
             stopPending={isStopping}
             workspaceSessionId={workspaceEnabled ? threadId : undefined}
+            contextControl={inputContextControl}
             mode="full"
           />
         )}

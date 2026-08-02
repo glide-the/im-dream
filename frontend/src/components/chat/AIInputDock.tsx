@@ -24,6 +24,7 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -60,6 +61,8 @@ interface AIInputDockProps {
   mode?: AIInputDockMode;
   workspaceSessionId?: string;
   fullAccessEnabled?: boolean;
+  /** Optional business context control rendered with the composer controls. */
+  contextControl?: ReactNode;
 }
 
 const QUERY_INPUT_MAX_HEIGHT = 320;
@@ -119,6 +122,7 @@ export default function AIInputDock({
   mode = 'simple',
   workspaceSessionId,
   fullAccessEnabled,
+  contextControl,
 }: AIInputDockProps) {
   const { t } = useTranslation();
   const toolChoiceOptions = useMemo(() => buildToolChoiceOptions(t), [t]);
@@ -601,6 +605,8 @@ export default function AIInputDock({
           >
             {t('chat.inputDock.addAttachment')}
           </button>
+
+          {contextControl}
 
           {resolvedFullAccessEnabled ? (
             <div

@@ -888,7 +888,10 @@ class WorkflowRunTests(unittest.IsolatedAsyncioTestCase):
                 "workflow_run_transitions",
             }.issubset(tables)
         )
-        self.assertFalse({"events", "outbox"} & tables)
+        # The application schema includes the shared audit event store; the
+        # workflow service still does not own a separate transactional outbox.
+        self.assertIn("events", tables)
+        self.assertNotIn("outbox", tables)
 
         run = await self.fixture.create()
         with self.assertRaises(ValidationError):

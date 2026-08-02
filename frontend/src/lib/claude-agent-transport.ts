@@ -56,6 +56,10 @@
 import { HttpChatTransport, type HttpChatTransportInitOptions, type UIMessage, type UIMessageChunk } from 'ai';
 import { applyPlanEvent } from '../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoItem } from '../hooks/useThreadTodos';
+import {
+  publishStoryWorkspaceOutput,
+  type StoryWorkspaceOutputReceipt,
+} from './story-workspace-events';
 
 // ---------------------------------------------------------------------------
 // Backend event shapes (Pawkeyland-aligned)
@@ -170,6 +174,10 @@ interface BackendTodoUpdated {
   updatedAt?: string | null;
 }
 
+interface BackendStoryWorkspaceOutput extends StoryWorkspaceOutputReceipt {
+  type: 'story-workspace-output';
+}
+
 interface BackendMessageFinal {
   type: 'message-final';
   text: string;
@@ -203,6 +211,7 @@ type BackendEvent =
   | BackendPlanModeChanged
   | BackendPlanUpdated
   | BackendTodoUpdated
+  | BackendStoryWorkspaceOutput
   | BackendMessageFinal
   | BackendFinish
   | BackendError;
@@ -417,6 +426,13 @@ function convertEvent(
       if (state.threadId) {
         applyTodoEvent(state.threadId, event);
       }
+      break;
+    }
+
+    // Structured output is already persisted and scoped by the backend. This
+    // frame updates Dream application state and does not create a chat part.
+    case 'story-workspace-output': {
+      publishStoryWorkspaceOutput(event);
       break;
     }
 

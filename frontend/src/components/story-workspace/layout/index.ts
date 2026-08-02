@@ -7,6 +7,11 @@ export {
   type StoryWorkspaceReviewPanelProps,
 } from './StoryWorkspaceReviewPanel';
 export {
+  StoryWorkspaceReviewDetail,
+  type StoryWorkspaceReviewDetailProps,
+  type StoryWorkspaceReviewSelection,
+} from './StoryWorkspaceReviewDetail';
+export {
   StoryWorkspaceToolbar,
   type StoryWorkspaceSortOption,
   type StoryWorkspaceToolbarProps,

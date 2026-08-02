@@ -200,13 +200,35 @@ def _store_story_workspace_output_sync(
     db = _db.get_db()
     try:
         workspace_id = get_or_create_default_workspace(db, user_id)
-        return store_agent_story_output(
+        result = store_agent_story_output(
             db,
             user_id,
             workspace_id,
             thread_id,
             payload,
         )
+        source = db.execute(
+            """
+            SELECT thread.id AS chat_thread_id, thread.deck_id,
+                   deck.name AS deck_name, deck.name_zh AS deck_name_zh,
+                   deck.name_en AS deck_name_en
+            FROM chat_thread AS thread
+            LEFT JOIN decks AS deck ON deck.id = thread.deck_id
+            WHERE thread.id = ? AND thread.user_id = ?
+            """,
+            (thread_id, user_id),
+        ).fetchone()
+        result["chat_thread_id"] = thread_id
+        if source is not None:
+            result.update(
+                {
+                    "deck_id": source["deck_id"],
+                    "deck_name": source["deck_name"],
+                    "deck_name_zh": source["deck_name_zh"],
+                    "deck_name_en": source["deck_name_en"],
+                }
+            )
+        return result
     finally:
         db.close()
 
@@ -797,6 +819,10 @@ class ClaudeAgentRunRequest:
     editor_state: Optional[dict[str, Any]] = None
     # Voice / deck system prompt injected as context into each user message.
     system_prompt: Optional[str] = None
+    # Server-generated Claude Code settings for validated Deck runtime plugins.
+    claude_settings_json: Optional[str] = None
+    # Server-resolved local Claude SDK plugin directories for the selected Deck.
+    claude_plugin_paths: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -1128,6 +1154,8 @@ class ClaudeAgentService:
             im_full_access_enabled=im_full_access_enabled,
             sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
+            settings_json=request.claude_settings_json,
+            local_plugin_paths=request.claude_plugin_paths,
             mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,
             editor_state=active_editor_state,
@@ -1213,11 +1241,15 @@ class ClaudeAgentService:
                     "sessionId": result.session_id,
                 })
             )
-            await queue.put(_sse("finish", {"finishReason": "stop"}))
             # Persist assistant message (user message already saved above).
             await self._persist_assistant_turn(execution, result)
-            # Story Workspace post-processing is isolated from successful Chat SSE.
-            await self._store_story_workspace_output(execution, full_text)
+            # A structured story proposal is persisted before the terminal frame
+            # so Dream can open the canonical review panel without polling or
+            # trusting client-derived provenance.
+            story_output = await self._store_story_workspace_output(execution, full_text)
+            if story_output is not None:
+                await queue.put(_sse("story-workspace-output", story_output))
+            await queue.put(_sse("finish", {"finishReason": "stop"}))
         else:
             error_msg = _format_exception_for_sse(result.error)
             await queue.put(_sse("error", {"errorText": error_msg}))

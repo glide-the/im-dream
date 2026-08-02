@@ -39,8 +39,14 @@ from .deps import get_current_user
 
 try:
     from services.errors.error_registry import ApiRouteError, build_error_payload
+    from services.deck.story_workflow_gateway import (
+        get_story_workflow_application_gateway,
+    )
 except ModuleNotFoundError:
     from backend.services.errors.error_registry import ApiRouteError, build_error_payload
+    from backend.services.deck.story_workflow_gateway import (
+        get_story_workflow_application_gateway,
+    )
 
 
 router = APIRouter(prefix="/api/story-workspace", tags=["story-workspace"])
@@ -99,6 +105,8 @@ class _WorkflowRunCreateRequest(BaseModel):
     preflight_token: str = Field(min_length=1)
     idempotency_key: str = Field(min_length=1, max_length=255)
     source_voice_thread_id: str | None = None
+    source_message_id: str | None = None
+    source_message_time: str | None = None
 
 
 class _WorkflowRunRetryRequest(BaseModel):
@@ -112,7 +120,7 @@ class _WorkflowRunRetryRequest(BaseModel):
 class _WorkflowRunCancelRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="Cancelled from Dream", min_length=1, max_length=500)
 
 
 class StoryWorkflowGateway(Protocol):
@@ -160,9 +168,22 @@ class _UnavailableStoryWorkflowGateway:
 
 
 def get_story_workflow_gateway() -> StoryWorkflowGateway:
-    """Deployment adapter hook for the authoritative preflight/run services."""
+    """Return the application wiring for authoritative preflight/run services."""
 
-    return _UnavailableStoryWorkflowGateway()  # type: ignore[return-value]
+    return get_story_workflow_application_gateway()
+
+
+async def _story_workflow_current_user(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    if current_user.get("workspace_id"):
+        return current_user
+    db = database.get_db()
+    try:
+        workspace_id = get_or_create_default_workspace(db, int(current_user["user_id"]))
+    finally:
+        db.close()
+    return {**current_user, "workspace_id": workspace_id}
 
 
 def _workflow_actor(current_user: dict[str, Any]) -> dict[str, str]:
@@ -387,13 +408,50 @@ def _transition_pending_review(
             )
 
         if action == StoryWorkspaceBatchAction.CONFIRM:
-            cursor = db.execute(
-                f"UPDATE {table} SET review_status = 'confirmed', "
-                "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
-                "AND review_status = 'pending' AND status != 'archived'",
-                (resource_id, user_id),
-            )
+            if resource_type == StoryWorkspaceResourceType.STORY:
+                cursor = db.execute(
+                    f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
+                    "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
+                    "updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                    "AND review_status = 'pending' AND status != 'archived'",
+                    (resource_id, user_id),
+                )
+                # Final story approval is the bundle gate described by Dream:
+                # the reviewed proposal is committed and its linked generated
+                # characters/scenes become usable in one transaction.
+                db.execute(
+                    """
+                    UPDATE story_workspace_scenes
+                    SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE story_id = ? AND author_id = ? AND agent_generated = 1
+                      AND review_status = 'pending' AND status != 'archived'
+                    """,
+                    (resource_id, user_id),
+                )
+                db.execute(
+                    """
+                    UPDATE story_workspace_characters
+                    SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE author_id = ? AND agent_generated = 1
+                      AND review_status = 'pending' AND status != 'archived'
+                      AND id IN (
+                        SELECT character_id FROM story_workspace_story_characters
+                        WHERE story_id = ?
+                      )
+                    """,
+                    (user_id, resource_id),
+                )
+            else:
+                cursor = db.execute(
+                    f"UPDATE {table} SET review_status = 'confirmed', "
+                    "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                    "AND review_status = 'pending' AND status != 'archived'",
+                    (resource_id, user_id),
+                )
             new_status = "confirmed"
         else:
             cursor = db.execute(
@@ -411,6 +469,12 @@ def _transition_pending_review(
                 detail="Item is not in pending review status",
             )
         updated = _row_to_dict(_owned_review_row(db, table, resource_id, user_id))
+        if action == StoryWorkspaceBatchAction.CONFIRM and resource_type == StoryWorkspaceResourceType.STORY:
+            updated["execution"] = {
+                "action": "publish_story_bundle",
+                "status": "completed",
+                "completed_at": updated.get("published_at"),
+            }
         db.commit()
     except Exception:
         db.rollback()
@@ -508,12 +572,37 @@ def _batch_review(
             )
             params: tuple[Any, ...] = tuple(eligible_ids) + (user_id,)
             if request.action == StoryWorkspaceBatchAction.CONFIRM:
-                cursor = db.execute(
-                    f"UPDATE {table} SET review_status = 'confirmed', "
-                    "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                    + common_where,
-                    params,
-                )
+                if request.resource_type == StoryWorkspaceResourceType.STORY:
+                    cursor = db.execute(
+                        f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
+                        "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
+                        "updated_at = CURRENT_TIMESTAMP " + common_where,
+                        params,
+                    )
+                    for story_id in eligible_ids:
+                        db.execute(
+                            "UPDATE story_workspace_scenes SET review_status = 'confirmed', "
+                            "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                            "WHERE story_id = ? AND author_id = ? AND agent_generated = 1 "
+                            "AND review_status = 'pending' AND status != 'archived'",
+                            (story_id, user_id),
+                        )
+                        db.execute(
+                            "UPDATE story_workspace_characters SET review_status = 'confirmed', "
+                            "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                            "WHERE author_id = ? AND agent_generated = 1 "
+                            "AND review_status = 'pending' AND status != 'archived' "
+                            "AND id IN (SELECT character_id FROM story_workspace_story_characters "
+                            "WHERE story_id = ?)",
+                            (user_id, story_id),
+                        )
+                else:
+                    cursor = db.execute(
+                        f"UPDATE {table} SET review_status = 'confirmed', "
+                        "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
+                        + common_where,
+                        params,
+                    )
                 new_status = "confirmed"
             elif request.action == StoryWorkspaceBatchAction.REJECT:
                 cursor = db.execute(
@@ -1009,7 +1098,7 @@ def receive_agent_story_output(
 @router.post("/workflow-preflights", status_code=202)
 async def create_workflow_preflight(
     request: _WorkflowPreflightRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ):
     try:
@@ -1025,7 +1114,7 @@ async def create_workflow_preflight(
 @router.get("/workflow-preflights/{preflight_id}")
 async def get_workflow_preflight(
     preflight_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ):
     try:
@@ -1041,7 +1130,7 @@ async def get_workflow_preflight(
 @router.post("/workflow-runs", status_code=201)
 async def create_workflow_run(
     request: _WorkflowRunCreateRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ):
     try:
@@ -1057,7 +1146,7 @@ async def create_workflow_run(
 @router.get("/workflow-runs/{workflow_run_id}")
 async def get_workflow_run(
     workflow_run_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ):
     try:
@@ -1074,7 +1163,7 @@ async def get_workflow_run(
 async def retry_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunRetryRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ):
     try:
@@ -1091,7 +1180,7 @@ async def retry_workflow_run(
 async def cancel_workflow_run(
     workflow_run_id: str,
     request: _WorkflowRunCancelRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ):
     try:

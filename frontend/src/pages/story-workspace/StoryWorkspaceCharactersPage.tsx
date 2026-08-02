@@ -1,7 +1,8 @@
 // [Input] Story Workspace characters REST list and local search/filter/sort/page state.
 // [Output] Render the characters route with tags, avatars, and pending-only selection.
 // [Pos] /story-workspace/characters page.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { batchReviewResources } from '../../api/storyWorkspaceReviewApi';
 import {
   StoryWorkspaceBatchReviewToolbar,
   StoryWorkspaceCharacterTable,
@@ -13,6 +14,7 @@ import {
   useCharacters,
   type StoryWorkspaceReviewStatus,
   type StoryWorkspaceSortOrder,
+  type StoryWorkspaceCharacter,
 } from '../../hooks/story-workspace';
 
 const CHARACTER_SORT_OPTIONS = [
@@ -22,7 +24,12 @@ const CHARACTER_SORT_OPTIONS = [
   { label: '名称 Z–A', sort: 'name', order: 'desc' as const },
 ];
 
-export function StoryWorkspaceCharactersPage() {
+export interface StoryWorkspaceCharactersPageProps {
+  onReview?: (character: StoryWorkspaceCharacter) => void;
+  refreshNonce?: number;
+}
+
+export function StoryWorkspaceCharactersPage({ onReview, refreshNonce = 0 }: StoryWorkspaceCharactersPageProps = {}) {
   const [query, setQuery] = useState('');
   const debouncedQuery = useDebounce(query, 300);
   const [reviewStatuses, setReviewStatuses] = useState<StoryWorkspaceReviewStatus[]>([]);
@@ -31,6 +38,8 @@ export function StoryWorkspaceCharactersPage() {
   const [page, setPage] = useState(1);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [batchNotice, setBatchNotice] = useState('');
+  const [batchNotes, setBatchNotes] = useState('');
+  const [batchSubmitting, setBatchSubmitting] = useState(false);
   const characters = useCharacters({
     q: debouncedQuery,
     reviewStatus: reviewStatuses,
@@ -39,6 +48,31 @@ export function StoryWorkspaceCharactersPage() {
     page,
     perPage: 20,
   });
+  const { refetch: refetchCharacters } = characters;
+
+  useEffect(() => {
+    if (refreshNonce > 0) refetchCharacters();
+  }, [refreshNonce, refetchCharacters]);
+
+  const runBatch = async (action: 'confirm' | 'reject') => {
+    if (batchSubmitting) return;
+    if (action === 'reject' && !batchNotes.trim()) {
+      setBatchNotice('批量驳回前请填写修改意见。');
+      return;
+    }
+    setBatchSubmitting(true);
+    try {
+      const result = await batchReviewResources('character', selectedIds, action, batchNotes.trim());
+      setBatchNotice(`已${action === 'confirm' ? '确认' : '驳回'} ${result.total_updated} 个角色提案。`);
+      setSelectedIds([]);
+      setBatchNotes('');
+      refetchCharacters();
+    } catch (reason) {
+      setBatchNotice(reason instanceof Error ? reason.message : '批量审阅失败。');
+    } finally {
+      setBatchSubmitting(false);
+    }
+  };
 
   const updateSort = (nextSort: string, nextOrder: StoryWorkspaceSortOrder) => {
     setSort(nextSort);
@@ -55,15 +89,19 @@ export function StoryWorkspaceCharactersPage() {
       </header>
 
       {selectedIds.length > 0 ? (
-        <StoryWorkspaceBatchReviewToolbar
-          onCancel={() => {
-            setSelectedIds([]);
-            setBatchNotice('');
-          }}
-          onConfirm={() => setBatchNotice('批量确认接口将在审阅流程任务中接入。')}
-          onReject={() => setBatchNotice('批量驳回接口将在审阅流程任务中接入。')}
-          selectedCount={selectedIds.length}
-        />
+        <div>
+          <StoryWorkspaceBatchReviewToolbar
+            onCancel={() => {
+              setSelectedIds([]);
+              setBatchNotes('');
+              setBatchNotice('');
+            }}
+            onConfirm={() => { void runBatch('confirm'); }}
+            onReject={() => { void runBatch('reject'); }}
+            selectedCount={selectedIds.length}
+          />
+          <textarea aria-label="批量驳回角色的修改意见" disabled={batchSubmitting} onChange={(event) => setBatchNotes(event.target.value)} placeholder="批量驳回时填写 Agent 修改意见" rows={2} value={batchNotes} style={{ width: '100%', marginTop: 8 }} />
+        </div>
       ) : (
         <StoryWorkspaceToolbar
           onOrderAndSortChange={updateSort}
@@ -95,6 +133,7 @@ export function StoryWorkspaceCharactersPage() {
       ) : (
         <StoryWorkspaceCharacterTable
           items={characters.data}
+          onReview={onReview}
           onSelectionChange={setSelectedIds}
           onSortChange={updateSort}
           order={order}

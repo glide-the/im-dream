@@ -47,7 +47,8 @@ CREATE TABLE story_workspace_stories (
   review_notes TEXT CHECK(review_notes IS NULL OR length(review_notes) <= 2000),
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  confirmed_at DATETIME
+  confirmed_at DATETIME,
+  published_at DATETIME
 );
 CREATE TABLE story_workspace_characters (
   id TEXT PRIMARY KEY,
@@ -69,6 +70,7 @@ CREATE TABLE story_workspace_scenes (
   id TEXT PRIMARY KEY,
   identifier TEXT NOT NULL,
   name TEXT NOT NULL,
+  story_id TEXT,
   author_id INTEGER NOT NULL,
   workspace_id TEXT NOT NULL,
   character_count INTEGER NOT NULL DEFAULT 0,
@@ -226,6 +228,46 @@ class StoryWorkspaceReviewTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 200, response.text)
                 self.assertEqual(response.json()["review_status"], "rejected")
                 self.assertEqual(response.json()["review_notes"], notes)
+
+    def test_story_confirmation_commits_the_reviewed_bundle_and_publishes(self) -> None:
+        db = database.get_db()
+        try:
+            with db:
+                db.execute(
+                    "INSERT INTO story_workspace_stories "
+                    "(id, identifier, title, status, review_status, author_id, workspace_id, agent_generated) "
+                    "VALUES ('story-bundle', 'story-bundle', 'Bundle', 'draft', 'pending', 1, 'ws-1', 1)"
+                )
+                db.execute(
+                    "INSERT INTO story_workspace_characters "
+                    "(id, identifier, name, author_id, workspace_id, review_status, agent_generated, status) "
+                    "VALUES ('character-bundle', 'character-bundle', 'Bundle role', 1, 'ws-1', 'pending', 1, 'active')"
+                )
+                db.execute(
+                    "INSERT INTO story_workspace_scenes "
+                    "(id, identifier, name, story_id, author_id, workspace_id, review_status, agent_generated, status) "
+                    "VALUES ('scene-bundle', 'scene-bundle', 'Bundle scene', 'story-bundle', 1, 'ws-1', 'pending', 1, 'active')"
+                )
+                db.execute(
+                    "INSERT INTO story_workspace_story_characters (story_id, character_id) "
+                    "VALUES ('story-bundle', 'character-bundle')"
+                )
+        finally:
+            db.close()
+
+        response = self.client.post("/api/story-workspace/stories/story-bundle/confirm")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["review_status"], "confirmed")
+        self.assertEqual(response.json()["status"], "published")
+        self.assertEqual(response.json()["execution"]["status"], "completed")
+        self.assertEqual(
+            self._db_value("story_workspace_characters", "character-bundle", "review_status"),
+            "confirmed",
+        )
+        self.assertEqual(
+            self._db_value("story_workspace_scenes", "scene-bundle", "review_status"),
+            "confirmed",
+        )
 
     def test_non_pending_review_transition_matrix(self) -> None:
         for plural, prefix in (

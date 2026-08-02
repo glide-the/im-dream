@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
 import database
+from services.story_workspace.agent_integration import get_or_create_default_workspace
 
 from .deps import get_current_user
 
@@ -31,6 +32,7 @@ try:
     from backend.services.deck_plugin.selection_validation_service import (
         SelectionValidationService,
     )
+    from backend.services.deck.runtime_context import make_runtime_context_resolver
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
     from models.deck_plugin import (
         DeckPluginBindingResponse,
@@ -49,6 +51,7 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
     from services.deck_plugin.selection_validation_service import (
         SelectionValidationService,
     )
+    from services.deck.runtime_context import make_runtime_context_resolver
 
 
 router = APIRouter(prefix="/api/voice-decks", tags=["deck-plugin-binding"])
@@ -65,7 +68,10 @@ async def _binding_db() -> AsyncIterator[sqlite3.Connection]:
 def _selection_service(
     db: sqlite3.Connection = Depends(_binding_db),
 ) -> SelectionValidationService:
-    return SelectionValidationService(db)
+    return SelectionValidationService(
+        db,
+        runtime_context_resolver=make_runtime_context_resolver(db),
+    )
 
 
 def _binding_service(
@@ -84,6 +90,20 @@ def _requested_workspace(current_user: dict[str, Any]) -> str | None:
     return str(workspace_id) if workspace_id else None
 
 
+async def _deck_current_user(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Ensure Deck binding always has the authenticated user's default workspace."""
+    if current_user.get("workspace_id"):
+        return current_user
+    db = database.get_db()
+    try:
+        workspace_id = get_or_create_default_workspace(db, int(current_user["user_id"]))
+    finally:
+        db.close()
+    return {**current_user, "workspace_id": workspace_id}
+
+
 def _access_denied() -> JSONResponse:
     return JSONResponse(
         status_code=404,
@@ -100,7 +120,7 @@ def _access_denied() -> JSONResponse:
 )
 async def get_plugin_options(
     deck_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_current_user),
     binding: BindingService = Depends(_binding_service),
     validator: SelectionValidationService = Depends(_selection_service),
 ):
@@ -126,7 +146,7 @@ async def get_plugin_options(
 )
 async def get_plugin_binding(
     deck_id: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_current_user),
     binding: BindingService = Depends(_binding_service),
 ):
     try:
@@ -146,7 +166,7 @@ async def get_plugin_binding(
 async def put_plugin_binding(
     deck_id: str,
     request: DeckPluginBindingUpdateRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_current_user),
     binding: BindingService = Depends(_binding_service),
 ):
     try:
@@ -185,7 +205,7 @@ async def put_plugin_binding(
 async def validate_plugin_binding(
     deck_id: str,
     request: DeckPluginSelectionRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_current_user),
     binding: BindingService = Depends(_binding_service),
     validator: SelectionValidationService = Depends(_selection_service),
 ):

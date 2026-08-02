@@ -26,6 +26,8 @@ export type ToolChoice = 'auto' | 'none' | 'manual';
 
 export type ChatApiSchemaRequestBody = {
   id: string;
+  /** Server-resolved Deck context. The client sends only the selected Deck id. */
+  deckId?: string;
   resume?: boolean;
   message: UIMessage;
   chatModel?: ChatModel;

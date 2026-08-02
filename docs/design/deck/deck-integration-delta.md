@@ -4,7 +4,7 @@
 > **关联 Issue**: `SUO-215`、`SUO-236`、`SUO-250`
 > **父级裁决**: `SUO-235`
 > **基线**: `docs/design/story-workspace/story-workspace-prd.md`、`docs/design/story-workspace/story-workspace-layout-design.md`
-> **最后更新**: 2026-08-01
+> **最后更新**: 2026-08-02
 > **设计阶段**: `design → issue → task → stage`
 > **当前 canonical 真相源**: `docs/design/deck/deck-integration-delta.md`
 
@@ -29,7 +29,7 @@ Story Workspace 的稳定基线把核心流程定义为“Claude Agent 产出 �
 - 本文覆盖此前将运行配置错误拆为独立领域的口径；被覆盖内容不得继续作为当前设计真相。
 - 两份基线中的桌面三栏、审阅、视觉、数据表展示及范围排除继续有效。
 - “Chat 直接触发 Agent”收敛为：Chat 可以表达创作意图，但执行前必须存在有效的 Deck 插件选择、Deck 运行配置和通过的 preflight。
-- Deck 编辑器仍是工作流与运行配置的创作/发布界面；本次不实现完整第三方插件运行时。
+- Deck 编辑器仍是工作流与运行配置的创作/发布界面；当前实现覆盖 Dream Chat 的 Deck 上下文解析与已物化 Claude Code Plugin 加载，完整第三方 worker/marketplace runtime 仍不在本轮范围。
 
 ### 1.2 裁决与冲突处理
 
@@ -49,9 +49,9 @@ Story Workspace 的稳定基线把核心流程定义为“Claude Agent 产出 �
 
 ### 2.2 范围外
 
-- 不修改 `docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/` 或实现代码。
-- 不实现 Deck 编辑器、Claude Agent 或 story-workspace 代码。
-- 不设计完整插件市场、插件安装器、依赖解析器或第三方插件沙箱。
+- 不改写 `docs/issue/`、`docs/task/`、`docs/stage/`、`docs/exec/` 的历史执行记录。
+- 不以本地 development evidence 代替 production rollout approval。
+- 不新增完整插件市场、通用依赖解析器或第三方 worker 沙箱；运行时仅消费已发布 lock 与已物化、可加载的插件证据。
 - 不增加复杂故事板/时间线画布、平台视频能力或移动端适配。
 - 不改变“用户审阅 Agent 产出，而非手动从零创建故事/角色/场景”的既有边界。
 
@@ -326,3 +326,98 @@ preflight → queued → running → output_validating → pending_review → co
 | **[CLARIFICATION_NEEDED] 插件选择主入口** | story-workspace 提供选择器并写入 Deck 权威 binding；Chat 复用同一 `deck_plugin_binding_id` | 旧路径绕过选择或产生双 binding | 产品 owner 确认主入口；后端强制同一 gate |
 | **[CLARIFICATION_NEEDED] 自定义插件发布审核** | 编辑与发布权限分离，能力扩张需审批 | 未审核插件获得高敏能力 | 安全/平台 owner 定义白名单、审批和撤销策略 |
 | **[CLARIFICATION_NEEDED] 安全撤销是否强制终止活动 run** | 普通禁用不终止；安全撤销可强制终止并审计 | 可用性与安全策略冲突 | 安全 owner 定义撤销等级和终止动作 |
+
+## 16. Dream Chat 交互与实现收口（2026-08-02）
+
+### 16.1 交互稿
+
+Dream 的 canonical 地址是 `/story-workspace/dream`，主区默认直接展示 Chat，不再使用 Dashboard 占位页。全局导航增加 `Dream` 入口；进入 Dream 后仍沿用 Story Workspace 左侧业务导航，故事、角色、场景及审阅状态继续使用原有页面。
+
+输入区控制栏增加一个紧凑的 `Deck` 单选器：
+
+1. 仅展示当前用户拥有且 `enabled=true` 的 Deck。
+2. `不使用 Deck` 是合法选项，保持普通 Chat 能力。
+3. 用户在 Dream 首页选择 Deck 并首次发送时，前端把唯一的 `deckId` 与新建 thread 一起提交。
+4. thread 创建后选择器变为只读来源标签；同一 thread 不允许切换 Deck，避免上下文与插件来源漂移。
+5. 恢复历史 thread 时以后端持久化的 `chat_thread.deck_id` 为准，而不是浏览器缓存。
+6. Deck 加载失败不阻断无 Deck Chat，但必须显式显示错误状态；Deck 已禁用、无权访问或绑定插件不可运行时，由后端返回结构化错误并阻止 Agent 启动。
+
+```mermaid
+sequenceDiagram
+    actor User as 用户
+    participant Dream as Dream / AIInputDock
+    participant Chat as ClaudeAgent API
+    participant Deck as DeckChatContextService
+    participant Runtime as Claude Code Runtime
+    participant Story as Story Workspace
+
+    User->>Dream: 单选 Deck，输入创作意图
+    Dream->>Chat: POST thread {deckId}
+    Chat->>Chat: 固化 chat_thread.deck_id
+    Dream->>Chat: POST message {id, deckId, message}
+    Chat->>Deck: 按 user_id + deck_id 解析上下文
+    Deck->>Deck: 读取 Deck、enabled Voices、active binding
+    alt 没有 active binding
+        Deck-->>Chat: Deck/Voice context
+    else 有 active binding
+        Deck->>Deck: 校验 release/install/capability/runtime readiness
+        Deck-->>Chat: Deck context + server-owned settings/local plugin paths
+    end
+    Chat->>Runtime: ClaudeAgentOptions(settings, plugins=validated local paths)
+    Runtime-->>Chat: Agent 流式产出
+    Chat->>Story: 合同输出写入 pending review
+    Story-->>User: 页面渲染与用户审阅确认
+    User->>Story: 确认故事提案
+    Story->>Story: 原子发布故事并确认关联角色/场景
+```
+
+### 16.2 服务端加载规则
+
+- 客户端只能提交 `deckId`，不能提交插件 ID、版本、settings JSON、能力集合或 Deck prompt。
+- 服务端按 `owner_id` 校验 Deck，并读取 enabled Voice prompt；有绑定时，再读取精确 `deck_plugin_id + version + binding_revision`。
+- 可选择性由 `SelectionValidationService` 统一裁决，运行兼容事实由 `services/deck/runtime_context.py` 从 release、installation、runtime lock 和 materialization 表解析。
+- compatibility 默认拒绝。只有显式设置 `INK_ENVIRONMENT=development|dev|test|testing` 时才采用本地兼容值；生产或未声明环境均为 fail-closed，必须通过 `INK_DECK_HOST_COMPATIBLE`、`INK_CLAUDE_AGENT_CONTRACT_COMPATIBLE`、`INK_STORY_SCHEMA_COMPATIBLE` 与 `INK_DECK_RUNTIME_CONFIG_COMPATIBLE` 提供真实兼容信号。
+- 只有 `materialization_status=materialized` 且 `activation_status in (loadable, loaded)`、版本与 artifact digest 精确匹配的插件，才会加载。Claude 管理的 registry 插件进入服务端生成的 `enabledPlugins`；仓库内置或服务端缓存的本地插件通过 SDK `plugins=[{type: "local", path}]` 加载，客户端不能提交路径。
+- 本地路径必须重新计算目录 digest；内置插件必须精确位于仓库受控目录，其他本地插件必须位于服务端 Claude cache 根目录。路径越界、制品变化或摘要不一致全部 fail closed。
+- active binding 任一 gate 失败时返回 409，不允许静默忽略插件后退化为普通 Chat。
+- 无 active binding 时只加载 Deck/Voice 上下文；这允许 Deck 作为提示词集合使用，但不会伪造插件来源。
+
+### 16.3 Paperclip 架构取舍
+
+本实现借鉴 Paperclip 的分层边界，而不是复制其数据模型：
+
+| Paperclip 方案 | 本项目对应 | 取舍 |
+|---|---|---|
+| `PluginManager` / `PluginSettings` 管理安装与启停 | Settings `PluginAdminPage` + Deck Editor binding | 管理面与业务选择面分离 |
+| loader/lifecycle manager 管理插件加载状态 | runtime materialization + reconcile/load receipt | readiness 由服务端证据决定，不信任 UI 状态 |
+| worker manager 与 tool registry 只向活跃 worker 路由 | Claude Code `enabledPlugins` 只包含精确可加载项 | 当前不复制通用 worker RPC；由 Claude Code Plugin runtime 执行 |
+| capability validator 在 host bridge 再校验 | manifest/installation/policy/grant/runtime 五方能力交集 | 声明不等于授权，未知能力默认拒绝 |
+| 插件停用时撤销注册和执行入口 | active binding 在运行前重新校验 | 不依赖历史 UI 缓存，下一轮执行即时 fail closed |
+
+### 16.4 代码落点
+
+| 层 | 代码 | 责任 |
+|---|---|---|
+| Dream composition | `frontend/src/App.tsx`、`frontend/src/router/story-workspace.tsx` | Dream 导航、canonical 页面与 Chat 组合 |
+| Deck interaction | `frontend/src/components/deck/DeckChatSelector.tsx` | 首页单选及 thread 锁定来源展示 |
+| Chat contract | `frontend/src/components/chat/ChatView.tsx`、`ChatPanel.tsx`、`frontend/src/lib/chat-schema.ts` | `deckId` 创建/发送/恢复链路 |
+| Persistence/API | `backend/database.py`、`backend/routers/claude_agent.py` | `chat_thread.deck_id`、不可切换与权属校验 |
+| Plugin control plane | `backend/services/deck/admin_gateway.py`、`backend/routers/deck_plugins.py`、`frontend/src/components/plugin-admin/PluginAdminPage.tsx` | 安装、启停、升级、回滚、卸载、审批、readiness 与来源约束 |
+| Built-in runtime plugin | `backend/services/deck/builtin_plugin.py`、`plugins/ink-dream-story/` | 发布并校验内置故事工作流插件与不可变 runtime lock |
+| Deck domain | `backend/services/deck/chat_context.py`、`runtime_context.py`、`story_workflow_gateway.py` | Deck/Voice/Binding 解析、preflight/run、不可变快照、readiness 与 SDK 设置生成 |
+| Claude runtime | `backend/claude_agent/service.py`、`backend/libs/claude_agent_kit/types.py`、`agent_runner.py` | 把服务端 settings 与已验证本地 plugin path 传入 Claude Agent SDK |
+| Review persistence | `backend/claude_agent/service.py`、`backend/services/story_workspace/agent_integration.py`、`backend/routers/story_workspace.py` | 合同输出原子写入待审阅资源；确认故事后原子发布故事并确认关联角色/场景 |
+| Review UI | `frontend/src/lib/story-workspace-events.ts`、`StoryWorkspaceReviewDetail.tsx`、`frontend/src/api/storyWorkspaceReviewApi.ts` | 接收 Agent receipt、自动打开审阅栏、编辑/驳回/确认及发布完成反馈 |
+
+### 16.5 Development/Test 验收证据
+
+- 后端全量：`646 passed, 1 skipped, 229 subtests passed`；覆盖 Deck manifest/lock/install/binding、runtime reconcile/session、preflight/run、Claude SDK plugin options、Story Workspace 合同/持久化/审阅发布与 API 路由。
+- 前端：`tsc --noEmit` 与 production build 通过；定向 ESLint 为 `0 errors`。`App.tsx` 仍报告 17 条既有 Hook dependency warnings，本次新增的 Deck、Chat、Plugin Admin、Story Workspace 与 E2E 文件没有 lint 告警。
+- Chromium E2E：真实注册/鉴权和 thread API，验证 Dream Deck 单选、`deckId` 请求合同、thread 来源锁定、Agent `story-workspace-output` 事件、右栏渲染、关联角色/场景以及“确认提案并执行发布”的完成状态。
+- 格式与差异：`git diff --check` 通过。
+
+浏览器用例对 Claude Agent SSE 使用确定性合同桩，以验证前端业务交互；它不等价于真实 Claude provider、真实 broker 或生产 runtime 的全链路证明。
+
+### 16.6 当前 Gate
+
+本节实现完成的是可运行的 development/test 业务闭环，不改变 production Gate：真实 broker/SSE/WebSocket、多节点 runtime、WORM/retention、生产隔离、独立安全 reviewer 与 rollout approval 仍须按生产计划单独验收。不得以本地单测、前端 build 或开发环境 materialization 记录替代生产证据。

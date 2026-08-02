@@ -92,10 +92,13 @@ import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
 import { getDateLocale } from '../../i18n';
+import { listDecks, type Deck } from '../../api/voiceApi';
+import DeckChatSelector from '../deck/DeckChatSelector';
 
 interface ChatThread {
   id: string;
   title: string | null;
+  deck_id?: string | null;
   created_at: string;
   updated_at: string;
   match?: {
@@ -241,9 +244,16 @@ function getThreadDateGroup(value: string, t: TFunction): string {
   return t('chat.dateGroup.earlier');
 }
 
-async function createThread(): Promise<string | null> {
+async function createThread(deckId?: string): Promise<string | null> {
   try {
-    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, { method: 'POST', headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
+    const res = await fetch(`${API_BASE}/api/claude-agent/threads`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${getAuthToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(deckId ? { deckId } : {}),
+    });
     if (!res.ok) return null;
     const data = await res.json() as { thread_id: string };
     return data.thread_id ?? null;
@@ -316,13 +326,18 @@ async function fetchThreadStatus(threadId: string): Promise<ThreadStatusResult |
   }
 }
 
-async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
+interface ThreadMessagesSnapshot {
+  thread?: ChatThread;
+  messages: UIMessage[];
+}
+
+async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesSnapshot> {
   try {
     const res = await fetch(`${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/messages`, { headers: { 'Authorization': `Bearer ${getAuthToken()}` } });
-    if (!res.ok) return [];
-    const data = await res.json() as { messages?: RawChatMessage[] };
+    if (!res.ok) return { messages: [] };
+    const data = await res.json() as { thread?: ChatThread; messages?: RawChatMessage[] };
     const msgs = data.messages ?? [];
-    return msgs.map((m) => {
+    return { thread: data.thread, messages: msgs.map((m) => {
       // parts is already a parsed list — aligned with better-chatbot
       // ChatRepository.selectMessagesByThreadId which returns parts directly.
       const parts: UIMessage['parts'] = Array.isArray(m.parts) && m.parts.length > 0
@@ -336,9 +351,9 @@ async function fetchThreadMessages(threadId: string): Promise<UIMessage[]> {
         metadata,
         createdAt: new Date(m.created_at),
       };
-    });
+    }) };
   } catch {
-    return [];
+    return { messages: [] };
   }
 }
 
@@ -372,6 +387,10 @@ function ChatViewContent({
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
+  const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
+  const [selectedDeckId, setSelectedDeckId] = useState<string | undefined>();
+  const [isLoadingDecks, setIsLoadingDecks] = useState(true);
+  const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState('');
@@ -386,6 +405,32 @@ function ChatViewContent({
   const [deletingThreadId, setDeletingThreadId] = useState<string | null>(null);
   // Bump to signal ChatPanel to attach GET /threads/{id}/stream when backend is still running.
   const [reconnectStreamNonce, setReconnectStreamNonce] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    setIsLoadingDecks(true);
+    setDeckLoadError(null);
+    void listDecks()
+      .then((decks) => {
+        if (cancelled) return;
+        const enabledDecks = decks.filter((deck) => deck.enabled);
+        setAvailableDecks(enabledDecks);
+        setSelectedDeckId((current) => (
+          current && enabledDecks.some((deck) => deck.id === current) ? current : undefined
+        ));
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setAvailableDecks([]);
+        setDeckLoadError(error instanceof Error ? error.message : t('chat.deck.loadFailed'));
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingDecks(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
   // Load thread list
   const reloadThreads = useCallback(async () => {
@@ -540,9 +585,11 @@ function ChatViewContent({
     setThreadMessages(null);
 
     void (async () => {
-      const msgs = await fetchThreadMessages(activeThreadId);
+      const snapshot = await fetchThreadMessages(activeThreadId);
       if (cancelled) return;
+      const msgs = snapshot.messages;
       setThreadMessages(msgs);
+      setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
       if (msgs.length > 0) setHasConversationStarted(true);
       setIsLoadingMessages(false);
 
@@ -565,8 +612,9 @@ function ChatViewContent({
 
   const handleReconnectComplete = useCallback(async () => {
     if (!activeThreadId) return;
-    const msgs = await fetchThreadMessages(activeThreadId);
-    setThreadMessages(msgs);
+    const snapshot = await fetchThreadMessages(activeThreadId);
+    setThreadMessages(snapshot.messages);
+    setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
   }, [activeThreadId]);
 
   const notifyReconnectComplete = useCallback(() => {
@@ -600,7 +648,7 @@ function ChatViewContent({
 
     setDraftInputError(null);
     setIsCreatingThread(true);
-    const id = await createThread();
+    const id = await createThread(selectedDeckId);
     setIsCreatingThread(false);
     if (!id) {
       setDraftInputError(t('chat.history.createFailed'));
@@ -608,7 +656,7 @@ function ChatViewContent({
     }
 
     queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
-  }, [isCreatingThread, queuePromptForThread, t]);
+  }, [isCreatingThread, queuePromptForThread, selectedDeckId, t]);
 
   const handleNewChat = useCallback(() => {
     if (isCreatingThread) return;
@@ -842,6 +890,16 @@ function ChatViewContent({
                   editorState={editorState}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
                   voiceSystemPrompt={activeVoice?.systemPrompt}
+                  deckId={selectedDeckId}
+                  inputContextControl={(
+                    <DeckChatSelector
+                      decks={availableDecks}
+                      selectedDeckId={selectedDeckId}
+                      loading={isLoadingDecks}
+                      error={deckLoadError}
+                      locked
+                    />
+                  )}
                   onConversationStart={() => {
                     setHasConversationStarted(true);
                     void reloadThreads();
@@ -863,6 +921,15 @@ function ChatViewContent({
                         placeholder="Ask Ink & Memory…"
                         disabled={isCreatingThread}
                         loading={isCreatingThread}
+                        contextControl={(
+                          <DeckChatSelector
+                            decks={availableDecks}
+                            selectedDeckId={selectedDeckId}
+                            onChange={setSelectedDeckId}
+                            loading={isLoadingDecks}
+                            error={deckLoadError}
+                          />
+                        )}
                         mode="full"
                       />
                     </div>

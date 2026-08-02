@@ -198,6 +198,10 @@ class AgentRunOptions:
     sandbox_network_mode: Literal["disabled", "allowlist", "open"] = "allowlist"
     # System prompt override.
     system_prompt: Optional[str] = None
+    # Server-generated Claude Code settings JSON. Never accept raw client settings.
+    settings_json: Optional[str] = None
+    # Server-resolved local Claude SDK plugins. Paths are never accepted from clients.
+    local_plugin_paths: tuple[str, ...] = ()
     # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.
     # Kept for backward compatibility with callers that set it; ignored by runner.
     include_runtime_context: bool = True

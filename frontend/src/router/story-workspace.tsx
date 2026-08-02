@@ -2,9 +2,17 @@
 // [Output] Resolve canonical Story Workspace paths and render synchronized route content.
 // [Pos] Story Workspace state-router adapter for the existing App architecture.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
+import {
+  StoryWorkspaceReviewDetail,
+  type StoryWorkspaceReviewSelection,
+} from '../components/story-workspace/layout/StoryWorkspaceReviewDetail';
 import { StoryWorkspaceSidebar } from '../components/story-workspace/layout/StoryWorkspaceSidebar';
+import {
+  subscribeStoryWorkspaceOutput,
+  type StoryWorkspaceOutputReceipt,
+} from '../lib/story-workspace-events';
 import {
   StoryWorkspaceCharactersPage,
   StoryWorkspaceDreamPage,
@@ -63,28 +71,51 @@ function replaceWithCanonicalPath(canonicalPath: string) {
   window.history.replaceState(storyWorkspaceHistoryState(), '', canonicalUrl);
 }
 
-function renderStoryWorkspaceRoute(route: StoryWorkspaceRoute) {
+function renderStoryWorkspaceRoute(
+  route: StoryWorkspaceRoute,
+  dreamContent: ReactNode,
+  onReview: (selection: StoryWorkspaceReviewSelection) => void,
+  refreshNonce: number,
+) {
   switch (route) {
     case 'stories':
-      return <StoryWorkspaceStoriesPage />;
+      return <StoryWorkspaceStoriesPage onReview={(story) => onReview({ resourceType: 'story', resourceId: story.id })} refreshNonce={refreshNonce} />;
     case 'characters':
-      return <StoryWorkspaceCharactersPage />;
+      return <StoryWorkspaceCharactersPage onReview={(character) => onReview({ resourceType: 'character', resourceId: character.id })} refreshNonce={refreshNonce} />;
     case 'scenes':
-      return <StoryWorkspaceScenesPage />;
+      return <StoryWorkspaceScenesPage onReview={(scene) => onReview({ resourceType: 'scene', resourceId: scene.id })} refreshNonce={refreshNonce} />;
     case 'dream':
     default:
-      return <StoryWorkspaceDreamPage />;
+      return <StoryWorkspaceDreamPage>{dreamContent}</StoryWorkspaceDreamPage>;
   }
 }
 
 export interface StoryWorkspaceRouterProps {
   onOpenSettings: () => void;
+  dreamContent: ReactNode;
 }
 
-export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterProps) {
+export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWorkspaceRouterProps) {
   const initialMatch = resolveStoryWorkspacePath(window.location.pathname)
     ?? { canonicalPath: STORY_WORKSPACE_PATHS.dream, route: 'dream' as const };
   const [activeRoute, setActiveRoute] = useState<StoryWorkspaceRoute>(initialMatch.route);
+  const [reviewSelection, setReviewSelection] = useState<StoryWorkspaceReviewSelection | null>(null);
+  const [reviewSource, setReviewSource] = useState<StoryWorkspaceOutputReceipt | null>(null);
+  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
+  const [resourceRefreshNonce, setResourceRefreshNonce] = useState(0);
+
+  useEffect(() => subscribeStoryWorkspaceOutput((receipt) => {
+    setReviewSource(receipt);
+    setReviewSelection({ resourceType: 'story', resourceId: receipt.story_id });
+    setReviewPanelOpen(true);
+    setResourceRefreshNonce((value) => value + 1);
+  }), []);
+
+  const handleOpenReview = useCallback((selection: StoryWorkspaceReviewSelection) => {
+    setReviewSource(null);
+    setReviewSelection(selection);
+    setReviewPanelOpen(true);
+  }, []);
 
   const syncFromLocation = useCallback(() => {
     const match = resolveStoryWorkspacePath(window.location.pathname);
@@ -116,7 +147,21 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
 
   return (
     <StoryWorkspaceLayout
-      defaultReviewPanelOpen={false}
+      reviewPanel={reviewSelection ? (
+        <StoryWorkspaceReviewDetail
+          key={`${reviewSelection.resourceType}:${reviewSelection.resourceId}`}
+          onChanged={() => setResourceRefreshNonce((value) => value + 1)}
+          onSelectResource={(selection) => {
+            setReviewSelection(selection);
+            setReviewPanelOpen(true);
+          }}
+          selection={reviewSelection}
+          sourceReceipt={reviewSource}
+        />
+      ) : null}
+      reviewPanelOpen={reviewPanelOpen}
+      onReviewPanelOpenChange={setReviewPanelOpen}
+      reviewPanelTitle="Agent 产出审阅"
       sidebar={(
         <StoryWorkspaceSidebar
           currentPath={currentPath}
@@ -125,7 +170,12 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
         />
       )}
     >
-      {renderStoryWorkspaceRoute(activeRoute)}
+      {renderStoryWorkspaceRoute(
+        activeRoute,
+        dreamContent,
+        handleOpenReview,
+        resourceRefreshNonce,
+      )}
     </StoryWorkspaceLayout>
   );
 }

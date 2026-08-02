@@ -59,6 +59,7 @@ from libs.claude_agent_kit.server.workspace_file_sync import (
     sync_attachments_to_workspace_files,
 )
 from libs.file_storage import server_file_storage
+from services.deck.chat_context import DeckChatContextError, DeckChatContextService
 
 from .deps import get_current_user
 
@@ -144,6 +145,7 @@ class ClaudeAgentRequestBody(BaseModel):
     attachments: List[ChatAttachment] = []
     editor_state: Optional[dict] = None
     system_prompt: Optional[str] = Field(default=None, validation_alias=AliasChoices("system_prompt", "systemPrompt"))
+    deck_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("deck_id", "deckId"))
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id
@@ -162,6 +164,11 @@ class ToolConfirmRequestBody(BaseModel):
 
 class CreateThreadResponseBody(BaseModel):
     thread_id: str
+    deck_id: Optional[str] = None
+
+
+class CreateThreadRequestBody(BaseModel):
+    deck_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("deck_id", "deckId"))
 
 
 @router.post("/api/claude-agent")
@@ -202,6 +209,46 @@ async def claude_agent_stream(
                 yield frame
 
         return StreamingResponse(generate_reconnect(), media_type="text/event-stream")
+
+    requested_deck_id = body.deck_id
+    persisted_deck_id = thread.get("deck_id")
+    if requested_deck_id and persisted_deck_id and requested_deck_id != persisted_deck_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "CHAT_DECK_IMMUTABLE",
+                "message": "The Deck cannot be changed after the conversation starts.",
+            },
+        )
+
+    deck_context = None
+    effective_deck_id = requested_deck_id or persisted_deck_id
+    if effective_deck_id:
+        deck_db = database.get_db()
+        try:
+            deck_context = await DeckChatContextService(deck_db).resolve(
+                deck_id=str(effective_deck_id),
+                actor_id=str(user_id),
+            )
+        except DeckChatContextError as exc:
+            raise HTTPException(
+                status_code=exc.status_code,
+                detail={"error_code": exc.code, "message": str(exc)},
+            ) from exc
+        finally:
+            deck_db.close()
+        if not persisted_deck_id and not database.bind_chat_thread_deck(
+            thread_id,
+            user_id,
+            str(effective_deck_id),
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "CHAT_DECK_IMMUTABLE",
+                    "message": "The conversation Deck changed concurrently.",
+                },
+            )
 
     message_text = body.get_message_text()
     if not message_text:
@@ -316,7 +363,17 @@ async def claude_agent_stream(
         message_parts=message_parts,
         attachments=attachment_payloads or None,
         editor_state=body.editor_state,
-        system_prompt=body.system_prompt or None,
+        system_prompt=(
+            deck_context.system_prompt
+            if deck_context is not None
+            else body.system_prompt or None
+        ),
+        claude_settings_json=(
+            deck_context.claude_settings_json if deck_context is not None else None
+        ),
+        claude_plugin_paths=(
+            deck_context.claude_plugin_paths if deck_context is not None else ()
+        ),
     )
 
     async def generate():
@@ -343,6 +400,7 @@ async def claude_agent_chat_history(
 @router.post("/api/claude-agent/threads", response_model=CreateThreadResponseBody)
 async def claude_agent_create_thread(
     current_user: dict = Depends(get_current_user),
+    body: Optional[CreateThreadRequestBody] = None,
 ):
     """Create a new chat thread and return its ``thread_id``.
 
@@ -351,8 +409,27 @@ async def claude_agent_create_thread(
     ``POST /api/claude-agent`` request for that conversation.
     """
     user_id = current_user["user_id"]
-    thread_id = database.create_chat_thread(user_id)
-    return {"thread_id": thread_id}
+    deck_id = body.deck_id if body else None
+    if deck_id:
+        deck = database.get_deck_with_voices(user_id, deck_id)
+        if deck is None:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "DECK_ACCESS_DENIED",
+                    "message": "Deck not found or permission denied.",
+                },
+            )
+        if not bool(deck.get("enabled")):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "DECK_DISABLED",
+                    "message": "The selected Deck is disabled.",
+                },
+            )
+    thread_id = database.create_chat_thread(user_id, deck_id=deck_id)
+    return {"thread_id": thread_id, "deck_id": deck_id}
 
 
 @router.get("/api/claude-agent/threads")

@@ -3,42 +3,57 @@
 from __future__ import annotations
 
 from typing import Any, Literal, Protocol
+import uuid
 
 from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
+import database
+from services.story_workspace.agent_integration import get_or_create_default_workspace
+
 from .deps import get_current_user
 
 try:
     from services.errors.error_registry import ApiRouteError, build_error_payload
+    from services.deck.admin_gateway import get_deck_plugin_admin_service
 except ModuleNotFoundError:
     from backend.services.errors.error_registry import ApiRouteError, build_error_payload
+    from backend.services.deck.admin_gateway import get_deck_plugin_admin_service
 
 
 router = APIRouter(prefix="/api/deck-plugins", tags=["deck-plugins"])
 
 
 class _StrictRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        str_strip_whitespace=True,
+        populate_by_name=True,
+    )
 
 
 class InstallRequest(_StrictRequest):
     deck_plugin_id: str = Field(min_length=3)
-    version: str = Field(min_length=5)
+    version: str = Field(alias="deck_plugin_version", min_length=5)
+    source_type: Literal["marketplace", "local", "controlled"] = "controlled"
     source: str = Field(min_length=1)
-    scope_type: Literal["instance", "workspace"]
-    scope_id: str = Field(min_length=1)
-    idempotency_key: str = Field(min_length=1, max_length=255)
+    scope_type: Literal["instance", "workspace"] | None = None
+    scope_id: str | None = None
+    idempotency_key: str = Field(
+        default_factory=lambda: f"install-{uuid.uuid4().hex}",
+        min_length=1,
+        max_length=255,
+    )
 
 
 class EnableRequest(_StrictRequest):
-    scope_type: Literal["instance", "workspace"]
-    scope_id: str = Field(min_length=1)
+    scope_type: Literal["instance", "workspace"] | None = None
+    scope_id: str | None = None
 
 
 class DisableRequest(EnableRequest):
-    reason: str = Field(min_length=1, max_length=500)
+    reason: str = Field(default="Disabled from Plugin Admin", min_length=1, max_length=500)
     revocation_level: Literal["normal", "security"] = "normal"
 
 
@@ -47,7 +62,11 @@ class VersionActionRequest(EnableRequest):
 
 
 class ReconcileRequest(EnableRequest):
-    environment: str = Field(min_length=1, max_length=128)
+    environment: str = Field(default="current", min_length=1, max_length=128)
+
+
+class UninstallRequest(EnableRequest):
+    purge: bool = False
 
 
 class DeckPluginAdminGateway(Protocol):
@@ -58,6 +77,9 @@ class DeckPluginAdminGateway(Protocol):
     async def disable(self, deck_plugin_id: str, request: DisableRequest, *, actor_id: str) -> Any: ...
     async def upgrade(self, deck_plugin_id: str, request: VersionActionRequest, *, actor_id: str) -> Any: ...
     async def rollback(self, deck_plugin_id: str, request: VersionActionRequest, *, actor_id: str) -> Any: ...
+    async def uninstall(self, deck_plugin_id: str, request: UninstallRequest, *, actor_id: str) -> Any: ...
+    async def approve_upgrade(self, deck_plugin_id: str, request: EnableRequest, *, actor_id: str) -> Any: ...
+    async def reject_upgrade(self, deck_plugin_id: str, request: EnableRequest, *, actor_id: str) -> Any: ...
     async def runtime_readiness(self, deck_plugin_id: str, *, environment: str) -> Any: ...
     async def reconcile(self, deck_plugin_id: str, request: ReconcileRequest, *, actor_id: str) -> Any: ...
 
@@ -71,9 +93,9 @@ class _UnavailableDeckPluginGateway:
 
 
 def get_deck_plugin_gateway() -> DeckPluginAdminGateway:
-    """Deployment adapters override this dependency with the Deck control plane."""
+    """Return the application Deck control-plane adapter."""
 
-    return _UnavailableDeckPluginGateway()  # type: ignore[return-value]
+    return get_deck_plugin_admin_service()
 
 
 def _actor_id(current_user: dict[str, Any]) -> str:
@@ -99,6 +121,48 @@ def _require_permission(
         status_code=403,
         content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
     )
+
+
+async def _deck_plugin_current_user(
+    current_user: dict[str, Any] = Depends(get_current_user),
+) -> dict[str, Any]:
+    """Resolve the authenticated user's owned Deck workspace for scoped admin."""
+    db = database.get_db()
+    try:
+        user_id = int(current_user["user_id"])
+        workspace_id = current_user.get("workspace_id") or get_or_create_default_workspace(db, user_id)
+        user_row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+    finally:
+        db.close()
+    return {
+        **current_user,
+        "workspace_id": workspace_id,
+        "role": current_user.get("role") or (user_row["role"] if user_row else "user"),
+    }
+
+
+def _workspace_request(
+    request: _StrictRequest,
+    current_user: dict[str, Any],
+) -> _StrictRequest | JSONResponse:
+    scope_type = getattr(request, "scope_type", None)
+    scope_id = getattr(request, "scope_id", None)
+    if scope_type == "instance" and current_user.get("role") != "admin":
+        return JSONResponse(
+            status_code=403,
+            content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
+        )
+    expected_workspace = str(current_user["workspace_id"])
+    if scope_type == "workspace" and scope_id and str(scope_id) != expected_workspace:
+        return JSONResponse(
+            status_code=403,
+            content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
+        )
+    if scope_type is None:
+        scope_type = "workspace"
+    if scope_id is None:
+        scope_id = expected_workspace if scope_type == "workspace" else "instance"
+    return request.model_copy(update={"scope_type": scope_type, "scope_id": str(scope_id)})
 
 
 def _json(value: Any) -> Any:
@@ -128,20 +192,31 @@ async def _call(awaitable: Any) -> Any:
 @router.get("/installations")
 async def list_installations(
     scope_id: str | None = Query(default=None),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:read", "plugin:admin")
     if denied is not None:
         return denied
-    return await _call(gateway.list_installations(scope_id=scope_id))
+    effective_scope = scope_id or str(current_user["workspace_id"])
+    payload = await _call(gateway.list_installations(scope_id=effective_scope))
+    if isinstance(payload, JSONResponse):
+        return payload
+    return {
+        **payload,
+        "permissions": {
+            "can_manage": True,
+            "can_install_local": current_user.get("role") == "admin",
+            "can_force_purge": current_user.get("role") == "admin",
+        },
+    }
 
 
 @router.post("/install", status_code=202)
 async def install_plugin(
     request: InstallRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:admin")
@@ -152,14 +227,17 @@ async def install_plugin(
             status_code=409,
             content=build_error_payload("IDEMPOTENCY_CONFLICT"),
         )
-    return await _call(gateway.install(request, actor_id=_actor_id(current_user)))
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.install(scoped, actor_id=_actor_id(current_user)))
 
 
 @router.get("/{deck_plugin_id}/versions/{version}")
 async def get_plugin_version(
     deck_plugin_id: str,
     version: str,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     del current_user
@@ -170,59 +248,71 @@ async def get_plugin_version(
 async def enable_plugin(
     deck_plugin_id: str,
     request: EnableRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:admin")
     if denied is not None:
         return denied
-    return await _call(gateway.enable(deck_plugin_id, request, actor_id=_actor_id(current_user)))
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.enable(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))
 
 
 @router.post("/{deck_plugin_id}/disable")
 async def disable_plugin(
     deck_plugin_id: str,
     request: DisableRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:admin")
     if denied is not None:
         return denied
-    return await _call(gateway.disable(deck_plugin_id, request, actor_id=_actor_id(current_user)))
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.disable(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))
 
 
 @router.post("/{deck_plugin_id}/upgrade")
 async def upgrade_plugin(
     deck_plugin_id: str,
     request: VersionActionRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:admin")
     if denied is not None:
         return denied
-    return await _call(gateway.upgrade(deck_plugin_id, request, actor_id=_actor_id(current_user)))
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.upgrade(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))
 
 
 @router.post("/{deck_plugin_id}/rollback")
 async def rollback_plugin(
     deck_plugin_id: str,
     request: VersionActionRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:admin")
     if denied is not None:
         return denied
-    return await _call(gateway.rollback(deck_plugin_id, request, actor_id=_actor_id(current_user)))
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.rollback(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))
 
 
 @router.get("/{deck_plugin_id}/runtime-readiness")
 async def get_runtime_readiness(
     deck_plugin_id: str,
-    environment: str = Query(min_length=1, max_length=128),
-    current_user: dict[str, Any] = Depends(get_current_user),
+    environment: str = Query(default="current", min_length=1, max_length=128),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:admin")
@@ -235,10 +325,63 @@ async def get_runtime_readiness(
 async def reconcile_plugin(
     deck_plugin_id: str,
     request: ReconcileRequest,
-    current_user: dict[str, Any] = Depends(get_current_user),
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
     gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
 ):
     denied = _require_permission(current_user, "plugin:admin", "plugin:service")
     if denied is not None:
         return denied
-    return await _call(gateway.reconcile(deck_plugin_id, request, actor_id=_actor_id(current_user)))
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.reconcile(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))
+
+
+@router.post("/{deck_plugin_id}/uninstall")
+async def uninstall_plugin(
+    deck_plugin_id: str,
+    request: UninstallRequest,
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
+    gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
+):
+    denied = _require_permission(current_user, "plugin:admin")
+    if denied is not None:
+        return denied
+    if request.purge and current_user.get("role") != "admin":
+        return JSONResponse(status_code=403, content=build_error_payload("WORKFLOW_PERMISSION_DENIED"))
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.uninstall(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))
+
+
+@router.post("/{deck_plugin_id}/upgrade/approve")
+async def approve_plugin_upgrade(
+    deck_plugin_id: str,
+    request: EnableRequest,
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
+    gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
+):
+    denied = _require_permission(current_user, "plugin:admin")
+    if denied is not None:
+        return denied
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.approve_upgrade(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))
+
+
+@router.post("/{deck_plugin_id}/upgrade/reject")
+async def reject_plugin_upgrade(
+    deck_plugin_id: str,
+    request: EnableRequest,
+    current_user: dict[str, Any] = Depends(_deck_plugin_current_user),
+    gateway: DeckPluginAdminGateway = Depends(get_deck_plugin_gateway),
+):
+    denied = _require_permission(current_user, "plugin:admin")
+    if denied is not None:
+        return denied
+    scoped = _workspace_request(request, current_user)
+    if isinstance(scoped, JSONResponse):
+        return scoped
+    return await _call(gateway.reject_upgrade(deck_plugin_id, scoped, actor_id=_actor_id(current_user)))

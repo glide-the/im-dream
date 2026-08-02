@@ -12,6 +12,7 @@ const resources = {
         analysis: 'Reflections',
         decks: 'Decks',
         connector: 'Connector',
+        dream: 'Dream',
         chat: 'Chat',
         friends: 'Friends',
         settings: 'Settings'
@@ -205,6 +206,15 @@ const resources = {
         removeError: 'Failed to remove friend'
       },
       chat: {
+        deck: {
+          none: 'No Deck',
+          loading: 'Loading…',
+          loadFailed: 'Failed to load Decks.',
+          selectAria: 'Select one Deck for this conversation',
+          selectTitle: 'Optionally load a Deck and its configured plugin for this conversation.',
+          lockedAria: 'Conversation Deck: {{name}}',
+          lockedTitle: 'The Deck is fixed when the conversation starts.'
+        },
         quickActions: {
           generateImage: {
             label: 'Generate image',
@@ -475,6 +485,7 @@ const resources = {
         analysis: '回顾',
         decks: '卡组',
         connector: '连接器',
+        dream: 'Dream',
         chat: '对话',
         friends: '好友',
         settings: '设置'
@@ -668,6 +679,15 @@ const resources = {
         removeError: '移除好友失败'
       },
       chat: {
+        deck: {
+          none: '不使用 Deck',
+          loading: '加载中…',
+          loadFailed: 'Deck 加载失败。',
+          selectAria: '为本次对话单选一个 Deck',
+          selectTitle: '可选加载一个 Deck 及其已配置插件。',
+          lockedAria: '当前对话 Deck：{{name}}',
+          lockedTitle: '对话开始后 Deck 将固定，确保运行来源可追溯。'
+        },
         quickActions: {
           generateImage: {
             label: '生成图片',

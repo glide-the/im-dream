@@ -2213,6 +2213,11 @@ class ClaudeAgentRunner:
                 can_use_tool=_can_use_tool,
                 cwd=cwd or os.getcwd(),
                 mcp_servers=mcp_servers,
+                settings=opts.settings_json,
+                plugins=[
+                    {"type": "local", "path": plugin_path}
+                    for plugin_path in opts.local_plugin_paths
+                ] or None,
             )
         )
         # CLI binary resolution: pin cli_path to the system/npm CLI when one

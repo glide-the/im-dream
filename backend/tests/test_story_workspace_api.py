@@ -413,7 +413,7 @@ class StoryWorkspaceAPITest(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 404, response.text)
 
-    def test_router_exposes_only_the_requested_baseline_methods(self) -> None:
+    def test_router_preserves_baseline_and_exposes_workflow_contracts(self) -> None:
         methods_by_path: dict[str, set[str]] = {}
         for route in story_workspace.router.routes:
             methods_by_path.setdefault(route.path, set()).update(route.methods)
@@ -426,11 +426,17 @@ class StoryWorkspaceAPITest(unittest.TestCase):
             "/api/story-workspace/characters/{character_id}": {"GET", "PATCH"},
             "/api/story-workspace/scenes": {"GET"},
             "/api/story-workspace/scenes/{scene_id}": {"GET", "PATCH"},
+            "/api/story-workspace/workflow-preflights": {"POST"},
+            "/api/story-workspace/workflow-preflights/{preflight_id}": {"GET"},
+            "/api/story-workspace/workflow-runs": {"POST"},
+            "/api/story-workspace/workflow-runs/{workflow_run_id}": {"GET"},
+            "/api/story-workspace/workflow-runs/{workflow_run_id}/retry": {"POST"},
+            "/api/story-workspace/workflow-runs/{workflow_run_id}/cancel": {"POST"},
         }
         for path, methods in expected.items():
             self.assertIn(path, methods_by_path)
             self.assertEqual(methods_by_path[path], methods)
-        self.assertFalse(any("workflow-runs" in path for path in methods_by_path))
+        self.assertTrue(any("workflow-runs" in path for path in methods_by_path))
 
 
 if __name__ == "__main__":

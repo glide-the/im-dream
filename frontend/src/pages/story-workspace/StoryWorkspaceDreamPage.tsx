@@ -1,14 +1,12 @@
-// [Input] Reusable Story Workspace dashboard/page shell.
-// [Output] Render the canonical Dream route skeleton without Dashboard business content.
+// [Input] Dream business content supplied by the app composition root.
+// [Output] Render the canonical Dream route as a full-height Chat/Agent workspace.
 // [Pos] Canonical /story-workspace/dream page.
-import { StoryWorkspaceDashboardPage } from './StoryWorkspaceDashboardPage';
+import type { ReactNode } from 'react';
 
-export function StoryWorkspaceDreamPage() {
+export function StoryWorkspaceDreamPage({ children }: { children: ReactNode }) {
   return (
-    <StoryWorkspaceDashboardPage
-      description="这里是 Story Workspace 的 canonical 入口。工作流上下文、审阅 Gate 与业务内容将在各自任务中接入。"
-      eyebrow="Story Workspace · Dream"
-      title="Dream"
-    />
+    <div style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+      {children}
+    </div>
   );
 }

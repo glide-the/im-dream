@@ -366,6 +366,17 @@ class WorkflowRunService:
         ).fetchall()
         return [self._row_to_transition(row) for row in rows]
 
+    def read_run(
+        self,
+        workflow_run_id: str,
+        actor_context: AuthenticatedActorContext,
+    ) -> WorkflowRun:
+        """Read one actor/workspace-scoped authoritative run snapshot."""
+        row = self._select_scoped_run(workflow_run_id, actor_context)
+        if row is None:
+            raise RunNotFound()
+        return self._row_to_run(row)
+
     def _create_run(
         self,
         *,

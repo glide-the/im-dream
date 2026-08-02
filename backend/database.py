@@ -36,13 +36,14 @@ from typing import Optional, Union
 import json
 
 # Database location
-DB_DIR = Path(__file__).parent / "data"
-DB_PATH = DB_DIR / "ink-and-memory.db"
+_DEFAULT_DB_PATH = Path(__file__).parent / "data" / "ink-and-memory.db"
+DB_PATH = Path(os.getenv("INK_DATABASE_PATH", str(_DEFAULT_DB_PATH))).expanduser()
+DB_DIR = DB_PATH.parent
 
 logger = logging.getLogger(__name__)
 
 # Ensure data directory exists
-DB_DIR.mkdir(exist_ok=True)
+DB_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def _default_memory_workspace_config() -> dict:
@@ -132,6 +133,15 @@ def init_db():
     """Initialize database by creating all tables."""
     db = get_db()
     create_tables(db)
+    # Deck Plugin execution storage is an application dependency, not a test-only
+    # appendix. The helper is idempotent and recursively creates workflow/runtime
+    # tables before the run-scoped ClaudeAgent session tables.
+    create_agent_session_tables(db)
+    try:
+        from services.deck.builtin_plugin import seed_builtin_deck_plugin
+    except ModuleNotFoundError:
+        from backend.services.deck.builtin_plugin import seed_builtin_deck_plugin
+    seed_builtin_deck_plugin(db)
     db.commit()
     db.close()
     print(f"✅ Database initialized at {DB_PATH}")
@@ -567,16 +577,18 @@ def create_tables(db):
       id TEXT PRIMARY KEY,
       user_id INTEGER NOT NULL,
       title TEXT,
+      deck_id TEXT,
       claude_session_id TEXT,
       agent_contract_version TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+      FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
+      FOREIGN KEY (deck_id) REFERENCES decks (id) ON DELETE SET NULL
     )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_chat_thread_user ON chat_thread(user_id, updated_at)")
-    # Migration: add claude_session_id / agent_contract_version for resume support.
-    for _col, _type in (("claude_session_id", "TEXT"), ("agent_contract_version", "TEXT")):
+    # Migration: add Deck provenance and Claude resume fields.
+    for _col, _type in (("deck_id", "TEXT"), ("claude_session_id", "TEXT"), ("agent_contract_version", "TEXT")):
         try:
             db.execute(f"ALTER TABLE chat_thread ADD COLUMN {_col} {_type}")
         except Exception:
@@ -962,6 +974,44 @@ def create_tables(db):
         "CREATE INDEX IF NOT EXISTS idx_deck_plugin_bindings_release "
         "ON deck_plugin_bindings(deck_plugin_id, deck_plugin_version)"
     )
+
+    # Deck-owned immutable runtime snapshots. Story Workspace receives only the
+    # snapshot identifier and sanitized summary hash during preflight.
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS deck_runtime_snapshots (
+      deck_runtime_snapshot_id TEXT PRIMARY KEY,
+      deck_id TEXT NOT NULL,
+      deck_plugin_binding_id TEXT NOT NULL,
+      binding_revision INTEGER NOT NULL CHECK(binding_revision >= 1),
+      deck_runtime_profile_id TEXT NOT NULL,
+      snapshot_contract TEXT NOT NULL,
+      config_hash TEXT NOT NULL,
+      config_json TEXT NOT NULL,
+      sanitized_summary_hash TEXT NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(deck_id, binding_revision, deck_runtime_profile_id, config_hash),
+      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT,
+      FOREIGN KEY (deck_plugin_binding_id)
+        REFERENCES deck_plugin_bindings(deck_plugin_binding_id) ON DELETE RESTRICT
+    )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deck_runtime_snapshots_deck "
+        "ON deck_runtime_snapshots(deck_id, binding_revision, created_at DESC)"
+    )
+    for trigger_name, operation in (
+        ("deck_runtime_snapshots_no_update", "UPDATE"),
+        ("deck_runtime_snapshots_no_delete", "DELETE"),
+    ):
+        db.execute(
+            f"""
+            CREATE TRIGGER IF NOT EXISTS {trigger_name}
+            BEFORE {operation} ON deck_runtime_snapshots
+            BEGIN
+              SELECT RAISE(ABORT, 'deck_runtime_snapshots is append-only');
+            END
+            """
+        )
 
     # Story Workspace owns only the preflight record. Deck remains the single
     # owner of immutable runtime snapshots; this table stores the controlled ID
@@ -3803,15 +3853,15 @@ def get_daily_pictures_range(user_id: int, start_date: Optional[str], end_date: 
 
 # ========== Claude Agent Chat Thread CRUD ==========
 
-def create_chat_thread(user_id: int) -> str:
+def create_chat_thread(user_id: int, deck_id: Optional[str] = None) -> str:
     """Create a new chat thread for the user. Returns the thread_id (UUID)."""
     import uuid
     thread_id = str(uuid.uuid4())
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO chat_thread (id, user_id) VALUES (?, ?)",
-            (thread_id, user_id),
+            "INSERT INTO chat_thread (id, user_id, deck_id) VALUES (?, ?, ?)",
+            (thread_id, user_id, deck_id),
         )
         db.commit()
         return thread_id
@@ -3824,11 +3874,35 @@ def get_chat_thread(thread_id: str, user_id: int) -> Optional[dict]:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, user_id, title, claude_session_id, agent_contract_version, created_at, updated_at"
+            "SELECT id, user_id, title, deck_id, claude_session_id, agent_contract_version, created_at, updated_at"
             " FROM chat_thread WHERE id = ? AND user_id = ?",
             (thread_id, user_id),
         ).fetchone()
         return dict(row) if row else None
+    finally:
+        db.close()
+
+
+def bind_chat_thread_deck(thread_id: str, user_id: int, deck_id: str) -> bool:
+    """Bind a Deck once; an existing conversation cannot switch provenance."""
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE chat_thread
+            SET deck_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ? AND deck_id IS NULL
+            """,
+            (deck_id, thread_id, user_id),
+        )
+        db.commit()
+        if cursor.rowcount == 1:
+            return True
+        row = db.execute(
+            "SELECT deck_id FROM chat_thread WHERE id = ? AND user_id = ?",
+            (thread_id, user_id),
+        ).fetchone()
+        return bool(row and row["deck_id"] == deck_id)
     finally:
         db.close()
 
@@ -3840,7 +3914,7 @@ def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0
         if limit is not None:
             rows = db.execute(
                 """
-                SELECT id, title, created_at, updated_at
+                SELECT id, title, deck_id, created_at, updated_at
                 FROM chat_thread
                 WHERE user_id = ?
                 ORDER BY updated_at DESC
@@ -3850,7 +3924,7 @@ def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0
             ).fetchall()
         else:
             rows = db.execute(
-                "SELECT id, title, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
+                "SELECT id, title, deck_id, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
                 (user_id,),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -3867,6 +3941,7 @@ def list_chat_threads_for_search(user_id: int) -> list[dict]:
             SELECT
               t.id,
               t.title,
+              t.deck_id,
               t.created_at,
               t.updated_at,
               m.parts AS message_parts

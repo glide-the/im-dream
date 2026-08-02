@@ -26,10 +26,10 @@ interface PluginAdminPageProps {
 }
 
 const EMPTY_INSTALL_INPUT: InstallPluginInput = {
-  deckPluginId: '',
-  deckPluginVersion: '',
-  sourceType: 'marketplace',
-  source: '',
+  deckPluginId: 'ink.dream.story-workflow',
+  deckPluginVersion: '1.0.0',
+  sourceType: 'controlled',
+  source: 'builtin://ink-dream-story',
 };
 
 const EXACT_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -311,10 +311,10 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
               <button type="button" className="plugin-admin-icon-button" aria-label="关闭安装对话框" onClick={() => setInstallOpen(false)}>×</button>
             </div>
             <label className="plugin-admin-field">Deck Plugin ID
-              <input required value={installInput.deckPluginId} placeholder="voice-decks.story-dramatize" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginId: event.target.value })); setInstallPreview(null); }} />
+              <input required value={installInput.deckPluginId} placeholder="ink.dream.story-workflow" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginId: event.target.value })); setInstallPreview(null); }} />
             </label>
             <label className="plugin-admin-field">精确版本
-              <input required value={installInput.deckPluginVersion} placeholder="3.1.0" pattern="\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginVersion: event.target.value })); setInstallPreview(null); }} />
+              <input required value={installInput.deckPluginVersion} placeholder="1.0.0" pattern="\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?" onChange={(event) => { setInstallInput((value) => ({ ...value, deckPluginVersion: event.target.value })); setInstallPreview(null); }} />
             </label>
             <label className="plugin-admin-field">来源类型
               <select value={installInput.sourceType} onChange={(event) => setInstallInput((value) => ({ ...value, sourceType: event.target.value as InstallPluginInput['sourceType'] }))}>
@@ -324,7 +324,7 @@ export default function PluginAdminPage({ isMobile = false }: PluginAdminPagePro
               </select>
             </label>
             <label className="plugin-admin-field">来源
-              <input required value={installInput.source} placeholder="approved-marketplace" onChange={(event) => setInstallInput((value) => ({ ...value, source: event.target.value }))} />
+              <input required value={installInput.source} placeholder="builtin://ink-dream-story" onChange={(event) => setInstallInput((value) => ({ ...value, source: event.target.value }))} />
             </label>
             <div className="plugin-admin-actions" style={{ marginTop: 14 }}>
               <button type="button" className="plugin-admin-button" disabled={previewLoading} onClick={() => { void loadInstallPreview(); }}>

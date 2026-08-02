@@ -1,0 +1,509 @@
+"""Application wiring for Dream workflow preflight and run APIs."""
+
+from __future__ import annotations
+
+from datetime import datetime
+import hashlib
+import json
+import os
+import sqlite3
+from typing import Any
+import uuid
+
+import database
+
+try:
+    from models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
+    from models.workflow_run import AuthenticatedActorContext, RunStatus
+    from services.deck.runtime_context import resolve_runtime_context
+    from services.deck_plugin.compatibility_service import CompatibilityService
+    from services.deck_plugin.installation_service import Scope
+    from services.errors.error_registry import ApiRouteError
+    from services.workflow.preflight_service import (
+        BindingReleaseContext,
+        PreflightCheckError,
+        PreflightService,
+    )
+    from services.workflow.run_service import WorkflowRunError, WorkflowRunService
+except ModuleNotFoundError:  # Support package imports from repository root.
+    from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
+    from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
+    from backend.services.deck.runtime_context import resolve_runtime_context
+    from backend.services.deck_plugin.compatibility_service import CompatibilityService
+    from backend.services.deck_plugin.installation_service import Scope
+    from backend.services.errors.error_registry import ApiRouteError
+    from backend.services.workflow.preflight_service import (
+        BindingReleaseContext,
+        PreflightCheckError,
+        PreflightService,
+    )
+    from backend.services.workflow.run_service import WorkflowRunError, WorkflowRunService
+
+
+_DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
+_DEV_TOKEN_SECRET = "ink-dream-development-workflow-token-secret-v1"
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+
+
+def _sha256(value: str) -> str:
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _token_secret() -> str:
+    explicit = os.getenv("INK_WORKFLOW_TOKEN_SECRET") or os.getenv("JWT_SECRET")
+    if explicit and len(explicit.encode("utf-8")) >= 32:
+        return explicit
+    environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
+    if environment in _DEVELOPMENT_ENVIRONMENTS:
+        return _DEV_TOKEN_SECRET
+    raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+
+
+class StoryWorkflowApplicationGateway:
+    @staticmethod
+    def _actor(actor: dict[str, str]) -> AuthenticatedActorContext:
+        return AuthenticatedActorContext(
+            workspace_id=actor["workspace_id"],
+            actor_id=actor["actor_id"],
+        )
+
+    @staticmethod
+    def _raise_run_error(exc: WorkflowRunError) -> None:
+        mapping = {
+            "IDEMPOTENCY_CONFLICT": ("IDEMPOTENCY_CONFLICT", 409),
+            "ILLEGAL_RUN_TRANSITION": ("WORKFLOW_STEP_FAILED", 409),
+            "WORKFLOW_RUN_NOT_FOUND": ("AGENT_EXECUTION_FAILED", 404),
+            "PREFLIGHT_NOT_FOUND_OR_NOT_AUTHORIZED": ("WORKFLOW_PERMISSION_DENIED", 404),
+            "PREFLIGHT_TOKEN_INVALID": ("WORKFLOW_PERMISSION_DENIED", 409),
+            "PREFLIGHT_TOKEN_EXPIRED": ("DECK_RUNTIME_CONFIG_UNAVAILABLE", 409),
+            "PREFLIGHT_TOKEN_REPLAYED": ("IDEMPOTENCY_CONFLICT", 409),
+            "RETRY_SOURCE_MISMATCH": ("CONFIG_VERSION_DRIFT", 409),
+        }
+        code, status = mapping.get(exc.code, ("AGENT_EXECUTION_FAILED", 422))
+        raise ApiRouteError(code, status_code=status) from exc
+
+    @staticmethod
+    def _installation_scope(
+        db: sqlite3.Connection,
+        workspace_id: str,
+        deck_plugin_id: str,
+    ) -> Scope:
+        row = db.execute(
+            """
+            SELECT scope_type, scope_id FROM deck_plugin_installations
+            WHERE scope_type = 'workspace' AND scope_id = ? AND deck_plugin_id = ?
+              AND status = 'ready'
+            """,
+            (workspace_id, deck_plugin_id),
+        ).fetchone()
+        if row is None:
+            row = db.execute(
+                """
+                SELECT scope_type, scope_id FROM deck_plugin_installations
+                WHERE scope_type = 'instance' AND deck_plugin_id = ? AND status = 'ready'
+                ORDER BY updated_at DESC LIMIT 1
+                """,
+                (deck_plugin_id,),
+            ).fetchone()
+        if row is None:
+            raise PreflightCheckError("DECK_PLUGIN_UNAVAILABLE")
+        return Scope(scope_type=row["scope_type"], scope_id=row["scope_id"])
+
+    def _preflight_service(
+        self,
+        db: sqlite3.Connection,
+        actor: dict[str, str],
+    ) -> PreflightService:
+        actor_id = actor["actor_id"]
+        workspace_id = actor["workspace_id"]
+
+        def identity_checker(deck_id: str, checked_actor: str) -> dict[str, str]:
+            if checked_actor != actor_id:
+                raise PreflightCheckError("WORKFLOW_PERMISSION_DENIED")
+            row = db.execute(
+                """
+                SELECT deck.id FROM decks AS deck
+                JOIN story_workspace_workspaces AS workspace
+                  ON workspace.id = ? AND workspace.owner_id = deck.owner_id
+                WHERE deck.id = ? AND deck.owner_id = ? AND deck.enabled = 1
+                """,
+                (workspace_id, deck_id, actor_id),
+            ).fetchone()
+            if row is None:
+                raise PreflightCheckError("WORKFLOW_PERMISSION_DENIED")
+            return {"workspace_id": workspace_id}
+
+        def binding_resolver(deck_id: str, binding_revision: int) -> dict[str, Any]:
+            row = db.execute(
+                """
+                SELECT binding.*, release.manifest_json, release.manifest_hash,
+                       release.workflow_definition_ref, runtime_lock.id AS lock_id,
+                       runtime_lock.lock_json,
+                       runtime_lock.deck_plugin_manifest_hash AS lock_manifest_hash
+                FROM deck_plugin_bindings AS binding
+                JOIN deck_plugin_releases AS release
+                  ON release.deck_plugin_id = binding.deck_plugin_id
+                 AND release.deck_plugin_version = binding.deck_plugin_version
+                JOIN deck_runtime_plugin_locks AS runtime_lock
+                  ON runtime_lock.deck_plugin_id = binding.deck_plugin_id
+                 AND runtime_lock.deck_plugin_version = binding.deck_plugin_version
+                WHERE binding.deck_id = ? AND binding.binding_revision = ?
+                  AND binding.status = 'active' AND binding.workspace_id = ?
+                  AND binding.creator_id = ?
+                """,
+                (deck_id, binding_revision, workspace_id, actor_id),
+            ).fetchone()
+            if row is None or row["manifest_hash"] != row["lock_manifest_hash"]:
+                raise PreflightCheckError("BINDING_REVISION_CONFLICT")
+            manifest = DeckPluginManifestV1.model_validate_json(row["manifest_json"])
+            runtime_lock = DeckRuntimePluginLock.model_validate_json(row["lock_json"])
+            profile_id = "drp_" + hashlib.sha256(
+                manifest.runtime_configuration.profile_contract.encode("utf-8")
+            ).hexdigest()[:32]
+            return {
+                "deck_plugin_id": manifest.deck_plugin_id,
+                "deck_plugin_version": manifest.deck_plugin_version,
+                "runtime_plugin_lock_id": runtime_lock.runtime_plugin_lock_id,
+                "deck_runtime_profile_id": profile_id,
+                "deck_runtime_snapshot_contract": manifest.compatibility.deck_runtime_snapshot_contract,
+                "manifest_hash": row["manifest_hash"],
+                "workflow_definition_ref": manifest.workflow.workflow_definition_ref,
+                "input_schema_ref": manifest.workflow.input_schema_ref or "schema://none",
+                "output_schema_ref": manifest.workflow.output_schema_ref or "schema://none",
+                "required_runtime_plugins": [
+                    {
+                        "claude_code_plugin_id": entry.claude_code_plugin_id,
+                        "artifact_digest": entry.artifact_digest,
+                    }
+                    for entry in runtime_lock.claude_code_plugins
+                    if entry.required
+                ],
+            }
+
+        def manifest_checker(binding: BindingReleaseContext, input_data: dict[str, Any]) -> bool:
+            encoded = _canonical_json(input_data)
+            if len(encoded.encode("utf-8")) > 64 * 1024:
+                raise PreflightCheckError("DECK_PLUGIN_MANIFEST_INVALID")
+            if not binding.output_schema_ref.startswith(("story-workspace/", "schema://")):
+                raise PreflightCheckError("STORY_SCHEMA_INCOMPATIBLE")
+            return True
+
+        async def compatibility_checker(
+            binding: BindingReleaseContext,
+            _identity: Any,
+        ) -> bool:
+            runtime_context = resolve_runtime_context(
+                db,
+                deck_plugin_id=binding.deck_plugin_id,
+                deck_plugin_version=binding.deck_plugin_version,
+                workspace_id=workspace_id,
+            )
+            scope = self._installation_scope(db, workspace_id, binding.deck_plugin_id)
+            result = await CompatibilityService(db).check_compatibility(
+                binding.deck_plugin_id,
+                binding.deck_plugin_version,
+                scope,
+                runtime_context,
+            )
+            if not result.passed:
+                raise PreflightCheckError(result.error_code or "CLAUDE_AGENT_INCOMPATIBLE")
+            return True
+
+        def capability_checker(binding: BindingReleaseContext, _identity: Any) -> bool:
+            installation = db.execute(
+                """
+                SELECT approved_capabilities_json FROM deck_plugin_installations
+                WHERE deck_plugin_id = ? AND status = 'ready'
+                  AND ((scope_type = 'workspace' AND scope_id = ?) OR scope_type = 'instance')
+                ORDER BY CASE scope_type WHEN 'workspace' THEN 0 ELSE 1 END,
+                         updated_at DESC LIMIT 1
+                """,
+                (binding.deck_plugin_id, workspace_id),
+            ).fetchone()
+            try:
+                approved = set(json.loads(installation["approved_capabilities_json"])) if installation else set()
+            except (TypeError, json.JSONDecodeError):
+                approved = set()
+            release = db.execute(
+                "SELECT manifest_json FROM deck_plugin_releases WHERE deck_plugin_id = ? "
+                "AND deck_plugin_version = ?",
+                (binding.deck_plugin_id, binding.deck_plugin_version),
+            ).fetchone()
+            manifest = DeckPluginManifestV1.model_validate_json(release["manifest_json"])
+            required = {
+                capability
+                for step in manifest.workflow.steps
+                for capability in step.required_capabilities
+            }
+            if not required.issubset(approved):
+                raise PreflightCheckError("WORKFLOW_PERMISSION_DENIED")
+            return True
+
+        def snapshot_owner(deck_id: str, profile_id: str, contract: str) -> dict[str, Any]:
+            binding = db.execute(
+                """
+                SELECT * FROM deck_plugin_bindings
+                WHERE deck_id = ? AND workspace_id = ? AND creator_id = ? AND status = 'active'
+                """,
+                (deck_id, workspace_id, actor_id),
+            ).fetchone()
+            deck = db.execute(
+                "SELECT id, name, name_zh, name_en, description, description_zh, description_en "
+                "FROM decks WHERE id = ? AND owner_id = ?",
+                (deck_id, actor_id),
+            ).fetchone()
+            voices = db.execute(
+                "SELECT id, name, name_zh, name_en, system_prompt FROM voices "
+                "WHERE deck_id = ? AND enabled = 1 ORDER BY order_index, id",
+                (deck_id,),
+            ).fetchall()
+            if binding is None or deck is None:
+                raise PreflightCheckError("DECK_RUNTIME_CONFIG_INVALID")
+            config = {
+                "deck": dict(deck),
+                "voices": [dict(voice) for voice in voices],
+                "binding": {
+                    "deck_plugin_binding_id": binding["deck_plugin_binding_id"],
+                    "binding_revision": binding["binding_revision"],
+                    "deck_plugin_id": binding["deck_plugin_id"],
+                    "deck_plugin_version": binding["deck_plugin_version"],
+                },
+                "profile_id": profile_id,
+                "snapshot_contract": contract,
+            }
+            config_json = _canonical_json(config)
+            config_hash = _sha256(config_json)
+            existing = db.execute(
+                """
+                SELECT deck_runtime_snapshot_id, sanitized_summary_hash
+                FROM deck_runtime_snapshots
+                WHERE deck_id = ? AND binding_revision = ?
+                  AND deck_runtime_profile_id = ? AND config_hash = ?
+                """,
+                (deck_id, binding["binding_revision"], profile_id, config_hash),
+            ).fetchone()
+            if existing is not None:
+                return {
+                    "deck_runtime_snapshot_id": existing["deck_runtime_snapshot_id"],
+                    "sanitized_summary_hash": existing["sanitized_summary_hash"],
+                    "reused": True,
+                }
+            snapshot_id = "drs_" + uuid.uuid4().hex
+            summary_hash = _sha256(
+                _canonical_json(
+                    {
+                        "deck_id": deck_id,
+                        "binding_revision": binding["binding_revision"],
+                        "profile_id": profile_id,
+                        "voice_count": len(voices),
+                        "config_hash": config_hash,
+                    }
+                )
+            )
+            with db:
+                db.execute(
+                    """
+                    INSERT INTO deck_runtime_snapshots (
+                        deck_runtime_snapshot_id, deck_id, deck_plugin_binding_id,
+                        binding_revision, deck_runtime_profile_id, snapshot_contract,
+                        config_hash, config_json, sanitized_summary_hash
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        snapshot_id,
+                        deck_id,
+                        binding["deck_plugin_binding_id"],
+                        binding["binding_revision"],
+                        profile_id,
+                        contract,
+                        config_hash,
+                        config_json,
+                        summary_hash,
+                    ),
+                )
+            return {
+                "deck_runtime_snapshot_id": snapshot_id,
+                "sanitized_summary_hash": summary_hash,
+                "reused": False,
+            }
+
+        def materialization_reader(runtime_lock_id: str) -> dict[str, Any]:
+            lock_row = db.execute(
+                "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = ?",
+                (runtime_lock_id,),
+            ).fetchone()
+            if lock_row is None:
+                raise PreflightCheckError("RUNTIME_PLUGIN_NOT_READY")
+            runtime_lock = DeckRuntimePluginLock.model_validate_json(lock_row["lock_json"])
+            plugins: list[dict[str, Any]] = []
+            smoke_passed = True
+            for entry in runtime_lock.claude_code_plugins:
+                row = db.execute(
+                    """
+                    SELECT * FROM runtime_plugin_materializations
+                    WHERE claude_code_plugin_id = ? AND resolved_version = ?
+                      AND artifact_digest = ?
+                    ORDER BY updated_at DESC LIMIT 1
+                    """,
+                    (entry.claude_code_plugin_id, entry.resolved_version, entry.artifact_digest),
+                ).fetchone()
+                if row is None:
+                    plugins.append(
+                        {
+                            "claude_code_plugin_id": entry.claude_code_plugin_id,
+                            "declaration_status": "undeclared",
+                            "materialization_status": "missing",
+                            "activation_status": "inactive",
+                            "artifact_digest": entry.artifact_digest,
+                        }
+                    )
+                    smoke_passed = False
+                    continue
+                plugins.append(
+                    {
+                        "claude_code_plugin_id": entry.claude_code_plugin_id,
+                        "declaration_status": row["declaration_status"],
+                        "materialization_status": row["materialization_status"],
+                        "activation_status": row["activation_status"],
+                        "artifact_digest": row["artifact_digest"],
+                    }
+                )
+                smoke_passed = smoke_passed and bool(
+                    row["materialized_digest"] == entry.artifact_digest
+                    and row["verification_status"] in {"verified", "legacy_unverified"}
+                    and row["materialization_status"] == "materialized"
+                    and row["activation_status"] in {"loadable", "loaded"}
+                )
+            return {
+                "runtime_plugin_lock_id": runtime_lock_id,
+                "plugins": plugins,
+                "load_smoke_passed": smoke_passed,
+            }
+
+        return PreflightService(
+            db,
+            identity_checker=identity_checker,
+            binding_resolver=binding_resolver,
+            manifest_schema_checker=manifest_checker,
+            compatibility_checker=compatibility_checker,
+            capability_policy_checker=capability_checker,
+            deck_snapshot_owner=snapshot_owner,
+            runtime_materialization_reader=materialization_reader,
+            token_secret=_token_secret(),
+        )
+
+    async def create_preflight(self, request: Any, *, actor: dict[str, str]) -> Any:
+        db = database.get_db()
+        try:
+            return await self._preflight_service(db, actor).execute_preflight(
+                request.deck_id,
+                request.binding_revision,
+                request.input_data,
+                actor["actor_id"],
+            )
+        finally:
+            db.close()
+
+    async def get_preflight(self, preflight_id: str, *, actor: dict[str, str]) -> Any:
+        db = database.get_db()
+        try:
+            return self._preflight_service(db, actor).read_preflight(
+                preflight_id,
+                actor=actor["actor_id"],
+            )
+        except PreflightCheckError as exc:
+            raise ApiRouteError(exc.code, status_code=404) from exc
+        finally:
+            db.close()
+
+    async def create_run(self, request: Any, *, actor: dict[str, str]) -> Any:
+        db = database.get_db()
+        try:
+            service = WorkflowRunService(db, token_secret=_token_secret())
+            source_time = (
+                datetime.fromisoformat(request.source_message_time.replace("Z", "+00:00"))
+                if request.source_message_time
+                else None
+            )
+            return await service.create_run(
+                request.workflow_preflight_id,
+                request.preflight_token,
+                request.idempotency_key,
+                request.source_voice_thread_id,
+                self._actor(actor),
+                source_message_id=request.source_message_id,
+                source_message_time=source_time,
+            )
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        finally:
+            db.close()
+
+    async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any:
+        db = database.get_db()
+        try:
+            return WorkflowRunService(db, token_secret=_token_secret()).read_run(
+                workflow_run_id,
+                self._actor(actor),
+            )
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        finally:
+            db.close()
+
+    async def retry_run(
+        self,
+        workflow_run_id: str,
+        request: Any,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        db = database.get_db()
+        try:
+            return await WorkflowRunService(db, token_secret=_token_secret()).retry_run(
+                workflow_run_id,
+                self._actor(actor),
+                preflight_id=request.workflow_preflight_id,
+                preflight_token=request.preflight_token,
+                idempotency_key=request.idempotency_key,
+            )
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        finally:
+            db.close()
+
+    async def cancel_run(
+        self,
+        workflow_run_id: str,
+        request: Any,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        db = database.get_db()
+        try:
+            return await WorkflowRunService(db, token_secret=_token_secret()).transition_run(
+                workflow_run_id,
+                RunStatus.CANCELLED,
+                self._actor(actor),
+                reason_code=f"user_cancelled:{request.reason}",
+            )
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        finally:
+            db.close()
+
+
+_GATEWAY = StoryWorkflowApplicationGateway()
+
+
+def get_story_workflow_application_gateway() -> StoryWorkflowApplicationGateway:
+    return _GATEWAY

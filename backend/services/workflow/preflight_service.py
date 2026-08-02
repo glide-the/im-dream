@@ -421,6 +421,26 @@ class PreflightService:
 
         return self._load_model(row["workflow_preflight_id"])
 
+    def read_preflight(self, preflight_id: str, *, actor: str) -> WorkflowPreflight:
+        """Read one actor-scoped preflight and re-issue only an active token."""
+        row = self.db.execute(
+            """
+            SELECT * FROM workflow_preflights
+            WHERE workflow_preflight_id = ? AND created_by = ?
+            """,
+            (preflight_id, actor),
+        ).fetchone()
+        if row is None:
+            raise PreflightCheckError("WORKFLOW_PERMISSION_DENIED")
+        token = None
+        if (
+            row["status"] == PreflightStatus.PASSED.value
+            and row["consumed_at"] is None
+            and self._parse_datetime(row["expires_at"]) > self._now()
+        ):
+            token = self._token_from_row(row)
+        return self._row_to_model(row, token=token)
+
     async def _call_check(
         self,
         check: PreflightCheck,
