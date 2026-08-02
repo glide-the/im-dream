@@ -31,7 +31,7 @@ import logging
 import os
 from pathlib import Path
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Union
 import json
 
@@ -137,6 +137,7 @@ def init_db():
     # appendix. The helper is idempotent and recursively creates workflow/runtime
     # tables before the run-scoped ClaudeAgent session tables.
     create_agent_session_tables(db)
+    create_claude_plugin_tables(db)
     try:
         from services.deck.builtin_plugin import seed_builtin_deck_plugin
     except ModuleNotFoundError:
@@ -1680,6 +1681,210 @@ def create_agent_session_tables(db):
     END
     """)
     db.commit()
+
+
+def create_claude_plugin_tables(db):
+    """Shared Claude Code plugin installation storage (deck-integration-delta).
+
+    These tables back the real-CLI plugin pipeline:
+
+    - ``claude_plugin_installations``: shared, digest-pinned install records
+      produced by real ``claude plugin install`` executions inside the
+      server-managed runtime root (or server-declared platform-builtin
+      sources).  A row only exists for successful installs (status ready);
+      failures live only in ``claude_plugin_operations``.
+    - ``claude_plugin_operations``: per-operation evidence pointers (argv,
+      cwd, CLI version, exit code, evidence file path).
+    - ``deck_claude_plugin_refs``: Deck → installation references.  Decks
+      never store paths, settings JSON, workflows, or SDK plugin options.
+    """
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS claude_plugin_installations (
+      id TEXT PRIMARY KEY,
+      requested_package_spec TEXT NOT NULL,
+      package_name TEXT NOT NULL,
+      marketplace TEXT NOT NULL,
+      requested_version TEXT,
+      resolved_version TEXT NOT NULL,
+      source_type TEXT NOT NULL
+        CHECK(source_type IN ('claude-official', 'marketplace', 'github', 'platform-builtin')),
+      artifact_digest TEXT NOT NULL,
+      artifact_path TEXT NOT NULL,
+      claude_cli_version TEXT NOT NULL,
+      cli_git_commit_sha TEXT,
+      manifest_json TEXT,
+      component_inventory_json TEXT NOT NULL DEFAULT '{}',
+      compatibility_json TEXT NOT NULL DEFAULT '{}',
+      status TEXT NOT NULL DEFAULT 'installing'
+        CHECK(status IN ('installing', 'ready', 'error', 'uninstalled')),
+      operation_id TEXT NOT NULL,
+      error_code TEXT,
+      error_summary TEXT,
+      file_count INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      installed_at DATETIME,
+      UNIQUE(package_name, marketplace, resolved_version, artifact_digest)
+    )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claude_plugin_installations_status "
+        "ON claude_plugin_installations(status)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claude_plugin_installations_pkg "
+        "ON claude_plugin_installations(package_name, marketplace)"
+    )
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS claude_plugin_operations (
+      id TEXT PRIMARY KEY,
+      operation_kind TEXT NOT NULL
+        CHECK(operation_kind IN ('install', 'uninstall', 'validate', 'revalidate')),
+      requested_package_spec TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued'
+        CHECK(status IN ('queued', 'running', 'ready', 'error')),
+      phase TEXT NOT NULL DEFAULT 'queued',
+      progress INTEGER NOT NULL DEFAULT 0,
+      message TEXT,
+      executable TEXT,
+      argv_json TEXT,
+      cwd TEXT,
+      cli_version TEXT,
+      exit_code INTEGER,
+      evidence_path TEXT,
+      installation_id TEXT,
+      error_code TEXT,
+      error_summary TEXT,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at DATETIME
+    )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_claude_plugin_operations_status "
+        "ON claude_plugin_operations(status, created_at)"
+    )
+
+    db.execute("""
+    CREATE TABLE IF NOT EXISTS deck_claude_plugin_refs (
+      deck_id TEXT NOT NULL,
+      plugin_installation_id TEXT NOT NULL,
+      package_spec TEXT NOT NULL,
+      resolved_version TEXT NOT NULL,
+      artifact_digest TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      order_index INTEGER NOT NULL DEFAULT 0,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (deck_id, plugin_installation_id),
+      FOREIGN KEY (deck_id) REFERENCES decks(id) ON DELETE RESTRICT,
+      FOREIGN KEY (plugin_installation_id)
+        REFERENCES claude_plugin_installations(id) ON DELETE RESTRICT
+    )
+    """)
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_deck_claude_plugin_refs_deck "
+        "ON deck_claude_plugin_refs(deck_id, enabled, order_index)"
+    )
+    db.commit()
+
+
+def replace_deck_claude_plugin_refs(
+    db, deck_id: str, refs: list[dict]
+) -> None:
+    """Atomically replace a Deck's Claude plugin references.
+
+    *refs* items: {plugin_installation_id, package_spec, resolved_version,
+    artifact_digest, enabled, order_index}.  Validation (ready status, digest
+    verification, CLI compatibility) happens in the service layer before this
+    write; this helper only persists the validated set.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with db:
+        db.execute("DELETE FROM deck_claude_plugin_refs WHERE deck_id = ?", (deck_id,))
+        for position, ref in enumerate(refs):
+            db.execute(
+                """
+                INSERT INTO deck_claude_plugin_refs (
+                    deck_id, plugin_installation_id, package_spec,
+                    resolved_version, artifact_digest, enabled, order_index,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    deck_id,
+                    ref["plugin_installation_id"],
+                    ref["package_spec"],
+                    ref["resolved_version"],
+                    ref["artifact_digest"],
+                    1 if ref.get("enabled", True) else 0,
+                    int(ref.get("order_index", position)),
+                    now,
+                    now,
+                ),
+            )
+
+
+def list_deck_claude_plugin_refs(db, deck_id: str) -> list[dict]:
+    """All Claude plugin references for a Deck (enabled and disabled)."""
+    cursor = db.execute(
+        """
+        SELECT r.*, i.status AS installation_status, i.source_type,
+               i.claude_cli_version, i.manifest_json
+        FROM deck_claude_plugin_refs r
+        JOIN claude_plugin_installations i ON i.id = r.plugin_installation_id
+        WHERE r.deck_id = ?
+        ORDER BY r.order_index, r.created_at, r.plugin_installation_id
+        """,
+        (deck_id,),
+    )
+    columns = [desc[0] for desc in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def backfill_builtin_deck_plugin_refs(db, builtin_installation_id: str,
+                                      package_spec: str, resolved_version: str,
+                                      artifact_digest: str) -> int:
+    """One-time migration: bind decks using the legacy built-in Deck Plugin to
+    the new platform-builtin Claude plugin installation.
+
+    Legacy signal: an active ``deck_plugin_bindings`` row for
+    ``ink.dream.story-workflow``.  Idempotent (INSERT OR IGNORE).  Returns the
+    number of refs created.  Old threads and the legacy workflow tables are
+    untouched.
+    """
+    rows = db.execute(
+        """
+        SELECT DISTINCT deck_id FROM deck_plugin_bindings
+        WHERE status = 'active' AND deck_plugin_id = 'ink.dream.story-workflow'
+        """
+    ).fetchall()
+    now = datetime.now(timezone.utc).isoformat()
+    created = 0
+    with db:
+        for row in rows:
+            cursor = db.execute(
+                """
+                INSERT OR IGNORE INTO deck_claude_plugin_refs (
+                    deck_id, plugin_installation_id, package_spec,
+                    resolved_version, artifact_digest, enabled, order_index,
+                    created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)
+                """,
+                (
+                    row[0],
+                    builtin_installation_id,
+                    package_spec,
+                    resolved_version,
+                    artifact_digest,
+                    now,
+                    now,
+                ),
+            )
+            created += cursor.rowcount
+    return created
 
 
 def drop_story_workspace_tables(db):

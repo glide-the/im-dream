@@ -142,6 +142,87 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
         "meaning": "A selected configuration reference changed before execution.",
         "recovery": "Use the frozen version or explicitly create a new binding and run.",
     },
+    # Claude Code plugin install/pack pipeline (deck-integration-delta).
+    "CLAUDE_PLUGIN_SPEC_INVALID": {
+        "phase": "selection",
+        "meaning": "The package spec is invalid. Use <plugin>@<marketplace>.",
+        "recovery": "Correct the package spec and retry the install.",
+    },
+    "CLAUDE_PLUGIN_SOURCE_UNKNOWN": {
+        "phase": "selection",
+        "meaning": "The plugin source is not a server-declared source.",
+        "recovery": "Use a marketplace package spec or a declared platform-builtin plugin.",
+    },
+    "CLAUDE_PLUGIN_MARKETPLACE_UNKNOWN": {
+        "phase": "install",
+        "meaning": "The marketplace is not registered in the managed workspace.",
+        "recovery": "Use a plugin from a server-registered marketplace.",
+    },
+    "CLAUDE_PLUGIN_CLI_UNAVAILABLE": {
+        "phase": "install",
+        "meaning": "The Claude Code CLI is not available on this host.",
+        "recovery": "Install or update Claude Code and retry.",
+    },
+    "CLAUDE_PLUGIN_INSTALL_FAILED": {
+        "phase": "install",
+        "meaning": "The real claude plugin install execution failed.",
+        "recovery": "Inspect the operation evidence and retry.",
+    },
+    "CLAUDE_PLUGIN_REGISTRY_MISMATCH": {
+        "phase": "install",
+        "meaning": "The CLI registry has no cache-contained entry after install.",
+        "recovery": "Retry the install; if it persists, reinstall the Claude Code CLI.",
+    },
+    "CLAUDE_PLUGIN_MANIFEST_INVALID": {
+        "phase": "install",
+        "meaning": "The plugin manifest is missing or invalid.",
+        "recovery": "Fix .claude-plugin/plugin.json and retry.",
+    },
+    "CLAUDE_PLUGIN_ARTIFACT_FAILED": {
+        "phase": "install",
+        "meaning": "The plugin artifact could not be imported or verified.",
+        "recovery": "Retry the install; the artifact store refuses unverifiable content.",
+    },
+    "CLAUDE_PLUGIN_NOT_FOUND": {
+        "phase": "selection",
+        "meaning": "The plugin installation does not exist.",
+        "recovery": "Install the plugin first.",
+    },
+    "CLAUDE_PLUGIN_NOT_READY": {
+        "phase": "selection",
+        "meaning": "The plugin installation is not in ready state.",
+        "recovery": "Wait for the install operation or reinstall.",
+    },
+    "CLAUDE_PLUGIN_INTEGRITY_FAILED": {
+        "phase": "verification",
+        "meaning": "The plugin artifact failed digest verification.",
+        "recovery": "Reinstall the plugin; unverifiable artifacts are never loaded.",
+    },
+    "CLAUDE_PLUGIN_INCOMPATIBLE": {
+        "phase": "selection",
+        "meaning": "The plugin is not compatible with the current Claude Code version.",
+        "recovery": "Update the plugin or the Claude Code CLI.",
+    },
+    "CLAUDE_PLUGIN_REF_INVALID": {
+        "phase": "selection",
+        "meaning": "The Deck plugin reference set is invalid.",
+        "recovery": "Submit references to ready installations only.",
+    },
+    "CLAUDE_PLUGIN_OPERATION_NOT_FOUND": {
+        "phase": "install",
+        "meaning": "The install operation does not exist.",
+        "recovery": "Check the operation id.",
+    },
+    "CLAUDE_PLUGIN_MANIFEST_INVALID_SCHEMA": {
+        "phase": "verification",
+        "meaning": "The workspace launch manifest is invalid.",
+        "recovery": "Recreate the chat workspace.",
+    },
+    "CLAUDE_PLUGIN_PACK_MISSING": {
+        "phase": "verification",
+        "meaning": "A packed plugin directory is missing from the workspace.",
+        "recovery": "Recreate the chat workspace so plugins are re-packed.",
+    },
 }
 
 

@@ -105,9 +105,19 @@ def _operation(
 
 
 def _registered_claude_plugin_path(plugin_id: str, version: str) -> Path | None:
-    """Resolve a Claude-managed install without trusting a request path."""
-    registry = Path.home() / ".claude" / "plugins" / "installed_plugins.json"
-    cache_root = (Path.home() / ".claude" / "plugins" / "cache").resolve()
+    """Resolve a CLI-managed install from the server-managed registry only.
+
+    2026-08-02 (deck-integration-delta): this used to read the developer's
+    real ``~/.claude/plugins/installed_plugins.json``.  Plugin installs now
+    live in the server-managed runtime root (isolated CLAUDE_CONFIG_DIR);
+    the developer's personal registry is never consulted.
+    """
+    try:
+        from services.claude_plugin import runtime as _plugin_runtime
+    except ModuleNotFoundError:
+        from backend.services.claude_plugin import runtime as _plugin_runtime
+    registry = _plugin_runtime.get_cli_registry_path()
+    cache_root = _plugin_runtime.get_cli_cache_root().resolve()
     try:
         payload = json.loads(registry.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

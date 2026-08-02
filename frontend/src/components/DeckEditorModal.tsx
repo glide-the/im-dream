@@ -10,6 +10,7 @@ import { COLORS, iconMap } from './deckVisuals';
 import type { ActiveChatVoice } from '../lib/chat-schema';
 import DeckPluginBindingCard from './deck/DeckPluginBindingCard';
 import DeckPluginBindingStatus from './deck/DeckPluginBindingStatus';
+import DeckClaudePluginSelector from './DeckClaudePluginSelector';
 import DeckPluginVersionPicker from './deck/DeckPluginVersionPicker';
 import { useDeckPluginBinding } from '../hooks/useDeckPluginBinding';
 import { useDeckPluginOptions } from '../hooks/useDeckPluginOptions';
@@ -304,6 +305,9 @@ export default function DeckEditorModal({
               currentWorkflowRunId={currentWorkflowRunId}
             />
           </section>
+
+          {/* Claude Code plugins: shared-installation references (digest-pinned). */}
+          <DeckClaudePluginSelector deckId={deck.id} disabled={isSystem} />
 
           <div style={{ height: 1, background: 'var(--color-border-paper)', width: '100%' }} />
 

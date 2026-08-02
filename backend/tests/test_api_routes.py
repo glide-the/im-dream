@@ -328,9 +328,11 @@ class ApiRouteContractTests(unittest.TestCase):
 
 
 class ErrorRegistryTests(unittest.TestCase):
-    def test_registry_has_all_27_canonical_codes_with_recovery(self):
+    def test_registry_has_all_43_canonical_codes_with_recovery(self):
+        # 27 legacy codes + 16 Claude Code plugin pipeline codes
+        # (deck-integration-delta, 2026-08-02).
         self.assertGreaterEqual(len(ERROR_REGISTRY), 25)
-        self.assertEqual(len(ERROR_REGISTRY), 27)
+        self.assertEqual(len(ERROR_REGISTRY), 43)
         for code, metadata in ERROR_REGISTRY.items():
             self.assertRegex(code, r"^[A-Z][A-Z0-9_]+$")
             self.assertTrue(metadata["phase"])

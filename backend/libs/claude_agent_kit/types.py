@@ -198,10 +198,13 @@ class AgentRunOptions:
     sandbox_network_mode: Literal["disabled", "allowlist", "open"] = "allowlist"
     # System prompt override.
     system_prompt: Optional[str] = None
-    # Server-generated Claude Code settings JSON. Never accept raw client settings.
-    settings_json: Optional[str] = None
-    # Server-resolved local Claude SDK plugins. Paths are never accepted from clients.
-    local_plugin_paths: tuple[str, ...] = ()
+    # NOTE (2026-08-02, deck-integration-delta): ``settings_json`` and
+    # ``local_plugin_paths`` were removed.  Per-run options must never carry
+    # workspace configuration or plugin artifact paths: settings belong to
+    # the per-thread workspace (``.claude-home`` / CLAUDE_CONFIG_DIR), and
+    # plugins are packed into the workspace and loaded through the
+    # server-controlled launch manifest at the CLI launcher boundary
+    # (plugin_launcher.apply_plugin_launch_options → literal --plugin-dir).
     # Deprecated: context processing is now owned by ClaudeAgentContextBuilder.
     # Kept for backward compatibility with callers that set it; ignored by runner.
     include_runtime_context: bool = True

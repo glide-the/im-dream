@@ -38,7 +38,7 @@ from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import AliasChoices, BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 import database
 from agent_factory import claude_agent_thread_factory
@@ -50,7 +50,7 @@ from claude_agent.thread_retrieval import (
     search_chat_threads,
 )
 from libs.claude_agent_kit.messages.build_user_message_content import AttachmentPayload
-from libs.claude_agent_kit.server.workspace import get_or_create_workspace
+from libs.claude_agent_kit.server.workspace import get_or_create_workspace, get_workspace_root
 from libs.claude_agent_kit.server.workspace_file_sync import (
     WorkspaceFileSyncError,
     WorkspaceFileSyncErrorCode,
@@ -131,6 +131,22 @@ class ChatAttachment(BaseModel):
         return self.model_dump(exclude_none=True)
 
 
+# Client-supplied plugin/settings controls rejected by Deck Chat requests
+# (deck-integration-delta §AgentRunOptions boundary).  Covers snake_case,
+# camelCase and the literal CLI flag spelling.
+_FORBIDDEN_CLIENT_PLUGIN_FIELDS = frozenset({
+    "settings_json", "settingsJson", "settings",
+    "claude_settings_json", "claudeSettingsJson",
+    "local_plugin_paths", "localPluginPaths",
+    "claude_plugin_paths", "claudePluginPaths",
+    "plugin_paths", "pluginPaths", "plugins",
+    "plugin_dir", "pluginDir", "plugin-dir",
+    "enabled_plugins", "enabledPlugins",
+    "plugin_installation_path", "pluginInstallationPath",
+    "package_installation_path", "packageInstallationPath",
+})
+
+
 class ClaudeAgentRequestBody(BaseModel):
     thread_id: Optional[str] = None
     id: Optional[str] = None
@@ -146,6 +162,25 @@ class ClaudeAgentRequestBody(BaseModel):
     editor_state: Optional[dict] = None
     system_prompt: Optional[str] = Field(default=None, validation_alias=AliasChoices("system_prompt", "systemPrompt"))
     deck_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("deck_id", "deckId"))
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_client_plugin_controls(cls, data: Any) -> Any:
+        """Deck Chat requests must never carry plugin/settings controls.
+
+        Rejected (deck-integration-delta §AgentRunOptions boundary): plugin
+        paths, settings JSON, ``--plugin-dir`` values, package installation
+        paths, and dynamic enabledPlugins maps.  Plugin loading is a
+        server-side workspace bootstrap concern only.
+        """
+        if isinstance(data, dict):
+            banned = _FORBIDDEN_CLIENT_PLUGIN_FIELDS.intersection(data.keys())
+            if banned:
+                raise ValueError(
+                    "Client-supplied plugin or settings fields are not accepted: "
+                    + ", ".join(sorted(banned))
+                )
+        return data
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id
@@ -368,12 +403,11 @@ async def claude_agent_stream(
             if deck_context is not None
             else body.system_prompt or None
         ),
-        claude_settings_json=(
-            deck_context.claude_settings_json if deck_context is not None else None
-        ),
-        claude_plugin_paths=(
-            deck_context.claude_plugin_paths if deck_context is not None else ()
-        ),
+        # NOTE (2026-08-02, deck-integration-delta): Deck plugin
+        # settings/paths are no longer passed here.  The thread-locked Deck's
+        # plugin installations are packed into the thread workspace by the
+        # agent service (workspace bootstrap) and loaded by the CLI via
+        # --plugin-dir from the server-controlled launch manifest.
     )
 
     async def generate():
@@ -430,6 +464,61 @@ async def claude_agent_create_thread(
             )
     thread_id = database.create_chat_thread(user_id, deck_id=deck_id)
     return {"thread_id": thread_id, "deck_id": deck_id}
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/plugin-load-receipt")
+async def claude_agent_thread_plugin_load_receipt(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return the workspace plugin pack + launch receipt for a thread.
+
+    The receipt is produced by the server-side workspace packer when the
+    thread's locked Deck has enabled Claude plugin installations.  It carries
+    package spec, resolved version and artifact digest per plugin, plus the
+    frozen flag.  A thread without plugins returns an empty plugin list.
+    """
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    try:
+        from services.claude_plugin import workspace_packer as _packer
+    except ModuleNotFoundError:
+        from backend.services.claude_plugin import workspace_packer as _packer
+
+    payload: dict[str, Any] = {
+        "thread_id": thread_id,
+        "deck_id": thread.get("deck_id"),
+        "workspace_found": False,
+        "receipt": None,
+        "launch_manifest": None,
+    }
+    try:
+        root = get_workspace_root().resolve(strict=False)
+        workspace = (root / thread_id).resolve(strict=False)
+        workspace.relative_to(root)
+    except (OSError, RuntimeError, ValueError):
+        return payload
+    if not workspace.is_dir():
+        return payload
+    payload["workspace_found"] = True
+    receipt_path = workspace / _packer.PACK_RECEIPT_RELATIVE_PATH
+    if receipt_path.is_file():
+        try:
+            payload["receipt"] = json.loads(receipt_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            payload["receipt"] = None
+    manifest_path = workspace / _packer.LAUNCH_MANIFEST_RELATIVE_PATH
+    if manifest_path.is_file():
+        try:
+            payload["launch_manifest"] = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError):
+            payload["launch_manifest"] = None
+    return payload
 
 
 @router.get("/api/claude-agent/threads")

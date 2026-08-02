@@ -64,6 +64,7 @@ if hasattr(time, "tzset"):
     time.tzset()
 
 import asyncio
+import logging
 from datetime import datetime
 import httpx
 from fastapi import FastAPI, HTTPException, Depends, Header, WebSocket
@@ -822,6 +823,7 @@ from routers.reports import router as reports_router
 from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
 from routers.deck_plugins import router as deck_plugins_router
+from routers.claude_plugins import router as claude_plugins_router
 from routers.deck_plugin_binding import router as deck_plugin_binding_router
 from routers.story_workspace import router as story_workspace_router
 from routers.system_config import router as system_config_router
@@ -858,6 +860,75 @@ async def startup_claude_agent():
     """Start the Claude Agent session pool sweeper."""
     claude_agent_thread_factory.start()
     print("✅ Claude Agent factory started\n")
+
+
+@app.on_event("startup")
+async def startup_claude_plugin_seed():
+    """Seed platform-builtin Claude plugins and backfill Deck references.
+
+    Uses the real CLI (``claude plugin validate``) for evidence.  Failure is
+    non-fatal: the app starts normally and the operation record carries the
+    error; installs can be retried from Settings → Plugins.
+    """
+
+    def _seed() -> None:
+        import database as _database
+        from services.claude_plugin.builtin_sources import PLATFORM_BUILTIN_SOURCES
+        from services.claude_plugin.install_service import (
+            PluginInstallError,
+            PluginInstallService,
+        )
+
+        db = _database.get_db()
+        try:
+            service = PluginInstallService(db)
+            for canonical in PLATFORM_BUILTIN_SOURCES:
+                existing = db.execute(
+                    "SELECT id, resolved_version, artifact_digest FROM "
+                    "claude_plugin_installations WHERE package_name = ? AND "
+                    "marketplace = ? AND status = 'ready' ORDER BY created_at DESC "
+                    "LIMIT 1",
+                    (canonical.split("@")[0], canonical.split("@")[1]),
+                ).fetchone()
+                if existing is None:
+                    try:
+                        service.install(canonical, source_type="platform-builtin")
+                    except PluginInstallError as exc:
+                        logging.getLogger(__name__).warning(
+                            "platform-builtin plugin seed failed for %s: %s",
+                            canonical,
+                            exc,
+                        )
+                        continue
+                    existing = db.execute(
+                        "SELECT id, resolved_version, artifact_digest FROM "
+                        "claude_plugin_installations WHERE package_name = ? AND "
+                        "marketplace = ? AND status = 'ready' ORDER BY created_at "
+                        "DESC LIMIT 1",
+                        (canonical.split("@")[0], canonical.split("@")[1]),
+                    ).fetchone()
+                if existing is None:
+                    continue
+                created = _database.backfill_builtin_deck_plugin_refs(
+                    db,
+                    builtin_installation_id=existing[0],
+                    package_spec=canonical,
+                    resolved_version=existing[1],
+                    artifact_digest=existing[2],
+                )
+                if created:
+                    logging.getLogger(__name__).info(
+                        "backfilled %d deck Claude plugin refs for %s",
+                        created,
+                        canonical,
+                    )
+        finally:
+            db.close()
+
+    try:
+        await asyncio.to_thread(_seed)
+    except Exception:  # noqa: BLE001 - seeding must never block startup
+        logging.getLogger(__name__).exception("claude plugin seed failed")
 
 
 @app.on_event("shutdown")
@@ -934,6 +1005,7 @@ app.include_router(friends_router)
 app.include_router(claude_agent_router)
 app.include_router(storage_router)
 app.include_router(deck_plugins_router)
+app.include_router(claude_plugins_router)
 app.include_router(deck_plugin_binding_router)
 app.include_router(story_workspace_router)
 app.include_router(system_config_router)

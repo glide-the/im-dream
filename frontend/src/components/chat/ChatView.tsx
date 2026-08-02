@@ -94,6 +94,7 @@ import { API_BASE } from '../../lib/apiBase';
 import { getDateLocale } from '../../i18n';
 import { listDecks, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
+import PluginReceiptBadge from './PluginReceiptBadge';
 
 interface ChatThread {
   id: string;
@@ -796,6 +797,8 @@ function ChatViewContent({
                 </div>
               );
             })()}
+            {/* 插件加载 receipt 徽标（package / version / digest） */}
+            <PluginReceiptBadge threadId={activeThreadId ?? null} />
             {/* 新建对话 */}
             <button
               type="button"

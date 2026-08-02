@@ -1,9 +1,14 @@
-"""Deck → Chat → ClaudeAgent context and plugin-loading contract tests."""
+"""Deck → Chat → ClaudeAgent context and plugin-loading contract tests.
+
+2026-08-02 (deck-integration-delta): rewritten for the shared-installation
+architecture.  DeckChatContext no longer produces settings JSON or plugin
+paths; it validates ``deck_claude_plugin_refs`` → ``claude_plugin_installations``
+references and returns them as informational provenance.  Plugin bytes flow
+through the workspace pack, never through per-run agent options.
+"""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-import json
 import os
 from pathlib import Path
 import sys
@@ -18,12 +23,47 @@ if str(BACKEND_ROOT) not in sys.path:
 from services.deck.chat_context import DeckChatContextError, DeckChatContextService
 from services.deck.runtime_context import _compatibility_flag
 import database
-from tests.test_deck_plugin_binding import (
-    BindingFixture,
-    DECK_ID,
-    DIGEST,
-    RUNTIME_PLUGIN_ID,
-)
+from tests.test_deck_plugin_binding import BindingFixture, DECK_ID
+
+
+DIGEST = "sha256:" + "b" * 64
+INSTALLATION_ID = "cpi_test_ready"
+PACKAGE_SPEC = "superpowers@claude-plugins-official"
+
+
+def _insert_installation(db, *, status: str = "ready", installation_id: str = INSTALLATION_ID) -> None:
+    db.execute(
+        """
+        INSERT INTO claude_plugin_installations (
+            id, requested_package_spec, package_name, marketplace,
+            resolved_version, source_type, artifact_digest, artifact_path,
+            claude_cli_version, component_inventory_json, status,
+            operation_id, file_count, installed_at
+        ) VALUES (?, ?, 'superpowers', 'claude-plugins-official',
+                  '6.2.0', 'claude-official', ?, '/managed/artifacts/x',
+                  '2.1.220 (Claude Code)', '{}', ?, 'cop_test', 180,
+                  '2026-08-02T00:00:00')
+        """,
+        (installation_id, PACKAGE_SPEC, DIGEST, status),
+    )
+
+
+def _insert_ref(
+    db,
+    *,
+    deck_id: str = DECK_ID,
+    installation_id: str = INSTALLATION_ID,
+    enabled: int = 1,
+) -> None:
+    db.execute(
+        """
+        INSERT INTO deck_claude_plugin_refs (
+            deck_id, plugin_installation_id, package_spec, resolved_version,
+            artifact_digest, enabled, order_index
+        ) VALUES (?, ?, ?, '6.2.0', ?, ?, 0)
+        """,
+        (deck_id, installation_id, PACKAGE_SPEC, DIGEST, enabled),
+    )
 
 
 class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
@@ -35,6 +75,7 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.environment.start()
         self.fixture = BindingFixture()
         database.create_runtime_plugin_tables(self.fixture.db)
+        database.create_claude_plugin_tables(self.fixture.db)
         self.fixture.db.execute(
             """
             INSERT INTO voices (
@@ -57,75 +98,44 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(context.deck_id, DECK_ID)
         self.assertIn("Dream Guide", context.system_prompt)
         self.assertIn("Keep a cinematic story voice.", context.system_prompt)
-        self.assertIsNone(context.claude_settings_json)
+        self.assertEqual(context.plugin_refs, ())
         self.assertIsNone(context.plugin_provenance)
 
-    async def test_bound_ready_deck_generates_server_owned_claude_settings(self) -> None:
-        await self.fixture.binding.save(
-            deck_id=DECK_ID,
-            actor_id="1",
-            request=BindingFixture.request(0),
-        )
-        now = datetime.now(UTC).isoformat()
-        self.fixture.db.execute(
-            """
-            INSERT INTO runtime_plugin_materializations (
-                runtime_materialization_id, runtime_environment_id,
-                runtime_pool_id, runtime_node_id, claude_code_plugin_id,
-                resolved_version, artifact_digest, materialized_digest,
-                artifact_set_hash, policy_revision, declaration_status,
-                materialization_status, activation_status, materialization_key,
-                attempt_id, attempt_count, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "rpm-deck-chat",
-                "development",
-                "development",
-                "node-local",
-                RUNTIME_PLUGIN_ID,
-                "1.4.2",
-                DIGEST,
-                DIGEST,
-                "sha256:" + "a" * 64,
-                "policy-development",
-                "declared",
-                "materialized",
-                "loadable",
-                "deck-chat-ready",
-                "attempt-deck-chat",
-                1,
-                now,
-                now,
-            ),
-        )
+    async def test_ready_refs_surface_as_digest_pinned_provenance(self) -> None:
+        _insert_installation(self.fixture.db)
+        _insert_ref(self.fixture.db)
         self.fixture.db.commit()
 
         context = await DeckChatContextService(self.fixture.db).resolve(
             deck_id=DECK_ID,
             actor_id="1",
         )
+        self.assertEqual(len(context.plugin_refs), 1)
+        ref = context.plugin_refs[0]
+        self.assertEqual(ref["package_spec"], PACKAGE_SPEC)
+        self.assertEqual(ref["resolved_version"], "6.2.0")
+        self.assertEqual(ref["artifact_digest"], DIGEST)
         self.assertEqual(
-            json.loads(context.claude_settings_json or "{}"),
-            {"enabledPlugins": {RUNTIME_PLUGIN_ID: True}},
+            context.plugin_provenance["source"],  # type: ignore[index]
+            "deck_claude_plugin_refs",
         )
-        self.assertEqual(
-            context.plugin_provenance["binding_revision"], 1  # type: ignore[index]
-        )
-        self.assertIn(RUNTIME_PLUGIN_ID, context.system_prompt)
+        # Provenance is embedded in the system prompt for transparency.
+        self.assertIn(PACKAGE_SPEC, context.system_prompt)
+        # The context must never carry settings JSON or plugin paths.
+        self.assertFalse(hasattr(context, "claude_settings_json"))
+        self.assertFalse(hasattr(context, "claude_plugin_paths"))
 
-    async def test_bound_deck_fails_closed_when_runtime_is_not_materialized(self) -> None:
-        await self.fixture.binding.save(
-            deck_id=DECK_ID,
-            actor_id="1",
-            request=BindingFixture.request(0),
-        )
+    async def test_non_ready_installation_fails_closed(self) -> None:
+        _insert_installation(self.fixture.db, status="installing")
+        _insert_ref(self.fixture.db)
+        self.fixture.db.commit()
+
         with self.assertRaises(DeckChatContextError) as caught:
             await DeckChatContextService(self.fixture.db).resolve(
                 deck_id=DECK_ID,
                 actor_id="1",
             )
-        self.assertEqual(caught.exception.code, "RUNTIME_PLUGIN_NOT_READY")
+        self.assertEqual(caught.exception.code, "DECK_PLUGIN_UNAVAILABLE")
 
     async def test_deck_ownership_is_server_enforced(self) -> None:
         with self.assertRaises(DeckChatContextError) as caught:

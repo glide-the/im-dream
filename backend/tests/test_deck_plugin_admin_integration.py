@@ -112,31 +112,80 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
         self.assertEqual(materialization["materialization_status"], "materialized")
         self.assertEqual(materialization["activation_status"], "loadable")
 
-        deck_id = database.create_deck(101, "Dream Story Deck")
-        db = database.get_db()
+        # New architecture (deck-integration-delta): the chat plugin path is
+        # shared-installation based.  The legacy binding above stays for the
+        # workflow-run path below; chat context now resolves deck refs.
         try:
-            workspace_id = db.execute(
-                "SELECT id FROM story_workspace_workspaces WHERE owner_id = '101'"
-            ).fetchone()["id"]
-            with db:
-                db.execute(
-                    """
-                    INSERT INTO deck_plugin_bindings (
-                        deck_plugin_binding_id, deck_id, workspace_id, creator_id,
-                        deck_plugin_id, deck_plugin_version, binding_revision,
-                        status, applied_to
-                    ) VALUES ('dpb_11111111111111111111111111111111', ?, ?, '101', ?, ?, 1,
-                              'active', 'next_run')
-                    """,
-                    (deck_id, workspace_id, BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
-                )
-            context = asyncio.run(
-                DeckChatContextService(db).resolve(deck_id=deck_id, actor_id="101")
+            from services.claude_plugin.cli import resolve_claude_binary
+
+            resolve_claude_binary()
+        except Exception:
+            self.skipTest(
+                "BLOCKED: claude CLI unavailable; real platform-builtin "
+                "install cannot run"
             )
-        finally:
-            db.close()
-        self.assertEqual(context.claude_plugin_paths, (str(builtin_plugin_path().resolve()),))
-        self.assertIsNone(context.claude_settings_json)
+
+        runtime_root = Path(self._tmp.name) / "plugin-runtime"
+        with patch.dict(
+            os.environ,
+            {"INK_CLAUDE_PLUGIN_RUNTIME_ROOT": str(runtime_root)},
+            clear=False,
+        ):
+            from services.claude_plugin.deck_refs_service import DeckPluginRefService
+            from services.claude_plugin.install_service import PluginInstallService
+
+            deck_id = database.create_deck(101, "Dream Story Deck")
+            db = database.get_db()
+            try:
+                workspace_id = db.execute(
+                    "SELECT id FROM story_workspace_workspaces WHERE owner_id = '101'"
+                ).fetchone()["id"]
+                operation = PluginInstallService(db).install(
+                    "ink-dream-story@platform-builtin",
+                    source_type="platform-builtin",
+                )
+                self.assertEqual(operation["status"], "ready", operation)
+                installation_id = operation["installation_id"]
+
+                with db:
+                    db.execute(
+                        """
+                        INSERT INTO deck_plugin_bindings (
+                            deck_plugin_binding_id, deck_id, workspace_id, creator_id,
+                            deck_plugin_id, deck_plugin_version, binding_revision,
+                            status, applied_to
+                        ) VALUES ('dpb_11111111111111111111111111111111', ?, ?, '101', ?, ?, 1,
+                                  'active', 'next_run')
+                        """,
+                        (deck_id, workspace_id, BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
+                    )
+                refs = DeckPluginRefService(db).replace_refs(
+                    deck_id,
+                    "101",
+                    [
+                        {
+                            "plugin_installation_id": installation_id,
+                            "enabled": True,
+                            "order_index": 0,
+                        }
+                    ],
+                )
+                self.assertEqual(len(refs), 1)
+                self.assertEqual(refs[0]["package_spec"], "ink-dream-story@platform-builtin")
+
+                context = asyncio.run(
+                    DeckChatContextService(db).resolve(deck_id=deck_id, actor_id="101")
+                )
+            finally:
+                db.close()
+        self.assertEqual(len(context.plugin_refs), 1)
+        self.assertEqual(
+            context.plugin_refs[0]["package_spec"], "ink-dream-story@platform-builtin"
+        )
+        self.assertEqual(context.plugin_refs[0]["resolved_version"], "1.0.0")
+        # The chat context must never carry settings JSON or plugin paths.
+        self.assertFalse(hasattr(context, "claude_plugin_paths"))
+        self.assertFalse(hasattr(context, "claude_settings_json"))
 
         with TestClient(self.app) as client:
             preflight_response = client.post(

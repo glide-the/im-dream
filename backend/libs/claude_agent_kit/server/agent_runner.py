@@ -230,6 +230,7 @@ from .sdk_env import (
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
 )
+from .plugin_launcher import apply_plugin_launch_options
 from .workspace import get_plans_dir, get_tasks_dir, get_workspace_root, read_task_items
 
 logger = logging.getLogger(__name__)
@@ -2213,13 +2214,21 @@ class ClaudeAgentRunner:
                 can_use_tool=_can_use_tool,
                 cwd=cwd or os.getcwd(),
                 mcp_servers=mcp_servers,
-                settings=opts.settings_json,
-                plugins=[
-                    {"type": "local", "path": plugin_path}
-                    for plugin_path in opts.local_plugin_paths
-                ] or None,
+                # NOTE (2026-08-02, deck-integration-delta): no ``settings=``
+                # and no request-driven ``plugins=`` here.  Settings belong to
+                # the per-thread workspace (.claude-home via
+                # apply_plan_mode_env_to_options below); plugins are attached
+                # right after construction from the server-controlled
+                # workspace launch manifest (literal --plugin-dir argv at the
+                # CLI launcher boundary), never from AgentRunOptions.
             )
         )
+        # Plugin launch boundary: read .ink/launch-manifest.json from the
+        # agent workspace (digest-verified, fail-closed) and attach each
+        # plugin as a literal `--plugin-dir <path>` argv element via the SDK's
+        # local-plugin channel (SubprocessCLITransport).  Clients cannot
+        # submit --plugin-dir and cannot control the manifest.
+        apply_plugin_launch_options(sdk_options, cwd)
         # CLI binary resolution: pin cli_path to the system/npm CLI when one
         # exists (Docker's apply-seccomp-patched runtime; local npm claude),
         # else leave unset so the SDK falls back to its bundled CLI.  An

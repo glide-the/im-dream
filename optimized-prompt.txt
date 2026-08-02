@@ -1,0 +1,577 @@
+Optimized Prompt:
+
+你是一名资深软件架构师、Claude Code CLI/Plugin 专家和全栈工程师。请在以下仓库中纠正当前插件架构，并完成设计、实现和真实执行测试：
+
+```text
+/Users/dmeck/project/ink-dream-memory
+```
+
+以下要求覆盖此前关于 `settings_json`、`local_plugin_paths`、SDK `plugins` 参数以及 `/plugin install` 的错误设计。
+
+## 一、必须遵循的技术事实
+
+Claude Code Plugin 的 shell 可执行安装方式为：
+
+```bash
+claude plugin install superpowers@claude-plugins-official
+```
+
+不要把交互式 slash command 当作 shell 命令：
+
+```text
+/plugin install ...
+```
+
+服务端必须调用真实可执行文件 `claude`，并通过参数数组启动子进程：
+
+```python
+[
+    claude_binary,
+    "plugin",
+    "install",
+    "superpowers@claude-plugins-official",
+]
+```
+
+禁止：
+
+```python
+shell=True
+os.system(...)
+subprocess.run("claude plugin install ...", shell=True)
+```
+
+Claude Code Plugin 官方文档：
+
+```text
+https://code.claude.com/docs/zh-CN/plugins
+```
+
+插件装配后，Claude Code 应通过工作空间中的不可变插件包启动，例如：
+
+```bash
+claude \
+  --plugin-dir ./superpowers@claude-plugins-official@sha256-<digest>
+```
+
+实际目录名称需要包含解析后的 package、marketplace 和制品摘要，例如：
+
+```text
+superpowers@claude-plugins-official@sha256-01ab...
+```
+
+不得使用字面量 `@sha256` 代替真实摘要。
+
+## 二、架构纠偏
+
+### 1. 删除错误的 AgentRunOptions 设计
+
+当前以下设计是错误的：
+
+```text
+AgentRunOptions.settings_json
+AgentRunOptions.claude_settings_json
+AgentRunOptions.local_plugin_paths
+```
+
+这些字段不属于单次 Agent Run 的业务参数，必须从以下链路中移除：
+
+- `AgentRunOptions`
+- ClaudeAgent request model
+- Deck Chat context
+- Agent service
+- Agent runner
+- Claude SDK options 装配
+- 前端 request body
+- 相关测试和文档
+
+同时禁止使用以下方式作为 Deck 插件主加载路径：
+
+```python
+ClaudeAgentOptions(
+    settings=...,
+    plugins=[{"type": "local", "path": "..."}],
+)
+```
+
+也不能由 Deck Chat 动态构造：
+
+```json
+{
+  "enabledPlugins": {
+    "plugin-id": true
+  }
+}
+```
+
+原始需求只是：
+
+> 在公共工作空间中安装和配置 Claude Code Plugin，并在发起 Deck 对话时，将选定插件的不可变文件包复制到当前 ClaudeAgent 工作空间，再通过 Claude CLI 的 `--plugin-dir` 加载。
+
+### 2. 正确分层
+
+系统应拆成以下边界：
+
+```text
+Settings / Plugin Admin
+    ↓
+公共插件安装工作空间
+    ↓
+Claude CLI plugin install
+    ↓
+公共不可变插件制品仓库
+    ↓
+Deck 保存插件引用
+    ↓
+创建 Deck Chat
+    ↓
+把插件包复制到当前 Agent workspace
+    ↓
+claude --plugin-dir ./<immutable-plugin-dir>
+```
+
+职责如下：
+
+| 模块 | 职责 |
+|---|---|
+| Plugin Admin | 输入插件包名、发起安装、查看安装结果 |
+| 公共插件工作空间 | 使用真实 Claude CLI 安装插件 |
+| 公共插件制品仓库 | 保存精确版本、manifest、文件和 digest |
+| Deck | 配置需要使用的插件引用，不保存工作流 |
+| Dream | 选择 Deck、发起对话、处理 Agent 产出和审阅 |
+| Agent Workspace Builder | 把 Deck 插件包复制到当前 Agent workspace |
+| Claude CLI Launcher | 根据 workspace launch manifest 添加 `--plugin-dir` |
+| AgentRunOptions | 只保存真正的单次 Agent 参数，不保存插件路径或 settings JSON |
+
+## 三、公共插件工作空间
+
+实现服务端管理的公共插件安装工作空间，例如：
+
+```text
+<managed-runtime-root>/
+├── install-workspace/
+│   └── .claude/
+├── registry/
+└── artifacts/
+    └── superpowers@claude-plugins-official@sha256-<digest>/
+        ├── .claude-plugin/
+        │   └── plugin.json
+        ├── skills/
+        ├── commands/
+        ├── agents/
+        ├── hooks/
+        └── ...
+```
+
+具体文件结构必须以官方文档和真实 CLI 安装结果为准，不得凭空设计。
+
+公共工作空间必须：
+
+- 由服务端创建和管理；
+- 与开发者真实 `~/.claude` 隔离；
+- 使用 Claude Code 官方支持的配置目录和作用域；
+- 有明确的运行路径和 `cwd`；
+- 不允许浏览器提交本地文件路径；
+- 不允许插件包逃逸出受管根目录；
+- 不通过 symlink 指向用户数据；
+- 保存安装 operation ID；
+- 保存真实 CLI exit code；
+- 保存脱敏后的 stdout/stderr；
+- 保存 CLI 版本；
+- 保存安装前后文件变化；
+- 保存 plugin manifest；
+- 保存解析版本和 SHA-256；
+- 安装失败时不得生成 ready 记录。
+
+## 四、安装流程
+
+用户在 Settings → Plugins 点击 `Install Plugin`，输入：
+
+```text
+superpowers@claude-plugins-official
+```
+
+后端执行：
+
+```python
+subprocess_exec(
+    [
+        claude_binary,
+        "plugin",
+        "install",
+        "superpowers@claude-plugins-official",
+    ],
+    cwd=managed_install_workspace,
+    env=isolated_claude_environment,
+)
+```
+
+要求：
+
+1. 校验 package spec。
+2. 禁止 shell 元字符和命令注入。
+3. 验证 Claude CLI 路径。
+4. 记录 `claude --version`。
+5. 使用明确的公共安装 workspace。
+6. 设置超时。
+7. 捕获退出码。
+8. 检查 CLI 实际写入的 registry 和插件目录。
+9. 找到插件根目录。
+10. 校验 `.claude-plugin/plugin.json`。
+11. 枚举插件包含的 skills、commands、agents、hooks、MCP 或其他官方支持内容。
+12. 计算整个目录的确定性 SHA-256。
+13. 将插件复制到不可变 artifact 目录：
+
+```text
+<package>@<marketplace>@sha256-<digest>
+```
+
+14. 保存数据库安装记录。
+15. 将状态标记为 `ready`。
+16. 同一 package、解析版本和 digest 重试时返回原安装结果。
+
+不得仅修改数据库来伪造安装成功。
+
+## 五、插件来源和兼容版本
+
+支持：
+
+- 平台内置插件配置；
+- Claude 官方 marketplace 插件；
+- GitHub 或官方文档支持的其他分发方式。
+
+平台内置配置只负责声明：
+
+```json
+{
+  "package_spec": "superpowers@claude-plugins-official",
+  "source_type": "claude-official",
+  "compatibility": {
+    "claude_code": ">=1.0.0 <2.0.0",
+    "platform": ">=1.0.0 <2.0.0"
+  }
+}
+```
+
+其他版本由真实 Claude CLI 解析。
+
+数据库必须区分：
+
+```text
+requested_package_spec
+package_name
+marketplace
+requested_version
+resolved_version
+artifact_digest
+artifact_path
+claude_cli_version
+manifest_json
+status
+installed_at
+```
+
+兼容性必须使用真实 SemVer 比较，不能继续使用单纯的环境布尔值代替版本判断。
+
+## 六、Deck 配置
+
+Deck 只保存公共插件安装记录的引用：
+
+```text
+deck_id
+plugin_installation_id
+package_spec
+resolved_version
+artifact_digest
+enabled
+order_index
+```
+
+Deck 不保存：
+
+- 本地绝对路径；
+- `settings_json`；
+- `local_plugin_paths`；
+- Workflow；
+- Workflow Preflight；
+- Workflow Run；
+- Claude SDK plugin options。
+
+Deck Editor 只能选择：
+
+- 已真实安装；
+- 状态为 ready；
+- digest 校验通过；
+- 与当前 Claude Code 版本兼容的插件。
+
+## 七、发起 Deck Chat 时的装配流程
+
+发起 Deck 对话时：
+
+1. 根据 thread 创建当前 ClaudeAgent workspace。
+2. 读取 thread 已锁定的 Deck。
+3. 读取 Deck 已启用的插件安装引用。
+4. 从公共 artifact 仓库加载精确 digest 对应的插件。
+5. 重新校验 manifest 和 digest。
+6. 将插件目录复制到当前 Agent workspace，例如：
+
+```text
+<agent-workspace>/
+├── .ink/
+│   └── plugins/
+│       └── superpowers@claude-plugins-official@sha256-<digest>/
+└── ...
+```
+
+7. 保持官方插件根目录结构完整，尤其是：
+
+```text
+.claude-plugin/plugin.json
+skills/
+commands/
+agents/
+hooks/
+```
+
+8. 创建服务端控制的 launch manifest，例如：
+
+```json
+{
+  "schema_version": "claude-launch/v1",
+  "plugins": [
+    {
+      "package_spec": "superpowers@claude-plugins-official",
+      "relative_path": ".ink/plugins/superpowers@claude-plugins-official@sha256-<digest>",
+      "artifact_digest": "sha256:<digest>"
+    }
+  ]
+}
+```
+
+9. Claude CLI Launcher 从当前 workspace 读取该受控 manifest。
+10. 启动 Claude CLI 时追加：
+
+```bash
+--plugin-dir ./.ink/plugins/superpowers@claude-plugins-official@sha256-<digest>
+```
+
+11. 多个插件必须生成多个独立 `--plugin-dir` 参数，具体格式以官方 CLI 实际行为为准。
+12. 返回插件加载 receipt。
+
+禁止客户端提交 `--plugin-dir`，也禁止客户端控制 launch manifest。
+
+## 八、AgentRunOptions 的正确边界
+
+`AgentRunOptions` 应只保留真正的运行参数，例如：
+
+```text
+model
+max_turns
+cwd
+permission_mode
+tool_choice
+system_prompt
+attachments
+resume/session 信息
+```
+
+不得包含：
+
+```text
+settings_json
+claude_settings_json
+local_plugin_paths
+enabled_plugins
+plugin package spec
+plugin installation path
+plugin artifact path
+```
+
+插件准备属于 workspace bootstrap 阶段。
+
+推荐执行顺序：
+
+```text
+DeckChatContextResolver
+→ WorkspacePluginPacker
+→ WorkspaceLaunchManifestWriter
+→ ClaudeCliLauncher
+→ Agent Session
+```
+
+如果 ClaudeAgent SDK 默认隐藏底层 CLI 参数，应在 CLI process launcher/adapter 边界增加 `--plugin-dir`，不要重新把路径塞回 `AgentRunOptions`。
+
+## 九、现有代码迁移
+
+重点审计并修改：
+
+```text
+backend/services/deck/chat_context.py
+backend/claude_agent/service.py
+backend/libs/claude_agent_kit/types.py
+backend/libs/claude_agent_kit/server/agent_runner.py
+backend/services/deck/admin_gateway.py
+backend/services/deck/builtin_plugin.py
+backend/routers/deck_plugins.py
+frontend/src/components/plugin-admin/
+```
+
+必须输出迁移表：
+
+| 现有字段/实现 | 问题 | 新归属 | 修改方式 |
+|---|---|---|---|
+| `claude_settings_json` | 把 workspace 配置错误放入 run options | Workspace initializer | 删除字段，改为文件配置 |
+| `local_plugin_paths` | 把运行制品路径暴露给 Agent options | Workspace packer | 删除字段 |
+| SDK `plugins` | 绕过 CLI workspace 装配 | CLI launcher | 改为 `--plugin-dir` |
+| `enabledPlugins` | 动态生成 settings | 公共 workspace/CLI 安装 | 移除 Deck 动态生成 |
+| 内置本地目录直载 | 没有真实 CLI 安装证据 | 公共 artifact store | 经过 install、digest、pack |
+
+迁移必须保持旧 thread 可读，不允许破坏用户数据。
+
+## 十、真实执行测试
+
+仅有 mock 测试不算完成。
+
+### 1. CLI 安装测试
+
+在隔离临时目录运行：
+
+```bash
+claude --version
+claude plugin install superpowers@claude-plugins-official
+```
+
+必须记录：
+
+- executable；
+- argv；
+- cwd；
+- CLI version；
+- exit code；
+- 安装前后文件列表；
+- registry 变化；
+- manifest；
+- artifact path；
+- digest。
+
+如果网络、认证或 CLI 不可用，必须报告 `BLOCKED`，不能把 fake CLI 测试当作成功。
+
+### 2. Workspace Pack 测试
+
+创建两个 Agent workspace：
+
+```text
+workspace-a：使用配置了 superpowers 的 Deck
+workspace-b：使用未配置插件的 Deck
+```
+
+验证：
+
+- workspace-a 存在不可变插件目录；
+- workspace-a 插件 digest 正确；
+- workspace-a launch manifest 正确；
+- workspace-a CLI argv 包含正确的 `--plugin-dir`；
+- workspace-b 不存在该插件；
+- workspace-b CLI argv 不包含该参数；
+- 禁用插件后，新 workspace 不再 pack；
+- 已启动 workspace 不被静默修改。
+
+### 3. 实际加载测试
+
+使用真实 Claude CLI 从 workspace-a 启动：
+
+```bash
+claude --plugin-dir ./.ink/plugins/superpowers@claude-plugins-official@sha256-<digest>
+```
+
+按照官方文档提供的检测方式，验证该插件的 commands、skills、agents、hooks 或其他能力确实可见。
+
+必须区分：
+
+- 安装成功；
+- pack 成功；
+- CLI 参数正确；
+- Claude 真正识别插件。
+
+这四项不能合并为一个伪造的 ready 状态。
+
+### 4. 静态契约测试
+
+增加测试明确断言：
+
+```python
+assert "settings_json" not in AgentRunOptions.model_fields
+assert "claude_settings_json" not in AgentRunOptions.model_fields
+assert "local_plugin_paths" not in AgentRunOptions.model_fields
+```
+
+并断言 Deck Chat request 不接受：
+
+```text
+plugin path
+settings JSON
+--plugin-dir
+package installation path
+```
+
+### 5. 浏览器 E2E
+
+验证：
+
+- Install Plugin 输入 `superpowers@claude-plugins-official`；
+- 安装进度与真实 operation ID；
+- Deck Editor 选择插件；
+- Dream 选择 Deck；
+- 发起 Chat；
+- thread 锁定 Deck；
+- 页面显示插件包名、版本和 digest；
+- 后端返回 workspace load receipt；
+- 禁用插件后新对话不再加载。
+
+## 十一、设计文档
+
+更新唯一 canonical 文档：
+
+```text
+docs/design/deck/deck-integration-delta.md
+```
+
+设计稿必须明确：
+
+- Deck 不拥有 Workflow；
+- 插件通过公共工作空间安装；
+- 安装使用 `claude plugin install <package-spec>`；
+- 对话使用 workspace plugin pack；
+- Claude 启动使用 `--plugin-dir`；
+- `AgentRunOptions` 不支持 settings/plugin path；
+- Settings 属于 workspace 配置；
+- 插件路径由服务端控制；
+- 真实 CLI 测试是完成条件。
+
+## 十二、验收标准
+
+只有全部满足才能宣布完成：
+
+- 已删除 `AgentRunOptions.settings_json`。
+- 已删除 `AgentRunOptions.claude_settings_json`。
+- 已删除 `AgentRunOptions.local_plugin_paths`。
+- Deck Chat 不再动态生成 `enabledPlugins`。
+- Deck Plugin 不再通过 SDK local plugin 参数直载。
+- 服务端真实执行 `claude plugin install`。
+- 插件安装发生在隔离的公共工作空间。
+- 插件生成不可变 digest 目录。
+- Deck 只保存安装引用。
+- Chat 创建时将插件复制到当前 Agent workspace。
+- Claude CLI 使用真实 `--plugin-dir` 参数。
+- 不同 Deck 和 workspace 之间没有插件污染。
+- 有真实 CLI、真实文件变化、真实 pack 和真实加载证据。
+- 单元测试、集成测试、前端 build 和浏览器 E2E 通过。
+- 未执行或受阻的测试明确报告，禁止伪造成功。
+
+Optional Enhancers:
+
+- 使用 `superpowers@claude-plugins-official` 作为强制真实验收插件。
+- 为公共 artifact 仓库增加文件锁和并发安装去重。
+- 将插件包目录归档为只读文件或 CAS 内容寻址存储。
+- 为 GitHub 来源增加 commit SHA 锁定、签名校验和 SBOM。
+- 增加 CLI 版本升级后的插件兼容性重新验证任务。

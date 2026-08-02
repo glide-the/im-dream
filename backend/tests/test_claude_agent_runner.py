@@ -252,15 +252,37 @@ _SDK_USER = agent_runner_module.UserMessage
 
 
 def AssistantMessage(content=None):
-    return _SDK_ASSISTANT(content or [])
+    # claude-agent-sdk 0.2.128 requires ``model``; the in-repo stub does not.
+    try:
+        return _SDK_ASSISTANT(content or [], model="test-model")
+    except TypeError:
+        return _SDK_ASSISTANT(content or [])
 
 
 def ResultMessage(session_id=None, subtype="success", usage=None):
-    return _SDK_RESULT(subtype=subtype, session_id=session_id, usage=usage)
+    try:
+        return _SDK_RESULT(
+            subtype=subtype,
+            duration_ms=1,
+            duration_api_ms=1,
+            is_error=False,
+            num_turns=1,
+            session_id=session_id,
+            usage=usage,
+        )
+    except TypeError:
+        return _SDK_RESULT(subtype=subtype, session_id=session_id, usage=usage)
 
 
 def StreamEvent(event=None, session_id=None):
-    return _SDK_STREAM_EVENT(event=event or {}, session_id=session_id)
+    try:
+        return _SDK_STREAM_EVENT(
+            uuid="test-uuid",
+            session_id=session_id or "test-session",
+            event=event or {},
+        )
+    except TypeError:
+        return _SDK_STREAM_EVENT(event=event or {}, session_id=session_id)
 
 
 def UserMessage(content=None):
@@ -400,22 +422,57 @@ class TestClaudeAgentRunnerBasicText(_RunnerBase):
         self.assertEqual(result.full_text, "Hello World")
         self.assertEqual(received, ["Hello", " World"])
 
-    async def test_server_resolved_local_plugins_are_forwarded_to_sdk(self):
+    async def test_workspace_launch_manifest_plugins_are_forwarded_to_sdk(self):
+        """Plugins reach the CLI only via the workspace launch manifest.
+
+        deck-integration-delta: AgentRunOptions no longer carries plugin
+        paths.  A server-packed workspace (.ink/launch-manifest.json +
+        digest-pinned .ink/plugins/<immutable> dir) is read at the CLI
+        launcher boundary and forwarded as literal --plugin-dir argv via the
+        SDK's local-plugin channel.
+        """
+        import json as _json
+
+        from libs.claude_agent_kit.server.plugin_digest import compute_plugin_digest
+
         self.set_query([])
         runner = self.make_runner()
-        with tempfile.TemporaryDirectory() as plugin_dir:
+        with tempfile.TemporaryDirectory() as workspace:
+            ws = Path(workspace)
+            packed = ws / ".ink" / "plugins" / "demo-plugin@demo-market@sha256-pending"
+            packed.mkdir(parents=True)
+            (packed / ".claude-plugin").mkdir()
+            (packed / ".claude-plugin" / "plugin.json").write_text(
+                _json.dumps({"name": "demo-plugin", "version": "1.0.0"})
+            )
+            digest = compute_plugin_digest(packed)
+            renamed = packed.with_name(f"demo-plugin@demo-market@{digest.replace(':', '-')}")
+            packed.rename(renamed)
+            manifest = {
+                "schema_version": "claude-launch/v1",
+                "plugins": [
+                    {
+                        "package_spec": "demo-plugin@demo-market",
+                        "resolved_version": "1.0.0",
+                        "relative_path": f".ink/plugins/{renamed.name}",
+                        "artifact_digest": digest,
+                    }
+                ],
+            }
+            (ws / ".ink" / "launch-manifest.json").write_text(_json.dumps(manifest))
+
             await runner.run_streaming(
                 opts=AgentRunOptions(
-                    thread_id="test-session-local-plugin",
+                    thread_id="test-session-manifest-plugin",
                     user_message="create a story proposal",
                     tool_choice="none",
-                    local_plugin_paths=(plugin_dir,),
+                    cwd=str(ws),
                 ),
                 callbacks=AgentStreamingCallbacks(on_text_delta=lambda _delta: None),
             )
         self.assertEqual(
             self._mock_client.last_options.plugins,
-            [{"type": "local", "path": plugin_dir}],
+            [{"type": "local", "path": str(renamed.resolve())}],
         )
 
 

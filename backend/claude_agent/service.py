@@ -185,9 +185,29 @@ from services.story_workspace.agent_integration import (
 )
 from story_workspace.contracts import StoryWorkspaceAgentStoryPayload
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
+from services.claude_plugin.workspace_packer import pack_workspace_plugins
 from session_events import EditSessionEvent, session_event_bus
 
 logger = logging.getLogger(__name__)
+
+
+def _pack_thread_workspace_plugins(cwd: str, deck_id: Optional[str]) -> None:
+    """Pack the thread-locked Deck's plugins into the thread workspace.
+
+    Runs on the service executor thread (SQLite + filesystem work).  Errors
+    propagate to the chat turn: a workspace whose Deck references unverifiable
+    plugins must fail closed, never launch with a partial plugin set.  A
+    thread without a locked Deck is a full no-op (no DB connection, no
+    filesystem writes).
+    """
+
+    if not deck_id:
+        return
+    db = _db.get_db()
+    try:
+        pack_workspace_plugins(db, workspace=Path(cwd), deck_id=deck_id)
+    finally:
+        db.close()
 
 
 def _store_story_workspace_output_sync(
@@ -819,10 +839,12 @@ class ClaudeAgentRunRequest:
     editor_state: Optional[dict[str, Any]] = None
     # Voice / deck system prompt injected as context into each user message.
     system_prompt: Optional[str] = None
-    # Server-generated Claude Code settings for validated Deck runtime plugins.
-    claude_settings_json: Optional[str] = None
-    # Server-resolved local Claude SDK plugin directories for the selected Deck.
-    claude_plugin_paths: tuple[str, ...] = ()
+    # NOTE (2026-08-02, deck-integration-delta): ``claude_settings_json`` and
+    # ``claude_plugin_paths`` were removed.  Per-turn requests must never
+    # carry settings JSON or plugin paths: plugins are resolved from the
+    # thread-locked Deck, packed into the thread workspace by the server, and
+    # loaded via the workspace launch manifest (--plugin-dir) at the CLI
+    # launcher boundary.
 
 
 # ---------------------------------------------------------------------------
@@ -1117,6 +1139,31 @@ class ClaudeAgentService:
         # None on first turn lets the SDK allocate a fresh session ID.
         thread_id_for_agent: Optional[str] = existing_claude_session_id if should_resume else None
 
+        # Deck plugin pack (deck-integration-delta §Chat Assembly): pack the
+        # thread-locked Deck's enabled plugin installations into the thread
+        # workspace and write the server-controlled launch manifest.  Frozen
+        # semantics — an already-packed workspace is re-validated and its
+        # packed copies repaired, never silently reconfigured; disabling a
+        # plugin on the Deck only affects workspaces created afterwards.
+        # deck_id reuses the resume-check row above (no extra DB read); with
+        # no locked Deck the pack is a full no-op (no DB, no filesystem).
+        if workspace_enabled and cwd:
+            thread_deck_id = (
+                str((existing_session or {}).get("deck_id") or "").strip() or None
+            )
+            if thread_deck_id:
+                try:
+                    await asyncio.to_thread(
+                        _pack_thread_workspace_plugins, cwd, thread_deck_id
+                    )
+                except Exception:
+                    logger.exception(
+                        "Deck plugin pack failed for thread_id=%s deck_id=%s",
+                        request.thread_id,
+                        thread_deck_id,
+                    )
+                    raise
+
         # editor_session_id is user_sessions.id from /api/sessions, carried in
         # editor_state["id"].  This is distinct from state.session_id (Claude thread ID)
         # and os.path.basename(cwd) (workspace directory name).
@@ -1154,8 +1201,6 @@ class ClaudeAgentService:
             im_full_access_enabled=im_full_access_enabled,
             sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
             system_prompt=state.system_prompt,
-            settings_json=request.claude_settings_json,
-            local_plugin_paths=request.claude_plugin_paths,
             mcp_env={**user_env_vars, "INK_AGENT_USER_ID": str(request.user_id)},
             user_sdk_env=user_env_vars,
             editor_state=active_editor_state,
