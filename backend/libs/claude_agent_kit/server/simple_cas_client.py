@@ -70,16 +70,23 @@ class SimpleClaudeAgentSDKClient(IClaudeAgentSDKClient):
     async def load_messages(
         self,
         session_id: Optional[str],
+        cwd: Optional[str] = None,
     ) -> dict[str, list[Any]]:
         """Load message history for a given session ID.
 
         Returns ``{"messages": [...]}`` so callers can destructure the same
         way as the TypeScript version.
+
+        In Workspace Mode the SDK subprocess's config home is redirected to
+        ``{cwd}/.claude-home`` (``apply_claude_config_home_to_options``), so
+        pass
+        the thread workspace as *cwd* to locate transcripts there instead of
+        the global ``~/.claude/projects``.
         """
         if not session_id:
             return {"messages": []}
 
-        projects_root = get_projects_root()
+        projects_root = get_projects_root(cwd)
         if not projects_root:
             return {"messages": []}
 

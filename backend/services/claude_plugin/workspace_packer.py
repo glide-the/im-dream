@@ -23,7 +23,11 @@ from pathlib import Path
 import sqlite3
 from typing import Any
 
-from . import artifact_store
+from . import artifact_store, runtime, workspace_init
+
+
+def _as_pack_error(exc: workspace_init.WorkspaceInitError) -> "WorkspacePackError":
+    return WorkspacePackError(exc.code, str(exc))
 
 LAUNCH_MANIFEST_RELATIVE_PATH = Path(".ink") / "launch-manifest.json"
 PLUGIN_SLOTS_RELATIVE_DIR = Path(".ink") / "plugins"
@@ -120,12 +124,14 @@ def pack_workspace_plugins(
     existing_manifest = _read_manifest(workspace)
     if existing_manifest is not None:
         # Frozen workspace: re-validate, repair missing packed dirs, never swap.
+        # Init steps are never re-run; the managed venv is a derived cache
+        # keyed by digest and may be rebuilt when missing.
         plugins = existing_manifest.get("plugins") or []
         repaired: list[dict[str, Any]] = []
         for entry in plugins:
-            repaired.append(
-                _ensure_packed_entry(workspace, entry, allow_repair=True)
-            )
+            repaired_entry = _ensure_packed_entry(workspace, entry, allow_repair=True)
+            _ensure_frozen_runtime(workspace, entry)
+            repaired.append(repaired_entry)
         receipt.update(
             {
                 "packed_at": existing_manifest.get("written_at"),
@@ -133,12 +139,18 @@ def pack_workspace_plugins(
                 "frozen": True,
             }
         )
+        if existing_manifest.get("runtime"):
+            receipt["runtime"] = existing_manifest["runtime"]
+        if existing_manifest.get("init_steps"):
+            receipt["init_steps"] = existing_manifest["init_steps"]
         _write_json(workspace / PACK_RECEIPT_RELATIVE_PATH, receipt)
         return receipt
 
     refs = load_deck_plugin_refs(db, deck_id)
     manifest_entries: list[dict[str, Any]] = []
     receipt_entries: list[dict[str, Any]] = []
+    init_steps: list[dict[str, Any]] = []
+    venv_dirs: list[str] = []
     for ref in refs:
         if ref["installation_status"] != "ready":
             raise WorkspacePackError(
@@ -154,6 +166,25 @@ def pack_workspace_plugins(
         )
         destination = workspace / PLUGIN_SLOTS_RELATIVE_DIR / packed_name
         artifact_store.copy_into_workspace(artifact, destination)
+        try:
+            profile = workspace_init.load_init_profile(destination)
+            if profile is not None:
+                init_steps.extend(
+                    {**step, "package_spec": ref["package_spec"]}
+                    for step in workspace_init.execute_init_profile(
+                        workspace, destination, profile
+                    )
+                )
+                if profile.python is not None:
+                    venv_dir = workspace_init.ensure_plugin_venv(
+                        runtime.get_runtime_root(),
+                        ref["artifact_digest"],
+                        destination,
+                        profile.python,
+                    )
+                    venv_dirs.append(str(venv_dir))
+        except workspace_init.WorkspaceInitError as exc:
+            raise _as_pack_error(exc) from exc
         manifest_entries.append(_manifest_entry(ref, workspace, packed_name))
         receipt_entries.append(
             {
@@ -171,11 +202,41 @@ def pack_workspace_plugins(
         "written_at": _now(),
         "plugins": manifest_entries,
     }
+    if venv_dirs:
+        manifest["runtime"] = {"venv_dirs": venv_dirs}
+    if init_steps:
+        manifest["init_steps"] = init_steps
     if manifest_entries:
         _write_json(workspace / LAUNCH_MANIFEST_RELATIVE_PATH, manifest)
     receipt.update({"packed_at": manifest["written_at"], "plugins": receipt_entries})
+    if venv_dirs:
+        receipt["runtime"] = {"venv_dirs": venv_dirs}
+    if init_steps:
+        receipt["init_steps"] = init_steps
     _write_json(workspace / PACK_RECEIPT_RELATIVE_PATH, receipt)
     return receipt
+
+
+def _ensure_frozen_runtime(workspace: Path, entry: dict[str, Any]) -> None:
+    """Rebuild the managed venv of a frozen workspace entry when missing.
+
+    Never re-runs init steps and never swaps plugin versions — the venv is a
+    derived cache addressable by the pinned artifact digest.
+    """
+    relative_path = str(entry.get("relative_path") or "")
+    digest = str(entry.get("artifact_digest") or "")
+    packed_dir = (workspace / relative_path).resolve()
+    if not packed_dir.is_dir():
+        return  # missing-dir repair is handled by _ensure_packed_entry
+    try:
+        profile = workspace_init.load_init_profile(packed_dir)
+        if profile is None or profile.python is None:
+            return
+        workspace_init.ensure_plugin_venv(
+            runtime.get_runtime_root(), digest, packed_dir, profile.python
+        )
+    except workspace_init.WorkspaceInitError as exc:
+        raise _as_pack_error(exc) from exc
 
 
 def _ensure_packed_entry(

@@ -44,6 +44,27 @@ KNOWN_MARKETPLACE_REPOS: dict[str, str] = {
     "claude-community": "anthropics/claude-plugins-community",
 }
 
+# Server-declared local marketplaces: repository-owned directories holding a
+# standard .claude-plugin/marketplace.json (never accepted from a browser).
+# Development-time distribution form for the Dream driver plugin
+# (drama-forge-workspace-init-design §3.3 / C8).
+KNOWN_MARKETPLACE_LOCAL_PATHS: dict[str, str] = {
+    "drama-studio": "marketplaces/drama-studio",
+}
+
+
+def resolve_local_marketplace(name: str) -> Path | None:
+    """Return the server-declared repository path for a local marketplace."""
+    rel = KNOWN_MARKETPLACE_LOCAL_PATHS.get(name)
+    if rel is None:
+        return None
+    path = (_REPO_ROOT / rel).resolve()
+    try:
+        path.relative_to(_REPO_ROOT.resolve())
+    except ValueError:
+        return None
+    return path if (path / ".claude-plugin" / "marketplace.json").is_file() else None
+
 
 def resolve_builtin_source(spec_canonical: str) -> Path | None:
     """Return the server-declared repository path for a builtin spec."""

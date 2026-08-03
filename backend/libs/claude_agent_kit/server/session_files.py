@@ -1,8 +1,13 @@
-# [Input] None — standalone session JSONL file reader.
+# [Input] Consume CLAUDE_CONFIG_DIR / HOME process env and optional workspace cwd.
 # [Output] Provide locate_session_file, read_session_messages,
 #          parse_session_messages_from_jsonl to simple_cas_client.
 # [Pos] utility node in libs/claude_agent_kit/server
 # [Sync] 2026-05-01: initial Python port from server/utils/session-files.ts
+# [Sync] 2026-08-03: get_projects_root honors CLAUDE_CONFIG_DIR and accepts an
+#                    optional workspace cwd — apply_claude_config_home_to_options
+#                    (sdk_env) points the SDK subprocess's config home at
+#                    {cwd}/.claude-home, so transcripts land under
+#                    {cwd}/.claude-home/projects/, not ~/.claude/projects.
 
 """Session file utilities.
 
@@ -10,23 +15,38 @@ Python translation of TypeScript:
   server/utils/session-files.ts
 
 Session files are JSONL files stored at:
-  ~/.claude/projects/<project-dir>/<session-id>.jsonl
+  {CLAUDE_CONFIG_DIR or ~/.claude or {cwd}/.claude-home}/projects/<project-dir>/<session-id>.jsonl
 """
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Union
+
+from .sdk_env import resolve_claude_config_home
 
 SESSION_FILE_EXTENSION = ".jsonl"
 
 
-def get_projects_root() -> Optional[str]:
-    """Return the Claude projects root directory (``~/.claude/projects``).
+def get_projects_root(cwd: Optional[Union[str, Path]] = None) -> Optional[str]:
+    """Return the Claude projects root directory.
 
     Maps to TypeScript ``getProjectsRoot``.
+
+    Resolution order (delegates to ``sdk_env.resolve_claude_config_home``):
+      1. ``CLAUDE_CONFIG_DIR`` process env → ``{CLAUDE_CONFIG_DIR}/projects``.
+      2. *cwd* provided (Workspace Mode) → ``{cwd}/.claude-home/projects``,
+         mirroring ``sdk_env.apply_claude_config_home_to_options`` which
+         injects ``CLAUDE_CONFIG_DIR={cwd}/.claude-home`` into the SDK
+         subprocess (claude-plan §5.1).  The backend process itself does not
+         carry that env var, so callers that know the thread workspace must
+         pass it in.
+      3. Fallback ``~/.claude/projects``.
     """
+    config_home = resolve_claude_config_home(cwd)
+    if config_home:
+        return str(Path(config_home) / "projects")
     home_dir = os.environ.get("HOME") or os.environ.get("USERPROFILE")
     if not home_dir:
         return None

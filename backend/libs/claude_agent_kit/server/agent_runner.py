@@ -86,6 +86,17 @@
 #                    claude-agent-permission-policy.md); add PostToolUse
 #                    plan-file observer hook with INK_AGENT_PLAN_EMIT_DEBOUNCE_MS
 #                    debounce firing callbacks.on_plan_file_changed.
+# [Sync] 2026-08-03: scope correction + injection hoist — CLAUDE_CONFIG_DIR
+#                    relocates the CLI's ENTIRE config home (plans/, tasks/,
+#                    projects/ transcripts, plugins/, agents/, caches), not
+#                    just Plan Mode.  apply_claude_config_home_to_options
+#                    (renamed from apply_plan_mode_env_to_options) now runs
+#                    FIRST on sdk_options, before apply_project_sdk_runtime_
+#                    options/plugin/cli_path/task_v2, consuming the
+#                    service-resolved AgentRunOptions.claude_config_home
+#                    (decision made right after workspace/cwd resolution, not
+#                    inside this lifecycle); falls back to resolving from cwd
+#                    for direct runner callers.
 # [Sync] 2026-07-20: claude-todo — DEFAULT_ALLOWED_TOOLS gains the v2 task
 #                    tools (TaskCreate/TaskUpdate/TaskList/TaskGet); all five
 #                    todo tools (+TodoWrite) classified low-sensitivity
@@ -224,8 +235,8 @@ from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
+    apply_claude_config_home_to_options,
     apply_cli_path_to_options,
-    apply_plan_mode_env_to_options,
     apply_project_sdk_runtime_options,
     apply_task_v2_env_to_options,
     apply_user_sdk_env_to_options,
@@ -2189,40 +2200,54 @@ class ClaudeAgentRunner:
             logger.debug("Editor MCP enabled; session context flows via tool arguments.")
 
         _stderr_buf = tempfile.TemporaryFile()
-        sdk_options = apply_project_sdk_runtime_options(
-            ClaudeAgentOptions(
-                max_turns=max_turns,
-                allowed_tools=effective_allowed_tools,
-                include_partial_messages=include_partial_messages,
-                hooks={
-                    "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])],
-                    "PostToolUse": [
-                        HookMatcher(
-                            matcher=None,
-                            hooks=[
-                                _post_tool_use_hook,
-                                _plan_file_post_tool_use_hook,
-                                _tasks_changed_post_tool_use_hook,
-                            ],
-                        )
-                    ],
-                },
-                # SDK control channel for system-level permission asks the
-                # PreToolUse hook cannot see — primarily the sandbox-runtime
-                # network ask ("SandboxNetworkAccess"); routed through the same
-                # frontend confirmation side-channel.
-                can_use_tool=_can_use_tool,
-                cwd=cwd or os.getcwd(),
-                mcp_servers=mcp_servers,
-                # NOTE (2026-08-02, deck-integration-delta): no ``settings=``
-                # and no request-driven ``plugins=`` here.  Settings belong to
-                # the per-thread workspace (.claude-home via
-                # apply_plan_mode_env_to_options below); plugins are attached
-                # right after construction from the server-controlled
-                # workspace launch manifest (literal --plugin-dir argv at the
-                # CLI launcher boundary), never from AgentRunOptions.
-            )
+        sdk_options = ClaudeAgentOptions(
+            max_turns=max_turns,
+            allowed_tools=effective_allowed_tools,
+            include_partial_messages=include_partial_messages,
+            hooks={
+                "PreToolUse": [HookMatcher(matcher=None, hooks=[_pre_tool_use_hook])],
+                "PostToolUse": [
+                    HookMatcher(
+                        matcher=None,
+                        hooks=[
+                            _post_tool_use_hook,
+                            _plan_file_post_tool_use_hook,
+                            _tasks_changed_post_tool_use_hook,
+                        ],
+                    )
+                ],
+            },
+            # SDK control channel for system-level permission asks the
+            # PreToolUse hook cannot see — primarily the sandbox-runtime
+            # network ask ("SandboxNetworkAccess"); routed through the same
+            # frontend confirmation side-channel.
+            can_use_tool=_can_use_tool,
+            cwd=cwd or os.getcwd(),
+            mcp_servers=mcp_servers,
+            # NOTE (2026-08-02, deck-integration-delta): no ``settings=``
+            # and no request-driven ``plugins=`` here.  Settings belong to
+            # the per-thread workspace (.claude-home via
+            # apply_claude_config_home_to_options below); plugins are attached
+            # right after construction from the server-controlled
+            # workspace launch manifest (literal --plugin-dir argv at the
+            # CLI launcher boundary), never from AgentRunOptions.
         )
+        # Claude config home FIRST — before every other claude module
+        # configures the env chain (2026-08-03).  The service layer resolves
+        # AgentRunOptions.claude_config_home right after workspace/cwd
+        # resolution; the runner only falls back to resolving from cwd for
+        # direct callers.  Setting CLAUDE_CONFIG_DIR here (before
+        # apply_project_sdk_runtime_options) makes it explicit options.env,
+        # so no later merge (backend/.env, process env, user_sdk_env) can
+        # relocate the CLI's config home — plans/, tasks/, projects/
+        # transcripts, plugins/, agents/ and caches all stay inside the
+        # per-thread workspace, never the user's real ~/.claude.
+        apply_claude_config_home_to_options(
+            sdk_options,
+            config_home=opts.claude_config_home,
+            cwd=cwd,
+        )
+        sdk_options = apply_project_sdk_runtime_options(sdk_options)
         # Plugin launch boundary: read .ink/launch-manifest.json from the
         # agent workspace (digest-verified, fail-closed) and attach each
         # plugin as a literal `--plugin-dir <path>` argv element via the SDK's
@@ -2234,12 +2259,6 @@ class ClaudeAgentRunner:
         # else leave unset so the SDK falls back to its bundled CLI.  An
         # explicit cli_path on options always wins.
         apply_cli_path_to_options(sdk_options)
-        # Plan Mode: point CLAUDE_CONFIG_DIR at {cwd}/.claude-home so CLI plan
-        # files land in the per-thread workspace (claude-plan §5.1).  Lowest
-        # priority in the env chain: an explicit CLAUDE_CONFIG_DIR already on
-        # options.env is preserved, and the user_sdk_env merge below still
-        # overlays on top.  No-op when cwd is falsy (Workspace Mode disabled).
-        apply_plan_mode_env_to_options(sdk_options, cwd)
         # Task v2 (claude-todo §5.1): always pin CLAUDE_CODE_TASK_LIST_ID=main
         # at the same lowest priority (explicit values preserved; user_sdk_env
         # below still overlays on top) so the new CLI's default-on task tools

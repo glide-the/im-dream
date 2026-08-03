@@ -62,6 +62,13 @@
 # [Sync] 2026-06-13: read workspace_enabled before cwd resolution and force
 #                    Claude Code cwd to the server-owned thread workspace whose
 #                    .claude/settings.json carries the sandbox block.
+# [Sync] 2026-08-03: Phase 1 (assemble_context) — resolve the per-thread
+#                    Claude config home together with cwd establishment
+#                    (sdk_env.resolve_claude_config_home), before the resume
+#                    transcript probe, Deck plugin pack, and any other claude
+#                    module; carried into the runner via
+#                    AgentRunOptions.claude_config_home, so CLAUDE_CONFIG_DIR
+#                    is no longer decided inside the run_streaming lifecycle.
 # [Sync] 2026-06-13: remove assemble_context local database import that shadowed
 #                    module-level _db before system_config lookup.
 # [Sync] 2026-06-09: P2 fix — split _persist_turn into _persist_user_message (called
@@ -167,6 +174,7 @@ from uuid import uuid4
 import database as _db
 from claude_agent.context_builder import ClaudeAgentContextBuilder
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
+from libs.claude_agent_kit.server.sdk_env import resolve_claude_config_home
 from claude_agent.thread_pool import AgentRunState
 from libs.claude_agent_kit.server.workspace import (
     get_or_create_workspace,
@@ -1027,6 +1035,15 @@ class ClaudeAgentService:
                 )
             state.with_cwd(cwd)
 
+            # Phase 1: establish the per-thread Claude config home together
+            # with cwd — BEFORE any claude module (resume transcript probe,
+            # Deck plugin pack, plan/tasks readers, agent run) touches the
+            # filesystem (2026-08-03 scope correction — CLAUDE_CONFIG_DIR
+            # relocates plans/, tasks/, projects/ transcripts, plugins/,
+            # agents/ and caches, not just Plan Mode files).  Carried into
+            # the runner via AgentRunOptions.claude_config_home below.
+            claude_config_home = resolve_claude_config_home(cwd)
+
             try:
                 from notion import build_notion_facade  # noqa: PLC0415
                 from notion.errors import NotionConnectorNotFoundError  # noqa: PLC0415
@@ -1076,6 +1093,11 @@ class ClaudeAgentService:
                 )
             state.with_cwd("")
 
+            # Phase 1: Workspace Mode disabled — no per-thread config home;
+            # resolution falls back to an explicit CLAUDE_CONFIG_DIR process
+            # env var or the CLI's official default (~/.claude).
+            claude_config_home = resolve_claude_config_home(None)
+
         # ---------------------------------------------------------------
         # Resolve resume: load existing chat_thread to get claude_session_id.
         #
@@ -1115,7 +1137,7 @@ class ClaudeAgentService:
             candidate_session_id = str(
                 resume_existing_session.get("claude_session_id") or ""
             ).strip()
-            projects_root = get_projects_root()
+            projects_root = get_projects_root(cwd or None)
             located_session_path = (
                 await locate_session_file(projects_root, candidate_session_id)
                 if (projects_root and candidate_session_id)
@@ -1196,6 +1218,7 @@ class ClaudeAgentService:
             resume=should_resume,
             model=request.model,
             cwd=cwd or None,
+            claude_config_home=claude_config_home,
             max_turns=request.max_turns,
             tool_choice=request.tool_choice,  # type: ignore[arg-type]
             im_full_access_enabled=im_full_access_enabled,

@@ -38,7 +38,7 @@ Claude Code 官方 Plan Mode 中，模型通过 `EnterPlanMode` / `ExitPlanMode`
 ### 3.2 本系统锚点（2026-07-20 代码现状）
 
 - Runner cwd：`service.py:443-458`，`workspace_enabled` 时 `cwd = {AGENT_CWD}/{thread_id}`（`workspace.py:315/484/518`），客户端 `request.cwd` 被忽略。
-- SDK env 注入链：`agent_runner.py:1696-1710` 构造 `sdk_options` 后经 `apply_user_sdk_env_to_options` 合并，优先级 `backend/.env` → 进程环境 → `user_sdk_env` → 显式 `options.env`（[`claude-sdk-env-design.md`](./claude-sdk-env-design.md) §5.1）。`CLAUDE_CONFIG_DIR` 当前不在 `_PROJECT_DOTENV_SDK_ENV_NAMES`（`sdk_env.py:28-45`），后端源码中无任何引用。
+- SDK env 注入链：`agent_runner.py` `run_streaming` 构造 `sdk_options` 后经 `apply_user_sdk_env_to_options` 合并，优先级 `backend/.env` → 进程环境 → `user_sdk_env` → 显式 `options.env`（[`claude-sdk-env-design.md`](./claude-sdk-env-design.md) §5.1）。`CLAUDE_CONFIG_DIR` 当前不在 `_PROJECT_DOTENV_SDK_ENV_NAMES`（`sdk_env.py:28-45`），后端源码中无任何引用。**[2026-08-03 更新]** `CLAUDE_CONFIG_DIR` 已由本系统注入：Phase 1（`assemble_context`）随 cwd 建立经 `sdk_env.resolve_claude_config_home` 解析，runner 侧由 `apply_claude_config_home_to_options` 在 options 构建**第一步**注入 `{workspace}/.claude-home`；该重定向覆盖 CLI 整个 config home（plans/、tasks/、projects/ 转录、plugins/、agents/、缓存），详见 [`claude-sdk-env-design.md`](./claude-sdk-env-design.md) §5.5B。
 - SSE 通道：`POST /api/claude-agent` 单 `data:` 帧、按 JSON `type` 分发（[`claude-agent-api-contracts.md`](./claude-agent-api-contracts.md) §4.5.1）；前端 `claude-agent-transport.ts` `convertEvent` 映射为 UIMessageChunk。
 - 权限策略：`_LOW_SENSITIVITY_QUERY_TOOL_NAMES`（`agent_runner.py:211-232`）、`_apply_low_sensitivity_query_permission`（1074-1109），决策顺序见 [`claude-agent-permission-policy.md`](./claude-agent-permission-policy.md) §6。
 
@@ -73,7 +73,7 @@ flowchart LR
 
 - 取值：`{workspace_path}/.claude-home`（per-thread 隔离，随 workspace TTL 一并清理）。
 - 效果：官方默认逻辑使 plans 目录解析为 `{workspace}/.claude-home/plans/{slug}.md`。
-- 注入点（复用优先）：`sdk_env.py` 新增 `apply_plan_mode_env_to_options(options, cwd)`，在 `agent_runner.py` 构造 `sdk_options` 后、`apply_user_sdk_env_to_options` 之前调用；仅 `workspace_enabled` 且 cwd 非空时生效。优先级链中位于最低层，允许 `user_sdk_env` 显式覆盖（与用户 env 设计 §3 一致）。
+- 注入点 **[2026-08-03 更新]**：`sdk_env.apply_claude_config_home_to_options`（由 `apply_plan_mode_env_to_options` 更名，旧名保留兼容包装）。决策在 **Phase 1（`assemble_context`）** 随 cwd 建立完成（`resolve_claude_config_home` → `AgentRunOptions.claude_config_home`），runner 在 `sdk_options` 构造后**第一步**注入（早于 `apply_project_sdk_runtime_options`），显式 `options.env` 语义使后续任何合并都无法搬移；仅 `workspace_enabled` 且 cwd 非空时生效。仅允许显式 `CLAUDE_CONFIG_DIR` 覆盖，`user_sdk_env` 白名单不含该键。
 - **不改动** `_PROJECT_DOTENV_SDK_ENV_NAMES`：`CLAUDE_CONFIG_DIR` 不允许从 `backend/.env` 透传，避免全局 config home 被意外搬移。
 
 **备选方案 — `plansDirectory` settings 键：**
@@ -305,3 +305,4 @@ cd frontend && npm run build
 | 2026-07-20 | 不做 fsnotify，事件驱动捕获 | 所有写入必经工具流 | 无新依赖 |
 | 2026-07-20 | `plan-*` 事件不映射 UIMessageChunk、不入 `collected_parts` | 计划是面板状态而非对话消息 | 历史消息回放不含计划帧，依赖 REST 水合 |
 | 2026-07-20 | ExitPlanMode 降级低敏并记录官方偏差 | 无 TUI 场景下 ask 语义阻塞自动流转 | 须同步 policy 文档与测试 |
+| 2026-08-03 | 范围修正：config home 重定向覆盖 plans/tasks/projects/plugins/agents/缓存，非 Plan Mode 专属；解析决策上移到 Phase 1（`assemble_context`），注入改名 `apply_claude_config_home_to_options` 并置于 options 构建第一步 | 旧命名误导为 plan-only；决策埋在 `run_streaming` 导致 resume 探测等前置模块无统一依据 | sdk_env 增 `resolve_claude_config_home` 单一真相源；`AgentRunOptions.claude_config_home` 透传；`get_projects_root(cwd)` 定位转录；旧名保留兼容 |

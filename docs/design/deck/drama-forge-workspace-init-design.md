@@ -126,7 +126,7 @@ marketplaces/drama-studio/
 
 ## §5 受管 Python venv（C2）
 
-**存放**：制品外共享 store —— `data/claude-plugins/runtime/<artifact_digest>/venv/`。
+**存放**：制品外共享 store —— `<受管运行时根>/plugin-runtimes/<digest>/venv/`（实现注记：digest 中的 `:` 按制品仓库惯例替换为 `-`，因为 `python -m venv` 拒绝含 PATH 分隔符的路径；受管运行时根即现有 `INK_CLAUDE_PLUGIN_RUNTIME_ROOT`/`backend/data/claude-plugin-runtime`）。
 **寻址键**：`artifact_digest`（requirements 已随制品固定，天然覆盖「依赖变更 → 新 venv」）+ 创建时记录 `python_version`/`requirements_sha256` 于 `<digest>/runtime-receipt.json` 以便审计。
 **解释器来源**：受管 Python（与后端同策略），要求 ≥ profile.min_version。
 **创建时机**：首次 pack 引用该制品的工作区时（懒创建）；成功后写 receipt；失败即 `WorkspacePackError("CLAUDE_PLUGIN_RUNTIME_FAILED")`，**不降级为系统 python3**（依赖缺失的半可用状态比明确报错更难排查）。

@@ -178,6 +178,17 @@ class AgentRunOptions:
     model: Optional[str] = None
     # Working directory for the agent.
     cwd: Optional[str] = None
+    # Server-resolved Claude config home for this thread (2026-08-03).
+    # Resolved by the service layer via sdk_env.resolve_claude_config_home()
+    # right after workspace/cwd resolution — BEFORE any claude module
+    # (resume probe, plugin pack, plan/tasks readers) touches the
+    # filesystem — so the redirect decision is not buried in the
+    # run_streaming lifecycle.  The runner applies it as the FIRST
+    # options-build step (CLAUDE_CONFIG_DIR), relocating the CLI's entire
+    # config home (plans/, tasks/, projects/ transcripts, plugins/, agents/,
+    # caches) into the per-thread workspace.  When None the runner falls
+    # back to resolving from ``cwd`` itself.
+    claude_config_home: Optional[str] = None
     # Maximum turns for the agent.
     max_turns: int = 100
     # Allowed tools for the agent.
@@ -289,6 +300,12 @@ class IClaudeAgentSDKClient(ABC):
     async def load_messages(
         self,
         session_id: Optional[str],
+        cwd: Optional[str] = None,
     ) -> dict[str, list[Any]]:
-        """Load message history for a session. Returns ``{"messages": [...]}``. """
+        """Load message history for a session. Returns ``{"messages": [...]}``.
+
+        *cwd* is the thread workspace in Workspace Mode; it locates
+        transcripts under ``{cwd}/.claude-home/projects`` instead of the
+        global ``~/.claude/projects``.
+        """
         ...

@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -139,6 +140,51 @@ def _verify_entry(workspace: Path, entry: Any) -> dict[str, Any]:
     }
 
 
+def read_workspace_runtime_venv_dirs(cwd: str | Path | None) -> list[str]:
+    """Return validated managed-venv dirs declared by the workspace manifest.
+
+    Empty list means "no manifest" or "manifest without a runtime section".
+    A declared but missing venv dir raises — fail-closed, because hook
+    subprocesses would otherwise silently fall back to a system python3
+    without the plugin's dependencies (drama-forge-workspace-init-design §5).
+    """
+    if not cwd:
+        return []
+    workspace = Path(cwd).resolve()
+    manifest_path = workspace / LAUNCH_MANIFEST_RELATIVE_PATH
+    if not manifest_path.is_file():
+        return []
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise PluginLaunchError(
+            "CLAUDE_PLUGIN_MANIFEST_INVALID",
+            f"launch manifest is not valid JSON: {manifest_path}",
+        ) from exc
+    runtime = payload.get("runtime") if isinstance(payload, dict) else None
+    if runtime is None:
+        return []
+    if not isinstance(runtime, dict) or not isinstance(runtime.get("venv_dirs"), list):
+        raise PluginLaunchError(
+            "CLAUDE_PLUGIN_MANIFEST_INVALID",
+            "manifest 'runtime.venv_dirs' must be a list",
+        )
+    venv_dirs: list[str] = []
+    for item in runtime["venv_dirs"]:
+        if not isinstance(item, str) or not Path(item).is_absolute():
+            raise PluginLaunchError(
+                "CLAUDE_PLUGIN_MANIFEST_INVALID",
+                f"runtime.venv_dirs entry must be an absolute path: {item!r}",
+            )
+        if not (Path(item) / "bin" / "python3").is_file():
+            raise PluginLaunchError(
+                "CLAUDE_PLUGIN_RUNTIME_MISSING",
+                f"managed plugin venv is missing its interpreter: {item}",
+            )
+        venv_dirs.append(item)
+    return venv_dirs
+
+
 def apply_plugin_launch_options(sdk_options: Any, cwd: str | Path | None) -> list[dict[str, Any]]:
     """Attach verified workspace plugins to *sdk_options* (CLI argv boundary).
 
@@ -152,6 +198,22 @@ def apply_plugin_launch_options(sdk_options: Any, cwd: str | Path | None) -> lis
     sdk_options.plugins = [
         {"type": "local", "path": entry["absolute_path"]} for entry in entries
     ]
+    # Managed plugin runtimes (workspace-init design §5): prepend each
+    # manifest-declared venv's bin/ to PATH so hook subprocesses (children of
+    # the claude CLI) resolve python3 with the plugin's dependencies.
+    venv_dirs = read_workspace_runtime_venv_dirs(cwd)
+    if venv_dirs:
+        existing_env = getattr(sdk_options, "env", None) or {}
+        if not isinstance(existing_env, dict):
+            existing_env = dict(existing_env)
+        base_path = existing_env.get("PATH") or os.environ.get("PATH", "")
+        sdk_options.env = {
+            **existing_env,
+            "PATH": os.pathsep.join(
+                [*(str(Path(d) / "bin") for d in venv_dirs), base_path]
+            ),
+            "VIRTUAL_ENV": venv_dirs[0],
+        }
     logger.info(
         "Claude CLI launch: --plugin-dir × %d from workspace manifest (%s)",
         len(entries),

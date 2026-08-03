@@ -208,6 +208,16 @@ options.extra_args["setting-sources"] = "project"
 
 > **环境变量生命周期警告（2026-07-26 生产事故）**：`server.py::_drop_unsupported_agent_env()` 在 uvicorn 启动时清空所有不在 `allowed_ink_names` 白名单内的 `INK_AGENT_*` 变量——`/proc/1/environ` 里能看到不代表 `os.environ` 里还在。`INK_AGENT_SANDBOX_SECCOMP_APPLY_PATH` 与 `INK_AGENT_SANDBOX_EXTRA_ALLOW_READ` 曾因此被静默清除（settings.json 丢失 `sandbox.seccomp`、额外读路径失效），已补入白名单。**新增任何 `INK_AGENT_*` 运行时配置键时必须同步登记该白名单。**
 
+### 5.5B Claude config home 重定向（CLAUDE_CONFIG_DIR）**[2026-08-03 范围修正]**
+
+**范围修正**：`CLAUDE_CONFIG_DIR={cwd}/.claude-home` 不只服务 Plan Mode。注入后 CLI 的**整个 config home** 搬入 per-thread workspace —— `plans/`、`tasks/`、`projects/`（session 转录 JSONL）、`plugins/`、`agents/`、skills/settings 缓存等所有内置功能都不再读取用户真实 `~/.claude`。因此所有需要解析 config-home 相对路径的后端模块（resume 转录探测、plan/tasks 读取、插件打包）必须走统一解析器，绝不直接碰 `~/.claude`。
+
+**统一解析器**：`sdk_env.resolve_claude_config_home(cwd)` 为单一真相源，优先级 `CLAUDE_CONFIG_DIR` 进程环境变量 → `{cwd}/.claude-home` → `None`（调用方回退官方默认 `~/.claude`）。`session_files.get_projects_root(cwd)` 等读取函数全部委托给它。
+
+**注入时机**：决策**不埋在 `run_streaming` 生命周期里**，而是放在 **Phase 1: Context Assembly**（`ClaudeAgentService.assemble_context`）——cwd 在工作区分支建立（`state.with_cwd(cwd)`）时同步调用 `resolve_claude_config_home(cwd)`，Workspace Mode 关闭分支以 `resolve_claude_config_home(None)` 清除。该点早于 resume 转录探测、Deck 插件打包、plan/tasks 读取等所有 claude 模块触碰文件系统的时机，结果通过 `AgentRunOptions.claude_config_home` 传入 runner。
+
+**注入顺序**：`run_streaming` 中 `apply_claude_config_home_to_options`（2026-08-03 由 `apply_plan_mode_env_to_options` 更名，旧名保留为兼容包装；常量 `_PLAN_MODE_CONFIG_HOME_DIRNAME` → `_CLAUDE_CONFIG_HOME_DIRNAME`，旧名保留别名）在 `sdk_options` 构造后**第一步**执行 —— 早于 `apply_project_sdk_runtime_options` / plugin launch / cli_path / task_v2 / user_sdk_env。由于 `merge_project_dotenv_env` 中显式 `options.env` 优先级最高，先写入的 `CLAUDE_CONFIG_DIR` 不会被后续任何合并搬移（`CLAUDE_CONFIG_DIR` 仍不在 dotenv/user_sdk_env 白名单内）。runner 对直接调用方保留从 `cwd` 就地解析的兜底。
+
 ### 5.6 时序图
 
 ```mermaid
@@ -223,8 +233,12 @@ sequenceDiagram
     Svc->>Workspace: get_or_create_workspace(workspace_key)
     Workspace->>Workspace: sync project .claude template into cwd
     Workspace-->>Svc: workspace_path
-    Svc->>Runner: run_streaming(AgentRunOptions)
+    Note over Svc: Phase 1 Context Assembly：cwd 建立时同步解析 config home
+    Svc->>Env: resolve_claude_config_home(cwd)（早于 resume 探测/插件打包）
+    Env-->>Svc: claude_config_home
+    Svc->>Runner: run_streaming(AgentRunOptions.claude_config_home)
     Runner->>Runner: build ClaudeAgentOptions
+    Runner->>Env: apply_claude_config_home_to_options（第一步）
     Runner->>Env: apply_project_sdk_runtime_options(options)
     Env-->>Runner: options.env plus extra_args["setting-sources"]="project"
     Runner->>Runner: verify env keys before query_stream

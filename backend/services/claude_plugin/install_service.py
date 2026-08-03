@@ -30,6 +30,7 @@ from .builtin_sources import (
     KNOWN_MARKETPLACE_REPOS,
     get_builtin_declaration,
     resolve_builtin_source,
+    resolve_local_marketplace,
 )
 from .compatibility import cli_version_to_semver, version_satisfies
 from .digest import compute_plugin_digest
@@ -137,7 +138,62 @@ def enumerate_components(plugin_root: Path) -> dict[str, Any]:
     for marker in _COMPONENT_FILES:
         if (root / marker).is_file():
             inventory[marker.lstrip(".").replace(".json", "")] = True
+    _enumerate_manifest_declared_components(root, inventory)
     return inventory
+
+
+def _as_path_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
+
+
+def _enumerate_manifest_declared_components(root: Path, inventory: dict[str, Any]) -> None:
+    """Merge components declared via plugin.json custom paths (official
+    component config fields: skills/commands/agents/hooks) — e.g. plugins
+    that keep their tree under ``.claude/`` like drama-forge."""
+    manifest = read_manifest(root)
+    if not manifest:
+        return
+    for skills_path in _as_path_list(manifest.get("skills")):
+        skills_dir = root / skills_path
+        if skills_dir.is_dir():
+            inventory["skills"] = sorted(
+                {
+                    *inventory["skills"],
+                    *(
+                        item.name
+                        for item in skills_dir.iterdir()
+                        if item.is_dir() and (item / "SKILL.md").is_file()
+                    ),
+                }
+            )
+    for commands_path in _as_path_list(manifest.get("commands")):
+        commands_dir = root / commands_path
+        if commands_dir.is_dir():
+            inventory["commands"] = sorted(
+                {*inventory["commands"], *(item.name for item in commands_dir.glob("*.md"))}
+            )
+        elif commands_dir.is_file() and commands_dir.suffix == ".md":
+            inventory["commands"] = sorted({*inventory["commands"], commands_dir.name})
+    for agents_path in _as_path_list(manifest.get("agents")):
+        agents_entry = root / agents_path
+        if agents_entry.is_dir():
+            inventory["agents"] = sorted(
+                {*inventory["agents"], *(item.name for item in agents_entry.glob("*.md"))}
+            )
+        elif agents_entry.is_file() and agents_entry.suffix == ".md":
+            inventory["agents"] = sorted({*inventory["agents"], agents_entry.name})
+    for hooks_path in _as_path_list(manifest.get("hooks")):
+        hooks_entry = root / hooks_path
+        if hooks_entry.is_file():
+            inventory["hooks"] = sorted({*inventory["hooks"], hooks_entry.name})
+        elif hooks_entry.is_dir():
+            inventory["hooks"] = sorted(
+                {*inventory["hooks"], *(item.name for item in hooks_entry.glob("*.json"))}
+            )
 
 
 def read_manifest(plugin_root: Path) -> dict[str, Any] | None:
@@ -218,21 +274,25 @@ def _ensure_marketplace(spec: PackageSpec, evidence: dict[str, Any]) -> None:
     if spec.marketplace in _known_marketplaces():
         return
     repo = KNOWN_MARKETPLACE_REPOS.get(spec.marketplace)
-    if repo is None:
+    source: str | None = repo
+    if source is None:
+        local = resolve_local_marketplace(spec.marketplace)
+        source = str(local) if local is not None else None
+    if source is None:
         raise PluginInstallError(
             PLUGIN_MARKETPLACE_UNKNOWN,
             f"marketplace {spec.marketplace!r} is not registered in the managed "
             "workspace and has no server-declared repository",
         )
     execution = cli.run_claude(
-        ["plugin", "marketplace", "add", repo],
+        ["plugin", "marketplace", "add", source],
         cwd=runtime.get_install_workspace(),
     )
     evidence["marketplace_add"] = execution.to_json()
     if not execution.ok:
         raise PluginInstallError(
             PLUGIN_INSTALL_FAILED,
-            f"claude plugin marketplace add {repo} failed "
+            f"claude plugin marketplace add {source} failed "
             f"(exit {execution.exit_code})",
             detail={"stderr": execution.stderr[-500:]},
         )
