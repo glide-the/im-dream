@@ -306,6 +306,8 @@ export interface RenderThreadImageHooks {
   /** Fired as soon as the first slice is captured so the dialog can show a head
    *  preview immediately instead of making the user wait for the full render. */
   onPartialPreview?: (preview: RenderedThreadImage) => void;
+  /** 截取进度（done/total 块数）— 弹窗用它渲染进度条。 */
+  onProgress?: (progress: { done: number; total: number }) => void;
 }
 
 /**
@@ -345,7 +347,17 @@ function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
   });
 }
 
-const yieldToUi = () => new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+/**
+ * 让出主线程直到下一帧绘制完成 — 进度条等 UI 更新有机会真正上屏。
+ * 后台标签页 rAF 不触发，用 120ms 超时兜底避免卡死。
+ */
+const yieldToUi = () => new Promise<void>((resolve) => {
+  const timer = setTimeout(resolve, 120);
+  requestAnimationFrame(() => {
+    clearTimeout(timer);
+    setTimeout(resolve, 0);
+  });
+});
 
 function planSliceHeights(totalHeight: number): number[] {
   const heights: number[] = [];
@@ -446,7 +458,51 @@ class PartCanvasCollector {
  * margin-top（规避 margin 折叠双倍计数），拼回后与原排版逐像素一致；容器 overflow:hidden
  * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。块间 setTimeout(0) 让出主线程。
  */
-export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
+export interface CaptureProgressHooks {
+  onFirstSlice?: (previewUrl: string) => void;
+  onProgress?: (progress: { done: number; total: number }) => void;
+}
+
+/** 从首块 toSvg 输出中提取内嵌字体的 <style> 元素（无字体时返回空串）。 */
+function extractFontStyleElement(svgText: string): string {
+  const match = svgText.match(/<style[^>]*>[\s\S]*?<\/style>/);
+  return match?.[0] ?? '';
+}
+
+/** 把首块提取的字体 <style> 注入后续块（skipFonts 后由我们补回），插入到
+ *  foreignObject 内 XHTML 包裹 div 的开标签之后——与 html-to-image 的位置一致。 */
+function injectFontStyleElement(svgText: string, styleElement: string): string | null {
+  const foIndex = svgText.indexOf('<foreignObject');
+  if (foIndex < 0) {
+    return null;
+  }
+  const divIndex = svgText.indexOf('<div', foIndex);
+  if (divIndex < 0) {
+    return null;
+  }
+  const gtIndex = svgText.indexOf('>', divIndex);
+  if (gtIndex < 0) {
+    return null;
+  }
+  return svgText.slice(0, gtIndex + 1) + styleElement + svgText.slice(gtIndex + 1);
+}
+
+const SVG_DATA_PREFIX = 'data:image/svg+xml;charset=utf-8,';
+const decodeSvgDataUrl = (url: string) => decodeURIComponent(url.slice(url.indexOf(',') + 1));
+const encodeSvgDataUrl = (text: string) => SVG_DATA_PREFIX + encodeURIComponent(text);
+
+/**
+ * Tile 路径 — DOM 分块截取：把卡片的直接子节点按像素高度分组为若干 tile（每块
+ * ≤TILE_HEIGHT_CSS），每块用「卡片浅克隆容器 + 该组子节点深克隆」单独 toSvg。
+ * 这样任何时刻都不存在完整对话的 SVG 文本（长对话下单趟 toSvg 的字符串可达数百 MB，
+ * encodeURIComponent 后更可达 6-9 倍，是 Chrome 卡死/OOM 的根因），单块的序列化/编码
+ * 开销严格有界。子节点间距通过实测 getBoundingClientRect 换算为克隆节点的显式
+ * margin-top（规避 margin 折叠双倍计数），拼回后与原排版逐像素一致；容器 overflow:hidden
+ * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。字体只在首块内嵌一次，后续块
+ * skipFonts 并注入首块的字体 <style>（中文字体 base64 可达数 MB，逐块重复嵌入是
+ * CPU 占满的主因）。块间让出主线程到下一帧，保证进度条实时上屏。
+ */
+export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
   const { toSvg } = await import('html-to-image');
   const totalHeight = node.offsetHeight;
   const cardWidth = node.offsetWidth;
@@ -485,11 +541,14 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
   }
 
   // 3) 逐块克隆、截取、画入拼接器，随即释放位图。
+  hooks?.onProgress?.({ done: 0, total: tiles.length });
   const collector = new PartCanvasCollector(
     cardWidth * CAPTURE_PIXEL_RATIO,
     tiles.map((tile) => tile.heightCss * CAPTURE_PIXEL_RATIO),
     background,
   );
+  // 首块提取出的字体 <style>；null = 尚未确定 / 无字体可复用（保持逐块内嵌）。
+  let sharedFontStyle: string | null = null;
   for (let index = 0; index < tiles.length; index += 1) {
     const tile = tiles[index];
     const wrapper = node.cloneNode(false) as HTMLElement;
@@ -510,17 +569,29 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
     }
     host.appendChild(wrapper);
     try {
-      const tileUrl = await toSvg(wrapper);
+      const skipFonts = index > 0 && sharedFontStyle !== null;
+      let tileUrl = await toSvg(wrapper, skipFonts ? { skipFonts: true } : undefined);
+      if (index === 0) {
+        const extracted = extractFontStyleElement(decodeSvgDataUrl(tileUrl));
+        // 只有确实提取到字体样式才启用后续块的 skipFonts 复用。
+        sharedFontStyle = extracted || null;
+      } else if (skipFonts && sharedFontStyle) {
+        const injected = injectFontStyleElement(decodeSvgDataUrl(tileUrl), sharedFontStyle);
+        if (injected) {
+          tileUrl = encodeSvgDataUrl(injected);
+        }
+      }
       const image = await loadImage(tileUrl);
       // 首块 data URL 直接交给弹窗做预览头（SVG 可在 <img> 中显示）。
       if (index === 0) {
-        onFirstSlice?.(tileUrl);
+        hooks?.onFirstSlice?.(tileUrl);
       }
       await collector.add(image, CAPTURE_PIXEL_RATIO);
       image.src = ''; // 立即释放分块位图
     } finally {
       wrapper.remove();
     }
+    hooks?.onProgress?.({ done: index + 1, total: tiles.length });
     await yieldToUi();
   }
   return collector.finish();
