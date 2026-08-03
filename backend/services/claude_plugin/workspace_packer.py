@@ -19,6 +19,7 @@ plugin on the Deck only affects workspaces created afterwards.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from dataclasses import asdict
 import json
 import logging
 from pathlib import Path
@@ -136,6 +137,22 @@ def pack_workspace_plugins(
             repaired_entry = _ensure_packed_entry(workspace, entry, allow_repair=True)
             _ensure_frozen_runtime(workspace, entry)
             repaired.append(repaired_entry)
+        # Frozen surfaces: validate only, never rebuild — a materialized
+        # protocol directory is an init result, not a derived cache
+        # (design_004 §3.4.4; audit A1).
+        existing_surfaces = existing_manifest.get("surfaces") or []
+        missing = [
+            surface["protocol_dir"]
+            for surface in existing_surfaces
+            if isinstance(surface, dict)
+            and surface.get("protocol_dir")
+            and not (workspace / surface["protocol_dir"] / "workspace.json").exists()
+        ]
+        if missing:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                f"frozen workspace is missing materialized surfaces: {missing}",
+            )
         receipt.update(
             {
                 "packed_at": existing_manifest.get("written_at"),
@@ -143,6 +160,8 @@ def pack_workspace_plugins(
                 "frozen": True,
             }
         )
+        if existing_surfaces:
+            receipt["surfaces"] = existing_surfaces
         if existing_manifest.get("runtime"):
             receipt["runtime"] = existing_manifest["runtime"]
         if existing_manifest.get("init_steps"):
@@ -155,6 +174,9 @@ def pack_workspace_plugins(
     receipt_entries: list[dict[str, Any]] = []
     init_steps: list[dict[str, Any]] = []
     venv_dirs: list[str] = []
+    merged_surfaces: list[workspace_init.SurfaceSpec] = []
+    surface_names_seen: set[str] = set()
+    warnings: list[dict[str, Any]] = []
     for ref in refs:
         if ref["installation_status"] != "ready":
             raise WorkspacePackError(
@@ -179,6 +201,21 @@ def pack_workspace_plugins(
                         workspace, destination, profile
                     )
                 )
+                # Merge declared surfaces: first declaration in pack order
+                # wins; later conflicts are recorded as receipt warnings
+                # (design_004 §3.1/§3.4.4 multi-plugin rule).
+                for spec in profile.surfaces:
+                    if spec.name in surface_names_seen:
+                        warnings.append(
+                            {
+                                "kind": "surface-conflict",
+                                "surface": spec.name,
+                                "package_spec": ref["package_spec"],
+                            }
+                        )
+                        continue
+                    surface_names_seen.add(spec.name)
+                    merged_surfaces.append(spec)
                 if profile.python is not None:
                     venv_dir = workspace_init.ensure_plugin_venv(
                         runtime.get_runtime_root(),
@@ -200,12 +237,39 @@ def pack_workspace_plugins(
                 "verified": True,
             }
         )
+    # Materialize protocol directories once, after every artifact has been
+    # copied and init has run — workspace.json needs the full plugin list
+    # (design_004 §3.4.4; audit A1/A4).  Any failure fails the whole pack.
+    if merged_surfaces:
+        plugins_payload = [
+            {
+                "package_spec": entry["package_spec"],
+                "artifact_digest": entry["artifact_digest"],
+                "resolved_version": entry["resolved_version"],
+            }
+            for entry in manifest_entries
+        ]
+        for spec in merged_surfaces:
+            if spec.name == "dream":
+                try:
+                    init_steps.append(
+                        workspace_init.materialize_dream_surface(
+                            workspace, deck_id, plugins_payload, spec.entry_route
+                        )
+                    )
+                except Exception as exc:
+                    raise WorkspacePackError(
+                        "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                        f"failed to materialize dream surface: {exc}",
+                    ) from exc
     manifest = {
         "schema_version": LAUNCH_MANIFEST_SCHEMA_VERSION,
         "deck_id": deck_id,
         "written_at": _now(),
         "plugins": manifest_entries,
     }
+    if merged_surfaces:
+        manifest["surfaces"] = [asdict(spec) for spec in merged_surfaces]
     if venv_dirs:
         manifest["runtime"] = {"venv_dirs": venv_dirs}
     if init_steps:
@@ -213,6 +277,10 @@ def pack_workspace_plugins(
     if manifest_entries:
         _write_json(workspace / LAUNCH_MANIFEST_RELATIVE_PATH, manifest)
     receipt.update({"packed_at": manifest["written_at"], "plugins": receipt_entries})
+    if merged_surfaces:
+        receipt["surfaces"] = manifest["surfaces"]
+    if warnings:
+        receipt["warnings"] = warnings
     if venv_dirs:
         receipt["runtime"] = {"venv_dirs": venv_dirs}
     if init_steps:

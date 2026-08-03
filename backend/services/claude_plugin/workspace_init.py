@@ -24,7 +24,9 @@ from datetime import UTC, datetime
 import fcntl
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -54,11 +56,71 @@ class PythonRuntimeSpec:
     min_version: str | None = None
 
 
+# --- surfaces[] extension (design_004 §3.1; schema stays workspace-init/v1) ---
+
+ALLOWED_SURFACE_NAMES = frozenset({"dream"})
+RESERVED_PROTOCOL_DIRS = frozenset({".ink", ".editor", ".notion"})
+PROTOCOL_DIR_RE = re.compile(r"^\.[a-z][a-z0-9-]*$")
+ENTRY_ROUTE_PREFIX = "/story-workspace/"
+
+
+@dataclass(frozen=True)
+class SurfaceSpec:
+    name: str
+    protocol_dir: str
+    entry_route: str
+
+
+def validate_surfaces(raw: list) -> list[SurfaceSpec]:
+    """Validate a profile's ``surfaces[]``; fail-closed on anything illegal.
+
+    Rules (design_004 §3.1): name whitelist, single-level dot-prefixed
+    protocol dir outside the reserved set, entry route confined to the
+    story-workspace domain, and per-profile uniqueness of both name and
+    protocol_dir.  Raises ``WorkspaceInitError`` with code
+    ``CLAUDE_PLUGIN_INIT_PROFILE_INVALID`` (surfaced as
+    ``WorkspacePackError`` with the same code at the pack boundary).
+    """
+    specs: list[SurfaceSpec] = []
+    seen_names: set[str] = set()
+    seen_dirs: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise WorkspaceInitError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                "surfaces entries must be objects",
+            )
+        name = item.get("name", "")
+        pdir = item.get("protocol_dir", "")
+        route = item.get("entry_route", "")
+        ok = (
+            isinstance(name, str)
+            and name in ALLOWED_SURFACE_NAMES
+            and isinstance(pdir, str)
+            and PROTOCOL_DIR_RE.match(pdir) is not None
+            and pdir not in RESERVED_PROTOCOL_DIRS
+            and isinstance(route, str)
+            and route.startswith(ENTRY_ROUTE_PREFIX)
+            and name not in seen_names
+            and pdir not in seen_dirs
+        )
+        if not ok:
+            raise WorkspaceInitError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                f"invalid surface declaration: {item!r}",
+            )
+        seen_names.add(name)
+        seen_dirs.add(pdir)
+        specs.append(SurfaceSpec(name=name, protocol_dir=pdir, entry_route=route))
+    return specs
+
+
 @dataclass(frozen=True)
 class InitProfile:
     runtime_dirs: tuple[str, ...] = field(default_factory=tuple)
     workspace_files: tuple[WorkspaceFileSpec, ...] = field(default_factory=tuple)
     python: PythonRuntimeSpec | None = None
+    surfaces: tuple[SurfaceSpec, ...] = field(default_factory=tuple)
 
 
 def _now() -> str:
@@ -176,11 +238,78 @@ def load_init_profile(packed_dir: Path) -> InitProfile | None:
             )
         python_spec = PythonRuntimeSpec(requirements=requirements, min_version=min_version)
 
+    raw_surfaces = payload.get("surfaces") or []
+    if not isinstance(raw_surfaces, list):
+        raise WorkspaceInitError(
+            "CLAUDE_PLUGIN_INIT_PROFILE_INVALID", "'surfaces' must be a list"
+        )
+    surfaces = tuple(validate_surfaces(raw_surfaces))
+
     return InitProfile(
         runtime_dirs=runtime_dirs,
         workspace_files=tuple(workspace_files),
         python=python_spec,
+        surfaces=surfaces,
     )
+
+
+# --- .dream/ protocol directory materialization (design_004 §3.2-§3.4) ---
+
+DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录（只读）
+
+本目录由 packer 在会话首个 agent turn 的 pack 时物化，标识本工作区由 Dream 驱动插件加载。
+
+- workspace.json：静态 launch 事实（deck_id、插件制品清单、入口路由）。
+  它在 pack 后不再变化，不含 workflow_run_id 等 run 级事实。
+- 运行期事实（run 状态、Gate 阶段、快照锁）一律以会话 / story-workspace
+  REST API 为准，不要以本目录文件判断。
+- 本目录对 Agent 只读：不要写入、修改或删除其中任何文件。
+- Dream 提案输出仍走 Chat JSON 合同，不经本目录落盘。
+
+入口路由：/story-workspace/dream
+"""
+
+
+def materialize_dream_surface(
+    workspace: Path, deck_id: str, plugins: list[dict], entry_route: str
+) -> dict:
+    """Materialize the static ``.dream/`` protocol directory; returns an
+    audit step for the pack receipt.
+
+    Atomic (audit A4): both files are written into a temporary directory and
+    moved into place with ``os.rename``; any write failure fails the whole
+    pack and never leaves a half-written ``.dream/``.  An already complete
+    ``.dream/`` is kept (create-if-missing) so a re-pack of the same digest
+    is byte-identical.  The payload holds launch facts only — no
+    workflow_run_id, no timestamps (DEC-029).
+    """
+    workspace = Path(workspace)
+    dream_dir = workspace / ".dream"
+    if (dream_dir / "workspace.json").is_file() and (dream_dir / "README.md").is_file():
+        return {"step": "materialize-surface", "surface": "dream", "path": ".dream/"}
+    payload = {
+        "schema_version": "dream-surface/v1",
+        "deck_id": deck_id,
+        "plugins": plugins,
+        "entry_route": entry_route,
+    }
+    tmp_dir = workspace / f".dream.tmp-{os.getpid()}"
+    if tmp_dir.exists():
+        shutil.rmtree(tmp_dir)
+    tmp_dir.mkdir()
+    try:
+        (tmp_dir / "workspace.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (tmp_dir / "README.md").write_text(DREAM_SURFACE_README, encoding="utf-8")
+        if dream_dir.exists():
+            shutil.rmtree(dream_dir)  # clear a half-written dir before rebuild
+        os.rename(tmp_dir, dream_dir)
+    except Exception:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+    return {"step": "materialize-surface", "surface": "dream", "path": ".dream/"}
 
 
 def execute_init_profile(
