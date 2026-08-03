@@ -14,6 +14,11 @@
 //                    Deep links only do initial positioning — the resolved run
 //                    never freezes selection (stale-review semantics stay with
 //                    design_003).
+//         2026-08-04: F-2 fix — the resolve-once cursor moved into
+//                    createRunDeepLinkResolveGate and now latches only after a
+//                    resolution is applied; an aborted attempt (StrictMode dev
+//                    double-effect) reopens the gate so the second setup still
+//                    resolves fresh-load `?run=` deep links.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -62,6 +67,48 @@ export interface StoryWorkspaceRunDeepLinkState {
 }
 
 /**
+ * Resolve-once gate for the deep-link effect (F-2 fix, 2026-08-04). The
+ * cursor is latched only after a resolution is *applied*; an aborted attempt
+ * (React StrictMode dev double-effect: setup → cleanup → setup) leaves the
+ * gate open so the second setup can still resolve instead of early-returning
+ * on a cursor that was latched before the async read finished.
+ */
+export interface RunDeepLinkResolveGate {
+  /** true when a resolve attempt should start for runId. */
+  begin(runId: string): boolean;
+  /** Latch runId as resolved (call only when the attempt is applied). */
+  markResolved(runId: string): void;
+  /** Abort the in-flight attempt (effect cleanup); the gate stays open. */
+  abort(): void;
+  /** Clear both slots (route switch / deep link disabled). */
+  reset(): void;
+}
+
+export function createRunDeepLinkResolveGate(): RunDeepLinkResolveGate {
+  let inFlightKey: string | null = null;
+  let resolvedKey: string | null = null;
+  return {
+    begin(runId) {
+      if (inFlightKey === runId || resolvedKey === runId) return false;
+      inFlightKey = runId;
+      return true;
+    },
+    markResolved(runId) {
+      if (inFlightKey !== runId) return;
+      resolvedKey = runId;
+      inFlightKey = null;
+    },
+    abort() {
+      inFlightKey = null;
+    },
+    reset() {
+      inFlightKey = null;
+      resolvedKey = null;
+    },
+  };
+}
+
+/**
  * Resolve the Dream page `?run=` deep link once per distinct run id (initial
  * positioning only — later selection changes are not frozen to this run).
  * `enabled` gates resolution to routes that surface the Dream review flow;
@@ -75,21 +122,25 @@ export function useRunDeepLink(
 ): StoryWorkspaceRunDeepLinkState {
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const resolvedKeyRef = useRef<string | null>(null);
+  const gateRef = useRef<RunDeepLinkResolveGate | null>(null);
+  if (gateRef.current === null) {
+    gateRef.current = createRunDeepLinkResolveGate();
+  }
+  const gate = gateRef.current;
 
   useEffect(() => {
     if (!enabled) {
-      resolvedKeyRef.current = null;
+      gate.reset();
       setRun(null);
       setNotice(null);
       return;
     }
-    if (!runId || resolvedKeyRef.current === runId) return;
-    resolvedKeyRef.current = runId;
+    if (!runId || !gate.begin(runId)) return;
 
     let cancelled = false;
     void resolveRunDeepLink(runId).then((resolution) => {
       if (cancelled) return;
+      gate.markResolved(runId);
       if (resolution.status === 'resolved') {
         setRun(resolution.run);
         setNotice(null);
@@ -100,8 +151,11 @@ export function useRunDeepLink(
     });
     return () => {
       cancelled = true;
+      // StrictMode dev double-effect: the aborted first attempt must not keep
+      // the gate closed, or the second setup would early-return (F-2).
+      gate.abort();
     };
-  }, [enabled, runId]);
+  }, [enabled, runId, gate]);
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 
