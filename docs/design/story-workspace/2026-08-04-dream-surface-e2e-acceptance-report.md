@@ -87,7 +87,7 @@
 
 | # | 要点 | 结果 | 说明 |
 |---|------|------|------|
-| 1 | 路由直开 execution → story-workspace 视图；直开 episode review → Dream 工作区 + run 定位 | ✅（定位见 F-2 限制） | 直开执行页落 story-workspace 视图、run 加载（test 3）；episode-review 直开渲染 Dream 工作区（test 4 step 2）；**fresh-load `?run=` 定位在 dev StrictMode 下不生效（F-2），SPA 路径定位已实测（test 4 step 1）** |
+| 1 | 路由直开 execution → story-workspace 视图；直开 episode review → Dream 工作区 + run 定位 | ✅（F-2 已修复） | 直开执行页落 story-workspace 视图、run 加载（test 3）；episode-review 直开渲染 Dream 工作区（test 4 step 2）；fresh-load `?run=` 定位在 dev StrictMode 下曾不生效（F-2，commit `dec5a92` 已修复），SPA 路径定位已实测（test 4 step 1） |
 | 2 | 六态按钮 SPA 导航无整页刷新 + 四态执行页渲染 | ⚠️ 部分实测 | 执行页四态渲染由 seam 测试 + 本次 continuing 真实渲染承载；按钮点击 SPA 导航**浏览器不可测**（聚合端点缺位按钮默认隐藏，见 Step 2）；router `handleNavigate` 无刷新导航已由 Gate 重定向路径实测（无整页加载完成跳转） |
 | 3 | Gate 重定向 + 可关闭提示 + run 定位 | ✅ | pending_review run 直开执行页 → URL 变 `/story-workspace/dream?run=<id>` + 「先完成审阅确认」提示条可关闭 + WorkflowContextBar 显示 run（test 4 step 1，全真实后端） |
 | 4 | 指导闭环（202 / dispatched:false 文案 / 历史 / replayed / 无气泡） | ✅（dispatched:false 例外） | 202、历史、replayed、无气泡全真实通过；**`dispatched:false` 需线程 in-flight 回合，未真实构造**（后端单测 `test_guidance_dispatch_failure_still_accepted` 与侧边栏 seam 文案测试覆盖）；本次实测为 `dispatched:true` 并完成真实注入 |
@@ -108,10 +108,12 @@
 4. **指导闭环非自导自演**：guidance 提交、审计断言、气泡断言分属三个独立通道（REST 写 / REST 读 / 浏览器 DOM），且 assistant 真实产出内容逐字引用指导文本。
 5. **遗留脏文件隔离**：`install_service.py`、`PluginReceiptBadge.tsx`、`i18n.ts`、`test_install_service_reinstall.py` 及多份 docs 改动为工作区既有 WIP，与本 Task 无关，未纳入提交；全量套件在含这些 WIP 的工作区通过，已如实记录环境。
 
-## 六、新发现缺陷（如实记录，未修复——超出本 Task 提交范围，建议后续 Task 跟进）
+## 六、新发现缺陷（已修复——修复记录见下）
 
-- **F-1（真实产品缺陷，轻微）**：指导提交成功反馈（「指导已发送给执行 Agent。」/「已记录，待执行 Agent 拾取」）在线上**永不可见**——`StoryWorkspaceGuidanceSidebar.submit` 在同一 React 批次内 `setFeedback` 后立即 `onSubmitted → loadRun()`，`isLoading=true` 使执行页整体切换到加载分支、侧边栏卸载，反馈未能绘制。seam 测试 `describeStoryWorkspaceGuidanceResult` 锁定文案映射（单元层正确），但 live 页面只剩指导历史条目作为提交证据。建议：`loadRun` 刷新时不翻转 `isLoading`（保留现 run 背景刷新）。
-- **F-2（dev-only 缺陷）**：fresh-load（直接打开/刷新）`?run=` 深链定位在 React StrictMode 下静默失效——`useRunDeepLink` 的 resolve-once 游标在异步读取**之前**置位，StrictMode 挂载双效应（setup→cleanup→setup）使首次 fetch 回调 `cancelled`、第二次 setup 因游标已置位而早退。SPA 导航路径（效应更新而非挂载）不受影响；生产构建无双效应，预期不受影响（**未在生产构建实测**）。探针证据：直开 episode-review 深链时 run read 请求 200 返回合法 run，但 WorkflowContextBar 与提示条均不渲染。建议：游标改在 resolution 完成时置位，或以 `{enabled, runId}` 为键重置。
+- **F-1（真实产品缺陷，轻微）**：指导提交成功反馈（「指导已发送给执行 Agent。」/「已记录，待执行 Agent 拾取」）在线上**永不可见**——`StoryWorkspaceGuidanceSidebar.submit` 在同一 React 批次内 `setFeedback` 后立即 `onSubmitted → loadRun()`，`isLoading=true` 使执行页整体切换到加载分支、侧边栏卸载，反馈未能绘制。seam 测试 `describeStoryWorkspaceGuidanceResult` 锁定文案映射（单元层正确），但 live 页面只剩指导历史条目作为提交证据。
+  - **修复记录（2026-08-04，commit `8510ddc`）**：页面分支判断移入 executionState 新 seam `resolveStoryWorkspaceExecutionPageView`，loading 分支仅首屏（无 run 时）进入；已有 run 的背景刷新（含指导提交后的 `onSubmitted → loadRun`）保持页面与侧边栏挂载，`setFeedback` 正常绘制。验证：`StoryWorkspaceExecutionPage.test.tsx` 新增「page view seam: refresh with a loaded run never re-enters loading (F-1)」用例（先红后绿）；全量 `npx playwright test src/` 63 passed；`npx tsc -b` 与 eslint 改动文件均 exit 0。
+- **F-2（dev-only 缺陷）**：fresh-load（直接打开/刷新）`?run=` 深链定位在 React StrictMode 下静默失效——`useRunDeepLink` 的 resolve-once 游标在异步读取**之前**置位，StrictMode 挂载双效应（setup→cleanup→setup）使首次 fetch 回调 `cancelled`、第二次 setup 因游标已置位而早退。SPA 导航路径（效应更新而非挂载）不受影响；生产构建无双效应，预期不受影响。探针证据：直开 episode-review 深链时 run read 请求 200 返回合法 run，但 WorkflowContextBar 与提示条均不渲染。
+  - **修复记录（2026-08-04，commit `dec5a92`）**：游标移入可测 seam `createRunDeepLinkResolveGate`，仅在 resolution 被应用后才闩锁（`markResolved`）；cleanup 中 `abort()` 重新打开 gate，StrictMode 第二次 setup 可正常完成 resolve。验证：`useRunDeepLink.test.ts` 新增 3 例（闩锁时机 / abort 后重开模拟 StrictMode 双效应 / reset），先红后绿；全量 63 passed；`npx tsc -b`、eslint 改动文件 exit 0；**生产构建冒烟 `npm run build` 通过**（`tsc -b && vite build` ✓ built in 443ms）。
 
 ## 七、遗留未实测项清单（集成替代/未实测）
 
@@ -122,7 +124,7 @@
 | `dispatched:false`「已记录待拾取」真实触发 | **未实测** | 需线程 in-flight 回合；后端 `test_guidance_dispatch_failure_still_accepted` + 侧边栏文案 seam 覆盖 |
 | `awaiting-guidance` 投影态 UI | **未实测** | 无 projection 端点（Task 5 既定降级）；无投影时安全缺省不出现，空态已实测 |
 | Agent 真实产出 `story-workspace-output` → 审阅面板打开（产出侧） | **集成替代** | 既有 deck-dream.spec 以 mock SSE 驱动；本次 guidance 回合 assistant 真实产出提案 JSON 可作旁证，但面板打开链路未以真实产出驱动 |
-| F-2 在生产构建的行为 | **未实测** | StrictMode 双效应为 dev-only，推断生产不受影响，未构建验证 |
+| F-2 在生产构建的行为 | **已实测** | 修复 commit `dec5a92` 后 `npm run build`（含 `tsc -b`）通过；生产无双效应，行为不受 StrictMode 影响 |
 | `retry-step` 指导（failed run）真实链路 | **集成替代** | 后端单测覆盖端点；前端 seam 覆盖 payload 构造；未在浏览器提交 |
 
 ## 八、Commit 范围
