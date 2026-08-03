@@ -909,6 +909,12 @@ function ChatViewContent({
         color: threadVoiceEntry.voice.color,
       }
     : (showPropVoice ? activeVoice : undefined);
+  // @@@ voiceSystemPrompt is injected into runs — scope it to conversations the
+  // voice actually drives (voice threads, derived or freshly requested). Deck
+  // conversations only DISPLAY the voice name as context (design §G4).
+  const voiceSystemPrompt = threadVoiceEntry
+    ? threadVoiceEntry.voice.system_prompt
+    : (isRequestedThreadActive ? activeVoice?.systemPrompt : undefined);
 
   return (
       <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>        <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
@@ -1054,7 +1060,7 @@ function ChatViewContent({
                   inputPlaceholder="Ask Ink & Memory…"
                   editorState={editorState}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
-                  voiceSystemPrompt={activeVoice?.systemPrompt}
+                  voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
                   inputContextControl={(
                     <DeckChatSelector

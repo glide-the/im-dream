@@ -309,8 +309,8 @@ function PendingConfirmationCard({ confirmation }: { confirmation: ExportPending
           gap: '0.4rem',
           height: '2.5rem',
           borderRadius: '0.9rem',
-          background: 'var(--color-action-primary)',
-          color: 'var(--color-text-on-action, #FFFFFF)',
+          background: 'var(--color-export-action-bg)',
+          color: 'var(--color-export-action-text, #FFFFFF)',
           fontSize: '0.85rem',
           fontWeight: 600,
         }}>
@@ -404,8 +404,8 @@ export default function ThreadImageCard({ title, messages, labels, dateText, pen
               <div style={{
                 maxWidth: '82%',
                 boxSizing: 'border-box',
-                background: 'var(--color-action-primary)',
-                color: 'var(--color-text-on-action, #FFFFFF)',
+                background: 'var(--color-export-action-bg)',
+                color: 'var(--color-export-action-text, #FFFFFF)',
                 borderRadius: '1.1rem 1.1rem 0.3rem 1.1rem',
                 padding: '0.7rem 1rem',
                 lineHeight: 1.7,

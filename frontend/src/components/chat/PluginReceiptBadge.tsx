@@ -8,7 +8,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   getThreadPluginLoadReceipt,
+  listClaudePluginInstallations,
   shortDigest,
+  type ClaudePluginInstallation,
   type PluginLoadReceipt,
 } from '../../api/claudePluginAdminApi';
 import type { Deck } from '../../api/voiceApi';
@@ -45,6 +47,7 @@ export default function PluginReceiptBadge({
   const { t, i18n } = useTranslation();
   const language = (i18n.language || 'en').split('-')[0];
   const [receipt, setReceipt] = useState<PluginLoadReceipt | null>(null);
+  const [configuredPlugins, setConfiguredPlugins] = useState<ClaudePluginInstallation[] | null>(null);
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -109,8 +112,7 @@ export default function PluginReceiptBadge({
   }, [open]);
 
   const plugins = receipt?.receipt?.plugins ?? receipt?.launch_manifest?.plugins ?? [];
-  if (!threadId || plugins.length === 0) return null;
-
+  const hasReceiptPlugins = plugins.length > 0;
   const frozen = receipt?.receipt?.frozen === true;
   const deckName = deck
     ? ((language === 'zh' ? deck.name_zh : deck.name_en) || deck.name)
@@ -119,6 +121,36 @@ export default function PluginReceiptBadge({
   const agentCount = deck
     ? (deck.voices ? agents.length : (deck.voice_count ?? 0))
     : 0;
+
+  // @@@ Config-state plugin list (design §4.3): before the first run packs the
+  // workspace there is no receipt, so show the Deck's configured Claude plugin
+  // installations instead. Fetched lazily — only while no receipt is available.
+  useEffect(() => {
+    if (!deck || hasReceiptPlugins) return undefined;
+    let cancelled = false;
+    setConfiguredPlugins(null);
+    listClaudePluginInstallations()
+      .then(({ installations }) => {
+        if (cancelled) return;
+        setConfiguredPlugins(installations.filter((installation) => (
+          installation.status === 'ready'
+          && (installation.deck_refs ?? []).some(
+            (ref) => ref.deck_id === deck.id && ref.enabled,
+          )
+        )));
+      })
+      .catch(() => {
+        if (!cancelled) setConfiguredPlugins([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [deck, hasReceiptPlugins]);
+
+  // @@@ The badge is a DECK CONTEXT badge (design §3): it renders whenever a
+  // Deck context exists, even before the first message / pack — the receipt
+  // plugin chips are a progressive enhancement on top.
+  if (!deck && !hasReceiptPlugins) return null;
 
   return (
     <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
@@ -149,12 +181,16 @@ export default function PluginReceiptBadge({
       >
         <span aria-hidden>🧩</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {plugins.map((plugin) => (
-            <span key={`${plugin.package_spec}-${plugin.artifact_digest}`} style={{ marginRight: '0.5rem' }}>
-              {plugin.package_spec.split('@')[0]} v{plugin.resolved_version ?? '?'} ·{' '}
-              {shortDigest(plugin.artifact_digest)}
-            </span>
-          ))}
+          {hasReceiptPlugins ? (
+            plugins.map((plugin) => (
+              <span key={`${plugin.package_spec}-${plugin.artifact_digest}`} style={{ marginRight: '0.5rem' }}>
+                {plugin.package_spec.split('@')[0]} v{plugin.resolved_version ?? '?'} ·{' '}
+                {shortDigest(plugin.artifact_digest)}
+              </span>
+            ))
+          ) : (
+            deckName
+          )}
         </span>
         {frozen ? <span style={{ opacity: 0.75 }}>🔒</span> : null}
       </button>
@@ -276,32 +312,68 @@ export default function PluginReceiptBadge({
 
           <section>
             <span style={sectionLabelStyle}>
-              {t('chat.deck.metadataPlugins')}（{plugins.length}）
+              {t('chat.deck.metadataPlugins')}（
+              {hasReceiptPlugins ? plugins.length : (configuredPlugins?.length ?? 0)}
+              ）
             </span>
-            <div style={{ display: 'grid', gap: 7 }}>
-              {plugins.map((plugin) => (
-                <div
-                  key={`${plugin.package_spec}-${plugin.artifact_digest}`}
-                  title={plugin.artifact_digest}
-                  style={{
-                    padding: '7px 9px',
-                    borderRadius: 7,
-                    border: '1px solid var(--color-border-paper)',
-                    background: 'var(--color-bg-surface)',
-                  }}
-                >
-                  <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
-                    {plugin.package_spec}{' '}
-                    <span style={{ color: 'var(--color-text-secondary)', fontWeight: 400 }}>
-                      v{plugin.resolved_version ?? '?'}
-                    </span>
+            {hasReceiptPlugins ? (
+              <div style={{ display: 'grid', gap: 7 }}>
+                {plugins.map((plugin) => (
+                  <div
+                    key={`${plugin.package_spec}-${plugin.artifact_digest}`}
+                    title={plugin.artifact_digest}
+                    style={{
+                      padding: '7px 9px',
+                      borderRadius: 7,
+                      border: '1px solid var(--color-border-paper)',
+                      background: 'var(--color-bg-surface)',
+                    }}
+                  >
+                    <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                      {plugin.package_spec}{' '}
+                      <span style={{ color: 'var(--color-text-secondary)', fontWeight: 400 }}>
+                        v{plugin.resolved_version ?? '?'}
+                      </span>
+                    </div>
+                    <code style={{ fontSize: 10, color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>
+                      sha256:{shortDigest(plugin.artifact_digest)}
+                    </code>
                   </div>
-                  <code style={{ fontSize: 10, color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>
-                    sha256:{shortDigest(plugin.artifact_digest)}
-                  </code>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : configuredPlugins === null ? (
+              <span style={{ color: 'var(--color-text-muted)' }}>
+                {t('chat.deck.metadataPacking')}
+              </span>
+            ) : configuredPlugins.length === 0 ? (
+              <span style={{ color: 'var(--color-text-secondary)' }}>
+                {t('chat.deck.metadataNoPlugins')}
+              </span>
+            ) : (
+              <div style={{ display: 'grid', gap: 7 }}>
+                {configuredPlugins.map((installation) => (
+                  <div
+                    key={installation.id}
+                    style={{
+                      padding: '7px 9px',
+                      borderRadius: 7,
+                      border: '1px dashed var(--color-border-paper)',
+                      background: 'var(--color-bg-surface)',
+                    }}
+                  >
+                    <div style={{ color: 'var(--color-text-primary)', fontWeight: 600 }}>
+                      {installation.package_name}{' '}
+                      <span style={{ color: 'var(--color-text-secondary)', fontWeight: 400 }}>
+                        v{installation.resolved_version}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                <span style={{ color: 'var(--color-text-muted)', fontSize: 11 }}>
+                  {t('chat.deck.metadataPacking')}
+                </span>
+              </div>
+            )}
           </section>
         </div>
       ) : null}

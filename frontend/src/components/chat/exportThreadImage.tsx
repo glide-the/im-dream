@@ -309,15 +309,17 @@ export interface RenderThreadImageHooks {
 }
 
 /**
- * 拼接方案 — the card is captured in vertical slices (each always at full CAPTURE_PIXEL_RATIO,
- * independent of total height) and stitched at the slices' ACTUAL pixel size — never
+ * 拼接方案 — the card is captured in vertical tiles (each always at full CAPTURE_PIXEL_RATIO,
+ * independent of total height) and stitched at the tiles' ACTUAL pixel size — never
  * downscaled. A one-shot html-to-image capture of a very tall node forces the pixel ratio
  * down once the canvas hits the browser's edge/area limit, which is what made long exports
- * blurry; slices stay well under the limit so every pixel is rasterized at 3x. When the
+ * blurry; tiles stay well under the limit so every pixel is rasterized at 3x. When the
  * stitched result would exceed a single canvas's safe height, it is emitted as multiple
  * full-resolution PNG parts instead of shrinking.
  */
 const SLICE_HEIGHT_PX = 2000;
+/** DOM-tile 路径的单块最大高度（CSS px）— 每块独立序列化，字符串开销有界。 */
+const TILE_HEIGHT_CSS = 2000;
 const CAPTURE_PIXEL_RATIO = 3;
 /** Safe per-canvas height in physical pixels (browsers cap canvas edge ≈ 16384). */
 const MAX_PART_HEIGHT_PX = 15000;
@@ -436,61 +438,95 @@ class PartCanvasCollector {
 }
 
 /**
- * Fast path — 单趟样式内联 + 流式输出：html-to-image 的开销几乎全部在「克隆整棵 DOM +
- * 逐节点 getComputedStyle 内联」，逐片 toPng 会把这份开销乘以片数（长对话下页面卡死的
- * 根因）。这里 toSvg 只调用一次，之后每个分片通过 SVG 字符串手术重建（视口 = 分片尺寸 +
- * foreignObject y 负偏移定位），交给浏览器栅格化；canvas 按 3x 绘制时 Chrome 会按
- * 绘制尺寸重新栅格化矢量内容，清晰度与逐片 toPng 一致（已用色块 + 3px 条纹探针在
- * Playwright 中逐片验证）。每片解码画入拼接器后立即释放位图（字符串拷贝随迭代结束
- * 被 GC），片间 setTimeout(0) 让出主线程保持页面响应。
- * 注意：分片必须用 data: URL — Chrome 会把 blob: URL 加载的含 foreignObject 的 SVG
- * 视为污染画布（toBlob/toDataURL 抛 SecurityError），data: URL 则无此限制。
+ * Tile 路径 — DOM 分块截取：把卡片的直接子节点按像素高度分组为若干 tile（每块
+ * ≤TILE_HEIGHT_CSS），每块用「卡片浅克隆容器 + 该组子节点深克隆」单独 toSvg。
+ * 这样任何时刻都不存在完整对话的 SVG 文本（长对话下单趟 toSvg 的字符串可达数百 MB，
+ * encodeURIComponent 后更可达 6-9 倍，是 Chrome 卡死/OOM 的根因），单块的序列化/编码
+ * 开销严格有界。子节点间距通过实测 getBoundingClientRect 换算为克隆节点的显式
+ * margin-top（规避 margin 折叠双倍计数），拼回后与原排版逐像素一致；容器 overflow:hidden
+ * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。块间 setTimeout(0) 让出主线程。
  */
-export async function capturePartBlobsFast(node: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
+export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
   const { toSvg } = await import('html-to-image');
   const totalHeight = node.offsetHeight;
   const cardWidth = node.offsetWidth;
   const background = getComputedStyle(node).backgroundColor || '#F6EFE5';
-  const svgDataUrl = await toSvg(node);
-  const svgText = decodeURIComponent(svgDataUrl.slice(svgDataUrl.indexOf(',') + 1));
-  const openTag = svgText.match(/<svg[^>]*>/)?.[0];
-  const foTag = svgText.match(/<foreignObject[^>]*>/)?.[0];
-  const foClose = svgText.lastIndexOf('</foreignObject>');
-  if (!openTag || !foTag || foClose < 0) {
-    throw new Error('unexpected toSvg output structure');
+  const cardRect = node.getBoundingClientRect();
+  const children = Array.from(node.children) as HTMLElement[];
+  if (children.length === 0) {
+    throw new Error('export card has no element children to tile');
   }
-  const xmlnsAttrs = (openTag.match(/xmlns[^=]*="[^"]*"/g) ?? []).join(' ');
-  const content = svgText.slice(svgText.indexOf(foTag) + foTag.length, foClose);
 
-  const sliceHeights = planSliceHeights(totalHeight);
+  // 1) 实测每个子节点相对卡片顶部的位置（含 margin 折叠后的真实渲染结果）。
+  const metrics = children.map((el) => {
+    const rect = el.getBoundingClientRect();
+    return { top: rect.top - cardRect.top, bottom: rect.bottom - cardRect.top };
+  });
+
+  // 2) 按高度分组为 tiles；边界取整避免分数漂移产生接缝。
+  interface Tile { start: number; end: number; topCss: number; heightCss: number }
+  const tiles: Tile[] = [];
+  let tileStart = 0;
+  let tileTop = 0;
+  for (let i = 0; i < children.length; i += 1) {
+    const bottom = Math.round(metrics[i].bottom);
+    if (i > tileStart && bottom - tileTop > TILE_HEIGHT_CSS) {
+      // 边界取上一个子节点的底部 — 当前子节点属于下一块。
+      const boundary = Math.round(metrics[i - 1].bottom);
+      tiles.push({ start: tileStart, end: i, topCss: tileTop, heightCss: boundary - tileTop });
+      tileStart = i;
+      tileTop = boundary;
+    }
+  }
+  tiles.push({ start: tileStart, end: children.length, topCss: tileTop, heightCss: totalHeight - tileTop });
+  // 单个子节点超高时整 tile 超高，超出分块 canvas 上限则放弃 fast 路径（回退 legacy）。
+  if (tiles.some((tile) => tile.heightCss * CAPTURE_PIXEL_RATIO > MAX_PART_HEIGHT_PX)) {
+    throw new Error('a single export block exceeds the tile canvas limit');
+  }
+
+  // 3) 逐块克隆、截取、画入拼接器，随即释放位图。
   const collector = new PartCanvasCollector(
     cardWidth * CAPTURE_PIXEL_RATIO,
-    sliceHeights.map((height) => height * CAPTURE_PIXEL_RATIO),
+    tiles.map((tile) => tile.heightCss * CAPTURE_PIXEL_RATIO),
     background,
   );
-
-  let offset = 0;
-  for (let index = 0; index < sliceHeights.length; index += 1) {
-    const sliceHeight = sliceHeights[index];
-    const slicedSvg = `<svg ${xmlnsAttrs} width="${cardWidth}" height="${sliceHeight}">`
-      + `<foreignObject x="0" y="${-offset}" width="${cardWidth}" height="${totalHeight}">`
-      + content
-      + '</foreignObject></svg>';
-    offset += sliceHeight;
-    const sliceUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(slicedSvg)}`;
-    const image = await loadImage(sliceUrl);
-    // 首片 data URL 直接交给弹窗做预览头（SVG 可在 <img> 中显示）。
-    if (index === 0) {
-      onFirstSlice?.(sliceUrl);
+  for (let index = 0; index < tiles.length; index += 1) {
+    const tile = tiles[index];
+    const wrapper = node.cloneNode(false) as HTMLElement;
+    wrapper.style.paddingTop = '0px';
+    wrapper.style.paddingBottom = '0px';
+    wrapper.style.margin = '0px';
+    wrapper.style.height = `${tile.heightCss}px`;
+    wrapper.style.overflow = 'hidden';
+    for (let i = tile.start; i < tile.end; i += 1) {
+      const clone = children[i].cloneNode(true) as HTMLElement;
+      clone.style.marginTop = i === tile.start
+        ? `${metrics[i].top - tile.topCss}px`
+        : `${metrics[i].top - metrics[i - 1].bottom}px`;
+      clone.style.marginBottom = i === tile.end - 1
+        ? `${tile.topCss + tile.heightCss - metrics[i].bottom}px`
+        : '0px';
+      wrapper.appendChild(clone);
     }
-    await collector.add(image, CAPTURE_PIXEL_RATIO);
-    image.src = ''; // 立即释放分片位图
+    host.appendChild(wrapper);
+    try {
+      const tileUrl = await toSvg(wrapper);
+      const image = await loadImage(tileUrl);
+      // 首块 data URL 直接交给弹窗做预览头（SVG 可在 <img> 中显示）。
+      if (index === 0) {
+        onFirstSlice?.(tileUrl);
+      }
+      await collector.add(image, CAPTURE_PIXEL_RATIO);
+      image.src = ''; // 立即释放分块位图
+    } finally {
+      wrapper.remove();
+    }
     await yieldToUi();
   }
   return collector.finish();
 }
 
-/** Legacy per-slice toPng path — kept as a fallback if the SVG surgery ever fails. */
+/** Legacy per-slice toPng path — kept as a fallback if the tiled capture ever fails. */
 export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
   const { toPng } = await import('html-to-image');
   const totalHeight = node.offsetHeight;
@@ -531,7 +567,7 @@ export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElemen
 
 async function capturePartBlobs(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
   try {
-    return await capturePartBlobsFast(node, onFirstSlice);
+    return await capturePartBlobsTiled(node, host, onFirstSlice);
   } catch {
     return capturePartBlobsLegacy(node, host, onFirstSlice);
   }

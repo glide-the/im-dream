@@ -34,6 +34,10 @@
   --color-voice-green: #27ae60;
   --color-voice-yellow: #f39c12;
   --color-text-on-action: #ffffff;
+  /* 导出长图专用动作色 — 不随暗色反转（--color-action-primary 在暗色下变浅米色，
+     直接复用会导致白底白字）；用户气泡与导出卡片主按钮保持暖棕底白字。 */
+  --color-export-action-bg: #5f4a36;
+  --color-export-action-text: #ffffff;
   --color-code-bg: #2c2c2c;
   --color-code-text: #f3eee6;
   --color-code-inline-bg: rgba(0, 0, 0, 0.08);
@@ -75,6 +79,8 @@
   --color-voice-green: #7bdba0;
   --color-voice-yellow: #f7c96a;
   --color-text-on-action: #ffffff;
+  --color-export-action-bg: #6b5a45;
+  --color-export-action-text: #ffffff;
   --color-code-bg: #0d1117;
   --color-code-text: #e6edf3;
   --color-code-inline-bg: rgba(0, 0, 0, 0.18);
@@ -117,6 +123,8 @@
     --color-voice-green: #7bdba0;
     --color-voice-yellow: #f7c96a;
     --color-text-on-action: #ffffff;
+    --color-export-action-bg: #6b5a45;
+    --color-export-action-text: #ffffff;
     --color-code-bg: #0d1117;
     --color-code-text: #e6edf3;
     --color-code-inline-bg: rgba(0, 0, 0, 0.18);
