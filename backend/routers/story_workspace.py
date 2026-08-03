@@ -25,6 +25,7 @@ from story_workspace.contracts import (
     StoryWorkspaceAgentStoryPayload,
     StoryWorkspaceBatchAction,
     StoryWorkspaceCharacterPatch,
+    StoryWorkspaceGuidanceCommandPayload,
     StoryWorkspaceResourceType,
     StoryWorkspaceScenePatch,
     StoryWorkspaceStoryPatch,
@@ -154,6 +155,14 @@ class StoryWorkflowGateway(Protocol):
         self,
         workflow_run_id: str,
         request: _WorkflowRunCancelRequest,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def submit_guidance(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceGuidanceCommandPayload,
         *,
         actor: dict[str, str],
     ) -> Any: ...
@@ -1191,3 +1200,30 @@ async def cancel_workflow_run(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(gateway.cancel_run(workflow_run_id, request, actor=actor))
+
+
+@router.post("/runs/{workflow_run_id}/guidance", status_code=202)
+async def submit_run_guidance(
+    workflow_run_id: str,
+    request: StoryWorkspaceGuidanceCommandPayload,
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Submit one idempotent guidance command to a guidable run.
+
+    202 — accepted (persisted as a ``metadata.kind="story-workspace-guidance"``
+    chat_message row and handed to the same thread's runner as a new turn);
+    a same-key same-content replay also returns 202 with ``replayed: true``
+    and no duplicate injection. 409 — run not guidable or same key with
+    different content (``IDEMPOTENCY_CONFLICT``).
+    """
+    try:
+        actor = _workflow_actor(current_user)
+    except ApiRouteError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _workflow_call(
+        gateway.submit_guidance(workflow_run_id, request, actor=actor)
+    )

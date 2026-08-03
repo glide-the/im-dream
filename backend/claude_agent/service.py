@@ -841,6 +841,11 @@ class ClaudeAgentRunRequest:
     # AI-SDK message fields (for context assembly and DB persistence)
     message_id: Optional[str] = None
     message_parts: Optional[list] = None
+    # Optional AI-SDK message metadata persisted with the user row. Server-side
+    # turn injectors (e.g. Story Workspace guidance) pass their audit metadata
+    # here so the per-turn re-save (INSERT OR REPLACE) preserves it instead of
+    # wiping a previously persisted metadata payload.
+    message_metadata: Optional[dict[str, Any]] = None
     # File attachments to be passed as content blocks to Claude.
     attachments: Optional[list[AttachmentPayload]] = None
     # Current EditorState for the .editor/ virtual index (optional).
@@ -1383,6 +1388,7 @@ class ClaudeAgentService:
                 thread_id, "user",
                 parts=resolved_user_parts,
                 message_id=user_message_id,
+                metadata=execution.request.message_metadata,
             )
             # Auto-fill thread title from first user message if still NULL.
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))

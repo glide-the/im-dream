@@ -10,11 +10,13 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-STORY_WORKSPACE_CONTRACT_VERSION = "1.1.0"
+STORY_WORKSPACE_CONTRACT_VERSION = "1.2.0"
 STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH = 2000
+STORY_WORKSPACE_GUIDANCE_TEXT_MAX_LENGTH = 4000
+STORY_WORKSPACE_GUIDANCE_IDEMPOTENCY_KEY_MAX_LENGTH = 255
 
 
 class StoryWorkspaceReviewStatus(str, Enum):
@@ -51,6 +53,25 @@ class StoryWorkspaceBatchAction(str, Enum):
     CONFIRM = "confirm"
     REJECT = "reject"
     ARCHIVE = "archive"
+
+
+class StoryWorkspaceReviewEventAction(str, Enum):
+    """ReviewEvent audit action vocabulary (contract layer only, no DDL).
+
+    ``GUIDE`` is the Dream Surface extension: every submitted guidance command
+    is one ReviewEvent with action ``guide``; persistence reuses
+    ``chat_message.metadata`` (DEC-032) instead of a new table.
+    """
+
+    CONFIRM = "confirm"
+    REJECT = "reject"
+    ARCHIVE = "archive"
+    GUIDE = "guide"
+
+
+class StoryWorkspaceGuidanceKind(str, Enum):
+    RETRY_STEP = "retry-step"
+    FREE_TEXT = "free-text"
 
 
 class StoryWorkspaceResourceType(str, Enum):
@@ -303,6 +324,82 @@ class StoryWorkspaceAgentOutputRequest(StoryWorkspaceAgentStoryOutput):
     """Direct request body accepted by the Agent-output integration endpoint."""
 
 
+@dataclass(frozen=True)
+class StoryWorkspaceSurface:
+    """Business-level surface descriptor (design_004 §6 contract value object)."""
+
+    name: str
+    protocol_dir: str
+    entry_route: str
+
+
+@dataclass(frozen=True)
+class StoryWorkspaceGuidanceCommand:
+    """Domain-level guidance command handed to the guidance service."""
+
+    run_id: str
+    kind: StoryWorkspaceGuidanceKind
+    idempotency_key: str
+    actor: str
+    text: Optional[str] = None
+    step_id: Optional[str] = None
+
+
+@dataclass
+class StoryWorkspaceExecutionProjection:
+    """Read-side execution facts projection consumed by the execution page.
+
+    ``phase`` may carry projection states such as ``awaiting-guidance`` —
+    inferred from ``continuing`` plus blocked-step markers — which are
+    deliberately NOT ``RunStatus`` enum values (audit note D13).
+    """
+
+    run_id: str
+    phase: str
+    steps: List[Dict[str, Any]] = field(default_factory=list)
+    assets_ref: Optional[str] = None
+    events: List[Dict[str, Any]] = field(default_factory=list)
+
+
+class StoryWorkspaceGuidanceCommandPayload(BaseModel):
+    """Request body of ``POST /api/story-workspace/runs/{run_id}/guidance``.
+
+    The client ``actor`` is a declared identity hint; the service rejects any
+    mismatch with the authenticated actor (never trusted on its own).
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    kind: StoryWorkspaceGuidanceKind
+    text: Optional[str] = Field(
+        default=None, max_length=STORY_WORKSPACE_GUIDANCE_TEXT_MAX_LENGTH
+    )
+    step_id: Optional[str] = Field(default=None, min_length=1, max_length=128)
+    idempotency_key: str = Field(
+        min_length=1, max_length=STORY_WORKSPACE_GUIDANCE_IDEMPOTENCY_KEY_MAX_LENGTH
+    )
+    actor: str = Field(min_length=1, max_length=128)
+
+    @model_validator(mode="after")
+    def kind_fields_are_consistent(self) -> "StoryWorkspaceGuidanceCommandPayload":
+        if self.kind == StoryWorkspaceGuidanceKind.FREE_TEXT:
+            if not self.text or not self.text.strip():
+                raise ValueError("free-text guidance requires non-blank text")
+        if self.kind == StoryWorkspaceGuidanceKind.RETRY_STEP and not self.step_id:
+            raise ValueError("retry-step guidance requires step_id")
+        return self
+
+    def to_command(self, run_id: str) -> StoryWorkspaceGuidanceCommand:
+        return StoryWorkspaceGuidanceCommand(
+            run_id=run_id,
+            kind=self.kind,
+            idempotency_key=self.idempotency_key,
+            actor=self.actor,
+            text=self.text,
+            step_id=self.step_id,
+        )
+
+
 class _StoryWorkspaceAgentPayload(BaseModel):
     """Ignore future Agent fields while keeping the canonical minimum."""
 
@@ -394,6 +491,8 @@ class StoryWorkspaceScenePatch(_StoryWorkspaceControlledPatch):
 
 __all__ = [
     "STORY_WORKSPACE_CONTRACT_VERSION",
+    "STORY_WORKSPACE_GUIDANCE_IDEMPOTENCY_KEY_MAX_LENGTH",
+    "STORY_WORKSPACE_GUIDANCE_TEXT_MAX_LENGTH",
     "STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH",
     "StoryWorkspaceAgentCharacterOutput",
     "StoryWorkspaceAgentCharacterPayload",
@@ -411,10 +510,15 @@ __all__ = [
     "StoryWorkspaceCharacterFilter",
     "StoryWorkspaceCharacterPatch",
     "StoryWorkspaceContentStatus",
+    "StoryWorkspaceExecutionProjection",
+    "StoryWorkspaceGuidanceCommand",
+    "StoryWorkspaceGuidanceCommandPayload",
+    "StoryWorkspaceGuidanceKind",
     "StoryWorkspacePaginatedResponse",
     "StoryWorkspacePaginationInfo",
     "StoryWorkspaceResourceType",
     "StoryWorkspaceReviewActionRequest",
+    "StoryWorkspaceReviewEventAction",
     "StoryWorkspaceReviewStatus",
     "StoryWorkspaceRoleType",
     "StoryWorkspaceScene",
@@ -429,6 +533,7 @@ __all__ = [
     "StoryWorkspaceStoryFilter",
     "StoryWorkspaceStoryPatch",
     "StoryWorkspaceStoryType",
+    "StoryWorkspaceSurface",
     "StoryWorkspaceWorkspace",
     "StoryWorkspaceWorkspacePatch",
 ]

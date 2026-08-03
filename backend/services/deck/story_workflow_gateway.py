@@ -25,6 +25,11 @@ try:
         PreflightService,
     )
     from services.workflow.run_service import WorkflowRunError, WorkflowRunService
+    from services.story_workspace.guidance_service import (
+        StoryWorkspaceGuidanceError,
+        StoryWorkspaceGuidanceService,
+        build_thread_turn_dispatcher,
+    )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
@@ -38,6 +43,11 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         PreflightService,
     )
     from backend.services.workflow.run_service import WorkflowRunError, WorkflowRunService
+    from backend.services.story_workspace.guidance_service import (
+        StoryWorkspaceGuidanceError,
+        StoryWorkspaceGuidanceService,
+        build_thread_turn_dispatcher,
+    )
 
 
 _DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
@@ -496,6 +506,40 @@ class StoryWorkflowApplicationGateway:
                 self._actor(actor),
                 reason_code=f"user_cancelled:{request.reason}",
             )
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        finally:
+            db.close()
+
+    async def submit_guidance(
+        self,
+        workflow_run_id: str,
+        request: Any,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Persist and dispatch one guidance command for a guidable run.
+
+        Persistence rides ``chat_message.metadata`` (DEC-032, zero DDL); the
+        default dispatcher hands the guidance to the runner as a new user turn
+        on the chat thread that initiated the run (review note R5).
+        """
+        db = database.get_db()
+        try:
+            actor_context = self._actor(actor)
+            run_service = WorkflowRunService(db, token_secret=_token_secret())
+            service = StoryWorkspaceGuidanceService(
+                db,
+                run_reader=lambda run_id: run_service.read_run(run_id, actor_context),
+                dispatcher=build_thread_turn_dispatcher(),
+            )
+            return service.submit_guidance(
+                workflow_run_id,
+                request,
+                actor_id=actor["actor_id"],
+            )
+        except StoryWorkspaceGuidanceError as exc:
+            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
         except WorkflowRunError as exc:
             self._raise_run_error(exc)
         finally:

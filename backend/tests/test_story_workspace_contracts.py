@@ -39,7 +39,7 @@ from story_workspace.contracts import (
 
 class StoryWorkspaceCanonicalContractTest(unittest.TestCase):
     def test_canonical_owner_and_public_prefixes(self) -> None:
-        self.assertEqual(STORY_WORKSPACE_CONTRACT_VERSION, "1.1.0")
+        self.assertEqual(STORY_WORKSPACE_CONTRACT_VERSION, "1.2.0")
         self.assertTrue(contracts.__all__)
         self.assertTrue(
             all(
@@ -83,7 +83,7 @@ class StoryWorkspaceCanonicalContractTest(unittest.TestCase):
         self.assertTrue(all(not hasattr(contracts, name) for name in old_public_names))
 
     def test_story_workspace_review_contract_v1_1(self) -> None:
-        self.assertEqual(STORY_WORKSPACE_CONTRACT_VERSION, "1.1.0")
+        self.assertEqual(STORY_WORKSPACE_CONTRACT_VERSION, "1.2.0")
         self.assertEqual(STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH, 2000)
         self.assertEqual(
             [item.value for item in StoryWorkspaceAssetStatus],

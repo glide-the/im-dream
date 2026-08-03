@@ -112,6 +112,11 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
         "meaning": "A known workflow step failed.",
         "recovery": "Retry as a new run using the frozen source.",
     },
+    "WORKFLOW_RUN_NOT_GUIDABLE": {
+        "phase": "run",
+        "meaning": "The run is not in a guidable state or has no guidance channel.",
+        "recovery": "Confirm the run review and submit guidance while it is continuing.",
+    },
     "AGENT_EXECUTION_FAILED": {
         "phase": "run",
         "meaning": "The agent runtime could not complete the operation.",
