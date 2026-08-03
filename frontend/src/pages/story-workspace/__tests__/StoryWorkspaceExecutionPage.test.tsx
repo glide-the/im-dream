@@ -17,6 +17,7 @@ import { expect, test } from '@playwright/test';
 import type { WorkflowRun, WorkflowRunStatus } from '../../../api/storyWorkspaceApi';
 import {
   isStoryWorkspaceGuidableStatus,
+  resolveStoryWorkspaceExecutionPageView,
   resolveStoryWorkspaceExecutionRedirect,
   resolveStoryWorkspaceExecutionState,
   STORY_WORKSPACE_EXECUTION_STATE_COPY,
@@ -132,4 +133,30 @@ test('hook-free leaf components render (direct function-component smoke)', () =>
     projection: null,
   });
   expect(assets).toBeTruthy();
+});
+
+test('page view seam: refresh with a loaded run never re-enters loading (F-1)', () => {
+  const run = runWith('continuing') as WorkflowRun;
+  // First paint: no run yet → the loading branch owns the page.
+  expect(
+    resolveStoryWorkspaceExecutionPageView({ isLoading: true, loadError: null, run: null }),
+  ).toBe('loading');
+  // Background refresh after a guidance submission: the run is already on
+  // screen, so the loading branch must not unmount the guidance sidebar
+  // (which would discard the just-set submit feedback before it paints).
+  expect(
+    resolveStoryWorkspaceExecutionPageView({ isLoading: true, loadError: null, run }),
+  ).toBe('ready');
+  // Loaded + idle stays ready.
+  expect(
+    resolveStoryWorkspaceExecutionPageView({ isLoading: false, loadError: null, run }),
+  ).toBe('ready');
+  // Load failure without a run renders the error branch.
+  expect(
+    resolveStoryWorkspaceExecutionPageView({ isLoading: false, loadError: 'boom', run: null }),
+  ).toBe('error');
+  // A failed first load that also failed to set loadError still errors.
+  expect(
+    resolveStoryWorkspaceExecutionPageView({ isLoading: false, loadError: null, run: null }),
+  ).toBe('error');
 });

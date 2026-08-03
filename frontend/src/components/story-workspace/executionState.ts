@@ -70,6 +70,32 @@ export function isStoryWorkspaceGuidableStatus(status: WorkflowRunStatus): boole
   return status === 'continuing' || status === 'failed';
 }
 
+export type StoryWorkspaceExecutionPageView = 'loading' | 'error' | 'ready';
+
+/**
+ * Page-level branch resolution (F-1 fix, 2026-08-04): the loading branch is
+ * first-paint only. A background refresh (e.g. the guidance sidebar's
+ * onSubmitted → loadRun) keeps the already-loaded run mounted, so the
+ * sidebar's just-set submit feedback actually paints instead of being
+ * discarded by an unmount/remount cycle.
+ */
+export function resolveStoryWorkspaceExecutionPageView({
+  isLoading,
+  loadError,
+  run,
+}: {
+  isLoading: boolean;
+  loadError: string | null;
+  run: WorkflowRun | null;
+}): StoryWorkspaceExecutionPageView {
+  if (run === null) {
+    if (isLoading) return 'loading';
+    return 'error';
+  }
+  if (loadError !== null) return 'error';
+  return 'ready';
+}
+
 export interface StoryWorkspaceExecutionStateCopy {
   /** Short status badge next to the breadcrumb. */
   badge: string;

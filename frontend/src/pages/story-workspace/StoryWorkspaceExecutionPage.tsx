@@ -9,6 +9,10 @@
 //                    StoryWorkspaceLayout; this page owns only the §5.1
 //                    two-zone content. All presentation decisions come from
 //                    the executionState seams.
+//         2026-08-04: F-1 fix — page branch resolution moved to the
+//                    executionState seam (loading is first-paint only), so a
+//                    guidance-submit refresh no longer unmounts the sidebar
+//                    and discards its success feedback.
 
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -21,6 +25,7 @@ import {
   StoryWorkspaceGuidanceSidebar,
 } from '../../components/story-workspace';
 import {
+  resolveStoryWorkspaceExecutionPageView,
   resolveStoryWorkspaceExecutionRedirect,
   resolveStoryWorkspaceExecutionState,
   STORY_WORKSPACE_EXECUTION_STATE_COPY,
@@ -146,7 +151,13 @@ export function StoryWorkspaceExecutionPage({
     void loadRun();
   }, [guidanceHistory, loadRun]);
 
-  if (isLoading) {
+  // F-1 (2026-08-04): the loading branch is first-paint only. A background
+  // refresh (guidance submit → onSubmitted → loadRun) keeps the loaded run
+  // mounted so the sidebar's submit feedback is not discarded by an
+  // unmount/remount in the same React batch.
+  const view = resolveStoryWorkspaceExecutionPageView({ isLoading, loadError, run });
+
+  if (view === 'loading') {
     return (
       <section className="story-workspace-page story-workspace-execution-page">
         <div className="story-workspace-table-message">正在加载运行…</div>
@@ -154,7 +165,7 @@ export function StoryWorkspaceExecutionPage({
     );
   }
 
-  if (loadError || !run || !state) {
+  if (view === 'error' || !run || !state) {
     return (
       <section className="story-workspace-page story-workspace-execution-page">
         <div className="story-workspace-table-message story-workspace-table-message--error">
