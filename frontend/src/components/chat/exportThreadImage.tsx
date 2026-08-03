@@ -32,6 +32,7 @@ import {
   summarizeToolInvocation,
 } from './toolInputSummary';
 import type { AskUserQuestionInput, QuestionField } from './AskUserQuestionUI';
+import { EXPORT_FONT_UNCOVERED_RANGES } from './exportFontSubset';
 
 export type { ExportChatMessage, ExportImageLabels, ExportPendingConfirmation };
 
@@ -322,7 +323,7 @@ export interface RenderThreadImageHooks {
 const SLICE_HEIGHT_PX = 2000;
 /** DOM-tile 路径的单块最大高度（CSS px）— 每块独立序列化，字符串开销有界；
  *  取 4000（3x 物理 12000，仍低于 canvas 上限 15000）以减半块数、摊薄每块固定开销。 */
-const TILE_HEIGHT_CSS = 4000;
+const TILE_HEIGHT_CSS = 5000;
 const CAPTURE_PIXEL_RATIO = 3;
 /** Safe per-canvas height in physical pixels (browsers cap canvas edge ≈ 16384). */
 const MAX_PART_HEIGHT_PX = 15000;
@@ -489,15 +490,145 @@ function spliceEncodedFontStyle(dataUrl: string, encodedFontStyle: string): stri
 }
 
 /**
+ * 导出字体计划 — CPU 优化的核心。
+ * 实测：SVG 图像文档禁止外部子资源（blob:/http: 字体 URL 会被静默忽略、仅 data: 内嵌有效），
+ * 而完整 Xiaolai 有 11.8MB（base64 后约 16MB），Chrome 对每个分块 SVG 都要重新解析一遍字体
+ * （约 190ms/块，占整条管线 CPU 的 60%+）。构建期用 fonttools 生成 1.5MB 的 GB2312 子集
+ * （scripts/subset-export-font.py），解析耗时降为约 1/3；逐块扫描文本，命中子集未覆盖的
+ * 生僻字（EXPORT_FONT_UNCOVERED_RANGES，即全量 cmap 减子集）时回退全量内嵌字体，
+ * 保证任何字符都渲染正确。子集内同时内嵌 Excalifont 全量（52KB，Latin unicode-range
+ * 与 App.css 保持一致），确保中英混排的字体选择与页面一致。
+ */
+interface ExportFontPlan {
+  /** 已 encodeURIComponent 的 <style>（Xiaolai 子集 + Excalifont 全量）。 */
+  subsetEncodedStyle: string;
+}
+
+let exportFontPlanPromise: Promise<ExportFontPlan | null> | null = null;
+
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  const CHUNK = 0x8000;
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}
+
+function getExportFontPlan(): Promise<ExportFontPlan | null> {
+  if (!exportFontPlanPromise) {
+    exportFontPlanPromise = (async () => {
+      try {
+        const base = (import.meta as { env?: { BASE_URL?: string } }).env?.BASE_URL ?? '/';
+        const [xiaolaiRes, excaliRes] = await Promise.all([
+          fetch(`${base}Xiaolai-ExportSubset.woff2`),
+          fetch(`${base}Excalifont-Regular.woff2`),
+        ]);
+        if (!xiaolaiRes.ok || !excaliRes.ok) {
+          return null;
+        }
+        const [xB64, eB64] = await Promise.all([
+          xiaolaiRes.blob().then(blobToBase64),
+          excaliRes.blob().then(blobToBase64),
+        ]);
+        const style = '<style>'
+          + `@font-face{font-family:'Excalifont';src:url(data:font/woff2;base64,${eB64}) format('woff2');`
+          + 'font-weight:normal;font-style:normal;'
+          + 'unicode-range:U+0000-00FF,U+0100-017F,U+0180-024F,U+1E00-1EFF,U+2000-206F,U+20A0-20CF,U+2100-214F;}'
+          + `@font-face{font-family:'Xiaolai';src:url(data:font/woff2;base64,${xB64}) format('woff2');`
+          + 'font-weight:normal;font-style:normal;}'
+          + '</style>';
+        return { subsetEncodedStyle: encodeURIComponent(style) };
+      } catch {
+        return null; // 子集不可用（如 dev 未生成文件）→ 回退逐块全量内嵌
+      }
+    })();
+  }
+  return exportFontPlanPromise;
+}
+
+/** 文本是否包含子集字体未覆盖的生僻字（命中即该块回退全量字体渲染）。 */
+function textNeedsFullFont(text: string): boolean {
+  for (const ch of text) {
+    const cp = ch.codePointAt(0) ?? 0;
+    let lo = 0;
+    let hi = EXPORT_FONT_UNCOVERED_RANGES.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      const range = EXPORT_FONT_UNCOVERED_RANGES[mid];
+      if (cp < range[0]) {
+        hi = mid - 1;
+      } else if (cp > range[1]) {
+        lo = mid + 1;
+      } else {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * SVG 内嵌字体预热 — 修复冷启动竞态。
+ * 实测：SVG 图像文档首次加载某份内嵌字体（按字体 data URL 缓存）时，foreignObject 的
+ * 布局可能在字体解码完成前完成，导致整块文本空白（同一 SVG 首载空白、再载正常）。
+ * 在正式加载各分块前，用一个内嵌**相同字体字节**的微型探针 SVG 反复加载并做像素验证，
+ * 直到字体真正生效；此后所有分块（同一字体 URL）的渲染即为确定性。
+ * 探针文本需覆盖字体栈中各族的典型字符（CJK / Latin / 数字 / 标点）。
+ */
+const SVG_FONT_WARMUP_MAX_ATTEMPTS = 40;
+async function warmupEmbeddedFonts(encodedFontStyle: string): Promise<void> {
+  try {
+    const style = decodeURIComponent(encodedFontStyle);
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="64">'
+      + style
+      + '<foreignObject width="100%" height="100%">'
+      + '<div xmlns="http://www.w3.org/1999/xhtml" style="'
+      + "font-family:'Excalifont','Xiaolai',Georgia,serif;font-size:20px;line-height:1.4;"
+      + 'background:#ffffff;color:#000000;padding:4px;">墨问A1。</div>'
+      + '</foreignObject></svg>';
+    const url = SVG_DATA_PREFIX + encodeURIComponent(svg);
+    for (let attempt = 0; attempt < SVG_FONT_WARMUP_MAX_ATTEMPTS; attempt += 1) {
+      const image = await loadImage(url);
+      const canvas = document.createElement('canvas');
+      canvas.width = 240;
+      canvas.height = 64;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) {
+        return;
+      }
+      ctx.drawImage(image, 0, 0);
+      image.src = '';
+      const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let dark = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] < 128) {
+          dark += 1;
+          if (dark > 50) {
+            return; // 字体已生效
+          }
+        }
+      }
+      await new Promise((resolve) => { setTimeout(resolve, 50); });
+    }
+  } catch {
+    // 预热是 best-effort：失败不阻断导出（退化为旧行为，大概率仍能渲染）。
+  }
+}
+
+
+/**
  * Tile 路径 — DOM 分块截取：把卡片的直接子节点按像素高度分组为若干 tile（每块
  * ≤TILE_HEIGHT_CSS），每块用「卡片浅克隆容器 + 该组子节点深克隆」单独 toSvg。
  * 这样任何时刻都不存在完整对话的 SVG 文本（长对话下单趟 toSvg 的字符串可达数百 MB，
  * encodeURIComponent 后更可达 6-9 倍，是 Chrome 卡死/OOM 的根因），单块的序列化/编码
  * 开销严格有界。子节点间距通过实测 getBoundingClientRect 换算为克隆节点的显式
  * margin-top（规避 margin 折叠双倍计数），拼回后与原排版逐像素一致；容器 overflow:hidden
- * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。字体只在首块内嵌一次：后续块
- * skipFonts 并拼接首块字体的「编码后」字符串（中文字体 base64 可达 16MB，逐块
- * 重复嵌入+逐块重编码是 CPU 占满的主因）。块间让出主线程到下一帧，保证进度条实时上屏。
+ * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。SVG 图像文档要求字体 base64 内嵌，
+ * 而 Chrome 对每块都重新解析字体（完整 Xiaolai 11.8MB，约 190ms/块，是 CPU 占满的主因），
+ * 因此默认改用构建期生成的 1.5MB GB2312 子集字体（见 getExportFontPlan），仅当分块文本
+ * 命中子集未覆盖的生僻字时才回退全量内嵌。块间让出主线程到下一帧，保证进度条实时上屏。
  */
 export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
   const { toSvg } = await import('html-to-image');
@@ -537,15 +668,21 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
     throw new Error('a single export block exceeds the tile canvas limit');
   }
 
-  // 3) 逐块克隆、截取、画入拼接器，随即释放位图。
+  // 3) 逐块克隆、序列化、解码、拼接。字体策略：优先使用构建期生成的 1.5MB GB2312 子集
+  //    （Chrome 对每个分块 SVG 都重新解析内嵌字体，子集把这部分 CPU 降到约 1/3）；
+  //    分块文本命中子集未覆盖的生僻字时，该块回退全量内嵌字体（首个全量块由 toSvg 自行
+  //    嵌入并提取编码串，后续全量块 skipFonts + 拼接复用，与旧逻辑一致）。
   hooks?.onProgress?.({ done: 0, total: tiles.length });
-  const collector = new PartCanvasCollector(
-    cardWidth * CAPTURE_PIXEL_RATIO,
-    tiles.map((tile) => tile.heightCss * CAPTURE_PIXEL_RATIO),
-    background,
-  );
-  // 首块字体 <style> 的「编码后」形态；null = 尚未确定 / 无字体可复用（保持逐块内嵌）。
-  let sharedEncodedFontStyle: string | null = null;
+  const partHeightsPx = tiles.map((tile) => tile.heightCss * CAPTURE_PIXEL_RATIO);
+  const widthPx = cardWidth * CAPTURE_PIXEL_RATIO;
+  const collector = new PartCanvasCollector(widthPx, partHeightsPx, background);
+  const fontPlan = await getExportFontPlan();
+  // 字体冷启动竞态修复：正式渲染前先预热（见 warmupEmbeddedFonts）。
+  if (fontPlan) {
+    await warmupEmbeddedFonts(fontPlan.subsetEncodedStyle);
+  }
+  // 全量字体 <style> 的「编码后」形态；null = 尚未提取（下一块全量块不带 skipFonts 重试）。
+  let fullEncodedFontStyle: string | null = null;
   for (let index = 0; index < tiles.length; index += 1) {
     const tile = tiles[index];
     const wrapper = node.cloneNode(false) as HTMLElement;
@@ -566,19 +703,34 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
     }
     host.appendChild(wrapper);
     try {
-      const skipFonts = index > 0 && sharedEncodedFontStyle !== null;
-      let tileUrl = await toSvg(wrapper, skipFonts ? { skipFonts: true } : undefined);
-      if (index === 0) {
-        const extracted = extractFontStyleElement(decodeSvgDataUrl(tileUrl));
-        // 只有确实提取到字体样式才启用后续块的 skipFonts 复用；编码串只算这一次。
-        sharedEncodedFontStyle = extracted ? encodeURIComponent(extracted) : null;
-      } else if (skipFonts && sharedEncodedFontStyle) {
-        tileUrl = spliceEncodedFontStyle(tileUrl, sharedEncodedFontStyle) ?? tileUrl;
+      const useSubset = fontPlan !== null && !textNeedsFullFont(wrapper.textContent ?? '');
+      let tileUrl: string;
+      if (useSubset && fontPlan) {
+        tileUrl = await toSvg(wrapper, { skipFonts: true });
+        tileUrl = spliceEncodedFontStyle(tileUrl, fontPlan.subsetEncodedStyle) ?? tileUrl;
+      } else {
+        tileUrl = await toSvg(wrapper, fullEncodedFontStyle ? { skipFonts: true } : undefined);
+        if (fullEncodedFontStyle === null) {
+          const extracted = extractFontStyleElement(decodeSvgDataUrl(tileUrl));
+          // 只有确实提取到字体样式才启用后续块的 skipFonts 复用；编码串只算这一次。
+          fullEncodedFontStyle = extracted ? encodeURIComponent(extracted) : null;
+          if (fullEncodedFontStyle) {
+            // 全量字体同样是首次加载，先预热再渲染本块，避免冷启动空白。
+            await warmupEmbeddedFonts(fullEncodedFontStyle);
+          }
+        } else {
+          tileUrl = spliceEncodedFontStyle(tileUrl, fullEncodedFontStyle) ?? tileUrl;
+        }
       }
-      const image = await loadImage(tileUrl);
       // 首块 data URL 直接交给弹窗做预览头（SVG 可在 <img> 中显示）。
       if (index === 0) {
         hooks?.onFirstSlice?.(tileUrl);
+      }
+      const image = await loadImage(tileUrl);
+      // onload ≠ 首帧就绪（见 waitForSliceImageReady）；无文本内容的块（纯图片/留白）
+      // 跳过等待，避免空等超时。
+      if ((wrapper.textContent ?? '').trim().length > 0) {
+        await waitForSliceImageReady(image);
       }
       await collector.add(image, CAPTURE_PIXEL_RATIO);
       image.src = ''; // 立即释放分块位图
@@ -589,6 +741,48 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
     await yieldToUi();
   }
   return collector.finish();
+}
+
+/**
+ * 位图就绪等待 — SVG 图像文档的 onload 不代表首帧已绘制完成：
+ * 实测内嵌字体的 SVG（尤其大尺寸/大字体）在 onload 时位图仍是空白，
+ * 字体解码与首帧栅格完成后**同一个 img 会异步重绘**（约 100-600ms，逐文档独立，
+ * 预热字体缓存只能加速、不能消除）。若在空白窗口期 drawImage，该块整段内容丢失
+ * （即线上偶发「长条状坏图」的根因）。这里轮询采样多个水平条带的「局部细节」
+ * （相邻像素差异），出现任何细节即视为首帧就绪；超时放行（均匀内容的块本来就
+ * 画不错，等不到细节也不过是退回旧行为）。
+ */
+const SLICE_READY_MAX_ATTEMPTS = 40;
+async function waitForSliceImageReady(image: HTMLImageElement): Promise<void> {
+  const width = image.naturalWidth;
+  const height = image.naturalHeight;
+  if (!width || !height) {
+    return;
+  }
+  const probeWidth = Math.min(width, 720);
+  const probe = document.createElement('canvas');
+  probe.width = probeWidth;
+  probe.height = 100;
+  const ctx = probe.getContext('2d', { willReadFrequently: true });
+  if (!ctx) {
+    return;
+  }
+  const stripYs = [0, Math.max(0, Math.floor(height / 2) - 50), Math.max(0, height - 100)];
+  for (let attempt = 0; attempt < SLICE_READY_MAX_ATTEMPTS; attempt += 1) {
+    for (const y of stripYs) {
+      ctx.drawImage(image, 0, y, width, 100, 0, 0, probeWidth, 100);
+      const data = ctx.getImageData(0, 0, probeWidth, 100).data;
+      for (let i = 0; i + 12 < data.length; i += 16) {
+        // 相邻采样点差异 > 24 → 有文字/边框/图片等细节，首帧已就绪。
+        if (Math.abs(data[i] - data[i + 16]) > 24
+          || Math.abs(data[i + 1] - data[i + 17]) > 24
+          || Math.abs(data[i + 2] - data[i + 18]) > 24) {
+          return;
+        }
+      }
+    }
+    await new Promise((resolve) => { setTimeout(resolve, 50); });
+  }
 }
 
 /** Legacy per-slice toPng path — kept as a fallback if the tiled capture ever fails. */
