@@ -407,6 +407,7 @@ function ChatViewContent({
   const [shareExporting, setShareExporting] = useState(false);
   const [shareExportFailed, setShareExportFailed] = useState(false);
   const [sharePreview, setSharePreview] = useState<RenderedThreadImage | null>(null);
+  const [shareProgress, setShareProgress] = useState<{ done: number; total: number } | null>(null);
   const [shareDownloading, setShareDownloading] = useState(false);
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState('');
@@ -749,22 +750,33 @@ function ChatViewContent({
   }, [onLandingTabChange, reloadThreads]);
 
   const handleOpenShareDialog = useCallback(() => {
+    // 导出进行中（后台运行）或已有完成预览时，直接打开弹窗呈现当前状态，不重置。
+    if (shareExporting || (sharePreview && !sharePreview.partial)) {
+      setShareDialogOpen(true);
+      return;
+    }
     setShareExportFailed(false);
+    setShareProgress(null);
     setSharePreview((previous) => {
       releaseThreadImage(previous);
       return null;
     });
     setShareDialogOpen(true);
-  }, []);
+  }, [shareExporting, sharePreview]);
 
   const handleCloseShareDialog = useCallback(() => {
     setShareDialogOpen(false);
+    // 导出/下载进行中关闭 = 任务转后台运行：保留进度与预览状态，不打断、不释放。
+    if (shareExporting || shareDownloading) {
+      return;
+    }
     setShareExportFailed(false);
+    setShareProgress(null);
     setSharePreview((previous) => {
       releaseThreadImage(previous);
       return null;
     });
-  }, []);
+  }, [shareExporting, shareDownloading]);
 
   const handleExportShareImage = useCallback(async () => {
     if (!activeThreadId || shareExporting) {
@@ -772,6 +784,7 @@ function ChatViewContent({
     }
     setShareExporting(true);
     setShareExportFailed(false);
+    setShareProgress(null);
     try {
       const snapshot = getChatExportSnapshot(activeThreadId);
       const exportMessages = snapshot.messages
@@ -802,13 +815,18 @@ function ChatViewContent({
           releaseThreadImage(previous);
           return partial;
         }),
+        onProgress: setShareProgress,
       });
       setSharePreview((previous) => {
         releaseThreadImage(previous);
         return rendered;
       });
+      // 后台运行完成的信号 — 若弹窗被用户关闭过，完成时自动弹回结果。
+      setShareDialogOpen(true);
     } catch {
       setShareExportFailed(true);
+      // 后台运行失败同样弹回，避免静默失败。
+      setShareDialogOpen(true);
     } finally {
       setShareExporting(false);
     }
@@ -1515,6 +1533,7 @@ function ChatViewContent({
           canExport={Boolean(activeThreadId)}
           preview={sharePreview}
           downloading={shareDownloading}
+          progress={shareProgress}
           onClose={handleCloseShareDialog}
           onExportImage={() => void handleExportShareImage()}
           onDownloadPreview={() => void handleDownloadSharePreview()}

@@ -22,6 +22,8 @@ interface ChatShareDialogProps {
   preview: RenderedThreadImage | null;
   /** True while the merged PNG is being assembled for download. */
   downloading: boolean;
+  /** 截取进度（done/total 块数）；null 表示尚未开始。 */
+  progress: { done: number; total: number } | null;
   onClose: () => void;
   onExportImage: () => void;
   onDownloadPreview: () => void;
@@ -36,6 +38,7 @@ export default function ChatShareDialog({
   canExport,
   preview,
   downloading,
+  progress,
   onClose,
   onExportImage,
   onDownloadPreview,
@@ -43,18 +46,35 @@ export default function ChatShareDialog({
 }: ChatShareDialogProps) {
   const { t } = useTranslation();
 
+  const progressPercent = progress && progress.total > 0
+    ? Math.min(100, Math.round((progress.done / progress.total) * 100))
+    : null;
+  // 截取进度条 — Memory Yellow 细条 + 百分比，导出进行中可见。
+  const progressBar = exporting && progressPercent !== null ? (
+    <div style={{ marginTop: '0.6rem' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.3rem', fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+        <span>{t('chat.share.rendering')}</span>
+        <span>{progressPercent}%</span>
+      </div>
+      <div style={{ height: '0.3rem', borderRadius: '999px', background: 'color-mix(in srgb, var(--color-border-paper) 42%, transparent)', overflow: 'hidden' }}>
+        <div style={{ width: `${progressPercent}%`, height: '100%', borderRadius: '999px', background: 'var(--color-voice-yellow)', transition: 'width 0.2s ease' }} />
+      </div>
+    </div>
+  ) : null;
+
   useEffect(() => {
     if (!open) {
       return undefined;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && !exporting) {
+      // 导出进行中关闭 = 任务转后台运行，不打断。
+      if (event.key === 'Escape') {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, exporting, onClose]);
+  }, [open, onClose]);
 
   if (!open) {
     return null;
@@ -76,7 +96,7 @@ export default function ChatShareDialog({
   return (
     <div
       role="presentation"
-      onClick={() => { if (!exporting) onClose(); }}
+      onClick={() => { onClose(); }}
       style={{
         position: 'fixed',
         inset: 0,
@@ -125,8 +145,7 @@ export default function ChatShareDialog({
           <button
             type="button"
             onClick={onClose}
-            disabled={exporting}
-            title={t('chat.history.close')}
+            title={exporting ? t('chat.share.closeToBackground') : t('chat.history.close')}
             style={{
               width: '1.8rem',
               height: '1.8rem',
@@ -135,11 +154,11 @@ export default function ChatShareDialog({
               borderRadius: '0.55rem',
               background: 'transparent',
               color: 'var(--color-text-secondary)',
-              cursor: exporting ? 'not-allowed' : 'pointer',
+              cursor: 'pointer',
               display: 'grid',
               placeItems: 'center',
             }}
-            onMouseEnter={(e) => { if (!exporting) { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; } }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--color-bg-surface)'; e.currentTarget.style.color = 'var(--color-text-primary)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--color-text-secondary)'; }}
           >
             <IconX style={{ width: '1rem', height: '1rem' }} />
@@ -172,11 +191,15 @@ export default function ChatShareDialog({
               {preview.fileName}
               {!preview.partial && preview.images.length > 1 ? ` · ${t('chat.share.partsInfo', { count: preview.images.length })}` : ''}
             </div>
-            {/* 预览头已上屏、完整长图仍在后台拼接时的进行态提示 */}
+            {/* 预览头已上屏、完整长图仍在后台拼接时的进行态提示 + 进度条 */}
             {preview.partial ? (
-              <div style={{ marginTop: '0.6rem', display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
-                <IconLoader style={{ width: '0.85rem', height: '0.85rem', flexShrink: 0, animation: 'spin 1s linear infinite' }} />
-                {t('chat.share.rendering')}
+              <div style={{ marginTop: '0.6rem' }}>
+                {progressBar ?? (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.76rem', color: 'var(--color-text-secondary)' }}>
+                    <IconLoader style={{ width: '0.85rem', height: '0.85rem', flexShrink: 0, animation: 'spin 1s linear infinite' }} />
+                    {t('chat.share.rendering')}
+                  </div>
+                )}
               </div>
             ) : null}
             {/* 操作行 — 下载图片（主操作） / 返回（次操作） */}
@@ -237,10 +260,11 @@ export default function ChatShareDialog({
             </div>
           </>
         ) : exporting ? (
-          /* 点分享即触发生成 — 首片预览未就绪前的占位加载视图 */
+          /* 点分享即触发生成 — 首片预览未就绪前的占位加载视图（带进度条） */
           <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.7rem', padding: '2.2rem 1rem', borderRadius: '0.85rem', border: '1px dashed color-mix(in srgb, var(--color-border-paper) 88%, transparent)', background: 'var(--color-bg-app)' }}>
             <IconLoader style={{ width: '1.3rem', height: '1.3rem', color: 'var(--color-text-secondary)', animation: 'spin 1s linear infinite' }} />
             <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{t('chat.share.preparingPreview')}</span>
+            {progressBar ? <div style={{ width: '100%' }}>{progressBar}</div> : null}
           </div>
         ) : (
           <>

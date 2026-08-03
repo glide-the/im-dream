@@ -320,8 +320,9 @@ export interface RenderThreadImageHooks {
  * full-resolution PNG parts instead of shrinking.
  */
 const SLICE_HEIGHT_PX = 2000;
-/** DOM-tile 路径的单块最大高度（CSS px）— 每块独立序列化，字符串开销有界。 */
-const TILE_HEIGHT_CSS = 2000;
+/** DOM-tile 路径的单块最大高度（CSS px）— 每块独立序列化，字符串开销有界；
+ *  取 4000（3x 物理 12000，仍低于 canvas 上限 15000）以减半块数、摊薄每块固定开销。 */
+const TILE_HEIGHT_CSS = 4000;
 const CAPTURE_PIXEL_RATIO = 3;
 /** Safe per-canvas height in physical pixels (browsers cap canvas edge ≈ 16384). */
 const MAX_PART_HEIGHT_PX = 15000;
@@ -449,15 +450,6 @@ class PartCanvasCollector {
   }
 }
 
-/**
- * Tile 路径 — DOM 分块截取：把卡片的直接子节点按像素高度分组为若干 tile（每块
- * ≤TILE_HEIGHT_CSS），每块用「卡片浅克隆容器 + 该组子节点深克隆」单独 toSvg。
- * 这样任何时刻都不存在完整对话的 SVG 文本（长对话下单趟 toSvg 的字符串可达数百 MB，
- * encodeURIComponent 后更可达 6-9 倍，是 Chrome 卡死/OOM 的根因），单块的序列化/编码
- * 开销严格有界。子节点间距通过实测 getBoundingClientRect 换算为克隆节点的显式
- * margin-top（规避 margin 折叠双倍计数），拼回后与原排版逐像素一致；容器 overflow:hidden
- * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。块间 setTimeout(0) 让出主线程。
- */
 export interface CaptureProgressHooks {
   onFirstSlice?: (previewUrl: string) => void;
   onProgress?: (progress: { done: number; total: number }) => void;
@@ -469,9 +461,15 @@ function extractFontStyleElement(svgText: string): string {
   return match?.[0] ?? '';
 }
 
-/** 把首块提取的字体 <style> 注入后续块（skipFonts 后由我们补回），插入到
- *  foreignObject 内 XHTML 包裹 div 的开标签之后——与 html-to-image 的位置一致。 */
-function injectFontStyleElement(svgText: string, styleElement: string): string | null {
+const SVG_DATA_PREFIX = 'data:image/svg+xml;charset=utf-8,';
+const decodeSvgDataUrl = (url: string) => decodeURIComponent(url.slice(url.indexOf(',') + 1));
+
+/** 把「已编码」的字体 <style> 拼进后续块的 data URL（skipFonts 后由我们补回）。
+ *  字体 base64 可达 16MB，若对整块 SVG 跑 encodeURIComponent，每块都要逐字符
+ *  重编码这份字体（CPU 主因之一）；这里只对几 KB 的正文两段做编码，字体编码串
+ *  全局只算一次，最终 URL 以 rope 拼接（img.src 赋值时一次平坦化）。 */
+function spliceEncodedFontStyle(dataUrl: string, encodedFontStyle: string): string | null {
+  const svgText = decodeSvgDataUrl(dataUrl); // skipFonts 后的正文，只有几 KB
   const foIndex = svgText.indexOf('<foreignObject');
   if (foIndex < 0) {
     return null;
@@ -484,12 +482,11 @@ function injectFontStyleElement(svgText: string, styleElement: string): string |
   if (gtIndex < 0) {
     return null;
   }
-  return svgText.slice(0, gtIndex + 1) + styleElement + svgText.slice(gtIndex + 1);
+  return SVG_DATA_PREFIX
+    + encodeURIComponent(svgText.slice(0, gtIndex + 1))
+    + encodedFontStyle
+    + encodeURIComponent(svgText.slice(gtIndex + 1));
 }
-
-const SVG_DATA_PREFIX = 'data:image/svg+xml;charset=utf-8,';
-const decodeSvgDataUrl = (url: string) => decodeURIComponent(url.slice(url.indexOf(',') + 1));
-const encodeSvgDataUrl = (text: string) => SVG_DATA_PREFIX + encodeURIComponent(text);
 
 /**
  * Tile 路径 — DOM 分块截取：把卡片的直接子节点按像素高度分组为若干 tile（每块
@@ -498,9 +495,9 @@ const encodeSvgDataUrl = (text: string) => SVG_DATA_PREFIX + encodeURIComponent(
  * encodeURIComponent 后更可达 6-9 倍，是 Chrome 卡死/OOM 的根因），单块的序列化/编码
  * 开销严格有界。子节点间距通过实测 getBoundingClientRect 换算为克隆节点的显式
  * margin-top（规避 margin 折叠双倍计数），拼回后与原排版逐像素一致；容器 overflow:hidden
- * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。字体只在首块内嵌一次，后续块
- * skipFonts 并注入首块的字体 <style>（中文字体 base64 可达数 MB，逐块重复嵌入是
- * CPU 占满的主因）。块间让出主线程到下一帧，保证进度条实时上屏。
+ * 建立 BFC 防止首尾 margin 穿透，并裁齐整数块高。字体只在首块内嵌一次：后续块
+ * skipFonts 并拼接首块字体的「编码后」字符串（中文字体 base64 可达 16MB，逐块
+ * 重复嵌入+逐块重编码是 CPU 占满的主因）。块间让出主线程到下一帧，保证进度条实时上屏。
  */
 export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
   const { toSvg } = await import('html-to-image');
@@ -547,8 +544,8 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
     tiles.map((tile) => tile.heightCss * CAPTURE_PIXEL_RATIO),
     background,
   );
-  // 首块提取出的字体 <style>；null = 尚未确定 / 无字体可复用（保持逐块内嵌）。
-  let sharedFontStyle: string | null = null;
+  // 首块字体 <style> 的「编码后」形态；null = 尚未确定 / 无字体可复用（保持逐块内嵌）。
+  let sharedEncodedFontStyle: string | null = null;
   for (let index = 0; index < tiles.length; index += 1) {
     const tile = tiles[index];
     const wrapper = node.cloneNode(false) as HTMLElement;
@@ -569,17 +566,14 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
     }
     host.appendChild(wrapper);
     try {
-      const skipFonts = index > 0 && sharedFontStyle !== null;
+      const skipFonts = index > 0 && sharedEncodedFontStyle !== null;
       let tileUrl = await toSvg(wrapper, skipFonts ? { skipFonts: true } : undefined);
       if (index === 0) {
         const extracted = extractFontStyleElement(decodeSvgDataUrl(tileUrl));
-        // 只有确实提取到字体样式才启用后续块的 skipFonts 复用。
-        sharedFontStyle = extracted || null;
-      } else if (skipFonts && sharedFontStyle) {
-        const injected = injectFontStyleElement(decodeSvgDataUrl(tileUrl), sharedFontStyle);
-        if (injected) {
-          tileUrl = encodeSvgDataUrl(injected);
-        }
+        // 只有确实提取到字体样式才启用后续块的 skipFonts 复用；编码串只算这一次。
+        sharedEncodedFontStyle = extracted ? encodeURIComponent(extracted) : null;
+      } else if (skipFonts && sharedEncodedFontStyle) {
+        tileUrl = spliceEncodedFontStyle(tileUrl, sharedEncodedFontStyle) ?? tileUrl;
       }
       const image = await loadImage(tileUrl);
       // 首块 data URL 直接交给弹窗做预览头（SVG 可在 <img> 中显示）。
@@ -598,12 +592,13 @@ export async function capturePartBlobsTiled(node: HTMLElement, host: HTMLElement
 }
 
 /** Legacy per-slice toPng path — kept as a fallback if the tiled capture ever fails. */
-export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
+export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
   const { toPng } = await import('html-to-image');
   const totalHeight = node.offsetHeight;
   const cardWidth = node.offsetWidth;
   const background = getComputedStyle(node).backgroundColor || '#F6EFE5';
   const sliceHeights = planSliceHeights(totalHeight);
+  hooks?.onProgress?.({ done: 0, total: sliceHeights.length });
   const collector = new PartCanvasCollector(
     cardWidth * CAPTURE_PIXEL_RATIO,
     sliceHeights.map((height) => height * CAPTURE_PIXEL_RATIO),
@@ -623,7 +618,7 @@ export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElemen
     try {
       const dataUrl = await toPng(wrapper, { pixelRatio: CAPTURE_PIXEL_RATIO });
       if (index === 0) {
-        onFirstSlice?.(dataUrl);
+        hooks?.onFirstSlice?.(dataUrl);
       }
       const image = await loadImage(dataUrl);
       await collector.add(image, 1);
@@ -631,16 +626,17 @@ export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElemen
     } finally {
       wrapper.remove();
     }
+    hooks?.onProgress?.({ done: index + 1, total: sliceHeights.length });
     await yieldToUi();
   }
   return collector.finish();
 }
 
-async function capturePartBlobs(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
+async function capturePartBlobs(node: HTMLElement, host: HTMLElement, hooks?: CaptureProgressHooks): Promise<Blob[]> {
   try {
-    return await capturePartBlobsTiled(node, host, onFirstSlice);
+    return await capturePartBlobsTiled(node, host, hooks);
   } catch {
-    return capturePartBlobsLegacy(node, host, onFirstSlice);
+    return capturePartBlobsLegacy(node, host, hooks);
   }
 }
 
@@ -678,8 +674,11 @@ export async function renderThreadImage({ threadId, title, messages, labels, pen
     const safeTitle = title.replace(/[^\w一-龥-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'chat';
     const fileName = `ink-memory-${safeTitle}-${threadId.slice(0, 8)}.png`;
     // 先出头部一段预览，避免用户空等 — 剩余切片在后台继续流式截取拼接。
-    const partBlobs = await capturePartBlobs(node, host, (firstSliceUrl) => {
-      hooks?.onPartialPreview?.({ images: [firstSliceUrl], fileName, partial: true });
+    const partBlobs = await capturePartBlobs(node, host, {
+      onFirstSlice: (firstSliceUrl) => {
+        hooks?.onPartialPreview?.({ images: [firstSliceUrl], fileName, partial: true });
+      },
+      onProgress: hooks?.onProgress,
     });
     const images = partBlobs.map((blob) => URL.createObjectURL(blob));
     if (images.length === 0) {
