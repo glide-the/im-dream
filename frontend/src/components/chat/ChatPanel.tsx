@@ -81,6 +81,7 @@ import {
   publishStoryWorkspaceOutput,
   type StoryWorkspaceOutputReceipt,
 } from '../../lib/story-workspace-events';
+import { filterStoryWorkspaceGuidanceMessages } from '../../lib/story-workspace-guidance';
 import {
   applyBackendEventToMessages,
   consumeClaudeAgentSseStream,
@@ -292,6 +293,14 @@ export default function ChatPanel({
 
   setMessagesRef.current = setMessages;
 
+  // DEC-032: story-workspace guidance rows persist in chat_message but must
+  // never render as Chat bubbles — every render/export seam below consumes
+  // visibleMessages instead of the raw useChat list (Task 4 Step 0).
+  const visibleMessages = useMemo(
+    () => filterStoryWorkspaceGuidanceMessages(messages),
+    [messages],
+  );
+
   // Share/export — expose the live message snapshot to the chat-export registry so
   // ChatView's share dialog can render the current conversation as a long image
   // without lifting useChat state out of this panel. The snapshot also carries the
@@ -300,7 +309,7 @@ export default function ChatPanel({
   const messagesForExportRef = useRef<UIMessage[]>([]);
   const pendingConfirmationForExportRef = useRef<PendingToolConfirmation | null>(null);
   const toolChoiceForExportRef = useRef<ToolChoice>('auto');
-  messagesForExportRef.current = messages;
+  messagesForExportRef.current = visibleMessages;
   useEffect(
     () => registerChatExportSource(threadId, () => ({
       messages: messagesForExportRef.current,
@@ -481,7 +490,7 @@ export default function ChatPanel({
       onReconnectCompleteRef.current?.();
     }
   }, [isStopping, stop, threadId]);
-  const shouldShowMessageSurface = messages.length > 0 || Boolean(error) || chatLoading;
+  const shouldShowMessageSurface = visibleMessages.length > 0 || Boolean(error) || chatLoading;
 
   const effectiveToolChoice: ToolChoice = imFullAccessEnabled ? 'auto' : currentToolChoice;
 
@@ -489,7 +498,7 @@ export default function ChatPanel({
   // confirmation UI (approve/reject or AskUserQuestion form) floats above the
   // input dock instead of rendering inline in the message list.
   const pendingConfirmation = useMemo<PendingToolConfirmation | null>(() => {
-    for (const message of messages) {
+    for (const message of visibleMessages) {
       const parts = message.parts ?? [];
       for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
         const part = parts[partIndex];
@@ -509,22 +518,22 @@ export default function ChatPanel({
       }
     }
     return null;
-  }, [messages, effectiveToolChoice]);
+  }, [visibleMessages, effectiveToolChoice]);
 
   // Keep the export snapshot refs in sync with the derived dock state.
   pendingConfirmationForExportRef.current = pendingConfirmation;
   toolChoiceForExportRef.current = effectiveToolChoice;
 
   const shouldShowLoadingIndicator = useMemo(() => {
-    if (!agentBusy || messages.length === 0) {
+    if (!agentBusy || visibleMessages.length === 0) {
       return false;
     }
-    const lastMessage = messages.at(-1);
+    const lastMessage = visibleMessages.at(-1);
     const hasVisibleParts = lastMessage?.parts?.some(
       (part) => part.type === 'text' || part.type === 'reasoning' || isToolUIPart(part),
     );
     return !hasVisibleParts;
-  }, [agentBusy, messages]);
+  }, [agentBusy, visibleMessages]);
 
   const updateScrollToBottomVisibility = useCallback((element: HTMLDivElement) => {
     const distanceFromBottom = element.scrollHeight - element.scrollTop - element.clientHeight;
@@ -580,7 +589,7 @@ export default function ChatPanel({
       {shouldShowMessageSurface ? (
         <div ref={chatContainerRef} onScroll={handleScroll} style={{ minHeight: 0, flex: 1, overflowY: 'auto', borderRadius: '1.5rem', background: 'var(--color-bg-app)', padding: '1rem 1rem 1.5rem' }}>
           <ChatMessageList
-            messages={messages}
+            messages={visibleMessages}
             threadId={threadId}
             isLoading={chatLoading}
             error={error}

@@ -202,6 +202,49 @@
 .story-workspace-review-detail__source dt { color: var(--color-text-muted); }
 .story-workspace-review-detail__source dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
 
+/* Dream surface jump link (design_004 §4; shared by review detail + list rows) */
+.story-workspace-surface-link {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.story-workspace-surface-link a {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border: 1px solid var(--color-action-primary);
+  border-radius: 999px;
+  background: var(--color-bg-paper);
+  color: var(--color-action-primary);
+  font-size: 12px;
+  text-decoration: none;
+}
+
+.story-workspace-surface-link a:hover {
+  background: color-mix(in srgb, var(--color-action-primary) 10%, var(--color-bg-paper));
+}
+
+.story-workspace-surface-link__secondary {
+  border-color: var(--color-border-paper) !important;
+  color: var(--color-text-secondary) !important;
+}
+
+/* Dream page ?run= deep-link fallback notice (design_004 §4.3) */
+.story-workspace-deep-link-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--color-border-paper);
+  border-radius: 10px;
+  background: var(--color-bg-surface);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
 .story-workspace-review-detail__fields,
 .story-workspace-review-detail__decision {
   display: grid;

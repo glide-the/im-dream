@@ -1,6 +1,10 @@
 // [Input] A selected Agent-generated Story Workspace resource and server provenance.
 // [Output] Editable proposal detail with confirm/reject review actions.
 // [Pos] Dream right-rail business review surface.
+// [Sync] 2026-08-04: mount StoryWorkspaceSurfaceLinkButton in the proposal
+//                    detail area (Task 4, design_004 §4); surfaces resolve via
+//                    the source receipt's chat thread, link state arrives as
+//                    server-aggregated props (hidden while absent).
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -13,15 +17,30 @@ import {
   type StoryWorkspaceStoryDetail,
 } from '../../../api/storyWorkspaceReviewApi';
 import type { StoryWorkspaceOutputReceipt } from '../../../lib/story-workspace-events';
+import { useWorkspaceSurfaces } from '../../../hooks/story-workspace';
+import type { StoryWorkspaceSurfaceLinkState } from '../../../hooks/story-workspace/contracts';
+import { StoryWorkspaceSurfaceLinkButton } from '../StoryWorkspaceSurfaceLinkButton';
 
 export interface StoryWorkspaceReviewSelection {
   resourceType: StoryWorkspaceReviewResourceType;
   resourceId: string;
 }
 
+/**
+ * Server-aggregated Dream surface link context for the selected proposal
+ * (design_004 §4.1). Optional: while no server aggregation binds proposals
+ * to runs, callers omit it and the link stays hidden.
+ */
+export interface StoryWorkspaceReviewSurfaceLink {
+  runId: string | null;
+  episodeId?: string | null;
+  state: StoryWorkspaceSurfaceLinkState | null;
+}
+
 export interface StoryWorkspaceReviewDetailProps {
   selection: StoryWorkspaceReviewSelection;
   sourceReceipt?: StoryWorkspaceOutputReceipt | null;
+  surfaceLink?: StoryWorkspaceReviewSurfaceLink | null;
   onChanged: (resource: StoryWorkspaceReviewResource) => void;
   onSelectResource?: (selection: StoryWorkspaceReviewSelection) => void;
 }
@@ -102,6 +121,7 @@ function patchFromDraft(type: StoryWorkspaceReviewResourceType, draft: Draft) {
 export function StoryWorkspaceReviewDetail({
   selection,
   sourceReceipt,
+  surfaceLink,
   onChanged,
   onSelectResource,
 }: StoryWorkspaceReviewDetailProps) {
@@ -111,6 +131,12 @@ export function StoryWorkspaceReviewDetail({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Dream surface discovery needs the originating chat thread; only fetch when
+  // aggregated link state is actually supplied (undefined = hidden, DEC-028).
+  const surfaces = useWorkspaceSurfaces(
+    surfaceLink?.runId && surfaceLink.state ? sourceReceipt?.chat_thread_id : undefined,
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -218,6 +244,15 @@ export function StoryWorkspaceReviewDetail({
           <div><dt>Deck</dt><dd>{deckName || '未使用 Deck'}</dd></div>
           <div><dt>Thread</dt><dd><code>{sourceReceipt.chat_thread_id}</code></dd></div>
         </dl>
+      )}
+
+      {surfaceLink && (
+        <StoryWorkspaceSurfaceLinkButton
+          episodeId={surfaceLink.episodeId}
+          runId={surfaceLink.runId}
+          state={surfaceLink.state}
+          surfaces={surfaces}
+        />
       )}
 
       <div className="story-workspace-review-detail__fields">

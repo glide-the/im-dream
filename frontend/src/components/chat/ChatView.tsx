@@ -96,6 +96,7 @@ import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
+import { filterStoryWorkspaceGuidanceMessages } from '../../lib/story-workspace-guidance';
 import { getDateLocale } from '../../i18n';
 import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
@@ -347,7 +348,9 @@ async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesSnap
     if (!res.ok) return { messages: [] };
     const data = await res.json() as { thread?: ChatThread; messages?: RawChatMessage[] };
     const msgs = data.messages ?? [];
-    return { thread: data.thread, messages: msgs.map((m) => {
+    // DEC-032: guidance rows persist in chat_message but never render as Chat
+    // bubbles — filter them at the history-load seam (Task 4 Step 0).
+    return { thread: data.thread, messages: filterStoryWorkspaceGuidanceMessages(msgs.map((m) => {
       // parts is already a parsed list — aligned with better-chatbot
       // ChatRepository.selectMessagesByThreadId which returns parts directly.
       const parts: UIMessage['parts'] = Array.isArray(m.parts) && m.parts.length > 0
@@ -361,7 +364,7 @@ async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesSnap
         metadata,
         createdAt: new Date(m.created_at),
       };
-    }) };
+    })) };
   } catch {
     return { messages: [] };
   }

@@ -1,6 +1,11 @@
 // [Input] Browser location/history, Story Workspace layout/sidebar, and route page skeletons.
 // [Output] Resolve canonical Story Workspace paths and render synchronized route content.
 // [Pos] Story Workspace state-router adapter for the existing App architecture.
+// [Sync] 2026-08-04: Task 4 Step 5 (R2) — resolve the Dream page ?run= deep
+//                    link locally (URLSearchParams) and surface the resolved
+//                    run via WorkflowContextBar; missing/foreign runs show a
+//                    dismissible notice and fall back to the default view.
+//                    Task 5 Step 0 unifies query parsing into this router.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
@@ -9,6 +14,7 @@ import {
   type StoryWorkspaceReviewSelection,
 } from '../components/story-workspace/layout/StoryWorkspaceReviewDetail';
 import { StoryWorkspaceSidebar } from '../components/story-workspace/layout/StoryWorkspaceSidebar';
+import { useRunDeepLink } from '../hooks/story-workspace';
 import {
   subscribeStoryWorkspaceOutput,
   type StoryWorkspaceOutputReceipt,
@@ -115,6 +121,11 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
   const [resourceRefreshNonce, setResourceRefreshNonce] = useState(0);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoryWorkspaceSidebarCollapsed);
 
+  // Dream page ?run= deep link (design_004 §4.3, Task 4 R2): local
+  // URLSearchParams resolution, initial positioning only — the selected run is
+  // surfaced through the existing WorkflowContextBar mount and never frozen.
+  const runDeepLink = useRunDeepLink(activeRoute === 'dream');
+
   const handleToggleSidebarCollapse = useCallback(() => {
     setSidebarCollapsed((collapsed) => {
       const next = !collapsed;
@@ -195,7 +206,20 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
         />
       )}
       sidebarCollapsed={sidebarCollapsed}
+      workflowContext={runDeepLink.run ? {
+        state: runDeepLink.run.status,
+        deckPluginDisplayName: runDeepLink.run.deck_plugin_display_name,
+        deckPluginVersion: runDeepLink.run.deck_plugin_version,
+        workflowRunId: runDeepLink.run.workflow_run_id,
+        workflowSummary: runDeepLink.run.workflow_summary,
+      } : null}
     >
+      {runDeepLink.notice && (
+        <div className="story-workspace-deep-link-notice" role="status">
+          <span>{runDeepLink.notice}</span>
+          <button className="workflow-button" onClick={runDeepLink.dismissNotice} type="button">知道了</button>
+        </div>
+      )}
       {renderStoryWorkspaceRoute(
         activeRoute,
         dreamContent,

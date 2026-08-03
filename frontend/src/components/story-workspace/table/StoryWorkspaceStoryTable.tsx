@@ -3,6 +3,10 @@ import type {
   StoryWorkspaceStory,
   StoryWorkspaceStoryType,
 } from '../../../hooks/story-workspace';
+import {
+  StoryWorkspaceSurfaceLinkButton,
+  type StoryWorkspaceSurfaceLinkButtonProps,
+} from '../StoryWorkspaceSurfaceLinkButton';
 import { StoryWorkspaceReviewStatusBadge } from './StoryWorkspaceReviewStatusBadge';
 import { StoryWorkspaceSortButton } from './StoryWorkspaceSortButton';
 import { StoryWorkspaceTableRow } from './StoryWorkspaceTableRow';
@@ -27,6 +31,12 @@ export interface StoryWorkspaceStoryTableProps {
   onReview?: (story: StoryWorkspaceStory) => void;
   onSelectionChange: (ids: string[]) => void;
   onSortChange: (sort: string, order: StoryWorkspaceSortOrder) => void;
+  /**
+   * Row-level Dream surface link mount (design_004 §4.1, same component as the
+   * review panel detail area). Optional: while no server aggregation binds
+   * stories to runs, callers omit it and no link renders.
+   */
+  surfaceLinkForStory?: (story: StoryWorkspaceStory) => StoryWorkspaceSurfaceLinkButtonProps | null;
 }
 
 export function StoryWorkspaceStoryTable({
@@ -37,6 +47,7 @@ export function StoryWorkspaceStoryTable({
   onReview,
   onSelectionChange,
   onSortChange,
+  surfaceLinkForStory,
 }: StoryWorkspaceStoryTableProps) {
   const pendingIds = items
     .filter((item) => item.review_status === 'pending' && item.status !== 'archived')
@@ -80,6 +91,7 @@ export function StoryWorkspaceStoryTable({
             const displayReviewStatus = story.status === 'archived'
               ? 'archived'
               : story.review_status;
+            const surfaceLinkProps = surfaceLinkForStory?.(story) ?? null;
 
             return (
               <StoryWorkspaceTableRow
@@ -107,6 +119,7 @@ export function StoryWorkspaceStoryTable({
                 >
                   审阅
                 </button>
+                {surfaceLinkProps && <StoryWorkspaceSurfaceLinkButton {...surfaceLinkProps} />}
               </td>
               </StoryWorkspaceTableRow>
             );

@@ -100,6 +100,31 @@ export interface StoryWorkspacePluginLoadReceiptResponse {
   launch_manifest: { surfaces?: StoryWorkspaceSurface[] } | null;
 }
 
+/**
+ * The six Gate / run stages of design_004 §4.2. This value is produced by
+ * server-side aggregation ("proposal review status + story-workspace run
+ * status"); the frontend must never derive it from local data.
+ */
+export type StoryWorkspaceSurfaceLinkStage =
+  | 'pending_review'
+  | 'confirmed'
+  | 'continuing'
+  | 'completed'
+  | 'failed'
+  | 'rejected';
+
+/**
+ * Server-aggregated button state for StoryWorkspaceSurfaceLinkButton
+ * (design_004 §4.1). `superseded` marks a proposal whose attempt was replaced
+ * by a newer run (retryOfRunId chain); `latestRunId` points at that newest
+ * run for the "查看最新版本" degradation target (§4.4).
+ */
+export interface StoryWorkspaceSurfaceLinkState {
+  stage: StoryWorkspaceSurfaceLinkStage;
+  superseded?: boolean;
+  latestRunId?: string | null;
+}
+
 export interface StoryWorkspaceListState<T> {
   data: T[];
   pagination: StoryWorkspacePaginationData;
