@@ -73,31 +73,8 @@ def _error_response(exc: PluginInstallError) -> JSONResponse:
     )
 
 
-def _permissions(current_user: dict[str, Any]) -> set[str]:
-    raw = current_user.get("permissions", current_user.get("scopes", []))
-    if isinstance(raw, str):
-        return set(raw.split())
-    return {str(item) for item in raw}
-
-
-def _require_admin(current_user: dict[str, Any]) -> JSONResponse | None:
-    if current_user.get("role") == "admin":
-        return None
-    if _permissions(current_user).intersection({"plugin:admin"}):
-        return None
-    return JSONResponse(
-        status_code=403,
-        content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
-    )
-
-
-def _require_reader(current_user: dict[str, Any]) -> JSONResponse | None:
-    if current_user.get("role") == "admin":
-        return None
-    if _permissions(current_user).intersection({"plugin:read", "plugin:admin"}):
-        return None
-    # Settings → Plugins is an owner-facing surface in this app; any
-    # authenticated user may read installation state.
+def _require_authenticated(current_user: dict[str, Any]) -> JSONResponse | None:
+    """Any authenticated user may read and manage plugins."""
     if current_user.get("user_id") is not None:
         return None
     return JSONResponse(
@@ -143,7 +120,7 @@ def _run_install(operation_id: str, package_spec: str, source_type: str) -> None
 
 @router.get("/api/claude-plugins/installations")
 async def list_installations(current_user: dict = Depends(get_current_user)):
-    denied = _require_reader(current_user)
+    denied = _require_authenticated(current_user)
     if denied is not None:
         return denied
     db = database.get_db()
@@ -159,7 +136,10 @@ async def list_installations(current_user: dict = Depends(get_current_user)):
         }
         for item in installations:
             item["deck_ref_count"] = ref_counts.get(item["id"], 0)
-        return {"installations": installations}
+        return {
+            "installations": installations,
+            "permissions": {"can_manage_shared_plugins": True},
+        }
     finally:
         db.close()
 
@@ -170,7 +150,7 @@ async def install_plugin(
     background_tasks: BackgroundTasks,
     current_user: dict = Depends(get_current_user),
 ):
-    denied = _require_admin(current_user)
+    denied = _require_authenticated(current_user)
     if denied is not None:
         return denied
     try:
@@ -231,7 +211,7 @@ async def list_operations(
     limit: int = 20,
     current_user: dict = Depends(get_current_user),
 ):
-    denied = _require_reader(current_user)
+    denied = _require_authenticated(current_user)
     if denied is not None:
         return denied
     db = database.get_db()
@@ -248,7 +228,7 @@ async def list_operations(
 
 @router.get("/api/claude-plugins/operations/{operation_id}")
 async def get_operation(operation_id: str, current_user: dict = Depends(get_current_user)):
-    denied = _require_reader(current_user)
+    denied = _require_authenticated(current_user)
     if denied is not None:
         return denied
     db = database.get_db()
@@ -266,7 +246,7 @@ async def get_operation(operation_id: str, current_user: dict = Depends(get_curr
 
 @router.get("/api/claude-plugins/installations/{installation_id}")
 async def get_installation(installation_id: str, current_user: dict = Depends(get_current_user)):
-    denied = _require_reader(current_user)
+    denied = _require_authenticated(current_user)
     if denied is not None:
         return denied
     db = database.get_db()
@@ -293,7 +273,7 @@ async def get_installation(installation_id: str, current_user: dict = Depends(ge
 
 @router.post("/api/claude-plugins/installations/{installation_id}/uninstall")
 async def uninstall_plugin(installation_id: str, current_user: dict = Depends(get_current_user)):
-    denied = _require_admin(current_user)
+    denied = _require_authenticated(current_user)
     if denied is not None:
         return denied
     db = database.get_db()
@@ -328,9 +308,6 @@ async def put_deck_plugins(
     request: DeckRefsPutRequest,
     current_user: dict = Depends(get_current_user),
 ):
-    denied = _require_admin(current_user)
-    if denied is not None:
-        return denied
     db = database.get_db()
     try:
         try:

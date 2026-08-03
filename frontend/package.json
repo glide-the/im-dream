@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "build:docker": "vite build",
     "e2e:deck": "playwright test e2e/deck-dream.spec.ts --reporter=line --workers=1",
+    "e2e:claude-plugins": "playwright test e2e/claude-plugin-settings.spec.ts --reporter=line --workers=1",
     "lint": "eslint .",
     "preview": "vite preview"
   },

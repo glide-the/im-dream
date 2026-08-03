@@ -35,11 +35,11 @@ export default function DeckClaudePluginSelector({ deckId, disabled }: DeckClaud
     setLoading(true);
     setError(null);
     try {
-      const [installs, refs] = await Promise.all([
+      const [installResult, refs] = await Promise.all([
         listClaudePluginInstallations(),
         listDeckClaudePluginRefs(deckId),
       ]);
-      setInstallations(installs);
+      setInstallations(installResult.installations);
       const next = new Map<string, boolean>();
       refs.forEach((ref) => next.set(ref.plugin_installation_id, ref.enabled === 1));
       setSelected(next);

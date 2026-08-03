@@ -2,6 +2,9 @@
 // [Output] Typed client for shared plugin installations, operations, and Deck plugin refs.
 // [Pos] API layer for claude-plugin-admin components and the Deck editor plugin selector.
 
+import { getAuthToken } from '../contexts/AuthContext';
+import { apiUrl } from '../lib/apiBase';
+
 export type ClaudePluginSourceType = 'claude-official' | 'marketplace' | 'github' | 'platform-builtin';
 export type ClaudePluginInstallStatus = 'installing' | 'ready' | 'error' | 'uninstalled';
 export type ClaudePluginOperationStatus = 'queued' | 'running' | 'ready' | 'error';
@@ -31,6 +34,10 @@ export interface ClaudePluginInstallation {
   installed_at: string | null;
   deck_ref_count?: number;
   deck_refs?: Array<{ deck_id: string; enabled: boolean; order_index: number }>;
+}
+
+export interface ClaudePluginInstallationsResult {
+  installations: ClaudePluginInstallation[];
 }
 
 export interface ClaudePluginOperation {
@@ -110,11 +117,19 @@ export class ClaudePluginApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers);
+  const token = getAuthToken();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  headers.set('Accept', 'application/json');
+  if (init.body !== undefined && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  const response = await fetch(apiUrl(path), {
     ...init,
+    credentials: 'include',
+    headers,
   });
   const text = await response.text();
   let payload: unknown = null;
@@ -134,11 +149,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-export async function listClaudePluginInstallations(): Promise<ClaudePluginInstallation[]> {
-  const payload = await request<{ installations: ClaudePluginInstallation[] }>(
+export async function listClaudePluginInstallations(): Promise<ClaudePluginInstallationsResult> {
+  return request<ClaudePluginInstallationsResult>(
     '/api/claude-plugins/installations',
   );
-  return payload.installations;
 }
 
 export async function installClaudePlugin(input: {

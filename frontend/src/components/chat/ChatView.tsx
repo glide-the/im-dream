@@ -92,7 +92,7 @@ import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
 import { iconMap } from '../deckVisuals';
 import { API_BASE } from '../../lib/apiBase';
 import { getDateLocale } from '../../i18n';
-import { listDecks, type Deck } from '../../api/voiceApi';
+import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
 import PluginReceiptBadge from './PluginReceiptBadge';
 
@@ -412,9 +412,20 @@ function ChatViewContent({
     setIsLoadingDecks(true);
     setDeckLoadError(null);
     void listDecks()
-      .then((decks) => {
+      .then(async (decks) => {
+        // @@@ Hydrate each deck with its voices (same pattern as DeckManager) so the
+        // Dream Deck selector can preview the agents bundled with each deck.
+        const hydrated = await Promise.all(
+          decks.map(async (deck) => {
+            try {
+              return await getDeck(deck.id);
+            } catch {
+              return deck;
+            }
+          }),
+        );
         if (cancelled) return;
-        const enabledDecks = decks.filter((deck) => deck.enabled);
+        const enabledDecks = hydrated.filter((deck) => deck.enabled);
         setAvailableDecks(enabledDecks);
         setSelectedDeckId((current) => (
           current && enabledDecks.some((deck) => deck.id === current) ? current : undefined

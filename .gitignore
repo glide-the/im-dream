@@ -44,3 +44,6 @@ backend/uv.lock
 .cloud-env
 .playwright-mcp
 output/
+
+vendor/
+marketplaces/

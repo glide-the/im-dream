@@ -212,6 +212,10 @@ const resources = {
           loadFailed: 'Failed to load Decks.',
           selectAria: 'Select one Deck for this conversation',
           selectTitle: 'Optionally load a Deck and its configured plugin for this conversation.',
+          searchPlaceholder: 'Type a prefix to filter Decks…',
+          noMatch: 'No Deck matches this prefix',
+          agentCount_one: '{{count}} agent',
+          agentCount_other: '{{count}} agents',
           lockedAria: 'Conversation Deck: {{name}}',
           lockedTitle: 'The Deck is fixed when the conversation starts.'
         },
@@ -685,6 +689,9 @@ const resources = {
           loadFailed: 'Deck 加载失败。',
           selectAria: '为本次对话单选一个 Deck',
           selectTitle: '可选加载一个 Deck 及其已配置插件。',
+          searchPlaceholder: '输入前缀筛选 Deck…',
+          noMatch: '没有匹配该前缀的 Deck',
+          agentCount: '{{count}} 个 Agent',
           lockedAria: '当前对话 Deck：{{name}}',
           lockedTitle: '对话开始后 Deck 将固定，确保运行来源可追溯。'
         },

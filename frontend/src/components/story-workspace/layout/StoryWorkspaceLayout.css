@@ -28,6 +28,13 @@
   overflow: auto;
   background: var(--color-bg-paper);
   border-right: 1px dashed var(--color-border-paper);
+  transition: flex-basis 180ms ease, width 180ms ease, min-width 180ms ease;
+}
+
+.story-workspace-layout[data-sidebar-state='collapsed'] .story-workspace-layout__sidebar {
+  flex: 0 0 72px;
+  width: 72px;
+  min-width: 72px;
 }
 
 .story-workspace-layout__main {

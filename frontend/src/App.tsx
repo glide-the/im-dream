@@ -63,7 +63,6 @@ import ChatView from './components/chat/ChatView';
 import ModelConfigSection from './components/dashboard/ModelConfigSection';
 import ConnectorSettingsSection from './components/dashboard/ConnectorSettingsSection';
 import ConnectorNotionDetailPage from './components/dashboard/ConnectorNotionDetailPage';
-import { PluginAdminPage } from './components/plugin-admin';
 import ClaudePluginAdminPage from './components/claude-plugin-admin/ClaudePluginAdminPage';
 import {
   resolveStoryWorkspacePath,
@@ -2166,12 +2165,7 @@ export default function App() {
 
             {/* Claude Code Plugin Admin (shared install + digest artifacts) */}
             <section style={{ marginBottom: 48 }}>
-              <ClaudePluginAdminPage isMobile={isMobile} />
-            </section>
-
-            {/* Deck Plugin Admin */}
-            <section style={{ marginBottom: 48 }}>
-              <PluginAdminPage isMobile={isMobile} />
+              <ClaudePluginAdminPage />
             </section>
 
             {/* AI Model Configuration */}

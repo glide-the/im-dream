@@ -22,6 +22,16 @@ import {
 
 export type StoryWorkspaceRoute = 'dream' | 'stories' | 'characters' | 'scenes';
 
+const STORY_WORKSPACE_SIDEBAR_COLLAPSED_KEY = 'ink-dream:story-workspace:sidebar-collapsed';
+
+function readStoryWorkspaceSidebarCollapsed() {
+  try {
+    return window.localStorage.getItem(STORY_WORKSPACE_SIDEBAR_COLLAPSED_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceRoute, string> = {
   dream: '/story-workspace/dream',
   stories: '/story-workspace/stories',
@@ -103,6 +113,19 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
   const [reviewSource, setReviewSource] = useState<StoryWorkspaceOutputReceipt | null>(null);
   const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
   const [resourceRefreshNonce, setResourceRefreshNonce] = useState(0);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readStoryWorkspaceSidebarCollapsed);
+
+  const handleToggleSidebarCollapse = useCallback(() => {
+    setSidebarCollapsed((collapsed) => {
+      const next = !collapsed;
+      try {
+        window.localStorage.setItem(STORY_WORKSPACE_SIDEBAR_COLLAPSED_KEY, next ? '1' : '0');
+      } catch {
+        // localStorage unavailable; collapse state simply stays session-local.
+      }
+      return next;
+    });
+  }, []);
 
   useEffect(() => subscribeStoryWorkspaceOutput((receipt) => {
     setReviewSource(receipt);
@@ -164,11 +187,14 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
       reviewPanelTitle="Agent 产出审阅"
       sidebar={(
         <StoryWorkspaceSidebar
+          collapsed={sidebarCollapsed}
           currentPath={currentPath}
           onNavigate={handleNavigate}
           onOpenSettings={onOpenSettings}
+          onToggleCollapse={handleToggleSidebarCollapse}
         />
       )}
+      sidebarCollapsed={sidebarCollapsed}
     >
       {renderStoryWorkspaceRoute(
         activeRoute,

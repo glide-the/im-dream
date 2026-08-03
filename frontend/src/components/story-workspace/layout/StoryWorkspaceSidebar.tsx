@@ -1,9 +1,11 @@
-// [Input] Current Story Workspace path, navigation callbacks, and the existing auth context.
-// [Output] Render the fixed desktop Story Workspace navigation sidebar.
+// [Input] Current Story Workspace path, navigation callbacks, collapse state, and the existing auth context.
+// [Output] Render the collapsible desktop Story Workspace navigation sidebar.
 // [Pos] Story Workspace left layout region.
 import type { IconType } from 'react-icons';
 import {
   FaBookOpen,
+  FaChevronLeft,
+  FaChevronRight,
   FaCog,
   FaFilm,
   FaHome,
@@ -26,22 +28,28 @@ const storyWorkspaceSidebarItems: StoryWorkspaceSidebarItem[] = [
 ];
 
 export interface StoryWorkspaceSidebarProps {
+  collapsed: boolean;
   currentPath: string;
   onNavigate: (path: string) => void;
   onOpenSettings: () => void;
+  onToggleCollapse: () => void;
 }
 
 export function StoryWorkspaceSidebar({
+  collapsed,
   currentPath,
   onNavigate,
   onOpenSettings,
+  onToggleCollapse,
 }: StoryWorkspaceSidebarProps) {
   const { user } = useAuth();
   const displayName = user?.display_name?.trim() || user?.email || 'Ink & Memory 用户';
   const avatarLabel = Array.from(displayName)[0]?.toUpperCase() || 'I';
 
   return (
-    <div className="story-workspace-sidebar">
+    <div
+      className={`story-workspace-sidebar${collapsed ? ' story-workspace-sidebar--collapsed' : ''}`}
+    >
       <style>{`
         .story-workspace-sidebar {
           display: flex;
@@ -55,11 +63,75 @@ export function StoryWorkspaceSidebar({
           color: var(--color-text-body);
           background: var(--color-bg-paper);
           font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          transition: width 180ms ease, min-width 180ms ease, padding 180ms ease;
+        }
+
+        .story-workspace-sidebar--collapsed {
+          width: 72px;
+          min-width: 72px;
+          padding: 28px 12px 16px;
         }
 
         .story-workspace-sidebar__brand {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 8px;
           padding: 0 8px 24px;
           border-bottom: 1px dashed var(--color-border-paper);
+        }
+
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__brand {
+          justify-content: center;
+          padding: 0 0 20px;
+        }
+
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__brand-text,
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__label,
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__settings-label,
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__user-details {
+          display: none;
+        }
+
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__nav-button,
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__settings-button {
+          justify-content: center;
+          gap: 0;
+          padding: 10px 0;
+        }
+
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__user {
+          justify-content: center;
+          padding: 14px 0 0;
+        }
+
+        .story-workspace-sidebar__toggle {
+          display: inline-flex;
+          flex: 0 0 28px;
+          width: 28px;
+          height: 28px;
+          align-items: center;
+          justify-content: center;
+          padding: 0;
+          color: var(--color-text-secondary);
+          background: transparent;
+          border: 1px solid var(--color-border-paper);
+          border-radius: 6px;
+          cursor: pointer;
+          font: inherit;
+          font-size: 11px;
+          transition: background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+        }
+
+        .story-workspace-sidebar__toggle:hover {
+          color: var(--color-text-primary);
+          background: var(--color-bg-hover);
+          border-color: var(--color-border-neutral);
+        }
+
+        .story-workspace-sidebar__toggle:focus-visible {
+          outline: 2px solid var(--color-border-focus);
+          outline-offset: 2px;
         }
 
         .story-workspace-sidebar__brand-name {
@@ -193,8 +265,21 @@ export function StoryWorkspaceSidebar({
       `}</style>
 
       <header className="story-workspace-sidebar__brand">
-        <p className="story-workspace-sidebar__brand-name">Ink &amp; Memory</p>
-        <p className="story-workspace-sidebar__brand-context">创作者工作台</p>
+        <div className="story-workspace-sidebar__brand-text">
+          <p className="story-workspace-sidebar__brand-name">Ink &amp; Memory</p>
+          <p className="story-workspace-sidebar__brand-context">创作者工作台</p>
+        </div>
+        <button
+          aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+          className="story-workspace-sidebar__toggle"
+          onClick={onToggleCollapse}
+          title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
+          type="button"
+        >
+          {collapsed
+            ? <FaChevronRight aria-hidden="true" />
+            : <FaChevronLeft aria-hidden="true" />}
+        </button>
       </header>
 
       <nav aria-label="Story Workspace 导航" className="story-workspace-sidebar__nav">
@@ -208,6 +293,7 @@ export function StoryWorkspaceSidebar({
               className="story-workspace-sidebar__nav-button"
               key={item.path}
               onClick={() => onNavigate(item.path)}
+              title={collapsed ? item.label : undefined}
               type="button"
             >
               <Icon aria-hidden="true" className="story-workspace-sidebar__icon" />
@@ -221,10 +307,11 @@ export function StoryWorkspaceSidebar({
         <button
           className="story-workspace-sidebar__settings-button"
           onClick={onOpenSettings}
+          title={collapsed ? '设置' : undefined}
           type="button"
         >
           <FaCog aria-hidden="true" className="story-workspace-sidebar__icon" />
-          <span>设置</span>
+          <span className="story-workspace-sidebar__settings-label">设置</span>
         </button>
 
         <div className="story-workspace-sidebar__user">

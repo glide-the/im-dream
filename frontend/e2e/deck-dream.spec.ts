@@ -113,7 +113,11 @@ test('Dream selects one Deck and persists immutable thread provenance', async ({
   await expect(page).toHaveURL(/\/story-workspace\/dream$/);
   const deckSelect = page.getByLabel('Select one Deck for this conversation');
   await expect(deckSelect).toBeVisible();
-  await deckSelect.selectOption(selectedDeck.id);
+  await deckSelect.click();
+  const selectedDeckLabel = selectedDeck.name_en || selectedDeck.name;
+  const prefix = selectedDeckLabel.slice(0, Math.min(3, selectedDeckLabel.length));
+  await page.getByPlaceholder('Type a prefix to filter Decks…').fill(prefix);
+  await page.getByRole('option', { name: selectedDeckLabel, exact: true }).click();
 
   const threadResponsePromise = page.waitForResponse((response) => (
     response.url().endsWith('/api/claude-agent/threads')

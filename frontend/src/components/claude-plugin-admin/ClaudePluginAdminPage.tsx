@@ -16,10 +16,6 @@ import {
   type ClaudePluginOperation,
 } from '../../api/claudePluginAdminApi';
 
-interface ClaudePluginAdminPageProps {
-  isMobile?: boolean;
-}
-
 const SPEC_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*(@v?\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?)?$/;
 
 function StatusPill({ status }: { status: string }) {
@@ -82,10 +78,12 @@ function InstallationRow({
   installation,
   onUninstall,
   busy,
+  canUninstall,
 }: {
   installation: ClaudePluginInstallation;
   onUninstall: (id: string) => void;
   busy: boolean;
+  canUninstall: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   let inventory: Record<string, unknown> = {};
@@ -124,7 +122,7 @@ function InstallationRow({
           >
             {expanded ? '收起' : '详情'}
           </button>
-          {installation.status === 'ready' ? (
+          {canUninstall && installation.status === 'ready' ? (
             <button
               type="button"
               disabled={busy}
@@ -175,7 +173,7 @@ function buttonStyle(primary: boolean): React.CSSProperties {
   };
 }
 
-export default function ClaudePluginAdminPage({ isMobile: _isMobile }: ClaudePluginAdminPageProps) {
+export default function ClaudePluginAdminPage() {
   const [installations, setInstallations] = useState<ClaudePluginInstallation[]>([]);
   const [operations, setOperations] = useState<ClaudePluginOperation[]>([]);
   const [spec, setSpec] = useState('');
@@ -186,11 +184,11 @@ export default function ClaudePluginAdminPage({ isMobile: _isMobile }: ClaudePlu
 
   const refresh = useCallback(async () => {
     try {
-      const [installs, ops] = await Promise.all([
+      const [installResult, ops] = await Promise.all([
         listClaudePluginInstallations(),
         listClaudePluginOperations(8),
       ]);
-      setInstallations(installs);
+      setInstallations(installResult.installations);
       setOperations(ops);
       setError(null);
     } catch (err) {
@@ -281,29 +279,29 @@ export default function ClaudePluginAdminPage({ isMobile: _isMobile }: ClaudePlu
       </div>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <input
-          value={spec}
-          onChange={(event) => setSpec(event.target.value)}
-          placeholder="superpowers@claude-plugins-official"
-          spellCheck={false}
-          style={{
-            flex: '1 1 320px', minWidth: 240, padding: '9px 12px', font: 'inherit', fontSize: 13,
-            borderRadius: 8, border: '1px solid var(--color-border-paper)',
-            background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)',
-          }}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !busy) void handleInstall();
-          }}
-        />
-        <button
-          type="button"
-          disabled={busy || !spec.trim()}
-          onClick={() => void handleInstall()}
-          style={{ ...buttonStyle(true), opacity: busy || !spec.trim() ? 0.5 : 1 }}
-        >
-          {busy ? '安装中…' : 'Install Plugin'}
-        </button>
-      </div>
+          <input
+            value={spec}
+            onChange={(event) => setSpec(event.target.value)}
+            placeholder="superpowers@claude-plugins-official"
+            spellCheck={false}
+            style={{
+              flex: '1 1 320px', minWidth: 240, padding: '9px 12px', font: 'inherit', fontSize: 13,
+              borderRadius: 8, border: '1px solid var(--color-border-paper)',
+              background: 'var(--color-bg-surface)', color: 'var(--color-text-primary)',
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !busy) void handleInstall();
+            }}
+          />
+          <button
+            type="button"
+            disabled={busy || !spec.trim()}
+            onClick={() => void handleInstall()}
+            style={{ ...buttonStyle(true), opacity: busy || !spec.trim() ? 0.5 : 1 }}
+          >
+            {busy ? '安装中…' : 'Install Plugin'}
+          </button>
+        </div>
 
       {error ? (
         <div style={{
@@ -318,9 +316,14 @@ export default function ClaudePluginAdminPage({ isMobile: _isMobile }: ClaudePlu
       {operations.length ? (
         <div style={{ marginTop: 18 }}>
           <FieldLabel>最近操作（真实 operation ID / argv / exit code）</FieldLabel>
-          {operations.map((operation) => (
-            <OperationCard key={operation.id} operation={operation} />
-          ))}
+          <div style={{
+            maxHeight: 236, overflowY: 'auto', overscrollBehavior: 'contain',
+            paddingRight: 4,
+          }}>
+            {operations.map((operation) => (
+              <OperationCard key={operation.id} operation={operation} />
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -337,6 +340,7 @@ export default function ClaudePluginAdminPage({ isMobile: _isMobile }: ClaudePlu
               installation={installation}
               onUninstall={handleUninstall}
               busy={busy}
+              canUninstall={true}
             />
           ))
         )}

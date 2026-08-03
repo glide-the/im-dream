@@ -3,17 +3,12 @@
 // [Pos] deck-editor-modal ui in frontend/src/components
 // [Sync] 2026-07-08: replace light-only modal panels, form fields, and voice rows with semantic
 //                    theme tokens so the Deck editor stays readable in dark mode.
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { Deck, Voice } from '../api/voiceApi';
 import { ensureVoiceThread } from '../api/voiceApi';
 import { COLORS, iconMap } from './deckVisuals';
 import type { ActiveChatVoice } from '../lib/chat-schema';
-import DeckPluginBindingCard from './deck/DeckPluginBindingCard';
-import DeckPluginBindingStatus from './deck/DeckPluginBindingStatus';
 import DeckClaudePluginSelector from './DeckClaudePluginSelector';
-import DeckPluginVersionPicker from './deck/DeckPluginVersionPicker';
-import { useDeckPluginBinding } from '../hooks/useDeckPluginBinding';
-import { useDeckPluginOptions } from '../hooks/useDeckPluginOptions';
 
 interface Props {
   deck: Deck;
@@ -44,25 +39,11 @@ export default function DeckEditorModal({
   onDeleteVoice,
   onOpenChat
 }: Props) {
-  const [isPluginPickerOpen, setIsPluginPickerOpen] = useState(false);
   const voices = useMemo(() => deck.voices || [], [deck.voices]);
   const selectedVoice = useMemo(
     () => voices.find(v => v.id === selectedVoiceId) || null,
     [voices, selectedVoiceId]
   );
-  const pluginBinding = useDeckPluginBinding(deck.id);
-  const pluginOptions = useDeckPluginOptions(deck.id);
-  const currentPluginOption = useMemo(() => {
-    const binding = pluginBinding.state?.binding;
-    if (!binding) return null;
-    return pluginOptions.options.find(option => (
-      option.deck_plugin_id === binding.deck_plugin_id
-      && option.deck_plugin_version === binding.deck_plugin_version
-    )) ?? null;
-  }, [pluginBinding.state?.binding, pluginOptions.options]);
-  const currentWorkflowRunId = (
-    deck as Deck & { current_workflow_run_id?: string | null }
-  ).current_workflow_run_id ?? null;
 
   return (
     <div
@@ -269,42 +250,6 @@ export default function DeckEditorModal({
               />
             </div>
           </div>
-
-          {/* Deck workflow plugin: next-run binding only; does not change metadata or Voice semantics. */}
-          <section
-            aria-label="Deck 工作流插件"
-            style={{
-              background: 'var(--color-bg-surface-solid)',
-              border: '2px solid var(--color-border-neutral)',
-              borderRadius: 12,
-              padding: 14,
-              boxShadow: '0 2px 6px var(--color-shadow-soft)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 9,
-              flexShrink: 0,
-            }}
-          >
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--color-text-secondary)', letterSpacing: 0.5, textTransform: 'uppercase' }}>
-              🧩 Deck 工作流插件
-            </div>
-            <DeckPluginBindingCard
-              state={pluginBinding.state}
-              currentOption={currentPluginOption}
-              loading={pluginBinding.loading}
-              disabled={isSystem}
-              currentWorkflowRunId={currentWorkflowRunId}
-              onBrowse={() => setIsPluginPickerOpen(true)}
-            />
-            <DeckPluginBindingStatus
-              loading={pluginBinding.loading || pluginOptions.loading}
-              saving={pluginBinding.saving}
-              error={pluginBinding.error ?? pluginOptions.error}
-              successMessage={pluginBinding.successMessage}
-              conflict={pluginBinding.conflict}
-              currentWorkflowRunId={currentWorkflowRunId}
-            />
-          </section>
 
           {/* Claude Code plugins: shared-installation references (digest-pinned). */}
           <DeckClaudePluginSelector deckId={deck.id} disabled={isSystem} />
@@ -665,22 +610,6 @@ export default function DeckEditorModal({
             </div>
           </div>
         </div>
-
-        {isPluginPickerOpen && (
-          <DeckPluginVersionPicker
-            options={pluginOptions.options}
-            bindingState={pluginBinding.state}
-            loading={pluginOptions.loading}
-            saving={pluginBinding.saving}
-            error={pluginOptions.error ?? pluginBinding.error}
-            conflict={pluginBinding.conflict}
-            onRefresh={() => {
-              void Promise.all([pluginBinding.refresh(), pluginOptions.refresh()]);
-            }}
-            onConfirm={option => pluginBinding.save(option, pluginOptions.refresh)}
-            onClose={() => setIsPluginPickerOpen(false)}
-          />
-        )}
       </div>
     </div>
   );
