@@ -11,6 +11,10 @@
 #                    per-session lock held until bg_task completes.
 # [Sync] 2026-06-25: add stop_thread() for frontend-initiated current-turn
 #                    cancellation without destroying the chat thread.
+# [Sync] 2026-08-03: assemble_context failure (e.g. WorkspacePackError from
+#                    workspace plugin pack) now emits an SSE error frame +
+#                    sentinel via the EventBus and resets lifecycle to IDLE,
+#                    instead of a bare SSE disconnect + stuck RUNNING session.
 
 """Claude Agent Thread Factory — 四阶段会话编排入口."""
 from __future__ import annotations
@@ -24,7 +28,12 @@ from uuid import uuid4
 from claude_agent.event_bus import IEventBus, create_event_bus
 from claude_agent.observer import LoggingObserver, SessionObserverRegistry
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
-from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
+from claude_agent.service import (
+    ClaudeAgentRunRequest,
+    ClaudeAgentService,
+    _format_exception_for_sse,
+    _sse,
+)
 from claude_agent.thread_pool import (
     AgentRunLifecycle,
     AgentRunState,
@@ -125,9 +134,36 @@ class ClaudeAgentThreadFactory:
             else:
                 runner = state.runner
 
-            execution = await self._service.assemble_context(
-                request, state=state, bus=bus, runner=runner
-            )
+            try:
+                execution = await self._service.assemble_context(
+                    request, state=state, bus=bus, runner=runner
+                )
+            except Exception as exc:
+                # Context assembly failed before bg_task was created (e.g.
+                # workspace plugin pack raising WorkspacePackError). Surface
+                # the failure as an SSE error frame + sentinel through the
+                # EventBus so the frontend sees a proper error event instead
+                # of a bare disconnect, and reset the lifecycle so the same
+                # session can be retried instead of being stuck in RUNNING.
+                logger.exception(
+                    "Context assembly failed for session_id=%s", session_id
+                )
+                if state.lifecycle == AgentRunLifecycle.RUNNING:
+                    state.mark_idle()
+                state.event_bus = None
+                error_text = _format_exception_for_sse(exc)
+                error_code = getattr(exc, "code", None)
+                if isinstance(error_code, str) and error_code:
+                    error_text = f"[{error_code}] {error_text}"
+                await bus.publish(_sse("error", {"errorText": error_text}))
+                await bus.publish(None)  # sentinel — closes the stream
+                token = await bus.subscribe()
+                try:
+                    async for frame in bus.read(token):
+                        yield frame
+                finally:
+                    await bus.unsubscribe(token)
+                return
 
             await self._observers.emit_after_context_assembly(
                 session_id, {"system_prompt_len": len(state.system_prompt)}

@@ -491,5 +491,72 @@ class TestFactoryAclose(unittest.TestCase):
             self.assertEqual(state.lifecycle, AgentRunLifecycle.DESTROYED)
 
 
+# ---------------------------------------------------------------------------
+# assemble_context failure (workspace pack) → SSE error frame
+# ---------------------------------------------------------------------------
+
+class TestAssembleContextFailure(unittest.TestCase):
+    """assemble_context raising (e.g. WorkspacePackError from plugin pack)
+    must surface an SSE error frame + sentinel instead of a bare disconnect,
+    and must reset the session lifecycle so the session can be retried."""
+
+    def setUp(self):
+        self.factory = ClaudeAgentThreadFactory()
+
+    def _fail_assemble(self, exc: Exception):
+        async def _assemble(req, *, state, bus, runner):
+            raise exc
+        self.factory._service.assemble_context = _assemble
+
+    def _drain(self, req: ClaudeAgentRunRequest) -> list[str]:
+        async def _collect():
+            frames = []
+            async for frame in self.factory.run_streaming(req):
+                frames.append(frame)
+            return frames
+        with unittest.mock.patch("claude_agent.thread_factory.ClaudeAgentRunner"):
+            return _run(_collect())
+
+    def test_pack_failure_emits_sse_error_frame(self):
+        from services.claude_plugin.workspace_packer import WorkspacePackError
+        self._fail_assemble(
+            WorkspacePackError("WORKSPACE_PACK_DIGEST_MISMATCH", "digest mismatch")
+        )
+        req = _make_request("user_pack_fail_1")
+        frames = self._drain(req)
+        error_frames = [f for f in frames if '"type": "error"' in f]
+        self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
+        self.assertIn("WORKSPACE_PACK_DIGEST_MISMATCH", error_frames[0])
+        self.assertIn("digest mismatch", error_frames[0])
+
+    def test_generic_failure_emits_sse_error_frame(self):
+        self._fail_assemble(RuntimeError("kaboom"))
+        req = _make_request("user_pack_fail_generic")
+        frames = self._drain(req)
+        error_frames = [f for f in frames if '"type": "error"' in f]
+        self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
+        self.assertIn("kaboom", error_frames[0])
+
+    def test_failure_resets_lifecycle_and_allows_retry(self):
+        from services.claude_plugin.workspace_packer import WorkspacePackError
+        self._fail_assemble(WorkspacePackError("WORKSPACE_PACK_ERROR", "boom"))
+        req = _make_request("user_pack_fail_2")
+        self._drain(req)
+
+        state = self.factory._pool.get("thread_user_pack_fail_2")
+        self.assertEqual(state.lifecycle, AgentRunLifecycle.IDLE)
+        self.assertIsNone(state.event_bus)
+
+        # Retry on the same session must NOT raise "already running";
+        # it should run the turn again and emit another error frame.
+        frames = self._drain(req)
+        error_frames = [f for f in frames if '"type": "error"' in f]
+        self.assertTrue(
+            error_frames,
+            "retry after pack failure should emit a fresh error frame, "
+            f"got: {frames!r}",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
