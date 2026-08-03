@@ -4,7 +4,13 @@ This is the single canonical digest implementation shared by the server-side
 plugin artifact store (``services.claude_plugin``) and the Claude CLI launch
 boundary in this kit.  The digest covers every regular file under the plugin
 root except volatile CLI runtime state (``.git/`` and the CLI's per-process
-``.in_use/`` PID markers — observed in the real Claude Code 2.1.220 cache).
+``.in_use/`` PID markers — observed in the real Claude Code 2.1.220 cache)
+and platform metadata junk (macOS ``.DS_Store`` + AppleDouble ``._*``
+companions, Windows ``Thumbs.db``/``desktop.ini``) that file managers and
+archive tools inject when a tree is copied around.  Plugin trees never
+legitimately contain those files, so excluding them keeps every previously
+pinned digest valid while making the digest stable across Finder/zip copy
+workflows.
 
 Verified reference value: a real ``superpowers@claude-plugins-official``
 6.2.0 cache tree (181 entries including the relative in-tree symlink
@@ -22,10 +28,28 @@ DIGEST_PREFIX = "sha256:"
 # Directories excluded from the digest: VCS metadata and the CLI's volatile
 # in-use markers (PID files created per running process).
 EXCLUDED_DIR_NAMES = frozenset({".git", ".in_use"})
+# Files excluded from the digest: platform metadata junk injected by OS file
+# managers / archive tools when a plugin tree is copied around.
+EXCLUDED_FILE_NAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
+# AppleDouble companion files (macOS metadata next to real files on
+# non-native filesystems and inside some zip archives).
+APPLEDOUBLE_FILE_PREFIX = "._"
 
 
 class PluginDigestError(ValueError):
     """Raised when a plugin directory cannot be digested."""
+
+
+def entry_is_excluded(relative: Path) -> bool:
+    """Return True when *relative* (a path relative to the plugin root) is
+    excluded from the digest: anything under an excluded directory, or any
+    path component matching platform metadata junk."""
+    for part in relative.parts:
+        if part in EXCLUDED_DIR_NAMES:
+            return True
+        if part in EXCLUDED_FILE_NAMES or part.startswith(APPLEDOUBLE_FILE_PREFIX):
+            return True
+    return False
 
 
 def compute_plugin_digest(root: Path) -> str:
@@ -41,7 +65,7 @@ def compute_plugin_digest(root: Path) -> str:
     entries: list[tuple[str, bytes]] = []
     for item in sorted(root.rglob("*")):
         relative = item.relative_to(root)
-        if any(part in EXCLUDED_DIR_NAMES for part in relative.parts):
+        if entry_is_excluded(relative):
             continue
         rel_text = relative.as_posix()
         if item.is_symlink():

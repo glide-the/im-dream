@@ -44,12 +44,12 @@ def artifact_dir_name(package_name: str, marketplace: str, digest: str) -> str:
 
 
 def _count_files(root: Path) -> int:
-    from .digest import EXCLUDED_DIR_NAMES
+    from .digest import entry_is_excluded
 
     count = 0
     for item in root.rglob("*"):
         relative = item.relative_to(root)
-        if any(part in EXCLUDED_DIR_NAMES for part in relative.parts):
+        if entry_is_excluded(relative):
             continue
         if item.is_file():
             count += 1
@@ -149,10 +149,22 @@ def import_tree(source: Path, *, package_name: str, marketplace: str) -> Artifac
     # Preserve in-tree relative symlinks (the CLI keeps them; our digest
     # hashes the link target string, so copies must keep links as links).
     shutil.copytree(source, staging, symlinks=True)
-    # Drop volatile CLI runtime markers from the staged copy.
+    # Drop volatile CLI runtime markers and platform metadata junk (Finder
+    # .DS_Store / AppleDouble companions etc.) from the staged copy so the
+    # immutable artifact stays clean.
+    from .digest import EXCLUDED_DIR_NAMES, entry_is_excluded
+
     for volatile in staging.rglob(".in_use"):
         if volatile.is_dir():
             shutil.rmtree(volatile, ignore_errors=True)
+    for item in staging.rglob("*"):
+        rel = item.relative_to(staging)
+        if any(part in EXCLUDED_DIR_NAMES for part in rel.parts):
+            continue  # .in_use handled above; .git retained by design
+        if not entry_is_excluded(rel):
+            continue
+        if item.is_symlink() or item.is_file():
+            item.unlink()
     staged_digest = compute_plugin_digest(staging)
     if staged_digest != digest:
         shutil.rmtree(staging, ignore_errors=True)

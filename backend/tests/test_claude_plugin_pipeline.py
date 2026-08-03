@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shutil
 import sqlite3
 import sys
 import tempfile
@@ -113,6 +114,28 @@ class DigestTests(unittest.TestCase):
             digest = compute_plugin_digest(root)
             self.assertTrue(digest_is_valid(digest))
 
+    def test_platform_metadata_junk_is_excluded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".claude-plugin").mkdir()
+            (root / ".claude-plugin" / "plugin.json").write_text('{"name":"x"}')
+            (root / "skills").mkdir()
+            (root / "skills" / "a.md").write_text("a")
+            first = compute_plugin_digest(root)
+            # Finder/zip metadata junk must not change the digest.
+            (root / ".DS_Store").write_bytes(b"\x00" * 16)
+            (root / "._plugin.json").write_bytes(b"\x00" * 8)
+            (root / "skills" / ".DS_Store").write_bytes(b"\x00" * 16)
+            (root / "skills" / "._a.md").write_bytes(b"\x00" * 8)
+            (root / "Thumbs.db").write_bytes(b"\x00" * 8)
+            (root / "desktop.ini").write_text("[.ShellClassInfo]")
+            (root / "._junk").mkdir()
+            (root / "._junk" / "inner.md").write_text("junk")
+            self.assertEqual(first, compute_plugin_digest(root))
+            # Real content changes still flip the digest.
+            (root / "skills" / "a.md").write_text("b")
+            self.assertNotEqual(first, compute_plugin_digest(root))
+
 
 class ArtifactStoreTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -168,6 +191,15 @@ class ArtifactStoreTests(unittest.TestCase):
         self.assertEqual(fetched.digest, artifact.digest)
         with self.assertRaises(ArtifactStoreError):
             get_artifact("demo", "local-market", "sha256:" + "0" * 64)
+
+    def test_import_strips_platform_metadata_junk(self) -> None:
+        source = self._make_plugin("junk")
+        (source / ".DS_Store").write_bytes(b"\x00" * 16)
+        (source / "skills" / "junk" / "._SKILL.md").write_bytes(b"\x00" * 8)
+        artifact = import_tree(source, package_name="junk", marketplace="local-market")
+        self.assertFalse((artifact.path / ".DS_Store").exists())
+        self.assertFalse((artifact.path / "skills" / "junk" / "._SKILL.md").exists())
+        self.assertEqual(compute_plugin_digest(artifact.path), artifact.digest)
 
 
 class WorkspacePackerTests(unittest.TestCase):
@@ -284,7 +316,7 @@ class WorkspacePackerTests(unittest.TestCase):
             pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
         self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_NOT_READY")
 
-    def test_tampered_packed_copy_fails_closed(self) -> None:
+    def test_tampered_packed_copy_is_repaired_from_store(self) -> None:
         workspace = Path(self._tmp.name) / "ws4"
         workspace.mkdir()
         pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
@@ -294,6 +326,94 @@ class WorkspacePackerTests(unittest.TestCase):
             if not item.is_symlink():
                 item.chmod(0o755 if item.is_dir() else 0o644)
         (packed / ".claude-plugin" / "plugin.json").write_text('{"name":"tampered"}')
+        receipt = pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        self.assertTrue(receipt["frozen"])
+        # The mangled copy is a derived cache: it is repaired from the
+        # digest-verified artifact store instead of bricking the thread.
+        restored = json.loads((packed / ".claude-plugin" / "plugin.json").read_text())
+        self.assertEqual(restored["name"], "demo")
+        self.assertEqual(compute_plugin_digest(packed), self.artifact.digest)
+
+    def test_finder_junk_in_packed_copy_does_not_break_pack(self) -> None:
+        workspace = Path(self._tmp.name) / "ws5"
+        workspace.mkdir()
+        pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        manifest = json.loads((workspace / ".ink" / "launch-manifest.json").read_text())
+        packed = workspace / manifest["plugins"][0]["relative_path"]
+        for item in packed.rglob("*"):
+            if not item.is_symlink():
+                item.chmod(0o755 if item.is_dir() else 0o644)
+        (packed / ".DS_Store").write_bytes(b"\x00" * 16)
+        (packed / ".claude-plugin" / "._plugin.json").write_bytes(b"\x00" * 8)
+        receipt = pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        self.assertTrue(receipt["frozen"])
+        self.assertTrue(receipt["plugins"][0]["verified"])
+
+    def test_flattened_symlink_copy_is_repaired(self) -> None:
+        # Simulates a zip/Finder-archive round-trip that turns in-tree
+        # symlinks into regular files (observed with macOS zip→unzip).
+        source = Path(self._tmp.name) / "link-src"
+        (source / ".claude-plugin").mkdir(parents=True)
+        (source / ".claude-plugin" / "plugin.json").write_text(
+            '{"name":"linkdemo","version":"1.0.0"}'
+        )
+        (source / "CLAUDE.md").write_text("# guide")
+        (source / "AGENTS.md").symlink_to("CLAUDE.md")
+        artifact = import_tree(source, package_name="linkdemo", marketplace="m")
+        self.db.execute(
+            """
+            INSERT INTO claude_plugin_installations (
+                id, requested_package_spec, package_name, marketplace,
+                resolved_version, source_type, artifact_digest, artifact_path,
+                claude_cli_version, status, operation_id
+            ) VALUES ('cpi-2', 'linkdemo@m', 'linkdemo', 'm', '1.0.0', 'marketplace',
+                      ?, ?, '2.1.220', 'ready', 'cop-2')
+            """,
+            (artifact.digest, str(artifact.path)),
+        )
+        self.db.execute(
+            """
+            INSERT INTO deck_claude_plugin_refs (
+                deck_id, plugin_installation_id, package_spec, resolved_version,
+                artifact_digest, enabled, order_index
+            ) VALUES ('deck-1', 'cpi-2', 'linkdemo@m', '1.0.0', ?, 1, 1)
+            """,
+            (artifact.digest,),
+        )
+        self.db.commit()
+        workspace = Path(self._tmp.name) / "ws7"
+        workspace.mkdir()
+        pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        manifest = json.loads((workspace / ".ink" / "launch-manifest.json").read_text())
+        entry = next(p for p in manifest["plugins"] if p["package_spec"] == "linkdemo@m")
+        packed = workspace / entry["relative_path"]
+        self.assertTrue((packed / "AGENTS.md").is_symlink())
+        # Flatten the symlink into a regular file, like zip does.
+        target_bytes = (packed / "CLAUDE.md").read_bytes()
+        (packed / "AGENTS.md").unlink()
+        (packed / "AGENTS.md").write_bytes(target_bytes)
+        self.assertNotEqual(compute_plugin_digest(packed), artifact.digest)
+        receipt = pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        self.assertTrue(receipt["frozen"])
+        self.assertTrue((packed / "AGENTS.md").is_symlink())
+        self.assertEqual(compute_plugin_digest(packed), artifact.digest)
+
+    def test_mangled_copy_fails_closed_when_store_missing(self) -> None:
+        workspace = Path(self._tmp.name) / "ws6"
+        workspace.mkdir()
+        pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
+        manifest = json.loads((workspace / ".ink" / "launch-manifest.json").read_text())
+        packed = workspace / manifest["plugins"][0]["relative_path"]
+        for item in packed.rglob("*"):
+            if not item.is_symlink():
+                item.chmod(0o755 if item.is_dir() else 0o644)
+        (packed / ".claude-plugin" / "plugin.json").write_text('{"name":"tampered"}')
+        # Remove the pinned artifact so repair from the store is impossible.
+        for item in sorted(self.artifact.path.rglob("*")):
+            if item.is_dir() and not item.is_symlink():
+                item.chmod(0o755)
+        self.artifact.path.chmod(0o755)
+        shutil.rmtree(self.artifact.path)
         with self.assertRaises(WorkspacePackError) as caught:
             pack_workspace_plugins(self.db, workspace=workspace, deck_id="deck-1")
         self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_INTEGRITY_FAILED")

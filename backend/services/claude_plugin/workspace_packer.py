@@ -10,20 +10,24 @@ When a Deck Chat workspace is prepared, the packer:
 
 Freeze semantics: a workspace that already has a launch manifest is *not*
 silently reconfigured.  The existing manifest is re-validated and its packed
-directories repaired from the artifact store when missing, but plugin
-versions are never swapped mid-thread.  Disabling a plugin on the Deck only
-affects workspaces created afterwards.
+directories repaired from the artifact store when missing or mangled (the
+packed copy is a derived cache; the store is the digest-verified source of
+truth), but plugin versions are never swapped mid-thread.  Disabling a
+plugin on the Deck only affects workspaces created afterwards.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 import json
+import logging
 from pathlib import Path
 import sqlite3
 from typing import Any
 
 from . import artifact_store, runtime, workspace_init
+
+logger = logging.getLogger(__name__)
 
 
 def _as_pack_error(exc: workspace_init.WorkspaceInitError) -> "WorkspacePackError":
@@ -272,6 +276,27 @@ def _ensure_packed_entry(
     from .digest import compute_plugin_digest
 
     actual = compute_plugin_digest(packed_dir)
+    if actual != digest and allow_repair:
+        # The packed copy is a derived cache; the immutable artifact store is
+        # the source of truth. Copies mangled outside our control — zip
+        # archives flattening symlinks, Finder metadata junk, manual edits —
+        # fail the digest check. Repair from the store and re-verify; only
+        # fail closed when the store cannot supply the pinned artifact.
+        logger.warning(
+            "packed plugin copy failed digest verification for %s (%s); "
+            "repairing from artifact store",
+            package_spec,
+            relative_path,
+        )
+        try:
+            artifact = artifact_store.get_artifact(package_name, marketplace, digest)
+            artifact_store.copy_into_workspace(artifact, packed_dir)
+        except artifact_store.ArtifactStoreError:
+            logger.exception(
+                "repair from artifact store failed for %s", package_spec
+            )
+        else:
+            actual = compute_plugin_digest(packed_dir)
     if actual != digest:
         raise WorkspacePackError(
             "CLAUDE_PLUGIN_INTEGRITY_FAILED",
