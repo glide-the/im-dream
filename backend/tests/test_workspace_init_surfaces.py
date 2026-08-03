@@ -217,6 +217,41 @@ class MaterializeDreamSurfaceTests(unittest.TestCase):
         )
         self.assertNotIn("workflow_run_id", json.loads(first))  # no run-level facts
 
+    def test_materialize_write_failure_leaves_no_partial_dream(self) -> None:
+        """Atomic failure path (Task 1 review follow-up, audit A4): a write
+        failure inside the temp dir must fail the whole call and leave neither
+        a half-written ``.dream/`` nor a stale ``.dream.tmp-*`` behind."""
+        real_write_text = Path.write_text
+
+        def flaky_write_text(self_path: Path, *args, **kwargs):  # noqa: ANN001
+            if self_path.name == "README.md":
+                raise OSError("simulated write failure")
+            return real_write_text(self_path, *args, **kwargs)
+
+        with mock.patch.object(Path, "write_text", flaky_write_text):
+            with self.assertRaises(OSError):
+                materialize_dream_surface(
+                    self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
+                )
+        self.assertFalse((self.workspace / ".dream").exists())
+        leftovers = [
+            p.name for p in self.workspace.iterdir() if p.name.startswith(".dream")
+        ]
+        self.assertEqual(leftovers, [])
+
+    def test_materialize_rebuilds_half_written_dream(self) -> None:
+        """A pre-existing half-written ``.dream/`` (missing workspace.json) is
+        cleared and rebuilt completely."""
+        half = self.workspace / ".dream"
+        half.mkdir()
+        (half / "README.md").write_text("stale", encoding="utf-8")
+        step = materialize_dream_surface(
+            self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
+        )
+        self.assertEqual(step["step"], "materialize-surface")
+        self.assertTrue((half / "workspace.json").is_file())
+        self.assertNotEqual((half / "README.md").read_text(encoding="utf-8"), "stale")
+
     def test_materialize_no_timestamps_anywhere(self) -> None:
         materialize_dream_surface(
             self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
