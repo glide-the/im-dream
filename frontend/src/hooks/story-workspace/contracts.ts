@@ -75,6 +75,31 @@ export interface StoryWorkspaceScene {
   updated_at: string;
 }
 
+/**
+ * A workspace surface declared by a Deck plugin's workspace-init profile and
+ * materialized by the packer (e.g. the dream surface with its `.dream/`
+ * protocol directory). Surfaced to the frontend via the existing
+ * plugin-load-receipt endpoint's whole-file passthrough (DEC-026/028).
+ */
+export interface StoryWorkspaceSurface {
+  name: string;
+  protocol_dir: string;
+  entry_route: string;
+}
+
+/**
+ * Response of GET /api/claude-agent/threads/{thread_id}/plugin-load-receipt.
+ * `receipt` / `launch_manifest` are whole-file passthroughs and may be null
+ * (pre-pack window) or lack the `surfaces` key entirely (legacy sessions).
+ */
+export interface StoryWorkspacePluginLoadReceiptResponse {
+  thread_id: string;
+  deck_id: string | null;
+  workspace_found: boolean;
+  receipt: { surfaces?: StoryWorkspaceSurface[] } | null;
+  launch_manifest: { surfaces?: StoryWorkspaceSurface[] } | null;
+}
+
 export interface StoryWorkspaceListState<T> {
   data: T[];
   pagination: StoryWorkspacePaginationData;
