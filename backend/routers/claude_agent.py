@@ -204,6 +204,7 @@ class CreateThreadResponseBody(BaseModel):
 
 class CreateThreadRequestBody(BaseModel):
     deck_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("deck_id", "deckId"))
+    title: Optional[str] = Field(default=None, max_length=200)
 
 
 @router.post("/api/claude-agent")
@@ -444,6 +445,7 @@ async def claude_agent_create_thread(
     """
     user_id = current_user["user_id"]
     deck_id = body.deck_id if body else None
+    title = body.title if body else None
     if deck_id:
         deck = database.get_deck_with_voices(user_id, deck_id)
         if deck is None:
@@ -462,7 +464,7 @@ async def claude_agent_create_thread(
                     "message": "The selected Deck is disabled.",
                 },
             )
-    thread_id = database.create_chat_thread(user_id, deck_id=deck_id)
+    thread_id = database.create_chat_thread(user_id, deck_id=deck_id, title=title)
     return {"thread_id": thread_id, "deck_id": deck_id}
 
 

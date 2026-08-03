@@ -290,9 +290,11 @@ export function buildExportPendingConfirmation(
 }
 
 export interface RenderedThreadImage {
-  /** One or more full-resolution PNG data URLs in top-to-bottom order. Very long
-   *  conversations exceed a single canvas's safe height and are split into multiple
-   *  images; the preview stacks them seamlessly. */
+  /** One or more full-resolution PNG blob object URLs in top-to-bottom order (the
+   *  partial head preview may be an SVG blob URL or, in the legacy fallback, a PNG
+   *  data URL). Very long conversations exceed a single canvas's safe height and are
+   *  split into multiple images; the preview stacks them seamlessly. Call
+   *  releaseThreadImage when the preview is replaced/discarded or the dialog closes. */
   images: string[];
   /** Base file name (single image) — part suffixes are added when split. */
   fileName: string;
@@ -320,88 +322,224 @@ const CAPTURE_PIXEL_RATIO = 3;
 /** Safe per-canvas height in physical pixels (browsers cap canvas edge ≈ 16384). */
 const MAX_PART_HEIGHT_PX = 15000;
 
-function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
     image.onerror = () => reject(new Error('slice image failed to load'));
-    image.src = dataUrl;
+    image.src = src;
   });
 }
 
-async function captureCardSlices(node: HTMLElement, host: HTMLElement, onFirstSlice?: (dataUrl: string) => void): Promise<HTMLImageElement[]> {
+function canvasToBlob(canvas: HTMLCanvasElement): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+      } else {
+        reject(new Error('canvas.toBlob failed'));
+      }
+    }, 'image/png');
+  });
+}
+
+const yieldToUi = () => new Promise<void>((resolve) => { setTimeout(resolve, 0); });
+
+function planSliceHeights(totalHeight: number): number[] {
+  const heights: number[] = [];
+  for (let offset = 0; offset < totalHeight; offset += SLICE_HEIGHT_PX) {
+    heights.push(Math.min(SLICE_HEIGHT_PX, totalHeight - offset));
+  }
+  return heights;
+}
+
+/**
+ * 流式拼接器 — 分片位图画入分块 canvas 后立即释放；块满即导出为压缩 PNG Blob 并销毁
+ * canvas 位图。内存峰值 ≈ 1 片位图 + 1 块 canvas，与对话长度无关（旧方案持有全部
+ * 分片位图直到拼接结束，长对话下 500MB+，是页面 OOM 崩溃的根因）。分片高度在截取前
+ * 即可确定，因此每块 canvas 按精确高度一次性分配，分图之间无缝堆叠。
+ */
+class PartCanvasCollector {
+  private readonly widthPx: number;
+  private readonly background: string;
+  private readonly partHeights: number[] = [];
+  private readonly blobs: Blob[] = [];
+  private canvas: HTMLCanvasElement | null = null;
+  private ctx: CanvasRenderingContext2D | null = null;
+  private cursorPx = 0;
+  private partIndex = 0;
+
+  constructor(widthPx: number, sliceHeightsPx: number[], background: string) {
+    this.widthPx = widthPx;
+    this.background = background;
+    let acc = 0;
+    for (const height of sliceHeightsPx) {
+      if (acc > 0 && acc + height > MAX_PART_HEIGHT_PX) {
+        this.partHeights.push(acc);
+        acc = 0;
+      }
+      acc += height;
+    }
+    if (acc > 0) {
+      this.partHeights.push(acc);
+    }
+  }
+
+  private beginPart(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = this.widthPx;
+    canvas.height = this.partHeights[this.partIndex];
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      throw new Error('failed to create stitch canvas context');
+    }
+    ctx.fillStyle = this.background;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    this.canvas = canvas;
+    this.ctx = ctx;
+    this.cursorPx = 0;
+  }
+
+  /** Draw one slice image at `scale` (CSS-unit slices pass 3; physical-pixel slices pass 1). */
+  async add(image: HTMLImageElement, scale: number): Promise<void> {
+    if (!this.canvas || !this.ctx) {
+      this.beginPart();
+    }
+    const ctx = this.ctx as CanvasRenderingContext2D;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    ctx.drawImage(image, 0, this.cursorPx / scale);
+    this.cursorPx += image.height * scale;
+    if (this.cursorPx >= this.partHeights[this.partIndex]) {
+      await this.flushPart();
+    }
+  }
+
+  private async flushPart(): Promise<void> {
+    if (!this.canvas) {
+      return;
+    }
+    this.blobs.push(await canvasToBlob(this.canvas));
+    // 立即销毁位图 — 压缩后的 Blob 通常只占几 MB。
+    this.canvas.width = 0;
+    this.canvas = null;
+    this.ctx = null;
+    this.partIndex += 1;
+    this.cursorPx = 0;
+  }
+
+  async finish(): Promise<Blob[]> {
+    if (this.canvas) {
+      await this.flushPart();
+    }
+    return this.blobs;
+  }
+}
+
+/**
+ * Fast path — 单趟样式内联 + 流式输出：html-to-image 的开销几乎全部在「克隆整棵 DOM +
+ * 逐节点 getComputedStyle 内联」，逐片 toPng 会把这份开销乘以片数（长对话下页面卡死的
+ * 根因）。这里 toSvg 只调用一次，之后每个分片通过 SVG 字符串手术重建（视口 = 分片尺寸 +
+ * foreignObject y 负偏移定位），交给浏览器栅格化；canvas 按 3x 绘制时 Chrome 会按
+ * 绘制尺寸重新栅格化矢量内容，清晰度与逐片 toPng 一致（已用色块 + 3px 条纹探针在
+ * Playwright 中逐片验证）。每片解码画入拼接器后立即释放位图（字符串拷贝随迭代结束
+ * 被 GC），片间 setTimeout(0) 让出主线程保持页面响应。
+ * 注意：分片必须用 data: URL — Chrome 会把 blob: URL 加载的含 foreignObject 的 SVG
+ * 视为污染画布（toBlob/toDataURL 抛 SecurityError），data: URL 则无此限制。
+ */
+export async function capturePartBlobsFast(node: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
+  const { toSvg } = await import('html-to-image');
+  const totalHeight = node.offsetHeight;
+  const cardWidth = node.offsetWidth;
+  const background = getComputedStyle(node).backgroundColor || '#F6EFE5';
+  const svgDataUrl = await toSvg(node);
+  const svgText = decodeURIComponent(svgDataUrl.slice(svgDataUrl.indexOf(',') + 1));
+  const openTag = svgText.match(/<svg[^>]*>/)?.[0];
+  const foTag = svgText.match(/<foreignObject[^>]*>/)?.[0];
+  const foClose = svgText.lastIndexOf('</foreignObject>');
+  if (!openTag || !foTag || foClose < 0) {
+    throw new Error('unexpected toSvg output structure');
+  }
+  const xmlnsAttrs = (openTag.match(/xmlns[^=]*="[^"]*"/g) ?? []).join(' ');
+  const content = svgText.slice(svgText.indexOf(foTag) + foTag.length, foClose);
+
+  const sliceHeights = planSliceHeights(totalHeight);
+  const collector = new PartCanvasCollector(
+    cardWidth * CAPTURE_PIXEL_RATIO,
+    sliceHeights.map((height) => height * CAPTURE_PIXEL_RATIO),
+    background,
+  );
+
+  let offset = 0;
+  for (let index = 0; index < sliceHeights.length; index += 1) {
+    const sliceHeight = sliceHeights[index];
+    const slicedSvg = `<svg ${xmlnsAttrs} width="${cardWidth}" height="${sliceHeight}">`
+      + `<foreignObject x="0" y="${-offset}" width="${cardWidth}" height="${totalHeight}">`
+      + content
+      + '</foreignObject></svg>';
+    offset += sliceHeight;
+    const sliceUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(slicedSvg)}`;
+    const image = await loadImage(sliceUrl);
+    // 首片 data URL 直接交给弹窗做预览头（SVG 可在 <img> 中显示）。
+    if (index === 0) {
+      onFirstSlice?.(sliceUrl);
+    }
+    await collector.add(image, CAPTURE_PIXEL_RATIO);
+    image.src = ''; // 立即释放分片位图
+    await yieldToUi();
+  }
+  return collector.finish();
+}
+
+/** Legacy per-slice toPng path — kept as a fallback if the SVG surgery ever fails. */
+export async function capturePartBlobsLegacy(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
   const { toPng } = await import('html-to-image');
   const totalHeight = node.offsetHeight;
   const cardWidth = node.offsetWidth;
-  const slices: HTMLImageElement[] = [];
-  for (let offset = 0; offset < totalHeight; offset += SLICE_HEIGHT_PX) {
-    const sliceHeight = Math.min(SLICE_HEIGHT_PX, totalHeight - offset);
+  const background = getComputedStyle(node).backgroundColor || '#F6EFE5';
+  const sliceHeights = planSliceHeights(totalHeight);
+  const collector = new PartCanvasCollector(
+    cardWidth * CAPTURE_PIXEL_RATIO,
+    sliceHeights.map((height) => height * CAPTURE_PIXEL_RATIO),
+    background,
+  );
+
+  let offset = 0;
+  for (let index = 0; index < sliceHeights.length; index += 1) {
+    const sliceHeight = sliceHeights[index];
     const wrapper = document.createElement('div');
     wrapper.style.cssText = `width:${cardWidth}px;height:${sliceHeight}px;overflow:hidden;`;
     const clone = node.cloneNode(true) as HTMLElement;
     clone.style.marginTop = `-${offset}px`;
     wrapper.appendChild(clone);
     host.appendChild(wrapper);
+    offset += sliceHeight;
     try {
       const dataUrl = await toPng(wrapper, { pixelRatio: CAPTURE_PIXEL_RATIO });
-      if (slices.length === 0) {
+      if (index === 0) {
         onFirstSlice?.(dataUrl);
       }
-      slices.push(await loadImage(dataUrl));
+      const image = await loadImage(dataUrl);
+      await collector.add(image, 1);
+      image.src = ''; // 立即释放分片位图
     } finally {
       wrapper.remove();
     }
+    await yieldToUi();
   }
-  return slices;
+  return collector.finish();
 }
 
-/**
- * Stitch 3x slices at their natural pixel size. Slices are grouped so every output
- * canvas stays under MAX_PART_HEIGHT_PX; each canvas is emitted as its own PNG part.
- */
-function stitchSlices(node: HTMLElement, slices: HTMLImageElement[]): string[] {
-  const background = getComputedStyle(node).backgroundColor || '#F6EFE5';
-  const parts: string[] = [];
-  let group: HTMLImageElement[] = [];
-  let groupHeight = 0;
-
-  const flushGroup = () => {
-    if (group.length === 0) {
-      return;
-    }
-    const canvas = document.createElement('canvas');
-    canvas.width = group[0].width;
-    canvas.height = groupHeight;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      throw new Error('failed to create stitch canvas context');
-    }
-    ctx.fillStyle = background;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    let cursorY = 0;
-    for (const slice of group) {
-      ctx.drawImage(slice, 0, cursorY);
-      cursorY += slice.height;
-    }
-    parts.push(canvas.toDataURL('image/png'));
-    group = [];
-    groupHeight = 0;
-  };
-
-  for (const slice of slices) {
-    if (groupHeight + slice.height > MAX_PART_HEIGHT_PX && group.length > 0) {
-      flushGroup();
-    }
-    group.push(slice);
-    groupHeight += slice.height;
+async function capturePartBlobs(node: HTMLElement, host: HTMLElement, onFirstSlice?: (previewUrl: string) => void): Promise<Blob[]> {
+  try {
+    return await capturePartBlobsFast(node, onFirstSlice);
+  } catch {
+    return capturePartBlobsLegacy(node, host, onFirstSlice);
   }
-  flushGroup();
-  return parts;
 }
 
 /**
  * Render the conversation off-screen and return the long PNG (or PNG parts for very
- * long conversations) as data URLs — the share dialog shows them as a scrollable
+ * long conversations) as blob object URLs — the share dialog shows them as a scrollable
  * preview before downloading. Throws when rendering or capture fails.
  */
 export async function renderThreadImage({ threadId, title, messages, labels, pendingConfirmation }: ExportThreadImageOptions, hooks?: RenderThreadImageHooks): Promise<RenderedThreadImage> {
@@ -432,16 +570,32 @@ export async function renderThreadImage({ threadId, title, messages, labels, pen
     });
     const safeTitle = title.replace(/[^\w一-龥-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'chat';
     const fileName = `ink-memory-${safeTitle}-${threadId.slice(0, 8)}.png`;
-    // 先出头部一段预览，避免用户空等 — 剩余切片在后台继续截取拼接。
-    const slices = await captureCardSlices(node, host, (firstSliceDataUrl) => {
-      hooks?.onPartialPreview?.({ images: [firstSliceDataUrl], fileName, partial: true });
+    // 先出头部一段预览，避免用户空等 — 剩余切片在后台继续流式截取拼接。
+    const partBlobs = await capturePartBlobs(node, host, (firstSliceUrl) => {
+      hooks?.onPartialPreview?.({ images: [firstSliceUrl], fileName, partial: true });
     });
-    const images = stitchSlices(node, slices);
-
+    const images = partBlobs.map((blob) => URL.createObjectURL(blob));
+    if (images.length === 0) {
+      throw new Error('export capture produced no image parts');
+    }
     return { images, fileName };
   } finally {
     root.unmount();
     host.remove();
+  }
+}
+
+/** Revoke every blob: object URL held by a rendered image or partial preview (data URLs
+ *  are ignored). Must be called when a preview is replaced or discarded and when the
+ *  share dialog closes — object URLs otherwise pin whole PNG blobs in memory forever. */
+export function releaseThreadImage(rendered: RenderedThreadImage | null | undefined): void {
+  if (!rendered) {
+    return;
+  }
+  for (const url of rendered.images) {
+    if (url.startsWith('blob:')) {
+      URL.revokeObjectURL(url);
+    }
   }
 }
 

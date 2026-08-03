@@ -89,7 +89,7 @@ import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ConnectorLandingPanel from './ConnectorLandingPanel';
 import ChatShareDialog from './ChatShareDialog';
-import { renderThreadImage, downloadThreadImage, toExportChatMessage, buildExportPendingConfirmation, type ExportChatMessage, type RenderedThreadImage } from './exportThreadImage';
+import { renderThreadImage, downloadThreadImage, releaseThreadImage, toExportChatMessage, buildExportPendingConfirmation, type ExportChatMessage, type RenderedThreadImage } from './exportThreadImage';
 import { getChatExportSnapshot } from '../../lib/chat-export-registry';
 import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
 import { SkeletonList } from './Skeleton';
@@ -130,6 +130,10 @@ interface ChatViewProps {
   threadId?: string;
   /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
   requestedThreadId?: string;
+  /** When set (with requestedDeckNonce), preselect this Deck in the input dock and land on a fresh conversation (Deck editor "Chat →"). */
+  requestedDeckId?: string;
+  /** Bump-only companion of requestedDeckId so repeated requests for the same Deck still re-apply. */
+  requestedDeckNonce?: number;
   onNewChat?: () => void;
   quickActions?: QuickActionStripItem[];
   /** Current EditorState snapshot passed down to ChatPanel for agent editor_state injection. */
@@ -366,6 +370,8 @@ async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesSnap
 function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
+  requestedDeckId,
+  requestedDeckNonce,
   onNewChat,
   quickActions,
   editorState,
@@ -596,6 +602,21 @@ function ChatViewContent({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedThreadId]);
 
+  // @@@ External navigation (Deck editor "Chat →"): preselect the Deck in the
+  // input dock and land on a FRESH conversation — from here on the user chats
+  // with the Deck as a whole; the voice name is only informational context.
+  useEffect(() => {
+    if (requestedDeckNonce === undefined || !requestedDeckId) return;
+    setSelectedDeckId(requestedDeckId);
+    setActiveThreadId(null);
+    setThreadMessages(null);
+    setHasConversationStarted(false);
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedDeckNonce]);
+
   // Fetch messages for the active thread (following better-chatbot pattern:
   // parent fetches history and passes as initialMessages to the chat component).
   // Load history, then reconnect SSE when the backend turn is still running.
@@ -729,14 +750,20 @@ function ChatViewContent({
 
   const handleOpenShareDialog = useCallback(() => {
     setShareExportFailed(false);
-    setSharePreview(null);
+    setSharePreview((previous) => {
+      releaseThreadImage(previous);
+      return null;
+    });
     setShareDialogOpen(true);
   }, []);
 
   const handleCloseShareDialog = useCallback(() => {
     setShareDialogOpen(false);
     setShareExportFailed(false);
-    setSharePreview(null);
+    setSharePreview((previous) => {
+      releaseThreadImage(previous);
+      return null;
+    });
   }, []);
 
   const handleExportShareImage = useCallback(async () => {
@@ -770,9 +797,16 @@ function ChatViewContent({
         pendingConfirmation: buildExportPendingConfirmation(snapshot.pendingConfirmation, t),
       }, {
         // 首片截好立即上屏一段预览头，剩余部分后台继续拼接。
-        onPartialPreview: (partial) => setSharePreview(partial),
+        // 替换/完成时先回收旧预览的 blob URL，避免长图 Blob 常驻内存。
+        onPartialPreview: (partial) => setSharePreview((previous) => {
+          releaseThreadImage(previous);
+          return partial;
+        }),
       });
-      setSharePreview(rendered);
+      setSharePreview((previous) => {
+        releaseThreadImage(previous);
+        return rendered;
+      });
     } catch {
       setShareExportFailed(true);
     } finally {
@@ -786,16 +820,23 @@ function ChatViewContent({
     }
     setShareDownloading(true);
     try {
+      // 先完成下载（png-stitch 需要 fetch 这些 blob URL），再回收并关弹窗。
       await downloadThreadImage(sharePreview);
       setShareDialogOpen(false);
-      setSharePreview(null);
+      setSharePreview((previous) => {
+        releaseThreadImage(previous);
+        return null;
+      });
     } finally {
       setShareDownloading(false);
     }
   }, [sharePreview, shareDownloading]);
 
   const handleDiscardSharePreview = useCallback(() => {
-    setSharePreview(null);
+    setSharePreview((previous) => {
+      releaseThreadImage(previous);
+      return null;
+    });
   }, []);
 
   const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
@@ -838,23 +879,53 @@ function ChatViewContent({
     return groups;
   }, [threads, t]);
 
+  // @@@ Derive the voice bound to the active thread from the hydrated decks
+  // (voice.thread_id ↔ activeThreadId). The App-level activeVoice prop is only
+  // set when a chat is opened through the Deck editor / agent picker, so treat
+  // it as informational context: show it only while it still matches the
+  // conversation you are looking at (the requested thread, or a conversation
+  // whose Deck contains that voice).
+  const threadVoiceEntry = activeThreadId
+    ? availableDecks
+        .flatMap((deck) => (deck.voices || []).map((voice) => ({ deck, voice })))
+        .find(({ voice }) => voice.thread_id === activeThreadId)
+    : undefined;
+  const isRequestedThreadActive = requestedThreadId !== undefined
+    && requestedThreadId === activeThreadId;
+  const badgeDeckId = selectedDeckId ?? threadVoiceEntry?.deck.id;
+  const activeVoiceDeck = activeVoice
+    ? availableDecks.find(
+        (deck) => (deck.voices || []).some((voice) => voice.name === activeVoice.name),
+      )
+    : undefined;
+  const showPropVoice = !threadVoiceEntry && activeVoice && (
+    isRequestedThreadActive
+    || (activeVoiceDeck !== undefined && badgeDeckId === activeVoiceDeck.id)
+  );
+  const displayVoice = threadVoiceEntry
+    ? {
+        name: threadVoiceEntry.voice.name,
+        icon: threadVoiceEntry.voice.icon,
+        color: threadVoiceEntry.voice.color,
+      }
+    : (showPropVoice ? activeVoice : undefined);
+
   return (
-      <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>
-        <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+      <div style={{ position: 'relative', display: 'flex', width: '100%', height: '100%', minHeight: 0, minWidth: 0, overflow: 'hidden', boxSizing: 'border-box', background: 'var(--color-bg-app)', color: 'var(--color-text-primary)', fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif" }}>        <main style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           {/* 浮动操作按钮区 – 右上角：卡组信息 / 新建 / 更多（含下拉菜单） */}
           <div style={{ position: 'absolute', top: '0.65rem', right: '0.75rem', zIndex: 20, display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
-            {/* 当前 Deck Voice 徽标 */}
-            {activeVoice && (() => {
+            {/* 当前 Deck Voice 徽标（按当前线程推导，切换对话不残留旧值） */}
+            {displayVoice && (() => {
               const colorHex: Record<string, string> = {
                 blue: '#4da3ff', pink: '#ff66b3', green: '#52c77e',
                 purple: '#9b7ff5', orange: '#f9a875', red: '#f86e6e',
                 yellow: '#f5d76e', teal: '#5ec0c0'
               };
-              const hex = colorHex[activeVoice.color] ?? '#4da3ff';
-              const VoiceIcon = iconMap[activeVoice.icon as keyof typeof iconMap] || iconMap.brain;
+              const hex = colorHex[displayVoice.color] ?? '#4da3ff';
+              const VoiceIcon = iconMap[displayVoice.icon as keyof typeof iconMap] || iconMap.brain;
               return (
                 <div
-                  title={activeVoice.name}
+                  title={displayVoice.name}
                   style={{
                     height: '2rem',
                     display: 'inline-flex',
@@ -873,13 +944,18 @@ function ChatViewContent({
                 >
                   <VoiceIcon style={{ width: '0.85rem', height: '0.85rem', flexShrink: 0 }} />
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {activeVoice.name}
+                    {displayVoice.name}
                   </span>
                 </div>
               );
             })()}
-            {/* 插件加载 receipt 徽标（package / version / digest） */}
-            <PluginReceiptBadge threadId={activeThreadId ?? null} />
+            {/* 插件加载 receipt 徽标（点击查看 Deck 元信息 / 插件清单） */}
+            <PluginReceiptBadge
+              activeVoiceId={threadVoiceEntry?.voice.id}
+              activeVoiceName={displayVoice?.name}
+              deck={availableDecks.find((deck) => deck.id === badgeDeckId)}
+              threadId={activeThreadId ?? null}
+            />
             {/* 新建对话 */}
             <button
               type="button"

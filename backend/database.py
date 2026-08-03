@@ -4058,15 +4058,19 @@ def get_daily_pictures_range(user_id: int, start_date: Optional[str], end_date: 
 
 # ========== Claude Agent Chat Thread CRUD ==========
 
-def create_chat_thread(user_id: int, deck_id: Optional[str] = None) -> str:
+def create_chat_thread(
+    user_id: int,
+    deck_id: Optional[str] = None,
+    title: Optional[str] = None,
+) -> str:
     """Create a new chat thread for the user. Returns the thread_id (UUID)."""
     import uuid
     thread_id = str(uuid.uuid4())
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO chat_thread (id, user_id, deck_id) VALUES (?, ?, ?)",
-            (thread_id, user_id, deck_id),
+            "INSERT INTO chat_thread (id, user_id, title, deck_id) VALUES (?, ?, ?, ?)",
+            (thread_id, user_id, title, deck_id),
         )
         db.commit()
         return thread_id

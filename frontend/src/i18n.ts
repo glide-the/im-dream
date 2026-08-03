@@ -223,7 +223,8 @@ const resources = {
           metadataAgents: 'Agents',
           metadataPlugins: 'Plugin manifest',
           metadataNoDeck: 'No Deck bound to this conversation',
-          metadataFrozen: 'Workspace frozen for this conversation'
+          metadataFrozen: 'Workspace frozen for this conversation',
+          metadataCurrentAgent: 'current'
         },
         quickActions: {
           generateImage: {
@@ -731,7 +732,8 @@ const resources = {
           metadataAgents: 'Agent',
           metadataPlugins: '插件清单',
           metadataNoDeck: '本次对话未绑定 Deck',
-          metadataFrozen: '本次对话工作区已锁定'
+          metadataFrozen: '本次对话工作区已锁定',
+          metadataCurrentAgent: '当前'
         },
         quickActions: {
           generateImage: {

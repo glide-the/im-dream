@@ -30,7 +30,7 @@ import type { ActiveChatVoice } from '../lib/chat-schema';
 
 interface Props {
   onUpdate?: () => void;
-  onOpenChat?: (threadId: string, voiceInfo: ActiveChatVoice) => void;
+  onChatWithDeck?: (deckId: string, voiceInfo: ActiveChatVoice) => void;
 }
 
 function getErrorMessage(error: unknown, fallback: string): string {
@@ -43,7 +43,7 @@ const DECK_ITEM_BORDER = '1px solid color-mix(in srgb, var(--color-border-paper)
 const DECK_LIST_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 36%, transparent)';
 const DECK_ITEM_HOVER_SURFACE = 'color-mix(in srgb, var(--color-bg-paper) 58%, var(--color-bg-surface))';
 
-export default function DeckManager({ onUpdate, onOpenChat }: Props) {
+export default function DeckManager({ onUpdate, onChatWithDeck }: Props) {
   const { t } = useTranslation();
   const spinnerKeyframes = useMemo(() => (
     `@keyframes deck-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`
@@ -826,7 +826,7 @@ export default function DeckManager({ onUpdate, onOpenChat }: Props) {
           onUpdateVoice={handleUpdateVoice}
           onToggleVoice={handleToggleVoice}
           onDeleteVoice={handleDeleteVoice}
-          onOpenChat={onOpenChat}
+          onChatWithDeck={onChatWithDeck}
         />
       )}
 
