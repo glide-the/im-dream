@@ -32,6 +32,13 @@ export interface StoryWorkspaceSurfaceLinkButtonProps {
   episodeId?: string | null;
   /** Server-aggregated stage/supersede state; missing = hidden, never inferred. */
   state: StoryWorkspaceSurfaceLinkState | null | undefined;
+  /**
+   * In-app router navigation (Task 5 Step 0): when provided, link clicks are
+   * intercepted and routed without a full-page load; when absent the plain
+   * href keeps its progressive-enhancement navigation (Task 4 review
+   * leftover).
+   */
+  onNavigate?: (href: string) => void;
 }
 
 /**

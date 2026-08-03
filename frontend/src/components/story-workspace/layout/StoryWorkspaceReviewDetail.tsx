@@ -43,6 +43,11 @@ export interface StoryWorkspaceReviewDetailProps {
   surfaceLink?: StoryWorkspaceReviewSurfaceLink | null;
   onChanged: (resource: StoryWorkspaceReviewResource) => void;
   onSelectResource?: (selection: StoryWorkspaceReviewSelection) => void;
+  /**
+   * In-app router navigation for the surface link button (Task 5 Step 0);
+   * absent = plain href full-page navigation (progressive enhancement).
+   */
+  onSurfaceLinkNavigate?: (href: string) => void;
 }
 
 type Draft = Record<string, string>;
@@ -124,6 +129,7 @@ export function StoryWorkspaceReviewDetail({
   surfaceLink,
   onChanged,
   onSelectResource,
+  onSurfaceLinkNavigate,
 }: StoryWorkspaceReviewDetailProps) {
   const [resource, setResource] = useState<StoryWorkspaceReviewResource | null>(null);
   const [draft, setDraft] = useState<Draft>({});
@@ -249,6 +255,7 @@ export function StoryWorkspaceReviewDetail({
       {surfaceLink && (
         <StoryWorkspaceSurfaceLinkButton
           episodeId={surfaceLink.episodeId}
+          onNavigate={onSurfaceLinkNavigate}
           runId={surfaceLink.runId}
           state={surfaceLink.state}
           surfaces={surfaces}

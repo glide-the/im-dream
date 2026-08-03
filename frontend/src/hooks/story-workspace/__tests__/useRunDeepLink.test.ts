@@ -1,19 +1,18 @@
-// [Input] Synthetic location search strings + stubbed run reads (Playwright
+// [Input] Router-parsed `?run=` param values + stubbed run reads (Playwright
 //          node-side runner).
-// [Output] Contract tests for the Dream page ?run= deep link: local
-//          URLSearchParams parsing (Task 5 Step 0 later unifies this in the
-//          router) and actor-scoped resolution with toast fallback semantics
-//          (design_004 §4.3).
-// [Pos] story-workspace run deep-link test node (Task 4 Step 5)
-// [Sync] 2026-08-04: initial coverage - parse + resolve seams; the hook is a
-//                    thin React wrapper (initial positioning only, no freeze).
+// [Output] Contract tests for the Dream page ?run= deep link: actor-scoped
+//          resolution with toast fallback semantics (design_004 §4.3). Query
+//          parsing moved to the router (storyWorkspacePath.ts, Task 5 Step 0);
+//          its seam tests live in src/router/__tests__/.
+// [Pos] story-workspace run deep-link test node (Task 4 Step 5; Task 5 Step 0
+//       absorbed parsing into the router)
+// [Sync] 2026-08-04: resolveRunDeepLink now takes the parsed run id directly;
+//                    the hook is a thin React wrapper (initial positioning
+//                    only, no freeze) that clears state on route switch.
 
 import { expect, test } from '@playwright/test';
 import type { WorkflowRun } from '../../../api/storyWorkspaceApi';
-import {
-  parseRunDeepLinkParam,
-  resolveRunDeepLink,
-} from '../useRunDeepLink';
+import { resolveRunDeepLink } from '../useRunDeepLink';
 
 function stubRun(runId: string): WorkflowRun {
   return {
@@ -36,22 +35,9 @@ function stubRun(runId: string): WorkflowRun {
   };
 }
 
-test('parseRunDeepLinkParam extracts the run query value', () => {
-  expect(parseRunDeepLinkParam('?run=r1')).toBe('r1');
-  expect(parseRunDeepLinkParam('?foo=1&run=r2&bar=2')).toBe('r2');
-  expect(parseRunDeepLinkParam('?run=%2Frun%20x')).toBe('/run x');
-});
-
-test('parseRunDeepLinkParam returns null without a usable run value', () => {
-  expect(parseRunDeepLinkParam('')).toBeNull();
-  expect(parseRunDeepLinkParam('?foo=1')).toBeNull();
-  expect(parseRunDeepLinkParam('?run=')).toBeNull();
-  expect(parseRunDeepLinkParam('?run=%20')).toBeNull();
-});
-
 test('resolve without a run param is a no-op (default view, no fetch)', async () => {
   let called = 0;
-  const resolution = await resolveRunDeepLink('?foo=1', {
+  const resolution = await resolveRunDeepLink(null, {
     getRun: async () => {
       called += 1;
       return stubRun('r1');
@@ -63,7 +49,7 @@ test('resolve without a run param is a no-op (default view, no fetch)', async ()
 
 test('run owned by the current user resolves as the selected run', async () => {
   const seen: string[] = [];
-  const resolution = await resolveRunDeepLink('?run=r1', {
+  const resolution = await resolveRunDeepLink('r1', {
     getRun: async (runId) => {
       seen.push(runId);
       return stubRun(runId);
@@ -74,21 +60,21 @@ test('run owned by the current user resolves as the selected run', async () => {
 });
 
 test('missing / foreign / failing runs degrade to the toast fallback', async () => {
-  const notFound = await resolveRunDeepLink('?run=gone', {
+  const notFound = await resolveRunDeepLink('gone', {
     getRun: async () => {
       throw new Error('404');
     },
   });
   expect(notFound).toEqual({ status: 'missing', runId: 'gone' });
 
-  const forbidden = await resolveRunDeepLink('?foo=1&run=other-user-run', {
+  const forbidden = await resolveRunDeepLink('other-user-run', {
     getRun: async () => {
       throw new Error('403');
     },
   });
   expect(forbidden).toEqual({ status: 'missing', runId: 'other-user-run' });
 
-  const emptyPayload = await resolveRunDeepLink('?run=r1', {
+  const emptyPayload = await resolveRunDeepLink('r1', {
     getRun: async () => null as unknown as WorkflowRun,
   });
   expect(emptyPayload).toEqual({ status: 'missing', runId: 'r1' });

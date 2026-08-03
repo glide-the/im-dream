@@ -105,6 +105,11 @@ export interface WorkflowRun {
   current_step?: string | null;
   transitions?: WorkflowRunTransition[];
   source_context?: WorkflowSourceContext | null;
+  /**
+   * Chat thread that initiated the run (guidance transport channel, DEC-032).
+   * Returned by the run read since SUO-198; optional for older payloads.
+   */
+  source_voice_thread_id?: string | null;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
