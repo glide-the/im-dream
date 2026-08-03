@@ -217,7 +217,13 @@ const resources = {
           agentCount_one: '{{count}} agent',
           agentCount_other: '{{count}} agents',
           lockedAria: 'Conversation Deck: {{name}}',
-          lockedTitle: 'The Deck is fixed when the conversation starts.'
+          lockedTitle: 'The Deck is fixed when the conversation starts.',
+          metadataTitle: 'Deck metadata',
+          metadataDeckName: 'Deck name',
+          metadataAgents: 'Agents',
+          metadataPlugins: 'Plugin manifest',
+          metadataNoDeck: 'No Deck bound to this conversation',
+          metadataFrozen: 'Workspace frozen for this conversation'
         },
         quickActions: {
           generateImage: {
@@ -719,7 +725,13 @@ const resources = {
           noMatch: '没有匹配该前缀的 Deck',
           agentCount: '{{count}} 个 Agent',
           lockedAria: '当前对话 Deck：{{name}}',
-          lockedTitle: '对话开始后 Deck 将固定，确保运行来源可追溯。'
+          lockedTitle: '对话开始后 Deck 将固定，确保运行来源可追溯。',
+          metadataTitle: 'Deck 元信息',
+          metadataDeckName: 'Deck 名称',
+          metadataAgents: 'Agent',
+          metadataPlugins: '插件清单',
+          metadataNoDeck: '本次对话未绑定 Deck',
+          metadataFrozen: '本次对话工作区已锁定'
         },
         quickActions: {
           generateImage: {

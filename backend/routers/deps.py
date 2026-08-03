@@ -5,19 +5,58 @@
 # [Sync] 2026-05-25: extracted common dependency helpers from backend/server.py.
 # [Sync] 2026-06-23: allow auth dependencies to read system access tokens from
 #                    Authorization headers or OAuth login cookies.
+# [Sync] 2026-08-03: sliding token renewal - authenticated requests receive a
+#                    fresh access token (header + cookie) once the current one
+#                    is past half of its lifetime.
 
 import os
 from datetime import datetime
 import re
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends, HTTPException, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 
 import auth
 
 http_bearer = HTTPBearer(auto_error=False)
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def apply_token_renewal(request: Request, response: Response, user_data: dict) -> None:
+    """
+    Sliding expiration: when the presented access token is past half of its
+    lifetime, attach a freshly signed token to the response so active clients
+    never hit the 1-hour expiry. Bearer clients read the X-New-Access-Token
+    header; browser clients get their access_token cookie refreshed when one
+    was presented.
+    """
+    new_token = auth.maybe_renew_access_token(user_data)
+    if not new_token:
+        return
+
+    response.headers[auth.NEW_ACCESS_TOKEN_HEADER] = new_token
+
+    if request.cookies.get("access_token") or request.cookies.get("token"):
+        samesite = os.environ.get("COOKIE_SAMESITE", "lax").strip().lower()
+        if samesite not in {"lax", "strict", "none"}:
+            samesite = "lax"
+        response.set_cookie(
+            "access_token",
+            new_token,
+            max_age=int(auth.ACCESS_TOKEN_EXPIRE_DELTA.total_seconds()),
+            secure=_bool_env("COOKIE_SECURE", False),
+            httponly=True,
+            samesite=samesite,
+            path="/",
+        )
 
 
 def _count_mixed_words(text: str) -> int:
@@ -47,6 +86,7 @@ def _count_mixed_words(text: str) -> int:
 
 def get_current_user(
     request: Request,
+    response: Response,
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> dict:
     """
@@ -65,6 +105,7 @@ def get_current_user(
     if not user_data:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
 
+    apply_token_renewal(request, response, user_data)
     return user_data
 
 

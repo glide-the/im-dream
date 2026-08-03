@@ -4,6 +4,8 @@
 // [Sync] 2026-06-12: use centralized API_BASE so deployed frontend can call backend cross-origin.
 // [Sync] 2026-06-23: consume Google OAuth callback access_token fragments and
 //                    expose backend-driven Google login/logout helpers.
+// [Sync] 2026-08-03: adopt sliding token renewal - install fetch interceptor
+//                    and sync X-New-Access-Token renewals into auth state.
 /**
  * Authentication context and hooks
  *
@@ -14,6 +16,10 @@ import { createContext, useContext, useState, useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE, apiUrl } from '../lib/apiBase';
+import {
+  AUTH_TOKEN_RENEWED_EVENT,
+  installAuthTokenRefreshInterceptor,
+} from '../lib/authTokenRefresh';
 
 interface User {
   id: number;
@@ -56,6 +62,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Load token from localStorage on mount
   useEffect(() => {
+    installAuthTokenRefreshInterceptor();
+
+    // Adopt backend-renewed tokens (sliding 1h session) into React state.
+    const handleTokenRenewed = (event: Event) => {
+      const newToken = (event as CustomEvent<string>).detail;
+      if (newToken) {
+        setToken(prev => (prev ? newToken : prev));
+      }
+    };
+    window.addEventListener(AUTH_TOKEN_RENEWED_EVENT, handleTokenRenewed);
+
     const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const oauthToken = fragment.get('access_token');
     if (oauthToken) {
@@ -90,6 +107,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } else {
       setIsLoading(false);
     }
+
+    return () => {
+      window.removeEventListener(AUTH_TOKEN_RENEWED_EVENT, handleTokenRenewed);
+    };
   }, []);
 
   const loginWithGoogle = () => {

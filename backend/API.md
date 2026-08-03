@@ -21,7 +21,7 @@ Browser clients may also authenticate with the backend-issued `access_token`
 HttpOnly cookie. Google `id_token` / `access_token` values are never accepted
 as business API credentials.
 
-JWT access token lifetime is configured by `JWT_EXPIRES_IN` and defaults to 7 days in this project.
+JWT access token lifetime is configured by `JWT_EXPIRES_IN` and defaults to 1 hour in this project. Expiration is sliding: any authenticated request made while less than half of the lifetime remains receives a freshly signed token in the `X-New-Access-Token` response header (and a refreshed `access_token` cookie for cookie-based clients), so active sessions stay signed in indefinitely.
 
 ---
 

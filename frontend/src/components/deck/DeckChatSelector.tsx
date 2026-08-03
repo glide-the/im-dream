@@ -117,6 +117,8 @@ export default function DeckChatSelector({
   }, []);
 
   // @@@ Click-outside closes the popup; scroll/resize keeps it attached to the window.
+  // Scroll events from descendants (captured at the window) must not close the
+  // popup — the listbox itself is scrollable.
   useEffect(() => {
     if (!isOpen) return undefined;
     const handleMouseDown = (event: MouseEvent) => {
@@ -125,7 +127,16 @@ export default function DeckChatSelector({
       }
     };
     const handleResize = () => computeLayout();
-    const handleScroll = () => setIsOpen(false);
+    const handleScroll = (event: Event) => {
+      if (
+        rootRef.current
+        && event.target instanceof Node
+        && rootRef.current.contains(event.target)
+      ) {
+        return;
+      }
+      setIsOpen(false);
+    };
     document.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('resize', handleResize);
     window.addEventListener('scroll', handleScroll, true);
@@ -282,7 +293,11 @@ export default function DeckChatSelector({
               outline: 'none',
             }}
           />
-          <div style={{ maxHeight: popupLayout.listMaxHeight, overflowY: 'auto' }}>
+          <div style={{
+            maxHeight: popupLayout.listMaxHeight,
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+          }}>
             {options.map((option, idx) => {
               const isActive = idx === activeIndex;
               const isSelected = option.id === selectedDeckId;

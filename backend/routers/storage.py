@@ -28,7 +28,7 @@ from libs.file_storage import (
 )
 from libs.file_storage.interface import FileNotFoundError as StorageFileNotFoundError
 
-from .deps import http_bearer
+from .deps import apply_token_renewal, http_bearer
 
 router = APIRouter()
 
@@ -52,6 +52,7 @@ class UploadUrlRequest(BaseModel):
 
 def _require_storage_auth(
     request: Request,
+    response: Response,
     credentials: HTTPAuthorizationCredentials = Depends(http_bearer),
 ) -> dict:
     token = credentials.credentials if credentials else None
@@ -64,6 +65,7 @@ def _require_storage_auth(
     user_data = auth.verify_access_token(token) if token else None
     if not user_data:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    apply_token_renewal(request, response, user_data)
     return user_data
 
 
