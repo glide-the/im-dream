@@ -37,6 +37,8 @@
 // [Sync] 2026-07-23: SandboxPermissionRequest — pendingConfirmation carries the backend
 //                    networkRequest metadata for kind==='sandbox-network' so ToolConfirmationDock
 //                    renders the network-variant card (claude-agent-sandbox-network-permission-tool.md §5).
+// [Sync] 2026-08-03: register a live message getter in chat-export-registry for the share
+//                    dialog long-image export.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -73,6 +75,7 @@ import {
   type PendingToolConfirmation,
 } from './toolConfirmation';
 import { getAuthToken } from '../../contexts/AuthContext';
+import { registerChatExportSource } from '../../lib/chat-export-registry';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import {
   publishStoryWorkspaceOutput,
@@ -289,6 +292,24 @@ export default function ChatPanel({
 
   setMessagesRef.current = setMessages;
 
+  // Share/export — expose the live message snapshot to the chat-export registry so
+  // ChatView's share dialog can render the current conversation as a long image
+  // without lifting useChat state out of this panel. The snapshot also carries the
+  // pending ToolConfirmationDock state and effective tool choice so the exported
+  // image can mirror reasoning/tool blocks and the bottom confirmation card.
+  const messagesForExportRef = useRef<UIMessage[]>([]);
+  const pendingConfirmationForExportRef = useRef<PendingToolConfirmation | null>(null);
+  const toolChoiceForExportRef = useRef<ToolChoice>('auto');
+  messagesForExportRef.current = messages;
+  useEffect(
+    () => registerChatExportSource(threadId, () => ({
+      messages: messagesForExportRef.current,
+      pendingConfirmation: pendingConfirmationForExportRef.current,
+      toolChoice: toolChoiceForExportRef.current,
+    })),
+    [threadId],
+  );
+
   useEffect(() => {
     setActiveSessionId(threadId);
     return () => {
@@ -489,6 +510,10 @@ export default function ChatPanel({
     }
     return null;
   }, [messages, effectiveToolChoice]);
+
+  // Keep the export snapshot refs in sync with the derived dock state.
+  pendingConfirmationForExportRef.current = pendingConfirmation;
+  toolChoiceForExportRef.current = effectiveToolChoice;
 
   const shouldShowLoadingIndicator = useMemo(() => {
     if (!agentBusy || messages.length === 0) {

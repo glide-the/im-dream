@@ -65,6 +65,8 @@
 //                    search dialog, WorkspaceTabBar, aria labels) through the chat
 //                    namespace in i18n.ts (en + zh); date group/label helpers now take
 //                    t() and format via getDateLocale(i18n.language).
+// [Sync] 2026-08-03: share button now opens ChatShareDialog (复制链接 placeholder +
+//                    导出图片 long-image export via chat-export-registry + exportThreadImage).
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -86,6 +88,9 @@ import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
 import ConnectorLandingPanel from './ConnectorLandingPanel';
+import ChatShareDialog from './ChatShareDialog';
+import { renderThreadImage, downloadThreadImage, toExportChatMessage, buildExportPendingConfirmation, type ExportChatMessage, type RenderedThreadImage } from './exportThreadImage';
+import { getChatExportSnapshot } from '../../lib/chat-export-registry';
 import { IconClock, IconDatabase, IconFolder, IconMessageCircle, IconMoreHorizontal, IconPlus, IconSearch, IconShare, IconX } from './Icons';
 import { SkeletonList } from './Skeleton';
 import type { ActiveChatVoice, ToolChoice } from '../../lib/chat-schema';
@@ -392,7 +397,11 @@ function ChatViewContent({
   const [selectedDeckId, setSelectedDeckId] = useState<string | undefined>();
   const [isLoadingDecks, setIsLoadingDecks] = useState(true);
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
-  const [shareCopied, setShareCopied] = useState(false);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareExporting, setShareExporting] = useState(false);
+  const [shareExportFailed, setShareExportFailed] = useState(false);
+  const [sharePreview, setSharePreview] = useState<RenderedThreadImage | null>(null);
+  const [shareDownloading, setShareDownloading] = useState(false);
   const [threadSearchOpen, setThreadSearchOpen] = useState(false);
   const [threadSearchQuery, setThreadSearchQuery] = useState('');
   const [threadSearchResults, setThreadSearchResults] = useState<ChatThread[]>([]);
@@ -718,14 +727,75 @@ function ChatViewContent({
     }
   }, [onLandingTabChange, reloadThreads]);
 
-  const handleShare = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
-      setShareCopied(true);
-      window.setTimeout(() => setShareCopied(false), 1600);
-    } catch {
-      setShareCopied(false);
+  const handleOpenShareDialog = useCallback(() => {
+    setShareExportFailed(false);
+    setSharePreview(null);
+    setShareDialogOpen(true);
+  }, []);
+
+  const handleCloseShareDialog = useCallback(() => {
+    setShareDialogOpen(false);
+    setShareExportFailed(false);
+    setSharePreview(null);
+  }, []);
+
+  const handleExportShareImage = useCallback(async () => {
+    if (!activeThreadId || shareExporting) {
+      return;
     }
+    setShareExporting(true);
+    setShareExportFailed(false);
+    try {
+      const snapshot = getChatExportSnapshot(activeThreadId);
+      const exportMessages = snapshot.messages
+        .map((message) => toExportChatMessage(message, snapshot.toolChoice, t))
+        .filter((message): message is ExportChatMessage => message !== null);
+      if (exportMessages.length === 0) {
+        throw new Error('nothing to export');
+      }
+      const threadTitle = threads.find((thread) => thread.id === activeThreadId)?.title
+        ?? t('chat.history.fallbackTitle');
+      const rendered = await renderThreadImage({
+        threadId: activeThreadId,
+        title: threadTitle,
+        messages: exportMessages,
+        labels: {
+          you: t('chat.share.you'),
+          assistant: t('chat.share.assistant'),
+          footer: t('chat.share.footer'),
+          thinking: t('chat.share.thinking'),
+          truncated: t('chat.share.truncated'),
+        },
+        // 待确认窗口整图只有一个，渲染在长图最下方（镜像 ToolConfirmationDock）。
+        pendingConfirmation: buildExportPendingConfirmation(snapshot.pendingConfirmation, t),
+      }, {
+        // 首片截好立即上屏一段预览头，剩余部分后台继续拼接。
+        onPartialPreview: (partial) => setSharePreview(partial),
+      });
+      setSharePreview(rendered);
+    } catch {
+      setShareExportFailed(true);
+    } finally {
+      setShareExporting(false);
+    }
+  }, [activeThreadId, shareExporting, threads, t]);
+
+  const handleDownloadSharePreview = useCallback(async () => {
+    if (!sharePreview || sharePreview.partial || shareDownloading) {
+      return;
+    }
+    setShareDownloading(true);
+    try {
+      await downloadThreadImage(sharePreview);
+      setShareDialogOpen(false);
+      setSharePreview(null);
+    } finally {
+      setShareDownloading(false);
+    }
+  }, [sharePreview, shareDownloading]);
+
+  const handleDiscardSharePreview = useCallback(() => {
+    setSharePreview(null);
   }, []);
 
   const handleDeleteThread = useCallback(async (e: React.MouseEvent, threadId: string) => {
@@ -874,11 +944,11 @@ function ChatViewContent({
                     <div style={{ height: '1px', background: 'var(--color-border-paper)', margin: '0.2rem 0.4rem' }} />
                     <button
                       type="button"
-                      onClick={() => { void handleShare(); setMoreMenuOpen(false); }}
+                      onClick={() => { handleOpenShareDialog(); setMoreMenuOpen(false); }}
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                     >
                       <IconShare style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
-                      <span>{shareCopied ? t('chat.history.linkCopied') : t('chat.history.share')}</span>
+                      <span>{t('chat.history.share')}</span>
                     </button>
                   </div>
                 </>
@@ -1349,6 +1419,20 @@ function ChatViewContent({
         {workspaceEnabled ? (
           <FileSidebar sessionId={activeThreadId ?? ''} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
         ) : null}
+
+        <ChatShareDialog
+          open={shareDialogOpen}
+          threadTitle={threads.find((thread) => thread.id === activeThreadId)?.title ?? null}
+          exporting={shareExporting}
+          exportFailed={shareExportFailed}
+          canExport={Boolean(activeThreadId)}
+          preview={sharePreview}
+          downloading={shareDownloading}
+          onClose={handleCloseShareDialog}
+          onExportImage={() => void handleExportShareImage()}
+          onDownloadPreview={() => void handleDownloadSharePreview()}
+          onDiscardPreview={handleDiscardSharePreview}
+        />
       </div>
   );
 }
