@@ -236,6 +236,12 @@ export default function ChatShareDialog({
               </button>
             </div>
           </>
+        ) : exporting ? (
+          /* 点分享即触发生成 — 首片预览未就绪前的占位加载视图 */
+          <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.7rem', padding: '2.2rem 1rem', borderRadius: '0.85rem', border: '1px dashed color-mix(in srgb, var(--color-border-paper) 88%, transparent)', background: 'var(--color-bg-app)' }}>
+            <IconLoader style={{ width: '1.3rem', height: '1.3rem', color: 'var(--color-text-secondary)', animation: 'spin 1s linear infinite' }} />
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-secondary)' }}>{t('chat.share.preparingPreview')}</span>
+          </div>
         ) : (
           <>
         {/* 选项列表 — 虚线纸边界条目，hover 才出现轻阴影（无卡片设计规则） */}

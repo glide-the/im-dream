@@ -285,7 +285,8 @@ const resources = {
           back: 'Back',
           partsInfo: '{{count}} parts',
           rendering: 'Rendering the rest of the image…',
-          merging: 'Merging…'
+          merging: 'Merging…',
+          preparingPreview: 'Preparing preview…'
         },
         search: {
           button: 'Search',
@@ -786,7 +787,8 @@ const resources = {
           back: '返回',
           partsInfo: '共 {{count}} 张分图',
           rendering: '正在生成剩余部分…',
-          merging: '合并中…'
+          merging: '合并中…',
+          preparingPreview: '正在生成预览…'
         },
         search: {
           button: '搜索',

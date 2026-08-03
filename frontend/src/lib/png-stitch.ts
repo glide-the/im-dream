@@ -247,9 +247,11 @@ export async function stitchPngPartsToBlob(dataUrls: string[]): Promise<Blob> {
 
   const writer = stream.writable.getWriter();
   const rowLength = 1 + width * BYTES_PER_PIXEL;
-  let prevRow: Uint8Array | null = null;
   try {
     for (const part of parts) {
+      // PNG 去滤镜是「按图」定义的：每个分图的首行必须以全零行作为上一行参考。
+      // 沿用上一个分图的末行会污染首行并沿行链传播（后半段条状坏图的根因）。
+      let prevRow: Uint8Array | null = null;
       await processRows(part.idat, rowLength, async (rawRow) => {
         const row = rawRow.slice(1);
         unfilterRow(rawRow[0], row, prevRow);

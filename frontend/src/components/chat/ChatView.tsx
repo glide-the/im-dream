@@ -944,7 +944,12 @@ function ChatViewContent({
                     <div style={{ height: '1px', background: 'var(--color-border-paper)', margin: '0.2rem 0.4rem' }} />
                     <button
                       type="button"
-                      onClick={() => { handleOpenShareDialog(); setMoreMenuOpen(false); }}
+                      onClick={() => {
+                        // 点分享直接触发生成 — 弹窗立即进入预览流程（先出头部一段）。
+                        handleOpenShareDialog();
+                        void handleExportShareImage();
+                        setMoreMenuOpen(false);
+                      }}
                       style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                     >
                       <IconShare style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
