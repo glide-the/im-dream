@@ -1166,6 +1166,59 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
             1,
         )
 
+    def test_visible_run_swap_after_directory_fsync_uses_root_tree(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        runs = self.dream / "runtime" / "runs"
+        run_directory = runs / RUN_ID
+        visible_snapshot = runs / f"{RUN_ID}.root-visible-snapshot"
+        displaced = runs / f"{RUN_ID}.fsync-displaced"
+        shutil.copytree(run_directory, visible_snapshot)
+        original_fsync = os.fsync
+        swapped = False
+
+        def fsync_then_swap_visible_run(descriptor: int) -> None:
+            nonlocal swapped
+            original_fsync(descriptor)
+            if not swapped and stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                swapped = True
+                run_directory.rename(displaced)
+                visible_snapshot.rename(run_directory)
+
+        with patch.object(os, "fsync", side_effect=fsync_then_swap_visible_run):
+            with self.assertRaises(
+                dream_files.StoryWorkspaceDreamDurabilityIndeterminate
+            ) as raised:
+                self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="durable-in-displaced-run",
+                )
+
+        self.assertEqual(raised.exception.pinned_observed_revision, 2)
+        self.assertEqual(raised.exception.visible_observed_revision, 1)
+        self.assertEqual(
+            raised.exception.state_hint,
+            "pinned-commit-visible-directory-replaced",
+        )
+        self.assertEqual(
+            json.loads(
+                (displaced / "stages" / "characters.json").read_text()
+            )["revision"],
+            2,
+        )
+        self.assertEqual(
+            self.reader.read_stage(
+                self.run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+            ).revision,
+            1,
+        )
+
     def test_durable_commit_cleanup_failure_warns_and_returns_revision(self) -> None:
         self.initialize_run()
         self.write_stage(

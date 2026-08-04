@@ -794,29 +794,50 @@ class _StoryWorkspaceDreamFilesystem:
         except StoryWorkspaceDreamFileError:
             return None
 
-    @classmethod
-    def _observe_visible_revision(
-        cls,
-        directory: _PinnedDirectory,
+    def _observe_root_visible_revision(
+        self,
+        run_id: str,
         filename: str,
+        *,
+        in_stages_directory: bool,
     ) -> int | None:
-        visible_descriptor: int | None = None
+        descriptors: list[int] = []
+        pinned_children: list[tuple[int, str, int]] = []
         try:
-            visible_descriptor = cls._open_child_directory(
-                directory.parent_descriptor,
-                directory.name,
-                create=False,
-                optional=True,
+            workspace_descriptor = self._open_workspace_descriptor()
+            descriptors.append(workspace_descriptor)
+            parent_descriptor = workspace_descriptor
+            component_names = [".dream", "runtime", "runs", run_id]
+            if in_stages_directory:
+                component_names.append("stages")
+            for component_name in component_names:
+                child_descriptor = self._open_child_directory(
+                    parent_descriptor,
+                    component_name,
+                    create=False,
+                    optional=True,
+                )
+                if child_descriptor is None:
+                    return None
+                descriptors.append(child_descriptor)
+                pinned_children.append(
+                    (parent_descriptor, component_name, child_descriptor)
+                )
+                parent_descriptor = child_descriptor
+            observed_revision = self._observe_revision(
+                parent_descriptor,
+                filename,
             )
-            if visible_descriptor is None:
-                return None
-            return cls._observe_revision(visible_descriptor, filename)
+            self._verify_workspace_identity(workspace_descriptor)
+            for parent, name, child in pinned_children:
+                self._verify_child_identity(parent, name, child)
+            return observed_revision
         except StoryWorkspaceDreamFileError:
             return None
         finally:
-            if visible_descriptor is not None:
+            for descriptor in reversed(descriptors):
                 try:
-                    os.close(visible_descriptor)
+                    os.close(descriptor)
                 except OSError:
                     pass
 
@@ -865,6 +886,7 @@ class _StoryWorkspaceDreamFilesystem:
         previous_revision: int,
         next_revision: int,
         verify_context: Callable[[], None],
+        observe_root_visible_revision: Callable[[], int | None],
     ) -> None:
         if len(payload) > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES:
             raise StoryWorkspaceDreamContractError(
@@ -900,12 +922,11 @@ class _StoryWorkspaceDreamFilesystem:
                     directory.descriptor,
                     filename,
                 )
-                visible_observed_revision = cls._observe_visible_revision(
-                    directory,
-                    filename,
-                )
+                visible_observed_revision = observe_root_visible_revision()
                 state_hint = "durable-commit-context-changed"
-                if (
+                if visible_observed_revision is None:
+                    state_hint = "pinned-commit-root-visible-unavailable"
+                elif (
                     pinned_observed_revision == next_revision
                     and visible_observed_revision == previous_revision
                 ):
@@ -958,7 +979,12 @@ class _StoryWorkspaceDreamFilesystem:
                         directory.descriptor,
                         filename,
                     )
-                    if observed_revision == next_revision:
+                    visible_observed_revision = observe_root_visible_revision()
+                    if visible_observed_revision is None:
+                        state_hint = (
+                            "rollback-failed-root-visible-unavailable"
+                        )
+                    elif observed_revision == next_revision:
                         state_hint = "replacement-visible-rollback-failed"
                     elif observed_revision == previous_revision:
                         state_hint = "rollback-visible-durability-unknown"
@@ -967,10 +993,7 @@ class _StoryWorkspaceDreamFilesystem:
                     indeterminate = StoryWorkspaceDreamDurabilityIndeterminate(
                         observed_revision,
                         state_hint,
-                        visible_observed_revision=cls._observe_visible_revision(
-                            directory,
-                            filename,
-                        ),
+                        visible_observed_revision=visible_observed_revision,
                     )
                     _add_cleanup_note(indeterminate, operation_error)
                     cls._cleanup_names(
@@ -1095,6 +1118,13 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                 previous_revision=current_revision,
                 next_revision=next_file.revision,
                 verify_context=lambda: self._verify_run(run),
+                observe_root_visible_revision=lambda: (
+                    self._observe_root_visible_revision(
+                        run_id,
+                        "run.json",
+                        in_stages_directory=False,
+                    )
+                ),
             )
             return next_file
 
@@ -1187,6 +1217,13 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                     previous_revision=current_revision,
                     next_revision=candidate.revision,
                     verify_context=verify_stage_context,
+                    observe_root_visible_revision=lambda: (
+                        self._observe_root_visible_revision(
+                            run_id,
+                            canonical_filename,
+                            in_stages_directory=True,
+                        )
+                    ),
                 )
                 return candidate
 
