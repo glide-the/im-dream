@@ -16,6 +16,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import time
 from typing import Any, Awaitable, Callable, Optional, Protocol
 from uuid import uuid4
 
@@ -523,7 +524,7 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
             )
             stream = selected_factory.run_streaming(request)
 
-            completed = False
+            saw_message_final = False
             async for frame in stream:
                 if not isinstance(frame, str):
                     continue
@@ -545,11 +546,13 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                     continue
                 if event.get("type") == "error":
                     return False
+                if event.get("type") == "message-final":
+                    saw_message_final = True
                 if event.get("type") == "finish":
                     if event.get("finishReason") == "error":
                         return False
-                    completed = True
-            return completed
+                    return saw_message_final
+            return False
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -578,6 +581,12 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
     return dispatch
 
 
+@dataclass(frozen=True)
+class _StoryWorkspaceDreamRetryState:
+    failures: int
+    not_before: float
+
+
 class StoryWorkspaceDreamConfirmationCoordinator:
     """Reconcile durable pending confirmations with same-thread Agent turns.
 
@@ -596,11 +605,18 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             story_workspace_build_dream_confirmation_turn_dispatcher
         ),
         reconcile_interval_s: float = 2.0,
+        clock: Callable[[], float] = time.monotonic,
+        retry_base_s: float = 2.0,
+        retry_max_s: float = 60.0,
     ) -> None:
         self._db_factory = db_factory
         self._dispatcher_factory = dispatcher_factory
         self._reconcile_interval_s = max(float(reconcile_interval_s), 0.01)
+        self._clock = clock
+        self._retry_base_s = max(float(retry_base_s), 0.01)
+        self._retry_max_s = max(float(retry_max_s), self._retry_base_s)
         self._in_flight: dict[str, asyncio.Task[None]] = {}
+        self._retry_state: dict[str, _StoryWorkspaceDreamRetryState] = {}
         self._loop_task: Optional[asyncio.Task[None]] = None
         self._stop_event: Optional[asyncio.Event] = None
 
@@ -635,6 +651,9 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         dispatch: Optional[StoryWorkspaceDreamConfirmationDispatch],
     ) -> bool:
         if dispatch is None or dispatch.message_id in self._in_flight:
+            return False
+        retry = self._retry_state.get(dispatch.message_id)
+        if retry is not None and self._clock() < retry.not_before:
             return False
         task = asyncio.create_task(
             self._consume_and_ack(dispatch),
@@ -674,6 +693,19 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         finally:
             db.close()
 
+    def _record_retry(self, message_id: str) -> None:
+        previous = self._retry_state.get(message_id)
+        failures = 1 if previous is None else previous.failures + 1
+        exponent = min(failures - 1, 30)
+        delay = min(
+            self._retry_max_s,
+            self._retry_base_s * (2 ** exponent),
+        )
+        self._retry_state[message_id] = _StoryWorkspaceDreamRetryState(
+            failures=failures,
+            not_before=self._clock() + delay,
+        )
+
     async def _consume_and_ack(
         self,
         dispatch: StoryWorkspaceDreamConfirmationDispatch,
@@ -689,9 +721,14 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             )
             if completed:
                 await asyncio.to_thread(self._mark_dispatched_sync, dispatch)
+                self._retry_state.pop(dispatch.message_id, None)
+            else:
+                self._record_retry(dispatch.message_id)
         except asyncio.CancelledError:
+            self._record_retry(dispatch.message_id)
             raise
         except Exception:
+            self._record_retry(dispatch.message_id)
             _logger.exception(
                 "Dream confirmation remains pending for thread_id=%s "
                 "message_id=%s",

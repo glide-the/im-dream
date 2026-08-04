@@ -194,6 +194,17 @@ class RecordingProjectionReader:
         return self.projection
 
 
+class ManualClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class ConfirmationFixture:
     def __init__(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -781,10 +792,14 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                 raise RuntimeError("stream failed before completion")
             return True
 
+        clock = ManualClock()
         coordinator = StoryWorkspaceDreamConfirmationCoordinator(
             database.get_db,
             dispatcher_factory=lambda: consume,
             reconcile_interval_s=3600,
+            clock=clock,
+            retry_base_s=2,
+            retry_max_s=8,
         )
         try:
             coordinator.start()
@@ -801,7 +816,9 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                     (True, False),
                 )
 
-            await coordinator.reconcile_once()
+            self.assertEqual(await coordinator.reconcile_once(), 0)
+            clock.advance(2)
+            self.assertEqual(await coordinator.reconcile_once(), 1)
             await self._wait_until(lambda: len(attempts) == 2)
             await coordinator.wait_for_idle()
             with database.get_db() as db:
@@ -832,10 +849,14 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             consumptions += 1
             return True
 
+        clock = ManualClock()
         coordinator = StoryWorkspaceDreamConfirmationCoordinator(
             database.get_db,
             dispatcher_factory=lambda: consume,
             reconcile_interval_s=3600,
+            clock=clock,
+            retry_base_s=2,
+            retry_max_s=8,
         )
         real_mark = coordinator._mark_dispatched_sync
         acknowledgements = 0
@@ -860,7 +881,9 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                     ),
                     (True, False),
                 )
-            await coordinator.reconcile_once()
+            self.assertEqual(await coordinator.reconcile_once(), 0)
+            clock.advance(2)
+            self.assertEqual(await coordinator.reconcile_once(), 1)
             await coordinator.wait_for_idle()
 
         with database.get_db() as db:
@@ -875,6 +898,61 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             )
         self.assertEqual(consumptions, 2)
         self.assertEqual(acknowledgements, 2)
+
+    async def test_false_consumption_uses_exponential_per_message_backoff(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        attempts = 0
+
+        async def consume(*_args):
+            nonlocal attempts
+            attempts += 1
+            return attempts >= 3
+
+        clock = ManualClock()
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=0.01,
+            clock=clock,
+            retry_base_s=2,
+            retry_max_s=8,
+        )
+
+        coordinator.schedule(persisted.dispatch)
+        await coordinator.wait_for_idle()
+        self.assertEqual(attempts, 1)
+        self.assertEqual(await coordinator.reconcile_once(), 0)
+        clock.advance(1.99)
+        self.assertEqual(await coordinator.reconcile_once(), 0)
+        clock.advance(0.01)
+        self.assertEqual(await coordinator.reconcile_once(), 1)
+        await coordinator.wait_for_idle()
+        self.assertEqual(attempts, 2)
+
+        clock.advance(3.99)
+        self.assertEqual(await coordinator.reconcile_once(), 0)
+        clock.advance(0.01)
+        self.assertEqual(await coordinator.reconcile_once(), 1)
+        await coordinator.wait_for_idle()
+        self.assertEqual(attempts, 3)
+        self.assertNotIn(
+            persisted.accepted.message_id,
+            coordinator._retry_state,
+        )
+        with database.get_db() as db:
+            self.assertEqual(
+                story_workspace_read_dream_confirmation_fact(
+                    db,
+                    actor_id=ACTOR_ID,
+                    thread_id=THREAD_ID,
+                    run_id=RUN_ID,
+                ),
+                (True, True),
+            )
 
     async def test_scan_and_submit_deduplicate_one_in_flight_message(self) -> None:
         persisted = self.fixture.service().submit_confirmation(
@@ -1022,6 +1100,7 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
                 requests.append(request)
                 entered.set()
                 await release.wait()
+                yield 'data: {"type":"message-final","text":"done"}\n\n'
                 yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
@@ -1066,6 +1145,32 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
 
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             ErrorFactory(),
+            request_factory=lambda **values: SimpleNamespace(**values),
+        )
+        self.assertFalse(
+            await dispatcher(THREAD_ID, ACTOR_ID, "message-1", [], {})
+        )
+
+    async def test_finish_stop_without_message_final_is_not_consumed(self) -> None:
+        class CancelledFactory:
+            async def run_streaming(self, _request):
+                yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+        dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
+            CancelledFactory(),
+            request_factory=lambda **values: SimpleNamespace(**values),
+        )
+        self.assertFalse(
+            await dispatcher(THREAD_ID, ACTOR_ID, "message-1", [], {})
+        )
+
+    async def test_message_final_without_terminal_finish_is_not_consumed(self) -> None:
+        class TruncatedFactory:
+            async def run_streaming(self, _request):
+                yield 'data: {"type":"message-final","text":"done"}\n\n'
+
+        dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
+            TruncatedFactory(),
             request_factory=lambda **values: SimpleNamespace(**values),
         )
         self.assertFalse(
