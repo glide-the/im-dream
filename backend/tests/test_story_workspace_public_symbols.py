@@ -27,6 +27,22 @@ def public_definitions(relative_path: str) -> dict[str, str]:
     return definitions
 
 
+def dream_route_functions(relative_path: str) -> set[str]:
+    tree = ast.parse((BACKEND_ROOT / relative_path).read_text(encoding="utf-8"))
+    names: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for decorator in node.decorator_list:
+            if not isinstance(decorator, ast.Call) or not decorator.args:
+                continue
+            route = decorator.args[0]
+            if isinstance(route, ast.Constant) and isinstance(route.value, str):
+                if "/dream-" in route.value:
+                    names.add(node.name)
+    return names
+
+
 class StoryWorkspacePublicSymbolTests(unittest.TestCase):
     def test_dream_confirmation_module_uses_dec_004_prefixes(self) -> None:
         definitions = public_definitions(
@@ -67,19 +83,37 @@ class StoryWorkspacePublicSymbolTests(unittest.TestCase):
         self.assertNotIn("handle_story_workspace_dream_tool", tool_definitions)
         self.assertNotIn("create_story_workspace_mcp_server", server_definitions)
 
-    def test_gateway_and_lifecycle_expose_only_prefixed_task3_names(self) -> None:
+    def test_task3_gateway_functions_are_scanned_not_enumerated(self) -> None:
         gateway = public_definitions("services/deck/story_workflow_gateway.py")
+        preexisting = {"get_story_workflow_application_gateway"}
+        candidates = {
+            name
+            for name, kind in gateway.items()
+            if kind == "function" and name not in preexisting
+        }
+        self.assertGreaterEqual(len(candidates), 2)
+        for name in candidates:
+            with self.subTest(name=name):
+                self.assertTrue(name.startswith("story_workspace_"), name)
+
+    def test_all_dream_router_handlers_use_dec_004_prefix(self) -> None:
+        names = dream_route_functions("routers/story_workspace.py")
+        self.assertGreaterEqual(len(names), 2)
+        for name in names:
+            with self.subTest(name=name):
+                self.assertTrue(name.startswith("story_workspace_"), name)
+
+    def test_task3_server_lifecycle_functions_use_dec_004_prefix(self) -> None:
         server = public_definitions("server.py")
-        self.assertIn("story_workspace_get_dream_confirmation_coordinator", gateway)
-        self.assertNotIn("get_dream_confirmation_coordinator", gateway)
-        self.assertIn(
-            "story_workspace_startup_dream_confirmation_coordinator",
-            server,
-        )
-        self.assertIn(
-            "story_workspace_shutdown_dream_confirmation_coordinator",
-            server,
-        )
+        candidates = {
+            name
+            for name, kind in server.items()
+            if kind == "function" and "dream_confirmation_coordinator" in name
+        }
+        self.assertGreaterEqual(len(candidates), 2)
+        for name in candidates:
+            with self.subTest(name=name):
+                self.assertTrue(name.startswith("story_workspace_"), name)
 
 
 if __name__ == "__main__":

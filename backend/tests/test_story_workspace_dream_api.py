@@ -551,7 +551,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ) as get_thread,
             patch.object(
                 gateway_module,
-                "get_workspace_root",
+                "story_workspace_get_workspace_root",
                 return_value=root or self.root,
             ),
         ):
@@ -572,7 +572,10 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         self,
     ) -> None:
         with patch.dict(os.environ, {"AGENT_CWD": str(self.root)}):
-            self.assertEqual(gateway_module.get_workspace_root(), self.root)
+            self.assertEqual(
+                gateway_module.story_workspace_get_workspace_root(),
+                self.root,
+            )
 
     async def test_owner_read_uses_scoped_run_and_owned_original_thread(self) -> None:
         with self.wired() as (read_run, get_thread, db):

@@ -96,7 +96,7 @@ _DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
 )
 
 
-def get_workspace_root() -> Path:
+def story_workspace_get_workspace_root() -> Path:
     """Load the canonical workspace resolver only when this projection runs."""
 
     try:
@@ -231,7 +231,7 @@ class StoryWorkflowApplicationGateway:
         ):
             raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
 
-        supplied_root = Path(get_workspace_root())
+        supplied_root = Path(story_workspace_get_workspace_root())
         try:
             resolved_root = supplied_root.resolve(strict=True)
         except (OSError, RuntimeError) as exc:

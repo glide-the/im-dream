@@ -1189,7 +1189,7 @@ async def get_workflow_run(
 
 
 @router.get("/workflow-runs/{workflow_run_id}/dream-files")
-async def get_workflow_run_dream_files(
+async def story_workspace_get_workflow_run_dream_files(
     workflow_run_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
@@ -1212,7 +1212,7 @@ async def get_workflow_run_dream_files(
     "/workflow-runs/{workflow_run_id}/dream-confirmation",
     status_code=202,
 )
-async def submit_workflow_run_dream_confirmation(
+async def story_workspace_submit_workflow_run_dream_confirmation(
     workflow_run_id: str,
     request: StoryWorkspaceDreamConfirmationCommand,
     current_user: dict[str, Any] = Depends(get_current_user),
