@@ -177,6 +177,9 @@
 #                    (before plan/task env injection) so the system/npm CLI —
 #                    Docker's apply-seccomp-patched runtime — is not shadowed
 #                    by the SDK bundled CLI (bundled-first _find_cli in 0.2.128).
+# [Sync] 2026-08-04: harden the .dream Bash write guard against find mutation
+#                    actions, env/wrapper execution, glob paths, and normalized
+#                    relative/absolute paths with conservative read-only parsing.
 
 """Claude Agent Runner.
 
@@ -190,6 +193,7 @@ interface for the AI worker.
 from __future__ import annotations
 
 import asyncio
+from fnmatch import fnmatchcase
 import inspect
 import json
 import logging
@@ -377,6 +381,7 @@ _DREAM_SURFACE_REFERENCE_RE = re.compile(
     r"(?<![A-Za-z0-9_.-])\.dream(?=$|[/\\\s'\";&|<>])",
     re.IGNORECASE,
 )
+_DREAM_PATH_FRAGMENT_RE = re.compile(r"\.[A-Za-z0-9_?*\[\]!.^-]+")
 
 # Read-only / navigation shell commands that carry no filesystem side effects.
 # Any command whose first token matches one of these and contains no shell
@@ -436,6 +441,39 @@ _PACKAGE_NETWORK_SUBCOMMANDS: dict[str, frozenset[str]] = {
     "cargo": frozenset({"install", "search", "publish", "update"}),
 }
 _COMMAND_WRAPPERS: frozenset[str] = frozenset({"command", "exec", "sudo", "time"})
+_DREAM_READ_ONLY_BASH_COMMANDS: frozenset[str] = frozenset({
+    "ls",
+    "cd",
+    "pwd",
+    "echo",
+    "cat",
+    "head",
+    "tail",
+    "wc",
+    "find",
+    "which",
+    "type",
+    "date",
+    "whoami",
+    "id",
+    "groups",
+    "printenv",
+    "uname",
+    "hostname",
+})
+_FIND_MUTATING_ACTIONS: frozenset[str] = frozenset({
+    "-delete",
+    "-exec",
+    "-execdir",
+    "-ok",
+    "-okdir",
+    # These write to a named output file. Deny conservatively whenever find
+    # traverses the controlled surface, even when that output is elsewhere.
+    "-fls",
+    "-fprint",
+    "-fprint0",
+    "-fprintf",
+})
 
 
 def _is_low_sensitivity_bash_command(command: str) -> bool:
@@ -544,21 +582,121 @@ def _is_path_inside_dream_surface(raw_path: str, cwd: Optional[str]) -> bool:
         return False
 
 
-def _is_dream_mutating_bash_command(command: str) -> bool:
+def _dream_path_component_pattern_can_match(component: str) -> bool:
+    """Return whether a shell path component can expand to ``.dream``.
+
+    Leading-dot matching must be explicit in normal shell glob expansion, so
+    broad components such as ``*`` are not treated as Dream references. This
+    still catches ``.drea?``, ``.*``, and bracket forms such as ``[.]dream``.
+    """
+
+    pattern = component.strip(" \t\r\n'\"(){}:,;=+").lower()
+    if not pattern:
+        return False
+    explicitly_matches_dot = pattern.startswith(".") or bool(
+        re.match(r"^\[[^]]*\.", pattern)
+    )
+    if not explicitly_matches_dot:
+        return False
+    if fnmatchcase(".dream", pattern):
+        return True
+
+    # ``fnmatch`` does not model Bash brace/extglob syntax. If such syntax has
+    # a literal prefix compatible with .dream, treat it as a possible match;
+    # e.g. ``.dr{eam,aft}`` and ``.@(dream|draft)`` both fail closed.
+    expansion_indexes = [
+        pattern.find(char)
+        for char in "*?[]{}()|"
+        if char in pattern
+    ]
+    if not expansion_indexes:
+        return False
+    literal_prefix = pattern[:min(expansion_indexes)]
+    return ".dream".startswith(literal_prefix)
+
+
+def _shell_token_may_reference_dream_surface(token: str, cwd: Optional[str]) -> bool:
+    """Classify literal, normalized, symlinked, or globbed Dream path tokens."""
+
+    normalized_token = token.replace("\\", "/")
+    for component in normalized_token.split("/"):
+        candidates = [component, *_DREAM_PATH_FRAGMENT_RE.findall(component)]
+        if any(_dream_path_component_pattern_can_match(item) for item in candidates):
+            return True
+
+    if not cwd or any(char in token for char in "*?[]{}"):
+        return False
+    raw_path = token.strip(" \t\r\n'\"(){}:,;=+")
+    if not raw_path or raw_path.startswith("-"):
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        dream_root = (workspace / ".dream").resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        return resolved == dream_root or resolved.is_relative_to(dream_root)
+    except (OSError, RuntimeError, ValueError):
+        # Lexical/glob classification above remains authoritative when a path
+        # cannot be resolved. Unknown resolution never turns a known match safe.
+        return False
+
+
+def _bash_command_may_reference_dream_surface(
+    command: str,
+    tokens: list[str],
+    cwd: Optional[str],
+) -> bool:
+    """Return whether Bash could address the controlled Dream surface."""
+
+    if _DREAM_SURFACE_REFERENCE_RE.search(command) is not None:
+        return True
+    return any(
+        _shell_token_may_reference_dream_surface(token, cwd)
+        for token in tokens
+    )
+
+
+def _is_definitely_read_only_dream_bash_command(
+    command: str,
+    tokens: list[str],
+) -> bool:
+    """Allow only a narrow, parsed set of commands with no write capability."""
+
+    if _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
+        return False
+    unwrapped = _unwrap_command_tokens(tokens)
+    if not unwrapped:
+        # Plain ``env`` only prints the environment. Any command supplied to it
+        # survives unwrapping and is classified by its real executable below.
+        return bool(tokens) and _command_name(tokens[0]) == "env"
+
+    name = _command_name(unwrapped[0])
+    if name not in _DREAM_READ_ONLY_BASH_COMMANDS:
+        return False
+    if name == "find":
+        return not any(
+            token.lower() in _FIND_MUTATING_ACTIONS
+            for token in unwrapped[1:]
+        )
+    return True
+
+
+def _is_dream_mutating_bash_command(command: str, cwd: Optional[str]) -> bool:
     """Conservatively identify shell attempts to mutate the Dream surface.
 
     Read-only commands such as ``cat .dream/workspace.json`` remain available.
-    Redirects, filesystem mutation utilities, and inline Python are denied when
-    the command references ``.dream``; writes must use the controlled MCP seam.
+    Literal, normalized, symlink-resolved, and shell-glob path forms are checked.
+    Once a command can address ``.dream``, only a parsed, narrow read-only form
+    is accepted; wrappers and ``find`` actions are inspected rather than trusted
+    by their first token. Writes must use the controlled MCP seam.
     """
 
-    if _DREAM_SURFACE_REFERENCE_RE.search(command) is None:
+    tokens = _split_shell_command(command)
+    if not _bash_command_may_reference_dream_surface(command, tokens, cwd):
         return False
-    # Fail closed for every executable or compound shell form except the
-    # existing narrow no-metacharacter read/navigation allowlist. This also
-    # covers nested ``sh -c``, interpreters, redirections, and mutation tools
-    # without trying to maintain an inevitably incomplete command denylist.
-    return not _is_low_sensitivity_bash_command(command)
+    return not _is_definitely_read_only_dream_bash_command(command, tokens)
 
 
 def _apply_dream_surface_write_guard(
@@ -576,7 +714,8 @@ def _apply_dream_surface_write_guard(
         )
     elif tool_name == "Bash":
         denied = _is_dream_mutating_bash_command(
-            str(tool_input.get("command") or "")
+            str(tool_input.get("command") or ""),
+            cwd,
         )
     if not denied:
         return None

@@ -60,6 +60,9 @@
 #                    (5 tests): claude-agent-sdk 0.2.128 makes HookJSONOutput a
 #                    non-callable TypedDict Union, so hooks return plain dicts;
 #                    the old stub class had masked the production TypeError.
+# [Sync] 2026-08-04: cover fail-closed Dream Bash mutation classification for
+#                    find actions, env wrappers, shell globs, and normalized
+#                    relative/absolute workspace paths while preserving reads.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -1081,6 +1084,60 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                     _hook_specific(read_result, {}).get("permissionDecision"),
                     "allow",
                 )
+
+    async def test_bash_dream_guard_denies_find_env_glob_and_normalized_path_bypasses(self):
+        for full_access in (False, True):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                (workspace / ".dream" / "runtime").mkdir(parents=True)
+                absolute_run = workspace / ".dream" / "runtime" / "run.json"
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace),
+                    im_full_access_enabled=full_access,
+                )
+                mutations = (
+                    "find .dream/runtime -type f -delete",
+                    "find .dream/runtime -type f -exec rm -f {} +",
+                    "env rm -f .dream/runtime/run.json",
+                    "rm -f .drea?/runtime/run.json",
+                    "rm -f .dr{eam,aft}/runtime/run.json",
+                    "find ./.dream/runtime -type f -delete",
+                    "rm -f files/../.dream/runtime/run.json",
+                    f"find {workspace / '.dream' / 'runtime'} -type f -delete",
+                    f"env rm -f {absolute_run}",
+                    f"rm -f {workspace / '.drea?' / 'runtime' / 'run.json'}",
+                )
+                for command in mutations:
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-dream-bypass",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        specific = _hook_specific(result, {})
+                        self.assertEqual(specific.get("permissionDecision"), "deny")
+                        self.assertIn(
+                            "controlled by Story Workspace",
+                            specific.get("permissionDecisionReason", ""),
+                        )
+
+                reads = (
+                    "find .dream/runtime -type f -print",
+                    "env cat .dream/workspace.json",
+                    "cat .drea?/workspace.json",
+                    f"find {workspace / '.dream' / 'runtime'} -type f -print",
+                )
+                for command in reads:
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-dream-read",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        self.assertEqual(
+                            _hook_specific(result, {}).get("permissionDecision"),
+                            "allow",
+                        )
 
     async def test_auto_relative_write_under_workspace_files_gets_explicit_allow(self):
         with tempfile.TemporaryDirectory() as temp_dir:
