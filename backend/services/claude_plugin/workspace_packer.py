@@ -22,8 +22,10 @@ from datetime import UTC, datetime
 from dataclasses import asdict
 import json
 import logging
+import os
 from pathlib import Path
 import sqlite3
+import tempfile
 from typing import Any
 
 from . import artifact_store, runtime, workspace_init
@@ -39,6 +41,15 @@ LAUNCH_MANIFEST_RELATIVE_PATH = Path(".ink") / "launch-manifest.json"
 PLUGIN_SLOTS_RELATIVE_DIR = Path(".ink") / "plugins"
 PACK_RECEIPT_RELATIVE_PATH = Path(".ink") / "plugin-pack-receipt.json"
 LAUNCH_MANIFEST_SCHEMA_VERSION = "claude-launch/v1"
+DRAMA_FORGE_PACKAGE_SPEC = "drama-forge@drama-studio"
+_DREAM_DRAMA_COMPATIBILITY_FILES = (
+    (Path(".claude-plugin/plugin.json"), Path("plugin.json")),
+    (
+        Path(".claude/docs/templates/project-init.md"),
+        Path(".claude/docs/templates/project-init.md"),
+    ),
+    (Path(".claude/hooks/hooks.json"), Path(".claude/hooks/hooks.json")),
+)
 
 
 class WorkspacePackError(RuntimeError):
@@ -172,6 +183,94 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _ensure_dream_drama_compatibility(
+    workspace: Path,
+    packed_plugin: Path,
+    *,
+    allow_install: bool,
+) -> None:
+    """Install or validate drama-forge's consumer-workspace preflight files.
+
+    drama-forge resolves these paths from the consumer project root rather
+    than its isolated plugin directory.  A fresh Dream pack may install them;
+    a frozen workspace only validates the launch-time result.
+    """
+    files: list[tuple[Path, Path, bytes]] = []
+    for source_relative, target_relative in _DREAM_DRAMA_COMPATIBILITY_FILES:
+        source = packed_plugin / source_relative
+        target = workspace / target_relative
+        if not source.is_file():
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                f"drama-forge compatibility source is missing: {source_relative}",
+            )
+        try:
+            content = source.read_bytes()
+        except OSError as exc:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                f"failed to read drama-forge compatibility source: {source_relative}",
+            ) from exc
+        files.append((source_relative, target, content))
+
+    missing: list[tuple[Path, bytes]] = []
+    for source_relative, target, content in files:
+        if target.exists() or target.is_symlink():
+            try:
+                matches = (
+                    target.is_file()
+                    and not target.is_symlink()
+                    and target.read_bytes() == content
+                )
+            except OSError:
+                matches = False
+            if not matches:
+                raise WorkspacePackError(
+                    "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                    "drama-forge compatibility target conflicts with the "
+                    f"packed source: {target.relative_to(workspace)} "
+                    f"(source={source_relative})",
+                )
+            continue
+        if not allow_install:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                "frozen workspace is missing drama-forge compatibility target: "
+                f"{target.relative_to(workspace)}",
+            )
+        missing.append((target, content))
+
+    staged: list[tuple[Path, Path]] = []
+    installed: list[Path] = []
+    try:
+        for target, content in missing:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(
+                dir=target.parent,
+                prefix=f".{target.name}.dream-compat-",
+                delete=False,
+            ) as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+                staged.append((Path(handle.name), target))
+        for temporary, target in staged:
+            # A hard-link publishes the complete staged bytes without
+            # overwriting a target created after the conflict preflight.
+            os.link(temporary, target)
+            installed.append(target)
+    except OSError as exc:
+        for target in reversed(installed):
+            target.unlink(missing_ok=True)
+        raise WorkspacePackError(
+            "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+            f"failed to install drama-forge compatibility files: {exc}",
+        ) from exc
+    finally:
+        for temporary, _target in staged:
+            temporary.unlink(missing_ok=True)
+
+
 def pack_workspace_plugins(
     db: sqlite3.Connection,
     *,
@@ -226,6 +325,25 @@ def pack_workspace_plugins(
                 "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
                 f"frozen workspace is missing materialized surfaces: {missing}",
             )
+        has_dream_surface = any(
+            isinstance(surface, dict) and surface.get("name") == "dream"
+            for surface in existing_surfaces
+        )
+        drama_entry = next(
+            (
+                entry
+                for entry in plugins
+                if isinstance(entry, dict)
+                and entry.get("package_spec") == DRAMA_FORGE_PACKAGE_SPEC
+            ),
+            None,
+        )
+        if has_dream_surface and drama_entry is not None:
+            _ensure_dream_drama_compatibility(
+                workspace,
+                workspace / str(drama_entry.get("relative_path") or ""),
+                allow_install=False,
+            )
         receipt.update(
             {
                 "packed_at": existing_manifest.get("written_at"),
@@ -259,6 +377,7 @@ def pack_workspace_plugins(
     merged_surfaces: list[workspace_init.SurfaceSpec] = []
     surface_names_seen: set[str] = set()
     warnings: list[dict[str, Any]] = []
+    drama_packed_plugin: Path | None = None
     for ref in refs:
         if ref["installation_status"] != "ready":
             raise WorkspacePackError(
@@ -274,6 +393,8 @@ def pack_workspace_plugins(
         )
         destination = workspace / PLUGIN_SLOTS_RELATIVE_DIR / packed_name
         artifact_store.copy_into_workspace(artifact, destination)
+        if ref["package_spec"] == DRAMA_FORGE_PACKAGE_SPEC:
+            drama_packed_plugin = destination
         try:
             profile = workspace_init.load_init_profile(destination)
             if profile is not None:
@@ -319,6 +440,14 @@ def pack_workspace_plugins(
                 "verified": True,
             }
         )
+    has_dream_surface = any(spec.name == "dream" for spec in merged_surfaces)
+    if has_dream_surface and drama_packed_plugin is not None:
+        _ensure_dream_drama_compatibility(
+            workspace,
+            drama_packed_plugin,
+            allow_install=True,
+        )
+
     # Materialize protocol directories once, after every artifact has been
     # copied and init has run — workspace.json needs the full plugin list
     # (design_004 §3.4.4; audit A1/A4).  Any failure fails the whole pack.

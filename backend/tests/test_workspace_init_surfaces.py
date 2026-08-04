@@ -307,6 +307,20 @@ def _write_surface_plugin(root: Path, *, with_surfaces: bool = True) -> Path:
     return root
 
 
+def _write_drama_forge_compatibility_sources(root: Path) -> dict[str, bytes]:
+    """Add the consumer-workspace files required by drama-forge preflight."""
+    fixtures = {
+        ".claude-plugin/plugin.json": b'{"name":"drama-forge"}\n',
+        ".claude/docs/templates/project-init.md": b"# Drama project init\n",
+        ".claude/hooks/hooks.json": b'{"hooks":{}}\n',
+    }
+    for relative_path, content in fixtures.items():
+        target = root / relative_path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(content)
+    return fixtures
+
+
 class PackerSurfacesIntegrationTests(unittest.TestCase):
     """pack_workspace_plugins: .dream materialization + manifest/receipt surfaces."""
 
@@ -398,6 +412,8 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
             Path(self._tmp.name) / f"src-{installation_id}",
             with_surfaces=with_surfaces,
         )
+        if package_spec == "drama-forge@drama-studio":
+            _write_drama_forge_compatibility_sources(source)
         artifact = import_tree(
             source,
             package_name=package_name,
@@ -596,6 +612,36 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         ).fetchone()[0]
         self.assertEqual(adapter_refs, 0)
 
+    def test_dream_pack_installs_drama_forge_consumer_compatibility_files(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-drama-compat"
+        workspace.mkdir()
+
+        pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+        )
+
+        expected = {
+            "plugin.json": b'{"name":"drama-forge"}\n',
+            ".claude/docs/templates/project-init.md": b"# Drama project init\n",
+            ".claude/hooks/hooks.json": b'{"hooks":{}}\n',
+        }
+        for relative_path, content in expected.items():
+            with self.subTest(relative_path=relative_path):
+                self.assertEqual((workspace / relative_path).read_bytes(), content)
+
     def test_server_adapter_is_opt_in_for_normal_chat_pack(self) -> None:
         self._register_named_plugin(
             "cpi-drama",
@@ -622,6 +668,37 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         )
         self.assertNotIn("surfaces", receipt)
         self.assertFalse((workspace / ".dream").exists())
+        self.assertFalse((workspace / "plugin.json").exists())
+        self.assertFalse(
+            (workspace / ".claude" / "docs" / "templates" / "project-init.md").exists()
+        )
+        self.assertFalse((workspace / ".claude" / "hooks" / "hooks.json").exists())
+
+    def test_dream_drama_compatibility_conflict_fails_closed(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-drama-conflict"
+        workspace.mkdir()
+        (workspace / "plugin.json").write_bytes(b"user-owned\n")
+
+        with self.assertRaises(WorkspacePackError) as caught:
+            pack_workspace_plugins(
+                self.db,
+                workspace=workspace,
+                deck_id="deck-1",
+                server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+            )
+
+        self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_INIT_PROFILE_INVALID")
+        self.assertEqual((workspace / "plugin.json").read_bytes(), b"user-owned\n")
 
     def test_server_adapter_declarations_are_deduplicated(self) -> None:
         self._register_named_plugin(
@@ -730,6 +807,61 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
             first_manifest,
         )
         self.assertFalse((workspace / ".dream").exists())
+        self.assertFalse((workspace / "plugin.json").exists())
+        self.assertFalse((workspace / ".claude" / "hooks" / "hooks.json").exists())
+
+    def test_frozen_dream_workspace_validates_but_never_repairs_drama_compatibility(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-frozen-drama-compat"
+        workspace.mkdir()
+        pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+        )
+        plugin_json = workspace / "plugin.json"
+        missing_hooks = workspace / ".claude" / "hooks" / "hooks.json"
+        plugin_json.write_bytes(b"changed-after-freeze\n")
+        missing_hooks.unlink()
+
+        with self.assertRaises(WorkspacePackError) as caught:
+            pack_workspace_plugins(
+                self.db,
+                workspace=workspace,
+                deck_id="deck-1",
+                server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+            )
+
+        self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_INIT_PROFILE_INVALID")
+        self.assertEqual(plugin_json.read_bytes(), b"changed-after-freeze\n")
+        self.assertFalse(missing_hooks.exists())
+
+        # Even after the conflicting file is restored, the frozen pack must
+        # report the missing target instead of installing it late.
+        plugin_json.write_bytes(b'{"name":"drama-forge"}\n')
+        with self.assertRaises(WorkspacePackError) as missing_caught:
+            pack_workspace_plugins(
+                self.db,
+                workspace=workspace,
+                deck_id="deck-1",
+                server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+            )
+        self.assertEqual(
+            missing_caught.exception.code,
+            "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+        )
+        self.assertIn("frozen workspace is missing", str(missing_caught.exception))
+        self.assertFalse(missing_hooks.exists())
 
 
 if __name__ == "__main__":
