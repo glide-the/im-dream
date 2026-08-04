@@ -1,7 +1,7 @@
 # design_007：Dream 业务功能模块与四阶段交互设计
 
 > **Design ID**：`design_007_dream-business-module-interaction`
-> **状态**：设计完成，待任务三实现
+> **状态**：主体已实现；初始发起接线与丰富 Outline 结构字段仍按任务三记录为遗留
 > **更新日期**：2026-08-04
 > **唯一调研来源**：[调研Dreem_app平台.pdf](./调研Dreem_app平台.pdf) 第 3～8 页
 > **视觉约束**：[Ink & Memory UI Design v2.pdf](../../prd/Ink%20%26%20Memory%20UI%20Design%20v2.pdf) 第 4～5 页
@@ -94,13 +94,13 @@ flowchart LR
 2. 写人物 canonical 文件，完成后原子写 `stages/characters.json`；
 3. 写场景 canonical 文件，完成后原子写 `stages/scenes.json`；
 4. 写 canonical `stories/<project>/episodes/EP??/storyboard.yaml`，完成后原子写 `stages/storyboards.json`；
-5. 发 `story-workspace-output` SSE，通知 changed stages/revisions。
+5. writer 不直接发布 run-scoped SSE；页面以至少 5 秒 REST 轮询发现 revisions。若既有链路恰好发出携带匹配 `runId` 的 `story-workspace-output`，页面可提前重新读取。
 
 stage 文件不存在表示该模块还在等待 Agent；stage 文件存在且有效表示页面可渲染。不设计额外的 generating/validating/failed 状态。
 
 ### 4.2 页面渲染
 
-**触发**：页面进入 Dream、收到 `story-workspace-output`，或用户主动刷新。
+**触发**：页面进入 Dream、至少 5 秒 REST 轮询、收到携带匹配 `runId` 的兼容 `story-workspace-output`，或用户主动刷新。
 
 **页面动作**：
 
@@ -123,7 +123,7 @@ stage 文件不存在表示该模块还在等待 Agent；stage 文件存在且�
 - 本地字段通过基础格式校验；
 - 确认命令具有幂等键。
 
-**确认结果**：story-workspace 把修改和确认作为隐藏 Chat 消息注入原 thread。没有逐项确认、批量确认、驳回或再次审批。
+**确认结果**：story-workspace 把修改和确认作为唯一隐藏 Chat 消息持久化到原 thread；后台确认协调器透明交付给同一 Agent，页面刷新后也不会要求用户再次提交。没有逐项确认、批量确认、驳回或再次审批。
 
 ### 4.4 同一 Chat Agent 后续执行
 
@@ -146,6 +146,7 @@ sequenceDiagram
     actor Creator as 创作者
     participant Dream as Dream 前端
     participant API as story-workspace API
+    participant RC as 后台确认协调器
     participant Agent as 同一 Chat Agent
     participant FS as 会话工作区
 
@@ -159,7 +160,7 @@ sequenceDiagram
         Agent->>FS: 写人物文件 + characters.json
         Agent->>FS: 写场景文件 + scenes.json
         Agent->>FS: 写 storyboard.yaml + storyboards.json
-        Agent-->>Dream: story-workspace-output(changed stages/revisions)
+        Note over Agent,FS: writer 当前不直接发布 run-scoped SSE
     end
 
     rect rgb(255,250,242)
@@ -176,7 +177,9 @@ sequenceDiagram
         Creator->>Dream: 修改人物 / 场景 / 分镜内容
         Creator->>Dream: 点击“确认并继续”
         Dream->>API: confirmation(edits, base revisions, idempotency key)
-        API->>Agent: 隐藏 Chat 消息注入原 thread
+        API->>API: 隐藏 Chat 消息持久化为 pending
+        API->>RC: 调度同一 message ID
+        RC->>Agent: 隐藏确认交付原 thread
     end
 
     rect rgb(255,250,242)
@@ -185,9 +188,13 @@ sequenceDiagram
         Agent->>FS: 更新 stage revisions
         Agent->>Agent: 继续同一插件后续步骤
         Agent->>FS: 持续写后续 workspace 文件
-        Agent-->>Dream: SSE 通知 revisions 更新
-        Dream->>API: GET dream-files
+        Agent-->>RC: message-final + 非 error 终止帧
+        RC->>API: 持久确认 dispatched
+        Dream->>API: 至少 5 秒轮询 GET dream-files
         API-->>Dream: 最新工作空间内容
+        opt 收到携带匹配 runId 的兼容 story-workspace-output
+            Dream->>API: 立即重新 GET dream-files
+        end
     end
 ```
 
@@ -211,10 +218,12 @@ sequenceDiagram
     end
     Agent->>Canonical: 写 canonical storyboard.yaml
     Agent->>DreamFiles: 原子写 storyboards.json(revision 1)
-    Agent-->>Page: story-workspace-output
-    Page->>API: GET dream-files
+    Page->>API: 页面进入 / 至少 5 秒轮询 GET dream-files
     API->>DreamFiles: 校验并读取三个 stage 文件
     API-->>Page: 对应页面模块与 revisions
+    opt 匹配 runId 的兼容 story-workspace-output
+        Page->>API: 立即重新 GET dream-files
+    end
 ```
 
 ### 5.3 Assets / Outline 业务导航时序
@@ -286,6 +295,10 @@ sequenceDiagram
 - 页面只展示 Chat Agent 继续写入的 workspace 内容和 revision 更新。
 - 本设计到此结束，不定义后续执行后的审批或异常分支。
 
+> **2026-08-04 任务三实现注记**：Assets / Outline、叙事主工作面与聚焦层已落地；
+> 当前 `dream-stage/v1.items` 只提供名称、摘要、关系与来源文件，因此故事线分组、
+> 多镜头结构说明和带时间历史仍是字段级占位，不得把现有通用摘要渲染描述为完整实现。
+
 ## 7. 页面状态
 
 | UI 状态 | 来源 | 页面表现 |
@@ -293,10 +306,12 @@ sequenceDiagram
 | `story-workspace-dream-waiting-files` | required stage 文件未齐 | 等待 Agent；已存在模块可查看 |
 | `story-workspace-dream-editing` | stage 文件已齐，尚未确认 | 可编辑 Dream 内容；显示确认条 |
 | `story-workspace-dream-confirming` | 确认命令提交中 | 禁止重复点击 |
-| `story-workspace-dream-continuing` | 确认已注入原 thread | 显示 Agent 正在继续并刷新 revisions |
+| `story-workspace-dream-continuing` | 确认已持久化，协调器交付或 Agent 继续 | 锁定确认动作并刷新 revisions |
 | `story-workspace-dream-completed` | 插件后续步骤结束 | 只读展示最终工作空间结果 |
 
 不定义 rejected、failed、retrying 或 archived 页面状态。
+
+Dream 路由顶部上下文固定显示“Dream 协作中”，不直接显示底层 `WorkflowRun.status`。协调器未观察到 `message-final` 与非 error 终止帧时，隐藏确认继续保持 pending，并在基础设施内部按 message ID 指数退避自动协调；这不是页面的失败、重试或驳回业务分支。
 
 ## 8. 视觉规范
 
@@ -319,24 +334,25 @@ sequenceDiagram
 - World Builder、人物三视图、计费积分；
 - 移动端、平板端和触控布局；
 - 浏览器直接读写工作区；
-- 把目标时序描述为当前已实现。
+- 把 G1/G3/G6、writer 主动 run-scoped SSE 或丰富 Outline 字段描述为当前已实现。
 
 ## 10. 验收清单
 
-- [ ] PDF 第 3 页的“修改 → 一次确认 → Agent 后续执行”成为唯一主链。
-- [ ] PDF 第 4～7 页的 Assets/Outline、故事线定位、镜头点击和聚焦上下文有对应模块时序。
-- [ ] 四阶段分别写明参与者、文件动作、页面动作和退出条件。
-- [ ] 人物、场景、分镜 canonical 文件完成后，Agent 更新对应 `.dream` stage 文件并使页面出现。
-- [ ] 页面允许用户修改内容，但只有一个“确认并继续”。
-- [ ] 确认命令回到原 Chat thread，由同一 Agent 写入修改并继续。
-- [ ] 后续执行只描述 workspace 持续写入和页面刷新。
-- [ ] 文档没有驳回、失败、重试、归档或第二次确认业务分支。
-- [ ] 执行两层是交互深度，不是固定第三栏或静态双栏。
-- [ ] UI 服从暖纸、轻纸面和无卡片约束。
-- [ ] G1～G3/G5/G6 未被写成已实现。
+- [x] PDF 第 3 页的“修改 → 一次确认 → Agent 后续执行”成为唯一主链。
+- [x] PDF 第 4～7 页的 Assets/Outline、故事线定位、镜头点击和聚焦上下文有对应模块时序。
+- [x] 四阶段分别写明参与者、文件动作、页面动作和退出条件。
+- [x] 人物、场景、分镜 canonical 文件完成后，Agent 更新对应 `.dream` stage 文件并使页面出现。
+- [x] 页面允许用户修改内容，但只有一个“确认并继续”；刷新后不再出现第二次确认。
+- [x] 确认命令回到原 Chat thread，由同一 Agent 写入修改并继续。
+- [x] 后续执行只描述 workspace 持续写入和页面刷新。
+- [x] 文档没有驳回、失败、重试、归档或第二次确认业务分支。
+- [x] 执行两层是交互深度，不是固定第三栏或静态双栏。
+- [x] UI 服从暖纸、轻纸面和无卡片约束。
+- [x] G5 已实现；G1/G3/G6、writer 主动 SSE 与丰富 Outline 字段仍明确为遗留/占位。
 
 ## 11. 变更记录
 
 | 日期 | 内容 |
 |---|---|
 | 2026-08-04 | 最终用户修订：建立 Agent workspace 文件驱动的 Dream 四阶段；用户修改后一次确认，同一 Chat Agent 继续；补主时序、文件写入时序和 Assets/Outline 导航时序；不设计驳回、失败、重试或归档 |
+| 2026-08-04 | 任务三实现校准：持久确认事实恢复单次生命周期；REST 轮询保证更新，匹配 run 的兼容事件仅作加速；Dream 路由与旧审阅面板隔离 |

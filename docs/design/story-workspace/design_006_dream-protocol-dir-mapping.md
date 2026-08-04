@@ -1,7 +1,7 @@
 # design_006：`.dream` 静态启动层与 Agent 运行内容层合同
 
 > **Design ID**：`design_006_dream-protocol-dir-mapping`
-> **状态**：设计修订完成；静态启动层已实现，Agent 运行内容层待实现
+> **状态**：主体已实现；初始 run 生产推进（G1/G3）与 writer 主动 SSE 仍为遗留
 > **更新日期**：2026-08-04
 > **术语 canonical**：[术语表](../../architecture/术语表.md)
 > **业务交互 owner**：[design_007](./design_007_dream-business-module-interaction.md)
@@ -43,6 +43,11 @@
 
 不再引入 host event journal、projection 聚合器、逐项 Review Gate 或 stage failed 状态机。
 
+> **2026-08-04 任务三实现注记**：`StoryWorkspaceDreamFileWriter`、run/stage
+> 合同、actor-scoped REST、受控 MCP 与单次确认已实现。writer 尚不直接发送
+> SSE；前端在 waiting/editing/continuing 使用至少 5 秒轮询保证更新。初始 queued run
+> 的生产推进方和 Dream 发起 UI 接线仍按 G1/G3 记录为遗留，见任务三实施记录。
+
 ### 1.3 与上游事实的关系
 
 drama-forge 上游当前不写 `.dream`。它把人物/场景写入 `assets/`，把分镜唯一源写入 `stories/<project>/episodes/EP??/storyboard.yaml`；内部运行及报告位于 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`。首期兼容方式是在 Ink-Dream 插件说明/adapter 中要求 Agent 在 canonical 分镜 YAML 完成后补写对应 Dream stage 文件；报告路径只能作为可选 `source_files`，不得替代 storyboard 唯一源，也不得声称 vendor 已原生支持 `.dream`。
@@ -55,7 +60,7 @@ drama-forge 上游当前不写 `.dream`。它把人物/场景写入 `assets/`，
 | 当前 Chat Agent | canonical 人物/场景/分镜文件；`.dream/runtime/**` | 插件说明、run context、用户确认修改 |
 | `StoryWorkspaceDreamFileWriter` | 作为 Agent 调用的受控 helper，完成 runtime 路径校验、revision 和原子替换 | 当前 run/stage 文件 |
 | story-workspace 后端 | 不改内容文件；接收“确认并继续”并注入原 Chat thread | 安全读取 run/stage 文件并返回 REST |
-| Dream 前端 | 用户本地编辑草稿；不直接写工作区 | REST + SSE 通知 |
+| Dream 前端 | 用户本地编辑草稿；不直接写工作区 | REST 轮询；匹配 run 的兼容事件可提前触发读取 |
 
 静态启动层只有 packer 可写；Agent 的可写范围严格限定为 `.dream/runtime/**`，不能修改 `README.md` 或 `workspace.json`。
 
@@ -252,16 +257,18 @@ sequenceDiagram
         Chat->>FS: 原子写 scenes.json
         Chat->>FS: 写分镜 canonical 文件
         Chat->>FS: 原子写 storyboards.json
-        Chat-->>API: story-workspace-output(run, changed stages/revisions)
+        Note over Chat,FS: writer 当前不直接发布 run-scoped SSE
     end
 
     rect rgb(255,250,242)
         Note over FE,API: 阶段二：页面渲染
-        API-->>FE: SSE 通知 Dream 文件已更新
-        FE->>API: GET dream-files
+        FE->>API: GET dream-files（进入页面 / 至少 5 秒轮询）
         API->>FS: 校验并读取 run/stages
         FS-->>API: 文件描述与 source refs
         API-->>FE: 人物 / 场景 / 分镜页面数据
+        opt 收到携带匹配 runId 的兼容 story-workspace-output
+            FE->>API: 立即重新 GET dream-files
+        end
     end
 
     rect rgb(246,239,229)
@@ -278,7 +285,8 @@ sequenceDiagram
         Note over Chat,FE: 阶段四：后续执行
         Chat->>Chat: 按同一插件与锁定上下文继续
         Chat->>FS: 持续写后续 workspace 文件与 stage revisions
-        Chat-->>FE: SSE → GET dream-files → 页面刷新
+        FE->>API: 至少 5 秒轮询 GET dream-files
+        API-->>FE: 最新 revisions → 页面刷新
     end
 ```
 
@@ -324,10 +332,12 @@ POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 服务端行为：
 
 1. 校验 actor、thread、run 与 required stage revisions；
-2. 把命令保存为 `metadata.kind="story-workspace-dream-confirmation"` 的隐藏 user 消息；
-3. 同幂等键同内容只注入一次，同键不同内容冲突；
-4. 触发原 thread 的同一 Chat Agent turn；
-5. Agent 先把 edits 写入 canonical 文件并更新 stage revisions，再继续插件后续步骤。
+2. 把命令保存为 `metadata.kind="story-workspace-dream-confirmation"`、`dispatch_status="pending"` 的隐藏 user 消息；
+3. 同 actor+run 只允许这一条确认；同幂等键同内容返回同一结果，换键或同键不同内容均冲突；
+4. 后台确认协调器在提交后与服务启动后周期扫描 pending，按 message ID 进程内去重并把命令交给原 thread 的同一 Chat Agent turn；页面不提供人工恢复入口；
+5. 只有该 turn 依次产生 `message-final` 与非 error `finish`，才把隐藏消息更新为 `dispatch_status="dispatched"`；单独出现 `finishReason="stop"` 不能证明成功，取消、截断、异常或进程退出前未完成确认时继续保持 pending；
+6. 未成功消费的 message ID 按 2 秒起、最大 60 秒的指数退避自动协调；成功后清除退避状态，服务重启仍从持久 pending 恢复；
+7. Agent 先把 edits 写入 canonical 文件并更新 stage revisions，再继续插件后续步骤。
 
 不建立逐项 review_status，不提供驳回、失败、重试或归档命令。
 
@@ -354,15 +364,16 @@ POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 
 后端合同只归 `backend/story_workspace/contracts.py`，前端局部合同只归 `frontend/src/hooks/story-workspace/contracts.ts`；`backend/database.py` 只读、零 DDL。
 
-### 8.3 SSE
+### 8.3 revision 发现与兼容事件
 
-Agent 每次原子写完 run/stage 文件后，复用 `story-workspace-output` 生命周期帧携带 `{runId, changedStages, revisions}`。前端收到后只使 `dream-files` query 失效并重新 GET；SSE payload 不承载全文。
+REST `dream-files` 是页面真相源。页面在 waiting、editing、continuing 阶段至少每 5 秒重新 GET；writer 当前不直接发布 run-scoped SSE。若既有链路发出携带匹配 `runId` 的 `story-workspace-output`，前端可以把它作为加速信号立即重新 GET，但事件 payload 不承载全文、没有 `runId` 的旧事件也不得刷新当前 Dream run。writer 主动 run-scoped SSE 保留为遗留，不作为首期正确性的前提。
 
 ## 9. 写入一致性与并发边界
 
 - `StoryWorkspaceDreamFileWriter` 只接受当前 run 目录与固定 stage 文件名。
 - 每次写入先校验 expected revision，再写同目录临时文件、flush/fsync、`os.replace`。
-- 同一 Chat thread 同时只允许一个会修改当前 Dream run 的 Agent turn；确认命令使用幂等键防止重复 continuation。
+- 同一 Chat thread 同时只允许一个会修改当前 Dream run 的 Agent turn；同 actor+run 只有一条隐藏确认，协调器对同 message ID 进程内去重。
+- 隐藏确认是零 DDL 的 durable work item：观察到 `message-final` 与非 error 终止帧后才确认 dispatched；未成功消费按 message ID 指数退避。若 Agent 已完成、SQLite 确认前进程退出，同一 message ID 可能再次交付，因此提供 at-least-once 而非 exactly-once。Agent 的 canonical 写入与 stage CAS 必须吸收重复交付。
 - 不同 stage 可并行准备 canonical 文件，最终替换各自独立 JSON；同一 stage revision 必须串行。
 - 不允许 append JSON，不允许绝对路径、`..`、symlink 逃逸或跨 run 写入。
 - 临时写未完成时保留上一有效 revision；页面继续显示上一版或等待该 stage 文件出现，不新增业务失败页面。
@@ -390,22 +401,22 @@ Agent 每次原子写完 run/stage 文件后，复用 `story-workspace-output` �
 - 视频、上传、播放器、外部模型选择和复杂画布；
 - 移动端、平板端、触控适配；
 - 修改 `backend/database.py` 或新增 DDL；
-- 把 G1～G3/G5/G6 写成已实现。
+- 把 G1/G3/G6 写成已实现。
 
 ## 12. 验收清单
 
-- [ ] 静态 `workspace.json` 保持 `dream-surface/v1` 与冻结语义。
-- [ ] Agent 只可写 `.dream/runtime/**`，不能修改静态启动层。
-- [ ] `run.json` 包含 run/source 字段、`projection_entry` 与 required stages。
-- [ ] 人物、场景、分镜 canonical 文件完成后才出现对应 stage 文件。
-- [ ] stage 文件存在即页面可渲染，不设计驳回或失败状态机。
-- [ ] 页面允许用户修改内容，并且只有一次“确认并继续”。
-- [ ] 确认命令注入原 Chat thread；同一 Chat Agent 写入修改后继续后续执行。
-- [ ] 后续执行只描述持续写工作区与页面刷新，不包含驳回、失败、重试或归档。
-- [ ] 前端经 actor-scoped REST 读取，SSE 只通知刷新，不直读文件。
-- [ ] revision、幂等、原子替换、路径 containment 与静态冻结边界明确。
-- [ ] G1～G3/G5/G6 仍标为待实现。
-- [ ] 文中只使用“物理映射”，不使用禁用同义词。
+- [x] 静态 `workspace.json` 保持 `dream-surface/v1` 与冻结语义。
+- [x] Agent 只可经受控工具写 `.dream/runtime/**`，不能修改静态启动层；通用文件工具和 Bash 写入均 fail-closed。
+- [x] `run.json` 包含 run/source 字段、`projection_entry` 与 required stages。
+- [x] 人物、场景、分镜 canonical 文件完成后才出现对应 stage 文件。
+- [x] stage 文件存在即页面可渲染，不设计驳回或失败状态机。
+- [x] 页面允许用户修改内容，并且只有一次“确认并继续”；刷新后由持久确认事实恢复只读继续态。
+- [x] 确认命令注入原 Chat thread；同一 Chat Agent 写入修改后继续后续执行。
+- [x] 后续执行只描述持续写工作区与页面刷新，不包含驳回、失败、重试或归档。
+- [x] 前端经 actor-scoped REST 读取，并以至少 5 秒轮询保证刷新；匹配 run 的兼容事件只用于提前读取。
+- [x] revision、幂等、原子替换、路径 containment 与静态冻结边界明确。
+- [x] G5 已实现；G1/G3/G6 仍标为遗留。
+- [x] 文中只使用“物理映射”，不使用禁用同义词。
 
 ## 13. 变更记录
 
@@ -414,3 +425,4 @@ Agent 每次原子写完 run/stage 文件后，复用 `story-workspace-output` �
 | 2026-08-04 | 初版：只设计静态 `.dream` |
 | 2026-08-04 | 首轮审阅修订：形成分层方案中间稿，后按用户反馈废止 |
 | 2026-08-04 | 最终用户修订：改为同一 Chat Agent 通过工作空间写 run/stage 文件；用户只修改并一次确认，确认后 Agent 继续；删除驳回、失败、重试和归档设计 |
+| 2026-08-04 | 任务三实现校准：REST 轮询成为 revision 发现保证；匹配 run 的兼容事件仅作加速；补持久确认/派发恢复与通用 Bash 写保护 |

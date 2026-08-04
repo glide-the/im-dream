@@ -102,7 +102,7 @@ Dreem 的黑底画布、橙色按钮、视频和卡片堆叠不作为视觉规�
 - 人物 canonical 文件：插件声明的 `assets/characters/*.md` 等路径；
 - 场景 canonical 文件：插件声明的 `assets/scenes/*.md` 等路径；
 - 分镜 canonical 文件：`stories/<project>/episodes/EP??/storyboard.yaml`；`.dramaforge/runs/<internal_run_id>/{artifacts,reports}/` 只作为可选来源引用；
-- `.dream/runtime/stages/*.json`：页面索引、摘要、source files 与 revision，不复制全文或二进制。
+- `.dream/runtime/runs/<workflow_run_id>/stages/*.json`：页面索引、摘要、source files 与 revision，不复制全文或二进制。
 
 `.dream/workspace.json` 继续只含 deck、plugins、entry route。run/source 字段和 `projection_entry` 只进入运行层 `run.json`。
 
@@ -210,7 +210,7 @@ stage：`storyboards.json`。
 3. 写人物 canonical 文件后原子写 `characters.json`；
 4. 写场景 canonical 文件后原子写 `scenes.json`；
 5. 写分镜 canonical 文件后原子写 `storyboards.json`；
-6. 发 `story-workspace-output`，携带 changed stages/revisions。
+6. writer 当前不直接发布 run-scoped SSE；页面以至少 5 秒 REST 轮询发现 revisions。若收到携带匹配 `runId` 的兼容 `story-workspace-output`，可提前重新读取。
 
 stage 文件不存在表示等待 Agent；存在且 schema 有效表示该模块可渲染。
 
@@ -227,7 +227,8 @@ stage 文件不存在表示等待 Agent；存在且 schema 有效表示该模块
 2. base revisions 未变化；
 3. 用户点击一次“确认并继续”；
 4. 页面提交 `StoryWorkspaceDreamConfirmationCommand`，包含 edits、base revisions 与幂等键；
-5. 服务端把命令作为 `metadata.kind="story-workspace-dream-confirmation"` 的隐藏 user 消息注入原 thread。
+5. 服务端把命令作为 `metadata.kind="story-workspace-dream-confirmation"` 的唯一隐藏 user 消息持久化到原 thread，初始 `dispatch_status="pending"`；
+6. 后台确认协调器在提交后及服务启动后的周期扫描中透明交付 pending 命令；只有同一 Chat Agent turn 依次产生 `message-final` 与非 error 终止帧才持久确认为 dispatched；取消、截断或异常保持 pending，并按 message ID 指数退避后自动协调，页面不提供人工恢复入口。
 
 不建立逐项 review_status。
 
@@ -237,7 +238,7 @@ stage 文件不存在表示等待 Agent；存在且 schema 有效表示该模块
 2. 写入用户修改的 canonical 文件；
 3. 更新受影响 stage revisions；
 4. 按同一 Deck 插件、runtime snapshot 和 plugin lock 继续；
-5. 后续文件写入继续触发 SSE → GET `dream-files` → 页面刷新。
+5. 后续文件写入由至少 5 秒轮询 GET `dream-files` 发现并刷新；匹配 run 的兼容事件可提前触发读取。
 
 后续执行到此为止，不附加审批或异常业务分支。
 
@@ -282,11 +283,11 @@ POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 }
 ```
 
-同幂等键同内容只注入一次；同键不同内容返回冲突。Chat 视图按 metadata kind 过滤，不在普通消息气泡中显示。
+同 actor+run 只允许一次确认；同幂等键同内容返回同一结果，换键或同键不同内容返回冲突。Chat 视图按 metadata kind 过滤，不在普通消息气泡中显示。隐藏消息同时是零 DDL 的 durable work item：取消、截断、异常或进程退出时保持 pending，并由后台按 message ID 指数退避协调；只有 `message-final` 与非 error 终止帧同时出现才确认 dispatched。Agent 已完成、SQLite 确认前退出可能重复交付同一 message ID，因此语义为 at-least-once，不承诺 exactly-once。
 
-### 9.3 SSE
+### 9.3 revision 发现与兼容事件
 
-复用 `story-workspace-output`，增加 `{runId, changedStages, revisions}`。SSE 只通知刷新，页面重新 GET `dream-files`；不在事件中传全文。
+REST `dream-files` 是运行内容真相源。waiting、editing、continuing 页面至少每 5 秒轮询；writer 主动 run-scoped SSE 仍是遗留。既有链路若发出带匹配 `runId` 的兼容 `story-workspace-output`，只作为立即重新 GET 的加速信号，不在事件中传全文；无 `runId` 或 run 不匹配的事件不得刷新当前 Dream。
 
 ## 10. 页面状态
 
@@ -299,6 +300,8 @@ POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 | `story-workspace-dream-completed` | 插件后续步骤结束 | 只读展示最终结果 |
 
 不定义 rejected、failed、retrying 或 archived 页面状态。
+
+Dream 路由的工作流上下文固定投影为 `story_workspace_dream`，显示“Dream 协作中”；底层 `WorkflowRun.status` 不进入 Dream 页面，因此既有 rejected、failed、cancelled 标签和 cancel/retry/review 动作不会成为 Dream 业务交互。非 Dream 页面继续保留原有状态语义。
 
 ## 11. 文件一致性与安全
 
@@ -315,44 +318,46 @@ POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 
 ### 12.1 功能
 
-- [ ] Dream 从 Chat Agent workspace 文件渲染，不依赖第二份内容数据库。
-- [ ] `run.json` 包含 run/source 字段、`projection_entry` 与 required stages。
-- [ ] 人物、场景、分镜 canonical 文件完成后，Agent 原子写对应 stage 描述。
-- [ ] 页面按 stage 文件出现人物、场景和 Outline/分镜模块。
-- [ ] 用户可以修改内容，但只有一次“确认并继续”。
-- [ ] 确认命令注入发起 Dream 的原 thread。
-- [ ] 同一 Chat Agent 先写入用户修改，再继续后续插件步骤。
-- [ ] 后续执行只展示 workspace 持续更新，不出现驳回、失败、重试、归档或第二次确认。
-- [ ] 浏览器不直接访问工作空间文件。
-- [ ] G1～G3/G5/G6 未被描述为已实现。
+- [x] Dream 从 Chat Agent workspace 文件渲染，不依赖第二份内容数据库。
+- [x] `run.json` 包含 run/source 字段、`projection_entry` 与 required stages。
+- [x] 人物、场景、分镜 canonical 文件完成后，Agent 原子写对应 stage 描述。
+- [x] 页面按 stage 文件出现人物、场景和 Outline/分镜模块。
+- [x] 用户可以修改内容，但只有一次“确认并继续”。
+- [x] 确认命令注入发起 Dream 的原 thread。
+- [x] 同一 Chat Agent 先写入用户修改，再继续后续插件步骤。
+- [x] 后续执行只展示 workspace 持续更新，不出现驳回、失败、重试、归档或第二次确认。
+- [x] 浏览器不直接访问工作空间文件。
+- [x] G1/G3/G6 继续被明确描述为遗留；G5 已实现。
 
 ### 12.2 视觉与布局
 
-- [ ] 产出/修改阶段三栏与后续执行两层交互职责分离。
-- [ ] 执行“两层”不实现为固定第三栏或静态双栏。
-- [ ] 对齐 PDF 第 3 页一次确认、第 4～7 页 Assets/Outline 和聚焦上下文动线。
-- [ ] 使用 Warm Canvas / Paper Cream、轻纸面和无卡片规则。
-- [ ] 不实现视频、上传、播放器或可编辑画布。
+- [x] 产出/修改阶段三栏与后续执行两层交互职责分离。
+- [x] 执行“两层”不实现为固定第三栏或静态双栏。
+- [x] 对齐 PDF 第 3 页一次确认、第 4～7 页 Assets/Outline 和聚焦上下文动线。
+- [x] 使用 Warm Canvas / Paper Cream、轻纸面和无卡片规则。
+- [x] 不实现视频、上传、播放器或可编辑画布。
 
 ### 12.3 合同与工程边界
 
-- [ ] 后端合同只归 `backend/story_workspace/contracts.py`。
-- [ ] 前端局部合同只归 `frontend/src/hooks/story-workspace/contracts.ts`。
-- [ ] 新符号统一 `StoryWorkspace*` 前缀。
-- [ ] `backend/database.py` 只读、无 DDL。
-- [ ] stage writer 覆盖 revision、原子替换、路径 containment 和静态层保护测试。
+- [x] 后端业务与 Agent-visible MCP 输入合同只归 `backend/story_workspace/contracts.py`。
+- [x] 前端局部合同只归 `frontend/src/hooks/story-workspace/contracts.ts`。
+- [x] 新符号统一 `StoryWorkspace*` 前缀。
+- [x] `backend/database.py` 只读、无 DDL。
+- [x] stage writer 覆盖 revision、原子替换、路径 containment 和静态层保护测试。
 
 ## 13. 代码现状诚实边界
 
-截至 `design_005` 记录的现状：
+任务三后的现状：
 
 - G1：queued 后无生产推进方；
-- G2：既有逐项 confirm 不驱动 run；目标改为 Dream confirmation 注入原 Chat thread；
+- G2：Dream confirmation 已注入原 Chat thread 并排队同一 Agent 续跑；
 - G3：preflight/run 无 Dream UI 接线；
-- G5：没有 `dream-files` REST；
+- G5：actor-scoped `dream-files` REST 已实现；
 - G6：入口聚合端点缺位，默认隐藏。
 
-因此本 PRD 是目标设计，不代表 runtime stage 文件、一次确认或 Agent continuation 已实现。
+runtime stage 文件、一次确认和确认后的 Agent continuation 已实现；G1/G3 的初始
+run 发起/推进接线与 G6 聚合端点仍是遗留。Outline 丰富结构字段与 writer 主动 SSE
+按任务三实施记录保留为占位/降级，不宣称完整实现。
 
 ## 14. 决策记录
 
@@ -401,4 +406,4 @@ POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 4. 对照 `design_006` 验证静态层、run/stage schema、Agent 写入时点和 revision。
 5. 对照 `design_007` 验证四阶段主时序、文件写入时序和业务导航时序。
 6. 检索确认当前业务章节没有逐项确认、驳回、失败、重试或归档流程。
-7. 确认 G1～G3/G5/G6 仍标为目标缺口。
+7. 确认 G5 已实现，G1/G3/G6 仍标为目标缺口；writer 主动 SSE 与丰富 Outline 字段仍为遗留/占位。
