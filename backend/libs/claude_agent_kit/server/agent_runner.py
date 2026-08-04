@@ -2628,6 +2628,18 @@ class ClaudeAgentRunner:
                 # Raw message callback
                 await _call(callbacks.on_message, message)
 
+                # The SDK can report terminal protocol failures as an
+                # AssistantMessage.error without raising from query_stream.
+                # Treat that typed error exactly like a raised SDK failure so
+                # the existing on_error -> SSE error channel is preserved.
+                if isinstance(message, AssistantMessage):
+                    assistant_error = getattr(message, "error", None)
+                    if assistant_error:
+                        raise RuntimeError(
+                            "Claude SDK AssistantMessage error: "
+                            f"{str(assistant_error).strip() or 'unknown'}"
+                        )
+
                 # Route to typed handler
                 await self._process_message(
                     message=message,

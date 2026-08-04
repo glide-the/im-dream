@@ -724,6 +724,32 @@ class TestSandboxFailureHintHelper(unittest.TestCase):
 class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
     """Errors from the SDK are caught and reported via on_error."""
 
+    async def test_assistant_message_error_sets_success_false(self):
+        assistant_error = AssistantMessage([])
+        assistant_error.error = "authentication_failed"
+        self.set_query([assistant_error])
+        runner = self.make_runner()
+        errors: list[Exception] = []
+
+        with self.assertLogs(agent_runner_module.logger, level="ERROR"):
+            result = await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="assistant-error-001",
+                    user_message="authenticate",
+                    tool_choice="none",
+                ),
+                callbacks=AgentStreamingCallbacks(
+                    on_text_delta=lambda _delta: None,
+                    on_error=lambda error: errors.append(error),
+                ),
+            )
+
+        self.assertFalse(result.success)
+        self.assertIsNotNone(result.error)
+        self.assertIn("authentication_failed", str(result.error))
+        self.assertEqual(errors, [result.error])
+        self.assertEqual(result.full_text, "")
+
     async def test_sdk_error_sets_success_false(self):
         boom = RuntimeError("sdk exploded")
         runner = _runner_with_error_query(boom)
