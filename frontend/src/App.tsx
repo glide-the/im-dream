@@ -1483,19 +1483,6 @@ export default function App() {
         }}>
           <StoryWorkspaceRouter
             onOpenSettings={handleStoryWorkspaceOpenSettings}
-            dreamContent={(
-              <ChatView
-                editorState={state ? (state as unknown as Record<string, unknown>) : null}
-                onEditorWriteConfirmed={handleEditorWriteConfirmed}
-                requestedThreadId={requestedChatThreadId}
-                requestedDeckId={requestedChatDeck?.deckId}
-                requestedDeckNonce={requestedChatDeck?.nonce}
-                activeVoice={activeChatVoice}
-                isMobile={isMobile}
-                landingTab="history"
-                onOpenConnectorSettings={openConnectorSettings}
-              />
-            )}
           />
         </div>
       )}

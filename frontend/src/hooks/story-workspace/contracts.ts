@@ -101,10 +101,26 @@ export interface StoryWorkspacePluginLoadReceiptResponse {
 }
 
 /* --------------------------------------------------------------------------
- * Dream file + single-confirmation contracts (design_006 §4/§7, DEC-026).
+ * Dream launch + file + single-confirmation contracts (design_006 §4/§7,
+ * DEC-026). The launch command is the complete client-authored surface;
+ * thread/run provenance is returned by the server and cannot be supplied by
+ * the browser.
  * State-only hydration models stay in the pure Dream seam; the command sent
  * to POST .../dream-confirmation is owned here and nowhere else.
  * ------------------------------------------------------------------------ */
+
+/** Request body of POST /api/story-workspace/dream-runs/start. */
+export interface StoryWorkspaceDreamLaunchCommand {
+  readonly deckId: string;
+  readonly goal: string;
+  readonly idempotencyKey: string;
+}
+
+/** Trusted identifiers returned after the server creates and dispatches a Dream run. */
+export interface StoryWorkspaceDreamLaunchAccepted {
+  readonly workflowRunId: string;
+  readonly threadId: string;
+}
 
 export type StoryWorkspaceDreamStage = 'characters' | 'scenes' | 'storyboards';
 

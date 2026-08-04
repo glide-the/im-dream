@@ -1,5 +1,5 @@
-// [Input] Optional run deep link plus the app's existing Chat composition.
-// [Output] Workspace-file-driven Dream editor or the no-run Chat launch surface.
+// [Input] Optional run deep link plus the dedicated Dream launch module.
+// [Output] Workspace-file-driven Dream editor or the no-run Dream start surface.
 // [Pos] Canonical /story-workspace/dream business page (Task 3 F4)
 // [Sync] 2026-08-04: implement Agent files -> render -> edit/one confirm -> continue.
 
@@ -8,7 +8,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  type ReactNode,
 } from 'react';
 import {
   storyWorkspaceAcceptDreamConfirmation,
@@ -38,6 +37,7 @@ import {
   storyWorkspaceDreamLifecycleFromPersistence,
   storyWorkspaceDreamPersistenceNotice,
 } from './dreamViewModel';
+import { StoryWorkspaceDreamLaunch } from './StoryWorkspaceDreamLaunch';
 import './StoryWorkspaceDreamPage.css';
 
 const STAGE_LABELS: Record<StoryWorkspaceDreamStage, {
@@ -53,7 +53,6 @@ const STAGE_LABELS: Record<StoryWorkspaceDreamStage, {
 type DreamSelection = { stage: StoryWorkspaceDreamStage; entityId: string };
 
 export interface StoryWorkspaceDreamPageProps {
-  children: ReactNode;
   initialStage?: StoryWorkspaceDreamStage;
   runId?: string | null;
   onNavigate?: (path: string) => void;
@@ -95,7 +94,6 @@ function revisionLine(state: StoryWorkspaceDreamState | null): string {
 }
 
 export function StoryWorkspaceDreamPage({
-  children,
   initialStage = 'characters',
   runId,
   onNavigate,
@@ -273,16 +271,7 @@ export function StoryWorkspaceDreamPage({
   }, [confirmation, dreamState, files]);
 
   if (!runId) {
-    return (
-      <section className="story-workspace-dream-launch" aria-labelledby="dream-launch-title">
-        <header className="story-workspace-dream-launch__header">
-          <p>Dream · Agent workspace</p>
-          <h1 id="dream-launch-title">从一次对话开始创作</h1>
-          <span>在 Chat 中描述故事目标。绑定运行后，人物、场景与分镜会从工作空间逐步出现在这里。</span>
-        </header>
-        <div className="story-workspace-dream-launch__chat">{children}</div>
-      </section>
-    );
+    return <StoryWorkspaceDreamLaunch onNavigate={onNavigate} />;
   }
 
   const canConfirm = Boolean(

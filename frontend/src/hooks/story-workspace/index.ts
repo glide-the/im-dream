@@ -3,6 +3,16 @@ export { useCharacters } from './useCharacters';
 export { useScenes } from './useScenes';
 export { useWorkspaceSurfaces } from './useWorkspaceSurfaces';
 export {
+  createStoryWorkspaceDreamLauncher,
+  storyWorkspaceDreamRunPath,
+  storyWorkspaceNewDreamLaunchIdempotencyKey,
+  useStoryWorkspaceDreamLaunch,
+} from './useStoryWorkspaceDreamLaunch';
+export type {
+  StoryWorkspaceDreamLaunchState,
+  StoryWorkspaceDreamLauncher,
+} from './useStoryWorkspaceDreamLaunch';
+export {
   storyWorkspaceDreamFilesEndpoint,
   storyWorkspaceFetchDreamFiles,
   storyWorkspaceParseDreamFiles,
@@ -51,6 +61,8 @@ export type {
   StoryWorkspaceDreamConfirmationCommand,
   StoryWorkspaceDreamConfirmationAccepted,
   StoryWorkspaceDreamConfirmationEdit,
+  StoryWorkspaceDreamLaunchAccepted,
+  StoryWorkspaceDreamLaunchCommand,
   StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
   StoryWorkspaceDreamLifecycleState,

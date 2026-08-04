@@ -14,7 +14,7 @@
 //                    story_workspace_dream context state; raw WorkflowRun
 //                    statuses never reach WorkflowContextBar.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
 import {
   StoryWorkspaceReviewDetail,
@@ -98,7 +98,6 @@ function splitStoryWorkspaceHref(href: string): { pathname: string; search: stri
 
 function renderStoryWorkspaceRoute(
   match: StoryWorkspaceRouteMatch,
-  dreamContent: ReactNode,
   onReview: (selection: StoryWorkspaceReviewSelection) => void,
   refreshNonce: number,
   onNavigate: (path: string, notice?: string) => void,
@@ -115,9 +114,7 @@ function renderStoryWorkspaceRoute(
             initialStage={dreamStage}
             onNavigate={onNavigate}
             runId={runId}
-          >
-            {dreamContent}
-          </StoryWorkspaceDreamPage>
+          />
         );
       }
       return <StoryWorkspaceCharactersPage onReview={(character) => onReview({ resourceType: 'character', resourceId: character.id })} refreshNonce={refreshNonce} />;
@@ -128,9 +125,7 @@ function renderStoryWorkspaceRoute(
             initialStage={dreamStage}
             onNavigate={onNavigate}
             runId={runId}
-          >
-            {dreamContent}
-          </StoryWorkspaceDreamPage>
+          />
         );
       }
       return <StoryWorkspaceScenesPage onReview={(scene) => onReview({ resourceType: 'scene', resourceId: scene.id })} refreshNonce={refreshNonce} />;
@@ -149,19 +144,16 @@ function renderStoryWorkspaceRoute(
         <StoryWorkspaceDreamPage
           onNavigate={onNavigate}
           runId={runId}
-        >
-          {dreamContent}
-        </StoryWorkspaceDreamPage>
+        />
       );
   }
 }
 
 export interface StoryWorkspaceRouterProps {
   onOpenSettings: () => void;
-  dreamContent: ReactNode;
 }
 
-export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWorkspaceRouterProps) {
+export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterProps) {
   const [activeMatch, setActiveMatch] = useState<StoryWorkspaceRouteMatch>(
     () => resolveStoryWorkspacePath(window.location.pathname, window.location.search) ?? DEFAULT_MATCH,
   );
@@ -298,7 +290,6 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
       )}
       {renderStoryWorkspaceRoute(
         activeMatch,
-        dreamContent,
         handleOpenReview,
         resourceRefreshNonce,
         handleNavigate,

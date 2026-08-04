@@ -3,6 +3,10 @@
 // [Pos] Story Workspace workflow API client; it never derives authoritative workflow state locally.
 import { getAuthToken } from '../contexts/AuthContext';
 import { apiUrl } from '../lib/apiBase';
+import type {
+  StoryWorkspaceDreamLaunchAccepted,
+  StoryWorkspaceDreamLaunchCommand,
+} from '../hooks/story-workspace/contracts';
 
 export const PREFLIGHT_CHECK_ORDER = [
   'identity_workspace_permission',
@@ -158,6 +162,16 @@ interface ApiErrorBody {
   message?: string;
 }
 
+export const storyWorkspaceDreamLaunchEndpoint = '/api/story-workspace/dream-runs/start';
+
+export interface StoryWorkspaceDreamLaunchRequestOptions {
+  fetchImpl?: typeof fetch;
+  token?: string | null;
+  signal?: AbortSignal;
+  /** Full runtime URL override; the pure transport otherwise uses the relative path. */
+  endpoint?: string;
+}
+
 export class StoryWorkspaceApiError extends Error {
   readonly errorCode: string | null;
   readonly status: number;
@@ -176,6 +190,94 @@ function authHeaders(hasBody: boolean): Headers {
   if (token) headers.set('Authorization', `Bearer ${token}`);
   if (hasBody) headers.set('Content-Type', 'application/json');
   return headers;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function requiredLaunchString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Dream launch response has invalid ${field}.`);
+  }
+  return value;
+}
+
+function readCompatibleLaunchField(
+  value: Record<string, unknown>,
+  canonical: string,
+  legacy: string,
+): unknown {
+  const canonicalValue = value[canonical];
+  const legacyValue = value[legacy];
+  if (
+    canonicalValue !== undefined
+    && legacyValue !== undefined
+    && canonicalValue !== legacyValue
+  ) {
+    throw new Error(`Dream launch response has conflicting ${canonical}.`);
+  }
+  return canonicalValue ?? legacyValue;
+}
+
+/** Validate the canonical camelCase response; snake_case is migration-only input. */
+export function storyWorkspaceParseDreamLaunchAccepted(
+  value: unknown,
+): StoryWorkspaceDreamLaunchAccepted {
+  if (!isRecord(value)) throw new Error('Dream launch response must be an object.');
+  const workflowRunId = requiredLaunchString(
+    readCompatibleLaunchField(value, 'workflowRunId', 'workflow_run_id'),
+    'workflowRunId',
+  );
+  if (!/^run_[0-9a-f]{32}$/.test(workflowRunId)) {
+    throw new Error('Dream launch response has invalid workflowRunId.');
+  }
+  return {
+    workflowRunId,
+    threadId: requiredLaunchString(
+      readCompatibleLaunchField(value, 'threadId', 'thread_id'),
+      'threadId',
+    ),
+  };
+}
+
+/** Start one Dream run through the dedicated Story Workspace boundary. */
+export async function storyWorkspaceStartDreamRun(
+  input: StoryWorkspaceDreamLaunchCommand,
+  options: StoryWorkspaceDreamLaunchRequestOptions = {},
+): Promise<StoryWorkspaceDreamLaunchAccepted> {
+  const headers = new Headers({
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  });
+  const token = options.token === undefined ? getAuthToken() : options.token;
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await (options.fetchImpl ?? fetch)(
+    options.endpoint ?? apiUrl(storyWorkspaceDreamLaunchEndpoint),
+    {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: JSON.stringify(input),
+      signal: options.signal ?? null,
+    },
+  );
+  if (response.status !== 201) {
+    let body: ApiErrorBody = {};
+    try {
+      body = await response.json() as ApiErrorBody;
+    } catch {
+      // Keep the launch page on a stable, non-sensitive technical message.
+    }
+    throw new StoryWorkspaceApiError(response.status, body.error_code ?? null);
+  }
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    throw new Error('Dream launch response is not valid JSON.');
+  }
+  return storyWorkspaceParseDreamLaunchAccepted(payload);
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

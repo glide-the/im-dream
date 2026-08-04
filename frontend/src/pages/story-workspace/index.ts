@@ -4,6 +4,7 @@ export {
   type StoryWorkspaceDashboardPageProps,
 } from './StoryWorkspaceDashboardPage';
 export { StoryWorkspaceDreamPage } from './StoryWorkspaceDreamPage';
+export { StoryWorkspaceDreamLaunch } from './StoryWorkspaceDreamLaunch';
 export {
   StoryWorkspaceExecutionPage,
   type StoryWorkspaceExecutionPageProps,
