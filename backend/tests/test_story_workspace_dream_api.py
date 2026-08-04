@@ -278,6 +278,139 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         )
         self.assertNotIn("/private/workspace", response.text)
 
+    def test_jwt_without_workspace_never_creates_one_for_dream_get(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            old_db_path = database.DB_PATH
+            database.DB_PATH = Path(temporary_directory) / "read-only-route.db"
+            try:
+                db = database.get_db()
+                db.execute(
+                    """
+                    CREATE TABLE story_workspace_workspaces (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        owner_id INTEGER NOT NULL,
+                        settings TEXT NOT NULL DEFAULT '{}',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                db.commit()
+                db.close()
+
+                app = FastAPI()
+                gateway = _RecordingGateway(waiting_response())
+                app.dependency_overrides[story_workspace.get_current_user] = lambda: {
+                    "user_id": int(ACTOR_ID),
+                    "email": "writer@example.com",
+                }
+                app.dependency_overrides[
+                    story_workspace.get_story_workflow_gateway
+                ] = lambda: gateway
+                app.include_router(story_workspace.router)
+
+                creator = story_workspace.get_or_create_default_workspace
+                with (
+                    patch.object(
+                        story_workspace,
+                        "get_or_create_default_workspace",
+                        wraps=creator,
+                    ) as create_workspace,
+                    TestClient(app) as client,
+                ):
+                    response = client.get(
+                        f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-files"
+                    )
+
+                db = database.get_db()
+                count = db.execute(
+                    "SELECT COUNT(*) FROM story_workspace_workspaces"
+                ).fetchone()[0]
+                db.close()
+            finally:
+                database.DB_PATH = old_db_path
+
+        self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(response.json()["error"]["code"], "WORKFLOW_PERMISSION_DENIED")
+        create_workspace.assert_not_called()
+        self.assertEqual(count, 0)
+        self.assertEqual(gateway.calls, [])
+
+    def test_jwt_without_workspace_selects_oldest_existing_workspace_read_only(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            old_db_path = database.DB_PATH
+            database.DB_PATH = Path(temporary_directory) / "read-only-route.db"
+            try:
+                db = database.get_db()
+                db.execute(
+                    """
+                    CREATE TABLE story_workspace_workspaces (
+                        id TEXT PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        owner_id INTEGER NOT NULL,
+                        settings TEXT NOT NULL DEFAULT '{}',
+                        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+                db.executemany(
+                    "INSERT INTO story_workspace_workspaces "
+                    "(id, name, owner_id, created_at) VALUES (?, ?, ?, ?)",
+                    [
+                        ("workspace-new", "New", int(ACTOR_ID), "2026-08-04"),
+                        ("workspace-old", "Old", int(ACTOR_ID), "2026-08-01"),
+                    ],
+                )
+                db.commit()
+                db.close()
+
+                app = FastAPI()
+                gateway = _RecordingGateway(waiting_response())
+                app.dependency_overrides[story_workspace.get_current_user] = lambda: {
+                    "user_id": int(ACTOR_ID),
+                    "email": "writer@example.com",
+                }
+                app.dependency_overrides[
+                    story_workspace.get_story_workflow_gateway
+                ] = lambda: gateway
+                app.include_router(story_workspace.router)
+
+                creator = story_workspace.get_or_create_default_workspace
+                with (
+                    patch.object(
+                        story_workspace,
+                        "get_or_create_default_workspace",
+                        wraps=creator,
+                    ) as create_workspace,
+                    TestClient(app) as client,
+                ):
+                    response = client.get(
+                        f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-files"
+                    )
+
+                db = database.get_db()
+                count = db.execute(
+                    "SELECT COUNT(*) FROM story_workspace_workspaces"
+                ).fetchone()[0]
+                db.close()
+            finally:
+                database.DB_PATH = old_db_path
+
+        self.assertEqual(response.status_code, 200, response.text)
+        create_workspace.assert_not_called()
+        self.assertEqual(count, 2)
+        self.assertEqual(
+            gateway.calls,
+            [
+                (
+                    RUN_ID,
+                    {"workspace_id": "workspace-old", "actor_id": ACTOR_ID},
+                )
+            ],
+        )
+
 
 class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
@@ -506,6 +639,44 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ("WORKFLOW_PERMISSION_DENIED", 403),
         )
 
+    async def test_workspace_swap_to_external_symlink_before_reader_is_rejected(
+        self,
+    ) -> None:
+        external = Path(self.temporary_directory.name) / "external"
+        external.mkdir()
+        external_dream = external / ".dream"
+        external_dream.mkdir()
+        (external_dream / "README.md").write_text("external\n", encoding="utf-8")
+        (external_dream / "workspace.json").write_text(
+            '{"schema_version":"dream-surface/v1"}\n', encoding="utf-8"
+        )
+        original_workspace = self.root / "thread-original"
+        canonical_workspace = self.workspace.resolve()
+        real_reader = gateway_module.StoryWorkspaceDreamFileReader
+
+        def swap_then_construct(workspace: Path):
+            self.workspace.rename(original_workspace)
+            self.workspace.symlink_to(external, target_is_directory=True)
+            return real_reader(workspace)
+
+        with (
+            self.wired(),
+            patch.object(
+                gateway_module,
+                "StoryWorkspaceDreamFileReader",
+                side_effect=swap_then_construct,
+            ) as construct_reader,
+        ):
+            with self.assertRaises(ApiRouteError) as raised:
+                await self.call()
+
+        construct_reader.assert_called_once_with(canonical_workspace)
+        self.assertEqual(
+            (raised.exception.code, raised.exception.status_code),
+            ("WORKFLOW_PERMISSION_DENIED", 403),
+        )
+        self.assertNotEqual(external.resolve(), original_workspace.resolve())
+
     async def test_malformed_storage_maps_to_safe_contract_error(self) -> None:
         run_directory = self.dream / "runtime" / "runs" / RUN_ID
         run_directory.mkdir(parents=True)
@@ -560,6 +731,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         for error, code, status in cases:
             with self.subTest(error=type(error).__name__):
                 reader = Mock()
+                reader.workspace_root = self.workspace.resolve()
                 reader.read.side_effect = error
                 with (
                     self.wired(),

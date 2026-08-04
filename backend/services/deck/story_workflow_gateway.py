@@ -624,7 +624,20 @@ class StoryWorkflowApplicationGateway:
                     status_code=404,
                 )
             workspace = self._thread_workspace(thread_id)
-            return StoryWorkspaceDreamFileReader(workspace).read(
+            reader = StoryWorkspaceDreamFileReader(workspace)
+            reader_workspace = Path(reader.workspace_root)
+            canonical_parent = workspace.parent
+            if (
+                reader_workspace != workspace
+                or reader_workspace.parent != canonical_parent
+                or reader_workspace.name != thread_id
+                or not reader_workspace.is_relative_to(canonical_parent)
+            ):
+                raise ApiRouteError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    status_code=403,
+                )
+            return reader.read(
                 workflow_run,
                 thread_id=thread_id,
             )
