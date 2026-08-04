@@ -46,10 +46,12 @@ from services.story_workspace.dream_confirmation_service import (
     PersistedDreamConfirmation,
     StoryWorkspaceDreamConfirmationError,
     StoryWorkspaceDreamConfirmationService,
+    StoryWorkspaceDreamConfirmationCoordinator,
     build_thread_turn_dispatcher,
     dream_confirmation_message_id,
     mark_dream_confirmation_dispatched,
     read_dream_confirmation_fact,
+    read_pending_dream_confirmations,
 )
 from story_workspace.contracts import (
     StoryWorkspaceDreamConfirmationAccepted,
@@ -213,7 +215,46 @@ class ConfirmationFixture:
                 (OTHER_THREAD_ID, int(OTHER_ACTOR_ID), "Other Dream"),
             ],
         )
+        db.execute(
+            "INSERT INTO story_workspace_workspaces (id, name, owner_id) "
+            "VALUES (?, 'Dream', ?)",
+            (WORKSPACE_ID, int(ACTOR_ID)),
+        )
         db.commit()
+        db.execute("PRAGMA foreign_keys=OFF")
+        database.create_workflow_run_tables(db)
+        db.execute(
+            "INSERT INTO workflow_runs ("
+            "id, workspace_id, deck_plugin_id, deck_plugin_version, "
+            "workflow_definition_ref, deck_runtime_snapshot_id, status, "
+            "deck_plugin_manifest_hash, deck_plugin_binding_id, "
+            "binding_revision, runtime_plugin_lock_id, workflow_preflight_id, "
+            "source_voice_thread_id, source_message_id, source_message_time, "
+            "idempotency_key, input_hash, "
+            "semantic_fingerprint, created_by"
+            ") VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                RUN_ID,
+                WORKSPACE_ID,
+                "ink.dream.story-workflow",
+                "1.0.0",
+                "deck://ink.dream/workflow.json",
+                "drs_" + "5" * 32,
+                "sha256:" + "c" * 64,
+                "dpb_" + "2" * 32,
+                "rpl_" + "1" * 32,
+                "pf_" + "3" * 32,
+                THREAD_ID,
+                "message-source-1",
+                NOW.isoformat(),
+                "run-key",
+                "sha256:" + "d" * 64,
+                "sha256:" + "e" * 64,
+                ACTOR_ID,
+            ),
+        )
+        db.commit()
+        db.execute("PRAGMA foreign_keys=ON")
         db.close()
         self.runs = {RUN_ID: make_run()}
         self.projection_reader = RecordingProjectionReader(complete_projection())
@@ -489,7 +530,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertEqual(replay.dispatch.parts, first.dispatch.parts)
         self.assertEqual(
             replay.dispatch.metadata["dispatch_status"],
-            "dispatched",
+            "pending",
         )
         self.assertEqual(len(self.fixture.rows()), 1)
 
@@ -685,6 +726,260 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertEqual(len(self.fixture.rows()), 1)
 
 
+class StoryWorkspaceDreamConfirmationCoordinatorTests(
+    unittest.IsolatedAsyncioTestCase
+):
+    async def asyncSetUp(self) -> None:
+        self.fixture = ConfirmationFixture()
+
+    async def asyncTearDown(self) -> None:
+        self.fixture.close()
+
+    async def _wait_until(self, predicate, *, timeout: float = 1.0) -> None:
+        async def wait() -> None:
+            while not predicate():
+                await asyncio.sleep(0.005)
+
+        await asyncio.wait_for(wait(), timeout=timeout)
+
+    async def test_failed_consumption_remains_pending_then_reconciles(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        attempts: list[str] = []
+
+        async def consume(thread_id, actor_id, message_id, parts, metadata):
+            attempts.append(message_id)
+            if len(attempts) == 1:
+                raise RuntimeError("stream failed before completion")
+            return True
+
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+        )
+        try:
+            coordinator.start()
+            await self._wait_until(lambda: len(attempts) == 1)
+            await coordinator.wait_for_idle()
+            with database.get_db() as db:
+                self.assertEqual(
+                    read_dream_confirmation_fact(
+                        db,
+                        actor_id=ACTOR_ID,
+                        thread_id=THREAD_ID,
+                        run_id=RUN_ID,
+                    ),
+                    (True, False),
+                )
+
+            await coordinator.reconcile_once()
+            await self._wait_until(lambda: len(attempts) == 2)
+            await coordinator.wait_for_idle()
+            with database.get_db() as db:
+                self.assertEqual(
+                    read_dream_confirmation_fact(
+                        db,
+                        actor_id=ACTOR_ID,
+                        thread_id=THREAD_ID,
+                        run_id=RUN_ID,
+                    ),
+                    (True, True),
+                )
+        finally:
+            await coordinator.stop()
+
+        self.assertEqual(attempts, [persisted.accepted.message_id] * 2)
+
+    async def test_completion_before_ack_can_replay_but_cannot_lose_work(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        consumptions = 0
+
+        async def consume(*_args):
+            nonlocal consumptions
+            consumptions += 1
+            return True
+
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+        )
+        real_mark = coordinator._mark_dispatched_sync
+        acknowledgements = 0
+
+        def flaky_mark(dispatch):
+            nonlocal acknowledgements
+            acknowledgements += 1
+            if acknowledgements == 1:
+                raise RuntimeError("process stopped before durable ack")
+            return real_mark(dispatch)
+
+        with patch.object(coordinator, "_mark_dispatched_sync", flaky_mark):
+            coordinator.schedule(persisted.dispatch)
+            await coordinator.wait_for_idle()
+            with database.get_db() as db:
+                self.assertEqual(
+                    read_dream_confirmation_fact(
+                        db,
+                        actor_id=ACTOR_ID,
+                        thread_id=THREAD_ID,
+                        run_id=RUN_ID,
+                    ),
+                    (True, False),
+                )
+            await coordinator.reconcile_once()
+            await coordinator.wait_for_idle()
+
+        with database.get_db() as db:
+            self.assertEqual(
+                read_dream_confirmation_fact(
+                    db,
+                    actor_id=ACTOR_ID,
+                    thread_id=THREAD_ID,
+                    run_id=RUN_ID,
+                ),
+                (True, True),
+            )
+        self.assertEqual(consumptions, 2)
+        self.assertEqual(acknowledgements, 2)
+
+    async def test_scan_and_submit_deduplicate_one_in_flight_message(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        attempts = 0
+
+        async def consume(*_args):
+            nonlocal attempts
+            attempts += 1
+            entered.set()
+            await release.wait()
+            return True
+
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+        )
+        try:
+            self.assertTrue(coordinator.schedule(persisted.dispatch))
+            await entered.wait()
+            await coordinator.reconcile_once()
+            self.assertFalse(coordinator.schedule(persisted.dispatch))
+            self.assertEqual(attempts, 1)
+            release.set()
+            await coordinator.wait_for_idle()
+        finally:
+            await coordinator.stop()
+
+    async def test_shutdown_cancels_consumption_and_leaves_pending(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        entered = asyncio.Event()
+
+        async def consume(*_args):
+            entered.set()
+            await asyncio.Event().wait()
+
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+        )
+        coordinator.schedule(persisted.dispatch)
+        await entered.wait()
+        await coordinator.stop()
+
+        with database.get_db() as db:
+            self.assertEqual(
+                read_dream_confirmation_fact(
+                    db,
+                    actor_id=ACTOR_ID,
+                    thread_id=THREAD_ID,
+                    run_id=RUN_ID,
+                ),
+                (True, False),
+            )
+
+    async def test_scan_fails_closed_when_run_authority_binding_drifts(self) -> None:
+        self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        cases = (
+            (
+                "UPDATE story_workspace_workspaces SET owner_id = ? WHERE id = ?",
+                (int(OTHER_ACTOR_ID), WORKSPACE_ID),
+                "UPDATE story_workspace_workspaces SET owner_id = ? WHERE id = ?",
+                (int(ACTOR_ID), WORKSPACE_ID),
+            ),
+        )
+        for mutate, values, restore, restore_values in cases:
+            with self.subTest(mutate=mutate):
+                with database.get_db() as db:
+                    db.execute(mutate, values)
+                    db.commit()
+                    self.assertEqual(read_pending_dream_confirmations(db), [])
+                    db.execute(restore, restore_values)
+                    db.commit()
+
+    async def test_scan_recovers_legacy_pending_row_without_dispatch_status(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        with database.get_db() as db:
+            row = db.execute(
+                "SELECT metadata FROM chat_message WHERE id = ?",
+                (persisted.accepted.message_id,),
+            ).fetchone()
+            metadata = json.loads(row["metadata"])
+            metadata.pop("dispatch_status")
+            db.execute(
+                "UPDATE chat_message SET metadata = ? WHERE id = ?",
+                (json.dumps(metadata), persisted.accepted.message_id),
+            )
+            db.commit()
+            pending = read_pending_dream_confirmations(db)
+
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(pending[0].message_id, persisted.accepted.message_id)
+
+    async def test_scan_skips_malformed_pending_envelope(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        with database.get_db() as db:
+            db.execute(
+                "UPDATE chat_message SET parts = ? WHERE id = ?",
+                (
+                    json.dumps([{"type": "text", "text": "[]"}]),
+                    persisted.accepted.message_id,
+                ),
+            )
+            db.commit()
+            self.assertEqual(read_pending_dream_confirmations(db), [])
+
+
 class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTestCase):
     async def test_running_thread_is_queued_on_factory_lock_and_uses_same_turn_data(self) -> None:
         release = asyncio.Event()
@@ -696,7 +991,7 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
                 requests.append(request)
                 entered.set()
                 await release.wait()
-                yield "done"
+                yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
 
         dispatcher = build_thread_turn_dispatcher(
             FakeFactory(),
@@ -704,11 +999,12 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         )
         parts = [{"type": "text", "text": "structured"}]
         metadata = {"kind": DREAM_CONFIRMATION_METADATA_KIND}
-        dispatched = dispatcher(THREAD_ID, ACTOR_ID, "message-1", parts, metadata)
-        self.assertTrue(dispatched)
+        dispatch_task = dispatcher(
+            THREAD_ID, ACTOR_ID, "message-1", parts, metadata
+        )
         await asyncio.wait_for(entered.wait(), timeout=2)
         release.set()
-        await asyncio.sleep(0)
+        self.assertTrue(await dispatch_task)
         self.assertEqual(len(requests), 1)
         request = requests[0]
         self.assertEqual(request.thread_id, THREAD_ID)
@@ -726,7 +1022,22 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
             BrokenFactory(),
             request_factory=lambda **values: SimpleNamespace(**values),
         )
-        self.assertFalse(dispatcher(THREAD_ID, ACTOR_ID, "message-1", [], {}))
+        self.assertFalse(
+            await dispatcher(THREAD_ID, ACTOR_ID, "message-1", [], {})
+        )
+
+    async def test_error_frame_is_not_successful_consumption(self) -> None:
+        class ErrorFactory:
+            async def run_streaming(self, _request):
+                yield 'data: {"type":"error","errorText":"agent failed"}\n\n'
+
+        dispatcher = build_thread_turn_dispatcher(
+            ErrorFactory(),
+            request_factory=lambda **values: SimpleNamespace(**values),
+        )
+        self.assertFalse(
+            await dispatcher(THREAD_ID, ACTOR_ID, "message-1", [], {})
+        )
 
 
 class StoryWorkspaceDreamConfirmationRouteTests(unittest.TestCase):
@@ -785,8 +1096,12 @@ class StoryWorkspaceDreamConfirmationRouteTests(unittest.TestCase):
 
 
 class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sync_chain_dispatches_and_persists_success_audit(self) -> None:
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+    async def test_sync_chain_schedules_durable_work_without_claiming_completion(self) -> None:
+        coordinator = unittest.mock.Mock()
+        coordinator.schedule.return_value = True
+        gateway = gateway_module.StoryWorkflowApplicationGateway(
+            dream_confirmation_coordinator=coordinator,
+        )
         main_thread = threading.get_ident()
         worker_threads = []
         accepted = StoryWorkspaceDreamConfirmationAccepted(
@@ -810,35 +1125,16 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
             worker_threads.append(threading.get_ident())
             return PersistedDreamConfirmation(accepted=accepted, dispatch=dispatch)
 
-        dispatcher_calls = []
-
-        def dispatcher(*args):
-            dispatcher_calls.append((threading.get_ident(), args))
-            return True
-
-        with (
-            patch.object(gateway, "_submit_dream_confirmation_sync", sync_chain),
-            patch.object(
-                gateway,
-                "_mark_dream_confirmation_dispatched_sync",
-                return_value=True,
-            ) as mark_dispatched,
-            patch.object(
-                gateway_module,
-                "build_dream_confirmation_dispatcher",
-                return_value=dispatcher,
-            ),
-        ):
+        with patch.object(gateway, "_submit_dream_confirmation_sync", sync_chain):
             result = await gateway.submit_dream_confirmation(
                 RUN_ID,
                 command(),
                 actor={"actor_id": ACTOR_ID},
-            )
+        )
 
         self.assertNotEqual(worker_threads, [main_thread])
-        self.assertEqual(dispatcher_calls[0][0], main_thread)
-        self.assertTrue(result.dispatched)
-        mark_dispatched.assert_called_once_with(dispatch)
+        coordinator.schedule.assert_called_once_with(dispatch)
+        self.assertFalse(result.dispatched)
 
         replay = accepted.model_copy(update={"replayed": True, "dispatched": True})
         with (
@@ -850,10 +1146,6 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
                     dispatch=None,
                 ),
             ),
-            patch.object(
-                gateway_module,
-                "build_dream_confirmation_dispatcher",
-            ) as build_dispatcher,
         ):
             replay_result = await gateway.submit_dream_confirmation(
                 RUN_ID,
@@ -862,10 +1154,14 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
             )
         self.assertTrue(replay_result.replayed)
         self.assertTrue(replay_result.dispatched)
-        build_dispatcher.assert_not_called()
+        coordinator.schedule.assert_called_once()
 
-    async def test_false_dispatch_stays_pending_and_exact_replay_dispatches(self) -> None:
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+    async def test_in_flight_replay_remains_pending_without_duplicate_schedule(self) -> None:
+        coordinator = unittest.mock.Mock()
+        coordinator.schedule.side_effect = [True, False]
+        gateway = gateway_module.StoryWorkflowApplicationGateway(
+            dream_confirmation_coordinator=coordinator,
+        )
         pending = StoryWorkspaceDreamConfirmationAccepted(
             message_id="message-1",
             story_workspace_run_id=RUN_ID,
@@ -882,10 +1178,9 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
             parts=[{"type": "text", "text": "structured"}],
             metadata={
                 "kind": DREAM_CONFIRMATION_METADATA_KIND,
-                "dispatch_status": "dispatched",
+                "dispatch_status": "pending",
             },
         )
-        attempts = iter([False, True])
         persisted = iter([
             PersistedDreamConfirmation(accepted=pending, dispatch=dispatch),
             PersistedDreamConfirmation(
@@ -893,22 +1188,10 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
                 dispatch=dispatch,
             ),
         ])
-        with (
-            patch.object(
-                gateway,
-                "_submit_dream_confirmation_sync",
-                side_effect=lambda *_args: next(persisted),
-            ),
-            patch.object(
-                gateway,
-                "_mark_dream_confirmation_dispatched_sync",
-                return_value=True,
-            ) as mark_dispatched,
-            patch.object(
-                gateway_module,
-                "build_dream_confirmation_dispatcher",
-                return_value=lambda *_args: next(attempts),
-            ),
+        with patch.object(
+            gateway,
+            "_submit_dream_confirmation_sync",
+            side_effect=lambda *_args: next(persisted),
         ):
             first = await gateway.submit_dream_confirmation(
                 RUN_ID,
@@ -923,11 +1206,15 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
 
         self.assertFalse(first.dispatched)
         self.assertTrue(replay.replayed)
-        self.assertTrue(replay.dispatched)
-        mark_dispatched.assert_called_once_with(dispatch)
+        self.assertFalse(replay.dispatched)
+        self.assertEqual(coordinator.schedule.call_count, 2)
 
     async def test_dispatch_exception_keeps_accepted_result(self) -> None:
-        gateway = gateway_module.StoryWorkflowApplicationGateway()
+        coordinator = unittest.mock.Mock()
+        coordinator.schedule.side_effect = RuntimeError("scheduler unavailable")
+        gateway = gateway_module.StoryWorkflowApplicationGateway(
+            dream_confirmation_coordinator=coordinator,
+        )
         accepted = StoryWorkspaceDreamConfirmationAccepted(
             message_id="message-1",
             story_workspace_run_id=RUN_ID,
@@ -947,17 +1234,10 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
                 {},
             ),
         )
-        with (
-            patch.object(
-                gateway,
-                "_submit_dream_confirmation_sync",
-                return_value=persisted,
-            ),
-            patch.object(
-                gateway_module,
-                "build_dream_confirmation_dispatcher",
-                side_effect=RuntimeError("dispatcher unavailable"),
-            ),
+        with patch.object(
+            gateway,
+            "_submit_dream_confirmation_sync",
+            return_value=persisted,
         ):
             result = await gateway.submit_dream_confirmation(
                 RUN_ID,

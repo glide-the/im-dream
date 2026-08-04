@@ -548,6 +548,22 @@ class TestFactoryLifecycle(unittest.TestCase):
         ]
         self.assertIn("shutdown_claude_agent", handler_names)
 
+    def test_dream_confirmation_coordinator_lifecycle_is_ordered(self):
+        startup_names = [h.__name__ for h in self.srv.app.router.on_startup]
+        shutdown_names = [h.__name__ for h in self.srv.app.router.on_shutdown]
+        self.assertLess(
+            startup_names.index("startup_database"),
+            startup_names.index("startup_dream_confirmation_coordinator"),
+        )
+        self.assertLess(
+            startup_names.index("startup_claude_agent"),
+            startup_names.index("startup_dream_confirmation_coordinator"),
+        )
+        self.assertLess(
+            shutdown_names.index("shutdown_dream_confirmation_coordinator"),
+            shutdown_names.index("shutdown_claude_agent"),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Authentication enforcement (401 without token)

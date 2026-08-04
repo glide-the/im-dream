@@ -16,7 +16,7 @@ import hashlib
 import json
 import logging
 import sqlite3
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Awaitable, Callable, Optional, Protocol
 from uuid import uuid4
 
 try:
@@ -70,7 +70,10 @@ class ProjectionReader(Protocol):
     ) -> StoryWorkspaceDreamFilesResponse: ...
 
 
-DreamConfirmationDispatcher = Callable[[str, str, str, list, dict], bool]
+DreamConfirmationDispatcher = Callable[
+    [str, str, str, list, dict],
+    Awaitable[bool],
+]
 
 
 @dataclass(frozen=True)
@@ -372,6 +375,105 @@ def mark_dream_confirmation_dispatched(
         ) from exc
 
 
+def _decode_pending_dispatch_row(row: Any) -> Optional[DreamConfirmationDispatch]:
+    """Decode one durable work item, rejecting forged or malformed metadata."""
+
+    metadata = _decode_metadata(row["metadata"])
+    parts = _decode_parts(row["parts"])
+    actor_id = str(row["user_id"])
+    if not (
+        row["role"] == "user"
+        and isinstance(metadata, dict)
+        and metadata.get("kind") == DREAM_CONFIRMATION_METADATA_KIND
+        and metadata.get(
+            "dispatch_status",
+            DREAM_CONFIRMATION_DISPATCH_PENDING,
+        ) == DREAM_CONFIRMATION_DISPATCH_PENDING
+        and metadata.get("actor") == actor_id
+        and metadata.get("thread_id") == row["thread_id"]
+        and isinstance(parts, list)
+    ):
+        return None
+    run_id = metadata.get("story_workspace_run_id")
+    idempotency_key = metadata.get("idempotency_key")
+    request_id = metadata.get("request_id")
+    fingerprint = metadata.get("command_fingerprint")
+    if not all(
+        isinstance(value, str) and bool(value)
+        for value in (run_id, idempotency_key, request_id, fingerprint)
+    ):
+        return None
+    if row["id"] != dream_confirmation_message_id(
+        actor_id,
+        run_id,
+        idempotency_key,
+    ):
+        return None
+    if len(parts) != 1 or not isinstance(parts[0], dict):
+        return None
+    text = parts[0].get("text")
+    if parts[0].get("type") != "text" or not isinstance(text, str):
+        return None
+    try:
+        envelope = json.loads(text)
+    except (TypeError, ValueError):
+        return None
+    command = envelope.get("command") if isinstance(envelope, dict) else None
+    if not (
+        isinstance(envelope, dict)
+        and envelope.get("kind") == DREAM_CONFIRMATION_METADATA_KIND
+        and isinstance(command, dict)
+        and command.get("storyWorkspaceRunId") == run_id
+        and command.get("threadId") == row["thread_id"]
+        and command.get("idempotencyKey") == idempotency_key
+        and _sha256({"actor": actor_id, "command": command}) == fingerprint
+    ):
+        return None
+    return DreamConfirmationDispatch(
+        thread_id=row["thread_id"],
+        actor_id=actor_id,
+        message_id=row["id"],
+        parts=parts,
+        metadata=metadata,
+    )
+
+
+def read_pending_dream_confirmations(
+    db: sqlite3.Connection,
+) -> list[DreamConfirmationDispatch]:
+    """Read valid pending work from the existing hidden-message audit log."""
+
+    rows = db.execute(
+        "SELECT message.id, message.thread_id, message.role, message.parts, "
+        "message.metadata, thread.user_id "
+        "FROM chat_message AS message "
+        "JOIN chat_thread AS thread ON thread.id = message.thread_id "
+        "WHERE message.role = 'user' ORDER BY message.created_at ASC, message.id ASC"
+    ).fetchall()
+    pending: list[DreamConfirmationDispatch] = []
+    for row in rows:
+        dispatch = _decode_pending_dispatch_row(row)
+        if dispatch is None:
+            continue
+        run_id = dispatch.metadata["story_workspace_run_id"]
+        run_scope = db.execute(
+            "SELECT run.id FROM workflow_runs AS run "
+            "JOIN story_workspace_workspaces AS workspace "
+            "ON workspace.id = run.workspace_id "
+            "WHERE run.id = ? AND run.created_by = ? "
+            "AND run.source_voice_thread_id = ? AND workspace.owner_id = ?",
+            (
+                run_id,
+                dispatch.actor_id,
+                dispatch.thread_id,
+                int(dispatch.actor_id),
+            ),
+        ).fetchone()
+        if run_scope is not None:
+            pending.append(dispatch)
+    return pending
+
+
 def build_thread_turn_dispatcher(
     factory: Any | None = None,
     *,
@@ -384,7 +486,7 @@ def build_thread_turn_dispatcher(
     preserves ordering without a lifecycle pre-check that could lose work.
     """
 
-    def dispatch(
+    async def consume(
         thread_id: str,
         actor_id: str,
         message_id: str,
@@ -412,33 +514,195 @@ def build_thread_turn_dispatcher(
             )
             stream = selected_factory.run_streaming(request)
 
-            async def _drain() -> None:
+            completed = False
+            async for frame in stream:
+                if not isinstance(frame, str):
+                    continue
+                data_line = next(
+                    (
+                        line.removeprefix("data: ")
+                        for line in frame.splitlines()
+                        if line.startswith("data: ")
+                    ),
+                    None,
+                )
+                if data_line is None:
+                    continue
                 try:
-                    async for _frame in stream:
-                        pass
-                except Exception:
-                    logger.exception(
-                        "Dream confirmation turn failed for thread_id=%s "
-                        "message_id=%s",
-                        thread_id,
-                        message_id,
-                    )
-
-            asyncio.create_task(
-                _drain(),
-                name=f"dream-confirmation-{message_id}",
-            )
-            return True
+                    event = json.loads(data_line)
+                except (TypeError, ValueError):
+                    continue
+                if not isinstance(event, dict):
+                    continue
+                if event.get("type") == "error":
+                    return False
+                if event.get("type") == "finish":
+                    if event.get("finishReason") == "error":
+                        return False
+                    completed = True
+            return completed
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(
-                "Dream confirmation dispatch failed for thread_id=%s "
+                "Dream confirmation turn failed for thread_id=%s "
                 "message_id=%s",
                 thread_id,
                 message_id,
             )
             return False
 
+    def dispatch(
+        thread_id: str,
+        actor_id: str,
+        message_id: str,
+        parts: list,
+        metadata: dict,
+    ) -> Awaitable[bool]:
+        # Preserve the established fire-now callable shape while returning a
+        # completion awaitable for the durable coordinator acknowledgement.
+        return asyncio.create_task(
+            consume(thread_id, actor_id, message_id, parts, metadata),
+            name=f"dream-confirmation-turn-{message_id}",
+        )
+
     return dispatch
+
+
+class StoryWorkspaceDreamConfirmationCoordinator:
+    """Reconcile durable pending confirmations with same-thread Agent turns.
+
+    Delivery is at least once. The hidden message stays ``pending`` until the
+    stream finishes. A process crash after stream completion but before the
+    SQLite acknowledgement can replay the same message, but cannot strand it.
+    """
+
+    def __init__(
+        self,
+        db_factory: Callable[[], sqlite3.Connection],
+        *,
+        dispatcher_factory: Callable[[], DreamConfirmationDispatcher] = (
+            build_thread_turn_dispatcher
+        ),
+        reconcile_interval_s: float = 2.0,
+    ) -> None:
+        self._db_factory = db_factory
+        self._dispatcher_factory = dispatcher_factory
+        self._reconcile_interval_s = max(float(reconcile_interval_s), 0.01)
+        self._in_flight: dict[str, asyncio.Task[None]] = {}
+        self._loop_task: Optional[asyncio.Task[None]] = None
+        self._stop_event: Optional[asyncio.Event] = None
+
+    def start(self) -> None:
+        if self._loop_task is not None and not self._loop_task.done():
+            return
+        self._stop_event = asyncio.Event()
+        self._loop_task = asyncio.create_task(
+            self._run(),
+            name="dream-confirmation-reconciler",
+        )
+
+    async def stop(self) -> None:
+        stop_event = self._stop_event
+        if stop_event is not None:
+            stop_event.set()
+        loop_task = self._loop_task
+        if loop_task is not None and not loop_task.done():
+            loop_task.cancel()
+        tasks = list(self._in_flight.values())
+        for task in tasks:
+            task.cancel()
+        if loop_task is not None:
+            await asyncio.gather(loop_task, return_exceptions=True)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._loop_task = None
+        self._stop_event = None
+
+    def schedule(self, dispatch: Optional[DreamConfirmationDispatch]) -> bool:
+        if dispatch is None or dispatch.message_id in self._in_flight:
+            return False
+        task = asyncio.create_task(
+            self._consume_and_ack(dispatch),
+            name=f"dream-confirmation-{dispatch.message_id}",
+        )
+        # Occupy the key synchronously before the event loop can run a scan.
+        self._in_flight[dispatch.message_id] = task
+        return True
+
+    async def reconcile_once(self) -> int:
+        pending = await asyncio.to_thread(self._read_pending_sync)
+        return sum(1 for dispatch in pending if self.schedule(dispatch))
+
+    async def wait_for_idle(self) -> None:
+        while self._in_flight:
+            await asyncio.gather(
+                *list(self._in_flight.values()),
+                return_exceptions=True,
+            )
+
+    def _read_pending_sync(self) -> list[DreamConfirmationDispatch]:
+        db = self._db_factory()
+        try:
+            return read_pending_dream_confirmations(db)
+        finally:
+            db.close()
+
+    def _mark_dispatched_sync(self, dispatch: DreamConfirmationDispatch) -> bool:
+        db = self._db_factory()
+        try:
+            return mark_dream_confirmation_dispatched(db, dispatch)
+        finally:
+            db.close()
+
+    async def _consume_and_ack(self, dispatch: DreamConfirmationDispatch) -> None:
+        try:
+            dispatcher = self._dispatcher_factory()
+            completed = await dispatcher(
+                dispatch.thread_id,
+                dispatch.actor_id,
+                dispatch.message_id,
+                dispatch.parts,
+                dispatch.metadata,
+            )
+            if completed:
+                await asyncio.to_thread(self._mark_dispatched_sync, dispatch)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception(
+                "Dream confirmation remains pending for thread_id=%s "
+                "message_id=%s",
+                dispatch.thread_id,
+                dispatch.message_id,
+            )
+        finally:
+            current = asyncio.current_task()
+            if self._in_flight.get(dispatch.message_id) is current:
+                self._in_flight.pop(dispatch.message_id, None)
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                try:
+                    await self.reconcile_once()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logger.exception("Dream confirmation reconciliation scan failed")
+                stop_event = self._stop_event
+                if stop_event is None:
+                    return
+                try:
+                    await asyncio.wait_for(
+                        stop_event.wait(),
+                        timeout=self._reconcile_interval_s,
+                    )
+                    return
+                except asyncio.TimeoutError:
+                    continue
+        except asyncio.CancelledError:
+            raise
 
 
 class StoryWorkspaceDreamConfirmationService:
@@ -637,10 +901,7 @@ class StoryWorkspaceDreamConfirmationService:
                 actor_id=str(actor_id),
                 message_id=message_id,
                 parts=parts,
-                metadata={
-                    **metadata,
-                    "dispatch_status": DREAM_CONFIRMATION_DISPATCHED,
-                },
+                metadata=metadata,
             ),
         )
 
@@ -776,9 +1037,6 @@ class StoryWorkspaceDreamConfirmationService:
                 actor_id=actor_id,
                 message_id=message_id,
                 parts=parts,
-                metadata={
-                    **metadata,
-                    "dispatch_status": DREAM_CONFIRMATION_DISPATCHED,
-                },
+                metadata=metadata,
             ),
         )

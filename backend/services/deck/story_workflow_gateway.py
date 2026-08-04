@@ -46,12 +46,10 @@ try:
         build_thread_turn_dispatcher,
     )
     from services.story_workspace.dream_confirmation_service import (
-        DreamConfirmationDispatch,
         PersistedDreamConfirmation,
+        StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
-        build_thread_turn_dispatcher as build_dream_confirmation_dispatcher,
-        mark_dream_confirmation_dispatched,
         read_dream_confirmation_fact,
     )
 except ModuleNotFoundError:  # Support package imports from repository root.
@@ -82,12 +80,10 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         build_thread_turn_dispatcher,
     )
     from backend.services.story_workspace.dream_confirmation_service import (
-        DreamConfirmationDispatch,
         PersistedDreamConfirmation,
+        StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
-        build_thread_turn_dispatcher as build_dream_confirmation_dispatcher,
-        mark_dream_confirmation_dispatched,
         read_dream_confirmation_fact,
     )
 
@@ -95,6 +91,9 @@ except ModuleNotFoundError:  # Support package imports from repository root.
 _DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
 _DEV_TOKEN_SECRET = "ink-dream-development-workflow-token-secret-v1"
 logger = logging.getLogger(__name__)
+_DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
+    database.get_db,
+)
 
 
 def get_workspace_root() -> Path:
@@ -158,6 +157,17 @@ def _token_secret() -> str:
 
 
 class StoryWorkflowApplicationGateway:
+    def __init__(
+        self,
+        *,
+        dream_confirmation_coordinator: (
+            StoryWorkspaceDreamConfirmationCoordinator | None
+        ) = None,
+    ) -> None:
+        self._dream_confirmation_coordinator = (
+            dream_confirmation_coordinator or _DREAM_CONFIRMATION_COORDINATOR
+        )
+
     @staticmethod
     def _actor(actor: dict[str, str]) -> AuthenticatedActorContext:
         return AuthenticatedActorContext(
@@ -758,50 +768,20 @@ class StoryWorkflowApplicationGateway:
         if dispatch is None:
             return accepted
 
-        dispatched = False
         try:
-            dispatcher = build_dream_confirmation_dispatcher()
-            dispatched = bool(dispatcher(
-                dispatch.thread_id,
-                dispatch.actor_id,
-                dispatch.message_id,
-                dispatch.parts,
-                dispatch.metadata,
-            ))
+            self._dream_confirmation_coordinator.schedule(dispatch)
         except Exception:
-            # Persistence is the accepted outcome. A dispatcher failure must
-            # never remove or rewrite the durable hidden command.
+            # The committed hidden turn remains pending. The lifecycle scan
+            # will pick it up without asking the user to submit again.
             logger.exception(
-                "Dream confirmation dispatch failed for run_id=%s message_id=%s",
+                "Dream confirmation scheduling deferred for run_id=%s "
+                "message_id=%s",
                 workflow_run_id,
                 dispatch.message_id,
             )
-            dispatched = False
-        if dispatched:
-            try:
-                dispatched = bool(await asyncio.to_thread(
-                    self._mark_dream_confirmation_dispatched_sync,
-                    dispatch,
-                ))
-            except Exception:
-                logger.exception(
-                    "Dream confirmation dispatch audit failed for run_id=%s "
-                    "message_id=%s",
-                    workflow_run_id,
-                    dispatch.message_id,
-                )
-                dispatched = False
-        return accepted.model_copy(update={"dispatched": dispatched})
-
-    @staticmethod
-    def _mark_dream_confirmation_dispatched_sync(
-        dispatch: DreamConfirmationDispatch,
-    ) -> bool:
-        db = database.get_db()
-        try:
-            return mark_dream_confirmation_dispatched(db, dispatch)
-        finally:
-            db.close()
+        # Scheduled is not consumed. Only the coordinator writes the durable
+        # dispatched acknowledgement after the same Chat Agent turn completes.
+        return accepted.model_copy(update={"dispatched": False})
 
     def _submit_dream_confirmation_sync(
         self,
@@ -966,3 +946,9 @@ _GATEWAY = StoryWorkflowApplicationGateway()
 
 def get_story_workflow_application_gateway() -> StoryWorkflowApplicationGateway:
     return _GATEWAY
+
+
+def get_dream_confirmation_coordinator() -> StoryWorkspaceDreamConfirmationCoordinator:
+    """Return the process singleton managed by the FastAPI lifecycle."""
+
+    return _DREAM_CONFIRMATION_COORDINATOR

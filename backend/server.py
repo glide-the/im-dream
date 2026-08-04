@@ -795,6 +795,9 @@ async def shutdown_scheduler():
 # ========== Claude Agent Factory ==========
 
 from agent_factory import claude_agent_thread_factory
+from services.deck.story_workflow_gateway import (
+    get_dream_confirmation_coordinator,
+)
 from routers import admin as admin_router_module
 from routers.admin import router as admin_router
 from routers.auth import (
@@ -864,6 +867,13 @@ async def startup_claude_agent():
 
 
 @app.on_event("startup")
+async def startup_dream_confirmation_coordinator():
+    """Reconcile accepted Dream confirmations after the Agent is ready."""
+
+    get_dream_confirmation_coordinator().start()
+
+
+@app.on_event("startup")
 async def startup_claude_plugin_seed():
     """Seed platform-builtin Claude plugins and backfill Deck references.
 
@@ -930,6 +940,13 @@ async def startup_claude_plugin_seed():
         await asyncio.to_thread(_seed)
     except Exception:  # noqa: BLE001 - seeding must never block startup
         logging.getLogger(__name__).exception("claude plugin seed failed")
+
+
+@app.on_event("shutdown")
+async def shutdown_dream_confirmation_coordinator():
+    """Stop reconciliation before closing the Claude Agent factory."""
+
+    await get_dream_confirmation_coordinator().stop()
 
 
 @app.on_event("shutdown")
