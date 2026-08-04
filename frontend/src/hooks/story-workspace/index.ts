@@ -16,6 +16,17 @@ export type {
   UseStoryWorkspaceDreamFilesOptions,
 } from './useStoryWorkspaceDreamFiles';
 export {
+  dreamConfirmationEndpoint,
+  newStoryWorkspaceDreamConfirmationIdempotencyKey,
+  parseStoryWorkspaceDreamConfirmationAccepted,
+  submitStoryWorkspaceDreamConfirmation,
+  useStoryWorkspaceDreamConfirmation,
+} from './useStoryWorkspaceDreamConfirmation';
+export type {
+  StoryWorkspaceDreamConfirmationState,
+  SubmitStoryWorkspaceDreamConfirmationOptions,
+} from './useStoryWorkspaceDreamConfirmation';
+export {
   buildStoryWorkspaceGuidancePayload,
   describeStoryWorkspaceGuidanceResult,
   extractStoryWorkspaceGuidanceHistory,
@@ -38,6 +49,7 @@ export {
 export type {
   StoryWorkspaceCharacter,
   StoryWorkspaceDreamConfirmationCommand,
+  StoryWorkspaceDreamConfirmationAccepted,
   StoryWorkspaceDreamConfirmationEdit,
   StoryWorkspaceDreamFilesResponse,
   StoryWorkspaceDreamLifecycleState,

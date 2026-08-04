@@ -131,6 +131,17 @@ export interface StoryWorkspaceDreamConfirmationCommand {
   readonly idempotencyKey: string;
 }
 
+/** 202 response after the hidden confirmation row is durably accepted. */
+export interface StoryWorkspaceDreamConfirmationAccepted {
+  readonly messageId: string;
+  readonly storyWorkspaceRunId: string;
+  readonly threadId: string;
+  readonly status: 'accepted';
+  readonly replayed: boolean;
+  readonly dispatched: boolean;
+  readonly requestId: string;
+}
+
 /** Frozen WorkflowRun provenance returned by the Dream file read endpoint. */
 export interface StoryWorkspaceDreamSource {
   readonly deckPluginBindingId: string;

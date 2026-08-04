@@ -38,11 +38,12 @@ test('rejects non-guidance and malformed metadata shapes', () => {
   expect(isStoryWorkspaceGuidanceMetadata({ kind: 42 })).toBe(false);
 });
 
-test('filter drops guidance rows and keeps every other message in order', () => {
+test('Chat compatibility filter drops guidance and Dream confirmation rows', () => {
   const messages = [
     { id: 'm1', role: 'user', metadata: undefined },
     { id: 'guide_k-1', role: 'user', metadata: { kind: 'story-workspace-guidance', actor: '11' } },
     { id: 'm2', role: 'assistant', metadata: { kind: 'other' } },
+    { id: 'dream_k-1', role: 'user', metadata: { kind: 'story-workspace-dream-confirmation' } },
     { id: 'm3', role: 'assistant' },
     { id: 'guide_k-2', role: 'user', metadata: { kind: 'story-workspace-guidance' } },
   ];
