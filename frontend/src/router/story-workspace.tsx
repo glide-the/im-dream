@@ -115,9 +115,14 @@ function renderStoryWorkspaceRoute(
     case 'episode-review':
     case 'dream':
     default:
-      // The episode review route surfaces the Dream workspace; the carried
-      // ?run= deep link does initial positioning via the WorkflowContextBar.
-      return <StoryWorkspaceDreamPage>{dreamContent}</StoryWorkspaceDreamPage>;
+      return (
+        <StoryWorkspaceDreamPage
+          onNavigate={onNavigate}
+          runId={readStoryWorkspaceRunParam(match.query)}
+        >
+          {dreamContent}
+        </StoryWorkspaceDreamPage>
+      );
   }
 }
 

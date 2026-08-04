@@ -51,6 +51,7 @@ export type {
   StoryWorkspaceDreamConfirmationCommand,
   StoryWorkspaceDreamConfirmationAccepted,
   StoryWorkspaceDreamConfirmationEdit,
+  StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
   StoryWorkspaceDreamLifecycleState,
   StoryWorkspaceDreamSource,
