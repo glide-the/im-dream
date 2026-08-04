@@ -384,7 +384,7 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
         """The real factory lock must serialize the hidden continuation."""
 
         from services.story_workspace.dream_confirmation_service import (
-            build_thread_turn_dispatcher,
+            story_workspace_build_dream_confirmation_turn_dispatcher,
         )
 
         first_request = _make_request(
@@ -424,7 +424,7 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
                 await execution.turn_context.queue.put(None)
 
             self.factory._service.execute_session = _execute
-            dispatcher = build_thread_turn_dispatcher(
+            dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
                 self.factory,
                 request_factory=ClaudeAgentRunRequest,
             )

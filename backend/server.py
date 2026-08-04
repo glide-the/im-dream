@@ -796,7 +796,7 @@ async def shutdown_scheduler():
 
 from agent_factory import claude_agent_thread_factory
 from services.deck.story_workflow_gateway import (
-    get_dream_confirmation_coordinator,
+    story_workspace_get_dream_confirmation_coordinator,
 )
 from routers import admin as admin_router_module
 from routers.admin import router as admin_router
@@ -867,10 +867,10 @@ async def startup_claude_agent():
 
 
 @app.on_event("startup")
-async def startup_dream_confirmation_coordinator():
+async def story_workspace_startup_dream_confirmation_coordinator():
     """Reconcile accepted Dream confirmations after the Agent is ready."""
 
-    get_dream_confirmation_coordinator().start()
+    story_workspace_get_dream_confirmation_coordinator().start()
 
 
 @app.on_event("startup")
@@ -943,10 +943,10 @@ async def startup_claude_plugin_seed():
 
 
 @app.on_event("shutdown")
-async def shutdown_dream_confirmation_coordinator():
+async def story_workspace_shutdown_dream_confirmation_coordinator():
     """Stop reconciliation before closing the Claude Agent factory."""
 
-    await get_dream_confirmation_coordinator().stop()
+    await story_workspace_get_dream_confirmation_coordinator().stop()
 
 
 @app.on_event("shutdown")

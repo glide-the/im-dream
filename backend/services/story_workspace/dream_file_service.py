@@ -155,7 +155,7 @@ def _platform_capability_reason() -> str | None:
     return None
 
 
-DREAM_PLATFORM_SUPPORTED = _platform_capability_reason() is None
+STORY_WORKSPACE_DREAM_PLATFORM_SUPPORTED = _platform_capability_reason() is None
 
 
 def _require_platform() -> None:
@@ -1625,7 +1625,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
 
 
 __all__ = [
-    "DREAM_PLATFORM_SUPPORTED",
+    "STORY_WORKSPACE_DREAM_PLATFORM_SUPPORTED",
     "StoryWorkspaceDreamContractError",
     "StoryWorkspaceDreamDurabilityIndeterminate",
     "StoryWorkspaceDreamFileConflict",

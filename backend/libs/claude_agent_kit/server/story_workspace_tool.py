@@ -33,7 +33,7 @@ from story_workspace.contracts import (
 from .workspace import get_workspace_root
 
 
-logger = logging.getLogger(__name__)
+_logger = logging.getLogger(__name__)
 
 _TRUSTED_USER_ENV = "INK_AGENT_USER_ID"
 _TRUSTED_THREAD_ENV = "INK_AGENT_THREAD_ID"
@@ -70,7 +70,7 @@ STORY_WORKSPACE_DREAM_TOOL_SPECS: dict[str, StoryWorkspaceToolSpec] = {
 }
 
 
-def allowed_story_workspace_tool_names() -> list[str]:
+def story_workspace_allowed_tool_names() -> list[str]:
     """Return the complete Story Workspace MCP allowlist entries."""
 
     return [
@@ -202,7 +202,7 @@ def _success_json(payload: dict[str, object]) -> str:
     )
 
 
-def handle_story_workspace_dream_tool(
+def story_workspace_handle_dream_tool(
     name: str,
     arguments: dict[str, Any] | None,
 ) -> str:
@@ -253,13 +253,13 @@ def handle_story_workspace_dream_tool(
             )
         raise ValueError("unknown Story Workspace tool")
     except Exception:  # noqa: BLE001 - public fail-closed seam.
-        logger.warning("Story Workspace Dream MCP write rejected", exc_info=True)
+        _logger.warning("Story Workspace Dream MCP write rejected", exc_info=True)
         return _success_json({"error": "DREAM_WRITE_REJECTED"})
 
 
 __all__ = [
     "STORY_WORKSPACE_DREAM_TOOL_SPECS",
     "StoryWorkspaceToolSpec",
-    "allowed_story_workspace_tool_names",
-    "handle_story_workspace_dream_tool",
+    "story_workspace_allowed_tool_names",
+    "story_workspace_handle_dream_tool",
 ]

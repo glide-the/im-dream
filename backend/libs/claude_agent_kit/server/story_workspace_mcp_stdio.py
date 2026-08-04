@@ -6,13 +6,13 @@ import asyncio
 
 from mcp.server.stdio import stdio_server
 
-from .story_workspace_mcp_server import create_story_workspace_mcp_server
+from .story_workspace_mcp_server import story_workspace_create_mcp_server
 
 
 async def main() -> None:
     """Run the server without writing application logs to stdout."""
 
-    server = create_story_workspace_mcp_server()
+    server = story_workspace_create_mcp_server()
     async with stdio_server() as (read_stream, write_stream):
         await server.run(
             read_stream,

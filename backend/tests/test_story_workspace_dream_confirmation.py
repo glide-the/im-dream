@@ -41,17 +41,17 @@ from models.workflow_run import RunStatus, WorkflowRun
 from routers import story_workspace
 from services.deck import story_workflow_gateway as gateway_module
 from services.story_workspace.dream_confirmation_service import (
-    DREAM_CONFIRMATION_METADATA_KIND,
-    DreamConfirmationDispatch,
-    PersistedDreamConfirmation,
+    STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
+    StoryWorkspaceDreamConfirmationDispatch,
+    StoryWorkspacePersistedDreamConfirmation,
     StoryWorkspaceDreamConfirmationError,
     StoryWorkspaceDreamConfirmationService,
     StoryWorkspaceDreamConfirmationCoordinator,
-    build_thread_turn_dispatcher,
-    dream_confirmation_message_id,
-    mark_dream_confirmation_dispatched,
-    read_dream_confirmation_fact,
-    read_pending_dream_confirmations,
+    story_workspace_build_dream_confirmation_turn_dispatcher,
+    story_workspace_dream_confirmation_message_id,
+    story_workspace_mark_dream_confirmation_dispatched,
+    story_workspace_read_dream_confirmation_fact,
+    story_workspace_read_pending_dream_confirmations,
 )
 from story_workspace.contracts import (
     StoryWorkspaceDreamConfirmationAccepted,
@@ -401,7 +401,10 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
                 "dispatch_status",
             },
         )
-        self.assertEqual(metadata["kind"], DREAM_CONFIRMATION_METADATA_KIND)
+        self.assertEqual(
+            metadata["kind"],
+            STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
+        )
         self.assertEqual(metadata["actor"], ACTOR_ID)
         self.assertEqual(metadata["story_workspace_run_id"], RUN_ID)
         self.assertEqual(metadata["thread_id"], THREAD_ID)
@@ -418,7 +421,9 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertEqual(row["id"], persisted.accepted.message_id)
         self.assertEqual(
             row["id"],
-            dream_confirmation_message_id(ACTOR_ID, RUN_ID, "swc_test-key"),
+            story_workspace_dream_confirmation_message_id(
+                ACTOR_ID, RUN_ID, "swc_test-key"
+            ),
         )
 
         self.assertEqual(len(row["parts"]), 1)
@@ -470,7 +475,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertEqual(rewritten["metadata"], original["metadata"])
         self.assertEqual(
             rewritten["metadata"]["kind"],
-            DREAM_CONFIRMATION_METADATA_KIND,
+            STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
         )
         structured = json.loads(rewritten["parts"][0]["text"])
         self.assertEqual(
@@ -536,7 +541,12 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
 
         db = database.get_db()
         try:
-            self.assertTrue(mark_dream_confirmation_dispatched(db, replay.dispatch))
+            self.assertTrue(
+                story_workspace_mark_dream_confirmation_dispatched(
+                    db,
+                    replay.dispatch,
+                )
+            )
         finally:
             db.close()
 
@@ -603,7 +613,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         db = database.get_db()
         try:
             self.assertEqual(
-                read_dream_confirmation_fact(
+                story_workspace_read_dream_confirmation_fact(
                     db,
                     actor_id=ACTOR_ID,
                     thread_id=THREAD_ID,
@@ -612,7 +622,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
                 (True, False),
             )
             self.assertEqual(
-                read_dream_confirmation_fact(
+                story_workspace_read_dream_confirmation_fact(
                     db,
                     actor_id=OTHER_ACTOR_ID,
                     thread_id=THREAD_ID,
@@ -620,9 +630,14 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
                 ),
                 (False, False),
             )
-            self.assertTrue(mark_dream_confirmation_dispatched(db, persisted.dispatch))
+            self.assertTrue(
+                story_workspace_mark_dream_confirmation_dispatched(
+                    db,
+                    persisted.dispatch,
+                )
+            )
             self.assertEqual(
-                read_dream_confirmation_fact(
+                story_workspace_read_dream_confirmation_fact(
                     db,
                     actor_id=ACTOR_ID,
                     thread_id=THREAD_ID,
@@ -634,18 +649,28 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             db.close()
 
     def test_actor_run_and_key_are_isolated_in_message_id(self) -> None:
-        first = dream_confirmation_message_id(ACTOR_ID, RUN_ID, "swc_same")
-        self.assertNotEqual(
-            first,
-            dream_confirmation_message_id(ACTOR_ID, RUN_ID, "swc_different"),
+        first = story_workspace_dream_confirmation_message_id(
+            ACTOR_ID,
+            RUN_ID,
+            "swc_same",
         )
         self.assertNotEqual(
             first,
-            dream_confirmation_message_id(OTHER_ACTOR_ID, RUN_ID, "swc_same"),
+            story_workspace_dream_confirmation_message_id(
+                ACTOR_ID, RUN_ID, "swc_different"
+            ),
         )
         self.assertNotEqual(
             first,
-            dream_confirmation_message_id(ACTOR_ID, OTHER_RUN_ID, "swc_same"),
+            story_workspace_dream_confirmation_message_id(
+                OTHER_ACTOR_ID, RUN_ID, "swc_same"
+            ),
+        )
+        self.assertNotEqual(
+            first,
+            story_workspace_dream_confirmation_message_id(
+                ACTOR_ID, OTHER_RUN_ID, "swc_same"
+            ),
         )
 
     def test_second_projection_read_fails_closed_before_insert(self) -> None:
@@ -767,7 +792,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             await coordinator.wait_for_idle()
             with database.get_db() as db:
                 self.assertEqual(
-                    read_dream_confirmation_fact(
+                    story_workspace_read_dream_confirmation_fact(
                         db,
                         actor_id=ACTOR_ID,
                         thread_id=THREAD_ID,
@@ -781,7 +806,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             await coordinator.wait_for_idle()
             with database.get_db() as db:
                 self.assertEqual(
-                    read_dream_confirmation_fact(
+                    story_workspace_read_dream_confirmation_fact(
                         db,
                         actor_id=ACTOR_ID,
                         thread_id=THREAD_ID,
@@ -827,7 +852,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             await coordinator.wait_for_idle()
             with database.get_db() as db:
                 self.assertEqual(
-                    read_dream_confirmation_fact(
+                    story_workspace_read_dream_confirmation_fact(
                         db,
                         actor_id=ACTOR_ID,
                         thread_id=THREAD_ID,
@@ -840,7 +865,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
 
         with database.get_db() as db:
             self.assertEqual(
-                read_dream_confirmation_fact(
+                story_workspace_read_dream_confirmation_fact(
                     db,
                     actor_id=ACTOR_ID,
                     thread_id=THREAD_ID,
@@ -907,7 +932,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
 
         with database.get_db() as db:
             self.assertEqual(
-                read_dream_confirmation_fact(
+                story_workspace_read_dream_confirmation_fact(
                     db,
                     actor_id=ACTOR_ID,
                     thread_id=THREAD_ID,
@@ -935,7 +960,10 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                 with database.get_db() as db:
                     db.execute(mutate, values)
                     db.commit()
-                    self.assertEqual(read_pending_dream_confirmations(db), [])
+                    self.assertEqual(
+                        story_workspace_read_pending_dream_confirmations(db),
+                        [],
+                    )
                     db.execute(restore, restore_values)
                     db.commit()
 
@@ -957,7 +985,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                 (json.dumps(metadata), persisted.accepted.message_id),
             )
             db.commit()
-            pending = read_pending_dream_confirmations(db)
+            pending = story_workspace_read_pending_dream_confirmations(db)
 
         self.assertEqual(len(pending), 1)
         self.assertEqual(pending[0].message_id, persisted.accepted.message_id)
@@ -977,7 +1005,10 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                 ),
             )
             db.commit()
-            self.assertEqual(read_pending_dream_confirmations(db), [])
+            self.assertEqual(
+                story_workspace_read_pending_dream_confirmations(db),
+                [],
+            )
 
 
 class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTestCase):
@@ -993,12 +1024,14 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
                 await release.wait()
                 yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
 
-        dispatcher = build_thread_turn_dispatcher(
+        dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             FakeFactory(),
             request_factory=lambda **values: SimpleNamespace(**values),
         )
         parts = [{"type": "text", "text": "structured"}]
-        metadata = {"kind": DREAM_CONFIRMATION_METADATA_KIND}
+        metadata = {
+            "kind": STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND
+        }
         dispatch_task = dispatcher(
             THREAD_ID, ACTOR_ID, "message-1", parts, metadata
         )
@@ -1018,7 +1051,7 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
             def run_streaming(self, _request):
                 raise RuntimeError("dispatcher broke")
 
-        dispatcher = build_thread_turn_dispatcher(
+        dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             BrokenFactory(),
             request_factory=lambda **values: SimpleNamespace(**values),
         )
@@ -1031,7 +1064,7 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
             async def run_streaming(self, _request):
                 yield 'data: {"type":"error","errorText":"agent failed"}\n\n'
 
-        dispatcher = build_thread_turn_dispatcher(
+        dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             ErrorFactory(),
             request_factory=lambda **values: SimpleNamespace(**values),
         )
@@ -1113,17 +1146,22 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
             dispatched=False,
             request_id="request-1",
         )
-        dispatch = DreamConfirmationDispatch(
+        dispatch = StoryWorkspaceDreamConfirmationDispatch(
             thread_id=THREAD_ID,
             actor_id=ACTOR_ID,
             message_id="message-1",
             parts=[{"type": "text", "text": "structured"}],
-            metadata={"kind": DREAM_CONFIRMATION_METADATA_KIND},
+            metadata={
+                "kind": STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND
+            },
         )
 
         def sync_chain(*_args):
             worker_threads.append(threading.get_ident())
-            return PersistedDreamConfirmation(accepted=accepted, dispatch=dispatch)
+            return StoryWorkspacePersistedDreamConfirmation(
+                accepted=accepted,
+                dispatch=dispatch,
+            )
 
         with patch.object(gateway, "_submit_dream_confirmation_sync", sync_chain):
             result = await gateway.submit_dream_confirmation(
@@ -1141,7 +1179,7 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
             patch.object(
                 gateway,
                 "_submit_dream_confirmation_sync",
-                return_value=PersistedDreamConfirmation(
+                return_value=StoryWorkspacePersistedDreamConfirmation(
                     accepted=replay,
                     dispatch=None,
                 ),
@@ -1171,19 +1209,22 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
             dispatched=False,
             request_id="request-1",
         )
-        dispatch = DreamConfirmationDispatch(
+        dispatch = StoryWorkspaceDreamConfirmationDispatch(
             thread_id=THREAD_ID,
             actor_id=ACTOR_ID,
             message_id="message-1",
             parts=[{"type": "text", "text": "structured"}],
             metadata={
-                "kind": DREAM_CONFIRMATION_METADATA_KIND,
+                "kind": STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
                 "dispatch_status": "pending",
             },
         )
         persisted = iter([
-            PersistedDreamConfirmation(accepted=pending, dispatch=dispatch),
-            PersistedDreamConfirmation(
+            StoryWorkspacePersistedDreamConfirmation(
+                accepted=pending,
+                dispatch=dispatch,
+            ),
+            StoryWorkspacePersistedDreamConfirmation(
                 accepted=pending.model_copy(update={"replayed": True}),
                 dispatch=dispatch,
             ),
@@ -1224,9 +1265,9 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
             dispatched=False,
             request_id="request-1",
         )
-        persisted = PersistedDreamConfirmation(
+        persisted = StoryWorkspacePersistedDreamConfirmation(
             accepted=accepted,
-            dispatch=DreamConfirmationDispatch(
+            dispatch=StoryWorkspaceDreamConfirmationDispatch(
                 THREAD_ID,
                 ACTOR_ID,
                 "message-1",

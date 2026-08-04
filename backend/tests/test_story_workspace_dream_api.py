@@ -688,7 +688,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ),
             patch.object(
                 gateway_module,
-                "read_dream_confirmation_fact",
+                "story_workspace_read_dream_confirmation_fact",
                 return_value=(True, True),
             ) as read_confirmation,
         ):

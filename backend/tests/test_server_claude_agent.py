@@ -553,14 +553,20 @@ class TestFactoryLifecycle(unittest.TestCase):
         shutdown_names = [h.__name__ for h in self.srv.app.router.on_shutdown]
         self.assertLess(
             startup_names.index("startup_database"),
-            startup_names.index("startup_dream_confirmation_coordinator"),
+            startup_names.index(
+                "story_workspace_startup_dream_confirmation_coordinator"
+            ),
         )
         self.assertLess(
             startup_names.index("startup_claude_agent"),
-            startup_names.index("startup_dream_confirmation_coordinator"),
+            startup_names.index(
+                "story_workspace_startup_dream_confirmation_coordinator"
+            ),
         )
         self.assertLess(
-            shutdown_names.index("shutdown_dream_confirmation_coordinator"),
+            shutdown_names.index(
+                "story_workspace_shutdown_dream_confirmation_coordinator"
+            ),
             shutdown_names.index("shutdown_claude_agent"),
         )
 

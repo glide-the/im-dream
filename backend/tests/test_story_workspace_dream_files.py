@@ -788,7 +788,11 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
         )
 
     def test_cross_process_cas_has_exactly_one_winner(self) -> None:
-        if not getattr(dream_files, "DREAM_PLATFORM_SUPPORTED", False):
+        if not getattr(
+            dream_files,
+            "STORY_WORKSPACE_DREAM_PLATFORM_SUPPORTED",
+            False,
+        ):
             self.skipTest("Dream runtime requires secure Unix dirfd capabilities")
         self.initialize_run()
         self.write_stage(

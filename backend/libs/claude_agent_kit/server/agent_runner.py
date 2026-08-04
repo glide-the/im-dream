@@ -240,7 +240,7 @@ from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
-from .story_workspace_tool import allowed_story_workspace_tool_names
+from .story_workspace_tool import story_workspace_allowed_tool_names
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
     apply_claude_config_home_to_options,
@@ -299,7 +299,7 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
-    *allowed_story_workspace_tool_names(),
+    *story_workspace_allowed_tool_names(),
 ]
 
 _AUTO_MODE_REQUIRED_ALLOWED_TOOLS: frozenset[str] = frozenset({
@@ -315,7 +315,7 @@ _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
 _STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
 _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
-    allowed_story_workspace_tool_names()
+    story_workspace_allowed_tool_names()
 )
 _WORKSPACE_FILES_PERMISSION_TOOLS: frozenset[str] = frozenset({
     "Read",

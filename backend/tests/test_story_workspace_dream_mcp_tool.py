@@ -13,12 +13,12 @@ from unittest.mock import patch
 import database
 from libs.claude_agent_kit.server import story_workspace_tool
 from libs.claude_agent_kit.server.story_workspace_mcp_server import (
-    create_story_workspace_mcp_server,
+    story_workspace_create_mcp_server,
 )
 from libs.claude_agent_kit.server.story_workspace_tool import (
     STORY_WORKSPACE_DREAM_TOOL_SPECS,
-    allowed_story_workspace_tool_names,
-    handle_story_workspace_dream_tool,
+    story_workspace_allowed_tool_names,
+    story_workspace_handle_dream_tool,
 )
 from story_workspace import contracts as story_workspace_contracts
 from story_workspace.contracts import (
@@ -176,7 +176,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             ),
         ):
             return json.loads(
-                handle_story_workspace_dream_tool(tool_name, arguments)
+                story_workspace_handle_dream_tool(tool_name, arguments)
             )
 
     def test_tool_contract_exposes_only_non_forgeable_arguments(self) -> None:
@@ -185,7 +185,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             {"write_dream_run", "write_dream_stage"},
         )
         self.assertEqual(
-            set(allowed_story_workspace_tool_names()),
+            set(story_workspace_allowed_tool_names()),
             {
                 "mcp__story_workspace__write_dream_run",
                 "mcp__story_workspace__write_dream_stage",
@@ -205,7 +205,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             self.assertFalse(forbidden & set(schema["properties"]))
             self.assertFalse(schema["additionalProperties"])
 
-        server = create_story_workspace_mcp_server()
+        server = story_workspace_create_mcp_server()
         self.assertEqual(server.name, "story_workspace")
 
     def test_agent_visible_input_contracts_have_one_canonical_owner(self) -> None:

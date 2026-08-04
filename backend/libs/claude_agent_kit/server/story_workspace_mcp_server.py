@@ -9,11 +9,11 @@ from mcp.server import Server as McpServer
 
 from .story_workspace_tool import (
     STORY_WORKSPACE_DREAM_TOOL_SPECS,
-    handle_story_workspace_dream_tool,
+    story_workspace_handle_dream_tool,
 )
 
 
-def create_story_workspace_mcp_server() -> McpServer:
+def story_workspace_create_mcp_server() -> McpServer:
     """Create the local controlled Dream-write MCP namespace."""
 
     server = McpServer("story_workspace")
@@ -42,10 +42,10 @@ def create_story_workspace_mcp_server() -> McpServer:
     ) -> list[mcp_types.TextContent]:
         if name not in STORY_WORKSPACE_DREAM_TOOL_SPECS:
             raise ValueError("Unknown Story Workspace tool")
-        result_text = handle_story_workspace_dream_tool(name, arguments)
+        result_text = story_workspace_handle_dream_tool(name, arguments)
         return [mcp_types.TextContent(type="text", text=result_text)]
 
     return server
 
 
-__all__ = ["create_story_workspace_mcp_server"]
+__all__ = ["story_workspace_create_mcp_server"]

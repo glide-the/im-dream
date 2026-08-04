@@ -46,11 +46,11 @@ try:
         build_thread_turn_dispatcher,
     )
     from services.story_workspace.dream_confirmation_service import (
-        PersistedDreamConfirmation,
+        StoryWorkspacePersistedDreamConfirmation,
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
-        read_dream_confirmation_fact,
+        story_workspace_read_dream_confirmation_fact,
     )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
@@ -80,11 +80,11 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         build_thread_turn_dispatcher,
     )
     from backend.services.story_workspace.dream_confirmation_service import (
-        PersistedDreamConfirmation,
+        StoryWorkspacePersistedDreamConfirmation,
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
-        read_dream_confirmation_fact,
+        story_workspace_read_dream_confirmation_fact,
     )
 
 
@@ -720,7 +720,7 @@ class StoryWorkflowApplicationGateway:
                     thread_id=thread_id,
                 )
                 confirmation_accepted, confirmation_dispatched = (
-                    read_dream_confirmation_fact(
+                    story_workspace_read_dream_confirmation_fact(
                         db,
                         actor_id=str(actor_id),
                         thread_id=thread_id,
@@ -788,7 +788,7 @@ class StoryWorkflowApplicationGateway:
         workflow_run_id: str,
         request: Any,
         actor: dict[str, str],
-    ) -> PersistedDreamConfirmation:
+    ) -> StoryWorkspacePersistedDreamConfirmation:
         """Run the complete scoped DB/file/INSERT chain in one worker."""
 
         try:
@@ -948,7 +948,8 @@ def get_story_workflow_application_gateway() -> StoryWorkflowApplicationGateway:
     return _GATEWAY
 
 
-def get_dream_confirmation_coordinator() -> StoryWorkspaceDreamConfirmationCoordinator:
+def story_workspace_get_dream_confirmation_coordinator(
+) -> StoryWorkspaceDreamConfirmationCoordinator:
     """Return the process singleton managed by the FastAPI lifecycle."""
 
     return _DREAM_CONFIRMATION_COORDINATOR
