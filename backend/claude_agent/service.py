@@ -1461,14 +1461,46 @@ class ClaudeAgentService:
         thread_id = execution.request.thread_id
         user_message_id = execution.request.message_id
         user_parts = execution.request.message_parts
+        message_metadata = execution.request.message_metadata
+        is_persisted_dream_confirmation = (
+            isinstance(message_metadata, dict)
+            and message_metadata.get("kind")
+            == "story-workspace-dream-confirmation"
+        )
 
         def _save_user() -> None:
             resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": ""}]
+            if is_persisted_dream_confirmation:
+                try:
+                    from services.story_workspace.dream_confirmation_service import (
+                        story_workspace_assert_persisted_dream_confirmation_turn,
+                    )
+                except ModuleNotFoundError:
+                    from backend.services.story_workspace.dream_confirmation_service import (
+                        story_workspace_assert_persisted_dream_confirmation_turn,
+                    )
+
+                db = database.get_db()
+                try:
+                    story_workspace_assert_persisted_dream_confirmation_turn(
+                        db,
+                        thread_id=thread_id,
+                        actor_id=str(execution.request.user_id),
+                        message_id=user_message_id,
+                        parts=resolved_user_parts,
+                        metadata=message_metadata,
+                    )
+                finally:
+                    db.close()
+                # The confirmation service owns this pre-persisted hidden row.
+                # In particular, never replace its newer durable claim lease
+                # with the older request snapshot carried through a thread lock.
+                return
             database.save_chat_message(
                 thread_id, "user",
                 parts=resolved_user_parts,
                 message_id=user_message_id,
-                metadata=execution.request.message_metadata,
+                metadata=message_metadata,
             )
             # Auto-fill thread title from first user message if still NULL.
             thread = database.get_chat_thread(thread_id, int(execution.request.user_id))
@@ -1483,6 +1515,8 @@ class ClaudeAgentService:
             logger.exception(
                 "Failed to persist user message for thread_id=%s", thread_id
             )
+            if is_persisted_dream_confirmation:
+                raise
 
     async def _persist_partial_assistant(self, execution: "_TurnExecution") -> None:
         """Flush partial assistant content collected so far (called on cancel/error).

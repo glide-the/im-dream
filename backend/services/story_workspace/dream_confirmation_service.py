@@ -516,6 +516,72 @@ def _story_workspace_dispatch_matches_expected(
     )
 
 
+def story_workspace_assert_persisted_dream_confirmation_turn(
+    db: sqlite3.Connection,
+    *,
+    thread_id: str,
+    actor_id: str,
+    message_id: str,
+    parts: list,
+    metadata: dict,
+) -> None:
+    """Verify an Agent request references the authoritative hidden turn.
+
+    Confirmation messages are already persisted and claimed before the Agent
+    starts. The Agent may carry an older lease snapshot while waiting for the
+    per-thread lock, so persistence must validate the immutable envelope and
+    claim identity without writing that stale snapshot back to SQLite.
+    """
+
+    row = db.execute(
+        "SELECT message.id, message.thread_id, message.role, message.parts, "
+        "message.metadata, thread.user_id "
+        "FROM chat_message AS message "
+        "JOIN chat_thread AS thread ON thread.id = message.thread_id "
+        "WHERE message.id = ?",
+        (message_id,),
+    ).fetchone()
+    current = _decode_confirmation_dispatch_row(row) if row is not None else None
+    if not (
+        current is not None
+        and current.thread_id == thread_id
+        and current.actor_id == str(actor_id)
+        and current.message_id == message_id
+        and _story_workspace_dream_confirmation_has_run_scope(db, current)
+        and isinstance(parts, list)
+        and isinstance(metadata, dict)
+        and current.metadata.get("dispatch_status")
+        == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+        and metadata.get("dispatch_status")
+        == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+        and _valid_lease_deadline(
+            current.metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+        )
+        and _valid_lease_deadline(metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL))
+    ):
+        raise StoryWorkspaceDreamConfirmationError(
+            "IDEMPOTENCY_CONFLICT", 409
+        )
+
+    current_identity = {
+        key: value
+        for key, value in current.metadata.items()
+        if key != _DISPATCH_CLAIM_LEASE_UNTIL
+    }
+    request_identity = {
+        key: value
+        for key, value in metadata.items()
+        if key != _DISPATCH_CLAIM_LEASE_UNTIL
+    }
+    if (
+        current_identity != request_identity
+        or _canonical_json(current.parts) != _canonical_json(parts)
+    ):
+        raise StoryWorkspaceDreamConfirmationError(
+            "IDEMPOTENCY_CONFLICT", 409
+        )
+
+
 def story_workspace_claim_dream_confirmation(
     db: sqlite3.Connection,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
@@ -907,6 +973,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         clock: Callable[[], float] = time.monotonic,
         lease_clock: Callable[[], float] = time.time,
         lease_duration_s: float = 120.0,
+        lease_renew_interval_s: Optional[float] = None,
         claim_id_factory: Callable[[], str] = lambda: uuid4().hex,
         retry_base_s: float = 2.0,
         retry_max_s: float = 60.0,
@@ -922,6 +989,24 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         ):
             raise ValueError("lease_duration_s must be finite and positive")
         self._lease_duration_s = max(float(lease_duration_s), 0.1)
+        default_renew_interval_s = max(
+            min(self._lease_duration_s / 3.0, 30.0),
+            0.01,
+        )
+        if lease_renew_interval_s is None:
+            self._lease_renew_interval_s = default_renew_interval_s
+        else:
+            if (
+                not _valid_lease_deadline(lease_renew_interval_s)
+                or float(lease_renew_interval_s) <= 0
+            ):
+                raise ValueError(
+                    "lease_renew_interval_s must be finite and positive"
+                )
+            self._lease_renew_interval_s = min(
+                max(float(lease_renew_interval_s), 0.01),
+                default_renew_interval_s,
+            )
         self._claim_id_factory = claim_id_factory
         self._retry_base_s = max(float(retry_base_s), 0.01)
         self._retry_max_s = max(float(retry_max_s), self._retry_base_s)
@@ -1076,24 +1161,25 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         self,
         dispatch: StoryWorkspaceDreamConfirmationDispatch,
     ) -> None:
-        interval = max(min(self._lease_duration_s / 3.0, 30.0), 0.05)
-        try:
-            while True:
-                await asyncio.sleep(interval)
+        while True:
+            await asyncio.sleep(self._lease_renew_interval_s)
+            try:
                 renewed = await asyncio.to_thread(
                     self._set_claim_lease_sync,
                     dispatch,
                     self._lease_clock() + self._lease_duration_s,
                 )
-                if not renewed:
-                    return
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            _logger.exception(
-                "Dream confirmation claim renewal failed for message_id=%s",
-                dispatch.message_id,
-            )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                _logger.exception(
+                    "Dream confirmation claim renewal failed for "
+                    "message_id=%s; retrying before lease expiry",
+                    dispatch.message_id,
+                )
+                continue
+            if not renewed:
+                return
 
     async def _consume_and_ack(
         self,

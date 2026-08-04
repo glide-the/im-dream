@@ -478,9 +478,28 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         serialized = json.dumps(row, ensure_ascii=False).lower()
         self.assertFalse(any(word in serialized for word in forbidden))
 
-    def test_agent_service_resave_preserves_hidden_command_and_metadata(self) -> None:
+    def test_agent_resave_cannot_roll_back_authoritative_claim_lease(self) -> None:
         persisted = self.submit()
-        original = self.fixture.rows()[0]
+        claimed = self.fixture.claim(
+            persisted.dispatch,
+            claim_id="claim-resave-owner",
+            now_s=0.0,
+            lease_duration_s=2.0,
+        )
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            lease_clock=ManualClock(98.0),
+        )
+        self.assertTrue(coordinator._set_claim_lease_sync(claimed, 100.0))
+        authoritative = self.fixture.rows()[0]
+        self.assertEqual(
+            authoritative["metadata"]["dispatch_claim_lease_until"],
+            100.0,
+        )
+        self.assertEqual(
+            claimed.metadata["dispatch_claim_lease_until"],
+            2.0,
+        )
 
         async def _resave() -> None:
             request = ClaudeAgentRunRequest(
@@ -488,8 +507,8 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
                 thread_id=THREAD_ID,
                 resume=True,
                 message_id=persisted.accepted.message_id,
-                message_parts=original["parts"],
-                message_metadata=original["metadata"],
+                message_parts=claimed.parts,
+                message_metadata=claimed.metadata,
             )
             execution = claude_service_module._TurnExecution(
                 request=request,
@@ -505,9 +524,11 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
 
         asyncio.run(_resave())
         rewritten = self.fixture.rows()[0]
-        self.assertEqual(rewritten["id"], original["id"])
-        self.assertEqual(rewritten["parts"], original["parts"])
-        self.assertEqual(rewritten["metadata"], original["metadata"])
+        self.assertEqual(rewritten, authoritative)
+        self.assertEqual(
+            rewritten["metadata"]["dispatch_claim_lease_until"],
+            100.0,
+        )
         self.assertEqual(
             rewritten["metadata"]["kind"],
             STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
@@ -517,6 +538,77 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             structured["command"],
             command().model_dump(mode="json", by_alias=True),
         )
+
+    def test_agent_cannot_recreate_missing_hidden_confirmation_row(self) -> None:
+        persisted = self.submit()
+        claimed = self.fixture.claim(persisted.dispatch)
+        with database.get_db() as db:
+            db.execute(
+                "DELETE FROM chat_message WHERE id = ?",
+                (claimed.message_id,),
+            )
+            db.commit()
+
+        async def _resave() -> None:
+            request = ClaudeAgentRunRequest(
+                user_id=ACTOR_ID,
+                thread_id=THREAD_ID,
+                resume=True,
+                message_id=claimed.message_id,
+                message_parts=claimed.parts,
+                message_metadata=claimed.metadata,
+            )
+            execution = claude_service_module._TurnExecution(
+                request=request,
+                state=AgentRunState(session_id=THREAD_ID),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+            )
+            await ClaudeAgentService()._persist_user_message(execution)
+
+        with self.assertRaises(StoryWorkspaceDreamConfirmationError):
+            asyncio.run(_resave())
+        self.assertEqual(self.fixture.rows(), [])
+
+    def test_agent_cannot_replace_hidden_confirmation_identity_or_parts(
+        self,
+    ) -> None:
+        persisted = self.submit()
+        claimed = self.fixture.claim(persisted.dispatch)
+        authoritative = self.fixture.rows()[0]
+        forged_metadata = {
+            **claimed.metadata,
+            "request_id": "request-forged",
+        }
+
+        async def _resave() -> None:
+            request = ClaudeAgentRunRequest(
+                user_id=ACTOR_ID,
+                thread_id=THREAD_ID,
+                resume=True,
+                message_id=claimed.message_id,
+                message_parts=[{"type": "text", "text": "forged"}],
+                message_metadata=forged_metadata,
+            )
+            execution = claude_service_module._TurnExecution(
+                request=request,
+                state=AgentRunState(session_id=THREAD_ID),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+            )
+            await ClaudeAgentService()._persist_user_message(execution)
+
+        with self.assertRaises(StoryWorkspaceDreamConfirmationError):
+            asyncio.run(_resave())
+        self.assertEqual(self.fixture.rows()[0], authoritative)
 
     def test_url_body_and_authoritative_thread_mismatches_are_rejected(self) -> None:
         self.assert_error(409, storyWorkspaceRunId=OTHER_RUN_ID)
@@ -956,6 +1048,85 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
         completed = self.fixture.rows()[0]["metadata"]
         self.assertEqual(completed["dispatch_status"], "dispatched")
         self.assertNotIn("dispatch_claim_id", completed)
+
+    async def test_heartbeat_retries_transient_renewal_failure(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        release = asyncio.Event()
+        entered = asyncio.Event()
+
+        async def consume(*_args):
+            entered.set()
+            await release.wait()
+            return True
+
+        clock = ManualClock(10.0)
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            lease_duration_s=0.2,
+            lease_renew_interval_s=0.01,
+            claim_id_factory=lambda: "claim-heartbeat",
+        )
+        contender_consumptions = 0
+
+        async def contender_consume(*_args):
+            nonlocal contender_consumptions
+            contender_consumptions += 1
+            return True
+
+        contender = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: contender_consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            lease_duration_s=0.2,
+            lease_renew_interval_s=0.01,
+            claim_id_factory=lambda: "claim-contender",
+        )
+        real_set_lease = coordinator._set_claim_lease_sync
+        renewal_attempts = 0
+        successful_renewals = 0
+
+        def flaky_set_lease(dispatch, lease_until_s):
+            nonlocal renewal_attempts, successful_renewals
+            renewal_attempts += 1
+            clock.advance(0.1)
+            if renewal_attempts == 1:
+                raise sqlite3.OperationalError("temporary busy")
+            renewed = real_set_lease(dispatch, lease_until_s)
+            successful_renewals += int(renewed)
+            return renewed
+
+        try:
+            with patch.object(
+                coordinator,
+                "_set_claim_lease_sync",
+                flaky_set_lease,
+                ):
+                self.assertTrue(coordinator.schedule(persisted.dispatch))
+                await entered.wait()
+                await self._wait_until(lambda: successful_renewals >= 1)
+                metadata = self.fixture.rows()[0]["metadata"]
+                self.assertEqual(metadata["dispatch_status"], "dispatching")
+                self.assertEqual(metadata["dispatch_claim_id"], "claim-heartbeat")
+                self.assertGreater(
+                    metadata["dispatch_claim_lease_until"],
+                    10.2,
+                )
+                self.assertEqual(await contender.reconcile_once(), 0)
+                self.assertEqual(contender_consumptions, 0)
+                release.set()
+                await coordinator.wait_for_idle()
+        finally:
+            release.set()
+            await coordinator.stop()
+            await contender.stop()
 
     async def test_exact_replay_during_fresh_claim_cannot_schedule_dispatch(
         self,
