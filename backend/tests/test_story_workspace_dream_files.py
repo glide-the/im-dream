@@ -814,6 +814,32 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
                     operation()
                 self.assertEqual(self.tree_snapshot(self.workspace), before)
 
+    def test_write_stage_authorizes_thread_before_probing_source_paths(self) -> None:
+        self.initialize_run()
+        run_path = self.dream / "runtime" / "runs" / RUN_ID / "run.json"
+        payload = json.loads(run_path.read_text(encoding="utf-8"))
+        payload["thread_id"] = "attacker-thread"
+        run_path.write_text(json.dumps(payload), encoding="utf-8")
+        before = self.tree_snapshot(self.workspace)
+
+        with patch.object(
+            self.writer,
+            "_validate_source_files",
+            wraps=self.writer._validate_source_files,
+        ) as validate_source_files:
+            with self.assertRaises(StoryWorkspaceDreamFileError) as raised:
+                self.writer.write_stage(
+                    self.run,
+                    stage=StoryWorkspaceDreamStage.CHARACTERS,
+                    source_files=["private/probe.md"],
+                    items=[self.item("private/probe.md")],
+                    expected_revision=0,
+                )
+            validate_source_files.assert_not_called()
+            self.assertIn("thread", str(raised.exception))
+
+        self.assertEqual(self.tree_snapshot(self.workspace), before)
+
 
 if __name__ == "__main__":
     unittest.main()

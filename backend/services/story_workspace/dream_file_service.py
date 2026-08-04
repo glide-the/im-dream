@@ -612,7 +612,6 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
             page=_stage_page(canonical_stage, run_id),
             items=items,
         )
-        self._validate_source_files(candidate)
 
         with self._locked_run(run_id, create=False) as run_directory:
             run_file = self._read_model(
@@ -628,6 +627,10 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                 source=source,
                 thread_id=thread_id,
             )
+            # Authorization must precede resolve/stat of caller-provided paths;
+            # otherwise a cross-thread caller could use validation errors as a
+            # workspace path-existence oracle.
+            self._validate_source_files(candidate)
             stages_directory = self._stages_directory(run_directory, create=True)
             current = self._read_model(
                 stages_directory,
