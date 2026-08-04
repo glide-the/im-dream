@@ -318,6 +318,45 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             any(statement.lstrip().upper().startswith("CREATE ") for statement in self.statements)
         )
 
+    def test_run_in_actors_second_workspace_uses_its_exact_workspace(self) -> None:
+        db = sqlite3.connect(self.database_path)
+        try:
+            db.execute(
+                "INSERT INTO story_workspace_workspaces (id, owner_id, created_at) "
+                "VALUES (?, ?, ?)",
+                ("workspace-2", 7, "2026-08-04T01:00:00+00:00"),
+            )
+            db.execute(
+                "INSERT INTO story_workspace_workspaces (id, owner_id, created_at) "
+                "VALUES (?, ?, ?)",
+                ("workspace-other-actor", 8, "2026-08-04T02:00:00+00:00"),
+            )
+            db.execute(
+                "UPDATE workflow_runs SET workspace_id = ? WHERE id = ?",
+                ("workspace-2", RUN_ID),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        cross_actor_result = self._call(
+            "write_dream_run",
+            {"workflowRunId": RUN_ID, "expectedRevision": 0},
+            actor_id="8",
+        )
+        self.assertEqual(cross_actor_result, {"error": "DREAM_WRITE_REJECTED"})
+        self.assertFalse((self.workspace / ".dream" / "runtime").exists())
+
+        result = self._call(
+            "write_dream_run",
+            {"workflowRunId": RUN_ID, "expectedRevision": 0},
+        )
+
+        self.assertEqual(
+            result,
+            {"changedStages": [], "revision": 1, "run": RUN_ID},
+        )
+
     def test_cross_thread_cross_actor_and_forgeable_inputs_fail_closed(self) -> None:
         runtime = self.workspace / ".dream" / "runtime"
         for actor_id, thread_id, extra in (

@@ -146,9 +146,14 @@ def _with_authoritative_context(
     try:
         db.row_factory = sqlite3.Row
         workspace_row = db.execute(
-            "SELECT id FROM story_workspace_workspaces WHERE owner_id = ? "
-            "ORDER BY created_at ASC, id ASC LIMIT 1",
-            (actor_id,),
+            "SELECT workflow_runs.workspace_id AS id "
+            "FROM workflow_runs "
+            "INNER JOIN story_workspace_workspaces "
+            "ON story_workspace_workspaces.id = workflow_runs.workspace_id "
+            "WHERE workflow_runs.id = ? "
+            "AND story_workspace_workspaces.owner_id = ? "
+            "LIMIT 1",
+            (workflow_run_id, actor_id),
         ).fetchone()
         if workspace_row is None:
             raise PermissionError("actor workspace is unavailable")
