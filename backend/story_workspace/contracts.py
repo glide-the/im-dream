@@ -187,6 +187,69 @@ class _StoryWorkspaceDreamWireModel(BaseModel):
     )
 
 
+class StoryWorkspaceDreamToolInput(BaseModel):
+    """Canonical base for Agent-visible Dream MCP input contracts."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=False,
+        str_strip_whitespace=True,
+    )
+
+
+class StoryWorkspaceDreamRunToolInput(StoryWorkspaceDreamToolInput):
+    workflow_run_id: str = Field(
+        alias="workflowRunId",
+        pattern=r"^run_[0-9a-f]{32}$",
+        description="Authoritative WorkflowRun ID supplied by the host-started flow.",
+    )
+    expected_revision: int = Field(
+        alias="expectedRevision",
+        ge=0,
+        strict=True,
+        description="Current run.json revision; use 0 when it does not exist.",
+    )
+
+
+class StoryWorkspaceDreamStageItemToolInput(StoryWorkspaceDreamToolInput):
+    entity_id: str = Field(alias="entityId", min_length=1, max_length=128)
+    display_name: str = Field(alias="displayName", min_length=1, max_length=200)
+    summary: Optional[str] = Field(default=None, max_length=4000)
+    source_file: str = Field(alias="sourceFile", min_length=1, max_length=1024)
+    relations: list[str] = Field(
+        default_factory=list,
+        max_length=STORY_WORKSPACE_DREAM_RELATIONS_MAX,
+    )
+
+
+class StoryWorkspaceDreamStageToolInput(StoryWorkspaceDreamToolInput):
+    workflow_run_id: str = Field(
+        alias="workflowRunId",
+        pattern=r"^run_[0-9a-f]{32}$",
+        description="Authoritative WorkflowRun ID supplied by the host-started flow.",
+    )
+    stage: StoryWorkspaceDreamStage = Field(
+        description="One canonical Dream stage: characters, scenes, or storyboards."
+    )
+    source_files: list[str] = Field(
+        alias="sourceFiles",
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX,
+        description="Existing canonical workspace files represented by this stage.",
+    )
+    items: list[StoryWorkspaceDreamStageItemToolInput] = Field(
+        default_factory=list,
+        max_length=STORY_WORKSPACE_DREAM_ITEMS_MAX,
+        description="Normalized entities rendered by the corresponding Dream page.",
+    )
+    expected_revision: int = Field(
+        alias="expectedRevision",
+        ge=0,
+        strict=True,
+        description="Current stage file revision; use 0 when it does not exist.",
+    )
+
+
 class StoryWorkspaceDreamSource(_StoryWorkspaceDreamStorageModel):
     deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
     binding_revision: _StoryWorkspaceDreamPositiveInt
@@ -907,16 +970,20 @@ __all__ = [
     "StoryWorkspaceDreamConfirmationCommand",
     "StoryWorkspaceDreamEdit",
     "StoryWorkspaceDreamFilesResponse",
+    "StoryWorkspaceDreamRunToolInput",
     "StoryWorkspaceDreamRunFile",
     "StoryWorkspaceDreamSource",
     "StoryWorkspaceDreamSourceResponse",
     "StoryWorkspaceDreamStage",
     "StoryWorkspaceDreamStageFile",
+    "StoryWorkspaceDreamStageItemToolInput",
     "StoryWorkspaceDreamStageItem",
     "StoryWorkspaceDreamStageItemResponse",
     "StoryWorkspaceDreamStagePage",
     "StoryWorkspaceDreamStagePageResponse",
     "StoryWorkspaceDreamStageResponse",
+    "StoryWorkspaceDreamStageToolInput",
+    "StoryWorkspaceDreamToolInput",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",
     "StoryWorkspaceGuidanceCommandPayload",

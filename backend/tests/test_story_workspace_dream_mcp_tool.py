@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import database
+from libs.claude_agent_kit.server import story_workspace_tool
 from libs.claude_agent_kit.server.story_workspace_mcp_server import (
     create_story_workspace_mcp_server,
 )
@@ -18,6 +19,12 @@ from libs.claude_agent_kit.server.story_workspace_tool import (
     STORY_WORKSPACE_DREAM_TOOL_SPECS,
     allowed_story_workspace_tool_names,
     handle_story_workspace_dream_tool,
+)
+from story_workspace import contracts as story_workspace_contracts
+from story_workspace.contracts import (
+    StoryWorkspaceDreamRunToolInput,
+    StoryWorkspaceDreamStageItemToolInput,
+    StoryWorkspaceDreamStageToolInput,
 )
 
 
@@ -200,6 +207,61 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
 
         server = create_story_workspace_mcp_server()
         self.assertEqual(server.name, "story_workspace")
+
+    def test_agent_visible_input_contracts_have_one_canonical_owner(self) -> None:
+        contract_types = (
+            StoryWorkspaceDreamRunToolInput,
+            StoryWorkspaceDreamStageItemToolInput,
+            StoryWorkspaceDreamStageToolInput,
+        )
+        for contract_type in contract_types:
+            self.assertEqual(contract_type.__module__, "story_workspace.contracts")
+            self.assertIn(contract_type.__name__, story_workspace_contracts.__all__)
+
+        for legacy_name in (
+            "_DreamToolInput",
+            "_WriteDreamRunInput",
+            "_DreamStageItemInput",
+            "_WriteDreamStageInput",
+        ):
+            self.assertFalse(hasattr(story_workspace_tool, legacy_name))
+
+        run_schema = StoryWorkspaceDreamRunToolInput.model_json_schema(
+            by_alias=True
+        )
+        self.assertEqual(
+            set(run_schema["properties"]),
+            {"workflowRunId", "expectedRevision"},
+        )
+        self.assertFalse(run_schema["additionalProperties"])
+
+        stage_schema = StoryWorkspaceDreamStageToolInput.model_json_schema(
+            by_alias=True
+        )
+        self.assertEqual(
+            set(stage_schema["properties"]),
+            {
+                "workflowRunId",
+                "stage",
+                "sourceFiles",
+                "items",
+                "expectedRevision",
+            },
+        )
+        item_schema = stage_schema["$defs"][
+            "StoryWorkspaceDreamStageItemToolInput"
+        ]
+        self.assertEqual(
+            set(item_schema["properties"]),
+            {
+                "entityId",
+                "displayName",
+                "summary",
+                "sourceFile",
+                "relations",
+            },
+        )
+        self.assertFalse(item_schema["additionalProperties"])
 
     def test_real_run_and_stage_writes_return_minimal_json(self) -> None:
         run_result = self._call(

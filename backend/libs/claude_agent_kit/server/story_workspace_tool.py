@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 from models.workflow_run import AuthenticatedActorContext, WorkflowRun
 from services.story_workspace.dream_file_service import (
@@ -26,10 +26,8 @@ from services.story_workspace.dream_file_service import (
 )
 from services.workflow.run_service import WorkflowRunService
 from story_workspace.contracts import (
-    STORY_WORKSPACE_DREAM_ITEMS_MAX,
-    STORY_WORKSPACE_DREAM_RELATIONS_MAX,
-    STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX,
-    StoryWorkspaceDreamStage,
+    StoryWorkspaceDreamRunToolInput,
+    StoryWorkspaceDreamStageToolInput,
 )
 
 from .workspace import get_workspace_root
@@ -39,69 +37,7 @@ logger = logging.getLogger(__name__)
 
 _TRUSTED_USER_ENV = "INK_AGENT_USER_ID"
 _TRUSTED_THREAD_ENV = "INK_AGENT_THREAD_ID"
-_RUN_PATTERN = r"^run_[0-9a-f]{32}$"
 _ResultT = TypeVar("_ResultT", bound=BaseModel)
-
-
-class _DreamToolInput(BaseModel):
-    model_config = ConfigDict(
-        extra="forbid",
-        populate_by_name=False,
-        str_strip_whitespace=True,
-    )
-
-
-class _WriteDreamRunInput(_DreamToolInput):
-    workflow_run_id: str = Field(
-        alias="workflowRunId",
-        pattern=_RUN_PATTERN,
-        description="Authoritative WorkflowRun ID supplied by the host-started flow.",
-    )
-    expected_revision: int = Field(
-        alias="expectedRevision",
-        ge=0,
-        strict=True,
-        description="Current run.json revision; use 0 when it does not exist.",
-    )
-
-
-class _DreamStageItemInput(_DreamToolInput):
-    entity_id: str = Field(alias="entityId", min_length=1, max_length=128)
-    display_name: str = Field(alias="displayName", min_length=1, max_length=200)
-    summary: str | None = Field(default=None, max_length=4000)
-    source_file: str = Field(alias="sourceFile", min_length=1, max_length=1024)
-    relations: list[str] = Field(
-        default_factory=list,
-        max_length=STORY_WORKSPACE_DREAM_RELATIONS_MAX,
-    )
-
-
-class _WriteDreamStageInput(_DreamToolInput):
-    workflow_run_id: str = Field(
-        alias="workflowRunId",
-        pattern=_RUN_PATTERN,
-        description="Authoritative WorkflowRun ID supplied by the host-started flow.",
-    )
-    stage: StoryWorkspaceDreamStage = Field(
-        description="One canonical Dream stage: characters, scenes, or storyboards."
-    )
-    source_files: list[str] = Field(
-        alias="sourceFiles",
-        min_length=1,
-        max_length=STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX,
-        description="Existing canonical workspace files represented by this stage.",
-    )
-    items: list[_DreamStageItemInput] = Field(
-        default_factory=list,
-        max_length=STORY_WORKSPACE_DREAM_ITEMS_MAX,
-        description="Normalized entities rendered by the corresponding Dream page.",
-    )
-    expected_revision: int = Field(
-        alias="expectedRevision",
-        ge=0,
-        strict=True,
-        description="Current stage file revision; use 0 when it does not exist.",
-    )
 
 
 @dataclass(frozen=True)
@@ -120,7 +56,7 @@ STORY_WORKSPACE_DREAM_TOOL_SPECS: dict[str, StoryWorkspaceToolSpec] = {
             "thread, routing, filenames, and frozen source provenance are host-derived. "
             "It does not advance the WorkflowRun state machine."
         ),
-        input_schema=_WriteDreamRunInput.model_json_schema(by_alias=True),
+        input_schema=StoryWorkspaceDreamRunToolInput.model_json_schema(by_alias=True),
     ),
     "write_dream_stage": StoryWorkspaceToolSpec(
         description=(
@@ -129,7 +65,7 @@ STORY_WORKSPACE_DREAM_TOOL_SPECS: dict[str, StoryWorkspaceToolSpec] = {
             "protocol; identity, routing, filename, schema, and provenance are "
             "host-derived. It does not advance the WorkflowRun state machine."
         ),
-        input_schema=_WriteDreamStageInput.model_json_schema(by_alias=True),
+        input_schema=StoryWorkspaceDreamStageToolInput.model_json_schema(by_alias=True),
     ),
 }
 
@@ -274,7 +210,7 @@ def handle_story_workspace_dream_tool(
 
     try:
         if name == "write_dream_run":
-            request = _WriteDreamRunInput.model_validate(arguments or {})
+            request = StoryWorkspaceDreamRunToolInput.model_validate(arguments or {})
             result = _with_authoritative_context(
                 request.workflow_run_id,
                 lambda writer, run: writer.write_run(
@@ -291,7 +227,7 @@ def handle_story_workspace_dream_tool(
                 }
             )
         if name == "write_dream_stage":
-            request = _WriteDreamStageInput.model_validate(arguments or {})
+            request = StoryWorkspaceDreamStageToolInput.model_validate(arguments or {})
             result = _with_authoritative_context(
                 request.workflow_run_id,
                 lambda writer, run: writer.write_stage(
