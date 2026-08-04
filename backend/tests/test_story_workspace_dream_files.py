@@ -9,6 +9,7 @@ import shutil
 import stat
 import tempfile
 import unittest
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -292,6 +293,37 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
                 required_stages=list(StoryWorkspaceDreamStage),
                 run_revision=1,
                 stages={StoryWorkspaceDreamStage.CHARACTERS: nested},
+                can_confirm=False,
+            )
+
+    def test_response_rejects_stage_route_for_a_different_outer_run(self) -> None:
+        source = StoryWorkspaceDreamSourceResponse(
+            deck_plugin_binding_id="binding-1",
+            binding_revision=3,
+            deck_plugin_version="1.2.3",
+            deck_runtime_snapshot_id="snapshot-1",
+            runtime_plugin_lock_id="lock-1",
+        )
+        stage = StoryWorkspaceDreamStageResponse(
+            stage=StoryWorkspaceDreamStage.CHARACTERS,
+            revision=1,
+            source_files=["assets/characters/lead.md"],
+            page={
+                "title": "人物",
+                "entry_route": (
+                    f"/story-workspace/characters?run={OTHER_RUN_ID}"
+                ),
+            },
+            items=[self.item("assets/characters/lead.md")],
+        )
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamFilesResponse(
+                story_workspace_run_id=RUN_ID,
+                thread_id="thread-1",
+                source=source,
+                required_stages=list(StoryWorkspaceDreamStage),
+                run_revision=1,
+                stages={StoryWorkspaceDreamStage.CHARACTERS: stage},
                 can_confirm=False,
             )
 
@@ -1081,6 +1113,89 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
                 stage=StoryWorkspaceDreamStage.CHARACTERS,
             ).revision,
             1,
+        )
+
+    def test_visible_stage_swap_after_directory_fsync_is_indeterminate(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        stages = self.dream / "runtime" / "runs" / RUN_ID / "stages"
+        displaced = stages.with_name("stages.fsync-displaced")
+        visible_target = stages / "characters.json"
+        old_bytes = visible_target.read_bytes()
+        original_fsync = os.fsync
+        swapped = False
+
+        def fsync_then_swap_visible_stages(descriptor: int) -> None:
+            nonlocal swapped
+            original_fsync(descriptor)
+            if not swapped and stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                swapped = True
+                stages.rename(displaced)
+                stages.mkdir()
+                visible_target.write_bytes(old_bytes)
+
+        with patch.object(os, "fsync", side_effect=fsync_then_swap_visible_stages):
+            with self.assertRaises(
+                dream_files.StoryWorkspaceDreamDurabilityIndeterminate
+            ) as raised:
+                self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="durable-in-pinned-directory",
+                )
+
+        self.assertEqual(raised.exception.pinned_observed_revision, 2)
+        self.assertEqual(raised.exception.visible_observed_revision, 1)
+        self.assertEqual(
+            raised.exception.state_hint,
+            "pinned-commit-visible-directory-replaced",
+        )
+        self.assertEqual(
+            json.loads((displaced / "characters.json").read_text())["revision"],
+            2,
+        )
+        self.assertEqual(
+            self.reader.read_stage(
+                self.run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+            ).revision,
+            1,
+        )
+
+    def test_durable_commit_cleanup_failure_warns_and_returns_revision(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        with patch.object(
+            os,
+            "unlink",
+            side_effect=OSError("injected post-commit cleanup failure"),
+        ):
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                committed = self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="durably-committed",
+                )
+
+        self.assertEqual(committed.revision, 2)
+        self.assertTrue(
+            any("cleanup" in str(warning.message).lower() for warning in caught)
+        )
+        self.assertEqual(
+            self.reader.read_stage(
+                self.run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+            ).revision,
+            2,
         )
 
     def test_cleanup_error_does_not_mask_primary_replace_error(self) -> None:

@@ -17,6 +17,7 @@ import re
 import stat
 import sys
 import threading
+import warnings
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -101,14 +102,24 @@ class StoryWorkspaceDreamPlatformUnsupported(StoryWorkspaceDreamFileError):
 
 
 class StoryWorkspaceDreamDurabilityIndeterminate(StoryWorkspaceDreamIOError):
-    """Replace succeeded but rollback could not establish a durable outcome."""
+    """The pinned and visible trees do not establish one trustworthy outcome."""
 
-    def __init__(self, observed_revision: int | None, state_hint: str) -> None:
+    def __init__(
+        self,
+        observed_revision: int | None,
+        state_hint: str,
+        *,
+        visible_observed_revision: int | None = None,
+    ) -> None:
         super().__init__(
             "Dream file durability is indeterminate; re-read the file before "
-            f"retrying (observed_revision={observed_revision}, state={state_hint})"
+            "retrying "
+            f"(pinned_revision={observed_revision}, "
+            f"visible_revision={visible_observed_revision}, state={state_hint})"
         )
         self.observed_revision = observed_revision
+        self.pinned_observed_revision = observed_revision
+        self.visible_observed_revision = visible_observed_revision
         self.state_hint = state_hint
 
 
@@ -783,6 +794,32 @@ class _StoryWorkspaceDreamFilesystem:
         except StoryWorkspaceDreamFileError:
             return None
 
+    @classmethod
+    def _observe_visible_revision(
+        cls,
+        directory: _PinnedDirectory,
+        filename: str,
+    ) -> int | None:
+        visible_descriptor: int | None = None
+        try:
+            visible_descriptor = cls._open_child_directory(
+                directory.parent_descriptor,
+                directory.name,
+                create=False,
+                optional=True,
+            )
+            if visible_descriptor is None:
+                return None
+            return cls._observe_revision(visible_descriptor, filename)
+        except StoryWorkspaceDreamFileError:
+            return None
+        finally:
+            if visible_descriptor is not None:
+                try:
+                    os.close(visible_descriptor)
+                except OSError:
+                    pass
+
     @staticmethod
     def _cleanup_names(
         directory_descriptor: int,
@@ -839,6 +876,7 @@ class _StoryWorkspaceDreamFilesystem:
         old_payload: bytes | None = None
         replace_attempted = False
         replaced = False
+        durable = False
         try:
             verify_context()
             old_payload = cls._existing_bytes(directory.descriptor, filename)
@@ -854,7 +892,36 @@ class _StoryWorkspaceDreamFilesystem:
             replaced = True
             verify_context()
             os.fsync(directory.descriptor)
+            durable = True
+            verify_context()
         except Exception as operation_error:
+            if durable:
+                pinned_observed_revision = cls._observe_revision(
+                    directory.descriptor,
+                    filename,
+                )
+                visible_observed_revision = cls._observe_visible_revision(
+                    directory,
+                    filename,
+                )
+                state_hint = "durable-commit-context-changed"
+                if (
+                    pinned_observed_revision == next_revision
+                    and visible_observed_revision == previous_revision
+                ):
+                    state_hint = "pinned-commit-visible-directory-replaced"
+                indeterminate = StoryWorkspaceDreamDurabilityIndeterminate(
+                    pinned_observed_revision,
+                    state_hint,
+                    visible_observed_revision=visible_observed_revision,
+                )
+                _add_cleanup_note(indeterminate, operation_error)
+                cls._cleanup_names(
+                    directory.descriptor,
+                    cleanup_names,
+                    indeterminate,
+                )
+                raise indeterminate from operation_error
             if replace_attempted and not replaced:
                 try:
                     replaced = (
@@ -900,6 +967,10 @@ class _StoryWorkspaceDreamFilesystem:
                     indeterminate = StoryWorkspaceDreamDurabilityIndeterminate(
                         observed_revision,
                         state_hint,
+                        visible_observed_revision=cls._observe_visible_revision(
+                            directory,
+                            filename,
+                        ),
                     )
                     _add_cleanup_note(indeterminate, operation_error)
                     cls._cleanup_names(
@@ -920,7 +991,20 @@ class _StoryWorkspaceDreamFilesystem:
             if public_error is operation_error:
                 raise public_error
             raise public_error from operation_error
-        cls._cleanup_names(directory.descriptor, cleanup_names, None)
+        try:
+            cls._cleanup_names(directory.descriptor, cleanup_names, None)
+        except StoryWorkspaceDreamIOError as cleanup_error:
+            try:
+                warnings.warn(
+                    "Dream file commit is durable, but temporary-file cleanup "
+                    f"failed: {cleanup_error}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+            except Exception:
+                # Warning policy or hooks must not turn a durable commit into a
+                # reported operation failure.
+                pass
 
     def _validate_source_file(self, relative_path: str) -> None:
         if not isinstance(relative_path, str) or not relative_path:

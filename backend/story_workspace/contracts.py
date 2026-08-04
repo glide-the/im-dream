@@ -122,6 +122,24 @@ _STORY_WORKSPACE_DREAM_STAGE_TITLES = {
 }
 
 
+def _dream_stage_entry_route(
+    stage: StoryWorkspaceDreamStage,
+    run_id: str,
+) -> str:
+    routes = {
+        StoryWorkspaceDreamStage.CHARACTERS: (
+            f"/story-workspace/characters?run={run_id}"
+        ),
+        StoryWorkspaceDreamStage.SCENES: (
+            f"/story-workspace/scenes?run={run_id}"
+        ),
+        StoryWorkspaceDreamStage.STORYBOARDS: (
+            f"/story-workspace/runs/{run_id}/execution"
+        ),
+    }
+    return routes[stage]
+
+
 def _validate_dream_relations(values: list[str]) -> list[str]:
     if any(not value or len(value) > 128 for value in values):
         raise ValueError(
@@ -249,20 +267,12 @@ class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamStorageModel):
 
     @model_validator(mode="after")
     def fixed_stage_fields_are_canonical(self) -> "StoryWorkspaceDreamStageFile":
-        routes = {
-            StoryWorkspaceDreamStage.CHARACTERS: (
-                f"/story-workspace/characters?run={self.workflow_run_id}"
-            ),
-            StoryWorkspaceDreamStage.SCENES: (
-                f"/story-workspace/scenes?run={self.workflow_run_id}"
-            ),
-            StoryWorkspaceDreamStage.STORYBOARDS: (
-                f"/story-workspace/runs/{self.workflow_run_id}/execution"
-            ),
-        }
         if self.page.title != _STORY_WORKSPACE_DREAM_STAGE_TITLES[self.stage]:
             raise ValueError("page.title does not match stage")
-        if self.page.entry_route != routes[self.stage]:
+        if self.page.entry_route != _dream_stage_entry_route(
+            self.stage,
+            self.workflow_run_id,
+        ):
             raise ValueError(
                 "page.entry_route does not match stage and workflow_run_id"
             )
@@ -363,6 +373,14 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
             raise ValueError("required_stages must contain the three canonical stages")
         if any(key is not value.stage for key, value in self.stages.items()):
             raise ValueError("each stages key must match its nested stage value")
+        if any(
+            value.page.entry_route
+            != _dream_stage_entry_route(stage, self.story_workspace_run_id)
+            for stage, value in self.stages.items()
+        ):
+            raise ValueError(
+                "each stage entry route must match story_workspace_run_id"
+            )
         if self.run_revision == 0 and self.stages:
             raise ValueError(
                 "waiting projections without run.json cannot contain stages"
