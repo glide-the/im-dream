@@ -180,6 +180,9 @@
 # [Sync] 2026-08-04: harden the .dream Bash write guard against find mutation
 #                    actions, env/wrapper execution, glob paths, and normalized
 #                    relative/absolute paths with conservative read-only parsing.
+# [Sync] 2026-08-04: make Bash read-only-by-default whenever cwd contains a
+#                    real .dream surface, closing dynamic-path and prewritten-
+#                    script write bypasses that lexical inspection cannot solve.
 
 """Claude Agent Runner.
 
@@ -582,6 +585,18 @@ def _is_path_inside_dream_surface(raw_path: str, cwd: Optional[str]) -> bool:
         return False
 
 
+def _workspace_has_dream_surface(cwd: Optional[str]) -> bool:
+    """Return whether the current workspace contains an actual Dream directory."""
+
+    if not cwd:
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        return (workspace / ".dream").is_dir()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _dream_path_component_pattern_can_match(component: str) -> bool:
     """Return whether a shell path component can expand to ``.dream``.
 
@@ -666,13 +681,17 @@ def _is_definitely_read_only_dream_bash_command(
 
     if _SHELL_METACHAR_RE.search(command) or "\n" in command or "\r" in command:
         return False
-    unwrapped = _unwrap_command_tokens(tokens)
+    unwrapped = _unwrap_dream_read_only_command_tokens(tokens)
+    if unwrapped is None:
+        return False
     if not unwrapped:
-        # Plain ``env`` only prints the environment. Any command supplied to it
-        # survives unwrapping and is classified by its real executable below.
-        return bool(tokens) and _command_name(tokens[0]) == "env"
+        return True
 
     name = _command_name(unwrapped[0])
+    # A path whose basename merely looks safe can still be an arbitrary script
+    # (e.g. ``files/cat``). Permit command names, never caller-selected paths.
+    if unwrapped[0] != name:
+        return False
     if name not in _DREAM_READ_ONLY_BASH_COMMANDS:
         return False
     if name == "find":
@@ -683,17 +702,60 @@ def _is_definitely_read_only_dream_bash_command(
     return True
 
 
+def _unwrap_dream_read_only_command_tokens(
+    tokens: list[str],
+) -> Optional[list[str]]:
+    """Strictly unwrap shell helpers for the protected-workspace allowlist.
+
+    Wrapper options and environment assignments are rejected because they can
+    redirect executable lookup (``env PATH=...``), inject code, or hide a
+    command inside an option. Plain ``env`` is the sole no-command safe form.
+    """
+
+    index = 0
+    while index < len(tokens):
+        raw_name = tokens[index]
+        name = _command_name(raw_name)
+        if raw_name != name:
+            return None
+        if name == "env":
+            index += 1
+            if index == len(tokens):
+                return []
+            if tokens[index] == "--":
+                index += 1
+                if index == len(tokens):
+                    return None
+            elif tokens[index].startswith("-") or "=" in tokens[index]:
+                return None
+            continue
+        if name in _COMMAND_WRAPPERS:
+            index += 1
+            if index < len(tokens) and tokens[index] == "--":
+                index += 1
+            elif index < len(tokens) and tokens[index].startswith("-"):
+                return None
+            if index == len(tokens):
+                return None
+            continue
+        return tokens[index:]
+    return None
+
+
 def _is_dream_mutating_bash_command(command: str, cwd: Optional[str]) -> bool:
     """Conservatively identify shell attempts to mutate the Dream surface.
 
-    Read-only commands such as ``cat .dream/workspace.json`` remain available.
-    Literal, normalized, symlink-resolved, and shell-glob path forms are checked.
-    Once a command can address ``.dream``, only a parsed, narrow read-only form
-    is accepted; wrappers and ``find`` actions are inspected rather than trusted
-    by their first token. Writes must use the controlled MCP seam.
+    If cwd already contains ``.dream/``, static target inspection is not a safe
+    boundary: an interpreter can construct the path dynamically and a prewritten
+    script can hide it completely. In that workspace every Bash call therefore
+    defaults to deny unless parsing proves it is one of the narrow read-only
+    forms. Without an existing surface, the legacy lexical/path guard remains so
+    ordinary Bash behavior is unchanged. Writes must use the controlled MCP seam.
     """
 
     tokens = _split_shell_command(command)
+    if _workspace_has_dream_surface(cwd):
+        return not _is_definitely_read_only_dream_bash_command(command, tokens)
     if not _bash_command_may_reference_dream_surface(command, tokens, cwd):
         return False
     return not _is_definitely_read_only_dream_bash_command(command, tokens)

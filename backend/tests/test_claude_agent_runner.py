@@ -63,6 +63,9 @@
 # [Sync] 2026-08-04: cover fail-closed Dream Bash mutation classification for
 #                    find actions, env wrappers, shell globs, and normalized
 #                    relative/absolute workspace paths while preserving reads.
+# [Sync] 2026-08-04: when a workspace has a real .dream surface, cover
+#                    read-only-by-default Bash policy against dynamically
+#                    constructed paths and prewritten mutation scripts.
 
 """Tests for ClaudeAgentRunner (Ink & Memory).
 
@@ -1138,6 +1141,77 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                             _hook_specific(result, {}).get("permissionDecision"),
                             "allow",
                         )
+
+    async def test_existing_dream_surface_denies_dynamic_paths_and_prewritten_scripts(self):
+        dynamic_write = (
+            'python -c "from pathlib import Path; '
+            "Path(chr(46)+'dream/pwn').write_text('x')\""
+        )
+        for full_access in (False, True):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                workspace = Path(temp_dir)
+                (workspace / ".dream").mkdir()
+                (workspace / "files").mkdir()
+                (workspace / "files" / "mutate-dream.sh").write_text(
+                    "#!/bin/sh\nprintf x > .dream/pwn\n",
+                    encoding="utf-8",
+                )
+                (workspace / "files" / "cat").write_text(
+                    "#!/bin/sh\nprintf x > .dream/pwn\n",
+                    encoding="utf-8",
+                )
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace),
+                    im_full_access_enabled=full_access,
+                )
+
+                for command in (
+                    dynamic_write,
+                    "bash files/mutate-dream.sh",
+                    "files/cat",
+                    "env PATH=files cat",
+                ):
+                    with self.subTest(full_access=full_access, command=command):
+                        result = await hook(
+                            {"tool_name": "Bash", "tool_input": {"command": command}},
+                            "call-bash-dream-indirect-write",
+                            _SDK_HOOK_CONTEXT(),
+                        )
+                        specific = _hook_specific(result, {})
+                        self.assertEqual(specific.get("permissionDecision"), "deny")
+                        self.assertIn(
+                            "controlled by Story Workspace",
+                            specific.get("permissionDecisionReason", ""),
+                        )
+
+    async def test_workspace_without_dream_surface_keeps_normal_bash_policy(self):
+        dynamic_write = (
+            'python -c "from pathlib import Path; '
+            "Path(chr(46)+'dream/pwn').write_text('x')\""
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "files").mkdir()
+            (workspace / "files" / "mutate-dream.sh").write_text(
+                "#!/bin/sh\nprintf x > .dream/pwn\n",
+                encoding="utf-8",
+            )
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=str(workspace),
+                im_full_access_enabled=True,
+            )
+
+            for command in (dynamic_write, "bash files/mutate-dream.sh"):
+                with self.subTest(command=command):
+                    result = await hook(
+                        {"tool_name": "Bash", "tool_input": {"command": command}},
+                        "call-bash-no-dream-surface",
+                        _SDK_HOOK_CONTEXT(),
+                    )
+                    self.assertEqual(
+                        _hook_specific(result, {}).get("permissionDecision"),
+                        "allow",
+                    )
 
     async def test_auto_relative_write_under_workspace_files_gets_explicit_allow(self):
         with tempfile.TemporaryDirectory() as temp_dir:
