@@ -363,6 +363,8 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
     run_revision: _StoryWorkspaceDreamNonNegativeInt
     stages: dict[StoryWorkspaceDreamStage, StoryWorkspaceDreamStageResponse]
     can_confirm: bool
+    confirmation_accepted: bool = False
+    confirmation_dispatched: bool = False
     confirmation_label: Literal["确认并继续"] = "确认并继续"
 
     @model_validator(mode="after")
@@ -385,9 +387,18 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
             raise ValueError(
                 "waiting projections without run.json cannot contain stages"
             )
+        if self.confirmation_dispatched and not self.confirmation_accepted:
+            raise ValueError(
+                "confirmation_dispatched requires confirmation_accepted"
+            )
         expected = set(STORY_WORKSPACE_DREAM_REQUIRED_STAGES)
-        if self.can_confirm != (set(self.stages) == expected):
-            raise ValueError("can_confirm must reflect complete required stages")
+        expected_can_confirm = (
+            set(self.stages) == expected and not self.confirmation_accepted
+        )
+        if self.can_confirm != expected_can_confirm:
+            raise ValueError(
+                "can_confirm must reflect completeness and persisted confirmation"
+            )
         return self
 
 

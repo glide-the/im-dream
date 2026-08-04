@@ -209,9 +209,13 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 "runRevision",
                 "stages",
                 "canConfirm",
+                "confirmationAccepted",
+                "confirmationDispatched",
                 "confirmationLabel",
             },
         )
+        self.assertFalse(payload["confirmationAccepted"])
+        self.assertFalse(payload["confirmationDispatched"])
         self.assertEqual(
             set(payload["source"]),
             {
@@ -515,8 +519,24 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         root: Path | None = None,
     ):
         db = Mock()
-        db.execute.return_value.fetchone.return_value = {"id": WORKSPACE_ID}
         selected_run = run or self.run
+        owner_cursor = Mock()
+        owner_cursor.fetchone.return_value = {"id": "discarded-owner-workspace"}
+        run_cursor = Mock()
+        run_cursor.fetchone.return_value = {
+            "workspace_id": selected_run.workspace_id,
+        }
+        confirmation_cursor = Mock()
+        confirmation_cursor.fetchall.return_value = []
+
+        def execute(query, _params=()):
+            if "FROM workflow_runs" in query:
+                return run_cursor
+            if "FROM chat_message" in query:
+                return confirmation_cursor
+            return owner_cursor
+
+        db.execute.side_effect = execute
         selected_thread = {"id": THREAD_ID, "user_id": int(ACTOR_ID)}
         if thread is not None:
             selected_thread = thread
@@ -566,10 +586,32 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
         get_thread.assert_called_once_with(THREAD_ID, int(ACTOR_ID))
-        query, params = db.execute.call_args.args
-        self.assertIn("SELECT id FROM story_workspace_workspaces", query)
-        self.assertEqual(params, (int(ACTOR_ID),))
+        run_scope_queries = [
+            call.args
+            for call in db.execute.call_args_list
+            if "FROM workflow_runs" in call.args[0]
+        ]
+        self.assertEqual(len(run_scope_queries), 1)
+        self.assertEqual(
+            run_scope_queries[0][1],
+            (RUN_ID, ACTOR_ID, int(ACTOR_ID)),
+        )
         db.close.assert_called_once_with()
+        self.assertEqual(result.story_workspace_run_id, RUN_ID)
+
+    async def test_actor_with_multiple_workspaces_uses_run_owned_workspace(self) -> None:
+        selected_workspace = "workspace-newer-owned-by-run"
+        selected_run = authoritative_run(workspace_id=selected_workspace)
+        with self.wired(run=selected_run) as (read_run, _, _):
+            result = await self.call()
+
+        read_run.assert_called_once_with(
+            RUN_ID,
+            AuthenticatedActorContext(
+                workspace_id=selected_workspace,
+                actor_id=ACTOR_ID,
+            ),
+        )
         self.assertEqual(result.story_workspace_run_id, RUN_ID)
 
     async def test_static_workspace_is_waiting_and_get_writes_nothing(self) -> None:
@@ -632,6 +674,39 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(wire["canConfirm"])
         self.assertEqual(len(wire["source"]), 5)
         self.assertEqual(self.tree_snapshot(self.root), before)
+
+    async def test_persisted_confirmation_fact_disables_confirmation(self) -> None:
+        reader = Mock()
+        reader.workspace_root = self.workspace.resolve()
+        reader.read.return_value = complete_response()
+        with (
+            self.wired(),
+            patch.object(
+                gateway_module,
+                "StoryWorkspaceDreamFileReader",
+                return_value=reader,
+            ),
+            patch.object(
+                gateway_module,
+                "read_dream_confirmation_fact",
+                return_value=(True, True),
+            ) as read_confirmation,
+        ):
+            result = await self.call()
+
+        read_confirmation.assert_called_once()
+        _, fact_kwargs = read_confirmation.call_args
+        self.assertEqual(
+            fact_kwargs,
+            {
+                "actor_id": ACTOR_ID,
+                "thread_id": THREAD_ID,
+                "run_id": RUN_ID,
+            },
+        )
+        self.assertTrue(result.confirmation_accepted)
+        self.assertTrue(result.confirmation_dispatched)
+        self.assertFalse(result.can_confirm)
 
     async def test_other_actor_run_and_other_actor_thread_are_not_disclosed(self) -> None:
         with self.wired(

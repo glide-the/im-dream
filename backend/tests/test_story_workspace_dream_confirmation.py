@@ -48,6 +48,8 @@ from services.story_workspace.dream_confirmation_service import (
     StoryWorkspaceDreamConfirmationService,
     build_thread_turn_dispatcher,
     dream_confirmation_message_id,
+    mark_dream_confirmation_dispatched,
+    read_dream_confirmation_fact,
 )
 from story_workspace.contracts import (
     StoryWorkspaceDreamConfirmationAccepted,
@@ -286,6 +288,28 @@ class StoryWorkspaceDreamConfirmationContractTests(unittest.TestCase):
             contracts_module.__all__,
         )
 
+    def test_files_response_confirmation_fact_controls_can_confirm(self) -> None:
+        confirmed = complete_projection().model_copy(update={
+            "confirmation_accepted": True,
+            "confirmation_dispatched": True,
+            "can_confirm": False,
+        })
+        confirmed = StoryWorkspaceDreamFilesResponse.model_validate(
+            confirmed.model_dump()
+        )
+        wire = confirmed.model_dump(mode="json", by_alias=True)
+        self.assertTrue(wire["confirmationAccepted"])
+        self.assertTrue(wire["confirmationDispatched"])
+        self.assertFalse(wire["canConfirm"])
+
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamFilesResponse.model_validate({
+                **complete_projection().model_dump(),
+                "confirmation_accepted": False,
+                "confirmation_dispatched": True,
+                "can_confirm": False,
+            })
+
 
 class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -333,6 +357,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
                 "command_fingerprint",
                 "idempotency_key",
                 "request_id",
+                "dispatch_status",
             },
         )
         self.assertEqual(metadata["kind"], DREAM_CONFIRMATION_METADATA_KIND)
@@ -348,6 +373,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertEqual(metadata["idempotency_key"], "swc_test-key")
         self.assertTrue(metadata["command_fingerprint"].startswith("sha256:"))
         self.assertEqual(metadata["request_id"], "request-confirmation-1")
+        self.assertEqual(metadata["dispatch_status"], "pending")
         self.assertEqual(row["id"], persisted.accepted.message_id)
         self.assertEqual(
             row["id"],
@@ -450,14 +476,37 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
                 self.assert_error(422, edits=[edits])
         self.assertEqual(self.fixture.rows(), [])
 
-    def test_same_key_replay_and_conflict(self) -> None:
+    def test_pending_exact_replay_recovers_dispatch_then_success_stays_one_shot(
+        self,
+    ) -> None:
         first = self.submit()
         replay = self.submit()
         self.assertFalse(first.accepted.replayed)
         self.assertTrue(replay.accepted.replayed)
         self.assertEqual(first.accepted.request_id, replay.accepted.request_id)
-        self.assertIsNone(replay.dispatch)
+        self.assertIsNotNone(replay.dispatch)
+        self.assertFalse(replay.accepted.dispatched)
+        self.assertEqual(replay.dispatch.parts, first.dispatch.parts)
+        self.assertEqual(
+            replay.dispatch.metadata["dispatch_status"],
+            "dispatched",
+        )
         self.assertEqual(len(self.fixture.rows()), 1)
+
+        db = database.get_db()
+        try:
+            self.assertTrue(mark_dream_confirmation_dispatched(db, replay.dispatch))
+        finally:
+            db.close()
+
+        completed_replay = self.submit()
+        self.assertTrue(completed_replay.accepted.replayed)
+        self.assertTrue(completed_replay.accepted.dispatched)
+        self.assertIsNone(completed_replay.dispatch)
+        self.assertEqual(
+            self.fixture.rows()[0]["metadata"]["dispatch_status"],
+            "dispatched",
+        )
 
         with self.assertRaises(StoryWorkspaceDreamConfirmationError) as raised:
             self.submit(edits=[], idempotencyKey="swc_test-key")
@@ -466,6 +515,82 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             ("IDEMPOTENCY_CONFLICT", 409),
         )
         self.assertEqual(len(self.fixture.rows()), 1)
+
+    def test_actor_run_allows_only_one_confirmation_across_idempotency_keys(
+        self,
+    ) -> None:
+        first = self.submit()
+        with self.assertRaises(StoryWorkspaceDreamConfirmationError) as raised:
+            self.submit(idempotencyKey="swc_second-key")
+
+        self.assertEqual(
+            (raised.exception.code, raised.exception.status_code),
+            ("IDEMPOTENCY_CONFLICT", 409),
+        )
+        self.assertEqual(len(self.fixture.rows()), 1)
+        self.assertEqual(self.fixture.rows()[0]["id"], first.accepted.message_id)
+
+    def test_actor_run_uniqueness_does_not_depend_on_current_thread(self) -> None:
+        first = self.submit()
+        replacement_thread_id = "thread-dream-confirmation-rebound"
+        db = database.get_db()
+        try:
+            db.execute(
+                "INSERT INTO chat_thread (id, user_id, title) VALUES (?, ?, ?)",
+                (replacement_thread_id, int(ACTOR_ID), "Rebound Dream"),
+            )
+            db.commit()
+        finally:
+            db.close()
+        self.fixture.runs[RUN_ID] = make_run(thread_id=replacement_thread_id)
+
+        with self.assertRaises(StoryWorkspaceDreamConfirmationError) as raised:
+            self.submit(
+                threadId=replacement_thread_id,
+                idempotencyKey="swc_rebound-key",
+            )
+
+        self.assertEqual(
+            (raised.exception.code, raised.exception.status_code),
+            ("IDEMPOTENCY_CONFLICT", 409),
+        )
+        self.assertEqual(len(self.fixture.rows()), 1)
+        self.assertEqual(self.fixture.rows()[0]["id"], first.accepted.message_id)
+
+    def test_confirmation_fact_is_scoped_to_actor_thread_and_run(self) -> None:
+        persisted = self.submit()
+        db = database.get_db()
+        try:
+            self.assertEqual(
+                read_dream_confirmation_fact(
+                    db,
+                    actor_id=ACTOR_ID,
+                    thread_id=THREAD_ID,
+                    run_id=RUN_ID,
+                ),
+                (True, False),
+            )
+            self.assertEqual(
+                read_dream_confirmation_fact(
+                    db,
+                    actor_id=OTHER_ACTOR_ID,
+                    thread_id=THREAD_ID,
+                    run_id=RUN_ID,
+                ),
+                (False, False),
+            )
+            self.assertTrue(mark_dream_confirmation_dispatched(db, persisted.dispatch))
+            self.assertEqual(
+                read_dream_confirmation_fact(
+                    db,
+                    actor_id=ACTOR_ID,
+                    thread_id=THREAD_ID,
+                    run_id=RUN_ID,
+                ),
+                (True, True),
+            )
+        finally:
+            db.close()
 
     def test_actor_run_and_key_are_isolated_in_message_id(self) -> None:
         first = dream_confirmation_message_id(ACTOR_ID, RUN_ID, "swc_same")
@@ -556,7 +681,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(len(results), 2)
         self.assertEqual(sorted(r.accepted.replayed for r in results), [False, True])
-        self.assertEqual(sum(r.dispatch is not None for r in results), 1)
+        self.assertEqual(sum(r.dispatch is not None for r in results), 2)
         self.assertEqual(len(self.fixture.rows()), 1)
 
 
@@ -660,7 +785,7 @@ class StoryWorkspaceDreamConfirmationRouteTests(unittest.TestCase):
 
 
 class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCase):
-    async def test_sync_chain_is_offloaded_and_only_new_insert_is_dispatched(self) -> None:
+    async def test_sync_chain_dispatches_and_persists_success_audit(self) -> None:
         gateway = gateway_module.StoryWorkflowApplicationGateway()
         main_thread = threading.get_ident()
         worker_threads = []
@@ -694,6 +819,11 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
         with (
             patch.object(gateway, "_submit_dream_confirmation_sync", sync_chain),
             patch.object(
+                gateway,
+                "_mark_dream_confirmation_dispatched_sync",
+                return_value=True,
+            ) as mark_dispatched,
+            patch.object(
                 gateway_module,
                 "build_dream_confirmation_dispatcher",
                 return_value=dispatcher,
@@ -708,8 +838,9 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
         self.assertNotEqual(worker_threads, [main_thread])
         self.assertEqual(dispatcher_calls[0][0], main_thread)
         self.assertTrue(result.dispatched)
+        mark_dispatched.assert_called_once_with(dispatch)
 
-        replay = accepted.model_copy(update={"replayed": True})
+        replay = accepted.model_copy(update={"replayed": True, "dispatched": True})
         with (
             patch.object(
                 gateway,
@@ -730,8 +861,70 @@ class StoryWorkspaceDreamConfirmationGatewayTests(unittest.IsolatedAsyncioTestCa
                 actor={"actor_id": ACTOR_ID},
             )
         self.assertTrue(replay_result.replayed)
-        self.assertFalse(replay_result.dispatched)
+        self.assertTrue(replay_result.dispatched)
         build_dispatcher.assert_not_called()
+
+    async def test_false_dispatch_stays_pending_and_exact_replay_dispatches(self) -> None:
+        gateway = gateway_module.StoryWorkflowApplicationGateway()
+        pending = StoryWorkspaceDreamConfirmationAccepted(
+            message_id="message-1",
+            story_workspace_run_id=RUN_ID,
+            thread_id=THREAD_ID,
+            status="accepted",
+            replayed=False,
+            dispatched=False,
+            request_id="request-1",
+        )
+        dispatch = DreamConfirmationDispatch(
+            thread_id=THREAD_ID,
+            actor_id=ACTOR_ID,
+            message_id="message-1",
+            parts=[{"type": "text", "text": "structured"}],
+            metadata={
+                "kind": DREAM_CONFIRMATION_METADATA_KIND,
+                "dispatch_status": "dispatched",
+            },
+        )
+        attempts = iter([False, True])
+        persisted = iter([
+            PersistedDreamConfirmation(accepted=pending, dispatch=dispatch),
+            PersistedDreamConfirmation(
+                accepted=pending.model_copy(update={"replayed": True}),
+                dispatch=dispatch,
+            ),
+        ])
+        with (
+            patch.object(
+                gateway,
+                "_submit_dream_confirmation_sync",
+                side_effect=lambda *_args: next(persisted),
+            ),
+            patch.object(
+                gateway,
+                "_mark_dream_confirmation_dispatched_sync",
+                return_value=True,
+            ) as mark_dispatched,
+            patch.object(
+                gateway_module,
+                "build_dream_confirmation_dispatcher",
+                return_value=lambda *_args: next(attempts),
+            ),
+        ):
+            first = await gateway.submit_dream_confirmation(
+                RUN_ID,
+                command(),
+                actor={"actor_id": ACTOR_ID},
+            )
+            replay = await gateway.submit_dream_confirmation(
+                RUN_ID,
+                command(),
+                actor={"actor_id": ACTOR_ID},
+            )
+
+        self.assertFalse(first.dispatched)
+        self.assertTrue(replay.replayed)
+        self.assertTrue(replay.dispatched)
+        mark_dispatched.assert_called_once_with(dispatch)
 
     async def test_dispatch_exception_keeps_accepted_result(self) -> None:
         gateway = gateway_module.StoryWorkflowApplicationGateway()

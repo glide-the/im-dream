@@ -46,10 +46,13 @@ try:
         build_thread_turn_dispatcher,
     )
     from services.story_workspace.dream_confirmation_service import (
+        DreamConfirmationDispatch,
         PersistedDreamConfirmation,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
         build_thread_turn_dispatcher as build_dream_confirmation_dispatcher,
+        mark_dream_confirmation_dispatched,
+        read_dream_confirmation_fact,
     )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
@@ -79,10 +82,13 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         build_thread_turn_dispatcher,
     )
     from backend.services.story_workspace.dream_confirmation_service import (
+        DreamConfirmationDispatch,
         PersistedDreamConfirmation,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
         build_thread_turn_dispatcher as build_dream_confirmation_dispatcher,
+        mark_dream_confirmation_dispatched,
+        read_dream_confirmation_fact,
     )
 
 
@@ -157,6 +163,35 @@ class StoryWorkflowApplicationGateway:
         return AuthenticatedActorContext(
             workspace_id=actor["workspace_id"],
             actor_id=actor["actor_id"],
+        )
+
+    @staticmethod
+    def _run_actor_context(
+        db: sqlite3.Connection,
+        workflow_run_id: str,
+        actor_id: int,
+    ) -> AuthenticatedActorContext:
+        """Resolve the run-owned workspace without selecting an actor default."""
+
+        owns_workspace = db.execute(
+            "SELECT id FROM story_workspace_workspaces "
+            "WHERE owner_id = ? LIMIT 1",
+            (actor_id,),
+        ).fetchone()
+        if owns_workspace is None:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        row = db.execute(
+            "SELECT run.workspace_id FROM workflow_runs AS run "
+            "JOIN story_workspace_workspaces AS workspace "
+            "ON workspace.id = run.workspace_id "
+            "WHERE run.id = ? AND run.created_by = ? AND workspace.owner_id = ?",
+            (workflow_run_id, str(actor_id), actor_id),
+        ).fetchone()
+        if row is None:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
+        return AuthenticatedActorContext(
+            workspace_id=str(row["workspace_id"]),
+            actor_id=str(actor_id),
         )
 
     @staticmethod
@@ -638,19 +673,10 @@ class StoryWorkflowApplicationGateway:
                         "WORKFLOW_PERMISSION_DENIED",
                         status_code=403,
                     ) from exc
-                workspace_row = db.execute(
-                    "SELECT id FROM story_workspace_workspaces WHERE owner_id = ? "
-                    "ORDER BY created_at ASC, id ASC LIMIT 1",
-                    (actor_id,),
-                ).fetchone()
-                if workspace_row is None:
-                    raise ApiRouteError(
-                        "WORKFLOW_PERMISSION_DENIED",
-                        status_code=403,
-                    )
-                actor_context = AuthenticatedActorContext(
-                    workspace_id=str(workspace_row["id"]),
-                    actor_id=str(actor_id),
+                actor_context = self._run_actor_context(
+                    db,
+                    workflow_run_id,
+                    actor_id,
                 )
                 workflow_run = WorkflowRunService(
                     db,
@@ -679,10 +705,25 @@ class StoryWorkflowApplicationGateway:
                         "WORKFLOW_PERMISSION_DENIED",
                         status_code=403,
                     )
-                return reader.read(
+                projection = reader.read(
                     workflow_run,
                     thread_id=thread_id,
                 )
+                confirmation_accepted, confirmation_dispatched = (
+                    read_dream_confirmation_fact(
+                        db,
+                        actor_id=str(actor_id),
+                        thread_id=thread_id,
+                        run_id=workflow_run_id,
+                    )
+                )
+                return projection.model_copy(update={
+                    "confirmation_accepted": confirmation_accepted,
+                    "confirmation_dispatched": confirmation_dispatched,
+                    "can_confirm": (
+                        projection.can_confirm and not confirmation_accepted
+                    ),
+                })
             finally:
                 db.close()
         except WorkflowRunError as exc:
@@ -736,7 +777,31 @@ class StoryWorkflowApplicationGateway:
                 dispatch.message_id,
             )
             dispatched = False
+        if dispatched:
+            try:
+                dispatched = bool(await asyncio.to_thread(
+                    self._mark_dream_confirmation_dispatched_sync,
+                    dispatch,
+                ))
+            except Exception:
+                logger.exception(
+                    "Dream confirmation dispatch audit failed for run_id=%s "
+                    "message_id=%s",
+                    workflow_run_id,
+                    dispatch.message_id,
+                )
+                dispatched = False
         return accepted.model_copy(update={"dispatched": dispatched})
+
+    @staticmethod
+    def _mark_dream_confirmation_dispatched_sync(
+        dispatch: DreamConfirmationDispatch,
+    ) -> bool:
+        db = database.get_db()
+        try:
+            return mark_dream_confirmation_dispatched(db, dispatch)
+        finally:
+            db.close()
 
     def _submit_dream_confirmation_sync(
         self,
@@ -756,19 +821,10 @@ class StoryWorkflowApplicationGateway:
                         "WORKFLOW_PERMISSION_DENIED",
                         status_code=403,
                     ) from exc
-                workspace_row = db.execute(
-                    "SELECT id FROM story_workspace_workspaces WHERE owner_id = ? "
-                    "ORDER BY created_at ASC, id ASC LIMIT 1",
-                    (actor_id,),
-                ).fetchone()
-                if workspace_row is None:
-                    raise ApiRouteError(
-                        "WORKFLOW_PERMISSION_DENIED",
-                        status_code=403,
-                    )
-                actor_context = AuthenticatedActorContext(
-                    workspace_id=str(workspace_row["id"]),
-                    actor_id=str(actor_id),
+                actor_context = self._run_actor_context(
+                    db,
+                    workflow_run_id,
+                    actor_id,
                 )
                 workflow_run = WorkflowRunService(
                     db,

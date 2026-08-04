@@ -44,6 +44,8 @@ except ModuleNotFoundError:  # Support repository-root package imports.
 logger = logging.getLogger(__name__)
 
 DREAM_CONFIRMATION_METADATA_KIND = "story-workspace-dream-confirmation"
+DREAM_CONFIRMATION_DISPATCH_PENDING = "pending"
+DREAM_CONFIRMATION_DISPATCHED = "dispatched"
 _EDITABLE_FIELDS = frozenset({"displayName", "summary", "relations"})
 
 
@@ -235,6 +237,141 @@ def _decode_metadata(raw: Any) -> Optional[dict[str, Any]]:
     return decoded if isinstance(decoded, dict) else None
 
 
+def _decode_parts(raw: Any) -> Optional[list[Any]]:
+    if not isinstance(raw, str):
+        return None
+    try:
+        decoded = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return decoded if isinstance(decoded, list) else None
+
+
+def _confirmation_metadata_matches_actor_run(
+    metadata: Any,
+    *,
+    actor_id: str,
+    run_id: str,
+) -> bool:
+    return (
+        isinstance(metadata, dict)
+        and metadata.get("kind") == DREAM_CONFIRMATION_METADATA_KIND
+        and metadata.get("actor") == actor_id
+        and metadata.get("story_workspace_run_id") == run_id
+    )
+
+
+def _confirmation_metadata_matches_scope(
+    metadata: Any,
+    *,
+    actor_id: str,
+    thread_id: str,
+    run_id: str,
+) -> bool:
+    return (
+        _confirmation_metadata_matches_actor_run(
+            metadata,
+            actor_id=actor_id,
+            run_id=run_id,
+        )
+        and metadata.get("thread_id") == thread_id
+    )
+
+
+def read_dream_confirmation_fact(
+    db: sqlite3.Connection,
+    *,
+    actor_id: str,
+    thread_id: str,
+    run_id: str,
+) -> tuple[bool, bool]:
+    """Read the actor/thread/run confirmation fact from existing message audit."""
+
+    rows = db.execute(
+        "SELECT metadata FROM chat_message "
+        "WHERE thread_id = ? AND role = 'user' ORDER BY created_at ASC, id ASC",
+        (thread_id,),
+    ).fetchall()
+    accepted = False
+    dispatched = False
+    for row in rows:
+        metadata = _decode_metadata(row["metadata"])
+        if not _confirmation_metadata_matches_scope(
+            metadata,
+            actor_id=str(actor_id),
+            thread_id=thread_id,
+            run_id=run_id,
+        ):
+            continue
+        accepted = True
+        dispatched = dispatched or (
+            metadata.get("dispatch_status") == DREAM_CONFIRMATION_DISPATCHED
+        )
+    return accepted, dispatched
+
+
+def mark_dream_confirmation_dispatched(
+    db: sqlite3.Connection,
+    dispatch: DreamConfirmationDispatch,
+) -> bool:
+    """Durably mark a scheduled continuation; repeated marking is idempotent."""
+
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT thread_id, role, metadata FROM chat_message WHERE id = ?",
+            (dispatch.message_id,),
+        ).fetchone()
+        if row is None:
+            raise StoryWorkspaceDreamConfirmationError("RESULT_COMMIT_FAILED", 503)
+        metadata = _decode_metadata(row["metadata"])
+        expected = dispatch.metadata
+        valid = (
+            row["thread_id"] == dispatch.thread_id
+            and row["role"] == "user"
+            and isinstance(metadata, dict)
+            and isinstance(expected, dict)
+            and metadata.get("kind") == DREAM_CONFIRMATION_METADATA_KIND
+            and metadata.get("actor") == dispatch.actor_id
+            and metadata.get("thread_id") == dispatch.thread_id
+            and metadata.get("story_workspace_run_id")
+            == expected.get("story_workspace_run_id")
+            and metadata.get("request_id") == expected.get("request_id")
+            and metadata.get("command_fingerprint")
+            == expected.get("command_fingerprint")
+        )
+        if not valid:
+            raise StoryWorkspaceDreamConfirmationError("IDEMPOTENCY_CONFLICT", 409)
+        status = metadata.get(
+            "dispatch_status",
+            DREAM_CONFIRMATION_DISPATCH_PENDING,
+        )
+        if status == DREAM_CONFIRMATION_DISPATCHED:
+            db.commit()
+            return True
+        if status != DREAM_CONFIRMATION_DISPATCH_PENDING:
+            raise StoryWorkspaceDreamConfirmationError("IDEMPOTENCY_CONFLICT", 409)
+        metadata["dispatch_status"] = DREAM_CONFIRMATION_DISPATCHED
+        updated = db.execute(
+            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            (_canonical_json(metadata), dispatch.message_id),
+        )
+        if updated.rowcount != 1:
+            raise StoryWorkspaceDreamConfirmationError("RESULT_COMMIT_FAILED", 503)
+        db.commit()
+        return True
+    except StoryWorkspaceDreamConfirmationError:
+        if db.in_transaction:
+            db.rollback()
+        raise
+    except sqlite3.Error as exc:
+        if db.in_transaction:
+            db.rollback()
+        raise StoryWorkspaceDreamConfirmationError(
+            "RESULT_COMMIT_FAILED", 503
+        ) from exc
+
+
 def build_thread_turn_dispatcher(
     factory: Any | None = None,
     *,
@@ -369,6 +506,14 @@ class StoryWorkspaceDreamConfirmationService:
                 idempotency_key=payload.idempotency_key,
                 fingerprint=fingerprint,
             )
+        if self._select_confirmation_for_scope(
+            thread_id=thread_id,
+            actor_id=str(actor_id),
+            run_id=run_id,
+        ) is not None:
+            raise StoryWorkspaceDreamConfirmationError(
+                "IDEMPOTENCY_CONFLICT", 409
+            )
 
         # First read catches ordinary stale drafts without acquiring a SQLite
         # writer lock. A second read immediately before INSERT closes the
@@ -391,6 +536,7 @@ class StoryWorkspaceDreamConfirmationService:
             "command_fingerprint": fingerprint,
             "idempotency_key": payload.idempotency_key,
             "request_id": request_id,
+            "dispatch_status": DREAM_CONFIRMATION_DISPATCH_PENDING,
         }
 
         try:
@@ -408,6 +554,14 @@ class StoryWorkspaceDreamConfirmationService:
                 )
                 self._db.commit()
                 return result
+            if self._select_confirmation_for_scope(
+                thread_id=thread_id,
+                actor_id=str(actor_id),
+                run_id=run_id,
+            ) is not None:
+                raise StoryWorkspaceDreamConfirmationError(
+                    "IDEMPOTENCY_CONFLICT", 409
+                )
 
             _validate_projection(
                 self._projection_reader(workflow_run, thread_id),
@@ -483,7 +637,10 @@ class StoryWorkspaceDreamConfirmationService:
                 actor_id=str(actor_id),
                 message_id=message_id,
                 parts=parts,
-                metadata=metadata,
+                metadata={
+                    **metadata,
+                    "dispatch_status": DREAM_CONFIRMATION_DISPATCHED,
+                },
             ),
         )
 
@@ -502,7 +659,8 @@ class StoryWorkspaceDreamConfirmationService:
     def _select_message(self, message_id: str) -> Optional[dict[str, Any]]:
         try:
             row = self._db.execute(
-                "SELECT id, thread_id, role, metadata FROM chat_message WHERE id = ?",
+                "SELECT id, thread_id, role, parts, metadata "
+                "FROM chat_message WHERE id = ?",
                 (message_id,),
             ).fetchone()
         except sqlite3.Error as exc:
@@ -515,8 +673,42 @@ class StoryWorkspaceDreamConfirmationService:
             "id": row["id"],
             "thread_id": row["thread_id"],
             "role": row["role"],
+            "parts": _decode_parts(row["parts"]),
             "metadata": _decode_metadata(row["metadata"]),
         }
+
+    def _select_confirmation_for_scope(
+        self,
+        *,
+        thread_id: str,
+        actor_id: str,
+        run_id: str,
+    ) -> Optional[dict[str, Any]]:
+        try:
+            rows = self._db.execute(
+                "SELECT id, thread_id, role, parts, metadata FROM chat_message "
+                "WHERE role = 'user' "
+                "ORDER BY created_at ASC, id ASC",
+            ).fetchall()
+        except sqlite3.Error as exc:
+            raise StoryWorkspaceDreamConfirmationError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
+            ) from exc
+        for row in rows:
+            metadata = _decode_metadata(row["metadata"])
+            if _confirmation_metadata_matches_actor_run(
+                metadata,
+                actor_id=actor_id,
+                run_id=run_id,
+            ):
+                return {
+                    "id": row["id"],
+                    "thread_id": row["thread_id"],
+                    "role": row["role"],
+                    "parts": _decode_parts(row["parts"]),
+                    "metadata": metadata,
+                }
+        return None
 
     @staticmethod
     def _resolve_existing(
@@ -549,15 +741,44 @@ class StoryWorkspaceDreamConfirmationService:
             raise StoryWorkspaceDreamConfirmationError(
                 "IDEMPOTENCY_CONFLICT", 409
             )
+        dispatch_status = metadata.get(
+            "dispatch_status",
+            DREAM_CONFIRMATION_DISPATCH_PENDING,
+        )
+        if dispatch_status not in {
+            DREAM_CONFIRMATION_DISPATCH_PENDING,
+            DREAM_CONFIRMATION_DISPATCHED,
+        }:
+            raise StoryWorkspaceDreamConfirmationError(
+                "IDEMPOTENCY_CONFLICT", 409
+            )
+        dispatched = dispatch_status == DREAM_CONFIRMATION_DISPATCHED
+        accepted = StoryWorkspaceDreamConfirmationAccepted(
+            message_id=message_id,
+            story_workspace_run_id=run_id,
+            thread_id=thread_id,
+            status="accepted",
+            replayed=True,
+            dispatched=dispatched,
+            request_id=request_id,
+        )
+        if dispatched:
+            return PersistedDreamConfirmation(accepted=accepted, dispatch=None)
+        parts = existing.get("parts")
+        if not isinstance(parts, list):
+            raise StoryWorkspaceDreamConfirmationError(
+                "IDEMPOTENCY_CONFLICT", 409
+            )
         return PersistedDreamConfirmation(
-            accepted=StoryWorkspaceDreamConfirmationAccepted(
-                message_id=message_id,
-                story_workspace_run_id=run_id,
+            accepted=accepted,
+            dispatch=DreamConfirmationDispatch(
                 thread_id=thread_id,
-                status="accepted",
-                replayed=True,
-                dispatched=False,
-                request_id=request_id,
+                actor_id=actor_id,
+                message_id=message_id,
+                parts=parts,
+                metadata={
+                    **metadata,
+                    "dispatch_status": DREAM_CONFIRMATION_DISPATCHED,
+                },
             ),
-            dispatch=None,
         )
