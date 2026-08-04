@@ -26,6 +26,8 @@ from story_workspace.contracts import (
     StoryWorkspaceBatchAction,
     StoryWorkspaceCharacterPatch,
     StoryWorkspaceDreamConfirmationCommand,
+    StoryWorkspaceDreamLaunchAccepted,
+    StoryWorkspaceDreamLaunchCommand,
     StoryWorkspaceGuidanceCommandPayload,
     StoryWorkspaceResourceType,
     StoryWorkspaceScenePatch,
@@ -126,6 +128,13 @@ class _WorkflowRunCancelRequest(BaseModel):
 
 
 class StoryWorkflowGateway(Protocol):
+    async def start_dream_run(
+        self,
+        request: StoryWorkspaceDreamLaunchCommand,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
     async def create_preflight(
         self,
         request: _WorkflowPreflightRequest,
@@ -1138,6 +1147,27 @@ async def create_workflow_preflight(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(gateway.create_preflight(request, actor=actor))
+
+
+@router.post("/dream-runs/start", status_code=201)
+async def story_workspace_start_dream_run(
+    request: StoryWorkspaceDreamLaunchCommand,
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    try:
+        actor = _workflow_actor(current_user)
+    except ApiRouteError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+
+    async def accepted_response() -> StoryWorkspaceDreamLaunchAccepted:
+        context = await gateway.start_dream_run(request, actor=actor)
+        return StoryWorkspaceDreamLaunchAccepted.from_context(context)
+
+    return await _workflow_call(accepted_response(), by_alias=True)
 
 
 @router.get("/workflow-preflights/{preflight_id}")

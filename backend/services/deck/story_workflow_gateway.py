@@ -52,6 +52,14 @@ try:
         StoryWorkspaceDreamConfirmationService,
         story_workspace_read_dream_confirmation_fact,
     )
+    from services.story_workspace.dream_launch_gateway import (
+        StoryWorkspaceDreamLaunchGateway,
+        StoryWorkspaceDreamLaunchGatewayError,
+    )
+    from services.story_workspace.dream_launch_service import (
+        StoryWorkspaceDreamLaunchIdempotencyConflict,
+        StoryWorkspaceDreamLaunchProvenanceError,
+    )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
@@ -85,6 +93,14 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
         story_workspace_read_dream_confirmation_fact,
+    )
+    from backend.services.story_workspace.dream_launch_gateway import (
+        StoryWorkspaceDreamLaunchGateway,
+        StoryWorkspaceDreamLaunchGatewayError,
+    )
+    from backend.services.story_workspace.dream_launch_service import (
+        StoryWorkspaceDreamLaunchIdempotencyConflict,
+        StoryWorkspaceDreamLaunchProvenanceError,
     )
 
 
@@ -602,6 +618,39 @@ class StoryWorkflowApplicationGateway:
                 request.input_data,
                 actor["actor_id"],
             )
+        finally:
+            db.close()
+
+    async def start_dream_run(
+        self,
+        request: Any,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Provision server-owned Dream dependencies and start one Agent turn."""
+
+        db = database.get_db()
+        try:
+            gateway = StoryWorkspaceDreamLaunchGateway(
+                db,
+                preflight_service=self._preflight_service(db, actor),
+                token_secret=_token_secret(),
+            )
+            return await gateway.start(request, actor=actor)
+        except StoryWorkspaceDreamLaunchIdempotencyConflict as exc:
+            raise ApiRouteError("IDEMPOTENCY_CONFLICT", status_code=409) from exc
+        except StoryWorkspaceDreamLaunchProvenanceError as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_INVALID", status_code=409
+            ) from exc
+        except StoryWorkspaceDreamLaunchGatewayError as exc:
+            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        except PermissionError as exc:
+            raise ApiRouteError(
+                "WORKFLOW_PERMISSION_DENIED", status_code=403
+            ) from exc
         finally:
             db.close()
 

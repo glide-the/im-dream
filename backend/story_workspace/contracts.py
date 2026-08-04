@@ -223,6 +223,28 @@ class StoryWorkspaceDreamRunContext(BaseModel):
     runtime_plugin_lock_id: str = Field(min_length=1, max_length=255)
 
 
+class StoryWorkspaceDreamLaunchAccepted(_StoryWorkspaceDreamWireModel):
+    """Canonical 201 response for a host-started Dream Agent turn."""
+
+    status: Literal["accepted"] = "accepted"
+    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    thread_id: str = Field(min_length=1, max_length=255)
+    deck_id: str = Field(min_length=1, max_length=255)
+    deck_plugin_id: str = Field(min_length=1, max_length=255)
+    deck_plugin_version: str = Field(min_length=1, max_length=255)
+    deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
+    binding_revision: _StoryWorkspaceDreamPositiveInt
+    deck_runtime_snapshot_id: str = Field(min_length=1, max_length=255)
+    runtime_plugin_lock_id: str = Field(min_length=1, max_length=255)
+
+    @classmethod
+    def from_context(
+        cls,
+        context: StoryWorkspaceDreamRunContext,
+    ) -> "StoryWorkspaceDreamLaunchAccepted":
+        return cls.model_validate(context.model_dump(mode="json"))
+
+
 class StoryWorkspaceDreamToolInput(BaseModel):
     """Canonical base for Agent-visible Dream MCP input contracts."""
 

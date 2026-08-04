@@ -17,8 +17,9 @@ except ModuleNotFoundError:  # Support backend directory on PYTHONPATH.
 
 BUILTIN_DECK_PLUGIN_ID = "ink.dream.story-workflow"
 BUILTIN_DECK_PLUGIN_VERSION = "1.0.0"
-BUILTIN_CLAUDE_PLUGIN_ID = "ink-dream-story@local"
+BUILTIN_CLAUDE_PLUGIN_ID = "ink-dream-story@platform-builtin"
 BUILTIN_SOURCE_REF = "builtin://ink-dream-story"
+_LEGACY_BUILTIN_CLAUDE_PLUGIN_ID = "ink-dream-story@local"
 
 
 def builtin_plugin_path() -> Path:
@@ -49,26 +50,19 @@ def resolve_builtin_source(source_ref: str) -> Path | None:
     return builtin_plugin_path().resolve()
 
 
-def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
-    """Publish the immutable built-in workflow release once per database."""
-    existing = db.execute(
-        """
-        SELECT 1 FROM deck_plugin_releases
-        WHERE deck_plugin_id = ? AND deck_plugin_version = ?
-        """,
-        (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
-    ).fetchone()
-    if existing is not None:
-        return
-
-    now = datetime.now(UTC)
-    manifest = DeckPluginManifestV1.model_validate(
+def _builtin_manifest(
+    claude_code_plugin_id: str = BUILTIN_CLAUDE_PLUGIN_ID,
+) -> DeckPluginManifestV1:
+    return DeckPluginManifestV1.model_validate(
         {
             "schema_version": "deck-plugin/v1",
             "deck_plugin_id": BUILTIN_DECK_PLUGIN_ID,
             "deck_plugin_version": BUILTIN_DECK_PLUGIN_VERSION,
             "display_name": "Dream Story Workflow",
-            "description": "Create structured story, character, and scene proposals for Dream review.",
+            "description": (
+                "Create structured story, character, and scene proposals "
+                "for Dream review."
+            ),
             "author": "Ink & Memory",
             "status": "published",
             "workflow": {
@@ -99,7 +93,7 @@ def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
             "runtime": {
                 "claude_code_plugins": [
                     {
-                        "claude_code_plugin_id": BUILTIN_CLAUDE_PLUGIN_ID,
+                        "claude_code_plugin_id": claude_code_plugin_id,
                         "source_ref": BUILTIN_SOURCE_REF,
                         "version_constraint": BUILTIN_DECK_PLUGIN_VERSION,
                         "required": True,
@@ -111,13 +105,160 @@ def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
             "dependencies": {"deck_plugin_releases": []},
         }
     )
-    manifest_json = json.dumps(
-        manifest.model_dump(mode="json"),
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(
+        value,
         ensure_ascii=False,
         separators=(",", ":"),
         sort_keys=True,
     )
-    manifest_hash = "sha256:" + hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
+
+
+def _manifest_json_and_hash(
+    manifest: DeckPluginManifestV1,
+) -> tuple[str, str]:
+    manifest_json = _canonical_json(manifest.model_dump(mode="json"))
+    manifest_hash = (
+        "sha256:" + hashlib.sha256(manifest_json.encode("utf-8")).hexdigest()
+    )
+    return manifest_json, manifest_hash
+
+
+def _repair_legacy_builtin_release(
+    db: sqlite3.Connection,
+    existing: sqlite3.Row,
+) -> None:
+    """Repair only the exact repository-owned pre-production built-in release."""
+    try:
+        manifest = DeckPluginManifestV1.model_validate_json(existing["manifest_json"])
+    except ValueError:
+        return
+
+    persisted_manifest_json, persisted_manifest_hash = _manifest_json_and_hash(manifest)
+    if (
+        existing["manifest_hash"] != persisted_manifest_hash
+        or manifest != _builtin_manifest(_LEGACY_BUILTIN_CLAUDE_PLUGIN_ID)
+    ):
+        return
+
+    lock_row = db.execute(
+        """
+        SELECT id, deck_plugin_manifest_hash, lock_json
+        FROM deck_runtime_plugin_locks
+        WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+        """,
+        (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
+    ).fetchone()
+    if lock_row is None:
+        return
+    try:
+        runtime_lock = DeckRuntimePluginLock.model_validate_json(lock_row["lock_json"])
+    except ValueError:
+        return
+
+    entries = runtime_lock.claude_code_plugins
+    if (
+        lock_row["id"] != runtime_lock.runtime_plugin_lock_id
+        or lock_row["deck_plugin_manifest_hash"] != persisted_manifest_hash
+        or runtime_lock.deck_plugin_id != BUILTIN_DECK_PLUGIN_ID
+        or runtime_lock.deck_plugin_version != BUILTIN_DECK_PLUGIN_VERSION
+        or runtime_lock.deck_plugin_manifest_hash != persisted_manifest_hash
+        or len(entries) != 1
+        or entries[0].claude_code_plugin_id
+        != _LEGACY_BUILTIN_CLAUDE_PLUGIN_ID
+        or entries[0].resolved_version != BUILTIN_DECK_PLUGIN_VERSION
+        or entries[0].source_ref != BUILTIN_SOURCE_REF
+        or not entries[0].required
+        or entries[0].capability_bindings != ["story.workspace.propose"]
+        or runtime_lock.production_ready
+        or runtime_lock.production_readiness_reasons
+        != ["repository_local_plugin", "development_runtime_only"]
+    ):
+        return
+
+    repaired_manifest = _builtin_manifest()
+    repaired_manifest_json, repaired_manifest_hash = _manifest_json_and_hash(
+        repaired_manifest
+    )
+    repaired_lock = DeckRuntimePluginLock(
+        runtime_plugin_lock_id=runtime_lock.runtime_plugin_lock_id,
+        deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
+        deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
+        deck_plugin_manifest_hash=repaired_manifest_hash,
+        claude_code_plugins=[
+            {
+                "claude_code_plugin_id": BUILTIN_CLAUDE_PLUGIN_ID,
+                "resolved_version": BUILTIN_DECK_PLUGIN_VERSION,
+                "source_ref": BUILTIN_SOURCE_REF,
+                "artifact_digest": plugin_artifact_digest(),
+                "required": True,
+                "capability_bindings": ["story.workspace.propose"],
+            }
+        ],
+        created_at=runtime_lock.created_at,
+        production_ready=True,
+        production_readiness_reasons=[],
+    )
+    now = datetime.now(UTC).isoformat()
+    with db:
+        release_result = db.execute(
+            """
+            UPDATE deck_plugin_releases
+            SET manifest_json = ?, manifest_hash = ?, runtime_spec_json = ?,
+                updated_at = ?
+            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+              AND manifest_hash = ? AND manifest_json = ?
+            """,
+            (
+                repaired_manifest_json,
+                repaired_manifest_hash,
+                _canonical_json(repaired_manifest.runtime.model_dump(mode="json")),
+                now,
+                BUILTIN_DECK_PLUGIN_ID,
+                BUILTIN_DECK_PLUGIN_VERSION,
+                persisted_manifest_hash,
+                persisted_manifest_json,
+            ),
+        )
+        lock_result = db.execute(
+            """
+            UPDATE deck_runtime_plugin_locks
+            SET deck_plugin_manifest_hash = ?, lock_json = ?
+            WHERE id = ? AND deck_plugin_id = ? AND deck_plugin_version = ?
+              AND deck_plugin_manifest_hash = ? AND lock_json = ?
+            """,
+            (
+                repaired_manifest_hash,
+                repaired_lock.model_dump_json(),
+                runtime_lock.runtime_plugin_lock_id,
+                BUILTIN_DECK_PLUGIN_ID,
+                BUILTIN_DECK_PLUGIN_VERSION,
+                persisted_manifest_hash,
+                lock_row["lock_json"],
+            ),
+        )
+        if release_result.rowcount != 1 or lock_result.rowcount != 1:
+            raise RuntimeError("built-in Deck Plugin legacy repair raced")
+
+
+def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
+    """Publish the immutable built-in workflow release once per database."""
+    existing = db.execute(
+        """
+        SELECT manifest_json, manifest_hash FROM deck_plugin_releases
+        WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+        """,
+        (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
+    ).fetchone()
+    if existing is not None:
+        _repair_legacy_builtin_release(db, existing)
+        return
+
+    now = datetime.now(UTC)
+    manifest = _builtin_manifest()
+    manifest_json, manifest_hash = _manifest_json_and_hash(manifest)
     lock_id = "rpl_" + uuid.uuid5(
         uuid.NAMESPACE_URL,
         f"{BUILTIN_DECK_PLUGIN_ID}@{BUILTIN_DECK_PLUGIN_VERSION}",
@@ -138,8 +279,8 @@ def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
             }
         ],
         created_at=now,
-        production_ready=False,
-        production_readiness_reasons=["repository_local_plugin", "development_runtime_only"],
+        production_ready=True,
+        production_readiness_reasons=[],
     )
     with db:
         db.execute(
@@ -167,7 +308,10 @@ def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
                 manifest.workflow.output_schema_ref,
                 json.dumps(manifest.capabilities, separators=(",", ":")),
                 json.dumps(manifest.compatibility.model_dump(mode="json"), separators=(",", ":")),
-                json.dumps(manifest.runtime_configuration.model_dump(mode="json"), separators=(",", ":")),
+                json.dumps(
+                    manifest.runtime_configuration.model_dump(mode="json"),
+                    separators=(",", ":"),
+                ),
                 json.dumps(manifest.runtime.model_dump(mode="json"), separators=(",", ":")),
                 json.dumps(manifest.dependencies.model_dump(mode="json"), separators=(",", ":")),
                 now.isoformat(),

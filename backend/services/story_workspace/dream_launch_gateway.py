@@ -1,0 +1,840 @@
+"""Production adapters for the Dream launch orchestration core.
+
+The browser supplies only a Deck, goal, and idempotency key.  This module owns
+all persisted source facts, server-selected plugin provisioning, workflow
+creation, and the durable first-turn dispatch envelope.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import dataclass
+from datetime import UTC, datetime
+import hashlib
+import json
+import os
+import sqlite3
+from typing import Any, Callable
+import uuid
+
+try:
+    from models.deck_plugin import (
+        DeckPluginBindingUpdateRequest,
+        DeckRuntimePluginLock,
+    )
+    from models.workflow_run import AuthenticatedActorContext
+    from services.claude_plugin.install_service import (
+        PluginInstallError,
+        PluginInstallService,
+    )
+    from services.deck.builtin_plugin import (
+        BUILTIN_CLAUDE_PLUGIN_ID,
+        BUILTIN_DECK_PLUGIN_ID,
+        BUILTIN_DECK_PLUGIN_VERSION,
+        seed_builtin_deck_plugin,
+    )
+    from services.deck.runtime_context import make_runtime_context_resolver
+    from services.deck_plugin.binding_service import BindingService
+    from services.deck_plugin.installation_service import (
+        InstallationService,
+        InstallationServiceError,
+        InstallationStatus,
+        RuntimePreparation,
+        Scope,
+    )
+    from services.deck_plugin.selection_validation_service import (
+        SelectionValidationService,
+    )
+    from services.story_workspace.dream_launch_service import (
+        StoryWorkspaceDreamLaunchIdempotencyConflict,
+        StoryWorkspaceDreamLaunchService,
+        StoryWorkspaceDreamLaunchSource,
+    )
+    from services.workflow.preflight_service import PreflightService, PreflightStatus
+    from services.workflow.run_service import WorkflowRunService
+    from story_workspace.contracts import (
+        StoryWorkspaceDreamLaunchCommand,
+        StoryWorkspaceDreamRunContext,
+    )
+except ModuleNotFoundError:  # Support package imports from repository root.
+    from backend.models.deck_plugin import (
+        DeckPluginBindingUpdateRequest,
+        DeckRuntimePluginLock,
+    )
+    from backend.models.workflow_run import AuthenticatedActorContext
+    from backend.services.claude_plugin.install_service import (
+        PluginInstallError,
+        PluginInstallService,
+    )
+    from backend.services.deck.builtin_plugin import (
+        BUILTIN_CLAUDE_PLUGIN_ID,
+        BUILTIN_DECK_PLUGIN_ID,
+        BUILTIN_DECK_PLUGIN_VERSION,
+        seed_builtin_deck_plugin,
+    )
+    from backend.services.deck.runtime_context import make_runtime_context_resolver
+    from backend.services.deck_plugin.binding_service import BindingService
+    from backend.services.deck_plugin.installation_service import (
+        InstallationService,
+        InstallationServiceError,
+        InstallationStatus,
+        RuntimePreparation,
+        Scope,
+    )
+    from backend.services.deck_plugin.selection_validation_service import (
+        SelectionValidationService,
+    )
+    from backend.services.story_workspace.dream_launch_service import (
+        StoryWorkspaceDreamLaunchIdempotencyConflict,
+        StoryWorkspaceDreamLaunchService,
+        StoryWorkspaceDreamLaunchSource,
+    )
+    from backend.services.workflow.preflight_service import (
+        PreflightService,
+        PreflightStatus,
+    )
+    from backend.services.workflow.run_service import WorkflowRunService
+    from backend.story_workspace.contracts import (
+        StoryWorkspaceDreamLaunchCommand,
+        StoryWorkspaceDreamRunContext,
+    )
+
+
+STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND = "story-workspace-dream-launch"
+STORY_WORKSPACE_DREAM_ADAPTER_PACKAGE_SPEC = (
+    "ink-dream-story@platform-builtin"
+)
+
+
+class StoryWorkspaceDreamLaunchGatewayError(RuntimeError):
+    def __init__(self, code: str, status_code: int) -> None:
+        self.code = code
+        self.status_code = status_code
+        super().__init__(code)
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _decode_json_object(raw: Any) -> dict[str, Any]:
+    try:
+        value = json.loads(str(raw or "{}"))
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _parse_time(raw: Any) -> datetime:
+    value = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value
+
+
+@dataclass(frozen=True)
+class StoryWorkspaceDreamLaunchBinding:
+    deck_plugin_id: str
+    deck_plugin_version: str
+    deck_plugin_binding_id: str
+    binding_revision: int
+
+
+class StoryWorkspaceDreamLaunchSourceStore:
+    """Atomically ensure one hidden Deck-bound source thread and message."""
+
+    def __init__(self, db: sqlite3.Connection) -> None:
+        self.db = db
+        self.db.row_factory = sqlite3.Row
+
+    async def ensure_source(
+        self,
+        *,
+        actor_id: str,
+        workspace_id: str,
+        deck_id: str,
+        goal: str,
+        idempotency_key: str,
+        request_fingerprint: str,
+        thread_id: str,
+        message_id: str,
+    ) -> StoryWorkspaceDreamLaunchSource:
+        try:
+            numeric_actor_id = int(actor_id)
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("invalid Dream launch actor") from exc
+        now = datetime.now(UTC)
+        metadata = {
+            "kind": STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND,
+            "schemaVersion": "story-workspace-dream-launch/v1",
+            "visibility": "system-hidden",
+            "actorId": actor_id,
+            "workspaceId": workspace_id,
+            "deckId": deck_id,
+            "goal": goal,
+            "idempotencyKey": idempotency_key,
+            "requestFingerprint": request_fingerprint,
+            "dispatchStatus": "pending",
+        }
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            self._require_scope(
+                actor_id=numeric_actor_id,
+                workspace_id=workspace_id,
+                deck_id=deck_id,
+            )
+            existing_message = self.db.execute(
+                "SELECT message.*, thread.user_id, thread.deck_id "
+                "FROM chat_message AS message JOIN chat_thread AS thread "
+                "ON thread.id = message.thread_id WHERE message.id = ?",
+                (message_id,),
+            ).fetchone()
+            if existing_message is not None:
+                self._validate_existing(
+                    existing_message,
+                    actor_id=numeric_actor_id,
+                    deck_id=deck_id,
+                    thread_id=thread_id,
+                    request_fingerprint=request_fingerprint,
+                    idempotency_key=idempotency_key,
+                )
+                self.db.commit()
+                existing_metadata = _decode_json_object(
+                    existing_message["metadata"]
+                )
+                return StoryWorkspaceDreamLaunchSource(
+                    thread_id=thread_id,
+                    message_id=message_id,
+                    message_time=_parse_time(existing_message["created_at"]),
+                    request_fingerprint=str(
+                        existing_metadata["requestFingerprint"]
+                    ),
+                    created=False,
+                )
+
+            existing_thread = self.db.execute(
+                "SELECT id, user_id, deck_id FROM chat_thread WHERE id = ?",
+                (thread_id,),
+            ).fetchone()
+            if existing_thread is None:
+                self.db.execute(
+                    "INSERT INTO chat_thread (id, user_id, title, deck_id) "
+                    "VALUES (?, ?, ?, ?)",
+                    (
+                        thread_id,
+                        numeric_actor_id,
+                        f"Dream · {goal[:80]}",
+                        deck_id,
+                    ),
+                )
+            elif (
+                int(existing_thread["user_id"]) != numeric_actor_id
+                or existing_thread["deck_id"] != deck_id
+            ):
+                raise PermissionError("Dream backing thread scope mismatch")
+
+            self.db.execute(
+                "INSERT INTO chat_message "
+                "(id, thread_id, role, parts, metadata, created_at) "
+                "VALUES (?, ?, 'user', ?, ?, ?)",
+                (
+                    message_id,
+                    thread_id,
+                    _canonical_json([{"type": "text", "text": goal}]),
+                    _canonical_json(metadata),
+                    now.isoformat(),
+                ),
+            )
+            self.db.execute(
+                "UPDATE chat_thread SET updated_at = ? WHERE id = ?",
+                (now.isoformat(), thread_id),
+            )
+            self.db.commit()
+        except Exception:
+            if self.db.in_transaction:
+                self.db.rollback()
+            raise
+        return StoryWorkspaceDreamLaunchSource(
+            thread_id=thread_id,
+            message_id=message_id,
+            message_time=now,
+            request_fingerprint=request_fingerprint,
+            created=True,
+        )
+
+    def _require_scope(
+        self,
+        *,
+        actor_id: int,
+        workspace_id: str,
+        deck_id: str,
+    ) -> None:
+        row = self.db.execute(
+            "SELECT deck.id FROM decks AS deck "
+            "JOIN story_workspace_workspaces AS workspace "
+            "ON workspace.id = ? AND workspace.owner_id = deck.owner_id "
+            "WHERE deck.id = ? AND deck.owner_id = ? AND deck.enabled = 1",
+            (workspace_id, deck_id, actor_id),
+        ).fetchone()
+        if row is None:
+            raise PermissionError("Deck not found or permission denied")
+
+    @staticmethod
+    def _validate_existing(
+        row: sqlite3.Row,
+        *,
+        actor_id: int,
+        deck_id: str,
+        thread_id: str,
+        request_fingerprint: str,
+        idempotency_key: str,
+    ) -> None:
+        metadata = _decode_json_object(row["metadata"])
+        scope_matches = (
+            row["thread_id"] == thread_id
+            and int(row["user_id"]) == actor_id
+            and row["deck_id"] == deck_id
+            and row["role"] == "user"
+            and metadata.get("kind")
+            == STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND
+            and metadata.get("idempotencyKey") == idempotency_key
+        )
+        if not scope_matches:
+            raise PermissionError("Dream launch source scope mismatch")
+        if metadata.get("requestFingerprint") != request_fingerprint:
+            raise StoryWorkspaceDreamLaunchIdempotencyConflict()
+
+
+class StoryWorkspaceDreamLaunchProvisioner:
+    """Ensure the server-owned Dream adapter runtime and active binding."""
+
+    def __init__(
+        self,
+        db: sqlite3.Connection,
+        *,
+        claude_installer_factory: Callable[[sqlite3.Connection], Any] = (
+            PluginInstallService
+        ),
+    ) -> None:
+        self.db = db
+        self.db.row_factory = sqlite3.Row
+        self._claude_installer_factory = claude_installer_factory
+
+    async def ensure_binding(
+        self,
+        *,
+        deck_id: str,
+        actor_id: str,
+        workspace_id: str,
+    ) -> StoryWorkspaceDreamLaunchBinding:
+        self._require_scope(deck_id, actor_id, workspace_id)
+        seed_builtin_deck_plugin(self.db)
+        runtime_lock = self._runtime_lock()
+        installation = self._ensure_claude_installation(runtime_lock)
+        self._ensure_materialization(runtime_lock, installation)
+        await self._ensure_deck_installation(runtime_lock, workspace_id)
+        return await self._ensure_active_binding(
+            deck_id=deck_id,
+            actor_id=actor_id,
+            workspace_id=workspace_id,
+        )
+
+    def _require_scope(
+        self,
+        deck_id: str,
+        actor_id: str,
+        workspace_id: str,
+    ) -> None:
+        try:
+            numeric_actor = int(actor_id)
+        except (TypeError, ValueError) as exc:
+            raise PermissionError("invalid Dream launch actor") from exc
+        row = self.db.execute(
+            "SELECT deck.id FROM decks AS deck "
+            "JOIN story_workspace_workspaces AS workspace "
+            "ON workspace.id = ? AND workspace.owner_id = deck.owner_id "
+            "WHERE deck.id = ? AND deck.owner_id = ? AND deck.enabled = 1",
+            (workspace_id, deck_id, numeric_actor),
+        ).fetchone()
+        if row is None:
+            raise PermissionError("Deck not found or permission denied")
+
+    def _runtime_lock(self) -> DeckRuntimePluginLock:
+        row = self.db.execute(
+            "SELECT lock_json FROM deck_runtime_plugin_locks "
+            "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
+            (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
+        ).fetchone()
+        if row is None:
+            raise StoryWorkspaceDreamLaunchGatewayError(
+                "DECK_PLUGIN_UNAVAILABLE", 503
+            )
+        runtime_lock = DeckRuntimePluginLock.model_validate_json(row["lock_json"])
+        required = [
+            entry for entry in runtime_lock.claude_code_plugins if entry.required
+        ]
+        if (
+            len(required) != 1
+            or required[0].claude_code_plugin_id != BUILTIN_CLAUDE_PLUGIN_ID
+            or required[0].resolved_version != BUILTIN_DECK_PLUGIN_VERSION
+        ):
+            raise StoryWorkspaceDreamLaunchGatewayError(
+                "DECK_RUNTIME_CONFIG_INVALID", 503
+            )
+        return runtime_lock
+
+    def _ensure_claude_installation(
+        self,
+        runtime_lock: DeckRuntimePluginLock,
+    ) -> dict[str, Any]:
+        entry = next(
+            item for item in runtime_lock.claude_code_plugins if item.required
+        )
+        row = self.db.execute(
+            "SELECT * FROM claude_plugin_installations "
+            "WHERE package_name = 'ink-dream-story' "
+            "AND marketplace = 'platform-builtin' AND resolved_version = ? "
+            "AND artifact_digest = ? AND status = 'ready' "
+            "ORDER BY installed_at DESC, id DESC LIMIT 1",
+            (entry.resolved_version, entry.artifact_digest),
+        ).fetchone()
+        installer = self._claude_installer_factory(self.db)
+        if row is None:
+            try:
+                operation = installer.install(
+                    STORY_WORKSPACE_DREAM_ADAPTER_PACKAGE_SPEC,
+                    source_type="platform-builtin",
+                )
+            except PluginInstallError as exc:
+                raise StoryWorkspaceDreamLaunchGatewayError(
+                    "RUNTIME_PLUGIN_NOT_READY", 503
+                ) from exc
+            installation_id = operation.get("installation_id")
+            row_value = installer.get_installation(str(installation_id))
+            if row_value is None:
+                raise StoryWorkspaceDreamLaunchGatewayError(
+                    "RUNTIME_PLUGIN_NOT_READY", 503
+                )
+            record = dict(row_value)
+        else:
+            record = dict(row)
+        if (
+            record.get("status") != "ready"
+            or record.get("requested_package_spec")
+            != STORY_WORKSPACE_DREAM_ADAPTER_PACKAGE_SPEC
+            or record.get("resolved_version") != entry.resolved_version
+            or record.get("artifact_digest") != entry.artifact_digest
+            or not installer.verify_installation_artifact(record)
+        ):
+            raise StoryWorkspaceDreamLaunchGatewayError(
+                "RUNTIME_PLUGIN_NOT_READY", 503
+            )
+        return record
+
+    def _ensure_materialization(
+        self,
+        runtime_lock: DeckRuntimePluginLock,
+        installation: dict[str, Any],
+    ) -> None:
+        entry = next(item for item in runtime_lock.claude_code_plugins if item.required)
+        environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
+        now = datetime.now(UTC).isoformat()
+        key = hashlib.sha256(
+            f"{environment}\0dream-launch\0{entry.claude_code_plugin_id}\0"
+            f"{entry.resolved_version}\0{entry.artifact_digest}".encode("utf-8")
+        ).hexdigest()
+        artifact_set_hash = "sha256:" + hashlib.sha256(
+            runtime_lock.model_dump_json().encode("utf-8")
+        ).hexdigest()
+        existing = self.db.execute(
+            "SELECT runtime_materialization_id FROM runtime_plugin_materializations "
+            "WHERE materialization_key = ?",
+            (key,),
+        ).fetchone()
+        with self.db:
+            if existing is None:
+                self.db.execute(
+                    """
+                    INSERT INTO runtime_plugin_materializations (
+                        runtime_materialization_id, runtime_environment_id,
+                        runtime_pool_id, runtime_node_id, claude_code_plugin_id,
+                        resolved_version, artifact_digest, materialized_digest,
+                        artifact_set_hash, policy_revision, declaration_status,
+                        materialization_status, activation_status,
+                        materialization_key, attempt_id, attempt_count,
+                        verification_status, retention_state, cache_ref,
+                        created_at, updated_at
+                    ) VALUES (?, ?, ?, 'local', ?, ?, ?, ?, ?, 'dream-launch/v1',
+                              'declared', 'materialized', 'loadable', ?, ?, 1,
+                              'verified', 'shared_artifact', ?, ?, ?)
+                    """,
+                    (
+                        "rm_" + uuid.uuid4().hex,
+                        environment,
+                        environment,
+                        entry.claude_code_plugin_id,
+                        entry.resolved_version,
+                        entry.artifact_digest,
+                        entry.artifact_digest,
+                        artifact_set_hash,
+                        key,
+                        "rpa_" + uuid.uuid4().hex,
+                        installation["artifact_path"],
+                        now,
+                        now,
+                    ),
+                )
+            else:
+                self.db.execute(
+                    "UPDATE runtime_plugin_materializations SET "
+                    "materialized_digest = ?, declaration_status = 'declared', "
+                    "materialization_status = 'materialized', "
+                    "activation_status = 'loadable', verification_status = 'verified', "
+                    "cache_ref = ?, last_error = NULL, updated_at = ? "
+                    "WHERE runtime_materialization_id = ?",
+                    (
+                        entry.artifact_digest,
+                        installation["artifact_path"],
+                        now,
+                        existing["runtime_materialization_id"],
+                    ),
+                )
+
+    async def _ensure_deck_installation(
+        self,
+        runtime_lock: DeckRuntimePluginLock,
+        workspace_id: str,
+    ) -> None:
+        def prepared(
+            _plugin_id: str,
+            _version: str,
+            checked_lock: DeckRuntimePluginLock,
+        ) -> RuntimePreparation:
+            ready = checked_lock.runtime_plugin_lock_id == runtime_lock.runtime_plugin_lock_id
+            return RuntimePreparation(
+                runtime_readiness="loadable" if ready else "lock_mismatch",
+                lock_materialized=ready,
+                load_smoke_passed=ready,
+                error_code=None if ready else "RUNTIME_PLUGIN_NOT_READY",
+                error_summary=None if ready else "runtime lock changed",
+            )
+
+        service = InstallationService(self.db, runtime_preparer=prepared)
+        row = self.db.execute(
+            "SELECT * FROM deck_plugin_installations "
+            "WHERE scope_type = 'workspace' AND scope_id = ? AND deck_plugin_id = ?",
+            (workspace_id, BUILTIN_DECK_PLUGIN_ID),
+        ).fetchone()
+        try:
+            if row is None:
+                started = await service.install(
+                    BUILTIN_DECK_PLUGIN_ID,
+                    BUILTIN_DECK_PLUGIN_VERSION,
+                    Scope(scope_type="workspace", scope_id=workspace_id),
+                    source_policy_id="system:dream-launch/v1",
+                )
+                await service.complete_installation(
+                    started.deck_plugin_installation_id
+                )
+                return
+            status = InstallationStatus(row["status"])
+            if status is InstallationStatus.INSTALLING:
+                await service.complete_installation(row["id"])
+                return
+            installed = set(json.loads(row["installed_versions_json"] or "[]"))
+            if (
+                status is not InstallationStatus.READY
+                or row["default_version"] != BUILTIN_DECK_PLUGIN_VERSION
+                or BUILTIN_DECK_PLUGIN_VERSION not in installed
+            ):
+                raise StoryWorkspaceDreamLaunchGatewayError(
+                    "DECK_PLUGIN_UNAVAILABLE", 409
+                )
+        except InstallationServiceError as exc:
+            raise StoryWorkspaceDreamLaunchGatewayError(
+                "RUNTIME_PLUGIN_NOT_READY", 503
+            ) from exc
+
+    async def _ensure_active_binding(
+        self,
+        *,
+        deck_id: str,
+        actor_id: str,
+        workspace_id: str,
+    ) -> StoryWorkspaceDreamLaunchBinding:
+        current = self.db.execute(
+            "SELECT * FROM deck_plugin_bindings "
+            "WHERE deck_id = ? AND status = 'active'",
+            (deck_id,),
+        ).fetchone()
+        if (
+            current is not None
+            and current["deck_plugin_id"] == BUILTIN_DECK_PLUGIN_ID
+            and current["deck_plugin_version"] == BUILTIN_DECK_PLUGIN_VERSION
+            and current["workspace_id"] == workspace_id
+            and current["creator_id"] == actor_id
+        ):
+            return StoryWorkspaceDreamLaunchBinding(
+                deck_plugin_id=current["deck_plugin_id"],
+                deck_plugin_version=current["deck_plugin_version"],
+                deck_plugin_binding_id=current["deck_plugin_binding_id"],
+                binding_revision=int(current["binding_revision"]),
+            )
+        revision = int(current["binding_revision"]) if current is not None else 0
+        validator = SelectionValidationService(
+            self.db,
+            runtime_context_resolver=make_runtime_context_resolver(self.db),
+        )
+        service = BindingService(self.db, selection_validator=validator)
+        response = await service.save(
+            deck_id=deck_id,
+            actor_id=actor_id,
+            requested_workspace_id=workspace_id,
+            request=DeckPluginBindingUpdateRequest(
+                deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
+                deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
+                expected_binding_revision=revision,
+                apply_to="next_run",
+            ),
+        )
+        return StoryWorkspaceDreamLaunchBinding(
+            deck_plugin_id=response.deck_plugin_id,
+            deck_plugin_version=response.deck_plugin_version,
+            deck_plugin_binding_id=response.deck_plugin_binding_id,
+            binding_revision=response.binding_revision,
+        )
+
+
+def _launch_instruction(goal: str) -> str:
+    return (
+        f"{goal}\n\n"
+        "你正在执行 Dream 工作空间生成流程。\n"
+        "必须遵守：\n"
+        "1. 首先调用 write_dream_run，使用宿主提供的 workflowRunId。\n"
+        "2. 仅在 canonical 人物文件完成后调用 write_dream_stage(characters)。\n"
+        "3. 仅在 canonical 场景文件完成后调用 write_dream_stage(scenes)。\n"
+        "4. 仅在 canonical 分镜文件完成后调用 write_dream_stage(storyboards)。\n"
+        "5. Dream flow 不调用 AskUserQuestion；缺少字段时写明"
+        "显式假设，形成可编辑草稿。\n"
+        "6. 完成人物、场景、分镜后停在 Dream 页面等待用户确认。"
+    )
+
+
+def story_workspace_build_dream_launch_turn_dispatcher() -> Callable[..., Any]:
+    """Resolve the U2b Agent request only when a launch is dispatched."""
+
+    def dispatch(**values: Any) -> Any:
+        from agent_factory import claude_agent_thread_factory
+        from claude_agent.service import ClaudeAgentRunRequest
+
+        request = ClaudeAgentRunRequest(
+            user_id=values["actor_id"],
+            thread_id=values["thread_id"],
+            resume=False,
+            message_id=values["message_id"],
+            message_parts=values["parts"],
+            message_metadata=values["metadata"],
+            story_workspace_dream_context=values["context"],
+        )
+        stream = claude_agent_thread_factory.run_streaming(request)
+
+        async def consume() -> None:
+            async for _frame in stream:
+                pass
+
+        return asyncio.create_task(
+            consume(),
+            name=f"dream-launch-turn-{values['message_id']}",
+        )
+
+    return dispatch
+
+
+class StoryWorkspaceDreamLaunchPersistentDispatcher:
+    """Persist the complete launch envelope and schedule it at most once."""
+
+    def __init__(
+        self,
+        db: sqlite3.Connection,
+        *,
+        turn_dispatcher: Callable[..., Any] | None = None,
+    ) -> None:
+        self.db = db
+        self.db.row_factory = sqlite3.Row
+        self._turn_dispatcher = (
+            turn_dispatcher or story_workspace_build_dream_launch_turn_dispatcher()
+        )
+
+    def __call__(
+        self,
+        *,
+        actor_id: str,
+        goal: str,
+        source: StoryWorkspaceDreamLaunchSource,
+        context: StoryWorkspaceDreamRunContext,
+    ) -> bool:
+        row = self.db.execute(
+            "SELECT message.parts, message.metadata, thread.user_id "
+            "FROM chat_message AS message JOIN chat_thread AS thread "
+            "ON thread.id = message.thread_id "
+            "WHERE message.id = ? AND message.thread_id = ?",
+            (source.message_id, source.thread_id),
+        ).fetchone()
+        if row is None or str(row["user_id"]) != actor_id:
+            raise PermissionError("Dream launch message scope mismatch")
+        metadata = _decode_json_object(row["metadata"])
+        if metadata.get("kind") != STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND:
+            raise PermissionError("Dream launch message kind mismatch")
+        existing_run_id = metadata.get("workflowRunId")
+        if existing_run_id not in {None, context.workflow_run_id}:
+            raise StoryWorkspaceDreamLaunchGatewayError(
+                "IDEMPOTENCY_CONFLICT", 409
+            )
+        if metadata.get("dispatchStatus") == "dispatched":
+            return False
+
+        parts = [{"type": "text", "text": _launch_instruction(goal)}]
+        metadata.update({
+            "workflowRunId": context.workflow_run_id,
+            "threadId": context.thread_id,
+            "dreamContext": context.model_dump(mode="json"),
+            "dispatchStatus": "pending",
+        })
+        with self.db:
+            self.db.execute(
+                "UPDATE chat_message SET parts = ?, metadata = ? WHERE id = ?",
+                (
+                    _canonical_json(parts),
+                    _canonical_json(metadata),
+                    source.message_id,
+                ),
+            )
+        accepted = self._turn_dispatcher(
+            actor_id=actor_id,
+            thread_id=source.thread_id,
+            message_id=source.message_id,
+            parts=parts,
+            metadata=metadata,
+            context=context,
+            resume=False,
+        )
+        if accepted is False:
+            return False
+        metadata["dispatchStatus"] = "dispatched"
+        with self.db:
+            self.db.execute(
+                "UPDATE chat_message SET metadata = ? WHERE id = ?",
+                (_canonical_json(metadata), source.message_id),
+            )
+        return True
+
+
+class StoryWorkspaceDreamLaunchGateway:
+    """Adapt production persistence/services into the U1 launch core."""
+
+    def __init__(
+        self,
+        db: sqlite3.Connection,
+        *,
+        preflight_service: PreflightService,
+        token_secret: bytes | str,
+        claude_installer_factory: Callable[[sqlite3.Connection], Any] = (
+            PluginInstallService
+        ),
+        turn_dispatcher: Callable[..., Any] | None = None,
+    ) -> None:
+        self.db = db
+        self.db.row_factory = sqlite3.Row
+        self._preflight_service = preflight_service
+        self._run_service = WorkflowRunService(db, token_secret=token_secret)
+        self._provisioner = StoryWorkspaceDreamLaunchProvisioner(
+            db,
+            claude_installer_factory=claude_installer_factory,
+        )
+        self._source_store = StoryWorkspaceDreamLaunchSourceStore(db)
+        self._dispatcher = StoryWorkspaceDreamLaunchPersistentDispatcher(
+            db,
+            turn_dispatcher=turn_dispatcher,
+        )
+
+    async def start(
+        self,
+        request: StoryWorkspaceDreamLaunchCommand,
+        *,
+        actor: dict[str, str],
+    ) -> StoryWorkspaceDreamRunContext:
+        actor_context = AuthenticatedActorContext(
+            actor_id=actor["actor_id"],
+            workspace_id=actor["workspace_id"],
+        )
+
+        async def resolve_binding(**values: Any) -> Any:
+            return await self._provisioner.ensure_binding(**values)
+
+        async def create_preflight(**values: Any) -> Any:
+            existing_run = self.db.execute(
+                "SELECT workflow_preflight_id FROM workflow_runs "
+                "WHERE workspace_id = ? AND created_by = ? AND idempotency_key = ?",
+                (
+                    actor_context.workspace_id,
+                    actor_context.actor_id,
+                    request.idempotency_key,
+                ),
+            ).fetchone()
+            if existing_run is not None:
+                row = self.db.execute(
+                    "SELECT * FROM workflow_preflights "
+                    "WHERE workflow_preflight_id = ? AND created_by = ?",
+                    (
+                        existing_run["workflow_preflight_id"],
+                        actor_context.actor_id,
+                    ),
+                ).fetchone()
+                if row is None:
+                    raise StoryWorkspaceDreamLaunchGatewayError(
+                        "DECK_RUNTIME_CONFIG_INVALID", 409
+                    )
+                token = self._preflight_service._token_from_row(row)
+                return self._preflight_service._row_to_model(row, token=token)
+            preflight = await self._preflight_service.execute_preflight(
+                values["deck_id"],
+                values["binding_revision"],
+                values["input_data"],
+                values["actor_id"],
+            )
+            if preflight.status is not PreflightStatus.PASSED:
+                raise StoryWorkspaceDreamLaunchGatewayError(
+                    preflight.error_code or "DECK_RUNTIME_CONFIG_INVALID",
+                    409,
+                )
+            return preflight
+
+        async def create_run(**values: Any) -> Any:
+            return await self._run_service.create_run(
+                values["preflight_id"],
+                values["preflight_token"],
+                values["idempotency_key"],
+                values["source_thread_id"],
+                actor_context,
+                source_message_id=values["source_message_id"],
+                source_message_time=values["source_message_time"],
+            )
+
+        service = StoryWorkspaceDreamLaunchService(
+            source_adapter=self._source_store,
+            binding_resolver=resolve_binding,
+            preflight_creator=create_preflight,
+            run_creator=create_run,
+            dispatcher=self._dispatcher,
+        )
+        return await service.launch(
+            request,
+            actor_id=actor["actor_id"],
+            workspace_id=actor["workspace_id"],
+        )
