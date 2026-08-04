@@ -45,7 +45,7 @@ export interface StoryWorkspaceExecutionWorkspace {
 }
 
 /** Access guard uses the persisted Dream command, never legacy run statuses. */
-export function canAccessStoryWorkspaceExecution(
+export function storyWorkspaceCanAccessExecution(
   files: StoryWorkspaceDreamFilesResponse,
 ): boolean {
   return files.confirmationAccepted;
@@ -74,7 +74,7 @@ function toEntry(
  * Build the collaboration surface from workspace files only. Run-state
  * branches and approval actions are intentionally absent from this model.
  */
-export function buildStoryWorkspaceExecutionWorkspace(
+export function storyWorkspaceBuildExecutionWorkspace(
   files: StoryWorkspaceDreamFilesResponse,
 ): StoryWorkspaceExecutionWorkspace {
   const assets: StoryWorkspaceExecutionEntry[] = [];

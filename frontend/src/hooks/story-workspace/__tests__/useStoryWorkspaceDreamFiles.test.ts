@@ -5,12 +5,12 @@
 
 import { expect, test } from '@playwright/test';
 import {
-  dreamFilesEndpoint,
-  fetchStoryWorkspaceDreamFiles,
-  parseStoryWorkspaceDreamFiles,
-  reduceStoryWorkspaceDreamFilesFetch,
-  shouldInvalidateStoryWorkspaceDreamFiles,
-  shouldPollStoryWorkspaceDreamFiles,
+  storyWorkspaceDreamFilesEndpoint,
+  storyWorkspaceFetchDreamFiles,
+  storyWorkspaceParseDreamFiles,
+  storyWorkspaceReduceDreamFilesFetch,
+  storyWorkspaceShouldInvalidateDreamFiles,
+  storyWorkspaceShouldPollDreamFiles,
 } from '../useStoryWorkspaceDreamFiles';
 
 const RUN_ID = `run_${'1'.repeat(32)}`;
@@ -79,20 +79,20 @@ function fullProjection() {
 }
 
 test('builds the canonical run-scoped endpoint', () => {
-  expect(dreamFilesEndpoint(RUN_ID)).toBe(
+  expect(storyWorkspaceDreamFilesEndpoint(RUN_ID)).toBe(
     `/api/story-workspace/workflow-runs/${RUN_ID}/dream-files`,
   );
-  expect(dreamFilesEndpoint('run/a?b')).toContain('run%2Fa%3Fb');
+  expect(storyWorkspaceDreamFilesEndpoint('run/a?b')).toContain('run%2Fa%3Fb');
 });
 
 test('strictly parses waiting and complete camelCase projections', () => {
-  const complete = parseStoryWorkspaceDreamFiles(fullProjection());
+  const complete = storyWorkspaceParseDreamFiles(fullProjection());
   expect(complete.canConfirm).toBe(true);
   expect(complete.confirmationAccepted).toBe(false);
   expect(complete.confirmationDispatched).toBe(false);
   expect(complete.stages.characters?.revision).toBe(2);
 
-  const accepted = parseStoryWorkspaceDreamFiles({
+  const accepted = storyWorkspaceParseDreamFiles({
     ...fullProjection(),
     confirmationAccepted: true,
     confirmationDispatched: false,
@@ -104,7 +104,7 @@ test('strictly parses waiting and complete camelCase projections', () => {
     canConfirm: false,
   });
 
-  const waiting = parseStoryWorkspaceDreamFiles({
+  const waiting = storyWorkspaceParseDreamFiles({
     ...fullProjection(),
     runRevision: 0,
     stages: {},
@@ -113,28 +113,28 @@ test('strictly parses waiting and complete camelCase projections', () => {
   expect(waiting.runRevision).toBe(0);
   expect(waiting.stages).toEqual({});
 
-  expect(() => parseStoryWorkspaceDreamFiles({
+  expect(() => storyWorkspaceParseDreamFiles({
     ...fullProjection(),
     requiredStages: ['characters', 'scenes', 'failed'],
   })).toThrow();
-  expect(() => parseStoryWorkspaceDreamFiles({
+  expect(() => storyWorkspaceParseDreamFiles({
     ...fullProjection(),
     stages: { characters: { ...fullProjection().stages.characters, revision: true } },
   })).toThrow();
-  expect(() => parseStoryWorkspaceDreamFiles({
+  expect(() => storyWorkspaceParseDreamFiles({
     ...fullProjection(),
     confirmationAccepted: true,
     confirmationDispatched: false,
     canConfirm: true,
   })).toThrow();
-  expect(() => parseStoryWorkspaceDreamFiles({
+  expect(() => storyWorkspaceParseDreamFiles({
     ...fullProjection(),
     confirmationAccepted: false,
     confirmationDispatched: true,
   })).toThrow();
   const withoutConfirmationFacts = { ...fullProjection() } as Record<string, unknown>;
   delete withoutConfirmationFacts.confirmationAccepted;
-  expect(() => parseStoryWorkspaceDreamFiles(withoutConfirmationFacts)).toThrow();
+  expect(() => storyWorkspaceParseDreamFiles(withoutConfirmationFacts)).toThrow();
 });
 
 test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
@@ -147,7 +147,7 @@ test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
     });
   }) as unknown as typeof fetch;
 
-  const projection = await fetchStoryWorkspaceDreamFiles('/api/dream', {
+  const projection = await storyWorkspaceFetchDreamFiles('/api/dream', {
     fetchImpl,
     token: 'token-1',
   });
@@ -155,42 +155,42 @@ test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
   expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer token-1');
   expect(calls[0].init?.credentials).toBe('include');
 
-  await expect(fetchStoryWorkspaceDreamFiles('/api/dream', {
+  await expect(storyWorkspaceFetchDreamFiles('/api/dream', {
     fetchImpl: (async () => new Response('{}', { status: 409 })) as unknown as typeof fetch,
   })).rejects.toThrow();
-  await expect(fetchStoryWorkspaceDreamFiles('/api/dream', {
+  await expect(storyWorkspaceFetchDreamFiles('/api/dream', {
     fetchImpl: (async () => new Response('{bad', { status: 200 })) as unknown as typeof fetch,
   })).rejects.toThrow();
 });
 
 test('polling includes editing so Agent revision conflicts surface within five seconds', () => {
-  expect(shouldPollStoryWorkspaceDreamFiles('story-workspace-dream-waiting-files')).toBe(true);
-  expect(shouldPollStoryWorkspaceDreamFiles('story-workspace-dream-editing')).toBe(true);
-  expect(shouldPollStoryWorkspaceDreamFiles('story-workspace-dream-continuing')).toBe(true);
+  expect(storyWorkspaceShouldPollDreamFiles('story-workspace-dream-waiting-files')).toBe(true);
+  expect(storyWorkspaceShouldPollDreamFiles('story-workspace-dream-editing')).toBe(true);
+  expect(storyWorkspaceShouldPollDreamFiles('story-workspace-dream-continuing')).toBe(true);
   for (const state of [
     'story-workspace-dream-confirming',
     'story-workspace-dream-completed',
   ] as const) {
-    expect(shouldPollStoryWorkspaceDreamFiles(state)).toBe(false);
+    expect(storyWorkspaceShouldPollDreamFiles(state)).toBe(false);
   }
 });
 
 test('only same-run story-workspace output invalidates the REST snapshot', () => {
-  expect(shouldInvalidateStoryWorkspaceDreamFiles({
+  expect(storyWorkspaceShouldInvalidateDreamFiles({
     type: 'story-workspace-output',
     runId: RUN_ID,
     changedStages: ['characters'],
     revisions: { characters: 2 },
   }, RUN_ID)).toBe(true);
-  expect(shouldInvalidateStoryWorkspaceDreamFiles({
+  expect(storyWorkspaceShouldInvalidateDreamFiles({
     type: 'story-workspace-output',
     storyWorkspaceRunId: RUN_ID,
   }, RUN_ID)).toBe(true);
-  expect(shouldInvalidateStoryWorkspaceDreamFiles({
+  expect(storyWorkspaceShouldInvalidateDreamFiles({
     type: 'story-workspace-output',
     runId: `run_${'2'.repeat(32)}`,
   }, RUN_ID)).toBe(false);
-  expect(shouldInvalidateStoryWorkspaceDreamFiles({
+  expect(storyWorkspaceShouldInvalidateDreamFiles({
     type: 'story-workspace-output',
     story_id: 'legacy-proposal',
     review_status: 'pending',
@@ -198,20 +198,20 @@ test('only same-run story-workspace output invalidates the REST snapshot', () =>
 });
 
 test('fetch reducer ignores stale generations and preserves the last snapshot on error', () => {
-  const projection = parseStoryWorkspaceDreamFiles(fullProjection());
+  const projection = storyWorkspaceParseDreamFiles(fullProjection());
   const initial = { data: null, error: null, isLoading: false, generation: 0 };
-  const loading = reduceStoryWorkspaceDreamFilesFetch(initial, {
+  const loading = storyWorkspaceReduceDreamFilesFetch(initial, {
     type: 'start', generation: 2,
   });
-  const stale = reduceStoryWorkspaceDreamFilesFetch(loading, {
+  const stale = storyWorkspaceReduceDreamFilesFetch(loading, {
     type: 'success', generation: 1, data: projection,
   });
   expect(stale).toEqual(loading);
 
-  const loaded = reduceStoryWorkspaceDreamFilesFetch(loading, {
+  const loaded = storyWorkspaceReduceDreamFilesFetch(loading, {
     type: 'success', generation: 2, data: projection,
   });
-  const failed = reduceStoryWorkspaceDreamFilesFetch(loaded, {
+  const failed = storyWorkspaceReduceDreamFilesFetch(loaded, {
     type: 'error', generation: 3, error: new Error('offline'),
   });
   expect(failed.data).toBe(projection);

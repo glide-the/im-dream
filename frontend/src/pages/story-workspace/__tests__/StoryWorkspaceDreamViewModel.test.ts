@@ -5,10 +5,10 @@
 import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
 import {
-  dreamStageSnapshotsFromFiles,
+  storyWorkspaceDreamStageSnapshotsFromFiles,
   storyWorkspaceDreamLifecycleFromPersistence,
   storyWorkspaceDreamPersistenceNotice,
-  parseStoryWorkspaceDreamEditorValue,
+  storyWorkspaceParseDreamEditorValue,
   storyWorkspaceDreamEditorValue,
 } from '../dreamViewModel';
 
@@ -50,7 +50,7 @@ function projection(): StoryWorkspaceDreamFilesResponse {
 }
 
 test('maps only the three server-whitelisted editable fields into local state', () => {
-  const snapshots = dreamStageSnapshotsFromFiles(projection());
+  const snapshots = storyWorkspaceDreamStageSnapshotsFromFiles(projection());
   expect(snapshots).toHaveLength(1);
   expect(snapshots[0]).toEqual({
     stage: 'characters',
@@ -114,9 +114,9 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
 test('formats editor values and parses relations without empty duplicates', () => {
   expect(storyWorkspaceDreamEditorValue(['林默', '苏遥'])).toBe('林默，苏遥');
   expect(storyWorkspaceDreamEditorValue(null)).toBe('');
-  expect(parseStoryWorkspaceDreamEditorValue('relations', '林默, 苏遥，林默'))
+  expect(storyWorkspaceParseDreamEditorValue('relations', '林默, 苏遥，林默'))
     .toEqual(['林默', '苏遥']);
-  expect(parseStoryWorkspaceDreamEditorValue('summary', '')).toBeNull();
-  expect(parseStoryWorkspaceDreamEditorValue('displayName', '  林默  ')).toBe('林默');
-  expect(() => parseStoryWorkspaceDreamEditorValue('displayName', '   ')).toThrow();
+  expect(storyWorkspaceParseDreamEditorValue('summary', '')).toBeNull();
+  expect(storyWorkspaceParseDreamEditorValue('displayName', '  林默  ')).toBe('林默');
+  expect(() => storyWorkspaceParseDreamEditorValue('displayName', '   ')).toThrow();
 });

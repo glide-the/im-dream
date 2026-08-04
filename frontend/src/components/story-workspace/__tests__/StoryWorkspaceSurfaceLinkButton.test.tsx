@@ -11,8 +11,8 @@ import type {
   StoryWorkspaceSurfaceLinkStage,
 } from '../../../hooks/story-workspace';
 import {
-  resolveStoryWorkspaceSurfaceLink,
-  SURFACE_LINK_LABELS,
+  storyWorkspaceResolveSurfaceLink,
+  STORY_WORKSPACE_SURFACE_LINK_LABELS,
   storyWorkspaceExecutionDeepLink,
   storyWorkspaceReviewDeepLink,
   type StoryWorkspaceSurfaceLinkButtonProps,
@@ -43,20 +43,20 @@ const STAGE_CASES: Array<[StoryWorkspaceSurfaceLinkStage, string, string]> = [
 ];
 
 test('label table exposes only the four design_007 lifecycle bridge stages', () => {
-  expect(Object.keys(SURFACE_LINK_LABELS).sort()).toEqual([
+  expect(Object.keys(STORY_WORKSPACE_SURFACE_LINK_LABELS).sort()).toEqual([
     'completed', 'confirmed', 'continuing', 'pending_review',
   ]);
 });
 
 for (const [stage, label, href] of STAGE_CASES) {
   test(`stage ${stage} resolves to "${label}" → ${href}`, () => {
-    const model = resolveStoryWorkspaceSurfaceLink(props({ state: { stage } }));
+    const model = storyWorkspaceResolveSurfaceLink(props({ state: { stage } }));
     expect(model).toEqual({ primary: { label, href } });
   });
 }
 
 test('review deep link degrades to the surface entry_route when episodeId is missing', () => {
-  const model = resolveStoryWorkspaceSurfaceLink(props({
+  const model = storyWorkspaceResolveSurfaceLink(props({
     episodeId: null,
     state: { stage: 'pending_review' },
   }));
@@ -71,35 +71,35 @@ test('deep-link builders encode path/query segments', () => {
 });
 
 test('hidden when the session has no dream surface', () => {
-  expect(resolveStoryWorkspaceSurfaceLink(props({ surfaces: undefined }))).toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({
+  expect(storyWorkspaceResolveSurfaceLink(props({ surfaces: undefined }))).toBeUndefined();
+  expect(storyWorkspaceResolveSurfaceLink(props({
     surfaces: [{ name: 'other', protocol_dir: '.other', entry_route: '/story-workspace/other' }],
   }))).toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({ surfaces: [] }))).toBeUndefined();
+  expect(storyWorkspaceResolveSurfaceLink(props({ surfaces: [] }))).toBeUndefined();
 });
 
 test('hidden when the resource is not bound to a run or aggregation is absent', () => {
-  expect(resolveStoryWorkspaceSurfaceLink(props({ runId: null }))).toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({ runId: undefined }))).toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({ runId: '' }))).toBeUndefined();
+  expect(storyWorkspaceResolveSurfaceLink(props({ runId: null }))).toBeUndefined();
+  expect(storyWorkspaceResolveSurfaceLink(props({ runId: undefined }))).toBeUndefined();
+  expect(storyWorkspaceResolveSurfaceLink(props({ runId: '' }))).toBeUndefined();
   // The frontend never infers stage: without server-aggregated state the
   // button stays hidden instead of guessing.
-  expect(resolveStoryWorkspaceSurfaceLink(props({ state: null }))).toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({ state: undefined }))).toBeUndefined();
+  expect(storyWorkspaceResolveSurfaceLink(props({ state: null }))).toBeUndefined();
+  expect(storyWorkspaceResolveSurfaceLink(props({ state: undefined }))).toBeUndefined();
 });
 
 test('legacy aggregate branches and replaced attempts stay outside Dream UI', () => {
-  expect(resolveStoryWorkspaceSurfaceLink(props({ state: { stage: 'failed' } })))
+  expect(storyWorkspaceResolveSurfaceLink(props({ state: { stage: 'failed' } })))
     .toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({ state: { stage: 'rejected' } })))
+  expect(storyWorkspaceResolveSurfaceLink(props({ state: { stage: 'rejected' } })))
     .toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({
+  expect(storyWorkspaceResolveSurfaceLink(props({
     state: { stage: 'pending_review', superseded: true, latestRunId: 'r2' },
   }))).toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({
+  expect(storyWorkspaceResolveSurfaceLink(props({
     state: { stage: 'pending_review', superseded: true },
   }))).toBeUndefined();
-  expect(resolveStoryWorkspaceSurfaceLink(props({
+  expect(storyWorkspaceResolveSurfaceLink(props({
     state: { stage: 'pending_review', superseded: true, latestRunId: 'r1' },
   }))).toBeUndefined();
 });
@@ -107,7 +107,7 @@ test('legacy aggregate branches and replaced attempts stay outside Dream UI', ()
 test('component renders content when visible and null when hidden', () => {
   // The node-side runner's JSX runtime is incompatible with react-dom/server,
   // so render coverage is limited to the null/non-null boundary; label/href
-  // semantics are fully covered by resolveStoryWorkspaceSurfaceLink above.
+  // semantics are fully covered by storyWorkspaceResolveSurfaceLink above.
   expect(StoryWorkspaceSurfaceLinkButton(props({ state: { stage: 'confirmed' } }))).not.toBeNull();
   expect(StoryWorkspaceSurfaceLinkButton(props({
     state: { stage: 'pending_review', superseded: true, latestRunId: 'r2' },

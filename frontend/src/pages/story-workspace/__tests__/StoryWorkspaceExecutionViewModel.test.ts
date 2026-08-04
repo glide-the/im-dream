@@ -5,8 +5,8 @@
 import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
 import {
-  buildStoryWorkspaceExecutionWorkspace,
-  canAccessStoryWorkspaceExecution,
+  storyWorkspaceBuildExecutionWorkspace,
+  storyWorkspaceCanAccessExecution,
   storyWorkspaceExecutionFocusNeighbors,
 } from '../executionViewModel';
 
@@ -68,7 +68,7 @@ function files(): StoryWorkspaceDreamFilesResponse {
 }
 
 test('builds Assets and Outline from workspace files without approval states', () => {
-  const workspace = buildStoryWorkspaceExecutionWorkspace(files());
+  const workspace = storyWorkspaceBuildExecutionWorkspace(files());
 
   expect(workspace.assets.map((entry) => entry.title)).toEqual(['林默', '旧车站']);
   expect(workspace.outline.map((entry) => entry.title)).toEqual(['雨夜抵达', '冲突发生']);
@@ -86,7 +86,7 @@ test('builds Assets and Outline from workspace files without approval states', (
 });
 
 test('focus neighbors stay inside the ordered Outline manuscript', () => {
-  const outline = buildStoryWorkspaceExecutionWorkspace(files()).outline;
+  const outline = storyWorkspaceBuildExecutionWorkspace(files()).outline;
 
   expect(storyWorkspaceExecutionFocusNeighbors(outline, 'storyboards:beat-01'))
     .toEqual({ previousKey: null, nextKey: 'storyboards:beat-02' });
@@ -97,8 +97,8 @@ test('focus neighbors stay inside the ordered Outline manuscript', () => {
 });
 
 test('route gate uses the durable Dream confirmation fact, never WorkflowRun.status', () => {
-  expect(canAccessStoryWorkspaceExecution(files())).toBe(true);
-  expect(canAccessStoryWorkspaceExecution({
+  expect(storyWorkspaceCanAccessExecution(files())).toBe(true);
+  expect(storyWorkspaceCanAccessExecution({
     ...files(),
     confirmationAccepted: false,
     confirmationDispatched: false,

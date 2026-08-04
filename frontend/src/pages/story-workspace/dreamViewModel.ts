@@ -12,7 +12,7 @@ import type { StoryWorkspaceDreamStageSnapshot } from '../../components/story-wo
 import { STORY_WORKSPACE_DREAM_STAGES } from '../../components/story-workspace/dreamState';
 
 /** Map REST projections to the exact three-field local edit whitelist. */
-export function dreamStageSnapshotsFromFiles(
+export function storyWorkspaceDreamStageSnapshotsFromFiles(
   files: StoryWorkspaceDreamFilesResponse,
 ): StoryWorkspaceDreamStageSnapshot[] {
   return STORY_WORKSPACE_DREAM_STAGES.flatMap((stage) => {
@@ -43,7 +43,7 @@ export function storyWorkspaceDreamEditorValue(
   return String(value);
 }
 
-export function parseStoryWorkspaceDreamEditorValue(
+export function storyWorkspaceParseDreamEditorValue(
   field: 'displayName' | 'summary' | 'relations',
   value: string,
 ): StoryWorkspaceDreamFieldValue {

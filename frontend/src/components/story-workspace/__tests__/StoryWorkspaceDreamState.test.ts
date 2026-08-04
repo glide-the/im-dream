@@ -15,16 +15,16 @@ import type {
   StoryWorkspaceDreamStage,
 } from '../../../hooks/story-workspace/contracts';
 import {
-  acceptStoryWorkspaceDreamConfirmation,
-  beginStoryWorkspaceDreamConfirmation,
-  canConfirmStoryWorkspaceDream,
-  completeStoryWorkspaceDream,
-  createStoryWorkspaceDreamState,
-  editStoryWorkspaceDreamField,
-  hydrateStoryWorkspaceDreamState,
-  readStoryWorkspaceDreamField,
-  resolveStoryWorkspaceDreamRevisionConflict,
-  resetStoryWorkspaceDreamField,
+  storyWorkspaceAcceptDreamConfirmation,
+  storyWorkspaceBeginDreamConfirmation,
+  storyWorkspaceCanConfirmDream,
+  storyWorkspaceCompleteDream,
+  storyWorkspaceCreateDreamState,
+  storyWorkspaceEditDreamField,
+  storyWorkspaceHydrateDreamState,
+  storyWorkspaceReadDreamField,
+  storyWorkspaceResolveDreamRevisionConflict,
+  storyWorkspaceResetDreamField,
   STORY_WORKSPACE_DREAM_STAGES,
   STORY_WORKSPACE_DREAM_STATES,
   type StoryWorkspaceDreamConfirmationStart,
@@ -77,8 +77,8 @@ function stageSnapshot(
 }
 
 function readyState() {
-  return hydrateStoryWorkspaceDreamState(
-    createStoryWorkspaceDreamState({
+  return storyWorkspaceHydrateDreamState(
+    storyWorkspaceCreateDreamState({
       storyWorkspaceRunId: RUN_ID,
       threadId: THREAD_ID,
     }),
@@ -93,8 +93,8 @@ function readyState() {
 function readyStateWithCharacterItems(
   items: StoryWorkspaceDreamStageSnapshot['items'],
 ) {
-  return hydrateStoryWorkspaceDreamState(
-    createStoryWorkspaceDreamState({
+  return storyWorkspaceHydrateDreamState(
+    storyWorkspaceCreateDreamState({
       storyWorkspaceRunId: RUN_ID,
       threadId: THREAD_ID,
     }),
@@ -135,27 +135,27 @@ test('Dream exposes only the five design_007 lifecycle states', () => {
 });
 
 test('the three required stages hydrate one by one and only the complete set is confirmable', () => {
-  let state = createStoryWorkspaceDreamState({
+  let state = storyWorkspaceCreateDreamState({
     storyWorkspaceRunId: RUN_ID,
     threadId: THREAD_ID,
   });
 
   expect(state.status).toBe('story-workspace-dream-waiting-files');
   expect(state.availableStages).toEqual([]);
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(false);
 
-  state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('characters', 2)]);
+  state = storyWorkspaceHydrateDreamState(state, [stageSnapshot('characters', 2)]);
   expect(state.status).toBe('story-workspace-dream-waiting-files');
   expect(state.availableStages).toEqual(['characters']);
   expect(state.baseRevisions).toEqual({ characters: 2 });
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(false);
 
-  state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('scenes', 3)]);
+  state = storyWorkspaceHydrateDreamState(state, [stageSnapshot('scenes', 3)]);
   expect(state.status).toBe('story-workspace-dream-waiting-files');
   expect(state.availableStages).toEqual(['characters', 'scenes']);
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(false);
 
-  state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('storyboards', 5)]);
+  state = storyWorkspaceHydrateDreamState(state, [stageSnapshot('storyboards', 5)]);
   expect(state.status).toBe('story-workspace-dream-editing');
   expect(state.availableStages).toEqual(STORY_WORKSPACE_DREAM_STAGES);
   expect(state.baseRevisions).toEqual({
@@ -164,22 +164,22 @@ test('the three required stages hydrate one by one and only the complete set is 
     storyboards: 5,
   });
   expect(state.latestRevisions).toEqual(state.baseRevisions);
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(true);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(true);
 });
 
 test('hydrate stores server fields while field edits and resets remain local and count dirty fields', () => {
   let state = readyState();
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('characters summary r2');
 
-  state = editStoryWorkspaceDreamField(
+  state = storyWorkspaceEditDreamField(
     state,
     'characters',
     'characters_primary',
     'summary',
     'locally rewritten character',
   );
-  state = editStoryWorkspaceDreamField(
+  state = storyWorkspaceEditDreamField(
     state,
     'characters',
     'characters_primary',
@@ -187,20 +187,20 @@ test('hydrate stores server fields while field edits and resets remain local and
     'local notes',
   );
   expect(state.dirtyCount).toBe(2);
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('locally rewritten character');
 
-  state = resetStoryWorkspaceDreamField(
+  state = storyWorkspaceResetDreamField(
     state,
     'characters',
     'characters_primary',
     'summary',
   );
   expect(state.dirtyCount).toBe(1);
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('characters summary r2');
 
-  state = resetStoryWorkspaceDreamField(
+  state = storyWorkspaceResetDreamField(
     state,
     'characters',
     'characters_primary',
@@ -221,17 +221,17 @@ test('hydrate/edit clone inputs, operations preserve old state, and reads return
       editableFields,
     }],
   } satisfies StoryWorkspaceDreamStageSnapshot;
-  const empty = createStoryWorkspaceDreamState({
+  const empty = storyWorkspaceCreateDreamState({
     storyWorkspaceRunId: RUN_ID,
     threadId: THREAD_ID,
   });
-  const hydrated = hydrateStoryWorkspaceDreamState(empty, [characters]);
+  const hydrated = storyWorkspaceHydrateDreamState(empty, [characters]);
 
   hydratedValue.beats.push('mutated after hydrate');
   editableFields.push('not_really_editable');
-  expect(readStoryWorkspaceDreamField(hydrated, 'characters', 'character_clone', 'details'))
+  expect(storyWorkspaceReadDreamField(hydrated, 'characters', 'character_clone', 'details'))
     .toEqual({ beats: ['server beat'] });
-  expect(() => editStoryWorkspaceDreamField(
+  expect(() => storyWorkspaceEditDreamField(
     hydrated,
     'characters',
     'character_clone',
@@ -240,7 +240,7 @@ test('hydrate/edit clone inputs, operations preserve old state, and reads return
   )).toThrow(/editable/i);
 
   const editValue = { beats: ['local beat'] };
-  const edited = editStoryWorkspaceDreamField(
+  const edited = storyWorkspaceEditDreamField(
     hydrated,
     'characters',
     'character_clone',
@@ -250,47 +250,47 @@ test('hydrate/edit clone inputs, operations preserve old state, and reads return
   editValue.beats.push('mutated after edit');
 
   expect(hydrated.dirtyCount).toBe(0);
-  expect(readStoryWorkspaceDreamField(hydrated, 'characters', 'character_clone', 'details'))
+  expect(storyWorkspaceReadDreamField(hydrated, 'characters', 'character_clone', 'details'))
     .toEqual({ beats: ['server beat'] });
   expect(edited.dirtyCount).toBe(1);
-  expect(readStoryWorkspaceDreamField(edited, 'characters', 'character_clone', 'details'))
+  expect(storyWorkspaceReadDreamField(edited, 'characters', 'character_clone', 'details'))
     .toEqual({ beats: ['local beat'] });
 
-  const readValue = readStoryWorkspaceDreamField(
+  const readValue = storyWorkspaceReadDreamField(
     edited,
     'characters',
     'character_clone',
     'details',
   ) as { beats: string[] };
   readValue.beats.push('mutated read clone');
-  expect(readStoryWorkspaceDreamField(edited, 'characters', 'character_clone', 'details'))
+  expect(storyWorkspaceReadDreamField(edited, 'characters', 'character_clone', 'details'))
     .toEqual({ beats: ['local beat'] });
 });
 
 test('all public states and the canonical command are deeply frozen against external mutation', () => {
-  const created = createStoryWorkspaceDreamState({
+  const created = storyWorkspaceCreateDreamState({
     storyWorkspaceRunId: RUN_ID,
     threadId: THREAD_ID,
   });
   const hydrated = readyState();
-  const edited = editStoryWorkspaceDreamField(
+  const edited = storyWorkspaceEditDreamField(
     hydrated,
     'characters',
     'characters_primary',
     'summary',
     'frozen local summary',
   );
-  const reset = resetStoryWorkspaceDreamField(
+  const reset = storyWorkspaceResetDreamField(
     edited,
     'characters',
     'characters_primary',
     'summary',
   );
-  const stale = hydrateStoryWorkspaceDreamState(edited, [stageSnapshot('characters', 4)]);
-  const resolved = resolveStoryWorkspaceDreamRevisionConflict(stale, 'characters', 'keep-local');
-  const confirmation = beginStoryWorkspaceDreamConfirmation(resolved, 'swc_frozen');
-  const continuing = acceptStoryWorkspaceDreamConfirmation(confirmation.state);
-  const completed = completeStoryWorkspaceDream(continuing);
+  const stale = storyWorkspaceHydrateDreamState(edited, [stageSnapshot('characters', 4)]);
+  const resolved = storyWorkspaceResolveDreamRevisionConflict(stale, 'characters', 'keep-local');
+  const confirmation = storyWorkspaceBeginDreamConfirmation(resolved, 'swc_frozen');
+  const continuing = storyWorkspaceAcceptDreamConfirmation(confirmation.state);
+  const completed = storyWorkspaceCompleteDream(continuing);
 
   for (const state of [created, hydrated, edited, reset, stale, resolved, confirmation.state, continuing, completed]) {
     expect(Object.isFrozen(state)).toBe(true);
@@ -343,15 +343,15 @@ test('hydrate and edit reject cycles, Date/non-plain objects, and nested reserve
   ];
 
   for (const invalidValue of invalidValues) {
-    const empty = createStoryWorkspaceDreamState({
+    const empty = storyWorkspaceCreateDreamState({
       storyWorkspaceRunId: RUN_ID,
       threadId: THREAD_ID,
     });
-    expect(() => hydrateStoryWorkspaceDreamState(
+    expect(() => storyWorkspaceHydrateDreamState(
       empty,
       [invalidCharactersSnapshot(invalidValue)],
     )).toThrow(/JSON/i);
-    expect(() => editStoryWorkspaceDreamField(
+    expect(() => storyWorkspaceEditDreamField(
       readyState(),
       'characters',
       'characters_primary',
@@ -362,7 +362,7 @@ test('hydrate and edit reject cycles, Date/non-plain objects, and nested reserve
 });
 
 function revisionConflictState() {
-  let state = editStoryWorkspaceDreamField(
+  let state = storyWorkspaceEditDreamField(
     readyState(),
     'characters',
     'characters_primary',
@@ -370,7 +370,7 @@ function revisionConflictState() {
     'keep my local character',
   );
 
-  state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('characters', 4, {
+  state = storyWorkspaceHydrateDreamState(state, [stageSnapshot('characters', 4, {
     summary: 'server character r4',
     notes: 'server notes r4',
   })]);
@@ -380,74 +380,74 @@ function revisionConflictState() {
 test('a newer server revision preserves a dirty field, refreshes clean fields, and marks update/stale', () => {
   const state = revisionConflictState();
 
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('keep my local character');
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'notes'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'notes'))
     .toBe('server notes r4');
   expect(state.baseRevisions.characters).toBe(2);
   expect(state.latestRevisions.characters).toBe(4);
   expect(state.workspaceUpdatedStages).toEqual(['characters']);
   expect(state.staleStages).toEqual(['characters']);
   expect(state.hasRevisionConflict).toBe(true);
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
-  expect(() => beginStoryWorkspaceDreamConfirmation(state, 'swc_conflict')).toThrow(/revision/i);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(false);
+  expect(() => storyWorkspaceBeginDreamConfirmation(state, 'swc_conflict')).toThrow(/revision/i);
 });
 
 test('keep-local explicitly rebases the dirty merge result onto the latest stage revision', () => {
-  const state = resolveStoryWorkspaceDreamRevisionConflict(
+  const state = storyWorkspaceResolveDreamRevisionConflict(
     revisionConflictState(),
     'characters',
     'keep-local',
   );
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('keep my local character');
   expect(state.baseRevisions.characters).toBe(4);
   expect(state.latestRevisions.characters).toBe(4);
   expect(state.workspaceUpdatedStages).toEqual(['characters']);
   expect(state.staleStages).toEqual([]);
   expect(state.hasRevisionConflict).toBe(false);
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(true);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(true);
 });
 
 test('accept-server explicitly discards only that stage draft and rebases to authoritative data', () => {
-  let state = editStoryWorkspaceDreamField(
+  let state = storyWorkspaceEditDreamField(
     revisionConflictState(),
     'storyboards',
     'storyboards_primary',
     'notes',
     'unrelated local storyboard note',
   );
-  state = resolveStoryWorkspaceDreamRevisionConflict(state, 'characters', 'accept-server');
+  state = storyWorkspaceResolveDreamRevisionConflict(state, 'characters', 'accept-server');
 
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('server character r4');
-  expect(readStoryWorkspaceDreamField(state, 'storyboards', 'storyboards_primary', 'notes'))
+  expect(storyWorkspaceReadDreamField(state, 'storyboards', 'storyboards_primary', 'notes'))
     .toBe('unrelated local storyboard note');
   expect(state.dirtyCount).toBe(1);
   expect(state.baseRevisions.characters).toBe(4);
   expect(state.staleStages).toEqual([]);
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(true);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(true);
 });
 
 test('a clean stage rebases to its latest server revision without creating a conflict', () => {
-  const state = hydrateStoryWorkspaceDreamState(readyState(), [stageSnapshot('scenes', 7)]);
+  const state = storyWorkspaceHydrateDreamState(readyState(), [stageSnapshot('scenes', 7)]);
   expect(state.baseRevisions.scenes).toBe(7);
   expect(state.latestRevisions.scenes).toBe(7);
   expect(state.workspaceUpdatedStages).toEqual(['scenes']);
   expect(state.staleStages).toEqual([]);
-  expect(canConfirmStoryWorkspaceDream(state)).toBe(true);
+  expect(storyWorkspaceCanConfirmDream(state)).toBe(true);
 });
 
 test('the editable-field whitelist is enforced before confirmation payload construction', () => {
   const state = readyState();
-  expect(() => editStoryWorkspaceDreamField(
+  expect(() => storyWorkspaceEditDreamField(
     state,
     'characters',
     'characters_primary',
     'displayName',
     'attempt to change a read-only field',
   )).toThrow(/editable/i);
-  expect(() => editStoryWorkspaceDreamField(
+  expect(() => storyWorkspaceEditDreamField(
     state,
     'characters',
     'characters_primary',
@@ -479,9 +479,9 @@ test('non-ASCII command ordering is ordinal and byte-stable across opposite edit
     let state = readyStateWithCharacterItems(items);
     const edits = reverse ? [...operations].reverse() : operations;
     for (const [stage, entityId, field, value] of edits) {
-      state = editStoryWorkspaceDreamField(state, stage, entityId, field, value);
+      state = storyWorkspaceEditDreamField(state, stage, entityId, field, value);
     }
-    return beginStoryWorkspaceDreamConfirmation(state, 'swc_ordinal').command;
+    return storyWorkspaceBeginDreamConfirmation(state, 'swc_ordinal').command;
   };
 
   const forward = buildCommand(false);
@@ -493,14 +493,14 @@ test('non-ASCII command ordering is ordinal and byte-stable across opposite edit
 });
 
 test('confirmation builds one canonical camelCase Command and prevents double-click', () => {
-  let state = editStoryWorkspaceDreamField(
+  let state = storyWorkspaceEditDreamField(
     readyState(),
     'characters',
     'characters_primary',
     'summary',
     'final character summary',
   );
-  state = editStoryWorkspaceDreamField(
+  state = storyWorkspaceEditDreamField(
     state,
     'storyboards',
     'storyboards_primary',
@@ -508,7 +508,7 @@ test('confirmation builds one canonical camelCase Command and prevents double-cl
     'final shot note',
   );
 
-  const confirmation = beginStoryWorkspaceDreamConfirmation(state, 'swc_123');
+  const confirmation = storyWorkspaceBeginDreamConfirmation(state, 'swc_123');
   const command: StoryWorkspaceDreamConfirmationCommand = confirmation.command;
   expect(confirmation.state.status).toBe('story-workspace-dream-confirming');
   expect(confirmation.state.confirmationCommand).toBe(command);
@@ -541,28 +541,28 @@ test('confirmation builds one canonical camelCase Command and prevents double-cl
     'edits',
     'idempotencyKey',
   ]);
-  expect(() => beginStoryWorkspaceDreamConfirmation(
+  expect(() => storyWorkspaceBeginDreamConfirmation(
     confirmation.state,
     'swc_second_click',
   )).toThrow(/already|confirming/i);
 });
 
 test('accepted clears submitted drafts so a higher Agent revision becomes authoritative', () => {
-  const edited = editStoryWorkspaceDreamField(
+  const edited = storyWorkspaceEditDreamField(
     readyState(),
     'characters',
     'characters_primary',
     'summary',
     'submitted character summary',
   );
-  const confirmation = beginStoryWorkspaceDreamConfirmation(edited, 'swc_ack');
-  let state = acceptStoryWorkspaceDreamConfirmation(confirmation.state);
+  const confirmation = storyWorkspaceBeginDreamConfirmation(edited, 'swc_ack');
+  let state = storyWorkspaceAcceptDreamConfirmation(confirmation.state);
 
   expect(state.status).toBe('story-workspace-dream-continuing');
   expect(state.confirmationCommand).toBe(confirmation.command);
   expect(state.dirtyCount).toBe(0);
   expect(state.localEdits).toEqual([]);
-  expect(() => editStoryWorkspaceDreamField(
+  expect(() => storyWorkspaceEditDreamField(
     state,
     'characters',
     'characters_primary',
@@ -570,15 +570,15 @@ test('accepted clears submitted drafts so a higher Agent revision becomes author
     'too late',
   )).toThrow(/continuing/i);
 
-  state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('characters', 6, {
+  state = storyWorkspaceHydrateDreamState(state, [stageSnapshot('characters', 6, {
     summary: 'authoritative Agent character r6',
   })]);
-  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+  expect(storyWorkspaceReadDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('authoritative Agent character r6');
   expect(state.baseRevisions.characters).toBe(6);
   expect(state.latestRevisions.characters).toBe(6);
   expect(state.staleStages).toEqual([]);
 
-  state = completeStoryWorkspaceDream(state);
+  state = storyWorkspaceCompleteDream(state);
   expect(state.status).toBe('story-workspace-dream-completed');
 });

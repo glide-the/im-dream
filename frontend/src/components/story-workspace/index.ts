@@ -1,10 +1,10 @@
 export * from './layout';
 export * from './table';
 export {
-  resolveStoryWorkspaceSurfaceLink,
+  storyWorkspaceResolveSurfaceLink,
   storyWorkspaceExecutionDeepLink,
   storyWorkspaceReviewDeepLink,
-  SURFACE_LINK_LABELS,
+  STORY_WORKSPACE_SURFACE_LINK_LABELS,
   type StoryWorkspaceSurfaceLinkButtonProps,
   type StoryWorkspaceSurfaceLinkModel,
   type StoryWorkspaceSurfaceLinkTarget,

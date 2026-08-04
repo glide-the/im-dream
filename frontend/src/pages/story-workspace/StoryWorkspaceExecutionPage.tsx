@@ -14,8 +14,8 @@ import { storyWorkspaceReviewDeepLink } from '../../components/story-workspace';
 import { useStoryWorkspaceDreamFiles } from '../../hooks/story-workspace';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import {
-  buildStoryWorkspaceExecutionWorkspace,
-  canAccessStoryWorkspaceExecution,
+  storyWorkspaceBuildExecutionWorkspace,
+  storyWorkspaceCanAccessExecution,
   storyWorkspaceExecutionFocusNeighbors,
   type StoryWorkspaceExecutionEntry,
 } from './executionViewModel';
@@ -121,7 +121,7 @@ export function StoryWorkspaceExecutionPage({
   });
 
   const workspace = useMemo(
-    () => files.data ? buildStoryWorkspaceExecutionWorkspace(files.data) : null,
+    () => files.data ? storyWorkspaceBuildExecutionWorkspace(files.data) : null,
     [files.data],
   );
   const visibleEntries = activeModule === 'assets'
@@ -161,7 +161,7 @@ export function StoryWorkspaceExecutionPage({
   }, [focusedEntry]);
 
   useEffect(() => {
-    if (!files.data || canAccessStoryWorkspaceExecution(files.data)) return;
+    if (!files.data || storyWorkspaceCanAccessExecution(files.data)) return;
     navigate(
       storyWorkspaceReviewDeepLink(files.data.storyWorkspaceRunId, episodeId),
       '请先完成本次 Dream 的确认。',
@@ -176,7 +176,7 @@ export function StoryWorkspaceExecutionPage({
     );
   }
 
-  if (files.data && !canAccessStoryWorkspaceExecution(files.data)) {
+  if (files.data && !storyWorkspaceCanAccessExecution(files.data)) {
     return (
       <section className="story-workspace-collaboration story-workspace-collaboration--message">
         <p>正在返回 Dream 完成本次确认…</p>

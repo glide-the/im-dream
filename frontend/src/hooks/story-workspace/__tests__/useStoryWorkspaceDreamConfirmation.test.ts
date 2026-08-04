@@ -4,10 +4,10 @@
 
 import { expect, test } from '@playwright/test';
 import {
-  dreamConfirmationEndpoint,
-  newStoryWorkspaceDreamConfirmationIdempotencyKey,
-  parseStoryWorkspaceDreamConfirmationAccepted,
-  submitStoryWorkspaceDreamConfirmation,
+  storyWorkspaceDreamConfirmationEndpoint,
+  storyWorkspaceNewDreamConfirmationIdempotencyKey,
+  storyWorkspaceParseDreamConfirmationAccepted,
+  storyWorkspaceSubmitDreamConfirmation,
 } from '../useStoryWorkspaceDreamConfirmation';
 import {
   filterStoryWorkspaceControlMessages,
@@ -28,11 +28,11 @@ const command = {
 };
 
 test('builds the run-scoped confirmation endpoint and swc idempotency keys', () => {
-  expect(dreamConfirmationEndpoint(RUN_ID)).toBe(
+  expect(storyWorkspaceDreamConfirmationEndpoint(RUN_ID)).toBe(
     `/api/story-workspace/workflow-runs/${RUN_ID}/dream-confirmation`,
   );
-  expect(dreamConfirmationEndpoint('run/a?b')).toContain('run%2Fa%3Fb');
-  expect(newStoryWorkspaceDreamConfirmationIdempotencyKey(() => 'uuid-1'))
+  expect(storyWorkspaceDreamConfirmationEndpoint('run/a?b')).toContain('run%2Fa%3Fb');
+  expect(storyWorkspaceNewDreamConfirmationIdempotencyKey(() => 'uuid-1'))
     .toBe('swc_uuid-1');
 });
 
@@ -55,7 +55,7 @@ test('submits exactly one camelCase command and parses the 202 response', async 
     });
   }) as unknown as typeof fetch;
 
-  const accepted = await submitStoryWorkspaceDreamConfirmation(RUN_ID, command, {
+  const accepted = await storyWorkspaceSubmitDreamConfirmation(RUN_ID, command, {
     fetchImpl,
     token: 'token-1',
   });
@@ -66,16 +66,16 @@ test('submits exactly one camelCase command and parses the 202 response', async 
 });
 
 test('rejects URL/body drift, non-202 responses, and malformed accepted payloads', async () => {
-  await expect(submitStoryWorkspaceDreamConfirmation(
+  await expect(storyWorkspaceSubmitDreamConfirmation(
     `run_${'2'.repeat(32)}`,
     command,
     { fetchImpl: (() => { throw new Error('must not call'); }) as unknown as typeof fetch },
   )).rejects.toThrow();
 
-  await expect(submitStoryWorkspaceDreamConfirmation(RUN_ID, command, {
+  await expect(storyWorkspaceSubmitDreamConfirmation(RUN_ID, command, {
     fetchImpl: (async () => new Response('{}', { status: 409 })) as unknown as typeof fetch,
   })).rejects.toThrow();
-  expect(() => parseStoryWorkspaceDreamConfirmationAccepted({
+  expect(() => storyWorkspaceParseDreamConfirmationAccepted({
     messageId: 'm1',
     storyWorkspaceRunId: RUN_ID,
     threadId: 'thread-1',

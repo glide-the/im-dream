@@ -11,20 +11,20 @@ import {
   type ReactNode,
 } from 'react';
 import {
-  acceptStoryWorkspaceDreamConfirmation,
-  beginStoryWorkspaceDreamConfirmation,
-  canConfirmStoryWorkspaceDream,
-  createStoryWorkspaceDreamState,
-  editStoryWorkspaceDreamField,
-  hydrateStoryWorkspaceDreamState,
-  readStoryWorkspaceDreamField,
-  resetStoryWorkspaceDreamField,
-  resolveStoryWorkspaceDreamRevisionConflict,
+  storyWorkspaceAcceptDreamConfirmation,
+  storyWorkspaceBeginDreamConfirmation,
+  storyWorkspaceCanConfirmDream,
+  storyWorkspaceCreateDreamState,
+  storyWorkspaceEditDreamField,
+  storyWorkspaceHydrateDreamState,
+  storyWorkspaceReadDreamField,
+  storyWorkspaceResetDreamField,
+  storyWorkspaceResolveDreamRevisionConflict,
   STORY_WORKSPACE_DREAM_STAGES,
   type StoryWorkspaceDreamState,
 } from '../../components/story-workspace/dreamState';
 import {
-  newStoryWorkspaceDreamConfirmationIdempotencyKey,
+  storyWorkspaceNewDreamConfirmationIdempotencyKey,
   useStoryWorkspaceDreamConfirmation,
   useStoryWorkspaceDreamFiles,
   type StoryWorkspaceDreamFieldValue,
@@ -32,8 +32,8 @@ import {
 } from '../../hooks/story-workspace';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import {
-  dreamStageSnapshotsFromFiles,
-  parseStoryWorkspaceDreamEditorValue,
+  storyWorkspaceDreamStageSnapshotsFromFiles,
+  storyWorkspaceParseDreamEditorValue,
   storyWorkspaceDreamEditorValue,
   storyWorkspaceDreamLifecycleFromPersistence,
   storyWorkspaceDreamPersistenceNotice,
@@ -76,7 +76,7 @@ function draftIsValid(
   if (!state || !files) return false;
   return STORY_WORKSPACE_DREAM_STAGES.every((stage) => (
     files.stages[stage]?.items.every((item) => {
-      const displayName = readStoryWorkspaceDreamField(
+      const displayName = storyWorkspaceReadDreamField(
         state,
         stage,
         item.entityId,
@@ -150,17 +150,17 @@ export function StoryWorkspaceDreamPage({
   useEffect(() => {
     const data = files.data;
     if (!runId || !data) return;
-    const snapshots = dreamStageSnapshotsFromFiles(data);
+    const snapshots = storyWorkspaceDreamStageSnapshotsFromFiles(data);
     setDreamState((current) => {
       const base = current
         && current.storyWorkspaceRunId === data.storyWorkspaceRunId
         && current.threadId === data.threadId
         ? current
-        : createStoryWorkspaceDreamState({
+        : storyWorkspaceCreateDreamState({
           storyWorkspaceRunId: data.storyWorkspaceRunId,
           threadId: data.threadId,
         });
-      return hydrateStoryWorkspaceDreamState(base, snapshots);
+      return storyWorkspaceHydrateDreamState(base, snapshots);
     });
   }, [files.data, runId]);
 
@@ -210,9 +210,9 @@ export function StoryWorkspaceDreamPage({
     if (!dreamState || !selection) return;
     try {
       const value: StoryWorkspaceDreamFieldValue = field === 'relations'
-        ? parseStoryWorkspaceDreamEditorValue(field, rawValue)
+        ? storyWorkspaceParseDreamEditorValue(field, rawValue)
         : field === 'summary' && rawValue === '' ? null : rawValue;
-      setDreamState(editStoryWorkspaceDreamField(
+      setDreamState(storyWorkspaceEditDreamField(
         dreamState,
         selection.stage,
         selection.entityId,
@@ -228,17 +228,17 @@ export function StoryWorkspaceDreamPage({
   const normalizeField = useCallback((field: 'displayName' | 'summary') => {
     if (!dreamState || !selection) return;
     try {
-      const current = readStoryWorkspaceDreamField(
+      const current = storyWorkspaceReadDreamField(
         dreamState,
         selection.stage,
         selection.entityId,
         field,
       );
-      const normalized = parseStoryWorkspaceDreamEditorValue(
+      const normalized = storyWorkspaceParseDreamEditorValue(
         field,
         storyWorkspaceDreamEditorValue(current),
       );
-      setDreamState(editStoryWorkspaceDreamField(
+      setDreamState(storyWorkspaceEditDreamField(
         dreamState,
         selection.stage,
         selection.entityId,
@@ -255,14 +255,14 @@ export function StoryWorkspaceDreamPage({
     if (!dreamState) return;
     const previous = dreamState;
     try {
-      const started = beginStoryWorkspaceDreamConfirmation(
+      const started = storyWorkspaceBeginDreamConfirmation(
         dreamState,
-        newStoryWorkspaceDreamConfirmationIdempotencyKey(),
+        storyWorkspaceNewDreamConfirmationIdempotencyKey(),
       );
       setDreamState(started.state);
       await confirmation.submit(started.command);
       setDreamState((current) => (
-        current ? acceptStoryWorkspaceDreamConfirmation(current) : current
+        current ? storyWorkspaceAcceptDreamConfirmation(current) : current
       ));
       files.refresh();
       setEditorError(null);
@@ -289,7 +289,7 @@ export function StoryWorkspaceDreamPage({
     dreamState
     && files.data?.canConfirm
     && draftIsValid(dreamState, files.data)
-    && canConfirmStoryWorkspaceDream(dreamState)
+    && storyWorkspaceCanConfirmDream(dreamState)
     && confirmation.status !== 'confirming',
   );
   return (
@@ -366,10 +366,10 @@ export function StoryWorkspaceDreamPage({
           <ol className="story-workspace-dream__rows">
             {activeItems.map((item, index) => {
               const displayName = dreamState
-                ? readStoryWorkspaceDreamField(dreamState, activeStage, item.entityId, 'displayName')
+                ? storyWorkspaceReadDreamField(dreamState, activeStage, item.entityId, 'displayName')
                 : '';
               const summary = dreamState
-                ? readStoryWorkspaceDreamField(dreamState, activeStage, item.entityId, 'summary')
+                ? storyWorkspaceReadDreamField(dreamState, activeStage, item.entityId, 'summary')
                 : null;
               const selected = selection?.stage === activeStage && selection.entityId === item.entityId;
               const dirty = dreamState?.localEdits.some(
@@ -410,10 +410,10 @@ export function StoryWorkspaceDreamPage({
                 <div className="story-workspace-dream__conflict" role="status">
                   <p>工作空间有新版本，请选择如何合并本地修改。</p>
                   <div>
-                    <button onClick={() => setDreamState(resolveStoryWorkspaceDreamRevisionConflict(
+                    <button onClick={() => setDreamState(storyWorkspaceResolveDreamRevisionConflict(
                       dreamState, selection.stage, 'keep-local',
                     ))} type="button">保留我的修改</button>
-                    <button onClick={() => setDreamState(resolveStoryWorkspaceDreamRevisionConflict(
+                    <button onClick={() => setDreamState(storyWorkspaceResolveDreamRevisionConflict(
                       dreamState, selection.stage, 'accept-server',
                     ))} type="button">使用工作空间版本</button>
                   </div>
@@ -426,7 +426,7 @@ export function StoryWorkspaceDreamPage({
                   disabled={isReadOnly}
                   onBlur={() => normalizeField('displayName')}
                   onChange={(event) => updateField('displayName', event.currentTarget.value)}
-                  value={storyWorkspaceDreamEditorValue(readStoryWorkspaceDreamField(
+                  value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
                     dreamState, selection.stage, selection.entityId, 'displayName',
                   ))}
                 />
@@ -438,7 +438,7 @@ export function StoryWorkspaceDreamPage({
                   onBlur={() => normalizeField('summary')}
                   onChange={(event) => updateField('summary', event.currentTarget.value)}
                   rows={7}
-                  value={storyWorkspaceDreamEditorValue(readStoryWorkspaceDreamField(
+                  value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
                     dreamState, selection.stage, selection.entityId, 'summary',
                   ))}
                 />
@@ -449,7 +449,7 @@ export function StoryWorkspaceDreamPage({
                   disabled={isReadOnly}
                   onChange={(event) => updateField('relations', event.currentTarget.value)}
                   placeholder="用逗号分隔"
-                  value={storyWorkspaceDreamEditorValue(readStoryWorkspaceDreamField(
+                  value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
                     dreamState, selection.stage, selection.entityId, 'relations',
                   ))}
                 />
@@ -466,7 +466,7 @@ export function StoryWorkspaceDreamPage({
                   onClick={() => {
                     let next = dreamState;
                     for (const field of ['displayName', 'summary', 'relations'] as const) {
-                      next = resetStoryWorkspaceDreamField(
+                      next = storyWorkspaceResetDreamField(
                         next, selection.stage, selection.entityId, field,
                       );
                     }

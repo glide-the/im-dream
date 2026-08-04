@@ -8,7 +8,7 @@
 //                    keeps its Task 4 progressive-enhancement behavior.
 
 import {
-  resolveStoryWorkspaceSurfaceLink,
+  storyWorkspaceResolveSurfaceLink,
   type StoryWorkspaceSurfaceLinkButtonProps,
   type StoryWorkspaceSurfaceLinkTarget,
 } from './surfaceLink';
@@ -34,7 +34,7 @@ function linkClickHandler(
  * props satisfy every visibility condition (§4.1/§4.4).
  */
 export function StoryWorkspaceSurfaceLinkButton(props: StoryWorkspaceSurfaceLinkButtonProps) {
-  const model = resolveStoryWorkspaceSurfaceLink(props);
+  const model = storyWorkspaceResolveSurfaceLink(props);
   if (!model) return null;
 
   return (

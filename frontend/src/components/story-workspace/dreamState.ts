@@ -319,7 +319,7 @@ function withDerivedState(
   });
 }
 
-export function createStoryWorkspaceDreamState({
+export function storyWorkspaceCreateDreamState({
   storyWorkspaceRunId,
   threadId,
 }: {
@@ -382,14 +382,14 @@ function hydrateOneStage(
  * Newer server data replaces clean fields; local edits stay in localEdits and
  * therefore win reads until reset, while the stage becomes revision-stale.
  */
-export function hydrateStoryWorkspaceDreamState(
+export function storyWorkspaceHydrateDreamState(
   state: StoryWorkspaceDreamState,
   snapshots: readonly StoryWorkspaceDreamStageSnapshot[],
 ): StoryWorkspaceDreamState {
   return snapshots.reduce(hydrateOneStage, state);
 }
 
-export function readStoryWorkspaceDreamField(
+export function storyWorkspaceReadDreamField(
   state: StoryWorkspaceDreamState,
   stage: StoryWorkspaceDreamStage,
   entityId: string,
@@ -434,7 +434,7 @@ function rebaseCleanStage(
   return { baseRevisions, staleStages };
 }
 
-export function editStoryWorkspaceDreamField(
+export function storyWorkspaceEditDreamField(
   state: StoryWorkspaceDreamState,
   stage: StoryWorkspaceDreamStage,
   entityId: string,
@@ -464,7 +464,7 @@ export function editStoryWorkspaceDreamField(
   });
 }
 
-export function resetStoryWorkspaceDreamField(
+export function storyWorkspaceResetDreamField(
   state: StoryWorkspaceDreamState,
   stage: StoryWorkspaceDreamStage,
   entityId: string,
@@ -487,7 +487,7 @@ export function resetStoryWorkspaceDreamField(
  * the user's field merge while rebasing its expected revision; accepting the
  * server drops only that stage's drafts and reads the latest snapshot.
  */
-export function resolveStoryWorkspaceDreamRevisionConflict(
+export function storyWorkspaceResolveDreamRevisionConflict(
   state: StoryWorkspaceDreamState,
   stage: StoryWorkspaceDreamStage,
   resolution: StoryWorkspaceDreamRevisionResolution,
@@ -579,7 +579,7 @@ function buildConfirmationEdits(
   return [...grouped.values()];
 }
 
-export function canConfirmStoryWorkspaceDream(state: StoryWorkspaceDreamState): boolean {
+export function storyWorkspaceCanConfirmDream(state: StoryWorkspaceDreamState): boolean {
   if (
     state.status !== 'story-workspace-dream-editing'
     || state.confirmationCommand !== null
@@ -596,7 +596,7 @@ export function canConfirmStoryWorkspaceDream(state: StoryWorkspaceDreamState): 
   }
 }
 
-export function beginStoryWorkspaceDreamConfirmation(
+export function storyWorkspaceBeginDreamConfirmation(
   state: StoryWorkspaceDreamState,
   idempotencyKey: string,
 ): StoryWorkspaceDreamConfirmationStart {
@@ -618,7 +618,7 @@ export function beginStoryWorkspaceDreamConfirmation(
   if (!idempotencyKey.startsWith('swc_') || idempotencyKey.length <= 4) {
     throw new Error('Dream confirmation idempotencyKey must start with swc_');
   }
-  if (!canConfirmStoryWorkspaceDream(state)) {
+  if (!storyWorkspaceCanConfirmDream(state)) {
     throw new Error('Dream confirmation requirements are not satisfied');
   }
 
@@ -636,7 +636,7 @@ export function beginStoryWorkspaceDreamConfirmation(
   return deepFreezeOwned({ state: confirming, command });
 }
 
-export function acceptStoryWorkspaceDreamConfirmation(
+export function storyWorkspaceAcceptDreamConfirmation(
   state: StoryWorkspaceDreamState,
 ): StoryWorkspaceDreamState {
   if (
@@ -652,7 +652,7 @@ export function acceptStoryWorkspaceDreamConfirmation(
   });
 }
 
-export function completeStoryWorkspaceDream(
+export function storyWorkspaceCompleteDream(
   state: StoryWorkspaceDreamState,
 ): StoryWorkspaceDreamState {
   if (state.status !== 'story-workspace-dream-continuing') {

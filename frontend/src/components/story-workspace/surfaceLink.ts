@@ -44,7 +44,7 @@ export interface StoryWorkspaceSurfaceLinkButtonProps {
  * accepted at the boundary, but only design_007 lifecycle bridge stages have
  * labels and therefore enter Dream UI.
  */
-export const SURFACE_LINK_LABELS: Partial<Record<
+export const STORY_WORKSPACE_SURFACE_LINK_LABELS: Partial<Record<
   StoryWorkspaceSurfaceLinkStage,
   { label: string; target: 'review' | 'execution' }
 >> = {
@@ -82,7 +82,7 @@ export function storyWorkspaceExecutionDeepLink(runId: string): string {
  * the four displayable design_007 lifecycle bridges. Replaced attempts and
  * legacy aggregate branches remain hidden instead of creating a parallel UI.
  */
-export function resolveStoryWorkspaceSurfaceLink(
+export function storyWorkspaceResolveSurfaceLink(
   props: StoryWorkspaceSurfaceLinkButtonProps,
 ): StoryWorkspaceSurfaceLinkModel | undefined {
   const dreamSurface = props.surfaces?.find((surface) => surface.name === 'dream');
@@ -91,7 +91,7 @@ export function resolveStoryWorkspaceSurfaceLink(
 
   if (state.superseded) return undefined;
 
-  const spec = SURFACE_LINK_LABELS[state.stage];
+  const spec = STORY_WORKSPACE_SURFACE_LINK_LABELS[state.stage];
   if (!spec) return undefined;
   const href = spec.target === 'execution'
     ? storyWorkspaceExecutionDeepLink(runId)

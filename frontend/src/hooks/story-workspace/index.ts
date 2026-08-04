@@ -3,28 +3,28 @@ export { useCharacters } from './useCharacters';
 export { useScenes } from './useScenes';
 export { useWorkspaceSurfaces } from './useWorkspaceSurfaces';
 export {
-  dreamFilesEndpoint,
-  fetchStoryWorkspaceDreamFiles,
-  parseStoryWorkspaceDreamFiles,
-  reduceStoryWorkspaceDreamFilesFetch,
-  shouldInvalidateStoryWorkspaceDreamFiles,
-  shouldPollStoryWorkspaceDreamFiles,
+  storyWorkspaceDreamFilesEndpoint,
+  storyWorkspaceFetchDreamFiles,
+  storyWorkspaceParseDreamFiles,
+  storyWorkspaceReduceDreamFilesFetch,
+  storyWorkspaceShouldInvalidateDreamFiles,
+  storyWorkspaceShouldPollDreamFiles,
   useStoryWorkspaceDreamFiles,
 } from './useStoryWorkspaceDreamFiles';
 export type {
   StoryWorkspaceDreamFilesState,
-  UseStoryWorkspaceDreamFilesOptions,
+  StoryWorkspaceDreamFilesUseOptions,
 } from './useStoryWorkspaceDreamFiles';
 export {
-  dreamConfirmationEndpoint,
-  newStoryWorkspaceDreamConfirmationIdempotencyKey,
-  parseStoryWorkspaceDreamConfirmationAccepted,
-  submitStoryWorkspaceDreamConfirmation,
+  storyWorkspaceDreamConfirmationEndpoint,
+  storyWorkspaceNewDreamConfirmationIdempotencyKey,
+  storyWorkspaceParseDreamConfirmationAccepted,
+  storyWorkspaceSubmitDreamConfirmation,
   useStoryWorkspaceDreamConfirmation,
 } from './useStoryWorkspaceDreamConfirmation';
 export type {
   StoryWorkspaceDreamConfirmationState,
-  SubmitStoryWorkspaceDreamConfirmationOptions,
+  StoryWorkspaceDreamConfirmationSubmitOptions,
 } from './useStoryWorkspaceDreamConfirmation';
 export {
   buildStoryWorkspaceGuidancePayload,

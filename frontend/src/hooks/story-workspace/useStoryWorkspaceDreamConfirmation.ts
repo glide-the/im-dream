@@ -22,11 +22,11 @@ function requiredString(value: unknown, field: string): string {
   return value;
 }
 
-export function dreamConfirmationEndpoint(runId: string): string {
+export function storyWorkspaceDreamConfirmationEndpoint(runId: string): string {
   return `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/dream-confirmation`;
 }
 
-export function newStoryWorkspaceDreamConfirmationIdempotencyKey(
+export function storyWorkspaceNewDreamConfirmationIdempotencyKey(
   uuidFactory: () => string = () => {
     if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
     return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -35,7 +35,7 @@ export function newStoryWorkspaceDreamConfirmationIdempotencyKey(
   return `swc_${uuidFactory()}`;
 }
 
-export function parseStoryWorkspaceDreamConfirmationAccepted(
+export function storyWorkspaceParseDreamConfirmationAccepted(
   value: unknown,
 ): StoryWorkspaceDreamConfirmationAccepted {
   if (!isRecord(value)) throw new Error('Dream confirmation response must be an object.');
@@ -57,7 +57,7 @@ export function parseStoryWorkspaceDreamConfirmationAccepted(
   };
 }
 
-export interface SubmitStoryWorkspaceDreamConfirmationOptions {
+export interface StoryWorkspaceDreamConfirmationSubmitOptions {
   fetchImpl?: typeof fetch;
   token?: string | null;
   signal?: AbortSignal;
@@ -66,10 +66,10 @@ export interface SubmitStoryWorkspaceDreamConfirmationOptions {
 }
 
 /** Submit Dream's one confirmation; URL/body run drift is rejected client-side. */
-export async function submitStoryWorkspaceDreamConfirmation(
+export async function storyWorkspaceSubmitDreamConfirmation(
   runId: string,
   command: StoryWorkspaceDreamConfirmationCommand,
-  options: SubmitStoryWorkspaceDreamConfirmationOptions = {},
+  options: StoryWorkspaceDreamConfirmationSubmitOptions = {},
 ): Promise<StoryWorkspaceDreamConfirmationAccepted> {
   if (command.storyWorkspaceRunId !== runId) {
     throw new Error('Dream confirmation run does not match the current page.');
@@ -80,7 +80,7 @@ export async function submitStoryWorkspaceDreamConfirmation(
   });
   if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
   const response = await (options.fetchImpl ?? fetch)(
-    options.endpoint ?? dreamConfirmationEndpoint(runId),
+    options.endpoint ?? storyWorkspaceDreamConfirmationEndpoint(runId),
     {
       method: 'POST',
       credentials: 'include',
@@ -98,7 +98,7 @@ export async function submitStoryWorkspaceDreamConfirmation(
   } catch {
     throw new Error('Dream confirmation response is not valid JSON.');
   }
-  const accepted = parseStoryWorkspaceDreamConfirmationAccepted(payload);
+  const accepted = storyWorkspaceParseDreamConfirmationAccepted(payload);
   if (accepted.storyWorkspaceRunId !== runId || accepted.threadId !== command.threadId) {
     throw new Error('Dream confirmation response does not match the submitted command.');
   }
@@ -117,7 +117,7 @@ export interface StoryWorkspaceDreamConfirmationState {
 /** Prevent duplicate clicks by sharing the current in-flight Promise. */
 export function useStoryWorkspaceDreamConfirmation(
   runId: string,
-  options: SubmitStoryWorkspaceDreamConfirmationOptions = {},
+  options: StoryWorkspaceDreamConfirmationSubmitOptions = {},
 ): StoryWorkspaceDreamConfirmationState {
   const [status, setStatus] = useState<'idle' | 'confirming' | 'accepted'>('idle');
   const [accepted, setAccepted] = useState<StoryWorkspaceDreamConfirmationAccepted | null>(null);
@@ -135,11 +135,11 @@ export function useStoryWorkspaceDreamConfirmation(
     if (inFlight.current) return inFlight.current;
     setStatus('confirming');
     setError(null);
-    const pending = submitStoryWorkspaceDreamConfirmation(runId, command, {
+    const pending = storyWorkspaceSubmitDreamConfirmation(runId, command, {
       fetchImpl: options.fetchImpl,
       token: options.token === undefined ? getAuthToken() : options.token,
       signal: options.signal,
-      endpoint: apiUrl(dreamConfirmationEndpoint(runId)),
+      endpoint: apiUrl(storyWorkspaceDreamConfirmationEndpoint(runId)),
     }).then((result) => {
       setAccepted(result);
       setStatus('accepted');

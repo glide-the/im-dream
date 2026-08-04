@@ -135,7 +135,7 @@ function parseStage(
 }
 
 /** Validate the backend's explicit camelCase REST boundary before hydration. */
-export function parseStoryWorkspaceDreamFiles(value: unknown): StoryWorkspaceDreamFilesResponse {
+export function storyWorkspaceParseDreamFiles(value: unknown): StoryWorkspaceDreamFilesResponse {
   if (!isRecord(value)) throw new Error('Dream files response must be an object.');
   const runId = requiredString(value.storyWorkspaceRunId, 'storyWorkspaceRunId');
   if (!RUN_ID_PATTERN.test(runId)) throw new Error('Dream files response has invalid run id.');
@@ -189,20 +189,20 @@ export function parseStoryWorkspaceDreamFiles(value: unknown): StoryWorkspaceDre
   };
 }
 
-export function dreamFilesEndpoint(runId: string): string {
+export function storyWorkspaceDreamFilesEndpoint(runId: string): string {
   return `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/dream-files`;
 }
 
-export interface FetchStoryWorkspaceDreamFilesOptions {
+export interface StoryWorkspaceDreamFilesFetchOptions {
   fetchImpl?: typeof fetch;
   token?: string | null;
   signal?: AbortSignal;
 }
 
 /** Fetch one authoritative Dream snapshot; HTTP/JSON/contract failures reject. */
-export async function fetchStoryWorkspaceDreamFiles(
+export async function storyWorkspaceFetchDreamFiles(
   endpoint: string,
-  options: FetchStoryWorkspaceDreamFilesOptions = {},
+  options: StoryWorkspaceDreamFilesFetchOptions = {},
 ): Promise<StoryWorkspaceDreamFilesResponse> {
   const headers = new Headers({ Accept: 'application/json' });
   if (options.token) headers.set('Authorization', `Bearer ${options.token}`);
@@ -218,10 +218,10 @@ export async function fetchStoryWorkspaceDreamFiles(
   } catch {
     throw new Error('Dream files response is not valid JSON.');
   }
-  return parseStoryWorkspaceDreamFiles(payload);
+  return storyWorkspaceParseDreamFiles(payload);
 }
 
-export function shouldPollStoryWorkspaceDreamFiles(
+export function storyWorkspaceShouldPollDreamFiles(
   state: StoryWorkspaceDreamLifecycleState,
 ): boolean {
   return state === 'story-workspace-dream-waiting-files'
@@ -230,7 +230,7 @@ export function shouldPollStoryWorkspaceDreamFiles(
 }
 
 /** SSE notices carry identity only; their content never replaces a REST snapshot. */
-export function shouldInvalidateStoryWorkspaceDreamFiles(
+export function storyWorkspaceShouldInvalidateDreamFiles(
   event: unknown,
   runId: string,
 ): boolean {
@@ -260,7 +260,7 @@ const EMPTY_FETCH_STATE: StoryWorkspaceDreamFilesFetchState = {
 };
 
 /** Pure stale-response gate; an error intentionally retains the last snapshot. */
-export function reduceStoryWorkspaceDreamFilesFetch(
+export function storyWorkspaceReduceDreamFilesFetch(
   state: StoryWorkspaceDreamFilesFetchState,
   action: StoryWorkspaceDreamFilesFetchAction,
 ): StoryWorkspaceDreamFilesFetchState {
@@ -275,7 +275,7 @@ export function reduceStoryWorkspaceDreamFilesFetch(
   return { ...state, error: action.error, isLoading: false, generation: action.generation };
 }
 
-export interface UseStoryWorkspaceDreamFilesOptions {
+export interface StoryWorkspaceDreamFilesUseOptions {
   lifecycleState: StoryWorkspaceDreamLifecycleState;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch;
@@ -296,10 +296,10 @@ export interface StoryWorkspaceDreamFilesState {
  */
 export function useStoryWorkspaceDreamFiles(
   runId: string | null | undefined,
-  options: UseStoryWorkspaceDreamFilesOptions,
+  options: StoryWorkspaceDreamFilesUseOptions,
 ): StoryWorkspaceDreamFilesState {
   const [state, dispatch] = useReducer(
-    reduceStoryWorkspaceDreamFilesFetch,
+    storyWorkspaceReduceDreamFilesFetch,
     EMPTY_FETCH_STATE,
   );
   const generation = useRef(0);
@@ -313,7 +313,7 @@ export function useStoryWorkspaceDreamFiles(
     generation.current += 1;
     const nextGeneration = generation.current;
     dispatch({ type: 'start', generation: nextGeneration });
-    void fetchStoryWorkspaceDreamFiles(apiUrl(dreamFilesEndpoint(runId)), {
+    void storyWorkspaceFetchDreamFiles(apiUrl(storyWorkspaceDreamFilesEndpoint(runId)), {
       fetchImpl: options.fetchImpl,
       token: options.token === undefined ? getAuthToken() : options.token,
       signal: nextController.signal,
@@ -344,7 +344,7 @@ export function useStoryWorkspaceDreamFiles(
   }, [refresh, runId]);
 
   useEffect(() => {
-    if (!runId || !shouldPollStoryWorkspaceDreamFiles(options.lifecycleState)) return;
+    if (!runId || !storyWorkspaceShouldPollDreamFiles(options.lifecycleState)) return;
     const intervalMs = Math.max(options.pollIntervalMs ?? 5000, 5000);
     const interval = window.setInterval(refresh, intervalMs);
     return () => window.clearInterval(interval);
@@ -354,7 +354,7 @@ export function useStoryWorkspaceDreamFiles(
     if (!runId) return;
     const handleOutput = (event: Event) => {
       const detail = (event as CustomEvent<unknown>).detail;
-      if (shouldInvalidateStoryWorkspaceDreamFiles(detail, runId)) refresh();
+      if (storyWorkspaceShouldInvalidateDreamFiles(detail, runId)) refresh();
     };
     window.addEventListener(DREAM_OUTPUT_EVENT, handleOutput);
     return () => window.removeEventListener(DREAM_OUTPUT_EVENT, handleOutput);
