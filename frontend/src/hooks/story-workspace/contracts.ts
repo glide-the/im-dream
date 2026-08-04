@@ -270,57 +270,10 @@ export interface StoryWorkspaceGuidanceAccepted {
   request_id: string | null;
 }
 
-/** One step of the run's execution facts projection (§5.2 任务进度). */
-export interface StoryWorkspaceExecutionStep {
-  name?: string;
-  status?: string;
-  /** Blocked steps mark the awaiting-guidance projection state (D13). */
-  blocked?: boolean;
-  duration_seconds?: number | null;
-  failure_reason?: string | null;
-  retry_count?: number | null;
-}
-
-/** One event of the run's execution timeline (§5.2 运行记录). */
-export interface StoryWorkspaceExecutionEvent {
-  type?: string;
-  occurred_at?: string | null;
-  summary?: string | null;
-}
-
 /**
- * Read-side execution facts projection (StoryWorkspaceExecutionProjection,
- * Task 3). `phase` may carry projection states such as `awaiting-guidance` —
- * inferred from `continuing` plus blocked-step markers — which are NOT
- * RunStatus values (audit note D13). No projection endpoint exists yet; the
- * execution page accepts this as an optional injection seam and degrades
- * gracefully when it is absent.
- */
-export interface StoryWorkspaceExecutionProjection {
-  run_id: string;
-  phase: string;
-  steps: StoryWorkspaceExecutionStep[];
-  assets_ref: string | null;
-  events: StoryWorkspaceExecutionEvent[];
-}
-
-/**
- * The execution page UI states (design_004 §5.4). `awaiting-guidance` is a
- * projection state; `cancelled` is a post-Gate terminal state the §5.4 table
- * does not enumerate (handled as its own terminal notice, documented in the
- * Task 5 record).
- */
-export type StoryWorkspaceExecutionPageState =
-  | 'continuing'
-  | 'awaiting-guidance'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'not-confirmed';
-
-/**
- * One guidance history entry for the sidebar (§5.3 指导历史), reverse-looked
- * from chat_message rows carrying metadata.kind="story-workspace-guidance".
+ * One historical guidance audit entry, reverse-looked from chat_message rows
+ * carrying metadata.kind="story-workspace-guidance". The API remains for
+ * compatibility; Dream's file-driven execution page does not render it.
  */
 export interface StoryWorkspaceGuidanceHistoryEntry {
   messageId: string;

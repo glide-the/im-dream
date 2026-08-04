@@ -10,6 +10,3 @@ export {
   type StoryWorkspaceSurfaceLinkTarget,
 } from './surfaceLink';
 export { StoryWorkspaceSurfaceLinkButton } from './StoryWorkspaceSurfaceLinkButton';
-export { StoryWorkspaceExecutionAssetPanel } from './StoryWorkspaceExecutionAssetPanel';
-export { StoryWorkspaceExecutionProgressTable } from './StoryWorkspaceExecutionProgressTable';
-export { StoryWorkspaceGuidanceSidebar } from './StoryWorkspaceGuidanceSidebar';
