@@ -10,6 +10,9 @@
 //                    route switches clear the deep-link notice (Task 4 review
 //                    leftover), and the surface link button routes in-app via
 //                    handleNavigate (no full-page load).
+// [Sync] 2026-08-04: Dream routes project every selected run to the fixed
+//                    story_workspace_dream context state; raw WorkflowRun
+//                    statuses never reach WorkflowContextBar.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
@@ -40,6 +43,7 @@ import {
   type StoryWorkspaceRoute,
   type StoryWorkspaceRouteMatch,
 } from './storyWorkspacePath';
+import { storyWorkspaceDreamWorkflowContext } from './storyWorkspaceDreamContext';
 
 export {
   resolveStoryWorkspacePath,
@@ -276,13 +280,9 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
         />
       )}
       sidebarCollapsed={sidebarCollapsed}
-      workflowContext={isDreamRoute && runDeepLink.run ? {
-        state: runDeepLink.run.status,
-        deckPluginDisplayName: runDeepLink.run.deck_plugin_display_name,
-        deckPluginVersion: runDeepLink.run.deck_plugin_version,
-        workflowRunId: runDeepLink.run.workflow_run_id,
-        workflowSummary: runDeepLink.run.workflow_summary,
-      } : null}
+      workflowContext={isDreamRoute
+        ? storyWorkspaceDreamWorkflowContext(runDeepLink.run)
+        : null}
     >
       {runDeepLink.notice && (
         <div className="story-workspace-deep-link-notice" role="status">

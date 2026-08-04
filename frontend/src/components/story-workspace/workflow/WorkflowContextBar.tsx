@@ -1,34 +1,19 @@
 // [Input] Current Deck binding/runtime/readiness projection and permitted navigation callbacks.
 // [Output] A compact workflow context and action bar with a sanitized config summary.
 // [Pos] Story Workspace main-region workflow context header.
+// [Sync] 2026-08-04: add a status-agnostic Dream collaboration context while
+//                    preserving legacy labels for non-Dream resource pages.
 import type { WorkflowRunStatus } from '../../../api/storyWorkspaceApi';
+import { storyWorkspaceWorkflowContextLabel } from './storyWorkspaceWorkflowContext';
 
 export type WorkflowContextState =
   | 'workflow_unselected'
   | 'workflow_unavailable'
   | 'deck_runtime_config_not_ready'
+  | 'story_workspace_dream'
   | 'ready'
   | 'preflight_checking'
   | WorkflowRunStatus;
-
-const STATE_LABELS: Record<WorkflowContextState, string> = {
-  workflow_unselected: '未选择工作流',
-  workflow_unavailable: '工作流不可用',
-  deck_runtime_config_not_ready: '配置未就绪',
-  ready: '可运行',
-  preflight_checking: '预检中…',
-  preflight: '预检中…',
-  queued: '等待运行',
-  running: '运行中…',
-  output_validating: '校验结果中…',
-  pending_review: '待审阅',
-  confirmed: '已确认',
-  rejected: '已驳回',
-  continuing: '继续运行中…',
-  completed: '已完成',
-  failed: '运行失败',
-  cancelled: '已取消',
-};
 
 export interface WorkflowContextBarProps {
   state: WorkflowContextState;
@@ -89,7 +74,7 @@ export function WorkflowContextBar({
           Deck 配置：{runtimeReady === true ? 'Ready' : runtimeReady === false ? '未就绪' : '待确认'}
         </span>
         <span className={`workflow-context-bar__fact workflow-context-bar__fact--state-${state}`}>
-          运行：{STATE_LABELS[state]}{progressLabel ? ` · ${progressLabel}` : ''}
+          运行：{storyWorkspaceWorkflowContextLabel(state)}{progressLabel ? ` · ${progressLabel}` : ''}
         </span>
         {workflowRunId && <code className="workflow-context-bar__run-id">{workflowRunId}</code>}
       </div>
