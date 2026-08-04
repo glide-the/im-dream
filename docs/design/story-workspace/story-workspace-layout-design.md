@@ -1,7 +1,7 @@
 # Story Workspace — Dream 页面布局与交互规范
 
 > **Design ID**：`design_002_story-workspace-layout`
-> **状态**：设计完成，待任务三实现
+> **状态**：生产主链已实现；丰富执行字段仍为占位
 > **最后更新**：2026-08-04
 > **适用端**：桌面端
 > **业务交互 owner**：[design_007](./design_007_dream-business-module-interaction.md)
@@ -13,7 +13,7 @@
 Dream 页面服务一条主生命周期：
 
 ```text
-Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Chat Agent 后续执行
+Dream Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Dream Agent 后续执行
 ```
 
 布局必须让创作者始终看清三件事：
@@ -226,7 +226,7 @@ Dream / 《雨夜》     Deck：Drama Forge 1.4     Run：…7A31     Agent 正�
 - 左侧固定表达 Assets / Outline 上下文；
 - 主工作面按故事线和叙事点组织 Agent 后续写入；
 - Agent 活动历史使用轻量时间线嵌入主工作面，不使用深色日志控制台；
-- 页面接收 SSE 后按 changed stage revision 增量刷新。
+- 页面以 `dream-files` REST 轮询发现 stage revision；携带匹配 run ID 的兼容事件只用于提前读取。
 
 ### 5.2 第二层：聚焦上下文
 
@@ -271,8 +271,8 @@ stateDiagram-v2
     Rendering --> ReadyToConfirm: required stages 齐全
     Editing --> ReadyToConfirm: required stages 齐全且字段有效
     ReadyToConfirm --> Confirming: 点击“确认并继续”
-    Confirming --> Continuing: 确认命令注入原 Chat
-    Continuing --> Completed: 同一 Agent 完成插件后续步骤
+    Confirming --> Continuing: 确认命令交回隐藏技术 thread
+    Continuing --> Completed: 同一 Dream Agent 完成插件后续步骤
 ```
 
 页面状态只用于展示阶段，不作为第二套内容真相源。stage 是否可渲染以 `.dream/runtime` 文件存在且有效为准。
@@ -294,17 +294,19 @@ stateDiagram-v2
 
 ```mermaid
 sequenceDiagram
-    participant Agent as 同一 Chat Agent
+    participant Agent as 同一 Dream Agent
     participant FS as 会话工作区
     participant API as story-workspace API
     participant UI as Dream 页面
 
     Agent->>FS: 写 canonical 文件
     Agent->>FS: 原子更新对应 stage JSON
-    Agent-->>UI: story-workspace-output(changed stages/revisions)
-    UI->>API: GET dream-files
+    UI->>API: GET dream-files（至少 5 秒轮询）
     API->>FS: 安全读取最新有效 revision
     API-->>UI: 可渲染内容
+    opt 收到携带匹配 run ID 的兼容 story-workspace-output
+        UI->>API: 立即重新 GET dream-files
+    end
 ```
 
 ### 7.3 用户确认到同一 Agent
@@ -314,16 +316,17 @@ sequenceDiagram
     actor User as 创作者
     participant UI as Dream 页面
     participant API as story-workspace API
-    participant Agent as 同一 Chat Agent
+    participant Agent as 同一 Dream Agent
     participant FS as 会话工作区
 
     User->>UI: 修改人物/场景/分镜
     User->>UI: 点击“确认并继续”
     UI->>API: edits + base revisions + idempotency key
-    API->>Agent: 隐藏消息注入原 thread
+    API->>API: SQLite 原子领取单次确认（claim + lease）
+    API->>Agent: 隐藏消息经同一技术 thread 交付
     Agent->>FS: 写入用户修改并提高 revisions
     Agent->>FS: 继续插件后续步骤
-    Agent-->>UI: SSE 通知工作空间更新
+    UI->>API: 轮询读取最新 revisions
 ```
 
 ## 8. 组件边界
@@ -389,8 +392,8 @@ StoryWorkspaceExecutionPage
 - [ ] 人物、场景、分镜 stage 文件分别到达时，对应模块立即可渲染；
 - [ ] stage 文件尚未出现时只显示“等待 Agent 写入”；
 - [ ] Agent 更新 revision 后页面安全刷新，不覆盖本地未确认修改；
-- [ ] 用户确认作为隐藏消息回到原 Chat thread；
-- [ ] 同一 Chat Agent 写入用户修改并继续后续步骤；
+- [ ] 用户确认作为隐藏消息回到同一 Dream 技术 thread；
+- [ ] 同一 Dream Agent 写入用户修改并继续后续步骤；
 - [ ] 后续执行页没有第二次确认入口。
 
 ### 11.3 工程约束
@@ -416,11 +419,11 @@ StoryWorkspaceExecutionPage
 
 保留以上历史决策原意并追加现行裁决：
 
-1. 页面主生命周期统一为“Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Chat Agent 后续执行”；
+1. 页面主生命周期统一为“Dream Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Dream Agent 后续执行”；
 2. 三栏骨架保留在确认前，但右栏从审阅动作区改为内容编辑器；
 3. 页面只有整份 Dream 的一次“确认并继续”；
 4. 确认后进入对齐 Dreem 创作者协作页的两层执行工作台；
-5. 所有页面内容由同一 Chat Agent 通过工作空间文件与 `.dream` stage revision 驱动；
+5. 所有页面内容由同一 Dream Agent 通过工作空间文件与 `.dream` stage revision 驱动；隐藏技术 thread 只承担连续性传输，不把 Dream 页面降级为 Chat 页面；
 6. 现行业务稿不扩展否定式审批、多分支恢复或内容归档。
 
 ## 13. 变更记录
@@ -430,3 +433,4 @@ StoryWorkspaceExecutionPage
 | 2026-08-01 | 初版三栏、结构化列表与 Story Workspace 视觉规范 |
 | 2026-08-03 | 增加 Dream 入口、运行上下文与执行页草案 |
 | 2026-08-04 | 对齐 Dreem PDF 第 3～8 页，改为 Agent 工作空间文件驱动、用户修改后一次确认、同一 Agent 后续执行；执行页改为数据/任务层与聚焦上下文层 |
+| 2026-08-04 | 统一业务主体为 Dream Agent；隐藏技术 thread 只承担连续性传输；校准为 REST 轮询保证刷新、匹配 run 的兼容事件仅作加速 |

@@ -3,7 +3,7 @@
 > 本文保留 2026-08-04 任务三前代码基线（commits `99075d0`/`bd450ff`/`57eab52`/`d0e8af9`/`f7b3ca0`/`8510ddc`/`dec5a92`）的数据流图、时序图与证据，并在 §2.3、§3.3、§5 追加任务三生产链修订。
 > 所有数据流事实均带 `文件:行号` 证据；术语以 `docs/architecture/术语表.md` 为准（「物理映射」= pack 时刻把 `.dream/` 协议目录写入会话工作区，代码标识 `materialize_dream_surface()`）。
 > §5 如实标注了代码现状中的「端点空洞」——阅读图表时请对照，勿把设计语义误认为已接线行为。
-> **2026-08-04 任务三修订注记**：业务主体统一为 Dream Agent。Dream 专用发起页、服务端 Dream adapter、可信 run context、run → characters → scenes → storyboards writer 链和单次确认 continuation 已接通（`bb1b0eb`/`2da2b41`/`d09f43c`/`530f1ac`/`62e21d7`/`4c85b96`；测试与评审证据见专项实施记录）。技术上复用隐藏 Deck-bound Agent thread / `chat_message` 作为连续性载体，但 Dream 前端不挂载 `ChatView`，该载体不是 Chat 页面或 Chat 业务合同。G3/G5 已关闭；G1 仅余旧 `WorkflowRun.status` 仍停 `queued` 的技术遗留，不能再解释为缺少生产 Dream Agent；G6 与 writer 主动 SSE 仍为遗留。
+> **2026-08-04 任务三修订注记**：业务主体统一为 Dream Agent。Dream 专用发起页、服务端 Dream adapter、可信 run context、run → characters → scenes → storyboards writer 链和单次确认 continuation 已接通（`bb1b0eb`/`2da2b41`/`d09f43c`/`530f1ac`/`62e21d7`/`4c85b96`；发起 terminal metadata 修复 `e292467`；drama-forge preflight 兼容发布与最终安全加固 `9831e41`/`c7fcbcd`/`7087036`；Dream Agent 可见文案 `b091695`；单次确认 SQLite 原子 claim `a0cb5d6`、续租保护 `bea9dbe`、数据库权威行守卫 `5497a25` 与事务内 lease 时间戳 `2200d28`；测试与评审证据见专项实施记录）。技术上复用隐藏 Deck-bound Agent thread / `chat_message` 作为连续性载体，但 Dream 前端不挂载 `ChatView`，该载体不是 Chat 页面或 Chat 业务合同。G3/G5 已关闭；G1 仅余旧 `WorkflowRun.status` 仍停 `queued` 的技术遗留，不能再解释为缺少生产 Dream Agent；G6 与 writer 主动 SSE 仍为遗留。
 
 ---
 
@@ -134,7 +134,10 @@ flowchart LR
     GW --> SRC[隐藏 Deck-bound Agent thread<br/>+ source chat_message]
     GW --> RUN[preflight + WorkflowRun queued]
     GW --> ADP[服务端 Dream adapter]
-    SRC --> DA[同一 Dream Agent]
+    SRC --> PACK[首 turn pack<br/>Deck 插件 + 服务端 adapter]
+    ADP --> PACK
+    PACK --> COMPAT[drama-forge preflight 兼容入口<br/>根 plugin.json + .claude 读取路径]
+    PACK --> DA[同一 Dream Agent]
     RUN --> CTX[可信 run context]
     ADP --> DA
     CTX --> DA
@@ -151,11 +154,13 @@ flowchart LR
 当前证据：前端发起与 canonical `?run=` 导航在
 `useStoryWorkspaceDreamLaunch.ts:37-72`、`StoryWorkspaceDreamPage.tsx:274`；服务端
 source/preflight/run/context 编排在 `dream_launch_service.py:139-275`；Dream adapter
-只经服务端 pack seam 注入（`workspace_packer.py:175-180,247-252`，
+只经服务端 pack seam 注入（`workspace_packer.py:458-467`，
 `service.py:226-237`）；可信 writer 顺序在 `context_builder.py:435-459`，MCP run/thread
 核对在 `story_workspace_tool.py:170-255`。strict wire、atomic claim 与冻结 binding 重放
-在 `contracts.py:190-216`、`dream_launch_gateway.py:723-860,898-1030`。浏览器不提供
-thread/run/来源字段。
+在 `contracts.py:190-216`、`dream_launch_gateway.py:723-860,898-1030`。drama-forge
+消费方 preflight 三个读取入口的发布与冻结校验在
+`workspace_packer.py:45-53,187-367,423-441,538-544`；它们不属于 `.dream/runtime`，
+不改变静态启动层冻结。浏览器不提供 thread/run/来源字段。
 
 ---
 
@@ -284,6 +289,7 @@ sequenceDiagram
     actor U as 创作者
     participant FE as Dream 前端
     participant API as story-workspace API
+    participant PK as workspace packer
     participant DA as 同一 Dream Agent
     participant MCP as Story Workspace MCP/writer
     participant FS as 会话工作区
@@ -292,6 +298,9 @@ sequenceDiagram
     FE->>API: POST dream-runs/start
     API->>API: 隐藏 source + preflight/run + 服务端 adapter
     API->>DA: 首个 turn + 可信 run context
+    DA->>PK: turn 启动阶段 pack Deck 插件 + 服务端 adapter
+    PK->>FS: 物理映射 .dream 静态启动层
+    PK->>FS: 发布 drama-forge preflight 三个兼容读取入口
 
     Note over DA,FS: ① Dream Agent 产出
     DA->>MCP: write_dream_run
@@ -311,6 +320,7 @@ sequenceDiagram
     Note over U,DA: ③ 用户修改并一次确认
     U->>FE: 修改；点击“确认并继续”
     FE->>API: dream-confirmation
+    API->>API: SQLite 原子 pending→dispatching claim + lease
     API->>DA: 经隐藏技术 thread 恢复同一 Dream Agent + 可信 context
 
     Note over DA,FE: ④ 后续执行
@@ -351,7 +361,7 @@ sequenceDiagram
 | G1 | run 状态机 `queued` 后无生产 transition 调用方 | **技术遗留**：旧 `WorkflowRun.status` 聚合仍停 `queued`；但隐藏 source message 已调度首个生产 Dream Agent | 旧 status 不能代表 Dream 文件生产进度；不得再写“无生产 Agent” |
 | G2 | 旧 story review confirm 不驱动 run | **Dream 主链已替换**：Dream 单次确认恢复同一 Dream Agent；旧 confirm 仍不驱动 run，但已退出主链 | 不把旧 `review_status` 当 Dream gate |
 | G3 | preflight/run 无 Dream UI 链路 | **已关闭**：专用发起页 → `dream-runs/start` → preflight/run → 首 turn 已接通 | 无 run 页面可发起并进入 `?run=` |
-| G4 | run events / writer 主动 SSE 不存在 | **遗留** | `dream-files` REST 轮询保证正确性；兼容帧只加速 |
+| G4 | run events / writer 主动 SSE 不存在 | **遗留**：真实浏览器验收中 writer events 请求返回 404 | `dream-files` REST 轮询已保证人物/场景/分镜 revision 渐进显示；兼容帧只加速 |
 | G5 | projection 端点不存在 | **已关闭**：actor-scoped `dream-files` REST 已实现 | Dream 页面可读取 run/stage projection |
 | G6 | 六态按钮聚合端点缺位 | **遗留** | 入口按钮继续默认隐藏 |
 | G7 | 旧 guidance `dispatched:false` 无自动拾取 | **旧能力遗留，不属 Dream 主链** | Dream 采用独立单次确认协调器，不接 guidance 侧栏 |
@@ -367,3 +377,4 @@ sequenceDiagram
 |------|------|
 | 2026-08-04 | 初版：基于代码现状（六 Task 实现完成后）的数据流图 ×2、业务时序图 ×2、存储矩阵、端点空洞清单 G1–G7 |
 | 2026-08-04 | 任务三修订：保留原基线图与证据，追加 Dream 专用发起、Dream Agent、服务端 adapter、可信 run context、writer 链和单次确认 continuation；更新 G1–G7 状态 |
+| 2026-08-04 | 生产验收校准：补发起 terminal metadata 修复、drama-forge preflight 三个消费方读取入口及安全发布边界、Dream Agent 可见文案、单次确认 SQLite 原子 claim；G4 明确保留 writer events 404 与 REST 轮询降级事实 |
