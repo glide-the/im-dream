@@ -625,7 +625,7 @@ def story_workspace_claim_dream_confirmation(
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
     *,
     claim_id: str,
-    now_s: float,
+    clock: Callable[[], float],
     lease_duration_s: float,
 ) -> Optional[StoryWorkspaceDreamConfirmationDispatch]:
     """Atomically acquire pending or expired confirmation work in SQLite."""
@@ -633,8 +633,7 @@ def story_workspace_claim_dream_confirmation(
     if not isinstance(claim_id, str) or not claim_id:
         raise ValueError("claim_id must be non-empty")
     if (
-        not _valid_lease_deadline(now_s)
-        or not _valid_lease_deadline(lease_duration_s)
+        not _valid_lease_deadline(lease_duration_s)
         or lease_duration_s <= 0
     ):
         raise ValueError("claim lease must use finite non-negative time")
@@ -658,6 +657,9 @@ def story_workspace_claim_dream_confirmation(
         ):
             db.commit()
             return None
+        now_s = clock()
+        if not _valid_lease_deadline(now_s):
+            raise ValueError("claim clock must return finite non-negative time")
         metadata = current.metadata
         status = metadata.get(
             "dispatch_status",
@@ -713,21 +715,26 @@ def story_workspace_claim_dream_confirmation(
         raise StoryWorkspaceDreamConfirmationError(
             "RESULT_COMMIT_FAILED", 503
         ) from exc
+    except Exception:
+        if db.in_transaction:
+            db.rollback()
+        raise
 
 
 def _story_workspace_set_dream_confirmation_claim_lease(
     db: sqlite3.Connection,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
     *,
-    lease_until_s: float,
+    clock: Callable[[], float],
+    lease_duration_s: float,
 ) -> bool:
-    """Move the owned claim lease without changing its identity."""
+    """Move an owned lease using time sampled inside the write transaction."""
 
     expected_claim_id = dispatch.metadata.get(_DISPATCH_CLAIM_ID)
     if (
         not isinstance(expected_claim_id, str)
         or not expected_claim_id
-        or not _valid_lease_deadline(lease_until_s)
+        or not _valid_lease_deadline(lease_duration_s)
     ):
         return False
     try:
@@ -749,7 +756,12 @@ def _story_workspace_set_dream_confirmation_claim_lease(
         ):
             db.commit()
             return False
-        metadata[_DISPATCH_CLAIM_LEASE_UNTIL] = float(lease_until_s)
+        now_s = clock()
+        if not _valid_lease_deadline(now_s):
+            raise ValueError("lease clock must return finite non-negative time")
+        metadata[_DISPATCH_CLAIM_LEASE_UNTIL] = (
+            float(now_s) + float(lease_duration_s)
+        )
         updated = db.execute(
             "UPDATE chat_message SET metadata = ? WHERE id = ?",
             (_canonical_json(metadata), dispatch.message_id),
@@ -770,6 +782,10 @@ def _story_workspace_set_dream_confirmation_claim_lease(
         raise StoryWorkspaceDreamConfirmationError(
             "RESULT_COMMIT_FAILED", 503
         ) from exc
+    except Exception:
+        if db.in_transaction:
+            db.rollback()
+        raise
 
 
 def story_workspace_read_pending_dream_confirmations(
@@ -1132,7 +1148,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
                 db,
                 dispatch,
                 claim_id=self._claim_id_factory(),
-                now_s=self._lease_clock(),
+                clock=self._lease_clock,
                 lease_duration_s=self._lease_duration_s,
             )
         finally:
@@ -1151,14 +1167,15 @@ class StoryWorkspaceDreamConfirmationCoordinator:
     def _set_claim_lease_sync(
         self,
         dispatch: StoryWorkspaceDreamConfirmationDispatch,
-        lease_until_s: float,
+        lease_duration_s: float,
     ) -> bool:
         db = self._db_factory()
         try:
             return _story_workspace_set_dream_confirmation_claim_lease(
                 db,
                 dispatch,
-                lease_until_s=lease_until_s,
+                clock=self._lease_clock,
+                lease_duration_s=lease_duration_s,
             )
         finally:
             db.close()
@@ -1186,7 +1203,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             await asyncio.to_thread(
                 self._set_claim_lease_sync,
                 dispatch,
-                self._lease_clock() + max(float(delay_s), 0.0),
+                max(float(delay_s), 0.0),
             )
         except Exception:
             _logger.exception(
@@ -1205,7 +1222,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
                 renewed = await asyncio.to_thread(
                     self._set_claim_lease_sync,
                     dispatch,
-                    self._lease_clock() + self._lease_duration_s,
+                    self._lease_duration_s,
                 )
             except asyncio.CancelledError:
                 raise

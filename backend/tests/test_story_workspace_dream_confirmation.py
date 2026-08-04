@@ -314,7 +314,7 @@ class ConfirmationFixture:
                     db,
                     dispatch,
                     claim_id=claim_id,
-                    now_s=now_s,
+                    clock=ManualClock(now_s),
                     lease_duration_s=lease_duration_s,
                 )
             )
@@ -520,7 +520,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             database.get_db,
             lease_clock=ManualClock(98.0),
         )
-        self.assertTrue(coordinator._set_claim_lease_sync(claimed, 100.0))
+        self.assertTrue(coordinator._set_claim_lease_sync(claimed, 2.0))
         authoritative = self.fixture.rows()[0]
         self.assertEqual(
             authoritative["metadata"]["dispatch_claim_lease_until"],
@@ -1262,6 +1262,184 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             await coordinator.stop()
             await contender.stop()
 
+    async def test_heartbeat_timestamps_lease_inside_write_transaction(
+        self,
+    ) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def consume(*_args):
+            entered.set()
+            await release.wait()
+            return True
+
+        clock = ManualClock(10.0)
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            lease_duration_s=0.2,
+            lease_renew_interval_s=0.01,
+            claim_id_factory=lambda: "claim-transaction-clock",
+        )
+        contender_consumptions = 0
+
+        async def contender_consume(*_args):
+            nonlocal contender_consumptions
+            contender_consumptions += 1
+            return True
+
+        contender = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: contender_consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            lease_duration_s=0.2,
+            lease_renew_interval_s=0.01,
+            claim_id_factory=lambda: "claim-transaction-contender",
+        )
+        real_set_lease = coordinator._set_claim_lease_sync
+        successful_renewals = 0
+
+        def delayed_set_lease(dispatch, lease_value):
+            nonlocal successful_renewals
+            # Simulate executor queueing / SQLite lock delay after the event
+            # loop prepared the call but before BEGIN IMMEDIATE + UPDATE.
+            clock.advance(1.0)
+            renewed = real_set_lease(dispatch, lease_value)
+            successful_renewals += int(renewed)
+            return renewed
+
+        try:
+            with patch.object(
+                coordinator,
+                "_set_claim_lease_sync",
+                delayed_set_lease,
+            ):
+                self.assertTrue(coordinator.schedule(persisted.dispatch))
+                await entered.wait()
+                await self._wait_until(lambda: successful_renewals >= 1)
+                metadata = self.fixture.rows()[0]["metadata"]
+                scheduled = await contender.reconcile_once()
+                self.assertEqual(
+                    (
+                        metadata["dispatch_claim_lease_until"] > clock(),
+                        scheduled,
+                        contender_consumptions,
+                    ),
+                    (True, 0, 0),
+                )
+                release.set()
+                await coordinator.wait_for_idle()
+        finally:
+            release.set()
+            await coordinator.stop()
+            await contender.stop()
+
+    async def test_failed_dispatch_timestamps_defer_inside_transaction(
+        self,
+    ) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+
+        async def consume(*_args):
+            return False
+
+        clock = ManualClock(20.0)
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            clock=clock,
+            lease_clock=clock,
+            lease_duration_s=30.0,
+            retry_base_s=2.0,
+            claim_id_factory=lambda: "claim-defer-clock",
+        )
+        contender = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            claim_id_factory=lambda: "claim-defer-contender",
+        )
+        real_set_lease = coordinator._set_claim_lease_sync
+
+        def delayed_set_lease(dispatch, lease_value):
+            clock.advance(5.0)
+            return real_set_lease(dispatch, lease_value)
+
+        try:
+            with patch.object(
+                coordinator,
+                "_set_claim_lease_sync",
+                delayed_set_lease,
+            ):
+                self.assertTrue(coordinator.schedule(persisted.dispatch))
+                await coordinator.wait_for_idle()
+            metadata = self.fixture.rows()[0]["metadata"]
+            scheduled = await contender.reconcile_once()
+            self.assertEqual(
+                (
+                    metadata["dispatch_claim_lease_until"] > clock(),
+                    scheduled,
+                ),
+                (True, 0),
+            )
+        finally:
+            await coordinator.stop()
+            await contender.stop()
+
+    async def test_cancel_timestamps_expired_lease_inside_transaction(
+        self,
+    ) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        entered = asyncio.Event()
+
+        async def consume(*_args):
+            entered.set()
+            await asyncio.Event().wait()
+
+        clock = ManualClock(30.0)
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            lease_duration_s=30.0,
+            claim_id_factory=lambda: "claim-cancel-clock",
+        )
+        real_set_lease = coordinator._set_claim_lease_sync
+
+        def delayed_set_lease(dispatch, lease_value):
+            clock.advance(3.0)
+            return real_set_lease(dispatch, lease_value)
+
+        with patch.object(
+            coordinator,
+            "_set_claim_lease_sync",
+            delayed_set_lease,
+        ):
+            self.assertTrue(coordinator.schedule(persisted.dispatch))
+            await entered.wait()
+            await coordinator.stop()
+
+        metadata = self.fixture.rows()[0]["metadata"]
+        self.assertEqual(metadata["dispatch_claim_lease_until"], clock())
+
     async def test_exact_replay_during_fresh_claim_cannot_schedule_dispatch(
         self,
     ) -> None:
@@ -1312,7 +1490,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                 db,
                 persisted.dispatch,
                 claim_id="claim-owner",
-                now_s=5_000.0,
+                clock=ManualClock(5_000.0),
                 lease_duration_s=30.0,
             )
         self.assertIsNotNone(claimed)
@@ -1351,7 +1529,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
                     db,
                     persisted.dispatch,
                     claim_id="claim-stale",
-                    now_s=6_000.0,
+                    clock=ManualClock(6_000.0),
                     lease_duration_s=10.0,
                 )
             )
