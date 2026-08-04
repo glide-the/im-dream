@@ -8,15 +8,37 @@ respective router and service modules.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, Generic, List, Literal, Optional, TypeVar
+from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictInt,
+    field_validator,
+    model_validator,
+)
 
 
 STORY_WORKSPACE_CONTRACT_VERSION = "1.2.0"
 STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH = 2000
 STORY_WORKSPACE_GUIDANCE_TEXT_MAX_LENGTH = 4000
 STORY_WORKSPACE_GUIDANCE_IDEMPOTENCY_KEY_MAX_LENGTH = 255
+# Implementation guardrails: design_006 requires bounded file/list sizes but
+# intentionally does not assign numeric policy values. Keep these centralized
+# so a later product/security decision can revise them without schema drift.
+STORY_WORKSPACE_DREAM_FILE_MAX_BYTES = 1024 * 1024
+STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX = 256
+STORY_WORKSPACE_DREAM_ITEMS_MAX = 1000
+STORY_WORKSPACE_DREAM_RELATIONS_MAX = 100
+STORY_WORKSPACE_DREAM_EDITS_MAX = 1000
+STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX = 64
+_StoryWorkspaceDreamPositiveInt = Annotated[StrictInt, Field(ge=1)]
+
+
+def _story_workspace_to_camel(value: str) -> str:
+    first, *rest = value.split("_")
+    return first + "".join(part.capitalize() for part in rest)
 
 
 class StoryWorkspaceReviewStatus(str, Enum):
@@ -78,6 +100,241 @@ class StoryWorkspaceResourceType(str, Enum):
     STORY = "story"
     CHARACTER = "character"
     SCENE = "scene"
+
+
+class StoryWorkspaceDreamStage(str, Enum):
+    CHARACTERS = "characters"
+    SCENES = "scenes"
+    STORYBOARDS = "storyboards"
+
+
+STORY_WORKSPACE_DREAM_REQUIRED_STAGES = (
+    StoryWorkspaceDreamStage.CHARACTERS,
+    StoryWorkspaceDreamStage.SCENES,
+    StoryWorkspaceDreamStage.STORYBOARDS,
+)
+
+
+class _StoryWorkspaceDreamModel(BaseModel):
+    """Strict Dream model with optional camelCase serialization aliases.
+
+    Runtime JSON is always dumped without aliases and therefore remains the
+    canonical snake_case storage schema. REST models opt into ``by_alias`` at
+    the API boundary and recursively serialize the same nested values in
+    camelCase.
+    """
+
+    model_config = ConfigDict(
+        alias_generator=_story_workspace_to_camel,
+        extra="forbid",
+        frozen=True,
+        populate_by_name=True,
+        str_strip_whitespace=True,
+    )
+
+
+class StoryWorkspaceDreamSource(_StoryWorkspaceDreamModel):
+    deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
+    binding_revision: _StoryWorkspaceDreamPositiveInt
+    deck_plugin_version: str = Field(min_length=1, max_length=255)
+    deck_runtime_snapshot_id: str = Field(min_length=1, max_length=255)
+    runtime_plugin_lock_id: str = Field(min_length=1, max_length=255)
+
+
+class StoryWorkspaceDreamRunFile(_StoryWorkspaceDreamModel):
+    """Canonical snake_case payload persisted as ``run.json``."""
+
+    schema_version: Literal["dream-run/v1"] = "dream-run/v1"
+    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    thread_id: str = Field(min_length=1, max_length=255)
+    source: StoryWorkspaceDreamSource
+    projection_entry: str = Field(min_length=1, max_length=512)
+    required_stages: list[StoryWorkspaceDreamStage] = Field(
+        default_factory=lambda: list(STORY_WORKSPACE_DREAM_REQUIRED_STAGES),
+        min_length=3,
+        max_length=3,
+    )
+    revision: _StoryWorkspaceDreamPositiveInt
+
+    @model_validator(mode="after")
+    def fixed_run_fields_are_canonical(self) -> "StoryWorkspaceDreamRunFile":
+        if tuple(self.required_stages) != STORY_WORKSPACE_DREAM_REQUIRED_STAGES:
+            raise ValueError("required_stages must contain the three canonical stages")
+        expected_entry = (
+            f"/api/story-workspace/workflow-runs/{self.workflow_run_id}/dream-files"
+        )
+        if self.projection_entry != expected_entry:
+            raise ValueError("projection_entry does not match workflow_run_id")
+        return self
+
+
+class StoryWorkspaceDreamStagePage(_StoryWorkspaceDreamModel):
+    title: str = Field(min_length=1, max_length=200)
+    entry_route: str = Field(min_length=1, max_length=512)
+
+
+class StoryWorkspaceDreamStageItem(_StoryWorkspaceDreamModel):
+    entity_id: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=200)
+    summary: Optional[str] = Field(default=None, max_length=4000)
+    source_file: str = Field(min_length=1, max_length=1024)
+    relations: list[str] = Field(
+        default_factory=list,
+        max_length=STORY_WORKSPACE_DREAM_RELATIONS_MAX,
+    )
+
+    @field_validator("relations")
+    @classmethod
+    def relations_are_bounded(cls, values: list[str]) -> list[str]:
+        if any(not value or len(value) > 128 for value in values):
+            raise ValueError(
+                "relations must contain non-blank identifiers <= 128 chars"
+            )
+        return values
+
+
+class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamModel):
+    """Canonical snake_case payload persisted in ``stages/<stage>.json``."""
+
+    schema_version: Literal["dream-stage/v1"] = "dream-stage/v1"
+    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    stage: StoryWorkspaceDreamStage
+    revision: _StoryWorkspaceDreamPositiveInt
+    source_files: list[str] = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX,
+    )
+    page: StoryWorkspaceDreamStagePage
+    items: list[StoryWorkspaceDreamStageItem] = Field(
+        default_factory=list,
+        max_length=STORY_WORKSPACE_DREAM_ITEMS_MAX,
+    )
+
+    @field_validator("source_files")
+    @classmethod
+    def source_files_are_unique(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError("source_files must not contain duplicates")
+        return values
+
+    @model_validator(mode="after")
+    def fixed_stage_fields_are_canonical(self) -> "StoryWorkspaceDreamStageFile":
+        titles = {
+            StoryWorkspaceDreamStage.CHARACTERS: "人物",
+            StoryWorkspaceDreamStage.SCENES: "场景",
+            StoryWorkspaceDreamStage.STORYBOARDS: "分镜",
+        }
+        routes = {
+            StoryWorkspaceDreamStage.CHARACTERS: (
+                f"/story-workspace/characters?run={self.workflow_run_id}"
+            ),
+            StoryWorkspaceDreamStage.SCENES: (
+                f"/story-workspace/scenes?run={self.workflow_run_id}"
+            ),
+            StoryWorkspaceDreamStage.STORYBOARDS: (
+                f"/story-workspace/runs/{self.workflow_run_id}/execution"
+            ),
+        }
+        if self.page.title != titles[self.stage]:
+            raise ValueError("page.title does not match stage")
+        if self.page.entry_route != routes[self.stage]:
+            raise ValueError(
+                "page.entry_route does not match stage and workflow_run_id"
+            )
+        if any(item.source_file not in self.source_files for item in self.items):
+            raise ValueError("every item source_file must be declared in source_files")
+        return self
+
+
+class StoryWorkspaceDreamStageResponse(_StoryWorkspaceDreamModel):
+    stage: StoryWorkspaceDreamStage
+    revision: _StoryWorkspaceDreamPositiveInt
+    source_files: list[str] = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX,
+    )
+    page: StoryWorkspaceDreamStagePage
+    items: list[StoryWorkspaceDreamStageItem] = Field(
+        default_factory=list,
+        max_length=STORY_WORKSPACE_DREAM_ITEMS_MAX,
+    )
+
+
+class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamModel):
+    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    thread_id: str = Field(min_length=1, max_length=255)
+    source: StoryWorkspaceDreamSource
+    required_stages: list[StoryWorkspaceDreamStage] = Field(
+        min_length=3,
+        max_length=3,
+    )
+    run_revision: _StoryWorkspaceDreamPositiveInt = 1
+    stages: dict[StoryWorkspaceDreamStage, StoryWorkspaceDreamStageResponse]
+    can_confirm: bool
+    confirmation_label: Literal["确认并继续"] = "确认并继续"
+
+    @model_validator(mode="after")
+    def confirmation_matches_file_completeness(
+        self,
+    ) -> "StoryWorkspaceDreamFilesResponse":
+        if tuple(self.required_stages) != STORY_WORKSPACE_DREAM_REQUIRED_STAGES:
+            raise ValueError("required_stages must contain the three canonical stages")
+        expected = set(STORY_WORKSPACE_DREAM_REQUIRED_STAGES)
+        if self.can_confirm != (set(self.stages) == expected):
+            raise ValueError("can_confirm must reflect complete required stages")
+        return self
+
+
+class StoryWorkspaceDreamEdit(_StoryWorkspaceDreamModel):
+    stage: StoryWorkspaceDreamStage
+    entity_id: str = Field(min_length=1, max_length=128)
+    fields: dict[str, Any] = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX,
+    )
+
+    @field_validator("fields")
+    @classmethod
+    def edit_fields_are_safe_json(cls, values: dict[str, Any]) -> dict[str, Any]:
+        for key in values:
+            if not key or len(key) > 128:
+                raise ValueError("edit field names must be 1..128 characters")
+        try:
+            import json
+
+            encoded = json.dumps(values, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("edit fields must be finite JSON values") from exc
+        if len(encoded.encode("utf-8")) > 64 * 1024:
+            raise ValueError("one edit fields payload must be at most 64 KiB")
+        return values
+
+
+class StoryWorkspaceDreamConfirmationCommand(_StoryWorkspaceDreamModel):
+    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    thread_id: str = Field(min_length=1, max_length=255)
+    base_revisions: dict[StoryWorkspaceDreamStage, _StoryWorkspaceDreamPositiveInt]
+    edits: list[StoryWorkspaceDreamEdit] = Field(
+        default_factory=list,
+        max_length=STORY_WORKSPACE_DREAM_EDITS_MAX,
+    )
+    idempotency_key: str = Field(
+        pattern=r"^swc_[A-Za-z0-9._:-]+$",
+        min_length=5,
+        max_length=255,
+    )
+
+    @field_validator("base_revisions")
+    @classmethod
+    def all_base_revisions_are_present(
+        cls,
+        values: dict[StoryWorkspaceDreamStage, int],
+    ) -> dict[StoryWorkspaceDreamStage, int]:
+        if set(values) != set(STORY_WORKSPACE_DREAM_REQUIRED_STAGES):
+            raise ValueError("base_revisions must contain all three required stages")
+        if any(isinstance(value, bool) or value < 1 for value in values.values()):
+            raise ValueError("base revisions must be positive integers")
+        return values
 
 
 @dataclass
@@ -491,6 +748,13 @@ class StoryWorkspaceScenePatch(_StoryWorkspaceControlledPatch):
 
 __all__ = [
     "STORY_WORKSPACE_CONTRACT_VERSION",
+    "STORY_WORKSPACE_DREAM_EDITS_MAX",
+    "STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX",
+    "STORY_WORKSPACE_DREAM_FILE_MAX_BYTES",
+    "STORY_WORKSPACE_DREAM_ITEMS_MAX",
+    "STORY_WORKSPACE_DREAM_RELATIONS_MAX",
+    "STORY_WORKSPACE_DREAM_REQUIRED_STAGES",
+    "STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX",
     "STORY_WORKSPACE_GUIDANCE_IDEMPOTENCY_KEY_MAX_LENGTH",
     "STORY_WORKSPACE_GUIDANCE_TEXT_MAX_LENGTH",
     "STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH",
@@ -510,6 +774,16 @@ __all__ = [
     "StoryWorkspaceCharacterFilter",
     "StoryWorkspaceCharacterPatch",
     "StoryWorkspaceContentStatus",
+    "StoryWorkspaceDreamConfirmationCommand",
+    "StoryWorkspaceDreamEdit",
+    "StoryWorkspaceDreamFilesResponse",
+    "StoryWorkspaceDreamRunFile",
+    "StoryWorkspaceDreamSource",
+    "StoryWorkspaceDreamStage",
+    "StoryWorkspaceDreamStageFile",
+    "StoryWorkspaceDreamStageItem",
+    "StoryWorkspaceDreamStagePage",
+    "StoryWorkspaceDreamStageResponse",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",
     "StoryWorkspaceGuidanceCommandPayload",
