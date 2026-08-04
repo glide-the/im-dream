@@ -4,9 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime
 import hashlib
+import importlib.util
 import json
 import os
+from pathlib import Path
 import sqlite3
+import stat
+import sys
 from typing import Any
 import uuid
 
@@ -19,6 +23,15 @@ try:
     from services.deck_plugin.compatibility_service import CompatibilityService
     from services.deck_plugin.installation_service import Scope
     from services.errors.error_registry import ApiRouteError
+    from services.story_workspace.dream_file_service import (
+        StoryWorkspaceDreamContractError,
+        StoryWorkspaceDreamDurabilityIndeterminate,
+        StoryWorkspaceDreamFileError,
+        StoryWorkspaceDreamFileReader,
+        StoryWorkspaceDreamIOError,
+        StoryWorkspaceDreamPathError,
+        StoryWorkspaceDreamPlatformUnsupported,
+    )
     from services.workflow.preflight_service import (
         BindingReleaseContext,
         PreflightCheckError,
@@ -37,6 +50,15 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.deck_plugin.compatibility_service import CompatibilityService
     from backend.services.deck_plugin.installation_service import Scope
     from backend.services.errors.error_registry import ApiRouteError
+    from backend.services.story_workspace.dream_file_service import (
+        StoryWorkspaceDreamContractError,
+        StoryWorkspaceDreamDurabilityIndeterminate,
+        StoryWorkspaceDreamFileError,
+        StoryWorkspaceDreamFileReader,
+        StoryWorkspaceDreamIOError,
+        StoryWorkspaceDreamPathError,
+        StoryWorkspaceDreamPlatformUnsupported,
+    )
     from backend.services.workflow.preflight_service import (
         BindingReleaseContext,
         PreflightCheckError,
@@ -52,6 +74,42 @@ except ModuleNotFoundError:  # Support package imports from repository root.
 
 _DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
 _DEV_TOKEN_SECRET = "ink-dream-development-workflow-token-secret-v1"
+
+
+def get_workspace_root() -> Path:
+    """Load the canonical workspace resolver only when this projection runs."""
+
+    try:
+        from libs.claude_agent_kit.server.workspace import (
+            get_workspace_root as resolve_workspace_root,
+        )
+    except ModuleNotFoundError:
+        # Importing the parent package eagerly loads the optional agent SDK.
+        # Dream file reads only need the dependency-free canonical resolver,
+        # so load that source module directly when the SDK is absent (or when
+        # this file is imported through the repository-root package layout).
+        module_name = "_ink_story_workspace_root_resolver"
+        workspace_module = sys.modules.get(module_name)
+        if workspace_module is None:
+            module_path = (
+                Path(__file__).resolve().parents[2]
+                / "libs"
+                / "claude_agent_kit"
+                / "server"
+                / "workspace.py"
+            )
+            spec = importlib.util.spec_from_file_location(module_name, module_path)
+            if spec is None or spec.loader is None:
+                raise ModuleNotFoundError("canonical workspace resolver unavailable")
+            workspace_module = importlib.util.module_from_spec(spec)
+            sys.modules[module_name] = workspace_module
+            try:
+                spec.loader.exec_module(workspace_module)
+            except BaseException:
+                sys.modules.pop(module_name, None)
+                raise
+        resolve_workspace_root = workspace_module.get_workspace_root
+    return resolve_workspace_root()
 
 
 def _canonical_json(value: Any) -> str:
@@ -100,6 +158,70 @@ class StoryWorkflowApplicationGateway:
         }
         code, status = mapping.get(exc.code, ("AGENT_EXECUTION_FAILED", 422))
         raise ApiRouteError(code, status_code=status) from exc
+
+    @staticmethod
+    def _thread_workspace(thread_id: str) -> Path:
+        """Resolve one existing, real thread directory without creating it."""
+
+        if (
+            not isinstance(thread_id, str)
+            or not thread_id.strip()
+            or Path(thread_id).parts != (thread_id,)
+            or thread_id in {".", ".."}
+        ):
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+
+        supplied_root = Path(get_workspace_root())
+        try:
+            resolved_root = supplied_root.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        if not resolved_root.is_dir():
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+
+        supplied_workspace = supplied_root / thread_id
+        try:
+            metadata = supplied_workspace.lstat()
+        except FileNotFoundError as exc:
+            raise ApiRouteError("AGENT_EXECUTION_FAILED", status_code=404) from exc
+        except (OSError, ValueError) as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+
+        try:
+            resolved_workspace = supplied_workspace.resolve(strict=True)
+        except (OSError, RuntimeError) as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403) from exc
+        if (
+            not resolved_workspace.is_relative_to(resolved_root)
+            or resolved_workspace.parent != resolved_root
+        ):
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return resolved_workspace
+
+    @staticmethod
+    def _raise_dream_file_error(exc: StoryWorkspaceDreamFileError) -> None:
+        if isinstance(exc, StoryWorkspaceDreamPlatformUnsupported):
+            raise ApiRouteError("AGENT_EXECUTION_FAILED", status_code=501) from exc
+        if isinstance(exc, StoryWorkspaceDreamDurabilityIndeterminate):
+            raise ApiRouteError("RESULT_COMMIT_FAILED", status_code=409) from exc
+        if isinstance(exc, StoryWorkspaceDreamPathError):
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403) from exc
+        if isinstance(exc, StoryWorkspaceDreamContractError):
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
+        if isinstance(exc, StoryWorkspaceDreamIOError):
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        raise ApiRouteError("AGENT_EXECUTION_FAILED", status_code=422) from exc
 
     @staticmethod
     def _installation_scope(
@@ -467,6 +589,51 @@ class StoryWorkflowApplicationGateway:
             )
         except WorkflowRunError as exc:
             self._raise_run_error(exc)
+        finally:
+            db.close()
+
+    async def get_dream_files(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Project an authorized run's existing Dream workspace files."""
+
+        db = database.get_db()
+        try:
+            actor_context = self._actor(actor)
+            workflow_run = WorkflowRunService(
+                db,
+                token_secret=_token_secret(),
+            ).read_run(workflow_run_id, actor_context)
+            thread_id = workflow_run.source_voice_thread_id
+            if not isinstance(thread_id, str) or not thread_id.strip():
+                raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+            try:
+                actor_id = int(actor["actor_id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ApiRouteError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    status_code=403,
+                ) from exc
+            thread = database.get_chat_thread(thread_id, actor_id)
+            if thread is None or str(thread.get("id")) != thread_id:
+                raise ApiRouteError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    status_code=404,
+                )
+            workspace = self._thread_workspace(thread_id)
+            return StoryWorkspaceDreamFileReader(workspace).read(
+                workflow_run,
+                thread_id=thread_id,
+            )
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        except ApiRouteError:
+            raise
+        except StoryWorkspaceDreamFileError as exc:
+            self._raise_dream_file_error(exc)
         finally:
             db.close()
 

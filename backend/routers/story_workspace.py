@@ -143,6 +143,13 @@ class StoryWorkflowGateway(Protocol):
 
     async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any: ...
 
+    async def get_dream_files(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
     async def retry_run(
         self,
         workflow_run_id: str,
@@ -205,13 +212,17 @@ def _workflow_actor(current_user: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _workflow_json(value: Any) -> Any:
-    return value.model_dump(mode="json") if hasattr(value, "model_dump") else value
+def _workflow_json(value: Any, *, by_alias: bool = False) -> Any:
+    return (
+        value.model_dump(mode="json", by_alias=by_alias)
+        if hasattr(value, "model_dump")
+        else value
+    )
 
 
-async def _workflow_call(awaitable: Any) -> Any:
+async def _workflow_call(awaitable: Any, *, by_alias: bool = False) -> Any:
     try:
-        return _workflow_json(await awaitable)
+        return _workflow_json(await awaitable, by_alias=by_alias)
     except ApiRouteError as exc:
         return JSONResponse(
             status_code=exc.status_code,
@@ -1166,6 +1177,25 @@ async def get_workflow_run(
             content=build_error_payload(exc.code),
         )
     return await _workflow_call(gateway.get_run(workflow_run_id, actor=actor))
+
+
+@router.get("/workflow-runs/{workflow_run_id}/dream-files")
+async def get_workflow_run_dream_files(
+    workflow_run_id: str,
+    current_user: dict[str, Any] = Depends(_story_workflow_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    try:
+        actor = _workflow_actor(current_user)
+    except ApiRouteError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _workflow_call(
+        gateway.get_dream_files(workflow_run_id, actor=actor),
+        by_alias=True,
+    )
 
 
 @router.post("/workflow-runs/{workflow_run_id}/retry", status_code=201)
