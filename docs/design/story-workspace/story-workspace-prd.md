@@ -5,8 +5,9 @@
 > **增量 Issue**: [SUO-214](/SUO/issues/SUO-214)、[SUO-230](/SUO/issues/SUO-230)、[SUO-236](/SUO/issues/SUO-236)、[SUO-298](/SUO/issues/SUO-298)
 > **父 Issue**: [SUO-198](/SUO/issues/SUO-198)  
 > **设计阶段**: design → issue → task → stage  
-> **最后更新**: 2026-08-01  
+> **最后更新**: 2026-08-04
 > **设计负责人**: DesignArchitect  
+> **2026-08-04 专项修订**: `.dream` 协议目录完整合同见 [design_006_dream-protocol-dir-mapping.md](./design_006_dream-protocol-dir-mapping.md)；本文按任务一裁决校准四阶段生命周期与后续执行布局，DEC 原文保留并追加修订注记。
 
 ---
 
@@ -21,7 +22,7 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 ### 1.2 设计目标
 
 - 为创作者提供一个**审阅 Agent 产出的剧本工作空间**，而非手动创作工具
-- 核心工作流：**创作者在 Deck 中配置并选择 Deck 插件 → story-workspace 执行 `WorkflowPreflight`（调用 Deck 解析运行配置并锁定快照）→ Claude Agent 按所选工作流产出剧本 → 页面渲染 → 用户审阅确认 → 所选工作流继续或结束**
+- 核心工作流：前置准备为**选择 Deck 插件 → `WorkflowPreflight` → 创建 run**；页面主生命周期为 **Agent 产出 → 页面渲染 → 用户审阅确认 → 后续执行**。后续执行承接同一锁定快照，并在独立执行协作工作台中呈现。
 - 在现有全局顶部导航提供 **Dream** 入口，并把 Claude Agent 产出、页面渲染、用户审阅与确认 gate 收拢到同一个 `story-workspace` 页面域
 - 遵循 Ink & Memory UI Design v2 的视觉体系（暖纸张、轻纸面分区、无卡片设计）
 - 本期聚焦布局骨架与基础交互，复杂画布以数据表形式呈现
@@ -35,17 +36,18 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 
 | 模块 | 说明 |
 |------|------|
-| Workspace 布局骨架 | 三栏桌面端布局、导航、侧边栏、主内容区 |
+| Workspace 布局骨架 | 阶段化桌面布局：审阅阶段三栏；后续执行阶段独立两层执行协作工作台 |
 | **全局顶部 Dream 入口** | **在现有 AppHeader / TopNavBar 增加 Dream 导航项，定义目标路由及选中、未选中状态** |
 | **Agent 产出渲染** | **剧本/角色/场景由 Agent 自动生成，页面负责渲染展示** |
 | **审阅确认流程** | **用户查看 Agent 产出 → 确认通过 / 提出修改 / 重新生成** |
 | **Dream 页面审阅 gate** | **Dream 页面持续展示运行与审阅阶段；全部必审产出确认前，后续工作流保持锁定** |
+| **后续执行协作工作台** | **独立执行路由；`Assets / Outline` 索引、叙事点/执行步骤主工作面、选中项上下文协作区** |
 | **Deck 工作流选择与执行前校验** | **选择已发布、可用的 Deck 插件；展示其版本及 Deck 运行配置就绪状态；执行记录保留来源快照** |
 | 故事/剧本列表 | 数据表格呈现 Agent 产出的剧本，展示生成状态 |
 | 角色资产管理 | 展示 Agent 生成的角色列表，支持审阅编辑 |
 | 场景资产管理 | 展示 Agent 生成的场景列表，支持审阅编辑 |
 | 空态/加载/错误/选中态 | 各模块的完整状态设计，含 Agent 生成中状态 |
-| 桌面端布局 | 固定三栏桌面端布局，无响应式适配需求 |
+| 桌面端布局 | 仅桌面端；布局随生命周期阶段切换，不做移动端/平板端响应式适配 |
 
 ### 2.2 范围外（本期不实现）
 
@@ -58,6 +60,7 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | 移动端适配 | 完整移动端交互 | 本期明确排除，仅桌面端 |
 | 实时协作 | 多创作者同时编辑 | 后续迭代 |
 | **Deck 编辑器内部编辑能力** | **Deck 插件的工作流编排、发布、版本管理，以及 Agent 提示词、模型/工具策略、secret-ref 和插件运行配置均由 Deck 负责；story-workspace 仅消费可选择版本、快照引用和脱敏状态** | **由 Deck 模块独立设计与实现** |
+| **`.dream` 运行期写入** | **不新增 `.dream/runs/`；人物、场景、分镜元信息与 run provenance 不写 `workspace.json`** | **运行事实继续由 story-workspace/workflow REST API 提供；完整合同见 design_006** |
 
 ---
 
@@ -83,6 +86,8 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | **DEC-018** | **Dream 页面设置运行级审阅 gate；全部必审产出确认前禁止工作流继续或结束** | **让“用户确认后才执行”成为可见且不可绕过的业务约束** |
 | **DEC-026** | **story-workspace 业务合同按领域归属：后端统一放在 `backend/story_workspace/contracts.py`，前端局部 REST 合同统一放在 `frontend/src/hooks/story-workspace/contracts.ts`；禁止用通用 `types` 目录承载** | **避免顶层 `backend/types/` 遮蔽 Python 标准库 `types`，并让合同 owner 可定位** |
 
+> **2026-08-04 修订提示**：DEC-003 与 DEC-007 原文保留。DEC-003 的“三栏”现在只适用于产出列表与审阅阶段；后续执行采用独立两层协作工作台。DEC-007 的“执行”明确为第四阶段的独立页面生命周期，不再用一句“继续或结束”跳过用户可见执行过程。完整注记见 §9。
+
 ### 3.2 从 Dreem 提取的参考点与适配差异
 
 | Dreem 功能 | 本平台适配 | 差异说明 |
@@ -104,22 +109,22 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 
 以下分析基于 Dreem 调研 PDF 中的实际截图，提取其布局结构、组件样式与交互模式，作为本平台设计的直接参考。
 
-#### 3.3.1 创作者协作页布局（PDF 第 3-4 页截图）
+#### 3.3.1 创作者协作页布局与操作动线（PDF 第 3-7 页截图）
 
 **Dreem 截图特征**：
-- **三栏布局**：左侧窄边栏（图标导航）+ 中间资产列表 + 右侧详情/预览
-- **资产分类**：Characters / Locations / Script / World assets 分组展示
-- **资产卡片**：缩略图（头像/场景图）+ 名称 + artifact 数量
-- **面包屑导航**：`< Ordinary Waiting Day > Storylines > A`
-- **标签切换**：Assets / Outline 标签页
+- **两层交互**（第 3 页正文）：数据层包含资产与任务进度，用户通过侧栏指导 Agent 推进创作。
+- **第一层定位**（第 4、6 页）：`Assets / Outline` 在同一索引面切换；资产按 Characters / Locations / Script / World assets 分组；故事线条目显示节点数，并定位右侧叙事点或镜头文稿。
+- **第二层协作**（第 6、7 页）：点击叙事点中的镜头文稿后打开上下文协作窗口；窗口承载人物、主要信息、镜头说明、确认、历史与指导动作。
+- **确认后推进**（第 5、7 页）：资产或当前方案经创作者确认后，后续 Agent 才继续生成。
+- **截图包含视频能力**（第 7 页）：镜头预览、上传与历史版本是平台能力，不等于本期必须采纳的产品范围。
 
 **本平台适配**：
-- ✅ 采纳三栏布局结构（Sidebar 240px + Main + Detail Panel 360px）
-- ✅ 采纳资产分组展示模式（故事 / 角色 / 场景 分组）
-- ✅ 采纳缩略图 + 名称 + 数量的卡片信息密度
-- ❌ 不采纳 Dreem 的暗色主题（本平台使用暖纸色浅色主题）
-- ❌ 不采纳面包屑导航（Sidebar 导航替代）
-- ❌ 不采纳 World assets 分组（本期排除视频/世界构建）
+- ✅ 审阅阶段继续采用左导航 + 中内容 + 右审阅详情三栏。
+- ✅ 后续执行阶段采用独立两层协作工作台：`Assets / Outline` 索引 → 叙事点/执行步骤主工作面 → 选中项上下文协作区。
+- ✅ 采纳资产分组、节点计数、确认后推进与上下文历史。
+- 🔄 缩略图卡片改为轻纸面条目；用人物/场景引用、结构化产物摘要与执行状态替代镜头预览。
+- ❌ 不把固定 240 / Main / 360 三栏解释成全部阶段唯一布局。
+- ❌ 不采纳 Dreem 暗色主题、视频预览、上传、播放器、外部模型选择或 World assets 编辑。
 
 #### 3.3.2 角色资产页布局（PDF 第 3 页截图）
 
@@ -159,10 +164,10 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 - **镜头呈现文稿**：点击叙事点展开镜头描述
 
 **本平台适配**：
-- ✅ 采纳「故事线 → 叙事点」的层级概念（对应故事 → 场景的层级）
+- ✅ 采纳「故事线 → 叙事点」层级，并在后续执行页映射为「Outline 索引 → 叙事点/执行步骤」
 - ✅ 采纳节点计数展示（对应角色数/场景数字段）
 - ❌ 不采纳故事线可视化编辑（本期以表格呈现，后续迭代）
-- ❌ 不采纳镜头文稿呈现（本期排除视频模块）
+- 🔄 镜头文稿以结构化产物摘要、人物/场景引用和执行状态呈现；不渲染视频
 
 #### 3.3.5 交互控件/决策点布局（PDF 第 7-8 页截图）
 
@@ -176,7 +181,7 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 - ✅ 采纳「选项/决策」概念（以故事内容中的交互类型字段记录）
 - ❌ 不采纳可视化决策控件（本期以纯文本/Markdown 记录）
 - ❌ 不采纳预览窗口（本期排除视频模块）
-- ❌ 不采纳历史版本（后续迭代）
+- 🔄 不实现可编辑视频历史；保留只读运行记录与 guidance 历史
 
 #### 3.3.6 创作台页布局（PDF 第 2 页截图）
 
@@ -198,13 +203,15 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 | Dreem 截图元素 | Dreem 风格 | Ink & Memory 适配风格 |
 |----------------|-----------|----------------------|
 | 主题 | 暗色/浅色双主题 | 暖纸色浅色单主题（Warm Canvas #F6EFE5） |
-| 边栏 | 窄图标边栏（~60px） | 240px 文字边栏（图标+文字） |
-| 资产卡片 | 缩略图+名称+数量 | 表格行：头像+名称+字段+操作 |
+| 边栏 | 窄图标边栏（~60px） | 审阅阶段 240px 文字导航；执行阶段为 `Assets / Outline` 上下文索引，不共用全局右栏 |
+| 资产卡片 | 缩略图+名称+数量 | 轻纸面条目/表格行：头像或图标+名称+计数/状态；静止无阴影外框 |
 | 选中态 | 背景色块高亮 | 右侧 2px Action Brown 竖线 |
 | 按钮 | 橙色强调（#FF6B35） | Action Brown #5F4A36 |
 | 标签 | 圆角胶囊，深色底 | 圆角胶囊，Paper Cream 底 |
 | 分割线 | 实线细边框 | Border Paper #D8C7B3 虚线 |
 | 字体 | 系统无衬线 | 系统无衬线 + Excalifont 标题 |
+
+视觉实现必须同时服从 `Ink & Memory UI Design v2.pdf` 第 4～5 页：页面主背景使用 Warm Canvas，分区使用 Paper Cream 或透明混合；Action Brown 仅用于主操作与少数焦点；以留白、字号和行分隔建立层级；页面级只保留一条 Border Paper 虚线边界；普通条目静止时无阴影、外框卡片或深色底。
 
 ### 3.5 Deck / Ink-Dream 关系声明
 
@@ -251,6 +258,8 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 
 **版本规则**：创作者切换 Deck 插件或插件版本时，只改变下一次执行；既有剧本继续关联原 `deck_plugin_binding_id + binding_revision`、`deck_plugin_version`、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`。驳回后默认沿用原快照/锁并附加修改意见重试；若用户改选工作流，则创建新的 `workflow_run_id`，不得覆盖原运行来源。
 
+**运行事实载体（2026-08-04）**：以上 `workflow_run_id` 与五项来源字段由 story-workspace/workflow 数据库和 actor-scoped REST API 保存、读取；不得写入 `.dream/workspace.json`。`.dream` 仅说明会话 pack 时的 Deck、插件制品和入口路由。人物、场景、分镜的插件源文件可保留各自 frontmatter，但页面需要的审阅与执行数据必须进入 story-workspace 合同后再消费，不能由前端直接探测工作区文件。完整边界见 `design_006` §5～§8。
+
 #### 3.5.4 story-workspace 业务合同归属（SUO-298 增量）
 
 | 边界 | Canonical 设计 | 禁止项 |
@@ -264,7 +273,7 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 
 ### 3.6 SUO-230 增量：顶部 Dream 入口与页面审阅 gate
 
-> 本节只定义 SUO-230 的新增/变化项；SUO-211/212/213 已完成结论、SUO-214/215 经 SUO-236 修订后的 Deck-only 关系、桌面三栏、复杂画布数据表化、排除平台视频与 UI Design v2 视觉约束均保持不变。
+> 本节只定义 SUO-230 的新增/变化项；SUO-211/212/213 已完成结论、SUO-214/215 经 SUO-236 修订后的 Deck-only 关系、复杂画布数据表化、排除平台视频与 UI Design v2 视觉约束均保持不变。2026-08-04 起，桌面三栏只指审阅阶段；后续执行使用独立两层协作工作台。
 
 #### 3.6.1 全局顶部 Dream 导航合同
 
@@ -289,7 +298,7 @@ AppHeader:  Ink & Memory  …  Dream（选中）  …  头像/设置
    ├─ StoryWorkspaceSidebar：概览 / 故事 / 角色 / 场景
    ├─ Main Content
    │  ├─ StoryWorkspaceWorkflowContextBar（Deck release / runtime snapshot / workflow_run_id）
-   │  ├─ StoryWorkspaceReviewGate（产出 → 渲染 → 审阅 → 继续/结束）
+   │  ├─ StoryWorkspaceReviewGate（Agent 产出 → 页面渲染 → 用户审阅确认 → 后续执行）
    │  └─ StoryWorkspace*Table（复杂画布数据表化，待审阅项可见）
    └─ StoryWorkspaceReviewPanel（完整内容、确认、编辑后确认、驳回）
 ```
@@ -303,8 +312,8 @@ AppHeader:  Ink & Memory  …  Dream（选中）  …  头像/设置
 | `story-workspace-pending-review` | canonical `pending_review`；必审项已完整持久化 | 第三步“用户审阅”高亮；待审阅行黄条，Review Panel 可操作 | 锁定 |
 | `story-workspace-rejected` | 任一必审项为 `rejected` | 第三步红色状态，显示修改意见与“沿原快照重新生成” | 锁定；驳回不触发后续步骤 |
 | `story-workspace-confirming` | 确认请求提交中 | 操作按钮 Loading 且防重复提交 | 锁定 |
-| `story-workspace-confirmed` | 当前运行的全部必审项为 `confirmed` | 第三步完成，第四步解锁 | 仅此状态可请求继续或结束 |
-| `story-workspace-continuing` / `story-workspace-completed` | 已确认后继续下一步 / 工作流终点 | 第四步显示执行中或已结束；来源信息只读 | 已解锁 |
+| `story-workspace-confirmed` | 当前运行的全部必审项为 `confirmed` | 第三步完成，第四步入口解锁 | 仅此状态可进入后续执行 |
+| `story-workspace-continuing` / `story-workspace-completed` | 已确认后继续下一步 / 工作流终点 | 第四步进入独立执行协作工作台，显示执行中或已结束；来源信息只读 | 已解锁 |
 | `story-workspace-failed` | 产出、渲染、确认或继续失败 | 显示非敏感错误、失败步骤与可恢复动作 | 锁定；按幂等规则重试 |
 
 Gate 规则：
@@ -343,6 +352,8 @@ story-workspace/
 ├── /scenes                       ← 场景资产（Agent 生成的场景列表）
 │   ├── /scenes/:sceneId          ← 场景详情审阅
 │   └── /scenes/:sceneId/review
+├── /runs/:storyWorkspaceRunId/execution
+│                                  ← 后续执行协作工作台（确认后进入）
 └── /settings                     ← 工作区设置（复用全局 Settings）
 ```
 
@@ -356,7 +367,9 @@ Dream 页内输入携带所选工作流上下文，触发 Claude Agent
     ↓
 /story-workspace/stories/:storyId/review  ← Dream 域内审阅（用户确认/驳回/编辑）
     ↓
-全部必审项确认 → gate 解锁 → 按所选 Deck 插件的下一步继续或结束
+全部必审项确认 → gate 解锁 → /story-workspace/runs/:storyWorkspaceRunId/execution
+    ↓
+Assets / Outline 定位 → 叙事点/执行步骤 → 上下文协作区指导 Agent 或查看结果
 任一项驳回/待审阅 → gate 保持锁定 → 沿用原执行快照重新生成或继续审阅
 用户编辑 → 保存修改 → 再确认
 ```
@@ -387,11 +400,12 @@ Dream 页内输入携带所选工作流上下文，触发 Claude Agent
 - **可见审阅 gate**：持续展示“Claude Agent 产出 → 页面渲染 → 用户审阅 → 继续/结束”；未全部确认时第四步锁定
 - **Agent 产出概览**：待审阅剧本数、已确认剧本数、最近 Agent 生成活动
 - **待审阅快捷入口**：Agent 最新生成的剧本/角色/场景，点击直达审阅
+- **后续执行入口**：只有当前 run 已确认且服务端聚合状态允许时，进入独立执行协作工作台；未确认访问执行路由时回到审阅深链
 - **空态**：首次进入时的引导（等待 Agent 产出）
 
 **布局**：
 - 顶部：页面标题 + 审阅状态统计
-- 中部：待审阅项卡片（Agent 最新产出）
+- 中部：待审阅轻纸面条目（Agent 最新产出；静止无阴影外框）
 - 下部：已确认剧本列表（最近确认）
 
 #### 4.3.2 故事/剧本列表 (`/story-workspace/stories`)
@@ -418,7 +432,7 @@ Dream 页内输入携带所选工作流上下文，触发 Claude Agent
 
 **审阅状态流转**：
 ```
-WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已确认 → 所选工作流继续或结束
+WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已确认 → 进入后续执行
                 ↓
               用户驳回 → 附带修改意见 → Agent 重新生成 → 待审阅
                 ↓
@@ -478,9 +492,11 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 
 ### 4.4 布局交互
 
-#### 4.4.1 桌面端三栏布局（唯一支持的布局）
+#### 4.4.1 桌面端阶段化布局（唯一支持桌面端）
 
-> **约束**：本期仅支持桌面端（≥1280px），不包含任何移动端或平板端适配。所有布局、交互和状态设计均基于大屏桌面场景。
+> **约束**：本期仅支持桌面端（≥1280px），不包含任何移动端或平板端适配。布局按生命周期分为两种：产出列表/用户审阅使用三栏；后续执行使用独立两层协作工作台。不存在“全部阶段共用同一固定三栏”的合同。
+
+**产出列表与用户审阅阶段**：
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -492,7 +508,7 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 │          │                                              │  （可折叠）        │
 │  - Logo  │                                              │                   │
 │  - Nav   │  ┌────────────────────────────────────────┐  │  - 详情表单       │
-│  - 用户  │  │ Review Gate（产出→渲染→审阅→继续/结束） │  │  - 属性编辑       │
+│  - 用户  │  │ Review Gate（Agent 产出→页面渲染→用户审阅确认→后续执行）│ - 属性编辑 │
 │          │  ├────────────────────────────────────────┤  │  - 关联信息       │
 │          │  │ Toolbar（搜索/筛选/排序）                │  │                   │
 │          │  └────────────────────────────────────────┘  │                   │
@@ -511,41 +527,62 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+**后续执行阶段（`/story-workspace/runs/:storyWorkspaceRunId/execution`）**：
+
+```text
+┌─ App Header：Dream（选中） ─ breadcrumb：Dream / Runs / <runId> / 执行 ───────┐
+├──────────────────────┬───────────────────────────────────────────────────────┤
+│ Assets │ Outline     │ 运行摘要 · 当前阶段 · 状态                           │
+│                      │                                                       │
+│ 资产分组 / 故事线     │ 叙事点 / 执行步骤轻纸面条目                          │
+│ 节点计数 / 状态       │ 人物、场景、产物引用、失败原因、重试次数               │
+│ 运行记录入口          │ 选择条目 → 打开上下文协作区                            │
+├──────────────────────┴───────────────────────────────┬───────────────────────┤
+│ 当前叙事点的结构化产物摘要 / 执行状态                  │ 上下文协作区            │
+│ 不含视频、上传、播放器、可编辑画布                     │ 确认事实、指导、历史、重试 │
+└──────────────────────────────────────────────────────┴───────────────────────┘
+```
+
+上下文协作区是选中叙事点/执行步骤后出现的第二层工作面，不是 Dream 审阅右栏，也不是全页面始终存在的固定第三栏。当前代码的常驻 360px guidance sidebar 属过渡实现，目标实现以此节和 `design_004` §5.1 为准。
+
 #### 4.4.2 布局组件规范
 
 | 组件 | 宽度 | 行为 |
 |------|------|------|
 | Sidebar | 240px | 固定宽度，始终展开 |
 | Main Content | 自适应 | 填充剩余空间 |
-| Detail Panel | 360px | 默认展开，可手动折叠，选中行时显示详情 |
+| Review Detail Panel | 360px | 只属于审阅阶段；选中行时显示当前 artifact version 的详情 |
+| Execution Index | 建议 260–300px | `Assets / Outline`、故事线/资产分组、节点计数与状态；不复用审阅 Sidebar owner |
+| Execution Main | 自适应，最小 720px | 叙事点/执行步骤、结构化产物摘要与状态 |
+| Context Collaboration Area | 建议 380–440px，按选中项出现 | guidance、确认事实、历史、失败重试；使用第二层工作面，不作为全局固定栏 |
 
 #### 4.4.3 布局约束说明
 
 > **重要**：本期设计仅针对桌面端（≥1280px）。不考虑任何移动端（<768px）或平板端（768px–1279px）的适配。
 >
-> - Sidebar 始终 240px 展开，不提供折叠为图标栏的模式
-> - Detail Panel 始终 360px 展开，不作为抽屉滑出
+> - 审阅 Sidebar 始终 240px 展开，不提供折叠为图标栏的模式
+> - 审阅 Detail Panel 为 360px；执行上下文协作区不继承该固定宽度与常驻规则
 > - 所有交互基于鼠标（hover、点击、拖拽），不考虑触控
-> - 表格始终完整展示所有列，不提供卡片式简化视图
+> - 审阅表格完整展示既定字段；执行阶段用轻纸面条目和结构化详情，不提供卡片式简化视图
 >
 > 若未来需要扩展响应式支持，应作为独立设计 Issue 处理。
 
 ### 4.5 交互设计
 
-#### 4.5.1 核心工作流：选择 Deck 工作流 → WorkflowPreflight → Agent 产出 → 审阅确认
+#### 4.5.1 核心工作流：前置准备 + Dream 页面四阶段生命周期
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│             Deck 选择 → 运行配置快照 → Agent 产出 → 审阅确认                 │
+│ 前置：Deck 选择 → WorkflowPreflight → 创建 run                              │
+│ 主链：Agent 产出 → 页面渲染 → 用户审阅确认 → 后续执行                       │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                             │
-│  Deck Editor → 选择 Deck Plugin → WorkflowPreflight → Claude Agent → 页面 → 审阅 │
-│   自定义/发布     锁定 ID/版本       配置快照       执行工作流     渲染      │
+│  Deck Editor → 选择插件 → Preflight / run → Agent → 页面 → 审阅 → 执行协作  │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**详细流程**：
+**前置准备（不计入页面四阶段）**：
 
 1. **工作流准备与选择阶段**
    - 创作者在 Deck 编辑器中自定义并发布 Deck 插件
@@ -557,29 +594,36 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
    - 校验发布/启用状态、访问权限、配置完整性与版本兼容性
    - 校验通过后锁定 `deck_plugin_version`、`deck_runtime_snapshot_id` 与 `runtime_plugin_lock_id`；任一校验失败均不启动 Agent
 
-3. **Agent 产出阶段**（系统侧，Dream 页面内可见）
+**Dream 页面四阶段生命周期**：
+
+1. **Agent 产出阶段**（系统侧，Dream 页面内可见）
    - Dream 页面内的创作输入复用现有 Chat 能力，但不跳离 Dream；请求连同已锁定的工作流上下文触发 Claude Agent
    - Agent 按 Deck 插件定义的步骤，使用 Deck 运行快照生成剧本、角色、场景数据
-   - 数据存入数据库，标记 `review_status = 'pending'`
+   - 完整结果经现有解析链写入 story-workspace 数据库，标记 `review_status = 'pending'`
    - 记录 `workflow_run_id`、来源版本与执行状态
+   - 人物、场景、分镜的插件源文件及 frontmatter 留在各自 canonical 工作区路径；不得写入 `.dream/`
 
-4. **页面渲染阶段**（UI 侧）
+2. **页面渲染阶段**（UI 侧）
    - 用户进入 story-workspace
    - 页面加载 Agent 生成的数据，按审阅状态分组展示
    - 待审阅项高亮显示
 
-5. **用户审阅阶段**（UI 侧）
+3. **用户审阅确认阶段**（UI 侧）
    - 用户点击待审阅项 → 右侧审阅面板展开
    - 面板展示 Agent 生成的完整内容
    - 用户可：
-     - **确认**：点击「确认」→ 当前项变为 `confirmed`；只有全部必审项确认后 gate 才允许工作流继续或结束
+     - **确认**：点击「确认」→ 当前项变为 `confirmed`；只有全部必审项确认后 gate 才允许进入后续执行
      - **编辑后确认**：修改字段 → 点击「保存并确认」→ 当前版本变为 `confirmed`，仍按运行级 gate 聚合判断
      - **驳回**：点击「驳回」→ 填写修改意见 → 状态变为 `rejected` → Agent 重新生成
 
-6. **工作流继续/结束阶段**（系统侧）
+4. **后续执行阶段**（独立执行协作工作台）
    - 只有当前 `workflow_run_id` 的全部必审项确认后，运行级 gate 才解锁
-   - 已确认内容回写当前 `workflow_run_id`；待审阅或已驳回状态不得调用后续执行
-   - 若 Deck 插件定义确认后的下一步骤，则 Claude Agent 按同一锁定快照继续；若确认是终点，则该运行完成
+   - 待审阅或已驳回状态不得进入执行页；直接访问执行路由时重定向审阅深链
+   - 页面第一层用 `Assets / Outline` 索引定位叙事点/执行步骤，第二层上下文协作区承载 Agent 指导、确认事实、运行历史与失败重试
+   - 运行来源五字段、status 与 projection 只从 actor-scoped REST API 读取，不从 `.dream/workspace.json` 或工作区文件推断
+   - 若 Deck 插件定义确认后的下一步骤，则 Agent 按同一锁定快照继续；若确认是终点，则执行页展示完成结果
+
+> **代码现状诚实边界（2026-08-04）**：G1 queued 后无生产推进方、G2 审阅 confirm 不驱动 run、G3 preflight/run 无 UI 接线（`design_005:256-268`）。因此本节是目标生命周期；任务二没有把这三处描述为已接线，任务三必须逐项决定实现或遗留。
 
 #### 4.5.2 表格交互
 
@@ -637,6 +681,7 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 | 搜索结果 | "未找到匹配的结果" | 清除搜索条件 |
 | **无 Deck 插件** | **"还没有可用的 Deck 工作流"** | **前往 Deck 编辑器自定义并发布插件** |
 | **未选择 Deck 插件** | **"请先选择创作工作流"** | **打开 Deck 工作流选择器；不启动 Agent** |
+| **执行页暂无 projection** | **"执行数据尚未接入"** | **显示 G5 显式空态；不从 `.dream` 或工作区文件补探测** |
 
 **空态视觉**：
 - 居中显示
@@ -681,13 +726,26 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 
 `StoryWorkspaceReviewGateState` 与可序列化的 `story-workspace-*` 状态值以 3.6.2 为唯一新增合同。页面关闭、路由切换或刷新只可重新读取 gate，不可将 `pending_review` 推进为 `confirmed`；任何绕过页面直接请求继续的行为都必须被服务端拒绝。
 
+### 5.6 后续执行协作状态
+
+| UI 状态 | 页面表现 | 可用动作 |
+|---|---|---|
+| `story-workspace-execution-not-confirmed` | 提示先完成审阅并重定向审阅深链 | 返回审阅 |
+| `story-workspace-execution-continuing` | 第一层高亮当前叙事点/步骤；上下文协作区显示最新 guidance 与运行记录 | 提交指导、查看资产 |
+| `story-workspace-execution-awaiting-guidance` | 当前阻塞步骤与协作区成为主焦点 | 提交指导 |
+| `story-workspace-execution-completed` | 结构化结果与来源只读展示 | 查看结果、返回 Dream |
+| `story-workspace-execution-failed` | 展示失败步骤、非敏感错误与已保留确认事实 | 重试失败步骤、返回审阅 |
+| `story-workspace-execution-projection-unavailable` | G5 未接线的显式空态 | 查看 run 基础状态；不得文件补探测 |
+
+`awaiting-guidance` 是 `continuing` + projection 阻塞信息推导的 UI 投影态，不新增 `RunStatus` 枚举。上下文协作区只围绕当前叙事点或执行步骤出现，不改变审阅面板 owner。
+
 ---
 
 ## 6. 视觉设计规范
 
 ### 6.1 色彩应用
 
-遵循 [Ink & Memory Color System](../color_system/README.md) 和 `frontend/src/styles/tokens.css`。
+遵循 `Ink & Memory UI Design v2.pdf` 第 4～5 页、[Ink & Memory Color System](../color_system/README.md) 和 `frontend/src/styles/tokens.css`。Dreem PDF 只提供信息架构与操作动线，不覆盖本节品牌视觉。
 
 | 用途 | Token | 色值 |
 |------|-------|------|
@@ -724,6 +782,8 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 - **留白分区**：以留白和字号层级代替实线边框
 - **Hover 效果**：仅 hover 时出现 `--color-shadow-soft` 轻阴影
 - **选中态**：右侧细线（2px Action Brown）表达选中
+- **执行协作区**：第一层索引、主工作面与第二层协作区只用浅纸面混合、留白与行分隔建立层级；不把三块各自包成悬浮卡片
+- **强调收敛**：Action Brown 只用于主操作，Memory Yellow / Spark Green 只用于少数状态焦点；不复制 Dreem 深色大面积填充
 
 ---
 
@@ -731,7 +791,7 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 
 ### 7.1 功能验收
 
-- [ ] 桌面端三栏布局正常渲染，各区域比例正确
+- [ ] 桌面端阶段化布局正常渲染：审阅三栏与独立两层执行协作工作台各自 owner 清晰
 - [ ] Agent 产出的剧本/角色/场景在表格中正确展示
 - [ ] **审阅状态（待审阅/已确认/已驳回）正确显示和流转**
 - [ ] **审阅面板可正常展开，展示 Agent 生成内容**
@@ -750,21 +810,26 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 - [ ] `/story-workspace` 与 `/story-workspace/dashboard` 只重定向至 canonical Dream 入口，不产生平行状态
 - [ ] Dream 页面同时可见工作流上下文、四步审阅 gate、产出数据表与右侧 Review Panel
 - [ ] 任一必审项待审阅或驳回时，后续继续/结束不可触发；全部确认后仅触发一次
+- [ ] 已确认 run 进入 `/story-workspace/runs/:storyWorkspaceRunId/execution`；第一层可从 `Assets / Outline` 定位叙事点/执行步骤，第二层按选中项打开上下文协作区
+- [ ] 未确认 run 访问执行路由时回到审阅深链；运行来源与 projection 只从 actor-scoped REST API 读取
+- [ ] `.dream/workspace.json` 保持 `dream-surface/v1` 静态字段，不含 `workflow_run_id`、运行来源五字段、`projection_entry` 或时间戳
+- [ ] 人物、场景、分镜生成阶段对 `.dream/**` 零写入；Agent 只读边界保持
 
 ### 7.2 视觉验收
 
 - [ ] 色彩系统与 tokens.css 一致
 - [ ] 轻纸面分区原则贯彻（无卡片堆叠、虚线边界、留白分区）
+- [ ] 执行工作台对齐 Dreem PDF 第 3、6、7 页的“索引定位 → 叙事点 → 上下文协作”动线，同时服从 UI Design v2.1 第 4～5 页暖纸与无卡片规范
 - [ ] 字体层级清晰
 - [ ] 选中态使用右侧细线（非背景色块）
 - [ ] Hover 仅出现轻阴影
 
 ### 7.3 桌面端约束验收
 
-- [ ] 仅桌面端（≥1280px）三栏完整布局
+- [ ] 仅桌面端（≥1280px）；审阅三栏与执行两层工作台均完整可用
 - [ ] 确认无移动端/平板端相关代码或样式
-- [ ] Sidebar 始终 240px 展开，不可折叠为图标栏
-- [ ] Detail Panel 始终 360px 展开，不作为抽屉
+- [ ] 审阅 Sidebar 始终 240px 展开，不可折叠为图标栏
+- [ ] 审阅 Detail Panel 为 360px；执行上下文协作区不错误复用该固定常驻合同
 
 ### 7.4 下游可消费性
 
@@ -801,6 +866,10 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 | 顶部 Dream 入口与既有 Dashboard 形成双状态 | 高 | 以 `/story-workspace/dream` 为 canonical，旧入口只重定向，不复制 store 或运行上下文 |
 | 客户端或重试绕过审阅 gate | 高 | 服务端以 `workflow_run_id` + 审阅版本校验全部必审项，确认与继续均幂等 |
 | 通用 `types` 目录承载 story-workspace 合同并遮蔽语言/标准库类型模块 | 高 | 合同按 DEC-026 迁回 story-workspace 领域路径；通用路径不保留 re-export 或 shim |
+| 把运行期元信息复制进 `.dream` 形成双真相源 | 高 | 维持 DEC-029；`.dream` 静态冻结，动态事实只认 REST；完整合同归 design_006 |
+| 目标四阶段被误读为已生产接线 | 高 | `design_005` G1～G3 继续作为缺口真相源；任务三未完成前，PRD 明确标记目标态 |
+| 执行页显示空数据却从文件系统补探测 | 中 | G5 projection 缺位时显示显式空态；前端不读取 `.dream` 或插件工作区文件 |
+| 六态入口由前端猜测 run 阶段 | 中 | G6 未接线时保持隐藏降级；阶段只接受服务端聚合结果 |
 
 ### 依赖
 
@@ -810,6 +879,8 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 - **Deck 编辑器 / Deck 插件目录**：提供 Deck 内部编辑发布界面及可选择的已发布版本
 - `frontend/src/styles/tokens.css` 色彩系统
 - 现有 Workspace 文件管理 API（文件上传/下载能力复用）
+- `design_006_dream-protocol-dir-mapping.md`：`.dream` 静态 launch 与前端发现 canonical
+- `design_005_dream-module-dataflow-and-sequence.md`：G1～G7 代码现状；尤其 G1～G3、G5、G6 是后续执行布局可用性的前置依赖
 
 ---
 
@@ -834,6 +905,15 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 | **DEC-019** | **2026-08-01** | **提示词、运行配置、secret-ref、权限与不可变快照统一归属 Deck，并使用 `deck_runtime_*` 合同** | **local-board + DesignArchitect** | **统一所有权、字段、错误码和 participant** |
 | **DEC-026** | **2026-08-01** | **后端合同归 `backend/story_workspace/contracts.py`，前端局部 REST 合同归 `frontend/src/hooks/story-workspace/contracts.ts`；禁止通用 `types` 业务归属，`backend/database.py` 只读且不新增审计 Schema / DDL** | **local-board + CEOOrchestrator** | **统一合同 owner、兼容迁移与数据库写入边界** |
 
+### 2026-08-04 专项修订注记
+
+> 以下保留上表原决策文本，只追加适用范围与原因；`.dream` 的 DEC-029、执行页的 DEC-030 原文和对应注记仍归 `design_004` §9。
+
+- **DEC-003（2026-08-04 修订）**：三栏桌面布局保留为 Agent 产出列表与用户审阅阶段的唯一布局；不再扩张为“所有 Dream 生命周期阶段的唯一布局”。后续执行继续使用独立路由，内部调整为 `Assets / Outline` 索引、叙事点/执行步骤主工作面与选中项上下文协作区组成的两层协作工作台。原因是 Dreem 调研 PDF 第 3、6、7 页表达的是“数据层定位 + 上下文协作”的两层动线，而非固定 240 / Main / 360 比例。
+- **DEC-007（2026-08-04 修订）**：原四步不变，统一表述为「Agent 产出 → 页面渲染 → 用户审阅确认 → 后续执行」；Deck 选择、`WorkflowPreflight` 与 run 创建属于进入四阶段前的准备链。第四阶段必须是用户可见的独立执行协作工作台，不能只写成后台“继续或结束”。
+- **DEC-001（2026-08-04 适用说明）**：轻纸面、无卡片原则覆盖新增执行工作台。Dreem 截图的暗色、视频预览和悬浮面板不是视觉规范；执行页服从 UI Design v2.1 第 4～5 页。
+- **与 DEC-029/030 的关系**：`workspace.json` 保持静态，不写 run 与 projection；“独立执行页”原则不变，只修订页内信息架构。详见 `design_004` §9 的 2026-08-04 注记与 `design_006`。
+
 ---
 
 ## 10. 增量变更说明
@@ -845,6 +925,7 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 - **修订 5 / SUO-230**（2026-08-01）：根据 SUO-198 评论 `2eff7996-aa5e-4371-a557-fb9a39037310` 与边界验收，新增全局顶部 Dream 导航、canonical `/story-workspace/dream` 路由、选中/未选中状态、Dream 页面四步可见审阅 gate、确认幂等/防绕过规则及 issue/task/stage 影响；不改写 SUO-211/212/213 的稳定结论。
 - **修订 6 / SUO-236**（2026-08-01）：按 SUO-235 将业务模块和设计元语统一为 Deck；保留运行配置、不可变快照、secret-ref、权限、preflight、审计、重试和回滚语义，并统一字段为 `deck_runtime_*`、错误码为 `DECK_RUNTIME_CONFIG_*`。
 - **修订 7 / SUO-298**（2026-08-01）：按直接修订授权增量明确 story-workspace 合同的前后端 canonical 路径，禁止通用 `types` 业务归属，补充无行为变更的兼容迁移与 `backend/database.py` 只读边界；表格替代复杂画布、排除视频等产品范围保持不变。
+- **修订 8 / `.dream` 与执行布局专项**（2026-08-04）：按任务一裁决维持 DEC-029 静态冻结，新增 design_006 作为 `.dream` 唯一协议 owner；主生命周期统一为「Agent 产出 → 页面渲染 → 用户审阅确认 → 后续执行」；审阅三栏保留，后续执行改为对齐 Dreem PDF 第 3、6、7 页动线的独立两层协作工作台，并以 UI Design v2.1 第 4～5 页覆盖其视觉。
 
 ---
 
@@ -858,6 +939,10 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 | Agent 产出的触发方式 | **已收敛** | **先在 Dream 页面选择 Deck 插件并通过 story-workspace `WorkflowPreflight`（调用 Deck 校验），再由 Dream 页内创作输入复用现有 Chat 能力并携带工作流上下文触发 Claude Agent；不得跳离 Dream 完成该流程** |
 | 驳回后的重新生成流程 | **已收敛** | **默认沿用原 Deck 插件版本、Deck 运行快照与 runtime lock，附加审阅意见重试；改选工作流则创建新运行** |
 | 已确认内容的后续执行 | **已收敛** | **按所选 Deck 插件定义的确认后步骤继续；若确认是该工作流终点，则运行结束** |
+| `.dream` 生成期元信息 | **已关闭** | **维持 DEC-029：不写入。插件元信息留在既有资产/故事/分镜文件；host 运行事实只认 REST，见 design_006** |
+| 后续执行布局 | **已收敛** | **审阅三栏保留；执行阶段使用独立两层协作工作台，见 §4.4.1 与 design_004 §5.1** |
+| G1～G3 生产接线 | **待实现，不阻塞任务二** | **queued 推进、confirm 驱动 run、preflight/run UI 链路仍缺；任务三必须实现或显式遗留** |
+| G5 projection / G6 六态聚合 | **待实现，不阻塞任务二** | **执行数据缺位时显式空态，入口缺位时保持隐藏；禁止前端文件探测或状态推断** |
 | **[CLARIFICATION_NEEDED] Deck 技术传输合同** | **不阻塞 design；下游 owner：IssueDispatcher → BackendTaskAgent** | **需在增量 Issue/Task 中明确可用插件查询、`WorkflowPreflight` 与 Deck 校验、运行创建及来源字段的 API/事件合同、权限和幂等；不得改变 DEC-009～DEC-011、DEC-019** |
 
 **默认假设**：
@@ -866,7 +951,8 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 - **Deck 插件选择为工作区/用户当前创作上下文；单次运行以锁定快照为准，不能被后续选择覆盖**
 - **Agent 产出由 Dream 页内创作输入触发；可复用现有 Chat 会话能力，但页面上下文与审阅闭环始终留在 Dream，且请求必须携带已校验的 Deck release、运行快照与 runtime lock**
 - **驳回后默认在同一工作流快照下重新生成，并保留原运行与失败记录**
-- **已确认内容按所选 Deck 插件的后续步骤继续或结束，不再使用未定义的“Deck 生成”占位语义**
+- **已确认内容进入独立执行协作工作台；再按所选 Deck 插件的后续步骤继续或展示终点结果，不使用未定义的“Deck 生成”占位语义**
+- **执行页只从 story-workspace/workflow REST API 获取 run 与 projection；G5 未实现前显示空态，不从 `.dream`、`.dramaforge` 或资产目录补探测**
 
 ---
 
@@ -879,3 +965,6 @@ WorkflowPreflight 通过 → Agent 生成 → 待审阅 → 用户确认 → 已
 5. **关系与状态检查**：确认 Deck/story-workspace/Claude Agent 职责、选择/执行时序、版本溯源及未配置/失败状态在本文均可定位，且不存在独立配置 owner
 6. **Dream 入口与 gate 检查**：检索 `story-workspace-dream`、`/story-workspace/dream`、`StoryWorkspaceReviewGate`、`story-workspace-pending-review`、`DEC-017`、`DEC-018`，并确认待审阅/驳回时没有后续执行路径
 7. **合同归属定向检查**：检索 `backend/types`、通用 `types`、`backend/story_workspace/contracts.py`、`frontend/src/hooks/story-workspace/contracts.ts`、`backend/database.py` 与 `DEC-026`；确认前两者仅出现在禁止/风险语境，canonical 路径、`StoryWorkspace*` 前缀、无 Schema / DDL 迁移和产品边界表述一致
+8. **PDF 动线与视觉检查**：逐项对照 `调研Dreem_app平台.pdf` 第 3、6、7 页的索引定位、叙事点与上下文协作动作；再对照 `Ink & Memory UI Design v2.pdf` 第 4～5 页的 token、留白、轻纸面、单一虚线边界与无卡片规则
+9. **`.dream` owner 检查**：确认术语表指向 `design_006`，`workspace.json` 只含静态 launch 字段，所有运行期字段和 `projection_entry` 只出现在“禁止写入/REST owner”语境
+10. **缺口诚实性检查**：确认 G1～G3、G5、G6 仍标为待接线；PRD 没有把目标生命周期或执行投影写成已实现

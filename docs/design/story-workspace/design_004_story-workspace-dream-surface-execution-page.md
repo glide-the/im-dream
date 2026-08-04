@@ -3,16 +3,17 @@
 > **Design ID**: `design_004_story-workspace-dream-surface-execution-page`
 > **稳定基线**: [story-workspace-prd.md](./story-workspace-prd.md)、[story-workspace-layout-design.md](./story-workspace-layout-design.md)、[design_003_story-workspace-episodes-metadata-review.md](./design_003_story-workspace-episodes-metadata-review.md)
 > **上游机制**: [drama-forge-workspace-init-design.md](./drama-forge-workspace-init-design.md)（workspace-init profile 与 packer 扩展点）
-> **调研来源**: [调研Dreem_app平台.pdf](./调研Dreem_app平台.pdf) 第 3-4 页（创作者协作页面：数据层 + 侧边栏指导 Agent）
-> **状态**: design 完成，可供下游只读消费
-> **更新日期**: 2026-08-03
+> **调研来源**: [调研Dreem_app平台.pdf](./调研Dreem_app平台.pdf) 第 3-7 页（创作者协作页面：数据层、故事线/叙事点、上下文协作与确认动线）
+> **状态**: design 完成；`.dream` 合同已迁移至 design_006，执行页布局有 2026-08-04 增量修订
+> **更新日期**: 2026-08-04
 > **2026-08-03 兼容性修订（任务二）**: 见审计报告 [2026-08-03-dream-surface-audit-report.md](./2026-08-03-dream-surface-audit-report.md)（A1–E15；本文修订点：§0.1 决策 4、§0.2、§2.2、§3.2/§3.4/§3.5、§4、§5.3、§8/§9/§10）
+> **2026-08-04 专项修订**: `.dream` 触发、schema、物理映射、冻结、Agent 边界、前端发现与异常的唯一 canonical 已迁移至 [design_006_dream-protocol-dir-mapping.md](./design_006_dream-protocol-dir-mapping.md)；本文 §3 保留为历史细节与摘要，不再是第二 owner。执行页目标布局见 §5.1 与 DEC-030 新注记。
 
 ## 0. 增量适用规则
 
 本文是 story-workspace 稳定设计与 drama-forge 工作区初始化设计的**受控增量附录**，不是平行 PRD。
 
-- SUO-230 已确认的顶部 Dream 导航、canonical `/story-workspace/dream`、桌面三栏、`StoryWorkspaceReviewGate`、未确认不得继续、表格替代复杂画布、排除平台视频均保持不变。
+- SUO-230 已确认的顶部 Dream 导航、canonical `/story-workspace/dream`、审阅阶段桌面三栏、`StoryWorkspaceReviewGate`、未确认不得继续、表格替代复杂画布、排除平台视频均保持不变；后续执行阶段按本文 §5.1 与 DEC-030 的 2026-08-04 注记采用两层协作工作台。
 - design_003 已确认的 episodes 投影、五步闭环、审阅 Gate、运行/版本/审计最小合同、合同归属与 `backend/database.py` 只读均保持不变。
 - drama-forge-workspace-init-design 已确认的 workspace-init profile（=制品内 `.ink/workspace-init.json`，schema `workspace-init/v1`，由 `load_init_profile()` 解析；区别于 Agent profile=Deck 提示词/配置归属物，代码侧归 `services/deck/`）schema（`workspace-init/v1`）、受管 venv、packer（`pack_workspace_plugins()`，`backend/services/claude_plugin/workspace_packer.py`）扩展插槽与冻结语义均保持不变。
 - 本文只补充三件事：①插件制品如何声明 `.dream` 协议目录并经 launch manifest 透出；②Dream 审阅面板侧按钮如何跳转到 Dream 审阅/执行；③「后续执行」阶段独立执行页的布局、状态与审计。
@@ -73,7 +74,9 @@
 
 ---
 
-## 3. `.dream` 协议目录合同
+## 3. `.dream` 协议目录合同（历史摘要，canonical 见 design_006）
+
+> **Canonical 边界（2026-08-04）**：本节保留 2026-08-03 的设计推导与 DEC 上下文，便于追溯；`.dream` 协议目录的现行规范只认 [design_006](./design_006_dream-protocol-dir-mapping.md)。若本节与 design_006 冲突，以 design_006 为准。2026-08-04 裁决维持 `dream-surface/v1` 与 DEC-029：生成期元信息不写 `.dream/`，`workspace.json` 不加入 `workflow_run_id`、运行来源五字段或 `projection_entry`。
 
 ### 3.1 workspace-init profile 扩展：`surfaces[]`
 
@@ -301,24 +304,27 @@ Dream 审阅面板（`StoryWorkspaceReviewDetail`，`frontend/src/components/sto
 
 ### 5.1 布局归属
 
-**独立页面 = AppHeader（Dream 选中态）+ breadcrumb + 自有双区布局，不嵌入 Dream 三栏。** Dream 三栏右栏的语义是「审阅当前 artifact version」，与执行期「指导 Agent」是不同职责；执行页复用 360px 右栏节奏与视觉 token 即可，嵌入会造成一个右栏两种语义。
+**独立页面 = AppHeader（Dream 选中态）+ breadcrumb + 两层执行协作工作台，不嵌入 Dream 审阅三栏。** Dream 审阅三栏右侧的 owner 是「审阅当前 artifact version」，执行期上下文协作区的 owner 是「围绕当前叙事点或执行步骤指导 Agent、查看历史、处理失败」；二者不得混用。
+
+2026-08-04 目标布局对齐 `调研Dreem_app平台.pdf` 第 3、6、7 页：第一层使用 `Assets / Outline` 索引定位叙事点或执行步骤；第二层由选中项打开上下文协作区。当前已实现的「左数据 Tabs + 常驻 360px 指导侧边栏」是过渡形态，任务三应调整为下述目标，不再把固定 360px 右栏当执行页最终合同。
 
 ```text
-┌─ AppHeader：Dream（选中态） ── breadcrumb：Dream / Runs / <runId> / 执行 ─────┐
-├──────────────────────────────────────────────────┬──────────────────────────┤
-│ 数据层（自适应，只读）                             │ StoryWorkspaceGuidance   │
-│ ┌ 进度条：阶段 n/N · 当前步骤 · 状态徽章 ────────┐ │ Sidebar（360px）          │
-│ │ Tab：任务进度 │ 资产 │ 运行记录                │ │                          │
-│ │ · 任务进度：步骤表（步骤/状态/耗时/失败原因/   │ │ 预设动作：                │
-│ │   重试次数）                                   │ │ [重试失败步骤] [补充约束] │
-│ │ · 资产：角色/场景/分集产物（来源 Episode       │ │                          │
-│ │   Projection，只读引用 + 回 Dream 详情深链）   │ │ 指令输入框（多行）        │
-│ │ · 运行记录：事件时间线（确认/触发/指导/重试）  │ │                          │
-│ └───────────────────────────────────────────────┘ │ 指导历史（指令+状态+时间）│
-└──────────────────────────────────────────────────┴──────────────────────────┘
+┌─ AppHeader：Dream（选中态） ─ breadcrumb：Dream / Runs / <runId> / 执行 ──────┐
+├──────────────────────┬───────────────────────────────────────────────────────┤
+│ 第一层索引            │ 第一层主工作面                                         │
+│ Assets │ Outline     │ 运行摘要 · 阶段 n/N · 当前步骤 · 状态                   │
+│                      │                                                       │
+│ 故事线 / 资产分组     │ 叙事点 / 执行步骤轻纸面条目                            │
+│ 节点数 / 状态         │ 人物、场景、产物引用、失败原因、重试次数                 │
+│                      │                                                       │
+│ 运行记录入口          │ 选中条目 → 打开第二层上下文协作区                        │
+├──────────────────────┴───────────────────────────────┬───────────────────────┤
+│ 第二层：当前叙事点的结构化产物摘要 / 执行状态           │ 上下文协作区            │
+│ 不含视频、上传、播放器或可编辑画布                      │ 确认事实、指导、历史、重试 │
+└──────────────────────────────────────────────────────┴───────────────────────┘
 ```
 
-PDF 取舍：采用「Assets / 任务进度双层 + 侧边栏指导 Agent + breadcrumb」；舍弃视频预览、上传、播放器；资产不做可编辑图库（沿用 design_003 §7.1 的取舍原则）。
+PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上下文协作区」操作动线；结构化产物摘要替代镜头预览，运行记录替代视频历史；舍弃视频预览、上传、播放器、外部模型选择与可编辑图库（沿用 design_003 §7.1）。视觉服从 `Ink & Memory UI Design v2.pdf` 第 4～5 页：Warm Canvas / Paper Cream、少面板、多留白、浅纸面分区、页面级单一虚线边界、静止条目无卡片阴影。
 
 ### 5.2 数据层（只读，遵守 DEC-008）
 
@@ -412,7 +418,7 @@ PDF 取舍：采用「Assets / 任务进度双层 + 侧边栏指导 Agent + brea
 
 | 风险 / 依赖 | 影响 | 处理 |
 |-------------|------|------|
-| workspace-init profile 尚未实现（仅设计稿） | `.dream` 物理映射无承载 | 与 drama-forge 任务三同插槽交付；profile 未上线前 surfaces 全链路降级为「无 surface」 |
+| workspace-init profile / dream surface 声明发生漂移 | `.dream` 物理映射与入口发现不一致 | 当前 profile 解析、`surfaces[]` 校验与物理映射已实现；后续变更以 design_006 为 canonical，并保留无 surface 缺省隐藏 |
 | 旧会话无 `surfaces` 字段（含 thread 创建后、首个 agent turn pack 完成前） | 入口不一致 | 缺省即隐藏，不补探测；行为文档化（§3.5） |
 | 深链 `?run=` 与 Gate 状态漂移（审阅期间新 attempt） | 用户审阅过期版本 | 沿用 design_003 `story-workspace-stale-review`；深链只做初始定位 |
 | 执行页与 Chat 双入口写冲突 | 指导与普通消息混杂、审计断裂 | 指导复用 thread 仅作传输通道、以 `chat_message.metadata.kind` 标记落库、Chat 视图按 kind 过滤不渲染（§5.3）；审计只记 ReviewEvent action=guide（承载于同一 metadata） |
@@ -442,6 +448,13 @@ PDF 取舍：采用「Assets / 任务进度双层 + 侧边栏指导 Agent + brea
 - **DEC-031（2026-08-03 修订，审计报告 C9）**：跳转入口由「Dream 提案消息卡片按钮」改写为「**Dream 审阅面板侧按钮**」（挂 `StoryWorkspaceReviewDetail` 提案详情区与故事列表行操作列）。原因：代码中不存在 Chat 消息流内的提案卡片——`story-workspace-output` 是不进消息气泡的 SSE 生命周期帧（`frontend/src/components/chat/ChatPanel.tsx:421-424`），提案的可见形态是审阅面板/列表行；新建 Chat 卡片会引入第二条渲染链路与新 Chat 域消息合同，成本与风险均高于复用既有面板。「文案与目标随 Gate 阶段由服务端聚合返回、前端不做状态推断」维持不变。
 - **DEC-032（2026-08-03 修订，审计报告 D11/D12/D13）**：「复用 thread 传输但不渲染」的承载方式明确为：指导以 `metadata.kind="story-workspace-guidance"` 标记的 user 消息落 `chat_message` 表（metadata 列与 `save_chat_message(metadata=...)` 均已存在，`backend/database.py:603-611`、:4249-4296），Chat 视图在消息消费层按 kind 过滤不渲染；指导历史按 kind 反查。幂等键作 `chat_message.id`（`INSERT OR REPLACE` 去重），服务层先查比对，同键不同内容返回 409。审计字段（actor / run / request ID / timestamp）承载于同一 metadata。`awaiting-guidance` 为投影态而非 `RunStatus` 新枚举。「不新增 DDL」维持不变。
 
+### 2026-08-04 专项修订注记
+
+> 以下继续遵循“保留原决策文本，只追加修订说明”的惯例；依据为任务一实施记录、`design_006`、Dreem 调研 PDF 第 3～7 页与 Ink & Memory UI Design v2.1 第 4～5 页。
+
+- **DEC-029（2026-08-04 修订）**：决策内容不变，并明确否决“人物、场景、分镜生成期向 `.dream/` 追加元信息”与“把 `workflow_run_id`、运行来源五字段、`projection_entry` 写入 `workspace.json`”。drama-forge 上游没有 `.dream` 写行为；其用户项目运行区为 `stories/`、`assets/`、`exports/`、`.dramaforge/`，分镜另按 skill 声明写 storyboard 与校验报告。动态事实继续通过 Agent 输出解析、story-workspace 数据库、SSE 与 actor-scoped REST API 消费；`.dream` 完整合同迁移至 design_006。
+- **DEC-030（2026-08-04 修订）**：“独立执行页、不嵌入 Dream 审阅三栏”的原则不变；内部布局由「通用数据层 + 常驻 360px 指导栏」调整为“两层执行协作工作台”：第一层 `Assets / Outline` 索引与叙事点/执行步骤主工作面，第二层为选中项触发的上下文协作区。该修订对齐调研 PDF 的定位—协作动线，同时用 UI Design v2.1 的暖纸、轻纸面、无卡片规则替换截图视觉；视频、上传、播放器仍排除。
+
 ---
 
 ## 10. 相对基线的增量变更说明
@@ -450,7 +463,7 @@ PDF 取舍：采用「Assets / 任务进度双层 + 侧边栏指导 Agent + brea
 |------------|----------------|------------|
 | 顶部 Dream 导航与 canonical 路由 | 新增执行页路由与 `?run=` 深链定位语义 | Dream 入口、选中态、兼容重定向 |
 | 四步 Review Gate | 执行页承接第四步之后；审阅面板侧按钮文案映射 Gate 阶段 | 未确认不得继续、aggregate hash 服务端复核 |
-| 三栏 240 / 自适应 / 360 | 执行页自有双区（数据层 + 360px 指导侧边栏） | Dream 页三栏骨架与右栏审阅语义 |
+| 审阅三栏 240 / 自适应 / 360 | 执行页独立两层协作工作台（索引 + 主工作面；选中项上下文协作区） | Dream 审阅页三栏骨架与右栏审阅语义 |
 | workspace-init profile（v1） | 新增可选 `surfaces[]` 字段与校验规则 | v1 既有字段语义、受管 venv、冻结语义 |
 | launch-manifest（claude-launch/v1） | 新增 `surfaces` 透出字段，经既有 `plugin-load-receipt` 端点整文件透传到前端 | deck_id、plugins[]、receipt 既有字段 |
 | 审计最小合同 | ReviewEvent action 枚举扩展 `guide`（承载于 `chat_message.metadata`，见 DEC-032 修订注记）；ExecutionGateRecord 复用 | 不新增 Schema / DDL；`backend/database.py` 只读 |

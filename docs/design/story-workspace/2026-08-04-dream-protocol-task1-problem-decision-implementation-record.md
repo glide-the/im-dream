@@ -5,6 +5,8 @@
 > **输入基线**：`术语表.md`、`story-workspace-prd.md`、`story-workspace-layout-design.md`、`design_003`、`design_004`、`design_005`、两份 PDF、`vendor/drama-forge/` 及打包说明  
 > **输出约束**：本记录是任务二的输入；任务三在任务一、二审阅通过前不启动。
 
+> **行号口径**：本记录中的既有设计/PRD 行号固定对应任务一读取时的输入基线 commit `8fc6f23`；任务二随后会改动这些文件并导致当前工作树行号移动。vendor 与代码证据未被任务二修改，仍按当前路径行号读取。
+
 ## 1. 调研证据摘要
 
 ### 1.1 Dreem 创作者协作页面
