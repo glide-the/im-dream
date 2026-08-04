@@ -22,6 +22,8 @@
 # [Sync] 2026-07-20: add todo_state (claude-todo §5.2 TodoState, memory-only) to
 #                    AgentRunState intrinsic state; snapshot() exposes the live
 #                    object for the GET /threads/{id}/todos endpoint.
+# [Sync] 2026-08-04: preserve a lock created by get_lock() before first-state
+#                    creation so queued same-thread turns cannot bypass it.
 
 """Claude Agent Thread Session Pool.
 
@@ -322,7 +324,13 @@ class AgentRunStatePool:
         _validate_session_id(session_id)
         if session_id not in self._states:
             self._states[session_id] = AgentRunState(session_id=session_id)
-            self._locks[session_id] = asyncio.Lock()
+            # ClaudeAgentThreadFactory intentionally calls get_lock() before
+            # get_or_create(). Never replace that already-acquired lock: doing
+            # so lets a same-session continuation enter on a different lock.
+            # Locks also remain stable across destroy/TTL rebuilds so existing
+            # waiters are never split into separate serialization domains.
+            if session_id not in self._locks:
+                self._locks[session_id] = asyncio.Lock()
             self._order.append(session_id)
         state = self._states[session_id]
         if state.lifecycle == AgentRunLifecycle.DESTROYED:

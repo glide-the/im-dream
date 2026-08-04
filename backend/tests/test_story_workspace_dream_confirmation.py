@@ -25,7 +25,18 @@ for candidate in (str(BACKEND_ROOT), str(REPOSITORY_ROOT)):
     if candidate not in sys.path:
         sys.path.insert(0, candidate)
 
+import tests._sdk_stubs  # noqa: F401 - stub optional SDK before service import
+
 import database
+import story_workspace.contracts as contracts_module
+import claude_agent.service as claude_service_module
+from claude_agent.service import (
+    ClaudeAgentRunRequest,
+    ClaudeAgentService,
+    _TurnContext,
+)
+from claude_agent.thread_pool import AgentRunState
+from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from models.workflow_run import RunStatus, WorkflowRun
 from routers import story_workspace
 from services.deck import story_workflow_gateway as gateway_module
@@ -269,6 +280,12 @@ class StoryWorkspaceDreamConfirmationContractTests(unittest.TestCase):
                 "fields": {"summary": float("nan")},
             }])
 
+    def test_accepted_contract_is_publicly_exported(self) -> None:
+        self.assertIn(
+            "StoryWorkspaceDreamConfirmationAccepted",
+            contracts_module.__all__,
+        )
+
 
 class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -353,6 +370,46 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         forbidden = ("reject", "failure", "retry", "archive")
         serialized = json.dumps(row, ensure_ascii=False).lower()
         self.assertFalse(any(word in serialized for word in forbidden))
+
+    def test_agent_service_resave_preserves_hidden_command_and_metadata(self) -> None:
+        persisted = self.submit()
+        original = self.fixture.rows()[0]
+
+        async def _resave() -> None:
+            request = ClaudeAgentRunRequest(
+                user_id=ACTOR_ID,
+                thread_id=THREAD_ID,
+                resume=True,
+                message_id=persisted.accepted.message_id,
+                message_parts=original["parts"],
+                message_metadata=original["metadata"],
+            )
+            execution = claude_service_module._TurnExecution(
+                request=request,
+                state=AgentRunState(session_id=THREAD_ID),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+            )
+            await ClaudeAgentService()._persist_user_message(execution)
+
+        asyncio.run(_resave())
+        rewritten = self.fixture.rows()[0]
+        self.assertEqual(rewritten["id"], original["id"])
+        self.assertEqual(rewritten["parts"], original["parts"])
+        self.assertEqual(rewritten["metadata"], original["metadata"])
+        self.assertEqual(
+            rewritten["metadata"]["kind"],
+            DREAM_CONFIRMATION_METADATA_KIND,
+        )
+        structured = json.loads(rewritten["parts"][0]["text"])
+        self.assertEqual(
+            structured["command"],
+            command().model_dump(mode="json", by_alias=True),
+        )
 
     def test_url_body_and_authoritative_thread_mismatches_are_rejected(self) -> None:
         self.assert_error(409, storyWorkspaceRunId=OTHER_RUN_ID)

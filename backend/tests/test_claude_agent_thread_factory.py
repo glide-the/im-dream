@@ -138,9 +138,11 @@ class TestAgentRunStatePool(unittest.TestCase):
 
     def test_get_or_create_rebuilds_after_destroy(self):
         self.pool.get_or_create("u1").mark_running()
+        original_lock = self.pool.get_lock("u1")
         self.pool.destroy("u1")
         new_state = self.pool.get_or_create("u1")
         self.assertEqual(new_state.lifecycle, AgentRunLifecycle.IDLE)
+        self.assertIs(original_lock, self.pool.get_lock("u1"))
 
     def test_each_session_gets_own_lock(self):
         lock1 = self.pool.get_lock("u1")
@@ -151,6 +153,13 @@ class TestAgentRunStatePool(unittest.TestCase):
         lock1 = self.pool.get_lock("u1")
         lock2 = self.pool.get_lock("u1")
         self.assertIs(lock1, lock2)
+
+    def test_get_or_create_preserves_lock_obtained_before_first_state(self):
+        """Factory acquires the lock before it creates the first state."""
+
+        acquired_first = self.pool.get_lock("u1")
+        self.pool.get_or_create("u1")
+        self.assertIs(acquired_first, self.pool.get_lock("u1"))
 
     def test_destroy_all_destroys_all(self):
         self.pool.get_or_create("u1")
@@ -370,6 +379,94 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             _run(self._collect_gen(req))
         instances = getattr(self.factory, "_test_runner_instances", [])
         self.assertEqual(len(instances), 1, "Runner should be created only once within TTL")
+
+    def test_dream_continuation_queues_behind_first_in_flight_turn(self):
+        """The real factory lock must serialize the hidden continuation."""
+
+        from services.story_workspace.dream_confirmation_service import (
+            build_thread_turn_dispatcher,
+        )
+
+        first_request = _make_request(
+            "user_dream_queue",
+            message="first",
+            thread_id="thread_dream_queue",
+        )
+        second_parts = [{"type": "text", "text": "structured confirmation"}]
+        second_metadata = {"kind": "story-workspace-dream-confirmation"}
+        first_release: asyncio.Event
+        first_started: asyncio.Event
+        second_started: asyncio.Event
+        executed_messages: list[str]
+
+        async def _scenario():
+            nonlocal first_release, first_started, second_started, executed_messages
+            first_release = asyncio.Event()
+            first_started = asyncio.Event()
+            second_started = asyncio.Event()
+            executed_messages = []
+
+            async def _execute(execution):
+                text = "".join(
+                    part.get("text", "")
+                    for part in (execution.request.message_parts or [])
+                    if isinstance(part, dict) and part.get("type") == "text"
+                )
+                executed_messages.append(text)
+                if text == "first":
+                    first_started.set()
+                    await first_release.wait()
+                else:
+                    second_started.set()
+                await execution.turn_context.queue.put(
+                    'data: {"type":"finish","reason":"success"}\n\n'
+                )
+                await execution.turn_context.queue.put(None)
+
+            self.factory._service.execute_session = _execute
+            dispatcher = build_thread_turn_dispatcher(
+                self.factory,
+                request_factory=ClaudeAgentRunRequest,
+            )
+
+            with unittest.mock.patch(
+                "claude_agent.thread_factory.ClaudeAgentRunner",
+                self._FakeRunner,
+            ):
+                first_consumer = asyncio.create_task(
+                    self._collect_gen(first_request)
+                )
+                await asyncio.wait_for(first_started.wait(), timeout=1.0)
+
+                dispatched = dispatcher(
+                    "thread_dream_queue",
+                    "user_dream_queue",
+                    "dream-confirmation-message",
+                    second_parts,
+                    second_metadata,
+                )
+                self.assertTrue(dispatched)
+                await asyncio.sleep(0)
+                self.assertEqual(executed_messages, ["first"])
+
+                first_release.set()
+                await asyncio.wait_for(first_consumer, timeout=1.0)
+                await asyncio.wait_for(second_started.wait(), timeout=1.0)
+
+                for _ in range(100):
+                    snapshot = self.factory.session_snapshot("thread_dream_queue")
+                    if snapshot and snapshot["lifecycle"] == "idle":
+                        break
+                    await asyncio.sleep(0.01)
+                return dispatched, snapshot
+
+        dispatched, snapshot = _run(_scenario())
+        self.assertTrue(dispatched)
+        self.assertEqual(
+            executed_messages,
+            ["first", "structured confirmation"],
+        )
+        self.assertEqual(snapshot["lifecycle"], "idle")
 
     async def _collect_gen(self, req):
         async for _ in self.factory.run_streaming(req):

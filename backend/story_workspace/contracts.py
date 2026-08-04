@@ -892,6 +892,7 @@ __all__ = [
     "StoryWorkspaceCharacterFilter",
     "StoryWorkspaceCharacterPatch",
     "StoryWorkspaceContentStatus",
+    "StoryWorkspaceDreamConfirmationAccepted",
     "StoryWorkspaceDreamConfirmationCommand",
     "StoryWorkspaceDreamEdit",
     "StoryWorkspaceDreamFilesResponse",
