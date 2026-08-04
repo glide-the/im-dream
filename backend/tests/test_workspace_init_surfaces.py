@@ -729,6 +729,102 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         self.assertFalse((outside / "docs" / "templates" / "project-init.md").exists())
         self.assertFalse((outside / "hooks" / "hooks.json").exists())
 
+    def test_dream_drama_compatibility_rejects_parent_swapped_to_symlink(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-drama-symlink-swap"
+        outside = Path(self._tmp.name) / "outside-fresh-swap"
+        workspace.mkdir()
+        (workspace / ".claude").mkdir()
+        outside.mkdir()
+        real_fsync = os.fsync
+        swapped = False
+
+        def fsync_then_swap(fd):  # noqa: ANN001
+            nonlocal swapped
+            real_fsync(fd)
+            if not swapped:
+                swapped = True
+                (workspace / ".claude").rmdir()
+                (workspace / ".claude").symlink_to(
+                    outside,
+                    target_is_directory=True,
+                )
+
+        with mock.patch(
+            "services.claude_plugin.workspace_packer.os.fsync",
+            side_effect=fsync_then_swap,
+        ):
+            with self.assertRaises(WorkspacePackError):
+                pack_workspace_plugins(
+                    self.db,
+                    workspace=workspace,
+                    deck_id="deck-1",
+                    server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+                )
+
+        self.assertTrue(swapped)
+        self.assertEqual(
+            (workspace / "plugin.json").read_bytes(),
+            b'{"name":"drama-forge"}\n',
+        )
+        self.assertFalse((outside / "docs" / "templates" / "project-init.md").exists())
+        self.assertFalse((outside / "hooks" / "hooks.json").exists())
+
+    def test_dream_drama_partial_publish_is_safe_and_reentrant(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-drama-partial"
+        conflict = workspace / ".claude" / "docs" / "templates" / "project-init.md"
+        conflict.parent.mkdir(parents=True)
+        conflict.write_bytes(b"concurrent-conflict\n")
+
+        with self.assertRaises(WorkspacePackError):
+            pack_workspace_plugins(
+                self.db,
+                workspace=workspace,
+                deck_id="deck-1",
+                server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+            )
+
+        self.assertEqual(
+            (workspace / "plugin.json").read_bytes(),
+            b'{"name":"drama-forge"}\n',
+        )
+        self.assertEqual(conflict.read_bytes(), b"concurrent-conflict\n")
+        self.assertFalse((workspace / ".claude" / "hooks" / "hooks.json").exists())
+        self.assertEqual(list(workspace.rglob("*.dream-compat-*")), [])
+
+        conflict.unlink()
+        receipt = pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+        )
+        self.assertEqual(receipt["surfaces"][0]["name"], "dream")
+        self.assertEqual(conflict.read_bytes(), b"# Drama project init\n")
+        self.assertEqual(
+            (workspace / ".claude" / "hooks" / "hooks.json").read_bytes(),
+            b'{"hooks":{}}\n',
+        )
+
     def test_dream_drama_compatibility_rollback_preserves_concurrent_replacement(self) -> None:
         self._register_named_plugin(
             "cpi-drama",
@@ -745,13 +841,16 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         real_link = os.link
         calls = 0
 
-        def replace_then_fail(source, target):  # noqa: ANN001
+        def replace_then_fail(source, target, **kwargs):  # noqa: ANN001
             nonlocal calls
             calls += 1
             if calls == 1:
-                real_link(source, target)
-                Path(target).unlink()
-                Path(target).write_bytes(b"concurrent-owner\n")
+                real_link(source, target, **kwargs)
+                published_target = Path(target)
+                if not published_target.is_absolute():
+                    published_target = workspace / published_target
+                published_target.unlink()
+                published_target.write_bytes(b"concurrent-owner\n")
                 return
             raise OSError("simulated later publish failure")
 
@@ -772,6 +871,7 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
             (workspace / ".claude" / "docs" / "templates" / "project-init.md").exists()
         )
         self.assertFalse((workspace / ".claude" / "hooks" / "hooks.json").exists())
+        self.assertEqual(list(workspace.rglob("*.dream-compat-*")), [])
 
     def test_server_adapter_declarations_are_deduplicated(self) -> None:
         self._register_named_plugin(
@@ -986,6 +1086,67 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_INIT_PROFILE_INVALID")
         self.assertEqual(outside_project_init.read_bytes(), project_init_content)
         self.assertEqual(outside_hooks.read_bytes(), hooks_content)
+
+    def test_frozen_dream_workspace_rejects_parent_swapped_to_symlink(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-frozen-drama-symlink-swap"
+        outside = Path(self._tmp.name) / "outside-frozen-swap"
+        workspace.mkdir()
+        pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+        )
+        project_content = (
+            workspace / ".claude" / "docs" / "templates" / "project-init.md"
+        ).read_bytes()
+        hooks_content = (workspace / ".claude" / "hooks" / "hooks.json").read_bytes()
+        (outside / "docs" / "templates").mkdir(parents=True)
+        (outside / "hooks").mkdir()
+        outside_project = outside / "docs" / "templates" / "project-init.md"
+        outside_hook = outside / "hooks" / "hooks.json"
+        outside_project.write_bytes(project_content)
+        outside_hook.write_bytes(hooks_content)
+        original_claude = workspace / ".claude-original"
+        real_open = os.open
+        swapped = False
+
+        def open_parent_then_swap(path, flags, mode=0o777, *, dir_fd=None):  # noqa: ANN001
+            nonlocal swapped
+            if os.fspath(path) == ".claude" and dir_fd is not None and not swapped:
+                swapped = True
+                (workspace / ".claude").rename(original_claude)
+                (workspace / ".claude").symlink_to(
+                    outside,
+                    target_is_directory=True,
+                )
+            return real_open(path, flags, mode, dir_fd=dir_fd)
+
+        with mock.patch(
+            "services.claude_plugin.workspace_packer.os.open",
+            side_effect=open_parent_then_swap,
+        ):
+            with self.assertRaises(WorkspacePackError):
+                pack_workspace_plugins(
+                    self.db,
+                    workspace=workspace,
+                    deck_id="deck-1",
+                    server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+                )
+
+        self.assertTrue(swapped)
+        self.assertEqual(outside_project.read_bytes(), project_content)
+        self.assertEqual(outside_hook.read_bytes(), hooks_content)
 
 
 if __name__ == "__main__":
