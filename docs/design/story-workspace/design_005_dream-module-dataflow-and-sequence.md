@@ -1,9 +1,9 @@
-# design_005：Dream 业务模块数据流图与业务时序图（代码现状版）
+# design_005：Dream 业务模块数据流图与业务时序图（基线 + 任务三修订）
 
-> 本文基于**代码现状**（2026-08-04，commits `99075d0`/`bd450ff`/`57eab52`/`d0e8af9`/`f7b3ca0`/`8510ddc`/`dec5a92`）绘制 Dream 业务模块的数据流图与业务时序图。
+> 本文保留 2026-08-04 任务三前代码基线（commits `99075d0`/`bd450ff`/`57eab52`/`d0e8af9`/`f7b3ca0`/`8510ddc`/`dec5a92`）的数据流图、时序图与证据，并在 §2.3、§3.3、§5 追加任务三生产链修订。
 > 所有数据流事实均带 `文件:行号` 证据；术语以 `docs/architecture/术语表.md` 为准（「物理映射」= pack 时刻把 `.dream/` 协议目录写入会话工作区，代码标识 `materialize_dream_surface()`）。
 > §5 如实标注了代码现状中的「端点空洞」——阅读图表时请对照，勿把设计语义误认为已接线行为。
-> **2026-08-04 目标差异注记**：用户审阅后，目标合同新增由同一 Chat Agent 写入的 `.dream/runtime` run/stage 文件、`dream-files` REST/SSE 刷新与单次确认业务时序，见 `design_006`/`design_007`。本文仍只描述当前代码；在任务三实现并验证前，不把 G1～G3/G5/G6 或 Agent 运行内容层标成已接线。
+> **2026-08-04 任务三修订注记**：业务主体统一为 Dream Agent。Dream 专用发起页、服务端 Dream adapter、可信 run context、run → characters → scenes → storyboards writer 链和单次确认 continuation 已接通（`bb1b0eb`/`2da2b41`/`d09f43c`/`530f1ac`/`62e21d7`/`4c85b96`；测试与评审证据见专项实施记录）。技术上复用隐藏 Deck-bound Agent thread / `chat_message` 作为连续性载体，但 Dream 前端不挂载 `ChatView`，该载体不是 Chat 页面或 Chat 业务合同。G3/G5 已关闭；G1 仅余旧 `WorkflowRun.status` 仍停 `queued` 的技术遗留，不能再解释为缺少生产 Dream Agent；G6 与 writer 主动 SSE 仍为遗留。
 
 ---
 
@@ -11,19 +11,23 @@
 
 | 参与者 | 代码实体 |
 |--------|----------|
-| Dream 页（前端） | `frontend/src/router/story-workspace.tsx`（Dream 内容即 `ChatView`）+ `pages/story-workspace/` |
+| Dream 页（前端） | `frontend/src/router/story-workspace.tsx` + `pages/story-workspace/`；无 run 时渲染 `StoryWorkspaceDreamLaunch`，不挂载 `ChatView`（`StoryWorkspaceDreamPage.tsx:274`） |
 | Chat 视图 | `components/chat/ChatView.tsx` / `ChatPanel.tsx` |
 | claude-agent 后端 | `backend/routers/claude_agent.py` + `backend/claude_agent/service.py`（非独立服务，端口 8765） |
 | packer | `backend/services/claude_plugin/workspace_packer.py` / `workspace_init.py` / `artifact_store.py` |
 | story-workspace 后端 | `backend/routers/story_workspace.py`（`/api/story-workspace`）+ `services/story_workspace/` + `services/deck/story_workflow_gateway.py` |
 | workflow 执行域 | `backend/services/workflow/preflight_service.py` / `run_service.py` |
 | 存储 | SQLite 表（`backend/database.py`）+ 会话工作区文件树（`.ink/`、`.dream/`） |
+| Dream Agent | Dream 四阶段唯一业务执行主体；服务端注入可信 run context 与 Dream adapter；隐藏 Agent thread 仅是技术连续性载体 |
 
 ---
 
 ## 2. 数据流图
 
 ### 2.1 会话与 pack 域（thread → pack → surfaces 透出）
+
+> 本节图保留任务三前由 ChatView 首 turn 触发 pack 的兼容基线；当前 Dream 专用
+> 发起不挂载 ChatView，改由 §2.3 的 Dream Agent 首 turn 触发同一 packer。
 
 ```mermaid
 flowchart TD
@@ -67,6 +71,9 @@ flowchart TD
 - pack receipt **不回传前端**；surfaces 对前端唯一透出通道 = `GET plugin-load-receipt`（pre-pack 时 `workspace_found:false` → 前端按无 surface 隐藏入口）。
 
 ### 2.2 run / 审阅 / 执行域
+
+> 本节保留任务三前的旧 story review / workflow run 基线；该链仍在代码中，但不再是
+> Dream 主业务链。当前 Dream 生产链见 §2.3。
 
 ```mermaid
 flowchart TD
@@ -118,17 +125,51 @@ flowchart TD
 - 执行页数据 = `GET workflow-runs/{id}`（actor+workspace 双 scope）+ 指导历史（`GET threads/{id}/messages` 按 `metadata.kind` 过滤）；projection 恒 null → 进度/资产 tab 为显式空态。
 - Gate 重定向：`EXECUTION_PAGE_STATUSES = {confirmed, continuing, completed, failed, cancelled}`（`executionState.ts:23-29`），不在集合内 → 重定向审阅深链（`/story-workspace/dream?run=` 或 `/episodes/:id/review?run=`）。
 
+### 2.3 任务三生产链：专用发起 → Dream Agent → `.dream/runtime` → 页面
+
+```mermaid
+flowchart LR
+    FE[Dream 专用发起页<br/>Deck + goal + idempotencyKey] --> API[POST /dream-runs/start]
+    API --> GW[Dream launch gateway<br/>可信 actor/workspace]
+    GW --> SRC[隐藏 Deck-bound Agent thread<br/>+ source chat_message]
+    GW --> RUN[preflight + WorkflowRun queued]
+    GW --> ADP[服务端 Dream adapter]
+    SRC --> DA[同一 Dream Agent]
+    RUN --> CTX[可信 run context]
+    ADP --> DA
+    CTX --> DA
+    DA --> CANON[canonical 人物/场景/分镜文件]
+    DA --> MCP[Story Workspace MCP]
+    MCP --> DFILES[writer 原子写<br/>run→characters→scenes→storyboards]
+    DFILES --> REST[GET dream-files]
+    REST --> PAGE[Dream Assets / Outline]
+    PAGE --> CONF[一次确认]
+    CONF --> SRC
+    SRC --> DA
+```
+
+当前证据：前端发起与 canonical `?run=` 导航在
+`useStoryWorkspaceDreamLaunch.ts:37-72`、`StoryWorkspaceDreamPage.tsx:274`；服务端
+source/preflight/run/context 编排在 `dream_launch_service.py:139-275`；Dream adapter
+只经服务端 pack seam 注入（`workspace_packer.py:175-180,247-252`，
+`service.py:226-237`）；可信 writer 顺序在 `context_builder.py:435-459`，MCP run/thread
+核对在 `story_workspace_tool.py:170-255`。strict wire、atomic claim 与冻结 binding 重放
+在 `contracts.py:190-216`、`dream_launch_gateway.py:723-860,898-1030`。浏览器不提供
+thread/run/来源字段。
+
 ---
 
 ## 3. 业务时序图
 
 ### 3.1 主链路：选 Deck 发 Chat → pack → Agent 产出 → 审阅确认
 
+> 本节是任务三前历史主链，不再是当前 Dream 业务时序；当前时序见 §3.3。
+
 ```mermaid
 sequenceDiagram
     autonumber
     participant U as 用户
-    participant FE as Dream页/ChatView
+    participant FE as 旧基线 Dream页/ChatView
     participant CA as claude-agent 后端
     participant PK as packer
     participant FS as 会话工作区(.ink/.dream)
@@ -178,6 +219,9 @@ sequenceDiagram
 ```
 
 ### 3.2 执行链路：preflight → run → 执行页 → guidance 闭环
+
+> 本节是任务三前旧 execution/guidance 基线，继续作为兼容代码存在；Dream 当前的
+> 一次确认与后续执行时序见 §3.3。
 
 ```mermaid
 sequenceDiagram
@@ -232,6 +276,50 @@ sequenceDiagram
     end
 ```
 
+### 3.3 任务三四阶段业务时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 创作者
+    participant FE as Dream 前端
+    participant API as story-workspace API
+    participant DA as 同一 Dream Agent
+    participant MCP as Story Workspace MCP/writer
+    participant FS as 会话工作区
+
+    U->>FE: 选择 Deck、输入目标、发起 Dream
+    FE->>API: POST dream-runs/start
+    API->>API: 隐藏 source + preflight/run + 服务端 adapter
+    API->>DA: 首个 turn + 可信 run context
+
+    Note over DA,FS: ① Dream Agent 产出
+    DA->>MCP: write_dream_run
+    MCP->>FS: run.json
+    DA->>FS: 人物 canonical 文件
+    DA->>MCP: write_dream_stage(characters)
+    DA->>FS: 场景 canonical 文件
+    DA->>MCP: write_dream_stage(scenes)
+    DA->>FS: canonical storyboard.yaml
+    DA->>MCP: write_dream_stage(storyboards)
+
+    Note over FE,FS: ② 页面渲染
+    FE->>API: GET dream-files（进入/轮询）
+    API->>FS: actor/run/schema/path 校验并读取
+    API-->>FE: stages + revisions + items
+
+    Note over U,DA: ③ 用户修改并一次确认
+    U->>FE: 修改；点击“确认并继续”
+    FE->>API: dream-confirmation
+    API->>DA: 经隐藏技术 thread 恢复同一 Dream Agent + 可信 context
+
+    Note over DA,FE: ④ 后续执行
+    DA->>FS: 写入修改并提高 stage revisions
+    DA->>DA: 继续锁定插件后续步骤
+    FE->>API: 轮询 GET dream-files
+    API-->>FE: 最新 revisions
+```
+
 ---
 
 ## 4. 数据存储 × 读写方矩阵（Dream 链路核心子集）
@@ -244,6 +332,8 @@ sequenceDiagram
 | artifact store（`<runtime_root>/artifacts/`） | `import_tree`（安装/迁移脚本） | pack/frozen 修复 `get_artifact` |
 | 会话工作区 `.ink/plugins/`、`.ink/launch-manifest.json`、`.ink/plugin-pack-receipt.json` | pack（非冻结写、冻结只校验） | GET plugin-load-receipt；CLI launcher |
 | `.dream/`（README + workspace.json） | `materialize_dream_surface`（pack 时刻一次性、原子） | pack 冻结校验；Agent 只读约定；**无 REST 读方** |
+| `.dream/runtime/runs/<run_id>/**` | 仅 Story Workspace MCP → `StoryWorkspaceDreamFileWriter` | actor-scoped `dream-files` REST；Dream 页面轮询 |
+| 隐藏 launch / confirmation `chat_message.metadata` | Dream launch gateway / confirmation service | 首 turn 持久调度、同一 Dream Agent continuation、刷新后确认事实 |
 | `story_workspace_stories` / `characters` / `scenes`（+ 关系表） | `store_agent_story_output`（upsert/reconcile）、PATCH、confirm/reject 级联 | 审阅面板 GET、confirm 守卫 |
 | `deck_runtime_snapshots` | preflight 第 6 步（hash 去重） | preflight/run 比对 |
 | `workflow_preflights` | PreflightService（checking→passed/failed）、消费于 run 创建 | run 创建载入上下文 |
@@ -254,19 +344,20 @@ sequenceDiagram
 
 ---
 
-## 5. 代码现状的「端点空洞」（阅读图表必读）
+## 5. 基线「端点空洞」与任务三状态（阅读图表必读）
 
-| # | 空洞 | 现状与证据 | 影响 |
-|---|------|-----------|------|
-| G1 | **run 状态机 queued 之后无生产推进方** | `transition_run` 的生产调用方仅 cancel 与 `SessionManager`，而后者在全仓仅被测试 import（`session_manager.py` 无生产引用） | run 创建后实际停在 `queued`；`output_validating→pending_review→confirmed→continuing` 迁移暂无生产触发路径；guidance 要求 `{continuing,failed}` 状态，闭环当前主要由测试覆盖 |
-| G2 | **审阅 confirm 不驱动 run 状态** | confirm 仅级联内容表 + `logger.info` 审计；`transition_run` 的 CONFIRMED 分支（需 `review_items_approved`，run_service.py:768-770）无生产调用方 | 内容审阅状态机与 run 状态机是手工/未来接线关系 |
-| G3 | **preflight→run 创建无 UI 链路** | `useWorkflowPreflight`/`useWorkflowRun`（含 startPreflight/startRun）无任何组件消费 | Dream 页与 run 的接触面只有 `?run=` 深链读取、执行页读取、guidance 提交 |
-| G4 | **run events SSE 端点不存在** | 前端 `workflowRunEventsUrl` 指向 `GET …/workflow-runs/{id}/events`，后端无此路由；前端降级 5s 轮询 | 执行页实时性靠轮询 |
-| G5 | **projection 端点不存在** | 执行页 projection 恒 null | 任务进度/资产 tab 为显式空态；`awaiting-guidance` 投影态不可达 |
-| G6 | **六态按钮聚合端点缺位** | `StoryWorkspaceSurfaceLinkButton` 挂载点已留注入缝，聚合 state 无服务端来源 | 按钮线上默认隐藏（既定降级，Task 4 实施记录） |
-| G7 | **dispatched:false 无自动拾取** | in-flight 时指导只落库，依赖下一 turn 上下文带出；用户不再发消息则指导永不送达 runner | 侧边栏已呈现「已记录，待拾取」态 |
+| # | 基线空洞 | 任务三状态 | 当前影响 |
+|---|---|---|---|
+| G1 | run 状态机 `queued` 后无生产 transition 调用方 | **技术遗留**：旧 `WorkflowRun.status` 聚合仍停 `queued`；但隐藏 source message 已调度首个生产 Dream Agent | 旧 status 不能代表 Dream 文件生产进度；不得再写“无生产 Agent” |
+| G2 | 旧 story review confirm 不驱动 run | **Dream 主链已替换**：Dream 单次确认恢复同一 Dream Agent；旧 confirm 仍不驱动 run，但已退出主链 | 不把旧 `review_status` 当 Dream gate |
+| G3 | preflight/run 无 Dream UI 链路 | **已关闭**：专用发起页 → `dream-runs/start` → preflight/run → 首 turn 已接通 | 无 run 页面可发起并进入 `?run=` |
+| G4 | run events / writer 主动 SSE 不存在 | **遗留** | `dream-files` REST 轮询保证正确性；兼容帧只加速 |
+| G5 | projection 端点不存在 | **已关闭**：actor-scoped `dream-files` REST 已实现 | Dream 页面可读取 run/stage projection |
+| G6 | 六态按钮聚合端点缺位 | **遗留** | 入口按钮继续默认隐藏 |
+| G7 | 旧 guidance `dispatched:false` 无自动拾取 | **旧能力遗留，不属 Dream 主链** | Dream 采用独立单次确认协调器，不接 guidance 侧栏 |
 
-> G1–G3 指向同一个结论：**「Agent 产出 → 审阅确认 → 后续执行」链路中，审阅（内容域）与执行（run 域）目前由 `source_voice_thread_id` 和 `?run=` 深链关联，状态机尚未合流**。这是后续接线的核心工作面。
+> 当前生产结论：G3/G5 已关闭；G1 只表示旧状态聚合没有跟上 Dream Agent
+> 生产事实。G4/G6 仍按降级合同保留。
 
 ---
 
@@ -275,3 +366,4 @@ sequenceDiagram
 | 日期 | 内容 |
 |------|------|
 | 2026-08-04 | 初版：基于代码现状（六 Task 实现完成后）的数据流图 ×2、业务时序图 ×2、存储矩阵、端点空洞清单 G1–G7 |
+| 2026-08-04 | 任务三修订：保留原基线图与证据，追加 Dream 专用发起、Dream Agent、服务端 adapter、可信 run context、writer 链和单次确认 continuation；更新 G1–G7 状态 |

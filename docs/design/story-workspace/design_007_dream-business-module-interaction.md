@@ -1,28 +1,29 @@
 # design_007：Dream 业务功能模块与四阶段交互设计
 
 > **Design ID**：`design_007_dream-business-module-interaction`
-> **状态**：主体已实现；初始发起接线与丰富 Outline 结构字段仍按任务三记录为遗留
+> **状态**：Dream 发起与四阶段生产主链已实现；丰富 Outline 结构字段、入口聚合与 writer 主动 SSE 仍为遗留
 > **更新日期**：2026-08-04
 > **唯一调研来源**：[调研Dreem_app平台.pdf](./调研Dreem_app平台.pdf) 第 3～8 页
 > **视觉约束**：[Ink & Memory UI Design v2.pdf](../../prd/Ink%20%26%20Memory%20UI%20Design%20v2.pdf) 第 4～5 页
 > **文件协议 owner**：[design_006](./design_006_dream-protocol-dir-mapping.md)
 > **代码现状与缺口**：[design_005](./design_005_dream-module-dataflow-and-sequence.md)
+> **任务三实施证据**：[Dream 发起与 writer 生产链接通实施记录](./2026-08-04-dream-launch-writer-integration-implementation-record.md)
 
 ## 0. 业务模型
 
 Dream 只有一条主生命周期：
 
 ```text
-Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Chat Agent 后续执行
+Dream Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Dream Agent 后续执行
 ```
 
 “用户审阅确认”不是逐项审批：
 
-- 用户在 Dream 页面查看 Agent 写入工作空间的人物、场景和分镜内容；
+- 用户在 Dream 页面查看 Dream Agent 写入工作空间的人物、场景和分镜内容；
 - 用户只修改需要调整的内容；
 - 页面只提供一次主操作“确认并继续”；
-- 确认后把修改和确认命令交回发起该 Dream 的同一 Chat thread；
-- 同一 Chat Agent 写入修改，然后按插件流程继续后续执行。
+- 确认后把修改和确认命令交回同一 Dream Agent；
+- 同一 Dream Agent 写入修改，然后按插件流程继续后续执行。
 
 本文不设计驳回、失败、重试或归档分支，也不设计后续执行后的第二次确认。
 
@@ -32,10 +33,10 @@ Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Chat Agent �
 
 | 页码 | 调研事实 | Ink-Dream 采用 | 排除 |
 |---|---|---|---|
-| 第 3 页 | Script Review 页面允许用户检查/修改；底部 `Confirm & Generate World` 只确认一次，随后后台 Agent 启动自动化创作 | “修改 → 确认并继续 → 同一 Agent 后续执行”主链 | 逐项审批和多次 Gate |
-| 第 3 页 | 创作者协作页面由数据/任务进度层与 Agent 指导组成 | Dream 显示 workspace 文件进度和 Agent 后续执行状态 | 复制截图视觉 |
+| 第 3 页 | Script Review 页面允许用户检查/修改；底部 `Confirm & Generate World` 只确认一次，随后后台 Agent 启动自动化创作 | “修改 → 确认并继续 → 同一 Dream Agent 后续执行”主链 | 逐项审批和多次 Gate |
+| 第 3 页 | 创作者协作页面由数据/任务进度层与 Agent 指导组成 | Dream 显示 workspace 文件进度和 Dream Agent 后续执行状态 | 复制截图视觉 |
 | 第 4 页 | Assets / Outline；人物、地点和完整剧本入口 | 人物、场景、分镜/Outline 模块索引 | World Builder、三视图编辑 |
-| 第 5 页 | 用户确认后 Agent 按剧本继续扩展 | 确认后 Chat Agent 继续插件步骤 | 上传、自建资产 |
+| 第 5 页 | 用户确认后 Agent 按剧本继续扩展 | 确认后 Dream Agent 继续插件步骤 | 上传、自建资产 |
 | 第 6 页 | 左侧故事线定位叙事点；点击镜头文稿进入协作窗口 | Outline → 故事线 → 叙事点 → 镜头摘要的定位动线 | 黑色无限画布、外部模型 |
 | 第 7 页 | 协作窗口展示人物、主要信息、镜头说明与历史 | 后续执行页显示结构化上下文和工作空间更新 | 视频预览、上传、播放器 |
 | 第 8 页 | 特殊镜头包含决策控件 | 只读显示插件写入的结构化决策元信息 | 可编辑控件画布、计费积分 |
@@ -44,7 +45,7 @@ Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Chat Agent �
 
 PDF 的“两层”不是固定两列布局：
 
-1. **数据与任务层**：Assets / Outline、人物/场景/故事线、Agent 工作空间写入进度；
+1. **数据与任务层**：Assets / Outline、人物/场景/故事线、Dream Agent 工作空间写入进度；
 2. **聚焦上下文层**：从叙事点或镜头摘要进入，查看当前项人物、场景、说明和历史。
 
 审阅阶段可以保留三栏骨架；后续执行不能强制为常驻三栏，也不能把“两层”误画成静态双栏。
@@ -54,49 +55,53 @@ PDF 的“两层”不是固定两列布局：
 | 参与者 | 业务职责 |
 |---|---|
 | 创作者 | 查看、修改 Dream 内容；一次确认并继续 |
-| Dream 前端 | 读取 Agent 写入的 Dream 文件、保存本地编辑草稿、提交确认命令 |
-| story-workspace API | 安全读取工作空间文件；把确认命令作为隐藏消息注入原 thread |
-| 同一 Chat Agent | 按插件步骤写人物/场景/分镜文件和 `.dream` 描述；确认后写入用户修改并继续 |
-| Deck 插件 | 定义 Agent 的文件路径、阶段顺序和后续执行步骤 |
+| Dream 前端 | 选择可用 Deck、输入创作目标并发起；读取 Dream 文件、保存本地编辑草稿、提交确认命令 |
+| story-workspace API / gateway | 只接受 Deck、目标与幂等键；服务端创建 Dream Agent、preflight/run、可信上下文并调度首个 turn；安全读取文件并把确认交回同一 Dream Agent |
+| 同一 Dream Agent | 按 adapter 指令写人物/场景/分镜 canonical 文件；通过 Story Workspace MCP 更新 `.dream` 描述；确认后写入用户修改并继续 |
+| Deck 插件 + 服务端 Dream adapter | Deck 插件定义 canonical 文件和创作能力；服务端专用 adapter 定义 run → characters → scenes → storyboards 的 Dream writer 链 |
 
 ## 3. 业务功能模块
 
 ```mermaid
 flowchart LR
-    A["Dream 发起与运行上下文"] --> B["Agent 工作空间产出"]
+    A["Dream 发起与运行上下文"] --> B["Dream Agent 工作空间产出"]
     B --> C["Assets：人物 / 场景"]
     B --> D["Outline：故事线 / 叙事点 / 分镜"]
     C --> E["Dream 内容编辑"]
     D --> E
     E --> F["一次确认并继续"]
-    F --> G["同一 Chat Agent 后续执行"]
+    F --> G["同一 Dream Agent 后续执行"]
     G --> H["工作空间持续更新 / 页面刷新"]
 ```
 
 | 模块 | 输入 | 用户动作 | 输出 |
 |---|---|---|---|
-| Dream 发起 | Deck 插件、thread、run context | 输入创作目标并发起 | Chat Agent 开始写 workspace |
-| Agent 工作空间产出 | canonical 文件 + `.dream/runtime` stage 文件 | 查看已出现模块 | 人物/场景/分镜页面逐步出现 |
+| Dream 发起 | 可用 Deck、创作目标、幂等键 | 选择 Deck 并发起 | 服务端创建 Dream Agent 与可信 run context，并调度首个 turn |
+| Dream Agent 工作空间产出 | canonical 文件 + `.dream/runtime` stage 文件 | 查看已出现模块 | 人物/场景/分镜页面逐步出现 |
 | Assets | characters/scenes stage 描述与 source files | 查看和修改人物、场景 | 前端本地编辑草稿 |
 | Outline | storyboards stage 描述与 source files | 选择故事线、叙事点和镜头摘要并修改 | 前端本地编辑草稿 |
-| 一次确认 | 所有 required stages + base revisions + 用户修改 | 点击“确认并继续” | 隐藏 Chat 确认消息 |
-| 后续执行 | 原 thread、锁定插件上下文、确认修改 | 查看 Agent 持续写入结果 | stage revision 更新与页面刷新 |
+| 一次确认 | 所有 required stages + base revisions + 用户修改 | 点击“确认并继续” | 隐藏确认事实；恢复同一 Dream Agent |
+| 后续执行 | 同一 Dream Agent、锁定插件上下文、确认修改 | 查看 Dream Agent 持续写入结果 | stage revision 更新与页面刷新 |
 
 ## 4. 四阶段生命周期
 
-### 4.1 Agent 产出
+### 4.1 Dream Agent 产出
 
-**进入**：Dream 已发起，Chat Agent 获得 thread、`workflow_run_id` 与锁定插件上下文。
+**进入**：用户在专用发起页选择 Deck、输入目标并提交。服务端校验 actor/workspace/Deck，仅以服务端事实创建 Dream Agent、preflight/run 和可信 run context，然后调度首个 Agent turn。浏览器不能提交 thread ID、run ID、来源五字段或 adapter spec。
 
-**Agent 文件动作**：
+**技术载体**：服务端复用一个隐藏的 Deck-bound Agent thread 与隐藏
+`chat_message` 保存发起/确认，并承载首个 turn 到 continuation 的连续性。Dream 前端
+不挂载 `ChatView`，该 thread 不是 Chat 页面或 Chat 业务合同。
 
-1. 写 `.dream/runtime/runs/<run_id>/run.json`；
-2. 写人物 canonical 文件，完成后原子写 `stages/characters.json`；
-3. 写场景 canonical 文件，完成后原子写 `stages/scenes.json`；
-4. 写 canonical `stories/<project>/episodes/EP??/storyboard.yaml`，完成后原子写 `stages/storyboards.json`；
+**Dream Agent 文件动作**：
+
+1. 服务端 Dream adapter 指示 Dream Agent 调用 `write_dream_run`，由 writer 写 `.dream/runtime/runs/<run_id>/run.json`；
+2. 写人物 canonical 文件，完成后调用 `write_dream_stage(characters)` 原子写 `stages/characters.json`；
+3. 写场景 canonical 文件，完成后调用 `write_dream_stage(scenes)` 原子写 `stages/scenes.json`；
+4. 写 canonical `stories/<project>/episodes/EP??/storyboard.yaml`，完成后调用 `write_dream_stage(storyboards)` 原子写 `stages/storyboards.json`；
 5. writer 不直接发布 run-scoped SSE；页面以至少 5 秒 REST 轮询发现 revisions。若既有链路恰好发出携带匹配 `runId` 的 `story-workspace-output`，页面可提前重新读取。
 
-stage 文件不存在表示该模块还在等待 Agent；stage 文件存在且有效表示页面可渲染。不设计额外的 generating/validating/failed 状态。
+stage 文件不存在表示该模块还在等待 Dream Agent；stage 文件存在且有效表示页面可渲染。不设计额外的 generating/validating/failed 状态。
 
 ### 4.2 页面渲染
 
@@ -105,7 +110,7 @@ stage 文件不存在表示该模块还在等待 Agent；stage 文件存在且�
 **页面动作**：
 
 1. GET 当前 run 的 `dream-files`；
-2. 显示 run 已声明但尚无 stage 文件的模块为“等待 Agent 写入”；
+2. 显示 run 已声明但尚无 stage 文件的模块为“等待 Dream Agent 写入”；
 3. 对已存在 stage 加载人物、场景或 Outline/分镜内容；
 4. 记录各 stage revision，作为用户确认时的 base revisions；
 5. 允许用户修改可编辑字段，修改暂存在页面本地草稿。
@@ -123,18 +128,18 @@ stage 文件不存在表示该模块还在等待 Agent；stage 文件存在且�
 - 本地字段通过基础格式校验；
 - 确认命令具有幂等键。
 
-**确认结果**：story-workspace 把修改和确认作为唯一隐藏 Chat 消息持久化到原 thread；后台确认协调器透明交付给同一 Agent，页面刷新后也不会要求用户再次提交。没有逐项确认、批量确认、驳回或再次审批。
+**确认结果**：story-workspace 把修改和确认作为唯一隐藏 `chat_message` 持久化到技术 thread；后台确认协调器透明恢复同一 Dream Agent，并重新装载同一可信 run context。页面刷新后也不会要求用户再次提交。没有逐项确认、批量确认、驳回或再次审批。
 
-### 4.4 同一 Chat Agent 后续执行
+### 4.4 同一 Dream Agent 后续执行
 
-Chat Agent 收到确认命令后：
+Dream Agent 收到确认命令后：
 
 1. 将用户修改写入对应 canonical workspace 文件；
 2. 原子提高受影响的 `.dream` stage revisions；
 3. 按同一 Deck 插件、runtime snapshot 和 plugin lock 继续后续步骤；
 4. 后续写入仍通过 workspace 文件 + stage revision 通知页面刷新。
 
-后续执行不再进入驳回、失败或第二次确认设计；页面只展示 Agent 持续写入的工作空间结果。
+后续执行不再进入驳回、失败或第二次确认设计；页面只展示 Dream Agent 持续写入的工作空间结果。
 
 ## 5. 端到端业务交互时序图
 
@@ -146,20 +151,32 @@ sequenceDiagram
     actor Creator as 创作者
     participant Dream as Dream 前端
     participant API as story-workspace API
+    participant GW as Dream launch gateway
     participant RC as 后台确认协调器
-    participant Agent as 同一 Chat Agent
+    participant Agent as 同一 Dream Agent
     participant FS as 会话工作区
 
-    Creator->>Dream: 输入创作目标并发起 Dream
-    Dream->>API: 创建/定位 thread 与 workflow run
-    API->>Agent: 启动携带锁定插件上下文的 turn
+    Creator->>Dream: 选择 Deck、输入创作目标并发起 Dream
+    Dream->>API: POST dream-runs/start(deckId, goal, idempotencyKey)
+    API->>GW: 使用可信 actor/workspace 发起
+    GW->>GW: 校验 Deck；创建 Dream Agent（隐藏技术 thread/source message）
+    GW->>GW: 服务端配置 Dream adapter；创建 preflight + queued run
+    GW->>Agent: 调度首个 turn（可信 run context + 服务端 adapter）
+    API-->>Dream: workflowRunId + threadId + 服务端来源字段
 
     rect rgb(246,239,229)
-        Note over Agent,FS: 阶段一：Agent 产出
-        Agent->>FS: 写 run.json
-        Agent->>FS: 写人物文件 + characters.json
-        Agent->>FS: 写场景文件 + scenes.json
-        Agent->>FS: 写 storyboard.yaml + storyboards.json
+        Note over Agent,FS: 阶段一：Dream Agent 产出
+        Agent->>API: MCP write_dream_run（只接受可信 run ID）
+        API->>FS: writer 原子写 run.json
+        Agent->>FS: 写人物 canonical 文件
+        Agent->>API: MCP write_dream_stage(characters)
+        API->>FS: writer 原子写 characters.json
+        Agent->>FS: 写场景 canonical 文件
+        Agent->>API: MCP write_dream_stage(scenes)
+        API->>FS: writer 原子写 scenes.json
+        Agent->>FS: 写 storyboard.yaml
+        Agent->>API: MCP write_dream_stage(storyboards)
+        API->>FS: writer 原子写 storyboards.json
         Note over Agent,FS: writer 当前不直接发布 run-scoped SSE
     end
 
@@ -177,9 +194,9 @@ sequenceDiagram
         Creator->>Dream: 修改人物 / 场景 / 分镜内容
         Creator->>Dream: 点击“确认并继续”
         Dream->>API: confirmation(edits, base revisions, idempotency key)
-        API->>API: 隐藏 Chat 消息持久化为 pending
+        API->>API: 隐藏 chat_message 持久化为 pending
         API->>RC: 调度同一 message ID
-        RC->>Agent: 隐藏确认交付原 thread
+        RC->>Agent: 隐藏确认交付同一 thread + 同一可信 run context
     end
 
     rect rgb(255,250,242)
@@ -198,12 +215,12 @@ sequenceDiagram
     end
 ```
 
-### 5.2 Agent 文件写入与页面出现时序
+### 5.2 Dream Agent 文件写入与页面出现时序
 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant Agent as Chat Agent
+    participant Agent as Dream Agent
     participant Canonical as canonical workspace files
     participant DreamFiles as .dream/runtime/stages
     participant API as dream-files API
@@ -260,15 +277,22 @@ sequenceDiagram
 | 状态 | 页面内容 | 主操作 |
 |---|---|---|
 | 无 run | Deck 工作流与创作目标 | 发起 Dream |
-| 有 run、stage 未齐 | Agent 工作空间写入进度；已存在模块可先查看 | 等待 Agent |
+| 有 run、stage 未齐 | Dream Agent 工作空间写入进度；已存在模块可先查看 | 等待 Dream Agent |
 | required stages 已齐 | 完整 Dream 草稿、可编辑内容、base revisions | 确认并继续 |
 | 已确认 | 后续执行进度与最新工作空间内容 | 查看执行内容 |
+
+发起页只提交 `deckId + goal + idempotencyKey`。成功后 canonical 导航到
+`/story-workspace/dream?run=<workflowRunId>`；重复点击在前端共享同一 in-flight
+Promise，服务端按幂等键复用隐藏 source、preflight/run 与首次调度事实。普通 Chat
+入口不注入 Dream adapter。服务端只接受 camelCase 三字段，不静默裁剪目标；同键
+改 Deck/goal 返回冲突，binding 漂移时仍恢复原 run 冻结事实，并用持久 claim 防止
+并发重放产生两个首 turn。
 
 ### 6.2 人物与场景
 
 - 人物：名称、摘要、关系和插件提供的结构化字段；用户可修改允许字段。
 - 场景：名称、描述、关联人物和故事引用；不提供场景布局画布。
-- 页面修改只保存在本地草稿，统一确认时交给 Chat Agent 写入。
+- 页面修改只保存在本地草稿，统一确认时交给 Dream Agent 写入。
 
 ### 6.3 Outline / 分镜
 
@@ -286,13 +310,13 @@ sequenceDiagram
 - 用户修改数量；
 - 唯一主操作“确认并继续”。
 
-点击后按钮进入提交中并防止重复；幂等成功后页面切换到“Agent 正在继续”。不显示“确认此项”“驳回”“重试”或“归档”。
+点击后按钮进入提交中并防止重复；幂等成功后页面切换到“Dream Agent 正在继续”。不显示“确认此项”“驳回”“重试”或“归档”。
 
 ### 6.5 后续执行
 
 - 第一层为 Assets / Outline 索引和当前叙事点/步骤主工作面。
 - 第二层为选中项聚焦上下文层，不是常驻审阅右栏。
-- 页面只展示 Chat Agent 继续写入的 workspace 内容和 revision 更新。
+- 页面只展示 Dream Agent 继续写入的 workspace 内容和 revision 更新。
 - 本设计到此结束，不定义后续执行后的审批或异常分支。
 
 > **2026-08-04 任务三实现注记**：Assets / Outline、叙事主工作面与聚焦层已落地；
@@ -303,10 +327,10 @@ sequenceDiagram
 
 | UI 状态 | 来源 | 页面表现 |
 |---|---|---|
-| `story-workspace-dream-waiting-files` | required stage 文件未齐 | 等待 Agent；已存在模块可查看 |
+| `story-workspace-dream-waiting-files` | required stage 文件未齐 | 等待 Dream Agent；已存在模块可查看 |
 | `story-workspace-dream-editing` | stage 文件已齐，尚未确认 | 可编辑 Dream 内容；显示确认条 |
 | `story-workspace-dream-confirming` | 确认命令提交中 | 禁止重复点击 |
-| `story-workspace-dream-continuing` | 确认已持久化，协调器交付或 Agent 继续 | 锁定确认动作并刷新 revisions |
+| `story-workspace-dream-continuing` | 确认已持久化，协调器交付或 Dream Agent 继续 | 锁定确认动作并刷新 revisions |
 | `story-workspace-dream-completed` | 插件后续步骤结束 | 只读展示最终工作空间结果 |
 
 不定义 rejected、failed、retrying 或 archived 页面状态。
@@ -334,25 +358,28 @@ Dream 路由顶部上下文固定显示“Dream 协作中”，不直接显示�
 - World Builder、人物三视图、计费积分；
 - 移动端、平板端和触控布局；
 - 浏览器直接读写工作区；
-- 把 G1/G3/G6、writer 主动 run-scoped SSE 或丰富 Outline 字段描述为当前已实现。
+- 把旧 `WorkflowRun.status` 推进、G6、writer 主动 run-scoped SSE 或丰富 Outline 字段描述为当前已实现。
 
 ## 10. 验收清单
 
-- [x] PDF 第 3 页的“修改 → 一次确认 → Agent 后续执行”成为唯一主链。
+- [x] PDF 第 3 页的“修改 → 一次确认 → Dream Agent 后续执行”成为唯一主链。
 - [x] PDF 第 4～7 页的 Assets/Outline、故事线定位、镜头点击和聚焦上下文有对应模块时序。
 - [x] 四阶段分别写明参与者、文件动作、页面动作和退出条件。
-- [x] 人物、场景、分镜 canonical 文件完成后，Agent 更新对应 `.dream` stage 文件并使页面出现。
+- [x] 人物、场景、分镜 canonical 文件完成后，Dream Agent 更新对应 `.dream` stage 文件并使页面出现。
 - [x] 页面允许用户修改内容，但只有一个“确认并继续”；刷新后不再出现第二次确认。
-- [x] 确认命令回到原 Chat thread，由同一 Agent 写入修改并继续。
+- [x] 专用发起页经服务端创建 Dream Agent、可信 run context 与首个 turn；隐藏 Deck-bound thread 仅为技术载体，浏览器不提供可信来源字段。
+- [x] 服务端专用 adapter 与 MCP/writer 接通 run → characters → scenes → storyboards 文件链。
+- [x] 确认命令恢复同一 Dream Agent，并复用可信 run context，由其写入修改并继续。
 - [x] 后续执行只描述 workspace 持续写入和页面刷新。
 - [x] 文档没有驳回、失败、重试、归档或第二次确认业务分支。
 - [x] 执行两层是交互深度，不是固定第三栏或静态双栏。
 - [x] UI 服从暖纸、轻纸面和无卡片约束。
-- [x] G5 已实现；G1/G3/G6、writer 主动 SSE 与丰富 Outline 字段仍明确为遗留/占位。
+- [x] G3、G5 已实现；G1 仅作为旧状态聚合仍停 `queued` 的技术遗留；G6、writer 主动 SSE 与丰富 Outline 字段仍为遗留/占位。
 
 ## 11. 变更记录
 
 | 日期 | 内容 |
 |---|---|
-| 2026-08-04 | 最终用户修订：建立 Agent workspace 文件驱动的 Dream 四阶段；用户修改后一次确认，同一 Chat Agent 继续；补主时序、文件写入时序和 Assets/Outline 导航时序；不设计驳回、失败、重试或归档 |
+| 2026-08-04 | 最终用户修订：建立 Agent workspace 文件驱动的 Dream 四阶段；用户修改后一次确认，同一 Dream Agent 继续；补主时序、文件写入时序和 Assets/Outline 导航时序；不设计驳回、失败、重试或归档 |
 | 2026-08-04 | 任务三实现校准：持久确认事实恢复单次生命周期；REST 轮询保证更新，匹配 run 的兼容事件仅作加速；Dream 路由与旧审阅面板隔离 |
+| 2026-08-04 | Dream 发起与 writer 集成校准：专用发起页创建 Dream Agent，隐藏 Deck-bound thread 仅作为技术载体；服务端注入专用 adapter 与可信 run context，首个 turn 与确认 continuation 接通同一 Dream Agent；G3 关闭 |

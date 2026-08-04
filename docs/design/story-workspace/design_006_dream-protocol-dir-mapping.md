@@ -1,23 +1,24 @@
-# design_006：`.dream` 静态启动层与 Agent 运行内容层合同
+# design_006：`.dream` 静态启动层与 Dream Agent 运行内容层合同
 
 > **Design ID**：`design_006_dream-protocol-dir-mapping`
-> **状态**：主体已实现；初始 run 生产推进（G1/G3）与 writer 主动 SSE 仍为遗留
+> **状态**：生产主链已实现；旧 `WorkflowRun.status` 推进、入口六态聚合与 writer 主动 SSE 仍为遗留
 > **更新日期**：2026-08-04
 > **术语 canonical**：[术语表](../../architecture/术语表.md)
 > **业务交互 owner**：[design_007](./design_007_dream-business-module-interaction.md)
 > **决策历史**：[design_004](./design_004_story-workspace-dream-surface-execution-page.md) §9
 > **代码现状与缺口**：[design_005](./design_005_dream-module-dataflow-and-sequence.md)
+> **任务三实施证据**：[Dream 发起与 writer 生产链接通实施记录](./2026-08-04-dream-launch-writer-integration-implementation-record.md)
 
 ## 0. 文档职责
 
 本文是 `.dream` 文件协议唯一 owner，定义：
 
 - packer 如何物理映射静态启动层；
-- 同一 Chat Agent 在人物、场景、分镜阶段何时写 `.dream`；
+- 同一 Dream Agent 在人物、场景、分镜阶段何时更新 `.dream`；
 - 运行目录、run/stage schema、revision 与原子写规则；
 - 前端如何经后端读取文件并显示对应页面；
-- 用户修改内容并一次“确认并继续”时，如何回到同一 Chat Agent；
-- 静态层冻结边界、Agent 可写边界和旧会话兼容。
+- 用户修改内容并一次“确认并继续”时，如何回到同一 Dream Agent；
+- 静态层冻结边界、Dream Agent 写入边界和旧会话兼容。
 
 本文不设计逐项审阅、驳回、失败、重试或归档业务状态。业务动作和时序只认 `design_007`。
 
@@ -28,41 +29,52 @@
 `.dream` 分为：
 
 1. **静态启动层**：`README.md + workspace.json`。由 packer 在首个 agent turn 物理映射，随插件 digest 冻结。
-2. **Agent 运行内容层**：`runtime/runs/<workflow_run_id>/`。由同一 Chat Agent 按插件步骤通过会话工作空间写入和更新。
+2. **Dream Agent 运行内容层**：`runtime/runs/<workflow_run_id>/`。由同一 Dream Agent 按插件步骤更新；`.dream/**` 的实际写入必须经过 Story Workspace MCP 与 writer。
 
 `workspace.json` 保持 `dream-surface/v1`，不加入 run 级字段。`workflow_run_id`、来源五字段与 `projection_entry` 写入运行层 `run.json`。
 
 ### 1.2 “插件更新 `.dream`”的准确含义
 
-插件在本项目中是 Agent 执行的工作流与 skill。实际写文件者是当前 Chat Agent：
+插件在本项目中是 Dream Agent 执行的工作流与 skill。Dream 专用发起时，服务端额外选择内建 `ink-dream-story@platform-builtin` adapter；浏览器和普通 Chat turn 都不能选择该 adapter。实际内容生产者是 Dream Agent：
 
-- Agent 先按插件约定写人物、场景、分镜 canonical 文件；
-- 对应阶段可供页面显示时，Agent 再调用 `StoryWorkspaceDreamFileWriter` 原子更新 `.dream/runtime/**`；
+- Dream Agent 先按插件约定写人物、场景、分镜 canonical 文件；
+- Dream Agent 先调用 `mcp__story_workspace__write_dream_run` 建立 run 文件，再按 `characters → scenes → storyboards` 调用 `mcp__story_workspace__write_dream_stage`；MCP 内部委托 `StoryWorkspaceDreamFileWriter` 原子更新 `.dream/runtime/**`；
+- 普通 `Write`/`Edit`/`MultiEdit` 与 Bash 对 `.dream/**` 始终 fail-closed；Dream Agent 不能绕开受控 writer；
 - 前端不直接读取工作区，通过 actor-scoped 后端接口取得已校验的 run/stage 描述；
-- 用户在页面修改内容后只执行一次“确认并继续”，同一 Chat Agent 收到结构化修改和确认命令，写回工作区后继续后续执行。
+- 用户在页面修改内容后只执行一次“确认并继续”，同一 Dream Agent 收到结构化修改和确认命令，写回工作区后继续后续执行。
 
 不再引入 host event journal、projection 聚合器、逐项 Review Gate 或 stage failed 状态机。
 
-> **2026-08-04 任务三实现注记**：`StoryWorkspaceDreamFileWriter`、run/stage
-> 合同、actor-scoped REST、受控 MCP 与单次确认已实现。writer 尚不直接发送
-> SSE；前端在 waiting/editing/continuing 使用至少 5 秒轮询保证更新。初始 queued run
-> 的生产推进方和 Dream 发起 UI 接线仍按 G1/G3 记录为遗留，见任务三实施记录。
+> **2026-08-04 任务三实现注记**：Dream 专用发起页、服务端发起端点、隐藏
+> Deck-bound thread、服务端专用 adapter、可信 run context、run/stage writer 链、
+> actor-scoped REST 与单次确认 continuation 已接通。writer 尚不直接发送 SSE；前端在
+> waiting/editing/continuing 使用至少 5 秒轮询保证更新。G3 已关闭；G1 仅保留为旧
+> `WorkflowRun.status` 仍停在 `queued` 的技术遗留，不再表示生产 Dream Agent 缺位。
+
+Dream 发起 wire 只接受 `deckId + goal + idempotencyKey` 三个 camelCase 字段，不接受
+snake_case、额外 provenance 或首尾空白。幂等重放使用 run 冻结 binding；首次 turn
+投递使用持久 claim，避免并发重放启动两个 Dream Agent turn。
 
 ### 1.3 与上游事实的关系
 
-drama-forge 上游当前不写 `.dream`。它把人物/场景写入 `assets/`，把分镜唯一源写入 `stories/<project>/episodes/EP??/storyboard.yaml`；内部运行及报告位于 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`。首期兼容方式是在 Ink-Dream 插件说明/adapter 中要求 Agent 在 canonical 分镜 YAML 完成后补写对应 Dream stage 文件；报告路径只能作为可选 `source_files`，不得替代 storyboard 唯一源，也不得声称 vendor 已原生支持 `.dream`。
+drama-forge 上游当前不写 `.dream`。它把人物/场景写入 `assets/`，把分镜唯一源写入 `stories/<project>/episodes/EP??/storyboard.yaml`；内部运行及报告位于 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`。首期兼容方式是在 Ink-Dream 插件说明/adapter 中要求 Dream Agent 在 canonical 分镜 YAML 完成后补写对应 Dream stage 文件；报告路径只能作为可选 `source_files`，不得替代 storyboard 唯一源，也不得声称 vendor 已原生支持 `.dream`。
 
 ## 2. 参与者与文件 owner
 
 | 参与者 | 写入 | 读取 |
 |---|---|---|
 | packer | `.dream/README.md`、`.dream/workspace.json` | 冻结时校验静态文件 |
-| 当前 Chat Agent | canonical 人物/场景/分镜文件；`.dream/runtime/**` | 插件说明、run context、用户确认修改 |
-| `StoryWorkspaceDreamFileWriter` | 作为 Agent 调用的受控 helper，完成 runtime 路径校验、revision 和原子替换 | 当前 run/stage 文件 |
-| story-workspace 后端 | 不改内容文件；接收“确认并继续”并注入原 Chat thread | 安全读取 run/stage 文件并返回 REST |
+| Dream Agent | canonical 人物/场景/分镜文件；通过 Story Workspace MCP 请求更新运行内容层 | adapter 指令、可信 run context、用户确认修改 |
+| Story Workspace MCP + `StoryWorkspaceDreamFileWriter` | 唯一的 `.dream/runtime/**` 写通道；完成 run 绑定、路径校验、revision 和原子替换 | 当前可信 run context 与 run/stage 文件 |
+| story-workspace 后端 | 不改内容文件；接收“确认并继续”并恢复同一 Dream Agent continuation | 安全读取 run/stage 文件并返回 REST |
 | Dream 前端 | 用户本地编辑草稿；不直接写工作区 | REST 轮询；匹配 run 的兼容事件可提前触发读取 |
 
-静态启动层只有 packer 可写；Agent 的可写范围严格限定为 `.dream/runtime/**`，不能修改 `README.md` 或 `workspace.json`。
+静态启动层只有 packer 可写。Dream Agent 的普通文件工具不能写任何 `.dream/**` 路径；仅服务端注入可信 run context 后，Story Workspace MCP 可代表当前 Dream Agent 调用 writer 更新该 run 的 `.dream/runtime/**`，不能修改 `README.md` 或 `workspace.json`。
+
+> **技术载体边界**：为复用既有 Agent runtime、工作区与消息持久化，服务端为每次
+> Dream 发起创建隐藏的 Deck-bound Agent thread，并以隐藏 `chat_message` 承载发起与
+> 确认。该 thread 仅是 Dream Agent 的连续性载体；Dream 前端不挂载 `ChatView`，它不
+> 属于 Chat 页面或 Chat 业务合同。
 
 ## 3. 静态启动层
 
@@ -87,7 +99,7 @@ drama-forge 上游当前不写 `.dream`。它把人物/场景写入 `assets/`，
 
 ### 3.2 物理映射时机
 
-只有 thread 已锁定 Deck、首个 agent turn 开始 pack、ready 插件声明 dream surface 且尚无 launch manifest 时，packer 才物理映射静态层。thread 创建本身不写 `.dream`。
+只有 thread 已锁定 Deck、首个 agent turn 开始 pack、ready Deck 插件或服务端 Dream adapter 声明 dream surface 且尚无 launch manifest 时，packer 才物理映射静态层。thread 创建本身不写 `.dream`。Dream 专用发起在首个 turn 由服务端传入 adapter package spec；普通 Chat pack 默认不注入。
 
 ```mermaid
 sequenceDiagram
@@ -99,7 +111,7 @@ sequenceDiagram
 
     FE->>CA: 创建 thread（锁 deck_id）
     FE->>CA: 首个 agent turn
-    CA->>PK: pack_workspace_plugins()
+    CA->>PK: pack_workspace_plugins(server_adapter_package_specs=Dream 专用值)
     PK->>PK: 解析并校验 surfaces[]
     alt 声明 dream surface
         PK->>FS: 临时目录写 README.md + workspace.json
@@ -127,9 +139,9 @@ sequenceDiagram
 
 静态文件不含 `workflow_run_id`、来源五字段、`projection_entry`、时间戳或内容元信息；同 digest 重 pack 字节一致，冻结只校验不重建。
 
-README 必须说明：静态文件禁止 Agent 修改；Agent 只可通过 `StoryWorkspaceDreamFileWriter` 写 `runtime/**`；页面数据从后端接口读取。
+README 必须说明：静态文件禁止 Dream Agent 修改；运行内容只可通过 Story Workspace MCP / `StoryWorkspaceDreamFileWriter` 写 `runtime/**`；页面数据从后端接口读取。
 
-## 4. Agent 运行内容层
+## 4. Dream Agent 运行内容层
 
 ### 4.1 目录
 
@@ -171,7 +183,7 @@ README 必须说明：静态文件禁止 Agent 修改；Agent 只可通过 `Stor
 
 规则：
 
-- Agent 从 host 提供的受控运行上下文复制字段，不猜测 run/source ID；
+- Dream Agent 从 host 提供的受控运行上下文复制字段，不猜测 run/source ID；MCP 还会把请求 run ID 与该上下文精确比对；
 - `projection_entry` 使用固定后端模板，插件不得提供外部 URL；
 - `required_stages` 由插件合同声明；本专项固定人物、场景、分镜三类；
 - `revision` 每次 run 描述变更单调增加；
@@ -222,18 +234,18 @@ README 必须说明：静态文件禁止 Agent 修改；Agent 只可通过 `Stor
 | `scenes` | `/story-workspace/scenes?run=<run_id>` |
 | `storyboards` | `/story-workspace/runs/<run_id>/execution` 的 Outline/叙事点入口 |
 
-stage 文件不存在表示该模块尚未由 Agent 写完；文件存在且 schema、run ID、revision 和 source paths 有效，表示对应页面可以渲染。不增加 generating/validating/failed 等业务状态。
+stage 文件不存在表示该模块尚未由 Dream Agent 写完；文件存在且 schema、run ID、revision 和 source paths 有效，表示对应页面可以渲染。不增加 generating/validating/failed 等业务状态。
 
 ## 5. 插件阶段何时更新 `.dream`
 
-| Agent 执行步骤 | canonical 文件 | `.dream` 更新时点 | 页面结果 |
+| Dream Agent 执行步骤 | canonical 文件 | `.dream` 更新时点 | 页面结果 |
 |---|---|---|---|
-| 建立 Dream run | 无内容文件 | Agent 取得 host run context 后先原子写 `run.json` | Dream 显示本次运行与三个等待中的模块 |
+| 建立 Dream run | 无内容文件 | 首个 Dream Agent turn 取得可信 run context 后先调用 `write_dream_run` 原子写 `run.json` | Dream 显示本次运行与三个等待中的模块 |
 | 生成人物 | `assets/characters/*.md` 与 frontmatter | 所需人物文件全部写完后写/替换 `stages/characters.json` | 人物页面出现并可编辑 |
 | 生成场景 | `assets/scenes/*.md` 与 frontmatter | 所需场景文件全部写完后写/替换 `stages/scenes.json` | 场景页面出现并可编辑 |
 | 生成分镜 | `stories/<project>/episodes/EP??/storyboard.yaml`；可选关联 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/` | canonical `storyboard.yaml` 写完后写/替换 `stages/storyboards.json`；报告若已生成可作为附加 source refs，不阻塞页面出现 | Outline、叙事点和镜头摘要出现 |
-| 用户确认 | 用户在页面积累本地修改 | “确认并继续”命令交回同一 Chat Agent；Agent 先写 source files，再更新受影响 stage revision | 页面刷新为确认时版本，Agent 继续后续执行 |
-| 后续执行 | 插件定义的后续 workspace 文件 | Agent 若更新人物/场景/分镜，就同步提高对应 stage revision | 页面持续显示最新工作区内容 |
+| 用户确认 | 用户在页面积累本地修改 | “确认并继续”命令交回同一 Dream Agent；该 Agent 先写 source files，再更新受影响 stage revision | 页面刷新为确认时版本，Dream Agent 继续后续执行 |
+| 后续执行 | 插件定义的后续 workspace 文件 | Dream Agent 若更新人物/场景/分镜，就同步提高对应 stage revision | 页面持续显示最新工作区内容 |
 
 人物、场景可以按插件工作流并行写；每个 stage 文件只有在该阶段页面所需文件完整后才原子出现。用户不对每个 item 分别确认。
 
@@ -245,19 +257,23 @@ sequenceDiagram
     actor U as 创作者
     participant FE as Dream 前端
     participant API as story-workspace API
-    participant Chat as 同一 Chat Agent
+    participant Agent as 同一 Dream Agent
     participant FS as 会话工作区
 
     rect rgb(246,239,229)
-        Note over Chat,FS: 阶段一：Agent 产出
-        Chat->>FS: 写 run.json
-        Chat->>FS: 写人物 canonical 文件
-        Chat->>FS: 原子写 characters.json
-        Chat->>FS: 写场景 canonical 文件
-        Chat->>FS: 原子写 scenes.json
-        Chat->>FS: 写分镜 canonical 文件
-        Chat->>FS: 原子写 storyboards.json
-        Note over Chat,FS: writer 当前不直接发布 run-scoped SSE
+        Note over Agent,FS: 阶段一：Dream Agent 产出
+        Agent->>API: MCP write_dream_run（可信 run context）
+        API->>FS: writer 原子写 run.json
+        Agent->>FS: 写人物 canonical 文件
+        Agent->>API: MCP write_dream_stage(characters)
+        API->>FS: writer 原子写 characters.json
+        Agent->>FS: 写场景 canonical 文件
+        Agent->>API: MCP write_dream_stage(scenes)
+        API->>FS: writer 原子写 scenes.json
+        Agent->>FS: 写分镜 canonical 文件
+        Agent->>API: MCP write_dream_stage(storyboards)
+        API->>FS: writer 原子写 storyboards.json
+        Note over Agent,FS: writer 当前不直接发布 run-scoped SSE
     end
 
     rect rgb(255,250,242)
@@ -272,19 +288,19 @@ sequenceDiagram
     end
 
     rect rgb(246,239,229)
-        Note over U,Chat: 阶段三：用户修改并一次确认
+        Note over U,Agent: 阶段三：用户修改并一次确认
         U->>FE: 修改页面中的内容
         U->>FE: 点击“确认并继续”
         FE->>API: confirmation(base revisions, edits, idempotency key)
-        API->>Chat: 隐藏 Chat 消息注入原 thread
-        Chat->>FS: 写入用户修改的 source files
-        Chat->>FS: 原子提高受影响 stage revisions
+        API->>Agent: 通过隐藏技术 thread 恢复同一 Dream Agent
+        Agent->>FS: 写入用户修改的 source files
+        Agent->>FS: 原子提高受影响 stage revisions
     end
 
     rect rgb(255,250,242)
-        Note over Chat,FE: 阶段四：后续执行
-        Chat->>Chat: 按同一插件与锁定上下文继续
-        Chat->>FS: 持续写后续 workspace 文件与 stage revisions
+        Note over Agent,FE: 阶段四：后续执行
+        Agent->>Agent: 按同一插件与锁定上下文继续
+        Agent->>FS: 持续写后续 workspace 文件与 stage revisions
         FE->>API: 至少 5 秒轮询 GET dream-files
         API-->>FE: 最新 revisions → 页面刷新
     end
@@ -301,13 +317,13 @@ sequenceDiagram
 
 ### 7.2 确认命令
 
-目标端点：
+已实现端点：
 
 ```text
 POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 ```
 
-目标合同 `StoryWorkspaceDreamConfirmationCommand`：
+已实现合同 `StoryWorkspaceDreamConfirmationCommand`：
 
 ```json
 {
@@ -334,10 +350,10 @@ POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
 1. 校验 actor、thread、run 与 required stage revisions；
 2. 把命令保存为 `metadata.kind="story-workspace-dream-confirmation"`、`dispatch_status="pending"` 的隐藏 user 消息；
 3. 同 actor+run 只允许这一条确认；同幂等键同内容返回同一结果，换键或同键不同内容均冲突；
-4. 后台确认协调器在提交后与服务启动后周期扫描 pending，按 message ID 进程内去重并把命令交给原 thread 的同一 Chat Agent turn；页面不提供人工恢复入口；
+4. 后台确认协调器在提交后与服务启动后周期扫描 pending，按 message ID 进程内去重，并通过本次 Dream 的隐藏技术 thread 恢复同一 Dream Agent turn；页面不提供人工恢复入口；
 5. 只有该 turn 依次产生 `message-final` 与非 error `finish`，才把隐藏消息更新为 `dispatch_status="dispatched"`；单独出现 `finishReason="stop"` 不能证明成功，取消、截断、异常或进程退出前未完成确认时继续保持 pending；
 6. 未成功消费的 message ID 按 2 秒起、最大 60 秒的指数退避自动协调；成功后清除退避状态，服务重启仍从持久 pending 恢复；
-7. Agent 先把 edits 写入 canonical 文件并更新 stage revisions，再继续插件后续步骤。
+7. Dream Agent 先把 edits 写入 canonical 文件并更新 stage revisions，再继续插件后续步骤。
 
 不建立逐项 review_status，不提供驳回、失败、重试或归档命令。
 
@@ -370,26 +386,26 @@ REST `dream-files` 是页面真相源。页面在 waiting、editing、continuing
 
 ## 9. 写入一致性与并发边界
 
-- `StoryWorkspaceDreamFileWriter` 只接受当前 run 目录与固定 stage 文件名。
+- Story Workspace MCP 必须持有服务端注入的可信 run context，并且只接受其中的精确 run ID；`StoryWorkspaceDreamFileWriter` 只接受当前 run 目录与固定 stage 文件名。
 - 每次写入先校验 expected revision，再写同目录临时文件、flush/fsync、`os.replace`。
-- 同一 Chat thread 同时只允许一个会修改当前 Dream run 的 Agent turn；同 actor+run 只有一条隐藏确认，协调器对同 message ID 进程内去重。
-- 隐藏确认是零 DDL 的 durable work item：观察到 `message-final` 与非 error 终止帧后才确认 dispatched；未成功消费按 message ID 指数退避。若 Agent 已完成、SQLite 确认前进程退出，同一 message ID 可能再次交付，因此提供 at-least-once 而非 exactly-once。Agent 的 canonical 写入与 stage CAS 必须吸收重复交付。
+- 同一 Dream 技术 thread 同时只允许一个会修改当前 run 的 Dream Agent turn；同 actor+run 只有一条隐藏确认，协调器对同 message ID 进程内去重。
+- 隐藏确认是零 DDL 的 durable work item：观察到 `message-final` 与非 error 终止帧后才确认 dispatched；未成功消费按 message ID 指数退避。若 Dream Agent 已完成、SQLite 确认前进程退出，同一 message ID 可能再次交付，因此提供 at-least-once 而非 exactly-once。Dream Agent 的 canonical 写入与 stage CAS 必须吸收重复交付。
 - 不同 stage 可并行准备 canonical 文件，最终替换各自独立 JSON；同一 stage revision 必须串行。
 - 不允许 append JSON，不允许绝对路径、`..`、symlink 逃逸或跨 run 写入。
 - 临时写未完成时保留上一有效 revision；页面继续显示上一版或等待该 stage 文件出现，不新增业务失败页面。
-- 冻结分支仍只校验静态 `workspace.json`，不得删除或重建 Agent 运行内容层。
+- 冻结分支仍只校验静态 `workspace.json`，不得删除或重建 Dream Agent 运行内容层。
 
 ## 10. 上游兼容
 
-| 上游文件 | Agent 补写的 Dream 文件 |
+| 上游文件 | Dream Agent 补写的 Dream 文件 |
 |---|---|
 | `assets/characters/*.md` | `stages/characters.json` |
 | `assets/scenes/*.md` | `stages/scenes.json` |
 | `stories/<project>/episodes/EP??/storyboard.yaml`（可选关联 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`） | `stages/storyboards.json` |
 
-现有 drama-forge skill 需要在任务三由插件制品说明或 adapter 增加这些补写步骤；vendor 原目录与文件格式保持不变。
+内建 Dream adapter 已补充 run → characters → scenes → storyboards 的 writer 指令；vendor 原目录与文件格式保持不变。该 adapter 只由 Dream 服务端发起链选择，不改变普通 Chat turn 的插件包。
 
-旧会话只有静态层时仍可显示 Dream 入口；没有 `run.json` 时页面显示等待 Agent 写入，不自动改写旧工作区。
+旧会话只有静态层时仍可显示 Dream 入口；没有 `run.json` 时页面显示等待 Dream Agent 写入，不自动改写旧工作区。
 
 ## 11. 本期不做
 
@@ -401,21 +417,23 @@ REST `dream-files` 是页面真相源。页面在 waiting、editing、continuing
 - 视频、上传、播放器、外部模型选择和复杂画布；
 - 移动端、平板端、触控适配；
 - 修改 `backend/database.py` 或新增 DDL；
-- 把 G1/G3/G6 写成已实现。
+- 把旧 `WorkflowRun.status` 的 G1 技术遗留或 G6 入口聚合端点写成已实现。
 
 ## 12. 验收清单
 
 - [x] 静态 `workspace.json` 保持 `dream-surface/v1` 与冻结语义。
-- [x] Agent 只可经受控工具写 `.dream/runtime/**`，不能修改静态启动层；通用文件工具和 Bash 写入均 fail-closed。
+- [x] Dream Agent 只可经受控工具写 `.dream/runtime/**`，不能修改静态启动层；通用文件工具和 Bash 写入均 fail-closed。
 - [x] `run.json` 包含 run/source 字段、`projection_entry` 与 required stages。
 - [x] 人物、场景、分镜 canonical 文件完成后才出现对应 stage 文件。
 - [x] stage 文件存在即页面可渲染，不设计驳回或失败状态机。
 - [x] 页面允许用户修改内容，并且只有一次“确认并继续”；刷新后由持久确认事实恢复只读继续态。
-- [x] 确认命令注入原 Chat thread；同一 Chat Agent 写入修改后继续后续执行。
+- [x] Dream 专用发起建立隐藏 Deck-bound Agent thread 作为技术连续性载体；Dream 前端不挂载 `ChatView`，首个 turn 与确认 continuation 复用该载体和同一可信 run context。
+- [x] 服务端专用 adapter 指示 Dream Agent 按 run → characters → scenes → storyboards 调用受控 writer，普通 Chat 不注入该 adapter。
+- [x] 确认命令恢复同一 Dream Agent；该 Agent 写入修改后继续后续执行。
 - [x] 后续执行只描述持续写工作区与页面刷新，不包含驳回、失败、重试或归档。
 - [x] 前端经 actor-scoped REST 读取，并以至少 5 秒轮询保证刷新；匹配 run 的兼容事件只用于提前读取。
 - [x] revision、幂等、原子替换、路径 containment 与静态冻结边界明确。
-- [x] G5 已实现；G1/G3/G6 仍标为遗留。
+- [x] G3、G5 已实现；G1 仅作为旧状态聚合仍停 `queued` 的技术遗留；G6 仍为遗留。
 - [x] 文中只使用“物理映射”，不使用禁用同义词。
 
 ## 13. 变更记录
@@ -424,5 +442,6 @@ REST `dream-files` 是页面真相源。页面在 waiting、editing、continuing
 |---|---|
 | 2026-08-04 | 初版：只设计静态 `.dream` |
 | 2026-08-04 | 首轮审阅修订：形成分层方案中间稿，后按用户反馈废止 |
-| 2026-08-04 | 最终用户修订：改为同一 Chat Agent 通过工作空间写 run/stage 文件；用户只修改并一次确认，确认后 Agent 继续；删除驳回、失败、重试和归档设计 |
+| 2026-08-04 | 最终用户修订：改为同一 Dream Agent 通过工作空间写 run/stage 文件；用户只修改并一次确认，确认后 Dream Agent 继续；删除驳回、失败、重试和归档设计 |
 | 2026-08-04 | 任务三实现校准：REST 轮询成为 revision 发现保证；匹配 run 的兼容事件仅作加速；补持久确认/派发恢复与通用 Bash 写保护 |
+| 2026-08-04 | Dream 发起与 writer 集成校准：补隐藏 Deck-bound thread、服务端专用 adapter、可信 run context、run → characters → scenes → storyboards writer 链；G3 关闭，G1 收窄为旧状态聚合技术遗留 |
