@@ -1,36 +1,34 @@
 // [Input] Actor-scoped Dream stage snapshots plus local field edit/reset and
 //         lifecycle commands.
-// [Output] A pure, immutable local-draft state and the single camelCase Dream
-//          confirmation payload consumed by the future page/API adapter.
+// [Output] A pure, immutable local-draft state and the single canonical Dream
+//          confirmation command consumed by the future page/API adapter.
 // [Pos] Story Workspace Dream state seam (Task 3 F1); this file deliberately
-//       owns no REST contract and imports neither React nor canonical types.
-// [Sync] 2026-08-04: initial design_006/design_007 five-state implementation.
+//       owns no REST contract, imports canonical types only, and has no React.
+// [Sync] 2026-08-04: canonical command ownership, full UI-state values,
+//                    confirmation ack cleanup, and explicit conflict rebase.
+
+import type {
+  StoryWorkspaceDreamConfirmationCommand,
+  StoryWorkspaceDreamConfirmationEdit,
+  StoryWorkspaceDreamFieldValue,
+  StoryWorkspaceDreamStage,
+} from '../../hooks/story-workspace/contracts';
 
 export const STORY_WORKSPACE_DREAM_STAGES = [
   'characters',
   'scenes',
   'storyboards',
-] as const;
-
-export type StoryWorkspaceDreamStage = typeof STORY_WORKSPACE_DREAM_STAGES[number];
+] as const satisfies readonly StoryWorkspaceDreamStage[];
 
 export const STORY_WORKSPACE_DREAM_STATES = [
-  'waiting-files',
-  'editing',
-  'confirming',
-  'continuing',
-  'completed',
+  'story-workspace-dream-waiting-files',
+  'story-workspace-dream-editing',
+  'story-workspace-dream-confirming',
+  'story-workspace-dream-continuing',
+  'story-workspace-dream-completed',
 ] as const;
 
 export type StoryWorkspaceDreamStatus = typeof STORY_WORKSPACE_DREAM_STATES[number];
-
-export type StoryWorkspaceDreamFieldValue =
-  | string
-  | number
-  | boolean
-  | null
-  | readonly StoryWorkspaceDreamFieldValue[]
-  | { readonly [key: string]: StoryWorkspaceDreamFieldValue };
 
 export interface StoryWorkspaceDreamStageItemSnapshot {
   entityId: string;
@@ -67,20 +65,6 @@ interface StoryWorkspaceDreamLocalEdit {
   value: StoryWorkspaceDreamFieldValue;
 }
 
-export interface StoryWorkspaceDreamConfirmationEdit {
-  stage: StoryWorkspaceDreamStage;
-  entityId: string;
-  fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
-}
-
-export interface StoryWorkspaceDreamConfirmationPayload {
-  storyWorkspaceRunId: string;
-  threadId: string;
-  baseRevisions: Readonly<Record<StoryWorkspaceDreamStage, number>>;
-  edits: readonly StoryWorkspaceDreamConfirmationEdit[];
-  idempotencyKey: string;
-}
-
 export interface StoryWorkspaceDreamState {
   status: StoryWorkspaceDreamStatus;
   storyWorkspaceRunId: string;
@@ -92,7 +76,7 @@ export interface StoryWorkspaceDreamState {
   workspaceUpdatedStages: readonly StoryWorkspaceDreamStage[];
   staleStages: readonly StoryWorkspaceDreamStage[];
   hasRevisionConflict: boolean;
-  confirmationPayload: StoryWorkspaceDreamConfirmationPayload | null;
+  confirmationCommand: StoryWorkspaceDreamConfirmationCommand | null;
   /** Internal seam data; page components should use the exported operations. */
   readonly stageData: Readonly<Partial<Record<StoryWorkspaceDreamStage, StoryWorkspaceDreamHydratedStage>>>;
   /** Internal seam data; one row represents one locally changed field. */
@@ -101,8 +85,10 @@ export interface StoryWorkspaceDreamState {
 
 export interface StoryWorkspaceDreamConfirmationStart {
   state: StoryWorkspaceDreamState;
-  payload: StoryWorkspaceDreamConfirmationPayload;
+  command: StoryWorkspaceDreamConfirmationCommand;
 }
+
+export type StoryWorkspaceDreamRevisionResolution = 'keep-local' | 'accept-server';
 
 const STAGE_ORDER: Readonly<Record<StoryWorkspaceDreamStage, number>> = {
   characters: 0,
@@ -136,8 +122,13 @@ function deriveStatus(
   status: StoryWorkspaceDreamStatus,
   stageData: StoryWorkspaceDreamState['stageData'],
 ): StoryWorkspaceDreamStatus {
-  if (status !== 'waiting-files' && status !== 'editing') return status;
-  return isComplete(stageData) ? 'editing' : 'waiting-files';
+  if (
+    status !== 'story-workspace-dream-waiting-files'
+    && status !== 'story-workspace-dream-editing'
+  ) return status;
+  return isComplete(stageData)
+    ? 'story-workspace-dream-editing'
+    : 'story-workspace-dream-waiting-files';
 }
 
 function hasOwn(value: object, key: string): boolean {
@@ -317,7 +308,7 @@ export function createStoryWorkspaceDreamState({
   if (storyWorkspaceRunId.trim() === '') throw new Error('storyWorkspaceRunId must not be empty');
   if (threadId.trim() === '') throw new Error('threadId must not be empty');
   return {
-    status: 'waiting-files',
+    status: 'story-workspace-dream-waiting-files',
     storyWorkspaceRunId,
     threadId,
     availableStages: [],
@@ -327,7 +318,7 @@ export function createStoryWorkspaceDreamState({
     workspaceUpdatedStages: [],
     staleStages: [],
     hasRevisionConflict: false,
-    confirmationPayload: null,
+    confirmationCommand: null,
     stageData: {},
     localEdits: [],
   };
@@ -394,7 +385,10 @@ export function readStoryWorkspaceDreamField(
 }
 
 function assertLocallyEditable(state: StoryWorkspaceDreamState): void {
-  if (state.status !== 'waiting-files' && state.status !== 'editing') {
+  if (
+    state.status !== 'story-workspace-dream-waiting-files'
+    && state.status !== 'story-workspace-dream-editing'
+  ) {
     throw new Error(`Dream fields cannot be edited while ${state.status}`);
   }
 }
@@ -467,6 +461,40 @@ export function resetStoryWorkspaceDreamField(
   });
 }
 
+/**
+ * Resolve a stage-level revision conflict explicitly. Keeping local retains
+ * the user's field merge while rebasing its expected revision; accepting the
+ * server drops only that stage's drafts and reads the latest snapshot.
+ */
+export function resolveStoryWorkspaceDreamRevisionConflict(
+  state: StoryWorkspaceDreamState,
+  stage: StoryWorkspaceDreamStage,
+  resolution: StoryWorkspaceDreamRevisionResolution,
+): StoryWorkspaceDreamState {
+  assertLocallyEditable(state);
+  if (!state.staleStages.includes(stage)) {
+    throw new Error(`Dream stage ${stage} has no revision conflict to resolve`);
+  }
+  const latestRevision = state.latestRevisions[stage];
+  if (latestRevision === undefined) {
+    throw new Error(`Dream stage ${stage} has no latest revision to rebase`);
+  }
+  if (resolution !== 'keep-local' && resolution !== 'accept-server') {
+    throw new Error(`Unknown Dream revision resolution: ${String(resolution)}`);
+  }
+
+  const localEdits = resolution === 'accept-server'
+    ? state.localEdits.filter((edit) => edit.stage !== stage)
+    : state.localEdits;
+  if (resolution === 'keep-local') validateLocalEdits(state);
+
+  return withDerivedState(state, {
+    localEdits,
+    baseRevisions: { ...state.baseRevisions, [stage]: latestRevision },
+    staleStages: state.staleStages.filter((candidate) => candidate !== stage),
+  });
+}
+
 function compareLocalEdits(
   left: StoryWorkspaceDreamLocalEdit,
   right: StoryWorkspaceDreamLocalEdit,
@@ -524,7 +552,10 @@ function buildConfirmationEdits(
 }
 
 export function canConfirmStoryWorkspaceDream(state: StoryWorkspaceDreamState): boolean {
-  if (state.status !== 'editing' || state.confirmationPayload !== null) return false;
+  if (
+    state.status !== 'story-workspace-dream-editing'
+    || state.confirmationCommand !== null
+  ) return false;
   if (!isComplete(state.stageData) || state.hasRevisionConflict) return false;
   for (const stage of STORY_WORKSPACE_DREAM_STAGES) {
     if (state.baseRevisions[stage] !== state.latestRevisions[stage]) return false;
@@ -541,10 +572,13 @@ export function beginStoryWorkspaceDreamConfirmation(
   state: StoryWorkspaceDreamState,
   idempotencyKey: string,
 ): StoryWorkspaceDreamConfirmationStart {
-  if (state.status === 'confirming' || state.confirmationPayload !== null) {
+  if (
+    state.status === 'story-workspace-dream-confirming'
+    || state.confirmationCommand !== null
+  ) {
     throw new Error('Dream confirmation is already in progress');
   }
-  if (state.status !== 'editing') {
+  if (state.status !== 'story-workspace-dream-editing') {
     throw new Error(`Dream cannot be confirmed while ${state.status}`);
   }
   if (!isComplete(state.stageData)) {
@@ -560,7 +594,7 @@ export function beginStoryWorkspaceDreamConfirmation(
     throw new Error('Dream confirmation requirements are not satisfied');
   }
 
-  const payload: StoryWorkspaceDreamConfirmationPayload = {
+  const command: StoryWorkspaceDreamConfirmationCommand = {
     storyWorkspaceRunId: state.storyWorkspaceRunId,
     threadId: state.threadId,
     baseRevisions: completeBaseRevisions(state),
@@ -568,26 +602,33 @@ export function beginStoryWorkspaceDreamConfirmation(
     idempotencyKey,
   };
   const confirming = withDerivedState(state, {
-    status: 'confirming',
-    confirmationPayload: payload,
+    status: 'story-workspace-dream-confirming',
+    confirmationCommand: command,
   });
-  return { state: confirming, payload };
+  return { state: confirming, command };
 }
 
 export function acceptStoryWorkspaceDreamConfirmation(
   state: StoryWorkspaceDreamState,
 ): StoryWorkspaceDreamState {
-  if (state.status !== 'confirming' || state.confirmationPayload === null) {
+  if (
+    state.status !== 'story-workspace-dream-confirming'
+    || state.confirmationCommand === null
+  ) {
     throw new Error(`Dream confirmation cannot be accepted while ${state.status}`);
   }
-  return withDerivedState(state, { status: 'continuing' });
+  return withDerivedState(state, {
+    status: 'story-workspace-dream-continuing',
+    localEdits: [],
+    staleStages: [],
+  });
 }
 
 export function completeStoryWorkspaceDream(
   state: StoryWorkspaceDreamState,
 ): StoryWorkspaceDreamState {
-  if (state.status !== 'continuing') {
+  if (state.status !== 'story-workspace-dream-continuing') {
     throw new Error(`Dream cannot be completed while ${state.status}`);
   }
-  return withDerivedState(state, { status: 'completed' });
+  return withDerivedState(state, { status: 'story-workspace-dream-completed' });
 }

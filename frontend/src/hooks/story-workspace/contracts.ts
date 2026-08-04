@@ -100,6 +100,37 @@ export interface StoryWorkspacePluginLoadReceiptResponse {
   launch_manifest: { surfaces?: StoryWorkspaceSurface[] } | null;
 }
 
+/* --------------------------------------------------------------------------
+ * Dream file + single-confirmation contracts (design_006 §4/§7, DEC-026).
+ * State-only hydration models stay in the pure Dream seam; the command sent
+ * to POST .../dream-confirmation is owned here and nowhere else.
+ * ------------------------------------------------------------------------ */
+
+export type StoryWorkspaceDreamStage = 'characters' | 'scenes' | 'storyboards';
+
+export type StoryWorkspaceDreamFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | readonly StoryWorkspaceDreamFieldValue[]
+  | { readonly [key: string]: StoryWorkspaceDreamFieldValue };
+
+export interface StoryWorkspaceDreamConfirmationEdit {
+  stage: StoryWorkspaceDreamStage;
+  entityId: string;
+  fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
+}
+
+/** Request body of the run-scoped Dream single-confirmation endpoint. */
+export interface StoryWorkspaceDreamConfirmationCommand {
+  storyWorkspaceRunId: string;
+  threadId: string;
+  baseRevisions: Readonly<Record<StoryWorkspaceDreamStage, number>>;
+  edits: readonly StoryWorkspaceDreamConfirmationEdit[];
+  idempotencyKey: string;
+}
+
 /**
  * The six Gate / run stages of design_004 §4.2. This value is produced by
  * server-side aggregation ("proposal review status + story-workspace run

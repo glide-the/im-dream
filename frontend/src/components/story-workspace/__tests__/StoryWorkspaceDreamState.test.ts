@@ -3,9 +3,14 @@
 // [Output] Contract tests for the pure Dream draft seam: three-stage hydrate,
 //          field-level drafts, revision staleness, and one confirmation.
 // [Pos] Story Workspace Dream local-state seam (Task 3 F1).
-// [Sync] 2026-08-04: initial Red coverage for design_006/design_007.
+// [Sync] 2026-08-04: canonical command/full-state values plus ack and explicit
+//                    keep-local/accept-server revision resolution coverage.
 
 import { expect, test } from '@playwright/test';
+import type {
+  StoryWorkspaceDreamConfirmationCommand,
+  StoryWorkspaceDreamStage,
+} from '../../../hooks/story-workspace/contracts';
 import {
   acceptStoryWorkspaceDreamConfirmation,
   beginStoryWorkspaceDreamConfirmation,
@@ -15,10 +20,10 @@ import {
   editStoryWorkspaceDreamField,
   hydrateStoryWorkspaceDreamState,
   readStoryWorkspaceDreamField,
+  resolveStoryWorkspaceDreamRevisionConflict,
   resetStoryWorkspaceDreamField,
   STORY_WORKSPACE_DREAM_STAGES,
   STORY_WORKSPACE_DREAM_STATES,
-  type StoryWorkspaceDreamStage,
   type StoryWorkspaceDreamStageSnapshot,
 } from '../dreamState';
 
@@ -64,11 +69,11 @@ function readyState() {
 
 test('Dream exposes only the five design_007 lifecycle states', () => {
   expect(STORY_WORKSPACE_DREAM_STATES).toEqual([
-    'waiting-files',
-    'editing',
-    'confirming',
-    'continuing',
-    'completed',
+    'story-workspace-dream-waiting-files',
+    'story-workspace-dream-editing',
+    'story-workspace-dream-confirming',
+    'story-workspace-dream-continuing',
+    'story-workspace-dream-completed',
   ]);
   expect(STORY_WORKSPACE_DREAM_STAGES).toEqual([
     'characters',
@@ -83,23 +88,23 @@ test('the three required stages hydrate one by one and only the complete set is 
     threadId: THREAD_ID,
   });
 
-  expect(state.status).toBe('waiting-files');
+  expect(state.status).toBe('story-workspace-dream-waiting-files');
   expect(state.availableStages).toEqual([]);
   expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
 
   state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('characters', 2)]);
-  expect(state.status).toBe('waiting-files');
+  expect(state.status).toBe('story-workspace-dream-waiting-files');
   expect(state.availableStages).toEqual(['characters']);
   expect(state.baseRevisions).toEqual({ characters: 2 });
   expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
 
   state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('scenes', 3)]);
-  expect(state.status).toBe('waiting-files');
+  expect(state.status).toBe('story-workspace-dream-waiting-files');
   expect(state.availableStages).toEqual(['characters', 'scenes']);
   expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
 
   state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('storyboards', 5)]);
-  expect(state.status).toBe('editing');
+  expect(state.status).toBe('story-workspace-dream-editing');
   expect(state.availableStages).toEqual(STORY_WORKSPACE_DREAM_STAGES);
   expect(state.baseRevisions).toEqual({
     characters: 2,
@@ -152,7 +157,7 @@ test('hydrate stores server fields while field edits and resets remain local and
   expect(state.dirtyCount).toBe(0);
 });
 
-test('a newer server revision preserves a dirty field, refreshes clean fields, and marks update/stale', () => {
+function revisionConflictState() {
   let state = editStoryWorkspaceDreamField(
     readyState(),
     'characters',
@@ -165,6 +170,11 @@ test('a newer server revision preserves a dirty field, refreshes clean fields, a
     summary: 'server character r4',
     notes: 'server notes r4',
   })]);
+  return state;
+}
+
+test('a newer server revision preserves a dirty field, refreshes clean fields, and marks update/stale', () => {
+  const state = revisionConflictState();
 
   expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
     .toBe('keep my local character');
@@ -177,20 +187,41 @@ test('a newer server revision preserves a dirty field, refreshes clean fields, a
   expect(state.hasRevisionConflict).toBe(true);
   expect(canConfirmStoryWorkspaceDream(state)).toBe(false);
   expect(() => beginStoryWorkspaceDreamConfirmation(state, 'swc_conflict')).toThrow(/revision/i);
+});
 
-  state = resetStoryWorkspaceDreamField(
-    state,
+test('keep-local explicitly rebases the dirty merge result onto the latest stage revision', () => {
+  const state = resolveStoryWorkspaceDreamRevisionConflict(
+    revisionConflictState(),
     'characters',
-    'characters_primary',
-    'summary',
+    'keep-local',
   );
   expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
-    .toBe('server character r4');
+    .toBe('keep my local character');
   expect(state.baseRevisions.characters).toBe(4);
   expect(state.latestRevisions.characters).toBe(4);
   expect(state.workspaceUpdatedStages).toEqual(['characters']);
   expect(state.staleStages).toEqual([]);
   expect(state.hasRevisionConflict).toBe(false);
+  expect(canConfirmStoryWorkspaceDream(state)).toBe(true);
+});
+
+test('accept-server explicitly discards only that stage draft and rebases to authoritative data', () => {
+  let state = editStoryWorkspaceDreamField(
+    revisionConflictState(),
+    'storyboards',
+    'storyboards_primary',
+    'notes',
+    'unrelated local storyboard note',
+  );
+  state = resolveStoryWorkspaceDreamRevisionConflict(state, 'characters', 'accept-server');
+
+  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+    .toBe('server character r4');
+  expect(readStoryWorkspaceDreamField(state, 'storyboards', 'storyboards_primary', 'notes'))
+    .toBe('unrelated local storyboard note');
+  expect(state.dirtyCount).toBe(1);
+  expect(state.baseRevisions.characters).toBe(4);
+  expect(state.staleStages).toEqual([]);
   expect(canConfirmStoryWorkspaceDream(state)).toBe(true);
 });
 
@@ -221,7 +252,7 @@ test('the editable-field whitelist is enforced before confirmation payload const
   )).toThrow(/JSON/i);
 });
 
-test('confirmation builds one camelCase payload, prevents double-click, and accepted continues', () => {
+test('confirmation builds one canonical camelCase Command and prevents double-click', () => {
   let state = editStoryWorkspaceDreamField(
     readyState(),
     'characters',
@@ -238,9 +269,10 @@ test('confirmation builds one camelCase payload, prevents double-click, and acce
   );
 
   const confirmation = beginStoryWorkspaceDreamConfirmation(state, 'swc_123');
-  expect(confirmation.state.status).toBe('confirming');
-  expect(confirmation.state.confirmationPayload).toBe(confirmation.payload);
-  expect(confirmation.payload).toEqual({
+  const command: StoryWorkspaceDreamConfirmationCommand = confirmation.command;
+  expect(confirmation.state.status).toBe('story-workspace-dream-confirming');
+  expect(confirmation.state.confirmationCommand).toBe(command);
+  expect(command).toEqual({
     storyWorkspaceRunId: RUN_ID,
     threadId: THREAD_ID,
     baseRevisions: {
@@ -262,7 +294,7 @@ test('confirmation builds one camelCase payload, prevents double-click, and acce
     ],
     idempotencyKey: 'swc_123',
   });
-  expect(Object.keys(confirmation.payload)).toEqual([
+  expect(Object.keys(command)).toEqual([
     'storyWorkspaceRunId',
     'threadId',
     'baseRevisions',
@@ -273,10 +305,23 @@ test('confirmation builds one camelCase payload, prevents double-click, and acce
     confirmation.state,
     'swc_second_click',
   )).toThrow(/already|confirming/i);
+});
 
-  state = acceptStoryWorkspaceDreamConfirmation(confirmation.state);
-  expect(state.status).toBe('continuing');
-  expect(state.confirmationPayload).toBe(confirmation.payload);
+test('accepted clears submitted drafts so a higher Agent revision becomes authoritative', () => {
+  const edited = editStoryWorkspaceDreamField(
+    readyState(),
+    'characters',
+    'characters_primary',
+    'summary',
+    'submitted character summary',
+  );
+  const confirmation = beginStoryWorkspaceDreamConfirmation(edited, 'swc_ack');
+  let state = acceptStoryWorkspaceDreamConfirmation(confirmation.state);
+
+  expect(state.status).toBe('story-workspace-dream-continuing');
+  expect(state.confirmationCommand).toBe(confirmation.command);
+  expect(state.dirtyCount).toBe(0);
+  expect(state.localEdits).toEqual([]);
   expect(() => editStoryWorkspaceDreamField(
     state,
     'characters',
@@ -285,6 +330,15 @@ test('confirmation builds one camelCase payload, prevents double-click, and acce
     'too late',
   )).toThrow(/continuing/i);
 
+  state = hydrateStoryWorkspaceDreamState(state, [stageSnapshot('characters', 6, {
+    summary: 'authoritative Agent character r6',
+  })]);
+  expect(readStoryWorkspaceDreamField(state, 'characters', 'characters_primary', 'summary'))
+    .toBe('authoritative Agent character r6');
+  expect(state.baseRevisions.characters).toBe(6);
+  expect(state.latestRevisions.characters).toBe(6);
+  expect(state.staleStages).toEqual([]);
+
   state = completeStoryWorkspaceDream(state);
-  expect(state.status).toBe('completed');
+  expect(state.status).toBe('story-workspace-dream-completed');
 });
