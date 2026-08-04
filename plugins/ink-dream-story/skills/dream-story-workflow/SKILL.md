@@ -1,46 +1,34 @@
 ---
 name: dream-story-workflow
-description: Create or revise Dream stories, characters, and scenes as one structured proposal that must be reviewed by the user before downstream execution.
+description: Drive Dream from canonical workspace files through Agent output, page rendering, one confirmation, and same-Agent continuation.
 ---
 
 # Dream Story Workflow
 
-Use this workflow when the user asks to create or revise a story, outline, script,
-character set, or scene plan in Dream.
+Use this workflow when the user asks to create or revise a story, outline,
+character set, scene plan, or storyboard in Dream.
 
-## Contract
+The only product lifecycle is:
 
-Return exactly one JSON object without a Markdown fence or surrounding prose:
-
-```json
-{
-  "title": "string",
-  "description": "string or null",
-  "type": "short | long | script | outline",
-  "content": "string or null",
-  "characters": [
-    {
-      "name": "string",
-      "identity": "string or null",
-      "personality": "string or null",
-      "background": "string or null",
-      "catchphrase": "string or null",
-      "tags": ["string"]
-    }
-  ],
-  "scenes": [
-    {
-      "name": "string",
-      "description": "string or null",
-      "order_index": 0
-    }
-  ]
-}
+```text
+Agent output -> page rendering -> one confirmation -> same Chat Agent continues
 ```
 
-The object is a proposal, not an approved result. Never claim that the user
-confirmed it or that downstream creation executed. Preserve the Deck voice and
-constraints supplied in `<deck_context>`. Use unique character names and unique
-scene `order_index` values.
+Before creating Dream assets, read `references/dream-file-sync.md` completely
+and follow its canonical-file and controlled-tool sequence.
+
+## Rules
+
+- Preserve the locked Deck voice and constraints supplied in `<deck_context>`.
+- Write durable story assets in the current Chat workspace; do not return a
+  standalone proposal JSON as a substitute for workspace files.
+- Synchronize Dream page metadata only after the corresponding canonical files
+  are complete and readable.
+- Treat the hidden Dream confirmation command as the creator's one confirmation:
+  apply its edits, update affected stage revisions, then continue this workflow
+  in the same Chat thread.
+- Never invent a WorkflowRun, actor, thread, source provenance, revision, or path.
+- Do not introduce item-by-item approval, rejection, retry, archive, or another
+  confirmation step.
 
 For ordinary questions that do not create or revise Dream assets, answer normally.

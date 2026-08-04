@@ -255,16 +255,25 @@ def load_init_profile(packed_dir: Path) -> InitProfile | None:
 
 # --- .dream/ protocol directory materialization (design_004 §3.2-§3.4) ---
 
-DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录（只读）
+DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录
 
 本目录由 packer 在会话首个 agent turn 的 pack 时物理映射到会话工作区，标识本工作区由 Dream 驱动插件加载。
 
-- workspace.json：静态 launch 事实（deck_id、插件制品清单、入口路由）。
-  它在 pack 后不再变化，不含 workflow_run_id 等 run 级事实。
-- 运行期事实（run 状态、Gate 阶段、快照锁）一律以会话 / story-workspace
-  REST API 为准，不要以本目录文件判断。
-- 本目录对 Agent 只读：不要写入、修改或删除其中任何文件。
-- Dream 提案输出仍走 Chat JSON 合同，不经本目录落盘。
+## 静态启动层只读
+
+- README.md 与 workspace.json 由 packer 写入，Agent 不得修改或删除。
+- workspace.json 只记录 deck_id、插件制品清单和入口路由；pack 后保持冻结，
+  不含 workflow_run_id、来源五字段或时间戳。
+
+## Agent 运行内容层
+
+- 页面描述位于 runtime/runs/<workflow_run_id>/run.json 与 stages/*.json。
+- Agent 只能调用 mcp__story_workspace__write_dream_run 和
+  mcp__story_workspace__write_dream_stage 更新运行内容层。
+- 禁止使用 Write、Edit 或 Bash 直接修改 .dream；受控工具会从 host 读取
+  actor、thread 与冻结的 WorkflowRun 来源字段，并校验 revision 和 source files。
+- 先写人物、场景或分镜的 canonical 工作区文件，再调用 stage 工具同步页面元信息。
+- Dream 页面通过 story-workspace REST API 读取文件；SSE 只通知页面重新读取。
 
 入口路由：/story-workspace/dream
 """

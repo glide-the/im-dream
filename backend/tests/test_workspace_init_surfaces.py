@@ -199,8 +199,12 @@ class MaterializeDreamSurfaceTests(unittest.TestCase):
             },
         )
         readme = (self.workspace / ".dream" / "README.md").read_text()
-        self.assertIn("只读", readme)
-        self.assertIn("workflow_run_id", readme)  # boundary declaration
+        self.assertIn("静态启动层只读", readme)
+        self.assertIn("workspace.json", readme)
+        self.assertIn("runtime/runs/<workflow_run_id>", readme)
+        self.assertIn("mcp__story_workspace__write_dream_run", readme)
+        self.assertIn("mcp__story_workspace__write_dream_stage", readme)
+        self.assertIn("禁止使用 Write、Edit 或 Bash", readme)
         self.assertEqual(step["step"], "materialize-surface")
         self.assertEqual(step["surface"], "dream")
 
