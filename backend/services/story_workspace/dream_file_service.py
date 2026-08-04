@@ -10,33 +10,43 @@ import stat
 import threading
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterator, TypeVar
+from typing import Iterator, TypeVar
 from uuid import uuid4
 
 from pydantic import BaseModel, ValidationError
 
 try:
+    from models.workflow_run import WorkflowRun
     from story_workspace.contracts import (
         STORY_WORKSPACE_DREAM_FILE_MAX_BYTES,
         STORY_WORKSPACE_DREAM_REQUIRED_STAGES,
         StoryWorkspaceDreamFilesResponse,
         StoryWorkspaceDreamRunFile,
         StoryWorkspaceDreamSource,
+        StoryWorkspaceDreamSourceResponse,
         StoryWorkspaceDreamStage,
         StoryWorkspaceDreamStageFile,
+        StoryWorkspaceDreamStageItem,
+        StoryWorkspaceDreamStageItemResponse,
         StoryWorkspaceDreamStagePage,
+        StoryWorkspaceDreamStagePageResponse,
         StoryWorkspaceDreamStageResponse,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
+    from backend.models.workflow_run import WorkflowRun
     from backend.story_workspace.contracts import (
         STORY_WORKSPACE_DREAM_FILE_MAX_BYTES,
         STORY_WORKSPACE_DREAM_REQUIRED_STAGES,
         StoryWorkspaceDreamFilesResponse,
         StoryWorkspaceDreamRunFile,
         StoryWorkspaceDreamSource,
+        StoryWorkspaceDreamSourceResponse,
         StoryWorkspaceDreamStage,
         StoryWorkspaceDreamStageFile,
+        StoryWorkspaceDreamStageItem,
+        StoryWorkspaceDreamStageItemResponse,
         StoryWorkspaceDreamStagePage,
+        StoryWorkspaceDreamStagePageResponse,
         StoryWorkspaceDreamStageResponse,
     )
 
@@ -96,29 +106,43 @@ def _validate_expected_revision(expected_revision: int) -> None:
         )
 
 
-def _authoritative_context(workflow_run: Any) -> tuple[str, StoryWorkspaceDreamSource]:
-    run_id = getattr(workflow_run, "workflow_run_id", None)
-    if not isinstance(run_id, str) or _RUN_ID_PATTERN.fullmatch(run_id) is None:
+def _authoritative_context(
+    workflow_run: WorkflowRun,
+) -> tuple[str, StoryWorkspaceDreamSource]:
+    if not isinstance(workflow_run, WorkflowRun):
+        raise StoryWorkspaceDreamFileError(
+            "Dream file operations require an authoritative WorkflowRun"
+        )
+    run_id = workflow_run.workflow_run_id
+    if _RUN_ID_PATTERN.fullmatch(run_id) is None:
         raise StoryWorkspaceDreamFileError("authoritative workflow run id is invalid")
     try:
         source = StoryWorkspaceDreamSource(
-            deck_plugin_binding_id=getattr(
-                workflow_run, "deck_plugin_binding_id", None
-            ),
-            binding_revision=getattr(workflow_run, "binding_revision", None),
-            deck_plugin_version=getattr(workflow_run, "deck_plugin_version", None),
-            deck_runtime_snapshot_id=getattr(
-                workflow_run, "deck_runtime_snapshot_id", None
-            ),
-            runtime_plugin_lock_id=getattr(
-                workflow_run, "runtime_plugin_lock_id", None
-            ),
+            deck_plugin_binding_id=workflow_run.deck_plugin_binding_id,
+            binding_revision=workflow_run.binding_revision,
+            deck_plugin_version=workflow_run.deck_plugin_version,
+            deck_runtime_snapshot_id=workflow_run.deck_runtime_snapshot_id,
+            runtime_plugin_lock_id=workflow_run.runtime_plugin_lock_id,
         )
     except ValidationError as exc:
         raise StoryWorkspaceDreamFileError(
             "authoritative workflow run source is incomplete"
         ) from exc
     return run_id, source
+
+
+def _validate_authoritative_thread(
+    workflow_run: WorkflowRun,
+    thread_id: str,
+) -> None:
+    if not isinstance(workflow_run, WorkflowRun):
+        raise StoryWorkspaceDreamFileError(
+            "Dream file operations require an authoritative WorkflowRun"
+        )
+    if workflow_run.source_voice_thread_id != thread_id:
+        raise StoryWorkspaceDreamFileError(
+            "thread_id does not match the authoritative WorkflowRun"
+        )
 
 
 def _stage_page(
@@ -228,6 +252,31 @@ class _StoryWorkspaceDreamFilesystem:
             self._validate_directory(runtime, within=self.dream_root)
             self._validate_directory(runs, within=runtime)
             self._validate_directory(run_directory, within=runs)
+        return run_directory
+
+    def _optional_run_directory(self, run_id: str) -> Path | None:
+        """Resolve an existing run tree without creating any path component."""
+
+        if _RUN_ID_PATTERN.fullmatch(run_id) is None:
+            raise StoryWorkspaceDreamPathError("unsafe workflow run directory name")
+        self._validate_dream_root()
+        runtime = self.dream_root / "runtime"
+        runs = runtime / "runs"
+        run_directory = runs / run_id
+        for path, within in (
+            (runtime, self.dream_root),
+            (runs, runtime),
+            (run_directory, runs),
+        ):
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return None
+            except OSError as exc:
+                raise StoryWorkspaceDreamPathError(
+                    f"Dream protocol directory is unavailable: {path.name}"
+                ) from exc
+            self._validate_directory(path, within=within)
         return run_directory
 
     @contextmanager
@@ -484,12 +533,13 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
 
     def write_run(
         self,
-        workflow_run: Any,
+        workflow_run: WorkflowRun,
         *,
         thread_id: str,
         expected_revision: int,
     ) -> StoryWorkspaceDreamRunFile:
         _validate_expected_revision(expected_revision)
+        _validate_authoritative_thread(workflow_run, thread_id)
         run_id, source = _authoritative_context(workflow_run)
         with self._locked_run(run_id, create=True) as run_directory:
             current = self._read_model(
@@ -529,11 +579,11 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
 
     def write_stage(
         self,
-        workflow_run: Any,
+        workflow_run: WorkflowRun,
         *,
         stage: StoryWorkspaceDreamStage | str,
         source_files: list[str],
-        items: list[dict[str, Any] | Any],
+        items: list[dict[str, object] | StoryWorkspaceDreamStageItem],
         expected_revision: int,
         filename: str | None = None,
     ) -> StoryWorkspaceDreamStageFile:
@@ -650,10 +700,11 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
 
     def read_run(
         self,
-        workflow_run: Any,
+        workflow_run: WorkflowRun,
         *,
         thread_id: str,
     ) -> StoryWorkspaceDreamRunFile:
+        _validate_authoritative_thread(workflow_run, thread_id)
         run_id, source = _authoritative_context(workflow_run)
         with self._locked_run(run_id, create=False) as run_directory:
             run_file = self._read_model(
@@ -673,7 +724,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
 
     def read_stage(
         self,
-        workflow_run: Any,
+        workflow_run: WorkflowRun,
         *,
         stage: StoryWorkspaceDreamStage | str,
     ) -> StoryWorkspaceDreamStageFile | None:
@@ -700,7 +751,7 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
 
     def read_stage_file(
         self,
-        workflow_run: Any,
+        workflow_run: WorkflowRun,
         *,
         filename: str,
     ) -> StoryWorkspaceDreamStageFile | None:
@@ -713,16 +764,27 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
 
     def read(
         self,
-        workflow_run: Any,
+        workflow_run: WorkflowRun,
         *,
         thread_id: str,
     ) -> StoryWorkspaceDreamFilesResponse:
+        _validate_authoritative_thread(workflow_run, thread_id)
         run_id, source = _authoritative_context(workflow_run)
+        if self._optional_run_directory(run_id) is None:
+            return self._waiting_response(run_id, thread_id, source)
         with self._locked_run(run_id, create=False) as run_directory:
-            run_file = self._read_and_validate_run(
+            run_file = self._read_model(
                 run_directory,
-                run_id,
-                source,
+                "run.json",
+                StoryWorkspaceDreamRunFile,
+                required=False,
+            )
+            if run_file is None:
+                return self._waiting_response(run_id, thread_id, source)
+            StoryWorkspaceDreamFileWriter._validate_run_authority(
+                run_file,
+                run_id=run_id,
+                source=source,
                 thread_id=thread_id,
             )
             stage_responses: dict[
@@ -745,8 +807,15 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
                         stage=stage_file.stage,
                         revision=stage_file.revision,
                         source_files=stage_file.source_files,
-                        page=stage_file.page,
-                        items=stage_file.items,
+                        page=StoryWorkspaceDreamStagePageResponse.model_validate(
+                            stage_file.page.model_dump()
+                        ),
+                        items=[
+                            StoryWorkspaceDreamStageItemResponse.model_validate(
+                                item.model_dump()
+                            )
+                            for item in stage_file.items
+                        ],
                     )
             complete = set(stage_responses) == set(
                 STORY_WORKSPACE_DREAM_REQUIRED_STAGES
@@ -754,12 +823,32 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
             return StoryWorkspaceDreamFilesResponse(
                 story_workspace_run_id=run_id,
                 thread_id=run_file.thread_id,
-                source=run_file.source,
+                source=StoryWorkspaceDreamSourceResponse.model_validate(
+                    run_file.source.model_dump()
+                ),
                 required_stages=list(run_file.required_stages),
                 run_revision=run_file.revision,
                 stages=stage_responses,
                 can_confirm=complete,
             )
+
+    @staticmethod
+    def _waiting_response(
+        run_id: str,
+        thread_id: str,
+        source: StoryWorkspaceDreamSource,
+    ) -> StoryWorkspaceDreamFilesResponse:
+        return StoryWorkspaceDreamFilesResponse(
+            story_workspace_run_id=run_id,
+            thread_id=thread_id,
+            source=StoryWorkspaceDreamSourceResponse.model_validate(
+                source.model_dump()
+            ),
+            required_stages=list(STORY_WORKSPACE_DREAM_REQUIRED_STAGES),
+            run_revision=0,
+            stages={},
+            can_confirm=False,
+        )
 
     def _read_and_validate_run(
         self,

@@ -34,6 +34,7 @@ STORY_WORKSPACE_DREAM_RELATIONS_MAX = 100
 STORY_WORKSPACE_DREAM_EDITS_MAX = 1000
 STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX = 64
 _StoryWorkspaceDreamPositiveInt = Annotated[StrictInt, Field(ge=1)]
+_StoryWorkspaceDreamNonNegativeInt = Annotated[StrictInt, Field(ge=0)]
 
 
 def _story_workspace_to_camel(value: str) -> str:
@@ -115,14 +116,18 @@ STORY_WORKSPACE_DREAM_REQUIRED_STAGES = (
 )
 
 
-class _StoryWorkspaceDreamModel(BaseModel):
-    """Strict Dream model with optional camelCase serialization aliases.
+class _StoryWorkspaceDreamStorageModel(BaseModel):
+    """Strict snake_case-only model for canonical runtime JSON files."""
 
-    Runtime JSON is always dumped without aliases and therefore remains the
-    canonical snake_case storage schema. REST models opt into ``by_alias`` at
-    the API boundary and recursively serialize the same nested values in
-    camelCase.
-    """
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+
+class _StoryWorkspaceDreamWireModel(BaseModel):
+    """Strict REST model with explicit snake_case ↔ camelCase boundary."""
 
     model_config = ConfigDict(
         alias_generator=_story_workspace_to_camel,
@@ -133,7 +138,7 @@ class _StoryWorkspaceDreamModel(BaseModel):
     )
 
 
-class StoryWorkspaceDreamSource(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamSource(_StoryWorkspaceDreamStorageModel):
     deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
     binding_revision: _StoryWorkspaceDreamPositiveInt
     deck_plugin_version: str = Field(min_length=1, max_length=255)
@@ -141,7 +146,7 @@ class StoryWorkspaceDreamSource(_StoryWorkspaceDreamModel):
     runtime_plugin_lock_id: str = Field(min_length=1, max_length=255)
 
 
-class StoryWorkspaceDreamRunFile(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamRunFile(_StoryWorkspaceDreamStorageModel):
     """Canonical snake_case payload persisted as ``run.json``."""
 
     schema_version: Literal["dream-run/v1"] = "dream-run/v1"
@@ -168,12 +173,12 @@ class StoryWorkspaceDreamRunFile(_StoryWorkspaceDreamModel):
         return self
 
 
-class StoryWorkspaceDreamStagePage(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamStagePage(_StoryWorkspaceDreamStorageModel):
     title: str = Field(min_length=1, max_length=200)
     entry_route: str = Field(min_length=1, max_length=512)
 
 
-class StoryWorkspaceDreamStageItem(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamStageItem(_StoryWorkspaceDreamStorageModel):
     entity_id: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=200)
     summary: Optional[str] = Field(default=None, max_length=4000)
@@ -193,7 +198,7 @@ class StoryWorkspaceDreamStageItem(_StoryWorkspaceDreamModel):
         return values
 
 
-class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamStorageModel):
     """Canonical snake_case payload persisted in ``stages/<stage>.json``."""
 
     schema_version: Literal["dream-stage/v1"] = "dream-stage/v1"
@@ -243,32 +248,66 @@ class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamModel):
             )
         if any(item.source_file not in self.source_files for item in self.items):
             raise ValueError("every item source_file must be declared in source_files")
+        entity_ids = [item.entity_id for item in self.items]
+        if len(entity_ids) != len(set(entity_ids)):
+            raise ValueError("items must have unique entity_id values within a stage")
         return self
 
 
-class StoryWorkspaceDreamStageResponse(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamSourceResponse(_StoryWorkspaceDreamWireModel):
+    deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
+    binding_revision: _StoryWorkspaceDreamPositiveInt
+    deck_plugin_version: str = Field(min_length=1, max_length=255)
+    deck_runtime_snapshot_id: str = Field(min_length=1, max_length=255)
+    runtime_plugin_lock_id: str = Field(min_length=1, max_length=255)
+
+
+class StoryWorkspaceDreamStagePageResponse(_StoryWorkspaceDreamWireModel):
+    title: str = Field(min_length=1, max_length=200)
+    entry_route: str = Field(min_length=1, max_length=512)
+
+
+class StoryWorkspaceDreamStageItemResponse(_StoryWorkspaceDreamWireModel):
+    entity_id: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=200)
+    summary: Optional[str] = Field(default=None, max_length=4000)
+    source_file: str = Field(min_length=1, max_length=1024)
+    relations: list[str] = Field(
+        default_factory=list,
+        max_length=STORY_WORKSPACE_DREAM_RELATIONS_MAX,
+    )
+
+
+class StoryWorkspaceDreamStageResponse(_StoryWorkspaceDreamWireModel):
     stage: StoryWorkspaceDreamStage
     revision: _StoryWorkspaceDreamPositiveInt
     source_files: list[str] = Field(
         min_length=1,
         max_length=STORY_WORKSPACE_DREAM_SOURCE_FILES_MAX,
     )
-    page: StoryWorkspaceDreamStagePage
-    items: list[StoryWorkspaceDreamStageItem] = Field(
+    page: StoryWorkspaceDreamStagePageResponse
+    items: list[StoryWorkspaceDreamStageItemResponse] = Field(
         default_factory=list,
         max_length=STORY_WORKSPACE_DREAM_ITEMS_MAX,
     )
 
+    @model_validator(mode="after")
+    def response_entity_ids_are_unique(self) -> "StoryWorkspaceDreamStageResponse":
+        entity_ids = [item.entity_id for item in self.items]
+        if len(entity_ids) != len(set(entity_ids)):
+            raise ValueError("items must have unique entity_id values within a stage")
+        return self
 
-class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamModel):
+
+class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     thread_id: str = Field(min_length=1, max_length=255)
-    source: StoryWorkspaceDreamSource
+    source: StoryWorkspaceDreamSourceResponse
     required_stages: list[StoryWorkspaceDreamStage] = Field(
         min_length=3,
         max_length=3,
     )
-    run_revision: _StoryWorkspaceDreamPositiveInt = 1
+    run_revision: _StoryWorkspaceDreamNonNegativeInt
     stages: dict[StoryWorkspaceDreamStage, StoryWorkspaceDreamStageResponse]
     can_confirm: bool
     confirmation_label: Literal["确认并继续"] = "确认并继续"
@@ -279,13 +318,19 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamModel):
     ) -> "StoryWorkspaceDreamFilesResponse":
         if tuple(self.required_stages) != STORY_WORKSPACE_DREAM_REQUIRED_STAGES:
             raise ValueError("required_stages must contain the three canonical stages")
+        if any(key is not value.stage for key, value in self.stages.items()):
+            raise ValueError("each stages key must match its nested stage value")
+        if self.run_revision == 0 and self.stages:
+            raise ValueError(
+                "waiting projections without run.json cannot contain stages"
+            )
         expected = set(STORY_WORKSPACE_DREAM_REQUIRED_STAGES)
         if self.can_confirm != (set(self.stages) == expected):
             raise ValueError("can_confirm must reflect complete required stages")
         return self
 
 
-class StoryWorkspaceDreamEdit(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamEdit(_StoryWorkspaceDreamWireModel):
     stage: StoryWorkspaceDreamStage
     entity_id: str = Field(min_length=1, max_length=128)
     fields: dict[str, Any] = Field(
@@ -310,7 +355,7 @@ class StoryWorkspaceDreamEdit(_StoryWorkspaceDreamModel):
         return values
 
 
-class StoryWorkspaceDreamConfirmationCommand(_StoryWorkspaceDreamModel):
+class StoryWorkspaceDreamConfirmationCommand(_StoryWorkspaceDreamWireModel):
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     thread_id: str = Field(min_length=1, max_length=255)
     base_revisions: dict[StoryWorkspaceDreamStage, _StoryWorkspaceDreamPositiveInt]
@@ -779,10 +824,13 @@ __all__ = [
     "StoryWorkspaceDreamFilesResponse",
     "StoryWorkspaceDreamRunFile",
     "StoryWorkspaceDreamSource",
+    "StoryWorkspaceDreamSourceResponse",
     "StoryWorkspaceDreamStage",
     "StoryWorkspaceDreamStageFile",
     "StoryWorkspaceDreamStageItem",
+    "StoryWorkspaceDreamStageItemResponse",
     "StoryWorkspaceDreamStagePage",
+    "StoryWorkspaceDreamStagePageResponse",
     "StoryWorkspaceDreamStageResponse",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",

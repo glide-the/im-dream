@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
 from pydantic import ValidationError
 
+from models.workflow_run import RunStatus, WorkflowRun
 from services.story_workspace.dream_file_service import (
     StoryWorkspaceDreamFileConflict,
     StoryWorkspaceDreamFileError,
@@ -27,8 +30,11 @@ from story_workspace.contracts import (
     StoryWorkspaceDreamEdit,
     StoryWorkspaceDreamFilesResponse,
     StoryWorkspaceDreamRunFile,
+    StoryWorkspaceDreamSource,
+    StoryWorkspaceDreamSourceResponse,
     StoryWorkspaceDreamStage,
     StoryWorkspaceDreamStageFile,
+    StoryWorkspaceDreamStageResponse,
 )
 
 
@@ -36,17 +42,30 @@ RUN_ID = "run_0123456789abcdef0123456789abcdef"
 OTHER_RUN_ID = "run_fedcba9876543210fedcba9876543210"
 
 
-def authoritative_run(run_id: str = RUN_ID, **overrides: object) -> SimpleNamespace:
+def authoritative_run(run_id: str = RUN_ID, **overrides: object) -> WorkflowRun:
     values: dict[str, object] = {
         "workflow_run_id": run_id,
+        "deck_plugin_id": "plugin-1",
+        "workflow_definition_ref": "workflow-1",
         "deck_plugin_binding_id": "binding-1",
         "binding_revision": 3,
         "deck_plugin_version": "1.2.3",
         "deck_runtime_snapshot_id": "snapshot-1",
         "runtime_plugin_lock_id": "lock-1",
+        "deck_plugin_manifest_hash": "sha256:" + "1" * 64,
+        "workflow_preflight_id": "pf_" + "2" * 32,
+        "status": RunStatus.PREFLIGHT,
+        "workspace_id": "workspace-1",
+        "idempotency_key": "run-request-1",
+        "input_hash": "sha256:" + "3" * 64,
+        "semantic_fingerprint": "sha256:" + "4" * 64,
+        "status_version": 1,
+        "created_by": "actor-1",
+        "created_at": datetime(2026, 8, 4, tzinfo=timezone.utc),
+        "source_voice_thread_id": "thread-1",
     }
     values.update(overrides)
-    return SimpleNamespace(**values)
+    return WorkflowRun(**values)
 
 
 class StoryWorkspaceDreamFilesTest(unittest.TestCase):
@@ -92,6 +111,167 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
             self.run, thread_id="thread-1", expected_revision=0
         )
 
+    @staticmethod
+    def tree_snapshot(root: Path) -> list[tuple[str, str, bytes | None]]:
+        snapshot: list[tuple[str, str, bytes | None]] = []
+        for path in sorted(root.rglob("*")):
+            relative = path.relative_to(root).as_posix()
+            if path.is_symlink():
+                snapshot.append((relative, "symlink", os.readlink(path).encode()))
+            elif path.is_dir():
+                snapshot.append((relative, "dir", None))
+            else:
+                snapshot.append((relative, "file", path.read_bytes()))
+        return snapshot
+
+    def test_static_only_and_run_without_json_are_read_only_waiting_states(
+        self,
+    ) -> None:
+        before = self.tree_snapshot(self.workspace)
+        waiting = self.reader.read(self.run, thread_id="thread-1")
+        self.assertEqual(waiting.run_revision, 0)
+        self.assertEqual(waiting.stages, {})
+        self.assertFalse(waiting.can_confirm)
+        self.assertEqual(self.tree_snapshot(self.workspace), before)
+        self.assertFalse((self.dream / "runtime").exists())
+
+        run_directory = self.dream / "runtime" / "runs" / RUN_ID
+        run_directory.mkdir(parents=True)
+        before = self.tree_snapshot(self.workspace)
+        waiting = self.reader.read(self.run, thread_id="thread-1")
+        self.assertEqual(waiting.run_revision, 0)
+        self.assertEqual(waiting.stages, {})
+        self.assertFalse(waiting.can_confirm)
+        self.assertEqual(self.tree_snapshot(self.workspace), before)
+
+    def test_storage_validation_rejects_camel_case_and_mixed_keys(self) -> None:
+        canonical_source = {
+            "deck_plugin_binding_id": "binding-1",
+            "binding_revision": 3,
+            "deck_plugin_version": "1.2.3",
+            "deck_runtime_snapshot_id": "snapshot-1",
+            "runtime_plugin_lock_id": "lock-1",
+        }
+        canonical_run = {
+            "schema_version": "dream-run/v1",
+            "workflow_run_id": RUN_ID,
+            "thread_id": "thread-1",
+            "source": canonical_source,
+            "projection_entry": (
+                f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-files"
+            ),
+            "required_stages": ["characters", "scenes", "storyboards"],
+            "revision": 1,
+        }
+        for invalid in (
+            {**canonical_run, "threadId": canonical_run["thread_id"]},
+            {
+                "schemaVersion": "dream-run/v1",
+                "workflowRunId": RUN_ID,
+                "threadId": "thread-1",
+                "source": {
+                    "deckPluginBindingId": "binding-1",
+                    "bindingRevision": 3,
+                    "deckPluginVersion": "1.2.3",
+                    "deckRuntimeSnapshotId": "snapshot-1",
+                    "runtimePluginLockId": "lock-1",
+                },
+                "projectionEntry": (
+                    f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-files"
+                ),
+                "requiredStages": ["characters", "scenes", "storyboards"],
+                "revision": 1,
+            },
+        ):
+            with self.subTest(keys=sorted(invalid)):
+                with self.assertRaises(ValidationError):
+                    StoryWorkspaceDreamRunFile.model_validate(invalid)
+
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamStageFile.model_validate({
+                "schemaVersion": "dream-stage/v1",
+                "workflowRunId": RUN_ID,
+                "stage": "characters",
+                "revision": 1,
+                "sourceFiles": ["assets/characters/lead.md"],
+                "page": {
+                    "title": "人物",
+                    "entryRoute": f"/story-workspace/characters?run={RUN_ID}",
+                },
+                "items": [{
+                    "entityId": "entity-1",
+                    "displayName": "Entity",
+                    "summary": "summary",
+                    "sourceFile": "assets/characters/lead.md",
+                    "relations": [],
+                }],
+            })
+
+    def test_only_real_workflow_run_is_a_trusted_host_source(self) -> None:
+        fake = SimpleNamespace(
+            workflow_run_id=RUN_ID,
+            deck_plugin_binding_id="binding-1",
+            binding_revision=3,
+            deck_plugin_version="1.2.3",
+            deck_runtime_snapshot_id="snapshot-1",
+            runtime_plugin_lock_id="lock-1",
+        )
+        with self.assertRaises(StoryWorkspaceDreamFileError):
+            self.writer.write_run(
+                fake,
+                thread_id="thread-1",
+                expected_revision=0,
+            )
+        self.assertFalse((self.dream / "runtime").exists())
+
+    def test_response_rejects_stage_key_and_nested_stage_mismatch(self) -> None:
+        source = StoryWorkspaceDreamSource(
+            deck_plugin_binding_id="binding-1",
+            binding_revision=3,
+            deck_plugin_version="1.2.3",
+            deck_runtime_snapshot_id="snapshot-1",
+            runtime_plugin_lock_id="lock-1",
+        )
+        nested = StoryWorkspaceDreamStageResponse(
+            stage=StoryWorkspaceDreamStage.SCENES,
+            revision=1,
+            source_files=["assets/scenes/opening.md"],
+            page={
+                "title": "场景",
+                "entry_route": f"/story-workspace/scenes?run={RUN_ID}",
+            },
+            items=[],
+        )
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamFilesResponse(
+                story_workspace_run_id=RUN_ID,
+                thread_id="thread-1",
+                source=StoryWorkspaceDreamSourceResponse.model_validate(
+                    source.model_dump()
+                ),
+                required_stages=list(StoryWorkspaceDreamStage),
+                run_revision=1,
+                stages={StoryWorkspaceDreamStage.CHARACTERS: nested},
+                can_confirm=False,
+            )
+
+    def test_stage_file_rejects_duplicate_entity_ids(self) -> None:
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamStageFile(
+                workflow_run_id=RUN_ID,
+                stage="characters",
+                revision=1,
+                source_files=["assets/characters/lead.md"],
+                page={
+                    "title": "人物",
+                    "entry_route": f"/story-workspace/characters?run={RUN_ID}",
+                },
+                items=[
+                    self.item("assets/characters/lead.md", "one"),
+                    self.item("assets/characters/lead.md", "two"),
+                ],
+            )
+
     def write_stage(
         self,
         stage: StoryWorkspaceDreamStage,
@@ -130,9 +310,27 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
         response = StoryWorkspaceDreamFilesResponse(
             story_workspace_run_id=RUN_ID,
             thread_id="thread-1",
-            source=run_file.source,
+            source=StoryWorkspaceDreamSourceResponse.model_validate(
+                run_file.source.model_dump()
+            ),
             required_stages=list(StoryWorkspaceDreamStage),
-            stages={},
+            run_revision=1,
+            stages={
+                StoryWorkspaceDreamStage.CHARACTERS: (
+                    StoryWorkspaceDreamStageResponse(
+                        stage=StoryWorkspaceDreamStage.CHARACTERS,
+                        revision=1,
+                        source_files=["assets/characters/lead.md"],
+                        page={
+                            "title": "人物",
+                            "entry_route": (
+                                f"/story-workspace/characters?run={RUN_ID}"
+                            ),
+                        },
+                        items=[self.item("assets/characters/lead.md")],
+                    )
+                )
+            },
             can_confirm=False,
         )
         wire = response.model_dump(mode="json", by_alias=True)
@@ -141,6 +339,11 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
         self.assertIn("deckPluginBindingId", wire["source"])
         self.assertIn("requiredStages", wire)
         self.assertEqual(wire["confirmationLabel"], "确认并继续")
+        character_wire = wire["stages"]["characters"]
+        self.assertIn("sourceFiles", character_wire)
+        self.assertIn("entryRoute", character_wire["page"])
+        self.assertIn("entityId", character_wire["items"][0])
+        self.assertNotIn("entity_id", character_wire["items"][0])
 
         command = StoryWorkspaceDreamConfirmationCommand.model_validate(
             {
@@ -459,6 +662,58 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
         losers = [x for x in results if isinstance(x, StoryWorkspaceDreamFileConflict)]
         self.assertEqual(len(winners), 1)
         self.assertEqual(len(losers), 1)
+        self.assertEqual(
+            self.reader.read_stage(
+                self.run, stage=StoryWorkspaceDreamStage.CHARACTERS
+            ).revision,
+            2,
+        )
+
+    def test_cross_process_cas_has_exactly_one_winner(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS, "assets/characters/lead.md"
+        )
+        context = multiprocessing.get_context("fork")
+        ready = context.Queue()
+        start = context.Event()
+        results = context.Queue()
+
+        def update(summary: str) -> None:
+            writer = StoryWorkspaceDreamFileWriter(self.workspace)
+            ready.put(True)
+            start.wait(5)
+            try:
+                writer.write_stage(
+                    self.run,
+                    stage=StoryWorkspaceDreamStage.CHARACTERS,
+                    source_files=["assets/characters/lead.md"],
+                    items=[self.item("assets/characters/lead.md", summary)],
+                    expected_revision=1,
+                )
+            except StoryWorkspaceDreamFileConflict:
+                results.put("conflict")
+            except Exception as exc:
+                results.put(f"error:{type(exc).__name__}:{exc}")
+            else:
+                results.put("written")
+
+        processes = [
+            context.Process(target=update, args=(summary,))
+            for summary in ("process-one", "process-two")
+        ]
+        for process in processes:
+            process.start()
+        for _ in processes:
+            self.assertTrue(ready.get(timeout=5))
+        start.set()
+        for process in processes:
+            process.join(timeout=10)
+            self.assertFalse(process.is_alive())
+            self.assertEqual(process.exitcode, 0)
+
+        outcomes = sorted(results.get(timeout=5) for _ in processes)
+        self.assertEqual(outcomes, ["conflict", "written"])
         self.assertEqual(
             self.reader.read_stage(
                 self.run, stage=StoryWorkspaceDreamStage.CHARACTERS
