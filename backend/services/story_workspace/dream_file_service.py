@@ -1,17 +1,32 @@
-"""Atomic, fail-closed reader/writer for the ``.dream/runtime`` protocol."""
+"""Atomic, fail-closed reader/writer for the ``.dream/runtime`` protocol.
+
+The runtime protocol deliberately requires Unix ``flock`` plus secure
+``dir_fd``/``O_NOFOLLOW`` primitives. Every operation pins the directory inode
+chain from ``.dream`` through the run/stages directory and performs all JSON
+I/O relative to those descriptors. Paths are used only to establish and later
+verify the pinned identities; they are never reopened after the run lock.
+"""
 
 from __future__ import annotations
 
-import fcntl
+import errno
+import inspect
 import json
 import os
 import re
 import stat
+import sys
 import threading
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Iterator, TypeVar
+from typing import Callable, Iterator, TypeVar
 from uuid import uuid4
+
+try:  # Import-safe on Windows; construction fails with a public exception.
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by capability simulation.
+    fcntl = None  # type: ignore[assignment]
 
 from pydantic import BaseModel, ValidationError
 
@@ -62,18 +77,39 @@ _STAGE_TITLES = {
     StoryWorkspaceDreamStage.SCENES: "场景",
     StoryWorkspaceDreamStage.STORYBOARDS: "分镜",
 }
-
-_THREAD_LOCKS_GUARD = threading.Lock()
-_THREAD_LOCKS: dict[str, threading.RLock] = {}
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 class StoryWorkspaceDreamFileError(RuntimeError):
-    """Base class for a malformed, unsafe, or inconsistent Dream file."""
+    """Base public failure for Dream runtime files."""
+
+
+class StoryWorkspaceDreamContractError(StoryWorkspaceDreamFileError):
+    """A request or on-disk JSON payload violated the canonical contract."""
 
 
 class StoryWorkspaceDreamPathError(StoryWorkspaceDreamFileError):
-    """A caller-controlled or on-disk path crossed the protocol boundary."""
+    """A path, symlink, or directory inode violated containment."""
+
+
+class StoryWorkspaceDreamIOError(StoryWorkspaceDreamFileError):
+    """An I/O operation failed before a durable state was established."""
+
+
+class StoryWorkspaceDreamPlatformUnsupported(StoryWorkspaceDreamFileError):
+    """The host lacks the primitives required by the Dream file protocol."""
+
+
+class StoryWorkspaceDreamDurabilityIndeterminate(StoryWorkspaceDreamIOError):
+    """Replace succeeded but rollback could not establish a durable outcome."""
+
+    def __init__(self, observed_revision: int | None, state_hint: str) -> None:
+        super().__init__(
+            "Dream file durability is indeterminate; re-read the file before "
+            f"retrying (observed_revision={observed_revision}, state={state_hint})"
+        )
+        self.observed_revision = observed_revision
+        self.state_hint = state_hint
 
 
 class StoryWorkspaceDreamFileConflict(StoryWorkspaceDreamFileError):
@@ -88,11 +124,42 @@ class StoryWorkspaceDreamFileConflict(StoryWorkspaceDreamFileError):
         self.current_revision = current_revision
 
 
+def _platform_capability_reason() -> str | None:
+    if fcntl is None or not callable(getattr(fcntl, "flock", None)):
+        return "fcntl.flock is unavailable"
+    for flag_name in ("O_DIRECTORY", "O_NOFOLLOW"):
+        if not hasattr(os, flag_name):
+            return f"os.{flag_name} is unavailable"
+    for function in (os.open, os.stat, os.mkdir, os.unlink):
+        if function not in os.supports_dir_fd:
+            return f"{function.__name__} lacks dir_fd support"
+    if os.stat not in os.supports_follow_symlinks:
+        return "stat lacks follow_symlinks support"
+    try:
+        replace_parameters = inspect.signature(os.replace).parameters
+    except (TypeError, ValueError):
+        return "os.replace signature cannot be inspected"
+    if not {"src_dir_fd", "dst_dir_fd"}.issubset(replace_parameters):
+        return "os.replace lacks source/destination dir_fd support"
+    return None
+
+
+DREAM_PLATFORM_SUPPORTED = _platform_capability_reason() is None
+
+
+def _require_platform() -> None:
+    reason = _platform_capability_reason()
+    if reason is not None:
+        raise StoryWorkspaceDreamPlatformUnsupported(
+            f"Dream runtime file protocol is unsupported on this platform: {reason}"
+        )
+
+
 def _coerce_stage(stage: StoryWorkspaceDreamStage | str) -> StoryWorkspaceDreamStage:
     try:
         return StoryWorkspaceDreamStage(stage)
     except (TypeError, ValueError) as exc:
-        raise StoryWorkspaceDreamFileError("unsupported Dream stage") from exc
+        raise StoryWorkspaceDreamContractError("unsupported Dream stage") from exc
 
 
 def _validate_expected_revision(expected_revision: int) -> None:
@@ -101,7 +168,7 @@ def _validate_expected_revision(expected_revision: int) -> None:
         or not isinstance(expected_revision, int)
         or expected_revision < 0
     ):
-        raise StoryWorkspaceDreamFileError(
+        raise StoryWorkspaceDreamContractError(
             "expected_revision must be a non-negative integer"
         )
 
@@ -110,12 +177,14 @@ def _authoritative_context(
     workflow_run: WorkflowRun,
 ) -> tuple[str, StoryWorkspaceDreamSource]:
     if not isinstance(workflow_run, WorkflowRun):
-        raise StoryWorkspaceDreamFileError(
+        raise StoryWorkspaceDreamContractError(
             "Dream file operations require an authoritative WorkflowRun"
         )
     run_id = workflow_run.workflow_run_id
     if _RUN_ID_PATTERN.fullmatch(run_id) is None:
-        raise StoryWorkspaceDreamFileError("authoritative workflow run id is invalid")
+        raise StoryWorkspaceDreamContractError(
+            "authoritative workflow run id is invalid"
+        )
     try:
         source = StoryWorkspaceDreamSource(
             deck_plugin_binding_id=workflow_run.deck_plugin_binding_id,
@@ -125,34 +194,33 @@ def _authoritative_context(
             runtime_plugin_lock_id=workflow_run.runtime_plugin_lock_id,
         )
     except ValidationError as exc:
-        raise StoryWorkspaceDreamFileError(
+        raise StoryWorkspaceDreamContractError(
             "authoritative workflow run source is incomplete"
         ) from exc
     return run_id, source
+
+
+def _authoritative_thread_id(workflow_run: WorkflowRun) -> str:
+    if not isinstance(workflow_run, WorkflowRun):
+        raise StoryWorkspaceDreamContractError(
+            "Dream file operations require an authoritative WorkflowRun"
+        )
+    thread_id = workflow_run.source_voice_thread_id
+    if not isinstance(thread_id, str) or not thread_id.strip():
+        raise StoryWorkspaceDreamContractError(
+            "authoritative WorkflowRun does not identify a Chat thread"
+        )
+    return thread_id
 
 
 def _validate_authoritative_thread(
     workflow_run: WorkflowRun,
     thread_id: str,
 ) -> None:
-    authoritative_thread_id = _authoritative_thread_id(workflow_run)
-    if authoritative_thread_id != thread_id:
-        raise StoryWorkspaceDreamFileError(
+    if _authoritative_thread_id(workflow_run) != thread_id:
+        raise StoryWorkspaceDreamContractError(
             "thread_id does not match the authoritative WorkflowRun"
         )
-
-
-def _authoritative_thread_id(workflow_run: WorkflowRun) -> str:
-    if not isinstance(workflow_run, WorkflowRun):
-        raise StoryWorkspaceDreamFileError(
-            "Dream file operations require an authoritative WorkflowRun"
-        )
-    thread_id = workflow_run.source_voice_thread_id
-    if not isinstance(thread_id, str) or not thread_id.strip():
-        raise StoryWorkspaceDreamFileError(
-            "authoritative WorkflowRun does not identify a Chat thread"
-        )
-    return thread_id
 
 
 def _stage_page(
@@ -174,13 +242,70 @@ def _stage_page(
     )
 
 
-def _thread_lock(key: str) -> threading.RLock:
+@dataclass
+class _LocalLockEntry:
+    lock: threading.RLock
+    references: int = 0
+
+
+_THREAD_LOCKS_GUARD = threading.Lock()
+_THREAD_LOCKS: dict[str, _LocalLockEntry] = {}
+
+
+@contextmanager
+def _local_run_lock(key: str) -> Iterator[None]:
     with _THREAD_LOCKS_GUARD:
-        return _THREAD_LOCKS.setdefault(key, threading.RLock())
+        entry = _THREAD_LOCKS.get(key)
+        if entry is None:
+            entry = _LocalLockEntry(lock=threading.RLock())
+            _THREAD_LOCKS[key] = entry
+        entry.references += 1
+    entry.lock.acquire()
+    try:
+        yield
+    finally:
+        entry.lock.release()
+        with _THREAD_LOCKS_GUARD:
+            entry.references -= 1
+            if entry.references == 0 and _THREAD_LOCKS.get(key) is entry:
+                del _THREAD_LOCKS[key]
+
+
+@dataclass(frozen=True)
+class _PinnedDirectory:
+    descriptor: int
+    parent_descriptor: int
+    name: str
+
+
+@dataclass(frozen=True)
+class _PinnedRun:
+    workspace_descriptor: int
+    dream_descriptor: int
+    runtime_descriptor: int
+    runs_descriptor: int
+    run_descriptor: int
+    run_id: str
+
+    @property
+    def directory(self) -> _PinnedDirectory:
+        return _PinnedDirectory(
+            descriptor=self.run_descriptor,
+            parent_descriptor=self.runs_descriptor,
+            name=self.run_id,
+        )
+
+
+def _add_cleanup_note(primary: BaseException, cleanup: BaseException) -> None:
+    try:
+        primary.add_note(f"suppressed cleanup failure: {cleanup!r}")
+    except AttributeError:  # pragma: no cover - Python 3.10 fallback.
+        pass
 
 
 class _StoryWorkspaceDreamFilesystem:
     def __init__(self, workspace_root: str | os.PathLike[str]) -> None:
+        _require_platform()
         supplied_root = Path(workspace_root)
         try:
             resolved_root = supplied_root.resolve(strict=True)
@@ -192,204 +317,422 @@ class _StoryWorkspaceDreamFilesystem:
         self.dream_root = resolved_root / ".dream"
 
     @staticmethod
-    def _open_directory(path: Path) -> int:
-        flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
-        flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    def _directory_flags() -> int:
+        return os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(
+            os, "O_CLOEXEC", 0
+        )
+
+    @staticmethod
+    def _file_flags() -> int:
+        return os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+
+    @staticmethod
+    def _verify_directory_descriptor(descriptor: int) -> os.stat_result:
         try:
-            descriptor = os.open(path, flags)
+            metadata = os.fstat(descriptor)
         except OSError as exc:
-            raise StoryWorkspaceDreamPathError(
-                f"unsafe Dream protocol directory: {path.name}"
+            raise StoryWorkspaceDreamIOError(
+                "unable to inspect Dream directory descriptor"
             ) from exc
-        if not stat.S_ISDIR(os.fstat(descriptor).st_mode):
-            os.close(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
             raise StoryWorkspaceDreamPathError(
                 "Dream protocol component is not a directory"
             )
-        return descriptor
+        return metadata
 
-    def _validate_directory(self, path: Path, *, within: Path) -> None:
+    @classmethod
+    def _verify_child_identity(
+        cls,
+        parent_descriptor: int,
+        name: str,
+        child_descriptor: int,
+    ) -> None:
+        child_metadata = cls._verify_directory_descriptor(child_descriptor)
         try:
-            metadata = path.lstat()
-            resolved = path.resolve(strict=True)
-        except (OSError, RuntimeError) as exc:
-            raise StoryWorkspaceDreamPathError(
-                f"Dream protocol directory is unavailable: {path.name}"
-            ) from exc
-        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
-            raise StoryWorkspaceDreamPathError(
-                f"Dream protocol directory is unsafe: {path.name}"
+            visible_metadata = os.stat(
+                name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
             )
-        try:
-            contained = resolved.is_relative_to(within.resolve(strict=True))
-        except (OSError, RuntimeError) as exc:
-            raise StoryWorkspaceDreamPathError(
-                "unable to resolve Dream directory"
-            ) from exc
-        if not contained:
-            raise StoryWorkspaceDreamPathError(
-                "Dream protocol directory escaped workspace"
-            )
-        descriptor = self._open_directory(path)
-        os.close(descriptor)
-
-    def _validate_dream_root(self) -> None:
-        self._validate_directory(self.dream_root, within=self.workspace_root)
-
-    def _ensure_directory(self, path: Path, *, within: Path) -> None:
-        try:
-            path.mkdir(mode=0o700)
-        except FileExistsError:
-            pass
         except OSError as exc:
             raise StoryWorkspaceDreamPathError(
-                f"unable to create Dream protocol directory: {path.name}"
+                f"Dream directory identity is unavailable: {name}"
             ) from exc
-        self._validate_directory(path, within=within)
-
-    def _run_directory(self, run_id: str, *, create: bool) -> Path:
-        if _RUN_ID_PATTERN.fullmatch(run_id) is None:
-            raise StoryWorkspaceDreamPathError("unsafe workflow run directory name")
-        self._validate_dream_root()
-        runtime = self.dream_root / "runtime"
-        runs = runtime / "runs"
-        run_directory = runs / run_id
-        if create:
-            self._ensure_directory(runtime, within=self.dream_root)
-            self._ensure_directory(runs, within=runtime)
-            self._ensure_directory(run_directory, within=runs)
-        else:
-            self._validate_directory(runtime, within=self.dream_root)
-            self._validate_directory(runs, within=runtime)
-            self._validate_directory(run_directory, within=runs)
-        return run_directory
-
-    def _optional_run_directory(self, run_id: str) -> Path | None:
-        """Resolve an existing run tree without creating any path component."""
-
-        if _RUN_ID_PATTERN.fullmatch(run_id) is None:
-            raise StoryWorkspaceDreamPathError("unsafe workflow run directory name")
-        self._validate_dream_root()
-        runtime = self.dream_root / "runtime"
-        runs = runtime / "runs"
-        run_directory = runs / run_id
-        for path, within in (
-            (runtime, self.dream_root),
-            (runs, runtime),
-            (run_directory, runs),
+        if stat.S_ISLNK(visible_metadata.st_mode) or not stat.S_ISDIR(
+            visible_metadata.st_mode
         ):
-            try:
-                path.lstat()
-            except FileNotFoundError:
-                return None
-            except OSError as exc:
-                raise StoryWorkspaceDreamPathError(
-                    f"Dream protocol directory is unavailable: {path.name}"
-                ) from exc
-            self._validate_directory(path, within=within)
-        return run_directory
+            raise StoryWorkspaceDreamPathError(
+                f"Dream protocol directory is unsafe: {name}"
+            )
+        if (visible_metadata.st_dev, visible_metadata.st_ino) != (
+            child_metadata.st_dev,
+            child_metadata.st_ino,
+        ):
+            raise StoryWorkspaceDreamPathError(
+                f"Dream directory inode changed during operation: {name}"
+            )
 
-    @contextmanager
-    def _locked_run(self, run_id: str, *, create: bool) -> Iterator[Path]:
-        key = f"{self.workspace_root}:{run_id}"
-        with _thread_lock(key):
-            run_directory = self._run_directory(run_id, create=create)
-            descriptor = self._open_directory(run_directory)
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-                yield run_directory
-            finally:
-                try:
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
-                finally:
-                    os.close(descriptor)
+    def _verify_workspace_identity(self, descriptor: int) -> None:
+        descriptor_metadata = self._verify_directory_descriptor(descriptor)
+        try:
+            visible_metadata = os.stat(self.workspace_root, follow_symlinks=False)
+        except OSError as exc:
+            raise StoryWorkspaceDreamPathError(
+                "workspace root identity is unavailable"
+            ) from exc
+        if (visible_metadata.st_dev, visible_metadata.st_ino) != (
+            descriptor_metadata.st_dev,
+            descriptor_metadata.st_ino,
+        ):
+            raise StoryWorkspaceDreamPathError(
+                "workspace root inode changed during operation"
+            )
 
-    def _stages_directory(self, run_directory: Path, *, create: bool) -> Path:
-        stages = run_directory / "stages"
+    @classmethod
+    def _open_child_directory(
+        cls,
+        parent_descriptor: int,
+        name: str,
+        *,
+        create: bool,
+        optional: bool = False,
+    ) -> int | None:
         if create:
-            self._ensure_directory(stages, within=run_directory)
-        else:
-            self._validate_directory(stages, within=run_directory)
-        return stages
+            try:
+                os.mkdir(name, mode=0o700, dir_fd=parent_descriptor)
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                raise StoryWorkspaceDreamIOError(
+                    f"unable to create Dream directory: {name}"
+                ) from exc
+        try:
+            descriptor = os.open(
+                name,
+                cls._directory_flags(),
+                dir_fd=parent_descriptor,
+            )
+        except FileNotFoundError:
+            if optional:
+                return None
+            raise StoryWorkspaceDreamContractError(
+                f"required Dream directory is missing: {name}"
+            )
+        except OSError as exc:
+            raise StoryWorkspaceDreamPathError(
+                f"unsafe Dream protocol directory: {name}"
+            ) from exc
+        try:
+            cls._verify_child_identity(parent_descriptor, name, descriptor)
+            return descriptor
+        except BaseException:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            raise
+
+    def _open_workspace_descriptor(self) -> int:
+        try:
+            descriptor = os.open(self.workspace_root, self._directory_flags())
+        except OSError as exc:
+            raise StoryWorkspaceDreamPathError(
+                "workspace root cannot be opened safely"
+            ) from exc
+        try:
+            self._verify_workspace_identity(descriptor)
+            return descriptor
+        except BaseException:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            raise
 
     @staticmethod
+    def _cleanup_descriptors(
+        descriptors: list[int],
+        primary: BaseException | None,
+    ) -> None:
+        first_cleanup_error: OSError | None = None
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                if primary is not None:
+                    _add_cleanup_note(primary, exc)
+                elif first_cleanup_error is None:
+                    first_cleanup_error = exc
+        if first_cleanup_error is not None:
+            raise StoryWorkspaceDreamIOError(
+                "failed to close a Dream directory descriptor"
+            ) from first_cleanup_error
+
+    def _verify_run(self, run: _PinnedRun) -> None:
+        self._verify_workspace_identity(run.workspace_descriptor)
+        self._verify_child_identity(
+            run.workspace_descriptor,
+            ".dream",
+            run.dream_descriptor,
+        )
+        self._verify_child_identity(
+            run.dream_descriptor,
+            "runtime",
+            run.runtime_descriptor,
+        )
+        self._verify_child_identity(
+            run.runtime_descriptor,
+            "runs",
+            run.runs_descriptor,
+        )
+        self._verify_child_identity(
+            run.runs_descriptor,
+            run.run_id,
+            run.run_descriptor,
+        )
+
+    @contextmanager
+    def _locked_run(
+        self,
+        run_id: str,
+        *,
+        create: bool,
+        exclusive: bool,
+    ) -> Iterator[_PinnedRun | None]:
+        if _RUN_ID_PATTERN.fullmatch(run_id) is None:
+            raise StoryWorkspaceDreamPathError("unsafe workflow run directory name")
+        key = f"{self.workspace_root}:{run_id}"
+        with _local_run_lock(key):
+            descriptors: list[int] = []
+            locked_descriptor: int | None = None
+            primary: BaseException | None = None
+            try:
+                workspace_descriptor = self._open_workspace_descriptor()
+                descriptors.append(workspace_descriptor)
+                dream_descriptor = self._open_child_directory(
+                    workspace_descriptor,
+                    ".dream",
+                    create=False,
+                )
+                assert dream_descriptor is not None
+                descriptors.append(dream_descriptor)
+                runtime_descriptor = self._open_child_directory(
+                    dream_descriptor,
+                    "runtime",
+                    create=create,
+                    optional=not create,
+                )
+                if runtime_descriptor is None:
+                    yield None
+                    return
+                descriptors.append(runtime_descriptor)
+                runs_descriptor = self._open_child_directory(
+                    runtime_descriptor,
+                    "runs",
+                    create=create,
+                    optional=not create,
+                )
+                if runs_descriptor is None:
+                    yield None
+                    return
+                descriptors.append(runs_descriptor)
+                run_descriptor = self._open_child_directory(
+                    runs_descriptor,
+                    run_id,
+                    create=create,
+                    optional=not create,
+                )
+                if run_descriptor is None:
+                    yield None
+                    return
+                descriptors.append(run_descriptor)
+                lock_operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+                try:
+                    fcntl.flock(run_descriptor, lock_operation)
+                except OSError as exc:
+                    raise StoryWorkspaceDreamIOError(
+                        "unable to acquire Dream run file lock"
+                    ) from exc
+                locked_descriptor = run_descriptor
+                run = _PinnedRun(
+                    workspace_descriptor=workspace_descriptor,
+                    dream_descriptor=dream_descriptor,
+                    runtime_descriptor=runtime_descriptor,
+                    runs_descriptor=runs_descriptor,
+                    run_descriptor=run_descriptor,
+                    run_id=run_id,
+                )
+                self._verify_run(run)
+                try:
+                    yield run
+                except BaseException as exc:
+                    primary = exc
+                    raise
+            except BaseException as exc:
+                if primary is None:
+                    primary = exc
+                raise
+            finally:
+                unlock_failure: StoryWorkspaceDreamIOError | None = None
+                if locked_descriptor is not None:
+                    try:
+                        fcntl.flock(locked_descriptor, fcntl.LOCK_UN)
+                    except OSError as exc:
+                        if primary is not None:
+                            _add_cleanup_note(primary, exc)
+                        else:
+                            unlock_failure = StoryWorkspaceDreamIOError(
+                                "unable to release Dream run file lock"
+                            )
+                            unlock_failure.__cause__ = exc
+                try:
+                    self._cleanup_descriptors(
+                        descriptors,
+                        primary or unlock_failure,
+                    )
+                except StoryWorkspaceDreamIOError:
+                    if primary is None and unlock_failure is None:
+                        raise
+                if primary is None and unlock_failure is not None:
+                    raise unlock_failure
+
+    @contextmanager
+    def _stages_directory(
+        self,
+        run: _PinnedRun,
+        *,
+        create: bool,
+    ) -> Iterator[_PinnedDirectory | None]:
+        descriptor = self._open_child_directory(
+            run.run_descriptor,
+            "stages",
+            create=create,
+            optional=not create,
+        )
+        if descriptor is None:
+            yield None
+            return
+        pinned = _PinnedDirectory(
+            descriptor=descriptor,
+            parent_descriptor=run.run_descriptor,
+            name="stages",
+        )
+        primary: BaseException | None = None
+        try:
+            self._verify_run(run)
+            self._verify_child_identity(
+                pinned.parent_descriptor,
+                pinned.name,
+                pinned.descriptor,
+            )
+            try:
+                yield pinned
+            except BaseException as exc:
+                primary = exc
+                raise
+        finally:
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                if primary is not None or sys.exc_info()[0] is not None:
+                    _add_cleanup_note(primary or sys.exc_info()[1], exc)  # type: ignore[arg-type]
+                else:
+                    raise StoryWorkspaceDreamIOError(
+                        "failed to close Dream stages descriptor"
+                    ) from exc
+
+    @classmethod
+    def _read_bytes(
+        cls,
+        directory_descriptor: int,
+        filename: str,
+        *,
+        required: bool,
+    ) -> bytes | None:
+        try:
+            descriptor = os.open(
+                filename,
+                cls._file_flags(),
+                dir_fd=directory_descriptor,
+            )
+        except FileNotFoundError:
+            if required:
+                raise StoryWorkspaceDreamContractError(
+                    f"required Dream file is missing: {filename}"
+                )
+            return None
+        except OSError as exc:
+            error_class = (
+                StoryWorkspaceDreamPathError
+                if exc.errno in {errno.ELOOP, errno.ENOTDIR}
+                else StoryWorkspaceDreamIOError
+            )
+            raise error_class(f"unable to open Dream file: {filename}") from exc
+        try:
+            try:
+                metadata = os.fstat(descriptor)
+            except OSError as exc:
+                raise StoryWorkspaceDreamIOError(
+                    f"unable to inspect Dream file: {filename}"
+                ) from exc
+            if not stat.S_ISREG(metadata.st_mode):
+                raise StoryWorkspaceDreamPathError(
+                    f"Dream file is not regular: {filename}"
+                )
+            if metadata.st_size > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES:
+                raise StoryWorkspaceDreamContractError(
+                    f"Dream file exceeds size limit: {filename}"
+                )
+            try:
+                with os.fdopen(descriptor, "rb", closefd=True) as handle:
+                    descriptor = -1
+                    payload = handle.read(STORY_WORKSPACE_DREAM_FILE_MAX_BYTES + 1)
+            except OSError as exc:
+                raise StoryWorkspaceDreamIOError(
+                    f"unable to read Dream file: {filename}"
+                ) from exc
+            if len(payload) > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES:
+                raise StoryWorkspaceDreamContractError(
+                    f"Dream file exceeds size limit: {filename}"
+                )
+            return payload
+        finally:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+
+    @classmethod
     def _read_model(
-        directory: Path,
+        cls,
+        directory_descriptor: int,
         filename: str,
         model: type[_ModelT],
         *,
         required: bool,
     ) -> _ModelT | None:
-        directory_descriptor = _StoryWorkspaceDreamFilesystem._open_directory(directory)
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        try:
-            try:
-                descriptor = os.open(filename, flags, dir_fd=directory_descriptor)
-            except FileNotFoundError:
-                if required:
-                    raise StoryWorkspaceDreamFileError(
-                        f"required Dream file is missing: {filename}"
-                    )
-                return None
-            except OSError as exc:
-                raise StoryWorkspaceDreamPathError(
-                    f"unsafe Dream file target: {filename}"
-                ) from exc
-            try:
-                metadata = os.fstat(descriptor)
-                if not stat.S_ISREG(metadata.st_mode):
-                    raise StoryWorkspaceDreamPathError(
-                        f"Dream file is not a regular file: {filename}"
-                    )
-                if metadata.st_size > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES:
-                    raise StoryWorkspaceDreamFileError(
-                        f"Dream file exceeds size limit: {filename}"
-                    )
-                with os.fdopen(descriptor, "rb", closefd=True) as handle:
-                    descriptor = -1
-                    payload = handle.read(STORY_WORKSPACE_DREAM_FILE_MAX_BYTES + 1)
-                if len(payload) > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES:
-                    raise StoryWorkspaceDreamFileError(
-                        f"Dream file exceeds size limit: {filename}"
-                    )
-            finally:
-                if descriptor >= 0:
-                    os.close(descriptor)
-        finally:
-            os.close(directory_descriptor)
-
+        payload = cls._read_bytes(
+            directory_descriptor,
+            filename,
+            required=required,
+        )
+        if payload is None:
+            return None
         try:
             return model.model_validate_json(payload)
         except (ValidationError, ValueError) as exc:
-            raise StoryWorkspaceDreamFileError(
+            raise StoryWorkspaceDreamContractError(
                 f"Dream file schema is invalid: {filename}"
             ) from exc
 
-    @staticmethod
-    def _existing_bytes(directory_descriptor: int, filename: str) -> bytes | None:
-        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
-        flags |= getattr(os, "O_NOFOLLOW", 0)
-        try:
-            descriptor = os.open(filename, flags, dir_fd=directory_descriptor)
-        except FileNotFoundError:
-            return None
-        except OSError as exc:
-            raise StoryWorkspaceDreamPathError(
-                f"unsafe Dream file target: {filename}"
-            ) from exc
-        try:
-            metadata = os.fstat(descriptor)
-            if not stat.S_ISREG(metadata.st_mode):
-                raise StoryWorkspaceDreamPathError(
-                    f"Dream file is not regular: {filename}"
-                )
-            with os.fdopen(descriptor, "rb", closefd=True) as handle:
-                descriptor = -1
-                return handle.read(STORY_WORKSPACE_DREAM_FILE_MAX_BYTES + 1)
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
+    @classmethod
+    def _existing_bytes(
+        cls,
+        directory_descriptor: int,
+        filename: str,
+    ) -> bytes | None:
+        return cls._read_bytes(directory_descriptor, filename, required=False)
 
     @staticmethod
     def _write_temp(
@@ -397,8 +740,8 @@ class _StoryWorkspaceDreamFilesystem:
         temporary_name: str,
         payload: bytes,
     ) -> None:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-        flags |= getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        flags |= getattr(os, "O_CLOEXEC", 0)
         descriptor = os.open(
             temporary_name,
             flags,
@@ -415,97 +758,169 @@ class _StoryWorkspaceDreamFilesystem:
             if descriptor >= 0:
                 os.close(descriptor)
 
+    @staticmethod
+    def _payload_revision(payload: bytes | None) -> int | None:
+        if payload is None:
+            return None
+        try:
+            revision = json.loads(payload).get("revision")
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if isinstance(revision, bool) or not isinstance(revision, int):
+            return None
+        return revision
+
     @classmethod
-    def _restore_after_durability_error(
+    def _observe_revision(
         cls,
         directory_descriptor: int,
         filename: str,
-        old_payload: bytes | None,
-    ) -> None:
+    ) -> int | None:
         try:
-            if old_payload is None:
-                os.unlink(filename, dir_fd=directory_descriptor)
-            else:
-                rollback_name = f".{filename}.{uuid4().hex}.rollback.tmp"
-                try:
-                    cls._write_temp(directory_descriptor, rollback_name, old_payload)
-                    os.replace(
-                        rollback_name,
-                        filename,
-                        src_dir_fd=directory_descriptor,
-                        dst_dir_fd=directory_descriptor,
-                    )
-                finally:
-                    try:
-                        os.unlink(rollback_name, dir_fd=directory_descriptor)
-                    except FileNotFoundError:
-                        pass
+            return cls._payload_revision(
+                cls._existing_bytes(directory_descriptor, filename)
+            )
+        except StoryWorkspaceDreamFileError:
+            return None
+
+    @staticmethod
+    def _cleanup_names(
+        directory_descriptor: int,
+        names: list[str],
+        primary: BaseException | None,
+    ) -> None:
+        first_error: OSError | None = None
+        for name in names:
             try:
-                os.fsync(directory_descriptor)
-            except OSError:
-                pass
-        except OSError:
-            # The original durability error remains the public failure. This
-            # best-effort branch only runs after replace already succeeded.
-            pass
+                os.unlink(name, dir_fd=directory_descriptor)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                if primary is not None:
+                    _add_cleanup_note(primary, exc)
+                elif first_error is None:
+                    first_error = exc
+        if first_error is not None:
+            raise StoryWorkspaceDreamIOError(
+                "unable to clean Dream temporary file"
+            ) from first_error
+
+    @staticmethod
+    def _normalize_operation_error(
+        error: Exception,
+        context: str,
+    ) -> StoryWorkspaceDreamFileError:
+        if isinstance(error, StoryWorkspaceDreamFileError):
+            return error
+        if isinstance(error, ValidationError):
+            return StoryWorkspaceDreamContractError(context)
+        if isinstance(error, OSError):
+            return StoryWorkspaceDreamIOError(context)
+        return StoryWorkspaceDreamFileError(context)
 
     @classmethod
-    def _atomic_replace(cls, directory: Path, filename: str, payload: bytes) -> None:
+    def _atomic_replace(
+        cls,
+        directory: _PinnedDirectory,
+        filename: str,
+        payload: bytes,
+        *,
+        previous_revision: int,
+        next_revision: int,
+        verify_context: Callable[[], None],
+    ) -> None:
         if len(payload) > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES:
-            raise StoryWorkspaceDreamFileError(
+            raise StoryWorkspaceDreamContractError(
                 "serialized Dream file exceeds size limit"
             )
-        directory_descriptor = cls._open_directory(directory)
         temporary_name = f".{filename}.{uuid4().hex}.tmp"
-        replaced = False
+        rollback_name = f".{filename}.{uuid4().hex}.rollback.tmp"
+        cleanup_names = [temporary_name, rollback_name]
         old_payload: bytes | None = None
+        replace_attempted = False
+        replaced = False
         try:
-            old_payload = cls._existing_bytes(directory_descriptor, filename)
-            if (
-                old_payload is not None
-                and len(old_payload) > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES
-            ):
-                raise StoryWorkspaceDreamFileError(
-                    "existing Dream file exceeds size limit"
-                )
-            try:
-                cls._write_temp(directory_descriptor, temporary_name, payload)
-                os.replace(
-                    temporary_name,
-                    filename,
-                    src_dir_fd=directory_descriptor,
-                    dst_dir_fd=directory_descriptor,
-                )
-                replaced = True
-                os.fsync(directory_descriptor)
-            except Exception:
-                # A syscall wrapper may report an error after the kernel has
-                # already completed the atomic rename. Re-read the target so
-                # every surfaced write exception still restores the previous
-                # visible bytes, not merely failures known to occur pre-rename.
-                target_changed = replaced
-                if not target_changed:
-                    try:
-                        target_changed = (
-                            cls._existing_bytes(directory_descriptor, filename)
-                            != old_payload
-                        )
-                    except StoryWorkspaceDreamFileError:
-                        target_changed = True
-                if target_changed:
-                    cls._restore_after_durability_error(
-                        directory_descriptor,
-                        filename,
-                        old_payload,
-                    )
-                raise
-            finally:
+            verify_context()
+            old_payload = cls._existing_bytes(directory.descriptor, filename)
+            cls._write_temp(directory.descriptor, temporary_name, payload)
+            verify_context()
+            replace_attempted = True
+            os.replace(
+                temporary_name,
+                filename,
+                src_dir_fd=directory.descriptor,
+                dst_dir_fd=directory.descriptor,
+            )
+            replaced = True
+            verify_context()
+            os.fsync(directory.descriptor)
+        except Exception as operation_error:
+            if replace_attempted and not replaced:
                 try:
-                    os.unlink(temporary_name, dir_fd=directory_descriptor)
-                except FileNotFoundError:
-                    pass
-        finally:
-            os.close(directory_descriptor)
+                    replaced = (
+                        cls._existing_bytes(directory.descriptor, filename)
+                        != old_payload
+                    )
+                except StoryWorkspaceDreamFileError:
+                    replaced = False
+            if replaced:
+                rollback_error: Exception | None = None
+                try:
+                    verify_context()
+                    if old_payload is None:
+                        os.unlink(filename, dir_fd=directory.descriptor)
+                    else:
+                        cls._write_temp(
+                            directory.descriptor,
+                            rollback_name,
+                            old_payload,
+                        )
+                        verify_context()
+                        os.replace(
+                            rollback_name,
+                            filename,
+                            src_dir_fd=directory.descriptor,
+                            dst_dir_fd=directory.descriptor,
+                        )
+                    verify_context()
+                    os.fsync(directory.descriptor)
+                except Exception as exc:
+                    rollback_error = exc
+                if rollback_error is not None:
+                    observed_revision = cls._observe_revision(
+                        directory.descriptor,
+                        filename,
+                    )
+                    if observed_revision == next_revision:
+                        state_hint = "replacement-visible-rollback-failed"
+                    elif observed_revision == previous_revision:
+                        state_hint = "rollback-visible-durability-unknown"
+                    else:
+                        state_hint = "final-state-unknown"
+                    indeterminate = StoryWorkspaceDreamDurabilityIndeterminate(
+                        observed_revision,
+                        state_hint,
+                    )
+                    _add_cleanup_note(indeterminate, operation_error)
+                    cls._cleanup_names(
+                        directory.descriptor,
+                        cleanup_names,
+                        indeterminate,
+                    )
+                    raise indeterminate from rollback_error
+            public_error = cls._normalize_operation_error(
+                operation_error,
+                "Dream file atomic replacement failed",
+            )
+            cls._cleanup_names(
+                directory.descriptor,
+                cleanup_names,
+                public_error,
+            )
+            if public_error is operation_error:
+                raise public_error
+            raise public_error from operation_error
+        cls._cleanup_names(directory.descriptor, cleanup_names, None)
 
     def _validate_source_file(self, relative_path: str) -> None:
         if not isinstance(relative_path, str) or not relative_path:
@@ -521,9 +936,10 @@ class _StoryWorkspaceDreamFilesystem:
             raise StoryWorkspaceDreamPathError(
                 "source file path must be safely relative"
             )
-        candidate = self.workspace_root.joinpath(*pure_path.parts)
         try:
-            resolved = candidate.resolve(strict=True)
+            resolved = self.workspace_root.joinpath(*pure_path.parts).resolve(
+                strict=True
+            )
         except (OSError, RuntimeError) as exc:
             raise StoryWorkspaceDreamPathError(
                 f"source file does not exist: {relative_path}"
@@ -539,7 +955,7 @@ class _StoryWorkspaceDreamFilesystem:
 
 
 class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
-    """CAS writer that derives run identity/provenance from ``WorkflowRun``."""
+    """CAS writer deriving run identity/provenance from ``WorkflowRun``."""
 
     def write_run(
         self,
@@ -551,13 +967,16 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
         _validate_expected_revision(expected_revision)
         _validate_authoritative_thread(workflow_run, thread_id)
         run_id, source = _authoritative_context(workflow_run)
-        with self._locked_run(run_id, create=True) as run_directory:
+        with self._locked_run(run_id, create=True, exclusive=True) as run:
+            assert run is not None
+            self._verify_run(run)
             current = self._read_model(
-                run_directory,
+                run.run_descriptor,
                 "run.json",
                 StoryWorkspaceDreamRunFile,
                 required=False,
             )
+            self._verify_run(run)
             if current is not None:
                 self._validate_run_authority(
                     current,
@@ -571,19 +990,27 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                     expected_revision,
                     current_revision,
                 )
-            next_file = StoryWorkspaceDreamRunFile(
-                workflow_run_id=run_id,
-                thread_id=thread_id,
-                source=source,
-                projection_entry=(
-                    f"/api/story-workspace/workflow-runs/{run_id}/dream-files"
-                ),
-                revision=current_revision + 1,
-            )
+            try:
+                next_file = StoryWorkspaceDreamRunFile(
+                    workflow_run_id=run_id,
+                    thread_id=thread_id,
+                    source=source,
+                    projection_entry=(
+                        f"/api/story-workspace/workflow-runs/{run_id}/dream-files"
+                    ),
+                    revision=current_revision + 1,
+                )
+            except ValidationError as exc:
+                raise StoryWorkspaceDreamContractError(
+                    "Dream run file payload is invalid"
+                ) from exc
             self._atomic_replace(
-                run_directory,
+                run.directory,
                 "run.json",
                 self._serialize(next_file),
+                previous_revision=current_revision,
+                next_revision=next_file.revision,
+                verify_context=lambda: self._verify_run(run),
             )
             return next_file
 
@@ -604,59 +1031,80 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
         if filename is not None and filename != canonical_filename:
             raise StoryWorkspaceDreamPathError("stage filename does not match stage")
         run_id, source = _authoritative_context(workflow_run)
-        candidate = StoryWorkspaceDreamStageFile(
-            workflow_run_id=run_id,
-            stage=canonical_stage,
-            revision=expected_revision + 1,
-            source_files=source_files,
-            page=_stage_page(canonical_stage, run_id),
-            items=items,
-        )
+        try:
+            candidate = StoryWorkspaceDreamStageFile(
+                workflow_run_id=run_id,
+                stage=canonical_stage,
+                revision=expected_revision + 1,
+                source_files=source_files,
+                page=_stage_page(canonical_stage, run_id),
+                items=items,
+            )
+        except ValidationError as exc:
+            raise StoryWorkspaceDreamContractError(
+                "Dream stage file payload is invalid"
+            ) from exc
 
-        with self._locked_run(run_id, create=False) as run_directory:
+        with self._locked_run(run_id, create=False, exclusive=True) as run:
+            if run is None:
+                raise StoryWorkspaceDreamContractError("Dream run has not been created")
+            self._verify_run(run)
             run_file = self._read_model(
-                run_directory,
+                run.run_descriptor,
                 "run.json",
                 StoryWorkspaceDreamRunFile,
                 required=True,
             )
             assert run_file is not None
+            self._verify_run(run)
             self._validate_run_authority(
                 run_file,
                 run_id=run_id,
                 source=source,
                 thread_id=thread_id,
             )
-            # Authorization must precede resolve/stat of caller-provided paths;
-            # otherwise a cross-thread caller could use validation errors as a
-            # workspace path-existence oracle.
             self._validate_source_files(candidate)
-            stages_directory = self._stages_directory(run_directory, create=True)
-            current = self._read_model(
-                stages_directory,
-                canonical_filename,
-                StoryWorkspaceDreamStageFile,
-                required=False,
-            )
-            if current is not None:
-                self._validate_stage_identity(current, run_id, canonical_stage)
-                self._validate_source_files(current)
-            current_revision = current.revision if current is not None else 0
-            if expected_revision != current_revision:
-                raise StoryWorkspaceDreamFileConflict(
-                    expected_revision,
-                    current_revision,
+            with self._stages_directory(run, create=True) as stages:
+                assert stages is not None
+
+                def verify_stage_context() -> None:
+                    self._verify_run(run)
+                    self._verify_child_identity(
+                        stages.parent_descriptor,
+                        stages.name,
+                        stages.descriptor,
+                    )
+
+                verify_stage_context()
+                current = self._read_model(
+                    stages.descriptor,
+                    canonical_filename,
+                    StoryWorkspaceDreamStageFile,
+                    required=False,
                 )
-            if candidate.revision != current_revision + 1:
-                candidate = candidate.model_copy(
-                    update={"revision": current_revision + 1}
+                verify_stage_context()
+                if current is not None:
+                    self._validate_stage_identity(
+                        current,
+                        run_id,
+                        canonical_stage,
+                    )
+                    self._validate_source_files(current)
+                current_revision = current.revision if current is not None else 0
+                if expected_revision != current_revision:
+                    raise StoryWorkspaceDreamFileConflict(
+                        expected_revision,
+                        current_revision,
+                    )
+                self._atomic_replace(
+                    stages,
+                    canonical_filename,
+                    self._serialize(candidate),
+                    previous_revision=current_revision,
+                    next_revision=candidate.revision,
+                    verify_context=verify_stage_context,
                 )
-            self._atomic_replace(
-                stages_directory,
-                canonical_filename,
-                self._serialize(candidate),
-            )
-            return candidate
+                return candidate
 
     @staticmethod
     def _serialize(model: BaseModel) -> bytes:
@@ -669,11 +1117,11 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                 sort_keys=True,
             ).encode("utf-8") + b"\n"
         except (TypeError, ValueError) as exc:
-            raise StoryWorkspaceDreamFileError(
+            raise StoryWorkspaceDreamContractError(
                 "Dream file contains non-JSON values"
             ) from exc
         if len(payload) > STORY_WORKSPACE_DREAM_FILE_MAX_BYTES:
-            raise StoryWorkspaceDreamFileError(
+            raise StoryWorkspaceDreamContractError(
                 "serialized Dream file exceeds size limit"
             )
         return payload
@@ -684,16 +1132,18 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
         *,
         run_id: str,
         source: StoryWorkspaceDreamSource,
-        thread_id: str | None,
+        thread_id: str,
     ) -> None:
         if run_file.workflow_run_id != run_id:
-            raise StoryWorkspaceDreamFileError("run.json workflow run mismatch")
+            raise StoryWorkspaceDreamContractError(
+                "run.json workflow run mismatch"
+            )
         if run_file.source != source:
-            raise StoryWorkspaceDreamFileError(
+            raise StoryWorkspaceDreamContractError(
                 "run.json source does not match authoritative WorkflowRun"
             )
-        if thread_id is not None and run_file.thread_id != thread_id:
-            raise StoryWorkspaceDreamFileError(
+        if run_file.thread_id != thread_id:
+            raise StoryWorkspaceDreamContractError(
                 "run.json thread does not match authoritative context"
             )
 
@@ -704,7 +1154,7 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
         stage: StoryWorkspaceDreamStage,
     ) -> None:
         if stage_file.workflow_run_id != run_id or stage_file.stage is not stage:
-            raise StoryWorkspaceDreamFileError(
+            raise StoryWorkspaceDreamContractError(
                 "Dream stage file does not match run directory and filename"
             )
 
@@ -720,20 +1170,16 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
     ) -> StoryWorkspaceDreamRunFile:
         _validate_authoritative_thread(workflow_run, thread_id)
         run_id, source = _authoritative_context(workflow_run)
-        with self._locked_run(run_id, create=False) as run_directory:
-            run_file = self._read_model(
-                run_directory,
-                "run.json",
-                StoryWorkspaceDreamRunFile,
-                required=True,
-            )
-            assert run_file is not None
-            StoryWorkspaceDreamFileWriter._validate_run_authority(
-                run_file,
-                run_id=run_id,
-                source=source,
+        with self._locked_run(run_id, create=False, exclusive=False) as run:
+            if run is None:
+                raise StoryWorkspaceDreamContractError("Dream run has not been created")
+            run_file = self._read_and_validate_run(
+                run,
+                run_id,
+                source,
                 thread_id=thread_id,
             )
+            self._verify_run(run)
             return run_file
 
     def read_stage(
@@ -745,29 +1191,30 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
         thread_id = _authoritative_thread_id(workflow_run)
         canonical_stage = _coerce_stage(stage)
         run_id, source = _authoritative_context(workflow_run)
-        with self._locked_run(run_id, create=False) as run_directory:
+        with self._locked_run(run_id, create=False, exclusive=False) as run:
+            if run is None:
+                raise StoryWorkspaceDreamContractError("Dream run has not been created")
             self._read_and_validate_run(
-                run_directory,
+                run,
                 run_id,
                 source,
                 thread_id=thread_id,
             )
-            try:
-                stages = self._stages_directory(run_directory, create=False)
-            except StoryWorkspaceDreamPathError:
-                if not (run_directory / "stages").exists():
+            with self._stages_directory(run, create=False) as stages:
+                if stages is None:
                     return None
-                raise
-            stage_file = self._read_model(
-                stages,
-                _STAGE_FILENAMES[canonical_stage],
-                StoryWorkspaceDreamStageFile,
-                required=False,
-            )
-            if stage_file is None:
-                return None
-            self._validate_stage(stage_file, run_id, canonical_stage)
-            return stage_file
+                self._verify_read_context(run, stages)
+                stage_file = self._read_model(
+                    stages.descriptor,
+                    _STAGE_FILENAMES[canonical_stage],
+                    StoryWorkspaceDreamStageFile,
+                    required=False,
+                )
+                self._verify_read_context(run, stages)
+                if stage_file is None:
+                    return None
+                self._validate_stage(stage_file, run_id, canonical_stage)
+                return stage_file
 
     def read_stage_file(
         self,
@@ -779,7 +1226,9 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
             stage for stage, name in _STAGE_FILENAMES.items() if name == filename
         ]
         if len(matches) != 1:
-            raise StoryWorkspaceDreamPathError("filename is not a canonical stage file")
+            raise StoryWorkspaceDreamPathError(
+                "filename is not a canonical stage file"
+            )
         return self.read_stage(workflow_run, stage=matches[0])
 
     def read(
@@ -790,15 +1239,16 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
     ) -> StoryWorkspaceDreamFilesResponse:
         _validate_authoritative_thread(workflow_run, thread_id)
         run_id, source = _authoritative_context(workflow_run)
-        if self._optional_run_directory(run_id) is None:
-            return self._waiting_response(run_id, thread_id, source)
-        with self._locked_run(run_id, create=False) as run_directory:
+        with self._locked_run(run_id, create=False, exclusive=False) as run:
+            if run is None:
+                return self._waiting_response(run_id, thread_id, source)
             run_file = self._read_model(
-                run_directory,
+                run.run_descriptor,
                 "run.json",
                 StoryWorkspaceDreamRunFile,
                 required=False,
             )
+            self._verify_run(run)
             if run_file is None:
                 return self._waiting_response(run_id, thread_id, source)
             StoryWorkspaceDreamFileWriter._validate_run_authority(
@@ -810,47 +1260,76 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
             stage_responses: dict[
                 StoryWorkspaceDreamStage, StoryWorkspaceDreamStageResponse
             ] = {}
-            stages_path = run_directory / "stages"
-            if stages_path.exists() or stages_path.is_symlink():
-                stages = self._stages_directory(run_directory, create=False)
-                for stage in STORY_WORKSPACE_DREAM_REQUIRED_STAGES:
-                    stage_file = self._read_model(
-                        stages,
-                        _STAGE_FILENAMES[stage],
-                        StoryWorkspaceDreamStageFile,
-                        required=False,
-                    )
-                    if stage_file is None:
-                        continue
-                    self._validate_stage(stage_file, run_id, stage)
-                    stage_responses[stage] = StoryWorkspaceDreamStageResponse(
-                        stage=stage_file.stage,
-                        revision=stage_file.revision,
-                        source_files=stage_file.source_files,
-                        page=StoryWorkspaceDreamStagePageResponse.model_validate(
-                            stage_file.page.model_dump()
-                        ),
-                        items=[
-                            StoryWorkspaceDreamStageItemResponse.model_validate(
-                                item.model_dump()
-                            )
-                            for item in stage_file.items
-                        ],
-                    )
+            with self._stages_directory(run, create=False) as stages:
+                if stages is not None:
+                    for stage in STORY_WORKSPACE_DREAM_REQUIRED_STAGES:
+                        self._verify_read_context(run, stages)
+                        stage_file = self._read_model(
+                            stages.descriptor,
+                            _STAGE_FILENAMES[stage],
+                            StoryWorkspaceDreamStageFile,
+                            required=False,
+                        )
+                        self._verify_read_context(run, stages)
+                        if stage_file is None:
+                            continue
+                        self._validate_stage(stage_file, run_id, stage)
+                        stage_responses[stage] = self._stage_response(stage_file)
             complete = set(stage_responses) == set(
                 STORY_WORKSPACE_DREAM_REQUIRED_STAGES
             )
-            return StoryWorkspaceDreamFilesResponse(
-                story_workspace_run_id=run_id,
-                thread_id=run_file.thread_id,
-                source=StoryWorkspaceDreamSourceResponse.model_validate(
-                    run_file.source.model_dump()
+            try:
+                return StoryWorkspaceDreamFilesResponse(
+                    story_workspace_run_id=run_id,
+                    thread_id=run_file.thread_id,
+                    source=StoryWorkspaceDreamSourceResponse.model_validate(
+                        run_file.source.model_dump()
+                    ),
+                    required_stages=list(run_file.required_stages),
+                    run_revision=run_file.revision,
+                    stages=stage_responses,
+                    can_confirm=complete,
+                )
+            except ValidationError as exc:
+                raise StoryWorkspaceDreamContractError(
+                    "Dream response projection is invalid"
+                ) from exc
+
+    def _verify_read_context(
+        self,
+        run: _PinnedRun,
+        stages: _PinnedDirectory,
+    ) -> None:
+        self._verify_run(run)
+        self._verify_child_identity(
+            stages.parent_descriptor,
+            stages.name,
+            stages.descriptor,
+        )
+
+    @staticmethod
+    def _stage_response(
+        stage_file: StoryWorkspaceDreamStageFile,
+    ) -> StoryWorkspaceDreamStageResponse:
+        try:
+            return StoryWorkspaceDreamStageResponse(
+                stage=stage_file.stage,
+                revision=stage_file.revision,
+                source_files=stage_file.source_files,
+                page=StoryWorkspaceDreamStagePageResponse.model_validate(
+                    stage_file.page.model_dump()
                 ),
-                required_stages=list(run_file.required_stages),
-                run_revision=run_file.revision,
-                stages=stage_responses,
-                can_confirm=complete,
+                items=[
+                    StoryWorkspaceDreamStageItemResponse.model_validate(
+                        item.model_dump()
+                    )
+                    for item in stage_file.items
+                ],
             )
+        except ValidationError as exc:
+            raise StoryWorkspaceDreamContractError(
+                "Dream stage response projection is invalid"
+            ) from exc
 
     @staticmethod
     def _waiting_response(
@@ -858,32 +1337,39 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
         thread_id: str,
         source: StoryWorkspaceDreamSource,
     ) -> StoryWorkspaceDreamFilesResponse:
-        return StoryWorkspaceDreamFilesResponse(
-            story_workspace_run_id=run_id,
-            thread_id=thread_id,
-            source=StoryWorkspaceDreamSourceResponse.model_validate(
-                source.model_dump()
-            ),
-            required_stages=list(STORY_WORKSPACE_DREAM_REQUIRED_STAGES),
-            run_revision=0,
-            stages={},
-            can_confirm=False,
-        )
+        try:
+            return StoryWorkspaceDreamFilesResponse(
+                story_workspace_run_id=run_id,
+                thread_id=thread_id,
+                source=StoryWorkspaceDreamSourceResponse.model_validate(
+                    source.model_dump()
+                ),
+                required_stages=list(STORY_WORKSPACE_DREAM_REQUIRED_STAGES),
+                run_revision=0,
+                stages={},
+                can_confirm=False,
+            )
+        except ValidationError as exc:
+            raise StoryWorkspaceDreamContractError(
+                "Dream waiting response projection is invalid"
+            ) from exc
 
     def _read_and_validate_run(
         self,
-        run_directory: Path,
+        run: _PinnedRun,
         run_id: str,
         source: StoryWorkspaceDreamSource,
         *,
-        thread_id: str | None,
+        thread_id: str,
     ) -> StoryWorkspaceDreamRunFile:
+        self._verify_run(run)
         run_file = self._read_model(
-            run_directory,
+            run.run_descriptor,
             "run.json",
             StoryWorkspaceDreamRunFile,
             required=True,
         )
+        self._verify_run(run)
         assert run_file is not None
         StoryWorkspaceDreamFileWriter._validate_run_authority(
             run_file,
@@ -908,9 +1394,14 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
 
 
 __all__ = [
+    "DREAM_PLATFORM_SUPPORTED",
+    "StoryWorkspaceDreamContractError",
+    "StoryWorkspaceDreamDurabilityIndeterminate",
     "StoryWorkspaceDreamFileConflict",
     "StoryWorkspaceDreamFileError",
     "StoryWorkspaceDreamFileReader",
     "StoryWorkspaceDreamFileWriter",
+    "StoryWorkspaceDreamIOError",
     "StoryWorkspaceDreamPathError",
+    "StoryWorkspaceDreamPlatformUnsupported",
 ]

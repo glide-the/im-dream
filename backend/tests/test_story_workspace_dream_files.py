@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import multiprocessing
 import os
+import shutil
+import stat
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -16,6 +18,7 @@ from unittest.mock import patch
 from pydantic import ValidationError
 
 from models.workflow_run import RunStatus, WorkflowRun
+import services.story_workspace.dream_file_service as dream_files
 from services.story_workspace.dream_file_service import (
     StoryWorkspaceDreamFileConflict,
     StoryWorkspaceDreamFileError,
@@ -40,6 +43,43 @@ from story_workspace.contracts import (
 
 RUN_ID = "run_0123456789abcdef0123456789abcdef"
 OTHER_RUN_ID = "run_fedcba9876543210fedcba9876543210"
+
+
+def cross_process_stage_update(
+    workspace: str,
+    workflow_run: WorkflowRun,
+    ready: object,
+    start: object,
+    results: object,
+    summary: str,
+) -> None:
+    """Spawn-safe worker used to verify the process-level CAS lock."""
+
+    writer = StoryWorkspaceDreamFileWriter(workspace)
+    ready.put(True)  # type: ignore[attr-defined]
+    start.wait(5)  # type: ignore[attr-defined]
+    try:
+        writer.write_stage(
+            workflow_run,
+            stage=StoryWorkspaceDreamStage.CHARACTERS,
+            source_files=["assets/characters/lead.md"],
+            items=[{
+                "entity_id": "entity-1",
+                "display_name": "Entity",
+                "summary": summary,
+                "source_file": "assets/characters/lead.md",
+                "relations": [],
+            }],
+            expected_revision=1,
+        )
+    except StoryWorkspaceDreamFileConflict:
+        results.put("conflict")  # type: ignore[attr-defined]
+    except Exception as exc:
+        results.put(  # type: ignore[attr-defined]
+            f"error:{type(exc).__name__}:{exc}"
+        )
+    else:
+        results.put("written")  # type: ignore[attr-defined]
 
 
 def authoritative_run(run_id: str = RUN_ID, **overrides: object) -> WorkflowRun:
@@ -487,7 +527,13 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
 
     def test_unsafe_source_paths_and_symlink_escape_are_rejected(self) -> None:
         self.initialize_run()
-        outside = Path(self.temporary_directory.name).parent / "dream-outside.txt"
+        outside_descriptor, outside_name = tempfile.mkstemp(
+            prefix="dream-outside-",
+            suffix=".txt",
+            dir=Path(self.temporary_directory.name).parent,
+        )
+        os.close(outside_descriptor)
+        outside = Path(outside_name)
         outside.write_text("outside", encoding="utf-8")
         link = self.workspace / "assets" / "characters" / "escape.md"
         try:
@@ -602,7 +648,7 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
             "services.story_workspace.dream_file_service.os.replace",
             side_effect=OSError("injected replace failure"),
         ):
-            with self.assertRaises(OSError):
+            with self.assertRaises(dream_files.StoryWorkspaceDreamIOError):
                 self.write_stage(
                     StoryWorkspaceDreamStage.CHARACTERS,
                     "assets/characters/lead.md",
@@ -627,7 +673,7 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
             "services.story_workspace.dream_file_service.os.replace",
             side_effect=replace_then_raise,
         ):
-            with self.assertRaises(OSError):
+            with self.assertRaises(dream_files.StoryWorkspaceDreamIOError):
                 self.write_stage(
                     StoryWorkspaceDreamStage.CHARACTERS,
                     "assets/characters/lead.md",
@@ -670,36 +716,29 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
         )
 
     def test_cross_process_cas_has_exactly_one_winner(self) -> None:
+        if not getattr(dream_files, "DREAM_PLATFORM_SUPPORTED", False):
+            self.skipTest("Dream runtime requires secure Unix dirfd capabilities")
         self.initialize_run()
         self.write_stage(
             StoryWorkspaceDreamStage.CHARACTERS, "assets/characters/lead.md"
         )
-        context = multiprocessing.get_context("fork")
+        context = multiprocessing.get_context("spawn")
         ready = context.Queue()
         start = context.Event()
         results = context.Queue()
 
-        def update(summary: str) -> None:
-            writer = StoryWorkspaceDreamFileWriter(self.workspace)
-            ready.put(True)
-            start.wait(5)
-            try:
-                writer.write_stage(
-                    self.run,
-                    stage=StoryWorkspaceDreamStage.CHARACTERS,
-                    source_files=["assets/characters/lead.md"],
-                    items=[self.item("assets/characters/lead.md", summary)],
-                    expected_revision=1,
-                )
-            except StoryWorkspaceDreamFileConflict:
-                results.put("conflict")
-            except Exception as exc:
-                results.put(f"error:{type(exc).__name__}:{exc}")
-            else:
-                results.put("written")
-
         processes = [
-            context.Process(target=update, args=(summary,))
+            context.Process(
+                target=cross_process_stage_update,
+                args=(
+                    str(self.workspace),
+                    self.run,
+                    ready,
+                    start,
+                    results,
+                    summary,
+                ),
+            )
             for summary in ("process-one", "process-two")
         ]
         for process in processes:
@@ -839,6 +878,366 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
             self.assertIn("thread", str(raised.exception))
 
         self.assertEqual(self.tree_snapshot(self.workspace), before)
+
+    def test_run_directory_replacement_before_read_fails_closed(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        run_directory = self.dream / "runtime" / "runs" / RUN_ID
+        displaced = run_directory.with_name(f"{RUN_ID}.read-displaced")
+        original_flock = dream_files.fcntl.flock
+        replaced = False
+
+        def replace_after_lock(descriptor: int, operation: int) -> object:
+            nonlocal replaced
+            result = original_flock(descriptor, operation)
+            if not replaced and operation in {
+                dream_files.fcntl.LOCK_SH,
+                dream_files.fcntl.LOCK_EX,
+            }:
+                replaced = True
+                run_directory.rename(displaced)
+                shutil.copytree(displaced, run_directory)
+            return result
+
+        with patch.object(
+            dream_files.fcntl,
+            "flock",
+            side_effect=replace_after_lock,
+        ):
+            with self.assertRaises(StoryWorkspaceDreamPathError):
+                self.reader.read(self.run, thread_id="thread-1")
+
+        visible = json.loads(
+            (run_directory / "stages" / "characters.json").read_text()
+        )
+        self.assertEqual(visible["revision"], 1)
+
+    def test_run_directory_replacement_before_cas_write_fails_closed(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        run_directory = self.dream / "runtime" / "runs" / RUN_ID
+        displaced = run_directory.with_name(f"{RUN_ID}.write-displaced")
+        original_flock = dream_files.fcntl.flock
+        replaced = False
+
+        def replace_after_lock(descriptor: int, operation: int) -> object:
+            nonlocal replaced
+            result = original_flock(descriptor, operation)
+            if not replaced and operation == dream_files.fcntl.LOCK_EX:
+                replaced = True
+                run_directory.rename(displaced)
+                shutil.copytree(displaced, run_directory)
+            return result
+
+        with patch.object(
+            dream_files.fcntl,
+            "flock",
+            side_effect=replace_after_lock,
+        ):
+            with self.assertRaises(StoryWorkspaceDreamPathError):
+                self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="must-not-reach-replacement",
+                )
+
+        visible = json.loads(
+            (run_directory / "stages" / "characters.json").read_text()
+        )
+        self.assertEqual(visible["revision"], 1)
+
+    def test_stage_directory_replacement_before_commit_fails_closed(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        stages = self.dream / "runtime" / "runs" / RUN_ID / "stages"
+        displaced = stages.with_name("stages.commit-displaced")
+        target = stages / "characters.json"
+        old_bytes = target.read_bytes()
+        original_write_temp = type(self.writer)._write_temp
+        replaced = False
+
+        def replace_after_temp(
+            directory_descriptor: int,
+            temporary_name: str,
+            payload: bytes,
+        ) -> None:
+            nonlocal replaced
+            original_write_temp(directory_descriptor, temporary_name, payload)
+            if not replaced:
+                replaced = True
+                stages.rename(displaced)
+                stages.mkdir()
+                (stages / "characters.json").write_bytes(old_bytes)
+
+        with patch.object(
+            type(self.writer),
+            "_write_temp",
+            side_effect=replace_after_temp,
+        ):
+            with self.assertRaises(StoryWorkspaceDreamPathError):
+                self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="must-not-commit-off-path",
+                )
+
+        visible = json.loads(target.read_text())
+        self.assertEqual(visible["revision"], 1)
+
+    def test_rollback_replace_failure_is_durability_indeterminate(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        original_fsync = os.fsync
+        original_replace = os.replace
+        replace_calls = 0
+
+        def fail_directory_fsync(descriptor: int) -> None:
+            if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                raise OSError("injected main directory fsync failure")
+            original_fsync(descriptor)
+
+        def fail_rollback_replace(*args: object, **kwargs: object) -> None:
+            nonlocal replace_calls
+            replace_calls += 1
+            if replace_calls == 1:
+                original_replace(*args, **kwargs)
+                return
+            raise OSError("injected rollback replace failure")
+
+        with patch.object(os, "fsync", side_effect=fail_directory_fsync), patch.object(
+            os,
+            "replace",
+            side_effect=fail_rollback_replace,
+        ):
+            with self.assertRaises(
+                dream_files.StoryWorkspaceDreamDurabilityIndeterminate
+            ) as raised:
+                self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="new-visible",
+                )
+
+        self.assertEqual(raised.exception.observed_revision, 2)
+        self.assertEqual(
+            raised.exception.state_hint,
+            "replacement-visible-rollback-failed",
+        )
+        self.assertEqual(
+            self.reader.read_stage(
+                self.run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+            ).revision,
+            2,
+        )
+
+    def test_rollback_directory_fsync_failure_is_indeterminate(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        original_fsync = os.fsync
+
+        def fail_directory_fsync(descriptor: int) -> None:
+            if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+                raise OSError("injected directory fsync failure")
+            original_fsync(descriptor)
+
+        with patch.object(os, "fsync", side_effect=fail_directory_fsync):
+            with self.assertRaises(
+                dream_files.StoryWorkspaceDreamDurabilityIndeterminate
+            ) as raised:
+                self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="rolled-back-visible",
+                )
+
+        self.assertEqual(raised.exception.observed_revision, 1)
+        self.assertEqual(
+            raised.exception.state_hint,
+            "rollback-visible-durability-unknown",
+        )
+        self.assertEqual(
+            self.reader.read_stage(
+                self.run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+            ).revision,
+            1,
+        )
+
+    def test_cleanup_error_does_not_mask_primary_replace_error(self) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        with patch.object(
+            os,
+            "replace",
+            side_effect=OSError("primary replace failure"),
+        ), patch.object(
+            os,
+            "unlink",
+            side_effect=OSError("secondary cleanup failure"),
+        ):
+            with self.assertRaises(
+                dream_files.StoryWorkspaceDreamIOError
+            ) as raised:
+                self.write_stage(
+                    StoryWorkspaceDreamStage.CHARACTERS,
+                    "assets/characters/lead.md",
+                    expected_revision=1,
+                    summary="must-not-land",
+                )
+        self.assertIsInstance(raised.exception.__cause__, OSError)
+        self.assertIn("primary replace failure", str(raised.exception.__cause__))
+
+    def test_platform_capability_missing_fails_fast_at_construction(self) -> None:
+        with patch.object(dream_files, "fcntl", None):
+            with self.assertRaises(
+                dream_files.StoryWorkspaceDreamPlatformUnsupported
+            ):
+                StoryWorkspaceDreamFileReader(self.workspace)
+            with self.assertRaises(
+                dream_files.StoryWorkspaceDreamPlatformUnsupported
+            ):
+                StoryWorkspaceDreamFileWriter(self.workspace)
+        self.assertFalse((self.dream / "runtime").exists())
+
+    def test_wire_stage_direct_construction_enforces_storage_invariants(self) -> None:
+        valid = {
+            "stage": "characters",
+            "revision": 1,
+            "sourceFiles": ["assets/characters/lead.md"],
+            "page": {
+                "title": "人物",
+                "entryRoute": f"/story-workspace/characters?run={RUN_ID}",
+            },
+            "items": [{
+                "entityId": "entity-1",
+                "displayName": "Entity",
+                "summary": "summary",
+                "sourceFile": "assets/characters/lead.md",
+                "relations": [],
+            }],
+        }
+        invalid_variants = {
+            "external-route": {
+                **valid,
+                "page": {"title": "人物", "entryRoute": "https://evil.invalid"},
+            },
+            "duplicate-source": {
+                **valid,
+                "sourceFiles": [
+                    "assets/characters/lead.md",
+                    "assets/characters/lead.md",
+                ],
+            },
+            "undeclared-item-source": {
+                **valid,
+                "items": [{**valid["items"][0], "sourceFile": "private/other.md"}],
+            },
+            "empty-relation": {
+                **valid,
+                "items": [{**valid["items"][0], "relations": [""]}],
+            },
+            "duplicate-entity": {
+                **valid,
+                "items": [valid["items"][0], valid["items"][0]],
+            },
+        }
+        for name, payload in invalid_variants.items():
+            with self.subTest(case=name):
+                with self.assertRaises(ValidationError):
+                    StoryWorkspaceDreamStageResponse.model_validate(payload)
+
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamSourceResponse(
+                deck_plugin_binding_id="",
+                binding_revision=1,
+                deck_plugin_version="1",
+                deck_runtime_snapshot_id="snapshot",
+                runtime_plugin_lock_id="lock",
+            )
+
+    def test_service_wraps_contract_validation_and_reclaims_local_lock(self) -> None:
+        self.initialize_run()
+        with self.assertRaises(
+            dream_files.StoryWorkspaceDreamContractError
+        ) as raised:
+            self.writer.write_stage(
+                self.run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+                source_files=["assets/characters/lead.md"],
+                items=[
+                    self.item("assets/characters/lead.md", "one"),
+                    self.item("assets/characters/lead.md", "two"),
+                ],
+                expected_revision=0,
+            )
+        self.assertIsInstance(raised.exception.__cause__, ValidationError)
+        self.reader.read(self.run, thread_id="thread-1")
+        self.assertEqual(dream_files._THREAD_LOCKS, {})
+
+    def test_reader_uses_shared_process_lock(self) -> None:
+        self.initialize_run()
+        operations: list[int] = []
+        original_flock = dream_files.fcntl.flock
+
+        def record_flock(descriptor: int, operation: int) -> object:
+            operations.append(operation)
+            return original_flock(descriptor, operation)
+
+        with patch.object(
+            dream_files.fcntl,
+            "flock",
+            side_effect=record_flock,
+        ):
+            self.reader.read(self.run, thread_id="thread-1")
+        self.assertIn(dream_files.fcntl.LOCK_SH, operations)
+
+    def test_unlock_failure_is_public_io_error_and_descriptor_is_closed(self) -> None:
+        self.initialize_run()
+        original_flock = dream_files.fcntl.flock
+        locked_descriptors: list[int] = []
+
+        def fail_unlock(descriptor: int, operation: int) -> object:
+            if operation == dream_files.fcntl.LOCK_UN:
+                raise OSError("injected unlock failure")
+            locked_descriptors.append(descriptor)
+            return original_flock(descriptor, operation)
+
+        with patch.object(
+            dream_files.fcntl,
+            "flock",
+            side_effect=fail_unlock,
+        ):
+            with self.assertRaises(dream_files.StoryWorkspaceDreamIOError) as raised:
+                self.reader.read(self.run, thread_id="thread-1")
+
+        self.assertIsInstance(raised.exception.__cause__, OSError)
+        self.assertEqual(dream_files._THREAD_LOCKS, {})
+        for descriptor in locked_descriptors:
+            with self.assertRaises(OSError):
+                os.fstat(descriptor)
 
 
 if __name__ == "__main__":

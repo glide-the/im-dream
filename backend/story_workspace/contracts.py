@@ -115,6 +115,37 @@ STORY_WORKSPACE_DREAM_REQUIRED_STAGES = (
     StoryWorkspaceDreamStage.STORYBOARDS,
 )
 
+_STORY_WORKSPACE_DREAM_STAGE_TITLES = {
+    StoryWorkspaceDreamStage.CHARACTERS: "人物",
+    StoryWorkspaceDreamStage.SCENES: "场景",
+    StoryWorkspaceDreamStage.STORYBOARDS: "分镜",
+}
+
+
+def _validate_dream_relations(values: list[str]) -> list[str]:
+    if any(not value or len(value) > 128 for value in values):
+        raise ValueError(
+            "relations must contain non-blank identifiers <= 128 chars"
+        )
+    return values
+
+
+def _validate_dream_source_files(values: list[str]) -> list[str]:
+    if len(values) != len(set(values)):
+        raise ValueError("source_files must not contain duplicates")
+    return values
+
+
+def _validate_dream_stage_items(
+    source_files: list[str],
+    items: list[Any],
+) -> None:
+    if any(item.source_file not in source_files for item in items):
+        raise ValueError("every item source_file must be declared in source_files")
+    entity_ids = [item.entity_id for item in items]
+    if len(entity_ids) != len(set(entity_ids)):
+        raise ValueError("items must have unique entity_id values within a stage")
+
 
 class _StoryWorkspaceDreamStorageModel(BaseModel):
     """Strict snake_case-only model for canonical runtime JSON files."""
@@ -191,11 +222,7 @@ class StoryWorkspaceDreamStageItem(_StoryWorkspaceDreamStorageModel):
     @field_validator("relations")
     @classmethod
     def relations_are_bounded(cls, values: list[str]) -> list[str]:
-        if any(not value or len(value) > 128 for value in values):
-            raise ValueError(
-                "relations must contain non-blank identifiers <= 128 chars"
-            )
-        return values
+        return _validate_dream_relations(values)
 
 
 class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamStorageModel):
@@ -218,17 +245,10 @@ class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamStorageModel):
     @field_validator("source_files")
     @classmethod
     def source_files_are_unique(cls, values: list[str]) -> list[str]:
-        if len(values) != len(set(values)):
-            raise ValueError("source_files must not contain duplicates")
-        return values
+        return _validate_dream_source_files(values)
 
     @model_validator(mode="after")
     def fixed_stage_fields_are_canonical(self) -> "StoryWorkspaceDreamStageFile":
-        titles = {
-            StoryWorkspaceDreamStage.CHARACTERS: "人物",
-            StoryWorkspaceDreamStage.SCENES: "场景",
-            StoryWorkspaceDreamStage.STORYBOARDS: "分镜",
-        }
         routes = {
             StoryWorkspaceDreamStage.CHARACTERS: (
                 f"/story-workspace/characters?run={self.workflow_run_id}"
@@ -240,17 +260,13 @@ class StoryWorkspaceDreamStageFile(_StoryWorkspaceDreamStorageModel):
                 f"/story-workspace/runs/{self.workflow_run_id}/execution"
             ),
         }
-        if self.page.title != titles[self.stage]:
+        if self.page.title != _STORY_WORKSPACE_DREAM_STAGE_TITLES[self.stage]:
             raise ValueError("page.title does not match stage")
         if self.page.entry_route != routes[self.stage]:
             raise ValueError(
                 "page.entry_route does not match stage and workflow_run_id"
             )
-        if any(item.source_file not in self.source_files for item in self.items):
-            raise ValueError("every item source_file must be declared in source_files")
-        entity_ids = [item.entity_id for item in self.items]
-        if len(entity_ids) != len(set(entity_ids)):
-            raise ValueError("items must have unique entity_id values within a stage")
+        _validate_dream_stage_items(self.source_files, self.items)
         return self
 
 
@@ -277,6 +293,11 @@ class StoryWorkspaceDreamStageItemResponse(_StoryWorkspaceDreamWireModel):
         max_length=STORY_WORKSPACE_DREAM_RELATIONS_MAX,
     )
 
+    @field_validator("relations")
+    @classmethod
+    def response_relations_are_bounded(cls, values: list[str]) -> list[str]:
+        return _validate_dream_relations(values)
+
 
 class StoryWorkspaceDreamStageResponse(_StoryWorkspaceDreamWireModel):
     stage: StoryWorkspaceDreamStage
@@ -291,11 +312,33 @@ class StoryWorkspaceDreamStageResponse(_StoryWorkspaceDreamWireModel):
         max_length=STORY_WORKSPACE_DREAM_ITEMS_MAX,
     )
 
+    @field_validator("source_files")
+    @classmethod
+    def response_source_files_are_unique(cls, values: list[str]) -> list[str]:
+        return _validate_dream_source_files(values)
+
     @model_validator(mode="after")
-    def response_entity_ids_are_unique(self) -> "StoryWorkspaceDreamStageResponse":
-        entity_ids = [item.entity_id for item in self.items]
-        if len(entity_ids) != len(set(entity_ids)):
-            raise ValueError("items must have unique entity_id values within a stage")
+    def response_stage_fields_are_canonical(
+        self,
+    ) -> "StoryWorkspaceDreamStageResponse":
+        route_patterns = {
+            StoryWorkspaceDreamStage.CHARACTERS: (
+                r"^/story-workspace/characters\?run=run_[0-9a-f]{32}$"
+            ),
+            StoryWorkspaceDreamStage.SCENES: (
+                r"^/story-workspace/scenes\?run=run_[0-9a-f]{32}$"
+            ),
+            StoryWorkspaceDreamStage.STORYBOARDS: (
+                r"^/story-workspace/runs/run_[0-9a-f]{32}/execution$"
+            ),
+        }
+        if self.page.title != _STORY_WORKSPACE_DREAM_STAGE_TITLES[self.stage]:
+            raise ValueError("page.title does not match stage")
+        import re
+
+        if re.fullmatch(route_patterns[self.stage], self.page.entry_route) is None:
+            raise ValueError("page.entry_route is not canonical for stage")
+        _validate_dream_stage_items(self.source_files, self.items)
         return self
 
 
