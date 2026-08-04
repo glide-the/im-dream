@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 import json
 import sqlite3
 import sys
@@ -40,6 +41,7 @@ from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from models.workflow_run import RunStatus, WorkflowRun
 from routers import story_workspace
 from services.deck import story_workflow_gateway as gateway_module
+import services.story_workspace.dream_confirmation_service as confirmation_module
 from services.story_workspace.dream_confirmation_service import (
     STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
     StoryWorkspaceDreamConfirmationDispatch,
@@ -196,8 +198,8 @@ class RecordingProjectionReader:
 
 
 class ManualClock:
-    def __init__(self) -> None:
-        self.now = 0.0
+    def __init__(self, now: float = 0.0) -> None:
+        self.now = now
 
     def __call__(self) -> float:
         return self.now
@@ -297,6 +299,27 @@ class ConfirmationFixture:
             }
             for row in rows
         ]
+
+    def claim(
+        self,
+        dispatch: StoryWorkspaceDreamConfirmationDispatch,
+        *,
+        claim_id: str = "claim-test-owner",
+        now_s: float = 100.0,
+        lease_duration_s: float = 30.0,
+    ) -> StoryWorkspaceDreamConfirmationDispatch:
+        with database.get_db() as db:
+            claimed = (
+                confirmation_module.story_workspace_claim_dream_confirmation(
+                    db,
+                    dispatch,
+                    claim_id=claim_id,
+                    now_s=now_s,
+                    lease_duration_s=lease_duration_s,
+                )
+            )
+        assert claimed is not None
+        return claimed
 
     def close(self) -> None:
         database.DB_PATH = self.old_database_path
@@ -553,10 +576,11 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
 
         db = database.get_db()
         try:
+            claimed = self.fixture.claim(replay.dispatch)
             self.assertTrue(
                 story_workspace_mark_dream_confirmation_dispatched(
                     db,
-                    replay.dispatch,
+                    claimed,
                 )
             )
         finally:
@@ -622,6 +646,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
 
     def test_confirmation_fact_is_scoped_to_actor_thread_and_run(self) -> None:
         persisted = self.submit()
+        claimed = self.fixture.claim(persisted.dispatch)
         db = database.get_db()
         try:
             self.assertEqual(
@@ -645,7 +670,7 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
             self.assertTrue(
                 story_workspace_mark_dream_confirmation_dispatched(
                     db,
-                    persisted.dispatch,
+                    claimed,
                 )
             )
             self.assertEqual(
@@ -779,6 +804,293 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
 
         await asyncio.wait_for(wait(), timeout=timeout)
 
+    async def test_two_coordinators_atomically_claim_one_pending_message(
+        self,
+    ) -> None:
+        self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        claim_barrier = threading.Barrier(2)
+        result_lock = threading.Lock()
+        scheduled: list[int] = []
+        consumptions = 0
+
+        async def consume(*_args):
+            nonlocal consumptions
+            with result_lock:
+                consumptions += 1
+            return True
+
+        def worker(index: int) -> None:
+            db_opens = 0
+
+            def competing_db_factory():
+                nonlocal db_opens
+                db_opens += 1
+                # First connection scans. Align the second connection so both
+                # independent event loops contend on the claim transaction.
+                if db_opens == 2:
+                    claim_barrier.wait(timeout=5)
+                return database.get_db()
+
+            async def run() -> None:
+                coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+                    competing_db_factory,
+                    dispatcher_factory=lambda: consume,
+                    reconcile_interval_s=3600,
+                    lease_clock=ManualClock(1_000.0),
+                    claim_id_factory=lambda: f"claim-{index}",
+                )
+                claimed_count = await coordinator.reconcile_once()
+                await coordinator.wait_for_idle()
+                with result_lock:
+                    scheduled.append(claimed_count)
+
+            asyncio.run(run())
+
+        await asyncio.gather(
+            asyncio.to_thread(worker, 0),
+            asyncio.to_thread(worker, 1),
+        )
+
+        self.assertEqual(sorted(scheduled), [0, 1])
+        self.assertEqual(consumptions, 1)
+
+    async def test_fresh_claim_blocks_other_coordinator_scan_and_agent(
+        self,
+    ) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        consumptions = 0
+
+        async def consume(*_args):
+            nonlocal consumptions
+            consumptions += 1
+            entered.set()
+            await release.wait()
+            return True
+
+        clock = ManualClock(2_000.0)
+        first = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            claim_id_factory=lambda: "claim-first",
+        )
+        second = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=clock,
+            claim_id_factory=lambda: "claim-second",
+        )
+        try:
+            self.assertTrue(first.schedule(persisted.dispatch))
+            await entered.wait()
+            self.assertEqual(await second.reconcile_once(), 0)
+            self.assertFalse(second.schedule(persisted.dispatch))
+            self.assertEqual(consumptions, 1)
+            release.set()
+            await first.wait_for_idle()
+        finally:
+            release.set()
+            await first.stop()
+            await second.stop()
+
+    async def test_claimed_metadata_survives_agent_user_message_resave(
+        self,
+    ) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        observed: list[dict] = []
+
+        async def consume(thread_id, actor_id, message_id, parts, metadata):
+            request = ClaudeAgentRunRequest(
+                user_id=actor_id,
+                thread_id=thread_id,
+                resume=True,
+                message_id=message_id,
+                message_parts=parts,
+                message_metadata=metadata,
+            )
+            execution = claude_service_module._TurnExecution(
+                request=request,
+                state=AgentRunState(session_id=thread_id),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+            )
+            await ClaudeAgentService()._persist_user_message(execution)
+            observed.append(self.fixture.rows()[0]["metadata"])
+            return True
+
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=ManualClock(3_000.0),
+            claim_id_factory=lambda: "claim-agent-resave",
+        )
+        self.assertTrue(coordinator.schedule(persisted.dispatch))
+        await coordinator.wait_for_idle()
+
+        self.assertEqual(observed[0]["dispatch_status"], "dispatching")
+        self.assertEqual(
+            observed[0]["dispatch_claim_id"],
+            "claim-agent-resave",
+        )
+        completed = self.fixture.rows()[0]["metadata"]
+        self.assertEqual(completed["dispatch_status"], "dispatched")
+        self.assertNotIn("dispatch_claim_id", completed)
+
+    async def test_exact_replay_during_fresh_claim_cannot_schedule_dispatch(
+        self,
+    ) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def consume(*_args):
+            entered.set()
+            await release.wait()
+            return True
+
+        coordinator = StoryWorkspaceDreamConfirmationCoordinator(
+            database.get_db,
+            dispatcher_factory=lambda: consume,
+            reconcile_interval_s=3600,
+            lease_clock=ManualClock(4_000.0),
+            claim_id_factory=lambda: "claim-replay",
+        )
+        try:
+            self.assertTrue(coordinator.schedule(persisted.dispatch))
+            await entered.wait()
+            replay = self.fixture.service().submit_confirmation(
+                RUN_ID,
+                command(),
+                actor_id=ACTOR_ID,
+            )
+            self.assertTrue(replay.accepted.replayed)
+            self.assertFalse(replay.accepted.dispatched)
+            self.assertIsNone(replay.dispatch)
+            self.assertFalse(coordinator.schedule(replay.dispatch))
+        finally:
+            release.set()
+            await coordinator.wait_for_idle()
+
+    async def test_ack_rejects_non_owner_claim(self) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        with database.get_db() as db:
+            claimed = confirmation_module.story_workspace_claim_dream_confirmation(
+                db,
+                persisted.dispatch,
+                claim_id="claim-owner",
+                now_s=5_000.0,
+                lease_duration_s=30.0,
+            )
+        self.assertIsNotNone(claimed)
+        wrong_claim = replace(
+            claimed,
+            metadata={
+                **claimed.metadata,
+                "dispatch_claim_id": "claim-not-owner",
+            },
+        )
+        with database.get_db() as db:
+            with self.assertRaises(StoryWorkspaceDreamConfirmationError) as raised:
+                story_workspace_mark_dream_confirmation_dispatched(
+                    db,
+                    wrong_claim,
+                )
+            self.assertEqual(raised.exception.status_code, 409)
+            self.assertTrue(
+                story_workspace_mark_dream_confirmation_dispatched(db, claimed)
+            )
+            self.assertTrue(
+                story_workspace_mark_dream_confirmation_dispatched(db, claimed)
+            )
+
+    async def test_stale_lease_is_recovered_once_across_two_coordinators(
+        self,
+    ) -> None:
+        persisted = self.fixture.service().submit_confirmation(
+            RUN_ID,
+            command(),
+            actor_id=ACTOR_ID,
+        )
+        with database.get_db() as db:
+            original_claim = (
+                confirmation_module.story_workspace_claim_dream_confirmation(
+                    db,
+                    persisted.dispatch,
+                    claim_id="claim-stale",
+                    now_s=6_000.0,
+                    lease_duration_s=10.0,
+                )
+            )
+        self.assertIsNotNone(original_claim)
+
+        entered = 0
+        first_entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def consume(*_args):
+            nonlocal entered
+            entered += 1
+            first_entered.set()
+            await release.wait()
+            return True
+
+        clock = ManualClock(6_011.0)
+        coordinators = [
+            StoryWorkspaceDreamConfirmationCoordinator(
+                database.get_db,
+                dispatcher_factory=lambda: consume,
+                reconcile_interval_s=3600,
+                lease_clock=clock,
+                claim_id_factory=lambda index=index: f"claim-recovered-{index}",
+            )
+            for index in range(2)
+        ]
+        try:
+            scheduled = await asyncio.gather(
+                *(coordinator.reconcile_once() for coordinator in coordinators)
+            )
+            await first_entered.wait()
+            self.assertEqual(sum(scheduled), 1)
+            self.assertEqual(entered, 1)
+            release.set()
+            await asyncio.gather(
+                *(coordinator.wait_for_idle() for coordinator in coordinators)
+            )
+        finally:
+            release.set()
+            await asyncio.gather(
+                *(coordinator.stop() for coordinator in coordinators)
+            )
+
     async def test_failed_consumption_remains_pending_then_reconciles(self) -> None:
         persisted = self.fixture.service().submit_confirmation(
             RUN_ID,
@@ -799,6 +1111,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             dispatcher_factory=lambda: consume,
             reconcile_interval_s=3600,
             clock=clock,
+            lease_clock=clock,
             retry_base_s=2,
             retry_max_s=8,
         )
@@ -856,6 +1169,8 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             dispatcher_factory=lambda: consume,
             reconcile_interval_s=3600,
             clock=clock,
+            lease_clock=clock,
+            lease_duration_s=2,
             retry_base_s=2,
             retry_max_s=8,
         )
@@ -919,6 +1234,7 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
             dispatcher_factory=lambda: consume,
             reconcile_interval_s=0.01,
             clock=clock,
+            lease_clock=clock,
             retry_base_s=2,
             retry_max_s=8,
         )

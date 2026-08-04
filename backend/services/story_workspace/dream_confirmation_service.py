@@ -15,6 +15,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import logging
+import math
 import sqlite3
 import time
 from typing import Any, Awaitable, Callable, Optional, Protocol
@@ -50,7 +51,11 @@ STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND = (
     "story-workspace-dream-confirmation"
 )
 STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING = "pending"
+STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING = "dispatching"
 STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHED = "dispatched"
+_DISPATCH_CLAIM_ID = "dispatch_claim_id"
+_DISPATCH_CLAIM_LEASE_UNTIL = "dispatch_claim_lease_until"
+_DISPATCH_ACK_CLAIM_SHA256 = "dispatch_ack_claim_sha256"
 _EDITABLE_FIELDS = frozenset({"displayName", "summary", "relations"})
 
 
@@ -324,7 +329,7 @@ def story_workspace_mark_dream_confirmation_dispatched(
     db: sqlite3.Connection,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
 ) -> bool:
-    """Durably mark a scheduled continuation; repeated marking is idempotent."""
+    """Acknowledge only the coordinator that owns the durable claim."""
 
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -336,6 +341,11 @@ def story_workspace_mark_dream_confirmation_dispatched(
             raise StoryWorkspaceDreamConfirmationError("RESULT_COMMIT_FAILED", 503)
         metadata = _decode_metadata(row["metadata"])
         expected = dispatch.metadata
+        expected_claim_id = (
+            expected.get(_DISPATCH_CLAIM_ID)
+            if isinstance(expected, dict)
+            else None
+        )
         valid = (
             row["thread_id"] == dispatch.thread_id
             and row["role"] == "user"
@@ -350,6 +360,8 @@ def story_workspace_mark_dream_confirmation_dispatched(
             and metadata.get("request_id") == expected.get("request_id")
             and metadata.get("command_fingerprint")
             == expected.get("command_fingerprint")
+            and isinstance(expected_claim_id, str)
+            and bool(expected_claim_id)
         )
         if not valid:
             raise StoryWorkspaceDreamConfirmationError("IDEMPOTENCY_CONFLICT", 409)
@@ -358,11 +370,23 @@ def story_workspace_mark_dream_confirmation_dispatched(
             STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING,
         )
         if status == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHED:
+            if metadata.get(_DISPATCH_ACK_CLAIM_SHA256) != _sha256(
+                expected_claim_id
+            ):
+                raise StoryWorkspaceDreamConfirmationError(
+                    "IDEMPOTENCY_CONFLICT", 409
+                )
             db.commit()
             return True
-        if status != STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING:
+        if (
+            status != STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+            or metadata.get(_DISPATCH_CLAIM_ID) != expected_claim_id
+        ):
             raise StoryWorkspaceDreamConfirmationError("IDEMPOTENCY_CONFLICT", 409)
         metadata["dispatch_status"] = STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHED
+        metadata[_DISPATCH_ACK_CLAIM_SHA256] = _sha256(expected_claim_id)
+        metadata.pop(_DISPATCH_CLAIM_ID, None)
+        metadata.pop(_DISPATCH_CLAIM_LEASE_UNTIL, None)
         updated = db.execute(
             "UPDATE chat_message SET metadata = ? WHERE id = ?",
             (_canonical_json(metadata), dispatch.message_id),
@@ -383,10 +407,19 @@ def story_workspace_mark_dream_confirmation_dispatched(
         ) from exc
 
 
-def _decode_pending_dispatch_row(
+def _valid_lease_deadline(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and float(value) >= 0
+    )
+
+
+def _decode_confirmation_dispatch_row(
     row: Any,
 ) -> Optional[StoryWorkspaceDreamConfirmationDispatch]:
-    """Decode one durable work item, rejecting forged or malformed metadata."""
+    """Decode one durable work item, rejecting forged or malformed audit data."""
 
     metadata = _decode_metadata(row["metadata"])
     parts = _decode_parts(row["parts"])
@@ -396,10 +429,6 @@ def _decode_pending_dispatch_row(
         and isinstance(metadata, dict)
         and metadata.get("kind")
         == STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND
-        and metadata.get(
-            "dispatch_status",
-            STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING,
-        ) == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING
         and metadata.get("actor") == actor_id
         and metadata.get("thread_id") == row["thread_id"]
         and isinstance(parts, list)
@@ -450,10 +479,203 @@ def _decode_pending_dispatch_row(
     )
 
 
+def _story_workspace_dream_confirmation_has_run_scope(
+    db: sqlite3.Connection,
+    dispatch: StoryWorkspaceDreamConfirmationDispatch,
+) -> bool:
+    run_scope = db.execute(
+        "SELECT run.id FROM workflow_runs AS run "
+        "JOIN story_workspace_workspaces AS workspace "
+        "ON workspace.id = run.workspace_id "
+        "WHERE run.id = ? AND run.created_by = ? "
+        "AND run.source_voice_thread_id = ? AND workspace.owner_id = ?",
+        (
+            dispatch.metadata["story_workspace_run_id"],
+            dispatch.actor_id,
+            dispatch.thread_id,
+            int(dispatch.actor_id),
+        ),
+    ).fetchone()
+    return run_scope is not None
+
+
+def _story_workspace_dispatch_matches_expected(
+    current: StoryWorkspaceDreamConfirmationDispatch,
+    expected: StoryWorkspaceDreamConfirmationDispatch,
+) -> bool:
+    return (
+        current.message_id == expected.message_id
+        and current.thread_id == expected.thread_id
+        and current.actor_id == expected.actor_id
+        and current.metadata.get("story_workspace_run_id")
+        == expected.metadata.get("story_workspace_run_id")
+        and current.metadata.get("request_id")
+        == expected.metadata.get("request_id")
+        and current.metadata.get("command_fingerprint")
+        == expected.metadata.get("command_fingerprint")
+    )
+
+
+def story_workspace_claim_dream_confirmation(
+    db: sqlite3.Connection,
+    dispatch: StoryWorkspaceDreamConfirmationDispatch,
+    *,
+    claim_id: str,
+    now_s: float,
+    lease_duration_s: float,
+) -> Optional[StoryWorkspaceDreamConfirmationDispatch]:
+    """Atomically acquire pending or expired confirmation work in SQLite."""
+
+    if not isinstance(claim_id, str) or not claim_id:
+        raise ValueError("claim_id must be non-empty")
+    if (
+        not _valid_lease_deadline(now_s)
+        or not _valid_lease_deadline(lease_duration_s)
+        or lease_duration_s <= 0
+    ):
+        raise ValueError("claim lease must use finite non-negative time")
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT message.id, message.thread_id, message.role, message.parts, "
+            "message.metadata, thread.user_id "
+            "FROM chat_message AS message "
+            "JOIN chat_thread AS thread ON thread.id = message.thread_id "
+            "WHERE message.id = ?",
+            (dispatch.message_id,),
+        ).fetchone()
+        current = (
+            _decode_confirmation_dispatch_row(row) if row is not None else None
+        )
+        if (
+            current is None
+            or not _story_workspace_dispatch_matches_expected(current, dispatch)
+            or not _story_workspace_dream_confirmation_has_run_scope(db, current)
+        ):
+            db.commit()
+            return None
+        metadata = current.metadata
+        status = metadata.get(
+            "dispatch_status",
+            STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING,
+        )
+        if status == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING:
+            lease_until = metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+            if (
+                not isinstance(metadata.get(_DISPATCH_CLAIM_ID), str)
+                or not _valid_lease_deadline(lease_until)
+            ):
+                db.commit()
+                return None
+            if float(lease_until) > float(now_s):
+                db.commit()
+                return None
+        elif status != STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING:
+            db.commit()
+            return None
+
+        claimed_metadata = dict(metadata)
+        claimed_metadata["dispatch_status"] = (
+            STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+        )
+        claimed_metadata[_DISPATCH_CLAIM_ID] = claim_id
+        claimed_metadata[_DISPATCH_CLAIM_LEASE_UNTIL] = (
+            float(now_s) + float(lease_duration_s)
+        )
+        claimed_metadata.pop(_DISPATCH_ACK_CLAIM_SHA256, None)
+        updated = db.execute(
+            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            (_canonical_json(claimed_metadata), current.message_id),
+        )
+        if updated.rowcount != 1:
+            raise StoryWorkspaceDreamConfirmationError(
+                "RESULT_COMMIT_FAILED", 503
+            )
+        db.commit()
+        return StoryWorkspaceDreamConfirmationDispatch(
+            thread_id=current.thread_id,
+            actor_id=current.actor_id,
+            message_id=current.message_id,
+            parts=current.parts,
+            metadata=claimed_metadata,
+        )
+    except StoryWorkspaceDreamConfirmationError:
+        if db.in_transaction:
+            db.rollback()
+        raise
+    except sqlite3.Error as exc:
+        if db.in_transaction:
+            db.rollback()
+        raise StoryWorkspaceDreamConfirmationError(
+            "RESULT_COMMIT_FAILED", 503
+        ) from exc
+
+
+def _story_workspace_set_dream_confirmation_claim_lease(
+    db: sqlite3.Connection,
+    dispatch: StoryWorkspaceDreamConfirmationDispatch,
+    *,
+    lease_until_s: float,
+) -> bool:
+    """Move the owned claim lease without changing its identity."""
+
+    expected_claim_id = dispatch.metadata.get(_DISPATCH_CLAIM_ID)
+    if (
+        not isinstance(expected_claim_id, str)
+        or not expected_claim_id
+        or not _valid_lease_deadline(lease_until_s)
+    ):
+        return False
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT metadata FROM chat_message WHERE id = ?",
+            (dispatch.message_id,),
+        ).fetchone()
+        metadata = _decode_metadata(row["metadata"]) if row is not None else None
+        if not (
+            isinstance(metadata, dict)
+            and metadata.get("dispatch_status")
+            == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+            and metadata.get(_DISPATCH_CLAIM_ID) == expected_claim_id
+            and metadata.get("request_id")
+            == dispatch.metadata.get("request_id")
+            and metadata.get("command_fingerprint")
+            == dispatch.metadata.get("command_fingerprint")
+        ):
+            db.commit()
+            return False
+        metadata[_DISPATCH_CLAIM_LEASE_UNTIL] = float(lease_until_s)
+        updated = db.execute(
+            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            (_canonical_json(metadata), dispatch.message_id),
+        )
+        if updated.rowcount != 1:
+            raise StoryWorkspaceDreamConfirmationError(
+                "RESULT_COMMIT_FAILED", 503
+            )
+        db.commit()
+        return True
+    except StoryWorkspaceDreamConfirmationError:
+        if db.in_transaction:
+            db.rollback()
+        raise
+    except sqlite3.Error as exc:
+        if db.in_transaction:
+            db.rollback()
+        raise StoryWorkspaceDreamConfirmationError(
+            "RESULT_COMMIT_FAILED", 503
+        ) from exc
+
+
 def story_workspace_read_pending_dream_confirmations(
     db: sqlite3.Connection,
+    *,
+    now_s: Optional[float] = None,
 ) -> list[StoryWorkspaceDreamConfirmationDispatch]:
-    """Read valid pending work from the existing hidden-message audit log."""
+    """Read pending plus expired-lease work from the hidden-message audit."""
+
+    current_time = time.time() if now_s is None else float(now_s)
 
     rows = db.execute(
         "SELECT message.id, message.thread_id, message.role, message.parts, "
@@ -464,24 +686,25 @@ def story_workspace_read_pending_dream_confirmations(
     ).fetchall()
     pending: list[StoryWorkspaceDreamConfirmationDispatch] = []
     for row in rows:
-        dispatch = _decode_pending_dispatch_row(row)
+        dispatch = _decode_confirmation_dispatch_row(row)
         if dispatch is None:
             continue
-        run_id = dispatch.metadata["story_workspace_run_id"]
-        run_scope = db.execute(
-            "SELECT run.id FROM workflow_runs AS run "
-            "JOIN story_workspace_workspaces AS workspace "
-            "ON workspace.id = run.workspace_id "
-            "WHERE run.id = ? AND run.created_by = ? "
-            "AND run.source_voice_thread_id = ? AND workspace.owner_id = ?",
-            (
-                run_id,
-                dispatch.actor_id,
-                dispatch.thread_id,
-                int(dispatch.actor_id),
-            ),
-        ).fetchone()
-        if run_scope is not None:
+        status = dispatch.metadata.get(
+            "dispatch_status",
+            STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING,
+        )
+        eligible = status == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING
+        if status == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING:
+            lease_until = dispatch.metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+            eligible = (
+                isinstance(dispatch.metadata.get(_DISPATCH_CLAIM_ID), str)
+                and _valid_lease_deadline(lease_until)
+                and float(lease_until) <= current_time
+            )
+        if (
+            eligible
+            and _story_workspace_dream_confirmation_has_run_scope(db, dispatch)
+        ):
             pending.append(dispatch)
     return pending
 
@@ -664,9 +887,11 @@ class _StoryWorkspaceDreamRetryState:
 class StoryWorkspaceDreamConfirmationCoordinator:
     """Reconcile durable pending confirmations with same-thread Agent turns.
 
-    Delivery is at least once. The hidden message stays ``pending`` until the
-    stream finishes. A process crash after stream completion but before the
-    SQLite acknowledgement can replay the same message, but cannot strand it.
+    Delivery is at least once. SQLite atomically moves one message from
+    ``pending`` to a leased ``dispatching`` claim before an Agent starts. A
+    process crash after stream completion but before acknowledgement can replay
+    after lease expiry, but two live coordinators cannot consume one fresh
+    claim concurrently.
     """
 
     def __init__(
@@ -680,6 +905,9 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         ),
         reconcile_interval_s: float = 2.0,
         clock: Callable[[], float] = time.monotonic,
+        lease_clock: Callable[[], float] = time.time,
+        lease_duration_s: float = 120.0,
+        claim_id_factory: Callable[[], str] = lambda: uuid4().hex,
         retry_base_s: float = 2.0,
         retry_max_s: float = 60.0,
     ) -> None:
@@ -687,6 +915,14 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         self._dispatcher_factory = dispatcher_factory
         self._reconcile_interval_s = max(float(reconcile_interval_s), 0.01)
         self._clock = clock
+        self._lease_clock = lease_clock
+        if (
+            not _valid_lease_deadline(lease_duration_s)
+            or float(lease_duration_s) <= 0
+        ):
+            raise ValueError("lease_duration_s must be finite and positive")
+        self._lease_duration_s = max(float(lease_duration_s), 0.1)
+        self._claim_id_factory = claim_id_factory
         self._retry_base_s = max(float(retry_base_s), 0.01)
         self._retry_max_s = max(float(retry_max_s), self._retry_base_s)
         self._in_flight: dict[str, asyncio.Task[None]] = {}
@@ -729,12 +965,15 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         retry = self._retry_state.get(dispatch.message_id)
         if retry is not None and self._clock() < retry.not_before:
             return False
+        claimed = self._claim_sync(dispatch)
+        if claimed is None:
+            return False
         task = asyncio.create_task(
-            self._consume_and_ack(dispatch),
-            name=f"dream-confirmation-{dispatch.message_id}",
+            self._consume_and_ack(claimed),
+            name=f"dream-confirmation-{claimed.message_id}",
         )
         # Occupy the key synchronously before the event loop can run a scan.
-        self._in_flight[dispatch.message_id] = task
+        self._in_flight[claimed.message_id] = task
         return True
 
     async def reconcile_once(self) -> int:
@@ -753,7 +992,26 @@ class StoryWorkspaceDreamConfirmationCoordinator:
     ) -> list[StoryWorkspaceDreamConfirmationDispatch]:
         db = self._db_factory()
         try:
-            return story_workspace_read_pending_dream_confirmations(db)
+            return story_workspace_read_pending_dream_confirmations(
+                db,
+                now_s=self._lease_clock(),
+            )
+        finally:
+            db.close()
+
+    def _claim_sync(
+        self,
+        dispatch: StoryWorkspaceDreamConfirmationDispatch,
+    ) -> Optional[StoryWorkspaceDreamConfirmationDispatch]:
+        db = self._db_factory()
+        try:
+            return story_workspace_claim_dream_confirmation(
+                db,
+                dispatch,
+                claim_id=self._claim_id_factory(),
+                now_s=self._lease_clock(),
+                lease_duration_s=self._lease_duration_s,
+            )
         finally:
             db.close()
 
@@ -767,7 +1025,22 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         finally:
             db.close()
 
-    def _record_retry(self, message_id: str) -> None:
+    def _set_claim_lease_sync(
+        self,
+        dispatch: StoryWorkspaceDreamConfirmationDispatch,
+        lease_until_s: float,
+    ) -> bool:
+        db = self._db_factory()
+        try:
+            return _story_workspace_set_dream_confirmation_claim_lease(
+                db,
+                dispatch,
+                lease_until_s=lease_until_s,
+            )
+        finally:
+            db.close()
+
+    def _record_retry(self, message_id: str) -> float:
         previous = self._retry_state.get(message_id)
         failures = 1 if previous is None else previous.failures + 1
         exponent = min(failures - 1, 30)
@@ -779,11 +1052,67 @@ class StoryWorkspaceDreamConfirmationCoordinator:
             failures=failures,
             not_before=self._clock() + delay,
         )
+        return delay
+
+    async def _defer_owned_claim(
+        self,
+        dispatch: StoryWorkspaceDreamConfirmationDispatch,
+        delay_s: float,
+    ) -> None:
+        try:
+            await asyncio.to_thread(
+                self._set_claim_lease_sync,
+                dispatch,
+                self._lease_clock() + max(float(delay_s), 0.0),
+            )
+        except Exception:
+            _logger.exception(
+                "Dream confirmation claim lease update failed for "
+                "message_id=%s",
+                dispatch.message_id,
+            )
+
+    async def _renew_owned_claim(
+        self,
+        dispatch: StoryWorkspaceDreamConfirmationDispatch,
+    ) -> None:
+        interval = max(min(self._lease_duration_s / 3.0, 30.0), 0.05)
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                renewed = await asyncio.to_thread(
+                    self._set_claim_lease_sync,
+                    dispatch,
+                    self._lease_clock() + self._lease_duration_s,
+                )
+                if not renewed:
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _logger.exception(
+                "Dream confirmation claim renewal failed for message_id=%s",
+                dispatch.message_id,
+            )
 
     async def _consume_and_ack(
         self,
         dispatch: StoryWorkspaceDreamConfirmationDispatch,
     ) -> None:
+        completion_observed = False
+        heartbeat: Optional[asyncio.Task[None]] = asyncio.create_task(
+            self._renew_owned_claim(dispatch),
+            name=f"dream-confirmation-lease-{dispatch.message_id}",
+        )
+
+        async def stop_heartbeat() -> None:
+            nonlocal heartbeat
+            if heartbeat is None:
+                return
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
+            heartbeat = None
+
         try:
             dispatcher = self._dispatcher_factory()
             completed = await dispatcher(
@@ -793,16 +1122,25 @@ class StoryWorkspaceDreamConfirmationCoordinator:
                 dispatch.parts,
                 dispatch.metadata,
             )
+            await stop_heartbeat()
             if completed:
+                completion_observed = True
                 await asyncio.to_thread(self._mark_dispatched_sync, dispatch)
                 self._retry_state.pop(dispatch.message_id, None)
             else:
-                self._record_retry(dispatch.message_id)
+                delay = self._record_retry(dispatch.message_id)
+                await self._defer_owned_claim(dispatch, delay)
         except asyncio.CancelledError:
+            await stop_heartbeat()
             self._record_retry(dispatch.message_id)
+            if not completion_observed:
+                await self._defer_owned_claim(dispatch, 0.0)
             raise
         except Exception:
-            self._record_retry(dispatch.message_id)
+            await stop_heartbeat()
+            delay = self._record_retry(dispatch.message_id)
+            if not completion_observed:
+                await self._defer_owned_claim(dispatch, delay)
             _logger.exception(
                 "Dream confirmation remains pending for thread_id=%s "
                 "message_id=%s",
@@ -810,6 +1148,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
                 dispatch.message_id,
             )
         finally:
+            await stop_heartbeat()
             current = asyncio.current_task()
             if self._in_flight.get(dispatch.message_id) is current:
                 self._in_flight.pop(dispatch.message_id, None)
@@ -1146,11 +1485,23 @@ class StoryWorkspaceDreamConfirmationService:
         )
         if dispatch_status not in {
             STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCH_PENDING,
+            STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING,
             STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHED,
         }:
             raise StoryWorkspaceDreamConfirmationError(
                 "IDEMPOTENCY_CONFLICT", 409
             )
+        if dispatch_status == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING:
+            if not (
+                isinstance(metadata.get(_DISPATCH_CLAIM_ID), str)
+                and bool(metadata.get(_DISPATCH_CLAIM_ID))
+                and _valid_lease_deadline(
+                    metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+                )
+            ):
+                raise StoryWorkspaceDreamConfirmationError(
+                    "IDEMPOTENCY_CONFLICT", 409
+                )
         dispatched = (
             dispatch_status == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHED
         )
@@ -1163,7 +1514,9 @@ class StoryWorkspaceDreamConfirmationService:
             dispatched=dispatched,
             request_id=request_id,
         )
-        if dispatched:
+        if dispatched or (
+            dispatch_status == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+        ):
             return StoryWorkspacePersistedDreamConfirmation(
                 accepted=accepted,
                 dispatch=None,
