@@ -226,7 +226,9 @@ const resources = {
           metadataFrozen: 'Workspace frozen for this conversation',
           metadataCurrentAgent: 'current',
           metadataPacking: 'Plugins will show resolved versions and digests after the first run packs the workspace.',
-          metadataNoPlugins: 'This Deck has no plugins configured.'
+          metadataNoPlugins: 'This Deck has no plugins configured.',
+          metadataCopyDigest: 'Copy digest',
+          metadataCopied: 'Copied'
         },
         quickActions: {
           generateImage: {
@@ -738,7 +740,9 @@ const resources = {
           metadataFrozen: '本次对话工作区已锁定',
           metadataCurrentAgent: '当前',
           metadataPacking: '插件将在首次运行打包工作区后显示版本与摘要。',
-          metadataNoPlugins: '此 Deck 未配置插件。'
+          metadataNoPlugins: '此 Deck 未配置插件。',
+          metadataCopyDigest: '复制 digest',
+          metadataCopied: '已复制'
         },
         quickActions: {
           generateImage: {

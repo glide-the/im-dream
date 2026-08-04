@@ -38,6 +38,61 @@ const sectionLabelStyle: React.CSSProperties = {
 const RECEIPT_RETRY_MS = 3000;
 const MAX_RECEIPT_ATTEMPTS = 40;
 
+function CopyDigestButton({ value }: { value: string }) {
+  const { t } = useTranslation();
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // Clipboard API unavailable (insecure context) — fall back to a hidden textarea.
+      const textarea = document.createElement('textarea');
+      textarea.value = value;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+      } catch {
+        return;
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <button
+      type="button"
+      aria-label={t('chat.deck.metadataCopyDigest')}
+      title={copied ? t('chat.deck.metadataCopied') : t('chat.deck.metadataCopyDigest')}
+      onClick={() => void handleCopy()}
+      style={{
+        display: 'inline-flex',
+        flex: '0 0 auto',
+        alignItems: 'center',
+        padding: '1px 6px',
+        borderRadius: 5,
+        border: '1px solid var(--color-border-paper)',
+        background: copied
+          ? 'color-mix(in srgb, #2e9d62 14%, var(--color-bg-surface))'
+          : 'var(--color-bg-surface)',
+        color: copied ? '#24784c' : 'var(--color-text-secondary)',
+        cursor: 'pointer',
+        font: 'inherit',
+        fontSize: 10,
+        fontWeight: 600,
+      }}
+    >
+      {copied ? `✓ ${t('chat.deck.metadataCopied')}` : t('chat.deck.metadataCopyDigest')}
+    </button>
+  );
+}
+
 export default function PluginReceiptBadge({
   activeVoiceId,
   activeVoiceName,
@@ -335,9 +390,12 @@ export default function PluginReceiptBadge({
                         v{plugin.resolved_version ?? '?'}
                       </span>
                     </div>
-                    <code style={{ fontSize: 10, color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>
-                      sha256:{shortDigest(plugin.artifact_digest)}
-                    </code>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2 }}>
+                      <code style={{ flex: 1, minWidth: 0, fontSize: 10, color: 'var(--color-text-muted)', overflowWrap: 'anywhere' }}>
+                        sha256:{shortDigest(plugin.artifact_digest)}
+                      </code>
+                      <CopyDigestButton value={plugin.artifact_digest} />
+                    </div>
                   </div>
                 ))}
               </div>

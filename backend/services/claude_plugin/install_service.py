@@ -401,6 +401,48 @@ def _insert_installation(db: sqlite3.Connection, record: dict[str, Any]) -> None
     )
 
 
+def _revive_installation(
+    db: sqlite3.Connection, installation_id: str, record: dict[str, Any]
+) -> None:
+    """Bring an existing non-ready installation row back to ready in place.
+
+    Used when reinstalling a package whose artifact identity
+    (package, marketplace, resolved version, digest) already has a row —
+    typically after an uninstall (soft delete) or a crashed/failed attempt.
+    Updating in place respects the UNIQUE artifact identity and keeps Deck
+    refs pointing at the same installation id.
+    """
+    db.execute(
+        """
+        UPDATE claude_plugin_installations SET
+            requested_package_spec = ?, requested_version = ?,
+            source_type = ?, artifact_path = ?, claude_cli_version = ?,
+            cli_git_commit_sha = ?, manifest_json = ?,
+            component_inventory_json = ?, compatibility_json = ?,
+            status = 'ready', operation_id = ?,
+            error_code = NULL, error_summary = NULL,
+            file_count = ?, updated_at = ?, installed_at = ?
+        WHERE id = ?
+        """,
+        (
+            record["requested_package_spec"],
+            record.get("requested_version"),
+            record["source_type"],
+            record["artifact_path"],
+            record["claude_cli_version"],
+            record.get("cli_git_commit_sha"),
+            record.get("manifest_json"),
+            record["component_inventory_json"],
+            record.get("compatibility_json", "{}"),
+            record["operation_id"],
+            record.get("file_count", 0),
+            record["updated_at"],
+            record.get("installed_at"),
+            installation_id,
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Install service
 # ---------------------------------------------------------------------------
@@ -454,6 +496,16 @@ class PluginInstallService:
                 raise
             except (cli.ClaudeCliError, artifact_store.ArtifactStoreError) as exc:
                 error = PluginInstallError(PLUGIN_INSTALL_FAILED, str(exc))
+                self._fail_operation(operation, error)
+                raise error from None
+            except Exception as exc:
+                # Unexpected failures (e.g. sqlite3.IntegrityError) must still
+                # move the operation to a terminal error state — otherwise the
+                # row stays in 'running' forever and the background task
+                # crashes without any user-visible error.
+                error = PluginInstallError(
+                    PLUGIN_INSTALL_FAILED, f"unexpected install failure: {exc}"
+                )
                 self._fail_operation(operation, error)
                 raise error from None
         return result
@@ -822,6 +874,23 @@ class PluginInstallService:
             "updated_at": _now(),
             "installed_at": _now(),
         }
+        if existing is not None:
+            # Reinstall after an uninstall (soft delete) or a crashed/failed
+            # attempt: revive the existing row in place instead of inserting
+            # a duplicate that violates the UNIQUE artifact identity.
+            with self.db:
+                _revive_installation(self.db, existing["id"], record)
+            return self._finish_operation(
+                operation,
+                installation_id=existing["id"],
+                evidence=evidence,
+                message=(
+                    f"Reinstalled {spec.canonical} {resolved_version} "
+                    f"({digest[:19]}…); revived existing record"
+                ),
+                execution=execution,
+                replayed=True,
+            )
         with self.db:
             _insert_installation(self.db, record)
         return self._finish_operation(

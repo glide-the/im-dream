@@ -257,7 +257,7 @@ def load_init_profile(packed_dir: Path) -> InitProfile | None:
 
 DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录（只读）
 
-本目录由 packer 在会话首个 agent turn 的 pack 时物化，标识本工作区由 Dream 驱动插件加载。
+本目录由 packer 在会话首个 agent turn 的 pack 时物理映射到会话工作区，标识本工作区由 Dream 驱动插件加载。
 
 - workspace.json：静态 launch 事实（deck_id、插件制品清单、入口路由）。
   它在 pack 后不再变化，不含 workflow_run_id 等 run 级事实。

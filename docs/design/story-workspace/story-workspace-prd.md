@@ -220,6 +220,10 @@ Ink & Memory 是一个以「暖纸张、手写、安静工具台」为产品气�
 
 > **关系结论**：Deck 同时定义“按什么工作流执行”“用什么提示词、插件配置及权限策略执行”，并权威保存下一次运行的 binding；story-workspace 提供选择交互并管理“发起哪次运行、运行到什么状态、产出了什么以及用户如何审阅”。两者通过不可变 Deck 运行快照协作，不复制敏感配置。
 
+#### 3.5.1.1 技术命名索引（代码对齐，2026-08 核实）
+
+> 技术命名索引已收编至唯一权威来源 **`docs/architecture/术语表.md`**（按模块分类，含实现状态与 commit 追溯）。上表业务术语对应的技术命名见该文件：Deck 模块 → §1；Ink-Dream/story-workspace 与 `workflow_run_id`/preflight/`review_status` → §4–§5；Claude Agent 与每线程会话工作区 → §3；Agent profile 与 workspace-init profile 的区分 → §1/§2。本 PRD 正文与设计决策不变。
+
 #### 3.5.2 职责与数据所有权
 
 | 模块 | 负责 | 权威数据/配置来源 | 明确不负责 |

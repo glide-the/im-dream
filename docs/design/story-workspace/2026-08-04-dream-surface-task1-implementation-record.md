@@ -1,4 +1,4 @@
-# Dream Surface Task 1 实施记录（packer surfaces[] 校验 + .dream 物化 + manifest/receipt 透出）
+# Dream Surface Task 1 实施记录（packer surfaces[] 校验 + .dream 物理映射 + manifest/receipt 透出）
 
 > 依据：`2026-08-03-dream-surface-execution-implementation-plan.md` Task 1（Step 0–Step 7）
 > 日期：2026-08-04
@@ -28,8 +28,8 @@
 | 步骤 | 测试（`backend/tests/test_workspace_init_surfaces.py`） | Red | Green |
 |------|------|-----|-------|
 | Step 1/2 校验 | `ValidateSurfacesTests`（合法 dream 1 例；非法 6 组 subTest；非 dict 条目；重复声明；空列表；`load_init_profile` 解析/无 surfaces 不变/非法 fail-closed/非 list fail-closed） | ImportError（collection error） | ✅ |
-| Step 4/5 物化 | `MaterializeDreamSurfaceTests`（静态文件内容与 audit step；重 pack 字节一致；README/workspace.json 均无时间戳） | ImportError | ✅ |
-| Step 6 集成 | `PackerSurfacesIntegrationTests`（物化 + manifest/receipt/init_steps 透出；无 surfaces diff-empty；冻结重 pack 字节一致且透出；冻结缺 `.dream/workspace.json` fail-closed；多插件同名 surface 前者胜出 + receipt warnings + workspace.json 全量插件清单） | 4 failed | ✅ |
+| Step 4/5 物理映射 | `MaterializeDreamSurfaceTests`（静态文件内容与 audit step；重 pack 字节一致；README/workspace.json 均无时间戳） | ImportError | ✅ |
+| Step 6 集成 | `PackerSurfacesIntegrationTests`（物理映射 + manifest/receipt/init_steps 透出；无 surfaces diff-empty；冻结重 pack 字节一致且透出；冻结缺 `.dream/workspace.json` fail-closed；多插件同名 surface 前者胜出 + receipt warnings + workspace.json 全量插件清单） | 4 failed | ✅ |
 
 ## 测试运行输出关键行
 
@@ -45,6 +45,6 @@ tests/test_workspace_init_surfaces.py: 17 passed, 6 subtests passed
 - `plugins/ink-dream-story/.ink/workspace-init.json`（新增）
 - `scripts/migrate_ink_dream_story_digest.py`（新增）
 - `backend/services/claude_plugin/workspace_init.py`（SurfaceSpec/validate_surfaces/materialize_dream_surface/InitProfile.surfaces/load_init_profile 接线）
-- `backend/services/claude_plugin/workspace_packer.py`（surfaces 合并与冲突警告、非冻结物化、冻结校验、manifest/receipt 透出）
+- `backend/services/claude_plugin/workspace_packer.py`（surfaces 合并与冲突警告、非冻结物理映射、冻结校验、manifest/receipt 透出）
 - `backend/tests/test_workspace_init_surfaces.py`（新增）
 - `docs/design/story-workspace/2026-08-04-dream-surface-task1-implementation-record.md`（本文件）

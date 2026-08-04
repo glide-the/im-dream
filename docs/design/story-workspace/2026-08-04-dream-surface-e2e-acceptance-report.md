@@ -20,13 +20,13 @@
 
 ## 二、逐步验收结果表
 
-### Plan Task 6 Step 1：真实链路 pack → `.dream/` 物化 → 三处 surfaces 一致
+### Plan Task 6 Step 1：真实链路 pack → `.dream/` 物理映射 → 三处 surfaces 一致
 
 | 验收点 | 方法 | 结果 | 证据 |
 |--------|------|------|------|
 | Deck 绑定含 dream surface 的制品 | 真实 API：注册新用户 → `GET /api/decks` → `GET /api/claude-plugins/installations`（发现 ready 安装）→ `PUT /api/decks/{id}/claude-plugins` | ✅ | e2e `dream-surface.spec.ts` beforeAll；refs 响应 digest = `sha256:77d77a10…` |
 | 创建 thread → 首个 agent turn 触发 pack | 真实 API + **真实 claude CLI 回合**（`POST /api/claude-agent/threads` → `POST /api/claude-agent`，max_turns=3） | ✅ | e2e test 1，SSE 200 |
-| `.dream/` 两文件物化 | Node 侧 FS 断言线程工作区 | ✅ | `.dream/workspace.json` 键集合精确等于 `{schema_version: dream-surface/v1, deck_id, plugins, entry_route}`；无 `workflow_run_id`；README 含「只读」「workflow_run_id」边界声明 |
+| `.dream/` 两文件物理映射 | Node 侧 FS 断言线程工作区 | ✅ | `.dream/workspace.json` 键集合精确等于 `{schema_version: dream-surface/v1, deck_id, plugins, entry_route}`；无 `workflow_run_id`；README 含「只读」「workflow_run_id」边界声明 |
 | manifest/receipt/端点三处一致 | FS 读 `.ink/launch-manifest.json`、`.ink/plugin-pack-receipt.json` + `GET …/plugin-load-receipt` | ✅ | 三处 `surfaces` 均 `[{name:dream, protocol_dir:.dream, entry_route:/story-workspace/dream}]`；receipt `init_steps` 含 `materialize-surface` |
 | 重 pack 字节一致（DEC-029） | 第二真实回合（frozen 分支）后比对字节 | ✅ | 两文件 bytes 逐一相等 |
 
@@ -80,7 +80,7 @@
 
 `backend/tests/test_workspace_init_surfaces.py` 新增 2 例（独立小改，随本 Task 提交并注明）：
 
-- `test_materialize_write_failure_leaves_no_partial_dream`：mock `Path.write_text` 在 README 写入时抛 `OSError` → 整个物化失败，workspace 下既无 `.dream/` 也无 `.dream.tmp-*` 残留；
+- `test_materialize_write_failure_leaves_no_partial_dream`：mock `Path.write_text` 在 README 写入时抛 `OSError` → 整个物理映射失败，workspace 下既无 `.dream/` 也无 `.dream.tmp-*` 残留；
 - `test_materialize_rebuilds_half_written_dream`：既有半截 `.dream/`（仅 README）被清除重建完整。
 
 ## 三、Task 5 验收要点六条对照
@@ -96,13 +96,13 @@
 
 ## 四、完整链路结论
 
-**主链路真实贯通**：Deck 绑定（真实 API）→ thread 创建 → 首个 agent turn（真实 claude CLI 2.1.220）→ pack → `.dream/` 两文件物化（静态、无 run 级事实、重 pack 字节一致）→ launch-manifest / pack-receipt / `plugin-load-receipt` 端点三处 surfaces 一致透出 → 执行页真实渲染 → 指导提交（202/幂等/冲突/状态守卫全真实）→ 审计字段落 `chat_message.metadata` → 指导经服务端新 turn 真实注入执行 Agent 并获得遵循指导的 assistant 产出 → Chat 视图无指导气泡。
+**主链路真实贯通**：Deck 绑定（真实 API）→ thread 创建 → 首个 agent turn（真实 claude CLI 2.1.220）→ pack → `.dream/` 两文件物理映射（静态、无 run 级事实、重 pack 字节一致）→ launch-manifest / pack-receipt / `plugin-load-receipt` 端点三处 surfaces 一致透出 → 执行页真实渲染 → 指导提交（202/幂等/冲突/状态守卫全真实）→ 审计字段落 `chat_message.metadata` → 指导经服务端新 turn 真实注入执行 Agent 并获得遵循指导的 assistant 产出 → Chat 视图无指导气泡。
 
 **旧会话兼容性结论**：无 surfaces 的会话/工作区在端点响应、文件系统、UI 三层均无 surface 痕迹，行为与改动前一致（DEC-028 成立）；既有 e2e 零回归。
 
 ## 五、假阳性排除（逐项给证据）
 
-1. **E14 digest 前置**：第一节四处核验，旧库不存在「静默无 surface」前提；且 `.dream/` 物化为存在性证据，不可能由无 Task 1 代码的进程产出。
+1. **E14 digest 前置**：第一节四处核验，旧库不存在「静默无 surface」前提；且 `.dream/` 的物理映射产物为存在性证据，不可能由无 Task 1 代码的进程产出。
 2. **运行后端版本**：进程启动 02:18 晚于 Task 1（00:48）/Task 3（01:27）提交；openapi 实测列出 guidance 端点；真实 pack 产出 `.dream/`。
 3. **DB 暂存的边界**：`stage_guidance_run.py` 仅替代「preflight 令牌仪式 + 工作流执行器推进 run 至 continuing/pending_review」这一段（真实执行需要完整 Deck 运行时，超出本回归可达层级）；暂存行的 id/哈希格式经 pydantic 合同全量校验（前两轮因格式不符 503 已修复并清理脏行），其后的 run read、guidance 端点、审计落库、前端执行页**全部走真实产品代码**，无任何 mock。
 4. **指导闭环非自导自演**：guidance 提交、审计断言、气泡断言分属三个独立通道（REST 写 / REST 读 / 浏览器 DOM），且 assistant 真实产出内容逐字引用指导文本。

@@ -3,6 +3,12 @@
 This document describes the interaction patterns and responsibilities for all AI-agent
 features in **Ink & Memory**.  Read this when adding or modifying any agent-driven UI.
 
+> **Terminology**: all business terms used here (Deck, claude-agent, thread, run,
+> story-workspace / Dream, packer, surfaces, guidance, etc.) are defined in the
+> canonical glossary [`docs/architecture/术语表.md`](architecture/术语表.md) —
+> business term → code-level technical naming, organized by module.  Consult it
+> before introducing any new term.
+
 ---
 
 ## Agent Entry Points

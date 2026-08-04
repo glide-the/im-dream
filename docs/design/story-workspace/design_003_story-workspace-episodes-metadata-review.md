@@ -9,16 +9,23 @@
 > **调研来源**: [调研Dreem_app平台.pdf](./调研Dreem_app平台.pdf)、`docs/prd/Ink & Memory UI Design v2.pdf`  
 > **状态**: design 完成，可供下游只读消费  
 > **更新日期**: 2026-08-01
+> **2026-08-03 兼容性修订（任务二）**: 见审计报告 [2026-08-03-dream-surface-audit-report.md](./2026-08-03-dream-surface-audit-report.md)。本文无正文修订（C8 差距属既有设计债，不在本增量处理）；`StoryWorkspaceReviewEvent` action=guide 的无 DDL 承载在 design_004 §5.3 与 §9 DEC-032 修订注记中定义（`chat_message.metadata`，审计报告 D11/D12/D13）。
 
 ## 0. 增量适用规则
 
 本文是 `story-workspace` 稳定设计的**受控增量附录**，不是平行 PRD。
 
-- [SUO-230](/SUO/issues/SUO-230) 已确认的顶部 Dream 导航、canonical `/story-workspace/dream`、桌面三栏、`StoryWorkspaceReviewGate`、未确认不得继续、表格替代复杂画布、排除平台视频及 UI Design v2 均保持不变。
+- [SUO-230](/SUO/issues/SUO-230) 已确认的顶部 Dream 导航（Dream 一词横跨：导航文案（i18n 键 `nav.dream`）、页面 `StoryWorkspaceDreamPage.tsx`、canonical 路由 `/story-workspace/dream`（`STORY_WORKSPACE_PATHS.dream`）；本文沿用该基线语义，不引入 `.dream` 目录或 surface 语义——后者属 design_004 增量）、canonical `/story-workspace/dream`、桌面三栏、`StoryWorkspaceReviewGate`（Gate=UI 组件；服务端聚合校验与审计记录见 §6 消歧）、未确认不得继续、表格替代复杂画布、排除平台视频及 UI Design v2 均保持不变。
 - 本文只补充 `output/episodes` 元信息如何进入同一工作空间投影，以及“简单描述 → Agent 产出 → 页面渲染 → 用户审阅 → 后续执行”的页面与状态细节。
 - 若本文与稳定基线发生冲突，仅本文显式标记为“SUO-241 变化”的 episodes 元信息、运行版本及审阅规则生效；其余内容仍以稳定基线为准。
 - [SUO-298](/SUO/issues/SUO-298) 仅修复合同代码归属：后端为 `backend/story_workspace/contracts.py`，前端局部 REST 合同为 `frontend/src/hooks/story-workspace/contracts.ts`；不改变 episodes 投影、Gate、REST、数据表或产品范围。
 - 下游 `IssueDispatcher`、`TaskDesignAgent`、`StagePlanner` 只读消费本文；本文不直接拆 Issue、写 Task 或排 Stage。
+
+---
+
+## 0.5 术语对照表（业务术语 → 技术命名）
+
+> 术语表已收编至唯一权威来源 **`docs/architecture/术语表.md`**（按模块分类，含实现状态与 commit 追溯）。本文用到的 run/`storyWorkspaceRunId`/attempt/review_status/Gate/Deck/Chat 会话/Dream 页面/episodes artifact/插件制品/ReviewEvent/supersede 等术语，见该文件 §2–§5。本文 §3.2 的「术语映射与步数对齐」仍是 `storyWorkspaceRunId` ↔ `workflow_run_id` 映射规则的权威定义处。
 
 ---
 
@@ -101,16 +108,22 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 | 步骤 | 用户/系统行为 | 页面结果 | Gate 结果 |
 |------|---------------|----------|-----------|
 | 1. 简单描述 | 用户输入题材、剧情或修改意图；选择既有 Deck 运行上下文 | 建立 `storyWorkspaceRunId`，输入摘要进入运行记录 | 锁定，不可继续 |
-| 2. Agent 产出 | Agent 生成 episodes artifact bundle；已有参考产物也从此入口被索引 | 显示运行步骤、已到达的 artifact kind 与非敏感日志 | 锁定，不可审阅不完整版本 |
+| 2. Agent 产出 | Agent 生成 episodes artifact bundle（episodes artifact=内容产物，以 artifact kind/version 标识；区别于插件制品=pack 打包单元，以 `package_spec`/`artifact_digest` 标识，由 `pack_workspace_plugins()` 物理映射）；已有参考产物也从此入口被索引 | 显示运行步骤、已到达的 artifact kind 与非敏感日志 | 锁定，不可审阅不完整版本 |
 | 3. 页面渲染 | 适配层校验并生成统一投影；列表和详情增量显示 | 完整版本进入 `story-workspace-pending-review`；部分版本标记“产出校验中/不完整” | 完整且一致后才开放审阅 |
 | 4. 用户审阅 | 用户检查剧本、镜头、Prompt、Agent 审查结论；确认、编辑后确认或驳回 | 写入当前 artifact version 的审阅事件和意见 | 全部必审项确认才解锁 |
 | 5. 后续执行 | 用户点击“进入后续执行”，系统做最终 Gate 校验并幂等触发 | 显示继续中、完成或失败；保留原确认事实 | 仅最新活动版本可放行一次 |
 
+**术语映射与步数对齐（不改变闭环语义）：**
+
+- `storyWorkspaceRunId` 是运行级标识的合同层命名，持久化对应代码侧 `workflow_run_id`（形如 `run_<32hex>`，模型 `WorkflowRun`，表 `workflow_runs`）。
+- attempt 语义为「同一业务运行的新不可变尝试，合同层以 `retryOfRunId` 关联」；统一措辞为：**新 attempt=新 run 记录（新 `workflow_run_id`），非 run 的子级**。代码中尚无 attempt / `retryOfRunId` 字段，属待实现。
+- 步数对齐：PRD 的「四步」Review Gate（产出 → 渲染 → 审阅 → 继续/结束）= 本文五步去掉第 1 步（简单描述）；本文第 5 步「后续执行」对应 PRD 原第 4 步「继续/结束」。后续文档引用 Gate 步数时以本映射为准。
+
 ### 3.3 异常与回退总则
 
 - 解析失败、必需文件缺失、跨文件版本冲突：保留可读内容，但禁止确认和后续执行。
-- Agent 失败：保留本次 run 与已生成文件清单；“重试当前运行”形成新 attempt，不覆盖失败记录。
-- 用户驳回：当前版本变为只读的 `rejected` 事实；“再次生成”创建新 run/attempt，并带入原始描述与驳回意见。
+- Agent 失败：保留本次 run 与已生成文件清单；“重试当前运行”形成新 attempt（新 run 记录，非原 run 的子级），不覆盖失败记录。
+- 用户驳回：当前版本变为只读的 `rejected` 事实；“再次生成”创建新 run（新 attempt），并带入原始描述与驳回意见。
 - 确认提交冲突：若服务端发现页面版本过期，返回最新版本并要求重新审阅，不继承旧确认。
 - 后续执行失败：确认记录仍有效；允许对同一已确认版本幂等重试后续执行，不要求用户重复确认，除非产物版本已改变。
 
@@ -297,6 +310,8 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 
 ## 6. 交互状态与审阅 Gate
 
+> **术语消歧**：本文中的「Gate」指向三类不同实体——① UI 组件 `StoryWorkspaceReviewGate`（前端组件，待实现）；② 服务端聚合校验（对应代码侧 `PreflightService`（`pf_*`）+ `RunStatus` 状态机 + `workflow_run_transitions` 表 + `RuntimeLoadReceiptReadiness`，已存在）；③ 审计记录 `StoryWorkspaceExecutionGateRecord`（§6.3，待实现）。上下文中的「Gate 锁定/解锁/校验」默认指 ② 的业务约束，「Gate 高亮/展示」指 ①，「Gate 记录/审计」指 ③。
+
 ### 6.1 页面状态表
 
 | UI 状态 | 进入条件 | 页面表现 | 可用动作 |
@@ -318,6 +333,8 @@ output/episodes/EP??                         StoryWorkspacePromptComposer
 | `story-workspace-stale-review` | 审阅期间出现新 artifact version | 旧内容只读并提示“审阅版本已过期” | 切换最新版本重新审阅 |
 
 页面 UI 状态是基线 canonical run/review 状态的可见投影，不另造第二套后端事实。`pending_review` 仍是可审阅的 canonical 状态。
+
+> 术语对齐：PRD §3.6.2 的 UI 状态 `story-workspace-rendering` 与本文 `story-workspace-output-validating` 指同一阶段（文件到达但尚未完成解析/一致性校验），`story-workspace-rendering` 为更早命名；后续实现统一以本文 `story-workspace-output-validating` 为准。
 
 ### 6.2 审阅动作与 Gate 规则
 
