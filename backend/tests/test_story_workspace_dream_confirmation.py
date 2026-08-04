@@ -60,6 +60,7 @@ from story_workspace.contracts import (
     StoryWorkspaceDreamSourceResponse,
     StoryWorkspaceDreamStage,
     StoryWorkspaceDreamStageResponse,
+    StoryWorkspaceDreamRunContext,
 )
 
 
@@ -1090,6 +1091,106 @@ class StoryWorkspaceDreamConfirmationCoordinatorTests(
 
 
 class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTestCase):
+    async def test_resume_rebuilds_dream_context_from_persisted_run(self) -> None:
+        requests = []
+
+        class FakeFactory:
+            async def run_streaming(self, request):
+                requests.append(request)
+                yield 'data: {"type":"message-final","text":"done"}\n\n'
+                yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            db_path = Path(temp_dir) / "resume-context.db"
+            db = sqlite3.connect(db_path)
+            db.executescript(
+                """
+                CREATE TABLE story_workspace_workspaces (
+                    id TEXT PRIMARY KEY, owner_id INTEGER NOT NULL
+                );
+                CREATE TABLE deck_plugin_bindings (
+                    deck_plugin_binding_id TEXT PRIMARY KEY,
+                    deck_id TEXT NOT NULL,
+                    deck_plugin_id TEXT NOT NULL,
+                    deck_plugin_version TEXT NOT NULL,
+                    binding_revision INTEGER NOT NULL
+                );
+                CREATE TABLE workflow_runs (
+                    id TEXT PRIMARY KEY,
+                    workspace_id TEXT NOT NULL,
+                    source_voice_thread_id TEXT NOT NULL,
+                    created_by TEXT NOT NULL,
+                    deck_plugin_id TEXT NOT NULL,
+                    deck_plugin_version TEXT NOT NULL,
+                    deck_plugin_binding_id TEXT NOT NULL,
+                    binding_revision INTEGER NOT NULL,
+                    deck_runtime_snapshot_id TEXT NOT NULL,
+                    runtime_plugin_lock_id TEXT NOT NULL
+                );
+                """
+            )
+            db.execute(
+                "INSERT INTO story_workspace_workspaces VALUES (?, ?)",
+                (WORKSPACE_ID, int(ACTOR_ID)),
+            )
+            db.execute(
+                "INSERT INTO deck_plugin_bindings VALUES (?, ?, ?, ?, ?)",
+                (
+                    "dpb_" + "2" * 32,
+                    "deck-dream",
+                    "ink.dream.story-workflow",
+                    "1.0.0",
+                    1,
+                ),
+            )
+            db.execute(
+                "INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    RUN_ID,
+                    WORKSPACE_ID,
+                    THREAD_ID,
+                    ACTOR_ID,
+                    "ink.dream.story-workflow",
+                    "1.0.0",
+                    "dpb_" + "2" * 32,
+                    1,
+                    "drs_" + "5" * 32,
+                    "rpl_" + "1" * 32,
+                ),
+            )
+            db.commit()
+            db.close()
+
+            def open_db() -> sqlite3.Connection:
+                return sqlite3.connect(db_path)
+
+            dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
+                FakeFactory(),
+                request_factory=lambda **values: SimpleNamespace(**values),
+            )
+            metadata = {
+                "kind": STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND,
+                "story_workspace_run_id": RUN_ID,
+                "thread_id": THREAD_ID,
+                "actor": ACTOR_ID,
+            }
+            with patch.object(database, "get_db", side_effect=open_db):
+                self.assertTrue(
+                    await dispatcher(
+                        THREAD_ID,
+                        ACTOR_ID,
+                        "message-resume",
+                        [{"type": "text", "text": "continue"}],
+                        metadata,
+                    )
+                )
+
+        context = requests[0].story_workspace_dream_context
+        self.assertEqual(context.workflow_run_id, RUN_ID)
+        self.assertEqual(context.thread_id, THREAD_ID)
+        self.assertEqual(context.deck_id, "deck-dream")
+        self.assertEqual(context.binding_revision, 1)
+
     async def test_running_thread_is_queued_on_factory_lock_and_uses_same_turn_data(self) -> None:
         release = asyncio.Event()
         entered = asyncio.Event()
@@ -1106,6 +1207,17 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
             FakeFactory(),
             request_factory=lambda **values: SimpleNamespace(**values),
+            context_loader=lambda thread_id, actor_id, metadata: StoryWorkspaceDreamRunContext(
+                workflow_run_id=RUN_ID,
+                thread_id=thread_id,
+                deck_id="deck-dream",
+                deck_plugin_id="ink.dream.story-workflow",
+                deck_plugin_version="1.0.0",
+                deck_plugin_binding_id="dpb_" + "2" * 32,
+                binding_revision=1,
+                deck_runtime_snapshot_id="drs_" + "5" * 32,
+                runtime_plugin_lock_id="rpl_" + "1" * 32,
+            ),
         )
         parts = [{"type": "text", "text": "structured"}]
         metadata = {
@@ -1124,6 +1236,10 @@ class StoryWorkspaceDreamConfirmationDispatcherTests(unittest.IsolatedAsyncioTes
         self.assertTrue(request.resume)
         self.assertIs(request.message_parts, parts)
         self.assertIs(request.message_metadata, metadata)
+        self.assertEqual(
+            request.story_workspace_dream_context.workflow_run_id,
+            RUN_ID,
+        )
 
     async def test_dispatcher_exception_does_not_raise_to_caller(self) -> None:
         class BrokenFactory:

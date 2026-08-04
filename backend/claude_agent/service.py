@@ -191,15 +191,29 @@ from services.story_workspace.agent_integration import (
     parse_agent_story_output,
     store_agent_story_output,
 )
-from story_workspace.contracts import StoryWorkspaceAgentStoryPayload
+from story_workspace.contracts import (
+    StoryWorkspaceAgentStoryPayload,
+    StoryWorkspaceDreamRunContext,
+)
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 from services.claude_plugin.workspace_packer import pack_workspace_plugins
 from session_events import EditSessionEvent, session_event_bus
 
 logger = logging.getLogger(__name__)
 
+_TRUSTED_STORY_WORKSPACE_ENV_KEYS = frozenset({
+    "INK_AGENT_USER_ID",
+    "INK_AGENT_THREAD_ID",
+    "INK_AGENT_WORKFLOW_RUN_ID",
+})
 
-def _pack_thread_workspace_plugins(cwd: str, deck_id: Optional[str]) -> None:
+
+def _pack_thread_workspace_plugins(
+    cwd: str,
+    deck_id: Optional[str],
+    *,
+    dream_mode: bool = False,
+) -> None:
     """Pack the thread-locked Deck's plugins into the thread workspace.
 
     Runs on the service executor thread (SQLite + filesystem work).  Errors
@@ -213,7 +227,14 @@ def _pack_thread_workspace_plugins(cwd: str, deck_id: Optional[str]) -> None:
         return
     db = _db.get_db()
     try:
-        pack_workspace_plugins(db, workspace=Path(cwd), deck_id=deck_id)
+        pack_workspace_plugins(
+            db,
+            workspace=Path(cwd),
+            deck_id=deck_id,
+            server_adapter_package_specs=(
+                ("ink-dream-story@platform-builtin",) if dream_mode else ()
+            ),
+        )
     finally:
         db.close()
 
@@ -852,6 +873,11 @@ class ClaudeAgentRunRequest:
     editor_state: Optional[dict[str, Any]] = None
     # Voice / deck system prompt injected as context into each user message.
     system_prompt: Optional[str] = None
+    # Internal server-derived Dream provenance. Never hydrate this field from
+    # an HTTP client payload.
+    story_workspace_dream_context: Optional[
+        StoryWorkspaceDreamRunContext
+    ] = None
     # NOTE (2026-08-02, deck-integration-delta): ``claude_settings_json`` and
     # ``claude_plugin_paths`` were removed.  Per-turn requests must never
     # carry settings JSON or plugin paths: plugins are resolved from the
@@ -971,7 +997,11 @@ class ClaudeAgentService:
                 user_env_vars = {
                     str(k).strip(): str(v)
                     for k, v in raw_env.items()
-                    if str(k).strip() and v is not None
+                    if (
+                        str(k).strip()
+                        and str(k).strip() not in _TRUSTED_STORY_WORKSPACE_ENV_KEYS
+                        and v is not None
+                    )
                 }
             im_full_access_enabled = bool(sys_cfg.get("im_full_access_enabled"))
             workspace_enabled = bool(sys_cfg.get("workspace_enabled", True))
@@ -1179,9 +1209,22 @@ class ClaudeAgentService:
                 str((existing_session or {}).get("deck_id") or "").strip() or None
             )
             if thread_deck_id:
+                dream_context = request.story_workspace_dream_context
+                if dream_context is not None:
+                    if (
+                        dream_context.thread_id != request.thread_id
+                        or dream_context.thread_id != state.session_id
+                        or dream_context.deck_id != thread_deck_id
+                    ):
+                        raise ValueError(
+                            "Story Workspace Dream context does not match the trusted thread Deck"
+                        )
                 try:
                     await asyncio.to_thread(
-                        _pack_thread_workspace_plugins, cwd, thread_deck_id
+                        _pack_thread_workspace_plugins,
+                        cwd,
+                        thread_deck_id,
+                        dream_mode=(dream_context is not None),
                     )
                 except Exception:
                     logger.exception(
@@ -1190,6 +1233,10 @@ class ClaudeAgentService:
                         thread_deck_id,
                     )
                     raise
+            elif request.story_workspace_dream_context is not None:
+                raise ValueError("Story Workspace Dream turn requires a thread-locked Deck")
+        elif request.story_workspace_dream_context is not None:
+            raise ValueError("Story Workspace Dream turn requires Workspace Mode")
 
         # editor_session_id is user_sessions.id from /api/sessions, carried in
         # editor_state["id"].  This is distinct from state.session_id (Claude thread ID)
@@ -1215,6 +1262,7 @@ class ClaudeAgentService:
             cwd=cwd,
             editor_session_id=editor_session_id,
             voice_system_prompt=request.system_prompt or None,
+            story_workspace_dream_context=request.story_workspace_dream_context,
         )
 
         run_options = AgentRunOptions(
@@ -1233,6 +1281,15 @@ class ClaudeAgentService:
                 **user_env_vars,
                 "INK_AGENT_USER_ID": str(request.user_id),
                 "INK_AGENT_THREAD_ID": state.session_id,
+                **(
+                    {
+                        "INK_AGENT_WORKFLOW_RUN_ID": (
+                            request.story_workspace_dream_context.workflow_run_id
+                        )
+                    }
+                    if request.story_workspace_dream_context is not None
+                    else {}
+                ),
             },
             user_sdk_env=user_env_vars,
             editor_state=active_editor_state,
@@ -1354,6 +1411,13 @@ class ClaudeAgentService:
         full_text: str,
     ) -> Optional[dict[str, Any]]:
         """Persist an explicit JSON story bundle without changing Chat outcome."""
+
+        if getattr(
+            execution.request,
+            "story_workspace_dream_context",
+            None,
+        ) is not None:
+            return None
 
         thread_id = execution.request.thread_id
         candidate = (full_text or "").strip()

@@ -37,6 +37,7 @@ _logger = logging.getLogger(__name__)
 
 _TRUSTED_USER_ENV = "INK_AGENT_USER_ID"
 _TRUSTED_THREAD_ENV = "INK_AGENT_THREAD_ID"
+_TRUSTED_WORKFLOW_RUN_ENV = "INK_AGENT_WORKFLOW_RUN_ID"
 _ResultT = TypeVar("_ResultT", bound=BaseModel)
 
 
@@ -92,6 +93,12 @@ def _trusted_actor_and_thread() -> tuple[int, str]:
     ):
         raise PermissionError("trusted thread context is unavailable")
     return int(raw_actor), thread_id
+
+
+def _require_trusted_workflow_run(workflow_run_id: str) -> None:
+    trusted_run_id = os.getenv(_TRUSTED_WORKFLOW_RUN_ENV, "").strip()
+    if not trusted_run_id or workflow_run_id != trusted_run_id:
+        raise PermissionError("trusted workflow run context is unavailable")
 
 
 def _read_actor_scoped_run(
@@ -216,6 +223,7 @@ def story_workspace_handle_dream_tool(
     try:
         if name == "write_dream_run":
             request = StoryWorkspaceDreamRunToolInput.model_validate(arguments or {})
+            _require_trusted_workflow_run(request.workflow_run_id)
             result = _with_authoritative_context(
                 request.workflow_run_id,
                 lambda writer, run: writer.write_run(
@@ -233,6 +241,7 @@ def story_workspace_handle_dream_tool(
             )
         if name == "write_dream_stage":
             request = StoryWorkspaceDreamStageToolInput.model_validate(arguments or {})
+            _require_trusted_workflow_run(request.workflow_run_id)
             result = _with_authoritative_context(
                 request.workflow_run_id,
                 lambda writer, run: writer.write_stage(

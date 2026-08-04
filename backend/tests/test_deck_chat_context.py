@@ -100,6 +100,19 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Keep a cinematic story voice.", context.system_prompt)
         self.assertEqual(context.plugin_refs, ())
         self.assertIsNone(context.plugin_provenance)
+        self.assertIn("exactly one JSON object", context.system_prompt)
+
+    async def test_dream_mode_uses_workspace_file_lifecycle_not_legacy_json(self) -> None:
+        context = await DeckChatContextService(self.fixture.db).resolve(
+            deck_id=DECK_ID,
+            actor_id="1",
+            dream_mode=True,
+        )
+
+        self.assertNotIn("exactly one JSON object", context.system_prompt)
+        self.assertNotIn("pending Dream proposal", context.system_prompt)
+        self.assertIn("canonical workspace files", context.system_prompt)
+        self.assertIn("Dream run context", context.system_prompt)
 
     async def test_ready_refs_surface_as_digest_pinned_provenance(self) -> None:
         _insert_installation(self.fixture.db)

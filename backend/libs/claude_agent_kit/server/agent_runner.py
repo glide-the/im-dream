@@ -385,6 +385,12 @@ _DREAM_SURFACE_REFERENCE_RE = re.compile(
     re.IGNORECASE,
 )
 _DREAM_PATH_FRAGMENT_RE = re.compile(r"\.[A-Za-z0-9_?*\[\]!.^-]+")
+_STORY_WORKSPACE_DREAM_RUN_RE = re.compile(r"^run_[0-9a-f]{32}$")
+_STORY_WORKSPACE_DREAM_CANONICAL_ROOTS: tuple[str, ...] = (
+    "assets",
+    "stories",
+    ".dramaforge",
+)
 
 # Read-only / navigation shell commands that carry no filesystem side effects.
 # Any command whose first token matches one of these and contains no shell
@@ -1315,7 +1321,11 @@ def _story_workspace_mcp_stdio_config(
 
     trusted_env = {
         name: mcp_env[name]
-        for name in ("INK_AGENT_USER_ID", "INK_AGENT_THREAD_ID")
+        for name in (
+            "INK_AGENT_USER_ID",
+            "INK_AGENT_THREAD_ID",
+            "INK_AGENT_WORKFLOW_RUN_ID",
+        )
         if mcp_env.get(name)
     }
     return McpStdioServerConfig(
@@ -1324,6 +1334,36 @@ def _story_workspace_mcp_stdio_config(
         args=["-m", "libs.claude_agent_kit.server.story_workspace_mcp_stdio"],
         env=_stdio_env(extra_env=trusted_env),
     )
+
+
+def _trusted_story_workspace_run_id(mcp_env: dict[str, str]) -> Optional[str]:
+    run_id = str(mcp_env.get("INK_AGENT_WORKFLOW_RUN_ID") or "").strip()
+    return run_id if _STORY_WORKSPACE_DREAM_RUN_RE.fullmatch(run_id) else None
+
+
+def _is_trusted_story_workspace_mcp_context(
+    cwd: Optional[str],
+    mcp_env: dict[str, str],
+) -> bool:
+    actor_id = str(mcp_env.get("INK_AGENT_USER_ID") or "").strip()
+    thread_id = str(mcp_env.get("INK_AGENT_THREAD_ID") or "").strip()
+    if (
+        not actor_id.isdigit()
+        or int(actor_id) <= 0
+        or not thread_id
+        or _trusted_story_workspace_run_id(mcp_env) is None
+    ):
+        return False
+    try:
+        workspace = Path(cwd or "").expanduser().resolve(strict=True)
+        workspace_root = Path(get_workspace_root()).expanduser().resolve(strict=True)
+        return (
+            workspace.is_dir()
+            and workspace.parent == workspace_root
+            and workspace.name == thread_id
+        )
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -1671,6 +1711,38 @@ def _apply_workspace_files_permission(
             "permissionDecision": "allow",
         }
     }
+
+
+def _apply_story_workspace_dream_canonical_write_permission(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+    workflow_run_id: Optional[str],
+) -> Optional[HookJSONOutput]:
+    """Allow Dream Agent file writes only below its canonical content roots."""
+
+    if (
+        tool_name not in {"Write", "Edit", "MultiEdit"}
+        or workflow_run_id is None
+        or not cwd
+    ):
+        return None
+    raw_path = _extract_builtin_file_tool_path(tool_input)
+    if not raw_path:
+        return None
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        for root_name in _STORY_WORKSPACE_DREAM_CANONICAL_ROOTS:
+            root = (workspace / root_name).resolve(strict=False)
+            if resolved != root and resolved.is_relative_to(root):
+                return _explicit_pre_tool_use_allow()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return None
 
 
 def _apply_low_sensitivity_query_permission(
@@ -2084,8 +2156,21 @@ class ClaudeAgentRunner:
             if workspace_boundary_permission is not None:
                 return workspace_boundary_permission
 
+            if tool_choice == "auto":
+                dream_canonical_write_permission = (
+                    _apply_story_workspace_dream_canonical_write_permission(
+                        tool_name,
+                        tool_input,
+                        cwd,
+                        _trusted_story_workspace_run_id(mcp_env),
+                    )
+                )
+                if dream_canonical_write_permission is not None:
+                    return dream_canonical_write_permission
+
             if (
                 tool_choice == "auto"
+                and _trusted_story_workspace_run_id(mcp_env) is not None
                 and tool_name in _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES
             ):
                 return _explicit_pre_tool_use_allow()
@@ -2521,9 +2606,7 @@ class ClaudeAgentRunner:
             logger.debug("Editor MCP enabled; session context flows via tool arguments.")
 
         if (
-            cwd
-            and mcp_env.get("INK_AGENT_USER_ID")
-            and mcp_env.get("INK_AGENT_THREAD_ID")
+            _is_trusted_story_workspace_mcp_context(cwd, mcp_env)
             and any(
                 tool.startswith(_STORY_WORKSPACE_MCP_TOOL_PREFIX)
                 for tool in effective_allowed_tools
@@ -2532,7 +2615,9 @@ class ClaudeAgentRunner:
             mcp_servers["story_workspace"] = _story_workspace_mcp_stdio_config(
                 mcp_env
             )
-            logger.debug("Story Workspace MCP enabled with trusted actor/thread context.")
+            logger.debug(
+                "Story Workspace MCP enabled with trusted actor/thread/run context."
+            )
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = ClaudeAgentOptions(

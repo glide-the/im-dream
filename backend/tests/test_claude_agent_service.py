@@ -32,6 +32,7 @@ import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
@@ -46,6 +47,7 @@ from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService, _Tur
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from libs.claude_agent_kit.types import AgentRunResult, ToolEventPayload
+from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 
 class _FakeContextBuilder:
@@ -74,6 +76,132 @@ class _FakeBus:
 
 
 class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
+    @staticmethod
+    def _dream_context() -> StoryWorkspaceDreamRunContext:
+        return StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "1" * 32,
+            thread_id="thread_dream_turn",
+            deck_id="deck-dream",
+            deck_plugin_id="ink.dream.story-workflow",
+            deck_plugin_version="1.0.0",
+            deck_plugin_binding_id="dpb_" + "2" * 32,
+            binding_revision=3,
+            deck_runtime_snapshot_id="drs_" + "4" * 32,
+            runtime_plugin_lock_id="rpl_" + "5" * 32,
+        )
+
+    async def test_dream_turn_packs_adapter_and_propagates_only_its_run_context(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_dream_turn")
+        context = self._dream_context()
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_dream_turn",
+            message_parts=[{"type": "text", "text": "create Dream"}],
+            story_workspace_dream_context=context,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / "thread_dream_turn"
+            workspace_path.mkdir()
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={"workspace_enabled": True},
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value={"deck_id": "deck-dream"},
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "_pack_thread_workspace_plugins",
+                ) as pack,
+            ):
+                execution = await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        pack.assert_called_once_with(
+            str(workspace_path),
+            "deck-dream",
+            dream_mode=True,
+        )
+        self.assertIs(
+            builder.user_message_calls[0]["story_workspace_dream_context"],
+            context,
+        )
+        self.assertEqual(
+            execution.run_options.mcp_env["INK_AGENT_WORKFLOW_RUN_ID"],
+            context.workflow_run_id,
+        )
+
+    async def test_dream_turn_skips_legacy_standalone_proposal_persistence(self):
+        service = ClaudeAgentService(context_builder=_FakeContextBuilder())
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_dream_turn",
+            story_workspace_dream_context=self._dream_context(),
+        )
+        with unittest.mock.patch.object(
+            service_module,
+            "parse_agent_story_output",
+        ) as parse:
+            result = await service._store_story_workspace_output(
+                SimpleNamespace(request=request),
+                '{"title":"legacy"}',
+            )
+        self.assertIsNone(result)
+        parse.assert_not_called()
+
+    async def test_workspace_pack_adds_server_adapter_only_for_dream_turn(self):
+        db = unittest.mock.Mock()
+        with (
+            unittest.mock.patch.object(
+                service_module._db, "get_db", return_value=db
+            ),
+            unittest.mock.patch.object(
+                service_module, "pack_workspace_plugins"
+            ) as pack,
+        ):
+            service_module._pack_thread_workspace_plugins(
+                "/workspace/thread", "deck-dream"
+            )
+            service_module._pack_thread_workspace_plugins(
+                "/workspace/thread", "deck-dream", dream_mode=True
+            )
+
+        self.assertEqual(
+            pack.call_args_list,
+            [
+                unittest.mock.call(
+                    db,
+                    workspace=Path("/workspace/thread"),
+                    deck_id="deck-dream",
+                    server_adapter_package_specs=(),
+                ),
+                unittest.mock.call(
+                    db,
+                    workspace=Path("/workspace/thread"),
+                    deck_id="deck-dream",
+                    server_adapter_package_specs=(
+                        "ink-dream-story@platform-builtin",
+                    ),
+                ),
+            ],
+        )
+
     async def test_system_config_is_loaded_before_resume_db_lookup(self):
         builder = _FakeContextBuilder()
         service = ClaudeAgentService(context_builder=builder)
@@ -105,6 +233,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                         ],
                         "env_vars": {
                             "ANTHROPIC_AUTH_TOKEN": "user-token",
+                            "INK_AGENT_WORKFLOW_RUN_ID": "run_" + "9" * 32,
                             "EMPTY": None,
                             "  CUSTOM_KEY  ": "custom-value",
                         },
@@ -164,6 +293,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             execution.run_options.user_sdk_env["ANTHROPIC_AUTH_TOKEN"],
             "user-token",
+        )
+        self.assertNotIn(
+            "INK_AGENT_WORKFLOW_RUN_ID",
+            execution.run_options.user_sdk_env,
         )
 
     async def test_workspace_mode_disabled_skips_workspace_initialization(self):

@@ -28,6 +28,7 @@ try:
         StoryWorkspaceDreamConfirmationAccepted,
         StoryWorkspaceDreamConfirmationCommand,
         StoryWorkspaceDreamFilesResponse,
+        StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
@@ -38,6 +39,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceDreamConfirmationAccepted,
         StoryWorkspaceDreamConfirmationCommand,
         StoryWorkspaceDreamFilesResponse,
+        StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
     )
 
@@ -488,6 +490,9 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
     factory: Any | None = None,
     *,
     request_factory: Callable[..., Any] | None = None,
+    context_loader: Callable[
+        [str, str, dict], StoryWorkspaceDreamRunContext
+    ] | None = None,
 ) -> StoryWorkspaceDreamConfirmationDispatcher:
     """Queue a resumed turn even while the same thread is currently running.
 
@@ -514,6 +519,15 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 from claude_agent.service import ClaudeAgentRunRequest
 
                 selected_request_factory = ClaudeAgentRunRequest
+            dream_context = (
+                context_loader(thread_id, str(actor_id), metadata)
+                if context_loader is not None
+                else _story_workspace_load_confirmation_dream_context(
+                    thread_id,
+                    str(actor_id),
+                    metadata,
+                )
+            )
             request = selected_request_factory(
                 user_id=str(actor_id),
                 thread_id=thread_id,
@@ -521,6 +535,7 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 message_id=message_id,
                 message_parts=parts,
                 message_metadata=metadata,
+                story_workspace_dream_context=dream_context,
             )
             stream = selected_factory.run_streaming(request)
 
@@ -579,6 +594,65 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
         )
 
     return dispatch
+
+
+def _story_workspace_load_confirmation_dream_context(
+    thread_id: str,
+    actor_id: str,
+    metadata: dict,
+) -> StoryWorkspaceDreamRunContext:
+    """Rebuild trusted Dream provenance for a durable confirmation resume."""
+
+    if metadata.get("kind") != STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND:
+        raise PermissionError("confirmation metadata kind is invalid")
+    if (
+        metadata.get("thread_id") != thread_id
+        or str(metadata.get("actor") or "") != actor_id
+    ):
+        raise PermissionError("confirmation identity metadata is invalid")
+    run_id = metadata.get("story_workspace_run_id")
+    if not isinstance(run_id, str):
+        raise PermissionError("confirmation workflow run is unavailable")
+    if not actor_id.isdigit() or int(actor_id) <= 0:
+        raise PermissionError("confirmation actor is invalid")
+
+    import database
+
+    db = database.get_db()
+    try:
+        db.row_factory = sqlite3.Row
+        row = db.execute(
+            """
+            SELECT run.id AS workflow_run_id,
+                   run.source_voice_thread_id AS thread_id,
+                   binding.deck_id AS deck_id,
+                   run.deck_plugin_id AS deck_plugin_id,
+                   run.deck_plugin_version AS deck_plugin_version,
+                   run.deck_plugin_binding_id AS deck_plugin_binding_id,
+                   run.binding_revision AS binding_revision,
+                   run.deck_runtime_snapshot_id AS deck_runtime_snapshot_id,
+                   run.runtime_plugin_lock_id AS runtime_plugin_lock_id
+            FROM workflow_runs AS run
+            JOIN story_workspace_workspaces AS workspace
+              ON workspace.id = run.workspace_id
+            JOIN deck_plugin_bindings AS binding
+              ON binding.deck_plugin_binding_id = run.deck_plugin_binding_id
+             AND binding.binding_revision = run.binding_revision
+             AND binding.deck_plugin_id = run.deck_plugin_id
+             AND binding.deck_plugin_version = run.deck_plugin_version
+            WHERE run.id = ?
+              AND run.source_voice_thread_id = ?
+              AND run.created_by = ?
+              AND workspace.owner_id = ?
+            LIMIT 1
+            """,
+            (run_id, thread_id, actor_id, int(actor_id)),
+        ).fetchone()
+        if row is None:
+            raise PermissionError("confirmation Dream run is unavailable")
+        return StoryWorkspaceDreamRunContext.model_validate(dict(row))
+    finally:
+        db.close()
 
 
 @dataclass(frozen=True)

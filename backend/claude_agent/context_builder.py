@@ -59,6 +59,7 @@ pet persona, Mem0 memories, and necklace sensor data), this builder:
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -66,6 +67,7 @@ from typing import Any, Optional
 
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from claude_agent.workspace_context import build_workspace_context_block
+from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 logger = logging.getLogger(__name__)
 
@@ -314,6 +316,9 @@ class ClaudeAgentContextBuilder:
         cwd: Optional[str] = None,
         editor_session_id: Optional[str] = None,
         voice_system_prompt: Optional[str] = None,
+        story_workspace_dream_context: Optional[
+            StoryWorkspaceDreamRunContext
+        ] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
 
@@ -423,6 +428,35 @@ class ClaudeAgentContextBuilder:
                         "<voice_context>\n"
                         + voice_system_prompt.strip()
                         + "\n</voice_context>"
+                    ),
+                }
+            )
+
+        if story_workspace_dream_context is not None:
+            provenance = json.dumps(
+                story_workspace_dream_context.model_dump(mode="json"),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            blocks.append(
+                {
+                    "type": "text",
+                    "text": (
+                        "<story_workspace_dream_context>\n"
+                        f"{provenance}\n"
+                        "This is server-trusted provenance for this Dream turn. "
+                        "Use only this workflow_run_id and never infer or replace it.\n"
+                        "Call mcp__story_workspace__write_dream_run first. "
+                        "Write canonical workspace files with built-in file tools; "
+                        "never use generic file or Bash tools to write .dream/.\n"
+                        "After all required character files under assets/characters/ "
+                        "are complete, call mcp__story_workspace__write_dream_stage "
+                        "for characters. After all required scene files under "
+                        "assets/scenes/ are complete, call it for scenes. After the "
+                        "canonical stories/<project>/episodes/EP??/storyboard.yaml "
+                        "is complete, call it for storyboards.\n"
+                        "</story_workspace_dream_context>"
                     ),
                 }
             )

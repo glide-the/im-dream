@@ -42,6 +42,7 @@ from claude_agent.workspace_context import (
     WORKSPACE_CONTEXT_TEMPLATE,
     build_workspace_context_block,
 )
+from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -233,6 +234,38 @@ class TestBuildUserMessage(unittest.TestCase):
         blocks = self.builder.build_user_message(self._parts("Hello there"))
         self.assertIsInstance(blocks, list)
         self.assertTrue(all(isinstance(b, dict) for b in blocks))
+
+    def test_dream_turn_injects_trusted_run_context_and_stage_schedule(self):
+        context = StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "1" * 32,
+            thread_id="thread-dream-context",
+            deck_id="deck-dream",
+            deck_plugin_id="ink.dream.story-workflow",
+            deck_plugin_version="1.0.0",
+            deck_plugin_binding_id="dpb_" + "2" * 32,
+            binding_revision=3,
+            deck_runtime_snapshot_id="drs_" + "4" * 32,
+            runtime_plugin_lock_id="rpl_" + "5" * 32,
+        )
+
+        blocks = self.builder.build_user_message(
+            self._parts("create the story"),
+            story_workspace_dream_context=context,
+        )
+        combined = self._text_blocks(blocks)
+
+        self.assertIn("<story_workspace_dream_context>", combined)
+        self.assertIn(context.workflow_run_id, combined)
+        self.assertIn(context.deck_plugin_binding_id, combined)
+        self.assertIn("mcp__story_workspace__write_dream_run", combined)
+        self.assertIn("assets/characters", combined)
+        self.assertIn("assets/scenes", combined)
+        self.assertIn("storyboard.yaml", combined)
+        self.assertIn("mcp__story_workspace__write_dream_stage", combined)
+        self.assertLess(
+            combined.index("<story_workspace_dream_context>"),
+            combined.rindex("create the story"),
+        )
 
     def test_includes_runtime_context_block(self):
         blocks = self.builder.build_user_message(self._parts("Hello there"))

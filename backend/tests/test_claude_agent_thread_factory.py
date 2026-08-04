@@ -48,6 +48,7 @@ from claude_agent.thread_pool import (
 )
 from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService
 from claude_agent.observer import LoggingObserver, SessionObserverRegistry
+from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +428,17 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             dispatcher = story_workspace_build_dream_confirmation_turn_dispatcher(
                 self.factory,
                 request_factory=ClaudeAgentRunRequest,
+                context_loader=lambda *_args: StoryWorkspaceDreamRunContext(
+                    workflow_run_id="run_" + "1" * 32,
+                    thread_id="thread_dream_queue",
+                    deck_id="deck-dream",
+                    deck_plugin_id="ink.dream.story-workflow",
+                    deck_plugin_version="1.0.0",
+                    deck_plugin_binding_id="dpb_" + "2" * 32,
+                    binding_revision=1,
+                    deck_runtime_snapshot_id="drs_" + "3" * 32,
+                    runtime_plugin_lock_id="rpl_" + "4" * 32,
+                ),
             )
 
             with unittest.mock.patch(

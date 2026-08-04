@@ -923,6 +923,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         im_full_access_enabled: bool = False,
         sandbox_network_mode: str = "allowlist",
         on_tool_confirmation_request=None,
+        mcp_env: Optional[dict[str, str]] = None,
     ):
         self.set_query([])
         runner = self.make_runner()
@@ -936,6 +937,7 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                 allowed_tools=allowed_tools,
                 im_full_access_enabled=im_full_access_enabled,
                 sandbox_network_mode=sandbox_network_mode,  # type: ignore[arg-type]
+                mcp_env=mcp_env or {},
             ),
             callbacks=AgentStreamingCallbacks(
                 on_text_delta=lambda d: None,
@@ -973,7 +975,10 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
 
     async def test_story_workspace_tools_are_registered_and_auto_allowed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            hook = await self._capture_pre_tool_use_hook(cwd=temp_dir)
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                mcp_env={"INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32},
+            )
             for tool_name in (
                 "mcp__story_workspace__write_dream_run",
                 "mcp__story_workspace__write_dream_stage",
@@ -1001,24 +1006,33 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             agent_runner_module.DEFAULT_ALLOWED_TOOLS,
         )
 
-    async def test_story_workspace_stdio_receives_only_trusted_identity_env(self):
+    async def test_story_workspace_stdio_receives_only_trusted_run_identity_env(self):
         self.set_query([])
         runner = self.make_runner()
         with tempfile.TemporaryDirectory() as temp_dir:
-            await runner.run_streaming(
-                opts=AgentRunOptions(
-                    thread_id="story-workspace-mcp",
-                    user_message="write Dream metadata",
-                    cwd=temp_dir,
-                    tool_choice="auto",
-                    mcp_env={
-                        "INK_AGENT_USER_ID": "7",
-                        "INK_AGENT_THREAD_ID": "thread-7",
-                        "ANTHROPIC_AUTH_TOKEN": "must-not-flow",
-                    },
-                ),
-                callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
-            )
+            workspace_root = Path(temp_dir) / "workspaces"
+            workspace = workspace_root / "thread-7"
+            workspace.mkdir(parents=True)
+            with patch.object(
+                agent_runner_module,
+                "get_workspace_root",
+                return_value=workspace_root,
+            ):
+                await runner.run_streaming(
+                    opts=AgentRunOptions(
+                        thread_id="story-workspace-mcp",
+                        user_message="write Dream metadata",
+                        cwd=str(workspace),
+                        tool_choice="auto",
+                        mcp_env={
+                            "INK_AGENT_USER_ID": "7",
+                            "INK_AGENT_THREAD_ID": "thread-7",
+                            "INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32,
+                            "ANTHROPIC_AUTH_TOKEN": "must-not-flow",
+                        },
+                    ),
+                    callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
+                )
 
         config = self._mock_client.last_options.mcp_servers["story_workspace"]
         args = config["args"] if isinstance(config, dict) else config.args
@@ -1026,7 +1040,62 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(args[-1], "libs.claude_agent_kit.server.story_workspace_mcp_stdio")
         self.assertEqual(env["INK_AGENT_USER_ID"], "7")
         self.assertEqual(env["INK_AGENT_THREAD_ID"], "thread-7")
+        self.assertEqual(env["INK_AGENT_WORKFLOW_RUN_ID"], "run_" + "1" * 32)
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
+
+    async def test_story_workspace_stdio_is_not_started_without_trusted_run(self):
+        self.set_query([])
+        runner = self.make_runner()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            await runner.run_streaming(
+                opts=AgentRunOptions(
+                    thread_id="ordinary-chat",
+                    user_message="ordinary chat",
+                    cwd=temp_dir,
+                    tool_choice="auto",
+                    mcp_env={
+                        "INK_AGENT_USER_ID": "7",
+                        "INK_AGENT_THREAD_ID": "ordinary-chat",
+                    },
+                ),
+                callbacks=AgentStreamingCallbacks(on_text_delta=lambda d: None),
+            )
+        self.assertNotIn("story_workspace", self._mock_client.last_options.mcp_servers)
+
+    async def test_dream_run_auto_allows_only_canonical_roots(self):
+        run_env = {"INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32}
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / ".dream").mkdir()
+            for root in ("assets", "stories", ".dramaforge"):
+                target = workspace / root / "nested" / "output.md"
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace), mcp_env=run_env
+                )
+                result = await hook(
+                    {"tool_name": "Write", "tool_input": {"file_path": str(target)}},
+                    f"call-{root}",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                self.assertEqual(
+                    _hook_specific(result, {}).get("permissionDecision"), "allow"
+                )
+
+            for target in (
+                workspace / "other" / "output.md",
+                workspace / ".dream" / "runtime" / "run.json",
+            ):
+                hook = await self._capture_pre_tool_use_hook(
+                    cwd=str(workspace), mcp_env=run_env
+                )
+                result = await hook(
+                    {"tool_name": "Write", "tool_input": {"file_path": str(target)}},
+                    "call-denied",
+                    _SDK_HOOK_CONTEXT(),
+                )
+                self.assertNotEqual(
+                    _hook_specific(result, {}).get("permissionDecision"), "allow"
+                )
 
     async def test_story_workspace_stdio_is_not_started_without_workspace(self):
         self.set_query([])

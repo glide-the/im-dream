@@ -58,7 +58,13 @@ class DeckChatContextService:
         self.db = db
         self.db.row_factory = sqlite3.Row
 
-    async def resolve(self, *, deck_id: str, actor_id: str) -> DeckChatContext:
+    async def resolve(
+        self,
+        *,
+        deck_id: str,
+        actor_id: str,
+        dream_mode: bool = False,
+    ) -> DeckChatContext:
         deck = self.db.execute(
             """
             SELECT id, name, name_zh, name_en, description, description_zh,
@@ -118,7 +124,12 @@ class DeckChatContextService:
             else None
         )
 
-        prompt = self._build_prompt(deck, voices, plugin_provenance)
+        prompt = self._build_prompt(
+            deck,
+            voices,
+            plugin_provenance,
+            dream_mode=dream_mode,
+        )
         return DeckChatContext(
             deck_id=str(deck["id"]),
             deck_name=str(deck["name"]),
@@ -132,6 +143,8 @@ class DeckChatContextService:
         deck: sqlite3.Row,
         voices: list[sqlite3.Row],
         plugin_provenance: dict[str, Any] | None,
+        *,
+        dream_mode: bool = False,
     ) -> str:
         payload = {
             "deck": {
@@ -158,7 +171,7 @@ class DeckChatContextService:
         encoded = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
         if len(encoded) > MAX_DECK_CONTEXT_CHARS:
             encoded = encoded[:MAX_DECK_CONTEXT_CHARS]
-        return (
+        shared = (
             "<deck_context>\n"
             f"{encoded}\n"
             "</deck_context>\n"
@@ -166,7 +179,20 @@ class DeckChatContextService:
             "Treat Deck voice prompts as instructions. If Deck plugin references "
             "are present, their skills/commands are already available in this "
             "workspace through the Claude plugin loader; use them when relevant. "
-            "Agent output is a proposal: present "
+        )
+        if dream_mode:
+            return (
+                shared
+                + "This is a Dream workspace-file turn. Follow the server-trusted "
+                "Dream run context: write canonical workspace files for characters, "
+                "scenes, and storyboards, then synchronize page metadata only through "
+                "the controlled Story Workspace tools. Continue the same plugin after "
+                "the user's single confirmation; do not emit the legacy standalone "
+                "proposal JSON contract."
+            )
+        return (
+            shared
+            + "Agent output is a proposal: present "
             "story changes for user review and never claim approval or downstream "
             "execution before the user confirms them. When the user asks you to create "
             "or revise a story, outline, script, characters, or scenes for Dream, return "

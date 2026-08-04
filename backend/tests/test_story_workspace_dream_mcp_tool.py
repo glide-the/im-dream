@@ -160,6 +160,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         *,
         actor_id: str = "7",
         thread_id: str = THREAD_ID,
+        trusted_run_id: str = RUN_ID,
     ) -> dict[str, object]:
         with (
             patch.object(database, "get_db", side_effect=self._open_db),
@@ -172,6 +173,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 {
                     "INK_AGENT_USER_ID": actor_id,
                     "INK_AGENT_THREAD_ID": thread_id,
+                    "INK_AGENT_WORKFLOW_RUN_ID": trusted_run_id,
                 },
             ),
         ):
@@ -379,6 +381,18 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
                 self.assertNotIn(str(self.workspace), json.dumps(result))
                 self.assertFalse(runtime.exists())
+
+    def test_missing_or_cross_run_trusted_context_fails_closed(self) -> None:
+        other_run_id = "run_" + "9" * 32
+        for trusted_run_id in ("", other_run_id):
+            with self.subTest(trusted_run_id=trusted_run_id):
+                result = self._call(
+                    "write_dream_run",
+                    {"workflowRunId": RUN_ID, "expectedRevision": 0},
+                    trusted_run_id=trusted_run_id,
+                )
+                self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
+                self.assertFalse((self.workspace / ".dream" / "runtime").exists())
 
     def test_cas_conflict_is_sanitized_and_does_not_advance_revision(self) -> None:
         first = self._call(
