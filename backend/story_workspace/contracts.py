@@ -443,6 +443,18 @@ class StoryWorkspaceDreamConfirmationCommand(_StoryWorkspaceDreamWireModel):
         return values
 
 
+class StoryWorkspaceDreamConfirmationAccepted(_StoryWorkspaceDreamWireModel):
+    """202 response for one persisted Dream confirmation command."""
+
+    message_id: str = Field(min_length=1, max_length=255)
+    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    thread_id: str = Field(min_length=1, max_length=255)
+    status: Literal["accepted"] = "accepted"
+    replayed: bool
+    dispatched: bool
+    request_id: str = Field(min_length=1, max_length=255)
+
+
 @dataclass
 class StoryWorkspaceStory:
     id: str

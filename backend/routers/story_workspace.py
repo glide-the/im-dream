@@ -25,6 +25,7 @@ from story_workspace.contracts import (
     StoryWorkspaceAgentStoryPayload,
     StoryWorkspaceBatchAction,
     StoryWorkspaceCharacterPatch,
+    StoryWorkspaceDreamConfirmationCommand,
     StoryWorkspaceGuidanceCommandPayload,
     StoryWorkspaceResourceType,
     StoryWorkspaceScenePatch,
@@ -146,6 +147,14 @@ class StoryWorkflowGateway(Protocol):
     async def get_dream_files(
         self,
         workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def submit_dream_confirmation(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceDreamConfirmationCommand,
         *,
         actor: dict[str, str],
     ) -> Any: ...
@@ -1195,6 +1204,36 @@ async def get_workflow_run_dream_files(
         )
     return await _workflow_call(
         gateway.get_dream_files(workflow_run_id, actor=actor),
+        by_alias=True,
+    )
+
+
+@router.post(
+    "/workflow-runs/{workflow_run_id}/dream-confirmation",
+    status_code=202,
+)
+async def submit_workflow_run_dream_confirmation(
+    workflow_run_id: str,
+    request: StoryWorkspaceDreamConfirmationCommand,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Persist one hidden confirmation and queue the originating Chat Agent."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _workflow_call(
+        gateway.submit_dream_confirmation(
+            workflow_run_id,
+            request,
+            actor=actor,
+        ),
         by_alias=True,
     )
 

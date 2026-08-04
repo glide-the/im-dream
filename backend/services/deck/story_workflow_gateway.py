@@ -7,6 +7,7 @@ from datetime import datetime
 import hashlib
 import importlib.util
 import json
+import logging
 import os
 from pathlib import Path
 import sqlite3
@@ -44,6 +45,12 @@ try:
         StoryWorkspaceGuidanceService,
         build_thread_turn_dispatcher,
     )
+    from services.story_workspace.dream_confirmation_service import (
+        PersistedDreamConfirmation,
+        StoryWorkspaceDreamConfirmationError,
+        StoryWorkspaceDreamConfirmationService,
+        build_thread_turn_dispatcher as build_dream_confirmation_dispatcher,
+    )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
@@ -71,10 +78,17 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceGuidanceService,
         build_thread_turn_dispatcher,
     )
+    from backend.services.story_workspace.dream_confirmation_service import (
+        PersistedDreamConfirmation,
+        StoryWorkspaceDreamConfirmationError,
+        StoryWorkspaceDreamConfirmationService,
+        build_thread_turn_dispatcher as build_dream_confirmation_dispatcher,
+    )
 
 
 _DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
 _DEV_TOKEN_SECRET = "ink-dream-development-workflow-token-secret-v1"
+logger = logging.getLogger(__name__)
 
 
 def get_workspace_root() -> Path:
@@ -671,6 +685,138 @@ class StoryWorkflowApplicationGateway:
                 )
             finally:
                 db.close()
+        except WorkflowRunError as exc:
+            self._raise_run_error(exc)
+        except ApiRouteError:
+            raise
+        except StoryWorkspaceDreamFileError as exc:
+            self._raise_dream_file_error(exc)
+        except Exception as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+
+    async def submit_dream_confirmation(
+        self,
+        workflow_run_id: str,
+        request: Any,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Persist in a worker, then queue the same-thread turn on this loop."""
+
+        persisted = await asyncio.to_thread(
+            self._submit_dream_confirmation_sync,
+            workflow_run_id,
+            request,
+            actor,
+        )
+        accepted = persisted.accepted
+        dispatch = persisted.dispatch
+        if dispatch is None:
+            return accepted
+
+        dispatched = False
+        try:
+            dispatcher = build_dream_confirmation_dispatcher()
+            dispatched = bool(dispatcher(
+                dispatch.thread_id,
+                dispatch.actor_id,
+                dispatch.message_id,
+                dispatch.parts,
+                dispatch.metadata,
+            ))
+        except Exception:
+            # Persistence is the accepted outcome. A dispatcher failure must
+            # never remove or rewrite the durable hidden command.
+            logger.exception(
+                "Dream confirmation dispatch failed for run_id=%s message_id=%s",
+                workflow_run_id,
+                dispatch.message_id,
+            )
+            dispatched = False
+        return accepted.model_copy(update={"dispatched": dispatched})
+
+    def _submit_dream_confirmation_sync(
+        self,
+        workflow_run_id: str,
+        request: Any,
+        actor: dict[str, str],
+    ) -> PersistedDreamConfirmation:
+        """Run the complete scoped DB/file/INSERT chain in one worker."""
+
+        try:
+            db = database.get_db()
+            try:
+                try:
+                    actor_id = int(actor["actor_id"])
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ApiRouteError(
+                        "WORKFLOW_PERMISSION_DENIED",
+                        status_code=403,
+                    ) from exc
+                workspace_row = db.execute(
+                    "SELECT id FROM story_workspace_workspaces WHERE owner_id = ? "
+                    "ORDER BY created_at ASC, id ASC LIMIT 1",
+                    (actor_id,),
+                ).fetchone()
+                if workspace_row is None:
+                    raise ApiRouteError(
+                        "WORKFLOW_PERMISSION_DENIED",
+                        status_code=403,
+                    )
+                actor_context = AuthenticatedActorContext(
+                    workspace_id=str(workspace_row["id"]),
+                    actor_id=str(actor_id),
+                )
+                workflow_run = WorkflowRunService(
+                    db,
+                    token_secret=_token_secret(),
+                ).read_run(workflow_run_id, actor_context)
+                thread_id = workflow_run.source_voice_thread_id
+                if not isinstance(thread_id, str) or not thread_id.strip():
+                    raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+
+                workspace = self._thread_workspace(thread_id)
+                reader = StoryWorkspaceDreamFileReader(workspace)
+                reader_workspace = Path(reader.workspace_root)
+                canonical_parent = workspace.parent
+                if (
+                    reader_workspace != workspace
+                    or reader_workspace.parent != canonical_parent
+                    or reader_workspace.name != thread_id
+                    or not reader_workspace.is_relative_to(canonical_parent)
+                ):
+                    raise ApiRouteError(
+                        "WORKFLOW_PERMISSION_DENIED",
+                        status_code=403,
+                    )
+
+                def scoped_run_reader(requested_run_id: str):
+                    if requested_run_id != workflow_run_id:
+                        raise StoryWorkspaceDreamConfirmationError(
+                            "CONFIG_VERSION_DRIFT", 409
+                        )
+                    return workflow_run
+
+                service = StoryWorkspaceDreamConfirmationService(
+                    db,
+                    run_reader=scoped_run_reader,
+                    projection_reader=lambda run, authoritative_thread_id: reader.read(
+                        run,
+                        thread_id=authoritative_thread_id,
+                    ),
+                )
+                return service.submit_confirmation(
+                    workflow_run_id,
+                    request,
+                    actor_id=str(actor_id),
+                )
+            finally:
+                db.close()
+        except StoryWorkspaceDreamConfirmationError as exc:
+            raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
         except WorkflowRunError as exc:
             self._raise_run_error(exc)
         except ApiRouteError:
