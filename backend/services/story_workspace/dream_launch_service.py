@@ -94,7 +94,25 @@ class StoryWorkspaceDreamLaunchSourceAdapter(Protocol):
 
 
 StoryWorkspaceDreamLaunchAsyncSeam = Callable[..., Awaitable[Any]]
-StoryWorkspaceDreamLaunchDispatcher = Callable[..., Any]
+
+
+class StoryWorkspaceDreamLaunchDispatcher(Protocol):
+    """Durably claim and dispatch one deterministic launch message.
+
+    Implementations must deduplicate by ``source.message_id`` and leave an
+    uncompleted claim replayable when dispatch raises before it is accepted.
+    The service deliberately invokes this seam on every HTTP replay.
+    """
+
+    def __call__(
+        self,
+        *,
+        actor_id: str,
+        goal: str,
+        source: StoryWorkspaceDreamLaunchSource,
+        context: StoryWorkspaceDreamRunContext,
+    ) -> Any:
+        ...
 
 
 def _canonical_json(value: Any) -> str:
@@ -152,6 +170,23 @@ class StoryWorkspaceDreamLaunchService:
                 "trusted actor and workspace identifiers are required"
             )
 
+        # Resolve authorization and the active binding before creating any
+        # backing Chat records for the requested Deck.
+        binding = await self._binding_resolver(
+            deck_id=command.deck_id,
+            actor_id=actor_id,
+            workspace_id=workspace_id,
+        )
+        binding_revision = _field(binding, "binding_revision")
+        if isinstance(binding_revision, bool) or not isinstance(binding_revision, int):
+            raise StoryWorkspaceDreamLaunchProvenanceError(
+                "binding.binding_revision"
+            )
+        if binding_revision < 1:
+            raise StoryWorkspaceDreamLaunchProvenanceError(
+                "binding.binding_revision"
+            )
+
         fingerprint = _sha256({
             "deck_id": command.deck_id,
             "goal": command.goal,
@@ -178,21 +213,6 @@ class StoryWorkspaceDreamLaunchService:
             source.request_fingerprint,
             fingerprint,
         )
-
-        binding = await self._binding_resolver(
-            deck_id=command.deck_id,
-            actor_id=actor_id,
-            workspace_id=workspace_id,
-        )
-        binding_revision = _field(binding, "binding_revision")
-        if isinstance(binding_revision, bool) or not isinstance(binding_revision, int):
-            raise StoryWorkspaceDreamLaunchProvenanceError(
-                "binding.binding_revision"
-            )
-        if binding_revision < 1:
-            raise StoryWorkspaceDreamLaunchProvenanceError(
-                "binding.binding_revision"
-            )
 
         preflight = await self._preflight_creator(
             deck_id=command.deck_id,
@@ -246,13 +266,12 @@ class StoryWorkspaceDreamLaunchService:
             deck_runtime_snapshot_id=_field(run, "deck_runtime_snapshot_id"),
             runtime_plugin_lock_id=_field(run, "runtime_plugin_lock_id"),
         )
-        if source.created:
-            self._dispatcher(
-                actor_id=actor_id,
-                goal=command.goal,
-                source=source,
-                context=context,
-            )
+        self._dispatcher(
+            actor_id=actor_id,
+            goal=command.goal,
+            source=source,
+            context=context,
+        )
         return context
 
     @staticmethod

@@ -87,19 +87,22 @@ class DreamLaunchFixture:
         self.binding_calls: list[dict[str, object]] = []
         self.preflight_calls: list[dict[str, object]] = []
         self.run_calls: list[dict[str, object]] = []
-        self.dispatch_calls: list[dict[str, object]] = []
+        self.dispatcher = RecordingDispatcher()
         self.created_runs: dict[tuple[str, str, str], SimpleNamespace] = {}
+        self.binding_error: Exception | None = None
         self.run_overrides: dict[str, object] = {}
         self.service = StoryWorkspaceDreamLaunchService(
             source_adapter=self.source_adapter,
             binding_resolver=self.resolve_binding,
             preflight_creator=self.create_preflight,
             run_creator=self.create_run,
-            dispatcher=self.dispatch,
+            dispatcher=self.dispatcher,
         )
 
     async def resolve_binding(self, **values: object) -> SimpleNamespace:
         self.binding_calls.append(values)
+        if self.binding_error is not None:
+            raise self.binding_error
         return SimpleNamespace(
             deck_plugin_id="ink-dream-story",
             deck_plugin_version="1.2.0",
@@ -150,8 +153,26 @@ class DreamLaunchFixture:
         self.created_runs[scope] = created
         return created
 
-    def dispatch(self, **values: object) -> None:
-        self.dispatch_calls.append(values)
+
+class RecordingDispatcher:
+    """Model the gateway's durable message-id dispatch claim."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.dispatched_messages: set[str] = set()
+        self.failures_remaining = 0
+
+    def __call__(self, **values: object) -> bool:
+        self.calls.append(values)
+        if self.failures_remaining:
+            self.failures_remaining -= 1
+            raise RuntimeError("dispatch unavailable")
+        source = values["source"]
+        assert isinstance(source, StoryWorkspaceDreamLaunchSource)
+        if source.message_id in self.dispatched_messages:
+            return False
+        self.dispatched_messages.add(source.message_id)
+        return True
 
 
 class StoryWorkspaceDreamLaunchContractTest(unittest.TestCase):
@@ -215,8 +236,8 @@ class StoryWorkspaceDreamLaunchServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run_call["source_message_time"], MESSAGE_TIME)
         self.assertEqual(run_call["preflight_id"], PREFLIGHT_ID)
         self.assertEqual(run_call["preflight_token"], "trusted-preflight-token")
-        self.assertEqual(len(self.fixture.dispatch_calls), 1)
-        self.assertIs(self.fixture.dispatch_calls[0]["context"], result)
+        self.assertEqual(len(self.fixture.dispatcher.calls), 1)
+        self.assertIs(self.fixture.dispatcher.calls[0]["context"], result)
 
     async def test_same_request_replays_without_duplicate_source_run_or_dispatch(
         self,
@@ -231,7 +252,8 @@ class StoryWorkspaceDreamLaunchServiceTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second, first)
         self.assertEqual(len(self.fixture.source_adapter.created_sources), 1)
         self.assertEqual(len(self.fixture.created_runs), 1)
-        self.assertEqual(len(self.fixture.dispatch_calls), 1)
+        self.assertEqual(len(self.fixture.dispatcher.calls), 2)
+        self.assertEqual(len(self.fixture.dispatcher.dispatched_messages), 1)
         self.assertEqual(
             self.fixture.source_adapter.calls[0]["thread_id"],
             self.fixture.source_adapter.calls[1]["thread_id"],
@@ -255,10 +277,10 @@ class StoryWorkspaceDreamLaunchServiceTest(unittest.IsolatedAsyncioTestCase):
                 workspace_id=WORKSPACE_ID,
             )
 
-        self.assertEqual(len(self.fixture.binding_calls), 1)
+        self.assertEqual(len(self.fixture.binding_calls), 2)
         self.assertEqual(len(self.fixture.preflight_calls), 1)
         self.assertEqual(len(self.fixture.created_runs), 1)
-        self.assertEqual(len(self.fixture.dispatch_calls), 1)
+        self.assertEqual(len(self.fixture.dispatcher.dispatched_messages), 1)
 
     async def test_mismatched_authoritative_run_provenance_is_rejected(self) -> None:
         self.fixture.run_overrides["runtime_plugin_lock_id"] = "rpl_wrong"
@@ -268,7 +290,44 @@ class StoryWorkspaceDreamLaunchServiceTest(unittest.IsolatedAsyncioTestCase):
                 command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
             )
 
-        self.assertEqual(self.fixture.dispatch_calls, [])
+        self.assertEqual(self.fixture.dispatcher.calls, [])
+
+    async def test_binding_denial_creates_no_backing_source(self) -> None:
+        self.fixture.binding_error = PermissionError("Deck not found")
+
+        with self.assertRaises(PermissionError):
+            await self.fixture.service.launch(
+                command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
+            )
+
+        self.assertEqual(self.fixture.source_adapter.calls, [])
+        self.assertEqual(self.fixture.preflight_calls, [])
+        self.assertEqual(self.fixture.run_calls, [])
+        self.assertEqual(self.fixture.dispatcher.calls, [])
+
+    async def test_dispatch_failure_replays_pending_source_and_existing_run(self) -> None:
+        self.fixture.dispatcher.failures_remaining = 1
+
+        with self.assertRaisesRegex(RuntimeError, "dispatch unavailable"):
+            await self.fixture.service.launch(
+                command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
+            )
+        self.assertEqual(len(self.fixture.source_adapter.created_sources), 1)
+        self.assertEqual(len(self.fixture.created_runs), 1)
+        self.assertEqual(self.fixture.dispatcher.dispatched_messages, set())
+
+        replayed = await self.fixture.service.launch(
+            command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
+        )
+        repeated = await self.fixture.service.launch(
+            command(), actor_id=ACTOR_ID, workspace_id=WORKSPACE_ID
+        )
+
+        self.assertEqual(replayed, repeated)
+        self.assertEqual(len(self.fixture.source_adapter.created_sources), 1)
+        self.assertEqual(len(self.fixture.created_runs), 1)
+        self.assertEqual(len(self.fixture.dispatcher.calls), 3)
+        self.assertEqual(len(self.fixture.dispatcher.dispatched_messages), 1)
 
 
 if __name__ == "__main__":
