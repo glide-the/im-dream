@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
+import threading
+import time
 import unittest
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -26,6 +30,7 @@ from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRu
 from routers import story_workspace
 from services.deck import story_workflow_gateway as gateway_module
 from services.errors.error_registry import ApiRouteError, build_error_payload
+import services.story_workspace.dream_file_service as dream_files
 from services.story_workspace.dream_file_service import (
     StoryWorkspaceDreamContractError,
     StoryWorkspaceDreamDurabilityIndeterminate,
@@ -191,7 +196,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(
             gateway.calls,
-            [(RUN_ID, {"workspace_id": WORKSPACE_ID, "actor_id": ACTOR_ID})],
+            [(RUN_ID, {"actor_id": ACTOR_ID})],
         )
         payload = response.json()
         self.assertEqual(
@@ -299,14 +304,13 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 db.close()
 
                 app = FastAPI()
-                gateway = _RecordingGateway(waiting_response())
                 app.dependency_overrides[story_workspace.get_current_user] = lambda: {
                     "user_id": int(ACTOR_ID),
                     "email": "writer@example.com",
                 }
                 app.dependency_overrides[
                     story_workspace.get_story_workflow_gateway
-                ] = lambda: gateway
+                ] = gateway_module.StoryWorkflowApplicationGateway
                 app.include_router(story_workspace.router)
 
                 creator = story_workspace.get_or_create_default_workspace
@@ -334,9 +338,8 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         self.assertEqual(response.json()["error"]["code"], "WORKFLOW_PERMISSION_DENIED")
         create_workspace.assert_not_called()
         self.assertEqual(count, 0)
-        self.assertEqual(gateway.calls, [])
 
-    def test_jwt_without_workspace_selects_oldest_existing_workspace_read_only(
+    def test_route_passes_only_actor_and_does_not_resolve_workspace(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -384,6 +387,13 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                         "get_or_create_default_workspace",
                         wraps=creator,
                     ) as create_workspace,
+                    patch.object(
+                        story_workspace.database,
+                        "get_db",
+                        side_effect=AssertionError(
+                            "route dependency must not access the database"
+                        ),
+                    ) as route_get_db,
                     TestClient(app) as client,
                 ):
                     response = client.get(
@@ -400,16 +410,67 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200, response.text)
         create_workspace.assert_not_called()
+        route_get_db.assert_not_called()
         self.assertEqual(count, 2)
         self.assertEqual(
             gateway.calls,
-            [
-                (
-                    RUN_ID,
-                    {"workspace_id": "workspace-old", "actor_id": ACTOR_ID},
-                )
-            ],
+            [(RUN_ID, {"actor_id": ACTOR_ID})],
         )
+
+    def test_dream_get_database_failures_are_registered_503_responses(self) -> None:
+        cases: list[tuple[str, object]] = []
+        cases.append(("get_db", RuntimeError("get_db /private/database")))
+
+        select_db = Mock()
+        select_db.execute.side_effect = sqlite3.OperationalError(
+            "select /private/database"
+        )
+        cases.append(("select", select_db))
+
+        close_db = Mock()
+        close_db.execute.return_value.fetchone.return_value = None
+        close_db.close.side_effect = RuntimeError("close /private/database")
+        cases.append(("close", close_db))
+
+        for name, failure in cases:
+            with self.subTest(case=name):
+                app = FastAPI()
+                app.dependency_overrides[story_workspace.get_current_user] = lambda: {
+                    "user_id": int(ACTOR_ID),
+                    "email": "writer@example.com",
+                }
+                app.dependency_overrides[
+                    story_workspace.get_story_workflow_gateway
+                ] = gateway_module.StoryWorkflowApplicationGateway
+                app.include_router(story_workspace.router)
+
+                get_db = (
+                    patch.object(
+                        gateway_module.database,
+                        "get_db",
+                        side_effect=failure,
+                    )
+                    if name == "get_db"
+                    else patch.object(
+                        gateway_module.database,
+                        "get_db",
+                        return_value=failure,
+                    )
+                )
+                with get_db, TestClient(
+                    app,
+                    raise_server_exceptions=False,
+                ) as client:
+                    response = client.get(
+                        f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-files"
+                    )
+
+                self.assertEqual(response.status_code, 503, response.text)
+                self.assertEqual(
+                    response.json()["error"]["code"],
+                    "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                )
+                self.assertNotIn("/private/database", response.text)
 
 
 class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
@@ -454,6 +515,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
         root: Path | None = None,
     ):
         db = Mock()
+        db.execute.return_value.fetchone.return_value = {"id": WORKSPACE_ID}
         selected_run = run or self.run
         selected_thread = {"id": THREAD_ID, "user_id": int(ACTOR_ID)}
         if thread is not None:
@@ -483,7 +545,7 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
     async def call(self):
         return await self.gateway.get_dream_files(
             RUN_ID,
-            actor={"workspace_id": WORKSPACE_ID, "actor_id": ACTOR_ID},
+            actor={"actor_id": ACTOR_ID},
         )
 
     async def test_uses_canonical_workspace_root_without_optional_agent_sdk(
@@ -504,6 +566,9 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ),
         )
         get_thread.assert_called_once_with(THREAD_ID, int(ACTOR_ID))
+        query, params = db.execute.call_args.args
+        self.assertIn("SELECT id FROM story_workspace_workspaces", query)
+        self.assertEqual(params, (int(ACTOR_ID),))
         db.close.assert_called_once_with()
         self.assertEqual(result.story_workspace_run_id, RUN_ID)
 
@@ -676,6 +741,91 @@ class StoryWorkspaceDreamFilesGatewayTest(unittest.IsolatedAsyncioTestCase):
             ("WORKFLOW_PERMISSION_DENIED", 403),
         )
         self.assertNotEqual(external.resolve(), original_workspace.resolve())
+
+    async def test_workspace_root_swap_after_reader_validation_is_rejected(
+        self,
+    ) -> None:
+        writer = StoryWorkspaceDreamFileWriter(self.workspace)
+        writer.write_run(self.run, thread_id=THREAD_ID, expected_revision=0)
+
+        external_root = Path(self.temporary_directory.name) / "external-root"
+        external_workspace = external_root / THREAD_ID
+        external_dream = external_workspace / ".dream"
+        external_dream.mkdir(parents=True)
+        (external_dream / "README.md").write_text("external\n", encoding="utf-8")
+        (external_dream / "workspace.json").write_text(
+            '{"schema_version":"dream-surface/v1"}\n', encoding="utf-8"
+        )
+        StoryWorkspaceDreamFileWriter(external_workspace).write_run(
+            self.run,
+            thread_id=THREAD_ID,
+            expected_revision=0,
+        )
+
+        displaced_root = Path(self.temporary_directory.name) / "original-root"
+        real_reader = gateway_module.StoryWorkspaceDreamFileReader
+
+        def construct_reader(workspace: Path):
+            reader = real_reader(workspace)
+            original_read = reader.read
+
+            def swap_root_then_read(*args, **kwargs):
+                self.root.rename(displaced_root)
+                self.root.symlink_to(external_root, target_is_directory=True)
+                return original_read(*args, **kwargs)
+
+            reader.read = Mock(side_effect=swap_root_then_read)
+            return reader
+
+        with (
+            self.wired(),
+            patch.object(
+                gateway_module,
+                "StoryWorkspaceDreamFileReader",
+                side_effect=construct_reader,
+            ),
+        ):
+            with self.assertRaises(ApiRouteError) as raised:
+                await self.call()
+
+        self.assertEqual(
+            (raised.exception.code, raised.exception.status_code),
+            ("WORKFLOW_PERMISSION_DENIED", 403),
+        )
+
+    async def test_writer_lock_does_not_block_asyncio_timer(self) -> None:
+        writer = StoryWorkspaceDreamFileWriter(self.workspace)
+        writer.write_run(self.run, thread_id=THREAD_ID, expected_revision=0)
+        run_directory = self.dream / "runtime" / "runs" / RUN_ID
+        lock_ready = threading.Event()
+
+        def hold_writer_lock() -> None:
+            descriptor = os.open(run_directory, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                dream_files.fcntl.flock(descriptor, dream_files.fcntl.LOCK_EX)
+                lock_ready.set()
+                time.sleep(0.3)
+                dream_files.fcntl.flock(descriptor, dream_files.fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+
+        lock_thread = threading.Thread(target=hold_writer_lock)
+        lock_thread.start()
+        self.assertTrue(lock_ready.wait(1))
+
+        async def timer_elapsed() -> float:
+            started = asyncio.get_running_loop().time()
+            await asyncio.sleep(0.05)
+            return asyncio.get_running_loop().time() - started
+
+        try:
+            with self.wired():
+                elapsed, result = await asyncio.gather(timer_elapsed(), self.call())
+        finally:
+            lock_thread.join(timeout=1)
+
+        self.assertLess(elapsed, 0.15)
+        self.assertEqual(result.run_revision, 1)
 
     async def test_malformed_storage_maps_to_safe_contract_error(self) -> None:
         run_directory = self.dream / "runtime" / "runs" / RUN_ID

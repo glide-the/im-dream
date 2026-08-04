@@ -588,6 +588,46 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
         finally:
             outside.unlink(missing_ok=True)
 
+    def test_source_directory_swap_to_internal_symlink_is_rejected(self) -> None:
+        self.initialize_run()
+        assets = self.workspace / "assets"
+        displaced_assets = self.workspace / "assets-original"
+        replacement_assets = self.workspace / "replacement-assets"
+        (replacement_assets / "characters").mkdir(parents=True)
+        (replacement_assets / "characters" / "lead.md").write_text(
+            "replacement source\n",
+            encoding="utf-8",
+        )
+        original_validate = self.writer._validate_source_files
+        replaced = False
+
+        def replace_before_source_access(stage_file, *args):
+            nonlocal replaced
+            if not replaced:
+                replaced = True
+                assets.rename(displaced_assets)
+                assets.symlink_to(replacement_assets, target_is_directory=True)
+            return original_validate(stage_file, *args)
+
+        with patch.object(
+            self.writer,
+            "_validate_source_files",
+            side_effect=replace_before_source_access,
+        ):
+            with self.assertRaises(StoryWorkspaceDreamPathError):
+                self.writer.write_stage(
+                    self.run,
+                    stage=StoryWorkspaceDreamStage.CHARACTERS,
+                    source_files=["assets/characters/lead.md"],
+                    items=[self.item("assets/characters/lead.md")],
+                    expected_revision=0,
+                )
+
+        stage_file = (
+            self.dream / "runtime" / "runs" / RUN_ID / "stages" / "characters.json"
+        )
+        self.assertFalse(stage_file.exists())
+
     def test_protocol_directory_symlink_escape_is_rejected(self) -> None:
         outside = self.workspace / "outside-runtime"
         outside.mkdir()

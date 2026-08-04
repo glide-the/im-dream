@@ -202,27 +202,6 @@ async def _story_workflow_current_user(
     return {**current_user, "workspace_id": workspace_id}
 
 
-async def _story_workflow_read_current_user(
-    current_user: dict[str, Any] = Depends(get_current_user),
-) -> dict[str, Any]:
-    """Resolve an existing workspace for GET without creating business data."""
-
-    if current_user.get("workspace_id"):
-        return current_user
-    db = database.get_db()
-    try:
-        row = db.execute(
-            "SELECT id FROM story_workspace_workspaces WHERE owner_id = ? "
-            "ORDER BY created_at ASC, id ASC LIMIT 1",
-            (int(current_user["user_id"]),),
-        ).fetchone()
-    finally:
-        db.close()
-    if row is None:
-        return current_user
-    return {**current_user, "workspace_id": str(row["id"])}
-
-
 def _workflow_actor(current_user: dict[str, Any]) -> dict[str, str]:
     workspace_id = current_user.get("workspace_id")
     if workspace_id is None:
@@ -1203,12 +1182,13 @@ async def get_workflow_run(
 @router.get("/workflow-runs/{workflow_run_id}/dream-files")
 async def get_workflow_run_dream_files(
     workflow_run_id: str,
-    current_user: dict[str, Any] = Depends(_story_workflow_read_current_user),
+    current_user: dict[str, Any] = Depends(get_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ):
     try:
-        actor = _workflow_actor(current_user)
-    except ApiRouteError as exc:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
         return JSONResponse(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),

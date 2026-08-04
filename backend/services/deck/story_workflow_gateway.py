@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 import hashlib
 import importlib.util
@@ -598,57 +599,89 @@ class StoryWorkflowApplicationGateway:
         *,
         actor: dict[str, str],
     ) -> Any:
-        """Project an authorized run's existing Dream workspace files."""
+        """Project Dream files without blocking the application event loop."""
 
-        db = database.get_db()
+        return await asyncio.to_thread(
+            self._get_dream_files_sync,
+            workflow_run_id,
+            actor,
+        )
+
+    def _get_dream_files_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> Any:
+        """Run the complete SQLite/filesystem/flock chain in one worker."""
+
         try:
-            actor_context = self._actor(actor)
-            workflow_run = WorkflowRunService(
-                db,
-                token_secret=_token_secret(),
-            ).read_run(workflow_run_id, actor_context)
-            thread_id = workflow_run.source_voice_thread_id
-            if not isinstance(thread_id, str) or not thread_id.strip():
-                raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+            db = database.get_db()
             try:
-                actor_id = int(actor["actor_id"])
-            except (KeyError, TypeError, ValueError) as exc:
-                raise ApiRouteError(
-                    "WORKFLOW_PERMISSION_DENIED",
-                    status_code=403,
-                ) from exc
-            thread = database.get_chat_thread(thread_id, actor_id)
-            if thread is None or str(thread.get("id")) != thread_id:
-                raise ApiRouteError(
-                    "WORKFLOW_PERMISSION_DENIED",
-                    status_code=404,
+                try:
+                    actor_id = int(actor["actor_id"])
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise ApiRouteError(
+                        "WORKFLOW_PERMISSION_DENIED",
+                        status_code=403,
+                    ) from exc
+                workspace_row = db.execute(
+                    "SELECT id FROM story_workspace_workspaces WHERE owner_id = ? "
+                    "ORDER BY created_at ASC, id ASC LIMIT 1",
+                    (actor_id,),
+                ).fetchone()
+                if workspace_row is None:
+                    raise ApiRouteError(
+                        "WORKFLOW_PERMISSION_DENIED",
+                        status_code=403,
+                    )
+                actor_context = AuthenticatedActorContext(
+                    workspace_id=str(workspace_row["id"]),
+                    actor_id=str(actor_id),
                 )
-            workspace = self._thread_workspace(thread_id)
-            reader = StoryWorkspaceDreamFileReader(workspace)
-            reader_workspace = Path(reader.workspace_root)
-            canonical_parent = workspace.parent
-            if (
-                reader_workspace != workspace
-                or reader_workspace.parent != canonical_parent
-                or reader_workspace.name != thread_id
-                or not reader_workspace.is_relative_to(canonical_parent)
-            ):
-                raise ApiRouteError(
-                    "WORKFLOW_PERMISSION_DENIED",
-                    status_code=403,
+                workflow_run = WorkflowRunService(
+                    db,
+                    token_secret=_token_secret(),
+                ).read_run(workflow_run_id, actor_context)
+                thread_id = workflow_run.source_voice_thread_id
+                if not isinstance(thread_id, str) or not thread_id.strip():
+                    raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+                thread = database.get_chat_thread(thread_id, actor_id)
+                if thread is None or str(thread.get("id")) != thread_id:
+                    raise ApiRouteError(
+                        "WORKFLOW_PERMISSION_DENIED",
+                        status_code=404,
+                    )
+                workspace = self._thread_workspace(thread_id)
+                reader = StoryWorkspaceDreamFileReader(workspace)
+                reader_workspace = Path(reader.workspace_root)
+                canonical_parent = workspace.parent
+                if (
+                    reader_workspace != workspace
+                    or reader_workspace.parent != canonical_parent
+                    or reader_workspace.name != thread_id
+                    or not reader_workspace.is_relative_to(canonical_parent)
+                ):
+                    raise ApiRouteError(
+                        "WORKFLOW_PERMISSION_DENIED",
+                        status_code=403,
+                    )
+                return reader.read(
+                    workflow_run,
+                    thread_id=thread_id,
                 )
-            return reader.read(
-                workflow_run,
-                thread_id=thread_id,
-            )
+            finally:
+                db.close()
         except WorkflowRunError as exc:
             self._raise_run_error(exc)
         except ApiRouteError:
             raise
         except StoryWorkspaceDreamFileError as exc:
             self._raise_dream_file_error(exc)
-        finally:
-            db.close()
+        except Exception as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
 
     async def retry_run(
         self,

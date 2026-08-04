@@ -324,8 +324,18 @@ class _StoryWorkspaceDreamFilesystem:
             raise StoryWorkspaceDreamPathError("workspace root does not exist") from exc
         if not resolved_root.is_dir():
             raise StoryWorkspaceDreamPathError("workspace root must be a directory")
+        try:
+            workspace_metadata = os.stat(resolved_root, follow_symlinks=False)
+        except OSError as exc:
+            raise StoryWorkspaceDreamPathError(
+                "workspace root identity is unavailable"
+            ) from exc
         self.workspace_root = resolved_root
         self.dream_root = resolved_root / ".dream"
+        self._workspace_identity = (
+            workspace_metadata.st_dev,
+            workspace_metadata.st_ino,
+        )
 
     @staticmethod
     def _directory_flags() -> int:
@@ -385,6 +395,12 @@ class _StoryWorkspaceDreamFilesystem:
 
     def _verify_workspace_identity(self, descriptor: int) -> None:
         descriptor_metadata = self._verify_directory_descriptor(descriptor)
+        if (descriptor_metadata.st_dev, descriptor_metadata.st_ino) != (
+            self._workspace_identity
+        ):
+            raise StoryWorkspaceDreamPathError(
+                "workspace root inode changed during operation"
+            )
         try:
             visible_metadata = os.stat(self.workspace_root, follow_symlinks=False)
         except OSError as exc:
@@ -444,9 +460,37 @@ class _StoryWorkspaceDreamFilesystem:
             raise
 
     def _open_workspace_descriptor(self) -> int:
+        """Open an absolute workspace one component at a time from ``/``."""
+
+        anchor = self.workspace_root.anchor
+        parts = self.workspace_root.parts
+        if not anchor or not parts or parts[0] != anchor:
+            raise StoryWorkspaceDreamPathError(
+                "workspace root must be an absolute path"
+            )
+        descriptor = -1
         try:
-            descriptor = os.open(self.workspace_root, self._directory_flags())
-        except OSError as exc:
+            descriptor = os.open(anchor, self._directory_flags())
+            self._verify_directory_descriptor(descriptor)
+            for component in parts[1:]:
+                child_descriptor = self._open_child_directory(
+                    descriptor,
+                    component,
+                    create=False,
+                )
+                assert child_descriptor is not None
+                os.close(descriptor)
+                descriptor = child_descriptor
+        except BaseException as exc:
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
+            if not isinstance(exc, Exception):
+                raise
+            if isinstance(exc, StoryWorkspaceDreamPathError):
+                raise
             raise StoryWorkspaceDreamPathError(
                 "workspace root cannot be opened safely"
             ) from exc
@@ -1029,7 +1073,11 @@ class _StoryWorkspaceDreamFilesystem:
                 # reported operation failure.
                 pass
 
-    def _validate_source_file(self, relative_path: str) -> None:
+    def _validate_source_file(
+        self,
+        relative_path: str,
+        workspace_descriptor: int,
+    ) -> None:
         if not isinstance(relative_path, str) or not relative_path:
             raise StoryWorkspaceDreamPathError("source file path must be non-blank")
         if "\\" in relative_path:
@@ -1043,22 +1091,73 @@ class _StoryWorkspaceDreamFilesystem:
             raise StoryWorkspaceDreamPathError(
                 "source file path must be safely relative"
             )
+        directory_descriptors: list[int] = []
+        pinned_children: list[tuple[int, str, int]] = []
+        file_descriptor = -1
         try:
-            resolved = self.workspace_root.joinpath(*pure_path.parts).resolve(
-                strict=True
+            parent_descriptor = workspace_descriptor
+            for component in pure_path.parts[:-1]:
+                child_descriptor = self._open_child_directory(
+                    parent_descriptor,
+                    component,
+                    create=False,
+                )
+                assert child_descriptor is not None
+                directory_descriptors.append(child_descriptor)
+                pinned_children.append(
+                    (parent_descriptor, component, child_descriptor)
+                )
+                parent_descriptor = child_descriptor
+            filename = pure_path.parts[-1]
+            file_descriptor = os.open(
+                filename,
+                self._file_flags(),
+                dir_fd=parent_descriptor,
             )
-        except (OSError, RuntimeError) as exc:
+            file_metadata = os.fstat(file_descriptor)
+            visible_metadata = os.stat(
+                filename,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(file_metadata.st_mode)
+                or stat.S_ISLNK(visible_metadata.st_mode)
+                or not stat.S_ISREG(visible_metadata.st_mode)
+                or (file_metadata.st_dev, file_metadata.st_ino)
+                != (visible_metadata.st_dev, visible_metadata.st_ino)
+            ):
+                raise StoryWorkspaceDreamPathError(
+                    f"source file is unsafe: {relative_path}"
+                )
+            self._verify_workspace_identity(workspace_descriptor)
+            for parent, name, child in pinned_children:
+                self._verify_child_identity(parent, name, child)
+        except StoryWorkspaceDreamPathError:
+            raise
+        except (OSError, RuntimeError, StoryWorkspaceDreamFileError) as exc:
             raise StoryWorkspaceDreamPathError(
-                f"source file does not exist: {relative_path}"
+                f"source file cannot be opened safely: {relative_path}"
             ) from exc
-        if not resolved.is_relative_to(self.workspace_root) or not resolved.is_file():
-            raise StoryWorkspaceDreamPathError(
-                f"source file escaped workspace: {relative_path}"
-            )
+        finally:
+            if file_descriptor >= 0:
+                try:
+                    os.close(file_descriptor)
+                except OSError:
+                    pass
+            for descriptor in reversed(directory_descriptors):
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
 
-    def _validate_source_files(self, stage_file: StoryWorkspaceDreamStageFile) -> None:
+    def _validate_source_files(
+        self,
+        stage_file: StoryWorkspaceDreamStageFile,
+        workspace_descriptor: int,
+    ) -> None:
         for source_file in stage_file.source_files:
-            self._validate_source_file(source_file)
+            self._validate_source_file(source_file, workspace_descriptor)
 
 
 class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
@@ -1177,7 +1276,7 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                 source=source,
                 thread_id=thread_id,
             )
-            self._validate_source_files(candidate)
+            self._validate_source_files(candidate, run.workspace_descriptor)
             with self._stages_directory(run, create=True) as stages:
                 assert stages is not None
 
@@ -1203,7 +1302,7 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                         run_id,
                         canonical_stage,
                     )
-                    self._validate_source_files(current)
+                    self._validate_source_files(current, run.workspace_descriptor)
                 current_revision = current.revision if current is not None else 0
                 if expected_revision != current_revision:
                     raise StoryWorkspaceDreamFileConflict(
@@ -1334,7 +1433,12 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
                 self._verify_read_context(run, stages)
                 if stage_file is None:
                     return None
-                self._validate_stage(stage_file, run_id, canonical_stage)
+                self._validate_stage(
+                    stage_file,
+                    run_id,
+                    canonical_stage,
+                    run.workspace_descriptor,
+                )
                 return stage_file
 
     def read_stage_file(
@@ -1394,7 +1498,12 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
                         self._verify_read_context(run, stages)
                         if stage_file is None:
                             continue
-                        self._validate_stage(stage_file, run_id, stage)
+                        self._validate_stage(
+                            stage_file,
+                            run_id,
+                            stage,
+                            run.workspace_descriptor,
+                        )
                         stage_responses[stage] = self._stage_response(stage_file)
             complete = set(stage_responses) == set(
                 STORY_WORKSPACE_DREAM_REQUIRED_STAGES
@@ -1505,13 +1614,14 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
         stage_file: StoryWorkspaceDreamStageFile,
         run_id: str,
         stage: StoryWorkspaceDreamStage,
+        workspace_descriptor: int,
     ) -> None:
         StoryWorkspaceDreamFileWriter._validate_stage_identity(
             stage_file,
             run_id,
             stage,
         )
-        self._validate_source_files(stage_file)
+        self._validate_source_files(stage_file, workspace_descriptor)
 
 
 __all__ = [
