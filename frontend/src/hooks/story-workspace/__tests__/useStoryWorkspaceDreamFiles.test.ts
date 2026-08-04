@@ -71,6 +71,8 @@ function fullProjection() {
         }],
       },
     },
+    confirmationAccepted: false,
+    confirmationDispatched: false,
     canConfirm: true,
     confirmationLabel: '确认并继续',
   };
@@ -86,7 +88,21 @@ test('builds the canonical run-scoped endpoint', () => {
 test('strictly parses waiting and complete camelCase projections', () => {
   const complete = parseStoryWorkspaceDreamFiles(fullProjection());
   expect(complete.canConfirm).toBe(true);
+  expect(complete.confirmationAccepted).toBe(false);
+  expect(complete.confirmationDispatched).toBe(false);
   expect(complete.stages.characters?.revision).toBe(2);
+
+  const accepted = parseStoryWorkspaceDreamFiles({
+    ...fullProjection(),
+    confirmationAccepted: true,
+    confirmationDispatched: false,
+    canConfirm: false,
+  });
+  expect(accepted).toMatchObject({
+    confirmationAccepted: true,
+    confirmationDispatched: false,
+    canConfirm: false,
+  });
 
   const waiting = parseStoryWorkspaceDreamFiles({
     ...fullProjection(),
@@ -105,6 +121,20 @@ test('strictly parses waiting and complete camelCase projections', () => {
     ...fullProjection(),
     stages: { characters: { ...fullProjection().stages.characters, revision: true } },
   })).toThrow();
+  expect(() => parseStoryWorkspaceDreamFiles({
+    ...fullProjection(),
+    confirmationAccepted: true,
+    confirmationDispatched: false,
+    canConfirm: true,
+  })).toThrow();
+  expect(() => parseStoryWorkspaceDreamFiles({
+    ...fullProjection(),
+    confirmationAccepted: false,
+    confirmationDispatched: true,
+  })).toThrow();
+  const withoutConfirmationFacts = { ...fullProjection() } as Record<string, unknown>;
+  delete withoutConfirmationFacts.confirmationAccepted;
+  expect(() => parseStoryWorkspaceDreamFiles(withoutConfirmationFacts)).toThrow();
 });
 
 test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
@@ -133,11 +163,11 @@ test('fetch seam sends auth and rejects HTTP or malformed JSON', async () => {
   })).rejects.toThrow();
 });
 
-test('polling is limited to waiting and continuing Dream lifecycle states', () => {
+test('polling includes editing so Agent revision conflicts surface within five seconds', () => {
   expect(shouldPollStoryWorkspaceDreamFiles('story-workspace-dream-waiting-files')).toBe(true);
+  expect(shouldPollStoryWorkspaceDreamFiles('story-workspace-dream-editing')).toBe(true);
   expect(shouldPollStoryWorkspaceDreamFiles('story-workspace-dream-continuing')).toBe(true);
   for (const state of [
-    'story-workspace-dream-editing',
     'story-workspace-dream-confirming',
     'story-workspace-dream-completed',
   ] as const) {

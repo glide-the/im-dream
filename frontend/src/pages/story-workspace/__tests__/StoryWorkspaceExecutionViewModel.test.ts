@@ -6,7 +6,7 @@ import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
 import {
   buildStoryWorkspaceExecutionWorkspace,
-  isStoryWorkspaceExecutionPastConfirmation,
+  canAccessStoryWorkspaceExecution,
   storyWorkspaceExecutionFocusNeighbors,
 } from '../executionViewModel';
 
@@ -60,7 +60,9 @@ function files(): StoryWorkspaceDreamFilesResponse {
         ],
       },
     },
-    canConfirm: true,
+    confirmationAccepted: true,
+    confirmationDispatched: true,
+    canConfirm: false,
     confirmationLabel: '确认并继续',
   };
 }
@@ -94,11 +96,12 @@ test('focus neighbors stay inside the ordered Outline manuscript', () => {
     .toEqual({ previousKey: null, nextKey: null });
 });
 
-test('route gate is only an access guard and does not create failure UI states', () => {
-  expect(isStoryWorkspaceExecutionPastConfirmation('confirmed')).toBe(true);
-  expect(isStoryWorkspaceExecutionPastConfirmation('continuing')).toBe(true);
-  expect(isStoryWorkspaceExecutionPastConfirmation('completed')).toBe(true);
-  expect(isStoryWorkspaceExecutionPastConfirmation('queued')).toBe(false);
-  expect(isStoryWorkspaceExecutionPastConfirmation('pending_review')).toBe(false);
-  expect(isStoryWorkspaceExecutionPastConfirmation('rejected')).toBe(false);
+test('route gate uses the durable Dream confirmation fact, never WorkflowRun.status', () => {
+  expect(canAccessStoryWorkspaceExecution(files())).toBe(true);
+  expect(canAccessStoryWorkspaceExecution({
+    ...files(),
+    confirmationAccepted: false,
+    confirmationDispatched: false,
+    canConfirm: true,
+  })).toBe(false);
 });

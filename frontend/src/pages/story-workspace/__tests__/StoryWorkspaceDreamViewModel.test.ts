@@ -6,6 +6,8 @@ import { expect, test } from '@playwright/test';
 import type { StoryWorkspaceDreamFilesResponse } from '../../../hooks/story-workspace/contracts';
 import {
   dreamStageSnapshotsFromFiles,
+  storyWorkspaceDreamLifecycleFromPersistence,
+  storyWorkspaceDreamPersistenceNotice,
   parseStoryWorkspaceDreamEditorValue,
   storyWorkspaceDreamEditorValue,
 } from '../dreamViewModel';
@@ -40,6 +42,8 @@ function projection(): StoryWorkspaceDreamFilesResponse {
         }],
       },
     },
+    confirmationAccepted: false,
+    confirmationDispatched: false,
     canConfirm: false,
     confirmationLabel: '确认并继续',
   };
@@ -61,6 +65,50 @@ test('maps only the three server-whitelisted editable fields into local state', 
       editableFields: ['displayName', 'summary', 'relations'],
     }],
   });
+});
+
+test('restores the one-confirm lifecycle from durable confirmation and run facts', () => {
+  const editing = projection();
+  expect(storyWorkspaceDreamLifecycleFromPersistence(
+    editing,
+    'running',
+    'story-workspace-dream-editing',
+  )).toBe('story-workspace-dream-editing');
+
+  const saved = {
+    ...editing,
+    confirmationAccepted: true,
+    confirmationDispatched: false,
+  };
+  expect(storyWorkspaceDreamLifecycleFromPersistence(
+    saved,
+    'failed',
+    'story-workspace-dream-editing',
+  )).toBe('story-workspace-dream-continuing');
+  expect(storyWorkspaceDreamPersistenceNotice(saved, 'continuing')).toBe(
+    '命令已保存，等待同一 Agent 接续',
+  );
+  expect(storyWorkspaceDreamLifecycleFromPersistence(
+    saved,
+    'completed',
+    'story-workspace-dream-editing',
+  )).toBe('story-workspace-dream-continuing');
+  expect(storyWorkspaceDreamPersistenceNotice(saved, 'completed')).toBe(
+    '命令已保存，等待同一 Agent 接续',
+  );
+
+  const dispatched = { ...saved, confirmationDispatched: true };
+  expect(storyWorkspaceDreamPersistenceNotice(dispatched, 'continuing')).toBe(
+    '同一 Chat Agent 正在继续',
+  );
+  expect(storyWorkspaceDreamLifecycleFromPersistence(
+    dispatched,
+    'completed',
+    'story-workspace-dream-editing',
+  )).toBe('story-workspace-dream-completed');
+  expect(storyWorkspaceDreamPersistenceNotice(dispatched, 'completed')).toBe(
+    '同一 Chat Agent 已完成后续执行',
+  );
 });
 
 test('formats editor values and parses relations without empty duplicates', () => {

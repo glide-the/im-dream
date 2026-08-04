@@ -187,6 +187,10 @@ export interface StoryWorkspaceDreamFilesResponse {
     StoryWorkspaceDreamStage,
     StoryWorkspaceDreamStageProjection
   >>>;
+  /** Durable audit fact: the one Dream confirmation command was accepted. */
+  readonly confirmationAccepted: boolean;
+  /** Durable dispatch fact: the accepted command reached the same Chat Agent turn. */
+  readonly confirmationDispatched: boolean;
   readonly canConfirm: boolean;
   readonly confirmationLabel: '确认并继续';
 }

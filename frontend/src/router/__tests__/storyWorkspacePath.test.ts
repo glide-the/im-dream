@@ -16,6 +16,8 @@ import {
   matchStoryWorkspaceRoutePattern,
   parseStoryWorkspaceRunParam,
   resolveStoryWorkspacePath,
+  storyWorkspaceDreamStageForRoute,
+  storyWorkspaceAllowsLegacyReviewPanel,
   STORY_WORKSPACE_PATHS,
   STORY_WORKSPACE_ROUTE_PATTERNS,
   storyWorkspaceEpisodeReviewPath,
@@ -42,6 +44,36 @@ test('static routes resolve exactly as before (no regression)', () => {
   expect(resolveStoryWorkspacePath('/story-workspace/stories')).toMatchObject({ route: 'stories' });
   expect(resolveStoryWorkspacePath('/story-workspace/characters')).toMatchObject({ route: 'characters' });
   expect(resolveStoryWorkspacePath('/story-workspace/scenes')).toMatchObject({ route: 'scenes' });
+});
+
+test('run-bound character and scene routes target their Dream file stages', () => {
+  const characters = resolveStoryWorkspacePath(
+    '/story-workspace/characters',
+    '?run=run_characters',
+  );
+  const scenes = resolveStoryWorkspacePath('/story-workspace/scenes', '?run=run_scenes');
+  const characterList = resolveStoryWorkspacePath('/story-workspace/characters');
+
+  expect(characters && storyWorkspaceDreamStageForRoute(characters)).toBe('characters');
+  expect(scenes && storyWorkspaceDreamStageForRoute(scenes)).toBe('scenes');
+  expect(characterList && storyWorkspaceDreamStageForRoute(characterList)).toBeNull();
+});
+
+test('Dream run surfaces never mount the legacy review panel', () => {
+  const cases = [
+    resolveStoryWorkspacePath('/story-workspace/dream'),
+    resolveStoryWorkspacePath('/story-workspace/dream', '?run=run_1'),
+    resolveStoryWorkspacePath('/story-workspace/characters', '?run=run_1'),
+    resolveStoryWorkspacePath('/story-workspace/scenes', '?run=run_1'),
+    resolveStoryWorkspacePath('/story-workspace/runs/run_1/execution'),
+  ];
+  expect(cases.every((match) => match && !storyWorkspaceAllowsLegacyReviewPanel(match))).toBe(true);
+  expect(storyWorkspaceAllowsLegacyReviewPanel(
+    resolveStoryWorkspacePath('/story-workspace/characters')!,
+  )).toBe(true);
+  expect(storyWorkspaceAllowsLegacyReviewPanel(
+    resolveStoryWorkspacePath('/story-workspace/stories')!,
+  )).toBe(true);
 });
 
 test('execution route resolves with the run id param (C10-②)', () => {

@@ -7,7 +7,6 @@ import type {
   StoryWorkspaceDreamStage,
   StoryWorkspaceDreamStageItem,
 } from '../../hooks/story-workspace/contracts';
-import type { WorkflowRunStatus } from '../../api/storyWorkspaceApi';
 
 const STAGE_COPY: Record<StoryWorkspaceDreamStage, {
   label: string;
@@ -45,20 +44,11 @@ export interface StoryWorkspaceExecutionWorkspace {
   readonly runRevision: number;
 }
 
-const PRE_CONFIRMATION_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set([
-  'preflight',
-  'queued',
-  'running',
-  'output_validating',
-  'pending_review',
-  'rejected',
-]);
-
-/** Access guard only; the execution view itself is always workspace-file-driven. */
-export function isStoryWorkspaceExecutionPastConfirmation(
-  status: WorkflowRunStatus,
+/** Access guard uses the persisted Dream command, never legacy run statuses. */
+export function canAccessStoryWorkspaceExecution(
+  files: StoryWorkspaceDreamFilesResponse,
 ): boolean {
-  return !PRE_CONFIRMATION_STATUSES.has(status);
+  return files.confirmationAccepted;
 }
 
 function toEntry(

@@ -10,12 +10,12 @@ import {
   useState,
   type KeyboardEvent,
 } from 'react';
-import { getWorkflowRun, type WorkflowRun } from '../../api/storyWorkspaceApi';
 import { storyWorkspaceReviewDeepLink } from '../../components/story-workspace';
 import { useStoryWorkspaceDreamFiles } from '../../hooks/story-workspace';
+import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import {
   buildStoryWorkspaceExecutionWorkspace,
-  isStoryWorkspaceExecutionPastConfirmation,
+  canAccessStoryWorkspaceExecution,
   storyWorkspaceExecutionFocusNeighbors,
   type StoryWorkspaceExecutionEntry,
 } from './executionViewModel';
@@ -94,10 +94,10 @@ export function StoryWorkspaceExecutionPage({
   episodeId,
   onNavigate,
 }: StoryWorkspaceExecutionPageProps) {
-  const [run, setRun] = useState<WorkflowRun | null>(null);
-  const [runReadComplete, setRunReadComplete] = useState(false);
   const [activeModule, setActiveModule] = useState<ExecutionModule>('outline');
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
+  const currentRun = run?.workflow_run_id === runId ? run : null;
 
   const navigate = useCallback((href: string, notice?: string) => {
     if (onNavigate) {
@@ -108,23 +108,14 @@ export function StoryWorkspaceExecutionPage({
   }, [onNavigate]);
 
   useEffect(() => {
-    let active = true;
-    setRun(null);
-    setRunReadComplete(false);
-    void getWorkflowRun(runId).then((nextRun) => {
-      if (active) setRun(nextRun);
-    }).catch(() => {
-      if (active) setRun(null);
-    }).finally(() => {
-      if (active) setRunReadComplete(true);
+    void selectRun(runId).catch(() => {
+      // Dream files own the access fact. A run read is optional context for
+      // the title/completion indicator and never creates a failure branch.
     });
-    return () => {
-      active = false;
-    };
-  }, [runId]);
+  }, [runId, selectRun]);
 
   const files = useStoryWorkspaceDreamFiles(runId, {
-    lifecycleState: run?.status === 'completed'
+    lifecycleState: currentRun?.status === 'completed'
       ? 'story-workspace-dream-completed'
       : 'story-workspace-dream-continuing',
   });
@@ -170,14 +161,14 @@ export function StoryWorkspaceExecutionPage({
   }, [focusedEntry]);
 
   useEffect(() => {
-    if (!run || isStoryWorkspaceExecutionPastConfirmation(run.status)) return;
+    if (!files.data || canAccessStoryWorkspaceExecution(files.data)) return;
     navigate(
-      storyWorkspaceReviewDeepLink(run.workflow_run_id, episodeId),
+      storyWorkspaceReviewDeepLink(files.data.storyWorkspaceRunId, episodeId),
       '请先完成本次 Dream 的确认。',
     );
-  }, [episodeId, navigate, run]);
+  }, [episodeId, files.data, navigate]);
 
-  if (!runReadComplete || (files.isLoading && !files.data)) {
+  if (files.isLoading && !files.data) {
     return (
       <section className="story-workspace-collaboration story-workspace-collaboration--message">
         <p>正在读取 Agent 工作空间…</p>
@@ -185,7 +176,7 @@ export function StoryWorkspaceExecutionPage({
     );
   }
 
-  if (run && !isStoryWorkspaceExecutionPastConfirmation(run.status)) {
+  if (files.data && !canAccessStoryWorkspaceExecution(files.data)) {
     return (
       <section className="story-workspace-collaboration story-workspace-collaboration--message">
         <p>正在返回 Dream 完成本次确认…</p>
@@ -193,7 +184,7 @@ export function StoryWorkspaceExecutionPage({
     );
   }
 
-  if (!run || (!files.data && files.error)) {
+  if (!files.data && files.error) {
     return (
       <section className="story-workspace-collaboration story-workspace-collaboration--message">
         <p>工作空间内容尚未同步，页面会继续读取。</p>
@@ -202,7 +193,19 @@ export function StoryWorkspaceExecutionPage({
     );
   }
 
-  const isAgentContinuing = run.status === 'confirmed' || run.status === 'continuing';
+  if (!files.data) {
+    return (
+      <section className="story-workspace-collaboration story-workspace-collaboration--message">
+        <p>正在读取 Agent 工作空间…</p>
+      </section>
+    );
+  }
+
+  const agentStateCopy = !files.data.confirmationDispatched
+    ? '命令已保存，等待同一 Agent 接续'
+    : currentRun?.status === 'completed'
+      ? '同一 Chat Agent 已完成后续执行'
+      : '同一 Chat Agent 正在继续';
   const focusByKey = (key: string | null) => {
     if (key) setFocusKey(key);
   };
@@ -227,13 +230,13 @@ export function StoryWorkspaceExecutionPage({
             <span>后续执行</span>
           </nav>
           <h1 id="story-workspace-collaboration-title">
-            {run.workflow_summary?.trim() || '故事协作工作台'}
+            {currentRun?.workflow_summary?.trim() || '故事协作工作台'}
           </h1>
         </div>
         <div className="story-workspace-collaboration__agent-state" aria-live="polite">
           <span aria-hidden="true" />
           <div>
-            <strong>{isAgentContinuing ? '同一 Chat Agent 正在继续' : '工作空间已同步'}</strong>
+            <strong>{agentStateCopy}</strong>
             <small>workspace r{workspace?.runRevision ?? 0}</small>
           </div>
         </div>

@@ -42,6 +42,8 @@ export interface StoryWorkspaceRouteMatch {
   query: URLSearchParams;
 }
 
+export type StoryWorkspaceDreamRouteStage = 'characters' | 'scenes';
+
 export function trimStoryWorkspaceTrailingSlash(pathname: string): string {
   if (pathname === '/') return pathname;
   return pathname.replace(/\/+$/, '');
@@ -152,4 +154,26 @@ export function parseStoryWorkspaceRunParam(search: string): string | null {
 export function readStoryWorkspaceRunParam(query: URLSearchParams): string | null {
   const run = query.get('run');
   return run && run.trim() ? run : null;
+}
+
+/** Run-bound asset routes reuse the Dream file surface at the matching stage. */
+export function storyWorkspaceDreamStageForRoute(
+  match: StoryWorkspaceRouteMatch,
+): StoryWorkspaceDreamRouteStage | null {
+  if (!readStoryWorkspaceRunParam(match.query)) return null;
+  if (match.route === 'characters') return 'characters';
+  if (match.route === 'scenes') return 'scenes';
+  return null;
+}
+
+/** Legacy review belongs only to resource-management routes, never Dream surfaces. */
+export function storyWorkspaceAllowsLegacyReviewPanel(
+  match: StoryWorkspaceRouteMatch,
+): boolean {
+  if (
+    match.route === 'dream'
+    || match.route === 'episode-review'
+    || match.route === 'run-execution'
+  ) return false;
+  return storyWorkspaceDreamStageForRoute(match) === null;
 }

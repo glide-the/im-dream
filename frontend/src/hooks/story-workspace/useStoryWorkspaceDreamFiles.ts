@@ -161,7 +161,15 @@ export function parseStoryWorkspaceDreamFiles(value: unknown): StoryWorkspaceDre
     throw new Error('Waiting Dream projection cannot contain stage files.');
   }
   const complete = REQUIRED_STAGES.every((stage) => stages[stage] !== undefined);
-  if (typeof value.canConfirm !== 'boolean' || value.canConfirm !== complete) {
+  if (
+    typeof value.confirmationAccepted !== 'boolean'
+    || typeof value.confirmationDispatched !== 'boolean'
+    || (value.confirmationDispatched && !value.confirmationAccepted)
+  ) {
+    throw new Error('Dream files response has inconsistent confirmation facts.');
+  }
+  const canConfirm = complete && !value.confirmationAccepted;
+  if (typeof value.canConfirm !== 'boolean' || value.canConfirm !== canConfirm) {
     throw new Error('Dream files response has inconsistent canConfirm.');
   }
   if (value.confirmationLabel !== '确认并继续') {
@@ -174,6 +182,8 @@ export function parseStoryWorkspaceDreamFiles(value: unknown): StoryWorkspaceDre
     requiredStages: [...REQUIRED_STAGES],
     runRevision,
     stages,
+    confirmationAccepted: value.confirmationAccepted,
+    confirmationDispatched: value.confirmationDispatched,
     canConfirm: value.canConfirm,
     confirmationLabel: '确认并继续',
   };
@@ -215,6 +225,7 @@ export function shouldPollStoryWorkspaceDreamFiles(
   state: StoryWorkspaceDreamLifecycleState,
 ): boolean {
   return state === 'story-workspace-dream-waiting-files'
+    || state === 'story-workspace-dream-editing'
     || state === 'story-workspace-dream-continuing';
 }
 

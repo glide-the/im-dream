@@ -33,6 +33,8 @@ import {
 import {
   readStoryWorkspaceRunParam,
   resolveStoryWorkspacePath,
+  storyWorkspaceAllowsLegacyReviewPanel,
+  storyWorkspaceDreamStageForRoute,
   STORY_WORKSPACE_PATHS,
   trimStoryWorkspaceTrailingSlash,
   type StoryWorkspaceRoute,
@@ -97,12 +99,36 @@ function renderStoryWorkspaceRoute(
   refreshNonce: number,
   onNavigate: (path: string, notice?: string) => void,
 ) {
+  const runId = readStoryWorkspaceRunParam(match.query);
+  const dreamStage = storyWorkspaceDreamStageForRoute(match);
   switch (match.route) {
     case 'stories':
       return <StoryWorkspaceStoriesPage onReview={(story) => onReview({ resourceType: 'story', resourceId: story.id })} refreshNonce={refreshNonce} />;
     case 'characters':
+      if (dreamStage) {
+        return (
+          <StoryWorkspaceDreamPage
+            initialStage={dreamStage}
+            onNavigate={onNavigate}
+            runId={runId}
+          >
+            {dreamContent}
+          </StoryWorkspaceDreamPage>
+        );
+      }
       return <StoryWorkspaceCharactersPage onReview={(character) => onReview({ resourceType: 'character', resourceId: character.id })} refreshNonce={refreshNonce} />;
     case 'scenes':
+      if (dreamStage) {
+        return (
+          <StoryWorkspaceDreamPage
+            initialStage={dreamStage}
+            onNavigate={onNavigate}
+            runId={runId}
+          >
+            {dreamContent}
+          </StoryWorkspaceDreamPage>
+        );
+      }
       return <StoryWorkspaceScenesPage onReview={(scene) => onReview({ resourceType: 'scene', resourceId: scene.id })} refreshNonce={refreshNonce} />;
     case 'run-execution':
       return (
@@ -118,7 +144,7 @@ function renderStoryWorkspaceRoute(
       return (
         <StoryWorkspaceDreamPage
           onNavigate={onNavigate}
-          runId={readStoryWorkspaceRunParam(match.query)}
+          runId={runId}
         >
           {dreamContent}
         </StoryWorkspaceDreamPage>
@@ -145,7 +171,9 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
   const [routeNotice, setRouteNotice] = useState<string | null>(null);
 
   const activeRoute: StoryWorkspaceRoute = activeMatch.route;
-  const isDreamRoute = activeRoute === 'dream' || activeRoute === 'episode-review';
+  const isDreamRoute = activeRoute === 'dream'
+    || activeRoute === 'episode-review'
+    || storyWorkspaceDreamStageForRoute(activeMatch) !== null;
 
   // Dream page ?run= deep link (design_004 §4.3): the router parses the query
   // (C10-③), the hook resolves it actor-scoped; initial positioning only —
@@ -169,11 +197,12 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
   }, []);
 
   useEffect(() => subscribeStoryWorkspaceOutput((receipt) => {
+    setResourceRefreshNonce((value) => value + 1);
+    if (!storyWorkspaceAllowsLegacyReviewPanel(activeMatch)) return;
     setReviewSource(receipt);
     setReviewSelection({ resourceType: 'story', resourceId: receipt.story_id });
     setReviewPanelOpen(true);
-    setResourceRefreshNonce((value) => value + 1);
-  }), []);
+  }), [activeMatch]);
 
   const handleOpenReview = useCallback((selection: StoryWorkspaceReviewSelection) => {
     setReviewSource(null);
@@ -221,7 +250,7 @@ export function StoryWorkspaceRouter({ onOpenSettings, dreamContent }: StoryWork
 
   return (
     <StoryWorkspaceLayout
-      reviewPanel={activeRoute !== 'run-execution' && reviewSelection ? (
+      reviewPanel={storyWorkspaceAllowsLegacyReviewPanel(activeMatch) && reviewSelection ? (
         <StoryWorkspaceReviewDetail
           key={`${reviewSelection.resourceType}:${reviewSelection.resourceId}`}
           onChanged={() => setResourceRefreshNonce((value) => value + 1)}

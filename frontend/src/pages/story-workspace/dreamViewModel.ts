@@ -5,7 +5,9 @@
 import type {
   StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
+  StoryWorkspaceDreamLifecycleState,
 } from '../../hooks/story-workspace/contracts';
+import type { WorkflowRunStatus } from '../../api/storyWorkspaceApi';
 import type { StoryWorkspaceDreamStageSnapshot } from '../../components/story-workspace/dreamState';
 import { STORY_WORKSPACE_DREAM_STAGES } from '../../components/story-workspace/dreamState';
 
@@ -59,4 +61,33 @@ export function parseStoryWorkspaceDreamEditorValue(
     return trimmed;
   }
   return trimmed || null;
+}
+
+export type StoryWorkspaceDreamConfirmationPersistence = Pick<
+  StoryWorkspaceDreamFilesResponse,
+  'confirmationAccepted' | 'confirmationDispatched'
+>;
+
+/** Recover the visible one-confirm lifecycle from durable server facts. */
+export function storyWorkspaceDreamLifecycleFromPersistence(
+  persistence: StoryWorkspaceDreamConfirmationPersistence | null,
+  runStatus: WorkflowRunStatus | null | undefined,
+  fallback: StoryWorkspaceDreamLifecycleState,
+): StoryWorkspaceDreamLifecycleState {
+  if (!persistence?.confirmationAccepted) return fallback;
+  return persistence.confirmationDispatched && runStatus === 'completed'
+    ? 'story-workspace-dream-completed'
+    : 'story-workspace-dream-continuing';
+}
+
+/** Copy has no rejected/failed/retry branch: acceptance is monotonic. */
+export function storyWorkspaceDreamPersistenceNotice(
+  persistence: StoryWorkspaceDreamConfirmationPersistence | null,
+  lifecycle: 'continuing' | 'completed',
+): string {
+  if (persistence?.confirmationAccepted && !persistence.confirmationDispatched) {
+    return '命令已保存，等待同一 Agent 接续';
+  }
+  if (lifecycle === 'completed') return '同一 Chat Agent 已完成后续执行';
+  return '同一 Chat Agent 正在继续';
 }

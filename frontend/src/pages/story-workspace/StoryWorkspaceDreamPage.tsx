@@ -30,10 +30,13 @@ import {
   type StoryWorkspaceDreamFieldValue,
   type StoryWorkspaceDreamStage,
 } from '../../hooks/story-workspace';
+import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import {
   dreamStageSnapshotsFromFiles,
   parseStoryWorkspaceDreamEditorValue,
   storyWorkspaceDreamEditorValue,
+  storyWorkspaceDreamLifecycleFromPersistence,
+  storyWorkspaceDreamPersistenceNotice,
 } from './dreamViewModel';
 import './StoryWorkspaceDreamPage.css';
 
@@ -51,6 +54,7 @@ type DreamSelection = { stage: StoryWorkspaceDreamStage; entityId: string };
 
 export interface StoryWorkspaceDreamPageProps {
   children: ReactNode;
+  initialStage?: StoryWorkspaceDreamStage;
   runId?: string | null;
   onNavigate?: (path: string) => void;
 }
@@ -92,24 +96,56 @@ function revisionLine(state: StoryWorkspaceDreamState | null): string {
 
 export function StoryWorkspaceDreamPage({
   children,
+  initialStage = 'characters',
   runId,
   onNavigate,
 }: StoryWorkspaceDreamPageProps) {
   const [dreamState, setDreamState] = useState<StoryWorkspaceDreamState | null>(null);
-  const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>('characters');
+  const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>(initialStage);
   const [selection, setSelection] = useState<DreamSelection | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
 
-  const lifecycleState = dreamState?.status ?? 'story-workspace-dream-waiting-files';
-  const files = useStoryWorkspaceDreamFiles(runId, { lifecycleState });
+  const draftLifecycleState = dreamState?.status ?? 'story-workspace-dream-waiting-files';
+  const files = useStoryWorkspaceDreamFiles(runId, { lifecycleState: draftLifecycleState });
   const confirmation = useStoryWorkspaceDreamConfirmation(runId ?? '');
+  const { run: workflowRun, selectRun } = useWorkflowRun({ eventsEnabled: Boolean(runId) });
+  const currentWorkflowRun = workflowRun?.workflow_run_id === runId ? workflowRun : null;
+
+  const confirmationPersistence = useMemo(() => ({
+    confirmationAccepted: Boolean(
+      files.data?.confirmationAccepted || confirmation.accepted,
+    ),
+    confirmationDispatched: Boolean(
+      files.data?.confirmationDispatched || confirmation.accepted?.dispatched,
+    ),
+  }), [confirmation.accepted, files.data?.confirmationAccepted, files.data?.confirmationDispatched]);
+  const lifecycleState = storyWorkspaceDreamLifecycleFromPersistence(
+    confirmationPersistence,
+    currentWorkflowRun?.status,
+    draftLifecycleState,
+  );
+  const isReadOnly = lifecycleState === 'story-workspace-dream-continuing'
+    || lifecycleState === 'story-workspace-dream-completed';
+  const activityCopy = lifecycleState === 'story-workspace-dream-completed'
+    ? storyWorkspaceDreamPersistenceNotice(confirmationPersistence, 'completed')
+    : lifecycleState === 'story-workspace-dream-continuing'
+      ? storyWorkspaceDreamPersistenceNotice(confirmationPersistence, 'continuing')
+      : '读取 Agent 工作空间';
 
   useEffect(() => {
     setDreamState(null);
     setSelection(null);
-    setActiveStage('characters');
+    setActiveStage(initialStage);
     setEditorError(null);
-  }, [runId]);
+  }, [initialStage, runId]);
+
+  useEffect(() => {
+    if (!runId) return;
+    void selectRun(runId).catch(() => {
+      // Dream files remain authoritative for confirmation; run read is only
+      // used for title/completion observation and never creates a failure UI.
+    });
+  }, [runId, selectRun]);
 
   useEffect(() => {
     const data = files.data;
@@ -136,6 +172,10 @@ export function StoryWorkspaceDreamPage({
       setSelection({ stage: activeStage, entityId: preferred.entityId });
       return;
     }
+    if (initialStage === activeStage) {
+      setSelection(null);
+      return;
+    }
     const firstStage = STORY_WORKSPACE_DREAM_STAGES.find(
       (stage) => (dreamState.stageData[stage]?.items.length ?? 0) > 0,
     );
@@ -144,7 +184,7 @@ export function StoryWorkspaceDreamPage({
       ? { stage: firstStage, entityId: first.entityId }
       : null);
     if (firstStage) setActiveStage(firstStage);
-  }, [activeStage, dreamState, selection]);
+  }, [activeStage, dreamState, initialStage, selection]);
 
   useEffect(() => {
     const warnBeforeLeave = (event: BeforeUnloadEvent) => {
@@ -224,12 +264,13 @@ export function StoryWorkspaceDreamPage({
       setDreamState((current) => (
         current ? acceptStoryWorkspaceDreamConfirmation(current) : current
       ));
+      files.refresh();
       setEditorError(null);
     } catch (reason) {
       setDreamState(previous);
       setEditorError(reason instanceof Error ? reason.message : '确认命令未提交');
     }
-  }, [confirmation, dreamState]);
+  }, [confirmation, dreamState, files]);
 
   if (!runId) {
     return (
@@ -251,10 +292,12 @@ export function StoryWorkspaceDreamPage({
     && canConfirmStoryWorkspaceDream(dreamState)
     && confirmation.status !== 'confirming',
   );
-  const isContinuing = dreamState?.status === 'story-workspace-dream-continuing';
-
   return (
-    <section className="story-workspace-dream" aria-labelledby="story-workspace-dream-title">
+    <section
+      className="story-workspace-dream"
+      aria-labelledby="story-workspace-dream-title"
+      data-lifecycle={lifecycleState}
+    >
       <header className="story-workspace-dream__masthead">
         <div>
           <p className="story-workspace-dream__folio">Dream manuscript · {runId.slice(-6)}</p>
@@ -262,7 +305,7 @@ export function StoryWorkspaceDreamPage({
         </div>
         <div className="story-workspace-dream__activity" aria-live="polite">
           <span className="story-workspace-dream__activity-mark" />
-          {isContinuing ? '同一 Chat Agent 正在继续' : '读取 Agent 工作空间'}
+          {activityCopy}
         </div>
       </header>
 
@@ -380,7 +423,7 @@ export function StoryWorkspaceDreamPage({
               <label>
                 <span>名称</span>
                 <input
-                  disabled={isContinuing}
+                  disabled={isReadOnly}
                   onBlur={() => normalizeField('displayName')}
                   onChange={(event) => updateField('displayName', event.currentTarget.value)}
                   value={storyWorkspaceDreamEditorValue(readStoryWorkspaceDreamField(
@@ -391,7 +434,7 @@ export function StoryWorkspaceDreamPage({
               <label>
                 <span>摘要</span>
                 <textarea
-                  disabled={isContinuing}
+                  disabled={isReadOnly}
                   onBlur={() => normalizeField('summary')}
                   onChange={(event) => updateField('summary', event.currentTarget.value)}
                   rows={7}
@@ -403,7 +446,7 @@ export function StoryWorkspaceDreamPage({
               <label>
                 <span>关联项</span>
                 <input
-                  disabled={isContinuing}
+                  disabled={isReadOnly}
                   onChange={(event) => updateField('relations', event.currentTarget.value)}
                   placeholder="用逗号分隔"
                   value={storyWorkspaceDreamEditorValue(readStoryWorkspaceDreamField(
@@ -417,7 +460,7 @@ export function StoryWorkspaceDreamPage({
                 <div><dt>实体 ID</dt><dd>{selection.entityId}</dd></div>
               </dl>
 
-              {!isContinuing && (
+              {!isReadOnly && (
                 <button
                   className="story-workspace-dream__reset"
                   onClick={() => {
@@ -449,13 +492,15 @@ export function StoryWorkspaceDreamPage({
           <span>{revisionLine(dreamState)}</span>
           {editorError && <em role="status">{editorError}</em>}
         </div>
-        {isContinuing ? (
+        {isReadOnly ? (
           <div className="story-workspace-dream__continuing-actions">
-            <span>确认命令已进入原 Chat thread</span>
-            <button
-              onClick={() => onNavigate?.(`/story-workspace/runs/${encodeURIComponent(runId)}/execution`)}
-              type="button"
-            >查看后续执行</button>
+            <span>{activityCopy}</span>
+            {confirmationPersistence.confirmationDispatched && (
+              <button
+                onClick={() => onNavigate?.(`/story-workspace/runs/${encodeURIComponent(runId)}/execution`)}
+                type="button"
+              >查看后续执行</button>
+            )}
           </div>
         ) : (
           <button
