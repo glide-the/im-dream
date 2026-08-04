@@ -5,7 +5,8 @@
 // [Pos] Story Workspace Dream state seam (Task 3 F1); this file deliberately
 //       owns no REST contract, imports canonical types only, and has no React.
 // [Sync] 2026-08-04: canonical command ownership, full UI-state values,
-//                    confirmation ack cleanup, and explicit conflict rebase.
+//                    confirmation ack cleanup, explicit conflict rebase,
+//                    readonly/deep-frozen graphs, and ordinal command order.
 
 import type {
   StoryWorkspaceDreamConfirmationCommand,
@@ -31,9 +32,9 @@ export const STORY_WORKSPACE_DREAM_STATES = [
 export type StoryWorkspaceDreamStatus = typeof STORY_WORKSPACE_DREAM_STATES[number];
 
 export interface StoryWorkspaceDreamStageItemSnapshot {
-  entityId: string;
-  fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
-  editableFields: readonly string[];
+  readonly entityId: string;
+  readonly fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
+  readonly editableFields: readonly string[];
 }
 
 /**
@@ -41,42 +42,42 @@ export interface StoryWorkspaceDreamStageItemSnapshot {
  * An adapter may map the eventual hooks/story-workspace contract into it.
  */
 export interface StoryWorkspaceDreamStageSnapshot {
-  stage: StoryWorkspaceDreamStage;
-  revision: number;
-  items: readonly StoryWorkspaceDreamStageItemSnapshot[];
+  readonly stage: StoryWorkspaceDreamStage;
+  readonly revision: number;
+  readonly items: readonly StoryWorkspaceDreamStageItemSnapshot[];
 }
 
 interface StoryWorkspaceDreamHydratedItem {
-  entityId: string;
-  fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
-  editableFields: readonly string[];
+  readonly entityId: string;
+  readonly fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
+  readonly editableFields: readonly string[];
 }
 
 interface StoryWorkspaceDreamHydratedStage {
-  stage: StoryWorkspaceDreamStage;
-  revision: number;
-  items: readonly StoryWorkspaceDreamHydratedItem[];
+  readonly stage: StoryWorkspaceDreamStage;
+  readonly revision: number;
+  readonly items: readonly StoryWorkspaceDreamHydratedItem[];
 }
 
 interface StoryWorkspaceDreamLocalEdit {
-  stage: StoryWorkspaceDreamStage;
-  entityId: string;
-  field: string;
-  value: StoryWorkspaceDreamFieldValue;
+  readonly stage: StoryWorkspaceDreamStage;
+  readonly entityId: string;
+  readonly field: string;
+  readonly value: StoryWorkspaceDreamFieldValue;
 }
 
 export interface StoryWorkspaceDreamState {
-  status: StoryWorkspaceDreamStatus;
-  storyWorkspaceRunId: string;
-  threadId: string;
-  availableStages: readonly StoryWorkspaceDreamStage[];
-  baseRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
-  latestRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
-  dirtyCount: number;
-  workspaceUpdatedStages: readonly StoryWorkspaceDreamStage[];
-  staleStages: readonly StoryWorkspaceDreamStage[];
-  hasRevisionConflict: boolean;
-  confirmationCommand: StoryWorkspaceDreamConfirmationCommand | null;
+  readonly status: StoryWorkspaceDreamStatus;
+  readonly storyWorkspaceRunId: string;
+  readonly threadId: string;
+  readonly availableStages: readonly StoryWorkspaceDreamStage[];
+  readonly baseRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
+  readonly latestRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
+  readonly dirtyCount: number;
+  readonly workspaceUpdatedStages: readonly StoryWorkspaceDreamStage[];
+  readonly staleStages: readonly StoryWorkspaceDreamStage[];
+  readonly hasRevisionConflict: boolean;
+  readonly confirmationCommand: StoryWorkspaceDreamConfirmationCommand | null;
   /** Internal seam data; page components should use the exported operations. */
   readonly stageData: Readonly<Partial<Record<StoryWorkspaceDreamStage, StoryWorkspaceDreamHydratedStage>>>;
   /** Internal seam data; one row represents one locally changed field. */
@@ -84,8 +85,8 @@ export interface StoryWorkspaceDreamState {
 }
 
 export interface StoryWorkspaceDreamConfirmationStart {
-  state: StoryWorkspaceDreamState;
-  command: StoryWorkspaceDreamConfirmationCommand;
+  readonly state: StoryWorkspaceDreamState;
+  readonly command: StoryWorkspaceDreamConfirmationCommand;
 }
 
 export type StoryWorkspaceDreamRevisionResolution = 'keep-local' | 'accept-server';
@@ -133,6 +134,26 @@ function deriveStatus(
 
 function hasOwn(value: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
+}
+
+/** Freeze only plain data graphs created by this seam; never freeze inputs. */
+function deepFreezeOwned<Value>(
+  value: Value,
+  seen: Set<object> = new Set(),
+): Value {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return value;
+
+  const prototype = Object.getPrototypeOf(value);
+  if (!Array.isArray(value) && prototype !== Object.prototype && prototype !== null) {
+    throw new Error('Dream state may freeze only owned plain JSON data');
+  }
+
+  seen.add(value);
+  for (const child of Object.values(value as Readonly<Record<string, unknown>>)) {
+    deepFreezeOwned(child, seen);
+  }
+  return Object.freeze(value);
 }
 
 function isJsonValue(value: unknown, ancestors: ReadonlySet<object> = new Set()): value is StoryWorkspaceDreamFieldValue {
@@ -285,7 +306,7 @@ function withDerivedState(
   const stageData = updates.stageData ?? state.stageData;
   const localEdits = updates.localEdits ?? state.localEdits;
   const staleStages = updates.staleStages ?? state.staleStages;
-  return {
+  return deepFreezeOwned({
     ...state,
     ...updates,
     status: deriveStatus(updates.status ?? state.status, stageData),
@@ -295,7 +316,7 @@ function withDerivedState(
     stageData,
     localEdits,
     staleStages,
-  };
+  });
 }
 
 export function createStoryWorkspaceDreamState({
@@ -307,7 +328,7 @@ export function createStoryWorkspaceDreamState({
 }): StoryWorkspaceDreamState {
   if (storyWorkspaceRunId.trim() === '') throw new Error('storyWorkspaceRunId must not be empty');
   if (threadId.trim() === '') throw new Error('threadId must not be empty');
-  return {
+  return deepFreezeOwned({
     status: 'story-workspace-dream-waiting-files',
     storyWorkspaceRunId,
     threadId,
@@ -321,7 +342,7 @@ export function createStoryWorkspaceDreamState({
     confirmationCommand: null,
     stageData: {},
     localEdits: [],
-  };
+  });
 }
 
 function hydrateOneStage(
@@ -500,8 +521,15 @@ function compareLocalEdits(
   right: StoryWorkspaceDreamLocalEdit,
 ): number {
   return STAGE_ORDER[left.stage] - STAGE_ORDER[right.stage]
-    || left.entityId.localeCompare(right.entityId)
-    || left.field.localeCompare(right.field);
+    || compareOrdinal(left.entityId, right.entityId)
+    || compareOrdinal(left.field, right.field);
+}
+
+/** ECMAScript string relational comparison: locale-independent UTF-16 order. */
+function compareOrdinal(left: string, right: string): number {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
 }
 
 function validateLocalEdits(state: StoryWorkspaceDreamState): void {
@@ -605,7 +633,7 @@ export function beginStoryWorkspaceDreamConfirmation(
     status: 'story-workspace-dream-confirming',
     confirmationCommand: command,
   });
-  return { state: confirming, command };
+  return deepFreezeOwned({ state: confirming, command });
 }
 
 export function acceptStoryWorkspaceDreamConfirmation(

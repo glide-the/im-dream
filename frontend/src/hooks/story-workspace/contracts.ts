@@ -117,18 +117,18 @@ export type StoryWorkspaceDreamFieldValue =
   | { readonly [key: string]: StoryWorkspaceDreamFieldValue };
 
 export interface StoryWorkspaceDreamConfirmationEdit {
-  stage: StoryWorkspaceDreamStage;
-  entityId: string;
-  fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
+  readonly stage: StoryWorkspaceDreamStage;
+  readonly entityId: string;
+  readonly fields: Readonly<Record<string, StoryWorkspaceDreamFieldValue>>;
 }
 
 /** Request body of the run-scoped Dream single-confirmation endpoint. */
 export interface StoryWorkspaceDreamConfirmationCommand {
-  storyWorkspaceRunId: string;
-  threadId: string;
-  baseRevisions: Readonly<Record<StoryWorkspaceDreamStage, number>>;
-  edits: readonly StoryWorkspaceDreamConfirmationEdit[];
-  idempotencyKey: string;
+  readonly storyWorkspaceRunId: string;
+  readonly threadId: string;
+  readonly baseRevisions: Readonly<Record<StoryWorkspaceDreamStage, number>>;
+  readonly edits: readonly StoryWorkspaceDreamConfirmationEdit[];
+  readonly idempotencyKey: string;
 }
 
 /**
