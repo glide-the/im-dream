@@ -700,6 +700,79 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_INIT_PROFILE_INVALID")
         self.assertEqual((workspace / "plugin.json").read_bytes(), b"user-owned\n")
 
+    def test_dream_drama_compatibility_rejects_parent_symlink_escape(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-drama-symlink"
+        outside = Path(self._tmp.name) / "outside-fresh"
+        workspace.mkdir()
+        outside.mkdir()
+        (workspace / ".claude").symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaises(WorkspacePackError) as caught:
+            pack_workspace_plugins(
+                self.db,
+                workspace=workspace,
+                deck_id="deck-1",
+                server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+            )
+
+        self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_INIT_PROFILE_INVALID")
+        self.assertFalse((outside / "docs" / "templates" / "project-init.md").exists())
+        self.assertFalse((outside / "hooks" / "hooks.json").exists())
+
+    def test_dream_drama_compatibility_rollback_preserves_concurrent_replacement(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-drama-race"
+        workspace.mkdir()
+        real_link = os.link
+        calls = 0
+
+        def replace_then_fail(source, target):  # noqa: ANN001
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                real_link(source, target)
+                Path(target).unlink()
+                Path(target).write_bytes(b"concurrent-owner\n")
+                return
+            raise OSError("simulated later publish failure")
+
+        with mock.patch(
+            "services.claude_plugin.workspace_packer.os.link",
+            side_effect=replace_then_fail,
+        ):
+            with self.assertRaises(WorkspacePackError):
+                pack_workspace_plugins(
+                    self.db,
+                    workspace=workspace,
+                    deck_id="deck-1",
+                    server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+                )
+
+        self.assertEqual((workspace / "plugin.json").read_bytes(), b"concurrent-owner\n")
+        self.assertFalse(
+            (workspace / ".claude" / "docs" / "templates" / "project-init.md").exists()
+        )
+        self.assertFalse((workspace / ".claude" / "hooks" / "hooks.json").exists())
+
     def test_server_adapter_declarations_are_deduplicated(self) -> None:
         self._register_named_plugin(
             "cpi-drama",
@@ -862,6 +935,57 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         )
         self.assertIn("frozen workspace is missing", str(missing_caught.exception))
         self.assertFalse(missing_hooks.exists())
+
+    def test_frozen_dream_workspace_rejects_parent_symlink_escape(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-frozen-drama-symlink"
+        outside = Path(self._tmp.name) / "outside-frozen"
+        workspace.mkdir()
+        pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+        )
+
+        project_init = workspace / ".claude" / "docs" / "templates" / "project-init.md"
+        hooks_json = workspace / ".claude" / "hooks" / "hooks.json"
+        project_init_content = project_init.read_bytes()
+        hooks_content = hooks_json.read_bytes()
+        project_init.unlink()
+        hooks_json.unlink()
+        project_init.parent.rmdir()
+        project_init.parent.parent.rmdir()
+        hooks_json.parent.rmdir()
+        (workspace / ".claude").rmdir()
+        (outside / "docs" / "templates").mkdir(parents=True)
+        (outside / "hooks").mkdir()
+        outside_project_init = outside / "docs" / "templates" / "project-init.md"
+        outside_hooks = outside / "hooks" / "hooks.json"
+        outside_project_init.write_bytes(project_init_content)
+        outside_hooks.write_bytes(hooks_content)
+        (workspace / ".claude").symlink_to(outside, target_is_directory=True)
+
+        with self.assertRaises(WorkspacePackError) as caught:
+            pack_workspace_plugins(
+                self.db,
+                workspace=workspace,
+                deck_id="deck-1",
+                server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+            )
+
+        self.assertEqual(caught.exception.code, "CLAUDE_PLUGIN_INIT_PROFILE_INVALID")
+        self.assertEqual(outside_project_init.read_bytes(), project_init_content)
+        self.assertEqual(outside_hooks.read_bytes(), hooks_content)
 
 
 if __name__ == "__main__":

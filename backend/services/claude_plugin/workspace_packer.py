@@ -195,10 +195,43 @@ def _ensure_dream_drama_compatibility(
     than its isolated plugin directory.  A fresh Dream pack may install them;
     a frozen workspace only validates the launch-time result.
     """
+    def validate_target_path(target: Path) -> None:
+        try:
+            relative = target.relative_to(workspace)
+        except ValueError as exc:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                f"drama-forge compatibility target escapes workspace: {target}",
+            ) from exc
+        current = workspace
+        for part in relative.parts[:-1]:
+            current /= part
+            if current.is_symlink():
+                raise WorkspacePackError(
+                    "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                    "drama-forge compatibility target has a symlink parent: "
+                    f"{current.relative_to(workspace)}",
+                )
+            if current.exists() and not current.is_dir():
+                raise WorkspacePackError(
+                    "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                    "drama-forge compatibility target parent is not a directory: "
+                    f"{current.relative_to(workspace)}",
+                )
+        try:
+            target.parent.resolve(strict=False).relative_to(workspace)
+        except ValueError as exc:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
+                "drama-forge compatibility target resolves outside workspace: "
+                f"{relative}",
+            ) from exc
+
     files: list[tuple[Path, Path, bytes]] = []
     for source_relative, target_relative in _DREAM_DRAMA_COMPATIBILITY_FILES:
         source = packed_plugin / source_relative
         target = workspace / target_relative
+        validate_target_path(target)
         if not source.is_file():
             raise WorkspacePackError(
                 "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
@@ -241,10 +274,11 @@ def _ensure_dream_drama_compatibility(
         missing.append((target, content))
 
     staged: list[tuple[Path, Path]] = []
-    installed: list[Path] = []
+    installed: list[tuple[Path, tuple[int, int]]] = []
     try:
         for target, content in missing:
             target.parent.mkdir(parents=True, exist_ok=True)
+            validate_target_path(target)
             with tempfile.NamedTemporaryFile(
                 dir=target.parent,
                 prefix=f".{target.name}.dream-compat-",
@@ -256,12 +290,23 @@ def _ensure_dream_drama_compatibility(
                 staged.append((Path(handle.name), target))
         for temporary, target in staged:
             # A hard-link publishes the complete staged bytes without
-            # overwriting a target created after the conflict preflight.
+            # overwriting a target created after the conflict preflight.  The
+            # caller prepares this private workspace before its final publish;
+            # group rollback therefore keeps partial compatibility files out
+            # of the workspace that becomes visible to the Agent.
+            temporary_stat = temporary.stat()
             os.link(temporary, target)
-            installed.append(target)
+            installed.append(
+                (target, (temporary_stat.st_dev, temporary_stat.st_ino))
+            )
     except OSError as exc:
-        for target in reversed(installed):
-            target.unlink(missing_ok=True)
+        for target, published_identity in reversed(installed):
+            try:
+                current_stat = target.lstat()
+            except FileNotFoundError:
+                continue
+            if (current_stat.st_dev, current_stat.st_ino) == published_identity:
+                target.unlink(missing_ok=True)
         raise WorkspacePackError(
             "CLAUDE_PLUGIN_INIT_PROFILE_INVALID",
             f"failed to install drama-forge compatibility files: {exc}",
