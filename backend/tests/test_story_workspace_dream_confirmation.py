@@ -405,6 +405,36 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         finally:
             service.close()
 
+    def persist_agent_request(
+        self,
+        *,
+        message_id: str,
+        parts: list,
+        metadata: dict | None,
+    ) -> None:
+        async def _persist() -> None:
+            request = ClaudeAgentRunRequest(
+                user_id=ACTOR_ID,
+                thread_id=THREAD_ID,
+                resume=True,
+                message_id=message_id,
+                message_parts=parts,
+                message_metadata=metadata,
+            )
+            execution = claude_service_module._TurnExecution(
+                request=request,
+                state=AgentRunState(session_id=THREAD_ID),
+                runner=unittest.mock.Mock(),
+                run_options=unittest.mock.Mock(),
+                turn_context=_TurnContext(
+                    queue=asyncio.Queue(),
+                    confirmation_store=ToolConfirmationStore(),
+                ),
+            )
+            await ClaudeAgentService()._persist_user_message(execution)
+
+        asyncio.run(_persist())
+
     def assert_error(self, expected_status: int, **overrides: object) -> None:
         with self.assertRaises(StoryWorkspaceDreamConfirmationError) as raised:
             self.submit(**overrides)
@@ -609,6 +639,110 @@ class StoryWorkspaceDreamConfirmationServiceTests(unittest.TestCase):
         with self.assertRaises(StoryWorkspaceDreamConfirmationError):
             asyncio.run(_resave())
         self.assertEqual(self.fixture.rows()[0], authoritative)
+
+    def test_database_hidden_row_rejects_request_kind_downgrades(self) -> None:
+        persisted = self.submit()
+        claimed = self.fixture.claim(persisted.dispatch)
+        with database.get_db() as db:
+            row = db.execute(
+                "SELECT parts, metadata FROM chat_message WHERE id = ?",
+                (claimed.message_id,),
+            ).fetchone()
+        authoritative_parts = row["parts"]
+        authoritative_metadata = row["metadata"]
+        without_kind = {
+            key: value
+            for key, value in claimed.metadata.items()
+            if key != "kind"
+        }
+        scenarios = (
+            (
+                "ordinary-kind",
+                claimed.parts,
+                {"kind": "ordinary-chat"},
+            ),
+            ("missing-kind", claimed.parts, without_kind),
+            ("none-metadata", claimed.parts, None),
+            (
+                "forged-parts",
+                [{"type": "text", "text": "forged"}],
+                claimed.metadata,
+            ),
+        )
+
+        for label, parts, metadata in scenarios:
+            with self.subTest(label=label):
+                try:
+                    with self.assertRaises(
+                        StoryWorkspaceDreamConfirmationError
+                    ):
+                        self.persist_agent_request(
+                            message_id=claimed.message_id,
+                            parts=parts,
+                            metadata=metadata,
+                        )
+                    with database.get_db() as db:
+                        after = db.execute(
+                            "SELECT parts, metadata FROM chat_message WHERE id = ?",
+                            (claimed.message_id,),
+                        ).fetchone()
+                    self.assertEqual(after["parts"], authoritative_parts)
+                    self.assertEqual(after["metadata"], authoritative_metadata)
+                finally:
+                    # Restore the authoritative bytes so every downgrade runs
+                    # independently against the same server-owned hidden row.
+                    with database.get_db() as db:
+                        db.execute(
+                            "UPDATE chat_message SET parts = ?, metadata = ? "
+                            "WHERE id = ?",
+                            (
+                                authoritative_parts,
+                                authoritative_metadata,
+                                claimed.message_id,
+                            ),
+                        )
+                        db.commit()
+
+    def test_reserved_confirmation_message_id_cannot_create_missing_row(
+        self,
+    ) -> None:
+        forged_message_id = "dream_confirm_" + "f" * 64
+        with self.assertRaises(StoryWorkspaceDreamConfirmationError):
+            self.persist_agent_request(
+                message_id=forged_message_id,
+                parts=[{"type": "text", "text": "ordinary"}],
+                metadata=None,
+            )
+        with database.get_db() as db:
+            row = db.execute(
+                "SELECT id FROM chat_message WHERE id = ?",
+                (forged_message_id,),
+            ).fetchone()
+        self.assertIsNone(row)
+
+    def test_ordinary_chat_messages_still_insert_and_update(self) -> None:
+        message_id = "ordinary-user-message"
+        self.persist_agent_request(
+            message_id=message_id,
+            parts=[{"type": "text", "text": "first"}],
+            metadata={"kind": "ordinary-chat", "revision": 1},
+        )
+        self.persist_agent_request(
+            message_id=message_id,
+            parts=[{"type": "text", "text": "updated"}],
+            metadata={"kind": "ordinary-chat", "revision": 2},
+        )
+        row = next(
+            item for item in self.fixture.rows() if item["id"] == message_id
+        )
+        self.assertEqual(
+            row["parts"],
+            [{"type": "text", "text": "updated"}],
+        )
+        self.assertEqual(
+            row["metadata"],
+            {"kind": "ordinary-chat", "revision": 2},
+        )
 
     def test_url_body_and_authoritative_thread_mismatches_are_rejected(self) -> None:
         self.assert_error(409, storyWorkspaceRunId=OTHER_RUN_ID)

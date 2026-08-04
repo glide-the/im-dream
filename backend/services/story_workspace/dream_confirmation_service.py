@@ -516,49 +516,86 @@ def _story_workspace_dispatch_matches_expected(
     )
 
 
-def story_workspace_assert_persisted_dream_confirmation_turn(
+def story_workspace_guard_persisted_dream_confirmation_turn(
     db: sqlite3.Connection,
     *,
     thread_id: str,
     actor_id: str,
     message_id: str,
     parts: list,
-    metadata: dict,
-) -> None:
-    """Verify an Agent request references the authoritative hidden turn.
+    metadata: Optional[dict],
+) -> bool:
+    """Classify and verify a server-owned Dream confirmation turn.
 
     Confirmation messages are already persisted and claimed before the Agent
     starts. The Agent may carry an older lease snapshot while waiting for the
     per-thread lock, so persistence must validate the immutable envelope and
     claim identity without writing that stale snapshot back to SQLite.
+
+    Classification trusts the existing database row and reserved message-id
+    namespace, never a request's mutable ``kind`` alone. ``False`` is returned
+    only when both database and request are unambiguously ordinary Chat data.
     """
 
-    row = db.execute(
-        "SELECT message.id, message.thread_id, message.role, message.parts, "
-        "message.metadata, thread.user_id "
-        "FROM chat_message AS message "
-        "JOIN chat_thread AS thread ON thread.id = message.thread_id "
-        "WHERE message.id = ?",
-        (message_id,),
-    ).fetchone()
+    try:
+        row = db.execute(
+            "SELECT message.id, message.thread_id, message.role, message.parts, "
+            "message.metadata, thread.user_id "
+            "FROM chat_message AS message "
+            "JOIN chat_thread AS thread ON thread.id = message.thread_id "
+            "WHERE message.id = ?",
+            (message_id,),
+        ).fetchone()
+    except sqlite3.Error as exc:
+        raise StoryWorkspaceDreamConfirmationError(
+            "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
+        ) from exc
+
+    raw_database_metadata = (
+        _decode_metadata(row["metadata"]) if row is not None else None
+    )
+    reserved_message_id = (
+        isinstance(message_id, str) and message_id.startswith("dream_confirm_")
+    )
+    database_claims_dream = reserved_message_id or (
+        isinstance(raw_database_metadata, dict)
+        and raw_database_metadata.get("kind")
+        == STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND
+    )
+    request_claims_dream = reserved_message_id or (
+        isinstance(metadata, dict)
+        and metadata.get("kind")
+        == STORY_WORKSPACE_DREAM_CONFIRMATION_METADATA_KIND
+    )
+    if not database_claims_dream and not request_claims_dream:
+        return False
+
     current = _decode_confirmation_dispatch_row(row) if row is not None else None
-    if not (
-        current is not None
-        and current.thread_id == thread_id
-        and current.actor_id == str(actor_id)
-        and current.message_id == message_id
-        and _story_workspace_dream_confirmation_has_run_scope(db, current)
-        and isinstance(parts, list)
-        and isinstance(metadata, dict)
-        and current.metadata.get("dispatch_status")
-        == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
-        and metadata.get("dispatch_status")
-        == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
-        and _valid_lease_deadline(
-            current.metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+    try:
+        valid = (
+            current is not None
+            and current.thread_id == thread_id
+            and current.actor_id == str(actor_id)
+            and current.message_id == message_id
+            and _story_workspace_dream_confirmation_has_run_scope(db, current)
+            and isinstance(parts, list)
+            and isinstance(metadata, dict)
+            and current.metadata.get("dispatch_status")
+            == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+            and metadata.get("dispatch_status")
+            == STORY_WORKSPACE_DREAM_CONFIRMATION_DISPATCHING
+            and _valid_lease_deadline(
+                current.metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+            )
+            and _valid_lease_deadline(
+                metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
+            )
         )
-        and _valid_lease_deadline(metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL))
-    ):
+    except sqlite3.Error as exc:
+        raise StoryWorkspaceDreamConfirmationError(
+            "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
+        ) from exc
+    if not valid:
         raise StoryWorkspaceDreamConfirmationError(
             "IDEMPOTENCY_CONFLICT", 409
         )
@@ -580,6 +617,7 @@ def story_workspace_assert_persisted_dream_confirmation_turn(
         raise StoryWorkspaceDreamConfirmationError(
             "IDEMPOTENCY_CONFLICT", 409
         )
+    return True
 
 
 def story_workspace_claim_dream_confirmation(

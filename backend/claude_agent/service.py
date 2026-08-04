@@ -1462,27 +1462,23 @@ class ClaudeAgentService:
         user_message_id = execution.request.message_id
         user_parts = execution.request.message_parts
         message_metadata = execution.request.message_metadata
-        is_persisted_dream_confirmation = (
-            isinstance(message_metadata, dict)
-            and message_metadata.get("kind")
-            == "story-workspace-dream-confirmation"
-        )
+        try:
+            from services.story_workspace.dream_confirmation_service import (
+                StoryWorkspaceDreamConfirmationError,
+                story_workspace_guard_persisted_dream_confirmation_turn,
+            )
+        except ModuleNotFoundError:
+            from backend.services.story_workspace.dream_confirmation_service import (
+                StoryWorkspaceDreamConfirmationError,
+                story_workspace_guard_persisted_dream_confirmation_turn,
+            )
 
         def _save_user() -> None:
             resolved_user_parts: list = list(user_parts) if user_parts else [{"type": "text", "text": ""}]
-            if is_persisted_dream_confirmation:
-                try:
-                    from services.story_workspace.dream_confirmation_service import (
-                        story_workspace_assert_persisted_dream_confirmation_turn,
-                    )
-                except ModuleNotFoundError:
-                    from backend.services.story_workspace.dream_confirmation_service import (
-                        story_workspace_assert_persisted_dream_confirmation_turn,
-                    )
-
-                db = database.get_db()
-                try:
-                    story_workspace_assert_persisted_dream_confirmation_turn(
+            db = database.get_db()
+            try:
+                is_persisted_dream_confirmation = (
+                    story_workspace_guard_persisted_dream_confirmation_turn(
                         db,
                         thread_id=thread_id,
                         actor_id=str(execution.request.user_id),
@@ -1490,8 +1486,10 @@ class ClaudeAgentService:
                         parts=resolved_user_parts,
                         metadata=message_metadata,
                     )
-                finally:
-                    db.close()
+                )
+            finally:
+                db.close()
+            if is_persisted_dream_confirmation:
                 # The confirmation service owns this pre-persisted hidden row.
                 # In particular, never replace its newer durable claim lease
                 # with the older request snapshot carried through a thread lock.
@@ -1511,12 +1509,17 @@ class ClaudeAgentService:
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(None, _save_user)
+        except StoryWorkspaceDreamConfirmationError:
+            logger.exception(
+                "Rejected non-authoritative Dream confirmation persistence "
+                "for thread_id=%s",
+                thread_id,
+            )
+            raise
         except Exception:
             logger.exception(
                 "Failed to persist user message for thread_id=%s", thread_id
             )
-            if is_persisted_dream_confirmation:
-                raise
 
     async def _persist_partial_assistant(self, execution: "_TurnExecution") -> None:
         """Flush partial assistant content collected so far (called on cancel/error).
