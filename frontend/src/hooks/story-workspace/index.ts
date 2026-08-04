@@ -3,6 +3,19 @@ export { useCharacters } from './useCharacters';
 export { useScenes } from './useScenes';
 export { useWorkspaceSurfaces } from './useWorkspaceSurfaces';
 export {
+  dreamFilesEndpoint,
+  fetchStoryWorkspaceDreamFiles,
+  parseStoryWorkspaceDreamFiles,
+  reduceStoryWorkspaceDreamFilesFetch,
+  shouldInvalidateStoryWorkspaceDreamFiles,
+  shouldPollStoryWorkspaceDreamFiles,
+  useStoryWorkspaceDreamFiles,
+} from './useStoryWorkspaceDreamFiles';
+export type {
+  StoryWorkspaceDreamFilesState,
+  UseStoryWorkspaceDreamFilesOptions,
+} from './useStoryWorkspaceDreamFiles';
+export {
   buildStoryWorkspaceGuidancePayload,
   describeStoryWorkspaceGuidanceResult,
   extractStoryWorkspaceGuidanceHistory,
@@ -24,6 +37,15 @@ export {
 } from './useRunDeepLink';
 export type {
   StoryWorkspaceCharacter,
+  StoryWorkspaceDreamConfirmationCommand,
+  StoryWorkspaceDreamConfirmationEdit,
+  StoryWorkspaceDreamFilesResponse,
+  StoryWorkspaceDreamLifecycleState,
+  StoryWorkspaceDreamSource,
+  StoryWorkspaceDreamStage,
+  StoryWorkspaceDreamStageItem,
+  StoryWorkspaceDreamStagePage,
+  StoryWorkspaceDreamStageProjection,
   StoryWorkspaceExecutionEvent,
   StoryWorkspaceExecutionPageState,
   StoryWorkspaceExecutionProjection,

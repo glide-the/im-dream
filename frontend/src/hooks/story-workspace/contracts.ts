@@ -131,6 +131,63 @@ export interface StoryWorkspaceDreamConfirmationCommand {
   readonly idempotencyKey: string;
 }
 
+/** Frozen WorkflowRun provenance returned by the Dream file read endpoint. */
+export interface StoryWorkspaceDreamSource {
+  readonly deckPluginBindingId: string;
+  readonly bindingRevision: number;
+  readonly deckPluginVersion: string;
+  readonly deckRuntimeSnapshotId: string;
+  readonly runtimePluginLockId: string;
+}
+
+export interface StoryWorkspaceDreamStagePage {
+  readonly title: string;
+  readonly entryRoute: string;
+}
+
+export interface StoryWorkspaceDreamStageItem {
+  readonly entityId: string;
+  readonly displayName: string;
+  readonly summary: string | null;
+  readonly sourceFile: string;
+  readonly relations: readonly string[];
+}
+
+export interface StoryWorkspaceDreamStageProjection {
+  readonly stage: StoryWorkspaceDreamStage;
+  readonly revision: number;
+  readonly sourceFiles: readonly string[];
+  readonly page: StoryWorkspaceDreamStagePage;
+  readonly items: readonly StoryWorkspaceDreamStageItem[];
+}
+
+/**
+ * Response of GET /api/story-workspace/workflow-runs/{runId}/dream-files.
+ * A missing run.json is represented by runRevision=0 and an empty stages map;
+ * it is a normal "waiting for Agent files" projection, not an error state.
+ */
+export interface StoryWorkspaceDreamFilesResponse {
+  readonly storyWorkspaceRunId: string;
+  readonly threadId: string;
+  readonly source: StoryWorkspaceDreamSource;
+  readonly requiredStages: readonly StoryWorkspaceDreamStage[];
+  readonly runRevision: number;
+  readonly stages: Readonly<Partial<Record<
+    StoryWorkspaceDreamStage,
+    StoryWorkspaceDreamStageProjection
+  >>>;
+  readonly canConfirm: boolean;
+  readonly confirmationLabel: '确认并继续';
+}
+
+/** Dream's only page lifecycle; it intentionally has no rejection/failure arm. */
+export type StoryWorkspaceDreamLifecycleState =
+  | 'story-workspace-dream-waiting-files'
+  | 'story-workspace-dream-editing'
+  | 'story-workspace-dream-confirming'
+  | 'story-workspace-dream-continuing'
+  | 'story-workspace-dream-completed';
+
 /**
  * The six Gate / run stages of design_004 §4.2. This value is produced by
  * server-side aggregation ("proposal review status + story-workspace run
