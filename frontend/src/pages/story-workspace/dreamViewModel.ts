@@ -86,8 +86,8 @@ export function storyWorkspaceDreamPersistenceNotice(
   lifecycle: 'continuing' | 'completed',
 ): string {
   if (persistence?.confirmationAccepted && !persistence.confirmationDispatched) {
-    return '命令已保存，等待同一 Agent 接续';
+    return '命令已保存，等待同一 Dream Agent 接续';
   }
-  if (lifecycle === 'completed') return '同一 Chat Agent 已完成后续执行';
-  return '同一 Chat Agent 正在继续';
+  if (lifecycle === 'completed') return '同一 Dream Agent 已完成后续执行';
+  return '同一 Dream Agent 正在继续';
 }

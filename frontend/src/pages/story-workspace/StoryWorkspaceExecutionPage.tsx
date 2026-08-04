@@ -170,10 +170,10 @@ export function StoryWorkspaceExecutionPage({
   }
 
   const agentStateCopy = !files.data.confirmationDispatched
-    ? '命令已保存，等待同一 Agent 接续'
+    ? '命令已保存，等待同一 Dream Agent 接续'
     : currentRun?.status === 'completed'
-      ? '同一 Chat Agent 已完成后续执行'
-      : '同一 Chat Agent 正在继续';
+      ? '同一 Dream Agent 已完成后续执行'
+      : '同一 Dream Agent 正在继续';
   const focusByKey = (key: string | null) => {
     if (key) setFocusKey(key);
   };

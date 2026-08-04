@@ -86,7 +86,7 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
     'story-workspace-dream-editing',
   )).toBe('story-workspace-dream-continuing');
   expect(storyWorkspaceDreamPersistenceNotice(saved, 'continuing')).toBe(
-    '命令已保存，等待同一 Agent 接续',
+    '命令已保存，等待同一 Dream Agent 接续',
   );
   expect(storyWorkspaceDreamLifecycleFromPersistence(
     saved,
@@ -94,12 +94,12 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
     'story-workspace-dream-editing',
   )).toBe('story-workspace-dream-continuing');
   expect(storyWorkspaceDreamPersistenceNotice(saved, 'completed')).toBe(
-    '命令已保存，等待同一 Agent 接续',
+    '命令已保存，等待同一 Dream Agent 接续',
   );
 
   const dispatched = { ...saved, confirmationDispatched: true };
   expect(storyWorkspaceDreamPersistenceNotice(dispatched, 'continuing')).toBe(
-    '同一 Chat Agent 正在继续',
+    '同一 Dream Agent 正在继续',
   );
   expect(storyWorkspaceDreamLifecycleFromPersistence(
     dispatched,
@@ -107,7 +107,7 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
     'story-workspace-dream-editing',
   )).toBe('story-workspace-dream-completed');
   expect(storyWorkspaceDreamPersistenceNotice(dispatched, 'completed')).toBe(
-    '同一 Chat Agent 已完成后续执行',
+    '同一 Dream Agent 已完成后续执行',
   );
 });
 
