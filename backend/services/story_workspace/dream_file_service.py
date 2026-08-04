@@ -135,14 +135,24 @@ def _validate_authoritative_thread(
     workflow_run: WorkflowRun,
     thread_id: str,
 ) -> None:
+    authoritative_thread_id = _authoritative_thread_id(workflow_run)
+    if authoritative_thread_id != thread_id:
+        raise StoryWorkspaceDreamFileError(
+            "thread_id does not match the authoritative WorkflowRun"
+        )
+
+
+def _authoritative_thread_id(workflow_run: WorkflowRun) -> str:
     if not isinstance(workflow_run, WorkflowRun):
         raise StoryWorkspaceDreamFileError(
             "Dream file operations require an authoritative WorkflowRun"
         )
-    if workflow_run.source_voice_thread_id != thread_id:
+    thread_id = workflow_run.source_voice_thread_id
+    if not isinstance(thread_id, str) or not thread_id.strip():
         raise StoryWorkspaceDreamFileError(
-            "thread_id does not match the authoritative WorkflowRun"
+            "authoritative WorkflowRun does not identify a Chat thread"
         )
+    return thread_id
 
 
 def _stage_page(
@@ -588,6 +598,7 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
         filename: str | None = None,
     ) -> StoryWorkspaceDreamStageFile:
         _validate_expected_revision(expected_revision)
+        thread_id = _authoritative_thread_id(workflow_run)
         canonical_stage = _coerce_stage(stage)
         canonical_filename = _STAGE_FILENAMES[canonical_stage]
         if filename is not None and filename != canonical_filename:
@@ -615,7 +626,7 @@ class StoryWorkspaceDreamFileWriter(_StoryWorkspaceDreamFilesystem):
                 run_file,
                 run_id=run_id,
                 source=source,
-                thread_id=None,
+                thread_id=thread_id,
             )
             stages_directory = self._stages_directory(run_directory, create=True)
             current = self._read_model(
@@ -728,10 +739,16 @@ class StoryWorkspaceDreamFileReader(_StoryWorkspaceDreamFilesystem):
         *,
         stage: StoryWorkspaceDreamStage | str,
     ) -> StoryWorkspaceDreamStageFile | None:
+        thread_id = _authoritative_thread_id(workflow_run)
         canonical_stage = _coerce_stage(stage)
         run_id, source = _authoritative_context(workflow_run)
         with self._locked_run(run_id, create=False) as run_directory:
-            self._read_and_validate_run(run_directory, run_id, source, thread_id=None)
+            self._read_and_validate_run(
+                run_directory,
+                run_id,
+                source,
+                thread_id=thread_id,
+            )
             try:
                 stages = self._stages_directory(run_directory, create=False)
             except StoryWorkspaceDreamPathError:

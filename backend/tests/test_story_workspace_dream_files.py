@@ -744,6 +744,76 @@ class StoryWorkspaceDreamFilesTest(unittest.TestCase):
                 thread_id="thread-1",
             )
 
+    def test_all_stage_entrypoints_reject_tampered_run_thread_without_mutation(
+        self,
+    ) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        run_path = self.dream / "runtime" / "runs" / RUN_ID / "run.json"
+        payload = json.loads(run_path.read_text(encoding="utf-8"))
+        payload["thread_id"] = "attacker-thread"
+        run_path.write_text(json.dumps(payload), encoding="utf-8")
+        before = self.tree_snapshot(self.workspace)
+
+        operations = {
+            "read_stage": lambda: self.reader.read_stage(
+                self.run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+            ),
+            "read_stage_file": lambda: self.reader.read_stage_file(
+                self.run,
+                filename="characters.json",
+            ),
+            "write_stage": lambda: self.write_stage(
+                StoryWorkspaceDreamStage.CHARACTERS,
+                "assets/characters/lead.md",
+                expected_revision=1,
+                summary="must-not-land",
+            ),
+        }
+        for name, operation in operations.items():
+            with self.subTest(entrypoint=name):
+                with self.assertRaises(StoryWorkspaceDreamFileError):
+                    operation()
+                self.assertEqual(self.tree_snapshot(self.workspace), before)
+
+    def test_all_stage_entrypoints_reject_authoritative_run_without_thread(
+        self,
+    ) -> None:
+        self.initialize_run()
+        self.write_stage(
+            StoryWorkspaceDreamStage.CHARACTERS,
+            "assets/characters/lead.md",
+        )
+        no_thread_run = authoritative_run(source_voice_thread_id=None)
+        before = self.tree_snapshot(self.workspace)
+
+        operations = {
+            "read_stage": lambda: self.reader.read_stage(
+                no_thread_run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+            ),
+            "read_stage_file": lambda: self.reader.read_stage_file(
+                no_thread_run,
+                filename="characters.json",
+            ),
+            "write_stage": lambda: self.writer.write_stage(
+                no_thread_run,
+                stage=StoryWorkspaceDreamStage.CHARACTERS,
+                source_files=["assets/characters/lead.md"],
+                items=[self.item("assets/characters/lead.md", "must-not-land")],
+                expected_revision=1,
+            ),
+        }
+        for name, operation in operations.items():
+            with self.subTest(entrypoint=name):
+                with self.assertRaises(StoryWorkspaceDreamFileError):
+                    operation()
+                self.assertEqual(self.tree_snapshot(self.workspace), before)
+
 
 if __name__ == "__main__":
     unittest.main()
