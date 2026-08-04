@@ -29,7 +29,10 @@
 #                    current Plan Mode plan per thread (claude-plan §5.5).
 # [Sync] 2026-07-20: add GET /api/claude-agent/threads/{thread_id}/todos —
 #                    current todo list per thread (claude-todo §5.5).
+# [Sync] 2026-08-04: add authenticated GET /threads/{thread_id}/subagents —
+#                    safe projection of Claude Code subagent transcript metadata.
 
+import asyncio
 import base64
 import json
 import logging
@@ -44,6 +47,7 @@ import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
 from claude_agent.service import build_thread_plan_payload, build_thread_todos_payload
+from claude_agent.subagent_projection import build_thread_subagents_payload
 from claude_agent.thread_retrieval import (
     build_chat_thread_search_config,
     is_chat_history_search_requested,
@@ -597,6 +601,24 @@ async def claude_agent_thread_messages(
         raise HTTPException(status_code=404, detail="Thread not found")
     messages = database.list_chat_messages(thread_id)
     return {"thread": thread, "messages": messages}
+
+
+@router.get("/api/claude-agent/threads/{thread_id}/subagents")
+async def claude_agent_thread_subagents(
+    thread_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Return thread-owned subagent tasks without exposing raw transcripts."""
+
+    user_id = current_user["user_id"]
+    thread = database.get_chat_thread(thread_id, user_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return await asyncio.to_thread(
+        build_thread_subagents_payload,
+        thread_id,
+        get_workspace_root(),
+    )
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/stream")

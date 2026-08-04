@@ -67,6 +67,7 @@
 //                    t() and format via getDateLocale(i18n.language).
 // [Sync] 2026-08-03: share button now opens ChatShareDialog (复制链接 placeholder +
 //                    导出图片 long-image export via chat-export-registry + exportThreadImage).
+// [Sync] 2026-08-04: add thread subagent summary entry and mutually-exclusive right sidebar.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -84,6 +85,7 @@ import type { UIMessage } from 'ai';
 import { getAuthToken } from '../../contexts/AuthContext';
 import ChatShellError, { type ChatLandingTab } from './ChatShellError';
 import PlanButton from './PlanPanel';
+import { SubagentButton, SubagentSidebar } from './SubagentPanel';
 import { hydrateThreadPlan } from '../../hooks/useThreadPlan';
 import { hydrateThreadTodos } from '../../hooks/useThreadTodos';
 import QuickActionStrip, { type QuickActionStripItem } from './QuickActionStrip';
@@ -387,6 +389,7 @@ function ChatViewContent({
   const { t, i18n } = useTranslation();
   const { workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
+  const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
@@ -590,6 +593,11 @@ function ChatViewContent({
       setFileSidebarOpen(false);
     }
   }, [workspaceEnabled]);
+
+  useEffect(() => {
+    setFileSidebarOpen(false);
+    setSubagentSidebarOpen(false);
+  }, [activeThreadId]);
 
   // @@@ External navigation: switch to a specific thread when requestedThreadId changes.
   useEffect(() => {
@@ -1000,6 +1008,20 @@ function ChatViewContent({
             {/* claude-plan 计划按钮 – 仅当计划被触发或存在计划文件时渲染；点击切换锚定弹层 */}
             {activeThreadId ? <PlanButton threadId={activeThreadId} /> : null}
 
+            {activeThreadId ? (
+              <SubagentButton
+                threadId={activeThreadId}
+                open={subagentSidebarOpen}
+                onToggle={() => {
+                  setSubagentSidebarOpen((current) => {
+                    const next = !current;
+                    if (next) setFileSidebarOpen(false);
+                    return next;
+                  });
+                }}
+              />
+            ) : null}
+
             {/* 更多 */}
             <div style={{ position: 'relative' }}>
               <button
@@ -1037,7 +1059,14 @@ function ChatViewContent({
                     {workspaceEnabled ? (
                       <button
                         type="button"
-                        onClick={() => { setFileSidebarOpen((v) => !v); setMoreMenuOpen(false); }}
+                        onClick={() => {
+                          setFileSidebarOpen((current) => {
+                            const next = !current;
+                            if (next) setSubagentSidebarOpen(false);
+                            return next;
+                          });
+                          setMoreMenuOpen(false);
+                        }}
                         style={{ width: '100%', height: '2.2rem', border: 'none', borderRadius: '0.55rem', background: fileSidebarOpen ? 'var(--color-bg-surface)' : 'transparent', color: 'var(--color-text-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.6rem', padding: '0 0.65rem', fontSize: '0.83rem', textAlign: 'left' }}
                       >
                         <IconFolder style={{ width: '0.95rem', height: '0.95rem', flexShrink: 0, color: 'var(--color-text-secondary)' }} />
@@ -1526,6 +1555,10 @@ function ChatViewContent({
 
         {workspaceEnabled ? (
           <FileSidebar sessionId={activeThreadId ?? ''} open={fileSidebarOpen} onClose={() => setFileSidebarOpen(false)} />
+        ) : null}
+
+        {activeThreadId ? (
+          <SubagentSidebar threadId={activeThreadId} open={subagentSidebarOpen} onClose={() => setSubagentSidebarOpen(false)} />
         ) : null}
 
         <ChatShareDialog

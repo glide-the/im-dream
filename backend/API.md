@@ -516,6 +516,46 @@ text through the configured Chat history retriever.
 
 ---
 
+### GET `/api/claude-agent/threads/{thread_id}/subagents`
+
+Return the current user's projected Claude Code subagent tasks for one Chat
+thread. The server reads bounded transcript metadata from the server-owned
+workspace and never exposes raw prompts, tool inputs, or internal paths.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response:**
+```json
+{
+  "thread_id": "thread-123",
+  "exists": true,
+  "tasks": [
+    {
+      "task_id": "a1b2c3",
+      "agent_id": "a1b2c3",
+      "agent_type": "quality-reviewer",
+      "description": "Task3 quality review",
+      "summary": "PASS. No new regressions.",
+      "status": "completed",
+      "tool_call_id": "toolu_123",
+      "spawn_depth": 1,
+      "started_at": "2026-08-04T09:00:00Z",
+      "finished_at": "2026-08-04T09:00:10Z",
+      "duration_ms": 10000,
+      "error": null
+    }
+  ],
+  "counts": {"running": 0, "completed": 1, "ended": 0, "total": 1},
+  "updated_at": "2026-08-04T09:00:10Z"
+}
+```
+
+`status` is one of `running`, `completed`, `failed`, or `cancelled`.
+`ended` counts failed and cancelled tasks; it does not inflate the completed count.
+The endpoint returns `404` when the thread does not belong to the current user.
+
+---
+
 ## Pictures
 
 ### GET `/api/pictures`

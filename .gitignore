@@ -47,3 +47,5 @@ output/
 
 vendor/
 marketplaces/
+.codex-pet-runs
+files/

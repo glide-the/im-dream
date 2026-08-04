@@ -187,6 +187,42 @@ class _StoryWorkspaceDreamWireModel(BaseModel):
     )
 
 
+class StoryWorkspaceDreamLaunchCommand(_StoryWorkspaceDreamWireModel):
+    """The complete untrusted request surface for starting a Dream run."""
+
+    deck_id: str = Field(min_length=1, max_length=255)
+    goal: str = Field(min_length=1, max_length=12000)
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+
+
+class StoryWorkspaceDreamRunContext(BaseModel):
+    """Server-derived provenance injected into one Dream Agent turn.
+
+    This is an internal trust-boundary contract, not a client-authored request.
+    Every field is frozen from the authoritative run and its Deck binding.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        str_strip_whitespace=True,
+    )
+
+    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    thread_id: str = Field(min_length=1, max_length=255)
+    deck_id: str = Field(min_length=1, max_length=255)
+    deck_plugin_id: str = Field(min_length=1, max_length=255)
+    deck_plugin_version: str = Field(min_length=1, max_length=255)
+    deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
+    binding_revision: _StoryWorkspaceDreamPositiveInt
+    deck_runtime_snapshot_id: str = Field(min_length=1, max_length=255)
+    runtime_plugin_lock_id: str = Field(min_length=1, max_length=255)
+
+
 class StoryWorkspaceDreamToolInput(BaseModel):
     """Canonical base for Agent-visible Dream MCP input contracts."""
 

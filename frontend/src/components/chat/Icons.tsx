@@ -10,6 +10,7 @@
 //                    文字经悬浮 tooltip 展示（claude-todo §5.6 交互修订）。
 // [Sync] 2026-07-26: add shared IconCopy (lifted from AssistMessagePart) so user and
 //                    assistant message bubbles reuse the same copy affordance.
+// [Sync] 2026-08-04: add IconSubagents for thread subagent task summaries/details.
 import type { CSSProperties, ReactNode } from 'react';
 
 type IconProps = { className?: string; style?: CSSProperties };
@@ -41,6 +42,18 @@ export const IconSparkles = createIcon('0 0 24 24', <>
 </>);
 export const IconSearch = createIcon('0 0 24 24', <><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></>);
 export const IconUsers = createIcon('0 0 24 24', <><path d="M16 11c1.7 0 3-1.6 3-3.5S17.7 4 16 4s-3 1.6-3 3.5S14.3 11 16 11z" /><path d="M8 12c2.2 0 4-1.8 4-4S10.2 4 8 4 4 5.8 4 8s1.8 4 4 4z" /><path d="M2 20c0-2.2 2.5-4 5.5-4h1" /><path d="M13 16h1.5c3 0 5.5 1.8 5.5 4" /></>);
+export const IconSubagents = createIcon('0 0 24 24', <>
+  <rect x="5" y="7" width="14" height="11" rx="4" />
+  <path d="M12 3v4" />
+  <circle cx="12" cy="3" r="1" />
+  <circle cx="9" cy="12" r="1" />
+  <circle cx="15" cy="12" r="1" />
+  <path d="M9 15h6" />
+  <path d="M5 11H3v4h2" />
+  <path d="M19 11h2v4h-2" />
+  <path d="M8 18v3" />
+  <path d="M16 18v3" />
+</>);
 export const IconChecklist = createIcon('0 0 24 24', <><path d="M9 6h11" /><path d="M9 12h11" /><path d="M9 18h11" /><path d="M4 6l1.5 1.5L7 6" /><path d="M4 12l1.5 1.5L7 12" /><circle cx="5.5" cy="18" r="1" /></>);
 export const IconUser = createIcon('0 0 24 24', <><circle cx="12" cy="8" r="4" /><path d="M4 20c1.6-3 4.5-5 8-5s6.4 2 8 5" /></>);
 export const IconChevronRight = createIcon('0 0 24 24', <path d="M9 6l6 6-6 6" />);

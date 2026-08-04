@@ -451,6 +451,29 @@ const resources = {
           planTitle: 'Plan',
           todosTitle: 'To-dos'
         },
+        subagents: {
+          title: 'Subagents',
+          buttonAria: 'Subagent tasks: {{summary}}',
+          runningSummary: '{{running}} running · {{completed}} completed',
+          completedSummary: '{{count}} completed',
+          taskSummary: '{{count}} tasks',
+          activeTitle: 'Active',
+          noActive: 'No active subagents',
+          completedTitle: 'Completed · {{count}}',
+          endedTitle: 'Ended · {{count}}',
+          empty: 'This conversation has no subagent tasks yet.',
+          loading: 'Restoring subagent tasks…',
+          refresh: 'Refresh tasks',
+          retry: 'Retry',
+          unavailable: 'Could not refresh subagent tasks.',
+          noSummary: 'No task summary',
+          status: {
+            running: 'Running',
+            completed: 'Completed',
+            failed: 'Failed',
+            cancelled: 'Cancelled'
+          }
+        },
         mermaid: {
           renderFailed: 'Mermaid · render failed',
           rendering: 'Mermaid · rendering…',
@@ -964,6 +987,29 @@ const resources = {
           tooltip: '计划与待办',
           planTitle: '计划',
           todosTitle: '待办'
+        },
+        subagents: {
+          title: '子智能体',
+          buttonAria: '子智能体任务：{{summary}}',
+          runningSummary: '{{running}} 运行中 · {{completed}} 完成',
+          completedSummary: '{{count}} 完成',
+          taskSummary: '{{count}} 个任务',
+          activeTitle: '已开启',
+          noActive: '没有已开启的子智能体',
+          completedTitle: '完成 · {{count}}',
+          endedTitle: '已结束 · {{count}}',
+          empty: '此会话还没有子智能体任务。',
+          loading: '正在恢复子智能体任务…',
+          refresh: '刷新任务',
+          retry: '重试',
+          unavailable: '无法刷新子智能体任务。',
+          noSummary: '暂无任务摘要',
+          status: {
+            running: '运行中',
+            completed: '已完成',
+            failed: '失败',
+            cancelled: '已取消'
+          }
         },
         mermaid: {
           renderFailed: 'Mermaid · 渲染失败',
