@@ -1,11 +1,9 @@
 // [Input] Server-aggregated surface link state + workspace surfaces (Task 2).
-// [Output] Pure resolution seams for the Dream surface jump link: label table,
-//          deep-link builders, visibility/supersede resolution (design_004 §4).
+// [Output] Pure Dream lifecycle jump links and deep-link builders.
 // [Pos] Story Workspace dream-surface link seams (Task 4); the component in
 //       StoryWorkspaceSurfaceLinkButton.tsx is a thin JSX wrapper over these.
-// [Sync] 2026-08-04: initial implementation. Six-stage labels come from
-//                    server-aggregated props only — the frontend never infers
-//                    stage; missing aggregation keeps the link hidden.
+// [Sync] 2026-08-04: design_007 revision exposes only edit/continue/content
+//                    lifecycle links; legacy aggregate branches stay hidden.
 
 import type {
   StoryWorkspaceSurface,
@@ -42,19 +40,18 @@ export interface StoryWorkspaceSurfaceLinkButtonProps {
 }
 
 /**
- * Stage → label/target mapping, verbatim from design_004 §4.2. `review`
- * targets the review deep link, `execution` the execution page deep link.
+ * Displayable stage → target mapping. The wider aggregate contract remains
+ * accepted at the boundary, but only design_007 lifecycle bridge stages have
+ * labels and therefore enter Dream UI.
  */
-export const SURFACE_LINK_LABELS: Record<
+export const SURFACE_LINK_LABELS: Partial<Record<
   StoryWorkspaceSurfaceLinkStage,
   { label: string; target: 'review' | 'execution' }
-> = {
-  pending_review: { label: '前往 Dream 审阅', target: 'review' },
+>> = {
+  pending_review: { label: '打开 Dream 修改', target: 'review' },
   confirmed: { label: '进入后续执行', target: 'execution' },
-  continuing: { label: '查看执行进度', target: 'execution' },
-  completed: { label: '查看执行结果', target: 'execution' },
-  failed: { label: '查看失败详情', target: 'execution' },
-  rejected: { label: '查看审阅记录', target: 'review' },
+  continuing: { label: '查看执行内容', target: 'execution' },
+  completed: { label: '查看最新内容', target: 'execution' },
 };
 
 /**
@@ -81,9 +78,9 @@ export function storyWorkspaceExecutionDeepLink(runId: string): string {
 /**
  * Resolve the link model from server-aggregated props. Returns undefined
  * (hidden) unless every §4.1 visibility condition holds: dream surface
- * present, runId bound, aggregated state available. Superseded proposals
- * degrade to 查看最新版本 (latest run review deep link) with a 查看运行记录
- * companion link for the stale run (§4.1/§4.4).
+ * present, runId bound, aggregated state available and its stage belongs to
+ * the four displayable design_007 lifecycle bridges. Replaced attempts and
+ * legacy aggregate branches remain hidden instead of creating a parallel UI.
  */
 export function resolveStoryWorkspaceSurfaceLink(
   props: StoryWorkspaceSurfaceLinkButtonProps,
@@ -92,28 +89,10 @@ export function resolveStoryWorkspaceSurfaceLink(
   const { runId, episodeId, state } = props;
   if (!dreamSurface || !runId || !state) return undefined;
 
-  if (state.superseded) {
-    const runRecords: StoryWorkspaceSurfaceLinkTarget = {
-      label: '查看运行记录',
-      href: storyWorkspaceExecutionDeepLink(runId),
-    };
-    if (state.latestRunId && state.latestRunId !== runId) {
-      return {
-        primary: {
-          label: '查看最新版本',
-          href: storyWorkspaceReviewDeepLink(
-            state.latestRunId,
-            episodeId,
-            dreamSurface.entry_route,
-          ),
-        },
-        secondary: runRecords,
-      };
-    }
-    return { primary: runRecords };
-  }
+  if (state.superseded) return undefined;
 
   const spec = SURFACE_LINK_LABELS[state.stage];
+  if (!spec) return undefined;
   const href = spec.target === 'execution'
     ? storyWorkspaceExecutionDeepLink(runId)
     : storyWorkspaceReviewDeepLink(runId, episodeId, dreamSurface.entry_route);

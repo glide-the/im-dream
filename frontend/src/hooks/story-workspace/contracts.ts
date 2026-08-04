@@ -200,9 +200,9 @@ export type StoryWorkspaceDreamLifecycleState =
   | 'story-workspace-dream-completed';
 
 /**
- * The six Gate / run stages of design_004 §4.2. This value is produced by
- * server-side aggregation ("proposal review status + story-workspace run
- * status"); the frontend must never derive it from local data.
+ * Server aggregate compatibility stages. The Dream UI exposes lifecycle
+ * links for pending_review/confirmed/continuing/completed only; the two
+ * legacy branches remain accepted as transport values but render no action.
  */
 export type StoryWorkspaceSurfaceLinkStage =
   | 'pending_review'
@@ -213,10 +213,9 @@ export type StoryWorkspaceSurfaceLinkStage =
   | 'rejected';
 
 /**
- * Server-aggregated button state for StoryWorkspaceSurfaceLinkButton
- * (design_004 §4.1). `superseded` marks a proposal whose attempt was replaced
- * by a newer run (retryOfRunId chain); `latestRunId` points at that newest
- * run for the "查看最新版本" degradation target (§4.4).
+ * Server-aggregated button state for StoryWorkspaceSurfaceLinkButton.
+ * Replaced-attempt fields remain for compatibility and intentionally resolve
+ * to a hidden Dream entry under design_007.
  */
 export interface StoryWorkspaceSurfaceLinkState {
   stage: StoryWorkspaceSurfaceLinkStage;

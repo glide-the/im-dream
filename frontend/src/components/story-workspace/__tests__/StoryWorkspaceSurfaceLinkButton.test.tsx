@@ -1,8 +1,7 @@
 // [Input] Synthetic surface link props (Playwright node-side runner; component
 //          render smoke via react-dom/server).
-// [Output] Contract tests for StoryWorkspaceSurfaceLinkButton: six-stage
-//          labels/targets from server-aggregated props, visibility conditions,
-//          supersede degradation (design_004 §4.1/§4.2/§4.4).
+// [Output] Contract tests for StoryWorkspaceSurfaceLinkButton: the four Dream
+//          lifecycle bridge stages plus hidden legacy aggregate states.
 // [Pos] story-workspace surface link test node (Task 4 Step 1)
 // [Sync] 2026-08-04: initial coverage - resolution seam + render smoke.
 
@@ -37,17 +36,15 @@ function props(overrides: Partial<StoryWorkspaceSurfaceLinkButtonProps> = {}): S
 }
 
 const STAGE_CASES: Array<[StoryWorkspaceSurfaceLinkStage, string, string]> = [
-  ['pending_review', '前往 Dream 审阅', '/story-workspace/episodes/ep1/review?run=r1'],
+  ['pending_review', '打开 Dream 修改', '/story-workspace/episodes/ep1/review?run=r1'],
   ['confirmed', '进入后续执行', '/story-workspace/runs/r1/execution'],
-  ['continuing', '查看执行进度', '/story-workspace/runs/r1/execution'],
-  ['completed', '查看执行结果', '/story-workspace/runs/r1/execution'],
-  ['failed', '查看失败详情', '/story-workspace/runs/r1/execution'],
-  ['rejected', '查看审阅记录', '/story-workspace/episodes/ep1/review?run=r1'],
+  ['continuing', '查看执行内容', '/story-workspace/runs/r1/execution'],
+  ['completed', '查看最新内容', '/story-workspace/runs/r1/execution'],
 ];
 
-test('label table covers exactly the six design_004 §4.2 stages', () => {
+test('label table exposes only the four design_007 lifecycle bridge stages', () => {
   expect(Object.keys(SURFACE_LINK_LABELS).sort()).toEqual([
-    'completed', 'confirmed', 'continuing', 'failed', 'pending_review', 'rejected',
+    'completed', 'confirmed', 'continuing', 'pending_review',
   ]);
 });
 
@@ -91,30 +88,20 @@ test('hidden when the resource is not bound to a run or aggregation is absent', 
   expect(resolveStoryWorkspaceSurfaceLink(props({ state: undefined }))).toBeUndefined();
 });
 
-test('superseded proposal degrades to 查看最新版本 + 查看运行记录', () => {
-  const model = resolveStoryWorkspaceSurfaceLink(props({
+test('legacy aggregate branches and replaced attempts stay outside Dream UI', () => {
+  expect(resolveStoryWorkspaceSurfaceLink(props({ state: { stage: 'failed' } })))
+    .toBeUndefined();
+  expect(resolveStoryWorkspaceSurfaceLink(props({ state: { stage: 'rejected' } })))
+    .toBeUndefined();
+  expect(resolveStoryWorkspaceSurfaceLink(props({
     state: { stage: 'pending_review', superseded: true, latestRunId: 'r2' },
-  }));
-  expect(model).toEqual({
-    primary: { label: '查看最新版本', href: '/story-workspace/episodes/ep1/review?run=r2' },
-    secondary: { label: '查看运行记录', href: '/story-workspace/runs/r1/execution' },
-  });
-});
-
-test('superseded without a latest run keeps only 查看运行记录', () => {
-  const model = resolveStoryWorkspaceSurfaceLink(props({
+  }))).toBeUndefined();
+  expect(resolveStoryWorkspaceSurfaceLink(props({
     state: { stage: 'pending_review', superseded: true },
-  }));
-  expect(model).toEqual({
-    primary: { label: '查看运行记录', href: '/story-workspace/runs/r1/execution' },
-  });
-
-  const selfRetry = resolveStoryWorkspaceSurfaceLink(props({
+  }))).toBeUndefined();
+  expect(resolveStoryWorkspaceSurfaceLink(props({
     state: { stage: 'pending_review', superseded: true, latestRunId: 'r1' },
-  }));
-  expect(selfRetry).toEqual({
-    primary: { label: '查看运行记录', href: '/story-workspace/runs/r1/execution' },
-  });
+  }))).toBeUndefined();
 });
 
 test('component renders content when visible and null when hidden', () => {
@@ -124,7 +111,7 @@ test('component renders content when visible and null when hidden', () => {
   expect(StoryWorkspaceSurfaceLinkButton(props({ state: { stage: 'confirmed' } }))).not.toBeNull();
   expect(StoryWorkspaceSurfaceLinkButton(props({
     state: { stage: 'pending_review', superseded: true, latestRunId: 'r2' },
-  }))).not.toBeNull();
+  }))).toBeNull();
   expect(StoryWorkspaceSurfaceLinkButton(props({ surfaces: undefined }))).toBeNull();
   expect(StoryWorkspaceSurfaceLinkButton(props({ state: null }))).toBeNull();
 });
