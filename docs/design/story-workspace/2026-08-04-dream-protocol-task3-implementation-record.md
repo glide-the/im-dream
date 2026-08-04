@@ -313,3 +313,50 @@ Dream 后续执行页已替换旧五态/指导侧栏实现，改为：
 8. `docs/design/story-workspace/2026-08-04-dream-protocol-task2-review-revision-implementation-record.md`。
 
 任务三新增本实施记录。没有执行文档归档。
+
+## 9. 真实交互故障修复：Agent 错误不再表现为空回复
+
+### 9.1 复现与根因
+
+真实操作链为：选择带 `drama-forge@drama-studio` 的 Introspection Deck / The Holder，创建对话并发送普通消息或 `/drama-forge:drama-init`。Deck 绑定、会话打包收据和插件 Skill 均正常；故障时 Claude 原始会话返回 `AssistantMessage.error = authentication_failed`，provider 文本为 HTTP 403 与计费周期额度耗尽。
+
+旧 runner 只处理 `AssistantMessage.content`，没有裁决 `AssistantMessage.error`。在 `include_partial_messages=true` 时，完整 text snapshot 又按去重规则跳过；SDK 没有抛异常时 `success` 因而保持 `true`，service 最终持久化空 assistant parts。该问题与 slash command 解析及 `.dream` 写入无关，发生在 Agent 推理入口。
+
+### 9.2 Red → Green 与提交
+
+| 阶段 | 证据 |
+|---|---|
+| Red 1 | `test_assistant_message_error_sets_success_false` 失败：实际 `success=true`、无 error callback |
+| Green 1 | `33ec809 fix(agent): surface assistant message errors`：typed error 进入既有 `AgentRunResult(success=false)` / SSE error 通道 |
+| 独立评审 1 | **FAIL**：runner callback 与 service result 分支会对同一失败各发送一次 SSE `error` |
+| Red 2 | service 测试期望 1 个 `error`，实际 2 个；runner 异常仅含 `authentication_failed`，缺少 provider 的 `403 usage limit` 详情 |
+| Green 2 | `4309845 fix(agent): deduplicate terminal error events`：单 turn error 幂等门闩；提取并限制为 4096 字符的 provider detail |
+| 独立评审 2 | **PASS**：严格 `1 error + 1 finish(error) + 1 sentinel`，正常/partial stream 未回归 |
+
+变更文件：
+
+- `backend/libs/claude_agent_kit/server/agent_runner.py`：识别 typed AssistantMessage error，并保留 provider detail；
+- `backend/claude_agent/service.py`：单 turn SSE error 幂等发送；
+- `backend/tests/test_claude_agent_runner.py`：typed error 与 provider detail 回归；
+- `backend/tests/test_claude_agent_service.py`：终止帧数量与顺序回归。
+
+### 9.3 DeepSeek 切换与真实验证
+
+本机忽略文件 `backend/.env` 已从 Kimi 配置切换到仓库中原有的 DeepSeek Anthropic-compatible 配置；密钥未写入提交。后端已重启，`GET /api/health` 返回 `status=ok`。
+
+真实 Claude SDK 探针：
+
+- 普通消息 `Reply with exactly: DEEPSEEK_OK`：`success=true`、文本为 `DEEPSEEK_OK`、无 callback error；
+- 在真实 Deck 会话工作空间发送 `/drama-forge:drama-init`：`success=true`，成功加载 `drama-init`，检查 28 个题材模板并进入 Step 1 选题问答；
+- 说明：`drama-init` 在用户继续回答并确认前不会生成完整项目文件或进入 Dream 页面阶段，这是插件既有 Ask→Options→Decide→Draft→Approve 行为。
+
+### 9.4 最终验证
+
+| 验证 | 结果 |
+|---|---|
+| runner + service 全文件 | **103 passed, 1 skipped, 94 subtests passed** |
+| 独立复审扩展集合 | **149 passed, 1 skipped, 94 subtests passed** |
+| `cd backend && .venv/bin/python -m pytest -q tests` | **878 passed, 1 skipped, 16 warnings, 412 subtests passed，49.68s** |
+| `git diff --check` | **exit 0** |
+
+从 `backend/` 裸跑不带路径的 `pytest` 会继续递归收集 `data/agent-workspace/*/skills/**/tests`，产生同名 `test_basic` import mismatch；本仓库全量回归口径必须显式指定 `tests`。该收集噪声与本次改动无关，未删除任何会话工作空间或运行数据。
