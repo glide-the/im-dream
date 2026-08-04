@@ -725,7 +725,9 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
     """Errors from the SDK are caught and reported via on_error."""
 
     async def test_assistant_message_error_sets_success_false(self):
-        assistant_error = AssistantMessage([])
+        assistant_error = AssistantMessage(
+            [_text_block("API Error: 403 usage limit exceeded for this account")]
+        )
         assistant_error.error = "authentication_failed"
         self.set_query([assistant_error])
         runner = self.make_runner()
@@ -747,6 +749,7 @@ class TestClaudeAgentRunnerErrorHandling(_RunnerBase):
         self.assertFalse(result.success)
         self.assertIsNotNone(result.error)
         self.assertIn("authentication_failed", str(result.error))
+        self.assertIn("403 usage limit exceeded", str(result.error))
         self.assertEqual(errors, [result.error])
         self.assertEqual(result.full_text, "")
 

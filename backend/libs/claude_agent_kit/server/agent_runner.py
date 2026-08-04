@@ -1840,6 +1840,19 @@ def _block_type(block: Any) -> Optional[str]:
     return None
 
 
+def _assistant_message_error_detail(message: AssistantMessage) -> str:
+    """Extract the provider's human-readable detail from a terminal error."""
+
+    text_parts: list[str] = []
+    for block in getattr(message, "content", None) or []:
+        if _block_type(block) != "text":
+            continue
+        text = _block_value(block, "text", "")
+        if isinstance(text, str) and text.strip():
+            text_parts.append(text.strip())
+    return "\n".join(text_parts)[:4096]
+
+
 def _maybe_json(value: str) -> Any:
     text = str(value or "").strip()
     if not text:
@@ -2635,9 +2648,16 @@ class ClaudeAgentRunner:
                 if isinstance(message, AssistantMessage):
                     assistant_error = getattr(message, "error", None)
                     if assistant_error:
+                        provider_detail = _assistant_message_error_detail(message)
+                        detail_suffix = (
+                            f" | provider_detail: {provider_detail}"
+                            if provider_detail
+                            else ""
+                        )
                         raise RuntimeError(
                             "Claude SDK AssistantMessage error: "
                             f"{str(assistant_error).strip() or 'unknown'}"
+                            f"{detail_suffix}"
                         )
 
                 # Route to typed handler

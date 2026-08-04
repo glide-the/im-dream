@@ -1287,6 +1287,16 @@ class ClaudeAgentService:
             _sse("message-metadata", {"sessionId": execution.state.session_id, "turnIndex": execution.state.turn_count})
         )
 
+        error_event_emitted = False
+        emit_error = self._make_error_cb(queue)
+
+        async def on_error(exc: Exception) -> None:
+            nonlocal error_event_emitted
+            if error_event_emitted:
+                return
+            error_event_emitted = True
+            await emit_error(exc)
+
         callbacks = AgentStreamingCallbacks(
             on_text_delta=self._make_text_delta_cb(queue, execution.turn_context),
             on_text_done=self._make_text_done_cb(queue, execution.turn_context),
@@ -1294,7 +1304,7 @@ class ClaudeAgentService:
                 queue, execution.turn_context, execution.state
             ),
             on_tool_confirmation_request=self._make_tool_confirm_cb(queue, store, execution.turn_context),
-            on_error=self._make_error_cb(queue),
+            on_error=on_error,
             on_plan_file_changed=self._make_plan_file_changed_cb(queue, execution.state),
             on_tasks_changed=self._make_tasks_changed_cb(queue, execution.state),
         )
@@ -1329,7 +1339,9 @@ class ClaudeAgentService:
             await queue.put(_sse("finish", {"finishReason": "stop"}))
         else:
             error_msg = _format_exception_for_sse(result.error)
-            await queue.put(_sse("error", {"errorText": error_msg}))
+            if not error_event_emitted:
+                error_event_emitted = True
+                await queue.put(_sse("error", {"errorText": error_msg}))
             await queue.put(_sse("finish", {"finishReason": "error"}))
             # Even on error, flush whatever partial assistant content was collected.
             await self._persist_partial_assistant(execution)

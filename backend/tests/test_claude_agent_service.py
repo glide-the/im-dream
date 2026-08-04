@@ -45,7 +45,7 @@ import claude_agent.workspace_context as workspace_context_module
 from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService, _TurnContext
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
-from libs.claude_agent_kit.types import ToolEventPayload
+from libs.claude_agent_kit.types import AgentRunResult, ToolEventPayload
 
 
 class _FakeContextBuilder:
@@ -595,6 +595,80 @@ class TestClaudeAgentServiceStopCancellation(unittest.TestCase):
 
 
 class TestClaudeAgentServiceErrorFormatting(unittest.TestCase):
+    def test_execute_session_emits_one_error_when_runner_also_calls_on_error(self):
+        async def scenario():
+            service = ClaudeAgentService()
+            queue: asyncio.Queue[str | None] = asyncio.Queue()
+            turn_ctx = _TurnContext(
+                queue=queue,
+                confirmation_store=ToolConfirmationStore(),
+            )
+            state = AgentRunState(session_id="thread-error-service")
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id="thread-error-service",
+                message_parts=[{"type": "text", "text": "hello"}],
+            )
+
+            class _CallbackAndResultErrorRunner:
+                async def run_streaming(self, opts, callbacks):
+                    del opts
+                    error = RuntimeError(
+                        "Claude SDK AssistantMessage error: authentication_failed "
+                        "| provider_detail: 403 usage limit exceeded"
+                    )
+                    await callbacks.on_error(error)
+                    return AgentRunResult(
+                        full_text="",
+                        session_id=None,
+                        success=False,
+                        error=error,
+                    )
+
+            execution = service_module._TurnExecution(
+                request=request,
+                state=state,
+                runner=_CallbackAndResultErrorRunner(),
+                run_options=unittest.mock.Mock(),
+                turn_context=turn_ctx,
+            )
+
+            with (
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_user_message",
+                    new=unittest.mock.AsyncMock(),
+                ),
+                unittest.mock.patch.object(
+                    service,
+                    "_persist_partial_assistant",
+                    new=unittest.mock.AsyncMock(),
+                ),
+            ):
+                await service.execute_session(execution)
+
+            frames: list[str | None] = []
+            while not queue.empty():
+                frames.append(queue.get_nowait())
+            return frames
+
+        frames = _run(scenario())
+        parsed_frames = [_parse_sse(frame) for frame in frames if frame is not None]
+
+        self.assertEqual(
+            sum(frame["type"] == "error" for frame in parsed_frames),
+            1,
+        )
+        self.assertEqual(
+            sum(
+                frame["type"] == "finish" and frame["finishReason"] == "error"
+                for frame in parsed_frames
+            ),
+            1,
+        )
+        self.assertEqual(sum(frame is None for frame in frames), 1)
+        self.assertIsNone(frames[-1])
+
     def test_make_error_cb_includes_exception_notes(self):
         async def scenario():
             queue: asyncio.Queue[str] = asyncio.Queue()
