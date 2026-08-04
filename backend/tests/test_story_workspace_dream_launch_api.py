@@ -247,6 +247,35 @@ class RecordingTurnDispatcher:
         return True
 
 
+class DeferredMetadataPersistenceTurnDispatcher:
+    """Model the Agent service persisting its accepted request a tick later."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+        self.tasks: list[asyncio.Task[None]] = []
+
+    def __call__(self, **values: object) -> asyncio.Task[None]:
+        self.calls.append(values)
+        message_id = str(values["message_id"])
+        metadata = json.loads(json.dumps(values["metadata"]))
+
+        async def persist_later() -> None:
+            await asyncio.sleep(0)
+            db = database.get_db()
+            try:
+                with db:
+                    db.execute(
+                        "UPDATE chat_message SET metadata = ? WHERE id = ?",
+                        (json.dumps(metadata, sort_keys=True), message_id),
+                    )
+            finally:
+                db.close()
+
+        task = asyncio.create_task(persist_later())
+        self.tasks.append(task)
+        return task
+
+
 class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -561,6 +590,20 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         await self.start(launch_command())
 
         self.assertEqual(len(self.turn_dispatcher.calls), 1)
+        metadata = self._read_source_metadata()
+        self.assertEqual(metadata["dispatchStatus"], "dispatched")
+        self.assertNotIn("dispatchClaimId", metadata)
+        self.assertNotIn("dispatchClaimedAt", metadata)
+
+    async def test_agent_metadata_persistence_cannot_restore_dispatch_claim(
+        self,
+    ) -> None:
+        deferred_dispatcher = DeferredMetadataPersistenceTurnDispatcher()
+        self.turn_dispatcher = deferred_dispatcher
+
+        await self.start(launch_command())
+        await asyncio.gather(*deferred_dispatcher.tasks)
+
         metadata = self._read_source_metadata()
         self.assertEqual(metadata["dispatchStatus"], "dispatched")
         self.assertNotIn("dispatchClaimId", metadata)

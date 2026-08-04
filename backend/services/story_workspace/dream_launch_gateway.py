@@ -775,13 +775,17 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
                 self.db.rollback()
             raise
 
+        agent_metadata = dict(metadata)
+        agent_metadata["dispatchStatus"] = "dispatched"
+        agent_metadata.pop("dispatchClaimId", None)
+        agent_metadata.pop("dispatchClaimedAt", None)
         try:
             accepted = self._turn_dispatcher(
                 actor_id=actor_id,
                 thread_id=source.thread_id,
                 message_id=source.message_id,
                 parts=parts,
-                metadata=metadata,
+                metadata=agent_metadata,
                 context=context,
                 resume=False,
             )
