@@ -190,6 +190,16 @@ class _StoryWorkspaceDreamWireModel(BaseModel):
 class StoryWorkspaceDreamLaunchCommand(_StoryWorkspaceDreamWireModel):
     """The complete untrusted request surface for starting a Dream run."""
 
+    model_config = ConfigDict(
+        alias_generator=_story_workspace_to_camel,
+        extra="forbid",
+        frozen=True,
+        populate_by_name=False,
+        str_strip_whitespace=False,
+        validate_by_alias=True,
+        validate_by_name=False,
+    )
+
     deck_id: str = Field(min_length=1, max_length=255)
     goal: str = Field(min_length=1, max_length=12000)
     idempotency_key: str = Field(
@@ -197,6 +207,13 @@ class StoryWorkspaceDreamLaunchCommand(_StoryWorkspaceDreamWireModel):
         max_length=255,
         pattern=r"^[A-Za-z0-9._:-]+$",
     )
+
+    @field_validator("deck_id", "goal", "idempotency_key")
+    @classmethod
+    def launch_values_have_no_boundary_whitespace(cls, value: str) -> str:
+        if value != value.strip():
+            raise ValueError("Dream launch fields must not contain boundary whitespace")
+        return value
 
 
 class StoryWorkspaceDreamRunContext(BaseModel):

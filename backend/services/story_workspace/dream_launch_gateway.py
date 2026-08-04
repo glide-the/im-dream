@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import os
@@ -34,7 +34,10 @@ try:
         seed_builtin_deck_plugin,
     )
     from services.deck.runtime_context import make_runtime_context_resolver
-    from services.deck_plugin.binding_service import BindingService
+    from services.deck_plugin.binding_service import (
+        BindingRevisionConflict,
+        BindingService,
+    )
     from services.deck_plugin.installation_service import (
         InstallationService,
         InstallationServiceError,
@@ -73,7 +76,10 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         seed_builtin_deck_plugin,
     )
     from backend.services.deck.runtime_context import make_runtime_context_resolver
-    from backend.services.deck_plugin.binding_service import BindingService
+    from backend.services.deck_plugin.binding_service import (
+        BindingRevisionConflict,
+        BindingService,
+    )
     from backend.services.deck_plugin.installation_service import (
         InstallationService,
         InstallationServiceError,
@@ -104,6 +110,7 @@ STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND = "story-workspace-dream-launch"
 STORY_WORKSPACE_DREAM_ADAPTER_PACKAGE_SPEC = (
     "ink-dream-story@platform-builtin"
 )
+STORY_WORKSPACE_DREAM_DISPATCH_CLAIM_TTL = timedelta(minutes=5)
 
 
 class StoryWorkspaceDreamLaunchGatewayError(RuntimeError):
@@ -299,7 +306,6 @@ class StoryWorkspaceDreamLaunchSourceStore:
         scope_matches = (
             row["thread_id"] == thread_id
             and int(row["user_id"]) == actor_id
-            and row["deck_id"] == deck_id
             and row["role"] == "user"
             and metadata.get("kind")
             == STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND
@@ -307,7 +313,11 @@ class StoryWorkspaceDreamLaunchSourceStore:
         )
         if not scope_matches:
             raise PermissionError("Dream launch source scope mismatch")
-        if metadata.get("requestFingerprint") != request_fingerprint:
+        if (
+            row["deck_id"] != deck_id
+            or metadata.get("deckId") != deck_id
+            or metadata.get("requestFingerprint") != request_fingerprint
+        ):
             raise StoryWorkspaceDreamLaunchIdempotencyConflict()
 
 
@@ -568,46 +578,83 @@ class StoryWorkspaceDreamLaunchProvisioner:
         actor_id: str,
         workspace_id: str,
     ) -> StoryWorkspaceDreamLaunchBinding:
-        current = self.db.execute(
-            "SELECT * FROM deck_plugin_bindings "
-            "WHERE deck_id = ? AND status = 'active'",
-            (deck_id,),
-        ).fetchone()
-        if (
-            current is not None
-            and current["deck_plugin_id"] == BUILTIN_DECK_PLUGIN_ID
-            and current["deck_plugin_version"] == BUILTIN_DECK_PLUGIN_VERSION
-            and current["workspace_id"] == workspace_id
-            and current["creator_id"] == actor_id
-        ):
-            return StoryWorkspaceDreamLaunchBinding(
-                deck_plugin_id=current["deck_plugin_id"],
-                deck_plugin_version=current["deck_plugin_version"],
-                deck_plugin_binding_id=current["deck_plugin_binding_id"],
-                binding_revision=int(current["binding_revision"]),
-            )
-        revision = int(current["binding_revision"]) if current is not None else 0
         validator = SelectionValidationService(
             self.db,
             runtime_context_resolver=make_runtime_context_resolver(self.db),
         )
-        service = BindingService(self.db, selection_validator=validator)
-        response = await service.save(
-            deck_id=deck_id,
-            actor_id=actor_id,
-            requested_workspace_id=workspace_id,
-            request=DeckPluginBindingUpdateRequest(
-                deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
-                deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
-                expected_binding_revision=revision,
-                apply_to="next_run",
-            ),
-        )
+        for attempt in range(2):
+            current = self._active_binding_row(deck_id)
+            existing = self._expected_builtin_binding(
+                current,
+                actor_id=actor_id,
+                workspace_id=workspace_id,
+            )
+            if existing is not None:
+                return existing
+            revision = (
+                int(current["binding_revision"]) if current is not None else 0
+            )
+            service = BindingService(self.db, selection_validator=validator)
+            try:
+                response = await service.save(
+                    deck_id=deck_id,
+                    actor_id=actor_id,
+                    requested_workspace_id=workspace_id,
+                    request=DeckPluginBindingUpdateRequest(
+                        deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
+                        deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
+                        expected_binding_revision=revision,
+                        apply_to="next_run",
+                    ),
+                )
+            except BindingRevisionConflict as exc:
+                winner = self._expected_builtin_binding(
+                    self._active_binding_row(deck_id),
+                    actor_id=actor_id,
+                    workspace_id=workspace_id,
+                )
+                if winner is not None:
+                    return winner
+                if attempt == 0:
+                    continue
+                raise StoryWorkspaceDreamLaunchGatewayError(
+                    "DECK_BINDING_CONFLICT", 409
+                ) from exc
+            return StoryWorkspaceDreamLaunchBinding(
+                deck_plugin_id=response.deck_plugin_id,
+                deck_plugin_version=response.deck_plugin_version,
+                deck_plugin_binding_id=response.deck_plugin_binding_id,
+                binding_revision=response.binding_revision,
+            )
+        raise StoryWorkspaceDreamLaunchGatewayError("DECK_BINDING_CONFLICT", 409)
+
+    def _active_binding_row(self, deck_id: str) -> sqlite3.Row | None:
+        return self.db.execute(
+            "SELECT * FROM deck_plugin_bindings "
+            "WHERE deck_id = ? AND status = 'active'",
+            (deck_id,),
+        ).fetchone()
+
+    @staticmethod
+    def _expected_builtin_binding(
+        row: sqlite3.Row | None,
+        *,
+        actor_id: str,
+        workspace_id: str,
+    ) -> StoryWorkspaceDreamLaunchBinding | None:
+        if (
+            row is None
+            or row["deck_plugin_id"] != BUILTIN_DECK_PLUGIN_ID
+            or row["deck_plugin_version"] != BUILTIN_DECK_PLUGIN_VERSION
+            or row["workspace_id"] != workspace_id
+            or row["creator_id"] != actor_id
+        ):
+            return None
         return StoryWorkspaceDreamLaunchBinding(
-            deck_plugin_id=response.deck_plugin_id,
-            deck_plugin_version=response.deck_plugin_version,
-            deck_plugin_binding_id=response.deck_plugin_binding_id,
-            binding_revision=response.binding_revision,
+            deck_plugin_id=row["deck_plugin_id"],
+            deck_plugin_version=row["deck_plugin_version"],
+            deck_plugin_binding_id=row["deck_plugin_binding_id"],
+            binding_revision=int(row["binding_revision"]),
         )
 
 
@@ -664,12 +711,14 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
         db: sqlite3.Connection,
         *,
         turn_dispatcher: Callable[..., Any] | None = None,
+        before_claim: Callable[[], Any] | None = None,
     ) -> None:
         self.db = db
         self.db.row_factory = sqlite3.Row
         self._turn_dispatcher = (
             turn_dispatcher or story_workspace_build_dream_launch_turn_dispatcher()
         )
+        self._before_claim = before_claim
 
     def __call__(
         self,
@@ -679,34 +728,39 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
         source: StoryWorkspaceDreamLaunchSource,
         context: StoryWorkspaceDreamRunContext,
     ) -> bool:
-        row = self.db.execute(
-            "SELECT message.parts, message.metadata, thread.user_id "
-            "FROM chat_message AS message JOIN chat_thread AS thread "
-            "ON thread.id = message.thread_id "
-            "WHERE message.id = ? AND message.thread_id = ?",
-            (source.message_id, source.thread_id),
-        ).fetchone()
-        if row is None or str(row["user_id"]) != actor_id:
-            raise PermissionError("Dream launch message scope mismatch")
-        metadata = _decode_json_object(row["metadata"])
-        if metadata.get("kind") != STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND:
-            raise PermissionError("Dream launch message kind mismatch")
-        existing_run_id = metadata.get("workflowRunId")
-        if existing_run_id not in {None, context.workflow_run_id}:
-            raise StoryWorkspaceDreamLaunchGatewayError(
-                "IDEMPOTENCY_CONFLICT", 409
-            )
-        if metadata.get("dispatchStatus") == "dispatched":
-            return False
+        if self._before_claim is not None:
+            self._before_claim()
+        now = datetime.now(UTC)
+        claim_id = "dlc_" + uuid.uuid4().hex
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self._message_row(source)
+            if row is None or str(row["user_id"]) != actor_id:
+                raise PermissionError("Dream launch message scope mismatch")
+            metadata = _decode_json_object(row["metadata"])
+            if metadata.get("kind") != STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND:
+                raise PermissionError("Dream launch message kind mismatch")
+            existing_run_id = metadata.get("workflowRunId")
+            if existing_run_id not in {None, context.workflow_run_id}:
+                raise StoryWorkspaceDreamLaunchGatewayError(
+                    "IDEMPOTENCY_CONFLICT", 409
+                )
+            if metadata.get("dispatchStatus") == "dispatched":
+                self.db.commit()
+                return False
+            if self._claim_is_fresh(metadata, now=now):
+                self.db.commit()
+                return False
 
-        parts = [{"type": "text", "text": _launch_instruction(goal)}]
-        metadata.update({
-            "workflowRunId": context.workflow_run_id,
-            "threadId": context.thread_id,
-            "dreamContext": context.model_dump(mode="json"),
-            "dispatchStatus": "pending",
-        })
-        with self.db:
+            parts = [{"type": "text", "text": _launch_instruction(goal)}]
+            metadata.update({
+                "workflowRunId": context.workflow_run_id,
+                "threadId": context.thread_id,
+                "dreamContext": context.model_dump(mode="json"),
+                "dispatchStatus": "dispatching",
+                "dispatchClaimId": claim_id,
+                "dispatchClaimedAt": now.isoformat(),
+            })
             self.db.execute(
                 "UPDATE chat_message SET parts = ?, metadata = ? WHERE id = ?",
                 (
@@ -715,24 +769,100 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
                     source.message_id,
                 ),
             )
-        accepted = self._turn_dispatcher(
-            actor_id=actor_id,
-            thread_id=source.thread_id,
-            message_id=source.message_id,
-            parts=parts,
-            metadata=metadata,
-            context=context,
-            resume=False,
-        )
+            self.db.commit()
+        except Exception:
+            if self.db.in_transaction:
+                self.db.rollback()
+            raise
+
+        try:
+            accepted = self._turn_dispatcher(
+                actor_id=actor_id,
+                thread_id=source.thread_id,
+                message_id=source.message_id,
+                parts=parts,
+                metadata=metadata,
+                context=context,
+                resume=False,
+            )
+        except Exception:
+            self._finish_claim(
+                source.message_id,
+                claim_id=claim_id,
+                status="pending",
+            )
+            raise
         if accepted is False:
+            self._finish_claim(
+                source.message_id,
+                claim_id=claim_id,
+                status="pending",
+            )
             return False
-        metadata["dispatchStatus"] = "dispatched"
-        with self.db:
+        return self._finish_claim(
+            source.message_id,
+            claim_id=claim_id,
+            status="dispatched",
+        )
+
+    def _message_row(
+        self,
+        source: StoryWorkspaceDreamLaunchSource,
+    ) -> sqlite3.Row | None:
+        return self.db.execute(
+            "SELECT message.parts, message.metadata, thread.user_id "
+            "FROM chat_message AS message JOIN chat_thread AS thread "
+            "ON thread.id = message.thread_id "
+            "WHERE message.id = ? AND message.thread_id = ?",
+            (source.message_id, source.thread_id),
+        ).fetchone()
+
+    @staticmethod
+    def _claim_is_fresh(metadata: dict[str, Any], *, now: datetime) -> bool:
+        if metadata.get("dispatchStatus") != "dispatching":
+            return False
+        claimed_at = metadata.get("dispatchClaimedAt")
+        if not isinstance(claimed_at, str):
+            return False
+        try:
+            claimed_time = _parse_time(claimed_at)
+        except (TypeError, ValueError):
+            return False
+        return now - claimed_time < STORY_WORKSPACE_DREAM_DISPATCH_CLAIM_TTL
+
+    def _finish_claim(
+        self,
+        message_id: str,
+        *,
+        claim_id: str,
+        status: str,
+    ) -> bool:
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self.db.execute(
+                "SELECT metadata FROM chat_message WHERE id = ?",
+                (message_id,),
+            ).fetchone()
+            metadata = _decode_json_object(row["metadata"] if row else None)
+            if (
+                metadata.get("dispatchStatus") != "dispatching"
+                or metadata.get("dispatchClaimId") != claim_id
+            ):
+                self.db.commit()
+                return False
+            metadata["dispatchStatus"] = status
+            metadata.pop("dispatchClaimId", None)
+            metadata.pop("dispatchClaimedAt", None)
             self.db.execute(
                 "UPDATE chat_message SET metadata = ? WHERE id = ?",
-                (_canonical_json(metadata), source.message_id),
+                (_canonical_json(metadata), message_id),
             )
-        return True
+            self.db.commit()
+            return True
+        except Exception:
+            if self.db.in_transaction:
+                self.db.rollback()
+            raise
 
 
 class StoryWorkspaceDreamLaunchGateway:
@@ -748,6 +878,7 @@ class StoryWorkspaceDreamLaunchGateway:
             PluginInstallService
         ),
         turn_dispatcher: Callable[..., Any] | None = None,
+        dispatch_before_claim: Callable[[], Any] | None = None,
     ) -> None:
         self.db = db
         self.db.row_factory = sqlite3.Row
@@ -761,6 +892,7 @@ class StoryWorkspaceDreamLaunchGateway:
         self._dispatcher = StoryWorkspaceDreamLaunchPersistentDispatcher(
             db,
             turn_dispatcher=turn_dispatcher,
+            before_claim=dispatch_before_claim,
         )
 
     async def start(
@@ -773,20 +905,26 @@ class StoryWorkspaceDreamLaunchGateway:
             actor_id=actor["actor_id"],
             workspace_id=actor["workspace_id"],
         )
+        existing_run = self._existing_replay_run(request, actor_context)
 
         async def resolve_binding(**values: Any) -> Any:
+            if existing_run is not None:
+                self._provisioner._require_scope(
+                    values["deck_id"],
+                    values["actor_id"],
+                    values["workspace_id"],
+                )
+                return StoryWorkspaceDreamLaunchBinding(
+                    deck_plugin_id=existing_run["deck_plugin_id"],
+                    deck_plugin_version=existing_run["deck_plugin_version"],
+                    deck_plugin_binding_id=existing_run[
+                        "deck_plugin_binding_id"
+                    ],
+                    binding_revision=int(existing_run["binding_revision"]),
+                )
             return await self._provisioner.ensure_binding(**values)
 
         async def create_preflight(**values: Any) -> Any:
-            existing_run = self.db.execute(
-                "SELECT workflow_preflight_id FROM workflow_runs "
-                "WHERE workspace_id = ? AND created_by = ? AND idempotency_key = ?",
-                (
-                    actor_context.workspace_id,
-                    actor_context.actor_id,
-                    request.idempotency_key,
-                ),
-            ).fetchone()
             if existing_run is not None:
                 row = self.db.execute(
                     "SELECT * FROM workflow_preflights "
@@ -838,3 +976,55 @@ class StoryWorkspaceDreamLaunchGateway:
             actor_id=actor["actor_id"],
             workspace_id=actor["workspace_id"],
         )
+
+    def _existing_replay_run(
+        self,
+        request: StoryWorkspaceDreamLaunchCommand,
+        actor: AuthenticatedActorContext,
+    ) -> sqlite3.Row | None:
+        run = self.db.execute(
+            "SELECT run.*, preflight.deck_id AS preflight_deck_id "
+            "FROM workflow_runs AS run "
+            "JOIN workflow_preflights AS preflight "
+            "ON preflight.workflow_preflight_id = run.workflow_preflight_id "
+            "WHERE run.workspace_id = ? AND run.created_by = ? "
+            "AND run.idempotency_key = ?",
+            (actor.workspace_id, actor.actor_id, request.idempotency_key),
+        ).fetchone()
+        if run is None:
+            return None
+
+        source = self.db.execute(
+            "SELECT message.id AS message_id, message.metadata, "
+            "thread.id AS thread_id, thread.user_id, thread.deck_id "
+            "FROM chat_message AS message JOIN chat_thread AS thread "
+            "ON thread.id = message.thread_id "
+            "WHERE message.id = ? AND thread.id = ?",
+            (run["source_message_id"], run["source_voice_thread_id"]),
+        ).fetchone()
+        metadata = _decode_json_object(source["metadata"] if source else None)
+        expected_fingerprint = "sha256:" + hashlib.sha256(
+            _canonical_json({
+                "deck_id": request.deck_id,
+                "goal": request.goal,
+            }).encode("utf-8")
+        ).hexdigest()
+        valid = (
+            source is not None
+            and run["preflight_deck_id"] == request.deck_id
+            and source["thread_id"] == run["source_voice_thread_id"]
+            and source["message_id"] == run["source_message_id"]
+            and str(source["user_id"]) == actor.actor_id
+            and source["deck_id"] == request.deck_id
+            and metadata.get("kind")
+            == STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND
+            and metadata.get("actorId") == actor.actor_id
+            and metadata.get("workspaceId") == actor.workspace_id
+            and metadata.get("deckId") == request.deck_id
+            and metadata.get("goal") == request.goal
+            and metadata.get("idempotencyKey") == request.idempotency_key
+            and metadata.get("requestFingerprint") == expected_fingerprint
+        )
+        if not valid:
+            raise StoryWorkspaceDreamLaunchIdempotencyConflict()
+        return run

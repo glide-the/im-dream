@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import os
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -23,6 +26,7 @@ from services.deck.builtin_plugin import (
     plugin_artifact_digest,
 )
 from services.deck.story_workflow_gateway import StoryWorkflowApplicationGateway
+from services.deck_plugin.binding_service import BindingRevisionConflict
 from services.story_workspace.dream_launch_gateway import (
     StoryWorkspaceDreamLaunchGateway,
 )
@@ -40,6 +44,7 @@ OTHER_ACTOR_ID = "72"
 WORKSPACE_ID = "workspace-dream-launch-api"
 OTHER_WORKSPACE_ID = "workspace-dream-launch-api-other"
 DECK_ID = "deck-dream-launch-api"
+ALTERNATE_DECK_ID = "deck-dream-launch-api-alternate"
 
 
 def launch_command(**overrides: object) -> StoryWorkspaceDreamLaunchCommand:
@@ -132,6 +137,46 @@ class StoryWorkspaceDreamLaunchApiTest(unittest.TestCase):
                             "idempotencyKey": "dream-api-strict",
                             **extra,
                         },
+                    )
+                    self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.gateway.calls, [])
+
+    def test_start_rejects_snake_case_launch_fields(self) -> None:
+        with TestClient(self.app) as client:
+            response = client.post(
+                "/api/story-workspace/dream-runs/start",
+                json={
+                    "deck_id": DECK_ID,
+                    "goal": "目标",
+                    "idempotency_key": "dream-api-snake-case",
+                },
+            )
+
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertEqual(self.gateway.calls, [])
+
+    def test_start_rejects_launch_field_surrounding_or_blank_whitespace(self) -> None:
+        invalid_fields = (
+            ("deckId", f" {DECK_ID}"),
+            ("deckId", f"{DECK_ID} "),
+            ("goal", " /drama-forge:drama-init"),
+            ("goal", "/drama-forge:drama-init\n"),
+            ("goal", "   "),
+            ("idempotencyKey", " dream-api-whitespace"),
+            ("idempotencyKey", "dream-api-whitespace "),
+        )
+        with TestClient(self.app) as client:
+            for field, value in invalid_fields:
+                with self.subTest(field=field, value=value):
+                    payload = {
+                        "deckId": DECK_ID,
+                        "goal": "/drama-forge:drama-init",
+                        "idempotencyKey": "dream-api-whitespace",
+                    }
+                    payload[field] = value
+                    response = client.post(
+                        "/api/story-workspace/dream-runs/start",
+                        json=payload,
                     )
                     self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(self.gateway.calls, [])
@@ -247,6 +292,11 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
                     "VALUES (?, 'Dream Deck', ?, 1)",
                     (DECK_ID, int(ACTOR_ID)),
                 )
+                db.execute(
+                    "INSERT INTO decks (id, name, owner_id, enabled) "
+                    "VALUES (?, 'Alternate Dream Deck', ?, 1)",
+                    (ALTERNATE_DECK_ID, int(ACTOR_ID)),
+                )
         finally:
             db.close()
         self.turn_dispatcher = RecordingTurnDispatcher()
@@ -257,24 +307,44 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         database.DB_DIR = self.old_dir
         self.temp_dir.cleanup()
 
-    def make_gateway(self, db, actor: dict[str, str]):
+    def make_gateway(
+        self,
+        db,
+        actor: dict[str, str],
+        *,
+        dispatch_before_claim=None,
+    ):
         application = StoryWorkflowApplicationGateway()
+        options = {}
+        if dispatch_before_claim is not None:
+            options["dispatch_before_claim"] = dispatch_before_claim
         return StoryWorkspaceDreamLaunchGateway(
             db,
             preflight_service=application._preflight_service(db, actor),
             token_secret="ink-dream-development-workflow-token-secret-v1",
             claude_installer_factory=FakeClaudePluginInstaller,
             turn_dispatcher=self.turn_dispatcher,
+            **options,
         )
 
-    async def start(self, command: StoryWorkspaceDreamLaunchCommand, actor=None):
+    async def start(
+        self,
+        command: StoryWorkspaceDreamLaunchCommand,
+        actor=None,
+        *,
+        dispatch_before_claim=None,
+    ):
         selected_actor = actor or {
             "actor_id": ACTOR_ID,
             "workspace_id": WORKSPACE_ID,
         }
         db = database.get_db()
         try:
-            return await self.make_gateway(db, selected_actor).start(
+            return await self.make_gateway(
+                db,
+                selected_actor,
+                dispatch_before_claim=dispatch_before_claim,
+            ).start(
                 command,
                 actor=selected_actor,
             )
@@ -374,6 +444,165 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(metadata["dispatchStatus"], "dispatched")
         self.assertEqual(metadata["workflowRunId"], first.workflow_run_id)
 
+    async def test_same_key_changed_deck_is_an_idempotency_conflict(self) -> None:
+        await self.start(launch_command())
+
+        with self.assertRaises(StoryWorkspaceDreamLaunchIdempotencyConflict):
+            await self.start(launch_command(deckId=ALTERNATE_DECK_ID))
+
+        db = database.get_db()
+        try:
+            alternate_bindings = db.execute(
+                "SELECT COUNT(*) FROM deck_plugin_bindings WHERE deck_id = ?",
+                (ALTERNATE_DECK_ID,),
+            ).fetchone()[0]
+        finally:
+            db.close()
+        self.assertEqual(alternate_bindings, 0)
+
+    async def test_replay_uses_frozen_binding_after_active_revision_drifts(self) -> None:
+        first = await self.start(launch_command())
+        replacement_binding_id = "dpb_" + "8" * 32
+        db = database.get_db()
+        try:
+            current = db.execute(
+                "SELECT * FROM deck_plugin_bindings "
+                "WHERE deck_id = ? AND status = 'active'",
+                (DECK_ID,),
+            ).fetchone()
+            with db:
+                db.execute(
+                    "UPDATE deck_plugin_bindings SET status = 'stale' "
+                    "WHERE deck_plugin_binding_id = ?",
+                    (current["deck_plugin_binding_id"],),
+                )
+                db.execute(
+                    "INSERT INTO deck_plugin_bindings ("
+                    "deck_plugin_binding_id, deck_id, workspace_id, creator_id, "
+                    "deck_plugin_id, deck_plugin_version, binding_revision, "
+                    "status, applied_to) "
+                    "VALUES (?, ?, ?, ?, ?, ?, 2, 'active', 'next_run')",
+                    (
+                        replacement_binding_id,
+                        DECK_ID,
+                        WORKSPACE_ID,
+                        ACTOR_ID,
+                        BUILTIN_DECK_PLUGIN_ID,
+                        BUILTIN_DECK_PLUGIN_VERSION,
+                    ),
+                )
+        finally:
+            db.close()
+
+        replayed = await self.start(launch_command())
+
+        self.assertEqual(replayed, first)
+        self.assertEqual(replayed.binding_revision, 1)
+        db = database.get_db()
+        try:
+            active = db.execute(
+                "SELECT deck_plugin_binding_id, binding_revision "
+                "FROM deck_plugin_bindings WHERE deck_id = ? AND status = 'active'",
+                (DECK_ID,),
+            ).fetchone()
+        finally:
+            db.close()
+        self.assertEqual(active["deck_plugin_binding_id"], replacement_binding_id)
+        self.assertEqual(active["binding_revision"], 2)
+        self.assertEqual(len(self.turn_dispatcher.calls), 1)
+
+    async def test_concurrent_pending_replay_claims_one_agent_turn(self) -> None:
+        self.turn_dispatcher.failures_remaining = 1
+        with self.assertRaisesRegex(RuntimeError, "turn dispatch unavailable"):
+            await self.start(launch_command())
+
+        self.turn_dispatcher = RecordingTurnDispatcher()
+        before_claim = threading.Barrier(2)
+
+        def replay():
+            return asyncio.run(
+                self.start(
+                    launch_command(),
+                    dispatch_before_claim=lambda: before_claim.wait(timeout=5),
+                )
+            )
+
+        first, second = await asyncio.gather(
+            asyncio.to_thread(replay),
+            asyncio.to_thread(replay),
+        )
+
+        self.assertEqual(first, second)
+        self.assertEqual(len(self.turn_dispatcher.calls), 1)
+
+    async def test_fresh_dispatch_claim_is_not_duplicated(self) -> None:
+        self.turn_dispatcher.failures_remaining = 1
+        with self.assertRaisesRegex(RuntimeError, "turn dispatch unavailable"):
+            await self.start(launch_command())
+
+        self.turn_dispatcher = RecordingTurnDispatcher()
+        self._set_dispatch_claim(datetime.now(UTC))
+
+        await self.start(launch_command())
+
+        self.assertEqual(self.turn_dispatcher.calls, [])
+        metadata = self._read_source_metadata()
+        self.assertEqual(metadata["dispatchStatus"], "dispatching")
+        self.assertEqual(metadata["dispatchClaimId"], "claim-from-another-worker")
+
+    async def test_stale_dispatch_claim_is_recovered(self) -> None:
+        self.turn_dispatcher.failures_remaining = 1
+        with self.assertRaisesRegex(RuntimeError, "turn dispatch unavailable"):
+            await self.start(launch_command())
+
+        self.turn_dispatcher = RecordingTurnDispatcher()
+        self._set_dispatch_claim(datetime.now(UTC) - timedelta(minutes=10))
+
+        await self.start(launch_command())
+
+        self.assertEqual(len(self.turn_dispatcher.calls), 1)
+        metadata = self._read_source_metadata()
+        self.assertEqual(metadata["dispatchStatus"], "dispatched")
+        self.assertNotIn("dispatchClaimId", metadata)
+        self.assertNotIn("dispatchClaimedAt", metadata)
+
+    async def test_binding_revision_conflict_adopts_concurrent_builtin_winner(
+        self,
+    ) -> None:
+        binding_id = "dpb_" + "9" * 32
+
+        class ConcurrentWinnerBindingService:
+            def __init__(nested_self, db, *, selection_validator) -> None:
+                nested_self.db = db
+
+            async def save(nested_self, **_values):
+                with nested_self.db:
+                    nested_self.db.execute(
+                        "INSERT INTO deck_plugin_bindings ("
+                        "deck_plugin_binding_id, deck_id, workspace_id, creator_id, "
+                        "deck_plugin_id, deck_plugin_version, binding_revision, "
+                        "status, applied_to) "
+                        "VALUES (?, ?, ?, ?, ?, ?, 1, 'active', 'next_run')",
+                        (
+                            binding_id,
+                            DECK_ID,
+                            WORKSPACE_ID,
+                            ACTOR_ID,
+                            BUILTIN_DECK_PLUGIN_ID,
+                            BUILTIN_DECK_PLUGIN_VERSION,
+                        ),
+                    )
+                raise BindingRevisionConflict(1)
+
+        with patch(
+            "services.story_workspace.dream_launch_gateway.BindingService",
+            ConcurrentWinnerBindingService,
+        ):
+            context = await self.start(launch_command())
+
+        self.assertEqual(context.deck_plugin_binding_id, binding_id)
+        self.assertEqual(context.binding_revision, 1)
+
     async def test_slash_command_remains_the_unmodified_launch_text_prefix(self) -> None:
         goal = "/drama-forge:drama-init"
 
@@ -411,6 +640,34 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(dispatched["workflowRunId"], replayed.workflow_run_id)
         self.assertEqual(run_count, 1)
         self.assertEqual(len(self.turn_dispatcher.calls), 2)
+
+    def _set_dispatch_claim(self, claimed_at: datetime) -> None:
+        db = database.get_db()
+        try:
+            row = db.execute("SELECT id, metadata FROM chat_message").fetchone()
+            metadata = json.loads(row["metadata"])
+            metadata.update({
+                "dispatchStatus": "dispatching",
+                "dispatchClaimId": "claim-from-another-worker",
+                "dispatchClaimedAt": claimed_at.isoformat(),
+            })
+            with db:
+                db.execute(
+                    "UPDATE chat_message SET metadata = ? WHERE id = ?",
+                    (json.dumps(metadata, sort_keys=True), row["id"]),
+                )
+        finally:
+            db.close()
+
+    @staticmethod
+    def _read_source_metadata() -> dict[str, object]:
+        db = database.get_db()
+        try:
+            return json.loads(
+                db.execute("SELECT metadata FROM chat_message").fetchone()[0]
+            )
+        finally:
+            db.close()
 
     async def test_cross_actor_deck_launch_is_denied_before_source_creation(self) -> None:
         with self.assertRaises(PermissionError):
