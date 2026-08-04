@@ -233,6 +233,7 @@ from .simple_cas_client import SimpleClaudeAgentSDKClient
 from .memory_tool import allowed_memory_tool_names
 from .necklace_tool import allowed_necklace_tool_names
 from .editor_tool import allowed_editor_tool_names, SWITCH_EDITOR_TOOL_NAME, load_editor_state_from_db
+from .story_workspace_tool import allowed_story_workspace_tool_names
 from .sessions_tool import GET_SESSIONS_RANGE_TOOL_NAME
 from .sdk_env import (
     apply_claude_config_home_to_options,
@@ -291,6 +292,7 @@ DEFAULT_ALLOWED_TOOLS: list[str] = [
     *allowed_memory_tool_names(),
     *allowed_necklace_tool_names(),
     *allowed_editor_tool_names(),
+    *allowed_story_workspace_tool_names(),
 ]
 
 _AUTO_MODE_REQUIRED_ALLOWED_TOOLS: frozenset[str] = frozenset({
@@ -303,7 +305,11 @@ _USER_MCP_TOOL_PREFIX = "mcp__user__"
 _MEMORY_MCP_TOOL_PREFIX = "mcp__memory__"
 _NECKLACE_MCP_TOOL_PREFIX = "mcp__necklace__"
 _EDITOR_MCP_TOOL_PREFIX = "mcp__editor__"
+_STORY_WORKSPACE_MCP_TOOL_PREFIX = "mcp__story_workspace__"
 _SWITCH_EDITOR_MCP_TOOL_NAME = f"{_EDITOR_MCP_TOOL_PREFIX}{SWITCH_EDITOR_TOOL_NAME}"
+_STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES: frozenset[str] = frozenset(
+    allowed_story_workspace_tool_names()
+)
 _WORKSPACE_FILES_PERMISSION_TOOLS: frozenset[str] = frozenset({
     "Read",
     "Write",
@@ -367,6 +373,10 @@ _LOW_SENSITIVITY_QUERY_TOOL_NAMES: frozenset[str] = frozenset({
 
 # Shell metacharacters that would make a Bash command unsafe for auto-allow.
 _SHELL_METACHAR_RE = re.compile(r'[|;&<>`]|\$\(|\$\{')
+_DREAM_SURFACE_REFERENCE_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])\.dream(?=$|[/\\\s'\";&|<>])",
+    re.IGNORECASE,
+)
 
 # Read-only / navigation shell commands that carry no filesystem side effects.
 # Any command whose first token matches one of these and contains no shell
@@ -515,6 +525,71 @@ def _is_network_bash_command(command: str) -> bool:
     if name == "uv" and tokens[1] == "pip" and len(tokens) >= 3:
         return tokens[2].lower() in {"install", "download", "wheel"}
     return tokens[1].lower() in subcommands
+
+
+def _is_path_inside_dream_surface(raw_path: str, cwd: Optional[str]) -> bool:
+    """Return whether a built-in file mutation resolves under ``{cwd}/.dream``."""
+
+    if not raw_path or not cwd:
+        return False
+    try:
+        workspace = Path(cwd).expanduser().resolve(strict=False)
+        dream_root = (workspace / ".dream").resolve(strict=False)
+        candidate = Path(raw_path).expanduser()
+        if not candidate.is_absolute():
+            candidate = workspace / candidate
+        resolved = candidate.resolve(strict=False)
+        return resolved == dream_root or resolved.is_relative_to(dream_root)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
+def _is_dream_mutating_bash_command(command: str) -> bool:
+    """Conservatively identify shell attempts to mutate the Dream surface.
+
+    Read-only commands such as ``cat .dream/workspace.json`` remain available.
+    Redirects, filesystem mutation utilities, and inline Python are denied when
+    the command references ``.dream``; writes must use the controlled MCP seam.
+    """
+
+    if _DREAM_SURFACE_REFERENCE_RE.search(command) is None:
+        return False
+    # Fail closed for every executable or compound shell form except the
+    # existing narrow no-metacharacter read/navigation allowlist. This also
+    # covers nested ``sh -c``, interpreters, redirections, and mutation tools
+    # without trying to maintain an inevitably incomplete command denylist.
+    return not _is_low_sensitivity_bash_command(command)
+
+
+def _apply_dream_surface_write_guard(
+    tool_name: str,
+    tool_input: dict[str, Any],
+    cwd: Optional[str],
+) -> Optional[HookJSONOutput]:
+    """Hard-deny every generic mutation path into the controlled Dream surface."""
+
+    denied = False
+    if tool_name in {"Write", "Edit", "MultiEdit"}:
+        denied = _is_path_inside_dream_surface(
+            _extract_builtin_file_tool_path(tool_input),
+            cwd,
+        )
+    elif tool_name == "Bash":
+        denied = _is_dream_mutating_bash_command(
+            str(tool_input.get("command") or "")
+        )
+    if not denied:
+        return None
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": (
+                "The .dream runtime surface is controlled by Story Workspace; "
+                "use its MCP write tools instead of generic file or shell mutation."
+            ),
+        }
+    }
 
 
 def _apply_disabled_network_permission(
@@ -1029,6 +1104,24 @@ def _editor_mcp_stdio_config() -> McpStdioServerConfig:
         command=sys.executable,
         args=["-m", "libs.claude_agent_kit.server.editor_mcp_stdio"],
         env=_stdio_env(),
+    )
+
+
+def _story_workspace_mcp_stdio_config(
+    mcp_env: dict[str, str],
+) -> McpStdioServerConfig:
+    """Build the Story Workspace MCP config with only trusted identity context."""
+
+    trusted_env = {
+        name: mcp_env[name]
+        for name in ("INK_AGENT_USER_ID", "INK_AGENT_THREAD_ID")
+        if mcp_env.get(name)
+    }
+    return McpStdioServerConfig(
+        type="stdio",
+        command=sys.executable,
+        args=["-m", "libs.claude_agent_kit.server.story_workspace_mcp_stdio"],
+        env=_stdio_env(extra_env=trusted_env),
     )
 
 
@@ -1752,6 +1845,14 @@ class ClaudeAgentRunner:
             if redirect_result is not None:
                 return redirect_result
 
+            dream_write_guard = _apply_dream_surface_write_guard(
+                tool_name,
+                tool_input,
+                cwd,
+            )
+            if dream_write_guard is not None:
+                return dream_write_guard
+
             disabled_network_permission = _apply_disabled_network_permission(
                 sandbox_network_mode,
                 tool_name,
@@ -1768,6 +1869,12 @@ class ClaudeAgentRunner:
             )
             if workspace_boundary_permission is not None:
                 return workspace_boundary_permission
+
+            if (
+                tool_choice == "auto"
+                and tool_name in _STORY_WORKSPACE_CONTROLLED_WRITE_TOOL_NAMES
+            ):
+                return _explicit_pre_tool_use_allow()
 
             if (
                 opts.im_full_access_enabled
@@ -2198,6 +2305,20 @@ class ClaudeAgentRunner:
         ):
             mcp_servers["editor"] = _editor_mcp_stdio_config()
             logger.debug("Editor MCP enabled; session context flows via tool arguments.")
+
+        if (
+            cwd
+            and mcp_env.get("INK_AGENT_USER_ID")
+            and mcp_env.get("INK_AGENT_THREAD_ID")
+            and any(
+                tool.startswith(_STORY_WORKSPACE_MCP_TOOL_PREFIX)
+                for tool in effective_allowed_tools
+            )
+        ):
+            mcp_servers["story_workspace"] = _story_workspace_mcp_stdio_config(
+                mcp_env
+            )
+            logger.debug("Story Workspace MCP enabled with trusted actor/thread context.")
 
         _stderr_buf = tempfile.TemporaryFile()
         sdk_options = ClaudeAgentOptions(

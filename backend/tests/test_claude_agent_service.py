@@ -158,6 +158,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                 "ANTHROPIC_AUTH_TOKEN": "user-token",
                 "CUSTOM_KEY": "custom-value",
                 "INK_AGENT_USER_ID": "7",
+                "INK_AGENT_THREAD_ID": "thread_service_config",
             },
         )
         self.assertEqual(
@@ -293,7 +294,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(execution.run_options.system_prompt, "system-prompt:7")
         self.assertEqual(
             execution.run_options.mcp_env,
-            {"INK_AGENT_USER_ID": "7"},
+            {
+                "INK_AGENT_USER_ID": "7",
+                "INK_AGENT_THREAD_ID": "thread_service_config_failure",
+            },
         )
 
 
