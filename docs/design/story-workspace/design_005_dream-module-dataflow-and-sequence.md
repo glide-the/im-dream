@@ -3,6 +3,7 @@
 > 本文基于**代码现状**（2026-08-04，commits `99075d0`/`bd450ff`/`57eab52`/`d0e8af9`/`f7b3ca0`/`8510ddc`/`dec5a92`）绘制 Dream 业务模块的数据流图与业务时序图。
 > 所有数据流事实均带 `文件:行号` 证据；术语以 `docs/architecture/术语表.md` 为准（「物理映射」= pack 时刻把 `.dream/` 协议目录写入会话工作区，代码标识 `materialize_dream_surface()`）。
 > §5 如实标注了代码现状中的「端点空洞」——阅读图表时请对照，勿把设计语义误认为已接线行为。
+> **2026-08-04 目标差异注记**：用户审阅后，目标合同新增由同一 Chat Agent 写入的 `.dream/runtime` run/stage 文件、`dream-files` REST/SSE 刷新与单次确认业务时序，见 `design_006`/`design_007`。本文仍只描述当前代码；在任务三实现并验证前，不把 G1～G3/G5/G6 或 Agent 运行内容层标成已接线。
 
 ---
 
@@ -193,7 +194,7 @@ sequenceDiagram
     Note over U,DB: 前置（当前仅 hooks，无 UI 接线，见 §5）
     U->>SW: POST /workflow-preflights
     SW->>GW: create_preflight
-    GW->>GW: PreflightService 8 步（binding/快照/锁/物化核对…）
+    GW->>GW: PreflightService 8 步（binding/快照/锁/物理映射核对…）
     GW->>DB: workflow_preflights（passed）+ deck_runtime_snapshots
     SW-->>U: 202 + token pft_…（只存 hash）
 

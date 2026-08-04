@@ -1,9 +1,11 @@
 # 2026-08-04 `.dream` 映射与 Dream 执行布局专项：任务一问题判定实施记录
 
-> **任务**：任务一／问题判定（只做裁决，不改代码）  
-> **日期**：2026-08-04  
-> **输入基线**：`术语表.md`、`story-workspace-prd.md`、`story-workspace-layout-design.md`、`design_003`、`design_004`、`design_005`、两份 PDF、`vendor/drama-forge/` 及打包说明  
+> **任务**：任务一／问题判定（只做裁决，不改代码）
+> **日期**：2026-08-04
+> **输入基线**：`术语表.md`、`story-workspace-prd.md`、`story-workspace-layout-design.md`、`design_003`、`design_004`、`design_005`、两份 PDF、`vendor/drama-forge/` 及打包说明
 > **输出约束**：本记录是任务二的输入；任务三在任务一、二审阅通过前不启动。
+
+> **2026-08-04 用户审阅最终裁决**：本记录 P2 的方案 a 是当时输入下的历史结论。现行方案采用分层目录，但不引入 host event/projection 状态机：静态启动层继续冻结，同一 Chat Agent 按插件步骤通过工作空间写 `.dream/runtime` 的 run/stage 文件；用户在页面修改后只确认一次，确认回到原 Chat，由同一 Agent 继续。本文件保留原判定以便追溯，不再作为 P2 或布局的现行结论；现行合同见 `design_006`、`design_007` 与任务二审阅修订记录。
 
 > **行号口径**：本记录中的既有设计/PRD 行号固定对应任务一读取时的输入基线 commit `8fc6f23`；任务二随后会改动这些文件并导致当前工作树行号移动。vendor 与代码证据未被任务二修改，仍按当前路径行号读取。
 

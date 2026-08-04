@@ -1,86 +1,67 @@
-# design_006：`.dream` 协议目录物理映射与前端发现合同
+# design_006：`.dream` 静态启动层与 Agent 运行内容层合同
 
 > **Design ID**：`design_006_dream-protocol-dir-mapping`
-> **状态**：设计完成；当前实现已覆盖静态映射与 surface 发现，运行期写入明确禁止
+> **状态**：设计修订完成；静态启动层已实现，Agent 运行内容层待实现
 > **更新日期**：2026-08-04
 > **术语 canonical**：[术语表](../../architecture/术语表.md)
-> **决策历史**：[design_004](./design_004_story-workspace-dream-surface-execution-page.md) §9（DEC-027～032，保留原文与修订注记）
-> **代码现状与缺口**：[design_005](./design_005_dream-module-dataflow-and-sequence.md)（数据流、时序、G1～G7）
-> **任务一裁决**：[2026-08-04 任务一实施记录](./2026-08-04-dream-protocol-task1-problem-decision-implementation-record.md)
+> **业务交互 owner**：[design_007](./design_007_dream-business-module-interaction.md)
+> **决策历史**：[design_004](./design_004_story-workspace-dream-surface-execution-page.md) §9
+> **代码现状与缺口**：[design_005](./design_005_dream-module-dataflow-and-sequence.md)
 
-## 0. 文档职责与适用规则
+## 0. 文档职责
 
-本文是 `.dream` 协议目录交互合同的**唯一设计 owner**，完整定义：
+本文是 `.dream` 文件协议唯一 owner，定义：
 
-- 插件如何声明 dream surface；
-- packer 在何时、以什么输入物理映射 `.dream/`；
-- 目录结构、schema、冻结、原子性与多插件规则；
-- 人物、场景、分镜等生成阶段是否可以写入 `.dream/`；
-- Agent 读写边界；
-- 前端如何判断“要不要显示打开渲染页面的入口”；
-- `.dream/` 与 launch-manifest、pack-receipt、plugin-load-receipt 的关系；
-- 异常、兼容与本期边界。
+- packer 如何物理映射静态启动层；
+- 同一 Chat Agent 在人物、场景、分镜阶段何时写 `.dream`；
+- 运行目录、run/stage schema、revision 与原子写规则；
+- 前端如何经后端读取文件并显示对应页面；
+- 用户修改内容并一次“确认并继续”时，如何回到同一 Chat Agent；
+- 静态层冻结边界、Agent 可写边界和旧会话兼容。
 
-其他文档的职责：
+本文不设计逐项审阅、驳回、失败、重试或归档业务状态。业务动作和时序只认 `design_007`。
 
-| 文档 | 职责 | 不承担 |
+## 1. 最终裁决
+
+### 1.1 两层目录
+
+`.dream` 分为：
+
+1. **静态启动层**：`README.md + workspace.json`。由 packer 在首个 agent turn 物理映射，随插件 digest 冻结。
+2. **Agent 运行内容层**：`runtime/runs/<workflow_run_id>/`。由同一 Chat Agent 按插件步骤通过会话工作空间写入和更新。
+
+`workspace.json` 保持 `dream-surface/v1`，不加入 run 级字段。`workflow_run_id`、来源五字段与 `projection_entry` 写入运行层 `run.json`。
+
+### 1.2 “插件更新 `.dream`”的准确含义
+
+插件在本项目中是 Agent 执行的工作流与 skill。实际写文件者是当前 Chat Agent：
+
+- Agent 先按插件约定写人物、场景、分镜 canonical 文件；
+- 对应阶段可供页面显示时，Agent 再调用 `StoryWorkspaceDreamFileWriter` 原子更新 `.dream/runtime/**`；
+- 前端不直接读取工作区，通过 actor-scoped 后端接口取得已校验的 run/stage 描述；
+- 用户在页面修改内容后只执行一次“确认并继续”，同一 Chat Agent 收到结构化修改和确认命令，写回工作区后继续后续执行。
+
+不再引入 host event journal、projection 聚合器、逐项 Review Gate 或 stage failed 状态机。
+
+### 1.3 与上游事实的关系
+
+drama-forge 上游当前不写 `.dream`。它把人物/场景写入 `assets/`，把分镜唯一源写入 `stories/<project>/episodes/EP??/storyboard.yaml`；内部运行及报告位于 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`。首期兼容方式是在 Ink-Dream 插件说明/adapter 中要求 Agent 在 canonical 分镜 YAML 完成后补写对应 Dream stage 文件；报告路径只能作为可选 `source_files`，不得替代 storyboard 唯一源，也不得声称 vendor 已原生支持 `.dream`。
+
+## 2. 参与者与文件 owner
+
+| 参与者 | 写入 | 读取 |
 |---|---|---|
-| `docs/architecture/术语表.md` | 术语、技术命名、状态与本文件索引 | schema、时序和异常规则 |
-| `design_004` | 跳转链、执行页、guidance 以及 DEC-027～032 历史 | `.dream` 合同的第二份规范 owner |
-| `design_005` | 2026-08-04 代码现状、数据流和 G1～G7 | 目标合同 |
-| 本文 | `.dream` 协议目录完整合同 | run 状态机步骤语义、执行页详细视觉稿 |
+| packer | `.dream/README.md`、`.dream/workspace.json` | 冻结时校验静态文件 |
+| 当前 Chat Agent | canonical 人物/场景/分镜文件；`.dream/runtime/**` | 插件说明、run context、用户确认修改 |
+| `StoryWorkspaceDreamFileWriter` | 作为 Agent 调用的受控 helper，完成 runtime 路径校验、revision 和原子替换 | 当前 run/stage 文件 |
+| story-workspace 后端 | 不改内容文件；接收“确认并继续”并注入原 Chat thread | 安全读取 run/stage 文件并返回 REST |
+| Dream 前端 | 用户本地编辑草稿；不直接写工作区 | REST + SSE 通知 |
 
-若上述文档中的 `.dream` 细节与本文冲突，以本文为准；DEC 原文仍以 `design_004` §9 为决策历史依据。
+静态启动层只有 packer 可写；Agent 的可写范围严格限定为 `.dream/runtime/**`，不能修改 `README.md` 或 `workspace.json`。
 
-## 1. 背景与裁决
+## 3. 静态启动层
 
-### 1.1 要解决的问题
-
-dream surface 需要一个会话级、可冻结、可被服务端安全发现的启动标识，以回答：
-
-1. 这个会话是否由声明了 Dream 页面能力的插件驱动；
-2. 允许打开哪个 `story-workspace` 入口；
-3. pack 时实际锁定了哪个 Deck 和哪些插件制品。
-
-它不回答某次 run 的状态、审阅进度或产物位置。运行期事实由 story-workspace REST API 负责。
-
-### 1.2 2026-08-04 核心裁决
-
-维持 DEC-029 的静态冻结语义：
-
-- `.dream/` 只保存 pack 期 launch 事实；
-- `workspace.json` 保持 `dream-surface/v1`，不加入 `workflow_run_id`、运行来源五字段、`projection_entry` 或时间戳；
-- 人物、场景、分镜生成期元信息不写 `.dream/`；
-- Agent 不得写、改、删 `.dream/**`；
-- run、Gate、审阅、执行投影与来源字段只认 actor-scoped REST API。
-
-依据：
-
-- 当前物理映射 payload 只有四类字段，且代码注释明确不含 run 与时间戳（`backend/services/claude_plugin/workspace_init.py:273-305`）。
-- 冻结分支只校验 surface 文件存在，不重建（`backend/services/claude_plugin/workspace_packer.py:129-170`）。
-- drama-forge 上游把 `stories/`、`assets/`、`exports/` 与 `.dramaforge/` 作为用户项目运行区；具体分镜 skill 另声明 storyboard 与 `.drama/checks/` 产物路径。上游没有 `.dream`、`workflow_run_id` 或 `projection_entry` 合同（证据汇总见任务一记录 §1.3）。
-- G1～G3 是状态推进与 UI 接线缺口（`design_005:256-268`）；增加文件副本不能修复它们。
-
-## 2. 参与者与事实 owner
-
-| 事实 | 唯一写方 / owner | 消费方 |
-|---|---|---|
-| `surfaces[]` 声明 | 插件制品内 `.ink/workspace-init.json`，随 artifact digest 固定 | `load_init_profile()`、packer |
-| `.dream/README.md`、`.dream/workspace.json` | packer 的 `materialize_dream_surface()` | packer 冻结校验；Agent 只读参考 |
-| `.ink/launch-manifest.json` | packer | CLI launcher、`plugin-load-receipt` |
-| `.ink/plugin-pack-receipt.json` | packer | 审计、`plugin-load-receipt` 兜底 |
-| surface 发现响应 | claude-agent `plugin-load-receipt` 端点整文件透传 | `useWorkspaceSurfaces()` |
-| 人物、场景、分镜源文件 | 插件按自身 canonical 工作区合同写入 | Agent、host 解析器 |
-| story-workspace 内容与审阅状态 | story-workspace 数据库与 REST API | Dream 审阅页面 |
-| run 状态、来源字段、执行投影 | workflow/story-workspace 服务与 actor-scoped REST API | 执行协作工作台 |
-
-禁止把任何一行事实复制到 `.dream/` 后再作为另一真相源。
-
-## 3. 声明合同：workspace-init `surfaces[]`
-
-### 3.1 schema
-
-插件制品可以在 `.ink/workspace-init.json` 的 `workspace-init/v1` 中声明：
+### 3.1 surface 声明
 
 ```json
 {
@@ -95,36 +76,13 @@ dream surface 需要一个会话级、可冻结、可被服务端安全发现的
 }
 ```
 
-`surfaces` 是可选字段；缺省或空数组表示该插件不声明页面 surface，不改变 profile 版本。
+校验与现状不变：`name` 当前只允许 dream，`protocol_dir` 是安全单级点目录，`entry_route` 位于 `/story-workspace/`；非法声明 fail-closed，多插件同名时 pack 顺序前者胜出并记录 warning。
 
-### 3.2 校验
+实现证据：`backend/services/claude_plugin/workspace_init.py:59-115`、`:241-253`，`backend/services/claude_plugin/workspace_packer.py:177-218`。
 
-当前实现规则（`backend/services/claude_plugin/workspace_init.py:59-115`、`:241-253`）：
+### 3.2 物理映射时机
 
-| 字段 | 规则 |
-|---|---|
-| `name` | 白名单，当前只允许 `dream` |
-| `protocol_dir` | 单级、点号开头、小写字母开头，只含小写字母/数字/连字符；不得为 `.ink`、`.editor`、`.notion` |
-| `entry_route` | 必须以 `/story-workspace/` 开头 |
-| 唯一性 | 单 profile 内 `name` 和 `protocol_dir` 均不可重复 |
-| 错误 | 任一非法声明 fail-closed：`CLAUDE_PLUGIN_INIT_PROFILE_INVALID`，整个 pack 失败 |
-
-多插件声明同名 surface 时按 pack 顺序前者胜出，后者进入 receipt `warnings[]`；不合并两个同名 surface 的字段（`backend/services/claude_plugin/workspace_packer.py:177-218`）。
-
-## 4. 触发链路与物理映射时序
-
-### 4.1 触发条件
-
-只有以下条件同时成立才物理映射 `.dream/`：
-
-1. thread 已锁定 `deck_id`；
-2. 会话首个 agent turn 进入 `pack_workspace_plugins()`；
-3. 至少一个 ready 插件制品 profile 合法声明 `name="dream"`；
-4. 工作区不存在 launch manifest，即本次不是冻结分支。
-
-thread 创建本身不生成 `.dream/`。surface 首次可见时机是首个 agent turn pack 成功、manifest 与 receipt 落盘之后。
-
-### 4.2 时序
+只有 thread 已锁定 Deck、首个 agent turn 开始 pack、ready 插件声明 dream surface 且尚无 launch manifest 时，packer 才物理映射静态层。thread 创建本身不写 `.dream`。
 
 ```mermaid
 sequenceDiagram
@@ -132,41 +90,20 @@ sequenceDiagram
     participant FE as Dream / Chat 前端
     participant CA as claude-agent
     participant PK as workspace packer
-    participant AR as 插件制品
     participant FS as 会话工作区
 
     FE->>CA: 创建 thread（锁 deck_id）
-    Note over CA,FS: 此时没有 .dream/；入口缺省隐藏
     FE->>CA: 首个 agent turn
-    CA->>PK: pack_workspace_plugins(workspace, deck_id)
-    PK->>AR: 复制 digest 固定的插件制品
-    PK->>PK: load_init_profile() + validate_surfaces()
-    PK->>PK: 按 pack 顺序合并 surfaces（同名前者胜出）
+    CA->>PK: pack_workspace_plugins()
+    PK->>PK: 解析并校验 surfaces[]
     alt 声明 dream surface
         PK->>FS: 临时目录写 README.md + workspace.json
-        PK->>FS: os.rename 原子就位为 .dream/
+        PK->>FS: os.rename 原子就位 .dream/
     end
-    PK->>FS: 写 launch-manifest.json
-    PK->>FS: 写 plugin-pack-receipt.json
-    PK-->>CA: receipt
-    CA-->>FE: turn 流继续
+    PK->>FS: 写 launch-manifest + pack-receipt
 ```
 
-实现顺序为：复制全部制品 → 执行 profile 初始化 → 汇总全部插件清单 → 物理映射 surface → 写 manifest/receipt（`backend/services/claude_plugin/workspace_packer.py:180-288`）。这样 `workspace.json.plugins[]` 能包含本次 pack 的完整插件清单。
-
-## 5. `.dream/` 目录与 schema
-
-### 5.1 目录
-
-```text
-.dream/
-├── README.md
-└── workspace.json
-```
-
-不得在本 schema 下新增 `runs/`、`projections/`、`metadata/` 或阶段文件。新增子树属于协议升级，必须先修订本文、DEC-029 和 schema_version。
-
-### 5.2 `workspace.json`
+### 3.3 `workspace.json`
 
 ```json
 {
@@ -183,191 +120,297 @@ sequenceDiagram
 }
 ```
 
-字段规则：
+静态文件不含 `workflow_run_id`、来源五字段、`projection_entry`、时间戳或内容元信息；同 digest 重 pack 字节一致，冻结只校验不重建。
 
-| 字段 | 来源 | 语义 |
-|---|---|---|
-| `schema_version` | packer 常量 | 固定 `dream-surface/v1` |
-| `deck_id` | thread 锁定的 Deck | 会话级 launch 事实 |
-| `plugins[]` | 本次 manifest 全量插件条目投影 | 只含 `package_spec`、`artifact_digest`、`resolved_version` |
-| `entry_route` | 胜出的 surface 声明 | 允许前端进入的 story-workspace 路由 |
+README 必须说明：静态文件禁止 Agent 修改；Agent 只可通过 `StoryWorkspaceDreamFileWriter` 写 `runtime/**`；页面数据从后端接口读取。
 
-明确禁止的字段：
+## 4. Agent 运行内容层
 
-- `workflow_run_id`；
-- `deck_plugin_binding_id`、`binding_revision`、`deck_plugin_version`、`deck_runtime_snapshot_id`、`runtime_plugin_lock_id`；
-- `projection_entry`；
-- `created_at`、`updated_at`、`packed_at` 等时间戳；
-- review、Gate、run status、attempt、supersede、人物、场景、分镜或执行步骤状态。
-
-### 5.3 `README.md`
-
-README 必须告诉 Agent 与人工排障者：
-
-1. 本目录由 packer 在首个 agent turn 的 pack 时物理映射；
-2. `workspace.json` 是静态 launch 事实；
-3. 运行期事实只认会话 / story-workspace REST API；
-4. Agent 不得写、改、删本目录；
-5. Dream 提案仍走 Agent 输出解析与 `story-workspace-output` 生命周期帧，不经本目录落盘。
-
-当前模板实现位于 `backend/services/claude_plugin/workspace_init.py:258-270`。
-
-## 6. 各阶段元信息写入规则
-
-### 6.1 总规则
-
-所有阶段对 `.dream/**` 都是 **0 次写入**。阶段元信息写入其已有 canonical owner，host 需要展示时通过解析、数据库和 REST 投影取得。
-
-| 阶段 | 插件实际写区 | host 侧承载 | `.dream/` |
-|---|---|---|---|
-| 故事人物 | `assets/characters/*.md` 及索引/锁；YAML frontmatter | `story_workspace_characters` + 审阅 REST | 禁止写入 |
-| 故事场景 | `assets/scenes/*.md` 及索引/锁；YAML frontmatter | `story_workspace_scenes` + 审阅 REST | 禁止写入 |
-| 故事镜头 / 分镜 | skill 声明的 storyboard 文件与 `.drama/checks/` 校验报告；审批 frontmatter | 后续 episodes/projection 合同与 REST；当前缺口 G5 | 禁止写入 |
-| 插件内部生产 run | `.dramaforge/runs/{internal-run-id}/` | 插件内部运行审计；当前无 host run ID 映射 | 禁止写入 |
-| Ink-Dream workflow run | 不由插件文件定义 | `workflow_runs`、transitions、actor-scoped REST | 禁止写入 |
-| 用户审阅确认 | 不回写 `.dream` | story-workspace 内容表、review REST | 禁止写入 |
-| guidance | `chat_message.metadata.kind="story-workspace-guidance"` | guidance REST + 历史反查 | 禁止写入 |
-
-### 6.2 `projection_entry` 的处理
-
-当前执行页 projection 端点不存在，projection 恒为空（`design_005:113-118`、G5 `:264`）。因此：
-
-- 不允许在 `workspace.json` 中写一个尚不可兑现的 `projection_entry`；
-- 任务三若实现 G5，应在 `backend/story_workspace/contracts.py` 定义 actor-scoped REST 响应，由前端局部合同 `frontend/src/hooks/story-workspace/contracts.ts` 消费；
-- 若未来确需静态路由模板，须明确它不包含 run ID、不代表数据存在，并通过新的 schema 评审；不能就地扩写 `dream-surface/v1`。
-
-### 6.3 上游 run ID 与 host run ID
-
-drama-forge 的 `.dramaforge/runs/{internal-run-id}` 与 Ink-Dream 的 `workflow_run_id` 是两个现有 owner。未建立显式、持久化且可审计的绑定前，不得在任一侧推断等价关系，也不得把二者同时复制进 `.dream/`。
-
-## 7. 冻结、幂等、原子与失败语义
-
-### 7.1 首次物理映射
-
-- packer 在 `.dream.tmp-<pid>/` 中写完两个文件；
-- 全部成功后以 `os.rename` 原子就位；
-- 写入失败清理临时目录，抛出 `CLAUDE_PLUGIN_INIT_PROFILE_INVALID`，整个 pack 失败；
-- 已有半写目录仅允许首次非冻结 pack 在原子就位前清理并重建。
-
-实现证据：`backend/services/claude_plugin/workspace_init.py:273-312`、`backend/services/claude_plugin/workspace_packer.py:240-264`。
-
-### 7.2 同 digest 幂等
-
-完整 `.dream/README.md` 与 `workspace.json` 已存在时，`materialize_dream_surface()` 保持文件不变；相同输入重 pack 字节一致。不得以更新时间戳破坏幂等。
-
-### 7.3 冻结工作区
-
-一旦存在 launch manifest：
-
-- 插件版本不交换；
-- profile init steps 不重跑；
-- `.dream/` 只校验 `workspace.json` 存在，不重建；
-- 缺失则 pack 失败，不从当前插件引用推断并补写；
-- pack-receipt 可反映 `frozen: true`，但这不修改 `.dream/`。
-
-### 7.4 并发边界
-
-当前 `.dream` 合同只有 packer 单 writer，且只在首次 pack 写一次。维持静态冻结后没有 Agent 与 runner 并发追加场景，因此不引入文件锁、append journal 或 last-write-wins。若未来开放运行期写入，必须先另立单 writer、锁、回滚、清理、重放与可重建合同，不能复用 v1。
-
-## 8. manifest、receipt 与前端发现
-
-### 8.1 三份载体的关系
-
-| 载体 | 位置 | 用途 | 是否由前端直接读文件 |
-|---|---|---|---|
-| `.dream/workspace.json` | 会话工作区 | Agent/排障者只读的静态 launch 说明 | 否 |
-| `.ink/launch-manifest.json` | 会话工作区 | launch 唯一事实源，含 `surfaces[]` | 否；由端点透传 |
-| `.ink/plugin-pack-receipt.json` | 会话工作区 | pack 审计与 manifest 缺位时的 surface 兜底 | 否；由端点透传 |
-
-manifest 和 receipt 的 `surfaces[]` 保存 `{name, protocol_dir, entry_route}`；它们不嵌入 `workspace.json` 全文。
-
-### 8.2 透出端点
-
-前端只调用：
+### 4.1 目录
 
 ```text
-GET /api/claude-agent/threads/{thread_id}/plugin-load-receipt
+.dream/
+├── README.md
+├── workspace.json
+└── runtime/
+    └── runs/
+        └── <workflow_run_id>/
+            ├── run.json
+            └── stages/
+                ├── characters.json
+                ├── scenes.json
+                └── storyboards.json
 ```
 
-端点先校验 thread owner，再安全解析会话工作区，整文件透传 `launch_manifest` 与 `receipt`；pre-pack 或工作区缺位返回 `workspace_found:false`（`backend/routers/claude_agent.py:471-523`）。前端不得发起文件系统探测 API。
+运行层不创建 events、projection、review、reject、failure、retry 或 archive 子目录。
 
-### 8.3 “要不要打开渲染页面”的判定
+### 4.2 `run.json`
 
-`useWorkspaceSurfaces(threadId)` 的算法（`frontend/src/hooks/story-workspace/useWorkspaceSurfaces.ts:18-122`）：
+```json
+{
+  "schema_version": "dream-run/v1",
+  "workflow_run_id": "run_<32hex>",
+  "thread_id": "<chat thread id>",
+  "source": {
+    "deck_plugin_binding_id": "<id>",
+    "binding_revision": 3,
+    "deck_plugin_version": "<version>",
+    "deck_runtime_snapshot_id": "<id>",
+    "runtime_plugin_lock_id": "<id>"
+  },
+  "projection_entry": "/api/story-workspace/workflow-runs/run_<32hex>/dream-files",
+  "required_stages": ["characters", "scenes", "storyboards"],
+  "revision": 1
+}
+```
 
-1. `threadId` 缺失 → `undefined`；
-2. 请求失败、HTTP 非 2xx、JSON 非法或 `workspace_found !== true` → `undefined`；
-3. 优先取 `launch_manifest.surfaces`；
-4. manifest 不含有效数组时才回退 `receipt.surfaces`；
-5. 只保留同时具有字符串 `name`、`protocol_dir`、`entry_route` 的条目；
-6. 空数组、旧会话无键或无有效 dream surface → `undefined`；
-7. 只有 `name="dream"` 的 surface 才允许 Dream 审阅面板侧渲染跳转入口；目标使用服务端聚合阶段决定，`entry_route` 只作为 surface 入口，不替代 run 深链。
+规则：
 
-`undefined` 的 UI 语义是“隐藏入口”，不是错误空态。前端不能根据 `.dream/` 路径字符串、URL query 或本地文件存在性猜测 surface。
+- Agent 从 host 提供的受控运行上下文复制字段，不猜测 run/source ID；
+- `projection_entry` 使用固定后端模板，插件不得提供外部 URL；
+- `required_stages` 由插件合同声明；本专项固定人物、场景、分镜三类；
+- `revision` 每次 run 描述变更单调增加；
+- `.dramaforge` internal run ID 只能作为可选 opaque 字段，不能替代 host run ID。
 
-### 8.4 六态按钮与 G6
+### 4.3 stage 文件
 
-surface 只解决“该会话是否声明 Dream 页面能力”。按钮的六态文案和目标还需要服务端聚合 review/run 阶段；该聚合端点当前缺位（`design_005:265`），所以线上默认隐藏。不得用 `workspace.json` 或前端拼接状态绕过 G6。
+三个文件都使用 `dream-stage/v1`：
 
-## 9. 异常与兼容矩阵
+```json
+{
+  "schema_version": "dream-stage/v1",
+  "workflow_run_id": "run_<32hex>",
+  "stage": "characters",
+  "revision": 2,
+  "source_files": ["assets/characters/lead.md"],
+  "page": {
+    "title": "人物",
+    "entry_route": "/story-workspace/characters?run=run_<32hex>"
+  },
+  "items": [
+    {
+      "entity_id": "character_lead",
+      "display_name": "主角",
+      "summary": "页面摘要",
+      "source_file": "assets/characters/lead.md",
+      "relations": []
+    }
+  ]
+}
+```
 
-| 场景 | 结果 | 用户可见行为 |
-|---|---|---|
-| 插件无 profile 或无 `surfaces` | 正常 pack，无 `.dream/` 和 manifest surface | 隐藏入口 |
-| profile `surfaces` 非数组或字段非法 | pack fail-closed，`CLAUDE_PLUGIN_INIT_PROFILE_INVALID` | 首个 turn 失败，展示既有错误 |
-| 多插件声明 `dream` | 首个声明胜出，后续冲突写 receipt warning | 使用胜出入口；不合并 |
-| thread 已创建但首个 turn 未 pack | `workspace_found:false` | 隐藏入口 |
-| 旧会话 manifest 无 `surfaces` | 正常兼容 | 隐藏入口，不补探测 |
-| manifest 有 surface、receipt 无 | manifest 优先 | 显示入口所需 surface 可用 |
-| manifest 无有效 surface、receipt 有 | receipt 兜底 | surface 可用 |
-| 两者 JSON 损坏或请求失败 | 前端降级 `undefined` | 隐藏入口，不抛 surface 专属错误 |
-| 冻结工作区 `.dream/workspace.json` 缺失 | pack 失败，不重建 | 保持冻结不变量，人工排障 |
-| Agent 尝试写 `.dream/**` | 合同违规 | 不把写入视作有效事实；强制写拒绝钩子不在本期 |
-| run 不存在、无权或已 supersede | 由 actor-scoped run API 与深链策略处理 | 404/403 提示或回退；与 surface 发现无关 |
+字段规则：
 
-## 10. 安全与隐私
+| 字段 | 规则 |
+|---|---|
+| `stage` | 只允许 `characters` / `scenes` / `storyboards`，并与文件名一致 |
+| `revision` | 单调递增；页面修改与 Agent 重写都必须基于当前 revision |
+| `source_files` | 当前会话工作区内的相对路径，必须通过 realpath containment |
+| `page.entry_route` | 由 stage 固定映射，插件不能自定义域外路由 |
+| `items` | 页面展示所需元信息；不复制 secret、提示词、二进制或全文 |
 
-- `.dream/` 不包含提示词、secret-ref 值、令牌、用户输入全文或内容产物。
-- `plugins[]` 只暴露已锁定制品的非敏感标识和 digest。
-- run REST 必须按 actor/workspace scope 校验；不得因为知道 `entry_route` 或 `workflow_run_id` 获得数据访问权。
-- `protocol_dir` 和 `entry_route` 在 pack 期校验，阻止路径穿越与 story-workspace 域外路由。
-- 前端只信服务端端点返回，不把会话工作区暴露为通用文件浏览接口。
+固定路由：
 
-## 11. 本期不做与后续入口
+| stage | 页面 |
+|---|---|
+| `characters` | `/story-workspace/characters?run=<run_id>` |
+| `scenes` | `/story-workspace/scenes?run=<run_id>` |
+| `storyboards` | `/story-workspace/runs/<run_id>/execution` 的 Outline/叙事点入口 |
 
-本期不做：
+stage 文件不存在表示该模块尚未由 Agent 写完；文件存在且 schema、run ID、revision 和 source paths 有效，表示对应页面可以渲染。不增加 generating/validating/failed 等业务状态。
 
-- `.dream/runs/` 或任意运行期子区；
-- Agent/插件向 `.dream` 追加人物、场景、分镜元信息；
-- `workspace.json` v2；
-- `workflow_run_id` 与 drama-forge internal run ID 的文件级映射；
-- projection REST 端点（G5）与六态按钮聚合端点（G6）的实现；
-- G1～G3 状态机生产接线；
-- 强制拒绝 Agent 写 `.dream` 的文件系统钩子；
-- 视频、上传、播放器、复杂画布和移动端。
+## 5. 插件阶段何时更新 `.dream`
 
-后续如要改变任一项，必须：
+| Agent 执行步骤 | canonical 文件 | `.dream` 更新时点 | 页面结果 |
+|---|---|---|---|
+| 建立 Dream run | 无内容文件 | Agent 取得 host run context 后先原子写 `run.json` | Dream 显示本次运行与三个等待中的模块 |
+| 生成人物 | `assets/characters/*.md` 与 frontmatter | 所需人物文件全部写完后写/替换 `stages/characters.json` | 人物页面出现并可编辑 |
+| 生成场景 | `assets/scenes/*.md` 与 frontmatter | 所需场景文件全部写完后写/替换 `stages/scenes.json` | 场景页面出现并可编辑 |
+| 生成分镜 | `stories/<project>/episodes/EP??/storyboard.yaml`；可选关联 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/` | canonical `storyboard.yaml` 写完后写/替换 `stages/storyboards.json`；报告若已生成可作为附加 source refs，不阻塞页面出现 | Outline、叙事点和镜头摘要出现 |
+| 用户确认 | 用户在页面积累本地修改 | “确认并继续”命令交回同一 Chat Agent；Agent 先写 source files，再更新受影响 stage revision | 页面刷新为确认时版本，Agent 继续后续执行 |
+| 后续执行 | 插件定义的后续 workspace 文件 | Agent 若更新人物/场景/分镜，就同步提高对应 stage revision | 页面持续显示最新工作区内容 |
 
-1. 先更新术语表；
-2. 修订本文与 DEC-029 注记；
-3. 明确事实 owner、单 writer、并发、失败回滚、冻结升级和清理；
-4. 为 host run ↔ 插件 internal run 建立显式合同；
-5. 后端合同只归 `backend/story_workspace/contracts.py`，前端局部合同只归 `frontend/src/hooks/story-workspace/contracts.ts`；
-6. 补 Red/Green 测试，覆盖冻结、并发、失败与旧会话兼容。
+人物、场景可以按插件工作流并行写；每个 stage 文件只有在该阶段页面所需文件完整后才原子出现。用户不对每个 item 分别确认。
+
+## 6. 四阶段文件交互时序
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 创作者
+    participant FE as Dream 前端
+    participant API as story-workspace API
+    participant Chat as 同一 Chat Agent
+    participant FS as 会话工作区
+
+    rect rgb(246,239,229)
+        Note over Chat,FS: 阶段一：Agent 产出
+        Chat->>FS: 写 run.json
+        Chat->>FS: 写人物 canonical 文件
+        Chat->>FS: 原子写 characters.json
+        Chat->>FS: 写场景 canonical 文件
+        Chat->>FS: 原子写 scenes.json
+        Chat->>FS: 写分镜 canonical 文件
+        Chat->>FS: 原子写 storyboards.json
+        Chat-->>API: story-workspace-output(run, changed stages/revisions)
+    end
+
+    rect rgb(255,250,242)
+        Note over FE,API: 阶段二：页面渲染
+        API-->>FE: SSE 通知 Dream 文件已更新
+        FE->>API: GET dream-files
+        API->>FS: 校验并读取 run/stages
+        FS-->>API: 文件描述与 source refs
+        API-->>FE: 人物 / 场景 / 分镜页面数据
+    end
+
+    rect rgb(246,239,229)
+        Note over U,Chat: 阶段三：用户修改并一次确认
+        U->>FE: 修改页面中的内容
+        U->>FE: 点击“确认并继续”
+        FE->>API: confirmation(base revisions, edits, idempotency key)
+        API->>Chat: 隐藏 Chat 消息注入原 thread
+        Chat->>FS: 写入用户修改的 source files
+        Chat->>FS: 原子提高受影响 stage revisions
+    end
+
+    rect rgb(255,250,242)
+        Note over Chat,FE: 阶段四：后续执行
+        Chat->>Chat: 按同一插件与锁定上下文继续
+        Chat->>FS: 持续写后续 workspace 文件与 stage revisions
+        Chat-->>FE: SSE → GET dream-files → 页面刷新
+    end
+```
+
+## 7. 用户修改与“确认并继续”合同
+
+### 7.1 页面编辑
+
+- 页面从 `dream-files` REST 取得 stage revision 与可编辑字段。
+- 用户修改先保存在前端本地草稿；未确认离开时提示存在未提交修改。
+- 页面不直接写工作区，也不逐项发送 confirm/reject。
+- 只有一个主操作：“确认并继续”。
+
+### 7.2 确认命令
+
+目标端点：
+
+```text
+POST /api/story-workspace/workflow-runs/{run_id}/dream-confirmation
+```
+
+目标合同 `StoryWorkspaceDreamConfirmationCommand`：
+
+```json
+{
+  "storyWorkspaceRunId": "run_<32hex>",
+  "threadId": "<thread id>",
+  "baseRevisions": {
+    "characters": 2,
+    "scenes": 1,
+    "storyboards": 3
+  },
+  "edits": [
+    {
+      "stage": "characters",
+      "entityId": "character_lead",
+      "fields": {"summary": "用户修改后的摘要"}
+    }
+  ],
+  "idempotencyKey": "swc_<uuid>"
+}
+```
+
+服务端行为：
+
+1. 校验 actor、thread、run 与 required stage revisions；
+2. 把命令保存为 `metadata.kind="story-workspace-dream-confirmation"` 的隐藏 user 消息；
+3. 同幂等键同内容只注入一次，同键不同内容冲突；
+4. 触发原 thread 的同一 Chat Agent turn；
+5. Agent 先把 edits 写入 canonical 文件并更新 stage revisions，再继续插件后续步骤。
+
+不建立逐项 review_status，不提供驳回、失败、重试或归档命令。
+
+## 8. 前端读取与页面显示
+
+### 8.1 surface 与内容读取分工
+
+| 问题 | 接口 |
+|---|---|
+| 会话是否支持 Dream？ | `plugin-load-receipt` 的 `surfaces[]` |
+| 本次 run 有哪些 Dream 页面内容？ | `GET /api/story-workspace/workflow-runs/{run_id}/dream-files` |
+
+`useWorkspaceSurfaces()` 继续使用 manifest 优先、receipt 兜底；无 surface 时隐藏入口。stage 文件是否存在只影响页面内容，不改变 surface 能力。
+
+### 8.2 `dream-files` 响应
+
+后端读取前必须校验 thread owner、run ID、schema、revision 与 source path containment。响应至少包含：
+
+- `storyWorkspaceRunId`、`threadId`、来源五字段；
+- required stages；
+- 每个已存在 stage 的 revision、entry route、items 与可编辑字段；
+- `canConfirm`：全部 required stage 文件存在且 base revisions 一致；
+- `confirmationLabel`：固定“确认并继续”。
+
+后端合同只归 `backend/story_workspace/contracts.py`，前端局部合同只归 `frontend/src/hooks/story-workspace/contracts.ts`；`backend/database.py` 只读、零 DDL。
+
+### 8.3 SSE
+
+Agent 每次原子写完 run/stage 文件后，复用 `story-workspace-output` 生命周期帧携带 `{runId, changedStages, revisions}`。前端收到后只使 `dream-files` query 失效并重新 GET；SSE payload 不承载全文。
+
+## 9. 写入一致性与并发边界
+
+- `StoryWorkspaceDreamFileWriter` 只接受当前 run 目录与固定 stage 文件名。
+- 每次写入先校验 expected revision，再写同目录临时文件、flush/fsync、`os.replace`。
+- 同一 Chat thread 同时只允许一个会修改当前 Dream run 的 Agent turn；确认命令使用幂等键防止重复 continuation。
+- 不同 stage 可并行准备 canonical 文件，最终替换各自独立 JSON；同一 stage revision 必须串行。
+- 不允许 append JSON，不允许绝对路径、`..`、symlink 逃逸或跨 run 写入。
+- 临时写未完成时保留上一有效 revision；页面继续显示上一版或等待该 stage 文件出现，不新增业务失败页面。
+- 冻结分支仍只校验静态 `workspace.json`，不得删除或重建 Agent 运行内容层。
+
+## 10. 上游兼容
+
+| 上游文件 | Agent 补写的 Dream 文件 |
+|---|---|
+| `assets/characters/*.md` | `stages/characters.json` |
+| `assets/scenes/*.md` | `stages/scenes.json` |
+| `stories/<project>/episodes/EP??/storyboard.yaml`（可选关联 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`） | `stages/storyboards.json` |
+
+现有 drama-forge skill 需要在任务三由插件制品说明或 adapter 增加这些补写步骤；vendor 原目录与文件格式保持不变。
+
+旧会话只有静态层时仍可显示 Dream 入口；没有 `run.json` 时页面显示等待 Agent 写入，不自动改写旧工作区。
+
+## 11. 本期不做
+
+- 逐项确认、批量确认、Review Gate 聚合；
+- 驳回、失败、重试、归档业务状态或操作；
+- event journal、host projection 聚合器、stage 状态机；
+- 浏览器直接读写工作区；
+- 用户手动新建人物、场景或分镜；
+- 视频、上传、播放器、外部模型选择和复杂画布；
+- 移动端、平板端、触控适配；
+- 修改 `backend/database.py` 或新增 DDL；
+- 把 G1～G3/G5/G6 写成已实现。
 
 ## 12. 验收清单
 
-- [ ] 术语表只做索引，并指向本文作为 `.dream` 唯一设计 owner。
-- [ ] 插件声明、物理映射、目录/schema、冻结与失败语义均可在本文唯一定位。
-- [ ] `workspace.json` 明确排除 run、来源字段、`projection_entry` 与时间戳。
-- [ ] 人物、场景、分镜阶段的 canonical 写区与 `.dream` 0 写入规则明确。
-- [ ] Agent 只读边界与 REST 唯一运行事实源明确。
-- [ ] manifest 优先、receipt 兜底、旧会话/错误缺省隐藏规则明确。
-- [ ] G1～G3、G5、G6 没有被文件合同伪装成已实现。
-- [ ] 文中使用“物理映射”，不使用禁用同义词。
+- [ ] 静态 `workspace.json` 保持 `dream-surface/v1` 与冻结语义。
+- [ ] Agent 只可写 `.dream/runtime/**`，不能修改静态启动层。
+- [ ] `run.json` 包含 run/source 字段、`projection_entry` 与 required stages。
+- [ ] 人物、场景、分镜 canonical 文件完成后才出现对应 stage 文件。
+- [ ] stage 文件存在即页面可渲染，不设计驳回或失败状态机。
+- [ ] 页面允许用户修改内容，并且只有一次“确认并继续”。
+- [ ] 确认命令注入原 Chat thread；同一 Chat Agent 写入修改后继续后续执行。
+- [ ] 后续执行只描述持续写工作区与页面刷新，不包含驳回、失败、重试或归档。
+- [ ] 前端经 actor-scoped REST 读取，SSE 只通知刷新，不直读文件。
+- [ ] revision、幂等、原子替换、路径 containment 与静态冻结边界明确。
+- [ ] G1～G3/G5/G6 仍标为待实现。
+- [ ] 文中只使用“物理映射”，不使用禁用同义词。
 
 ## 13. 变更记录
 
 | 日期 | 内容 |
 |---|---|
-| 2026-08-04 | 初版：从 `design_004` 分离 `.dream` 完整合同；按任务一裁决维持 DEC-029 静态冻结；补上游真实写区、阶段写入规则、前端发现算法与 G1～G6 边界 |
+| 2026-08-04 | 初版：只设计静态 `.dream` |
+| 2026-08-04 | 首轮审阅修订：形成分层方案中间稿，后按用户反馈废止 |
+| 2026-08-04 | 最终用户修订：改为同一 Chat Agent 通过工作空间写 run/stage 文件；用户只修改并一次确认，确认后 Agent 继续；删除驳回、失败、重试和归档设计 |

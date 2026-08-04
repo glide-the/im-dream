@@ -1,4 +1,4 @@
-# Chat ↔ Dream 工作台联动：`.dream` 协议目录、审阅面板跳转链与独立执行页
+# Chat ↔ Dream 工作台联动：`.dream` 协议目录、Dream 入口与独立执行页
 
 > **Design ID**: `design_004_story-workspace-dream-surface-execution-page`
 > **稳定基线**: [story-workspace-prd.md](./story-workspace-prd.md)、[story-workspace-layout-design.md](./story-workspace-layout-design.md)、[design_003_story-workspace-episodes-metadata-review.md](./design_003_story-workspace-episodes-metadata-review.md)
@@ -13,10 +13,10 @@
 
 本文是 story-workspace 稳定设计与 drama-forge 工作区初始化设计的**受控增量附录**，不是平行 PRD。
 
-- SUO-230 已确认的顶部 Dream 导航、canonical `/story-workspace/dream`、审阅阶段桌面三栏、`StoryWorkspaceReviewGate`、未确认不得继续、表格替代复杂画布、排除平台视频均保持不变；后续执行阶段按本文 §5.1 与 DEC-030 的 2026-08-04 注记采用两层协作工作台。
-- design_003 已确认的 episodes 投影、五步闭环、审阅 Gate、运行/版本/审计最小合同、合同归属与 `backend/database.py` 只读均保持不变。
+- 顶部 Dream 导航、canonical `/story-workspace/dream`、确认前桌面三栏、结构化内容替代复杂画布与排除平台视频保持不变；右栏是内容编辑器，整页只有一次“确认并继续”，后续执行采用两层协作工作台。
+- design_003 只作为代码与历史设计背景；其中逐项审批模型不进入现行 Dream 主业务链。合同归属与 `backend/database.py` 只读仍保持不变。
 - drama-forge-workspace-init-design 已确认的 workspace-init profile（=制品内 `.ink/workspace-init.json`，schema `workspace-init/v1`，由 `load_init_profile()` 解析；区别于 Agent profile=Deck 提示词/配置归属物，代码侧归 `services/deck/`）schema（`workspace-init/v1`）、受管 venv、packer（`pack_workspace_plugins()`，`backend/services/claude_plugin/workspace_packer.py`）扩展插槽与冻结语义均保持不变。
-- 本文只补充三件事：①插件制品如何声明 `.dream` 协议目录并经 launch manifest 透出；②Dream 审阅面板侧按钮如何跳转到 Dream 审阅/执行；③「后续执行」阶段独立执行页的布局、状态与审计。
+- 本文只补充三件事：①插件制品如何声明 `.dream` 协议目录并经 launch manifest 透出；②Dream 入口如何跳转到当前 run；③「后续执行」阶段独立执行页的布局与状态。
 - 若本文与稳定基线冲突，仅本文显式标记为增量的 `.dream` surface、跳转链与执行页规则生效；其余以稳定基线为准。
 
 ### 0.1 已拍板决策（本文不重新讨论）
@@ -38,16 +38,16 @@
 
 ### 1.1 背景
 
-既有链路「Agent 产出 → 页面渲染 → 用户审阅确认 → 后续执行」中，前三步的页面与状态已由 design_003 定义，用户审阅确认在 Dream 页面完成。仍缺两块：
+现行链路为「Agent 产出 → 页面渲染 → 用户修改并确认 → 同一 Chat Agent 后续执行」。用户在 Dream 页面修改整份内容，只确认一次。仍需说明两块：
 
 1. **后续执行阶段如何从 Chat 对话跳转到 Dream 工作台**：Deck 加载的插件有特定的工作空间命名，需要增加固定的前缀协议目录（`.dream`），使系统可以判断一条会话要不要打开渲染页面。
-2. **后续执行阶段的页面布局**：应参照调研 PDF 的创作者协作页面——两层深度交互：数据层（资产、任务进度）+ 用户通过侧边栏指导 Agent 进行创作推进。
+2. **后续执行阶段的页面布局**：应参照调研 PDF 的创作者协作页面——数据/任务层与选中项聚焦上下文层；页面跟随同一 Agent 的工作空间写入。
 
 ### 1.2 目标
 
 - 建立 `.dream` 协议目录合同：声明方、内容物、物理映射时机、透出链路、兼容行为。
-- 建立 Chat → Dream 的审阅面板侧跳转链：可见条件、阶段文案、深链路由与 run 定位。
-- 建立独立执行页：信息架构、数据层、指导侧边栏、状态表、与 ReviewGate 的关系和审计归属。
+- 建立 Chat → Dream 的入口链：可见条件、阶段文案、深链路由与 run 定位。
+- 建立独立执行页：信息架构、数据层、工作空间持续更新，以及与一次“确认并继续”的关系。
 
 ---
 
@@ -58,8 +58,8 @@
 - workspace-init profile 的 `surfaces[]` 扩展 schema、校验规则与错误码。
 - `.dream/` 目录内容物、静态/运行期事实边界、Agent 侧读写约定。
 - packer 物理映射 `.dream/` 与 launch-manifest / pack-receipt / `plugin-load-receipt` 端点的 `surfaces` 透出。
-- Dream 审阅面板侧跳转按钮合同、六种阶段文案与深链行为、异常态。
-- 独立执行页路由、布局线框、数据层、指导侧边栏、状态表、审计扩展。
+- Dream 入口按钮合同、四种阶段文案与深链行为。
+- 独立执行页路由、布局线框、数据层与状态表。
 - 命名清单、合同归属、验收标准、风险与 DEC 增量记录。
 
 ### 2.2 范围外
@@ -68,15 +68,15 @@
 - 不定义 workspace-init profile 的既有字段（runtime_dirs / workspace_files / python），只扩展 `surfaces[]`。
 - 不定义执行引擎本身的步骤语义（Deck workflow 决定继续/结束，沿用基线）。
 - 不新增移动端/平板端设计；不提供视频预览、上传、生成、播放器或模型计费。
-- 不修改 `backend/database.py`，不新增审计 Schema / DDL；指导与重试审计复用既有信封的合同层扩展。
-- 不改变 Agent 故事产出 JSON 本身；只在 Dream 审阅面板侧增加跳转按钮（§4）。
+- 不修改 `backend/database.py`，不新增审计 Schema / DDL。
+- 不改变现有 Agent 故事产出 JSON 解析代码；目标态由同一 Chat Agent 的工作空间文件驱动页面，并在 Dream 入口增加 run 深链（§4）。
   > 旁注（2026-08-03 兼容性修订）：Agent 的故事产出 JSON 由后端从 assistant 全文解析（`backend/services/story_workspace/agent_integration.py:29-58`）并持久化为 `story_workspace_*` 表行；SSE 侧发出独立的 `story-workspace-output` 生命周期帧，前端收到后**不进消息气泡**（`frontend/src/components/chat/ChatPanel.tsx:421-424`），只驱动打开 Dream 审阅面板。代码中**不存在**「Chat 消息流中的提案消息类型」这一合同；提案的可见形态是 Dream 域审阅面板/列表行。原旁注「Dream 提案 JSON 合同属 Chat 域既有合同（SSE 消息流中的提案消息类型）」为错误表述，已按审计报告 C9 更正。
 
 ---
 
 ## 3. `.dream` 协议目录合同（历史摘要，canonical 见 design_006）
 
-> **Canonical 边界（2026-08-04）**：本节保留 2026-08-03 的设计推导与 DEC 上下文，便于追溯；`.dream` 协议目录的现行规范只认 [design_006](./design_006_dream-protocol-dir-mapping.md)。若本节与 design_006 冲突，以 design_006 为准。2026-08-04 裁决维持 `dream-surface/v1` 与 DEC-029：生成期元信息不写 `.dream/`，`workspace.json` 不加入 `workflow_run_id`、运行来源五字段或 `projection_entry`。
+> **Canonical 边界（2026-08-04）**：本节保留 2026-08-03 的设计推导与 DEC 上下文；现行规范只认 [design_006](./design_006_dream-protocol-dir-mapping.md)。`dream-surface/v1` 静态启动层继续冻结；同一 Chat Agent 按插件约定通过会话工作空间更新 `.dream/runtime/`，`workspace.json` 仍不加入 run 级字段。
 
 ### 3.1 workspace-init profile 扩展：`surfaces[]`
 
@@ -119,6 +119,8 @@
 └── workspace.json     # 绑定事实，schema_version: "dream-surface/v1"
 ```
 
+> 上述为 2026-08-03 的**静态启动层摘要**。2026-08-04 用户修订新增 `.dream/runtime/`：同一 Chat Agent 写 run context 与人物/场景/分镜 stage 文件；完整 schema 只以 `design_006` 为准，不在本历史摘要复制。
+
 `workspace.json`：
 
 ```json
@@ -138,13 +140,13 @@
 
 **字段边界：`workspace.json` 只含 pack 期可知的 launch 事实（deck_id、插件制品清单、入口路由），且不含时间戳——同一 digest 重 pack 产物必须字节一致。** `workflow_run_id`、`binding_revision`、`deck_runtime_snapshot_id`、`runtime_plugin_lock_id` 等 **run 级事实不进 workspace.json**：pack 发生在会话首个 agent turn（thread 创建仅锁定 `chat_thread.deck_id`，不分配工作区、不 pack，见 §3.4.1；2026-08-03 兼容性修订，审计报告 B6），run 此时尚未存在，写入即自相矛盾；这些事实由 `plugin-load-receipt` 端点与 story-workspace REST API 在运行期提供。
 
-**静态 vs 运行期边界：`.dream/` 全部是 packer 物理映射的静态事实，运行期不由后端回写。** 工作区首次写 manifest 后即冻结；运行期回写会破坏冻结语义与「同一 digest 同一初始化行为」。Gate 状态、最新 run 指针、run 级绑定等易变事实一律由会话 / story-workspace REST API 提供；`workspace.json` 只回答「这个工作区由哪个 Deck、哪些插件制品驱动，入口在哪」。README 必须显式写明这一边界，防止 Agent 或下游把它误当实时事实源。
+**静态 vs 运行期边界：packer 物理映射并冻结的是 `README.md + workspace.json` 静态启动层，而不是整个 `.dream` 根目录。** `.dream/runtime/` 由当前 Chat Agent 写 run/stage 文件，不参与 artifact digest，也不由冻结 pack 重建或删除。前端通过 actor-scoped REST 读取，不直接探测工作区。
 
 ### 3.3 与 `.editor` / `.notion` 先例的一致性
 
 - `.dream` 是**真实文件**（packer 物理映射），不走 `.editor` 的 PreToolUse 钩子重定向虚拟索引模式——它无需映射到 EditorState，真实文件更简单且冻结友好。
 - Agent 侧读取：与普通文件一致（Read 工具）；README.md 即协议说明；注入版工作区 CLAUDE.md 中加一行指向 `.dream/README.md`。
-- 写权限：约定 **Agent 只读**。Dream 提案仍走既有 Chat JSON 合同输出，不经 `.dream/` 落盘。本期不加钩子强制，仅靠 README / 规则文案约束；后续可在 preflight 类钩子中加 `.dream/**` 写拒绝。
+- 写权限：静态层只由 packer 写；当前 Chat Agent 只可通过 `StoryWorkspaceDreamFileWriter` 写 `.dream/runtime/**`。浏览器不直接读写工作区。
 
 ### 3.4 `.dream/` 生成逻辑（触发链路 / 输入来源 / 生成物全文 / 时序）
 
@@ -165,10 +167,10 @@
            → 物理映射 .dream/（下方时序第 5 步）
            → launch-manifest / pack-receipt 写入 surfaces
   → 首个 turn pack 完成后，GET …/threads/{id}/plugin-load-receipt 透出 surfaces
-    → 前端据此在 Dream 审阅面板侧渲染跳转按钮（§4）
+    → 前端据此渲染 Dream 入口（§4）
 ```
 
-生成只发生在 **pack 时刻（会话首个 agent turn，非 thread 创建）**，不在 run 创建时、不在 Agent 运行中、不由 Agent 手写。**surfaces 首次可见时机 = 首个 agent turn pack 完成、manifest 落盘之后**；此前 `plugin-load-receipt` 返回 `workspace_found: false`（`backend/routers/claude_agent.py:500-507`），前端按「无 surface」处理（DEC-028 缺省即隐藏）。（2026-08-03 兼容性修订：原表述「后端创建 thread → pack_workspace_plugins # 每个会话创建时执行一次」与代码事实不符，已按审计报告 B6 更正。）
+静态启动层只在 **pack 时刻（会话首个 agent turn，非 thread 创建）**物理映射，不在 run 创建时或 Agent 运行中重写。**surfaces 首次可见时机 = 首个 agent turn pack 完成、manifest 落盘之后**；此前 `plugin-load-receipt` 返回 `workspace_found: false`（`backend/routers/claude_agent.py:500-507`），前端按「无 surface」处理。pack 完成后，同一 Chat Agent 才能按 `design_006` 写 `.dream/runtime/**`。（2026-08-03 兼容性修订：原表述「后端创建 thread → pack_workspace_plugins # 每个会话创建时执行一次」与代码事实不符，已按审计报告 B6 更正。）
 
 #### 3.4.2 输入来源（每个字段从哪来）
 
@@ -188,16 +190,16 @@
 `.dream/workspace.json` 见 §3.2。`.dream/README.md` 模板全文：
 
 ```markdown
-# .dream/ — Dream Surface 协议目录（只读）
+# .dream/ — Dream Surface 协议目录
 
 本目录由 packer 在会话首个 agent turn 的 pack 时物理映射到会话工作区，标识本工作区由 Dream 驱动插件加载。
 
 - workspace.json：静态 launch 事实（deck_id、插件制品清单、入口路由）。
   它在 pack 后不再变化，不含 workflow_run_id 等 run 级事实。
-- 运行期事实（run 状态、Gate 阶段、快照锁）一律以会话 / story-workspace
-  REST API 为准，不要以本目录文件判断。
-- 本目录对 Agent 只读：不要写入、修改或删除其中任何文件。
-- Dream 提案输出仍走 Chat JSON 合同，不经本目录落盘。
+- README.md 与 workspace.json 是静态启动层，Agent 不得修改。
+- runtime/ 是 Agent 运行内容层；同一 Chat Agent 仅通过
+  StoryWorkspaceDreamFileWriter 写入 run/stage 文件。
+- Dream 页面经 story-workspace REST/SSE 安全读取，不直接访问文件系统。
 
 入口路由：/story-workspace/dream
 ```
@@ -250,53 +252,47 @@ launch-manifest（`claude-launch/v1`）与 pack-receipt 同步增加紧凑形式
 
 ---
 
-## 4. Chat → Dream 跳转链（审阅面板侧按钮）
+## 4. Chat → Dream 跳转链（surface 入口）
 
-> 2026-08-03 兼容性修订（审计报告 C9）：代码中**不存在** Chat 消息流内的「Dream 提案 pending proposal 卡片」——`story-workspace-output` 是不进消息气泡的 SSE 生命周期帧（`frontend/src/components/chat/ChatPanel.tsx:421-424`），提案的可见形态是 Dream 域审阅面板/列表行。因此 `StoryWorkspaceSurfaceLinkButton` 的挂载点从「Chat 消息卡片」改写为**既有审阅面板侧**：不新建 Chat 卡片、不引入第二条渲染链路、不新增 Chat 域消息合同。原「消息卡片按钮」表述全部更正。
+> 代码中不存在 Chat 消息流内的 Dream 卡片；`story-workspace-output` 是不进消息气泡的 SSE 生命周期帧。既有 `StoryWorkspaceSurfaceLinkButton` 仍可作为 Dream surface 入口，但目标业务不再绑定逐项审阅状态；页面内容与一次“确认并继续”以 `design_006`/`design_007` 为准。
 
 ### 4.1 按钮合同
 
-Dream 审阅面板（`StoryWorkspaceReviewDetail`，`frontend/src/components/story-workspace/layout/StoryWorkspaceReviewDetail.tsx`）的提案详情区新增 `StoryWorkspaceSurfaceLinkButton`；故事列表行的操作列复用同一组件（同一 props 合同，两种挂载位置）。可见条件（同时满足）：
+`StoryWorkspaceSurfaceLinkButton` 可见条件：
 
 1. 当前 thread 经 `GET …/plugin-load-receipt` 透出的 `surfaces` 含 `name="dream"`（§3.5；面板所在会话上下文提供，前端不探测文件系统）；
-2. 面板当前选中的提案资源已绑定 `storyWorkspaceRunId`；
-3. 提案未被新 attempt supersede（新 attempt=新 run 记录（新 `workflow_run_id`），非 run 的子级；合同层以 `retryOfRunId` 关联；attempt / supersede 语义代码中尚不存在，属待实现）（已废弃提案的按钮降级为「查看运行记录」）。
+2. 当前 Dream 上下文已绑定 `storyWorkspaceRunId`。
 
-按钮状态由「提案 review 状态 + story-workspace run 状态」服务端聚合返回，前端不做状态推断。
+按钮状态由服务端结合 Dream stage 文件与 continuation 状态返回，前端不做文件探测或逐项 review 推断。
 
 ### 4.2 文案与跳转目标随阶段变化
 
-| Gate / run 阶段 | 主按钮文案 | 目标 |
+| Dream 阶段 | 主按钮文案 | 目标 |
 |---|---|---|
-| `pending_review`（含 validating 完成） | 前往 Dream 审阅 | 审阅深链 |
-| `confirmed` | 进入后续执行 | 执行页深链 |
+| required stage 文件未齐 | 查看 Dream 进度 | Dream run 页面 |
+| required stage 文件已齐、尚未确认 | 打开 Dream | Dream 可编辑页面 |
 | `continuing` | 查看执行进度 | 执行页深链 |
 | `completed` | 查看执行结果 | 执行页深链 |
-| `failed` | 查看失败详情 | 执行页深链（定位失败步骤） |
-| `rejected` / 版本过期 | 查看审阅记录 | 审阅深链（只读态） |
-
-> 注：表中「Gate / run 阶段」为服务端聚合校验（对应代码侧 `RunStatus` 状态机与 `PreflightService` 门禁）返回的 run 阶段；UI 组件为 `StoryWorkspaceReviewGate`，审计记录为 `StoryWorkspaceExecutionGateRecord`——三者同名不同实体（见 §0.2 术语对照表）。
 
 路由：
 
-- 审阅深链：`/story-workspace/episodes/:storyWorkspaceEpisodeId/review?run=:storyWorkspaceRunId`；episodeId 未绑定时退化为 `/story-workspace/dream?run=:storyWorkspaceRunId`。
+- Dream 深链：`/story-workspace/dream?run=:storyWorkspaceRunId`。
 - 执行页深链：`/story-workspace/runs/:storyWorkspaceRunId/execution`。
 
 ### 4.3 深链上下文与 run 定位
 
-- URL 必须携带 `storyWorkspaceRunId`（`?run=` query），可选 `storyWorkspaceEpisodeId`。
+- URL 必须携带 `storyWorkspaceRunId`（`?run=` query）。
 - Dream 页加载时若 URL 带 `run` 参数，**以该 run 为选中上下文**而非默认最新 run；run 不存在或不属于当前用户 → 提示并回退默认。
-- 深链仅做初始定位，不冻结选中：审阅期间出现新 attempt 时沿用 design_003 `story-workspace-stale-review` 态。
+- 深链只做初始定位；stage revision 由 `dream-files` 响应提供。
 - 运行来源五字段（workflow_run_id 等）由页面按 run 拉取，不进 URL。
 
-### 4.4 异常态
+### 4.4 缺省态
 
 | 场景 | 行为 |
 |------|------|
 | 会话无 dream surface（含首个 agent turn pack 完成前） | 不渲染按钮 |
-| run 失败 / 过期 | 按钮不消失，按 §4.2 降级文案 |
-| 面板当前提案对应 attempt 已被再次生成 supersede | 次按钮「查看最新版本」，跳最新 run 审阅深链 |
-| episodeId 缺失 | 审阅深链退化为 Dream 主页 + `?run=` |
+| run 尚无 stage 文件 | 打开 Dream 后显示“等待 Agent 写入” |
+| runId 缺失 | 退化为 Dream 主页，不猜测最新文件目录 |
 
 ---
 
@@ -304,7 +300,7 @@ Dream 审阅面板（`StoryWorkspaceReviewDetail`，`frontend/src/components/sto
 
 ### 5.1 布局归属
 
-**独立页面 = AppHeader（Dream 选中态）+ breadcrumb + 两层执行协作工作台，不嵌入 Dream 审阅三栏。** Dream 审阅三栏右侧的 owner 是「审阅当前 artifact version」，执行期上下文协作区的 owner 是「围绕当前叙事点或执行步骤指导 Agent、查看历史、处理失败」；二者不得混用。
+**独立页面 = AppHeader（Dream 选中态）+ breadcrumb + 两层执行协作工作台，不嵌入 Dream 审阅三栏。** 第一层用于 Assets/Outline 定位，第二层用于查看当前叙事点或执行步骤的结构化上下文；确认后页面只跟随同一 Chat Agent 的工作空间更新。
 
 2026-08-04 目标布局对齐 `调研Dreem_app平台.pdf` 第 3、6、7 页：第一层使用 `Assets / Outline` 索引定位叙事点或执行步骤；第二层由选中项打开上下文协作区。当前已实现的「左数据 Tabs + 常驻 360px 指导侧边栏」是过渡形态，任务三应调整为下述目标，不再把固定 360px 右栏当执行页最终合同。
 
@@ -315,52 +311,40 @@ Dream 审阅面板（`StoryWorkspaceReviewDetail`，`frontend/src/components/sto
 │ Assets │ Outline     │ 运行摘要 · 阶段 n/N · 当前步骤 · 状态                   │
 │                      │                                                       │
 │ 故事线 / 资产分组     │ 叙事点 / 执行步骤轻纸面条目                            │
-│ 节点数 / 状态         │ 人物、场景、产物引用、失败原因、重试次数                 │
+│ 节点数 / revision     │ 人物、场景、产物引用与 Agent 最新写入                    │
 │                      │                                                       │
 │ 运行记录入口          │ 选中条目 → 打开第二层上下文协作区                        │
 ├──────────────────────┴───────────────────────────────┬───────────────────────┤
 │ 第二层：当前叙事点的结构化产物摘要 / 执行状态           │ 上下文协作区            │
-│ 不含视频、上传、播放器或可编辑画布                      │ 确认事实、指导、历史、重试 │
+│ 不含视频、上传、播放器或可编辑画布                      │ 结构化上下文与历史        │
 └──────────────────────────────────────────────────────┴───────────────────────┘
 ```
 
 PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上下文协作区」操作动线；结构化产物摘要替代镜头预览，运行记录替代视频历史；舍弃视频预览、上传、播放器、外部模型选择与可编辑图库（沿用 design_003 §7.1）。视觉服从 `Ink & Memory UI Design v2.pdf` 第 4～5 页：Warm Canvas / Paper Cream、少面板、多留白、浅纸面分区、页面级单一虚线边界、静止条目无卡片阴影。
 
-### 5.2 数据层（只读，遵守 DEC-008）
+### 5.2 数据层
 
-- **资产**：来自 `StoryWorkspaceEpisodeProjection` 的角色 / 场景 / 分集产物只读引用与深链（回 Dream 详情）；页面内不提供任何创建 / 编辑控件。
-- **任务进度**：执行步骤表（步骤、状态、当前阶段、耗时、失败原因、重试次数），来源为 run 的执行事实投影 `StoryWorkspaceExecutionProjection`。
-- **运行记录**：事件时间线（确认、触发、指导、重试、完成 / 失败）。
-- 允许的唯一页面级动作是「重试失败步骤」，且经指导侧边栏受控触发并审计；数据层本身零写操作。
+- **资产**：来自 Chat Agent 工作空间文件的角色 / 场景 / 分镜引用与 stage revision。
+- **执行内容**：显示插件后续步骤持续写入的结构化文件和更新时间顺序。
+- **运行历史**：只读展示确认与 Agent 后续写入，不提供新的内容处置动作。
 
-### 5.3 Agent 指导侧边栏
+### 5.3 既有 guidance 能力的适用说明
 
-- 形态：**预设动作按钮 + 对话式指令输入**双模；指令为 run 级消息列表（指导历史），不是自由聊天。
-- 送达与幂等：`POST` 指导指令携带 `storyWorkspaceRunId` + 客户端幂等键；服务端校验 run 处于可指导状态后入队给执行中的 Agent。传输**复用发起该 run 的同一 Chat thread 作为通道，但指导消息不渲染为 Chat 会话消息**，避免执行页与 Chat 双入口写混淆。
-- **无 DDL 承载（2026-08-03 兼容性修订，审计报告 D11/D12/D13，三选一选定路线 1）**：指导以 `metadata` 标记的 user 消息落 `chat_message` 表，同一条承载链同时解决持久化、幂等与「不渲染」：
-  - **持久化**：`chat_message` 表已有 `metadata TEXT` JSON 列（`backend/database.py:603-611`），`save_chat_message(..., metadata=...)` 原生支持（`backend/database.py:4249-4296`）。guidance 消息 `metadata = {kind: "story-workspace-guidance", story_workspace_run_id, actor, request_id, idempotency_key, command_kind, text_summary}`。审计字段（actor / run / 指令摘要 / timestamp / request ID）全部落在该 metadata 与 `created_at` 上，**不新增表、不改 DDL，满足 DEC-026**。
-  - **幂等**：客户端幂等键作为 `chat_message.id`（派生 `guide_<idempotency_key>`）；`save_chat_message` 为 `INSERT OR REPLACE`，同键同内容重放收敛为单条记录。服务层先 `SELECT` 按 id 取出比对内容：同键同内容 → 返回 202（重放无害）；同键**不同**内容 → 返回 409 冲突（纯应用层逻辑，弥补 INSERT OR REPLACE 静默覆盖的语义弱点，无需 DDL）。
-  - **不渲染**：`GET /threads/{id}/messages` 全量返回消息的现状不变；Chat 视图在消息消费/渲染层按 `metadata.kind === "story-workspace-guidance"` **过滤**（前端局部逻辑，零 schema 改动；ChatView 已透传 metadata 字段，过滤可行）。
-  - **指导历史**：执行页侧边栏的「指导历史（指令+状态+时间）」按 `thread_id` + `metadata.kind` 反查 `chat_message` 渲染，不从应用日志读取。
-  - **不采纳的备选**：log-only（沿用 `_audit_review_action` 的 logger 模式，`backend/routers/story_workspace.py:367-389`）无法支撑指导历史页面查询，否决；复用 `workflow_run_transitions` 违反其「变迁必须改变状态」不变量（guidance 不产生状态变迁），否决。
-- **投影态说明（2026-08-03 兼容性修订，审计报告 D13）**：§5.4 的 `story-workspace-execution-awaiting-guidance`（Agent 阻塞等待用户输入）是**投影态**，由 `continuing` 状态 + 执行投影（如阻塞步骤标记）推断得出，**不是 `RunStatus` 新枚举值**（现有枚举 `preflight/queued/running/output_validating/pending_review/confirmed/rejected/continuing/completed/failed/cancelled`，`backend/models/workflow_run.py:26-37`），不为此动 DDL。
-- 审计：每条指导 = 一条 `StoryWorkspaceReviewEvent` 语义扩展（action 枚举增加 `guide`，含 actor、run、指令摘要、timestamp、request ID），承载于上述 `chat_message.metadata`；重试记录复用 `StoryWorkspaceExecutionGateRecord` 信封。**合同层扩展，持久化层复用 `chat_message`，不新增 DDL。**
+现有 guidance 端点和侧边栏实现保留为代码事实，但**不进入本次 Dream 主业务链**。目标流程只有“用户在 Dream 修改 → 一次确认并继续 → 同一 Chat Agent 后续执行”；执行页不追加业务操作或二次确认。后续若重新启用 guidance，必须另行评审，不从本设计推导。
 
-### 5.4 执行页状态表
+### 5.4 执行页目标状态表
 
 | UI 状态 | 进入条件 | 页面表现 | 可用动作 |
 |---------|----------|----------|----------|
-| `story-workspace-execution-continuing` | 执行中 | 进度条滚动、步骤表实时更新 | 提交指导、查看资产 |
-| `story-workspace-execution-awaiting-guidance` | Agent 阻塞等待用户输入 | 侧边栏高亮、步骤表标出阻塞步骤 | 提交指导（主焦点） |
+| `story-workspace-execution-continuing` | “确认并继续”已注入原 thread | Agent 持续写入 workspace，页面按 revision 刷新 | 查看 Assets / Outline |
 | `story-workspace-execution-completed` | 执行完成 | 完成摘要、产物深链 | 查看、返回 Dream |
-| `story-workspace-execution-failed` | 执行失败 | 失败阶段 + 非敏感错误码 | 重试失败步骤、回 Dream 再次生成 |
-| `story-workspace-execution-not-confirmed` | run 未过 Gate | 空态 + 提示 | 重定向审阅深链 |
+| `story-workspace-execution-not-confirmed` | 尚未提交一次“确认并继续” | 提示返回 Dream 完成修改 | 重定向 Dream run 页面 |
 
-### 5.5 与 ReviewGate 的关系
+### 5.5 与一次确认的关系
 
-- 执行页只承接第四步之后；未 `confirmed` 的 run 访问执行页 → 重定向至审阅深链并提示「先完成审阅确认」。
-- 执行触发仍走 design_003 的幂等 Gate（aggregate hash 服务端复核）；执行页不自造触发入口的授权事实。
-- 确认事实在执行页只读展示；后续执行失败保留确认事实（沿用 design_003 §3.3）。
+- 执行页只承接第四步；未提交 `StoryWorkspaceDreamConfirmationCommand` 的 run 访问执行页时，重定向 Dream run 页面。
+- 确认命令校验 required stages、base revisions 和幂等键，然后注入原 Chat thread。
+- 同一 Chat Agent 先写入用户修改再继续；执行页不提供第二次确认或其他内容处置动作。
 
 ---
 
@@ -369,15 +353,15 @@ PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上
 | 类型 | 规范命名 |
 |------|----------|
 | 执行页路由 | `/story-workspace/runs/:storyWorkspaceRunId/execution` |
-| 审阅深链 | 沿用 `/story-workspace/episodes/:storyWorkspaceEpisodeId/review` |
+| Dream 深链 | `/story-workspace/dream?run=:storyWorkspaceRunId` |
 | 页面组件 | `StoryWorkspaceExecutionPage` |
 | 数据层组件 | `StoryWorkspaceExecutionProgressTable`、`StoryWorkspaceExecutionAssetPanel` |
-| 指导组件 | `StoryWorkspaceGuidanceSidebar` |
-| 跳转组件 | `StoryWorkspaceSurfaceLinkButton`（2026-08-03 修订：挂载于 `StoryWorkspaceReviewDetail` 提案详情区与故事列表行操作列，非 Chat 消息卡片） |
+| 聚焦上下文组件 | `StoryWorkspaceExecutionFocus` |
+| 跳转组件 | `StoryWorkspaceSurfaceLinkButton` |
 | UI 状态 | `story-workspace-execution-*`（§5.4） |
-| 领域事件 | `story-workspace.execution.guidance-submitted`、`story-workspace.execution.step-retried` |
-| 合同值对象 | `StoryWorkspaceSurface`、`StoryWorkspaceGuidanceCommand`、`StoryWorkspaceExecutionProjection` |
-| 后端业务合同 | `backend/story_workspace/contracts.py`（surface 业务语义、指导、执行投影） |
+| 确认命令 | `StoryWorkspaceDreamConfirmationCommand` |
+| 合同值对象 | `StoryWorkspaceSurface`、`StoryWorkspaceDreamStage` |
+| 后端业务合同 | `backend/story_workspace/contracts.py` |
 | 前端局部 REST 合同 | `frontend/src/hooks/story-workspace/contracts.ts` |
 | launch 合同 | `surfaces[]` JSON schema 归 packer 模块（`backend/services/claude_plugin/`） |
 
@@ -397,15 +381,15 @@ PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上
 
 ### 7.2 跳转链
 
-- [ ] 有 / 无 surface 的会话，审阅面板侧分别显示 / 隐藏 `StoryWorkspaceSurfaceLinkButton`；六种阶段文案与目标正确。
+- [ ] 有 / 无 surface 的会话分别显示 / 隐藏 `StoryWorkspaceSurfaceLinkButton`；四种阶段文案与目标正确。
 - [ ] 带 `?run=` 深链打开 Dream 页定位指定 run 而非默认最新 run。
-- [ ] supersede 提案按钮降级为「查看最新版本」并指向最新 run。
+- [ ] 入口携带当前 run，前端不猜测最新工作区目录。
 
 ### 7.3 执行页
 
-- [ ] 未 confirmed 访问执行页重定向审阅深链；confirmed 后五种状态各有明确表现与动作。
-- [ ] 指导指令幂等提交、可审计（actor / run / 时间 / request ID 齐全）；指导消息不出现在 Chat 会话消息流。
-- [ ] 数据层无任何手动创建 / 编辑入口；唯一页面级动作「重试失败步骤」经侧边栏受控触发。
+- [ ] 未提交“确认并继续”时访问执行页，重定向对应 Dream run 页面。
+- [ ] 确认命令幂等注入原 Chat thread，同一 Agent 写入用户修改后继续。
+- [ ] 执行页只展示 Agent 后续写入，不提供第二次确认或其他内容处置动作。
 
 ### 7.4 命名与视觉
 
@@ -420,10 +404,10 @@ PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上
 |-------------|------|------|
 | workspace-init profile / dream surface 声明发生漂移 | `.dream` 物理映射与入口发现不一致 | 当前 profile 解析、`surfaces[]` 校验与物理映射已实现；后续变更以 design_006 为 canonical，并保留无 surface 缺省隐藏 |
 | 旧会话无 `surfaces` 字段（含 thread 创建后、首个 agent turn pack 完成前） | 入口不一致 | 缺省即隐藏，不补探测；行为文档化（§3.5） |
-| 深链 `?run=` 与 Gate 状态漂移（审阅期间新 attempt） | 用户审阅过期版本 | 沿用 design_003 `story-workspace-stale-review`；深链只做初始定位 |
-| 执行页与 Chat 双入口写冲突 | 指导与普通消息混杂、审计断裂 | 指导复用 thread 仅作传输通道、以 `chat_message.metadata.kind` 标记落库、Chat 视图按 kind 过滤不渲染（§5.3）；审计只记 ReviewEvent action=guide（承载于同一 metadata） |
+| 深链 `?run=` 与 stage revision 漂移 | 用户基于旧版本确认 | 确认时校验 base revisions；深链只做初始定位 |
+| Dream 页面与 Agent 同时更新内容 | 本地修改被覆盖 | 前端保留本地草稿，发现新 revision 后要求重新核对合并 |
 | 插件声明恶意 / 未知 surface | 前端路由语义被圈占 | name 枚举白名单 + entry_route 前缀校验，pack 期拒绝 |
-| `.dream/workspace.json` 被误当运行期事实源 | 状态过期误判 | README 与 §3.2 明确「静态绑定事实」；易变状态只认 REST API |
+| `.dream/workspace.json` 被误当运行内容 | run 级信息缺失 | README 与 §3.2 明确静态/运行层分工；页面经 actor-scoped REST 读取 runtime 文件 |
 | 多插件声明同名 surface | 行为不确定 | pack 顺序前者胜出 + receipt 冲突警告（§3.1） |
 
 ---
@@ -438,6 +422,7 @@ PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上
 | DEC-030 | 2026-08-03 | 后续执行使用独立执行页（AppHeader + 自有双区），不嵌入 Dream 三栏 | 审阅右栏与指导侧边栏是两种职责，不可混用 | 路由、布局、状态表 |
 | DEC-031 | 2026-08-03 | Chat 跳转入口为 Dream 提案消息卡片按钮，文案与目标随 Gate 阶段由服务端聚合返回 | 入口与具体产出绑定；前端不做状态推断 | 卡片合同、深链行为 |
 | DEC-032 | 2026-08-03 | 指导指令复用发起 run 的同一 Chat thread 作传输通道但不渲染为 Chat 消息；审计复用 ReviewEvent / ExecutionGateRecord 信封，不新增 DDL | 避免双入口写混淆；`backend/database.py` 只读 | 指导链路、审计合同 |
+| DEC-033 | 2026-08-04 | `.dream` 分为冻结静态启动层和 Chat Agent 运行内容层；同一 Agent 按插件约定写人物、场景、分镜 stage 文件，用户修改后一次“确认并继续”，随后原 Agent 继续 | 用 workspace 文件直接驱动页面并保持四阶段主链简单 | runtime schema、G3/G5、确认命令、页面刷新 |
 
 ### 2026-08-03 兼容性修订注记（任务二）
 
@@ -452,8 +437,15 @@ PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上
 
 > 以下继续遵循“保留原决策文本，只追加修订说明”的惯例；依据为任务一实施记录、`design_006`、Dreem 调研 PDF 第 3～7 页与 Ink & Memory UI Design v2.1 第 4～5 页。
 
-- **DEC-029（2026-08-04 修订）**：决策内容不变，并明确否决“人物、场景、分镜生成期向 `.dream/` 追加元信息”与“把 `workflow_run_id`、运行来源五字段、`projection_entry` 写入 `workspace.json`”。drama-forge 上游没有 `.dream` 写行为；其用户项目运行区为 `stories/`、`assets/`、`exports/`、`.dramaforge/`，分镜另按 skill 声明写 storyboard 与校验报告。动态事实继续通过 Agent 输出解析、story-workspace 数据库、SSE 与 actor-scoped REST API 消费；`.dream` 完整合同迁移至 design_006。
+- **DEC-029（2026-08-04 修订）**：决策内容不变，并明确否决“人物、场景、分镜生成期向 `.dream/` 追加元信息”与“把 `workflow_run_id`、运行来源五字段、`projection_entry` 写入 `workspace.json`”。drama-forge 上游没有 `.dream` 写行为；其分镜唯一源为 `stories/<project>/episodes/EP??/storyboard.yaml`，内部运行产物与报告位于 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`。动态事实继续通过 Agent 输出解析、story-workspace 数据库、SSE 与 actor-scoped REST API 消费；`.dream` 完整合同迁移至 design_006。
 - **DEC-030（2026-08-04 修订）**：“独立执行页、不嵌入 Dream 审阅三栏”的原则不变；内部布局由「通用数据层 + 常驻 360px 指导栏」调整为“两层执行协作工作台”：第一层 `Assets / Outline` 索引与叙事点/执行步骤主工作面，第二层为选中项触发的上下文协作区。该修订对齐调研 PDF 的定位—协作动线，同时用 UI Design v2.1 的暖纸、轻纸面、无卡片规则替换截图视觉；视频、上传、播放器仍排除。
+
+### 2026-08-04 用户审阅二次修订注记
+
+> 用户要求明确人物、场景、分镜生成阶段与 `.dream` 的更新关系，并补齐业务交互时序。以下注记保留 DEC-029 原文和上一条修订的历史，不静默覆盖；现行合同以本注记、DEC-033、`design_006` 和 `design_007` 为准。
+
+- **DEC-029（二次修订）**：把原文“.dream 全部静态”的适用范围缩窄为 `.dream/README.md + workspace.json` 静态启动层；`workspace.json` 仍不含 run 级字段且保持冻结。新增 `.dream/runtime/`，由同一 Chat Agent 按插件步骤通过工作空间写 `run.json` 与人物/场景/分镜 stage 文件。run/source 字段与 `projection_entry` 写入运行层，而非 `workspace.json`。前端经 REST/SSE 读取，不直读文件。
+- **DEC-033（最终用户修订）**：不采用 host event/projection 状态机。stage 文件存在且有效即页面可渲染；用户只在整份 Dream 中修改内容并一次“确认并继续”，确认作为隐藏消息注入原 Chat thread，同一 Agent 写入修改后继续后续执行。不设计逐项确认、驳回、失败、重试或归档业务分支。
 
 ---
 
@@ -462,13 +454,14 @@ PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上
 | 基线稳定项 | 本文新增 / 变化 | 未改变内容 |
 |------------|----------------|------------|
 | 顶部 Dream 导航与 canonical 路由 | 新增执行页路由与 `?run=` 深链定位语义 | Dream 入口、选中态、兼容重定向 |
-| 四步 Review Gate | 执行页承接第四步之后；审阅面板侧按钮文案映射 Gate 阶段 | 未确认不得继续、aggregate hash 服务端复核 |
-| 审阅三栏 240 / 自适应 / 360 | 执行页独立两层协作工作台（索引 + 主工作面；选中项上下文协作区） | Dream 审阅页三栏骨架与右栏审阅语义 |
+| 四阶段主链 | 整份 Dream 修改后一次“确认并继续”，随后同一 Chat Agent 后续执行 | 不采用逐项审批 |
+| 确认前三栏 240 / 自适应 / 360 | 执行页独立两层协作工作台（索引 + 主工作面；选中项上下文协作区） | Dream 三栏骨架；右栏改为内容编辑器 |
 | workspace-init profile（v1） | 新增可选 `surfaces[]` 字段与校验规则 | v1 既有字段语义、受管 venv、冻结语义 |
 | launch-manifest（claude-launch/v1） | 新增 `surfaces` 透出字段，经既有 `plugin-load-receipt` 端点整文件透传到前端 | deck_id、plugins[]、receipt 既有字段 |
-| 审计最小合同 | ReviewEvent action 枚举扩展 `guide`（承载于 `chat_message.metadata`，见 DEC-032 修订注记）；ExecutionGateRecord 复用 | 不新增 Schema / DDL；`backend/database.py` 只读 |
+| `.dream` 静态启动层 | 新增 `.dream/runtime/`：Agent 写 run.json 与 stages/*.json，revision 驱动页面刷新 | `workspace.json` v1 字段、digest、冻结与 surface 发现不变 |
+| 确认传输 | `StoryWorkspaceDreamConfirmationCommand` 作为隐藏消息注入原 thread | 不新增 Schema / DDL；`backend/database.py` 只读 |
 | 排除平台视频 | 执行页同样排除视频预览 / 上传 / 播放器 | 无视频能力边界 |
-| PDF 调研取舍 | 采用创作者协作页「数据层 + 侧边栏指导」；舍弃视频与可编辑图库 | design_003 §7.1 既有取舍 |
+| PDF 调研取舍 | 采用创作者协作页「数据/任务层 + 聚焦上下文层」；舍弃视频与可编辑图库 | design_003 §7.1 既有取舍 |
 
 ---
 
@@ -477,6 +470,6 @@ PDF 取舍：采用「Assets / Outline 索引 → 叙事点/执行步骤 → 上
 当前无阻止 design 完成的外部 blocker。以下按默认假设收敛，后续若合同明确则在同一 Design ID 下增量修订：
 
 - `surfaces[]` 当前仅定义 `dream` 一个枚举值；未来新增 surface 需在同一 schema 下扩展白名单并补充对应协议目录合同。
-- 指导侧边栏的「预设动作」清单本期只定义「重试失败步骤」「补充约束」两个；更多动作由 Deck workflow 能力明确后扩展。
-- Agent 对 `.dream/` 的只读约束本期靠文案约定；preflight 钩子强制写拒绝列入后续可选项。
+- 既有 guidance 能力不进入本次主业务链；后续若重新启用需独立评审。
+- 当前 Chat Agent 只可通过 `StoryWorkspaceDreamFileWriter` 写 `.dream/runtime/**`；静态启动层继续禁止 Agent 修改，任务三需测试路径与 revision 边界。
 - 执行页数据层的「执行步骤」粒度由 Deck workflow 快照决定；本页只消费投影，不定义步骤语义。

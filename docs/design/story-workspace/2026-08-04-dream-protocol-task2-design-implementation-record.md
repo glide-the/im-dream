@@ -5,6 +5,8 @@
 > **状态**：设计完成，独立评审通过；等待人工审阅后再进入任务三
 > **日期**：2026-08-04
 
+> **2026-08-04 用户审阅最终修订**：本记录描述首轮任务二及其评审结果。首轮“运行期零写入”已被静态启动层 + Agent 运行内容层取代；不采用 host event/projection 状态机。现行主链是“同一 Chat Agent 写 workspace 与 `.dream/runtime` stage 文件 → 页面渲染 → 用户修改并确认一次 → 确认回到原 Chat → 同一 Agent 继续”。现行合同见 `design_006`、`design_007` 与后续审阅修订记录；本文件只保留为历史证据。
+
 ## 1. 结果摘要
 
 任务二按任务一裁决完成两项设计收敛：
@@ -49,7 +51,7 @@ PRD 已把目标动线写为「索引定位 → 叙事点/执行步骤 → 上�
 
 - 上游包没有 `.dream`、`workflow_run_id`、`projection_entry` 合同；
 - packer 注入的是 `.ink/workspace-init.json`，不是上游插件生成的 `.dream`；
-- 上游用户项目运行区是 `stories/`、`assets/`、`exports/`、`.dramaforge/`；分镜 skill 另声明 storyboard 与 `.drama/checks/` 产物；
+- 上游用户项目运行区是 `stories/`、`assets/`、`exports/`、`.dramaforge/`；分镜唯一源为 `stories/<project>/episodes/EP??/storyboard.yaml`，运行产物与报告位于 `.dramaforge/runs/<internal_run_id>/{artifacts,reports}/`；
 - `.dramaforge/runs/{internal-run-id}` 是插件内部运行审计，不能推断等同 host `workflow_run_id`。
 
 以上兼容边界已进入 `design_006:57-62`、`:217-241`，并进入 DEC-029 的 2026-08-04 注记（`design_004:451-456`）。
