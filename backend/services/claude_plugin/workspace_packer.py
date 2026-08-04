@@ -27,6 +27,7 @@ import sqlite3
 from typing import Any
 
 from . import artifact_store, runtime, workspace_init
+from .package_spec import PackageSpecError, parse_package_spec
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,75 @@ def load_deck_plugin_refs(db: sqlite3.Connection, deck_id: str) -> list[dict[str
     return [_row_to_dict(row) for row in rows]
 
 
+def _load_server_adapter_refs(
+    db: sqlite3.Connection,
+    package_specs: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    """Resolve server-selected adapters to ready, digest-pinned installs.
+
+    These transient references intentionally have the same shape as Deck refs
+    so the immutable pack pipeline can consume both uniformly.  They are never
+    persisted to ``deck_claude_plugin_refs``.
+    """
+
+    refs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for raw_spec in package_specs:
+        try:
+            spec = parse_package_spec(raw_spec)
+        except PackageSpecError as exc:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_NOT_FOUND",
+                f"server adapter package spec is invalid: {raw_spec!r}",
+            ) from exc
+        canonical = spec.canonical
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+
+        predicates = ["package_name = ?", "marketplace = ?"]
+        params: list[Any] = [spec.package_name, spec.marketplace]
+        if spec.requested_version is not None:
+            predicates.append("resolved_version = ?")
+            params.append(spec.requested_version)
+        rows = db.execute(
+            f"""
+            SELECT * FROM claude_plugin_installations
+            WHERE {' AND '.join(predicates)}
+            ORDER BY rowid DESC
+            """,
+            params,
+        ).fetchall()
+        if not rows:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_NOT_FOUND",
+                f"server adapter installation was not found: {canonical}",
+            )
+        ready = next((row for row in rows if row["status"] == "ready"), None)
+        if ready is None:
+            raise WorkspacePackError(
+                "CLAUDE_PLUGIN_NOT_READY",
+                f"server adapter installation is not ready: {canonical} "
+                f"(status={rows[0]['status']})",
+            )
+        row = _row_to_dict(ready)
+        refs.append(
+            {
+                "plugin_installation_id": row["id"],
+                "package_spec": canonical,
+                "resolved_version": row["resolved_version"],
+                "artifact_digest": row["artifact_digest"],
+                "package_name": row["package_name"],
+                "marketplace": row["marketplace"],
+                "installation_status": row["status"],
+                "installation_compatibility_json": row.get(
+                    "compatibility_json", "{}"
+                ),
+            }
+        )
+    return refs
+
+
 def _manifest_entry(
     ref: dict[str, Any], workspace: Path, packed_dir_name: str
 ) -> dict[str, Any]:
@@ -107,11 +177,14 @@ def pack_workspace_plugins(
     *,
     workspace: Path,
     deck_id: str | None,
+    server_adapter_package_specs: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Idempotently pack a workspace for its locked Deck.
 
     Returns the pack receipt.  With no Deck (or no enabled refs) the receipt
-    has an empty plugin list and no manifest is created.
+    has an empty plugin list and no manifest is created.  Server-selected
+    adapter package specs are resolved from ready installation records only on
+    the first pack; they never mutate Deck refs or a frozen workspace.
     """
     workspace = Path(workspace).resolve()
     receipt: dict[str, Any] = {
@@ -170,6 +243,15 @@ def pack_workspace_plugins(
         return receipt
 
     refs = load_deck_plugin_refs(db, deck_id)
+    package_specs_seen = {str(ref["package_spec"]) for ref in refs}
+    for adapter_ref in _load_server_adapter_refs(
+        db, server_adapter_package_specs
+    ):
+        package_spec = str(adapter_ref["package_spec"])
+        if package_spec in package_specs_seen:
+            continue
+        package_specs_seen.add(package_spec)
+        refs.append(adapter_ref)
     manifest_entries: list[dict[str, Any]] = []
     receipt_entries: list[dict[str, Any]] = []
     init_steps: list[dict[str, Any]] = []

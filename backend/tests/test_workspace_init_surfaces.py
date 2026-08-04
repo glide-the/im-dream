@@ -383,6 +383,65 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         self.db.commit()
         return artifact
 
+    def _register_named_plugin(
+        self,
+        installation_id: str,
+        package_spec: str,
+        *,
+        deck_id: str | None = None,
+        with_surfaces: bool = False,
+        status: str = "ready",
+        order_index: int = 0,
+    ):
+        package_name, marketplace = package_spec.split("@", 1)
+        source = _write_surface_plugin(
+            Path(self._tmp.name) / f"src-{installation_id}",
+            with_surfaces=with_surfaces,
+        )
+        artifact = import_tree(
+            source,
+            package_name=package_name,
+            marketplace=marketplace,
+        )
+        self.db.execute(
+            """
+            INSERT INTO claude_plugin_installations (
+                id, requested_package_spec, package_name, marketplace,
+                resolved_version, source_type, artifact_digest, artifact_path,
+                claude_cli_version, status, operation_id
+            ) VALUES (?, ?, ?, ?, '1.0.0', 'platform-builtin',
+                      ?, ?, '2.1.220', ?, ?)
+            """,
+            (
+                installation_id,
+                package_spec,
+                package_name,
+                marketplace,
+                artifact.digest,
+                str(artifact.path),
+                status,
+                f"op-{installation_id}",
+            ),
+        )
+        if deck_id is not None:
+            self.db.execute(
+                """
+                INSERT INTO deck_claude_plugin_refs (
+                    deck_id, plugin_installation_id, package_spec,
+                    resolved_version, artifact_digest, enabled, order_index
+                ) VALUES (?, ?, ?, '1.0.0', ?, 1, ?)
+                """,
+                (
+                    deck_id,
+                    installation_id,
+                    package_spec,
+                    artifact.digest,
+                    order_index,
+                ),
+            )
+        self.db.commit()
+        return artifact
+
     def test_pack_materializes_dream_and_exposes_surfaces(self) -> None:
         artifact = self._register_plugin("deck-1", "cpi-1")
         workspace = Path(self._tmp.name) / "ws"
@@ -487,6 +546,190 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
         ws = json.loads((workspace / ".dream" / "workspace.json").read_text())
         # workspace.json carries the full plugin list (both plugins).
         self.assertEqual(len(ws["plugins"]), 2)
+
+    def test_server_adapter_merges_with_deck_plugin_and_materializes_dream(self) -> None:
+        drama = self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        adapter = self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-adapter"
+        workspace.mkdir()
+
+        receipt = pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+        )
+
+        manifest = json.loads(
+            (workspace / ".ink" / "launch-manifest.json").read_text()
+        )
+        self.assertEqual(
+            [entry["package_spec"] for entry in manifest["plugins"]],
+            ["drama-forge@drama-studio", "ink-dream-story@platform-builtin"],
+        )
+        self.assertEqual(
+            [entry["artifact_digest"] for entry in manifest["plugins"]],
+            [drama.digest, adapter.digest],
+        )
+        self.assertEqual(receipt["surfaces"][0]["name"], "dream")
+        dream_workspace = json.loads(
+            (workspace / ".dream" / "workspace.json").read_text()
+        )
+        self.assertEqual(
+            [entry["package_spec"] for entry in dream_workspace["plugins"]],
+            ["drama-forge@drama-studio", "ink-dream-story@platform-builtin"],
+        )
+        adapter_refs = self.db.execute(
+            """
+            SELECT COUNT(*) FROM deck_claude_plugin_refs
+            WHERE deck_id = ? AND package_spec = ?
+            """,
+            ("deck-1", "ink-dream-story@platform-builtin"),
+        ).fetchone()[0]
+        self.assertEqual(adapter_refs, 0)
+
+    def test_server_adapter_is_opt_in_for_normal_chat_pack(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-default"
+        workspace.mkdir()
+
+        receipt = pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+        )
+
+        self.assertEqual(
+            [entry["package_spec"] for entry in receipt["plugins"]],
+            ["drama-forge@drama-studio"],
+        )
+        self.assertNotIn("surfaces", receipt)
+        self.assertFalse((workspace / ".dream").exists())
+
+    def test_server_adapter_declarations_are_deduplicated(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            deck_id="deck-1",
+            with_surfaces=True,
+            order_index=1,
+        )
+        workspace = Path(self._tmp.name) / "ws-deduplicated"
+        workspace.mkdir()
+
+        receipt = pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=(
+                "ink-dream-story@platform-builtin",
+                "ink-dream-story@platform-builtin",
+            ),
+        )
+
+        package_specs = [entry["package_spec"] for entry in receipt["plugins"]]
+        self.assertEqual(package_specs.count("ink-dream-story@platform-builtin"), 1)
+        self.assertEqual(len(package_specs), 2)
+
+    def test_server_adapter_missing_or_not_ready_fails_closed(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter-not-ready",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+            status="installing",
+        )
+
+        cases = (
+            ("ink-dream-story@platform-builtin", "CLAUDE_PLUGIN_NOT_READY"),
+            ("missing-adapter@platform-builtin", "CLAUDE_PLUGIN_NOT_FOUND"),
+        )
+        for index, (package_spec, expected_code) in enumerate(cases):
+            with self.subTest(package_spec=package_spec):
+                workspace = Path(self._tmp.name) / f"ws-fail-{index}"
+                workspace.mkdir()
+                with self.assertRaises(WorkspacePackError) as caught:
+                    pack_workspace_plugins(
+                        self.db,
+                        workspace=workspace,
+                        deck_id="deck-1",
+                        server_adapter_package_specs=(package_spec,),
+                    )
+                self.assertEqual(caught.exception.code, expected_code)
+                self.assertFalse(
+                    (workspace / ".ink" / "launch-manifest.json").exists()
+                )
+                self.assertFalse((workspace / ".dream").exists())
+
+    def test_frozen_workspace_does_not_append_late_server_adapter(self) -> None:
+        self._register_named_plugin(
+            "cpi-drama",
+            "drama-forge@drama-studio",
+            deck_id="deck-1",
+        )
+        self._register_named_plugin(
+            "cpi-adapter",
+            "ink-dream-story@platform-builtin",
+            with_surfaces=True,
+        )
+        workspace = Path(self._tmp.name) / "ws-frozen-adapter"
+        workspace.mkdir()
+        first = pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+        )
+        first_manifest = (
+            workspace / ".ink" / "launch-manifest.json"
+        ).read_bytes()
+
+        second = pack_workspace_plugins(
+            self.db,
+            workspace=workspace,
+            deck_id="deck-1",
+            server_adapter_package_specs=("ink-dream-story@platform-builtin",),
+        )
+
+        self.assertTrue(second["frozen"])
+        self.assertEqual(
+            [entry["package_spec"] for entry in second["plugins"]],
+            [entry["package_spec"] for entry in first["plugins"]],
+        )
+        self.assertEqual(
+            [entry["artifact_digest"] for entry in second["plugins"]],
+            [entry["artifact_digest"] for entry in first["plugins"]],
+        )
+        self.assertEqual(
+            (workspace / ".ink" / "launch-manifest.json").read_bytes(),
+            first_manifest,
+        )
+        self.assertFalse((workspace / ".dream").exists())
 
 
 if __name__ == "__main__":
