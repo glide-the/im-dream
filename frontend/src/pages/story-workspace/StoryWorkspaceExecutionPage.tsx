@@ -17,7 +17,6 @@ import {
   storyWorkspaceBuildExecutionWorkspace,
   storyWorkspaceCanAccessExecution,
   storyWorkspaceExecutionFocusNeighbors,
-  type StoryWorkspaceExecutionEntry,
 } from './executionViewModel';
 import './StoryWorkspaceExecutionPage.css';
 
@@ -46,37 +45,6 @@ function focusListItem(
     : Math.max(index - 1, 0);
   const list = event.currentTarget.closest('ol');
   list?.querySelectorAll<HTMLButtonElement>(':scope > li > button')[nextIndex]?.focus();
-}
-
-function WorkspaceIndexList({
-  entries,
-  focusKey,
-  onFocus,
-}: {
-  entries: readonly StoryWorkspaceExecutionEntry[];
-  focusKey: string | null;
-  onFocus: (key: string) => void;
-}) {
-  return (
-    <ol className="story-workspace-collaboration__index-list">
-      {entries.map((entry, index) => (
-        <li key={entry.key}>
-          <button
-            aria-current={focusKey === entry.key || undefined}
-            onClick={() => onFocus(entry.key)}
-            onKeyDown={(event) => focusListItem(event, index, entries.length)}
-            type="button"
-          >
-            <span>{String(index + 1).padStart(2, '0')}</span>
-            <span>
-              <strong>{entry.title}</strong>
-              <small>{entry.summary || entry.sourceFile}</small>
-            </span>
-          </button>
-        </li>
-      ))}
-    </ol>
-  );
 }
 
 function EmptyWorkspaceModule({ module }: { module: ExecutionModule }) {
@@ -243,65 +211,11 @@ export function StoryWorkspaceExecutionPage({
       </header>
 
       <div className="story-workspace-collaboration__surface">
-        <aside className="story-workspace-collaboration__rail" aria-label="Assets 与 Outline 索引">
-          <div className="story-workspace-collaboration__module-switch" role="tablist">
-            {(Object.keys(MODULE_COPY) as ExecutionModule[]).map((module) => (
-              <button
-                aria-selected={activeModule === module}
-                key={module}
-                onClick={() => {
-                  setActiveModule(module);
-                  setFocusKey(null);
-                }}
-                role="tab"
-                type="button"
-              >
-                <strong>{MODULE_COPY[module].label}</strong>
-                <small>{MODULE_COPY[module].description}</small>
-              </button>
-            ))}
-          </div>
-
-          <div className="story-workspace-collaboration__rail-body">
-            {activeModule === 'assets' ? (
-              <>
-                {(['characters', 'scenes'] as const).map((stage) => {
-                  const entries = visibleEntries.filter((entry) => entry.stage === stage);
-                  if (entries.length === 0) return null;
-                  return (
-                    <section key={stage}>
-                      <header>
-                        <span>{stage === 'characters' ? '人物' : '场景'}</span>
-                        <small>r{entries[0]?.revision}</small>
-                      </header>
-                      <WorkspaceIndexList
-                        entries={entries}
-                        focusKey={focusKey}
-                        onFocus={setFocusKey}
-                      />
-                    </section>
-                  );
-                })}
-              </>
-            ) : (
-              <section>
-                <header>
-                  <span>故事线 01</span>
-                  <small>{visibleEntries[0] ? `r${visibleEntries[0].revision}` : '等待'}</small>
-                </header>
-                <WorkspaceIndexList
-                  entries={visibleEntries}
-                  focusKey={focusKey}
-                  onFocus={setFocusKey}
-                />
-              </section>
-            )}
-            {visibleEntries.length === 0 && <EmptyWorkspaceModule module={activeModule} />}
-          </div>
-        </aside>
-
-        <main className="story-workspace-collaboration__main">
-          {focusedEntry ? (
+        {focusedEntry ? (
+          <main
+            className="story-workspace-collaboration__focus-layer"
+            data-execution-depth="focus"
+          >
             <article className="story-workspace-collaboration__focus">
               <header className="story-workspace-collaboration__focus-nav">
                 <button onClick={() => setFocusKey(null)} type="button">← 返回故事线</button>
@@ -358,8 +272,29 @@ export function StoryWorkspaceExecutionPage({
                 </ol>
               </section>
             </article>
-          ) : (
+          </main>
+        ) : (
+          <main
+            className="story-workspace-collaboration__overview-layer"
+            data-execution-depth="overview"
+          >
             <div className="story-workspace-collaboration__overview">
+              <div className="story-workspace-collaboration__module-switch" role="tablist">
+                {(Object.keys(MODULE_COPY) as ExecutionModule[]).map((module) => (
+                  <button
+                    aria-controls="story-workspace-execution-index"
+                    aria-selected={activeModule === module}
+                    key={module}
+                    onClick={() => setActiveModule(module)}
+                    role="tab"
+                    type="button"
+                  >
+                    <strong>{MODULE_COPY[module].label}</strong>
+                    <small>{MODULE_COPY[module].description}</small>
+                  </button>
+                ))}
+              </div>
+
               <header>
                 <p>{MODULE_COPY[activeModule].label} · Narrative execution</p>
                 <h2>{activeModule === 'assets' ? '故事资产' : '故事线与叙事点'}</h2>
@@ -370,11 +305,20 @@ export function StoryWorkspaceExecutionPage({
                 </span>
               </header>
 
-              {visibleEntries.length > 0 ? (
-                <ol className="story-workspace-collaboration__manuscript">
+              <section
+                aria-label={`${MODULE_COPY[activeModule].label} 索引`}
+                id="story-workspace-execution-index"
+                role="tabpanel"
+              >
+                {visibleEntries.length > 0 ? (
+                  <ol className="story-workspace-collaboration__manuscript">
                   {visibleEntries.map((entry, index) => (
                     <li key={entry.key}>
-                      <button onClick={() => setFocusKey(entry.key)} type="button">
+                      <button
+                        onClick={() => setFocusKey(entry.key)}
+                        onKeyDown={(event) => focusListItem(event, index, visibleEntries.length)}
+                        type="button"
+                      >
                         <span>{String(index + 1).padStart(2, '0')}</span>
                         <span>
                           <small>{entry.stageLabel} · r{entry.revision}</small>
@@ -385,10 +329,11 @@ export function StoryWorkspaceExecutionPage({
                       </button>
                     </li>
                   ))}
-                </ol>
-              ) : (
-                <EmptyWorkspaceModule module={activeModule} />
-              )}
+                  </ol>
+                ) : (
+                  <EmptyWorkspaceModule module={activeModule} />
+                )}
+              </section>
 
               <section className="story-workspace-collaboration__activity">
                 <header>
@@ -408,8 +353,8 @@ export function StoryWorkspaceExecutionPage({
                 </ol>
               </section>
             </div>
-          )}
-        </main>
+          </main>
+        )}
       </div>
     </section>
   );
