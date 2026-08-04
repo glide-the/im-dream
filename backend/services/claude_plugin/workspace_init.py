@@ -273,7 +273,10 @@ DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录
 - 禁止使用 Write、Edit 或 Bash 直接修改 .dream；受控工具会从 host 读取
   actor、thread 与冻结的 WorkflowRun 来源字段，并校验 revision 和 source files。
 - 先写人物、场景或分镜的 canonical 工作区文件，再调用 stage 工具同步页面元信息。
-- Dream 页面通过 story-workspace REST API 读取文件；SSE 只通知页面重新读取。
+- story-workspace REST API 是运行内容的真相源；Dream 页面在
+  waiting、editing、continuing 阶段最长每 5 秒轮询一次。
+- 仅当兼容的 story-workspace-output 事件携带匹配当前 workflow_run_id 的 runId
+  时，页面才立即重新读取；受控 writer 尚不主动发布 run-scoped SSE，此能力仍是遗留。
 
 入口路由：/story-workspace/dream
 """

@@ -208,6 +208,22 @@ class MaterializeDreamSurfaceTests(unittest.TestCase):
         self.assertEqual(step["step"], "materialize-surface")
         self.assertEqual(step["surface"], "dream")
 
+    def test_materialized_readme_states_the_truthful_refresh_contract(self) -> None:
+        materialize_dream_surface(
+            self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
+        )
+
+        readme = (self.workspace / ".dream" / "README.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("REST API 是运行内容的真相源", readme)
+        self.assertIn("waiting、editing、continuing", readme)
+        self.assertIn("最长每 5 秒", readme)
+        self.assertIn("story-workspace-output", readme)
+        self.assertIn("匹配当前 workflow_run_id 的 runId", readme)
+        self.assertIn("受控 writer 尚不主动发布 run-scoped SSE", readme)
+        self.assertNotIn("SSE 只通知页面重新读取", readme)
+
     def test_materialize_is_byte_identical_on_repack(self) -> None:
         materialize_dream_surface(
             self.workspace, "deck-1", self.PLUGINS, "/story-workspace/dream"
