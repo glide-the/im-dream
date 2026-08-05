@@ -19,6 +19,8 @@ import {
 
 const PAGE = readFileSync(new URL('../StoryWorkspaceDreamPage.tsx', import.meta.url), 'utf8');
 const RAIL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail.tsx', import.meta.url), 'utf8');
+const DECK_METADATA = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamDeckMetadata.tsx', import.meta.url), 'utf8');
+const DECK_METADATA_CSS = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamDeckMetadata.css', import.meta.url), 'utf8');
 const DIALOG = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
 const PANEL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentPanel.tsx', import.meta.url), 'utf8');
 const SCROLL = readFileSync(new URL('../../../components/story-workspace/dream/useStoryWorkspaceDreamAgentScroll.ts', import.meta.url), 'utf8');
@@ -29,8 +31,8 @@ test('Dream page integrates the dedicated rail/dialog and never a generic Chat v
   expect(PAGE).toContain('<StoryWorkspaceDreamAgentRail');
   expect(PAGE).toContain('<StoryWorkspaceDreamAgentPanel');
   expect(PAGE).not.toContain('<StoryWorkspaceDreamAgentDialog');
-  expect(`${PAGE}\n${RAIL}\n${DIALOG}`).not.toContain('ChatView');
-  expect(`${PAGE}\n${RAIL}\n${DIALOG}`).not.toContain('ChatWidgetUI');
+  expect(`${PAGE}\n${RAIL}\n${DECK_METADATA}\n${DIALOG}`).not.toContain('ChatView');
+  expect(`${PAGE}\n${RAIL}\n${DECK_METADATA}\n${DIALOG}`).not.toContain('ChatWidgetUI');
 });
 
 test('run-bound Dream keeps its full Agent history inside the editor rail, not in a floating dialog', () => {
@@ -182,26 +184,62 @@ test('Dream Panel and Dialog share Dream-only follow-latest controls', () => {
   expect(CSS).toContain('.story-workspace-dream-agent-scroll-to-latest');
 });
 
-test('rail is non-interactive Agent-section context and dialog keeps its accessibility contracts', () => {
+test('rail delegates trusted Deck metadata to a dedicated Dream control', () => {
   expect(RAIL).toContain('<div className="story-workspace-dream-agent-rail__summary">');
-  expect(RAIL).not.toContain('<button');
-  expect(RAIL).not.toContain('aria-expanded');
+  expect(RAIL).toContain("import { StoryWorkspaceDreamDeckMetadata } from './StoryWorkspaceDreamDeckMetadata'");
+  expect(RAIL).toContain('<StoryWorkspaceDreamDeckMetadata');
+  expect(RAIL).toContain('deckName={deckName}');
+  expect(RAIL).toContain('runId={runId}');
+  expect(RAIL).toContain('runtimeSnapshotId={runtimeSnapshotId}');
+  expect(RAIL).toContain('runtimeLockId={runtimeLockId}');
+  expect(RAIL).toContain('stageLine={stageLine}');
   expect(RAIL).not.toContain('onOpen');
+  expect(RAIL).not.toContain('agent.snapshot?.messages');
+  expect(RAIL).not.toContain('agent.streamText');
+  expect(RAIL).not.toContain('story-workspace-dream-agent-rail__preview');
+  expect(RAIL).not.toContain('Dream Agent 的回复会显示在这里。');
+  expect(RAIL).not.toContain('<details');
+  expect(RAIL).not.toContain('技术详情');
+  expect(PAGE.match(/runtimeLockId={agentRuntimeLockId}/g)).toHaveLength(2);
+  expect(PAGE.match(/runtimeSnapshotId={agentRuntimeSnapshotId}/g)).toHaveLength(2);
+  expect(PAGE.match(/stageLine={agentStageLine}/g)).toHaveLength(2);
+});
+
+test('Dream Deck metadata is an instance-safe accessible disclosure without Chat data ownership', () => {
+  expect(DECK_METADATA).toContain('const popoverId = useId()');
+  expect(DECK_METADATA).toContain('aria-controls={popoverId}');
+  expect(DECK_METADATA).toContain('aria-expanded={open}');
+  expect(DECK_METADATA).toContain('aria-haspopup="dialog"');
+  expect(DECK_METADATA).toContain('role="dialog"');
+  expect(DECK_METADATA).toContain('aria-modal="false"');
+  expect(DECK_METADATA).toContain("document.addEventListener('pointerdown', handlePointerDown)");
+  expect(DECK_METADATA).toContain("event.key !== 'Escape'");
+  expect(DECK_METADATA).toContain('triggerRef.current?.focus()');
+  expect(DECK_METADATA).not.toContain('PluginReceiptBadge');
+  expect(DECK_METADATA).not.toContain('threadId');
+  expect(DECK_METADATA).not.toContain('getThreadPluginLoadReceipt');
+  expect(DECK_METADATA).not.toContain('setInterval');
+  expect(DECK_METADATA).not.toContain('setTimeout');
+  expect(DECK_METADATA).toContain("import './StoryWorkspaceDreamDeckMetadata.css'");
+  expect(DECK_METADATA_CSS).toContain('.story-workspace-dream-deck-metadata__popover');
+  expect(DECK_METADATA_CSS).toContain('calc(100vw - 32px)');
+  expect(DECK_METADATA_CSS).toContain('@media (prefers-reduced-motion: reduce)');
+});
+
+test('dialog keeps its accessibility contracts', () => {
   expect(DIALOG).toContain("event.key === 'Escape'");
   expect(DIALOG).toContain('restoreFocusRef.current?.focus()');
   expect(DIALOG).toContain('aria-modal={isNarrow}');
   expect(DIALOG).toContain('aria-live="polite"');
   expect(DIALOG).toContain('headingRef.current?.focus()');
   expect(DIALOG).toContain('inputRef.current?.focus()');
-  expect(RAIL).toContain('技术详情');
-  expect(RAIL).toContain('runtime snapshot');
   expect(DIALOG).toContain('Dream Agent 正在执行');
   expect(DIALOG).toContain('Dream Agent 已完成本轮输出');
   expect(DIALOG).toContain('aria-hidden="true"');
 });
 
 test('rail shows compact Agent context without duplicate opening copy', () => {
-  expect(RAIL).toContain('<span>Dream Agent · {deckName}</span>');
+  expect(RAIL).not.toContain('<span>Dream Agent · {deckName}</span>');
   expect(RAIL).not.toContain('· {workflowName} · {pluginVersion}');
   expect(RAIL).not.toContain('story-workspace-dream-agent-rail__open');
   expect(CSS).not.toContain('.story-workspace-dream-agent-rail__open');

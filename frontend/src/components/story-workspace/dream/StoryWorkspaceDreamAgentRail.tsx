@@ -3,6 +3,7 @@
 // [Pos] Dream right rail (design_008 §5/§7); no generic Chat UI is mounted.
 
 import type { StoryWorkspaceDreamAgentViewModel } from '../../../hooks/story-workspace';
+import { StoryWorkspaceDreamDeckMetadata } from './StoryWorkspaceDreamDeckMetadata';
 
 export interface StoryWorkspaceDreamAgentRailProps {
   readonly agent: StoryWorkspaceDreamAgentViewModel;
@@ -25,31 +26,22 @@ function storyWorkspaceDreamAgentStatus(agent: StoryWorkspaceDreamAgentViewModel
 export function StoryWorkspaceDreamAgentRail({
   agent, deckName, runId, stageLine, runtimeSnapshotId, runtimeLockId,
 }: StoryWorkspaceDreamAgentRailProps) {
-  const assistant = agent.snapshot?.messages.filter((message) => message.role === 'assistant').slice(-3) ?? [];
-  const preview = agent.streamText || assistant.at(-1)?.text;
   return (
     <section className="story-workspace-dream-agent-rail" aria-label="Dream Agent 状态">
       <div className="story-workspace-dream-agent-rail__summary">
-        <span className="story-workspace-dream-agent-rail__context">
-          <span>Dream Agent · {deckName}</span>
-        </span>
+        <StoryWorkspaceDreamDeckMetadata
+          deckName={deckName}
+          runId={runId}
+          runtimeLockId={runtimeLockId}
+          runtimeSnapshotId={runtimeSnapshotId}
+          stageLine={stageLine}
+        />
         <span className="story-workspace-dream-agent-rail__status">
           <span aria-hidden="true" className="story-workspace-dream-agent-rail__mark" />
           <span>{storyWorkspaceDreamAgentStatus(agent)}</span>
         </span>
-        <span className="story-workspace-dream-agent-rail__preview">
-          {preview || (agent.isLoading ? '正在读取 Dream Agent 消息…' : 'Dream Agent 的回复会显示在这里。')}
-        </span>
         <span className="story-workspace-dream-agent-rail__meta">{stageLine}</span>
       </div>
-      <details className="story-workspace-dream-agent-rail__details">
-        <summary>技术详情</summary>
-        <dl>
-          <div><dt>完整 Run ID</dt><dd>{runId}</dd></div>
-          <div><dt>runtime snapshot</dt><dd>{runtimeSnapshotId ?? '—'}</dd></div>
-          <div><dt>runtime lock</dt><dd>{runtimeLockId ?? '—'}</dd></div>
-        </dl>
-      </details>
     </section>
   );
 }

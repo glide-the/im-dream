@@ -317,6 +317,13 @@ export function StoryWorkspaceDreamPage({
     && confirmation.status !== 'confirming',
   );
   const deckName = agentContextRun?.deck_plugin_display_name ?? '当前 Deck';
+  const agentRuntimeLockId = agentContextRun?.runtime_plugin_lock_id
+    ?? files.data?.source.runtimePluginLockId
+    ?? null;
+  const agentRuntimeSnapshotId = agentContextRun?.deck_runtime_snapshot_id
+    ?? files.data?.source.deckRuntimeSnapshotId
+    ?? null;
+  const agentStageLine = storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState));
   const agentPreview = dreamAgent.streamText
     || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
     || activityCopy;
@@ -377,9 +384,9 @@ export function StoryWorkspaceDreamPage({
             agent={dreamAgent}
             deckName={deckName}
             runId={runId}
-            runtimeLockId={agentContextRun?.runtime_plugin_lock_id ?? files.data?.source.runtimePluginLockId ?? null}
-            runtimeSnapshotId={agentContextRun?.deck_runtime_snapshot_id ?? files.data?.source.deckRuntimeSnapshotId ?? null}
-            stageLine={storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState))}
+            runtimeLockId={agentRuntimeLockId}
+            runtimeSnapshotId={agentRuntimeSnapshotId}
+            stageLine={agentStageLine}
           />
         </div>
       )}
@@ -479,9 +486,9 @@ export function StoryWorkspaceDreamPage({
               agent={dreamAgent}
               deckName={deckName}
               runId={runId}
-              runtimeLockId={agentContextRun?.runtime_plugin_lock_id ?? files.data?.source.runtimePluginLockId ?? null}
-              runtimeSnapshotId={agentContextRun?.deck_runtime_snapshot_id ?? files.data?.source.deckRuntimeSnapshotId ?? null}
-              stageLine={storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState))}
+              runtimeLockId={agentRuntimeLockId}
+              runtimeSnapshotId={agentRuntimeSnapshotId}
+              stageLine={agentStageLine}
             />
           )}
           <div className="story-workspace-dream__agent-panel">
