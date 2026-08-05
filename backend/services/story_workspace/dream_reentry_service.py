@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import base64
+import binascii
 from datetime import UTC, datetime
 import json
 import sqlite3
@@ -28,9 +30,11 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
 
 
-_StoryWorkspaceDreamProjectionLoader = Callable[[str, dict[str, str]], Any]
+_StoryWorkspaceDreamProjectionLoader = Callable[[str, dict[str, str], sqlite3.Connection], Any]
 _StoryWorkspaceDreamLiveTurnLookup = Callable[[str], bool]
-_STORY_WORKSPACE_DREAM_REENTRY_PAGE_SIZE = 100
+_STORY_WORKSPACE_DREAM_REENTRY_DEFAULT_PAGE_SIZE = 50
+_STORY_WORKSPACE_DREAM_REENTRY_MAX_PAGE_SIZE = 100
+_STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE = 400
 
 
 class StoryWorkspaceDreamReentryService:
@@ -58,8 +62,11 @@ class StoryWorkspaceDreamReentryService:
         self,
         *,
         actor: dict[str, str],
+        cursor: str | None = None,
+        limit: int = _STORY_WORKSPACE_DREAM_REENTRY_DEFAULT_PAGE_SIZE,
     ) -> StoryWorkspaceDreamReentryCollection:
         actor_id = self._actor_id(actor)
+        page_size = self._page_size(limit)
         db = self._db_factory()
         db.row_factory = sqlite3.Row
         try:
@@ -69,13 +76,14 @@ class StoryWorkspaceDreamReentryService:
                 item
                 for row in rows
                 if (item := self._project_row(
+                    db,
                     row,
                     actor_id,
                     confirmation_facts.get(str(row["run_id"]), (False, False)),
                 )) is not None
             ]
             items.sort(key=self._sort_tuple)
-            return StoryWorkspaceDreamReentryCollection(runs=items)
+            return self._page(items, cursor=cursor, limit=page_size)
         finally:
             if self._close_connections:
                 db.close()
@@ -124,6 +132,16 @@ class StoryWorkspaceDreamReentryService:
             "AND release.deck_plugin_version = run.deck_plugin_version "
             "AND release.workflow_definition_ref = run.workflow_definition_ref "
             "AND release.manifest_hash = run.deck_plugin_manifest_hash "
+            "AND json_valid(release.manifest_json) "
+            "AND ("
+            "EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.surfaces') AS surface "
+            "WHERE json_extract(surface.value, '$.name') = 'dream') "
+            "OR EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.capabilities') AS capability "
+            "WHERE capability.value = 'story.workspace.propose') "
+            "OR EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.runtime.claude_code_plugins') AS plugin "
+            "JOIN json_each(plugin.value, '$.capability_bindings') AS binding_capability "
+            "WHERE binding_capability.value = 'story.workspace.propose')"
+            ") "
             "JOIN deck_runtime_plugin_locks AS runtime_lock "
             "ON runtime_lock.id = run.runtime_plugin_lock_id "
             "AND runtime_lock.deck_plugin_id = run.deck_plugin_id "
@@ -155,18 +173,18 @@ class StoryWorkspaceDreamReentryService:
             "AND binding.deck_plugin_id = run.deck_plugin_id "
             "AND binding.deck_plugin_version = run.deck_plugin_version "
             "AND binding.binding_revision = run.binding_revision "
-            "ORDER BY run.created_at DESC, run.id ASC LIMIT ?",
+            "ORDER BY run.created_at DESC, run.id ASC",
             (
                 str(actor_id),
                 actor_id,
                 actor_id,
                 actor_id,
-                _STORY_WORKSPACE_DREAM_REENTRY_PAGE_SIZE,
             ),
         ).fetchall()
 
     def _project_row(
         self,
+        db: sqlite3.Connection,
         row: sqlite3.Row,
         actor_id: int,
         confirmation_facts: tuple[bool, bool],
@@ -191,7 +209,7 @@ class StoryWorkspaceDreamReentryService:
             return None
 
         confirmation_accepted, confirmation_dispatched = confirmation_facts
-        stage_revisions, stage_activity_at = self._stage_snapshot(run_id, actor_id)
+        stage_revisions, stage_activity_at = self._stage_snapshot(db, run_id, actor_id)
         live_turn = self._safe_live_turn_lookup(thread_id)
         lifecycle = self._lifecycle(
             stage_revisions=stage_revisions,
@@ -228,13 +246,18 @@ class StoryWorkspaceDreamReentryService:
 
     def _stage_snapshot(
         self,
+        db: sqlite3.Connection,
         run_id: str,
         actor_id: int,
     ) -> tuple[dict[StoryWorkspaceDreamStage, int], datetime | None]:
         """Read stage truth through the established Dream files adapter only."""
 
         try:
-            projection = self._dream_files_loader(run_id, {"actor_id": str(actor_id)})
+            projection = self._dream_files_loader(
+                run_id,
+                {"actor_id": str(actor_id)},
+                db,
+            )
         except FileNotFoundError:
             # A missing stage file is the only legal empty-stage condition.
             return {}, None
@@ -271,47 +294,91 @@ class StoryWorkspaceDreamReentryService:
         if not rows:
             return {}
         by_thread = {str(row["thread_id"]): str(row["run_id"]) for row in rows}
-        placeholders = ", ".join("?" for _ in by_thread)
-        limit = len(by_thread) + 1
-        matches = db.execute(
-            "SELECT thread_id, metadata FROM chat_message "
-            "WHERE role = 'user' AND thread_id IN (" + placeholders + ") "
-            "AND json_valid(metadata) "
-            "AND json_extract(metadata, '$.kind') = ? "
-            "ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT ?",
-            (
-                *by_thread.keys(),
-                "story-workspace-dream-confirmation",
-                limit,
-            ),
-        ).fetchall()
-        if len(matches) > len(by_thread):
-            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
         facts = {run_id: (False, False) for run_id in by_thread.values()}
         seen_threads: set[str] = set()
-        for match in matches:
-            thread_id = str(match["thread_id"])
-            run_id = by_thread.get(thread_id)
-            if run_id is None or thread_id in seen_threads:
+        thread_ids = list(by_thread)
+        for start in range(0, len(thread_ids), _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE):
+            batch = thread_ids[start:start + _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE]
+            placeholders = ", ".join("?" for _ in batch)
+            matches = db.execute(
+                "SELECT thread_id, metadata FROM chat_message "
+                "WHERE role = 'user' AND thread_id IN (" + placeholders + ") "
+                "AND json_valid(metadata) "
+                "AND json_extract(metadata, '$.kind') = ? "
+                "ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT ?",
+                (*batch, "story-workspace-dream-confirmation", len(batch) + 1),
+            ).fetchall()
+            if len(matches) > len(batch):
                 raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
-            seen_threads.add(thread_id)
-            try:
-                metadata = json.loads(match["metadata"])
-            except (TypeError, ValueError) as exc:
-                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
-            valid = (
-                isinstance(metadata, dict)
-                and metadata.get("actor") == str(actor_id)
-                and metadata.get("thread_id") == thread_id
-                and metadata.get("story_workspace_run_id") == run_id
-            )
-            if not valid:
-                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
-            facts[run_id] = (
-                True,
-                metadata.get("dispatch_status") == "dispatched",
-            )
+            for match in matches:
+                thread_id = str(match["thread_id"])
+                run_id = by_thread.get(thread_id)
+                if run_id is None or thread_id in seen_threads:
+                    raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+                seen_threads.add(thread_id)
+                try:
+                    metadata = json.loads(match["metadata"])
+                except (TypeError, ValueError) as exc:
+                    raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+                valid = (
+                    isinstance(metadata, dict)
+                    and metadata.get("actor") == str(actor_id)
+                    and metadata.get("thread_id") == thread_id
+                    and metadata.get("story_workspace_run_id") == run_id
+                )
+                if not valid:
+                    raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+                facts[run_id] = (
+                    True,
+                    metadata.get("dispatch_status") == "dispatched",
+                )
         return facts
+
+    @staticmethod
+    def _page_size(value: int) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= _STORY_WORKSPACE_DREAM_REENTRY_MAX_PAGE_SIZE:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        return value
+
+    @classmethod
+    def _page(
+        cls,
+        items: list[StoryWorkspaceDreamReentryItem],
+        *,
+        cursor: str | None,
+        limit: int,
+    ) -> StoryWorkspaceDreamReentryCollection:
+        start = 0 if cursor is None else cls._cursor_offset(items, cursor)
+        runs = items[start:start + limit]
+        next_cursor = (
+            cls._encode_cursor(runs[-1])
+            if runs and start + len(runs) < len(items)
+            else None
+        )
+        return StoryWorkspaceDreamReentryCollection(runs=runs, next_cursor=next_cursor)
+
+    @staticmethod
+    def _encode_cursor(item: StoryWorkspaceDreamReentryItem) -> str:
+        payload = json.dumps(
+            {"runId": item.story_workspace_run_id, "sortKey": item.sort_key},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+    @staticmethod
+    def _cursor_offset(items: list[StoryWorkspaceDreamReentryItem], cursor: str) -> int:
+        try:
+            padded = cursor + "=" * (-len(cursor) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
+            run_id = payload["runId"]
+            sort_key = payload["sortKey"]
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError, binascii.Error) as exc:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
+        for index, item in enumerate(items):
+            if item.story_workspace_run_id == run_id and item.sort_key == sort_key:
+                return index + 1
+        raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
 
     @staticmethod
     def _lifecycle(

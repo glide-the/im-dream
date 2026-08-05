@@ -89,7 +89,8 @@ def _create_schema(db: sqlite3.Connection) -> None:
           deck_plugin_id TEXT,
           deck_plugin_version TEXT,
           workflow_definition_ref TEXT,
-          manifest_hash TEXT
+          manifest_hash TEXT,
+          manifest_json TEXT
         );
         CREATE TABLE deck_runtime_plugin_locks (
           id TEXT PRIMARY KEY,
@@ -190,6 +191,7 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         preflight_snapshot_id: str | None = None,
         preflight_lock_id: str | None = None,
         stage_activity_at: datetime | None = None,
+        dream_release: bool = True,
     ) -> str:
         value = run_id(number)
         thread = f"thread-{number}"
@@ -222,8 +224,19 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             ),
         )
         self.db.execute(
-            "INSERT INTO deck_plugin_releases VALUES (?, ?, ?, ?)",
-            (plugin, "1.0.0", workflow_definition_ref, manifest),
+            "INSERT INTO deck_plugin_releases VALUES (?, ?, ?, ?, ?)",
+            (
+                plugin,
+                "1.0.0",
+                workflow_definition_ref,
+                manifest,
+                json.dumps({
+                    "capabilities": ["story.workspace.propose"] if dream_release else ["chat.general"],
+                    "runtime": {"claude_code_plugins": [{
+                        "capability_bindings": ["story.workspace.propose"] if dream_release else ["chat.general"],
+                    }]},
+                }),
+            ),
         )
         self.db.execute(
             "INSERT INTO deck_runtime_plugin_locks VALUES (?, ?, ?, ?)",
@@ -280,7 +293,7 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
 
         return StoryWorkspaceDreamReentryService(
             db_factory=lambda: self.db,
-            dream_files_loader=loader or (lambda value, _actor: self.projections[value]),
+            dream_files_loader=loader or (lambda value, *_args: self.projections[value]),
             live_turn_lookup=lambda thread: thread in self.live_threads,
             close_connections=False,
         )
@@ -353,6 +366,50 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
 
         self.assertEqual([item.story_workspace_run_id for item in response.runs], [visible])
 
+    def test_release_without_dream_surface_or_capability_is_never_projected(self) -> None:
+        visible = self._add_run(36, complete=False)
+        self._add_run(37, complete=False, dream_release=False)
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual([item.story_workspace_run_id for item in response.runs], [visible])
+
+    def test_pagination_never_drops_an_old_in_progress_run_behind_recent_runs(self) -> None:
+        oldest_in_progress = self._add_run(
+            60,
+            complete=False,
+            created_at="2026-08-01T00:00:00+00:00",
+            updated_at="2026-08-01T00:00:00+00:00",
+        )
+        for number in range(61, 162):
+            self._add_run(
+                number,
+                complete=True,
+                confirmation="dispatched",
+                created_at=f"2026-08-05T{number % 24:02d}:00:00+00:00",
+                updated_at=f"2026-08-05T{number % 24:02d}:00:00+00:00",
+            )
+
+        loader_calls: list[tuple[str, int]] = []
+
+        def loader(value, _actor, db):
+            loader_calls.append((value, id(db)))
+            return self.projections[value]
+
+        first = self._service(loader=loader).list_dream_runs(actor={"actor_id": ACTOR_ID}, limit=10)
+        second = self._service(loader=loader).list_dream_runs(
+            actor={"actor_id": ACTOR_ID},
+            limit=10,
+            cursor=first.next_cursor,
+        )
+
+        self.assertEqual(first.runs[0].story_workspace_run_id, oldest_in_progress)
+        self.assertEqual(len(first.runs), 10)
+        self.assertIsNotNone(first.next_cursor)
+        self.assertNotEqual(first.runs[0].story_workspace_run_id, second.runs[0].story_workspace_run_id)
+        self.assertEqual(len(loader_calls), 204)
+        self.assertEqual(len({connection_id for _, connection_id in loader_calls}), 1)
+
     def test_only_missing_stage_file_is_empty_and_permission_or_contract_errors_propagate(self) -> None:
         value = self._add_run(40, complete=False)
 
@@ -404,7 +461,7 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
 
         selects = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
         self.assertEqual(len(selects), 2)
-        self.assertTrue(all("LIMIT" in statement.upper() for statement in selects))
+        self.assertIn("LIMIT", selects[1].upper())
 
     def test_rejects_malformed_actor_and_does_not_fall_back_to_another_workspace(self) -> None:
         self._add_run(20, complete=False)
@@ -418,8 +475,10 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
 class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
     def test_route_uses_authenticated_actor_and_camel_case_contract(self) -> None:
         class Gateway:
-            async def list_dream_runs(self, *, actor):
+            async def list_dream_runs(self, *, actor, cursor=None, limit=50):
                 self.actor = actor
+                self.cursor = cursor
+                self.limit = limit
                 from story_workspace.contracts import (
                     StoryWorkspaceDreamReentryCollection,
                     StoryWorkspaceDreamReentryItem,
@@ -443,7 +502,7 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
                         sort_key="x",
                         href=f"/story-workspace/dream?run={run_id(99)}",
                     ),
-                ])
+                ], next_cursor=None)
 
         app = FastAPI()
         gateway = Gateway()
@@ -451,9 +510,11 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
         app.dependency_overrides[story_workspace.get_story_workflow_gateway] = lambda: gateway
         app.include_router(story_workspace.router)
         with TestClient(app) as client:
-            response = client.get("/api/story-workspace/dream-runs")
+            response = client.get("/api/story-workspace/dream-runs?cursor=cursor-1&limit=10")
 
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(gateway.actor, {"actor_id": ACTOR_ID})
+        self.assertEqual(gateway.cursor, "cursor-1")
+        self.assertEqual(gateway.limit, 10)
         self.assertEqual(response.json()["runs"][0]["storyWorkspaceRunId"], run_id(99))
         self.assertNotIn("threadId", response.text)

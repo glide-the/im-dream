@@ -730,26 +730,43 @@ class StoryWorkflowApplicationGateway:
             actor,
         )
 
-    async def list_dream_runs(self, *, actor: dict[str, str]) -> Any:
+    async def list_dream_runs(
+        self,
+        *,
+        actor: dict[str, str],
+        cursor: str | None = None,
+        limit: int = 50,
+    ) -> Any:
         """Return the canonical actor-scoped Dream re-entry collection."""
 
-        return await asyncio.to_thread(self._list_dream_runs_sync, actor)
+        return await asyncio.to_thread(self._list_dream_runs_sync, actor, cursor, limit)
 
-    def _list_dream_runs_sync(self, actor: dict[str, str]) -> Any:
+    def _list_dream_runs_sync(
+        self,
+        actor: dict[str, str],
+        cursor: str | None,
+        limit: int,
+    ) -> Any:
         service = StoryWorkspaceDreamReentryService(
             db_factory=database.get_db,
             dream_files_loader=self._load_dream_reentry_stage_projection,
         )
-        return service.list_dream_runs(actor=actor)
+        return service.list_dream_runs(actor=actor, cursor=cursor, limit=limit)
 
     def _load_dream_reentry_stage_projection(
         self,
         workflow_run_id: str,
         actor: dict[str, str],
+        db: sqlite3.Connection,
     ) -> StoryWorkspaceDreamReentryStageProjection:
         """Preserve Dream files truth while retaining its reliable mtime for sort."""
 
-        projection = self._get_dream_files_sync(workflow_run_id, actor)
+        projection = self._get_dream_files_from_db(
+            db,
+            workflow_run_id,
+            actor,
+            include_confirmation=False,
+        )
         stage_activity_at = self._dream_reentry_stage_activity_at(projection)
         return StoryWorkspaceDreamReentryStageProjection(
             stages=projection.stages,
@@ -802,69 +819,76 @@ class StoryWorkflowApplicationGateway:
     ) -> Any:
         """Run the complete SQLite/filesystem/flock chain in one worker."""
 
+        db = database.get_db()
         try:
-            db = database.get_db()
+            return self._get_dream_files_from_db(db, workflow_run_id, actor)
+        finally:
+            db.close()
+
+    def _get_dream_files_from_db(
+        self,
+        db: sqlite3.Connection,
+        workflow_run_id: str,
+        actor: dict[str, str],
+        *,
+        include_confirmation: bool = True,
+    ) -> Any:
+        """Reuse one already-authorized SQLite connection for a Dream projection."""
+
+        try:
             try:
-                try:
-                    actor_id = int(actor["actor_id"])
-                except (KeyError, TypeError, ValueError) as exc:
-                    raise ApiRouteError(
-                        "WORKFLOW_PERMISSION_DENIED",
-                        status_code=403,
-                    ) from exc
-                actor_context = self._run_actor_context(
-                    db,
-                    workflow_run_id,
-                    actor_id,
-                )
-                workflow_run = WorkflowRunService(
-                    db,
-                    token_secret=_token_secret(),
-                ).read_run(workflow_run_id, actor_context)
-                thread_id = workflow_run.source_voice_thread_id
-                if not isinstance(thread_id, str) or not thread_id.strip():
-                    raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+                actor_id = int(actor["actor_id"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ApiRouteError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    status_code=403,
+                ) from exc
+            actor_context = self._run_actor_context(db, workflow_run_id, actor_id)
+            workflow_run = WorkflowRunService(
+                db,
+                token_secret=_token_secret(),
+            ).read_run(workflow_run_id, actor_context)
+            thread_id = workflow_run.source_voice_thread_id
+            if not isinstance(thread_id, str) or not thread_id.strip():
+                raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+            if include_confirmation:
                 thread = database.get_chat_thread(thread_id, actor_id)
-                if thread is None or str(thread.get("id")) != thread_id:
-                    raise ApiRouteError(
-                        "WORKFLOW_PERMISSION_DENIED",
-                        status_code=404,
-                    )
-                workspace = self._thread_workspace(thread_id)
-                reader = StoryWorkspaceDreamFileReader(workspace)
-                reader_workspace = Path(reader.workspace_root)
-                canonical_parent = workspace.parent
-                if (
-                    reader_workspace != workspace
-                    or reader_workspace.parent != canonical_parent
-                    or reader_workspace.name != thread_id
-                    or not reader_workspace.is_relative_to(canonical_parent)
-                ):
-                    raise ApiRouteError(
-                        "WORKFLOW_PERMISSION_DENIED",
-                        status_code=403,
-                    )
-                projection = reader.read(
-                    workflow_run,
+                thread_id_value = str(thread.get("id")) if thread else None
+            else:
+                thread = db.execute(
+                    "SELECT id FROM chat_thread WHERE id = ? AND user_id = ?",
+                    (thread_id, actor_id),
+                ).fetchone()
+                thread_id_value = str(thread["id"]) if thread else None
+            if thread_id_value != thread_id:
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
+            workspace = self._thread_workspace(thread_id)
+            reader = StoryWorkspaceDreamFileReader(workspace)
+            reader_workspace = Path(reader.workspace_root)
+            canonical_parent = workspace.parent
+            if (
+                reader_workspace != workspace
+                or reader_workspace.parent != canonical_parent
+                or reader_workspace.name != thread_id
+                or not reader_workspace.is_relative_to(canonical_parent)
+            ):
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+            projection = reader.read(workflow_run, thread_id=thread_id)
+            if not include_confirmation:
+                return projection
+            confirmation_accepted, confirmation_dispatched = (
+                story_workspace_read_dream_confirmation_fact(
+                    db,
+                    actor_id=str(actor_id),
                     thread_id=thread_id,
+                    run_id=workflow_run_id,
                 )
-                confirmation_accepted, confirmation_dispatched = (
-                    story_workspace_read_dream_confirmation_fact(
-                        db,
-                        actor_id=str(actor_id),
-                        thread_id=thread_id,
-                        run_id=workflow_run_id,
-                    )
-                )
-                return projection.model_copy(update={
-                    "confirmation_accepted": confirmation_accepted,
-                    "confirmation_dispatched": confirmation_dispatched,
-                    "can_confirm": (
-                        projection.can_confirm and not confirmation_accepted
-                    ),
-                })
-            finally:
-                db.close()
+            )
+            return projection.model_copy(update={
+                "confirmation_accepted": confirmation_accepted,
+                "confirmation_dispatched": confirmation_dispatched,
+                "can_confirm": projection.can_confirm and not confirmation_accepted,
+            })
         except WorkflowRunError as exc:
             self._raise_run_error(exc)
         except ApiRouteError:
