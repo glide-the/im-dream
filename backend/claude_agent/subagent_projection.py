@@ -53,6 +53,17 @@ def _compact_text(value: object) -> str | None:
     return compact[:_SUMMARY_MAX_CHARS]
 
 
+def _compact_markdown(value: object) -> str | None:
+    """Bound assistant Markdown without flattening its block structure."""
+
+    if not isinstance(value, str):
+        return None
+    compact = value.replace("\r\n", "\n").replace("\r", "\n").strip()
+    if not compact:
+        return None
+    return compact[:_SUMMARY_MAX_CHARS]
+
+
 def _iter_content_blocks(record: dict[str, Any]) -> Iterable[dict[str, Any]]:
     message = record.get("message")
     if not isinstance(message, dict):
@@ -208,7 +219,7 @@ def _project_task(meta_path: Path) -> dict[str, Any] | None:
         for block in _iter_content_blocks(record):
             block_type = block.get("type")
             if role == "assistant" and block_type == "text":
-                text = _compact_text(block.get("text"))
+                text = _compact_markdown(block.get("text"))
                 if text:
                     latest_summary = text
             if role == "user" and block_type == "text":

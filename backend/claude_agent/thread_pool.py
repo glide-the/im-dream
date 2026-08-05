@@ -186,6 +186,13 @@ class AgentRunState:
     # Background asyncio.Task running execute_session for this turn.
     # Used by close_thread to cancel in-flight inference.
     bg_task: Optional[Any] = field(default=None, repr=False)
+    # Private current-turn provenance for scoped transports. It is deliberately
+    # not included in snapshot(): generic status consumers must never receive
+    # request metadata or Dream binding facts.
+    current_dream_context: Optional[Any] = field(default=None, repr=False)
+    current_message_metadata: Optional[dict[str, Any]] = field(default=None, repr=False)
+    current_message_id: Optional[str] = field(default=None, repr=False)
+    current_user_id: Optional[str] = field(default=None, repr=False)
 
     # ------------------------------------------------------------------
     # Lifecycle state
@@ -217,6 +224,10 @@ class AgentRunState:
         self.callbacks = None
         self.run_options = None
         self.event_bus = None
+        self.current_dream_context = None
+        self.current_message_metadata = None
+        self.current_message_id = None
+        self.current_user_id = None
         self.plan_state = None
         self.todo_state = None
         bg_task = self.bg_task

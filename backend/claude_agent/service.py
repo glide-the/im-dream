@@ -832,6 +832,44 @@ def _format_exception_for_sse(exc: BaseException | None) -> str:
     return " | ".join([base, *rendered_notes])
 
 
+def _attach_story_workspace_dream_assistant_source(
+    assistant_metadata: dict[str, Any],
+    request: "ClaudeAgentRunRequest",
+) -> None:
+    """Mark only a server-authenticated Dream reply with its exact user source.
+
+    Generic Chat assistant rows intentionally receive no marker. The Dream
+    adapter re-proves this marker against the persisted user row before it can
+    expose text, so a raw metadata value cannot promote an unrelated reply.
+    """
+
+    context = request.story_workspace_dream_context
+    source_metadata = request.message_metadata or {}
+    source_kind = (
+        source_metadata.get("kind")
+        if isinstance(source_metadata, dict)
+        else None
+    )
+    if not (
+        context is not None
+        and isinstance(request.message_id, str)
+        and request.message_id
+        and source_kind in {
+            "story-workspace-dream-launch",
+            "story-workspace-dream-confirmation",
+            "story-workspace-dream-agent-user",
+        }
+    ):
+        return
+    assistant_metadata["story_workspace_dream_source"] = {
+        "run_id": context.workflow_run_id,
+        "thread_id": context.thread_id,
+        "actor_id": str(request.user_id),
+        "message_id": request.message_id,
+        "kind": source_kind,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
@@ -1467,10 +1505,18 @@ class ClaudeAgentService:
                 StoryWorkspaceDreamConfirmationError,
                 story_workspace_guard_persisted_dream_confirmation_turn,
             )
+            from services.story_workspace.dream_agent_message_service import (
+                StoryWorkspaceDreamAgentMessageError,
+                story_workspace_guard_persisted_dream_agent_message_turn,
+            )
         except ModuleNotFoundError:
             from backend.services.story_workspace.dream_confirmation_service import (
                 StoryWorkspaceDreamConfirmationError,
                 story_workspace_guard_persisted_dream_confirmation_turn,
+            )
+            from backend.services.story_workspace.dream_agent_message_service import (
+                StoryWorkspaceDreamAgentMessageError,
+                story_workspace_guard_persisted_dream_agent_message_turn,
             )
 
         def _save_user() -> None:
@@ -1487,12 +1533,23 @@ class ClaudeAgentService:
                         metadata=message_metadata,
                     )
                 )
+                is_persisted_dream_agent_message = (
+                    story_workspace_guard_persisted_dream_agent_message_turn(
+                        db,
+                        thread_id=thread_id,
+                        actor_id=str(execution.request.user_id),
+                        message_id=user_message_id,
+                        metadata=message_metadata,
+                    )
+                )
             finally:
                 db.close()
             if is_persisted_dream_confirmation:
                 # The confirmation service owns this pre-persisted hidden row.
                 # In particular, never replace its newer durable claim lease
                 # with the older request snapshot carried through a thread lock.
+                return
+            if is_persisted_dream_agent_message:
                 return
             database.save_chat_message(
                 thread_id, "user",
@@ -1509,7 +1566,10 @@ class ClaudeAgentService:
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(None, _save_user)
-        except StoryWorkspaceDreamConfirmationError:
+        except (
+            StoryWorkspaceDreamConfirmationError,
+            StoryWorkspaceDreamAgentMessageError,
+        ):
             logger.exception(
                 "Rejected non-authoritative Dream confirmation persistence "
                 "for thread_id=%s",
@@ -1541,6 +1601,10 @@ class ClaudeAgentService:
 
         thread_id = execution.request.thread_id
         asst_metadata: dict = {"is_partial": True}
+        _attach_story_workspace_dream_assistant_source(
+            asst_metadata,
+            execution.request,
+        )
         if execution.request.model:
             asst_metadata["chatModel"] = {"provider": "anthropic", "model": execution.request.model}
         tool_count = sum(1 for p in asst_parts if p.get("type") == "tool-invocation")
@@ -1583,6 +1647,10 @@ class ClaudeAgentService:
                 asst_parts = [{"type": "text", "text": assistant_text}] if assistant_text else []
 
             asst_metadata: dict = {}
+            _attach_story_workspace_dream_assistant_source(
+                asst_metadata,
+                execution.request,
+            )
             if result and result.usage:
                 input_t = result.usage.get("input_tokens")
                 output_t = result.usage.get("output_tokens")

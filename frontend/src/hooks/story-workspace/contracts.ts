@@ -235,6 +235,44 @@ export interface StoryWorkspaceDreamFilesResponse {
   readonly confirmationLabel: '确认并继续';
 }
 
+/** Safe text-only message rendered by the Dream Agent workbench. */
+export interface StoryWorkspaceDreamAgentMessage {
+  readonly id: string;
+  readonly role: 'user' | 'assistant';
+  readonly text: string;
+  readonly truncated: boolean;
+  readonly createdAt: string;
+}
+
+/** Persisted Dream Agent history plus the server-owned send gate. */
+export interface StoryWorkspaceDreamAgentMessageSnapshot {
+  readonly storyWorkspaceRunId: string;
+  readonly lifecycle: 'idle' | 'streaming';
+  readonly activeTurnId: string | null;
+  readonly canSend: boolean;
+  readonly sendBlockReason: 'generating' | 'waiting_confirmation' | 'confirming' | 'continuing' | 'busy' | null;
+  readonly messages: readonly StoryWorkspaceDreamAgentMessage[];
+  readonly snapshotAt: string;
+}
+
+/** The browser submits only text and its idempotency key; all binding stays server-side. */
+export interface StoryWorkspaceDreamAgentMessageCommand {
+  readonly text: string;
+  readonly idempotencyKey: string;
+}
+
+export interface StoryWorkspaceDreamAgentMessageAccepted {
+  readonly storyWorkspaceRunId: string;
+  readonly messageId: string;
+  readonly accepted: true;
+}
+
+/** Allowlisted event surface emitted by the Story Workspace Dream SSE adapter. */
+export type StoryWorkspaceDreamAgentEvent =
+  | { readonly type: 'assistant_text_delta'; readonly cursor: string; readonly turnId: string; readonly delta: string }
+  | { readonly type: 'assistant_message_committed'; readonly turnId: string }
+  | { readonly type: 'status'; readonly lifecycle: 'idle' | 'streaming' };
+
 /** Dream's only page lifecycle; it intentionally has no rejection/failure arm. */
 export type StoryWorkspaceDreamLifecycleState =
   | 'story-workspace-dream-waiting-files'

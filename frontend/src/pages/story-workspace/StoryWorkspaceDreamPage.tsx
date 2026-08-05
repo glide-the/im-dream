@@ -7,6 +7,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import {
@@ -25,11 +26,15 @@ import {
 import {
   storyWorkspaceNewDreamConfirmationIdempotencyKey,
   useStoryWorkspaceDreamConfirmation,
+  useStoryWorkspaceDreamAgent,
   useStoryWorkspaceDreamFiles,
   type StoryWorkspaceDreamFieldValue,
   type StoryWorkspaceDreamStage,
 } from '../../hooks/story-workspace';
+import { StoryWorkspaceDreamAgentDialog } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
+import { StoryWorkspaceDreamAgentRail } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
+import type { WorkflowRun } from '../../api/storyWorkspaceApi';
 import {
   storyWorkspaceDreamStageSnapshotsFromFiles,
   storyWorkspaceParseDreamEditorValue,
@@ -56,6 +61,8 @@ export interface StoryWorkspaceDreamPageProps {
   initialDeckId?: string | null;
   initialStage?: StoryWorkspaceDreamStage;
   runId?: string | null;
+  /** Router-resolved, actor-scoped run context; Dream files remain stage truth. */
+  resolvedRun?: Pick<WorkflowRun, 'workflow_run_id' | 'deck_plugin_display_name' | 'deck_plugin_version' | 'workflow_summary' | 'deck_runtime_snapshot_id' | 'runtime_plugin_lock_id'> | null;
   onNavigate?: (path: string) => void;
 }
 
@@ -94,22 +101,37 @@ function revisionLine(state: StoryWorkspaceDreamState | null): string {
   )).join(' / ');
 }
 
+/** L3 rail copy combines the user-selected stage with file-derived revisions only. */
+function storyWorkspaceDreamAgentStageLine(
+  activeStage: StoryWorkspaceDreamStage,
+  revisions: string,
+): string {
+  return `当前：${STAGE_LABELS[activeStage].label} · ${revisions}`;
+}
+
 export function StoryWorkspaceDreamPage({
   initialDeckId,
   initialStage = 'characters',
   runId,
+  resolvedRun = null,
   onNavigate,
 }: StoryWorkspaceDreamPageProps) {
   const [dreamState, setDreamState] = useState<StoryWorkspaceDreamState | null>(null);
   const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>(initialStage);
   const [selection, setSelection] = useState<DreamSelection | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [agentDialogOpen, setAgentDialogOpen] = useState(false);
+  const desktopAgentTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileAgentTriggerRef = useRef<HTMLButtonElement>(null);
+  const [agentReturnTarget, setAgentReturnTarget] = useState<'desktop' | 'mobile'>('desktop');
 
   const draftLifecycleState = dreamState?.status ?? 'story-workspace-dream-waiting-files';
   const files = useStoryWorkspaceDreamFiles(runId, { lifecycleState: draftLifecycleState });
   const confirmation = useStoryWorkspaceDreamConfirmation(runId ?? '');
+  const dreamAgent = useStoryWorkspaceDreamAgent(runId);
   const { run: workflowRun, selectRun } = useWorkflowRun({ eventsEnabled: Boolean(runId) });
   const currentWorkflowRun = workflowRun?.workflow_run_id === runId ? workflowRun : null;
+  const agentContextRun = resolvedRun?.workflow_run_id === runId ? resolvedRun : currentWorkflowRun;
 
   const confirmationPersistence = useMemo(() => ({
     confirmationAccepted: Boolean(
@@ -137,6 +159,7 @@ export function StoryWorkspaceDreamPage({
     setSelection(null);
     setActiveStage(initialStage);
     setEditorError(null);
+    setAgentDialogOpen(false);
   }, [initialStage, runId]);
 
   useEffect(() => {
@@ -286,6 +309,14 @@ export function StoryWorkspaceDreamPage({
     && storyWorkspaceCanConfirmDream(dreamState)
     && confirmation.status !== 'confirming',
   );
+  const deckName = agentContextRun?.deck_plugin_display_name ?? '当前 Deck';
+  const pluginVersion = agentContextRun?.deck_plugin_version ?? files.data?.source.deckPluginVersion ?? 'Dream';
+  const workflowName = agentContextRun?.workflow_summary ?? 'Dream';
+  const openDreamAgent = (target: 'desktop' | 'mobile') => {
+    dreamAgent.markRead();
+    setAgentReturnTarget(target);
+    setAgentDialogOpen(true);
+  };
   return (
     <section
       className="story-workspace-dream"
@@ -302,6 +333,22 @@ export function StoryWorkspaceDreamPage({
           {activityCopy}
         </div>
       </header>
+
+      <div className="story-workspace-dream__mobile-agent">
+        <StoryWorkspaceDreamAgentRail
+          agent={dreamAgent}
+          deckName={deckName}
+          isOpen={agentDialogOpen}
+          onOpen={() => openDreamAgent('mobile')}
+          pluginVersion={pluginVersion}
+          runId={runId}
+          runtimeLockId={agentContextRun?.runtime_plugin_lock_id ?? files.data?.source.runtimePluginLockId ?? null}
+          runtimeSnapshotId={agentContextRun?.deck_runtime_snapshot_id ?? files.data?.source.deckRuntimeSnapshotId ?? null}
+          stageLine={storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState))}
+          triggerRef={mobileAgentTriggerRef}
+          workflowName={workflowName}
+        />
+      </div>
 
       <nav className="story-workspace-dream__spine" aria-label="Dream 文件模块">
         {STORY_WORKSPACE_DREAM_STAGES.map((stage, index) => {
@@ -393,6 +440,19 @@ export function StoryWorkspaceDreamPage({
         </main>
 
         <aside className="story-workspace-dream__editor" aria-label="Dream 内容编辑器">
+          <StoryWorkspaceDreamAgentRail
+            agent={dreamAgent}
+            deckName={deckName}
+            isOpen={agentDialogOpen}
+            onOpen={() => openDreamAgent('desktop')}
+            pluginVersion={pluginVersion}
+            runId={runId}
+            runtimeLockId={agentContextRun?.runtime_plugin_lock_id ?? files.data?.source.runtimePluginLockId ?? null}
+            runtimeSnapshotId={agentContextRun?.deck_runtime_snapshot_id ?? files.data?.source.deckRuntimeSnapshotId ?? null}
+            stageLine={storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState))}
+            triggerRef={desktopAgentTriggerRef}
+            workflowName={workflowName}
+          />
           {selection && dreamState && selectedFileItem ? (
             <>
               <header>
@@ -507,6 +567,15 @@ export function StoryWorkspaceDreamPage({
           </button>
         )}
       </footer>
+      {agentDialogOpen && (
+        <StoryWorkspaceDreamAgentDialog
+          agent={dreamAgent}
+          deckName={deckName}
+          onClose={() => setAgentDialogOpen(false)}
+          restoreFocusRef={agentReturnTarget === 'mobile' ? mobileAgentTriggerRef : desktopAgentTriggerRef}
+          runId={runId}
+        />
+      )}
     </section>
   );
 }

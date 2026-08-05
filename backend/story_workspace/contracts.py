@@ -33,6 +33,7 @@ STORY_WORKSPACE_DREAM_ITEMS_MAX = 1000
 STORY_WORKSPACE_DREAM_RELATIONS_MAX = 100
 STORY_WORKSPACE_DREAM_EDITS_MAX = 1000
 STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX = 64
+STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX = 4000
 _StoryWorkspaceDreamPositiveInt = Annotated[StrictInt, Field(ge=1)]
 _StoryWorkspaceDreamNonNegativeInt = Annotated[StrictInt, Field(ge=0)]
 
@@ -269,6 +270,56 @@ class StoryWorkspaceDreamLaunchAccepted(_StoryWorkspaceDreamWireModel):
         context: StoryWorkspaceDreamRunContext,
     ) -> "StoryWorkspaceDreamLaunchAccepted":
         return cls.model_validate(context.model_dump(mode="json"))
+
+
+class StoryWorkspaceDreamAgentMessageCommand(_StoryWorkspaceDreamWireModel):
+    """Untrusted text command for the run-bound Dream Agent widget."""
+
+    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+
+    @field_validator("text")
+    @classmethod
+    def message_text_must_not_be_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Dream Agent message text must not be blank")
+        return value
+
+
+class StoryWorkspaceDreamAgentMessage(_StoryWorkspaceDreamWireModel):
+    """Safe, text-only message projection for the Dream workbench."""
+
+    id: str = Field(min_length=1, max_length=255)
+    role: Literal["user", "assistant"]
+    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
+    truncated: bool = False
+    created_at: datetime
+
+
+class StoryWorkspaceDreamAgentMessageSnapshot(_StoryWorkspaceDreamWireModel):
+    """Persisted safe history plus transient execution availability."""
+
+    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    lifecycle: Literal["idle", "streaming"]
+    active_turn_id: Optional[str] = Field(default=None, max_length=255)
+    can_send: bool
+    send_block_reason: Optional[
+        Literal["generating", "waiting_confirmation", "confirming", "continuing", "busy"]
+    ] = None
+    messages: list[StoryWorkspaceDreamAgentMessage]
+    snapshot_at: datetime
+
+
+class StoryWorkspaceDreamAgentMessageAccepted(_StoryWorkspaceDreamWireModel):
+    """Acknowledge one durable, idempotently claimed widget command."""
+
+    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    message_id: str = Field(min_length=1, max_length=255)
+    accepted: Literal[True] = True
 
 
 class StoryWorkspaceDreamToolInput(BaseModel):
@@ -1090,6 +1141,10 @@ __all__ = [
     "StoryWorkspaceContentStatus",
     "StoryWorkspaceDreamConfirmationAccepted",
     "StoryWorkspaceDreamConfirmationCommand",
+    "StoryWorkspaceDreamAgentMessage",
+    "StoryWorkspaceDreamAgentMessageAccepted",
+    "StoryWorkspaceDreamAgentMessageCommand",
+    "StoryWorkspaceDreamAgentMessageSnapshot",
     "StoryWorkspaceDreamEdit",
     "StoryWorkspaceDreamFilesResponse",
     "StoryWorkspaceDreamReentryCollection",

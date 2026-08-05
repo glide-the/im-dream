@@ -253,7 +253,7 @@ interface StoryWorkspaceDreamAgentMessage {
 }
 ```
 
-只有 Dream widget user message 与 assistant text 可以进入 DTO。role、parts、metadata 不能原样透传。
+DTO 中的 `user` 仅允许 Dream widget 主动发送的文本；Dream launch 与 Dream confirmation 的隐藏 source user row 永不展示。`assistant` 仅在其来源元数据与当前 run、thread、actor 精确一致，且能关联到一条已持久化的 Dream launch、Dream confirmation 或 Dream widget source user row 时允许投影。普通系统、guidance、debug、未知 control 来源及其 assistant 输出一律排除；role、parts、metadata 不能原样透传。
 
 ### 9.2 增量合同
 

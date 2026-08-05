@@ -9,10 +9,10 @@
 | 设计维度 | 高保真规格 | 与参考图的对应 | 现有应用映射 |
 | --- | --- | --- | --- |
 | 整体气质 | 安静、克制、状态清晰；以留白和排版建立层级 | 深色背景、灰色分组标题、单条任务卡 | 使用 `tokens.css` 中纸张色与文本 token，自动适配亮暗主题 |
-| 面板形态 | 桌面端右侧推挤式 `<aside>`，20rem 基准宽；窄屏覆盖式抽屉 | 参考图是完整详情页，本项目收敛为右侧会话辅助栏 | 复用 `FileSidebar` 的宽度归零、左边框、0.25s 开合方式 |
+| 面板形态 | 桌面端右侧推挤式 `<aside>`，30rem 默认宽；左边界可拖动调宽 | 参考图是完整详情页，本项目收敛为右侧会话辅助栏 | 复用 `FileSidebar` 的宽度归零与 0.25s 开合方式，增加 352–768px resize rail |
 | 信息密度 | 标题栏紧凑，分组间留出明显呼吸，任务行高度约 64–76px | “已开启”与“完成 · 23”之间大段留白 | 4px 基础网格；内容区 12px 内边距，组间 24px |
 | 主色 | 不新增品牌主色；强调使用现有动作色、成功色、警告色 | 彩色代理图标承担局部视觉焦点 | `--color-action-link`、`--color-state-success/warning/error` |
-| 字体 | 继承聊天页 `'Excalifont', 'Xiaolai', Georgia, serif`；数字用 tabular nums | 截图标题自然、数字醒目但不机械 | 不加载新字体；标题 15–16px/600，正文 13px，辅助 11–12px |
+| 字体 | 侧栏内部使用 `Inter, ui-sans-serif, system-ui, -apple-system, sans-serif`；数字用 tabular nums | 执行详情属于高密度操作信息，需要优先保证可扫读性 | 不加载新字体；任务标题约 18px/700，Markdown 结果 15px/1.72，元信息与时间线 12–13px |
 | 图标 | 1.0–1.1rem 线稿 SVG，`currentColor`；头像为稳定彩色圆形/几何 fallback | 顶部机器人线稿、花形彩色头像 | 新增 `IconSubagents` 到现有 `Icons.tsx`；不依赖 Font Awesome |
 | 层级 | 背景 → 面板 → 任务行 → 状态点/头像；只用一层柔和边框 | 截图任务行比背景深一阶 | `--color-bg-app`、`--color-bg-paper`、`--color-border-paper` |
 | 动效 | 仅面板开合、hover 变色、运行点轻呼吸、任务迁移淡入 | 保留“运行中”的生命感，不制造噪音 | 140ms hover、250ms panel、900ms pulse；支持 reduced motion |
@@ -47,7 +47,9 @@
 
 ```css
 .subagents-ui {
-  --subagents-sidebar-width: 20rem;
+  --subagents-sidebar-width: 30rem;
+  --subagents-sidebar-min-width: 22rem;
+  --subagents-sidebar-max-width: 48rem;
   --subagents-drawer-max-width: 22rem;
   --subagents-space-1: 0.25rem;  /* 4px */
   --subagents-space-2: 0.5rem;   /* 8px */
@@ -67,7 +69,7 @@
 | --- | --- | --- | --- | --- |
 | A1 入口 | 高 32px；宽随内容，最小 32px | 横向 7px；图标与 A2 间 6px | 13px / 1 | 与 PlanButton 完全同高 |
 | A2 头像 | 18px；重叠时负间距 4px | 每个 1px 背景描边 | 汇总 12px/600 | 最多 4 个，更多显示 `+N` |
-| B1 面板 | 320px 桌面宽；最大建议 352px | 内容区 12px | 继承 ChatView 字体 | 关闭时 `width/min-width:0` |
+| B1 面板 | 480px 默认；352–768px 可调 | 内容区约 22px | 系统无衬线字体 | 关闭时 `width/min-width:0`；至少保留 360px 聊天区 |
 | B2 标题栏 | 最小高 56px | 16px；左右两端对齐 | 16px/600 | 底部 1px 分割线；sticky top |
 | C1/D1 分组标题 | 最小高 24px | 0 4px，组前 20–24px | 13px/600；字距 0.01em | 数字使用 `font-variant-numeric: tabular-nums` |
 | C2/D2 任务行 | 最小高 68px | 10px 12px；行间 6px | 标题 14px/1.3；摘要 12px/1.45；耗时 12px | 圆角 12px；长文本截断 |
@@ -138,6 +140,7 @@ frontend/src/lib/
 - 摘要占中间列第二行，最多两行；运行行可在摘要前加可读状态文本“运行中 ·”。
 - 默认背景 `--color-bg-paper`；整行使用语义化 `<button>`，hover 只改变纸面背景与弱边框，不使用抬升阴影；`:focus-visible` 必须清晰。
 - 点击任务行后在 B1 内容槽切换到 F1–F3：F1 为任务身份和状态元信息，F2 为最新结果/错误，F3 为按时间排列的脱敏执行记录。标题栏左侧变为返回按钮。
+- F2 “最新结果”不使用 `white-space: pre-wrap` 模拟格式，直接复用 `ChatMarkdown` 与 `.prose.prose-chat`，确保 GFM 列表、标题、表格、代码块、链接和 Mermaid 与聊天消息正文一致。
 - 新完成任务淡入 160ms；迁移后不保留旧运行行。
 - 代理头像使用服务端头像；fallback 基于稳定哈希选取现有 voice 色变量。头像边界使用 `--color-bg-app`，保证重叠时可辨识。
 

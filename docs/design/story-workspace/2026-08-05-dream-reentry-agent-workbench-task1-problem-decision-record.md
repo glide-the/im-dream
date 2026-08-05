@@ -176,8 +176,9 @@ Dream 需要持久快照和实时增量，但通用 Claude Agent API 会暴露�
 
 安全白名单：
 
-- 用户可见：用户在 Dream 悬浮层主动发送的文本；Dream Agent 的 `assistant` text；`正在输出/已完成本轮输出` 等安全状态摘要。
-- 默认排除：系统/launch/confirmation/control 消息、reasoning/thinking、tool invocation、工具输入输出、原始 error/debug event、session path、插件原始参数、凭证和内部 metadata。
+- 用户可见的 `user` 仅为 Dream 悬浮层主动发送的 widget 文本；发起与一次确认所写入的隐藏 source user row 永不展示。
+- 用户可见的 `assistant` text 必须同时精确绑定当前 run、thread、actor 与一条已持久化、允许来源（Dream launch、Dream confirmation 或 Dream widget）的 source user row；该规则允许展示 launch/confirmation 的安全 assistant 产出，而不展示它们的 source user row。
+- 默认排除：普通系统、guidance、debug、未知 control 来源及其 assistant 输出；以及 reasoning/thinking、tool invocation、工具输入输出、原始 error/debug event、session path、插件原始参数、凭证和内部 metadata。
 
 加载与重连：
 

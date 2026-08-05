@@ -198,6 +198,29 @@ class TestSubagentProjection(unittest.TestCase):
         self.assertEqual(task["status"], "completed")
         self.assertIsNone(task["error"])
 
+    def test_final_summary_preserves_markdown_block_structure(self) -> None:
+        self._write_agent(
+            "markdown",
+            [
+                _record(
+                    "2026-08-04T12:00:00Z",
+                    "assistant",
+                    [
+                        {
+                            "type": "text",
+                            "text": "## Review\n\n- PASS\n- No regressions\n\n```ts\nconst ok = true;\n```",
+                        }
+                    ],
+                ),
+            ],
+        )
+
+        summary = build_thread_subagents_payload(self.thread_id, self.root)["tasks"][0]["summary"]
+        self.assertEqual(
+            summary,
+            "## Review\n\n- PASS\n- No regressions\n\n```ts\nconst ok = true;\n```",
+        )
+
     def test_missing_workspace_returns_empty_payload(self) -> None:
         payload = build_thread_subagents_payload("missing-thread", self.root)
         self.assertFalse(payload["exists"])

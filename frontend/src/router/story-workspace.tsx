@@ -22,6 +22,7 @@ import {
 } from '../components/story-workspace/layout/StoryWorkspaceReviewDetail';
 import { StoryWorkspaceSidebar } from '../components/story-workspace/layout/StoryWorkspaceSidebar';
 import { useRunDeepLink } from '../hooks/story-workspace';
+import type { WorkflowRun } from '../api/storyWorkspaceApi';
 import {
   subscribeStoryWorkspaceOutput,
   type StoryWorkspaceOutputReceipt,
@@ -107,9 +108,9 @@ function renderStoryWorkspaceRoute(
   onReview: (selection: StoryWorkspaceReviewSelection) => void,
   refreshNonce: number,
   onNavigate: (path: string, notice?: string) => void,
-  resolvedDreamRunId: string | null,
+  resolvedDreamRun: WorkflowRun | null,
 ) {
-  const runId = resolvedDreamRunId;
+  const runId = storyWorkspaceDreamResolvedRunId(resolvedDreamRun);
   const initialDeckId = readStoryWorkspaceDeckParam(match.query);
   const dreamStage = storyWorkspaceDreamStageForRoute(match);
   switch (match.route) {
@@ -122,6 +123,7 @@ function renderStoryWorkspaceRoute(
             initialStage={dreamStage}
             initialDeckId={initialDeckId}
             onNavigate={onNavigate}
+            resolvedRun={resolvedDreamRun}
             runId={runId}
           />
         );
@@ -134,6 +136,7 @@ function renderStoryWorkspaceRoute(
             initialStage={dreamStage}
             initialDeckId={initialDeckId}
             onNavigate={onNavigate}
+            resolvedRun={resolvedDreamRun}
             runId={runId}
           />
         );
@@ -154,6 +157,7 @@ function renderStoryWorkspaceRoute(
         <StoryWorkspaceDreamPage
           initialDeckId={initialDeckId}
           onNavigate={onNavigate}
+          resolvedRun={resolvedDreamRun}
           runId={runId}
         />
       );
@@ -190,8 +194,6 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
     isDreamRoute,
     isDreamRoute ? readStoryWorkspaceRunParam(activeMatch.query) : null,
   );
-  const resolvedDreamRunId = storyWorkspaceDreamResolvedRunId(runDeepLink.run);
-
   const handleToggleSidebarCollapse = useCallback(() => {
     setSidebarCollapsed((collapsed) => {
       const next = !collapsed;
@@ -336,7 +338,7 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
         handleOpenReview,
         resourceRefreshNonce,
         handleNavigate,
-        resolvedDreamRunId,
+        runDeepLink.run,
       )}
     </StoryWorkspaceLayout>
   );

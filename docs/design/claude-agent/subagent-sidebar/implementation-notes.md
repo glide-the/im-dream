@@ -4,9 +4,11 @@
 
 - 后端按 thread workspace 扫描 `.claude-home/projects/**/subagents/*.meta.json` 与有界 JSONL 首尾，投影 `running/completed/failed/cancelled`、摘要、耗时、`tool_call_id` 和最多 80 条脱敏 activity。activity 只保留 assistant 文本、工具名、生命周期与时间，不下发 user prompt、thinking、工具输入或成功工具输出。
 - 顶部入口显示最近 Agent 头像及运行/完成计数；详情以与 `FileSidebar` 同层的右侧 `<aside>` 展示 active/completed/ended 分组。
-- 当前实现的桌面侧栏宽度为 `26rem`，与参考图的信息密度和任务摘要长度匹配；关闭态宽度与 `min-width` 均为 0。
+- 当前实现的桌面侧栏默认宽度为 `30rem`（480px），左侧 resize rail 可拖动到约 352–768px，并根据 viewport 保留至少 360px 聊天区；宽度持久化到 localStorage，双击恢复默认值。关闭态宽度与 `min-width` 均为 0。
 - `ChatMessageList` 对 `Agent`/旧名 `Task` 工具单独路由，不显示包含 agentId 的内部 launch/result envelope。聊天流改为任务胶囊按钮，点击后打开详情栏并按 `toolCallId` 定位高亮。
 - 侧栏任务行本身为按钮；点击后在同一 `<aside>` 内进入执行详情，聊天任务胶囊也直接选择对应任务。详情标题栏提供返回列表按钮，任务刷新时保持选中项，选中项消失时安全回退列表。
+- “最新结果”保留 assistant 最终文本中的 Markdown 换行，并复用聊天正文的 `ChatMarkdown` + `prose prose-chat` 渲染链；GFM 列表、标题、表格、代码块、链接和 Mermaid 与 `ChatMessageList` 行为一致。
+- 详情栏采用系统无衬线操作界面字体，标题、元信息、Markdown 结果与 activity 时间线分别提升到清晰的字号层级；resize rail 支持 Pointer Events、左右方向键（Shift 加速）、Home/End 和双击复位，并暴露 `role="separator"`/ARIA value。
 
 ## 2. Parent 无后续回复事故
 

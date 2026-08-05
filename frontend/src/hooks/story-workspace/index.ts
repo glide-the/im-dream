@@ -62,6 +62,20 @@ export {
   useStoryWorkspaceDreamRuns,
 } from './useStoryWorkspaceDreamRuns';
 export type { StoryWorkspaceDreamRunsState } from './useStoryWorkspaceDreamRuns';
+export {
+  storyWorkspaceDreamAgentEventsEndpoint,
+  storyWorkspaceDreamAgentMessagesEndpoint,
+  storyWorkspaceBuildDreamAgentSendPayload,
+  storyWorkspaceFetchDreamAgentSnapshot,
+  storyWorkspaceNewDreamAgentIdempotencyKey,
+  storyWorkspaceParseDreamAgentEvent,
+  storyWorkspaceParseDreamAgentSnapshot,
+  storyWorkspaceReadDreamAgentEventStream,
+  storyWorkspaceReduceDreamAgentEvents,
+  storyWorkspaceSubmitDreamAgentMessage,
+  useStoryWorkspaceDreamAgent,
+} from './useStoryWorkspaceDreamAgent';
+export type { StoryWorkspaceDreamAgentViewModel } from './useStoryWorkspaceDreamAgent';
 export type {
   StoryWorkspaceCharacter,
   StoryWorkspaceDreamConfirmationCommand,
@@ -73,6 +87,11 @@ export type {
   StoryWorkspaceDreamReentryItem,
   StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
+  StoryWorkspaceDreamAgentEvent,
+  StoryWorkspaceDreamAgentMessage,
+  StoryWorkspaceDreamAgentMessageAccepted,
+  StoryWorkspaceDreamAgentMessageCommand,
+  StoryWorkspaceDreamAgentMessageSnapshot,
   StoryWorkspaceDreamLifecycleState,
   StoryWorkspaceDreamSource,
   StoryWorkspaceDreamStage,

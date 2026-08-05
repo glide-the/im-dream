@@ -1,0 +1,146 @@
+// [Input] Dream-safe snapshots and normalized, server-allowlisted SSE events.
+// [Output] Node seam coverage for snapshot-first, terminal reconciliation and send boundaries.
+// [Pos] Dream Agent adapter Red/Green contract tests (design_008 §9/§20).
+
+import { expect, test } from '@playwright/test';
+import {
+  storyWorkspaceBuildDreamAgentSendPayload,
+  storyWorkspaceComputeDreamAgentUnreadCount,
+  storyWorkspaceDreamAgentEventsEndpoint,
+  storyWorkspaceFetchDreamAgentSnapshot,
+  storyWorkspaceReadDreamAgentEventStream,
+  storyWorkspaceParseDreamAgentEvent,
+  storyWorkspaceParseDreamAgentSnapshot,
+  storyWorkspaceReduceDreamAgentEvents,
+} from '../useStoryWorkspaceDreamAgent';
+
+const RUN_ID = 'run_0123456789abcdef0123456789abcdef';
+
+const SNAPSHOT = {
+  storyWorkspaceRunId: RUN_ID,
+  lifecycle: 'streaming',
+  activeTurnId: 'turn-1',
+  canSend: false,
+  sendBlockReason: 'continuing',
+  messages: [{ id: 'm1', role: 'assistant', text: '已保存的人物。', truncated: false, createdAt: '2026-08-05T00:00:00Z' }],
+  snapshotAt: '2026-08-05T00:00:01Z',
+};
+
+test('snapshot is a safe, complete first render before any increment is reduced', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
+  const model = storyWorkspaceReduceDreamAgentEvents({ snapshot, streamText: '', streamTurnId: null, seenCursors: [] }, []);
+  expect(model.snapshot.messages).toEqual(snapshot.messages);
+  expect(model.streamText).toBe('');
+});
+
+test('replayed cursor is de-duplicated and terminal event requests durable reconciliation', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
+  const delta = storyWorkspaceParseDreamAgentEvent('assistant_text_delta', '{"turnId":"turn-1","delta":"继续写场景"}', 'turn-1:7');
+  const committed = storyWorkspaceParseDreamAgentEvent('assistant_message_committed', '{"turnId":"turn-1"}', 'turn-1:8');
+  expect(delta).not.toBeNull();
+  expect(committed).not.toBeNull();
+  const first = storyWorkspaceReduceDreamAgentEvents({ snapshot, streamText: '', streamTurnId: null, seenCursors: [] }, [delta!, delta!]);
+  expect(first.streamText).toBe('继续写场景');
+  expect(first.shouldReconcile).toBe(false);
+  const terminal = storyWorkspaceReduceDreamAgentEvents(first, [committed!]);
+  expect(terminal.shouldReconcile).toBe(true);
+  expect(terminal.streamText).toBe('');
+});
+
+test('send payload has only text and idempotency key and is bound by run path', () => {
+  expect(storyWorkspaceBuildDreamAgentSendPayload(RUN_ID, '  保持雨夜氛围  ', 'key-1')).toEqual({
+    endpoint: `/api/story-workspace/workflow-runs/${RUN_ID}/dream-agent/messages`,
+    body: { text: '保持雨夜氛围', idempotencyKey: 'key-1' },
+  });
+  expect(storyWorkspaceBuildDreamAgentSendPayload(RUN_ID, ' ', 'key-1')).toBeNull();
+});
+
+test('SSE stream is fetched with the authenticated transport and terminal reconcile waits for durable assistant history', async () => {
+  const calls: RequestInit[] = [];
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(
+        'id: turn-1:1\nevent: assistant_text_delta\ndata: {"turnId":"turn-1","delta":"第一段"}\n\n'
+        + 'id: turn-1:2\nevent: assistant_message_committed\ndata: {"turnId":"turn-1"}\n\n',
+      ));
+      controller.close();
+    },
+  });
+  const events = await storyWorkspaceReadDreamAgentEventStream(RUN_ID, {
+    token: 'token-1',
+    endpoint: '/api/test-dream-events',
+    fetchImpl: (async (_url: unknown, init?: RequestInit) => {
+      calls.push(init ?? {});
+      return new Response(stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+    }) as unknown as typeof fetch,
+  });
+  expect(calls[0]?.credentials).toBe('include');
+  expect(new Headers(calls[0]?.headers).get('Authorization')).toBe('Bearer token-1');
+  expect(events.map((event) => event.type)).toEqual(['assistant_text_delta', 'assistant_message_committed']);
+});
+
+test('unread state is view-local: opening reads the current assistant history while a later stream becomes unread', () => {
+  const messages = storyWorkspaceParseDreamAgentSnapshot({ ...SNAPSHOT, lifecycle: 'idle', activeTurnId: null, messages: [
+    ...SNAPSHOT.messages,
+    { id: 'm2', role: 'assistant', text: '第二条。', truncated: false, createdAt: '2026-08-05T00:01:00Z' },
+  ] }).messages;
+  expect(storyWorkspaceComputeDreamAgentUnreadCount(messages, 'm2', null, null, '')).toBe(0);
+  expect(storyWorkspaceComputeDreamAgentUnreadCount(messages, 'm2', 'turn-2', null, '新输出')).toBe(1);
+});
+
+test('terminal state keeps cursor evidence while requesting a durable snapshot reconciliation', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
+  const terminal = storyWorkspaceReduceDreamAgentEvents({
+    snapshot, streamText: '尚未持久化', streamTurnId: 'turn-1', seenCursors: ['turn-1:1'], shouldReconcile: false,
+  }, [{ type: 'assistant_message_committed', turnId: 'turn-1' }]);
+  expect(terminal.shouldReconcile).toBe(true);
+  expect(terminal.seenCursors).toEqual(['turn-1:1']);
+});
+
+test('reconnect reconciles a snapshot then re-subscribes after cursor A, de-duplicating replay A and retaining B', async () => {
+  const calls: string[] = [];
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot({ ...SNAPSHOT, activeTurnId: 'turn-1' });
+  const fetchImpl = (async (url: unknown, init?: RequestInit) => {
+    const endpoint = String(url);
+    calls.push(endpoint);
+    const accept = new Headers(init?.headers).get('Accept');
+    if (accept === 'application/json') {
+      return new Response(JSON.stringify({ ...SNAPSHOT, snapshotAt: '2026-08-05T00:00:02Z' }), {
+        status: 200, headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    const isReconnect = endpoint.includes('after=turn-1%3A1');
+    const frames = isReconnect
+      ? 'id: turn-1:1\nevent: assistant_text_delta\ndata: {"turnId":"turn-1","delta":"A"}\n\n'
+        + 'id: turn-1:2\nevent: assistant_text_delta\ndata: {"turnId":"turn-1","delta":"B"}\n\n'
+      : 'id: turn-1:1\nevent: assistant_text_delta\ndata: {"turnId":"turn-1","delta":"A"}\n\n';
+    return new Response(frames, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+  }) as unknown as typeof fetch;
+
+  const first = await storyWorkspaceReadDreamAgentEventStream(RUN_ID, {
+    endpoint: '/api/test-dream-events', fetchImpl, token: 'token-1',
+  });
+  expect(first.map((event) => event.type)).toEqual(['assistant_text_delta']);
+  const firstCursor = (first[0] as Extract<typeof first[number], { type: 'assistant_text_delta' }>).cursor;
+  expect(firstCursor).toBe('turn-1:1');
+
+  const reconciled = await storyWorkspaceFetchDreamAgentSnapshot(RUN_ID, {
+    endpoint: '/api/test-dream-snapshot', fetchImpl, token: 'token-1',
+  });
+  expect(reconciled.snapshotAt).toBe('2026-08-05T00:00:02Z');
+
+  const replay = await storyWorkspaceReadDreamAgentEventStream(RUN_ID, {
+    endpoint: storyWorkspaceDreamAgentEventsEndpoint(RUN_ID, firstCursor),
+    after: firstCursor,
+    fetchImpl,
+    token: 'token-1',
+  });
+  expect(calls.at(-1)).toContain('after=turn-1%3A1');
+  const reduced = storyWorkspaceReduceDreamAgentEvents(
+    storyWorkspaceReduceDreamAgentEvents({ snapshot, streamText: '', streamTurnId: null, seenCursors: [] }, first),
+    replay,
+  );
+  expect(reduced.streamText).toBe('AB');
+  expect(reduced.seenCursors).toEqual(['turn-1:1', 'turn-1:2']);
+  expect(replay.at(-1)).toMatchObject({ type: 'assistant_text_delta', cursor: 'turn-1:2', delta: 'B' });
+});

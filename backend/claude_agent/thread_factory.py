@@ -118,6 +118,14 @@ class ClaudeAgentThreadFactory:
                 )
 
             state.current_turn_id = str(uuid4())
+            state.current_dream_context = request.story_workspace_dream_context
+            state.current_message_metadata = (
+                dict(request.message_metadata)
+                if isinstance(request.message_metadata, dict)
+                else None
+            )
+            state.current_message_id = request.message_id
+            state.current_user_id = str(request.user_id)
             bus = create_event_bus(session_id, state.current_turn_id)
             state.event_bus = bus
             state.mark_running()
@@ -209,6 +217,85 @@ class ClaudeAgentThreadFactory:
         finally:
             await bus.unsubscribe(token)
 
+    async def subscribe_expected_stream(
+        self,
+        session_id: str,
+        expected_turn_id: str,
+    ) -> AsyncGenerator[str, None]:
+        """Replay one expected live turn without surfacing turn-race errors.
+
+        Dream's adapter snapshots a turn ID before subscribing. A completed or
+        replaced turn is an ordinary idle transition, not an exception exposed
+        to a user-facing EventSource. Capturing the bus before subscribing keeps
+        its replay buffer available even when the producer finishes immediately
+        afterwards.
+        """
+
+        _validate_session_id(session_id)
+        state = self._pool.get(session_id)
+        if (
+            state is None
+            or state.lifecycle != AgentRunLifecycle.RUNNING
+            or state.current_turn_id != expected_turn_id
+        ):
+            return
+        bus = state.event_bus
+        if bus is None:
+            return
+        try:
+            token = await bus.subscribe()
+        except Exception:
+            return
+        try:
+            async for frame in bus.read(token):
+                yield frame
+        finally:
+            await bus.unsubscribe(token)
+
+    def is_expected_story_workspace_dream_turn(
+        self,
+        session_id: str,
+        expected_turn_id: str,
+        run_id: str,
+        actor_id: str,
+    ) -> bool:
+        """Return whether the active turn is a trusted source of Dream output."""
+
+        state = self._pool.get(session_id)
+        if (
+            state is None
+            or state.lifecycle != AgentRunLifecycle.RUNNING
+            or state.current_turn_id != expected_turn_id
+            or str(state.current_user_id or "") != actor_id
+        ):
+            return False
+        context = state.current_dream_context
+        metadata = state.current_message_metadata or {}
+        kind = metadata.get("kind") if isinstance(metadata, dict) else None
+        if (
+            context is None
+            or context.workflow_run_id != run_id
+            or context.thread_id != session_id
+            or kind not in {
+                "story-workspace-dream-launch",
+                "story-workspace-dream-confirmation",
+                "story-workspace-dream-agent-user",
+            }
+        ):
+            return False
+        if kind == "story-workspace-dream-launch":
+            return (
+                metadata.get("workflowRunId") == run_id
+                and metadata.get("threadId") == session_id
+                and str(metadata.get("actorId") or "") == actor_id
+            )
+        return (
+            metadata.get("story_workspace_run_id") == run_id
+            and str(metadata.get("thread_id") or "") == session_id
+            and str(metadata.get("actor_id") or metadata.get("actor") or "")
+            == actor_id
+        )
+
     async def _run_turn_task(
         self,
         execution: Any,
@@ -226,6 +313,10 @@ class ClaudeAgentThreadFactory:
             logger.exception("Turn failed for session_id=%s", session_id)
         finally:
             state.turn_context = None
+            state.current_dream_context = None
+            state.current_message_metadata = None
+            state.current_message_id = None
+            state.current_user_id = None
             state.event_bus = None
             state.bg_task = None
             if state.lifecycle == AgentRunLifecycle.RUNNING:
