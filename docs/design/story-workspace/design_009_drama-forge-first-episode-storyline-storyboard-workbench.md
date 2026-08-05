@@ -1,16 +1,32 @@
 # drama-forge 第一集完整工作流与故事线分镜工作台交互设计
 
 > 编号：design_009  
-> 状态：Canonical / 待独立评审  
+> 状态：Canonical / 独立评审通过（2026-08-05）
 > 日期：2026-08-05  
 > 上游裁决：`2026-08-05-drama-forge-ep01-task1-problem-decision-record.md`  
 > 适用范围：Story Workspace / Dream / Episode Execution
+
+## 0. Canonical 适用范围与优先级
+
+design_009 是 Episode artifact 工作台的增量 canonical owner，不重写 Dream 初稿确认、Dream Agent 消息或 `.dream` 三 stage 协议。发生冲突时按下表解释：
+
+| 旧设计条款 | design_009 的增量替代 | 继续保留的旧合同 |
+| --- | --- | --- |
+| `design_004` §5.3/§5.5 的“Execution 无业务操作” | Execution 可派发一个由后端计算的 episode 下一创作阶段 | Execution 仍不承担 artifact 审批、驳回、重试、归档，也不提供通用命令入口 |
+| `design_007` §6.5 与 §11.2 的“确认后只读/不追加确认” | canonical 文件保持只读，但允许把“继续生成下一阶段”意图交给同一 Dream Agent | Dream 初稿仍只有一次正式 confirmation；Episode 阶段派发不是第二次 confirmation |
+| `design_008` 对上述“无后续操作”的继承 | 仅该引用被本设计替代 | reentry、消息 claim/lease、active-turn、权限和 Dream Agent dialog 合同全部继续有效 |
+
+形式化区分：
+
+- `Dream confirmation`：现有一次性 Dream 初稿确认，仍由原 confirmation owner 持久化。
+- `Episode stage dispatch`：用户请求 Dream Agent 执行一个 derived capability，不批准 artifact，不写 confirmation record，不产生新的 Story Workspace 业务状态。
+- skill 内部的 Ask/Decide/Approve 是 Dream Agent 的创作对话，不映射为 Story Workspace confirmation 状态。
 
 ## 1. 背景、目标和非目标
 
 ### 1.1 背景
 
-当前 Dream 已能创建 run，写入 `.dream` 的 characters、scenes、storyboards 三个 stage，并让 Execution 页面逐 revision 展示；但这只是宿主投影，不等于 drama-forge 从零到完整第一集的真实流程。任务一已经证明，vendor 的典型流程在 init 后仍包含 plan、script、review、asset、storyboard、prompt、full-chain review、atomic commit validation、render/voice、edit、promote；当前真实 run 则只有三 stage 和一个提前生成的 `storyboard.yaml`（`2026-08-05-drama-forge-ep01-task1-problem-decision-record.md:58-128`）。
+当前 Dream 已能创建 run，写入 `.dream` 的 characters、scenes、storyboards 三个 stage，并让 Execution 页面逐 revision 展示；但这只是宿主投影，不等于 drama-forge 从零到完整第一集的真实流程。任务一已经证明，vendor 的典型流程在 init 后仍包含 plan、script、review、asset、storyboard、prompt、full-chain review、episode-commit 校验与索引/使用记录/备份更新、render/voice、edit、promote；当前真实 run 则只有三 stage 和一个提前生成的 `storyboard.yaml`（`2026-08-05-drama-forge-ep01-task1-problem-decision-record.md:58-128`）。
 
 ### 1.2 目标
 
@@ -32,7 +48,7 @@
 
 ### 2.1 业务阶段
 
-本设计完整保留 README 的 12 步顺序。产品本期实现到 render guide/已登记 render 的查看；voice/edit/promote 只标识外部边界，不提供入口。顺序证据、输入输出和规范漂移详见任务一第 2 节（`2026-08-05-drama-forge-ep01-task1-problem-decision-record.md:58-119`）。
+本设计完整保留 README 的 12 步顺序。产品本期只消费现有受审格式的 render guide 和显式 queue；真实媒体必须等待未来受审 schema 提供稳定 artifact ID 与 shot/prompt ref 后才能进入工作台。voice/edit/promote 只标识外部边界，不提供入口。顺序证据、输入输出和规范漂移详见任务一第 2 节（`2026-08-05-drama-forge-ep01-task1-problem-decision-record.md:58-119`）。
 
 ```mermaid
 flowchart LR
@@ -44,8 +60,8 @@ flowchart LR
     F --> G["drama-storyboard · Storyboard"]
     G --> H["drama-prompt · Prompts"]
     H --> I["full-chain review"]
-    I --> J["episode-commit · 原子校验语义"]
-    J --> K["drama-render · Guide / 已登记 Render"]
+    I --> J["episode-commit · 校验并更新索引/记录/备份"]
+    J --> K["drama-render · Guide / 显式 Queue"]
     K -. "本期边界外" .-> L["voice"]
     L -.-> M["edit"]
     M -.-> N["promote"]
@@ -75,11 +91,11 @@ flowchart TB
     Storyboard --> FullReview
     Prompts --> FullReview
     FullReview --> Review2["review-report.md · scope=full-chain"]
-    Review2 --> Commit["episode-commit / atomic validation"]
+    Review2 --> Commit["episode-commit / validate + index/usage/backup side effects"]
     Storyboard --> RenderCmd["drama-render EP01"]
     Prompts --> RenderCmd
     Commit --> RenderCmd
-    RenderCmd --> Renders["renders/render-guide.md + registered media"]
+    RenderCmd --> Renders["renders/render-guide.md + explicit queue"]
 ```
 
 ### 2.3 工作流推进原则
@@ -88,7 +104,8 @@ flowchart TB
 - 页面不显示 raw slash command，而显示阶段目的，例如“继续生成剧本”。提交后由服务端把受控 action 翻译为同一 Dream Agent 的指令。
 - 每一步是否可继续由 binding、canonical artifact 的存在性、source revision 和 review scope 推导；它是 capability，不是新增业务状态。
 - 若已有后序文件但前序文件缺失，显示“早期产物”，下一步仍回到最早缺失依赖；到达相应步骤时必须基于最新上游重新生成，不能仅因文件存在而跳过。
-- vendor Ask → Options → Decide → Draft → Approve 的暂停点保留；页面每次只触发一个可解释阶段，不自动串行到末端。
+- vendor Ask → Options → Decide → Draft → Approve 的创作暂停点保留在同一 Dream Agent 对话内；它们不是新的 Story Workspace confirmation。页面每次只派发一个可解释阶段，不自动串行到末端。
+- `episode-commit` 会先校验，再更新角色索引、场景使用记录和备份；它不提供跨文件事务或失败后的原子回滚保证（`vendor/drama-forge/drama-forge/scripts/dramaforge.py:1003-1154`）。
 
 ## 3. Ink-Dream 当前接入差距
 
@@ -110,12 +127,24 @@ flowchart TB
 
 ### 4.1 EpisodeArtifactManifest
 
-`episode.json` 是 `.dream` 下的 run-scoped 绑定投影，只拥有 identity，不拥有内容：
+`episode.json` 是 `.dream` 下的 run-scoped 绑定投影，只拥有 identity，不拥有内容。它不能用自身字段证明自身可信，建立时序必须是：
+
+1. actor、workspace、preflight、Deck、run creator、thread owner 和 locked plugin/workspace context 已由既有 reentry/gateway 合同验证；
+2. `drama-init` 已写出 canonical project identity；受控 reader 在 locked workspace 的可信 story root 内安全读取并核对该 identity；
+3. 本专项的 episode code 由服务端 first-episode policy 固定为 `EP01`，不接受浏览器传入；episode root 由“可信 story root + 固定 EP01”计算，而不是从 binding 自己读取；
+4. 在 `drama-plan` 写 EP01 outline **之前**，服务端 writer 依据上述独立事实生成 `episode_uid`，并用首次 CAS 创建 binding；
+5. 首次写入后 `workflow_run_id`、`episode_uid`、`story_slug`、`episode_code` 与 episode root identity 不可换绑；后续 revision 只允许更新非身份元数据；
+6. 重复的同内容首次请求幂等返回既有 binding；任何换 story、换 episode、换 root 或篡改 run 的请求在目录读取前拒绝；
+7. legacy run 若不能从可信 project identity、locked context 和既有 run provenance 共同证明绑定，返回 `bindingAvailability: "unbound"`，只能执行受控补建流程；不得从浏览器参数、文件名或 storyboard source path 猜测。
+
+该顺序继承现有可信范围（`design_008_dream-reentry-and-agent-workbench.md:420-437`）。
+
+legacy reentry 先调用幂等 `resolve_or_repair_binding`：若可信 canonical project identity、locked context 与 run provenance 三者足以证明同一 story，服务端按 first-episode policy 自动 CAS 补建 binding；若证据不足，则保持 unbound，**不读取任何 episode artifact，也不计算 episode nextAction**。自动补建不是从 storyboard 文件名/source path 推断。
 
 ```yaml
 schema: dream-episode/v1
 workflow_run_id: run_...
-episode_uid: 9fb7...          # writer 生成，跨 revision 不变
+episode_uid: 9fb7...          # 服务端生成，首次 CAS 后不可变
 story_slug: rebirth-gate     # 受控段，不从浏览器输入
 episode_code: EP01
 episode_root: stories/rebirth-gate/episodes/EP01
@@ -128,8 +157,11 @@ updated_at: 2026-08-05T12:00:00Z
 ```text
 StoryWorkspaceEpisodeArtifactSurface
 ├── runId / opaqueEpisodeId / manifestRevision / etag
+├── bindingAvailability: bound | unbound
+├── bindingRecovery: autoRepairAttempted, canDispatch, publicReason
 ├── workflow: derived nextAction + prerequisites + legacyPartial
-├── artifacts[]: key, availability, contentRevision, mtime, size, sourceKind
+├── artifacts[]: relativeKey, availability, contentRevision, mtime, size
+│   └── producerAction, consumers[]
 ├── story: arc, beats[], unlinkedScenes[]
 ├── scenes[] / shots[] / promptsPage / rendersPage
 ├── review: scope, sourceRevisions, sections[]
@@ -137,15 +169,40 @@ StoryWorkspaceEpisodeArtifactSurface
 └── diagnostics[]: artifact-scoped technical information
 ```
 
-### 4.2 Artifact 状态词汇
+manifest 的 `producerAction` 是受控 enum，前端只翻译成业务阶段名，不展示 raw slash command；`consumers[]` 也是受控组件 enum：
 
-这里只使用文件技术状态，不构成业务状态机：
+| artifact | producerAction | consumers |
+| --- | --- | --- |
+| `episode-outline.md` | `plan_episode` | `episode_overview`, `storyline_navigator`, `narrative_workbench` |
+| `script.md` | `write_script` | `narrative_workbench`, `shot_inspector` |
+| `storyboard.yaml` | `regenerate_storyboard` | `narrative_workbench`, `shot_inspector` |
+| `prompts/` | `generate_prompts` | `shot_inspector`, `prompt_view` |
+| `renders/` | `prepare_render_guide` | `shot_inspector`, `render_view` |
+| `review-report.md` | `review_script` 或 `review_full_chain`（取报告声明的实际 producer） | `review_view`, `shot_inspector` |
+
+### 4.2 Artifact availability 与关联状态
+
+`availability` 只描述文件读取/解析事实，不构成业务状态机：
 
 - `not_generated`：allowlisted artifact 不存在，是可恢复的正常事实。
 - `available`：读取、大小和 schema 校验通过。
-- `unlinked`：artifact 存在，但缺少可证明关系。
-- `invalid`：存在但解析/schema/限额失败；保留上一份成功快照。
+- `invalid`：存在但解析/schema/限额失败。
 - `unavailable`：当前授权或受控资源访问失败；不泄漏具体路径。
+
+关系单独使用 entity/link 级 `associationStatus: linked | unlinked | orphan`。因此一个 `available` storyboard 可以同时包含 linked 与 unlinked shots。
+
+`last-good` 仅是当前挂载会话的内存缓存：新 revision invalid 时，本次会话可继续阅读旧内容并清晰标记它不是最新 revision；刷新或重新登录后若 latest artifact 仍 invalid，页面必须诚实显示 invalid。本期不增加跨会话 validated snapshot，避免形成新的内容 owner。
+
+### 4.3 Binding 合同测试矩阵
+
+| 场景 | 预期 |
+| --- | --- |
+| 可信 init 后首次创建 | 201/成功，身份来自 locked context + canonical project identity |
+| 同内容重复创建 | 幂等返回同一 episode_uid/revision |
+| 请求换 story | 在任何 episode 目录读取前拒绝 |
+| 请求换 episode | 在任何 episode 目录读取前拒绝 |
+| 篡改 root/run | 在任何 artifact 探测前拒绝 |
+| legacy 无双重证据 | `unbound`，不猜测；仅提供受控补建 capability |
 
 ## 5. Episode、故事线、叙事点、场景和镜头的信息架构
 
@@ -161,7 +218,8 @@ flowchart TD
     S1 --> SH2["Shot · shot_id"]
     UA --> SUP["Supplemental Shot · 无外键时保持未关联"]
     SH1 --> P1["Prompt · same shot_id"]
-    P1 --> R1["Render Guide / Registered Render"]
+    SH1 --> Q1["Render Queue · explicit shot_id"]
+    P1 -. "未来 schema 的 explicit prompt_ref" .-> R1["Registered Render · future-only"]
     E --> RV["Review · 辅助层，不拥有故事内容"]
 ```
 
@@ -187,7 +245,7 @@ script 的显式 `SNN` 是 scene；storyboard 的 `shot_id` 是 shot。`scene_re
 
 ### 6.1 稳定 ID
 
-服务端 writer 首次绑定时生成持久化 `episode_uid`。adapter 使用 `UUIDv5(episode_uid, kind + ':' + normalizedSourceKey)` 生成不透明 view ID：
+服务端 binding writer 在可信首次绑定时生成持久化 `episode_uid`。adapter 使用 `UUIDv5(episode_uid, kind + ':' + normalizedSourceKey)` 生成不透明 view ID：
 
 | view entity | normalizedSourceKey | revision 是否进入 ID |
 | --- | --- | --- |
@@ -197,7 +255,8 @@ script 的显式 `SNN` 是 scene；storyboard 的 `shot_id` 是 shot。`scene_re
 | Scene | `SNN` | 否 |
 | Shot | canonical `shot_id` | 否 |
 | Prompt | `shot_id:prompt-kind` | 否 |
-| Render | `shot_id:registered-artifact-id` | 否 |
+| Render Queue Entry | canonical `shot_id` | 否 |
+| Registered Render（未来） | schema 提供的 `registered-artifact-id` | 否 |
 
 不得使用数组下标、显示标题、正文 hash、mtime 或 revision 作为长期身份。
 
@@ -215,12 +274,13 @@ script 的显式 `SNN` 是 scene；storyboard 的 `shot_id` 是 shot。`scene_re
 ```text
 beatSceneCoverage = linkedScenes / totalScenes
 sceneShotCoverage = linkedShots / totalShots
-shotPromptCoverage = linkedPrompts / totalShots
-promptRenderCoverage = linkedRenders / totalPrompts
+shotPromptCoverage = shotsWithAtLeastOneLinkedPrompt / totalShots
+shotRenderQueueCoverage = shotsWithExplicitQueueEntry / totalShots
+totalPrompts / totalQueueEntries / duplicateQueueShotIds
 missingLinks[] / orphanArtifacts[]
 ```
 
-分母为 0 时展示“尚未生成”，不是 0%。质量门只描述关联完整率，不自动改变 workflow capability。
+分母为 0 时展示“尚未生成”，不是 0%。本期样例只能证明 `Shot → Render Queue`，不能建立 `Prompt → Render`；一个 shot 有多个 prompt kind 时，绝不通过共享 shot_id 静默挑选 prompt。queue stable ID 为 `UUIDv5(episode_uid, "render-queue:" + shot_id)`；同一 shot_id 出现多个 queue row 时，该 render guide 为 invalid/diagnostic，不用数组位置制造多个身份。未来只有受审 schema 明示 `prompt_ref` 后才启用 `promptRenderCoverage`。质量门只描述关联完整率，不自动改变 workflow capability。
 
 ## 7. Episode artifact truth ownership
 
@@ -231,7 +291,7 @@ flowchart LR
       S["script.md\n场景 / 动作 / 对白"]
       SB["storyboard.yaml\n镜头结构"]
       P["prompts/\nPrompt"]
-      R["renders/\nGuide / 已登记产物"]
+      R["renders/\nGuide / 显式 Queue"]
       RR["review-report.md\n审阅事实"]
     end
     subgraph Projection[".dream · 物理映射 owner"]
@@ -296,6 +356,8 @@ flowchart LR
 
 默认选择 Episode Overview，不自动选择 beat/scene/shot。若 outline `not_generated`，左侧仍显示 episode heading 和“故事线尚未生成”；若 outline 有 overview 但无 SC section，显示 overview + “叙事点尚未形成”。
 
+若 binding 为 unbound，页面不渲染 Episode Overview 或 artifact 进度，显示“尚未建立可信的第一集关联”。唯一 CTA 是“恢复第一集关联”；它不要求也不允许用户输入 story、path 或 episode。
+
 ### 9.2 左侧导航
 
 - 顶部是 Episode Overview。
@@ -321,8 +383,8 @@ flowchart LR
 1. **镜头意图**：shot_id、景别、机位/运动、构图、动作、情绪、时长。
 2. **剧本上下文**：所属 scene heading、前后动作和对白；无显式 scene ref 时显示“尚未关联剧本场景”。
 3. **视听连续性**：角色/场景/道具 refs 与前后镜头提示。
-4. **Prompt**：positive/negative、参数、来源 revision、关联诊断。
-5. **Render**：guide/queue/已登记媒体分层，pending 不渲染为成片。
+4. **Prompt**：positive/negative、allowlisted 创作设置摘要、来源 revision、关联诊断。设置摘要只含镜头创作所需的安全字段；Dream Agent 原始 tool input/output 永不进入 API 或 DOM。
+5. **Render**：本期只展示 guide 和按相同 `shot_id` 关联的显式 queue，pending 不渲染为成片，也不声称关联到某个 Prompt；真实媒体属于未来受审 schema。
 6. **Review**：只显示明确定位到此 shot 的条目；全文仍在 episode 辅助视图。
 
 字段缺失显示短横或“尚未生成”，不以模型补全。原始 YAML、绝对文件路径和工具参数不展示。
@@ -346,13 +408,13 @@ scene 标题来自 script；shot 顺序和镜头字段来自 storyboard；prompt
 
 ## 12. renders 的渐进展示
 
-Render 辅助层分三种事实：
+Render 辅助层区分已受审事实与未来扩展：
 
 1. `guide`：文字制作指导，可用安全 Markdown section 展示。
 2. `queue`：shot 的 pending/running 等 renderer 自有状态；仅当 canonical 文件确实提供时展示，不能由文件名推导。
-3. `registered media`：受控资源 endpoint 返回的图片/视频缩略与元数据；必须有显式 shot/prompt 关联。
+3. `registered media`：**未来扩展，本期不消费。** 只有经独立设计与 schema 评审后，canonical manifest 明确提供稳定 artifact ID、shot/prompt ref、MIME 和受控资源 identity，工作台才可展示真实媒体；不得从文件名推导。
 
-同一 shot 可有多个 render attempt，但 `renderId` 基于已登记 artifact identity，不基于数组位置。新 render 到达只更新对应 shot 的辅助标记，不重排故事线或抢焦点。没有真实媒体时明确写“已生成制作指导，尚无已登记画面”。
+本期每个 shot 最多接受一个显式 queue entry，其稳定 ID 由 episode_uid + shot_id 生成；重复 row 使该 artifact invalid 并产生 diagnostic。本期 guide/queue 新 revision 只更新对应 shot 的辅助标记，不重排故事线或抢焦点。页面明确写“已生成制作指导，真实画面不在本期受审合同内”。未来同一 shot 可有多个 render attempt，但 `renderId` 必须基于受审 schema 的 artifact identity，并由显式 `prompt_ref` 建立 Prompt 关系。
 
 ## 13. review report 的展示和定位
 
@@ -383,7 +445,23 @@ Episode header 下只有一条轻量状态行：头像/名称、可公开的最�
 
 ## 15. 从当前步骤推进后续 drama-forge workflow
 
-### 15.1 NextActionResolver
+### 15.1 BindingRecoveryResolver
+
+- 可证明 legacy：服务端自动幂等补建，响应直接进入 `bound`，无需用户操作。
+- 不可证明 legacy：surface 只返回 `bindingAvailability: "unbound"` 和 `bindingRecovery.canDispatch=true`；`workflow`、artifact manifest、opaqueEpisodeId 均为空。
+- UI 的“恢复第一集关联”调用独立技术恢复 endpoint：
+
+```http
+POST /api/story-workspace/workflow-runs/{runId}/episode-binding/recover
+
+{
+  "idempotencyKey": "uuid"
+}
+```
+
+请求体不接受 story、path、episode、root 或 source file。服务端只依赖已授权 run/thread/locked context，复用同一 message coordinator、claim/lease、active-turn 与 fingerprint 语义，向同一 Dream Agent 派发受控 `recover_first_episode_binding` 意图。该意图只要求恢复/核对 canonical project identity；后续 polling 再由 `resolve_or_repair_binding` 自动补建。证据仍不足时继续 unbound，不开放 artifact 或 episode continue。
+
+### 15.2 NextActionResolver
 
 后端按依赖图寻找“最早缺失或已过期”的步骤，返回受控枚举和解释：
 
@@ -402,7 +480,7 @@ none_in_scope
 
 这些是可执行 capability，不是持久化业务状态。raw vendor command 仅存在服务端 adapter。
 
-### 15.2 过期规则
+### 15.3 过期规则
 
 - script 的 declared/generated source 早于 outline → `write_script`。
 - storyboard source revision 早于 script/asset → `regenerate_storyboard`。
@@ -412,7 +490,7 @@ none_in_scope
 
 不得仅用 mtime 大小比较业务顺序；优先使用 canonical metadata/source revision。缺失 metadata 时返回 `needs_confirmation` diagnostic，由 Dream Agent 解释，不假定完成。
 
-### 15.3 提交合同
+### 15.4 提交合同
 
 ```http
 POST /api/story-workspace/workflow-runs/{runId}/episode-actions/continue
@@ -427,6 +505,17 @@ If-Match: "manifest-etag"
 ```
 
 服务端重新授权并重算 capability；不匹配返回 409 + 最新 surface，不重复派发。响应只确认已交给同一 Dream Agent，文件更新仍由 GET/polling 驱动。
+
+派发必须复用 `design_008` 已有的 Dream Agent message service/coordinator、SQLite claim/lease 和 run/thread active-turn gate（`design_008_dream-reentry-and-agent-workbench.md:449-485,678-693`），不能另建内存队列：
+
+1. 服务端把 action、episode_uid、expected manifest revision 和安全 user guidance 规范化为 action envelope，并生成稳定 message/action ID 与 fingerprint。
+2. 同 idempotency key + 同 fingerprint：返回同一持久 message/claim 结果，不重复派发。
+3. 同 idempotency key + 不同 fingerprint：409。
+4. 不同 key 并发、或同 run/thread 已有 live turn：返回既有 busy/active-turn 技术门禁，不创建第二条 action message。
+5. claim owner 崩溃后按既有 lease 到期/恢复语义由 coordinator 接管，仍保持 at-least-once dispatch 与确定性 message identity。
+6. coordinator 只把受控阶段指令派发给既有 hidden thread/Dream Agent；artifact 更新不从 action response 或消息正文进入 UI，仍等 REST surface revision。
+
+并发验收必须证明：一个 logical action 只有一条持久 action message、一个有效 claim owner、一个 active dispatch；重复响应可引用同一 identity。
 
 ## 16. 文件快照、revision 与增量恢复
 
@@ -445,7 +534,7 @@ If-Match: "manifest-etag"
 3. 当前 selected ID 仍在：保持 focus/scroll，不自动播报整页。
 4. ID 被删除：选择最近存在父级；`aria-live="polite"` 通知“当前镜头已在新版本中移除”。
 5. 新增实体：只更新计数和微弱“已更新”标记，不自动滚动。
-6. artifact invalid：保留 last-good 内容，标明新 revision 暂不可解析。
+6. artifact invalid：仅当前挂载会话保留内存 last-good，标明旧 revision；刷新/重新登录后不伪造可用快照。
 
 ## 17. 离开、刷新、重新登录后的恢复
 
@@ -459,7 +548,7 @@ sequenceDiagram
     participant G as Actor/Run/Deck Gateway
     participant E as Episode Artifact Service
     participant FS as Trusted Workspace Files
-    U->>R: 打开 /story-workspace/execution/{runId}
+    U->>R: 打开 /story-workspace/runs/{storyWorkspaceRunId}/execution
     R->>API: GET run reentry facts
     API->>G: actor + workspace + Deck + run + thread 校验
     G-->>R: canonical run / Dream Agent 摘要
@@ -480,7 +569,7 @@ sequenceDiagram
     participant SSE as Writer Event Hint
     participant UI as Execution Query
     participant API as Episode Artifact API
-    A->>FS: atomic write script/storyboard/prompt/render/review
+    A->>FS: temp + fsync + rename 写入 artifact
     A-->>SSE: optional invalidation hint
     SSE-->>UI: mark query stale
     UI->>API: GET If-None-Match old ETag
@@ -527,7 +616,7 @@ sequenceDiagram
     Work-->>U: 显示叙事功能、剧本场景和镜头序列
     U->>Work: Enter 选择 shotId
     Work->>VM: select shotId, remember origin focus
-    VM-->>Insp: storyboard + script context + prompt/render/review refs
+    VM-->>Insp: storyboard + script context + prompt + shot queue + review refs
     Insp-->>U: 展示详细分镜及 provenance
     U->>Insp: Escape
     Insp->>Work: close and restore origin focus
@@ -596,17 +685,19 @@ flowchart LR
     end
     subgraph Backend["Story Workspace Backend Owner"]
       Auth["Actor + Deck + Run + Thread Validator"]
+      Binding["Trusted Episode Binding Writer / Resolver"]
       Reader["Allowlisted Episode Artifact Reader"]
       Parser["Markdown/YAML Safe Parsers"]
       Adapter["Episode Surface Adapter + Stable IDs"]
       Next["NextActionResolver"]
-      Resource["Controlled Render Resource"]
+      Coordinator["Existing Message Coordinator\nclaim / lease / active-turn"]
+      Thread["Hidden Thread → Dream Agent"]
     end
     subgraph API["HTTP Contracts"]
       Get["GET episode-artifacts + ETag"]
       Page["GET prompts/renders page"]
+      Recover["POST episode-binding/recover"]
       Continue["POST episode-actions/continue"]
-      Media["GET controlled render resource"]
     end
     subgraph Frontend["StoryWorkspace* Frontend"]
       Hook["useStoryWorkspaceEpisodeArtifacts"]
@@ -618,27 +709,31 @@ flowchart LR
       Aux["Prompt/Render/Review Views"]
       Agent["Dream Agent Preview/Dialog Adapter"]
     end
-    Files --> Auth --> Reader --> Parser --> Adapter
+    Auth --> Binding --> Reader
+    Files --> Binding
+    Files --> Reader --> Parser --> Adapter
     Adapter --> Next
     Adapter --> Get
     Adapter --> Page
     Next --> Continue
-    Reader --> Resource --> Media
     Get --> Hook --> VM --> PageUI
     PageUI --> Nav
     PageUI --> Work --> Inspector --> Aux
-    Continue --> Agent
+    Recover --> Coordinator
+    Continue --> Coordinator --> Thread
+    Coordinator -. "public status only" .-> Agent
 ```
 
 ### 20.2 后端合同
 
 - 新合同继续归既有 Story Workspace contract owner；不在 `backend/database.py` 新建表。
-- binding 写入使用 `.dream` 受控 writer、临时文件 + fsync + rename + revision CAS。
-- reader 在解析前完成 actor、workspace、Deck、run creator、thread owner、binding 和 root containment 校验。
+- binding 写入使用 `.dream` 受控 writer、临时文件 + fsync + rename + revision CAS，并遵循第 4.1 节的双重可信来源与不可换绑规则。
+- reader 在任何目录探测前完成 actor、workspace、Deck、run creator、thread owner、locked context、binding identity 和 root containment 校验。
 - 精确 allowlist：episode 顶层四文件；prompts/renders 目录的批准扩展名；逐层拒绝 symlink/NUL/`..`。
 - 每类文件有 byte、YAML depth/node、string length、item count 和目录 entry 上限。
-- Markdown 转为允许的 section/text AST；不执行 HTML。YAML 用 safe loader；媒体做 MIME sniff、Range 和 CSP。
-- 缺失返回 HTTP 200 + `not_generated`；错误 episode/run/binding 对无权 actor 使用不泄漏存在性的 404/403 既有语义。
+- Markdown 转为允许的 section/text AST；不执行 HTML。YAML 用 safe loader。本期没有真实媒体资源 endpoint。
+- 缺失 artifact 返回 HTTP 200 + `not_generated`；对于无权 actor 和不存在的 actor/workspace/Deck/run/thread/binding 统一返回既有“不可见”响应，不用 403/404 差异泄露对象是否存在（`design_008_dream-reentry-and-agent-workbench.md:439-443`）。
+- continue API 必须进入既有 message coordinator/claim/lease/active-turn，不得从 HTTP handler 直接调用 Agent adapter。
 
 ### 20.3 前端合同和组件
 
@@ -655,7 +750,7 @@ flowchart LR
 | --- | --- | --- |
 | artifact 缺失 | “尚未生成” | 由最早缺失依赖决定 |
 | 关系缺失 | “尚未关联”+ coverage | 否；必要时建议上游重生成 |
-| 新 revision 解析失败 | 保留 last-good，显示技术提示 | 暂停提交，等待可读 revision |
+| 新 revision 解析失败 | 当前挂载会话保留内存 last-good；刷新后诚实显示 latest invalid | 暂停提交，等待可读 revision |
 | ETag 冲突 | 拉取最新 surface，保留仍存在选择 | 重新计算 capability |
 | actor/Deck/run 不匹配 | access gate，不探测文件 | 不提供操作 |
 | 网络中断 | 保留 last-good，退避后 polling | 不产生失败状态 |
@@ -688,16 +783,16 @@ flowchart LR
 ### 24.1 工作流与合同
 
 1. 从 README 固化的步骤 fixture 与 next-step resolver 完全一致。
-2. 同一 Dream Agent/run/thread 推进；raw 命令和技术 thread 不出现在 UI。
-3. actor 只能读取自己 Deck/run binding 的 Episode；错误 actor/Deck/run/story/episode 和路径穿越全部拒绝。
+2. 同一 Dream Agent/run/thread 推进；一次 Dream confirmation 与多个 Episode stage dispatch 在持久合同和 UI 文案上可区分，raw 命令和技术 thread 不出现在 UI。
+3. actor 只能读取自己 Deck/run binding 的 Episode；错误 actor/Deck/run/story/episode 和路径穿越全部拒绝；unbound 时不探测 artifact，也不返回 episode continue。
 4. 缺失 artifact 返回 `not_generated`；无虚构内容。
-5. manifest 保存相对 artifact key、revision/mtime/size、来源命令和页面消费者；前后两次可逐项比对。
+5. manifest 保存相对 artifact key、revision/mtime/size、受控 `producerAction` 和 `consumers[]`；前后两次可逐项比对，API/DOM 不出现 raw command。
 
 ### 24.2 关联和渐进恢复
 
 6. outline 可独立形成 Episode Overview/故事线。
 7. script 到达后只有显式 SC/SNN 关系进入 beat；其余显示尚未关联。
-8. storyboard 更新按 shot_id 增量合并；prompt/render 必须显式关联。
+8. storyboard 更新按 shot_id 增量合并；Prompt 与 Render Queue 分别以显式 shot_id 关联，样例不得产生 Prompt→Render 关系。
 9. review 显示 scope/source revision，不成为内容 owner。
 10. 刷新、离开和重新登录从 backend binding/manifest 恢复；localStorage 不是 owner。
 11. 新 revision 不重置仍存在的 beat/scene/shot；删除时焦点回到父级并播报。
@@ -706,7 +801,7 @@ flowchart LR
 ### 24.3 UI、响应式与无障碍
 
 13. 默认是 Episode Overview；storyline/beat/scene/shot 层级可理解。
-14. shot inspector 展示 storyboard、script、prompt、render、review 的来源字段。
+14. shot inspector 展示 storyboard、script、prompt、render guide/shot queue、review 的来源字段。
 15. 页面保持暖纸张、轻分区、少卡片、克制阴影；辅助视图不抢主层级。
 16. 桌面与窄屏无严重遮挡/横向溢出/不可达操作。
 17. 键盘可完成 beat/scene/shot 导航；焦点、aria-live、折叠和 Escape 行为符合第 19 节。
@@ -714,7 +809,7 @@ flowchart LR
 
 ### 24.4 工程质量门
 
-19. 后端 pytest 覆盖 reader、parser、association、auth、binding、ETag、cursor 和 continue CAS。
+19. 后端 pytest 覆盖 reader、parser、association、auth、ETag、cursor；binding 必须覆盖首次建立、重复幂等、换 story、换 episode、篡改 root/run、legacy 可证明自动补建、legacy 不可证明 unbound/recovery 且请求无路径参数；continue/recovery 必须覆盖同 key 同内容复用、同 key 异内容 409、不同 key busy、已有 live turn、claim lease 恢复，并证明唯一持久 message/claim owner/active dispatch。
 20. 前端沿用 Playwright Node seam 覆盖 parser/view model/selection/layout，不引入 Vitest。
 21. `npx tsc -b` 通过；ESLint 覆盖全部改动前端文件。
 22. 真实浏览器保存 run/thread/episode、前后 manifest、artifact 清单、revisions、截图、trace 和数据库计数；外部依赖阻断时诚实标明已到达阶段与未验证范围。
@@ -730,7 +825,7 @@ flowchart LR
 | U5 | 16、17 | polling/reentry |
 | U6 | 8、9 | storyline/beat nav |
 | U7 | 10、11 | scene/shot inspector |
-| U8 | 11、12 | prompt/render association |
+| U8 | 11、12 | shot→prompt 与 shot→render queue 独立关联 |
 | U9 | 13 | review auxiliary view |
 | U10 | 2、15 | next workflow action |
 | U11 | 6、16 | revision/selection stability |
@@ -738,3 +833,11 @@ flowchart LR
 | U13 | 全文 | docs/implementation record |
 
 实现不得改变本设计的 canonical owners；若证据迫使设计变化，必须先更新本设计并重新独立评审，再改生产代码。
+
+## 26. 实施与验收回链
+
+任务三已按第 25 节拆分实施。完整 commit 台账、最终测试、真实 manifests、artifact 文件哈希、真实浏览器截图/trace、workflow `/events` 404 + REST fallback，以及 run 仍 queued/无 agent session/无真实 render media 的诚实遗留，见：
+
+`2026-08-05-drama-forge-ep01-task3-implementation-and-acceptance-record.md`
+
+该实施记录不修改本设计 owner 或流程裁决；它明确区分“Episode artifact 与工作台通过”和“外部 Dream Agent runtime/renderer 全链路未被证明”。

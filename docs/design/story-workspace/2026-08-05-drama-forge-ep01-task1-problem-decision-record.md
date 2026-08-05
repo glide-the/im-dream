@@ -14,7 +14,7 @@
 ### 0.2 Optional Enhancers
 
 - 建立“命令 → 输入 → 产物 → owner → consumer → revision”的证据矩阵。
-- 对 `Episode → 叙事点 → 场景 → 镜头 → Prompt → Render` 计算可机器验证的关联完整率；无法证明的关联显示“尚未关联”。
+- 分别对 `Shot → Prompt` 与 `Shot → Render Queue` 计算可机器验证的关联完整率；本期不建立未经显式 `prompt_ref` 证明的 Prompt → Render 关系。
 - 单列 README、skill、hook、生成脚本和样例之间的合同漂移，防止把历史实现误当 canonical contract。
 
 ### 0.3 执行计划
@@ -23,7 +23,7 @@
 2. 读取项目术语、现有设计、UI Design v2、最新实施记录。
 3. 读取 vendor README 涉及的全部技能、CLI、hook、模板、schema 和 EP01 示例。
 4. 读取 Execution、Dream files、surface、run deep-link、权限与恢复实现及测试。
-5. 用只读脚本核验 EP01 的 shot/prompt/render 关联和当前真实 Dream run 产物。
+5. 用只读脚本分别核验 EP01 的 shot/prompt、shot/render queue 关联和当前真实 Dream run 产物。
 6. 完成 P1—P7 裁决与唯一推荐方案；记录仍需任务二验证的风险。
 
 ### 0.4 验收标准
@@ -64,7 +64,7 @@
 
 ### 2.1 README 明示的完整顺序
 
-README 的“典型工作流（从零到第一集）”给出唯一明确顺序：init → plan → script → script-reviewer → asset → storyboard → prompt → full-chain review → atomic commit validation → render+voice → edit → promote；第 3—9 步对每一集重复，资产可跨集复用（`vendor/drama-forge/drama-forge/README.md:353-381`）。完整流水线还在概览中表述为从 concept 到 publish（`vendor/drama-forge/drama-forge/README.md:10-12`）。
+README 的“典型工作流（从零到第一集）”给出唯一明确顺序：init → plan → script → script-reviewer → asset → storyboard → prompt → full-chain review → episode-commit 校验 → render+voice → edit → promote；第 3—9 步对每一集重复，资产可跨集复用（`vendor/drama-forge/drama-forge/README.md:353-381`）。完整流水线还在概览中表述为从 concept 到 publish（`vendor/drama-forge/drama-forge/README.md:10-12`）。
 
 | 顺序 | 命令/动作 | 主要输入与前置依赖 | 权威输出 | 重复/增量规则 | 当前 Ink-Dream 接入 | 缺失能力 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -76,8 +76,8 @@ README 的“典型工作流（从零到第一集）”给出唯一明确顺序�
 | 6 | `/drama-forge:drama-storyboard EP01` | script、资产、镜头规范 | `episodes/EP01/storyboard.yaml` | 同一 `shot_id` 跨 revision 保持身份 | 已部分接入并投影到 `.dream/stages/storyboards` | 只消费部分 shot 字段；缺少 outline/script 上游关系 |
 | 7 | `/drama-forge:drama-prompt EP01` | storyboard shot、资产锚点 | `episodes/EP01/prompts/` | 以显式 `shot_id` 关联，不得按位置配对 | 未接入 | 列表、关联诊断、分页/限额缺失 |
 | 8 | `/drama-forge:drama-full-chain-review` | outline/script/storyboard/prompts/资产 | `review-report.md` 中完整链路审阅 | 每次上游变更后可重审；条件通过不是虚构的失败状态 | 未接入 | 范围、结论、定位链接缺失 |
-| 9 | `dramaforge episode-commit --episode 1`，并执行原子校验语义 | script、可选 storyboard/prompts、review | 内部索引、ledger、备份/提交结果 | CLI 会刷新索引与备份（`scripts/dramaforge.py:1139-1148`） | 未接入 | 当前 hook 路径和格式已漂移，不能照搬 |
-| 10 | `/drama-forge:drama-render EP01` + `/drama-forge:drama-voice EP01` | storyboard、prompts、角色/场景锚点 | render guide/注册后的 render 产物、voice 产物 | 每个 shot 可增量产生 | 未接入 | 示例只有 render guide/队列，没有真实媒体；语音不在本期页面边界 |
+| 9 | `dramaforge episode-commit --episode 1` | script、可选 storyboard/prompts、review | 校验后更新角色索引、场景使用、ledger/备份结果 | CLI 会执行多项副作用，但不保证跨文件事务回滚（`scripts/dramaforge.py:1003-1154`） | 未接入 | 当前 hook 路径和格式已漂移，不能照搬 |
+| 10 | `/drama-forge:drama-render EP01` + `/drama-forge:drama-voice EP01` | storyboard、prompts、角色/场景锚点 | render guide/显式 shot queue；voice 产物 | 每个 shot 可增量产生 | 未接入 | 示例只有 render guide/queue，没有 prompt_ref 或真实媒体 schema；语音不在本期页面边界 |
 | 11 | `/drama-forge:drama-edit EP01` | render、voice 等制作产物 | edit/export 产物 | 集级制作 | 未接入 | 本期明确不做视频剪辑 |
 | 12 | `/drama-forge:drama-promote EP01` | 已完成 episode | 宣发产物 | 发布后按需生成 | 未接入 | 本期明确不做宣发 |
 
@@ -115,7 +115,7 @@ storyboard_shots_with_characters=20 prompt_shots_with_characters=0
 storyboard_dialogue_nonempty=0
 ```
 
-结论：prompt/render-guide 与 shot 的显式关联完整率为 100%；能从 regular shot ID 明确解析 SNN 的只有 31/45，14 个 `SUP-E01-*` 不得按数组位置或邻近 shot 静默归入 script scene。prompt 中角色为空而 storyboard 有 20 个带角色 shot，证明样例和生成器也可能漂移，UI 必须显示来源与关联诊断。
+结论：`Shot → Prompt` 与 `Shot → Render Queue` 两组显式关联完整率各为 100%；render queue 没有 `prompt_ref`，因此 Prompt → Render 关系为 0 个、不得推导。能从 regular shot ID 明确解析 SNN 的只有 31/45，14 个 `SUP-E01-*` 不得按数组位置或邻近 shot 静默归入 script scene。prompt 中角色为空而 storyboard 有 20 个带角色 shot，证明样例和生成器也可能漂移，UI 必须显示来源与关联诊断。
 
 ## 3. Ink-Dream 当前接入程度
 
@@ -157,10 +157,11 @@ init 后还应执行什么；哪些属于初始创作与 Episode execution；是
 采用方案 3。
 
 - Initial Dream 边界：建立 concept/story，执行 init，并形成可确认的前期创作草稿。对于新 run，后续 writer 必须按 vendor 顺序执行；现有“先 storyboard”运行作为 legacy partial run 展示，不伪造成完整链路。
-- Episode execution 本期边界：plan → script/reviewer → asset → storyboard → prompt → full-chain review → episode-commit 校验语义 → render guide/已注册 render 展示。
+- Episode execution 本期边界：plan → script/reviewer → asset → storyboard → prompt → full-chain review → episode-commit 校验语义 → render guide/显式 shot queue 展示。真实媒体等待未来受审 schema。
 - voice、edit、promote 是 vendor 后续真实步骤，但属于音视频制作/宣发，本期只在流程图标明边界，不在工作台提供操作。
 - 页面只提供由后端计算的单一上下文操作“继续下一步”，发送受控意图给同一 Dream Agent；不向用户展示 slash command、原始工具参数或隐藏 thread。
-- run 下新增受控 `.dream/runtime/runs/<run>/episode.json` 物理映射，schema 建议为 `dream-episode/v1`，只拥有绑定身份：run、受校验 story slug、`EP\d+` episode code、canonical episode root 的相对引用和 binding revision。它不是 episode 内容 owner。
+- run 下新增受控 `.dream/runtime/runs/<run>/episode.json` 物理映射，schema 建议为 `dream-episode/v1`，只拥有绑定身份：run、受校验 story slug、服务端 first-episode policy 固定的 EP01、canonical episode root 的相对引用和 binding revision。它不是 episode 内容 owner。
+- binding 在 init 产生 canonical project identity 后、plan 写 outline 前，由服务端依据 locked context + canonical project identity + run provenance 首次 CAS 建立；身份不可换绑。legacy 证据充分时自动幂等补建；证据不足时保持 unbound，不探测 artifact、不开放 episode continue，只允许无 story/path/episode 参数且复用既有 coordinator/claim/idempotency 的“恢复第一集关联”动作。
 - v1 一个 run 绑定一个 episode；响应使用不透明 episode ID。未来可演进为列表，不改变 artifact owner。
 
 ### → 影响范围
@@ -173,7 +174,7 @@ Dream launch/context、受控 writer tool、Story Workspace backend contract/ser
 
 ### → 验收方式
 
-从 README 生成的 workflow fixture 与 runtime next-step resolver 顺序一致；同一 run/thread 的 binding 在刷新/重新进入后不变；legacy run 明确显示已有文件与缺失文件，不伪造已完成步骤；页面不出现新业务失败/驳回/重试/归档状态。
+从 README 生成的 workflow fixture 与 runtime next-step resolver 顺序一致；同一 run/thread 的 binding 在刷新/重新进入后不变；legacy 可证明时自动补建，不可证明时保持 access-safe unbound；页面不出现新业务失败/驳回/重试/归档状态。
 
 ## 5. P2 产物与 truth ownership
 
@@ -211,7 +212,7 @@ Dream launch/context、受控 writer tool、Story Workspace backend contract/ser
 | `script.md` | SNN 场景、动作、对白、场景级剧本 | 场景与镜头上下文 | 同上 |
 | `storyboard.yaml` | shot 结构、顺序和 8 层镜头字段 | 镜头列表/检查器 | 同上 |
 | `prompts/` | 每个显式 shot_id 的 prompt 文本与参数 | shot 的 Prompt 辅助页 | 同上；不得以 storyboard prompt 副本覆盖 |
-| `renders/` | render guide/队列及有可验证 shot 引用的已注册媒体 | Render 辅助页 | 外部 renderer/受控登记；无显式关联即“尚未关联” |
+| `renders/` | render guide 与显式 shot queue | Render 辅助页 | 本期只读；queue 仅以 `shot_id` 关联 shot，不关联某个 prompt；真实媒体等待未来受审 schema |
 | `review-report.md` | 审阅范围、结论、问题和建议 | Review 只读辅助页 | 只读展示；新审阅通过 Dream Agent 重新生成 |
 | Dream Agent messages | 用户与 Agent 的沟通历史 | 预览/对话框 | 消息 API；不得覆盖 artifact |
 | 前端 local draft | 未提交的输入与临时选择 | 当前浏览器会话 | 提交后成为消息；不拥有 run/episode/artifact 恢复事实 |
@@ -260,7 +261,7 @@ vendor 有 episode、SC-NN、SNN 和 shot_id，但没有独立 Story Arc ID，�
 - Narrative Beat：仅将 outline 中显式 `SC-NN` 段作为 beat；`beatId = hash(episodeIdentity, SC-NN)`。character beats 只作为角色弧线辅助信息，不冒充主叙事点。
 - Scene：script 的显式 SNN；`sceneId = hash(episodeIdentity, SNN)`。只利用模板证明的 SC-NN ↔ SNN 规范化编号关联。
 - Shot：canonical `shot_id`；`shotViewId = hash(episodeIdentity, shot_id)`。
-- Prompt：显式 `shot_id` + prompt kind；Render：显式 shot/prompt 引用 + 受控相对 artifact identity。revision 不进入稳定 identity。
+- Prompt：显式 `shot_id` + prompt kind；Render Queue：`episode_uid + shot_id` 形成稳定身份，同 shot 重复 queue row 为 invalid/diagnostic。未来 Registered Render 必须有受审 artifact ID 和显式 prompt_ref。revision 不进入稳定 identity。
 - 对新 writer/schema 增加可选 `narrative_beat_ref`、`script_scene_ref`；adapter 兼容 legacy。没有外键的 `SUP-*` 不按位置配对。
 - 响应包含 association coverage、missing、orphan 和 diagnostics；UI 用“尚未关联”显式呈现。
 
@@ -307,7 +308,7 @@ outline/script parser、storyboard/prompt/render adapter、schema/writer、view 
 - 默认进入 Episode Overview：标题、故事目标/冲突/hook、artifact 进度细线和缺失提示；不自动选 shot。
 - 左侧按 outline 顺序列叙事点，显示 SC-NN、叙事功能、摘要和关联覆盖；选择后 URL 不改变，稳定 selection 留在页面状态。
 - 右侧显示 beat 目标、关键对白节拍、关联 script scene，再按 scene 展开 shot 序列。
-- 选择 shot 后，在同一内容工作面进入 detail inspector：storyboard 的镜头字段、script 上下文/对白、Prompt、Render、来源 revision；Escape 返回父层并恢复焦点。
+- 选择 shot 后，在同一内容工作面进入 detail inspector：storyboard 的镜头字段、script 上下文/对白、Prompt、render guide/shot queue、来源 revision；Escape 返回父层并恢复焦点。
 - Prompt、Render、Review 不进入左侧主叙事树。Review 可从问题定位到已关联 beat/scene/shot；无定位则保持报告段落。
 - 未生成显示“尚未生成”和下一步含义，不显示虚构内容；未关联显示“尚未关联”。
 - 新 revision 在后台合并；稳定 ID 存在时保留 selection、滚动锚点和键盘焦点；实体被删除时回到最近父级并用 `aria-live="polite"` 通知。
@@ -345,7 +346,7 @@ episode artifacts 没有绑定、manifest、aggregate revision 或条件请求�
 
 1. localStorage 记住 episode/文件内容：越权且会过期。
 2. Agent 消息推断生成阶段：不可恢复。
-3. **后端 binding + artifact manifest + REST polling/ETag 是事实；SSE 只使缓存失效；前端保留最后成功快照和稳定选择。**
+3. **后端 binding + artifact manifest + REST polling/ETag 是事实；SSE 只使缓存失效；前端仅在当前挂载会话保留内存 last-good 和稳定选择。刷新后 latest invalid 必须诚实显示 invalid。**
 
 ### → 最终决策
 
@@ -358,11 +359,11 @@ episode artifacts 没有绑定、manifest、aggregate revision 或条件请求�
 | script 生成中/已到达 | 保留 outline；逐个加入可证明关联的 scenes |
 | storyboard revision 更新 | 按 shot_id 增量替换字段；不重置仍存在的 beat/scene/shot |
 | prompts 逐步产生 | 每个 shot 显示 prompt 可用/尚未生成；孤儿 prompt 单列诊断 |
-| renders 逐步产生 | guide、queue、实际登记媒体分开；不得把 pending 当完成 |
+| renders 逐步产生 | guide 与显式 shot queue 分开；不得把 pending 当完成，不建立 Prompt → Render 关系 |
 | review 到达 | 进入辅助视图，并显示审阅 scope/source revision |
 | 离开/刷新/重新登录 | canonical run deep-link → actor 校验 → episode binding → manifest/view model；本地只恢复非权威 UI 偏好 |
 
-REST 至少 5 秒 polling；响应带 aggregate `manifestRevision` 与每个 artifact 的 revision/mtime/size/source command，支持 ETag/304。解析错误为技术异常并保留最后成功快照，不扩展成业务失败状态。
+REST 至少 5 秒 polling；响应带 aggregate `manifestRevision`，每个 artifact 带 relative key、revision/mtime/size、受控 `producerAction` 和 `consumers[]`，支持 ETag/304。解析错误时只有当前挂载会话保留内存 last-good；刷新后 latest invalid 诚实显示 invalid，不扩展成业务失败状态，也不暴露 raw command。
 
 ### → 影响范围
 
@@ -391,7 +392,7 @@ mtime 单独不足以识别替换；大文件重复读取成本高；当前 SSE 
 
 ### → 根因
 
-stage aggregate 的领域是宿主投影，不适合塞入任意 episode 目录；现有没有目录 allowlist、文件上限、媒体受控 URL、episode 绑定或关联覆盖合同。
+stage aggregate 的领域是宿主投影，不适合塞入任意 episode 目录；现有没有目录 allowlist、文件上限、episode 绑定或 shot/prompt/queue 关联覆盖合同。
 
 ### → 可选方案
 
@@ -406,21 +407,21 @@ stage aggregate 的领域是宿主投影，不适合塞入任意 episode 目录�
 建议合同：
 
 - `GET /api/story-workspace/workflow-runs/{run_id}/episode-artifacts`：默认返回该 run 唯一 binding 的 manifest、outline/scene/shot 索引、association metrics、review summary 和下一步 capability；支持 `If-None-Match`。
-- prompts/renders 目录采用有界分页清单，`limit <= 100`、opaque cursor；当前页可包含受大小上限约束的文本 prompt 摘要。不得返回绝对路径。
-- 实际 render 媒体只通过受控资源 endpoint/短期 URL，校验 MIME、size、range、episode binding 和 actor；不把任意相对路径交给前端。
+- prompts/renders 目录采用有界分页清单，`limit <= 100`、opaque cursor；当前页可包含受大小上限约束的文本 prompt 摘要与 render guide/显式 queue。不得返回绝对路径。
+- 本期没有真实 render 媒体资源 endpoint 或 URL。未来只有受审 schema 明示稳定 artifact ID、shot/prompt ref、MIME 和受控资源 identity 后，才另行设计媒体读取合同。
 - allowlist：精确文件名 `episode-outline.md`、`script.md`、`storyboard.yaml`、`review-report.md`；目录 `prompts/` 和 `renders/` 只允许批准扩展名。目录和文件逐层 `lstat/open`，拒绝 symlink、`..`、NUL、跨根目录和超限文件。
-- 授权顺序：actor → workspace owner → frozen run provenance/creator → Deck binding/owner → thread owner → `episode.json` 与 run 一致 → canonical episode root containment，然后才读取。
+- 授权顺序：actor → workspace owner → frozen run provenance/creator → Deck binding/owner → thread owner → locked context/canonical project identity → `episode.json` 不可换绑 identity → canonical episode root containment，然后才读取。unbound 不读取 artifact。
 - Markdown 解析为受控 section AST/text；YAML 使用 safe loader、schema/数量/深度/字符串长度上限；前端默认纯文本或安全 renderer。
 - 缺失 artifact 返回 `availability: "not_generated"`，HTTP 200；解析失败返回 artifact 级 technical diagnostic 并保留其他可用 artifact，不虚构内容。
 - revision 使用内容摘要构成的 opaque token，并附 mtime/size；aggregate token 形成 ETag。writer event 不完整期间持续 REST polling。
 
 ### → 影响范围
 
-Story Workspace backend contracts/service/router/tests；受控 writer；frontend contracts/hook/adapter；媒体响应与 CSP。
+Story Workspace backend contracts/service/router/tests；受控 writer；frontend contracts/hook/adapter；本期不含媒体响应与媒体 CSP 专项。
 
 ### → 风险
 
-aggregate payload 可增长；Markdown parser 对自由格式兼容有限；render 媒体 endpoint 需要明确缓存和 Range 语义。
+aggregate payload 可增长；Markdown parser 对自由格式兼容有限；render queue 重复 shot_id 必须判 invalid/diagnostic。真实媒体读取留待未来独立设计。
 
 ### → 验收方式
 
@@ -444,7 +445,7 @@ vendor 全流水线包含 voice/edit/promote，历史设计还残留 reject/retr
 ### → 可选方案
 
 1. 顺手实现全部 vendor 命令和历史状态：范围失控。
-2. **只实现第一集文本/分镜/prompt/render-guide/已登记 render/review 的可读、可恢复工作面和受控下一步。**
+2. **只实现第一集文本/分镜/prompt/render-guide/显式 queue/review 的可读、可恢复工作面和受控下一步；真实媒体等待未来受审 schema。**
 
 ### → 最终决策
 
@@ -466,7 +467,7 @@ vendor 全流水线包含 voice/edit/promote，历史设计还残留 reject/retr
 
 ### → 风险
 
-用户可能期待真实视频预览；应明确区分 render guide、pending queue 与已注册媒体。
+用户可能期待真实视频预览；本期必须明确只有 render guide 与 pending queue，真实媒体尚无受审 schema。
 
 ### → 验收方式
 
@@ -491,9 +492,17 @@ vendor 全流水线包含 voice/edit/promote，历史设计还残留 reject/retr
 
 ## 13. 任务一验收结论
 
-- 已按 README 还原 12 步完整流水线，并将本期边界裁决至 render guide/已登记 render 展示。
+- 已按 README 还原 12 步完整流水线，并将本期边界裁决至 render guide/显式 queue 展示；真实媒体未被样例 schema 证明，留待未来评审。
 - 已识别 init、storyboard、prompt、hook、render 语义的 vendor 内部漂移。
-- 已对真实 EP01 做 shot/prompt/render 关联核验，并记录不可证明的 supplemental shot。
+- 已对真实 EP01 分别做 Shot→Prompt 与 Shot→Render Queue 关联核验，确认不存在可证明的 Prompt→Render 关系，并记录不可证明的 supplemental shot。
 - 已调查现有 Dream files、polling、权限、Execution、reentry 和真实 partial run 的接入差距。
 - P1—P7 均已给出唯一最终决策、影响、风险和验收。
 - 本轮只新增本实施记录，没有修改生产代码；任务二必须以本记录为输入建立 `design_009`，不得重新引入已排除方案。
+
+## 14. 任务三最终实施回链（不改变本记录裁决）
+
+任务三的实现、逐单元 Red/Green/评审/commit、真实 run/Deck/thread/Episode、before/after manifest、六类 artifact、关联完整率、浏览器 trace 和诚实遗留，统一记录在：
+
+`2026-08-05-drama-forge-ep01-task3-implementation-and-acceptance-record.md`
+
+该记录没有改变 P1—P7：canonical episode 文件仍是内容 owner；`.dream` 仍只承担宿主投影和 binding 物理映射；真实 render media 与无 agent session 的 runtime 闭环仍按诚实遗留处理。
