@@ -191,12 +191,14 @@ flowchart LR
 
 Dream route 不再向 `StoryWorkspaceLayout` 传完整 WorkflowContextBar；非 Dream route 可继续使用它。旧组件已有 cancel/retry/review 分支（`frontend/src/components/story-workspace/workflow/WorkflowContextBar.tsx:82-109`），因此不能整体移动。
 
-## 7. 收起态消息预览
+## 7. 收起态消息预览与 Agent rail
 
 ### 7.1 内容
 
-- Dream Agent 状态点与一行状态；
-- 最近一至三条 allowlisted assistant text，按视觉容器截断，不修改持久内容；
+- masthead 触发器是折叠态消息预览的唯一 owner：显示最新 allowlisted assistant text 或 streaming buffer，按视觉容器截断，不修改持久内容；
+- Agent rail 只显示 Dream Agent 状态点、当前阶段/revisions 和 Deck 元信息入口，不重复最新回复，也不显示“回复会显示在这里”之类空态说明；
+- Deck 元信息入口参考 Chat `PluginReceiptBadge` 的 button/popover 交互，但由 Dream 专属组件消费可信 run context；不得复用其 thread/plugin polling，也不得显示隐藏 thread 产品概念；
+- 元信息 popover 展示 Deck 名称、短/完整 run ID、当前阶段、runtime snapshot/lock，支持 `aria-haspopup="dialog"`、`aria-expanded`、Escape 和点击外部关闭；
 - 有新消息且 Agent 交互层未打开时显示低干扰未读点和“有新回复”；
 - streaming 时以节流后的 text buffer 替换最后一条临时预览；
 - 没有 assistant text 时显示与 lifecycle 对应的安全占位，不显示原始运行事件。
@@ -213,17 +215,25 @@ Dream route 不再向 `StoryWorkspaceLayout` 传完整 WorkflowContextBar；非 
 ### 8.1 内容结构
 
 ```text
-Dream Agent                                  [收起]
-Drama Forge 1.4 · Dream · Run …7A31
+Deck 元信息  ·  Dream Agent 已完成本轮输出        [返回内容]
+当前：分镜 · 人物 r2 / 场景 r2 / 分镜 r2
 ──────────────────────────────────────────────
-消息历史（只含安全 user/assistant text）
+消息历史（安全 text + 可折叠 activity）
 …
+[▸] 正在读取 Dream 工作区资料 · 已完成
+[▸] 正在更新 Dream 内容 · 已完成
 Dream Agent 正在输出…
                                   [前往最新消息]
 ──────────────────────────────────────────────
 给 Dream Agent 留言…
 [多行输入]                              [发送]
 ```
+
+内嵌 Panel 不再重复渲染“Dream Agent / 当前 Dream 对话”header；section 的可访问名称和 rail 已提供层级。返回内容动作保留为独立轻量按钮，并在关闭后归还 masthead 触发器焦点。
+
+安全 activity 只由后端固定分类投影，按原 message parts / SSE raw ordinal 顺序与公开文本共同渲染。允许分类为工作区读取、Dream 内容更新、参考资料检索、子任务协作和通用处理；状态只允许 `running / completed / stopped`。默认折叠行借鉴 ChatPanel 的工具过程视觉和 disclosure 行为，展开后仍只显示固定公开说明，不显示 tool name、call ID、原始 input/output/error、命令、文件内容、完整路径或 subagent envelope。`stopped` 是技术过程摘要，不形成业务失败/重试状态。
+
+Dream writer activity 只能表达“正在更新/已结束”，不能证明 characters/scenes/storyboards stage 已写入；stage 完成与 revision 仍只由 `.dream` REST 投影证明。
 
 当服务器投影一个待用户决策的工具请求时，输入区原位替换为 Dream 专属“编辑校样条”：只显示 allowlist 后的工具名、公开问题选项或网络 host/policy 摘要，以及允许/取消操作。它不显示原始工具 input/output、命令正文、凭证、隐藏推理或调试事件。
 
@@ -305,6 +315,9 @@ data: {"turnId":"…","delta":"…"}
 event: assistant_message_committed
 data: {"turnId":"…"}
 
+event: agent_activity_started|agent_activity_finished
+data: {"turnId":"…","activity":{"id":"…","category":"workspace_read|dream_write|reference_lookup|delegation|other","label":"服务端固定公开文案","status":"running|completed|stopped"}}
+
 event: status
 data: {"lifecycle":"streaming|idle"}
 
@@ -316,6 +329,8 @@ data: {"turnId":"…","toolCallId":"…"}
 ```
 
 工具确认事件由后端先做类型化安全投影：AskUser 只保留服务端生成的 `qN`、question/type/options 等公开字段，并对这些公开字符串再次执行敏感模式检查，命中凭证、危险命令或隐藏推理时整项 fail closed；规范小写 `run_<32hex>` 可作为普通业务标识展示，不得被通用高熵启发式误杀。网络请求只保留合法 host 与归一化 policy；普通审批只保留安全显示名。浏览器 adapter 再做严格 schema 校验，未知字段不会进入 view model。
+
+持久快照从已通过 actor/run/thread/source 校验的 assistant `parts` 再投影安全 activity；reasoning part 永远丢弃，tool input/output/error 永远不透传。实时 activity 使用同一分类器和 raw ordinal cursor；完成后刷新从持久 parts 恢复，而不是依赖 EventBus 作为持久真相。
 
 待确认 registry 绑定可信的 actor/run/thread/turn/toolCall 五元上下文；同一 turn 的重叠 SSE 订阅按 actor/run/thread/turn 计租约。任一非终态订阅断开只释放自己的租约，最后一个订阅离开才清理；真实 terminal 事件可强制清理，避免多标签页或重连交叠使仍在显示的确认提前失效。
 
@@ -746,6 +761,9 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 - [ ] 断线前后不重复、不遗漏允许展示的消息。
 - [ ] API payload/DOM 不含 reasoning、工具参数、凭证或 debug event。
 - [ ] allowlist 工具确认在同一 Dream panel/dialog 内显示；提交只含 toolCallId/decision/公开 answers，不含 thread、Deck 或原始工具参数。
+- [ ] Rail 不重复消息预览或空态说明；Deck 元信息由 Dream 专属 button/popover 展示，Panel 不重复 header。
+- [ ] Panel/dialog 按顺序显示安全 text 与可折叠 activity；reasoning、原始 tool input/output/error、命令、路径、凭证和内部 task envelope 不进入 API/DOM。
+- [ ] activity 完成不修改或代替 `.dream` stage revision；刷新后可从持久 assistant parts 恢复。
 - [ ] 用户消息沿同一 run/thread 只 dispatch 一次；快速连续发送不重复。
 - [ ] confirmation dispatched 前和任一 live turn 中，POST 被服务端门禁拒绝且不落消息；`recent + no live turn` 后才可发送。
 - [ ] 并发同 key 只有一个 SQLite claim owner、一个 active dispatch 和一条持久 user message；崩溃恢复语义与 §12.1 一致。
@@ -776,6 +794,8 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | DEC-044 | Dream 消息区采用 120px near-bottom 跟随阈值；用户上滚时暂停并用“前往最新消息”显式恢复 |
 | DEC-045 | 工具确认只经 Story Workspace 服务端安全投影进入 Dream 专属编辑校样条；确认仍绑定同一授权 run/thread，不复用 Chat UI |
 | DEC-046 | AskUser 公开 question ID 由服务端生成不透明 `qN`；确认 registry 对重叠 SSE 使用 turn-scoped 订阅租约，terminal 强制清理 |
+| DEC-047 | masthead 是折叠消息预览唯一 owner；rail 只持有状态、stage/revisions 与 Dream 专属 Deck 元信息入口，Panel 不重复 header |
+| DEC-048 | 中间过程只投影后端固定分类的安全 activity，并以 Dream 专属 disclosure 渲染；不复用 ChatPanel/ChatMessageList 的 raw rich parts |
 
 ## 22. 证据索引
 
@@ -795,3 +815,4 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | 2026-08-05 | 交互返工：Dream 入口降噪、run 返回入口、Dream inline panel / execution dialog 分流、状态图标、Dream/Decks/订阅导航、工作台内嵌 DeckManager 与 footer 主题切换 |
 | 2026-08-05 | 消息交互返工：补齐 near-bottom 自动跟随、前往最新消息标记，以及服务端安全投影的 Dream 专属工具确认校样条 |
 | 2026-08-05 | 消息交互复审返工：发送强制跟随到新对话；AskUser 改为不透明 `qN`；补齐危险命令 fail-closed、规范 run ID 豁免、稳定连接退避与重叠 SSE 租约 |
+| 2026-08-05 | 信息层级返工：Rail 移除重复回复/空态并增加 Dream Deck 元信息入口；Panel 移除重复 header；中间过程改为服务端安全 activity + Dream 专属折叠渲染 |
