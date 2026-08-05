@@ -1345,7 +1345,7 @@ function storyWorkspaceParseEpisodeBindingRecovery(value: unknown): StoryWorkspa
       'bindingRecovery.publicReason',
       ['episode_binding_unproven'],
     );
-  if ((canDispatch && publicReason !== null) || (!canDispatch && publicReason === null)) {
+  if (canDispatch !== (publicReason !== null)) {
     throw new Error('bindingRecovery reason is inconsistent.');
   }
   return {

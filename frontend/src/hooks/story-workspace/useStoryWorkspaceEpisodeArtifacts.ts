@@ -26,8 +26,19 @@ const STORY_WORKSPACE_EPISODE_RUN_ID = /^run_[0-9a-f]{32}$/;
 const STORY_WORKSPACE_EPISODE_HEX_ID = /^[0-9a-f]{32}$/;
 const STORY_WORKSPACE_EPISODE_REVISION = /^sha256:[0-9a-f]{64}$/;
 const STORY_WORKSPACE_EPISODE_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,255}$/;
-const STORY_WORKSPACE_EPISODE_UNSAFE_GUIDANCE =
-  /(?:\/drama-forge:|(?:^|\s)(?:sudo|curl|wget|(?:ba|z|fi)?sh|python|node|npm|npx|pnpm|yarn|git|claude)\b|--(?:api[-_]?key|token|secret|password|credential|authorization)\b|\b(?:hidden|internal|private|model)\s+reasoning\b|\bchain\s+of\s+thought\b|\bsystem\s+prompt\b|(?:^|[\s('"`=])(?:\/(?!\/)[A-Za-z0-9._~-]+(?:\/[^\s`]+)*|[A-Za-z]:[\\/][^\s`]+|\\\\[^\\\s]+\\[^\s`]+|file:\/\/|~[\\/]|\$HOME(?:[\\/]|\b)|\.\.[\\/]))/i;
+const STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST = [
+  /(?:^|\s)\/drama-[a-z-]+\b/i,
+  /\b(?:hidden|internal)\s+(?:reasoning|thoughts?)\b|\bchain\s+of\s+thought\b|\bsystem\s+prompt\b|隐藏推理|内部推理|思维链|系统提示词/i,
+  /\bBearer\s+\S+/i,
+  /(?<![A-Za-z0-9_-])(?:sk-(?:ant-|proj-)?|gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}/i,
+  /(?<![A-Za-z0-9])\/(?:Users|home)\/[^\s]+|(?<![A-Za-z0-9])[A-Za-z]:\\Users\\[^\s]+/i,
+  /(?:\$\{?HOME\}?|~)\/(?:\.[^/\s]+|[^/\s]+)\/(?:[^\s]+)|(?<![A-Za-z0-9])\/(?:etc)\/(?:passwd|shadow)(?![A-Za-z0-9])/i,
+  /(?<![A-Za-z0-9_])\.\.?\/[^\s]+/,
+  /(?:^|[\r\n;&|])\s*(?:[$>#]\s*)?(?:git|python(?:3(?:\.\d+)*)?|npx|rm|sudo|node|bash|sh)\b\s+(?:--?[A-Za-z0-9]|[A-Za-z0-9_./@])/i,
+  /\b(?:process\.)?env(?:\s*\||\s*\[|\.)|\bprintenv\b|\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|CREDENTIALS?)\s*=/i,
+  /\b(?:curl|wget)\b.{0,500}\|\s*(?:ba|z|fi)?sh\b/i,
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
+] as const;
 const STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS = [
   'episode-outline.md',
   'script.md',
@@ -123,12 +134,12 @@ function storyWorkspaceEpisodeActionGuidance(value: unknown): string | null {
   const trimmed = value.trim();
   if (trimmed.length === 0) return null;
   if (
-    trimmed.length > 2000
+    [...trimmed].length > 2000
     || [...trimmed].some((character) => {
       const code = character.charCodeAt(0);
-      return code === 127 || (code < 32 && code !== 9 && code !== 10);
+      return code < 32 && code !== 9 && code !== 10;
     })
-    || STORY_WORKSPACE_EPISODE_UNSAFE_GUIDANCE.test(trimmed)
+    || STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST.some((pattern) => pattern.test(trimmed))
   ) throw new StoryWorkspaceEpisodeActionUnavailableError();
   return trimmed;
 }
