@@ -10,9 +10,6 @@ from typing import Any
 
 try:
     from services.errors.error_registry import ApiRouteError
-    from services.story_workspace.dream_confirmation_service import (
-        story_workspace_read_dream_confirmation_fact,
-    )
     from story_workspace.contracts import (
         STORY_WORKSPACE_DREAM_REQUIRED_STAGES,
         StoryWorkspaceDreamReentryCollection,
@@ -22,9 +19,6 @@ try:
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.services.errors.error_registry import ApiRouteError
-    from backend.services.story_workspace.dream_confirmation_service import (
-        story_workspace_read_dream_confirmation_fact,
-    )
     from backend.story_workspace.contracts import (
         STORY_WORKSPACE_DREAM_REQUIRED_STAGES,
         StoryWorkspaceDreamReentryCollection,
@@ -36,6 +30,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
 
 _StoryWorkspaceDreamProjectionLoader = Callable[[str, dict[str, str]], Any]
 _StoryWorkspaceDreamLiveTurnLookup = Callable[[str], bool]
+_STORY_WORKSPACE_DREAM_REENTRY_PAGE_SIZE = 100
 
 
 class StoryWorkspaceDreamReentryService:
@@ -69,10 +64,15 @@ class StoryWorkspaceDreamReentryService:
         db.row_factory = sqlite3.Row
         try:
             rows = self._query_authorized_rows(db, actor_id)
+            confirmation_facts = self._confirmation_facts(db, rows, actor_id)
             items = [
                 item
                 for row in rows
-                if (item := self._project_row(db, row, actor_id)) is not None
+                if (item := self._project_row(
+                    row,
+                    actor_id,
+                    confirmation_facts.get(str(row["run_id"]), (False, False)),
+                )) is not None
             ]
             items.sort(key=self._sort_tuple)
             return StoryWorkspaceDreamReentryCollection(runs=items)
@@ -103,7 +103,10 @@ class StoryWorkspaceDreamReentryService:
 
         return db.execute(
             "SELECT "
-            "run.id AS run_id, run.workspace_id, run.deck_plugin_version, "
+            "run.id AS run_id, run.workspace_id, run.deck_plugin_id, "
+            "run.deck_plugin_version, run.deck_plugin_binding_id AS binding_id, "
+            "run.binding_revision, run.deck_runtime_snapshot_id, "
+            "run.runtime_plugin_lock_id, "
             "run.source_voice_thread_id AS thread_id, "
             "run.source_message_id AS source_message_id, "
             "run.created_at AS run_created_at, "
@@ -116,6 +119,21 @@ class StoryWorkspaceDreamReentryService:
             "ON preflight.workflow_preflight_id = run.workflow_preflight_id "
             "JOIN deck_plugin_bindings AS binding "
             "ON binding.deck_plugin_binding_id = run.deck_plugin_binding_id "
+            "JOIN deck_plugin_releases AS release "
+            "ON release.deck_plugin_id = run.deck_plugin_id "
+            "AND release.deck_plugin_version = run.deck_plugin_version "
+            "AND release.workflow_definition_ref = run.workflow_definition_ref "
+            "AND release.manifest_hash = run.deck_plugin_manifest_hash "
+            "JOIN deck_runtime_plugin_locks AS runtime_lock "
+            "ON runtime_lock.id = run.runtime_plugin_lock_id "
+            "AND runtime_lock.deck_plugin_id = run.deck_plugin_id "
+            "AND runtime_lock.deck_plugin_version = run.deck_plugin_version "
+            "AND runtime_lock.deck_plugin_manifest_hash = run.deck_plugin_manifest_hash "
+            "JOIN deck_runtime_snapshots AS runtime_snapshot "
+            "ON runtime_snapshot.deck_runtime_snapshot_id = run.deck_runtime_snapshot_id "
+            "AND runtime_snapshot.deck_id = binding.deck_id "
+            "AND runtime_snapshot.deck_plugin_binding_id = binding.deck_plugin_binding_id "
+            "AND runtime_snapshot.binding_revision = run.binding_revision "
             "JOIN decks AS deck ON deck.id = binding.deck_id "
             "JOIN chat_thread AS thread ON thread.id = run.source_voice_thread_id "
             "JOIN chat_message AS source "
@@ -124,24 +142,34 @@ class StoryWorkspaceDreamReentryService:
             "AND workspace.owner_id = ? "
             "AND deck.owner_id = ? AND deck.enabled = 1 "
             "AND thread.user_id = ? AND thread.deck_id = binding.deck_id "
+            "AND source.role = 'user' "
             "AND preflight.created_by = run.created_by "
             "AND preflight.deck_id = binding.deck_id "
+            "AND preflight.binding_revision = run.binding_revision "
             "AND preflight.deck_plugin_id = run.deck_plugin_id "
             "AND preflight.deck_plugin_version = run.deck_plugin_version "
             "AND preflight.runtime_plugin_lock_id = run.runtime_plugin_lock_id "
+            "AND preflight.deck_runtime_snapshot_id = run.deck_runtime_snapshot_id "
             "AND binding.workspace_id = run.workspace_id "
             "AND binding.creator_id = run.created_by "
             "AND binding.deck_plugin_id = run.deck_plugin_id "
             "AND binding.deck_plugin_version = run.deck_plugin_version "
-            "AND binding.binding_revision = run.binding_revision",
-            (str(actor_id), actor_id, actor_id, actor_id),
+            "AND binding.binding_revision = run.binding_revision "
+            "ORDER BY run.created_at DESC, run.id ASC LIMIT ?",
+            (
+                str(actor_id),
+                actor_id,
+                actor_id,
+                actor_id,
+                _STORY_WORKSPACE_DREAM_REENTRY_PAGE_SIZE,
+            ),
         ).fetchall()
 
     def _project_row(
         self,
-        db: sqlite3.Connection,
         row: sqlite3.Row,
         actor_id: int,
+        confirmation_facts: tuple[bool, bool],
     ) -> StoryWorkspaceDreamReentryItem | None:
         run_id = str(row["run_id"])
         thread_id = str(row["thread_id"])
@@ -153,18 +181,17 @@ class StoryWorkspaceDreamReentryService:
             run_id=run_id,
             thread_id=thread_id,
             deck_id=deck_id,
+            deck_plugin_id=str(row["deck_plugin_id"]),
+            deck_plugin_version=str(row["deck_plugin_version"]),
+            binding_id=str(row["binding_id"]),
+            binding_revision=int(row["binding_revision"]),
+            runtime_snapshot_id=str(row["deck_runtime_snapshot_id"]),
+            runtime_lock_id=str(row["runtime_plugin_lock_id"]),
         ):
             return None
 
-        confirmation_accepted, confirmation_dispatched = (
-            story_workspace_read_dream_confirmation_fact(
-                db,
-                actor_id=str(actor_id),
-                thread_id=thread_id,
-                run_id=run_id,
-            )
-        )
-        stage_revisions = self._stage_revisions(run_id, actor_id)
+        confirmation_accepted, confirmation_dispatched = confirmation_facts
+        stage_revisions, stage_activity_at = self._stage_snapshot(run_id, actor_id)
         live_turn = self._safe_live_turn_lookup(thread_id)
         lifecycle = self._lifecycle(
             stage_revisions=stage_revisions,
@@ -175,6 +202,7 @@ class StoryWorkspaceDreamReentryService:
         last_activity_at = max(
             self._parse_datetime(row["run_created_at"]),
             self._parse_datetime(row["thread_updated_at"]),
+            stage_activity_at or datetime.min.replace(tzinfo=UTC),
         )
         created_at = self._parse_datetime(row["run_created_at"])
         group = "recent" if lifecycle is StoryWorkspaceDreamRunLifecycle.RECENT else "in_progress"
@@ -198,33 +226,92 @@ class StoryWorkspaceDreamReentryService:
             href=f"/story-workspace/dream?run={run_id}",
         )
 
-    def _stage_revisions(
+    def _stage_snapshot(
         self,
         run_id: str,
         actor_id: int,
-    ) -> dict[StoryWorkspaceDreamStage, int]:
+    ) -> tuple[dict[StoryWorkspaceDreamStage, int], datetime | None]:
         """Read stage truth through the established Dream files adapter only."""
 
         try:
             projection = self._dream_files_loader(run_id, {"actor_id": str(actor_id)})
-        except ApiRouteError as exc:
-            if exc.status_code in {403, 404}:
-                return {}
-            raise
-        except Exception:
-            # Runtime files can legitimately be absent immediately after launch.
-            # The DB-provenanced run remains recoverable as ``generating``.
-            return {}
+        except FileNotFoundError:
+            # A missing stage file is the only legal empty-stage condition.
+            return {}, None
         stages = getattr(projection, "stages", {})
         if not isinstance(stages, dict):
-            return {}
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
         revisions: dict[StoryWorkspaceDreamStage, int] = {}
         for stage in STORY_WORKSPACE_DREAM_REQUIRED_STAGES:
             value = stages.get(stage) or stages.get(stage.value)
             revision = getattr(value, "revision", None)
             if isinstance(revision, int) and not isinstance(revision, bool) and revision >= 0:
                 revisions[stage] = revision
-        return revisions
+        stage_activity_at = getattr(projection, "stage_activity_at", None)
+        if stage_activity_at is not None and not isinstance(stage_activity_at, datetime):
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        if isinstance(stage_activity_at, datetime) and stage_activity_at.tzinfo is None:
+            stage_activity_at = stage_activity_at.replace(tzinfo=UTC)
+        return revisions, stage_activity_at
+
+    @staticmethod
+    def _confirmation_facts(
+        db: sqlite3.Connection,
+        rows: list[sqlite3.Row],
+        actor_id: int,
+    ) -> dict[str, tuple[bool, bool]]:
+        """Read at most one durable confirmation per re-entry candidate.
+
+        This is intentionally a single bounded batch query, rather than the
+        unbounded per-run audit scan used by the confirmation coordinator.
+        Duplicate matching facts are treated as a diagnostic error so a page
+        never silently derives lifecycle from a truncated audit history.
+        """
+
+        if not rows:
+            return {}
+        by_thread = {str(row["thread_id"]): str(row["run_id"]) for row in rows}
+        placeholders = ", ".join("?" for _ in by_thread)
+        limit = len(by_thread) + 1
+        matches = db.execute(
+            "SELECT thread_id, metadata FROM chat_message "
+            "WHERE role = 'user' AND thread_id IN (" + placeholders + ") "
+            "AND json_valid(metadata) "
+            "AND json_extract(metadata, '$.kind') = ? "
+            "ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT ?",
+            (
+                *by_thread.keys(),
+                "story-workspace-dream-confirmation",
+                limit,
+            ),
+        ).fetchall()
+        if len(matches) > len(by_thread):
+            raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+        facts = {run_id: (False, False) for run_id in by_thread.values()}
+        seen_threads: set[str] = set()
+        for match in matches:
+            thread_id = str(match["thread_id"])
+            run_id = by_thread.get(thread_id)
+            if run_id is None or thread_id in seen_threads:
+                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+            seen_threads.add(thread_id)
+            try:
+                metadata = json.loads(match["metadata"])
+            except (TypeError, ValueError) as exc:
+                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+            valid = (
+                isinstance(metadata, dict)
+                and metadata.get("actor") == str(actor_id)
+                and metadata.get("thread_id") == thread_id
+                and metadata.get("story_workspace_run_id") == run_id
+            )
+            if not valid:
+                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+            facts[run_id] = (
+                True,
+                metadata.get("dispatch_status") == "dispatched",
+            )
+        return facts
 
     @staticmethod
     def _lifecycle(
@@ -252,11 +339,18 @@ class StoryWorkspaceDreamReentryService:
         run_id: str,
         thread_id: str,
         deck_id: str,
+        deck_plugin_id: str,
+        deck_plugin_version: str,
+        binding_id: str,
+        binding_revision: int,
+        runtime_snapshot_id: str,
+        runtime_lock_id: str,
     ) -> bool:
         try:
             metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
         except (TypeError, ValueError):
             return False
+        dream_context = metadata.get("dreamContext") if isinstance(metadata, dict) else None
         return (
             isinstance(metadata, dict)
             and metadata.get("kind") == "story-workspace-dream-launch"
@@ -265,6 +359,18 @@ class StoryWorkspaceDreamReentryService:
             and metadata.get("deckId") == deck_id
             and metadata.get("workflowRunId") == run_id
             and metadata.get("threadId") == thread_id
+            and isinstance(dream_context, dict)
+            and dream_context == {
+                "workflow_run_id": run_id,
+                "thread_id": thread_id,
+                "deck_id": deck_id,
+                "deck_plugin_id": deck_plugin_id,
+                "deck_plugin_version": deck_plugin_version,
+                "deck_plugin_binding_id": binding_id,
+                "binding_revision": binding_revision,
+                "deck_runtime_snapshot_id": runtime_snapshot_id,
+                "runtime_plugin_lock_id": runtime_lock_id,
+            }
         )
 
     @staticmethod

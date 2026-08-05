@@ -39,6 +39,7 @@ class _Stage:
 @dataclass(frozen=True)
 class _Projection:
     stages: dict[StoryWorkspaceDreamStage, _Stage]
+    stage_activity_at: datetime | None = None
 
 
 def _create_schema(db: sqlite3.Connection) -> None:
@@ -55,6 +56,8 @@ def _create_schema(db: sqlite3.Connection) -> None:
           deck_plugin_id TEXT,
           deck_plugin_version TEXT,
           runtime_plugin_lock_id TEXT
+          ,binding_revision INTEGER
+          ,deck_runtime_snapshot_id TEXT
         );
         CREATE TABLE deck_plugin_bindings (
           deck_plugin_binding_id TEXT PRIMARY KEY,
@@ -71,6 +74,8 @@ def _create_schema(db: sqlite3.Connection) -> None:
           deck_plugin_id TEXT,
           deck_plugin_version TEXT,
           workflow_definition_ref TEXT,
+          deck_runtime_snapshot_id TEXT,
+          deck_plugin_manifest_hash TEXT,
           deck_plugin_binding_id TEXT,
           binding_revision INTEGER,
           runtime_plugin_lock_id TEXT,
@@ -79,6 +84,24 @@ def _create_schema(db: sqlite3.Connection) -> None:
           source_message_id TEXT,
           created_by TEXT,
           created_at TEXT
+        );
+        CREATE TABLE deck_plugin_releases (
+          deck_plugin_id TEXT,
+          deck_plugin_version TEXT,
+          workflow_definition_ref TEXT,
+          manifest_hash TEXT
+        );
+        CREATE TABLE deck_runtime_plugin_locks (
+          id TEXT PRIMARY KEY,
+          deck_plugin_id TEXT,
+          deck_plugin_version TEXT,
+          deck_plugin_manifest_hash TEXT
+        );
+        CREATE TABLE deck_runtime_snapshots (
+          deck_runtime_snapshot_id TEXT PRIMARY KEY,
+          deck_id TEXT,
+          deck_plugin_binding_id TEXT,
+          binding_revision INTEGER
         );
         CREATE TABLE chat_thread (
           id TEXT PRIMARY KEY,
@@ -106,6 +129,17 @@ def _launch_metadata(*, run: str, thread: str, deck: str, actor: str = ACTOR_ID)
         "deckId": deck,
         "workflowRunId": run,
         "threadId": thread,
+        "dreamContext": {
+            "workflow_run_id": run,
+            "thread_id": thread,
+            "deck_id": deck,
+            "deck_plugin_id": "plugin-1",
+            "deck_plugin_version": "1.0.0",
+            "deck_plugin_binding_id": "binding-PLACEHOLDER",
+            "binding_revision": 1,
+            "deck_runtime_snapshot_id": "snapshot-1",
+            "runtime_plugin_lock_id": "lock-1",
+        },
     })
 
 
@@ -151,26 +185,53 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         deck: str = "deck-1",
         thread_deck: str | None = None,
         metadata_kind: str = "story-workspace-dream-launch",
+        workflow_definition_ref: str = "deck://ink.dream/story/1.0.0/workflow.json",
+        preflight_binding_revision: int = 1,
+        preflight_snapshot_id: str | None = None,
+        preflight_lock_id: str | None = None,
+        stage_activity_at: datetime | None = None,
     ) -> str:
         value = run_id(number)
         thread = f"thread-{number}"
         preflight = f"pf-{number}"
         binding = f"binding-{number}"
         source = f"source-{number}"
+        plugin = f"plugin-{number}"
+        snapshot = f"snapshot-{number}"
+        lock = f"lock-{number}"
+        manifest = f"manifest-{number}"
+        preflight_snapshot_id = preflight_snapshot_id or snapshot
+        preflight_lock_id = preflight_lock_id or lock
         self.db.execute(
-            "INSERT INTO workflow_preflights VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (preflight, deck, workspace, actor, actor, "plugin-1", "1.0.0", "lock-1"),
+            "INSERT INTO workflow_preflights VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                preflight, deck, workspace, actor, actor, plugin, "1.0.0",
+                preflight_lock_id, preflight_binding_revision, preflight_snapshot_id,
+            ),
         )
         self.db.execute(
             "INSERT INTO deck_plugin_bindings VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (binding, deck, workspace, actor, "plugin-1", "1.0.0", 1),
+            (binding, deck, workspace, actor, plugin, "1.0.0", 1),
         )
         self.db.execute(
-            "INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO workflow_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
-                value, workspace, "plugin-1", "1.0.0", "dream", binding, 1,
-                "lock-1", preflight, thread, source, actor, created_at,
+                value, workspace, plugin, "1.0.0", workflow_definition_ref,
+                snapshot, manifest, binding, 1, lock, preflight,
+                thread, source, actor, created_at,
             ),
+        )
+        self.db.execute(
+            "INSERT INTO deck_plugin_releases VALUES (?, ?, ?, ?)",
+            (plugin, "1.0.0", workflow_definition_ref, manifest),
+        )
+        self.db.execute(
+            "INSERT INTO deck_runtime_plugin_locks VALUES (?, ?, ?, ?)",
+            (lock, plugin, "1.0.0", manifest),
+        )
+        self.db.execute(
+            "INSERT INTO deck_runtime_snapshots VALUES (?, ?, ?, ?)",
+            (snapshot, deck, binding, 1),
         )
         self.db.execute(
             "INSERT INTO chat_thread VALUES (?, ?, ?, ?)",
@@ -178,6 +239,10 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         )
         metadata = json.loads(_launch_metadata(run=value, thread=thread, deck=deck, actor=actor))
         metadata["kind"] = metadata_kind
+        metadata["dreamContext"]["deck_plugin_binding_id"] = binding
+        metadata["dreamContext"]["deck_plugin_id"] = plugin
+        metadata["dreamContext"]["deck_runtime_snapshot_id"] = snapshot
+        metadata["dreamContext"]["runtime_plugin_lock_id"] = lock
         self.db.execute(
             "INSERT INTO chat_message VALUES (?, ?, 'user', '[]', ?, ?)",
             (source, thread, json.dumps(metadata), created_at),
@@ -201,18 +266,21 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
                 stage: _Stage(index)
                 for index, stage in enumerate(StoryWorkspaceDreamStage, start=1)
             }
-        self.projections[value] = _Projection(stages=stages)
+        self.projections[value] = _Projection(
+            stages=stages,
+            stage_activity_at=stage_activity_at,
+        )
         self.db.commit()
         return value
 
-    def _service(self):
+    def _service(self, loader=None):
         from services.story_workspace.dream_reentry_service import (
             StoryWorkspaceDreamReentryService,
         )
 
         return StoryWorkspaceDreamReentryService(
             db_factory=lambda: self.db,
-            dream_files_loader=lambda value, _actor: self.projections[value],
+            dream_files_loader=loader or (lambda value, _actor: self.projections[value]),
             live_turn_lookup=lambda thread: thread in self.live_threads,
             close_connections=False,
         )
@@ -250,6 +318,93 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
 
         self.assertEqual([item.story_workspace_run_id for item in response.runs], [visible])
+
+    def test_sql_rejects_non_dream_or_inconsistent_provenance_edges(self) -> None:
+        visible = self._add_run(30, complete=False)
+        wrong_workflow = self._add_run(31, complete=False)
+        wrong_revision = self._add_run(32, complete=False)
+        wrong_snapshot = self._add_run(33, complete=False)
+        wrong_lock = self._add_run(34, complete=False)
+        wrong_context = self._add_run(35, complete=False)
+        self.db.execute(
+            "UPDATE workflow_runs SET workflow_definition_ref = 'deck://other/workflow.json' WHERE id = ?",
+            (wrong_workflow,),
+        )
+        self.db.execute(
+            "UPDATE workflow_preflights SET binding_revision = 2 WHERE workflow_preflight_id = 'pf-32'"
+        )
+        self.db.execute(
+            "UPDATE workflow_preflights SET deck_runtime_snapshot_id = 'snapshot-other' WHERE workflow_preflight_id = 'pf-33'"
+        )
+        self.db.execute(
+            "UPDATE workflow_preflights SET runtime_plugin_lock_id = 'lock-other' WHERE workflow_preflight_id = 'pf-34'"
+        )
+        metadata = json.loads(self.db.execute(
+            "SELECT metadata FROM chat_message WHERE id = 'source-35'"
+        ).fetchone()[0])
+        metadata["dreamContext"]["runtime_plugin_lock_id"] = "lock-other"
+        self.db.execute(
+            "UPDATE chat_message SET metadata = ? WHERE id = 'source-35'",
+            (json.dumps(metadata),),
+        )
+        self.db.commit()
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual([item.story_workspace_run_id for item in response.runs], [visible])
+
+    def test_only_missing_stage_file_is_empty_and_permission_or_contract_errors_propagate(self) -> None:
+        value = self._add_run(40, complete=False)
+
+        missing = self._service(loader=lambda *_args: (_ for _ in ()).throw(FileNotFoundError()))
+        self.assertEqual(
+            missing.list_dream_runs(actor={"actor_id": ACTOR_ID}).runs[0].lifecycle.value,
+            "generating",
+        )
+        for error in (
+            ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403),
+            RuntimeError("Dream contract is broken"),
+        ):
+            with self.subTest(error=type(error).__name__), self.assertRaises(type(error)):
+                self._service(loader=lambda *_args, error=error: (_ for _ in ()).throw(error)).list_dream_runs(
+                    actor={"actor_id": ACTOR_ID}
+                )
+        self.assertIn(value, self.projections)
+
+    def test_stage_activity_time_participates_in_stable_recent_sort(self) -> None:
+        older_thread_newer_stage = self._add_run(
+            41,
+            complete=True,
+            confirmation="dispatched",
+            updated_at="2026-08-05T10:00:00+00:00",
+            stage_activity_at=datetime(2026, 8, 5, 14, tzinfo=timezone.utc),
+        )
+        newer_thread = self._add_run(
+            42,
+            complete=True,
+            confirmation="dispatched",
+            updated_at="2026-08-05T13:00:00+00:00",
+        )
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(
+            [item.story_workspace_run_id for item in response.runs],
+            [older_thread_newer_stage, newer_thread],
+        )
+        self.assertEqual(response.runs[0].last_activity_at.hour, 14)
+
+    def test_confirmation_lookup_is_a_bounded_batch_query_not_per_run_scan(self) -> None:
+        for number in range(50, 56):
+            self._add_run(number, complete=False)
+        statements: list[str] = []
+        self.db.set_trace_callback(statements.append)
+
+        self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        selects = [statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]
+        self.assertEqual(len(selects), 2)
+        self.assertTrue(all("LIMIT" in statement.upper() for statement in selects))
 
     def test_rejects_malformed_actor_and_does_not_fall_back_to_another_workspace(self) -> None:
         self._add_run(20, complete=False)

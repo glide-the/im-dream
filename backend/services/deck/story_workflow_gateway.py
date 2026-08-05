@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 import hashlib
 import importlib.util
 import json
@@ -116,6 +117,14 @@ logger = logging.getLogger(__name__)
 _DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
     database.get_db,
 )
+
+
+@dataclass(frozen=True)
+class StoryWorkspaceDreamReentryStageProjection:
+    """Validated Dream files plus the newest canonical stage file timestamp."""
+
+    stages: Any
+    stage_activity_at: datetime | None
 
 
 def story_workspace_get_workspace_root() -> Path:
@@ -729,9 +738,62 @@ class StoryWorkflowApplicationGateway:
     def _list_dream_runs_sync(self, actor: dict[str, str]) -> Any:
         service = StoryWorkspaceDreamReentryService(
             db_factory=database.get_db,
-            dream_files_loader=self._get_dream_files_sync,
+            dream_files_loader=self._load_dream_reentry_stage_projection,
         )
         return service.list_dream_runs(actor=actor)
+
+    def _load_dream_reentry_stage_projection(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> StoryWorkspaceDreamReentryStageProjection:
+        """Preserve Dream files truth while retaining its reliable mtime for sort."""
+
+        projection = self._get_dream_files_sync(workflow_run_id, actor)
+        stage_activity_at = self._dream_reentry_stage_activity_at(projection)
+        return StoryWorkspaceDreamReentryStageProjection(
+            stages=projection.stages,
+            stage_activity_at=stage_activity_at,
+        )
+
+    @classmethod
+    def _dream_reentry_stage_activity_at(cls, projection: Any) -> datetime | None:
+        """Read only canonical, validated stage-file mtimes for re-entry order."""
+
+        thread_id = getattr(projection, "thread_id", None)
+        run_id = getattr(projection, "story_workspace_run_id", None)
+        stages = getattr(projection, "stages", None)
+        if not isinstance(thread_id, str) or not isinstance(run_id, str):
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        if not isinstance(stages, dict):
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        workspace = cls._thread_workspace(thread_id)
+        candidates = [
+            workspace / ".dream" / "runtime" / "runs" / run_id / "run.json",
+            *[
+                workspace / ".dream" / "runtime" / "runs" / run_id / "stages" / f"{stage.value}.json"
+                for stage in stages
+            ],
+        ]
+        newest: datetime | None = None
+        for candidate in candidates:
+            try:
+                resolved = candidate.resolve(strict=True)
+            except FileNotFoundError:
+                continue
+            except (OSError, RuntimeError) as exc:
+                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+            if not resolved.is_relative_to(workspace):
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+            try:
+                metadata = resolved.stat(follow_symlinks=False)
+            except OSError as exc:
+                raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503) from exc
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+            observed = datetime.fromtimestamp(metadata.st_mtime, tz=UTC)
+            newest = observed if newest is None else max(newest, observed)
+        return newest
 
     def _get_dream_files_sync(
         self,
