@@ -16,7 +16,9 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeAssociationDiagnostics,
     StoryWorkspaceEpisodeAssociationStatus,
     StoryWorkspaceEpisodeCharacterBeat,
+    StoryWorkspaceEpisodeDepthPlane,
     StoryWorkspaceEpisodeDialogueLine,
+    StoryWorkspaceEpisodeDialogueType,
     StoryWorkspaceEpisodeMetricAvailability,
     StoryWorkspaceEpisodeNarrativeBeat,
     StoryWorkspaceEpisodeNarrativeProjection,
@@ -25,6 +27,8 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeShotCamera,
     StoryWorkspaceEpisodeShotCharacter,
     StoryWorkspaceEpisodeShotTiming,
+    StoryWorkspaceEpisodeSourceArtifact,
+    StoryWorkspaceEpisodeStoryboardDialogue,
     StoryWorkspaceEpisodeStoryboardShot,
 )
 
@@ -50,6 +54,8 @@ _SOURCE_SCENE_RE = re.compile(r"^S[0-9]{2,}$", re.IGNORECASE)
 _SHOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _SCENE_REF_RE = re.compile(r"\[([^\]\r\n]{1,255})\]")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+_SOURCE_REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
+_GENERATED_FROM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$")
 
 
 class StoryWorkspaceEpisodeArtifactParseError(ValueError):
@@ -97,20 +103,28 @@ class StoryWorkspaceEpisodeArtifactAdapter:
         outline: bytes | None,
         script: bytes | None,
         storyboard: bytes | None,
+        outline_revision: str | None = None,
+        script_revision: str | None = None,
+        storyboard_revision: str | None = None,
     ) -> StoryWorkspaceEpisodeNarrativeProjection:
-        outline_projection = self._project_outline(outline)
+        outline_revision = _source_revision(outline_revision, "outline")
+        script_revision = _source_revision(script_revision, "script")
+        storyboard_revision = _source_revision(storyboard_revision, "storyboard")
+        outline_projection = self._project_outline(outline, outline_revision)
         beats_by_key = {
             beat.source_key: beat for beat in outline_projection.beats
         }
         scenes, scene_missing, scene_orphans = self._project_script(
             script,
             beats_by_key,
+            script_revision,
         )
         scenes_by_key = {scene.source_key: scene for scene in scenes}
         shots, shot_missing, shot_orphans = self._project_storyboard(
             storyboard,
             beats_by_key,
             scenes_by_key,
+            storyboard_revision,
         )
         linked_scenes = sum(
             scene.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
@@ -138,7 +152,11 @@ class StoryWorkspaceEpisodeArtifactAdapter:
     def _view_id(self, kind: str, source_key: str) -> str:
         return uuid5(self._namespace, f"{kind}:{source_key}").hex
 
-    def _project_outline(self, content: bytes | None) -> _OutlineProjection:
+    def _project_outline(
+        self,
+        content: bytes | None,
+        source_revision: str | None,
+    ) -> _OutlineProjection:
         if content is None:
             return _OutlineProjection(
                 overview=StoryWorkspaceEpisodeOverview(),
@@ -147,6 +165,7 @@ class StoryWorkspaceEpisodeArtifactAdapter:
         document = _parse_markdown(content, "outline")
         sections = _markdown_sections(document.body)
         metadata = document.metadata
+        generated_from = _generated_from(metadata.get("generated_from"), "outline")
         character_beats = self._character_beats(metadata.get("character_beats"))
         overview = StoryWorkspaceEpisodeOverview(
             title=_optional_scalar_text(metadata.get("title"), 500, "outline"),
@@ -162,6 +181,9 @@ class StoryWorkspaceEpisodeArtifactAdapter:
                 ("集尾卡点", "集尾钩子", "cliffhanger", "hook"),
                 labels=("卡点画面", "悬念钩子", "hook"),
             ),
+            source_artifact=StoryWorkspaceEpisodeSourceArtifact.EPISODE_OUTLINE,
+            source_revision=source_revision,
+            generated_from=generated_from,
             character_beats=character_beats,
         )
         beats: list[StoryWorkspaceEpisodeNarrativeBeat] = []
@@ -213,6 +235,8 @@ class StoryWorkspaceEpisodeArtifactAdapter:
                         section.lines,
                         ("关键对白节拍", "key dialogue beats"),
                     ),
+                    source_revision=source_revision,
+                    generated_from=generated_from,
                 )
             )
         return _OutlineProjection(overview=overview, beats=beats)
@@ -271,10 +295,15 @@ class StoryWorkspaceEpisodeArtifactAdapter:
         self,
         content: bytes | None,
         beats_by_key: Mapping[str, StoryWorkspaceEpisodeNarrativeBeat],
+        source_revision: str | None,
     ) -> tuple[list[StoryWorkspaceEpisodeScriptScene], list[str], list[str]]:
         if content is None:
             return [], [], []
         document = _parse_markdown(content, "script")
+        generated_from = _generated_from(
+            document.metadata.get("generated_from"),
+            "script",
+        )
         scene_sections = _script_scene_sections(document.body)
         scenes: list[StoryWorkspaceEpisodeScriptScene] = []
         missing_links: list[str] = []
@@ -322,6 +351,8 @@ class StoryWorkspaceEpisodeArtifactAdapter:
                     actions=actions,
                     dialogue=dialogue,
                     camera_cues=camera_cues,
+                    source_revision=source_revision,
+                    generated_from=generated_from,
                 )
             )
         return scenes, missing_links, orphan_artifacts
@@ -331,6 +362,7 @@ class StoryWorkspaceEpisodeArtifactAdapter:
         content: bytes | None,
         beats_by_key: Mapping[str, StoryWorkspaceEpisodeNarrativeBeat],
         scenes_by_key: Mapping[str, StoryWorkspaceEpisodeScriptScene],
+        source_revision: str | None,
     ) -> tuple[list[StoryWorkspaceEpisodeStoryboardShot], list[str], list[str]]:
         if content is None:
             return [], [], []
@@ -340,6 +372,7 @@ class StoryWorkspaceEpisodeArtifactAdapter:
             max_documents=4,
         )
         shots_value: Any = None
+        generated_from: str | None = None
         for document in documents:
             if document is None:
                 continue
@@ -347,6 +380,11 @@ class StoryWorkspaceEpisodeArtifactAdapter:
                 raise StoryWorkspaceEpisodeArtifactParseError(
                     "storyboard",
                     "invalid_shape",
+                )
+            if generated_from is None and "generated_from" in document:
+                generated_from = _generated_from(
+                    document.get("generated_from"),
+                    "storyboard",
                 )
             if "shots" in document:
                 if shots_value is not None:
@@ -412,25 +450,21 @@ class StoryWorkspaceEpisodeArtifactAdapter:
             target_beat = (
                 beats_by_key.get(explicit_beat) if explicit_beat is not None else None
             )
-            has_orphan = False
             if explicit_beat is not None and target_beat is None:
                 orphan_artifacts.append(
                     f"shot:{shot_id}:narrative_beat:{explicit_beat}"
                 )
-                has_orphan = True
-            if target_scene_key is not None and target_scene is None:
-                if explicit_scene is not None or inferred_scene is not None:
-                    orphan_artifacts.append(
-                        f"shot:{shot_id}:script_scene:{target_scene_key}"
-                    )
-                    has_orphan = True
-            if has_orphan:
+            if explicit_scene is not None and target_scene is None:
+                orphan_artifacts.append(
+                    f"shot:{shot_id}:script_scene:{explicit_scene}"
+                )
                 status = StoryWorkspaceEpisodeAssociationStatus.ORPHAN
-                target_scene = None
-                target_beat = None
             elif target_scene is not None:
                 status = StoryWorkspaceEpisodeAssociationStatus.LINKED
-                if target_beat is None and target_scene.narrative_beat_id is not None:
+                if (
+                    explicit_beat is None
+                    and target_scene.narrative_beat_id is not None
+                ):
                     target_beat = next(
                         (
                             beat
@@ -464,6 +498,8 @@ class StoryWorkspaceEpisodeArtifactAdapter:
                     ),
                     dialogue=_shot_dialogue(item.get("dialogue")),
                     timing=_shot_timing(item.get("timing")),
+                    source_revision=source_revision,
+                    generated_from=generated_from,
                 )
             )
         return shots, missing_links, orphan_artifacts
@@ -501,6 +537,28 @@ def _decode(content: bytes, artifact: str, max_bytes: int) -> str:
     if _HTML_RE.search(text):
         raise StoryWorkspaceEpisodeArtifactParseError(artifact, "unsafe_html")
     return text
+
+
+def _source_revision(value: str | None, artifact: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or _SOURCE_REVISION_RE.fullmatch(value) is None:
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "invalid_source_revision",
+        )
+    return value
+
+
+def _generated_from(value: Any, artifact: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or _GENERATED_FROM_RE.fullmatch(value) is None:
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "invalid_generated_from",
+        )
+    return value
 
 
 def _parse_markdown(content: bytes, artifact: str) -> _MarkdownDocument:
@@ -708,10 +766,23 @@ def _optional_scalar_text(
 
 
 def _required_source_text(value: Any, artifact: str) -> str:
-    result = _optional_scalar_text(value, 128, artifact)
+    result = _optional_string_text(value, 128, artifact)
     if result is None:
         raise StoryWorkspaceEpisodeArtifactParseError(artifact, "missing_identity")
     return result
+
+
+def _optional_string_text(
+    value: Any,
+    max_length: int,
+    artifact: str,
+) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise StoryWorkspaceEpisodeArtifactParseError(artifact, "invalid_shape")
+    text = _bounded_text(value, max_length)
+    return text or None
 
 
 def _normalized_source_ref(
@@ -719,7 +790,7 @@ def _normalized_source_ref(
     pattern: re.Pattern[str],
     artifact: str,
 ) -> str | None:
-    result = _optional_scalar_text(value, 128, artifact)
+    result = _optional_string_text(value, 128, artifact)
     if result is None:
         return None
     normalized = result.upper()
@@ -937,10 +1008,34 @@ def _shot_characters(value: Any) -> list[StoryWorkspaceEpisodeShotCharacter]:
         results.append(
             StoryWorkspaceEpisodeShotCharacter(
                 ref=ref,
-                action=_optional_scalar_text(item.get("action"), 2000, "storyboard"),
+                display_name=_optional_string_text(
+                    item.get("display_name"),
+                    255,
+                    "storyboard",
+                ),
+                depth_plane=_shot_depth_plane(item.get("depth_plane")),
+                action=_optional_string_text(item.get("action"), 2000, "storyboard"),
+                emotion=_optional_string_text(
+                    item.get("emotion"),
+                    1000,
+                    "storyboard",
+                ),
             )
         )
     return results
+
+
+def _shot_depth_plane(value: Any) -> StoryWorkspaceEpisodeDepthPlane | None:
+    if value is None:
+        return None
+    text = _required_source_text(value, "storyboard").lower()
+    try:
+        return StoryWorkspaceEpisodeDepthPlane(text)
+    except ValueError as exc:
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            "storyboard",
+            "invalid_depth_plane",
+        ) from exc
 
 
 def _shot_camera(value: Any) -> StoryWorkspaceEpisodeShotCamera:
@@ -956,16 +1051,40 @@ def _shot_camera(value: Any) -> StoryWorkspaceEpisodeShotCamera:
     )
 
 
-def _shot_dialogue(value: Any) -> list[str]:
+def _shot_dialogue(value: Any) -> list[StoryWorkspaceEpisodeStoryboardDialogue]:
     if value is None:
         return []
     if not isinstance(value, list) or len(value) > 128:
         raise StoryWorkspaceEpisodeArtifactParseError("storyboard", "shape_limit")
-    results: list[str] = []
+    results: list[StoryWorkspaceEpisodeStoryboardDialogue] = []
     for item in value:
-        text = _optional_scalar_text(item, 2000, "storyboard")
-        if text:
-            results.append(text)
+        if not isinstance(item, Mapping):
+            raise StoryWorkspaceEpisodeArtifactParseError(
+                "storyboard",
+                "invalid_shape",
+            )
+        speaker = _required_source_text(item.get("speaker"), "storyboard")
+        line = _optional_string_text(item.get("line"), 2000, "storyboard")
+        dialogue_type = _optional_string_text(item.get("type"), 32, "storyboard")
+        if line is None or dialogue_type is None:
+            raise StoryWorkspaceEpisodeArtifactParseError(
+                "storyboard",
+                "missing_dialogue_field",
+            )
+        try:
+            canonical_type = StoryWorkspaceEpisodeDialogueType(dialogue_type.lower())
+        except ValueError as exc:
+            raise StoryWorkspaceEpisodeArtifactParseError(
+                "storyboard",
+                "invalid_dialogue_type",
+            ) from exc
+        results.append(
+            StoryWorkspaceEpisodeStoryboardDialogue(
+                speaker=speaker,
+                line=line,
+                type=canonical_type,
+            )
+        )
     return results
 
 

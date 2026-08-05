@@ -14,7 +14,9 @@ from services.story_workspace.episode_artifact_adapter import (
 )
 from story_workspace.contracts import (
     StoryWorkspaceEpisodeAssociationStatus,
+    StoryWorkspaceEpisodeDialogueType,
     StoryWorkspaceEpisodeMetricAvailability,
+    StoryWorkspaceEpisodeSourceArtifact,
 )
 
 
@@ -29,12 +31,14 @@ VENDOR_EPISODE = (
     / "episodes"
     / "EP01"
 )
+VENDOR_STORIES = VENDOR_EPISODE.parents[2]
 
 
 OUTLINE_WITH_BEATS = b"""---
 series: Safe Series
 episode: 1
 title: Pilot
+generated_from: master-outline@v2
 character_beats:
   - beat_id: ARC-MC-01-SETUP
     character_id: mc-01
@@ -83,6 +87,7 @@ series: Safe Series
 episode: 1
 title: Pilot
 version: 7
+generated_from: episode-outline@v2
 ---
 # Pilot
 
@@ -109,6 +114,7 @@ Thank you.
 STORYBOARD_WITH_EXPLICIT_LINKS = b"""---
 episode: EP01
 total_shots: 3
+generated_from: script@v1
 ---
 shots:
   - shot_id: S01-E01-001
@@ -129,6 +135,16 @@ shots:
     narrative_beat_ref: SC-02
     shot_type: WS
     visual: The passenger exits.
+    characters:
+      - ref: passenger-01
+        display_name: Passenger
+        depth_plane: back
+        action: Exits the car.
+        emotion: Guarded
+    dialogue:
+      - speaker: passenger-01
+        line: Thank you.
+        type: spoken
 """
 
 
@@ -141,6 +157,9 @@ def test_projects_explicit_outline_beats_script_scenes_and_shot_links() -> None:
         outline=OUTLINE_WITH_BEATS,
         script=SCRIPT_WITH_SCENES,
         storyboard=STORYBOARD_WITH_EXPLICIT_LINKS,
+        outline_revision="sha256:" + "1" * 64,
+        script_revision="sha256:" + "2" * 64,
+        storyboard_revision="sha256:" + "3" * 64,
     )
 
     assert projection.episode_id != EPISODE_UID
@@ -156,6 +175,11 @@ def test_projects_explicit_outline_beats_script_scenes_and_shot_links() -> None:
         "The driver needs money but distrusts the phone."
     )
     assert projection.overview.hook == "The phone offers a hidden mission."
+    assert projection.overview.source_artifact is (
+        StoryWorkspaceEpisodeSourceArtifact.EPISODE_OUTLINE
+    )
+    assert projection.overview.source_revision == "sha256:" + "1" * 64
+    assert projection.overview.generated_from == "master-outline@v2"
     assert [beat.source_key for beat in projection.narrative_beats] == [
         "SC-01",
         "SC-02",
@@ -177,6 +201,11 @@ def test_projects_explicit_outline_beats_script_scenes_and_shot_links() -> None:
     assert projection.scenes[0].camera_cues == ["CU | PUSH_IN | phone | 3.0"]
     assert projection.scenes[0].dialogue[0].speaker == "Driver"
     assert projection.scenes[0].dialogue[0].text == "Is this real?"
+    assert projection.scenes[0].source_artifact is (
+        StoryWorkspaceEpisodeSourceArtifact.SCRIPT
+    )
+    assert projection.scenes[0].source_revision == "sha256:" + "2" * 64
+    assert projection.scenes[0].generated_from == "episode-outline@v2"
 
     regular, supplemental, explicit = projection.shots
     assert regular.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
@@ -189,6 +218,17 @@ def test_projects_explicit_outline_beats_script_scenes_and_shot_links() -> None:
     assert explicit.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
     assert explicit.script_scene_id == projection.scenes[1].id
     assert explicit.narrative_beat_id == projection.narrative_beats[1].id
+    assert explicit.source_artifact is StoryWorkspaceEpisodeSourceArtifact.STORYBOARD
+    assert explicit.source_revision == "sha256:" + "3" * 64
+    assert explicit.generated_from == "script@v1"
+    assert explicit.characters[0].ref == "passenger-01"
+    assert explicit.characters[0].display_name == "Passenger"
+    assert explicit.characters[0].depth_plane.value == "back"
+    assert explicit.characters[0].action == "Exits the car."
+    assert explicit.characters[0].emotion == "Guarded"
+    assert explicit.dialogue[0].speaker == "passenger-01"
+    assert explicit.dialogue[0].line == "Thank you."
+    assert explicit.dialogue[0].type is StoryWorkspaceEpisodeDialogueType.SPOKEN
 
     assert projection.associations.beat_scene_coverage.linked == 2
     assert projection.associations.beat_scene_coverage.total == 2
@@ -228,6 +268,58 @@ def test_real_vendor_episode_has_no_invented_narrative_beats() -> None:
     assert projection.associations.scene_shot_coverage.total == 45
     assert len(projection.associations.missing_links) == 16
     assert projection.associations.orphan_artifacts == []
+
+
+def test_storyboard_only_treats_regular_prefix_as_missing_not_orphan() -> None:
+    projection = _adapter().project(
+        outline=None,
+        script=None,
+        storyboard=(VENDOR_EPISODE / "storyboard.yaml").read_bytes(),
+    )
+
+    assert len(projection.shots) == 45
+    assert all(
+        shot.association_status is StoryWorkspaceEpisodeAssociationStatus.UNLINKED
+        for shot in projection.shots
+    )
+    assert len(projection.associations.missing_links) == 45
+    assert projection.associations.orphan_artifacts == []
+
+
+def test_real_ep21_preserves_canonical_dialogue_and_character_fields() -> None:
+    episode = VENDOR_STORIES / "didi-zhengzhou" / "episodes" / "EP21"
+    projection = _adapter().project(
+        outline=(episode / "episode-outline.md").read_bytes(),
+        script=(episode / "script.md").read_bytes(),
+        storyboard=(episode / "storyboard.yaml").read_bytes(),
+    )
+
+    assert len(projection.shots) == 52
+    assert sum(len(shot.dialogue) for shot in projection.shots) == 11
+    assert any(character.emotion for shot in projection.shots for character in shot.characters)
+    assert {
+        line.type
+        for shot in projection.shots
+        for line in shot.dialogue
+    } == {
+        StoryWorkspaceEpisodeDialogueType.SPOKEN,
+        StoryWorkspaceEpisodeDialogueType.INNER,
+    }
+
+
+def test_all_vendor_storyboards_match_the_bounded_canonical_dtos() -> None:
+    storyboards = sorted(VENDOR_STORIES.glob("*/episodes/*/storyboard.yaml"))
+    projected_shots = 0
+    for storyboard in storyboards:
+        projection = _adapter().project(
+            outline=None,
+            script=None,
+            storyboard=storyboard.read_bytes(),
+        )
+        projected_shots += len(projection.shots)
+
+    assert len(storyboards) == 85
+    assert projected_shots == 3832
 
 
 def test_stable_ids_survive_insertion_and_reordering() -> None:
@@ -282,6 +374,20 @@ def test_stable_ids_survive_insertion_and_reordering() -> None:
         shot.shot_id: shot.id for shot in reordered.shots
     }.items()
 
+    revised = adapter.project(
+        outline=OUTLINE_WITH_BEATS,
+        script=SCRIPT_WITH_SCENES,
+        storyboard=STORYBOARD_WITH_EXPLICIT_LINKS,
+        outline_revision="sha256:" + "a" * 64,
+        script_revision="sha256:" + "b" * 64,
+        storyboard_revision="sha256:" + "c" * 64,
+    )
+    assert [beat.id for beat in original.narrative_beats] == [
+        beat.id for beat in revised.narrative_beats
+    ]
+    assert [scene.id for scene in original.scenes] == [scene.id for scene in revised.scenes]
+    assert [shot.id for shot in original.shots] == [shot.id for shot in revised.shots]
+
 
 def test_missing_inputs_produce_empty_unavailable_projection() -> None:
     projection = _adapter().project(outline=None, script=None, storyboard=None)
@@ -313,6 +419,22 @@ def test_missing_inputs_produce_empty_unavailable_projection() -> None:
             b"shots:\n  - shot_id: S01-E01-001\n"
             b"  - shot_id: S01-E01-001\n",
             "duplicate_shot_id",
+        ),
+        (
+            "storyboard",
+            b"shots:\n  - shot_id: S01-E01-001\n"
+            b"    dialogue:\n"
+            b"      - speaker: mc-01\n"
+            b"        line: Unsafe enum expansion.\n"
+            b"        type: tool\n",
+            "invalid_dialogue_type",
+        ),
+        (
+            "storyboard",
+            b"shots:\n  - shot_id: S01-E01-001\n"
+            b"    dialogue:\n"
+            b"      - legacy scalar dialogue\n",
+            "invalid_shape",
         ),
     ],
 )
@@ -365,15 +487,21 @@ def test_rejects_markdown_size_section_and_yaml_depth_limits() -> None:
     assert depth_error.value.reason == "depth_limit"
 
 
-def test_explicit_missing_targets_are_orphans_and_scene_ref_is_not_a_script_link() -> None:
+def test_link_level_diagnostics_do_not_destroy_a_valid_scene_link() -> None:
     storyboard = b"""shots:
   - shot_id: CUSTOM-E01-001
     scene_ref: S01
     visual: Asset refs do not link script scenes.
   - shot_id: CUSTOM-E01-002
-    script_scene_ref: S99
+    script_scene_ref: S01
     narrative_beat_ref: SC-99
-    visual: Explicit targets are absent.
+    visual: Scene is valid while beat is absent.
+  - shot_id: CUSTOM-E01-003
+    script_scene_ref: S99
+    visual: Explicit scene target is absent.
+  - shot_id: SUP-E01-001
+    scene_ref: scene-station
+    visual: Supplemental shot has no hierarchy reference.
 """
     projection = _adapter().project(
         outline=OUTLINE_WITH_BEATS,
@@ -385,14 +513,23 @@ def test_explicit_missing_targets_are_orphans_and_scene_ref_is_not_a_script_link
         StoryWorkspaceEpisodeAssociationStatus.UNLINKED
     )
     assert projection.shots[1].association_status is (
+        StoryWorkspaceEpisodeAssociationStatus.LINKED
+    )
+    assert projection.shots[1].script_scene_id == projection.scenes[0].id
+    assert projection.shots[1].narrative_beat_id is None
+    assert projection.shots[2].association_status is (
         StoryWorkspaceEpisodeAssociationStatus.ORPHAN
     )
+    assert projection.shots[3].association_status is (
+        StoryWorkspaceEpisodeAssociationStatus.UNLINKED
+    )
     assert projection.associations.missing_links == [
-        "shot:CUSTOM-E01-001:script_scene"
+        "shot:CUSTOM-E01-001:script_scene",
+        "shot:SUP-E01-001:script_scene",
     ]
     assert projection.associations.orphan_artifacts == [
         "shot:CUSTOM-E01-002:narrative_beat:SC-99",
-        "shot:CUSTOM-E01-002:script_scene:S99",
+        "shot:CUSTOM-E01-003:script_scene:S99",
     ]
 
 

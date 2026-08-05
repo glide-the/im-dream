@@ -969,6 +969,31 @@ class StoryWorkspaceEpisodeAssociationStatus(str, Enum):
     ORPHAN = "orphan"
 
 
+class StoryWorkspaceEpisodeSourceArtifact(str, Enum):
+    """Allowlisted canonical artifact names used by Episode provenance."""
+
+    EPISODE_OUTLINE = "episode-outline.md"
+    SCRIPT = "script.md"
+    STORYBOARD = "storyboard.yaml"
+
+
+class StoryWorkspaceEpisodeDialogueType(str, Enum):
+    """Canonical DramaForge storyboard dialogue types."""
+
+    SPOKEN = "spoken"
+    VOICEOVER = "voiceover"
+    OS = "os"
+    INNER = "inner"
+
+
+class StoryWorkspaceEpisodeDepthPlane(str, Enum):
+    """Canonical compositional depth for multi-character shots."""
+
+    FRONT = "front"
+    MID = "mid"
+    BACK = "back"
+
+
 class StoryWorkspaceEpisodeMetricAvailability(str, Enum):
     """Whether a coverage denominator exists; not a workflow status."""
 
@@ -1030,6 +1055,17 @@ class StoryWorkspaceEpisodeOverview(_StoryWorkspaceDreamWireModel):
     story_goals: list[str] = Field(default_factory=list, max_length=32)
     core_conflict: Optional[str] = Field(default=None, max_length=4000)
     hook: Optional[str] = Field(default=None, max_length=4000)
+    source_artifact: Optional[
+        Literal[StoryWorkspaceEpisodeSourceArtifact.EPISODE_OUTLINE]
+    ] = None
+    source_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+    generated_from: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$",
+    )
     character_beats: list[StoryWorkspaceEpisodeCharacterBeat] = Field(
         default_factory=list,
         max_length=256,
@@ -1048,6 +1084,17 @@ class StoryWorkspaceEpisodeNarrativeBeat(_StoryWorkspaceDreamWireModel):
     summary: Optional[str] = Field(default=None, max_length=4000)
     scene_goals: list[str] = Field(default_factory=list, max_length=32)
     key_dialogue_beats: list[str] = Field(default_factory=list, max_length=32)
+    source_artifact: Literal[
+        StoryWorkspaceEpisodeSourceArtifact.EPISODE_OUTLINE
+    ] = StoryWorkspaceEpisodeSourceArtifact.EPISODE_OUTLINE
+    source_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+    generated_from: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$",
+    )
 
 
 class StoryWorkspaceEpisodeDialogueLine(_StoryWorkspaceDreamWireModel):
@@ -1081,6 +1128,17 @@ class StoryWorkspaceEpisodeScriptScene(_StoryWorkspaceDreamWireModel):
         max_length=256,
     )
     camera_cues: list[str] = Field(default_factory=list, max_length=256)
+    source_artifact: Literal[
+        StoryWorkspaceEpisodeSourceArtifact.SCRIPT
+    ] = StoryWorkspaceEpisodeSourceArtifact.SCRIPT
+    source_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+    generated_from: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$",
+    )
 
     @model_validator(mode="after")
     def linked_scene_has_a_beat(self) -> "StoryWorkspaceEpisodeScriptScene":
@@ -1095,7 +1153,18 @@ class StoryWorkspaceEpisodeShotCharacter(_StoryWorkspaceDreamWireModel):
     """Allowlisted storyboard character reference and visible action."""
 
     ref: str = Field(min_length=1, max_length=128)
+    display_name: Optional[str] = Field(default=None, max_length=255)
+    depth_plane: Optional[StoryWorkspaceEpisodeDepthPlane] = None
     action: Optional[str] = Field(default=None, max_length=2000)
+    emotion: Optional[str] = Field(default=None, max_length=1000)
+
+
+class StoryWorkspaceEpisodeStoryboardDialogue(_StoryWorkspaceDreamWireModel):
+    """Canonical structured storyboard dialogue; never stringified from mappings."""
+
+    speaker: str = Field(min_length=1, max_length=128)
+    line: str = Field(min_length=1, max_length=2000)
+    type: StoryWorkspaceEpisodeDialogueType
 
 
 class StoryWorkspaceEpisodeShotCamera(_StoryWorkspaceDreamWireModel):
@@ -1141,9 +1210,23 @@ class StoryWorkspaceEpisodeStoryboardShot(_StoryWorkspaceDreamWireModel):
         default_factory=StoryWorkspaceEpisodeShotCamera,
     )
     visual: Optional[str] = Field(default=None, max_length=4000)
-    dialogue: list[str] = Field(default_factory=list, max_length=128)
+    dialogue: list[StoryWorkspaceEpisodeStoryboardDialogue] = Field(
+        default_factory=list,
+        max_length=128,
+    )
     timing: StoryWorkspaceEpisodeShotTiming = Field(
         default_factory=StoryWorkspaceEpisodeShotTiming,
+    )
+    source_artifact: Literal[
+        StoryWorkspaceEpisodeSourceArtifact.STORYBOARD
+    ] = StoryWorkspaceEpisodeSourceArtifact.STORYBOARD
+    source_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+    generated_from: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$",
     )
 
     @model_validator(mode="after")
