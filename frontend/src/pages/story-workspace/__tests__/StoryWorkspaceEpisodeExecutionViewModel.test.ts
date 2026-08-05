@@ -47,6 +47,12 @@ const REVIEW_SHOT_ID = opaqueId(16);
 const REVIEW_UNKNOWN_ID = opaqueId(17);
 const REVIEW_SHOT_SECTION_ID = opaqueId(18);
 const REVIEW_UNKNOWN_SECTION_ID = opaqueId(19);
+const REVIEW_SCENE_ID = opaqueId(20);
+const REVIEW_BEAT_ID = opaqueId(21);
+const REVIEW_ORPHAN_ID = opaqueId(22);
+const REVIEW_SCENE_SECTION_ID = opaqueId(23);
+const REVIEW_BEAT_SECTION_ID = opaqueId(24);
+const REVIEW_ORPHAN_SECTION_ID = opaqueId(25);
 
 const ARTIFACT_SPECS = [
   ['episode-outline.md', 'plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
@@ -354,6 +360,30 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
           sourceArtifact: 'review-report.md',
           sourceRevision: revision('1'),
         },
+        {
+          id: REVIEW_SCENE_SECTION_ID,
+          level: 2,
+          title: '场景结论',
+          text: '场景关系明确。',
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
+        {
+          id: REVIEW_BEAT_SECTION_ID,
+          level: 2,
+          title: '叙事点结论',
+          text: '叙事点关系明确。',
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
+        {
+          id: REVIEW_ORPHAN_SECTION_ID,
+          level: 2,
+          title: '孤立结论',
+          text: '没有显式目标。',
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
       ],
       targets: [
         {
@@ -373,6 +403,36 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
           targetViewId: null,
           associationStatus: 'unlinked',
           sectionId: REVIEW_UNKNOWN_SECTION_ID,
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
+        {
+          id: REVIEW_SCENE_ID,
+          kind: 'script-scene',
+          sourceKey: 'S01',
+          targetViewId: SCENE_ID,
+          associationStatus: 'linked',
+          sectionId: REVIEW_SCENE_SECTION_ID,
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
+        {
+          id: REVIEW_BEAT_ID,
+          kind: 'narrative-beat',
+          sourceKey: 'SC-01',
+          targetViewId: BEAT_ID,
+          associationStatus: 'linked',
+          sectionId: REVIEW_BEAT_SECTION_ID,
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
+        {
+          id: REVIEW_ORPHAN_ID,
+          kind: 'shot',
+          sourceKey: 'S01-E01-SH01',
+          targetViewId: null,
+          associationStatus: 'orphan',
+          sectionId: REVIEW_ORPHAN_SECTION_ID,
           sourceArtifact: 'review-report.md',
           sourceRevision: revision('1'),
         },
@@ -571,6 +631,15 @@ test('locates review targets only by explicit targetViewId', () => {
   expect(viewModel.unlinked.reviewTargets.map((item) => item.id)).toEqual([
     REVIEW_UNKNOWN_ID,
   ]);
+  expect(viewModel.reviewTargetsByTargetViewId[SCENE_ID].map((item) => item.id)).toEqual([
+    REVIEW_SCENE_ID,
+  ]);
+  expect(viewModel.reviewTargetsByTargetViewId[BEAT_ID].map((item) => item.id)).toEqual([
+    REVIEW_BEAT_ID,
+  ]);
+  expect(viewModel.orphans.reviewTargets.map((item) => item.id)).toEqual([
+    REVIEW_ORPHAN_ID,
+  ]);
   expect(viewModel.reviewTargetsByTargetViewId['S01-E01-SH01']).toBeUndefined();
 });
 
@@ -710,6 +779,7 @@ test('makes auxiliary groups and detached nodes keyboard reachable without canon
     'scene',
     'shot',
     'prompt',
+    'review-target',
   ]);
   expect(unlinkedScene).toMatchObject({
     canonicalParent: null,
@@ -828,6 +898,117 @@ test('reconciles {kind,id} selection across reorder and deterministic ancestor d
     { kind: 'narrative-beat', id: BEAT_ID },
     previous,
     withoutBeat,
+  )).toEqual({ kind: 'episode', id: EPISODE_ID });
+});
+
+test('falls back auxiliary selections through only explicit previous relation ancestors', () => {
+  const previousNarrative = narrative();
+  const previous = storyWorkspaceBuildEpisodeExecutionViewModel(surface(
+    previousNarrative,
+    auxiliary(),
+  ));
+  const intactCore = storyWorkspaceBuildEpisodeExecutionViewModel(surface(
+    previousNarrative,
+    null,
+  ));
+  const withoutShot = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    shots: previousNarrative.shots.filter((shot) => shot.id !== SHOT_ID),
+  }, null));
+  const withoutScene = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    scenes: previousNarrative.scenes.filter((scene) => scene.id !== SCENE_ID),
+    shots: previousNarrative.shots.filter((shot) => shot.scriptSceneId !== SCENE_ID),
+  }, null));
+  const withoutBeat = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    narrativeBeats: previousNarrative.narrativeBeats.filter(
+      (beat) => beat.id !== BEAT_ID,
+    ),
+    scenes: previousNarrative.scenes.filter(
+      (scene) => scene.narrativeBeatId !== BEAT_ID,
+    ),
+    shots: previousNarrative.shots.filter(
+      (shot) => shot.narrativeBeatId !== BEAT_ID,
+    ),
+  }, null));
+  const shotScopedSelections = [
+    { label: 'prompt', selection: { kind: 'prompt' as const, id: PROMPT_ID } },
+    { label: 'render', selection: { kind: 'render-queue' as const, id: QUEUE_ID } },
+    {
+      label: 'shot review',
+      selection: { kind: 'review-target' as const, id: REVIEW_SHOT_ID },
+    },
+  ];
+  const shotAncestorStages = [
+    { label: 'shot exists', next: intactCore, expected: { kind: 'shot' as const, id: SHOT_ID } },
+    { label: 'shot deleted', next: withoutShot, expected: { kind: 'scene' as const, id: SCENE_ID } },
+    { label: 'scene deleted', next: withoutScene, expected: { kind: 'narrative-beat' as const, id: BEAT_ID } },
+    { label: 'beat deleted', next: withoutBeat, expected: { kind: 'episode' as const, id: EPISODE_ID } },
+  ];
+
+  for (const source of shotScopedSelections) {
+    for (const stage of shotAncestorStages) {
+      expect(
+        storyWorkspaceReconcileEpisodeSelection(
+          source.selection,
+          previous,
+          stage.next,
+        ),
+        `${source.label}: ${stage.label}`,
+      ).toEqual(stage.expected);
+    }
+  }
+
+  const sceneReviewSelection = {
+    kind: 'review-target' as const,
+    id: REVIEW_SCENE_ID,
+  };
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    sceneReviewSelection,
+    previous,
+    intactCore,
+  )).toEqual({ kind: 'scene', id: SCENE_ID });
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    sceneReviewSelection,
+    previous,
+    withoutScene,
+  )).toEqual({ kind: 'narrative-beat', id: BEAT_ID });
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    sceneReviewSelection,
+    previous,
+    withoutBeat,
+  )).toEqual({ kind: 'episode', id: EPISODE_ID });
+
+  const beatReviewSelection = {
+    kind: 'review-target' as const,
+    id: REVIEW_BEAT_ID,
+  };
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    beatReviewSelection,
+    previous,
+    intactCore,
+  )).toEqual({ kind: 'narrative-beat', id: BEAT_ID });
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    beatReviewSelection,
+    previous,
+    withoutBeat,
+  )).toEqual({ kind: 'episode', id: EPISODE_ID });
+
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    { kind: 'review-target', id: REVIEW_ORPHAN_ID },
+    previous,
+    intactCore,
+  )).toEqual({ kind: 'episode', id: EPISODE_ID });
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    { kind: 'prompt', id: UNLINKED_PROMPT_ID },
+    previous,
+    intactCore,
+  )).toEqual({ kind: 'episode', id: EPISODE_ID });
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    { kind: 'render-queue', id: UNLINKED_QUEUE_ID },
+    previous,
+    intactCore,
   )).toEqual({ kind: 'episode', id: EPISODE_ID });
 });
 

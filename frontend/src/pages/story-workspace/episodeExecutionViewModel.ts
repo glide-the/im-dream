@@ -831,6 +831,63 @@ function findReviewTarget(
   ].find((item) => item.id === id);
 }
 
+function sceneAncestorSelections(
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+  sceneId: string | null,
+): StoryWorkspaceEpisodeSelection[] {
+  if (sceneId === null) return [];
+  const scene = viewModel.scenesById[sceneId];
+  if (scene === undefined) return [];
+  const selections: StoryWorkspaceEpisodeSelection[] = [
+    { kind: 'scene', id: scene.id },
+  ];
+  if (scene.narrativeBeatId !== null) {
+    selections.push({ kind: 'narrative-beat', id: scene.narrativeBeatId });
+  }
+  return selections;
+}
+
+function shotAncestorSelections(
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+  shotId: string | null,
+): StoryWorkspaceEpisodeSelection[] {
+  if (shotId === null) return [];
+  const shot = viewModel.shotsById[shotId];
+  if (shot === undefined) return [];
+  const selections: StoryWorkspaceEpisodeSelection[] = [
+    { kind: 'shot', id: shot.id },
+  ];
+  const sceneSelections = sceneAncestorSelections(
+    viewModel,
+    shot.scriptSceneId,
+  );
+  selections.push(...sceneSelections);
+  if (
+    shot.narrativeBeatId !== null
+    && !selections.some(
+      (selection) => selection.kind === 'narrative-beat'
+        && selection.id === shot.narrativeBeatId,
+    )
+  ) {
+    selections.push({ kind: 'narrative-beat', id: shot.narrativeBeatId });
+  }
+  return selections;
+}
+
+function reviewTargetAncestorSelections(
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+  target: StoryWorkspaceEpisodeReviewTarget | undefined,
+): StoryWorkspaceEpisodeSelection[] {
+  if (target?.targetViewId === null || target?.targetViewId === undefined) return [];
+  if (target.kind === 'shot') {
+    return shotAncestorSelections(viewModel, target.targetViewId);
+  }
+  if (target.kind === 'script-scene') {
+    return sceneAncestorSelections(viewModel, target.targetViewId);
+  }
+  return [{ kind: 'narrative-beat', id: target.targetViewId }];
+}
+
 export function storyWorkspaceReconcileEpisodeSelection(
   previousSelection: StoryWorkspaceEpisodeSelection | null,
   previousViewModel: StoryWorkspaceEpisodeExecutionViewModel,
@@ -842,52 +899,37 @@ export function storyWorkspaceReconcileEpisodeSelection(
   if (selectionExists(previousSelection, nextViewModel)) return previousSelection;
 
   if (previousSelection.kind === 'shot') {
-    const shot = previousViewModel.shotsById[previousSelection.id];
-    return firstExistingSelection([
-      shot?.scriptSceneId === null || shot?.scriptSceneId === undefined
-        ? null
-        : { kind: 'scene', id: shot.scriptSceneId },
-      shot?.narrativeBeatId === null || shot?.narrativeBeatId === undefined
-        ? null
-        : { kind: 'narrative-beat', id: shot.narrativeBeatId },
-    ], nextViewModel);
+    return firstExistingSelection(
+      shotAncestorSelections(previousViewModel, previousSelection.id),
+      nextViewModel,
+    );
   }
   if (previousSelection.kind === 'scene') {
-    const scene = previousViewModel.scenesById[previousSelection.id];
-    return firstExistingSelection([
-      scene?.narrativeBeatId === null || scene?.narrativeBeatId === undefined
-        ? null
-        : { kind: 'narrative-beat', id: scene.narrativeBeatId },
-    ], nextViewModel);
+    return firstExistingSelection(
+      sceneAncestorSelections(previousViewModel, previousSelection.id),
+      nextViewModel,
+    );
   }
   if (previousSelection.kind === 'prompt') {
     const prompt = findPrompt(previousViewModel, previousSelection.id);
-    return firstExistingSelection([
-      prompt?.shotViewId === null || prompt?.shotViewId === undefined
-        ? null
-        : { kind: 'shot', id: prompt.shotViewId },
-    ], nextViewModel);
+    return firstExistingSelection(
+      shotAncestorSelections(previousViewModel, prompt?.shotViewId ?? null),
+      nextViewModel,
+    );
   }
   if (previousSelection.kind === 'render-queue') {
     const queueEntry = findQueueEntry(previousViewModel, previousSelection.id);
-    return firstExistingSelection([
-      queueEntry?.shotViewId === null || queueEntry?.shotViewId === undefined
-        ? null
-        : { kind: 'shot', id: queueEntry.shotViewId },
-    ], nextViewModel);
+    return firstExistingSelection(
+      shotAncestorSelections(previousViewModel, queueEntry?.shotViewId ?? null),
+      nextViewModel,
+    );
   }
   if (previousSelection.kind === 'review-target') {
     const target = findReviewTarget(previousViewModel, previousSelection.id);
-    const targetKind = target?.kind === 'script-scene'
-      ? 'scene'
-      : target?.kind;
-    return firstExistingSelection([
-      target?.targetViewId === null
-      || target?.targetViewId === undefined
-      || targetKind === undefined
-        ? null
-        : { kind: targetKind, id: target.targetViewId },
-    ], nextViewModel);
+    return firstExistingSelection(
+      reviewTargetAncestorSelections(previousViewModel, target),
+      nextViewModel,
+    );
   }
   return storyWorkspaceEpisodeDefaultSelection(nextViewModel);
 }
