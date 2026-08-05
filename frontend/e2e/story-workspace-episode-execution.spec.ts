@@ -22,6 +22,7 @@ const QUEUE_ID = '2'.repeat(32);
 const RENDER_SECTION_ID = '3'.repeat(32);
 const REVIEW_SECTION_ID = '4'.repeat(32);
 const REVIEW_TARGET_ID = '5'.repeat(32);
+const FROZEN_NOW = '2026-08-06T04:00:00.000Z';
 const CONTENT_REVISION = `sha256:${'a'.repeat(64)}`;
 const MANIFEST_REVISIONS = [
   `sha256:${'1'.repeat(64)}`,
@@ -44,7 +45,7 @@ const EVIDENCE_DIR = resolve(
   '../output/playwright/story-workspace-episode-execution-u12',
 );
 
-test.use({ channel: 'chromium' });
+test.use({ channel: 'chromium', timezoneId: 'Asia/Shanghai' });
 
 function coverage(linked = 1, total = 1) {
   return { availability: 'available', linked, total, ratio: linked / total };
@@ -527,6 +528,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
 
   try {
     expect(() => storyWorkspaceParseEpisodeArtifactSurface(episodeSurface(0))).not.toThrow();
+    await page.clock.setFixedTime(FROZEN_NOW);
     await installApiFixture(page, state);
     await page.addInitScript(() => {
       localStorage.setItem('auth_token', 'u12-browser-token');
@@ -536,6 +538,10 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
     await expect(page).toHaveURL(new RegExp(`/story-workspace/runs/${RUN_ID}/execution$`));
+    expect(await page.evaluate(() => ({
+      now: new Date().toISOString(),
+      timezoneId: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }))).toEqual({ now: FROZEN_NOW, timezoneId: 'Asia/Shanghai' });
     await expect(page.getByRole('heading', { name: '雨夜重逢' }).first()).toBeVisible();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
     const artifactProgress = page.getByRole('list', { name: '第一集产物进度' });

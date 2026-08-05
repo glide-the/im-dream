@@ -1023,6 +1023,7 @@ test('keeps real DOM focus stable across navigation, controlled transitions and 
     await page.setViewportSize({ width: 390, height: 844 });
     const storylineToggle = page.getByRole('button', { name: '打开故事线' });
     await expect(storylineToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(storylineToggle).toBeFocused();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeHidden();
     await storylineToggle.click();
     await expect(storylineToggle).toHaveAttribute('aria-expanded', 'true');
@@ -1040,6 +1041,14 @@ test('keeps real DOM focus stable across navigation, controlled transitions and 
     await page.keyboard.press('Tab');
     await expect.poll(() => page.evaluate(() => document.activeElement?.getAttribute('role')))
       .not.toBe('treeitem');
+
+    await page.setViewportSize({ width: 1024, height: 844 });
+    await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
+    await outsideFocus.focus();
+    await page.setViewportSize({ width: 390, height: 844 });
+    await expect(storylineToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(storylineToggle).not.toBeFocused();
+    await expect(outsideFocus).toBeFocused();
 
     expect(diagnostics).toEqual([]);
   } finally {

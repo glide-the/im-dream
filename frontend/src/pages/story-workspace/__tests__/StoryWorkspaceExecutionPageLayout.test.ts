@@ -22,6 +22,10 @@ const EPISODE_WORKBENCH_SOURCE = readFileSync(new URL(
   '../../../components/story-workspace/episode/StoryWorkspaceEpisodeNarrativeWorkbench.tsx',
   import.meta.url,
 ), 'utf8');
+const EPISODE_E2E_SOURCE = readFileSync(new URL(
+  '../../../../e2e/story-workspace-episode-execution.spec.ts',
+  import.meta.url,
+), 'utf8');
 
 test('overview is one workplane with tabs and index content, never a fixed rail grid', () => {
   expect(PAGE_SOURCE).toContain('data-execution-depth="overview"');
@@ -113,4 +117,14 @@ test('Episode continuation dialog owns a viewport-safe confirmation workplane', 
   expect(CSS_SOURCE.slice(narrowStart)).toMatch(
     /\.story-workspace-collaboration \.story-workspace-episode-action-dialog\s*\{[^}]*inset:\s*10px;[^}]*max-height:\s*calc\(100dvh - 20px\)/s,
   );
+});
+
+test('Episode browser QA freezes the date and timezone before navigation', () => {
+  const clockFreeze = EPISODE_E2E_SOURCE.indexOf('await page.clock.setFixedTime');
+  const navigation = EPISODE_E2E_SOURCE.indexOf('await page.goto');
+
+  expect(EPISODE_E2E_SOURCE).toContain("timezoneId: 'Asia/Shanghai'");
+  expect(clockFreeze).toBeGreaterThan(-1);
+  expect(navigation).toBeGreaterThan(clockFreeze);
+  expect(EPISODE_E2E_SOURCE).toContain('Unallowlisted API request');
 });

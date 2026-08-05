@@ -589,9 +589,10 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
   useEffect(() => {
     const media = window.matchMedia(STORYLINE_NARROW_QUERY);
     const synchronize = (matches: boolean) => {
+      const storylineOwnsFocus = storylineSheetRef.current?.contains(document.activeElement) === true;
+      storylineFocusIntent.current = matches && storylineOwnsFocus ? 'close' : null;
       setIsNarrowLayout(matches);
       setStorylineOpen(!matches);
-      storylineFocusIntent.current = null;
     };
     const onChange = (event: MediaQueryListEvent) => synchronize(event.matches);
     synchronize(media.matches);
