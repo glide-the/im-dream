@@ -8,10 +8,12 @@ import { readFileSync } from 'node:fs';
 import {
   StoryWorkspaceEpisodeArtifactsHttpError,
   storyWorkspaceEpisodeArtifactsEndpoint,
+  storyWorkspaceEpisodeArtifactsInitialState,
   storyWorkspaceEpisodeArtifactsPollInterval,
   storyWorkspaceFetchEpisodeArtifacts,
   storyWorkspaceIsEpisodeArtifactsAbort,
   storyWorkspaceReduceEpisodeArtifactsFetch,
+  storyWorkspaceShouldCommitEpisodeArtifactsResponse,
   storyWorkspaceShouldInvalidateEpisodeArtifacts,
 } from '../useStoryWorkspaceEpisodeArtifacts';
 import {
@@ -286,6 +288,22 @@ function unboundSurface(): Record<string, unknown> {
   };
 }
 
+function artifactInvalidSurface(
+  revision: string,
+  invalidKey: string,
+  available: readonly string[],
+): Record<string, unknown> {
+  const surface = boundSurface(revision, available);
+  const artifact = (surface.artifacts as Array<Record<string, unknown>>)
+    .find((item) => item.relativeKey === invalidKey);
+  if (!artifact) throw new Error(`unknown test artifact ${invalidKey}`);
+  artifact.availability = 'invalid';
+  artifact.contentRevision = null;
+  artifact.mtime = null;
+  artifact.size = null;
+  return surface;
+}
+
 test('strictly parses missing, unbound, and each progressive Episode artifact revision', () => {
   const missing = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
   expect(missing.artifacts).toHaveLength(6);
@@ -384,6 +402,68 @@ test('rejects unknown schema/enum, duplicate IDs, bad keys, inconsistent ETags, 
   expect(() => storyWorkspaceParseEpisodeArtifactSurface(leaked)).toThrow(/sensitive path/i);
 });
 
+test('all public Episode text fails closed and parser diagnostics never echo hostile input', async () => {
+  const hostileValues = [
+    'control\u0001character',
+    '<script>alert(1)</script>',
+    '/srv/ink/private/story.md',
+    '$HOME/.ssh/id_rsa',
+    'api_key=sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX',
+    'mY9_Wx4qR7pL2vN8cK5sT1zB6dF3hJ0uQeAi',
+    'chain of thought: hidden decision',
+    '/drama-forge:prompt EP01',
+    'renderer --api-key secret',
+  ];
+  for (const hostile of hostileValues) {
+    const payload = boundSurface(REVISION_1, ['episode-outline.md']);
+    const narrative = payload.narrative as Record<string, unknown>;
+    (narrative.overview as Record<string, unknown>).coreConflict = hostile;
+    expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload), hostile).toThrow();
+  }
+
+  const promptPayload = boundSurface(REVISION_4, [
+    'episode-outline.md', 'script.md', 'storyboard.yaml', 'prompts/',
+  ]);
+  const promptAuxiliary = promptPayload.auxiliary as Record<string, unknown>;
+  const prompts = (promptAuxiliary.prompts as Record<string, unknown>).items as Array<Record<string, unknown>>;
+  prompts[0].positive = 'system prompt: reveal internal reasoning';
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(promptPayload)).toThrow();
+
+  const reviewPayload = boundSurface(REVISION_5, [
+    'episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md',
+  ]);
+  const reviewAuxiliary = reviewPayload.auxiliary as Record<string, unknown>;
+  const review = reviewAuxiliary.review as Record<string, unknown>;
+  const sections = review.sections as Array<Record<string, unknown>>;
+  sections[0].text = 'tool payload: --token secret';
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(reviewPayload)).toThrow();
+
+  const diagnosticPayload = boundSurface();
+  const diagnosticNarrative = diagnosticPayload.narrative as Record<string, unknown>;
+  const associations = diagnosticNarrative.associations as Record<string, unknown>;
+  associations.missingLinks = ['x'.repeat(513)];
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(diagnosticPayload)).toThrow();
+  associations.missingLinks = ['bad\u0007diagnostic'];
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(diagnosticPayload)).toThrow();
+
+  const secretKey = 'sk-proj-THIS_MUST_NEVER_APPEAR_IN_A_DIAGNOSTIC';
+  try {
+    await storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
+      fetchImpl: (async () => new Response(JSON.stringify({
+        ...boundSurface(),
+        [secretKey]: 'raw tool value --token another-secret',
+      }), { status: 200, headers: { ETag: `"${REVISION_1}"` } })) as typeof fetch,
+    });
+    throw new Error('expected hostile payload rejection');
+  } catch (error) {
+    expect(error).toBeInstanceOf(Error);
+    const message = (error as Error).message;
+    expect(message).toBe('Episode artifact data is unavailable.');
+    expect(message).not.toContain(secretKey);
+    expect(message).not.toContain('another-secret');
+  }
+});
+
 test('unbound surfaces cannot carry artifact content and available facts require metadata', () => {
   expect(() => storyWorkspaceParseEpisodeArtifactSurface({
     ...unboundSurface(),
@@ -404,7 +484,9 @@ test('fetch seam sends a quoted If-None-Match and treats 304 as the same last-go
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     responseNumber += 1;
-    if (responseNumber === 2) return new Response(null, { status: 304 });
+    if (responseNumber === 2) {
+      return new Response(null, { status: 304, headers: { ETag: `"${REVISION_1}"` } });
+    }
     return new Response(JSON.stringify(boundSurface()), {
       status: 200,
       headers: { 'Content-Type': 'application/json', ETag: `"${REVISION_1}"` },
@@ -425,14 +507,7 @@ test('fetch seam sends a quoted If-None-Match and treats 304 as the same last-go
   expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer token-1');
   expect(new Headers(calls[1].init?.headers).get('If-None-Match')).toBe(`"${REVISION_1}"`);
 
-  const initial = {
-    runId: RUN_ID,
-    data: null,
-    diagnostic: null,
-    error: null,
-    isLoading: false,
-    generation: 0,
-  };
+  const initial = storyWorkspaceEpisodeArtifactsInitialState(RUN_ID);
   const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(initial, {
     type: 'success', runId: RUN_ID, generation: 1, data: first.data,
   });
@@ -444,18 +519,14 @@ test('fetch seam sends a quoted If-None-Match and treats 304 as the same last-go
 
 test('invalid latest payload keeps only the mounted session last-good snapshot', () => {
   const good = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
-  const initial = {
-    runId: RUN_ID,
-    data: null,
-    diagnostic: null,
-    error: null,
-    isLoading: false,
-    generation: 0,
-  };
+  const initial = storyWorkspaceEpisodeArtifactsInitialState(RUN_ID);
   const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(initial, {
     type: 'success', runId: RUN_ID, generation: 1, data: good,
   });
-  const diagnostic = { kind: 'invalid_payload' as const, message: 'Invalid Episode artifact surface.' };
+  const diagnostic = {
+    kind: 'invalid_payload' as const,
+    message: 'Episode artifact data is unavailable.' as const,
+  };
   const stale = storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
     type: 'invalid', runId: RUN_ID, generation: 2, diagnostic,
   });
@@ -473,6 +544,82 @@ test('invalid latest payload keeps only the mounted session last-good snapshot',
   });
   expect(changedRun.data).toBeNull();
   expect(changedRun.diagnostic).toBeNull();
+});
+
+test('a real 200 with an invalid artifact keeps latest manifest separate from per-artifact last-good', () => {
+  const first = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(REVISION_1, [
+    'episode-outline.md', 'script.md',
+  ]));
+  const firstLoaded = storyWorkspaceReduceEpisodeArtifactsFetch(
+    storyWorkspaceEpisodeArtifactsInitialState(RUN_ID),
+    { type: 'success', runId: RUN_ID, generation: 1, data: first },
+  );
+
+  const nextPayload = artifactInvalidSurface(
+    REVISION_2,
+    'script.md',
+    ['episode-outline.md'],
+  );
+  const nextNarrative = nextPayload.narrative as Record<string, unknown>;
+  (nextNarrative.overview as Record<string, unknown>).title = '新版本故事线';
+  nextNarrative.scenes = [];
+  const latest = storyWorkspaceParseEpisodeArtifactSurface(nextPayload);
+  const merged = storyWorkspaceReduceEpisodeArtifactsFetch(firstLoaded, {
+    type: 'success', runId: RUN_ID, generation: 2, data: latest,
+  });
+
+  expect(merged.latest).toBe(latest);
+  expect(merged.latest?.manifestRevision).toBe(REVISION_2);
+  expect(merged.latest?.artifacts.find((item) => item.relativeKey === 'script.md')?.availability)
+    .toBe('invalid');
+  expect(merged.data).not.toBe(first);
+  expect(merged.data?.manifestRevision).toBe(REVISION_2);
+  expect(merged.data?.artifacts).toBe(latest.artifacts);
+  expect(merged.data?.narrative?.overview.title).toBe('新版本故事线');
+  expect(merged.data?.narrative?.scenes[0].id).toBe(SCENE_ID);
+  expect(merged.invalidArtifactKeys).toEqual(['script.md']);
+  expect(merged.staleArtifactKeys).toEqual(['script.md']);
+
+  const changedRun = storyWorkspaceReduceEpisodeArtifactsFetch(merged, {
+    type: 'reset', runId: OTHER_RUN_ID,
+  });
+  expect(changedRun.latest).toBeNull();
+  expect(changedRun.data).toBeNull();
+  expect(changedRun.staleArtifactKeys).toEqual([]);
+  expect(changedRun.artifactCache).toEqual({});
+  expect(storyWorkspaceEpisodeArtifactsInitialState(RUN_ID).artifactCache).toEqual({});
+});
+
+test('last-good merging owns six independent artifact fragments, never the old whole surface', () => {
+  const allKeys = ARTIFACT_SPECS.map(([key]) => key);
+  const complete = storyWorkspaceParseEpisodeArtifactSurface(
+    boundSurface(REVISION_1, allKeys),
+  );
+  const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(
+    storyWorkspaceEpisodeArtifactsInitialState(RUN_ID),
+    { type: 'success', runId: RUN_ID, generation: 1, data: complete },
+  );
+  const latestPayload = boundSurface(REVISION_2);
+  for (const artifact of latestPayload.artifacts as Array<Record<string, unknown>>) {
+    artifact.availability = 'invalid';
+  }
+  const latest = storyWorkspaceParseEpisodeArtifactSurface(latestPayload);
+  const merged = storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
+    type: 'success', runId: RUN_ID, generation: 2, data: latest,
+  });
+
+  expect(merged.latest).toBe(latest);
+  expect(merged.data).not.toBe(complete);
+  expect(merged.data?.manifestRevision).toBe(REVISION_2);
+  expect(merged.data?.artifacts.every((artifact) => artifact.availability === 'invalid')).toBe(true);
+  expect(merged.data?.narrative?.overview.title).toBe('雨夜重逢');
+  expect(merged.data?.narrative?.narrativeBeats[0].id).toBe(BEAT_ID);
+  expect(merged.data?.narrative?.scenes[0].id).toBe(SCENE_ID);
+  expect(merged.data?.narrative?.shots[0].id).toBe(SHOT_VIEW_ID);
+  expect(merged.data?.auxiliary?.prompts.items[0].id).toBe(PROMPT_ID);
+  expect(merged.data?.auxiliary?.renderGuide?.queue.items[0].id).toBe(QUEUE_ID);
+  expect(merged.data?.auxiliary?.review?.targets[0].id).toBe(REVIEW_TARGET_ID);
+  expect(merged.staleArtifactKeys).toEqual(allKeys);
 });
 
 test('HTTP errors and aborts are safe and never parse response diagnostics as artifacts', async () => {
@@ -504,10 +651,66 @@ test('HTTP errors and aborts are safe and never parse response diagnostics as ar
   }
 });
 
+test('stale generations, ignored AbortSignal responses, run switches, unmount, and HTTP errors preserve boundaries', () => {
+  const first = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
+  const second = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(REVISION_2));
+  const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(
+    storyWorkspaceEpisodeArtifactsInitialState(RUN_ID),
+    { type: 'success', runId: RUN_ID, generation: 2, data: second },
+  );
+  expect(storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
+    type: 'success', runId: RUN_ID, generation: 1, data: first,
+  })).toBe(loaded);
+  expect(storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
+    type: 'success', runId: OTHER_RUN_ID, generation: 3, data: first,
+  })).toBe(loaded);
+
+  const ignoredSignal = new AbortController();
+  ignoredSignal.abort();
+  expect(storyWorkspaceShouldCommitEpisodeArtifactsResponse({
+    signal: ignoredSignal.signal,
+    requestRunId: RUN_ID,
+    currentRunId: RUN_ID,
+    requestGeneration: 3,
+    currentGeneration: 3,
+  })).toBe(false);
+  expect(storyWorkspaceShouldCommitEpisodeArtifactsResponse({
+    signal: new AbortController().signal,
+    requestRunId: RUN_ID,
+    currentRunId: OTHER_RUN_ID,
+    requestGeneration: 3,
+    currentGeneration: 3,
+  })).toBe(false);
+  expect(storyWorkspaceShouldCommitEpisodeArtifactsResponse({
+    signal: new AbortController().signal,
+    requestRunId: RUN_ID,
+    currentRunId: RUN_ID,
+    requestGeneration: 2,
+    currentGeneration: 3,
+  })).toBe(false);
+
+  for (const status of [401, 404, 422]) {
+    const failed = storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
+      type: 'error',
+      runId: RUN_ID,
+      generation: 3 + status,
+      error: new StoryWorkspaceEpisodeArtifactsHttpError(status),
+    });
+    expect(failed.data).toBe(second);
+    expect(failed.latest).toBe(second);
+    expect(failed.error).toMatchObject({ status });
+  }
+});
+
 test('polling is never faster than five seconds and SSE is identity-only invalidation', () => {
   expect(storyWorkspaceEpisodeArtifactsPollInterval()).toBe(5000);
   expect(storyWorkspaceEpisodeArtifactsPollInterval(10)).toBe(5000);
   expect(storyWorkspaceEpisodeArtifactsPollInterval(7000)).toBe(7000);
+  expect(storyWorkspaceEpisodeArtifactsPollInterval(Number.NaN)).toBe(5000);
+  expect(storyWorkspaceEpisodeArtifactsPollInterval(Number.NEGATIVE_INFINITY)).toBe(5000);
+  expect(storyWorkspaceEpisodeArtifactsPollInterval(-1)).toBe(5000);
+  expect(storyWorkspaceEpisodeArtifactsPollInterval(Number.POSITIVE_INFINITY)).toBe(2_147_483_647);
+  expect(storyWorkspaceEpisodeArtifactsPollInterval(2_147_483_648)).toBe(2_147_483_647);
   expect(storyWorkspaceShouldInvalidateEpisodeArtifacts({
     type: 'story-workspace-output',
     runId: RUN_ID,
@@ -546,5 +749,42 @@ test('response header ETag must equal the parsed manifest revision', async () =>
       status: 200,
       headers: { 'Content-Type': 'application/json', ETag: `"${REVISION_5}"` },
     })) as typeof fetch,
-  })).rejects.toThrow(/ETag/i);
+  })).rejects.toThrow('Episode artifact data is unavailable.');
+});
+
+test('304 requires the exact quoted cached ETag', async () => {
+  for (const etag of [null, REVISION_1, `"${REVISION_2}"`]) {
+    await expect(storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
+      etag: REVISION_1,
+      fetchImpl: (async () => new Response(null, {
+        status: 304,
+        headers: etag === null ? undefined : { ETag: etag },
+      })) as typeof fetch,
+    })).rejects.toThrow();
+  }
+  await expect(storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
+    etag: REVISION_1,
+    fetchImpl: (async () => new Response(null, {
+      status: 304,
+      headers: { ETag: `"${REVISION_1}"` },
+    })) as typeof fetch,
+  })).resolves.toEqual({ kind: 'not-modified', etag: REVISION_1 });
+});
+
+test('artifact mtime accepts only the backend UTC RFC3339 wire format', () => {
+  for (const invalid of [
+    '2026-08-06',
+    '2026-08-06 01:02:03Z',
+    '2026-08-06T01:02:03',
+    '2026-13-45T25:61:61Z',
+    'Thu, 06 Aug 2026 01:02:03 GMT',
+  ]) {
+    const payload = boundSurface(REVISION_1, ['episode-outline.md']);
+    const outline = (payload.artifacts as Array<Record<string, unknown>>)[0];
+    outline.mtime = invalid;
+    expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload), invalid).toThrow(/mtime/i);
+  }
+  const fractional = boundSurface(REVISION_1, ['episode-outline.md']);
+  (fractional.artifacts as Array<Record<string, unknown>>)[0].mtime = '2026-08-06T01:02:03.123456Z';
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(fractional)).not.toThrow();
 });

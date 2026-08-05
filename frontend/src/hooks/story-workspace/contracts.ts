@@ -764,7 +764,13 @@ const STORY_WORKSPACE_EPISODE_SHOT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const STORY_WORKSPACE_EPISODE_SCENE_KEY = /^S[0-9]{2,}$/;
 const STORY_WORKSPACE_EPISODE_BEAT_KEY = /^SC-[0-9]{2,}$/;
 const STORY_WORKSPACE_EPISODE_SENSITIVE_PATH =
-  /(?:^|[\s('"`=])(?:\/(?!\/)[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+|[A-Za-z]:[\\/]|file:\/\/|\.\.[\\/])/i;
+  /(?:^|[\s('"`=])(?:\/(?!\/)[A-Za-z0-9._~-]+(?:\/[^\s`]+)*|[A-Za-z]:[\\/][^\s`]+|\\\\[^\\\s]+\\[^\s`]+|file:\/\/(?:localhost)?\/[^\s`]+|(?:~|\$HOME|\$\{HOME\}|%(?:USERPROFILE|HOMEPATH)%|\$env:(?:USERPROFILE|HOME))(?=$|[\\/\s`])(?:[\\/][^\s`]*)?|\.\.[\\/])/i;
+const STORY_WORKSPACE_EPISODE_HTML = /<!--|<\/?[A-Za-z][^>]*>/;
+const STORY_WORKSPACE_EPISODE_CREDENTIAL = /(?:\bbearer\s+[A-Za-z0-9._-]{8,}|(?<![A-Za-z0-9_-])(?:sk-(?:(?:ant|proj)-)?|gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])|(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])|(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])|(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\b(?:api[\s_-]*keys?|access[\s_-]*tokens?|refresh[\s_-]*tokens?|tokens?|secrets?|auth(?:orization)?|credentials?|passwords?|private[\s_-]*keys?)\b\s*[:=]\s*[^\s`]+)/i;
+const STORY_WORKSPACE_EPISODE_PRIVATE_MODEL_TEXT = /(?:\bchain[\s_-]*(?:of[\s_-]*)?thought\b|\b(?:hidden|internal|private|model)[\s_-]*reasoning\b|\bsystem[\s_-]*prompt\b|隐藏推理|内部推理|思维链|系统提示词)/i;
+const STORY_WORKSPACE_EPISODE_RAW_COMMAND = /(?:^|[\s`])(?:\$\s+|sudo\s+|curl\b|wget\b|(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node\b|npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|cat\s+(?:~?\/\.ssh\/|\/etc\/(?:passwd|shadow)|\S*(?:credential|secret|token|private[_-]?key))|dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|\/drama-forge:[a-z0-9_-]+|(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=])/i;
+const STORY_WORKSPACE_EPISODE_SENSITIVE_OPTION = /(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|credential|authorization)(?:[=\s]|$)/i;
+const STORY_WORKSPACE_EPISODE_TOOL_OPTION = /(?<![A-Za-z0-9_-])(?:tool|renderer)\b[^\r\n]*?(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*/i;
 
 type StoryWorkspaceEpisodeWireRecord = Record<string, unknown>;
 
@@ -777,8 +783,8 @@ function storyWorkspaceEpisodeRecord(
     throw new Error(`${label} must be an object.`);
   }
   const record = value as StoryWorkspaceEpisodeWireRecord;
-  const unknown = Object.keys(record).find((key) => !keys.includes(key));
-  if (unknown) throw new Error(`${label} contains unknown field ${unknown}.`);
+  const unknown = Object.keys(record).some((key) => !keys.includes(key));
+  if (unknown) throw new Error(`${label} contains an unknown field.`);
   const missing = keys.find((key) => !Object.prototype.hasOwnProperty.call(record, key));
   if (missing) throw new Error(`${label} is missing ${missing}.`);
   return record;
@@ -795,10 +801,68 @@ function storyWorkspaceEpisodeString(
   if (value.length < min || value.length > max || (options.pattern && !options.pattern.test(value))) {
     throw new Error(`${label} has an invalid value.`);
   }
+  if ([...value].some((character) => {
+    const code = character.charCodeAt(0);
+    return code === 127 || (code < 32 && code !== 9 && code !== 10 && code !== 13);
+  })) {
+    throw new Error(`${label} contains a control character.`);
+  }
   if (options.pathAudit !== false && STORY_WORKSPACE_EPISODE_SENSITIVE_PATH.test(value)) {
     throw new Error(`${label} contains a sensitive path.`);
   }
   return value;
+}
+
+function storyWorkspaceEpisodeEntropy(value: string): number {
+  if (value.length === 0) return 0;
+  const counts = new Map<string, number>();
+  for (const character of value) counts.set(character, (counts.get(character) ?? 0) + 1);
+  let result = 0;
+  for (const count of counts.values()) {
+    const probability = count / value.length;
+    result -= probability * Math.log2(probability);
+  }
+  return result;
+}
+
+function storyWorkspaceEpisodeLooksLikeSecret(value: string): boolean {
+  const longHex = value.match(/(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])/g) ?? [];
+  if (longHex.some((candidate) => storyWorkspaceEpisodeEntropy(candidate) >= 3)) return true;
+  const candidates = value.match(/(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{32,}={0,2}(?![A-Za-z0-9+/_=-])/g) ?? [];
+  return candidates.some((candidate) => {
+    const token = candidate.replace(/=+$/, '');
+    const characterClasses = Number(/[a-z]/.test(token))
+      + Number(/[A-Z]/.test(token))
+      + Number(/[0-9]/.test(token))
+      + Number(/[+/_-]/.test(token));
+    return characterClasses >= 2 && storyWorkspaceEpisodeEntropy(token) >= 3.5;
+  });
+}
+
+function storyWorkspaceEpisodePublicText(
+  value: unknown,
+  label: string,
+  options: { min?: number; max?: number } = {},
+): string {
+  const result = storyWorkspaceEpisodeString(value, label, options);
+  if (
+    STORY_WORKSPACE_EPISODE_HTML.test(result)
+    || STORY_WORKSPACE_EPISODE_CREDENTIAL.test(result)
+    || STORY_WORKSPACE_EPISODE_PRIVATE_MODEL_TEXT.test(result)
+    || STORY_WORKSPACE_EPISODE_RAW_COMMAND.test(result)
+    || STORY_WORKSPACE_EPISODE_SENSITIVE_OPTION.test(result)
+    || STORY_WORKSPACE_EPISODE_TOOL_OPTION.test(result)
+    || storyWorkspaceEpisodeLooksLikeSecret(result)
+  ) throw new Error(`${label} violates the public text policy.`);
+  return result;
+}
+
+function storyWorkspaceEpisodeNullablePublicText(
+  value: unknown,
+  label: string,
+  options?: { min?: number; max?: number },
+): string | null {
+  return value === null ? null : storyWorkspaceEpisodePublicText(value, label, options);
 }
 
 function storyWorkspaceEpisodeNullableString(
@@ -837,6 +901,27 @@ function storyWorkspaceEpisodeNullableNumber(
   return value === null ? null : storyWorkspaceEpisodeNumber(value, label, options);
 }
 
+function storyWorkspaceEpisodeDatetime(value: unknown, label: string): string {
+  const result = storyWorkspaceEpisodeString(value, label, { min: 20, max: 32 });
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):([0-5]\d):([0-5]\d)(?:\.(\d{1,6}))?Z$/.exec(result);
+  if (!match) throw new Error(`${label} must be a UTC RFC3339 datetime.`);
+  const [, year, month, day, hour, minute, second, fraction = ''] = match;
+  if (Number(hour) > 23) throw new Error(`${label} must be a UTC RFC3339 datetime.`);
+  const timestamp = Date.parse(result);
+  if (!Number.isFinite(timestamp)) throw new Error(`${label} must be a UTC RFC3339 datetime.`);
+  const date = new Date(timestamp);
+  if (
+    date.getUTCFullYear() !== Number(year)
+    || date.getUTCMonth() + 1 !== Number(month)
+    || date.getUTCDate() !== Number(day)
+    || date.getUTCHours() !== Number(hour)
+    || date.getUTCMinutes() !== Number(minute)
+    || date.getUTCSeconds() !== Number(second)
+    || (fraction.length > 0 && !/^\d{1,6}$/.test(fraction))
+  ) throw new Error(`${label} must be a UTC RFC3339 datetime.`);
+  return result;
+}
+
 function storyWorkspaceEpisodeEnum<T extends string>(
   value: unknown,
   label: string,
@@ -869,14 +954,30 @@ function storyWorkspaceEpisodeStringList(
   label: string,
   max: number,
   unique = false,
+  publicText = true,
 ): string[] {
   const result = storyWorkspaceEpisodeArray(
     value,
     label,
-    (item, index) => storyWorkspaceEpisodeString(item, `${label}[${index}]`, { min: 1, max: 4000 }),
+    (item, index) => (publicText ? storyWorkspaceEpisodePublicText : storyWorkspaceEpisodeString)(
+      item,
+      `${label}[${index}]`,
+      { min: 1, max: 4000 },
+    ),
     max,
   );
   if (unique) storyWorkspaceEpisodeUnique(result, label);
+  return result;
+}
+
+function storyWorkspaceEpisodeDiagnosticList(value: unknown, label: string): string[] {
+  const result = storyWorkspaceEpisodeArray(
+    value,
+    label,
+    (item, index) => storyWorkspaceEpisodePublicText(item, `${label}[${index}]`, { min: 1, max: 512 }),
+    2048,
+  );
+  storyWorkspaceEpisodeUnique(result, label);
   return result;
 }
 
@@ -1002,8 +1103,9 @@ function storyWorkspaceParseEpisodeManifestEntry(
     : storyWorkspaceEpisodeString(record.contentRevision, `${label}.contentRevision`, {
       pattern: STORY_WORKSPACE_EPISODE_REVISION,
     });
-  const mtime = storyWorkspaceEpisodeNullableString(record.mtime, `${label}.mtime`, { min: 1, max: 64 });
-  if (mtime !== null && Number.isNaN(Date.parse(mtime))) throw new Error(`${label}.mtime is invalid.`);
+  const mtime = record.mtime === null
+    ? null
+    : storyWorkspaceEpisodeDatetime(record.mtime, `${label}.mtime`);
   const size = storyWorkspaceEpisodeNullableNumber(record.size, `${label}.size`, { integer: true, min: 0 });
   if (availability === 'available') {
     if (contentRevision === null || mtime === null || size === null) {
@@ -1043,7 +1145,7 @@ function storyWorkspaceParseEpisodeCharacterBeat(
   const record = storyWorkspaceEpisodeRecord(value, label, [
     'id', 'sourceKey', 'characterId', 'action', 'startState', 'trigger', 'choice', 'endState', 'visibleEvidence',
   ]);
-  const optional = (key: string, max: number) => storyWorkspaceEpisodeNullableString(
+  const optional = (key: string, max: number) => storyWorkspaceEpisodeNullablePublicText(
     record[key], `${label}.${key}`, { max },
   );
   return {
@@ -1075,11 +1177,11 @@ function storyWorkspaceParseEpisodeOverview(value: unknown): StoryWorkspaceEpiso
     ? null
     : storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, ['episode-outline.md']);
   return {
-    title: storyWorkspaceEpisodeNullableString(record.title, `${label}.title`, { max: 500 }),
-    series: storyWorkspaceEpisodeNullableString(record.series, `${label}.series`, { max: 500 }),
+    title: storyWorkspaceEpisodeNullablePublicText(record.title, `${label}.title`, { max: 500 }),
+    series: storyWorkspaceEpisodeNullablePublicText(record.series, `${label}.series`, { max: 500 }),
     storyGoals: storyWorkspaceEpisodeStringList(record.storyGoals, `${label}.storyGoals`, 32),
-    coreConflict: storyWorkspaceEpisodeNullableString(record.coreConflict, `${label}.coreConflict`, { max: 4000 }),
-    hook: storyWorkspaceEpisodeNullableString(record.hook, `${label}.hook`, { max: 4000 }),
+    coreConflict: storyWorkspaceEpisodeNullablePublicText(record.coreConflict, `${label}.coreConflict`, { max: 4000 }),
+    hook: storyWorkspaceEpisodeNullablePublicText(record.hook, `${label}.hook`, { max: 4000 }),
     sourceArtifact,
     sourceRevision: storyWorkspaceEpisodeNullableSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
     generatedFrom: storyWorkspaceEpisodeGeneratedFrom(record.generatedFrom, `${label}.generatedFrom`),
@@ -1098,11 +1200,11 @@ function storyWorkspaceParseEpisodeNarrativeBeat(
   return {
     id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
     sourceKey: storyWorkspaceEpisodeString(record.sourceKey, `${label}.sourceKey`, { pattern: STORY_WORKSPACE_EPISODE_BEAT_KEY }),
-    title: storyWorkspaceEpisodeString(record.title, `${label}.title`, { min: 1, max: 500 }),
+    title: storyWorkspaceEpisodePublicText(record.title, `${label}.title`, { min: 1, max: 500 }),
     assetSceneRef: storyWorkspaceEpisodeNullableString(record.assetSceneRef, `${label}.assetSceneRef`, { max: 255 }),
-    narrativeFunction: storyWorkspaceEpisodeNullableString(record.narrativeFunction, `${label}.narrativeFunction`, { max: 500 }),
-    emotionTone: storyWorkspaceEpisodeNullableString(record.emotionTone, `${label}.emotionTone`, { max: 500 }),
-    summary: storyWorkspaceEpisodeNullableString(record.summary, `${label}.summary`, { max: 4000 }),
+    narrativeFunction: storyWorkspaceEpisodeNullablePublicText(record.narrativeFunction, `${label}.narrativeFunction`, { max: 500 }),
+    emotionTone: storyWorkspaceEpisodeNullablePublicText(record.emotionTone, `${label}.emotionTone`, { max: 500 }),
+    summary: storyWorkspaceEpisodeNullablePublicText(record.summary, `${label}.summary`, { max: 4000 }),
     sceneGoals: storyWorkspaceEpisodeStringList(record.sceneGoals, `${label}.sceneGoals`, 32),
     keyDialogueBeats: storyWorkspaceEpisodeStringList(record.keyDialogueBeats, `${label}.keyDialogueBeats`, 32),
     sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, ['episode-outline.md']),
@@ -1117,9 +1219,9 @@ function storyWorkspaceParseEpisodeDialogueLine(
 ): StoryWorkspaceEpisodeDialogueLine {
   const record = storyWorkspaceEpisodeRecord(value, label, ['speaker', 'qualifier', 'text']);
   return {
-    speaker: storyWorkspaceEpisodeString(record.speaker, `${label}.speaker`, { min: 1, max: 128 }),
-    qualifier: storyWorkspaceEpisodeNullableString(record.qualifier, `${label}.qualifier`, { max: 255 }),
-    text: storyWorkspaceEpisodeString(record.text, `${label}.text`, { min: 1, max: 2000 }),
+    speaker: storyWorkspaceEpisodePublicText(record.speaker, `${label}.speaker`, { min: 1, max: 128 }),
+    qualifier: storyWorkspaceEpisodeNullablePublicText(record.qualifier, `${label}.qualifier`, { max: 255 }),
+    text: storyWorkspaceEpisodePublicText(record.text, `${label}.text`, { min: 1, max: 2000 }),
   };
 }
 
@@ -1136,8 +1238,8 @@ function storyWorkspaceParseEpisodeScene(value: unknown, index: number): StoryWo
   return {
     id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
     sourceKey: storyWorkspaceEpisodeString(record.sourceKey, `${label}.sourceKey`, { pattern: STORY_WORKSPACE_EPISODE_SCENE_KEY }),
-    title: storyWorkspaceEpisodeString(record.title, `${label}.title`, { min: 1, max: 500 }),
-    heading: storyWorkspaceEpisodeString(record.heading, `${label}.heading`, { min: 1, max: 1000 }),
+    title: storyWorkspaceEpisodePublicText(record.title, `${label}.title`, { min: 1, max: 500 }),
+    heading: storyWorkspaceEpisodePublicText(record.heading, `${label}.heading`, { min: 1, max: 1000 }),
     assetSceneRef: storyWorkspaceEpisodeNullableString(record.assetSceneRef, `${label}.assetSceneRef`, { max: 255 }),
     narrativeBeatId,
     declaredNarrativeBeatRef: storyWorkspaceEpisodeNullableString(record.declaredNarrativeBeatRef, `${label}.declaredNarrativeBeatRef`, { pattern: STORY_WORKSPACE_EPISODE_BEAT_KEY }),
@@ -1160,12 +1262,12 @@ function storyWorkspaceParseEpisodeShotCharacter(value: unknown, label: string):
   const record = storyWorkspaceEpisodeRecord(value, label, ['ref', 'displayName', 'depthPlane', 'action', 'emotion']);
   return {
     ref: storyWorkspaceEpisodeString(record.ref, `${label}.ref`, { min: 1, max: 128 }),
-    displayName: storyWorkspaceEpisodeNullableString(record.displayName, `${label}.displayName`, { max: 255 }),
+    displayName: storyWorkspaceEpisodeNullablePublicText(record.displayName, `${label}.displayName`, { max: 255 }),
     depthPlane: (record.depthPlane === null
       ? null
       : storyWorkspaceEpisodeEnum(record.depthPlane, `${label}.depthPlane`, ['front', 'mid', 'back'])) as StoryWorkspaceEpisodeShotCharacter['depthPlane'],
-    action: storyWorkspaceEpisodeNullableString(record.action, `${label}.action`, { max: 2000 }),
-    emotion: storyWorkspaceEpisodeNullableString(record.emotion, `${label}.emotion`, { max: 1000 }),
+    action: storyWorkspaceEpisodeNullablePublicText(record.action, `${label}.action`, { max: 2000 }),
+    emotion: storyWorkspaceEpisodeNullablePublicText(record.emotion, `${label}.emotion`, { max: 1000 }),
   };
 }
 
@@ -1200,18 +1302,18 @@ function storyWorkspaceParseEpisodeShot(value: unknown, index: number): StoryWor
       128,
     ),
     camera: {
-      angle: storyWorkspaceEpisodeNullableString(camera.angle, `${label}.camera.angle`, { max: 255 }),
-      height: storyWorkspaceEpisodeNullableString(camera.height, `${label}.camera.height`, { max: 255 }),
-      movement: storyWorkspaceEpisodeNullableString(camera.movement, `${label}.camera.movement`, { max: 255 }),
-      lens: storyWorkspaceEpisodeNullableString(camera.lens, `${label}.camera.lens`, { max: 255 }),
+      angle: storyWorkspaceEpisodeNullablePublicText(camera.angle, `${label}.camera.angle`, { max: 255 }),
+      height: storyWorkspaceEpisodeNullablePublicText(camera.height, `${label}.camera.height`, { max: 255 }),
+      movement: storyWorkspaceEpisodeNullablePublicText(camera.movement, `${label}.camera.movement`, { max: 255 }),
+      lens: storyWorkspaceEpisodeNullablePublicText(camera.lens, `${label}.camera.lens`, { max: 255 }),
     },
-    visual: storyWorkspaceEpisodeNullableString(record.visual, `${label}.visual`, { max: 4000 }),
+    visual: storyWorkspaceEpisodeNullablePublicText(record.visual, `${label}.visual`, { max: 4000 }),
     dialogue: storyWorkspaceEpisodeArray(record.dialogue, `${label}.dialogue`, (item, dialogueIndex) => {
       const dialogueLabel = `${label}.dialogue[${dialogueIndex}]`;
       const dialogue = storyWorkspaceEpisodeRecord(item, dialogueLabel, ['speaker', 'line', 'type']);
       return {
-        speaker: storyWorkspaceEpisodeString(dialogue.speaker, `${dialogueLabel}.speaker`, { min: 1, max: 128 }),
-        line: storyWorkspaceEpisodeString(dialogue.line, `${dialogueLabel}.line`, { min: 1, max: 2000 }),
+        speaker: storyWorkspaceEpisodePublicText(dialogue.speaker, `${dialogueLabel}.speaker`, { min: 1, max: 128 }),
+        line: storyWorkspaceEpisodePublicText(dialogue.line, `${dialogueLabel}.line`, { min: 1, max: 2000 }),
         type: storyWorkspaceEpisodeEnum(dialogue.type, `${dialogueLabel}.type`, ['spoken', 'voiceover', 'os', 'inner']),
       };
     }, 128),
@@ -1260,8 +1362,8 @@ function storyWorkspaceParseEpisodeNarrative(value: unknown): StoryWorkspaceEpis
     associations: {
       beatSceneCoverage: storyWorkspaceParseEpisodeCoverage(associations.beatSceneCoverage, 'narrative.associations.beatSceneCoverage'),
       sceneShotCoverage: storyWorkspaceParseEpisodeCoverage(associations.sceneShotCoverage, 'narrative.associations.sceneShotCoverage'),
-      missingLinks: storyWorkspaceEpisodeStringList(associations.missingLinks, 'narrative.associations.missingLinks', 2048, true),
-      orphanArtifacts: storyWorkspaceEpisodeStringList(associations.orphanArtifacts, 'narrative.associations.orphanArtifacts', 2048, true),
+      missingLinks: storyWorkspaceEpisodeDiagnosticList(associations.missingLinks, 'narrative.associations.missingLinks'),
+      orphanArtifacts: storyWorkspaceEpisodeDiagnosticList(associations.orphanArtifacts, 'narrative.associations.orphanArtifacts'),
     },
   };
 }
@@ -1286,8 +1388,8 @@ function storyWorkspaceParseEpisodePrompt(value: unknown, index: number): StoryW
     kind: storyWorkspaceEpisodeString(record.kind, `${label}.kind`, { pattern: /^[a-z0-9][a-z0-9._-]{0,63}$/ }),
     shotViewId,
     associationStatus,
-    positive: storyWorkspaceEpisodeString(record.positive, `${label}.positive`, { min: 1, max: 8000 }),
-    negative: storyWorkspaceEpisodeNullableString(record.negative, `${label}.negative`, { max: 4000 }),
+    positive: storyWorkspaceEpisodePublicText(record.positive, `${label}.positive`, { min: 1, max: 8000 }),
+    negative: storyWorkspaceEpisodeNullablePublicText(record.negative, `${label}.negative`, { max: 4000 }),
     parameters: {
       model: storyWorkspaceEpisodeNullableString(parameters.model, `${label}.parameters.model`, { max: 128 }),
       mode: storyWorkspaceEpisodeNullableString(parameters.mode, `${label}.parameters.mode`, { max: 128 }),
@@ -1297,10 +1399,10 @@ function storyWorkspaceParseEpisodePrompt(value: unknown, index: number): StoryW
       aspectRatio: storyWorkspaceEpisodeNullableString(parameters.aspectRatio, `${label}.parameters.aspectRatio`, { pattern: /^[0-9]{1,3}:[0-9]{1,3}$/, max: 32 }),
     },
     generability: {
-      characterAnchor: storyWorkspaceEpisodeNullableString(generability.characterAnchor, `${label}.generability.characterAnchor`, { max: 128 }),
-      motionFeasibility: storyWorkspaceEpisodeNullableString(generability.motionFeasibility, `${label}.generability.motionFeasibility`, { max: 128 }),
-      durationBudget: storyWorkspaceEpisodeNullableString(generability.durationBudget, `${label}.generability.durationBudget`, { max: 128 }),
-      notes: storyWorkspaceEpisodeNullableString(generability.notes, `${label}.generability.notes`, { max: 2000 }),
+      characterAnchor: storyWorkspaceEpisodeNullablePublicText(generability.characterAnchor, `${label}.generability.characterAnchor`, { max: 128 }),
+      motionFeasibility: storyWorkspaceEpisodeNullablePublicText(generability.motionFeasibility, `${label}.generability.motionFeasibility`, { max: 128 }),
+      durationBudget: storyWorkspaceEpisodeNullablePublicText(generability.durationBudget, `${label}.generability.durationBudget`, { max: 128 }),
+      notes: storyWorkspaceEpisodeNullablePublicText(generability.notes, `${label}.generability.notes`, { max: 2000 }),
     },
     sourceArtifact: storyWorkspaceEpisodeString(record.sourceArtifact, `${label}.sourceArtifact`, { pattern: /^prompts\/[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.ya?ml$/ }),
     sourceRevision: storyWorkspaceEpisodeSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
@@ -1316,8 +1418,8 @@ function storyWorkspaceParseEpisodeSection(
   return {
     id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
     level: storyWorkspaceEpisodeNumber(record.level, `${label}.level`, { integer: true, min: 1, max: 6 }),
-    title: storyWorkspaceEpisodeString(record.title, `${label}.title`, { min: 1, max: 500 }),
-    text: storyWorkspaceEpisodeString(record.text, `${label}.text`, { max: 8000 }),
+    title: storyWorkspaceEpisodePublicText(record.title, `${label}.title`, { min: 1, max: 500 }),
+    text: storyWorkspaceEpisodePublicText(record.text, `${label}.text`, { max: 8000 }),
     sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, [sourceArtifact]),
     sourceRevision: storyWorkspaceEpisodeSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
   };
@@ -1340,7 +1442,7 @@ function storyWorkspaceParseEpisodeQueueEntry(
     shotViewId,
     associationStatus,
     durationSec: storyWorkspaceEpisodeNullableNumber(record.durationSec, `${label}.durationSec`, { min: 0, max: 3600 }),
-    risk: storyWorkspaceEpisodeNullableString(record.risk, `${label}.risk`, { max: 128 }),
+    risk: storyWorkspaceEpisodeNullablePublicText(record.risk, `${label}.risk`, { max: 128 }),
     priority: storyWorkspaceEpisodeNullableString(record.priority, `${label}.priority`, { max: 64 }),
     renderer: storyWorkspaceEpisodeNullableString(record.renderer, `${label}.renderer`, { pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, max: 128 }),
     status: storyWorkspaceEpisodeNullableString(record.status, `${label}.status`, { pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, max: 64 }),
@@ -1429,6 +1531,7 @@ function storyWorkspaceParseEpisodeReview(value: unknown): StoryWorkspaceEpisode
         'auxiliary.review.reviewedArtifacts',
         256,
         true,
+        false,
       );
       if (values.some((item) => item.startsWith('/') || item.includes('\\') || item.split('/').includes('..'))) {
         throw new Error('auxiliary.review.reviewedArtifacts contains an unsafe relative key.');
@@ -1469,9 +1572,9 @@ function storyWorkspaceParseEpisodeAuxiliary(value: unknown): StoryWorkspaceEpis
       shotRenderQueueCoverage: storyWorkspaceParseEpisodeCoverage(associations.shotRenderQueueCoverage, 'auxiliary.associations.shotRenderQueueCoverage'),
       totalPrompts: storyWorkspaceEpisodeNumber(associations.totalPrompts, 'auxiliary.associations.totalPrompts', { integer: true, min: 0 }),
       totalQueueEntries: storyWorkspaceEpisodeNumber(associations.totalQueueEntries, 'auxiliary.associations.totalQueueEntries', { integer: true, min: 0 }),
-      orphanPrompts: storyWorkspaceEpisodeStringList(associations.orphanPrompts, 'auxiliary.associations.orphanPrompts', 2048, true),
-      orphanQueueEntries: storyWorkspaceEpisodeStringList(associations.orphanQueueEntries, 'auxiliary.associations.orphanQueueEntries', 2048, true),
-      duplicateQueueShotIds: storyWorkspaceEpisodeStringList(associations.duplicateQueueShotIds, 'auxiliary.associations.duplicateQueueShotIds', 2048, true),
+      orphanPrompts: storyWorkspaceEpisodeDiagnosticList(associations.orphanPrompts, 'auxiliary.associations.orphanPrompts'),
+      orphanQueueEntries: storyWorkspaceEpisodeDiagnosticList(associations.orphanQueueEntries, 'auxiliary.associations.orphanQueueEntries'),
+      duplicateQueueShotIds: storyWorkspaceEpisodeDiagnosticList(associations.duplicateQueueShotIds, 'auxiliary.associations.duplicateQueueShotIds'),
     },
   };
 }

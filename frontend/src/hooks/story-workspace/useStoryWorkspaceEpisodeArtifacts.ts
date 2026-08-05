@@ -13,6 +13,18 @@ import {
 
 const STORY_WORKSPACE_EPISODE_OUTPUT_EVENT = 'ink:story-workspace-output';
 const STORY_WORKSPACE_EPISODE_MIN_POLL_INTERVAL_MS = 5000;
+const STORY_WORKSPACE_EPISODE_MAX_TIMER_MS = 2_147_483_647;
+const STORY_WORKSPACE_EPISODE_INVALID_MESSAGE = 'Episode artifact data is unavailable.';
+const STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS = [
+  'episode-outline.md',
+  'script.md',
+  'storyboard.yaml',
+  'prompts/',
+  'renders/',
+  'review-report.md',
+] as const;
+
+export type StoryWorkspaceEpisodeArtifactRoot = typeof STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS[number];
 
 function storyWorkspaceEpisodeIsRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -29,8 +41,8 @@ export class StoryWorkspaceEpisodeArtifactsHttpError extends Error {
 }
 
 export class StoryWorkspaceEpisodeArtifactsContractError extends Error {
-  constructor(message = 'Invalid Episode artifact surface.') {
-    super(message);
+  constructor() {
+    super(STORY_WORKSPACE_EPISODE_INVALID_MESSAGE);
     this.name = 'StoryWorkspaceEpisodeArtifactsContractError';
   }
 }
@@ -40,7 +52,14 @@ export function storyWorkspaceEpisodeArtifactsEndpoint(runId: string): string {
 }
 
 export function storyWorkspaceEpisodeArtifactsPollInterval(requested?: number): number {
-  return Math.max(requested ?? STORY_WORKSPACE_EPISODE_MIN_POLL_INTERVAL_MS, STORY_WORKSPACE_EPISODE_MIN_POLL_INTERVAL_MS);
+  if (requested === Number.POSITIVE_INFINITY) return STORY_WORKSPACE_EPISODE_MAX_TIMER_MS;
+  if (requested === undefined || !Number.isFinite(requested)) {
+    return STORY_WORKSPACE_EPISODE_MIN_POLL_INTERVAL_MS;
+  }
+  return Math.min(
+    Math.max(Math.trunc(requested), STORY_WORKSPACE_EPISODE_MIN_POLL_INTERVAL_MS),
+    STORY_WORKSPACE_EPISODE_MAX_TIMER_MS,
+  );
 }
 
 /** Event content is ignored; only an exact run identity may invalidate REST. */
@@ -59,6 +78,22 @@ export function storyWorkspaceIsEpisodeArtifactsAbort(reason: unknown): boolean 
   return reason instanceof DOMException
     ? reason.name === 'AbortError'
     : storyWorkspaceEpisodeIsRecord(reason) && reason.name === 'AbortError';
+}
+
+export interface StoryWorkspaceEpisodeArtifactsCommitGuard {
+  readonly signal: AbortSignal;
+  readonly requestRunId: string;
+  readonly currentRunId: string | null;
+  readonly requestGeneration: number;
+  readonly currentGeneration: number;
+}
+
+export function storyWorkspaceShouldCommitEpisodeArtifactsResponse(
+  guard: StoryWorkspaceEpisodeArtifactsCommitGuard,
+): boolean {
+  return !guard.signal.aborted
+    && guard.requestRunId === guard.currentRunId
+    && guard.requestGeneration === guard.currentGeneration;
 }
 
 export interface StoryWorkspaceEpisodeArtifactsFetchOptions {
@@ -92,15 +127,11 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
   });
   if (response.status === 304) {
     if (!options.etag) {
-      throw new StoryWorkspaceEpisodeArtifactsContractError(
-        'Episode artifact 304 response has no cached ETag.',
-      );
+      throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
     const responseEtag = response.headers.get('ETag');
-    if (responseEtag !== null && responseEtag !== storyWorkspaceEpisodeQuotedEtag(options.etag)) {
-      throw new StoryWorkspaceEpisodeArtifactsContractError(
-        'Episode artifact 304 response has an inconsistent ETag.',
-      );
+    if (responseEtag !== storyWorkspaceEpisodeQuotedEtag(options.etag)) {
+      throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
     return { kind: 'not-modified', etag: options.etag };
   }
@@ -109,51 +140,52 @@ export async function storyWorkspaceFetchEpisodeArtifacts(
   try {
     payload = await response.json();
   } catch {
-    throw new StoryWorkspaceEpisodeArtifactsContractError(
-      'Episode artifact response is not valid JSON.',
-    );
+    throw new StoryWorkspaceEpisodeArtifactsContractError();
   }
   let data: StoryWorkspaceEpisodeArtifactSurface;
   try {
     data = storyWorkspaceParseEpisodeArtifactSurface(payload);
-  } catch (reason) {
-    throw new StoryWorkspaceEpisodeArtifactsContractError(
-      reason instanceof Error ? reason.message : undefined,
-    );
+  } catch {
+    throw new StoryWorkspaceEpisodeArtifactsContractError();
   }
   if (options.expectedRunId !== undefined && data.runId !== options.expectedRunId) {
-    throw new StoryWorkspaceEpisodeArtifactsContractError(
-      'Episode artifact response does not match the requested run.',
-    );
+    throw new StoryWorkspaceEpisodeArtifactsContractError();
   }
   const responseEtag = response.headers.get('ETag');
   if (data.bindingAvailability === 'bound') {
     if (data.etag === null || responseEtag !== storyWorkspaceEpisodeQuotedEtag(data.etag)) {
-      throw new StoryWorkspaceEpisodeArtifactsContractError(
-        'Episode artifact response header ETag does not match manifestRevision.',
-      );
+      throw new StoryWorkspaceEpisodeArtifactsContractError();
     }
   } else if (responseEtag !== null) {
-    throw new StoryWorkspaceEpisodeArtifactsContractError(
-      'Unbound Episode artifact response must not expose an ETag.',
-    );
+    throw new StoryWorkspaceEpisodeArtifactsContractError();
   }
   return { kind: 'surface', data };
 }
 
 export interface StoryWorkspaceEpisodeArtifactsDiagnostic {
   readonly kind: 'invalid_payload';
-  readonly message: string;
+  readonly message: typeof STORY_WORKSPACE_EPISODE_INVALID_MESSAGE;
 }
 
 export interface StoryWorkspaceEpisodeArtifactsFetchState {
   readonly runId: string | null;
+  /** Per-artifact merged display surface; its manifest always comes from latest. */
   readonly data: StoryWorkspaceEpisodeArtifactSurface | null;
+  /** Unmodified latest structurally valid 200 response. */
+  readonly latest: StoryWorkspaceEpisodeArtifactSurface | null;
+  readonly artifactCache: StoryWorkspaceEpisodeArtifactSessionCache;
+  readonly invalidArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
+  readonly staleArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
   readonly diagnostic: StoryWorkspaceEpisodeArtifactsDiagnostic | null;
   readonly error: Error | null;
   readonly isLoading: boolean;
   readonly generation: number;
 }
+
+export type StoryWorkspaceEpisodeArtifactSessionCache = Readonly<Partial<Record<
+  StoryWorkspaceEpisodeArtifactRoot,
+  StoryWorkspaceEpisodeArtifactSurface
+>>>;
 
 export type StoryWorkspaceEpisodeArtifactsFetchAction =
   | { readonly type: 'reset'; readonly runId: string | null }
@@ -169,10 +201,88 @@ export function storyWorkspaceEpisodeArtifactsInitialState(
   return {
     runId,
     data: null,
+    latest: null,
+    artifactCache: {},
+    invalidArtifactKeys: [],
+    staleArtifactKeys: [],
     diagnostic: null,
     error: null,
     isLoading: false,
     generation: 0,
+  };
+}
+
+function storyWorkspaceEpisodeArtifactAvailability(
+  surface: StoryWorkspaceEpisodeArtifactSurface,
+  key: StoryWorkspaceEpisodeArtifactRoot,
+): string | null {
+  return surface.artifacts.find((artifact) => artifact.relativeKey === key)?.availability ?? null;
+}
+
+function storyWorkspaceUpdateEpisodeArtifactCache(
+  current: StoryWorkspaceEpisodeArtifactSessionCache,
+  latest: StoryWorkspaceEpisodeArtifactSurface,
+): StoryWorkspaceEpisodeArtifactSessionCache {
+  if (latest.bindingAvailability === 'unbound') return {};
+  const next: Partial<Record<StoryWorkspaceEpisodeArtifactRoot, StoryWorkspaceEpisodeArtifactSurface>> = {
+    ...current,
+  };
+  for (const key of STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS) {
+    const availability = storyWorkspaceEpisodeArtifactAvailability(latest, key);
+    if (availability === 'available') next[key] = latest;
+    else if (availability !== 'invalid') delete next[key];
+  }
+  return next;
+}
+
+function storyWorkspaceMergeEpisodeArtifactLastGood(
+  latest: StoryWorkspaceEpisodeArtifactSurface,
+  cache: StoryWorkspaceEpisodeArtifactSessionCache,
+  staleKeys: readonly StoryWorkspaceEpisodeArtifactRoot[],
+): StoryWorkspaceEpisodeArtifactSurface {
+  if (staleKeys.length === 0 || latest.bindingAvailability === 'unbound') return latest;
+  const stale = new Set(staleKeys);
+  const latestNarrative = latest.narrative;
+  let narrative = latestNarrative;
+  if (latestNarrative !== null) {
+    const outline = stale.has('episode-outline.md')
+      ? cache['episode-outline.md']?.narrative
+      : latestNarrative;
+    const script = stale.has('script.md') ? cache['script.md']?.narrative : latestNarrative;
+    const storyboard = stale.has('storyboard.yaml')
+      ? cache['storyboard.yaml']?.narrative
+      : latestNarrative;
+    narrative = {
+      ...latestNarrative,
+      overview: outline?.overview ?? latestNarrative.overview,
+      narrativeBeats: outline?.narrativeBeats ?? latestNarrative.narrativeBeats,
+      scenes: script?.scenes ?? latestNarrative.scenes,
+      shots: storyboard?.shots ?? latestNarrative.shots,
+      associations: latestNarrative.associations,
+    };
+  }
+  const latestAuxiliary = latest.auxiliary;
+  let auxiliary = latestAuxiliary;
+  if (latestAuxiliary !== null) {
+    const prompts = stale.has('prompts/') ? cache['prompts/']?.auxiliary : latestAuxiliary;
+    const renders = stale.has('renders/') ? cache['renders/']?.auxiliary : latestAuxiliary;
+    const review = stale.has('review-report.md')
+      ? cache['review-report.md']?.auxiliary
+      : latestAuxiliary;
+    auxiliary = {
+      ...latestAuxiliary,
+      manifestRevision: latest.manifestRevision ?? latestAuxiliary.manifestRevision,
+      prompts: prompts?.prompts ?? latestAuxiliary.prompts,
+      renderGuide: renders?.renderGuide ?? latestAuxiliary.renderGuide,
+      review: review?.review ?? latestAuxiliary.review,
+      associations: latestAuxiliary.associations,
+    };
+  }
+  return {
+    ...latest,
+    artifacts: latest.artifacts,
+    narrative,
+    auxiliary,
   };
 }
 
@@ -187,9 +297,18 @@ export function storyWorkspaceReduceEpisodeArtifactsFetch(
     return { ...state, error: null, isLoading: true, generation: action.generation };
   }
   if (action.type === 'success') {
+    const artifactCache = storyWorkspaceUpdateEpisodeArtifactCache(state.artifactCache, action.data);
+    const invalidArtifactKeys = STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS.filter(
+      (key) => storyWorkspaceEpisodeArtifactAvailability(action.data, key) === 'invalid',
+    );
+    const staleArtifactKeys = invalidArtifactKeys.filter((key) => artifactCache[key] !== undefined);
     return {
       runId: state.runId,
-      data: action.data,
+      data: storyWorkspaceMergeEpisodeArtifactLastGood(action.data, artifactCache, staleArtifactKeys),
+      latest: action.data,
+      artifactCache,
+      invalidArtifactKeys,
+      staleArtifactKeys,
       diagnostic: null,
       error: null,
       isLoading: false,
@@ -208,7 +327,10 @@ export function storyWorkspaceReduceEpisodeArtifactsFetch(
   if (action.type === 'invalid') {
     return {
       ...state,
-      diagnostic: action.diagnostic,
+      diagnostic: {
+        kind: 'invalid_payload',
+        message: STORY_WORKSPACE_EPISODE_INVALID_MESSAGE,
+      },
       error: null,
       isLoading: false,
       generation: action.generation,
@@ -230,6 +352,9 @@ export interface StoryWorkspaceEpisodeArtifactsUseOptions {
 
 export interface StoryWorkspaceEpisodeArtifactsState {
   readonly data: StoryWorkspaceEpisodeArtifactSurface | null;
+  readonly latest: StoryWorkspaceEpisodeArtifactSurface | null;
+  readonly invalidArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
+  readonly staleArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
   readonly diagnostic: StoryWorkspaceEpisodeArtifactsDiagnostic | null;
   readonly error: Error | null;
   readonly isLoading: boolean;
@@ -279,7 +404,13 @@ export function useStoryWorkspaceEpisodeArtifacts(
         signal: nextController.signal,
       },
     ).then((result) => {
-      if (nextController.signal.aborted) return;
+      if (!storyWorkspaceShouldCommitEpisodeArtifactsResponse({
+        signal: nextController.signal,
+        requestRunId: normalizedRunId,
+        currentRunId: etagCache.current.runId,
+        requestGeneration: nextGeneration,
+        currentGeneration: generation.current,
+      })) return;
       if (result.kind === 'not-modified') {
         dispatch({ type: 'not-modified', runId: normalizedRunId, generation: nextGeneration });
         return;
@@ -292,13 +423,25 @@ export function useStoryWorkspaceEpisodeArtifacts(
         data: result.data,
       });
     }).catch((reason: unknown) => {
-      if (nextController.signal.aborted || storyWorkspaceIsEpisodeArtifactsAbort(reason)) return;
+      if (
+        !storyWorkspaceShouldCommitEpisodeArtifactsResponse({
+          signal: nextController.signal,
+          requestRunId: normalizedRunId,
+          currentRunId: etagCache.current.runId,
+          requestGeneration: nextGeneration,
+          currentGeneration: generation.current,
+        })
+        || storyWorkspaceIsEpisodeArtifactsAbort(reason)
+      ) return;
       if (reason instanceof StoryWorkspaceEpisodeArtifactsContractError) {
         dispatch({
           type: 'invalid',
           runId: normalizedRunId,
           generation: nextGeneration,
-          diagnostic: { kind: 'invalid_payload', message: reason.message },
+          diagnostic: {
+            kind: 'invalid_payload',
+            message: STORY_WORKSPACE_EPISODE_INVALID_MESSAGE,
+          },
         });
         return;
       }
@@ -347,12 +490,15 @@ export function useStoryWorkspaceEpisodeArtifacts(
 
   return {
     data: state.runId === normalizedRunId ? state.data : null,
+    latest: state.runId === normalizedRunId ? state.latest : null,
+    invalidArtifactKeys: state.runId === normalizedRunId ? state.invalidArtifactKeys : [],
+    staleArtifactKeys: state.runId === normalizedRunId ? state.staleArtifactKeys : [],
     diagnostic: state.runId === normalizedRunId ? state.diagnostic : null,
     error: state.runId === normalizedRunId ? state.error : null,
     isLoading: state.runId === normalizedRunId && state.isLoading,
     isShowingLastGood: state.runId === normalizedRunId
       && state.data !== null
-      && state.diagnostic !== null,
+      && (state.diagnostic !== null || state.staleArtifactKeys.length > 0),
     refresh,
   };
 }
