@@ -1,5 +1,5 @@
 // [Input] Dream-only safe message view model and run context.
-// [Output] A compact, accessible page-margin annotation that opens Dream Agent.
+// [Output] A compact, accessible Agent-section status annotation.
 // [Pos] Dream right rail (design_008 §5/§7); no generic Chat UI is mounted.
 
 import type { StoryWorkspaceDreamAgentViewModel } from '../../../hooks/story-workspace';
@@ -11,10 +11,6 @@ export interface StoryWorkspaceDreamAgentRailProps {
   readonly stageLine: string;
   readonly runtimeSnapshotId: string | null;
   readonly runtimeLockId: string | null;
-  readonly controlsId: string;
-  readonly isOpen: boolean;
-  readonly onOpen: () => void;
-  readonly triggerRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 function storyWorkspaceDreamAgentStatus(agent: StoryWorkspaceDreamAgentViewModel): string {
@@ -27,35 +23,25 @@ function storyWorkspaceDreamAgentStatus(agent: StoryWorkspaceDreamAgentViewModel
 }
 
 export function StoryWorkspaceDreamAgentRail({
-  agent, deckName, runId, stageLine, runtimeSnapshotId, runtimeLockId, controlsId, isOpen, onOpen, triggerRef,
+  agent, deckName, runId, stageLine, runtimeSnapshotId, runtimeLockId,
 }: StoryWorkspaceDreamAgentRailProps) {
   const assistant = agent.snapshot?.messages.filter((message) => message.role === 'assistant').slice(-3) ?? [];
   const preview = agent.streamText || assistant.at(-1)?.text;
-  const unread = !isOpen && agent.unreadCount > 0;
   return (
     <section className="story-workspace-dream-agent-rail" aria-label="Dream Agent 状态">
-      <button
-        aria-controls={controlsId}
-        aria-expanded={isOpen}
-        aria-label={`打开 Dream Agent。${storyWorkspaceDreamAgentStatus(agent)}${unread ? '，有新回复。' : ''}`}
-        className="story-workspace-dream-agent-rail__trigger"
-        onClick={onOpen}
-        ref={triggerRef}
-        type="button"
-      >
+      <div className="story-workspace-dream-agent-rail__summary">
         <span className="story-workspace-dream-agent-rail__context">
           <span>Dream Agent · {deckName}</span>
         </span>
         <span className="story-workspace-dream-agent-rail__status">
           <span aria-hidden="true" className="story-workspace-dream-agent-rail__mark" />
           <span>{storyWorkspaceDreamAgentStatus(agent)}</span>
-          {unread && <small className="story-workspace-dream-agent-rail__unread">有 {agent.unreadCount} 条新回复</small>}
         </span>
         <span className="story-workspace-dream-agent-rail__preview">
           {preview || (agent.isLoading ? '正在读取 Dream Agent 消息…' : 'Dream Agent 的回复会显示在这里。')}
         </span>
         <span className="story-workspace-dream-agent-rail__meta">{stageLine}</span>
-      </button>
+      </div>
       <details className="story-workspace-dream-agent-rail__details">
         <summary>技术详情</summary>
         <dl>

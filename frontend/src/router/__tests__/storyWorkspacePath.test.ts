@@ -11,6 +11,8 @@
 //                    adapter (window-dependent, not node-testable).
 
 import { expect, test } from '@playwright/test';
+// @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
+import { readFileSync } from 'node:fs';
 import { storyWorkspaceExecutionDeepLink } from '../../components/story-workspace/surfaceLink';
 import {
   matchStoryWorkspaceRoutePattern,
@@ -27,6 +29,8 @@ import {
   storyWorkspaceCommitNavigation,
   storyWorkspaceNavigationTarget,
 } from '../storyWorkspacePath';
+
+const ROUTER_SOURCE = readFileSync(new URL('../story-workspace.tsx', import.meta.url), 'utf8');
 
 test('static routes resolve exactly as before (no regression)', () => {
   expect(resolveStoryWorkspacePath('/story-workspace')).toMatchObject({
@@ -161,6 +165,14 @@ test('legacy Dream navigation uses window history replaceState rather than pushS
   };
   storyWorkspaceCommitNavigation(history, { inkDreamView: 'story-workspace' }, target.href, target.replace);
   expect(calls).toEqual(['replace']);
+});
+
+test('router writes a dedicated return marker only for ordinary Story Workspace pushes', () => {
+  expect(ROUTER_SOURCE).toContain('const sourceHref = window.location.pathname + window.location.search');
+  expect(ROUTER_SOURCE).toContain('navigation.replace ? null : sourceHref');
+  expect(ROUTER_SOURCE).toContain('storyWorkspaceDreamReturnState(currentState, sourceHref)');
+  expect(ROUTER_SOURCE).toContain('window.history.replaceState(storyWorkspaceHistoryState(),');
+  expect(ROUTER_SOURCE).not.toContain('window.history.replaceState(storyWorkspaceHistoryState(sourceHref),');
 });
 
 test('pattern matcher compares segments literally outside :param slots', () => {

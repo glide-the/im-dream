@@ -15,6 +15,7 @@ import type { WorkflowRun } from '../../../api/storyWorkspaceApi';
 import {
   createRunDeepLinkResolveGate,
   resolveRunDeepLink,
+  storyWorkspacePlanRunDeepLinkEffect,
 } from '../useRunDeepLink';
 
 function stubRun(runId: string): WorkflowRun {
@@ -138,4 +139,29 @@ test('gate reset clears both slots (route switch)', () => {
   gate.abort();
   gate.reset();
   expect(gate.begin('r1')).toBe(true);
+});
+
+test('resolved run is cleared at null input and the same run can resolve again', () => {
+  const gate = createRunDeepLinkResolveGate();
+
+  expect(storyWorkspacePlanRunDeepLinkEffect(true, 'runA', gate)).toEqual({
+    kind: 'resolve',
+    runId: 'runA',
+  });
+  gate.markResolved('runA');
+  expect(storyWorkspacePlanRunDeepLinkEffect(true, 'runA', gate)).toEqual({ kind: 'idle' });
+
+  expect(storyWorkspacePlanRunDeepLinkEffect(true, null, gate)).toEqual({
+    kind: 'clear',
+    state: {
+      run: null,
+      notice: null,
+      missingRunId: null,
+    },
+  });
+
+  expect(storyWorkspacePlanRunDeepLinkEffect(true, 'runA', gate)).toEqual({
+    kind: 'resolve',
+    runId: 'runA',
+  });
 });

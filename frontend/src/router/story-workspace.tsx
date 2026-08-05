@@ -40,6 +40,7 @@ import {
   StoryWorkspaceSubscriptionPage,
   storyWorkspaceSettingsSectionForRoute,
 } from '../pages/story-workspace';
+import { storyWorkspaceDreamReturnState } from '../pages/story-workspace/storyWorkspaceDreamNavigation';
 import {
   readStoryWorkspaceRunParam,
   readStoryWorkspaceDeckParam,
@@ -84,13 +85,12 @@ function readStoryWorkspaceSidebarCollapsed() {
   }
 }
 
-function storyWorkspaceHistoryState() {
+function storyWorkspaceHistoryState(sourceHref: string | null = null) {
   const currentState = window.history.state;
-  const safeCurrentState = currentState && typeof currentState === 'object'
-    ? currentState
-    : {};
-
-  return { ...safeCurrentState, inkDreamView: 'story-workspace' };
+  return {
+    ...storyWorkspaceDreamReturnState(currentState, sourceHref),
+    inkDreamView: 'story-workspace',
+  };
 }
 
 function replaceWithCanonicalPath(canonicalPath: string) {
@@ -302,9 +302,10 @@ export function StoryWorkspaceRouter({ decksContent, onGlobalNavigate, renderSet
     const target = navigation.href;
     if (window.location.pathname + window.location.search !== target) {
       // Legacy canonicalization replaces; ordinary in-app navigation adds a history entry.
+      const sourceHref = window.location.pathname + window.location.search;
       storyWorkspaceCommitNavigation(
         window.history,
-        storyWorkspaceHistoryState(),
+        storyWorkspaceHistoryState(navigation.replace ? null : sourceHref),
         target,
         navigation.replace,
       );

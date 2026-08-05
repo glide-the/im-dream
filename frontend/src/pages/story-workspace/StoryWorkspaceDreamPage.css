@@ -301,20 +301,15 @@
 
 .story-workspace-dream__mobile-agent { display: none; }
 
-.story-workspace-dream-agent-rail__trigger {
+.story-workspace-dream-agent-rail__summary {
   display: grid;
   width: 100%;
   gap: 6px;
   padding: 13px 4px 14px;
   color: var(--dream-body);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  font: inherit;
   text-align: left;
 }
 
-.story-workspace-dream-agent-rail__trigger:focus-visible,
 .story-workspace-dream-agent-dialog button:focus-visible,
 .story-workspace-dream-agent-dialog textarea:focus-visible {
   outline: 2px solid var(--dream-action);
@@ -994,7 +989,8 @@
 @media (max-width: 767px) {
   .story-workspace-dream { height: auto; min-height: 100%; overflow: visible; }
   .story-workspace-dream__masthead { min-height: 0; align-items: start; padding: 19px 18px 14px; }
-  .story-workspace-dream__activity { display: none; }
+  .story-workspace-dream__activity { width: 30px; height: 30px; flex: none; justify-content: center; padding: 0; }
+  .story-workspace-dream__activity > span:last-child { display: none; }
   .story-workspace-dream__spine { min-height: 57px; padding: 0 18px; overflow-x: auto; }
   .story-workspace-dream__mobile-agent { display: block; padding: 0 18px; background: var(--dream-paper); }
   .story-workspace-dream__mobile-agent .story-workspace-dream-agent-rail { margin: 0; }
@@ -1007,7 +1003,7 @@
   .story-workspace-dream__editor > .story-workspace-dream-agent-rail { display: none; }
   .story-workspace-dream-agent-panel__history { max-height: 42dvh; }
   .story-workspace-dream-agent-rail { margin: -4px 0 22px; }
-  .story-workspace-dream-agent-rail__trigger { grid-template-columns: minmax(0, 1fr); }
+  .story-workspace-dream-agent-rail__summary { grid-template-columns: minmax(0, 1fr); }
   .story-workspace-dream-agent-rail__preview,
   .story-workspace-dream-agent-rail__meta { grid-column: 1 / -1; }
   .story-workspace-dream-agent-dialog { position: fixed; inset: auto 8px 8px; width: auto; max-height: min(88dvh, 760px); min-height: min(520px, 82dvh); }

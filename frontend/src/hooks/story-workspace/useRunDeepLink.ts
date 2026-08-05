@@ -68,6 +68,11 @@ export interface StoryWorkspaceRunDeepLinkState {
   dismissNotice: () => void;
 }
 
+export type StoryWorkspaceRunDeepLinkSnapshot = Pick<
+  StoryWorkspaceRunDeepLinkState,
+  'run' | 'notice' | 'missingRunId'
+>;
+
 /**
  * Resolve-once gate for the deep-link effect (F-2 fix, 2026-08-04). The
  * cursor is latched only after a resolution is *applied*; an aborted attempt
@@ -110,13 +115,35 @@ export function createRunDeepLinkResolveGate(): RunDeepLinkResolveGate {
   };
 }
 
+export type StoryWorkspaceRunDeepLinkEffectPlan =
+  | { kind: 'clear'; state: StoryWorkspaceRunDeepLinkSnapshot }
+  | { kind: 'idle' }
+  | { kind: 'resolve'; runId: string };
+
+export function storyWorkspacePlanRunDeepLinkEffect(
+  enabled: boolean,
+  runId: string | null,
+  gate: RunDeepLinkResolveGate,
+): StoryWorkspaceRunDeepLinkEffectPlan {
+  if (!enabled || !runId) {
+    gate.reset();
+    return {
+      kind: 'clear',
+      state: { run: null, notice: null, missingRunId: null },
+    };
+  }
+  return gate.begin(runId)
+    ? { kind: 'resolve', runId }
+    : { kind: 'idle' };
+}
+
 /**
  * Resolve the Dream page `?run=` deep link once per distinct run id (initial
  * positioning only — later selection changes are not frozen to this run).
  * `enabled` gates resolution to routes that surface the Dream review flow;
- * leaving such a route clears both the resolved run and any notice (Task 4
- * review leftover). Without a usable run id the hook stays inert and the
- * default view is preserved.
+ * leaving such a route, or removing its run id, clears the resolved run,
+ * notice, missing id and resolve gate so the default view is restored and the
+ * same run can be resolved again later.
  */
 export function useRunDeepLink(
   enabled: boolean,
@@ -132,22 +159,22 @@ export function useRunDeepLink(
   const gate = gateRef.current;
 
   useEffect(() => {
-    if (!enabled) {
-      gate.reset();
-      setRun(null);
-      setNotice(null);
-      setMissingRunId(null);
+    const plan = storyWorkspacePlanRunDeepLinkEffect(enabled, runId, gate);
+    if (plan.kind === 'clear') {
+      setRun(plan.state.run);
+      setNotice(plan.state.notice);
+      setMissingRunId(plan.state.missingRunId);
       return;
     }
-    if (!runId || !gate.begin(runId)) return;
+    if (plan.kind === 'idle') return;
 
     setRun(null);
     setMissingRunId(null);
 
     let cancelled = false;
-    void resolveRunDeepLink(runId).then((resolution) => {
+    void resolveRunDeepLink(plan.runId).then((resolution) => {
       if (cancelled) return;
-      gate.markResolved(runId);
+      gate.markResolved(plan.runId);
       if (resolution.status === 'resolved') {
         setRun(resolution.run);
         setNotice(null);

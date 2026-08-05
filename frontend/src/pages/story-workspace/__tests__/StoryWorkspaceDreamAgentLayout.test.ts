@@ -6,12 +6,18 @@ import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
 import { readFileSync } from 'node:fs';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from '../../../components/story-workspace/dream/storyWorkspaceDreamAgentFocus';
+import {
+  storyWorkspaceDreamIsPlainPrimaryActivation,
+  storyWorkspaceDreamReturnState,
+  storyWorkspaceDreamShouldReturnToHistory,
+} from '../storyWorkspaceDreamNavigation';
 
 const PAGE = readFileSync(new URL('../StoryWorkspaceDreamPage.tsx', import.meta.url), 'utf8');
 const RAIL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail.tsx', import.meta.url), 'utf8');
 const DIALOG = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
 const PANEL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentPanel.tsx', import.meta.url), 'utf8');
 const CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
+const NAVIGATION = readFileSync(new URL('../storyWorkspaceDreamNavigation.ts', import.meta.url), 'utf8');
 
 test('Dream page integrates the dedicated rail/dialog and never a generic Chat view', () => {
   expect(PAGE).toContain('<StoryWorkspaceDreamAgentRail');
@@ -23,7 +29,7 @@ test('Dream page integrates the dedicated rail/dialog and never a generic Chat v
 
 test('run-bound Dream keeps its full Agent history inside the editor rail, not in a floating dialog', () => {
   expect(PAGE).toContain('className="story-workspace-dream__agent-panel"');
-  expect(PAGE).toContain("onOpen={() => openDreamAgent('desktop')}");
+  expect(PAGE).toContain('{agentPanelOpen && (');
   expect(PAGE).toContain('isOpen={agentPanelOpen}');
   expect(PAGE).toContain('!agentPanelOpen && (selection && dreamState && selectedFileItem ? (');
   expect(PAGE.match(/<StoryWorkspaceDreamAgentPanel/g)).toHaveLength(1);
@@ -41,18 +47,71 @@ test('Agent previews and Dream content controls switch one owned editor section'
 
 test('masthead activity is a safe Dream Agent preview trigger, never static live lifecycle copy', () => {
   expect(PAGE).toContain('className="story-workspace-dream__activity"');
-  expect(PAGE).toContain("onClick={() => openDreamAgent('masthead')}");
+  expect(PAGE).toContain('onClick={openDreamAgent}');
   expect(PAGE).toContain('agentPreview');
   expect(PAGE).not.toContain('className="story-workspace-dream__activity" aria-live');
 });
 
-test('Dream rail and inline panel share one stable controls target', () => {
+test('masthead preview and inline panel share one stable controls target', () => {
   expect(PANEL).toContain('STORY_WORKSPACE_DREAM_AGENT_PANEL_ID');
   expect(PANEL).toContain('id={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}');
-  expect(RAIL).toContain('readonly controlsId: string');
-  expect(RAIL).toContain('aria-controls={controlsId}');
-  expect(PAGE).toContain('controlsId={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}');
   expect(PAGE).toContain('aria-controls={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}');
+});
+
+test('Agent rail belongs exclusively to the Agent section on desktop and narrow layouts', () => {
+  expect(PAGE).toContain('{agentPanelOpen && (\n        <div className="story-workspace-dream__mobile-agent">');
+  expect(PAGE).toContain('{agentPanelOpen && (\n            <StoryWorkspaceDreamAgentRail');
+  expect(PAGE.match(/<StoryWorkspaceDreamAgentRail/g)).toHaveLength(2);
+  expect(CSS).toContain('.story-workspace-dream__activity > span:last-child { display: none; }');
+});
+
+test('Dream return link preserves native modifiers and only goes back for in-app history state', () => {
+  expect(PAGE).toContain('>← 返回上一页</a>');
+  expect(PAGE).toContain('storyWorkspaceDreamShouldReturnToHistory(window.history.state)');
+  expect(PAGE).toContain('storyWorkspaceDreamIsPlainPrimaryActivation(event)');
+  expect(PAGE).toContain('window.history.back()');
+  expect(PAGE).toContain("onNavigate('/story-workspace/dream')");
+  expect(NAVIGATION).toContain("const STORY_WORKSPACE_RETURN_KIND = 'story-workspace-push'");
+  expect(NAVIGATION).not.toContain("state.inkDreamView === 'story-workspace'");
+  expect(NAVIGATION).toContain('!event.metaKey');
+  expect(NAVIGATION).toContain('!event.ctrlKey');
+  expect(NAVIGATION).toContain('!event.shiftKey');
+  expect(NAVIGATION).toContain('!event.altKey');
+});
+
+test('Dream return navigation predicates distinguish in-app state and native link gestures', () => {
+  expect(storyWorkspaceDreamShouldReturnToHistory({ inkDreamView: 'story-workspace' })).toBe(false);
+  expect(storyWorkspaceDreamShouldReturnToHistory(null)).toBe(false);
+  expect(storyWorkspaceDreamShouldReturnToHistory({ inkDreamView: 'writing' })).toBe(false);
+
+  const pushState = storyWorkspaceDreamReturnState(
+    { inkDreamView: 'story-workspace' },
+    '/story-workspace/dream',
+  );
+  expect(pushState).toEqual({
+    inkDreamView: 'story-workspace',
+    storyWorkspaceReturn: {
+      kind: 'story-workspace-push',
+      sourceHref: '/story-workspace/dream',
+    },
+  });
+  expect(storyWorkspaceDreamShouldReturnToHistory(pushState)).toBe(true);
+
+  const replaceState = storyWorkspaceDreamReturnState(pushState, null);
+  expect(replaceState).toEqual({ inkDreamView: 'story-workspace' });
+  expect(storyWorkspaceDreamShouldReturnToHistory(replaceState)).toBe(false);
+
+  const plainActivation = {
+    altKey: false,
+    button: 0,
+    ctrlKey: false,
+    metaKey: false,
+    shiftKey: false,
+  };
+  expect(storyWorkspaceDreamIsPlainPrimaryActivation(plainActivation)).toBe(true);
+  expect(storyWorkspaceDreamIsPlainPrimaryActivation({ ...plainActivation, metaKey: true })).toBe(false);
+  expect(storyWorkspaceDreamIsPlainPrimaryActivation({ ...plainActivation, ctrlKey: true })).toBe(false);
+  expect(storyWorkspaceDreamIsPlainPrimaryActivation({ ...plainActivation, button: 1 })).toBe(false);
 });
 
 test('explicit panel collapse restores Agent trigger focus without stealing content-control focus', () => {
@@ -68,8 +127,11 @@ test('hidden Agent panel cannot participate in the content section layout', () =
   expect(CSS).toMatch(/\.story-workspace-dream-agent-panel\[hidden\]\s*{\s*display:\s*none;/);
 });
 
-test('rail is a named button and dialog has Escape focus return plus narrow modal semantics', () => {
-  expect(RAIL).toContain('aria-label={`打开 Dream Agent');
+test('rail is non-interactive Agent-section context and dialog keeps its accessibility contracts', () => {
+  expect(RAIL).toContain('<div className="story-workspace-dream-agent-rail__summary">');
+  expect(RAIL).not.toContain('<button');
+  expect(RAIL).not.toContain('aria-expanded');
+  expect(RAIL).not.toContain('onOpen');
   expect(DIALOG).toContain("event.key === 'Escape'");
   expect(DIALOG).toContain('restoreFocusRef.current?.focus()');
   expect(DIALOG).toContain('aria-modal={isNarrow}');
@@ -83,7 +145,7 @@ test('rail is a named button and dialog has Escape focus return plus narrow moda
   expect(DIALOG).toContain('aria-hidden="true"');
 });
 
-test('rail uses its whole preview as the action without duplicate opening copy', () => {
+test('rail shows compact Agent context without duplicate opening copy', () => {
   expect(RAIL).toContain('<span>Dream Agent · {deckName}</span>');
   expect(RAIL).not.toContain('· {workflowName} · {pluginVersion}');
   expect(RAIL).not.toContain('story-workspace-dream-agent-rail__open');
