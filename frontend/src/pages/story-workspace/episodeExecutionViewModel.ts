@@ -857,19 +857,11 @@ function shotAncestorSelections(
   const selections: StoryWorkspaceEpisodeSelection[] = [
     { kind: 'shot', id: shot.id },
   ];
-  const sceneSelections = sceneAncestorSelections(
-    viewModel,
-    shot.scriptSceneId,
-  );
-  selections.push(...sceneSelections);
-  if (
-    shot.narrativeBeatId !== null
-    && !selections.some(
-      (selection) => selection.kind === 'narrative-beat'
-        && selection.id === shot.narrativeBeatId,
-    )
-  ) {
-    selections.push({ kind: 'narrative-beat', id: shot.narrativeBeatId });
+  const scene = shot.scriptSceneId === null
+    ? undefined
+    : viewModel.scenesById[shot.scriptSceneId];
+  if (scene !== undefined && scene.shotIds.includes(shot.id)) {
+    selections.push(...sceneAncestorSelections(viewModel, scene.id));
   }
   return selections;
 }

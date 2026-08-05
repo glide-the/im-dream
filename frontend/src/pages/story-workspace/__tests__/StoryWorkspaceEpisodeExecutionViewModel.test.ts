@@ -53,6 +53,10 @@ const REVIEW_ORPHAN_ID = opaqueId(22);
 const REVIEW_SCENE_SECTION_ID = opaqueId(23);
 const REVIEW_BEAT_SECTION_ID = opaqueId(24);
 const REVIEW_ORPHAN_SECTION_ID = opaqueId(25);
+const ORPHAN_SHOT_PROMPT_ID = opaqueId(26);
+const ORPHAN_SHOT_QUEUE_ID = opaqueId(27);
+const ORPHAN_SHOT_REVIEW_ID = opaqueId(28);
+const ORPHAN_SHOT_REVIEW_SECTION_ID = opaqueId(29);
 
 const ARTIFACT_SPECS = [
   ['episode-outline.md', 'plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
@@ -213,7 +217,7 @@ function narrative(): StoryWorkspaceEpisodeNarrativeProjection {
         declaredScriptSceneRef: 'S99',
         declaredNarrativeBeatRef: null,
         scriptSceneId: null,
-        narrativeBeatId: null,
+        narrativeBeatId: BEAT_ID,
         associationStatus: 'orphan',
         shotType: null,
         characters: [],
@@ -239,7 +243,7 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
   return {
     manifestRevision: revision('d'),
     prompts: {
-      total: 3,
+      total: 4,
       nextCursor: null,
       items: [
         {
@@ -299,12 +303,31 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
           sourceArtifact: 'prompts/orphan.yaml',
           sourceRevision: revision('e'),
         },
+        {
+          id: ORPHAN_SHOT_PROMPT_ID,
+          shotId: 'S99-E01-SH01',
+          kind: 'video',
+          shotViewId: ORPHAN_SHOT_ID,
+          associationStatus: 'linked',
+          positive: 'explicitly targets the orphan shot only',
+          negative: null,
+          parameters: {
+            model: null, mode: null, durationSec: null, motionStrength: null,
+            cameraMotion: null, aspectRatio: null,
+          },
+          generability: {
+            characterAnchor: null, motionFeasibility: null,
+            durationBudget: null, notes: null,
+          },
+          sourceArtifact: 'prompts/orphan-shot.yaml',
+          sourceRevision: revision('e'),
+        },
       ],
     },
     renderGuide: {
       sections: [],
       queue: {
-        total: 2,
+        total: 3,
         nextCursor: null,
         items: [
           {
@@ -325,6 +348,19 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
             shotId: 'S01-E01-SH01',
             shotViewId: null,
             associationStatus: 'unlinked',
+            durationSec: 3,
+            risk: null,
+            priority: null,
+            renderer: null,
+            status: 'pending',
+            sourceArtifact: 'renders/render-guide.md',
+            sourceRevision: revision('f'),
+          },
+          {
+            id: ORPHAN_SHOT_QUEUE_ID,
+            shotId: 'S99-E01-SH01',
+            shotViewId: ORPHAN_SHOT_ID,
+            associationStatus: 'linked',
             durationSec: 3,
             risk: null,
             priority: null,
@@ -384,6 +420,14 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
           sourceArtifact: 'review-report.md',
           sourceRevision: revision('1'),
         },
+        {
+          id: ORPHAN_SHOT_REVIEW_SECTION_ID,
+          level: 2,
+          title: '孤立镜头结论',
+          text: '只明确定位到镜头。',
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
       ],
       targets: [
         {
@@ -436,15 +480,25 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
           sourceArtifact: 'review-report.md',
           sourceRevision: revision('1'),
         },
+        {
+          id: ORPHAN_SHOT_REVIEW_ID,
+          kind: 'shot',
+          sourceKey: 'S99-E01-SH01',
+          targetViewId: ORPHAN_SHOT_ID,
+          associationStatus: 'linked',
+          sectionId: ORPHAN_SHOT_REVIEW_SECTION_ID,
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
       ],
       sourceArtifact: 'review-report.md',
       sourceRevision: revision('1'),
     },
     associations: {
-      shotPromptCoverage: coverage(1, 3),
-      shotRenderQueueCoverage: coverage(1, 3),
-      totalPrompts: 3,
-      totalQueueEntries: 2,
+      shotPromptCoverage: coverage(2, 3),
+      shotRenderQueueCoverage: coverage(2, 3),
+      totalPrompts: 4,
+      totalQueueEntries: 3,
       orphanPrompts: [ORPHAN_PROMPT_ID],
       orphanQueueEntries: [],
       duplicateQueueShotIds: [],
@@ -649,7 +703,7 @@ test('renders zero-denominator association coverage as 尚未生成', () => {
 
   const viewModel = storyWorkspaceBuildEpisodeExecutionViewModel(surface());
   expect(viewModel.coverage.beatScene.label).toBe('33%');
-  expect(viewModel.coverage.shotPrompt.label).toBe('33%');
+  expect(viewModel.coverage.shotPrompt.label).toBe('67%');
 });
 
 test('returns explicit same-level, expand, child, collapse and parent keyboard actions', () => {
@@ -1010,6 +1064,41 @@ test('falls back auxiliary selections through only explicit previous relation an
     previous,
     intactCore,
   )).toEqual({ kind: 'episode', id: EPISODE_ID });
+});
+
+test('does not promote an orphan shot narrativeBeatId into a canonical ancestor', () => {
+  const previousNarrative = narrative();
+  const previous = storyWorkspaceBuildEpisodeExecutionViewModel(surface(
+    previousNarrative,
+    auxiliary(),
+  ));
+  const shotStillExists = storyWorkspaceBuildEpisodeExecutionViewModel(surface(
+    previousNarrative,
+    null,
+  ));
+  const shotDeleted = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    shots: previousNarrative.shots.filter((shot) => shot.id !== ORPHAN_SHOT_ID),
+  }, null));
+  const selections = [
+    { kind: 'shot' as const, id: ORPHAN_SHOT_ID },
+    { kind: 'prompt' as const, id: ORPHAN_SHOT_PROMPT_ID },
+    { kind: 'render-queue' as const, id: ORPHAN_SHOT_QUEUE_ID },
+    { kind: 'review-target' as const, id: ORPHAN_SHOT_REVIEW_ID },
+  ];
+
+  for (const selection of selections) {
+    expect(storyWorkspaceReconcileEpisodeSelection(
+      selection,
+      previous,
+      shotStillExists,
+    )).toEqual({ kind: 'shot', id: ORPHAN_SHOT_ID });
+    expect(storyWorkspaceReconcileEpisodeSelection(
+      selection,
+      previous,
+      shotDeleted,
+    )).toEqual({ kind: 'episode', id: EPISODE_ID });
+  }
 });
 
 test('returns no selection or navigation nodes when the Episode projection is unavailable', () => {
