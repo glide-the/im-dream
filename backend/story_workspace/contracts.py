@@ -840,7 +840,10 @@ class StoryWorkspaceEpisodeActionContinueCommand(_StoryWorkspaceDreamWireModel):
         normalized = value.strip()
         if not normalized:
             return None
-        if any(ord(character) < 32 and character not in "\n\t" for character in normalized):
+        if any(
+            ord(character) < 32 and character not in "\n\t"
+            for character in normalized
+        ):
             raise ValueError("user guidance must be bounded plain text")
         return normalized
 
