@@ -67,7 +67,7 @@
 //                    t() and format via getDateLocale(i18n.language).
 // [Sync] 2026-08-03: share button now opens ChatShareDialog (复制链接 placeholder +
 //                    导出图片 long-image export via chat-export-registry + exportThreadImage).
-// [Sync] 2026-08-04: add thread subagent summary entry and mutually-exclusive right sidebar.
+// [Sync] 2026-08-04: add thread subagent summary/right sidebar; Agent/Task chat buttons focus the matching task row.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -390,6 +390,7 @@ function ChatViewContent({
   const { workspaceEnabled } = useWorkspaceSession();
   const [fileSidebarOpen, setFileSidebarOpen] = useState(false);
   const [subagentSidebarOpen, setSubagentSidebarOpen] = useState(false);
+  const [focusedSubagentToolCallId, setFocusedSubagentToolCallId] = useState<string | null>(null);
   const [queuedPrompt, setQueuedPrompt] = useState('');
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
@@ -1015,7 +1016,10 @@ function ChatViewContent({
                 onToggle={() => {
                   setSubagentSidebarOpen((current) => {
                     const next = !current;
-                    if (next) setFileSidebarOpen(false);
+                    if (next) {
+                      setFileSidebarOpen(false);
+                      setFocusedSubagentToolCallId(null);
+                    }
                     return next;
                   });
                 }}
@@ -1110,6 +1114,11 @@ function ChatViewContent({
                   inputPlaceholder="Ask Ink & Memory…"
                   editorState={editorState}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
+                  onOpenSubagentTask={(toolCallId) => {
+                    setFocusedSubagentToolCallId(toolCallId);
+                    setFileSidebarOpen(false);
+                    setSubagentSidebarOpen(true);
+                  }}
                   voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
                   inputContextControl={(
@@ -1558,7 +1567,12 @@ function ChatViewContent({
         ) : null}
 
         {activeThreadId ? (
-          <SubagentSidebar threadId={activeThreadId} open={subagentSidebarOpen} onClose={() => setSubagentSidebarOpen(false)} />
+          <SubagentSidebar
+            threadId={activeThreadId}
+            open={subagentSidebarOpen}
+            focusToolCallId={focusedSubagentToolCallId}
+            onClose={() => setSubagentSidebarOpen(false)}
+          />
         ) : null}
 
         <ChatShareDialog

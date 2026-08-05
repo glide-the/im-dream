@@ -24,6 +24,8 @@
 //                    shared classifiers moved to toolConfirmation.ts (design §8).
 // [Sync] 2026-07-20: i18n — pending confirmation badge copy resolves through the
 //                    chat.toolConfirmation namespace (en + zh) via useTranslation.
+// [Sync] 2026-08-04: replace Agent/Task internal output envelopes with a task
+//                    button that opens the matching subagent sidebar item.
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { getToolName, isToolUIPart, type DynamicToolUIPart, type FileUIPart, type ToolUIPart, type UIMessage } from 'ai';
@@ -36,6 +38,8 @@ import { EditorWriteCompletedCard, type EditorWriteOutput } from './EditorWriteA
 import { isEditorWriteTool } from './editorWriteTools';
 import { resolvePendingToolConfirmation, resolveToolName } from './toolConfirmation';
 import { parsePartialInputJson, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
+import { useThreadSubagents } from '../../hooks/useThreadSubagents';
+import { SubagentToolButton } from './SubagentPanel';
 
 interface ChatMessageListProps {
   messages: UIMessage[];
@@ -50,6 +54,8 @@ interface ChatMessageListProps {
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
   /** Forwarded to ToolMessagePart for editor write tools — triggers Writing view reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
+  /** Opens the right-side task panel for an Agent/Task tool invocation. */
+  onOpenSubagentTask?: (toolCallId: string) => void;
 }
 
 type ToolStatus = 'executing' | 'completed' | 'error';
@@ -209,8 +215,9 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask }: ChatMessageListProps) {
   const { t } = useTranslation();
+  const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
   const [copiedPartId, setCopiedPartId] = useState<string | null>(null);
 
@@ -332,6 +339,8 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 const toolName = resolveToolName(toolPart);
                 const displayTitle = title || toolName || getToolName(toolPart);
                 const isBuiltInWrite = isBuiltInWriteTool(toolName);
+                const normalizedToolName = toolName.toLowerCase();
+                const isSubagentTool = normalizedToolName === 'agent' || normalizedToolName === 'task';
 
                 // Editor write tools always render as EditorWriteCompletedCard when
                 // completed — this check is independent of outputText so that history-
@@ -363,6 +372,29 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                         copiedPartId={copiedPartId}
                         isContentExpanded={isExpanded}
                         onToggleContent={toggleExpanded}
+                      />
+                    </div>
+                  );
+                }
+
+                // Agent output is an internal launch/result envelope. Replace it
+                // with a navigational task chip instead of exposing the raw
+                // "Async agent launched successfully" metadata in the chat.
+                if (isSubagentTool) {
+                  const rawInput = readToolInput(toolPart);
+                  const input = rawInput && typeof rawInput === 'object' && !Array.isArray(rawInput)
+                    ? rawInput as Record<string, unknown>
+                    : {};
+                  const description = typeof input.description === 'string' && input.description.trim()
+                    ? input.description.trim()
+                    : t('chat.subagents.taskFallback');
+                  const task = subagents.tasks.find((candidate) => candidate.toolCallId === toolPart.toolCallId);
+                  return (
+                    <div key={partKey}>
+                      <SubagentToolButton
+                        task={task}
+                        description={task?.description || description}
+                        onClick={onOpenSubagentTask ? () => onOpenSubagentTask(toolPart.toolCallId) : undefined}
                       />
                     </div>
                   );

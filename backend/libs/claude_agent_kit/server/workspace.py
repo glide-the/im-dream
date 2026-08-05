@@ -24,6 +24,8 @@
 #                    denyWrite to config/runtime internals instead of .claude/.
 # [Sync] 2026-06-16: workspace_file_sync imports direct .claude/skills writes
 #                    into workspace/skills before rebuilding discovery symlinks.
+# [Sync] 2026-08-04: pre-create .claude/agents so sandboxed runs can write
+#                    project subagent definitions with the built-in Write tool.
 # [Sync] 2026-06-17: include standard Linux sbin directories in sandbox runtime
 #                    read allowlist so bubblewrap can build its rootfs in Docker.
 # [Sync] 2026-06-21: add Settings-backed sandbox network policy emission.
@@ -603,6 +605,11 @@ def init_workspace(
         network_allowed_domains=sandbox_network_allowed_domains,
         fs_allowed_write_paths=sandbox_fs_allowed_write_paths,
     )
+
+    # Claude Code protects creation of new directories inside `.claude` from
+    # sandboxed Bash commands. Create the writable project-agent directory
+    # before the runner starts so built-in Write can manage its contents.
+    (workspace / ".claude" / "agents").mkdir(parents=True, exist_ok=True)
 
     # Ensure .claude/skills/ exists so symlink sync has a target directory.
     (workspace / ".claude" / "skills").mkdir(parents=True, exist_ok=True)

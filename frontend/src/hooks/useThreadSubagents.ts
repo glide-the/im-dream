@@ -9,6 +9,15 @@ import { apiUrl } from '../lib/apiBase';
 
 export type ThreadSubagentStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
+export interface ThreadSubagentActivity {
+  id: string;
+  kind: 'message' | 'tool';
+  status: 'started' | 'completed' | 'failed';
+  timestamp: string | null;
+  text: string | null;
+  toolName: string | null;
+}
+
 export interface ThreadSubagentTask {
   taskId: string;
   agentId: string;
@@ -22,6 +31,7 @@ export interface ThreadSubagentTask {
   finishedAt: string | null;
   durationMs: number | null;
   error: string | null;
+  activity: ThreadSubagentActivity[];
 }
 
 export interface ThreadSubagentCounts {
@@ -53,6 +63,14 @@ interface ThreadSubagentApiTask {
   finished_at: string | null;
   duration_ms: number | null;
   error: string | null;
+  activity?: Array<{
+    id: string;
+    kind: 'message' | 'tool';
+    status: 'started' | 'completed' | 'failed';
+    timestamp: string | null;
+    text: string | null;
+    tool_name: string | null;
+  }>;
 }
 
 interface ThreadSubagentApiResponse {
@@ -115,6 +133,21 @@ function normalizeTask(task: ThreadSubagentApiTask): ThreadSubagentTask | null {
     finishedAt: typeof task.finished_at === 'string' ? task.finished_at : null,
     durationMs: typeof task.duration_ms === 'number' ? task.duration_ms : null,
     error: typeof task.error === 'string' ? task.error : null,
+    activity: Array.isArray(task.activity)
+      ? task.activity.flatMap((item) => {
+          if (!item || typeof item.id !== 'string') return [];
+          if (!['message', 'tool'].includes(item.kind)) return [];
+          if (!['started', 'completed', 'failed'].includes(item.status)) return [];
+          return [{
+            id: item.id,
+            kind: item.kind,
+            status: item.status,
+            timestamp: typeof item.timestamp === 'string' ? item.timestamp : null,
+            text: typeof item.text === 'string' ? item.text : null,
+            toolName: typeof item.tool_name === 'string' ? item.tool_name : null,
+          }];
+        })
+      : [],
   };
 }
 

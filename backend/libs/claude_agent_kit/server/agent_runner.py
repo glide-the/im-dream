@@ -4,6 +4,8 @@
 #         SimpleClaudeAgentSDKClient from simple_cas_client.py;
 # [Output] Provide ClaudeAgentRunner and create_agent_runner to application layers.
 # [Pos] core runner node in libs/claude_agent_kit/server
+# [Sync] 2026-08-04: force Agent/Task run_in_background=false at the PreToolUse
+#                    boundary so the parent turn consumes child completion.
 # [Sync] 2026-05-09: forward stdio MCP tool input and result events for frontend traces.
 # [Sync] 2026-05-09: merge project .env SDK injection, stderr capture, and PreToolUse confirmation hooks while keeping Pet Chat's narrow stdio MCP surface.
 # [Sync] 2026-05-09: expose zero-argument necklace intent tools while keeping server-owned upstream parameters.
@@ -1783,15 +1785,41 @@ def _apply_low_sensitivity_query_permission(
     return None
 
 
-def _explicit_pre_tool_use_allow() -> HookJSONOutput:
+_SUBAGENT_TOOL_NAMES: frozenset[str] = frozenset({"Agent", "Task"})
+
+
+def _force_foreground_subagent_input(
+    tool_name: str,
+    tool_input: dict[str, Any],
+) -> tuple[dict[str, Any], bool]:
+    """Keep the parent turn alive until a spawned subagent returns.
+
+    Background Agent/Task calls can finish after the SDK query has already
+    emitted its terminal result. Their completion notification is then written
+    to the Claude transcript with no active parent model left to consume it.
+    Pinning foreground execution makes the tool result and the parent's final
+    response part of one streaming lifecycle.
+    """
+
+    if tool_name not in _SUBAGENT_TOOL_NAMES:
+        return tool_input, False
+    if tool_input.get("run_in_background") is False:
+        return tool_input, False
+    return {**tool_input, "run_in_background": False}, True
+
+
+def _explicit_pre_tool_use_allow(
+    updated_input: Optional[dict[str, Any]] = None,
+) -> HookJSONOutput:
     """Return the CLI 2.1+ explicit allow shape for PreToolUse hooks."""
 
-    return {
-        "hookSpecificOutput": {
-            "hookEventName": "PreToolUse",
-            "permissionDecision": "allow",
-        }
+    specific: dict[str, Any] = {
+        "hookEventName": "PreToolUse",
+        "permissionDecision": "allow",
     }
+    if updated_input is not None:
+        specific["updatedInput"] = updated_input
+    return {"hookSpecificOutput": specific}
 
 
 def _extract_hook_tool_name(hook_input: dict[str, Any]) -> str:
@@ -2096,7 +2124,11 @@ class ClaudeAgentRunner:
         ) -> HookJSONOutput:
             del context
             tool_name = _extract_hook_tool_name(hook_input)
-            tool_input = _extract_hook_tool_input(hook_input)
+            original_tool_input = _extract_hook_tool_input(hook_input)
+            tool_input, forced_foreground_subagent = _force_foreground_subagent_input(
+                tool_name,
+                original_tool_input,
+            )
             tool_call_id = tool_use_id or str(uuid4())
             pending_tool_calls[tool_call_id] = {
                 "tool_name": tool_name,
@@ -2180,7 +2212,9 @@ class ClaudeAgentRunner:
                 and tool_choice != "none"
                 and tool_name not in _ANSWER_FORM_TOOL_NAMES
             ):
-                return _explicit_pre_tool_use_allow()
+                return _explicit_pre_tool_use_allow(
+                    tool_input if forced_foreground_subagent else None
+                )
 
             if tool_choice == "auto":
                 workspace_files_permission = _apply_workspace_files_permission(
@@ -2274,12 +2308,9 @@ class ClaudeAgentRunner:
                                 }
                             }
 
-                        return {
-                            "hookSpecificOutput": {
-                                "hookEventName": "PreToolUse",
-                                "permissionDecision": "allow",
-                            }
-                        }
+                        return _explicit_pre_tool_use_allow(
+                            tool_input if forced_foreground_subagent else None
+                        )
 
                     if confirmation_result["approved"] is False:
                         pending_tool_calls.pop(tool_call_id, None)
@@ -2336,6 +2367,10 @@ class ClaudeAgentRunner:
             context: ToolPermissionContext,
         ) -> PermissionResult:
             del context
+            input_data, _ = _force_foreground_subagent_input(
+                tool_name,
+                dict(input_data or {}),
+            )
             is_sandbox_network_ask = tool_name == SANDBOX_NETWORK_ACCESS_TOOL_NAME
             host = (
                 str(input_data.get("host") or "").strip().lower() or None

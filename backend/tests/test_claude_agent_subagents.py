@@ -94,7 +94,7 @@ class TestSubagentProjection(unittest.TestCase):
                 _record(
                     "2026-08-04T10:00:04Z",
                     "assistant",
-                    [{"type": "tool_use", "name": "Read", "input": {"path": "/secret"}}],
+                    [{"type": "tool_use", "id": "read-secret", "name": "Read", "input": {"path": "/secret"}}],
                 ),
             ],
         )
@@ -134,11 +134,48 @@ class TestSubagentProjection(unittest.TestCase):
         self.assertEqual(by_id["completed"]["duration_ms"], 10_000)
         self.assertEqual(by_id["running"]["status"], "running")
         self.assertIsNone(by_id["running"]["finished_at"])
+        self.assertEqual(by_id["running"]["activity"][0]["tool_name"], "Read")
+        self.assertNotIn("input", by_id["running"]["activity"][0])
         self.assertEqual(by_id["cancelled"]["status"], "cancelled")
         self.assertEqual(by_id["failed"]["status"], "failed")
         self.assertEqual(by_id["failed"]["error"], "permission denied")
         self.assertNotIn("prompt", by_id["completed"])
         self.assertNotIn("path", by_id["running"])
+
+    def test_activity_excludes_prompts_thinking_and_tool_payloads(self) -> None:
+        self._write_agent(
+            "details",
+            [
+                _record("2026-08-04T13:00:00Z", "user", [{"type": "text", "text": "private prompt"}]),
+                _record(
+                    "2026-08-04T13:00:01Z",
+                    "assistant",
+                    [
+                        {"type": "thinking", "thinking": "private reasoning"},
+                        {"type": "tool_use", "id": "tool-1", "name": "Grep", "input": {"pattern": "secret"}},
+                    ],
+                ),
+                _record(
+                    "2026-08-04T13:00:02Z",
+                    "user",
+                    [{"type": "tool_result", "tool_use_id": "tool-1", "content": "/private/path"}],
+                ),
+                _record(
+                    "2026-08-04T13:00:03Z",
+                    "assistant",
+                    [{"type": "text", "text": "Review complete."}],
+                ),
+            ],
+        )
+
+        activity = build_thread_subagents_payload(self.thread_id, self.root)["tasks"][0]["activity"]
+        serialized = json.dumps(activity)
+        self.assertEqual([item["status"] for item in activity], ["started", "completed", "completed"])
+        self.assertNotIn("private prompt", serialized)
+        self.assertNotIn("private reasoning", serialized)
+        self.assertNotIn("secret", serialized)
+        self.assertNotIn("/private/path", serialized)
+        self.assertIn("Review complete.", serialized)
 
     def test_intermediate_error_does_not_override_successful_final_answer(self) -> None:
         self._write_agent(

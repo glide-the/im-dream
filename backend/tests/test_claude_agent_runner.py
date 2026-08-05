@@ -973,6 +973,63 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(specific.get("permissionDecision"), "allow")
         self.assertNotIn("updatedInput", specific)
 
+    async def test_full_access_forces_background_agent_into_foreground(self):
+        """A background subagent must finish before the parent SDK turn exits."""
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                im_full_access_enabled=True,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Agent",
+                    "tool_input": {
+                        "description": "Inspect the editor",
+                        "subagent_type": "Explore",
+                        "run_in_background": True,
+                    },
+                },
+                "call-agent-background",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+        self.assertEqual(
+            specific.get("updatedInput"),
+            {
+                "description": "Inspect the editor",
+                "subagent_type": "Explore",
+                "run_in_background": False,
+            },
+        )
+
+    async def test_confirmed_agent_is_also_forced_into_foreground(self):
+        async def confirm(_payload: dict):
+            return {"approved": True}
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hook = await self._capture_pre_tool_use_hook(
+                cwd=temp_dir,
+                on_tool_confirmation_request=confirm,
+            )
+            result = await hook(
+                {
+                    "tool_name": "Agent",
+                    "tool_input": {
+                        "description": "Review the draft",
+                        "run_in_background": True,
+                    },
+                },
+                "call-agent-confirmed",
+                _SDK_HOOK_CONTEXT(),
+            )
+
+        specific = _hook_specific(result, {})
+        self.assertEqual(specific.get("permissionDecision"), "allow")
+        self.assertFalse(specific["updatedInput"]["run_in_background"])
+
     async def test_story_workspace_tools_are_registered_and_auto_allowed(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             hook = await self._capture_pre_tool_use_hook(

@@ -1,9 +1,10 @@
 """Project Claude Code subagent transcripts into a thread-scoped API payload.
 
 The Claude runtime owns the canonical transcript files under the server-owned
-thread workspace.  This module reads only the small metadata files plus a
-bounded tail of each JSONL transcript; raw prompts, tool inputs, and internal
-paths are never returned to the browser.
+thread workspace. This module reads only the small metadata files plus a
+bounded tail of each JSONL transcript. It returns assistant updates and tool
+names for a safe execution timeline; raw prompts, thinking, tool inputs,
+successful tool outputs, and internal paths are never returned to the browser.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from typing import Any, Iterable
 _DEFAULT_MAX_ITEMS = 200
 _DEFAULT_TRANSCRIPT_SCAN_BYTES = 512 * 1024
 _SUMMARY_MAX_CHARS = 600
+_ACTIVITY_MAX_ITEMS = 80
 _INTERRUPTED_MARKERS = (
     "[Request interrupted by user]",
     "request interrupted by user",
@@ -99,6 +101,80 @@ def _read_bounded_records(path: Path) -> list[dict[str, Any]]:
     return records
 
 
+def _project_activity(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a bounded, browser-safe execution timeline.
+
+    User prompts, thinking blocks, tool inputs, and successful tool-result
+    payloads stay server-side. The UI receives only assistant text, tool names,
+    lifecycle state, and timestamps.
+    """
+
+    activity: list[dict[str, Any]] = []
+    tool_names: dict[str, str] = {}
+    sequence = 0
+
+    def append_item(
+        *,
+        kind: str,
+        timestamp: str | None,
+        status: str,
+        text: str | None = None,
+        tool_name: str | None = None,
+    ) -> None:
+        nonlocal sequence
+        sequence += 1
+        activity.append(
+            {
+                "id": f"activity-{sequence}",
+                "kind": kind,
+                "timestamp": timestamp,
+                "status": status,
+                "text": text,
+                "tool_name": tool_name,
+            }
+        )
+
+    for record in records:
+        timestamp = record.get("timestamp") if isinstance(record.get("timestamp"), str) else None
+        message = record.get("message")
+        role = message.get("role") if isinstance(message, dict) else None
+        for block in _iter_content_blocks(record):
+            block_type = block.get("type")
+            if role == "assistant" and block_type == "text":
+                text = _compact_text(block.get("text"))
+                if text:
+                    append_item(
+                        kind="message",
+                        timestamp=timestamp,
+                        status="completed",
+                        text=text,
+                    )
+                continue
+            if role == "assistant" and block_type == "tool_use":
+                tool_name = _compact_text(block.get("name")) or "Tool"
+                tool_use_id = block.get("id")
+                if isinstance(tool_use_id, str) and tool_use_id:
+                    tool_names[tool_use_id] = tool_name
+                append_item(
+                    kind="tool",
+                    timestamp=timestamp,
+                    status="started",
+                    tool_name=tool_name,
+                )
+                continue
+            if role == "user" and block_type == "tool_result":
+                tool_use_id = block.get("tool_use_id")
+                tool_name = tool_names.get(tool_use_id) if isinstance(tool_use_id, str) else None
+                append_item(
+                    kind="tool",
+                    timestamp=timestamp,
+                    status="failed" if block.get("is_error") is True else "completed",
+                    tool_name=tool_name or "Tool",
+                )
+
+    return activity[-_ACTIVITY_MAX_ITEMS:]
+
+
 def _project_task(meta_path: Path) -> dict[str, Any] | None:
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
@@ -113,6 +189,7 @@ def _project_task(meta_path: Path) -> dict[str, Any] | None:
         return None
     transcript_path = meta_path.with_name(f"{stem}.jsonl")
     records = _read_bounded_records(transcript_path) if transcript_path.is_file() else []
+    activity = _project_activity(records)
 
     first_at: datetime | None = None
     last_at: datetime | None = None
@@ -185,6 +262,7 @@ def _project_task(meta_path: Path) -> dict[str, Any] | None:
         "finished_at": last_at.isoformat().replace("+00:00", "Z") if terminal and last_at else None,
         "duration_ms": duration_ms,
         "error": terminal_error if status == "failed" else None,
+        "activity": activity,
     }
 
 

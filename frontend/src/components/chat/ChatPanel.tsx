@@ -39,6 +39,7 @@
 //                    renders the network-variant card (claude-agent-sandbox-network-permission-tool.md §5).
 // [Sync] 2026-08-03: register a live message getter in chat-export-registry for the share
 //                    dialog long-image export.
+// [Sync] 2026-08-04: forward Agent/Task chat-row navigation to ChatView's subagent sidebar.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -127,6 +128,8 @@ interface ChatPanelProps {
   editorState?: Record<string, unknown> | null;
   /** Called after an editor write tool is confirmed so the Writing view can reload from the database. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
+  /** Opens the right-side subagent detail panel for a chat tool invocation. */
+  onOpenSubagentTask?: (toolCallId: string) => void;
   /** Voice / deck system prompt injected as voice_context into each user message. */
   voiceSystemPrompt?: string;
   /** Immutable Deck selection for this thread. */
@@ -166,6 +169,7 @@ export default function ChatPanel({
   onConversationStart,
   editorState,
   onEditorWriteConfirmed,
+  onOpenSubagentTask,
   voiceSystemPrompt,
   deckId,
   inputContextControl,
@@ -599,6 +603,7 @@ export default function ChatPanel({
             setMessages={setMessages}
             sendMessage={sendMessage}
             onEditorWriteConfirmed={onEditorWriteConfirmed}
+            onOpenSubagentTask={onOpenSubagentTask}
           />
           <div ref={bottomRef} aria-hidden="true" />
         </div>

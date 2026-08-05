@@ -119,6 +119,15 @@ class TestInitWorkspace(unittest.TestCase):
         init_workspace("sess-repair")
         self.assertTrue(logs_dir.is_dir())
 
+    def test_creates_and_repairs_project_agents_directory(self):
+        ws = init_workspace("sess-agents")
+        agents_dir = ws / ".claude" / "agents"
+        self.assertTrue(agents_dir.is_dir())
+
+        agents_dir.rmdir()
+        init_workspace("sess-agents")
+        self.assertTrue(agents_dir.is_dir())
+
     def test_preserves_existing_claude_content_on_repeat(self):
         ws = init_workspace("sess-copy")
         marker = ws / ".claude" / "test_marker.txt"
@@ -154,6 +163,10 @@ class TestInitWorkspace(unittest.TestCase):
         )
         self.assertNotIn(
             str((ws / ".claude" / "skills").resolve()),
+            sandbox["filesystem"]["denyWrite"],
+        )
+        self.assertNotIn(
+            str((ws / ".claude" / "agents").resolve()),
             sandbox["filesystem"]["denyWrite"],
         )
         self.assertIn(
