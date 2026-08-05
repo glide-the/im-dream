@@ -581,7 +581,9 @@ flowchart TB
 
 ### 15.2 窄屏
 
+- Story Workspace 全局侧栏固定收敛为 72px 图标轨道，文字保留为视觉隐藏的可访问名称；内容主区必须占用剩余宽度，在 390px 与 320px viewport 均不得产生文档级横向溢出。
 - viewport < 768px：Dream rail 收成一条消息预览触发器，位于 page masthead 后、stage navigation 前；展开后仍只 mount 一个 inline panel，在单列编辑区内显示。
+- Dream inline panel 打开时，属于 Dream 内容 section 的 sticky confirmation footer 不渲染；消息历史、工具确认或留言输入成为右栏唯一活动内容，避免输入与发送按钮被确认栏覆盖。
 - execution dialog 降级为底部 sheet/近全屏层，`inset: 8px`，高度 `min(88dvh, 760px)`；使用 `dvh` 避免软键盘遮住输入。
 - 内容单列，不出现固定 420px 宽度或水平滚动。
 - modal 时锁背景滚动并约束焦点。
@@ -796,6 +798,8 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | DEC-046 | AskUser 公开 question ID 由服务端生成不透明 `qN`；确认 registry 对重叠 SSE 使用 turn-scoped 订阅租约，terminal 强制清理 |
 | DEC-047 | masthead 是折叠消息预览唯一 owner；rail 只持有状态、stage/revisions 与 Dream 专属 Deck 元信息入口，Panel 不重复 header |
 | DEC-048 | 中间过程只投影后端固定分类的安全 activity，并以 Dream 专属 disclosure 渲染；不复用 ChatPanel/ChatMessageList 的 raw rich parts |
+| DEC-049 | assistant 公开文本的 snapshot 与 SSE 共用保守脱敏策略；流式文本跨帧保留尾部 guard 后才释放安全边界，命中敏感模式后只输出固定替代文案 |
+| DEC-050 | 窄屏侧栏固定为 72px 可访问图标轨道；Dream Agent section 打开时不渲染内容确认栏，消息/确认/输入区拥有唯一可用工作面 |
 
 ## 22. 证据索引
 
@@ -805,6 +809,7 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 - UI Design v2 视觉证据在既有 design_007 已记录：Warm Canvas、Paper Cream、少面板、多留白、细分隔线与克制阴影（同文件 `:340-348`）。
 - 最新真实链路与遗留：`docs/design/story-workspace/2026-08-04-dream-launch-writer-integration-implementation-record.md:356-414`。
 - 自动跟随、工具确认与安全复审：`docs/design/story-workspace/2026-08-05-dream-agent-scroll-and-tool-confirmation-rework-record.md`。
+- Rail/Panel 信息层级、安全 activity、公开文本脱敏与窄屏验收：`docs/design/story-workspace/2026-08-05-dream-agent-information-hierarchy-and-activity-rework-record.md`。
 
 ## 23. 变更历史
 
@@ -816,3 +821,4 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | 2026-08-05 | 消息交互返工：补齐 near-bottom 自动跟随、前往最新消息标记，以及服务端安全投影的 Dream 专属工具确认校样条 |
 | 2026-08-05 | 消息交互复审返工：发送强制跟随到新对话；AskUser 改为不透明 `qN`；补齐危险命令 fail-closed、规范 run ID 豁免、稳定连接退避与重叠 SSE 租约 |
 | 2026-08-05 | 信息层级返工：Rail 移除重复回复/空态并增加 Dream Deck 元信息入口；Panel 移除重复 header；中间过程改为服务端安全 activity + Dream 专属折叠渲染 |
+| 2026-08-05 | 信息层级复审返工：补齐跨帧公开文本脱敏、confirmation activity 终态游标、activity-only 自动跟随/播报、元信息焦点管理与 72px 窄屏侧栏；Dream Agent section 打开时隐藏内容确认栏 |
