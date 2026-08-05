@@ -595,7 +595,8 @@ def _create_gateway_schema(db: sqlite3.Connection) -> None:
           deck_plugin_binding_id TEXT, binding_revision INTEGER
         );
         CREATE TABLE chat_thread (
-          id TEXT PRIMARY KEY, user_id INTEGER, deck_id TEXT, updated_at TEXT
+          id TEXT PRIMARY KEY, user_id INTEGER, deck_id TEXT,
+          voice_id TEXT, updated_at TEXT
         );
         CREATE TABLE chat_message (
           id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, parts TEXT,
@@ -646,8 +647,8 @@ def _seed_authorized_gateway_run(db: sqlite3.Connection) -> None:
         (snapshot, deck, binding, 1),
     )
     db.execute(
-        "INSERT INTO chat_thread VALUES (?, ?, ?, ?)",
-        (THREAD_ID, int(ACTOR_ID), deck, "2026-08-05T00:00:00Z"),
+        "INSERT INTO chat_thread VALUES (?, ?, ?, ?, ?)",
+        (THREAD_ID, int(ACTOR_ID), deck, None, "2026-08-05T00:00:00Z"),
     )
     metadata = {
         "kind": "story-workspace-dream-launch",

@@ -836,7 +836,8 @@ def _create_gateway_schema(db: sqlite3.Connection) -> None:
           deck_plugin_binding_id TEXT, binding_revision INTEGER
         );
         CREATE TABLE chat_thread (
-          id TEXT PRIMARY KEY, user_id INTEGER, deck_id TEXT, updated_at TEXT
+          id TEXT PRIMARY KEY, user_id INTEGER, deck_id TEXT,
+          voice_id TEXT, updated_at TEXT
         );
         CREATE TABLE chat_message (
           id TEXT PRIMARY KEY, thread_id TEXT, role TEXT, parts TEXT,
@@ -885,7 +886,7 @@ def _seed_gateway_run(
         "('snapshot-1', 'deck-1', 'binding-1', 1)"
     )
     db.execute(
-        "INSERT INTO chat_thread VALUES (?, 7, 'deck-1', '2026-08-06T00:00:00Z')",
+        "INSERT INTO chat_thread VALUES (?, 7, 'deck-1', NULL, '2026-08-06T00:00:00Z')",
         (THREAD_ID,),
     )
     source_metadata = {

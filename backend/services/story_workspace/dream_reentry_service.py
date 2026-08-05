@@ -33,6 +33,38 @@ _StoryWorkspaceDreamLiveTurnLookup = Callable[[str], bool]
 _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE = 400
 _STORY_WORKSPACE_DREAM_REENTRY_RECENT_LIMIT = 20
 _STORY_WORKSPACE_DREAM_GOAL_PREFIX_MAX = 80
+_STORY_WORKSPACE_DREAM_CONTEXT_REQUIRED_KEYS = frozenset({
+    "workflow_run_id",
+    "thread_id",
+    "deck_id",
+    "deck_plugin_id",
+    "deck_plugin_version",
+    "deck_plugin_binding_id",
+    "binding_revision",
+    "deck_runtime_snapshot_id",
+    "runtime_plugin_lock_id",
+})
+_STORY_WORKSPACE_DREAM_CONTEXT_AGENT_KEY = "agent_id"
+_STORY_WORKSPACE_DREAM_LAUNCH_ALLOWED_KEYS = frozenset({
+    "kind",
+    "schemaVersion",
+    "visibility",
+    "actorId",
+    "workspaceId",
+    "deckId",
+    "agentId",
+    "goal",
+    "idempotencyKey",
+    "requestFingerprint",
+    "dispatchStatus",
+    "dispatchClaimId",
+    "dispatchClaimedAt",
+    "workflowRunId",
+    "threadId",
+    "dreamContext",
+    "story_workspace_episode_identity",
+})
+_STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED = object()
 
 
 class StoryWorkspaceDreamReentryService:
@@ -119,7 +151,8 @@ class StoryWorkspaceDreamReentryService:
             "run.source_message_id AS source_message_id, "
             "run.created_at AS run_created_at, "
             "deck.id AS deck_id, deck.name AS deck_name, "
-            "thread.updated_at AS thread_updated_at, source.metadata AS source_metadata "
+            "thread.updated_at AS thread_updated_at, "
+            "thread.voice_id AS thread_voice_id, source.metadata AS source_metadata "
             "FROM workflow_runs AS run "
             "JOIN story_workspace_workspaces AS workspace "
             "ON workspace.id = run.workspace_id "
@@ -173,6 +206,14 @@ class StoryWorkspaceDreamReentryService:
             "AND binding.deck_plugin_id = run.deck_plugin_id "
             "AND binding.deck_plugin_version = run.deck_plugin_version "
             "AND binding.binding_revision = run.binding_revision "
+            "AND CASE WHEN json_valid(source.metadata) THEN ("
+            "(json_type(source.metadata, '$.agentId') IS NULL "
+            "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NULL) "
+            "OR (json_type(source.metadata, '$.agentId') IS NOT NULL "
+            "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NOT NULL "
+            "AND json_extract(source.metadata, '$.agentId') IS thread.voice_id "
+            "AND json_extract(source.metadata, '$.dreamContext.agent_id') IS thread.voice_id)"
+            ") ELSE 0 END "
             "ORDER BY run.created_at DESC, run.id ASC",
             (
                 str(actor_id),
@@ -198,6 +239,7 @@ class StoryWorkspaceDreamReentryService:
             workspace_id=str(row["workspace_id"]),
             run_id=run_id,
             thread_id=thread_id,
+            thread_agent_id=row["thread_voice_id"],
             deck_id=deck_id,
             deck_plugin_id=str(row["deck_plugin_id"]),
             deck_plugin_version=str(row["deck_plugin_version"]),
@@ -372,32 +414,74 @@ class StoryWorkspaceDreamReentryService:
         binding_revision: int,
         runtime_snapshot_id: str,
         runtime_lock_id: str,
+        thread_agent_id: Any = _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED,
     ) -> bool:
         try:
             metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
         except (TypeError, ValueError):
             return False
-        dream_context = metadata.get("dreamContext") if isinstance(metadata, dict) else None
+        if not isinstance(metadata, dict):
+            return False
+        if not set(metadata).issubset(_STORY_WORKSPACE_DREAM_LAUNCH_ALLOWED_KEYS):
+            return False
+        dream_context = metadata.get("dreamContext")
+        if not isinstance(dream_context, dict):
+            return False
+        context_keys = set(dream_context)
+        allowed_context_keys = (
+            _STORY_WORKSPACE_DREAM_CONTEXT_REQUIRED_KEYS
+            | {_STORY_WORKSPACE_DREAM_CONTEXT_AGENT_KEY}
+        )
+        if (
+            not _STORY_WORKSPACE_DREAM_CONTEXT_REQUIRED_KEYS.issubset(context_keys)
+            or not context_keys.issubset(allowed_context_keys)
+        ):
+            return False
+        expected_context = {
+            "workflow_run_id": run_id,
+            "thread_id": thread_id,
+            "deck_id": deck_id,
+            "deck_plugin_id": deck_plugin_id,
+            "deck_plugin_version": deck_plugin_version,
+            "deck_plugin_binding_id": binding_id,
+            "binding_revision": binding_revision,
+            "deck_runtime_snapshot_id": runtime_snapshot_id,
+            "runtime_plugin_lock_id": runtime_lock_id,
+        }
+        if any(dream_context.get(key) != value for key, value in expected_context.items()):
+            return False
+        top_agent_present = "agentId" in metadata
+        context_agent_present = _STORY_WORKSPACE_DREAM_CONTEXT_AGENT_KEY in dream_context
+        if top_agent_present != context_agent_present:
+            return False
+        if thread_agent_id is not _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED:
+            if thread_agent_id is not None and (
+                not isinstance(thread_agent_id, str) or not thread_agent_id
+            ):
+                return False
+        if top_agent_present:
+            top_agent = metadata["agentId"]
+            context_agent = dream_context[_STORY_WORKSPACE_DREAM_CONTEXT_AGENT_KEY]
+            if top_agent is not None and (
+                not isinstance(top_agent, str)
+                or not top_agent
+                or top_agent != top_agent.strip()
+            ):
+                return False
+            if top_agent != context_agent:
+                return False
+            if (
+                thread_agent_id is not _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED
+                and top_agent != thread_agent_id
+            ):
+                return False
         return (
-            isinstance(metadata, dict)
-            and metadata.get("kind") == "story-workspace-dream-launch"
+            metadata.get("kind") == "story-workspace-dream-launch"
             and metadata.get("actorId") == str(actor_id)
             and metadata.get("workspaceId") == workspace_id
             and metadata.get("deckId") == deck_id
             and metadata.get("workflowRunId") == run_id
             and metadata.get("threadId") == thread_id
-            and isinstance(dream_context, dict)
-            and dream_context == {
-                "workflow_run_id": run_id,
-                "thread_id": thread_id,
-                "deck_id": deck_id,
-                "deck_plugin_id": deck_plugin_id,
-                "deck_plugin_version": deck_plugin_version,
-                "deck_plugin_binding_id": binding_id,
-                "binding_revision": binding_revision,
-                "deck_runtime_snapshot_id": runtime_snapshot_id,
-                "runtime_plugin_lock_id": runtime_lock_id,
-            }
         )
 
     @staticmethod

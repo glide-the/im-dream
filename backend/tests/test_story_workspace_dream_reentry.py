@@ -108,6 +108,7 @@ def _create_schema(db: sqlite3.Connection) -> None:
           id TEXT PRIMARY KEY,
           user_id INTEGER,
           deck_id TEXT,
+          voice_id TEXT,
           updated_at TEXT
         );
         CREATE TABLE chat_message (
@@ -202,6 +203,8 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         preflight_lock_id: str | None = None,
         stage_activity_at: datetime | None = None,
         dream_release: bool = True,
+        real_launch_metadata: bool = False,
+        agent_id: str | None = None,
     ) -> str:
         value = run_id(number)
         thread = f"thread-{number}"
@@ -257,8 +260,8 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             (snapshot, deck, binding, 1),
         )
         self.db.execute(
-            "INSERT INTO chat_thread VALUES (?, ?, ?, ?)",
-            (thread, int(actor), thread_deck or deck, updated_at),
+            "INSERT INTO chat_thread VALUES (?, ?, ?, ?, ?)",
+            (thread, int(actor), thread_deck or deck, agent_id, updated_at),
         )
         metadata = json.loads(_launch_metadata(
             run=value,
@@ -274,6 +277,16 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         metadata["dreamContext"]["deck_plugin_id"] = plugin
         metadata["dreamContext"]["deck_runtime_snapshot_id"] = snapshot
         metadata["dreamContext"]["runtime_plugin_lock_id"] = lock
+        if real_launch_metadata:
+            metadata.update({
+                "schemaVersion": "story-workspace-dream-launch/v1",
+                "visibility": "system-hidden",
+                "agentId": agent_id,
+                "idempotencyKey": f"dream-reentry-{number}",
+                "requestFingerprint": "sha256:" + "a" * 64,
+                "dispatchStatus": "dispatched",
+            })
+            metadata["dreamContext"]["agent_id"] = agent_id
         self.db.execute(
             "INSERT INTO chat_message VALUES (?, ?, 'user', '[]', ?, ?)",
             (source, thread, json.dumps(metadata), created_at),
@@ -303,6 +316,25 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         )
         self.db.commit()
         return value
+
+    def _source_metadata(self, number: int) -> dict[str, object]:
+        row = self.db.execute(
+            "SELECT metadata FROM chat_message WHERE id = ?",
+            (f"source-{number}",),
+        ).fetchone()
+        self.assertIsNotNone(row)
+        return json.loads(row["metadata"])
+
+    def _replace_source_metadata(
+        self,
+        number: int,
+        metadata: dict[str, object],
+    ) -> None:
+        self.db.execute(
+            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            (json.dumps(metadata), f"source-{number}"),
+        )
+        self.db.commit()
 
     def _service(self, loader=None):
         from services.story_workspace.dream_reentry_service import (
@@ -358,6 +390,109 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
 
         self.assertEqual(response.runs[0].story_workspace_run_id, value)
         self.assertEqual(response.runs[0].goal_prefix, "甲板一")
+
+    def test_real_launch_agent_provenance_and_legacy_missing_fields_are_visible(self) -> None:
+        legacy = self._add_run(8, complete=False)
+        real = self._add_run(
+            9,
+            complete=False,
+            real_launch_metadata=True,
+            agent_id="voice-dream-1",
+        )
+        real_without_agent = self._add_run(
+            10,
+            complete=False,
+            real_launch_metadata=True,
+        )
+        statements: list[str] = []
+        self.db.set_trace_callback(statements.append)
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(
+            {item.story_workspace_run_id for item in response.runs},
+            {legacy, real, real_without_agent},
+        )
+        authorized = next(
+            statement for statement in statements
+            if "FROM workflow_runs AS run" in statement
+        )
+        self.assertIn("thread.voice_id AS thread_voice_id", authorized)
+
+    def test_agent_provenance_is_paired_and_matches_the_authorized_thread(self) -> None:
+        valid = self._add_run(
+            170,
+            complete=False,
+            real_launch_metadata=True,
+            agent_id="voice-valid",
+        )
+        mutations = {
+            171: lambda value: value["dreamContext"].__setitem__("agent_id", "voice-other"),
+            172: lambda value: value.__setitem__("agentId", "voice-other"),
+            173: lambda value: value.pop("agentId"),
+            174: lambda value: value["dreamContext"].pop("agent_id"),
+        }
+        for number, mutate in mutations.items():
+            self._add_run(
+                number,
+                complete=False,
+                real_launch_metadata=True,
+                agent_id="voice-bound",
+            )
+            metadata = self._source_metadata(number)
+            mutate(metadata)
+            self._replace_source_metadata(number, metadata)
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(
+            [item.story_workspace_run_id for item in response.runs],
+            [valid],
+        )
+
+    def test_dream_context_keeps_nine_required_fields_and_rejects_unknown_extras(self) -> None:
+        required = (
+            "workflow_run_id",
+            "thread_id",
+            "deck_id",
+            "deck_plugin_id",
+            "deck_plugin_version",
+            "deck_plugin_binding_id",
+            "binding_revision",
+            "deck_runtime_snapshot_id",
+            "runtime_plugin_lock_id",
+        )
+        visible = self._add_run(
+            180,
+            complete=False,
+            real_launch_metadata=True,
+            agent_id="voice-visible",
+        )
+        for offset, field in enumerate(required, start=181):
+            self._add_run(
+                offset,
+                complete=False,
+                real_launch_metadata=True,
+                agent_id=f"voice-{offset}",
+            )
+            metadata = self._source_metadata(offset)
+            metadata["dreamContext"].pop(field)
+            self._replace_source_metadata(offset, metadata)
+        self._add_run(190, complete=False, real_launch_metadata=True)
+        context_extra = self._source_metadata(190)
+        context_extra["dreamContext"]["unexpected"] = "forged"
+        self._replace_source_metadata(190, context_extra)
+        self._add_run(191, complete=False, real_launch_metadata=True)
+        top_level_extra = self._source_metadata(191)
+        top_level_extra["unexpected"] = "forged"
+        self._replace_source_metadata(191, top_level_extra)
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(
+            [item.story_workspace_run_id for item in response.runs],
+            [visible],
+        )
 
     def test_fails_closed_for_foreign_or_forged_binding_rows(self) -> None:
         visible = self._add_run(10, complete=False)
