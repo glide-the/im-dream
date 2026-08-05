@@ -6,6 +6,7 @@ from pathlib import Path
 from uuid import UUID
 
 import pytest
+import yaml
 
 from services.story_workspace.episode_artifact_adapter import (
     STORY_WORKSPACE_EPISODE_MARKDOWN_MAX_BYTES,
@@ -307,19 +308,32 @@ def test_real_ep21_preserves_canonical_dialogue_and_character_fields() -> None:
     }
 
 
-def test_all_vendor_storyboards_match_the_bounded_canonical_dtos() -> None:
+def test_all_vendor_narrative_artifacts_match_the_bounded_public_dtos() -> None:
     storyboards = sorted(VENDOR_STORIES.glob("*/episodes/*/storyboard.yaml"))
+    outlines = sorted(VENDOR_STORIES.glob("*/episodes/*/episode-outline.md"))
+    scripts = sorted(VENDOR_STORIES.glob("*/episodes/*/script.md"))
     projected_shots = 0
-    for storyboard in storyboards:
+    projected_dialogue = 0
+    projected_emotions = 0
+    for outline, script, storyboard in zip(outlines, scripts, storyboards, strict=True):
+        assert outline.parent == script.parent == storyboard.parent
         projection = _adapter().project(
-            outline=None,
-            script=None,
+            outline=outline.read_bytes(),
+            script=script.read_bytes(),
             storyboard=storyboard.read_bytes(),
         )
         projected_shots += len(projection.shots)
+        projected_dialogue += sum(len(shot.dialogue) for shot in projection.shots)
+        projected_emotions += sum(
+            character.emotion is not None
+            for shot in projection.shots
+            for character in shot.characters
+        )
 
-    assert len(storyboards) == 85
+    assert len(outlines) == len(scripts) == len(storyboards) == 85
     assert projected_shots == 3832
+    assert projected_dialogue == 111
+    assert projected_emotions == 160
 
 
 def test_stable_ids_survive_insertion_and_reordering() -> None:
@@ -573,3 +587,191 @@ def test_contract_rejects_impossible_coverage() -> None:
             total=0,
             ratio=0.0,
         )
+
+
+@pytest.mark.parametrize(
+    ("unsafe_text", "reason"),
+    [
+        ("/srv/private/episode/secret.txt", "sensitive_text"),
+        (r"D:\production\credentials.json", "sensitive_text"),
+        (r"\\render-host\episode-share\credentials.json", "sensitive_text"),
+        ("~/.aws/credentials", "sensitive_text"),
+        ("$HOME/.ssh/id_ed25519", "sensitive_text"),
+        ("${HOME}/Documents/episode-notes.md", "sensitive_text"),
+        (r"%USERPROFILE%\Documents\episode-notes.md", "sensitive_text"),
+        (r"%HOMEPATH%\Desktop\episode-notes.md", "sensitive_text"),
+        ("SERVICE_TOKEN=abcdefghijklmnop123456", "credential_forbidden"),
+        ("DATABASE_PASSWORD=hunter2-private", "credential_forbidden"),
+        ("Authorization: Bearer abcdefghijklmnop", "credential_forbidden"),
+        ("Bearer abcdefghijklmnop", "credential_forbidden"),
+        ("ToKeN = visible-value", "credential_forbidden"),
+        ("ghp_abcdefghijklmnopqrstuvwxyz123456", "credential_forbidden"),
+        ("8f4a9d7c2b6e1a3f5d8c0b2e4a6f9d1c", "credential_forbidden"),
+        ("hidden reasoning: choose the private route", "sensitive_text"),
+        ("chain-of-thought must stay private", "sensitive_text"),
+        ("内部推理：不要展示", "sensitive_text"),
+        ("tool: Bash(command='pwd')", "raw_command_forbidden"),
+        ("raw_command=render --api-key private", "raw_command_forbidden"),
+        ("curl https://example.test --header auth", "raw_command_forbidden"),
+        ("renderer --api-key private", "raw_command_forbidden"),
+        ("renderer kling-v2 --seed=42", "raw_command_forbidden"),
+        ("tool --verbose", "raw_command_forbidden"),
+    ],
+)
+def test_narrative_public_text_policy_fails_closed_by_category(
+    unsafe_text: str,
+    reason: str,
+) -> None:
+    outline = f"""---
+series: Safe Series
+episode: 1
+title: Pilot
+---
+# Pilot
+## Core Conflict
+**One-line conflict**: {unsafe_text}
+""".encode()
+
+    projection = None
+    with pytest.raises(
+        StoryWorkspaceEpisodeArtifactParseError,
+        match=reason,
+    ) as captured:
+        projection = _adapter().project(
+            outline=outline,
+            script=None,
+            storyboard=None,
+        )
+
+    assert unsafe_text.strip() not in str(captured.value)
+    serialized_projection = (
+        projection.model_dump_json(by_alias=True) if projection is not None else ""
+    )
+    assert unsafe_text not in serialized_projection
+
+
+def _public_text_field_probes(unsafe_text: str) -> list[tuple[str, bytes]]:
+    outline_frontmatter = yaml.safe_dump(
+        {
+            "series": "Safe",
+            "episode": 1,
+            "title": unsafe_text,
+        },
+        allow_unicode=True,
+        sort_keys=False,
+    )
+    storyboard_base = {
+        "shots": [
+            {
+                "shot_id": "S01-E01-001",
+                "scene_ref": "scene-safe",
+                "characters": [
+                    {
+                        "ref": "mc-01",
+                        "display_name": "Safe",
+                        "action": "Safe",
+                        "emotion": "Safe",
+                    }
+                ],
+                "camera": {"angle": "Safe", "movement": "Safe"},
+                "visual": "Safe",
+                "dialogue": [
+                    {"speaker": "mc-01", "line": "Safe", "type": "spoken"}
+                ],
+            }
+        ]
+    }
+    probes: list[tuple[str, bytes]] = [
+        ("outline-title", f"---\n{outline_frontmatter}---\n# Safe\n".encode()),
+        ("outline-goal", f"# Safe\n## Story Goals\n- {unsafe_text}\n".encode()),
+        (
+            "outline-hook",
+            f"# Safe\n## Cliffhanger\n{unsafe_text}\n".encode(),
+        ),
+        (
+            "outline-beat",
+            f"# Safe\n### SC-01. Safe\n**Scene Summary**:\n{unsafe_text}\n".encode(),
+        ),
+        (
+            "script-scene-action",
+            f"# Safe\nS01. Safe [scene-safe]\n[{unsafe_text}]\n".encode(),
+        ),
+        (
+            "script-dialogue",
+            f"# Safe\nS01. Safe [scene-safe]\nSpeaker\n{unsafe_text}\n".encode(),
+        ),
+        (
+            "script-camera",
+            f"# Safe\nS01. Safe [scene-safe]\nCAM: {unsafe_text}\n".encode(),
+        ),
+    ]
+    storyboard_fields = {
+        "storyboard-visual": ("visual", unsafe_text),
+        "storyboard-camera": ("camera", {"angle": unsafe_text}),
+        "storyboard-character": (
+            "characters",
+            [
+                {
+                    "ref": "mc-01",
+                    "action": unsafe_text,
+                    "emotion": "Safe",
+                }
+            ],
+        ),
+        "storyboard-dialogue": (
+            "dialogue",
+            [{"speaker": "mc-01", "line": unsafe_text, "type": "spoken"}],
+        ),
+    }
+    for label, (field, value) in storyboard_fields.items():
+        payload = yaml.safe_load(yaml.safe_dump(storyboard_base))
+        payload["shots"][0][field] = value
+        probes.append(
+            (
+                label,
+                yaml.safe_dump(
+                    payload,
+                    allow_unicode=True,
+                    sort_keys=False,
+                ).encode(),
+            )
+        )
+    generated = yaml.safe_dump(
+        {
+            "generated_from": unsafe_text,
+            **storyboard_base,
+        },
+        allow_unicode=True,
+        sort_keys=False,
+    ).encode()
+    probes.append(("storyboard-generated-from", generated))
+    return probes
+
+
+@pytest.mark.parametrize(
+    ("label", "artifact"),
+    _public_text_field_probes("curl https://example.test --header auth"),
+)
+def test_every_narrative_dto_text_boundary_rejects_raw_commands(
+    label: str,
+    artifact: bytes,
+) -> None:
+    inputs = {
+        "outline": artifact if label.startswith("outline") else None,
+        "script": artifact if label.startswith("script") else None,
+        "storyboard": artifact if label.startswith("storyboard") else None,
+    }
+
+    projection = None
+    with pytest.raises(
+        StoryWorkspaceEpisodeArtifactParseError,
+        match="raw_command_forbidden",
+    ) as captured:
+        projection = _adapter().project(**inputs)
+
+    serialized_error = str(captured.value)
+    assert "curl https://example.test --header auth" not in serialized_error
+    serialized_projection = (
+        projection.model_dump_json(by_alias=True) if projection is not None else ""
+    )
+    assert "curl https://example.test --header auth" not in serialized_projection

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import math
 import re
 from typing import Any, Iterable, Mapping, Sequence
 from uuid import UUID, uuid5
@@ -56,6 +57,77 @@ _SCENE_REF_RE = re.compile(r"\[([^\]\r\n]{1,255})\]")
 _CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 _SOURCE_REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
 _GENERATED_FROM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$")
+_ABSOLUTE_PATH_RE = re.compile(
+    r"(?i)(?:"
+    r"(?<![A-Za-z0-9:/])/(?!/)(?:[A-Za-z0-9._~-]+/)+[^\s`]+|"
+    r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
+    r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
+    r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\}|"
+    r"%(?:USERPROFILE|HOMEPATH)%|\$env:(?:USERPROFILE|HOME))"
+    r"[\\/][^\s`]+"
+    r")"
+)
+_CREDENTIAL_RE = re.compile(
+    r"(?i)(?:"
+    r"\b(?:[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN|SECRET|PASSWORD|"
+    r"CREDENTIALS?|PRIVATE_KEY)|API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|"
+    r"PASSWORD|CREDENTIALS?)\b(?:\s*[:=]\s*[^\s`]+)?|"
+    r"\b(?:api[\s_-]*keys?|access[\s_-]*tokens?|refresh[\s_-]*tokens?|"
+    r"tokens?|secrets?|auth(?:orization)?|credentials?|passwords?)"
+    r"\b\s*[:=]\s*[^\s`]+|"
+    r"\bbearer\s+[A-Za-z0-9._-]{8,}|"
+    r"(?<![A-Za-z0-9_-])(?:sk-(?:(?:ant|proj)-)?|"
+    r"gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])|"
+    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\."
+    r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])|"
+    r"(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])|"
+    r"(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])|"
+    r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+    r")"
+)
+_PRIVATE_MODEL_TEXT_RE = re.compile(
+    r"(?i)(?:"
+    r"\bchain[\s_-]*(?:of[\s_-]*)?thought\b|"
+    r"\bhidden[\s_-]*reasoning\b|\binternal[\s_-]*reasoning\b|"
+    r"\bsystem[\s_-]*prompt\b|隐藏推理|内部推理|思维链|系统提示词"
+    r")"
+)
+_RAW_COMMAND_RE = re.compile(
+    r"(?i)(?:^|[\s`\[({:])(?:"
+    r"\$\s+|sudo\s+|curl\b|wget\b|"
+    r"(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node\b|"
+    r"npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|"
+    r"rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|"
+    r"cat\s+(?:~?/\.ssh/|/etc/(?:passwd|shadow)|"
+    r"\S*(?:credential|secret|token|private[_-]?key))|"
+    r"dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|"
+    r"/drama-forge:[a-z0-9_-]+|"
+    r"(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=]"
+    r")"
+)
+_SENSITIVE_CLI_FLAG_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|"
+    r"credential|authorization)(?:[=\s]|$)"
+)
+_RAW_TOOL_CONTEXT_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])(?:tool|renderer)\b"
+)
+_CLI_OPTION_RE = re.compile(
+    r"(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*"
+)
+_LONG_HEX_SECRET_RE = re.compile(
+    r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])"
+)
+_LONG_TOKEN_CANDIDATE_RE = re.compile(
+    r"(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{32,}={0,2}"
+    r"(?![A-Za-z0-9+/_=-])"
+)
+_ASSIGNED_TOKEN_CANDIDATE_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])[A-Za-z_][A-Za-z0-9_.-]{0,40}\s*[:=]\s*"
+    r"([A-Za-z0-9+/_-]{16,}={0,2})"
+)
+_PUBLIC_DREAM_RUN_ID_RE = re.compile(r"run_[0-9a-f]{32}")
+_PUBLIC_CHARACTER_BEAT_ID_RE = re.compile(r"ARC-[A-Z0-9-]{1,124}")
 
 
 class StoryWorkspaceEpisodeArtifactParseError(ValueError):
@@ -366,11 +438,17 @@ class StoryWorkspaceEpisodeArtifactAdapter:
     ) -> tuple[list[StoryWorkspaceEpisodeStoryboardShot], list[str], list[str]]:
         if content is None:
             return [], [], []
+        text = _decode(
+            content,
+            "storyboard",
+            STORY_WORKSPACE_EPISODE_YAML_MAX_BYTES,
+        )
         documents = _safe_yaml_documents(
-            _decode(content, "storyboard", STORY_WORKSPACE_EPISODE_YAML_MAX_BYTES),
+            text,
             "storyboard",
             max_documents=4,
         )
+        _enforce_public_text_policy(text, "storyboard")
         shots_value: Any = None
         generated_from: str | None = None
         for document in documents:
@@ -539,6 +617,102 @@ def _decode(content: bytes, artifact: str, max_bytes: int) -> str:
     return text
 
 
+def _enforce_public_text_policy(value: str, artifact: str) -> None:
+    """Fail closed before any narrative artifact string can enter a public DTO."""
+
+    if _ABSOLUTE_PATH_RE.search(value):
+        raise StoryWorkspaceEpisodeArtifactParseError(artifact, "sensitive_text")
+    if _CREDENTIAL_RE.search(value):
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "credential_forbidden",
+        )
+    if _PRIVATE_MODEL_TEXT_RE.search(value):
+        raise StoryWorkspaceEpisodeArtifactParseError(artifact, "sensitive_text")
+    if _looks_like_high_entropy_secret(value):
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "credential_forbidden",
+        )
+    if (
+        _RAW_COMMAND_RE.search(value)
+        or _SENSITIVE_CLI_FLAG_RE.search(value)
+        or _contains_raw_tool_option(value)
+    ):
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "raw_command_forbidden",
+        )
+
+
+def _contains_raw_tool_option(value: str) -> bool:
+    for line in value.splitlines():
+        context = _RAW_TOOL_CONTEXT_RE.search(line)
+        if (
+            context is not None
+            and _CLI_OPTION_RE.search(line, context.end()) is not None
+        ):
+            return True
+    return False
+
+
+def _looks_like_high_entropy_secret(value: str) -> bool:
+    def high_entropy(
+        candidate: str,
+        *,
+        threshold: float,
+        minimum_character_classes: int,
+    ) -> bool:
+        token = candidate.rstrip("=")
+        if not token:
+            return False
+        counts = {character: token.count(character) for character in set(token)}
+        entropy = -sum(
+            (count / len(token)) * math.log2(count / len(token))
+            for count in counts.values()
+        )
+        character_classes = sum((
+            any(character.islower() for character in token),
+            any(character.isupper() for character in token),
+            any(character.isdigit() for character in token),
+            any(character in "+/_-" for character in token),
+        ))
+        return (
+            character_classes >= minimum_character_classes
+            and entropy >= threshold
+        )
+
+    if any(
+        high_entropy(
+            match.group(0),
+            threshold=3.0,
+            minimum_character_classes=1,
+        )
+        for match in _LONG_HEX_SECRET_RE.finditer(value)
+        if value[max(0, match.start() - 4) : match.start()].lower() != "run_"
+    ):
+        return True
+    if any(
+        high_entropy(
+            match.group(1),
+            threshold=3.0,
+            minimum_character_classes=3,
+        )
+        for match in _ASSIGNED_TOKEN_CANDIDATE_RE.finditer(value)
+        if _PUBLIC_CHARACTER_BEAT_ID_RE.fullmatch(match.group(1)) is None
+    ):
+        return True
+    return any(
+        high_entropy(
+            match.group(0),
+            threshold=3.5,
+            minimum_character_classes=3,
+        )
+        for match in _LONG_TOKEN_CANDIDATE_RE.finditer(value)
+        if _PUBLIC_DREAM_RUN_ID_RE.fullmatch(match.group(0)) is None
+    )
+
+
 def _source_revision(value: str | None, artifact: str) -> str | None:
     if value is None:
         return None
@@ -585,6 +759,7 @@ def _parse_markdown(content: bytes, artifact: str) -> _MarkdownDocument:
         metadata = loaded or {}
         body_start = closing + 1
     body = "\n".join(lines[body_start:])
+    _enforce_public_text_policy(text, artifact)
     if sum(_HEADING_RE.match(line) is not None for line in body.splitlines()) > (
         STORY_WORKSPACE_EPISODE_MAX_SECTIONS
     ):
