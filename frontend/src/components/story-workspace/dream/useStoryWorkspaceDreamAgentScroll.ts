@@ -3,6 +3,10 @@
 // [Pos] Shared Dream Agent Panel/Dialog scrolling; independent from generic Chat UI.
 
 import { useCallback, useEffect, useRef, useState, type UIEvent } from 'react';
+import type {
+  StoryWorkspaceDreamAgentContent,
+  StoryWorkspaceDreamAgentActivityContent,
+} from '../../../hooks/story-workspace/contracts';
 
 export const STORY_WORKSPACE_DREAM_AGENT_BOTTOM_PROXIMITY_PX = 120;
 
@@ -16,6 +20,101 @@ export interface StoryWorkspaceDreamAgentScrollPosition {
   readonly distanceFromBottom: number;
   readonly isNearBottom: boolean;
   readonly isScrollable: boolean;
+}
+
+export type StoryWorkspaceDreamAgentScrollUpdateMode = 'follow' | 'measure';
+
+export function storyWorkspaceDreamAgentScrollUpdateMode(
+  forceFollow: boolean,
+  isNearBottom: boolean,
+): StoryWorkspaceDreamAgentScrollUpdateMode {
+  return forceFollow || isNearBottom ? 'follow' : 'measure';
+}
+
+/** Stable render revision that changes for text deltas and same-id activity status updates. */
+export function storyWorkspaceDreamAgentContentRevision(
+  content: readonly StoryWorkspaceDreamAgentContent[],
+): string {
+  return JSON.stringify(content.map((part) => part.kind === 'text'
+    ? ['text', part.text, part.truncated]
+    : ['activity', part.id, part.status]));
+}
+
+const STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_STATUS_LABEL = {
+  running: '进行中',
+  completed: '已完成',
+  stopped: '已停止',
+} as const;
+
+export interface StoryWorkspaceDreamAgentActivityAnnouncement {
+  readonly key: string;
+  readonly text: string;
+}
+
+/** Return only a newly added or status-changed safe activity, never private runtime data. */
+export function storyWorkspaceDreamAgentNextActivityAnnouncement(
+  previous: readonly StoryWorkspaceDreamAgentContent[],
+  current: readonly StoryWorkspaceDreamAgentContent[],
+): StoryWorkspaceDreamAgentActivityAnnouncement | null {
+  const previousStatuses = new Map(previous.flatMap((part) => part.kind === 'activity'
+    ? [[part.id, part.status] as const]
+    : []));
+  let changed: StoryWorkspaceDreamAgentActivityContent | null = null;
+  for (const part of current) {
+    if (part.kind === 'activity' && previousStatuses.get(part.id) !== part.status) {
+      changed = part;
+    }
+  }
+  if (!changed) return null;
+  return {
+    key: `${changed.id}:${changed.status}`,
+    text: `${changed.label}，${STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_STATUS_LABEL[changed.status]}`,
+  };
+}
+
+export interface StoryWorkspaceDreamAgentAnnouncementOptions {
+  readonly streamContent: readonly StoryWorkspaceDreamAgentContent[];
+  readonly streamText: string;
+}
+
+/** Debounce safe activity/text updates into one quiet polite live-region string. */
+export function useStoryWorkspaceDreamAgentAnnouncement({
+  streamContent,
+  streamText,
+}: StoryWorkspaceDreamAgentAnnouncementOptions): string {
+  const [announcement, setAnnouncement] = useState('');
+  const previousContentRef = useRef<readonly StoryWorkspaceDreamAgentContent[]>([]);
+  const pendingActivityRef = useRef<StoryWorkspaceDreamAgentActivityAnnouncement | null>(null);
+  const lastAnnouncedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const activityAnnouncement = storyWorkspaceDreamAgentNextActivityAnnouncement(
+      previousContentRef.current,
+      streamContent,
+    );
+    previousContentRef.current = streamContent;
+    if (activityAnnouncement) pendingActivityRef.current = activityAnnouncement;
+
+    const pendingActivity = pendingActivityRef.current;
+    const nextAnnouncement = pendingActivity?.text ?? streamText;
+    const nextKey = pendingActivity?.key ?? (streamText ? `text:${streamText}` : null);
+    if (!nextKey || !nextAnnouncement) {
+      pendingActivityRef.current = null;
+      lastAnnouncedKeyRef.current = null;
+      setAnnouncement('');
+      return undefined;
+    }
+    if (lastAnnouncedKeyRef.current === nextKey) return undefined;
+
+    const timer = setTimeout(() => {
+      lastAnnouncedKeyRef.current = nextKey;
+      if (pendingActivityRef.current?.key === nextKey) pendingActivityRef.current = null;
+      setAnnouncement(nextAnnouncement);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [streamContent, streamText]);
+
+  return announcement;
 }
 
 export function storyWorkspaceDreamAgentScrollBehavior(
@@ -42,6 +141,7 @@ export function storyWorkspaceDreamAgentScrollPosition(
 }
 
 export interface StoryWorkspaceDreamAgentScrollOptions {
+  readonly contentRevision: string;
   readonly enabled?: boolean;
   readonly messageCount: number;
   readonly streamText: string;
@@ -49,6 +149,7 @@ export interface StoryWorkspaceDreamAgentScrollOptions {
 
 /** Follow new safe Dream messages only while the reader remains near the end. */
 export function useStoryWorkspaceDreamAgentScroll({
+  contentRevision,
   enabled = true,
   messageCount,
   streamText,
@@ -103,7 +204,11 @@ export function useStoryWorkspaceDreamAgentScroll({
       setShowScrollToLatest(false);
       return undefined;
     }
-    if (forceFollowRef.current || isNearBottomRef.current) {
+    const updateMode = storyWorkspaceDreamAgentScrollUpdateMode(
+      forceFollowRef.current,
+      isNearBottomRef.current,
+    );
+    if (updateMode === 'follow') {
       setShowScrollToLatest(false);
       const frameId = requestAnimationFrame(() => {
         scrollHistoryToLatest();
@@ -112,7 +217,7 @@ export function useStoryWorkspaceDreamAgentScroll({
     }
     const frameId = requestAnimationFrame(() => updateScrollPosition(element));
     return () => cancelAnimationFrame(frameId);
-  }, [enabled, messageCount, scrollHistoryToLatest, streamText, updateScrollPosition]);
+  }, [enabled, contentRevision, messageCount, scrollHistoryToLatest, streamText, updateScrollPosition]);
 
   return {
     bottomRef,

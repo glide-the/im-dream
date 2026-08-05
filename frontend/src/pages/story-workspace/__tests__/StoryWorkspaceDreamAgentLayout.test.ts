@@ -178,7 +178,7 @@ test('Dream Panel and Dialog share Dream-only follow-latest controls', () => {
   }
   expect(SCROLL).toContain('const forceFollowRef = useRef(false);');
   expect(SCROLL).toContain('if (forceFollowRef.current && position.isNearBottom)');
-  expect(SCROLL).toContain('if (forceFollowRef.current || isNearBottomRef.current)');
+  expect(SCROLL).toContain("if (updateMode === 'follow')");
   expect(SCROLL).not.toContain('ChatPanel');
   expect(SCROLL).not.toContain('ChatView');
   expect(CSS).toContain('.story-workspace-dream-agent-scroll-to-latest');
@@ -259,9 +259,10 @@ test('rail shows compact Agent context without duplicate opening copy', () => {
   expect(CSS).not.toContain('.story-workspace-dream-agent-rail__open');
 });
 
-test('rail stays silent, while dialog owns the throttled announcement and mobile focus cycles in both directions', () => {
+test('rail stays silent, while Dream surfaces share throttled announcements and mobile focus cycles in both directions', () => {
   expect(RAIL).not.toContain('aria-live');
-  expect(DIALOG).toContain('setTimeout(() => setAnnouncedStreamText(streamText), 500)');
+  expect(PANEL).toContain('useStoryWorkspaceDreamAgentAnnouncement({');
+  expect(DIALOG).toContain('useStoryWorkspaceDreamAgentAnnouncement({');
   expect(storyWorkspaceDreamAgentFocusCycleIndex(0, 3, true)).toBe(2);
   expect(storyWorkspaceDreamAgentFocusCycleIndex(2, 3, false)).toBe(0);
 });

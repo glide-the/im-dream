@@ -9,7 +9,11 @@ import {
 } from '../../../hooks/story-workspace';
 import { StoryWorkspaceDreamAgentMessageList } from './StoryWorkspaceDreamAgentMessageList';
 import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
-import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
+import {
+  storyWorkspaceDreamAgentContentRevision,
+  useStoryWorkspaceDreamAgentAnnouncement,
+  useStoryWorkspaceDreamAgentScroll,
+} from './useStoryWorkspaceDreamAgentScroll';
 
 export const STORY_WORKSPACE_DREAM_AGENT_PANEL_ID = 'story-workspace-dream-agent-panel';
 
@@ -34,10 +38,14 @@ function storyWorkspaceDreamAgentPanelHint(agent: StoryWorkspaceDreamAgentViewMo
 /** Expand the current Dream Agent in place without changing page or run ownership. */
 export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreFocusRef }: StoryWorkspaceDreamAgentPanelProps) {
   const [draft, setDraft] = useState('');
-  const [announcedStreamText, setAnnouncedStreamText] = useState('');
   const pendingKeyRef = useRef<string | null>(null);
   const inputHint = storyWorkspaceDreamAgentPanelHint(agent);
   const { markRead, snapshot, streamText } = agent;
+  const contentRevision = storyWorkspaceDreamAgentContentRevision(agent.streamContent);
+  const announcement = useStoryWorkspaceDreamAgentAnnouncement({
+    streamContent: agent.streamContent,
+    streamText: agent.streamText,
+  });
   const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
   const {
     bottomRef,
@@ -46,6 +54,7 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
     scrollToLatest,
     showScrollToLatest,
   } = useStoryWorkspaceDreamAgentScroll({
+    contentRevision,
     enabled: isOpen,
     messageCount: snapshot?.messages.length ?? 0,
     streamText,
@@ -54,11 +63,6 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
   useEffect(() => {
     if (isOpen) markRead();
   }, [isOpen, markRead, snapshot?.messages, streamText]);
-
-  useEffect(() => {
-    const timer = setTimeout(() => setAnnouncedStreamText(streamText), 500);
-    return () => clearTimeout(timer);
-  }, [streamText]);
 
   const closePanel = () => {
     onClose();
@@ -105,7 +109,7 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
           >↓ <span>前往最新消息</span></button>
         )}
       </div>
-      <p className="story-workspace-dream-agent-panel__announcement" aria-atomic="false" aria-live="polite">{announcedStreamText}</p>
+      <p className="story-workspace-dream-agent-panel__announcement" aria-atomic="false" aria-live="polite">{announcement}</p>
       {agent.pendingToolConfirmation ? (
         <StoryWorkspaceDreamToolConfirmation
           confirmation={agent.pendingToolConfirmation}

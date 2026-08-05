@@ -10,7 +10,11 @@ import {
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
 import { StoryWorkspaceDreamAgentMessageList } from './StoryWorkspaceDreamAgentMessageList';
 import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
-import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
+import {
+  storyWorkspaceDreamAgentContentRevision,
+  useStoryWorkspaceDreamAgentAnnouncement,
+  useStoryWorkspaceDreamAgentScroll,
+} from './useStoryWorkspaceDreamAgentScroll';
 
 export interface StoryWorkspaceDreamAgentDialogProps {
   readonly agent: StoryWorkspaceDreamAgentViewModel;
@@ -53,6 +57,11 @@ export function StoryWorkspaceDreamAgentDialog({
   const inputHint = storyWorkspaceDreamAgentInputHint(agent);
   const status = storyWorkspaceDreamAgentDialogStatus(agent);
   const { markRead, snapshot, streamText } = agent;
+  const contentRevision = storyWorkspaceDreamAgentContentRevision(agent.streamContent);
+  const announcement = useStoryWorkspaceDreamAgentAnnouncement({
+    streamContent: agent.streamContent,
+    streamText: agent.streamText,
+  });
   const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
   const {
     bottomRef,
@@ -61,6 +70,7 @@ export function StoryWorkspaceDreamAgentDialog({
     scrollToLatest,
     showScrollToLatest,
   } = useStoryWorkspaceDreamAgentScroll({
+    contentRevision,
     messageCount: snapshot?.messages.length ?? 0,
     streamText,
   });
@@ -131,12 +141,6 @@ export function StoryWorkspaceDreamAgentDialog({
     };
   }, [isNarrow]);
 
-  const [announcedStreamText, setAnnouncedStreamText] = useState('');
-  useEffect(() => {
-    const timer = setTimeout(() => setAnnouncedStreamText(streamText), 500);
-    return () => clearTimeout(timer);
-  }, [streamText]);
-
   const submit = async () => {
     if (!canSend) return;
     if (!pendingKeyRef.current) pendingKeyRef.current = storyWorkspaceNewDreamAgentIdempotencyKey();
@@ -187,7 +191,7 @@ export function StoryWorkspaceDreamAgentDialog({
           >↓ <span>前往最新消息</span></button>
         )}
       </div>
-      <p className="story-workspace-dream-agent-dialog__stream-announcement" aria-atomic="false" aria-live="polite">{announcedStreamText}</p>
+      <p className="story-workspace-dream-agent-dialog__stream-announcement" aria-atomic="false" aria-live="polite">{announcement}</p>
       {agent.pendingToolConfirmation ? (
         <StoryWorkspaceDreamToolConfirmation
           confirmation={agent.pendingToolConfirmation}
