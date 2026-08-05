@@ -427,7 +427,8 @@
 .story-workspace-dream-agent-dialog__header button,
 .story-workspace-dream-agent-dialog__composer > button { padding: 0; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; cursor: pointer; font: inherit; font-size: 11px; }
 
-.story-workspace-dream-agent-dialog__history { min-height: 0; padding: 15px 19px; overflow: auto; }
+.story-workspace-dream-agent-dialog__history-shell { position: relative; min-height: 0; }
+.story-workspace-dream-agent-dialog__history { height: 100%; min-height: 0; box-sizing: border-box; padding: 15px 19px; overflow: auto; }
 .story-workspace-dream-agent-dialog__message { margin: 0 0 16px; }
 .story-workspace-dream-agent-dialog__message p { margin: 5px 0 0; white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
 .story-workspace-dream-agent-dialog__message--user { padding-left: 26px; color: var(--dream-muted); }
@@ -452,7 +453,8 @@
 .story-workspace-dream-agent-panel > header strong { color: var(--dream-ink); font-family: Georgia, serif; font-size: 16px; font-weight: 500; }
 .story-workspace-dream-agent-panel button { padding: 0; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; cursor: pointer; font: inherit; font-size: 11px; }
 .story-workspace-dream-agent-panel button:disabled { cursor: not-allowed; opacity: .46; }
-.story-workspace-dream-agent-panel__history { min-height: 0; max-height: 36vh; padding: 14px 0; overflow: auto; }
+.story-workspace-dream-agent-panel__history-shell { position: relative; min-height: 0; max-height: 36vh; }
+.story-workspace-dream-agent-panel__history { height: 100%; min-height: 0; max-height: 36vh; box-sizing: border-box; padding: 14px 0; overflow: auto; }
 .story-workspace-dream-agent-panel__message { margin: 0 0 14px; }
 .story-workspace-dream-agent-panel__message p { margin: 5px 0 0; color: var(--dream-ink); white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
 .story-workspace-dream-agent-panel__message--user { padding-left: 18px; }
@@ -464,6 +466,32 @@
 .story-workspace-dream-agent-panel label { display: grid; gap: 7px; }
 .story-workspace-dream-agent-panel textarea { width: 100%; box-sizing: border-box; padding: 8px 1px; color: var(--dream-ink); background: transparent; border: 0; border-bottom: 1px solid var(--dream-rule); border-radius: 0; font: inherit; font-size: 13px; line-height: 1.55; outline: none; resize: vertical; }
 .story-workspace-dream-agent-panel form > button { justify-self: end; min-height: 27px; font-weight: 700; }
+
+.story-workspace-dream-agent-dialog .story-workspace-dream-agent-scroll-to-latest,
+.story-workspace-dream-agent-panel .story-workspace-dream-agent-scroll-to-latest {
+  position: absolute;
+  right: 12px;
+  bottom: 10px;
+  z-index: 1;
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  color: var(--dream-action);
+  background: color-mix(in srgb, var(--dream-paper) 96%, transparent);
+  border: 1px solid color-mix(in srgb, var(--dream-rule) 82%, transparent);
+  border-radius: 999px;
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--dream-ink) 9%, transparent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+}
+
+.story-workspace-dream-agent-scroll-to-latest:focus-visible {
+  outline: 2px solid var(--dream-action);
+  outline-offset: 2px;
+}
 
 .story-workspace-dream__editor header {
   margin-bottom: 25px;

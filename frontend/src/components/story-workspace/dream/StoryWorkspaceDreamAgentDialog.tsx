@@ -8,6 +8,7 @@ import {
   type StoryWorkspaceDreamAgentViewModel,
 } from '../../../hooks/story-workspace';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
+import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
 
 export interface StoryWorkspaceDreamAgentDialogProps {
   readonly agent: StoryWorkspaceDreamAgentViewModel;
@@ -51,6 +52,16 @@ export function StoryWorkspaceDreamAgentDialog({
   const status = storyWorkspaceDreamAgentDialogStatus(agent);
   const { markRead, snapshot, streamText } = agent;
   const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
+  const {
+    bottomRef,
+    handleHistoryScroll,
+    historyRef,
+    scrollToLatest,
+    showScrollToLatest,
+  } = useStoryWorkspaceDreamAgentScroll({
+    messageCount: snapshot?.messages.length ?? 0,
+    streamText,
+  });
 
   useEffect(() => {
     const disabled = !snapshot?.canSend;
@@ -98,7 +109,11 @@ export function StoryWorkspaceDreamAgentDialog({
     if (!canSend) return;
     if (!pendingKeyRef.current) pendingKeyRef.current = storyWorkspaceNewDreamAgentIdempotencyKey();
     const accepted = await agent.send(draft, pendingKeyRef.current);
-    if (accepted) { setDraft(''); pendingKeyRef.current = null; }
+    if (accepted) {
+      setDraft('');
+      pendingKeyRef.current = null;
+      scrollToLatest();
+    }
   };
 
   return (
@@ -121,19 +136,31 @@ export function StoryWorkspaceDreamAgentDialog({
         </div>
         <button aria-label="收起 Dream Agent" onClick={onClose} type="button">收起</button>
       </header>
-      <div className="story-workspace-dream-agent-dialog__history">
-        {agent.snapshot?.messages.map((message) => (
-          <article className={`story-workspace-dream-agent-dialog__message story-workspace-dream-agent-dialog__message--${message.role}`} key={message.id}>
-            <small>{message.role === 'assistant' ? 'Dream Agent' : '你'}</small>
-            <p>{message.text}{message.truncated ? '…' : ''}</p>
-          </article>
-        ))}
-        {agent.streamText && (
-          <article className="story-workspace-dream-agent-dialog__message story-workspace-dream-agent-dialog__message--assistant">
-            <small>Dream Agent 正在输出</small><p>{agent.streamText}</p>
-          </article>
+      <div className="story-workspace-dream-agent-dialog__history-shell">
+        <div className="story-workspace-dream-agent-dialog__history" onScroll={handleHistoryScroll} ref={historyRef}>
+          {agent.snapshot?.messages.map((message) => (
+            <article className={`story-workspace-dream-agent-dialog__message story-workspace-dream-agent-dialog__message--${message.role}`} key={message.id}>
+              <small>{message.role === 'assistant' ? 'Dream Agent' : '你'}</small>
+              <p>{message.text}{message.truncated ? '…' : ''}</p>
+            </article>
+          ))}
+          {agent.streamText && (
+            <article className="story-workspace-dream-agent-dialog__message story-workspace-dream-agent-dialog__message--assistant">
+              <small>Dream Agent 正在输出</small><p>{agent.streamText}</p>
+            </article>
+          )}
+          {!agent.snapshot?.messages.length && !agent.streamText && <p className="story-workspace-dream-agent-dialog__empty">正在准备可展示的 Dream Agent 消息。</p>}
+          <div aria-hidden="true" ref={bottomRef} />
+        </div>
+        {showScrollToLatest && (
+          <button
+            aria-label="前往最新消息"
+            className="story-workspace-dream-agent-scroll-to-latest"
+            onClick={() => scrollToLatest()}
+            title="前往最新消息"
+            type="button"
+          >↓ <span>前往最新消息</span></button>
         )}
-        {!agent.snapshot?.messages.length && !agent.streamText && <p className="story-workspace-dream-agent-dialog__empty">正在准备可展示的 Dream Agent 消息。</p>}
       </div>
       <p className="story-workspace-dream-agent-dialog__stream-announcement" aria-atomic="false" aria-live="polite">{announcedStreamText}</p>
       <form className="story-workspace-dream-agent-dialog__composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>

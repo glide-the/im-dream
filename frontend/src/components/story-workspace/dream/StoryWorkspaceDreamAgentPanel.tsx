@@ -7,6 +7,7 @@ import {
   storyWorkspaceNewDreamAgentIdempotencyKey,
   type StoryWorkspaceDreamAgentViewModel,
 } from '../../../hooks/story-workspace';
+import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
 
 export const STORY_WORKSPACE_DREAM_AGENT_PANEL_ID = 'story-workspace-dream-agent-panel';
 
@@ -36,6 +37,17 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
   const inputHint = storyWorkspaceDreamAgentPanelHint(agent);
   const { markRead, snapshot, streamText } = agent;
   const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
+  const {
+    bottomRef,
+    handleHistoryScroll,
+    historyRef,
+    scrollToLatest,
+    showScrollToLatest,
+  } = useStoryWorkspaceDreamAgentScroll({
+    enabled: isOpen,
+    messageCount: snapshot?.messages.length ?? 0,
+    streamText,
+  });
 
   useEffect(() => {
     if (isOpen) markRead();
@@ -58,6 +70,7 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
     if (accepted) {
       setDraft('');
       pendingKeyRef.current = null;
+      scrollToLatest();
     }
   };
 
@@ -75,19 +88,31 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
         </div>
         <button onClick={closePanel} type="button">收起</button>
       </header>
-      <div className="story-workspace-dream-agent-panel__history">
-        {agent.snapshot?.messages.map((message) => (
-          <article className={`story-workspace-dream-agent-panel__message story-workspace-dream-agent-panel__message--${message.role}`} key={message.id}>
-            <small>{message.role === 'assistant' ? 'Dream Agent' : '你'}</small>
-            <p>{message.text}{message.truncated ? '…' : ''}</p>
-          </article>
-        ))}
-        {agent.streamText && (
-          <article className="story-workspace-dream-agent-panel__message story-workspace-dream-agent-panel__message--assistant">
-            <small>Dream Agent 正在输出</small><p>{agent.streamText}</p>
-          </article>
+      <div className="story-workspace-dream-agent-panel__history-shell">
+        <div className="story-workspace-dream-agent-panel__history" onScroll={handleHistoryScroll} ref={historyRef}>
+          {agent.snapshot?.messages.map((message) => (
+            <article className={`story-workspace-dream-agent-panel__message story-workspace-dream-agent-panel__message--${message.role}`} key={message.id}>
+              <small>{message.role === 'assistant' ? 'Dream Agent' : '你'}</small>
+              <p>{message.text}{message.truncated ? '…' : ''}</p>
+            </article>
+          ))}
+          {agent.streamText && (
+            <article className="story-workspace-dream-agent-panel__message story-workspace-dream-agent-panel__message--assistant">
+              <small>Dream Agent 正在输出</small><p>{agent.streamText}</p>
+            </article>
+          )}
+          {!agent.snapshot?.messages.length && !agent.streamText && <p className="story-workspace-dream-agent-panel__empty">正在准备可展示的 Dream Agent 消息。</p>}
+          <div aria-hidden="true" ref={bottomRef} />
+        </div>
+        {showScrollToLatest && (
+          <button
+            aria-label="前往最新消息"
+            className="story-workspace-dream-agent-scroll-to-latest"
+            onClick={() => scrollToLatest()}
+            title="前往最新消息"
+            type="button"
+          >↓ <span>前往最新消息</span></button>
         )}
-        {!agent.snapshot?.messages.length && !agent.streamText && <p className="story-workspace-dream-agent-panel__empty">正在准备可展示的 Dream Agent 消息。</p>}
       </div>
       <p className="story-workspace-dream-agent-panel__announcement" aria-atomic="false" aria-live="polite">{announcedStreamText}</p>
       <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>

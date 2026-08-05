@@ -7,6 +7,10 @@ import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from '../../../components/story-workspace/dream/storyWorkspaceDreamAgentFocus';
 import {
+  STORY_WORKSPACE_DREAM_AGENT_BOTTOM_PROXIMITY_PX,
+  storyWorkspaceDreamAgentScrollPosition,
+} from '../../../components/story-workspace/dream/useStoryWorkspaceDreamAgentScroll';
+import {
   storyWorkspaceDreamIsPlainPrimaryActivation,
   storyWorkspaceDreamReturnState,
   storyWorkspaceDreamShouldReturnToHistory,
@@ -16,6 +20,7 @@ const PAGE = readFileSync(new URL('../StoryWorkspaceDreamPage.tsx', import.meta.
 const RAIL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail.tsx', import.meta.url), 'utf8');
 const DIALOG = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
 const PANEL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentPanel.tsx', import.meta.url), 'utf8');
+const SCROLL = readFileSync(new URL('../../../components/story-workspace/dream/useStoryWorkspaceDreamAgentScroll.ts', import.meta.url), 'utf8');
 const CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
 const NAVIGATION = readFileSync(new URL('../storyWorkspaceDreamNavigation.ts', import.meta.url), 'utf8');
 
@@ -125,6 +130,41 @@ test('hidden Agent panel cannot participate in the content section layout', () =
   expect(PANEL).toContain('hidden={!isOpen}');
   expect(CSS).toContain('.story-workspace-dream-agent-panel[hidden]');
   expect(CSS).toMatch(/\.story-workspace-dream-agent-panel\[hidden\]\s*{\s*display:\s*none;/);
+});
+
+test('Dream Agent scroll position uses the shared 120px near-bottom boundary', () => {
+  expect(STORY_WORKSPACE_DREAM_AGENT_BOTTOM_PROXIMITY_PX).toBe(120);
+  expect(storyWorkspaceDreamAgentScrollPosition({
+    clientHeight: 100,
+    scrollHeight: 1000,
+    scrollTop: 781,
+  })).toEqual({ distanceFromBottom: 119, isNearBottom: true, isScrollable: true });
+  expect(storyWorkspaceDreamAgentScrollPosition({
+    clientHeight: 100,
+    scrollHeight: 1000,
+    scrollTop: 780,
+  })).toEqual({ distanceFromBottom: 120, isNearBottom: false, isScrollable: true });
+  expect(storyWorkspaceDreamAgentScrollPosition({
+    clientHeight: 100,
+    scrollHeight: 220,
+    scrollTop: 0,
+  }).isScrollable).toBe(false);
+});
+
+test('Dream Panel and Dialog share Dream-only follow-latest controls', () => {
+  for (const surface of [PANEL, DIALOG]) {
+    expect(surface).toContain('useStoryWorkspaceDreamAgentScroll');
+    expect(surface).toContain('historyRef');
+    expect(surface).toContain('bottomRef');
+    expect(surface).toContain('onScroll={handleHistoryScroll}');
+    expect(surface).toContain('aria-label="前往最新消息"');
+    expect(surface).toContain('title="前往最新消息"');
+    expect(surface).toContain('scrollToLatest();');
+  }
+  expect(SCROLL).toContain('if (isNearBottomRef.current)');
+  expect(SCROLL).not.toContain('ChatPanel');
+  expect(SCROLL).not.toContain('ChatView');
+  expect(CSS).toContain('.story-workspace-dream-agent-scroll-to-latest');
 });
 
 test('rail is non-interactive Agent-section context and dialog keeps its accessibility contracts', () => {
