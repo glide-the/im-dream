@@ -75,4 +75,6 @@ Dream Agent 的 allowlist 工具确认在原输入区内显示为编辑校样条
 
 其他工作线的设置、订阅、侧栏、Dream launch/re-entry 测试和截图改动保持未提交或原状；本轮没有回滚、覆盖或夹带这些文件。测试完成后只关闭本轮启动的 Vite/浏览器进程，用户原有 `127.0.0.1:8765` 后端保持运行。
 
+22:04 的联合门禁完成后，另一工作线继续修改了 `ChatView.tsx`、`DeckChatSelector.tsx`、`i18n.ts` 与 `chat-schema.ts`。清理后的复核中，Dream 专项仍为 `37 passed`，但当前脏工作区的 `npx tsc -b` 因该 Chat/Agent selector 接口迁移报 3 个错误（`requestedAgentId` 未进入当前函数参数、locked selector 仍传旧属性、selection callback 类型未同步）。这些文件不属于本轮提交，本轮未擅自修复或回滚；因此 §5 的 TypeScript PASS 是 22:04 已验证提交基线的证据，不等同于对随后并发脏改动的 PASS 声明。
+
 明确声明：**未执行归档操作。**
