@@ -15,6 +15,7 @@ import hashlib
 import json
 import sqlite3
 import math
+import re
 import time
 from typing import Any, AsyncGenerator, Callable, Optional
 from uuid import uuid4
@@ -25,6 +26,8 @@ try:
         StoryWorkspaceDreamAgentMessageAccepted,
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentMessageSnapshot,
+        StoryWorkspaceDreamAgentToolConfirmationAccepted,
+        StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
     )
@@ -37,6 +40,8 @@ except ModuleNotFoundError:
         StoryWorkspaceDreamAgentMessageAccepted,
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentMessageSnapshot,
+        StoryWorkspaceDreamAgentToolConfirmationAccepted,
+        StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
     )
@@ -56,6 +61,22 @@ _CONFIRM_KIND = "story-workspace-dream-confirmation"
 _ACTIVE = frozenset({"pending", "dispatching"})
 _LEASE_SECONDS = 60
 _LEASE_HEARTBEAT_SECONDS = 15
+_TOOL_CALL_ID = re.compile(r"^[A-Za-z0-9._:/-]{1,255}$")
+_SAFE_TOOL_NAME = re.compile(r"^[A-Za-z0-9_.:-]{1,120}$")
+_SAFE_NETWORK_HOST = re.compile(
+    r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[A-Fa-f0-9:]+)(?::[0-9]{1,5})?$"
+)
+_ASK_USER_TOOL_NAMES = frozenset({
+    "askuserquestion",
+    "ask_user_question",
+    "ask_user",
+    "askuser",
+})
+_TOOL_OUTPUT_TYPES = frozenset({
+    "tool-output-available",
+    "tool-output-error",
+    "tool-error",
+})
 
 
 class StoryWorkspaceDreamAgentMessageError(RuntimeError):
@@ -211,6 +232,153 @@ def _has_data_frame(frame: str) -> bool:
     """Whether an upstream SSE frame consumes one stable raw ordinal."""
 
     return any(line.startswith("data:") for line in frame.splitlines())
+
+
+def _safe_public_text(value: Any, *, max_length: int) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split()).strip()
+    if not normalized:
+        return None
+    return normalized[:max_length]
+
+
+def _safe_tool_call_id(value: Any) -> str | None:
+    return value if isinstance(value, str) and _TOOL_CALL_ID.fullmatch(value) else None
+
+
+def _safe_tool_display_name(value: Any) -> str:
+    if not isinstance(value, str) or not _SAFE_TOOL_NAME.fullmatch(value):
+        return "Agent tool"
+    candidate = value.rsplit("__", 1)[-1]
+    display = candidate.replace("_", " ").strip()
+    return display[:80] or "Agent tool"
+
+
+def _is_ask_user_tool(tool_name: Any) -> bool:
+    if not isinstance(tool_name, str):
+        return False
+    normalized = tool_name.lower()
+    return (
+        normalized in _ASK_USER_TOOL_NAMES
+        or normalized.endswith("__ask_user")
+        or normalized.endswith("__askuserquestion")
+    )
+
+
+def _safe_question_options(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    safe: list[dict[str, str]] = []
+    for option in value[:12]:
+        candidate = option
+        if isinstance(option, dict):
+            candidate = option.get("label") or option.get("value")
+        text = _safe_public_text(candidate, max_length=120)
+        projected = {"label": text, "value": text} if text else None
+        if projected and projected not in safe:
+            safe.append(projected)
+    return safe
+
+
+def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]]:
+    if not isinstance(tool_input, dict):
+        return []
+    raw_questions = tool_input.get("questions")
+    if not isinstance(raw_questions, list) or not raw_questions:
+        raw_questions = [{
+            "question": (
+                tool_input.get("question")
+                or tool_input.get("message")
+                or tool_input.get("text")
+                or tool_input.get("prompt")
+            ),
+            "options": tool_input.get("options") or tool_input.get("choices"),
+        }]
+    safe: list[dict[str, Any]] = []
+    for index, question in enumerate(raw_questions[:8]):
+        if not isinstance(question, dict):
+            continue
+        text = _safe_public_text(
+            question.get("question")
+            or question.get("label")
+            or question.get("header"),
+            max_length=300,
+        )
+        if not text:
+            continue
+        raw_id = question.get("id")
+        question_id = (
+            raw_id
+            if isinstance(raw_id, str)
+            and re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", raw_id)
+            else f"q{index}"
+        )
+        projected: dict[str, Any] = {
+            "id": question_id,
+            "question": text,
+            "type": (
+                question.get("type")
+                if question.get("type") in {
+                    "text", "textarea", "select", "checkbox", "radio", "number",
+                }
+                else "radio" if question.get("options") else "text"
+            ),
+            "required": (
+                question.get("required")
+                if isinstance(question.get("required"), bool)
+                else True
+            ),
+        }
+        placeholder = _safe_public_text(question.get("placeholder"), max_length=160)
+        if placeholder:
+            projected["placeholder"] = placeholder
+        if isinstance(question.get("multiSelect"), bool):
+            projected["multiSelect"] = question["multiSelect"]
+        options = _safe_question_options(question.get("options"))
+        if options:
+            projected["options"] = options
+        safe.append(projected)
+    return safe
+
+
+def story_workspace_project_dream_tool_confirmation(
+    data: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Project one raw approval frame without retaining raw tool input."""
+
+    tool_call_id = _safe_tool_call_id(data.get("toolCallId"))
+    if tool_call_id is None:
+        return None
+    tool_name = data.get("toolName")
+    confirmation: dict[str, Any] = {
+        "toolCallId": tool_call_id,
+        "kind": "approval",
+        "toolName": _safe_tool_display_name(tool_name),
+    }
+    if data.get("confirmationKind") == "sandbox_network":
+        request = data.get("networkRequest")
+        request = request if isinstance(request, dict) else {}
+        raw_host = request.get("host")
+        host = (
+            raw_host[:253]
+            if isinstance(raw_host, str)
+            and len(raw_host) <= 253
+            and _SAFE_NETWORK_HOST.fullmatch(raw_host)
+            else None
+        )
+        raw_policy = request.get("policyMode")
+        policy = raw_policy if raw_policy in {"allowlist", "open", "deny"} else "unknown"
+        confirmation.update({
+            "kind": "sandbox_network",
+            "network": {"host": host, "policy": policy},
+        })
+    elif _is_ask_user_tool(tool_name):
+        confirmation.update({
+            "kind": "ask_user",
+            "questions": _safe_ask_user_questions(data.get("input")),
+        })
+    return confirmation
 
 
 class StoryWorkspaceDreamAgentMessageService:
@@ -404,7 +572,7 @@ class StoryWorkspaceDreamAgentMessageService:
         actor_id: str,
         after: str | None = None,
     ) -> AsyncGenerator[str, None]:
-        """Normalize only text deltas/final markers; raw frames never escape."""
+        """Normalize public text and safe tool lifecycle; raw frames never escape."""
         if self._thread_factory is None:
             yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
             return
@@ -418,7 +586,7 @@ class StoryWorkspaceDreamAgentMessageService:
             "is_expected_story_workspace_dream_turn",
             None,
         )
-        if callable(turn_matcher) and not turn_matcher(
+        if not callable(turn_matcher) or not turn_matcher(
             thread_id, turn_id, run_id, actor_id
         ):
             yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
@@ -429,6 +597,7 @@ class StoryWorkspaceDreamAgentMessageService:
         except ValueError:
             after_number = -1
         ordinal = -1
+        pending_tool_call_ids: set[str] = set()
         yield f"event: status\ndata: {_json({'lifecycle': 'streaming'})}\n\n"
         # A comment is transport-only: it cannot alter raw-frame ordinals and
         # proves intermediary/proxy connections remain alive without leaking a
@@ -456,9 +625,38 @@ class StoryWorkspaceDreamAgentMessageService:
                 if parsed is None:
                     continue
                 _event, data = parsed
+                frame_type = data.get("type")
+                if frame_type == "tool-approval-request":
+                    confirmation = story_workspace_project_dream_tool_confirmation(data)
+                    if confirmation is None:
+                        continue
+                    tool_call_id = confirmation["toolCallId"]
+                    pending_tool_call_ids.add(tool_call_id)
+                    if ordinal <= after_number:
+                        continue
+                    payload = {"turnId": turn_id, "confirmation": confirmation}
+                    yield (
+                        f"id: {turn_id}:{ordinal}\n"
+                        f"event: tool_confirmation_requested\n"
+                        f"data: {_json(payload)}\n\n"
+                    )
+                    continue
+                if frame_type in _TOOL_OUTPUT_TYPES:
+                    tool_call_id = _safe_tool_call_id(data.get("toolCallId"))
+                    if tool_call_id not in pending_tool_call_ids:
+                        continue
+                    pending_tool_call_ids.discard(tool_call_id)
+                    if ordinal <= after_number:
+                        continue
+                    payload = {"turnId": turn_id, "toolCallId": tool_call_id}
+                    yield (
+                        f"id: {turn_id}:{ordinal}\n"
+                        f"event: tool_confirmation_resolved\n"
+                        f"data: {_json(payload)}\n\n"
+                    )
+                    continue
                 if ordinal <= after_number:
                     continue
-                frame_type = data.get("type")
                 if frame_type == "text-delta" and isinstance(data.get("delta"), str):
                     payload = {"turnId": turn_id, "delta": data["delta"]}
                     yield f"id: {turn_id}:{ordinal}\nevent: assistant_text_delta\ndata: {_json(payload)}\n\n"
@@ -467,6 +665,61 @@ class StoryWorkspaceDreamAgentMessageService:
                     yield f"id: {turn_id}:{ordinal}\nevent: assistant_message_committed\ndata: {_json(payload)}\n\n"
         finally:
             yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
+
+    def confirm_tool(
+        self,
+        *,
+        run_id: str,
+        thread_id: str,
+        actor_id: str,
+        command: StoryWorkspaceDreamAgentToolConfirmationCommand,
+    ) -> StoryWorkspaceDreamAgentToolConfirmationAccepted:
+        """Resolve one tool only while the run's trusted Dream turn is active."""
+
+        factory = self._thread_factory
+        if factory is None:
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+                409,
+            )
+        snapshot = factory.session_snapshot(thread_id)
+        turn_id = (
+            str(snapshot.get("current_turn_id") or "")
+            if isinstance(snapshot, dict)
+            and snapshot.get("lifecycle") == "running"
+            else ""
+        )
+        matcher = getattr(
+            factory,
+            "is_expected_story_workspace_dream_turn",
+            None,
+        )
+        if (
+            not turn_id
+            or not callable(matcher)
+            or not matcher(thread_id, turn_id, run_id, actor_id)
+        ):
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+                409,
+            )
+        resolved = factory.confirm_tool(
+            session_id=thread_id,
+            tool_call_id=command.tool_call_id,
+            approved=command.approved,
+            reason=command.reason,
+            answers=command.answers,
+        )
+        if not resolved:
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+                409,
+            )
+        return StoryWorkspaceDreamAgentToolConfirmationAccepted(
+            story_workspace_run_id=run_id,
+            tool_call_id=command.tool_call_id,
+            approved=command.approved,
+        )
 
     def claim_message(
         self,

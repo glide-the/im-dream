@@ -22,7 +22,6 @@ import {
 } from '../components/story-workspace/layout/StoryWorkspaceReviewDetail';
 import {
   StoryWorkspaceSidebar,
-  type StoryWorkspaceGlobalView,
 } from '../components/story-workspace/layout/StoryWorkspaceSidebar';
 import { useRunDeepLink } from '../hooks/story-workspace';
 import type { WorkflowRun } from '../api/storyWorkspaceApi';
@@ -32,6 +31,7 @@ import {
 } from '../lib/story-workspace-events';
 import {
   StoryWorkspaceCharactersPage,
+  StoryWorkspaceDashboardPage,
   StoryWorkspaceDreamPage,
   StoryWorkspaceExecutionPage,
   StoryWorkspaceScenesPage,
@@ -116,12 +116,21 @@ function renderStoryWorkspaceRoute(
   onNavigate: (path: string, notice?: string) => void,
   resolvedDreamRun: WorkflowRun | null,
   decksContent: ReactNode,
+  legacyContent: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>,
   renderSettings: ((section: ReturnType<typeof storyWorkspaceSettingsSectionForRoute>, onNavigate: (path: string, notice?: string) => void) => ReactNode) | undefined,
 ) {
   const runId = storyWorkspaceDreamResolvedRunId(resolvedDreamRun);
   const initialDeckId = readStoryWorkspaceDeckParam(match.query);
   const dreamStage = storyWorkspaceDreamStageForRoute(match);
   switch (match.route) {
+    case 'writing':
+      return legacyContent.writing ?? null;
+    case 'timeline':
+      return legacyContent.timeline ?? <StoryWorkspaceDashboardPage title="时间线" description="在右侧工作区查看时间线。" />;
+    case 'analysis':
+      return legacyContent.analysis ?? <StoryWorkspaceDashboardPage title="分析" description="在右侧工作区查看分析结果。" />;
+    case 'chat':
+      return legacyContent.chat ?? <StoryWorkspaceDashboardPage title="对话" description="在右侧工作区打开对话。" />;
     case 'stories':
       return <StoryWorkspaceStoriesPage onReview={(story) => onReview({ resourceType: 'story', resourceId: story.id })} refreshNonce={refreshNonce} />;
     case 'characters':
@@ -151,7 +160,9 @@ function renderStoryWorkspaceRoute(
       }
       return <StoryWorkspaceScenesPage onReview={(scene) => onReview({ resourceType: 'scene', resourceId: scene.id })} refreshNonce={refreshNonce} />;
     case 'subscription':
-      return <StoryWorkspaceSubscriptionPage />;
+      return renderSettings
+        ? renderSettings(storyWorkspaceSettingsSectionForRoute(match.route), onNavigate)
+        : <StoryWorkspaceSubscriptionPage />;
     case 'settings':
     case 'settings-resources':
     case 'settings-plugins':
@@ -194,11 +205,12 @@ function renderStoryWorkspaceRoute(
 
 export interface StoryWorkspaceRouterProps {
   decksContent: ReactNode;
-  onGlobalNavigate?: (view: StoryWorkspaceGlobalView) => void;
+  legacyContent?: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>;
+  onRouteChange?: (route: StoryWorkspaceRoute) => void;
   renderSettings?: (section: ReturnType<typeof storyWorkspaceSettingsSectionForRoute>, onNavigate: (path: string, notice?: string) => void) => ReactNode;
 }
 
-export function StoryWorkspaceRouter({ decksContent, onGlobalNavigate, renderSettings }: StoryWorkspaceRouterProps) {
+export function StoryWorkspaceRouter({ decksContent, legacyContent = {}, onRouteChange, renderSettings }: StoryWorkspaceRouterProps) {
   const [activeMatch, setActiveMatch] = useState<StoryWorkspaceRouteMatch>(
     () => resolveStoryWorkspacePath(window.location.pathname, window.location.search) ?? DEFAULT_MATCH,
   );
@@ -270,8 +282,9 @@ export function StoryWorkspaceRouter({ decksContent, onGlobalNavigate, renderSet
       replaceWithCanonicalPath(match.canonicalPath);
     }
     setActiveMatch(match);
+    onRouteChange?.(match.route);
     setRouteNotice(null);
-  }, []);
+  }, [onRouteChange]);
 
   useEffect(() => {
     const requestedRunId = isDreamRoute
@@ -311,14 +324,21 @@ export function StoryWorkspaceRouter({ decksContent, onGlobalNavigate, renderSet
       );
     }
     setActiveMatch(navigation.match);
+    onRouteChange?.(navigation.match.route);
     setRouteNotice(notice ?? null);
-  }, []);
+  }, [onRouteChange]);
 
   // DEC-030: the execution page keeps the Dream entry selected in the app
   // chrome (it is a Dream surface page, not a fifth sidebar entry).
   const currentPath = activeRoute in STORY_WORKSPACE_PATHS
     ? STORY_WORKSPACE_PATHS[activeRoute as keyof typeof STORY_WORKSPACE_PATHS]
     : STORY_WORKSPACE_PATHS.dream;
+  const isSettingsRoute = activeRoute === 'settings'
+    || activeRoute === 'settings-resources'
+    || activeRoute === 'settings-plugins'
+    || activeRoute === 'settings-model'
+    || activeRoute === 'settings-about'
+    || activeRoute === 'subscription';
 
   return (
     <StoryWorkspaceLayout
@@ -338,17 +358,17 @@ export function StoryWorkspaceRouter({ decksContent, onGlobalNavigate, renderSet
       reviewPanelOpen={reviewPanelOpen}
       onReviewPanelOpenChange={setReviewPanelOpen}
       reviewPanelTitle="Agent 产出审阅"
+      showSidebar={!isSettingsRoute}
       sidebar={(
         <StoryWorkspaceSidebar
           collapsed={sidebarCollapsed}
           currentPath={currentPath}
           onNavigate={handleNavigate}
-          onGlobalNavigate={onGlobalNavigate}
           onToggleCollapse={handleToggleSidebarCollapse}
         />
       )}
       sidebarCollapsed={sidebarCollapsed}
-      workflowContext={isDreamRoute
+      workflowContext={isDreamRoute || isSettingsRoute
         ? null
         : storyWorkspaceDreamWorkflowContext(runDeepLink.run)}
     >
@@ -371,6 +391,7 @@ export function StoryWorkspaceRouter({ decksContent, onGlobalNavigate, renderSet
         handleNavigate,
         runDeepLink.run,
         decksContent,
+        legacyContent,
         renderSettings,
       )}
     </StoryWorkspaceLayout>

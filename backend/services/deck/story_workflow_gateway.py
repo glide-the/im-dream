@@ -24,6 +24,7 @@ try:
     from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
     from story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessageCommand,
+        StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
     )
     from services.deck.runtime_context import resolve_runtime_context
@@ -78,6 +79,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessageCommand,
+        StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
     )
     from backend.services.deck.runtime_context import resolve_runtime_context
@@ -815,6 +817,38 @@ class StoryWorkflowApplicationGateway:
         if pending is not None:
             self._dream_agent_message_coordinator.schedule(pending)
         return accepted
+
+    async def confirm_dream_agent_tool(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceDreamAgentToolConfirmationCommand,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Resolve a tool against the server-derived run thread and live turn."""
+
+        context = await asyncio.to_thread(
+            self._load_dream_agent_context_sync,
+            workflow_run_id,
+            actor,
+        )
+        db = database.get_db()
+        try:
+            service = StoryWorkspaceDreamAgentMessageService(
+                db,
+                thread_factory=self._dream_agent_thread_factory(),
+            )
+            try:
+                return service.confirm_tool(
+                    run_id=workflow_run_id,
+                    thread_id=context.thread_id,
+                    actor_id=actor["actor_id"],
+                    command=request,
+                )
+            except StoryWorkspaceDreamAgentMessageError as exc:
+                raise ApiRouteError(exc.code, status_code=exc.status_code) from exc
+        finally:
+            db.close()
 
     async def _recover_dream_agent_messages(
         self,

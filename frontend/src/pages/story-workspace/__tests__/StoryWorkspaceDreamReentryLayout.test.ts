@@ -9,6 +9,7 @@ import { resolveRunDeepLink } from '../../../hooks/story-workspace/useRunDeepLin
 import { storyWorkspaceDreamResolvedRunId } from '../../../router/storyWorkspacePath';
 
 const LAUNCH_SOURCE = readFileSync(new URL('../StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
+const DREAM_CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
 const ROUTER_SOURCE = readFileSync(new URL('../../../router/story-workspace.tsx', import.meta.url), 'utf8');
 const LAYOUT_SOURCE = readFileSync(new URL('../../../components/story-workspace/layout/StoryWorkspaceLayout.tsx', import.meta.url), 'utf8');
 const DECK_SOURCE = readFileSync(new URL('../../../components/DeckEditorModal.tsx', import.meta.url), 'utf8');
@@ -19,7 +20,15 @@ test('no-run Dream workbench renders durable re-entry list before the new Dream 
   expect(LAUNCH_SOURCE).toContain('进行中的 Dream');
   expect(LAUNCH_SOURCE).toContain('最近的 Dream');
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-reentry');
+  expect(LAUNCH_SOURCE).toContain('<strong>{run.goalPrefix}</strong>');
+  expect(LAUNCH_SOURCE).toContain('<small>{run.deckDisplayName}');
   expect(LAUNCH_SOURCE).not.toContain('localStorage');
+});
+
+test('Dream re-entry groups scroll their item lists without growing the workbench', () => {
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-launch__sheet\s*\{[^}]*overflow: hidden;/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-reentry__group\s*\{[^}]*min-height: 0;/s);
+  expect(DREAM_CSS).toMatch(/\.story-workspace-dream-reentry__group > div\s*\{[^}]*overflow-y: auto;/s);
 });
 
 test('Dream route removes the top WorkflowContextBar while non-Dream route support remains', () => {

@@ -122,7 +122,14 @@ def _create_schema(db: sqlite3.Connection) -> None:
     )
 
 
-def _launch_metadata(*, run: str, thread: str, deck: str, actor: str = ACTOR_ID) -> str:
+def _launch_metadata(
+    *,
+    run: str,
+    thread: str,
+    deck: str,
+    goal: str,
+    actor: str = ACTOR_ID,
+) -> str:
     return json.dumps({
         "kind": "story-workspace-dream-launch",
         "actorId": actor,
@@ -130,6 +137,7 @@ def _launch_metadata(*, run: str, thread: str, deck: str, actor: str = ACTOR_ID)
         "deckId": deck,
         "workflowRunId": run,
         "threadId": thread,
+        "goal": goal,
         "dreamContext": {
             "workflow_run_id": run,
             "thread_id": thread,
@@ -184,6 +192,8 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
         actor: str = ACTOR_ID,
         workspace: str = WORKSPACE_ID,
         deck: str = "deck-1",
+        goal: str | None = None,
+        include_goal: bool = True,
         thread_deck: str | None = None,
         metadata_kind: str = "story-workspace-dream-launch",
         workflow_definition_ref: str = "deck://ink.dream/story/1.0.0/workflow.json",
@@ -250,7 +260,15 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             "INSERT INTO chat_thread VALUES (?, ?, ?, ?)",
             (thread, int(actor), thread_deck or deck, updated_at),
         )
-        metadata = json.loads(_launch_metadata(run=value, thread=thread, deck=deck, actor=actor))
+        metadata = json.loads(_launch_metadata(
+            run=value,
+            thread=thread,
+            deck=deck,
+            goal=goal or f"创作目标 {number}",
+            actor=actor,
+        ))
+        if not include_goal:
+            metadata.pop("goal")
         metadata["kind"] = metadata_kind
         metadata["dreamContext"]["deck_plugin_binding_id"] = binding
         metadata["dreamContext"]["deck_plugin_id"] = plugin
@@ -323,6 +341,23 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             ["in_progress", "in_progress", "in_progress", "in_progress", "recent"],
         )
         self.assertTrue(all(item.sort_key for item in response.runs))
+
+    def test_projects_the_creation_goal_prefix_as_the_run_title(self) -> None:
+        goal = "创作一个雨夜车站重逢的短篇故事，人物关系克制，结尾保留悬念。" * 3
+        value = self._add_run(6, complete=False, goal=goal)
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(response.runs[0].story_workspace_run_id, value)
+        self.assertEqual(response.runs[0].goal_prefix, goal[:80])
+
+    def test_legacy_launch_without_goal_remains_visible_with_deck_fallback(self) -> None:
+        value = self._add_run(7, complete=False, include_goal=False)
+
+        response = self._service().list_dream_runs(actor={"actor_id": ACTOR_ID})
+
+        self.assertEqual(response.runs[0].story_workspace_run_id, value)
+        self.assertEqual(response.runs[0].goal_prefix, "甲板一")
 
     def test_fails_closed_for_foreign_or_forged_binding_rows(self) -> None:
         visible = self._add_run(10, complete=False)
@@ -486,6 +521,7 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
                 return StoryWorkspaceDreamReentryCollection(runs=[
                     StoryWorkspaceDreamReentryItem(
                         story_workspace_run_id=run_id(99),
+                        goal_prefix="创作一个雨夜车站重逢的短篇故事",
                         deck_id="deck-1",
                         deck_display_name="甲板一",
                         workflow_display_name="Dream",
@@ -513,4 +549,5 @@ class StoryWorkspaceDreamReentryRouteTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(gateway.actor, {"actor_id": ACTOR_ID})
         self.assertEqual(response.json()["runs"][0]["storyWorkspaceRunId"], run_id(99))
+        self.assertEqual(response.json()["runs"][0]["goalPrefix"], "创作一个雨夜车站重逢的短篇故事")
         self.assertNotIn("threadId", response.text)

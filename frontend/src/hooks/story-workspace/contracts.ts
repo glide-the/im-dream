@@ -125,6 +125,7 @@ export interface StoryWorkspaceDreamLaunchAccepted {
 /** One durable, actor-scoped run row rendered by Dream's canonical workbench. */
 export interface StoryWorkspaceDreamReentryItem {
   readonly storyWorkspaceRunId: string;
+  readonly goalPrefix: string;
   readonly deckId: string;
   readonly deckDisplayName: string;
   readonly workflowDisplayName: 'Dream';
@@ -267,10 +268,55 @@ export interface StoryWorkspaceDreamAgentMessageAccepted {
   readonly accepted: true;
 }
 
+/** User-facing, server-allowlisted description of one pending Dream Agent tool decision. */
+export interface StoryWorkspaceDreamAgentToolConfirmationOption {
+  readonly label: string;
+  readonly value: string;
+  readonly description?: string;
+}
+
+export interface StoryWorkspaceDreamAgentToolConfirmationQuestion {
+  readonly id: string;
+  readonly question: string;
+  readonly type: 'text' | 'textarea' | 'select' | 'checkbox' | 'radio' | 'number';
+  readonly required: boolean;
+  readonly multiSelect?: boolean;
+  readonly options?: readonly StoryWorkspaceDreamAgentToolConfirmationOption[];
+  readonly placeholder?: string;
+}
+
+export interface StoryWorkspaceDreamAgentToolConfirmation {
+  readonly toolCallId: string;
+  readonly kind: 'approval' | 'ask_user' | 'sandbox_network';
+  readonly toolName: string;
+  readonly title?: string;
+  readonly questions?: readonly StoryWorkspaceDreamAgentToolConfirmationQuestion[];
+  readonly network?: {
+    readonly host: string | null;
+    readonly policyMode: 'disabled' | 'allowlist' | 'open';
+  };
+}
+
+/** Run-scoped browser command; thread and Deck binding remain server-owned. */
+export interface StoryWorkspaceDreamAgentToolConfirmationCommand {
+  readonly toolCallId: string;
+  readonly approved: boolean;
+  readonly reason?: string;
+  readonly answers?: Readonly<Record<string, unknown>>;
+}
+
+export interface StoryWorkspaceDreamAgentToolConfirmationResolved {
+  readonly storyWorkspaceRunId: string;
+  readonly toolCallId: string;
+  readonly resolved: true;
+}
+
 /** Allowlisted event surface emitted by the Story Workspace Dream SSE adapter. */
 export type StoryWorkspaceDreamAgentEvent =
   | { readonly type: 'assistant_text_delta'; readonly cursor: string; readonly turnId: string; readonly delta: string }
   | { readonly type: 'assistant_message_committed'; readonly turnId: string }
+  | { readonly type: 'tool_confirmation_requested'; readonly cursor: string; readonly turnId: string; readonly confirmation: StoryWorkspaceDreamAgentToolConfirmation }
+  | { readonly type: 'tool_confirmation_resolved'; readonly cursor: string; readonly turnId: string; readonly toolCallId: string }
   | { readonly type: 'status'; readonly lifecycle: 'idle' | 'streaming' };
 
 /** Dream's only page lifecycle; it intentionally has no rejection/failure arm. */

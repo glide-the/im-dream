@@ -32,6 +32,7 @@ _StoryWorkspaceDreamProjectionLoader = Callable[[sqlite3.Row, dict[str, str], sq
 _StoryWorkspaceDreamLiveTurnLookup = Callable[[str], bool]
 _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE = 400
 _STORY_WORKSPACE_DREAM_REENTRY_RECENT_LIMIT = 20
+_STORY_WORKSPACE_DREAM_GOAL_PREFIX_MAX = 80
 
 
 class StoryWorkspaceDreamReentryService:
@@ -223,10 +224,15 @@ class StoryWorkspaceDreamReentryService:
         )
         created_at = self._parse_datetime(row["run_created_at"])
         group = "recent" if lifecycle is StoryWorkspaceDreamRunLifecycle.RECENT else "in_progress"
+        deck_display_name = str(row["deck_name"] or deck_id)
         return StoryWorkspaceDreamReentryItem(
             story_workspace_run_id=run_id,
+            goal_prefix=self._source_goal_prefix(
+                row["source_metadata"],
+                fallback=deck_display_name,
+            ),
             deck_id=deck_id,
-            deck_display_name=str(row["deck_name"] or deck_id),
+            deck_display_name=deck_display_name,
             deck_plugin_version=str(row["deck_plugin_version"]),
             lifecycle=lifecycle,
             group=group,
@@ -393,6 +399,21 @@ class StoryWorkspaceDreamReentryService:
                 "runtime_plugin_lock_id": runtime_lock_id,
             }
         )
+
+    @staticmethod
+    def _source_goal_prefix(raw_metadata: Any, *, fallback: str) -> str:
+        try:
+            metadata = json.loads(raw_metadata) if isinstance(raw_metadata, str) else {}
+        except (TypeError, ValueError):
+            metadata = {}
+        goal = metadata.get("goal") if isinstance(metadata, dict) else None
+        if (
+            isinstance(goal, str)
+            and goal == goal.strip()
+            and 1 <= len(goal) <= 12000
+        ):
+            return goal[:_STORY_WORKSPACE_DREAM_GOAL_PREFIX_MAX]
+        return fallback[:_STORY_WORKSPACE_DREAM_GOAL_PREFIX_MAX]
 
     @staticmethod
     def _parse_datetime(value: Any) -> datetime:

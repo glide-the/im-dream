@@ -17,7 +17,11 @@ const DREAM_LAUNCH = readFileSync(new URL('../../../../pages/story-workspace/Sto
 test('sidebar replaces legacy resource management with Dream, Decks and subscription', () => {
   expect(SIDEBAR).toContain("label: 'Dream'");
   expect(SIDEBAR).toContain("label: 'Decks'");
-  expect(SIDEBAR).toContain("label: '订阅'");
+  expect(SIDEBAR).toContain("writing: '/story-workspace/writing'");
+  expect(SIDEBAR).toContain("timeline: '/story-workspace/timeline'");
+  expect(SIDEBAR).toContain("analysis: '/story-workspace/analysis'");
+  expect(SIDEBAR).toContain("chat: '/story-workspace/chat'");
+  expect(SIDEBAR).not.toContain("label: '订阅'");
   expect(SIDEBAR).not.toContain('故事管理');
   expect(SIDEBAR).not.toContain('角色管理');
   expect(SIDEBAR).not.toContain('场景管理');
@@ -68,19 +72,49 @@ test('Dream keeps its durable recent list while subscription stays a static, acc
   expect(SUBSCRIPTION).not.toContain('apiUrl');
 });
 
-test('subscription and Settings stay in the workspace sidebar while their pages render in the right main region', () => {
+test('subscription moves into the focused Settings layout', () => {
   const footerMarkup = SIDEBAR.slice(
     SIDEBAR.indexOf('<footer className="story-workspace-sidebar__footer">'),
     SIDEBAR.indexOf('</footer>'),
   );
-  expect(footerMarkup.indexOf('subscriptionItem.path')).toBeLessThan(
-    footerMarkup.indexOf('story-workspace-sidebar__settings-button'),
-  );
+  expect(footerMarkup).not.toContain('subscriptionItem');
+  expect(footerMarkup).not.toContain("onNavigate('/story-workspace/subscription')");
   expect(SIDEBAR).toContain("onNavigate('/story-workspace/settings')");
+  expect(SETTINGS).toContain("id: 'settings-subscription'");
+  expect(SETTINGS).toContain("path: '/story-workspace/subscription'");
+  expect(SETTINGS).toContain('StoryWorkspaceSubscriptionPage');
   expect(ROUTER).toContain("case 'settings':");
+  expect(ROUTER).toContain("case 'subscription':");
   expect(ROUTER).toContain('renderSettings(storyWorkspaceSettingsSectionForRoute(match.route), onNavigate)');
   expect(APP).not.toContain("setCurrentView('settings')");
   expect(SETTINGS).toContain('<section aria-labelledby=');
   expect(SETTINGS).toContain('className="story-workspace-settings__section"');
   expect(SETTINGS).toContain('role="region"');
+  expect(SETTINGS).toContain('aria-label="返回应用"');
+  expect(SETTINGS).toContain("onNavigate('/story-workspace/dream')");
+  expect(ROUTER).toContain('showSidebar={!isSettingsRoute}');
+  expect(ROUTER).toContain("|| activeRoute === 'subscription'");
+  expect(ROUTER).toContain('workflowContext={isDreamRoute || isSettingsRoute');
+});
+
+test('legacy page links render through the workspace router main region', () => {
+  expect(PATHS).toContain("writing: '/story-workspace/writing'");
+  expect(PATHS).toContain("timeline: '/story-workspace/timeline'");
+  expect(PATHS).toContain("analysis: '/story-workspace/analysis'");
+  expect(PATHS).toContain("chat: '/story-workspace/chat'");
+  expect(ROUTER).toContain('legacyContent');
+  expect(ROUTER).toContain("case 'writing':");
+  expect(ROUTER).toContain("case 'chat':");
+  expect(APP).toContain('legacyContent={{');
+  expect(APP).toContain('storyWorkspaceLegacyView');
+  expect(APP).toContain('onRouteChange={handleStoryWorkspaceRouteChange}');
+  expect(APP).toContain('Start writing...');
+  expect(APP).not.toContain('onGlobalNavigate={handleAppViewChange}');
+});
+
+test('workspace user area owns the floating logout menu', () => {
+  expect(SIDEBAR).toContain('const { user, logout } = useAuth();');
+  expect(SIDEBAR).toContain('story-workspace-sidebar__user-menu');
+  expect(SIDEBAR).toContain('story-workspace-sidebar__logout');
+  expect(SIDEBAR).toContain('logout();');
 });

@@ -24,19 +24,37 @@
   padding: 0 8px 22px;
 }
 
-.story-workspace-settings__eyebrow {
-  color: var(--color-text-muted);
-  font-size: 11px;
-  letter-spacing: .11em;
-  text-transform: uppercase;
+.story-workspace-settings__back-button {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 24px;
+  padding: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 1.2;
+  text-align: left;
 }
 
-.story-workspace-settings__sidebar h1 {
-  margin: 5px 0 18px;
-  color: var(--color-text-primary);
-  font-family: Georgia, 'Times New Roman', serif;
-  font-size: 24px;
-  font-weight: 600;
+.story-workspace-settings__back-button svg {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: 19px;
+}
+
+.story-workspace-settings__back-button:hover {
+  color: var(--color-text-secondary);
+}
+
+.story-workspace-settings__back-button:focus-visible {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 4px;
 }
 
 .story-workspace-settings__search-label {
@@ -48,18 +66,44 @@
   white-space: nowrap;
 }
 
-.story-workspace-settings__sidebar input {
+.story-workspace-settings__search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   width: 100%;
   padding: 10px 12px;
   color: var(--color-text-primary);
   background: var(--color-bg-paper);
   border: 1px solid var(--color-border-paper);
   border-radius: 9px;
+}
+
+.story-workspace-settings__search-wrap:focus-within {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+.story-workspace-settings__search-wrap svg {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: 15px;
+}
+
+.story-workspace-settings__sidebar input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: 0;
   font: inherit;
   font-size: 13px;
 }
 
-.story-workspace-settings__sidebar input:focus-visible,
+.story-workspace-settings__sidebar input:focus-visible {
+  outline: 0;
+}
+
 .story-workspace-settings__nav-item:focus-visible,
 .story-workspace-settings__language-button:focus-visible,
 .story-workspace-settings__switch:focus-visible {
@@ -257,10 +301,6 @@
 
   .story-workspace-settings__sidebar-header {
     padding-bottom: 12px;
-  }
-
-  .story-workspace-settings__sidebar h1 {
-    margin-bottom: 12px;
   }
 
   .story-workspace-settings__nav {

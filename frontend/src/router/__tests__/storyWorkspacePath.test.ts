@@ -60,6 +60,14 @@ test('static routes resolve exactly as before (no regression)', () => {
     canonicalPath: STORY_WORKSPACE_PATHS.settings,
     route: 'settings',
   });
+  expect(resolveStoryWorkspacePath('/story-workspace/writing')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS.writing,
+    route: 'writing',
+  });
+  expect(resolveStoryWorkspacePath('/story-workspace/chat')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS.chat,
+    route: 'chat',
+  });
   expect(resolveStoryWorkspacePath('/story-workspace/settings/model')).toMatchObject({
     canonicalPath: STORY_WORKSPACE_PATHS['settings-model'],
     route: 'settings-model',

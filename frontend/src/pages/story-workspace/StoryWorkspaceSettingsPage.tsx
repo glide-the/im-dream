@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- route metadata helper intentionally shares this page module. */
 import { useMemo, useState, type ReactNode } from 'react';
-import { FaCog, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot } from 'react-icons/fa';
+import { FaArrowLeft, FaCog, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRegCreditCard, FaRobot, FaSearch } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import AboutView from '../../components/AboutView';
 import ClaudePluginAdminPage from '../../components/claude-plugin-admin/ClaudePluginAdminPage';
@@ -8,6 +8,7 @@ import ConnectorNotionDetailPage from '../../components/dashboard/ConnectorNotio
 import ConnectorSettingsSection from '../../components/dashboard/ConnectorSettingsSection';
 import ModelConfigSection from '../../components/dashboard/ModelConfigSection';
 import type { StoryWorkspaceStaticRoute } from '../../router/storyWorkspacePath';
+import { StoryWorkspaceSubscriptionPage } from './StoryWorkspaceSubscriptionPage';
 import './StoryWorkspaceSettingsPage.css';
 
 export type StoryWorkspaceSettingsSection =
@@ -15,7 +16,8 @@ export type StoryWorkspaceSettingsSection =
   | 'settings-resources'
   | 'settings-plugins'
   | 'settings-model'
-  | 'settings-about';
+  | 'settings-about'
+  | 'settings-subscription';
 
 export interface StoryWorkspaceSettingsPageProps {
   activeSection: StoryWorkspaceSettingsSection;
@@ -79,6 +81,7 @@ export function StoryWorkspaceSettingsPage({
   const [searchQuery, setSearchQuery] = useState('');
   const navItems = useMemo<SettingsNavItem[]>(() => [
     { id: 'settings', label: '常规', icon: FaCog, path: '/story-workspace/settings' },
+    { id: 'settings-subscription', label: '订阅', icon: FaRegCreditCard, path: '/story-workspace/subscription' },
     { id: 'settings-resources', label: '资源连接', icon: FaDatabase, path: '/story-workspace/settings/resources' },
     { id: 'settings-plugins', label: '插件', icon: FaPuzzlePiece, path: '/story-workspace/settings/plugins' },
     { id: 'settings-model', label: 'AI 模型', icon: FaRobot, path: '/story-workspace/settings/model' },
@@ -105,6 +108,10 @@ export function StoryWorkspaceSettingsPage({
   ) : activeSection === 'settings-model' ? (
     <SettingsSection id="settings-model" title="AI 模型配置" description="配置创作工作区使用的模型和运行策略。">
       <div className="story-workspace-settings__card"><ModelConfigSection /></div>
+    </SettingsSection>
+  ) : activeSection === 'settings-subscription' ? (
+    <SettingsSection id="settings-subscription" title="订阅" description="查看 Dream 工作区的订阅档位与创作侧重点。">
+      <StoryWorkspaceSubscriptionPage />
     </SettingsSection>
   ) : activeSection === 'settings-about' ? (
     <SettingsSection id="settings-about" title="关于" description="Ink & Memory 工作区信息。">
@@ -155,18 +162,28 @@ export function StoryWorkspaceSettingsPage({
     <div className={`story-workspace-settings${isMobile ? ' story-workspace-settings--mobile' : ''}`}>
       <aside aria-label="设置分类" className="story-workspace-settings__sidebar">
         <div className="story-workspace-settings__sidebar-header">
-          <span className="story-workspace-settings__eyebrow">Workspace</span>
-          <h1>设置</h1>
+          <button
+            aria-label="返回应用"
+            className="story-workspace-settings__back-button"
+            onClick={() => onNavigate('/story-workspace/dream')}
+            type="button"
+          >
+            <FaArrowLeft aria-hidden="true" />
+            <span>返回应用</span>
+          </button>
           <label className="story-workspace-settings__search-label" htmlFor="story-workspace-settings-search">
             搜索设置
           </label>
-          <input
-            id="story-workspace-settings-search"
-            onChange={(event) => setSearchQuery(event.target.value)}
-            placeholder="搜索设置..."
-            type="search"
-            value={searchQuery}
-          />
+          <div className="story-workspace-settings__search-wrap">
+            <FaSearch aria-hidden="true" />
+            <input
+              id="story-workspace-settings-search"
+              onChange={(event) => setSearchQuery(event.target.value)}
+              placeholder="搜索设置..."
+              type="search"
+              value={searchQuery}
+            />
+          </div>
         </div>
         <nav aria-label="设置分类导航" className="story-workspace-settings__nav">
           <span className="story-workspace-settings__nav-group">个人</span>
@@ -204,6 +221,7 @@ export function storyWorkspaceSettingsSectionForRoute(route: StoryWorkspaceStati
     || route === 'settings-plugins'
     || route === 'settings-model'
     || route === 'settings-about'
-    ? route
+    || route === 'subscription'
+    ? route === 'subscription' ? 'settings-subscription' : route
     : 'settings';
 }

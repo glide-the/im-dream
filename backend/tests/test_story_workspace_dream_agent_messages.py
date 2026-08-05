@@ -20,6 +20,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from story_workspace.contracts import (  # noqa: E402
     StoryWorkspaceDreamAgentMessageCommand,
+    StoryWorkspaceDreamAgentToolConfirmationCommand,
     StoryWorkspaceDreamRunContext,
 )
 from services.story_workspace.dream_agent_message_service import (  # noqa: E402
@@ -54,10 +55,35 @@ class _Factory:
         for frame in self.frames:
             yield frame
 
+    def is_expected_story_workspace_dream_turn(self, *_args) -> bool:
+        return True
+
     async def run_streaming(self, request):
         self.requests.append(request)
         yield 'data: {"type":"message-final"}\n\n'
         yield 'data: {"type":"finish","finishReason":"stop"}\n\n'
+
+
+class _ToolConfirmationFactory(_Factory):
+    def __init__(self, *, trusted: bool = True, resolved: bool = True) -> None:
+        super().__init__(running=True)
+        self.trusted = trusted
+        self.resolved = resolved
+        self.confirmations: list[tuple[object, ...]] = []
+
+    def is_expected_story_workspace_dream_turn(
+        self,
+        thread_id: str,
+        turn_id: str,
+        run_id: str,
+        actor_id: str,
+    ) -> bool:
+        self.confirmations.append(("trusted", thread_id, turn_id, run_id, actor_id))
+        return self.trusted
+
+    def confirm_tool(self, **kwargs):
+        self.confirmations.append(("confirm", kwargs))
+        return self.resolved
 
 
 def _context() -> StoryWorkspaceDreamRunContext:
@@ -251,6 +277,117 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         self.assertNotIn("id: turn-1:0", output)
         self.assertIn("id: turn-1:2", output)
         self.assertEqual(output.count("event: assistant_message_committed"), 1)
+
+    def test_events_project_only_allowlisted_tool_confirmation_fields(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-generic","toolName":"Bash","input":{"command":"rm -rf secret","token":"credential"}}\n\n',
+            'data: {"type":"tool-approval-request","toolCallId":"tool-ask","toolName":"AskUserQuestion","input":{"questions":[{"id":"q1","question":"继续吗？","description":"hidden","options":[{"label":"继续","value":"yes","description":"hidden option"}]}],"credential":"no"}}\n\n',
+            'data: {"type":"tool-approval-request","toolCallId":"tool-network","toolName":"SandboxNetworkAccess","input":{"token":"no"},"confirmationKind":"sandbox_network","networkRequest":{"host":"cdn.example.com","policyMode":"allowlist","matchedAllowedDomain":"secret.internal"}}\n\n',
+            'data: {"type":"tool-output-available","toolCallId":"tool-generic","output":{"credential":"must-not-leak"},"isError":false}\n\n',
+        ]
+        service = StoryWorkspaceDreamAgentMessageService(self.db, thread_factory=factory)
+        output = "".join(asyncio.run(_collect(service.events(
+            thread_id=THREAD_ID,
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+        ))))
+
+        self.assertEqual(output.count("event: tool_confirmation_requested"), 3)
+        self.assertEqual(output.count("event: tool_confirmation_resolved"), 1)
+        self.assertIn('"confirmation":{"kind":"approval"', output)
+        self.assertIn('"toolName":"Bash"', output)
+        self.assertIn('"kind":"ask_user"', output)
+        self.assertIn('"question":"继续吗？"', output)
+        self.assertIn('"options":[{"label":"继续","value":"继续"}]', output)
+        self.assertIn('"required":true', output)
+        self.assertIn('"type":"radio"', output)
+        self.assertIn('"kind":"sandbox_network"', output)
+        self.assertIn('"host":"cdn.example.com"', output)
+        self.assertIn('"policy":"allowlist"', output)
+        for secret in (
+            "rm -rf secret",
+            "credential",
+            "hidden option",
+            "secret.internal",
+            "must-not-leak",
+            '"input"',
+            '"output"',
+        ):
+            self.assertNotIn(secret, output)
+
+    def test_confirm_tool_requires_same_active_trusted_dream_turn(self) -> None:
+        command = StoryWorkspaceDreamAgentToolConfirmationCommand(
+            toolCallId="tool-ask",
+            approved=True,
+            reason="用户已选择",
+            answers={"q1": "继续"},
+        )
+        factory = _ToolConfirmationFactory()
+        accepted = StoryWorkspaceDreamAgentMessageService(
+            self.db,
+            thread_factory=factory,
+        ).confirm_tool(
+            run_id=RUN_ID,
+            thread_id=THREAD_ID,
+            actor_id=ACTOR_ID,
+            command=command,
+        )
+        self.assertTrue(accepted.resolved)
+        self.assertEqual(accepted.story_workspace_run_id, RUN_ID)
+        self.assertEqual(accepted.tool_call_id, "tool-ask")
+        self.assertNotIn(THREAD_ID, accepted.model_dump_json())
+        self.assertEqual(factory.confirmations[-1], (
+            "confirm",
+            {
+                "session_id": THREAD_ID,
+                "tool_call_id": "tool-ask",
+                "approved": True,
+                "reason": "用户已选择",
+                "answers": {"q1": "继续"},
+            },
+        ))
+
+        with self.assertRaisesRegex(
+            StoryWorkspaceDreamAgentMessageError,
+            "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+        ):
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=_ToolConfirmationFactory(trusted=False),
+            ).confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=command,
+            )
+
+    def test_tool_confirmation_contract_rejects_untrusted_context_and_oversized_answers(self) -> None:
+        from pydantic import ValidationError
+
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmationCommand.model_validate({
+                "toolCallId": "tool-1",
+                "approved": True,
+                "threadId": THREAD_ID,
+            })
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmationCommand(
+                toolCallId="x" * 256,
+                approved=True,
+            )
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmationCommand(
+                toolCallId="tool-1",
+                approved=True,
+                reason="x" * 501,
+            )
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmationCommand(
+                toolCallId="tool-1",
+                approved=True,
+                answers={"q1": {"nested": "forbidden"}},
+            )
 
     def test_events_never_forward_a_live_turn_without_trusted_dream_source(self) -> None:
         class GenericTurnFactory(_Factory):
@@ -465,6 +602,46 @@ class StoryWorkspaceDreamAgentBindingTest(unittest.TestCase):
             gateway._load_dream_agent_context_from_db(self.db, RUN_ID, {"actor_id": ACTOR_ID})
         self.assertEqual(cross_workspace.exception.status_code, 404)
 
+    def test_gateway_confirms_only_on_the_thread_resolved_from_authorized_run(self) -> None:
+        gateway = StoryWorkflowApplicationGateway()
+        factory = _ToolConfirmationFactory()
+        command = StoryWorkspaceDreamAgentToolConfirmationCommand(
+            toolCallId="tool-1",
+            approved=False,
+            reason="暂不执行",
+        )
+
+        def open_db():
+            connection = sqlite3.connect(":memory:")
+            connection.row_factory = sqlite3.Row
+            return connection
+
+        with (
+            patch.object(
+                gateway,
+                "_load_dream_agent_context_sync",
+                return_value=_context(),
+            ) as load_context,
+            patch.object(
+                gateway,
+                "_dream_agent_thread_factory",
+                return_value=factory,
+            ),
+            patch(
+                "services.deck.story_workflow_gateway.database.get_db",
+                side_effect=open_db,
+            ),
+        ):
+            accepted = asyncio.run(gateway.confirm_dream_agent_tool(
+                RUN_ID,
+                command,
+                actor={"actor_id": ACTOR_ID},
+            ))
+
+        load_context.assert_called_once_with(RUN_ID, {"actor_id": ACTOR_ID})
+        self.assertFalse(accepted.approved)
+        self.assertEqual(factory.confirmations[-1][1]["session_id"], THREAD_ID)
+
 
 class StoryWorkspaceDreamAssistantPersistenceTest(unittest.TestCase):
     def test_only_permitted_dream_source_turn_marks_assistant_persistence(self) -> None:
@@ -560,9 +737,22 @@ class _DreamAgentRouteGateway:
             message_id="dream_agent_test",
         )
 
+    async def confirm_dream_agent_tool(self, run_id: str, request, *, actor: dict[str, str]):
+        self.calls.append((
+            "tool-confirm",
+            (actor, request.tool_call_id, request.approved, request.reason, request.answers),
+        ))
+        from story_workspace.contracts import StoryWorkspaceDreamAgentToolConfirmationAccepted
+
+        return StoryWorkspaceDreamAgentToolConfirmationAccepted(
+            story_workspace_run_id=run_id,
+            tool_call_id=request.tool_call_id,
+            approved=request.approved,
+        )
+
 
 class StoryWorkspaceDreamAgentRouteTest(unittest.TestCase):
-    def test_snapshot_events_and_send_use_run_bound_gateway_contracts(self) -> None:
+    def test_snapshot_events_send_and_tool_confirm_use_run_bound_gateway_contracts(self) -> None:
         app = FastAPI()
         gateway = _DreamAgentRouteGateway()
         app.dependency_overrides[story_workspace.get_current_user] = lambda: {"user_id": 7}
@@ -578,6 +768,23 @@ class StoryWorkspaceDreamAgentRouteTest(unittest.TestCase):
                 f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-agent/messages",
                 json={"text": "继续", "idempotencyKey": "key-1"},
             )
+            confirmed = client.post(
+                f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-agent/tool-confirm",
+                json={
+                    "toolCallId": "tool-ask",
+                    "approved": True,
+                    "reason": "继续",
+                    "answers": {"q1": "继续"},
+                },
+            )
+            rejected_context = client.post(
+                f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-agent/tool-confirm",
+                json={
+                    "toolCallId": "tool-ask",
+                    "approved": True,
+                    "threadId": THREAD_ID,
+                },
+            )
         finally:
             client.close()
         self.assertEqual(snapshot.status_code, 200, snapshot.text)
@@ -587,10 +794,22 @@ class StoryWorkspaceDreamAgentRouteTest(unittest.TestCase):
         self.assertNotIn("reasoning", events.text)
         self.assertEqual(sent.status_code, 202, sent.text)
         self.assertEqual(sent.json()["messageId"], "dream_agent_test")
+        self.assertEqual(confirmed.status_code, 200, confirmed.text)
+        self.assertEqual(confirmed.json(), {
+            "storyWorkspaceRunId": RUN_ID,
+            "toolCallId": "tool-ask",
+            "approved": True,
+            "resolved": True,
+        })
+        self.assertEqual(rejected_context.status_code, 422, rejected_context.text)
         self.assertEqual(gateway.calls, [
             ("snapshot", {"actor_id": ACTOR_ID}),
             ("events", ({"actor_id": ACTOR_ID}, "turn-1:2")),
             ("send", ({"actor_id": ACTOR_ID}, "继续", "key-1")),
+            (
+                "tool-confirm",
+                ({"actor_id": ACTOR_ID}, "tool-ask", True, "继续", {"q1": "继续"}),
+            ),
         ])
 
 

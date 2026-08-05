@@ -8,13 +8,16 @@ respective router and service modules.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+import json
 from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    StrictBool,
     StrictInt,
+    StrictStr,
     field_validator,
     model_validator,
 )
@@ -34,6 +37,10 @@ STORY_WORKSPACE_DREAM_RELATIONS_MAX = 100
 STORY_WORKSPACE_DREAM_EDITS_MAX = 1000
 STORY_WORKSPACE_DREAM_EDIT_FIELDS_MAX = 64
 STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX = 4000
+STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX = 255
+STORY_WORKSPACE_DREAM_AGENT_TOOL_REASON_MAX = 500
+STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX_BYTES = 8192
+STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX = 20
 _StoryWorkspaceDreamPositiveInt = Annotated[StrictInt, Field(ge=1)]
 _StoryWorkspaceDreamNonNegativeInt = Annotated[StrictInt, Field(ge=0)]
 
@@ -322,6 +329,71 @@ class StoryWorkspaceDreamAgentMessageAccepted(_StoryWorkspaceDreamWireModel):
     accepted: Literal[True] = True
 
 
+_StoryWorkspaceDreamToolAnswerText = Annotated[
+    StrictStr,
+    Field(max_length=1000),
+]
+_StoryWorkspaceDreamToolAnswerInteger = Annotated[
+    StrictInt,
+    Field(ge=-1_000_000_000, le=1_000_000_000),
+]
+_StoryWorkspaceDreamToolAnswerValue = (
+    _StoryWorkspaceDreamToolAnswerText
+    | StrictBool
+    | _StoryWorkspaceDreamToolAnswerInteger
+    | Annotated[list[_StoryWorkspaceDreamToolAnswerText], Field(max_length=20)]
+)
+
+
+class StoryWorkspaceDreamAgentToolConfirmationCommand(_StoryWorkspaceDreamWireModel):
+    """Untrusted decision for one pending tool on the run-bound Dream turn."""
+
+    tool_call_id: str = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
+        pattern=r"^[A-Za-z0-9._:/-]+$",
+    )
+    approved: StrictBool
+    reason: Optional[str] = Field(
+        default=None,
+        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_REASON_MAX,
+    )
+    answers: Optional[
+        dict[
+            Annotated[StrictStr, Field(min_length=1, max_length=128)],
+            _StoryWorkspaceDreamToolAnswerValue,
+        ]
+    ] = Field(default=None, max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX)
+
+    @model_validator(mode="after")
+    def validate_tool_confirmation_payload(
+        self,
+    ) -> "StoryWorkspaceDreamAgentToolConfirmationCommand":
+        if self.reason is not None and not self.reason.strip():
+            raise ValueError("reason must not be blank")
+        if self.answers is not None:
+            encoded = json.dumps(
+                self.answers,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            if len(encoded) > STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX_BYTES:
+                raise ValueError("answers payload is too large")
+        return self
+
+
+class StoryWorkspaceDreamAgentToolConfirmationAccepted(_StoryWorkspaceDreamWireModel):
+    """Safe acknowledgement without exposing the hidden thread or tool input."""
+
+    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    tool_call_id: str = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
+    )
+    approved: StrictBool
+    resolved: Literal[True] = True
+
+
 class StoryWorkspaceDreamToolInput(BaseModel):
     """Canonical base for Agent-visible Dream MCP input contracts."""
 
@@ -604,6 +676,7 @@ class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
     """One permission-checked Dream run rendered by the canonical workbench."""
 
     story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    goal_prefix: str = Field(min_length=1, max_length=80)
     deck_id: str = Field(min_length=1, max_length=255)
     deck_display_name: str = Field(min_length=1, max_length=255)
     workflow_display_name: Literal["Dream"] = "Dream"
@@ -1145,6 +1218,8 @@ __all__ = [
     "StoryWorkspaceDreamAgentMessageAccepted",
     "StoryWorkspaceDreamAgentMessageCommand",
     "StoryWorkspaceDreamAgentMessageSnapshot",
+    "StoryWorkspaceDreamAgentToolConfirmationAccepted",
+    "StoryWorkspaceDreamAgentToolConfirmationCommand",
     "StoryWorkspaceDreamEdit",
     "StoryWorkspaceDreamFilesResponse",
     "StoryWorkspaceDreamReentryCollection",

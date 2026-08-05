@@ -13,6 +13,7 @@ import './StoryWorkspaceLayout.css';
 export interface StoryWorkspaceLayoutProps {
   children: ReactNode;
   sidebar: ReactNode;
+  showSidebar?: boolean;
   sidebarCollapsed?: boolean;
   reviewPanel?: ReactNode;
   reviewPanelOpen?: boolean;
@@ -26,6 +27,7 @@ export interface StoryWorkspaceLayoutProps {
 export function StoryWorkspaceLayout({
   children,
   sidebar,
+  showSidebar = true,
   sidebarCollapsed = false,
   reviewPanel,
   reviewPanelOpen,
@@ -54,15 +56,17 @@ export function StoryWorkspaceLayout({
     <div
       className="story-workspace-layout"
       data-review-panel-state={isReviewPanelOpen ? 'open' : 'closed'}
-      data-sidebar-state={sidebarCollapsed ? 'collapsed' : 'expanded'}
+      data-sidebar-state={!showSidebar ? 'hidden' : sidebarCollapsed ? 'collapsed' : 'expanded'}
     >
-      <aside
-        aria-label="Story Workspace sidebar"
-        className="story-workspace-layout__sidebar"
-        data-story-workspace-region="sidebar"
-      >
-        {sidebar}
-      </aside>
+      {showSidebar && (
+        <aside
+          aria-label="Story Workspace sidebar"
+          className="story-workspace-layout__sidebar"
+          data-story-workspace-region="sidebar"
+        >
+          {sidebar}
+        </aside>
+      )}
 
       <main
         className="story-workspace-layout__main"

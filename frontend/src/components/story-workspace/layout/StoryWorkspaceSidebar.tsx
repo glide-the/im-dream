@@ -2,7 +2,6 @@
 // [Output] Render the collapsible desktop Story Workspace navigation sidebar.
 // [Pos] Story Workspace left layout region.
 import { useEffect, useState } from 'react';
-import type { IconType } from 'react-icons';
 import { useTranslation } from 'react-i18next';
 import {
   FaBookOpen,
@@ -10,7 +9,6 @@ import {
   FaChevronRight,
   FaCog,
   FaMoon,
-  FaRegCreditCard,
   FaSun,
   FaThLarge,
   FaUserCircle,
@@ -18,57 +16,59 @@ import {
 import { useAuth } from '../../../contexts/AuthContext';
 import { getTheme, onThemeChange, toggleTheme } from '../../../utils/theme';
 
-interface StoryWorkspaceSidebarItem {
-  icon: IconType;
-  label: string;
-  path: string;
-}
-
-const storyWorkspaceSidebarItems: StoryWorkspaceSidebarItem[] = [
-  { icon: FaBookOpen, label: 'Dream', path: '/story-workspace/dream' },
-  { icon: FaThLarge, label: 'Decks', path: '/story-workspace/decks' },
-  { icon: FaRegCreditCard, label: '订阅', path: '/story-workspace/subscription' },
-  { icon: FaCog, label: '设置', path: '/story-workspace/settings' },
-];
+const storyWorkspaceMainNavPaths = {
+  writing: '/story-workspace/writing',
+  timeline: '/story-workspace/timeline',
+  analysis: '/story-workspace/analysis',
+  decks: '/story-workspace/decks',
+  dream: '/story-workspace/dream',
+  chat: '/story-workspace/chat',
+} as const;
 
 export interface StoryWorkspaceSidebarProps {
   collapsed: boolean;
   currentPath: string;
   onNavigate: (path: string) => void;
-  onGlobalNavigate?: (view: StoryWorkspaceGlobalView) => void;
   onToggleCollapse: () => void;
 }
-
-export type StoryWorkspaceGlobalView =
-  | 'writing'
-  | 'settings'
-  | 'timeline'
-  | 'analysis'
-  | 'decks'
-  | 'chat'
-  | 'story-workspace';
 
 export function StoryWorkspaceSidebar({
   collapsed,
   currentPath,
   onNavigate,
-  onGlobalNavigate,
   onToggleCollapse,
 }: StoryWorkspaceSidebarProps) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const { t } = useTranslation();
   const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
+  const [showUserMenu, setShowUserMenu] = useState(false);
   const displayName = user?.display_name?.trim() || user?.email || 'Ink & Memory 用户';
   const avatarLabel = Array.from(displayName)[0]?.toUpperCase() || 'I';
   const themeToggleLabel = isDark ? '切换到浅色' : '切换到深色';
-  const subscriptionItem = storyWorkspaceSidebarItems[2];
-  const SubscriptionIcon = subscriptionItem.icon;
-
   useEffect(() => {
     return onThemeChange((resolved) => {
       setIsDark(resolved === 'dark');
     });
   }, []);
+
+  useEffect(() => {
+    document.documentElement.style.setProperty(
+      '--story-workspace-sidebar-width',
+      collapsed ? '72px' : '240px',
+    );
+    return () => {
+      document.documentElement.style.removeProperty('--story-workspace-sidebar-width');
+    };
+  }, [collapsed]);
+
+  useEffect(() => {
+    if (!showUserMenu) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setShowUserMenu(false);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [showUserMenu]);
 
   const handleToggleTheme = () => {
     toggleTheme();
@@ -131,8 +131,12 @@ export function StoryWorkspaceSidebar({
         }
 
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__user {
-          justify-content: center;
           padding: 14px 0 0;
+        }
+
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__user-trigger {
+          justify-content: center;
+          padding: 0;
         }
 
         .story-workspace-sidebar__toggle {
@@ -250,12 +254,35 @@ export function StoryWorkspaceSidebar({
         }
 
         .story-workspace-sidebar__user {
-          display: flex;
-          align-items: center;
-          gap: 10px;
+          position: relative;
           margin-top: 12px;
           padding: 14px 10px 0;
           border-top: 1px dashed var(--color-border-paper);
+        }
+
+        .story-workspace-sidebar__user-trigger {
+          display: flex;
+          width: 100%;
+          align-items: center;
+          gap: 10px;
+          padding: 0;
+          color: inherit;
+          background: transparent;
+          border: 0;
+          border-radius: 8px;
+          cursor: pointer;
+          font: inherit;
+          text-align: left;
+        }
+
+        .story-workspace-sidebar__user-trigger:hover {
+          background: var(--color-bg-hover);
+        }
+
+        .story-workspace-sidebar__user-trigger:focus-visible,
+        .story-workspace-sidebar__logout:focus-visible {
+          outline: 2px solid var(--color-border-focus);
+          outline-offset: 2px;
         }
 
         .story-workspace-sidebar__avatar {
@@ -295,6 +322,72 @@ export function StoryWorkspaceSidebar({
           color: var(--color-text-muted);
           font-size: 11px;
         }
+
+        .story-workspace-sidebar__user-scrim {
+          position: fixed;
+          z-index: 998;
+          inset: 0;
+          background: transparent;
+        }
+
+        .story-workspace-sidebar__user-menu {
+          position: fixed;
+          z-index: 999;
+          left: 20px;
+          bottom: 88px;
+          width: 220px;
+          overflow: hidden;
+          color: var(--color-text-body);
+          background: var(--color-bg-surface-solid);
+          border: 1px solid var(--color-border-paper);
+          border-radius: 10px;
+          box-shadow: 0 8px 24px var(--color-shadow-medium);
+        }
+
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__user-menu {
+          left: 80px;
+          bottom: 20px;
+        }
+
+        .story-workspace-sidebar__user-menu-profile {
+          padding: 12px 14px;
+          border-bottom: 1px solid var(--color-border-neutral);
+        }
+
+        .story-workspace-sidebar__user-menu-name {
+          overflow: hidden;
+          color: var(--color-text-primary);
+          font-size: 13px;
+          font-weight: 650;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .story-workspace-sidebar__user-menu-email {
+          margin-top: 3px;
+          overflow: hidden;
+          color: var(--color-text-secondary);
+          font-size: 11px;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        .story-workspace-sidebar__logout {
+          display: block;
+          width: 100%;
+          padding: 10px 14px;
+          color: var(--color-text-body);
+          background: transparent;
+          border: 0;
+          cursor: pointer;
+          font: inherit;
+          font-size: 13px;
+          text-align: left;
+        }
+
+        .story-workspace-sidebar__logout:hover {
+          background: var(--color-bg-hover);
+        }
       `}</style>
 
       <header className="story-workspace-sidebar__brand">
@@ -317,26 +410,20 @@ export function StoryWorkspaceSidebar({
 
       <nav aria-label="Story Workspace 导航" className="story-workspace-sidebar__nav">
         {([
-          { label: t('nav.writing'), view: 'writing' },
-          { label: t('nav.timeline'), view: 'timeline' },
-          { label: t('nav.analysis'), view: 'analysis' },
-          { label: t('nav.decks'), view: 'decks' },
-          { label: t('nav.dream'), view: 'story-workspace' },
-          { label: t('nav.chat'), view: 'chat' },
+          { label: t('nav.writing'), view: 'writing', path: storyWorkspaceMainNavPaths.writing },
+          { label: t('nav.timeline'), view: 'timeline', path: storyWorkspaceMainNavPaths.timeline },
+          { label: t('nav.analysis'), view: 'analysis', path: storyWorkspaceMainNavPaths.analysis },
+          { label: t('nav.decks'), view: 'decks', path: storyWorkspaceMainNavPaths.decks },
+          { label: t('nav.dream'), view: 'dream', path: storyWorkspaceMainNavPaths.dream },
+          { label: t('nav.chat'), view: 'chat', path: storyWorkspaceMainNavPaths.chat },
         ] as const).map((item) => {
-          const isCurrent = item.view === 'story-workspace' && currentPath === '/story-workspace/dream';
+          const isCurrent = currentPath === item.path;
           return (
             <button
               aria-current={isCurrent ? 'page' : undefined}
               className="story-workspace-sidebar__nav-button"
               key={item.view}
-              onClick={() => {
-                if (item.view === 'story-workspace') {
-                  onNavigate('/story-workspace/dream');
-                  return;
-                }
-                onGlobalNavigate?.(item.view);
-              }}
+              onClick={() => onNavigate(item.path)}
               title={collapsed ? item.label : undefined}
               type="button"
             >
@@ -360,16 +447,6 @@ export function StoryWorkspaceSidebar({
           <span className="story-workspace-sidebar__theme-label">{themeToggleLabel}</span>
         </button>
         <button
-          aria-current={currentPath === subscriptionItem.path ? 'page' : undefined}
-          className="story-workspace-sidebar__nav-button"
-          onClick={() => onNavigate(subscriptionItem.path)}
-          title={collapsed ? subscriptionItem.label : undefined}
-          type="button"
-        >
-          <SubscriptionIcon aria-hidden="true" className="story-workspace-sidebar__icon" />
-          <span className="story-workspace-sidebar__label">{subscriptionItem.label}</span>
-        </button>
-        <button
           aria-current={currentPath.startsWith('/story-workspace/settings') ? 'page' : undefined}
           className="story-workspace-sidebar__settings-button"
           onClick={() => onNavigate('/story-workspace/settings')}
@@ -380,15 +457,51 @@ export function StoryWorkspaceSidebar({
           <span className="story-workspace-sidebar__settings-label">设置</span>
         </button>
         <div className="story-workspace-sidebar__user">
-          <span aria-hidden="true" className="story-workspace-sidebar__avatar">
-            {user ? avatarLabel : <FaUserCircle />}
-          </span>
-          <span className="story-workspace-sidebar__user-details">
-            <span className="story-workspace-sidebar__user-name">{displayName}</span>
-            {user?.display_name && user.email ? (
-              <span className="story-workspace-sidebar__user-email">{user.email}</span>
-            ) : null}
-          </span>
+          <button
+            aria-expanded={showUserMenu}
+            aria-haspopup="menu"
+            aria-label="打开用户菜单"
+            className="story-workspace-sidebar__user-trigger"
+            onClick={() => setShowUserMenu((visible) => !visible)}
+            title="用户菜单"
+            type="button"
+          >
+            <span aria-hidden="true" className="story-workspace-sidebar__avatar">
+              {user ? avatarLabel : <FaUserCircle />}
+            </span>
+            <span className="story-workspace-sidebar__user-details">
+              <span className="story-workspace-sidebar__user-name">{displayName}</span>
+              {user?.display_name && user.email ? (
+                <span className="story-workspace-sidebar__user-email">{user.email}</span>
+              ) : null}
+            </span>
+          </button>
+          {showUserMenu ? (
+            <>
+              <div
+                aria-hidden="true"
+                className="story-workspace-sidebar__user-scrim"
+                onClick={() => setShowUserMenu(false)}
+              />
+              <div aria-label="用户菜单" className="story-workspace-sidebar__user-menu" role="menu">
+                <div className="story-workspace-sidebar__user-menu-profile">
+                  <div className="story-workspace-sidebar__user-menu-name">{user?.display_name || 'User'}</div>
+                  {user?.email ? <div className="story-workspace-sidebar__user-menu-email">{user.email}</div> : null}
+                </div>
+                <button
+                  className="story-workspace-sidebar__logout"
+                  onClick={() => {
+                    setShowUserMenu(false);
+                    logout();
+                  }}
+                  role="menuitem"
+                  type="button"
+                >
+                  Logout
+                </button>
+              </div>
+            </>
+          ) : null}
         </div>
       </footer>
     </div>

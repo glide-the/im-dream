@@ -399,14 +399,18 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     if (href !== `/story-workspace/dream?run=${storyWorkspaceRunId}`) {
       throw new Error('Dream re-entry response has invalid href.');
     }
+    const deckDisplayName = storyWorkspaceReadBoundedDreamRunString(
+      run.deckDisplayName,
+      'deckDisplayName',
+      255,
+    );
     return {
       storyWorkspaceRunId,
+      goalPrefix: run.goalPrefix === undefined
+        ? deckDisplayName
+        : storyWorkspaceReadBoundedDreamRunString(run.goalPrefix, 'goalPrefix', 80),
       deckId: storyWorkspaceReadBoundedDreamRunString(run.deckId, 'deckId', 255),
-      deckDisplayName: storyWorkspaceReadBoundedDreamRunString(
-        run.deckDisplayName,
-        'deckDisplayName',
-        255,
-      ),
+      deckDisplayName,
       workflowDisplayName: 'Dream' as const,
       deckPluginVersion: storyWorkspaceReadBoundedDreamRunString(
         run.deckPluginVersion,

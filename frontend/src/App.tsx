@@ -68,6 +68,7 @@ import {
   resolveStoryWorkspacePath,
   STORY_WORKSPACE_PATHS,
   StoryWorkspaceRouter,
+  type StoryWorkspaceRoute,
 } from './router/story-workspace';
 import { StoryWorkspaceSettingsPage } from './pages/story-workspace';
 import type { ActiveChatVoice } from './lib/chat-schema';
@@ -170,6 +171,9 @@ export default function App() {
   const [currentView, setCurrentView] = useState<AppView>(() => (
     resolveStoryWorkspacePath(window.location.pathname) ? 'story-workspace' : 'writing'
   ));
+  const [storyWorkspaceLegacyView, setStoryWorkspaceLegacyView] = useState<'writing' | null>(() => (
+    resolveStoryWorkspacePath(window.location.pathname)?.route === 'writing' ? 'writing' : null
+  ));
   const [connectorSettingsFocusNonce, setConnectorSettingsFocusNonce] = useState(0);
   const [chatLandingTab, setChatLandingTab] = useState<'history' | 'connector'>('history');
   const [hasOpenedChatView, setHasOpenedChatView] = useState(false);
@@ -200,6 +204,10 @@ export default function App() {
   const closeNotionConnectorDetail = useCallback(() => {
     setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
+  }, []);
+
+  const handleStoryWorkspaceRouteChange = useCallback((route: StoryWorkspaceRoute) => {
+    setStoryWorkspaceLegacyView(route === 'writing' ? 'writing' : null);
   }, []);
 
   const handleAppViewChange = useCallback((view: GlobalAppView) => {
@@ -1527,7 +1535,34 @@ export default function App() {
         }}>
           <StoryWorkspaceRouter
             decksContent={storyWorkspaceDeckManager}
-            onGlobalNavigate={handleAppViewChange}
+            onRouteChange={handleStoryWorkspaceRouteChange}
+            legacyContent={{
+              timeline: (
+                <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+                  <CollectionsView isVisible voiceConfigs={voiceConfigs} timezone={userTimezone} />
+                </div>
+              ),
+              analysis: (
+                <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'auto' }}>
+                  <AnalysisView />
+                </div>
+              ),
+              chat: (
+                <div style={{ width: '100%', height: '100%', minHeight: 0, display: 'flex', overflow: 'hidden' }}>
+                  <ChatView
+                    editorState={state ? (state as unknown as Record<string, unknown>) : null}
+                    onEditorWriteConfirmed={handleEditorWriteConfirmed}
+                    requestedThreadId={requestedChatThreadId}
+                    requestedDeckId={requestedChatDeck?.deckId}
+                    requestedDeckNonce={requestedChatDeck?.nonce}
+                    activeVoice={activeChatVoice}
+                    isMobile={isMobile}
+                    landingTab={chatLandingTab}
+                    onOpenConnectorSettings={openConnectorSettings}
+                  />
+                </div>
+              ),
+            }}
             renderSettings={(section, onNavigate) => (
               <StoryWorkspaceSettingsPage
                 activeSection={section}
@@ -1548,11 +1583,18 @@ export default function App() {
         </div>
       )}
 
-      {currentView === 'writing' && (
+      {(currentView === 'writing' || storyWorkspaceLegacyView === 'writing') && (
         <div style={{
           display: 'flex',
-          height: '100vh',
-          paddingTop: mobileTopInset,
+          height: storyWorkspaceLegacyView === 'writing' ? '100%' : '100vh',
+          position: storyWorkspaceLegacyView === 'writing' ? 'fixed' : undefined,
+          top: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
+          left: storyWorkspaceLegacyView === 'writing' ? 'var(--story-workspace-sidebar-width, 240px)' : undefined,
+          right: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
+          bottom: storyWorkspaceLegacyView === 'writing' ? 0 : undefined,
+          zIndex: storyWorkspaceLegacyView === 'writing' ? 12 : undefined,
+          transform: storyWorkspaceLegacyView === 'writing' ? 'translateZ(0)' : undefined,
+          paddingTop: storyWorkspaceLegacyView === 'writing' ? 0 : mobileTopInset,
           paddingBottom: writingBottomPadding,  // @@@ Space for fixed stats bar + mobile nav
           fontFamily: 'system-ui, -apple-system, sans-serif',
           boxSizing: 'border-box'

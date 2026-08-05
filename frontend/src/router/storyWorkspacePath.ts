@@ -13,6 +13,10 @@
 
 export type StoryWorkspaceStaticRoute =
   | 'dream'
+  | 'writing'
+  | 'timeline'
+  | 'analysis'
+  | 'chat'
   | 'stories'
   | 'characters'
   | 'scenes'
@@ -30,6 +34,10 @@ export type StoryWorkspaceRoute = StoryWorkspaceStaticRoute | StoryWorkspacePara
 
 export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = {
   dream: '/story-workspace/dream',
+  writing: '/story-workspace/writing',
+  timeline: '/story-workspace/timeline',
+  analysis: '/story-workspace/analysis',
+  chat: '/story-workspace/chat',
   stories: '/story-workspace/stories',
   characters: '/story-workspace/characters',
   scenes: '/story-workspace/scenes',
@@ -275,6 +283,10 @@ export function storyWorkspaceAllowsLegacyReviewPanel(
     || match.route === 'episode-review'
     || match.route === 'run-execution'
     || match.route === 'decks'
+    || match.route === 'writing'
+    || match.route === 'timeline'
+    || match.route === 'analysis'
+    || match.route === 'chat'
     || match.route === 'subscription'
     || match.route === 'settings'
     || match.route === 'settings-resources'

@@ -27,6 +27,7 @@ from story_workspace.contracts import (
     StoryWorkspaceCharacterPatch,
     StoryWorkspaceDreamConfirmationCommand,
     StoryWorkspaceDreamAgentMessageCommand,
+    StoryWorkspaceDreamAgentToolConfirmationCommand,
     StoryWorkspaceDreamLaunchAccepted,
     StoryWorkspaceDreamLaunchCommand,
     StoryWorkspaceGuidanceCommandPayload,
@@ -194,6 +195,14 @@ class StoryWorkflowGateway(Protocol):
         self,
         workflow_run_id: str,
         request: StoryWorkspaceDreamAgentMessageCommand,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def confirm_dream_agent_tool(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceDreamAgentToolConfirmationCommand,
         *,
         actor: dict[str, str],
     ) -> Any: ...
@@ -1356,6 +1365,29 @@ async def story_workspace_submit_dream_agent_message(
         return JSONResponse(status_code=exc.status_code, content=build_error_payload(exc.code))
     return await _workflow_call(
         gateway.submit_dream_agent_message(workflow_run_id, request, actor=actor),
+        by_alias=True,
+    )
+
+
+@router.post("/workflow-runs/{workflow_run_id}/dream-agent/tool-confirm")
+async def story_workspace_confirm_dream_agent_tool(
+    workflow_run_id: str,
+    request: StoryWorkspaceDreamAgentToolConfirmationCommand,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Resolve one tool without accepting a browser-authored thread or Deck."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _workflow_call(
+        gateway.confirm_dream_agent_tool(workflow_run_id, request, actor=actor),
         by_alias=True,
     )
 

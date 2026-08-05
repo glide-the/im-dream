@@ -40,8 +40,8 @@ function StoryWorkspaceDreamReentryList({
       type="button"
     >
       <span className="story-workspace-dream-reentry__item-copy">
-        <strong>{run.deckDisplayName}</strong>
-        <small>{STORY_WORKSPACE_DREAM_REENTRY_COPY[run.lifecycle]} · {run.deckPluginVersion} · Run …{run.storyWorkspaceRunId.slice(-6)}</small>
+        <strong>{run.goalPrefix}</strong>
+        <small>{run.deckDisplayName} · {STORY_WORKSPACE_DREAM_REENTRY_COPY[run.lifecycle]} · {run.deckPluginVersion} · Run …{run.storyWorkspaceRunId.slice(-6)}</small>
       </span>
       <span aria-hidden="true">打开</span>
     </button>
@@ -148,58 +148,62 @@ export function StoryWorkspaceDreamLaunch({
           )}
         </div>
         <form className="story-workspace-dream-launch__form" onSubmit={handleSubmit}>
-          <div className="story-workspace-dream-launch__form-heading">
-            <p>New dream</p>
-            <h2>创作设置</h2>
+          <div className="story-workspace-dream-launch__form-body">
+            <div className="story-workspace-dream-launch__form-heading">
+              <p>New dream</p>
+              <h2>创作设置</h2>
+            </div>
+
+            <label>
+              <span>Deck</span>
+              <select
+                aria-busy={isLoadingDecks}
+                disabled={isLoadingDecks || launch.isLaunching}
+                onChange={(event) => setSelectedDeckId(event.currentTarget.value)}
+                value={selectedDeckId}
+              >
+                {decks.length === 0 && (
+                  <option value="">{isLoadingDecks ? '正在读取 Deck…' : '没有可用的 Deck'}</option>
+                )}
+                {decks.map((deck) => (
+                  <option key={deck.id} value={deck.id}>{deckDisplayName(deck)}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span>创作目标</span>
+              <textarea
+                disabled={launch.isLaunching}
+                maxLength={12000}
+                onChange={(event) => setGoal(event.currentTarget.value)}
+                placeholder="例如：创作一个发生在雨夜车站的短篇故事，人物关系克制，结尾保留悬念。"
+                rows={8}
+                value={goal}
+              />
+            </label>
+
+            {selectedDeck && (
+              <p className="story-workspace-dream-launch__selection">
+                <span>当前 Deck</span>
+                <strong>{deckDisplayName(selectedDeck)}</strong>
+              </p>
+            )}
+            {visibleError && (
+              <p className="story-workspace-dream-launch__error" role="alert">
+                {visibleError.message}
+              </p>
+            )}
           </div>
 
-          <label>
-            <span>Deck</span>
-            <select
-              aria-busy={isLoadingDecks}
-              disabled={isLoadingDecks || launch.isLaunching}
-              onChange={(event) => setSelectedDeckId(event.currentTarget.value)}
-              value={selectedDeckId}
-            >
-              {decks.length === 0 && (
-                <option value="">{isLoadingDecks ? '正在读取 Deck…' : '没有可用的 Deck'}</option>
-              )}
-              {decks.map((deck) => (
-                <option key={deck.id} value={deck.id}>{deckDisplayName(deck)}</option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            <span>创作目标</span>
-            <textarea
-              disabled={launch.isLaunching}
-              maxLength={12000}
-              onChange={(event) => setGoal(event.currentTarget.value)}
-              placeholder="例如：创作一个发生在雨夜车站的短篇故事，人物关系克制，结尾保留悬念。"
-              rows={8}
-              value={goal}
-            />
-          </label>
-
-          {selectedDeck && (
-            <p className="story-workspace-dream-launch__selection">
-              <span>当前 Deck</span>
-              <strong>{deckDisplayName(selectedDeck)}</strong>
-            </p>
-          )}
-          {visibleError && (
-            <p className="story-workspace-dream-launch__error" role="alert">
-              {visibleError.message}
-            </p>
-          )}
-
-          <button
-            aria-busy={launch.isLaunching}
-            className="story-workspace-dream-launch__submit"
-            disabled={!canStart}
-            type="submit"
-          >发起 Dream</button>
+          <div className="story-workspace-dream-launch__form-actions">
+            <button
+              aria-busy={launch.isLaunching}
+              className="story-workspace-dream-launch__submit"
+              disabled={!canStart}
+              type="submit"
+            >发起 Dream</button>
+          </div>
         </form>
       </div>
     </section>

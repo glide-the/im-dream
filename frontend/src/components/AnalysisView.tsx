@@ -1426,36 +1426,6 @@ export default function AnalysisView() {
           </div>
         )}
 
-        {/* View report button if data exists */}
-        {hasAnyData && viewMode === 'dashboard' && (
-          <div style={{ textAlign: 'center', marginTop: '2rem' }}>
-            <button
-              onClick={() => openReflectionBlogReport({
-                echoes, traits, patterns,
-                stats: { days: stats.totalDays, entries: stats.totalEntries, words: stats.totalWords },
-              })}
-              style={{
-                padding: '12px 32px', borderRadius: '24px',
-                background: 'var(--color-bg-surface-solid)',
-                border: '1px solid var(--color-border-paper)',
-                color: 'var(--color-text-body)', fontSize: '14px', cursor: 'pointer',
-                fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-                fontWeight: 500, transition: 'all 0.3s',
-                boxShadow: '0 4px 12px var(--color-shadow-soft)',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 8px 20px var(--color-shadow-medium)';
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 12px var(--color-shadow-soft)';
-              }}
-            >
-              View Reflections →
-            </button>
-          </div>
-        )}
       </div>
 
       <ReanalysisConfirmModal
