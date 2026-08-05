@@ -2,7 +2,7 @@
 
 The generic Claude Agent routes intentionally expose rich UI parts.  This
 adapter is the only Story Workspace boundary that turns those parts/events
-into the small text-only contract consumed by the Dream workbench.
+into the small text-and-safe-activity contract consumed by the Dream workbench.
 """
 
 from __future__ import annotations
@@ -23,9 +23,11 @@ from uuid import uuid4
 try:
     from story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessage,
+        StoryWorkspaceDreamAgentActivityContent,
         StoryWorkspaceDreamAgentMessageAccepted,
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentMessageSnapshot,
+        StoryWorkspaceDreamAgentTextContent,
         StoryWorkspaceDreamAgentToolConfirmationAccepted,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
@@ -41,9 +43,11 @@ try:
 except ModuleNotFoundError:
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessage,
+        StoryWorkspaceDreamAgentActivityContent,
         StoryWorkspaceDreamAgentMessageAccepted,
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentMessageSnapshot,
+        StoryWorkspaceDreamAgentTextContent,
         StoryWorkspaceDreamAgentToolConfirmationAccepted,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
@@ -85,6 +89,18 @@ _TOOL_OUTPUT_TYPES = frozenset({
     "tool-output-error",
     "tool-error",
 })
+_ACTIVITY_LABELS = {
+    "workspace_read": "读取工作区资料",
+    "dream_write": "更新 Dream 内容",
+    "reference_lookup": "查找参考资料",
+    "delegation": "协同处理创作任务",
+    "other": "处理 Dream 创作任务",
+}
+_WORKSPACE_READ_TOOLS = frozenset({
+    "read", "glob", "grep", "ls", "list", "listdir", "notebookread", "todowrite",
+})
+_REFERENCE_LOOKUP_TOOLS = frozenset({"webfetch", "websearch", "search", "fetch"})
+_DELEGATION_TOOLS = frozenset({"agent", "task"})
 _DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR = (
     "_story_workspace_dream_public_tool_confirmations"
 )
@@ -356,6 +372,109 @@ def _parts_text(parts: Any) -> tuple[str, bool]:
         normalized[:STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX],
         len(normalized) > STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
     )
+
+
+def _activity_category(tool_name: Any) -> str:
+    """Map a private runtime tool name to one fixed public category."""
+
+    if not isinstance(tool_name, str):
+        return "other"
+    leaf = tool_name.rsplit("__", 1)[-1].replace("_", "").lower()
+    if leaf in {name.replace("_", "") for name in _WORKSPACE_READ_TOOLS}:
+        return "workspace_read"
+    if leaf in {"writedreamrun", "writedreamstage"}:
+        return "dream_write"
+    if leaf in {name.replace("_", "") for name in _REFERENCE_LOOKUP_TOOLS}:
+        return "reference_lookup"
+    if leaf in _DELEGATION_TOOLS:
+        return "delegation"
+    return "other"
+
+
+def _activity_status(value: Any, *, is_error: bool = False) -> str:
+    if is_error or value in {"output-error", "error", "stopped"}:
+        return "stopped"
+    if value in {"output-available", "completed"}:
+        return "completed"
+    return "running"
+
+
+def _opaque_activity_id(*identity: str) -> str:
+    digest = hashlib.sha256(_json(identity).encode("utf-8")).hexdigest()
+    return f"dream_activity_{digest}"
+
+
+def _activity_projection(
+    *,
+    activity_id: str,
+    tool_name: Any,
+    status: str,
+) -> StoryWorkspaceDreamAgentActivityContent:
+    category = _activity_category(tool_name)
+    return StoryWorkspaceDreamAgentActivityContent(
+        id=activity_id,
+        category=category,
+        label=_ACTIVITY_LABELS[category],
+        status=status,
+    )
+
+
+def _persisted_activity_part(
+    part: Any,
+    *,
+    message_id: str,
+    part_index: int,
+) -> StoryWorkspaceDreamAgentActivityContent | None:
+    if not isinstance(part, dict) or part.get("type") not in {
+        "tool-invocation", "dynamic-tool",
+    }:
+        return None
+    tool_name = part.get("toolName")
+    if not isinstance(tool_name, str):
+        invocation = part.get("toolInvocation")
+        tool_name = invocation.get("toolName") if isinstance(invocation, dict) else None
+    return _activity_projection(
+        activity_id=_opaque_activity_id("persisted", message_id, str(part_index)),
+        tool_name=tool_name,
+        status=_activity_status(part.get("state")),
+    )
+
+
+def _safe_content(
+    parts: Any,
+    *,
+    message_id: str,
+    include_activities: bool,
+) -> list[StoryWorkspaceDreamAgentTextContent | StoryWorkspaceDreamAgentActivityContent]:
+    """Project ordered public content without retaining any raw tool object."""
+
+    if not isinstance(parts, list):
+        return []
+    remaining_text = STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX
+    content: list[
+        StoryWorkspaceDreamAgentTextContent | StoryWorkspaceDreamAgentActivityContent
+    ] = []
+    for index, part in enumerate(parts):
+        if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            normalized = part["text"].strip()
+            if not normalized or remaining_text <= 0:
+                continue
+            public_text = normalized[:remaining_text]
+            content.append(StoryWorkspaceDreamAgentTextContent(
+                text=public_text,
+                truncated=len(normalized) > len(public_text),
+            ))
+            remaining_text -= len(public_text)
+            continue
+        if include_activities:
+            activity = _persisted_activity_part(
+                part,
+                message_id=message_id,
+                part_index=index,
+            )
+            if activity is not None:
+                content.append(activity)
+    return content
 
 
 def _message_id(actor_id: str, run_id: str, key: str) -> str:
@@ -992,6 +1111,11 @@ class StoryWorkspaceDreamAgentMessageService:
                 role=row["role"],
                 text=text,
                 truncated=truncated,
+                content=_safe_content(
+                    parts,
+                    message_id=str(row["id"]),
+                    include_activities=row["role"] == "assistant",
+                ),
                 created_at=created,
             ))
         return safe
@@ -1097,6 +1221,8 @@ class StoryWorkspaceDreamAgentMessageService:
             after_number = -1
         ordinal = -1
         pending_tool_call_ids: set[str] = set()
+        activity_tool_names: dict[str, str] = {}
+        started_activity_ids: set[str] = set()
         if not _retain_dream_public_confirmation_turn(
             self._thread_factory,
             thread_id=thread_id,
@@ -1138,6 +1264,32 @@ class StoryWorkspaceDreamAgentMessageService:
                 if frame_type == "finish":
                     terminal = True
                     break
+                if frame_type in {"tool-input-start", "tool-input-available"}:
+                    tool_call_id = _safe_tool_call_id(data.get("toolCallId"))
+                    tool_name = data.get("toolName")
+                    if tool_call_id is None or not isinstance(tool_name, str):
+                        continue
+                    activity_tool_names[tool_call_id] = tool_name
+                    activity_id = _opaque_activity_id(
+                        "live", run_id, thread_id, turn_id, tool_call_id
+                    )
+                    if activity_id in started_activity_ids:
+                        continue
+                    started_activity_ids.add(activity_id)
+                    if ordinal <= after_number:
+                        continue
+                    activity = _activity_projection(
+                        activity_id=activity_id,
+                        tool_name=tool_name,
+                        status="running",
+                    ).model_dump(mode="json", by_alias=True)
+                    payload = {"turnId": turn_id, "activity": activity}
+                    yield (
+                        f"id: {turn_id}:{ordinal}\n"
+                        f"event: agent_activity_started\n"
+                        f"data: {_json(payload)}\n\n"
+                    )
+                    continue
                 if frame_type == "tool-approval-request":
                     confirmation = story_workspace_project_dream_tool_confirmation(data)
                     if confirmation is None:
@@ -1164,23 +1316,50 @@ class StoryWorkspaceDreamAgentMessageService:
                     continue
                 if frame_type in _TOOL_OUTPUT_TYPES:
                     tool_call_id = _safe_tool_call_id(data.get("toolCallId"))
-                    if tool_call_id not in pending_tool_call_ids:
+                    if tool_call_id is None:
                         continue
-                    pending_tool_call_ids.discard(tool_call_id)
-                    _forget_dream_public_confirmation(
-                        self._thread_factory,
-                        thread_id=thread_id,
-                        turn_id=turn_id,
-                        run_id=run_id,
-                        actor_id=actor_id,
-                        tool_call_id=tool_call_id,
+                    if tool_call_id in pending_tool_call_ids:
+                        pending_tool_call_ids.discard(tool_call_id)
+                        _forget_dream_public_confirmation(
+                            self._thread_factory,
+                            thread_id=thread_id,
+                            turn_id=turn_id,
+                            run_id=run_id,
+                            actor_id=actor_id,
+                            tool_call_id=tool_call_id,
+                        )
+                        if ordinal <= after_number:
+                            continue
+                        payload = {"turnId": turn_id, "toolCallId": tool_call_id}
+                        yield (
+                            f"id: {turn_id}:{ordinal}\n"
+                            f"event: tool_confirmation_resolved\n"
+                            f"data: {_json(payload)}\n\n"
+                        )
+                        continue
+                    tool_name = activity_tool_names.get(tool_call_id)
+                    activity_id = _opaque_activity_id(
+                        "live", run_id, thread_id, turn_id, tool_call_id
                     )
+                    if tool_name is None or activity_id not in started_activity_ids:
+                        continue
                     if ordinal <= after_number:
                         continue
-                    payload = {"turnId": turn_id, "toolCallId": tool_call_id}
+                    activity = _activity_projection(
+                        activity_id=activity_id,
+                        tool_name=tool_name,
+                        status=_activity_status(
+                            "output-available" if frame_type == "tool-output-available" else "output-error",
+                            is_error=(
+                                frame_type != "tool-output-available"
+                                or data.get("isError") is True
+                            ),
+                        ),
+                    ).model_dump(mode="json", by_alias=True)
+                    payload = {"turnId": turn_id, "activity": activity}
                     yield (
                         f"id: {turn_id}:{ordinal}\n"
-                        f"event: tool_confirmation_resolved\n"
+                        f"event: agent_activity_finished\n"
                         f"data: {_json(payload)}\n\n"
                     )
                     continue

@@ -236,12 +236,38 @@ export interface StoryWorkspaceDreamFilesResponse {
   readonly confirmationLabel: '确认并继续';
 }
 
-/** Safe text-only message rendered by the Dream Agent workbench. */
+export type StoryWorkspaceDreamAgentActivityCategory =
+  | 'workspace_read'
+  | 'dream_write'
+  | 'reference_lookup'
+  | 'delegation'
+  | 'other';
+
+export interface StoryWorkspaceDreamAgentTextContent {
+  readonly kind: 'text';
+  readonly text: string;
+  readonly truncated: boolean;
+}
+
+export interface StoryWorkspaceDreamAgentActivityContent {
+  readonly kind: 'activity';
+  readonly id: string;
+  readonly category: StoryWorkspaceDreamAgentActivityCategory;
+  readonly label: '读取工作区资料' | '更新 Dream 内容' | '查找参考资料' | '协同处理创作任务' | '处理 Dream 创作任务';
+  readonly status: 'running' | 'completed' | 'stopped';
+}
+
+export type StoryWorkspaceDreamAgentContent =
+  | StoryWorkspaceDreamAgentTextContent
+  | StoryWorkspaceDreamAgentActivityContent;
+
+/** Safe message rendered by the Dream Agent workbench. */
 export interface StoryWorkspaceDreamAgentMessage {
   readonly id: string;
   readonly role: 'user' | 'assistant';
   readonly text: string;
   readonly truncated: boolean;
+  readonly content: readonly StoryWorkspaceDreamAgentContent[];
   readonly createdAt: string;
 }
 
@@ -314,6 +340,8 @@ export interface StoryWorkspaceDreamAgentToolConfirmationResolved {
 /** Allowlisted event surface emitted by the Story Workspace Dream SSE adapter. */
 export type StoryWorkspaceDreamAgentEvent =
   | { readonly type: 'assistant_text_delta'; readonly cursor: string; readonly turnId: string; readonly delta: string }
+  | { readonly type: 'agent_activity_started'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
+  | { readonly type: 'agent_activity_finished'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
   | { readonly type: 'assistant_message_committed'; readonly turnId: string }
   | { readonly type: 'tool_confirmation_requested'; readonly cursor: string; readonly turnId: string; readonly confirmation: StoryWorkspaceDreamAgentToolConfirmation }
   | { readonly type: 'tool_confirmation_resolved'; readonly cursor: string; readonly turnId: string; readonly toolCallId: string }

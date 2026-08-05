@@ -175,6 +175,127 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         ])
         self.assertTrue(result.can_send)
 
+    def test_snapshot_projects_safe_ordered_content_without_raw_tool_data(self) -> None:
+        self._insert("widget-content", "user", [{"type": "text", "text": "继续"}], {
+            "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+            "story_workspace_run_id": RUN_ID,
+            "actor_id": ACTOR_ID,
+            "thread_id": THREAD_ID,
+        })
+        self._insert("assistant-content", "assistant", [
+            {"type": "text", "text": "先读取资料。"},
+            {"type": "reasoning", "text": "hidden chain of thought"},
+            {
+                "type": "tool-invocation",
+                "toolCallId": "call-read-secret",
+                "toolName": "Read",
+                "state": "output-available",
+                "input": {"path": "/private/story.md", "token": "secret"},
+                "output": {"content": "private output"},
+            },
+            {"type": "text", "text": "再更新内容。"},
+            {
+                "type": "tool-invocation",
+                "toolCallId": "call-writer-secret",
+                "toolName": "mcp__story_workspace__write_dream_stage",
+                "state": "output-error",
+                "input": {"stage": "characters", "credential": "secret"},
+                "output": {"error": "stack trace"},
+            },
+            {
+                "type": "tool-invocation",
+                "toolCallId": "call-unknown-secret",
+                "toolName": "sk-secret-looking-tool-name",
+                "state": "call",
+                "input": {"command": "rm -rf /"},
+            },
+        ], {"story_workspace_dream_source": {
+            "run_id": RUN_ID,
+            "thread_id": THREAD_ID,
+            "actor_id": ACTOR_ID,
+            "message_id": "widget-content",
+            "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+        }})
+
+        with patch(
+            "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+            return_value=(True, True),
+        ):
+            result = StoryWorkspaceDreamAgentMessageService(self.db).snapshot(
+                run_id=RUN_ID, thread_id=THREAD_ID, actor_id=ACTOR_ID
+            )
+
+        message = next(item for item in result.messages if item.id == "assistant-content")
+        self.assertEqual(message.text, "先读取资料。再更新内容。")
+        self.assertEqual(
+            [item.model_dump(mode="json", by_alias=True) for item in message.content],
+            [
+                {"kind": "text", "text": "先读取资料。", "truncated": False},
+                {
+                    "kind": "activity",
+                    "id": message.content[1].id,
+                    "category": "workspace_read",
+                    "label": "读取工作区资料",
+                    "status": "completed",
+                },
+                {"kind": "text", "text": "再更新内容。", "truncated": False},
+                {
+                    "kind": "activity",
+                    "id": message.content[3].id,
+                    "category": "dream_write",
+                    "label": "更新 Dream 内容",
+                    "status": "stopped",
+                },
+                {
+                    "kind": "activity",
+                    "id": message.content[4].id,
+                    "category": "other",
+                    "label": "处理 Dream 创作任务",
+                    "status": "running",
+                },
+            ],
+        )
+        serialized = message.model_dump_json(by_alias=True)
+        for forbidden in (
+            "reasoning", "hidden chain", "toolCallId", "call-read-secret",
+            "toolName", "/private/story.md", "credential", "stack trace",
+            "sk-secret-looking-tool-name", "rm -rf",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_events_project_safe_activity_lifecycle_with_stable_opaque_ids(self) -> None:
+        factory = _Factory(running=True, frames=[
+            'data: {"type":"tool-input-available","toolCallId":"tool-read","toolName":"Read","input":{"path":"/private/a","token":"secret"}}\n\n',
+            'data: {"type":"tool-output-available","toolCallId":"tool-read","output":{"content":"private"},"isError":false}\n\n',
+            'data: {"type":"tool-input-available","toolCallId":"tool-unknown","toolName":"sk-secret-tool","input":{"command":"rm -rf /"}}\n\n',
+            'data: {"type":"tool-output-error","toolCallId":"tool-unknown","output":{"error":"stack trace"}}\n\n',
+            'data: {"type":"thinking-delta","delta":"hidden reasoning"}\n\n',
+            'data: {"type":"message-final"}\n\n',
+        ])
+        output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db, thread_factory=factory
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+
+        self.assertEqual(output.count("event: agent_activity_started"), 2)
+        self.assertEqual(output.count("event: agent_activity_finished"), 2)
+        self.assertIn('"category":"workspace_read"', output)
+        self.assertIn('"label":"读取工作区资料"', output)
+        self.assertIn('"status":"completed"', output)
+        self.assertIn('"category":"other"', output)
+        self.assertIn('"label":"处理 Dream 创作任务"', output)
+        self.assertIn('"status":"stopped"', output)
+        for forbidden in (
+            "tool-read", "tool-unknown", "toolCallId", "toolName", "sk-secret-tool",
+            "/private/a", "token", "private", "rm -rf", "stack trace", "reasoning",
+        ):
+            self.assertNotIn(forbidden, output)
+
     def test_snapshot_excludes_assistant_without_proven_source_and_truncates_text(self) -> None:
         self._insert("source", "user", [{"type": "text", "text": "继续"}], {
             "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,

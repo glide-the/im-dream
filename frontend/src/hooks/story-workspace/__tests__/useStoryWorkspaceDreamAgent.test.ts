@@ -33,6 +33,119 @@ test('snapshot is a safe, complete first render before any increment is reduced'
   expect(model.streamText).toBe('');
 });
 
+test('snapshot preserves safe text/activity order and drops untrusted extra fields', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot({
+    ...SNAPSHOT,
+    messages: [{
+      ...SNAPSHOT.messages[0],
+      content: [
+        { kind: 'text', text: '先读取。', truncated: false, reasoning: 'hidden' },
+        {
+          kind: 'activity',
+          id: 'dream_activity_0123456789abcdef0123456789abcdef',
+          category: 'workspace_read',
+          label: '读取工作区资料',
+          status: 'completed',
+          toolCallId: 'raw-call',
+          input: { token: 'secret' },
+        },
+        { kind: 'text', text: '再继续。', truncated: false },
+      ],
+    }],
+  });
+
+  expect(snapshot.messages[0]?.content).toEqual([
+    { kind: 'text', text: '先读取。', truncated: false },
+    {
+      kind: 'activity',
+      id: 'dream_activity_0123456789abcdef0123456789abcdef',
+      category: 'workspace_read',
+      label: '读取工作区资料',
+      status: 'completed',
+    },
+    { kind: 'text', text: '再继续。', truncated: false },
+  ]);
+});
+
+test('safe activity lifecycle is cursor-de-duplicated and never accepts raw tool fields', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
+  const started = storyWorkspaceParseDreamAgentEvent(
+    'agent_activity_started',
+    JSON.stringify({
+      turnId: 'turn-1',
+      activity: {
+        kind: 'activity',
+        id: 'dream_activity_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        category: 'other',
+        label: '处理 Dream 创作任务',
+        status: 'running',
+        toolName: 'Bash',
+        input: { command: 'rm -rf /' },
+      },
+    }),
+    'turn-1:4',
+  );
+  const finished = storyWorkspaceParseDreamAgentEvent(
+    'agent_activity_finished',
+    JSON.stringify({
+      turnId: 'turn-1',
+      activity: {
+        kind: 'activity',
+        id: 'dream_activity_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        category: 'other',
+        label: '处理 Dream 创作任务',
+        status: 'stopped',
+        output: 'secret stack',
+      },
+    }),
+    'turn-1:5',
+  );
+  expect(started).not.toBeNull();
+  expect(finished).not.toBeNull();
+  const running = storyWorkspaceReduceDreamAgentEvents({
+    snapshot, streamText: '', streamTurnId: null, seenCursors: [],
+  }, [started!, started!]);
+  expect(running.streamContent).toEqual([{
+    kind: 'activity',
+    id: 'dream_activity_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    category: 'other',
+    label: '处理 Dream 创作任务',
+    status: 'running',
+  }]);
+  const stopped = storyWorkspaceReduceDreamAgentEvents(running, [finished!]);
+  expect(stopped.streamContent).toEqual([{
+    kind: 'activity',
+    id: 'dream_activity_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    category: 'other',
+    label: '处理 Dream 创作任务',
+    status: 'stopped',
+  }]);
+  expect(JSON.stringify(stopped)).not.toContain('rm -rf');
+  expect(JSON.stringify(stopped)).not.toContain('secret stack');
+});
+
+test('activity parser rejects non-fixed labels and raw reasoning events', () => {
+  expect(storyWorkspaceParseDreamAgentEvent(
+    'agent_activity_started',
+    JSON.stringify({
+      turnId: 'turn-1',
+      activity: {
+        kind: 'activity',
+        id: 'dream_activity_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        category: 'dream_write',
+        label: '角色阶段已经完成',
+        status: 'running',
+      },
+    }),
+    'turn-1:6',
+  )).toBeNull();
+  expect(storyWorkspaceParseDreamAgentEvent(
+    'reasoning-delta',
+    '{"turnId":"turn-1","delta":"hidden"}',
+    'turn-1:7',
+  )).toBeNull();
+});
+
 test('replayed cursor is de-duplicated and terminal event requests durable reconciliation', () => {
   const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
   const delta = storyWorkspaceParseDreamAgentEvent('assistant_text_delta', '{"turnId":"turn-1","delta":"继续写场景"}', 'turn-1:7');

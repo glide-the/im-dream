@@ -302,13 +302,60 @@ class StoryWorkspaceDreamAgentMessageCommand(_StoryWorkspaceDreamWireModel):
         return value
 
 
+_STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_LABELS = {
+    "workspace_read": "读取工作区资料",
+    "dream_write": "更新 Dream 内容",
+    "reference_lookup": "查找参考资料",
+    "delegation": "协同处理创作任务",
+    "other": "处理 Dream 创作任务",
+}
+
+
+class StoryWorkspaceDreamAgentTextContent(_StoryWorkspaceDreamWireModel):
+    """One bounded public text part in its persisted message order."""
+
+    kind: Literal["text"] = "text"
+    text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
+    truncated: bool = False
+
+
+class StoryWorkspaceDreamAgentActivityContent(_StoryWorkspaceDreamWireModel):
+    """Server-authored activity summary; raw generic tool data is never carried."""
+
+    kind: Literal["activity"] = "activity"
+    id: str = Field(pattern=r"^dream_activity_[0-9a-f]{32,64}$")
+    category: Literal[
+        "workspace_read", "dream_write", "reference_lookup", "delegation", "other"
+    ]
+    label: Literal[
+        "读取工作区资料",
+        "更新 Dream 内容",
+        "查找参考资料",
+        "协同处理创作任务",
+        "处理 Dream 创作任务",
+    ]
+    status: Literal["running", "completed", "stopped"]
+
+    @model_validator(mode="after")
+    def label_matches_category(self) -> "StoryWorkspaceDreamAgentActivityContent":
+        if self.label != _STORY_WORKSPACE_DREAM_AGENT_ACTIVITY_LABELS[self.category]:
+            raise ValueError("Dream Agent activity label must match its fixed category")
+        return self
+
+
+StoryWorkspaceDreamAgentContent = (
+    StoryWorkspaceDreamAgentTextContent | StoryWorkspaceDreamAgentActivityContent
+)
+
+
 class StoryWorkspaceDreamAgentMessage(_StoryWorkspaceDreamWireModel):
-    """Safe, text-only message projection for the Dream workbench."""
+    """Safe message plus ordered Dream-only public content projection."""
 
     id: str = Field(min_length=1, max_length=255)
     role: Literal["user", "assistant"]
     text: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX)
     truncated: bool = False
+    content: list[StoryWorkspaceDreamAgentContent]
     created_at: datetime
 
 
@@ -1226,9 +1273,12 @@ __all__ = [
     "StoryWorkspaceDreamConfirmationAccepted",
     "StoryWorkspaceDreamConfirmationCommand",
     "StoryWorkspaceDreamAgentMessage",
+    "StoryWorkspaceDreamAgentActivityContent",
+    "StoryWorkspaceDreamAgentContent",
     "StoryWorkspaceDreamAgentMessageAccepted",
     "StoryWorkspaceDreamAgentMessageCommand",
     "StoryWorkspaceDreamAgentMessageSnapshot",
+    "StoryWorkspaceDreamAgentTextContent",
     "StoryWorkspaceDreamAgentToolConfirmationAccepted",
     "StoryWorkspaceDreamAgentToolConfirmationCommand",
     "StoryWorkspaceDreamEdit",

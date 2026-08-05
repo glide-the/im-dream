@@ -7,6 +7,9 @@ import { getAuthToken } from '../../contexts/AuthContext';
 import { apiUrl } from '../../lib/apiBase';
 import type {
   StoryWorkspaceDreamAgentEvent,
+  StoryWorkspaceDreamAgentActivityCategory,
+  StoryWorkspaceDreamAgentActivityContent,
+  StoryWorkspaceDreamAgentContent,
   StoryWorkspaceDreamAgentMessage,
   StoryWorkspaceDreamAgentMessageAccepted,
   StoryWorkspaceDreamAgentMessageCommand,
@@ -21,6 +24,14 @@ const RUN_ID_PATTERN = /^run_[0-9a-f]{32}$/;
 const MAX_TEXT_LENGTH = 4000;
 const MAX_TOOL_CONFIRMATION_ANSWERS_BYTES = 8192;
 const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000] as const;
+const DREAM_AGENT_ACTIVITY_LABELS: Readonly<Record<StoryWorkspaceDreamAgentActivityCategory, StoryWorkspaceDreamAgentActivityContent['label']>> = {
+  workspace_read: '读取工作区资料',
+  dream_write: '更新 Dream 内容',
+  reference_lookup: '查找参考资料',
+  delegation: '协同处理创作任务',
+  other: '处理 Dream 创作任务',
+};
+const DREAM_AGENT_ACTIVITY_ID = /^dream_activity_[0-9a-f]{32,64}$/;
 export const STORY_WORKSPACE_DREAM_AGENT_STABLE_CONNECTION_MS = 10_000;
 
 export function storyWorkspaceDreamAgentReconnectDelay(attemptIndex: number): number {
@@ -56,6 +67,44 @@ function storyWorkspaceDreamAgentRole(value: unknown): 'user' | 'assistant' {
   throw new Error('Dream Agent response has invalid message role.');
 }
 
+function storyWorkspaceParseDreamAgentActivity(value: unknown): StoryWorkspaceDreamAgentActivityContent | null {
+  if (!storyWorkspaceDreamAgentIsRecord(value)
+    || value.kind !== 'activity'
+    || typeof value.id !== 'string'
+    || !DREAM_AGENT_ACTIVITY_ID.test(value.id)
+    || !['workspace_read', 'dream_write', 'reference_lookup', 'delegation', 'other'].includes(String(value.category))
+    || !['running', 'completed', 'stopped'].includes(String(value.status))) return null;
+  const category = value.category as StoryWorkspaceDreamAgentActivityCategory;
+  if (value.label !== DREAM_AGENT_ACTIVITY_LABELS[category]) return null;
+  return {
+    kind: 'activity',
+    id: value.id,
+    category,
+    label: DREAM_AGENT_ACTIVITY_LABELS[category],
+    status: value.status as StoryWorkspaceDreamAgentActivityContent['status'],
+  };
+}
+
+function storyWorkspaceParseDreamAgentContent(
+  value: unknown,
+  fallbackText: string,
+  fallbackTruncated: boolean,
+): readonly StoryWorkspaceDreamAgentContent[] {
+  if (!Array.isArray(value)) {
+    return [{ kind: 'text', text: fallbackText, truncated: fallbackTruncated }];
+  }
+  return value.map((part): StoryWorkspaceDreamAgentContent => {
+    if (storyWorkspaceDreamAgentIsRecord(part) && part.kind === 'text') {
+      const text = storyWorkspaceDreamAgentString(part.text, 'message.content.text', MAX_TEXT_LENGTH);
+      if (typeof part.truncated !== 'boolean') throw new Error('Dream Agent text content has invalid truncated flag.');
+      return { kind: 'text', text, truncated: part.truncated };
+    }
+    const activity = storyWorkspaceParseDreamAgentActivity(part);
+    if (activity) return activity;
+    throw new Error('Dream Agent response has invalid safe content.');
+  });
+}
+
 /** Parse only the safe backend projection, never generic Chat message parts. */
 export function storyWorkspaceParseDreamAgentSnapshot(
   value: unknown,
@@ -81,11 +130,13 @@ export function storyWorkspaceParseDreamAgentSnapshot(
     if (!storyWorkspaceDreamAgentIsRecord(candidate)) throw new Error('Dream Agent message must be an object.');
     const text = storyWorkspaceDreamAgentString(candidate.text, 'message.text', MAX_TEXT_LENGTH);
     if (typeof candidate.truncated !== 'boolean') throw new Error('Dream Agent response has invalid message.truncated.');
+    const content = storyWorkspaceParseDreamAgentContent(candidate.content, text, candidate.truncated);
     return {
       id: storyWorkspaceDreamAgentString(candidate.id, 'message.id'),
       role: storyWorkspaceDreamAgentRole(candidate.role),
       text,
       truncated: candidate.truncated,
+      content,
       createdAt: storyWorkspaceDreamAgentDate(candidate.createdAt, 'message.createdAt'),
     };
   });
@@ -305,10 +356,37 @@ export async function storyWorkspaceReadDreamAgentEventStream(
 export interface StoryWorkspaceDreamAgentReducedState {
   readonly snapshot: StoryWorkspaceDreamAgentMessageSnapshot;
   readonly streamText: string;
+  readonly streamContent: readonly StoryWorkspaceDreamAgentContent[];
   readonly streamTurnId: string | null;
   readonly pendingToolConfirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
   readonly seenCursors: readonly string[];
   readonly shouldReconcile: boolean;
+}
+
+function storyWorkspaceAppendDreamAgentStreamText(
+  content: readonly StoryWorkspaceDreamAgentContent[],
+  delta: string,
+): readonly StoryWorkspaceDreamAgentContent[] {
+  if (!delta) return content;
+  const next = [...content];
+  const last = next.at(-1);
+  if (last?.kind === 'text') {
+    next[next.length - 1] = { ...last, text: `${last.text}${delta}` };
+  } else {
+    next.push({ kind: 'text', text: delta, truncated: false });
+  }
+  return next;
+}
+
+function storyWorkspaceUpsertDreamAgentActivity(
+  content: readonly StoryWorkspaceDreamAgentContent[],
+  activity: StoryWorkspaceDreamAgentActivityContent,
+): readonly StoryWorkspaceDreamAgentContent[] {
+  const index = content.findIndex((item) => item.kind === 'activity' && item.id === activity.id);
+  if (index < 0) return [...content, activity];
+  const next = [...content];
+  next[index] = activity;
+  return next;
 }
 
 /** UI-only unread calculation. It never participates in run or message recovery truth. */
@@ -327,11 +405,12 @@ export function storyWorkspaceComputeDreamAgentUnreadCount(
 
 /** Pure event seam: replay identities de-duplicate transient text, while terminal frames require a DB snapshot. */
 export function storyWorkspaceReduceDreamAgentEvents(
-  state: Omit<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations'>
-    & Partial<Pick<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations'>>,
+  state: Omit<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations' | 'streamContent'>
+    & Partial<Pick<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations' | 'streamContent'>>,
   events: readonly StoryWorkspaceDreamAgentEvent[],
 ): StoryWorkspaceDreamAgentReducedState {
   let streamText = state.streamText;
+  let streamContent = state.streamContent ?? [];
   let streamTurnId = state.streamTurnId;
   let pendingToolConfirmations = [...(state.pendingToolConfirmations ?? [])];
   let shouldReconcile = Boolean(state.shouldReconcile);
@@ -342,6 +421,14 @@ export function storyWorkspaceReduceDreamAgentEvents(
       seen.add(event.cursor);
       streamTurnId = event.turnId;
       streamText += event.delta;
+      streamContent = storyWorkspaceAppendDreamAgentStreamText(streamContent, event.delta);
+      continue;
+    }
+    if (event.type === 'agent_activity_started' || event.type === 'agent_activity_finished') {
+      if (seen.has(event.cursor)) continue;
+      seen.add(event.cursor);
+      streamTurnId = event.turnId;
+      streamContent = storyWorkspaceUpsertDreamAgentActivity(streamContent, event.activity);
       continue;
     }
     if (event.type === 'tool_confirmation_requested') {
@@ -361,12 +448,13 @@ export function storyWorkspaceReduceDreamAgentEvents(
     }
     if (event.type === 'assistant_message_committed' || event.lifecycle === 'idle') {
       streamText = '';
+      streamContent = [];
       streamTurnId = null;
       pendingToolConfirmations = [];
       shouldReconcile = true;
     }
   }
-  return { snapshot: state.snapshot, streamText, streamTurnId, pendingToolConfirmations, seenCursors: [...seen], shouldReconcile };
+  return { snapshot: state.snapshot, streamText, streamContent, streamTurnId, pendingToolConfirmations, seenCursors: [...seen], shouldReconcile };
 }
 
 function storyWorkspaceParseDreamAgentToolQuestion(value: unknown): StoryWorkspaceDreamAgentToolConfirmationQuestion | null {
@@ -448,6 +536,15 @@ export function storyWorkspaceParseDreamAgentEvent(
     && cursor) {
     return { type: 'assistant_text_delta', cursor, turnId: value.turnId, delta: value.delta };
   }
+  if ((eventName === 'agent_activity_started' || eventName === 'agent_activity_finished')
+    && typeof value.turnId === 'string'
+    && cursor) {
+    const activity = storyWorkspaceParseDreamAgentActivity(value.activity);
+    if (!activity) return null;
+    if (eventName === 'agent_activity_started' && activity.status !== 'running') return null;
+    if (eventName === 'agent_activity_finished' && activity.status === 'running') return null;
+    return { type: eventName, cursor, turnId: value.turnId, activity };
+  }
   if (eventName === 'assistant_message_committed' && typeof value.turnId === 'string') {
     return { type: 'assistant_message_committed', turnId: value.turnId };
   }
@@ -483,6 +580,7 @@ export function storyWorkspaceNewDreamAgentIdempotencyKey(): string {
 export interface StoryWorkspaceDreamAgentViewModel {
   readonly snapshot: StoryWorkspaceDreamAgentMessageSnapshot | null;
   readonly streamText: string;
+  readonly streamContent: readonly StoryWorkspaceDreamAgentContent[];
   readonly streamTurnId: string | null;
   readonly pendingToolConfirmation: StoryWorkspaceDreamAgentToolConfirmation | null;
   readonly isLoading: boolean;
@@ -502,6 +600,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const [reload, setReload] = useState(0);
   const [snapshot, setSnapshot] = useState<StoryWorkspaceDreamAgentMessageSnapshot | null>(null);
   const [streamText, setStreamText] = useState('');
+  const [streamContent, setStreamContent] = useState<readonly StoryWorkspaceDreamAgentContent[]>([]);
   const [streamTurnId, setStreamTurnId] = useState<string | null>(null);
   const [pendingToolConfirmations, setPendingToolConfirmations] = useState<readonly StoryWorkspaceDreamAgentToolConfirmation[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(runId));
@@ -517,7 +616,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
 
   useEffect(() => {
     if (!runId) {
-      setSnapshot(null); setStreamText(''); setStreamTurnId(null); setPendingToolConfirmations([]); setIsLoading(false);
+      setSnapshot(null); setStreamText(''); setStreamContent([]); setStreamTurnId(null); setPendingToolConfirmations([]); setIsLoading(false);
       return undefined;
     }
     let active = true;
@@ -536,6 +635,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       if (latestTurnId && next.activeTurnId && next.activeTurnId !== latestTurnId) {
         latestCursor = null;
         seenCursors.clear();
+        setStreamContent([]);
         setPendingToolConfirmations([]);
       }
       latestSnapshot = next;
@@ -548,7 +648,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         const next = await reconcile();
         const persisted = next?.messages.some((message) => message.role === 'assistant' && !beforeIds.has(message.id));
         if (persisted || attempt === 3 || !active) {
-          setStreamText(''); setStreamTurnId(null);
+          setStreamText(''); setStreamContent([]); setStreamTurnId(null);
           return next;
         }
         await new Promise<void>((resolve) => { setTimeout(resolve, 150 * (attempt + 1)); });
@@ -591,6 +691,14 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
         setStreamTurnId(parsed.turnId);
         setStreamText((previous) => previous + parsed.delta);
+        setStreamContent((previous) => storyWorkspaceAppendDreamAgentStreamText(previous, parsed.delta));
+        return;
+      }
+      if (parsed.type === 'agent_activity_started' || parsed.type === 'agent_activity_finished') {
+        if (seenCursors.has(parsed.cursor)) return;
+        seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
+        setStreamTurnId(parsed.turnId);
+        setStreamContent((previous) => storyWorkspaceUpsertDreamAgentActivity(previous, parsed.activity));
         return;
       }
       if (parsed.type === 'tool_confirmation_requested') {
@@ -701,7 +809,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   }, [pendingToolConfirmation, runId]);
 
   return {
-    snapshot, streamText, streamTurnId, pendingToolConfirmation,
+    snapshot, streamText, streamContent, streamTurnId, pendingToolConfirmation,
     isLoading, isSending, isConfirmingTool, isReconnecting, error, unreadCount,
     refresh, markRead, send, confirmTool,
   };
