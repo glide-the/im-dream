@@ -18,6 +18,18 @@ export interface StoryWorkspaceDreamAgentScrollPosition {
   readonly isScrollable: boolean;
 }
 
+export function storyWorkspaceDreamAgentScrollBehavior(
+  prefersReducedMotion: boolean,
+): ScrollBehavior {
+  return prefersReducedMotion ? 'auto' : 'smooth';
+}
+
+function storyWorkspaceDreamAgentPrefersReducedMotion(): boolean {
+  return typeof window !== 'undefined'
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export function storyWorkspaceDreamAgentScrollPosition(
   metrics: StoryWorkspaceDreamAgentScrollMetrics,
 ): StoryWorkspaceDreamAgentScrollPosition {
@@ -56,17 +68,23 @@ export function useStoryWorkspaceDreamAgentScroll({
     updateScrollPosition(event.currentTarget);
   }, [updateScrollPosition]);
 
-  const scrollToLatest = useCallback(() => {
+  const scrollHistoryToLatest = useCallback(() => {
     const element = historyRef.current;
     if (!element) return;
+    element.scrollTo({
+      behavior: storyWorkspaceDreamAgentScrollBehavior(
+        storyWorkspaceDreamAgentPrefersReducedMotion(),
+      ),
+      top: element.scrollHeight,
+    });
+  }, []);
+
+  const scrollToLatest = useCallback(() => {
+    if (!historyRef.current) return;
     isNearBottomRef.current = true;
     setShowScrollToLatest(false);
-    if (bottomRef.current) {
-      bottomRef.current.scrollIntoView({ behavior: 'smooth' });
-      return;
-    }
-    element.scrollTo({ behavior: 'smooth', top: element.scrollHeight });
-  }, []);
+    scrollHistoryToLatest();
+  }, [scrollHistoryToLatest]);
 
   useEffect(() => {
     const element = historyRef.current;
@@ -78,13 +96,13 @@ export function useStoryWorkspaceDreamAgentScroll({
     if (isNearBottomRef.current) {
       setShowScrollToLatest(false);
       const frameId = requestAnimationFrame(() => {
-        bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+        scrollHistoryToLatest();
       });
       return () => cancelAnimationFrame(frameId);
     }
     const frameId = requestAnimationFrame(() => updateScrollPosition(element));
     return () => cancelAnimationFrame(frameId);
-  }, [enabled, messageCount, streamText, updateScrollPosition]);
+  }, [enabled, messageCount, scrollHistoryToLatest, streamText, updateScrollPosition]);
 
   return {
     bottomRef,

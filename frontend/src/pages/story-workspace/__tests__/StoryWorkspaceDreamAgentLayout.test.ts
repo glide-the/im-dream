@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from '../../../components/story-workspace/dream/storyWorkspaceDreamAgentFocus';
 import {
   STORY_WORKSPACE_DREAM_AGENT_BOTTOM_PROXIMITY_PX,
+  storyWorkspaceDreamAgentScrollBehavior,
   storyWorkspaceDreamAgentScrollPosition,
 } from '../../../components/story-workspace/dream/useStoryWorkspaceDreamAgentScroll';
 import {
@@ -149,6 +150,18 @@ test('Dream Agent scroll position uses the shared 120px near-bottom boundary', (
     scrollHeight: 220,
     scrollTop: 0,
   }).isScrollable).toBe(false);
+});
+
+test('Dream Agent scrolling targets only its history and respects reduced motion', () => {
+  expect(storyWorkspaceDreamAgentScrollBehavior(true)).toBe('auto');
+  expect(storyWorkspaceDreamAgentScrollBehavior(false)).toBe('smooth');
+  expect(SCROLL).not.toContain('scrollIntoView');
+  expect(SCROLL).not.toContain('window.scrollTo');
+  expect(SCROLL).not.toContain('document.scrollingElement');
+  expect(SCROLL).not.toContain('document.documentElement');
+  expect(SCROLL).toContain('const element = historyRef.current;');
+  expect(SCROLL.match(/element\.scrollTo\(/g)).toHaveLength(1);
+  expect(SCROLL).toContain("window.matchMedia('(prefers-reduced-motion: reduce)').matches");
 });
 
 test('Dream Panel and Dialog share Dream-only follow-latest controls', () => {
