@@ -10,7 +10,7 @@ import os
 from pathlib import Path
 import re
 import stat
-from typing import Mapping, Sequence
+from typing import Mapping
 
 from pydantic import ValidationError
 
@@ -28,10 +28,6 @@ try:
         STORY_WORKSPACE_EPISODE_AUXILIARY_YAML_MAX_BYTES,
         StoryWorkspaceEpisodeAuxiliaryArtifactAdapter,
         StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
-    )
-    from services.story_workspace.episode_binding_service import (
-        StoryWorkspaceEpisodeBindingContext,
-        StoryWorkspaceEpisodeBindingService,
     )
     from story_workspace.contracts import (
         StoryWorkspaceEpisodeArtifactAvailability,
@@ -59,10 +55,6 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeAuxiliaryArtifactAdapter,
         StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
     )
-    from backend.services.story_workspace.episode_binding_service import (
-        StoryWorkspaceEpisodeBindingContext,
-        StoryWorkspaceEpisodeBindingService,
-    )
     from backend.story_workspace.contracts import (
         StoryWorkspaceEpisodeArtifactAvailability,
         StoryWorkspaceEpisodeArtifactConsumer,
@@ -85,6 +77,7 @@ _PROJECT_ID_RE = re.compile(
 _SAFE_DIRECTORY_ENTRY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 _BINDING_MAX_BYTES = 16 * 1024
 _PROJECT_MAX_BYTES = 256 * 1024
+_EPISODE_AUTHORITY_SCHEMA = "story-workspace-episode-authority/v1"
 
 
 class StoryWorkspaceEpisodeArtifactError(RuntimeError):
@@ -97,6 +90,60 @@ class StoryWorkspaceEpisodeArtifactPathError(StoryWorkspaceEpisodeArtifactError)
 
 class StoryWorkspaceEpisodeArtifactContractError(StoryWorkspaceEpisodeArtifactError):
     """A persisted binding or bounded artifact violates its public contract."""
+
+    def __init__(self, message: str, *, fact_revision: str | None = None) -> None:
+        self.fact_revision = fact_revision
+        super().__init__(message)
+
+
+@dataclass(frozen=True)
+class StoryWorkspaceEpisodeAuthority:
+    """Frozen launch-message authority; never derived from Episode files."""
+
+    workflow_run_id: str
+    episode_uid: str
+    story_slug: str
+    episode_code: str
+
+    @classmethod
+    def parse(
+        cls,
+        value: object,
+        *,
+        expected_run_id: str,
+    ) -> "StoryWorkspaceEpisodeAuthority | None":
+        if isinstance(value, cls):
+            value = {
+                "schema": _EPISODE_AUTHORITY_SCHEMA,
+                "workflow_run_id": value.workflow_run_id,
+                "episode_uid": value.episode_uid,
+                "story_slug": value.story_slug,
+                "episode_code": value.episode_code,
+            }
+        if not isinstance(value, Mapping) or set(value) != {
+            "schema",
+            "workflow_run_id",
+            "episode_uid",
+            "story_slug",
+            "episode_code",
+        }:
+            return None
+        if (
+            value.get("schema") != _EPISODE_AUTHORITY_SCHEMA
+            or value.get("workflow_run_id") != expected_run_id
+            or not isinstance(value.get("episode_uid"), str)
+            or re.fullmatch(r"[0-9a-f]{32}", value["episode_uid"]) is None
+            or not isinstance(value.get("story_slug"), str)
+            or _STORY_SLUG_RE.fullmatch(value["story_slug"]) is None
+            or value.get("episode_code") != "EP01"
+        ):
+            return None
+        return cls(
+            workflow_run_id=expected_run_id,
+            episode_uid=value["episode_uid"],
+            story_slug=value["story_slug"],
+            episode_code="EP01",
+        )
 
 
 @dataclass(frozen=True)
@@ -125,6 +172,7 @@ class _EpisodeReads:
     prompts: _DirectoryFact | None
     renders: _DirectoryFact | None
     review: _FileFact | None
+    invalid_revisions: Mapping[str, str]
 
 
 _ARTIFACT_PRESENTATION = {
@@ -208,6 +256,28 @@ class StoryWorkspaceEpisodeArtifactService:
     @staticmethod
     def _file_flags() -> int:
         return os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
+
+    @staticmethod
+    def _metadata_revision(
+        relative_key: str,
+        metadata: os.stat_result,
+        *,
+        extra: object | None = None,
+    ) -> str:
+        payload = json.dumps(
+            [
+                relative_key,
+                metadata.st_size,
+                metadata.st_mtime_ns,
+                stat.S_IFMT(metadata.st_mode),
+                extra,
+            ],
+            ensure_ascii=True,
+            allow_nan=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        return "sha256:" + hashlib.sha256(payload).hexdigest()
 
     def _open_workspace(self) -> int:
         try:
@@ -309,7 +379,8 @@ class StoryWorkspaceEpisodeArtifactService:
                 )
             if pinned.st_size > max_bytes:
                 raise StoryWorkspaceEpisodeArtifactContractError(
-                    "artifact exceeds its byte limit"
+                    "artifact exceeds its byte limit",
+                    fact_revision=cls._metadata_revision(relative_key, pinned),
                 )
             chunks: list[bytes] = []
             total = 0
@@ -320,7 +391,8 @@ class StoryWorkspaceEpisodeArtifactService:
                 total += len(chunk)
                 if total > max_bytes:
                     raise StoryWorkspaceEpisodeArtifactContractError(
-                        "artifact exceeds its byte limit"
+                        "artifact exceeds its byte limit",
+                        fact_revision=cls._metadata_revision(relative_key, pinned),
                     )
                 chunks.append(chunk)
         except OSError as exc:
@@ -361,9 +433,44 @@ class StoryWorkspaceEpisodeArtifactService:
                 raise StoryWorkspaceEpisodeArtifactPathError(
                     "artifact directory cannot be listed safely"
                 ) from exc
+            entry_facts: list[list[object]] = []
+            non_regular_entry = False
+            for entry in entries:
+                try:
+                    metadata = os.stat(
+                        entry,
+                        dir_fd=descriptor,
+                        follow_symlinks=False,
+                    )
+                except OSError as exc:
+                    raise StoryWorkspaceEpisodeArtifactPathError(
+                        "artifact directory entry identity is unavailable"
+                    ) from exc
+                if stat.S_ISLNK(metadata.st_mode):
+                    raise StoryWorkspaceEpisodeArtifactPathError(
+                        "artifact directory entry is unsafe"
+                    )
+                if not stat.S_ISREG(metadata.st_mode):
+                    non_regular_entry = True
+                entry_facts.append(
+                    [entry, metadata.st_size, metadata.st_mtime_ns]
+                )
+            invalid_directory_revision = "sha256:" + hashlib.sha256(
+                json.dumps(
+                    [f"{name}/", entry_facts],
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            if non_regular_entry:
+                raise StoryWorkspaceEpisodeArtifactContractError(
+                    "artifact directory contains an unapproved entry",
+                    fact_revision=invalid_directory_revision,
+                )
             if len(entries) > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_FILES:
                 raise StoryWorkspaceEpisodeArtifactContractError(
-                    "artifact directory exceeds its entry limit"
+                    "artifact directory exceeds its entry limit",
+                    fact_revision=invalid_directory_revision,
                 )
             files: dict[str, _FileFact] = {}
             total = 0
@@ -373,20 +480,28 @@ class StoryWorkspaceEpisodeArtifactService:
                     or Path(entry).suffix.lower() not in approved_extensions
                 ):
                     raise StoryWorkspaceEpisodeArtifactContractError(
-                        "artifact directory contains an unapproved entry"
+                        "artifact directory contains an unapproved entry",
+                        fact_revision=invalid_directory_revision,
                     )
-                fact = cls._read_file(
-                    descriptor,
-                    entry,
-                    relative_key=f"{name}/{entry}",
-                    max_bytes=per_file_max_bytes,
-                    optional=False,
-                )
+                try:
+                    fact = cls._read_file(
+                        descriptor,
+                        entry,
+                        relative_key=f"{name}/{entry}",
+                        max_bytes=per_file_max_bytes,
+                        optional=False,
+                    )
+                except StoryWorkspaceEpisodeArtifactContractError as exc:
+                    raise StoryWorkspaceEpisodeArtifactContractError(
+                        "artifact directory contains an invalid file",
+                        fact_revision=exc.fact_revision or invalid_directory_revision,
+                    ) from exc
                 assert fact is not None
                 total += fact.size
                 if total > STORY_WORKSPACE_EPISODE_AUXILIARY_COLLECTION_MAX_BYTES:
                     raise StoryWorkspaceEpisodeArtifactContractError(
-                        "artifact directory exceeds its byte limit"
+                        "artifact directory exceeds its byte limit",
+                        fact_revision=invalid_directory_revision,
                     )
                 files[fact.relative_key] = fact
             if not files:
@@ -432,27 +547,24 @@ class StoryWorkspaceEpisodeArtifactService:
                     return None
                 descriptors.append(child)
                 parent = child
-            fact = self._read_file(
-                parent,
-                "episode.json",
-                relative_key="episode.json",
-                max_bytes=_BINDING_MAX_BYTES,
-                optional=True,
-            )
+            try:
+                fact = self._read_file(
+                    parent,
+                    "episode.json",
+                    relative_key="episode.json",
+                    max_bytes=_BINDING_MAX_BYTES,
+                    optional=True,
+                )
+            except StoryWorkspaceEpisodeArtifactContractError:
+                return None
             if fact is None:
                 return None
             try:
                 binding = StoryWorkspaceEpisodeBindingFile.model_validate_json(
                     fact.content
                 )
-            except ValidationError as exc:
-                raise StoryWorkspaceEpisodeArtifactPathError(
-                    "Episode binding violates dream-episode/v1"
-                ) from exc
-            if binding.workflow_run_id != workflow_run_id:
-                raise StoryWorkspaceEpisodeArtifactPathError(
-                    "Episode binding does not belong to the authorized run"
-                )
+            except ValidationError:
+                return None
             return binding
         finally:
             for descriptor in reversed(descriptors):
@@ -479,13 +591,18 @@ class StoryWorkspaceEpisodeArtifactService:
                 assert child is not None
                 descriptors.append(child)
                 parent = child
-            project = self._read_file(
-                parent,
-                "project.yaml",
-                relative_key="project.yaml",
-                max_bytes=_PROJECT_MAX_BYTES,
-                optional=False,
-            )
+            try:
+                project = self._read_file(
+                    parent,
+                    "project.yaml",
+                    relative_key="project.yaml",
+                    max_bytes=_PROJECT_MAX_BYTES,
+                    optional=False,
+                )
+            except StoryWorkspaceEpisodeArtifactContractError as exc:
+                raise StoryWorkspaceEpisodeArtifactPathError(
+                    "canonical project identity is invalid"
+                ) from exc
             assert project is not None
             try:
                 project_text = project.content.decode("utf-8")
@@ -503,53 +620,102 @@ class StoryWorkspaceEpisodeArtifactService:
             descriptors.append(episodes)
             episode = self._open_child_directory(episodes, "EP01", optional=True)
             if episode is None:
-                return _EpisodeReads(None, None, None, None, None, None)
+                return _EpisodeReads(None, None, None, None, None, None, {})
             descriptors.append(episode)
+            invalid_revisions: dict[str, str] = {}
+
+            def read_root_file(
+                name: str,
+                *,
+                max_bytes: int,
+            ) -> _FileFact | None:
+                try:
+                    return self._read_file(
+                        episode,
+                        name,
+                        relative_key=name,
+                        max_bytes=max_bytes,
+                        optional=True,
+                    )
+                except StoryWorkspaceEpisodeArtifactContractError as exc:
+                    invalid_revisions[name] = (
+                        exc.fact_revision
+                        or self._invalid_error_revision(name, "contract")
+                    )
+                    return None
+
+            def read_root_directory(
+                name: str,
+                *,
+                approved_extensions: frozenset[str],
+                per_file_max_bytes: int,
+            ) -> _DirectoryFact | None:
+                key = f"{name}/"
+                try:
+                    return self._read_directory(
+                        episode,
+                        name,
+                        approved_extensions=approved_extensions,
+                        per_file_max_bytes=per_file_max_bytes,
+                    )
+                except StoryWorkspaceEpisodeArtifactContractError as exc:
+                    invalid_revisions[key] = (
+                        exc.fact_revision
+                        or self._invalid_error_revision(key, "contract")
+                    )
+                    return None
+
             return _EpisodeReads(
-                outline=self._read_file(
-                    episode,
+                outline=read_root_file(
                     "episode-outline.md",
-                    relative_key="episode-outline.md",
                     max_bytes=STORY_WORKSPACE_EPISODE_MARKDOWN_MAX_BYTES,
-                    optional=True,
                 ),
-                script=self._read_file(
-                    episode,
+                script=read_root_file(
                     "script.md",
-                    relative_key="script.md",
                     max_bytes=STORY_WORKSPACE_EPISODE_MARKDOWN_MAX_BYTES,
-                    optional=True,
                 ),
-                storyboard=self._read_file(
-                    episode,
+                storyboard=read_root_file(
                     "storyboard.yaml",
-                    relative_key="storyboard.yaml",
                     max_bytes=STORY_WORKSPACE_EPISODE_YAML_MAX_BYTES,
-                    optional=True,
                 ),
-                prompts=self._read_directory(
-                    episode,
+                prompts=read_root_directory(
                     "prompts",
                     approved_extensions=frozenset({".yaml", ".yml"}),
                     per_file_max_bytes=STORY_WORKSPACE_EPISODE_AUXILIARY_YAML_MAX_BYTES,
                 ),
-                renders=self._read_directory(
-                    episode,
+                renders=read_root_directory(
                     "renders",
                     approved_extensions=frozenset({".md", ".json"}),
                     per_file_max_bytes=STORY_WORKSPACE_EPISODE_AUXILIARY_MARKDOWN_MAX_BYTES,
                 ),
-                review=self._read_file(
-                    episode,
+                review=read_root_file(
                     "review-report.md",
-                    relative_key="review-report.md",
                     max_bytes=STORY_WORKSPACE_EPISODE_AUXILIARY_MARKDOWN_MAX_BYTES,
-                    optional=True,
                 ),
+                invalid_revisions=invalid_revisions,
             )
         finally:
             for descriptor in reversed(descriptors):
                 os.close(descriptor)
+
+    @staticmethod
+    def _invalid_error_revision(relative_key: str, reason: str) -> str:
+        return "sha256:" + hashlib.sha256(
+            f"invalid:{relative_key}:{reason}".encode("utf-8")
+        ).hexdigest()
+
+    @staticmethod
+    def _root_revision(
+        revisions: Mapping[str, str],
+        relative_key: str,
+    ) -> str:
+        return "sha256:" + hashlib.sha256(
+            json.dumps(
+                [relative_key, sorted(revisions.items())],
+                ensure_ascii=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
 
     @staticmethod
     def _manifest_revision(
@@ -573,16 +739,14 @@ class StoryWorkspaceEpisodeArtifactService:
         return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
-    def _empty_unbound_surface(
+    def unbound_surface(
         workflow_run_id: str,
-        *,
-        auto_repair_attempted: bool,
     ) -> StoryWorkspaceEpisodeArtifactSurface:
         return StoryWorkspaceEpisodeArtifactSurface(
             runId=workflow_run_id,
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
             bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
-                autoRepairAttempted=auto_repair_attempted,
+                autoRepairAttempted=False,
                 canDispatch=False,
                 publicReason="episode_binding_unproven",
             ),
@@ -592,7 +756,7 @@ class StoryWorkspaceEpisodeArtifactService:
         self,
         workflow_run_id: str,
         *,
-        trusted_binding_context: StoryWorkspaceEpisodeBindingContext | None = None,
+        episode_authority: object,
     ) -> StoryWorkspaceEpisodeArtifactSurface:
         """Return an honest aggregate after the caller completed DB authorization."""
 
@@ -600,29 +764,30 @@ class StoryWorkspaceEpisodeArtifactService:
             raise StoryWorkspaceEpisodeArtifactContractError(
                 "workflow run identity is invalid"
             )
+        authority = StoryWorkspaceEpisodeAuthority.parse(
+            episode_authority,
+            expected_run_id=workflow_run_id,
+        )
+        if authority is None:
+            return self.unbound_surface(workflow_run_id)
         binding = self._read_existing_binding(workflow_run_id)
-        auto_repair_attempted = False
-        if binding is None and trusted_binding_context is not None:
-            if trusted_binding_context.workflow_run_id != workflow_run_id:
-                raise StoryWorkspaceEpisodeArtifactPathError(
-                    "trusted binding context belongs to another run"
-                )
-            resolution = StoryWorkspaceEpisodeBindingService(
-                self.workspace_root
-            ).resolve_or_repair_binding(trusted_binding_context)
-            auto_repair_attempted = resolution.recovery.auto_repair_attempted
-            binding = resolution.binding
         if binding is None:
-            return self._empty_unbound_surface(
-                workflow_run_id,
-                auto_repair_attempted=auto_repair_attempted,
-            )
+            return self.unbound_surface(workflow_run_id)
+        if (
+            binding.workflow_run_id != authority.workflow_run_id
+            or binding.episode_uid != authority.episode_uid
+            or binding.story_slug != authority.story_slug
+            or binding.episode_code != authority.episode_code
+            or binding.episode_root
+            != f"stories/{authority.story_slug}/episodes/{authority.episode_code}"
+        ):
+            return self.unbound_surface(workflow_run_id)
 
         reads = self._read_bound_episode(binding)
         narrative_adapter = StoryWorkspaceEpisodeArtifactAdapter(
             episode_uid=binding.episode_uid
         )
-        invalid: set[str] = set()
+        invalid: dict[str, str] = dict(reads.invalid_revisions)
 
         narrative_inputs: dict[str, _FileFact | None] = {
             "outline": reads.outline,
@@ -644,7 +809,7 @@ class StoryWorkspaceEpisodeArtifactService:
                     storyboard_revision=(fact.content_revision if key == "storyboard" else None),
                 )
             except StoryWorkspaceEpisodeArtifactParseError:
-                invalid.add(fact.relative_key)
+                invalid[fact.relative_key] = fact.content_revision
                 narrative_inputs[key] = None
 
         narrative = narrative_adapter.project(
@@ -766,7 +931,7 @@ class StoryWorkspaceEpisodeArtifactService:
             etag=manifest_revision,
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.BOUND,
             bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
-                autoRepairAttempted=auto_repair_attempted,
+                autoRepairAttempted=False,
                 canDispatch=True,
             ),
             artifacts=artifacts,
@@ -783,7 +948,7 @@ class StoryWorkspaceEpisodeArtifactService:
         review: _FileFact | None,
         narrative: object,
         manifest_revision: str,
-        invalid: set[str],
+        invalid: dict[str, str],
     ) -> tuple[dict[str, bytes], dict[str, str], _FileFact | None, _FileFact | None]:
         values = {
             "prompts": bool(prompt_files),
@@ -826,21 +991,38 @@ class StoryWorkspaceEpisodeArtifactService:
                 )
             except StoryWorkspaceEpisodeAuxiliaryArtifactParseError:
                 if kind == "prompts":
-                    invalid.add("prompts/")
+                    invalid["prompts/"] = StoryWorkspaceEpisodeArtifactService._root_revision(
+                        prompt_revisions,
+                        "prompts/",
+                    )
                     prompt_files = {}
                     prompt_revisions = {}
                 elif kind == "render":
-                    invalid.add("renders/")
+                    invalid["renders/"] = (
+                        render_guide.content_revision
+                        if render_guide is not None
+                        else StoryWorkspaceEpisodeArtifactService._invalid_error_revision(
+                            "renders/",
+                            "parse",
+                        )
+                    )
                     render_guide = None
                 else:
-                    invalid.add("review-report.md")
+                    invalid["review-report.md"] = (
+                        review.content_revision
+                        if review is not None
+                        else StoryWorkspaceEpisodeArtifactService._invalid_error_revision(
+                            "review-report.md",
+                            "parse",
+                        )
+                    )
                     review = None
         return prompt_files, prompt_revisions, render_guide, review
 
     @staticmethod
     def _raw_manifest_facts(
         reads: _EpisodeReads,
-        invalid: set[str],
+        invalid: Mapping[str, str],
     ) -> dict[str, tuple[str, str | None]]:
         values: dict[str, _FileFact | _DirectoryFact | None] = {
             "episode-outline.md": reads.outline,
@@ -854,7 +1036,10 @@ class StoryWorkspaceEpisodeArtifactService:
         for key, value in values.items():
             revision = value.content_revision if value is not None else None
             if key in invalid:
-                facts[key] = (StoryWorkspaceEpisodeArtifactAvailability.INVALID.value, revision)
+                facts[key] = (
+                    StoryWorkspaceEpisodeArtifactAvailability.INVALID.value,
+                    invalid[key],
+                )
             elif value is None or revision is None:
                 facts[key] = (
                     StoryWorkspaceEpisodeArtifactAvailability.NOT_GENERATED.value,
@@ -870,7 +1055,7 @@ class StoryWorkspaceEpisodeArtifactService:
     @staticmethod
     def _manifest_entries(
         reads: _EpisodeReads,
-        invalid: set[str],
+        invalid: Mapping[str, str],
         *,
         review_producer: StoryWorkspaceEpisodeProducerAction,
     ) -> list[StoryWorkspaceEpisodeArtifactManifestEntry]:
@@ -920,4 +1105,5 @@ __all__ = [
     "StoryWorkspaceEpisodeArtifactError",
     "StoryWorkspaceEpisodeArtifactPathError",
     "StoryWorkspaceEpisodeArtifactService",
+    "StoryWorkspaceEpisodeAuthority",
 ]

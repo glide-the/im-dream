@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 import stat
 import sys
-from typing import Any, Callable
+from typing import Any
 import uuid
 
 import database
@@ -74,9 +74,7 @@ try:
         StoryWorkspaceEpisodeArtifactError,
         StoryWorkspaceEpisodeArtifactPathError,
         StoryWorkspaceEpisodeArtifactService,
-    )
-    from services.story_workspace.episode_binding_service import (
-        StoryWorkspaceEpisodeBindingContext,
+        StoryWorkspaceEpisodeAuthority,
     )
     from services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -138,9 +136,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeArtifactError,
         StoryWorkspaceEpisodeArtifactPathError,
         StoryWorkspaceEpisodeArtifactService,
-    )
-    from backend.services.story_workspace.episode_binding_service import (
-        StoryWorkspaceEpisodeBindingContext,
+        StoryWorkspaceEpisodeAuthority,
     )
     from backend.services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -232,13 +228,6 @@ class StoryWorkflowApplicationGateway:
         dream_confirmation_coordinator: (
             StoryWorkspaceDreamConfirmationCoordinator | None
         ) = None,
-        episode_identity_provider: (
-            Callable[
-                [sqlite3.Row, Path],
-                StoryWorkspaceEpisodeBindingContext | None,
-            ]
-            | None
-        ) = None,
     ) -> None:
         self._dream_confirmation_coordinator = (
             dream_confirmation_coordinator or _DREAM_CONFIRMATION_COORDINATOR
@@ -248,7 +237,6 @@ class StoryWorkflowApplicationGateway:
                 self._dispatch_dream_agent_message
             )
         )
-        self._episode_identity_provider = episode_identity_provider
 
     @staticmethod
     def _actor(actor: dict[str, str]) -> AuthenticatedActorContext:
@@ -1304,6 +1292,26 @@ class StoryWorkflowApplicationGateway:
             raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
         return row
 
+    @staticmethod
+    def _episode_authority_from_source(
+        row: sqlite3.Row,
+        workflow_run_id: str,
+    ) -> StoryWorkspaceEpisodeAuthority | None:
+        try:
+            metadata = (
+                json.loads(row["source_metadata"])
+                if isinstance(row["source_metadata"], str)
+                else None
+            )
+        except (TypeError, ValueError):
+            return None
+        if not isinstance(metadata, dict):
+            return None
+        return StoryWorkspaceEpisodeAuthority.parse(
+            metadata.get("story_workspace_episode_identity"),
+            expected_run_id=workflow_run_id,
+        )
+
     def _get_episode_artifacts_from_db(
         self,
         db: sqlite3.Connection,
@@ -1318,21 +1326,22 @@ class StoryWorkflowApplicationGateway:
                 workflow_run_id,
                 actor,
             )
-            thread_id = str(row["thread_id"])
-            workspace = self._thread_workspace(thread_id)
-            trusted_context = (
-                self._episode_identity_provider(row, workspace)
-                if self._episode_identity_provider is not None
-                else None
+            authority = self._episode_authority_from_source(
+                row,
+                workflow_run_id,
             )
-            if (
-                trusted_context is not None
-                and trusted_context.workflow_run_id != workflow_run_id
-            ):
+            if authority is None:
+                return StoryWorkspaceEpisodeArtifactService.unbound_surface(
+                    workflow_run_id
+                )
+            thread_id = str(row["thread_id"])
+            try:
+                workspace = self._thread_workspace(thread_id)
+            except ApiRouteError as exc:
                 raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
             return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
                 workflow_run_id,
-                trusted_binding_context=trusted_context,
+                episode_authority=authority,
             )
         except ApiRouteError:
             raise

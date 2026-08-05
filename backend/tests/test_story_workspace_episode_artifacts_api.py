@@ -65,6 +65,21 @@ def _binding_context(run_id: str = RUN_ID, story_slug: str = "didi-zhengzhou"):
     )
 
 
+def _episode_authority(
+    episode_uid: str,
+    *,
+    run_id: str = RUN_ID,
+    story_slug: str = "didi-zhengzhou",
+) -> dict[str, str]:
+    return {
+        "schema": "story-workspace-episode-authority/v1",
+        "workflow_run_id": run_id,
+        "episode_uid": episode_uid,
+        "story_slug": story_slug,
+        "episode_code": "EP01",
+    }
+
+
 def _unbound_surface() -> StoryWorkspaceEpisodeArtifactSurface:
     return StoryWorkspaceEpisodeArtifactSurface(
         runId=RUN_ID,
@@ -165,13 +180,20 @@ class TestStoryWorkspaceEpisodeArtifactService:
             self.workspace
         ).resolve_or_repair_binding(_binding_context()).binding
         assert self.binding is not None
+        self.authority = _episode_authority(self.binding.episode_uid)
         self.service = StoryWorkspaceEpisodeArtifactService(self.workspace)
 
     def teardown_method(self) -> None:
         self.temporary_directory.cleanup()
 
+    def read_surface(self):
+        return self.service.read_surface(
+            RUN_ID,
+            episode_authority=self.authority,
+        )
+
     def test_missing_artifacts_are_six_recoverable_not_generated_facts(self) -> None:
-        surface = self.service.read_surface(RUN_ID)
+        surface = self.read_surface()
 
         assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.BOUND
         assert surface.opaque_episode_id == self.binding.episode_uid
@@ -206,7 +228,7 @@ class TestStoryWorkspaceEpisodeArtifactService:
         shutil.copytree(VENDOR_EPISODE / "prompts", self.episode / "prompts")
         shutil.copytree(VENDOR_EPISODE / "renders", self.episode / "renders")
 
-        surface = self.service.read_surface(RUN_ID)
+        surface = self.read_surface()
 
         assert surface.narrative is not None
         assert len(surface.narrative.shots) == 45
@@ -222,12 +244,12 @@ class TestStoryWorkspaceEpisodeArtifactService:
         )
 
     def test_manifest_revision_and_etag_change_with_content_fact(self) -> None:
-        first = self.service.read_surface(RUN_ID)
+        first = self.read_surface()
         (self.episode / "episode-outline.md").write_text(
             "---\ntitle: Demo\n---\n# Story Goals\n- Begin\n",
             encoding="utf-8",
         )
-        second = self.service.read_surface(RUN_ID)
+        second = self.read_surface()
 
         assert first.manifest_revision != second.manifest_revision
         assert second.etag == second.manifest_revision
@@ -250,12 +272,12 @@ class TestStoryWorkspaceEpisodeArtifactService:
         target.symlink_to(outside)
 
         with pytest.raises(StoryWorkspaceEpisodeArtifactPathError):
-            self.service.read_surface(RUN_ID)
+            self.read_surface()
 
     def test_invalid_artifact_is_200_surface_fact_without_untrusted_text(self) -> None:
         (self.episode / "storyboard.yaml").write_bytes(b"shots: [\xff]\n")
 
-        surface = self.service.read_surface(RUN_ID)
+        surface = self.read_surface()
 
         storyboard = next(
             item for item in surface.artifacts if item.relative_key == "storyboard.yaml"
@@ -270,7 +292,7 @@ class TestStoryWorkspaceEpisodeArtifactService:
         )
 
         with pytest.raises(StoryWorkspaceEpisodeArtifactPathError):
-            self.service.read_surface(RUN_ID)
+            self.read_surface()
 
     @pytest.mark.parametrize(
         "binding_updates",
@@ -291,8 +313,9 @@ class TestStoryWorkspaceEpisodeArtifactService:
         payload.update(binding_updates)
         binding_path.write_text(json.dumps(payload), encoding="utf-8")
 
-        with pytest.raises(StoryWorkspaceEpisodeArtifactPathError):
-            self.service.read_surface(RUN_ID)
+        surface = self.read_surface()
+        assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.UNBOUND
+        assert surface.artifacts == []
 
     @pytest.mark.parametrize(
         ("component", "replacement_kind"),
@@ -320,7 +343,7 @@ class TestStoryWorkspaceEpisodeArtifactService:
         target.symlink_to(outside)
 
         with pytest.raises(StoryWorkspaceEpisodeArtifactPathError):
-            self.service.read_surface(RUN_ID)
+            self.read_surface()
 
     def test_symlink_inside_approved_directory_is_rejected(self) -> None:
         prompts = self.episode / "prompts"
@@ -330,7 +353,7 @@ class TestStoryWorkspaceEpisodeArtifactService:
         (prompts / "episode.yaml").symlink_to(outside)
 
         with pytest.raises(StoryWorkspaceEpisodeArtifactPathError):
-            self.service.read_surface(RUN_ID)
+            self.read_surface()
 
     def test_unbound_does_not_probe_episode_tree(self) -> None:
         service = StoryWorkspaceEpisodeArtifactService(self.workspace)
@@ -340,12 +363,152 @@ class TestStoryWorkspaceEpisodeArtifactService:
             "_read_bound_episode",
             side_effect=AssertionError("artifact probe before binding"),
         ) as probe:
-            surface = service.read_surface(OTHER_RUN_ID)
+            surface = service.read_surface(
+                OTHER_RUN_ID,
+                episode_authority=_episode_authority(
+                    "f" * 32,
+                    run_id=OTHER_RUN_ID,
+                ),
+            )
 
         assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.UNBOUND
         assert surface.artifacts == []
         assert surface.opaque_episode_id is None
         probe.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "authority",
+        [
+            None,
+            {},
+            {"schema": "wrong"},
+            _episode_authority("e" * 32),
+            _episode_authority("a" * 32, run_id=OTHER_RUN_ID),
+            _episode_authority("a" * 32, story_slug="other"),
+        ],
+    )
+    def test_missing_invalid_or_mismatched_authority_is_unbound_without_probe(
+        self,
+        authority: dict[str, str] | None,
+    ) -> None:
+        with patch.object(
+            self.service,
+            "_read_bound_episode",
+            side_effect=AssertionError("Episode probe without matched authority"),
+        ) as probe:
+            surface = self.service.read_surface(
+                RUN_ID,
+                episode_authority=authority,
+            )
+
+        assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.UNBOUND
+        assert surface.artifacts == []
+        probe.assert_not_called()
+
+    def test_self_consistent_binding_and_project_swap_cannot_override_authority(self) -> None:
+        binding_path = (
+            self.workspace / ".dream" / "runtime" / "runs" / RUN_ID / "episode.json"
+        )
+        payload = json.loads(binding_path.read_text(encoding="utf-8"))
+        payload.update(
+            {
+                "episode_uid": "e" * 32,
+                "story_slug": "other",
+                "episode_root": "stories/other/episodes/EP01",
+            }
+        )
+        binding_path.write_text(json.dumps(payload), encoding="utf-8")
+        swapped_episode = self.workspace / "stories" / "other" / "episodes" / "EP01"
+        swapped_episode.mkdir(parents=True)
+        (swapped_episode.parent.parent / "project.yaml").write_text(
+            "project_id: other\n",
+            encoding="utf-8",
+        )
+        (swapped_episode / "episode-outline.md").write_text(
+            "# Story Goals\n- SWAPPED SOURCE\n",
+            encoding="utf-8",
+        )
+
+        with patch.object(
+            self.service,
+            "_read_bound_episode",
+            side_effect=AssertionError("swapped Episode must not be probed"),
+        ) as probe:
+            surface = self.service.read_surface(
+                RUN_ID,
+                episode_authority=self.authority,
+            )
+
+        assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.UNBOUND
+        assert "SWAPPED SOURCE" not in surface.model_dump_json()
+        probe.assert_not_called()
+
+    def test_oversize_root_is_invalid_while_other_artifacts_remain_available(self) -> None:
+        (self.episode / "episode-outline.md").write_bytes(b"x" * (1024 * 1024 + 1))
+        (self.episode / "script.md").write_text(
+            "---\ntitle: Demo\n---\n# Script\n",
+            encoding="utf-8",
+        )
+
+        first = self.read_surface()
+        (self.episode / "episode-outline.md").write_bytes(b"y" * (1024 * 1024 + 2))
+        second = self.read_surface()
+
+        availability = {item.relative_key: item.availability for item in second.artifacts}
+        assert availability["episode-outline.md"] is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+        assert availability["script.md"] is StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
+        assert first.manifest_revision != second.manifest_revision
+
+    def test_prompt_count_and_unapproved_render_entry_are_isolated_invalid_roots(self) -> None:
+        prompts = self.episode / "prompts"
+        prompts.mkdir()
+        for index in range(129):
+            (prompts / f"p-{index:03d}.yaml").write_text(
+                "shots: []\n",
+                encoding="utf-8",
+            )
+        renders = self.episode / "renders"
+        renders.mkdir()
+        (renders / "private.bin").write_bytes(b"not approved")
+
+        surface = self.read_surface()
+
+        availability = {item.relative_key: item.availability for item in surface.artifacts}
+        assert availability["prompts/"] is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+        assert availability["renders/"] is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+        assert surface.auxiliary is not None
+        assert surface.auxiliary.prompts.total == 0
+        assert surface.auxiliary.render_guide is None
+
+    @pytest.mark.parametrize(
+        "secret",
+        [
+            "/Users/private/story.txt",
+            r"C:\\Users\\private\\story.txt",
+            "api_key=sk-proj-abcdefghijklmnopqrstuv",
+            "Bearer abcdefghijklmnop",
+            "hidden reasoning: private chain",
+            "/drama-forge:drama-init --token secret",
+            "token: abcdefghijklmnopqrstuvwxyz123456",
+        ],
+    )
+    def test_narrative_sensitive_text_never_crosses_u2_u4_surface(
+        self,
+        secret: str,
+    ) -> None:
+        (self.episode / "episode-outline.md").write_text(
+            f"# Story Goals\n- {secret}\n",
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+        payload = surface.model_dump_json()
+
+        assert secret not in payload
+        outline = next(
+            item for item in surface.artifacts if item.relative_key == "episode-outline.md"
+        )
+        assert outline.availability is StoryWorkspaceEpisodeArtifactAvailability.INVALID
 
 
 def _create_gateway_schema(db: sqlite3.Connection) -> None:
@@ -466,6 +629,26 @@ def _seed_authorized_gateway_run(db: sqlite3.Connection) -> None:
     db.commit()
 
 
+def _set_gateway_episode_authority(
+    db: sqlite3.Connection,
+    episode_uid: str,
+    *,
+    authority: dict[str, str] | None = None,
+) -> None:
+    row = db.execute(
+        "SELECT metadata FROM chat_message WHERE id = 'source-1'"
+    ).fetchone()
+    metadata = json.loads(row[0])
+    metadata["story_workspace_episode_identity"] = authority or _episode_authority(
+        episode_uid
+    )
+    db.execute(
+        "UPDATE chat_message SET metadata = ? WHERE id = 'source-1'",
+        (json.dumps(metadata),),
+    )
+    db.commit()
+
+
 def test_gateway_authorizes_full_provenance_before_any_workspace_probe() -> None:
     db = sqlite3.connect(":memory:")
     db.row_factory = sqlite3.Row
@@ -486,6 +669,30 @@ def test_gateway_authorizes_full_provenance_before_any_workspace_probe() -> None
             )
 
     assert captured.value.status_code == 404
+    workspace_probe.assert_not_called()
+    db.close()
+
+
+def test_gateway_missing_authority_is_unbound_before_thread_workspace_probe() -> None:
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    _create_gateway_schema(db)
+    _seed_authorized_gateway_run(db)
+    gateway = gateway_module.StoryWorkflowApplicationGateway()
+
+    with patch.object(
+        gateway,
+        "_thread_workspace",
+        side_effect=AssertionError("missing authority must not probe workspace"),
+    ) as workspace_probe:
+        surface = gateway._get_episode_artifacts_from_db(
+            db,
+            RUN_ID,
+            {"actor_id": ACTOR_ID},
+        )
+
+    assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.UNBOUND
+    assert surface.artifacts == []
     workspace_probe.assert_not_called()
     db.close()
 
@@ -553,6 +760,7 @@ def test_gateway_owner_get_reads_bound_episode_after_full_authorization() -> Non
             workspace
         ).resolve_or_repair_binding(_binding_context()).binding
         assert binding is not None
+        _set_gateway_episode_authority(db, binding.episode_uid)
 
         with patch.object(gateway, "_thread_workspace", return_value=workspace):
             surface = gateway._get_episode_artifacts_from_db(
@@ -590,6 +798,11 @@ def test_real_route_owner_etag_refresh_and_other_actor_invisibility() -> None:
         StoryWorkspaceEpisodeBindingService(workspace).resolve_or_repair_binding(
             _binding_context()
         )
+        binding_path = workspace / ".dream" / "runtime" / "runs" / RUN_ID / "episode.json"
+        binding_uid = json.loads(binding_path.read_text(encoding="utf-8"))["episode_uid"]
+        db = sqlite3.connect(db_path)
+        _set_gateway_episode_authority(db, binding_uid)
+        db.close()
 
         app = FastAPI()
         current_actor = {"value": int(ACTOR_ID)}
@@ -638,3 +851,35 @@ def test_real_route_owner_etag_refresh_and_other_actor_invisibility() -> None:
     assert changed.headers["etag"] != first_etag
     assert forbidden.status_code == 404
     assert forbidden.json()["error"]["code"] == "WORKFLOW_PERMISSION_DENIED"
+
+
+@pytest.mark.parametrize(
+    ("workspace_error", "expected_status"),
+    [
+        (ApiRouteError("AGENT_EXECUTION_FAILED", status_code=404), 404),
+        (ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403), 404),
+        (ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503), 404),
+    ],
+)
+def test_episode_workspace_invisibility_has_one_public_404_boundary(
+    workspace_error: ApiRouteError,
+    expected_status: int,
+) -> None:
+    db = sqlite3.connect(":memory:")
+    db.row_factory = sqlite3.Row
+    _create_gateway_schema(db)
+    _seed_authorized_gateway_run(db)
+    _set_gateway_episode_authority(db, "a" * 32)
+    gateway = gateway_module.StoryWorkflowApplicationGateway()
+
+    with patch.object(gateway, "_thread_workspace", side_effect=workspace_error):
+        with pytest.raises(ApiRouteError) as captured:
+            gateway._get_episode_artifacts_from_db(
+                db,
+                RUN_ID,
+                {"actor_id": ACTOR_ID},
+            )
+
+    assert captured.value.status_code == expected_status
+    assert captured.value.code == "WORKFLOW_PERMISSION_DENIED"
+    db.close()
