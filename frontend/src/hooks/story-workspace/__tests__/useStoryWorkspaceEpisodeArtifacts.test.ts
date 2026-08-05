@@ -7,6 +7,7 @@ import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import {
   StoryWorkspaceEpisodeArtifactsHttpError,
+  storyWorkspaceCreateEpisodeArtifactsRequestLifecycle,
   storyWorkspaceEpisodeArtifactsEndpoint,
   storyWorkspaceEpisodeArtifactsInitialState,
   storyWorkspaceEpisodeArtifactsPollInterval,
@@ -17,7 +18,9 @@ import {
   storyWorkspaceShouldInvalidateEpisodeArtifacts,
 } from '../useStoryWorkspaceEpisodeArtifacts';
 import {
+  storyWorkspaceEpisodeStringFieldClassification,
   storyWorkspaceParseEpisodeArtifactSurface,
+  type StoryWorkspaceEpisodeArtifactSurface,
 } from '../contracts';
 
 const RUN_ID = `run_${'1'.repeat(32)}`;
@@ -304,6 +307,158 @@ function artifactInvalidSurface(
   return surface;
 }
 
+const EXPECTED_STRING_FIELD_CLASSIFICATIONS = [
+  'surface.runId',
+  'surface.opaqueEpisodeId',
+  'surface.manifestRevision',
+  'surface.etag',
+  'surface.bindingAvailability',
+  'bindingRecovery.publicReason',
+  'artifacts[].relativeKey',
+  'artifacts[].availability',
+  'artifacts[].contentRevision',
+  'artifacts[].mtime',
+  'artifacts[].producerAction',
+  'artifacts[].consumers[]',
+  'coverage.availability',
+  'narrative.episodeId',
+  'narrative.storyArcId',
+  'narrative.overview.title',
+  'narrative.overview.series',
+  'narrative.overview.storyGoals[]',
+  'narrative.overview.coreConflict',
+  'narrative.overview.hook',
+  'narrative.overview.sourceArtifact',
+  'narrative.overview.sourceRevision',
+  'narrative.overview.generatedFrom',
+  'narrative.overview.characterBeats[].id',
+  'narrative.overview.characterBeats[].sourceKey',
+  'narrative.overview.characterBeats[].characterId',
+  'narrative.overview.characterBeats[].action',
+  'narrative.overview.characterBeats[].startState',
+  'narrative.overview.characterBeats[].trigger',
+  'narrative.overview.characterBeats[].choice',
+  'narrative.overview.characterBeats[].endState',
+  'narrative.overview.characterBeats[].visibleEvidence',
+  'narrative.narrativeBeats[].id',
+  'narrative.narrativeBeats[].sourceKey',
+  'narrative.narrativeBeats[].title',
+  'narrative.narrativeBeats[].assetSceneRef',
+  'narrative.narrativeBeats[].narrativeFunction',
+  'narrative.narrativeBeats[].emotionTone',
+  'narrative.narrativeBeats[].summary',
+  'narrative.narrativeBeats[].sceneGoals[]',
+  'narrative.narrativeBeats[].keyDialogueBeats[]',
+  'narrative.narrativeBeats[].sourceArtifact',
+  'narrative.narrativeBeats[].sourceRevision',
+  'narrative.narrativeBeats[].generatedFrom',
+  'narrative.scenes[].id',
+  'narrative.scenes[].sourceKey',
+  'narrative.scenes[].title',
+  'narrative.scenes[].heading',
+  'narrative.scenes[].assetSceneRef',
+  'narrative.scenes[].narrativeBeatId',
+  'narrative.scenes[].declaredNarrativeBeatRef',
+  'narrative.scenes[].associationStatus',
+  'narrative.scenes[].actions[]',
+  'narrative.scenes[].dialogue[].speaker',
+  'narrative.scenes[].dialogue[].qualifier',
+  'narrative.scenes[].dialogue[].text',
+  'narrative.scenes[].cameraCues[]',
+  'narrative.scenes[].sourceArtifact',
+  'narrative.scenes[].sourceRevision',
+  'narrative.scenes[].generatedFrom',
+  'narrative.shots[].id',
+  'narrative.shots[].shotId',
+  'narrative.shots[].assetSceneRef',
+  'narrative.shots[].declaredScriptSceneRef',
+  'narrative.shots[].declaredNarrativeBeatRef',
+  'narrative.shots[].scriptSceneId',
+  'narrative.shots[].narrativeBeatId',
+  'narrative.shots[].associationStatus',
+  'narrative.shots[].shotType',
+  'narrative.shots[].characters[].ref',
+  'narrative.shots[].characters[].displayName',
+  'narrative.shots[].characters[].depthPlane',
+  'narrative.shots[].characters[].action',
+  'narrative.shots[].characters[].emotion',
+  'narrative.shots[].camera.angle',
+  'narrative.shots[].camera.height',
+  'narrative.shots[].camera.movement',
+  'narrative.shots[].camera.lens',
+  'narrative.shots[].visual',
+  'narrative.shots[].dialogue[].speaker',
+  'narrative.shots[].dialogue[].line',
+  'narrative.shots[].dialogue[].type',
+  'narrative.shots[].timing.transitionIn',
+  'narrative.shots[].timing.transitionOut',
+  'narrative.shots[].sourceArtifact',
+  'narrative.shots[].sourceRevision',
+  'narrative.shots[].generatedFrom',
+  'narrative.associations.missingLinks[]',
+  'narrative.associations.orphanArtifacts[]',
+  'auxiliary.manifestRevision',
+  'auxiliary.prompts.items[].id',
+  'auxiliary.prompts.items[].shotId',
+  'auxiliary.prompts.items[].kind',
+  'auxiliary.prompts.items[].shotViewId',
+  'auxiliary.prompts.items[].associationStatus',
+  'auxiliary.prompts.items[].positive',
+  'auxiliary.prompts.items[].negative',
+  'auxiliary.prompts.items[].parameters.model',
+  'auxiliary.prompts.items[].parameters.mode',
+  'auxiliary.prompts.items[].parameters.cameraMotion',
+  'auxiliary.prompts.items[].parameters.aspectRatio',
+  'auxiliary.prompts.items[].generability.characterAnchor',
+  'auxiliary.prompts.items[].generability.motionFeasibility',
+  'auxiliary.prompts.items[].generability.durationBudget',
+  'auxiliary.prompts.items[].generability.notes',
+  'auxiliary.prompts.items[].sourceArtifact',
+  'auxiliary.prompts.items[].sourceRevision',
+  'auxiliary.prompts.nextCursor',
+  'auxiliary.renderGuide.sections[].id',
+  'auxiliary.renderGuide.sections[].title',
+  'auxiliary.renderGuide.sections[].text',
+  'auxiliary.renderGuide.sections[].sourceArtifact',
+  'auxiliary.renderGuide.sections[].sourceRevision',
+  'auxiliary.renderGuide.queue.items[].id',
+  'auxiliary.renderGuide.queue.items[].shotId',
+  'auxiliary.renderGuide.queue.items[].shotViewId',
+  'auxiliary.renderGuide.queue.items[].associationStatus',
+  'auxiliary.renderGuide.queue.items[].risk',
+  'auxiliary.renderGuide.queue.items[].priority',
+  'auxiliary.renderGuide.queue.items[].renderer',
+  'auxiliary.renderGuide.queue.items[].status',
+  'auxiliary.renderGuide.queue.items[].sourceArtifact',
+  'auxiliary.renderGuide.queue.items[].sourceRevision',
+  'auxiliary.renderGuide.queue.nextCursor',
+  'auxiliary.renderGuide.sourceArtifact',
+  'auxiliary.renderGuide.sourceRevision',
+  'auxiliary.review.scope',
+  'auxiliary.review.overallVerdict',
+  'auxiliary.review.reviewedArtifacts[]',
+  'auxiliary.review.sourceRevisions[].sourceArtifact',
+  'auxiliary.review.sourceRevisions[].sourceRevision',
+  'auxiliary.review.sections[].id',
+  'auxiliary.review.sections[].title',
+  'auxiliary.review.sections[].text',
+  'auxiliary.review.sections[].sourceArtifact',
+  'auxiliary.review.sections[].sourceRevision',
+  'auxiliary.review.targets[].id',
+  'auxiliary.review.targets[].kind',
+  'auxiliary.review.targets[].sourceKey',
+  'auxiliary.review.targets[].targetViewId',
+  'auxiliary.review.targets[].associationStatus',
+  'auxiliary.review.targets[].sectionId',
+  'auxiliary.review.targets[].sourceArtifact',
+  'auxiliary.review.targets[].sourceRevision',
+  'auxiliary.review.sourceArtifact',
+  'auxiliary.review.sourceRevision',
+  'auxiliary.associations.orphanPrompts[]',
+  'auxiliary.associations.orphanQueueEntries[]',
+  'auxiliary.associations.duplicateQueueShotIds[]',
+] as const;
+
 test('strictly parses missing, unbound, and each progressive Episode artifact revision', () => {
   const missing = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
   expect(missing.artifacts).toHaveLength(6);
@@ -461,6 +616,119 @@ test('all public Episode text fails closed and parser diagnostics never echo hos
     expect(message).toBe('Episode artifact data is unavailable.');
     expect(message).not.toContain(secretKey);
     expect(message).not.toContain('another-secret');
+  }
+});
+
+test('every Episode string field has an explicit trust classification', () => {
+  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification).sort()).toEqual(
+    [...EXPECTED_STRING_FIELD_CLASSIFICATIONS].sort(),
+  );
+  expect(new Set(Object.values(storyWorkspaceEpisodeStringFieldClassification))).toEqual(
+    new Set(['machine_enum_or_pattern', 'canonical_relative_key', 'public_text', 'diagnostic']),
+  );
+  expect(storyWorkspaceEpisodeStringFieldClassification).toMatchObject({
+    'narrative.shots[].shotType': 'public_text',
+    'narrative.shots[].timing.transitionIn': 'public_text',
+    'narrative.shots[].timing.transitionOut': 'public_text',
+    'auxiliary.prompts.items[].parameters.model': 'public_text',
+    'auxiliary.prompts.items[].parameters.mode': 'public_text',
+    'auxiliary.prompts.items[].parameters.cameraMotion': 'public_text',
+    'auxiliary.renderGuide.queue.items[].priority': 'public_text',
+    'auxiliary.review.reviewedArtifacts[]': 'canonical_relative_key',
+  });
+});
+
+test('previously unclassified shot, prompt, render, and review strings reject unsafe injection', () => {
+  const cases: Array<{
+    label: string;
+    hostile: string;
+    mutate: (surface: Record<string, unknown>, hostile: string) => void;
+  }> = [
+    {
+      label: 'shotType',
+      hostile: '<script>unsafe</script>',
+      mutate: (surface, hostile) => {
+        const narrative = surface.narrative as Record<string, unknown>;
+        ((narrative.shots as Array<Record<string, unknown>>)[0]).shotType = hostile;
+      },
+    },
+    {
+      label: 'transitionIn',
+      hostile: 'chain of thought: private transition',
+      mutate: (surface, hostile) => {
+        const narrative = surface.narrative as Record<string, unknown>;
+        const shot = (narrative.shots as Array<Record<string, unknown>>)[0];
+        (shot.timing as Record<string, unknown>).transitionIn = hostile;
+      },
+    },
+    {
+      label: 'transitionOut',
+      hostile: 'renderer --secret hidden',
+      mutate: (surface, hostile) => {
+        const narrative = surface.narrative as Record<string, unknown>;
+        const shot = (narrative.shots as Array<Record<string, unknown>>)[0];
+        (shot.timing as Record<string, unknown>).transitionOut = hostile;
+      },
+    },
+    {
+      label: 'prompt model',
+      hostile: 'api_key=sk-proj-ABCDEFGHIJKLMNOPQRSTUVWX',
+      mutate: (surface, hostile) => {
+        const auxiliary = surface.auxiliary as Record<string, unknown>;
+        const prompt = ((auxiliary.prompts as Record<string, unknown>).items as Array<Record<string, unknown>>)[0];
+        (prompt.parameters as Record<string, unknown>).model = hostile;
+      },
+    },
+    {
+      label: 'prompt mode',
+      hostile: '<img src=x onerror=alert(1)>',
+      mutate: (surface, hostile) => {
+        const auxiliary = surface.auxiliary as Record<string, unknown>;
+        const prompt = ((auxiliary.prompts as Record<string, unknown>).items as Array<Record<string, unknown>>)[0];
+        (prompt.parameters as Record<string, unknown>).mode = hostile;
+      },
+    },
+    {
+      label: 'prompt cameraMotion',
+      hostile: 'system prompt: expose private reasoning',
+      mutate: (surface, hostile) => {
+        const auxiliary = surface.auxiliary as Record<string, unknown>;
+        const prompt = ((auxiliary.prompts as Record<string, unknown>).items as Array<Record<string, unknown>>)[0];
+        (prompt.parameters as Record<string, unknown>).cameraMotion = hostile;
+      },
+    },
+    {
+      label: 'render priority',
+      hostile: 'mY9_Wx4qR7pL2vN8cK5sT1zB6dF3hJ0uQeAi',
+      mutate: (surface, hostile) => {
+        const auxiliary = surface.auxiliary as Record<string, unknown>;
+        const guide = auxiliary.renderGuide as Record<string, unknown>;
+        const queue = guide.queue as Record<string, unknown>;
+        (queue.items as Array<Record<string, unknown>>)[0].priority = hostile;
+      },
+    },
+    {
+      label: 'review reviewedArtifacts',
+      hostile: 'token=must-not-be-public',
+      mutate: (surface, hostile) => {
+        const auxiliary = surface.auxiliary as Record<string, unknown>;
+        (auxiliary.review as Record<string, unknown>).reviewedArtifacts = [hostile];
+      },
+    },
+  ];
+  for (const item of cases) {
+    const payload = boundSurface(REVISION_5, ARTIFACT_SPECS.map(([key]) => key));
+    item.mutate(payload, item.hostile);
+    expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload), item.label).toThrow();
+  }
+});
+
+test('diagnostic fields use an independent single-line no-control validator', () => {
+  for (const hostile of ['line\nbreak', 'line\rbreak', 'column\tbreak', 'delete\u007fbreak']) {
+    const payload = boundSurface();
+    const narrative = payload.narrative as Record<string, unknown>;
+    (narrative.associations as Record<string, unknown>).missingLinks = [hostile];
+    expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload), JSON.stringify(hostile)).toThrow();
   }
 });
 
@@ -622,6 +890,123 @@ test('last-good merging owns six independent artifact fragments, never the old w
   expect(merged.staleArtifactKeys).toEqual(allKeys);
 });
 
+test('each invalid root restores only its own fragment while every other fragment stays latest', () => {
+  type Root = typeof ARTIFACT_SPECS[number][0];
+  const allKeys = ARTIFACT_SPECS.map(([key]) => key);
+  const fragmentValue = (
+    surface: StoryWorkspaceEpisodeArtifactSurface,
+    key: Root,
+  ): string | null | undefined => ({
+    'episode-outline.md': surface.narrative?.overview.title,
+    'script.md': surface.narrative?.scenes[0]?.title,
+    'storyboard.yaml': surface.narrative?.shots[0]?.visual,
+    'prompts/': surface.auxiliary?.prompts.items[0]?.positive,
+    'renders/': surface.auxiliary?.renderGuide?.sections[0]?.title,
+    'review-report.md': surface.auxiliary?.review?.sections[0]?.title,
+  })[key];
+  const oldValues: Record<Root, string> = {
+    'episode-outline.md': '雨夜重逢',
+    'script.md': '车站外',
+    'storyboard.yaml': '雨夜车站。',
+    'prompts/': '雨夜车站，中景。',
+    'renders/': '制作指导',
+    'review-report.md': '结论',
+  };
+  const latestValues: Record<Root, string> = {
+    'episode-outline.md': 'latest-outline',
+    'script.md': 'latest-script',
+    'storyboard.yaml': 'latest-storyboard',
+    'prompts/': 'latest-prompt',
+    'renders/': 'latest-render',
+    'review-report.md': 'latest-review',
+  };
+
+  for (const [targetIndex, target] of allKeys.entries()) {
+    const complete = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(REVISION_1, allKeys));
+    const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(
+      storyWorkspaceEpisodeArtifactsInitialState(RUN_ID),
+      { type: 'success', runId: RUN_ID, generation: 1, data: complete },
+    );
+    const payload = boundSurface(REVISION_2, allKeys);
+    const narrative = payload.narrative as Record<string, unknown>;
+    const overview = narrative.overview as Record<string, unknown>;
+    const beats = narrative.narrativeBeats as Array<Record<string, unknown>>;
+    const scenes = narrative.scenes as Array<Record<string, unknown>>;
+    const shots = narrative.shots as Array<Record<string, unknown>>;
+    const auxiliary = payload.auxiliary as Record<string, unknown>;
+    const prompts = auxiliary.prompts as Record<string, unknown>;
+    const promptItems = prompts.items as Array<Record<string, unknown>>;
+    const guide = auxiliary.renderGuide as Record<string, unknown>;
+    const guideSections = guide.sections as Array<Record<string, unknown>>;
+    const queueItems = (guide.queue as Record<string, unknown>).items as Array<Record<string, unknown>>;
+    const review = auxiliary.review as Record<string, unknown>;
+    const reviewSections = review.sections as Array<Record<string, unknown>>;
+    const reviewTargets = review.targets as Array<Record<string, unknown>>;
+    overview.title = latestValues['episode-outline.md'];
+    beats[0].title = 'latest-beat';
+    scenes[0].title = latestValues['script.md'];
+    shots[0].visual = latestValues['storyboard.yaml'];
+    promptItems[0].positive = latestValues['prompts/'];
+    guideSections[0].title = latestValues['renders/'];
+    reviewSections[0].title = latestValues['review-report.md'];
+    const artifact = (payload.artifacts as Array<Record<string, unknown>>)
+      .find((item) => item.relativeKey === target);
+    if (!artifact) throw new Error('missing test artifact');
+    Object.assign(artifact, {
+      availability: 'invalid',
+      contentRevision: null,
+      mtime: null,
+      size: null,
+    });
+    if (target === 'episode-outline.md') {
+      Object.assign(overview, {
+        title: null,
+        series: null,
+        storyGoals: [],
+        coreConflict: null,
+        hook: null,
+        sourceArtifact: null,
+        sourceRevision: null,
+        generatedFrom: null,
+        characterBeats: [],
+      });
+      narrative.narrativeBeats = [];
+      scenes[0].narrativeBeatId = null;
+      scenes[0].associationStatus = 'unlinked';
+      shots[0].narrativeBeatId = null;
+    } else if (target === 'script.md') {
+      narrative.scenes = [];
+      shots[0].scriptSceneId = null;
+      shots[0].associationStatus = 'unlinked';
+    } else if (target === 'storyboard.yaml') {
+      narrative.shots = [];
+      promptItems[0].shotViewId = null;
+      promptItems[0].associationStatus = 'orphan';
+      queueItems[0].shotViewId = null;
+      queueItems[0].associationStatus = 'orphan';
+      reviewTargets[0].targetViewId = null;
+      reviewTargets[0].associationStatus = 'orphan';
+    } else if (target === 'prompts/') {
+      prompts.items = [];
+      prompts.total = 0;
+    } else if (target === 'renders/') {
+      auxiliary.renderGuide = null;
+    } else {
+      auxiliary.review = null;
+    }
+    const latest = storyWorkspaceParseEpisodeArtifactSurface(payload);
+    const merged = storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
+      type: 'success', runId: RUN_ID, generation: 2, data: latest,
+    });
+    expect(merged.staleArtifactKeys, target).toEqual([target]);
+    expect(fragmentValue(merged.data!, target), target).toBe(oldValues[target]);
+    const unaffected = allKeys[(targetIndex + 1) % allKeys.length];
+    expect(fragmentValue(merged.data!, unaffected), `${target} must not stale ${unaffected}`)
+      .toBe(latestValues[unaffected]);
+    expect(merged.data?.manifestRevision).toBe(REVISION_2);
+  }
+});
+
 test('HTTP errors and aborts are safe and never parse response diagnostics as artifacts', async () => {
   for (const status of [401, 404, 422]) {
     await expect(storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
@@ -700,6 +1085,69 @@ test('stale generations, ignored AbortSignal responses, run switches, unmount, a
     expect(failed.latest).toBe(second);
     expect(failed.error).toMatchObject({ status });
   }
+});
+
+test('request lifecycle executes cleanup and run-switch against late promises that ignore abort', async () => {
+  let resolveFirst: (value: string) => void = () => {
+    throw new Error('First deferred request was not initialized.');
+  };
+  const ignoredAbortFetch = new Promise<string>((resolve) => {
+    resolveFirst = resolve;
+  });
+  const dispatched: string[] = [];
+  const lifecycle = storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(RUN_ID);
+  const first = lifecycle.begin(RUN_ID);
+  void ignoredAbortFetch.then((value) => {
+    if (lifecycle.shouldCommit(first)) dispatched.push(value);
+  });
+  expect(lifecycle.commitEtag(first, REVISION_1)).toBe(true);
+  expect(lifecycle.etagFor(RUN_ID)).toBe(REVISION_1);
+
+  lifecycle.cleanup();
+  expect(first.signal.aborted).toBe(true);
+  expect(lifecycle.etagFor(RUN_ID)).toBeNull();
+  resolveFirst('late-after-unmount');
+  await ignoredAbortFetch;
+  await Promise.resolve();
+  expect(dispatched).toEqual([]);
+
+  const remounted = storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(RUN_ID);
+  expect(remounted.etagFor(RUN_ID)).toBeNull();
+  const remountTicket = remounted.begin(RUN_ID);
+  expect(remounted.shouldCommit(remountTicket)).toBe(true);
+  expect(remounted.commitEtag(remountTicket, REVISION_1)).toBe(true);
+
+  let resolveRunA: (value: string) => void = () => {
+    throw new Error('Run A deferred request was not initialized.');
+  };
+  const lateRunA = new Promise<string>((resolve) => {
+    resolveRunA = resolve;
+  });
+  const runATicket = remounted.begin(RUN_ID);
+  void lateRunA.then((value) => {
+    if (remounted.shouldCommit(runATicket)) dispatched.push(value);
+  });
+  const runBTicket = remounted.begin(OTHER_RUN_ID);
+  expect(runATicket.signal.aborted).toBe(true);
+  expect(remounted.etagFor(OTHER_RUN_ID)).toBeNull();
+  expect(remounted.etagFor(RUN_ID)).toBeNull();
+  expect(remounted.shouldCommit(runBTicket)).toBe(true);
+  resolveRunA('late-after-run-switch');
+  await lateRunA;
+  await Promise.resolve();
+  expect(dispatched).toEqual([]);
+
+  const cached = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
+  const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(
+    storyWorkspaceEpisodeArtifactsInitialState(RUN_ID),
+    { type: 'success', runId: RUN_ID, generation: 1, data: cached },
+  );
+  const switched = storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
+    type: 'reset', runId: OTHER_RUN_ID,
+  });
+  expect(switched.data).toBeNull();
+  expect(switched.latest).toBeNull();
+  expect(switched.artifactCache).toEqual({});
 });
 
 test('polling is never faster than five seconds and SSE is identity-only invalidation', () => {

@@ -88,6 +88,84 @@ export interface StoryWorkspaceEpisodeArtifactsCommitGuard {
   readonly currentGeneration: number;
 }
 
+export interface StoryWorkspaceEpisodeArtifactsRequestTicket {
+  readonly runId: string;
+  readonly generation: number;
+  readonly signal: AbortSignal;
+}
+
+export interface StoryWorkspaceEpisodeArtifactsRequestLifecycle {
+  activate: (runId: string | null) => void;
+  begin: (runId: string) => StoryWorkspaceEpisodeArtifactsRequestTicket;
+  shouldCommit: (ticket: StoryWorkspaceEpisodeArtifactsRequestTicket) => boolean;
+  commitEtag: (ticket: StoryWorkspaceEpisodeArtifactsRequestTicket, etag: string | null) => boolean;
+  etagFor: (runId: string) => string | null;
+  cleanup: () => void;
+}
+
+/**
+ * Mounted request lifecycle shared by the hook and its Node seam. It owns the
+ * AbortController, generation, run-local ETag, and late-response commit gate.
+ */
+export function storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(
+  initialRunId: string | null,
+): StoryWorkspaceEpisodeArtifactsRequestLifecycle {
+  let generation = 0;
+  let currentRunId = initialRunId;
+  let mounted = true;
+  let etag: string | null = null;
+  let controller: AbortController | null = null;
+
+  const moveToRun = (runId: string | null) => {
+    if (currentRunId === runId) return;
+    controller?.abort();
+    controller = null;
+    generation += 1;
+    currentRunId = runId;
+    etag = null;
+  };
+  const shouldCommit = (ticket: StoryWorkspaceEpisodeArtifactsRequestTicket) => (
+    mounted && storyWorkspaceShouldCommitEpisodeArtifactsResponse({
+      signal: ticket.signal,
+      requestRunId: ticket.runId,
+      currentRunId,
+      requestGeneration: ticket.generation,
+      currentGeneration: generation,
+    })
+  );
+
+  return {
+    activate(runId) {
+      moveToRun(runId);
+      mounted = true;
+    },
+    begin(runId) {
+      if (!mounted) throw new Error('Episode artifact request lifecycle is inactive.');
+      moveToRun(runId);
+      controller?.abort();
+      controller = new AbortController();
+      generation += 1;
+      return { runId, generation, signal: controller.signal };
+    },
+    shouldCommit,
+    commitEtag(ticket, value) {
+      if (!shouldCommit(ticket)) return false;
+      etag = value;
+      return true;
+    },
+    etagFor(runId) {
+      return mounted && currentRunId === runId ? etag : null;
+    },
+    cleanup() {
+      mounted = false;
+      controller?.abort();
+      controller = null;
+      generation += 1;
+      etag = null;
+    },
+  };
+}
+
 export function storyWorkspaceShouldCommitEpisodeArtifactsResponse(
   guard: StoryWorkspaceEpisodeArtifactsCommitGuard,
 ): boolean {
@@ -376,68 +454,53 @@ export function useStoryWorkspaceEpisodeArtifacts(
     normalizedRunId,
     storyWorkspaceEpisodeArtifactsInitialState,
   );
-  const generation = useRef(0);
-  const controller = useRef<AbortController | null>(null);
-  const etagCache = useRef<{ runId: string | null; etag: string | null }>({
-    runId: normalizedRunId,
-    etag: null,
-  });
+  const lifecycleRef = useRef<StoryWorkspaceEpisodeArtifactsRequestLifecycle | null>(null);
+  const renderedRunIdRef = useRef<string | null>(normalizedRunId);
+  if (lifecycleRef.current === null) {
+    lifecycleRef.current = storyWorkspaceCreateEpisodeArtifactsRequestLifecycle(normalizedRunId);
+  }
+  const lifecycle = lifecycleRef.current;
 
   const refresh = useCallback(() => {
     if (!normalizedRunId) return;
-    if (etagCache.current.runId !== normalizedRunId) {
-      etagCache.current = { runId: normalizedRunId, etag: null };
-    }
-    controller.current?.abort();
-    const nextController = new AbortController();
-    controller.current = nextController;
-    generation.current += 1;
-    const nextGeneration = generation.current;
-    dispatch({ type: 'start', runId: normalizedRunId, generation: nextGeneration });
+    const ticket = lifecycle.begin(normalizedRunId);
+    dispatch({ type: 'start', runId: normalizedRunId, generation: ticket.generation });
     void storyWorkspaceFetchEpisodeArtifacts(
       apiUrl(storyWorkspaceEpisodeArtifactsEndpoint(normalizedRunId)),
       {
         fetchImpl: options.fetchImpl,
         token: options.token === undefined ? getAuthToken() : options.token,
-        etag: etagCache.current.etag,
+        etag: lifecycle.etagFor(normalizedRunId),
         expectedRunId: normalizedRunId,
-        signal: nextController.signal,
+        signal: ticket.signal,
       },
     ).then((result) => {
-      if (!storyWorkspaceShouldCommitEpisodeArtifactsResponse({
-        signal: nextController.signal,
-        requestRunId: normalizedRunId,
-        currentRunId: etagCache.current.runId,
-        requestGeneration: nextGeneration,
-        currentGeneration: generation.current,
-      })) return;
+      if (!lifecycle.shouldCommit(ticket)) return;
       if (result.kind === 'not-modified') {
-        dispatch({ type: 'not-modified', runId: normalizedRunId, generation: nextGeneration });
+        dispatch({
+          type: 'not-modified',
+          runId: normalizedRunId,
+          generation: ticket.generation,
+        });
         return;
       }
-      etagCache.current = { runId: normalizedRunId, etag: result.data.etag };
+      if (!lifecycle.commitEtag(ticket, result.data.etag)) return;
       dispatch({
         type: 'success',
         runId: normalizedRunId,
-        generation: nextGeneration,
+        generation: ticket.generation,
         data: result.data,
       });
     }).catch((reason: unknown) => {
       if (
-        !storyWorkspaceShouldCommitEpisodeArtifactsResponse({
-          signal: nextController.signal,
-          requestRunId: normalizedRunId,
-          currentRunId: etagCache.current.runId,
-          requestGeneration: nextGeneration,
-          currentGeneration: generation.current,
-        })
+        !lifecycle.shouldCommit(ticket)
         || storyWorkspaceIsEpisodeArtifactsAbort(reason)
       ) return;
       if (reason instanceof StoryWorkspaceEpisodeArtifactsContractError) {
         dispatch({
           type: 'invalid',
           runId: normalizedRunId,
-          generation: nextGeneration,
+          generation: ticket.generation,
           diagnostic: {
             kind: 'invalid_payload',
             message: STORY_WORKSPACE_EPISODE_INVALID_MESSAGE,
@@ -448,24 +511,23 @@ export function useStoryWorkspaceEpisodeArtifacts(
       dispatch({
         type: 'error',
         runId: normalizedRunId,
-        generation: nextGeneration,
+        generation: ticket.generation,
         error: reason instanceof Error
           ? reason
           : new Error('Episode artifact request failed.'),
       });
     });
-  }, [normalizedRunId, options.fetchImpl, options.token]);
+  }, [lifecycle, normalizedRunId, options.fetchImpl, options.token]);
 
   useEffect(() => {
-    controller.current?.abort();
-    if (etagCache.current.runId !== normalizedRunId) {
-      generation.current += 1;
-      etagCache.current = { runId: normalizedRunId, etag: null };
+    lifecycle.activate(normalizedRunId);
+    if (renderedRunIdRef.current !== normalizedRunId) {
+      renderedRunIdRef.current = normalizedRunId;
       dispatch({ type: 'reset', runId: normalizedRunId });
     }
     if (normalizedRunId) refresh();
-    return () => controller.current?.abort();
-  }, [normalizedRunId, refresh]);
+    return () => lifecycle.cleanup();
+  }, [lifecycle, normalizedRunId, refresh]);
 
   useEffect(() => {
     if (!normalizedRunId) return;
