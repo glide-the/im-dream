@@ -386,7 +386,8 @@ def _source_launch_row(
         "SELECT run.workspace_id, binding.deck_id, run.deck_plugin_id, "
         "run.deck_plugin_version, run.deck_plugin_binding_id, "
         "run.binding_revision, run.deck_runtime_snapshot_id, "
-        "run.runtime_plugin_lock_id, thread.voice_id AS thread_voice_id "
+        "run.runtime_plugin_lock_id, thread.voice_id AS thread_voice_id, "
+        "source.id AS source_id, source.metadata AS source_metadata "
         "FROM workflow_runs AS run "
         "JOIN deck_plugin_bindings AS binding "
         "ON binding.deck_plugin_binding_id = run.deck_plugin_binding_id "
@@ -397,45 +398,39 @@ def _source_launch_row(
         "JOIN chat_thread AS thread "
         "ON thread.id = run.source_voice_thread_id "
         "AND thread.deck_id = binding.deck_id "
+        "JOIN chat_message AS source "
+        "ON source.id = run.source_message_id "
+        "AND source.thread_id = thread.id AND source.role = 'user' "
         "WHERE run.id = ? AND run.created_by = ? "
         "AND run.source_voice_thread_id = ? AND thread.user_id = ? LIMIT 1",
         (workflow_run_id, str(actor_id), thread_id, actor_id),
     ).fetchone()
     if locked is None:
         raise PermissionError("Dream launch provenance is unavailable")
-    rows = db.execute(
-        "SELECT id, metadata FROM chat_message "
-        "WHERE thread_id = ? AND role = 'user'",
-        (thread_id,),
-    ).fetchall()
-    matches: list[tuple[str, str, dict[str, Any]]] = []
-    for row in rows:
-        raw = row["metadata"] or "{}"
-        try:
-            metadata = json.loads(raw)
-        except (TypeError, ValueError):
-            continue
-        if (
-            StoryWorkspaceDreamReentryService._source_metadata_matches(  # noqa: SLF001
-                raw,
-                actor_id=actor_id,
-                workspace_id=str(locked["workspace_id"]),
-                run_id=workflow_run_id,
-                thread_id=thread_id,
-                deck_id=str(locked["deck_id"]),
-                deck_plugin_id=str(locked["deck_plugin_id"]),
-                deck_plugin_version=str(locked["deck_plugin_version"]),
-                binding_id=str(locked["deck_plugin_binding_id"]),
-                binding_revision=int(locked["binding_revision"]),
-                runtime_snapshot_id=str(locked["deck_runtime_snapshot_id"]),
-                runtime_lock_id=str(locked["runtime_plugin_lock_id"]),
-                thread_agent_id=locked["thread_voice_id"],
-            )
-        ):
-            matches.append((str(row["id"]), str(raw), metadata))
-    if len(matches) != 1:
+    raw = locked["source_metadata"] or "{}"
+    try:
+        metadata = json.loads(raw)
+    except (TypeError, ValueError) as error:
+        raise PermissionError("Dream launch provenance is unavailable") from error
+    if not isinstance(metadata, dict) or not (
+        StoryWorkspaceDreamReentryService._source_metadata_matches(  # noqa: SLF001
+            raw,
+            actor_id=actor_id,
+            workspace_id=str(locked["workspace_id"]),
+            run_id=workflow_run_id,
+            thread_id=thread_id,
+            deck_id=str(locked["deck_id"]),
+            deck_plugin_id=str(locked["deck_plugin_id"]),
+            deck_plugin_version=str(locked["deck_plugin_version"]),
+            binding_id=str(locked["deck_plugin_binding_id"]),
+            binding_revision=int(locked["binding_revision"]),
+            runtime_snapshot_id=str(locked["deck_runtime_snapshot_id"]),
+            runtime_lock_id=str(locked["runtime_plugin_lock_id"]),
+            thread_agent_id=locked["thread_voice_id"],
+        )
+    ):
         raise PermissionError("Dream launch provenance is unavailable")
-    return matches[0]
+    return str(locked["source_id"]), str(raw), metadata
 
 
 def _bind_first_episode(

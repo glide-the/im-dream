@@ -174,6 +174,15 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                     "2026-08-04T00:00:00+00:00",
                 ),
             )
+            db.execute(
+                "UPDATE workflow_runs "
+                "SET source_message_id = ?, source_message_time = ? WHERE id = ?",
+                (
+                    "launch-source",
+                    "2026-08-04T00:00:01+00:00",
+                    RUN_ID,
+                ),
+            )
             db.commit()
         finally:
             db.close()
@@ -219,6 +228,37 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         finally:
             db.close()
         return encoded
+
+    def _insert_launch_decoy(
+        self,
+        message_id: str,
+        metadata: dict[str, object],
+    ) -> str:
+        encoded = json.dumps(metadata, sort_keys=True)
+        db = sqlite3.connect(self.database_path)
+        try:
+            db.execute(
+                "INSERT INTO chat_message "
+                "(id, thread_id, role, parts, metadata) "
+                "VALUES (?, ?, 'user', '[]', ?)",
+                (message_id, THREAD_ID, encoded),
+            )
+            db.commit()
+        finally:
+            db.close()
+        return encoded
+
+    def _message_metadata(self, message_id: str) -> dict[str, object]:
+        db = sqlite3.connect(self.database_path)
+        try:
+            row = db.execute(
+                "SELECT metadata FROM chat_message WHERE id = ?",
+                (message_id,),
+            ).fetchone()
+            self.assertIsNotNone(row)
+            return json.loads(row[0])
+        finally:
+            db.close()
 
     @staticmethod
     def _current_launch_metadata(
@@ -705,16 +745,61 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             )
         )
 
+    def test_source_launch_never_accepts_a_same_thread_decoy(self) -> None:
+        self._seed_episode_action(action="recover_first_episode_binding")
+        legacy = self._launch_metadata()
+        forged_authority = self._current_launch_metadata(legacy, "voice-forged")
+        decoys = (
+            ("current", self._current_launch_metadata(legacy, "voice-authorized")),
+            ("legacy", legacy),
+        )
+        for label, decoy in decoys:
+            with self.subTest(label=label):
+                self._replace_launch_metadata(
+                    forged_authority,
+                    thread_agent_id="voice-authorized",
+                )
+                decoy_id = f"launch-decoy-{label}"
+                self._insert_launch_decoy(decoy_id, decoy)
+                db = self._open_db()
+                try:
+                    with self.assertRaises(PermissionError):
+                        story_workspace_tool._source_launch_row(  # noqa: SLF001
+                            db,
+                            actor_id=7,
+                            thread_id=THREAD_ID,
+                            workflow_run_id=RUN_ID,
+                        )
+                finally:
+                    db.close()
+                cleanup = sqlite3.connect(self.database_path)
+                try:
+                    cleanup.execute(
+                        "DELETE FROM chat_message WHERE id = ?",
+                        (decoy_id,),
+                    )
+                    cleanup.commit()
+                finally:
+                    cleanup.close()
+        self.assertTrue(
+            any(
+                "source.id = run.source_message_id" in statement
+                for statement in self.statements
+            )
+        )
+
     def test_binding_rejects_forged_agent_before_any_episode_write(self) -> None:
         story = self.workspace / "stories" / "demo"
         (story / "episodes" / "EP01").mkdir(parents=True)
         (story / "project.yaml").write_text("project_id: demo\n", encoding="utf-8")
         self._seed_episode_action(action="recover_first_episode_binding")
-        forged = self._current_launch_metadata(self._launch_metadata(), "voice-forged")
+        legacy = self._launch_metadata()
+        forged = self._current_launch_metadata(legacy, "voice-forged")
         raw_before = self._replace_launch_metadata(
             forged,
             thread_agent_id="voice-authorized",
         )
+        decoy_before = self._insert_launch_decoy("launch-decoy", legacy)
 
         result = self._call(
             "bind_first_episode",
@@ -725,6 +810,14 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         self.assertEqual(
             self._launch_metadata(),
             json.loads(raw_before),
+        )
+        self.assertEqual(
+            self._message_metadata("launch-decoy"),
+            json.loads(decoy_before),
+        )
+        self.assertNotIn(
+            "story_workspace_episode_identity",
+            self._message_metadata("launch-decoy"),
         )
         self.assertFalse(
             (
@@ -905,9 +998,17 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             self._launch_metadata(),
             "voice-forged",
         )
+        valid_decoy = self._current_launch_metadata(
+            self._launch_metadata(),
+            "voice-authorized",
+        )
         raw_before = self._replace_launch_metadata(
             forged,
             thread_agent_id="voice-authorized",
+        )
+        decoy_before = self._insert_launch_decoy(
+            "launch-decoy",
+            valid_decoy,
         )
 
         result = self._call(
@@ -917,6 +1018,10 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
 
         self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
         self.assertEqual(self._launch_metadata(), json.loads(raw_before))
+        self.assertEqual(
+            self._message_metadata("launch-decoy"),
+            json.loads(decoy_before),
+        )
         persisted = facts_service.read(RUN_ID, episode_uid)
         self.assertEqual(persisted.revision, 0)
         self.assertEqual(persisted.completions, [])
