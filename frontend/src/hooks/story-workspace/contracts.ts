@@ -440,3 +440,1119 @@ export interface StoryWorkspaceGuidanceHistoryEntry {
   requestId: string | null;
   idempotencyKey: string | null;
 }
+
+/* --------------------------------------------------------------------------
+ * U5 — Episode artifact read surface (design_009 §§4, 16–17, 20).
+ * This is the strict camelCase browser boundary for the backend's
+ * StoryWorkspaceEpisodeArtifactSurface. Canonical files remain the content
+ * owners; these values are read-only projections.
+ * ------------------------------------------------------------------------ */
+
+export type StoryWorkspaceEpisodeBindingAvailability = 'bound' | 'unbound';
+export type StoryWorkspaceEpisodeBindingPublicReason = 'episode_binding_unproven';
+export type StoryWorkspaceEpisodeArtifactAvailability =
+  | 'not_generated'
+  | 'available'
+  | 'invalid'
+  | 'unavailable';
+export type StoryWorkspaceEpisodeProducerAction =
+  | 'plan_episode'
+  | 'write_script'
+  | 'review_script'
+  | 'build_assets'
+  | 'regenerate_storyboard'
+  | 'generate_prompts'
+  | 'review_full_chain'
+  | 'commit_episode'
+  | 'prepare_render_guide';
+export type StoryWorkspaceEpisodeArtifactConsumer =
+  | 'episode_overview'
+  | 'storyline_navigator'
+  | 'narrative_workbench'
+  | 'shot_inspector'
+  | 'prompt_view'
+  | 'render_view'
+  | 'review_view';
+export type StoryWorkspaceEpisodeAssociationStatus = 'linked' | 'unlinked' | 'orphan';
+export type StoryWorkspaceEpisodeMetricAvailability = 'available' | 'unavailable';
+export type StoryWorkspaceEpisodeReviewScope = 'script' | 'full-chain' | 'unknown';
+
+export interface StoryWorkspaceEpisodeBindingRecovery {
+  readonly autoRepairAttempted: boolean;
+  readonly canDispatch: boolean;
+  readonly publicReason: StoryWorkspaceEpisodeBindingPublicReason | null;
+}
+
+export interface StoryWorkspaceEpisodeArtifactManifestEntry {
+  readonly relativeKey: string;
+  readonly availability: StoryWorkspaceEpisodeArtifactAvailability;
+  readonly contentRevision: string | null;
+  readonly mtime: string | null;
+  readonly size: number | null;
+  readonly producerAction: StoryWorkspaceEpisodeProducerAction;
+  readonly consumers: readonly StoryWorkspaceEpisodeArtifactConsumer[];
+}
+
+export interface StoryWorkspaceEpisodeAssociationCoverage {
+  readonly availability: StoryWorkspaceEpisodeMetricAvailability;
+  readonly linked: number;
+  readonly total: number;
+  readonly ratio: number | null;
+}
+
+export interface StoryWorkspaceEpisodeCharacterBeat {
+  readonly id: string;
+  readonly sourceKey: string;
+  readonly characterId: string | null;
+  readonly action: string | null;
+  readonly startState: string | null;
+  readonly trigger: string | null;
+  readonly choice: string | null;
+  readonly endState: string | null;
+  readonly visibleEvidence: string | null;
+}
+
+export interface StoryWorkspaceEpisodeOverview {
+  readonly title: string | null;
+  readonly series: string | null;
+  readonly storyGoals: readonly string[];
+  readonly coreConflict: string | null;
+  readonly hook: string | null;
+  readonly sourceArtifact: 'episode-outline.md' | null;
+  readonly sourceRevision: string | null;
+  readonly generatedFrom: string | null;
+  readonly characterBeats: readonly StoryWorkspaceEpisodeCharacterBeat[];
+}
+
+export interface StoryWorkspaceEpisodeNarrativeBeat {
+  readonly id: string;
+  readonly sourceKey: string;
+  readonly title: string;
+  readonly assetSceneRef: string | null;
+  readonly narrativeFunction: string | null;
+  readonly emotionTone: string | null;
+  readonly summary: string | null;
+  readonly sceneGoals: readonly string[];
+  readonly keyDialogueBeats: readonly string[];
+  readonly sourceArtifact: 'episode-outline.md';
+  readonly sourceRevision: string | null;
+  readonly generatedFrom: string | null;
+}
+
+export interface StoryWorkspaceEpisodeDialogueLine {
+  readonly speaker: string;
+  readonly qualifier: string | null;
+  readonly text: string;
+}
+
+export interface StoryWorkspaceEpisodeScriptScene {
+  readonly id: string;
+  readonly sourceKey: string;
+  readonly title: string;
+  readonly heading: string;
+  readonly assetSceneRef: string | null;
+  readonly narrativeBeatId: string | null;
+  readonly declaredNarrativeBeatRef: string | null;
+  readonly associationStatus: StoryWorkspaceEpisodeAssociationStatus;
+  readonly actions: readonly string[];
+  readonly dialogue: readonly StoryWorkspaceEpisodeDialogueLine[];
+  readonly cameraCues: readonly string[];
+  readonly sourceArtifact: 'script.md';
+  readonly sourceRevision: string | null;
+  readonly generatedFrom: string | null;
+}
+
+export interface StoryWorkspaceEpisodeShotCharacter {
+  readonly ref: string;
+  readonly displayName: string | null;
+  readonly depthPlane: 'front' | 'mid' | 'back' | null;
+  readonly action: string | null;
+  readonly emotion: string | null;
+}
+
+export interface StoryWorkspaceEpisodeStoryboardDialogue {
+  readonly speaker: string;
+  readonly line: string;
+  readonly type: 'spoken' | 'voiceover' | 'os' | 'inner';
+}
+
+export interface StoryWorkspaceEpisodeShotCamera {
+  readonly angle: string | null;
+  readonly height: string | null;
+  readonly movement: string | null;
+  readonly lens: string | null;
+}
+
+export interface StoryWorkspaceEpisodeShotTiming {
+  readonly durationSec: number | null;
+  readonly transitionIn: string | null;
+  readonly transitionOut: string | null;
+}
+
+export interface StoryWorkspaceEpisodeStoryboardShot {
+  readonly id: string;
+  readonly shotId: string;
+  readonly assetSceneRef: string | null;
+  readonly declaredScriptSceneRef: string | null;
+  readonly declaredNarrativeBeatRef: string | null;
+  readonly scriptSceneId: string | null;
+  readonly narrativeBeatId: string | null;
+  readonly associationStatus: StoryWorkspaceEpisodeAssociationStatus;
+  readonly shotType: string | null;
+  readonly characters: readonly StoryWorkspaceEpisodeShotCharacter[];
+  readonly camera: StoryWorkspaceEpisodeShotCamera;
+  readonly visual: string | null;
+  readonly dialogue: readonly StoryWorkspaceEpisodeStoryboardDialogue[];
+  readonly timing: StoryWorkspaceEpisodeShotTiming;
+  readonly sourceArtifact: 'storyboard.yaml';
+  readonly sourceRevision: string | null;
+  readonly generatedFrom: string | null;
+}
+
+export interface StoryWorkspaceEpisodeAssociationDiagnostics {
+  readonly beatSceneCoverage: StoryWorkspaceEpisodeAssociationCoverage;
+  readonly sceneShotCoverage: StoryWorkspaceEpisodeAssociationCoverage;
+  readonly missingLinks: readonly string[];
+  readonly orphanArtifacts: readonly string[];
+}
+
+export interface StoryWorkspaceEpisodeNarrativeProjection {
+  readonly episodeId: string;
+  readonly storyArcId: string;
+  readonly overview: StoryWorkspaceEpisodeOverview;
+  readonly narrativeBeats: readonly StoryWorkspaceEpisodeNarrativeBeat[];
+  readonly scenes: readonly StoryWorkspaceEpisodeScriptScene[];
+  readonly shots: readonly StoryWorkspaceEpisodeStoryboardShot[];
+  readonly associations: StoryWorkspaceEpisodeAssociationDiagnostics;
+}
+
+export interface StoryWorkspaceEpisodePromptParameters {
+  readonly model: string | null;
+  readonly mode: string | null;
+  readonly durationSec: number | null;
+  readonly motionStrength: number | null;
+  readonly cameraMotion: string | null;
+  readonly aspectRatio: string | null;
+}
+
+export interface StoryWorkspaceEpisodePromptGenerability {
+  readonly characterAnchor: string | null;
+  readonly motionFeasibility: string | null;
+  readonly durationBudget: string | null;
+  readonly notes: string | null;
+}
+
+export interface StoryWorkspaceEpisodePrompt {
+  readonly id: string;
+  readonly shotId: string;
+  readonly kind: string;
+  readonly shotViewId: string | null;
+  readonly associationStatus: StoryWorkspaceEpisodeAssociationStatus;
+  readonly positive: string;
+  readonly negative: string | null;
+  readonly parameters: StoryWorkspaceEpisodePromptParameters;
+  readonly generability: StoryWorkspaceEpisodePromptGenerability;
+  readonly sourceArtifact: string;
+  readonly sourceRevision: string;
+}
+
+export interface StoryWorkspaceEpisodePromptPage {
+  readonly items: readonly StoryWorkspaceEpisodePrompt[];
+  readonly total: number;
+  readonly nextCursor: string | null;
+}
+
+export interface StoryWorkspaceEpisodeArtifactSection {
+  readonly id: string;
+  readonly level: number;
+  readonly title: string;
+  readonly text: string;
+  readonly sourceArtifact: 'renders/render-guide.md' | 'review-report.md';
+  readonly sourceRevision: string;
+}
+
+export interface StoryWorkspaceEpisodeRenderQueueEntry {
+  readonly id: string;
+  readonly shotId: string;
+  readonly shotViewId: string | null;
+  readonly associationStatus: StoryWorkspaceEpisodeAssociationStatus;
+  readonly durationSec: number | null;
+  readonly risk: string | null;
+  readonly priority: string | null;
+  readonly renderer: string | null;
+  readonly status: string | null;
+  readonly sourceArtifact: 'renders/render-guide.md';
+  readonly sourceRevision: string;
+}
+
+export interface StoryWorkspaceEpisodeRenderQueuePage {
+  readonly items: readonly StoryWorkspaceEpisodeRenderQueueEntry[];
+  readonly total: number;
+  readonly nextCursor: string | null;
+}
+
+export interface StoryWorkspaceEpisodeRenderGuide {
+  readonly sections: readonly StoryWorkspaceEpisodeArtifactSection[];
+  readonly queue: StoryWorkspaceEpisodeRenderQueuePage;
+  readonly sourceArtifact: 'renders/render-guide.md';
+  readonly sourceRevision: string;
+}
+
+export interface StoryWorkspaceEpisodeReviewTarget {
+  readonly id: string;
+  readonly kind: 'narrative-beat' | 'script-scene' | 'shot';
+  readonly sourceKey: string;
+  readonly targetViewId: string | null;
+  readonly associationStatus: StoryWorkspaceEpisodeAssociationStatus;
+  readonly sectionId: string;
+  readonly sourceArtifact: 'review-report.md';
+  readonly sourceRevision: string;
+}
+
+export interface StoryWorkspaceEpisodeReviewedSourceRevision {
+  readonly sourceArtifact: string;
+  readonly sourceRevision: string;
+}
+
+export interface StoryWorkspaceEpisodeReviewReport {
+  readonly scope: StoryWorkspaceEpisodeReviewScope;
+  readonly overallVerdict: string | null;
+  readonly reviewedArtifacts: readonly string[];
+  readonly sourceRevisions: readonly StoryWorkspaceEpisodeReviewedSourceRevision[];
+  readonly sections: readonly StoryWorkspaceEpisodeArtifactSection[];
+  readonly targets: readonly StoryWorkspaceEpisodeReviewTarget[];
+  readonly sourceArtifact: 'review-report.md';
+  readonly sourceRevision: string;
+}
+
+export interface StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics {
+  readonly shotPromptCoverage: StoryWorkspaceEpisodeAssociationCoverage;
+  readonly shotRenderQueueCoverage: StoryWorkspaceEpisodeAssociationCoverage;
+  readonly totalPrompts: number;
+  readonly totalQueueEntries: number;
+  readonly orphanPrompts: readonly string[];
+  readonly orphanQueueEntries: readonly string[];
+  readonly duplicateQueueShotIds: readonly string[];
+}
+
+export interface StoryWorkspaceEpisodeAuxiliaryProjection {
+  readonly manifestRevision: string;
+  readonly prompts: StoryWorkspaceEpisodePromptPage;
+  readonly renderGuide: StoryWorkspaceEpisodeRenderGuide | null;
+  readonly review: StoryWorkspaceEpisodeReviewReport | null;
+  readonly associations: StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics;
+}
+
+/** GET /api/story-workspace/workflow-runs/{runId}/episode-artifacts. */
+export interface StoryWorkspaceEpisodeArtifactSurface {
+  readonly runId: string;
+  readonly opaqueEpisodeId: string | null;
+  readonly manifestRevision: string | null;
+  readonly etag: string | null;
+  readonly bindingAvailability: StoryWorkspaceEpisodeBindingAvailability;
+  readonly bindingRecovery: StoryWorkspaceEpisodeBindingRecovery;
+  readonly artifacts: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
+  readonly narrative: StoryWorkspaceEpisodeNarrativeProjection | null;
+  readonly auxiliary: StoryWorkspaceEpisodeAuxiliaryProjection | null;
+}
+
+const STORY_WORKSPACE_EPISODE_RUN_ID = /^run_[0-9a-f]{32}$/;
+const STORY_WORKSPACE_EPISODE_HEX_ID = /^[0-9a-f]{32}$/;
+const STORY_WORKSPACE_EPISODE_REVISION = /^sha256:[0-9a-f]{64}$/;
+const STORY_WORKSPACE_EPISODE_SOURCE_REVISION = /^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$/;
+const STORY_WORKSPACE_EPISODE_SHOT_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const STORY_WORKSPACE_EPISODE_SCENE_KEY = /^S[0-9]{2,}$/;
+const STORY_WORKSPACE_EPISODE_BEAT_KEY = /^SC-[0-9]{2,}$/;
+const STORY_WORKSPACE_EPISODE_SENSITIVE_PATH =
+  /(?:^|[\s('"`=])(?:\/(?!\/)[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+|[A-Za-z]:[\\/]|file:\/\/|\.\.[\\/])/i;
+
+type StoryWorkspaceEpisodeWireRecord = Record<string, unknown>;
+
+function storyWorkspaceEpisodeRecord(
+  value: unknown,
+  label: string,
+  keys: readonly string[],
+): StoryWorkspaceEpisodeWireRecord {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  const record = value as StoryWorkspaceEpisodeWireRecord;
+  const unknown = Object.keys(record).find((key) => !keys.includes(key));
+  if (unknown) throw new Error(`${label} contains unknown field ${unknown}.`);
+  const missing = keys.find((key) => !Object.prototype.hasOwnProperty.call(record, key));
+  if (missing) throw new Error(`${label} is missing ${missing}.`);
+  return record;
+}
+
+function storyWorkspaceEpisodeString(
+  value: unknown,
+  label: string,
+  options: { min?: number; max?: number; pattern?: RegExp; pathAudit?: boolean } = {},
+): string {
+  if (typeof value !== 'string') throw new Error(`${label} must be a string.`);
+  const min = options.min ?? 0;
+  const max = options.max ?? Number.MAX_SAFE_INTEGER;
+  if (value.length < min || value.length > max || (options.pattern && !options.pattern.test(value))) {
+    throw new Error(`${label} has an invalid value.`);
+  }
+  if (options.pathAudit !== false && STORY_WORKSPACE_EPISODE_SENSITIVE_PATH.test(value)) {
+    throw new Error(`${label} contains a sensitive path.`);
+  }
+  return value;
+}
+
+function storyWorkspaceEpisodeNullableString(
+  value: unknown,
+  label: string,
+  options?: { min?: number; max?: number; pattern?: RegExp; pathAudit?: boolean },
+): string | null {
+  return value === null ? null : storyWorkspaceEpisodeString(value, label, options);
+}
+
+function storyWorkspaceEpisodeBoolean(value: unknown, label: string): boolean {
+  if (typeof value !== 'boolean') throw new Error(`${label} must be a boolean.`);
+  return value;
+}
+
+function storyWorkspaceEpisodeNumber(
+  value: unknown,
+  label: string,
+  options: { integer?: boolean; min?: number; max?: number } = {},
+): number {
+  if (
+    typeof value !== 'number'
+    || !Number.isFinite(value)
+    || (options.integer && !Number.isInteger(value))
+    || (options.min !== undefined && value < options.min)
+    || (options.max !== undefined && value > options.max)
+  ) throw new Error(`${label} must be a bounded number.`);
+  return value;
+}
+
+function storyWorkspaceEpisodeNullableNumber(
+  value: unknown,
+  label: string,
+  options?: { integer?: boolean; min?: number; max?: number },
+): number | null {
+  return value === null ? null : storyWorkspaceEpisodeNumber(value, label, options);
+}
+
+function storyWorkspaceEpisodeEnum<T extends string>(
+  value: unknown,
+  label: string,
+  values: readonly T[],
+): T {
+  if (typeof value !== 'string' || !values.includes(value as T)) {
+    throw new Error(`${label} has an invalid enum value.`);
+  }
+  return value as T;
+}
+
+function storyWorkspaceEpisodeArray<T>(
+  value: unknown,
+  label: string,
+  parser: (item: unknown, index: number) => T,
+  max: number,
+): T[] {
+  if (!Array.isArray(value) || value.length > max) {
+    throw new Error(`${label} must be a bounded array.`);
+  }
+  return value.map(parser);
+}
+
+function storyWorkspaceEpisodeUnique(values: readonly string[], label: string): void {
+  if (new Set(values).size !== values.length) throw new Error(`${label} contains duplicate IDs.`);
+}
+
+function storyWorkspaceEpisodeStringList(
+  value: unknown,
+  label: string,
+  max: number,
+  unique = false,
+): string[] {
+  const result = storyWorkspaceEpisodeArray(
+    value,
+    label,
+    (item, index) => storyWorkspaceEpisodeString(item, `${label}[${index}]`, { min: 1, max: 4000 }),
+    max,
+  );
+  if (unique) storyWorkspaceEpisodeUnique(result, label);
+  return result;
+}
+
+function storyWorkspaceEpisodeId(value: unknown, label: string): string {
+  return storyWorkspaceEpisodeString(value, label, {
+    min: 32,
+    max: 32,
+    pattern: STORY_WORKSPACE_EPISODE_HEX_ID,
+  });
+}
+
+function storyWorkspaceEpisodeNullableId(value: unknown, label: string): string | null {
+  return value === null ? null : storyWorkspaceEpisodeId(value, label);
+}
+
+function storyWorkspaceEpisodeSourceRevision(value: unknown, label: string): string {
+  return storyWorkspaceEpisodeString(value, label, {
+    min: 1,
+    max: 128,
+    pattern: STORY_WORKSPACE_EPISODE_SOURCE_REVISION,
+  });
+}
+
+function storyWorkspaceEpisodeNullableSourceRevision(value: unknown, label: string): string | null {
+  return value === null ? null : storyWorkspaceEpisodeSourceRevision(value, label);
+}
+
+function storyWorkspaceEpisodeGeneratedFrom(value: unknown, label: string): string | null {
+  return storyWorkspaceEpisodeNullableString(value, label, {
+    min: 1,
+    max: 255,
+    pattern: /^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$/,
+  });
+}
+
+function storyWorkspaceEpisodeAssociationStatus(
+  value: unknown,
+  label: string,
+): StoryWorkspaceEpisodeAssociationStatus {
+  return storyWorkspaceEpisodeEnum(value, label, ['linked', 'unlinked', 'orphan']);
+}
+
+function storyWorkspaceParseEpisodeCoverage(
+  value: unknown,
+  label: string,
+): StoryWorkspaceEpisodeAssociationCoverage {
+  const record = storyWorkspaceEpisodeRecord(value, label, ['availability', 'linked', 'total', 'ratio']);
+  const availability = storyWorkspaceEpisodeEnum(
+    record.availability,
+    `${label}.availability`,
+    ['available', 'unavailable'],
+  );
+  const linked = storyWorkspaceEpisodeNumber(record.linked, `${label}.linked`, { integer: true, min: 0 });
+  const total = storyWorkspaceEpisodeNumber(record.total, `${label}.total`, { integer: true, min: 0 });
+  const ratio = storyWorkspaceEpisodeNullableNumber(record.ratio, `${label}.ratio`, { min: 0, max: 1 });
+  if (linked > total) throw new Error(`${label} linked exceeds total.`);
+  if (total === 0) {
+    if (availability !== 'unavailable' || linked !== 0 || ratio !== null) {
+      throw new Error(`${label} zero denominator is inconsistent.`);
+    }
+  } else if (
+    availability !== 'available'
+    || ratio === null
+    || Math.abs(ratio - linked / total) > 1e-12
+  ) throw new Error(`${label} ratio is inconsistent.`);
+  return { availability, linked, total, ratio };
+}
+
+function storyWorkspaceParseEpisodeBindingRecovery(value: unknown): StoryWorkspaceEpisodeBindingRecovery {
+  const record = storyWorkspaceEpisodeRecord(value, 'bindingRecovery', [
+    'autoRepairAttempted', 'canDispatch', 'publicReason',
+  ]);
+  const canDispatch = storyWorkspaceEpisodeBoolean(record.canDispatch, 'bindingRecovery.canDispatch');
+  const publicReason = record.publicReason === null
+    ? null
+    : storyWorkspaceEpisodeEnum(
+      record.publicReason,
+      'bindingRecovery.publicReason',
+      ['episode_binding_unproven'],
+    );
+  if ((canDispatch && publicReason !== null) || (!canDispatch && publicReason === null)) {
+    throw new Error('bindingRecovery reason is inconsistent.');
+  }
+  return {
+    autoRepairAttempted: storyWorkspaceEpisodeBoolean(
+      record.autoRepairAttempted,
+      'bindingRecovery.autoRepairAttempted',
+    ),
+    canDispatch,
+    publicReason,
+  };
+}
+
+const STORY_WORKSPACE_EPISODE_ARTIFACT_RULES = {
+  'episode-outline.md': ['plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
+  'script.md': ['write_script', ['narrative_workbench', 'shot_inspector']],
+  'storyboard.yaml': ['regenerate_storyboard', ['narrative_workbench', 'shot_inspector']],
+  'prompts/': ['generate_prompts', ['shot_inspector', 'prompt_view']],
+  'renders/': ['prepare_render_guide', ['shot_inspector', 'render_view']],
+  'review-report.md': [['review_script', 'review_full_chain'], ['review_view', 'shot_inspector']],
+} as const;
+
+function storyWorkspaceParseEpisodeManifestEntry(
+  value: unknown,
+  index: number,
+): StoryWorkspaceEpisodeArtifactManifestEntry {
+  const label = `artifacts[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'relativeKey', 'availability', 'contentRevision', 'mtime', 'size', 'producerAction', 'consumers',
+  ]);
+  const relativeKey = storyWorkspaceEpisodeEnum(
+    record.relativeKey,
+    `${label}.relativeKey`,
+    Object.keys(STORY_WORKSPACE_EPISODE_ARTIFACT_RULES),
+  ) as keyof typeof STORY_WORKSPACE_EPISODE_ARTIFACT_RULES;
+  const availability = storyWorkspaceEpisodeEnum(
+    record.availability,
+    `${label}.availability`,
+    ['not_generated', 'available', 'invalid', 'unavailable'],
+  );
+  const contentRevision = record.contentRevision === null
+    ? null
+    : storyWorkspaceEpisodeString(record.contentRevision, `${label}.contentRevision`, {
+      pattern: STORY_WORKSPACE_EPISODE_REVISION,
+    });
+  const mtime = storyWorkspaceEpisodeNullableString(record.mtime, `${label}.mtime`, { min: 1, max: 64 });
+  if (mtime !== null && Number.isNaN(Date.parse(mtime))) throw new Error(`${label}.mtime is invalid.`);
+  const size = storyWorkspaceEpisodeNullableNumber(record.size, `${label}.size`, { integer: true, min: 0 });
+  if (availability === 'available') {
+    if (contentRevision === null || mtime === null || size === null) {
+      throw new Error(`${label} available metadata is incomplete.`);
+    }
+  } else if (contentRevision !== null || mtime !== null || size !== null) {
+    throw new Error(`${label} unavailable metadata must be null.`);
+  }
+  const [producerRule, consumerRule] = STORY_WORKSPACE_EPISODE_ARTIFACT_RULES[relativeKey];
+  const allowedProducers = Array.isArray(producerRule) ? producerRule : [producerRule];
+  const producerAction = storyWorkspaceEpisodeEnum(
+    record.producerAction,
+    `${label}.producerAction`,
+    allowedProducers,
+  ) as StoryWorkspaceEpisodeProducerAction;
+  const consumers = storyWorkspaceEpisodeArray(
+    record.consumers,
+    `${label}.consumers`,
+    (item, consumerIndex): StoryWorkspaceEpisodeArtifactConsumer => storyWorkspaceEpisodeEnum(
+      item,
+      `${label}.consumers[${consumerIndex}]`,
+      ['episode_overview', 'storyline_navigator', 'narrative_workbench', 'shot_inspector', 'prompt_view', 'render_view', 'review_view'],
+    ),
+    8,
+  );
+  if (consumers.length !== consumerRule.length || consumers.some((item, i) => item !== consumerRule[i])) {
+    throw new Error(`${label}.consumers do not match relativeKey.`);
+  }
+  return { relativeKey, availability, contentRevision, mtime, size, producerAction, consumers };
+}
+
+function storyWorkspaceParseEpisodeCharacterBeat(
+  value: unknown,
+  index: number,
+): StoryWorkspaceEpisodeCharacterBeat {
+  const label = `narrative.overview.characterBeats[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'id', 'sourceKey', 'characterId', 'action', 'startState', 'trigger', 'choice', 'endState', 'visibleEvidence',
+  ]);
+  const optional = (key: string, max: number) => storyWorkspaceEpisodeNullableString(
+    record[key], `${label}.${key}`, { max },
+  );
+  return {
+    id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
+    sourceKey: storyWorkspaceEpisodeString(record.sourceKey, `${label}.sourceKey`, { min: 1, max: 128 }),
+    characterId: optional('characterId', 128),
+    action: optional('action', 128),
+    startState: optional('startState', 2000),
+    trigger: optional('trigger', 2000),
+    choice: optional('choice', 2000),
+    endState: optional('endState', 2000),
+    visibleEvidence: optional('visibleEvidence', 2000),
+  };
+}
+
+function storyWorkspaceParseEpisodeOverview(value: unknown): StoryWorkspaceEpisodeOverview {
+  const label = 'narrative.overview';
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'title', 'series', 'storyGoals', 'coreConflict', 'hook', 'sourceArtifact', 'sourceRevision', 'generatedFrom', 'characterBeats',
+  ]);
+  const characterBeats = storyWorkspaceEpisodeArray(
+    record.characterBeats,
+    `${label}.characterBeats`,
+    storyWorkspaceParseEpisodeCharacterBeat,
+    256,
+  );
+  storyWorkspaceEpisodeUnique(characterBeats.map((item) => item.id), `${label}.characterBeats`);
+  const sourceArtifact = record.sourceArtifact === null
+    ? null
+    : storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, ['episode-outline.md']);
+  return {
+    title: storyWorkspaceEpisodeNullableString(record.title, `${label}.title`, { max: 500 }),
+    series: storyWorkspaceEpisodeNullableString(record.series, `${label}.series`, { max: 500 }),
+    storyGoals: storyWorkspaceEpisodeStringList(record.storyGoals, `${label}.storyGoals`, 32),
+    coreConflict: storyWorkspaceEpisodeNullableString(record.coreConflict, `${label}.coreConflict`, { max: 4000 }),
+    hook: storyWorkspaceEpisodeNullableString(record.hook, `${label}.hook`, { max: 4000 }),
+    sourceArtifact,
+    sourceRevision: storyWorkspaceEpisodeNullableSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
+    generatedFrom: storyWorkspaceEpisodeGeneratedFrom(record.generatedFrom, `${label}.generatedFrom`),
+    characterBeats,
+  };
+}
+
+function storyWorkspaceParseEpisodeNarrativeBeat(
+  value: unknown,
+  index: number,
+): StoryWorkspaceEpisodeNarrativeBeat {
+  const label = `narrative.narrativeBeats[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'id', 'sourceKey', 'title', 'assetSceneRef', 'narrativeFunction', 'emotionTone', 'summary', 'sceneGoals', 'keyDialogueBeats', 'sourceArtifact', 'sourceRevision', 'generatedFrom',
+  ]);
+  return {
+    id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
+    sourceKey: storyWorkspaceEpisodeString(record.sourceKey, `${label}.sourceKey`, { pattern: STORY_WORKSPACE_EPISODE_BEAT_KEY }),
+    title: storyWorkspaceEpisodeString(record.title, `${label}.title`, { min: 1, max: 500 }),
+    assetSceneRef: storyWorkspaceEpisodeNullableString(record.assetSceneRef, `${label}.assetSceneRef`, { max: 255 }),
+    narrativeFunction: storyWorkspaceEpisodeNullableString(record.narrativeFunction, `${label}.narrativeFunction`, { max: 500 }),
+    emotionTone: storyWorkspaceEpisodeNullableString(record.emotionTone, `${label}.emotionTone`, { max: 500 }),
+    summary: storyWorkspaceEpisodeNullableString(record.summary, `${label}.summary`, { max: 4000 }),
+    sceneGoals: storyWorkspaceEpisodeStringList(record.sceneGoals, `${label}.sceneGoals`, 32),
+    keyDialogueBeats: storyWorkspaceEpisodeStringList(record.keyDialogueBeats, `${label}.keyDialogueBeats`, 32),
+    sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, ['episode-outline.md']),
+    sourceRevision: storyWorkspaceEpisodeNullableSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
+    generatedFrom: storyWorkspaceEpisodeGeneratedFrom(record.generatedFrom, `${label}.generatedFrom`),
+  };
+}
+
+function storyWorkspaceParseEpisodeDialogueLine(
+  value: unknown,
+  label: string,
+): StoryWorkspaceEpisodeDialogueLine {
+  const record = storyWorkspaceEpisodeRecord(value, label, ['speaker', 'qualifier', 'text']);
+  return {
+    speaker: storyWorkspaceEpisodeString(record.speaker, `${label}.speaker`, { min: 1, max: 128 }),
+    qualifier: storyWorkspaceEpisodeNullableString(record.qualifier, `${label}.qualifier`, { max: 255 }),
+    text: storyWorkspaceEpisodeString(record.text, `${label}.text`, { min: 1, max: 2000 }),
+  };
+}
+
+function storyWorkspaceParseEpisodeScene(value: unknown, index: number): StoryWorkspaceEpisodeScriptScene {
+  const label = `narrative.scenes[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'id', 'sourceKey', 'title', 'heading', 'assetSceneRef', 'narrativeBeatId', 'declaredNarrativeBeatRef', 'associationStatus', 'actions', 'dialogue', 'cameraCues', 'sourceArtifact', 'sourceRevision', 'generatedFrom',
+  ]);
+  const associationStatus = storyWorkspaceEpisodeAssociationStatus(record.associationStatus, `${label}.associationStatus`);
+  const narrativeBeatId = storyWorkspaceEpisodeNullableId(record.narrativeBeatId, `${label}.narrativeBeatId`);
+  if ((associationStatus === 'linked') !== (narrativeBeatId !== null)) {
+    throw new Error(`${label} linked association is inconsistent.`);
+  }
+  return {
+    id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
+    sourceKey: storyWorkspaceEpisodeString(record.sourceKey, `${label}.sourceKey`, { pattern: STORY_WORKSPACE_EPISODE_SCENE_KEY }),
+    title: storyWorkspaceEpisodeString(record.title, `${label}.title`, { min: 1, max: 500 }),
+    heading: storyWorkspaceEpisodeString(record.heading, `${label}.heading`, { min: 1, max: 1000 }),
+    assetSceneRef: storyWorkspaceEpisodeNullableString(record.assetSceneRef, `${label}.assetSceneRef`, { max: 255 }),
+    narrativeBeatId,
+    declaredNarrativeBeatRef: storyWorkspaceEpisodeNullableString(record.declaredNarrativeBeatRef, `${label}.declaredNarrativeBeatRef`, { pattern: STORY_WORKSPACE_EPISODE_BEAT_KEY }),
+    associationStatus,
+    actions: storyWorkspaceEpisodeStringList(record.actions, `${label}.actions`, 256),
+    dialogue: storyWorkspaceEpisodeArray(
+      record.dialogue,
+      `${label}.dialogue`,
+      (item, dialogueIndex) => storyWorkspaceParseEpisodeDialogueLine(item, `${label}.dialogue[${dialogueIndex}]`),
+      256,
+    ),
+    cameraCues: storyWorkspaceEpisodeStringList(record.cameraCues, `${label}.cameraCues`, 256),
+    sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, ['script.md']),
+    sourceRevision: storyWorkspaceEpisodeNullableSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
+    generatedFrom: storyWorkspaceEpisodeGeneratedFrom(record.generatedFrom, `${label}.generatedFrom`),
+  };
+}
+
+function storyWorkspaceParseEpisodeShotCharacter(value: unknown, label: string): StoryWorkspaceEpisodeShotCharacter {
+  const record = storyWorkspaceEpisodeRecord(value, label, ['ref', 'displayName', 'depthPlane', 'action', 'emotion']);
+  return {
+    ref: storyWorkspaceEpisodeString(record.ref, `${label}.ref`, { min: 1, max: 128 }),
+    displayName: storyWorkspaceEpisodeNullableString(record.displayName, `${label}.displayName`, { max: 255 }),
+    depthPlane: (record.depthPlane === null
+      ? null
+      : storyWorkspaceEpisodeEnum(record.depthPlane, `${label}.depthPlane`, ['front', 'mid', 'back'])) as StoryWorkspaceEpisodeShotCharacter['depthPlane'],
+    action: storyWorkspaceEpisodeNullableString(record.action, `${label}.action`, { max: 2000 }),
+    emotion: storyWorkspaceEpisodeNullableString(record.emotion, `${label}.emotion`, { max: 1000 }),
+  };
+}
+
+function storyWorkspaceParseEpisodeShot(value: unknown, index: number): StoryWorkspaceEpisodeStoryboardShot {
+  const label = `narrative.shots[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'id', 'shotId', 'assetSceneRef', 'declaredScriptSceneRef', 'declaredNarrativeBeatRef', 'scriptSceneId', 'narrativeBeatId', 'associationStatus', 'shotType', 'characters', 'camera', 'visual', 'dialogue', 'timing', 'sourceArtifact', 'sourceRevision', 'generatedFrom',
+  ]);
+  const associationStatus = storyWorkspaceEpisodeAssociationStatus(record.associationStatus, `${label}.associationStatus`);
+  const scriptSceneId = storyWorkspaceEpisodeNullableId(record.scriptSceneId, `${label}.scriptSceneId`);
+  if ((associationStatus === 'linked') !== (scriptSceneId !== null)) {
+    throw new Error(`${label} linked association is inconsistent.`);
+  }
+  const camera = storyWorkspaceEpisodeRecord(record.camera, `${label}.camera`, ['angle', 'height', 'movement', 'lens']);
+  const timing = storyWorkspaceEpisodeRecord(record.timing, `${label}.timing`, [
+    'durationSec', 'transitionIn', 'transitionOut',
+  ]);
+  return {
+    id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
+    shotId: storyWorkspaceEpisodeString(record.shotId, `${label}.shotId`, { pattern: STORY_WORKSPACE_EPISODE_SHOT_ID }),
+    assetSceneRef: storyWorkspaceEpisodeNullableString(record.assetSceneRef, `${label}.assetSceneRef`, { max: 255 }),
+    declaredScriptSceneRef: storyWorkspaceEpisodeNullableString(record.declaredScriptSceneRef, `${label}.declaredScriptSceneRef`, { pattern: STORY_WORKSPACE_EPISODE_SCENE_KEY }),
+    declaredNarrativeBeatRef: storyWorkspaceEpisodeNullableString(record.declaredNarrativeBeatRef, `${label}.declaredNarrativeBeatRef`, { pattern: STORY_WORKSPACE_EPISODE_BEAT_KEY }),
+    scriptSceneId,
+    narrativeBeatId: storyWorkspaceEpisodeNullableId(record.narrativeBeatId, `${label}.narrativeBeatId`),
+    associationStatus,
+    shotType: storyWorkspaceEpisodeNullableString(record.shotType, `${label}.shotType`, { max: 255 }),
+    characters: storyWorkspaceEpisodeArray(
+      record.characters,
+      `${label}.characters`,
+      (item, characterIndex) => storyWorkspaceParseEpisodeShotCharacter(item, `${label}.characters[${characterIndex}]`),
+      128,
+    ),
+    camera: {
+      angle: storyWorkspaceEpisodeNullableString(camera.angle, `${label}.camera.angle`, { max: 255 }),
+      height: storyWorkspaceEpisodeNullableString(camera.height, `${label}.camera.height`, { max: 255 }),
+      movement: storyWorkspaceEpisodeNullableString(camera.movement, `${label}.camera.movement`, { max: 255 }),
+      lens: storyWorkspaceEpisodeNullableString(camera.lens, `${label}.camera.lens`, { max: 255 }),
+    },
+    visual: storyWorkspaceEpisodeNullableString(record.visual, `${label}.visual`, { max: 4000 }),
+    dialogue: storyWorkspaceEpisodeArray(record.dialogue, `${label}.dialogue`, (item, dialogueIndex) => {
+      const dialogueLabel = `${label}.dialogue[${dialogueIndex}]`;
+      const dialogue = storyWorkspaceEpisodeRecord(item, dialogueLabel, ['speaker', 'line', 'type']);
+      return {
+        speaker: storyWorkspaceEpisodeString(dialogue.speaker, `${dialogueLabel}.speaker`, { min: 1, max: 128 }),
+        line: storyWorkspaceEpisodeString(dialogue.line, `${dialogueLabel}.line`, { min: 1, max: 2000 }),
+        type: storyWorkspaceEpisodeEnum(dialogue.type, `${dialogueLabel}.type`, ['spoken', 'voiceover', 'os', 'inner']),
+      };
+    }, 128),
+    timing: {
+      durationSec: storyWorkspaceEpisodeNullableNumber(timing.durationSec, `${label}.timing.durationSec`, { min: 0, max: 3600 }),
+      transitionIn: storyWorkspaceEpisodeNullableString(timing.transitionIn, `${label}.timing.transitionIn`, { max: 255 }),
+      transitionOut: storyWorkspaceEpisodeNullableString(timing.transitionOut, `${label}.timing.transitionOut`, { max: 255 }),
+    },
+    sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, ['storyboard.yaml']),
+    sourceRevision: storyWorkspaceEpisodeNullableSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
+    generatedFrom: storyWorkspaceEpisodeGeneratedFrom(record.generatedFrom, `${label}.generatedFrom`),
+  };
+}
+
+function storyWorkspaceParseEpisodeNarrative(value: unknown): StoryWorkspaceEpisodeNarrativeProjection {
+  const record = storyWorkspaceEpisodeRecord(value, 'narrative', [
+    'episodeId', 'storyArcId', 'overview', 'narrativeBeats', 'scenes', 'shots', 'associations',
+  ]);
+  const narrativeBeats = storyWorkspaceEpisodeArray(record.narrativeBeats, 'narrative.narrativeBeats', storyWorkspaceParseEpisodeNarrativeBeat, 256);
+  const scenes = storyWorkspaceEpisodeArray(record.scenes, 'narrative.scenes', storyWorkspaceParseEpisodeScene, 1000);
+  const shots = storyWorkspaceEpisodeArray(record.shots, 'narrative.shots', storyWorkspaceParseEpisodeShot, 1000);
+  storyWorkspaceEpisodeUnique(narrativeBeats.map((item) => item.id), 'narrative.narrativeBeats');
+  storyWorkspaceEpisodeUnique(scenes.map((item) => item.id), 'narrative.scenes');
+  storyWorkspaceEpisodeUnique(shots.map((item) => item.id), 'narrative.shots');
+  const beatIds = new Set(narrativeBeats.map((item) => item.id));
+  const sceneIds = new Set(scenes.map((item) => item.id));
+  if (scenes.some((item) => item.narrativeBeatId !== null && !beatIds.has(item.narrativeBeatId))) {
+    throw new Error('narrative.scenes contains an unknown narrativeBeatId.');
+  }
+  if (shots.some((item) => item.scriptSceneId !== null && !sceneIds.has(item.scriptSceneId))) {
+    throw new Error('narrative.shots contains an unknown scriptSceneId.');
+  }
+  if (shots.some((item) => item.narrativeBeatId !== null && !beatIds.has(item.narrativeBeatId))) {
+    throw new Error('narrative.shots contains an unknown narrativeBeatId.');
+  }
+  const associations = storyWorkspaceEpisodeRecord(record.associations, 'narrative.associations', [
+    'beatSceneCoverage', 'sceneShotCoverage', 'missingLinks', 'orphanArtifacts',
+  ]);
+  return {
+    episodeId: storyWorkspaceEpisodeId(record.episodeId, 'narrative.episodeId'),
+    storyArcId: storyWorkspaceEpisodeId(record.storyArcId, 'narrative.storyArcId'),
+    overview: storyWorkspaceParseEpisodeOverview(record.overview),
+    narrativeBeats,
+    scenes,
+    shots,
+    associations: {
+      beatSceneCoverage: storyWorkspaceParseEpisodeCoverage(associations.beatSceneCoverage, 'narrative.associations.beatSceneCoverage'),
+      sceneShotCoverage: storyWorkspaceParseEpisodeCoverage(associations.sceneShotCoverage, 'narrative.associations.sceneShotCoverage'),
+      missingLinks: storyWorkspaceEpisodeStringList(associations.missingLinks, 'narrative.associations.missingLinks', 2048, true),
+      orphanArtifacts: storyWorkspaceEpisodeStringList(associations.orphanArtifacts, 'narrative.associations.orphanArtifacts', 2048, true),
+    },
+  };
+}
+
+function storyWorkspaceParseEpisodePrompt(value: unknown, index: number): StoryWorkspaceEpisodePrompt {
+  const label = `auxiliary.prompts.items[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'id', 'shotId', 'kind', 'shotViewId', 'associationStatus', 'positive', 'negative', 'parameters', 'generability', 'sourceArtifact', 'sourceRevision',
+  ]);
+  const associationStatus = storyWorkspaceEpisodeAssociationStatus(record.associationStatus, `${label}.associationStatus`);
+  const shotViewId = storyWorkspaceEpisodeNullableId(record.shotViewId, `${label}.shotViewId`);
+  if ((associationStatus === 'linked') !== (shotViewId !== null)) throw new Error(`${label} linked association is inconsistent.`);
+  const parameters = storyWorkspaceEpisodeRecord(record.parameters, `${label}.parameters`, [
+    'model', 'mode', 'durationSec', 'motionStrength', 'cameraMotion', 'aspectRatio',
+  ]);
+  const generability = storyWorkspaceEpisodeRecord(record.generability, `${label}.generability`, [
+    'characterAnchor', 'motionFeasibility', 'durationBudget', 'notes',
+  ]);
+  return {
+    id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
+    shotId: storyWorkspaceEpisodeString(record.shotId, `${label}.shotId`, { pattern: STORY_WORKSPACE_EPISODE_SHOT_ID }),
+    kind: storyWorkspaceEpisodeString(record.kind, `${label}.kind`, { pattern: /^[a-z0-9][a-z0-9._-]{0,63}$/ }),
+    shotViewId,
+    associationStatus,
+    positive: storyWorkspaceEpisodeString(record.positive, `${label}.positive`, { min: 1, max: 8000 }),
+    negative: storyWorkspaceEpisodeNullableString(record.negative, `${label}.negative`, { max: 4000 }),
+    parameters: {
+      model: storyWorkspaceEpisodeNullableString(parameters.model, `${label}.parameters.model`, { max: 128 }),
+      mode: storyWorkspaceEpisodeNullableString(parameters.mode, `${label}.parameters.mode`, { max: 128 }),
+      durationSec: storyWorkspaceEpisodeNullableNumber(parameters.durationSec, `${label}.parameters.durationSec`, { min: 0, max: 3600 }),
+      motionStrength: storyWorkspaceEpisodeNullableNumber(parameters.motionStrength, `${label}.parameters.motionStrength`, { min: 0, max: 100 }),
+      cameraMotion: storyWorkspaceEpisodeNullableString(parameters.cameraMotion, `${label}.parameters.cameraMotion`, { max: 255 }),
+      aspectRatio: storyWorkspaceEpisodeNullableString(parameters.aspectRatio, `${label}.parameters.aspectRatio`, { pattern: /^[0-9]{1,3}:[0-9]{1,3}$/, max: 32 }),
+    },
+    generability: {
+      characterAnchor: storyWorkspaceEpisodeNullableString(generability.characterAnchor, `${label}.generability.characterAnchor`, { max: 128 }),
+      motionFeasibility: storyWorkspaceEpisodeNullableString(generability.motionFeasibility, `${label}.generability.motionFeasibility`, { max: 128 }),
+      durationBudget: storyWorkspaceEpisodeNullableString(generability.durationBudget, `${label}.generability.durationBudget`, { max: 128 }),
+      notes: storyWorkspaceEpisodeNullableString(generability.notes, `${label}.generability.notes`, { max: 2000 }),
+    },
+    sourceArtifact: storyWorkspaceEpisodeString(record.sourceArtifact, `${label}.sourceArtifact`, { pattern: /^prompts\/[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.ya?ml$/ }),
+    sourceRevision: storyWorkspaceEpisodeSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
+  };
+}
+
+function storyWorkspaceParseEpisodeSection(
+  value: unknown,
+  label: string,
+  sourceArtifact: 'renders/render-guide.md' | 'review-report.md',
+): StoryWorkspaceEpisodeArtifactSection {
+  const record = storyWorkspaceEpisodeRecord(value, label, ['id', 'level', 'title', 'text', 'sourceArtifact', 'sourceRevision']);
+  return {
+    id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
+    level: storyWorkspaceEpisodeNumber(record.level, `${label}.level`, { integer: true, min: 1, max: 6 }),
+    title: storyWorkspaceEpisodeString(record.title, `${label}.title`, { min: 1, max: 500 }),
+    text: storyWorkspaceEpisodeString(record.text, `${label}.text`, { max: 8000 }),
+    sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, [sourceArtifact]),
+    sourceRevision: storyWorkspaceEpisodeSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
+  };
+}
+
+function storyWorkspaceParseEpisodeQueueEntry(
+  value: unknown,
+  index: number,
+): StoryWorkspaceEpisodeRenderQueueEntry {
+  const label = `auxiliary.renderGuide.queue.items[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'id', 'shotId', 'shotViewId', 'associationStatus', 'durationSec', 'risk', 'priority', 'renderer', 'status', 'sourceArtifact', 'sourceRevision',
+  ]);
+  const associationStatus = storyWorkspaceEpisodeAssociationStatus(record.associationStatus, `${label}.associationStatus`);
+  const shotViewId = storyWorkspaceEpisodeNullableId(record.shotViewId, `${label}.shotViewId`);
+  if ((associationStatus === 'linked') !== (shotViewId !== null)) throw new Error(`${label} linked association is inconsistent.`);
+  return {
+    id: storyWorkspaceEpisodeId(record.id, `${label}.id`),
+    shotId: storyWorkspaceEpisodeString(record.shotId, `${label}.shotId`, { pattern: STORY_WORKSPACE_EPISODE_SHOT_ID }),
+    shotViewId,
+    associationStatus,
+    durationSec: storyWorkspaceEpisodeNullableNumber(record.durationSec, `${label}.durationSec`, { min: 0, max: 3600 }),
+    risk: storyWorkspaceEpisodeNullableString(record.risk, `${label}.risk`, { max: 128 }),
+    priority: storyWorkspaceEpisodeNullableString(record.priority, `${label}.priority`, { max: 64 }),
+    renderer: storyWorkspaceEpisodeNullableString(record.renderer, `${label}.renderer`, { pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/, max: 128 }),
+    status: storyWorkspaceEpisodeNullableString(record.status, `${label}.status`, { pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/, max: 64 }),
+    sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, `${label}.sourceArtifact`, ['renders/render-guide.md']),
+    sourceRevision: storyWorkspaceEpisodeSourceRevision(record.sourceRevision, `${label}.sourceRevision`),
+  };
+}
+
+function storyWorkspaceParseEpisodeRenderGuide(value: unknown): StoryWorkspaceEpisodeRenderGuide {
+  const record = storyWorkspaceEpisodeRecord(value, 'auxiliary.renderGuide', [
+    'sections', 'queue', 'sourceArtifact', 'sourceRevision',
+  ]);
+  const sections = storyWorkspaceEpisodeArray(
+    record.sections,
+    'auxiliary.renderGuide.sections',
+    (item, index) => storyWorkspaceParseEpisodeSection(item, `auxiliary.renderGuide.sections[${index}]`, 'renders/render-guide.md'),
+    128,
+  );
+  const queue = storyWorkspaceEpisodeRecord(record.queue, 'auxiliary.renderGuide.queue', ['items', 'total', 'nextCursor']);
+  const items = storyWorkspaceEpisodeArray(queue.items, 'auxiliary.renderGuide.queue.items', storyWorkspaceParseEpisodeQueueEntry, 100);
+  storyWorkspaceEpisodeUnique(sections.map((item) => item.id), 'auxiliary.renderGuide.sections');
+  storyWorkspaceEpisodeUnique(items.map((item) => item.id), 'auxiliary.renderGuide.queue.items');
+  const total = storyWorkspaceEpisodeNumber(queue.total, 'auxiliary.renderGuide.queue.total', { integer: true, min: 0 });
+  if (items.length > total) throw new Error('auxiliary.renderGuide.queue exceeds total.');
+  return {
+    sections,
+    queue: {
+      items,
+      total,
+      nextCursor: storyWorkspaceEpisodeNullableString(queue.nextCursor, 'auxiliary.renderGuide.queue.nextCursor', { max: 2048 }),
+    },
+    sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, 'auxiliary.renderGuide.sourceArtifact', ['renders/render-guide.md']),
+    sourceRevision: storyWorkspaceEpisodeSourceRevision(record.sourceRevision, 'auxiliary.renderGuide.sourceRevision'),
+  };
+}
+
+function storyWorkspaceParseEpisodeReview(value: unknown): StoryWorkspaceEpisodeReviewReport {
+  const record = storyWorkspaceEpisodeRecord(value, 'auxiliary.review', [
+    'scope', 'overallVerdict', 'reviewedArtifacts', 'sourceRevisions', 'sections', 'targets', 'sourceArtifact', 'sourceRevision',
+  ]);
+  const sections = storyWorkspaceEpisodeArray(
+    record.sections,
+    'auxiliary.review.sections',
+    (item, index) => storyWorkspaceParseEpisodeSection(item, `auxiliary.review.sections[${index}]`, 'review-report.md'),
+    128,
+  );
+  const sourceRevisions = storyWorkspaceEpisodeArray(record.sourceRevisions, 'auxiliary.review.sourceRevisions', (item, index) => {
+    const label = `auxiliary.review.sourceRevisions[${index}]`;
+    const revision = storyWorkspaceEpisodeRecord(item, label, ['sourceArtifact', 'sourceRevision']);
+    return {
+      sourceArtifact: storyWorkspaceEpisodeString(revision.sourceArtifact, `${label}.sourceArtifact`, {
+        pattern: /^(episode-outline\.md|script\.md|storyboard\.yaml|prompts\/[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.ya?ml|renders\/render-guide\.md)$/,
+      }),
+      sourceRevision: storyWorkspaceEpisodeSourceRevision(revision.sourceRevision, `${label}.sourceRevision`),
+    };
+  }, 256);
+  const targets = storyWorkspaceEpisodeArray(record.targets, 'auxiliary.review.targets', (item, index) => {
+    const label = `auxiliary.review.targets[${index}]`;
+    const target = storyWorkspaceEpisodeRecord(item, label, [
+      'id', 'kind', 'sourceKey', 'targetViewId', 'associationStatus', 'sectionId', 'sourceArtifact', 'sourceRevision',
+    ]);
+    const associationStatus = storyWorkspaceEpisodeAssociationStatus(target.associationStatus, `${label}.associationStatus`);
+    const targetViewId = storyWorkspaceEpisodeNullableId(target.targetViewId, `${label}.targetViewId`);
+    if ((associationStatus === 'linked') !== (targetViewId !== null)) throw new Error(`${label} linked association is inconsistent.`);
+    return {
+      id: storyWorkspaceEpisodeId(target.id, `${label}.id`),
+      kind: storyWorkspaceEpisodeEnum(target.kind, `${label}.kind`, ['narrative-beat', 'script-scene', 'shot']),
+      sourceKey: storyWorkspaceEpisodeString(target.sourceKey, `${label}.sourceKey`, { pattern: STORY_WORKSPACE_EPISODE_SHOT_ID }),
+      targetViewId,
+      associationStatus,
+      sectionId: storyWorkspaceEpisodeId(target.sectionId, `${label}.sectionId`),
+      sourceArtifact: storyWorkspaceEpisodeEnum(target.sourceArtifact, `${label}.sourceArtifact`, ['review-report.md']),
+      sourceRevision: storyWorkspaceEpisodeSourceRevision(target.sourceRevision, `${label}.sourceRevision`),
+    };
+  }, 2048);
+  storyWorkspaceEpisodeUnique(sections.map((item) => item.id), 'auxiliary.review.sections');
+  storyWorkspaceEpisodeUnique(targets.map((item) => item.id), 'auxiliary.review.targets');
+  const sectionIds = new Set(sections.map((item) => item.id));
+  if (targets.some((item) => !sectionIds.has(item.sectionId))) throw new Error('auxiliary.review.targets contains an unknown sectionId.');
+  return {
+    scope: storyWorkspaceEpisodeEnum(record.scope, 'auxiliary.review.scope', ['script', 'full-chain', 'unknown']),
+    overallVerdict: storyWorkspaceEpisodeNullableString(record.overallVerdict, 'auxiliary.review.overallVerdict', { pattern: /^[A-Z][A-Z0-9_ -]{0,63}$/, max: 64 }),
+    reviewedArtifacts: (() => {
+      const values = storyWorkspaceEpisodeStringList(
+        record.reviewedArtifacts,
+        'auxiliary.review.reviewedArtifacts',
+        256,
+        true,
+      );
+      if (values.some((item) => item.startsWith('/') || item.includes('\\') || item.split('/').includes('..'))) {
+        throw new Error('auxiliary.review.reviewedArtifacts contains an unsafe relative key.');
+      }
+      return values;
+    })(),
+    sourceRevisions,
+    sections,
+    targets,
+    sourceArtifact: storyWorkspaceEpisodeEnum(record.sourceArtifact, 'auxiliary.review.sourceArtifact', ['review-report.md']),
+    sourceRevision: storyWorkspaceEpisodeSourceRevision(record.sourceRevision, 'auxiliary.review.sourceRevision'),
+  };
+}
+
+function storyWorkspaceParseEpisodeAuxiliary(value: unknown): StoryWorkspaceEpisodeAuxiliaryProjection {
+  const record = storyWorkspaceEpisodeRecord(value, 'auxiliary', [
+    'manifestRevision', 'prompts', 'renderGuide', 'review', 'associations',
+  ]);
+  const promptsRecord = storyWorkspaceEpisodeRecord(record.prompts, 'auxiliary.prompts', ['items', 'total', 'nextCursor']);
+  const prompts = storyWorkspaceEpisodeArray(promptsRecord.items, 'auxiliary.prompts.items', storyWorkspaceParseEpisodePrompt, 100);
+  storyWorkspaceEpisodeUnique(prompts.map((item) => item.id), 'auxiliary.prompts.items');
+  const promptTotal = storyWorkspaceEpisodeNumber(promptsRecord.total, 'auxiliary.prompts.total', { integer: true, min: 0 });
+  if (prompts.length > promptTotal) throw new Error('auxiliary.prompts exceeds total.');
+  const associations = storyWorkspaceEpisodeRecord(record.associations, 'auxiliary.associations', [
+    'shotPromptCoverage', 'shotRenderQueueCoverage', 'totalPrompts', 'totalQueueEntries', 'orphanPrompts', 'orphanQueueEntries', 'duplicateQueueShotIds',
+  ]);
+  return {
+    manifestRevision: storyWorkspaceEpisodeString(record.manifestRevision, 'auxiliary.manifestRevision', { pattern: STORY_WORKSPACE_EPISODE_REVISION }),
+    prompts: {
+      items: prompts,
+      total: promptTotal,
+      nextCursor: storyWorkspaceEpisodeNullableString(promptsRecord.nextCursor, 'auxiliary.prompts.nextCursor', { max: 2048 }),
+    },
+    renderGuide: record.renderGuide === null ? null : storyWorkspaceParseEpisodeRenderGuide(record.renderGuide),
+    review: record.review === null ? null : storyWorkspaceParseEpisodeReview(record.review),
+    associations: {
+      shotPromptCoverage: storyWorkspaceParseEpisodeCoverage(associations.shotPromptCoverage, 'auxiliary.associations.shotPromptCoverage'),
+      shotRenderQueueCoverage: storyWorkspaceParseEpisodeCoverage(associations.shotRenderQueueCoverage, 'auxiliary.associations.shotRenderQueueCoverage'),
+      totalPrompts: storyWorkspaceEpisodeNumber(associations.totalPrompts, 'auxiliary.associations.totalPrompts', { integer: true, min: 0 }),
+      totalQueueEntries: storyWorkspaceEpisodeNumber(associations.totalQueueEntries, 'auxiliary.associations.totalQueueEntries', { integer: true, min: 0 }),
+      orphanPrompts: storyWorkspaceEpisodeStringList(associations.orphanPrompts, 'auxiliary.associations.orphanPrompts', 2048, true),
+      orphanQueueEntries: storyWorkspaceEpisodeStringList(associations.orphanQueueEntries, 'auxiliary.associations.orphanQueueEntries', 2048, true),
+      duplicateQueueShotIds: storyWorkspaceEpisodeStringList(associations.duplicateQueueShotIds, 'auxiliary.associations.duplicateQueueShotIds', 2048, true),
+    },
+  };
+}
+
+function storyWorkspaceEpisodeAssertLinks(surface: StoryWorkspaceEpisodeArtifactSurface): void {
+  const narrative = surface.narrative;
+  if (!narrative) return;
+  const shotIds = new Set(narrative.shots.map((item) => item.id));
+  const beatIds = new Set(narrative.narrativeBeats.map((item) => item.id));
+  const sceneIds = new Set(narrative.scenes.map((item) => item.id));
+  const auxiliary = surface.auxiliary;
+  if (auxiliary?.prompts.items.some((item) => item.shotViewId !== null && !shotIds.has(item.shotViewId))) {
+    throw new Error('auxiliary.prompts contains an unknown shotViewId.');
+  }
+  if (auxiliary?.renderGuide?.queue.items.some((item) => item.shotViewId !== null && !shotIds.has(item.shotViewId))) {
+    throw new Error('auxiliary.renderGuide.queue contains an unknown shotViewId.');
+  }
+  const targetSets = { 'narrative-beat': beatIds, 'script-scene': sceneIds, shot: shotIds };
+  if (auxiliary?.review?.targets.some(
+    (item) => item.targetViewId !== null && !targetSets[item.kind].has(item.targetViewId),
+  )) throw new Error('auxiliary.review contains an unknown targetViewId.');
+}
+
+/** Strictly hydrate the backend camelCase Episode surface. */
+export function storyWorkspaceParseEpisodeArtifactSurface(
+  value: unknown,
+): StoryWorkspaceEpisodeArtifactSurface {
+  const record = storyWorkspaceEpisodeRecord(value, 'Episode artifact surface', [
+    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'narrative', 'auxiliary',
+  ]);
+  const runId = storyWorkspaceEpisodeString(record.runId, 'runId', { pattern: STORY_WORKSPACE_EPISODE_RUN_ID });
+  const bindingAvailability = storyWorkspaceEpisodeEnum(
+    record.bindingAvailability,
+    'bindingAvailability',
+    ['bound', 'unbound'],
+  );
+  const opaqueEpisodeId = storyWorkspaceEpisodeNullableId(record.opaqueEpisodeId, 'opaqueEpisodeId');
+  const manifestRevision = record.manifestRevision === null
+    ? null
+    : storyWorkspaceEpisodeString(record.manifestRevision, 'manifestRevision', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
+  const etag = record.etag === null
+    ? null
+    : storyWorkspaceEpisodeString(record.etag, 'etag', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
+  const bindingRecovery = storyWorkspaceParseEpisodeBindingRecovery(record.bindingRecovery);
+  const artifacts = storyWorkspaceEpisodeArray(record.artifacts, 'artifacts', storyWorkspaceParseEpisodeManifestEntry, 256);
+  storyWorkspaceEpisodeUnique(artifacts.map((item) => item.relativeKey), 'artifacts.relativeKey');
+  const narrative = record.narrative === null ? null : storyWorkspaceParseEpisodeNarrative(record.narrative);
+  const auxiliary = record.auxiliary === null ? null : storyWorkspaceParseEpisodeAuxiliary(record.auxiliary);
+  if (bindingAvailability === 'bound') {
+    if (opaqueEpisodeId === null || manifestRevision === null || etag === null) {
+      throw new Error('bound Episode artifact surface requires identity and revisions.');
+    }
+    if (etag !== manifestRevision) throw new Error('etag must equal manifestRevision.');
+    const expectedKeys = Object.keys(STORY_WORKSPACE_EPISODE_ARTIFACT_RULES);
+    if (
+      artifacts.length !== expectedKeys.length
+      || expectedKeys.some((key) => !artifacts.some((item) => item.relativeKey === key))
+    ) throw new Error('bound Episode artifact surface requires all six artifacts.');
+    if (auxiliary !== null && auxiliary.manifestRevision !== manifestRevision) {
+      throw new Error('auxiliary manifestRevision must equal manifestRevision.');
+    }
+  } else if (
+    opaqueEpisodeId !== null
+    || manifestRevision !== null
+    || etag !== null
+    || artifacts.length > 0
+    || narrative !== null
+    || auxiliary !== null
+    || bindingRecovery.canDispatch
+  ) throw new Error('unbound Episode artifact surface cannot contain artifacts.');
+  const surface: StoryWorkspaceEpisodeArtifactSurface = {
+    runId,
+    opaqueEpisodeId,
+    manifestRevision,
+    etag,
+    bindingAvailability,
+    bindingRecovery,
+    artifacts,
+    narrative,
+    auxiliary,
+  };
+  storyWorkspaceEpisodeAssertLinks(surface);
+  return surface;
+}
