@@ -263,6 +263,154 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         ):
             self.assertNotIn(forbidden, serialized)
 
+    def test_snapshot_redacts_sensitive_text_across_persisted_part_boundaries(self) -> None:
+        self._insert("widget-sensitive", "user", [{"type": "text", "text": "继续"}], {
+            "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+            "story_workspace_run_id": RUN_ID,
+            "actor_id": ACTOR_ID,
+            "thread_id": THREAD_ID,
+        })
+        probes = (
+            ("secret-key", ["密钥：sk-ant-", "api03-" + "A" * 48]),
+            ("pem", ["-----BEGIN PRIVATE ", "KEY-----\nprivate material"]),
+            ("hidden", ["hidden chain ", "of thought: internal"]),
+            ("system", ["system pro", "mpt: internal instructions"]),
+            ("path", ["读取 /Users/dmeck/", "project/private.txt"]),
+            ("generic-api-key", ["api_key=", "abcdef0123456789abcdef"]),
+        )
+        for index, (name, chunks) in enumerate(probes):
+            self._insert(f"assistant-sensitive-{index}", "assistant", [
+                {"type": "text", "text": chunk} for chunk in chunks
+            ], {"story_workspace_dream_source": {
+                "run_id": RUN_ID,
+                "thread_id": THREAD_ID,
+                "actor_id": ACTOR_ID,
+                "message_id": "widget-sensitive",
+                "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+            }})
+
+        self._insert("assistant-safe-chinese", "assistant", [
+            {"type": "text", "text": "角色关系已经整理完成，可以继续创作。"},
+        ], {"story_workspace_dream_source": {
+            "run_id": RUN_ID,
+            "thread_id": THREAD_ID,
+            "actor_id": ACTOR_ID,
+            "message_id": "widget-sensitive",
+            "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+        }})
+
+        with patch(
+            "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+            return_value=(True, True),
+        ):
+            result = StoryWorkspaceDreamAgentMessageService(self.db).snapshot(
+                run_id=RUN_ID, thread_id=THREAD_ID, actor_id=ACTOR_ID
+            )
+
+        by_id = {message.id: message for message in result.messages}
+        for index, (_name, chunks) in enumerate(probes):
+            message = by_id[f"assistant-sensitive-{index}"]
+            self.assertEqual(message.text, "[已隐藏敏感内容]")
+            self.assertEqual(
+                [item.model_dump(mode="json", by_alias=True) for item in message.content],
+                [{"kind": "text", "text": "[已隐藏敏感内容]", "truncated": False}],
+            )
+            serialized = message.model_dump_json(by_alias=True)
+            for chunk in chunks:
+                self.assertNotIn(chunk, serialized)
+        self.assertEqual(
+            by_id["assistant-safe-chinese"].text,
+            "角色关系已经整理完成，可以继续创作。",
+        )
+
+    def test_events_buffer_and_redact_sensitive_text_split_across_frames(self) -> None:
+        sensitive_factory = _Factory(running=True, frames=[
+            'data: {"type":"text-start","id":"text-1"}\n\n',
+            'data: {"type":"text-delta","id":"text-1","delta":"创作建议包含 sk-"}\n\n',
+            'data: {"type":"text-delta","id":"text-1","delta":"ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"}\n\n',
+            'data: {"type":"message-final"}\n\n',
+        ])
+        sensitive_output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db, thread_factory=sensitive_factory
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertIn("event: assistant_text_delta", sensitive_output)
+        self.assertIn("[已隐藏敏感内容]", sensitive_output)
+        self.assertNotIn("sk-ant", sensitive_output)
+        self.assertNotIn("api03", sensitive_output)
+        self.assertIn("id: turn-1:2", sensitive_output)
+        self.assertIn("id: turn-1:3", sensitive_output)
+
+        safe_first = "角色关系已经整理。" + "雨夜氛围持续推进，" * 20
+        safe_second = "场景与人物动机保持一致，可以继续创作。"
+        safe_factory = _Factory(running=True, frames=[
+            "data: " + json.dumps(
+                {"type": "text-delta", "delta": safe_first},
+                ensure_ascii=False,
+            ) + "\n\n",
+            "data: " + json.dumps(
+                {"type": "text-delta", "delta": safe_second},
+                ensure_ascii=False,
+            ) + "\n\n",
+            'data: {"type":"message-final"}\n\n',
+        ])
+        safe_output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db, thread_factory=safe_factory
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertIn("id: turn-1:0", safe_output)
+        self.assertIn("角色关系已经整理。", safe_output)
+        self.assertLess(
+            safe_output.index("event: assistant_text_delta"),
+            safe_output.index("event: assistant_message_committed"),
+        )
+
+    def test_confirmation_output_combines_resolved_and_finished_with_replayable_subcursors(self) -> None:
+        frames = [
+            'data: {"type":"tool-input-available","toolCallId":"tool-write","toolName":"mcp__story_workspace__write_dream_stage","input":{"stage":"characters"}}\n\n',
+            'data: {"type":"tool-approval-request","toolCallId":"tool-write","toolName":"mcp__story_workspace__write_dream_stage","input":{"stage":"characters"}}\n\n',
+            'data: {"type":"tool-output-available","toolCallId":"tool-write","output":{"credential":"secret"},"isError":false}\n\n',
+            'data: {"type":"message-final"}\n\n',
+        ]
+
+        def collect(after: str | None = None) -> str:
+            factory = _ToolConfirmationFactory()
+            factory.frames = frames
+            return "".join(asyncio.run(_collect(
+                StoryWorkspaceDreamAgentMessageService(
+                    self.db, thread_factory=factory
+                ).events(
+                    thread_id=THREAD_ID,
+                    run_id=RUN_ID,
+                    actor_id=ACTOR_ID,
+                    after=after,
+                )
+            )))
+
+        full = collect()
+        self.assertIn("event: tool_confirmation_resolved", full)
+        self.assertIn("event: agent_activity_finished", full)
+        self.assertIn("id: turn-1:2:0", full)
+        self.assertIn("id: turn-1:2:1", full)
+        self.assertNotIn("credential", full)
+
+        after_resolved = collect("turn-1:2:0")
+        self.assertNotIn("event: tool_confirmation_resolved", after_resolved)
+        self.assertEqual(after_resolved.count("event: agent_activity_finished"), 1)
+        after_finished = collect("turn-1:2:1")
+        self.assertNotIn("event: tool_confirmation_resolved", after_finished)
+        self.assertNotIn("event: agent_activity_finished", after_finished)
+
     def test_events_project_safe_activity_lifecycle_with_stable_opaque_ids(self) -> None:
         factory = _Factory(running=True, frames=[
             'data: {"type":"tool-input-available","toolCallId":"tool-read","toolName":"Read","input":{"path":"/private/a","token":"secret"}}\n\n',
@@ -408,7 +556,8 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         self.assertNotIn("credential", output)
         self.assertNotIn("no raw", output)
         self.assertNotIn("id: turn-1:0", output)
-        self.assertIn("id: turn-1:2", output)
+        self.assertIn("id: turn-1:4:0", output)
+        self.assertIn("id: turn-1:4:1", output)
         self.assertEqual(output.count("event: assistant_message_committed"), 1)
 
     def test_events_project_only_allowlisted_tool_confirmation_fields(self) -> None:

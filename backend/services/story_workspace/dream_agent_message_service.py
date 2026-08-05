@@ -110,6 +110,17 @@ _DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR = (
 _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX = 256
 _ASK_USER_QUESTIONS_MAX = 8
 _ASK_USER_OPTIONS_MAX = 12
+_DREAM_PUBLIC_TEXT_REDACTION = "[已隐藏敏感内容]"
+_DREAM_PUBLIC_TEXT_TRAILING_GUARD = 96
+_DREAM_PUBLIC_TEXT_STREAM_MAX_PENDING = 16 * 1024
+_DREAM_PUBLIC_TEXT_BOUNDARY = re.compile(r"[\s。！？；：，、,.!?;:]")
+_SENSITIVE_ABSOLUTE_USER_PATH = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9])/(?:Users|home)/[^/\s]+(?:/[^\s]*)?|"
+    r"(?<![A-Za-z0-9])[A-Za-z]:\\Users\\[^\\\s]+(?:\\[^\s]*)?"
+    r")",
+    re.IGNORECASE,
+)
 _SENSITIVE_ASK_USER_TEXT = re.compile(
     r"(?:"
     r"(?<![A-Za-z0-9])authorization(?:header|value|token)?(?![A-Za-z0-9])|"
@@ -357,6 +368,45 @@ def _decode(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _public_text_is_sensitive(value: str) -> bool:
+    normalized = value.strip()
+    return bool(
+        _SENSITIVE_ASK_USER_TEXT.search(normalized)
+        or _SENSITIVE_ABSOLUTE_USER_PATH.search(normalized)
+        or any(pattern.search(normalized) for pattern in _HIGH_CONFIDENCE_ASK_USER_SECRETS)
+        or _looks_like_high_entropy_secret(normalized)
+    )
+
+
+def _public_text_projection(value: str) -> tuple[str, bool, bool]:
+    """Apply one conservative public-text policy to snapshot and live output."""
+
+    normalized = value.strip()
+    if not normalized:
+        return "", False, False
+    if _public_text_is_sensitive(normalized):
+        return _DREAM_PUBLIC_TEXT_REDACTION, False, True
+    return (
+        normalized[:STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX],
+        len(normalized) > STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
+        False,
+    )
+
+
+def _incremental_public_text_split(value: str) -> tuple[str, str]:
+    """Release only a boundary-terminated prefix before the trailing guard."""
+
+    safe_limit = len(value) - _DREAM_PUBLIC_TEXT_TRAILING_GUARD
+    if safe_limit <= 0:
+        return "", value
+    boundary_end = 0
+    for match in _DREAM_PUBLIC_TEXT_BOUNDARY.finditer(value, 0, safe_limit + 1):
+        boundary_end = match.end()
+    if boundary_end <= 0:
+        return "", value
+    return value[:boundary_end], value[boundary_end:]
+
+
 def _parts_text(parts: Any) -> tuple[str, bool]:
     if not isinstance(parts, list):
         return "", False
@@ -367,11 +417,8 @@ def _parts_text(parts: Any) -> tuple[str, bool]:
         and part.get("type") == "text"
         and isinstance(part.get("text"), str)
     )
-    normalized = text.strip()
-    return (
-        normalized[:STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX],
-        len(normalized) > STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
-    )
+    public_text, truncated, _redacted = _public_text_projection(text)
+    return public_text, truncated
 
 
 def _activity_category(tool_name: Any) -> str:
@@ -450,12 +497,31 @@ def _safe_content(
 
     if not isinstance(parts, list):
         return []
+    joined_text = "".join(
+        part.get("text", "")
+        for part in parts
+        if isinstance(part, dict)
+        and part.get("type") == "text"
+        and isinstance(part.get("text"), str)
+    )
+    _message_text, _message_truncated, text_is_redacted = _public_text_projection(
+        joined_text
+    )
     remaining_text = STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX
+    redaction_emitted = False
     content: list[
         StoryWorkspaceDreamAgentTextContent | StoryWorkspaceDreamAgentActivityContent
     ] = []
     for index, part in enumerate(parts):
         if isinstance(part, dict) and part.get("type") == "text" and isinstance(part.get("text"), str):
+            if text_is_redacted:
+                if not redaction_emitted:
+                    content.append(StoryWorkspaceDreamAgentTextContent(
+                        text=_DREAM_PUBLIC_TEXT_REDACTION,
+                        truncated=False,
+                    ))
+                    redaction_emitted = True
+                continue
             normalized = part["text"].strip()
             if not normalized or remaining_text <= 0:
                 continue
@@ -509,6 +575,28 @@ def _has_data_frame(frame: str) -> bool:
     """Whether an upstream SSE frame consumes one stable raw ordinal."""
 
     return any(line.startswith("data:") for line in frame.splitlines())
+
+
+def _dream_public_cursor_position(
+    cursor: str | None,
+    *,
+    turn_id: str,
+) -> tuple[int, int]:
+    """Decode `<turn>:<raw ordinal>[:<stable subevent>]` for replay."""
+
+    if not cursor:
+        return -1, -1
+    parts = cursor.split(":")
+    if len(parts) not in {2, 3} or parts[0] != turn_id:
+        return -1, -1
+    try:
+        ordinal = int(parts[1])
+        subevent = int(parts[2]) if len(parts) == 3 else 0
+    except ValueError:
+        return -1, -1
+    if ordinal < 0 or subevent < 0:
+        return -1, -1
+    return ordinal, subevent
 
 
 def _safe_public_text(value: Any, *, max_length: int) -> str | None:
@@ -1214,15 +1302,19 @@ class StoryWorkspaceDreamAgentMessageService:
         ):
             yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
             return
-        after_turn, _, after_ordinal = (after or "").partition(":")
-        try:
-            after_number = int(after_ordinal) if after_turn == turn_id else -1
-        except ValueError:
-            after_number = -1
+        after_position = _dream_public_cursor_position(after, turn_id=turn_id)
+
+        def cursor_consumed(raw_ordinal: int, subevent: int = 0) -> bool:
+            return (raw_ordinal, subevent) <= after_position
+
         ordinal = -1
         pending_tool_call_ids: set[str] = set()
         activity_tool_names: dict[str, str] = {}
         started_activity_ids: set[str] = set()
+        public_text_pending = ""
+        public_text_redacted = False
+        public_text_redaction_emitted = False
+        public_text_emitted_chars = 0
         if not _retain_dream_public_confirmation_turn(
             self._thread_factory,
             thread_id=thread_id,
@@ -1276,7 +1368,7 @@ class StoryWorkspaceDreamAgentMessageService:
                     if activity_id in started_activity_ids:
                         continue
                     started_activity_ids.add(activity_id)
-                    if ordinal <= after_number:
+                    if cursor_consumed(ordinal):
                         continue
                     activity = _activity_projection(
                         activity_id=activity_id,
@@ -1305,7 +1397,7 @@ class StoryWorkspaceDreamAgentMessageService:
                     ):
                         continue
                     pending_tool_call_ids.add(tool_call_id)
-                    if ordinal <= after_number:
+                    if cursor_consumed(ordinal):
                         continue
                     payload = {"turnId": turn_id, "confirmation": confirmation}
                     yield (
@@ -1318,7 +1410,8 @@ class StoryWorkspaceDreamAgentMessageService:
                     tool_call_id = _safe_tool_call_id(data.get("toolCallId"))
                     if tool_call_id is None:
                         continue
-                    if tool_call_id in pending_tool_call_ids:
+                    was_pending_confirmation = tool_call_id in pending_tool_call_ids
+                    if was_pending_confirmation:
                         pending_tool_call_ids.discard(tool_call_id)
                         _forget_dream_public_confirmation(
                             self._thread_factory,
@@ -1328,53 +1421,137 @@ class StoryWorkspaceDreamAgentMessageService:
                             actor_id=actor_id,
                             tool_call_id=tool_call_id,
                         )
-                        if ordinal <= after_number:
-                            continue
-                        payload = {"turnId": turn_id, "toolCallId": tool_call_id}
-                        yield (
-                            f"id: {turn_id}:{ordinal}\n"
-                            f"event: tool_confirmation_resolved\n"
-                            f"data: {_json(payload)}\n\n"
-                        )
-                        continue
                     tool_name = activity_tool_names.get(tool_call_id)
                     activity_id = _opaque_activity_id(
                         "live", run_id, thread_id, turn_id, tool_call_id
                     )
-                    if tool_name is None or activity_id not in started_activity_ids:
-                        continue
-                    if ordinal <= after_number:
-                        continue
-                    activity = _activity_projection(
-                        activity_id=activity_id,
-                        tool_name=tool_name,
-                        status=_activity_status(
-                            "output-available" if frame_type == "tool-output-available" else "output-error",
-                            is_error=(
-                                frame_type != "tool-output-available"
-                                or data.get("isError") is True
-                            ),
-                        ),
-                    ).model_dump(mode="json", by_alias=True)
-                    payload = {"turnId": turn_id, "activity": activity}
-                    yield (
-                        f"id: {turn_id}:{ordinal}\n"
-                        f"event: agent_activity_finished\n"
-                        f"data: {_json(payload)}\n\n"
+                    has_public_activity = (
+                        tool_name is not None and activity_id in started_activity_ids
                     )
+                    activity = (
+                        _activity_projection(
+                            activity_id=activity_id,
+                            tool_name=tool_name,
+                            status=_activity_status(
+                                "output-available" if frame_type == "tool-output-available" else "output-error",
+                                is_error=(
+                                    frame_type != "tool-output-available"
+                                    or data.get("isError") is True
+                                ),
+                            ),
+                        ).model_dump(mode="json", by_alias=True)
+                        if has_public_activity
+                        else None
+                    )
+                    if was_pending_confirmation:
+                        if not cursor_consumed(ordinal, 0):
+                            payload = {"turnId": turn_id, "toolCallId": tool_call_id}
+                            yield (
+                                f"id: {turn_id}:{ordinal}:0\n"
+                                f"event: tool_confirmation_resolved\n"
+                                f"data: {_json(payload)}\n\n"
+                            )
+                        if activity is not None and not cursor_consumed(ordinal, 1):
+                            payload = {"turnId": turn_id, "activity": activity}
+                            yield (
+                                f"id: {turn_id}:{ordinal}:1\n"
+                                f"event: agent_activity_finished\n"
+                                f"data: {_json(payload)}\n\n"
+                            )
+                        continue
+                    if activity is not None and not cursor_consumed(ordinal):
+                        payload = {"turnId": turn_id, "activity": activity}
+                        yield (
+                            f"id: {turn_id}:{ordinal}\n"
+                            f"event: agent_activity_finished\n"
+                            f"data: {_json(payload)}\n\n"
+                        )
                     continue
                 if frame_type == "message-final":
                     terminal = True
-                    if ordinal <= after_number:
-                        break
                     payload = {"turnId": turn_id}
-                    yield f"id: {turn_id}:{ordinal}\nevent: assistant_message_committed\ndata: {_json(payload)}\n\n"
+                    final_text = ""
+                    if not public_text_redacted:
+                        public_text, _truncated, text_is_redacted = (
+                            _public_text_projection(public_text_pending)
+                        )
+                        if text_is_redacted:
+                            public_text_redacted = True
+                            public_text_pending = ""
+                            if not public_text_redaction_emitted:
+                                final_text = _DREAM_PUBLIC_TEXT_REDACTION
+                                public_text_redaction_emitted = True
+                        else:
+                            remaining = max(
+                                0,
+                                STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX
+                                - public_text_emitted_chars,
+                            )
+                            final_text = public_text[:remaining]
+                            public_text_emitted_chars += len(final_text)
+                            public_text_pending = ""
+                    if final_text:
+                        if not cursor_consumed(ordinal, 0):
+                            text_payload = {"turnId": turn_id, "delta": final_text}
+                            yield (
+                                f"id: {turn_id}:{ordinal}:0\n"
+                                f"event: assistant_text_delta\n"
+                                f"data: {_json(text_payload)}\n\n"
+                            )
+                        if not cursor_consumed(ordinal, 1):
+                            yield (
+                                f"id: {turn_id}:{ordinal}:1\n"
+                                f"event: assistant_message_committed\n"
+                                f"data: {_json(payload)}\n\n"
+                            )
+                    elif not cursor_consumed(ordinal):
+                        yield f"id: {turn_id}:{ordinal}\nevent: assistant_message_committed\ndata: {_json(payload)}\n\n"
                     break
-                if ordinal <= after_number:
-                    continue
                 if frame_type == "text-delta" and isinstance(data.get("delta"), str):
-                    payload = {"turnId": turn_id, "delta": data["delta"]}
-                    yield f"id: {turn_id}:{ordinal}\nevent: assistant_text_delta\ndata: {_json(payload)}\n\n"
+                    if public_text_redacted:
+                        continue
+                    public_text_pending += data["delta"]
+                    text_is_sensitive = (
+                        len(public_text_pending)
+                        > _DREAM_PUBLIC_TEXT_STREAM_MAX_PENDING
+                        or _public_text_is_sensitive(public_text_pending)
+                    )
+                    if text_is_sensitive:
+                        public_text_redacted = True
+                        public_text_pending = ""
+                        if not public_text_redaction_emitted:
+                            public_text_redaction_emitted = True
+                            if not cursor_consumed(ordinal):
+                                text_payload = {
+                                    "turnId": turn_id,
+                                    "delta": _DREAM_PUBLIC_TEXT_REDACTION,
+                                }
+                                yield (
+                                    f"id: {turn_id}:{ordinal}\n"
+                                    f"event: assistant_text_delta\n"
+                                    f"data: {_json(text_payload)}\n\n"
+                                )
+                        continue
+                    public_prefix, public_text_pending = (
+                        _incremental_public_text_split(public_text_pending)
+                    )
+                    remaining = max(
+                        0,
+                        STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX
+                        - public_text_emitted_chars,
+                    )
+                    public_prefix = public_prefix[:remaining]
+                    public_text_emitted_chars += len(public_prefix)
+                    if public_prefix and not cursor_consumed(ordinal):
+                        text_payload = {
+                            "turnId": turn_id,
+                            "delta": public_prefix,
+                        }
+                        yield (
+                            f"id: {turn_id}:{ordinal}\n"
+                            f"event: assistant_text_delta\n"
+                            f"data: {_json(text_payload)}\n\n"
+                        )
         finally:
             _release_dream_public_confirmation_turn(
                 self._thread_factory,

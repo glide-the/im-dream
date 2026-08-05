@@ -146,6 +146,49 @@ test('activity parser rejects non-fixed labels and raw reasoning events', () => 
   )).toBeNull();
 });
 
+test('confirmation resolution and activity completion use independent stable subcursors', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
+  const resolved = storyWorkspaceParseDreamAgentEvent(
+    'tool_confirmation_resolved',
+    '{"turnId":"turn-1","toolCallId":"tool-write"}',
+    'turn-1:8:0',
+  );
+  const finished = storyWorkspaceParseDreamAgentEvent(
+    'agent_activity_finished',
+    JSON.stringify({
+      turnId: 'turn-1',
+      activity: {
+        kind: 'activity',
+        id: 'dream_activity_cccccccccccccccccccccccccccccccc',
+        category: 'dream_write',
+        label: '更新 Dream 内容',
+        status: 'completed',
+      },
+    }),
+    'turn-1:8:1',
+  );
+  expect(resolved).not.toBeNull();
+  expect(finished).not.toBeNull();
+  const reduced = storyWorkspaceReduceDreamAgentEvents({
+    snapshot,
+    streamText: '',
+    streamTurnId: 'turn-1',
+    pendingToolConfirmations: [{
+      toolCallId: 'tool-write', kind: 'approval', toolName: 'write dream stage',
+    }],
+    seenCursors: [],
+  }, [resolved!, finished!, resolved!, finished!]);
+  expect(reduced.pendingToolConfirmations).toEqual([]);
+  expect(reduced.streamContent).toEqual([{
+    kind: 'activity',
+    id: 'dream_activity_cccccccccccccccccccccccccccccccc',
+    category: 'dream_write',
+    label: '更新 Dream 内容',
+    status: 'completed',
+  }]);
+  expect(reduced.seenCursors).toEqual(['turn-1:8:0', 'turn-1:8:1']);
+});
+
 test('replayed cursor is de-duplicated and terminal event requests durable reconciliation', () => {
   const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
   const delta = storyWorkspaceParseDreamAgentEvent('assistant_text_delta', '{"turnId":"turn-1","delta":"继续写场景"}', 'turn-1:7');
