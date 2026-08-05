@@ -78,7 +78,8 @@ _ABSOLUTE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
     r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
     r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\}|"
-    r"%(?:USERPROFILE|HOMEPATH)%|\$env:USERPROFILE)[\\/][^\s`]+"
+    r"%(?:USERPROFILE|HOMEPATH)%|\$env:(?:USERPROFILE|HOME))"
+    r"[\\/][^\s`]+"
     r")"
 )
 _CREDENTIAL_RE = re.compile(

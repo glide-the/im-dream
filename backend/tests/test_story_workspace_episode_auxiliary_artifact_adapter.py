@@ -736,6 +736,7 @@ def test_remaining_public_text_bypasses_fail_closed(
         "%USERPROFILE%",
         "%HOMEPATH%",
         "$env:USERPROFILE",
+        "$EnV:HoMe",
     ],
 )
 @pytest.mark.parametrize("separator", ["/", "\\"])
