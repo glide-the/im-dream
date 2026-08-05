@@ -318,33 +318,36 @@ class StoryWorkspaceEpisodeBindingService:
             for descriptor in reversed(descriptors):
                 os.close(descriptor)
 
-    def read_canonical_project_story_slug(self, story_slug: str) -> str:
-        """Read one exact project.yaml identity through pinned, no-follow FDs."""
-
-        candidate = self._validate_story_slug(story_slug)
-        descriptors: list[int] = []
+    @classmethod
+    def _read_project_id_from_story_directory(
+        cls,
+        story_descriptor: int,
+        *,
+        candidate: str,
+        optional: bool,
+    ) -> str | None:
         descriptor = -1
         try:
-            parent = self._open_workspace()
-            descriptors.append(parent)
-            for component in ("stories", candidate):
-                child = self._open_child_directory(
-                    parent,
-                    component,
-                    create=False,
-                )
-                assert child is not None
-                descriptors.append(child)
-                parent = child
             descriptor = os.open(
                 "project.yaml",
-                self._file_flags(),
-                dir_fd=parent,
+                cls._file_flags(),
+                dir_fd=story_descriptor,
             )
+        except FileNotFoundError:
+            if optional:
+                return None
+            raise StoryWorkspaceEpisodeBindingPathError(
+                "canonical project identity is unavailable"
+            ) from None
+        except OSError as exc:
+            raise StoryWorkspaceEpisodeBindingPathError(
+                "canonical project identity cannot be opened safely"
+            ) from exc
+        try:
             pinned = os.fstat(descriptor)
             visible = os.stat(
                 "project.yaml",
-                dir_fd=parent,
+                dir_fd=story_descriptor,
                 follow_symlinks=False,
             )
             if (
@@ -382,10 +385,6 @@ class StoryWorkspaceEpisodeBindingService:
                     "canonical project identity does not match"
                 )
             return candidate
-        except FileNotFoundError as exc:
-            raise StoryWorkspaceEpisodeBindingPathError(
-                "canonical project identity is unavailable"
-            ) from exc
         except OSError as exc:
             raise StoryWorkspaceEpisodeBindingPathError(
                 "canonical project identity cannot be read safely"
@@ -393,6 +392,80 @@ class StoryWorkspaceEpisodeBindingService:
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
+
+    def discover_unique_canonical_project_story_slug(self) -> str | None:
+        """Return the sole server-proven project identity, never an Agent choice."""
+
+        descriptors: list[int] = []
+        try:
+            workspace_descriptor = self._open_workspace()
+            descriptors.append(workspace_descriptor)
+            stories_descriptor = self._open_child_directory(
+                workspace_descriptor,
+                "stories",
+                create=False,
+                optional=True,
+            )
+            if stories_descriptor is None:
+                return None
+            descriptors.append(stories_descriptor)
+            candidates: list[str] = []
+            try:
+                names = os.listdir(stories_descriptor)
+            except OSError as exc:
+                raise StoryWorkspaceEpisodeBindingPathError(
+                    "canonical project directory cannot be listed safely"
+                ) from exc
+            for name in sorted(names):
+                if _STORY_SLUG_PATTERN.fullmatch(name) is None:
+                    continue
+                story_descriptor = self._open_child_directory(
+                    stories_descriptor,
+                    name,
+                    create=False,
+                    optional=False,
+                )
+                assert story_descriptor is not None
+                try:
+                    project_id = self._read_project_id_from_story_directory(
+                        story_descriptor,
+                        candidate=name,
+                        optional=True,
+                    )
+                finally:
+                    os.close(story_descriptor)
+                if project_id is not None:
+                    candidates.append(project_id)
+            return candidates[0] if len(candidates) == 1 else None
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
+
+    def read_canonical_project_story_slug(self, story_slug: str) -> str:
+        """Read one exact project.yaml identity through pinned, no-follow FDs."""
+
+        candidate = self._validate_story_slug(story_slug)
+        descriptors: list[int] = []
+        try:
+            parent = self._open_workspace()
+            descriptors.append(parent)
+            for component in ("stories", candidate):
+                child = self._open_child_directory(
+                    parent,
+                    component,
+                    create=False,
+                )
+                assert child is not None
+                descriptors.append(child)
+                parent = child
+            project_id = self._read_project_id_from_story_directory(
+                parent,
+                candidate=candidate,
+                optional=False,
+            )
+            assert project_id is not None
+            return project_id
+        finally:
             for opened in reversed(descriptors):
                 os.close(opened)
 

@@ -193,6 +193,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         episode_uid: str | None = None,
         manifest_revision: str | None = None,
         input_revision: str | None = None,
+        facts_revision: int | None = None,
         message_id: str = "dream_agent_" + "a" * 64,
     ) -> None:
         launch_metadata = {
@@ -226,9 +227,10 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 "schema": "story-workspace-episode-action/v1",
                 "action": action,
                 "episode_uid": episode_uid,
-                "surface_revision": manifest_revision,
-                "manifest_revision": manifest_revision,
                 "input_revision": input_revision,
+                "expected_facts_revision": facts_revision,
+                "expected_manifest_revision": manifest_revision,
+                "expected_workflow_revision": manifest_revision,
             },
         }
         db = sqlite3.connect(self.database_path)
@@ -375,7 +377,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         )
         self.assertEqual(
             set(binding_schema["properties"]),
-            {"workflowRunId", "storySlug", "expectedBindingRevision"},
+            {"workflowRunId", "expectedBindingRevision"},
         )
         completion_schema = (
             StoryWorkspaceEpisodeWorkflowCompletionToolInput.model_json_schema(
@@ -384,14 +386,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         )
         self.assertEqual(
             set(completion_schema["properties"]),
-            {
-                "workflowRunId",
-                "episodeId",
-                "action",
-                "inputRevision",
-                "expectedWorkflowRevision",
-                "expectedManifestRevision",
-            },
+            {"workflowRunId"},
         )
         for schema in (binding_schema, completion_schema):
             self.assertFalse(schema["additionalProperties"])
@@ -579,7 +574,6 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             "bind_first_episode",
             {
                 "workflowRunId": RUN_ID,
-                "storySlug": "demo",
                 "expectedBindingRevision": 0,
             },
         )
@@ -617,7 +611,6 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         self._seed_episode_action(action="recover_first_episode_binding")
         arguments = {
             "workflowRunId": RUN_ID,
-            "storySlug": "demo",
             "expectedBindingRevision": 0,
         }
         for message_id in ("", "dream_agent_" + "b" * 64):
@@ -659,7 +652,6 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             "bind_first_episode",
             {
                 "workflowRunId": RUN_ID,
-                "storySlug": "demo",
                 "expectedBindingRevision": 0,
             },
         )
@@ -688,15 +680,23 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             episode_uid=episode_uid,
             manifest_revision=surface.manifest_revision,
             input_revision=input_revision,
+            facts_revision=facts.revision,
         )
-        arguments = {
-            "workflowRunId": RUN_ID,
-            "episodeId": episode_uid,
-            "action": "plan_episode",
-            "inputRevision": input_revision,
-            "expectedWorkflowRevision": 0,
-            "expectedManifestRevision": surface.manifest_revision,
-        }
+        (story / "episodes" / "EP01" / "episode-outline.md").write_text(
+            "---\ntitle: Demo\n---\n# Story Goals\n- Begin\n",
+            encoding="utf-8",
+        )
+        output_surface = StoryWorkspaceEpisodeArtifactService(
+            self.workspace
+        ).read_surface(
+            RUN_ID,
+            episode_authority=authority,
+        )
+        self.assertNotEqual(
+            output_surface.manifest_revision,
+            surface.manifest_revision,
+        )
+        arguments = {"workflowRunId": RUN_ID}
         first = self._call("record_episode_workflow_completion", arguments)
         replay = self._call("record_episode_workflow_completion", arguments)
 
@@ -708,13 +708,73 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         )
         self.assertEqual(persisted.revision, 1)
         self.assertEqual(len(persisted.completions), 1)
+        self.assertEqual(
+            persisted.completions[0].manifest_revision,
+            output_surface.manifest_revision,
+        )
 
-        poisoned = dict(arguments)
-        poisoned["inputRevision"] = "sha256:" + "f" * 64
+        poisoned = {**arguments, "inputRevision": "sha256:" + "f" * 64}
         self.assertEqual(
             self._call("record_episode_workflow_completion", poisoned),
             {"error": "DREAM_WRITE_REJECTED"},
         )
+
+    def test_binding_rejects_multiple_canonical_projects_without_agent_choice(self) -> None:
+        for slug in ("demo-a", "demo-b"):
+            story = self.workspace / "stories" / slug
+            (story / "episodes" / "EP01").mkdir(parents=True)
+            (story / "project.yaml").write_text(
+                f"project_id: {slug}\n",
+                encoding="utf-8",
+            )
+        self._seed_episode_action(action="recover_first_episode_binding")
+
+        result = self._call(
+            "bind_first_episode",
+            {
+                "workflowRunId": RUN_ID,
+                "expectedBindingRevision": 0,
+            },
+        )
+
+        self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
+        self.assertFalse(
+            (
+                self.workspace
+                / ".dream"
+                / "runtime"
+                / "runs"
+                / RUN_ID
+                / "episode.json"
+            ).exists()
+        )
+
+    def test_binding_rejects_project_id_that_does_not_match_directory(self) -> None:
+        story = self.workspace / "stories" / "demo"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text(
+            "project_id: other\n",
+            encoding="utf-8",
+        )
+        self._seed_episode_action(action="recover_first_episode_binding")
+
+        result = self._call(
+            "bind_first_episode",
+            {
+                "workflowRunId": RUN_ID,
+                "expectedBindingRevision": 0,
+            },
+        )
+
+        self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
+        db = sqlite3.connect(self.database_path)
+        source = json.loads(
+            db.execute(
+                "SELECT metadata FROM chat_message WHERE id = 'launch-source'"
+            ).fetchone()[0]
+        )
+        db.close()
+        self.assertNotIn("story_workspace_episode_identity", source)
 
 
 if __name__ == "__main__":

@@ -523,15 +523,11 @@ class StoryWorkspaceDreamStageToolInput(StoryWorkspaceDreamToolInput):
 
 
 class StoryWorkspaceEpisodeBindingToolInput(StoryWorkspaceDreamToolInput):
-    """Agent candidate for the server-owned EP01 binding CAS."""
+    """Path-free request for the server-owned EP01 binding CAS."""
 
     workflow_run_id: str = Field(
         alias="workflowRunId",
         pattern=r"^run_[0-9a-f]{32}$",
-    )
-    story_slug: str = Field(
-        alias="storySlug",
-        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
     )
     expected_binding_revision: int = Field(
         alias="expectedBindingRevision",
@@ -856,37 +852,12 @@ class StoryWorkspaceEpisodeWorkflowFile(_StoryWorkspaceDreamStorageModel):
 class StoryWorkspaceEpisodeWorkflowCompletionToolInput(
     StoryWorkspaceDreamToolInput
 ):
-    """Agent completion evidence; host context supplies actor/thread/message."""
+    """Path-free request; the host message owns all completion evidence."""
 
     workflow_run_id: str = Field(
         alias="workflowRunId",
         pattern=r"^run_[0-9a-f]{32}$",
     )
-    episode_id: str = Field(alias="episodeId", pattern=r"^[0-9a-f]{32}$")
-    action: StoryWorkspaceEpisodeAction
-    input_revision: str = Field(
-        alias="inputRevision",
-        pattern=r"^sha256:[0-9a-f]{64}$",
-    )
-    expected_workflow_revision: int = Field(
-        alias="expectedWorkflowRevision",
-        ge=0,
-        strict=True,
-    )
-    expected_manifest_revision: str = Field(
-        alias="expectedManifestRevision",
-        pattern=r"^sha256:[0-9a-f]{64}$",
-    )
-
-    @field_validator("action")
-    @classmethod
-    def action_is_completable(
-        cls,
-        value: StoryWorkspaceEpisodeAction,
-    ) -> StoryWorkspaceEpisodeAction:
-        if value is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
-            raise ValueError("none_in_scope cannot be recorded as completion")
-        return value
 
 
 class StoryWorkspaceEpisodeActionResolution(_StoryWorkspaceDreamWireModel):
@@ -957,6 +928,16 @@ _STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST = (
     re.compile(
         r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s]+|"
         r"(?<![A-Za-z0-9])[A-Za-z]:\\Users\\[^\s]+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:\$\{?HOME\}?|~)/(?:\.[^/\s]+|[^/\s]+)/(?:[^\s]+)|"
+        r"(?<![A-Za-z0-9])/(?:etc)/(?:passwd|shadow)(?![A-Za-z0-9])",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:process\.)?env(?:\s*\||\s*\[|\.)|\bprintenv\b|"
+        r"\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|CREDENTIALS?)\s*=",
         re.IGNORECASE,
     ),
     re.compile(

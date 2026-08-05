@@ -92,9 +92,10 @@ STORY_WORKSPACE_DREAM_TOOL_SPECS: dict[str, StoryWorkspaceToolSpec] = {
     "bind_first_episode": StoryWorkspaceToolSpec(
         description=(
             "CAS-bind the canonical first Episode after the current controlled "
-            "Story Workspace action. The candidate story slug is checked against "
-            "project.yaml; actor, thread, run, message, Episode code/root/UID and "
-            "launch provenance are server-owned."
+            "Story Workspace action. The server requires exactly one canonical "
+            "project.yaml whose project_id matches its directory; actor, thread, "
+            "run, story, message, Episode code/root/UID and launch provenance are "
+            "server-owned."
         ),
         input_schema=StoryWorkspaceEpisodeBindingToolInput.model_json_schema(
             by_alias=True
@@ -285,6 +286,16 @@ def _active_episode_action_provenance(
         or not math.isfinite(float(metadata["dispatch_claim_lease_until"]))
         or float(metadata["dispatch_claim_lease_until"]) <= time.time()
         or not isinstance(action, dict)
+        or set(action)
+        != {
+            "schema",
+            "action",
+            "episode_uid",
+            "input_revision",
+            "expected_facts_revision",
+            "expected_manifest_revision",
+            "expected_workflow_revision",
+        }
         or action.get("schema") != "story-workspace-episode-action/v1"
     ):
         raise PermissionError("Story Workspace action provenance is unavailable")
@@ -440,9 +451,9 @@ def _bind_first_episode(
         }:
             raise PermissionError("current action cannot bind an Episode")
         service = StoryWorkspaceEpisodeBindingService(workspace)
-        project_slug = service.read_canonical_project_story_slug(
-            request.story_slug
-        )
+        project_slug = service.discover_unique_canonical_project_story_slug()
+        if project_slug is None:
+            raise PermissionError("a unique canonical project is unavailable")
         source_id, raw_metadata, source_metadata = _source_launch_row(
             db,
             actor_id=actor_id,
@@ -491,8 +502,8 @@ def _bind_first_episode(
             StoryWorkspaceEpisodeBindingContext(
                 workflow_run_id=request.workflow_run_id,
                 trusted_project_story_slug=project_slug,
-                locked_context_story_slug=request.story_slug,
-                run_provenance_story_slug=request.story_slug,
+                locked_context_story_slug=project_slug,
+                run_provenance_story_slug=project_slug,
                 episode_uid=episode_uid,
             )
         )
@@ -517,12 +528,36 @@ def _record_episode_workflow_completion(
         message_id: str,
         provenance: dict[str, Any],
     ) -> dict[str, object]:
+        try:
+            action = StoryWorkspaceEpisodeAction(provenance["action"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise PermissionError("completion action is unavailable") from exc
+        episode_uid = provenance.get("episode_uid")
+        input_revision = provenance.get("input_revision")
+        expected_facts_revision = provenance.get("expected_facts_revision")
+        expected_manifest_revision = provenance.get("expected_manifest_revision")
+        expected_workflow_revision = provenance.get("expected_workflow_revision")
         if (
-            provenance.get("action") != request.action.value
-            or provenance.get("episode_uid") != request.episode_id
-            or provenance.get("input_revision") != request.input_revision
+            action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE
+            or not isinstance(episode_uid, str)
+            or re.fullmatch(r"[0-9a-f]{32}", episode_uid) is None
+            or not isinstance(input_revision, str)
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", input_revision) is None
+            or not isinstance(expected_facts_revision, int)
+            or isinstance(expected_facts_revision, bool)
+            or expected_facts_revision < 0
+            or not isinstance(expected_manifest_revision, str)
+            or re.fullmatch(
+                r"sha256:[0-9a-f]{64}", expected_manifest_revision
+            )
+            is None
+            or not isinstance(expected_workflow_revision, str)
+            or re.fullmatch(
+                r"sha256:[0-9a-f]{64}", expected_workflow_revision
+            )
+            is None
         ):
-            raise PermissionError("completion does not match the current action")
+            raise PermissionError("completion provenance is unavailable")
         authority_row = _source_launch_row(
             _db,
             actor_id=_actor_id,
@@ -533,36 +568,54 @@ def _record_episode_workflow_completion(
             authority_row[2].get("story_workspace_episode_identity"),
             expected_run_id=request.workflow_run_id,
         )
-        if authority is None or authority.episode_uid != request.episode_id:
+        if authority is None or authority.episode_uid != episode_uid:
             raise PermissionError("Episode authority is unavailable")
         surface = StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
             request.workflow_run_id,
             episode_authority=authority,
         )
-        if surface.manifest_revision != request.expected_manifest_revision:
-            raise PermissionError("Episode manifest revision changed")
         service = StoryWorkspaceEpisodeWorkflowFactService(workspace)
-        facts = service.read(request.workflow_run_id, request.episode_id)
+        facts = service.read(request.workflow_run_id, episode_uid)
         expected_input = StoryWorkspaceEpisodeNextActionResolver.action_input_revision(
-            request.action,
+            action,
             surface,
             facts,
         )
-        if expected_input != request.input_revision:
+        if expected_input != input_revision:
             raise PermissionError("Episode action input revision changed")
+        if facts.revision != expected_facts_revision:
+            replay = next(
+                (
+                    item
+                    for item in facts.completions
+                    if item.action is action
+                    and item.input_revision == input_revision
+                    and item.manifest_revision == surface.manifest_revision
+                    and item.message_id == message_id
+                ),
+                None,
+            )
+            if replay is None:
+                raise PermissionError("Episode workflow revision changed")
+            return {
+                "run": request.workflow_run_id,
+                "episodeId": episode_uid,
+                "action": action.value,
+                "workflowRevision": facts.revision,
+            }
         updated = service.record_completion(
             workflow_run_id=request.workflow_run_id,
-            episode_uid=request.episode_id,
-            action=request.action,
-            input_revision=request.input_revision,
-            manifest_revision=request.expected_manifest_revision,
+            episode_uid=episode_uid,
+            action=action,
+            input_revision=input_revision,
+            manifest_revision=surface.manifest_revision,
             message_id=message_id,
-            expected_revision=request.expected_workflow_revision,
+            expected_revision=expected_facts_revision,
         )
         return {
             "run": request.workflow_run_id,
-            "episodeId": request.episode_id,
-            "action": request.action.value,
+            "episodeId": episode_uid,
+            "action": action.value,
             "workflowRevision": updated.revision,
         }
 

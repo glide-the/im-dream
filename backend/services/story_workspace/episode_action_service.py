@@ -1070,8 +1070,9 @@ class StoryWorkspaceEpisodeActionService:
         key: str,
         capability: StoryWorkspaceEpisodeAction | str,
         episode_id: str | None,
-        surface_revision: str | None,
+        workflow_revision: str | None,
         manifest_revision: str | None,
+        facts_revision: int | None,
         input_revision: str | None,
         text: str,
     ) -> tuple[
@@ -1102,9 +1103,10 @@ class StoryWorkspaceEpisodeActionService:
                 else capability
             ),
             "episode_uid": episode_id,
-            "surface_revision": surface_revision,
-            "manifest_revision": manifest_revision,
             "input_revision": input_revision,
+            "expected_facts_revision": facts_revision,
+            "expected_manifest_revision": manifest_revision,
+            "expected_workflow_revision": workflow_revision,
         }
         row = self._db.execute(
             "SELECT metadata FROM chat_message WHERE id = ?",
@@ -1216,8 +1218,9 @@ class StoryWorkspaceEpisodeActionService:
             key=command.idempotency_key,
             capability="recover_first_episode_binding",
             episode_id=None,
-            surface_revision=None,
+            workflow_revision=None,
             manifest_revision=None,
+            facts_revision=None,
             input_revision=None,
             text=self._recover_text(),
         )
@@ -1265,8 +1268,13 @@ class StoryWorkspaceEpisodeActionService:
                 key=command.idempotency_key,
                 capability=command.action,
                 episode_id=command.episode_id,
-                surface_revision=surface_revision,
+                workflow_revision=surface_revision,
                 manifest_revision=manifest_revision,
+                facts_revision=(
+                    action_facts.revision
+                    if isinstance(action_facts, StoryWorkspaceEpisodeWorkflowFile)
+                    else None
+                ),
                 input_revision=action_input_revision,
                 text=replay_text,
             )
@@ -1312,8 +1320,13 @@ class StoryWorkspaceEpisodeActionService:
             key=command.idempotency_key,
             capability=command.action,
             episode_id=command.episode_id,
-            surface_revision=surface_revision,
+            workflow_revision=surface_revision,
             manifest_revision=manifest_revision,
+            facts_revision=(
+                action_facts.revision
+                if isinstance(action_facts, StoryWorkspaceEpisodeWorkflowFile)
+                else None
+            ),
             input_revision=action_input_revision,
             text=text,
         )
