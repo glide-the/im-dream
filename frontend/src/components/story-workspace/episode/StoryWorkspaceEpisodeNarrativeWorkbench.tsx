@@ -5,8 +5,10 @@
 
 import {
   createElement as h,
+  useEffect,
   useLayoutEffect,
   useRef,
+  useState,
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -48,6 +50,21 @@ export interface StoryWorkspaceEpisodeNarrativeKeyInput {
     expanded: boolean,
   ) => void;
   readonly onEscape: (selection: StoryWorkspaceEpisodeSelection) => void;
+}
+
+const STORYLINE_SHEET_ID = 'story-workspace-episode-storyline-sheet';
+const STORYLINE_NARROW_QUERY = '(max-width: 767px)';
+
+function initialNarrowLayout(): boolean {
+  return typeof window !== 'undefined' && window.matchMedia(STORYLINE_NARROW_QUERY).matches;
+}
+
+function storylineSheetFocusableElements(container: HTMLElement): HTMLElement[] {
+  return Array.from(container.querySelectorAll<HTMLElement>(
+    'button:not(:disabled):not([tabindex="-1"]), a[href]:not([tabindex="-1"]), '
+      + 'input:not(:disabled):not([tabindex="-1"]), textarea:not(:disabled):not([tabindex="-1"]), '
+      + 'select:not(:disabled):not([tabindex="-1"]), [tabindex]:not([tabindex="-1"])',
+  )).filter((element) => !element.hidden);
 }
 
 function isAuxiliarySelection(selection: StoryWorkspaceEpisodeSelection): boolean {
@@ -532,6 +549,11 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
   const focusToken = useRef(0);
   const focusIntent = useRef<{ readonly token: number; readonly targetKey: string } | null>(null);
+  const storylineTriggerRef = useRef<HTMLButtonElement>(null);
+  const storylineSheetRef = useRef<HTMLElement>(null);
+  const storylineFocusIntent = useRef<'open' | 'close' | null>(null);
+  const [isNarrowLayout, setIsNarrowLayout] = useState(initialNarrowLayout);
+  const [storylineOpen, setStorylineOpen] = useState(() => !initialNarrowLayout());
   const items = storyWorkspaceEpisodeNavigationItems(viewModel, expandedKeys);
   const requestedKey = storyWorkspaceEpisodeSelectionKey(selection);
   const activeItem = items.find(
@@ -554,6 +576,28 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
     ) return;
     itemRefs.current.get(intent.targetKey)?.focus();
   }, [activeKey]);
+  useLayoutEffect(() => {
+    const intent = storylineFocusIntent.current;
+    if (intent === 'open' && isNarrowLayout && storylineOpen) {
+      storylineFocusIntent.current = null;
+      if (activeKey !== null) itemRefs.current.get(activeKey)?.focus();
+    } else if (intent === 'close' && isNarrowLayout && !storylineOpen) {
+      storylineFocusIntent.current = null;
+      storylineTriggerRef.current?.focus();
+    }
+  }, [activeKey, isNarrowLayout, storylineOpen]);
+  useEffect(() => {
+    const media = window.matchMedia(STORYLINE_NARROW_QUERY);
+    const synchronize = (matches: boolean) => {
+      setIsNarrowLayout(matches);
+      setStorylineOpen(!matches);
+      storylineFocusIntent.current = null;
+    };
+    const onChange = (event: MediaQueryListEvent) => synchronize(event.matches);
+    synchronize(media.matches);
+    media.addEventListener('change', onChange);
+    return () => media.removeEventListener('change', onChange);
+  }, []);
   if (viewModel.episode === null || activeSelection === null) {
     return h('section', { role: 'status' }, '故事线尚未生成');
   }
@@ -584,6 +628,36 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
     focusIntent.current = null;
     onEscape(activeSelection);
     itemRefs.current.get(storyWorkspaceEpisodeSelectionKey(activeSelection))?.focus();
+  };
+  const closeStoryline = () => {
+    if (!isNarrowLayout) return;
+    storylineFocusIntent.current = 'close';
+    setStorylineOpen(false);
+  };
+  const openStoryline = () => {
+    storylineFocusIntent.current = 'open';
+    setStorylineOpen(true);
+  };
+  const handleStorylineSheetKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (!isNarrowLayout || !storylineOpen) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeStoryline();
+      return;
+    }
+    if (event.key !== 'Tab' || storylineSheetRef.current === null) return;
+    const focusable = storylineSheetFocusableElements(storylineSheetRef.current);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (first === undefined || last === undefined) return;
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
   };
   const handleKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -635,23 +709,71 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
     'section',
     { 'aria-label': 'Episode 叙事工作台' },
     h(
-      'nav',
-      { 'aria-label': '故事线导航' },
-      h('ul', { role: 'tree', 'aria-label': 'Episode 故事线' }, treeItems),
+      'button',
+      {
+        type: 'button',
+        className: 'story-workspace-episode-storyline-toggle',
+        'aria-controls': STORYLINE_SHEET_ID,
+        'aria-expanded': storylineOpen,
+        'aria-label': '打开故事线',
+        ref: storylineTriggerRef,
+        onClick: openStoryline,
+      },
+      '故事线',
     ),
     h(
-      'section',
-      { 'aria-label': '叙事内容工作面', onKeyDown: handleContentKeyDown },
-      h(NarrativeContent, {
-        viewModel,
-        selection: activeSelection,
-        episodeOverview,
-        onNavigate: selectAndFocus,
-        auxiliaryGroup: activeItem.auxiliaryGroup,
-      }),
+      'div',
+      { 'aria-label': 'Episode 主工作面' },
+      h(
+        'aside',
+        {
+          className: 'story-workspace-episode-storyline-sheet',
+          id: STORYLINE_SHEET_ID,
+          hidden: isNarrowLayout && !storylineOpen,
+          role: isNarrowLayout ? 'dialog' : undefined,
+          'aria-modal': isNarrowLayout ? true : undefined,
+          'aria-label': isNarrowLayout ? '故事线' : undefined,
+          ref: storylineSheetRef,
+          onKeyDownCapture: handleStorylineSheetKeyDown,
+        },
+        h(
+          'header',
+          { className: 'story-workspace-episode-storyline-sheet__header' },
+          h('p', null, '故事线'),
+          h(
+            'button',
+            {
+              type: 'button',
+              'aria-label': '关闭故事线',
+              onClick: closeStoryline,
+            },
+            '关闭',
+          ),
+        ),
+        h(
+          'nav',
+          { 'aria-label': '故事线导航' },
+          h('ul', { role: 'tree', 'aria-label': 'Episode 故事线' }, treeItems),
+        ),
+      ),
+      h(
+        'section',
+        { 'aria-label': 'Episode 内容工作面' },
+        h(
+          'section',
+          { 'aria-label': '叙事内容工作面', onKeyDown: handleContentKeyDown },
+          h(NarrativeContent, {
+            viewModel,
+            selection: activeSelection,
+            episodeOverview,
+            onNavigate: selectAndFocus,
+            auxiliaryGroup: activeItem.auxiliaryGroup,
+          }),
+        ),
+        auxiliarySlot === undefined
+          ? null
+          : h('aside', { 'aria-label': 'Episode 辅助视图' }, auxiliarySlot),
+      ),
     ),
-    auxiliarySlot === undefined
-      ? null
-      : h('aside', { 'aria-label': 'Episode 辅助视图' }, auxiliarySlot),
   );
 }

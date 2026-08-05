@@ -18,6 +18,10 @@ const DIALOG_SOURCE = readFileSync(new URL(
   '../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx',
   import.meta.url,
 ), 'utf8');
+const EPISODE_WORKBENCH_SOURCE = readFileSync(new URL(
+  '../../../components/story-workspace/episode/StoryWorkspaceEpisodeNarrativeWorkbench.tsx',
+  import.meta.url,
+), 'utf8');
 
 test('overview is one workplane with tabs and index content, never a fixed rail grid', () => {
   expect(PAGE_SOURCE).toContain('data-execution-depth="overview"');
@@ -55,26 +59,36 @@ test('execution status preview opens the Dream Agent floating dialog without mou
   expect(PAGE_SOURCE).not.toContain('<ChatView');
 });
 
-test('Episode workbench uses a restrained three-column reading hierarchy', () => {
-  expect(CSS_SOURCE).toContain('[aria-label="Episode 叙事工作台"]');
+test('Episode workbench uses a two-column master-detail hierarchy', () => {
+  expect(CSS_SOURCE).toContain('[aria-label="Episode 主工作面"]');
   expect(CSS_SOURCE).toMatch(
-    /\[aria-label="Episode 叙事工作台"\]\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(190px,\s*\.72fr\)\s+minmax\(320px,\s*1\.45fr\)\s+minmax\(240px,\s*\.9fr\)/s,
+    /\[aria-label="Episode 主工作面"\]\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(200px,\s*\.62fr\)\s+minmax\(0,\s*2fr\)/s,
   );
   expect(CSS_SOURCE).toContain('[aria-label="叙事内容工作面"]');
   expect(CSS_SOURCE).toContain('[aria-label="Episode 辅助视图"]');
-  expect(CSS_SOURCE).not.toMatch(/\[aria-label="Episode 辅助视图"\][^{]*\{[^}]*grid-column:\s*1\s*\/\s*-1/s);
+  expect(EPISODE_WORKBENCH_SOURCE).toContain("{ 'aria-label': 'Episode 内容工作面' }");
+  const contentWorkplane = EPISODE_WORKBENCH_SOURCE.indexOf("{ 'aria-label': 'Episode 内容工作面' }");
+  const auxiliaryView = EPISODE_WORKBENCH_SOURCE.indexOf("{ 'aria-label': 'Episode 辅助视图' }");
+  expect(contentWorkplane).toBeGreaterThan(-1);
+  expect(auxiliaryView).toBeGreaterThan(contentWorkplane);
 });
 
-test('Episode layout has one-column narrow-screen degradation and touch-safe controls', () => {
-  expect(CSS_SOURCE).toMatch(/@media\s*\(max-width:\s*760px\)/);
-  const narrowStart = CSS_SOURCE.indexOf('@media (max-width: 760px)');
+test('Episode layout has a mobile storyline sheet and 44px controls below 768px', () => {
+  expect(CSS_SOURCE).toMatch(/@media\s*\(max-width:\s*767px\)/);
+  const narrowStart = CSS_SOURCE.indexOf('@media (max-width: 767px)');
   expect(narrowStart).toBeGreaterThan(-1);
   const narrow = CSS_SOURCE.slice(narrowStart);
   expect(narrow).toMatch(
-    /\[aria-label="Episode 叙事工作台"\][^{]*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
+    /\[aria-label="Episode 主工作面"\][^{]*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/s,
   );
   expect(narrow).toContain('min-height: 44px');
+  expect(narrow).toContain('min-width: 44px');
   expect(narrow).toContain('overflow-x: hidden');
+  expect(narrow).toContain('.story-workspace-episode-storyline-sheet');
+  expect(narrow).toContain('position: fixed');
+  expect(EPISODE_WORKBENCH_SOURCE).toContain("'aria-expanded': storylineOpen");
+  expect(EPISODE_WORKBENCH_SOURCE).toContain("'aria-controls': STORYLINE_SHEET_ID");
+  expect(EPISODE_WORKBENCH_SOURCE).toContain('hidden: isNarrowLayout && !storylineOpen');
 });
 
 test('Episode layout exposes keyboard focus, wrapping, and reduced-motion safeguards', () => {
@@ -95,7 +109,7 @@ test('Episode continuation dialog owns a viewport-safe confirmation workplane', 
     /\.story-workspace-collaboration \.story-workspace-episode-action-dialog\s*\{[^}]*position:\s*fixed;[^}]*max-height:\s*calc\(100dvh - 48px\)/s,
   );
   expect(CSS_SOURCE).toContain('.story-workspace-episode-action-dialog > section');
-  const narrowStart = CSS_SOURCE.indexOf('@media (max-width: 760px)');
+  const narrowStart = CSS_SOURCE.indexOf('@media (max-width: 767px)');
   expect(CSS_SOURCE.slice(narrowStart)).toMatch(
     /\.story-workspace-collaboration \.story-workspace-episode-action-dialog\s*\{[^}]*inset:\s*10px;[^}]*max-height:\s*calc\(100dvh - 20px\)/s,
   );

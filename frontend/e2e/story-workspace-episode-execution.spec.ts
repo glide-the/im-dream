@@ -341,33 +341,61 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
-    if (path === '/api/me') {
+    const method = request.method();
+    const matches = (
+      expectedMethod: 'GET' | 'POST',
+      expectedPath: string,
+      expectedSearch = '',
+    ) => (
+      method === expectedMethod && path === expectedPath && url.search === expectedSearch
+    );
+    if (matches('GET', '/api/me')) {
       await json(route, { id: 12, email: 'u12@example.test', display_name: 'U12 QA' });
       return;
     }
-    if (path === '/api/default-voices') {
+    if (matches('GET', '/api/default-voices')) {
       await json(route, {});
       return;
     }
-    if (path === '/api/decks') {
+    if (matches('GET', '/api/decks')) {
       await json(route, { decks: [] });
       return;
     }
-    if (path === '/api/preferences') {
-      await json(route, request.method() === 'GET'
-        ? { first_login_completed: true, timezone: 'UTC', updated_at: '2026-08-06T01:00:00Z' }
-        : {});
+    if (matches('GET', '/api/preferences')) {
+      await json(route, {
+        first_login_completed: true,
+        timezone: 'UTC',
+        updated_at: '2026-08-06T01:00:00Z',
+      });
       return;
     }
-    if (path === '/api/sessions') {
-      await json(route, request.method() === 'GET' ? { sessions: [] } : {});
+    if (matches('POST', '/api/preferences')) {
+      await route.fulfill({ status: 204 });
       return;
     }
-    if (path === '/api/sessions/range') {
+    if (matches('GET', '/api/sessions', '?timezone=Asia%2FShanghai')) {
       await json(route, { sessions: [] });
       return;
     }
-    if (path === '/api/sessions/aggregate') {
+    if (
+      matches(
+        'GET',
+        '/api/sessions/range',
+        '?timezone=Asia%2FShanghai&start_date=2026-07-23&end_date=2026-08-06',
+      )
+      || matches(
+        'GET',
+        '/api/sessions/range',
+        '?timezone=UTC&start_date=2026-07-23&end_date=2026-08-06',
+      )
+    ) {
+      await json(route, { sessions: [] });
+      return;
+    }
+    if (
+      matches('GET', '/api/sessions/aggregate', '?timezone=Asia%2FShanghai')
+      || matches('GET', '/api/sessions/aggregate', '?timezone=UTC')
+    ) {
       await json(route, {
         stats: { total_days: 0, total_entries: 0, total_words: 0 },
         sessions: [],
@@ -375,36 +403,42 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       });
       return;
     }
-    if (path === '/api/pictures' || path === '/api/pictures/range') {
+    if (
+      matches('GET', '/api/pictures', '?limit=30')
+      || matches(
+        'GET',
+        '/api/pictures/range',
+        '?limit=28&start_date=2026-07-23&end_date=2026-08-06',
+      )
+    ) {
       await json(route, { pictures: [] });
       return;
     }
-    if (path === '/api/reports') {
+    if (matches('GET', '/api/reports')) {
       await json(route, { reports: [] });
       return;
     }
-    if (path === '/api/sessions/events') {
+    if (matches('GET', '/api/sessions/events')) {
       await route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': connected\n\n' });
       return;
     }
-    if (path === `/api/story-workspace/workflow-runs/${RUN_ID}`) {
+    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}`)) {
       await json(route, workflowRun());
       return;
     }
-    if (path === `/api/story-workspace/workflow-runs/${RUN_ID}/events`) {
+    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/events`)) {
       await route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': ready\n\n' });
       return;
     }
-    if (path === `/api/story-workspace/workflow-runs/${RUN_ID}/dream-files`) {
+    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/dream-files`)) {
       await json(route, dreamFiles());
       return;
     }
-    if (path === `/api/story-workspace/workflow-runs/${RUN_ID}/dream-agent/messages`) {
+    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/dream-agent/messages`)) {
       await json(route, dreamAgentSnapshot());
       return;
     }
-    if (path === `/api/story-workspace/workflow-runs/${RUN_ID}/episode-actions/continue`
-      && request.method() === 'POST') {
+    if (matches('POST', `/api/story-workspace/workflow-runs/${RUN_ID}/episode-actions/continue`)) {
       state.continueRequests.push(request.postDataJSON() as Record<string, unknown>);
       await json(route, {
         runId: RUN_ID,
@@ -416,7 +450,7 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       }, 202);
       return;
     }
-    if (path === `/api/story-workspace/workflow-runs/${RUN_ID}/episode-artifacts`) {
+    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/episode-artifacts`)) {
       state.artifactReads += 1;
       const etag = AGGREGATE_ETAGS[state.revisionIndex];
       if (request.headers()['if-none-match'] === `"${etag}"`) {
@@ -426,7 +460,7 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       }
       return;
     }
-    await json(route, {});
+    throw new Error(`Unallowlisted API request: ${method} ${path}`);
   });
 }
 
@@ -510,11 +544,12 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(artifactProgress.getByText('Review Report', { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
-    const columns = await page.locator('[aria-label="Episode 叙事工作台"] > *')
+    const columns = await page.locator('[aria-label="Episode 主工作面"] > *')
       .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().x));
-    expect(columns).toHaveLength(3);
+    expect(columns).toHaveLength(2);
     expect(columns[0]).toBeLessThan(columns[1]);
-    expect(columns[1]).toBeLessThan(columns[2]);
+    await expect(page.locator('[aria-label="Episode 内容工作面"] [aria-label="Episode 辅助视图"]'))
+      .toBeVisible();
 
     let continueAction = page.getByRole('button', { name: '验证第一集产物' });
     await continueAction.click();
@@ -575,18 +610,34 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expectNoHorizontalOverflow(page);
-    const stacked = await page.locator('[aria-label="Episode 叙事工作台"] > *')
-      .evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().y));
-    expect(stacked).toHaveLength(3);
-    expect(stacked[0]).toBeLessThan(stacked[1]);
-    expect(stacked[1]).toBeLessThan(stacked[2]);
+    const storylineToggle = page.getByRole('button', { name: '打开故事线' });
+    await expect(storylineToggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeHidden();
     const visibleActions = page.locator('.story-workspace-collaboration button:visible');
     for (let index = 0; index < await visibleActions.count(); index += 1) {
       const box = await visibleActions.nth(index).boundingBox();
       if (box === null) continue;
+      expect(box.width).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(44);
       expect(box.x).toBeGreaterThanOrEqual(71);
       expect(box.x + box.width).toBeLessThanOrEqual(391);
     }
+    await page.screenshot({ path: resolve(EVIDENCE_DIR, 'narrow-390x844.png'), fullPage: true });
+
+    await storylineToggle.click();
+    const storylineSheet = page.getByRole('dialog', { name: '故事线' });
+    await expect(storylineSheet).toBeVisible();
+    const activeStorylineItem = storylineSheet.locator('[role="treeitem"][tabindex="0"]');
+    await expect(activeStorylineItem).toBeFocused();
+    await page.screenshot({ path: resolve(EVIDENCE_DIR, 'narrow-storyline-390x844.png') });
+    await page.keyboard.press('Tab');
+    await expect(storylineSheet.getByRole('button', { name: '关闭故事线' })).toBeFocused();
+    await page.keyboard.press('Shift+Tab');
+    await expect(activeStorylineItem).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(storylineSheet).toBeHidden();
+    await expect(storylineToggle).toBeFocused();
+
     await continueAction.click();
     await expect(continueDialog).toBeVisible();
     await expect(guidance).toBeFocused();
@@ -600,7 +651,6 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await guidance.press('Escape');
     await expect(continueDialog).toBeHidden();
     await expect(continueAction).toBeFocused();
-    await page.screenshot({ path: resolve(EVIDENCE_DIR, 'narrow-390x844.png'), fullPage: true });
 
     const bodyText = await page.locator('body').innerText();
     for (const forbidden of [
