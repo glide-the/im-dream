@@ -1590,7 +1590,7 @@ class StoryWorkspaceEpisodeAuxiliaryProjection(_StoryWorkspaceDreamWireModel):
 
 
 class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
-    """Base Episode response; adapters extend its normalized content later."""
+    """Actor-scoped Episode manifest plus normalized read-only projections."""
 
     run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     opaque_episode_id: Optional[str] = Field(
@@ -1611,6 +1611,8 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
         default_factory=list,
         max_length=256,
     )
+    narrative: Optional[StoryWorkspaceEpisodeNarrativeProjection] = None
+    auxiliary: Optional[StoryWorkspaceEpisodeAuxiliaryProjection] = None
 
     @model_validator(mode="after")
     def binding_controls_episode_surface(
@@ -1641,6 +1643,8 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
             or self.manifest_revision is not None
             or self.etag is not None
             or self.artifacts
+            or self.narrative is not None
+            or self.auxiliary is not None
             or self.binding_recovery.can_dispatch
         ):
             raise ValueError("unbound surfaces cannot expose Episode artifacts")

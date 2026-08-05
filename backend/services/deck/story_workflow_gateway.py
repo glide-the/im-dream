@@ -14,7 +14,7 @@ from pathlib import Path
 import sqlite3
 import stat
 import sys
-from typing import Any
+from typing import Any, Callable
 import uuid
 
 import database
@@ -68,6 +68,15 @@ try:
     )
     from services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
+    )
+    from services.story_workspace.episode_artifact_service import (
+        StoryWorkspaceEpisodeArtifactContractError,
+        StoryWorkspaceEpisodeArtifactError,
+        StoryWorkspaceEpisodeArtifactPathError,
+        StoryWorkspaceEpisodeArtifactService,
+    )
+    from services.story_workspace.episode_binding_service import (
+        StoryWorkspaceEpisodeBindingContext,
     )
     from services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -123,6 +132,15 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     )
     from backend.services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
+    )
+    from backend.services.story_workspace.episode_artifact_service import (
+        StoryWorkspaceEpisodeArtifactContractError,
+        StoryWorkspaceEpisodeArtifactError,
+        StoryWorkspaceEpisodeArtifactPathError,
+        StoryWorkspaceEpisodeArtifactService,
+    )
+    from backend.services.story_workspace.episode_binding_service import (
+        StoryWorkspaceEpisodeBindingContext,
     )
     from backend.services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -214,6 +232,13 @@ class StoryWorkflowApplicationGateway:
         dream_confirmation_coordinator: (
             StoryWorkspaceDreamConfirmationCoordinator | None
         ) = None,
+        episode_identity_provider: (
+            Callable[
+                [sqlite3.Row, Path],
+                StoryWorkspaceEpisodeBindingContext | None,
+            ]
+            | None
+        ) = None,
     ) -> None:
         self._dream_confirmation_coordinator = (
             dream_confirmation_coordinator or _DREAM_CONFIRMATION_COORDINATOR
@@ -223,6 +248,7 @@ class StoryWorkflowApplicationGateway:
                 self._dispatch_dream_agent_message
             )
         )
+        self._episode_identity_provider = episode_identity_provider
 
     @staticmethod
     def _actor(actor: dict[str, str]) -> AuthenticatedActorContext:
@@ -755,6 +781,20 @@ class StoryWorkflowApplicationGateway:
             actor,
         )
 
+    async def get_episode_artifacts(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Project the bound Episode only after full run provenance authorization."""
+
+        return await asyncio.to_thread(
+            self._get_episode_artifacts_sync,
+            workflow_run_id,
+            actor,
+        )
+
     async def get_dream_agent_messages(
         self,
         workflow_run_id: str,
@@ -1210,6 +1250,106 @@ class StoryWorkflowApplicationGateway:
             return self._get_dream_files_from_db(db, workflow_run_id, actor)
         finally:
             db.close()
+
+    def _get_episode_artifacts_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> Any:
+        """Keep authorization and pinned filesystem projection in one worker."""
+
+        db = database.get_db()
+        try:
+            return self._get_episode_artifacts_from_db(
+                db,
+                workflow_run_id,
+                actor,
+            )
+        finally:
+            db.close()
+
+    @staticmethod
+    def _authorized_episode_row(
+        db: sqlite3.Connection,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> sqlite3.Row:
+        """Fail closed on every frozen run/Deck/thread provenance edge."""
+
+        try:
+            actor_id = int(actor["actor_id"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403) from exc
+        if actor_id < 1:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        rows = StoryWorkspaceDreamReentryService._query_authorized_rows(db, actor_id)
+        matches = [row for row in rows if str(row["run_id"]) == workflow_run_id]
+        if len(matches) != 1:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
+        row = matches[0]
+        if not StoryWorkspaceDreamReentryService._source_metadata_matches(
+            row["source_metadata"],
+            actor_id=actor_id,
+            workspace_id=str(row["workspace_id"]),
+            run_id=str(row["run_id"]),
+            thread_id=str(row["thread_id"]),
+            deck_id=str(row["deck_id"]),
+            deck_plugin_id=str(row["deck_plugin_id"]),
+            deck_plugin_version=str(row["deck_plugin_version"]),
+            binding_id=str(row["binding_id"]),
+            binding_revision=int(row["binding_revision"]),
+            runtime_snapshot_id=str(row["deck_runtime_snapshot_id"]),
+            runtime_lock_id=str(row["runtime_plugin_lock_id"]),
+        ):
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
+        return row
+
+    def _get_episode_artifacts_from_db(
+        self,
+        db: sqlite3.Connection,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> Any:
+        """Authorize all relational facts before probing the thread workspace."""
+
+        try:
+            row = self._authorized_episode_row(
+                db,
+                workflow_run_id,
+                actor,
+            )
+            thread_id = str(row["thread_id"])
+            workspace = self._thread_workspace(thread_id)
+            trusted_context = (
+                self._episode_identity_provider(row, workspace)
+                if self._episode_identity_provider is not None
+                else None
+            )
+            if (
+                trusted_context is not None
+                and trusted_context.workflow_run_id != workflow_run_id
+            ):
+                raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
+            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+                workflow_run_id,
+                trusted_binding_context=trusted_context,
+            )
+        except ApiRouteError:
+            raise
+        except StoryWorkspaceEpisodeArtifactPathError as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
+        except StoryWorkspaceEpisodeArtifactContractError as exc:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
+        except StoryWorkspaceEpisodeArtifactError as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        except sqlite3.Error as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
 
     def _get_dream_files_from_db(
         self,

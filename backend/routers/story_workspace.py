@@ -16,7 +16,7 @@ from typing import Any, Iterator, Optional, Protocol
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import database
@@ -156,6 +156,13 @@ class StoryWorkflowGateway(Protocol):
     async def get_run(self, workflow_run_id: str, *, actor: dict[str, str]) -> Any: ...
 
     async def get_dream_files(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def get_episode_artifacts(
         self,
         workflow_run_id: str,
         *,
@@ -1293,6 +1300,39 @@ async def story_workspace_get_workflow_run_dream_files(
         gateway.get_dream_files(workflow_run_id, actor=actor),
         by_alias=True,
     )
+
+
+@router.get("/workflow-runs/{workflow_run_id}/episode-artifacts")
+async def story_workspace_get_workflow_run_episode_artifacts(
+    workflow_run_id: str,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Return only the server-bound Episode surface; no path input is accepted."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    result = await _workflow_call(
+        gateway.get_episode_artifacts(workflow_run_id, actor=actor),
+        by_alias=True,
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    etag = result.get("etag") if isinstance(result, dict) else None
+    headers: dict[str, str] = {}
+    if isinstance(etag, str):
+        quoted_etag = f'"{etag}"'
+        headers["ETag"] = quoted_etag
+        if if_none_match is not None and if_none_match.strip() == quoted_etag:
+            return Response(status_code=304, headers=headers)
+    return JSONResponse(content=result, headers=headers)
 
 
 @router.get("/workflow-runs/{workflow_run_id}/dream-agent/messages")
