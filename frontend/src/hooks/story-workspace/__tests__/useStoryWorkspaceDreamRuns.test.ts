@@ -7,6 +7,7 @@ import {
   storyWorkspaceParseDreamRuns,
   storyWorkspaceDreamRunsEndpoint,
 } from '../useStoryWorkspaceDreamRuns';
+import { storyWorkspaceFetchDreamRuns } from '../../../api/storyWorkspaceApi';
 
 const response = {
   runs: [
@@ -59,4 +60,34 @@ test('canonical Dream runs parser rejects browser-invented lifecycle/group combi
   expect(() => storyWorkspaceParseDreamRuns({
     runs: [{ ...response.runs[0], lifecycle: 'recent', group: 'in_progress' }],
   })).toThrow(/recent/i);
+});
+
+test('canonical Dream runs parser rejects malformed IDs, unsafe booleans, unexpected stage keys and href drift', () => {
+  const malformed = [
+    { storyWorkspaceRunId: 'not-a-run' },
+    { workflowDisplayName: 'Other workflow' },
+    { confirmationAccepted: 'false' },
+    { stageRevisions: { characters: 1, scenes: 1, storyboards: 1, raw: 1 } },
+    { href: '/story-workspace/dream?run=run_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+  ];
+  for (const patch of malformed) {
+    expect(() => storyWorkspaceParseDreamRuns({
+      runs: [{ ...response.runs[0], ...patch }],
+    })).toThrow();
+  }
+});
+
+test('Dream run collection transport forwards an AbortSignal', async () => {
+  const controller = new AbortController();
+  let seenSignal: AbortSignal | null = null;
+  await storyWorkspaceFetchDreamRuns({
+    endpoint: storyWorkspaceDreamRunsEndpoint,
+    token: null,
+    signal: controller.signal,
+    fetchImpl: async (_url, init) => {
+      seenSignal = init?.signal as AbortSignal;
+      return new Response(JSON.stringify(response), { status: 200 });
+    },
+  });
+  expect(seenSignal).toBe(controller.signal);
 });

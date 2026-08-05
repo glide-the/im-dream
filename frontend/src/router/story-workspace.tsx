@@ -37,6 +37,9 @@ import {
   readStoryWorkspaceRunParam,
   readStoryWorkspaceDeckParam,
   resolveStoryWorkspacePath,
+  storyWorkspaceDreamLegacyRunRedirectPath,
+  storyWorkspaceDreamPathWithoutRun,
+  storyWorkspaceDreamResolvedRunId,
   storyWorkspaceAllowsLegacyReviewPanel,
   storyWorkspaceDreamStageForRoute,
   STORY_WORKSPACE_PATHS,
@@ -102,8 +105,9 @@ function renderStoryWorkspaceRoute(
   onReview: (selection: StoryWorkspaceReviewSelection) => void,
   refreshNonce: number,
   onNavigate: (path: string, notice?: string) => void,
+  resolvedDreamRunId: string | null,
 ) {
-  const runId = readStoryWorkspaceRunParam(match.query);
+  const runId = resolvedDreamRunId;
   const initialDeckId = readStoryWorkspaceDeckParam(match.query);
   const dreamStage = storyWorkspaceDreamStageForRoute(match);
   switch (match.route) {
@@ -184,6 +188,7 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
     isDreamRoute,
     isDreamRoute ? readStoryWorkspaceRunParam(activeMatch.query) : null,
   );
+  const resolvedDreamRunId = storyWorkspaceDreamResolvedRunId(runDeepLink.run);
 
   const handleToggleSidebarCollapse = useCallback(() => {
     setSidebarCollapsed((collapsed) => {
@@ -215,6 +220,18 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
     const match = resolveStoryWorkspacePath(window.location.pathname, window.location.search);
     if (!match) return;
 
+    if (match.route === 'dream-legacy') {
+      const redirect = storyWorkspaceDreamLegacyRunRedirectPath(
+        match.params.storyWorkspaceRunId,
+        window.location.search,
+      );
+      const { pathname, search } = splitStoryWorkspaceHref(redirect);
+      window.history.replaceState(storyWorkspaceHistoryState(), '', `${pathname}${search}`);
+      const redirectedMatch = resolveStoryWorkspacePath(pathname, search);
+      if (redirectedMatch) setActiveMatch(redirectedMatch);
+      return;
+    }
+
     if (trimStoryWorkspaceTrailingSlash(window.location.pathname) !== match.canonicalPath) {
       replaceWithCanonicalPath(match.canonicalPath);
     }
@@ -223,15 +240,40 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
   }, []);
 
   useEffect(() => {
+    const requestedRunId = isDreamRoute
+      ? readStoryWorkspaceRunParam(activeMatch.query)
+      : null;
+    if (!requestedRunId || runDeepLink.missingRunId !== requestedRunId) return;
+    const search = storyWorkspaceDreamPathWithoutRun(window.location.search);
+    window.history.replaceState(
+      storyWorkspaceHistoryState(),
+      '',
+      `${STORY_WORKSPACE_PATHS.dream}${search}`,
+    );
+    const fallback = resolveStoryWorkspacePath(STORY_WORKSPACE_PATHS.dream, search);
+    if (fallback) setActiveMatch(fallback);
+  }, [activeMatch.query, isDreamRoute, runDeepLink.missingRunId]);
+
+  useEffect(() => {
     syncFromLocation();
     window.addEventListener('popstate', syncFromLocation);
     return () => window.removeEventListener('popstate', syncFromLocation);
   }, [syncFromLocation]);
 
   const handleNavigate = useCallback((path: string, notice?: string) => {
-    const { pathname, search } = splitStoryWorkspaceHref(path);
-    const match = resolveStoryWorkspacePath(pathname, search);
+    let { pathname, search } = splitStoryWorkspaceHref(path);
+    let match = resolveStoryWorkspacePath(pathname, search);
     if (!match) return;
+
+    if (match.route === 'dream-legacy') {
+      const redirect = storyWorkspaceDreamLegacyRunRedirectPath(
+        match.params.storyWorkspaceRunId,
+        search,
+      );
+      ({ pathname, search } = splitStoryWorkspaceHref(redirect));
+      match = resolveStoryWorkspacePath(pathname, search);
+      if (!match) return;
+    }
 
     const target = match.canonicalPath + search;
     if (window.location.pathname + window.location.search !== target) {
@@ -298,6 +340,7 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
         handleOpenReview,
         resourceRefreshNonce,
         handleNavigate,
+        resolvedDreamRunId,
       )}
     </StoryWorkspaceLayout>
   );

@@ -295,6 +295,36 @@ function storyWorkspaceReadDreamRunRecord(value: unknown, field: string): Record
   return value;
 }
 
+function storyWorkspaceReadDreamRunBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`Dream re-entry response has invalid ${field}.`);
+  }
+  return value;
+}
+
+function storyWorkspaceValidateDreamRunLifecycle(
+  lifecycle: StoryWorkspaceDreamReentryItem['lifecycle'],
+  group: StoryWorkspaceDreamReentryItem['group'],
+  confirmationAccepted: boolean,
+  confirmationDispatched: boolean,
+): void {
+  if (confirmationDispatched && !confirmationAccepted) {
+    throw new Error('Dream re-entry response has incompatible confirmation facts.');
+  }
+  const groupMatches = lifecycle === 'recent' ? group === 'recent' : group === 'in_progress';
+  if (!groupMatches) throw new Error('Dream re-entry response has incompatible recent lifecycle group.');
+  if ((lifecycle === 'generating' || lifecycle === 'waiting_confirmation')
+    && (confirmationAccepted || confirmationDispatched)) {
+    throw new Error('Dream re-entry response has incompatible pre-confirmation facts.');
+  }
+  if ((lifecycle === 'continuing' || lifecycle === 'recent') && !confirmationAccepted) {
+    throw new Error('Dream re-entry response has incompatible post-confirmation facts.');
+  }
+  if (lifecycle === 'recent' && !confirmationDispatched) {
+    throw new Error('Dream re-entry response has incompatible recent facts.');
+  }
+}
+
 /** Parse the server-owned collection without deriving client-side run status or order. */
 export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDreamReentryCollection {
   const payload = storyWorkspaceReadDreamRunRecord(value, 'payload');
@@ -309,17 +339,46 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     if (group !== 'in_progress' && group !== 'recent') {
       throw new Error('Dream re-entry response has invalid group.');
     }
-    if ((lifecycle === 'recent') !== (group === 'recent')) {
-      throw new Error('Dream re-entry response has incompatible recent group.');
+    const storyWorkspaceRunId = storyWorkspaceReadDreamRunString(
+      run.storyWorkspaceRunId,
+      'storyWorkspaceRunId',
+    );
+    if (!/^run_[0-9a-f]{32}$/.test(storyWorkspaceRunId)) {
+      throw new Error('Dream re-entry response has invalid storyWorkspaceRunId.');
+    }
+    if (run.workflowDisplayName !== 'Dream') {
+      throw new Error('Dream re-entry response has invalid workflowDisplayName.');
     }
     const stageRevisions = storyWorkspaceReadDreamRunRecord(run.stageRevisions, 'stageRevisions');
+    const stageKeys = Object.keys(stageRevisions);
+    if (stageKeys.some((key) => !['characters', 'scenes', 'storyboards'].includes(key))) {
+      throw new Error('Dream re-entry response has invalid stage key.');
+    }
     for (const revision of Object.values(stageRevisions)) {
       if (!Number.isInteger(revision) || (revision as number) < 0) {
         throw new Error('Dream re-entry response has invalid stage revision.');
       }
     }
+    const confirmationAccepted = storyWorkspaceReadDreamRunBoolean(
+      run.confirmationAccepted,
+      'confirmationAccepted',
+    );
+    const confirmationDispatched = storyWorkspaceReadDreamRunBoolean(
+      run.confirmationDispatched,
+      'confirmationDispatched',
+    );
+    storyWorkspaceValidateDreamRunLifecycle(
+      lifecycle as StoryWorkspaceDreamReentryItem['lifecycle'],
+      group as StoryWorkspaceDreamReentryItem['group'],
+      confirmationAccepted,
+      confirmationDispatched,
+    );
+    const href = storyWorkspaceReadDreamRunString(run.href, 'href');
+    if (href !== `/story-workspace/dream?run=${storyWorkspaceRunId}`) {
+      throw new Error('Dream re-entry response has invalid href.');
+    }
     return {
-      storyWorkspaceRunId: storyWorkspaceReadDreamRunString(run.storyWorkspaceRunId, 'storyWorkspaceRunId'),
+      storyWorkspaceRunId,
       deckId: storyWorkspaceReadDreamRunString(run.deckId, 'deckId'),
       deckDisplayName: storyWorkspaceReadDreamRunString(run.deckDisplayName, 'deckDisplayName'),
       workflowDisplayName: 'Dream' as const,
@@ -327,24 +386,38 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
       lifecycle: lifecycle as StoryWorkspaceDreamReentryItem['lifecycle'],
       group: group as StoryWorkspaceDreamReentryItem['group'],
       stageRevisions: stageRevisions as StoryWorkspaceDreamReentryItem['stageRevisions'],
-      confirmationAccepted: run.confirmationAccepted === true,
-      confirmationDispatched: run.confirmationDispatched === true,
+      confirmationAccepted,
+      confirmationDispatched,
       lastActivityAt: storyWorkspaceReadDreamRunString(run.lastActivityAt, 'lastActivityAt'),
       createdAt: storyWorkspaceReadDreamRunString(run.createdAt, 'createdAt'),
       sortKey: storyWorkspaceReadDreamRunString(run.sortKey, 'sortKey'),
-      href: storyWorkspaceReadDreamRunString(run.href, 'href'),
+      href,
     } satisfies StoryWorkspaceDreamReentryItem;
   });
   return { runs };
 }
 
+export interface StoryWorkspaceDreamRunsRequestOptions {
+  endpoint?: string;
+  fetchImpl?: typeof fetch;
+  signal?: AbortSignal;
+  token?: string | null;
+}
+
 export async function storyWorkspaceFetchDreamRuns(
-  fetchImpl: typeof fetch = fetch,
+  options: StoryWorkspaceDreamRunsRequestOptions = {},
 ): Promise<StoryWorkspaceDreamReentryCollection> {
-  const response = await fetchImpl(apiUrl(storyWorkspaceDreamRunsEndpoint), {
+  const headers = new Headers({ Accept: 'application/json' });
+  const token = options.token === undefined ? getAuthToken() : options.token;
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const response = await (options.fetchImpl ?? fetch)(
+    options.endpoint ?? apiUrl(storyWorkspaceDreamRunsEndpoint),
+    {
     credentials: 'include',
-    headers: authHeaders(false),
-  });
+    headers,
+    signal: options.signal,
+    },
+  );
   if (!response.ok) {
     throw new StoryWorkspaceApiError(response.status, null);
   }

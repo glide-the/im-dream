@@ -22,6 +22,8 @@ import {
   STORY_WORKSPACE_ROUTE_PATTERNS,
   storyWorkspaceEpisodeReviewPath,
   storyWorkspaceExecutionPath,
+  storyWorkspaceDreamLegacyRunRedirectPath,
+  storyWorkspaceDreamPathWithoutRun,
 } from '../storyWorkspacePath';
 
 test('static routes resolve exactly as before (no regression)', () => {
@@ -110,13 +112,23 @@ test('query string is parsed and carried on the match (C10-③)', () => {
 });
 
 test('parameterized patterns reject partial / extra segments', () => {
-  expect(resolveStoryWorkspacePath('/story-workspace/runs/run_abc')).toBeNull();
+  expect(resolveStoryWorkspacePath('/story-workspace/runs/run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')).toMatchObject({
+    route: 'dream-legacy',
+    params: { storyWorkspaceRunId: 'run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' },
+  });
   expect(resolveStoryWorkspacePath('/story-workspace/runs/run_abc/execution/extra')).toBeNull();
   expect(resolveStoryWorkspacePath('/story-workspace/runs//execution')).toBeNull();
   expect(resolveStoryWorkspacePath('/story-workspace/episodes/ep1')).toBeNull();
   expect(resolveStoryWorkspacePath('/story-workspace/episodes/ep1/review/2')).toBeNull();
   expect(resolveStoryWorkspacePath('/story-workspace/unknown')).toBeNull();
   expect(resolveStoryWorkspacePath('/other/route')).toBeNull();
+});
+
+test('legacy Dream run URLs replace into canonical query deep links without dropping other safe query intent', () => {
+  expect(storyWorkspaceDreamLegacyRunRedirectPath('run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', '?deck=deck-a')).toBe(
+    '/story-workspace/dream?deck=deck-a&run=run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  );
+  expect(storyWorkspaceDreamPathWithoutRun('?run=run_abc&deck=deck-a')).toBe('?deck=deck-a');
 });
 
 test('pattern matcher compares segments literally outside :param slots', () => {

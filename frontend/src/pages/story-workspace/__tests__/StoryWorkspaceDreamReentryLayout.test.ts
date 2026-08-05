@@ -5,6 +5,8 @@
 // @ts-expect-error Playwright has Node built-ins; the browser app tsconfig intentionally omits Node types.
 import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
+import { resolveRunDeepLink } from '../../../hooks/story-workspace/useRunDeepLink';
+import { storyWorkspaceDreamResolvedRunId } from '../../../router/storyWorkspacePath';
 
 const LAUNCH_SOURCE = readFileSync(new URL('../StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
 const ROUTER_SOURCE = readFileSync(new URL('../../../router/story-workspace.tsx', import.meta.url), 'utf8');
@@ -29,4 +31,18 @@ test('Deck editor offers only canonical Dream workbench navigation', () => {
   expect(DECK_SOURCE).toContain('onOpenDreamWithDeck');
   expect(APP_SOURCE).toContain('/story-workspace/dream?deck=');
   expect(DECK_SOURCE).not.toContain('ChatView');
+});
+
+test('403/404 deep links resolve to no run so Dream renders the recovery workbench, never a raw run page', async () => {
+  for (const status of [403, 404]) {
+    const resolution = await resolveRunDeepLink('run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', {
+      getRun: async () => { throw new Error(String(status)); },
+    });
+    expect(resolution.status).toBe('missing');
+  }
+  expect(storyWorkspaceDreamResolvedRunId(null)).toBeNull();
+  expect(storyWorkspaceDreamResolvedRunId({
+    workflow_run_id: 'run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  })).toBe('run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+  expect(ROUTER_SOURCE).toContain('storyWorkspaceDreamPathWithoutRun');
 });

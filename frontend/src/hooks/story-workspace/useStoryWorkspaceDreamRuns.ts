@@ -29,8 +29,9 @@ export function useStoryWorkspaceDreamRuns(): StoryWorkspaceDreamRunsState {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     setIsLoading(true);
-    void storyWorkspaceFetchDreamRuns().then((next) => {
+    void storyWorkspaceFetchDreamRuns({ signal: controller.signal }).then((next) => {
       if (!active) return;
       setData(next);
       setError(null);
@@ -42,6 +43,7 @@ export function useStoryWorkspaceDreamRuns(): StoryWorkspaceDreamRunsState {
     });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [refresh]);
 

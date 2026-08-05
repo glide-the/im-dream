@@ -63,6 +63,8 @@ export interface StoryWorkspaceRunDeepLinkState {
   run: WorkflowRun | null;
   /** Toast text when the deep-linked run is missing or not viewable. */
   notice: string | null;
+  /** The actor-scoped read rejected this exact run; router must remove its query. */
+  missingRunId: string | null;
   dismissNotice: () => void;
 }
 
@@ -122,6 +124,7 @@ export function useRunDeepLink(
 ): StoryWorkspaceRunDeepLinkState {
   const [run, setRun] = useState<WorkflowRun | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [missingRunId, setMissingRunId] = useState<string | null>(null);
   const gateRef = useRef<RunDeepLinkResolveGate | null>(null);
   if (gateRef.current === null) {
     gateRef.current = createRunDeepLinkResolveGate();
@@ -133,9 +136,13 @@ export function useRunDeepLink(
       gate.reset();
       setRun(null);
       setNotice(null);
+      setMissingRunId(null);
       return;
     }
     if (!runId || !gate.begin(runId)) return;
+
+    setRun(null);
+    setMissingRunId(null);
 
     let cancelled = false;
     void resolveRunDeepLink(runId).then((resolution) => {
@@ -144,8 +151,10 @@ export function useRunDeepLink(
       if (resolution.status === 'resolved') {
         setRun(resolution.run);
         setNotice(null);
+        setMissingRunId(null);
       } else if (resolution.status === 'missing') {
         setRun(null);
+        setMissingRunId(resolution.runId);
         setNotice(`链接指向的运行 ${resolution.runId} 不存在或无权查看，已回退到默认视图。`);
       }
     });
@@ -159,5 +168,5 @@ export function useRunDeepLink(
 
   const dismissNotice = useCallback(() => setNotice(null), []);
 
-  return { run, notice, dismissNotice };
+  return { run, notice, missingRunId, dismissNotice };
 }

@@ -13,7 +13,7 @@
 
 export type StoryWorkspaceStaticRoute = 'dream' | 'stories' | 'characters' | 'scenes';
 
-export type StoryWorkspaceParameterizedRoute = 'episode-review' | 'run-execution';
+export type StoryWorkspaceParameterizedRoute = 'episode-review' | 'run-execution' | 'dream-legacy';
 
 export type StoryWorkspaceRoute = StoryWorkspaceStaticRoute | StoryWorkspaceParameterizedRoute;
 
@@ -31,6 +31,7 @@ export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = 
 export const STORY_WORKSPACE_ROUTE_PATTERNS: Record<StoryWorkspaceParameterizedRoute, string> = {
   'episode-review': '/story-workspace/episodes/:storyWorkspaceEpisodeId/review',
   'run-execution': '/story-workspace/runs/:storyWorkspaceRunId/execution',
+  'dream-legacy': '/story-workspace/runs/:storyWorkspaceRunId',
 };
 
 export interface StoryWorkspaceRouteMatch {
@@ -122,6 +123,9 @@ export function resolveStoryWorkspacePath(
   for (const route of Object.keys(STORY_WORKSPACE_ROUTE_PATTERNS) as StoryWorkspaceParameterizedRoute[]) {
     const params = matchStoryWorkspaceRoutePattern(STORY_WORKSPACE_ROUTE_PATTERNS[route], normalizedPath);
     if (params) {
+      if (route === 'dream-legacy' && !/^run_[0-9a-f]{32}$/.test(params.storyWorkspaceRunId)) {
+        continue;
+      }
       return { canonicalPath: normalizedPath, route, params, query };
     }
   }
@@ -132,6 +136,33 @@ export function resolveStoryWorkspacePath(
 /** Concrete execution page path (canonical form of the run-execution route). */
 export function storyWorkspaceExecutionPath(storyWorkspaceRunId: string): string {
   return `/story-workspace/runs/${encodeURIComponent(storyWorkspaceRunId)}/execution`;
+}
+
+/** Convert a former run URL into the one Dream workbench route without new state ownership. */
+export function storyWorkspaceDreamLegacyRunRedirectPath(
+  storyWorkspaceRunId: string,
+  search = '',
+): string {
+  const query = new URLSearchParams(search);
+  query.set('run', storyWorkspaceRunId);
+  return `${STORY_WORKSPACE_PATHS.dream}?${query.toString()}`;
+}
+
+/** Remove only an untrusted deep-link run while retaining harmless navigation intent such as Deck. */
+export function storyWorkspaceDreamPathWithoutRun(search = ''): string {
+  const query = new URLSearchParams(search);
+  query.delete('run');
+  const suffix = query.toString();
+  return suffix ? `?${suffix}` : '';
+}
+
+/** A Dream page may use only the actor-scoped run read that completed successfully. */
+export function storyWorkspaceDreamResolvedRunId(
+  run: { workflow_run_id?: unknown } | null | undefined,
+): string | null {
+  return typeof run?.workflow_run_id === 'string' && run.workflow_run_id.trim()
+    ? run.workflow_run_id
+    : null;
 }
 
 /** Concrete episode review path (canonical form of the episode-review route). */
