@@ -1,6 +1,6 @@
 /* [Input] Ink & Memory UI v2 warm-paper semantic tokens. */
-/* [Output] Two-depth Assets / Outline overview and full-width focus context. */
-/* [Pos] Story Workspace post-confirmation execution page (Task 3 F10) */
+/* [Output] Warm-paper Episode master-detail workbench and legacy Dream projection. */
+/* [Pos] Story Workspace post-confirmation execution page (Task 3 U12) */
 
 .story-workspace-collaboration {
   --collaboration-canvas: var(--color-bg-warm, #f6efe5);
@@ -24,10 +24,16 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: var(--collaboration-body);
   background: var(--collaboration-canvas);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+.story-workspace-collaboration,
+.story-workspace-collaboration * {
+  box-sizing: border-box;
 }
 
 .story-workspace-collaboration--message {
@@ -482,8 +488,407 @@
   line-height: 1.6;
 }
 
+/* Episode artifacts stay in one reading surface: progress and workflow facts
+   lead into narrative navigation, detail, then quieter auxiliary evidence. */
+.story-workspace-collaboration > section[aria-label="第一集产物工作台"] {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+  padding: 0 clamp(20px, 3.2vw, 48px) 48px;
+}
+
+.story-workspace-collaboration > section[aria-label="第一集产物工作台"] > main {
+  width: min(100%, 1440px);
+  min-width: 0;
+  margin: 0 auto;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 13px 32px;
+  padding: 30px 0 24px;
+  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 82%, transparent);
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > p,
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > h2 {
+  grid-column: 1;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > p {
+  margin: 0;
+  color: var(--collaboration-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > h2 {
+  margin: 0;
+  color: var(--collaboration-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(28px, 3vw, 42px);
+  font-weight: 500;
+  letter-spacing: -.035em;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > ol {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 0;
+  margin: 5px 0 0;
+  padding: 12px 0 0;
+  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 56%, transparent);
+  list-style: none;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > ol li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 4px 14px 4px 0;
+  color: var(--collaboration-muted);
+  font-size: 10px;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > ol li + li {
+  padding-left: 14px;
+  border-left: 1px solid color-mix(in srgb, var(--collaboration-rule) 70%, transparent);
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > ol strong {
+  color: var(--collaboration-ink);
+  font-weight: 620;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > div[aria-label="Episode 下一步"] {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  place-items: end;
+  align-content: center;
+  gap: 8px;
+  max-width: 260px;
+  text-align: right;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header button,
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-unbound-title"] button {
+  min-height: 40px;
+  padding: 9px 15px;
+  color: var(--collaboration-paper);
+  background: var(--collaboration-action);
+  border: 1px solid var(--collaboration-action);
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header button:disabled,
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-unbound-title"] button:disabled {
+  cursor: default;
+  opacity: .52;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header small,
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > p[role],
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > p[aria-live] {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--collaboration-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-unbound-title"] {
+  padding: clamp(42px, 8vw, 92px) 0;
+  border-bottom: 1px solid var(--collaboration-rule);
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-unbound-title"] h2 {
+  margin: 0 0 12px;
+  color: var(--collaboration-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(27px, 3vw, 40px);
+  font-weight: 500;
+}
+
+.story-workspace-collaboration main[aria-labelledby="story-workspace-episode-unbound-title"] p {
+  max-width: 680px;
+  margin: 0 0 18px;
+  line-height: 1.75;
+}
+
+.story-workspace-collaboration [aria-label="Episode 叙事工作台"] {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(190px, .72fr) minmax(320px, 1.45fr) minmax(240px, .9fr);
+  gap: 0;
+  padding: 26px 0 18px;
+}
+
+.story-workspace-collaboration [aria-label="Episode 叙事工作台"] > * {
+  min-width: 0;
+}
+
+.story-workspace-collaboration [aria-label="故事线导航"] {
+  padding: 4px clamp(14px, 2vw, 28px) 36px 0;
+  border-right: 1px solid color-mix(in srgb, var(--collaboration-rule) 78%, transparent);
+}
+
+.story-workspace-collaboration [aria-label="Episode 故事线"] {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.story-workspace-collaboration [aria-label="Episode 故事线"] li + li {
+  margin-top: 2px;
+}
+
+.story-workspace-collaboration [role="treeitem"] {
+  width: 100%;
+  min-height: 36px;
+  padding: 7px 8px;
+  overflow: hidden;
+  color: var(--collaboration-muted);
+  background: transparent;
+  border: 0;
+  border-left: 2px solid transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  line-height: 1.45;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-workspace-collaboration [role="treeitem"][aria-level="2"] {
+  padding-left: 18px;
+}
+
+.story-workspace-collaboration [role="treeitem"][aria-level="3"] {
+  padding-left: 29px;
+}
+
+.story-workspace-collaboration [role="treeitem"][aria-level="4"] {
+  padding-left: 40px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+}
+
+.story-workspace-collaboration [role="treeitem"][aria-current="true"] {
+  color: var(--collaboration-ink);
+  background: color-mix(in srgb, var(--collaboration-paper) 66%, transparent);
+  border-left-color: var(--collaboration-action);
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] {
+  padding: 4px clamp(22px, 3vw, 42px) 44px;
+  border-right: 1px solid color-mix(in srgb, var(--collaboration-rule) 78%, transparent);
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] article > p:first-child,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] article > p:first-child {
+  margin: 0 0 8px;
+  color: var(--collaboration-action);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] h2,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] h2 {
+  margin: 0 0 22px;
+  overflow-wrap: anywhere;
+  color: var(--collaboration-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(24px, 2.5vw, 36px);
+  font-weight: 500;
+  line-height: 1.12;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] h3,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] h3,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] h4 {
+  margin: 0 0 8px;
+  color: var(--collaboration-ink);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] article > section,
+.story-workspace-collaboration [aria-label="叙事内容工作面"] article > footer,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] article > section,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] article > footer {
+  padding: 16px 0;
+  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 63%, transparent);
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] p,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] p,
+.story-workspace-collaboration [aria-label="叙事内容工作面"] li,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] li,
+.story-workspace-collaboration [aria-label="叙事内容工作面"] dd,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] dd {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.72;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] ul,
+.story-workspace-collaboration [aria-label="叙事内容工作面"] ol,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] ul,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] ol {
+  margin: 7px 0 0;
+  padding-left: 18px;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] dl,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 18px;
+  margin: 12px 0;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] dt,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] dt {
+  color: var(--collaboration-muted);
+  font-size: 9px;
+  letter-spacing: .05em;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] dd,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] dd {
+  margin: 3px 0 0;
+  color: var(--collaboration-ink);
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] button,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] button {
+  min-height: 36px;
+  padding: 7px 10px;
+  color: var(--collaboration-action);
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--collaboration-action) 48%, var(--collaboration-rule));
+  border-radius: 2px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  text-align: left;
+}
+
+.story-workspace-collaboration [aria-label="叙事内容工作面"] footer,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] footer {
+  overflow-wrap: anywhere;
+  color: var(--collaboration-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] {
+  padding: 4px 0 44px clamp(18px, 2.3vw, 32px);
+  color: var(--collaboration-muted);
+}
+
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] > section + section,
+.story-workspace-collaboration [aria-label="Episode 辅助视图"] > article + article {
+  margin-top: 28px;
+  padding-top: 24px;
+  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 80%, transparent);
+}
+
+.story-workspace-collaboration > details {
+  flex: 0 0 auto;
+  margin: 0 clamp(20px, 3.2vw, 48px) 48px;
+  padding-top: 14px;
+  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 72%, transparent);
+}
+
+.story-workspace-collaboration > details > summary {
+  width: fit-content;
+  min-height: 36px;
+  padding: 8px 0;
+  color: var(--collaboration-muted);
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: .05em;
+}
+
+.story-workspace-collaboration .story-workspace-episode-action-dialog {
+  position: fixed;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  left: 50%;
+  z-index: 50;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  transform: translate(-50%, -50%);
+  box-shadow:
+    0 0 0 100vmax color-mix(in srgb, var(--collaboration-ink) 24%, transparent),
+    0 14px 34px color-mix(in srgb, var(--collaboration-ink) 17%, transparent);
+}
+
+.story-workspace-episode-action-dialog > section {
+  min-height: 0;
+  padding: 16px 19px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--collaboration-rule);
+}
+
+.story-workspace-episode-action-dialog > section h3 {
+  margin: 0 0 10px;
+  color: var(--collaboration-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.story-workspace-episode-action-dialog > section ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.story-workspace-episode-action-dialog > section li {
+  padding: 8px 0;
+  overflow-wrap: anywhere;
+  color: var(--collaboration-body);
+  border-top: 1px solid color-mix(in srgb, var(--collaboration-rule) 62%, transparent);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.story-workspace-episode-action-dialog > section strong {
+  color: var(--collaboration-ink);
+  font-weight: 650;
+}
+
+.story-workspace-episode-action-dialog > section small {
+  color: var(--collaboration-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+}
+
 .story-workspace-collaboration button:focus-visible,
-.story-workspace-collaboration a:focus-visible {
+.story-workspace-collaboration a:focus-visible,
+.story-workspace-collaboration [role="treeitem"]:focus-visible,
+.story-workspace-collaboration summary:focus-visible {
   outline: 2px solid var(--collaboration-action);
   outline-offset: 3px;
 }
@@ -499,10 +904,130 @@
     padding-right: 32px;
     padding-left: 32px;
   }
+
+  .story-workspace-collaboration [aria-label="Episode 叙事工作台"] {
+    grid-template-columns: minmax(180px, .68fr) minmax(300px, 1.35fr) minmax(220px, .82fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .story-workspace-collaboration {
+    height: auto;
+    min-height: 100%;
+    overflow-x: hidden;
+  }
+
+  .story-workspace-collaboration__masthead {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 18px;
+    padding: 18px 18px 20px;
+  }
+
+  .story-workspace-collaboration__masthead h1 {
+    font-size: 27px;
+  }
+
+  .story-workspace-collaboration__agent-state,
+  .story-workspace-collaboration__agent-state > span:last-child {
+    width: 100%;
+    max-width: none;
+  }
+
+  .story-workspace-collaboration .story-workspace-episode-action-dialog {
+    inset: 10px;
+    width: auto;
+    max-height: calc(100dvh - 20px);
+    transform: none;
+  }
+
+  .story-workspace-episode-action-dialog > section {
+    padding: 13px 15px;
+  }
+
+  .story-workspace-collaboration > section[aria-label="第一集产物工作台"] {
+    padding-right: 18px;
+    padding-bottom: 34px;
+    padding-left: 18px;
+  }
+
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding-top: 24px;
+  }
+
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > *,
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > div[aria-label="Episode 下一步"] {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > div[aria-label="Episode 下一步"] {
+    place-items: start;
+    max-width: none;
+    text-align: left;
+  }
+
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > ol {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > ol li,
+  .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > ol li + li {
+    min-width: 0;
+    padding: 6px 8px 6px 0;
+    border-left: 0;
+  }
+
+  .story-workspace-collaboration [aria-label="Episode 叙事工作台"] {
+    grid-template-columns: minmax(0, 1fr);
+    padding-top: 20px;
+  }
+
+  .story-workspace-collaboration [aria-label="故事线导航"],
+  .story-workspace-collaboration [aria-label="叙事内容工作面"],
+  .story-workspace-collaboration [aria-label="Episode 辅助视图"] {
+    padding: 0 0 26px;
+    border-right: 0;
+  }
+
+  .story-workspace-collaboration [aria-label="故事线导航"],
+  .story-workspace-collaboration [aria-label="叙事内容工作面"] {
+    margin-bottom: 25px;
+    border-bottom: 1px solid color-mix(in srgb, var(--collaboration-rule) 82%, transparent);
+  }
+
+  .story-workspace-collaboration [role="treeitem"] {
+    min-height: 44px;
+    white-space: normal;
+  }
+
+  .story-workspace-collaboration button,
+  .story-workspace-collaboration a,
+  .story-workspace-collaboration summary {
+    min-height: 44px;
+  }
+
+  .story-workspace-collaboration [aria-label="叙事内容工作面"] dl,
+  .story-workspace-collaboration [aria-label="Episode 辅助视图"] dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .story-workspace-collaboration > details {
+    margin-right: 18px;
+    margin-bottom: 34px;
+    margin-left: 18px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .story-workspace-collaboration * {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
     scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
   }
 }
