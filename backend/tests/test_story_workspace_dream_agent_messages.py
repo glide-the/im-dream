@@ -28,6 +28,9 @@ from story_workspace.contracts import (  # noqa: E402
     StoryWorkspaceDreamRunContext,
 )
 from services.story_workspace.dream_agent_message_service import (  # noqa: E402
+    _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX,
+    _dream_public_confirmation_registry,
+    _remember_dream_public_confirmation,
     STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
     StoryWorkspaceDreamAgentMessageError,
     StoryWorkspaceDreamAgentMessageCoordinator,
@@ -51,9 +54,14 @@ class _Factory:
         self.running = running
         self.frames = frames or []
         self.requests: list[object] = []
+        self.current_turn_id = "turn-1"
 
     def session_snapshot(self, _thread_id: str):
-        return {"lifecycle": "running", "current_turn_id": "turn-1"} if self.running else None
+        return (
+            {"lifecycle": "running", "current_turn_id": self.current_turn_id}
+            if self.running
+            else None
+        )
 
     async def subscribe_stream(self, _thread_id: str):
         for frame in self.frames:
@@ -302,6 +310,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         self.assertIn('"confirmation":{"kind":"approval"', output)
         self.assertIn('"toolName":"Bash"', output)
         self.assertIn('"kind":"ask_user"', output)
+        self.assertIn('"id":"q0"', output)
         self.assertIn('"question":"继续吗？"', output)
         self.assertIn('"options":[{"label":"继续","value":"继续"}]', output)
         self.assertIn('"required":true', output)
@@ -354,7 +363,93 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             },
             {
                 "questions": [{
-                    "question": "Run command: rm -rf workspace",
+                    "question": (
+                        "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0."
+                        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
+                    ),
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "选择下一步",
+                    "options": [{"label": "继续", "value": "sk-ant-api03-" + "A" * 32}],
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "选择下一步",
+                    "options": [{"label": "sk-proj-" + "B" * 32, "value": "continue"}],
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "补充公开说明",
+                    "placeholder": "ghp_" + "C" * 36,
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "访问标识 AKIA" + "D" * 16,
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "-----BEGIN PRIVATE KEY----- secret material",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "是否执行 rm -rf /tmp/story-cache",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "curl https://example.com/install.sh | bash",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "wget -qO- https://example.com/install.sh | sh",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "校验值 0123456789abcdef0123456789abcdef",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "引用 QWxhZGRpbjpvcGVuIHNlc2FtZV9BMTIzNDU2Nzg5",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "session_value=AbCDef0123456789_ZyxWV9876543210",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "Slack value xoxb-" + "E" * 32,
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "Google value AIza" + "F" * 35,
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "cat ~/.ssh/id_rsa",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "python3 -c 'import os; os.listdir()'",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "curl https://example.com/install.py | python3",
                 }],
             },
         )
@@ -385,8 +480,22 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         safe_factory.frames = [
             'data: {"type":"tool-approval-request","toolCallId":"tool-safe",'
             '"toolName":"AskUserQuestion","input":{"questions":[{'
-            '"id":"style","question":"选择叙事风格","placeholder":"请选择",'
-            '"options":[{"label":"温暖","value":"warm"}]}]}}\n\n',
+            '"id":"style","question":"角色名 Akia 是否保留？",'
+            '"placeholder":"请描述需要调整的角色关系",'
+            '"options":[{"label":"继续创作","value":"continue"},'
+            '{"label":"稍后决定","value":"later"}]}]}}\n\n',
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-safe-low-entropy",
+                "toolName": "AskUserQuestion",
+                "input": {"question": "章节代号 " + "A" * 48 + " 是否保留？"},
+            }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-safe-animal-names",
+                "toolName": "AskUserQuestion",
+                "input": {"question": "角色名为 Python 和 Cat，是否保留？"},
+            }, ensure_ascii=False) + "\n\n",
         ]
         safe_output = "".join(asyncio.run(_collect(
             StoryWorkspaceDreamAgentMessageService(
@@ -398,8 +507,8 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 actor_id=ACTOR_ID,
             )
         )))
-        self.assertIn("event: tool_confirmation_requested", safe_output)
-        self.assertIn("选择叙事风格", safe_output)
+        self.assertEqual(safe_output.count("event: tool_confirmation_requested"), 3)
+        self.assertIn("角色名 Akia 是否保留？", safe_output)
 
     def test_ask_user_public_question_lengths_and_keys_are_one_contract(self) -> None:
         from pydantic import ValidationError
@@ -460,15 +569,6 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             }, ensure_ascii=False) + "\n\n",
             "data: " + json.dumps({
                 "type": "tool-approval-request",
-                "toolCallId": "tool-id-too-long",
-                "toolName": "AskUserQuestion",
-                "input": {"questions": [{
-                    "id": "i" * (STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX + 1),
-                    "question": "普通问题",
-                }]},
-            }, ensure_ascii=False) + "\n\n",
-            "data: " + json.dumps({
-                "type": "tool-approval-request",
                 "toolCallId": "tool-option-too-long",
                 "toolName": "AskUserQuestion",
                 "input": {"questions": [{
@@ -505,6 +605,33 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         )))
         self.assertNotIn("event: tool_confirmation_requested", output)
 
+        raw_id = "sk-ant-api03-" + "R" * 48
+        raw_id_factory = _ToolConfirmationFactory()
+        raw_id_factory.frames = [
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-raw-id",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [{
+                    "id": raw_id,
+                    "question": "普通公开问题",
+                }]},
+            }, ensure_ascii=False) + "\n\n",
+        ]
+        raw_id_output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=raw_id_factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertIn("event: tool_confirmation_requested", raw_id_output)
+        self.assertIn('"id":"q0"', raw_id_output)
+        self.assertNotIn(raw_id, raw_id_output)
+
         duplicate_text_factory = _ToolConfirmationFactory()
         duplicate_text_factory.frames = [
             "data: " + json.dumps({
@@ -517,19 +644,35 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 ]},
             }, ensure_ascii=False) + "\n\n",
         ]
+        duplicate_text_service = StoryWorkspaceDreamAgentMessageService(
+            self.db,
+            thread_factory=duplicate_text_factory,
+        )
         duplicate_text_output = "".join(asyncio.run(_collect(
-            StoryWorkspaceDreamAgentMessageService(
-                self.db,
-                thread_factory=duplicate_text_factory,
-            ).events(
+            duplicate_text_service.events(
                 thread_id=THREAD_ID,
                 run_id=RUN_ID,
                 actor_id=ACTOR_ID,
             )
         )))
-        self.assertIn("event: tool_confirmation_requested", duplicate_text_output)
-        self.assertIn('"id":"one"', duplicate_text_output)
-        self.assertIn('"id":"two"', duplicate_text_output)
+        self.assertNotIn("event: tool_confirmation_requested", duplicate_text_output)
+        with self.assertRaisesRegex(
+            StoryWorkspaceDreamAgentMessageError,
+            "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+        ):
+            duplicate_text_service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-duplicate-text",
+                    approved=True,
+                    answers={"one": "甲", "two": "乙"},
+                ),
+            )
+        self.assertFalse(
+            any(item[0] == "confirm" for item in duplicate_text_factory.confirmations)
+        )
 
     def test_confirm_tool_requires_same_active_trusted_dream_turn(self) -> None:
         factory = _ToolConfirmationFactory()
@@ -542,23 +685,21 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             self.db,
             thread_factory=factory,
         )
-        asyncio.run(_collect(service.events(
-            thread_id=THREAD_ID,
-            run_id=RUN_ID,
-            actor_id=ACTOR_ID,
-        )))
         command = StoryWorkspaceDreamAgentToolConfirmationCommand(
             toolCallId="tool-ask",
             approved=True,
             reason="用户已选择",
             answers={"q0": "继续"},
         )
-        accepted = service.confirm_tool(
-            run_id=RUN_ID,
-            thread_id=THREAD_ID,
-            actor_id=ACTOR_ID,
-            command=command,
-        )
+        accepted = asyncio.run(_act_while_tool_confirmation_pending(
+            service,
+            lambda: service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=command,
+            ),
+        ))
         self.assertTrue(accepted.resolved)
         self.assertEqual(accepted.story_workspace_run_id, RUN_ID)
         self.assertEqual(accepted.tool_call_id, "tool-ask")
@@ -570,7 +711,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 "tool_call_id": "tool-ask",
                 "approved": True,
                 "reason": "用户已选择",
-                "answers": {"q0": "继续"},
+                "answers": {"继续吗？": "继续"},
             },
         ))
 
@@ -631,39 +772,43 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 self.db,
                 thread_factory=factory,
             )
-            asyncio.run(_collect(service.events(
-                thread_id=THREAD_ID,
-                run_id=RUN_ID,
-                actor_id=ACTOR_ID,
-            )))
             return service, factory
 
         valid_service, valid_factory = pending_service()
-        accepted = valid_service.confirm_tool(
-            run_id=RUN_ID,
-            thread_id=THREAD_ID,
-            actor_id=ACTOR_ID,
-            command=StoryWorkspaceDreamAgentToolConfirmationCommand(
-                toolCallId="tool-current",
-                approved=True,
-                answers={
-                    "note": "继续完善人物动机",
-                    "style": "温暖",
-                    "confirm": True,
-                    "elements": ["雨", "灯"],
-                },
+        accepted = asyncio.run(_act_while_tool_confirmation_pending(
+            valid_service,
+            lambda: valid_service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-current",
+                    approved=True,
+                    answers={
+                        "q0": "继续完善人物动机",
+                        "q1": "温暖",
+                        "q2": True,
+                        "q3": ["雨", "灯"],
+                    },
+                ),
             ),
-        )
+        ))
         self.assertTrue(accepted.resolved)
         self.assertEqual(valid_factory.confirmations[-1][0], "confirm")
+        self.assertEqual(valid_factory.confirmations[-1][1]["answers"], {
+            "补充说明": "继续完善人物动机",
+            "选择风格": "温暖",
+            "确认继续": True,
+            "选择元素": ["雨", "灯"],
+        })
 
         invalid_answers = (
             {"unknown": "继续"},
-            {"补充说明": "公开说明", "style": "温暖", "confirm": True, "elements": ["雨"]},
-            {"note": "公开说明", "style": "秘密风格", "confirm": True, "elements": ["雨"]},
-            {"note": "公开说明", "style": "温暖", "confirm": True, "elements": ["雨", "不存在"]},
-            {"note": "公开说明", "style": "温暖", "confirm": "true", "elements": ["雨"]},
-            {"note": "", "style": "温暖", "confirm": True, "elements": ["雨"]},
+            {"note": "公开说明", "q1": "温暖", "q2": True, "q3": ["雨"]},
+            {"q0": "公开说明", "q1": "秘密风格", "q2": True, "q3": ["雨"]},
+            {"q0": "公开说明", "q1": "温暖", "q2": True, "q3": ["雨", "不存在"]},
+            {"q0": "公开说明", "q1": "温暖", "q2": "true", "q3": ["雨"]},
+            {"q0": "", "q1": "温暖", "q2": True, "q3": ["雨"]},
         )
         for answers in invalid_answers:
             with self.subTest(answers=answers):
@@ -672,16 +817,19 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                     StoryWorkspaceDreamAgentMessageError,
                     "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
                 ):
-                    service.confirm_tool(
-                        run_id=RUN_ID,
-                        thread_id=THREAD_ID,
-                        actor_id=ACTOR_ID,
-                        command=StoryWorkspaceDreamAgentToolConfirmationCommand(
-                            toolCallId="tool-current",
-                            approved=True,
-                            answers=answers,
+                    asyncio.run(_act_while_tool_confirmation_pending(
+                        service,
+                        lambda: service.confirm_tool(
+                            run_id=RUN_ID,
+                            thread_id=THREAD_ID,
+                            actor_id=ACTOR_ID,
+                            command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                                toolCallId="tool-current",
+                                approved=True,
+                                answers=answers,
+                            ),
                         ),
-                    )
+                    ))
                 self.assertFalse(any(item[0] == "confirm" for item in factory.confirmations))
 
         wrong_tool_service, wrong_tool_factory = pending_service()
@@ -689,15 +837,18 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             StoryWorkspaceDreamAgentMessageError,
             "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
         ):
-            wrong_tool_service.confirm_tool(
-                run_id=RUN_ID,
-                thread_id=THREAD_ID,
-                actor_id=ACTOR_ID,
-                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
-                    toolCallId="tool-other",
-                    approved=True,
+            asyncio.run(_act_while_tool_confirmation_pending(
+                wrong_tool_service,
+                lambda: wrong_tool_service.confirm_tool(
+                    run_id=RUN_ID,
+                    thread_id=THREAD_ID,
+                    actor_id=ACTOR_ID,
+                    command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                        toolCallId="tool-other",
+                        approved=True,
+                    ),
                 ),
-            )
+            ))
         self.assertFalse(
             any(item[0] == "confirm" for item in wrong_tool_factory.confirmations)
         )
@@ -707,16 +858,19 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             StoryWorkspaceDreamAgentMessageError,
             "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
         ):
-            reject_service.confirm_tool(
-                run_id=RUN_ID,
-                thread_id=THREAD_ID,
-                actor_id=ACTOR_ID,
-                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
-                    toolCallId="tool-current",
-                    approved=False,
-                    answers={"style": "温暖"},
+            asyncio.run(_act_while_tool_confirmation_pending(
+                reject_service,
+                lambda: reject_service.confirm_tool(
+                    run_id=RUN_ID,
+                    thread_id=THREAD_ID,
+                    actor_id=ACTOR_ID,
+                    command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                        toolCallId="tool-current",
+                        approved=False,
+                        answers={"q1": "温暖"},
+                    ),
                 ),
-            )
+            ))
         self.assertFalse(any(item[0] == "confirm" for item in reject_factory.confirmations))
 
     def test_tool_confirmation_contract_rejects_untrusted_context_and_oversized_answers(self) -> None:
@@ -763,6 +917,114 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         ))))
         self.assertIn('"lifecycle":"idle"', output)
         self.assertNotIn("ordinary", output)
+
+    def test_public_confirmation_registry_never_evicts_a_live_entry_at_capacity(self) -> None:
+        factory = _ToolConfirmationFactory()
+        for index in range(_DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX):
+            self.assertTrue(_remember_dream_public_confirmation(
+                factory,
+                thread_id=THREAD_ID,
+                turn_id="turn-capacity",
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+                confirmation={
+                    "toolCallId": f"tool-{index}",
+                    "kind": "approval",
+                    "toolName": "Write",
+                },
+            ))
+        self.assertFalse(_remember_dream_public_confirmation(
+            factory,
+            thread_id=THREAD_ID,
+            turn_id="turn-capacity",
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+            confirmation={
+                "toolCallId": "tool-over-capacity",
+                "kind": "approval",
+                "toolName": "Write",
+            },
+        ))
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        assert registry is not None
+        self.assertEqual(len(registry), _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX)
+        self.assertTrue(any(key[-1] == "tool-0" for key in registry))
+        self.assertFalse(any(key[-1] == "tool-over-capacity" for key in registry))
+
+    def test_events_cleanup_only_the_subscribed_turn_and_actor_registry(self) -> None:
+        async def exercise() -> None:
+            factory = _ToolConfirmationFactory()
+            factory.frames = [
+                'data: {"type":"tool-approval-request","toolCallId":"tool-pending",'
+                '"toolName":"AskUserQuestion","input":{"question":"继续吗？",'
+                '"options":["继续","停止"]}}\n\n',
+            ]
+            service = StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            )
+            first_stream = service.events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+            await _next_tool_confirmation(first_stream)
+
+            factory.current_turn_id = "turn-2"
+            second_stream = service.events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id="8",
+            )
+            await _next_tool_confirmation(second_stream)
+            registry = _dream_public_confirmation_registry(factory, create=False)
+            assert registry is not None
+            self.assertTrue(any(key[1:4] == ("turn-1", RUN_ID, ACTOR_ID) for key in registry))
+            self.assertTrue(any(key[1:4] == ("turn-2", RUN_ID, "8") for key in registry))
+
+            await first_stream.aclose()
+            self.assertFalse(any(key[1:4] == ("turn-1", RUN_ID, ACTOR_ID) for key in registry))
+            self.assertTrue(any(key[1:4] == ("turn-2", RUN_ID, "8") for key in registry))
+
+            accepted = service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id="8",
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-pending",
+                    approved=True,
+                    answers={"q0": "继续"},
+                ),
+            )
+            self.assertTrue(accepted.resolved)
+            await second_stream.aclose()
+            self.assertFalse(registry)
+
+        asyncio.run(exercise())
+
+    def test_terminal_event_cleans_every_confirmation_for_the_same_turn(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-one",'
+            '"toolName":"Write","input":{}}\n\n',
+            'data: {"type":"tool-approval-request","toolCallId":"tool-two",'
+            '"toolName":"Write","input":{}}\n\n',
+            'data: {"type":"message-final"}\n\n',
+        ]
+        output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertEqual(output.count("event: tool_confirmation_requested"), 2)
+        self.assertIn("event: assistant_message_committed", output)
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        self.assertEqual(registry, {})
 
     def test_claim_same_key_replays_different_text_conflicts_and_second_key_is_busy(self) -> None:
         service = StoryWorkspaceDreamAgentMessageService(self.db)
@@ -978,17 +1240,26 @@ class StoryWorkspaceDreamAgentBindingTest(unittest.TestCase):
             '"toolName":"Write","input":{"file_path":"not-public"}}\n\n',
         ]
         event_db = open_db()
-        try:
-            asyncio.run(_collect(StoryWorkspaceDreamAgentMessageService(
-                event_db,
-                thread_factory=factory,
-            ).events(
+        event_service = StoryWorkspaceDreamAgentMessageService(
+            event_db,
+            thread_factory=factory,
+        )
+
+        async def confirm_while_pending():
+            stream = event_service.events(
                 thread_id=THREAD_ID,
                 run_id=RUN_ID,
                 actor_id=ACTOR_ID,
-            )))
-        finally:
-            event_db.close()
+            )
+            await _next_tool_confirmation(stream)
+            try:
+                return await gateway.confirm_dream_agent_tool(
+                    RUN_ID,
+                    command,
+                    actor={"actor_id": ACTOR_ID},
+                )
+            finally:
+                await stream.aclose()
 
         with (
             patch.object(
@@ -1006,11 +1277,10 @@ class StoryWorkspaceDreamAgentBindingTest(unittest.TestCase):
                 side_effect=open_db,
             ),
         ):
-            accepted = asyncio.run(gateway.confirm_dream_agent_tool(
-                RUN_ID,
-                command,
-                actor={"actor_id": ACTOR_ID},
-            ))
+            try:
+                accepted = asyncio.run(confirm_while_pending())
+            finally:
+                event_db.close()
 
         load_context.assert_called_once_with(RUN_ID, {"actor_id": ACTOR_ID})
         self.assertFalse(accepted.approved)
@@ -1202,6 +1472,33 @@ class StoryWorkspaceDreamAgentRouteTest(unittest.TestCase):
 
 async def _collect(generator):
     return [frame async for frame in generator]
+
+
+async def _next_tool_confirmation(generator):
+    async for frame in generator:
+        if "event: tool_confirmation_requested" in frame:
+            return frame
+    raise AssertionError("tool confirmation was not projected")
+
+
+async def _act_while_tool_confirmation_pending(
+    service,
+    action,
+    *,
+    run_id: str = RUN_ID,
+    thread_id: str = THREAD_ID,
+    actor_id: str = ACTOR_ID,
+):
+    stream = service.events(
+        thread_id=thread_id,
+        run_id=run_id,
+        actor_id=actor_id,
+    )
+    await _next_tool_confirmation(stream)
+    try:
+        return action()
+    finally:
+        await stream.aclose()
 
 
 def _pending_dispatch():

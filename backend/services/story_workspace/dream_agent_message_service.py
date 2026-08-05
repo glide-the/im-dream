@@ -31,7 +31,6 @@ try:
         StoryWorkspaceDreamRunContext,
         STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
-        STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
@@ -50,7 +49,6 @@ except ModuleNotFoundError:
         StoryWorkspaceDreamRunContext,
         STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
-        STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
@@ -110,6 +108,59 @@ _SENSITIVE_ASK_USER_TEXT = re.compile(
     r")",
     re.IGNORECASE,
 )
+_HIGH_CONFIDENCE_ASK_USER_SECRETS = (
+    re.compile(
+        r"(?<![A-Za-z0-9_-])"
+        r"eyJ[A-Za-z0-9_-]{5,}\.eyJ[A-Za-z0-9_-]{5,}\."
+        r"[A-Za-z0-9_-]{8,}"
+        r"(?![A-Za-z0-9_-])"
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])"
+        r"(?:sk-(?:(?:ant|proj)-)?|gh[pousr]_|xox[baprs]-)"
+        r"[A-Za-z0-9_-]{16,}"
+        r"(?![A-Za-z0-9_-])",
+        re.IGNORECASE,
+    ),
+    re.compile(r"(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])"),
+    re.compile(r"(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])"),
+    re.compile(
+        r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])rm\s+"
+        r"(?:-[A-Za-z]*r[A-Za-z]*f|-[A-Za-z]*f[A-Za-z]*r)\s+\S+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])(?:curl|wget)\b.{0,500}\|\s*"
+        r"(?:(?:/usr)?/bin/)?(?:(?:ba|z|fi)?sh|python(?:3(?:\.\d+)?)?)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])cat\s+(?:"
+        r"~?/\.ssh/\S+|/etc/(?:passwd|shadow)\b|"
+        r"\S*(?:credential|secret|token|private[_-]?key)\S*"
+        r")",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])python(?:3(?:\.\d+)?)?\s+(?:-c\b|<<)",
+        re.IGNORECASE,
+    ),
+)
+_LONG_HEX_SECRET = re.compile(
+    r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])"
+)
+_LONG_TOKEN_CANDIDATE = re.compile(
+    r"(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{32,}={0,2}"
+    r"(?![A-Za-z0-9+/_=-])"
+)
+_ASSIGNED_TOKEN_CANDIDATE = re.compile(
+    r"(?<![A-Za-z0-9_.-])[A-Za-z_][A-Za-z0-9_.-]{0,40}\s*[:=]\s*"
+    r"([A-Za-z0-9+/_-]{16,}={0,2})"
+)
 
 
 class StoryWorkspaceDreamAgentMessageError(RuntimeError):
@@ -119,6 +170,61 @@ class StoryWorkspaceDreamAgentMessageError(RuntimeError):
         super().__init__(code)
         self.code = code
         self.status_code = status_code
+
+
+def _looks_like_high_entropy_secret(value: str) -> bool:
+    def high_entropy(
+        candidate: str,
+        *,
+        threshold: float,
+        minimum_character_classes: int,
+    ) -> bool:
+        token = candidate.rstrip("=")
+        if not token:
+            return False
+        counts = {character: token.count(character) for character in set(token)}
+        entropy = -sum(
+            (count / len(token)) * math.log2(count / len(token))
+            for count in counts.values()
+        )
+        character_classes = sum((
+            any(character.islower() for character in token),
+            any(character.isupper() for character in token),
+            any(character.isdigit() for character in token),
+            any(character in "+/_-" for character in token),
+        ))
+        return (
+            character_classes >= minimum_character_classes
+            and entropy >= threshold
+        )
+
+    if any(
+        high_entropy(
+            match.group(0),
+            threshold=3.0,
+            minimum_character_classes=1,
+        )
+        for match in _LONG_HEX_SECRET.finditer(value)
+    ):
+        return True
+
+    if any(
+        high_entropy(
+            match.group(1),
+            threshold=3.0,
+            minimum_character_classes=3,
+        )
+        for match in _ASSIGNED_TOKEN_CANDIDATE.finditer(value)
+    ):
+        return True
+    return any(
+        high_entropy(
+            match.group(0),
+            threshold=3.5,
+            minimum_character_classes=3,
+        )
+        for match in _LONG_TOKEN_CANDIDATE.finditer(value)
+    )
 
 
 def story_workspace_guard_persisted_dream_agent_message_turn(
@@ -286,6 +392,11 @@ def _strict_ask_user_public_text(value: Any, *, max_length: int) -> str | None:
         not normalized
         or len(normalized) > max_length
         or _SENSITIVE_ASK_USER_TEXT.search(normalized)
+        or any(
+            pattern.search(normalized)
+            for pattern in _HIGH_CONFIDENCE_ASK_USER_SECRETS
+        )
+        or _looks_like_high_entropy_secret(normalized)
     ):
         return None
     return normalized
@@ -367,7 +478,7 @@ def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]] | None:
     if len(raw_questions) > _ASK_USER_QUESTIONS_MAX:
         return None
     safe: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    seen_runner_answer_keys: set[str] = set()
     for index, question in enumerate(raw_questions):
         if not isinstance(question, dict):
             return None
@@ -388,19 +499,12 @@ def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]] | None:
         )
         if text is None:
             return None
-        raw_id = question.get("id")
-        if raw_id is None:
-            question_id = f"q{index}"
-        elif isinstance(raw_id, str) and re.fullmatch(
-                rf"[A-Za-z0-9._:-]{{1,{STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX}}}",
-                raw_id,
-        ):
-            question_id = raw_id
-        else:
+        if text in seen_runner_answer_keys:
             return None
-        if question_id in seen_ids:
-            return None
-        seen_ids.add(question_id)
+        seen_runner_answer_keys.add(text)
+        # Raw model IDs are neither trusted nor public. Sequence-derived IDs
+        # are stable across a full replay of the same pending AskUser input.
+        question_id = f"q{index}"
         question_type = (
             question.get("type")
             if question.get("type") in {
@@ -530,15 +634,19 @@ def _remember_dream_public_confirmation(
     registry = _dream_public_confirmation_registry(factory, create=True)
     if registry is None:
         return False
-    while len(registry) >= _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX:
-        registry.pop(next(iter(registry)))
-    registry[_dream_public_confirmation_key(
+    confirmation_key = _dream_public_confirmation_key(
         thread_id=thread_id,
         turn_id=turn_id,
         run_id=run_id,
         actor_id=actor_id,
         tool_call_id=confirmation["toolCallId"],
-    )] = confirmation
+    )
+    if (
+        confirmation_key not in registry
+        and len(registry) >= _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX
+    ):
+        return False
+    registry[confirmation_key] = confirmation
     return True
 
 
@@ -560,6 +668,23 @@ def _forget_dream_public_confirmation(
             actor_id=actor_id,
             tool_call_id=tool_call_id,
         ), None)
+
+
+def _forget_dream_public_confirmations_for_turn(
+    factory: Any,
+    *,
+    thread_id: str,
+    turn_id: str,
+    run_id: str,
+    actor_id: str,
+) -> None:
+    registry = _dream_public_confirmation_registry(factory, create=False)
+    if registry is None:
+        return
+    turn_prefix = (thread_id, turn_id, run_id, actor_id)
+    for confirmation_key in tuple(registry):
+        if confirmation_key[:4] == turn_prefix:
+            registry.pop(confirmation_key, None)
 
 
 def _validate_dream_public_confirmation_answers(
@@ -603,6 +728,7 @@ def _validate_dream_public_confirmation_answers(
             "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
             422,
         )
+    runner_answers: dict[str, Any] = {}
     for question_id, question in questions_by_id.items():
         present = question_id in answer_map
         if question.get("required") is True and not present:
@@ -657,7 +783,14 @@ def _validate_dream_public_confirmation_answers(
                 "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
                 422,
             )
-    return answer_map
+        question_text = question.get("question")
+        if not isinstance(question_text, str) or question_text in runner_answers:
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+                409,
+            )
+        runner_answers[question_text] = answer
+    return runner_answers
 
 
 class StoryWorkspaceDreamAgentMessageService:
@@ -905,6 +1038,8 @@ class StoryWorkspaceDreamAgentMessageService:
                     continue
                 _event, data = parsed
                 frame_type = data.get("type")
+                if frame_type == "finish":
+                    break
                 if frame_type == "tool-approval-request":
                     confirmation = story_workspace_project_dream_tool_confirmation(data)
                     if confirmation is None:
@@ -959,8 +1094,16 @@ class StoryWorkspaceDreamAgentMessageService:
                 elif frame_type == "message-final":
                     payload = {"turnId": turn_id}
                     yield f"id: {turn_id}:{ordinal}\nevent: assistant_message_committed\ndata: {_json(payload)}\n\n"
+                    break
         finally:
-            yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
+            _forget_dream_public_confirmations_for_turn(
+                self._thread_factory,
+                thread_id=thread_id,
+                turn_id=turn_id,
+                run_id=run_id,
+                actor_id=actor_id,
+            )
+        yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
 
     def confirm_tool(
         self,
