@@ -95,30 +95,44 @@ export interface StoryWorkspaceEpisodeExecutionViewModel {
   readonly coverage: StoryWorkspaceEpisodeExecutionCoverage;
 }
 
-export type StoryWorkspaceEpisodeNavigationKind =
+export const STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID =
+  'story-workspace-episode-unlinked';
+export const STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID =
+  'story-workspace-episode-orphans';
+
+export type StoryWorkspaceEpisodeSelectionKind =
   | 'episode'
+  | 'story-arc'
   | 'narrative-beat'
   | 'scene'
-  | 'shot';
+  | 'shot'
+  | 'prompt'
+  | 'render-queue'
+  | 'review-target'
+  | 'auxiliary-group';
 
 export interface StoryWorkspaceEpisodeSelection {
-  readonly kind: StoryWorkspaceEpisodeNavigationKind;
+  readonly kind: StoryWorkspaceEpisodeSelectionKind;
   readonly id: string;
 }
 
 export interface StoryWorkspaceEpisodeNavigationItem
   extends StoryWorkspaceEpisodeSourceFact {
   readonly id: string;
-  readonly kind: StoryWorkspaceEpisodeNavigationKind;
-  readonly parentId: string | null;
+  readonly kind: StoryWorkspaceEpisodeSelectionKind;
   readonly level: 1 | 2 | 3 | 4;
+  readonly canonicalParent: StoryWorkspaceEpisodeSelection | null;
+  readonly navigationParent: StoryWorkspaceEpisodeSelection | null;
+  readonly auxiliaryGroup: 'unlinked' | 'orphan' | null;
+  readonly children: readonly StoryWorkspaceEpisodeSelection[];
+  readonly expanded: boolean;
 }
 
 export interface StoryWorkspaceEpisodeNavigationNeighbors {
-  readonly previousId: string | null;
-  readonly nextId: string | null;
-  readonly parentId: string | null;
-  readonly firstChildId: string | null;
+  readonly previousSibling: StoryWorkspaceEpisodeSelection | null;
+  readonly nextSibling: StoryWorkspaceEpisodeSelection | null;
+  readonly parent: StoryWorkspaceEpisodeSelection | null;
+  readonly firstChild: StoryWorkspaceEpisodeSelection | null;
 }
 
 export type StoryWorkspaceEpisodeNavigationKey =
@@ -126,6 +140,19 @@ export type StoryWorkspaceEpisodeNavigationKey =
   | 'ArrowDown'
   | 'ArrowLeft'
   | 'ArrowRight';
+
+export type StoryWorkspaceEpisodeNavigationActionKind =
+  | 'move-sibling'
+  | 'expand'
+  | 'collapse'
+  | 'move-parent'
+  | 'move-first-child'
+  | 'noop';
+
+export interface StoryWorkspaceEpisodeNavigationAction {
+  readonly action: StoryWorkspaceEpisodeNavigationActionKind;
+  readonly target: StoryWorkspaceEpisodeSelection | null;
+}
 
 const unavailableCoverage: StoryWorkspaceEpisodeAssociationCoverage = {
   availability: 'unavailable',
@@ -432,86 +459,435 @@ export function storyWorkspaceEpisodeDefaultSelection(
 function navigationItem(
   node: {
     readonly id: string;
-    readonly kind: StoryWorkspaceEpisodeNavigationKind;
+    readonly kind: StoryWorkspaceEpisodeSelectionKind;
     readonly sourceArtifact: string | null;
     readonly sourceRevision: string | null;
     readonly sourceAvailability: StoryWorkspaceEpisodeSourceAvailability;
   },
-  parentId: string | null,
-  level: StoryWorkspaceEpisodeNavigationItem['level'],
+  options: {
+    readonly level: StoryWorkspaceEpisodeNavigationItem['level'];
+    readonly canonicalParent: StoryWorkspaceEpisodeSelection | null;
+    readonly navigationParent: StoryWorkspaceEpisodeSelection | null;
+    readonly auxiliaryGroup: 'unlinked' | 'orphan' | null;
+    readonly children?: readonly StoryWorkspaceEpisodeSelection[];
+    readonly expanded?: boolean;
+  },
 ): StoryWorkspaceEpisodeNavigationItem {
   return {
     id: node.id,
     kind: node.kind,
-    parentId,
-    level,
+    level: options.level,
+    canonicalParent: options.canonicalParent,
+    navigationParent: options.navigationParent,
+    auxiliaryGroup: options.auxiliaryGroup,
+    children: options.children ?? [],
+    expanded: options.expanded ?? false,
     sourceArtifact: node.sourceArtifact,
     sourceRevision: node.sourceRevision,
     sourceAvailability: node.sourceAvailability,
   };
 }
 
+export function storyWorkspaceEpisodeSelectionKey(
+  selection: StoryWorkspaceEpisodeSelection,
+): string {
+  return `${selection.kind}:${selection.id}`;
+}
+
+function itemSelection(
+  item: Pick<StoryWorkspaceEpisodeNavigationItem, 'kind' | 'id'>,
+): StoryWorkspaceEpisodeSelection {
+  return { kind: item.kind, id: item.id };
+}
+
+function auxiliaryNavigationNodes(
+  artifacts: StoryWorkspaceEpisodeDetachedArtifacts,
+): Array<{
+  readonly id: string;
+  readonly kind: StoryWorkspaceEpisodeSelectionKind;
+  readonly sourceArtifact: string;
+  readonly sourceRevision: string | null;
+  readonly sourceAvailability: StoryWorkspaceEpisodeSourceAvailability;
+}> {
+  return [
+    ...artifacts.scenes,
+    ...artifacts.shots,
+    ...artifacts.prompts.map((prompt) => ({
+      ...prompt,
+      kind: 'prompt' as const,
+      sourceAvailability: 'available' as const,
+    })),
+    ...artifacts.renderQueueEntries.map((entry) => ({
+      ...entry,
+      kind: 'render-queue' as const,
+      sourceAvailability: 'available' as const,
+    })),
+    ...artifacts.reviewTargets.map((target) => ({
+      ...target,
+      kind: 'review-target' as const,
+      sourceAvailability: 'available' as const,
+    })),
+  ];
+}
+
+function appendAuxiliaryNavigationGroup(
+  items: StoryWorkspaceEpisodeNavigationItem[],
+  artifacts: StoryWorkspaceEpisodeDetachedArtifacts,
+  group: 'unlinked' | 'orphan',
+  expandedKeys: ReadonlySet<string>,
+): void {
+  const nodes = auxiliaryNavigationNodes(artifacts);
+  if (nodes.length === 0) return;
+  const groupSelection: StoryWorkspaceEpisodeSelection = {
+    kind: 'auxiliary-group',
+    id: group === 'unlinked'
+      ? STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID
+      : STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
+  };
+  const expanded = expandedKeys.has(
+    storyWorkspaceEpisodeSelectionKey(groupSelection),
+  );
+  items.push(navigationItem({
+    ...groupSelection,
+    sourceArtifact: null,
+    sourceRevision: null,
+    sourceAvailability: 'unavailable',
+  }, {
+    level: 1,
+    canonicalParent: null,
+    navigationParent: null,
+    auxiliaryGroup: group,
+    children: nodes.map(itemSelection),
+    expanded,
+  }));
+  if (!expanded) return;
+  for (const node of nodes) {
+    items.push(navigationItem(node, {
+      level: 2,
+      canonicalParent: null,
+      navigationParent: groupSelection,
+      auxiliaryGroup: group,
+    }));
+  }
+}
+
 export function storyWorkspaceEpisodeNavigationItems(
   viewModel: StoryWorkspaceEpisodeExecutionViewModel,
-  expandedIds: ReadonlySet<string>,
+  expandedKeys: ReadonlySet<string>,
 ): readonly StoryWorkspaceEpisodeNavigationItem[] {
   if (viewModel.episode === null || viewModel.storyArc === null) {
     return [];
   }
+  const episodeSelection: StoryWorkspaceEpisodeSelection = {
+    kind: 'episode',
+    id: viewModel.episode.id,
+  };
+  const beatSelections = viewModel.storyArc.narrativeBeatIds.map((id) => ({
+    kind: 'narrative-beat' as const,
+    id,
+  }));
   const items: StoryWorkspaceEpisodeNavigationItem[] = [
-    navigationItem(viewModel.episode, null, 1),
+    navigationItem(viewModel.episode, {
+      level: 1,
+      canonicalParent: null,
+      navigationParent: null,
+      auxiliaryGroup: null,
+      children: beatSelections,
+      expanded: true,
+    }),
   ];
   for (const beatId of viewModel.storyArc.narrativeBeatIds) {
     const beat = viewModel.narrativeBeatsById[beatId];
     if (beat === undefined) continue;
-    items.push(navigationItem(beat, viewModel.episode.id, 2));
-    if (!expandedIds.has(beat.id)) continue;
+    const beatSelection = itemSelection(beat);
+    const sceneSelections = beat.sceneIds.map((id) => ({
+      kind: 'scene' as const,
+      id,
+    }));
+    const beatExpanded = expandedKeys.has(
+      storyWorkspaceEpisodeSelectionKey(beatSelection),
+    );
+    items.push(navigationItem(beat, {
+      level: 2,
+      canonicalParent: { kind: 'story-arc', id: viewModel.storyArc.id },
+      navigationParent: episodeSelection,
+      auxiliaryGroup: null,
+      children: sceneSelections,
+      expanded: beatExpanded,
+    }));
+    if (!beatExpanded) continue;
     for (const sceneId of beat.sceneIds) {
       const scene = viewModel.scenesById[sceneId];
       if (scene === undefined) continue;
-      items.push(navigationItem(scene, beat.id, 3));
-      if (!expandedIds.has(scene.id)) continue;
+      const sceneSelection = itemSelection(scene);
+      const shotSelections = scene.shotIds.map((id) => ({
+        kind: 'shot' as const,
+        id,
+      }));
+      const sceneExpanded = expandedKeys.has(
+        storyWorkspaceEpisodeSelectionKey(sceneSelection),
+      );
+      items.push(navigationItem(scene, {
+        level: 3,
+        canonicalParent: beatSelection,
+        navigationParent: beatSelection,
+        auxiliaryGroup: null,
+        children: shotSelections,
+        expanded: sceneExpanded,
+      }));
+      if (!sceneExpanded) continue;
       for (const shotId of scene.shotIds) {
         const shot = viewModel.shotsById[shotId];
         if (shot !== undefined) {
-          items.push(navigationItem(shot, scene.id, 4));
+          items.push(navigationItem(shot, {
+            level: 4,
+            canonicalParent: sceneSelection,
+            navigationParent: sceneSelection,
+            auxiliaryGroup: null,
+          }));
         }
       }
     }
   }
+  appendAuxiliaryNavigationGroup(
+    items,
+    viewModel.unlinked,
+    'unlinked',
+    expandedKeys,
+  );
+  appendAuxiliaryNavigationGroup(
+    items,
+    viewModel.orphans,
+    'orphan',
+    expandedKeys,
+  );
   return items;
 }
 
 export function storyWorkspaceEpisodeNavigationNeighbors(
   items: readonly StoryWorkspaceEpisodeNavigationItem[],
-  currentId: string,
+  currentSelection: StoryWorkspaceEpisodeSelection,
 ): StoryWorkspaceEpisodeNavigationNeighbors {
-  const index = items.findIndex((item) => item.id === currentId);
-  if (index < 0) {
+  const currentKey = storyWorkspaceEpisodeSelectionKey(currentSelection);
+  const current = items.find(
+    (item) => storyWorkspaceEpisodeSelectionKey(itemSelection(item)) === currentKey,
+  );
+  if (current === undefined) {
     return {
-      previousId: null,
-      nextId: null,
-      parentId: null,
-      firstChildId: null,
+      previousSibling: null,
+      nextSibling: null,
+      parent: null,
+      firstChild: null,
     };
   }
-  const current = items[index];
+  const parentKey = current.navigationParent === null
+    ? null
+    : storyWorkspaceEpisodeSelectionKey(current.navigationParent);
+  const siblings = items.filter((item) => {
+    const itemParentKey = item.navigationParent === null
+      ? null
+      : storyWorkspaceEpisodeSelectionKey(item.navigationParent);
+    return itemParentKey === parentKey && item.level === current.level;
+  });
+  const siblingIndex = siblings.findIndex(
+    (item) => storyWorkspaceEpisodeSelectionKey(itemSelection(item)) === currentKey,
+  );
   return {
-    previousId: items[index - 1]?.id ?? null,
-    nextId: items[index + 1]?.id ?? null,
-    parentId: current.parentId,
-    firstChildId: items.find((item) => item.parentId === current.id)?.id ?? null,
+    previousSibling: siblings[siblingIndex - 1] === undefined
+      ? null
+      : itemSelection(siblings[siblingIndex - 1]),
+    nextSibling: siblings[siblingIndex + 1] === undefined
+      ? null
+      : itemSelection(siblings[siblingIndex + 1]),
+    parent: current.navigationParent,
+    firstChild: current.children[0] ?? null,
   };
 }
 
-export function storyWorkspaceEpisodeNavigationTarget(
+export function storyWorkspaceEpisodeNavigationAction(
   items: readonly StoryWorkspaceEpisodeNavigationItem[],
-  currentId: string,
+  currentSelection: StoryWorkspaceEpisodeSelection,
   key: StoryWorkspaceEpisodeNavigationKey,
-): string | null {
-  const neighbors = storyWorkspaceEpisodeNavigationNeighbors(items, currentId);
-  if (key === 'ArrowUp') return neighbors.previousId;
-  if (key === 'ArrowDown') return neighbors.nextId;
-  if (key === 'ArrowLeft') return neighbors.parentId;
-  return neighbors.firstChildId;
+): StoryWorkspaceEpisodeNavigationAction {
+  const currentKey = storyWorkspaceEpisodeSelectionKey(currentSelection);
+  const current = items.find(
+    (item) => storyWorkspaceEpisodeSelectionKey(itemSelection(item)) === currentKey,
+  );
+  if (current === undefined) return { action: 'noop', target: null };
+  const neighbors = storyWorkspaceEpisodeNavigationNeighbors(
+    items,
+    currentSelection,
+  );
+  if (key === 'ArrowUp' || key === 'ArrowDown') {
+    const target = key === 'ArrowUp'
+      ? neighbors.previousSibling
+      : neighbors.nextSibling;
+    return target === null
+      ? { action: 'noop', target: null }
+      : { action: 'move-sibling', target };
+  }
+  if (key === 'ArrowRight') {
+    if (current.children.length === 0) return { action: 'noop', target: null };
+    if (!current.expanded) return { action: 'expand', target: currentSelection };
+    return { action: 'move-first-child', target: neighbors.firstChild };
+  }
+  if (
+    current.kind !== 'episode'
+    && current.expanded
+    && current.children.length > 0
+  ) {
+    return { action: 'collapse', target: currentSelection };
+  }
+  return neighbors.parent === null
+    ? { action: 'noop', target: null }
+    : { action: 'move-parent', target: neighbors.parent };
+}
+
+function recordValues<T>(record: Readonly<Record<string, readonly T[]>>): T[] {
+  return Object.values(record).flatMap((items) => [...items]);
+}
+
+function selectionExists(
+  selection: StoryWorkspaceEpisodeSelection,
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+): boolean {
+  if (selection.kind === 'episode') return viewModel.episode?.id === selection.id;
+  if (selection.kind === 'story-arc') return viewModel.storyArc?.id === selection.id;
+  if (selection.kind === 'narrative-beat') {
+    return viewModel.narrativeBeatsById[selection.id] !== undefined;
+  }
+  if (selection.kind === 'scene') return viewModel.scenesById[selection.id] !== undefined;
+  if (selection.kind === 'shot') return viewModel.shotsById[selection.id] !== undefined;
+  if (selection.kind === 'prompt') {
+    return [
+      ...recordValues(viewModel.promptsByShotViewId),
+      ...viewModel.unlinked.prompts,
+      ...viewModel.orphans.prompts,
+    ].some((item) => item.id === selection.id);
+  }
+  if (selection.kind === 'render-queue') {
+    return [
+      ...recordValues(viewModel.renderQueueByShotViewId),
+      ...viewModel.unlinked.renderQueueEntries,
+      ...viewModel.orphans.renderQueueEntries,
+    ].some((item) => item.id === selection.id);
+  }
+  if (selection.kind === 'review-target') {
+    return [
+      ...recordValues(viewModel.reviewTargetsByTargetViewId),
+      ...viewModel.unlinked.reviewTargets,
+      ...viewModel.orphans.reviewTargets,
+    ].some((item) => item.id === selection.id);
+  }
+  const artifacts = selection.id === STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID
+    ? viewModel.unlinked
+    : selection.id === STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID
+      ? viewModel.orphans
+      : null;
+  return artifacts !== null && auxiliaryNavigationNodes(artifacts).length > 0;
+}
+
+function firstExistingSelection(
+  candidates: readonly (StoryWorkspaceEpisodeSelection | null)[],
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+): StoryWorkspaceEpisodeSelection | null {
+  return candidates.find(
+    (candidate): candidate is StoryWorkspaceEpisodeSelection => (
+      candidate !== null && selectionExists(candidate, viewModel)
+    ),
+  ) ?? storyWorkspaceEpisodeDefaultSelection(viewModel);
+}
+
+function findPrompt(
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+  id: string,
+): StoryWorkspaceEpisodePrompt | undefined {
+  return [
+    ...recordValues(viewModel.promptsByShotViewId),
+    ...viewModel.unlinked.prompts,
+    ...viewModel.orphans.prompts,
+  ].find((item) => item.id === id);
+}
+
+function findQueueEntry(
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+  id: string,
+): StoryWorkspaceEpisodeRenderQueueEntry | undefined {
+  return [
+    ...recordValues(viewModel.renderQueueByShotViewId),
+    ...viewModel.unlinked.renderQueueEntries,
+    ...viewModel.orphans.renderQueueEntries,
+  ].find((item) => item.id === id);
+}
+
+function findReviewTarget(
+  viewModel: StoryWorkspaceEpisodeExecutionViewModel,
+  id: string,
+): StoryWorkspaceEpisodeReviewTarget | undefined {
+  return [
+    ...recordValues(viewModel.reviewTargetsByTargetViewId),
+    ...viewModel.unlinked.reviewTargets,
+    ...viewModel.orphans.reviewTargets,
+  ].find((item) => item.id === id);
+}
+
+export function storyWorkspaceReconcileEpisodeSelection(
+  previousSelection: StoryWorkspaceEpisodeSelection | null,
+  previousViewModel: StoryWorkspaceEpisodeExecutionViewModel,
+  nextViewModel: StoryWorkspaceEpisodeExecutionViewModel,
+): StoryWorkspaceEpisodeSelection | null {
+  if (previousSelection === null) {
+    return storyWorkspaceEpisodeDefaultSelection(nextViewModel);
+  }
+  if (selectionExists(previousSelection, nextViewModel)) return previousSelection;
+
+  if (previousSelection.kind === 'shot') {
+    const shot = previousViewModel.shotsById[previousSelection.id];
+    return firstExistingSelection([
+      shot?.scriptSceneId === null || shot?.scriptSceneId === undefined
+        ? null
+        : { kind: 'scene', id: shot.scriptSceneId },
+      shot?.narrativeBeatId === null || shot?.narrativeBeatId === undefined
+        ? null
+        : { kind: 'narrative-beat', id: shot.narrativeBeatId },
+    ], nextViewModel);
+  }
+  if (previousSelection.kind === 'scene') {
+    const scene = previousViewModel.scenesById[previousSelection.id];
+    return firstExistingSelection([
+      scene?.narrativeBeatId === null || scene?.narrativeBeatId === undefined
+        ? null
+        : { kind: 'narrative-beat', id: scene.narrativeBeatId },
+    ], nextViewModel);
+  }
+  if (previousSelection.kind === 'prompt') {
+    const prompt = findPrompt(previousViewModel, previousSelection.id);
+    return firstExistingSelection([
+      prompt?.shotViewId === null || prompt?.shotViewId === undefined
+        ? null
+        : { kind: 'shot', id: prompt.shotViewId },
+    ], nextViewModel);
+  }
+  if (previousSelection.kind === 'render-queue') {
+    const queueEntry = findQueueEntry(previousViewModel, previousSelection.id);
+    return firstExistingSelection([
+      queueEntry?.shotViewId === null || queueEntry?.shotViewId === undefined
+        ? null
+        : { kind: 'shot', id: queueEntry.shotViewId },
+    ], nextViewModel);
+  }
+  if (previousSelection.kind === 'review-target') {
+    const target = findReviewTarget(previousViewModel, previousSelection.id);
+    const targetKind = target?.kind === 'script-scene'
+      ? 'scene'
+      : target?.kind;
+    return firstExistingSelection([
+      target?.targetViewId === null
+      || target?.targetViewId === undefined
+      || targetKind === undefined
+        ? null
+        : { kind: targetKind, id: target.targetViewId },
+    ], nextViewModel);
+  }
+  return storyWorkspaceEpisodeDefaultSelection(nextViewModel);
 }

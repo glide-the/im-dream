@@ -10,12 +10,19 @@ import type {
   StoryWorkspaceEpisodeNarrativeProjection,
 } from '../../../hooks/story-workspace/contracts';
 import {
+  storyWorkspaceParseEpisodeArtifactSurface,
+} from '../../../hooks/story-workspace/contracts';
+import {
+  STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
+  STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
   storyWorkspaceBuildEpisodeExecutionViewModel,
   storyWorkspaceEpisodeCoverageLabel,
   storyWorkspaceEpisodeDefaultSelection,
+  storyWorkspaceEpisodeNavigationAction,
   storyWorkspaceEpisodeNavigationItems,
   storyWorkspaceEpisodeNavigationNeighbors,
-  storyWorkspaceEpisodeNavigationTarget,
+  storyWorkspaceEpisodeSelectionKey,
+  storyWorkspaceReconcileEpisodeSelection,
 } from '../episodeExecutionViewModel';
 
 const opaqueId = (value: number) => value.toString(16).padStart(32, '0');
@@ -38,6 +45,17 @@ const QUEUE_ID = opaqueId(14);
 const UNLINKED_QUEUE_ID = opaqueId(15);
 const REVIEW_SHOT_ID = opaqueId(16);
 const REVIEW_UNKNOWN_ID = opaqueId(17);
+const REVIEW_SHOT_SECTION_ID = opaqueId(18);
+const REVIEW_UNKNOWN_SECTION_ID = opaqueId(19);
+
+const ARTIFACT_SPECS = [
+  ['episode-outline.md', 'plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
+  ['script.md', 'write_script', ['narrative_workbench', 'shot_inspector']],
+  ['storyboard.yaml', 'regenerate_storyboard', ['narrative_workbench', 'shot_inspector']],
+  ['prompts/', 'generate_prompts', ['shot_inspector', 'prompt_view']],
+  ['renders/', 'prepare_render_guide', ['shot_inspector', 'render_view']],
+  ['review-report.md', 'review_full_chain', ['review_view', 'shot_inspector']],
+] as const;
 
 function coverage(linked: number, total: number): StoryWorkspaceEpisodeAssociationCoverage {
   return {
@@ -319,7 +337,24 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
       overallVerdict: null,
       reviewedArtifacts: [],
       sourceRevisions: [],
-      sections: [],
+      sections: [
+        {
+          id: REVIEW_SHOT_SECTION_ID,
+          level: 2,
+          title: '镜头结论',
+          text: '镜头关系明确。',
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
+        {
+          id: REVIEW_UNKNOWN_SECTION_ID,
+          level: 2,
+          title: '未定位结论',
+          text: '尚未建立目标关系。',
+          sourceArtifact: 'review-report.md',
+          sourceRevision: revision('1'),
+        },
+      ],
       targets: [
         {
           id: REVIEW_SHOT_ID,
@@ -327,7 +362,7 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
           sourceKey: 'S01-E01-SH01',
           targetViewId: SHOT_ID,
           associationStatus: 'linked',
-          sectionId: opaqueId(18),
+          sectionId: REVIEW_SHOT_SECTION_ID,
           sourceArtifact: 'review-report.md',
           sourceRevision: revision('1'),
         },
@@ -337,7 +372,7 @@ function auxiliary(): StoryWorkspaceEpisodeAuxiliaryProjection {
           sourceKey: 'S01-E01-SH01',
           targetViewId: null,
           associationStatus: 'unlinked',
-          sectionId: opaqueId(19),
+          sectionId: REVIEW_UNKNOWN_SECTION_ID,
           sourceArtifact: 'review-report.md',
           sourceRevision: revision('1'),
         },
@@ -361,21 +396,45 @@ function surface(
   narrativeProjection: StoryWorkspaceEpisodeNarrativeProjection | null = narrative(),
   auxiliaryProjection: StoryWorkspaceEpisodeAuxiliaryProjection | null = auxiliary(),
 ): StoryWorkspaceEpisodeArtifactSurface {
-  return {
+  const available = new Set<string>();
+  if (narrativeProjection?.overview.sourceArtifact !== null) {
+    available.add('episode-outline.md');
+  }
+  if ((narrativeProjection?.scenes.length ?? 0) > 0) available.add('script.md');
+  if ((narrativeProjection?.shots.length ?? 0) > 0) available.add('storyboard.yaml');
+  if ((auxiliaryProjection?.prompts.items.length ?? 0) > 0) available.add('prompts/');
+  if (auxiliaryProjection !== null && auxiliaryProjection.renderGuide !== null) {
+    available.add('renders/');
+  }
+  if (auxiliaryProjection !== null && auxiliaryProjection.review !== null) {
+    available.add('review-report.md');
+  }
+  const wireSurface = {
     runId: `run_${'2'.repeat(32)}`,
-    opaqueEpisodeId: narrativeProjection?.episodeId ?? null,
+    opaqueEpisodeId: EPISODE_ID,
     manifestRevision: revision('2'),
     etag: revision('2'),
     bindingAvailability: 'bound',
     bindingRecovery: {
       autoRepairAttempted: false,
-      canDispatch: false,
+      canDispatch: true,
       publicReason: null,
     },
-    artifacts: [],
+    artifacts: ARTIFACT_SPECS.map(([relativeKey, producerAction, consumers]) => ({
+      relativeKey,
+      availability: available.has(relativeKey) ? 'available' : 'not_generated',
+      contentRevision: available.has(relativeKey) ? revision('3') : null,
+      mtime: available.has(relativeKey) ? '2026-08-06T01:02:03Z' : null,
+      size: available.has(relativeKey) ? 128 : null,
+      producerAction,
+      consumers: [...consumers],
+    })),
     narrative: narrativeProjection,
-    auxiliary: auxiliaryProjection,
+    auxiliary: auxiliaryProjection === null
+      ? null
+      : { ...auxiliaryProjection, manifestRevision: revision('2') },
   };
+  return storyWorkspaceParseEpisodeArtifactSurface(wireSurface);
 }
 
 test('builds Episode → Arc → Beat → Scene → Shot only from opaque relationship ids', () => {
@@ -524,11 +583,14 @@ test('renders zero-denominator association coverage as 尚未生成', () => {
   expect(viewModel.coverage.shotPrompt.label).toBe('33%');
 });
 
-test('provides Episode default selection and pure expanded-tree keyboard adjacency', () => {
+test('returns explicit same-level, expand, child, collapse and parent keyboard actions', () => {
   const viewModel = storyWorkspaceBuildEpisodeExecutionViewModel(surface());
   const items = storyWorkspaceEpisodeNavigationItems(
     viewModel,
-    new Set([BEAT_ID, SCENE_ID]),
+    new Set([
+      storyWorkspaceEpisodeSelectionKey({ kind: 'narrative-beat', id: BEAT_ID }),
+      storyWorkspaceEpisodeSelectionKey({ kind: 'scene', id: SCENE_ID }),
+    ]),
   );
 
   expect(storyWorkspaceEpisodeDefaultSelection(viewModel)).toEqual({
@@ -541,25 +603,232 @@ test('provides Episode default selection and pure expanded-tree keyboard adjacen
     SCENE_ID,
     SHOT_ID,
     EMPTY_BEAT_ID,
+    STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
+    STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
   ]);
-  expect(storyWorkspaceEpisodeNavigationNeighbors(items, SCENE_ID)).toEqual({
-    previousId: BEAT_ID,
-    nextId: SHOT_ID,
-    parentId: BEAT_ID,
-    firstChildId: SHOT_ID,
+  expect(storyWorkspaceEpisodeNavigationNeighbors(
+    items,
+    { kind: 'narrative-beat', id: BEAT_ID },
+  )).toEqual({
+    previousSibling: null,
+    nextSibling: { kind: 'narrative-beat', id: EMPTY_BEAT_ID },
+    parent: { kind: 'episode', id: EPISODE_ID },
+    firstChild: { kind: 'scene', id: SCENE_ID },
   });
-  expect(storyWorkspaceEpisodeNavigationTarget(items, SCENE_ID, 'ArrowRight')).toBe(
-    SHOT_ID,
+  expect(storyWorkspaceEpisodeNavigationAction(
+    items,
+    { kind: 'narrative-beat', id: BEAT_ID },
+    'ArrowDown',
+  )).toEqual({
+    action: 'move-sibling',
+    target: { kind: 'narrative-beat', id: EMPTY_BEAT_ID },
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    items,
+    { kind: 'narrative-beat', id: EMPTY_BEAT_ID },
+    'ArrowUp',
+  )).toEqual({
+    action: 'move-sibling',
+    target: { kind: 'narrative-beat', id: BEAT_ID },
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    items,
+    { kind: 'scene', id: SCENE_ID },
+    'ArrowRight',
+  )).toEqual({
+    action: 'move-first-child',
+    target: { kind: 'shot', id: SHOT_ID },
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    items,
+    { kind: 'scene', id: SCENE_ID },
+    'ArrowLeft',
+  )).toEqual({
+    action: 'collapse',
+    target: { kind: 'scene', id: SCENE_ID },
+  });
+
+  const collapsedItems = storyWorkspaceEpisodeNavigationItems(viewModel, new Set());
+  expect(storyWorkspaceEpisodeNavigationAction(
+    collapsedItems,
+    { kind: 'narrative-beat', id: BEAT_ID },
+    'ArrowRight',
+  )).toEqual({
+    action: 'expand',
+    target: { kind: 'narrative-beat', id: BEAT_ID },
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    collapsedItems,
+    { kind: 'narrative-beat', id: BEAT_ID },
+    'ArrowLeft',
+  )).toEqual({
+    action: 'move-parent',
+    target: { kind: 'episode', id: EPISODE_ID },
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    collapsedItems,
+    { kind: 'narrative-beat', id: EMPTY_BEAT_ID },
+    'ArrowRight',
+  )).toEqual({ action: 'noop', target: null });
+});
+
+test('makes auxiliary groups and detached nodes keyboard reachable without canonical parents', () => {
+  const viewModel = storyWorkspaceBuildEpisodeExecutionViewModel(surface());
+  const items = storyWorkspaceEpisodeNavigationItems(viewModel, new Set([
+    storyWorkspaceEpisodeSelectionKey({
+      kind: 'auxiliary-group',
+      id: STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
+    }),
+    storyWorkspaceEpisodeSelectionKey({
+      kind: 'auxiliary-group',
+      id: STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
+    }),
+  ]));
+  const unlinkedScene = items.find(
+    (item) => item.kind === 'scene' && item.id === UNLINKED_SCENE_ID,
   );
-  expect(storyWorkspaceEpisodeNavigationTarget(items, SCENE_ID, 'ArrowLeft')).toBe(
-    BEAT_ID,
+  const orphanPrompt = items.find(
+    (item) => item.kind === 'prompt' && item.id === ORPHAN_PROMPT_ID,
   );
-  expect(storyWorkspaceEpisodeNavigationTarget(items, SCENE_ID, 'ArrowDown')).toBe(
-    SHOT_ID,
+  const unlinkedGroup = items.find(
+    (item) => item.kind === 'auxiliary-group'
+      && item.id === STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
   );
-  expect(storyWorkspaceEpisodeNavigationTarget(items, SCENE_ID, 'ArrowUp')).toBe(
-    BEAT_ID,
+  const orphanGroup = items.find(
+    (item) => item.kind === 'auxiliary-group'
+      && item.id === STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
   );
+
+  expect(unlinkedGroup?.children.map((selection) => selection.kind)).toEqual([
+    'scene',
+    'shot',
+    'prompt',
+    'render-queue',
+    'review-target',
+  ]);
+  expect(orphanGroup?.children.map((selection) => selection.kind)).toEqual([
+    'scene',
+    'shot',
+    'prompt',
+  ]);
+  expect(unlinkedScene).toMatchObject({
+    canonicalParent: null,
+    navigationParent: {
+      kind: 'auxiliary-group',
+      id: STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
+    },
+    auxiliaryGroup: 'unlinked',
+  });
+  expect(orphanPrompt).toMatchObject({
+    canonicalParent: null,
+    navigationParent: {
+      kind: 'auxiliary-group',
+      id: STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
+    },
+    auxiliaryGroup: 'orphan',
+    sourceArtifact: 'prompts/orphan.yaml',
+    sourceRevision: revision('e'),
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    items,
+    {
+      kind: 'auxiliary-group',
+      id: STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
+    },
+    'ArrowRight',
+  )).toEqual({
+    action: 'move-first-child',
+    target: { kind: 'scene', id: UNLINKED_SCENE_ID },
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    items,
+    { kind: 'scene', id: UNLINKED_SCENE_ID },
+    'ArrowDown',
+  )).toEqual({
+    action: 'move-sibling',
+    target: { kind: 'shot', id: UNLINKED_SHOT_ID },
+  });
+  expect(storyWorkspaceEpisodeNavigationAction(
+    items,
+    { kind: 'scene', id: UNLINKED_SCENE_ID },
+    'ArrowLeft',
+  )).toEqual({
+    action: 'move-parent',
+    target: {
+      kind: 'auxiliary-group',
+      id: STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
+    },
+  });
+});
+
+test('reconciles {kind,id} selection across reorder and deterministic ancestor deletion', () => {
+  const previousNarrative = narrative();
+  const previous = storyWorkspaceBuildEpisodeExecutionViewModel(surface(
+    previousNarrative,
+    null,
+  ));
+  const reordered = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    narrativeBeats: [...previousNarrative.narrativeBeats].reverse(),
+    scenes: [...previousNarrative.scenes].reverse(),
+    shots: [...previousNarrative.shots].reverse(),
+  }, null));
+  const shotSelection = { kind: 'shot' as const, id: SHOT_ID };
+
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    shotSelection,
+    previous,
+    reordered,
+  )).toEqual(shotSelection);
+
+  const withoutShot = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    shots: previousNarrative.shots.filter((shot) => shot.id !== SHOT_ID),
+  }, null));
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    shotSelection,
+    previous,
+    withoutShot,
+  )).toEqual({ kind: 'scene', id: SCENE_ID });
+
+  const withoutScene = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    scenes: previousNarrative.scenes.filter((scene) => scene.id !== SCENE_ID),
+    shots: previousNarrative.shots.filter((shot) => shot.scriptSceneId !== SCENE_ID),
+  }, null));
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    shotSelection,
+    previous,
+    withoutScene,
+  )).toEqual({ kind: 'narrative-beat', id: BEAT_ID });
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    { kind: 'scene', id: SCENE_ID },
+    previous,
+    withoutScene,
+  )).toEqual({ kind: 'narrative-beat', id: BEAT_ID });
+
+  const withoutBeat = storyWorkspaceBuildEpisodeExecutionViewModel(surface({
+    ...previousNarrative,
+    narrativeBeats: previousNarrative.narrativeBeats.filter(
+      (beat) => beat.id !== BEAT_ID,
+    ),
+    scenes: previousNarrative.scenes.filter(
+      (scene) => scene.narrativeBeatId !== BEAT_ID,
+    ),
+    shots: previousNarrative.shots.filter(
+      (shot) => shot.narrativeBeatId !== BEAT_ID,
+    ),
+  }, null));
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    shotSelection,
+    previous,
+    withoutBeat,
+  )).toEqual({ kind: 'episode', id: EPISODE_ID });
+  expect(storyWorkspaceReconcileEpisodeSelection(
+    { kind: 'narrative-beat', id: BEAT_ID },
+    previous,
+    withoutBeat,
+  )).toEqual({ kind: 'episode', id: EPISODE_ID });
 });
 
 test('returns no selection or navigation nodes when the Episode projection is unavailable', () => {
