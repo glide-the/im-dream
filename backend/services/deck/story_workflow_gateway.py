@@ -26,6 +26,8 @@ try:
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
+        StoryWorkspaceEpisodeActionContinueCommand,
+        StoryWorkspaceEpisodeBindingRecoveryCommand,
     )
     from services.deck.runtime_context import resolve_runtime_context
     from services.deck_plugin.compatibility_service import CompatibilityService
@@ -76,6 +78,11 @@ try:
         StoryWorkspaceEpisodeArtifactService,
         StoryWorkspaceEpisodeAuthority,
     )
+    from services.story_workspace.episode_action_service import (
+        StoryWorkspaceEpisodeActionError,
+        StoryWorkspaceEpisodeActionFacts,
+        StoryWorkspaceEpisodeActionService,
+    )
     from services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
         StoryWorkspaceDreamAgentMessageCoordinator,
@@ -88,6 +95,8 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
+        StoryWorkspaceEpisodeActionContinueCommand,
+        StoryWorkspaceEpisodeBindingRecoveryCommand,
     )
     from backend.services.deck.runtime_context import resolve_runtime_context
     from backend.services.deck_plugin.compatibility_service import CompatibilityService
@@ -137,6 +146,11 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeArtifactPathError,
         StoryWorkspaceEpisodeArtifactService,
         StoryWorkspaceEpisodeAuthority,
+    )
+    from backend.services.story_workspace.episode_action_service import (
+        StoryWorkspaceEpisodeActionError,
+        StoryWorkspaceEpisodeActionFacts,
+        StoryWorkspaceEpisodeActionService,
     )
     from backend.services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -783,6 +797,46 @@ class StoryWorkflowApplicationGateway:
             actor,
         )
 
+    async def recover_episode_binding(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceEpisodeBindingRecoveryCommand,
+        *,
+        actor: dict[str, str],
+    ) -> Any:
+        """Dispatch one path-free identity recovery intent on the bound thread."""
+
+        accepted, pending = await asyncio.to_thread(
+            self._recover_episode_binding_sync,
+            workflow_run_id,
+            request,
+            actor,
+        )
+        if pending is not None:
+            self._dream_agent_message_coordinator.schedule(pending)
+        return accepted
+
+    async def continue_episode_action(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceEpisodeActionContinueCommand,
+        *,
+        actor: dict[str, str],
+        if_match: str,
+    ) -> Any:
+        """Revalidate and dispatch one server-derived Episode capability."""
+
+        accepted, pending = await asyncio.to_thread(
+            self._continue_episode_action_sync,
+            workflow_run_id,
+            request,
+            actor,
+            if_match,
+        )
+        if pending is not None:
+            self._dream_agent_message_coordinator.schedule(pending)
+        return accepted
+
     async def get_dream_agent_messages(
         self,
         workflow_run_id: str,
@@ -1253,6 +1307,133 @@ class StoryWorkflowApplicationGateway:
                 workflow_run_id,
                 actor,
             )
+        finally:
+            db.close()
+
+    @staticmethod
+    def _source_metadata(row: sqlite3.Row) -> dict[str, Any]:
+        try:
+            metadata = json.loads(row["source_metadata"] or "{}")
+        except (KeyError, TypeError, ValueError):
+            return {}
+        return metadata if isinstance(metadata, dict) else {}
+
+    def _recover_episode_binding_sync(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceEpisodeBindingRecoveryCommand,
+        actor: dict[str, str],
+    ) -> Any:
+        db = database.get_db()
+        try:
+            # Missing authority is handled without a workspace probe. Existing
+            # authority may resolve only its server-owned canonical binding.
+            row = self._authorized_episode_row(db, workflow_run_id, actor)
+            authority = self._episode_authority_from_source(
+                row,
+                workflow_run_id,
+            )
+            if authority is not None:
+                current = self._get_episode_artifacts_from_db(
+                    db,
+                    workflow_run_id,
+                    actor,
+                )
+                if getattr(current, "opaque_episode_id", None) is not None:
+                    raise StoryWorkspaceEpisodeActionError(
+                        "BINDING_REVISION_CONFLICT",
+                        409,
+                        latest_surface=current,
+                    )
+            context = self._load_dream_agent_context_from_db(
+                db,
+                workflow_run_id,
+                actor,
+            )
+            try:
+                return StoryWorkspaceEpisodeActionService(
+                    db,
+                    thread_factory=self._dream_agent_thread_factory(),
+                    db_factory=database.get_db,
+                ).recover_binding(
+                    run_id=workflow_run_id,
+                    actor_id=actor["actor_id"],
+                    context=context,
+                    command=request,
+                )
+            except StoryWorkspaceDreamAgentMessageError as exc:
+                raise StoryWorkspaceEpisodeActionError(
+                    exc.code,
+                    exc.status_code,
+                ) from exc
+        except StoryWorkspaceEpisodeActionError:
+            raise
+        except ApiRouteError:
+            raise
+        except sqlite3.Error as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
+        finally:
+            db.close()
+
+    def _continue_episode_action_sync(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceEpisodeActionContinueCommand,
+        actor: dict[str, str],
+        if_match: str,
+    ) -> Any:
+        db = database.get_db()
+        try:
+            row = self._authorized_episode_row(db, workflow_run_id, actor)
+            context = self._load_dream_agent_context_from_db(
+                db,
+                workflow_run_id,
+                actor,
+            )
+            surface = self._get_episode_artifacts_from_db(
+                db,
+                workflow_run_id,
+                actor,
+            )
+            episode_uid = getattr(surface, "opaque_episode_id", None)
+            if not isinstance(episode_uid, str):
+                raise StoryWorkspaceEpisodeActionError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    404,
+                )
+            facts = StoryWorkspaceEpisodeActionFacts.parse(
+                self._source_metadata(row),
+                episode_uid=episode_uid,
+            )
+            try:
+                return StoryWorkspaceEpisodeActionService(
+                    db,
+                    thread_factory=self._dream_agent_thread_factory(),
+                    db_factory=database.get_db,
+                ).continue_episode(
+                    run_id=workflow_run_id,
+                    actor_id=actor["actor_id"],
+                    context=context,
+                    surface=surface,
+                    action_facts=facts,
+                    if_match=if_match,
+                    command=request,
+                )
+            except StoryWorkspaceDreamAgentMessageError as exc:
+                raise StoryWorkspaceEpisodeActionError(
+                    exc.code,
+                    exc.status_code,
+                ) from exc
+        except (StoryWorkspaceEpisodeActionError, ApiRouteError):
+            raise
+        except sqlite3.Error as exc:
+            raise ApiRouteError(
+                "DECK_RUNTIME_CONFIG_UNAVAILABLE",
+                status_code=503,
+            ) from exc
         finally:
             db.close()
 

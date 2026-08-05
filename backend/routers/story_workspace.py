@@ -30,6 +30,8 @@ from story_workspace.contracts import (
     StoryWorkspaceDreamAgentToolConfirmationCommand,
     StoryWorkspaceDreamLaunchAccepted,
     StoryWorkspaceDreamLaunchCommand,
+    StoryWorkspaceEpisodeActionContinueCommand,
+    StoryWorkspaceEpisodeBindingRecoveryCommand,
     StoryWorkspaceGuidanceCommandPayload,
     StoryWorkspaceResourceType,
     StoryWorkspaceScenePatch,
@@ -48,10 +50,16 @@ try:
     from services.deck.story_workflow_gateway import (
         get_story_workflow_application_gateway,
     )
+    from services.story_workspace.episode_action_service import (
+        StoryWorkspaceEpisodeActionError,
+    )
 except ModuleNotFoundError:
     from backend.services.errors.error_registry import ApiRouteError, build_error_payload
     from backend.services.deck.story_workflow_gateway import (
         get_story_workflow_application_gateway,
+    )
+    from backend.services.story_workspace.episode_action_service import (
+        StoryWorkspaceEpisodeActionError,
     )
 
 
@@ -167,6 +175,23 @@ class StoryWorkflowGateway(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+    ) -> Any: ...
+
+    async def recover_episode_binding(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceEpisodeBindingRecoveryCommand,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def continue_episode_action(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceEpisodeActionContinueCommand,
+        *,
+        actor: dict[str, str],
+        if_match: str,
     ) -> Any: ...
 
     async def list_dream_runs(
@@ -296,6 +321,36 @@ async def _workflow_call(awaitable: Any, *, by_alias: bool = False) -> Any:
                 run_id=exc.run_id,
                 failed_check=exc.failed_check,
             ),
+        )
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
+        )
+
+
+async def _episode_action_call(awaitable: Any) -> Any:
+    """Serialize only allowlisted action conflicts and their latest safe surface."""
+
+    try:
+        return _workflow_json(await awaitable, by_alias=True)
+    except StoryWorkspaceEpisodeActionError as exc:
+        payload = build_error_payload(exc.code)
+        if exc.latest_surface is not None:
+            payload["latestSurface"] = _workflow_json(
+                exc.latest_surface,
+                by_alias=True,
+            )
+        if exc.resolution is not None:
+            payload["resolution"] = _workflow_json(
+                exc.resolution,
+                by_alias=True,
+            )
+        return JSONResponse(status_code=exc.status_code, content=payload)
+    except ApiRouteError as exc:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
         )
     except Exception:
         return JSONResponse(
@@ -1333,6 +1388,66 @@ async def story_workspace_get_workflow_run_episode_artifacts(
         if if_none_match is not None and if_none_match.strip() == quoted_etag:
             return Response(status_code=304, headers=headers)
     return JSONResponse(content=result, headers=headers)
+
+
+@router.post(
+    "/workflow-runs/{workflow_run_id}/episode-binding/recover",
+    status_code=202,
+)
+async def story_workspace_recover_workflow_run_episode_binding(
+    workflow_run_id: str,
+    request: StoryWorkspaceEpisodeBindingRecoveryCommand,
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Dispatch the path-free, server-owned first-Episode recovery intent."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _episode_action_call(
+        gateway.recover_episode_binding(
+            workflow_run_id,
+            request,
+            actor=actor,
+        )
+    )
+
+
+@router.post(
+    "/workflow-runs/{workflow_run_id}/episode-actions/continue",
+    status_code=202,
+)
+async def story_workspace_continue_workflow_run_episode_action(
+    workflow_run_id: str,
+    request: StoryWorkspaceEpisodeActionContinueCommand,
+    if_match: str = Header(alias="If-Match", min_length=73, max_length=73),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Dispatch one capability only after authority and manifest revalidation."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _episode_action_call(
+        gateway.continue_episode_action(
+            workflow_run_id,
+            request,
+            actor=actor,
+            if_match=if_match,
+        )
+    )
 
 
 @router.get("/workflow-runs/{workflow_run_id}/dream-agent/messages")

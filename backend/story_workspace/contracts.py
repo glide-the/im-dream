@@ -772,6 +772,92 @@ class StoryWorkspaceEpisodeProducerAction(str, Enum):
     PREPARE_RENDER_GUIDE = "prepare_render_guide"
 
 
+class StoryWorkspaceEpisodeAction(str, Enum):
+    """Server-derived Episode capabilities, never persisted lifecycle states."""
+
+    PLAN_EPISODE = "plan_episode"
+    WRITE_SCRIPT = "write_script"
+    REVIEW_SCRIPT = "review_script"
+    REFRESH_ASSETS = "refresh_assets"
+    REGENERATE_STORYBOARD = "regenerate_storyboard"
+    GENERATE_PROMPTS = "generate_prompts"
+    REVIEW_FULL_CHAIN = "review_full_chain"
+    VALIDATE_EPISODE = "validate_episode"
+    PREPARE_RENDER_GUIDE = "prepare_render_guide"
+    NONE_IN_SCOPE = "none_in_scope"
+
+
+class StoryWorkspaceEpisodeActionDiagnostic(str, Enum):
+    """Evidence quality for a derived action, not an Episode business status."""
+
+    READY = "ready"
+    NEEDS_CONFIRMATION = "needs_confirmation"
+
+
+class StoryWorkspaceEpisodeActionResolution(_StoryWorkspaceDreamWireModel):
+    """One evidence-derived next capability and its diagnostic confidence."""
+
+    action: StoryWorkspaceEpisodeAction
+    diagnostic: StoryWorkspaceEpisodeActionDiagnostic
+    can_dispatch: StrictBool
+
+    @model_validator(mode="after")
+    def dispatch_matches_action(self) -> "StoryWorkspaceEpisodeActionResolution":
+        if self.can_dispatch == (
+            self.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE
+        ):
+            raise ValueError("only an in-scope Episode action may be dispatched")
+        return self
+
+
+class StoryWorkspaceEpisodeBindingRecoveryCommand(_StoryWorkspaceDreamWireModel):
+    """Path-free request for the server-owned first-Episode recovery intent."""
+
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+
+
+class StoryWorkspaceEpisodeActionContinueCommand(_StoryWorkspaceDreamWireModel):
+    """Untrusted request to dispatch one server-revalidated Episode capability."""
+
+    episode_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    action: StoryWorkspaceEpisodeAction
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+    user_guidance: Optional[StrictStr] = Field(default=None, max_length=2000)
+
+    @field_validator("user_guidance")
+    @classmethod
+    def guidance_is_bounded_plain_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            return None
+        if any(ord(character) < 32 and character not in "\n\t" for character in normalized):
+            raise ValueError("user guidance must be bounded plain text")
+        return normalized
+
+
+class StoryWorkspaceEpisodeActionAccepted(_StoryWorkspaceDreamWireModel):
+    """Durable dispatch acknowledgement; canonical files remain authoritative."""
+
+    run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    episode_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    capability: StoryWorkspaceEpisodeAction | Literal[
+        "recover_first_episode_binding"
+    ]
+    message_id: str = Field(min_length=1, max_length=255)
+    accepted: Literal[True] = True
+    replayed: StrictBool
+
+
 class StoryWorkspaceEpisodeArtifactConsumer(str, Enum):
     """Allowlisted UI consumers; never accepts arbitrary component names."""
 
@@ -2224,6 +2310,11 @@ __all__ = [
     "StoryWorkspaceDreamStageResponse",
     "StoryWorkspaceDreamStageToolInput",
     "StoryWorkspaceDreamToolInput",
+    "StoryWorkspaceEpisodeAction",
+    "StoryWorkspaceEpisodeActionAccepted",
+    "StoryWorkspaceEpisodeActionContinueCommand",
+    "StoryWorkspaceEpisodeActionDiagnostic",
+    "StoryWorkspaceEpisodeActionResolution",
     "StoryWorkspaceEpisodeArtifactSection",
     "StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics",
     "StoryWorkspaceEpisodeAuxiliaryProjection",
@@ -2239,6 +2330,7 @@ __all__ = [
     "StoryWorkspaceEpisodeReviewTarget",
     "StoryWorkspaceEpisodeReviewTargetKind",
     "StoryWorkspaceEpisodeReviewedSourceRevision",
+    "StoryWorkspaceEpisodeBindingRecoveryCommand",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",
     "StoryWorkspaceGuidanceCommandPayload",
