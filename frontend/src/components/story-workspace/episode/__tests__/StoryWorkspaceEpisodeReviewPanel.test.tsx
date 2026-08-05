@@ -174,6 +174,53 @@ test('keeps Render Guide diagnostic-only in full-chain scope', () => {
   expect(html).toContain('<li>Render Guide</li>');
 });
 
+test('accepts only real single-level Prompt YAML adapter keys in full-chain scope', () => {
+  const accepted = [
+    'prompts/S01-E01-SH01.yaml',
+    'prompts/ep001-prompts.yml',
+  ];
+  const rejected = [
+    'prompts/shot.json',
+    'prompts/nested/shot.yaml',
+    'prompts/../escape.yaml',
+    '/prompts/absolute.yaml',
+    'prompts\\shot.yaml',
+    'renders/',
+  ];
+  const artifacts = [...accepted, ...rejected];
+
+  expect(storyWorkspaceClassifyEpisodeReviewArtifacts('full-chain', artifacts)).toEqual({
+    inScope: accepted,
+    scopeConflicts: rejected,
+  });
+  for (const scope of ['script', 'unknown'] as const) {
+    expect(storyWorkspaceClassifyEpisodeReviewArtifacts(scope, accepted)).toEqual({
+      inScope: [],
+      scopeConflicts: accepted,
+    });
+  }
+
+  const sourceRevisions = artifacts.map((sourceArtifact, index) => ({
+    sourceArtifact,
+    sourceRevision: revision(String.fromCharCode('a'.charCodeAt(0) + index)),
+  }));
+  const html = render({
+    review: report({ scope: 'full-chain', reviewedArtifacts: artifacts, sourceRevisions }),
+  });
+  const diagnosticStart = html.indexOf('aria-label="与审阅范围不一致"');
+  const confirmed = html.slice(0, diagnosticStart);
+  const diagnostic = html.slice(diagnosticStart);
+  expect(confirmed).toContain('<li>Prompts</li><li>Prompts</li>');
+  expect(confirmed).toContain(`Prompts · ${revision('a')}`);
+  expect(confirmed).toContain(`Prompts · ${revision('b')}`);
+  for (const suffix of ['c', 'd', 'e', 'f', 'g', 'h']) {
+    expect(confirmed).not.toContain(revision(suffix));
+    expect(diagnostic).toContain(revision(suffix));
+  }
+  expect(diagnostic).toContain('Render Guide');
+  expect(html).not.toContain('<button');
+});
+
 test('confirms no artifacts when review scope is unknown', () => {
   const artifacts = ['script.md', 'storyboard.yaml', 'prompts/', 'renders/'];
 

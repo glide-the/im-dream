@@ -49,7 +49,19 @@ const REVIEW_ARTIFACTS_BY_SCOPE: Readonly<
   unknown: new Set(),
 };
 
+const STORY_WORKSPACE_EPISODE_PROMPT_ARTIFACT =
+  /^prompts\/[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.ya?ml$/;
+
+function artifactMatchesReviewScope(
+  scope: StoryWorkspaceEpisodeReviewScope,
+  artifact: string,
+): boolean {
+  return REVIEW_ARTIFACTS_BY_SCOPE[scope].has(artifact)
+    || (scope === 'full-chain' && STORY_WORKSPACE_EPISODE_PROMPT_ARTIFACT.test(artifact));
+}
+
 function logicalArtifactLabel(value: string): string {
+  if (STORY_WORKSPACE_EPISODE_PROMPT_ARTIFACT.test(value)) return 'Prompts';
   return LOGICAL_ARTIFACT_LABELS[value] ?? '未识别产物声明';
 }
 
@@ -60,11 +72,10 @@ export function storyWorkspaceClassifyEpisodeReviewArtifacts(
   readonly inScope: readonly string[];
   readonly scopeConflicts: readonly string[];
 } {
-  const allowed = REVIEW_ARTIFACTS_BY_SCOPE[scope];
   const inScope: string[] = [];
   const scopeConflicts: string[] = [];
   for (const artifact of artifacts) {
-    (allowed.has(artifact) ? inScope : scopeConflicts).push(artifact);
+    (artifactMatchesReviewScope(scope, artifact) ? inScope : scopeConflicts).push(artifact);
   }
   return { inScope, scopeConflicts };
 }
