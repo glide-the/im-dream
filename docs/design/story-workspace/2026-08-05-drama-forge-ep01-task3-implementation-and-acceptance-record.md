@@ -5,7 +5,7 @@
 > 上游裁决：`2026-08-05-drama-forge-ep01-task1-problem-decision-record.md`
 > canonical 设计：`design_009_drama-forge-first-episode-storyline-storyboard-workbench.md`
 > 任务二评审：`2026-08-05-drama-forge-ep01-task2-design-review-record.md`
-> 实现基线：`acf0f77` 至 `38cb29a`
+> 实现基线：`eec96a9..38cb29a` 的 49 个生产实现 commits
 > 结论：代码与确定性 UI 质量门通过；真实第一集 artifact 和浏览器工作台通过；真实 Dream Agent runtime 串行派发与真实 render media 仍有诚实遗留
 
 ## 0. 本轮规划前置器
@@ -108,7 +108,7 @@ flowchart LR
 
 ### 3.2 commit 主题核对
 
-以下清单与第 3.1 节一一对应，覆盖 `acf0f77..38cb29a` 的 50 个 Task3 commits：
+以下清单与第 3.1 节一一对应，覆盖 `eec96a9..38cb29a` 的 49 个生产实现 commits；随后 `4860aac` 与 `f2fa498` 两个 U13 docs-only commits 完成交付记录，因此冻结的专项交付基线为 **49 + 2 = 51 个 commits**。该计数不自包含之后用于修正计数文字的文档 commit。
 
 - U1：`acf0f77 feat ... add episode binding contract`；`f2b4fa4 fix ... harden episode binding contract`。
 - U2：`edf8421 feat ... adapt episode narrative artifacts`；`a598133 fix ... preserve canonical storyboard semantics`；`7c40be3 fix ... redact narrative artifact text`；`c715a90 fix ... close narrative redaction gaps`；`7ce50ce test ... supply episode authority to surface probe`。
