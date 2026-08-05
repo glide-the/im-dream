@@ -160,6 +160,8 @@ class StoryWorkflowGateway(Protocol):
         actor: dict[str, str],
     ) -> Any: ...
 
+    async def list_dream_runs(self, *, actor: dict[str, str]) -> Any: ...
+
     async def submit_dream_confirmation(
         self,
         workflow_run_id: str,
@@ -1168,6 +1170,24 @@ async def story_workspace_start_dream_run(
         return StoryWorkspaceDreamLaunchAccepted.from_context(context)
 
     return await _workflow_call(accepted_response(), by_alias=True)
+
+
+@router.get("/dream-runs")
+async def story_workspace_list_dream_runs(
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+) -> Any:
+    """List only durable Dream runs visible to the authenticated actor."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        exc = ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    return await _workflow_call(gateway.list_dream_runs(actor=actor), by_alias=True)
 
 
 @router.get("/workflow-preflights/{preflight_id}")

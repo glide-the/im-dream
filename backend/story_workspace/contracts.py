@@ -109,6 +109,15 @@ class StoryWorkspaceDreamStage(str, Enum):
     STORYBOARDS = "storyboards"
 
 
+class StoryWorkspaceDreamRunLifecycle(str, Enum):
+    """Durable, user-visible lifecycle projected for Dream re-entry only."""
+
+    GENERATING = "generating"
+    WAITING_CONFIRMATION = "waiting_confirmation"
+    CONTINUING = "continuing"
+    RECENT = "recent"
+
+
 STORY_WORKSPACE_DREAM_REQUIRED_STAGES = (
     StoryWorkspaceDreamStage.CHARACTERS,
     StoryWorkspaceDreamStage.SCENES,
@@ -538,6 +547,44 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
                 "can_confirm must reflect completeness and persisted confirmation"
             )
         return self
+
+
+class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
+    """One permission-checked Dream run rendered by the canonical workbench."""
+
+    story_workspace_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    deck_id: str = Field(min_length=1, max_length=255)
+    deck_display_name: str = Field(min_length=1, max_length=255)
+    workflow_display_name: Literal["Dream"] = "Dream"
+    deck_plugin_version: str = Field(min_length=1, max_length=255)
+    lifecycle: StoryWorkspaceDreamRunLifecycle
+    group: Literal["in_progress", "recent"]
+    stage_revisions: dict[StoryWorkspaceDreamStage, _StoryWorkspaceDreamNonNegativeInt]
+    confirmation_accepted: bool
+    confirmation_dispatched: bool
+    last_activity_at: datetime
+    created_at: datetime
+    sort_key: str = Field(min_length=1, max_length=512)
+    href: str = Field(pattern=r"^/story-workspace/dream\?run=run_[0-9a-f]{32}$")
+
+    @model_validator(mode="after")
+    def lifecycle_matches_confirmation_facts(
+        self,
+    ) -> "StoryWorkspaceDreamReentryItem":
+        if self.confirmation_dispatched and not self.confirmation_accepted:
+            raise ValueError("confirmation_dispatched requires confirmation_accepted")
+        if self.lifecycle is StoryWorkspaceDreamRunLifecycle.RECENT:
+            if self.group != "recent" or not self.confirmation_dispatched:
+                raise ValueError("recent requires dispatched confirmation")
+        elif self.group != "in_progress":
+            raise ValueError("non-recent lifecycle must be in_progress")
+        return self
+
+
+class StoryWorkspaceDreamReentryCollection(_StoryWorkspaceDreamWireModel):
+    """Canonical actor-scoped collection; ordering is server-owned."""
+
+    runs: list[StoryWorkspaceDreamReentryItem] = Field(default_factory=list)
 
 
 class StoryWorkspaceDreamEdit(_StoryWorkspaceDreamWireModel):
@@ -1045,6 +1092,9 @@ __all__ = [
     "StoryWorkspaceDreamConfirmationCommand",
     "StoryWorkspaceDreamEdit",
     "StoryWorkspaceDreamFilesResponse",
+    "StoryWorkspaceDreamReentryCollection",
+    "StoryWorkspaceDreamReentryItem",
+    "StoryWorkspaceDreamRunLifecycle",
     "StoryWorkspaceDreamRunToolInput",
     "StoryWorkspaceDreamRunFile",
     "StoryWorkspaceDreamSource",

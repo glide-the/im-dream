@@ -60,6 +60,9 @@ try:
         StoryWorkspaceDreamLaunchIdempotencyConflict,
         StoryWorkspaceDreamLaunchProvenanceError,
     )
+    from services.story_workspace.dream_reentry_service import (
+        StoryWorkspaceDreamReentryService,
+    )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
@@ -101,6 +104,9 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.story_workspace.dream_launch_service import (
         StoryWorkspaceDreamLaunchIdempotencyConflict,
         StoryWorkspaceDreamLaunchProvenanceError,
+    )
+    from backend.services.story_workspace.dream_reentry_service import (
+        StoryWorkspaceDreamReentryService,
     )
 
 
@@ -714,6 +720,18 @@ class StoryWorkflowApplicationGateway:
             workflow_run_id,
             actor,
         )
+
+    async def list_dream_runs(self, *, actor: dict[str, str]) -> Any:
+        """Return the canonical actor-scoped Dream re-entry collection."""
+
+        return await asyncio.to_thread(self._list_dream_runs_sync, actor)
+
+    def _list_dream_runs_sync(self, actor: dict[str, str]) -> Any:
+        service = StoryWorkspaceDreamReentryService(
+            db_factory=database.get_db,
+            dream_files_loader=self._get_dream_files_sync,
+        )
+        return service.list_dream_runs(actor=actor)
 
     def _get_dream_files_sync(
         self,
