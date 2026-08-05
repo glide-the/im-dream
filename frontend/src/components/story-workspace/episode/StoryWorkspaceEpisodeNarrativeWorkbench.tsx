@@ -5,6 +5,8 @@
 
 import {
   createElement as h,
+  useLayoutEffect,
+  useRef,
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
@@ -82,6 +84,13 @@ export function storyWorkspaceHandleEpisodeNarrativeKey({
     onSelection(selection);
     return true;
   }
+  if (key === 'Home' || key === 'End') {
+    const boundaryItem = key === 'Home' ? items[0] : items[items.length - 1];
+    if (boundaryItem !== undefined) {
+      onSelection({ kind: boundaryItem.kind, id: boundaryItem.id });
+    }
+    return true;
+  }
   if (
     key !== 'ArrowUp'
     && key !== 'ArrowDown'
@@ -143,6 +152,41 @@ function TextList({
   );
 }
 
+function CharacterBeats({
+  values,
+}: {
+  readonly values: StoryWorkspaceEpisodeOverview['characterBeats'];
+}) {
+  if (values.length === 0) {
+    return h('section', null, h('h3', null, '人物弧光'), h('p', null, '尚未生成'));
+  }
+  return h(
+    'section',
+    null,
+    h('h3', null, '人物弧光'),
+    h(
+      'ol',
+      null,
+      values.map((beat) => h(
+        'li',
+        { key: beat.id },
+        h('h4', null, beat.sourceKey),
+        h(
+          'dl',
+          null,
+          h('div', null, h('dt', null, '角色'), h('dd', null, pending(beat.characterId))),
+          h('div', null, h('dt', null, '行动'), h('dd', null, pending(beat.action))),
+          h('div', null, h('dt', null, '起始状态'), h('dd', null, pending(beat.startState))),
+          h('div', null, h('dt', null, '触发'), h('dd', null, pending(beat.trigger))),
+          h('div', null, h('dt', null, '选择'), h('dd', null, pending(beat.choice))),
+          h('div', null, h('dt', null, '结束状态'), h('dd', null, pending(beat.endState))),
+          h('div', null, h('dt', null, '可见证据'), h('dd', null, pending(beat.visibleEvidence))),
+        ),
+      )),
+    ),
+  );
+}
+
 function navigationLabel(
   item: StoryWorkspaceEpisodeNavigationItem,
   viewModel: StoryWorkspaceEpisodeExecutionViewModel,
@@ -187,6 +231,7 @@ function EpisodeOverviewContent({
     { 'aria-label': 'Episode Overview' },
     h('p', null, 'Episode Overview'),
     h('h2', null, pending(overview?.title ?? episode?.title)),
+    h('section', null, h('h3', null, '系列'), h('p', null, pending(overview?.series))),
     h(TextList, { title: '故事目标', values: overview?.storyGoals ?? [] }),
     h(
       'section',
@@ -200,6 +245,7 @@ function EpisodeOverviewContent({
       h('h3', null, 'Hook'),
       h('p', null, pending(overview?.hook)),
     ),
+    h(CharacterBeats, { values: overview?.characterBeats ?? [] }),
     hasScenes ? null : h('p', { role: 'status' }, '场景尚未生成'),
     hasShots ? null : h('p', { role: 'status' }, '镜头尚未生成'),
     h(Provenance, {
@@ -224,6 +270,7 @@ function BeatContent({
     h('p', null, beat.sourceKey),
     h('h2', null, beat.title),
     h('section', null, h('h3', null, '叙事功能'), h('p', null, pending(beat.narrativeFunction))),
+    h('section', null, h('h3', null, '情绪基调'), h('p', null, pending(beat.emotionTone))),
     h('section', null, h('h3', null, '摘要'), h('p', null, pending(beat.summary))),
     h(TextList, { title: '场景目标', values: beat.sceneGoals }),
     h(TextList, { title: '对白节拍', values: beat.keyDialogueBeats }),
@@ -259,9 +306,11 @@ function SceneContent({
     'article',
     { 'aria-label': 'Script Scene' },
     h('p', null, scene.sourceKey),
-    h('h2', null, scene.heading),
+    h('h2', null, scene.title),
+    h('p', null, scene.heading),
     h(TextList, { title: '动作', values: scene.actions }),
     h('section', null, h('h3', null, '对白'), dialogue),
+    h(TextList, { title: '镜头提示', values: scene.cameraCues }),
     scene.shotIds.length === 0 ? h('p', { role: 'status' }, '镜头尚未生成') : null,
     h(Provenance, { artifact: scene.sourceArtifact, revision: scene.sourceRevision }),
   );
@@ -270,12 +319,20 @@ function SceneContent({
 function ShotContent({
   viewModel,
   id,
+  onReturnScene,
 }: {
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly id: string;
+  readonly onReturnScene: (selection: StoryWorkspaceEpisodeSelection) => void;
 }) {
   const shot = viewModel.shotsById[id];
   if (shot === undefined) return h('p', { role: 'status' }, '镜头尚未生成');
+  const scene = shot.scriptSceneId === null
+    ? undefined
+    : viewModel.scenesById[shot.scriptSceneId];
+  const beat = shot.narrativeBeatId === null
+    ? undefined
+    : viewModel.narrativeBeatsById[shot.narrativeBeatId];
   const definition = (title: string, value: string | number | null) => h(
     'div',
     { key: title },
@@ -306,15 +363,63 @@ function ShotContent({
         null,
         shot.dialogue.map((line) => h(
           'li',
-          { key: `${line.speaker}:${line.line}` },
+          { key: `${line.speaker}:${line.type}:${line.line}` },
           h('strong', null, line.speaker),
           '：',
           line.line,
+          ' · ',
+          h('span', null, line.type),
         )),
       );
+  const scriptContext = scene === undefined
+    ? h('p', { role: 'status' }, '尚未关联剧本场景')
+    : h(
+        'div',
+        null,
+        h('h4', null, `${scene.sourceKey} ${scene.title}`),
+        h('p', null, scene.heading),
+        h(TextList, { title: '场景动作', values: scene.actions }),
+        h(
+          'section',
+          null,
+          h('h4', null, '场景对白'),
+          scene.dialogue.length === 0
+            ? h('p', null, '尚未生成')
+            : h(
+                'ol',
+                null,
+                scene.dialogue.map((line) => h(
+                  'li',
+                  { key: `${line.speaker}:${line.qualifier ?? ''}:${line.text}` },
+                  h('strong', null, line.speaker),
+                  line.qualifier === null ? null : `（${line.qualifier}）`,
+                  '：',
+                  line.text,
+                )),
+              ),
+        ),
+      );
+  const breadcrumb = [
+    viewModel.episode?.title ?? 'Episode Overview',
+    beat?.sourceKey ?? '叙事点尚未关联',
+    scene?.sourceKey ?? '场景尚未关联',
+    shot.shotId,
+  ].join(' / ');
   return h(
     'article',
     { 'aria-label': 'Shot Detail' },
+    h('p', { 'aria-label': '分镜位置' }, breadcrumb),
+    scene === undefined
+      ? null
+      : h(
+          'button',
+          {
+            type: 'button',
+            'aria-label': `返回场景：${scene.title}`,
+            onClick: () => onReturnScene({ kind: 'scene', id: scene.id }),
+          },
+          `返回场景：${scene.title}`,
+        ),
     h('p', null, '详细分镜'),
     h('h2', null, shot.shotId),
     h('section', null, h('h3', null, '镜头意图'), h('p', null, pending(shot.visual))),
@@ -335,7 +440,29 @@ function ShotContent({
     ),
     h('section', null, h('h3', null, '角色'), characters),
     h('section', null, h('h3', null, '对白'), dialogue),
-    h(Provenance, { artifact: shot.sourceArtifact, revision: shot.sourceRevision }),
+    h('section', null, h('h3', null, '剧本上下文'), scriptContext),
+    h(
+      'footer',
+      { 'aria-label': '来源信息' },
+      h(
+        'p',
+        null,
+        '来源：',
+        `${scene?.sourceArtifact ?? '尚未生成'} ${scene?.sourceRevision ?? '尚未生成'}`,
+        ' · ',
+        `${shot.sourceArtifact} ${shot.sourceRevision ?? '尚未生成'}`,
+      ),
+      h(
+        'p',
+        null,
+        '关联：script_scene_ref → ',
+        pending(shot.declaredScriptSceneRef),
+        ' · narrative_beat_ref → ',
+        pending(shot.declaredNarrativeBeatRef),
+        ' · shot_id → ',
+        shot.shotId,
+      ),
+    ),
   );
 }
 
@@ -343,10 +470,12 @@ function NarrativeContent({
   viewModel,
   selection,
   episodeOverview,
+  onNavigate,
 }: {
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly selection: StoryWorkspaceEpisodeSelection;
   readonly episodeOverview: StoryWorkspaceEpisodeOverview | null;
+  readonly onNavigate: (selection: StoryWorkspaceEpisodeSelection) => void;
 }) {
   if (selection.kind === 'episode' || selection.kind === 'story-arc') {
     return h(EpisodeOverviewContent, { viewModel, overview: episodeOverview });
@@ -358,19 +487,24 @@ function NarrativeContent({
     return h(SceneContent, { viewModel, id: selection.id });
   }
   if (selection.kind === 'shot') {
-    return h(ShotContent, { viewModel, id: selection.id });
+    return h(ShotContent, { viewModel, id: selection.id, onReturnScene: onNavigate });
   }
+  const orphan = selection.id === STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID;
   return h(
     'section',
     { 'aria-label': '辅助选择' },
     h(
       'h2',
       null,
-      selection.id === STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID
-        ? '孤立引用'
-        : '尚未关联',
+      orphan ? '孤立引用' : '尚未关联',
     ),
-    h('p', null, '辅助内容请在右侧视图中查看。'),
+    h(
+      'p',
+      null,
+      orphan
+        ? '这些产物声明了上游引用，但目标不存在或不一致，暂不并入故事线。'
+        : '这些产物没有声明可验证的上游引用，暂不并入故事线。',
+    ),
     h(Provenance, { artifact: null, revision: null }),
   );
 }
@@ -386,24 +520,37 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
   auxiliarySlot,
   onAuxiliarySelection,
 }: StoryWorkspaceEpisodeNarrativeWorkbenchProps) {
+  const itemRefs = useRef(new Map<string, HTMLButtonElement>());
+  const pendingFocusKey = useRef<string | null>(null);
   const items = storyWorkspaceEpisodeNavigationItems(viewModel, expandedKeys);
-  if (viewModel.episode === null || items.length === 0) {
-    return h('section', { role: 'status' }, '故事线尚未生成');
-  }
   const requestedKey = storyWorkspaceEpisodeSelectionKey(selection);
   const activeItem = items.find(
     (item) => storyWorkspaceEpisodeSelectionKey(item) === requestedKey,
   ) ?? items[0];
-  const activeSelection: StoryWorkspaceEpisodeSelection = {
-    kind: activeItem.kind,
-    id: activeItem.id,
-  };
+  const activeSelection: StoryWorkspaceEpisodeSelection | null = activeItem === undefined
+    ? null
+    : { kind: activeItem.kind, id: activeItem.id };
+  const activeKey = activeSelection === null
+    ? null
+    : storyWorkspaceEpisodeSelectionKey(activeSelection);
+  useLayoutEffect(() => {
+    if (activeKey === null || pendingFocusKey.current !== activeKey) return;
+    pendingFocusKey.current = null;
+    itemRefs.current.get(activeKey)?.focus();
+  }, [activeKey]);
+  if (viewModel.episode === null || activeSelection === null) {
+    return h('section', { role: 'status' }, '故事线尚未生成');
+  }
   const select = (nextSelection: StoryWorkspaceEpisodeSelection) => {
     storyWorkspaceSelectEpisodeNarrativeItem(
       nextSelection,
       onSelection,
       onAuxiliarySelection,
     );
+  };
+  const selectAndFocus = (nextSelection: StoryWorkspaceEpisodeSelection) => {
+    pendingFocusKey.current = storyWorkspaceEpisodeSelectionKey(nextSelection);
+    select(nextSelection);
   };
   const handleKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -413,13 +560,12 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
       key: event.key,
       items,
       selection: { kind: item.kind, id: item.id },
-      onSelection: select,
+      onSelection: selectAndFocus,
       onExpanded,
       onEscape,
     });
     if (handled) event.preventDefault();
   };
-  const activeKey = storyWorkspaceEpisodeSelectionKey(activeSelection);
   const treeItems = items.map((item) => {
     const itemSelection: StoryWorkspaceEpisodeSelection = {
       kind: item.kind,
@@ -440,6 +586,10 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
           'aria-selected': active,
           'aria-expanded': item.children.length > 0 ? item.expanded : undefined,
           tabIndex: active ? 0 : -1,
+          ref: (node: HTMLButtonElement | null) => {
+            if (node === null) itemRefs.current.delete(itemKey);
+            else itemRefs.current.set(itemKey, node);
+          },
           onClick: () => select(itemSelection),
           onKeyDown: (event: KeyboardEvent<HTMLButtonElement>) => handleKeyDown(event, item),
         },
@@ -459,7 +609,12 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
     h(
       'section',
       { 'aria-label': '叙事内容工作面' },
-      h(NarrativeContent, { viewModel, selection, episodeOverview }),
+      h(NarrativeContent, {
+        viewModel,
+        selection: activeSelection,
+        episodeOverview,
+        onNavigate: selectAndFocus,
+      }),
     ),
     auxiliarySlot === undefined
       ? null
