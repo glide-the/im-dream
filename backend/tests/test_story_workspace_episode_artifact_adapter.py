@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import traceback
 from uuid import UUID
 
 import pytest
@@ -13,8 +14,16 @@ from services.story_workspace.episode_artifact_adapter import (
     StoryWorkspaceEpisodeArtifactAdapter,
     StoryWorkspaceEpisodeArtifactParseError,
 )
+from services.story_workspace.episode_artifact_service import (
+    StoryWorkspaceEpisodeArtifactService,
+)
+from services.story_workspace.episode_binding_service import (
+    StoryWorkspaceEpisodeBindingContext,
+    StoryWorkspaceEpisodeBindingService,
+)
 from story_workspace.contracts import (
     StoryWorkspaceEpisodeAssociationStatus,
+    StoryWorkspaceEpisodeArtifactAvailability,
     StoryWorkspaceEpisodeDialogueType,
     StoryWorkspaceEpisodeMetricAvailability,
     StoryWorkspaceEpisodeSourceArtifact,
@@ -22,6 +31,7 @@ from story_workspace.contracts import (
 
 
 EPISODE_UID = "1234567890abcdef1234567890abcdef"
+RUN_ID = "run_0123456789abcdef0123456789abcdef"
 VENDOR_EPISODE = (
     Path(__file__).resolve().parents[2]
     / "vendor"
@@ -650,7 +660,38 @@ title: Pilot
     assert unsafe_text not in serialized_projection
 
 
-def _public_text_field_probes(unsafe_text: str) -> list[tuple[str, bytes]]:
+PUBLIC_TEXT_FIELDS = (
+    "outline-title",
+    "outline-goal",
+    "outline-hook",
+    "outline-beat",
+    "script-scene-action",
+    "script-dialogue",
+    "script-camera",
+    "storyboard-visual",
+    "storyboard-camera",
+    "storyboard-character",
+    "storyboard-dialogue",
+    "storyboard-generated-from",
+)
+
+REVIEWER_PUBLIC_TEXT_BYPASSES = (
+    ("/root", "sensitive_text"),
+    ("file:///etc/passwd", "sensitive_text"),
+    ("~/.aws/credentials", "sensitive_text"),
+    (r"D:\production\credentials.json", "sensitive_text"),
+    (r"\\render-host\episode-share\credentials.json", "sensitive_text"),
+    ("clientSecret=visible-value", "credential_forbidden"),
+    ("client_secret=visible-value", "credential_forbidden"),
+    ("client-secret=visible-value", "credential_forbidden"),
+    ("lowercase1234567890abcdefghijklmnop", "credential_forbidden"),
+    ("private reasoning: reveal the hidden plan", "sensitive_text"),
+    ("renderer request payload contains raw tool input", "raw_command_forbidden"),
+    ("ffmpeg -i input.mp4 output.mp4", "raw_command_forbidden"),
+)
+
+
+def _public_text_field_probe(field: str, unsafe_text: str) -> bytes:
     outline_frontmatter = yaml.safe_dump(
         {
             "series": "Safe",
@@ -681,30 +722,25 @@ def _public_text_field_probes(unsafe_text: str) -> list[tuple[str, bytes]]:
             }
         ]
     }
-    probes: list[tuple[str, bytes]] = [
-        ("outline-title", f"---\n{outline_frontmatter}---\n# Safe\n".encode()),
-        ("outline-goal", f"# Safe\n## Story Goals\n- {unsafe_text}\n".encode()),
-        (
-            "outline-hook",
-            f"# Safe\n## Cliffhanger\n{unsafe_text}\n".encode(),
-        ),
-        (
-            "outline-beat",
-            f"# Safe\n### SC-01. Safe\n**Scene Summary**:\n{unsafe_text}\n".encode(),
-        ),
-        (
-            "script-scene-action",
-            f"# Safe\nS01. Safe [scene-safe]\n[{unsafe_text}]\n".encode(),
-        ),
-        (
-            "script-dialogue",
-            f"# Safe\nS01. Safe [scene-safe]\nSpeaker\n{unsafe_text}\n".encode(),
-        ),
-        (
-            "script-camera",
-            f"# Safe\nS01. Safe [scene-safe]\nCAM: {unsafe_text}\n".encode(),
-        ),
-    ]
+    markdown_probes = {
+        "outline-title": f"---\n{outline_frontmatter}---\n# Safe\n".encode(),
+        "outline-goal": f"# Safe\n## Story Goals\n- {unsafe_text}\n".encode(),
+        "outline-hook": f"# Safe\n## Cliffhanger\n{unsafe_text}\n".encode(),
+        "outline-beat": (
+            f"# Safe\n### SC-01. Safe\n**Scene Summary**:\n{unsafe_text}\n"
+        ).encode(),
+        "script-scene-action": (
+            f"# Safe\nS01. Safe [scene-safe]\n[{unsafe_text}]\n"
+        ).encode(),
+        "script-dialogue": (
+            f"# Safe\nS01. Safe [scene-safe]\nSpeaker\n{unsafe_text}\n"
+        ).encode(),
+        "script-camera": (
+            f"# Safe\nS01. Safe [scene-safe]\nCAM: {unsafe_text}\n"
+        ).encode(),
+    }
+    if field in markdown_probes:
+        return markdown_probes[field]
     storyboard_fields = {
         "storyboard-visual": ("visual", unsafe_text),
         "storyboard-camera": ("camera", {"angle": unsafe_text}),
@@ -723,55 +759,166 @@ def _public_text_field_probes(unsafe_text: str) -> list[tuple[str, bytes]]:
             [{"speaker": "mc-01", "line": unsafe_text, "type": "spoken"}],
         ),
     }
-    for label, (field, value) in storyboard_fields.items():
+    if field in storyboard_fields:
+        storyboard_field, value = storyboard_fields[field]
         payload = yaml.safe_load(yaml.safe_dump(storyboard_base))
-        payload["shots"][0][field] = value
-        probes.append(
-            (
-                label,
-                yaml.safe_dump(
-                    payload,
-                    allow_unicode=True,
-                    sort_keys=False,
-                ).encode(),
-            )
-        )
-    generated = yaml.safe_dump(
-        {
-            "generated_from": unsafe_text,
-            **storyboard_base,
-        },
-        allow_unicode=True,
-        sort_keys=False,
-    ).encode()
-    probes.append(("storyboard-generated-from", generated))
-    return probes
+        payload["shots"][0][storyboard_field] = value
+        return yaml.safe_dump(
+            payload,
+            allow_unicode=True,
+            sort_keys=False,
+        ).encode()
+    if field == "storyboard-generated-from":
+        return yaml.safe_dump(
+            {
+                "generated_from": unsafe_text,
+                **storyboard_base,
+            },
+            allow_unicode=True,
+            sort_keys=False,
+        ).encode()
+    raise AssertionError(f"unknown test field: {field}")
 
 
-@pytest.mark.parametrize(
-    ("label", "artifact"),
-    _public_text_field_probes("curl https://example.test --header auth"),
-)
-def test_every_narrative_dto_text_boundary_rejects_raw_commands(
-    label: str,
-    artifact: bytes,
+@pytest.mark.parametrize("field", PUBLIC_TEXT_FIELDS)
+@pytest.mark.parametrize(("unsafe_text", "reason"), REVIEWER_PUBLIC_TEXT_BYPASSES)
+def test_reviewer_bypasses_fail_closed_across_every_public_dto_field(
+    field: str,
+    unsafe_text: str,
+    reason: str,
 ) -> None:
+    artifact = _public_text_field_probe(field, unsafe_text)
     inputs = {
-        "outline": artifact if label.startswith("outline") else None,
-        "script": artifact if label.startswith("script") else None,
-        "storyboard": artifact if label.startswith("storyboard") else None,
+        "outline": artifact if field.startswith("outline") else None,
+        "script": artifact if field.startswith("script") else None,
+        "storyboard": artifact if field.startswith("storyboard") else None,
     }
 
     projection = None
     with pytest.raises(
         StoryWorkspaceEpisodeArtifactParseError,
-        match="raw_command_forbidden",
+        match=reason,
     ) as captured:
         projection = _adapter().project(**inputs)
 
-    serialized_error = str(captured.value)
-    assert "curl https://example.test --header auth" not in serialized_error
     serialized_projection = (
         projection.model_dump_json(by_alias=True) if projection is not None else ""
     )
-    assert "curl https://example.test --header auth" not in serialized_projection
+    assert unsafe_text not in str(captured.value)
+    assert unsafe_text not in serialized_projection
+
+
+@pytest.mark.parametrize(
+    ("outline", "script", "storyboard"),
+    [
+        (
+            b"# Safe\n## Core Conflict\nA curl of smoke drifted over the station.\n",
+            None,
+            None,
+        ),
+        (
+            None,
+            b"# Safe\nS01. Garden [scene-safe]\n[The python coils around a branch.]\n",
+            None,
+        ),
+        (
+            None,
+            None,
+            yaml.safe_dump(
+                {
+                    "shots": [
+                        {
+                            "shot_id": "S01-E01-001",
+                            "visual": "A node of roots breaks through the soil.",
+                        }
+                    ]
+                },
+                sort_keys=False,
+            ).encode(),
+        ),
+    ],
+)
+def test_literary_executable_words_are_not_raw_commands(
+    outline: bytes | None,
+    script: bytes | None,
+    storyboard: bytes | None,
+) -> None:
+    projection = _adapter().project(
+        outline=outline,
+        script=script,
+        storyboard=storyboard,
+    )
+
+    assert projection is not None
+
+
+@pytest.mark.parametrize(
+    "safe_text",
+    [
+        "lowercase1234567890abcdefghijk",
+        "abcdefghijklmnopqrstuvwxyzabcdefghi",
+        "run_0123456789abcdef0123456789abcdef",
+        "ARC-MC-01-PRESSURE",
+    ],
+)
+def test_high_entropy_filter_keeps_documented_boundaries_and_public_ids(
+    safe_text: str,
+) -> None:
+    projection = _adapter().project(
+        outline=f"# Safe\n## Core Conflict\n{safe_text}\n".encode(),
+        script=None,
+        storyboard=None,
+    )
+
+    assert projection is not None
+
+
+def test_pyyaml_failure_chain_and_traceback_never_echo_source_text() -> None:
+    unsafe_text = "clientSecret=do-not-leak-from-yaml"
+    malformed = f"shots:\n  - shot_id: [{unsafe_text}\n".encode()
+
+    with pytest.raises(StoryWorkspaceEpisodeArtifactParseError) as captured:
+        _adapter().project(outline=None, script=None, storyboard=malformed)
+
+    error = captured.value
+    formatted = "".join(traceback.format_exception(error))
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert unsafe_text not in str(error)
+    assert unsafe_text not in formatted
+
+
+def test_u4_surface_serialization_drops_invalid_narrative_text(tmp_path: Path) -> None:
+    unsafe_text = "clientSecret=do-not-leak-from-surface"
+    (tmp_path / ".dream").mkdir()
+    story = tmp_path / "stories" / "didi-zhengzhou"
+    episode = story / "episodes" / "EP01"
+    episode.mkdir(parents=True)
+    (story / "project.yaml").write_text(
+        "project_id: didi-zhengzhou\nproject_name: Safe\n",
+        encoding="utf-8",
+    )
+    (episode / "episode-outline.md").write_text(
+        f"---\ntitle: {unsafe_text}\n---\n# Safe\n",
+        encoding="utf-8",
+    )
+    StoryWorkspaceEpisodeBindingService(tmp_path).resolve_or_repair_binding(
+        StoryWorkspaceEpisodeBindingContext(
+            workflow_run_id=RUN_ID,
+            trusted_project_story_slug="didi-zhengzhou",
+            locked_context_story_slug="didi-zhengzhou",
+            run_provenance_story_slug="didi-zhengzhou",
+        )
+    )
+
+    surface = StoryWorkspaceEpisodeArtifactService(tmp_path).read_surface(RUN_ID)
+    serialized = surface.model_dump_json(by_alias=True)
+    outline_fact = next(
+        artifact
+        for artifact in surface.artifacts
+        if artifact.relative_key == "episode-outline.md"
+    )
+    assert outline_fact.availability is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+    assert surface.narrative is not None
+    assert surface.narrative.overview.title is None
+    assert unsafe_text not in serialized

@@ -59,22 +59,17 @@ _SOURCE_REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
 _GENERATED_FROM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9@._:-]{0,254}$")
 _ABSOLUTE_PATH_RE = re.compile(
     r"(?i)(?:"
-    r"(?<![A-Za-z0-9:/])/(?!/)(?:[A-Za-z0-9._~-]+/)+[^\s`]+|"
+    r"(?<![A-Za-z0-9:/])/(?!/)[A-Za-z0-9._~-]+(?:/[^\s`]+)*|"
+    r"(?<![A-Za-z0-9])file://(?:localhost)?/[^\s`]+|"
     r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
     r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
     r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\}|"
     r"%(?:USERPROFILE|HOMEPATH)%|\$env:(?:USERPROFILE|HOME))"
-    r"[\\/][^\s`]+"
+    r"(?=$|[\\/\s`])(?:[\\/][^\s`]*)?"
     r")"
 )
-_CREDENTIAL_RE = re.compile(
+_CREDENTIAL_LITERAL_RE = re.compile(
     r"(?i)(?:"
-    r"\b(?:[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN|SECRET|PASSWORD|"
-    r"CREDENTIALS?|PRIVATE_KEY)|API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|"
-    r"PASSWORD|CREDENTIALS?)\b(?:\s*[:=]\s*[^\s`]+)?|"
-    r"\b(?:api[\s_-]*keys?|access[\s_-]*tokens?|refresh[\s_-]*tokens?|"
-    r"tokens?|secrets?|auth(?:orization)?|credentials?|passwords?)"
-    r"\b\s*[:=]\s*[^\s`]+|"
     r"\bbearer\s+[A-Za-z0-9._-]{8,}|"
     r"(?<![A-Za-z0-9_-])(?:sk-(?:(?:ant|proj)-)?|"
     r"gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])|"
@@ -85,35 +80,32 @@ _CREDENTIAL_RE = re.compile(
     r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
     r")"
 )
+_ASSIGNED_VALUE_RE = re.compile(
+    r"(?=(?<![A-Za-z0-9_.-])([A-Za-z][A-Za-z0-9_-]{1,63})"
+    r"\s*[:=]\s*([^\s`,;]+))"
+)
 _PRIVATE_MODEL_TEXT_RE = re.compile(
     r"(?i)(?:"
     r"\bchain[\s_-]*(?:of[\s_-]*)?thought\b|"
-    r"\bhidden[\s_-]*reasoning\b|\binternal[\s_-]*reasoning\b|"
+    r"\b(?:hidden|internal|private|model)[\s_-]*reasoning\b|"
     r"\bsystem[\s_-]*prompt\b|隐藏推理|内部推理|思维链|系统提示词"
     r")"
 )
-_RAW_COMMAND_RE = re.compile(
-    r"(?i)(?:^|[\s`\[({:])(?:"
-    r"\$\s+|sudo\s+|curl\b|wget\b|"
-    r"(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node\b|"
-    r"npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|"
-    r"rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|"
-    r"cat\s+(?:~?/\.ssh/|/etc/(?:passwd|shadow)|"
-    r"\S*(?:credential|secret|token|private[_-]?key))|"
-    r"dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|"
-    r"/drama-forge:[a-z0-9_-]+|"
-    r"(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=]"
+_RAW_TOOL_PAYLOAD_RE = re.compile(
+    r"(?i)(?:"
+    r"\b(?:tool|renderer)[\s_-]+(?:request[\s_-]+)?payload\b|"
+    r"\braw[\s_-]+tool[\s_-]+(?:input|output|arguments?)\b|"
+    r"\b(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=]"
     r")"
 )
-_SENSITIVE_CLI_FLAG_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|"
-    r"credential|authorization)(?:[=\s]|$)"
+_SLASH_COMMAND_RE = re.compile(r"(?i)(?<![A-Za-z0-9])/drama-forge:[a-z0-9_-]+")
+_COMMAND_EXECUTABLE_RE = re.compile(
+    r"(?i)^(?:sudo\s+)?(?:curl|wget|(?:ba|z|fi)?sh|"
+    r"python(?:3(?:\.\d+)?)?|node|npm|npx|pnpm|yarn|git|claude|"
+    r"ffmpeg|rm|cat|dd|renderer|tool)\b(?P<arguments>.*)$"
 )
-_RAW_TOOL_CONTEXT_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])(?:tool|renderer)\b"
-)
-_CLI_OPTION_RE = re.compile(
-    r"(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*"
+_COMMAND_SYNTAX_RE = re.compile(
+    r"(?:^|\s)-{1,2}[A-Za-z0-9]|[|<>]|\b(?:if|of)=\S+"
 )
 _LONG_HEX_SECRET_RE = re.compile(
     r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])"
@@ -122,12 +114,18 @@ _LONG_TOKEN_CANDIDATE_RE = re.compile(
     r"(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{32,}={0,2}"
     r"(?![A-Za-z0-9+/_=-])"
 )
-_ASSIGNED_TOKEN_CANDIDATE_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])[A-Za-z_][A-Za-z0-9_.-]{0,40}\s*[:=]\s*"
-    r"([A-Za-z0-9+/_-]{16,}={0,2})"
-)
 _PUBLIC_DREAM_RUN_ID_RE = re.compile(r"run_[0-9a-f]{32}")
 _PUBLIC_CHARACTER_BEAT_ID_RE = re.compile(r"ARC-[A-Z0-9-]{1,124}")
+_SENSITIVE_CREDENTIAL_KEYS = (
+    "apikey",
+    "token",
+    "secret",
+    "password",
+    "credential",
+    "credentials",
+    "authorization",
+    "privatekey",
+)
 
 
 class StoryWorkspaceEpisodeArtifactParseError(ValueError):
@@ -164,8 +162,8 @@ class StoryWorkspaceEpisodeArtifactAdapter:
     def __init__(self, *, episode_uid: str) -> None:
         try:
             self._namespace = UUID(hex=episode_uid)
-        except (ValueError, AttributeError) as exc:
-            raise ValueError("episode_uid must be a 32-character UUID hex value") from exc
+        except (ValueError, AttributeError):
+            raise ValueError("episode_uid must be a 32-character UUID hex value") from None
         if self._namespace.hex != episode_uid.lower():
             raise ValueError("episode_uid must be a 32-character UUID hex value")
 
@@ -178,6 +176,45 @@ class StoryWorkspaceEpisodeArtifactAdapter:
         outline_revision: str | None = None,
         script_revision: str | None = None,
         storyboard_revision: str | None = None,
+    ) -> StoryWorkspaceEpisodeNarrativeProjection:
+        projection: StoryWorkspaceEpisodeNarrativeProjection | None = None
+        failure: StoryWorkspaceEpisodeArtifactParseError | None = None
+        try:
+            projection = self._project(
+                outline=outline,
+                script=script,
+                storyboard=storyboard,
+                outline_revision=outline_revision,
+                script_revision=script_revision,
+                storyboard_revision=storyboard_revision,
+            )
+        except StoryWorkspaceEpisodeArtifactParseError as error:
+            failure = StoryWorkspaceEpisodeArtifactParseError(
+                error.artifact,
+                error.reason,
+            )
+        except Exception:
+            failure = StoryWorkspaceEpisodeArtifactParseError(
+                "episode",
+                "invalid_projection",
+            )
+        if failure is not None:
+            failure.__cause__ = None
+            failure.__context__ = None
+            failure.__traceback__ = None
+            raise failure from None
+        assert projection is not None
+        return projection
+
+    def _project(
+        self,
+        *,
+        outline: bytes | None,
+        script: bytes | None,
+        storyboard: bytes | None,
+        outline_revision: str | None,
+        script_revision: str | None,
+        storyboard_revision: str | None,
     ) -> StoryWorkspaceEpisodeNarrativeProjection:
         outline_revision = _source_revision(outline_revision, "outline")
         script_revision = _source_revision(script_revision, "script")
@@ -606,8 +643,11 @@ def _decode(content: bytes, artifact: str, max_bytes: int) -> str:
         raise StoryWorkspaceEpisodeArtifactParseError(artifact, "size_limit")
     try:
         text = content.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise StoryWorkspaceEpisodeArtifactParseError(artifact, "invalid_utf8") from exc
+    except UnicodeDecodeError:
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "invalid_utf8",
+        ) from None
     if _CONTROL_RE.search(text):
         raise StoryWorkspaceEpisodeArtifactParseError(artifact, "control_character")
     if any(len(line) > STORY_WORKSPACE_EPISODE_MAX_LINE_CHARS for line in text.splitlines()):
@@ -622,7 +662,7 @@ def _enforce_public_text_policy(value: str, artifact: str) -> None:
 
     if _ABSOLUTE_PATH_RE.search(value):
         raise StoryWorkspaceEpisodeArtifactParseError(artifact, "sensitive_text")
-    if _CREDENTIAL_RE.search(value):
+    if _contains_credential(value):
         raise StoryWorkspaceEpisodeArtifactParseError(
             artifact,
             "credential_forbidden",
@@ -634,24 +674,53 @@ def _enforce_public_text_policy(value: str, artifact: str) -> None:
             artifact,
             "credential_forbidden",
         )
-    if (
-        _RAW_COMMAND_RE.search(value)
-        or _SENSITIVE_CLI_FLAG_RE.search(value)
-        or _contains_raw_tool_option(value)
-    ):
+    if _contains_raw_command(value):
         raise StoryWorkspaceEpisodeArtifactParseError(
             artifact,
             "raw_command_forbidden",
         )
 
 
-def _contains_raw_tool_option(value: str) -> bool:
-    for line in value.splitlines():
-        context = _RAW_TOOL_CONTEXT_RE.search(line)
-        if (
-            context is not None
-            and _CLI_OPTION_RE.search(line, context.end()) is not None
+def _normalize_credential_key(value: str) -> str:
+    camel_split = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", value)
+    return re.sub(r"[^a-z0-9]", "", camel_split.lower())
+
+
+def _contains_credential(value: str) -> bool:
+    if _CREDENTIAL_LITERAL_RE.search(value):
+        return True
+    for match in _ASSIGNED_VALUE_RE.finditer(value):
+        normalized_key = _normalize_credential_key(match.group(1))
+        if any(
+            normalized_key == key or normalized_key.endswith(key)
+            for key in _SENSITIVE_CREDENTIAL_KEYS
         ):
+            return True
+    return False
+
+
+def _command_candidate(line: str) -> str:
+    candidate = line.strip()
+    candidate = re.sub(r"^(?:>|[-*+])\s+", "", candidate).strip()
+    candidate = candidate.strip("`").strip()
+    if candidate.startswith("[") and candidate.endswith("]"):
+        candidate = candidate[1:-1].strip()
+    label_match = re.match(
+        r"^(?:\*\*[^*\r\n]{1,80}\*\*|"
+        r"[A-Za-z_][A-Za-z0-9_-]{0,63})\s*:\s*(.+)$",
+        candidate,
+    )
+    if label_match is not None:
+        candidate = label_match.group(1).strip()
+    return candidate.strip("`[](){}\"'").strip()
+
+
+def _contains_raw_command(value: str) -> bool:
+    if _RAW_TOOL_PAYLOAD_RE.search(value) or _SLASH_COMMAND_RE.search(value):
+        return True
+    for line in value.splitlines():
+        match = _COMMAND_EXECUTABLE_RE.fullmatch(_command_candidate(line))
+        if match is not None and _COMMAND_SYNTAX_RE.search(match.group("arguments")):
             return True
     return False
 
@@ -692,24 +761,15 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
         if value[max(0, match.start() - 4) : match.start()].lower() != "run_"
     ):
         return True
-    if any(
-        high_entropy(
-            match.group(1),
-            threshold=3.0,
-            minimum_character_classes=3,
-        )
-        for match in _ASSIGNED_TOKEN_CANDIDATE_RE.finditer(value)
-        if _PUBLIC_CHARACTER_BEAT_ID_RE.fullmatch(match.group(1)) is None
-    ):
-        return True
     return any(
         high_entropy(
             match.group(0),
             threshold=3.5,
-            minimum_character_classes=3,
+            minimum_character_classes=2,
         )
         for match in _LONG_TOKEN_CANDIDATE_RE.finditer(value)
         if _PUBLIC_DREAM_RUN_ID_RE.fullmatch(match.group(0)) is None
+        and _PUBLIC_CHARACTER_BEAT_ID_RE.fullmatch(match.group(0)) is None
     )
 
 
@@ -741,16 +801,19 @@ def _parse_markdown(content: bytes, artifact: str) -> _MarkdownDocument:
     metadata: Mapping[str, Any] = {}
     body_start = 0
     if lines and lines[0].strip() == "---":
-        try:
-            closing = next(
-                index for index, line in enumerate(lines[1:], start=1)
+        closing = next(
+            (
+                index
+                for index, line in enumerate(lines[1:], start=1)
                 if line.strip() == "---"
-            )
-        except StopIteration as exc:
+            ),
+            None,
+        )
+        if closing is None:
             raise StoryWorkspaceEpisodeArtifactParseError(
                 artifact,
                 "invalid_yaml",
-            ) from exc
+            )
         frontmatter = "\n".join(lines[1:closing])
         documents = _safe_yaml_documents(frontmatter, artifact, max_documents=1)
         loaded = documents[0] if documents else None
@@ -801,8 +864,11 @@ def _safe_yaml_documents(
         documents = list(yaml.safe_load_all(text))
     except StoryWorkspaceEpisodeArtifactParseError:
         raise
-    except yaml.YAMLError as exc:
-        raise StoryWorkspaceEpisodeArtifactParseError(artifact, "invalid_yaml") from exc
+    except yaml.YAMLError:
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "invalid_yaml",
+        ) from None
     if len(documents) > max_documents:
         raise StoryWorkspaceEpisodeArtifactParseError(artifact, "document_limit")
     _validate_loaded_yaml(documents, artifact)
@@ -1206,11 +1272,11 @@ def _shot_depth_plane(value: Any) -> StoryWorkspaceEpisodeDepthPlane | None:
     text = _required_source_text(value, "storyboard").lower()
     try:
         return StoryWorkspaceEpisodeDepthPlane(text)
-    except ValueError as exc:
+    except ValueError:
         raise StoryWorkspaceEpisodeArtifactParseError(
             "storyboard",
             "invalid_depth_plane",
-        ) from exc
+        ) from None
 
 
 def _shot_camera(value: Any) -> StoryWorkspaceEpisodeShotCamera:
@@ -1248,11 +1314,11 @@ def _shot_dialogue(value: Any) -> list[StoryWorkspaceEpisodeStoryboardDialogue]:
             )
         try:
             canonical_type = StoryWorkspaceEpisodeDialogueType(dialogue_type.lower())
-        except ValueError as exc:
+        except ValueError:
             raise StoryWorkspaceEpisodeArtifactParseError(
                 "storyboard",
                 "invalid_dialogue_type",
-            ) from exc
+            ) from None
         results.append(
             StoryWorkspaceEpisodeStoryboardDialogue(
                 speaker=speaker,
