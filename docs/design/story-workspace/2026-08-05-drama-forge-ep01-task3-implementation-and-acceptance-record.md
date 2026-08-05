@@ -263,12 +263,13 @@ after surface 的机器统计（`manifest-after.json:58-75`）：
 
 ## 10. 服务、终端、工作区与归档
 
-- U12 自行启动的 4177 Vite 已关闭；关闭后 4177 无监听。
-- 真实浏览器使用的 5173 在本记录审计时已无监听。
-- 当前仍有 8765、4723、18789 监听；它们在 Task1 调查或本轮开始前已存在，本记录不擅自关闭。
-- `PENDING(ROOT-FINAL-SERVICE-INVENTORY)`：root 最终交付前需再次记录监听端口，只关闭本专项由 root 额外启动且可确认归属的服务，并在最终答复写明结果。
+- 本轮隔离 QA backend `127.0.0.1:8877`（PID 66199）已优雅关闭。
+- 本轮测试 Vite `127.0.0.1:4177` 已关闭。
+- 用户原有服务 `5173`（PID 29200）、`5174`（PID 11923）、`8765`（PID 23800）保持运行，本轮没有关闭。
+- 既有 Playwright MCP 保持运行，本轮没有关闭。
+- 本轮临时测试终端均已退出。
 - 其他工作线/前序文档的未提交修改被保留；U13 不覆盖、不回滚、不格式化生产代码。
-- 本专项和 U13 均未执行归档操作；root 最终答复必须再次明确这一点。
+- 本专项和 U13 均未执行归档操作。
 
 ## 11. 读者检验
 
@@ -292,4 +293,4 @@ after surface 的机器统计（`manifest-after.json:58-75`）：
 3. 真实浏览器完成桌面、窄屏、详细镜头、Prompt/Queue、Review、刷新和重新进入；trace/截图/result 可复核。
 4. workflow event endpoint 精确 404，REST fallback 仍恢复，符合“event 不完整时文件事实继续 polling”的设计。
 5. 真实 run 仍 queued 且没有 agent session；render 目录没有媒体。因此最终结论是：**第一集 artifact 与 Story Workspace 工作台接入通过，真实 Dream Agent runtime 串行派发和真实 renderer 媒体链路未验证/未实现，不得宣称完整外部链路成功。**
-6. 唯一 root 待补项是最终服务/终端归属与关闭快照；本轮未执行归档。
+6. 本轮启动的隔离 backend、测试 Vite 和临时终端均已关闭；用户原有服务与既有 Playwright MCP 保持运行；未执行归档。
