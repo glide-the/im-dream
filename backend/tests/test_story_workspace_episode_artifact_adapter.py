@@ -902,16 +902,29 @@ def test_u4_surface_serialization_drops_invalid_narrative_text(tmp_path: Path) -
         f"---\ntitle: {unsafe_text}\n---\n# Safe\n",
         encoding="utf-8",
     )
-    StoryWorkspaceEpisodeBindingService(tmp_path).resolve_or_repair_binding(
+    binding = StoryWorkspaceEpisodeBindingService(
+        tmp_path
+    ).resolve_or_repair_binding(
         StoryWorkspaceEpisodeBindingContext(
             workflow_run_id=RUN_ID,
             trusted_project_story_slug="didi-zhengzhou",
             locked_context_story_slug="didi-zhengzhou",
             run_provenance_story_slug="didi-zhengzhou",
         )
-    )
+    ).binding
+    assert binding is not None
+    episode_authority = {
+        "schema": "story-workspace-episode-authority/v1",
+        "workflow_run_id": binding.workflow_run_id,
+        "episode_uid": binding.episode_uid,
+        "story_slug": binding.story_slug,
+        "episode_code": binding.episode_code,
+    }
 
-    surface = StoryWorkspaceEpisodeArtifactService(tmp_path).read_surface(RUN_ID)
+    surface = StoryWorkspaceEpisodeArtifactService(tmp_path).read_surface(
+        RUN_ID,
+        episode_authority=episode_authority,
+    )
     serialized = surface.model_dump_json(by_alias=True)
     outline_fact = next(
         artifact
