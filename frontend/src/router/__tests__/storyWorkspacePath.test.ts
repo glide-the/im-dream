@@ -24,6 +24,8 @@ import {
   storyWorkspaceExecutionPath,
   storyWorkspaceDreamLegacyRunRedirectPath,
   storyWorkspaceDreamPathWithoutRun,
+  storyWorkspaceCommitNavigation,
+  storyWorkspaceNavigationTarget,
 } from '../storyWorkspacePath';
 
 test('static routes resolve exactly as before (no regression)', () => {
@@ -129,6 +131,21 @@ test('legacy Dream run URLs replace into canonical query deep links without drop
     '/story-workspace/dream?deck=deck-a&run=run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   );
   expect(storyWorkspaceDreamPathWithoutRun('?run=run_abc&deck=deck-a')).toBe('?deck=deck-a');
+});
+
+test('legacy Dream navigation uses window history replaceState rather than pushState', () => {
+  const target = storyWorkspaceNavigationTarget(
+    '/story-workspace/runs/run_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+    '?deck=deck-a',
+  )!;
+  expect(target.replace).toBe(true);
+  const calls: string[] = [];
+  const history = {
+    pushState: () => calls.push('push'),
+    replaceState: () => calls.push('replace'),
+  };
+  storyWorkspaceCommitNavigation(history, { inkDreamView: 'story-workspace' }, target.href, target.replace);
+  expect(calls).toEqual(['replace']);
 });
 
 test('pattern matcher compares segments literally outside :param slots', () => {

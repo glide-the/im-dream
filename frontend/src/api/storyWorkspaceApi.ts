@@ -290,6 +290,28 @@ function storyWorkspaceReadDreamRunString(value: unknown, field: string): string
   return value;
 }
 
+function storyWorkspaceReadBoundedDreamRunString(
+  value: unknown,
+  field: string,
+  maxLength: number,
+): string {
+  const parsed = storyWorkspaceReadDreamRunString(value, field);
+  if (parsed.trim().length === 0 || parsed.length > maxLength) {
+    throw new Error(`Dream re-entry response has invalid ${field}.`);
+  }
+  return parsed;
+}
+
+function storyWorkspaceReadDreamRunDate(value: unknown, field: string): string {
+  const parsed = storyWorkspaceReadDreamRunString(value, field);
+  const hasTimeZone = /(?:Z|[+-]\d{2}:\d{2})$/i.test(parsed);
+  const isIsoDateTime = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/i.test(parsed);
+  if (!hasTimeZone || !isIsoDateTime || Number.isNaN(Date.parse(parsed))) {
+    throw new Error(`Dream re-entry response has invalid ${field}.`);
+  }
+  return parsed;
+}
+
 function storyWorkspaceReadDreamRunRecord(value: unknown, field: string): Record<string, unknown> {
   if (!isRecord(value)) throw new Error(`Dream re-entry response has invalid ${field}.`);
   return value;
@@ -379,18 +401,26 @@ export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDrea
     }
     return {
       storyWorkspaceRunId,
-      deckId: storyWorkspaceReadDreamRunString(run.deckId, 'deckId'),
-      deckDisplayName: storyWorkspaceReadDreamRunString(run.deckDisplayName, 'deckDisplayName'),
+      deckId: storyWorkspaceReadBoundedDreamRunString(run.deckId, 'deckId', 255),
+      deckDisplayName: storyWorkspaceReadBoundedDreamRunString(
+        run.deckDisplayName,
+        'deckDisplayName',
+        255,
+      ),
       workflowDisplayName: 'Dream' as const,
-      deckPluginVersion: storyWorkspaceReadDreamRunString(run.deckPluginVersion, 'deckPluginVersion'),
+      deckPluginVersion: storyWorkspaceReadBoundedDreamRunString(
+        run.deckPluginVersion,
+        'deckPluginVersion',
+        255,
+      ),
       lifecycle: lifecycle as StoryWorkspaceDreamReentryItem['lifecycle'],
       group: group as StoryWorkspaceDreamReentryItem['group'],
       stageRevisions: stageRevisions as StoryWorkspaceDreamReentryItem['stageRevisions'],
       confirmationAccepted,
       confirmationDispatched,
-      lastActivityAt: storyWorkspaceReadDreamRunString(run.lastActivityAt, 'lastActivityAt'),
-      createdAt: storyWorkspaceReadDreamRunString(run.createdAt, 'createdAt'),
-      sortKey: storyWorkspaceReadDreamRunString(run.sortKey, 'sortKey'),
+      lastActivityAt: storyWorkspaceReadDreamRunDate(run.lastActivityAt, 'lastActivityAt'),
+      createdAt: storyWorkspaceReadDreamRunDate(run.createdAt, 'createdAt'),
+      sortKey: storyWorkspaceReadBoundedDreamRunString(run.sortKey, 'sortKey', 512),
       href,
     } satisfies StoryWorkspaceDreamReentryItem;
   });

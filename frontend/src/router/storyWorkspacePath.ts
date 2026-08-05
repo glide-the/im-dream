@@ -43,6 +43,13 @@ export interface StoryWorkspaceRouteMatch {
   query: URLSearchParams;
 }
 
+export interface StoryWorkspaceNavigationTarget {
+  href: string;
+  match: StoryWorkspaceRouteMatch;
+  /** Legacy routes are URL normalization, never a new browser-history entry. */
+  replace: boolean;
+}
+
 export type StoryWorkspaceDreamRouteStage = 'characters' | 'scenes';
 
 export function trimStoryWorkspaceTrailingSlash(pathname: string): string {
@@ -163,6 +170,44 @@ export function storyWorkspaceDreamResolvedRunId(
   return typeof run?.workflow_run_id === 'string' && run.workflow_run_id.trim()
     ? run.workflow_run_id
     : null;
+}
+
+/** Resolve a Story Workspace navigation request before the React router mutates browser history. */
+export function storyWorkspaceNavigationTarget(
+  pathname: string,
+  search = '',
+): StoryWorkspaceNavigationTarget | null {
+  let match = resolveStoryWorkspacePath(pathname, search);
+  if (!match) return null;
+  let nextSearch = search;
+  let replace = false;
+  if (match.route === 'dream-legacy') {
+    const redirect = storyWorkspaceDreamLegacyRunRedirectPath(
+      match.params.storyWorkspaceRunId,
+      search,
+    );
+    const questionMark = redirect.indexOf('?');
+    const nextPathname = questionMark >= 0 ? redirect.slice(0, questionMark) : redirect;
+    nextSearch = questionMark >= 0 ? redirect.slice(questionMark) : '';
+    match = resolveStoryWorkspacePath(nextPathname, nextSearch);
+    if (!match) return null;
+    replace = true;
+  }
+  return { href: match.canonicalPath + nextSearch, match, replace };
+}
+
+/** Write a previously-resolved in-app navigation through the appropriate History API method. */
+export function storyWorkspaceCommitNavigation(
+  history: Pick<History, 'pushState' | 'replaceState'>,
+  state: unknown,
+  href: string,
+  replace: boolean,
+): void {
+  if (replace) {
+    history.replaceState(state, '', href);
+    return;
+  }
+  history.pushState(state, '', href);
 }
 
 /** Concrete episode review path (canonical form of the episode-review route). */

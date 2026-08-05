@@ -37,9 +37,11 @@ import {
   readStoryWorkspaceRunParam,
   readStoryWorkspaceDeckParam,
   resolveStoryWorkspacePath,
+  storyWorkspaceCommitNavigation,
   storyWorkspaceDreamLegacyRunRedirectPath,
   storyWorkspaceDreamPathWithoutRun,
   storyWorkspaceDreamResolvedRunId,
+  storyWorkspaceNavigationTarget,
   storyWorkspaceAllowsLegacyReviewPanel,
   storyWorkspaceDreamStageForRoute,
   STORY_WORKSPACE_PATHS,
@@ -261,27 +263,21 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
   }, [syncFromLocation]);
 
   const handleNavigate = useCallback((path: string, notice?: string) => {
-    let { pathname, search } = splitStoryWorkspaceHref(path);
-    let match = resolveStoryWorkspacePath(pathname, search);
-    if (!match) return;
+    const { pathname, search } = splitStoryWorkspaceHref(path);
+    const navigation = storyWorkspaceNavigationTarget(pathname, search);
+    if (!navigation) return;
 
-    if (match.route === 'dream-legacy') {
-      const redirect = storyWorkspaceDreamLegacyRunRedirectPath(
-        match.params.storyWorkspaceRunId,
-        search,
-      );
-      ({ pathname, search } = splitStoryWorkspaceHref(redirect));
-      match = resolveStoryWorkspacePath(pathname, search);
-      if (!match) return;
-    }
-
-    const target = match.canonicalPath + search;
+    const target = navigation.href;
     if (window.location.pathname + window.location.search !== target) {
-      // pushState carries the query string (C10-⑤) — deep links survive
-      // in-app navigation.
-      window.history.pushState(storyWorkspaceHistoryState(), '', target);
+      // Legacy canonicalization replaces; ordinary in-app navigation adds a history entry.
+      storyWorkspaceCommitNavigation(
+        window.history,
+        storyWorkspaceHistoryState(),
+        target,
+        navigation.replace,
+      );
     }
-    setActiveMatch(match);
+    setActiveMatch(navigation.match);
     setRouteNotice(notice ?? null);
   }, []);
 

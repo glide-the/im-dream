@@ -77,6 +77,22 @@ test('canonical Dream runs parser rejects malformed IDs, unsafe booleans, unexpe
   }
 });
 
+test('Dream run parser fails closed on naive dates and bounded display metadata', () => {
+  const malformed = [
+    { lastActivityAt: '2026-08-05T10:00:00' },
+    { createdAt: 'not-a-date' },
+    { deckId: 'x'.repeat(256) },
+    { deckDisplayName: 'x'.repeat(256) },
+    { deckPluginVersion: 'x'.repeat(256) },
+    { sortKey: 'x'.repeat(513) },
+  ];
+  for (const patch of malformed) {
+    expect(() => storyWorkspaceParseDreamRuns({
+      runs: [{ ...response.runs[0], ...patch }],
+    })).toThrow();
+  }
+});
+
 test('Dream run collection transport forwards an AbortSignal', async () => {
   const controller = new AbortController();
   let seenSignal: AbortSignal | null = null;
