@@ -1,10 +1,13 @@
 // [Input] Synthetic Episode artifact wire surfaces, HTTP snapshots, and invalidation hints.
-// [Output] Node-side contract coverage for strict parsing, ETag polling, and last-good recovery.
+// [Output] Node/browser coverage for strict parsing, ETag polling, lifecycle, and last-good recovery.
 // [Pos] Story Workspace Episode artifact query seam test (U5)
 
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
 import { readFileSync } from 'node:fs';
+// @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
+import { fileURLToPath } from 'node:url';
+import { createServer } from 'vite';
 import {
   StoryWorkspaceEpisodeArtifactsHttpError,
   storyWorkspaceCreateEpisodeArtifactsRequestLifecycle,
@@ -21,6 +24,7 @@ import {
   storyWorkspaceEpisodeStringFieldClassification,
   storyWorkspaceParseEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeArtifactSurface,
+  type StoryWorkspaceEpisodeStringFieldClass,
 } from '../contracts';
 
 const RUN_ID = `run_${'1'.repeat(32)}`;
@@ -42,6 +46,44 @@ const REVISION_3 = `sha256:${'3'.repeat(64)}`;
 const REVISION_4 = `sha256:${'4'.repeat(64)}`;
 const REVISION_5 = `sha256:${'5'.repeat(64)}`;
 const CONTENT_REVISION = `sha256:${'a'.repeat(64)}`;
+
+interface U5BrowserHarnessSnapshot {
+  readonly requests: readonly {
+    readonly aborted: boolean;
+    readonly ifNoneMatch: string | null;
+    readonly url: string;
+  }[];
+  readonly commits: readonly {
+    readonly runId: string;
+    readonly dataRunId: string | null;
+    readonly title: string | null;
+    readonly errorStatus: number | null;
+    readonly isLoading: boolean;
+  }[];
+  readonly current: {
+    readonly runId: string;
+    readonly dataRunId: string | null;
+    readonly title: string | null;
+    readonly errorStatus: number | null;
+    readonly isLoading: boolean;
+  } | null;
+}
+
+interface U5BrowserHarness {
+  mount: (runId: string) => void;
+  switchRun: (runId: string) => void;
+  unmount: () => void;
+  refresh: () => void;
+  resolve: (index: number, payload: Record<string, unknown>) => void;
+  respondError: (index: number, status: number) => void;
+  snapshot: () => U5BrowserHarnessSnapshot;
+}
+
+declare global {
+  interface Window {
+    __u5Harness: U5BrowserHarness;
+  }
+}
 
 const ARTIFACT_SPECS = [
   ['episode-outline.md', 'plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
@@ -307,157 +349,89 @@ function artifactInvalidSurface(
   return surface;
 }
 
-const EXPECTED_STRING_FIELD_CLASSIFICATIONS = [
-  'surface.runId',
-  'surface.opaqueEpisodeId',
-  'surface.manifestRevision',
-  'surface.etag',
-  'surface.bindingAvailability',
-  'bindingRecovery.publicReason',
-  'artifacts[].relativeKey',
-  'artifacts[].availability',
-  'artifacts[].contentRevision',
-  'artifacts[].mtime',
-  'artifacts[].producerAction',
-  'artifacts[].consumers[]',
-  'coverage.availability',
-  'narrative.episodeId',
-  'narrative.storyArcId',
-  'narrative.overview.title',
-  'narrative.overview.series',
-  'narrative.overview.storyGoals[]',
-  'narrative.overview.coreConflict',
-  'narrative.overview.hook',
-  'narrative.overview.sourceArtifact',
-  'narrative.overview.sourceRevision',
-  'narrative.overview.generatedFrom',
-  'narrative.overview.characterBeats[].id',
-  'narrative.overview.characterBeats[].sourceKey',
-  'narrative.overview.characterBeats[].characterId',
-  'narrative.overview.characterBeats[].action',
-  'narrative.overview.characterBeats[].startState',
-  'narrative.overview.characterBeats[].trigger',
-  'narrative.overview.characterBeats[].choice',
-  'narrative.overview.characterBeats[].endState',
-  'narrative.overview.characterBeats[].visibleEvidence',
-  'narrative.narrativeBeats[].id',
-  'narrative.narrativeBeats[].sourceKey',
-  'narrative.narrativeBeats[].title',
-  'narrative.narrativeBeats[].assetSceneRef',
-  'narrative.narrativeBeats[].narrativeFunction',
-  'narrative.narrativeBeats[].emotionTone',
-  'narrative.narrativeBeats[].summary',
-  'narrative.narrativeBeats[].sceneGoals[]',
-  'narrative.narrativeBeats[].keyDialogueBeats[]',
-  'narrative.narrativeBeats[].sourceArtifact',
-  'narrative.narrativeBeats[].sourceRevision',
-  'narrative.narrativeBeats[].generatedFrom',
-  'narrative.scenes[].id',
-  'narrative.scenes[].sourceKey',
-  'narrative.scenes[].title',
-  'narrative.scenes[].heading',
-  'narrative.scenes[].assetSceneRef',
-  'narrative.scenes[].narrativeBeatId',
-  'narrative.scenes[].declaredNarrativeBeatRef',
-  'narrative.scenes[].associationStatus',
-  'narrative.scenes[].actions[]',
-  'narrative.scenes[].dialogue[].speaker',
-  'narrative.scenes[].dialogue[].qualifier',
-  'narrative.scenes[].dialogue[].text',
-  'narrative.scenes[].cameraCues[]',
-  'narrative.scenes[].sourceArtifact',
-  'narrative.scenes[].sourceRevision',
-  'narrative.scenes[].generatedFrom',
-  'narrative.shots[].id',
-  'narrative.shots[].shotId',
-  'narrative.shots[].assetSceneRef',
-  'narrative.shots[].declaredScriptSceneRef',
-  'narrative.shots[].declaredNarrativeBeatRef',
-  'narrative.shots[].scriptSceneId',
-  'narrative.shots[].narrativeBeatId',
-  'narrative.shots[].associationStatus',
-  'narrative.shots[].shotType',
-  'narrative.shots[].characters[].ref',
-  'narrative.shots[].characters[].displayName',
-  'narrative.shots[].characters[].depthPlane',
-  'narrative.shots[].characters[].action',
-  'narrative.shots[].characters[].emotion',
-  'narrative.shots[].camera.angle',
-  'narrative.shots[].camera.height',
-  'narrative.shots[].camera.movement',
-  'narrative.shots[].camera.lens',
-  'narrative.shots[].visual',
-  'narrative.shots[].dialogue[].speaker',
-  'narrative.shots[].dialogue[].line',
-  'narrative.shots[].dialogue[].type',
-  'narrative.shots[].timing.transitionIn',
-  'narrative.shots[].timing.transitionOut',
-  'narrative.shots[].sourceArtifact',
-  'narrative.shots[].sourceRevision',
-  'narrative.shots[].generatedFrom',
-  'narrative.associations.missingLinks[]',
-  'narrative.associations.orphanArtifacts[]',
-  'auxiliary.manifestRevision',
-  'auxiliary.prompts.items[].id',
-  'auxiliary.prompts.items[].shotId',
-  'auxiliary.prompts.items[].kind',
-  'auxiliary.prompts.items[].shotViewId',
-  'auxiliary.prompts.items[].associationStatus',
-  'auxiliary.prompts.items[].positive',
-  'auxiliary.prompts.items[].negative',
-  'auxiliary.prompts.items[].parameters.model',
-  'auxiliary.prompts.items[].parameters.mode',
-  'auxiliary.prompts.items[].parameters.cameraMotion',
-  'auxiliary.prompts.items[].parameters.aspectRatio',
-  'auxiliary.prompts.items[].generability.characterAnchor',
-  'auxiliary.prompts.items[].generability.motionFeasibility',
-  'auxiliary.prompts.items[].generability.durationBudget',
-  'auxiliary.prompts.items[].generability.notes',
-  'auxiliary.prompts.items[].sourceArtifact',
-  'auxiliary.prompts.items[].sourceRevision',
-  'auxiliary.prompts.nextCursor',
-  'auxiliary.renderGuide.sections[].id',
-  'auxiliary.renderGuide.sections[].title',
-  'auxiliary.renderGuide.sections[].text',
-  'auxiliary.renderGuide.sections[].sourceArtifact',
-  'auxiliary.renderGuide.sections[].sourceRevision',
-  'auxiliary.renderGuide.queue.items[].id',
-  'auxiliary.renderGuide.queue.items[].shotId',
-  'auxiliary.renderGuide.queue.items[].shotViewId',
-  'auxiliary.renderGuide.queue.items[].associationStatus',
-  'auxiliary.renderGuide.queue.items[].risk',
-  'auxiliary.renderGuide.queue.items[].priority',
-  'auxiliary.renderGuide.queue.items[].renderer',
-  'auxiliary.renderGuide.queue.items[].status',
-  'auxiliary.renderGuide.queue.items[].sourceArtifact',
-  'auxiliary.renderGuide.queue.items[].sourceRevision',
-  'auxiliary.renderGuide.queue.nextCursor',
-  'auxiliary.renderGuide.sourceArtifact',
-  'auxiliary.renderGuide.sourceRevision',
-  'auxiliary.review.scope',
-  'auxiliary.review.overallVerdict',
-  'auxiliary.review.reviewedArtifacts[]',
-  'auxiliary.review.sourceRevisions[].sourceArtifact',
-  'auxiliary.review.sourceRevisions[].sourceRevision',
-  'auxiliary.review.sections[].id',
-  'auxiliary.review.sections[].title',
-  'auxiliary.review.sections[].text',
-  'auxiliary.review.sections[].sourceArtifact',
-  'auxiliary.review.sections[].sourceRevision',
-  'auxiliary.review.targets[].id',
-  'auxiliary.review.targets[].kind',
-  'auxiliary.review.targets[].sourceKey',
-  'auxiliary.review.targets[].targetViewId',
-  'auxiliary.review.targets[].associationStatus',
-  'auxiliary.review.targets[].sectionId',
-  'auxiliary.review.targets[].sourceArtifact',
-  'auxiliary.review.targets[].sourceRevision',
-  'auxiliary.review.sourceArtifact',
-  'auxiliary.review.sourceRevision',
-  'auxiliary.associations.orphanPrompts[]',
-  'auxiliary.associations.orphanQueueEntries[]',
-  'auxiliary.associations.duplicateQueueShotIds[]',
-] as const;
+function fullyPopulatedSurface(): Record<string, unknown> {
+  const surface = boundSurface(REVISION_5, ARTIFACT_SPECS.map(([key]) => key));
+  surface.bindingRecovery = {
+    autoRepairAttempted: true,
+    canDispatch: false,
+    publicReason: 'episode_binding_unproven',
+  };
+  const narrative = surface.narrative as Record<string, unknown>;
+  const overview = narrative.overview as Record<string, unknown>;
+  Object.assign(overview, {
+    series: '雨夜故事',
+    coreConflict: '信任与隐瞒发生冲突。',
+    hook: '电话再次响起。',
+    generatedFrom: 'master-outline@v2',
+    characterBeats: [{
+      id: '6'.repeat(32),
+      sourceKey: 'ARC-MC-01-SETUP',
+      characterId: 'mc-01',
+      action: '重新接单',
+      startState: '戒备',
+      trigger: '电话响起',
+      choice: '接听',
+      endState: '动摇',
+      visibleEvidence: '握紧方向盘',
+    }],
+  });
+  const beat = (narrative.narrativeBeats as Array<Record<string, unknown>>)[0];
+  Object.assign(beat, {
+    assetSceneRef: 'scene_train_station_night',
+    emotionTone: '克制',
+    generatedFrom: 'master-outline@v2',
+    keyDialogueBeats: ['你来了。'],
+  });
+  const scene = (narrative.scenes as Array<Record<string, unknown>>)[0];
+  scene.assetSceneRef = 'scene_train_station_night';
+  scene.cameraCues = ['镜头保持稳定'];
+  scene.generatedFrom = 'episode-outline@v2';
+  ((scene.dialogue as Array<Record<string, unknown>>)[0]).qualifier = '压低声音';
+  const shot = (narrative.shots as Array<Record<string, unknown>>)[0];
+  shot.assetSceneRef = 'scene_train_station_night';
+  const camera = shot.camera as Record<string, unknown>;
+  camera.height = 'eye-level';
+  const timing = shot.timing as Record<string, unknown>;
+  timing.transitionIn = 'fade';
+  const narrativeAssociations = narrative.associations as Record<string, unknown>;
+  narrativeAssociations.missingLinks = ['safe-missing-link'];
+  narrativeAssociations.orphanArtifacts = ['safe-orphan-artifact'];
+
+  const auxiliary = surface.auxiliary as Record<string, unknown>;
+  const prompts = auxiliary.prompts as Record<string, unknown>;
+  prompts.nextCursor = 'signature.payload';
+  const prompt = (prompts.items as Array<Record<string, unknown>>)[0];
+  prompt.negative = '避免过曝';
+  Object.assign(prompt.parameters as Record<string, unknown>, {
+    model: 'video-model',
+    mode: 'cinematic',
+    motionStrength: 0.5,
+  });
+  Object.assign(prompt.generability as Record<string, unknown>, {
+    characterAnchor: 'mc-01',
+    motionFeasibility: 'high',
+    durationBudget: '3s',
+    notes: '保持人物一致性',
+  });
+  const renderGuide = auxiliary.renderGuide as Record<string, unknown>;
+  const queue = renderGuide.queue as Record<string, unknown>;
+  queue.nextCursor = 'signature.payload';
+  const queueItem = (queue.items as Array<Record<string, unknown>>)[0];
+  Object.assign(queueItem, { risk: 'low', renderer: 'render-engine' });
+  const auxiliaryAssociations = auxiliary.associations as Record<string, unknown>;
+  auxiliaryAssociations.orphanPrompts = ['safe-orphan-prompt'];
+  auxiliaryAssociations.orphanQueueEntries = ['safe-orphan-render'];
+  auxiliaryAssociations.duplicateQueueShotIds = ['safe-duplicate-shot'];
+  return surface;
+}
+
+function browserSurface(runId: string, revision: string, title: string): Record<string, unknown> {
+  const surface = boundSurface(revision, ['episode-outline.md']);
+  surface.runId = runId;
+  const narrative = surface.narrative as Record<string, unknown>;
+  (narrative.overview as Record<string, unknown>).title = title;
+  return surface;
+}
 
 test('strictly parses missing, unbound, and each progressive Episode artifact revision', () => {
   const missing = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
@@ -619,10 +593,18 @@ test('all public Episode text fails closed and parser diagnostics never echo hos
   }
 });
 
-test('every Episode string field has an explicit trust classification', () => {
-  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification).sort()).toEqual(
-    [...EXPECTED_STRING_FIELD_CLASSIFICATIONS].sort(),
+test('one 149-field registry constrains every string parser at runtime', () => {
+  const visited = new Map<string, StoryWorkspaceEpisodeStringFieldClass>();
+  storyWorkspaceParseEpisodeArtifactSurface(fullyPopulatedSurface(), {
+    onStringField(field, classification) {
+      visited.set(field, classification);
+    },
+  });
+  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(149);
+  expect([...visited.keys()].sort()).toEqual(
+    Object.keys(storyWorkspaceEpisodeStringFieldClassification).sort(),
   );
+  expect(Object.fromEntries(visited)).toEqual(storyWorkspaceEpisodeStringFieldClassification);
   expect(new Set(Object.values(storyWorkspaceEpisodeStringFieldClassification))).toEqual(
     new Set(['machine_enum_or_pattern', 'canonical_relative_key', 'public_text', 'diagnostic']),
   );
@@ -724,11 +706,21 @@ test('previously unclassified shot, prompt, render, and review strings reject un
 });
 
 test('diagnostic fields use an independent single-line no-control validator', () => {
-  for (const hostile of ['line\nbreak', 'line\rbreak', 'column\tbreak', 'delete\u007fbreak']) {
+  const unicodeControlsAndSeparators = [
+    ...Array.from({ length: 0x20 }, (_, codePoint) => codePoint),
+    ...Array.from({ length: 0x21 }, (_, offset) => 0x7f + offset),
+    0x2028,
+    0x2029,
+  ];
+  for (const codePoint of unicodeControlsAndSeparators) {
+    const hostile = `before${String.fromCodePoint(codePoint)}after`;
     const payload = boundSurface();
     const narrative = payload.narrative as Record<string, unknown>;
     (narrative.associations as Record<string, unknown>).missingLinks = [hostile];
-    expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload), JSON.stringify(hostile)).toThrow();
+    expect(
+      () => storyWorkspaceParseEpisodeArtifactSurface(payload),
+      `U+${codePoint.toString(16).toUpperCase().padStart(4, '0')}`,
+    ).toThrow();
   }
 });
 
@@ -1148,6 +1140,242 @@ test('request lifecycle executes cleanup and run-switch against late promises th
   expect(switched.data).toBeNull();
   expect(switched.latest).toBeNull();
   expect(switched.artifactCache).toEqual({});
+});
+
+test('real browser hook mount isolates unmount, remount, and run-switch late responses', async ({ page }) => {
+  const diagnostics: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on('requestfailed', (request) => {
+    diagnostics.push(`requestfailed: ${request.failure()?.errorText ?? 'unknown'} ${request.url()}`);
+  });
+
+  const harnessModule = `
+    import React, { useLayoutEffect } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { useStoryWorkspaceEpisodeArtifacts } from '/src/hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts.ts';
+
+    const requests = [];
+    const commits = [];
+    let root = null;
+    let latestRefresh = null;
+    let current = null;
+
+    function controlledFetch(input, init = {}) {
+      return new Promise((resolve, reject) => {
+        requests.push({
+          url: String(input),
+          signal: init.signal,
+          ifNoneMatch: new Headers(init.headers).get('If-None-Match'),
+          resolve,
+          reject,
+        });
+      });
+    }
+
+    function Probe({ runId }) {
+      const state = useStoryWorkspaceEpisodeArtifacts(runId, {
+        fetchImpl: controlledFetch,
+        token: null,
+        pollIntervalMs: Number.POSITIVE_INFINITY,
+      });
+      latestRefresh = state.refresh;
+      const snapshot = {
+        runId,
+        dataRunId: state.data?.runId ?? null,
+        title: state.data?.narrative?.overview.title ?? null,
+        errorStatus: typeof state.error?.status === 'number' ? state.error.status : null,
+        isLoading: state.isLoading,
+      };
+      const serialized = JSON.stringify(snapshot);
+      current = snapshot;
+      useLayoutEffect(() => {
+        commits.push(snapshot);
+      }, [serialized]);
+      return React.createElement('output', { 'data-testid': 'u5-state' }, serialized);
+    }
+
+    function render(runId) {
+      root.render(React.createElement(Probe, { runId }));
+    }
+
+    window.__u5Harness = {
+      mount(runId) {
+        if (root !== null) throw new Error('Harness is already mounted.');
+        const host = document.createElement('div');
+        host.id = 'u5-root';
+        document.body.append(host);
+        root = createRoot(host);
+        render(runId);
+      },
+      switchRun(runId) {
+        if (root === null) throw new Error('Harness is not mounted.');
+        render(runId);
+      },
+      unmount() {
+        if (root === null) return;
+        root.unmount();
+        root = null;
+        latestRefresh = null;
+        current = null;
+        document.querySelector('#u5-root')?.remove();
+      },
+      refresh() {
+        if (latestRefresh === null) throw new Error('Refresh is unavailable.');
+        latestRefresh();
+      },
+      resolve(index, payload) {
+        requests[index].resolve(new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json', ETag: JSON.stringify(payload.etag) },
+        }));
+      },
+      respondError(index, status) {
+        requests[index].resolve(new Response(null, { status }));
+      },
+      snapshot() {
+        return {
+          requests: requests.map((request) => ({
+            aborted: request.signal.aborted,
+            ifNoneMatch: request.ifNoneMatch,
+            url: request.url,
+          })),
+          commits: commits.map((entry) => ({ ...entry })),
+          current: current === null ? null : { ...current },
+        };
+      },
+    };
+  `;
+  const server = await createServer({
+    root: fileURLToPath(new URL('../../../../', import.meta.url)),
+    configFile: false,
+    logLevel: 'silent',
+    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    plugins: [{
+      name: 'u5-episode-artifact-browser-harness',
+      configureServer(vite) {
+        vite.middlewares.use(async (request, response, next) => {
+          const requestUrl = (request as unknown as { readonly url?: string }).url;
+          if (requestUrl !== '/u5-episode-artifact-lifecycle') return next();
+          try {
+            const html = await vite.transformIndexHtml(requestUrl, `
+              <!doctype html>
+              <html><body><script type="module" src="/u5-harness.js"></script></body></html>
+            `);
+            response.statusCode = 200;
+            response.setHeader('Content-Type', 'text/html; charset=utf-8');
+            response.end(html);
+          } catch (error) {
+            next(error as Error);
+          }
+        });
+      },
+      resolveId(id) {
+        return id === '/u5-harness.js' ? '\0u5-harness.js' : null;
+      },
+      load(id) {
+        return id === '\0u5-harness.js' ? harnessModule : null;
+      },
+    }],
+  });
+
+  const settleLateResponse = () => page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
+  try {
+    await server.listen();
+    const address = server.httpServer?.address();
+    if (address === null || address === undefined || typeof address === 'string') {
+      throw new Error('Ephemeral Vite server did not expose a TCP address.');
+    }
+    await page.goto(`http://127.0.0.1:${address.port}/u5-episode-artifact-lifecycle`);
+    await page.waitForFunction(() => window.__u5Harness !== undefined);
+
+    await page.evaluate((runId) => window.__u5Harness.mount(runId), RUN_ID);
+    await expect.poll(
+      () => page.evaluate(() => window.__u5Harness.snapshot().requests.length),
+    ).toBe(1);
+    const successUnmountCommits = await page.evaluate(
+      () => window.__u5Harness.snapshot().commits.length,
+    );
+    await page.evaluate(() => window.__u5Harness.unmount());
+    expect(await page.evaluate(() => window.__u5Harness.snapshot().requests[0].aborted)).toBe(true);
+    await page.evaluate(
+      ({ payload }) => window.__u5Harness.resolve(0, payload),
+      { payload: browserSurface(RUN_ID, REVISION_1, 'late unmounted success') },
+    );
+    await settleLateResponse();
+    expect(await page.evaluate(() => window.__u5Harness.snapshot().commits.length))
+      .toBe(successUnmountCommits);
+
+    await page.evaluate((runId) => window.__u5Harness.mount(runId), RUN_ID);
+    await expect.poll(
+      () => page.evaluate(() => window.__u5Harness.snapshot().requests.length),
+    ).toBe(2);
+    let snapshot = await page.evaluate(() => window.__u5Harness.snapshot());
+    expect(snapshot.requests[1].ifNoneMatch).toBeNull();
+    expect(snapshot.current).toMatchObject({ dataRunId: null, title: null, errorStatus: null });
+    const errorUnmountCommits = snapshot.commits.length;
+    await page.evaluate(() => window.__u5Harness.unmount());
+    expect(await page.evaluate(() => window.__u5Harness.snapshot().requests[1].aborted)).toBe(true);
+    await page.evaluate(() => window.__u5Harness.respondError(1, 401));
+    await settleLateResponse();
+    expect(await page.evaluate(() => window.__u5Harness.snapshot().commits.length))
+      .toBe(errorUnmountCommits);
+
+    await page.evaluate((runId) => window.__u5Harness.mount(runId), RUN_ID);
+    await expect.poll(
+      () => page.evaluate(() => window.__u5Harness.snapshot().requests.length),
+    ).toBe(3);
+    snapshot = await page.evaluate(() => window.__u5Harness.snapshot());
+    expect(snapshot.requests[2].ifNoneMatch).toBeNull();
+    expect(snapshot.current).toMatchObject({ dataRunId: null, title: null, errorStatus: null });
+    await page.evaluate(
+      ({ payload }) => window.__u5Harness.resolve(2, payload),
+      { payload: browserSurface(RUN_ID, REVISION_1, 'A ready') },
+    );
+    await expect(page.getByTestId('u5-state')).toContainText('A ready');
+
+    await page.evaluate(() => window.__u5Harness.refresh());
+    await expect.poll(
+      () => page.evaluate(() => window.__u5Harness.snapshot().requests.length),
+    ).toBe(4);
+    expect(await page.evaluate(() => window.__u5Harness.snapshot().requests[3].ifNoneMatch))
+      .toBe(`"${REVISION_1}"`);
+    await page.evaluate((runId) => window.__u5Harness.switchRun(runId), OTHER_RUN_ID);
+    await expect.poll(
+      () => page.evaluate(() => window.__u5Harness.snapshot().requests.length),
+    ).toBe(5);
+    snapshot = await page.evaluate(() => window.__u5Harness.snapshot());
+    expect(snapshot.requests[3].aborted).toBe(true);
+    expect(snapshot.requests[4].ifNoneMatch).toBeNull();
+    expect(snapshot.current).toMatchObject({
+      runId: OTHER_RUN_ID,
+      dataRunId: null,
+      title: null,
+      errorStatus: null,
+    });
+    const runSwitchCommits = snapshot.commits.length;
+    await page.evaluate(
+      ({ payload }) => window.__u5Harness.resolve(3, payload),
+      { payload: browserSurface(RUN_ID, REVISION_2, 'late A') },
+    );
+    await settleLateResponse();
+    snapshot = await page.evaluate(() => window.__u5Harness.snapshot());
+    expect(snapshot.commits).toHaveLength(runSwitchCommits);
+    expect(snapshot.current).toMatchObject({ runId: OTHER_RUN_ID, dataRunId: null, title: null });
+
+    await page.evaluate(
+      ({ payload }) => window.__u5Harness.resolve(4, payload),
+      { payload: browserSurface(OTHER_RUN_ID, REVISION_3, 'B ready') },
+    );
+    await expect(page.getByTestId('u5-state')).toContainText('B ready');
+    expect(diagnostics).toEqual([]);
+  } finally {
+    await server.close();
+  }
 });
 
 test('polling is never faster than five seconds and SSE is identity-only invalidation', () => {

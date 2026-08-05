@@ -936,6 +936,38 @@ const STORY_WORKSPACE_EPISODE_SENSITIVE_OPTION = /(?<![A-Za-z0-9_-])--(?:api[-_]
 const STORY_WORKSPACE_EPISODE_TOOL_OPTION = /(?<![A-Za-z0-9_-])(?:tool|renderer)\b[^\r\n]*?(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*/i;
 
 type StoryWorkspaceEpisodeWireRecord = Record<string, unknown>;
+type StoryWorkspaceEpisodeStringFieldVisitor = (
+  field: string,
+  classification: StoryWorkspaceEpisodeStringFieldClass,
+) => void;
+
+const storyWorkspaceEpisodeStringFieldVisitors: StoryWorkspaceEpisodeStringFieldVisitor[] = [];
+
+function storyWorkspaceEpisodeStringFieldKey(label: string): string {
+  const normalized = label.replace(/\[[0-9]+\]/g, '[]');
+  if (/\.(?:beatSceneCoverage|sceneShotCoverage|shotPromptCoverage|shotRenderQueueCoverage)\.availability$/.test(normalized)) {
+    return 'coverage.availability';
+  }
+  return normalized;
+}
+
+function storyWorkspaceEpisodeStringFieldClass(
+  label: string,
+): StoryWorkspaceEpisodeStringFieldClass {
+  const field = storyWorkspaceEpisodeStringFieldKey(label);
+  const classification = (
+    storyWorkspaceEpisodeStringFieldClassification as Readonly<
+      Record<string, StoryWorkspaceEpisodeStringFieldClass | undefined>
+    >
+  )[field];
+  if (classification === undefined) {
+    throw new Error(`${label} has no string-field classification.`);
+  }
+  storyWorkspaceEpisodeStringFieldVisitors[
+    storyWorkspaceEpisodeStringFieldVisitors.length - 1
+  ]?.(field, classification);
+  return classification;
+}
 
 function storyWorkspaceEpisodeRecord(
   value: unknown,
@@ -956,12 +988,24 @@ function storyWorkspaceEpisodeRecord(
 function storyWorkspaceEpisodeString(
   value: unknown,
   label: string,
-  options: { min?: number; max?: number; pattern?: RegExp; pathAudit?: boolean } = {},
+  options: {
+    min?: number;
+    max?: number;
+    pattern?: RegExp;
+    allowedValues?: readonly string[];
+    pathAudit?: boolean;
+  } = {},
 ): string {
+  const classification = storyWorkspaceEpisodeStringFieldClass(label);
   if (typeof value !== 'string') throw new Error(`${label} must be a string.`);
   const min = options.min ?? 0;
   const max = options.max ?? Number.MAX_SAFE_INTEGER;
-  if (value.length < min || value.length > max || (options.pattern && !options.pattern.test(value))) {
+  if (
+    value.length < min
+    || value.length > max
+    || (options.pattern && !options.pattern.test(value))
+    || (options.allowedValues && !options.allowedValues.includes(value))
+  ) {
     throw new Error(`${label} has an invalid value.`);
   }
   if ([...value].some((character) => {
@@ -973,6 +1017,18 @@ function storyWorkspaceEpisodeString(
   if (options.pathAudit !== false && STORY_WORKSPACE_EPISODE_SENSITIVE_PATH.test(value)) {
     throw new Error(`${label} contains a sensitive path.`);
   }
+  if (
+    (classification === 'machine_enum_or_pattern' || classification === 'canonical_relative_key')
+    && options.pattern === undefined
+    && options.allowedValues === undefined
+  ) throw new Error(`${label} lacks a machine-readable string constraint.`);
+  if (classification === 'diagnostic' && /[\p{Cc}\u2028\u2029]/u.test(value)) {
+    throw new Error(`${label} contains a diagnostic control or separator.`);
+  }
+  if (
+    (classification === 'public_text' || classification === 'diagnostic')
+    && storyWorkspaceEpisodeViolatesPublicTextPolicy(value)
+  ) throw new Error(`${label} violates the ${classification} policy.`);
   return value;
 }
 
@@ -1017,11 +1073,7 @@ function storyWorkspaceEpisodePublicText(
   label: string,
   options: { min?: number; max?: number } = {},
 ): string {
-  const result = storyWorkspaceEpisodeString(value, label, options);
-  if (storyWorkspaceEpisodeViolatesPublicTextPolicy(result)) {
-    throw new Error(`${label} violates the public text policy.`);
-  }
-  return result;
+  return storyWorkspaceEpisodeString(value, label, options);
 }
 
 function storyWorkspaceEpisodeNullablePublicText(
@@ -1035,7 +1087,13 @@ function storyWorkspaceEpisodeNullablePublicText(
 function storyWorkspaceEpisodeNullableString(
   value: unknown,
   label: string,
-  options?: { min?: number; max?: number; pattern?: RegExp; pathAudit?: boolean },
+  options?: {
+    min?: number;
+    max?: number;
+    pattern?: RegExp;
+    allowedValues?: readonly string[];
+    pathAudit?: boolean;
+  },
 ): string | null {
   return value === null ? null : storyWorkspaceEpisodeString(value, label, options);
 }
@@ -1069,8 +1127,13 @@ function storyWorkspaceEpisodeNullableNumber(
 }
 
 function storyWorkspaceEpisodeDatetime(value: unknown, label: string): string {
-  const result = storyWorkspaceEpisodeString(value, label, { min: 20, max: 32 });
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):([0-5]\d):([0-5]\d)(?:\.(\d{1,6}))?Z$/.exec(result);
+  const datetimePattern = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):([0-5]\d):([0-5]\d)(?:\.(\d{1,6}))?Z$/;
+  const result = storyWorkspaceEpisodeString(value, label, {
+    min: 20,
+    max: 32,
+    pattern: datetimePattern,
+  });
+  const match = datetimePattern.exec(result);
   if (!match) throw new Error(`${label} must be a UTC RFC3339 datetime.`);
   const [, year, month, day, hour, minute, second, fraction = ''] = match;
   if (Number(hour) > 23) throw new Error(`${label} must be a UTC RFC3339 datetime.`);
@@ -1094,10 +1157,7 @@ function storyWorkspaceEpisodeEnum<T extends string>(
   label: string,
   values: readonly T[],
 ): T {
-  if (typeof value !== 'string' || !values.includes(value as T)) {
-    throw new Error(`${label} has an invalid enum value.`);
-  }
-  return value as T;
+  return storyWorkspaceEpisodeString(value, label, { allowedValues: values }) as T;
 }
 
 function storyWorkspaceEpisodeArray<T>(
@@ -1121,12 +1181,11 @@ function storyWorkspaceEpisodeStringList(
   label: string,
   max: number,
   unique = false,
-  publicText = true,
 ): string[] {
   const result = storyWorkspaceEpisodeArray(
     value,
     label,
-    (item, index) => (publicText ? storyWorkspaceEpisodePublicText : storyWorkspaceEpisodeString)(
+    (item, index) => storyWorkspaceEpisodePublicText(
       item,
       `${label}[${index}]`,
       { min: 1, max: 4000 },
@@ -1143,15 +1202,7 @@ function storyWorkspaceEpisodeDiagnosticList(value: unknown, label: string): str
     label,
     (item, index) => {
       const itemLabel = `${label}[${index}]`;
-      const diagnostic = storyWorkspaceEpisodeString(item, itemLabel, { min: 1, max: 512 });
-      if ([...diagnostic].some((character) => {
-        const code = character.charCodeAt(0);
-        return code <= 31 || code === 127;
-      })) throw new Error(`${itemLabel} contains a control character.`);
-      if (storyWorkspaceEpisodeViolatesPublicTextPolicy(diagnostic)) {
-        throw new Error(`${itemLabel} violates the diagnostic policy.`);
-      }
-      return diagnostic;
+      return storyWorkspaceEpisodeString(item, itemLabel, { min: 1, max: 512 });
     },
     2048,
   );
@@ -1774,26 +1825,25 @@ function storyWorkspaceEpisodeAssertLinks(surface: StoryWorkspaceEpisodeArtifact
   )) throw new Error('auxiliary.review contains an unknown targetViewId.');
 }
 
-/** Strictly hydrate the backend camelCase Episode surface. */
-export function storyWorkspaceParseEpisodeArtifactSurface(
+function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   value: unknown,
 ): StoryWorkspaceEpisodeArtifactSurface {
   const record = storyWorkspaceEpisodeRecord(value, 'Episode artifact surface', [
     'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'narrative', 'auxiliary',
   ]);
-  const runId = storyWorkspaceEpisodeString(record.runId, 'runId', { pattern: STORY_WORKSPACE_EPISODE_RUN_ID });
+  const runId = storyWorkspaceEpisodeString(record.runId, 'surface.runId', { pattern: STORY_WORKSPACE_EPISODE_RUN_ID });
   const bindingAvailability = storyWorkspaceEpisodeEnum(
     record.bindingAvailability,
-    'bindingAvailability',
+    'surface.bindingAvailability',
     ['bound', 'unbound'],
   );
-  const opaqueEpisodeId = storyWorkspaceEpisodeNullableId(record.opaqueEpisodeId, 'opaqueEpisodeId');
+  const opaqueEpisodeId = storyWorkspaceEpisodeNullableId(record.opaqueEpisodeId, 'surface.opaqueEpisodeId');
   const manifestRevision = record.manifestRevision === null
     ? null
-    : storyWorkspaceEpisodeString(record.manifestRevision, 'manifestRevision', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
+    : storyWorkspaceEpisodeString(record.manifestRevision, 'surface.manifestRevision', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
   const etag = record.etag === null
     ? null
-    : storyWorkspaceEpisodeString(record.etag, 'etag', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
+    : storyWorkspaceEpisodeString(record.etag, 'surface.etag', { pattern: STORY_WORKSPACE_EPISODE_REVISION });
   const bindingRecovery = storyWorkspaceParseEpisodeBindingRecovery(record.bindingRecovery);
   const artifacts = storyWorkspaceEpisodeArray(record.artifacts, 'artifacts', storyWorkspaceParseEpisodeManifestEntry, 256);
   storyWorkspaceEpisodeUnique(artifacts.map((item) => item.relativeKey), 'artifacts.relativeKey');
@@ -1833,5 +1883,27 @@ export function storyWorkspaceParseEpisodeArtifactSurface(
     auxiliary,
   };
   storyWorkspaceEpisodeAssertLinks(surface);
+  return surface;
+}
+
+export interface StoryWorkspaceEpisodeArtifactParseOptions {
+  /** Test/audit seam: reports only static field keys and their public trust class. */
+  readonly onStringField?: StoryWorkspaceEpisodeStringFieldVisitor;
+}
+
+/** Strictly hydrate the backend camelCase Episode surface. */
+export function storyWorkspaceParseEpisodeArtifactSurface(
+  value: unknown,
+  options: StoryWorkspaceEpisodeArtifactParseOptions = {},
+): StoryWorkspaceEpisodeArtifactSurface {
+  const visitor = options.onStringField;
+  if (visitor === undefined) return storyWorkspaceParseEpisodeArtifactSurfaceInternal(value);
+  storyWorkspaceEpisodeStringFieldVisitors.push(visitor);
+  let surface: StoryWorkspaceEpisodeArtifactSurface;
+  try {
+    surface = storyWorkspaceParseEpisodeArtifactSurfaceInternal(value);
+  } finally {
+    storyWorkspaceEpisodeStringFieldVisitors.pop();
+  }
   return surface;
 }
