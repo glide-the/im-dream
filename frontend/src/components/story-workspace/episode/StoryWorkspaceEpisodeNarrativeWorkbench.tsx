@@ -13,8 +13,6 @@ import {
 
 import type { StoryWorkspaceEpisodeOverview } from '../../../hooks/story-workspace/contracts';
 import {
-  STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
-  STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
   storyWorkspaceEpisodeNavigationAction,
   storyWorkspaceEpisodeNavigationItems,
   storyWorkspaceEpisodeSelectionKey,
@@ -191,6 +189,9 @@ function navigationLabel(
   item: StoryWorkspaceEpisodeNavigationItem,
   viewModel: StoryWorkspaceEpisodeExecutionViewModel,
 ): string {
+  const associationLabel = item.auxiliaryGroup === 'orphan'
+    ? '孤立引用'
+    : '尚未关联';
   if (item.kind === 'episode') {
     return viewModel.episode?.title ?? 'Episode Overview';
   }
@@ -206,13 +207,11 @@ function navigationLabel(
     return viewModel.shotsById[item.id]?.shotId ?? '镜头尚未生成';
   }
   if (item.kind === 'auxiliary-group') {
-    return item.id === STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID
-      ? '尚未关联'
-      : '孤立引用';
+    return associationLabel;
   }
-  if (item.kind === 'prompt') return 'Prompt · 尚未关联';
-  if (item.kind === 'render-queue') return 'Render Queue · 尚未关联';
-  if (item.kind === 'review-target') return 'Review · 尚未关联';
+  if (item.kind === 'prompt') return `Prompt · ${associationLabel}`;
+  if (item.kind === 'render-queue') return `Render Queue · ${associationLabel}`;
+  if (item.kind === 'review-target') return `Review · ${associationLabel}`;
   return '故事线';
 }
 
@@ -471,11 +470,13 @@ function NarrativeContent({
   selection,
   episodeOverview,
   onNavigate,
+  auxiliaryGroup,
 }: {
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly selection: StoryWorkspaceEpisodeSelection;
   readonly episodeOverview: StoryWorkspaceEpisodeOverview | null;
   readonly onNavigate: (selection: StoryWorkspaceEpisodeSelection) => void;
+  readonly auxiliaryGroup: StoryWorkspaceEpisodeNavigationItem['auxiliaryGroup'];
 }) {
   if (selection.kind === 'episode' || selection.kind === 'story-arc') {
     return h(EpisodeOverviewContent, { viewModel, overview: episodeOverview });
@@ -489,14 +490,22 @@ function NarrativeContent({
   if (selection.kind === 'shot') {
     return h(ShotContent, { viewModel, id: selection.id, onReturnScene: onNavigate });
   }
-  const orphan = selection.id === STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID;
+  const orphan = auxiliaryGroup === 'orphan';
+  const associationLabel = orphan ? '孤立引用' : '尚未关联';
+  const artifactLabel = selection.kind === 'prompt'
+    ? 'Prompt'
+    : selection.kind === 'render-queue'
+      ? 'Render Queue'
+      : selection.kind === 'review-target'
+        ? 'Review'
+        : null;
   return h(
     'section',
     { 'aria-label': '辅助选择' },
     h(
       'h2',
       null,
-      orphan ? '孤立引用' : '尚未关联',
+      artifactLabel === null ? associationLabel : `${artifactLabel} · ${associationLabel}`,
     ),
     h(
       'p',
@@ -521,7 +530,8 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
   onAuxiliarySelection,
 }: StoryWorkspaceEpisodeNarrativeWorkbenchProps) {
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
-  const pendingFocusKey = useRef<string | null>(null);
+  const focusToken = useRef(0);
+  const focusIntent = useRef<{ readonly token: number; readonly targetKey: string } | null>(null);
   const items = storyWorkspaceEpisodeNavigationItems(viewModel, expandedKeys);
   const requestedKey = storyWorkspaceEpisodeSelectionKey(selection);
   const activeItem = items.find(
@@ -534,9 +544,15 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
     ? null
     : storyWorkspaceEpisodeSelectionKey(activeSelection);
   useLayoutEffect(() => {
-    if (activeKey === null || pendingFocusKey.current !== activeKey) return;
-    pendingFocusKey.current = null;
-    itemRefs.current.get(activeKey)?.focus();
+    const intent = focusIntent.current;
+    if (intent === null) return;
+    focusIntent.current = null;
+    if (
+      activeKey === null
+      || intent.token !== focusToken.current
+      || intent.targetKey !== activeKey
+    ) return;
+    itemRefs.current.get(intent.targetKey)?.focus();
   }, [activeKey]);
   if (viewModel.episode === null || activeSelection === null) {
     return h('section', { role: 'status' }, '故事线尚未生成');
@@ -549,8 +565,25 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
     );
   };
   const selectAndFocus = (nextSelection: StoryWorkspaceEpisodeSelection) => {
-    pendingFocusKey.current = storyWorkspaceEpisodeSelectionKey(nextSelection);
+    const targetKey = storyWorkspaceEpisodeSelectionKey(nextSelection);
+    if (targetKey === activeKey) {
+      focusIntent.current = null;
+      select(nextSelection);
+      return;
+    }
+    const token = focusToken.current + 1;
+    focusToken.current = token;
+    focusIntent.current = { token, targetKey };
     select(nextSelection);
+  };
+  const handleContentKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopPropagation();
+    focusToken.current += 1;
+    focusIntent.current = null;
+    onEscape(activeSelection);
+    itemRefs.current.get(storyWorkspaceEpisodeSelectionKey(activeSelection))?.focus();
   };
   const handleKeyDown = (
     event: KeyboardEvent<HTMLButtonElement>,
@@ -608,12 +641,13 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
     ),
     h(
       'section',
-      { 'aria-label': '叙事内容工作面' },
+      { 'aria-label': '叙事内容工作面', onKeyDown: handleContentKeyDown },
       h(NarrativeContent, {
         viewModel,
         selection: activeSelection,
         episodeOverview,
         onNavigate: selectAndFocus,
+        auxiliaryGroup: activeItem.auxiliaryGroup,
       }),
     ),
     auxiliarySlot === undefined

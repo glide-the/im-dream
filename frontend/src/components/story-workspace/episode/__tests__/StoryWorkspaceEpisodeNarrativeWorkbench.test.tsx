@@ -41,6 +41,14 @@ const SHOT_ID = opaqueId(8);
 const UNLINKED_SHOT_ID = opaqueId(9);
 const ORPHAN_SHOT_ID = opaqueId(10);
 const CHARACTER_BEAT_ID = opaqueId(11);
+const UNLINKED_PROMPT_ID = opaqueId(12);
+const ORPHAN_PROMPT_ID = opaqueId(13);
+const UNLINKED_QUEUE_ID = opaqueId(14);
+const ORPHAN_QUEUE_ID = opaqueId(15);
+const UNLINKED_REVIEW_ID = opaqueId(16);
+const ORPHAN_REVIEW_ID = opaqueId(17);
+const UNLINKED_REVIEW_SECTION_ID = opaqueId(18);
+const ORPHAN_REVIEW_SECTION_ID = opaqueId(19);
 
 function coverage(linked: number, total: number) {
   return total === 0
@@ -245,6 +253,179 @@ function surface(stage: 'outline' | 'script' | 'storyboard'): StoryWorkspaceEpis
       },
     },
     auxiliary: null,
+    workflow: {
+      factsRevision: 0,
+      nextAction: {
+        action: stage === 'outline'
+          ? 'write_script'
+          : stage === 'script'
+            ? 'review_script'
+            : 'generate_prompts',
+        diagnostic: 'ready',
+        canDispatch: true,
+      },
+      prerequisites: [],
+      legacyPartial: false,
+    },
+  };
+}
+
+function surfaceWithAuxiliary(): StoryWorkspaceEpisodeArtifactSurface {
+  return {
+    ...surface('storyboard'),
+    auxiliary: {
+      manifestRevision: 'aux-r1',
+      prompts: {
+        total: 2,
+        nextCursor: null,
+        items: [
+          {
+            id: UNLINKED_PROMPT_ID,
+            shotId: 'SUP-E01-01',
+            kind: 'image',
+            shotViewId: null,
+            associationStatus: 'unlinked',
+            positive: '雨水特写',
+            negative: null,
+            parameters: {
+              model: null,
+              mode: null,
+              durationSec: null,
+              motionStrength: null,
+              cameraMotion: null,
+              aspectRatio: null,
+            },
+            generability: {
+              characterAnchor: null,
+              motionFeasibility: null,
+              durationBudget: null,
+              notes: null,
+            },
+            sourceArtifact: 'prompts/unlinked.yaml',
+            sourceRevision: 'prompt-r1',
+          },
+          {
+            id: ORPHAN_PROMPT_ID,
+            shotId: 'S99-E01-SH01',
+            kind: 'video',
+            shotViewId: null,
+            associationStatus: 'orphan',
+            positive: '未知侧门',
+            negative: null,
+            parameters: {
+              model: null,
+              mode: null,
+              durationSec: null,
+              motionStrength: null,
+              cameraMotion: null,
+              aspectRatio: null,
+            },
+            generability: {
+              characterAnchor: null,
+              motionFeasibility: null,
+              durationBudget: null,
+              notes: null,
+            },
+            sourceArtifact: 'prompts/orphan.yaml',
+            sourceRevision: 'prompt-r1',
+          },
+        ],
+      },
+      renderGuide: {
+        sections: [],
+        queue: {
+          total: 2,
+          nextCursor: null,
+          items: [
+            {
+              id: UNLINKED_QUEUE_ID,
+              shotId: 'SUP-E01-01',
+              shotViewId: null,
+              associationStatus: 'unlinked',
+              durationSec: null,
+              risk: null,
+              priority: null,
+              renderer: null,
+              status: 'pending',
+              sourceArtifact: 'renders/render-guide.md',
+              sourceRevision: 'render-r1',
+            },
+            {
+              id: ORPHAN_QUEUE_ID,
+              shotId: 'S99-E01-SH01',
+              shotViewId: null,
+              associationStatus: 'orphan',
+              durationSec: null,
+              risk: null,
+              priority: null,
+              renderer: null,
+              status: 'pending',
+              sourceArtifact: 'renders/render-guide.md',
+              sourceRevision: 'render-r1',
+            },
+          ],
+        },
+        sourceArtifact: 'renders/render-guide.md',
+        sourceRevision: 'render-r1',
+      },
+      review: {
+        scope: 'full-chain',
+        overallVerdict: null,
+        reviewedArtifacts: [],
+        sourceRevisions: [],
+        sections: [
+          {
+            id: UNLINKED_REVIEW_SECTION_ID,
+            level: 2,
+            title: '未关联审阅',
+            text: '没有定位目标。',
+            sourceArtifact: 'review-report.md',
+            sourceRevision: 'review-r1',
+          },
+          {
+            id: ORPHAN_REVIEW_SECTION_ID,
+            level: 2,
+            title: '孤立审阅',
+            text: '引用目标不存在。',
+            sourceArtifact: 'review-report.md',
+            sourceRevision: 'review-r1',
+          },
+        ],
+        targets: [
+          {
+            id: UNLINKED_REVIEW_ID,
+            kind: 'shot',
+            sourceKey: 'SUP-E01-01',
+            targetViewId: null,
+            associationStatus: 'unlinked',
+            sectionId: UNLINKED_REVIEW_SECTION_ID,
+            sourceArtifact: 'review-report.md',
+            sourceRevision: 'review-r1',
+          },
+          {
+            id: ORPHAN_REVIEW_ID,
+            kind: 'shot',
+            sourceKey: 'S99-E01-SH01',
+            targetViewId: null,
+            associationStatus: 'orphan',
+            sectionId: ORPHAN_REVIEW_SECTION_ID,
+            sourceArtifact: 'review-report.md',
+            sourceRevision: 'review-r1',
+          },
+        ],
+        sourceArtifact: 'review-report.md',
+        sourceRevision: 'review-r1',
+      },
+      associations: {
+        shotPromptCoverage: coverage(0, 3),
+        shotRenderQueueCoverage: coverage(0, 3),
+        totalPrompts: 2,
+        totalQueueEntries: 2,
+        orphanPrompts: [ORPHAN_PROMPT_ID],
+        orphanQueueEntries: [ORPHAN_QUEUE_ID],
+        duplicateQueueShotIds: [],
+      },
+    },
   };
 }
 
@@ -440,6 +621,57 @@ test('uses one resolved active selection for tree state and narrative content', 
   expect(html.match(/tabindex="0"/g)).toHaveLength(1);
 });
 
+test('preserves orphan and unlinked semantics for Prompt, Render and Review children', () => {
+  const viewModel = storyWorkspaceBuildEpisodeExecutionViewModel(surfaceWithAuxiliary());
+  const expandedKeys = new Set([
+    storyWorkspaceEpisodeSelectionKey({
+      kind: 'auxiliary-group', id: STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
+    }),
+    storyWorkspaceEpisodeSelectionKey({
+      kind: 'auxiliary-group', id: STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID,
+    }),
+  ]);
+  const navigationHtml = renderWorkbench({
+    viewModel,
+    selection: {
+      kind: 'auxiliary-group', id: STORY_WORKSPACE_EPISODE_UNLINKED_GROUP_ID,
+    },
+    expandedKeys,
+    onSelection: noOp,
+    onExpanded: noOp,
+    onEscape: noOp,
+  });
+
+  for (const expected of [
+    'Prompt · 尚未关联',
+    'Prompt · 孤立引用',
+    'Render Queue · 尚未关联',
+    'Render Queue · 孤立引用',
+    'Review · 尚未关联',
+    'Review · 孤立引用',
+  ]) expect(navigationHtml).toContain(expected);
+
+  const detailCases: ReadonlyArray<readonly [StoryWorkspaceEpisodeSelection, string]> = [
+    [{ kind: 'prompt', id: UNLINKED_PROMPT_ID }, 'Prompt · 尚未关联'],
+    [{ kind: 'prompt', id: ORPHAN_PROMPT_ID }, 'Prompt · 孤立引用'],
+    [{ kind: 'render-queue', id: UNLINKED_QUEUE_ID }, 'Render Queue · 尚未关联'],
+    [{ kind: 'render-queue', id: ORPHAN_QUEUE_ID }, 'Render Queue · 孤立引用'],
+    [{ kind: 'review-target', id: UNLINKED_REVIEW_ID }, 'Review · 尚未关联'],
+    [{ kind: 'review-target', id: ORPHAN_REVIEW_ID }, 'Review · 孤立引用'],
+  ];
+  for (const [selection, heading] of detailCases) {
+    const html = renderWorkbench({
+      viewModel,
+      selection,
+      expandedKeys,
+      onSelection: noOp,
+      onExpanded: noOp,
+      onEscape: noOp,
+    });
+    expect(html).toContain(`<h2>${heading}</h2>`);
+  }
+});
+
 test('keyboard seam delegates U6 actions and uses explicit Escape callback', () => {
   const viewModel = storyWorkspaceBuildEpisodeExecutionViewModel(surface('storyboard'));
   const beatSelection = { kind: 'narrative-beat' as const, id: BEAT_ID };
@@ -534,7 +766,7 @@ test('source boundary contains no generic conversation, persistence or styling d
   expect(SOURCE).toContain('onAuxiliarySelection');
 });
 
-test('moves real DOM focus through continuous Arrow, Home and End navigation', async ({ page }) => {
+test('keeps real DOM focus stable across navigation, controlled transitions and Escape', async ({ page }) => {
   const browserSurface = JSON.stringify(surface('storyboard'));
   const harnessModule = `
     import React, { useState } from 'react';
@@ -548,6 +780,8 @@ test('moves real DOM focus through continuous Arrow, Home and End navigation', a
     function Harness() {
       const [selection, setSelection] = useState({ kind: 'episode', id: '${EPISODE_ID}' });
       const [expandedKeys, setExpandedKeys] = useState(new Set());
+      const [escapeCount, setEscapeCount] = useState(0);
+      const [deferSelection, setDeferSelection] = useState(false);
       const onExpanded = (target, expanded) => {
         setExpandedKeys((current) => {
           const next = new Set(current);
@@ -557,15 +791,54 @@ test('moves real DOM focus through continuous Arrow, Home and End navigation', a
           return next;
         });
       };
-      return React.createElement(StoryWorkspaceEpisodeNarrativeWorkbench, {
-        viewModel,
-        selection,
-        expandedKeys,
-        episodeOverview: surface.narrative.overview,
-        onSelection: setSelection,
-        onExpanded,
-        onEscape: () => undefined,
-      });
+      return React.createElement(
+        React.Fragment,
+        null,
+        React.createElement('button', { id: 'outside-focus', type: 'button' }, '外部焦点'),
+        React.createElement('button', {
+          id: 'external-episode',
+          type: 'button',
+          onClick: () => setSelection({ kind: 'episode', id: '${EPISODE_ID}' }),
+        }, '外部选择 Episode'),
+        React.createElement('button', {
+          id: 'external-beat',
+          type: 'button',
+          onClick: () => setSelection({ kind: 'narrative-beat', id: '${BEAT_ID}' }),
+        }, '外部选择 Beat'),
+        React.createElement('button', {
+          id: 'external-orphan-group',
+          type: 'button',
+          onClick: () => setSelection({
+            kind: 'auxiliary-group',
+            id: '${STORY_WORKSPACE_EPISODE_ORPHAN_GROUP_ID}',
+          }),
+        }, '外部选择孤立引用'),
+        React.createElement('button', {
+          id: 'defer-selection',
+          type: 'button',
+          onClick: () => setDeferSelection(true),
+        }, '暂缓受控选择'),
+        React.createElement('button', {
+          id: 'resume-selection',
+          type: 'button',
+          onClick: () => setDeferSelection(false),
+        }, '恢复受控选择'),
+        React.createElement(
+          'output',
+          { id: 'selection-mode' },
+          deferSelection ? 'deferred' : 'immediate',
+        ),
+        React.createElement('output', { id: 'escape-count' }, String(escapeCount)),
+        React.createElement(StoryWorkspaceEpisodeNarrativeWorkbench, {
+          viewModel,
+          selection,
+          expandedKeys,
+          episodeOverview: surface.narrative.overview,
+          onSelection: deferSelection ? () => undefined : setSelection,
+          onExpanded,
+          onEscape: () => setEscapeCount((count) => count + 1),
+        }),
+      );
     }
 
     createRoot(document.querySelector('#root')).render(React.createElement(Harness));
@@ -629,6 +902,55 @@ test('moves real DOM focus through continuous Arrow, Home and End navigation', a
     await expect(activeTreeItem).toContainText('雨夜重逢');
     await activeTreeItem.focus();
 
+    const outsideFocus = page.locator('#outside-focus');
+    const externalSelect = async (id: string) => {
+      await page.locator(id).evaluate((element: HTMLButtonElement) => element.click());
+    };
+    for (const key of ['Enter', 'Space', 'Home']) {
+      await activeTreeItem.focus();
+      await page.keyboard.press(key);
+      await outsideFocus.focus();
+      await externalSelect('#external-beat');
+      await expect(activeTreeItem).toContainText('SC-01');
+      await externalSelect('#external-episode');
+      await expect(activeTreeItem).toContainText('雨夜重逢');
+      await expect.soft.poll(() => page.evaluate(() => document.activeElement?.id ?? ''), {
+        timeout: 500,
+      }).toBe('outside-focus');
+    }
+    await externalSelect('#defer-selection');
+    await expect(page.locator('#selection-mode')).toHaveText('deferred');
+    await activeTreeItem.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(activeTreeItem).toContainText('雨夜重逢');
+    await outsideFocus.focus();
+    await externalSelect('#external-orphan-group');
+    await expect(activeTreeItem).toContainText('孤立引用');
+    await externalSelect('#external-beat');
+    await expect(activeTreeItem).toContainText('SC-01');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id ?? ''), {
+      timeout: 500,
+    }).toBe('outside-focus');
+    await externalSelect('#external-episode');
+    await externalSelect('#resume-selection');
+    await expect(page.locator('#selection-mode')).toHaveText('immediate');
+    await expect(activeTreeItem).toContainText('雨夜重逢');
+    await activeTreeItem.focus();
+    await page.keyboard.press('End');
+    await expectFocused('孤立引用');
+    await page.keyboard.press('End');
+    await outsideFocus.focus();
+    await externalSelect('#external-episode');
+    await expect(activeTreeItem).toContainText('雨夜重逢');
+    await externalSelect('#external-orphan-group');
+    await expect(activeTreeItem).toContainText('孤立引用');
+    await expect.soft.poll(() => page.evaluate(() => document.activeElement?.id ?? ''), {
+      timeout: 500,
+    }).toBe('outside-focus');
+    await externalSelect('#external-episode');
+    await expect(activeTreeItem).toContainText('雨夜重逢');
+    await activeTreeItem.focus();
+
     await page.keyboard.press('ArrowRight');
     await expectFocused('SC-01');
     await page.keyboard.press('ArrowDown');
@@ -650,7 +972,43 @@ test('moves real DOM focus through continuous Arrow, Home and End navigation', a
     await page.keyboard.press('ArrowRight');
     await expectFocused('S01-E01-SH01');
     await expect(page.getByRole('article', { name: 'Shot Detail' })).toBeVisible();
-    await page.getByRole('button', { name: '返回场景：雨夜站台' }).click();
+
+    const escapeCount = () => page.locator('#escape-count').textContent();
+    const expectShotFocus = async () => {
+      await expect.soft.poll(() => page.evaluate(() => document.activeElement?.textContent ?? ''), {
+        timeout: 500,
+      }).toContain('S01-E01-SH01');
+    };
+    const returnScene = page.getByRole('button', { name: '返回场景：雨夜站台' });
+    await returnScene.focus();
+    await page.keyboard.press('Escape');
+    await expect.soft.poll(escapeCount, { timeout: 500 }).toBe('1');
+    await expectShotFocus();
+
+    await outsideFocus.focus();
+    await page.getByRole('article', { name: 'Shot Detail' }).dispatchEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      bubbles: true,
+    });
+    await expect.soft.poll(escapeCount, { timeout: 500 }).toBe('2');
+    await expectShotFocus();
+
+    await outsideFocus.focus();
+    await page.getByRole('region', { name: '叙事内容工作面' }).dispatchEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      bubbles: true,
+    });
+    await expect.soft.poll(escapeCount, { timeout: 500 }).toBe('3');
+    await expectShotFocus();
+
+    await activeTreeItem.focus();
+    await page.keyboard.press('Escape');
+    await expect.soft.poll(escapeCount, { timeout: 500 }).toBe('4');
+    await expectShotFocus();
+
+    await returnScene.click();
     await expectFocused('S01');
     await expect(page.getByRole('article', { name: 'Script Scene' })).toBeVisible();
     await page.keyboard.press('ArrowRight');
