@@ -8,6 +8,7 @@ import {
   type StoryWorkspaceDreamAgentViewModel,
 } from '../../../hooks/story-workspace';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
+import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
 import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
 
 export interface StoryWorkspaceDreamAgentDialogProps {
@@ -64,8 +65,11 @@ export function StoryWorkspaceDreamAgentDialog({
   });
 
   useEffect(() => {
-    const disabled = !snapshot?.canSend;
-    if (disabled) headingRef.current?.focus();
+    if (agent.pendingToolConfirmation) {
+      dialogRef.current?.querySelector<HTMLElement>(
+        '.story-workspace-dream-tool-confirmation button:not(:disabled), .story-workspace-dream-tool-confirmation input:not(:disabled), .story-workspace-dream-tool-confirmation select:not(:disabled), .story-workspace-dream-tool-confirmation textarea:not(:disabled)',
+      )?.focus();
+    } else if (!snapshot?.canSend) headingRef.current?.focus();
     else inputRef.current?.focus();
     const media = window.matchMedia('(max-width: 767px)');
     const syncNarrow = () => setIsNarrow(media.matches);
@@ -74,7 +78,7 @@ export function StoryWorkspaceDreamAgentDialog({
       if (event.key === 'Escape') { event.preventDefault(); onClose(); return; }
       if (event.key !== 'Tab' || !media.matches) return;
       const focusable = dialogRef.current?.querySelectorAll<HTMLElement>(
-        'button:not(:disabled), textarea:not(:disabled), [tabindex]',
+        'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]',
       );
       if (!focusable?.length) return;
       const currentIndex = Array.from(focusable).indexOf(document.activeElement as HTMLElement);
@@ -84,7 +88,7 @@ export function StoryWorkspaceDreamAgentDialog({
     document.addEventListener('keydown', onKeyDown);
     media.addEventListener('change', syncNarrow);
     return () => { document.removeEventListener('keydown', onKeyDown); media.removeEventListener('change', syncNarrow); };
-  }, [onClose, snapshot?.canSend]);
+  }, [agent.pendingToolConfirmation, onClose, snapshot?.canSend]);
 
   useEffect(() => () => { restoreFocusRef.current?.focus(); }, [restoreFocusRef]);
 
@@ -163,24 +167,32 @@ export function StoryWorkspaceDreamAgentDialog({
         )}
       </div>
       <p className="story-workspace-dream-agent-dialog__stream-announcement" aria-atomic="false" aria-live="polite">{announcedStreamText}</p>
-      <form className="story-workspace-dream-agent-dialog__composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-        {inputHint && <p role="status">{inputHint}</p>}
-        {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
-        <label>
-          <span>给 Dream Agent 留言</span>
-          <textarea
-            aria-label="给 Dream Agent 留言"
-            disabled={!agent.snapshot?.canSend || agent.isSending}
-            onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
-            onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
-            placeholder="写下后续创作指令…"
-            ref={inputRef}
-            rows={3}
-            value={draft}
-          />
-        </label>
-        <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
-      </form>
+      {agent.pendingToolConfirmation ? (
+        <StoryWorkspaceDreamToolConfirmation
+          confirmation={agent.pendingToolConfirmation}
+          isResolving={agent.isConfirmingTool}
+          onResolve={agent.confirmTool}
+        />
+      ) : (
+        <form className="story-workspace-dream-agent-dialog__composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+          {inputHint && <p role="status">{inputHint}</p>}
+          {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
+          <label>
+            <span>给 Dream Agent 留言</span>
+            <textarea
+              aria-label="给 Dream Agent 留言"
+              disabled={!agent.snapshot?.canSend || agent.isSending}
+              onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
+              onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
+              placeholder="写下后续创作指令…"
+              ref={inputRef}
+              rows={3}
+              value={draft}
+            />
+          </label>
+          <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
+        </form>
+      )}
     </div>
   );
 }

@@ -399,10 +399,10 @@ function storyWorkspaceParseDreamAgentToolConfirmation(value: unknown): StoryWor
   if (value.network !== undefined) {
     if (!storyWorkspaceDreamAgentIsRecord(value.network)
       || (value.network.host !== null && (typeof value.network.host !== 'string' || value.network.host.length > 255))
-      || !['disabled', 'allowlist', 'open'].includes(String(value.network.policyMode))) return null;
+      || !['allowlist', 'open', 'deny', 'unknown'].includes(String(value.network.policy))) return null;
     network = {
       host: value.network.host as string | null,
-      policyMode: value.network.policyMode as 'disabled' | 'allowlist' | 'open',
+      policy: value.network.policy as 'allowlist' | 'open' | 'deny' | 'unknown',
     };
   }
   return {

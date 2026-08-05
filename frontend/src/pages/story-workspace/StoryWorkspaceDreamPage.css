@@ -467,6 +467,71 @@
 .story-workspace-dream-agent-panel textarea { width: 100%; box-sizing: border-box; padding: 8px 1px; color: var(--dream-ink); background: transparent; border: 0; border-bottom: 1px solid var(--dream-rule); border-radius: 0; font: inherit; font-size: 13px; line-height: 1.55; outline: none; resize: vertical; }
 .story-workspace-dream-agent-panel form > button { justify-self: end; min-height: 27px; font-weight: 700; }
 
+.story-workspace-dream-tool-confirmation {
+  position: relative;
+  display: grid;
+  gap: 13px;
+  max-height: min(46vh, 380px);
+  box-sizing: border-box;
+  padding: 15px 19px 17px 23px;
+  overflow-y: auto;
+  color: var(--dream-body);
+  background: color-mix(in srgb, var(--dream-paper) 94%, var(--dream-action) 6%);
+  border-top: 1px solid var(--dream-rule);
+  border-bottom: 1px solid var(--dream-rule);
+}
+
+.story-workspace-dream-agent-panel > .story-workspace-dream-tool-confirmation {
+  padding-right: 4px;
+  padding-left: 11px;
+}
+
+.story-workspace-dream-tool-confirmation::before {
+  position: absolute;
+  top: 15px;
+  bottom: 17px;
+  left: 7px;
+  width: 2px;
+  content: "";
+  background: var(--dream-action);
+}
+
+.story-workspace-dream-agent-panel > .story-workspace-dream-tool-confirmation::before { left: 0; }
+.story-workspace-dream-tool-confirmation > header { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.story-workspace-dream-tool-confirmation > header span { color: var(--dream-action); font-family: ui-monospace, monospace; font-size: 9px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.story-workspace-dream-tool-confirmation > header h3 { margin: 5px 0 0; color: var(--dream-ink); font-family: Georgia, "Times New Roman", serif; font-size: 17px; font-weight: 500; line-height: 1.35; }
+.story-workspace-dream-tool-confirmation > header small { padding-top: 2px; color: var(--dream-muted); font-family: ui-monospace, monospace; font-size: 9px; overflow-wrap: anywhere; }
+.story-workspace-dream-tool-confirmation form { display: grid; gap: 14px; padding: 0; border: 0; }
+.story-workspace-dream-tool-confirmation fieldset { display: grid; min-width: 0; gap: 8px; margin: 0; padding: 0; border: 0; }
+.story-workspace-dream-tool-confirmation legend { margin-bottom: 2px; color: var(--dream-ink); font-size: 12px; font-weight: 650; line-height: 1.5; }
+.story-workspace-dream-tool-confirmation legend em { color: var(--dream-action); font-style: normal; }
+.story-workspace-dream-tool-confirmation input[type="text"],
+.story-workspace-dream-tool-confirmation input[type="number"],
+.story-workspace-dream-tool-confirmation select,
+.story-workspace-dream-tool-confirmation textarea { width: 100%; box-sizing: border-box; padding: 8px 2px; color: var(--dream-ink); background: transparent; border: 0; border-bottom: 1px solid var(--dream-rule); border-radius: 0; font: inherit; font-size: 12px; outline: none; }
+.story-workspace-dream-tool-confirmation input:focus-visible,
+.story-workspace-dream-tool-confirmation select:focus-visible,
+.story-workspace-dream-tool-confirmation textarea:focus-visible { border-bottom-color: var(--dream-action); box-shadow: 0 1px 0 var(--dream-action); }
+.story-workspace-dream-tool-confirmation__options { display: grid; gap: 6px; }
+.story-workspace-dream-agent-panel .story-workspace-dream-tool-confirmation__option,
+.story-workspace-dream-tool-confirmation__option { display: flex; align-items: start; gap: 9px; margin: 0; padding: 8px 9px; cursor: pointer; background: color-mix(in srgb, var(--dream-paper) 80%, transparent); border: 1px solid color-mix(in srgb, var(--dream-rule) 72%, transparent); }
+.story-workspace-dream-tool-confirmation__option input { flex: 0 0 auto; margin: 3px 0 0; accent-color: var(--dream-action); }
+.story-workspace-dream-tool-confirmation__option span { display: grid; min-width: 0; gap: 2px; }
+.story-workspace-dream-tool-confirmation__option strong { color: var(--dream-ink); font-size: 12px; font-weight: 600; }
+.story-workspace-dream-tool-confirmation__option small { color: var(--dream-muted); font-family: inherit; font-size: 10px; letter-spacing: 0; line-height: 1.4; text-transform: none; }
+.story-workspace-dream-tool-confirmation__check { display: inline-flex; align-items: center; gap: 8px; color: var(--dream-body); font-size: 12px; }
+.story-workspace-dream-tool-confirmation__decision { display: grid; gap: 13px; }
+.story-workspace-dream-tool-confirmation__decision > p { margin: 0; color: var(--dream-muted); font-size: 11px; line-height: 1.55; }
+.story-workspace-dream-tool-confirmation dl { display: grid; gap: 6px; margin: 0; }
+.story-workspace-dream-tool-confirmation dl > div { display: grid; grid-template-columns: 45px minmax(0, 1fr); gap: 8px; font-size: 11px; line-height: 1.45; }
+.story-workspace-dream-tool-confirmation dt { color: var(--dream-muted); }
+.story-workspace-dream-tool-confirmation dd { margin: 0; color: var(--dream-ink); font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.story-workspace-dream-tool-confirmation__actions { display: flex; justify-content: flex-end; gap: 12px; padding-top: 2px; }
+.story-workspace-dream-agent-panel .story-workspace-dream-tool-confirmation__actions button,
+.story-workspace-dream-agent-dialog .story-workspace-dream-tool-confirmation__actions button { min-height: 30px; padding: 0 2px; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
+.story-workspace-dream-tool-confirmation__actions button:first-child { color: var(--dream-muted); }
+.story-workspace-dream-tool-confirmation__actions button:disabled { cursor: not-allowed; opacity: .44; }
+
 .story-workspace-dream-agent-dialog .story-workspace-dream-agent-scroll-to-latest,
 .story-workspace-dream-agent-panel .story-workspace-dream-agent-scroll-to-latest {
   position: absolute;

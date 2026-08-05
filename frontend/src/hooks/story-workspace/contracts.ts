@@ -293,7 +293,7 @@ export interface StoryWorkspaceDreamAgentToolConfirmation {
   readonly questions?: readonly StoryWorkspaceDreamAgentToolConfirmationQuestion[];
   readonly network?: {
     readonly host: string | null;
-    readonly policyMode: 'disabled' | 'allowlist' | 'open';
+    readonly policy: 'allowlist' | 'open' | 'deny' | 'unknown';
   };
 }
 

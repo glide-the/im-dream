@@ -58,7 +58,10 @@ export function StoryWorkspaceDreamToolConfirmation({
   isResolving,
   onResolve,
 }: StoryWorkspaceDreamToolConfirmationProps) {
-  const questions = confirmation.questions ?? [];
+  const questions = useMemo(
+    () => confirmation.questions ?? [],
+    [confirmation.questions],
+  );
   const [answers, setAnswers] = useState<Record<string, unknown>>(
     () => storyWorkspaceDreamInitialAnswers(questions),
   );
@@ -211,7 +214,7 @@ export function StoryWorkspaceDreamToolConfirmation({
           {confirmation.kind === 'sandbox_network' ? (
             <dl>
               <div><dt>目标</dt><dd>{confirmation.network?.host ?? '未提供主机名'}</dd></div>
-              <div><dt>规则</dt><dd>{confirmation.network?.policyMode === 'open' ? '开放网络' : confirmation.network?.policyMode === 'disabled' ? '网络已关闭' : '仅允许清单内地址'}</dd></div>
+              <div><dt>规则</dt><dd>{confirmation.network?.policy === 'open' ? '开放网络' : confirmation.network?.policy === 'allowlist' ? '仅允许清单内地址' : confirmation.network?.policy === 'deny' ? '网络访问受限' : '网络规则待核验'}</dd></div>
             </dl>
           ) : (
             <p>此操作需要你的明确许可。Dream 工作台不会展示原始工具参数或隐藏运行信息。</p>
@@ -225,4 +228,3 @@ export function StoryWorkspaceDreamToolConfirmation({
     </section>
   );
 }
-

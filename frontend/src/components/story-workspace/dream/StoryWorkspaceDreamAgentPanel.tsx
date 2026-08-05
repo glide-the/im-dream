@@ -7,6 +7,7 @@ import {
   storyWorkspaceNewDreamAgentIdempotencyKey,
   type StoryWorkspaceDreamAgentViewModel,
 } from '../../../hooks/story-workspace';
+import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
 import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
 
 export const STORY_WORKSPACE_DREAM_AGENT_PANEL_ID = 'story-workspace-dream-agent-panel';
@@ -115,23 +116,31 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
         )}
       </div>
       <p className="story-workspace-dream-agent-panel__announcement" aria-atomic="false" aria-live="polite">{announcedStreamText}</p>
-      <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-        {inputHint && <p role="status">{inputHint}</p>}
-        {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
-        <label>
-          <span>给 Dream Agent 留言</span>
-          <textarea
-            aria-label="给 Dream Agent 留言"
-            disabled={!agent.snapshot?.canSend || agent.isSending}
-            onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
-            onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
-            placeholder="写下后续创作指令…"
-            rows={3}
-            value={draft}
-          />
-        </label>
-        <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
-      </form>
+      {agent.pendingToolConfirmation ? (
+        <StoryWorkspaceDreamToolConfirmation
+          confirmation={agent.pendingToolConfirmation}
+          isResolving={agent.isConfirmingTool}
+          onResolve={agent.confirmTool}
+        />
+      ) : (
+        <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+          {inputHint && <p role="status">{inputHint}</p>}
+          {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
+          <label>
+            <span>给 Dream Agent 留言</span>
+            <textarea
+              aria-label="给 Dream Agent 留言"
+              disabled={!agent.snapshot?.canSend || agent.isSending}
+              onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
+              onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
+              placeholder="写下后续创作指令…"
+              rows={3}
+              value={draft}
+            />
+          </label>
+          <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
+        </form>
+      )}
     </section>
   );
 }

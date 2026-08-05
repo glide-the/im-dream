@@ -65,6 +65,8 @@ export type { StoryWorkspaceDreamRunsState } from './useStoryWorkspaceDreamRuns'
 export {
   storyWorkspaceDreamAgentEventsEndpoint,
   storyWorkspaceDreamAgentMessagesEndpoint,
+  storyWorkspaceDreamAgentToolConfirmationEndpoint,
+  storyWorkspaceBuildDreamAgentToolConfirmationPayload,
   storyWorkspaceBuildDreamAgentSendPayload,
   storyWorkspaceFetchDreamAgentSnapshot,
   storyWorkspaceNewDreamAgentIdempotencyKey,
@@ -73,6 +75,7 @@ export {
   storyWorkspaceReadDreamAgentEventStream,
   storyWorkspaceReduceDreamAgentEvents,
   storyWorkspaceSubmitDreamAgentMessage,
+  storyWorkspaceSubmitDreamAgentToolConfirmation,
   useStoryWorkspaceDreamAgent,
 } from './useStoryWorkspaceDreamAgent';
 export type { StoryWorkspaceDreamAgentViewModel } from './useStoryWorkspaceDreamAgent';
@@ -92,6 +95,11 @@ export type {
   StoryWorkspaceDreamAgentMessageAccepted,
   StoryWorkspaceDreamAgentMessageCommand,
   StoryWorkspaceDreamAgentMessageSnapshot,
+  StoryWorkspaceDreamAgentToolConfirmation,
+  StoryWorkspaceDreamAgentToolConfirmationCommand,
+  StoryWorkspaceDreamAgentToolConfirmationOption,
+  StoryWorkspaceDreamAgentToolConfirmationQuestion,
+  StoryWorkspaceDreamAgentToolConfirmationResolved,
   StoryWorkspaceDreamLifecycleState,
   StoryWorkspaceDreamSource,
   StoryWorkspaceDreamStage,

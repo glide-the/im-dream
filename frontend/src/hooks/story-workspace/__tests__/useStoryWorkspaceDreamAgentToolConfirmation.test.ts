@@ -65,6 +65,23 @@ test('parses only the allowlisted Dream tool-confirmation projection', () => {
     },
   });
   expect(JSON.stringify(requested)).not.toContain('must-not-survive');
+
+  const networkRequested = storyWorkspaceParseDreamAgentEvent(
+    'tool_confirmation_requested',
+    JSON.stringify({
+      turnId: 'turn-1',
+      confirmation: {
+        toolCallId: 'tool-network',
+        kind: 'sandbox_network',
+        toolName: 'WebFetch',
+        network: { host: 'example.test', policy: 'deny' },
+      },
+    }),
+    'turn-1:5',
+  );
+  expect(networkRequested && 'confirmation' in networkRequested
+    ? networkRequested.confirmation.network
+    : null).toEqual({ host: 'example.test', policy: 'deny' });
 });
 
 test('replay de-duplicates a pending confirmation and clears it when resolved', () => {
@@ -140,4 +157,3 @@ test('builds a run-scoped confirmation command without exposing thread context',
   expect(requestBody).not.toContain('thread');
   expect(requestBody).not.toContain('deck');
 });
-
