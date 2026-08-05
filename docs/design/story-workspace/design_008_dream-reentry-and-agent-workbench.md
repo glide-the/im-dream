@@ -219,12 +219,17 @@ Drama Forge 1.4 · Dream · Run …7A31
 消息历史（只含安全 user/assistant text）
 …
 Dream Agent 正在输出…
+                                  [前往最新消息]
 ──────────────────────────────────────────────
 给 Dream Agent 留言…
 [多行输入]                              [发送]
 ```
 
-展开层不提供 Chat 导航、thread 新建、模型选择、工具详情、推理折叠、失败重试、驳回或归档。
+当服务器投影一个待用户决策的工具请求时，输入区原位替换为 Dream 专属“编辑校样条”：只显示 allowlist 后的工具名、公开问题选项或网络 host/policy 摘要，以及允许/取消操作。它不显示原始工具 input/output、命令正文、凭证、隐藏推理或调试事件。
+
+同一 turn 可连续出现多个确认请求。view model 以 `toolCallId` 去重并按 SSE 到达顺序排队，一次只显示队首；resolved 只移除对应项，不得以单值状态覆盖更早请求。AskUser 的原始 question ID 不进入公开合同；服务端按投影顺序生成不透明 `qN`，answers 只使用该 `qN` 作为 key，选项值必须属于当前公开 projection。服务端验证后再把 `qN` 映射回 runner 所需的问题文本。
+
+展开层不提供 Chat 导航、thread 新建、模型选择、通用工具详情流、推理折叠、失败重试、业务驳回或归档。
 
 ### 8.2 surface 分流
 
@@ -240,8 +245,11 @@ Dream 页不同时 mount 内嵌 panel 和 dialog；窄屏也只允许一个 pane
 - 点击 masthead/rail 的实时消息预览展开；点击收起关闭。execution dialog 额外支持 Escape。
 - 打开时记录触发元素，关闭后恢复焦点。
 - Enter 发送，Shift+Enter 换行；空白内容不可发送。
+- 首次打开以及新 assistant 消息、streaming 增量到达时，若用户距底部不超过 120px，消息区自动跟随最新内容；成功发送属于显式继续对话操作，无论发送前阅读位置如何，都保持跟随直到新消息真正抵达底部。
+- 用户主动上滚超过 120px 后暂停自动跟随，不抢夺阅读位置；显示“前往最新消息”按钮。点击按钮滚到底部并恢复自动跟随。
 - 单次 send 生成稳定 idempotency key；首次 dispatch 未决时同 key 重复触发不得再次发送。
 - 服务器返回 busy 时保留 draft，并显示“Dream Agent 正在处理上一条消息”；不是失败态，不提供人工重试工作流。
+- 工具确认 409/422/网络失败时保留当前队首与已填答案，在校样条内以 `role=status` 显示技术恢复提示；不新增业务失败或人工重试状态。
 - Agent 输入 draft 与 Dream stage editor draft 分属不同 state slice，互不覆盖。
 
 消息历史在所有 lifecycle 均可打开，但自由输入遵循一次确认门禁：
@@ -299,9 +307,19 @@ data: {"turnId":"…"}
 
 event: status
 data: {"lifecycle":"streaming|idle"}
+
+event: tool_confirmation_requested
+data: {"turnId":"…","confirmation":{"toolCallId":"…","kind":"approval|ask_user|sandbox_network","toolName":"…","questions":[…],"network":{"host":"…","policy":"allowlist|open|deny|unknown"}}}
+
+event: tool_confirmation_resolved
+data: {"turnId":"…","toolCallId":"…"}
 ```
 
-adapter 对每个原始 **data frame** 增加稳定 ordinal，再执行 allowlist；使用 raw ordinal 可让同一 turn 的完整 replay 在重连时得到相同 identity。过滤掉的 data frame 仍占 ordinal，SSE comment/keepalive、空行和 transport retry 指令不计数，避免网络空闲时长改变序号。
+工具确认事件由后端先做类型化安全投影：AskUser 只保留服务端生成的 `qN`、question/type/options 等公开字段，并对这些公开字符串再次执行敏感模式检查，命中凭证、危险命令或隐藏推理时整项 fail closed；规范小写 `run_<32hex>` 可作为普通业务标识展示，不得被通用高熵启发式误杀。网络请求只保留合法 host 与归一化 policy；普通审批只保留安全显示名。浏览器 adapter 再做严格 schema 校验，未知字段不会进入 view model。
+
+待确认 registry 绑定可信的 actor/run/thread/turn/toolCall 五元上下文；同一 turn 的重叠 SSE 订阅按 actor/run/thread/turn 计租约。任一非终态订阅断开只释放自己的租约，最后一个订阅离开才清理；真实 terminal 事件可强制清理，避免多标签页或重连交叠使仍在显示的确认提前失效。
+
+adapter 对每个原始 **data frame** 增加稳定 ordinal，再执行 allowlist；使用 raw ordinal 可让同一 turn 的完整 replay 在重连时得到相同 identity。过滤掉的 data frame 仍占 ordinal，SSE comment/keepalive、空行和 transport retry 指令不计数，避免网络空闲时长改变序号。待确认项以 `toolCallId` 去重，收到 resolved 或 terminal status 后清除。
 
 snapshot 不声明 stream cursor：持久消息与瞬时 turn 是两个事实域。首次订阅没有 `after`，只对 `activeTurnId` 的完整 replay 做 view-model 去重；页面会话已有 cursor 时才传 `after=<turn_id>:<ordinal>`。cursor 只在相同 `activeTurnId` 内比较；turn 改变或 terminal snapshot reconciliation 后立即清空。
 
@@ -344,6 +362,7 @@ sequenceDiagram
 - 首次订阅：不传 cursor，完整 replay 当前 active turn；message ID 与 `turnId + ordinal` 分域去重。
 - terminal 前断线：bus replay 当前 turn 全历史；已见 ordinal 被过滤，未见 delta 继续追加。
 - terminal 后断线：先重新取持久快照；持久 message ID 替换临时 turn message，然后仅订阅新的 active turn。
+- 立即断开的连接按 500/1000/2000/4000/8000ms 退避；只有连接连续稳定 10 秒才重置退避，避免“每次刚 open 就清零”形成快速重连循环。
 - 服务重启/内存 session 淘汰：快照仍为恢复真相；状态显示 idle，不把 `not_found` 暴露为业务失败。
 - 任意 committed/finish 或异常断开后都做 snapshot reconciliation，防止“message-final 已发、DB 稍后持久化”的短窗口；现有服务的顺序正是先 `message-final`、再持久化、再 finish（`backend/claude_agent/service.py:1379-1406`）。
 
@@ -551,6 +570,7 @@ flowchart TB
 - execution dialog 降级为底部 sheet/近全屏层，`inset: 8px`，高度 `min(88dvh, 760px)`；使用 `dvh` 避免软键盘遮住输入。
 - 内容单列，不出现固定 420px 宽度或水平滚动。
 - modal 时锁背景滚动并约束焦点。
+- execution dialog 内的确认区使用内嵌 `region`，不得嵌套第二个 dialog；窄屏打开时将工作区背景分支设为 inert，并显示克制遮罩。
 
 ### 15.3 无障碍
 
@@ -633,6 +653,7 @@ Dream 页在单列编辑区原位展开唯一 inline panel。
 | GET | `/api/story-workspace/workflow-runs/{run_id}/dream-agent/messages` | path run + actor | safe persisted snapshot |
 | GET | `/api/story-workspace/workflow-runs/{run_id}/dream-agent/events` | path run + actor + optional cursor | filtered SSE increment |
 | POST | `/api/story-workspace/workflow-runs/{run_id}/dream-agent/messages` | path run + actor + text/key | persist once + dispatch same thread |
+| POST | `/api/story-workspace/workflow-runs/{run_id}/dream-agent/tool-confirm` | path run + actor + toolCallId/decision/按公开 question.id 建立的 answers；Deck/thread 不由浏览器提交 | validate current public projection + resolve same active run/thread tool call |
 | GET | 既有 `/workflow-runs/{run_id}/dream-files` | path run + actor | `.dream` stage/confirmation projection，继续保留 |
 
 后端 Story Workspace DTO 只写入 `backend/story_workspace/contracts.py`；前端局部 DTO 只写入 `frontend/src/hooks/story-workspace/contracts.ts`。`backend/database.py` 不修改，不新增 DDL。
@@ -650,6 +671,7 @@ story_workspace/contracts.py
 
 - re-entry service 只做安全聚合，不读取浏览器偏好。
 - message service 负责 run/thread 权限解析、消息 allowlist、SSE normalization 与 lifecycle send gate。
+- tool confirmation service 从授权 run 解析服务端持久 Deck/thread 绑定，并校验当前 active Dream turn 与 toolCallId；浏览器不能指定或改写 thread/Deck。
 - message coordinator 负责确定性 message ID、`BEGIN IMMEDIATE` 持久 claim、lease/ack 与同 active dispatch 去重；不得使用裸 `INSERT OR REPLACE` 充当并发门禁。
 - Claude Agent 原始 transport 不直接暴露给 Dream UI。
 
@@ -713,6 +735,7 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 - [ ] Deck/workflow/run/stage/revisions/status 层级符合 §5；编辑器仍可用。
 - [ ] masthead/rail 显示状态、最近回复与未读；Dream 页点击在右栏打开唯一 inline panel，execution 页点击打开专属 dialog。
 - [ ] panel/dialog 的 `aria-controls` 都指向实际唯一目标；关闭后归还焦点，dialog 支持 Escape。
+- [ ] 初次打开和新回复在 near-bottom 时自动跟随；成功发送始终跟随到新对话；用户普通上滚后位置保持并出现“前往最新消息”，点击后恢复跟随。
 - [ ] Story Workspace 侧栏为 Dream / Decks / 订阅；Decks 在 `/story-workspace/decks` 内直接显示已有 DeckManager，不卸载 layout/sidebar；主题切换位于设置上方且共享全局 theme owner。
 - [ ] desktop/narrow viewport 无严重遮挡或溢出。
 - [ ] 源码 import graph 与运行时 DOM 都不挂载 ChatView。
@@ -722,6 +745,7 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 - [ ] snapshot 先显示，实时增量随后追加；terminal 对账为持久 message ID。
 - [ ] 断线前后不重复、不遗漏允许展示的消息。
 - [ ] API payload/DOM 不含 reasoning、工具参数、凭证或 debug event。
+- [ ] allowlist 工具确认在同一 Dream panel/dialog 内显示；提交只含 toolCallId/decision/公开 answers，不含 thread、Deck 或原始工具参数。
 - [ ] 用户消息沿同一 run/thread 只 dispatch 一次；快速连续发送不重复。
 - [ ] confirmation dispatched 前和任一 live turn 中，POST 被服务端门禁拒绝且不落消息；`recent + no live turn` 后才可发送。
 - [ ] 并发同 key 只有一个 SQLite claim owner、一个 active dispatch 和一条持久 user message；崩溃恢复语义与 §12.1 一致。
@@ -749,6 +773,9 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | DEC-041 | 技术异常不扩展为失败、重试、驳回或归档业务状态机 |
 | DEC-042 | Story Workspace 主导航为 Dream / Decks / 订阅；Decks 以内部 route 组合已有 DeckManager，不切换全局 view |
 | DEC-043 | 侧栏主题切换复用 `utils/theme.ts` 唯一 owner，不新建主题存储 |
+| DEC-044 | Dream 消息区采用 120px near-bottom 跟随阈值；用户上滚时暂停并用“前往最新消息”显式恢复 |
+| DEC-045 | 工具确认只经 Story Workspace 服务端安全投影进入 Dream 专属编辑校样条；确认仍绑定同一授权 run/thread，不复用 Chat UI |
+| DEC-046 | AskUser 公开 question ID 由服务端生成不透明 `qN`；确认 registry 对重叠 SSE 使用 turn-scoped 订阅租约，terminal 强制清理 |
 
 ## 22. 证据索引
 
@@ -757,6 +784,7 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 - Dream 四阶段、一次确认与状态边界：`docs/design/story-workspace/design_007_dream-business-module-interaction.md:304-338`。
 - UI Design v2 视觉证据在既有 design_007 已记录：Warm Canvas、Paper Cream、少面板、多留白、细分隔线与克制阴影（同文件 `:340-348`）。
 - 最新真实链路与遗留：`docs/design/story-workspace/2026-08-04-dream-launch-writer-integration-implementation-record.md:356-414`。
+- 自动跟随、工具确认与安全复审：`docs/design/story-workspace/2026-08-05-dream-agent-scroll-and-tool-confirmation-rework-record.md`。
 
 ## 23. 变更历史
 
@@ -765,3 +793,5 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | 2026-08-05 | 初稿：基于 Task 1 唯一裁决建立 re-entry、右侧 Agent rail、消息 adapter、悬浮层、truth ownership 与响应式/无障碍合同 |
 | 2026-08-05 | 独立评审修订：收紧 initial/continuation lifecycle 与确认前发送门禁；闭合 run/thread 级持久 claim；明确无 snapshot cursor 的 replay 规则；修正 EventBus/writer 因果；复审 PASS |
 | 2026-08-05 | 交互返工：Dream 入口降噪、run 返回入口、Dream inline panel / execution dialog 分流、状态图标、Dream/Decks/订阅导航、工作台内嵌 DeckManager 与 footer 主题切换 |
+| 2026-08-05 | 消息交互返工：补齐 near-bottom 自动跟随、前往最新消息标记，以及服务端安全投影的 Dream 专属工具确认校样条 |
+| 2026-08-05 | 消息交互复审返工：发送强制跟随到新对话；AskUser 改为不透明 `qN`；补齐危险命令 fail-closed、规范 run ID 豁免、稳定连接退避与重叠 SSE 租约 |
