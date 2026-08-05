@@ -19,7 +19,16 @@ import type {
 
 const RUN_ID_PATTERN = /^run_[0-9a-f]{32}$/;
 const MAX_TEXT_LENGTH = 4000;
+const MAX_TOOL_CONFIRMATION_ANSWERS_BYTES = 8192;
 const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000] as const;
+export const STORY_WORKSPACE_DREAM_AGENT_STABLE_CONNECTION_MS = 10_000;
+
+export function storyWorkspaceDreamAgentReconnectDelay(attemptIndex: number): number {
+  const normalizedIndex = Number.isFinite(attemptIndex)
+    ? Math.max(0, Math.floor(attemptIndex))
+    : 0;
+  return RECONNECT_DELAYS[Math.min(normalizedIndex, RECONNECT_DELAYS.length - 1)];
+}
 
 type StoryWorkspaceDreamAgentWireRecord = Record<string, unknown>;
 
@@ -143,7 +152,7 @@ export function storyWorkspaceBuildDreamAgentToolConfirmationPayload(
     || !normalizedToolCallId
     || normalizedToolCallId.length > 255
     || (normalizedReason?.length ?? 0) > 500
-    || serializedAnswers.length > 16_000) {
+    || new TextEncoder().encode(serializedAnswers).byteLength > MAX_TOOL_CONFIRMATION_ANSWERS_BYTES) {
     return null;
   }
   return {
@@ -167,6 +176,7 @@ export interface StoryWorkspaceDreamAgentFetchOptions {
 
 export interface StoryWorkspaceDreamAgentStreamOptions extends StoryWorkspaceDreamAgentFetchOptions {
   readonly after?: string | null;
+  readonly onOpen?: () => void;
   readonly onEvent?: (event: StoryWorkspaceDreamAgentEvent) => void;
 }
 
@@ -257,6 +267,7 @@ export async function storyWorkspaceReadDreamAgentEventStream(
     { credentials: 'include', headers, signal: options.signal ?? null },
   );
   if (!response.ok || !response.body) throw new Error(`Dream Agent event stream failed (${response.status}).`);
+  options.onOpen?.();
   const decoder = new TextDecoder();
   const reader = response.body.getReader();
   const events: StoryWorkspaceDreamAgentEvent[] = [];
@@ -512,6 +523,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     let active = true;
     let streamController: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectIndex = 0;
     let latestCursor: string | null = null;
     let latestTurnId: string | null = null;
@@ -543,10 +555,23 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       }
       return null;
     };
+    const clearStableConnectionTimer = () => {
+      if (stableConnectionTimer) clearTimeout(stableConnectionTimer);
+      stableConnectionTimer = null;
+    };
+    const markStreamOpen = () => {
+      if (!active) return;
+      clearStableConnectionTimer();
+      stableConnectionTimer = setTimeout(() => {
+        stableConnectionTimer = null;
+        reconnectIndex = 0;
+        setIsReconnecting(false);
+      }, STORY_WORKSPACE_DREAM_AGENT_STABLE_CONNECTION_MS);
+    };
     const scheduleReconnect = () => {
       if (!active || reconnectTimer) return;
       setIsReconnecting(true);
-      const delay = RECONNECT_DELAYS[Math.min(reconnectIndex, RECONNECT_DELAYS.length - 1)];
+      const delay = storyWorkspaceDreamAgentReconnectDelay(reconnectIndex);
       reconnectIndex += 1;
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
@@ -561,8 +586,6 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     };
     const process = (parsed: StoryWorkspaceDreamAgentEvent) => {
       if (!parsed || !active) return;
-      reconnectIndex = 0;
-      setIsReconnecting(false);
       if (parsed.type === 'assistant_text_delta') {
         if (seenCursors.has(parsed.cursor)) return;
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
@@ -598,10 +621,12 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     const connect = () => {
       if (!active) return;
       streamController?.abort();
+      clearStableConnectionTimer();
       streamController = new AbortController();
       void storyWorkspaceReadDreamAgentEventStream(runId, {
         after: latestCursor,
         onEvent: process,
+        onOpen: markStreamOpen,
         signal: streamController.signal,
       }).then(() => {
         if (active && latestSnapshot?.lifecycle === 'streaming') scheduleReconnect();
@@ -609,7 +634,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         if (!active || (reason instanceof Error && reason.name === 'AbortError')) return;
         setError(reason instanceof Error ? reason : new Error('Dream Agent 实时消息暂不可用。'));
         scheduleReconnect();
-      });
+      }).finally(clearStableConnectionTimer);
     };
     setIsLoading(true);
     void reconcile().then((next) => { if (next?.lifecycle === 'streaming') connect(); }).catch((reason: unknown) => {
@@ -618,6 +643,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     return () => {
       active = false; controller.abort(); streamController?.abort();
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearStableConnectionTimer();
     };
   }, [reload, runId]);
 

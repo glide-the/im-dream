@@ -7,6 +7,7 @@ import { expect, test } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import {
   storyWorkspaceBuildDreamAgentToolConfirmationPayload,
+  storyWorkspaceDreamAgentReconnectDelay,
   storyWorkspaceDreamAgentToolConfirmationEndpoint,
   storyWorkspaceParseDreamAgentEvent,
   storyWorkspaceReduceDreamAgentEvents,
@@ -120,10 +121,12 @@ test('replay de-duplicates a pending confirmation and clears it when resolved', 
   expect(cleared.seenCursors).toEqual(['turn-1:5', 'turn-1:7', 'turn-1:6']);
 });
 
-test('keeps reconnect backoff across failed reconnect attempts', () => {
-  expect(ADAPTER_SOURCE).toContain('reconnectIndex += 1');
-  expect(ADAPTER_SOURCE).not.toContain('reconnectIndex = 0; setIsReconnecting(false)');
-  expect(ADAPTER_SOURCE).toContain('reconnectIndex = 0;\n      setIsReconnecting(false)');
+test('keeps reconnect backoff across immediate disconnects and resets only after stability', () => {
+  expect(Array.from({ length: 7 }, (_, index) => storyWorkspaceDreamAgentReconnectDelay(index)))
+    .toEqual([500, 1000, 2000, 4000, 8000, 8000, 8000]);
+  expect(ADAPTER_SOURCE).toContain('onOpen: markStreamOpen');
+  expect(ADAPTER_SOURCE).toContain('STORY_WORKSPACE_DREAM_AGENT_STABLE_CONNECTION_MS');
+  expect(ADAPTER_SOURCE).not.toContain("const process = (parsed: StoryWorkspaceDreamAgentEvent) => {\n      if (!parsed || !active) return;\n      reconnectIndex = 0;");
 });
 
 test('builds a run-scoped confirmation command without exposing thread context', async () => {
@@ -144,6 +147,13 @@ test('builds a run-scoped confirmation command without exposing thread context',
       answers: { q0: '第一人称' },
     },
   });
+  expect(storyWorkspaceBuildDreamAgentToolConfirmationPayload(
+    RUN_ID,
+    'tool-utf8',
+    true,
+    undefined,
+    { q0: '梦'.repeat(3_000) },
+  )).toBeNull();
 
   let requestBody = '';
   await storyWorkspaceSubmitDreamAgentToolConfirmation(
