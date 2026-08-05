@@ -77,8 +77,8 @@ _ABSOLUTE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9:/])/(?!/)(?:[A-Za-z0-9._~-]+/)+[^\s`]+|"
     r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
     r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
-    r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\})/[^\s`]+|"
-    r"(?<![A-Za-z0-9])%(?:USERPROFILE|HOMEPATH)%[\\/][^\s`]+"
+    r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\}|"
+    r"%(?:USERPROFILE|HOMEPATH)%|\$env:USERPROFILE)[\\/][^\s`]+"
     r")"
 )
 _CREDENTIAL_RE = re.compile(
@@ -122,8 +122,10 @@ _SENSITIVE_CLI_FLAG_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|"
     r"credential|authorization)(?:[=\s]|$)"
 )
-_RAW_TOOL_OPTION_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9_-])(?:tool|renderer)\b[^\n]{0,240}?"
+_RAW_TOOL_CONTEXT_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])(?:tool|renderer)\b"
+)
+_CLI_OPTION_RE = re.compile(
     r"(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*"
 )
 _LONG_HEX_SECRET_RE = re.compile(
@@ -1168,13 +1170,26 @@ def _bounded_text(
     if (
         _RAW_COMMAND_RE.search(value)
         or _SENSITIVE_CLI_FLAG_RE.search(value)
-        or _RAW_TOOL_OPTION_RE.search(value)
+        or _contains_raw_tool_option(value)
     ):
         raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
             artifact,
             "raw_command_forbidden",
         )
     return value
+
+
+def _contains_raw_tool_option(value: str) -> bool:
+    """Scan each bounded line linearly without a distance window or wildcard."""
+
+    for line in value.splitlines():
+        context = _RAW_TOOL_CONTEXT_RE.search(line)
+        if (
+            context is not None
+            and _CLI_OPTION_RE.search(line, context.end()) is not None
+        ):
+            return True
+    return False
 
 
 def _looks_like_high_entropy_secret(value: str) -> bool:

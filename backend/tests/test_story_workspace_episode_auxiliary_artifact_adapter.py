@@ -725,3 +725,53 @@ def test_remaining_public_text_bypasses_fail_closed(
         _project(review_report=report)
 
     assert unsafe_text.strip() not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "home_marker",
+    [
+        "$HOME",
+        "${HOME}",
+        "~",
+        "%USERPROFILE%",
+        "%HOMEPATH%",
+        "$env:USERPROFILE",
+    ],
+)
+@pytest.mark.parametrize("separator", ["/", "\\"])
+def test_every_home_marker_separator_is_private(
+    home_marker: str,
+    separator: str,
+) -> None:
+    unsafe_text = f"{home_marker}{separator}projects{separator}episode-notes.md"
+    report = f"# Review\n\n## Finding\n{unsafe_text}\n".encode()
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="sensitive_text",
+    ) as exc_info:
+        _project(review_report=report)
+
+    assert unsafe_text not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "unsafe_text",
+    [
+        "tool " + "x" * 241 + " --verbose",
+        "renderer " + "x" * 7950 + " --seed=42",
+    ],
+)
+def test_tool_options_are_scanned_across_the_complete_bounded_line(
+    unsafe_text: str,
+) -> None:
+    assert len(unsafe_text) <= 8000
+    report = f"# Review\n\n## Finding\n{unsafe_text}\n".encode()
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="raw_command_forbidden",
+    ) as exc_info:
+        _project(review_report=report)
+
+    assert unsafe_text not in str(exc_info.value)
