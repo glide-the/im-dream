@@ -1367,7 +1367,7 @@ class StoryWorkspaceEpisodePromptPage(_StoryWorkspaceDreamWireModel):
 
 
 class StoryWorkspaceEpisodeArtifactSection(_StoryWorkspaceDreamWireModel):
-    """A safe plain-text Markdown section with explicit provenance."""
+    """A safe section whose ID is local to one source revision."""
 
     id: str = Field(pattern=r"^[0-9a-f]{32}$")
     level: StrictInt = Field(ge=1, le=6)
@@ -1389,7 +1389,11 @@ class StoryWorkspaceEpisodeRenderQueueEntry(_StoryWorkspaceDreamWireModel):
     duration_sec: Optional[float] = Field(default=None, ge=0.0, le=3600.0)
     risk: Optional[str] = Field(default=None, max_length=128)
     priority: Optional[str] = Field(default=None, max_length=64)
-    renderer: Optional[str] = Field(default=None, max_length=128)
+    renderer: Optional[str] = Field(
+        default=None,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    )
     status: Optional[str] = Field(
         default=None,
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
@@ -1459,7 +1463,7 @@ class StoryWorkspaceEpisodeReviewTargetKind(str, Enum):
 
 
 class StoryWorkspaceEpisodeReviewTarget(_StoryWorkspaceDreamWireModel):
-    """A location created only from an explicit machine-readable source key."""
+    """A stable location created only from an explicit source locator."""
 
     id: str = Field(pattern=r"^[0-9a-f]{32}$")
     kind: StoryWorkspaceEpisodeReviewTargetKind

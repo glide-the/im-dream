@@ -14,7 +14,15 @@ from typing import Any, Mapping, Sequence
 from uuid import UUID, uuid5
 
 import yaml
-from yaml.events import AliasEvent, CollectionEndEvent, CollectionStartEvent, NodeEvent
+from yaml.events import (
+    AliasEvent,
+    CollectionEndEvent,
+    CollectionStartEvent,
+    DocumentStartEvent,
+    MappingStartEvent,
+    NodeEvent,
+    ScalarEvent,
+)
 
 from story_workspace.contracts import (
     StoryWorkspaceEpisodeArtifactSection,
@@ -46,6 +54,8 @@ STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_ITEMS = 1000
 STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_SECTIONS = 128
 STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_YAML_DEPTH = 32
 STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_YAML_NODES = 20_000
+STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_YAML_DOCUMENTS = 128
+STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_MAPPING_ITEMS = 1000
 STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_SCALAR_CHARS = 16_384
 STORY_WORKSPACE_EPISODE_AUXILIARY_PAGE_MAX = 100
 
@@ -57,6 +67,36 @@ _SHOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PROMPT_KIND_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
 _MANIFEST_REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+_CANONICAL_EPISODE_ROOT_RE = re.compile(
+    r"^stories/[A-Za-z0-9][A-Za-z0-9._-]{0,127}/episodes/EP[0-9]{2,3}$"
+)
+_RENDERER_IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_ABSOLUTE_PATH_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9])(?:/(?:Users|home|private|var|tmp|etc|opt)/[^\s`]+|[A-Z]:\\[^\s`]+)"
+)
+_CREDENTIAL_RE = re.compile(
+    r"(?i)(?:"
+    r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
+    r"auth(?:orization)?|credential|secret)\b\s*[:=]\s*[^\s`]+|"
+    r"\bbearer\s+[A-Za-z0-9._-]{8,}|"
+    r"(?<![A-Za-z0-9_-])(?:sk-(?:(?:ant|proj)-)?|"
+    r"gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])|"
+    r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\."
+    r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])|"
+    r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+    r")"
+)
+_RAW_COMMAND_RE = re.compile(
+    r"(?i)(?:^|[\s`])(?:"
+    r"\$\s+|sudo\s+|curl\s+|wget\s+|"
+    r"(?:ba|z|fi)?sh\s+-c\s+|python(?:3(?:\.\d+)?)?\s+(?:-[mc]\s+|<<)|"
+    r"node\s+(?:-e|--eval)\s+|git\s+(?:commit|push)\s+|"
+    r"rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|"
+    r"cat\s+(?:~?/\.ssh/|/etc/(?:passwd|shadow)|\S*(?:credential|secret|token|private[_-]?key))|"
+    r"dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|"
+    r"/drama-forge:[a-z0-9_-]+"
+    r")"
+)
 _BEAT_KEY_RE = re.compile(r"(?<![A-Za-z0-9_-])(SC-[0-9]{2,})(?![A-Za-z0-9_-])", re.IGNORECASE)
 _SCENE_KEY_RE = re.compile(
     r"(?<![A-Za-z0-9_-])(S[0-9]{2,})(?!-E[0-9])(?![A-Za-z0-9_-])",
@@ -93,13 +133,19 @@ class _MarkdownSection:
 class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
     """Project auxiliary artifacts using explicit identifiers only."""
 
-    def __init__(self, *, episode_uid: str) -> None:
+    def __init__(self, *, episode_uid: str, canonical_episode_root: str) -> None:
         try:
             self._namespace = UUID(hex=episode_uid)
         except (ValueError, AttributeError) as exc:
             raise ValueError("episode_uid must be a 32-character UUID hex value") from exc
         if self._namespace.hex != episode_uid.lower():
             raise ValueError("episode_uid must be a 32-character UUID hex value")
+        if (
+            not isinstance(canonical_episode_root, str)
+            or not _CANONICAL_EPISODE_ROOT_RE.fullmatch(canonical_episode_root)
+        ):
+            raise ValueError("canonical_episode_root must identify one trusted Episode")
+        self._canonical_episode_root = canonical_episode_root
         self._cursor_key = hashlib.sha256(
             b"story-workspace-episode-cursor\x00" + self._namespace.bytes
         ).digest()
@@ -455,7 +501,7 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
                                 duration_sec=_duration_seconds(raw.get("duration"), artifact),
                                 risk=_optional_text(raw.get("risk"), 128, artifact),
                                 priority=_optional_text(raw.get("priority"), 64, artifact),
-                                renderer=_optional_text(raw.get("tool"), 128, artifact),
+                                renderer=_renderer_identity(raw.get("tool"), artifact),
                                 status=_optional_text(raw.get("status"), 64, artifact),
                                 source_revision=source_revision,
                             )
@@ -482,10 +528,12 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         reviewed_artifacts, reviewed_revisions = _reviewed_sources(
             document.metadata.get("reviewed_files"),
             artifact,
+            self._canonical_episode_root,
         )
         explicit_revisions = _reviewed_revision_mapping(
             document.metadata.get("source_revisions"),
             artifact,
+            self._canonical_episode_root,
         )
         revisions_by_artifact = {
             item.source_artifact: item for item in reviewed_revisions
@@ -495,6 +543,7 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         )
         scope = _review_scope(document.metadata.get("scope"), reviewed_artifacts, artifact)
         targets: list[StoryWorkspaceEpisodeReviewTarget] = []
+        seen_targets: set[tuple[StoryWorkspaceEpisodeReviewTargetKind, str]] = set()
         for raw_section, section in zip(raw_sections, sections, strict=True):
             searchable = f"{raw_section.title}\n{'\n'.join(raw_section.lines)}"
             target_specs = (
@@ -519,12 +568,16 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
             )
             for kind, keys, known, view_kind in target_specs:
                 for source_key in keys:
+                    locator = (kind, source_key)
+                    if locator in seen_targets:
+                        continue
+                    seen_targets.add(locator)
                     linked = source_key in known
                     targets.append(
                         StoryWorkspaceEpisodeReviewTarget(
                             id=self._view_id(
                                 "review-target",
-                                f"{section.id}:{kind.value}:{source_key}",
+                                f"{kind.value}:{source_key}",
                             ),
                             kind=kind,
                             source_key=source_key,
@@ -567,19 +620,14 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         source_revision: str,
     ) -> list[StoryWorkspaceEpisodeArtifactSection]:
         sections: list[StoryWorkspaceEpisodeArtifactSection] = []
-        seen: set[str] = set()
         kind = "render-section" if artifact.startswith("renders/") else "review-section"
-        for raw in raw_sections:
-            identity = _normalized_title(raw.title)
-            if identity in seen:
-                raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
-                    artifact,
-                    "duplicate_section_heading",
-                )
-            seen.add(identity)
+        for ordinal, raw in enumerate(raw_sections):
             sections.append(
                 StoryWorkspaceEpisodeArtifactSection(
-                    id=self._view_id(kind, identity),
+                    id=self._view_id(
+                        f"{kind}-revision",
+                        f"{source_revision}:{ordinal}",
+                    ),
                     level=raw.level,
                     title=_bounded_text(raw.title, 500, artifact),
                     text=_section_plain_text(raw.lines, artifact),
@@ -764,13 +812,32 @@ def _safe_yaml_documents(
     try:
         depth = 0
         nodes = 0
+        collection_kinds: list[str] = []
+        collection_direct_nodes: list[int] = []
+        documents_seen = 0
         for event in yaml.parse(text):
+            if isinstance(event, DocumentStartEvent):
+                documents_seen += 1
+                if (
+                    documents_seen
+                    > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_YAML_DOCUMENTS
+                ):
+                    raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                        artifact,
+                        "document_limit",
+                    )
             if isinstance(event, AliasEvent):
                 raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
                     artifact,
                     "yaml_alias_forbidden",
                 )
             if isinstance(event, CollectionStartEvent):
+                if collection_direct_nodes:
+                    collection_direct_nodes[-1] += 1
+                collection_kinds.append(
+                    "mapping" if isinstance(event, MappingStartEvent) else "sequence"
+                )
+                collection_direct_nodes.append(0)
                 depth += 1
                 if depth > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_YAML_DEPTH:
                     raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
@@ -778,7 +845,20 @@ def _safe_yaml_documents(
                         "depth_limit",
                     )
             elif isinstance(event, CollectionEndEvent):
+                kind = collection_kinds.pop()
+                direct_nodes = collection_direct_nodes.pop()
+                if (
+                    kind == "mapping"
+                    and direct_nodes // 2
+                    > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_MAPPING_ITEMS
+                ):
+                    raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                        artifact,
+                        "mapping_item_limit",
+                    )
                 depth -= 1
+            elif isinstance(event, ScalarEvent) and collection_direct_nodes:
+                collection_direct_nodes[-1] += 1
             if isinstance(event, NodeEvent):
                 nodes += 1
                 if nodes > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_YAML_NODES:
@@ -794,6 +874,11 @@ def _safe_yaml_documents(
             artifact,
             "invalid_yaml",
         ) from exc
+    if len(documents) > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_YAML_DOCUMENTS:
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "document_limit",
+        )
     _validate_loaded_yaml(documents, artifact)
     return documents
 
@@ -823,6 +908,11 @@ def _validate_loaded_yaml(values: Sequence[Any], artifact: str) -> None:
                 )
             return
         if isinstance(value, Mapping):
+            if len(value) > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_MAPPING_ITEMS:
+                raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                    artifact,
+                    "mapping_item_limit",
+                )
             for key, child in value.items():
                 if not isinstance(key, (str, int, float, bool)) and key is not None:
                     raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
@@ -1004,14 +1094,35 @@ def _bounded_text(
     *,
     empty_allowed: bool = False,
 ) -> str:
-    if (
-        (not value and not empty_allowed)
-        or len(value) > limit
-        or _HTML_RE.search(value)
-        or _CONTROL_RE.search(value)
-    ):
-        reason = "html_forbidden" if _HTML_RE.search(value) else "text_limit"
-        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(artifact, reason)
+    if not value and not empty_allowed:
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(artifact, "text_limit")
+    if len(value) > limit:
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(artifact, "text_limit")
+    if _HTML_RE.search(value):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "html_forbidden",
+        )
+    if _CONTROL_RE.search(value):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "control_character",
+        )
+    if _ABSOLUTE_PATH_RE.search(value):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "sensitive_text",
+        )
+    if _CREDENTIAL_RE.search(value):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "credential_forbidden",
+        )
+    if _RAW_COMMAND_RE.search(value):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "raw_command_forbidden",
+        )
     return value
 
 
@@ -1040,9 +1151,24 @@ def _duration_seconds(value: Any, artifact: str) -> float | None:
     return _optional_number(value, artifact)
 
 
+def _renderer_identity(value: Any, artifact: str) -> str | None:
+    if value is None:
+        return None
+    if (
+        not isinstance(value, str)
+        or not _RENDERER_IDENTITY_RE.fullmatch(value.strip())
+    ):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "unsafe_renderer",
+        )
+    return value.strip()
+
+
 def _reviewed_sources(
     value: Any,
     artifact: str,
+    canonical_episode_root: str,
 ) -> tuple[list[str], list[StoryWorkspaceEpisodeReviewedSourceRevision]]:
     if value is None:
         return [], []
@@ -1065,11 +1191,17 @@ def _reviewed_sources(
                 artifact,
                 "invalid_reviewed_files",
             )
-        key = _canonical_reviewed_artifact(path, artifact)
-        if key is None:
-            continue
-        if key not in keys:
-            keys.append(key)
+        key = _canonical_reviewed_artifact(
+            path,
+            artifact,
+            canonical_episode_root,
+        )
+        if key in keys:
+            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                artifact,
+                "canonical_source_collision",
+            )
+        keys.append(key)
         if revision is not None:
             revisions.append(
                 StoryWorkspaceEpisodeReviewedSourceRevision(
@@ -1083,6 +1215,7 @@ def _reviewed_sources(
 def _reviewed_revision_mapping(
     value: Any,
     artifact: str,
+    canonical_episode_root: str,
 ) -> list[StoryWorkspaceEpisodeReviewedSourceRevision]:
     if value is None:
         return []
@@ -1092,10 +1225,19 @@ def _reviewed_revision_mapping(
             "invalid_source_revisions",
         )
     results: list[StoryWorkspaceEpisodeReviewedSourceRevision] = []
+    seen: set[str] = set()
     for path, revision in value.items():
-        key = _canonical_reviewed_artifact(path, artifact)
-        if key is None:
-            continue
+        key = _canonical_reviewed_artifact(
+            path,
+            artifact,
+            canonical_episode_root,
+        )
+        if key in seen:
+            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                artifact,
+                "canonical_source_collision",
+            )
+        seen.add(key)
         results.append(
             StoryWorkspaceEpisodeReviewedSourceRevision(
                 source_artifact=key,
@@ -1105,7 +1247,11 @@ def _reviewed_revision_mapping(
     return results
 
 
-def _canonical_reviewed_artifact(value: Any, artifact: str) -> str | None:
+def _canonical_reviewed_artifact(
+    value: Any,
+    artifact: str,
+    canonical_episode_root: str,
+) -> str:
     if (
         not isinstance(value, str)
         or not value
@@ -1123,16 +1269,43 @@ def _canonical_reviewed_artifact(value: Any, artifact: str) -> str | None:
             artifact,
             "unsafe_reviewed_path",
         )
-    if path.name in {"episode-outline.md", "script.md", "storyboard.yaml"}:
-        return path.name
-    if len(path.parts) >= 2 and path.parts[-2] == "prompts" and path.suffix.lower() in {
+    value_path = path.as_posix()
+    root_prefix = canonical_episode_root + "/"
+    if value_path.startswith(root_prefix):
+        relative = value_path[len(root_prefix) :]
+    elif value_path.startswith("stories/"):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "reviewed_path_outside_episode",
+        )
+    else:
+        relative = value_path
+    relative_path = PurePosixPath(relative)
+    if relative_path.name in {
+        "episode-outline.md",
+        "script.md",
+        "storyboard.yaml",
+    } and len(relative_path.parts) == 1:
+        return relative_path.name
+    if (
+        len(relative_path.parts) == 2
+        and relative_path.parts[0] == "prompts"
+        and relative_path.suffix.lower() in {
         ".yml",
         ".yaml",
-    }:
-        return f"prompts/{path.name}"
-    if len(path.parts) >= 2 and path.parts[-2:] == ("renders", "render-guide.md"):
+        }
+        and re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}",
+            relative_path.name,
+        )
+    ):
+        return f"prompts/{relative_path.name}"
+    if relative_path.parts == ("renders", "render-guide.md"):
         return "renders/render-guide.md"
-    return None
+    raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+        artifact,
+        "invalid_reviewed_file",
+    )
 
 
 def _explicit_revision(value: Any, artifact: str) -> str:

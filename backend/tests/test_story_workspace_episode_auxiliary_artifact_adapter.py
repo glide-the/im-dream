@@ -37,8 +37,13 @@ VENDOR_EPISODE = (
 )
 
 
-def _adapter() -> StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
-    return StoryWorkspaceEpisodeAuxiliaryArtifactAdapter(episode_uid=EPISODE_UID)
+def _adapter(
+    canonical_episode_root: str = "stories/didi-zhengzhou/episodes/EP01",
+) -> StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
+    return StoryWorkspaceEpisodeAuxiliaryArtifactAdapter(
+        episode_uid=EPISODE_UID,
+        canonical_episode_root=canonical_episode_root,
+    )
 
 
 def _project(
@@ -53,17 +58,20 @@ def _project(
     render_queue_cursor: str | None = None,
     page_limit: int = 100,
     manifest_revision: str = MANIFEST_REVISION,
+    canonical_episode_root: str = "stories/didi-zhengzhou/episodes/EP01",
+    render_revision: str = REVISION_B,
+    review_revision: str = REVISION_A,
 ):
     prompt_revisions = {
         key: REVISION_A for key in (prompts or {})
     }
-    return _adapter().project(
+    return _adapter(canonical_episode_root).project(
         prompts=prompts,
         prompt_revisions=prompt_revisions,
         render_guide=render_guide,
-        render_revision=REVISION_B if render_guide is not None else None,
+        render_revision=render_revision if render_guide is not None else None,
         review_report=review_report,
-        review_revision=REVISION_A if review_report is not None else None,
+        review_revision=review_revision if review_report is not None else None,
         shot_ids=shot_ids or [],
         narrative_beat_keys=narrative_beat_keys or [],
         script_scene_keys=script_scene_keys or [],
@@ -320,6 +328,7 @@ The station opening resembles the first scene, but contains no machine key.
         shot_ids=["S01-E01-001"],
         narrative_beat_keys=["SC-01"],
         script_scene_keys=["S01"],
+        canonical_episode_root="stories/safe/episodes/EP01",
     )
     review = projection.review
     assert review is not None
@@ -405,3 +414,195 @@ def test_rejects_html_in_markdown_auxiliary_artifacts(
         match=reason,
     ):
         _project(**{field: content})
+
+
+@pytest.mark.parametrize(
+    "foreign_path",
+    [
+        "stories/other-story/episodes/EP01/script.md",
+        "stories/didi-zhengzhou/episodes/EP02/script.md",
+    ],
+)
+def test_review_rejects_sources_outside_the_trusted_episode_root(
+    foreign_path: str,
+) -> None:
+    report = f"""---
+reviewed_files:
+  - path: {foreign_path}
+overall_verdict: APPROVED
+---
+# Review
+""".encode()
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="reviewed_path_outside_episode",
+    ):
+        _project(review_report=report)
+
+
+def test_review_rejects_canonical_source_key_collisions() -> None:
+    report = b"""---
+reviewed_files:
+  - path: script.md
+  - path: stories/didi-zhengzhou/episodes/EP01/script.md
+overall_verdict: APPROVED
+---
+# Review
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="canonical_source_collision",
+    ):
+        _project(review_report=report)
+
+
+def test_review_source_revision_mapping_rejects_foreign_episode() -> None:
+    report = b"""---
+reviewed_files:
+  - path: script.md
+source_revisions:
+  stories/didi-zhengzhou/episodes/EP02/script.md: {REVISION_A}
+overall_verdict: APPROVED
+---
+# Review
+""".replace(b"{REVISION_A}", REVISION_A.encode())
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="reviewed_path_outside_episode",
+    ):
+        _project(review_report=report)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "reason"),
+    [
+        (
+            {
+                "prompts": {
+                    "prompts/a.yml": (
+                        b"shots:\n- shot_id: S01-E01-001\n"
+                        b"  positive: read /Users/admin/.env\n"
+                    )
+                },
+                "shot_ids": ["S01-E01-001"],
+            },
+            "sensitive_text",
+        ),
+        (
+            {
+                "render_guide": b"# Guide\n\n## Notes\nRun `curl https://example.test` now.\n"
+            },
+            "raw_command_forbidden",
+        ),
+        (
+            {
+                "review_report": b"# Review\n\n## Secret\napi_key = sk-private-value\n"
+            },
+            "credential_forbidden",
+        ),
+    ],
+)
+def test_public_projection_rejects_sensitive_or_raw_text(
+    kwargs: dict[str, object],
+    reason: str,
+) -> None:
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match=reason,
+    ):
+        _project(**kwargs)
+
+
+def test_render_queue_rejects_command_like_renderer_value() -> None:
+    render = b"""## Render Queue
+```yaml
+- shot_id: S01-E01-001
+  tool: kling-v2 --api-key secret
+  status: pending
+```
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="unsafe_renderer",
+    ):
+        _project(render_guide=render, shot_ids=["S01-E01-001"])
+
+
+def test_yaml_document_count_is_bounded_before_loading() -> None:
+    documents = b"---\n" * 1001
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="document_limit",
+    ):
+        _project(prompts={"prompts/many.yml": documents})
+
+
+def test_yaml_mapping_item_count_is_bounded() -> None:
+    large_mapping = "\n".join(f"key_{index}: value" for index in range(1001)).encode()
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="mapping_item_limit",
+    ):
+        _project(prompts={"prompts/mapping.yml": large_mapping})
+
+
+def test_duplicate_section_titles_use_revision_local_ids() -> None:
+    render = b"""# Guide
+
+## Notes
+First note.
+
+## Notes
+Second note.
+"""
+
+    projection = _project(render_guide=render)
+
+    assert projection.render_guide is not None
+    notes = [
+        section
+        for section in projection.render_guide.sections
+        if section.title == "Notes"
+    ]
+    assert len(notes) == 2
+    assert len({section.id for section in notes}) == 2
+
+
+def test_review_target_identity_is_locator_stable_and_globally_deduplicated() -> None:
+    first_report = b"""# Review
+
+## Timing
+S01-E01-001 needs work.
+
+## Duplicate mention
+S01-E01-001 remains the locator.
+"""
+    renamed_report = b"""# Review renamed
+
+## New heading
+S01-E01-001 needs work.
+"""
+
+    first = _project(
+        review_report=first_report,
+        review_revision=REVISION_A,
+        shot_ids=["S01-E01-001"],
+    )
+    renamed = _project(
+        review_report=renamed_report,
+        review_revision=REVISION_B,
+        shot_ids=["S01-E01-001"],
+    )
+
+    assert first.review is not None
+    assert renamed.review is not None
+    assert len(first.review.targets) == 1
+    assert len(renamed.review.targets) == 1
+    assert first.review.targets[0].id == renamed.review.targets[0].id
+    assert first.review.targets[0].section_id != renamed.review.targets[0].section_id
