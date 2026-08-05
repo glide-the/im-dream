@@ -36,8 +36,37 @@ const LOGICAL_ARTIFACT_LABELS: Readonly<Record<string, string>> = {
   'review-report.md': 'Review Report',
 };
 
+const REVIEW_ARTIFACTS_BY_SCOPE: Readonly<
+  Record<StoryWorkspaceEpisodeReviewScope, ReadonlySet<string>>
+> = {
+  script: new Set(['script.md']),
+  'full-chain': new Set([
+    'episode-outline.md',
+    'script.md',
+    'storyboard.yaml',
+    'prompts/',
+  ]),
+  unknown: new Set(),
+};
+
 function logicalArtifactLabel(value: string): string {
-  return LOGICAL_ARTIFACT_LABELS[value] ?? '未识别的受审产物';
+  return LOGICAL_ARTIFACT_LABELS[value] ?? '未识别产物声明';
+}
+
+export function storyWorkspaceClassifyEpisodeReviewArtifacts(
+  scope: StoryWorkspaceEpisodeReviewScope,
+  artifacts: readonly string[],
+): {
+  readonly inScope: readonly string[];
+  readonly scopeConflicts: readonly string[];
+} {
+  const allowed = REVIEW_ARTIFACTS_BY_SCOPE[scope];
+  const inScope: string[] = [];
+  const scopeConflicts: string[] = [];
+  for (const artifact of artifacts) {
+    (allowed.has(artifact) ? inScope : scopeConflicts).push(artifact);
+  }
+  return { inScope, scopeConflicts };
 }
 
 function scopeLabel(scope: StoryWorkspaceEpisodeReviewScope): string {
@@ -182,48 +211,92 @@ function DiagnosticTargets({
   );
 }
 
-function ReviewedArtifacts({
-  values,
-}: {
-  readonly values: readonly string[];
-}) {
+function ArtifactList({ values }: { readonly values: readonly string[] }) {
   return h(
-    'section',
-    { 'aria-label': '受审产物' },
-    h('h3', null, '受审产物'),
-    values.length === 0
-      ? h('p', null, '尚未声明')
-      : h(
-          'ul',
-          null,
-          values.map((value) => h(
-            'li',
-            { key: value },
-            logicalArtifactLabel(value),
-          )),
-        ),
+    'ul',
+    null,
+    values.map((value) => h(
+      'li',
+      { key: value },
+      logicalArtifactLabel(value),
+    )),
   );
 }
 
-function ReviewedRevisions({
+function RevisionList({
+  values,
+}: {
+  readonly values: StoryWorkspaceEpisodeReviewReport['sourceRevisions'];
+}) {
+  return h(
+    'ul',
+    null,
+    values.map((item) => h(
+      'li',
+      { key: `${item.sourceArtifact}:${item.sourceRevision}` },
+      `${logicalArtifactLabel(item.sourceArtifact)} · ${item.sourceRevision}`,
+    )),
+  );
+}
+
+function ReviewArtifactScopeFacts({
   review,
 }: {
   readonly review: StoryWorkspaceEpisodeReviewReport;
 }) {
+  const artifacts = storyWorkspaceClassifyEpisodeReviewArtifacts(
+    review.scope,
+    review.reviewedArtifacts,
+  );
+  const revisionArtifacts = storyWorkspaceClassifyEpisodeReviewArtifacts(
+    review.scope,
+    review.sourceRevisions.map((item) => item.sourceArtifact),
+  );
+  const inScopeRevisionArtifacts = new Set(revisionArtifacts.inScope);
+  const conflictRevisionArtifacts = new Set(revisionArtifacts.scopeConflicts);
+  const inScopeRevisions = review.sourceRevisions.filter(
+    (item) => inScopeRevisionArtifacts.has(item.sourceArtifact),
+  );
+  const conflictRevisions = review.sourceRevisions.filter(
+    (item) => conflictRevisionArtifacts.has(item.sourceArtifact),
+  );
   return h(
     'section',
-    { 'aria-label': '受审来源 revisions' },
-    h('h3', null, '受审来源 Revisions'),
-    review.sourceRevisions.length === 0
-      ? h('p', null, '尚未声明')
+    { 'aria-label': '审阅产物范围事实' },
+    h(
+      'section',
+      { 'aria-label': '审阅范围内确认' },
+      h('h3', null, '审阅范围内确认'),
+      artifacts.inScope.length === 0
+        ? h('p', null, '审阅范围内未确认任何产物')
+        : h(ArtifactList, { values: artifacts.inScope }),
+      inScopeRevisions.length === 0
+        ? null
+        : h(
+            'div',
+            { 'aria-label': '范围内来源 revisions' },
+            h('h4', null, '范围内来源 Revisions'),
+            h(RevisionList, { values: inScopeRevisions }),
+          ),
+    ),
+    artifacts.scopeConflicts.length === 0 && conflictRevisions.length === 0
+      ? null
       : h(
-          'ul',
-          null,
-          review.sourceRevisions.map((item) => h(
-            'li',
-            { key: `${item.sourceArtifact}:${item.sourceRevision}` },
-            `${logicalArtifactLabel(item.sourceArtifact)} · ${item.sourceRevision}`,
-          )),
+          'section',
+          { 'aria-label': '与审阅范围不一致' },
+          h('h3', null, '与审阅范围不一致'),
+          h('p', null, '这些报告声明超出当前审阅范围，仅作只读诊断保留。'),
+          artifacts.scopeConflicts.length === 0
+            ? null
+            : h(ArtifactList, { values: artifacts.scopeConflicts }),
+          conflictRevisions.length === 0
+            ? null
+            : h(
+                'div',
+                { 'aria-label': '范围不一致的来源 revisions' },
+                h('h4', null, '报告声明的来源 Revisions'),
+                h(RevisionList, { values: conflictRevisions }),
+              ),
         ),
   );
 }
@@ -262,8 +335,7 @@ function ReviewContent({
         h('dd', null, review.overallVerdict ?? '尚未声明'),
       ),
     ),
-    h(ReviewedArtifacts, { values: review.reviewedArtifacts }),
-    h(ReviewedRevisions, { review }),
+    h(ReviewArtifactScopeFacts, { review }),
     h(
       'section',
       { 'aria-label': '审阅内容' },

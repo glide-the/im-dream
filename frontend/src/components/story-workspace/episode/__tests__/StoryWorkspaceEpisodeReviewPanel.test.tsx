@@ -14,6 +14,7 @@ import type {
 } from '../../../../hooks/story-workspace/contracts';
 import {
   StoryWorkspaceEpisodeReviewPanel,
+  storyWorkspaceClassifyEpisodeReviewArtifacts,
   storyWorkspaceLocateEpisodeReviewTarget,
   type StoryWorkspaceEpisodeReviewLocateSelection,
 } from '../StoryWorkspaceEpisodeReviewPanel';
@@ -100,8 +101,9 @@ test('renders a low-level read-only script review with logical artifact provenan
     '剧本（script）',
     '报告结论',
     'CONDITIONAL_APPROVAL',
-    '受审产物',
+    '审阅范围内确认',
     'Script',
+    '与审阅范围不一致',
     'Storyboard',
     'Prompts',
     `Script · ${revision('a')}`,
@@ -124,6 +126,66 @@ test('renders full-chain and unknown scopes as report facts only', () => {
   const unknown = render({ review: report({ scope: 'unknown', overallVerdict: null }) });
   expect(unknown).toContain('范围未声明（unknown）');
   expect(unknown).toContain('报告结论</dt><dd>尚未声明');
+});
+
+test('confirms only Script in script scope and diagnoses later-chain declarations', () => {
+  const artifacts = ['script.md', 'storyboard.yaml', 'prompts/', 'renders/'];
+
+  expect(storyWorkspaceClassifyEpisodeReviewArtifacts('script', artifacts)).toEqual({
+    inScope: ['script.md'],
+    scopeConflicts: ['storyboard.yaml', 'prompts/', 'renders/'],
+  });
+
+  const html = render({ review: report({ scope: 'script', reviewedArtifacts: artifacts }) });
+  expect(html).toContain(
+    'aria-label="审阅范围内确认"><h3>审阅范围内确认</h3><ul><li>Script</li></ul>',
+  );
+  expect(html).toContain('aria-label="与审阅范围不一致"');
+  expect(html).toContain('这些报告声明超出当前审阅范围，仅作只读诊断保留');
+  expect(html).toContain('<li>Storyboard</li><li>Prompts</li><li>Render Guide</li>');
+  const diagnosticStart = html.indexOf('aria-label="与审阅范围不一致"');
+  expect(html.slice(0, diagnosticStart)).toContain(`Script · ${revision('a')}`);
+  expect(html.slice(0, diagnosticStart)).not.toContain(`Storyboard · ${revision('b')}`);
+  expect(html.slice(diagnosticStart)).toContain(`Storyboard · ${revision('b')}`);
+  expect(html).not.toContain('<button');
+});
+
+test('keeps Render Guide diagnostic-only in full-chain scope', () => {
+  const artifacts = [
+    'episode-outline.md',
+    'script.md',
+    'storyboard.yaml',
+    'prompts/',
+    'renders/',
+  ];
+
+  expect(storyWorkspaceClassifyEpisodeReviewArtifacts('full-chain', artifacts)).toEqual({
+    inScope: ['episode-outline.md', 'script.md', 'storyboard.yaml', 'prompts/'],
+    scopeConflicts: ['renders/'],
+  });
+
+  const html = render({ review: report({ scope: 'full-chain', reviewedArtifacts: artifacts }) });
+  expect(html).toContain(
+    '<li>Episode Outline</li><li>Script</li><li>Storyboard</li><li>Prompts</li>',
+  );
+  expect(html).toContain(
+    'aria-label="与审阅范围不一致"><h3>与审阅范围不一致</h3>',
+  );
+  expect(html).toContain('<li>Render Guide</li>');
+});
+
+test('confirms no artifacts when review scope is unknown', () => {
+  const artifacts = ['script.md', 'storyboard.yaml', 'prompts/', 'renders/'];
+
+  expect(storyWorkspaceClassifyEpisodeReviewArtifacts('unknown', artifacts)).toEqual({
+    inScope: [],
+    scopeConflicts: artifacts,
+  });
+
+  const html = render({ review: report({ scope: 'unknown', reviewedArtifacts: artifacts }) });
+  expect(html).toContain('审阅范围内未确认任何产物');
+  expect(html).toContain('aria-label="与审阅范围不一致"');
+  expect(html).toContain('<li>Script</li><li>Storyboard</li><li>Prompts</li><li>Render Guide</li>');
 });
 
 test('locates linked Beat, Scene and Shot targets only by explicit opaque identity', () => {
