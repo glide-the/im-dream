@@ -606,3 +606,94 @@ S01-E01-001 needs work.
     assert len(renamed.review.targets) == 1
     assert first.review.targets[0].id == renamed.review.targets[0].id
     assert first.review.targets[0].section_id != renamed.review.targets[0].section_id
+
+
+def test_review_cross_source_same_revision_is_explicitly_deduplicated() -> None:
+    report = f"""---
+reviewed_files:
+  - path: stories/didi-zhengzhou/episodes/EP01/script.md
+    revision: {REVISION_A}
+source_revisions:
+  script.md: {REVISION_A}
+overall_verdict: APPROVED
+---
+# Review
+""".encode()
+
+    projection = _project(review_report=report)
+
+    assert projection.review is not None
+    assert len(projection.review.source_revisions) == 1
+    assert projection.review.source_revisions[0].source_artifact == "script.md"
+    assert projection.review.source_revisions[0].source_revision == REVISION_A
+
+
+def test_review_cross_source_conflicting_revision_fails_closed() -> None:
+    report = f"""---
+reviewed_files:
+  - path: stories/didi-zhengzhou/episodes/EP01/script.md
+    revision: {REVISION_A}
+source_revisions:
+  script.md: {REVISION_B}
+overall_verdict: APPROVED
+---
+# Review
+""".encode()
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="source_revision_conflict",
+    ):
+        _project(review_report=report)
+
+
+@pytest.mark.parametrize(
+    "unsafe_text",
+    [
+        "Read /root/.ssh/id_rsa before review.",
+        r"Read C:\Users\alice\.ssh\id_rsa before review.",
+        "OPENAI_API_KEY=sk-proj-abcdefghijklmnop",
+        "renderer: kling-v2 --token abc123",
+    ],
+)
+def test_reviewer_exact_sensitive_strings_never_enter_public_dto(
+    unsafe_text: str,
+) -> None:
+    report = f"# Review\n\n## Finding\n{unsafe_text}\n".encode()
+
+    with pytest.raises(StoryWorkspaceEpisodeAuxiliaryArtifactParseError) as exc_info:
+        _project(review_report=report)
+
+    assert unsafe_text not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "unsafe_text",
+    [
+        "/srv/private/episode/secret.txt",
+        r"D:\production\credentials.json",
+        r"\\render-host\episode-share\credentials.json",
+        "~/.aws/credentials",
+        "$HOME/.ssh/id_ed25519",
+        "SERVICE_TOKEN=abcdefghijklmnop123456",
+        "DATABASE_PASSWORD=hunter2-private",
+        "Authorization: Bearer abcdefghijklmnop",
+        "Bearer abcdefghijklmnop",
+        "tool: Bash(command='pwd')",
+        "raw_command=render --api-key private",
+        "curl https://example.test --header auth",
+        "renderer --api-key private",
+        "kling-v2 --token private",
+        "render --password=private",
+        "ghp_abcdefghijklmnopqrstuvwxyz123456",
+    ],
+)
+def test_public_text_policy_fails_closed_by_sensitive_category(
+    unsafe_text: str,
+) -> None:
+    report = f"# Review\n\n## Finding\n{unsafe_text}\n".encode()
+
+    with pytest.raises(StoryWorkspaceEpisodeAuxiliaryArtifactParseError) as exc_info:
+        _project(review_report=report)
+
+    assert unsafe_text not in str(exc_info.value)

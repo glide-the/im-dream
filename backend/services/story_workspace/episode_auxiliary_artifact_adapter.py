@@ -8,6 +8,7 @@ from datetime import date, datetime
 import hashlib
 import hmac
 import json
+import math
 from pathlib import PurePosixPath
 import re
 from typing import Any, Mapping, Sequence
@@ -72,31 +73,66 @@ _CANONICAL_EPISODE_ROOT_RE = re.compile(
 )
 _RENDERER_IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ABSOLUTE_PATH_RE = re.compile(
-    r"(?i)(?<![A-Za-z0-9])(?:/(?:Users|home|private|var|tmp|etc|opt)/[^\s`]+|[A-Z]:\\[^\s`]+)"
+    r"(?i)(?:"
+    r"(?<![A-Za-z0-9:/])/(?!/)(?:[A-Za-z0-9._~-]+/)+[^\s`]+|"
+    r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
+    r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
+    r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\})/"
+    r"(?:\.ssh|\.aws|\.config|\.gnupg|\.kube|\.docker)/[^\s`]+"
+    r")"
 )
 _CREDENTIAL_RE = re.compile(
     r"(?i)(?:"
-    r"\b(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"auth(?:orization)?|credential|secret)\b\s*[:=]\s*[^\s`]+|"
+    r"\b(?:[A-Z][A-Z0-9_]*_(?:API_KEY|TOKEN|SECRET|PASSWORD|"
+    r"CREDENTIALS?|PRIVATE_KEY)|API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|"
+    r"PASSWORD|CREDENTIALS?)\b(?:\s*[:=]\s*[^\s`]+)?|"
+    r"\b(?:api[\s_-]*keys?|access[\s_-]*tokens?|refresh[\s_-]*tokens?|"
+    r"auth(?:orization)?|credentials?|passwords?)\b\s*[:=]\s*[^\s`]+|"
     r"\bbearer\s+[A-Za-z0-9._-]{8,}|"
     r"(?<![A-Za-z0-9_-])(?:sk-(?:(?:ant|proj)-)?|"
     r"gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])|"
     r"(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\."
     r"eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])|"
+    r"(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{30,}(?![A-Za-z0-9_-])|"
+    r"(?<![A-Z0-9])AKIA[A-Z0-9]{16}(?![A-Z0-9])|"
     r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+    r")"
+)
+_PRIVATE_MODEL_TEXT_RE = re.compile(
+    r"(?i)(?:"
+    r"\bchain[\s_-]*(?:of[\s_-]*)?thought\b|"
+    r"\bhidden[\s_-]*reasoning\b|\binternal[\s_-]*reasoning\b|"
+    r"\bsystem[\s_-]*prompt\b|隐藏推理|内部推理|思维链|系统提示词"
     r")"
 )
 _RAW_COMMAND_RE = re.compile(
     r"(?i)(?:^|[\s`])(?:"
-    r"\$\s+|sudo\s+|curl\s+|wget\s+|"
-    r"(?:ba|z|fi)?sh\s+-c\s+|python(?:3(?:\.\d+)?)?\s+(?:-[mc]\s+|<<)|"
-    r"node\s+(?:-e|--eval)\s+|git\s+(?:commit|push)\s+|"
+    r"\$\s+|sudo\s+|curl\b|wget\b|"
+    r"(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node\b|"
+    r"npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|"
     r"rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|"
     r"cat\s+(?:~?/\.ssh/|/etc/(?:passwd|shadow)|\S*(?:credential|secret|token|private[_-]?key))|"
     r"dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|"
-    r"/drama-forge:[a-z0-9_-]+"
+    r"/drama-forge:[a-z0-9_-]+|"
+    r"(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=]"
     r")"
 )
+_SENSITIVE_CLI_FLAG_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|"
+    r"credential|authorization)(?:[=\s]|$)"
+)
+_LONG_HEX_SECRET_RE = re.compile(
+    r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])"
+)
+_LONG_TOKEN_CANDIDATE_RE = re.compile(
+    r"(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{32,}={0,2}"
+    r"(?![A-Za-z0-9+/_=-])"
+)
+_ASSIGNED_TOKEN_CANDIDATE_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])[A-Za-z_][A-Za-z0-9_.-]{0,40}\s*[:=]\s*"
+    r"([A-Za-z0-9+/_-]{16,}={0,2})"
+)
+_PUBLIC_DREAM_RUN_ID_RE = re.compile(r"run_[0-9a-f]{32}")
 _BEAT_KEY_RE = re.compile(r"(?<![A-Za-z0-9_-])(SC-[0-9]{2,})(?![A-Za-z0-9_-])", re.IGNORECASE)
 _SCENE_KEY_RE = re.compile(
     r"(?<![A-Za-z0-9_-])(S[0-9]{2,})(?!-E[0-9])(?![A-Za-z0-9_-])",
@@ -535,11 +571,10 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
             artifact,
             self._canonical_episode_root,
         )
-        revisions_by_artifact = {
-            item.source_artifact: item for item in reviewed_revisions
-        }
-        revisions_by_artifact.update(
-            {item.source_artifact: item for item in explicit_revisions}
+        merged_source_revisions = _merge_reviewed_source_revisions(
+            reviewed_revisions,
+            explicit_revisions,
+            artifact,
         )
         scope = _review_scope(document.metadata.get("scope"), reviewed_artifacts, artifact)
         targets: list[StoryWorkspaceEpisodeReviewTarget] = []
@@ -604,10 +639,7 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
             scope=scope,
             overall_verdict=verdict,
             reviewed_artifacts=reviewed_artifacts,
-            source_revisions=sorted(
-                revisions_by_artifact.values(),
-                key=lambda item: item.source_artifact,
-            ),
+            source_revisions=merged_source_revisions,
             sections=sections,
             targets=targets,
             source_revision=source_revision,
@@ -1118,12 +1150,80 @@ def _bounded_text(
             artifact,
             "credential_forbidden",
         )
-    if _RAW_COMMAND_RE.search(value):
+    if _PRIVATE_MODEL_TEXT_RE.search(value):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "sensitive_text",
+        )
+    if _looks_like_high_entropy_secret(value):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "credential_forbidden",
+        )
+    if _RAW_COMMAND_RE.search(value) or _SENSITIVE_CLI_FLAG_RE.search(value):
         raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
             artifact,
             "raw_command_forbidden",
         )
     return value
+
+
+def _looks_like_high_entropy_secret(value: str) -> bool:
+    """Mirror the Dream Agent public-text entropy guard at file boundaries."""
+
+    def high_entropy(
+        candidate: str,
+        *,
+        threshold: float,
+        minimum_character_classes: int,
+    ) -> bool:
+        token = candidate.rstrip("=")
+        if not token:
+            return False
+        counts = {character: token.count(character) for character in set(token)}
+        entropy = -sum(
+            (count / len(token)) * math.log2(count / len(token))
+            for count in counts.values()
+        )
+        character_classes = sum((
+            any(character.islower() for character in token),
+            any(character.isupper() for character in token),
+            any(character.isdigit() for character in token),
+            any(character in "+/_-" for character in token),
+        ))
+        return (
+            character_classes >= minimum_character_classes
+            and entropy >= threshold
+        )
+
+    if any(
+        high_entropy(
+            match.group(0),
+            threshold=3.0,
+            minimum_character_classes=1,
+        )
+        for match in _LONG_HEX_SECRET_RE.finditer(value)
+        if value[max(0, match.start() - 4) : match.start()].lower() != "run_"
+    ):
+        return True
+    if any(
+        high_entropy(
+            match.group(1),
+            threshold=3.0,
+            minimum_character_classes=3,
+        )
+        for match in _ASSIGNED_TOKEN_CANDIDATE_RE.finditer(value)
+    ):
+        return True
+    return any(
+        high_entropy(
+            match.group(0),
+            threshold=3.5,
+            minimum_character_classes=3,
+        )
+        for match in _LONG_TOKEN_CANDIDATE_RE.finditer(value)
+        if _PUBLIC_DREAM_RUN_ID_RE.fullmatch(match.group(0)) is None
+    )
 
 
 def _optional_number(value: Any, artifact: str) -> float | None:
@@ -1245,6 +1345,27 @@ def _reviewed_revision_mapping(
             )
         )
     return results
+
+
+def _merge_reviewed_source_revisions(
+    reviewed_revisions: Sequence[StoryWorkspaceEpisodeReviewedSourceRevision],
+    explicit_revisions: Sequence[StoryWorkspaceEpisodeReviewedSourceRevision],
+    artifact: str,
+) -> list[StoryWorkspaceEpisodeReviewedSourceRevision]:
+    """Deduplicate equal canonical facts and reject conflicting provenance."""
+
+    merged: dict[str, StoryWorkspaceEpisodeReviewedSourceRevision] = {}
+    for item in (*reviewed_revisions, *explicit_revisions):
+        existing = merged.get(item.source_artifact)
+        if existing is None:
+            merged[item.source_artifact] = item
+            continue
+        if existing.source_revision != item.source_revision:
+            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                artifact,
+                "source_revision_conflict",
+            )
+    return sorted(merged.values(), key=lambda item: item.source_artifact)
 
 
 def _canonical_reviewed_artifact(
