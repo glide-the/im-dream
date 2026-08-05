@@ -124,6 +124,22 @@ export class StoryWorkspaceEpisodeActionSessionKeys {
   }
 }
 
+export interface StoryWorkspaceEpisodeActionTicket {
+  readonly identity: string;
+  readonly generation: number;
+}
+
+export function storyWorkspaceEpisodeActionTicketIsFresh(
+  ticket: StoryWorkspaceEpisodeActionTicket,
+  currentIdentity: string,
+  currentGeneration: number,
+  mounted: boolean,
+): boolean {
+  return mounted
+    && ticket.identity === currentIdentity
+    && ticket.generation === currentGeneration;
+}
+
 export function storyWorkspaceNormalizeEpisodeGuidance(value: string): string | null {
   const normalized = value.trim();
   return normalized.length === 0 ? null : normalized;
@@ -470,6 +486,9 @@ export function StoryWorkspaceExecutionPage({
     ? 'recover_first_episode_binding'
     : episodeSurface?.workflow?.nextAction.action ?? 'none_in_scope';
   const episodeActionIdentity = `${runId}\u0000${episodeActionFact}\u0000${episodeActionName}`;
+  const episodeActionCurrentIdentityRef = useRef(episodeActionIdentity);
+  const episodeActionGenerationRef = useRef(0);
+  const episodeActionMountedRef = useRef(false);
   const {
     announcement: episodeSelectionAnnouncement,
     onSelection: setEpisodeSelection,
@@ -503,6 +522,20 @@ export function StoryWorkspaceExecutionPage({
     setFocusKey(null);
     setEpisodeExpandedKeys(new Set());
   }, [runId]);
+
+  useLayoutEffect(() => {
+    if (episodeActionCurrentIdentityRef.current === episodeActionIdentity) return;
+    episodeActionCurrentIdentityRef.current = episodeActionIdentity;
+    episodeActionGenerationRef.current += 1;
+  }, [episodeActionIdentity]);
+
+  useLayoutEffect(() => {
+    episodeActionMountedRef.current = true;
+    return () => {
+      episodeActionMountedRef.current = false;
+      episodeActionGenerationRef.current += 1;
+    };
+  }, []);
 
   useEffect(() => {
     setEpisodeActionBusy(null);
@@ -604,6 +637,25 @@ export function StoryWorkspaceExecutionPage({
       setEpisodeSelection(parent);
     }
   };
+  const beginEpisodeAction = (): StoryWorkspaceEpisodeActionTicket => {
+    if (episodeActionCurrentIdentityRef.current !== episodeActionIdentity) {
+      episodeActionCurrentIdentityRef.current = episodeActionIdentity;
+      episodeActionGenerationRef.current += 1;
+    }
+    episodeActionGenerationRef.current += 1;
+    return {
+      identity: episodeActionIdentity,
+      generation: episodeActionGenerationRef.current,
+    };
+  };
+  const episodeActionTicketIsFresh = (ticket: StoryWorkspaceEpisodeActionTicket) => (
+    storyWorkspaceEpisodeActionTicketIsFresh(
+      ticket,
+      episodeActionCurrentIdentityRef.current,
+      episodeActionGenerationRef.current,
+      episodeActionMountedRef.current,
+    )
+  );
   const handleEpisodeRecovery = async () => {
     if (
       episodeSurface === null
@@ -613,6 +665,7 @@ export function StoryWorkspaceExecutionPage({
     ) return;
     const action = 'recover_first_episode_binding';
     const idempotencyKey = episodeActionKeys.keyFor(runId, episodeActionFact, action);
+    const ticket = beginEpisodeAction();
     setEpisodeActionBusy('recover');
     setEpisodeActionError(null);
     try {
@@ -620,14 +673,16 @@ export function StoryWorkspaceExecutionPage({
         idempotencyKey,
         token: getAuthToken(),
       });
+      if (!episodeActionTicketIsFresh(ticket)) return;
       setEpisodeDispatchedIdentity(episodeActionIdentity);
       setEpisodeActionNotice('已交给同一 Dream Agent；第一集关联将从服务端事实恢复。');
       setAgentDialogOpen(true);
       episodeArtifacts.refresh();
     } catch {
+      if (!episodeActionTicketIsFresh(ticket)) return;
       setEpisodeActionError('第一集关联暂未恢复，页面会继续读取服务端事实。');
     } finally {
-      setEpisodeActionBusy(null);
+      if (episodeActionTicketIsFresh(ticket)) setEpisodeActionBusy(null);
     }
   };
   const handleEpisodeContinue = async (userGuidance: string | null) => {
@@ -640,6 +695,7 @@ export function StoryWorkspaceExecutionPage({
       || episodeDispatchedIdentity === episodeActionIdentity
     ) return;
     const idempotencyKey = episodeActionKeys.keyFor(runId, episodeActionFact, action);
+    const ticket = beginEpisodeAction();
     setEpisodeActionBusy('continue');
     setEpisodeActionError(null);
     try {
@@ -648,15 +704,17 @@ export function StoryWorkspaceExecutionPage({
         token: getAuthToken(),
         userGuidance,
       });
+      if (!episodeActionTicketIsFresh(ticket)) return;
       setEpisodeDispatchedIdentity(episodeActionIdentity);
       setEpisodeActionNotice('已交给同一 Dream Agent；新产物仍以 REST revisions 到达为准。');
       setEpisodeContinueDialogOpen(false);
       episodeArtifacts.refresh();
     } catch {
+      if (!episodeActionTicketIsFresh(ticket)) return;
       setEpisodeActionError('本次继续操作暂未被接受；页面会读取最新工作流事实。');
       episodeArtifacts.refresh();
     } finally {
-      setEpisodeActionBusy(null);
+      if (episodeActionTicketIsFresh(ticket)) setEpisodeActionBusy(null);
     }
   };
   const selectedEpisodeShot = episodeSelection?.kind === 'shot'

@@ -130,6 +130,12 @@ test('allowlists visible next-action labels and reuses idempotency only for one 
         selection: { readonly kind: string; readonly id: string },
       ) => { readonly kind: string; readonly id: string };
       readonly storyWorkspaceEpisodeNextActionLabel: (action: string) => string | null;
+      readonly storyWorkspaceEpisodeActionTicketIsFresh: (
+        ticket: { readonly identity: string; readonly generation: number },
+        currentIdentity: string,
+        currentGeneration: number,
+        mounted: boolean,
+      ) => boolean;
     };
     const generated = ['key-1', 'key-2', 'key-3'];
     const keys = new module.StoryWorkspaceEpisodeActionSessionKeys(
@@ -214,6 +220,19 @@ test('allowlists visible next-action labels and reuses idempotency only for one 
       .toBe('生成镜头 Prompt');
     expect(module.storyWorkspaceEpisodeNextActionLabel('none_in_scope')).toBeNull();
     expect(module.storyWorkspaceEpisodeNextActionLabel('invent_episode')).toBeNull();
+    const ticket = { identity: 'run-a\u0000etag-2\u0000review_script', generation: 5 };
+    expect(module.storyWorkspaceEpisodeActionTicketIsFresh(
+      ticket, ticket.identity, 5, true,
+    )).toBe(true);
+    expect(module.storyWorkspaceEpisodeActionTicketIsFresh(
+      ticket, 'run-a\u0000etag-3\u0000generate_prompts', 5, true,
+    )).toBe(false);
+    expect(module.storyWorkspaceEpisodeActionTicketIsFresh(
+      ticket, ticket.identity, 6, true,
+    )).toBe(false);
+    expect(module.storyWorkspaceEpisodeActionTicketIsFresh(
+      ticket, ticket.identity, 5, false,
+    )).toBe(false);
   } finally {
     await server.close();
   }
@@ -409,6 +428,263 @@ test('revision deletion moves selection, aria-live copy and DOM focus to the rec
     await expect(selectedScene).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('#announcement')).toContainText('当前镜头已在新版本中移除');
     await expect(selectedScene).toBeFocused();
+  } finally {
+    await server.close();
+  }
+});
+
+test('real Page ignores stale A resolve, reject and finally after REST identity B is submitted', async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  const consoleErrors: string[] = [];
+  const badResponses: string[] = [];
+  page.on('pageerror', (error) => pageErrors.push(error.message));
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text());
+  });
+  page.on('response', (response) => {
+    if (response.status() >= 400) badResponses.push(`${response.status()} ${response.url()}`);
+  });
+  const runId = `run_${'7'.repeat(32)}`;
+  const episodeModule = `
+    import { useSyncExternalStore } from 'react';
+    const RUN_ID = '${runId}';
+    const revision = (value) => 'sha256:' + value.repeat(64);
+    const artifact = (relativeKey, contentRevision, availability = 'available') => ({
+      relativeKey, availability, contentRevision,
+      mtime: '2026-08-06T00:00:00Z', size: 12,
+      producerAction: relativeKey === 'script.md' ? 'write_script' : 'plan_episode',
+      consumers: ['episode_overview'],
+    });
+    const artifacts = (value) => [
+      artifact('episode-outline.md', revision(value)),
+      artifact('script.md', revision(value)),
+      artifact('storyboard.yaml', null, 'not_generated'),
+      artifact('prompts/', null, 'not_generated'),
+      artifact('renders/', null, 'not_generated'),
+      artifact('review-report.md', null, 'not_generated'),
+    ];
+    const surface = (value, action) => ({
+      runId: RUN_ID,
+      opaqueEpisodeId: '1'.repeat(32),
+      manifestRevision: revision(value),
+      etag: revision(value),
+      bindingAvailability: 'bound',
+      bindingRecovery: { autoRepairAttempted: false, canDispatch: false, publicReason: null },
+      artifacts: artifacts(value),
+      narrative: null,
+      auxiliary: null,
+      workflow: {
+        factsRevision: value === 'a' ? 1 : 2,
+        nextAction: { action, diagnostic: 'ready', canDispatch: true },
+        prerequisites: [], legacyPartial: false,
+      },
+    });
+    let current = surface('a', 'write_script');
+    let refreshCount = 0;
+    const calls = [];
+    const pending = new Map();
+    const listeners = new Set();
+    const subscribe = (listener) => { listeners.add(listener); return () => listeners.delete(listener); };
+    const refresh = () => { refreshCount += 1; };
+    export function useStoryWorkspaceEpisodeArtifacts() {
+      const data = useSyncExternalStore(subscribe, () => current, () => current);
+      return {
+        data, latest: data, invalidArtifactKeys: [], staleArtifactKeys: [],
+        diagnostic: null, error: null, isLoading: false, isShowingLastGood: false,
+        refresh,
+      };
+    }
+    export async function storyWorkspaceContinueEpisodeAction(runId, actionSurface, options) {
+      calls.push({ runId, etag: actionSurface.etag, guidance: options.userGuidance, key: options.idempotencyKey });
+      return await new Promise((resolve, reject) => {
+        pending.set(actionSurface.etag, { resolve, reject });
+      });
+    }
+    export async function storyWorkspaceRecoverEpisodeBinding() {
+      throw new Error('recovery is outside this harness');
+    }
+    export function __u11ToSurfaceB() {
+      current = surface('b', 'generate_prompts');
+      for (const listener of listeners) listener();
+    }
+    export function __u11Settle(value, outcome) {
+      const etag = revision(value);
+      const deferred = pending.get(etag);
+      if (!deferred) throw new Error('missing deferred ' + value);
+      pending.delete(etag);
+      if (outcome === 'resolve') {
+        deferred.resolve({
+          runId: RUN_ID, episodeId: '1'.repeat(32),
+          capability: value === 'a' ? 'write_script' : 'generate_prompts',
+          messageId: 'message-' + value, accepted: true, replayed: false,
+        });
+      } else deferred.reject(new Error('deferred-' + value));
+    }
+    export function __u11Stats() {
+      return { refreshCount, calls: calls.map((call) => ({ ...call })) };
+    }
+  `;
+  const storyWorkspaceHooksModule = `
+    const RUN_ID = '${runId}';
+    const files = {
+      storyWorkspaceRunId: RUN_ID,
+      threadId: 'thread-u11',
+      source: {
+        deckPluginBindingId: 'binding-u11', bindingRevision: 1,
+        deckPluginVersion: '1.0.0', deckRuntimeSnapshotId: 'snapshot-u11',
+        runtimePluginLockId: 'lock-u11',
+      },
+      requiredStages: ['characters', 'scenes', 'storyboards'],
+      runRevision: 1, stages: {}, confirmationAccepted: true,
+      confirmationDispatched: true, canConfirm: false,
+      confirmationLabel: '确认并继续',
+    };
+    const agent = {
+      streamText: '', streamContent: [], isSending: false, error: null,
+      pendingToolConfirmation: null, isConfirmingTool: false,
+      snapshot: { messages: [], canSend: false, lifecycle: 'idle', sendBlockReason: 'continuing' },
+      markRead: () => undefined,
+    };
+    export function useStoryWorkspaceDreamFiles() {
+      return { data: files, error: null, isLoading: false };
+    }
+    export function useStoryWorkspaceDreamAgent() { return agent; }
+  `;
+  const workflowRunModule = `
+    const RUN_ID = '${runId}';
+    const selectRun = async () => undefined;
+    export function useWorkflowRun() {
+      return {
+        run: { workflow_run_id: RUN_ID, status: 'running', workflow_summary: 'U11 Deferred' },
+        selectRun,
+      };
+    }
+  `;
+  const authModule = `export function getAuthToken() { return 'token-u11'; }`;
+  const harnessModule = `
+    import React, { createElement as h } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { StoryWorkspaceExecutionPage } from '/src/pages/story-workspace/StoryWorkspaceExecutionPage.tsx';
+    import { __u11Settle, __u11Stats, __u11ToSurfaceB } from 'virtual:u11-episode-artifacts';
+    window.__u11Deferred = { settle: __u11Settle, stats: __u11Stats, toB: __u11ToSurfaceB };
+    createRoot(document.querySelector('#root')).render(h(StoryWorkspaceExecutionPage, { runId: '${runId}' }));
+  `;
+  const virtualIds: Readonly<Record<string, string>> = {
+    'virtual:u11-episode-artifacts': episodeModule,
+    'virtual:u11-story-workspace-hooks': storyWorkspaceHooksModule,
+    'virtual:u11-workflow-run': workflowRunModule,
+    'virtual:u11-auth': authModule,
+  };
+  const server = await createServer({
+    root: fileURLToPath(new URL('../../../../', import.meta.url)),
+    configFile: false,
+    logLevel: 'silent',
+    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    plugins: [{
+      name: 'u11-real-page-deferred-harness',
+      enforce: 'pre',
+      configureServer(vite) {
+        vite.middlewares.use(async (request, response, next) => {
+          const requestUrl = (request as unknown as { readonly url?: string }).url;
+          if (requestUrl !== '/u11-real-page-deferred') return next();
+          const html = await vite.transformIndexHtml(requestUrl, `
+            <!doctype html><html><body><div id="root"></div>
+            <script type="module" src="/u11-real-page-harness.js"></script></body></html>
+          `);
+          response.statusCode = 200;
+          response.setHeader('Content-Type', 'text/html; charset=utf-8');
+          response.end(html);
+        });
+      },
+      resolveId(id) {
+        if (id === '/u11-real-page-harness.js') return '\0u11-real-page-harness.js';
+        if (id in virtualIds) return `\0${id}`;
+        if (id === '../../hooks/story-workspace/useStoryWorkspaceEpisodeArtifacts') {
+          return '\0virtual:u11-episode-artifacts';
+        }
+        if (id === '../../hooks/story-workspace') return '\0virtual:u11-story-workspace-hooks';
+        if (id === '../../hooks/useWorkflowRun') return '\0virtual:u11-workflow-run';
+        if (id === '../../contexts/AuthContext') return '\0virtual:u11-auth';
+        return null;
+      },
+      load(id) {
+        if (id === '\0u11-real-page-harness.js') return harnessModule;
+        return id.startsWith('\0') ? virtualIds[id.slice(1)] ?? null : null;
+      },
+    }],
+  });
+  await server.listen();
+  const address = server.httpServer?.address();
+  if (address === null || address === undefined || typeof address === 'string') {
+    await server.close();
+    throw new Error('U11 real Page harness did not bind a TCP port.');
+  }
+  type DeferredHarness = {
+    readonly settle: (value: 'a' | 'b', outcome: 'resolve' | 'reject') => void;
+    readonly stats: () => {
+      readonly refreshCount: number;
+      readonly calls: ReadonlyArray<{
+        readonly etag: string;
+        readonly guidance: string | null;
+        readonly key: string;
+      }>;
+    };
+    readonly toB: () => void;
+  };
+  const settle = async (value: 'a' | 'b', outcome: 'resolve' | 'reject') => {
+    await page.evaluate(({ target, result }) => {
+      (window as unknown as { __u11Deferred: DeferredHarness })
+        .__u11Deferred.settle(target, result);
+    }, { target: value, result: outcome });
+    await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  };
+  const stats = () => page.evaluate(() => (
+    window as unknown as { __u11Deferred: DeferredHarness }
+  ).__u11Deferred.stats());
+
+  try {
+    for (const staleOutcome of ['resolve', 'reject'] as const) {
+      await page.goto(`http://127.0.0.1:${address.port}/u11-real-page-deferred`);
+      await expect.poll(() => page.evaluate(() => '__u11Deferred' in window)).toBe(true);
+      expect({ pageErrors, consoleErrors, badResponses }).toEqual({
+        pageErrors: [], consoleErrors: [], badResponses: [],
+      });
+      await page.getByRole('button', { name: '继续生成剧本' }).click();
+      await page.getByRole('textbox', { name: '补充创作要求（可选）' }).fill('A draft');
+      await page.getByRole('button', { name: '确认并继续' }).click();
+      await expect.poll(async () => (await stats()).calls).toHaveLength(1);
+
+      await page.evaluate(() => {
+        (window as unknown as { __u11Deferred: DeferredHarness })
+          .__u11Deferred.toB();
+      });
+      await page.getByRole('button', { name: '生成镜头 Prompt' }).click();
+      const bDraft = page.getByRole('textbox', { name: '补充创作要求（可选）' });
+      await bDraft.fill('B draft');
+      await page.getByRole('button', { name: '确认并继续' }).click();
+      await expect.poll(async () => (await stats()).calls).toHaveLength(2);
+      await expect(bDraft).toBeDisabled();
+
+      await settle('a', staleOutcome);
+
+      await expect(page.getByRole('dialog', { name: '确认 Episode 下一步' })).toBeVisible();
+      await expect(bDraft).toHaveValue('B draft');
+      await expect(bDraft).toBeDisabled();
+      await expect(page.getByRole('button', { name: '正在交给 Dream Agent…' })).toBeDisabled();
+      await expect(page.getByRole('alert')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: '已交给 Dream Agent' })).toHaveCount(0);
+      await expect(page.getByText('已交给同一 Dream Agent；新产物仍以 REST revisions 到达为准。'))
+        .toHaveCount(0);
+      await expect(page.locator('#story-workspace-dream-agent-dialog')).toHaveCount(0);
+      expect((await stats()).refreshCount).toBe(0);
+
+      await settle('b', 'resolve');
+      await expect(page.getByRole('dialog', { name: '确认 Episode 下一步' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: '已交给 Dream Agent' })).toBeDisabled();
+      expect((await stats()).refreshCount).toBe(1);
+    }
   } finally {
     await server.close();
   }
