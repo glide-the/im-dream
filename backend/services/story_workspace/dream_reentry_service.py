@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-import base64
-import binascii
 from datetime import UTC, datetime
 import json
 import sqlite3
@@ -30,11 +28,10 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
 
 
-_StoryWorkspaceDreamProjectionLoader = Callable[[str, dict[str, str], sqlite3.Connection], Any]
+_StoryWorkspaceDreamProjectionLoader = Callable[[sqlite3.Row, dict[str, str], sqlite3.Connection], Any]
 _StoryWorkspaceDreamLiveTurnLookup = Callable[[str], bool]
-_STORY_WORKSPACE_DREAM_REENTRY_DEFAULT_PAGE_SIZE = 50
-_STORY_WORKSPACE_DREAM_REENTRY_MAX_PAGE_SIZE = 100
 _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE = 400
+_STORY_WORKSPACE_DREAM_REENTRY_RECENT_LIMIT = 20
 
 
 class StoryWorkspaceDreamReentryService:
@@ -62,11 +59,8 @@ class StoryWorkspaceDreamReentryService:
         self,
         *,
         actor: dict[str, str],
-        cursor: str | None = None,
-        limit: int = _STORY_WORKSPACE_DREAM_REENTRY_DEFAULT_PAGE_SIZE,
     ) -> StoryWorkspaceDreamReentryCollection:
         actor_id = self._actor_id(actor)
-        page_size = self._page_size(limit)
         db = self._db_factory()
         db.row_factory = sqlite3.Row
         try:
@@ -83,7 +77,11 @@ class StoryWorkspaceDreamReentryService:
                 )) is not None
             ]
             items.sort(key=self._sort_tuple)
-            return self._page(items, cursor=cursor, limit=page_size)
+            in_progress = [item for item in items if item.group == "in_progress"]
+            recent = [item for item in items if item.group == "recent"]
+            return StoryWorkspaceDreamReentryCollection(
+                runs=in_progress + recent[:_STORY_WORKSPACE_DREAM_REENTRY_RECENT_LIMIT]
+            )
         finally:
             if self._close_connections:
                 db.close()
@@ -111,7 +109,8 @@ class StoryWorkspaceDreamReentryService:
 
         return db.execute(
             "SELECT "
-            "run.id AS run_id, run.workspace_id, run.deck_plugin_id, "
+            "run.*, run.id AS run_id, "
+            "run.workspace_id, run.deck_plugin_id, "
             "run.deck_plugin_version, run.deck_plugin_binding_id AS binding_id, "
             "run.binding_revision, run.deck_runtime_snapshot_id, "
             "run.runtime_plugin_lock_id, "
@@ -209,7 +208,7 @@ class StoryWorkspaceDreamReentryService:
             return None
 
         confirmation_accepted, confirmation_dispatched = confirmation_facts
-        stage_revisions, stage_activity_at = self._stage_snapshot(db, run_id, actor_id)
+        stage_revisions, stage_activity_at = self._stage_snapshot(db, row, actor_id)
         live_turn = self._safe_live_turn_lookup(thread_id)
         lifecycle = self._lifecycle(
             stage_revisions=stage_revisions,
@@ -247,14 +246,14 @@ class StoryWorkspaceDreamReentryService:
     def _stage_snapshot(
         self,
         db: sqlite3.Connection,
-        run_id: str,
+        row: sqlite3.Row,
         actor_id: int,
     ) -> tuple[dict[StoryWorkspaceDreamStage, int], datetime | None]:
         """Read stage truth through the established Dream files adapter only."""
 
         try:
             projection = self._dream_files_loader(
-                run_id,
+                row,
                 {"actor_id": str(actor_id)},
                 db,
             )
@@ -334,51 +333,6 @@ class StoryWorkspaceDreamReentryService:
                 )
         return facts
 
-    @staticmethod
-    def _page_size(value: int) -> int:
-        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= _STORY_WORKSPACE_DREAM_REENTRY_MAX_PAGE_SIZE:
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
-        return value
-
-    @classmethod
-    def _page(
-        cls,
-        items: list[StoryWorkspaceDreamReentryItem],
-        *,
-        cursor: str | None,
-        limit: int,
-    ) -> StoryWorkspaceDreamReentryCollection:
-        start = 0 if cursor is None else cls._cursor_offset(items, cursor)
-        runs = items[start:start + limit]
-        next_cursor = (
-            cls._encode_cursor(runs[-1])
-            if runs and start + len(runs) < len(items)
-            else None
-        )
-        return StoryWorkspaceDreamReentryCollection(runs=runs, next_cursor=next_cursor)
-
-    @staticmethod
-    def _encode_cursor(item: StoryWorkspaceDreamReentryItem) -> str:
-        payload = json.dumps(
-            {"runId": item.story_workspace_run_id, "sortKey": item.sort_key},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-        return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
-
-    @staticmethod
-    def _cursor_offset(items: list[StoryWorkspaceDreamReentryItem], cursor: str) -> int:
-        try:
-            padded = cursor + "=" * (-len(cursor) % 4)
-            payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")))
-            run_id = payload["runId"]
-            sort_key = payload["sortKey"]
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError, binascii.Error) as exc:
-            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
-        for index, item in enumerate(items):
-            if item.story_workspace_run_id == run_id and item.sort_key == sort_key:
-                return index + 1
-        raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
 
     @staticmethod
     def _lifecycle(

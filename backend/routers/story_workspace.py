@@ -164,8 +164,6 @@ class StoryWorkflowGateway(Protocol):
         self,
         *,
         actor: dict[str, str],
-        cursor: str | None = None,
-        limit: int = 50,
     ) -> Any: ...
 
     async def submit_dream_confirmation(
@@ -1180,8 +1178,6 @@ async def story_workspace_start_dream_run(
 
 @router.get("/dream-runs")
 async def story_workspace_list_dream_runs(
-    cursor: str | None = Query(default=None, min_length=1, max_length=1024),
-    limit: int = Query(default=50, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
 ) -> Any:
@@ -1195,10 +1191,7 @@ async def story_workspace_list_dream_runs(
             status_code=exc.status_code,
             content=build_error_payload(exc.code),
         )
-    return await _workflow_call(
-        gateway.list_dream_runs(actor=actor, cursor=cursor, limit=limit),
-        by_alias=True,
-    )
+    return await _workflow_call(gateway.list_dream_runs(actor=actor), by_alias=True)
 
 
 @router.get("/workflow-preflights/{preflight_id}")

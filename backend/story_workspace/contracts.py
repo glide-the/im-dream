@@ -585,7 +585,6 @@ class StoryWorkspaceDreamReentryCollection(_StoryWorkspaceDreamWireModel):
     """Canonical actor-scoped collection; ordering is server-owned."""
 
     runs: list[StoryWorkspaceDreamReentryItem] = Field(default_factory=list)
-    next_cursor: str | None = Field(default=None, min_length=1, max_length=1024)
 
 
 class StoryWorkspaceDreamEdit(_StoryWorkspaceDreamWireModel):

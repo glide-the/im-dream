@@ -21,7 +21,7 @@ import database
 
 try:
     from models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
-    from models.workflow_run import AuthenticatedActorContext, RunStatus
+    from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
     from services.deck.runtime_context import resolve_runtime_context
     from services.deck_plugin.compatibility_service import CompatibilityService
     from services.deck_plugin.installation_service import Scope
@@ -66,7 +66,7 @@ try:
     )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
-    from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
+    from backend.models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
     from backend.services.deck.runtime_context import resolve_runtime_context
     from backend.services.deck_plugin.compatibility_service import CompatibilityService
     from backend.services.deck_plugin.installation_service import Scope
@@ -734,44 +734,76 @@ class StoryWorkflowApplicationGateway:
         self,
         *,
         actor: dict[str, str],
-        cursor: str | None = None,
-        limit: int = 50,
     ) -> Any:
         """Return the canonical actor-scoped Dream re-entry collection."""
 
-        return await asyncio.to_thread(self._list_dream_runs_sync, actor, cursor, limit)
+        return await asyncio.to_thread(self._list_dream_runs_sync, actor)
 
     def _list_dream_runs_sync(
         self,
         actor: dict[str, str],
-        cursor: str | None,
-        limit: int,
     ) -> Any:
         service = StoryWorkspaceDreamReentryService(
             db_factory=database.get_db,
             dream_files_loader=self._load_dream_reentry_stage_projection,
         )
-        return service.list_dream_runs(actor=actor, cursor=cursor, limit=limit)
+        return service.list_dream_runs(actor=actor)
 
     def _load_dream_reentry_stage_projection(
         self,
-        workflow_run_id: str,
+        row: sqlite3.Row,
         actor: dict[str, str],
         db: sqlite3.Connection,
     ) -> StoryWorkspaceDreamReentryStageProjection:
         """Preserve Dream files truth while retaining its reliable mtime for sort."""
 
-        projection = self._get_dream_files_from_db(
-            db,
-            workflow_run_id,
-            actor,
-            include_confirmation=False,
-        )
+        try:
+            workflow_values = {
+                field: row[field]
+                for field in WorkflowRun.model_fields
+                if field != "workflow_run_id"
+            }
+            workflow_values["workflow_run_id"] = row["run_id"]
+            workflow_run = WorkflowRun.model_validate(workflow_values)
+            thread_id = workflow_run.source_voice_thread_id
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422) from exc
+        if not isinstance(thread_id, str) or not thread_id.strip():
+            raise ApiRouteError("OUTPUT_CONTRACT_INVALID", status_code=422)
+        try:
+            projection = self._read_dream_files_for_authorized_run(
+                workflow_run,
+                thread_id=thread_id,
+            )
+        except StoryWorkspaceDreamFileError as exc:
+            self._raise_dream_file_error(exc)
         stage_activity_at = self._dream_reentry_stage_activity_at(projection)
         return StoryWorkspaceDreamReentryStageProjection(
             stages=projection.stages,
             stage_activity_at=stage_activity_at,
         )
+
+    @classmethod
+    def _read_dream_files_for_authorized_run(
+        cls,
+        workflow_run: WorkflowRun,
+        *,
+        thread_id: str,
+    ) -> Any:
+        """Use the row already proven by re-entry SQL; do not reopen SQLite."""
+
+        workspace = cls._thread_workspace(thread_id)
+        reader = StoryWorkspaceDreamFileReader(workspace)
+        reader_workspace = Path(reader.workspace_root)
+        canonical_parent = workspace.parent
+        if (
+            reader_workspace != workspace
+            or reader_workspace.parent != canonical_parent
+            or reader_workspace.name != thread_id
+            or not reader_workspace.is_relative_to(canonical_parent)
+        ):
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=403)
+        return reader.read(workflow_run, thread_id=thread_id)
 
     @classmethod
     def _dream_reentry_stage_activity_at(cls, projection: Any) -> datetime | None:
