@@ -20,7 +20,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from story_workspace.contracts import (  # noqa: E402
     STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-    STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+    STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
     STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
     STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
     StoryWorkspaceDreamAgentMessageCommand,
@@ -402,13 +402,22 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         self.assertIn("选择叙事风格", safe_output)
 
     def test_ask_user_public_question_lengths_and_keys_are_one_contract(self) -> None:
-        question_key = "问" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX
+        from pydantic import ValidationError
+
+        question_id = "i" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX
+        question_text = "问" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX
         command = StoryWorkspaceDreamAgentToolConfirmationCommand(
             toolCallId="tool-length",
             approved=True,
-            answers={question_key: "普通回答"},
+            answers={question_id: "普通回答"},
         )
-        self.assertIn(question_key, command.answers or {})
+        self.assertIn(question_id, command.answers or {})
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmationCommand(
+                toolCallId="tool-length",
+                approved=True,
+                answers={question_id + "x": "普通回答"},
+            )
 
         safe_factory = _ToolConfirmationFactory()
         safe_factory.frames = [
@@ -417,8 +426,8 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 "toolCallId": "tool-max-lengths",
                 "toolName": "AskUserQuestion",
                 "input": {"questions": [{
-                    "id": "i" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-                    "question": question_key,
+                    "id": question_id,
+                    "question": question_text,
                     "placeholder": (
                         "提" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX
                     ),
@@ -447,7 +456,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 "type": "tool-approval-request",
                 "toolCallId": "tool-too-long",
                 "toolName": "AskUserQuestion",
-                "input": {"questions": [{"question": question_key + "超"}]},
+                "input": {"questions": [{"question": question_text + "超"}]},
             }, ensure_ascii=False) + "\n\n",
             "data: " + json.dumps({
                 "type": "tool-approval-request",
@@ -483,15 +492,6 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                     ),
                 }]},
             }, ensure_ascii=False) + "\n\n",
-            "data: " + json.dumps({
-                "type": "tool-approval-request",
-                "toolCallId": "tool-duplicate",
-                "toolName": "AskUserQuestion",
-                "input": {"questions": [
-                    {"id": "one", "question": "同一个问题"},
-                    {"id": "two", "question": "同一个问题"},
-                ]},
-            }, ensure_ascii=False) + "\n\n",
         ]
         output = "".join(asyncio.run(_collect(
             StoryWorkspaceDreamAgentMessageService(
@@ -505,12 +505,38 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         )))
         self.assertNotIn("event: tool_confirmation_requested", output)
 
+        duplicate_text_factory = _ToolConfirmationFactory()
+        duplicate_text_factory.frames = [
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-duplicate-text",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [
+                    {"id": "one", "question": "同一个展示问题"},
+                    {"id": "two", "question": "同一个展示问题"},
+                ]},
+            }, ensure_ascii=False) + "\n\n",
+        ]
+        duplicate_text_output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=duplicate_text_factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertIn("event: tool_confirmation_requested", duplicate_text_output)
+        self.assertIn('"id":"one"', duplicate_text_output)
+        self.assertIn('"id":"two"', duplicate_text_output)
+
     def test_confirm_tool_requires_same_active_trusted_dream_turn(self) -> None:
         factory = _ToolConfirmationFactory()
         factory.frames = [
             'data: {"type":"tool-approval-request","toolCallId":"tool-ask",'
             '"toolName":"AskUserQuestion","input":{"questions":[{'
-            '"id":"q1","question":"继续吗？","options":["继续","停止"]}]}}\n\n',
+            '"question":"继续吗？","options":["继续","停止"]}]}}\n\n',
         ]
         service = StoryWorkspaceDreamAgentMessageService(
             self.db,
@@ -525,7 +551,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             toolCallId="tool-ask",
             approved=True,
             reason="用户已选择",
-            answers={"继续吗？": "继续"},
+            answers={"q0": "继续"},
         )
         accepted = service.confirm_tool(
             run_id=RUN_ID,
@@ -544,7 +570,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 "tool_call_id": "tool-ask",
                 "approved": True,
                 "reason": "用户已选择",
-                "answers": {"继续吗？": "继续"},
+                "answers": {"q0": "继续"},
             },
         ))
 
@@ -621,10 +647,10 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 toolCallId="tool-current",
                 approved=True,
                 answers={
-                    "补充说明": "继续完善人物动机",
-                    "选择风格": "温暖",
-                    "确认继续": True,
-                    "选择元素": ["雨", "灯"],
+                    "note": "继续完善人物动机",
+                    "style": "温暖",
+                    "confirm": True,
+                    "elements": ["雨", "灯"],
                 },
             ),
         )
@@ -632,11 +658,12 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         self.assertEqual(valid_factory.confirmations[-1][0], "confirm")
 
         invalid_answers = (
-            {"未知问题": "继续"},
-            {"补充说明": "公开说明", "选择风格": "秘密风格", "确认继续": True, "选择元素": ["雨"]},
-            {"补充说明": "公开说明", "选择风格": "温暖", "确认继续": True, "选择元素": ["雨", "不存在"]},
-            {"补充说明": "公开说明", "选择风格": "温暖", "确认继续": "true", "选择元素": ["雨"]},
-            {"补充说明": "", "选择风格": "温暖", "确认继续": True, "选择元素": ["雨"]},
+            {"unknown": "继续"},
+            {"补充说明": "公开说明", "style": "温暖", "confirm": True, "elements": ["雨"]},
+            {"note": "公开说明", "style": "秘密风格", "confirm": True, "elements": ["雨"]},
+            {"note": "公开说明", "style": "温暖", "confirm": True, "elements": ["雨", "不存在"]},
+            {"note": "公开说明", "style": "温暖", "confirm": "true", "elements": ["雨"]},
+            {"note": "", "style": "温暖", "confirm": True, "elements": ["雨"]},
         )
         for answers in invalid_answers:
             with self.subTest(answers=answers):
@@ -687,7 +714,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 command=StoryWorkspaceDreamAgentToolConfirmationCommand(
                     toolCallId="tool-current",
                     approved=False,
-                    answers={"选择风格": "温暖"},
+                    answers={"style": "温暖"},
                 ),
             )
         self.assertFalse(any(item[0] == "confirm" for item in reject_factory.confirmations))

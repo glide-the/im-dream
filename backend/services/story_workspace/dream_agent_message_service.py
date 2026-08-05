@@ -32,9 +32,9 @@ try:
         STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-        STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
     )
     from services.story_workspace.dream_confirmation_service import (
         story_workspace_read_dream_confirmation_fact,
@@ -51,9 +51,9 @@ except ModuleNotFoundError:
         STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
-        STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
         STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
     )
     from backend.services.story_workspace.dream_confirmation_service import (
         story_workspace_read_dream_confirmation_fact,
@@ -368,7 +368,6 @@ def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]] | None:
         return None
     safe: list[dict[str, Any]] = []
     seen_ids: set[str] = set()
-    seen_keys: set[str] = set()
     for index, question in enumerate(raw_questions):
         if not isinstance(question, dict):
             return None
@@ -380,16 +379,15 @@ def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]] | None:
         for candidate in public_candidates:
             if isinstance(candidate, str) and _strict_ask_user_public_text(
                 candidate,
-                max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+                max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
             ) is None:
                 return None
         text = _strict_ask_user_public_text(
             next((item for item in public_candidates if item), None),
-            max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+            max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
         )
-        if text is None or text in seen_keys:
+        if text is None:
             return None
-        seen_keys.add(text)
         raw_id = question.get("id")
         if raw_id is None:
             question_id = f"q{index}"
@@ -593,20 +591,20 @@ def _validate_dream_public_confirmation_answers(
             409,
         )
     answer_map = answers or {}
-    questions_by_key = {
-        question["question"]: question
+    questions_by_id = {
+        question["id"]: question
         for question in questions
-        if isinstance(question, dict) and isinstance(question.get("question"), str)
+        if isinstance(question, dict) and isinstance(question.get("id"), str)
     }
-    if len(questions_by_key) != len(questions) or not set(answer_map).issubset(
-        questions_by_key
+    if len(questions_by_id) != len(questions) or not set(answer_map).issubset(
+        questions_by_id
     ):
         raise StoryWorkspaceDreamAgentMessageError(
             "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
             422,
         )
-    for key, question in questions_by_key.items():
-        present = key in answer_map
+    for question_id, question in questions_by_id.items():
+        present = question_id in answer_map
         if question.get("required") is True and not present:
             raise StoryWorkspaceDreamAgentMessageError(
                 "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
@@ -614,7 +612,7 @@ def _validate_dream_public_confirmation_answers(
             )
         if not present:
             continue
-        answer = answer_map[key]
+        answer = answer_map[question_id]
         options = question.get("options")
         allowed_values = {
             option["value"]
