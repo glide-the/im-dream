@@ -174,7 +174,9 @@ test('Dream Panel and Dialog share Dream-only follow-latest controls', () => {
     expect(surface).toContain('title="前往最新消息"');
     expect(surface).toContain('scrollToLatest();');
   }
-  expect(SCROLL).toContain('if (isNearBottomRef.current)');
+  expect(SCROLL).toContain('const forceFollowRef = useRef(false);');
+  expect(SCROLL).toContain('if (forceFollowRef.current && position.isNearBottom)');
+  expect(SCROLL).toContain('if (forceFollowRef.current || isNearBottomRef.current)');
   expect(SCROLL).not.toContain('ChatPanel');
   expect(SCROLL).not.toContain('ChatView');
   expect(CSS).toContain('.story-workspace-dream-agent-scroll-to-latest');

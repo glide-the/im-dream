@@ -56,12 +56,20 @@ export function useStoryWorkspaceDreamAgentScroll({
   const historyRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
+  const forceFollowRef = useRef(false);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
 
   const updateScrollPosition = useCallback((element: HTMLDivElement) => {
     const position = storyWorkspaceDreamAgentScrollPosition(element);
-    isNearBottomRef.current = position.isNearBottom;
-    setShowScrollToLatest(position.isScrollable && !position.isNearBottom);
+    if (forceFollowRef.current && position.isNearBottom) {
+      forceFollowRef.current = false;
+    }
+    if (!forceFollowRef.current) {
+      isNearBottomRef.current = position.isNearBottom;
+    }
+    setShowScrollToLatest(
+      !forceFollowRef.current && position.isScrollable && !position.isNearBottom,
+    );
   }, []);
 
   const handleHistoryScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
@@ -81,6 +89,7 @@ export function useStoryWorkspaceDreamAgentScroll({
 
   const scrollToLatest = useCallback(() => {
     if (!historyRef.current) return;
+    forceFollowRef.current = true;
     isNearBottomRef.current = true;
     setShowScrollToLatest(false);
     scrollHistoryToLatest();
@@ -89,11 +98,12 @@ export function useStoryWorkspaceDreamAgentScroll({
   useEffect(() => {
     const element = historyRef.current;
     if (!enabled || !element) {
+      forceFollowRef.current = false;
       isNearBottomRef.current = true;
       setShowScrollToLatest(false);
       return undefined;
     }
-    if (isNearBottomRef.current) {
+    if (forceFollowRef.current || isNearBottomRef.current) {
       setShowScrollToLatest(false);
       const frameId = requestAnimationFrame(() => {
         scrollHistoryToLatest();
