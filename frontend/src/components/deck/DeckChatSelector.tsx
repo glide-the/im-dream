@@ -1,27 +1,36 @@
-// [Input] Enabled Deck summaries (hydrated with voices) and the current Dream chat selection.
-// [Output] Render the compact, single-select Deck control used by AIInputDock.
-// [Pos] deck-domain adapter between Dream chat composition and Deck configuration.
-// [Sync] 2026-08-03: popup lists each deck together with its bundled agents (prefix
-//                    matching covers deck and agent names), and the popup position is
-//                    computed against the browser viewport (up/down + horizontal clamp).
+// [Input] Enabled Decks hydrated with their Agents and the current Agent selection.
+// [Output] Render a Deck-grouped, Agent-selecting cascade for Chat and Dream.
+// [Pos] Shared Deck -> Agent selection boundary.
+// [Sync] 2026-08-05: Decks are grouping labels only; selectable values are Agents.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Deck, Voice } from '../../api/voiceApi';
 import { COLORS, iconMap } from '../deckVisuals';
 
+export interface DeckAgentSelection {
+  deckId: string;
+  agentId: string;
+}
+
 interface DeckChatSelectorProps {
   decks: Deck[];
-  selectedDeckId?: string;
-  onChange?: (deckId: string | undefined) => void;
+  selectedAgentId?: string;
+  onChange?: (selection: DeckAgentSelection | undefined) => void;
   loading?: boolean;
   error?: string | null;
   locked?: boolean;
+  allowNone?: boolean;
+  variant?: 'compact' | 'dream';
 }
 
-interface DeckOption {
-  id: string | undefined;
-  label: string;
-  deck?: Deck;
+interface AgentOption extends DeckAgentSelection {
+  deck: Deck;
+  agent: Voice;
+}
+
+interface AgentGroup {
+  deck: Deck;
+  agents: Voice[];
 }
 
 interface PopupLayout {
@@ -33,32 +42,34 @@ interface PopupLayout {
 }
 
 const VIEWPORT_MARGIN = 8;
-const POPUP_WIDTH = 280;
-// @@@ Approximate fixed chrome of the popup (search input + paddings + gaps).
+const POPUP_WIDTH = 300;
 const POPUP_CHROME = 52;
 
-function enabledVoicesOf(deck: Deck): Voice[] {
-  return (deck.voices || []).filter((voice) => voice.enabled);
+function enabledAgentsOf(deck: Deck): Voice[] {
+  return (deck.voices || []).filter((agent) => agent.enabled);
 }
 
 export default function DeckChatSelector({
   decks,
-  selectedDeckId,
+  selectedAgentId,
   onChange,
   loading = false,
   error,
   locked = false,
+  allowNone = true,
+  variant = 'compact',
 }: DeckChatSelectorProps) {
   const { t, i18n } = useTranslation();
   const language = (i18n.language || 'en').split('-')[0];
   const deckLabel = (deck: Deck) =>
     ((language === 'zh' ? deck.name_zh : deck.name_en) || deck.name);
-  const voiceLabel = (voice: Voice) =>
-    ((language === 'zh' ? voice.name_zh : voice.name_en) || voice.name);
-  const selectedDeck = decks.find((deck) => deck.id === selectedDeckId);
-  const selectedLabel = selectedDeck
-    ? deckLabel(selectedDeck)
-    : t('chat.deck.none');
+  const agentLabel = (agent: Voice) =>
+    ((language === 'zh' ? agent.name_zh : agent.name_en) || agent.name);
+
+  const selected = useMemo(() => decks
+    .flatMap((deck) => enabledAgentsOf(deck).map((agent) => ({ deck, agent })))
+    .find(({ agent }) => agent.id === selectedAgentId), [decks, selectedAgentId]);
+  const selectedLabel = selected ? agentLabel(selected.agent) : t('chat.deck.noneAgent');
 
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -68,31 +79,32 @@ export default function DeckChatSelector({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const itemRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
-  // @@@ Prefix match against deck names and their bundled agent names.
-  const options: DeckOption[] = useMemo(() => {
+  const groups = useMemo<AgentGroup[]>(() => {
     const q = query.trim().toLowerCase();
-    const matched = q
-      ? decks.filter((deck) => {
-          const label = ((language === 'zh' ? deck.name_zh : deck.name_en) || deck.name).toLowerCase();
-          if (label.startsWith(q) || deck.name.toLowerCase().startsWith(q)) return true;
-          return (deck.voices || []).some((voice) => {
-            const vLabel = ((language === 'zh' ? voice.name_zh : voice.name_en) || voice.name).toLowerCase();
-            return vLabel.startsWith(q) || voice.name.toLowerCase().startsWith(q);
-          });
-        })
-      : decks;
-    return [
-      { id: undefined, label: t('chat.deck.none') },
-      ...matched.map((deck) => ({
-        id: deck.id as string | undefined,
-        label: (language === 'zh' ? deck.name_zh : deck.name_en) || deck.name,
-        deck,
-      })),
-    ];
-  }, [decks, query, language, t]);
+    return decks.flatMap((deck) => {
+      const agents = enabledAgentsOf(deck);
+      if (!q) return agents.length ? [{ deck, agents }] : [];
+      const deckNames = [deckLabel(deck), deck.name].map((name) => name.toLowerCase());
+      const deckMatches = deckNames.some((name) => name.startsWith(q));
+      const matchingAgents = deckMatches ? agents : agents.filter((agent) => (
+        [agentLabel(agent), agent.name]
+          .map((name) => name.toLowerCase())
+          .some((name) => name.startsWith(q))
+      ));
+      return matchingAgents.length ? [{ deck, agents: matchingAgents }] : [];
+    });
+  }, [decks, query, language]);
 
-  // @@@ Viewport-adaptive layout: open toward whichever side has more room and
-  // clamp horizontally so the popup never leaves the browser window.
+  const options = useMemo<(AgentOption | undefined)[]>(() => [
+    ...(allowNone ? [undefined] : []),
+    ...groups.flatMap(({ deck, agents }) => agents.map((agent) => ({
+      deck,
+      agent,
+      deckId: deck.id,
+      agentId: agent.id,
+    }))),
+  ], [allowNone, groups]);
+
   const computeLayout = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
@@ -101,40 +113,28 @@ export default function DeckChatSelector({
     const spaceAbove = rect.top - VIEWPORT_MARGIN;
     const openUp = spaceAbove > spaceBelow;
     const available = Math.max(120, (openUp ? spaceAbove : spaceBelow) - VIEWPORT_MARGIN);
-    const width = Math.min(POPUP_WIDTH, window.innerWidth - VIEWPORT_MARGIN * 2);
+    const preferredWidth = variant === 'dream' ? Math.max(POPUP_WIDTH, rect.width) : POPUP_WIDTH;
+    const width = Math.min(preferredWidth, window.innerWidth - VIEWPORT_MARGIN * 2);
     const left = Math.min(
       Math.max(VIEWPORT_MARGIN, rect.left),
       window.innerWidth - width - VIEWPORT_MARGIN,
     );
     setPopupLayout({
-      ...(openUp
-        ? { bottom: window.innerHeight - rect.top + 6 }
-        : { top: rect.bottom + 6 }),
+      ...(openUp ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }),
       left,
       width,
-      listMaxHeight: Math.max(96, Math.min(300, available - POPUP_CHROME)),
+      listMaxHeight: Math.max(96, Math.min(320, available - POPUP_CHROME)),
     });
-  }, []);
+  }, [variant]);
 
-  // @@@ Click-outside closes the popup; scroll/resize keeps it attached to the window.
-  // Scroll events from descendants (captured at the window) must not close the
-  // popup — the listbox itself is scrollable.
   useEffect(() => {
     if (!isOpen) return undefined;
     const handleMouseDown = (event: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        setIsOpen(false);
-      }
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) setIsOpen(false);
     };
     const handleResize = () => computeLayout();
     const handleScroll = (event: Event) => {
-      if (
-        rootRef.current
-        && event.target instanceof Node
-        && rootRef.current.contains(event.target)
-      ) {
-        return;
-      }
+      if (rootRef.current && event.target instanceof Node && rootRef.current.contains(event.target)) return;
       setIsOpen(false);
     };
     document.addEventListener('mousedown', handleMouseDown);
@@ -147,21 +147,20 @@ export default function DeckChatSelector({
     };
   }, [isOpen, computeLayout]);
 
-  // @@@ Keep the keyboard-active option visible while navigating.
   useEffect(() => {
-    if (!isOpen) return;
-    itemRefs.current.get(activeIndex)?.scrollIntoView({ block: 'nearest' });
+    if (isOpen) itemRefs.current.get(activeIndex)?.scrollIntoView({ block: 'nearest' });
   }, [activeIndex, isOpen]);
 
   const openPopup = () => {
     setQuery('');
-    setActiveIndex(0);
+    const selectedIndex = options.findIndex((option) => option?.agentId === selectedAgentId);
+    setActiveIndex(Math.max(0, selectedIndex));
     computeLayout();
     setIsOpen(true);
   };
 
-  const selectOption = (deckId: string | undefined) => {
-    onChange?.(deckId);
+  const selectOption = (option: AgentOption | undefined) => {
+    onChange?.(option ? { deckId: option.deckId, agentId: option.agentId } : undefined);
     setIsOpen(false);
     setQuery('');
   };
@@ -178,226 +177,109 @@ export default function DeckChatSelector({
       setActiveIndex((prev) => Math.max(prev - 1, 0));
     } else if (event.key === 'Enter') {
       event.preventDefault();
-      const option = options[activeIndex];
-      if (option) selectOption(option.id);
+      if (options.length) selectOption(options[activeIndex]);
     }
   };
 
-  if (locked) {
-    return (
-      <div
-        aria-label={t('chat.deck.lockedAria', { name: selectedLabel })}
-        title={t('chat.deck.lockedTitle')}
-        style={{
-          display: 'inline-flex',
-          minHeight: '1.8rem',
-          maxWidth: '15rem',
-          alignItems: 'center',
-          gap: '0.42rem',
-          border: '1px solid var(--color-border-paper)',
-          borderRadius: '999px',
-          background: 'var(--color-bg-app)',
-          color: 'var(--color-text-secondary)',
-          padding: '0 0.7rem',
-          fontSize: '0.76rem',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>Deck</span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedLabel}</span>
-        <span aria-hidden="true" style={{ fontSize: '0.64rem', color: 'var(--color-text-muted)' }}>●</span>
-      </div>
-    );
-  }
+  const trigger = locked ? (
+    <div
+      aria-label={t('chat.deck.lockedAgentAria', { name: selectedLabel })}
+      title={t('chat.deck.lockedTitle')}
+      className={variant === 'dream' ? 'deck-agent-selector deck-agent-selector--dream' : undefined}
+      style={variant === 'compact' ? {
+        display: 'inline-flex', minHeight: '1.8rem', maxWidth: '15rem', alignItems: 'center', gap: '0.42rem',
+        border: '1px solid var(--color-border-paper)', borderRadius: '999px', background: 'var(--color-bg-app)',
+        color: 'var(--color-text-secondary)', padding: '0 0.7rem', fontSize: '0.76rem', whiteSpace: 'nowrap',
+      } : undefined}
+    >
+      <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>Agent</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedLabel}</span>
+      <span aria-hidden="true" style={{ fontSize: '0.64rem', color: 'var(--color-text-muted)' }}>●</span>
+    </div>
+  ) : (
+    <button
+      ref={triggerRef}
+      type="button"
+      aria-label={t('chat.deck.selectAgentAria')}
+      aria-haspopup="listbox"
+      aria-expanded={isOpen}
+      title={error || t('chat.deck.selectAgentTitle')}
+      disabled={loading}
+      className={variant === 'dream' ? 'deck-agent-selector deck-agent-selector--dream' : undefined}
+      onClick={() => (isOpen ? setIsOpen(false) : openPopup())}
+      style={variant === 'compact' ? {
+        display: 'inline-flex', minHeight: '1.8rem', maxWidth: '15rem', alignItems: 'center', gap: '0.35rem',
+        border: `1px solid ${error ? 'var(--color-state-error)' : 'var(--color-border-paper)'}`,
+        borderRadius: '999px', background: 'var(--color-bg-app)',
+        color: error ? 'var(--color-state-error)' : 'var(--color-text-secondary)', padding: '0 0.7rem',
+        fontSize: '0.76rem', cursor: loading ? 'wait' : 'pointer', whiteSpace: 'nowrap',
+      } : undefined}
+    >
+      <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>Agent</span>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '10rem', color: 'var(--color-text-primary)' }}>
+        {loading ? t('chat.deck.loadingAgents') : selectedLabel}
+      </span>
+      <span aria-hidden="true" style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)' }}>▾</span>
+    </button>
+  );
 
   return (
-    <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
-      <button
-        ref={triggerRef}
-        type="button"
-        aria-label={t('chat.deck.selectAria')}
-        aria-haspopup="listbox"
-        aria-expanded={isOpen}
-        title={error || t('chat.deck.selectTitle')}
-        disabled={loading}
-        onClick={() => (isOpen ? setIsOpen(false) : openPopup())}
-        style={{
-          display: 'inline-flex',
-          minHeight: '1.8rem',
-          maxWidth: '15rem',
-          alignItems: 'center',
-          gap: '0.35rem',
-          border: `1px solid ${error ? 'var(--color-state-error)' : 'var(--color-border-paper)'}`,
-          borderRadius: '999px',
-          background: 'var(--color-bg-app)',
-          color: error ? 'var(--color-state-error)' : 'var(--color-text-secondary)',
-          padding: '0 0.7rem',
-          fontSize: '0.76rem',
-          cursor: loading ? 'wait' : 'pointer',
-          whiteSpace: 'nowrap',
-        }}
-      >
-        <span aria-hidden="true" style={{ color: 'var(--color-text-muted)' }}>Deck</span>
-        <span style={{
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          maxWidth: '10rem',
-          color: 'var(--color-text-primary)',
-        }}>
-          {loading ? t('chat.deck.loading') : selectedLabel}
-        </span>
-        <span aria-hidden="true" style={{ fontSize: '0.6rem', color: 'var(--color-text-muted)' }}>▾</span>
-      </button>
-
+    <div ref={rootRef} style={{ position: 'relative', display: variant === 'dream' ? 'block' : 'inline-flex', width: variant === 'dream' ? '100%' : undefined }}>
+      {trigger}
       {isOpen && popupLayout && (
-        <div
-          role="listbox"
-          style={{
-            position: 'fixed',
-            top: popupLayout.top,
-            bottom: popupLayout.bottom,
-            left: popupLayout.left,
-            width: popupLayout.width,
-            background: 'var(--color-bg-surface-solid)',
-            border: '1px solid var(--color-border-neutral)',
-            borderRadius: '8px',
-            boxShadow: '0 4px 12px var(--color-shadow-medium)',
-            padding: '6px',
-            zIndex: 1000,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '4px',
-            boxSizing: 'border-box',
-          }}
-        >
+        <div role="listbox" aria-label={t('chat.deck.agentListAria')} style={{
+          position: 'fixed', top: popupLayout.top, bottom: popupLayout.bottom, left: popupLayout.left,
+          width: popupLayout.width, background: 'var(--color-bg-surface-solid)', border: '1px solid var(--color-border-neutral)',
+          borderRadius: '8px', boxShadow: '0 4px 12px var(--color-shadow-medium)', padding: '6px', zIndex: 1000,
+          display: 'flex', flexDirection: 'column', gap: '4px', boxSizing: 'border-box',
+        }}>
           <input
-            // eslint-disable-next-line jsx-a11y/no-autofocus -- popup search should be typed into immediately
-            autoFocus
-            value={query}
-            placeholder={t('chat.deck.searchPlaceholder')}
-            aria-label={t('chat.deck.searchPlaceholder')}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setActiveIndex(0);
-            }}
+            autoFocus value={query} placeholder={t('chat.deck.searchAgentPlaceholder')}
+            aria-label={t('chat.deck.searchAgentPlaceholder')}
+            onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
             onKeyDown={handleSearchKeyDown}
-            style={{
-              width: '100%',
-              boxSizing: 'border-box',
-              border: '1px solid var(--color-border-neutral)',
-              borderRadius: '6px',
-              background: 'var(--color-bg-paper)',
-              color: 'var(--color-text-primary)',
-              padding: '6px 8px',
-              fontSize: '12px',
-              outline: 'none',
-            }}
+            style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--color-border-neutral)', borderRadius: '6px', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)', padding: '6px 8px', fontSize: '12px', outline: 'none' }}
           />
-          <div style={{
-            maxHeight: popupLayout.listMaxHeight,
-            overflowY: 'auto',
-            overscrollBehavior: 'contain',
-          }}>
-            {options.map((option, idx) => {
-              const isActive = idx === activeIndex;
-              const isSelected = option.id === selectedDeckId;
-              const agents = option.deck ? enabledVoicesOf(option.deck) : [];
-              const agentCount = option.deck
-                ? (option.deck.voices ? agents.length : (option.deck.voice_count ?? 0))
-                : 0;
+          <div style={{ maxHeight: popupLayout.listMaxHeight, overflowY: 'auto', overscrollBehavior: 'contain' }}>
+            {allowNone && (() => {
+              const isActive = activeIndex === 0;
               return (
-                <div
-                  key={option.id ?? '__none__'}
-                  role="option"
-                  aria-selected={isSelected}
-                  ref={(el) => {
-                    if (el) {
-                      itemRefs.current.set(idx, el);
-                    } else {
-                      itemRefs.current.delete(idx);
-                    }
-                  }}
-                  onClick={() => selectOption(option.id)}
-                  onMouseEnter={() => setActiveIndex(idx)}
-                  style={{
-                    padding: '7px 10px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '8px',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    color: 'var(--color-text-body)',
-                    background: isActive ? 'var(--color-bg-hover)' : 'transparent',
-                    transition: 'background 0.15s',
-                  }}
-                >
-                  <span
-                    aria-hidden="true"
-                    style={{
-                      width: '14px',
-                      flexShrink: 0,
-                      color: 'var(--color-action-link)',
-                      visibility: isSelected ? 'visible' : 'hidden',
-                    }}
-                  >
-                    ✓
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px' }}>
-                    <span style={{
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontStyle: option.id === undefined ? 'italic' : 'normal',
-                      color: option.id === undefined ? 'var(--color-text-muted)' : undefined,
-                    }}>
-                      {option.label}
-                    </span>
-                    {option.deck && (
-                      <span
-                        aria-hidden="true"
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                          overflow: 'hidden',
-                          whiteSpace: 'nowrap',
-                          fontSize: '11px',
-                          color: 'var(--color-text-muted)',
-                        }}
-                      >
-                        {agents.length > 0 ? (
-                          <>
-                            <span style={{ display: 'inline-flex', gap: '2px', flexShrink: 0 }}>
-                              {agents.slice(0, 5).map((voice) => {
-                                const AgentIcon = iconMap[voice.icon as keyof typeof iconMap] || iconMap.brain;
-                                const agentColor = COLORS[voice.color as keyof typeof COLORS]?.hex
-                                  || 'var(--color-action-link)';
-                                return <AgentIcon key={voice.id} size={11} color={agentColor} />;
-                              })}
-                            </span>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {agents.slice(0, 3).map((voice) => voiceLabel(voice)).join(' · ')}
-                              {agents.length > 3 ? ` · +${agents.length - 3}` : ''}
-                            </span>
-                          </>
-                        ) : (
-                          <span>{t('chat.deck.agentCount', { count: agentCount })}</span>
-                        )}
-                      </span>
-                    )}
-                  </span>
+                <div role="option" aria-selected={!selectedAgentId} ref={(el) => { if (el) itemRefs.current.set(0, el); else itemRefs.current.delete(0); }}
+                  onClick={() => selectOption(undefined)} onMouseEnter={() => setActiveIndex(0)}
+                  style={{ padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '6px', fontSize: '13px', color: 'var(--color-text-muted)', background: isActive ? 'var(--color-bg-hover)' : 'transparent', fontStyle: 'italic' }}>
+                  <span aria-hidden="true" style={{ width: '14px', visibility: selectedAgentId ? 'hidden' : 'visible' }}>✓</span>
+                  {t('chat.deck.noneAgent')}
                 </div>
               );
-            })}
-            {options.length <= 1 && query.trim() !== '' && (
-              <div style={{
-                padding: '8px 10px',
-                fontSize: '12px',
-                color: 'var(--color-text-muted)',
-                fontStyle: 'italic',
-              }}>
-                {t('chat.deck.noMatch')}
+            })()}
+            {groups.map(({ deck, agents }) => (
+              <div key={deck.id} role="group" aria-label={deckLabel(deck)}>
+                <div style={{ padding: '8px 10px 4px', color: 'var(--color-text-muted)', fontSize: '10px', fontWeight: 700, letterSpacing: '.07em', textTransform: 'uppercase' }}>
+                  {deckLabel(deck)}
+                </div>
+                {agents.map((agent) => {
+                  const flatIndex = options.findIndex((option) => option?.agentId === agent.id);
+                  const isActive = flatIndex === activeIndex;
+                  const isSelected = agent.id === selectedAgentId;
+                  const AgentIcon = iconMap[agent.icon as keyof typeof iconMap] || iconMap.brain;
+                  const agentColor = COLORS[agent.color as keyof typeof COLORS]?.hex || 'var(--color-action-link)';
+                  const option = { deck, agent, deckId: deck.id, agentId: agent.id };
+                  return (
+                    <div key={agent.id} role="option" aria-selected={isSelected}
+                      ref={(el) => { if (el) itemRefs.current.set(flatIndex, el); else itemRefs.current.delete(flatIndex); }}
+                      onClick={() => selectOption(option)} onMouseEnter={() => setActiveIndex(flatIndex)}
+                      style={{ marginLeft: '8px', padding: '7px 10px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', borderRadius: '6px', fontSize: '13px', color: 'var(--color-text-body)', background: isActive ? 'var(--color-bg-hover)' : 'transparent' }}>
+                      <span aria-hidden="true" style={{ width: '14px', color: 'var(--color-action-link)', visibility: isSelected ? 'visible' : 'hidden' }}>✓</span>
+                      <AgentIcon size={14} color={agentColor} />
+                      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{agentLabel(agent)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            {groups.length === 0 && query.trim() && (
+              <div style={{ padding: '8px 10px', fontSize: '12px', color: 'var(--color-text-muted)', fontStyle: 'italic' }}>
+                {t('chat.deck.noAgentMatch')}
               </div>
             )}
           </div>

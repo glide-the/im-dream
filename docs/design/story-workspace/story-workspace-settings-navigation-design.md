@@ -16,11 +16,10 @@ StoryWorkspaceSidebar
 ├── Chat
 └── footer
     ├── 主题切换
-    ├── 订阅
     ├── 设置
     └── 用户信息（点击后浮出 Logout）
 
-设置右侧内容区的二级导航：常规、资源连接、插件、AI 模型、关于。
+设置右侧内容区的二级导航：常规、订阅、资源连接、插件、AI 模型、关于。
 ```
 
 路由映射：
@@ -31,7 +30,7 @@ StoryWorkspaceSidebar
 | 时间线 | `/story-workspace/timeline` |
 | 回顾 | `/story-workspace/analysis` |
 | 对话 | `/story-workspace/chat` |
-| 订阅 | `/story-workspace/subscription` |
+| 订阅（设置内） | `/story-workspace/subscription` |
 | 设置首页/常规 | `/story-workspace/settings` |
 | 资源连接 | `/story-workspace/settings/resources` |
 | 插件 | `/story-workspace/settings/plugins` |
@@ -47,8 +46,8 @@ StoryWorkspaceSidebar
 ## 交互规则
 
 1. LeftSidebar 原有的写作、时间线、分析、Decks、Dream、Chat 导航在 Story Workspace 中保持原顺序和行为。
-2. 点击“订阅”时导航到 `/story-workspace/subscription`，左侧工作区布局保持挂载，右侧渲染独立订阅 `section`；订阅紧邻 footer 设置入口上方。
-3. 点击 footer“设置”时导航到 `/story-workspace/settings`，隐藏 `StoryWorkspaceSidebar`，默认选中“常规”；设置页顶部显示“返回应用”按钮，点击后返回 Dream 工作区。
+2. 点击 footer“设置”时导航到 `/story-workspace/settings`，隐藏 `StoryWorkspaceSidebar`，默认选中“常规”；设置页顶部显示“返回应用”按钮，点击后返回 Dream 工作区。
+3. 在设置二级导航点击“订阅”时导航到 `/story-workspace/subscription`，仍保持设置专注布局并在内容区渲染订阅 `section`。
 4. 点击设置分类只更新 Story Workspace 路由，不刷新页面；刷新、直接访问、前进和后退均可恢复当前分类。
 5. 搜索框即时过滤设置分类标题；无结果时显示“没有匹配的设置”。
 6. 当前一级、二级导航均使用 `aria-current="page"` 和视觉高亮表达选中状态。
@@ -70,7 +69,7 @@ StoryWorkspaceSidebar
 ## 验收标准
 
 - 订阅在设置上方显示。
-- 订阅在 `StoryWorkspaceSidebar` 右方渲染；设置进入隐藏一级侧栏的专注布局，并可通过“返回应用”回到工作区。
+- 订阅作为设置二级导航项在设置内容区渲染；设置进入隐藏一级侧栏的专注布局，并可通过“返回应用”回到工作区。
 - 设置分类导航与 URL 同步。
 - 旧工作区设置入口不再把 URL 改回 `/`。
 - 设置分区具有语义化 `section` 和标题。

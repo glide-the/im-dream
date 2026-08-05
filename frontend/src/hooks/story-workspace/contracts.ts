@@ -112,6 +112,7 @@ export interface StoryWorkspacePluginLoadReceiptResponse {
 /** Request body of POST /api/story-workspace/dream-runs/start. */
 export interface StoryWorkspaceDreamLaunchCommand {
   readonly deckId: string;
+  readonly agentId: string;
   readonly goal: string;
   readonly idempotencyKey: string;
 }

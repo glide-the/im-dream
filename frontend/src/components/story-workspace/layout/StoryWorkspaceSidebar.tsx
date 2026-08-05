@@ -3,12 +3,17 @@
 // [Pos] Story Workspace left layout region.
 import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { IconType } from 'react-icons';
 import {
   FaBookOpen,
+  FaChartLine,
   FaChevronLeft,
   FaChevronRight,
+  FaComments,
   FaCog,
   FaMoon,
+  FaPenNib,
+  FaStream,
   FaSun,
   FaThLarge,
   FaUserCircle,
@@ -176,14 +181,6 @@ export function StoryWorkspaceSidebar({
           font-style: italic;
           font-weight: 700;
           line-height: 1.35;
-        }
-
-        .story-workspace-sidebar__brand-context {
-          margin: 5px 0 0;
-          color: var(--color-text-secondary);
-          font-size: 12px;
-          letter-spacing: 0.08em;
-          line-height: 1.5;
         }
 
         .story-workspace-sidebar__nav {
@@ -393,7 +390,6 @@ export function StoryWorkspaceSidebar({
       <header className="story-workspace-sidebar__brand">
         <div className="story-workspace-sidebar__brand-text">
           <p className="story-workspace-sidebar__brand-name">Ink &amp; Memory</p>
-          <p className="story-workspace-sidebar__brand-context">创作者工作台</p>
         </div>
         <button
           aria-label={collapsed ? '展开侧边栏' : '折叠侧边栏'}
@@ -410,16 +406,18 @@ export function StoryWorkspaceSidebar({
 
       <nav aria-label="Story Workspace 导航" className="story-workspace-sidebar__nav">
         {([
-          { label: t('nav.writing'), view: 'writing', path: storyWorkspaceMainNavPaths.writing },
-          { label: t('nav.timeline'), view: 'timeline', path: storyWorkspaceMainNavPaths.timeline },
-          { label: t('nav.analysis'), view: 'analysis', path: storyWorkspaceMainNavPaths.analysis },
-          { label: t('nav.decks'), view: 'decks', path: storyWorkspaceMainNavPaths.decks },
-          { label: t('nav.dream'), view: 'dream', path: storyWorkspaceMainNavPaths.dream },
-          { label: t('nav.chat'), view: 'chat', path: storyWorkspaceMainNavPaths.chat },
+          { icon: FaPenNib, label: t('nav.writing'), view: 'writing', path: storyWorkspaceMainNavPaths.writing },
+          { icon: FaStream, label: t('nav.timeline'), view: 'timeline', path: storyWorkspaceMainNavPaths.timeline },
+          { icon: FaChartLine, label: t('nav.analysis'), view: 'analysis', path: storyWorkspaceMainNavPaths.analysis },
+          { icon: FaThLarge, label: t('nav.decks'), view: 'decks', path: storyWorkspaceMainNavPaths.decks },
+          { icon: FaBookOpen, label: t('nav.dream'), view: 'dream', path: storyWorkspaceMainNavPaths.dream },
+          { icon: FaComments, label: t('nav.chat'), view: 'chat', path: storyWorkspaceMainNavPaths.chat },
         ] as const).map((item) => {
           const isCurrent = currentPath === item.path;
+          const Icon = item.icon as IconType;
           return (
             <button
+              aria-label={collapsed ? item.label : undefined}
               aria-current={isCurrent ? 'page' : undefined}
               className="story-workspace-sidebar__nav-button"
               key={item.view}
@@ -427,6 +425,7 @@ export function StoryWorkspaceSidebar({
               title={collapsed ? item.label : undefined}
               type="button"
             >
+              <Icon aria-hidden="true" className="story-workspace-sidebar__icon" />
               <span className="story-workspace-sidebar__label">{item.label}</span>
             </button>
           );

@@ -533,9 +533,9 @@ export default function DeckEditorModal({
                         <button
                           onClick={() => {
                             // "Chat →" = preselect this Deck in the chat input
-                            // dock and start a fresh Deck conversation; the
-                            // voice name is informational context only.
+                            // dock together with this Agent.
                             onChatWithDeck(deck.id, {
+                              id: selectedVoice.id,
                               name: selectedVoice.name,
                               systemPrompt: selectedVoice.system_prompt,
                               icon: selectedVoice.icon,

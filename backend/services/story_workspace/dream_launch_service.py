@@ -84,6 +84,7 @@ class StoryWorkspaceDreamLaunchSourceAdapter(Protocol):
         actor_id: str,
         workspace_id: str,
         deck_id: str,
+        agent_id: str | None,
         goal: str,
         idempotency_key: str,
         request_fingerprint: str,
@@ -187,10 +188,13 @@ class StoryWorkspaceDreamLaunchService:
                 "binding.binding_revision"
             )
 
-        fingerprint = _sha256({
+        fingerprint_payload = {
             "deck_id": command.deck_id,
             "goal": command.goal,
-        })
+        }
+        if command.agent_id is not None:
+            fingerprint_payload["agent_id"] = command.agent_id
+        fingerprint = _sha256(fingerprint_payload)
         thread_id, message_id = self._deterministic_source_ids(
             actor_id=actor_id,
             workspace_id=workspace_id,
@@ -200,6 +204,7 @@ class StoryWorkspaceDreamLaunchService:
             actor_id=actor_id,
             workspace_id=workspace_id,
             deck_id=command.deck_id,
+            agent_id=command.agent_id,
             goal=command.goal,
             idempotency_key=command.idempotency_key,
             request_fingerprint=fingerprint,
@@ -259,6 +264,7 @@ class StoryWorkspaceDreamLaunchService:
             workflow_run_id=_field(run, "workflow_run_id"),
             thread_id=source.thread_id,
             deck_id=command.deck_id,
+            agent_id=command.agent_id,
             deck_plugin_id=_field(run, "deck_plugin_id"),
             deck_plugin_version=_field(run, "deck_plugin_version"),
             deck_plugin_binding_id=_field(run, "deck_plugin_binding_id"),

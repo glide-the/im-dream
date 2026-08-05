@@ -63,6 +63,7 @@ class DeckChatContextService:
         *,
         deck_id: str,
         actor_id: str,
+        voice_id: str | None = None,
         dream_mode: bool = False,
     ) -> DeckChatContext:
         deck = self.db.execute(
@@ -96,6 +97,14 @@ class DeckChatContextService:
             """,
             (deck_id,),
         ).fetchall()
+        if voice_id is not None:
+            voices = [voice for voice in voices if str(voice["id"]) == voice_id]
+            if not voices:
+                raise DeckChatContextError(
+                    "AGENT_ACCESS_DENIED",
+                    "Agent not found, disabled, or outside the selected Deck.",
+                    status_code=404,
+                )
 
         plugin_refs: list[dict[str, Any]] = []
         for ref in load_deck_plugin_refs(self.db, deck_id):

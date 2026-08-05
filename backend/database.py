@@ -579,17 +579,19 @@ def create_tables(db):
       user_id INTEGER NOT NULL,
       title TEXT,
       deck_id TEXT,
+      voice_id TEXT,
       claude_session_id TEXT,
       agent_contract_version TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
-      FOREIGN KEY (deck_id) REFERENCES decks (id) ON DELETE SET NULL
+      FOREIGN KEY (deck_id) REFERENCES decks (id) ON DELETE SET NULL,
+      FOREIGN KEY (voice_id) REFERENCES voices (id) ON DELETE SET NULL
     )
     """)
     db.execute("CREATE INDEX IF NOT EXISTS idx_chat_thread_user ON chat_thread(user_id, updated_at)")
     # Migration: add Deck provenance and Claude resume fields.
-    for _col, _type in (("deck_id", "TEXT"), ("claude_session_id", "TEXT"), ("agent_contract_version", "TEXT")):
+    for _col, _type in (("deck_id", "TEXT"), ("voice_id", "TEXT"), ("claude_session_id", "TEXT"), ("agent_contract_version", "TEXT")):
         try:
             db.execute(f"ALTER TABLE chat_thread ADD COLUMN {_col} {_type}")
         except Exception:
@@ -4061,6 +4063,7 @@ def get_daily_pictures_range(user_id: int, start_date: Optional[str], end_date: 
 def create_chat_thread(
     user_id: int,
     deck_id: Optional[str] = None,
+    voice_id: Optional[str] = None,
     title: Optional[str] = None,
 ) -> str:
     """Create a new chat thread for the user. Returns the thread_id (UUID)."""
@@ -4069,8 +4072,8 @@ def create_chat_thread(
     db = get_db()
     try:
         db.execute(
-            "INSERT INTO chat_thread (id, user_id, title, deck_id) VALUES (?, ?, ?, ?)",
-            (thread_id, user_id, title, deck_id),
+            "INSERT INTO chat_thread (id, user_id, title, deck_id, voice_id) VALUES (?, ?, ?, ?, ?)",
+            (thread_id, user_id, title, deck_id, voice_id),
         )
         db.commit()
         return thread_id
@@ -4083,7 +4086,7 @@ def get_chat_thread(thread_id: str, user_id: int) -> Optional[dict]:
     db = get_db()
     try:
         row = db.execute(
-            "SELECT id, user_id, title, deck_id, claude_session_id, agent_contract_version, created_at, updated_at"
+            "SELECT id, user_id, title, deck_id, voice_id, claude_session_id, agent_contract_version, created_at, updated_at"
             " FROM chat_thread WHERE id = ? AND user_id = ?",
             (thread_id, user_id),
         ).fetchone()
@@ -4116,6 +4119,30 @@ def bind_chat_thread_deck(thread_id: str, user_id: int, deck_id: str) -> bool:
         db.close()
 
 
+def bind_chat_thread_voice(thread_id: str, user_id: int, voice_id: str) -> bool:
+    """Bind one Agent once; an existing conversation cannot switch persona."""
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """
+            UPDATE chat_thread
+            SET voice_id = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND user_id = ? AND voice_id IS NULL
+            """,
+            (voice_id, thread_id, user_id),
+        )
+        db.commit()
+        if cursor.rowcount == 1:
+            return True
+        row = db.execute(
+            "SELECT voice_id FROM chat_thread WHERE id = ? AND user_id = ?",
+            (thread_id, user_id),
+        ).fetchone()
+        return bool(row and row["voice_id"] == voice_id)
+    finally:
+        db.close()
+
+
 def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0) -> list[dict]:
     """List chat threads for a user, newest first, optionally paged."""
     db = get_db()
@@ -4123,7 +4150,7 @@ def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0
         if limit is not None:
             rows = db.execute(
                 """
-                SELECT id, title, deck_id, created_at, updated_at
+                SELECT id, title, deck_id, voice_id, created_at, updated_at
                 FROM chat_thread
                 WHERE user_id = ?
                 ORDER BY updated_at DESC
@@ -4133,7 +4160,7 @@ def list_chat_threads(user_id: int, limit: Optional[int] = None, offset: int = 0
             ).fetchall()
         else:
             rows = db.execute(
-                "SELECT id, title, deck_id, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
+                "SELECT id, title, deck_id, voice_id, created_at, updated_at FROM chat_thread WHERE user_id = ? ORDER BY updated_at DESC",
                 (user_id,),
             ).fetchall()
         return [dict(row) for row in rows]
@@ -4151,6 +4178,7 @@ def list_chat_threads_for_search(user_id: int) -> list[dict]:
               t.id,
               t.title,
               t.deck_id,
+              t.voice_id,
               t.created_at,
               t.updated_at,
               m.parts AS message_parts
@@ -4172,6 +4200,8 @@ def list_chat_threads_for_search(user_id: int) -> list[dict]:
                     "title": row["title"],
                     "created_at": row["created_at"],
                     "updated_at": row["updated_at"],
+                    "deck_id": row["deck_id"],
+                    "voice_id": row["voice_id"],
                     "messages_text": "",
                 }
                 message_texts[thread_id] = []

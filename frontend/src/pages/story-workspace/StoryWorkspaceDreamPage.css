@@ -1013,6 +1013,36 @@
   padding: 0 2px;
 }
 
+.story-workspace-dream-launch__form .deck-agent-selector--dream {
+  display: flex;
+  width: 100%;
+  min-height: 43px;
+  box-sizing: border-box;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 0 2px;
+  color: var(--dream-ink);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--dream-rule);
+  border-radius: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.story-workspace-dream-launch__form .deck-agent-selector--dream:focus-visible {
+  border-bottom-color: var(--dream-action);
+  box-shadow: 0 1px 0 var(--dream-action);
+  outline: none;
+}
+
+.story-workspace-dream-launch__form .deck-agent-selector--dream:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
 .story-workspace-dream-launch__form textarea {
   min-height: 156px;
   padding: 10px 2px;

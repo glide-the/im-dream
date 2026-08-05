@@ -7,6 +7,7 @@ from playwright.sync_api import Route, sync_playwright
 BASE_URL = "http://127.0.0.1:4173"
 SCREENSHOT = Path(__file__).resolve().parents[2] / "artifacts" / "story-workspace-settings-e2e.png"
 WRITING_SCREENSHOT = Path(__file__).resolve().parents[2] / "artifacts" / "story-workspace-writing-e2e.png"
+SUBSCRIPTION_SCREENSHOT = Path(__file__).resolve().parents[2] / "artifacts" / "story-workspace-subscription-e2e.png"
 
 
 def json_response(route: Route, body: str) -> None:
@@ -93,13 +94,22 @@ with sync_playwright() as playwright:
     ).all_inner_texts()
     assert main_nav_labels == ["写作", "时间线", "回顾", "卡组", "Dream", "对话"], main_nav_labels
 
+    workspace_sidebar.get_by_role("button", name="折叠侧边栏").click()
+    collapsed_nav = workspace_sidebar.locator(
+        ".story-workspace-sidebar__nav > .story-workspace-sidebar__nav-button"
+    )
+    assert collapsed_nav.count() == 6
+    assert collapsed_nav.locator(".story-workspace-sidebar__icon").count() == 6
+    for index in range(collapsed_nav.count()):
+        assert collapsed_nav.nth(index).locator(".story-workspace-sidebar__icon").is_visible()
+    workspace_sidebar.get_by_role("button", name="展开侧边栏").click()
+
     footer_labels = workspace_sidebar.locator(
         ".story-workspace-sidebar__footer > button:not([hidden])"
     ).all_inner_texts()
-    assert footer_labels[-2:] == ["订阅", "设置"], footer_labels
+    assert footer_labels[-1:] == ["设置"], footer_labels
 
     settings_button = workspace_sidebar.get_by_role("button", name="设置", exact=True)
-    subscription_button = workspace_sidebar.get_by_role("button", name="订阅", exact=True)
 
     # Subscription replaces only the right-hand content and keeps the
     # StoryWorkspaceSidebar mounted in the same position.
@@ -124,12 +134,6 @@ with sync_playwright() as playwright:
             assert writing_editor.bounding_box()["x"] > workspace_sidebar.bounding_box()["x"] + workspace_sidebar.bounding_box()["width"]
             page.screenshot(path=str(WRITING_SCREENSHOT), full_page=True)
 
-    subscription_button.click()
-    page.wait_for_url("**/story-workspace/subscription")
-    page.get_by_role("heading", name="选择适合现在创作节奏的方式").wait_for()
-    assert workspace_sidebar.is_visible()
-    assert workspace_sidebar.bounding_box() == sidebar_before
-
     settings_button.click()
     page.wait_for_url("**/story-workspace/settings")
     page.get_by_role("navigation", name="设置分类导航").wait_for()
@@ -140,6 +144,19 @@ with sync_playwright() as playwright:
     page.get_by_role("button", name="返回应用").click()
     page.wait_for_url("**/story-workspace/dream")
     workspace_sidebar = page.locator('[data-story-workspace-region="sidebar"]')
+
+    workspace_sidebar.get_by_role("button", name="设置", exact=True).click()
+    page.wait_for_url("**/story-workspace/settings")
+    page.get_by_role("button", name="订阅", exact=True).click()
+    page.wait_for_url("**/story-workspace/subscription")
+    page.locator("#story-workspace-subscription-title").wait_for()
+    page.get_by_role("heading", name="选择适合现在创作节奏的方式").wait_for()
+    assert page.locator('[data-story-workspace-region="sidebar"]').count() == 0
+    page.screenshot(path=str(SUBSCRIPTION_SCREENSHOT), full_page=True)
+    page.get_by_role("button", name="返回应用").click()
+    page.wait_for_url("**/story-workspace/dream")
+    workspace_sidebar = page.locator('[data-story-workspace-region="sidebar"]')
+
     user_trigger = workspace_sidebar.get_by_role("button", name="打开用户菜单")
     user_trigger.click()
     user_menu = page.get_by_role("menu", name="用户菜单")

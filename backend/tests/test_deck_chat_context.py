@@ -84,6 +84,14 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
             """,
             (DECK_ID,),
         )
+        self.fixture.db.execute(
+            """
+            INSERT INTO voices (
+                id, deck_id, name, system_prompt, enabled, order_index
+            ) VALUES ('voice-editor', ?, 'Story Editor', 'Challenge every plot hole.', 1, 1)
+            """,
+            (DECK_ID,),
+        )
         self.fixture.db.commit()
 
     def tearDown(self) -> None:
@@ -113,6 +121,26 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("pending Dream proposal", context.system_prompt)
         self.assertIn("canonical workspace files", context.system_prompt)
         self.assertIn("Dream run context", context.system_prompt)
+
+    async def test_selected_agent_excludes_sibling_agent_prompts(self) -> None:
+        context = await DeckChatContextService(self.fixture.db).resolve(
+            deck_id=DECK_ID,
+            actor_id="1",
+            voice_id="voice-dream",
+        )
+
+        self.assertIn("Dream Guide", context.system_prompt)
+        self.assertIn("Keep a cinematic story voice.", context.system_prompt)
+        self.assertNotIn("Story Editor", context.system_prompt)
+        self.assertNotIn("Challenge every plot hole.", context.system_prompt)
+
+        with self.assertRaises(DeckChatContextError) as caught:
+            await DeckChatContextService(self.fixture.db).resolve(
+                deck_id=DECK_ID,
+                actor_id="1",
+                voice_id="agent-outside-deck",
+            )
+        self.assertEqual(caught.exception.code, "AGENT_ACCESS_DENIED")
 
     async def test_ready_refs_surface_as_digest_pinned_provenance(self) -> None:
         _insert_installation(self.fixture.db)

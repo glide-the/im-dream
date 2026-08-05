@@ -32,7 +32,7 @@ test('Dream re-entry groups scroll their item lists without growing the workbenc
 });
 
 test('Dream route removes the top WorkflowContextBar while non-Dream route support remains', () => {
-  expect(ROUTER_SOURCE).toContain('workflowContext={isDreamRoute\n        ? null');
+  expect(ROUTER_SOURCE).toContain('workflowContext={isDreamRoute || isSettingsRoute\n        ? null');
   expect(LAYOUT_SOURCE).toContain('<WorkflowContextBar {...workflowContext} />');
 });
 

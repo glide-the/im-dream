@@ -166,6 +166,7 @@ class ClaudeAgentRequestBody(BaseModel):
     editor_state: Optional[dict] = None
     system_prompt: Optional[str] = Field(default=None, validation_alias=AliasChoices("system_prompt", "systemPrompt"))
     deck_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("deck_id", "deckId"))
+    voice_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("voice_id", "voiceId"))
 
     @model_validator(mode="before")
     @classmethod
@@ -204,10 +205,12 @@ class ToolConfirmRequestBody(BaseModel):
 class CreateThreadResponseBody(BaseModel):
     thread_id: str
     deck_id: Optional[str] = None
+    voice_id: Optional[str] = None
 
 
 class CreateThreadRequestBody(BaseModel):
     deck_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("deck_id", "deckId"))
+    voice_id: Optional[str] = Field(default=None, min_length=1, validation_alias=AliasChoices("voice_id", "voiceId"))
     title: Optional[str] = Field(default=None, max_length=200)
 
 
@@ -252,6 +255,8 @@ async def claude_agent_stream(
 
     requested_deck_id = body.deck_id
     persisted_deck_id = thread.get("deck_id")
+    requested_voice_id = body.voice_id
+    persisted_voice_id = thread.get("voice_id")
     if requested_deck_id and persisted_deck_id and requested_deck_id != persisted_deck_id:
         raise HTTPException(
             status_code=409,
@@ -260,15 +265,27 @@ async def claude_agent_stream(
                 "message": "The Deck cannot be changed after the conversation starts.",
             },
         )
+    if requested_voice_id and persisted_voice_id and requested_voice_id != persisted_voice_id:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "CHAT_AGENT_IMMUTABLE",
+                "message": "The Agent cannot be changed after the conversation starts.",
+            },
+        )
 
     deck_context = None
     effective_deck_id = requested_deck_id or persisted_deck_id
+    effective_voice_id = requested_voice_id or persisted_voice_id
+    if effective_voice_id and not effective_deck_id:
+        raise HTTPException(status_code=422, detail="voiceId requires deckId")
     if effective_deck_id:
         deck_db = database.get_db()
         try:
             deck_context = await DeckChatContextService(deck_db).resolve(
                 deck_id=str(effective_deck_id),
                 actor_id=str(user_id),
+                voice_id=str(effective_voice_id) if effective_voice_id else None,
             )
         except DeckChatContextError as exc:
             raise HTTPException(
@@ -287,6 +304,18 @@ async def claude_agent_stream(
                 detail={
                     "error_code": "CHAT_DECK_IMMUTABLE",
                     "message": "The conversation Deck changed concurrently.",
+                },
+            )
+        if effective_voice_id and not persisted_voice_id and not database.bind_chat_thread_voice(
+            thread_id,
+            user_id,
+            str(effective_voice_id),
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "CHAT_AGENT_IMMUTABLE",
+                    "message": "The conversation Agent changed concurrently.",
                 },
             )
 
@@ -449,6 +478,7 @@ async def claude_agent_create_thread(
     """
     user_id = current_user["user_id"]
     deck_id = body.deck_id if body else None
+    voice_id = body.voice_id if body else None
     title = body.title if body else None
     if deck_id:
         deck = database.get_deck_with_voices(user_id, deck_id)
@@ -468,8 +498,21 @@ async def claude_agent_create_thread(
                     "message": "The selected Deck is disabled.",
                 },
             )
-    thread_id = database.create_chat_thread(user_id, deck_id=deck_id, title=title)
-    return {"thread_id": thread_id, "deck_id": deck_id}
+        if voice_id and not any(
+            str(voice.get("id")) == voice_id and bool(voice.get("enabled"))
+            for voice in deck.get("voices", [])
+        ):
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "error_code": "AGENT_ACCESS_DENIED",
+                    "message": "Agent not found, disabled, or outside the selected Deck.",
+                },
+            )
+    elif voice_id:
+        raise HTTPException(status_code=422, detail="voiceId requires deckId")
+    thread_id = database.create_chat_thread(user_id, deck_id=deck_id, voice_id=voice_id, title=title)
+    return {"thread_id": thread_id, "deck_id": deck_id, "voice_id": voice_id}
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/plugin-load-receipt")

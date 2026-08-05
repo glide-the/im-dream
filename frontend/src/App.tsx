@@ -313,7 +313,7 @@ export default function App() {
   const [chatStreaming, setChatStreaming] = useState<Map<string, { text: string; reasoning: string; reasoningDone: boolean }>>(new Map());
   /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
-  const [requestedChatDeck, setRequestedChatDeck] = useState<{ deckId: string; nonce: number } | undefined>(undefined);
+  const [requestedChatDeck, setRequestedChatDeck] = useState<{ deckId: string; agentId?: string; nonce: number } | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
   const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
 
@@ -1073,12 +1073,10 @@ export default function App() {
     setHasOpenedChatView(true);
   }, []);
 
-  // @@@ Deck editor "Chat →": preselect the Deck in the chat input dock and land
-  // on a fresh conversation. Subsequent interaction is with the Deck as a whole;
-  // the voice name rides along as informational context for the top badge.
+  // @@@ Deck editor "Chat →": preselect the selected Agent and its parent Deck.
   const handleChatWithDeck = useCallback((deckId: string, voiceInfo?: ActiveChatVoice) => {
     setRequestedChatThreadId(undefined);
-    setRequestedChatDeck({ deckId, nonce: Date.now() });
+    setRequestedChatDeck({ deckId, agentId: voiceInfo?.id, nonce: Date.now() });
     setActiveChatVoice(voiceInfo);
     setCurrentView('chat');
     setHasOpenedChatView(true);
@@ -1554,6 +1552,7 @@ export default function App() {
                     onEditorWriteConfirmed={handleEditorWriteConfirmed}
                     requestedThreadId={requestedChatThreadId}
                     requestedDeckId={requestedChatDeck?.deckId}
+                    requestedAgentId={requestedChatDeck?.agentId}
                     requestedDeckNonce={requestedChatDeck?.nonce}
                     activeVoice={activeChatVoice}
                     isMobile={isMobile}
@@ -2334,6 +2333,7 @@ export default function App() {
             onEditorWriteConfirmed={handleEditorWriteConfirmed}
             requestedThreadId={requestedChatThreadId}
             requestedDeckId={requestedChatDeck?.deckId}
+            requestedAgentId={requestedChatDeck?.agentId}
             requestedDeckNonce={requestedChatDeck?.nonce}
             activeVoice={activeChatVoice}
             isMobile={isMobile}

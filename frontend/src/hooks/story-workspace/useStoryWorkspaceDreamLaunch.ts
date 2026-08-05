@@ -14,7 +14,7 @@ type StoryWorkspaceDreamLaunchTransport = (
 ) => Promise<StoryWorkspaceDreamLaunchAccepted>;
 
 export interface StoryWorkspaceDreamLauncher {
-  start: (deckId: string, goal: string) => Promise<StoryWorkspaceDreamLaunchAccepted>;
+  start: (deckId: string, agentId: string, goal: string) => Promise<StoryWorkspaceDreamLaunchAccepted>;
 }
 
 export function storyWorkspaceNewDreamLaunchIdempotencyKey(
@@ -45,14 +45,15 @@ export function createStoryWorkspaceDreamLauncher(
   } | null = null;
 
   return {
-    start(deckId, goal) {
+    start(deckId, agentId, goal) {
       if (inFlight) return inFlight;
       const normalizedDeckId = deckId.trim();
+      const normalizedAgentId = agentId.trim();
       const normalizedGoal = goal.trim();
-      if (!normalizedDeckId || !normalizedGoal) {
-        return Promise.reject(new Error('请选择 Deck 并填写创作目标。'));
+      if (!normalizedDeckId || !normalizedAgentId || !normalizedGoal) {
+        return Promise.reject(new Error('请选择 Agent 并填写创作目标。'));
       }
-      const fingerprint = `${normalizedDeckId}\u0000${normalizedGoal}`;
+      const fingerprint = `${normalizedDeckId}\u0000${normalizedAgentId}\u0000${normalizedGoal}`;
       if (!retainedRequest || retainedRequest.fingerprint !== fingerprint) {
         retainedRequest = {
           fingerprint,
@@ -61,6 +62,7 @@ export function createStoryWorkspaceDreamLauncher(
       }
       const command: StoryWorkspaceDreamLaunchCommand = {
         deckId: normalizedDeckId,
+        agentId: normalizedAgentId,
         goal: normalizedGoal,
         idempotencyKey: retainedRequest.idempotencyKey,
       };
@@ -78,6 +80,7 @@ export interface StoryWorkspaceDreamLaunchState {
   readonly error: Error | null;
   readonly start: (
     deckId: string,
+    agentId: string,
     goal: string,
   ) => Promise<StoryWorkspaceDreamLaunchAccepted>;
 }
@@ -88,10 +91,10 @@ export function useStoryWorkspaceDreamLaunch(): StoryWorkspaceDreamLaunchState {
   const [isLaunching, setIsLaunching] = useState(false);
   const [error, setError] = useState<Error | null>(null);
 
-  const start = useCallback((deckId: string, goal: string) => {
+  const start = useCallback((deckId: string, agentId: string, goal: string) => {
     setIsLaunching(true);
     setError(null);
-    return launcher.current!.start(deckId, goal).catch((reason: unknown) => {
+    return launcher.current!.start(deckId, agentId, goal).catch((reason: unknown) => {
       const launchError = reason instanceof Error
         ? reason
         : new Error('Dream 暂时无法发起。');

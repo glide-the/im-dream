@@ -108,6 +108,7 @@ interface ChatThread {
   id: string;
   title: string | null;
   deck_id?: string | null;
+  voice_id?: string | null;
   created_at: string;
   updated_at: string;
   match?: {
@@ -135,6 +136,8 @@ interface ChatViewProps {
   requestedThreadId?: string;
   /** When set (with requestedDeckNonce), preselect this Deck in the input dock and land on a fresh conversation (Deck editor "Chat →"). */
   requestedDeckId?: string;
+  /** Agent selected under requestedDeckId. */
+  requestedAgentId?: string;
   /** Bump-only companion of requestedDeckId so repeated requests for the same Deck still re-apply. */
   requestedDeckNonce?: number;
   onNewChat?: () => void;
@@ -257,7 +260,7 @@ function getThreadDateGroup(value: string, t: TFunction): string {
   return t('chat.dateGroup.earlier');
 }
 
-async function createThread(deckId?: string): Promise<string | null> {
+async function createThread(deckId?: string, voiceId?: string): Promise<string | null> {
   try {
     const res = await fetch(`${API_BASE}/api/claude-agent/threads`, {
       method: 'POST',
@@ -265,7 +268,7 @@ async function createThread(deckId?: string): Promise<string | null> {
         'Authorization': `Bearer ${getAuthToken()}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(deckId ? { deckId } : {}),
+      body: JSON.stringify(deckId ? { deckId, ...(voiceId ? { voiceId } : {}) } : {}),
     });
     if (!res.ok) return null;
     const data = await res.json() as { thread_id: string };
@@ -376,6 +379,7 @@ function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
   requestedDeckId,
+  requestedAgentId,
   requestedDeckNonce,
   onNewChat,
   quickActions,
@@ -408,6 +412,7 @@ function ChatViewContent({
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState<string | undefined>();
+  const [selectedAgentId, setSelectedAgentId] = useState<string | undefined>();
   const [isLoadingDecks, setIsLoadingDecks] = useState(true);
   const [deckLoadError, setDeckLoadError] = useState<string | null>(null);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
@@ -452,6 +457,11 @@ function ChatViewContent({
         setAvailableDecks(enabledDecks);
         setSelectedDeckId((current) => (
           current && enabledDecks.some((deck) => deck.id === current) ? current : undefined
+        ));
+        setSelectedAgentId((current) => (
+          current && enabledDecks.some((deck) => (deck.voices || []).some(
+            (agent) => agent.enabled && agent.id === current,
+          )) ? current : undefined
         ));
       })
       .catch((error: unknown) => {
@@ -615,12 +625,12 @@ function ChatViewContent({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedThreadId]);
 
-  // @@@ External navigation (Deck editor "Chat →"): preselect the Deck in the
-  // input dock and land on a FRESH conversation — from here on the user chats
-  // with the Deck as a whole; the voice name is only informational context.
+  // @@@ External navigation (Deck editor "Chat →"): preselect the Agent under
+  // its Deck and land on a fresh conversation.
   useEffect(() => {
     if (requestedDeckNonce === undefined || !requestedDeckId) return;
     setSelectedDeckId(requestedDeckId);
+    setSelectedAgentId(requestedAgentId);
     setActiveThreadId(null);
     setThreadMessages(null);
     setHasConversationStarted(false);
@@ -645,6 +655,7 @@ function ChatViewContent({
       const msgs = snapshot.messages;
       setThreadMessages(msgs);
       setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
+      setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
       if (msgs.length > 0) setHasConversationStarted(true);
       setIsLoadingMessages(false);
 
@@ -670,6 +681,7 @@ function ChatViewContent({
     const snapshot = await fetchThreadMessages(activeThreadId);
     setThreadMessages(snapshot.messages);
     setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
+    setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
   }, [activeThreadId]);
 
   const notifyReconnectComplete = useCallback(() => {
@@ -703,7 +715,7 @@ function ChatViewContent({
 
     setDraftInputError(null);
     setIsCreatingThread(true);
-    const id = await createThread(selectedDeckId);
+    const id = await createThread(selectedDeckId, selectedAgentId);
     setIsCreatingThread(false);
     if (!id) {
       setDraftInputError(t('chat.history.createFailed'));
@@ -711,7 +723,7 @@ function ChatViewContent({
     }
 
     queuePromptForThread(id, message, uploadedFiles.map(toAttachment), toolChoice);
-  }, [isCreatingThread, queuePromptForThread, selectedDeckId, t]);
+  }, [isCreatingThread, queuePromptForThread, selectedAgentId, selectedDeckId, t]);
 
   const handleNewChat = useCallback(() => {
     if (isCreatingThread) return;
@@ -909,17 +921,16 @@ function ChatViewContent({
     return groups;
   }, [threads, t]);
 
-  // @@@ Derive the voice bound to the active thread from the hydrated decks
-  // (voice.thread_id ↔ activeThreadId). The App-level activeVoice prop is only
-  // set when a chat is opened through the Deck editor / agent picker, so treat
-  // it as informational context: show it only while it still matches the
-  // conversation you are looking at (the requested thread, or a conversation
-  // whose Deck contains that voice).
-  const threadVoiceEntry = activeThreadId
-    ? availableDecks
-        .flatMap((deck) => (deck.voices || []).map((voice) => ({ deck, voice })))
+  const selectedVoiceEntry = availableDecks
+    .flatMap((deck) => (deck.voices || []).map((voice) => ({ deck, voice })))
+    .find(({ voice }) => voice.id === selectedAgentId);
+  // Legacy voice threads predate persisted Agent IDs; keep their association as
+  // a read-only fallback while all new conversations use selectedAgentId.
+  const legacyThreadVoiceEntry = !selectedVoiceEntry && activeThreadId
+    ? availableDecks.flatMap((deck) => (deck.voices || []).map((voice) => ({ deck, voice })))
         .find(({ voice }) => voice.thread_id === activeThreadId)
     : undefined;
+  const threadVoiceEntry = selectedVoiceEntry ?? legacyThreadVoiceEntry;
   const isRequestedThreadActive = requestedThreadId !== undefined
     && requestedThreadId === activeThreadId;
   const badgeDeckId = selectedDeckId ?? threadVoiceEntry?.deck.id;
@@ -939,9 +950,8 @@ function ChatViewContent({
         color: threadVoiceEntry.voice.color,
       }
     : (showPropVoice ? activeVoice : undefined);
-  // @@@ voiceSystemPrompt is injected into runs — scope it to conversations the
-  // voice actually drives (voice threads, derived or freshly requested). Deck
-  // conversations only DISPLAY the voice name as context (design §G4).
+  // The chosen Agent is the only voice prompt for this thread; its Deck remains
+  // the immutable plugin/runtime provenance.
   const voiceSystemPrompt = threadVoiceEntry
     ? threadVoiceEntry.voice.system_prompt
     : (isRequestedThreadActive ? activeVoice?.systemPrompt : undefined);
@@ -1121,10 +1131,11 @@ function ChatViewContent({
                   }}
                   voiceSystemPrompt={voiceSystemPrompt}
                   deckId={selectedDeckId}
+                  voiceId={selectedAgentId}
                   inputContextControl={(
                     <DeckChatSelector
                       decks={availableDecks}
-                      selectedDeckId={selectedDeckId}
+                      selectedAgentId={selectedAgentId}
                       loading={isLoadingDecks}
                       error={deckLoadError}
                       locked
@@ -1154,8 +1165,11 @@ function ChatViewContent({
                         contextControl={(
                           <DeckChatSelector
                             decks={availableDecks}
-                            selectedDeckId={selectedDeckId}
-                            onChange={setSelectedDeckId}
+                            selectedAgentId={selectedAgentId}
+                            onChange={(selection) => {
+                              setSelectedDeckId(selection?.deckId);
+                              setSelectedAgentId(selection?.agentId);
+                            }}
                             loading={isLoadingDecks}
                             error={deckLoadError}
                           />

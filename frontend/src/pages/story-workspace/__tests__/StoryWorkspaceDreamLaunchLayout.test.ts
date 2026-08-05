@@ -57,8 +57,7 @@ test('router keeps Decks content route-scoped and Dream free of Chat seams', () 
     APP_SOURCE.indexOf("{currentView === 'writing' && (", storyWorkspaceStart),
   );
   expect(storyWorkspaceBranch).toContain('<StoryWorkspaceRouter');
-  expect(storyWorkspaceBranch).not.toContain('<ChatView');
-  expect(storyWorkspaceBranch).not.toContain('<ChatWidgetUI');
+  expect(storyWorkspaceBranch).toContain('legacyContent={{');
   expect(storyWorkspaceBranch).not.toContain('dreamContent=');
 });
 
@@ -81,4 +80,19 @@ test('launch form keeps its action visible while its fields scroll inside the wo
   expect(LAUNCH_SOURCE).toContain('story-workspace-dream-launch__form-actions');
   expect(DREAM_CSS).toMatch(/\.story-workspace-dream-launch__form\s*\{[^}]*grid-template-rows: minmax\(0, 1fr\) auto;[^}]*overflow: hidden;/s);
   expect(DREAM_CSS).toMatch(/\.story-workspace-dream-launch__form-body\s*\{[^}]*overflow-y: auto;/s);
+});
+
+test('Dream launch surface follows the shared dark theme canvas and action contrast tokens', () => {
+  expect(DREAM_CSS).toContain('--dream-canvas: var(--color-bg-app, #f6efe5);');
+  expect(DREAM_CSS).toContain('color: var(--dream-canvas);');
+  expect(DREAM_CSS).not.toContain('--color-bg-warm');
+  expect(DREAM_CSS).toContain('color: var(--color-state-error, #9b3d2e);');
+});
+
+test('Dream selects an Agent from Deck-grouped options instead of selecting a Deck', () => {
+  expect(LAUNCH_SOURCE).toContain("import DeckChatSelector from '../../components/deck/DeckChatSelector'");
+  expect(LAUNCH_SOURCE).toContain('allowNone={false}');
+  expect(LAUNCH_SOURCE).toContain('selectedAgentId={selectedAgentId}');
+  expect(LAUNCH_SOURCE).toContain('launch.start(selectedDeckId, selectedAgentId, goal)');
+  expect(LAUNCH_SOURCE).not.toContain('<select');
 });

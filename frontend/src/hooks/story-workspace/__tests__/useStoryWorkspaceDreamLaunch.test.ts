@@ -15,7 +15,7 @@ import {
 
 const RUN_ID = `run_${'a'.repeat(32)}`;
 
-test('posts only the three public camelCase launch fields', async () => {
+test('posts only the four public camelCase launch fields', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   const fetchImpl = (async (url: unknown, init?: RequestInit) => {
     calls.push({ url: String(url), init });
@@ -27,6 +27,7 @@ test('posts only the three public camelCase launch fields', async () => {
 
   const accepted = await storyWorkspaceStartDreamRun({
     deckId: 'deck-1',
+    agentId: 'agent-1',
     goal: '雨夜车站的重逢',
     idempotencyKey: 'dream_test-1',
   }, { endpoint: storyWorkspaceDreamLaunchEndpoint, fetchImpl, token: 'token-1' });
@@ -39,6 +40,7 @@ test('posts only the three public camelCase launch fields', async () => {
   expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer token-1');
   expect(JSON.parse(String(calls[0].init?.body))).toEqual({
     deckId: 'deck-1',
+    agentId: 'agent-1',
     goal: '雨夜车站的重逢',
     idempotencyKey: 'dream_test-1',
   });
@@ -78,12 +80,13 @@ test('shares one in-flight launch and navigates with the accepted run id', async
     () => 'dream_uuid-1',
   );
 
-  const first = launcher.start('deck-1', '  雨夜车站  ');
-  const second = launcher.start('deck-1', '被忽略的双击');
+  const first = launcher.start('deck-1', 'agent-1', '  雨夜车站  ');
+  const second = launcher.start('deck-1', 'agent-1', '被忽略的双击');
 
   expect(first).toBe(second);
   expect(commands).toEqual([{
     deckId: 'deck-1',
+    agentId: 'agent-1',
     goal: '雨夜车站',
     idempotencyKey: 'dream_uuid-1',
   }]);
@@ -98,6 +101,7 @@ test('shares one in-flight launch and navigates with the accepted run id', async
 test('rejects non-201 and malformed launch responses', async () => {
   await expect(storyWorkspaceStartDreamRun({
     deckId: 'deck-1',
+    agentId: 'agent-1',
     goal: '目标',
     idempotencyKey: 'dream_test-2',
   }, {
@@ -106,6 +110,7 @@ test('rejects non-201 and malformed launch responses', async () => {
 
   await expect(storyWorkspaceStartDreamRun({
     deckId: 'deck-1',
+    agentId: 'agent-1',
     goal: '目标',
     idempotencyKey: 'dream_test-3',
   }, {

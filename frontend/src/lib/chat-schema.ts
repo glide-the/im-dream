@@ -26,8 +26,10 @@ export type ToolChoice = 'auto' | 'none' | 'manual';
 
 export type ChatApiSchemaRequestBody = {
   id: string;
-  /** Server-resolved Deck context. The client sends only the selected Deck id. */
+  /** Parent Deck provides the selected Agent's plugin/runtime context. */
   deckId?: string;
+  /** Agent within the parent Deck that supplies the persona prompt. */
+  voiceId?: string;
   resume?: boolean;
   message: UIMessage;
   chatModel?: ChatModel;
@@ -52,6 +54,7 @@ export type ChatMetadata = {
 
 /** Voice / deck info displayed in the Chat view and forwarded to the backend as voice context. */
 export interface ActiveChatVoice {
+  id?: string;
   name: string;
   systemPrompt: string;
   icon: string;

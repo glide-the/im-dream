@@ -223,6 +223,7 @@ class StoryWorkspaceDreamLaunchCommand(_StoryWorkspaceDreamWireModel):
     )
 
     deck_id: str = Field(min_length=1, max_length=255)
+    agent_id: str | None = Field(default=None, min_length=1, max_length=255)
     goal: str = Field(min_length=1, max_length=12000)
     idempotency_key: str = Field(
         min_length=1,
@@ -230,9 +231,11 @@ class StoryWorkspaceDreamLaunchCommand(_StoryWorkspaceDreamWireModel):
         pattern=r"^[A-Za-z0-9._:-]+$",
     )
 
-    @field_validator("deck_id", "goal", "idempotency_key")
+    @field_validator("deck_id", "agent_id", "goal", "idempotency_key")
     @classmethod
-    def launch_values_have_no_boundary_whitespace(cls, value: str) -> str:
+    def launch_values_have_no_boundary_whitespace(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
         if value != value.strip():
             raise ValueError("Dream launch fields must not contain boundary whitespace")
         return value
@@ -254,6 +257,7 @@ class StoryWorkspaceDreamRunContext(BaseModel):
     workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     thread_id: str = Field(min_length=1, max_length=255)
     deck_id: str = Field(min_length=1, max_length=255)
+    agent_id: str | None = Field(default=None, min_length=1, max_length=255)
     deck_plugin_id: str = Field(min_length=1, max_length=255)
     deck_plugin_version: str = Field(min_length=1, max_length=255)
     deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
@@ -269,6 +273,7 @@ class StoryWorkspaceDreamLaunchAccepted(_StoryWorkspaceDreamWireModel):
     workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
     thread_id: str = Field(min_length=1, max_length=255)
     deck_id: str = Field(min_length=1, max_length=255)
+    agent_id: str | None = Field(default=None, min_length=1, max_length=255)
     deck_plugin_id: str = Field(min_length=1, max_length=255)
     deck_plugin_version: str = Field(min_length=1, max_length=255)
     deck_plugin_binding_id: str = Field(min_length=1, max_length=255)

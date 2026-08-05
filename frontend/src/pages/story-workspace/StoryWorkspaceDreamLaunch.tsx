@@ -3,7 +3,8 @@
 // [Pos] Story Workspace Dream no-run surface (Task 3 U4)
 
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { listDecks, type Deck } from '../../api/voiceApi';
+import { getDeck, listDecks, type Deck } from '../../api/voiceApi';
+import DeckChatSelector from '../../components/deck/DeckChatSelector';
 import {
   storyWorkspaceDreamRunPath,
   useStoryWorkspaceDreamLaunch,
@@ -75,6 +76,7 @@ export function StoryWorkspaceDreamLaunch({
 }: StoryWorkspaceDreamLaunchProps) {
   const [decks, setDecks] = useState<Deck[]>([]);
   const [selectedDeckId, setSelectedDeckId] = useState('');
+  const [selectedAgentId, setSelectedAgentId] = useState('');
   const [goal, setGoal] = useState('');
   const [isLoadingDecks, setIsLoadingDecks] = useState(true);
   const [deckError, setDeckError] = useState<Error | null>(null);
@@ -84,17 +86,31 @@ export function StoryWorkspaceDreamLaunch({
   useEffect(() => {
     let active = true;
     setIsLoadingDecks(true);
-    void listDecks().then((availableDecks) => {
+    void listDecks().then((availableDecks) => Promise.all(availableDecks.map(async (deck) => {
+      try {
+        return await getDeck(deck.id);
+      } catch {
+        return deck;
+      }
+    }))).then((availableDecks) => {
       if (!active) return;
       const enabledDecks = availableDecks.filter((deck) => deck.enabled);
       setDecks(enabledDecks);
-      setSelectedDeckId((current) => (
-        enabledDecks.some((deck) => deck.id === current)
-          ? current
+      setSelectedDeckId((currentDeckId) => {
+        const nextDeckId = enabledDecks.some((deck) => deck.id === currentDeckId)
+          ? currentDeckId
           : enabledDecks.some((deck) => deck.id === initialDeckId)
             ? initialDeckId ?? ''
-            : enabledDecks[0]?.id ?? ''
-      ));
+            : enabledDecks[0]?.id ?? '';
+        const nextDeck = enabledDecks.find((deck) => deck.id === nextDeckId);
+        setSelectedAgentId((currentAgentId) => {
+          const agents = (nextDeck?.voices || []).filter((agent) => agent.enabled);
+          return agents.some((agent) => agent.id === currentAgentId)
+            ? currentAgentId
+            : agents[0]?.id ?? '';
+        });
+        return nextDeckId;
+      });
       setDeckError(null);
     }).catch(() => {
       if (!active) return;
@@ -111,13 +127,14 @@ export function StoryWorkspaceDreamLaunch({
     () => decks.find((deck) => deck.id === selectedDeckId) ?? null,
     [decks, selectedDeckId],
   );
-  const canStart = Boolean(selectedDeckId && goal.trim() && !launch.isLaunching);
+  const selectedAgent = selectedDeck?.voices?.find((agent) => agent.id === selectedAgentId) ?? null;
+  const canStart = Boolean(selectedDeckId && selectedAgentId && goal.trim() && !launch.isLaunching);
   const visibleError = deckError ?? launch.error;
 
   const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!canStart) return;
-    void launch.start(selectedDeckId, goal).then((accepted) => {
+    void launch.start(selectedDeckId, selectedAgentId, goal).then((accepted) => {
       onNavigate?.(storyWorkspaceDreamRunPath(accepted.workflowRunId));
     }).catch(() => {
       // The hook keeps the technical error on this surface. There is no Dream
@@ -130,7 +147,7 @@ export function StoryWorkspaceDreamLaunch({
       <header className="story-workspace-dream-launch__header">
         <p>Dream · Agent workspace</p>
         <h1 id="dream-launch-title">发起一次 Dream</h1>
-        <span>选择 Deck 和创作目标。Dream 会逐步写入人物、场景与分镜。</span>
+        <span>选择 Agent 和创作目标。Dream 会逐步写入人物、场景与分镜。</span>
       </header>
 
       <div className="story-workspace-dream-launch__sheet">
@@ -155,20 +172,19 @@ export function StoryWorkspaceDreamLaunch({
             </div>
 
             <label>
-              <span>Deck</span>
-              <select
-                aria-busy={isLoadingDecks}
-                disabled={isLoadingDecks || launch.isLaunching}
-                onChange={(event) => setSelectedDeckId(event.currentTarget.value)}
-                value={selectedDeckId}
-              >
-                {decks.length === 0 && (
-                  <option value="">{isLoadingDecks ? '正在读取 Deck…' : '没有可用的 Deck'}</option>
-                )}
-                {decks.map((deck) => (
-                  <option key={deck.id} value={deck.id}>{deckDisplayName(deck)}</option>
-                ))}
-              </select>
+              <span>Agent</span>
+              <DeckChatSelector
+                allowNone={false}
+                decks={decks}
+                error={deckError?.message}
+                loading={isLoadingDecks}
+                onChange={(selection) => {
+                  setSelectedDeckId(selection?.deckId ?? '');
+                  setSelectedAgentId(selection?.agentId ?? '');
+                }}
+                selectedAgentId={selectedAgentId}
+                variant="dream"
+              />
             </label>
 
             <label>
@@ -183,10 +199,10 @@ export function StoryWorkspaceDreamLaunch({
               />
             </label>
 
-            {selectedDeck && (
+            {selectedDeck && selectedAgent && (
               <p className="story-workspace-dream-launch__selection">
-                <span>当前 Deck</span>
-                <strong>{deckDisplayName(selectedDeck)}</strong>
+                <span>当前 Agent</span>
+                <strong>{deckDisplayName(selectedDeck)} · {selectedAgent.name_zh || selectedAgent.name}</strong>
               </p>
             )}
             {visibleError && (

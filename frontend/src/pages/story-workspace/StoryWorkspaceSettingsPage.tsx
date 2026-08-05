@@ -110,9 +110,7 @@ export function StoryWorkspaceSettingsPage({
       <div className="story-workspace-settings__card"><ModelConfigSection /></div>
     </SettingsSection>
   ) : activeSection === 'settings-subscription' ? (
-    <SettingsSection id="settings-subscription" title="订阅" description="查看 Dream 工作区的订阅档位与创作侧重点。">
-      <StoryWorkspaceSubscriptionPage />
-    </SettingsSection>
+    <StoryWorkspaceSubscriptionPage />
   ) : activeSection === 'settings-about' ? (
     <SettingsSection id="settings-about" title="关于" description="Ink & Memory 工作区信息。">
       <div className="story-workspace-settings__card"><AboutView /></div>

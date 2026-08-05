@@ -166,6 +166,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
         actor_id: str,
         workspace_id: str,
         deck_id: str,
+        agent_id: str | None,
         goal: str,
         idempotency_key: str,
         request_fingerprint: str,
@@ -184,6 +185,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
             "actorId": actor_id,
             "workspaceId": workspace_id,
             "deckId": deck_id,
+            "agentId": agent_id,
             "goal": goal,
             "idempotencyKey": idempotency_key,
             "requestFingerprint": request_fingerprint,
@@ -197,7 +199,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
                 deck_id=deck_id,
             )
             existing_message = self.db.execute(
-                "SELECT message.*, thread.user_id, thread.deck_id "
+                "SELECT message.*, thread.user_id, thread.deck_id, thread.voice_id "
                 "FROM chat_message AS message JOIN chat_thread AS thread "
                 "ON thread.id = message.thread_id WHERE message.id = ?",
                 (message_id,),
@@ -207,6 +209,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
                     existing_message,
                     actor_id=numeric_actor_id,
                     deck_id=deck_id,
+                    agent_id=agent_id,
                     thread_id=thread_id,
                     request_fingerprint=request_fingerprint,
                     idempotency_key=idempotency_key,
@@ -226,23 +229,25 @@ class StoryWorkspaceDreamLaunchSourceStore:
                 )
 
             existing_thread = self.db.execute(
-                "SELECT id, user_id, deck_id FROM chat_thread WHERE id = ?",
+                "SELECT id, user_id, deck_id, voice_id FROM chat_thread WHERE id = ?",
                 (thread_id,),
             ).fetchone()
             if existing_thread is None:
                 self.db.execute(
-                    "INSERT INTO chat_thread (id, user_id, title, deck_id) "
-                    "VALUES (?, ?, ?, ?)",
+                    "INSERT INTO chat_thread (id, user_id, title, deck_id, voice_id) "
+                    "VALUES (?, ?, ?, ?, ?)",
                     (
                         thread_id,
                         numeric_actor_id,
                         f"Dream · {goal[:80]}",
                         deck_id,
+                        agent_id,
                     ),
                 )
             elif (
                 int(existing_thread["user_id"]) != numeric_actor_id
                 or existing_thread["deck_id"] != deck_id
+                or existing_thread["voice_id"] != agent_id
             ):
                 raise PermissionError("Dream backing thread scope mismatch")
 
@@ -298,6 +303,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
         *,
         actor_id: int,
         deck_id: str,
+        agent_id: str | None,
         thread_id: str,
         request_fingerprint: str,
         idempotency_key: str,
@@ -315,7 +321,9 @@ class StoryWorkspaceDreamLaunchSourceStore:
             raise PermissionError("Dream launch source scope mismatch")
         if (
             row["deck_id"] != deck_id
+            or row["voice_id"] != agent_id
             or metadata.get("deckId") != deck_id
+            or metadata.get("agentId") != agent_id
             or metadata.get("requestFingerprint") != request_fingerprint
         ):
             raise StoryWorkspaceDreamLaunchIdempotencyConflict()
@@ -374,6 +382,16 @@ class StoryWorkspaceDreamLaunchProvisioner:
         ).fetchone()
         if row is None:
             raise PermissionError("Deck not found or permission denied")
+
+    def require_agent_scope(self, deck_id: str, agent_id: str | None) -> None:
+        if agent_id is None:
+            return
+        row = self.db.execute(
+            "SELECT id FROM voices WHERE id = ? AND deck_id = ? AND enabled = 1",
+            (agent_id, deck_id),
+        ).fetchone()
+        if row is None:
+            raise StoryWorkspaceDreamLaunchGatewayError("AGENT_ACCESS_DENIED", 404)
 
     def _runtime_lock(self) -> DeckRuntimePluginLock:
         row = self.db.execute(
@@ -688,6 +706,7 @@ def story_workspace_build_dream_launch_turn_dispatcher() -> Callable[..., Any]:
             message_parts=values["parts"],
             message_metadata=values["metadata"],
             story_workspace_dream_context=values["context"],
+            system_prompt=values.get("system_prompt"),
         )
         stream = claude_agent_thread_factory.run_streaming(request)
 
@@ -780,6 +799,15 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
         agent_metadata.pop("dispatchClaimId", None)
         agent_metadata.pop("dispatchClaimedAt", None)
         try:
+            system_prompt = None
+            if context.agent_id:
+                voice = self.db.execute(
+                    "SELECT system_prompt FROM voices WHERE id = ? AND deck_id = ? AND enabled = 1",
+                    (context.agent_id, context.deck_id),
+                ).fetchone()
+                if voice is None:
+                    raise StoryWorkspaceDreamLaunchGatewayError("AGENT_ACCESS_DENIED", 404)
+                system_prompt = str(voice["system_prompt"])
             accepted = self._turn_dispatcher(
                 actor_id=actor_id,
                 thread_id=source.thread_id,
@@ -787,6 +815,7 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
                 parts=parts,
                 metadata=agent_metadata,
                 context=context,
+                system_prompt=system_prompt,
                 resume=False,
             )
         except Exception:
@@ -909,6 +938,7 @@ class StoryWorkspaceDreamLaunchGateway:
             actor_id=actor["actor_id"],
             workspace_id=actor["workspace_id"],
         )
+        self._provisioner.require_agent_scope(request.deck_id, request.agent_id)
         existing_run = self._existing_replay_run(request, actor_context)
 
         async def resolve_binding(**values: Any) -> Any:
@@ -1000,18 +1030,21 @@ class StoryWorkspaceDreamLaunchGateway:
 
         source = self.db.execute(
             "SELECT message.id AS message_id, message.metadata, "
-            "thread.id AS thread_id, thread.user_id, thread.deck_id "
+            "thread.id AS thread_id, thread.user_id, thread.deck_id, thread.voice_id "
             "FROM chat_message AS message JOIN chat_thread AS thread "
             "ON thread.id = message.thread_id "
             "WHERE message.id = ? AND thread.id = ?",
             (run["source_message_id"], run["source_voice_thread_id"]),
         ).fetchone()
         metadata = _decode_json_object(source["metadata"] if source else None)
+        fingerprint_payload = {
+            "deck_id": request.deck_id,
+            "goal": request.goal,
+        }
+        if request.agent_id is not None:
+            fingerprint_payload["agent_id"] = request.agent_id
         expected_fingerprint = "sha256:" + hashlib.sha256(
-            _canonical_json({
-                "deck_id": request.deck_id,
-                "goal": request.goal,
-            }).encode("utf-8")
+            _canonical_json(fingerprint_payload).encode("utf-8")
         ).hexdigest()
         valid = (
             source is not None
@@ -1020,11 +1053,13 @@ class StoryWorkspaceDreamLaunchGateway:
             and source["message_id"] == run["source_message_id"]
             and str(source["user_id"]) == actor.actor_id
             and source["deck_id"] == request.deck_id
+            and source["voice_id"] == request.agent_id
             and metadata.get("kind")
             == STORY_WORKSPACE_DREAM_LAUNCH_METADATA_KIND
             and metadata.get("actorId") == actor.actor_id
             and metadata.get("workspaceId") == actor.workspace_id
             and metadata.get("deckId") == request.deck_id
+            and metadata.get("agentId") == request.agent_id
             and metadata.get("goal") == request.goal
             and metadata.get("idempotencyKey") == request.idempotency_key
             and metadata.get("requestFingerprint") == expected_fingerprint

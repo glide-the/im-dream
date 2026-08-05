@@ -14,17 +14,22 @@ const SUBSCRIPTION = readFileSync(new URL('../../../../pages/story-workspace/Sto
 const SETTINGS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
 const DREAM_LAUNCH = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
 
-test('sidebar replaces legacy resource management with Dream, Decks and subscription', () => {
-  expect(SIDEBAR).toContain("label: 'Dream'");
-  expect(SIDEBAR).toContain("label: 'Decks'");
+test('sidebar replaces legacy resource management with Dream and Decks', () => {
+  expect(SIDEBAR).toContain("dream: '/story-workspace/dream'");
+  expect(SIDEBAR).toContain("decks: '/story-workspace/decks'");
   expect(SIDEBAR).toContain("writing: '/story-workspace/writing'");
   expect(SIDEBAR).toContain("timeline: '/story-workspace/timeline'");
   expect(SIDEBAR).toContain("analysis: '/story-workspace/analysis'");
   expect(SIDEBAR).toContain("chat: '/story-workspace/chat'");
+  expect(SIDEBAR).toContain('const Icon = item.icon as IconType;');
+  expect(SIDEBAR).toContain('story-workspace-sidebar__icon');
+  expect(SIDEBAR).toContain('aria-label={collapsed ? item.label : undefined}');
   expect(SIDEBAR).not.toContain("label: '订阅'");
   expect(SIDEBAR).not.toContain('故事管理');
   expect(SIDEBAR).not.toContain('角色管理');
   expect(SIDEBAR).not.toContain('场景管理');
+  expect(SIDEBAR).not.toContain('创作者工作台');
+  expect(DREAM_LAUNCH).toContain('id="dream-launch-title">发起一次 Dream');
 });
 
 test('Decks stays inside the workspace and projects the existing DeckManager into its main region', () => {
@@ -36,7 +41,7 @@ test('Decks stays inside the workspace and projects the existing DeckManager int
   expect(APP).toContain('<StoryWorkspaceRouter\n            decksContent={storyWorkspaceDeckManager}');
   expect(APP).toContain('onOpenDreamWithDeck={handleOpenDreamWithDeck}');
   expect(APP).not.toContain('handleStoryWorkspaceOpenDecks');
-  expect(SIDEBAR).toContain("label: 'Decks', path: '/story-workspace/decks'");
+  expect(SIDEBAR).toContain("decks: '/story-workspace/decks'");
   expect(SIDEBAR).not.toContain("action: 'open-decks'");
   expect(SIDEBAR).not.toContain('onOpenDecks');
   expect(SIDEBAR).toContain('aria-current={isCurrent ?');

@@ -134,6 +134,8 @@ interface ChatPanelProps {
   voiceSystemPrompt?: string;
   /** Immutable Deck selection for this thread. */
   deckId?: string;
+  /** Immutable Agent selection within the Deck. */
+  voiceId?: string;
   /** Compact Deck provenance control rendered beside the composer controls. */
   inputContextControl?: ReactNode;
 }
@@ -172,6 +174,7 @@ export default function ChatPanel({
   onOpenSubagentTask,
   voiceSystemPrompt,
   deckId,
+  voiceId,
   inputContextControl,
 }: ChatPanelProps) {
   const { t } = useTranslation();
@@ -274,6 +277,7 @@ export default function ChatPanel({
         const requestBody: ChatApiSchemaRequestBody = {
           id,
           ...(deckId ? { deckId } : {}),
+          ...(voiceId ? { voiceId } : {}),
           resume: true,
           message: lastMessage,
           chatModel: resolvedChatModel,
