@@ -7,6 +7,7 @@ import {
   storyWorkspaceNewDreamAgentIdempotencyKey,
   type StoryWorkspaceDreamAgentViewModel,
 } from '../../../hooks/story-workspace';
+import { StoryWorkspaceDreamAgentMessageList } from './StoryWorkspaceDreamAgentMessageList';
 import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
 import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
 
@@ -82,27 +83,16 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
       hidden={!isOpen}
       id={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}
     >
-      <header>
-        <div>
-          <p>Dream Agent</p>
-          <strong>当前 Dream 对话</strong>
-        </div>
-        <button onClick={closePanel} type="button">收起</button>
-      </header>
+      <div className="story-workspace-dream-agent-panel__controls">
+        <button onClick={closePanel} type="button">← 返回 Dream 内容</button>
+      </div>
       <div className="story-workspace-dream-agent-panel__history-shell">
         <div className="story-workspace-dream-agent-panel__history" onScroll={handleHistoryScroll} ref={historyRef}>
-          {agent.snapshot?.messages.map((message) => (
-            <article className={`story-workspace-dream-agent-panel__message story-workspace-dream-agent-panel__message--${message.role}`} key={message.id}>
-              <small>{message.role === 'assistant' ? 'Dream Agent' : '你'}</small>
-              <p>{message.text}{message.truncated ? '…' : ''}</p>
-            </article>
-          ))}
-          {agent.streamText && (
-            <article className="story-workspace-dream-agent-panel__message story-workspace-dream-agent-panel__message--assistant">
-              <small>Dream Agent 正在输出</small><p>{agent.streamText}</p>
-            </article>
-          )}
-          {!agent.snapshot?.messages.length && !agent.streamText && <p className="story-workspace-dream-agent-panel__empty">正在准备可展示的 Dream Agent 消息。</p>}
+          <StoryWorkspaceDreamAgentMessageList
+            messages={agent.snapshot?.messages ?? []}
+            streamContent={agent.streamContent}
+            streamText={agent.streamText}
+          />
           <div aria-hidden="true" ref={bottomRef} />
         </div>
         {showScrollToLatest && (

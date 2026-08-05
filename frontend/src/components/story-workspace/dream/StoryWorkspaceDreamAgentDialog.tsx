@@ -8,6 +8,7 @@ import {
   type StoryWorkspaceDreamAgentViewModel,
 } from '../../../hooks/story-workspace';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
+import { StoryWorkspaceDreamAgentMessageList } from './StoryWorkspaceDreamAgentMessageList';
 import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
 import { useStoryWorkspaceDreamAgentScroll } from './useStoryWorkspaceDreamAgentScroll';
 
@@ -169,18 +170,11 @@ export function StoryWorkspaceDreamAgentDialog({
       </header>
       <div className="story-workspace-dream-agent-dialog__history-shell">
         <div className="story-workspace-dream-agent-dialog__history" onScroll={handleHistoryScroll} ref={historyRef}>
-          {agent.snapshot?.messages.map((message) => (
-            <article className={`story-workspace-dream-agent-dialog__message story-workspace-dream-agent-dialog__message--${message.role}`} key={message.id}>
-              <small>{message.role === 'assistant' ? 'Dream Agent' : '你'}</small>
-              <p>{message.text}{message.truncated ? '…' : ''}</p>
-            </article>
-          ))}
-          {agent.streamText && (
-            <article className="story-workspace-dream-agent-dialog__message story-workspace-dream-agent-dialog__message--assistant">
-              <small>Dream Agent 正在输出</small><p>{agent.streamText}</p>
-            </article>
-          )}
-          {!agent.snapshot?.messages.length && !agent.streamText && <p className="story-workspace-dream-agent-dialog__empty">正在准备可展示的 Dream Agent 消息。</p>}
+          <StoryWorkspaceDreamAgentMessageList
+            messages={agent.snapshot?.messages ?? []}
+            streamContent={agent.streamContent}
+            streamText={agent.streamText}
+          />
           <div aria-hidden="true" ref={bottomRef} />
         </div>
         {showScrollToLatest && (
