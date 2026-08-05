@@ -22,11 +22,14 @@ export function StoryWorkspaceDreamDeckMetadata({
 }: StoryWorkspaceDreamDeckMetadataProps) {
   const [open, setOpen] = useState(false);
   const popoverId = useId();
+  const popoverTitleId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return undefined;
+    popoverRef.current?.focus();
 
     const handlePointerDown = (event: PointerEvent) => {
       if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
@@ -67,13 +70,15 @@ export function StoryWorkspaceDreamDeckMetadata({
 
       {open && (
         <div
-          aria-label={`${deckName} Deck 元信息`}
+          aria-labelledby={popoverTitleId}
           aria-modal="false"
           className="story-workspace-dream-deck-metadata__popover"
           id={popoverId}
+          ref={popoverRef}
           role="dialog"
+          tabIndex={-1}
         >
-          <p>当前 Dream</p>
+          <h2 id={popoverTitleId}>Deck 元信息</h2>
           <dl>
             <div><dt>Deck</dt><dd>{deckName}</dd></div>
             <div><dt>Dream run</dt><dd>{runId}</dd></div>

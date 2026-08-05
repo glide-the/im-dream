@@ -81,11 +81,17 @@
   box-shadow: 0 10px 24px color-mix(in srgb, var(--dream-ink) 11%, transparent);
 }
 
-.story-workspace-dream-deck-metadata__popover > p {
+.story-workspace-dream-deck-metadata__popover:focus-visible {
+  outline: 2px solid var(--dream-action);
+  outline-offset: 2px;
+}
+
+.story-workspace-dream-deck-metadata__popover > h2 {
   margin: 0 0 11px;
   color: var(--dream-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 9px;
+  font-weight: 500;
   letter-spacing: .08em;
   text-transform: uppercase;
 }

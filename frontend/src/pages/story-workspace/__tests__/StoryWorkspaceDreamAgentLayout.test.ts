@@ -207,14 +207,28 @@ test('rail delegates trusted Deck metadata to a dedicated Dream control', () => 
 
 test('Dream Deck metadata is an instance-safe accessible disclosure without Chat data ownership', () => {
   expect(DECK_METADATA).toContain('const popoverId = useId()');
+  expect(DECK_METADATA).toContain('const popoverTitleId = useId()');
+  expect(DECK_METADATA).toContain('const popoverRef = useRef<HTMLDivElement>(null)');
   expect(DECK_METADATA).toContain('aria-controls={popoverId}');
   expect(DECK_METADATA).toContain('aria-expanded={open}');
   expect(DECK_METADATA).toContain('aria-haspopup="dialog"');
   expect(DECK_METADATA).toContain('role="dialog"');
   expect(DECK_METADATA).toContain('aria-modal="false"');
+  expect(DECK_METADATA).toContain('aria-labelledby={popoverTitleId}');
+  expect(DECK_METADATA).toContain('id={popoverTitleId}');
+  expect(DECK_METADATA).toContain('ref={popoverRef}');
+  expect(DECK_METADATA).toContain('tabIndex={-1}');
+  expect(DECK_METADATA).toContain('popoverRef.current?.focus()');
   expect(DECK_METADATA).toContain("document.addEventListener('pointerdown', handlePointerDown)");
   expect(DECK_METADATA).toContain("event.key !== 'Escape'");
   expect(DECK_METADATA).toContain('triggerRef.current?.focus()');
+  const pointerHandler = DECK_METADATA.slice(
+    DECK_METADATA.indexOf('const handlePointerDown'),
+    DECK_METADATA.indexOf('const handleKeyDown'),
+  );
+  expect(pointerHandler).not.toContain('triggerRef.current?.focus()');
+  expect(DECK_METADATA).not.toContain("event.key === 'Tab'");
+  expect(DECK_METADATA).not.toContain('querySelectorAll');
   expect(DECK_METADATA).not.toContain('PluginReceiptBadge');
   expect(DECK_METADATA).not.toContain('threadId');
   expect(DECK_METADATA).not.toContain('getThreadPluginLoadReceipt');
