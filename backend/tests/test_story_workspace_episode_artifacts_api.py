@@ -86,7 +86,7 @@ def _unbound_surface() -> StoryWorkspaceEpisodeArtifactSurface:
         bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
         bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
             autoRepairAttempted=True,
-            canDispatch=False,
+            canDispatch=True,
             publicReason="episode_binding_unproven",
         ),
     )

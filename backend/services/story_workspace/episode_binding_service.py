@@ -33,6 +33,8 @@ except ModuleNotFoundError:  # Support repository-root package imports.
 _RUN_ID_PATTERN = re.compile(r"^run_[0-9a-f]{32}$")
 _STORY_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BINDING_MAX_BYTES = 16 * 1024
+_PROJECT_MAX_BYTES = 256 * 1024
+_PROJECT_ID_PATTERN = re.compile(r"(?m)^project_id:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*$")
 
 
 class StoryWorkspaceEpisodeBindingError(RuntimeError):
@@ -61,6 +63,7 @@ class StoryWorkspaceEpisodeBindingContext:
     trusted_project_story_slug: str | None
     locked_context_story_slug: str | None
     run_provenance_story_slug: str | None
+    episode_uid: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,6 +205,14 @@ class StoryWorkspaceEpisodeBindingService:
             )
         return value
 
+    @staticmethod
+    def _validate_episode_uid(value: object) -> str:
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{32}", value) is None:
+            raise StoryWorkspaceEpisodeBindingContractError(
+                "trusted Episode identity is invalid"
+            )
+        return value
+
     def _proved_story_slug(
         self,
         context: StoryWorkspaceEpisodeBindingContext,
@@ -307,6 +318,84 @@ class StoryWorkspaceEpisodeBindingService:
             for descriptor in reversed(descriptors):
                 os.close(descriptor)
 
+    def read_canonical_project_story_slug(self, story_slug: str) -> str:
+        """Read one exact project.yaml identity through pinned, no-follow FDs."""
+
+        candidate = self._validate_story_slug(story_slug)
+        descriptors: list[int] = []
+        descriptor = -1
+        try:
+            parent = self._open_workspace()
+            descriptors.append(parent)
+            for component in ("stories", candidate):
+                child = self._open_child_directory(
+                    parent,
+                    component,
+                    create=False,
+                )
+                assert child is not None
+                descriptors.append(child)
+                parent = child
+            descriptor = os.open(
+                "project.yaml",
+                self._file_flags(),
+                dir_fd=parent,
+            )
+            pinned = os.fstat(descriptor)
+            visible = os.stat(
+                "project.yaml",
+                dir_fd=parent,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(pinned.st_mode)
+                or stat.S_ISLNK(visible.st_mode)
+                or not stat.S_ISREG(visible.st_mode)
+                or (pinned.st_dev, pinned.st_ino) != (visible.st_dev, visible.st_ino)
+                or pinned.st_size > _PROJECT_MAX_BYTES
+            ):
+                raise StoryWorkspaceEpisodeBindingPathError(
+                    "canonical project identity is unsafe"
+                )
+            payload = bytearray()
+            while len(payload) <= _PROJECT_MAX_BYTES:
+                chunk = os.read(
+                    descriptor,
+                    min(8192, _PROJECT_MAX_BYTES + 1 - len(payload)),
+                )
+                if not chunk:
+                    break
+                payload.extend(chunk)
+            if len(payload) > _PROJECT_MAX_BYTES:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "canonical project identity exceeds the size limit"
+                )
+            try:
+                text = payload.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "canonical project identity is unreadable"
+                ) from exc
+            matches = _PROJECT_ID_PATTERN.findall(text)
+            if matches != [candidate]:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "canonical project identity does not match"
+                )
+            return candidate
+        except FileNotFoundError as exc:
+            raise StoryWorkspaceEpisodeBindingPathError(
+                "canonical project identity is unavailable"
+            ) from exc
+        except OSError as exc:
+            raise StoryWorkspaceEpisodeBindingPathError(
+                "canonical project identity cannot be read safely"
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            for opened in reversed(descriptors):
+                os.close(opened)
+
     @classmethod
     def _read_binding(
         cls,
@@ -377,6 +466,7 @@ class StoryWorkspaceEpisodeBindingService:
         *,
         workflow_run_id: str,
         story_slug: str,
+        episode_uid: str | None = None,
     ) -> None:
         if binding.workflow_run_id != workflow_run_id:
             raise StoryWorkspaceEpisodeBindingIdentityConflict(
@@ -385,6 +475,10 @@ class StoryWorkspaceEpisodeBindingService:
         if binding.story_slug != story_slug:
             raise StoryWorkspaceEpisodeBindingIdentityConflict(
                 "Episode binding story identity cannot be changed"
+            )
+        if episode_uid is not None and binding.episode_uid != episode_uid:
+            raise StoryWorkspaceEpisodeBindingIdentityConflict(
+                "Episode binding opaque identity cannot be changed"
             )
 
     @staticmethod
@@ -485,12 +579,17 @@ class StoryWorkspaceEpisodeBindingService:
                     current,
                     workflow_run_id=run_id,
                     story_slug=story_slug,
+                    episode_uid=context.episode_uid,
                 )
                 return current
             self._validate_episode_root(story_slug)
             binding = StoryWorkspaceEpisodeBindingFile(
                 workflow_run_id=run_id,
-                episode_uid=uuid4().hex,
+                episode_uid=(
+                    self._validate_episode_uid(context.episode_uid)
+                    if context.episode_uid is not None
+                    else uuid4().hex
+                ),
                 story_slug=story_slug,
                 episode_code="EP01",
                 episode_root=f"stories/{story_slug}/episodes/EP01",
@@ -502,6 +601,7 @@ class StoryWorkspaceEpisodeBindingService:
                 committed,
                 workflow_run_id=run_id,
                 story_slug=story_slug,
+                episode_uid=context.episode_uid,
             )
             return committed
 
@@ -517,7 +617,7 @@ class StoryWorkspaceEpisodeBindingService:
                 binding_availability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
                 recovery=StoryWorkspaceEpisodeBindingRecovery(
                     autoRepairAttempted=True,
-                    canDispatch=False,
+                    canDispatch=True,
                     publicReason="episode_binding_unproven",
                 ),
             )
@@ -526,7 +626,7 @@ class StoryWorkspaceEpisodeBindingService:
             binding_availability=StoryWorkspaceEpisodeBindingAvailability.BOUND,
             recovery=StoryWorkspaceEpisodeBindingRecovery(
                 autoRepairAttempted=True,
-                canDispatch=True,
+                canDispatch=False,
             ),
             binding=binding,
         )

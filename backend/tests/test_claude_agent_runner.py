@@ -1039,6 +1039,8 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
             for tool_name in (
                 "mcp__story_workspace__write_dream_run",
                 "mcp__story_workspace__write_dream_stage",
+                "mcp__story_workspace__bind_first_episode",
+                "mcp__story_workspace__record_episode_workflow_completion",
             ):
                 result = await hook(
                     {
@@ -1060,6 +1062,14 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         )
         self.assertIn(
             "mcp__story_workspace__write_dream_stage",
+            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
+        )
+        self.assertIn(
+            "mcp__story_workspace__bind_first_episode",
+            agent_runner_module.DEFAULT_ALLOWED_TOOLS,
+        )
+        self.assertIn(
+            "mcp__story_workspace__record_episode_workflow_completion",
             agent_runner_module.DEFAULT_ALLOWED_TOOLS,
         )
 
@@ -1085,6 +1095,9 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
                             "INK_AGENT_USER_ID": "7",
                             "INK_AGENT_THREAD_ID": "thread-7",
                             "INK_AGENT_WORKFLOW_RUN_ID": "run_" + "1" * 32,
+                            "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID": (
+                                "dream_agent_" + "a" * 64
+                            ),
                             "ANTHROPIC_AUTH_TOKEN": "must-not-flow",
                         },
                     ),
@@ -1098,6 +1111,10 @@ class TestClaudeAgentRunnerPreToolUsePolicy(_RunnerBase):
         self.assertEqual(env["INK_AGENT_USER_ID"], "7")
         self.assertEqual(env["INK_AGENT_THREAD_ID"], "thread-7")
         self.assertEqual(env["INK_AGENT_WORKFLOW_RUN_ID"], "run_" + "1" * 32)
+        self.assertEqual(
+            env["INK_AGENT_STORY_WORKSPACE_MESSAGE_ID"],
+            "dream_agent_" + "a" * 64,
+        )
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", env)
 
     async def test_story_workspace_stdio_is_not_started_without_trusted_run(self):

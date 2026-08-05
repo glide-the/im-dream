@@ -270,6 +270,10 @@ DREAM_SURFACE_README = """# .dream/ — Dream Surface 协议目录
 - 页面描述位于 runtime/runs/<workflow_run_id>/run.json 与 stages/*.json。
 - Agent 只能调用 mcp__story_workspace__write_dream_run 和
   mcp__story_workspace__write_dream_stage 更新运行内容层。
+- 第一集只允许通过 mcp__story_workspace__bind_first_episode 建立服务端
+  绑定，通过 mcp__story_workspace__record_episode_workflow_completion 记录受控的
+  技术完成修订；两者均校验 host 注入的 run/thread/message 上下文，
+  不持有剧情、剧本、分镜、Prompt 或渲染内容。
 - 禁止使用 Write、Edit 或 Bash 直接修改 .dream；受控工具会从 host 读取
   actor、thread 与冻结的 WorkflowRun 来源字段，并校验 revision 和 source files。
 - 先写人物、场景或分镜的 canonical 工作区文件，再调用 stage 工具同步页面元信息。

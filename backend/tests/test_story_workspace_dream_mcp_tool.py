@@ -6,6 +6,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -25,6 +26,17 @@ from story_workspace.contracts import (
     StoryWorkspaceDreamRunToolInput,
     StoryWorkspaceDreamStageItemToolInput,
     StoryWorkspaceDreamStageToolInput,
+    StoryWorkspaceEpisodeAction,
+    StoryWorkspaceEpisodeBindingToolInput,
+    StoryWorkspaceEpisodeWorkflowCompletionToolInput,
+)
+from services.story_workspace.episode_action_service import (
+    StoryWorkspaceEpisodeNextActionResolver,
+    StoryWorkspaceEpisodeWorkflowFactService,
+)
+from services.story_workspace.episode_artifact_service import (
+    StoryWorkspaceEpisodeArtifactService,
+    StoryWorkspaceEpisodeAuthority,
 )
 
 
@@ -57,7 +69,16 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 );
                 CREATE TABLE chat_thread (
                     id TEXT PRIMARY KEY,
-                    user_id INTEGER NOT NULL
+                    user_id INTEGER NOT NULL,
+                    deck_id TEXT NOT NULL
+                );
+                CREATE TABLE deck_plugin_bindings (
+                    deck_plugin_binding_id TEXT PRIMARY KEY,
+                    binding_revision INTEGER NOT NULL,
+                    deck_plugin_id TEXT NOT NULL,
+                    deck_plugin_version TEXT NOT NULL,
+                    workspace_id TEXT NOT NULL,
+                    deck_id TEXT NOT NULL
                 );
                 CREATE TABLE workflow_runs (
                     id TEXT PRIMARY KEY,
@@ -89,6 +110,14 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                     started_at TEXT,
                     completed_at TEXT
                 );
+                CREATE TABLE chat_message (
+                    id TEXT PRIMARY KEY,
+                    thread_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    parts TEXT,
+                    metadata TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
                 """
             )
             db.execute(
@@ -97,8 +126,12 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 ("workspace-1", 7, "2026-08-04T00:00:00+00:00"),
             )
             db.execute(
-                "INSERT INTO chat_thread (id, user_id) VALUES (?, ?)",
-                (THREAD_ID, 7),
+                "INSERT INTO chat_thread (id, user_id, deck_id) VALUES (?, ?, ?)",
+                (THREAD_ID, 7, "deck-1"),
+            )
+            db.execute(
+                "INSERT INTO deck_plugin_bindings VALUES (?, ?, ?, ?, ?, ?)",
+                ("binding-1", 3, "plugin-1", "1.2.3", "workspace-1", "deck-1"),
             )
             db.execute(
                 """
@@ -153,6 +186,67 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         db.set_trace_callback(self.statements.append)
         return db
 
+    def _seed_episode_action(
+        self,
+        *,
+        action: str,
+        episode_uid: str | None = None,
+        manifest_revision: str | None = None,
+        input_revision: str | None = None,
+        message_id: str = "dream_agent_" + "a" * 64,
+    ) -> None:
+        launch_metadata = {
+            "kind": "story-workspace-dream-launch",
+            "actorId": "7",
+            "workspaceId": "workspace-1",
+            "deckId": "deck-1",
+            "workflowRunId": RUN_ID,
+            "threadId": THREAD_ID,
+            "dreamContext": {
+                "workflow_run_id": RUN_ID,
+                "thread_id": THREAD_ID,
+                "deck_id": "deck-1",
+                "deck_plugin_id": "plugin-1",
+                "deck_plugin_version": "1.2.3",
+                "deck_plugin_binding_id": "binding-1",
+                "binding_revision": 3,
+                "deck_runtime_snapshot_id": "snapshot-1",
+                "runtime_plugin_lock_id": "lock-1",
+            },
+        }
+        action_metadata = {
+            "kind": "story-workspace-dream-agent-user",
+            "story_workspace_run_id": RUN_ID,
+            "actor_id": "7",
+            "thread_id": THREAD_ID,
+            "dispatch_status": "dispatching",
+            "dispatch_claim_id": "claim-1",
+            "dispatch_claim_lease_until": time.time() + 60,
+            "story_workspace_episode_action": {
+                "schema": "story-workspace-episode-action/v1",
+                "action": action,
+                "episode_uid": episode_uid,
+                "surface_revision": manifest_revision,
+                "manifest_revision": manifest_revision,
+                "input_revision": input_revision,
+            },
+        }
+        db = sqlite3.connect(self.database_path)
+        try:
+            db.execute(
+                "INSERT OR IGNORE INTO chat_message "
+                "(id, thread_id, role, parts, metadata) VALUES (?, ?, 'user', '[]', ?)",
+                ("launch-source", THREAD_ID, json.dumps(launch_metadata)),
+            )
+            db.execute(
+                "INSERT OR REPLACE INTO chat_message "
+                "(id, thread_id, role, parts, metadata) VALUES (?, ?, 'user', '[]', ?)",
+                (message_id, THREAD_ID, json.dumps(action_metadata)),
+            )
+            db.commit()
+        finally:
+            db.close()
+
     def _call(
         self,
         tool_name: str,
@@ -161,6 +255,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         actor_id: str = "7",
         thread_id: str = THREAD_ID,
         trusted_run_id: str = RUN_ID,
+        message_id: str = "dream_agent_" + "a" * 64,
     ) -> dict[str, object]:
         with (
             patch.object(database, "get_db", side_effect=self._open_db),
@@ -174,6 +269,7 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                     "INK_AGENT_USER_ID": actor_id,
                     "INK_AGENT_THREAD_ID": thread_id,
                     "INK_AGENT_WORKFLOW_RUN_ID": trusted_run_id,
+                    "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID": message_id,
                 },
             ),
         ):
@@ -184,13 +280,20 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
     def test_tool_contract_exposes_only_non_forgeable_arguments(self) -> None:
         self.assertEqual(
             set(STORY_WORKSPACE_DREAM_TOOL_SPECS),
-            {"write_dream_run", "write_dream_stage"},
+            {
+                "write_dream_run",
+                "write_dream_stage",
+                "bind_first_episode",
+                "record_episode_workflow_completion",
+            },
         )
         self.assertEqual(
             set(story_workspace_allowed_tool_names()),
             {
                 "mcp__story_workspace__write_dream_run",
                 "mcp__story_workspace__write_dream_stage",
+                "mcp__story_workspace__bind_first_episode",
+                "mcp__story_workspace__record_episode_workflow_completion",
             },
         )
         forbidden = {
@@ -215,6 +318,8 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             StoryWorkspaceDreamRunToolInput,
             StoryWorkspaceDreamStageItemToolInput,
             StoryWorkspaceDreamStageToolInput,
+            StoryWorkspaceEpisodeBindingToolInput,
+            StoryWorkspaceEpisodeWorkflowCompletionToolInput,
         )
         for contract_type in contract_types:
             self.assertEqual(contract_type.__module__, "story_workspace.contracts")
@@ -264,6 +369,36 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             },
         )
         self.assertFalse(item_schema["additionalProperties"])
+
+        binding_schema = StoryWorkspaceEpisodeBindingToolInput.model_json_schema(
+            by_alias=True
+        )
+        self.assertEqual(
+            set(binding_schema["properties"]),
+            {"workflowRunId", "storySlug", "expectedBindingRevision"},
+        )
+        completion_schema = (
+            StoryWorkspaceEpisodeWorkflowCompletionToolInput.model_json_schema(
+                by_alias=True
+            )
+        )
+        self.assertEqual(
+            set(completion_schema["properties"]),
+            {
+                "workflowRunId",
+                "episodeId",
+                "action",
+                "inputRevision",
+                "expectedWorkflowRevision",
+                "expectedManifestRevision",
+            },
+        )
+        for schema in (binding_schema, completion_schema):
+            self.assertFalse(schema["additionalProperties"])
+            self.assertFalse(
+                {"actorId", "threadId", "messageId", "path", "root"}
+                & set(schema["properties"])
+            )
 
     def test_real_run_and_stage_writes_return_minimal_json(self) -> None:
         run_result = self._call(
@@ -432,6 +567,153 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 statement.lstrip().upper().startswith(("CREATE ", "INSERT ", "UPDATE "))
                 for statement in self.statements
             )
+        )
+
+    def test_agent_only_binding_validates_project_and_persisted_action(self) -> None:
+        story = self.workspace / "stories" / "demo"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text("project_id: demo\n", encoding="utf-8")
+        self._seed_episode_action(action="recover_first_episode_binding")
+
+        result = self._call(
+            "bind_first_episode",
+            {
+                "workflowRunId": RUN_ID,
+                "storySlug": "demo",
+                "expectedBindingRevision": 0,
+            },
+        )
+
+        self.assertEqual(result["run"], RUN_ID)
+        self.assertEqual(result["bindingRevision"], 1)
+        self.assertRegex(str(result["episodeId"]), r"^[0-9a-f]{32}$")
+        db = sqlite3.connect(self.database_path)
+        source = json.loads(
+            db.execute(
+                "SELECT metadata FROM chat_message WHERE id = 'launch-source'"
+            ).fetchone()[0]
+        )
+        db.close()
+        self.assertEqual(
+            source["story_workspace_episode_identity"]["episode_uid"],
+            result["episodeId"],
+        )
+        self.assertNotIn("episodeRoot", json.dumps(result))
+
+        forged = self._call(
+            "bind_first_episode",
+            {
+                "workflowRunId": RUN_ID,
+                "storySlug": "other",
+                "expectedBindingRevision": 0,
+            },
+        )
+        self.assertEqual(forged, {"error": "DREAM_WRITE_REJECTED"})
+
+    def test_episode_tools_reject_missing_forged_or_inactive_message_identity(self) -> None:
+        story = self.workspace / "stories" / "demo"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text("project_id: demo\n", encoding="utf-8")
+        self._seed_episode_action(action="recover_first_episode_binding")
+        arguments = {
+            "workflowRunId": RUN_ID,
+            "storySlug": "demo",
+            "expectedBindingRevision": 0,
+        }
+        for message_id in ("", "dream_agent_" + "b" * 64):
+            with self.subTest(message_id=message_id):
+                self.assertEqual(
+                    self._call(
+                        "bind_first_episode",
+                        arguments,
+                        message_id=message_id,
+                    ),
+                    {"error": "DREAM_WRITE_REJECTED"},
+                )
+
+        db = sqlite3.connect(self.database_path)
+        metadata = json.loads(
+            db.execute(
+                "SELECT metadata FROM chat_message WHERE id = ?",
+                ("dream_agent_" + "a" * 64,),
+            ).fetchone()[0]
+        )
+        metadata["dispatch_status"] = "dispatched"
+        db.execute(
+            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            (json.dumps(metadata), "dream_agent_" + "a" * 64),
+        )
+        db.commit()
+        db.close()
+        self.assertEqual(
+            self._call("bind_first_episode", arguments),
+            {"error": "DREAM_WRITE_REJECTED"},
+        )
+
+    def test_completion_tool_checks_action_input_and_replays_same_cas(self) -> None:
+        story = self.workspace / "stories" / "demo"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text("project_id: demo\n", encoding="utf-8")
+        self._seed_episode_action(action="recover_first_episode_binding")
+        bound = self._call(
+            "bind_first_episode",
+            {
+                "workflowRunId": RUN_ID,
+                "storySlug": "demo",
+                "expectedBindingRevision": 0,
+            },
+        )
+        episode_uid = str(bound["episodeId"])
+        authority = StoryWorkspaceEpisodeAuthority(
+            workflow_run_id=RUN_ID,
+            episode_uid=episode_uid,
+            story_slug="demo",
+            episode_code="EP01",
+        )
+        surface = StoryWorkspaceEpisodeArtifactService(self.workspace).read_surface(
+            RUN_ID,
+            episode_authority=authority,
+        )
+        facts = StoryWorkspaceEpisodeWorkflowFactService(self.workspace).read(
+            RUN_ID,
+            episode_uid,
+        )
+        input_revision = StoryWorkspaceEpisodeNextActionResolver.action_input_revision(
+            StoryWorkspaceEpisodeAction.PLAN_EPISODE,
+            surface,
+            facts,
+        )
+        self._seed_episode_action(
+            action="plan_episode",
+            episode_uid=episode_uid,
+            manifest_revision=surface.manifest_revision,
+            input_revision=input_revision,
+        )
+        arguments = {
+            "workflowRunId": RUN_ID,
+            "episodeId": episode_uid,
+            "action": "plan_episode",
+            "inputRevision": input_revision,
+            "expectedWorkflowRevision": 0,
+            "expectedManifestRevision": surface.manifest_revision,
+        }
+        first = self._call("record_episode_workflow_completion", arguments)
+        replay = self._call("record_episode_workflow_completion", arguments)
+
+        self.assertEqual(first["workflowRevision"], 1)
+        self.assertEqual(replay, first)
+        persisted = StoryWorkspaceEpisodeWorkflowFactService(self.workspace).read(
+            RUN_ID,
+            episode_uid,
+        )
+        self.assertEqual(persisted.revision, 1)
+        self.assertEqual(len(persisted.completions), 1)
+
+        poisoned = dict(arguments)
+        poisoned["inputRevision"] = "sha256:" + "f" * 64
+        self.assertEqual(
+            self._call("record_episode_workflow_completion", poisoned),
+            {"error": "DREAM_WRITE_REJECTED"},
         )
 
 

@@ -205,6 +205,7 @@ _TRUSTED_STORY_WORKSPACE_ENV_KEYS = frozenset({
     "INK_AGENT_USER_ID",
     "INK_AGENT_THREAD_ID",
     "INK_AGENT_WORKFLOW_RUN_ID",
+    "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
 })
 
 
@@ -1323,7 +1324,17 @@ class ClaudeAgentService:
                     {
                         "INK_AGENT_WORKFLOW_RUN_ID": (
                             request.story_workspace_dream_context.workflow_run_id
-                        )
+                        ),
+                        **(
+                            {
+                                "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID": (
+                                    request.message_id
+                                )
+                            }
+                            if isinstance(request.message_id, str)
+                            and request.message_id.startswith("dream_agent_")
+                            else {}
+                        ),
                     }
                     if request.story_workspace_dream_context is not None
                     else {}

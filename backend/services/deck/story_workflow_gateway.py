@@ -80,8 +80,15 @@ try:
     )
     from services.story_workspace.episode_action_service import (
         StoryWorkspaceEpisodeActionError,
-        StoryWorkspaceEpisodeActionFacts,
+        StoryWorkspaceEpisodeNextActionResolver,
         StoryWorkspaceEpisodeActionService,
+        StoryWorkspaceEpisodeWorkflowFactError,
+        StoryWorkspaceEpisodeWorkflowFactService,
+    )
+    from services.story_workspace.episode_binding_service import (
+        StoryWorkspaceEpisodeBindingContext,
+        StoryWorkspaceEpisodeBindingError,
+        StoryWorkspaceEpisodeBindingService,
     )
     from services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -149,8 +156,15 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     )
     from backend.services.story_workspace.episode_action_service import (
         StoryWorkspaceEpisodeActionError,
-        StoryWorkspaceEpisodeActionFacts,
+        StoryWorkspaceEpisodeNextActionResolver,
         StoryWorkspaceEpisodeActionService,
+        StoryWorkspaceEpisodeWorkflowFactError,
+        StoryWorkspaceEpisodeWorkflowFactService,
+    )
+    from backend.services.story_workspace.episode_binding_service import (
+        StoryWorkspaceEpisodeBindingContext,
+        StoryWorkspaceEpisodeBindingError,
+        StoryWorkspaceEpisodeBindingService,
     )
     from backend.services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -1310,14 +1324,6 @@ class StoryWorkflowApplicationGateway:
         finally:
             db.close()
 
-    @staticmethod
-    def _source_metadata(row: sqlite3.Row) -> dict[str, Any]:
-        try:
-            metadata = json.loads(row["source_metadata"] or "{}")
-        except (KeyError, TypeError, ValueError):
-            return {}
-        return metadata if isinstance(metadata, dict) else {}
-
     def _recover_episode_binding_sync(
         self,
         workflow_run_id: str,
@@ -1387,7 +1393,7 @@ class StoryWorkflowApplicationGateway:
     ) -> Any:
         db = database.get_db()
         try:
-            row = self._authorized_episode_row(db, workflow_run_id, actor)
+            self._authorized_episode_row(db, workflow_run_id, actor)
             context = self._load_dream_agent_context_from_db(
                 db,
                 workflow_run_id,
@@ -1404,9 +1410,10 @@ class StoryWorkflowApplicationGateway:
                     "WORKFLOW_PERMISSION_DENIED",
                     404,
                 )
-            facts = StoryWorkspaceEpisodeActionFacts.parse(
-                self._source_metadata(row),
-                episode_uid=episode_uid,
+            workspace = self._thread_workspace(context.thread_id)
+            facts = StoryWorkspaceEpisodeWorkflowFactService(workspace).read(
+                workflow_run_id,
+                episode_uid,
             )
             try:
                 return StoryWorkspaceEpisodeActionService(
@@ -1520,9 +1527,40 @@ class StoryWorkflowApplicationGateway:
                 workspace = self._thread_workspace(thread_id)
             except ApiRouteError as exc:
                 raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404)
-            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+            binding_service = StoryWorkspaceEpisodeBindingService(workspace)
+            canonical_story_slug = (
+                binding_service.read_canonical_project_story_slug(
+                    authority.story_slug
+                )
+            )
+            binding_service.resolve_or_repair_binding(
+                StoryWorkspaceEpisodeBindingContext(
+                    workflow_run_id=workflow_run_id,
+                    trusted_project_story_slug=canonical_story_slug,
+                    locked_context_story_slug=authority.story_slug,
+                    run_provenance_story_slug=authority.story_slug,
+                    episode_uid=authority.episode_uid,
+                )
+            )
+            surface = StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
                 workflow_run_id,
                 episode_authority=authority,
+            )
+            episode_uid = surface.opaque_episode_id
+            manifest_revision = surface.manifest_revision
+            if episode_uid is None or manifest_revision is None:
+                return surface
+            facts = StoryWorkspaceEpisodeWorkflowFactService(workspace).read(
+                workflow_run_id,
+                episode_uid,
+            )
+            resolver = StoryWorkspaceEpisodeNextActionResolver()
+            workflow = resolver.project(surface, facts)
+            return surface.model_copy(
+                update={
+                    "workflow": workflow,
+                    "etag": resolver.surface_etag(manifest_revision, workflow),
+                }
             )
         except ApiRouteError:
             raise
@@ -1535,6 +1573,8 @@ class StoryWorkflowApplicationGateway:
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE",
                 status_code=503,
             ) from exc
+        except (StoryWorkspaceEpisodeBindingError, StoryWorkspaceEpisodeWorkflowFactError) as exc:
+            raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
         except sqlite3.Error as exc:
             raise ApiRouteError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE",

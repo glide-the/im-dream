@@ -1327,6 +1327,7 @@ def _story_workspace_mcp_stdio_config(
             "INK_AGENT_USER_ID",
             "INK_AGENT_THREAD_ID",
             "INK_AGENT_WORKFLOW_RUN_ID",
+            "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
         )
         if mcp_env.get(name)
     }

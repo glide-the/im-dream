@@ -10,24 +10,44 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
+import re
 import sqlite3
 import stat
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, TypeVar
-
-from pydantic import BaseModel
+from uuid import uuid4
 
 from models.workflow_run import AuthenticatedActorContext, WorkflowRun
 from services.story_workspace.dream_file_service import (
     StoryWorkspaceDreamFileWriter,
     WorkflowRun as DreamFileWorkflowRun,
 )
+from services.story_workspace.episode_action_service import (
+    StoryWorkspaceEpisodeNextActionResolver,
+    StoryWorkspaceEpisodeWorkflowFactService,
+)
+from services.story_workspace.episode_artifact_service import (
+    StoryWorkspaceEpisodeArtifactService,
+    StoryWorkspaceEpisodeAuthority,
+)
+from services.story_workspace.episode_binding_service import (
+    StoryWorkspaceEpisodeBindingContext,
+    StoryWorkspaceEpisodeBindingService,
+)
+from services.story_workspace.dream_reentry_service import (
+    StoryWorkspaceDreamReentryService,
+)
 from services.workflow.run_service import WorkflowRunService
 from story_workspace.contracts import (
     StoryWorkspaceDreamRunToolInput,
     StoryWorkspaceDreamStageToolInput,
+    StoryWorkspaceEpisodeAction,
+    StoryWorkspaceEpisodeBindingToolInput,
+    StoryWorkspaceEpisodeWorkflowCompletionToolInput,
 )
 
 from .workspace import get_workspace_root
@@ -38,7 +58,8 @@ _logger = logging.getLogger(__name__)
 _TRUSTED_USER_ENV = "INK_AGENT_USER_ID"
 _TRUSTED_THREAD_ENV = "INK_AGENT_THREAD_ID"
 _TRUSTED_WORKFLOW_RUN_ENV = "INK_AGENT_WORKFLOW_RUN_ID"
-_ResultT = TypeVar("_ResultT", bound=BaseModel)
+_TRUSTED_MESSAGE_ENV = "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID"
+_ResultT = TypeVar("_ResultT")
 
 
 @dataclass(frozen=True)
@@ -67,6 +88,29 @@ STORY_WORKSPACE_DREAM_TOOL_SPECS: dict[str, StoryWorkspaceToolSpec] = {
             "host-derived. It does not advance the WorkflowRun state machine."
         ),
         input_schema=StoryWorkspaceDreamStageToolInput.model_json_schema(by_alias=True),
+    ),
+    "bind_first_episode": StoryWorkspaceToolSpec(
+        description=(
+            "CAS-bind the canonical first Episode after the current controlled "
+            "Story Workspace action. The candidate story slug is checked against "
+            "project.yaml; actor, thread, run, message, Episode code/root/UID and "
+            "launch provenance are server-owned."
+        ),
+        input_schema=StoryWorkspaceEpisodeBindingToolInput.model_json_schema(
+            by_alias=True
+        ),
+    ),
+    "record_episode_workflow_completion": StoryWorkspaceToolSpec(
+        description=(
+            "CAS-record completion of the current allowlisted Episode action after "
+            "canonical files have been written. This stores only technical revision "
+            "evidence and never owns Episode creative content."
+        ),
+        input_schema=(
+            StoryWorkspaceEpisodeWorkflowCompletionToolInput.model_json_schema(
+                by_alias=True
+            )
+        ),
     ),
 }
 
@@ -99,6 +143,13 @@ def _require_trusted_workflow_run(workflow_run_id: str) -> None:
     trusted_run_id = os.getenv(_TRUSTED_WORKFLOW_RUN_ENV, "").strip()
     if not trusted_run_id or workflow_run_id != trusted_run_id:
         raise PermissionError("trusted workflow run context is unavailable")
+
+
+def _trusted_message_id() -> str:
+    message_id = os.getenv(_TRUSTED_MESSAGE_ENV, "").strip()
+    if not re.fullmatch(r"dream_agent_[0-9a-f]{64}", message_id):
+        raise PermissionError("trusted Story Workspace message is unavailable")
+    return message_id
 
 
 def _read_actor_scoped_run(
@@ -199,6 +250,325 @@ def _with_authoritative_context(
         db.close()
 
 
+def _active_episode_action_provenance(
+    db: sqlite3.Connection,
+    *,
+    message_id: str,
+    actor_id: int,
+    thread_id: str,
+    workflow_run_id: str,
+) -> dict[str, Any]:
+    row = db.execute(
+        "SELECT metadata FROM chat_message "
+        "WHERE id = ? AND thread_id = ? AND role = 'user' LIMIT 1",
+        (message_id, thread_id),
+    ).fetchone()
+    if row is None:
+        raise PermissionError("Story Workspace action provenance is unavailable")
+    try:
+        metadata = json.loads(row["metadata"] or "{}")
+    except (TypeError, ValueError) as exc:
+        raise PermissionError(
+            "Story Workspace action provenance is unavailable"
+        ) from exc
+    action = metadata.get("story_workspace_episode_action")
+    if (
+        not isinstance(metadata, dict)
+        or metadata.get("kind") != "story-workspace-dream-agent-user"
+        or metadata.get("story_workspace_run_id") != workflow_run_id
+        or metadata.get("thread_id") != thread_id
+        or str(metadata.get("actor_id") or "") != str(actor_id)
+        or metadata.get("dispatch_status") != "dispatching"
+        or not isinstance(metadata.get("dispatch_claim_id"), str)
+        or not isinstance(metadata.get("dispatch_claim_lease_until"), (int, float))
+        or isinstance(metadata.get("dispatch_claim_lease_until"), bool)
+        or not math.isfinite(float(metadata["dispatch_claim_lease_until"]))
+        or float(metadata["dispatch_claim_lease_until"]) <= time.time()
+        or not isinstance(action, dict)
+        or action.get("schema") != "story-workspace-episode-action/v1"
+    ):
+        raise PermissionError("Story Workspace action provenance is unavailable")
+    return action
+
+
+def _with_authoritative_episode_context(
+    workflow_run_id: str,
+    operation: Callable[
+        [
+            sqlite3.Connection,
+            Path,
+            WorkflowRun,
+            int,
+            str,
+            str,
+            dict[str, Any],
+        ],
+        _ResultT,
+    ],
+) -> _ResultT:
+    """Authorize host actor/run/thread/message before an Episode technical write."""
+
+    import database
+
+    actor_id, thread_id = _trusted_actor_and_thread()
+    message_id = _trusted_message_id()
+    db = database.get_db()
+    try:
+        db.row_factory = sqlite3.Row
+        workspace_row = db.execute(
+            "SELECT workflow_runs.workspace_id AS id "
+            "FROM workflow_runs INNER JOIN story_workspace_workspaces "
+            "ON story_workspace_workspaces.id = workflow_runs.workspace_id "
+            "WHERE workflow_runs.id = ? "
+            "AND workflow_runs.created_by = ? "
+            "AND story_workspace_workspaces.owner_id = ? LIMIT 1",
+            (workflow_run_id, str(actor_id), actor_id),
+        ).fetchone()
+        if workspace_row is None:
+            raise PermissionError("actor workspace is unavailable")
+        run = _read_actor_scoped_run(
+            db,
+            workflow_run_id,
+            AuthenticatedActorContext(
+                workspace_id=str(workspace_row["id"]),
+                actor_id=str(actor_id),
+            ),
+        )
+        if run.source_voice_thread_id != thread_id:
+            raise PermissionError("run and trusted thread do not match")
+        thread = db.execute(
+            "SELECT id FROM chat_thread "
+            "WHERE id = ? AND user_id = ? LIMIT 1",
+            (thread_id, actor_id),
+        ).fetchone()
+        if thread is None:
+            raise PermissionError("thread ownership is unavailable")
+        workspace = _existing_thread_workspace(thread_id)
+        provenance = _active_episode_action_provenance(
+            db,
+            message_id=message_id,
+            actor_id=actor_id,
+            thread_id=thread_id,
+            workflow_run_id=workflow_run_id,
+        )
+        return operation(
+            db,
+            workspace,
+            run,
+            actor_id,
+            thread_id,
+            message_id,
+            provenance,
+        )
+    finally:
+        db.close()
+
+
+def _source_launch_row(
+    db: sqlite3.Connection,
+    *,
+    actor_id: int,
+    thread_id: str,
+    workflow_run_id: str,
+) -> tuple[str, str, dict[str, Any]]:
+    locked = db.execute(
+        "SELECT run.workspace_id, binding.deck_id, run.deck_plugin_id, "
+        "run.deck_plugin_version, run.deck_plugin_binding_id, "
+        "run.binding_revision, run.deck_runtime_snapshot_id, "
+        "run.runtime_plugin_lock_id "
+        "FROM workflow_runs AS run "
+        "JOIN deck_plugin_bindings AS binding "
+        "ON binding.deck_plugin_binding_id = run.deck_plugin_binding_id "
+        "AND binding.binding_revision = run.binding_revision "
+        "AND binding.deck_plugin_id = run.deck_plugin_id "
+        "AND binding.deck_plugin_version = run.deck_plugin_version "
+        "AND binding.workspace_id = run.workspace_id "
+        "WHERE run.id = ? AND run.created_by = ? LIMIT 1",
+        (workflow_run_id, str(actor_id)),
+    ).fetchone()
+    if locked is None:
+        raise PermissionError("Dream launch provenance is unavailable")
+    rows = db.execute(
+        "SELECT id, metadata FROM chat_message "
+        "WHERE thread_id = ? AND role = 'user'",
+        (thread_id,),
+    ).fetchall()
+    matches: list[tuple[str, str, dict[str, Any]]] = []
+    for row in rows:
+        raw = row["metadata"] or "{}"
+        try:
+            metadata = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if (
+            StoryWorkspaceDreamReentryService._source_metadata_matches(  # noqa: SLF001
+                raw,
+                actor_id=actor_id,
+                workspace_id=str(locked["workspace_id"]),
+                run_id=workflow_run_id,
+                thread_id=thread_id,
+                deck_id=str(locked["deck_id"]),
+                deck_plugin_id=str(locked["deck_plugin_id"]),
+                deck_plugin_version=str(locked["deck_plugin_version"]),
+                binding_id=str(locked["deck_plugin_binding_id"]),
+                binding_revision=int(locked["binding_revision"]),
+                runtime_snapshot_id=str(locked["deck_runtime_snapshot_id"]),
+                runtime_lock_id=str(locked["runtime_plugin_lock_id"]),
+            )
+        ):
+            matches.append((str(row["id"]), str(raw), metadata))
+    if len(matches) != 1:
+        raise PermissionError("Dream launch provenance is unavailable")
+    return matches[0]
+
+
+def _bind_first_episode(
+    request: StoryWorkspaceEpisodeBindingToolInput,
+) -> dict[str, object]:
+    def bind(
+        db: sqlite3.Connection,
+        workspace: Path,
+        _run: WorkflowRun,
+        actor_id: int,
+        thread_id: str,
+        _message_id: str,
+        action: dict[str, Any],
+    ) -> dict[str, object]:
+        if action.get("action") not in {
+            "recover_first_episode_binding",
+            StoryWorkspaceEpisodeAction.PLAN_EPISODE.value,
+        }:
+            raise PermissionError("current action cannot bind an Episode")
+        service = StoryWorkspaceEpisodeBindingService(workspace)
+        project_slug = service.read_canonical_project_story_slug(
+            request.story_slug
+        )
+        source_id, raw_metadata, source_metadata = _source_launch_row(
+            db,
+            actor_id=actor_id,
+            thread_id=thread_id,
+            workflow_run_id=request.workflow_run_id,
+        )
+        authority = StoryWorkspaceEpisodeAuthority.parse(
+            source_metadata.get("story_workspace_episode_identity"),
+            expected_run_id=request.workflow_run_id,
+        )
+        if authority is not None and authority.story_slug != project_slug:
+            raise PermissionError("Episode authority cannot be rebound")
+        if authority is None:
+            if request.expected_binding_revision != 0:
+                raise PermissionError("Episode binding revision changed")
+            episode_uid = uuid4().hex
+            source_metadata["story_workspace_episode_identity"] = {
+                "schema": "story-workspace-episode-authority/v1",
+                "workflow_run_id": request.workflow_run_id,
+                "episode_uid": episode_uid,
+                "story_slug": project_slug,
+                "episode_code": "EP01",
+            }
+            encoded = json.dumps(
+                source_metadata,
+                ensure_ascii=False,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            db.execute("BEGIN IMMEDIATE")
+            updated = db.execute(
+                "UPDATE chat_message SET metadata = ? "
+                "WHERE id = ? AND metadata = ?",
+                (encoded, source_id, raw_metadata),
+            )
+            if updated.rowcount != 1:
+                db.rollback()
+                raise PermissionError("Episode authority CAS failed")
+            db.commit()
+        else:
+            episode_uid = authority.episode_uid
+            if request.expected_binding_revision not in {0, 1}:
+                raise PermissionError("Episode binding revision changed")
+        binding = service.bind_first_episode(
+            StoryWorkspaceEpisodeBindingContext(
+                workflow_run_id=request.workflow_run_id,
+                trusted_project_story_slug=project_slug,
+                locked_context_story_slug=request.story_slug,
+                run_provenance_story_slug=request.story_slug,
+                episode_uid=episode_uid,
+            )
+        )
+        return {
+            "run": request.workflow_run_id,
+            "episodeId": binding.episode_uid,
+            "bindingRevision": binding.revision,
+        }
+
+    return _with_authoritative_episode_context(request.workflow_run_id, bind)
+
+
+def _record_episode_workflow_completion(
+    request: StoryWorkspaceEpisodeWorkflowCompletionToolInput,
+) -> dict[str, object]:
+    def record(
+        _db: sqlite3.Connection,
+        workspace: Path,
+        _run: WorkflowRun,
+        _actor_id: int,
+        _thread_id: str,
+        message_id: str,
+        provenance: dict[str, Any],
+    ) -> dict[str, object]:
+        if (
+            provenance.get("action") != request.action.value
+            or provenance.get("episode_uid") != request.episode_id
+            or provenance.get("input_revision") != request.input_revision
+        ):
+            raise PermissionError("completion does not match the current action")
+        authority_row = _source_launch_row(
+            _db,
+            actor_id=_actor_id,
+            thread_id=_thread_id,
+            workflow_run_id=request.workflow_run_id,
+        )
+        authority = StoryWorkspaceEpisodeAuthority.parse(
+            authority_row[2].get("story_workspace_episode_identity"),
+            expected_run_id=request.workflow_run_id,
+        )
+        if authority is None or authority.episode_uid != request.episode_id:
+            raise PermissionError("Episode authority is unavailable")
+        surface = StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+            request.workflow_run_id,
+            episode_authority=authority,
+        )
+        if surface.manifest_revision != request.expected_manifest_revision:
+            raise PermissionError("Episode manifest revision changed")
+        service = StoryWorkspaceEpisodeWorkflowFactService(workspace)
+        facts = service.read(request.workflow_run_id, request.episode_id)
+        expected_input = StoryWorkspaceEpisodeNextActionResolver.action_input_revision(
+            request.action,
+            surface,
+            facts,
+        )
+        if expected_input != request.input_revision:
+            raise PermissionError("Episode action input revision changed")
+        updated = service.record_completion(
+            workflow_run_id=request.workflow_run_id,
+            episode_uid=request.episode_id,
+            action=request.action,
+            input_revision=request.input_revision,
+            manifest_revision=request.expected_manifest_revision,
+            message_id=message_id,
+            expected_revision=request.expected_workflow_revision,
+        )
+        return {
+            "run": request.workflow_run_id,
+            "episodeId": request.episode_id,
+            "action": request.action.value,
+            "workflowRevision": updated.revision,
+        }
+
+    return _with_authoritative_episode_context(request.workflow_run_id, record)
+
+
 def _success_json(payload: dict[str, object]) -> str:
     return json.dumps(
         payload,
@@ -260,6 +630,18 @@ def story_workspace_handle_dream_tool(
                     "changedStages": [result.stage.value],
                 }
             )
+        if name == "bind_first_episode":
+            request = StoryWorkspaceEpisodeBindingToolInput.model_validate(
+                arguments or {}
+            )
+            _require_trusted_workflow_run(request.workflow_run_id)
+            return _success_json(_bind_first_episode(request))
+        if name == "record_episode_workflow_completion":
+            request = StoryWorkspaceEpisodeWorkflowCompletionToolInput.model_validate(
+                arguments or {}
+            )
+            _require_trusted_workflow_run(request.workflow_run_id)
+            return _success_json(_record_episode_workflow_completion(request))
         raise ValueError("unknown Story Workspace tool")
     except Exception:  # noqa: BLE001 - public fail-closed seam.
         _logger.warning("Story Workspace Dream MCP write rejected", exc_info=True)

@@ -758,7 +758,7 @@ class StoryWorkspaceEpisodeArtifactService:
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.UNBOUND,
             bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
                 autoRepairAttempted=False,
-                canDispatch=False,
+                canDispatch=True,
                 publicReason="episode_binding_unproven",
             ),
         )
@@ -943,7 +943,7 @@ class StoryWorkspaceEpisodeArtifactService:
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.BOUND,
             bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
                 autoRepairAttempted=False,
-                canDispatch=True,
+                canDispatch=False,
             ),
             artifacts=artifacts,
             narrative=narrative,

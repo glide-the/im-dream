@@ -10,6 +10,7 @@ from datetime import datetime
 from enum import Enum
 import json
 import math
+import re
 from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 from pydantic import (
@@ -521,6 +522,25 @@ class StoryWorkspaceDreamStageToolInput(StoryWorkspaceDreamToolInput):
     )
 
 
+class StoryWorkspaceEpisodeBindingToolInput(StoryWorkspaceDreamToolInput):
+    """Agent candidate for the server-owned EP01 binding CAS."""
+
+    workflow_run_id: str = Field(
+        alias="workflowRunId",
+        pattern=r"^run_[0-9a-f]{32}$",
+    )
+    story_slug: str = Field(
+        alias="storySlug",
+        pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$",
+    )
+    expected_binding_revision: int = Field(
+        alias="expectedBindingRevision",
+        ge=0,
+        le=1,
+        strict=True,
+    )
+
+
 class StoryWorkspaceDreamSource(_StoryWorkspaceDreamStorageModel):
     deck_plugin_binding_id: str = Field(min_length=1, max_length=255)
     binding_revision: _StoryWorkspaceDreamPositiveInt
@@ -794,6 +814,81 @@ class StoryWorkspaceEpisodeActionDiagnostic(str, Enum):
     NEEDS_CONFIRMATION = "needs_confirmation"
 
 
+class StoryWorkspaceEpisodeWorkflowCompletion(_StoryWorkspaceDreamStorageModel):
+    """One technical completion fact tied to a canonical input snapshot."""
+
+    action: StoryWorkspaceEpisodeAction
+    input_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    manifest_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    message_id: str = Field(pattern=r"^dream_agent_[0-9a-f]{64}$")
+    recorded_at: datetime
+
+    @model_validator(mode="after")
+    def action_is_completable(self) -> "StoryWorkspaceEpisodeWorkflowCompletion":
+        if self.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
+            raise ValueError("none_in_scope cannot be recorded as completion")
+        return self
+
+
+class StoryWorkspaceEpisodeWorkflowFile(_StoryWorkspaceDreamStorageModel):
+    """Revisioned workflow evidence; never an owner of creative content."""
+
+    schema_version: Literal["dream-episode-workflow/v1"] = (
+        "dream-episode-workflow/v1"
+    )
+    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    episode_uid: str = Field(pattern=r"^[0-9a-f]{32}$")
+    revision: _StoryWorkspaceDreamNonNegativeInt = 0
+    completions: list[StoryWorkspaceEpisodeWorkflowCompletion] = Field(
+        default_factory=list,
+        max_length=9,
+    )
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def actions_are_unique(self) -> "StoryWorkspaceEpisodeWorkflowFile":
+        actions = [item.action for item in self.completions]
+        if len(actions) != len(set(actions)):
+            raise ValueError("workflow completion actions must be unique")
+        return self
+
+
+class StoryWorkspaceEpisodeWorkflowCompletionToolInput(
+    StoryWorkspaceDreamToolInput
+):
+    """Agent completion evidence; host context supplies actor/thread/message."""
+
+    workflow_run_id: str = Field(
+        alias="workflowRunId",
+        pattern=r"^run_[0-9a-f]{32}$",
+    )
+    episode_id: str = Field(alias="episodeId", pattern=r"^[0-9a-f]{32}$")
+    action: StoryWorkspaceEpisodeAction
+    input_revision: str = Field(
+        alias="inputRevision",
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    expected_workflow_revision: int = Field(
+        alias="expectedWorkflowRevision",
+        ge=0,
+        strict=True,
+    )
+    expected_manifest_revision: str = Field(
+        alias="expectedManifestRevision",
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+
+    @field_validator("action")
+    @classmethod
+    def action_is_completable(
+        cls,
+        value: StoryWorkspaceEpisodeAction,
+    ) -> StoryWorkspaceEpisodeAction:
+        if value is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
+            raise ValueError("none_in_scope cannot be recorded as completion")
+        return value
+
+
 class StoryWorkspaceEpisodeActionResolution(_StoryWorkspaceDreamWireModel):
     """One evidence-derived next capability and its diagnostic confidence."""
 
@@ -803,11 +898,36 @@ class StoryWorkspaceEpisodeActionResolution(_StoryWorkspaceDreamWireModel):
 
     @model_validator(mode="after")
     def dispatch_matches_action(self) -> "StoryWorkspaceEpisodeActionResolution":
-        if self.can_dispatch == (
+        if (
             self.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE
+            and self.can_dispatch
         ):
-            raise ValueError("only an in-scope Episode action may be dispatched")
+            raise ValueError("none_in_scope cannot be dispatched")
         return self
+
+
+class StoryWorkspaceEpisodeWorkflowProjection(_StoryWorkspaceDreamWireModel):
+    """Derived workflow navigation plus the revision of technical facts."""
+
+    facts_revision: _StoryWorkspaceDreamNonNegativeInt
+    next_action: StoryWorkspaceEpisodeActionResolution
+    prerequisites: list[StoryWorkspaceEpisodeAction] = Field(
+        default_factory=list,
+        max_length=9,
+    )
+    legacy_partial: StrictBool
+
+    @field_validator("prerequisites")
+    @classmethod
+    def prerequisites_are_unique_and_completed(
+        cls,
+        values: list[StoryWorkspaceEpisodeAction],
+    ) -> list[StoryWorkspaceEpisodeAction]:
+        if len(values) != len(set(values)):
+            raise ValueError("workflow prerequisites must be unique")
+        if StoryWorkspaceEpisodeAction.NONE_IN_SCOPE in values:
+            raise ValueError("none_in_scope is not a prerequisite")
+        return values
 
 
 class StoryWorkspaceEpisodeBindingRecoveryCommand(_StoryWorkspaceDreamWireModel):
@@ -818,6 +938,33 @@ class StoryWorkspaceEpisodeBindingRecoveryCommand(_StoryWorkspaceDreamWireModel)
         max_length=255,
         pattern=r"^[A-Za-z0-9._:-]+$",
     )
+
+
+_STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST = (
+    re.compile(r"(?:^|\s)/drama-[a-z-]+\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:hidden|internal)\s+(?:reasoning|thoughts?)\b|"
+        r"\bchain\s+of\s+thought\b|\bsystem\s+prompt\b|"
+        r"隐藏推理|内部推理|思维链|系统提示词",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bBearer\s+\S+", re.IGNORECASE),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])(?:sk-(?:ant-|proj-)?|gh[pousr]_|xox[baprs]-)"
+        r"[A-Za-z0-9_-]{16,}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9])/(?:Users|home)/[^\s]+|"
+        r"(?<![A-Za-z0-9])[A-Za-z]:\\Users\\[^\s]+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:curl|wget)\b.{0,500}\|\s*(?:ba|z|fi)?sh\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
+)
 
 
 class StoryWorkspaceEpisodeActionContinueCommand(_StoryWorkspaceDreamWireModel):
@@ -845,6 +992,11 @@ class StoryWorkspaceEpisodeActionContinueCommand(_StoryWorkspaceDreamWireModel):
             for character in normalized
         ):
             raise ValueError("user guidance must be bounded plain text")
+        if any(
+            pattern.search(normalized)
+            for pattern in _STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST
+        ):
+            raise ValueError("user guidance contains disallowed sensitive content")
         return normalized
 
 
@@ -906,10 +1058,10 @@ class StoryWorkspaceEpisodeBindingRecovery(_StoryWorkspaceDreamWireModel):
     def reason_matches_dispatch_capability(
         self,
     ) -> "StoryWorkspaceEpisodeBindingRecovery":
-        if self.can_dispatch and self.public_reason is not None:
-            raise ValueError("dispatchable bindings must not expose a recovery reason")
-        if not self.can_dispatch and self.public_reason is None:
-            raise ValueError("non-dispatchable bindings require a public reason")
+        if self.can_dispatch != (self.public_reason is not None):
+            raise ValueError(
+                "only an unbound recoverable surface exposes a recovery reason"
+            )
         return self
 
 
@@ -1702,6 +1854,7 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
     )
     narrative: Optional[StoryWorkspaceEpisodeNarrativeProjection] = None
     auxiliary: Optional[StoryWorkspaceEpisodeAuxiliaryProjection] = None
+    workflow: Optional[StoryWorkspaceEpisodeWorkflowProjection] = None
 
     @model_validator(mode="after")
     def binding_controls_episode_surface(
@@ -1714,8 +1867,6 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
                 or self.etag is None
             ):
                 raise ValueError("bound surfaces require opaque identity and revisions")
-            if self.etag != self.manifest_revision:
-                raise ValueError("etag must equal manifest_revision")
             expected_roots = {
                 "episode-outline.md",
                 "script.md",
@@ -1734,7 +1885,7 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
             or self.artifacts
             or self.narrative is not None
             or self.auxiliary is not None
-            or self.binding_recovery.can_dispatch
+            or self.workflow is not None
         ):
             raise ValueError("unbound surfaces cannot expose Episode artifacts")
         relative_keys = [artifact.relative_key for artifact in self.artifacts]
@@ -2318,6 +2469,7 @@ __all__ = [
     "StoryWorkspaceEpisodeActionContinueCommand",
     "StoryWorkspaceEpisodeActionDiagnostic",
     "StoryWorkspaceEpisodeActionResolution",
+    "StoryWorkspaceEpisodeBindingToolInput",
     "StoryWorkspaceEpisodeArtifactSection",
     "StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics",
     "StoryWorkspaceEpisodeAuxiliaryProjection",
@@ -2333,6 +2485,10 @@ __all__ = [
     "StoryWorkspaceEpisodeReviewTarget",
     "StoryWorkspaceEpisodeReviewTargetKind",
     "StoryWorkspaceEpisodeReviewedSourceRevision",
+    "StoryWorkspaceEpisodeWorkflowCompletion",
+    "StoryWorkspaceEpisodeWorkflowCompletionToolInput",
+    "StoryWorkspaceEpisodeWorkflowFile",
+    "StoryWorkspaceEpisodeWorkflowProjection",
     "StoryWorkspaceEpisodeBindingRecoveryCommand",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",

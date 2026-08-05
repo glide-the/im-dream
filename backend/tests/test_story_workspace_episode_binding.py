@@ -152,7 +152,7 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
             bindingAvailability=StoryWorkspaceEpisodeBindingAvailability.BOUND,
             bindingRecovery=StoryWorkspaceEpisodeBindingRecovery(
                 autoRepairAttempted=False,
-                canDispatch=True,
+                canDispatch=False,
             ),
             artifacts=artifacts if artifacts is not None else cls.manifest_entries(),
         )
@@ -289,7 +289,7 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
         )
         self.assertIsNotNone(result.binding)
         self.assertTrue(result.recovery.auto_repair_attempted)
-        self.assertTrue(result.recovery.can_dispatch)
+        self.assertFalse(result.recovery.can_dispatch)
         self.assertTrue(self.binding_path.is_file())
 
     def test_unproven_legacy_evidence_matrix_never_probes_episode(self) -> None:
@@ -317,7 +317,7 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
                 )
                 self.assertIsNone(result.binding)
                 self.assertTrue(result.recovery.auto_repair_attempted)
-                self.assertFalse(result.recovery.can_dispatch)
+                self.assertTrue(result.recovery.can_dispatch)
                 self.assertEqual(
                     result.recovery.public_reason,
                     "episode_binding_unproven",
@@ -531,13 +531,13 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
                         ],
                     )
 
-    def test_bound_surface_requires_complete_roots_and_matching_etag(self) -> None:
+    def test_bound_surface_requires_complete_roots_and_allows_aggregate_etag(self) -> None:
         for artifacts in ([], self.manifest_entries()[:-1]):
             with self.subTest(count=len(artifacts)):
                 with self.assertRaises(ValidationError):
                     self.bound_surface(artifacts=artifacts)
-        with self.assertRaises(ValidationError):
-            self.bound_surface(etag="sha256:" + "3" * 64)
+        surface = self.bound_surface(etag="sha256:" + "3" * 64)
+        self.assertNotEqual(surface.etag, surface.manifest_revision)
 
     def test_manifest_contract_rejects_path_traversal(self) -> None:
         with self.assertRaises(ValidationError):

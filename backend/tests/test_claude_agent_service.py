@@ -98,6 +98,7 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         request = ClaudeAgentRunRequest(
             user_id="7",
             thread_id="thread_dream_turn",
+            message_id="dream_agent_" + "a" * 64,
             message_parts=[{"type": "text", "text": "create Dream"}],
             story_workspace_dream_context=context,
         )
@@ -145,6 +146,12 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             execution.run_options.mcp_env["INK_AGENT_WORKFLOW_RUN_ID"],
             context.workflow_run_id,
+        )
+        self.assertEqual(
+            execution.run_options.mcp_env[
+                "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID"
+            ],
+            request.message_id,
         )
 
     async def test_dream_turn_skips_legacy_standalone_proposal_persistence(self):
@@ -234,6 +241,9 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
                         "env_vars": {
                             "ANTHROPIC_AUTH_TOKEN": "user-token",
                             "INK_AGENT_WORKFLOW_RUN_ID": "run_" + "9" * 32,
+                            "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID": (
+                                "dream_agent_" + "9" * 64
+                            ),
                             "EMPTY": None,
                             "  CUSTOM_KEY  ": "custom-value",
                         },
@@ -296,6 +306,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn(
             "INK_AGENT_WORKFLOW_RUN_ID",
+            execution.run_options.user_sdk_env,
+        )
+        self.assertNotIn(
+            "INK_AGENT_STORY_WORKSPACE_MESSAGE_ID",
             execution.run_options.user_sdk_env,
         )
 
