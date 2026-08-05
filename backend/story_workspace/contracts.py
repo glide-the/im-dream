@@ -1290,6 +1290,301 @@ class StoryWorkspaceEpisodeNarrativeProjection(_StoryWorkspaceDreamWireModel):
         return self
 
 
+class StoryWorkspaceEpisodePromptParameters(_StoryWorkspaceDreamWireModel):
+    """Allowlisted creative settings; never raw renderer/tool arguments."""
+
+    model: Optional[str] = Field(default=None, max_length=128)
+    mode: Optional[str] = Field(default=None, max_length=128)
+    duration_sec: Optional[float] = Field(default=None, ge=0.0, le=3600.0)
+    motion_strength: Optional[float] = Field(default=None, ge=0.0, le=100.0)
+    camera_motion: Optional[str] = Field(default=None, max_length=255)
+    aspect_ratio: Optional[str] = Field(
+        default=None,
+        max_length=32,
+        pattern=r"^[0-9]{1,3}:[0-9]{1,3}$",
+    )
+
+
+class StoryWorkspaceEpisodePromptGenerability(_StoryWorkspaceDreamWireModel):
+    """Allowlisted, user-facing prompt feasibility facts."""
+
+    character_anchor: Optional[str] = Field(default=None, max_length=128)
+    motion_feasibility: Optional[str] = Field(default=None, max_length=128)
+    duration_budget: Optional[str] = Field(default=None, max_length=128)
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+
+class StoryWorkspaceEpisodePrompt(_StoryWorkspaceDreamWireModel):
+    """One explicit shot prompt without any inferred render relationship."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    shot_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    kind: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$")
+    shot_view_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    association_status: StoryWorkspaceEpisodeAssociationStatus
+    positive: str = Field(min_length=1, max_length=8000)
+    negative: Optional[str] = Field(default=None, max_length=4000)
+    parameters: StoryWorkspaceEpisodePromptParameters = Field(
+        default_factory=StoryWorkspaceEpisodePromptParameters,
+    )
+    generability: StoryWorkspaceEpisodePromptGenerability = Field(
+        default_factory=StoryWorkspaceEpisodePromptGenerability,
+    )
+    source_artifact: str = Field(
+        pattern=r"^prompts/[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.ya?ml$",
+    )
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+    @model_validator(mode="after")
+    def linked_prompt_has_a_shot(self) -> "StoryWorkspaceEpisodePrompt":
+        if (
+            self.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
+        ) != (self.shot_view_id is not None):
+            raise ValueError("only linked prompts may expose shot_view_id")
+        return self
+
+
+class StoryWorkspaceEpisodePromptPage(_StoryWorkspaceDreamWireModel):
+    """Bounded prompt page with a revision-bound opaque cursor."""
+
+    items: list[StoryWorkspaceEpisodePrompt] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    total: _StoryWorkspaceDreamNonNegativeInt
+    next_cursor: Optional[str] = Field(default=None, max_length=2048)
+
+    @model_validator(mode="after")
+    def page_items_are_unique(self) -> "StoryWorkspaceEpisodePromptPage":
+        ids = [item.id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("prompt page IDs must be unique")
+        if len(self.items) > self.total:
+            raise ValueError("prompt page cannot exceed its total")
+        return self
+
+
+class StoryWorkspaceEpisodeArtifactSection(_StoryWorkspaceDreamWireModel):
+    """A safe plain-text Markdown section with explicit provenance."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    level: StrictInt = Field(ge=1, le=6)
+    title: str = Field(min_length=1, max_length=500)
+    text: str = Field(default="", max_length=8000)
+    source_artifact: Literal["renders/render-guide.md", "review-report.md"]
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+
+class StoryWorkspaceEpisodeRenderQueueEntry(_StoryWorkspaceDreamWireModel):
+    """One explicit render queue row linked only to its shot."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    shot_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    shot_view_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    association_status: StoryWorkspaceEpisodeAssociationStatus
+    duration_sec: Optional[float] = Field(default=None, ge=0.0, le=3600.0)
+    risk: Optional[str] = Field(default=None, max_length=128)
+    priority: Optional[str] = Field(default=None, max_length=64)
+    renderer: Optional[str] = Field(default=None, max_length=128)
+    status: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$",
+    )
+    source_artifact: Literal["renders/render-guide.md"] = "renders/render-guide.md"
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+    @model_validator(mode="after")
+    def linked_queue_entry_has_a_shot(
+        self,
+    ) -> "StoryWorkspaceEpisodeRenderQueueEntry":
+        if (
+            self.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
+        ) != (self.shot_view_id is not None):
+            raise ValueError("only linked queue entries may expose shot_view_id")
+        return self
+
+
+class StoryWorkspaceEpisodeRenderQueuePage(_StoryWorkspaceDreamWireModel):
+    """Bounded explicit queue page; it intentionally has no prompt reference."""
+
+    items: list[StoryWorkspaceEpisodeRenderQueueEntry] = Field(
+        default_factory=list,
+        max_length=100,
+    )
+    total: _StoryWorkspaceDreamNonNegativeInt
+    next_cursor: Optional[str] = Field(default=None, max_length=2048)
+
+    @model_validator(mode="after")
+    def queue_page_items_are_unique(self) -> "StoryWorkspaceEpisodeRenderQueuePage":
+        ids = [item.id for item in self.items]
+        if len(ids) != len(set(ids)):
+            raise ValueError("render queue page IDs must be unique")
+        if len(self.items) > self.total:
+            raise ValueError("render queue page cannot exceed its total")
+        return self
+
+
+class StoryWorkspaceEpisodeRenderGuide(_StoryWorkspaceDreamWireModel):
+    """Safe guide sections and an explicit queue; no registered media in v1."""
+
+    sections: list[StoryWorkspaceEpisodeArtifactSection] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    queue: StoryWorkspaceEpisodeRenderQueuePage
+    source_artifact: Literal["renders/render-guide.md"] = "renders/render-guide.md"
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+
+class StoryWorkspaceEpisodeReviewScope(str, Enum):
+    """Declared or evidence-derived report scope, not a workflow status."""
+
+    SCRIPT = "script"
+    FULL_CHAIN = "full-chain"
+    UNKNOWN = "unknown"
+
+
+class StoryWorkspaceEpisodeReviewTargetKind(str, Enum):
+    NARRATIVE_BEAT = "narrative-beat"
+    SCRIPT_SCENE = "script-scene"
+    SHOT = "shot"
+
+
+class StoryWorkspaceEpisodeReviewTarget(_StoryWorkspaceDreamWireModel):
+    """A location created only from an explicit machine-readable source key."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    kind: StoryWorkspaceEpisodeReviewTargetKind
+    source_key: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    target_view_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    association_status: StoryWorkspaceEpisodeAssociationStatus
+    section_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    source_artifact: Literal["review-report.md"] = "review-report.md"
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+    @model_validator(mode="after")
+    def linked_review_target_has_a_view_id(
+        self,
+    ) -> "StoryWorkspaceEpisodeReviewTarget":
+        if (
+            self.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
+        ) != (self.target_view_id is not None):
+            raise ValueError("only linked review targets may expose target_view_id")
+        return self
+
+
+class StoryWorkspaceEpisodeReviewedSourceRevision(_StoryWorkspaceDreamWireModel):
+    """An explicit reviewed artifact revision declared by the report."""
+
+    source_artifact: str = Field(
+        pattern=(
+            r"^(episode-outline\.md|script\.md|storyboard\.yaml|"
+            r"prompts/[A-Za-z0-9][A-Za-z0-9._-]{0,254}\.ya?ml|"
+            r"renders/render-guide\.md)$"
+        ),
+    )
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+
+class StoryWorkspaceEpisodeReviewReport(_StoryWorkspaceDreamWireModel):
+    """Read-only review facts that never own Episode creative content."""
+
+    scope: StoryWorkspaceEpisodeReviewScope
+    overall_verdict: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Z][A-Z0-9_ -]{0,63}$",
+    )
+    reviewed_artifacts: list[str] = Field(default_factory=list, max_length=256)
+    source_revisions: list[StoryWorkspaceEpisodeReviewedSourceRevision] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+    sections: list[StoryWorkspaceEpisodeArtifactSection] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    targets: list[StoryWorkspaceEpisodeReviewTarget] = Field(
+        default_factory=list,
+        max_length=2048,
+    )
+    source_artifact: Literal["review-report.md"] = "review-report.md"
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+    @field_validator("reviewed_artifacts")
+    @classmethod
+    def reviewed_artifacts_are_safe_and_unique(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError("reviewed_artifacts must be unique")
+        if any(
+            not value
+            or value.startswith("/")
+            or ".." in value.split("/")
+            or "\\" in value
+            for value in values
+        ):
+            raise ValueError("reviewed_artifacts must be safe relative keys")
+        return values
+
+
+class StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics(
+    _StoryWorkspaceDreamWireModel
+):
+    """Prompt/queue coverage without inventing a Prompt → Render edge."""
+
+    shot_prompt_coverage: StoryWorkspaceEpisodeAssociationCoverage
+    shot_render_queue_coverage: StoryWorkspaceEpisodeAssociationCoverage
+    total_prompts: _StoryWorkspaceDreamNonNegativeInt
+    total_queue_entries: _StoryWorkspaceDreamNonNegativeInt
+    orphan_prompts: list[str] = Field(default_factory=list, max_length=2048)
+    orphan_queue_entries: list[str] = Field(default_factory=list, max_length=2048)
+    duplicate_queue_shot_ids: list[str] = Field(default_factory=list, max_length=2048)
+
+    @field_validator(
+        "orphan_prompts",
+        "orphan_queue_entries",
+        "duplicate_queue_shot_ids",
+    )
+    @classmethod
+    def auxiliary_diagnostics_are_safe_and_unique(
+        cls,
+        values: list[str],
+    ) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError("auxiliary diagnostics must be unique")
+        if any(
+            not value
+            or len(value) > 512
+            or any(ord(char) < 32 for char in value)
+            for value in values
+        ):
+            raise ValueError("auxiliary diagnostics must be bounded plain text")
+        return values
+
+
+class StoryWorkspaceEpisodeAuxiliaryProjection(_StoryWorkspaceDreamWireModel):
+    """Read-only Prompt, Render Queue, and Review auxiliary view models."""
+
+    manifest_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    prompts: StoryWorkspaceEpisodePromptPage
+    render_guide: Optional[StoryWorkspaceEpisodeRenderGuide] = None
+    review: Optional[StoryWorkspaceEpisodeReviewReport] = None
+    associations: StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics
+
+
 class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
     """Base Episode response; adapters extend its normalized content later."""
 
@@ -1921,6 +2216,21 @@ __all__ = [
     "StoryWorkspaceDreamStageResponse",
     "StoryWorkspaceDreamStageToolInput",
     "StoryWorkspaceDreamToolInput",
+    "StoryWorkspaceEpisodeArtifactSection",
+    "StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics",
+    "StoryWorkspaceEpisodeAuxiliaryProjection",
+    "StoryWorkspaceEpisodePrompt",
+    "StoryWorkspaceEpisodePromptGenerability",
+    "StoryWorkspaceEpisodePromptPage",
+    "StoryWorkspaceEpisodePromptParameters",
+    "StoryWorkspaceEpisodeRenderGuide",
+    "StoryWorkspaceEpisodeRenderQueueEntry",
+    "StoryWorkspaceEpisodeRenderQueuePage",
+    "StoryWorkspaceEpisodeReviewReport",
+    "StoryWorkspaceEpisodeReviewScope",
+    "StoryWorkspaceEpisodeReviewTarget",
+    "StoryWorkspaceEpisodeReviewTargetKind",
+    "StoryWorkspaceEpisodeReviewedSourceRevision",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",
     "StoryWorkspaceGuidanceCommandPayload",
