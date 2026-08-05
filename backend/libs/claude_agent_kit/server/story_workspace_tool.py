@@ -386,7 +386,7 @@ def _source_launch_row(
         "SELECT run.workspace_id, binding.deck_id, run.deck_plugin_id, "
         "run.deck_plugin_version, run.deck_plugin_binding_id, "
         "run.binding_revision, run.deck_runtime_snapshot_id, "
-        "run.runtime_plugin_lock_id "
+        "run.runtime_plugin_lock_id, thread.voice_id AS thread_voice_id "
         "FROM workflow_runs AS run "
         "JOIN deck_plugin_bindings AS binding "
         "ON binding.deck_plugin_binding_id = run.deck_plugin_binding_id "
@@ -394,8 +394,12 @@ def _source_launch_row(
         "AND binding.deck_plugin_id = run.deck_plugin_id "
         "AND binding.deck_plugin_version = run.deck_plugin_version "
         "AND binding.workspace_id = run.workspace_id "
-        "WHERE run.id = ? AND run.created_by = ? LIMIT 1",
-        (workflow_run_id, str(actor_id)),
+        "JOIN chat_thread AS thread "
+        "ON thread.id = run.source_voice_thread_id "
+        "AND thread.deck_id = binding.deck_id "
+        "WHERE run.id = ? AND run.created_by = ? "
+        "AND run.source_voice_thread_id = ? AND thread.user_id = ? LIMIT 1",
+        (workflow_run_id, str(actor_id), thread_id, actor_id),
     ).fetchone()
     if locked is None:
         raise PermissionError("Dream launch provenance is unavailable")
@@ -425,6 +429,7 @@ def _source_launch_row(
                 binding_revision=int(locked["binding_revision"]),
                 runtime_snapshot_id=str(locked["deck_runtime_snapshot_id"]),
                 runtime_lock_id=str(locked["runtime_plugin_lock_id"]),
+                thread_agent_id=locked["thread_voice_id"],
             )
         ):
             matches.append((str(row["id"]), str(raw), metadata))

@@ -70,7 +70,8 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 CREATE TABLE chat_thread (
                     id TEXT PRIMARY KEY,
                     user_id INTEGER NOT NULL,
-                    deck_id TEXT NOT NULL
+                    deck_id TEXT NOT NULL,
+                    voice_id TEXT
                 );
                 CREATE TABLE deck_plugin_bindings (
                     deck_plugin_binding_id TEXT PRIMARY KEY,
@@ -185,6 +186,50 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         db.row_factory = sqlite3.Row
         db.set_trace_callback(self.statements.append)
         return db
+
+    def _launch_metadata(self) -> dict[str, object]:
+        db = sqlite3.connect(self.database_path)
+        try:
+            row = db.execute(
+                "SELECT metadata FROM chat_message WHERE id = 'launch-source'"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            return json.loads(row[0])
+        finally:
+            db.close()
+
+    def _replace_launch_metadata(
+        self,
+        metadata: dict[str, object],
+        *,
+        thread_agent_id: str | None,
+    ) -> str:
+        encoded = json.dumps(metadata, sort_keys=True)
+        db = sqlite3.connect(self.database_path)
+        try:
+            db.execute(
+                "UPDATE chat_thread SET voice_id = ? WHERE id = ?",
+                (thread_agent_id, THREAD_ID),
+            )
+            db.execute(
+                "UPDATE chat_message SET metadata = ? WHERE id = 'launch-source'",
+                (encoded,),
+            )
+            db.commit()
+        finally:
+            db.close()
+        return encoded
+
+    @staticmethod
+    def _current_launch_metadata(
+        legacy: dict[str, object],
+        agent_id: str | None,
+    ) -> dict[str, object]:
+        current = json.loads(json.dumps(legacy))
+        current["schemaVersion"] = "story-workspace-dream-launch/v1"
+        current["agentId"] = agent_id
+        current["dreamContext"]["agent_id"] = agent_id
+        return current
 
     def _seed_episode_action(
         self,
@@ -604,6 +649,104 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         )
         self.assertEqual(forged, {"error": "DREAM_WRITE_REJECTED"})
 
+    def test_source_launch_generation_and_agent_provenance_matrix(self) -> None:
+        self._seed_episode_action(action="recover_first_episode_binding")
+        legacy = self._launch_metadata()
+        current = self._current_launch_metadata(legacy, "voice-authorized")
+        current_null = self._current_launch_metadata(legacy, None)
+        modern_without_agents = json.loads(json.dumps(current))
+        modern_without_agents.pop("agentId")
+        modern_without_agents["dreamContext"].pop("agent_id")
+        partial_top = json.loads(json.dumps(current))
+        partial_top["dreamContext"].pop("agent_id")
+        partial_context = json.loads(json.dumps(current))
+        partial_context.pop("agentId")
+        unknown_schema = json.loads(json.dumps(current))
+        unknown_schema["schemaVersion"] = "story-workspace-dream-launch/v2"
+        cases = (
+            ("legacy", legacy, "voice-authorized", True),
+            ("current", current, "voice-authorized", True),
+            ("current-null", current_null, None, True),
+            ("modern-dual-delete", modern_without_agents, "voice-authorized", False),
+            ("partial-top", partial_top, "voice-authorized", False),
+            ("partial-context", partial_context, "voice-authorized", False),
+            ("unknown-schema", unknown_schema, "voice-authorized", False),
+        )
+        for label, metadata, thread_agent_id, accepted in cases:
+            with self.subTest(label=label):
+                self._replace_launch_metadata(
+                    metadata,
+                    thread_agent_id=thread_agent_id,
+                )
+                db = self._open_db()
+                try:
+                    if accepted:
+                        source = story_workspace_tool._source_launch_row(  # noqa: SLF001
+                            db,
+                            actor_id=7,
+                            thread_id=THREAD_ID,
+                            workflow_run_id=RUN_ID,
+                        )
+                        self.assertEqual(source[0], "launch-source")
+                    else:
+                        with self.assertRaises(PermissionError):
+                            story_workspace_tool._source_launch_row(  # noqa: SLF001
+                                db,
+                                actor_id=7,
+                                thread_id=THREAD_ID,
+                                workflow_run_id=RUN_ID,
+                            )
+                finally:
+                    db.close()
+        self.assertTrue(
+            any(
+                "thread.voice_id AS thread_voice_id" in statement
+                for statement in self.statements
+            )
+        )
+
+    def test_binding_rejects_forged_agent_before_any_episode_write(self) -> None:
+        story = self.workspace / "stories" / "demo"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text("project_id: demo\n", encoding="utf-8")
+        self._seed_episode_action(action="recover_first_episode_binding")
+        forged = self._current_launch_metadata(self._launch_metadata(), "voice-forged")
+        raw_before = self._replace_launch_metadata(
+            forged,
+            thread_agent_id="voice-authorized",
+        )
+
+        result = self._call(
+            "bind_first_episode",
+            {"workflowRunId": RUN_ID, "expectedBindingRevision": 0},
+        )
+
+        self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
+        self.assertEqual(
+            self._launch_metadata(),
+            json.loads(raw_before),
+        )
+        self.assertFalse(
+            (
+                self.workspace
+                / ".dream"
+                / "runtime"
+                / "runs"
+                / RUN_ID
+                / "episode.json"
+            ).exists()
+        )
+        self.assertFalse(
+            (
+                self.workspace
+                / ".dream"
+                / "runtime"
+                / "runs"
+                / RUN_ID
+                / "episodes"
+            ).exists()
+        )
+
     def test_episode_tools_reject_missing_forged_or_inactive_message_identity(self) -> None:
         story = self.workspace / "stories" / "demo"
         (story / "episodes" / "EP01").mkdir(parents=True)
@@ -718,6 +861,65 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             self._call("record_episode_workflow_completion", poisoned),
             {"error": "DREAM_WRITE_REJECTED"},
         )
+
+    def test_completion_rechecks_agent_provenance_before_workflow_write(self) -> None:
+        story = self.workspace / "stories" / "demo"
+        episode = story / "episodes" / "EP01"
+        episode.mkdir(parents=True)
+        (story / "project.yaml").write_text("project_id: demo\n", encoding="utf-8")
+        self._seed_episode_action(action="recover_first_episode_binding")
+        bound = self._call(
+            "bind_first_episode",
+            {"workflowRunId": RUN_ID, "expectedBindingRevision": 0},
+        )
+        episode_uid = str(bound["episodeId"])
+        authority = StoryWorkspaceEpisodeAuthority(
+            workflow_run_id=RUN_ID,
+            episode_uid=episode_uid,
+            story_slug="demo",
+            episode_code="EP01",
+        )
+        surface = StoryWorkspaceEpisodeArtifactService(self.workspace).read_surface(
+            RUN_ID,
+            episode_authority=authority,
+        )
+        facts_service = StoryWorkspaceEpisodeWorkflowFactService(self.workspace)
+        facts = facts_service.read(RUN_ID, episode_uid)
+        input_revision = StoryWorkspaceEpisodeNextActionResolver.action_input_revision(
+            StoryWorkspaceEpisodeAction.PLAN_EPISODE,
+            surface,
+            facts,
+        )
+        self._seed_episode_action(
+            action="plan_episode",
+            episode_uid=episode_uid,
+            manifest_revision=surface.manifest_revision,
+            input_revision=input_revision,
+            facts_revision=facts.revision,
+        )
+        (episode / "episode-outline.md").write_text(
+            "---\ntitle: Demo\n---\n# Story Goals\n- Begin\n",
+            encoding="utf-8",
+        )
+        forged = self._current_launch_metadata(
+            self._launch_metadata(),
+            "voice-forged",
+        )
+        raw_before = self._replace_launch_metadata(
+            forged,
+            thread_agent_id="voice-authorized",
+        )
+
+        result = self._call(
+            "record_episode_workflow_completion",
+            {"workflowRunId": RUN_ID},
+        )
+
+        self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
+        self.assertEqual(self._launch_metadata(), json.loads(raw_before))
+        persisted = facts_service.read(RUN_ID, episode_uid)
+        self.assertEqual(persisted.revision, 0)
+        self.assertEqual(persisted.completions, [])
 
     def test_binding_rejects_multiple_canonical_projects_without_agent_choice(self) -> None:
         for slug in ("demo-a", "demo-b"):

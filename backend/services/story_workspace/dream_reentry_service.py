@@ -45,6 +45,7 @@ _STORY_WORKSPACE_DREAM_CONTEXT_REQUIRED_KEYS = frozenset({
     "runtime_plugin_lock_id",
 })
 _STORY_WORKSPACE_DREAM_CONTEXT_AGENT_KEY = "agent_id"
+_STORY_WORKSPACE_DREAM_LAUNCH_SCHEMA = "story-workspace-dream-launch/v1"
 _STORY_WORKSPACE_DREAM_LAUNCH_ALLOWED_KEYS = frozenset({
     "kind",
     "schemaVersion",
@@ -207,9 +208,11 @@ class StoryWorkspaceDreamReentryService:
             "AND binding.deck_plugin_version = run.deck_plugin_version "
             "AND binding.binding_revision = run.binding_revision "
             "AND CASE WHEN json_valid(source.metadata) THEN ("
-            "(json_type(source.metadata, '$.agentId') IS NULL "
+            "(json_type(source.metadata, '$.schemaVersion') IS NULL "
+            "AND json_type(source.metadata, '$.agentId') IS NULL "
             "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NULL) "
-            "OR (json_type(source.metadata, '$.agentId') IS NOT NULL "
+            "OR (json_extract(source.metadata, '$.schemaVersion') = ? "
+            "AND json_type(source.metadata, '$.agentId') IS NOT NULL "
             "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NOT NULL "
             "AND json_extract(source.metadata, '$.agentId') IS thread.voice_id "
             "AND json_extract(source.metadata, '$.dreamContext.agent_id') IS thread.voice_id)"
@@ -220,6 +223,7 @@ class StoryWorkspaceDreamReentryService:
                 actor_id,
                 actor_id,
                 actor_id,
+                _STORY_WORKSPACE_DREAM_LAUNCH_SCHEMA,
             ),
         ).fetchall()
 
@@ -452,7 +456,15 @@ class StoryWorkspaceDreamReentryService:
             return False
         top_agent_present = "agentId" in metadata
         context_agent_present = _STORY_WORKSPACE_DREAM_CONTEXT_AGENT_KEY in dream_context
-        if top_agent_present != context_agent_present:
+        schema_present = "schemaVersion" in metadata
+        if schema_present:
+            if (
+                metadata["schemaVersion"] != _STORY_WORKSPACE_DREAM_LAUNCH_SCHEMA
+                or not top_agent_present
+                or not context_agent_present
+            ):
+                return False
+        elif top_agent_present or context_agent_present:
             return False
         if thread_agent_id is not _STORY_WORKSPACE_DREAM_AGENT_NOT_PROVIDED:
             if thread_agent_id is not None and (

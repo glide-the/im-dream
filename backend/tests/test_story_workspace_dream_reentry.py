@@ -431,6 +431,14 @@ class StoryWorkspaceDreamReentryServiceTest(unittest.TestCase):
             172: lambda value: value.__setitem__("agentId", "voice-other"),
             173: lambda value: value.pop("agentId"),
             174: lambda value: value["dreamContext"].pop("agent_id"),
+            175: lambda value: (
+                value.pop("agentId"),
+                value["dreamContext"].pop("agent_id"),
+            ),
+            176: lambda value: value.__setitem__(
+                "schemaVersion",
+                "story-workspace-dream-launch/v2",
+            ),
         }
         for number, mutate in mutations.items():
             self._add_run(
