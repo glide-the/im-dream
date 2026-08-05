@@ -3,6 +3,7 @@
 // [Pos] Story Workspace left layout region.
 import { useEffect, useState } from 'react';
 import type { IconType } from 'react-icons';
+import { useTranslation } from 'react-i18next';
 import {
   FaBookOpen,
   FaChevronLeft,
@@ -27,28 +28,41 @@ const storyWorkspaceSidebarItems: StoryWorkspaceSidebarItem[] = [
   { icon: FaBookOpen, label: 'Dream', path: '/story-workspace/dream' },
   { icon: FaThLarge, label: 'Decks', path: '/story-workspace/decks' },
   { icon: FaRegCreditCard, label: '订阅', path: '/story-workspace/subscription' },
+  { icon: FaCog, label: '设置', path: '/story-workspace/settings' },
 ];
 
 export interface StoryWorkspaceSidebarProps {
   collapsed: boolean;
   currentPath: string;
   onNavigate: (path: string) => void;
-  onOpenSettings: () => void;
+  onGlobalNavigate?: (view: StoryWorkspaceGlobalView) => void;
   onToggleCollapse: () => void;
 }
+
+export type StoryWorkspaceGlobalView =
+  | 'writing'
+  | 'settings'
+  | 'timeline'
+  | 'analysis'
+  | 'decks'
+  | 'chat'
+  | 'story-workspace';
 
 export function StoryWorkspaceSidebar({
   collapsed,
   currentPath,
   onNavigate,
-  onOpenSettings,
+  onGlobalNavigate,
   onToggleCollapse,
 }: StoryWorkspaceSidebarProps) {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
   const displayName = user?.display_name?.trim() || user?.email || 'Ink & Memory 用户';
   const avatarLabel = Array.from(displayName)[0]?.toUpperCase() || 'I';
   const themeToggleLabel = isDark ? '切换到浅色' : '切换到深色';
+  const subscriptionItem = storyWorkspaceSidebarItems[2];
+  const SubscriptionIcon = subscriptionItem.icon;
 
   useEffect(() => {
     return onThemeChange((resolved) => {
@@ -302,20 +316,30 @@ export function StoryWorkspaceSidebar({
       </header>
 
       <nav aria-label="Story Workspace 导航" className="story-workspace-sidebar__nav">
-        {storyWorkspaceSidebarItems.map((item) => {
-          const Icon = item.icon;
-          const isCurrent = item.path === currentPath;
-
+        {([
+          { label: t('nav.writing'), view: 'writing' },
+          { label: t('nav.timeline'), view: 'timeline' },
+          { label: t('nav.analysis'), view: 'analysis' },
+          { label: t('nav.decks'), view: 'decks' },
+          { label: t('nav.dream'), view: 'story-workspace' },
+          { label: t('nav.chat'), view: 'chat' },
+        ] as const).map((item) => {
+          const isCurrent = item.view === 'story-workspace' && currentPath === '/story-workspace/dream';
           return (
             <button
               aria-current={isCurrent ? 'page' : undefined}
               className="story-workspace-sidebar__nav-button"
-              key={item.path}
-              onClick={() => onNavigate(item.path)}
+              key={item.view}
+              onClick={() => {
+                if (item.view === 'story-workspace') {
+                  onNavigate('/story-workspace/dream');
+                  return;
+                }
+                onGlobalNavigate?.(item.view);
+              }}
               title={collapsed ? item.label : undefined}
               type="button"
             >
-              <Icon aria-hidden="true" className="story-workspace-sidebar__icon" />
               <span className="story-workspace-sidebar__label">{item.label}</span>
             </button>
           );
@@ -336,15 +360,25 @@ export function StoryWorkspaceSidebar({
           <span className="story-workspace-sidebar__theme-label">{themeToggleLabel}</span>
         </button>
         <button
+          aria-current={currentPath === subscriptionItem.path ? 'page' : undefined}
+          className="story-workspace-sidebar__nav-button"
+          onClick={() => onNavigate(subscriptionItem.path)}
+          title={collapsed ? subscriptionItem.label : undefined}
+          type="button"
+        >
+          <SubscriptionIcon aria-hidden="true" className="story-workspace-sidebar__icon" />
+          <span className="story-workspace-sidebar__label">{subscriptionItem.label}</span>
+        </button>
+        <button
+          aria-current={currentPath.startsWith('/story-workspace/settings') ? 'page' : undefined}
           className="story-workspace-sidebar__settings-button"
-          onClick={onOpenSettings}
+          onClick={() => onNavigate('/story-workspace/settings')}
           title={collapsed ? '设置' : undefined}
           type="button"
         >
           <FaCog aria-hidden="true" className="story-workspace-sidebar__icon" />
           <span className="story-workspace-sidebar__settings-label">设置</span>
         </button>
-
         <div className="story-workspace-sidebar__user">
           <span aria-hidden="true" className="story-workspace-sidebar__avatar">
             {user ? avatarLabel : <FaUserCircle />}

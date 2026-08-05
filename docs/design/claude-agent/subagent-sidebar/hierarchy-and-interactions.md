@@ -1,5 +1,52 @@
 # 「子智能体任务」层级与交互逻辑
 
+> 2026-08-05 更新：单任务详情改为统一只读消息时间线。以下主从结构与状态逻辑优先于后文旧的“元信息/结果/activity”详情描述。
+
+## 0. 新主从结构与交互
+
+```text
+SubagentSidebar（唯一内容滚动容器）
+├── 列表态
+│   ├── Active / Completed / Ended 分组
+│   └── TaskRow：Agent｜单行标题｜可选单行摘要｜状态｜耗时｜›
+│          └── click / Enter / Space
+└── 详情态
+    ├── Header：←｜Agent｜标题｜状态｜耗时｜关闭/刷新
+    ├── ProjectionNotice（按需）：消息范围｜截断｜legacy
+    └── ReadonlyMessageTimeline
+        ├── task_dispatch（长内容可展开）
+        ├── assistant_text（ChatMarkdown）
+        ├── tool_call/result（配对、只读、有界展开）
+        ├── artifact/file_change（工具结果结构化视图）
+        ├── status（running/completed/failed/cancelled）
+        ├── final（最终回复，唯一）
+        └── system_notice（未知/脱敏/截断/读取异常）
+```
+
+### 0.1 关键流程
+
+`打开侧栏 → 水合 thread snapshot → 选择 taskId → 记录列表 scrollTop → messages 标准化/去重/稳定排序 → 渲染统一只读时间线 → 返回并恢复列表位置、选中态与焦点`。
+
+- `focusToolCallId` 先通过 `toolCallId → taskId` 关联，再进入对应详情；找不到时保留列表并显示非阻塞提示。
+- 更新中的任务只追加/替换更高版本消息，不重置阅读位置；用户位于底部附近时才自动跟随。
+- 关闭详情/侧栏不创建或遗留额外监听器。REST 轮询由线程级 store 共享，详情组件不订阅 SSE。
+- 最终文本若已作为 `final` 存在，不再展示 `summary`；legacy 只有 summary 时合成一条带兼容提示的最终消息。
+
+### 0.2 响应式与滚动
+
+| 宽度/场景 | 列表 | 详情 | 滚动 |
+| --- | --- | --- | --- |
+| 480–768px | 标题 + 可选摘要 + 状态/耗时 | 完整 header 与时间线 | 侧栏内容区唯一纵向滚动 |
+| 352–479px | 隐藏非必要摘要 | header 可两行，操作收敛 | 同上；代码/表格仅横向滚动 |
+| viewport 无法保留 360px 主 Chat | 列表/详情主从单视图 | 返回占首要位置 | 不并排硬挤，不新增内层滚动 |
+
+### 0.3 可访问性
+
+- `TaskRow` 用整行 `<button>`；当前任务用 `aria-current`，label 包含任务名、Agent、状态和耗时。
+- 返回后焦点回到原任务行；关闭后回到侧栏入口；resize separator 现有 ARIA value、方向键、Home/End 和双击行为保持。
+- 展开长 Prompt/工具结果使用 `aria-expanded`/`aria-controls`；状态文字始终可见，颜色不作为唯一信号。
+- 只有任务状态转折进入 polite live region，运行耗时更新不播报。
+
 ## 1. 精炼页面结构图（模块分区）
 
 ```text

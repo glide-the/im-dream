@@ -1,5 +1,92 @@
 # 「子智能体任务」侧边栏入口与右侧详情面板 PRD 草案
 
+> 2026-08-05 交互重构结论：本文件原有“列表与任务可见性”能力继续保留；单任务详情从“元信息卡 + 最新结果 + activity 调试轴”升级为“紧凑身份栏 + 统一只读消息时间线”。以下增量规范优先于后文旧详情描述。
+
+## 0. 对话详情重构摘要
+
+### 0.1 背景与目标
+
+现有 `TaskRow` 同时展示头像、标题、状态、两行摘要、耗时与箭头，`TaskDetail` 又重复身份、生命周期、最终结果与执行记录，导致扫描效率低。重构目标是让列表只承担“找到任务”，详情只承担“阅读执行过程”：用户能连续看到任务派发、SubAgent 文本、工具调用及结果、状态转折、文件产物、最终回复和错误/中断。
+
+### 0.2 信息架构
+
+```text
+SubagentSidebar
+├── TaskIndex
+│   ├── TaskGroup
+│   └── CompactTaskRow × N
+└── ReadonlyTaskDetail
+    ├── DetailHeader：返回 / Agent / 标题 / 状态 / 耗时
+    ├── ProjectionNotice：消息范围、截断或兼容提示（按需）
+    └── ReadonlyMessageTimeline
+        ├── task_dispatch
+        ├── assistant_text
+        ├── tool_call / tool_result
+        ├── status
+        ├── final
+        └── system_notice
+```
+
+### 0.3 列表页设计
+
+- 任务项无摘要时约 64px，有摘要时不超过 80px；内边距 10px 12px，项间距 4px。
+- 左列为稳定 Agent 标识；中列为单行标题和可选单行摘要；右列为文本+图形状态、tabular-nums 耗时和进入箭头。
+- 标题与摘要均截断，完整标题通过 `title`/辅助文本可读；状态与耗时不得挤压主标题。
+- 不在列表展示完整最终结果、执行时间线、开始时间、spawn depth 或重复 Agent 类型字段。
+- 整行为单一按钮，至少 44px 点击目标，具有 hover、选中和 `:focus-visible` 状态，`aria-label` 包含任务名与状态。
+
+### 0.4 详情页与消息时间线
+
+- 顶部仅保留返回、Agent 标识/名称、任务标题、状态、耗时及关闭/刷新等必要只读操作。
+- 消息数量、投影范围、父任务与截断信息进入可选的轻量次级行；没有信息时不占位。
+- 主体是一个连续只读时间线，不再单独堆叠“最新结果”卡片；最终回复作为最后一条 `final` 消息自然收束。
+- 长派发 Prompt 默认展示有意义预览，可展开/收起；Markdown、代码、列表、链接和 Mermaid 复用 `ChatMarkdown`。
+- 工具调用与结果以同一个 callId 配对，默认显示工具名、状态、输入/输出安全摘要；长内容有界展开。文件产物与修改记录是工具结果的结构化视图，不创建第二个附件工作区。
+- 详情无输入框、发送、重新生成、继续会话、批准/拒绝工具、`useChat`、SSE 或自动续写。
+
+### 0.5 状态矩阵
+
+| 状态 | 列表 | 详情时间线 | 底部反馈 |
+| --- | --- | --- | --- |
+| loading | 保留快照并显示轻量刷新；无快照才用紧凑骨架 | 保留已知 header，主体显示加载占位 | 不显示输入框 |
+| running | “运行中”+动态耗时 | 已到达消息 + running 状态节点 | 明确“仍在执行”，不自动抢滚动 |
+| completed | “已完成”+最终耗时 | `final` 后接 completed 状态 | 无额外结果卡 |
+| failed | “失败”+耗时 | 保留此前消息，末尾显示安全错误 | 提供刷新，不伪造结果 |
+| cancelled | “已中断”+耗时 | 保留此前消息，末尾显示中断 | 不计入 completed |
+| empty | 列表全局空态 | 有任务无消息时显示真实空态 | 无伪造对话 |
+| legacy | 正常显示可用元数据 | `summary/activity` 转为兼容消息并标注历史数据不完整 | 最终摘要只出现一次 |
+
+### 0.6 数据映射与顺序
+
+- 后端新增有界、鉴权、脱敏的 `messages` 投影；原始 JSONL 是权威来源，前端不从摘要猜测过程。
+- 稳定排序使用 `sequence`（有值优先）→ `createdAt` → `id`；稳定 key 使用投影 id，重复块以记录 id/块序号/callId 去重。
+- 任务派发来自 meta prompt 或 transcript 首个真实 user text；SubAgent 文本来自 assistant text；工具调用/结果来自 `tool_use/tool_result`；中断来自真实 interruption marker；最终回复是终态前最后一条 assistant 文本。
+- 旧 API 的 `summary/activity` 暂时保留兼容；有 `messages` 时不再另渲染 summary，避免最终回复重复。
+- thinking 不展示为“真实对话”；未知 block 映射为中性 `system_notice`，缺失时间戳时保持 transcript 原序。
+
+### 0.7 响应式、无障碍与异常
+
+- 保留 352–768px 可调宽度、默认 480px、主 Chat 至少 360px；窄侧栏先隐藏摘要，极窄 viewport 使用列表/详情主从切换。
+- 侧栏内容区是唯一纵向滚动容器；代码/表格只允许局部横向滚动，禁止时间线内再建纵向滚动。
+- 状态不依赖颜色；状态转折可 `aria-live=polite`，每秒耗时不得播报；展开控件暴露 `aria-expanded`。
+- 深浅主题只使用现有 token；中英文文案与 `aria-label` 全部走 `chat.subagents.*`。
+- 脱敏、截断、未知事件与读取失败都在相关位置显示轻量系统提示；前端日志只记录 task/message/event id、状态与原因码，不记录正文。
+
+### 0.8 埋点与调试建议
+
+- 可观测事件：`subagent_list_opened`、`subagent_task_opened`、`subagent_detail_back`、`subagent_message_expanded`、`subagent_detail_reload`。
+- 调试字段：`threadId/taskId/toolCallId/messageCount/truncated/status/durationMs/projectionVersion`；不得记录 prompt、工具输入输出或绝对路径正文。
+- 开发模式可记录丢弃的重复/未知事件数量与排序兜底原因，生产环境仅保留聚合指标。
+
+### 0.9 验收清单
+
+- 任务项明显比旧版紧凑，标题、状态与结果概况可快速扫描。
+- 两种参考 Agent（短 PRD 交付、长 e2e 执行）使用同一模板正确展示。
+- 真实任务派发、文本、工具、文件记录、状态与最终回复按稳定顺序出现，最终回复不重复。
+- running/completed/failed/cancelled、加载、空记录、旧记录和未知事件都有明确降级。
+- 主 Chat Markdown/工具表现不回归；详情没有输入框、重复订阅或嵌套纵向滚动。
+- 深浅主题、中英文、窄/宽侧栏、键盘与读屏验收通过，宽度调节能力保持有效。
+
 ## 1. 产品目标与范围
 
 在现有聊天会话中补齐子智能体（subagent）执行记录的可见性。用户无需翻找消息或阅读原始工具事件，即可从 `PlanButton` 所在的顶部右侧操作区看到本会话是否运行过子智能体、最近涉及哪些代理、已完成多少项，并在点击后通过对话区右侧面板查看正在运行与已完成的具体任务。

@@ -11,6 +11,7 @@ const ROUTER = readFileSync(new URL('../../../../router/story-workspace.tsx', im
 const APP = readFileSync(new URL('../../../../App.tsx', import.meta.url), 'utf8');
 const PATHS = readFileSync(new URL('../../../../router/storyWorkspacePath.ts', import.meta.url), 'utf8');
 const SUBSCRIPTION = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSubscriptionPage.tsx', import.meta.url), 'utf8');
+const SETTINGS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceSettingsPage.tsx', import.meta.url), 'utf8');
 const DREAM_LAUNCH = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceDreamLaunch.tsx', import.meta.url), 'utf8');
 
 test('sidebar replaces legacy resource management with Dream, Decks and subscription', () => {
@@ -65,4 +66,21 @@ test('Dream keeps its durable recent list while subscription stays a static, acc
   expect(SUBSCRIPTION).toContain('aria-labelledby');
   expect(SUBSCRIPTION).not.toContain('fetch(');
   expect(SUBSCRIPTION).not.toContain('apiUrl');
+});
+
+test('subscription and Settings stay in the workspace sidebar while their pages render in the right main region', () => {
+  const footerMarkup = SIDEBAR.slice(
+    SIDEBAR.indexOf('<footer className="story-workspace-sidebar__footer">'),
+    SIDEBAR.indexOf('</footer>'),
+  );
+  expect(footerMarkup.indexOf('subscriptionItem.path')).toBeLessThan(
+    footerMarkup.indexOf('story-workspace-sidebar__settings-button'),
+  );
+  expect(SIDEBAR).toContain("onNavigate('/story-workspace/settings')");
+  expect(ROUTER).toContain("case 'settings':");
+  expect(ROUTER).toContain('renderSettings(storyWorkspaceSettingsSectionForRoute(match.route), onNavigate)');
+  expect(APP).not.toContain("setCurrentView('settings')");
+  expect(SETTINGS).toContain('<section aria-labelledby=');
+  expect(SETTINGS).toContain('className="story-workspace-settings__section"');
+  expect(SETTINGS).toContain('role="region"');
 });

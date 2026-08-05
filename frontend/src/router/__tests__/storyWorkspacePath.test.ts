@@ -52,6 +52,14 @@ test('static routes resolve exactly as before (no regression)', () => {
     canonicalPath: STORY_WORKSPACE_PATHS.decks,
     route: 'decks',
   });
+  expect(resolveStoryWorkspacePath('/story-workspace/settings')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS.settings,
+    route: 'settings',
+  });
+  expect(resolveStoryWorkspacePath('/story-workspace/settings/model')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS['settings-model'],
+    route: 'settings-model',
+  });
 });
 
 test('run-bound character and scene routes target their Dream file stages', () => {

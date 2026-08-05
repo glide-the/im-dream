@@ -11,6 +11,9 @@
 - 主图 `assets/subagent-detail.jpg`：任务详情页面。顶部显示“子智能体”，主体按“已开启”和“完成 · 数量”分组；任务行包含代理图标、任务名、摘要和耗时。
 - 辅图 `assets/subagent-summary.png`：侧边栏入口元信息。显示多个最近代理图标、完成任务总数和“完成”状态。
 - 聊天任务按钮参考 `assets/subagent-chat-button-reference.png`：Agent 工具记录应收敛为头像、任务名和状态胶囊；点击后进入对应任务详情，不展示内部启动 envelope。
+- `assets/subagent-detail-prd-agent.png`：短内容 Agent 类型，顶部紧凑展示返回/身份/标题，主体直接显示完成回复、文件产物与修改记录。
+- `assets/subagent-detail-e2e-agent.png`：长内容 Agent 类型，包含可折叠派发 Prompt、消息数量、处理耗时、最终回复、链接和测试结果。
+- 两种 Agent 只用于验证同一消息模板的内容适应性，不应产生按 Agent 类型写死的详情组件。
 
 功能目标：
 1. 正确解析并显示最近对话里 subagent 的执行记录，包括运行中和已完成任务。

@@ -520,7 +520,9 @@ text through the configured Chat history retriever.
 
 Return the current user's projected Claude Code subagent tasks for one Chat
 thread. The server reads bounded transcript metadata from the server-owned
-workspace and never exposes raw prompts, tool inputs, or internal paths.
+workspace. Projection v2 includes the assigned task, assistant Markdown,
+credential-redacted tool summaries, lifecycle status, and final reply; thinking
+blocks are excluded and oversized records are explicitly marked as truncated.
 
 **Headers:** `Authorization: Bearer <token>`
 
@@ -542,7 +544,15 @@ workspace and never exposes raw prompts, tool inputs, or internal paths.
       "started_at": "2026-08-04T09:00:00Z",
       "finished_at": "2026-08-04T09:00:10Z",
       "duration_ms": 10000,
-      "error": null
+      "error": null,
+      "messages": [
+        {"id": "message-1", "sequence": 1, "kind": "task", "text": "Review the change", "timestamp": null, "status": null, "tool_name": null, "tool_call_id": null, "input": null, "output": null, "redacted": false, "truncated": false},
+        {"id": "message-2", "sequence": 2, "kind": "final", "text": "PASS. No new regressions.", "timestamp": "2026-08-04T09:00:10Z", "status": null, "tool_name": null, "tool_call_id": null, "input": null, "output": null, "redacted": false, "truncated": false},
+        {"id": "message-3", "sequence": 3, "kind": "status", "text": null, "timestamp": "2026-08-04T09:00:10Z", "status": "completed", "tool_name": null, "tool_call_id": null, "input": null, "output": null, "redacted": false, "truncated": false}
+      ],
+      "message_count": 3,
+      "messages_truncated": false,
+      "projection_version": 2
     }
   ],
   "counts": {"running": 0, "completed": 1, "ended": 0, "total": 1},
@@ -551,6 +561,10 @@ workspace and never exposes raw prompts, tool inputs, or internal paths.
 ```
 
 `status` is one of `running`, `completed`, `failed`, or `cancelled`.
+`messages[].kind` is one of `task`, `assistant`, `tool_call`, `tool_result`,
+`status`, `final`, or `system`. Clients must use `sequence` then `timestamp` and
+`id` for stable ordering. `summary` and `activity` remain available for legacy
+clients; when v2 messages exist the final summary must not be rendered twice.
 `ended` counts failed and cancelled tasks; it does not inflate the completed count.
 The endpoint returns `404` when the thread does not belong to the current user.
 

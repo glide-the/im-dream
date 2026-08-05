@@ -1,5 +1,26 @@
 # 子智能体任务展示实现记录
 
+## 0. 2026-08-05 对话详情架构决策
+
+- 不嵌套 `ChatPanel`：它拥有 `useChat`、输入区、工具确认、SSE 重连、发送/停止与滚动控制，会造成重复生命周期和线程状态污染。
+- 不直接原样嵌入现有 `ChatMessageList`：当前组件会订阅父线程 SubAgent store，并带有交互式工具确认/编辑语义。实现应提取或参数化最小的 `ReadonlyMessageTimeline`，共享 Markdown、代码、工具展示组件，但不共享 transport 和写操作。
+- 后端当前 `activity` 主动剔除 prompt、thinking、工具输入和成功结果，只能支持调试式时间线，不能满足真实对话。新增 `messages` 安全投影后，`summary/activity` 仅用于旧记录兼容。
+- 原始 JSONL 记录顺序是事实来源；投影为每个可见 block 生成稳定 id/sequence，保留 tool call/result 关联，限制单条/总字节数并标注脱敏、截断与投影版本。
+- 前端标准化逻辑必须是纯函数，负责 schema guard、稳定排序、重复事件折叠、迟到事件防回退和 legacy fallback；UI 不从自然语言猜测状态或最终结果。
+- foreground 约束继续保留：Agent/Task 的 `run_in_background` 在 PreToolUse 与 can-use-tool 两条权限路径改为 `false`，使 child result 与 parent 最终回复保持同一 runner/SSE 生命周期。未来如恢复真正后台执行，必须先实现持久 completion watcher 与可恢复 parent continuation。
+
+### 预计代码边界
+
+| 文件 | 变更 |
+| --- | --- |
+| `backend/claude_agent/subagent_projection.py` | 新增安全 `messages` 投影、稳定 id/顺序、截断/兼容元数据 |
+| `backend/tests/test_claude_agent_subagents.py` | 覆盖派发、文本、工具、终态、重复/未知/截断与旧记录 |
+| `frontend/src/hooks/useThreadSubagents.ts` | 新消息类型、标准化/排序/legacy 转换 |
+| `frontend/src/components/chat/ChatMessageList.tsx` | 提取或参数化只读消息渲染边界 |
+| `frontend/src/components/chat/SubagentPanel.tsx` | 紧凑列表、header、只读时间线与状态反馈 |
+| `frontend/src/i18n.ts` | 新增中英文消息/兼容/状态文案 |
+| `.folder.md` | 同步共享组件与数据职责 |
+
 ## 1. 数据与展示
 
 - 后端按 thread workspace 扫描 `.claude-home/projects/**/subagents/*.meta.json` 与有界 JSONL 首尾，投影 `running/completed/failed/cancelled`、摘要、耗时、`tool_call_id` 和最多 80 条脱敏 activity。activity 只保留 assistant 文本、工具名、生命周期与时间，不下发 user prompt、thinking、工具输入或成功工具输出。

@@ -1,6 +1,6 @@
 # [Input] Consume claude_agent.subagent_projection filesystem projection.
-# [Output] Verify completed/running/cancelled/failed classification, recovery
-#          after intermediate tool errors, safe response shape, and empty state.
+# [Output] Verify completed/running/cancelled/failed classification, recovery,
+#          safe readonly messages, stable ordering, redaction, and empty state.
 # [Pos] Focused unit test node for the Chat subagent sidebar API projection.
 # [Sync] 2026-08-04: initial subagent transcript projection coverage.
 
@@ -176,6 +176,72 @@ class TestSubagentProjection(unittest.TestCase):
         self.assertNotIn("secret", serialized)
         self.assertNotIn("/private/path", serialized)
         self.assertIn("Review complete.", serialized)
+
+    def test_messages_project_dispatch_tools_final_and_terminal_status(self) -> None:
+        self._write_agent(
+            "conversation",
+            [
+                _record("2026-08-04T13:00:00Z", "user", [{"type": "text", "text": "private prompt"}]),
+                _record(
+                    "2026-08-04T13:00:01Z",
+                    "assistant",
+                    [
+                        {"type": "text", "text": "I will inspect the code."},
+                        {
+                            "type": "tool_use",
+                            "id": "tool-1",
+                            "name": "Read",
+                            "input": {"file_path": "frontend/src/App.tsx", "api_key": "must-hide"},
+                        },
+                    ],
+                ),
+                _record(
+                    "2026-08-04T13:00:02Z",
+                    "user",
+                    [{"type": "tool_result", "tool_use_id": "tool-1", "content": "source excerpt"}],
+                ),
+                _record(
+                    "2026-08-04T13:00:03Z",
+                    "assistant",
+                    [{"type": "text", "text": "## Done\n\n- Tests passed"}],
+                ),
+            ],
+        )
+
+        task = build_thread_subagents_payload(self.thread_id, self.root)["tasks"][0]
+        messages = task["messages"]
+
+        self.assertEqual(messages[0]["kind"], "task")
+        self.assertEqual(messages[0]["text"], "must never reach the browser")
+        self.assertEqual([item["sequence"] for item in messages], list(range(1, len(messages) + 1)))
+        tool_call = next(item for item in messages if item["kind"] == "tool_call")
+        tool_result = next(item for item in messages if item["kind"] == "tool_result")
+        self.assertEqual(tool_call["tool_call_id"], tool_result["tool_call_id"])
+        self.assertIn("[redacted]", tool_call["input"])
+        self.assertNotIn("must-hide", tool_call["input"])
+        self.assertEqual(sum(item["kind"] == "final" for item in messages), 1)
+        self.assertEqual(messages[-1]["kind"], "status")
+        self.assertEqual(messages[-1]["status"], "completed")
+        self.assertEqual(task["message_count"], len(messages))
+        self.assertEqual(task["projection_version"], 2)
+
+    def test_cancelled_message_timeline_keeps_prior_output_and_terminal_state(self) -> None:
+        self._write_agent(
+            "cancelled-timeline",
+            [
+                _record("2026-08-04T14:00:00Z", "assistant", [{"type": "text", "text": "Partial output"}]),
+                _record(
+                    "2026-08-04T14:00:01Z",
+                    "user",
+                    [{"type": "text", "text": "[Request interrupted by user]"}],
+                ),
+            ],
+        )
+
+        task = build_thread_subagents_payload(self.thread_id, self.root)["tasks"][0]
+        self.assertEqual(task["status"], "cancelled")
+        self.assertTrue(any(item["text"] == "Partial output" for item in task["messages"]))
+        self.assertEqual(task["messages"][-1]["status"], "cancelled")
 
     def test_intermediate_error_does_not_override_successful_final_answer(self) -> None:
         self._write_agent(

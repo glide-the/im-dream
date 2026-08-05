@@ -186,11 +186,11 @@ export default function ModelConfigSection() {
         const payload = (await response.json()) as SystemConfigResponse;
         const config = readSystemConfigResponse(payload);
         if (!active) return;
-        // Apply the backend theme only when it is explicitly configured, so a
-        // local toggle made via the navbar is not stomped by opening Settings.
-        if (config.theme === 'light' || config.theme === 'dark' || config.theme === 'system') {
-          setThemeMode(config.theme);
-        }
+        // Do not apply the persisted backend theme while mounting this section.
+        // Settings sections are route-scoped and may mount/unmount while the
+        // user is navigating; applying it here would unexpectedly change the
+        // document theme just by opening the AI model section. Theme changes
+        // remain explicit through the segmented control below.
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
         setSandboxNetworkMode(isSandboxNetworkMode(config.sandbox_network_mode) ? config.sandbox_network_mode : 'allowlist');

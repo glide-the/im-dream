@@ -69,6 +69,7 @@ import {
   STORY_WORKSPACE_PATHS,
   StoryWorkspaceRouter,
 } from './router/story-workspace';
+import { StoryWorkspaceSettingsPage } from './pages/story-workspace';
 import type { ActiveChatVoice } from './lib/chat-schema';
 import {
   EDITOR_WRITE_COMPLETED_TOOL_CACHE_MS,
@@ -181,7 +182,12 @@ export default function App() {
   const [showNotionConnectorDetail, setShowNotionConnectorDetail] = useState(false);
 
   const openConnectorSettings = useCallback(() => {
-    setCurrentView('settings');
+    window.history.pushState(
+      { inkDreamView: 'story-workspace' },
+      '',
+      '/story-workspace/settings/resources',
+    );
+    setCurrentView('story-workspace');
     setShowNotionConnectorDetail(false);
     setConnectorSettingsFocusNonce((value) => value + 1);
     setChatLandingTab('connector');
@@ -203,6 +209,17 @@ export default function App() {
         '',
         STORY_WORKSPACE_PATHS.dream,
       );
+      setShowNotionConnectorDetail(false);
+      setCurrentView('story-workspace');
+      return;
+    }
+    if (view === 'settings') {
+      window.history.pushState(
+        { inkDreamView: 'story-workspace' },
+        '',
+        STORY_WORKSPACE_PATHS.settings,
+      );
+      setShowNotionConnectorDetail(false);
       setCurrentView('story-workspace');
       return;
     }
@@ -215,12 +232,6 @@ export default function App() {
     }
     setCurrentView(view);
   }, [openConnectorSettings]);
-
-  const handleStoryWorkspaceOpenSettings = useCallback(() => {
-    window.history.pushState({ inkDreamView: 'settings' }, '', '/');
-    setShowNotionConnectorDetail(false);
-    setCurrentView('settings');
-  }, []);
 
   const handleOpenDreamWithDeck = useCallback((deckId: string) => {
     const href = `/story-workspace/dream?deck=${encodeURIComponent(deckId)}`;
@@ -236,7 +247,13 @@ export default function App() {
       }
 
       if (event.state?.inkDreamView === 'settings') {
-        setCurrentView('settings');
+        window.history.replaceState(
+          { inkDreamView: 'story-workspace' },
+          '',
+          STORY_WORKSPACE_PATHS.settings,
+        );
+        setShowNotionConnectorDetail(false);
+        setCurrentView('story-workspace');
         return;
       }
 
@@ -1510,7 +1527,23 @@ export default function App() {
         }}>
           <StoryWorkspaceRouter
             decksContent={storyWorkspaceDeckManager}
-            onOpenSettings={handleStoryWorkspaceOpenSettings}
+            onGlobalNavigate={handleAppViewChange}
+            renderSettings={(section, onNavigate) => (
+              <StoryWorkspaceSettingsPage
+                activeSection={section}
+                connectorSettingsFocusNonce={connectorSettingsFocusNonce}
+                currentLanguage={currentLanguage}
+                isMobile={isMobile}
+                languageCodes={LANGUAGE_CODES}
+                onCloseNotionDetail={closeNotionConnectorDetail}
+                onEnergyBarChange={() => setShowEnergyBar((value) => !value)}
+                onLanguageChange={handleUILanguageChange}
+                onNavigate={onNavigate}
+                onOpenNotionDetail={openNotionConnectorDetail}
+                showEnergyBar={showEnergyBar}
+                showNotionConnectorDetail={showNotionConnectorDetail}
+              />
+            )}
           />
         </div>
       )}

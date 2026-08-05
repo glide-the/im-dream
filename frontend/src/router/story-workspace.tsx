@@ -20,7 +20,10 @@ import {
   StoryWorkspaceReviewDetail,
   type StoryWorkspaceReviewSelection,
 } from '../components/story-workspace/layout/StoryWorkspaceReviewDetail';
-import { StoryWorkspaceSidebar } from '../components/story-workspace/layout/StoryWorkspaceSidebar';
+import {
+  StoryWorkspaceSidebar,
+  type StoryWorkspaceGlobalView,
+} from '../components/story-workspace/layout/StoryWorkspaceSidebar';
 import { useRunDeepLink } from '../hooks/story-workspace';
 import type { WorkflowRun } from '../api/storyWorkspaceApi';
 import {
@@ -32,8 +35,10 @@ import {
   StoryWorkspaceDreamPage,
   StoryWorkspaceExecutionPage,
   StoryWorkspaceScenesPage,
+  StoryWorkspaceSettingsPage,
   StoryWorkspaceStoriesPage,
   StoryWorkspaceSubscriptionPage,
+  storyWorkspaceSettingsSectionForRoute,
 } from '../pages/story-workspace';
 import {
   readStoryWorkspaceRunParam,
@@ -111,6 +116,7 @@ function renderStoryWorkspaceRoute(
   onNavigate: (path: string, notice?: string) => void,
   resolvedDreamRun: WorkflowRun | null,
   decksContent: ReactNode,
+  renderSettings: ((section: ReturnType<typeof storyWorkspaceSettingsSectionForRoute>, onNavigate: (path: string, notice?: string) => void) => ReactNode) | undefined,
 ) {
   const runId = storyWorkspaceDreamResolvedRunId(resolvedDreamRun);
   const initialDeckId = readStoryWorkspaceDeckParam(match.query);
@@ -146,6 +152,22 @@ function renderStoryWorkspaceRoute(
       return <StoryWorkspaceScenesPage onReview={(scene) => onReview({ resourceType: 'scene', resourceId: scene.id })} refreshNonce={refreshNonce} />;
     case 'subscription':
       return <StoryWorkspaceSubscriptionPage />;
+    case 'settings':
+    case 'settings-resources':
+    case 'settings-plugins':
+    case 'settings-model':
+    case 'settings-about':
+      return renderSettings
+        ? renderSettings(storyWorkspaceSettingsSectionForRoute(match.route), onNavigate)
+        : <StoryWorkspaceSettingsPage
+            activeSection={storyWorkspaceSettingsSectionForRoute(match.route)}
+            currentLanguage="en"
+            languageCodes={['en', 'zh']}
+            onEnergyBarChange={() => undefined}
+            onLanguageChange={() => undefined}
+            onNavigate={onNavigate}
+            showEnergyBar
+          />;
     case 'decks':
       return <div className="story-workspace-decks-surface">{decksContent}</div>;
     case 'run-execution':
@@ -172,10 +194,11 @@ function renderStoryWorkspaceRoute(
 
 export interface StoryWorkspaceRouterProps {
   decksContent: ReactNode;
-  onOpenSettings: () => void;
+  onGlobalNavigate?: (view: StoryWorkspaceGlobalView) => void;
+  renderSettings?: (section: ReturnType<typeof storyWorkspaceSettingsSectionForRoute>, onNavigate: (path: string, notice?: string) => void) => ReactNode;
 }
 
-export function StoryWorkspaceRouter({ decksContent, onOpenSettings }: StoryWorkspaceRouterProps) {
+export function StoryWorkspaceRouter({ decksContent, onGlobalNavigate, renderSettings }: StoryWorkspaceRouterProps) {
   const [activeMatch, setActiveMatch] = useState<StoryWorkspaceRouteMatch>(
     () => resolveStoryWorkspacePath(window.location.pathname, window.location.search) ?? DEFAULT_MATCH,
   );
@@ -319,7 +342,7 @@ export function StoryWorkspaceRouter({ decksContent, onOpenSettings }: StoryWork
           collapsed={sidebarCollapsed}
           currentPath={currentPath}
           onNavigate={handleNavigate}
-          onOpenSettings={onOpenSettings}
+          onGlobalNavigate={onGlobalNavigate}
           onToggleCollapse={handleToggleSidebarCollapse}
         />
       )}
@@ -347,6 +370,7 @@ export function StoryWorkspaceRouter({ decksContent, onOpenSettings }: StoryWork
         handleNavigate,
         runDeepLink.run,
         decksContent,
+        renderSettings,
       )}
     </StoryWorkspaceLayout>
   );

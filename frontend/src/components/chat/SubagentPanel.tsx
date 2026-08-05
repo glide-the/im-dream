@@ -4,6 +4,7 @@
 // [Sync] 2026-08-04: task summary entry, chat-row task button, and focused active/completed/ended sidebar.
 // [Sync] 2026-08-05: render the latest result through the shared ChatMarkdown/prose chain.
 // [Sync] 2026-08-05: add a draggable/keyboard resize rail and readable operational typography.
+// [Sync] 2026-08-05: compact task index and conversation-first readonly task detail.
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -14,8 +15,8 @@ import {
   type ThreadSubagentStatus,
   type ThreadSubagentTask,
 } from '../../hooks/useThreadSubagents';
-import ChatMarkdown from './ChatMarkdown';
 import { IconLoader, IconSubagents, IconX } from './Icons';
+import SubagentMessageTimeline from './SubagentMessageTimeline';
 
 const SUBAGENT_REFRESH_INTERVAL_MS = 8000;
 const RECENT_AGENT_LIMIT = 4;
@@ -40,8 +41,8 @@ interface SubagentSidebarProps {
 }
 
 const STATUS_COLORS: Record<ThreadSubagentStatus, string> = {
-  running: '#6ea8fe',
-  completed: '#52c77e',
+  running: 'var(--color-action-link)',
+  completed: 'var(--color-state-success)',
   failed: 'var(--color-state-error)',
   cancelled: 'var(--color-text-muted)',
 };
@@ -123,28 +124,32 @@ function formatDuration(milliseconds: number | null, language?: string): string 
 function TaskRow({ task, focused = false, onSelect }: { task: ThreadSubagentTask; focused?: boolean; onSelect: () => void }) {
   const { t, i18n } = useTranslation();
   const duration = formatDuration(task.durationMs, i18n.language);
+  const status = t(`chat.subagents.status.${task.status}`);
   return (
     <li id={`thread-subagent-task-${task.taskId}`}>
       <button
         type="button"
         onClick={onSelect}
-        aria-label={t('chat.subagents.openTask', { task: task.description })}
+        aria-current={focused ? 'true' : undefined}
+        aria-label={t('chat.subagents.openTaskAria', { task: task.description, status, duration: duration || t('chat.subagents.unknown') })}
         style={{
           width: '100%',
           display: 'flex',
-          alignItems: 'flex-start',
-          gap: '0.8rem',
+          alignItems: 'center',
+          gap: '0.65rem',
           minWidth: 0,
-          padding: '0.9rem',
-          borderRadius: '0.8rem',
+          minHeight: task.summary ? '4.5rem' : '3.75rem',
+          padding: '0.6rem 0.7rem',
+          borderRadius: '0.65rem',
           background: focused ? 'var(--color-bg-hover)' : 'var(--color-bg-paper)',
           border: '1px solid transparent',
-          boxShadow: focused ? 'inset 3px 0 0 var(--color-action-link)' : 'none',
+          boxShadow: focused ? 'inset 2px 0 0 var(--color-action-link)' : 'none',
           color: 'inherit',
           cursor: 'pointer',
           font: 'inherit',
           textAlign: 'left',
-          transition: 'background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease',
+          outlineOffset: '2px',
+          transition: 'background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease',
         }}
         onMouseEnter={(event) => {
           event.currentTarget.style.background = 'var(--color-bg-hover)';
@@ -155,27 +160,19 @@ function TaskRow({ task, focused = false, onSelect }: { task: ThreadSubagentTask
           event.currentTarget.style.borderColor = 'transparent';
         }}
       >
-        <AgentAvatar task={task} size="2rem" />
+        <AgentAvatar task={task} size="1.75rem" />
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', minWidth: 0 }}>
-            <span title={task.description} style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-text-primary)', fontSize: '0.94rem', lineHeight: 1.35, fontWeight: 650 }}>
-              {task.description}
-            </span>
-            <span style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: '0.3rem', color: STATUS_COLORS[task.status], fontSize: '0.74rem', fontWeight: 600 }}>
-              <span style={{ width: '0.42rem', height: '0.42rem', borderRadius: '50%', background: 'currentColor' }} aria-hidden="true" />
-              {t(`chat.subagents.status.${task.status}`)}
-            </span>
-          </div>
-          <div title={task.summary ?? undefined} style={{ marginTop: '0.35rem', color: 'var(--color-text-muted)', fontSize: '0.82rem', lineHeight: 1.55, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-            {task.summary || task.agentType || t('chat.subagents.noSummary')}
-          </div>
+          <div title={task.description} style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-text-primary)', fontSize: '0.86rem', lineHeight: 1.4, fontWeight: 650 }}>{task.description}</div>
+          {task.summary ? <div title={task.summary} style={{ marginTop: '0.2rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--color-text-muted)', fontSize: '0.76rem', lineHeight: 1.45 }}>{task.summary}</div> : null}
         </div>
-        {duration ? (
-          <span style={{ flexShrink: 0, paddingTop: '0.08rem', color: 'var(--color-text-muted)', fontSize: '0.76rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-            {duration}
+        <span style={{ minWidth: '4.4rem', flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.18rem' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', color: STATUS_COLORS[task.status], fontSize: '0.7rem', fontWeight: 650, whiteSpace: 'nowrap' }}>
+            <span style={{ width: '0.38rem', height: '0.38rem', borderRadius: '50%', background: 'currentColor' }} aria-hidden="true" />
+            {status}
           </span>
-        ) : null}
-        <span aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-text-muted)', fontSize: '1.05rem', lineHeight: 1.35 }}>›</span>
+          {duration ? <span style={{ color: 'var(--color-text-muted)', fontSize: '0.68rem', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{duration}</span> : null}
+        </span>
+        <span aria-hidden="true" style={{ flexShrink: 0, color: 'var(--color-text-muted)', fontSize: '0.95rem', lineHeight: 1 }}>›</span>
       </button>
     </li>
   );
@@ -183,10 +180,10 @@ function TaskRow({ task, focused = false, onSelect }: { task: ThreadSubagentTask
 
 function TaskGroup({ title, tasks, emptyLabel, focusedTaskId, onSelect }: { title: string; tasks: ThreadSubagentTask[]; emptyLabel?: string; focusedTaskId?: string | null; onSelect: (taskId: string) => void }) {
   return (
-    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.7rem' }}>
-      <h3 style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.84rem', lineHeight: 1.4, fontWeight: 700, letterSpacing: '0.015em' }}>{title}</h3>
+    <section style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      <h3 style={{ margin: 0, color: 'var(--color-text-secondary)', fontSize: '0.76rem', lineHeight: 1.4, fontWeight: 700, letterSpacing: '0.015em' }}>{title}</h3>
       {tasks.length > 0 ? (
-        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+        <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
           {tasks.map((task) => <TaskRow key={task.taskId} task={task} focused={task.taskId === focusedTaskId} onSelect={() => onSelect(task.taskId)} />)}
         </ul>
       ) : emptyLabel ? (
@@ -211,86 +208,15 @@ function formatDateTime(value: string | null, language?: string): string {
 
 function TaskDetail({ task }: { task: ThreadSubagentTask }) {
   const { t, i18n } = useTranslation();
-  const duration = formatDuration(task.durationMs, i18n.language) || t('chat.subagents.unknown');
-  const startedAt = formatDateTime(task.startedAt, i18n.language) || t('chat.subagents.unknown');
-
+  const legacy = task.projectionVersion < 2 || task.messages.some((message) => message.legacy);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.65rem' }}>
-      <section style={{ padding: '1.2rem 1.25rem', borderRadius: '0.9rem', background: 'var(--color-bg-paper)', border: '1px solid var(--color-border-paper)', boxShadow: '0 1px 0 var(--color-shadow-soft)' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.9rem' }}>
-          <AgentAvatar task={task} size="2.5rem" />
-          <div style={{ minWidth: 0, flex: 1 }}>
-            <h2 style={{ margin: 0, color: 'var(--color-text-primary)', fontSize: '1.12rem', lineHeight: 1.4, fontWeight: 700, letterSpacing: '-0.01em' }}>{task.description}</h2>
-            <div style={{ marginTop: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.4rem', color: STATUS_COLORS[task.status], fontSize: '0.8rem', fontWeight: 650 }}>
-              <span style={{ width: '0.42rem', height: '0.42rem', borderRadius: '50%', background: 'currentColor' }} aria-hidden="true" />
-              {t(`chat.subagents.status.${task.status}`)}
-            </div>
-          </div>
-        </div>
-
-        <dl style={{ margin: '1.15rem 0 0', paddingTop: '1rem', borderTop: '1px solid var(--color-border-paper)', display: 'grid', gridTemplateColumns: 'minmax(6.5rem, auto) minmax(0, 1fr)', gap: '0.6rem 1.1rem', fontSize: '0.84rem', lineHeight: 1.45 }}>
-          <dt style={{ color: 'var(--color-text-muted)', fontWeight: 550 }}>{t('chat.subagents.agentType')}</dt>
-          <dd style={{ margin: 0, color: 'var(--color-text-secondary)', fontWeight: 550, overflowWrap: 'anywhere' }}>{task.agentType}</dd>
-          <dt style={{ color: 'var(--color-text-muted)', fontWeight: 550 }}>{t('chat.subagents.startedAt')}</dt>
-          <dd style={{ margin: 0, color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{startedAt}</dd>
-          <dt style={{ color: 'var(--color-text-muted)', fontWeight: 550 }}>{t('chat.subagents.duration')}</dt>
-          <dd style={{ margin: 0, color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{duration}</dd>
-          {task.spawnDepth != null ? (
-            <>
-              <dt style={{ color: 'var(--color-text-muted)', fontWeight: 550 }}>{t('chat.subagents.spawnDepth')}</dt>
-              <dd style={{ margin: 0, color: 'var(--color-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{task.spawnDepth}</dd>
-            </>
-          ) : null}
-        </dl>
-      </section>
-
-      {task.summary ? (
-        <section>
-          <h3 style={{ margin: '0 0 0.7rem', color: 'var(--color-text-secondary)', fontSize: '0.86rem', lineHeight: 1.4, fontWeight: 700, letterSpacing: '0.015em' }}>{t('chat.subagents.resultTitle')}</h3>
-          <div style={{ padding: '1.1rem 1.15rem', borderRadius: '0.8rem', background: 'var(--color-bg-paper)', border: '1px solid color-mix(in srgb, var(--color-border-paper) 68%, transparent)', color: 'var(--color-text-primary)', fontSize: '0.94rem', lineHeight: 1.72, overflowWrap: 'anywhere' }}>
-            <div className="prose prose-chat">
-              <ChatMarkdown text={task.summary} />
-            </div>
-          </div>
-        </section>
-      ) : null}
-
-      {task.error ? (
-        <section style={{ padding: '1rem', borderRadius: '0.8rem', background: 'color-mix(in srgb, var(--color-state-error) 10%, transparent)', color: 'var(--color-state-error)', fontSize: '0.86rem', lineHeight: 1.6 }}>
-          <strong style={{ display: 'block', marginBottom: '0.35rem' }}>{t('chat.subagents.errorTitle')}</strong>
-          {task.error}
-        </section>
-      ) : null}
-
-      <section>
-        <h3 style={{ margin: '0 0 0.8rem', color: 'var(--color-text-secondary)', fontSize: '0.86rem', lineHeight: 1.4, fontWeight: 700, letterSpacing: '0.015em' }}>{t('chat.subagents.executionTitle')}</h3>
-        {task.activity.length > 0 ? (
-          <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column' }}>
-            {task.activity.map((item, index) => {
-              const timestamp = formatDateTime(item.timestamp, i18n.language);
-              const label = item.kind === 'tool'
-                ? t('chat.subagents.toolActivity', { tool: item.toolName || t('chat.subagents.toolFallback') })
-                : t('chat.subagents.messageActivity');
-              return (
-                <li key={item.id} style={{ position: 'relative', display: 'grid', gridTemplateColumns: '1rem minmax(0, 1fr)', gap: '0.75rem', paddingBottom: index === task.activity.length - 1 ? 0 : '1rem' }}>
-                  {index < task.activity.length - 1 ? <span aria-hidden="true" style={{ position: 'absolute', left: '0.47rem', top: '0.7rem', bottom: 0, width: '1px', background: 'var(--color-border-paper)' }} /> : null}
-                  <span aria-hidden="true" style={{ position: 'relative', zIndex: 1, width: '0.55rem', height: '0.55rem', marginTop: '0.28rem', borderRadius: '50%', background: item.status === 'failed' ? 'var(--color-state-error)' : item.status === 'started' ? 'var(--color-action-link)' : 'var(--color-state-success)', border: '2px solid var(--color-bg-app)', boxSizing: 'content-box' }} />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.9rem', color: 'var(--color-text-secondary)', fontSize: '0.84rem', lineHeight: 1.45, fontWeight: 650 }}>
-                      <span>{label}</span>
-                      {timestamp ? <time style={{ flexShrink: 0, color: 'var(--color-text-muted)', fontSize: '0.72rem', lineHeight: 1.5, fontWeight: 450, fontVariantNumeric: 'tabular-nums' }}>{timestamp}</time> : null}
-                    </div>
-                    {item.text ? <p style={{ margin: '0.3rem 0 0', color: 'var(--color-text-muted)', fontSize: '0.82rem', lineHeight: 1.6, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{item.text}</p> : null}
-                    {item.kind === 'tool' ? <div style={{ marginTop: '0.22rem', color: item.status === 'failed' ? 'var(--color-state-error)' : 'var(--color-text-muted)', fontSize: '0.74rem', lineHeight: 1.45 }}>{t(`chat.subagents.activityStatus.${item.status}`)}</div> : null}
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-        ) : (
-          <div style={{ padding: '0.95rem 1rem', borderRadius: '0.75rem', background: 'var(--color-bg-paper)', color: 'var(--color-text-muted)', fontSize: '0.84rem', lineHeight: 1.55 }}>{t('chat.subagents.noActivity')}</div>
-        )}
-      </section>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--color-border-paper)', color: 'var(--color-text-muted)', fontSize: '0.72rem', lineHeight: 1.45 }}>
+        <span>{t('chat.subagents.timeline.messageCount', { count: task.messageCount })}</span>
+        {task.startedAt ? <time>{formatDateTime(task.startedAt, i18n.language)}</time> : null}
+      </div>
+      <SubagentMessageTimeline messages={task.messages} taskStatus={task.status} legacy={legacy} truncated={task.messagesTruncated} />
+      {task.status === 'running' ? <div style={{ padding: '0.7rem 0', color: 'var(--color-action-link)', fontSize: '0.78rem' }}>{t('chat.subagents.timeline.running')}</div> : null}
     </div>
   );
 }
@@ -387,6 +313,10 @@ export function SubagentToolButton({
     durationMs: null,
     error: null,
     activity: [],
+    messages: [],
+    messageCount: 0,
+    messagesTruncated: false,
+    projectionVersion: 1,
   };
   const displayTask = task ?? fallbackTask;
   const statusLabel = task
@@ -439,7 +369,7 @@ export function SubagentToolButton({
 }
 
 export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: SubagentSidebarProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const state = useThreadSubagents(threadId);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(readInitialSidebarWidth);
@@ -655,24 +585,32 @@ export function SubagentSidebar({ threadId, open, onClose, focusToolCallId }: Su
             />
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '3.75rem', padding: '0.9rem 1.25rem', borderBottom: '1px solid var(--color-border-paper)', boxSizing: 'border-box' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', color: 'var(--color-text-primary)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: '3.75rem', padding: '0.65rem 0.85rem 0.65rem 1rem', borderBottom: '1px solid var(--color-border-paper)', boxSizing: 'border-box', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', color: 'var(--color-text-primary)', minWidth: 0, flex: 1 }}>
               {selectedTask ? (
-                <button type="button" onClick={() => setSelectedTaskId(null)} aria-label={t('chat.subagents.backToTasks')} title={t('chat.subagents.backToTasks')} style={{ width: '1.8rem', height: '1.8rem', margin: '-0.35rem 0', border: 'none', borderRadius: '0.45rem', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center', fontSize: '1.15rem' }}>←</button>
+                <button type="button" onClick={() => setSelectedTaskId(null)} aria-label={t('chat.subagents.backToTasks')} title={t('chat.subagents.backToTasks')} style={{ width: '2.2rem', height: '2.2rem', flexShrink: 0, border: 'none', borderRadius: '0.45rem', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', display: 'grid', placeItems: 'center', fontSize: '1.15rem' }}>←</button>
               ) : <IconSubagents style={{ width: '1.15rem', height: '1.15rem' }} />}
-              <span style={{ fontSize: '0.96rem', lineHeight: 1.4, fontWeight: 700 }}>{selectedTask ? t('chat.subagents.detailTitle') : t('chat.subagents.title')}</span>
+              {selectedTask ? <AgentAvatar task={selectedTask} size="1.8rem" /> : null}
+              <span style={{ minWidth: 0, flex: 1 }}>
+                <span title={selectedTask?.description} style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: selectedTask ? '0.88rem' : '0.96rem', lineHeight: 1.35, fontWeight: 700 }}>{selectedTask?.description ?? t('chat.subagents.title')}</span>
+                {selectedTask ? <span style={{ display: 'block', marginTop: '0.1rem', color: 'var(--color-text-muted)', fontSize: '0.68rem', lineHeight: 1.3 }}>{selectedTask.agentType}</span> : null}
+              </span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-              <button type="button" onClick={() => void hydrateThreadSubagents(threadId)} aria-label={t('chat.subagents.refresh')} title={t('chat.subagents.refresh')} style={{ width: '1.8rem', height: '1.8rem', border: 'none', borderRadius: '0.45rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
+              {selectedTask ? <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.08rem', marginRight: '0.15rem', color: STATUS_COLORS[selectedTask.status], fontSize: '0.68rem', fontWeight: 650, whiteSpace: 'nowrap' }}>
+                <span>{t(`chat.subagents.status.${selectedTask.status}`)}</span>
+                <span style={{ color: 'var(--color-text-muted)', fontVariantNumeric: 'tabular-nums', fontWeight: 500 }}>{formatDuration(selectedTask.durationMs, i18n.language) || t('chat.subagents.unknown')}</span>
+              </span> : null}
+              <button type="button" onClick={() => void hydrateThreadSubagents(threadId)} aria-label={t('chat.subagents.refresh')} title={t('chat.subagents.refresh')} style={{ width: '2.2rem', height: '2.2rem', border: 'none', borderRadius: '0.45rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
                 {state.loading ? <IconLoader style={{ width: '0.95rem', height: '0.95rem' }} /> : '↻'}
               </button>
-              <button type="button" onClick={onClose} aria-label={t('common.close', { defaultValue: 'Close' })} style={{ width: '1.8rem', height: '1.8rem', border: 'none', borderRadius: '0.45rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
+              <button type="button" onClick={onClose} aria-label={t('common.close', { defaultValue: 'Close' })} style={{ width: '2.2rem', height: '2.2rem', border: 'none', borderRadius: '0.45rem', background: 'transparent', color: 'var(--color-text-muted)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
                 <IconX style={{ width: '1rem', height: '1rem' }} />
               </button>
             </div>
           </div>
 
-          <div style={{ flex: 1, overflowY: 'auto', padding: '1.35rem 1.4rem 1.75rem', display: 'flex', flexDirection: 'column', gap: '1.75rem' }} aria-live="polite">
+          <div data-subagent-view={selectedTask ? 'detail' : 'list'} style={{ flex: 1, overflowY: 'auto', padding: selectedTask ? '0.9rem 1rem 1.5rem' : '1rem 1rem 1.5rem', display: 'flex', flexDirection: 'column', gap: selectedTask ? '1rem' : '1.25rem' }}>
             {state.error ? (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', padding: '0.7rem 0.8rem', borderRadius: '0.7rem', background: 'color-mix(in srgb, var(--color-state-error) 10%, transparent)', color: 'var(--color-state-error)', fontSize: '0.78rem' }}>
                 <span>{t('chat.subagents.unavailable')}</span>

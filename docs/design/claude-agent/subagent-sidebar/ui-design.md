@@ -1,5 +1,57 @@
 # 「子智能体任务」高保真 UI 设计与 React 映射规格
 
+> 2026-08-05 视觉更新：采用 “Quiet Execution Ledger / 静默执行账页” 方向。减少卡片嵌套、边框、重复标题和装饰，详情以消息内容为视觉主体；以下密度与组件规范优先于后文旧详情卡规格。
+
+## 0. 对话详情视觉规范
+
+### 0.1 密度与排版
+
+| 元素 | 规格 |
+| --- | --- |
+| 侧栏 | 默认 480px，最小 352px，最大 768px；主 Chat 至少 360px |
+| 列表头 | 56px 高，左右 16px |
+| 任务项 | 无摘要约 64px，有摘要约 80px；10px 12px 内距，4px 项间距 |
+| 详情头 | 桌面约 64px，窄栏最小 72px；16–20px 横向内距 |
+| 详情标题 | 18/24px，650；窄栏最多视觉两行 |
+| 列表标题 | 14/20px，620，单行省略 |
+| 消息正文 | 15/25px，400；系统/工具摘要 13/20px |
+| 元信息 | 12/16px，500；耗时使用 tabular nums |
+| 点击目标 | 至少 44×44 CSS px |
+
+### 0.2 视觉层级
+
+- 背景使用 `--color-bg-app`；任务项与用户派发内容使用 `--color-bg-paper`；工具/产物使用现有 surface token。
+- 默认不使用投影；以留白、1px `--color-border-paper` 分隔和排版层级组织内容。
+- Agent 头像沿用稳定 hue fallback，不复制参考图品牌花形。
+- running/completed/failed/cancelled 使用现有状态 token，同时显示图形与本地化文本。
+- 最终回复不包裹额外“大结果卡”，直接采用 assistant 消息正文层级；复制等只读操作弱化到消息下方。
+
+### 0.3 组件结构
+
+```text
+SubagentPanel
+├── ResizeRail（保留现有能力）
+├── TaskIndex
+│   └── CompactTaskRow
+└── ReadonlyTaskDetail
+    ├── ReadonlyDetailHeader
+    ├── ProjectionNotice
+    └── ReadonlyMessageTimeline
+        ├── TaskDispatchMessage
+        ├── AssistantTextMessage → ChatMarkdown
+        ├── ReadonlyToolEvent
+        ├── StatusNode
+        ├── FinalMessage → ChatMarkdown
+        └── SystemNotice
+```
+
+### 0.4 动效与主题
+
+- hover/focus 120–160ms；侧栏宽度沿用 250ms，拖动时禁用 transition；新消息只做轻微 opacity/translateY，不对旧历史播放。
+- `prefers-reduced-motion` 下移除位移/脉冲，仅保留即时状态变化。
+- 深浅主题只使用项目 token 和 `color-mix`；不得写死白底/黑字或高饱和大状态块。
+- 长 Prompt/工具结果展开必须有上限；展开后的内容随同一侧栏滚动，不能产生纵向内滚动。
+
 ## 1. 视觉方向
 
 本功能采用“超感官极简主义（Ultra-Sensory Minimalism）”：保留参考图中宽松的纵向留白、低对比深浅层次、彩色代理头像和一眼可读的状态分组，同时服从 Ink & Memory 现有纸张色设计系统。它是聊天的辅助信息层，不应做成高饱和仪表盘，也不应引入与现有界面冲突的玻璃拟态、外部图标字体或整页 Tailwind 风格。

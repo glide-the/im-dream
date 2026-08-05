@@ -11,7 +11,18 @@
 //                    builders stay byte-identical with the surface-link deep
 //                    links (Task 4 handoff note).
 
-export type StoryWorkspaceStaticRoute = 'dream' | 'stories' | 'characters' | 'scenes' | 'decks' | 'subscription';
+export type StoryWorkspaceStaticRoute =
+  | 'dream'
+  | 'stories'
+  | 'characters'
+  | 'scenes'
+  | 'decks'
+  | 'subscription'
+  | 'settings'
+  | 'settings-resources'
+  | 'settings-plugins'
+  | 'settings-model'
+  | 'settings-about';
 
 export type StoryWorkspaceParameterizedRoute = 'episode-review' | 'run-execution' | 'dream-legacy';
 
@@ -24,6 +35,11 @@ export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = 
   scenes: '/story-workspace/scenes',
   decks: '/story-workspace/decks',
   subscription: '/story-workspace/subscription',
+  settings: '/story-workspace/settings',
+  'settings-resources': '/story-workspace/settings/resources',
+  'settings-plugins': '/story-workspace/settings/plugins',
+  'settings-model': '/story-workspace/settings/model',
+  'settings-about': '/story-workspace/settings/about',
 };
 
 /**
@@ -259,6 +275,12 @@ export function storyWorkspaceAllowsLegacyReviewPanel(
     || match.route === 'episode-review'
     || match.route === 'run-execution'
     || match.route === 'decks'
+    || match.route === 'subscription'
+    || match.route === 'settings'
+    || match.route === 'settings-resources'
+    || match.route === 'settings-plugins'
+    || match.route === 'settings-model'
+    || match.route === 'settings-about'
   ) return false;
   return storyWorkspaceDreamStageForRoute(match) === null;
 }

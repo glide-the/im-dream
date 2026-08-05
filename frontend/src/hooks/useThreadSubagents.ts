@@ -18,6 +18,24 @@ export interface ThreadSubagentActivity {
   toolName: string | null;
 }
 
+export type ThreadSubagentMessageKind = 'task' | 'assistant' | 'tool_call' | 'tool_result' | 'status' | 'final' | 'system';
+
+export interface ThreadSubagentMessage {
+  id: string;
+  sequence: number | null;
+  kind: ThreadSubagentMessageKind;
+  timestamp: string | null;
+  text: string | null;
+  status: string | null;
+  toolName: string | null;
+  toolCallId: string | null;
+  input: string | null;
+  output: string | null;
+  redacted: boolean;
+  truncated: boolean;
+  legacy: boolean;
+}
+
 export interface ThreadSubagentTask {
   taskId: string;
   agentId: string;
@@ -32,6 +50,10 @@ export interface ThreadSubagentTask {
   durationMs: number | null;
   error: string | null;
   activity: ThreadSubagentActivity[];
+  messages: ThreadSubagentMessage[];
+  messageCount: number;
+  messagesTruncated: boolean;
+  projectionVersion: number;
 }
 
 export interface ThreadSubagentCounts {
@@ -71,6 +93,23 @@ interface ThreadSubagentApiTask {
     text: string | null;
     tool_name: string | null;
   }>;
+  messages?: Array<{
+    id: string;
+    sequence?: number | null;
+    kind: string;
+    timestamp: string | null;
+    text: string | null;
+    status: string | null;
+    tool_name: string | null;
+    tool_call_id: string | null;
+    input: string | null;
+    output: string | null;
+    redacted?: boolean;
+    truncated?: boolean;
+  }>;
+  message_count?: number;
+  messages_truncated?: boolean;
+  projection_version?: number;
 }
 
 interface ThreadSubagentApiResponse {
@@ -117,9 +156,110 @@ function subscribeThreadSubagents(threadId: string, listener: () => void): () =>
   };
 }
 
-function normalizeTask(task: ThreadSubagentApiTask): ThreadSubagentTask | null {
+const MESSAGE_KINDS = new Set<ThreadSubagentMessageKind>(['task', 'assistant', 'tool_call', 'tool_result', 'status', 'final', 'system']);
+
+function normalizeMessage(item: NonNullable<ThreadSubagentApiTask['messages']>[number]): ThreadSubagentMessage | null {
+  if (!item || typeof item.id !== 'string' || !item.id) return null;
+  const rawKind = typeof item.kind === 'string' ? item.kind : 'system';
+  const kind = MESSAGE_KINDS.has(rawKind as ThreadSubagentMessageKind)
+    ? rawKind as ThreadSubagentMessageKind
+    : 'system';
+  return {
+    id: item.id,
+    sequence: typeof item.sequence === 'number' && Number.isFinite(item.sequence) ? item.sequence : null,
+    kind,
+    timestamp: typeof item.timestamp === 'string' ? item.timestamp : null,
+    text: kind === 'system' && rawKind !== 'system'
+      ? rawKind
+      : typeof item.text === 'string' ? item.text : null,
+    status: typeof item.status === 'string' ? item.status : null,
+    toolName: typeof item.tool_name === 'string' ? item.tool_name : null,
+    toolCallId: typeof item.tool_call_id === 'string' ? item.tool_call_id : null,
+    input: typeof item.input === 'string' ? item.input : null,
+    output: typeof item.output === 'string' ? item.output : null,
+    redacted: item.redacted === true,
+    truncated: item.truncated === true,
+    legacy: false,
+  };
+}
+
+export function normalizeThreadSubagentMessages(
+  messages: ThreadSubagentApiTask['messages'],
+): ThreadSubagentMessage[] {
+  if (!Array.isArray(messages)) return [];
+  const byId = new Map<string, { message: ThreadSubagentMessage; inputIndex: number }>();
+  messages.forEach((item, inputIndex) => {
+    const message = normalizeMessage(item);
+    if (message) byId.set(message.id, { message, inputIndex });
+  });
+  return Array.from(byId.values())
+    .sort((left, right) => {
+      const leftSequence = left.message.sequence;
+      const rightSequence = right.message.sequence;
+      if (leftSequence != null || rightSequence != null) {
+        if (leftSequence == null) return 1;
+        if (rightSequence == null) return -1;
+        if (leftSequence !== rightSequence) return leftSequence - rightSequence;
+      }
+      const leftTime = Date.parse(left.message.timestamp ?? '');
+      const rightTime = Date.parse(right.message.timestamp ?? '');
+      if (Number.isFinite(leftTime) || Number.isFinite(rightTime)) {
+        if (!Number.isFinite(leftTime)) return 1;
+        if (!Number.isFinite(rightTime)) return -1;
+        if (leftTime !== rightTime) return leftTime - rightTime;
+      }
+      const idOrder = left.message.id.localeCompare(right.message.id);
+      return idOrder || left.inputIndex - right.inputIndex;
+    })
+    .map(({ message }) => message);
+}
+
+function buildLegacyMessages(task: ThreadSubagentApiTask): ThreadSubagentMessage[] {
+  const messages: ThreadSubagentMessage[] = [];
+  for (const [index, item] of (task.activity ?? []).entries()) {
+    if (!item || typeof item.id !== 'string') continue;
+    if (item.kind === 'message' && typeof item.text === 'string' && item.text === task.summary) continue;
+    messages.push({
+      id: `legacy-${item.id}`,
+      sequence: index + 1,
+      kind: item.kind === 'tool' ? (item.status === 'started' ? 'tool_call' : 'tool_result') : 'assistant',
+      timestamp: typeof item.timestamp === 'string' ? item.timestamp : null,
+      text: item.kind === 'message' && typeof item.text === 'string' ? item.text : null,
+      status: item.status,
+      toolName: typeof item.tool_name === 'string' ? item.tool_name : null,
+      toolCallId: null,
+      input: null,
+      output: null,
+      redacted: false,
+      truncated: false,
+      legacy: true,
+    });
+  }
+  if (typeof task.summary === 'string' && task.summary) {
+    messages.push({
+      id: `legacy-summary-${task.task_id}`,
+      sequence: messages.length + 1,
+      kind: task.status === 'completed' ? 'final' : 'assistant',
+      timestamp: typeof task.finished_at === 'string' ? task.finished_at : null,
+      text: task.summary,
+      status: task.status,
+      toolName: null,
+      toolCallId: null,
+      input: null,
+      output: null,
+      redacted: false,
+      truncated: false,
+      legacy: true,
+    });
+  }
+  return messages;
+}
+
+export function normalizeThreadSubagentTask(task: ThreadSubagentApiTask): ThreadSubagentTask | null {
   if (!task || typeof task.task_id !== 'string' || !task.task_id) return null;
   if (!['running', 'completed', 'failed', 'cancelled'].includes(task.status)) return null;
+  const messages = normalizeThreadSubagentMessages(task.messages);
+  const normalizedMessages = messages.length > 0 ? messages : buildLegacyMessages(task);
   return {
     taskId: task.task_id,
     agentId: task.agent_id || task.task_id,
@@ -148,6 +288,10 @@ function normalizeTask(task: ThreadSubagentApiTask): ThreadSubagentTask | null {
           }];
         })
       : [],
+    messages: normalizedMessages,
+    messageCount: typeof task.message_count === 'number' ? task.message_count : normalizedMessages.length,
+    messagesTruncated: task.messages_truncated === true,
+    projectionVersion: typeof task.projection_version === 'number' ? task.projection_version : 1,
   };
 }
 
@@ -179,7 +323,7 @@ export function hydrateThreadSubagents(threadId: string): Promise<void> {
       if (!response.ok) throw new Error(`Subagent tasks unavailable (${response.status})`);
       const payload = (await response.json()) as ThreadSubagentApiResponse;
       const tasks = Array.isArray(payload.tasks)
-        ? payload.tasks.map(normalizeTask).filter((task): task is ThreadSubagentTask => task !== null)
+        ? payload.tasks.map(normalizeThreadSubagentTask).filter((task): task is ThreadSubagentTask => task !== null)
         : [];
       const counts = payload.counts && typeof payload.counts === 'object'
         ? {

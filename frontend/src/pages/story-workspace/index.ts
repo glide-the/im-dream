@@ -12,3 +12,9 @@ export {
 export { StoryWorkspaceScenesPage } from './StoryWorkspaceScenesPage';
 export { StoryWorkspaceStoriesPage } from './StoryWorkspaceStoriesPage';
 export { StoryWorkspaceSubscriptionPage } from './StoryWorkspaceSubscriptionPage';
+export {
+  StoryWorkspaceSettingsPage,
+  storyWorkspaceSettingsSectionForRoute,
+  type StoryWorkspaceSettingsPageProps,
+  type StoryWorkspaceSettingsSection,
+} from './StoryWorkspaceSettingsPage';
