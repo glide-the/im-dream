@@ -935,6 +935,13 @@ _STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST = (
         r"(?<![A-Za-z0-9])/(?:etc)/(?:passwd|shadow)(?![A-Za-z0-9])",
         re.IGNORECASE,
     ),
+    re.compile(r"(?<![A-Za-z0-9_])\.\.?/[^\s]+"),
+    re.compile(
+        r"(?:^|[\r\n;&|])\s*(?:[$>#]\s*)?"
+        r"(?:git|python(?:3(?:\.\d+)*)?|npx|rm|sudo|node|bash|sh)\b"
+        r"\s+(?:--?[A-Za-z0-9]|[A-Za-z0-9_./@])",
+        re.IGNORECASE,
+    ),
     re.compile(
         r"\b(?:process\.)?env(?:\s*\||\s*\[|\.)|\bprintenv\b|"
         r"\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|SECRET|CREDENTIALS?)\s*=",

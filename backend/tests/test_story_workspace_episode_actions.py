@@ -1202,6 +1202,54 @@ def test_guidance_safety_matrix_rejects_commands_secrets_and_sensitive_paths(
         )
 
 
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        "git status",
+        "python scripts/rewrite.py",
+        "npx tsc -b",
+        "rm -rf ./renders",
+        "sudo apt update",
+        "node scripts/build.js",
+        "bash scripts/deploy.sh",
+        "sh ./scripts/check.sh",
+        "./scripts/render.sh",
+        "../private/credentials.txt",
+    ],
+)
+def test_guidance_rejects_shell_command_shapes_and_relative_paths(
+    guidance: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        StoryWorkspaceEpisodeActionContinueCommand(
+            episodeId=EPISODE_ID,
+            action="write_script",
+            idempotencyKey="command-boundary",
+            userGuidance=guidance,
+        )
+
+
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        "让角色把 git、python 和 node 当作技术隐喻，不要呈现任何命令。",
+        "对白里可以提到 bash 与 sh 的名称，但语气要自然。",
+        "以 rm 和 sudo 作为误听的词梗，保持克制。",
+        "Npx 是角色随手写下的三个字母。",
+    ],
+)
+def test_guidance_allows_natural_language_with_command_keywords(
+    guidance: str,
+) -> None:
+    command = StoryWorkspaceEpisodeActionContinueCommand(
+        episodeId=EPISODE_ID,
+        action="write_script",
+        idempotencyKey="natural-language",
+        userGuidance=guidance,
+    )
+    assert command.user_guidance == guidance
+
+
 def test_binding_recovery_direction_matches_public_action_semantics() -> None:
     from story_workspace.contracts import StoryWorkspaceEpisodeBindingRecovery
 
@@ -1216,6 +1264,47 @@ def test_binding_recovery_direction_matches_public_action_semantics() -> None:
     )
     assert unbound.can_dispatch is True
     assert bound.can_dispatch is False
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        StoryWorkspaceEpisodeReviewScope.SCRIPT,
+        StoryWorkspaceEpisodeReviewScope.FULL_CHAIN,
+    ],
+)
+@pytest.mark.parametrize("verdict", ["CONDITIONAL_APPROVAL", "BLOCKED"])
+def test_early_script_review_requires_current_approved_verdict(
+    scope: StoryWorkspaceEpisodeReviewScope,
+    verdict: str,
+) -> None:
+    resolver = StoryWorkspaceEpisodeNextActionResolver()
+    surface = _surface(
+        {"episode-outline.md", "script.md", "review-report.md"},
+        review_scope=scope,
+        review_source_revisions=[
+            SimpleNamespace(
+                source_artifact="script.md",
+                source_revision="sha256:" + "2" * 64,
+            )
+        ],
+    )
+    surface.auxiliary.review.overall_verdict = verdict
+
+    projected = resolver.project(
+        surface,
+        StoryWorkspaceEpisodeWorkflowFile(
+            workflow_run_id=RUN_ID,
+            episode_uid=EPISODE_ID,
+            revision=0,
+            completions=[],
+            updated_at=datetime.now(UTC),
+        ),
+    ).next_action
+    legacy = resolver.resolve(surface, _action_facts())
+
+    assert projected.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+    assert legacy.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
 
 
 def test_revisioned_workflow_facts_cas_is_idempotent_and_not_launch_metadata(
@@ -1309,7 +1398,7 @@ def test_full_chain_requires_current_approved_report_and_invalid_artifact_blocks
             updated_at=datetime.now(UTC),
         )
     conditional = resolver.project(base, facts).next_action
-    assert conditional.action is StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN
+    assert conditional.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
 
     base.auxiliary.review.overall_verdict = "APPROVED"
     base.auxiliary.review.source_revisions.append(

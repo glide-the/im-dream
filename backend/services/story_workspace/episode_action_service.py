@@ -724,11 +724,7 @@ class StoryWorkspaceEpisodeNextActionResolver:
                     StoryWorkspaceEpisodeReviewScope.FULL_CHAIN,
                 }
                 and cls._reviewed_revision(review, "script.md") == script_revision
-                and (
-                    getattr(review, "scope", None)
-                    is StoryWorkspaceEpisodeReviewScope.FULL_CHAIN
-                    or getattr(review, "overall_verdict", None) == "APPROVED"
-                )
+                and getattr(review, "overall_verdict", None) == "APPROVED"
             )
             if not script_review_current:
                 resolution = blocked_or_ready(
@@ -931,6 +927,7 @@ class StoryWorkspaceEpisodeNextActionResolver:
             }
             and script_revision is not None
             and reviewed_script_revision == script_revision
+            and getattr(review, "overall_verdict", None) == "APPROVED"
         )
         if not script_review_is_current:
             return self._resolution(
