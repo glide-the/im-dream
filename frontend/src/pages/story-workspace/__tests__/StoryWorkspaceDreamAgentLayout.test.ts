@@ -29,6 +29,16 @@ test('run-bound Dream keeps its full Agent history inside the editor rail, not i
   expect(PAGE.match(/<StoryWorkspaceDreamAgentPanel/g)).toHaveLength(1);
 });
 
+test('Agent previews and Dream content controls switch one owned editor section', () => {
+  expect(PAGE).toContain("type DreamRightSection = 'content' | 'agent'");
+  expect(PAGE).toContain("const [rightSection, setRightSection] = useState<DreamRightSection>('content')");
+  expect(PAGE).toContain("const agentPanelOpen = rightSection === 'agent'");
+  expect(PAGE).toContain("setRightSection('agent')");
+  expect(PAGE).toContain('const showDreamContent =');
+  expect(PAGE.match(/showDreamContent\(/g)?.length ?? 0).toBeGreaterThanOrEqual(2);
+  expect(PAGE).toContain("aria-current={selected && rightSection === 'content' || undefined}");
+});
+
 test('masthead activity is a safe Dream Agent preview trigger, never static live lifecycle copy', () => {
   expect(PAGE).toContain('className="story-workspace-dream__activity"');
   expect(PAGE).toContain("onClick={() => openDreamAgent('masthead')}");
@@ -45,6 +55,19 @@ test('Dream rail and inline panel share one stable controls target', () => {
   expect(PAGE).toContain('aria-controls={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}');
 });
 
+test('explicit panel collapse restores Agent trigger focus without stealing content-control focus', () => {
+  expect(PANEL).toContain('const closePanel = () =>');
+  expect(PANEL).toContain('requestAnimationFrame(() => restoreFocusRef.current?.focus())');
+  expect(PANEL).toContain('onClick={closePanel}');
+  expect(PANEL).not.toContain('if (wasOpenRef.current && !isOpen)');
+});
+
+test('hidden Agent panel cannot participate in the content section layout', () => {
+  expect(PANEL).toContain('hidden={!isOpen}');
+  expect(CSS).toContain('.story-workspace-dream-agent-panel[hidden]');
+  expect(CSS).toMatch(/\.story-workspace-dream-agent-panel\[hidden\]\s*{\s*display:\s*none;/);
+});
+
 test('rail is a named button and dialog has Escape focus return plus narrow modal semantics', () => {
   expect(RAIL).toContain('aria-label={`打开 Dream Agent');
   expect(DIALOG).toContain("event.key === 'Escape'");
@@ -58,6 +81,13 @@ test('rail is a named button and dialog has Escape focus return plus narrow moda
   expect(DIALOG).toContain('Dream Agent 正在执行');
   expect(DIALOG).toContain('Dream Agent 已完成本轮输出');
   expect(DIALOG).toContain('aria-hidden="true"');
+});
+
+test('rail uses its whole preview as the action without duplicate opening copy', () => {
+  expect(RAIL).toContain('<span>Dream Agent · {deckName}</span>');
+  expect(RAIL).not.toContain('· {workflowName} · {pluginVersion}');
+  expect(RAIL).not.toContain('story-workspace-dream-agent-rail__open');
+  expect(CSS).not.toContain('.story-workspace-dream-agent-rail__open');
 });
 
 test('rail stays silent, while dialog owns the throttled announcement and mobile focus cycles in both directions', () => {

@@ -7,8 +7,6 @@ import type { StoryWorkspaceDreamAgentViewModel } from '../../../hooks/story-wor
 export interface StoryWorkspaceDreamAgentRailProps {
   readonly agent: StoryWorkspaceDreamAgentViewModel;
   readonly deckName: string;
-  readonly workflowName: string;
-  readonly pluginVersion: string;
   readonly runId: string;
   readonly stageLine: string;
   readonly runtimeSnapshotId: string | null;
@@ -29,7 +27,7 @@ function storyWorkspaceDreamAgentStatus(agent: StoryWorkspaceDreamAgentViewModel
 }
 
 export function StoryWorkspaceDreamAgentRail({
-  agent, deckName, workflowName, pluginVersion, runId, stageLine, runtimeSnapshotId, runtimeLockId, controlsId, isOpen, onOpen, triggerRef,
+  agent, deckName, runId, stageLine, runtimeSnapshotId, runtimeLockId, controlsId, isOpen, onOpen, triggerRef,
 }: StoryWorkspaceDreamAgentRailProps) {
   const assistant = agent.snapshot?.messages.filter((message) => message.role === 'assistant').slice(-3) ?? [];
   const preview = agent.streamText || assistant.at(-1)?.text;
@@ -46,8 +44,7 @@ export function StoryWorkspaceDreamAgentRail({
         type="button"
       >
         <span className="story-workspace-dream-agent-rail__context">
-          <span>{deckName} · {workflowName} · {pluginVersion}</span>
-          <small>Dream · Run …{runId.slice(-6)}</small>
+          <span>Dream Agent · {deckName}</span>
         </span>
         <span className="story-workspace-dream-agent-rail__status">
           <span aria-hidden="true" className="story-workspace-dream-agent-rail__mark" />
@@ -58,7 +55,6 @@ export function StoryWorkspaceDreamAgentRail({
           {preview || (agent.isLoading ? '正在读取 Dream Agent 消息…' : 'Dream Agent 的回复会显示在这里。')}
         </span>
         <span className="story-workspace-dream-agent-rail__meta">{stageLine}</span>
-        <span className="story-workspace-dream-agent-rail__open">打开 Dream Agent <span aria-hidden="true">→</span></span>
       </button>
       <details className="story-workspace-dream-agent-rail__details">
         <summary>技术详情</summary>

@@ -304,8 +304,8 @@
 .story-workspace-dream-agent-rail__trigger {
   display: grid;
   width: 100%;
-  gap: 8px;
-  padding: 15px 4px 16px;
+  gap: 6px;
+  padding: 13px 4px 14px;
   color: var(--dream-body);
   background: transparent;
   border: 0;
@@ -340,9 +340,7 @@
   white-space: nowrap;
 }
 
-.story-workspace-dream-agent-rail__context small,
-.story-workspace-dream-agent-rail__meta,
-.story-workspace-dream-agent-rail__open {
+.story-workspace-dream-agent-rail__meta {
   color: var(--dream-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 9px;
@@ -391,11 +389,6 @@
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
-}
-
-.story-workspace-dream-agent-rail__open {
-  color: var(--dream-action);
-  font-weight: 700;
 }
 
 .story-workspace-dream-agent-dialog {
@@ -458,6 +451,7 @@
 .story-workspace-dream-agent-dialog__status b { display: inline-grid; width: 14px; height: 14px; place-items: center; color: var(--dream-action); font-size: 13px; }
 
 .story-workspace-dream-agent-panel { display: grid; min-height: 0; grid-template-rows: auto minmax(120px, 1fr) auto; border-top: 1px solid var(--dream-rule); }
+.story-workspace-dream-agent-panel[hidden] { display: none; }
 .story-workspace-dream-agent-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid color-mix(in srgb, var(--dream-rule) 74%, transparent); }
 .story-workspace-dream-agent-panel > header p, .story-workspace-dream-agent-panel small, .story-workspace-dream-agent-panel form label > span { margin: 0 0 4px; color: var(--dream-muted); font-family: ui-monospace, monospace; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
 .story-workspace-dream-agent-panel > header strong { color: var(--dream-ink); font-family: Georgia, serif; font-size: 16px; font-weight: 500; }
@@ -1013,10 +1007,9 @@
   .story-workspace-dream__editor > .story-workspace-dream-agent-rail { display: none; }
   .story-workspace-dream-agent-panel__history { max-height: 42dvh; }
   .story-workspace-dream-agent-rail { margin: -4px 0 22px; }
-  .story-workspace-dream-agent-rail__trigger { grid-template-columns: minmax(0, 1fr) auto; }
+  .story-workspace-dream-agent-rail__trigger { grid-template-columns: minmax(0, 1fr); }
   .story-workspace-dream-agent-rail__preview,
   .story-workspace-dream-agent-rail__meta { grid-column: 1 / -1; }
-  .story-workspace-dream-agent-rail__open { align-self: end; justify-self: end; }
   .story-workspace-dream-agent-dialog { position: fixed; inset: auto 8px 8px; width: auto; max-height: min(88dvh, 760px); min-height: min(520px, 82dvh); }
   .story-workspace-dream__confirmation { position: fixed; right: 0; bottom: 0; left: 0; min-height: 60px; gap: 12px; padding: 9px 18px; }
   .story-workspace-dream__confirmation > div:first-child { min-width: 0; }

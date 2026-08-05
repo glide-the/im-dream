@@ -59,6 +59,7 @@ const STAGE_LABELS: Record<StoryWorkspaceDreamStage, {
 };
 
 type DreamSelection = { stage: StoryWorkspaceDreamStage; entityId: string };
+type DreamRightSection = 'content' | 'agent';
 
 export interface StoryWorkspaceDreamPageProps {
   initialDeckId?: string | null;
@@ -123,7 +124,8 @@ export function StoryWorkspaceDreamPage({
   const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>(initialStage);
   const [selection, setSelection] = useState<DreamSelection | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
-  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const [rightSection, setRightSection] = useState<DreamRightSection>('content');
+  const agentPanelOpen = rightSection === 'agent';
   const mastheadAgentTriggerRef = useRef<HTMLButtonElement>(null);
   const desktopAgentTriggerRef = useRef<HTMLButtonElement>(null);
   const mobileAgentTriggerRef = useRef<HTMLButtonElement>(null);
@@ -163,7 +165,7 @@ export function StoryWorkspaceDreamPage({
     setSelection(null);
     setActiveStage(initialStage);
     setEditorError(null);
-    setAgentPanelOpen(false);
+    setRightSection('content');
   }, [initialStage, runId]);
 
   useEffect(() => {
@@ -314,15 +316,17 @@ export function StoryWorkspaceDreamPage({
     && confirmation.status !== 'confirming',
   );
   const deckName = agentContextRun?.deck_plugin_display_name ?? '当前 Deck';
-  const pluginVersion = agentContextRun?.deck_plugin_version ?? files.data?.source.deckPluginVersion ?? 'Dream';
-  const workflowName = agentContextRun?.workflow_summary ?? 'Dream';
   const agentPreview = dreamAgent.streamText
     || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
     || activityCopy;
   const openDreamAgent = (target: 'masthead' | 'desktop' | 'mobile') => {
     dreamAgent.markRead();
     setAgentReturnTarget(target);
-    setAgentPanelOpen(true);
+    setRightSection('agent');
+  };
+  const showDreamContent = (nextSelection: DreamSelection | null) => {
+    setSelection(nextSelection);
+    setRightSection('content');
   };
   const agentReturnRef = agentReturnTarget === 'desktop'
     ? desktopAgentTriggerRef
@@ -370,13 +374,11 @@ export function StoryWorkspaceDreamPage({
           deckName={deckName}
           isOpen={agentPanelOpen}
           onOpen={() => openDreamAgent('mobile')}
-          pluginVersion={pluginVersion}
           runId={runId}
           runtimeLockId={agentContextRun?.runtime_plugin_lock_id ?? files.data?.source.runtimePluginLockId ?? null}
           runtimeSnapshotId={agentContextRun?.deck_runtime_snapshot_id ?? files.data?.source.deckRuntimeSnapshotId ?? null}
           stageLine={storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState))}
           triggerRef={mobileAgentTriggerRef}
-          workflowName={workflowName}
         />
       </div>
 
@@ -395,7 +397,7 @@ export function StoryWorkspaceDreamPage({
               onClick={() => {
                 setActiveStage(stage);
                 const first = dreamState?.stageData[stage]?.items[0];
-                setSelection(first ? { stage, entityId: first.entityId } : null);
+                showDreamContent(first ? { stage, entityId: first.entityId } : null);
               }}
               type="button"
             >
@@ -449,9 +451,9 @@ export function StoryWorkspaceDreamPage({
               return (
                 <li key={item.entityId}>
                   <button
-                    aria-current={selected || undefined}
+                    aria-current={selected && rightSection === 'content' || undefined}
                     data-dirty={dirty || undefined}
-                    onClick={() => setSelection({ stage: activeStage, entityId: item.entityId })}
+                    onClick={() => showDreamContent({ stage: activeStage, entityId: item.entityId })}
                     type="button"
                   >
                     <span className="story-workspace-dream__row-index">
@@ -476,19 +478,17 @@ export function StoryWorkspaceDreamPage({
             deckName={deckName}
             isOpen={agentPanelOpen}
             onOpen={() => openDreamAgent('desktop')}
-            pluginVersion={pluginVersion}
             runId={runId}
             runtimeLockId={agentContextRun?.runtime_plugin_lock_id ?? files.data?.source.runtimePluginLockId ?? null}
             runtimeSnapshotId={agentContextRun?.deck_runtime_snapshot_id ?? files.data?.source.deckRuntimeSnapshotId ?? null}
             stageLine={storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState))}
             triggerRef={desktopAgentTriggerRef}
-            workflowName={workflowName}
           />
           <div className="story-workspace-dream__agent-panel">
             <StoryWorkspaceDreamAgentPanel
               agent={dreamAgent}
               isOpen={agentPanelOpen}
-              onClose={() => setAgentPanelOpen(false)}
+              onClose={() => setRightSection('content')}
               restoreFocusRef={agentReturnRef}
             />
           </div>

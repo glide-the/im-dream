@@ -33,7 +33,6 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
   const [draft, setDraft] = useState('');
   const [announcedStreamText, setAnnouncedStreamText] = useState('');
   const pendingKeyRef = useRef<string | null>(null);
-  const wasOpenRef = useRef(isOpen);
   const inputHint = storyWorkspaceDreamAgentPanelHint(agent);
   const { markRead, snapshot, streamText } = agent;
   const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
@@ -47,10 +46,10 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
     return () => clearTimeout(timer);
   }, [streamText]);
 
-  useEffect(() => {
-    if (wasOpenRef.current && !isOpen) restoreFocusRef.current?.focus();
-    wasOpenRef.current = isOpen;
-  }, [isOpen, restoreFocusRef]);
+  const closePanel = () => {
+    onClose();
+    requestAnimationFrame(() => restoreFocusRef.current?.focus());
+  };
 
   const submit = async () => {
     if (!canSend) return;
@@ -74,7 +73,7 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
           <p>Dream Agent</p>
           <strong>当前 Dream 对话</strong>
         </div>
-        <button onClick={onClose} type="button">收起</button>
+        <button onClick={closePanel} type="button">收起</button>
       </header>
       <div className="story-workspace-dream-agent-panel__history">
         {agent.snapshot?.messages.map((message) => (
