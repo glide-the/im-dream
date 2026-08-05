@@ -77,8 +77,8 @@ _ABSOLUTE_PATH_RE = re.compile(
     r"(?<![A-Za-z0-9:/])/(?!/)(?:[A-Za-z0-9._~-]+/)+[^\s`]+|"
     r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
     r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
-    r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\})/"
-    r"(?:\.ssh|\.aws|\.config|\.gnupg|\.kube|\.docker)/[^\s`]+"
+    r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\})/[^\s`]+|"
+    r"(?<![A-Za-z0-9])%(?:USERPROFILE|HOMEPATH)%[\\/][^\s`]+"
     r")"
 )
 _CREDENTIAL_RE = re.compile(
@@ -87,7 +87,8 @@ _CREDENTIAL_RE = re.compile(
     r"CREDENTIALS?|PRIVATE_KEY)|API_KEY|ACCESS_TOKEN|REFRESH_TOKEN|"
     r"PASSWORD|CREDENTIALS?)\b(?:\s*[:=]\s*[^\s`]+)?|"
     r"\b(?:api[\s_-]*keys?|access[\s_-]*tokens?|refresh[\s_-]*tokens?|"
-    r"auth(?:orization)?|credentials?|passwords?)\b\s*[:=]\s*[^\s`]+|"
+    r"tokens?|secrets?|auth(?:orization)?|credentials?|passwords?)"
+    r"\b\s*[:=]\s*[^\s`]+|"
     r"\bbearer\s+[A-Za-z0-9._-]{8,}|"
     r"(?<![A-Za-z0-9_-])(?:sk-(?:(?:ant|proj)-)?|"
     r"gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{16,}(?![A-Za-z0-9_-])|"
@@ -120,6 +121,10 @@ _RAW_COMMAND_RE = re.compile(
 _SENSITIVE_CLI_FLAG_RE = re.compile(
     r"(?i)(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|"
     r"credential|authorization)(?:[=\s]|$)"
+)
+_RAW_TOOL_OPTION_RE = re.compile(
+    r"(?i)(?<![A-Za-z0-9_-])(?:tool|renderer)\b[^\n]{0,240}?"
+    r"(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*"
 )
 _LONG_HEX_SECRET_RE = re.compile(
     r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])"
@@ -1160,7 +1165,11 @@ def _bounded_text(
             artifact,
             "credential_forbidden",
         )
-    if _RAW_COMMAND_RE.search(value) or _SENSITIVE_CLI_FLAG_RE.search(value):
+    if (
+        _RAW_COMMAND_RE.search(value)
+        or _SENSITIVE_CLI_FLAG_RE.search(value)
+        or _RAW_TOOL_OPTION_RE.search(value)
+    ):
         raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
             artifact,
             "raw_command_forbidden",

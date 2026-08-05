@@ -697,3 +697,31 @@ def test_public_text_policy_fails_closed_by_sensitive_category(
         _project(review_report=report)
 
     assert unsafe_text not in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("unsafe_text", "reason"),
+    [
+        ("$HOME/projects/episode-notes.md", "sensitive_text"),
+        ("${HOME}/Documents/episode-notes.md", "sensitive_text"),
+        (r"%USERPROFILE%\Documents\episode-notes.md", "sensitive_text"),
+        (r"%HOMEPATH%\Desktop\episode-notes.md", "sensitive_text"),
+        ("ToKeN = visible-value", "credential_forbidden"),
+        ("  SeCrEt  =  visible-value  ", "credential_forbidden"),
+        ("tool --verbose", "raw_command_forbidden"),
+        ("renderer kling-v2 --seed=42", "raw_command_forbidden"),
+    ],
+)
+def test_remaining_public_text_bypasses_fail_closed(
+    unsafe_text: str,
+    reason: str,
+) -> None:
+    report = f"# Review\n\n## Finding\n{unsafe_text}\n".encode()
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match=reason,
+    ) as exc_info:
+        _project(review_report=report)
+
+    assert unsafe_text.strip() not in str(exc_info.value)
