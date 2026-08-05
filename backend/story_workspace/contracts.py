@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import json
+import math
 from typing import Annotated, Any, Dict, Generic, List, Literal, Optional, TypeVar
 
 from pydantic import (
@@ -957,6 +958,252 @@ class StoryWorkspaceEpisodeArtifactManifestEntry(_StoryWorkspaceDreamWireModel):
             raise ValueError("producer_action does not match relative_key")
         if self.consumers != expected_consumers:
             raise ValueError("consumers do not match relative_key")
+        return self
+
+
+class StoryWorkspaceEpisodeAssociationStatus(str, Enum):
+    """Evidence-backed relationship state for one projected entity."""
+
+    LINKED = "linked"
+    UNLINKED = "unlinked"
+    ORPHAN = "orphan"
+
+
+class StoryWorkspaceEpisodeMetricAvailability(str, Enum):
+    """Whether a coverage denominator exists; not a workflow status."""
+
+    AVAILABLE = "available"
+    UNAVAILABLE = "unavailable"
+
+
+class StoryWorkspaceEpisodeAssociationCoverage(_StoryWorkspaceDreamWireModel):
+    """Bounded association metric with honest zero-denominator semantics."""
+
+    availability: StoryWorkspaceEpisodeMetricAvailability
+    linked: _StoryWorkspaceDreamNonNegativeInt
+    total: _StoryWorkspaceDreamNonNegativeInt
+    ratio: Optional[float] = Field(default=None, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def availability_matches_denominator(
+        self,
+    ) -> "StoryWorkspaceEpisodeAssociationCoverage":
+        if self.linked > self.total:
+            raise ValueError("linked coverage cannot exceed total")
+        if self.total == 0:
+            if (
+                self.availability is not StoryWorkspaceEpisodeMetricAvailability.UNAVAILABLE
+                or self.linked != 0
+                or self.ratio is not None
+            ):
+                raise ValueError("zero-denominator coverage must be unavailable")
+            return self
+        expected_ratio = self.linked / self.total
+        if (
+            self.availability is not StoryWorkspaceEpisodeMetricAvailability.AVAILABLE
+            or self.ratio is None
+            or not math.isclose(self.ratio, expected_ratio, rel_tol=1e-12)
+        ):
+            raise ValueError("available coverage must match linked / total")
+        return self
+
+
+class StoryWorkspaceEpisodeCharacterBeat(_StoryWorkspaceDreamWireModel):
+    """Auxiliary character-arc evidence; never a narrative hierarchy node."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    source_key: str = Field(min_length=1, max_length=128)
+    character_id: Optional[str] = Field(default=None, max_length=128)
+    action: Optional[str] = Field(default=None, max_length=128)
+    start_state: Optional[str] = Field(default=None, max_length=2000)
+    trigger: Optional[str] = Field(default=None, max_length=2000)
+    choice: Optional[str] = Field(default=None, max_length=2000)
+    end_state: Optional[str] = Field(default=None, max_length=2000)
+    visible_evidence: Optional[str] = Field(default=None, max_length=2000)
+
+
+class StoryWorkspaceEpisodeOverview(_StoryWorkspaceDreamWireModel):
+    """Episode story facts owned by ``episode-outline.md``."""
+
+    title: Optional[str] = Field(default=None, max_length=500)
+    series: Optional[str] = Field(default=None, max_length=500)
+    story_goals: list[str] = Field(default_factory=list, max_length=32)
+    core_conflict: Optional[str] = Field(default=None, max_length=4000)
+    hook: Optional[str] = Field(default=None, max_length=4000)
+    character_beats: list[StoryWorkspaceEpisodeCharacterBeat] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+
+
+class StoryWorkspaceEpisodeNarrativeBeat(_StoryWorkspaceDreamWireModel):
+    """One explicit ``SC-NN`` section from the Episode outline."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    source_key: str = Field(pattern=r"^SC-[0-9]{2,}$")
+    title: str = Field(min_length=1, max_length=500)
+    asset_scene_ref: Optional[str] = Field(default=None, max_length=255)
+    narrative_function: Optional[str] = Field(default=None, max_length=500)
+    emotion_tone: Optional[str] = Field(default=None, max_length=500)
+    summary: Optional[str] = Field(default=None, max_length=4000)
+    scene_goals: list[str] = Field(default_factory=list, max_length=32)
+    key_dialogue_beats: list[str] = Field(default_factory=list, max_length=32)
+
+
+class StoryWorkspaceEpisodeDialogueLine(_StoryWorkspaceDreamWireModel):
+    """Plain-text script dialogue safe for a scene context preview."""
+
+    speaker: str = Field(min_length=1, max_length=128)
+    qualifier: Optional[str] = Field(default=None, max_length=255)
+    text: str = Field(min_length=1, max_length=2000)
+
+
+class StoryWorkspaceEpisodeScriptScene(_StoryWorkspaceDreamWireModel):
+    """One explicit ``SNN.`` scene heading from ``script.md``."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    source_key: str = Field(pattern=r"^S[0-9]{2,}$")
+    title: str = Field(min_length=1, max_length=500)
+    heading: str = Field(min_length=1, max_length=1000)
+    asset_scene_ref: Optional[str] = Field(default=None, max_length=255)
+    narrative_beat_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{32}$",
+    )
+    declared_narrative_beat_ref: Optional[str] = Field(
+        default=None,
+        pattern=r"^SC-[0-9]{2,}$",
+    )
+    association_status: StoryWorkspaceEpisodeAssociationStatus
+    actions: list[str] = Field(default_factory=list, max_length=256)
+    dialogue: list[StoryWorkspaceEpisodeDialogueLine] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+    camera_cues: list[str] = Field(default_factory=list, max_length=256)
+
+    @model_validator(mode="after")
+    def linked_scene_has_a_beat(self) -> "StoryWorkspaceEpisodeScriptScene":
+        if (
+            self.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
+        ) != (self.narrative_beat_id is not None):
+            raise ValueError("only linked scenes may expose narrative_beat_id")
+        return self
+
+
+class StoryWorkspaceEpisodeShotCharacter(_StoryWorkspaceDreamWireModel):
+    """Allowlisted storyboard character reference and visible action."""
+
+    ref: str = Field(min_length=1, max_length=128)
+    action: Optional[str] = Field(default=None, max_length=2000)
+
+
+class StoryWorkspaceEpisodeShotCamera(_StoryWorkspaceDreamWireModel):
+    """Allowlisted camera fields from the canonical eight-layer shot schema."""
+
+    angle: Optional[str] = Field(default=None, max_length=255)
+    height: Optional[str] = Field(default=None, max_length=255)
+    movement: Optional[str] = Field(default=None, max_length=255)
+    lens: Optional[str] = Field(default=None, max_length=255)
+
+
+class StoryWorkspaceEpisodeShotTiming(_StoryWorkspaceDreamWireModel):
+    """Allowlisted timing fields from the canonical shot schema."""
+
+    duration_sec: Optional[float] = Field(default=None, ge=0.0, le=3600.0)
+    transition_in: Optional[str] = Field(default=None, max_length=255)
+    transition_out: Optional[str] = Field(default=None, max_length=255)
+
+
+class StoryWorkspaceEpisodeStoryboardShot(_StoryWorkspaceDreamWireModel):
+    """One canonical shot and its evidence-backed hierarchy links."""
+
+    id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    shot_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+    asset_scene_ref: Optional[str] = Field(default=None, max_length=255)
+    declared_script_scene_ref: Optional[str] = Field(
+        default=None,
+        pattern=r"^S[0-9]{2,}$",
+    )
+    declared_narrative_beat_ref: Optional[str] = Field(
+        default=None,
+        pattern=r"^SC-[0-9]{2,}$",
+    )
+    script_scene_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    narrative_beat_id: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{32}$")
+    association_status: StoryWorkspaceEpisodeAssociationStatus
+    shot_type: Optional[str] = Field(default=None, max_length=255)
+    characters: list[StoryWorkspaceEpisodeShotCharacter] = Field(
+        default_factory=list,
+        max_length=128,
+    )
+    camera: StoryWorkspaceEpisodeShotCamera = Field(
+        default_factory=StoryWorkspaceEpisodeShotCamera,
+    )
+    visual: Optional[str] = Field(default=None, max_length=4000)
+    dialogue: list[str] = Field(default_factory=list, max_length=128)
+    timing: StoryWorkspaceEpisodeShotTiming = Field(
+        default_factory=StoryWorkspaceEpisodeShotTiming,
+    )
+
+    @model_validator(mode="after")
+    def linked_shot_has_a_script_scene(self) -> "StoryWorkspaceEpisodeStoryboardShot":
+        if (
+            self.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
+        ) != (self.script_scene_id is not None):
+            raise ValueError("only linked shots may expose script_scene_id")
+        return self
+
+
+class StoryWorkspaceEpisodeAssociationDiagnostics(_StoryWorkspaceDreamWireModel):
+    """Machine-readable hierarchy quality without positional inference."""
+
+    beat_scene_coverage: StoryWorkspaceEpisodeAssociationCoverage
+    scene_shot_coverage: StoryWorkspaceEpisodeAssociationCoverage
+    missing_links: list[str] = Field(default_factory=list, max_length=2048)
+    orphan_artifacts: list[str] = Field(default_factory=list, max_length=2048)
+
+    @field_validator("missing_links", "orphan_artifacts")
+    @classmethod
+    def diagnostics_are_unique_and_safe(cls, values: list[str]) -> list[str]:
+        if len(values) != len(set(values)):
+            raise ValueError("association diagnostics must be unique")
+        if any(
+            not value
+            or len(value) > 512
+            or any(ord(char) < 32 for char in value)
+            for value in values
+        ):
+            raise ValueError("association diagnostics must be bounded plain text")
+        return values
+
+
+class StoryWorkspaceEpisodeNarrativeProjection(_StoryWorkspaceDreamWireModel):
+    """Read-only Episode → Beat → Scene → Shot view-model projection."""
+
+    episode_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    story_arc_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    overview: StoryWorkspaceEpisodeOverview
+    narrative_beats: list[StoryWorkspaceEpisodeNarrativeBeat] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+    scenes: list[StoryWorkspaceEpisodeScriptScene] = Field(
+        default_factory=list,
+        max_length=1000,
+    )
+    shots: list[StoryWorkspaceEpisodeStoryboardShot] = Field(
+        default_factory=list,
+        max_length=1000,
+    )
+    associations: StoryWorkspaceEpisodeAssociationDiagnostics
+
+    @model_validator(mode="after")
+    def projected_ids_are_unique(self) -> "StoryWorkspaceEpisodeNarrativeProjection":
+        for values in (self.narrative_beats, self.scenes, self.shots):
+            ids = [value.id for value in values]
+            if len(ids) != len(set(ids)):
+                raise ValueError("projected entity IDs must be unique within their kind")
         return self
 
 
