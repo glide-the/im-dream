@@ -19,6 +19,10 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from story_workspace.contracts import (  # noqa: E402
+    STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
+    STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+    STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
+    STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
     StoryWorkspaceDreamAgentMessageCommand,
     StoryWorkspaceDreamAgentToolConfirmationCommand,
     StoryWorkspaceDreamRunContext,
@@ -316,18 +320,214 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         ):
             self.assertNotIn(secret, output)
 
+    def test_ask_user_sensitive_public_fields_fail_closed_before_sse(self) -> None:
+        unsafe_inputs = (
+            {
+                "questions": [{
+                    "question": "请粘贴 Authorization bearer token",
+                    "options": [{"label": "继续", "value": "continue"}],
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "选择下一步",
+                    "options": [{"label": "API key", "value": "continue"}],
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "选择下一步",
+                    "options": [{"label": "继续", "value": "credential_token"}],
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "选择下一步",
+                    "options": [{"label": "继续", "value": "accessToken"}],
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "补充公开说明",
+                    "placeholder": "hidden reasoning / chain-of-thought",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "Run command: rm -rf workspace",
+                }],
+            },
+        )
+        for index, tool_input in enumerate(unsafe_inputs):
+            with self.subTest(index=index):
+                factory = _ToolConfirmationFactory()
+                factory.frames = [
+                    "data: " + json.dumps({
+                        "type": "tool-approval-request",
+                        "toolCallId": f"tool-unsafe-{index}",
+                        "toolName": "AskUserQuestion",
+                        "input": tool_input,
+                    }, ensure_ascii=False) + "\n\n",
+                ]
+                output = "".join(asyncio.run(_collect(
+                    StoryWorkspaceDreamAgentMessageService(
+                        self.db,
+                        thread_factory=factory,
+                    ).events(
+                        thread_id=THREAD_ID,
+                        run_id=RUN_ID,
+                        actor_id=ACTOR_ID,
+                    )
+                )))
+                self.assertNotIn("event: tool_confirmation_requested", output)
+
+        safe_factory = _ToolConfirmationFactory()
+        safe_factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-safe",'
+            '"toolName":"AskUserQuestion","input":{"questions":[{'
+            '"id":"style","question":"选择叙事风格","placeholder":"请选择",'
+            '"options":[{"label":"温暖","value":"warm"}]}]}}\n\n',
+        ]
+        safe_output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=safe_factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertIn("event: tool_confirmation_requested", safe_output)
+        self.assertIn("选择叙事风格", safe_output)
+
+    def test_ask_user_public_question_lengths_and_keys_are_one_contract(self) -> None:
+        question_key = "问" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX
+        command = StoryWorkspaceDreamAgentToolConfirmationCommand(
+            toolCallId="tool-length",
+            approved=True,
+            answers={question_key: "普通回答"},
+        )
+        self.assertIn(question_key, command.answers or {})
+
+        safe_factory = _ToolConfirmationFactory()
+        safe_factory.frames = [
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-max-lengths",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [{
+                    "id": "i" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
+                    "question": question_key,
+                    "placeholder": (
+                        "提" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX
+                    ),
+                    "options": [{
+                        "label": "选" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
+                        "value": "v" * STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
+                    }],
+                }]},
+            }, ensure_ascii=False) + "\n\n",
+        ]
+        safe_output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=safe_factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertEqual(safe_output.count("event: tool_confirmation_requested"), 1)
+
+        factory = _ToolConfirmationFactory()
+        factory.frames = [
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-too-long",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [{"question": question_key + "超"}]},
+            }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-id-too-long",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [{
+                    "id": "i" * (STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX + 1),
+                    "question": "普通问题",
+                }]},
+            }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-option-too-long",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [{
+                    "question": "普通问题",
+                    "options": [{
+                        "label": "选",
+                        "value": "v" * (
+                            STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX + 1
+                        ),
+                    }],
+                }]},
+            }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-placeholder-too-long",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [{
+                    "question": "普通问题",
+                    "placeholder": "提" * (
+                        STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX + 1
+                    ),
+                }]},
+            }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-duplicate",
+                "toolName": "AskUserQuestion",
+                "input": {"questions": [
+                    {"id": "one", "question": "同一个问题"},
+                    {"id": "two", "question": "同一个问题"},
+                ]},
+            }, ensure_ascii=False) + "\n\n",
+        ]
+        output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+        self.assertNotIn("event: tool_confirmation_requested", output)
+
     def test_confirm_tool_requires_same_active_trusted_dream_turn(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-ask",'
+            '"toolName":"AskUserQuestion","input":{"questions":[{'
+            '"id":"q1","question":"继续吗？","options":["继续","停止"]}]}}\n\n',
+        ]
+        service = StoryWorkspaceDreamAgentMessageService(
+            self.db,
+            thread_factory=factory,
+        )
+        asyncio.run(_collect(service.events(
+            thread_id=THREAD_ID,
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+        )))
         command = StoryWorkspaceDreamAgentToolConfirmationCommand(
             toolCallId="tool-ask",
             approved=True,
             reason="用户已选择",
-            answers={"q1": "继续"},
+            answers={"继续吗？": "继续"},
         )
-        factory = _ToolConfirmationFactory()
-        accepted = StoryWorkspaceDreamAgentMessageService(
-            self.db,
-            thread_factory=factory,
-        ).confirm_tool(
+        accepted = service.confirm_tool(
             run_id=RUN_ID,
             thread_id=THREAD_ID,
             actor_id=ACTOR_ID,
@@ -344,7 +544,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 "tool_call_id": "tool-ask",
                 "approved": True,
                 "reason": "用户已选择",
-                "answers": {"q1": "继续"},
+                "answers": {"继续吗？": "继续"},
             },
         ))
 
@@ -361,6 +561,136 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 actor_id=ACTOR_ID,
                 command=command,
             )
+
+    def test_confirm_tool_accepts_only_current_public_ask_user_answers(self) -> None:
+        questions = [
+            {"id": "note", "question": "补充说明", "type": "text", "required": True},
+            {
+                "id": "style",
+                "question": "选择风格",
+                "type": "radio",
+                "required": True,
+                "options": ["温暖", "冷峻"],
+            },
+            {
+                "id": "confirm",
+                "question": "确认继续",
+                "type": "checkbox",
+                "required": True,
+            },
+            {
+                "id": "elements",
+                "question": "选择元素",
+                "type": "checkbox",
+                "multiSelect": True,
+                "required": True,
+                "options": ["雨", "灯"],
+            },
+        ]
+
+        def pending_service() -> tuple[
+            StoryWorkspaceDreamAgentMessageService,
+            _ToolConfirmationFactory,
+        ]:
+            factory = _ToolConfirmationFactory()
+            factory.frames = [
+                "data: " + json.dumps({
+                    "type": "tool-approval-request",
+                    "toolCallId": "tool-current",
+                    "toolName": "AskUserQuestion",
+                    "input": {"questions": questions},
+                }, ensure_ascii=False) + "\n\n",
+            ]
+            service = StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            )
+            asyncio.run(_collect(service.events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )))
+            return service, factory
+
+        valid_service, valid_factory = pending_service()
+        accepted = valid_service.confirm_tool(
+            run_id=RUN_ID,
+            thread_id=THREAD_ID,
+            actor_id=ACTOR_ID,
+            command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                toolCallId="tool-current",
+                approved=True,
+                answers={
+                    "补充说明": "继续完善人物动机",
+                    "选择风格": "温暖",
+                    "确认继续": True,
+                    "选择元素": ["雨", "灯"],
+                },
+            ),
+        )
+        self.assertTrue(accepted.resolved)
+        self.assertEqual(valid_factory.confirmations[-1][0], "confirm")
+
+        invalid_answers = (
+            {"未知问题": "继续"},
+            {"补充说明": "公开说明", "选择风格": "秘密风格", "确认继续": True, "选择元素": ["雨"]},
+            {"补充说明": "公开说明", "选择风格": "温暖", "确认继续": True, "选择元素": ["雨", "不存在"]},
+            {"补充说明": "公开说明", "选择风格": "温暖", "确认继续": "true", "选择元素": ["雨"]},
+            {"补充说明": "", "选择风格": "温暖", "确认继续": True, "选择元素": ["雨"]},
+        )
+        for answers in invalid_answers:
+            with self.subTest(answers=answers):
+                service, factory = pending_service()
+                with self.assertRaisesRegex(
+                    StoryWorkspaceDreamAgentMessageError,
+                    "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                ):
+                    service.confirm_tool(
+                        run_id=RUN_ID,
+                        thread_id=THREAD_ID,
+                        actor_id=ACTOR_ID,
+                        command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                            toolCallId="tool-current",
+                            approved=True,
+                            answers=answers,
+                        ),
+                    )
+                self.assertFalse(any(item[0] == "confirm" for item in factory.confirmations))
+
+        wrong_tool_service, wrong_tool_factory = pending_service()
+        with self.assertRaisesRegex(
+            StoryWorkspaceDreamAgentMessageError,
+            "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+        ):
+            wrong_tool_service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-other",
+                    approved=True,
+                ),
+            )
+        self.assertFalse(
+            any(item[0] == "confirm" for item in wrong_tool_factory.confirmations)
+        )
+
+        reject_service, reject_factory = pending_service()
+        with self.assertRaisesRegex(
+            StoryWorkspaceDreamAgentMessageError,
+            "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+        ):
+            reject_service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-current",
+                    approved=False,
+                    answers={"选择风格": "温暖"},
+                ),
+            )
+        self.assertFalse(any(item[0] == "confirm" for item in reject_factory.confirmations))
 
     def test_tool_confirmation_contract_rejects_untrusted_context_and_oversized_answers(self) -> None:
         from pydantic import ValidationError
@@ -616,6 +946,23 @@ class StoryWorkspaceDreamAgentBindingTest(unittest.TestCase):
             connection.row_factory = sqlite3.Row
             return connection
 
+        factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-1",'
+            '"toolName":"Write","input":{"file_path":"not-public"}}\n\n',
+        ]
+        event_db = open_db()
+        try:
+            asyncio.run(_collect(StoryWorkspaceDreamAgentMessageService(
+                event_db,
+                thread_factory=factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )))
+        finally:
+            event_db.close()
+
         with (
             patch.object(
                 gateway,
@@ -785,6 +1132,14 @@ class StoryWorkspaceDreamAgentRouteTest(unittest.TestCase):
                     "threadId": THREAD_ID,
                 },
             )
+            rejected_deck_context = client.post(
+                f"/api/story-workspace/workflow-runs/{RUN_ID}/dream-agent/tool-confirm",
+                json={
+                    "toolCallId": "tool-ask",
+                    "approved": True,
+                    "deckId": "deck-1",
+                },
+            )
         finally:
             client.close()
         self.assertEqual(snapshot.status_code, 200, snapshot.text)
@@ -802,6 +1157,11 @@ class StoryWorkspaceDreamAgentRouteTest(unittest.TestCase):
             "resolved": True,
         })
         self.assertEqual(rejected_context.status_code, 422, rejected_context.text)
+        self.assertEqual(
+            rejected_deck_context.status_code,
+            422,
+            rejected_deck_context.text,
+        )
         self.assertEqual(gateway.calls, [
             ("snapshot", {"actor_id": ACTOR_ID}),
             ("events", ({"actor_id": ACTOR_ID}, "turn-1:2")),

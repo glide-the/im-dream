@@ -41,6 +41,11 @@ STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX = 255
 STORY_WORKSPACE_DREAM_AGENT_TOOL_REASON_MAX = 500
 STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX_BYTES = 8192
 STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX = 20
+STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX = 128
+STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX = 300
+STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX = 120
+STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX = 160
+STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX = 1000
 _StoryWorkspaceDreamPositiveInt = Annotated[StrictInt, Field(ge=1)]
 _StoryWorkspaceDreamNonNegativeInt = Annotated[StrictInt, Field(ge=0)]
 
@@ -331,7 +336,7 @@ class StoryWorkspaceDreamAgentMessageAccepted(_StoryWorkspaceDreamWireModel):
 
 _StoryWorkspaceDreamToolAnswerText = Annotated[
     StrictStr,
-    Field(max_length=1000),
+    Field(max_length=STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX),
 ]
 _StoryWorkspaceDreamToolAnswerInteger = Annotated[
     StrictInt,
@@ -360,7 +365,13 @@ class StoryWorkspaceDreamAgentToolConfirmationCommand(_StoryWorkspaceDreamWireMo
     )
     answers: Optional[
         dict[
-            Annotated[StrictStr, Field(min_length=1, max_length=128)],
+            Annotated[
+                StrictStr,
+                Field(
+                    min_length=1,
+                    max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+                ),
+            ],
             _StoryWorkspaceDreamToolAnswerValue,
         ]
     ] = Field(default=None, max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_ANSWERS_MAX)

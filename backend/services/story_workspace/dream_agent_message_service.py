@@ -29,7 +29,12 @@ try:
         StoryWorkspaceDreamAgentToolConfirmationAccepted,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
+        STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
     )
     from services.story_workspace.dream_confirmation_service import (
         story_workspace_read_dream_confirmation_fact,
@@ -43,7 +48,12 @@ except ModuleNotFoundError:
         StoryWorkspaceDreamAgentToolConfirmationAccepted,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
+        STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX,
         STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
+        STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
     )
     from backend.services.story_workspace.dream_confirmation_service import (
         story_workspace_read_dream_confirmation_fact,
@@ -77,6 +87,29 @@ _TOOL_OUTPUT_TYPES = frozenset({
     "tool-output-error",
     "tool-error",
 })
+_DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR = (
+    "_story_workspace_dream_public_tool_confirmations"
+)
+_DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX = 256
+_ASK_USER_QUESTIONS_MAX = 8
+_ASK_USER_OPTIONS_MAX = 12
+_SENSITIVE_ASK_USER_TEXT = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9])authorization(?:header|value|token)?(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])bearer(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])credentials?(?:value)?(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])tokens?(?:value)?(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])(?:access|auth|refresh|secret)[\s_-]*tokens?(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])api[\s_-]*keys?(?:value)?(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])commands?(?:text|line)?(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])chain[\s_-]*(?:of[\s_-]*)?thought(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])hidden[\s_-]*reasoning(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])internal[\s_-]*reasoning(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])system[\s_-]*prompt(?![A-Za-z0-9])|"
+    r"凭证|令牌|密钥|口令|命令|隐藏推理|内部推理|思维链|系统提示词"
+    r")",
+    re.IGNORECASE,
+)
 
 
 class StoryWorkspaceDreamAgentMessageError(RuntimeError):
@@ -243,6 +276,21 @@ def _safe_public_text(value: Any, *, max_length: int) -> str | None:
     return normalized[:max_length]
 
 
+def _strict_ask_user_public_text(value: Any, *, max_length: int) -> str | None:
+    """Accept a bounded public field only when the complete value is safe."""
+
+    if not isinstance(value, str):
+        return None
+    normalized = " ".join(value.split()).strip()
+    if (
+        not normalized
+        or len(normalized) > max_length
+        or _SENSITIVE_ASK_USER_TEXT.search(normalized)
+    ):
+        return None
+    return normalized
+
+
 def _safe_tool_call_id(value: Any) -> str | None:
     return value if isinstance(value, str) and _TOOL_CALL_ID.fullmatch(value) else None
 
@@ -266,24 +314,41 @@ def _is_ask_user_tool(tool_name: Any) -> bool:
     )
 
 
-def _safe_question_options(value: Any) -> list[dict[str, str]]:
+def _safe_question_options(value: Any) -> list[dict[str, str]] | None:
     if not isinstance(value, list):
         return []
+    if len(value) > _ASK_USER_OPTIONS_MAX:
+        return None
     safe: list[dict[str, str]] = []
-    for option in value[:12]:
-        candidate = option
+    for option in value:
         if isinstance(option, dict):
-            candidate = option.get("label") or option.get("value")
-        text = _safe_public_text(candidate, max_length=120)
-        projected = {"label": text, "value": text} if text else None
-        if projected and projected not in safe:
-            safe.append(projected)
+            raw_label = option.get("label")
+            raw_value = option.get("value")
+            for raw_field in (raw_label, raw_value):
+                if isinstance(raw_field, str) and _strict_ask_user_public_text(
+                    raw_field,
+                    max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
+                ) is None:
+                    return None
+            candidate = raw_label or raw_value
+        else:
+            candidate = option
+        text = _strict_ask_user_public_text(
+            candidate,
+            max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
+        )
+        if text is None:
+            return None
+        projected = {"label": text, "value": text}
+        if projected in safe:
+            return None
+        safe.append(projected)
     return safe
 
 
-def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]]:
+def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]] | None:
     if not isinstance(tool_input, dict):
-        return []
+        return None
     raw_questions = tool_input.get("questions")
     if not isinstance(raw_questions, list) or not raw_questions:
         raw_questions = [{
@@ -294,52 +359,94 @@ def _safe_ask_user_questions(tool_input: Any) -> list[dict[str, Any]]:
                 or tool_input.get("prompt")
             ),
             "options": tool_input.get("options") or tool_input.get("choices"),
+            "type": tool_input.get("type"),
+            "required": tool_input.get("required"),
+            "placeholder": tool_input.get("placeholder"),
+            "multiSelect": tool_input.get("multiSelect"),
         }]
+    if len(raw_questions) > _ASK_USER_QUESTIONS_MAX:
+        return None
     safe: list[dict[str, Any]] = []
-    for index, question in enumerate(raw_questions[:8]):
+    seen_ids: set[str] = set()
+    seen_keys: set[str] = set()
+    for index, question in enumerate(raw_questions):
         if not isinstance(question, dict):
-            continue
-        text = _safe_public_text(
-            question.get("question")
-            or question.get("label")
-            or question.get("header"),
-            max_length=300,
+            return None
+        public_candidates = (
+            question.get("question"),
+            question.get("label"),
+            question.get("header"),
         )
-        if not text:
-            continue
+        for candidate in public_candidates:
+            if isinstance(candidate, str) and _strict_ask_user_public_text(
+                candidate,
+                max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+            ) is None:
+                return None
+        text = _strict_ask_user_public_text(
+            next((item for item in public_candidates if item), None),
+            max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_KEY_MAX,
+        )
+        if text is None or text in seen_keys:
+            return None
+        seen_keys.add(text)
         raw_id = question.get("id")
-        question_id = (
-            raw_id
-            if isinstance(raw_id, str)
-            and re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", raw_id)
-            else f"q{index}"
+        if raw_id is None:
+            question_id = f"q{index}"
+        elif isinstance(raw_id, str) and re.fullmatch(
+                rf"[A-Za-z0-9._:-]{{1,{STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX}}}",
+                raw_id,
+        ):
+            question_id = raw_id
+        else:
+            return None
+        if question_id in seen_ids:
+            return None
+        seen_ids.add(question_id)
+        question_type = (
+            question.get("type")
+            if question.get("type") in {
+                "text", "textarea", "select", "checkbox", "radio", "number",
+            }
+            else "radio" if question.get("options") else "text"
         )
         projected: dict[str, Any] = {
             "id": question_id,
             "question": text,
-            "type": (
-                question.get("type")
-                if question.get("type") in {
-                    "text", "textarea", "select", "checkbox", "radio", "number",
-                }
-                else "radio" if question.get("options") else "text"
-            ),
+            "type": question_type,
             "required": (
                 question.get("required")
                 if isinstance(question.get("required"), bool)
                 else True
             ),
         }
-        placeholder = _safe_public_text(question.get("placeholder"), max_length=160)
-        if placeholder:
+        raw_placeholder = question.get("placeholder")
+        placeholder = (
+            _strict_ask_user_public_text(
+                raw_placeholder,
+                max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
+            )
+            if raw_placeholder is not None
+            else None
+        )
+        if raw_placeholder is not None and placeholder is None:
+            return None
+        if placeholder is not None:
             projected["placeholder"] = placeholder
         if isinstance(question.get("multiSelect"), bool):
             projected["multiSelect"] = question["multiSelect"]
         options = _safe_question_options(question.get("options"))
+        if options is None:
+            return None
         if options:
             projected["options"] = options
+        if (
+            question_type in {"select", "radio"}
+            or projected.get("multiSelect") is True
+        ) and not options:
+            return None
         safe.append(projected)
-    return safe
+    return safe or None
 
 
 def story_workspace_project_dream_tool_confirmation(
@@ -374,11 +481,185 @@ def story_workspace_project_dream_tool_confirmation(
             "network": {"host": host, "policy": policy},
         })
     elif _is_ask_user_tool(tool_name):
+        questions = _safe_ask_user_questions(data.get("input"))
+        if questions is None:
+            return None
         confirmation.update({
             "kind": "ask_user",
-            "questions": _safe_ask_user_questions(data.get("input")),
+            "questions": questions,
         })
     return confirmation
+
+
+def _dream_public_confirmation_key(
+    *,
+    thread_id: str,
+    turn_id: str,
+    run_id: str,
+    actor_id: str,
+    tool_call_id: str,
+) -> tuple[str, str, str, str, str]:
+    return (thread_id, turn_id, run_id, actor_id, tool_call_id)
+
+
+def _dream_public_confirmation_registry(
+    factory: Any,
+    *,
+    create: bool,
+) -> dict[tuple[str, str, str, str, str], dict[str, Any]] | None:
+    registry = getattr(factory, _DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR, None)
+    if isinstance(registry, dict):
+        return registry
+    if not create:
+        return None
+    registry = {}
+    try:
+        setattr(factory, _DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR, registry)
+    except (AttributeError, TypeError):
+        return None
+    return registry
+
+
+def _remember_dream_public_confirmation(
+    factory: Any,
+    *,
+    thread_id: str,
+    turn_id: str,
+    run_id: str,
+    actor_id: str,
+    confirmation: dict[str, Any],
+) -> bool:
+    registry = _dream_public_confirmation_registry(factory, create=True)
+    if registry is None:
+        return False
+    while len(registry) >= _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX:
+        registry.pop(next(iter(registry)))
+    registry[_dream_public_confirmation_key(
+        thread_id=thread_id,
+        turn_id=turn_id,
+        run_id=run_id,
+        actor_id=actor_id,
+        tool_call_id=confirmation["toolCallId"],
+    )] = confirmation
+    return True
+
+
+def _forget_dream_public_confirmation(
+    factory: Any,
+    *,
+    thread_id: str,
+    turn_id: str,
+    run_id: str,
+    actor_id: str,
+    tool_call_id: str,
+) -> None:
+    registry = _dream_public_confirmation_registry(factory, create=False)
+    if registry is not None:
+        registry.pop(_dream_public_confirmation_key(
+            thread_id=thread_id,
+            turn_id=turn_id,
+            run_id=run_id,
+            actor_id=actor_id,
+            tool_call_id=tool_call_id,
+        ), None)
+
+
+def _validate_dream_public_confirmation_answers(
+    *,
+    command: StoryWorkspaceDreamAgentToolConfirmationCommand,
+    confirmation: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Validate only against the public projection shown for this pending tool."""
+
+    answers = command.answers
+    if not command.approved:
+        if answers:
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                422,
+            )
+        return None
+    if confirmation.get("kind") != "ask_user":
+        if answers:
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                422,
+            )
+        return None
+    questions = confirmation.get("questions")
+    if not isinstance(questions, list) or not questions:
+        raise StoryWorkspaceDreamAgentMessageError(
+            "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+            409,
+        )
+    answer_map = answers or {}
+    questions_by_key = {
+        question["question"]: question
+        for question in questions
+        if isinstance(question, dict) and isinstance(question.get("question"), str)
+    }
+    if len(questions_by_key) != len(questions) or not set(answer_map).issubset(
+        questions_by_key
+    ):
+        raise StoryWorkspaceDreamAgentMessageError(
+            "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+            422,
+        )
+    for key, question in questions_by_key.items():
+        present = key in answer_map
+        if question.get("required") is True and not present:
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                422,
+            )
+        if not present:
+            continue
+        answer = answer_map[key]
+        options = question.get("options")
+        allowed_values = {
+            option["value"]
+            for option in options or []
+            if isinstance(option, dict) and isinstance(option.get("value"), str)
+        }
+        if question.get("multiSelect") is True:
+            if (
+                not isinstance(answer, list)
+                or not answer
+                or len(answer) != len(set(answer))
+                or any(value not in allowed_values for value in answer)
+            ):
+                raise StoryWorkspaceDreamAgentMessageError(
+                    "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                    422,
+                )
+        elif allowed_values:
+            if not isinstance(answer, str) or answer not in allowed_values:
+                raise StoryWorkspaceDreamAgentMessageError(
+                    "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                    422,
+                )
+        elif question.get("type") == "checkbox":
+            if not isinstance(answer, bool):
+                raise StoryWorkspaceDreamAgentMessageError(
+                    "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                    422,
+                )
+        elif question.get("type") == "number":
+            if isinstance(answer, bool) or not isinstance(answer, int):
+                raise StoryWorkspaceDreamAgentMessageError(
+                    "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                    422,
+                )
+        elif (
+            not isinstance(answer, str)
+            or len(answer) > STORY_WORKSPACE_DREAM_AGENT_ANSWER_TEXT_MAX
+            or (question.get("required") is True and not answer.strip())
+        ):
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+                422,
+            )
+    return answer_map
 
 
 class StoryWorkspaceDreamAgentMessageService:
@@ -631,6 +912,15 @@ class StoryWorkspaceDreamAgentMessageService:
                     if confirmation is None:
                         continue
                     tool_call_id = confirmation["toolCallId"]
+                    if not _remember_dream_public_confirmation(
+                        self._thread_factory,
+                        thread_id=thread_id,
+                        turn_id=turn_id,
+                        run_id=run_id,
+                        actor_id=actor_id,
+                        confirmation=confirmation,
+                    ):
+                        continue
                     pending_tool_call_ids.add(tool_call_id)
                     if ordinal <= after_number:
                         continue
@@ -646,6 +936,14 @@ class StoryWorkspaceDreamAgentMessageService:
                     if tool_call_id not in pending_tool_call_ids:
                         continue
                     pending_tool_call_ids.discard(tool_call_id)
+                    _forget_dream_public_confirmation(
+                        self._thread_factory,
+                        thread_id=thread_id,
+                        turn_id=turn_id,
+                        run_id=run_id,
+                        actor_id=actor_id,
+                        tool_call_id=tool_call_id,
+                    )
                     if ordinal <= after_number:
                         continue
                     payload = {"turnId": turn_id, "toolCallId": tool_call_id}
@@ -703,18 +1001,37 @@ class StoryWorkspaceDreamAgentMessageService:
                 "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
                 409,
             )
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        confirmation_key = _dream_public_confirmation_key(
+            thread_id=thread_id,
+            turn_id=turn_id,
+            run_id=run_id,
+            actor_id=actor_id,
+            tool_call_id=command.tool_call_id,
+        )
+        confirmation = registry.get(confirmation_key) if registry is not None else None
+        if not isinstance(confirmation, dict):
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+                409,
+            )
+        answers = _validate_dream_public_confirmation_answers(
+            command=command,
+            confirmation=confirmation,
+        )
         resolved = factory.confirm_tool(
             session_id=thread_id,
             tool_call_id=command.tool_call_id,
             approved=command.approved,
             reason=command.reason,
-            answers=command.answers,
+            answers=answers,
         )
         if not resolved:
             raise StoryWorkspaceDreamAgentMessageError(
                 "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
                 409,
             )
+        registry.pop(confirmation_key, None)
         return StoryWorkspaceDreamAgentToolConfirmationAccepted(
             story_workspace_run_id=run_id,
             tool_call_id=command.tool_call_id,
