@@ -388,10 +388,24 @@ class StoryWorkspaceEpisodeBindingService:
             )
 
     @staticmethod
+    def _binding_identity(
+        binding: StoryWorkspaceEpisodeBindingFile,
+    ) -> tuple[str, str, str, str, str, str]:
+        return (
+            binding.schema_version,
+            binding.workflow_run_id,
+            binding.episode_uid,
+            binding.story_slug,
+            binding.episode_code,
+            binding.episode_root,
+        )
+
+    @classmethod
     def _write_first_binding(
+        cls,
         run_descriptor: int,
         binding: StoryWorkspaceEpisodeBindingFile,
-    ) -> None:
+    ) -> StoryWorkspaceEpisodeBindingFile:
         temporary_name = f".episode.{uuid4().hex}.tmp"
         descriptor = -1
         try:
@@ -415,13 +429,27 @@ class StoryWorkspaceEpisodeBindingService:
             os.fsync(descriptor)
             os.close(descriptor)
             descriptor = -1
-            os.replace(
-                temporary_name,
-                "episode.json",
-                src_dir_fd=run_descriptor,
-                dst_dir_fd=run_descriptor,
-            )
+            try:
+                os.link(
+                    temporary_name,
+                    "episode.json",
+                    src_dir_fd=run_descriptor,
+                    dst_dir_fd=run_descriptor,
+                    follow_symlinks=False,
+                )
+            except FileExistsError:
+                current = cls._read_binding(run_descriptor)
+                if current is None:
+                    raise StoryWorkspaceEpisodeBindingPathError(
+                        "Episode binding CAS target disappeared"
+                    ) from None
+                if cls._binding_identity(current) != cls._binding_identity(binding):
+                    raise StoryWorkspaceEpisodeBindingIdentityConflict(
+                        "Episode binding identity won a competing first commit"
+                    ) from None
+                return current
             os.fsync(run_descriptor)
+            return binding
         except OSError as exc:
             raise StoryWorkspaceEpisodeBindingPathError(
                 "Episode binding cannot be committed safely"
@@ -435,6 +463,11 @@ class StoryWorkspaceEpisodeBindingService:
                 pass
             except OSError:
                 pass
+            else:
+                try:
+                    os.fsync(run_descriptor)
+                except OSError:
+                    pass
 
     def bind_first_episode(
         self,
@@ -464,8 +497,13 @@ class StoryWorkspaceEpisodeBindingService:
                 revision=1,
                 updated_at=datetime.now(timezone.utc),
             )
-            self._write_first_binding(run_descriptor, binding)
-            return binding
+            committed = self._write_first_binding(run_descriptor, binding)
+            self._validate_binding_authority(
+                committed,
+                workflow_run_id=run_id,
+                story_slug=story_slug,
+            )
+            return committed
 
     def resolve_or_repair_binding(
         self,

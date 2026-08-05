@@ -742,6 +742,12 @@ class StoryWorkspaceEpisodeBindingAvailability(str, Enum):
     UNBOUND = "unbound"
 
 
+class StoryWorkspaceEpisodeBindingPublicReason(str, Enum):
+    """Allowlisted public recovery reasons without internal diagnostics."""
+
+    EPISODE_BINDING_UNPROVEN = "episode_binding_unproven"
+
+
 class StoryWorkspaceEpisodeArtifactAvailability(str, Enum):
     """Filesystem/parse availability, not an Episode business lifecycle."""
 
@@ -804,7 +810,17 @@ class StoryWorkspaceEpisodeBindingRecovery(_StoryWorkspaceDreamWireModel):
 
     auto_repair_attempted: StrictBool
     can_dispatch: StrictBool
-    public_reason: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    public_reason: Optional[StoryWorkspaceEpisodeBindingPublicReason] = None
+
+    @model_validator(mode="after")
+    def reason_matches_dispatch_capability(
+        self,
+    ) -> "StoryWorkspaceEpisodeBindingRecovery":
+        if self.can_dispatch and self.public_reason is not None:
+            raise ValueError("dispatchable bindings must not expose a recovery reason")
+        if not self.can_dispatch and self.public_reason is None:
+            raise ValueError("non-dispatchable bindings require a public reason")
+        return self
 
 
 class StoryWorkspaceEpisodeArtifactManifestEntry(_StoryWorkspaceDreamWireModel):
@@ -856,6 +872,19 @@ class StoryWorkspaceEpisodeArtifactManifestEntry(_StoryWorkspaceDreamWireModel):
             for segment in segments
         ):
             raise ValueError("relative_key must be safely relative")
+        approved_extensions = (
+            {".md", ".yaml", ".yml"}
+            if matching_prefix == "prompts/"
+            else {".json", ".md"}
+        )
+        filename = segments[-1]
+        extension = (
+            "." + filename.rsplit(".", maxsplit=1)[-1].lower()
+            if "." in filename
+            else ""
+        )
+        if extension not in approved_extensions:
+            raise ValueError("relative_key extension is not approved")
         return value
 
     @field_validator("consumers")
@@ -878,6 +907,56 @@ class StoryWorkspaceEpisodeArtifactManifestEntry(_StoryWorkspaceDreamWireModel):
                 raise ValueError("available artifacts require revision, mtime, and size")
         elif any(value is not None for value in metadata):
             raise ValueError("unavailable artifacts must not expose file metadata")
+        if self.relative_key == "episode-outline.md":
+            allowed_producers = {StoryWorkspaceEpisodeProducerAction.PLAN_EPISODE}
+            expected_consumers = [
+                StoryWorkspaceEpisodeArtifactConsumer.EPISODE_OVERVIEW,
+                StoryWorkspaceEpisodeArtifactConsumer.STORYLINE_NAVIGATOR,
+                StoryWorkspaceEpisodeArtifactConsumer.NARRATIVE_WORKBENCH,
+            ]
+        elif self.relative_key == "script.md":
+            allowed_producers = {StoryWorkspaceEpisodeProducerAction.WRITE_SCRIPT}
+            expected_consumers = [
+                StoryWorkspaceEpisodeArtifactConsumer.NARRATIVE_WORKBENCH,
+                StoryWorkspaceEpisodeArtifactConsumer.SHOT_INSPECTOR,
+            ]
+        elif self.relative_key == "storyboard.yaml":
+            allowed_producers = {
+                StoryWorkspaceEpisodeProducerAction.REGENERATE_STORYBOARD
+            }
+            expected_consumers = [
+                StoryWorkspaceEpisodeArtifactConsumer.NARRATIVE_WORKBENCH,
+                StoryWorkspaceEpisodeArtifactConsumer.SHOT_INSPECTOR,
+            ]
+        elif self.relative_key.startswith("prompts/"):
+            allowed_producers = {
+                StoryWorkspaceEpisodeProducerAction.GENERATE_PROMPTS
+            }
+            expected_consumers = [
+                StoryWorkspaceEpisodeArtifactConsumer.SHOT_INSPECTOR,
+                StoryWorkspaceEpisodeArtifactConsumer.PROMPT_VIEW,
+            ]
+        elif self.relative_key.startswith("renders/"):
+            allowed_producers = {
+                StoryWorkspaceEpisodeProducerAction.PREPARE_RENDER_GUIDE
+            }
+            expected_consumers = [
+                StoryWorkspaceEpisodeArtifactConsumer.SHOT_INSPECTOR,
+                StoryWorkspaceEpisodeArtifactConsumer.RENDER_VIEW,
+            ]
+        else:
+            allowed_producers = {
+                StoryWorkspaceEpisodeProducerAction.REVIEW_SCRIPT,
+                StoryWorkspaceEpisodeProducerAction.REVIEW_FULL_CHAIN,
+            }
+            expected_consumers = [
+                StoryWorkspaceEpisodeArtifactConsumer.REVIEW_VIEW,
+                StoryWorkspaceEpisodeArtifactConsumer.SHOT_INSPECTOR,
+            ]
+        if self.producer_action not in allowed_producers:
+            raise ValueError("producer_action does not match relative_key")
+        if self.consumers != expected_consumers:
+            raise ValueError("consumers do not match relative_key")
         return self
 
 
@@ -895,7 +974,7 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
     )
     etag: Optional[str] = Field(
         default=None,
-        pattern=r'^"sha256:[0-9a-f]{64}"$',
+        pattern=r"^sha256:[0-9a-f]{64}$",
     )
     binding_availability: StoryWorkspaceEpisodeBindingAvailability
     binding_recovery: StoryWorkspaceEpisodeBindingRecovery
@@ -915,6 +994,19 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
                 or self.etag is None
             ):
                 raise ValueError("bound surfaces require opaque identity and revisions")
+            if self.etag != self.manifest_revision:
+                raise ValueError("etag must equal manifest_revision")
+            expected_roots = {
+                "episode-outline.md",
+                "script.md",
+                "storyboard.yaml",
+                "prompts/",
+                "renders/",
+                "review-report.md",
+            }
+            actual_roots = {artifact.relative_key for artifact in self.artifacts}
+            if len(self.artifacts) != len(expected_roots) or actual_roots != expected_roots:
+                raise ValueError("bound surfaces require all six root artifacts")
         elif (
             self.opaque_episode_id is not None
             or self.manifest_revision is not None
