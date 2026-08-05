@@ -11,3 +11,4 @@ export {
 } from './StoryWorkspaceExecutionPage';
 export { StoryWorkspaceScenesPage } from './StoryWorkspaceScenesPage';
 export { StoryWorkspaceStoriesPage } from './StoryWorkspaceStoriesPage';
+export { StoryWorkspaceSubscriptionPage } from './StoryWorkspaceSubscriptionPage';

@@ -10,13 +10,39 @@ import { storyWorkspaceDreamAgentFocusCycleIndex } from '../../../components/sto
 const PAGE = readFileSync(new URL('../StoryWorkspaceDreamPage.tsx', import.meta.url), 'utf8');
 const RAIL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail.tsx', import.meta.url), 'utf8');
 const DIALOG = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
+const PANEL = readFileSync(new URL('../../../components/story-workspace/dream/StoryWorkspaceDreamAgentPanel.tsx', import.meta.url), 'utf8');
 const CSS = readFileSync(new URL('../StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
 
 test('Dream page integrates the dedicated rail/dialog and never a generic Chat view', () => {
   expect(PAGE).toContain('<StoryWorkspaceDreamAgentRail');
-  expect(PAGE).toContain('<StoryWorkspaceDreamAgentDialog');
+  expect(PAGE).toContain('<StoryWorkspaceDreamAgentPanel');
+  expect(PAGE).not.toContain('<StoryWorkspaceDreamAgentDialog');
   expect(`${PAGE}\n${RAIL}\n${DIALOG}`).not.toContain('ChatView');
   expect(`${PAGE}\n${RAIL}\n${DIALOG}`).not.toContain('ChatWidgetUI');
+});
+
+test('run-bound Dream keeps its full Agent history inside the editor rail, not in a floating dialog', () => {
+  expect(PAGE).toContain('className="story-workspace-dream__agent-panel"');
+  expect(PAGE).toContain("onOpen={() => openDreamAgent('desktop')}");
+  expect(PAGE).toContain('isOpen={agentPanelOpen}');
+  expect(PAGE).toContain('!agentPanelOpen && (selection && dreamState && selectedFileItem ? (');
+  expect(PAGE.match(/<StoryWorkspaceDreamAgentPanel/g)).toHaveLength(1);
+});
+
+test('masthead activity is a safe Dream Agent preview trigger, never static live lifecycle copy', () => {
+  expect(PAGE).toContain('className="story-workspace-dream__activity"');
+  expect(PAGE).toContain("onClick={() => openDreamAgent('masthead')}");
+  expect(PAGE).toContain('agentPreview');
+  expect(PAGE).not.toContain('className="story-workspace-dream__activity" aria-live');
+});
+
+test('Dream rail and inline panel share one stable controls target', () => {
+  expect(PANEL).toContain('STORY_WORKSPACE_DREAM_AGENT_PANEL_ID');
+  expect(PANEL).toContain('id={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}');
+  expect(RAIL).toContain('readonly controlsId: string');
+  expect(RAIL).toContain('aria-controls={controlsId}');
+  expect(PAGE).toContain('controlsId={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}');
+  expect(PAGE).toContain('aria-controls={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}');
 });
 
 test('rail is a named button and dialog has Escape focus return plus narrow modal semantics', () => {
@@ -29,6 +55,9 @@ test('rail is a named button and dialog has Escape focus return plus narrow moda
   expect(DIALOG).toContain('inputRef.current?.focus()');
   expect(RAIL).toContain('技术详情');
   expect(RAIL).toContain('runtime snapshot');
+  expect(DIALOG).toContain('Dream Agent 正在执行');
+  expect(DIALOG).toContain('Dream Agent 已完成本轮输出');
+  expect(DIALOG).toContain('aria-hidden="true"');
 });
 
 test('rail stays silent, while dialog owns the throttled announcement and mobile focus cycles in both directions', () => {

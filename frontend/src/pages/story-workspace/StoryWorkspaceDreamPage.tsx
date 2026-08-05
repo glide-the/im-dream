@@ -31,7 +31,10 @@ import {
   type StoryWorkspaceDreamFieldValue,
   type StoryWorkspaceDreamStage,
 } from '../../hooks/story-workspace';
-import { StoryWorkspaceDreamAgentDialog } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
+import {
+  STORY_WORKSPACE_DREAM_AGENT_PANEL_ID,
+  StoryWorkspaceDreamAgentPanel,
+} from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentPanel';
 import { StoryWorkspaceDreamAgentRail } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentRail';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import type { WorkflowRun } from '../../api/storyWorkspaceApi';
@@ -120,10 +123,11 @@ export function StoryWorkspaceDreamPage({
   const [activeStage, setActiveStage] = useState<StoryWorkspaceDreamStage>(initialStage);
   const [selection, setSelection] = useState<DreamSelection | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
-  const [agentDialogOpen, setAgentDialogOpen] = useState(false);
+  const [agentPanelOpen, setAgentPanelOpen] = useState(false);
+  const mastheadAgentTriggerRef = useRef<HTMLButtonElement>(null);
   const desktopAgentTriggerRef = useRef<HTMLButtonElement>(null);
   const mobileAgentTriggerRef = useRef<HTMLButtonElement>(null);
-  const [agentReturnTarget, setAgentReturnTarget] = useState<'desktop' | 'mobile'>('desktop');
+  const [agentReturnTarget, setAgentReturnTarget] = useState<'masthead' | 'desktop' | 'mobile'>('masthead');
 
   const draftLifecycleState = dreamState?.status ?? 'story-workspace-dream-waiting-files';
   const files = useStoryWorkspaceDreamFiles(runId, { lifecycleState: draftLifecycleState });
@@ -159,7 +163,7 @@ export function StoryWorkspaceDreamPage({
     setSelection(null);
     setActiveStage(initialStage);
     setEditorError(null);
-    setAgentDialogOpen(false);
+    setAgentPanelOpen(false);
   }, [initialStage, runId]);
 
   useEffect(() => {
@@ -312,11 +316,19 @@ export function StoryWorkspaceDreamPage({
   const deckName = agentContextRun?.deck_plugin_display_name ?? '当前 Deck';
   const pluginVersion = agentContextRun?.deck_plugin_version ?? files.data?.source.deckPluginVersion ?? 'Dream';
   const workflowName = agentContextRun?.workflow_summary ?? 'Dream';
-  const openDreamAgent = (target: 'desktop' | 'mobile') => {
+  const agentPreview = dreamAgent.streamText
+    || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
+    || activityCopy;
+  const openDreamAgent = (target: 'masthead' | 'desktop' | 'mobile') => {
     dreamAgent.markRead();
     setAgentReturnTarget(target);
-    setAgentDialogOpen(true);
+    setAgentPanelOpen(true);
   };
+  const agentReturnRef = agentReturnTarget === 'desktop'
+    ? desktopAgentTriggerRef
+    : agentReturnTarget === 'mobile'
+      ? mobileAgentTriggerRef
+      : mastheadAgentTriggerRef;
   return (
     <section
       className="story-workspace-dream"
@@ -325,20 +337,38 @@ export function StoryWorkspaceDreamPage({
     >
       <header className="story-workspace-dream__masthead">
         <div>
+          <a
+            className="story-workspace-dream__return"
+            href="/story-workspace/dream"
+            onClick={(event) => {
+              if (!onNavigate) return;
+              event.preventDefault();
+              onNavigate('/story-workspace/dream');
+            }}
+          >← 返回 Dream 工作台</a>
           <p className="story-workspace-dream__folio">Dream manuscript · {runId.slice(-6)}</p>
           <h1 id="story-workspace-dream-title">创作工作空间</h1>
         </div>
-        <div className="story-workspace-dream__activity" aria-live="polite">
+        <button
+          aria-controls={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}
+          aria-expanded={agentPanelOpen}
+          aria-label="打开 Dream Agent 消息预览"
+          className="story-workspace-dream__activity"
+          onClick={() => openDreamAgent('masthead')}
+          ref={mastheadAgentTriggerRef}
+          type="button"
+        >
           <span className="story-workspace-dream__activity-mark" />
-          {activityCopy}
-        </div>
+          <span>{agentPreview}</span>
+        </button>
       </header>
 
       <div className="story-workspace-dream__mobile-agent">
         <StoryWorkspaceDreamAgentRail
           agent={dreamAgent}
+          controlsId={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}
           deckName={deckName}
-          isOpen={agentDialogOpen}
+          isOpen={agentPanelOpen}
           onOpen={() => openDreamAgent('mobile')}
           pluginVersion={pluginVersion}
           runId={runId}
@@ -442,8 +472,9 @@ export function StoryWorkspaceDreamPage({
         <aside className="story-workspace-dream__editor" aria-label="Dream 内容编辑器">
           <StoryWorkspaceDreamAgentRail
             agent={dreamAgent}
+            controlsId={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}
             deckName={deckName}
-            isOpen={agentDialogOpen}
+            isOpen={agentPanelOpen}
             onOpen={() => openDreamAgent('desktop')}
             pluginVersion={pluginVersion}
             runId={runId}
@@ -453,7 +484,15 @@ export function StoryWorkspaceDreamPage({
             triggerRef={desktopAgentTriggerRef}
             workflowName={workflowName}
           />
-          {selection && dreamState && selectedFileItem ? (
+          <div className="story-workspace-dream__agent-panel">
+            <StoryWorkspaceDreamAgentPanel
+              agent={dreamAgent}
+              isOpen={agentPanelOpen}
+              onClose={() => setAgentPanelOpen(false)}
+              restoreFocusRef={agentReturnRef}
+            />
+          </div>
+          {!agentPanelOpen && (selection && dreamState && selectedFileItem ? (
             <>
               <header>
                 <p>{STAGE_LABELS[selection.stage].label} · r{dreamState.latestRevisions[selection.stage]}</p>
@@ -536,7 +575,7 @@ export function StoryWorkspaceDreamPage({
               <p>选择一项内容</p>
               <span>人物、场景或分镜文件到达后，可在这里修改允许字段。</span>
             </div>
-          )}
+          ))}
         </aside>
       </div>
 
@@ -567,15 +606,6 @@ export function StoryWorkspaceDreamPage({
           </button>
         )}
       </footer>
-      {agentDialogOpen && (
-        <StoryWorkspaceDreamAgentDialog
-          agent={dreamAgent}
-          deckName={deckName}
-          onClose={() => setAgentDialogOpen(false)}
-          restoreFocusRef={agentReturnTarget === 'mobile' ? mobileAgentTriggerRef : desktopAgentTriggerRef}
-          runId={runId}
-        />
-      )}
     </section>
   );
 }

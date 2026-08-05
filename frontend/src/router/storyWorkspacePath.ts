@@ -11,7 +11,7 @@
 //                    builders stay byte-identical with the surface-link deep
 //                    links (Task 4 handoff note).
 
-export type StoryWorkspaceStaticRoute = 'dream' | 'stories' | 'characters' | 'scenes';
+export type StoryWorkspaceStaticRoute = 'dream' | 'stories' | 'characters' | 'scenes' | 'decks' | 'subscription';
 
 export type StoryWorkspaceParameterizedRoute = 'episode-review' | 'run-execution' | 'dream-legacy';
 
@@ -22,6 +22,8 @@ export const STORY_WORKSPACE_PATHS: Record<StoryWorkspaceStaticRoute, string> = 
   stories: '/story-workspace/stories',
   characters: '/story-workspace/characters',
   scenes: '/story-workspace/scenes',
+  decks: '/story-workspace/decks',
+  subscription: '/story-workspace/subscription',
 };
 
 /**
@@ -248,7 +250,7 @@ export function storyWorkspaceDreamStageForRoute(
   return null;
 }
 
-/** Legacy review belongs only to resource-management routes, never Dream surfaces. */
+/** Legacy review belongs only to resource-management routes, never Dream or Decks surfaces. */
 export function storyWorkspaceAllowsLegacyReviewPanel(
   match: StoryWorkspaceRouteMatch,
 ): boolean {
@@ -256,6 +258,7 @@ export function storyWorkspaceAllowsLegacyReviewPanel(
     match.route === 'dream'
     || match.route === 'episode-review'
     || match.route === 'run-execution'
+    || match.route === 'decks'
   ) return false;
   return storyWorkspaceDreamStageForRoute(match) === null;
 }

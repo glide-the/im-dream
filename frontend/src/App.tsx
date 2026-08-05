@@ -1059,6 +1059,27 @@ export default function App() {
     setHasOpenedChatView(true);
   }, []);
 
+  const handleDeckManagerUpdate = async () => {
+    // @@@ Reload voice configs from deck system.
+    console.log('Deck system updated, reloading voices...');
+    const updatedVoices = await loadVoicesFromDecks();
+    setVoiceConfigs(updatedVoices);
+
+    if (engineRef.current) {
+      engineRef.current.setVoiceConfigs(updatedVoices);
+    }
+
+    console.log(`✅ Loaded ${Object.keys(updatedVoices).length} enabled voices`);
+  };
+
+  const storyWorkspaceDeckManager = (
+    <DeckManager
+      onUpdate={handleDeckManagerUpdate}
+      onChatWithDeck={handleChatWithDeck}
+      onOpenDreamWithDeck={handleOpenDreamWithDeck}
+    />
+  );
+
   // @@@ Handle agent selection from dropdown — creates a Claude-agent thread and inserts an Agent Link widget.
   const handleAgentSelect = useCallback((voiceName: string, voiceConfig: VoiceConfig) => {
     setDropdownVisible(false);
@@ -1488,6 +1509,7 @@ export default function App() {
           overflow: 'hidden',
         }}>
           <StoryWorkspaceRouter
+            decksContent={storyWorkspaceDeckManager}
             onOpenSettings={handleStoryWorkspaceOpenSettings}
           />
         </div>
@@ -1986,22 +2008,7 @@ export default function App() {
           display: 'flex',
           overflow: 'hidden'
         }}>
-          <DeckManager
-            onUpdate={async () => {
-            // @@@ Reload voice configs from deck system
-            console.log('Deck system updated, reloading voices...');
-            const updatedVoices = await loadVoicesFromDecks();
-            setVoiceConfigs(updatedVoices);
-
-            if (engineRef.current) {
-              engineRef.current.setVoiceConfigs(updatedVoices);
-            }
-
-            console.log(`✅ Loaded ${Object.keys(updatedVoices).length} enabled voices`);
-          }}
-            onChatWithDeck={handleChatWithDeck}
-            onOpenDreamWithDeck={handleOpenDreamWithDeck}
-          />
+          {storyWorkspaceDeckManager}
         </div>
       )}
       {currentView === 'settings' && (

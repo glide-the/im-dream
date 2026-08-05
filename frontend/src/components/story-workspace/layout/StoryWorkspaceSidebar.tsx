@@ -1,18 +1,21 @@
 // [Input] Current Story Workspace path, navigation callbacks, collapse state, and the existing auth context.
 // [Output] Render the collapsible desktop Story Workspace navigation sidebar.
 // [Pos] Story Workspace left layout region.
+import { useEffect, useState } from 'react';
 import type { IconType } from 'react-icons';
 import {
   FaBookOpen,
   FaChevronLeft,
   FaChevronRight,
   FaCog,
-  FaFilm,
-  FaHome,
+  FaMoon,
+  FaRegCreditCard,
+  FaSun,
+  FaThLarge,
   FaUserCircle,
-  FaUsers,
 } from 'react-icons/fa';
 import { useAuth } from '../../../contexts/AuthContext';
+import { getTheme, onThemeChange, toggleTheme } from '../../../utils/theme';
 
 interface StoryWorkspaceSidebarItem {
   icon: IconType;
@@ -21,10 +24,9 @@ interface StoryWorkspaceSidebarItem {
 }
 
 const storyWorkspaceSidebarItems: StoryWorkspaceSidebarItem[] = [
-  { icon: FaHome, label: '工作台首页', path: '/story-workspace/dream' },
-  { icon: FaBookOpen, label: '故事管理', path: '/story-workspace/stories' },
-  { icon: FaUsers, label: '角色管理', path: '/story-workspace/characters' },
-  { icon: FaFilm, label: '场景管理', path: '/story-workspace/scenes' },
+  { icon: FaBookOpen, label: 'Dream', path: '/story-workspace/dream' },
+  { icon: FaThLarge, label: 'Decks', path: '/story-workspace/decks' },
+  { icon: FaRegCreditCard, label: '订阅', path: '/story-workspace/subscription' },
 ];
 
 export interface StoryWorkspaceSidebarProps {
@@ -43,8 +45,20 @@ export function StoryWorkspaceSidebar({
   onToggleCollapse,
 }: StoryWorkspaceSidebarProps) {
   const { user } = useAuth();
+  const [isDark, setIsDark] = useState(() => getTheme() === 'dark');
   const displayName = user?.display_name?.trim() || user?.email || 'Ink & Memory 用户';
   const avatarLabel = Array.from(displayName)[0]?.toUpperCase() || 'I';
+  const themeToggleLabel = isDark ? '切换到浅色' : '切换到深色';
+
+  useEffect(() => {
+    return onThemeChange((resolved) => {
+      setIsDark(resolved === 'dark');
+    });
+  }, []);
+
+  const handleToggleTheme = () => {
+    toggleTheme();
+  };
 
   return (
     <div
@@ -88,12 +102,14 @@ export function StoryWorkspaceSidebar({
 
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__brand-text,
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__label,
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__theme-label,
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__settings-label,
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__user-details {
           display: none;
         }
 
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__nav-button,
+        .story-workspace-sidebar--collapsed .story-workspace-sidebar__theme-button,
         .story-workspace-sidebar--collapsed .story-workspace-sidebar__settings-button {
           justify-content: center;
           gap: 0;
@@ -160,6 +176,7 @@ export function StoryWorkspaceSidebar({
         }
 
         .story-workspace-sidebar__nav-button,
+        .story-workspace-sidebar__theme-button,
         .story-workspace-sidebar__settings-button {
           display: flex;
           width: 100%;
@@ -181,12 +198,14 @@ export function StoryWorkspaceSidebar({
         }
 
         .story-workspace-sidebar__nav-button:hover,
+        .story-workspace-sidebar__theme-button:hover,
         .story-workspace-sidebar__settings-button:hover {
           color: var(--color-text-primary);
           background: var(--color-bg-hover);
         }
 
         .story-workspace-sidebar__nav-button:focus-visible,
+        .story-workspace-sidebar__theme-button:focus-visible,
         .story-workspace-sidebar__settings-button:focus-visible {
           outline: 2px solid var(--color-border-focus);
           outline-offset: 2px;
@@ -285,7 +304,7 @@ export function StoryWorkspaceSidebar({
       <nav aria-label="Story Workspace 导航" className="story-workspace-sidebar__nav">
         {storyWorkspaceSidebarItems.map((item) => {
           const Icon = item.icon;
-          const isCurrent = currentPath === item.path;
+          const isCurrent = item.path === currentPath;
 
           return (
             <button
@@ -304,6 +323,18 @@ export function StoryWorkspaceSidebar({
       </nav>
 
       <footer className="story-workspace-sidebar__footer">
+        <button
+          aria-label={isDark ? '切换到浅色' : '切换到深色'}
+          className="story-workspace-sidebar__theme-button"
+          onClick={handleToggleTheme}
+          title={isDark ? '切换到浅色' : '切换到深色'}
+          type="button"
+        >
+          {isDark
+            ? <FaSun aria-hidden="true" className="story-workspace-sidebar__icon" />
+            : <FaMoon aria-hidden="true" className="story-workspace-sidebar__icon" />}
+          <span className="story-workspace-sidebar__theme-label">{themeToggleLabel}</span>
+        </button>
         <button
           className="story-workspace-sidebar__settings-button"
           onClick={onOpenSettings}

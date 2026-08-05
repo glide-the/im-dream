@@ -14,7 +14,7 @@
 //                    story_workspace_dream context state; raw WorkflowRun
 //                    statuses never reach WorkflowContextBar.
 /* eslint-disable react-refresh/only-export-components -- This explicit route module intentionally exports route helpers for App integration. */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { StoryWorkspaceLayout } from '../components/story-workspace/layout/StoryWorkspaceLayout';
 import {
   StoryWorkspaceReviewDetail,
@@ -33,6 +33,7 @@ import {
   StoryWorkspaceExecutionPage,
   StoryWorkspaceScenesPage,
   StoryWorkspaceStoriesPage,
+  StoryWorkspaceSubscriptionPage,
 } from '../pages/story-workspace';
 import {
   readStoryWorkspaceRunParam,
@@ -109,6 +110,7 @@ function renderStoryWorkspaceRoute(
   refreshNonce: number,
   onNavigate: (path: string, notice?: string) => void,
   resolvedDreamRun: WorkflowRun | null,
+  decksContent: ReactNode,
 ) {
   const runId = storyWorkspaceDreamResolvedRunId(resolvedDreamRun);
   const initialDeckId = readStoryWorkspaceDeckParam(match.query);
@@ -142,6 +144,10 @@ function renderStoryWorkspaceRoute(
         );
       }
       return <StoryWorkspaceScenesPage onReview={(scene) => onReview({ resourceType: 'scene', resourceId: scene.id })} refreshNonce={refreshNonce} />;
+    case 'subscription':
+      return <StoryWorkspaceSubscriptionPage />;
+    case 'decks':
+      return <div className="story-workspace-decks-surface">{decksContent}</div>;
     case 'run-execution':
       return (
         <StoryWorkspaceExecutionPage
@@ -165,10 +171,11 @@ function renderStoryWorkspaceRoute(
 }
 
 export interface StoryWorkspaceRouterProps {
+  decksContent: ReactNode;
   onOpenSettings: () => void;
 }
 
-export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterProps) {
+export function StoryWorkspaceRouter({ decksContent, onOpenSettings }: StoryWorkspaceRouterProps) {
   const [activeMatch, setActiveMatch] = useState<StoryWorkspaceRouteMatch>(
     () => resolveStoryWorkspacePath(window.location.pathname, window.location.search) ?? DEFAULT_MATCH,
   );
@@ -339,6 +346,7 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
         resourceRefreshNonce,
         handleNavigate,
         runDeepLink.run,
+        decksContent,
       )}
     </StoryWorkspaceLayout>
   );

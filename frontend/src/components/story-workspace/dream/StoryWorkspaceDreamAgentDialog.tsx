@@ -28,6 +28,16 @@ function storyWorkspaceDreamAgentInputHint(agent: StoryWorkspaceDreamAgentViewMo
   }
 }
 
+function storyWorkspaceDreamAgentDialogStatus(agent: StoryWorkspaceDreamAgentViewModel) {
+  if (agent.snapshot?.lifecycle === 'streaming') {
+    return { icon: '◌', label: 'Dream Agent 正在执行' };
+  }
+  if (agent.snapshot?.canSend) {
+    return { icon: '✓', label: 'Dream Agent 已完成本轮输出' };
+  }
+  return { icon: '◇', label: storyWorkspaceDreamAgentInputHint(agent) ?? 'Dream Agent 正在准备内容' };
+}
+
 export function StoryWorkspaceDreamAgentDialog({
   agent, deckName, runId, onClose, restoreFocusRef,
 }: StoryWorkspaceDreamAgentDialogProps) {
@@ -38,6 +48,7 @@ export function StoryWorkspaceDreamAgentDialog({
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pendingKeyRef = useRef<string | null>(null);
   const inputHint = storyWorkspaceDreamAgentInputHint(agent);
+  const status = storyWorkspaceDreamAgentDialogStatus(agent);
   const { markRead, snapshot, streamText } = agent;
   const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
 
@@ -104,6 +115,9 @@ export function StoryWorkspaceDreamAgentDialog({
           <p>Dream Agent</p>
           <h2 id="story-workspace-dream-agent-dialog-title" ref={headingRef} tabIndex={-1}>Dream Agent</h2>
           <span>{deckName} · Run …{runId.slice(-6)}</span>
+          <p className="story-workspace-dream-agent-dialog__status" role="status">
+            <b aria-hidden="true">{status.icon}</b>{status.label}
+          </p>
         </div>
         <button aria-label="收起 Dream Agent" onClick={onClose} type="button">收起</button>
       </header>

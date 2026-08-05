@@ -95,13 +95,13 @@ Dream 工作台的工作区实现已形成四个独立边界：服务端持久 r
 | 命令 | 输出摘要 | 状态 |
 |---|---|---|
 | `backend/.venv/bin/python -m pytest -q tests/test_story_workspace_dream_reentry.py tests/test_story_workspace_dream_api.py tests/test_story_workspace_dream_files.py tests/test_story_workspace_dream_confirmation.py tests/test_story_workspace_dream_launch.py tests/test_story_workspace_dream_launch_api.py tests/test_story_workspace_dream_agent_messages.py` | `160 passed, 55 subtests passed in 4.05s` | PASS |
-| `frontend: npx playwright test $(find src -path '*/__tests__/*' ...) --reporter=line --workers=1` | `122 passed (824ms)` | PASS |
+| `frontend: find src -path '*/__tests__/*.test.ts' ... npx playwright test --reporter=line --workers=1` | 交互返工后最终当前集合 `120 passed (1.8s)` | PASS |
 | `frontend: npx tsc -b` | exit 0 | PASS |
-| `frontend: npx vite build` | `✓ built in 675ms`；仅既有 chunk-size/dynamic-import 警告 | PASS |
-| `frontend: npx eslint <全部当前改动的前端 TS/TSX/JS/JSX>` | exit 0 | PASS |
+| `frontend: npx vite build` | `✓ built in 1.47s`；仅既有 chunk-size/dynamic-import 警告 | PASS |
+| `frontend: npx eslint <全部当前改动的前端 TS/TSX/JS/JSX>` | 0 error；`App.tsx` 17 条既有 hooks warning | PASS |
 | `git diff --check` | 无输出，exit 0 | PASS |
 | `git diff -- backend/database.py` | 无输出 | PASS |
-| `rg -n "ChatView|ChatWidgetUI" <Dream page/adapter/components>` | 无命中 | PASS |
+| `rg -n "<ChatView|<ChatWidgetUI|dreamContent" <Dream/Execution/adapter/components/router>` | 无生产挂载命中 | PASS |
 
 一次误触发的无文件参数 `npx eslint` 会扫描整个历史仓库，报出 69 个既有 error/20 个 warning；它不属于当前改动文件，也未被本轮修复或夹带。上表的定向 ESLint 命令实际覆盖本轮所有改动的前端代码文件并通过。
 
@@ -139,7 +139,8 @@ Dream 工作台的工作区实现已形成四个独立边界：服务端持久 r
 | durable canonical re-entry 与多 run 选择 | 已实现并测试 | §4 #1–5、§5 pytest/Node seam |
 | 右侧唯一 context/status owner | 已实现并测试 | §4 #9、`StoryWorkspaceDreamReentryLayout.test.ts:25-28` |
 | 安全 snapshot + filtered SSE + reconciliation | 已实现并测试 | §4 #6–8、§5 pytest/Node seam |
-| 专属 Dream dialog、焦点与窄屏规则 | 已实现并测试 | §4 #9–10、#17 |
+| Dream 页唯一内嵌 panel，execution 页专属 dialog、焦点与窄屏规则 | 已实现并测试 | `StoryWorkspaceDreamAgentLayout.test.ts:16-85`、`StoryWorkspaceExecutionPageLayout.test.ts:48-57`；真实 DOM 仍见 §6.2 |
+| Story Workspace Dream/Decks/订阅、内部 DeckManager 与 theme owner | 已实现并测试 | `StoryWorkspaceSidebarR2Layout.test.ts:16-70`、`storyWorkspacePath.test.ts:31-88`；真实浏览器导航仍见 §6.2 |
 | 同 run/thread 安全发送和并发 claim | 已实现并测试 | §4 #11–12 |
 | `.dream` truth/local draft 隔离 | 已实现并测试 | §4 #13–14 |
 | 重连 cursor A/B 自动化路径 | 已实现并测试 | §4 #7；不等同于真实浏览器断网恢复 |
@@ -154,3 +155,11 @@ Dream 工作台的工作区实现已形成四个独立边界：服务端持久 r
 - 只启动过本单元 PID `2659`（port `8017`），已因 bind 拒绝自动退出；未关闭用户 PID `37471` 或其他用户服务。没有仍需关闭的本单元后端、浏览器或临时终端。
 - 调研 PDF 生成的 `tmp/pdfs/ui-design-v2/page-04.png` 与 `page-05.png` 已在根级收尾中删除，`tmp/` 已移除；浏览器产物目录因阻断保持为空。
 - 明确声明：**未执行归档操作。**
+
+## 9. 2026-08-05 交互返工回写
+
+用户运行时检查后发起的入口降噪、Dream Agent surface 分流、Story Workspace 导航/Decks/订阅/主题返工，已详细记录在：
+
+`docs/design/story-workspace/2026-08-05-dream-workbench-interaction-rework-record.md`
+
+该记录包含 R1、R2、R1a、R2a、R2b、R2c 的 Prompt Architect 轮次、Red/Green、独立评审返修、最终 120 项 Node seam、内部 `/story-workspace/decks` 组合边界、只读 `.git` 与真实浏览器未验证边界。本节不改变 §6.2 的诚实阻断结论。

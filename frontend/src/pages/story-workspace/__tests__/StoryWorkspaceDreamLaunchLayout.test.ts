@@ -29,9 +29,26 @@ test('no-run Dream mounts its own launch module instead of Chat children', () =>
   expect(LAUNCH_SOURCE).toContain('role="alert"');
 });
 
-test('router and Story Workspace App branch have no dreamContent Chat seam', () => {
+test('router keeps Decks content route-scoped and Dream free of Chat seams', () => {
   expect(ROUTER_SOURCE).not.toContain('dreamContent');
-  expect(ROUTER_SOURCE).not.toContain('type ReactNode');
+  expect(ROUTER_SOURCE).toContain('type ReactNode');
+  expect(ROUTER_SOURCE).toContain('decksContent: ReactNode;');
+  expect(ROUTER_SOURCE).toContain("case 'decks':");
+
+  const decksRouteBranch = ROUTER_SOURCE.slice(
+    ROUTER_SOURCE.indexOf("case 'decks':"),
+    ROUTER_SOURCE.indexOf("case 'run-execution':"),
+  );
+  expect(decksRouteBranch).toContain('{decksContent}');
+  expect(ROUTER_SOURCE.match(/\{decksContent\}/g)).toHaveLength(1);
+
+  const dreamPageProps = ROUTER_SOURCE.split('<StoryWorkspaceDreamPage').slice(1);
+  expect(dreamPageProps).not.toHaveLength(0);
+  dreamPageProps.forEach((props: string) => {
+    expect(props.slice(0, props.indexOf('/>'))).not.toContain('decksContent');
+  });
+  expect(ROUTER_SOURCE).not.toContain('ChatView');
+  expect(ROUTER_SOURCE).not.toContain('ChatWidgetUI');
 
   const storyWorkspaceStart = APP_SOURCE.indexOf("{currentView === 'story-workspace' && (");
   const storyWorkspaceBranch = APP_SOURCE.slice(
@@ -40,6 +57,7 @@ test('router and Story Workspace App branch have no dreamContent Chat seam', () 
   );
   expect(storyWorkspaceBranch).toContain('<StoryWorkspaceRouter');
   expect(storyWorkspaceBranch).not.toContain('<ChatView');
+  expect(storyWorkspaceBranch).not.toContain('<ChatWidgetUI');
   expect(storyWorkspaceBranch).not.toContain('dreamContent=');
 });
 
@@ -48,4 +66,11 @@ test('launch page keeps one primary action and no business failure branches', ()
   expect(LAUNCH_SOURCE).not.toContain('驳回');
   expect(LAUNCH_SOURCE).not.toContain('归档');
   expect(LAUNCH_SOURCE).not.toContain('重试');
+});
+
+test('launch surface uses one concise lifecycle note instead of a four-step lifecycle guide', () => {
+  expect(LAUNCH_SOURCE).toContain('Dream 会逐步写入人物、场景与分镜');
+  expect(LAUNCH_SOURCE).not.toContain('Creation flow');
+  expect(LAUNCH_SOURCE).not.toContain('从目标到可编辑稿件');
+  expect(LAUNCH_SOURCE).not.toContain('<ol>');
 });

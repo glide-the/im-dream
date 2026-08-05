@@ -14,6 +14,10 @@ const CSS_SOURCE = readFileSync(new URL(
   '../StoryWorkspaceExecutionPage.css',
   import.meta.url,
 ), 'utf8');
+const DIALOG_SOURCE = readFileSync(new URL(
+  '../../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx',
+  import.meta.url,
+), 'utf8');
 
 test('overview is one workplane with tabs and index content, never a fixed rail grid', () => {
   expect(PAGE_SOURCE).toContain('data-execution-depth="overview"');
@@ -39,4 +43,14 @@ test('focus replaces the overview layer and keeps only full-width context naviga
 
 test('execution page uses exactly one dashed rule', () => {
   expect(CSS_SOURCE.match(/dashed/g) ?? []).toHaveLength(1);
+});
+
+test('execution status preview opens the Dream Agent floating dialog without mounting ChatView', () => {
+  expect(PAGE_SOURCE).toContain('useStoryWorkspaceDreamAgent');
+  expect(PAGE_SOURCE).toContain('<StoryWorkspaceDreamAgentDialog');
+  expect(PAGE_SOURCE).toContain('onClick={() => setAgentDialogOpen(true)}');
+  expect(PAGE_SOURCE).toContain('Dream Agent 消息预览');
+  expect(PAGE_SOURCE).toContain('aria-controls="story-workspace-dream-agent-dialog"');
+  expect(DIALOG_SOURCE).toContain('id="story-workspace-dream-agent-dialog"');
+  expect(PAGE_SOURCE).not.toContain('<ChatView');
 });

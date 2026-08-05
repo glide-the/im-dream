@@ -7,11 +7,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
 import { storyWorkspaceReviewDeepLink } from '../../components/story-workspace';
-import { useStoryWorkspaceDreamFiles } from '../../hooks/story-workspace';
+import { useStoryWorkspaceDreamAgent, useStoryWorkspaceDreamFiles } from '../../hooks/story-workspace';
+import { StoryWorkspaceDreamAgentDialog } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
 import { useWorkflowRun } from '../../hooks/useWorkflowRun';
 import {
   storyWorkspaceBuildExecutionWorkspace,
@@ -19,6 +21,7 @@ import {
   storyWorkspaceExecutionFocusNeighbors,
 } from './executionViewModel';
 import './StoryWorkspaceExecutionPage.css';
+import './StoryWorkspaceDreamPage.css';
 
 type ExecutionModule = 'assets' | 'outline';
 
@@ -64,8 +67,11 @@ export function StoryWorkspaceExecutionPage({
 }: StoryWorkspaceExecutionPageProps) {
   const [activeModule, setActiveModule] = useState<ExecutionModule>('outline');
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  const [agentDialogOpen, setAgentDialogOpen] = useState(false);
+  const agentPreviewTriggerRef = useRef<HTMLButtonElement>(null);
   const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
   const currentRun = run?.workflow_run_id === runId ? run : null;
+  const dreamAgent = useStoryWorkspaceDreamAgent(runId);
 
   const navigate = useCallback((href: string, notice?: string) => {
     if (onNavigate) {
@@ -174,6 +180,9 @@ export function StoryWorkspaceExecutionPage({
     : currentRun?.status === 'completed'
       ? '同一 Dream Agent 已完成后续执行'
       : '同一 Dream Agent 正在继续';
+  const agentPreview = dreamAgent.streamText
+    || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
+    || agentStateCopy;
   const focusByKey = (key: string | null) => {
     if (key) setFocusKey(key);
   };
@@ -201,13 +210,21 @@ export function StoryWorkspaceExecutionPage({
             {currentRun?.workflow_summary?.trim() || '故事协作工作台'}
           </h1>
         </div>
-        <div className="story-workspace-collaboration__agent-state" aria-live="polite">
+        <button
+          aria-controls="story-workspace-dream-agent-dialog"
+          aria-expanded={agentDialogOpen}
+          aria-label="打开 Dream Agent 消息预览"
+          className="story-workspace-collaboration__agent-state"
+          onClick={() => setAgentDialogOpen(true)}
+          ref={agentPreviewTriggerRef}
+          type="button"
+        >
           <span aria-hidden="true" />
-          <div>
-            <strong>{agentStateCopy}</strong>
-            <small>workspace r{workspace?.runRevision ?? 0}</small>
-          </div>
-        </div>
+          <span>
+            <strong>Dream Agent 消息预览</strong>
+            <small>{agentPreview}</small>
+          </span>
+        </button>
       </header>
 
       <div className="story-workspace-collaboration__surface">
@@ -356,6 +373,15 @@ export function StoryWorkspaceExecutionPage({
           </main>
         )}
       </div>
+      {agentDialogOpen && (
+        <StoryWorkspaceDreamAgentDialog
+          agent={dreamAgent}
+          deckName={currentRun?.deck_plugin_display_name ?? '当前 Deck'}
+          onClose={() => setAgentDialogOpen(false)}
+          restoreFocusRef={agentPreviewTriggerRef}
+          runId={runId}
+        />
+      )}
     </section>
   );
 }

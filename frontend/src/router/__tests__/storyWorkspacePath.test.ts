@@ -48,6 +48,10 @@ test('static routes resolve exactly as before (no regression)', () => {
   expect(resolveStoryWorkspacePath('/story-workspace/stories')).toMatchObject({ route: 'stories' });
   expect(resolveStoryWorkspacePath('/story-workspace/characters')).toMatchObject({ route: 'characters' });
   expect(resolveStoryWorkspacePath('/story-workspace/scenes')).toMatchObject({ route: 'scenes' });
+  expect(resolveStoryWorkspacePath('/story-workspace/decks')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS.decks,
+    route: 'decks',
+  });
 });
 
 test('run-bound character and scene routes target their Dream file stages', () => {
@@ -78,6 +82,9 @@ test('Dream run surfaces never mount the legacy review panel', () => {
   expect(storyWorkspaceAllowsLegacyReviewPanel(
     resolveStoryWorkspacePath('/story-workspace/stories')!,
   )).toBe(true);
+  expect(storyWorkspaceAllowsLegacyReviewPanel(
+    resolveStoryWorkspacePath('/story-workspace/decks')!,
+  )).toBe(false);
 });
 
 test('execution route resolves with the run id param (C10-②)', () => {

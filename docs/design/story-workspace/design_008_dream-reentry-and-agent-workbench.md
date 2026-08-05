@@ -2,7 +2,7 @@
 
 > Design ID：`design_008`  
 > 日期：2026-08-05  
-> 状态：独立设计评审通过  
+> 状态：2026-08-05 交互返工复审通过
 > 前置裁决：`2026-08-05-dream-reentry-agent-workbench-task1-problem-decision-record.md`  
 > 关系：本设计增量修订 `story-workspace-layout-design.md` 中 Dream route 顶部 Workflow Context 的归属，不改变 `design_006` 的 `.dream` 文件合同，也不改变 `design_007` 的四阶段与一次确认业务合同。
 
@@ -30,7 +30,7 @@ Dream 已能通过独立 adapter 发起同一个 Dream Agent，依次写入 run�
 - 建立 `/story-workspace/dream` 唯一可恢复入口；覆盖离开、刷新、关闭浏览器、重新登录和多 run。
 - 把 Dream route 的 workflow 上下文迁入右侧 Dream Agent 区域，与消息预览形成一个 owner。
 - 建立 Dream 专属安全消息 adapter，实现持久快照、实时增量、重连去重和终态对账。
-- 建立像 Dream 工作台延伸的悬浮交互层，在同一 run 绑定的隐藏 Agent thread 上继续对话。
+- 建立像 Dream 工作台延伸的交互层：Dream 编辑工作台在右栏内展开，execution 详情页使用悬浮 dialog；两者都在同一 run 绑定的隐藏 Agent thread 上继续对话。
 - 保持 `.dream` stage、Agent message、隐藏 thread 和页面 local draft 的职责分离。
 
 ### 1.3 非目标
@@ -102,6 +102,23 @@ Dream 已能通过独立 adapter 发起同一个 Dream Agent，依次写入 run�
 - 列表加载失败：保留“发起新的 Dream”，显示“暂时无法恢复 Dream 列表，请稍后重新打开”；这是技术诊断表现，不写入 run status，不出现“重试任务”业务按钮。
 - 单项 stage 投影暂时不可读：该项仍可从 durable run 聚合出现，状态文案保持“正在恢复 Dream 内容”，不显示业务失败。
 
+### 3.4 入口页降噪与工作台返回
+
+- Dream 入口页只保留一句“Dream 会逐步写入人物、场景与分镜”；不再展示四步生命周期说明块。
+- 从最近 Dream 清单进入 `?run=` 后，工作台左上角必须提供“返回 Dream 工作台”，回到 canonical 清单页，不依赖浏览器历史是否完整。
+
+### 3.5 Story Workspace 主导航
+
+| 导航 | 目标 | owner |
+|---|---|---|
+| Dream | `/story-workspace/dream` | 展示 actor-scoped 进行中/最近 Dream 清单与发起入口 |
+| Decks | `/story-workspace/decks` | 保留 Story Workspace layout/sidebar，主内容直接挂载 App 注入的现有 `DeckManager`；不切换到全局 `decks` view，不复制第二个 Deck 页面 |
+| 订阅 | `/story-workspace/subscription` | 三列 Free / Dream / is Dreaming 说明；未接通计费前不发起请求、不修改权限 |
+
+旧“故事管理 / 角色管理 / 场景管理”不再占据主导航。为保护既有 stage deep link 与兼容路由，其底层 route 可保留，但不再作为产品级主入口。
+
+侧栏 footer 在“设置”上方增加主题切换。它必须复用 `utils/theme.ts` 的 `getTheme / toggleTheme / onThemeChange`，与 TopNavBar 共享同一主题 owner；不新建 localStorage key。折叠态保留图标与动态 `aria-label/title`。
+
 ## 4. 业务模块关系图
 
 ```mermaid
@@ -113,9 +130,11 @@ flowchart LR
     R --> F2["Dream files REST 投影"]
     R --> F3["确认持久事实"]
     H --> P["StoryWorkspaceDreamPage"]
-    P --> Rail["Dream Agent rail"]
-    Rail --> Dialog["Dream Agent dialog"]
+    P --> Rail["Dream Agent message preview"]
+    Rail --> Panel["Dream inline Agent panel"]
+    Rail --> Dialog["Execution Agent dialog"]
     Rail --> M["Dream Agent message adapter"]
+    Panel --> M
     Dialog --> M
     M --> CM["chat_message 持久快照"]
     M --> EB["Claude Agent EventBus 增量"]
@@ -135,16 +154,16 @@ flowchart LR
 
 ### 5.1 区域组成
 
-桌面端 Dream 页面保留现有三块工作面：stage navigation、内容预览、右侧编辑。右栏内部增加 Agent rail，位于编辑内容上方：
+桌面端 Dream 页面保留现有三块工作面：stage navigation、内容预览、右侧编辑。右栏收起时显示 Agent rail 与当前内容编辑器；展开时由 Dream Agent 完整历史/输入区替换编辑器区域，不叠加悬浮窗：
 
 1. `Agent context line`：Deck、workflow、版本、短 run ID；
 2. `Agent status line`：状态点、当前安全状态；
 3. `Message preview`：最近一至三条 assistant text；
-4. `Open trigger`：整块可点击，也有明确“打开 Dream Agent”可访问名称；
-5. 细分隔线；
-6. 当前 stage 编辑器。
+4. `Open trigger`：工作台 masthead 右上角和 rail 都显示同一条最新安全 assistant/streaming 预览，整块可点击；
+5. 收起态下为当前 stage 编辑器；
+6. 展开态下为同 run 的 Dream Agent 历史、实时输出与输入，只保留一个面板 owner。
 
-上下文与消息来自一个 `StoryWorkspaceDreamAgentViewModel`。编辑器继续消费 Dream files/local draft，不共享消息 reducer。
+上下文与消息来自一个 `StoryWorkspaceDreamAgentViewModel`。masthead 预览、rail 和展开面板只是同一 view model 的不同投影。编辑器继续消费 Dream files/local draft，不共享消息 reducer。
 
 ### 5.2 展示层级
 
@@ -178,18 +197,18 @@ Dream route 不再向 `StoryWorkspaceLayout` 传完整 WorkflowContextBar；非 
 
 - Dream Agent 状态点与一行状态；
 - 最近一至三条 allowlisted assistant text，按视觉容器截断，不修改持久内容；
-- 有新消息且 dialog 未打开时显示低干扰未读点和“有新回复”；
+- 有新消息且 Agent 交互层未打开时显示低干扰未读点和“有新回复”；
 - streaming 时以节流后的 text buffer 替换最后一条临时预览；
 - 没有 assistant text 时显示与 lifecycle 对应的安全占位，不显示原始运行事件。
 
 ### 7.2 未读规则
 
 - `lastSeenMessageId` 只属于当前页面会话的 UI 状态，不参与恢复真相；刷新后可保守视为未读。
-- dialog 打开且消息区域可见时清零未读。
+- 内嵌 panel 或 execution dialog 打开且消息区域可见时清零未读。
 - status keepalive、stage revision 和用户自己的消息不增加 assistant 未读数。
 - 不需要新增数据库 DDL；本期不承诺跨设备同步已读状态。
 
-## 8. 展开态悬浮交互层
+## 8. 展开态：Dream 内嵌面板与 execution 悬浮层
 
 ### 8.1 内容结构
 
@@ -207,14 +226,23 @@ Dream Agent 正在输出…
 
 展开层不提供 Chat 导航、thread 新建、模型选择、工具详情、推理折叠、失败重试、驳回或归档。
 
-### 8.2 交互
+### 8.2 surface 分流
 
-- 点击 rail 或“打开 Dream Agent”触发器展开；点击收起或 Escape 关闭。
+| surface | 点击预览后 | 理由 |
+|---|---|---|
+| `/story-workspace/dream?run=...` | 在“Dream 内容编辑器”右栏内展开 `StoryWorkspaceDreamAgentPanel`，替换当前编辑表单 | 这里本身是 Dream 工作台，Agent 交互是同一纸面的延伸 |
+| `/story-workspace/runs/{runId}/execution` | 打开 `StoryWorkspaceDreamAgentDialog` | execution 已有独立内容聚焦层，悬浮层避免替换执行结果 |
+
+Dream 页不同时 mount 内嵌 panel 和 dialog；窄屏也只允许一个 panel 实例，避免重复 `aria-live`、重复已读副作用或输入 draft 分叉。
+
+### 8.3 交互
+
+- 点击 masthead/rail 的实时消息预览展开；点击收起关闭。execution dialog 额外支持 Escape。
 - 打开时记录触发元素，关闭后恢复焦点。
 - Enter 发送，Shift+Enter 换行；空白内容不可发送。
 - 单次 send 生成稳定 idempotency key；首次 dispatch 未决时同 key 重复触发不得再次发送。
 - 服务器返回 busy 时保留 draft，并显示“Dream Agent 正在处理上一条消息”；不是失败态，不提供人工重试工作流。
-- dialog 中的输入 draft 与 Dream stage editor draft 分属不同 state slice，互不覆盖。
+- Agent 输入 draft 与 Dream stage editor draft 分属不同 state slice，互不覆盖。
 
 消息历史在所有 lifecycle 均可打开，但自由输入遵循一次确认门禁：
 
@@ -422,32 +450,36 @@ interface StoryWorkspaceDreamAgentMessageAccepted {
 
 既有 confirmation claim 已使用 `BEGIN IMMEDIATE`、claim ID、lease 和 compare-and-set（`backend/services/story_workspace/dream_confirmation_service.py:623-721,724-788`）；实现应抽取或按同一合同复用，不得改 `backend/database.py` 或新增 DDL。
 
-### 12.2 打开悬浮层并继续对话时序图
+### 12.2 点击预览并继续对话时序图
 
 ```mermaid
 sequenceDiagram
     actor U as 用户
-    participant Rail as Dream Agent Rail
-    participant Dialog as Dream Agent Dialog
+    participant Preview as Agent 消息预览
+    participant Surface as Inline Panel / Execution Dialog
     participant API as Dream Message Adapter
     participant Run as Run/Deck Binding
     participant Thread as 隐藏 Agent thread
 
-    U->>Rail: 点击消息预览
-    Rail->>Dialog: open(triggerRef, runId)
-    Dialog->>API: GET safe snapshot(runId)
-    API-->>Dialog: history + status
-    U->>Dialog: 输入后发送
-    Dialog->>Dialog: 生成 idempotencyKey，禁用重复发送
-    Dialog->>API: POST runId + text + key
+    U->>Preview: 点击安全消息预览
+    alt Dream 工作台
+        Preview->>Surface: 右栏内展开唯一 panel
+    else Execution 页
+        Preview->>Surface: 打开 dialog(triggerRef, runId)
+    end
+    Surface->>API: GET safe snapshot(runId)
+    API-->>Surface: history + status
+    U->>Surface: 输入后发送
+    Surface->>Surface: 生成 idempotencyKey，禁用重复发送
+    Surface->>API: POST runId + text + key
     API->>Run: actor scope + authoritative context
     Run-->>API: trusted thread/Deck/runtime context
     API->>Thread: persist once + resume same thread
-    API-->>Dialog: accepted(messageId)
+    API-->>Surface: accepted(messageId)
     Thread-->>API: filtered live assistant deltas
-    API-->>Dialog: safe increments
-    U->>Dialog: Escape
-    Dialog->>Rail: close + restore focus
+    API-->>Surface: safe increments
+    U->>Surface: 收起（dialog 亦支持 Escape）
+    Surface->>Preview: close + restore focus
 ```
 
 ## 13. `.dream` writer 与 Agent message 的职责边界
@@ -508,23 +540,23 @@ flowchart TB
 
 ### 15.1 桌面端
 
-- viewport ≥ 1180px：Agent rail 常驻右栏顶部；dialog 右侧锚定，宽 `min(420px, calc(100vw - 32px))`，高 `min(720px, 70vh)`。
-- dialog bottom 必须高于 sticky confirmation bar 加 16px；不得遮住唯一主操作。
-- 静止态无重阴影；dialog 仅一层柔和边界/阴影表达浮层。
-- 打开时不锁主页面滚动，dialog 自身滚动；输入区保持可见。
+- viewport ≥ 1180px：Dream Agent rail 常驻右栏顶部；点击后 inline panel 在同一右栏内替换编辑表单，不覆盖主内容与 sticky confirmation bar。
+- execution dialog 右侧锚定，宽 `min(420px, calc(100vw - 32px))`，高 `min(720px, 70vh)`；其 bottom 高于 sticky bar 加 16px。
+- 静止态无重阴影；inline panel 只用细分隔线，execution dialog 仅一层柔和边界/阴影。
+- 打开时不锁主页面滚动；消息历史自身滚动，输入区保持可见。
 
 ### 15.2 窄屏
 
-- viewport < 768px：rail 收成一条状态触发器，位于 page masthead 后、stage navigation 前。
-- dialog 降级为底部 sheet/近全屏层，`inset: 8px`，高度 `min(88dvh, 760px)`；使用 `dvh` 避免软键盘遮住输入。
+- viewport < 768px：Dream rail 收成一条消息预览触发器，位于 page masthead 后、stage navigation 前；展开后仍只 mount 一个 inline panel，在单列编辑区内显示。
+- execution dialog 降级为底部 sheet/近全屏层，`inset: 8px`，高度 `min(88dvh, 760px)`；使用 `dvh` 避免软键盘遮住输入。
 - 内容单列，不出现固定 420px 宽度或水平滚动。
 - modal 时锁背景滚动并约束焦点。
 
 ### 15.3 无障碍
 
 - 触发区实现为 `button`，名称包含“打开 Dream Agent”；不能只给可点击 div。
-- dialog 有 `role=dialog`、`aria-labelledby`；窄屏 modal 为 `aria-modal=true`。
-- 打开后焦点进入标题或输入框；Escape 关闭；关闭后返回原触发按钮。
+- execution dialog 有 `role=dialog`、`aria-labelledby`；窄屏 modal 为 `aria-modal=true`。inline panel 使用命名 `section`，不伪装成 modal。
+- 打开 execution dialog 后焦点进入标题或输入框；Escape 关闭；inline panel 点击收起关闭；两者关闭后都返回原触发按钮。
 - Tab 顺序：收起 → 消息区可交互项 → 输入 → 发送；modal 内焦点循环。
 - 新 assistant 消息的聚合容器 `aria-live=polite`、`aria-atomic=false`；流式 delta 以至少 500ms 节流，避免逐 token 朗读。
 - status 不只依赖颜色；未读同时有文本/可访问名称。
@@ -532,7 +564,7 @@ flowchart TB
 
 ## 16. 桌面端与窄屏线框图
 
-### 16.1 桌面端右侧区域与悬浮层
+### 16.1 桌面端右栏与 surface 分流
 
 ```text
 Warm Canvas #F6EFE5
@@ -541,7 +573,7 @@ Warm Canvas #F6EFE5
 │ nav      │                                  │ Drama Forge · Dream    │
 │          │ 人物 / 场景 / 分镜                │ ● 正在创作 · Run …7A31 │
 │          │                                  │ “我正在整理场景…”       │◄─ trigger/focus return
-│          │                                  │ 打开 Dream Agent        │
+│          │                                  │ 打开后原位替换编辑器 │
 │          │                                  │────────────────────────│
 │          │                                  │ 当前 stage 编辑器       │
 │          │                                  │                        │
@@ -549,7 +581,7 @@ Warm Canvas #F6EFE5
 │ revisions / 修改计数                              [确认并继续]       │◄─ 避让区
 └─────────────────────────────────────────────────────────────────────┘
                                       ┌──────────────────────────────┐
-                                      │ Dream Agent          [收起] │
+                                      │ Execution · Dream Agent [收起] │
                                       │──────────────────────────────│
                                       │ 持久消息 + 实时输出           │
                                       │                              │
@@ -575,7 +607,8 @@ Warm Canvas #F6EFE5
 │ revisions              [确认并继续]│
 └────────────────────────────────────┘
 
-打开后（modal bottom sheet, 8px inset, ≤ 88dvh）
+Dream 页在单列编辑区原位展开唯一 inline panel。
+以下 modal bottom sheet 仅用于 execution 页（8px inset, ≤ 88dvh）。
 ┌────────────────────────────────────┐
 │ Dream Agent                [收起]  │◄─ Escape
 │ Drama Forge · Run …7A31            │
@@ -627,13 +660,17 @@ useStoryWorkspaceDreamRuns
 useStoryWorkspaceDreamAgent
   → StoryWorkspaceDreamAgentViewModel
     → StoryWorkspaceDreamAgentRail
-    → StoryWorkspaceDreamAgentDialog
+    → StoryWorkspaceDreamAgentPanel（Dream route inline）
+    → StoryWorkspaceDreamAgentDialog（execution route floating）
 StoryWorkspaceDreamPage
   → useStoryWorkspaceDreamFiles（stage truth）
   → local draft reducer（未确认编辑 truth）
+App 已配置 DeckManager ReactNode
+  → StoryWorkspaceRouter decksContent
+    → /story-workspace/decks 主内容（保留 layout/sidebar）
 ```
 
-message view model 与 dream files/local draft reducer 只能通过只读 run ID 对齐，不共享 message/stage mutation action。
+message view model 与 dream files/local draft reducer 只能通过只读 run ID 对齐，不共享 message/stage mutation action。`decksContent` 只作为已有 DeckManager 的组合 seam，Router 不接管 voice engine 或 Deck 数据 owner。
 
 ## 18. 技术异常诊断边界
 
@@ -674,8 +711,10 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 
 - [ ] Dream route 顶部不再挂完整 WorkflowContextBar，右侧只有一个上下文/status owner。
 - [ ] Deck/workflow/run/stage/revisions/status 层级符合 §5；编辑器仍可用。
-- [ ] rail 显示状态、最近回复与未读；点击打开专属 dialog。
-- [ ] Escape 关闭并归还焦点；desktop/narrow viewport 无严重遮挡或溢出。
+- [ ] masthead/rail 显示状态、最近回复与未读；Dream 页点击在右栏打开唯一 inline panel，execution 页点击打开专属 dialog。
+- [ ] panel/dialog 的 `aria-controls` 都指向实际唯一目标；关闭后归还焦点，dialog 支持 Escape。
+- [ ] Story Workspace 侧栏为 Dream / Decks / 订阅；Decks 在 `/story-workspace/decks` 内直接显示已有 DeckManager，不卸载 layout/sidebar；主题切换位于设置上方且共享全局 theme owner。
+- [ ] desktop/narrow viewport 无严重遮挡或溢出。
 - [ ] 源码 import graph 与运行时 DOM 都不挂载 ChatView。
 
 ### 20.3 消息与 truth
@@ -704,10 +743,12 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | DEC-035 | actor-scoped Dream run 聚合是重新发现的唯一服务端入口，localStorage 不参与 |
 | DEC-036 | Dream route 移除顶部完整 WorkflowContextBar；右侧 rail 是唯一上下文/status owner |
 | DEC-037 | Dream Agent 消息使用服务端 allowlist 的 snapshot + filtered SSE + terminal reconciliation |
-| DEC-038 | 悬浮层使用 Dream 专属 adapter/view model/components，不挂 ChatView |
+| DEC-038 | Dream 工作台使用右栏 inline panel，execution 页使用悬浮 dialog；两者共用 Dream 专属 adapter/view model，不挂 ChatView |
 | DEC-039 | 用户发送只在 `recent + confirmation dispatched + no live turn` 开放；只提交 run path、text、idempotency key，并以持久 claim 解析可信 thread/Deck/context、去重 active dispatch |
 | DEC-040 | `.dream` stage、message、EventBus、隐藏 thread、本地 draft 保持各自唯一 truth owner |
 | DEC-041 | 技术异常不扩展为失败、重试、驳回或归档业务状态机 |
+| DEC-042 | Story Workspace 主导航为 Dream / Decks / 订阅；Decks 以内部 route 组合已有 DeckManager，不切换全局 view |
+| DEC-043 | 侧栏主题切换复用 `utils/theme.ts` 唯一 owner，不新建主题存储 |
 
 ## 22. 证据索引
 
@@ -723,3 +764,4 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 |---|---|
 | 2026-08-05 | 初稿：基于 Task 1 唯一裁决建立 re-entry、右侧 Agent rail、消息 adapter、悬浮层、truth ownership 与响应式/无障碍合同 |
 | 2026-08-05 | 独立评审修订：收紧 initial/continuation lifecycle 与确认前发送门禁；闭合 run/thread 级持久 claim；明确无 snapshot cursor 的 replay 规则；修正 EventBus/writer 因果；复审 PASS |
+| 2026-08-05 | 交互返工：Dream 入口降噪、run 返回入口、Dream inline panel / execution dialog 分流、状态图标、Dream/Decks/订阅导航、工作台内嵌 DeckManager 与 footer 主题切换 |

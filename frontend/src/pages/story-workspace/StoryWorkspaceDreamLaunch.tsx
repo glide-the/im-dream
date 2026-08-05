@@ -130,7 +130,7 @@ export function StoryWorkspaceDreamLaunch({
       <header className="story-workspace-dream-launch__header">
         <p>Dream · Agent workspace</p>
         <h1 id="dream-launch-title">发起一次 Dream</h1>
-        <span>选择创作所使用的 Deck，描述目标。Agent 会在独立工作空间中产出人物、场景与分镜，并逐步同步到 Dream 页面。</span>
+        <span>选择 Deck 和创作目标。Dream 会逐步写入人物、场景与分镜。</span>
       </header>
 
       <div className="story-workspace-dream-launch__sheet">
@@ -147,17 +147,6 @@ export function StoryWorkspaceDreamLaunch({
             </p>
           )}
         </div>
-        <aside className="story-workspace-dream-launch__guide" aria-label="Dream 页面生命周期">
-          <p>Creation flow</p>
-          <h2>从目标到可编辑稿件</h2>
-          <ol>
-            <li><span>01</span><strong>Agent 产出</strong><small>在绑定的工作空间编写创作文件</small></li>
-            <li><span>02</span><strong>页面渲染</strong><small>人物、场景与分镜按阶段出现</small></li>
-            <li><span>03</span><strong>审阅确认</strong><small>修改页面内容后统一确认一次</small></li>
-            <li><span>04</span><strong>后续执行</strong><small>同一 Agent 接续完成创作</small></li>
-          </ol>
-        </aside>
-
         <form className="story-workspace-dream-launch__form" onSubmit={handleSubmit}>
           <div className="story-workspace-dream-launch__form-heading">
             <p>New dream</p>

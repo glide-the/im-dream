@@ -13,9 +13,10 @@ export interface StoryWorkspaceDreamAgentRailProps {
   readonly stageLine: string;
   readonly runtimeSnapshotId: string | null;
   readonly runtimeLockId: string | null;
+  readonly controlsId: string;
   readonly isOpen: boolean;
   readonly onOpen: () => void;
-  readonly triggerRef: React.RefObject<HTMLButtonElement | null>;
+  readonly triggerRef?: React.RefObject<HTMLButtonElement | null>;
 }
 
 function storyWorkspaceDreamAgentStatus(agent: StoryWorkspaceDreamAgentViewModel): string {
@@ -28,7 +29,7 @@ function storyWorkspaceDreamAgentStatus(agent: StoryWorkspaceDreamAgentViewModel
 }
 
 export function StoryWorkspaceDreamAgentRail({
-  agent, deckName, workflowName, pluginVersion, runId, stageLine, runtimeSnapshotId, runtimeLockId, isOpen, onOpen, triggerRef,
+  agent, deckName, workflowName, pluginVersion, runId, stageLine, runtimeSnapshotId, runtimeLockId, controlsId, isOpen, onOpen, triggerRef,
 }: StoryWorkspaceDreamAgentRailProps) {
   const assistant = agent.snapshot?.messages.filter((message) => message.role === 'assistant').slice(-3) ?? [];
   const preview = agent.streamText || assistant.at(-1)?.text;
@@ -36,7 +37,7 @@ export function StoryWorkspaceDreamAgentRail({
   return (
     <section className="story-workspace-dream-agent-rail" aria-label="Dream Agent 状态">
       <button
-        aria-controls="story-workspace-dream-agent-dialog"
+        aria-controls={controlsId}
         aria-expanded={isOpen}
         aria-label={`打开 Dream Agent。${storyWorkspaceDreamAgentStatus(agent)}${unread ? '，有新回复。' : ''}`}
         className="story-workspace-dream-agent-rail__trigger"
