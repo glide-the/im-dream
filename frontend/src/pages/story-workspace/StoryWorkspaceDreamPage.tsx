@@ -586,33 +586,35 @@ export function StoryWorkspaceDreamPage({
         </aside>
       </div>
 
-      <footer className="story-workspace-dream__confirmation">
-        <div>
-          <strong>{dreamState?.dirtyCount ?? 0} 处本地修改</strong>
-          <span>{revisionLine(dreamState)}</span>
-          {editorError && <em role="status">{editorError}</em>}
-        </div>
-        {isReadOnly ? (
-          <div className="story-workspace-dream__continuing-actions">
-            <span>{activityCopy}</span>
-            {confirmationPersistence.confirmationDispatched && (
-              <button
-                onClick={() => onNavigate?.(`/story-workspace/runs/${encodeURIComponent(runId)}/execution`)}
-                type="button"
-              >查看后续执行</button>
-            )}
+      {!agentPanelOpen && (
+        <footer className="story-workspace-dream__confirmation">
+          <div>
+            <strong>{dreamState?.dirtyCount ?? 0} 处本地修改</strong>
+            <span>{revisionLine(dreamState)}</span>
+            {editorError && <em role="status">{editorError}</em>}
           </div>
-        ) : (
-          <button
-            className="story-workspace-dream__confirm"
-            disabled={!canConfirm}
-            onClick={() => void confirmAndContinue()}
-            type="button"
-          >
-            {confirmation.status === 'confirming' ? '正在确认…' : '确认并继续'}
-          </button>
-        )}
-      </footer>
+          {isReadOnly ? (
+            <div className="story-workspace-dream__continuing-actions">
+              <span>{activityCopy}</span>
+              {confirmationPersistence.confirmationDispatched && (
+                <button
+                  onClick={() => onNavigate?.(`/story-workspace/runs/${encodeURIComponent(runId)}/execution`)}
+                  type="button"
+                >查看后续执行</button>
+              )}
+            </div>
+          ) : (
+            <button
+              className="story-workspace-dream__confirm"
+              disabled={!canConfirm}
+              onClick={() => void confirmAndContinue()}
+              type="button"
+            >
+              {confirmation.status === 'confirming' ? '正在确认…' : '确认并继续'}
+            </button>
+          )}
+        </footer>
+      )}
     </section>
   );
 }

@@ -53,6 +53,16 @@ test('Agent previews and Dream content controls switch one owned editor section'
   expect(PAGE).toContain("aria-current={selected && rightSection === 'content' || undefined}");
 });
 
+test('confirmation footer belongs only to the Dream content section', () => {
+  expect(PAGE).toContain(
+    '{!agentPanelOpen && (\n        <footer className="story-workspace-dream__confirmation">',
+  );
+  expect(PAGE).toContain("onClose={() => setRightSection('content')}");
+  expect(PAGE).toContain('disabled={!canConfirm}');
+  expect(PAGE).toContain('onClick={() => void confirmAndContinue()}');
+  expect(PAGE).toContain("confirmation.status === 'confirming' ? '正在确认…' : '确认并继续'");
+});
+
 test('masthead activity is a safe Dream Agent preview trigger, never static live lifecycle copy', () => {
   expect(PAGE).toContain('className="story-workspace-dream__activity"');
   expect(PAGE).toContain('onClick={openDreamAgent}');
