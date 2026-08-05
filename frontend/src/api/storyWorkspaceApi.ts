@@ -6,6 +6,8 @@ import { apiUrl } from '../lib/apiBase';
 import type {
   StoryWorkspaceDreamLaunchAccepted,
   StoryWorkspaceDreamLaunchCommand,
+  StoryWorkspaceDreamReentryCollection,
+  StoryWorkspaceDreamReentryItem,
 } from '../hooks/story-workspace/contracts';
 
 export const PREFLIGHT_CHECK_ORDER = [
@@ -163,6 +165,7 @@ interface ApiErrorBody {
 }
 
 export const storyWorkspaceDreamLaunchEndpoint = '/api/story-workspace/dream-runs/start';
+export const storyWorkspaceDreamRunsEndpoint = '/api/story-workspace/dream-runs';
 
 export interface StoryWorkspaceDreamLaunchRequestOptions {
   fetchImpl?: typeof fetch;
@@ -278,6 +281,74 @@ export async function storyWorkspaceStartDreamRun(
     throw new Error('Dream launch response is not valid JSON.');
   }
   return storyWorkspaceParseDreamLaunchAccepted(payload);
+}
+
+function storyWorkspaceReadDreamRunString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Dream re-entry response has invalid ${field}.`);
+  }
+  return value;
+}
+
+function storyWorkspaceReadDreamRunRecord(value: unknown, field: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new Error(`Dream re-entry response has invalid ${field}.`);
+  return value;
+}
+
+/** Parse the server-owned collection without deriving client-side run status or order. */
+export function storyWorkspaceParseDreamRuns(value: unknown): StoryWorkspaceDreamReentryCollection {
+  const payload = storyWorkspaceReadDreamRunRecord(value, 'payload');
+  if (!Array.isArray(payload.runs)) throw new Error('Dream re-entry response has invalid runs.');
+  const runs = payload.runs.map((candidate) => {
+    const run = storyWorkspaceReadDreamRunRecord(candidate, 'run');
+    const lifecycle = storyWorkspaceReadDreamRunString(run.lifecycle, 'lifecycle');
+    const group = storyWorkspaceReadDreamRunString(run.group, 'group');
+    if (!['generating', 'waiting_confirmation', 'continuing', 'recent'].includes(lifecycle)) {
+      throw new Error('Dream re-entry response has invalid lifecycle.');
+    }
+    if (group !== 'in_progress' && group !== 'recent') {
+      throw new Error('Dream re-entry response has invalid group.');
+    }
+    if ((lifecycle === 'recent') !== (group === 'recent')) {
+      throw new Error('Dream re-entry response has incompatible recent group.');
+    }
+    const stageRevisions = storyWorkspaceReadDreamRunRecord(run.stageRevisions, 'stageRevisions');
+    for (const revision of Object.values(stageRevisions)) {
+      if (!Number.isInteger(revision) || (revision as number) < 0) {
+        throw new Error('Dream re-entry response has invalid stage revision.');
+      }
+    }
+    return {
+      storyWorkspaceRunId: storyWorkspaceReadDreamRunString(run.storyWorkspaceRunId, 'storyWorkspaceRunId'),
+      deckId: storyWorkspaceReadDreamRunString(run.deckId, 'deckId'),
+      deckDisplayName: storyWorkspaceReadDreamRunString(run.deckDisplayName, 'deckDisplayName'),
+      workflowDisplayName: 'Dream' as const,
+      deckPluginVersion: storyWorkspaceReadDreamRunString(run.deckPluginVersion, 'deckPluginVersion'),
+      lifecycle: lifecycle as StoryWorkspaceDreamReentryItem['lifecycle'],
+      group: group as StoryWorkspaceDreamReentryItem['group'],
+      stageRevisions: stageRevisions as StoryWorkspaceDreamReentryItem['stageRevisions'],
+      confirmationAccepted: run.confirmationAccepted === true,
+      confirmationDispatched: run.confirmationDispatched === true,
+      lastActivityAt: storyWorkspaceReadDreamRunString(run.lastActivityAt, 'lastActivityAt'),
+      createdAt: storyWorkspaceReadDreamRunString(run.createdAt, 'createdAt'),
+      sortKey: storyWorkspaceReadDreamRunString(run.sortKey, 'sortKey'),
+      href: storyWorkspaceReadDreamRunString(run.href, 'href'),
+    } satisfies StoryWorkspaceDreamReentryItem;
+  });
+  return { runs };
+}
+
+export async function storyWorkspaceFetchDreamRuns(
+  fetchImpl: typeof fetch = fetch,
+): Promise<StoryWorkspaceDreamReentryCollection> {
+  const response = await fetchImpl(apiUrl(storyWorkspaceDreamRunsEndpoint), {
+    credentials: 'include',
+    headers: authHeaders(false),
+  });
+  if (!response.ok) {
+    throw new StoryWorkspaceApiError(response.status, null);
+  }
+  return storyWorkspaceParseDreamRuns(await response.json());
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {

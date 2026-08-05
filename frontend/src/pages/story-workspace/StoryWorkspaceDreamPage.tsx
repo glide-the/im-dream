@@ -53,6 +53,7 @@ const STAGE_LABELS: Record<StoryWorkspaceDreamStage, {
 type DreamSelection = { stage: StoryWorkspaceDreamStage; entityId: string };
 
 export interface StoryWorkspaceDreamPageProps {
+  initialDeckId?: string | null;
   initialStage?: StoryWorkspaceDreamStage;
   runId?: string | null;
   onNavigate?: (path: string) => void;
@@ -94,6 +95,7 @@ function revisionLine(state: StoryWorkspaceDreamState | null): string {
 }
 
 export function StoryWorkspaceDreamPage({
+  initialDeckId,
   initialStage = 'characters',
   runId,
   onNavigate,
@@ -271,6 +273,9 @@ export function StoryWorkspaceDreamPage({
   }, [confirmation, dreamState, files]);
 
   if (!runId) {
+    if (initialDeckId) {
+      return <StoryWorkspaceDreamLaunch initialDeckId={initialDeckId} onNavigate={onNavigate} />;
+    }
     return <StoryWorkspaceDreamLaunch onNavigate={onNavigate} />;
   }
 

@@ -56,6 +56,12 @@ export {
   type StoryWorkspaceRunDeepLinkResolution,
   type StoryWorkspaceRunDeepLinkState,
 } from './useRunDeepLink';
+export {
+  storyWorkspaceDreamRunsEndpoint,
+  storyWorkspaceParseDreamRuns,
+  useStoryWorkspaceDreamRuns,
+} from './useStoryWorkspaceDreamRuns';
+export type { StoryWorkspaceDreamRunsState } from './useStoryWorkspaceDreamRuns';
 export type {
   StoryWorkspaceCharacter,
   StoryWorkspaceDreamConfirmationCommand,
@@ -63,6 +69,8 @@ export type {
   StoryWorkspaceDreamConfirmationEdit,
   StoryWorkspaceDreamLaunchAccepted,
   StoryWorkspaceDreamLaunchCommand,
+  StoryWorkspaceDreamReentryCollection,
+  StoryWorkspaceDreamReentryItem,
   StoryWorkspaceDreamFieldValue,
   StoryWorkspaceDreamFilesResponse,
   StoryWorkspaceDreamLifecycleState,

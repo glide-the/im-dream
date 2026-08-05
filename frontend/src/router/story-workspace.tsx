@@ -35,6 +35,7 @@ import {
 } from '../pages/story-workspace';
 import {
   readStoryWorkspaceRunParam,
+  readStoryWorkspaceDeckParam,
   resolveStoryWorkspacePath,
   storyWorkspaceAllowsLegacyReviewPanel,
   storyWorkspaceDreamStageForRoute,
@@ -103,6 +104,7 @@ function renderStoryWorkspaceRoute(
   onNavigate: (path: string, notice?: string) => void,
 ) {
   const runId = readStoryWorkspaceRunParam(match.query);
+  const initialDeckId = readStoryWorkspaceDeckParam(match.query);
   const dreamStage = storyWorkspaceDreamStageForRoute(match);
   switch (match.route) {
     case 'stories':
@@ -112,6 +114,7 @@ function renderStoryWorkspaceRoute(
         return (
           <StoryWorkspaceDreamPage
             initialStage={dreamStage}
+            initialDeckId={initialDeckId}
             onNavigate={onNavigate}
             runId={runId}
           />
@@ -123,6 +126,7 @@ function renderStoryWorkspaceRoute(
         return (
           <StoryWorkspaceDreamPage
             initialStage={dreamStage}
+            initialDeckId={initialDeckId}
             onNavigate={onNavigate}
             runId={runId}
           />
@@ -142,6 +146,7 @@ function renderStoryWorkspaceRoute(
     default:
       return (
         <StoryWorkspaceDreamPage
+          initialDeckId={initialDeckId}
           onNavigate={onNavigate}
           runId={runId}
         />
@@ -273,8 +278,8 @@ export function StoryWorkspaceRouter({ onOpenSettings }: StoryWorkspaceRouterPro
       )}
       sidebarCollapsed={sidebarCollapsed}
       workflowContext={isDreamRoute
-        ? storyWorkspaceDreamWorkflowContext(runDeepLink.run)
-        : null}
+        ? null
+        : storyWorkspaceDreamWorkflowContext(runDeepLink.run)}
     >
       {runDeepLink.notice && (
         <div className="story-workspace-deep-link-notice" role="status">

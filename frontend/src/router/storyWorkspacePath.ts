@@ -156,6 +156,12 @@ export function readStoryWorkspaceRunParam(query: URLSearchParams): string | nul
   return run && run.trim() ? run : null;
 }
 
+/** Optional Deck preselection is navigation intent only; it never authorizes a run. */
+export function readStoryWorkspaceDeckParam(query: URLSearchParams): string | null {
+  const deck = query.get('deck');
+  return deck && deck.trim() ? deck : null;
+}
+
 /** Run-bound asset routes reuse the Dream file surface at the matching stage. */
 export function storyWorkspaceDreamStageForRoute(
   match: StoryWorkspaceRouteMatch,

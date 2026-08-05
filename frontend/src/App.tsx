@@ -222,6 +222,12 @@ export default function App() {
     setCurrentView('settings');
   }, []);
 
+  const handleOpenDreamWithDeck = useCallback((deckId: string) => {
+    const href = `/story-workspace/dream?deck=${encodeURIComponent(deckId)}`;
+    window.history.pushState({ inkDreamView: 'story-workspace' }, '', href);
+    setCurrentView('story-workspace');
+  }, []);
+
   useEffect(() => {
     const handlePopState = (event: PopStateEvent) => {
       if (resolveStoryWorkspacePath(window.location.pathname)) {
@@ -1994,6 +2000,7 @@ export default function App() {
             console.log(`✅ Loaded ${Object.keys(updatedVoices).length} enabled voices`);
           }}
             onChatWithDeck={handleChatWithDeck}
+            onOpenDreamWithDeck={handleOpenDreamWithDeck}
           />
         </div>
       )}

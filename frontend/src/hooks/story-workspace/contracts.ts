@@ -122,6 +122,30 @@ export interface StoryWorkspaceDreamLaunchAccepted {
   readonly threadId: string;
 }
 
+/** One durable, actor-scoped run row rendered by Dream's canonical workbench. */
+export interface StoryWorkspaceDreamReentryItem {
+  readonly storyWorkspaceRunId: string;
+  readonly deckId: string;
+  readonly deckDisplayName: string;
+  readonly workflowDisplayName: 'Dream';
+  readonly deckPluginVersion: string;
+  readonly lifecycle: 'generating' | 'waiting_confirmation' | 'continuing' | 'recent';
+  readonly group: 'in_progress' | 'recent';
+  readonly stageRevisions: Readonly<Partial<Record<StoryWorkspaceDreamStage, number>>>;
+  readonly confirmationAccepted: boolean;
+  readonly confirmationDispatched: boolean;
+  readonly lastActivityAt: string;
+  readonly createdAt: string;
+  /** Server-owned stable ordering evidence. The UI must not recompute it. */
+  readonly sortKey: string;
+  readonly href: string;
+}
+
+/** Response of GET /api/story-workspace/dream-runs. */
+export interface StoryWorkspaceDreamReentryCollection {
+  readonly runs: readonly StoryWorkspaceDreamReentryItem[];
+}
+
 export type StoryWorkspaceDreamStage = 'characters' | 'scenes' | 'storyboards';
 
 export type StoryWorkspaceDreamFieldValue =

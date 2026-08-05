@@ -7,10 +7,62 @@ import { listDecks, type Deck } from '../../api/voiceApi';
 import {
   storyWorkspaceDreamRunPath,
   useStoryWorkspaceDreamLaunch,
+  useStoryWorkspaceDreamRuns,
+  type StoryWorkspaceDreamReentryItem,
 } from '../../hooks/story-workspace';
 
 export interface StoryWorkspaceDreamLaunchProps {
+  initialDeckId?: string | null;
   onNavigate?: (path: string) => void;
+}
+
+const STORY_WORKSPACE_DREAM_REENTRY_COPY: Record<StoryWorkspaceDreamReentryItem['lifecycle'], string> = {
+  generating: 'Dream Agent 正在创作',
+  waiting_confirmation: '等待你修改并确认',
+  continuing: 'Dream Agent 正在继续',
+  recent: '最近完成本轮输出',
+};
+
+function StoryWorkspaceDreamReentryList({
+  runs,
+  onNavigate,
+}: {
+  runs: readonly StoryWorkspaceDreamReentryItem[];
+  onNavigate?: (path: string) => void;
+}) {
+  const inProgress = runs.filter((run) => run.group === 'in_progress');
+  const recent = runs.filter((run) => run.group === 'recent');
+  const renderRun = (run: StoryWorkspaceDreamReentryItem) => (
+    <button
+      className="story-workspace-dream-reentry__item"
+      key={run.storyWorkspaceRunId}
+      onClick={() => onNavigate?.(run.href)}
+      type="button"
+    >
+      <span className="story-workspace-dream-reentry__item-copy">
+        <strong>{run.deckDisplayName}</strong>
+        <small>{STORY_WORKSPACE_DREAM_REENTRY_COPY[run.lifecycle]} · {run.deckPluginVersion} · Run …{run.storyWorkspaceRunId.slice(-6)}</small>
+      </span>
+      <span aria-hidden="true">打开</span>
+    </button>
+  );
+
+  return (
+    <section className="story-workspace-dream-reentry" aria-label="可恢复的 Dream">
+      {inProgress.length > 0 && (
+        <div className="story-workspace-dream-reentry__group">
+          <h2>进行中的 Dream</h2>
+          <div>{inProgress.map(renderRun)}</div>
+        </div>
+      )}
+      {recent.length > 0 && (
+        <div className="story-workspace-dream-reentry__group">
+          <h2>最近的 Dream</h2>
+          <div>{recent.map(renderRun)}</div>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function deckDisplayName(deck: Deck): string {
@@ -18,6 +70,7 @@ function deckDisplayName(deck: Deck): string {
 }
 
 export function StoryWorkspaceDreamLaunch({
+  initialDeckId,
   onNavigate,
 }: StoryWorkspaceDreamLaunchProps) {
   const [decks, setDecks] = useState<Deck[]>([]);
@@ -26,6 +79,7 @@ export function StoryWorkspaceDreamLaunch({
   const [isLoadingDecks, setIsLoadingDecks] = useState(true);
   const [deckError, setDeckError] = useState<Error | null>(null);
   const launch = useStoryWorkspaceDreamLaunch();
+  const reentry = useStoryWorkspaceDreamRuns();
 
   useEffect(() => {
     let active = true;
@@ -37,7 +91,9 @@ export function StoryWorkspaceDreamLaunch({
       setSelectedDeckId((current) => (
         enabledDecks.some((deck) => deck.id === current)
           ? current
-          : enabledDecks[0]?.id ?? ''
+          : enabledDecks.some((deck) => deck.id === initialDeckId)
+            ? initialDeckId ?? ''
+            : enabledDecks[0]?.id ?? ''
       ));
       setDeckError(null);
     }).catch(() => {
@@ -49,7 +105,7 @@ export function StoryWorkspaceDreamLaunch({
     return () => {
       active = false;
     };
-  }, []);
+  }, [initialDeckId]);
 
   const selectedDeck = useMemo(
     () => decks.find((deck) => deck.id === selectedDeckId) ?? null,
@@ -78,6 +134,19 @@ export function StoryWorkspaceDreamLaunch({
       </header>
 
       <div className="story-workspace-dream-launch__sheet">
+        <div className="story-workspace-dream-launch__reentry">
+          {reentry.isLoading && (
+            <p className="story-workspace-dream-reentry__loading" role="status">正在恢复可继续的 Dream…</p>
+          )}
+          {reentry.data && reentry.data.runs.length > 0 && (
+            <StoryWorkspaceDreamReentryList onNavigate={onNavigate} runs={reentry.data.runs} />
+          )}
+          {reentry.error && (
+            <p className="story-workspace-dream-reentry__error" role="status">
+              暂时无法恢复 Dream 列表，请稍后重新打开。
+            </p>
+          )}
+        </div>
         <aside className="story-workspace-dream-launch__guide" aria-label="Dream 页面生命周期">
           <p>Creation flow</p>
           <h2>从目标到可编辑稿件</h2>

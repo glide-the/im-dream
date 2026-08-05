@@ -22,6 +22,8 @@ interface Props {
   onToggleVoice: (voiceId: string, currentEnabled: boolean) => Promise<void>;
   onDeleteVoice: (voiceId: string) => Promise<void>;
   onChatWithDeck?: (deckId: string, voiceInfo: ActiveChatVoice) => void;
+  /** Opens Dream's canonical workbench with Deck selection as navigation intent only. */
+  onOpenDreamWithDeck?: (deckId: string) => void;
 }
 
 export default function DeckEditorModal({
@@ -36,7 +38,8 @@ export default function DeckEditorModal({
   onUpdateVoice,
   onToggleVoice,
   onDeleteVoice,
-  onChatWithDeck
+  onChatWithDeck,
+  onOpenDreamWithDeck,
 }: Props) {
   const voices = useMemo(() => deck.voices || [], [deck.voices]);
   const selectedVoice = useMemo(
@@ -550,6 +553,23 @@ export default function DeckEditorModal({
                           }}
                         >
                           Chat →
+                        </button>
+                      )}
+                      {onOpenDreamWithDeck && (
+                        <button
+                          onClick={() => onOpenDreamWithDeck(deck.id)}
+                          style={{
+                            padding: '8px 12px',
+                            background: 'var(--color-bg-paper)',
+                            border: '1px solid var(--color-border-neutral)',
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            fontSize: 12,
+                            color: 'var(--color-text-primary)'
+                          }}
+                          type="button"
+                        >
+                          打开 Dream
                         </button>
                       )}
                     </div>
