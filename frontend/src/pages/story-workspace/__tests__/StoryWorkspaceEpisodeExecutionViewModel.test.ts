@@ -532,7 +532,7 @@ function surface(
     bindingAvailability: 'bound',
     bindingRecovery: {
       autoRepairAttempted: false,
-      canDispatch: true,
+      canDispatch: false,
       publicReason: null,
     },
     artifacts: ARTIFACT_SPECS.map(([relativeKey, producerAction, consumers]) => ({
