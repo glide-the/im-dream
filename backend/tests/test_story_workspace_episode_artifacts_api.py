@@ -459,6 +459,52 @@ class TestStoryWorkspaceEpisodeArtifactService:
         assert availability["script.md"] is StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
         assert first.manifest_revision != second.manifest_revision
 
+    def test_oversize_root_revision_changes_after_same_size_preserved_mtime_rewrite(
+        self,
+    ) -> None:
+        outline = self.episode / "episode-outline.md"
+        outline.write_bytes(b"x" * (1024 * 1024 + 1))
+        original = outline.stat()
+        first = self.read_surface()
+
+        outline.write_bytes(b"y" * original.st_size)
+        os.utime(outline, ns=(original.st_atime_ns, original.st_mtime_ns))
+        second = self.read_surface()
+
+        outline_fact = next(
+            item
+            for item in second.artifacts
+            if item.relative_key == "episode-outline.md"
+        )
+        assert (
+            outline_fact.availability
+            is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+        )
+        assert first.manifest_revision != second.manifest_revision
+
+    def test_unapproved_directory_entry_revision_changes_after_same_size_preserved_mtime_rewrite(
+        self,
+    ) -> None:
+        renders = self.episode / "renders"
+        renders.mkdir()
+        unapproved = renders / "private.bin"
+        unapproved.write_bytes(b"AAAA")
+        original = unapproved.stat()
+        first = self.read_surface()
+
+        unapproved.write_bytes(b"BBBB")
+        os.utime(unapproved, ns=(original.st_atime_ns, original.st_mtime_ns))
+        second = self.read_surface()
+
+        renders_fact = next(
+            item for item in second.artifacts if item.relative_key == "renders/"
+        )
+        assert (
+            renders_fact.availability
+            is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+        )
+        assert first.manifest_revision != second.manifest_revision
+
     def test_prompt_count_and_unapproved_render_entry_are_isolated_invalid_roots(self) -> None:
         prompts = self.episode / "prompts"
         prompts.mkdir()

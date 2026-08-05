@@ -267,8 +267,11 @@ class StoryWorkspaceEpisodeArtifactService:
         payload = json.dumps(
             [
                 relative_key,
+                metadata.st_dev,
+                metadata.st_ino,
                 metadata.st_size,
                 metadata.st_mtime_ns,
+                metadata.st_ctime_ns,
                 stat.S_IFMT(metadata.st_mode),
                 extra,
             ],
@@ -453,7 +456,15 @@ class StoryWorkspaceEpisodeArtifactService:
                 if not stat.S_ISREG(metadata.st_mode):
                     non_regular_entry = True
                 entry_facts.append(
-                    [entry, metadata.st_size, metadata.st_mtime_ns]
+                    [
+                        entry,
+                        metadata.st_dev,
+                        metadata.st_ino,
+                        metadata.st_size,
+                        metadata.st_mtime_ns,
+                        metadata.st_ctime_ns,
+                        stat.S_IFMT(metadata.st_mode),
+                    ]
                 )
             invalid_directory_revision = "sha256:" + hashlib.sha256(
                 json.dumps(
