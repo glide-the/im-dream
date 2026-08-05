@@ -7,14 +7,27 @@ import { useCallback, useEffect, useReducer, useRef } from 'react';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { apiUrl } from '../../lib/apiBase';
 import {
+  storyWorkspaceParseEpisodeActionAccepted,
   storyWorkspaceParseEpisodeArtifactSurface,
+  type StoryWorkspaceEpisodeActionAccepted,
+  type StoryWorkspaceEpisodeActionContinueRequest,
   type StoryWorkspaceEpisodeArtifactSurface,
+  type StoryWorkspaceEpisodeBindingRecoveryRequest,
+  type StoryWorkspaceEpisodeDispatchAction,
 } from './contracts';
 
 const STORY_WORKSPACE_EPISODE_OUTPUT_EVENT = 'ink:story-workspace-output';
 const STORY_WORKSPACE_EPISODE_MIN_POLL_INTERVAL_MS = 5000;
 const STORY_WORKSPACE_EPISODE_MAX_TIMER_MS = 2_147_483_647;
 const STORY_WORKSPACE_EPISODE_INVALID_MESSAGE = 'Episode artifact data is unavailable.';
+const STORY_WORKSPACE_EPISODE_ACTION_INVALID_MESSAGE = 'Episode action data is unavailable.';
+const STORY_WORKSPACE_EPISODE_ACTION_UNAVAILABLE_MESSAGE = 'Episode action is unavailable.';
+const STORY_WORKSPACE_EPISODE_RUN_ID = /^run_[0-9a-f]{32}$/;
+const STORY_WORKSPACE_EPISODE_HEX_ID = /^[0-9a-f]{32}$/;
+const STORY_WORKSPACE_EPISODE_REVISION = /^sha256:[0-9a-f]{64}$/;
+const STORY_WORKSPACE_EPISODE_IDEMPOTENCY_KEY = /^[A-Za-z0-9._:-]{1,255}$/;
+const STORY_WORKSPACE_EPISODE_UNSAFE_GUIDANCE =
+  /(?:\/drama-forge:|(?:^|\s)(?:sudo|curl|wget|(?:ba|z|fi)?sh|python|node|npm|npx|pnpm|yarn|git|claude)\b|--(?:api[-_]?key|token|secret|password|credential|authorization)\b|\b(?:hidden|internal|private|model)\s+reasoning\b|\bchain\s+of\s+thought\b|\bsystem\s+prompt\b|(?:^|[\s('"`=])(?:\/(?!\/)[A-Za-z0-9._~-]+(?:\/[^\s`]+)*|[A-Za-z]:[\\/][^\s`]+|\\\\[^\\\s]+\\[^\s`]+|file:\/\/|~[\\/]|\$HOME(?:[\\/]|\b)|\.\.[\\/]))/i;
 const STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS = [
   'episode-outline.md',
   'script.md',
@@ -47,8 +60,188 @@ export class StoryWorkspaceEpisodeArtifactsContractError extends Error {
   }
 }
 
+export class StoryWorkspaceEpisodeActionHttpError extends Error {
+  readonly status: number;
+
+  constructor(status: number) {
+    super(`Episode action request failed (${status}).`);
+    this.name = 'StoryWorkspaceEpisodeActionHttpError';
+    this.status = status;
+  }
+}
+
+export class StoryWorkspaceEpisodeActionContractError extends Error {
+  constructor() {
+    super(STORY_WORKSPACE_EPISODE_ACTION_INVALID_MESSAGE);
+    this.name = 'StoryWorkspaceEpisodeActionContractError';
+  }
+}
+
+export class StoryWorkspaceEpisodeActionUnavailableError extends Error {
+  constructor() {
+    super(STORY_WORKSPACE_EPISODE_ACTION_UNAVAILABLE_MESSAGE);
+    this.name = 'StoryWorkspaceEpisodeActionUnavailableError';
+  }
+}
+
 export function storyWorkspaceEpisodeArtifactsEndpoint(runId: string): string {
   return `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/episode-artifacts`;
+}
+
+export function storyWorkspaceEpisodeBindingRecoveryEndpoint(runId: string): string {
+  return `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/episode-binding/recover`;
+}
+
+export function storyWorkspaceEpisodeActionContinueEndpoint(runId: string): string {
+  return `/api/story-workspace/workflow-runs/${encodeURIComponent(runId)}/episode-actions/continue`;
+}
+
+interface StoryWorkspaceEpisodeActionFetchOptions {
+  readonly fetchImpl?: typeof fetch;
+  readonly token?: string | null;
+  readonly idempotencyKey: string;
+}
+
+export type StoryWorkspaceEpisodeBindingRecoveryOptions =
+  StoryWorkspaceEpisodeActionFetchOptions;
+
+export interface StoryWorkspaceEpisodeActionContinueOptions
+  extends StoryWorkspaceEpisodeActionFetchOptions {
+  readonly userGuidance?: string | null;
+}
+
+function storyWorkspaceEpisodeActionIdempotencyKey(value: unknown): string {
+  if (typeof value !== 'string' || !STORY_WORKSPACE_EPISODE_IDEMPOTENCY_KEY.test(value)) {
+    throw new StoryWorkspaceEpisodeActionUnavailableError();
+  }
+  return value;
+}
+
+function storyWorkspaceEpisodeActionGuidance(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'string') throw new StoryWorkspaceEpisodeActionUnavailableError();
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (
+    trimmed.length > 2000
+    || [...trimmed].some((character) => {
+      const code = character.charCodeAt(0);
+      return code === 127 || (code < 32 && code !== 9 && code !== 10);
+    })
+    || STORY_WORKSPACE_EPISODE_UNSAFE_GUIDANCE.test(trimmed)
+  ) throw new StoryWorkspaceEpisodeActionUnavailableError();
+  return trimmed;
+}
+
+function storyWorkspaceEpisodeActionHeaders(
+  token: string | null | undefined,
+  etag?: string,
+): Headers {
+  const headers = new Headers({
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  });
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (etag !== undefined) headers.set('If-Match', storyWorkspaceEpisodeQuotedEtag(etag));
+  return headers;
+}
+
+async function storyWorkspacePostEpisodeAction(
+  endpoint: string,
+  body: StoryWorkspaceEpisodeBindingRecoveryRequest | StoryWorkspaceEpisodeActionContinueRequest,
+  options: StoryWorkspaceEpisodeActionFetchOptions,
+  etag?: string,
+): Promise<StoryWorkspaceEpisodeActionAccepted> {
+  const response = await (options.fetchImpl ?? fetch)(endpoint, {
+    method: 'POST',
+    credentials: 'include',
+    headers: storyWorkspaceEpisodeActionHeaders(options.token, etag),
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw new StoryWorkspaceEpisodeActionHttpError(response.status);
+  if (response.status !== 202) throw new StoryWorkspaceEpisodeActionContractError();
+  let payload: unknown;
+  try {
+    payload = await response.json();
+    return storyWorkspaceParseEpisodeActionAccepted(payload);
+  } catch (error) {
+    if (error instanceof StoryWorkspaceEpisodeActionContractError) throw error;
+    throw new StoryWorkspaceEpisodeActionContractError();
+  }
+}
+
+function storyWorkspaceEpisodeActionRunMatches(
+  runId: string,
+  surface: StoryWorkspaceEpisodeArtifactSurface,
+): boolean {
+  return STORY_WORKSPACE_EPISODE_RUN_ID.test(runId) && surface.runId === runId;
+}
+
+export async function storyWorkspaceRecoverEpisodeBinding(
+  runId: string,
+  surface: StoryWorkspaceEpisodeArtifactSurface,
+  options: StoryWorkspaceEpisodeBindingRecoveryOptions,
+): Promise<StoryWorkspaceEpisodeActionAccepted> {
+  if (
+    !storyWorkspaceEpisodeActionRunMatches(runId, surface)
+    || surface.bindingAvailability !== 'unbound'
+    || surface.workflow !== null
+    || !surface.bindingRecovery.canDispatch
+  ) throw new StoryWorkspaceEpisodeActionUnavailableError();
+  const body: StoryWorkspaceEpisodeBindingRecoveryRequest = {
+    idempotencyKey: storyWorkspaceEpisodeActionIdempotencyKey(options.idempotencyKey),
+  };
+  const accepted = await storyWorkspacePostEpisodeAction(
+    storyWorkspaceEpisodeBindingRecoveryEndpoint(runId),
+    body,
+    options,
+  );
+  if (
+    accepted.runId !== runId
+    || accepted.episodeId !== null
+    || accepted.capability !== 'recover_first_episode_binding'
+  ) throw new StoryWorkspaceEpisodeActionContractError();
+  return accepted;
+}
+
+export async function storyWorkspaceContinueEpisodeAction(
+  runId: string,
+  surface: StoryWorkspaceEpisodeArtifactSurface,
+  options: StoryWorkspaceEpisodeActionContinueOptions,
+): Promise<StoryWorkspaceEpisodeActionAccepted> {
+  const action = surface.workflow?.nextAction.action;
+  const episodeId = surface.opaqueEpisodeId;
+  const etag = surface.etag;
+  if (
+    !storyWorkspaceEpisodeActionRunMatches(runId, surface)
+    || surface.bindingAvailability !== 'bound'
+    || surface.workflow === null
+    || !surface.workflow.nextAction.canDispatch
+    || action === undefined
+    || action === 'none_in_scope'
+    || episodeId === null
+    || !STORY_WORKSPACE_EPISODE_HEX_ID.test(episodeId)
+    || etag === null
+    || !STORY_WORKSPACE_EPISODE_REVISION.test(etag)
+  ) throw new StoryWorkspaceEpisodeActionUnavailableError();
+  const body: StoryWorkspaceEpisodeActionContinueRequest = {
+    episodeId,
+    action: action as StoryWorkspaceEpisodeDispatchAction,
+    idempotencyKey: storyWorkspaceEpisodeActionIdempotencyKey(options.idempotencyKey),
+    userGuidance: storyWorkspaceEpisodeActionGuidance(options.userGuidance),
+  };
+  const accepted = await storyWorkspacePostEpisodeAction(
+    storyWorkspaceEpisodeActionContinueEndpoint(runId),
+    body,
+    options,
+    etag,
+  );
+  if (
+    accepted.runId !== runId
+    || accepted.episodeId !== episodeId
+    || accepted.capability !== action
+  ) throw new StoryWorkspaceEpisodeActionContractError();
+  return accepted;
 }
 
 export function storyWorkspaceEpisodeArtifactsPollInterval(requested?: number): number {

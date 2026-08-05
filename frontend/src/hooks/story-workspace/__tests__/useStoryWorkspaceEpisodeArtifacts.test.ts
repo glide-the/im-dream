@@ -21,11 +21,13 @@ import {
   storyWorkspaceShouldInvalidateEpisodeArtifacts,
 } from '../useStoryWorkspaceEpisodeArtifacts';
 import {
+  STORY_WORKSPACE_EPISODE_ACTIONS,
   storyWorkspaceEpisodeStringFieldClassification,
   storyWorkspaceParseEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeStringFieldClass,
 } from '../contracts';
+import * as storyWorkspaceEpisodeArtifactsModule from '../useStoryWorkspaceEpisodeArtifacts';
 
 const RUN_ID = `run_${'1'.repeat(32)}`;
 const OTHER_RUN_ID = `run_${'2'.repeat(32)}`;
@@ -46,6 +48,13 @@ const REVISION_3 = `sha256:${'3'.repeat(64)}`;
 const REVISION_4 = `sha256:${'4'.repeat(64)}`;
 const REVISION_5 = `sha256:${'5'.repeat(64)}`;
 const CONTENT_REVISION = `sha256:${'a'.repeat(64)}`;
+const AGGREGATE_ETAGS: Readonly<Record<string, string>> = {
+  [REVISION_1]: `sha256:${'6'.repeat(64)}`,
+  [REVISION_2]: `sha256:${'7'.repeat(64)}`,
+  [REVISION_3]: `sha256:${'8'.repeat(64)}`,
+  [REVISION_4]: `sha256:${'9'.repeat(64)}`,
+  [REVISION_5]: `sha256:${'b'.repeat(64)}`,
+};
 
 interface U5BrowserHarnessSnapshot {
   readonly requests: readonly {
@@ -78,6 +87,32 @@ interface U5BrowserHarness {
   respondError: (index: number, status: number) => void;
   snapshot: () => U5BrowserHarnessSnapshot;
 }
+
+interface U10FEpisodeActionApi {
+  storyWorkspaceEpisodeBindingRecoveryEndpoint: (runId: string) => string;
+  storyWorkspaceEpisodeActionContinueEndpoint: (runId: string) => string;
+  storyWorkspaceRecoverEpisodeBinding: (
+    runId: string,
+    surface: StoryWorkspaceEpisodeArtifactSurface,
+    options: {
+      readonly fetchImpl?: typeof fetch;
+      readonly token?: string | null;
+      readonly idempotencyKey: string;
+    },
+  ) => Promise<unknown>;
+  storyWorkspaceContinueEpisodeAction: (
+    runId: string,
+    surface: StoryWorkspaceEpisodeArtifactSurface,
+    options: {
+      readonly fetchImpl?: typeof fetch;
+      readonly token?: string | null;
+      readonly idempotencyKey: string;
+      readonly userGuidance?: string | null;
+    },
+  ) => Promise<unknown>;
+}
+
+const u10fActionApi = storyWorkspaceEpisodeArtifactsModule as unknown as U10FEpisodeActionApi;
 
 declare global {
   interface Window {
@@ -112,15 +147,36 @@ function artifacts(available: readonly string[] = []) {
   }));
 }
 
+function aggregateEtagFor(manifestRevision: string): string {
+  const etag = AGGREGATE_ETAGS[manifestRevision];
+  if (!etag) throw new Error(`unknown test manifest revision ${manifestRevision}`);
+  return etag;
+}
+
+function workflow(
+  action = 'plan_episode',
+  diagnostic = 'ready',
+  canDispatch = true,
+): Record<string, unknown> {
+  return {
+    factsRevision: 0,
+    nextAction: { action, diagnostic, canDispatch },
+    prerequisites: [],
+    legacyPartial: false,
+  };
+}
+
 function boundSurface(
   revision = REVISION_1,
   available: readonly string[] = [],
+  workflowProjection: Record<string, unknown> = workflow(),
+  aggregateEtag = aggregateEtagFor(revision),
 ): Record<string, unknown> {
   return {
     runId: RUN_ID,
     opaqueEpisodeId: EPISODE_ID,
     manifestRevision: revision,
-    etag: revision,
+    etag: aggregateEtag,
     bindingAvailability: 'bound',
     bindingRecovery: {
       autoRepairAttempted: false,
@@ -312,6 +368,7 @@ function boundSurface(
         duplicateQueueShotIds: [],
       },
     },
+    workflow: workflowProjection,
   };
 }
 
@@ -330,6 +387,32 @@ function unboundSurface(): Record<string, unknown> {
     artifacts: [],
     narrative: null,
     auxiliary: null,
+    workflow: null,
+  };
+}
+
+function recoverableUnboundSurface(): Record<string, unknown> {
+  return {
+    ...unboundSurface(),
+    bindingRecovery: {
+      autoRepairAttempted: false,
+      canDispatch: true,
+      publicReason: null,
+    },
+  };
+}
+
+function acceptedActionResponse(
+  capability = 'plan_episode',
+  episodeId: string | null = EPISODE_ID,
+): Record<string, unknown> {
+  return {
+    runId: RUN_ID,
+    episodeId,
+    capability,
+    messageId: 'dream_agent_test',
+    accepted: true,
+    replayed: false,
   };
 }
 
@@ -351,6 +434,12 @@ function artifactInvalidSurface(
 
 function fullyPopulatedSurface(): Record<string, unknown> {
   const surface = boundSurface(REVISION_5, ARTIFACT_SPECS.map(([key]) => key));
+  surface.workflow = {
+    ...workflow('validate_episode', 'needs_confirmation', true),
+    factsRevision: 42,
+    prerequisites: ['review_full_chain'],
+    legacyPartial: true,
+  };
   surface.bindingRecovery = {
     autoRepairAttempted: true,
     canDispatch: false,
@@ -496,7 +585,76 @@ test('new revisions preserve stable entity identities without array-position inf
   expect(second.narrative?.shots[0].id).toBe(first.narrative?.shots[0].id);
 });
 
-test('rejects unknown schema/enum, duplicate IDs, bad keys, inconsistent ETags, and path leaks', () => {
+test('requires strict workflow truth on bound surfaces and null workflow on unbound surfaces', () => {
+  expect(STORY_WORKSPACE_EPISODE_ACTIONS).toEqual([
+    'plan_episode',
+    'write_script',
+    'review_script',
+    'refresh_assets',
+    'regenerate_storyboard',
+    'generate_prompts',
+    'review_full_chain',
+    'validate_episode',
+    'prepare_render_guide',
+    'none_in_scope',
+  ]);
+  for (const action of STORY_WORKSPACE_EPISODE_ACTIONS) {
+    const parsedAction = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+      REVISION_1,
+      [],
+      workflow(action, 'ready', action !== 'none_in_scope'),
+    )).workflow?.nextAction.action;
+    expect(parsedAction).toBe(action);
+  }
+  const parsed = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+    REVISION_1,
+    [],
+    workflow('generate_prompts', 'needs_confirmation', true),
+  ));
+  expect(parsed.manifestRevision).toBe(REVISION_1);
+  expect(parsed.etag).toBe(aggregateEtagFor(REVISION_1));
+  expect(parsed.auxiliary?.manifestRevision).toBe(REVISION_1);
+  expect(parsed.workflow).toEqual({
+    factsRevision: 0,
+    nextAction: {
+      action: 'generate_prompts',
+      diagnostic: 'needs_confirmation',
+      canDispatch: true,
+    },
+    prerequisites: [],
+    legacyPartial: false,
+  });
+  expect(storyWorkspaceParseEpisodeArtifactSurface(unboundSurface()).workflow).toBeNull();
+
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface({
+    ...boundSurface(),
+    workflow: null,
+  })).toThrow(/workflow/i);
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface({
+    ...unboundSurface(),
+    workflow: workflow(),
+  })).toThrow(/unbound/i);
+
+  for (const invalidWorkflow of [
+    { ...workflow(), factsRevision: -1 },
+    { ...workflow(), factsRevision: 0.5 },
+    { ...workflow(), nextAction: { action: 'invent_episode', diagnostic: 'ready', canDispatch: true } },
+    { ...workflow(), nextAction: { action: 'plan_episode', diagnostic: 'raw_agent_trace', canDispatch: true } },
+    { ...workflow(), nextAction: { action: 'none_in_scope', diagnostic: 'ready', canDispatch: true } },
+    { ...workflow(), prerequisites: ['plan_episode', 'plan_episode'] },
+    { ...workflow(), prerequisites: ['none_in_scope'] },
+    { ...workflow(), prerequisites: Array.from({ length: 10 }, (_, index) => `step_${index}`) },
+    { ...workflow(), legacyPartial: 'false' },
+    { ...workflow(), rawAgentMessage: '/Users/private/agent.log' },
+  ]) {
+    expect(() => storyWorkspaceParseEpisodeArtifactSurface({
+      ...boundSurface(),
+      workflow: invalidWorkflow,
+    })).toThrow();
+  }
+});
+
+test('rejects unknown schema/enum, duplicate IDs, bad keys, malformed aggregate ETags, and path leaks', () => {
   expect(() => storyWorkspaceParseEpisodeArtifactSurface({
     ...boundSurface(),
     schema: 'episode-surface/v2',
@@ -521,8 +679,12 @@ test('rejects unknown schema/enum, duplicate IDs, bad keys, inconsistent ETags, 
 
   expect(() => storyWorkspaceParseEpisodeArtifactSurface({
     ...boundSurface(),
-    etag: REVISION_2,
+    etag: 'manifest-v1',
   })).toThrow(/etag/i);
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface({
+    ...boundSurface(),
+    etag: REVISION_2,
+  })).not.toThrow();
 
   const leaked = boundSurface(REVISION_1, ['episode-outline.md']);
   const leakedNarrative = leaked.narrative as Record<string, unknown>;
@@ -581,7 +743,7 @@ test('all public Episode text fails closed and parser diagnostics never echo hos
       fetchImpl: (async () => new Response(JSON.stringify({
         ...boundSurface(),
         [secretKey]: 'raw tool value --token another-secret',
-      }), { status: 200, headers: { ETag: `"${REVISION_1}"` } })) as typeof fetch,
+      }), { status: 200, headers: { ETag: `"${aggregateEtagFor(REVISION_1)}"` } })) as typeof fetch,
     });
     throw new Error('expected hostile payload rejection');
   } catch (error) {
@@ -593,14 +755,14 @@ test('all public Episode text fails closed and parser diagnostics never echo hos
   }
 });
 
-test('one 149-field registry constrains every string parser at runtime', () => {
+test('one 152-field registry constrains every surface string parser at runtime', () => {
   const visited = new Map<string, StoryWorkspaceEpisodeStringFieldClass>();
   storyWorkspaceParseEpisodeArtifactSurface(fullyPopulatedSurface(), {
     onStringField(field, classification) {
       visited.set(field, classification);
     },
   });
-  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(149);
+  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(152);
   expect([...visited.keys()].sort()).toEqual(
     Object.keys(storyWorkspaceEpisodeStringFieldClassification).sort(),
   );
@@ -738,18 +900,29 @@ test('unbound surfaces cannot carry artifact content and available facts require
   expect(() => storyWorkspaceParseEpisodeArtifactSurface(invalidAvailable)).toThrow(/metadata/i);
 });
 
-test('fetch seam sends a quoted If-None-Match and treats 304 as the same last-good snapshot', async () => {
+test('fetch seam follows aggregate ETag when workflow facts change without a manifest revision', async () => {
   const calls: Array<{ url: string; init?: RequestInit }> = [];
   let responseNumber = 0;
   const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
     calls.push({ url: String(input), init });
     responseNumber += 1;
-    if (responseNumber === 2) {
-      return new Response(null, { status: 304, headers: { ETag: `"${REVISION_1}"` } });
+    if (responseNumber === 3) {
+      return new Response(null, {
+        status: 304,
+        headers: { ETag: `"${aggregateEtagFor(REVISION_2)}"` },
+      });
     }
-    return new Response(JSON.stringify(boundSurface()), {
+    const payload = responseNumber === 1
+      ? boundSurface()
+      : boundSurface(
+        REVISION_1,
+        [],
+        { ...workflow('write_script'), factsRevision: 1 },
+        aggregateEtagFor(REVISION_2),
+      );
+    return new Response(JSON.stringify(payload), {
       status: 200,
-      headers: { 'Content-Type': 'application/json', ETag: `"${REVISION_1}"` },
+      headers: { 'Content-Type': 'application/json', ETag: JSON.stringify(payload.etag) },
     });
   }) as typeof fetch;
 
@@ -763,9 +936,23 @@ test('fetch seam sends a quoted If-None-Match and treats 304 as the same last-go
     fetchImpl,
     etag: first.data.etag,
   });
-  expect(second).toEqual({ kind: 'not-modified', etag: REVISION_1 });
+  expect(second.kind).toBe('surface');
+  if (second.kind !== 'surface') throw new Error('expected changed workflow surface');
+  expect(second.data.manifestRevision).toBe(first.data.manifestRevision);
+  expect(second.data.etag).toBe(aggregateEtagFor(REVISION_2));
+  expect(second.data.workflow?.factsRevision).toBe(1);
+  const third = await storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
+    fetchImpl,
+    etag: second.data.etag,
+  });
+  expect(third).toEqual({ kind: 'not-modified', etag: aggregateEtagFor(REVISION_2) });
   expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer token-1');
-  expect(new Headers(calls[1].init?.headers).get('If-None-Match')).toBe(`"${REVISION_1}"`);
+  expect(new Headers(calls[1].init?.headers).get('If-None-Match')).toBe(
+    `"${aggregateEtagFor(REVISION_1)}"`,
+  );
+  expect(new Headers(calls[2].init?.headers).get('If-None-Match')).toBe(
+    `"${aggregateEtagFor(REVISION_2)}"`,
+  );
 
   const initial = storyWorkspaceEpisodeArtifactsInitialState(RUN_ID);
   const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(initial, {
@@ -859,7 +1046,11 @@ test('last-good merging owns six independent artifact fragments, never the old w
     storyWorkspaceEpisodeArtifactsInitialState(RUN_ID),
     { type: 'success', runId: RUN_ID, generation: 1, data: complete },
   );
-  const latestPayload = boundSurface(REVISION_2);
+  const latestPayload = boundSurface(
+    REVISION_2,
+    [],
+    { ...workflow('generate_prompts', 'needs_confirmation', true), factsRevision: 9 },
+  );
   for (const artifact of latestPayload.artifacts as Array<Record<string, unknown>>) {
     artifact.availability = 'invalid';
   }
@@ -871,6 +1062,9 @@ test('last-good merging owns six independent artifact fragments, never the old w
   expect(merged.latest).toBe(latest);
   expect(merged.data).not.toBe(complete);
   expect(merged.data?.manifestRevision).toBe(REVISION_2);
+  expect(merged.data?.etag).toBe(aggregateEtagFor(REVISION_2));
+  expect(merged.data?.workflow?.factsRevision).toBe(9);
+  expect(merged.data?.workflow?.nextAction.action).toBe('generate_prompts');
   expect(merged.data?.artifacts.every((artifact) => artifact.availability === 'invalid')).toBe(true);
   expect(merged.data?.narrative?.overview.title).toBe('雨夜重逢');
   expect(merged.data?.narrative?.narrativeBeats[0].id).toBe(BEAT_ID);
@@ -1343,7 +1537,7 @@ test('real browser hook mount isolates unmount, remount, and run-switch late res
       () => page.evaluate(() => window.__u5Harness.snapshot().requests.length),
     ).toBe(4);
     expect(await page.evaluate(() => window.__u5Harness.snapshot().requests[3].ifNoneMatch))
-      .toBe(`"${REVISION_1}"`);
+      .toBe(`"${aggregateEtagFor(REVISION_1)}"`);
     await page.evaluate((runId) => window.__u5Harness.switchRun(runId), OTHER_RUN_ID);
     await expect.poll(
       () => page.evaluate(() => window.__u5Harness.snapshot().requests.length),
@@ -1419,7 +1613,7 @@ test('endpoint and source contain no browser storage, Agent artifact parser, or 
   expect(source).not.toContain('messages');
 });
 
-test('response header ETag must equal the parsed manifest revision', async () => {
+test('response header ETag must equal the parsed aggregate ETag', async () => {
   await expect(storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
     fetchImpl: (async () => new Response(JSON.stringify(boundSurface()), {
       status: 200,
@@ -1429,9 +1623,10 @@ test('response header ETag must equal the parsed manifest revision', async () =>
 });
 
 test('304 requires the exact quoted cached ETag', async () => {
+  const cachedEtag = aggregateEtagFor(REVISION_1);
   for (const etag of [null, REVISION_1, `"${REVISION_2}"`]) {
     await expect(storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
-      etag: REVISION_1,
+      etag: cachedEtag,
       fetchImpl: (async () => new Response(null, {
         status: 304,
         headers: etag === null ? undefined : { ETag: etag },
@@ -1439,12 +1634,171 @@ test('304 requires the exact quoted cached ETag', async () => {
     })).rejects.toThrow();
   }
   await expect(storyWorkspaceFetchEpisodeArtifacts('/api/episode', {
-    etag: REVISION_1,
+    etag: cachedEtag,
     fetchImpl: (async () => new Response(null, {
       status: 304,
-      headers: { ETag: `"${REVISION_1}"` },
+      headers: { ETag: `"${cachedEtag}"` },
     })) as typeof fetch,
-  })).resolves.toEqual({ kind: 'not-modified', etag: REVISION_1 });
+  })).resolves.toEqual({ kind: 'not-modified', etag: cachedEtag });
+});
+
+test('U10F unbound recovery posts only caller idempotency and accepts a strict response', async () => {
+  const surface = storyWorkspaceParseEpisodeArtifactSurface(recoverableUnboundSurface());
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const result = await u10fActionApi.storyWorkspaceRecoverEpisodeBinding(RUN_ID, surface, {
+    idempotencyKey: 'recover:test-001',
+    token: 'token-1',
+    fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify(acceptedActionResponse(
+        'recover_first_episode_binding',
+        null,
+      )), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch,
+  });
+
+  expect(u10fActionApi.storyWorkspaceEpisodeBindingRecoveryEndpoint(RUN_ID)).toBe(
+    `/api/story-workspace/workflow-runs/${RUN_ID}/episode-binding/recover`,
+  );
+  expect(calls).toHaveLength(1);
+  expect(calls[0].url).toBe(u10fActionApi.storyWorkspaceEpisodeBindingRecoveryEndpoint(RUN_ID));
+  expect(calls[0].init?.method).toBe('POST');
+  expect(new Headers(calls[0].init?.headers).get('Authorization')).toBe('Bearer token-1');
+  expect(new Headers(calls[0].init?.headers).get('If-Match')).toBeNull();
+  expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+    idempotencyKey: 'recover:test-001',
+  });
+  expect(result).toEqual(acceptedActionResponse('recover_first_episode_binding', null));
+});
+
+test('U10F bound continuation derives the action and exact If-Match from latest workflow truth', async () => {
+  const surface = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+    REVISION_1,
+    [],
+    { ...workflow('generate_prompts', 'needs_confirmation', true), factsRevision: 4 },
+  ));
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const callerOptions = {
+    idempotencyKey: 'continue:test-002',
+    userGuidance: '请继续生成提示词。',
+    action: 'write_script',
+    fetchImpl: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(input), init });
+      return new Response(JSON.stringify(acceptedActionResponse('generate_prompts')), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }) as typeof fetch,
+  };
+  const result = await u10fActionApi.storyWorkspaceContinueEpisodeAction(
+    RUN_ID,
+    surface,
+    callerOptions,
+  );
+
+  expect(u10fActionApi.storyWorkspaceEpisodeActionContinueEndpoint(RUN_ID)).toBe(
+    `/api/story-workspace/workflow-runs/${RUN_ID}/episode-actions/continue`,
+  );
+  expect(calls).toHaveLength(1);
+  expect(calls[0].url).toBe(u10fActionApi.storyWorkspaceEpisodeActionContinueEndpoint(RUN_ID));
+  expect(calls[0].init?.method).toBe('POST');
+  expect(new Headers(calls[0].init?.headers).get('If-Match')).toBe(
+    `"${aggregateEtagFor(REVISION_1)}"`,
+  );
+  expect(JSON.parse(String(calls[0].init?.body))).toEqual({
+    episodeId: EPISODE_ID,
+    action: 'generate_prompts',
+    idempotencyKey: 'continue:test-002',
+    userGuidance: '请继续生成提示词。',
+  });
+  expect(result).toEqual(acceptedActionResponse('generate_prompts'));
+});
+
+test('U10F action gates reject bound recovery, unbound continuation, none, invalid, and missing identity', async () => {
+  let fetches = 0;
+  const options = {
+    idempotencyKey: 'gate:test-003',
+    fetchImpl: (async () => {
+      fetches += 1;
+      return new Response('{}', { status: 202 });
+    }) as typeof fetch,
+  };
+  const bound = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
+  const unbound = storyWorkspaceParseEpisodeArtifactSurface(unboundSurface());
+  const none = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+    REVISION_1,
+    [],
+    workflow('none_in_scope', 'ready', false),
+  ));
+  const disabled = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+    REVISION_1,
+    [],
+    workflow('write_script', 'needs_confirmation', false),
+  ));
+  const missingEtag = { ...bound, etag: null } as StoryWorkspaceEpisodeArtifactSurface;
+  const missingEpisode = { ...bound, opaqueEpisodeId: null } as StoryWorkspaceEpisodeArtifactSurface;
+
+  await expect(u10fActionApi.storyWorkspaceRecoverEpisodeBinding(RUN_ID, bound, options))
+    .rejects.toThrow('Episode action is unavailable.');
+  await expect(u10fActionApi.storyWorkspaceRecoverEpisodeBinding(RUN_ID, unbound, options))
+    .rejects.toThrow('Episode action is unavailable.');
+  await expect(u10fActionApi.storyWorkspaceContinueEpisodeAction(RUN_ID, unbound, options))
+    .rejects.toThrow('Episode action is unavailable.');
+  for (const surface of [none, disabled, missingEtag, missingEpisode]) {
+    await expect(u10fActionApi.storyWorkspaceContinueEpisodeAction(RUN_ID, surface, options))
+      .rejects.toThrow('Episode action is unavailable.');
+  }
+  expect(fetches).toBe(0);
+});
+
+test('U10F action responses are exact and raw Agent/path material never enters the wire', async () => {
+  const surface = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
+  const invalidResponses = [
+    { ...acceptedActionResponse(), rawAgentMessage: 'hidden tool result' },
+    { ...acceptedActionResponse(), messageId: '/Users/private/agent.json' },
+    { ...acceptedActionResponse(), capability: 'write_script' },
+    { ...acceptedActionResponse(), accepted: false },
+  ];
+  for (const response of invalidResponses) {
+    await expect(u10fActionApi.storyWorkspaceContinueEpisodeAction(RUN_ID, surface, {
+      idempotencyKey: 'strict:test-004',
+      fetchImpl: (async () => new Response(JSON.stringify(response), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch,
+    })).rejects.toThrow('Episode action data is unavailable.');
+  }
+
+  let fetches = 0;
+  await expect(u10fActionApi.storyWorkspaceContinueEpisodeAction(RUN_ID, surface, {
+    idempotencyKey: 'strict:test-005',
+    userGuidance: '/drama-forge:prompt EP01 --token secret',
+    fetchImpl: (async () => {
+      fetches += 1;
+      return new Response('{}', { status: 202 });
+    }) as typeof fetch,
+  })).rejects.toThrow('Episode action is unavailable.');
+  expect(fetches).toBe(0);
+});
+
+test('U10F 401/404/409/422 action errors are fixed and never parse artifact-shaped bodies', async () => {
+  const surface = storyWorkspaceParseEpisodeArtifactSurface(boundSurface());
+  for (const status of [401, 404, 409, 422]) {
+    const secret = `/Users/private/status-${status}/storyboard.yaml`;
+    await expect(u10fActionApi.storyWorkspaceContinueEpisodeAction(RUN_ID, surface, {
+      idempotencyKey: `http:test-${status}`,
+      fetchImpl: (async () => new Response(JSON.stringify({
+        detail: secret,
+        artifacts: boundSurface(),
+      }), {
+        status,
+        headers: { 'Content-Type': 'application/json' },
+      })) as typeof fetch,
+    })).rejects.toThrow(`Episode action request failed (${status}).`);
+  }
 });
 
 test('artifact mtime accepts only the backend UTC RFC3339 wire format', () => {

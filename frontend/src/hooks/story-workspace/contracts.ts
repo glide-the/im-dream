@@ -476,11 +476,65 @@ export type StoryWorkspaceEpisodeArtifactConsumer =
 export type StoryWorkspaceEpisodeAssociationStatus = 'linked' | 'unlinked' | 'orphan';
 export type StoryWorkspaceEpisodeMetricAvailability = 'available' | 'unavailable';
 export type StoryWorkspaceEpisodeReviewScope = 'script' | 'full-chain' | 'unknown';
+export const STORY_WORKSPACE_EPISODE_ACTIONS = [
+  'plan_episode',
+  'write_script',
+  'review_script',
+  'refresh_assets',
+  'regenerate_storyboard',
+  'generate_prompts',
+  'review_full_chain',
+  'validate_episode',
+  'prepare_render_guide',
+  'none_in_scope',
+] as const;
+export type StoryWorkspaceEpisodeAction = typeof STORY_WORKSPACE_EPISODE_ACTIONS[number];
+export type StoryWorkspaceEpisodeActionDiagnostic = 'ready' | 'needs_confirmation';
+export type StoryWorkspaceEpisodeDispatchAction = Exclude<
+  StoryWorkspaceEpisodeAction,
+  'none_in_scope'
+>;
+export type StoryWorkspaceEpisodeActionCapability =
+  | StoryWorkspaceEpisodeAction
+  | 'recover_first_episode_binding';
 
 export interface StoryWorkspaceEpisodeBindingRecovery {
   readonly autoRepairAttempted: boolean;
   readonly canDispatch: boolean;
   readonly publicReason: StoryWorkspaceEpisodeBindingPublicReason | null;
+}
+
+export interface StoryWorkspaceEpisodeActionResolution {
+  readonly action: StoryWorkspaceEpisodeAction;
+  readonly diagnostic: StoryWorkspaceEpisodeActionDiagnostic;
+  readonly canDispatch: boolean;
+}
+
+export interface StoryWorkspaceEpisodeWorkflowProjection {
+  readonly factsRevision: number;
+  readonly nextAction: StoryWorkspaceEpisodeActionResolution;
+  readonly prerequisites: readonly StoryWorkspaceEpisodeAction[];
+  readonly legacyPartial: boolean;
+}
+
+export interface StoryWorkspaceEpisodeBindingRecoveryRequest {
+  readonly idempotencyKey: string;
+}
+
+export interface StoryWorkspaceEpisodeActionContinueRequest {
+  readonly episodeId: string;
+  readonly action: StoryWorkspaceEpisodeDispatchAction;
+  readonly idempotencyKey: string;
+  readonly userGuidance: string | null;
+}
+
+export interface StoryWorkspaceEpisodeActionAccepted {
+  readonly runId: string;
+  readonly episodeId: string | null;
+  readonly capability: StoryWorkspaceEpisodeActionCapability;
+  readonly messageId: string;
+  readonly accepted: true;
+  readonly replayed: boolean;
 }
 
 export interface StoryWorkspaceEpisodeArtifactManifestEntry {
@@ -754,6 +808,7 @@ export interface StoryWorkspaceEpisodeArtifactSurface {
   readonly artifacts: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
   readonly narrative: StoryWorkspaceEpisodeNarrativeProjection | null;
   readonly auxiliary: StoryWorkspaceEpisodeAuxiliaryProjection | null;
+  readonly workflow: StoryWorkspaceEpisodeWorkflowProjection | null;
 }
 
 export type StoryWorkspaceEpisodeStringFieldClass =
@@ -770,6 +825,9 @@ export const storyWorkspaceEpisodeStringFieldClassification = {
   'surface.etag': 'machine_enum_or_pattern',
   'surface.bindingAvailability': 'machine_enum_or_pattern',
   'bindingRecovery.publicReason': 'machine_enum_or_pattern',
+  'workflow.nextAction.action': 'machine_enum_or_pattern',
+  'workflow.nextAction.diagnostic': 'machine_enum_or_pattern',
+  'workflow.prerequisites[]': 'machine_enum_or_pattern',
   'artifacts[].relativeKey': 'canonical_relative_key',
   'artifacts[].availability': 'machine_enum_or_pattern',
   'artifacts[].contentRevision': 'machine_enum_or_pattern',
@@ -1297,6 +1355,60 @@ function storyWorkspaceParseEpisodeBindingRecovery(value: unknown): StoryWorkspa
     ),
     canDispatch,
     publicReason,
+  };
+}
+
+function storyWorkspaceParseEpisodeWorkflow(
+  value: unknown,
+): StoryWorkspaceEpisodeWorkflowProjection {
+  const record = storyWorkspaceEpisodeRecord(value, 'workflow', [
+    'factsRevision', 'nextAction', 'prerequisites', 'legacyPartial',
+  ]);
+  const nextActionRecord = storyWorkspaceEpisodeRecord(record.nextAction, 'workflow.nextAction', [
+    'action', 'diagnostic', 'canDispatch',
+  ]);
+  const nextAction: StoryWorkspaceEpisodeActionResolution = {
+    action: storyWorkspaceEpisodeEnum(
+      nextActionRecord.action,
+      'workflow.nextAction.action',
+      STORY_WORKSPACE_EPISODE_ACTIONS,
+    ),
+    diagnostic: storyWorkspaceEpisodeEnum(
+      nextActionRecord.diagnostic,
+      'workflow.nextAction.diagnostic',
+      ['ready', 'needs_confirmation'],
+    ),
+    canDispatch: storyWorkspaceEpisodeBoolean(
+      nextActionRecord.canDispatch,
+      'workflow.nextAction.canDispatch',
+    ),
+  };
+  if (nextAction.action === 'none_in_scope' && nextAction.canDispatch) {
+    throw new Error('workflow.nextAction cannot dispatch none_in_scope.');
+  }
+  const prerequisites = storyWorkspaceEpisodeArray(
+    record.prerequisites,
+    'workflow.prerequisites',
+    (item, index): StoryWorkspaceEpisodeAction => storyWorkspaceEpisodeEnum(
+      item,
+      `workflow.prerequisites[${index}]`,
+      STORY_WORKSPACE_EPISODE_ACTIONS,
+    ),
+    9,
+  );
+  storyWorkspaceEpisodeUnique(prerequisites, 'workflow.prerequisites');
+  if (prerequisites.includes('none_in_scope')) {
+    throw new Error('workflow.prerequisites cannot contain none_in_scope.');
+  }
+  return {
+    factsRevision: storyWorkspaceEpisodeNumber(record.factsRevision, 'workflow.factsRevision', {
+      integer: true,
+      min: 0,
+      max: Number.MAX_SAFE_INTEGER,
+    }),
+    nextAction,
+    prerequisites,
+    legacyPartial: storyWorkspaceEpisodeBoolean(record.legacyPartial, 'workflow.legacyPartial'),
   };
 }
 
@@ -1829,7 +1941,7 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   value: unknown,
 ): StoryWorkspaceEpisodeArtifactSurface {
   const record = storyWorkspaceEpisodeRecord(value, 'Episode artifact surface', [
-    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'narrative', 'auxiliary',
+    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'narrative', 'auxiliary', 'workflow',
   ]);
   const runId = storyWorkspaceEpisodeString(record.runId, 'surface.runId', { pattern: STORY_WORKSPACE_EPISODE_RUN_ID });
   const bindingAvailability = storyWorkspaceEpisodeEnum(
@@ -1849,11 +1961,11 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   storyWorkspaceEpisodeUnique(artifacts.map((item) => item.relativeKey), 'artifacts.relativeKey');
   const narrative = record.narrative === null ? null : storyWorkspaceParseEpisodeNarrative(record.narrative);
   const auxiliary = record.auxiliary === null ? null : storyWorkspaceParseEpisodeAuxiliary(record.auxiliary);
+  const workflow = record.workflow === null ? null : storyWorkspaceParseEpisodeWorkflow(record.workflow);
   if (bindingAvailability === 'bound') {
-    if (opaqueEpisodeId === null || manifestRevision === null || etag === null) {
-      throw new Error('bound Episode artifact surface requires identity and revisions.');
+    if (opaqueEpisodeId === null || manifestRevision === null || etag === null || workflow === null) {
+      throw new Error('bound Episode artifact surface requires identity, revisions, and workflow.');
     }
-    if (etag !== manifestRevision) throw new Error('etag must equal manifestRevision.');
     const expectedKeys = Object.keys(STORY_WORKSPACE_EPISODE_ARTIFACT_RULES);
     if (
       artifacts.length !== expectedKeys.length
@@ -1869,7 +1981,7 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     || artifacts.length > 0
     || narrative !== null
     || auxiliary !== null
-    || bindingRecovery.canDispatch
+    || workflow !== null
   ) throw new Error('unbound Episode artifact surface cannot contain artifacts.');
   const surface: StoryWorkspaceEpisodeArtifactSurface = {
     runId,
@@ -1881,6 +1993,7 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     artifacts,
     narrative,
     auxiliary,
+    workflow,
   };
   storyWorkspaceEpisodeAssertLinks(surface);
   return surface;
@@ -1906,4 +2019,57 @@ export function storyWorkspaceParseEpisodeArtifactSurface(
     storyWorkspaceEpisodeStringFieldVisitors.pop();
   }
   return surface;
+}
+
+const STORY_WORKSPACE_EPISODE_ACTION_MESSAGE_ID =
+  /^[A-Za-z0-9][A-Za-z0-9._:-]{0,254}$/;
+
+function storyWorkspaceEpisodeActionMachineString(
+  value: unknown,
+  pattern: RegExp,
+): string {
+  if (typeof value !== 'string' || !pattern.test(value)) {
+    throw new Error('Episode action response contains an invalid machine value.');
+  }
+  return value;
+}
+
+/** Strictly hydrate the public 202 response without accepting Agent payload fields. */
+export function storyWorkspaceParseEpisodeActionAccepted(
+  value: unknown,
+): StoryWorkspaceEpisodeActionAccepted {
+  const record = storyWorkspaceEpisodeRecord(value, 'Episode action response', [
+    'runId', 'episodeId', 'capability', 'messageId', 'accepted', 'replayed',
+  ]);
+  const runId = storyWorkspaceEpisodeActionMachineString(
+    record.runId,
+    STORY_WORKSPACE_EPISODE_RUN_ID,
+  );
+  const episodeId = record.episodeId === null
+    ? null
+    : storyWorkspaceEpisodeActionMachineString(record.episodeId, STORY_WORKSPACE_EPISODE_HEX_ID);
+  const capabilities: readonly StoryWorkspaceEpisodeActionCapability[] = [
+    ...STORY_WORKSPACE_EPISODE_ACTIONS,
+    'recover_first_episode_binding',
+  ];
+  if (typeof record.capability !== 'string' || !capabilities.includes(
+    record.capability as StoryWorkspaceEpisodeActionCapability,
+  )) {
+    throw new Error('Episode action response contains an invalid capability.');
+  }
+  const messageId = storyWorkspaceEpisodeActionMachineString(
+    record.messageId,
+    STORY_WORKSPACE_EPISODE_ACTION_MESSAGE_ID,
+  );
+  if (record.accepted !== true || typeof record.replayed !== 'boolean') {
+    throw new Error('Episode action response contains an invalid acceptance state.');
+  }
+  return {
+    runId,
+    episodeId,
+    capability: record.capability as StoryWorkspaceEpisodeActionCapability,
+    messageId,
+    accepted: true,
+    replayed: record.replayed,
+  };
 }
