@@ -99,8 +99,35 @@ export function StoryWorkspaceDreamAgentDialog({
   useEffect(() => {
     if (!isNarrow) return undefined;
     const previousOverflow = document.body.style.overflow;
+    const background: Array<{
+      element: HTMLElement;
+      previousAriaHidden: string | null;
+      previousInert: boolean;
+    }> = [];
+    let branch: HTMLElement | null = dialogRef.current;
+    while (branch?.parentElement && branch.parentElement !== document.body) {
+      const parent: HTMLElement = branch.parentElement;
+      for (const sibling of Array.from(parent.children)) {
+        if (!(sibling instanceof HTMLElement) || sibling === branch) continue;
+        background.push({
+          element: sibling,
+          previousAriaHidden: sibling.getAttribute('aria-hidden'),
+          previousInert: sibling.inert,
+        });
+        sibling.inert = true;
+        sibling.setAttribute('aria-hidden', 'true');
+      }
+      branch = parent;
+    }
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = previousOverflow; };
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      for (const { element, previousAriaHidden, previousInert } of background) {
+        element.inert = previousInert;
+        if (previousAriaHidden === null) element.removeAttribute('aria-hidden');
+        else element.setAttribute('aria-hidden', previousAriaHidden);
+      }
+    };
   }, [isNarrow]);
 
   const [announcedStreamText, setAnnouncedStreamText] = useState('');
@@ -170,6 +197,7 @@ export function StoryWorkspaceDreamAgentDialog({
       {agent.pendingToolConfirmation ? (
         <StoryWorkspaceDreamToolConfirmation
           confirmation={agent.pendingToolConfirmation}
+          errorMessage={agent.error ? '本次确认尚未提交，请检查连接后再试。' : null}
           isResolving={agent.isConfirmingTool}
           onResolve={agent.confirmTool}
         />

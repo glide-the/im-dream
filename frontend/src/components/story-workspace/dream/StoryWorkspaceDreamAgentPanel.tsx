@@ -119,6 +119,7 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
       {agent.pendingToolConfirmation ? (
         <StoryWorkspaceDreamToolConfirmation
           confirmation={agent.pendingToolConfirmation}
+          errorMessage={agent.error ? '本次确认尚未提交，请检查连接后再试。' : null}
           isResolving={agent.isConfirmingTool}
           onResolve={agent.confirmTool}
         />

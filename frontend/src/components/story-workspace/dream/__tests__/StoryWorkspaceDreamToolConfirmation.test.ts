@@ -20,16 +20,27 @@ test('Dream surfaces replace their composer with one run-bound tool decision', (
 });
 
 test('confirmation UI supports questions, safe approvals and network decisions without Chat UI', () => {
-  expect(CONFIRMATION).toContain('role="alertdialog"');
+  expect(CONFIRMATION).toContain('role="region"');
+  expect(CONFIRMATION).not.toContain('role="alertdialog"');
   expect(CONFIRMATION).toContain('待你确认');
   expect(CONFIRMATION).toContain("confirmation.kind === 'ask_user'");
   expect(CONFIRMATION).toContain("confirmation.kind === 'sandbox_network'");
   expect(CONFIRMATION).toContain('用户拒绝本次工具操作');
   expect(CONFIRMATION).toContain('aria-busy={isResolving}');
+  expect(CONFIRMATION).toContain('question.id');
+  expect(CONFIRMATION).toContain('maxLength={1000}');
+  expect(CONFIRMATION).toContain('role="status"');
+  for (const source of [DIALOG, PANEL]) expect(source).toContain('errorMessage={agent.error');
   expect(CONFIRMATION).not.toContain('ToolConfirmationDock');
   expect(CONFIRMATION).not.toContain('AskUserQuestionUI');
   expect(CONFIRMATION).not.toContain('ChatView');
   expect(CONFIRMATION).not.toContain('JSON.stringify(confirmation');
+});
+
+test('narrow Dream dialog makes every background branch inert while open', () => {
+  expect(DIALOG).toContain('sibling.inert = true');
+  expect(DIALOG).toContain("sibling.setAttribute('aria-hidden', 'true')");
+  expect(DIALOG).toContain('previousInert');
 });
 
 test('Dream confirmation styling is an editorial proof slip, not a rounded Chat card', () => {
@@ -40,4 +51,3 @@ test('Dream confirmation styling is an editorial proof slip, not a rounded Chat 
   expect(CSS).toContain('.story-workspace-dream-tool-confirmation__option');
   expect(CSS).toContain('.story-workspace-dream-tool-confirmation__actions');
 });
-

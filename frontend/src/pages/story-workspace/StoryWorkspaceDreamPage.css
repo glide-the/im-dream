@@ -1,6 +1,6 @@
 .story-workspace-dream,
 .story-workspace-dream-launch {
-  --dream-canvas: var(--color-bg-warm, #f6efe5);
+  --dream-canvas: var(--color-bg-app, #f6efe5);
   --dream-paper: var(--color-bg-paper, #fffaf2);
   --dream-ink: var(--color-text-primary, #352820);
   --dream-body: var(--color-text-body, #6a5144);
@@ -531,6 +531,7 @@
 .story-workspace-dream-agent-dialog .story-workspace-dream-tool-confirmation__actions button { min-height: 30px; padding: 0 2px; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; }
 .story-workspace-dream-tool-confirmation__actions button:first-child { color: var(--dream-muted); }
 .story-workspace-dream-tool-confirmation__actions button:disabled { cursor: not-allowed; opacity: .44; }
+.story-workspace-dream-tool-confirmation__error { margin: 0; color: var(--dream-action); font-size: 11px; line-height: 1.5; }
 
 .story-workspace-dream-agent-dialog .story-workspace-dream-agent-scroll-to-latest,
 .story-workspace-dream-agent-panel .story-workspace-dream-agent-scroll-to-latest {
@@ -735,7 +736,7 @@
   min-width: 132px;
   min-height: 42px;
   padding: 0 20px;
-  color: #fffaf2;
+  color: var(--dream-canvas);
   background: var(--dream-action);
   border: 1px solid var(--dream-action);
   border-radius: 4px;
@@ -1048,7 +1049,7 @@
 
 .story-workspace-dream-launch__error {
   margin: 0 0 18px;
-  color: #9b3d2e;
+  color: var(--color-state-error, #9b3d2e);
   font-size: 12px;
   line-height: 1.55;
 }
@@ -1137,7 +1138,7 @@
   .story-workspace-dream-agent-rail__summary { grid-template-columns: minmax(0, 1fr); }
   .story-workspace-dream-agent-rail__preview,
   .story-workspace-dream-agent-rail__meta { grid-column: 1 / -1; }
-  .story-workspace-dream-agent-dialog { position: fixed; inset: auto 8px 8px; width: auto; max-height: min(88dvh, 760px); min-height: min(520px, 82dvh); }
+  .story-workspace-dream-agent-dialog { position: fixed; inset: auto 8px 8px; width: auto; max-height: min(88dvh, 760px); min-height: min(520px, 82dvh); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--dream-ink) 24%, transparent), 0 12px 30px color-mix(in srgb, var(--dream-ink) 13%, transparent); }
   .story-workspace-dream__confirmation { position: fixed; right: 0; bottom: 0; left: 0; min-height: 60px; gap: 12px; padding: 9px 18px; }
   .story-workspace-dream__confirmation > div:first-child { min-width: 0; }
   .story-workspace-dream__confirmation span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

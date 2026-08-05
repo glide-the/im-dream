@@ -295,7 +295,7 @@ export interface StoryWorkspaceDreamAgentReducedState {
   readonly snapshot: StoryWorkspaceDreamAgentMessageSnapshot;
   readonly streamText: string;
   readonly streamTurnId: string | null;
-  readonly pendingToolConfirmation: StoryWorkspaceDreamAgentToolConfirmation | null;
+  readonly pendingToolConfirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
   readonly seenCursors: readonly string[];
   readonly shouldReconcile: boolean;
 }
@@ -316,13 +316,13 @@ export function storyWorkspaceComputeDreamAgentUnreadCount(
 
 /** Pure event seam: replay identities de-duplicate transient text, while terminal frames require a DB snapshot. */
 export function storyWorkspaceReduceDreamAgentEvents(
-  state: Omit<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmation'>
-    & Partial<Pick<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmation'>>,
+  state: Omit<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations'>
+    & Partial<Pick<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations'>>,
   events: readonly StoryWorkspaceDreamAgentEvent[],
 ): StoryWorkspaceDreamAgentReducedState {
   let streamText = state.streamText;
   let streamTurnId = state.streamTurnId;
-  let pendingToolConfirmation = state.pendingToolConfirmation ?? null;
+  let pendingToolConfirmations = [...(state.pendingToolConfirmations ?? [])];
   let shouldReconcile = Boolean(state.shouldReconcile);
   const seen = new Set(state.seenCursors);
   for (const event of events) {
@@ -337,36 +337,38 @@ export function storyWorkspaceReduceDreamAgentEvents(
       if (seen.has(event.cursor)) continue;
       seen.add(event.cursor);
       streamTurnId = event.turnId;
-      pendingToolConfirmation = event.confirmation;
+      if (!pendingToolConfirmations.some((item) => item.toolCallId === event.confirmation.toolCallId)) {
+        pendingToolConfirmations.push(event.confirmation);
+      }
       continue;
     }
     if (event.type === 'tool_confirmation_resolved') {
       if (seen.has(event.cursor)) continue;
       seen.add(event.cursor);
-      if (pendingToolConfirmation?.toolCallId === event.toolCallId) pendingToolConfirmation = null;
+      pendingToolConfirmations = pendingToolConfirmations.filter((item) => item.toolCallId !== event.toolCallId);
       continue;
     }
     if (event.type === 'assistant_message_committed' || event.lifecycle === 'idle') {
       streamText = '';
       streamTurnId = null;
-      pendingToolConfirmation = null;
+      pendingToolConfirmations = [];
       shouldReconcile = true;
     }
   }
-  return { snapshot: state.snapshot, streamText, streamTurnId, pendingToolConfirmation, seenCursors: [...seen], shouldReconcile };
+  return { snapshot: state.snapshot, streamText, streamTurnId, pendingToolConfirmations, seenCursors: [...seen], shouldReconcile };
 }
 
 function storyWorkspaceParseDreamAgentToolQuestion(value: unknown): StoryWorkspaceDreamAgentToolConfirmationQuestion | null {
   if (!storyWorkspaceDreamAgentIsRecord(value)) return null;
   const allowedTypes = ['text', 'textarea', 'select', 'checkbox', 'radio', 'number'] as const;
-  if (typeof value.id !== 'string' || !value.id || value.id.length > 80
-    || typeof value.question !== 'string' || !value.question || value.question.length > 500
+  if (typeof value.id !== 'string' || !value.id || value.id.length > 128
+    || typeof value.question !== 'string' || !value.question || value.question.length > 300
     || !allowedTypes.includes(value.type as typeof allowedTypes[number])
     || typeof value.required !== 'boolean') return null;
   const options = Array.isArray(value.options) ? value.options.map((option) => {
     if (!storyWorkspaceDreamAgentIsRecord(option)
-      || typeof option.label !== 'string' || !option.label || option.label.length > 160
-      || typeof option.value !== 'string' || !option.value || option.value.length > 160
+      || typeof option.label !== 'string' || !option.label || option.label.length > 120
+      || typeof option.value !== 'string' || !option.value || option.value.length > 120
       || (option.description !== undefined && (typeof option.description !== 'string' || option.description.length > 300))) return null;
     return {
       label: option.label,
@@ -382,7 +384,7 @@ function storyWorkspaceParseDreamAgentToolQuestion(value: unknown): StoryWorkspa
     required: value.required,
     ...(typeof value.multiSelect === 'boolean' ? { multiSelect: value.multiSelect } : {}),
     ...(options ? { options: options as NonNullable<StoryWorkspaceDreamAgentToolConfirmationQuestion['options']> } : {}),
-    ...(typeof value.placeholder === 'string' && value.placeholder.length <= 200 ? { placeholder: value.placeholder } : {}),
+    ...(typeof value.placeholder === 'string' && value.placeholder.length <= 160 ? { placeholder: value.placeholder } : {}),
   };
 }
 
@@ -490,7 +492,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const [snapshot, setSnapshot] = useState<StoryWorkspaceDreamAgentMessageSnapshot | null>(null);
   const [streamText, setStreamText] = useState('');
   const [streamTurnId, setStreamTurnId] = useState<string | null>(null);
-  const [pendingToolConfirmation, setPendingToolConfirmation] = useState<StoryWorkspaceDreamAgentToolConfirmation | null>(null);
+  const [pendingToolConfirmations, setPendingToolConfirmations] = useState<readonly StoryWorkspaceDreamAgentToolConfirmation[]>([]);
   const [isLoading, setIsLoading] = useState(Boolean(runId));
   const [isSending, setIsSending] = useState(false);
   const [isConfirmingTool, setIsConfirmingTool] = useState(false);
@@ -504,7 +506,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
 
   useEffect(() => {
     if (!runId) {
-      setSnapshot(null); setStreamText(''); setStreamTurnId(null); setPendingToolConfirmation(null); setIsLoading(false);
+      setSnapshot(null); setStreamText(''); setStreamTurnId(null); setPendingToolConfirmations([]); setIsLoading(false);
       return undefined;
     }
     let active = true;
@@ -522,7 +524,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       if (latestTurnId && next.activeTurnId && next.activeTurnId !== latestTurnId) {
         latestCursor = null;
         seenCursors.clear();
-        setPendingToolConfirmation(null);
+        setPendingToolConfirmations([]);
       }
       latestSnapshot = next;
       setSnapshot(next); setError(null);
@@ -559,6 +561,8 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     };
     const process = (parsed: StoryWorkspaceDreamAgentEvent) => {
       if (!parsed || !active) return;
+      reconnectIndex = 0;
+      setIsReconnecting(false);
       if (parsed.type === 'assistant_text_delta') {
         if (seenCursors.has(parsed.cursor)) return;
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
@@ -569,18 +573,22 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       if (parsed.type === 'tool_confirmation_requested') {
         if (seenCursors.has(parsed.cursor)) return;
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
-        setPendingToolConfirmation(parsed.confirmation);
+        setPendingToolConfirmations((current) => (
+          current.some((item) => item.toolCallId === parsed.confirmation.toolCallId)
+            ? current
+            : [...current, parsed.confirmation]
+        ));
         return;
       }
       if (parsed.type === 'tool_confirmation_resolved') {
         if (seenCursors.has(parsed.cursor)) return;
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
-        setPendingToolConfirmation((current) => current?.toolCallId === parsed.toolCallId ? null : current);
+        setPendingToolConfirmations((current) => current.filter((item) => item.toolCallId !== parsed.toolCallId));
         return;
       }
       if (parsed.type === 'assistant_message_committed'
         || (parsed.type === 'status' && parsed.lifecycle === 'idle')) {
-        setPendingToolConfirmation(null);
+        setPendingToolConfirmations([]);
         streamController?.abort(); streamController = null;
         void reconcileTerminal().then((next) => { if (next?.lifecycle === 'streaming') connect(); }).catch((reason: unknown) => {
           if (active && reason instanceof Error && reason.name !== 'AbortError') { setError(reason); scheduleReconnect(); }
@@ -602,7 +610,6 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         setError(reason instanceof Error ? reason : new Error('Dream Agent 实时消息暂不可用。'));
         scheduleReconnect();
       });
-      reconnectIndex = 0; setIsReconnecting(false);
     };
     setIsLoading(true);
     void reconcile().then((next) => { if (next?.lifecycle === 'streaming') connect(); }).catch((reason: unknown) => {
@@ -622,6 +629,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const unreadCount = storyWorkspaceComputeDreamAgentUnreadCount(
     snapshot?.messages ?? [], readThroughId, streamTurnId, readStreamTurnId, streamText,
   );
+  const pendingToolConfirmation = pendingToolConfirmations[0] ?? null;
   const send = useCallback(async (text: string, idempotencyKey: string) => {
     if (!runId || !snapshot?.canSend || inFlight.current) return false;
     inFlight.current = true; setIsSending(true);
@@ -653,9 +661,10 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         ...(reason ? { reason } : {}),
         ...(answers ? { answers } : {}),
       });
-      setPendingToolConfirmation((current) => (
-        current?.toolCallId === pendingToolConfirmation.toolCallId ? null : current
+      setPendingToolConfirmations((current) => current.filter(
+        (item) => item.toolCallId !== pendingToolConfirmation.toolCallId,
       ));
+      setError(null);
       return true;
     } catch (reasonCaught) {
       setError(reasonCaught instanceof Error ? reasonCaught : new Error('Dream Agent 工具确认暂未提交。'));

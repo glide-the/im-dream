@@ -3,6 +3,8 @@
 // [Pos] Dream Agent adapter tool-confirmation TDD seam.
 
 import { expect, test } from '@playwright/test';
+// @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
+import { readFileSync } from 'node:fs';
 import {
   storyWorkspaceBuildDreamAgentToolConfirmationPayload,
   storyWorkspaceDreamAgentToolConfirmationEndpoint,
@@ -13,6 +15,7 @@ import {
 import { storyWorkspaceParseDreamAgentSnapshot } from '../useStoryWorkspaceDreamAgent';
 
 const RUN_ID = 'run_0123456789abcdef0123456789abcdef';
+const ADAPTER_SOURCE = readFileSync(new URL('../useStoryWorkspaceDreamAgent.ts', import.meta.url), 'utf8');
 const SNAPSHOT = storyWorkspaceParseDreamAgentSnapshot({
   storyWorkspaceRunId: RUN_ID,
   lifecycle: 'streaming',
@@ -102,15 +105,25 @@ test('replay de-duplicates a pending confirmation and clears it when resolved', 
     snapshot: SNAPSHOT,
     streamText: '',
     streamTurnId: null,
-    pendingToolConfirmation: null,
+    pendingToolConfirmations: [],
     seenCursors: [],
-  }, [requested!, requested!]);
-  expect(pending.pendingToolConfirmation?.toolCallId).toBe('tool-2');
-  expect(pending.seenCursors).toEqual(['turn-1:5']);
+  }, [requested!, requested!, storyWorkspaceParseDreamAgentEvent(
+    'tool_confirmation_requested',
+    '{"turnId":"turn-1","confirmation":{"toolCallId":"tool-3","kind":"approval","toolName":"Write"}}',
+    'turn-1:7',
+  )!]);
+  expect(pending.pendingToolConfirmations.map((item) => item.toolCallId)).toEqual(['tool-2', 'tool-3']);
+  expect(pending.seenCursors).toEqual(['turn-1:5', 'turn-1:7']);
 
   const cleared = storyWorkspaceReduceDreamAgentEvents(pending, [resolved!]);
-  expect(cleared.pendingToolConfirmation).toBeNull();
-  expect(cleared.seenCursors).toEqual(['turn-1:5', 'turn-1:6']);
+  expect(cleared.pendingToolConfirmations.map((item) => item.toolCallId)).toEqual(['tool-3']);
+  expect(cleared.seenCursors).toEqual(['turn-1:5', 'turn-1:7', 'turn-1:6']);
+});
+
+test('keeps reconnect backoff across failed reconnect attempts', () => {
+  expect(ADAPTER_SOURCE).toContain('reconnectIndex += 1');
+  expect(ADAPTER_SOURCE).not.toContain('reconnectIndex = 0; setIsReconnecting(false)');
+  expect(ADAPTER_SOURCE).toContain('reconnectIndex = 0;\n      setIsReconnecting(false)');
 });
 
 test('builds a run-scoped confirmation command without exposing thread context', async () => {
@@ -122,13 +135,13 @@ test('builds a run-scoped confirmation command without exposing thread context',
     'tool-3',
     true,
     undefined,
-    { '采用哪一种视角？': '第一人称' },
+    { q0: '第一人称' },
   )).toEqual({
     endpoint: `/api/story-workspace/workflow-runs/${RUN_ID}/dream-agent/tool-confirm`,
     body: {
       toolCallId: 'tool-3',
       approved: true,
-      answers: { '采用哪一种视角？': '第一人称' },
+      answers: { q0: '第一人称' },
     },
   });
 

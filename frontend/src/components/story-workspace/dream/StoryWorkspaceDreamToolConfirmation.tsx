@@ -2,7 +2,7 @@
 // [Output] Dream-paper approval, question and network confirmation surface.
 // [Pos] Dream Agent tool-confirmation view; it never consumes generic Chat parts.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import type {
   StoryWorkspaceDreamAgentToolConfirmation,
   StoryWorkspaceDreamAgentToolConfirmationQuestion,
@@ -10,6 +10,7 @@ import type {
 
 interface StoryWorkspaceDreamToolConfirmationProps {
   readonly confirmation: StoryWorkspaceDreamAgentToolConfirmation;
+  readonly errorMessage?: string | null;
   readonly isResolving: boolean;
   readonly onResolve: (
     approved: boolean,
@@ -19,7 +20,7 @@ interface StoryWorkspaceDreamToolConfirmationProps {
 }
 
 function storyWorkspaceDreamQuestionKey(question: StoryWorkspaceDreamAgentToolConfirmationQuestion): string {
-  return question.question || question.id;
+  return question.id;
 }
 
 function storyWorkspaceDreamInitialAnswers(
@@ -55,6 +56,7 @@ function storyWorkspaceDreamAnswersAreValid(
 
 export function StoryWorkspaceDreamToolConfirmation({
   confirmation,
+  errorMessage,
   isResolving,
   onResolve,
 }: StoryWorkspaceDreamToolConfirmationProps) {
@@ -65,6 +67,7 @@ export function StoryWorkspaceDreamToolConfirmation({
   const [answers, setAnswers] = useState<Record<string, unknown>>(
     () => storyWorkspaceDreamInitialAnswers(questions),
   );
+  const headingId = useId();
   const title = storyWorkspaceDreamToolTitle(confirmation);
   const answersAreValid = useMemo(
     () => storyWorkspaceDreamAnswersAreValid(questions, answers),
@@ -103,14 +106,14 @@ export function StoryWorkspaceDreamToolConfirmation({
   return (
     <section
       aria-busy={isResolving}
-      aria-label={title}
+      aria-labelledby={headingId}
       className="story-workspace-dream-tool-confirmation"
-      role="alertdialog"
+      role="region"
     >
       <header>
         <div>
           <span>待你确认</span>
-          <h3>{title}</h3>
+          <h3 id={headingId}>{title}</h3>
         </div>
         <small>{confirmation.toolName}</small>
       </header>
@@ -171,6 +174,7 @@ export function StoryWorkspaceDreamToolConfirmation({
                     disabled={isResolving}
                     onChange={(event) => updateAnswer(question, event.currentTarget.value)}
                     placeholder={question.placeholder}
+                    maxLength={1000}
                     required={question.required}
                     rows={3}
                     value={String(value ?? '')}
@@ -196,6 +200,9 @@ export function StoryWorkspaceDreamToolConfirmation({
                         : event.currentTarget.value,
                     )}
                     placeholder={question.placeholder}
+                    max={question.type === 'number' ? 1_000_000_000 : undefined}
+                    maxLength={1000}
+                    min={question.type === 'number' ? -1_000_000_000 : undefined}
                     required={question.required}
                     type={question.type === 'number' ? 'number' : 'text'}
                     value={String(value ?? '')}
@@ -225,6 +232,7 @@ export function StoryWorkspaceDreamToolConfirmation({
           </div>
         </div>
       )}
+      {errorMessage ? <p className="story-workspace-dream-tool-confirmation__error" role="status">{errorMessage}</p> : null}
     </section>
   );
 }
