@@ -27,6 +27,7 @@ import {
 
 const opaqueId = (value: number) => value.toString(16).padStart(32, '0');
 const revision = (value: string) => `sha256:${value.repeat(64)}`;
+const AGGREGATE_ETAG = revision('0');
 
 const EPISODE_ID = opaqueId(1);
 const ARC_ID = opaqueId(2);
@@ -527,7 +528,7 @@ function surface(
     runId: `run_${'2'.repeat(32)}`,
     opaqueEpisodeId: EPISODE_ID,
     manifestRevision: revision('2'),
-    etag: revision('2'),
+    etag: AGGREGATE_ETAG,
     bindingAvailability: 'bound',
     bindingRecovery: {
       autoRepairAttempted: false,
@@ -547,6 +548,16 @@ function surface(
     auxiliary: auxiliaryProjection === null
       ? null
       : { ...auxiliaryProjection, manifestRevision: revision('2') },
+    workflow: {
+      factsRevision: 0,
+      nextAction: {
+        action: 'none_in_scope',
+        diagnostic: 'ready',
+        canDispatch: false,
+      },
+      prerequisites: [],
+      legacyPartial: false,
+    },
   };
   return storyWorkspaceParseEpisodeArtifactSurface(wireSurface);
 }
