@@ -88,6 +88,9 @@ _TOOL_OUTPUT_TYPES = frozenset({
 _DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR = (
     "_story_workspace_dream_public_tool_confirmations"
 )
+_DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR = (
+    "_story_workspace_dream_public_tool_confirmation_subscribers"
+)
 _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX = 256
 _ASK_USER_QUESTIONS_MAX = 8
 _ASK_USER_OPTIONS_MAX = 12
@@ -130,7 +133,7 @@ _HIGH_CONFIDENCE_ASK_USER_SECRETS = (
     ),
     re.compile(
         r"(?<![A-Za-z0-9_-])rm\s+"
-        r"(?:-[A-Za-z]*r[A-Za-z]*f|-[A-Za-z]*f[A-Za-z]*r)\s+\S+",
+        r"(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+\S+",
         re.IGNORECASE,
     ),
     re.compile(
@@ -149,6 +152,19 @@ _HIGH_CONFIDENCE_ASK_USER_SECRETS = (
         r"(?<![A-Za-z0-9_-])python(?:3(?:\.\d+)?)?\s+(?:-c\b|<<)",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])(?:ba|z|fi)?sh\s+-c\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])dd\b(?=[^\n]{0,240}\bif=\S+)"
+        r"(?=[^\n]{0,240}\bof=\S+)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?<![A-Za-z0-9_-])node\s+(?:-e|--eval)\b",
+        re.IGNORECASE,
+    ),
 )
 _LONG_HEX_SECRET = re.compile(
     r"(?<![A-Fa-f0-9])[A-Fa-f0-9]{32,}(?![A-Fa-f0-9])"
@@ -161,6 +177,7 @@ _ASSIGNED_TOKEN_CANDIDATE = re.compile(
     r"(?<![A-Za-z0-9_.-])[A-Za-z_][A-Za-z0-9_.-]{0,40}\s*[:=]\s*"
     r"([A-Za-z0-9+/_-]{16,}={0,2})"
 )
+_PUBLIC_DREAM_RUN_ID = re.compile(r"run_[0-9a-f]{32}")
 
 
 class StoryWorkspaceDreamAgentMessageError(RuntimeError):
@@ -205,6 +222,7 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
             minimum_character_classes=1,
         )
         for match in _LONG_HEX_SECRET.finditer(value)
+        if value[max(0, match.start() - 4):match.start()].lower() != "run_"
     ):
         return True
 
@@ -224,6 +242,7 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
             minimum_character_classes=3,
         )
         for match in _LONG_TOKEN_CANDIDATE.finditer(value)
+        if _PUBLIC_DREAM_RUN_ID.fullmatch(match.group(0)) is None
     )
 
 
@@ -687,6 +706,74 @@ def _forget_dream_public_confirmations_for_turn(
             registry.pop(confirmation_key, None)
 
 
+def _dream_public_confirmation_subscribers(
+    factory: Any,
+    *,
+    create: bool,
+) -> dict[tuple[str, str, str, str], int] | None:
+    subscribers = getattr(
+        factory,
+        _DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR,
+        None,
+    )
+    if isinstance(subscribers, dict):
+        return subscribers
+    if not create:
+        return None
+    subscribers = {}
+    try:
+        setattr(
+            factory,
+            _DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR,
+            subscribers,
+        )
+    except (AttributeError, TypeError):
+        return None
+    return subscribers
+
+
+def _retain_dream_public_confirmation_turn(
+    factory: Any,
+    *,
+    thread_id: str,
+    turn_id: str,
+    run_id: str,
+    actor_id: str,
+) -> bool:
+    subscribers = _dream_public_confirmation_subscribers(factory, create=True)
+    if subscribers is None:
+        return False
+    turn_key = (thread_id, turn_id, run_id, actor_id)
+    subscribers[turn_key] = subscribers.get(turn_key, 0) + 1
+    return True
+
+
+def _release_dream_public_confirmation_turn(
+    factory: Any,
+    *,
+    thread_id: str,
+    turn_id: str,
+    run_id: str,
+    actor_id: str,
+    terminal: bool,
+) -> None:
+    subscribers = _dream_public_confirmation_subscribers(factory, create=False)
+    turn_key = (thread_id, turn_id, run_id, actor_id)
+    remaining = subscribers.get(turn_key, 0) if subscribers is not None else 0
+    if terminal or remaining <= 1:
+        if subscribers is not None:
+            subscribers.pop(turn_key, None)
+        _forget_dream_public_confirmations_for_turn(
+            factory,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            run_id=run_id,
+            actor_id=actor_id,
+        )
+        return
+    subscribers[turn_key] = remaining - 1
+
+
 def _validate_dream_public_confirmation_answers(
     *,
     command: StoryWorkspaceDreamAgentToolConfirmationCommand,
@@ -1010,12 +1097,22 @@ class StoryWorkspaceDreamAgentMessageService:
             after_number = -1
         ordinal = -1
         pending_tool_call_ids: set[str] = set()
-        yield f"event: status\ndata: {_json({'lifecycle': 'streaming'})}\n\n"
-        # A comment is transport-only: it cannot alter raw-frame ordinals and
-        # proves intermediary/proxy connections remain alive without leaking a
-        # generic Claude Agent frame.
-        yield ": keepalive\n\n"
+        if not _retain_dream_public_confirmation_turn(
+            self._thread_factory,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            run_id=run_id,
+            actor_id=actor_id,
+        ):
+            yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
+            return
+        terminal = False
         try:
+            yield f"event: status\ndata: {_json({'lifecycle': 'streaming'})}\n\n"
+            # A comment is transport-only: it cannot alter raw-frame ordinals and
+            # proves intermediary/proxy connections remain alive without leaking a
+            # generic Claude Agent frame.
+            yield ": keepalive\n\n"
             subscribe_expected = getattr(
                 self._thread_factory,
                 "subscribe_expected_stream",
@@ -1039,6 +1136,7 @@ class StoryWorkspaceDreamAgentMessageService:
                 _event, data = parsed
                 frame_type = data.get("type")
                 if frame_type == "finish":
+                    terminal = True
                     break
                 if frame_type == "tool-approval-request":
                     confirmation = story_workspace_project_dream_tool_confirmation(data)
@@ -1086,22 +1184,26 @@ class StoryWorkspaceDreamAgentMessageService:
                         f"data: {_json(payload)}\n\n"
                     )
                     continue
+                if frame_type == "message-final":
+                    terminal = True
+                    if ordinal <= after_number:
+                        break
+                    payload = {"turnId": turn_id}
+                    yield f"id: {turn_id}:{ordinal}\nevent: assistant_message_committed\ndata: {_json(payload)}\n\n"
+                    break
                 if ordinal <= after_number:
                     continue
                 if frame_type == "text-delta" and isinstance(data.get("delta"), str):
                     payload = {"turnId": turn_id, "delta": data["delta"]}
                     yield f"id: {turn_id}:{ordinal}\nevent: assistant_text_delta\ndata: {_json(payload)}\n\n"
-                elif frame_type == "message-final":
-                    payload = {"turnId": turn_id}
-                    yield f"id: {turn_id}:{ordinal}\nevent: assistant_message_committed\ndata: {_json(payload)}\n\n"
-                    break
         finally:
-            _forget_dream_public_confirmations_for_turn(
+            _release_dream_public_confirmation_turn(
                 self._thread_factory,
                 thread_id=thread_id,
                 turn_id=turn_id,
                 run_id=run_id,
                 actor_id=actor_id,
+                terminal=terminal,
             )
         yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
 
