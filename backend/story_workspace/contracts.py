@@ -735,6 +735,200 @@ class StoryWorkspaceDreamFilesResponse(_StoryWorkspaceDreamWireModel):
         return self
 
 
+class StoryWorkspaceEpisodeBindingAvailability(str, Enum):
+    """Whether a run has a server-proven first-episode binding."""
+
+    BOUND = "bound"
+    UNBOUND = "unbound"
+
+
+class StoryWorkspaceEpisodeArtifactAvailability(str, Enum):
+    """Filesystem/parse availability, not an Episode business lifecycle."""
+
+    NOT_GENERATED = "not_generated"
+    AVAILABLE = "available"
+    INVALID = "invalid"
+    UNAVAILABLE = "unavailable"
+
+
+class StoryWorkspaceEpisodeProducerAction(str, Enum):
+    """Safe action vocabulary for artifact provenance and UI translation."""
+
+    PLAN_EPISODE = "plan_episode"
+    WRITE_SCRIPT = "write_script"
+    REVIEW_SCRIPT = "review_script"
+    BUILD_ASSETS = "build_assets"
+    REGENERATE_STORYBOARD = "regenerate_storyboard"
+    GENERATE_PROMPTS = "generate_prompts"
+    REVIEW_FULL_CHAIN = "review_full_chain"
+    COMMIT_EPISODE = "commit_episode"
+    PREPARE_RENDER_GUIDE = "prepare_render_guide"
+
+
+class StoryWorkspaceEpisodeArtifactConsumer(str, Enum):
+    """Allowlisted UI consumers; never accepts arbitrary component names."""
+
+    EPISODE_OVERVIEW = "episode_overview"
+    STORYLINE_NAVIGATOR = "storyline_navigator"
+    NARRATIVE_WORKBENCH = "narrative_workbench"
+    SHOT_INSPECTOR = "shot_inspector"
+    PROMPT_VIEW = "prompt_view"
+    RENDER_VIEW = "render_view"
+    REVIEW_VIEW = "review_view"
+
+
+class StoryWorkspaceEpisodeBindingFile(_StoryWorkspaceDreamStorageModel):
+    """Immutable run-scoped identity persisted as ``episode.json``."""
+
+    schema_version: Literal["dream-episode/v1"] = "dream-episode/v1"
+    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    episode_uid: str = Field(pattern=r"^[0-9a-f]{32}$")
+    story_slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    episode_code: Literal["EP01"] = "EP01"
+    episode_root: str = Field(min_length=1, max_length=512)
+    revision: Literal[1] = 1
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def episode_root_matches_server_identity(
+        self,
+    ) -> "StoryWorkspaceEpisodeBindingFile":
+        expected_root = f"stories/{self.story_slug}/episodes/EP01"
+        if self.episode_root != expected_root:
+            raise ValueError("episode_root does not match the canonical EP01 identity")
+        return self
+
+
+class StoryWorkspaceEpisodeBindingRecovery(_StoryWorkspaceDreamWireModel):
+    """Public recovery facts without story paths or internal failure details."""
+
+    auto_repair_attempted: StrictBool
+    can_dispatch: StrictBool
+    public_reason: Optional[str] = Field(default=None, min_length=1, max_length=80)
+
+
+class StoryWorkspaceEpisodeArtifactManifestEntry(_StoryWorkspaceDreamWireModel):
+    """One allowlisted artifact fact in the Episode surface manifest."""
+
+    relative_key: str = Field(
+        min_length=1,
+        max_length=512,
+    )
+    availability: StoryWorkspaceEpisodeArtifactAvailability
+    content_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    mtime: Optional[datetime] = None
+    size: Optional[_StoryWorkspaceDreamNonNegativeInt] = None
+    producer_action: StoryWorkspaceEpisodeProducerAction
+    consumers: list[StoryWorkspaceEpisodeArtifactConsumer] = Field(
+        min_length=1,
+        max_length=8,
+    )
+
+    @field_validator("relative_key")
+    @classmethod
+    def relative_key_is_allowlisted(cls, value: str) -> str:
+        top_level = {
+            "episode-outline.md",
+            "script.md",
+            "storyboard.yaml",
+            "review-report.md",
+        }
+        if value in top_level or value in {"prompts/", "renders/"}:
+            return value
+        prefixes = ("prompts/", "renders/")
+        matching_prefix = next(
+            (prefix for prefix in prefixes if value.startswith(prefix)),
+            None,
+        )
+        if matching_prefix is None:
+            raise ValueError("relative_key is not an allowlisted Episode artifact")
+        segments = value[len(matching_prefix) :].split("/")
+        if any(
+            segment in {"", ".", ".."}
+            or any(
+                not character.isascii()
+                or not (character.isalnum() or character in "._-")
+                for character in segment
+            )
+            for segment in segments
+        ):
+            raise ValueError("relative_key must be safely relative")
+        return value
+
+    @field_validator("consumers")
+    @classmethod
+    def consumers_are_unique(
+        cls,
+        values: list[StoryWorkspaceEpisodeArtifactConsumer],
+    ) -> list[StoryWorkspaceEpisodeArtifactConsumer]:
+        if len(values) != len(set(values)):
+            raise ValueError("consumers must not contain duplicates")
+        return values
+
+    @model_validator(mode="after")
+    def metadata_matches_availability(
+        self,
+    ) -> "StoryWorkspaceEpisodeArtifactManifestEntry":
+        metadata = (self.content_revision, self.mtime, self.size)
+        if self.availability is StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE:
+            if any(value is None for value in metadata):
+                raise ValueError("available artifacts require revision, mtime, and size")
+        elif any(value is not None for value in metadata):
+            raise ValueError("unavailable artifacts must not expose file metadata")
+        return self
+
+
+class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
+    """Base Episode response; adapters extend its normalized content later."""
+
+    run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    opaque_episode_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{32}$",
+    )
+    manifest_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    etag: Optional[str] = Field(
+        default=None,
+        pattern=r'^"sha256:[0-9a-f]{64}"$',
+    )
+    binding_availability: StoryWorkspaceEpisodeBindingAvailability
+    binding_recovery: StoryWorkspaceEpisodeBindingRecovery
+    artifacts: list[StoryWorkspaceEpisodeArtifactManifestEntry] = Field(
+        default_factory=list,
+        max_length=256,
+    )
+
+    @model_validator(mode="after")
+    def binding_controls_episode_surface(
+        self,
+    ) -> "StoryWorkspaceEpisodeArtifactSurface":
+        if self.binding_availability is StoryWorkspaceEpisodeBindingAvailability.BOUND:
+            if (
+                self.opaque_episode_id is None
+                or self.manifest_revision is None
+                or self.etag is None
+            ):
+                raise ValueError("bound surfaces require opaque identity and revisions")
+        elif (
+            self.opaque_episode_id is not None
+            or self.manifest_revision is not None
+            or self.etag is not None
+            or self.artifacts
+            or self.binding_recovery.can_dispatch
+        ):
+            raise ValueError("unbound surfaces cannot expose Episode artifacts")
+        relative_keys = [artifact.relative_key for artifact in self.artifacts]
+        if len(relative_keys) != len(set(relative_keys)):
+            raise ValueError("artifacts must have unique relative_key values")
+        return self
+
+
 class StoryWorkspaceDreamReentryItem(_StoryWorkspaceDreamWireModel):
     """One permission-checked Dream run rendered by the canonical workbench."""
 
