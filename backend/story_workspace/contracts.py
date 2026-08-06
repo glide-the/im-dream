@@ -959,6 +959,234 @@ class StoryWorkspaceEpisodeActionResolution(_StoryWorkspaceDreamWireModel):
         return self
 
 
+class StoryWorkspaceEpisodeActionAvailability(str, Enum):
+    """Public option eligibility derived from current server facts."""
+
+    EXECUTABLE = "executable"
+    PREVIEW = "preview"
+    BLOCKED = "blocked"
+
+
+class StoryWorkspaceEpisodeActionDispatchState(str, Enum):
+    """Technical dispatch coordination, never an Episode lifecycle."""
+
+    IDLE = "idle"
+    ACCEPTED = "accepted"
+    DISPATCHING = "dispatching"
+    DISPATCHED = "dispatched"
+
+
+class StoryWorkspaceEpisodeRelation(str, Enum):
+    """The bounded current/next Episode window exposed by the resolver."""
+
+    CURRENT = "current"
+    NEXT = "next"
+
+
+class StoryWorkspaceEpisodeActionTarget(_StoryWorkspaceDreamWireModel):
+    """Path-free Episode display identity issued by the server."""
+
+    opaque_episode_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{32}$",
+    )
+    candidate_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^episode_candidate_[0-9a-f]{64}$",
+    )
+    display_label: StrictStr = Field(pattern=r"^EP[0-9]{2,}$")
+    relation: StoryWorkspaceEpisodeRelation
+
+    @model_validator(mode="after")
+    def identity_matches_relation(self) -> "StoryWorkspaceEpisodeActionTarget":
+        if (self.opaque_episode_id is None) == (self.candidate_id is None):
+            raise ValueError("an Episode target requires exactly one opaque identity")
+        if (
+            self.relation is StoryWorkspaceEpisodeRelation.CURRENT
+            and self.opaque_episode_id is None
+        ):
+            raise ValueError("the current Episode target must already be bound")
+        return self
+
+
+class StoryWorkspaceEpisodeArtifactCanonicalInput(_StoryWorkspaceDreamWireModel):
+    """One Episode-manifest-owned public canonical input."""
+
+    source_type: Literal["episode_artifact"] = "episode_artifact"
+    artifact: Literal[
+        "episode_outline",
+        "script",
+        "review_report",
+        "storyboard",
+        "prompts",
+        "renders",
+    ]
+    owner: Literal["episode_artifact_manifest"] = "episode_artifact_manifest"
+    label: StrictStr = Field(min_length=1, max_length=120)
+    availability: Literal["available", "not_generated", "invalid", "unavailable"]
+    public_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    revision_kind: Literal["content"] = "content"
+    requirement: Literal["required", "context"]
+
+
+class StoryWorkspaceProjectArtifactCanonicalInput(_StoryWorkspaceDreamWireModel):
+    """One allowlisted canonical project-file input without its path."""
+
+    source_type: Literal["project_artifact"] = "project_artifact"
+    artifact: Literal[
+        "project_definition",
+        "master_outline",
+        "worldbuilding",
+        "character_arc_ledger",
+    ]
+    owner: Literal["canonical_project_files"] = "canonical_project_files"
+    label: StrictStr = Field(min_length=1, max_length=120)
+    availability: Literal["available", "not_generated", "invalid", "unavailable"]
+    public_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    revision_kind: Literal["content"] = "content"
+    requirement: Literal["required", "context"]
+
+
+class StoryWorkspaceAssetContextCanonicalInput(_StoryWorkspaceDreamWireModel):
+    """Public aggregate status for canonical project asset inventory."""
+
+    source_type: Literal["asset_context"] = "asset_context"
+    context: Literal["character_scene_prop_inventory"] = (
+        "character_scene_prop_inventory"
+    )
+    owner: Literal["canonical_project_asset_inventory"] = (
+        "canonical_project_asset_inventory"
+    )
+    label: StrictStr = Field(min_length=1, max_length=120)
+    availability: Literal["current", "stale", "unavailable"]
+    public_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    revision_kind: Literal["aggregate"] = "aggregate"
+    requirement: Literal["context"] = "context"
+
+
+class StoryWorkspaceWorkflowFactCanonicalInput(_StoryWorkspaceDreamWireModel):
+    """One workflow-fact-owned prerequisite exposed without internal metadata."""
+
+    source_type: Literal["workflow_fact"] = "workflow_fact"
+    fact: Literal[
+        "refresh_assets_completion",
+        "full_chain_review",
+        "validation",
+        "prior_episode_validation",
+    ]
+    owner: Literal["episode_workflow_facts"] = "episode_workflow_facts"
+    label: StrictStr = Field(min_length=1, max_length=120)
+    availability: Literal["current", "stale", "missing"]
+    public_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    revision_kind: Literal["input", "facts"]
+    requirement: Literal["required"] = "required"
+
+
+StoryWorkspaceEpisodeActionCanonicalInput = Annotated[
+    StoryWorkspaceEpisodeArtifactCanonicalInput
+    | StoryWorkspaceProjectArtifactCanonicalInput
+    | StoryWorkspaceAssetContextCanonicalInput
+    | StoryWorkspaceWorkflowFactCanonicalInput,
+    Field(discriminator="source_type"),
+]
+
+
+class StoryWorkspaceEpisodeActionOptionV2(_StoryWorkspaceDreamWireModel):
+    """One opaque, target-aware server-owned workflow action option."""
+
+    action_id: str = Field(pattern=r"^episode_action_[0-9a-f]{64}$")
+    action: StoryWorkspaceEpisodeAction
+    target_episode: StoryWorkspaceEpisodeActionTarget
+    label: StrictStr = Field(min_length=1, max_length=160)
+    description: StrictStr = Field(min_length=1, max_length=500)
+    display_command: StrictStr = Field(min_length=1, max_length=160)
+    availability: StoryWorkspaceEpisodeActionAvailability
+    is_recommended: StrictBool
+    can_dispatch: StrictBool
+    disabled_reason: Optional[StrictStr] = Field(default=None, max_length=300)
+    canonical_inputs: list[StoryWorkspaceEpisodeActionCanonicalInput] = Field(
+        default_factory=list,
+        max_length=16,
+    )
+    consequences: list[StrictStr] = Field(default_factory=list, max_length=8)
+    dispatch_state: StoryWorkspaceEpisodeActionDispatchState = (
+        StoryWorkspaceEpisodeActionDispatchState.IDLE
+    )
+
+    @model_validator(mode="after")
+    def option_state_is_consistent(self) -> "StoryWorkspaceEpisodeActionOptionV2":
+        if self.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
+            raise ValueError("none_in_scope cannot be rendered as an option")
+        if any(
+            marker in self.display_command
+            for marker in ("mcp__", "workflowRunId", "expectedBindingRevision")
+        ):
+            raise ValueError("display_command must not expose internal tool details")
+        if self.availability in {
+            StoryWorkspaceEpisodeActionAvailability.PREVIEW,
+            StoryWorkspaceEpisodeActionAvailability.BLOCKED,
+        }:
+            if self.dispatch_state is not StoryWorkspaceEpisodeActionDispatchState.IDLE:
+                raise ValueError("preview and blocked options must remain idle")
+            if self.can_dispatch:
+                raise ValueError("preview and blocked options cannot be dispatched")
+        if self.dispatch_state in {
+            StoryWorkspaceEpisodeActionDispatchState.ACCEPTED,
+            StoryWorkspaceEpisodeActionDispatchState.DISPATCHING,
+            StoryWorkspaceEpisodeActionDispatchState.DISPATCHED,
+        } and self.can_dispatch:
+            raise ValueError("non-idle options cannot be dispatched")
+        if self.can_dispatch and (
+            self.availability is not StoryWorkspaceEpisodeActionAvailability.EXECUTABLE
+            or self.disabled_reason is not None
+        ):
+            raise ValueError("dispatchable options must be executable without a reason")
+        if not self.can_dispatch and self.disabled_reason is None:
+            raise ValueError("non-dispatchable options require a public reason")
+        return self
+
+
+class StoryWorkspaceEpisodeActionProjectionV2(_StoryWorkspaceDreamWireModel):
+    """A bounded server-ordered current/next Episode action projection."""
+
+    recommended_action_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^episode_action_[0-9a-f]{64}$",
+    )
+    action_options: list[StoryWorkspaceEpisodeActionOptionV2] = Field(
+        default_factory=list,
+        max_length=9,
+    )
+
+    @model_validator(mode="after")
+    def options_match_recommendation(self) -> "StoryWorkspaceEpisodeActionProjectionV2":
+        if not self.action_options:
+            if self.recommended_action_id is not None:
+                raise ValueError("an empty projection cannot recommend an action")
+            return self
+        if self.recommended_action_id != self.action_options[0].action_id:
+            raise ValueError("the first option must match recommended_action_id")
+        recommended = [item for item in self.action_options if item.is_recommended]
+        if len(recommended) != 1 or recommended[0].action_id != self.recommended_action_id:
+            raise ValueError("a non-empty projection requires one recommendation")
+        identities = [item.action_id for item in self.action_options]
+        if len(identities) != len(set(identities)):
+            raise ValueError("action option identities must be unique")
+        return self
+
+
 class StoryWorkspaceEpisodeActionOption(_StoryWorkspaceDreamWireModel):
     """One server-ordered workflow option exposed for navigation only."""
 
@@ -2660,11 +2888,19 @@ __all__ = [
     "StoryWorkspaceDreamStageToolInput",
     "StoryWorkspaceDreamToolInput",
     "StoryWorkspaceEpisodeAction",
+    "StoryWorkspaceEpisodeActionAvailability",
     "StoryWorkspaceEpisodeActionAccepted",
+    "StoryWorkspaceEpisodeActionCanonicalInput",
     "StoryWorkspaceEpisodeActionContinueCommand",
     "StoryWorkspaceEpisodeActionDiagnostic",
+    "StoryWorkspaceEpisodeActionDispatchState",
     "StoryWorkspaceEpisodeActionOption",
+    "StoryWorkspaceEpisodeActionOptionV2",
+    "StoryWorkspaceEpisodeActionProjectionV2",
     "StoryWorkspaceEpisodeActionResolution",
+    "StoryWorkspaceEpisodeActionTarget",
+    "StoryWorkspaceEpisodeArtifactCanonicalInput",
+    "StoryWorkspaceAssetContextCanonicalInput",
     "StoryWorkspaceEpisodeBindingToolInput",
     "StoryWorkspaceEpisodeArtifactSection",
     "StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics",
@@ -2681,10 +2917,13 @@ __all__ = [
     "StoryWorkspaceEpisodeReviewTarget",
     "StoryWorkspaceEpisodeReviewTargetKind",
     "StoryWorkspaceEpisodeReviewedSourceRevision",
+    "StoryWorkspaceEpisodeRelation",
     "StoryWorkspaceEpisodeWorkflowCompletion",
     "StoryWorkspaceEpisodeWorkflowCompletionToolInput",
     "StoryWorkspaceEpisodeWorkflowFile",
     "StoryWorkspaceEpisodeWorkflowProjection",
+    "StoryWorkspaceProjectArtifactCanonicalInput",
+    "StoryWorkspaceWorkflowFactCanonicalInput",
     "StoryWorkspaceEpisodeBindingRecoveryCommand",
     "StoryWorkspaceExecutionProjection",
     "StoryWorkspaceGuidanceCommand",

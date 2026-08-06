@@ -1,0 +1,8 @@
+U1 Green
+Command: backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_multi_episode_actions.py
+Result: 6 passed in 0.11s
+
+Regression: backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_episode_actions.py
+Result: 101 passed in 1.52s
+
+Review: projector is pure and path-free; action IDs hash trusted run/target/action/input facts; preview and blocked options reject non-idle or dispatchable states; no binding, database, file, Agent, or frontend ownership changed in U1.
