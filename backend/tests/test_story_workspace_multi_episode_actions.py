@@ -56,8 +56,11 @@ def _snapshot(**overrides: object) -> StoryWorkspaceEpisodeActionSnapshot:
         "next_entry_action": StoryWorkspaceEpisodeAction.PLAN_EPISODE,
         "next_entry_can_dispatch": False,
         "project_has_next_episode": True,
+        "next_input_revision": REVISION,
     }
     values.update(overrides)
+    if values["next_episode"] is None:
+        values["next_input_revision"] = None
     return StoryWorkspaceEpisodeActionSnapshot(**values)
 
 

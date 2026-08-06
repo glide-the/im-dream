@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import re
@@ -21,6 +21,7 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeArtifactAvailability,
     StoryWorkspaceEpisodeArtifactCanonicalInput,
     StoryWorkspaceEpisodeRelation,
+    StoryWorkspaceEpisodeRegistryFile,
     StoryWorkspaceEpisodeWorkflowFile,
     StoryWorkspaceProjectArtifactCanonicalInput,
     StoryWorkspaceWorkflowFactCanonicalInput,
@@ -88,6 +89,7 @@ class StoryWorkspaceEpisodeActionSnapshot:
     next_entry_action: StoryWorkspaceEpisodeAction | None
     next_entry_can_dispatch: bool
     project_has_next_episode: bool
+    next_input_revision: str | None = None
 
     def __post_init__(self) -> None:
         if re.fullmatch(r"run_[0-9a-f]{32}", self.run_id) is None:
@@ -100,6 +102,12 @@ class StoryWorkspaceEpisodeActionSnapshot:
             raise ValueError("next Episode availability must match its descriptor")
         if (self.next_episode is None) != (self.next_entry_action is None):
             raise ValueError("next Episode descriptors require one entry action")
+        if (self.next_episode is None) != (self.next_input_revision is None):
+            raise ValueError("next Episode descriptors require an input revision")
+        if self.next_input_revision is not None and re.fullmatch(
+            r"sha256:[0-9a-f]{64}", self.next_input_revision
+        ) is None:
+            raise ValueError("next Episode actions require an opaque input revision")
         if self.next_episode is not None and self.next_episode.relation != "next":
             raise ValueError("next_episode must use the next relation")
         if self.next_entry_action not in {
@@ -108,6 +116,182 @@ class StoryWorkspaceEpisodeActionSnapshot:
             StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
         }:
             raise ValueError("next Episode entry must be plan or script")
+
+
+@dataclass(frozen=True)
+class StoryWorkspaceEpisodeRegistryActionContext:
+    """Server-derived current/next descriptors without exposing registry paths."""
+
+    current_episode: StoryWorkspaceEpisodeDescriptor
+    next_episode: StoryWorkspaceEpisodeDescriptor | None
+    registry_revision: int
+
+    @classmethod
+    def build(
+        cls,
+        registry: StoryWorkspaceEpisodeRegistryFile,
+        *,
+        total_episodes: int,
+    ) -> "StoryWorkspaceEpisodeRegistryActionContext":
+        if (
+            isinstance(total_episodes, bool)
+            or not isinstance(total_episodes, int)
+            or total_episodes < 1
+            or total_episodes > 99
+        ):
+            raise ValueError("trusted total Episode count is invalid")
+        if len(registry.episodes) > total_episodes:
+            raise ValueError("Episode registry exceeds the trusted project plan")
+        active = next(
+            episode
+            for episode in registry.episodes
+            if episode.episode_uid == registry.active_episode_uid
+        )
+        current = StoryWorkspaceEpisodeDescriptor(
+            opaque_episode_id=active.episode_uid,
+            episode_number=active.episode_number,
+            display_label=active.episode_code,
+            relation="current",
+        )
+        next_number = active.episode_number + 1
+        if next_number > total_episodes:
+            return cls(
+                current_episode=current,
+                next_episode=None,
+                registry_revision=registry.revision,
+            )
+        bound_next = next(
+            (
+                episode
+                for episode in registry.episodes
+                if episode.episode_number == next_number
+            ),
+            None,
+        )
+        if bound_next is not None:
+            next_episode = StoryWorkspaceEpisodeDescriptor(
+                opaque_episode_id=bound_next.episode_uid,
+                episode_number=bound_next.episode_number,
+                display_label=bound_next.episode_code,
+                relation="next",
+            )
+        else:
+            payload = {
+                "episode_number": next_number,
+                "registry_revision": registry.revision,
+                "run_id": registry.workflow_run_id,
+                "story_slug": registry.story_slug,
+            }
+            candidate_hash = hashlib.sha256(
+                json.dumps(
+                    payload,
+                    ensure_ascii=True,
+                    allow_nan=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ).encode("utf-8")
+            ).hexdigest()
+            next_episode = StoryWorkspaceEpisodeDescriptor(
+                candidate_id=f"episode_candidate_{candidate_hash}",
+                episode_number=next_number,
+                display_label=f"EP{next_number:02d}",
+                relation="next",
+            )
+        return cls(
+            current_episode=current,
+            next_episode=next_episode,
+            registry_revision=registry.revision,
+        )
+
+
+class StoryWorkspaceNextEpisodeActionPlanner:
+    """Attach the bounded next Episode entry only after trusted fact checks."""
+
+    def __init__(
+        self,
+        resolver: StoryWorkspaceEpisodeNextActionResolver | None = None,
+    ) -> None:
+        self._resolver = resolver or StoryWorkspaceEpisodeNextActionResolver()
+
+    @staticmethod
+    def _combined_revision(
+        snapshot: StoryWorkspaceEpisodeActionSnapshot,
+        descriptor: StoryWorkspaceEpisodeDescriptor,
+        entry_revision: str,
+    ) -> str:
+        payload = {
+            "current_input_revision": snapshot.current_input_revision,
+            "entry_revision": entry_revision,
+            "target": descriptor.opaque_episode_id or descriptor.candidate_id,
+        }
+        return "sha256:" + hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=True,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def attach(
+        self,
+        snapshot: StoryWorkspaceEpisodeActionSnapshot,
+        *,
+        context: StoryWorkspaceEpisodeRegistryActionContext,
+        next_surface: object | None = None,
+        next_facts: StoryWorkspaceEpisodeWorkflowFile | None = None,
+    ) -> StoryWorkspaceEpisodeActionSnapshot:
+        if snapshot.current_episode != context.current_episode:
+            raise ValueError("current action snapshot and Episode registry disagree")
+        descriptor = context.next_episode
+        if descriptor is None:
+            if next_surface is not None or next_facts is not None:
+                raise ValueError("terminal Episode cannot accept next Episode facts")
+            return snapshot
+        if (next_surface is None) != (next_facts is None):
+            raise ValueError("next Episode surface and facts must be supplied together")
+        if next_surface is None or next_facts is None:
+            next_action = StoryWorkspaceEpisodeAction.PLAN_EPISODE
+            next_can_dispatch = snapshot.validation_current
+            entry_revision = "sha256:" + hashlib.sha256(
+                f"candidate:{context.registry_revision}".encode("ascii")
+            ).hexdigest()
+        else:
+            if descriptor.opaque_episode_id is None:
+                raise ValueError("candidate Episode cannot own artifact facts")
+            StoryWorkspaceCurrentEpisodeActionSnapshotBuilder._assert_identity(
+                next_surface,
+                next_facts,
+                replace(descriptor, relation="current"),
+            )
+            workflow = self._resolver.project(next_surface, next_facts)
+            next_action = workflow.next_action.action
+            if next_action not in {
+                StoryWorkspaceEpisodeAction.PLAN_EPISODE,
+                StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
+            }:
+                raise ValueError("next Episode exceeds the two-step entry horizon")
+            next_can_dispatch = (
+                snapshot.validation_current and workflow.next_action.can_dispatch
+            )
+            entry_revision = self._resolver.action_input_revision(
+                next_action,
+                next_surface,
+                next_facts,
+            )
+        return replace(
+            snapshot,
+            next_episode=descriptor,
+            next_entry_action=next_action,
+            next_entry_can_dispatch=next_can_dispatch,
+            project_has_next_episode=True,
+            next_input_revision=self._combined_revision(
+                snapshot,
+                descriptor,
+                entry_revision,
+            ),
+        )
 
 
 class StoryWorkspaceCurrentEpisodeActionSnapshotBuilder:
@@ -200,6 +384,7 @@ class StoryWorkspaceCurrentEpisodeActionSnapshotBuilder:
             next_entry_action=None,
             next_entry_can_dispatch=False,
             project_has_next_episode=False,
+            next_input_revision=None,
         )
 
 
@@ -227,7 +412,11 @@ class StoryWorkspaceMultiEpisodeActionProjector:
     ) -> str:
         payload = {
             "action": action.value,
-            "input_revision": snapshot.current_input_revision,
+            "input_revision": (
+                snapshot.next_input_revision
+                if descriptor.relation == "next"
+                else snapshot.current_input_revision
+            ),
             "intent": intent,
             "relation": descriptor.relation,
             "run_id": snapshot.run_id,
@@ -526,7 +715,11 @@ class StoryWorkspaceMultiEpisodeActionProjector:
             canonicalInputs=cls._canonical_inputs(
                 action,
                 descriptor,
-                revision=snapshot.current_input_revision,
+                revision=(
+                    snapshot.next_input_revision
+                    if descriptor.relation == "next"
+                    else snapshot.current_input_revision
+                ),
                 executable=availability is StoryWorkspaceEpisodeActionAvailability.EXECUTABLE,
             ),
             consequences=cls._consequences(action, intent=intent),
@@ -693,5 +886,7 @@ __all__ = [
     "StoryWorkspaceCurrentEpisodeActionSnapshotBuilder",
     "StoryWorkspaceEpisodeActionSnapshot",
     "StoryWorkspaceEpisodeDescriptor",
+    "StoryWorkspaceEpisodeRegistryActionContext",
     "StoryWorkspaceMultiEpisodeActionProjector",
+    "StoryWorkspaceNextEpisodeActionPlanner",
 ]
