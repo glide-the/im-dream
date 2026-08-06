@@ -43,10 +43,12 @@ const actions = Array.from({ length: 7 }, (_, index): WorkflowActionViewModel =>
     '/drama-script (EP02)',
   ][index] ?? '受控步骤',
   isCurrent: index === 0,
-  canDispatch: index <= 1,
+  canDispatch: index <= 1 || index === 4,
   pending: false,
-  disabledReason: index <= 1 ? null : '完成当前步骤后可用',
-  availability: index <= 1 ? 'executable' : index === 5 ? 'blocked' : 'preview',
+  disabledReason: index <= 1 || index === 4 ? null : '完成当前步骤后可用',
+  availability: index <= 1 || index === 4
+    ? 'executable'
+    : index === 5 ? 'blocked' : 'preview',
   description: `动作说明 ${index + 1}`,
   targetEpisodeLabel: index < 5 ? 'EP01' : 'EP02',
 }));
@@ -103,11 +105,23 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     function Harness() {
       const [open, setOpen] = useState(true);
       const [pending, setPending] = useState(false);
+      const [initialWorkflowFocus, setInitialWorkflowFocus] = useState(null);
       const [requests, setRequests] = useState([]);
       const triggerRef = useRef(null);
       window.setWorkflowPending = setPending;
+      window.reopenWorkflowFocus = (actionId, wasOverflow) => {
+        setInitialWorkflowFocus({ actionId, wasOverflow });
+        setOpen(true);
+      };
       return h('main', null,
-        h('button', { ref: triggerRef, onClick: () => setOpen(true), type: 'button' }, '打开 Dream Agent'),
+        h('button', {
+          ref: triggerRef,
+          onClick: () => {
+            setInitialWorkflowFocus(null);
+            setOpen(true);
+          },
+          type: 'button',
+        }, '打开 Dream Agent'),
         h('output', { id: 'requests' }, requests.join(',')),
         open && h(StoryWorkspaceDreamAgentDialog, {
           agent, deckName: 'drama-forge', runId: snapshot.storyWorkspaceRunId,
@@ -115,6 +129,7 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
             ...action,
             pending: index === 0 && pending,
           })),
+          initialWorkflowFocus,
           onRequestWorkflowAction: (id) => setRequests((current) => [...current, id]),
           onClose: () => setOpen(false), restoreFocusRef: triggerRef,
         }),
@@ -226,6 +241,36 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('button', { name: '打开 Dream Agent' })).toBeFocused();
+
+    await page.evaluate(() => {
+      (window as unknown as {
+        reopenWorkflowFocus: (actionId: string, wasOverflow: boolean) => void;
+      }).reopenWorkflowFocus('episode-action-4', true);
+    });
+    const restoredDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    const restoredDisclosure = restoredDialog.getByRole('button', {
+      name: '更多工作流操作（5）',
+    });
+    await expect(restoredDisclosure).toHaveAttribute('aria-expanded', 'true');
+    await expect(restoredDialog.getByRole('button', {
+      name: /准备 EP01 渲染与配音指引.*当前可执行/,
+    })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
+
+    await page.evaluate(() => {
+      (window as unknown as {
+        reopenWorkflowFocus: (actionId: string, wasOverflow: boolean) => void;
+      }).reopenWorkflowFocus('episode-action-missing', true);
+    });
+    const fallbackDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    const fallbackDisclosure = fallbackDialog.getByRole('button', {
+      name: '更多工作流操作（5）',
+    });
+    await expect(fallbackDisclosure).toHaveAttribute('aria-expanded', 'true');
+    await expect(fallbackDisclosure).toBeFocused();
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
 
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth))
       .toBe(true);

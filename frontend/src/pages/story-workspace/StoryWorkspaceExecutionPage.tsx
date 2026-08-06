@@ -498,6 +498,8 @@ export function StoryWorkspaceExecutionPage({
   const [episodeContinueDialogOpen, setEpisodeContinueDialogOpen] = useState(false);
   const [selectedEpisodeWorkflowActionId, setSelectedEpisodeWorkflowActionId] =
     useState<string | null>(null);
+  const [dreamAgentInitialWorkflowFocus, setDreamAgentInitialWorkflowFocus] =
+    useState<{ readonly actionId: string; readonly wasOverflow: boolean } | null>(null);
   const [focusedArtifact, setFocusedArtifact] =
     useState<StoryWorkspaceEpisodeReadableArtifact>('storyboard.yaml');
   const [pendingArtifactReaderFocus, setPendingArtifactReaderFocus] =
@@ -864,6 +866,7 @@ export function StoryWorkspaceExecutionPage({
         messageId: accepted.messageId,
       });
       setEpisodeActionNotice('已交给同一 Dream Agent；第一集关联将从服务端事实恢复。');
+      setDreamAgentInitialWorkflowFocus(null);
       setAgentDialogOpen(true);
       dreamAgent.refresh();
       refreshEpisodeArtifacts();
@@ -992,6 +995,12 @@ export function StoryWorkspaceExecutionPage({
       (option) => option.actionId === action.id && option.canDispatch,
     )) return;
     setEpisodeActionError(null);
+    setDreamAgentInitialWorkflowFocus({
+      actionId,
+      wasOverflow: dreamAgentWorkflowActions.findIndex(
+        (candidate) => candidate.id === actionId,
+      ) >= 2,
+    });
     setSelectedEpisodeWorkflowActionId(action.id);
     setAgentDialogOpen(false);
     setEpisodeContinueDialogOpen(true);
@@ -1034,7 +1043,10 @@ export function StoryWorkspaceExecutionPage({
           aria-label="打开 Dream Agent 消息预览"
           className="story-workspace-collaboration__agent-state"
           disabled={episodeContinueDialogOpen}
-          onClick={() => setAgentDialogOpen(true)}
+          onClick={() => {
+            setDreamAgentInitialWorkflowFocus(null);
+            setAgentDialogOpen(true);
+          }}
           ref={agentPreviewTriggerRef}
           type="button"
         >
@@ -1401,6 +1413,7 @@ export function StoryWorkspaceExecutionPage({
             setEpisodeActionError(null);
             setEpisodeContinueDialogOpen(false);
             setSelectedEpisodeWorkflowActionId(null);
+            setAgentDialogOpen(true);
           }}
           onConfirm={(userGuidance) => handleEpisodeContinue(userGuidance)}
           restoreFocusRef={episodeContinueTriggerRef}
@@ -1412,6 +1425,7 @@ export function StoryWorkspaceExecutionPage({
         <StoryWorkspaceDreamAgentDialog
           agent={dreamAgent}
           deckName={currentRun?.deck_plugin_display_name ?? '当前 Deck'}
+          initialWorkflowFocus={dreamAgentInitialWorkflowFocus}
           onRequestWorkflowAction={handleDreamAgentWorkflowAction}
           onClose={() => setAgentDialogOpen(false)}
           restoreFocusRef={agentPreviewTriggerRef}

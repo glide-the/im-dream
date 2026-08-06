@@ -25,6 +25,10 @@ export interface StoryWorkspaceDreamAgentDialogProps {
   readonly onRequestWorkflowAction: (identity: string) => void;
   readonly onClose: () => void;
   readonly restoreFocusRef: React.RefObject<HTMLButtonElement | null>;
+  readonly initialWorkflowFocus?: {
+    readonly actionId: string;
+    readonly wasOverflow: boolean;
+  } | null;
 }
 
 export interface StoryWorkspaceDreamAgentWorkflowActionViewModel {
@@ -89,6 +93,7 @@ function storyWorkspaceDreamAgentVisibleFocusables(root: HTMLElement | null): re
 
 export function StoryWorkspaceDreamAgentDialog({
   agent, deckName, runId, workflowActions, onRequestWorkflowAction, onClose, restoreFocusRef,
+  initialWorkflowFocus = null,
 }: StoryWorkspaceDreamAgentDialogProps) {
   const [draft, setDraft] = useState('');
   const [isNarrow, setIsNarrow] = useState(false);
@@ -99,6 +104,7 @@ export function StoryWorkspaceDreamAgentDialog({
   const pendingKeyRef = useRef<string | null>(null);
   const workflowOverflowId = useId();
   const workflowOverflowTriggerRef = useRef<HTMLButtonElement>(null);
+  const workflowActionRefs = useRef(new Map<string, HTMLButtonElement>());
   const inputHint = storyWorkspaceDreamAgentInputHint(agent);
   const status = storyWorkspaceDreamAgentDialogStatus(agent);
   const { markRead, snapshot, streamText } = agent;
@@ -109,6 +115,7 @@ export function StoryWorkspaceDreamAgentDialog({
   });
   const canSend = Boolean(agent.snapshot?.canSend && draft.trim() && !agent.isSending);
   const workflowActionGroups = storyWorkspaceSplitDreamAgentWorkflowActions(workflowActions);
+  const workflowActionIdentity = workflowActions.map((action) => action.id).join('\u0000');
   const {
     bottomRef,
     handleHistoryScroll,
@@ -164,6 +171,28 @@ export function StoryWorkspaceDreamAgentDialog({
   useEffect(() => {
     if (workflowActionGroups.overflow.length === 0) setWorkflowOverflowOpen(false);
   }, [workflowActionGroups.overflow.length]);
+
+  useEffect(() => {
+    if (initialWorkflowFocus === null) return undefined;
+    if (initialWorkflowFocus.wasOverflow && workflowActionGroups.overflow.length > 0) {
+      setWorkflowOverflowOpen(true);
+    }
+    const frame = requestAnimationFrame(() => {
+      const action = workflowActionRefs.current.get(initialWorkflowFocus.actionId);
+      if (action !== undefined) {
+        action.focus();
+      } else if (initialWorkflowFocus.wasOverflow) {
+        workflowOverflowTriggerRef.current?.focus();
+      } else {
+        headingRef.current?.focus();
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    initialWorkflowFocus,
+    workflowActionGroups.overflow.length,
+    workflowActionIdentity,
+  ]);
 
   useEffect(() => () => {
     requestAnimationFrame(() => restoreFocusRef.current?.focus());
@@ -238,6 +267,10 @@ export function StoryWorkspaceDreamAgentDialog({
         disabled={disabled}
         key={action.id}
         onClick={() => onRequestWorkflowAction(action.id)}
+        ref={(element) => {
+          if (element === null) workflowActionRefs.current.delete(action.id);
+          else workflowActionRefs.current.set(action.id, element);
+        }}
         title={disabledReason ?? undefined}
         type="button"
       >
