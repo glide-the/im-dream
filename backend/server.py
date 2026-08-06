@@ -741,7 +741,7 @@ app.add_middleware(
     allow_credentials=CORS_ALLOW_CREDENTIALS,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-New-Access-Token"],
+    expose_headers=["X-New-Access-Token", "ETag"],
 )
 
 # ========== Timeline Auto-Generation Scheduler ==========

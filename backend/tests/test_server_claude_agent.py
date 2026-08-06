@@ -710,6 +710,31 @@ class TestFactoryLifecycle(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 @_skip_if_no_server
+class TestBrowserResponseHeaders(unittest.TestCase):
+    """Cross-origin browser clients must be able to verify artifact ETags."""
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            from fastapi.testclient import TestClient
+        except ImportError:
+            raise unittest.SkipTest("httpx not installed — skipping CORS tests")
+        cls.client = TestClient(_SERVER_MODULE.app, raise_server_exceptions=False)
+
+    def test_cors_exposes_etag_and_sliding_auth_header(self):
+        response = self.client.get(
+            "/api/me",
+            headers={"Origin": "http://127.0.0.1:5173"},
+        )
+
+        exposed = {
+            value.strip().lower()
+            for value in response.headers["access-control-expose-headers"].split(",")
+        }
+        self.assertEqual(exposed, {"etag", "x-new-access-token"})
+
+
+@_skip_if_no_server
 class TestClaudeAgentAuth(unittest.TestCase):
     """Claude agent routes must require JWT authentication."""
 
