@@ -2,6 +2,21 @@
 
 from __future__ import annotations
 
+import hashlib
+
+
+def story_workspace_canonical_project_fallback_slug(project_name: str) -> str:
+    """Return the byte-exact fallback slug without Unicode normalization."""
+
+    digest = hashlib.sha256(project_name.encode("utf-8")).hexdigest()
+    return f"proj-{digest[:8]}"
+
+
+_FALLBACK_EXAMPLE_PROJECT_NAME = "郑州暴雨夜"
+_FALLBACK_EXAMPLE_PROJECT_SLUG = story_workspace_canonical_project_fallback_slug(
+    _FALLBACK_EXAMPLE_PROJECT_NAME
+)
+
 
 STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION = (
     "先完成 drama-init 的项目初始化语义，再推进任何 Episode 工作。\n"
@@ -10,8 +25,12 @@ STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION = (
     "^[a-z0-9]+(?:-[a-z0-9]+)*$。\n"
     "project_name 只用于显示，禁止把 project_name 当作目录或 source path 的项目段；"
     "全中文 project_name 不得直接成为物理项目身份；没有可保留的 ASCII 片段时，"
-    "必须基于原始 project_name 生成稳定 proj-<8位小写十六进制摘要>，并将同一值"
-    "同时作为 project_id 与 project_slug。\n"
+    "fallback 算法固定为 proj- + "
+    "sha256(原始 project_name 的 UTF-8 bytes).hexdigest()[:8]。"
+    "直接编码原始 project_name，不 trim、casefold，也不对 project_name 做 "
+    "Unicode normalization；不同原始 Unicode code-point/byte 序列可以得到不同标识。"
+    f"示例：{_FALLBACK_EXAMPLE_PROJECT_NAME} → {_FALLBACK_EXAMPLE_PROJECT_SLUG}。"
+    "将该结果同时作为 project_id 与 project_slug。\n"
     "规范项目身份成立后，才能写入 storyboard canonical 文件。"
 )
 
@@ -36,4 +55,5 @@ __all__ = [
     "STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION",
     "STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX",
     "STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION",
+    "story_workspace_canonical_project_fallback_slug",
 ]

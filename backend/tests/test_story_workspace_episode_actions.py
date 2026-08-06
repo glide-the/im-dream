@@ -822,7 +822,9 @@ class TestStoryWorkspaceEpisodeActionService:
         assert "project_slug 必须与 project_id 完全相同" in text
         assert "project_name 只用于显示" in text
         assert "全中文 project_name 不得直接成为物理项目身份" in text
-        assert "稳定 proj-<8位小写十六进制摘要>" in text
+        assert "sha256(原始 project_name 的 UTF-8 bytes).hexdigest()[:8]" in text
+        assert "不对 project_name 做 Unicode normalization" in text
+        assert "郑州暴雨夜 → proj-396e4c1b" in text
         assert "禁止把 project_name 当作目录" in text
         assert "恰有一个非规范 story 目录" in text
         assert "唯一合法 ASCII project_id" in text

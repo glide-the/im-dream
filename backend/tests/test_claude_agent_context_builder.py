@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import sys
 import unittest
 import unittest.mock
@@ -42,6 +43,7 @@ from claude_agent.workspace_context import (
     WORKSPACE_CONTEXT_TEMPLATE,
     build_workspace_context_block,
 )
+from services.story_workspace import canonical_project_instruction
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 # ---------------------------------------------------------------------------
@@ -268,13 +270,33 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("^[a-z0-9]+(?:-[a-z0-9]+)*$", combined)
         self.assertIn("project_name 只用于显示", combined)
         self.assertIn("全中文 project_name 不得直接成为物理项目身份", combined)
-        self.assertIn("稳定 proj-<8位小写十六进制摘要>", combined)
+        self.assertIn(
+            "sha256(原始 project_name 的 UTF-8 bytes).hexdigest()[:8]",
+            combined,
+        )
+        self.assertIn("不对 project_name 做 Unicode normalization", combined)
+        self.assertIn("郑州暴雨夜 → proj-396e4c1b", combined)
         self.assertIn("规范项目身份成立后，才能写入 storyboard", combined)
         self.assertIn("expectedBindingRevision=0", combined)
         self.assertLess(
             combined.index("<story_workspace_dream_context>"),
             combined.rindex("create the story"),
         )
+
+    def test_canonical_project_fallback_slug_is_byte_exact_without_normalization(self):
+        fallback_slug = getattr(
+            canonical_project_instruction,
+            "story_workspace_canonical_project_fallback_slug",
+        )
+
+        self.assertEqual(
+            hashlib.sha256("郑州暴雨夜".encode("utf-8")).hexdigest(),
+            "396e4c1bc0b6e36bc8203fb490d20e5a536eb5f23e41f2f4ebd0dacfa4074e17",
+        )
+        self.assertEqual(fallback_slug("郑州暴雨夜"), "proj-396e4c1b")
+        self.assertEqual(fallback_slug("é"), "proj-4a99557e")
+        self.assertEqual(fallback_slug("e\u0301"), "proj-bf12767b")
+        self.assertNotEqual(fallback_slug("é"), fallback_slug("e\u0301"))
 
     def test_includes_runtime_context_block(self):
         blocks = self.builder.build_user_message(self._parts("Hello there"))

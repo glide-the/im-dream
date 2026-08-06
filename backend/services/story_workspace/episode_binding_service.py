@@ -35,12 +35,14 @@ _STORY_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BINDING_MAX_BYTES = 16 * 1024
 _PROJECT_MAX_BYTES = 256 * 1024
 _PROJECT_ID_PATTERN = re.compile(
-    r"(?m)^project_id:\s*"
+    r"(?m)^project_id:[ \t]*"
     r"(?P<quote>['\"]?)"
     r"(?P<value>[a-z0-9]+(?:-[a-z0-9]+)*)"
-    r"(?P=quote)\s*$"
+    r"(?P=quote)[ \t]*(?:\r\n|\n|\Z)"
 )
-_PROJECT_ID_DECLARATION_PATTERN = re.compile(r"(?m)^[ \t]*project_id\s*:")
+_PROJECT_ID_DECLARATION_PATTERN = re.compile(
+    r"(?m)^[ \t]*project_id[ \t]*:"
+)
 
 
 class StoryWorkspaceEpisodeBindingError(RuntimeError):

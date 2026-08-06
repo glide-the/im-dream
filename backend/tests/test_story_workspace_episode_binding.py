@@ -343,11 +343,18 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
     ) -> None:
         project_path = self.workspace / "stories" / "demo" / "project.yaml"
 
-        for serialized_id in ("demo", '"demo"', "'demo'"):
-            with self.subTest(serialized_id=serialized_id):
+        for payload in (
+            "project_id: demo\n",
+            'project_id: "demo"\n',
+            "project_id: 'demo'\n",
+            "project_id: demo\r\n",
+            'project_id:\t"demo"\t\r\n',
+        ):
+            with self.subTest(payload=repr(payload)):
                 project_path.write_text(
-                    f"project_id: {serialized_id}\n",
+                    payload,
                     encoding="utf-8",
+                    newline="",
                 )
                 self.assertEqual(
                     self.service.read_canonical_project_story_slug("demo"),
@@ -373,6 +380,12 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
             "project_id: 项目\n",
             "project_id: 'demo\"\n",
             "project_id: demo # ambiguous trailing syntax\n",
+            "project_id:\ndemo\n",
+            "project_id:\r\n\tdemo\r\n",
+            "project_id:\vdemo\n",
+            "project_id:\fdemo\n",
+            "project_id: demo\v\n",
+            "project_id: demo\f\n",
         )
 
         for payload in payloads:

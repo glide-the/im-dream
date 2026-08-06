@@ -1086,6 +1086,33 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         db.close()
         self.assertNotIn("story_workspace_episode_identity", source)
 
+    def test_binding_rejects_project_id_values_smuggled_across_yaml_lines(self) -> None:
+        payloads = (
+            "project_id:\ndemo\n",
+            "project_id:\r\n\tdemo\r\n",
+            "project_id:\vdemo\n",
+            "project_id:\fdemo\n",
+        )
+        story = self.workspace / "stories" / "demo"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        self._seed_episode_action(action="recover_first_episode_binding")
+
+        for payload in payloads:
+            with self.subTest(payload=repr(payload)):
+                (story / "project.yaml").write_text(
+                    payload,
+                    encoding="utf-8",
+                    newline="",
+                )
+                result = self._call(
+                    "bind_first_episode",
+                    {
+                        "workflowRunId": RUN_ID,
+                        "expectedBindingRevision": 0,
+                    },
+                )
+                self.assertEqual(result, {"error": "DREAM_WRITE_REJECTED"})
+
 
 if __name__ == "__main__":
     unittest.main()
