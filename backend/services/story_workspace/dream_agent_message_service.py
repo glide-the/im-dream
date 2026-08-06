@@ -121,7 +121,7 @@ _SENSITIVE_ABSOLUTE_USER_PATH = re.compile(
     r")",
     re.IGNORECASE,
 )
-_SENSITIVE_ASK_USER_TEXT = re.compile(
+_SENSITIVE_PUBLIC_TEXT = re.compile(
     r"(?:"
     r"(?<![A-Za-z0-9])authorization(?:header|value|token)?(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])bearer(?![A-Za-z0-9])|"
@@ -129,19 +129,29 @@ _SENSITIVE_ASK_USER_TEXT = re.compile(
     r"(?<![A-Za-z0-9])tokens?(?:value)?(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])(?:access|auth|refresh|secret)[\s_-]*tokens?(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])api[\s_-]*keys?(?:value)?(?![A-Za-z0-9])|"
-    r"(?<![A-Za-z0-9])commands?(?:text|line)?(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])chain[\s_-]*(?:of[\s_-]*)?thought(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])hidden[\s_-]*reasoning(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])internal[\s_-]*reasoning(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])system[\s_-]*prompt(?![A-Za-z0-9])|"
-    r"凭证|令牌|密钥|口令|命令|隐藏推理|内部推理|思维链|系统提示词"
+    r"凭证|令牌|密钥|口令|隐藏推理|内部推理|思维链|系统提示词"
+    r")",
+    re.IGNORECASE,
+)
+_SENSITIVE_ASK_USER_ONLY_TEXT = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9])commands?(?:text|line)?(?![A-Za-z0-9])|"
+    r"命令"
     r")",
     re.IGNORECASE,
 )
 _SENSITIVE_INTERNAL_DREAM_DIAGNOSTIC = re.compile(
     r"(?:"
     r"(?<![A-Za-z0-9])(?:"
-    r"agent_id|binding_revision|bind_first_episode|DREAM_WRITE_REJECTED"
+    r"agent(?:Id|_id)|"
+    r"binding(?:Revision|_revision)|"
+    r"expected(?:BindingRevision|_binding_revision|Revision|_revision)|"
+    r"workflow(?:RunId|_run_id)|thread(?:Id|_id)|tool(?:CallId|_call_id)|"
+    r"bind_first_episode|write_dream_(?:run|stage)|DREAM_WRITE_REJECTED"
     r")(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])mcp__story_workspace__"
     r")",
@@ -380,7 +390,7 @@ def _decode(value: Any) -> dict[str, Any]:
 def _public_text_is_sensitive(value: str) -> bool:
     normalized = value.strip()
     return bool(
-        _SENSITIVE_ASK_USER_TEXT.search(normalized)
+        _SENSITIVE_PUBLIC_TEXT.search(normalized)
         or _SENSITIVE_INTERNAL_DREAM_DIAGNOSTIC.search(normalized)
         or _SENSITIVE_ABSOLUTE_USER_PATH.search(normalized)
         or any(pattern.search(normalized) for pattern in _HIGH_CONFIDENCE_ASK_USER_SECRETS)
@@ -627,7 +637,9 @@ def _strict_ask_user_public_text(value: Any, *, max_length: int) -> str | None:
     if (
         not normalized
         or len(normalized) > max_length
-        or _SENSITIVE_ASK_USER_TEXT.search(normalized)
+        or _SENSITIVE_PUBLIC_TEXT.search(normalized)
+        or _SENSITIVE_ASK_USER_ONLY_TEXT.search(normalized)
+        or _SENSITIVE_INTERNAL_DREAM_DIAGNOSTIC.search(normalized)
         or any(
             pattern.search(normalized)
             for pattern in _HIGH_CONFIDENCE_ASK_USER_SECRETS

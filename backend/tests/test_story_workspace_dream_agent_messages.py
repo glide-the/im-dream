@@ -375,37 +375,44 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             safe_output.index("event: assistant_message_committed"),
         )
 
-    def test_snapshot_redacts_internal_dream_diagnostics_but_keeps_vendor_actions(self) -> None:
+    def test_snapshot_redacts_internal_dream_diagnostic_variants(self) -> None:
         self._insert("widget-internal-diagnostic", "user", [{"type": "text", "text": "继续"}], {
             "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
             "story_workspace_run_id": RUN_ID,
             "actor_id": ACTOR_ID,
             "thread_id": THREAD_ID,
         })
-        internal_diagnostics = (
-            "agent_id is null; binding_revision=1; "
-            "bind_first_episode returned DREAM_WRITE_REJECTED through "
-            "mcp__story_workspace__bind_first_episode"
+        diagnostics = (
+            "agentId",
+            "agent_id",
+            "bindingRevision",
+            "binding_revision",
+            "expectedBindingRevision",
+            "expected_binding_revision",
+            "expectedRevision",
+            "expected_revision",
+            "workflowRunId",
+            "workflow_run_id",
+            "threadId",
+            "thread_id",
+            "toolCallId",
+            "tool_call_id",
+            "bind_first_episode",
+            "write_dream_run",
+            "write_dream_stage",
+            "DREAM_WRITE_REJECTED",
+            "mcp__story_workspace__",
         )
-        self._insert("assistant-internal-diagnostic", "assistant", [
-            {"type": "text", "text": internal_diagnostics},
-        ], {"story_workspace_dream_source": {
-            "run_id": RUN_ID,
-            "thread_id": THREAD_ID,
-            "actor_id": ACTOR_ID,
-            "message_id": "widget-internal-diagnostic",
-            "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
-        }})
-        safe_vendor_actions = "下一步可执行 /drama-plan，然后执行 /drama-script (EP01)。"
-        self._insert("assistant-safe-vendor-actions", "assistant", [
-            {"type": "text", "text": safe_vendor_actions},
-        ], {"story_workspace_dream_source": {
-            "run_id": RUN_ID,
-            "thread_id": THREAD_ID,
-            "actor_id": ACTOR_ID,
-            "message_id": "widget-internal-diagnostic",
-            "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
-        }})
+        for index, diagnostic in enumerate(diagnostics):
+            self._insert(f"assistant-internal-diagnostic-{index}", "assistant", [
+                {"type": "text", "text": f"内部结果：{diagnostic}=private"},
+            ], {"story_workspace_dream_source": {
+                "run_id": RUN_ID,
+                "thread_id": THREAD_ID,
+                "actor_id": ACTOR_ID,
+                "message_id": "widget-internal-diagnostic",
+                "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+            }})
 
         with patch(
             "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
@@ -418,33 +425,47 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             )
 
         by_id = {message.id: message for message in result.messages}
-        diagnostic = by_id["assistant-internal-diagnostic"]
-        self.assertEqual(diagnostic.text, "[已隐藏敏感内容]")
-        self.assertEqual(
-            [item.model_dump(mode="json", by_alias=True) for item in diagnostic.content],
-            [{"kind": "text", "text": "[已隐藏敏感内容]", "truncated": False}],
-        )
-        serialized = diagnostic.model_dump_json(by_alias=True)
-        for forbidden in (
-            "agent_id",
-            "binding_revision",
-            "bind_first_episode",
-            "DREAM_WRITE_REJECTED",
-            "mcp__story_workspace__",
-        ):
-            self.assertNotIn(forbidden, serialized)
-        self.assertEqual(
-            by_id["assistant-safe-vendor-actions"].text,
-            safe_vendor_actions,
-        )
+        for index, diagnostic in enumerate(diagnostics):
+            with self.subTest(diagnostic=diagnostic):
+                message = by_id[f"assistant-internal-diagnostic-{index}"]
+                self.assertEqual(message.text, "[已隐藏敏感内容]")
+                self.assertEqual(
+                    [
+                        item.model_dump(mode="json", by_alias=True)
+                        for item in message.content
+                    ],
+                    [{
+                        "kind": "text",
+                        "text": "[已隐藏敏感内容]",
+                        "truncated": False,
+                    }],
+                )
+                self.assertNotIn(
+                    diagnostic,
+                    message.model_dump_json(by_alias=True),
+                )
 
     def test_events_redact_internal_dream_diagnostics_split_across_frames(self) -> None:
         probes = (
-            ("agent_", "id is null"),
-            ("binding_", "revision=1"),
-            ("bind_first_", "episode failed"),
+            ("agent", "Id"),
+            ("agent_", "id"),
+            ("binding", "Revision"),
+            ("binding_", "revision"),
+            ("expectedBinding", "Revision"),
+            ("expected_binding_", "revision"),
+            ("expected", "Revision"),
+            ("expected_", "revision"),
+            ("workflowRun", "Id"),
+            ("workflow_run_", "id"),
+            ("thread", "Id"),
+            ("thread_", "id"),
+            ("toolCall", "Id"),
+            ("tool_call_", "id"),
+            ("bind_first_", "episode"),
+            ("write_dream_", "run"),
+            ("write_dream_", "stage"),
             ("DREAM_WRITE_", "REJECTED"),
-            ("mcp__story_", "workspace__bind_first_episode"),
+            ("mcp__story_", "workspace__"),
         )
         for index, (first, second) in enumerate(probes):
             with self.subTest(index=index):
@@ -471,27 +492,64 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 )))
 
                 self.assertIn("[已隐藏敏感内容]", output)
-                self.assertNotIn(first, output)
-                self.assertNotIn(second, output)
+                self.assertNotIn(first + second, output)
 
-        safe_factory = _Factory(running=True, frames=[
-            'data: {"type":"text-delta","delta":"下一步可执行 /drama-"}\n\n',
-            'data: {"type":"text-delta","delta":"plan，然后执行 /drama-script (EP01)。"}\n\n',
+    def test_public_creative_command_text_is_not_treated_as_ask_user_input(self) -> None:
+        self._insert("widget-creative-command", "user", [{"type": "text", "text": "继续"}], {
+            "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+            "story_workspace_run_id": RUN_ID,
+            "actor_id": ACTOR_ID,
+            "thread_id": THREAD_ID,
+        })
+        safe_texts = (
+            "请执行命令 /drama-plan",
+            "下一步命令是 /drama-script (EP01)",
+            "将军下达命令，角色离开",
+        )
+        for index, safe_text in enumerate(safe_texts):
+            self._insert(f"assistant-creative-command-{index}", "assistant", [
+                {"type": "text", "text": safe_text},
+            ], {"story_workspace_dream_source": {
+                "run_id": RUN_ID,
+                "thread_id": THREAD_ID,
+                "actor_id": ACTOR_ID,
+                "message_id": "widget-creative-command",
+                "kind": STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+            }})
+
+        with patch(
+            "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+            return_value=(True, True),
+        ):
+            snapshot = StoryWorkspaceDreamAgentMessageService(self.db).snapshot(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+            )
+
+        by_id = {message.id: message.text for message in snapshot.messages}
+        for index, safe_text in enumerate(safe_texts):
+            self.assertEqual(by_id[f"assistant-creative-command-{index}"], safe_text)
+
+        factory = _Factory(running=True, frames=[
+            'data: {"type":"text-delta","delta":"请执行命令 /drama-"}\n\n',
+            'data: {"type":"text-delta","delta":"plan；下一步命令是 /drama-script (EP01)；"}\n\n',
+            'data: {"type":"text-delta","delta":"将军下达命令，角色离开"}\n\n',
             'data: {"type":"message-final"}\n\n',
         ])
-        safe_output = "".join(asyncio.run(_collect(
+        output = "".join(asyncio.run(_collect(
             StoryWorkspaceDreamAgentMessageService(
                 self.db,
-                thread_factory=safe_factory,
+                thread_factory=factory,
             ).events(
                 thread_id=THREAD_ID,
                 run_id=RUN_ID,
                 actor_id=ACTOR_ID,
             )
         )))
-        self.assertIn("/drama-plan", safe_output)
-        self.assertIn("/drama-script (EP01)", safe_output)
-        self.assertNotIn("[已隐藏敏感内容]", safe_output)
+        for safe_text in safe_texts:
+            self.assertIn(safe_text, output)
+        self.assertNotIn("[已隐藏敏感内容]", output)
 
     def test_confirmation_output_combines_resolved_and_finished_with_replayable_subcursors(self) -> None:
         frames = [
@@ -719,6 +777,18 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
 
     def test_ask_user_sensitive_public_fields_fail_closed_before_sse(self) -> None:
         unsafe_inputs = (
+            {
+                "questions": [{
+                    "question": "请提供 command text",
+                    "options": [{"label": "继续", "value": "continue"}],
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "请粘贴原始命令",
+                    "options": [{"label": "继续", "value": "continue"}],
+                }],
+            },
             {
                 "questions": [{
                     "question": "请粘贴 Authorization bearer token",
