@@ -400,6 +400,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             "bind_first_episode",
             "write_dream_run",
             "write_dream_stage",
+            "record_episode_workflow_completion",
             "DREAM_WRITE_REJECTED",
             "mcp__story_workspace__",
         )
@@ -464,6 +465,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             ("bind_first_", "episode"),
             ("write_dream_", "run"),
             ("write_dream_", "stage"),
+            ("record_episode_workflow_", "completion"),
             ("DREAM_WRITE_", "REJECTED"),
             ("mcp__story_", "workspace__"),
         )
@@ -935,6 +937,26 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                     "question": "node -e 'process.exit()'",
                 }],
             },
+            {
+                "questions": [{
+                    "question": "请读取 /Users/dreamer/private/story.md",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "补充公开说明",
+                    "placeholder": "/home/dreamer/private/story.md",
+                }],
+            },
+            {
+                "questions": [{
+                    "question": "选择下一步",
+                    "options": [{
+                        "label": r"C:\Users\dreamer\private\story.md",
+                        "value": "continue",
+                    }],
+                }],
+            },
         )
         for index, tool_input in enumerate(unsafe_inputs):
             with self.subTest(index=index):
@@ -989,6 +1011,24 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                     ),
                 },
             }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-safe-drama-plan",
+                "toolName": "AskUserQuestion",
+                "input": {"question": "是否继续推进 /drama-plan？"},
+            }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-safe-drama-script",
+                "toolName": "AskUserQuestion",
+                "input": {"question": "是否继续 /drama-script (EP01) 的创作？"},
+            }, ensure_ascii=False) + "\n\n",
+            "data: " + json.dumps({
+                "type": "tool-approval-request",
+                "toolCallId": "tool-safe-story-text",
+                "toolName": "AskUserQuestion",
+                "input": {"question": "角色沿山路返回旧城，这段剧情是否保留？"},
+            }, ensure_ascii=False) + "\n\n",
         ]
         safe_output = "".join(asyncio.run(_collect(
             StoryWorkspaceDreamAgentMessageService(
@@ -1000,12 +1040,15 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 actor_id=ACTOR_ID,
             )
         )))
-        self.assertEqual(safe_output.count("event: tool_confirmation_requested"), 4)
+        self.assertEqual(safe_output.count("event: tool_confirmation_requested"), 7)
         self.assertIn("角色名 Akia 是否保留？", safe_output)
         self.assertIn(
             "是否继续 run_0123456789abcdef0123456789abcdef 的创作？",
             safe_output,
         )
+        self.assertIn("是否继续推进 /drama-plan？", safe_output)
+        self.assertIn("是否继续 /drama-script (EP01) 的创作？", safe_output)
+        self.assertIn("角色沿山路返回旧城，这段剧情是否保留？", safe_output)
 
     def test_ask_user_public_question_lengths_and_keys_are_one_contract(self) -> None:
         from pydantic import ValidationError

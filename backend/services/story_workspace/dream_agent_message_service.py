@@ -151,7 +151,8 @@ _SENSITIVE_INTERNAL_DREAM_DIAGNOSTIC = re.compile(
     r"binding(?:Revision|_revision)|"
     r"expected(?:BindingRevision|_binding_revision|Revision|_revision)|"
     r"workflow(?:RunId|_run_id)|thread(?:Id|_id)|tool(?:CallId|_call_id)|"
-    r"bind_first_episode|write_dream_(?:run|stage)|DREAM_WRITE_REJECTED"
+    r"bind_first_episode|write_dream_(?:run|stage)|"
+    r"record_episode_workflow_completion|DREAM_WRITE_REJECTED"
     r")(?![A-Za-z0-9])|"
     r"(?<![A-Za-z0-9])mcp__story_workspace__"
     r")",
@@ -640,6 +641,7 @@ def _strict_ask_user_public_text(value: Any, *, max_length: int) -> str | None:
         or _SENSITIVE_PUBLIC_TEXT.search(normalized)
         or _SENSITIVE_ASK_USER_ONLY_TEXT.search(normalized)
         or _SENSITIVE_INTERNAL_DREAM_DIAGNOSTIC.search(normalized)
+        or _SENSITIVE_ABSOLUTE_USER_PATH.search(normalized)
         or any(
             pattern.search(normalized)
             for pattern in _HIGH_CONFIDENCE_ASK_USER_SECRETS
