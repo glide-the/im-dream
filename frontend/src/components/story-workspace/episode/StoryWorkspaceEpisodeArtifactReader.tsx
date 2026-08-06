@@ -29,6 +29,12 @@ export interface StoryWorkspaceEpisodeArtifactReaderProps {
   readonly onShotSelection: (shotId: string) => void;
 }
 
+export function storyWorkspaceEpisodeArtifactTabId(
+  artifact: StoryWorkspaceEpisodeReadableArtifact,
+): string {
+  return `story-workspace-episode-artifact-tab-${artifact.replaceAll('.', '-')}`;
+}
+
 const ARTIFACT_TABS: readonly {
   readonly key: StoryWorkspaceEpisodeReadableArtifact;
   readonly label: string;
@@ -249,7 +255,7 @@ export function StoryWorkspaceEpisodeArtifactReader({
     event.preventDefault();
     onArtifactSelection(target);
     event.currentTarget.parentElement
-      ?.querySelector<HTMLButtonElement>(`#story-workspace-episode-artifact-tab-${target.replaceAll('.', '-')}`)
+      ?.querySelector<HTMLButtonElement>(`#${storyWorkspaceEpisodeArtifactTabId(target)}`)
       ?.focus();
   };
   return (
@@ -267,7 +273,7 @@ export function StoryWorkspaceEpisodeArtifactReader({
             <button
               aria-controls="story-workspace-episode-artifact-content"
               aria-selected={activeArtifact === tab.key}
-              id={`story-workspace-episode-artifact-tab-${tab.key.replaceAll('.', '-')}`}
+              id={storyWorkspaceEpisodeArtifactTabId(tab.key)}
               key={tab.key}
               onClick={() => onArtifactSelection(tab.key)}
               onKeyDown={(event) => handleTabKey(event, tab.key)}
@@ -282,7 +288,7 @@ export function StoryWorkspaceEpisodeArtifactReader({
         </nav>
       </header>
       <div
-        aria-labelledby={`story-workspace-episode-artifact-tab-${activeArtifact.replaceAll('.', '-')}`}
+        aria-labelledby={storyWorkspaceEpisodeArtifactTabId(activeArtifact)}
         id="story-workspace-episode-artifact-content"
         role="tabpanel"
       >

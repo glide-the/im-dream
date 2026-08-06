@@ -145,17 +145,38 @@ test('real actor can read Markdown documents and structured storyboard from the 
     const progress = overview.getByRole('list', { name: '第一集产物进度' });
     await expect(progress).toBeVisible();
     await expect(progress.locator('li')).toHaveCount(6);
+    await expect(progress.getByRole('button')).toHaveCount(4);
+    await expect(progress.getByRole('button', { name: '阅读分集大纲' })).toBeVisible();
+    await expect(progress.getByRole('button', { name: '阅读剧本' })).toBeVisible();
+    await expect(progress.getByRole('button', { name: '阅读分镜' })).toBeVisible();
+    await expect(progress.getByRole('button', { name: '阅读审阅报告' })).toBeVisible();
+    await expect(progress.getByRole('button', { name: '阅读Prompts' })).toHaveCount(0);
+    await expect(progress.getByRole('button', { name: '阅读Renders' })).toHaveCount(0);
+    await expect(progress.locator('li').nth(0)).toContainText('分集大纲已生成');
     expect(await progress.evaluate((element) => element.previousElementSibling?.tagName)).toBe('H2');
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'episode-overview-progress-desktop-1440x1000.png'),
       fullPage: true,
     });
 
-    await page.getByText('Dream 初稿阶段投影', { exact: true }).click();
-    await page.getByRole('button', { name: /EP01: 下午的光/ }).click();
+    const readScript = progress.getByRole('button', { name: '阅读剧本' });
+    await readScript.focus();
+    await readScript.press('Enter');
     const reader = page.getByRole('region', { name: '第一集文件阅读器' });
     await expect(reader).toBeVisible();
+    await expect(reader).toBeInViewport();
+    await expect(page.locator('details').filter({ hasText: 'Dream 初稿阶段投影' }))
+      .toHaveAttribute('open', '');
+    await expect(reader.getByRole('tab', { name: /剧本/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(reader.getByRole('tab', { name: /剧本/ })).toBeFocused();
+    await expect(reader.getByRole('tab', { name: /剧本/ })).toBeInViewport();
+    await expect(reader.getByRole('article', { name: '剧本文件内容' })).toContainText('浮世行路');
+
+    await progress.getByRole('button', { name: '阅读分镜' }).click();
+    await expect(reader).toBeInViewport();
     await expect(reader.getByRole('tab', { name: /分镜/ })).toHaveAttribute('aria-selected', 'true');
+    await expect(reader.getByRole('tab', { name: /分镜/ })).toBeFocused();
+    await expect(reader.getByRole('tab', { name: /分镜/ })).toBeInViewport();
     await expect(reader.getByRole('navigation', { name: '分镜镜头导航' }).getByRole('button')).toHaveCount(22);
     await expect(reader.getByRole('article', { name: '分镜 YAML 属性' })).toContainText('镜头参数');
 
@@ -167,7 +188,10 @@ test('real actor can read Markdown documents and structured storyboard from the 
     await expect(reader.getByRole('tab', { name: /剧本/ })).toHaveAttribute('aria-selected', 'true');
     await expect(reader.getByRole('article', { name: '剧本文件内容' })).toContainText('浮世行路');
 
-    await reader.getByRole('tab', { name: /审阅/ }).click();
+    await progress.getByRole('button', { name: '阅读审阅报告' }).click();
+    await expect(reader).toBeInViewport();
+    await expect(reader.getByRole('tab', { name: /审阅/ })).toBeFocused();
+    await expect(reader.getByRole('tab', { name: /审阅/ })).toBeInViewport();
     await expect(reader.getByRole('article', { name: '审阅文件内容' })).toContainText('审查报告');
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'episode-artifacts-desktop-1440x1000.png'),

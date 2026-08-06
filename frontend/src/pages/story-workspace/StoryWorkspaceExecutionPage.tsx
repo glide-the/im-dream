@@ -36,6 +36,7 @@ import {
 import { StoryWorkspaceEpisodeNarrativeWorkbench } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeNarrativeWorkbench';
 import {
   StoryWorkspaceEpisodeArtifactReader,
+  storyWorkspaceEpisodeArtifactTabId,
   type StoryWorkspaceEpisodeReadableArtifact,
 } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeArtifactReader';
 import {
@@ -485,6 +486,8 @@ export function StoryWorkspaceExecutionPage({
   const [episodeContinueDialogOpen, setEpisodeContinueDialogOpen] = useState(false);
   const [focusedArtifact, setFocusedArtifact] =
     useState<StoryWorkspaceEpisodeReadableArtifact>('storyboard.yaml');
+  const [pendingArtifactReaderFocus, setPendingArtifactReaderFocus] =
+    useState<StoryWorkspaceEpisodeReadableArtifact | null>(null);
   const [episodeExpandedKeys, setEpisodeExpandedKeys] =
     useState<ReadonlySet<string>>(() => new Set());
   const [episodeActionBusy, setEpisodeActionBusy] =
@@ -499,6 +502,8 @@ export function StoryWorkspaceExecutionPage({
   ));
   const agentPreviewTriggerRef = useRef<HTMLButtonElement>(null);
   const episodeContinueTriggerRef = useRef<HTMLButtonElement>(null);
+  const dreamProjectionDetailsRef = useRef<HTMLDetailsElement>(null);
+  const episodeArtifactReaderRef = useRef<HTMLDivElement>(null);
   const { run, selectRun } = useWorkflowRun({ eventsEnabled: true });
   const currentRun = run?.workflow_run_id === runId ? run : null;
   const dreamAgent = useStoryWorkspaceDreamAgent(runId);
@@ -601,6 +606,9 @@ export function StoryWorkspaceExecutionPage({
     () => [...(workspace?.assets ?? []), ...(workspace?.outline ?? [])],
     [workspace],
   );
+  const storyboardFocusEntry = workspace?.outline.find(
+    (entry) => entry.stage === 'storyboards',
+  ) ?? null;
   const focusedEntry = focusKey
     ? allEntries.find((entry) => entry.key === focusKey) ?? null
     : null;
@@ -615,8 +623,50 @@ export function StoryWorkspaceExecutionPage({
     setActiveModule('outline');
     setFocusKey(null);
     setFocusedArtifact('storyboard.yaml');
+    setPendingArtifactReaderFocus(null);
     setEpisodeExpandedKeys(new Set());
   }, [runId]);
+
+  const handleEpisodeArtifactRead = useCallback((
+    artifact: StoryWorkspaceEpisodeReadableArtifact,
+  ) => {
+    if (storyboardFocusEntry === null) return;
+    if (dreamProjectionDetailsRef.current !== null) {
+      dreamProjectionDetailsRef.current.open = true;
+    }
+    setActiveModule('outline');
+    setFocusKey(storyboardFocusEntry.key);
+    setFocusedArtifact(artifact);
+    setPendingArtifactReaderFocus(artifact);
+  }, [storyboardFocusEntry]);
+  const episodeArtifactReadAction = storyboardFocusEntry === null
+    ? undefined
+    : handleEpisodeArtifactRead;
+
+  useEffect(() => {
+    if (
+      pendingArtifactReaderFocus === null
+      || focusedEntry?.stage !== 'storyboards'
+      || focusedArtifact !== pendingArtifactReaderFocus
+    ) return;
+    const frame = window.requestAnimationFrame(() => {
+      const reader = episodeArtifactReaderRef.current;
+      const tab = reader?.querySelector<HTMLButtonElement>(
+        `#${storyWorkspaceEpisodeArtifactTabId(pendingArtifactReaderFocus)}`,
+      );
+      if (reader === null || tab === undefined || tab === null) return;
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      reader.scrollIntoView({
+        behavior: reducedMotion ? 'auto' : 'smooth',
+        block: 'start',
+      });
+      tab.focus({ preventScroll: true });
+      setPendingArtifactReaderFocus((current) => (
+        current === pendingArtifactReaderFocus ? null : current
+      ));
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedArtifact, focusedEntry?.stage, pendingArtifactReaderFocus]);
 
   useLayoutEffect(() => {
     if (episodeActionCurrentIdentityRef.current === episodeActionIdentity) return;
@@ -944,7 +994,7 @@ export function StoryWorkspaceExecutionPage({
       </header>
 
       {episodeSurface?.bindingAvailability === 'bound' && (
-      <details>
+      <details ref={dreamProjectionDetailsRef}>
         <summary>Dream 初稿阶段投影</summary>
         <div className="story-workspace-collaboration__surface">
         {focusedEntry ? (
@@ -994,15 +1044,17 @@ export function StoryWorkspaceExecutionPage({
                       <p>{focusedEntry.summary || '等待镜头说明写入工作空间。'}</p>
                     </div>
                   </section>
-                  <StoryWorkspaceEpisodeArtifactReader
-                    activeArtifact={focusedArtifact}
-                    artifacts={episodeSurface.artifacts}
-                    documents={episodeSurface.documents ?? []}
-                    onArtifactSelection={setFocusedArtifact}
-                    onShotSelection={(shotId) => setEpisodeSelection({ kind: 'shot', id: shotId })}
-                    selectedShotId={selectedEpisodeShot?.id ?? null}
-                    shots={episodeSurface.narrative?.shots ?? []}
-                  />
+                  <div ref={episodeArtifactReaderRef}>
+                    <StoryWorkspaceEpisodeArtifactReader
+                      activeArtifact={focusedArtifact}
+                      artifacts={episodeSurface.artifacts}
+                      documents={episodeSurface.documents ?? []}
+                      onArtifactSelection={setFocusedArtifact}
+                      onShotSelection={(shotId) => setEpisodeSelection({ kind: 'shot', id: shotId })}
+                      selectedShotId={selectedEpisodeShot?.id ?? null}
+                      shots={episodeSurface.narrative?.shots ?? []}
+                    />
+                  </div>
                 </>
               )}
 
@@ -1269,6 +1321,7 @@ export function StoryWorkspaceExecutionPage({
                   expandedKeys={episodeExpandedKeys}
                   onEscape={handleEpisodeEscape}
                   onExpanded={handleEpisodeExpanded}
+                  onArtifactRead={episodeArtifactReadAction}
                   onSelection={setEpisodeSelection}
                   selection={episodeSelection}
                   viewModel={episodeViewModel}

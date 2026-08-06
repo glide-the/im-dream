@@ -17,6 +17,7 @@ import type {
   StoryWorkspaceEpisodeArtifactManifestEntry,
   StoryWorkspaceEpisodeOverview,
 } from '../../../hooks/story-workspace/contracts';
+import type { StoryWorkspaceEpisodeReadableArtifact } from './StoryWorkspaceEpisodeArtifactReader';
 import {
   storyWorkspaceEpisodeNavigationAction,
   storyWorkspaceEpisodeNavigationItems,
@@ -38,6 +39,7 @@ export interface StoryWorkspaceEpisodeNarrativeWorkbenchProps {
   readonly onEscape: (selection: StoryWorkspaceEpisodeSelection) => void;
   readonly episodeOverview?: StoryWorkspaceEpisodeOverview | null;
   readonly artifactProgress?: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
+  readonly onArtifactRead?: (artifact: StoryWorkspaceEpisodeReadableArtifact) => void;
   readonly auxiliarySlot?: ReactNode;
   readonly onAuxiliarySelection?: (
     selection: StoryWorkspaceEpisodeSelection,
@@ -74,6 +76,14 @@ const ARTIFACT_PROGRESS_AVAILABILITY = {
   invalid: '来源无效',
   unavailable: '当前不可用',
 } as const;
+
+const ARTIFACT_PROGRESS_READER_TARGETS:
+Readonly<Partial<Record<string, StoryWorkspaceEpisodeReadableArtifact>>> = {
+  'episode-outline.md': 'episode-outline.md',
+  'script.md': 'script.md',
+  'storyboard.yaml': 'storyboard.yaml',
+  'review-report.md': 'review-report.md',
+};
 
 function initialNarrowLayout(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(STORYLINE_NARROW_QUERY).matches;
@@ -256,10 +266,12 @@ function EpisodeOverviewContent({
   viewModel,
   overview,
   artifactProgress,
+  onArtifactRead,
 }: {
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly overview: StoryWorkspaceEpisodeOverview | null;
   readonly artifactProgress: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
+  readonly onArtifactRead?: (artifact: StoryWorkspaceEpisodeReadableArtifact) => void;
 }) {
   const episode = viewModel.episode;
   const hasScenes = Object.keys(viewModel.scenesById).length > 0;
@@ -275,12 +287,29 @@ function EpisodeOverviewContent({
         'aria-label': '第一集产物进度',
         className: 'story-workspace-episode-artifact-progress',
       },
-      artifactProgress.map((artifact) => h(
-        'li',
-        { key: artifact.relativeKey },
-        h('strong', null, ARTIFACT_PROGRESS_LABELS[artifact.relativeKey] ?? '受控产物'),
-        h('span', null, ARTIFACT_PROGRESS_AVAILABILITY[artifact.availability]),
-      )),
+      artifactProgress.map((artifact) => {
+        const label = ARTIFACT_PROGRESS_LABELS[artifact.relativeKey] ?? '受控产物';
+        const readerTarget = ARTIFACT_PROGRESS_READER_TARGETS[artifact.relativeKey] ?? null;
+        return h(
+          'li',
+          { key: artifact.relativeKey },
+          h('strong', null, label),
+          h('span', null, ARTIFACT_PROGRESS_AVAILABILITY[artifact.availability]),
+          artifact.availability === 'available'
+            && readerTarget !== null
+            && onArtifactRead !== undefined
+            ? h(
+              'button',
+              {
+                type: 'button',
+                'aria-label': `阅读${label}`,
+                onClick: () => onArtifactRead(readerTarget),
+              },
+              '阅读',
+            )
+            : null,
+        );
+      }),
     ),
     h('section', null, h('h3', null, '系列'), h('p', null, pending(overview?.series))),
     h(TextList, { title: '故事目标', values: overview?.storyGoals ?? [] }),
@@ -522,6 +551,7 @@ function NarrativeContent({
   selection,
   episodeOverview,
   artifactProgress,
+  onArtifactRead,
   onNavigate,
   auxiliaryGroup,
 }: {
@@ -529,6 +559,7 @@ function NarrativeContent({
   readonly selection: StoryWorkspaceEpisodeSelection;
   readonly episodeOverview: StoryWorkspaceEpisodeOverview | null;
   readonly artifactProgress: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
+  readonly onArtifactRead?: (artifact: StoryWorkspaceEpisodeReadableArtifact) => void;
   readonly onNavigate: (selection: StoryWorkspaceEpisodeSelection) => void;
   readonly auxiliaryGroup: StoryWorkspaceEpisodeNavigationItem['auxiliaryGroup'];
 }) {
@@ -537,6 +568,7 @@ function NarrativeContent({
       viewModel,
       overview: episodeOverview,
       artifactProgress,
+      onArtifactRead,
     });
   }
   if (selection.kind === 'narrative-beat') {
@@ -585,6 +617,7 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
   onEscape,
   episodeOverview = null,
   artifactProgress = [],
+  onArtifactRead,
   auxiliarySlot,
   onAuxiliarySelection,
 }: StoryWorkspaceEpisodeNarrativeWorkbenchProps) {
@@ -810,6 +843,7 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
             selection: activeSelection,
             episodeOverview,
             artifactProgress,
+            onArtifactRead,
             onNavigate: selectAndFocus,
             auxiliaryGroup: activeItem.auxiliaryGroup,
           }),

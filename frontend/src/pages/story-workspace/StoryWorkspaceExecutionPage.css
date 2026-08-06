@@ -775,6 +775,7 @@
 .story-workspace-episode-artifact-progress li {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 7px;
   padding: 4px 14px 4px 0;
   color: var(--collaboration-muted);
@@ -789,6 +790,30 @@
 .story-workspace-episode-artifact-progress strong {
   color: var(--collaboration-ink);
   font-weight: 620;
+}
+
+.story-workspace-episode-artifact-progress button {
+  min-width: 0;
+  min-height: 0;
+  margin-left: 2px;
+  padding: 2px 0;
+  color: var(--collaboration-action);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--collaboration-action) 52%, transparent);
+  border-radius: 0;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+}
+
+.story-workspace-episode-artifact-progress button:hover {
+  border-bottom-color: var(--collaboration-action);
+}
+
+.story-workspace-episode-artifact-progress button:focus-visible {
+  outline: 2px solid var(--collaboration-action);
+  outline-offset: 3px;
 }
 
 .story-workspace-collaboration main[aria-labelledby="story-workspace-episode-title"] > header > div[aria-label="Episode 下一步"] {
@@ -1228,6 +1253,11 @@
     min-width: 0;
     padding: 6px 8px 6px 0;
     border-left: 0;
+  }
+
+  .story-workspace-episode-artifact-progress button {
+    min-width: 44px;
+    min-height: 44px;
   }
 
   .story-workspace-collaboration [aria-label="Episode 叙事工作台"] {

@@ -68,7 +68,7 @@ test('execution status preview opens the Dream Agent floating dialog without mou
 });
 
 test('Episode artifacts unfold after the Dream projection on the same run execution route', () => {
-  const projectionStart = PAGE_SOURCE.indexOf('<details>');
+  const projectionStart = PAGE_SOURCE.indexOf('<details ref={dreamProjectionDetailsRef}>');
   const projectionEnd = PAGE_SOURCE.indexOf('</details>', projectionStart);
   const artifactMarker = 'aria-label="第一集产物工作台"';
   const artifactStart = PAGE_SOURCE.indexOf(artifactMarker);
@@ -80,7 +80,7 @@ test('Episode artifacts unfold after the Dream projection on the same run execut
   expect(artifactStart).toBeGreaterThan(projectionEnd);
   expect(agentDialogStart).toBeGreaterThan(artifactStart);
   expect(PAGE_SOURCE.slice(projectionStart, PAGE_SOURCE.indexOf('>', projectionStart) + 1))
-    .toBe('<details>');
+    .toBe('<details ref={dreamProjectionDetailsRef}>');
   expect(CSS_SOURCE).toMatch(
     /\.story-workspace-collaboration\s*\{[^}]*overflow-y:\s*auto;/s,
   );

@@ -63,8 +63,25 @@ function dreamFiles() {
       runtimePluginLockId: 'lock-u12-browser',
     },
     requiredStages: ['characters', 'scenes', 'storyboards'],
-    runRevision: 0,
-    stages: {},
+    runRevision: 1,
+    stages: {
+      storyboards: {
+        stage: 'storyboards',
+        revision: 1,
+        sourceFiles: ['stories/proj-u12/episodes/EP01/storyboard.yaml'],
+        page: {
+          title: '分镜',
+          entryRoute: `/story-workspace/runs/${RUN_ID}/execution`,
+        },
+        items: [{
+          entityId: 'ep01_storyboard',
+          displayName: 'EP01: 雨夜重逢',
+          summary: '第一集详细分镜。',
+          sourceFile: 'stories/proj-u12/episodes/EP01/storyboard.yaml',
+          relations: ['EP01'],
+        }],
+      },
+    },
     confirmationAccepted: true,
     confirmationDispatched: true,
     canConfirm: false,
@@ -464,6 +481,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       await route.fulfill({ status: 200, contentType: 'text/event-stream', body: ': connected\n\n' });
       return;
     }
+    if (matches('GET', '/api/story-workspace/dream-runs')) {
+      await json(route, { runs: [] });
+      return;
+    }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}`)) {
       await json(route, workflowRun());
       return;
@@ -661,14 +682,25 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
       scrollHeight: root.scrollHeight,
     }));
     expect(desktopScrollRange.scrollHeight).toBeGreaterThanOrEqual(desktopScrollRange.clientHeight);
-    await dreamProjection.locator('summary').click();
+    const artifactProgress = page.getByRole('list', { name: '第一集产物进度' });
+    await expect(artifactProgress.getByRole('button')).toHaveCount(4);
+    await expect(artifactProgress.getByRole('button', { name: '阅读Prompts' })).toHaveCount(0);
+    await expect(artifactProgress.getByRole('button', { name: '阅读Renders' })).toHaveCount(0);
+    const readOutline = artifactProgress.getByRole('button', { name: '阅读分集大纲' });
+    await readOutline.focus();
+    await readOutline.press('Enter');
     expect(await dreamProjection.evaluate((projection) => (
       (projection as HTMLDetailsElement).open
     ))).toBe(true);
-    const artifactProgress = page.getByRole('list', { name: '第一集产物进度' });
+    const artifactReader = page.getByRole('region', { name: '第一集文件阅读器' });
+    await expect(artifactReader).toBeVisible();
+    await expect(artifactReader).toBeInViewport();
+    await expect(artifactReader.getByRole('tab', { name: /分集大纲/ }))
+      .toHaveAttribute('aria-selected', 'true');
+    await expect(artifactReader.getByRole('tab', { name: /分集大纲/ })).toBeFocused();
     await expect(artifactProgress.getByText('Prompts', { exact: true })).toBeVisible();
-    await expect(artifactProgress.getByText('Render Guide', { exact: true })).toBeVisible();
-    await expect(artifactProgress.getByText('Review Report', { exact: true })).toBeVisible();
+    await expect(artifactProgress.getByText('Renders', { exact: true })).toBeVisible();
+    await expect(artifactProgress.getByText('审阅报告', { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
     const columns = await page.locator('[aria-label="Episode 主工作面"] > *')

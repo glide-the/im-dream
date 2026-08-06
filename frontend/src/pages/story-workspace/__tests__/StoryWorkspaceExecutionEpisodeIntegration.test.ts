@@ -42,6 +42,20 @@ test('opens canonical Episode artifacts inside the storyboard focus layer', () =
   expect(focusBranch).toContain('shots={episodeSurface.narrative?.shots ?? []}');
 });
 
+test('routes an Episode progress reading action into the controlled storyboard reader', () => {
+  for (const expected of [
+    'handleEpisodeArtifactRead',
+    'dreamProjectionDetailsRef',
+    'episodeArtifactReaderRef',
+    "stage === 'storyboards'",
+    'setFocusedArtifact(artifact)',
+    'setActiveModule(\'outline\')',
+    'onArtifactRead={episodeArtifactReadAction}',
+    'scrollIntoView',
+    'focus({ preventScroll: true })',
+  ]) expect(PAGE_SOURCE).toContain(expected);
+});
+
 test('keeps Dream confirmation and Agent preview boundaries without browser-owned truth', () => {
   for (const expected of [
     'storyWorkspaceCanAccessExecution',

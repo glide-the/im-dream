@@ -468,6 +468,46 @@ test('renders an outline-only Episode with one semantic tree and honest pending 
   expect(html).toContain('aria-current="true"');
 });
 
+test('keeps artifact progress facts and exposes reading actions only for supported available files', () => {
+  const artifactProgress: StoryWorkspaceEpisodeArtifactSurface['artifacts'] = [
+    ['episode-outline.md', 'plan_episode'],
+    ['script.md', 'write_script'],
+    ['storyboard.yaml', 'regenerate_storyboard'],
+    ['prompts/', 'generate_prompts'],
+    ['renders/', 'prepare_render_guide'],
+    ['review-report.md', 'review_full_chain'],
+  ].map(([relativeKey, producerAction]) => ({
+    relativeKey,
+    availability: 'available' as const,
+    contentRevision: `sha256:${'b'.repeat(64)}`,
+    mtime: '2026-08-06T00:00:00Z',
+    size: 128,
+    producerAction,
+    consumers: [],
+  })) as StoryWorkspaceEpisodeArtifactSurface['artifacts'];
+  const html = renderWorkbench({
+    viewModel: storyWorkspaceBuildEpisodeExecutionViewModel(surface('storyboard')),
+    selection: { kind: 'episode', id: EPISODE_ID },
+    expandedKeys: new Set(),
+    episodeOverview: surface('storyboard').narrative?.overview,
+    artifactProgress,
+    onArtifactRead: noOp,
+    onSelection: noOp,
+    onExpanded: noOp,
+    onEscape: noOp,
+  });
+
+  for (const label of ['分集大纲', '剧本', '分镜', 'Prompts', 'Renders', '审阅报告']) {
+    expect(html).toContain(`<strong>${label}</strong><span>已生成</span>`);
+  }
+  for (const label of ['分集大纲', '剧本', '分镜', '审阅报告']) {
+    expect(html).toContain(`aria-label="阅读${label}"`);
+  }
+  expect(html).not.toContain('aria-label="阅读Prompts"');
+  expect(html).not.toContain('aria-label="阅读Renders"');
+  expect(html.match(/aria-label="阅读/g)).toHaveLength(4);
+});
+
 test('renders Beat and Scene narrative content from their owning artifacts', () => {
   const viewModel = storyWorkspaceBuildEpisodeExecutionViewModel(surface('script'));
   const beatHtml = renderWorkbench({
