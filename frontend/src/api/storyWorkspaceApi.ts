@@ -516,7 +516,3 @@ export function cancelWorkflowRun(workflowRunId: string): Promise<WorkflowRun> {
     body: JSON.stringify({}),
   });
 }
-
-export function workflowRunEventsUrl(workflowRunId: string): string {
-  return apiUrl(`/api/story-workspace/workflow-runs/${encodeURIComponent(workflowRunId)}/events`);
-}

@@ -1,4 +1,4 @@
-// [Input] Workflow run REST mutations and ordered server events.
+// [Input] Workflow run REST mutations and actor-scoped status snapshots.
 // [Output] Server-authoritative run state plus create/retry/cancel/refresh commands.
 // [Pos] Story Workspace workflow run state adapter.
 import { useCallback, useState } from 'react';
@@ -10,7 +10,6 @@ import {
   type CreateWorkflowRunInput,
   type RetryWorkflowRunInput,
   type WorkflowRun,
-  type WorkflowRunEvent,
 } from '../api/storyWorkspaceApi';
 import { useWorkflowEvents } from './useWorkflowEvents';
 
@@ -23,7 +22,7 @@ export interface UseWorkflowRunResult {
   run: WorkflowRun | null;
   error: Error | null;
   isMutating: boolean;
-  eventTransport: 'idle' | 'connecting' | 'live' | 'polling';
+  eventTransport: 'idle' | 'polling';
   startRun: (input: CreateWorkflowRunInput) => Promise<WorkflowRun>;
   retryRun: (input: RetryWorkflowRunInput) => Promise<WorkflowRun>;
   cancelRun: () => Promise<WorkflowRun | null>;
@@ -57,27 +56,9 @@ export function useWorkflowRun({
     return refreshById(run.workflow_run_id);
   }, [refreshById, run]);
 
-  const onEvent = useCallback((event: WorkflowRunEvent) => {
-    setRun((current) => {
-      const eventRunId = event.workflow_run_id ?? event.aggregate_id;
-      if (!current || current.workflow_run_id !== eventRunId) return current;
-      if (event.aggregate_version <= current.status_version) return current;
-      return {
-        ...current,
-        status: event.payload?.status ?? current.status,
-        status_version: event.aggregate_version,
-        failed_step: event.payload?.failed_step ?? current.failed_step,
-        error_code: event.payload?.error_code ?? current.error_code,
-        current_step: event.payload?.current_step ?? current.current_step,
-        steps: event.payload?.steps ?? current.steps,
-      };
-    });
-  }, []);
-
   const events = useWorkflowEvents({
     workflowRunId: run?.workflow_run_id,
     enabled: eventsEnabled,
-    onEvent,
     onSnapshot: setRun,
   });
 
