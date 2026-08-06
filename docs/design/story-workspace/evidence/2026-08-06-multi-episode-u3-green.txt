@@ -1,0 +1,16 @@
+U3 focused command:
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_current_episode_action_projection.py
+
+Result:
+4 passed in 0.12s
+
+U3 action regression command:
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_current_episode_action_projection.py backend/tests/test_story_workspace_multi_episode_actions.py backend/tests/test_story_workspace_episode_actions.py
+
+Result:
+111 passed in 1.42s
+
+Static import/bytecode check:
+backend/.venv/bin/python -m compileall -q backend/services/story_workspace/multi_episode_action_service.py
+
+Result: exit 0 with no output.

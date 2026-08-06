@@ -7,6 +7,9 @@ import hashlib
 import json
 import re
 
+from services.story_workspace.episode_action_service import (
+    StoryWorkspaceEpisodeNextActionResolver,
+)
 from story_workspace.contracts import (
     StoryWorkspaceAssetContextCanonicalInput,
     StoryWorkspaceEpisodeAction,
@@ -15,8 +18,10 @@ from story_workspace.contracts import (
     StoryWorkspaceEpisodeActionOptionV2,
     StoryWorkspaceEpisodeActionProjectionV2,
     StoryWorkspaceEpisodeActionTarget,
+    StoryWorkspaceEpisodeArtifactAvailability,
     StoryWorkspaceEpisodeArtifactCanonicalInput,
     StoryWorkspaceEpisodeRelation,
+    StoryWorkspaceEpisodeWorkflowFile,
     StoryWorkspaceProjectArtifactCanonicalInput,
     StoryWorkspaceWorkflowFactCanonicalInput,
 )
@@ -103,6 +108,99 @@ class StoryWorkspaceEpisodeActionSnapshot:
             StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
         }:
             raise ValueError("next Episode entry must be plan or script")
+
+
+class StoryWorkspaceCurrentEpisodeActionSnapshotBuilder:
+    """Bridge canonical manifest/facts into the path-free OptionV2 snapshot."""
+
+    def __init__(
+        self,
+        resolver: StoryWorkspaceEpisodeNextActionResolver | None = None,
+    ) -> None:
+        self._resolver = resolver or StoryWorkspaceEpisodeNextActionResolver()
+
+    @staticmethod
+    def _assert_identity(
+        surface: object,
+        facts: StoryWorkspaceEpisodeWorkflowFile,
+        current_episode: StoryWorkspaceEpisodeDescriptor,
+    ) -> None:
+        if current_episode.opaque_episode_id is None:
+            raise ValueError("current Episode must have a bound opaque identity")
+        if (
+            getattr(surface, "run_id", None) != facts.workflow_run_id
+            or getattr(surface, "opaque_episode_id", None) != facts.episode_uid
+            or current_episode.opaque_episode_id != facts.episode_uid
+        ):
+            raise ValueError("surface, workflow facts, and Episode binding disagree")
+
+    def build(
+        self,
+        *,
+        surface: object,
+        facts: StoryWorkspaceEpisodeWorkflowFile,
+        current_episode: StoryWorkspaceEpisodeDescriptor,
+    ) -> StoryWorkspaceEpisodeActionSnapshot:
+        """Resolve the current action and safe storyboard re-entry from revisions."""
+
+        self._assert_identity(surface, facts, current_episode)
+        workflow = self._resolver.project(surface, facts)
+        current_action = workflow.next_action.action
+        artifacts = self._resolver._artifact_map(surface)  # noqa: SLF001
+        storyboard = artifacts.get("storyboard.yaml")
+        storyboard_available = (
+            getattr(storyboard, "availability", None)
+            is StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
+        )
+        assets_current = self._resolver._completion_is_current(  # noqa: SLF001
+            StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+            surface,
+            facts,
+        )
+        if current_action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
+            at_or_after_storyboard = True
+        else:
+            at_or_after_storyboard = _VENDOR_ACTIONS.index(
+                current_action
+            ) >= _VENDOR_ACTIONS.index(
+                StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
+            )
+        storyboard_current = storyboard_available and self._resolver._completion_is_current(  # noqa: SLF001
+            StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+            surface,
+            facts,
+        )
+        validation_current = self._resolver._completion_is_current(  # noqa: SLF001
+            StoryWorkspaceEpisodeAction.VALIDATE_EPISODE,
+            surface,
+            facts,
+        )
+        render_current = self._resolver._completion_is_current(  # noqa: SLF001
+            StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE,
+            surface,
+            facts,
+        )
+        return StoryWorkspaceEpisodeActionSnapshot(
+            run_id=facts.workflow_run_id,
+            current_episode=current_episode,
+            current_action=current_action,
+            current_can_dispatch=workflow.next_action.can_dispatch,
+            current_input_revision=self._resolver.action_input_revision(
+                current_action,
+                surface,
+                facts,
+            ),
+            storyboard_current=storyboard_current,
+            storyboard_can_regenerate=(
+                storyboard_available and assets_current and at_or_after_storyboard
+            ),
+            validation_current=validation_current,
+            render_guide_current=render_current,
+            next_episode=None,
+            next_entry_action=None,
+            next_entry_can_dispatch=False,
+            project_has_next_episode=False,
+        )
 
 
 class StoryWorkspaceMultiEpisodeActionProjector:
@@ -592,6 +690,7 @@ class StoryWorkspaceMultiEpisodeActionProjector:
 
 
 __all__ = [
+    "StoryWorkspaceCurrentEpisodeActionSnapshotBuilder",
     "StoryWorkspaceEpisodeActionSnapshot",
     "StoryWorkspaceEpisodeDescriptor",
     "StoryWorkspaceMultiEpisodeActionProjector",
