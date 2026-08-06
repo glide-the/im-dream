@@ -14,6 +14,10 @@ import {
   useStoryWorkspaceDreamAgentAnnouncement,
   useStoryWorkspaceDreamAgentScroll,
 } from './useStoryWorkspaceDreamAgentScroll';
+import {
+  storyWorkspaceDreamAgentPanelFocusTarget,
+  type StoryWorkspaceDreamAgentPanelFocusZone,
+} from './storyWorkspaceDreamAgentFocus';
 
 export const STORY_WORKSPACE_DREAM_AGENT_PANEL_ID = 'story-workspace-dream-agent-panel';
 
@@ -23,6 +27,13 @@ export interface StoryWorkspaceDreamAgentPanelProps {
   readonly onClose: () => void;
   readonly restoreFocusRef: React.RefObject<HTMLElement | null>;
 }
+
+const STORY_WORKSPACE_DREAM_CONFIRMATION_FOCUSABLE = [
+  '.story-workspace-dream-tool-confirmation button:not(:disabled)',
+  '.story-workspace-dream-tool-confirmation input:not(:disabled)',
+  '.story-workspace-dream-tool-confirmation select:not(:disabled)',
+  '.story-workspace-dream-tool-confirmation textarea:not(:disabled)',
+].join(', ');
 
 function storyWorkspaceDreamAgentPanelHint(agent: StoryWorkspaceDreamAgentViewModel): string | null {
   switch (agent.snapshot?.sendBlockReason) {
@@ -39,7 +50,14 @@ function storyWorkspaceDreamAgentPanelHint(agent: StoryWorkspaceDreamAgentViewMo
 export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreFocusRef }: StoryWorkspaceDreamAgentPanelProps) {
   const [draft, setDraft] = useState('');
   const pendingKeyRef = useRef<string | null>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previousToolCallIdRef = useRef<string | null>(null);
+  const wasOpenRef = useRef(false);
+  const lastFocusedZoneRef = useRef<StoryWorkspaceDreamAgentPanelFocusZone>('outside');
   const inputHint = storyWorkspaceDreamAgentPanelHint(agent);
+  const pendingToolCallId = agent.pendingToolConfirmation?.toolCallId ?? null;
+  const composerCanReceiveFocus = Boolean(agent.snapshot?.canSend && !agent.isSending);
   const { markRead, snapshot, streamText } = agent;
   const contentRevision = storyWorkspaceDreamAgentContentRevision(agent.streamContent);
   const announcement = useStoryWorkspaceDreamAgentAnnouncement({
@@ -64,6 +82,59 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
     if (isOpen) markRead();
   }, [isOpen, markRead, snapshot?.messages, streamText]);
 
+  useEffect(() => {
+    const previousToolCallId = previousToolCallIdRef.current;
+    const focusFellOut = document.activeElement === document.body || document.activeElement === null;
+    const focusTarget = storyWorkspaceDreamAgentPanelFocusTarget({
+      focusFellOut,
+      isOpen,
+      lastFocusedZone: lastFocusedZoneRef.current,
+      pendingToolCallId,
+      previousToolCallId,
+      wasOpen: wasOpenRef.current,
+    });
+    let focusFrame: number | null = null;
+
+    let retainPreviousToolCallId = false;
+    if (focusTarget === 'confirmation') {
+      focusFrame = requestAnimationFrame(() => {
+        panelRef.current?.querySelector<HTMLElement>(STORY_WORKSPACE_DREAM_CONFIRMATION_FOCUSABLE)?.focus();
+      });
+    } else if (focusTarget === 'composer') {
+      if (composerCanReceiveFocus) {
+        focusFrame = requestAnimationFrame(() => textareaRef.current?.focus());
+      } else {
+        retainPreviousToolCallId = true;
+      }
+    }
+
+    if (!retainPreviousToolCallId) previousToolCallIdRef.current = pendingToolCallId;
+    wasOpenRef.current = isOpen;
+    return () => {
+      if (focusFrame !== null) cancelAnimationFrame(focusFrame);
+    };
+  }, [composerCanReceiveFocus, isOpen, pendingToolCallId]);
+
+  const captureFocusZone = (event: React.FocusEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement;
+    if (target === textareaRef.current) {
+      lastFocusedZoneRef.current = 'composer';
+    } else if (target.closest('.story-workspace-dream-tool-confirmation')) {
+      lastFocusedZoneRef.current = 'confirmation';
+    } else if (target.closest('.story-workspace-dream-agent-panel__history')) {
+      lastFocusedZoneRef.current = 'history';
+    } else {
+      lastFocusedZoneRef.current = 'navigation';
+    }
+  };
+
+  const captureFocusExit = (event: React.FocusEvent<HTMLElement>) => {
+    const next = event.relatedTarget;
+    if (!next || !panelRef.current?.contains(next as Node)) {
+      lastFocusedZoneRef.current = 'outside';
+    }
+  };
+
   const closePanel = () => {
     onClose();
     requestAnimationFrame(() => restoreFocusRef.current?.focus());
@@ -86,12 +157,22 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
       className="story-workspace-dream-agent-panel"
       hidden={!isOpen}
       id={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}
+      onBlurCapture={captureFocusExit}
+      onFocusCapture={captureFocusZone}
+      ref={panelRef}
     >
       <div className="story-workspace-dream-agent-panel__controls">
         <button onClick={closePanel} type="button">← 返回 Dream 内容</button>
       </div>
       <div className="story-workspace-dream-agent-panel__history-shell">
-        <div className="story-workspace-dream-agent-panel__history" onScroll={handleHistoryScroll} ref={historyRef}>
+        <div
+          aria-label="Dream Agent 消息历史"
+          className="story-workspace-dream-agent-panel__history"
+          onScroll={handleHistoryScroll}
+          ref={historyRef}
+          role="region"
+          tabIndex={0}
+        >
           <StoryWorkspaceDreamAgentMessageList
             messages={agent.snapshot?.messages ?? []}
             streamContent={agent.streamContent}
@@ -129,6 +210,7 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
               onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
               onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
               placeholder="写下后续创作指令…"
+              ref={textareaRef}
               rows={3}
               value={draft}
             />

@@ -458,6 +458,7 @@ class StoryWorkspaceDreamAgentMessageSnapshot(_StoryWorkspaceDreamWireModel):
         default_factory=list,
         max_length=256,
     )
+    tool_confirmation_observation: Literal["known", "unknown"]
     snapshot_at: datetime
 
 
@@ -1082,6 +1083,33 @@ _STORY_WORKSPACE_EPISODE_GUIDANCE_DENYLIST = (
         re.IGNORECASE,
     ),
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", re.IGNORECASE),
+    re.compile(
+        r"\bmcp__[a-z0-9_]+\b|\brecord_episode_workflow_completion\b|"
+        r"story_workspace_(?:dream_context|episode_action|run_id)|"
+        r"dispatch_(?:claim_id|claim_lease_until|status)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:workflowRunId|expectedFactsRevision|expectedManifestRevision|"
+        r"expectedWorkflowRevision|inputRevision|factsRevision|manifestRevision|"
+        r"workflow_run_id|expected_facts_revision|expected_manifest_revision|"
+        r"expected_workflow_revision|input_revision)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsha256:[0-9a-f]{64}\b", re.IGNORECASE),
+    re.compile(
+        r"(?<![A-Za-z0-9_])CAS(?![A-Za-z0-9_])|"
+        r"\bcompare[- ]and[- ](?:swap|set)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:忽略|无视|覆盖).{0,24}(?:上文|以上|之前|前述|限制|约束)"
+        r".{0,48}(?:继续|执行|运行|下一步|后续)|"
+        r"\b(?:ignore|override|disregard)\b.{0,64}"
+        r"\b(?:previous|prior|above|instructions?|constraints?)\b.{0,64}"
+        r"\b(?:continue|execute|run|next|remaining|subsequent)\b",
+        re.IGNORECASE,
+    ),
 )
 
 

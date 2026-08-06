@@ -5,10 +5,13 @@
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
 import { readFileSync } from 'node:fs';
+import { storyWorkspaceDreamAgentPanelFocusTarget } from '../storyWorkspaceDreamAgentFocus';
 
 const CONFIRMATION = readFileSync(new URL('../StoryWorkspaceDreamToolConfirmation.tsx', import.meta.url), 'utf8');
 const DIALOG = readFileSync(new URL('../StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
 const PANEL = readFileSync(new URL('../StoryWorkspaceDreamAgentPanel.tsx', import.meta.url), 'utf8');
+const RAIL = readFileSync(new URL('../StoryWorkspaceDreamAgentRail.tsx', import.meta.url), 'utf8');
+const PAGE = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceDreamPage.tsx', import.meta.url), 'utf8');
 const CSS = readFileSync(new URL('../../../../pages/story-workspace/StoryWorkspaceDreamPage.css', import.meta.url), 'utf8');
 
 test('Dream surfaces replace their composer with one run-bound tool decision', () => {
@@ -35,6 +38,8 @@ test('confirmation UI supports questions, safe approvals and network decisions w
   expect(CONFIRMATION).not.toContain('AskUserQuestionUI');
   expect(CONFIRMATION).not.toContain('ChatView');
   expect(CONFIRMATION).not.toContain('JSON.stringify(confirmation');
+  expect(CONFIRMATION).not.toContain('confirmation.title');
+  expect(CONFIRMATION).not.toContain('option.description');
 });
 
 test('narrow Dream dialog makes every background branch inert while open', () => {
@@ -50,4 +55,87 @@ test('Dream confirmation styling is an editorial proof slip, not a rounded Chat 
   expect(CSS).toContain('border-bottom: 1px solid var(--dream-rule)');
   expect(CSS).toContain('.story-workspace-dream-tool-confirmation__option');
   expect(CSS).toContain('.story-workspace-dream-tool-confirmation__actions');
+});
+
+test('collapsed Dream content announces one safe pending action and keeps an explicit entry point', () => {
+  expect(PAGE).toContain('Dream Agent 等待你确认一项操作');
+  expect(PAGE).toContain('role="status"');
+  expect(PAGE).toContain('aria-live="polite"');
+  expect(PAGE).toContain('announcedToolCallIdsRef');
+  expect(PAGE).toContain('dreamAgent.pendingToolConfirmation?.toolCallId');
+  expect(PAGE).toContain('announcedToolCallIdsRef.current.has(pendingToolCallId)');
+  expect(PAGE).toContain('data-pending={Boolean(dreamAgent.pendingToolConfirmation) || undefined}');
+  expect(PANEL).not.toContain('key={pendingToolCallId}');
+  expect(PANEL).toContain('retainPreviousToolCallId = true');
+  expect(PANEL).toContain('[composerCanReceiveFocus, isOpen, pendingToolCallId]');
+  expect(RAIL).toContain('if (agent.pendingToolConfirmation)');
+  expect(RAIL).toContain("return '等待你确认一项操作'");
+  expect(`${PAGE}\n${RAIL}`).not.toContain('ToolConfirmationDock');
+  expect(`${PAGE}\n${RAIL}`).not.toContain('ChatPanel');
+  expect(`${PAGE}\n${RAIL}`).not.toContain('ChatView');
+  expect(`${PAGE}\n${RAIL}\n${PANEL}\n${CONFIRMATION}`).not.toContain('/Users/');
+});
+
+test('inline Panel follows every confirmation focus path without stealing reading focus', () => {
+  const state = {
+    focusFellOut: false,
+    isOpen: true,
+    lastFocusedZone: 'composer' as const,
+    pendingToolCallId: 'tool-a',
+    previousToolCallId: null,
+    wasOpen: true,
+  };
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({ ...state, isOpen: false }))
+    .toBeNull();
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({ ...state, wasOpen: false }))
+    .toBe('confirmation');
+  expect(storyWorkspaceDreamAgentPanelFocusTarget(state))
+    .toBe('confirmation');
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({ ...state, lastFocusedZone: 'history' }))
+    .toBeNull();
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({
+    ...state,
+    lastFocusedZone: 'history',
+    pendingToolCallId: 'tool-b',
+    previousToolCallId: 'tool-a',
+  })).toBe('confirmation');
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({
+    ...state,
+    pendingToolCallId: null,
+    previousToolCallId: 'tool-a',
+  })).toBe('composer');
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({
+    ...state,
+    lastFocusedZone: 'history',
+    pendingToolCallId: null,
+    previousToolCallId: 'tool-a',
+  })).toBeNull();
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({
+    ...state,
+    lastFocusedZone: 'navigation',
+    pendingToolCallId: null,
+    previousToolCallId: 'tool-a',
+  })).toBeNull();
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({
+    ...state,
+    lastFocusedZone: 'outside',
+    pendingToolCallId: null,
+    previousToolCallId: 'tool-a',
+  })).toBeNull();
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({
+    ...state,
+    focusFellOut: true,
+    lastFocusedZone: 'outside',
+    pendingToolCallId: null,
+    previousToolCallId: 'tool-a',
+  })).toBe('composer');
+  expect(storyWorkspaceDreamAgentPanelFocusTarget({
+    ...state,
+    isOpen: false,
+    pendingToolCallId: null,
+    previousToolCallId: 'tool-a',
+  })).toBeNull();
+  expect(CSS).toContain('@media (max-width: 767px)');
+  expect(CSS).toContain('.story-workspace-dream-tool-confirmation { max-height: min(52dvh, 420px);');
+  expect(CSS).toContain('min-height: 44px;');
 });

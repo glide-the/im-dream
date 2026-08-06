@@ -44,6 +44,9 @@ from claude_agent.workspace_context import (
     build_workspace_context_block,
 )
 from services.story_workspace import canonical_project_instruction
+from services.story_workspace.episode_workflow_instruction import (
+    story_workspace_private_episode_completion_guidance,
+)
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
 # ---------------------------------------------------------------------------
@@ -281,6 +284,109 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertLess(
             combined.index("<story_workspace_dream_context>"),
             combined.rindex("create the story"),
+        )
+
+    def test_trusted_episode_action_injects_private_completion_handshake(self):
+        context = StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "1" * 32,
+            thread_id="thread-dream-context",
+            deck_id="deck-dream",
+            deck_plugin_id="ink.dream.story-workflow",
+            deck_plugin_version="1.0.0",
+            deck_plugin_binding_id="dpb_" + "2" * 32,
+            binding_revision=3,
+            deck_runtime_snapshot_id="drs_" + "4" * 32,
+            runtime_plugin_lock_id="rpl_" + "5" * 32,
+        )
+        provenance = {
+            "schema": "story-workspace-episode-action/v1",
+            "action": "write_script",
+            "episode_uid": "a" * 32,
+            "input_revision": "sha256:" + "b" * 64,
+            "expected_facts_revision": 2,
+            "expected_manifest_revision": "sha256:" + "c" * 64,
+            "expected_workflow_revision": "sha256:" + "d" * 64,
+        }
+
+        guidance = story_workspace_private_episode_completion_guidance(
+            context,
+            provenance,
+        )
+        blocks = self.builder.build_user_message(
+            self._parts("继续写剧本"),
+            story_workspace_dream_context=context,
+            story_workspace_episode_action=provenance,
+        )
+        combined = self._text_blocks(blocks)
+
+        self.assertIsNotNone(guidance)
+        self.assertIn(
+            "mcp__story_workspace__record_episode_workflow_completion",
+            combined,
+        )
+        self.assertIn(context.workflow_run_id, combined)
+        self.assertIn("重新读取并核验本轮规范产物", combined)
+        self.assertIn("无论成功或 fail closed 都立即停止", combined)
+
+    def test_generic_and_plain_dream_messages_have_no_private_completion_handshake(self):
+        context = StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "1" * 32,
+            thread_id="thread-dream-context",
+            deck_id="deck-dream",
+            deck_plugin_id="ink.dream.story-workflow",
+            deck_plugin_version="1.0.0",
+            deck_plugin_binding_id="dpb_" + "2" * 32,
+            binding_revision=3,
+            deck_runtime_snapshot_id="drs_" + "4" * 32,
+            runtime_plugin_lock_id="rpl_" + "5" * 32,
+        )
+        generic = self._text_blocks(
+            self.builder.build_user_message(self._parts("普通聊天"))
+        )
+        plain_dream = self._text_blocks(
+            self.builder.build_user_message(
+                self._parts("普通 Dream 留言"),
+                story_workspace_dream_context=context,
+            )
+        )
+
+        self.assertNotIn("record_episode_workflow_completion", generic)
+        self.assertNotIn("record_episode_workflow_completion", plain_dream)
+
+    def test_recovery_or_malformed_provenance_cannot_gain_private_completion(self):
+        context = StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "1" * 32,
+            thread_id="thread-dream-context",
+            deck_id="deck-dream",
+            deck_plugin_id="ink.dream.story-workflow",
+            deck_plugin_version="1.0.0",
+            deck_plugin_binding_id="dpb_" + "2" * 32,
+            binding_revision=3,
+            deck_runtime_snapshot_id="drs_" + "4" * 32,
+            runtime_plugin_lock_id="rpl_" + "5" * 32,
+        )
+        recovery = {
+            "schema": "story-workspace-episode-action/v1",
+            "action": "recover_first_episode_binding",
+            "episode_uid": None,
+            "input_revision": None,
+            "expected_facts_revision": None,
+            "expected_manifest_revision": None,
+            "expected_workflow_revision": None,
+        }
+        malformed = {**recovery, "action": "write_script"}
+
+        self.assertIsNone(
+            story_workspace_private_episode_completion_guidance(
+                context,
+                recovery,
+            )
+        )
+        self.assertIsNone(
+            story_workspace_private_episode_completion_guidance(
+                context,
+                malformed,
+            )
         )
 
     def test_canonical_project_fallback_slug_is_byte_exact_without_normalization(self):

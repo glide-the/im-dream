@@ -63,7 +63,7 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
 
 from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from claude_agent.workspace_context import build_workspace_context_block
@@ -74,10 +74,16 @@ try:
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
         STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
     )
+    from services.story_workspace.episode_workflow_instruction import (
+        story_workspace_private_episode_completion_guidance,
+    )
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
         STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
+    )
+    from backend.services.story_workspace.episode_workflow_instruction import (
+        story_workspace_private_episode_completion_guidance,
     )
 
 logger = logging.getLogger(__name__)
@@ -330,6 +336,9 @@ class ClaudeAgentContextBuilder:
         story_workspace_dream_context: Optional[
             StoryWorkspaceDreamRunContext
         ] = None,
+        story_workspace_episode_action: Optional[
+            Mapping[str, object]
+        ] = None,
     ) -> list[dict[str, Any]]:
         """Build the content blocks for a user turn.
 
@@ -450,6 +459,15 @@ class ClaudeAgentContextBuilder:
                 separators=(",", ":"),
                 sort_keys=True,
             )
+
+            private_completion = (
+                story_workspace_private_episode_completion_guidance(
+                    story_workspace_dream_context,
+                    story_workspace_episode_action,
+                )
+            )
+            if private_completion is not None:
+                blocks.append({"type": "text", "text": private_completion})
             blocks.append(
                 {
                     "type": "text",

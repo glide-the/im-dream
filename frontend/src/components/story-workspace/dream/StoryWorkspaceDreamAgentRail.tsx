@@ -15,6 +15,7 @@ export interface StoryWorkspaceDreamAgentRailProps {
 }
 
 function storyWorkspaceDreamAgentStatus(agent: StoryWorkspaceDreamAgentViewModel): string {
+  if (agent.pendingToolConfirmation) return '等待你确认一项操作';
   if (agent.isReconnecting) return '正在恢复实时消息…';
   if (agent.snapshot?.lifecycle === 'streaming') return 'Dream Agent 正在输出';
   if (agent.snapshot?.sendBlockReason === 'waiting_confirmation') return '等待你修改并确认';

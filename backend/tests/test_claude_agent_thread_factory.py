@@ -361,11 +361,46 @@ class TestFactoryStoryWorkspaceDreamTurn(unittest.TestCase):
         self.assertEqual(snapshot, {
             "turn_id": "turn-dream-trusted",
             "pending_tool_call_ids": ["tool-write", "tool-ask"],
+            "pending_tool_call_ids_observation": "known",
         })
         self.assertNotIn(
             "current_turn_id",
             self.factory.session_snapshot(self.thread_id),
         )
+
+    def test_trusted_dream_turn_snapshot_marks_pending_observation_unknown_on_failure(self):
+        state = self._running_state()
+        state.turn_context.confirmation_store.pending_ids = unittest.mock.Mock(
+            side_effect=RuntimeError("observation failed")
+        )
+
+        snapshot = self.factory.story_workspace_dream_turn_snapshot(
+            self.thread_id,
+            self.run_id,
+            self.actor_id,
+        )
+
+        self.assertEqual(snapshot, {
+            "turn_id": "turn-dream-trusted",
+            "pending_tool_call_ids": [],
+            "pending_tool_call_ids_observation": "unknown",
+        })
+
+    def test_trusted_dream_turn_snapshot_marks_missing_store_observation_unknown(self):
+        state = self._running_state()
+        state.turn_context = SimpleNamespace(confirmation_store=None)
+
+        snapshot = self.factory.story_workspace_dream_turn_snapshot(
+            self.thread_id,
+            self.run_id,
+            self.actor_id,
+        )
+
+        self.assertEqual(snapshot, {
+            "turn_id": "turn-dream-trusted",
+            "pending_tool_call_ids": [],
+            "pending_tool_call_ids_observation": "unknown",
+        })
 
     def test_trusted_dream_turn_snapshot_fails_closed_for_wrong_binding(self):
         state = self._running_state()

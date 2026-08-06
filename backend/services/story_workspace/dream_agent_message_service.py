@@ -110,6 +110,8 @@ _DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR = (
     "_story_workspace_dream_public_tool_confirmation_subscribers"
 )
 _DREAM_PUBLIC_TOOL_CONFIRMATIONS_MAX = 256
+_DREAM_TOOL_CONFIRMATION_OBSERVATION_RETRIES = 3
+_DREAM_TOOL_CONFIRMATION_OBSERVATION_RETRY_SECONDS = 0.05
 _ASK_USER_QUESTIONS_MAX = 8
 _ASK_USER_OPTIONS_MAX = 12
 _DREAM_PUBLIC_TEXT_REDACTION = "[已隐藏敏感内容]"
@@ -880,7 +882,7 @@ def _trusted_dream_turn_snapshot(
     thread_id: str,
     run_id: str,
     actor_id: str,
-) -> tuple[str, list[str]] | None:
+) -> tuple[str, list[str], str] | None:
     """Read the factory's Dream-only turn view and fail closed on bad doubles."""
 
     accessor = getattr(factory, "story_workspace_dream_turn_snapshot", None)
@@ -891,7 +893,13 @@ def _trusted_dream_turn_snapshot(
         return None
     turn_id = snapshot.get("turn_id")
     pending = snapshot.get("pending_tool_call_ids")
-    if not isinstance(turn_id, str) or not turn_id or not isinstance(pending, list):
+    observation = snapshot.get("pending_tool_call_ids_observation")
+    if (
+        not isinstance(turn_id, str)
+        or not turn_id
+        or not isinstance(pending, list)
+        or observation not in {"known", "unknown"}
+    ):
         return None
     pending_ids: list[str] = []
     seen: set[str] = set()
@@ -901,7 +909,7 @@ def _trusted_dream_turn_snapshot(
             continue
         seen.add(safe)
         pending_ids.append(safe)
-    return turn_id, pending_ids
+    return turn_id, pending_ids, observation
 
 
 def _pending_dream_public_confirmations(
@@ -912,9 +920,12 @@ def _pending_dream_public_confirmations(
     run_id: str,
     actor_id: str,
     runtime_pending_ids: list[str],
+    runtime_pending_observation: str,
 ) -> list[StoryWorkspaceDreamAgentToolConfirmation]:
-    """Return runtime/display intersection and prune only this exact turn."""
+    """Return the exact-turn safe projection without guessing runtime absence."""
 
+    if runtime_pending_observation != "known":
+        return []
     registry = _dream_public_confirmation_registry(factory, create=False)
     if registry is None:
         return []
@@ -925,7 +936,10 @@ def _pending_dream_public_confirmations(
         if key[:4] != prefix:
             continue
         tool_call_id = key[4]
-        if tool_call_id not in runtime_pending:
+        if (
+            runtime_pending_observation == "known"
+            and tool_call_id not in runtime_pending
+        ):
             registry.pop(key, None)
             continue
         try:
@@ -1215,6 +1229,11 @@ class StoryWorkspaceDreamAgentMessageService:
             else None
         )
         active_turn_id = trusted_turn[0] if trusted_turn is not None else None
+        tool_confirmation_observation = (
+            trusted_turn[2]
+            if trusted_turn is not None
+            else "unknown" if running else "known"
+        )
         pending_tool_confirmations = (
             _pending_dream_public_confirmations(
                 self._thread_factory,
@@ -1223,6 +1242,7 @@ class StoryWorkspaceDreamAgentMessageService:
                 run_id=run_id,
                 actor_id=actor_id,
                 runtime_pending_ids=trusted_turn[1],
+                runtime_pending_observation=trusted_turn[2],
             )
             if trusted_turn is not None
             else []
@@ -1254,6 +1274,7 @@ class StoryWorkspaceDreamAgentMessageService:
                 run_id=run_id, thread_id=thread_id, actor_id=actor_id
             ),
             pending_tool_confirmations=pending_tool_confirmations,
+            tool_confirmation_observation=tool_confirmation_observation,
             snapshot_at=datetime.now(UTC),
         )
 
@@ -1414,11 +1435,32 @@ class StoryWorkspaceDreamAgentMessageService:
         if trusted_turn is None:
             yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
             return
-        turn_id, _runtime_pending_ids = trusted_turn
+        turn_id, _runtime_pending_ids, _runtime_pending_observation = trusted_turn
         after_position = _dream_public_cursor_position(after, turn_id=turn_id)
 
         def cursor_consumed(raw_ordinal: int, subevent: int = 0) -> bool:
             return (raw_ordinal, subevent) <= after_position
+
+        async def observe_runtime_confirmation() -> tuple[str, list[str], str] | None:
+            observation: tuple[str, list[str], str] | None = None
+            for attempt in range(_DREAM_TOOL_CONFIRMATION_OBSERVATION_RETRIES):
+                observation = _trusted_dream_turn_snapshot(
+                    self._thread_factory,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    actor_id=actor_id,
+                )
+                if (
+                    observation is None
+                    or observation[0] != turn_id
+                    or observation[2] == "known"
+                ):
+                    return observation
+                if attempt + 1 < _DREAM_TOOL_CONFIRMATION_OBSERVATION_RETRIES:
+                    await asyncio.sleep(
+                        _DREAM_TOOL_CONFIRMATION_OBSERVATION_RETRY_SECONDS
+                    )
+            return observation
 
         ordinal = -1
         pending_tool_call_ids: set[str] = set()
@@ -1500,6 +1542,30 @@ class StoryWorkspaceDreamAgentMessageService:
                     if confirmation is None:
                         continue
                     tool_call_id = confirmation["toolCallId"]
+                    runtime_observation = await observe_runtime_confirmation()
+                    if (
+                        runtime_observation is None
+                        or runtime_observation[0] != turn_id
+                        or runtime_observation[2] != "known"
+                    ):
+                        # Do not consume the only approval frame while its
+                        # runtime truth is unknowable. Ending this public SSE
+                        # makes the snapshot/reconnect adapter replay safely.
+                        break
+                    if (
+                        runtime_observation[2] == "known"
+                        and tool_call_id not in set(runtime_observation[1])
+                    ):
+                        _forget_dream_public_confirmation(
+                            self._thread_factory,
+                            thread_id=thread_id,
+                            turn_id=turn_id,
+                            run_id=run_id,
+                            actor_id=actor_id,
+                            tool_call_id=tool_call_id,
+                        )
+                        pending_tool_call_ids.discard(tool_call_id)
+                        continue
                     if not _remember_dream_public_confirmation(
                         self._thread_factory,
                         thread_id=thread_id,
@@ -1703,7 +1769,12 @@ class StoryWorkspaceDreamAgentMessageService:
                 "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
                 409,
             )
-        turn_id, runtime_pending_ids = trusted_turn
+        turn_id, runtime_pending_ids, runtime_pending_observation = trusted_turn
+        if runtime_pending_observation != "known":
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+                409,
+            )
         pending_confirmations = _pending_dream_public_confirmations(
             factory,
             thread_id=thread_id,
@@ -1711,6 +1782,7 @@ class StoryWorkspaceDreamAgentMessageService:
             run_id=run_id,
             actor_id=actor_id,
             runtime_pending_ids=runtime_pending_ids,
+            runtime_pending_observation=runtime_pending_observation,
         )
         if command.tool_call_id not in {
             item.tool_call_id for item in pending_confirmations
@@ -1745,13 +1817,17 @@ class StoryWorkspaceDreamAgentMessageService:
             answers=answers,
         )
         if not resolved:
-            if command.tool_call_id not in set(
-                (_trusted_dream_turn_snapshot(
-                    factory,
-                    thread_id=thread_id,
-                    run_id=run_id,
-                    actor_id=actor_id,
-                ) or ("", []))[1]
+            latest_observation = _trusted_dream_turn_snapshot(
+                factory,
+                thread_id=thread_id,
+                run_id=run_id,
+                actor_id=actor_id,
+            )
+            if (
+                latest_observation is not None
+                and latest_observation[0] == turn_id
+                and latest_observation[2] == "known"
+                and command.tool_call_id not in set(latest_observation[1])
             ):
                 registry.pop(confirmation_key, None)
             raise StoryWorkspaceDreamAgentMessageError(

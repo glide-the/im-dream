@@ -33,7 +33,6 @@ function storyWorkspaceDreamInitialAnswers(
 }
 
 function storyWorkspaceDreamToolTitle(confirmation: StoryWorkspaceDreamAgentToolConfirmation): string {
-  if (confirmation.title) return confirmation.title;
   if (confirmation.kind === 'ask_user') return 'Dream Agent 需要你的选择';
   if (confirmation.kind === 'sandbox_network') {
     return confirmation.network?.host
@@ -137,7 +136,7 @@ export function StoryWorkspaceDreamToolConfirmation({
                           onChange={(event) => toggleOption(question, option.value, event.currentTarget.checked)}
                           type="checkbox"
                         />
-                        <span><strong>{option.label}</strong>{option.description ? <small>{option.description}</small> : null}</span>
+                        <span><strong>{option.label}</strong></span>
                       </label>
                     ))}
                   </div>
@@ -164,7 +163,7 @@ export function StoryWorkspaceDreamToolConfirmation({
                           type="radio"
                           value={option.value}
                         />
-                        <span><strong>{option.label}</strong>{option.description ? <small>{option.description}</small> : null}</span>
+                        <span><strong>{option.label}</strong></span>
                       </label>
                     ))}
                   </div>

@@ -80,7 +80,8 @@ test('Agent rail belongs exclusively to the Agent section on desktop and narrow 
   expect(PAGE).toContain('{agentPanelOpen && (\n        <div className="story-workspace-dream__mobile-agent">');
   expect(PAGE).toContain('{agentPanelOpen && (\n            <StoryWorkspaceDreamAgentRail');
   expect(PAGE.match(/<StoryWorkspaceDreamAgentRail/g)).toHaveLength(2);
-  expect(CSS).toContain('.story-workspace-dream__activity > span:last-child { display: none; }');
+  expect(CSS).toContain('.story-workspace-dream__activity-copy { display: none; }');
+  expect(CSS).toContain('.story-workspace-dream__activity[data-pending] .story-workspace-dream__activity-copy');
 });
 
 test('Dream return link preserves native modifiers and only goes back for in-app history state', () => {

@@ -313,6 +313,7 @@ class ClaudeAgentThreadFactory:
         turn_context = state.turn_context
         store = getattr(turn_context, "confirmation_store", None)
         pending_ids = getattr(store, "pending_ids", None)
+        observation = "unknown"
         if not callable(pending_ids):
             runtime_pending: list[str] = []
         else:
@@ -322,6 +323,7 @@ class ClaudeAgentThreadFactory:
                     for item in pending_ids()
                     if isinstance(item, str) and 0 < len(item) <= 255
                 ]
+                observation = "known"
             except Exception:
                 logger.exception(
                     "Failed to read Dream runtime confirmations for session_id=%s",
@@ -331,6 +333,7 @@ class ClaudeAgentThreadFactory:
         return {
             "turn_id": state.current_turn_id,
             "pending_tool_call_ids": runtime_pending,
+            "pending_tool_call_ids_observation": observation,
         }
 
     def _trusted_story_workspace_dream_state(

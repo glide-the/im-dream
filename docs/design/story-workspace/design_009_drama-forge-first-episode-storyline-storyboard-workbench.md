@@ -890,3 +890,46 @@ HTTP 202 只证明消息已经持久接受，不能把页面永久锁到“已�
 4. 桌面与 390px 窄屏均无横向溢出；折叠按钮、当前操作、后续 disabled 语义与两级 Escape 焦点恢复均由浏览器测试覆盖。
 5. accepted message 在相同 Episode revision 下完成但未产生 artifact 时，页面不得永久显示“已交给 Dream Agent”。
 6. Dream Agent 的 snapshot 与 SSE 文本出现 `agent_id`、`binding_revision`、内部绑定工具名或统一拒绝码时，必须使用安全公共投影；受控 `/drama-*` 产品操作名不因此被误隐藏。
+
+## 28. 2026-08-06 第一集流程指导模板修订
+
+本节由恢复按钮与阶段操作的真实使用反馈触发，增量修订第 2、15、20 与 27 节。完整问题证据见 `2026-08-06-drama-forge-workflow-guidance-template-rework-record.md`。
+
+### 28.1 模板 owner 与内容
+
+- Episode action service 持有一个 server-authored 第一集 workflow guidance template；它从第 27.2 节同一个 vendor flow owner 生成，不在恢复/continue 分支各复制一份顺序。
+- 同一 owner 分为核心创作序列 2—7 与本期完成序列 8—10。核心序列按 vendor README 固定说明：`/drama-plan → /drama-script (EP01) → script-reviewer 五维度审查 → /drama-asset → /drama-storyboard (EP01) → /drama-prompt (EP01)`；完成序列继续说明 full-chain review → validate/commit → `/drama-render + /drama-voice`。步骤 11—12 明确为本期外。
+- `script-reviewer` 是 `drama-script` Skill 的 blocking required review Agent，不是 slash command。模板不得虚构 `/script-reviewer`；resolver 的 `review_script` capability 只表示基于当前文件事实补齐或刷新 script-scope `review-report.md`。
+- 若 `/drama-script` 已为当前 `script.md` revision 产出 APPROVED script/full-chain report，resolver 必须直接跳过 `review_script`；`review_script` 只在报告缺失、陈旧或未批准时成为 current action，不能被实现成每次必经的第二次派发。
+- template 是 Agent 的依赖 guidance；Episode artifact、workflow completion 与 nextAction 的 owner 仍分别是安全文件 surface、workflow facts 与 server resolver。
+
+### 28.2 分轮授权
+
+- recovery envelope 复用 template，但本轮唯一目标是恢复 canonical project 与 EP01 binding；恢复成功后停止，不在同一 turn 自动执行 `/drama-plan` 或任何后续步骤。
+- continue envelope 复用 template，并只授权 resolver 已证明为 current/canDispatch 的 action；后续步骤仅说明依赖方向，不得串行执行。
+- 每个 action entry 固定 canonical 前置、预期输出、creator/reviewer approval boundary 与是否需要 technical completion；Agent 必须先重新读取并核验本轮 canonical 输出，再记录 current action completion，随后停止。
+- 模板不得把“Agent 已读到命令”“工具已允许”“技术 turn 已结束”解释为 artifact 已完成；每轮结束后重新读取 Episode REST facts/revisions。
+- 用户 supplement 只能补充当前 action 的创作方向，不能注入 slash command、敏感路径、secret 或改写下一步。
+
+### 28.3 Public template 与 private completion handshake
+
+- public task envelope 只包含审定产品步骤、当前 action、canonical 前置/输出、manifest 身份与 current-only/stop 约束；它可以进入 Dream 安全 user message。
+- Episode action provenance 已由服务端绑定 message/action/episode/input/facts/manifest/workflow revisions。Claude Agent context builder 只在 `story_workspace_dream_context` 与 server-owned `story_workspace_episode_action` 同时成立时注入 private completion guidance；generic Chat 或普通 Dream 留言不得获得该能力提示。
+- private guidance 要求 canonical 输出验证后调用 Story Workspace 受控 workflow completion；MCP 名称、arguments、CAS/revision 值不能进入 public user text、actionOptions、snapshot/SSE、DOM 或日志展示。
+- completion tool 再次校验 actor/thread/run/message/episode/action 与 current input revisions；校验失败 fail closed，不能由 Agent 自报成功。没有 current completion fact 时，即使文件已出现，resolver 对依赖 completion 的 action也不得前进。
+
+### 28.4 工具确认边界
+
+- workflow guidance 不是工具预授权。可信 Dream turn 请求 Write/Bash/AskUser/网络许可时，必须进入 `design_008` §24 的 Dream 专属 confirmation surface。
+- generic Chat provenance 不因共用 thread 被 Dream 接管；Dream instruction 也不得挂载通用 `ToolConfirmationDock` 或暴露 raw input/绝对路径。
+
+### 28.5 新增验收
+
+- [ ] README 步骤 2—10 与 guidance template/action entries 顺序完全一致；`script-reviewer` 被识别为 `drama-script` required review Agent，而不是 slash command。
+- [ ] recovery 文本包含完整 guidance 和明确的 bind-only/stop 约束。
+- [ ] 每个 continue 文本包含完整 guidance、唯一 current action、manifest revision 与 current-only 约束；后续步骤不能被一次派发。
+- [ ] 当前 script revision 已有 APPROVED report 时跳过 `review_script`；缺失、陈旧或未批准时才显示补齐动作。
+- [ ] 依赖 completion 的 action 即使 canonical 文件已写也不提前前进；trusted private context 指导 exact completion，成功后 resolver 才读取新 workflow fact。
+- [ ] completion MCP 名称/参数/CAS/revision 不进入 public user message、actionOptions、Dream snapshot/SSE 或 DOM；generic Chat/普通留言不获得 private action guidance。
+- [ ] actionOptions 仍只有当前项可派发；模板不改变 resolver 或 artifact truth ownership。
+- [ ] Dream 工具确认、actor/run/turn/provenance、安全投影与无 Chat Dock 回归全部通过。

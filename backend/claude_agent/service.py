@@ -163,7 +163,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -871,6 +873,104 @@ def _attach_story_workspace_dream_assistant_source(
     }
 
 
+def _trusted_story_workspace_episode_action(
+    request: "ClaudeAgentRunRequest",
+) -> dict[str, object] | None:
+    """Return only a server-authored Episode action matching this Dream turn.
+
+    ``message_metadata`` is not hydrated by the generic HTTP route. The Dream
+    dispatcher copies it from the already-claimed user row, and the completion
+    tool re-reads that row before accepting any write.
+    """
+
+    context = request.story_workspace_dream_context
+    request_metadata = request.message_metadata
+    if not (
+        context is not None
+        and request.thread_id == context.thread_id
+        and isinstance(request_metadata, dict)
+        and request_metadata.get("kind")
+        == "story-workspace-dream-agent-user"
+        and request_metadata.get("story_workspace_run_id")
+        == context.workflow_run_id
+        and request_metadata.get("thread_id") == context.thread_id
+        and str(request_metadata.get("actor_id") or "")
+        == str(request.user_id)
+        and request_metadata.get("dispatch_status") == "dispatching"
+        and isinstance(request_metadata.get("dispatch_claim_id"), str)
+        and bool(
+            str(request_metadata.get("dispatch_claim_id") or "").strip()
+        )
+        and isinstance(request.message_id, str)
+        and re.fullmatch(r"dream_agent_[0-9a-f]{64}", request.message_id)
+        is not None
+        and isinstance(
+            request_metadata.get("story_workspace_episode_action"),
+            dict,
+        )
+    ):
+        return None
+    try:
+        rows = _db.list_chat_messages(context.thread_id)
+    except Exception:  # noqa: BLE001 - trusted context fails closed.
+        logger.warning(
+            "Story Workspace Episode action row unavailable; private guidance skipped"
+        )
+        return None
+    matching_rows = [
+        row
+        for row in rows
+        if row.get("id") == request.message_id and row.get("role") == "user"
+    ]
+    if len(matching_rows) != 1:
+        return None
+    persisted_metadata = matching_rows[0].get("metadata")
+    if not isinstance(persisted_metadata, dict):
+        return None
+    persisted_lease = persisted_metadata.get("dispatch_claim_lease_until")
+    request_claim_id = request_metadata.get("dispatch_claim_id")
+    persisted_provenance = persisted_metadata.get(
+        "story_workspace_episode_action"
+    )
+    request_provenance = request_metadata.get("story_workspace_episode_action")
+    if not (
+        persisted_metadata.get("kind")
+        == "story-workspace-dream-agent-user"
+        and persisted_metadata.get("story_workspace_run_id")
+        == context.workflow_run_id
+        and persisted_metadata.get("thread_id") == context.thread_id
+        and str(persisted_metadata.get("actor_id") or "")
+        == str(request.user_id)
+        and persisted_metadata.get("dispatch_status") == "dispatching"
+        and persisted_metadata.get("dispatch_claim_id") == request_claim_id
+        and isinstance(persisted_lease, (int, float))
+        and not isinstance(persisted_lease, bool)
+        and math.isfinite(float(persisted_lease))
+        and float(persisted_lease) > time.time()
+        and isinstance(persisted_provenance, dict)
+        and persisted_provenance == request_provenance
+    ):
+        return None
+    provenance = dict(persisted_provenance)
+    try:
+        from services.story_workspace.episode_workflow_instruction import (
+            story_workspace_private_episode_completion_guidance,
+        )
+    except ModuleNotFoundError:
+        from backend.services.story_workspace.episode_workflow_instruction import (
+            story_workspace_private_episode_completion_guidance,
+        )
+    if (
+        story_workspace_private_episode_completion_guidance(
+            context,
+            provenance,
+        )
+        is None
+    ):
+        return None
+    return provenance
+
+
 # ---------------------------------------------------------------------------
 # Request model
 # ---------------------------------------------------------------------------
@@ -1302,6 +1402,9 @@ class ClaudeAgentService:
             editor_session_id=editor_session_id,
             voice_system_prompt=request.system_prompt or None,
             story_workspace_dream_context=request.story_workspace_dream_context,
+            story_workspace_episode_action=(
+                _trusted_story_workspace_episode_action(request)
+            ),
         )
 
         run_options = AgentRunOptions(

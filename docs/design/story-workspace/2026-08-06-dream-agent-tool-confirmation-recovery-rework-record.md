@@ -230,4 +230,23 @@ Dream 内容区（不抢焦）                    Masthead
 
 ### 4.2 实现台账
 
-待回写 Red / Green / 代码评审 / commit、测试输出、浏览器截图与 trace。
+| 单元 | Red | Green | 独立评审 | 提交状态 |
+|---|---|---|---|---|
+| U1 后端 runtime truth 与 snapshot/SSE/confirm | 初始生产 seam 复现真实 factory 无 `current_turn_id`；复审返工再得到 4 个失败：unknown snapshot 仍公开、confirm 仍调用 runtime、EventBus replay 仍 emit、observation 合同缺失 | unknown 时保留 registry 但不公开、不确认；SSE 最多重观测 3 次，持续 unknown 主动结束并由既有 reconnect 重新取事实；known 时才输出 runtime IDs 与 safe registry 的交集 | 首轮代码评审 FAIL；返工复评 PASS（P0=0 / P1=0 / P2=0） | 基础修复 commit `6a18a60`；复审返工因 `.git` 在执行环境只读而未提交 |
+| U2 前端 snapshot/replay/GC 安全合同 | 4 个失败复现不同 cursor 重放复活、tombstone 优先级缺失、turn-2 并发 mutation 丢失与非安全字段被接受；GC 返工先以缺少 helper 失败 | 严格拒绝 `title`、option `description`、raw input 与路径形态 tool name；tombstone 以 turn+tool 为身份且上限 256，mutation journal 上限 512；只按 known server observation 回收 | 与 U1 合并复评 PASS（P0=0 / P1=0 / P2=0） | 基础修复 commit `d9d82e2`；复审返工因 `.git` 只读而未提交 |
+| U3 Panel/Page/390px | 新增源码 seam 覆盖折叠入口、五种焦点路径、播报去重和窄屏触控尺寸；E2E 首次复审指出可见文本检查抓不到 `aria-label` 泄漏、viewport 断言不足、缺少终态 textarea 焦点；延迟聚焦复审再以 `1 failed, 5 passed` 复现 history 焦点被抢回 | DOM/ARIA 安全反断言覆盖原事故形态；桌面/390px 均校验 overflow、viewport 与边界；POST 后由 deferred SSE idle 驱动 REST snapshot 恢复 textarea；延迟焦点只在 composer/confirmation 或焦点确实落空时恢复，history/navigation/outside 不抢焦；聚焦 Node seam `40 passed` | 两次返工后最终 PASS（P0=0 / P1=0 / P2=0） | 因 `.git` 只读未提交 |
+
+### 4.3 合并验证
+
+- 后端合并回归：`382 passed, 1 skipped, 210 subtests passed in 2.18s`。覆盖 thread factory、Dream message snapshot/SSE/confirm、Episode action、context builder、service、Dream MCP tool 与 runner。
+- 前端确定性 seam：最终 U3/U1/U2 聚焦组合 `40 passed`，U3 最终独立复审组 `27 passed`；较宽合并组共 `80 passed`，另 4 个需要 Chromium 的既有 DOM 用例均在 browser launch 阶段被同一环境权限阻断，不是断言失败。
+- `npx tsc -b`：PASS。
+- 全部改动前端文件 scoped ESLint：PASS。
+- `git diff --check`：PASS；`backend/database.py` 无 diff。
+
+### 4.4 浏览器验收边界
+
+- 已新增确定性 mocked-browser 用例 `frontend/e2e/story-workspace-episode-execution.spec.ts`：从 `pendingToolConfirmations` snapshot 打开 Dream Page Panel，验证 Write 确认替换 composer、首次焦点、无绝对路径/raw Dock 文案、1440px/390px 布局，以及 run-scoped `tool-confirm` POST body；`playwright --list` 成功发现 2 个用例。
+- 仓库 Playwright QA preflight 通过，但当前受控环境禁止监听 `127.0.0.1:4177`（Vite `listen EPERM`），Chromium 与 headless shell 均在导航前因 `MachPortRendezvousServer ... Permission denied (1100)` 退出；因此没有生成可诚实认定为通过的截图或 trace。
+- 未用 mock 冒充真实 Agent 链路成功。真实浏览器点击、截图与 trace 仍需在允许本机监听和 Chromium MachPort 的环境补跑。
+- 本轮没有成功启动后端、Vite 或浏览器常驻服务；未关闭用户服务，未执行归档。

@@ -281,6 +281,7 @@ export interface StoryWorkspaceDreamAgentMessageSnapshot {
   readonly sendBlockReason: 'generating' | 'waiting_confirmation' | 'confirming' | 'continuing' | 'busy' | null;
   readonly messages: readonly StoryWorkspaceDreamAgentMessage[];
   readonly pendingToolConfirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
+  readonly toolConfirmationObservation: 'known' | 'unknown';
   readonly snapshotAt: string;
 }
 
@@ -300,7 +301,6 @@ export interface StoryWorkspaceDreamAgentMessageAccepted {
 export interface StoryWorkspaceDreamAgentToolConfirmationOption {
   readonly label: string;
   readonly value: string;
-  readonly description?: string;
 }
 
 export interface StoryWorkspaceDreamAgentToolConfirmationQuestion {
@@ -317,7 +317,6 @@ export interface StoryWorkspaceDreamAgentToolConfirmation {
   readonly toolCallId: string;
   readonly kind: 'approval' | 'ask_user' | 'sandbox_network';
   readonly toolName: string;
-  readonly title?: string;
   readonly questions?: readonly StoryWorkspaceDreamAgentToolConfirmationQuestion[];
   readonly network?: {
     readonly host: string | null;

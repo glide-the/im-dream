@@ -58,6 +58,7 @@ class _Factory:
         self.requests: list[object] = []
         self.current_turn_id = "turn-1"
         self.pending_tool_call_ids: set[str] | None = None
+        self.pending_tool_call_ids_observation = "known"
 
     def session_snapshot(self, _thread_id: str):
         return (
@@ -97,6 +98,7 @@ class _Factory:
         return {
             "turn_id": self.current_turn_id,
             "pending_tool_call_ids": sorted(pending),
+            "pending_tool_call_ids_observation": self.pending_tool_call_ids_observation,
         }
 
     async def run_streaming(self, request):
@@ -1472,6 +1474,29 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 "title": "/Users/private/script.md",
             })
         with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmation.model_validate({
+                "toolCallId": "tool-secret",
+                "kind": "ask_user",
+                "toolName": "AskUserQuestion",
+                "questions": [{
+                    "id": "q0",
+                    "question": "继续吗？",
+                    "type": "radio",
+                    "required": True,
+                    "options": [{
+                        "label": "继续",
+                        "value": "继续",
+                        "description": "内部说明",
+                    }],
+                }],
+            })
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmation.model_validate({
+                "toolCallId": "tool-secret",
+                "kind": "approval",
+                "toolName": "/Users/private/script.md",
+            })
+        with self.assertRaises(ValidationError):
             StoryWorkspaceDreamAgentToolConfirmationCommand.model_validate({
                 "toolCallId": "tool-1",
                 "approved": True,
@@ -1603,6 +1628,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             [item.tool_call_id for item in snapshot.pending_tool_confirmations],
             ["tool-write"],
         )
+        self.assertEqual(snapshot.tool_confirmation_observation, "known")
         payload = snapshot.model_dump_json(by_alias=True)
         self.assertNotIn("/Users/", payload)
         self.assertNotIn("file_path", payload)
@@ -1611,6 +1637,163 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         assert registry is not None
         self.assertFalse(any(key[-1] == "tool-timeout" for key in registry))
         self.assertTrue(any(key[-1] == "tool-foreign" for key in registry))
+
+    def test_unknown_runtime_observation_hides_but_keeps_exact_and_cross_thread_public_projections(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.pending_tool_call_ids = set()
+        factory.pending_tool_call_ids_observation = "unknown"
+        for thread_id, tool_call_id in (
+            (THREAD_ID, "tool-observation-unknown"),
+            ("other-thread", "tool-other-thread"),
+        ):
+            self.assertTrue(_remember_dream_public_confirmation(
+                factory,
+                thread_id=thread_id,
+                turn_id="turn-1",
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+                confirmation={
+                    "toolCallId": tool_call_id,
+                    "kind": "approval",
+                    "toolName": "Write",
+                },
+            ))
+
+        with patch(
+            "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+            return_value=(True, True),
+        ):
+            snapshot = StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).snapshot(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+            )
+
+        self.assertEqual(
+            [item.tool_call_id for item in snapshot.pending_tool_confirmations],
+            [],
+        )
+        self.assertEqual(snapshot.tool_confirmation_observation, "unknown")
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        assert registry is not None
+        self.assertTrue(any(key[-1] == "tool-observation-unknown" for key in registry))
+        self.assertTrue(any(key[-1] == "tool-other-thread" for key in registry))
+
+        factory.pending_tool_call_ids = {"tool-observation-unknown"}
+        factory.pending_tool_call_ids_observation = "known"
+        with patch(
+            "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+            return_value=(True, True),
+        ):
+            recovered = StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).snapshot(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+            )
+        self.assertEqual(recovered.tool_confirmation_observation, "known")
+        self.assertEqual(
+            [item.tool_call_id for item in recovered.pending_tool_confirmations],
+            ["tool-observation-unknown"],
+        )
+
+    def test_replayed_old_approval_is_not_exposed_when_runtime_observes_it_resolved(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.pending_tool_call_ids = set()
+        factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-resolved",'
+            '"toolName":"Write","input":{"file_path":"/Users/private/script.md"}}\n\n',
+        ]
+        output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+
+        self.assertNotIn("event: tool_confirmation_requested", output)
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        self.assertFalse(registry)
+
+    def test_unknown_runtime_observation_neither_remembers_nor_emits_approval_replay(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.pending_tool_call_ids = set()
+        factory.pending_tool_call_ids_observation = "unknown"
+        factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-unknown",'
+            '"toolName":"Write","input":{"file_path":"/Users/private/script.md"}}\n\n',
+        ]
+
+        output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+
+        self.assertNotIn("event: tool_confirmation_requested", output)
+        self.assertFalse(_dream_public_confirmation_registry(factory, create=False))
+
+    def test_approval_projection_recovers_when_unknown_observation_becomes_known(self) -> None:
+        class RecoveringObservationFactory(_ToolConfirmationFactory):
+            def __init__(self) -> None:
+                super().__init__()
+                self.observation_calls = 0
+
+            def story_workspace_dream_turn_snapshot(
+                self,
+                thread_id: str,
+                run_id: str,
+                actor_id: str,
+            ):
+                snapshot = super().story_workspace_dream_turn_snapshot(
+                    thread_id,
+                    run_id,
+                    actor_id,
+                )
+                self.observation_calls += 1
+                if snapshot is not None:
+                    snapshot["pending_tool_call_ids_observation"] = (
+                        "unknown" if self.observation_calls <= 2 else "known"
+                    )
+                return snapshot
+
+        factory = RecoveringObservationFactory()
+        factory.pending_tool_call_ids = {"tool-recovers"}
+        factory.frames = [
+            'data: {"type":"tool-approval-request","toolCallId":"tool-recovers",'
+            '"toolName":"Write","input":{"file_path":"/Users/private/script.md"}}\n\n',
+        ]
+
+        output = "".join(asyncio.run(_collect(
+            StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+        )))
+
+        self.assertIn("event: tool_confirmation_requested", output)
+        self.assertNotIn("/Users/private", output)
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        assert registry is not None
+        self.assertTrue(any(key[-1] == "tool-recovers" for key in registry))
 
     def test_disconnect_keeps_runtime_pending_projection_recoverable_from_snapshot(self) -> None:
         async def exercise():
@@ -1682,6 +1865,46 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
 
         registry = _dream_public_confirmation_registry(factory, create=False)
         self.assertEqual(registry, {})
+        self.assertFalse(any(item[0] == "confirm" for item in factory.confirmations))
+
+    def test_failed_confirm_does_not_prune_when_runtime_observation_is_unknown(self) -> None:
+        factory = _ToolConfirmationFactory(resolved=False)
+        factory.pending_tool_call_ids = set()
+        factory.pending_tool_call_ids_observation = "unknown"
+        self.assertTrue(_remember_dream_public_confirmation(
+            factory,
+            thread_id=THREAD_ID,
+            turn_id="turn-1",
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+            confirmation={
+                "toolCallId": "tool-observation-unknown",
+                "kind": "approval",
+                "toolName": "Write",
+            },
+        ))
+        service = StoryWorkspaceDreamAgentMessageService(
+            self.db,
+            thread_factory=factory,
+        )
+
+        with self.assertRaisesRegex(
+            StoryWorkspaceDreamAgentMessageError,
+            "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+        ):
+            service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-observation-unknown",
+                    approved=True,
+                ),
+            )
+
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        assert registry is not None
+        self.assertTrue(any(key[-1] == "tool-observation-unknown" for key in registry))
         self.assertFalse(any(item[0] == "confirm" for item in factory.confirmations))
 
     def test_events_disconnect_retains_runtime_pending_turn_and_actor_registry(self) -> None:
@@ -2147,6 +2370,7 @@ class _DreamAgentRouteGateway:
             active_turn_id=None,
             can_send=True,
             messages=[],
+            tool_confirmation_observation="known",
             snapshot_at=datetime.now(UTC),
         )
 

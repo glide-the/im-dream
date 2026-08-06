@@ -23,6 +23,8 @@ import type {
 const RUN_ID_PATTERN = /^run_[0-9a-f]{32}$/;
 const MAX_TEXT_LENGTH = 4000;
 const MAX_TOOL_CONFIRMATION_ANSWERS_BYTES = 8192;
+const MAX_DREAM_AGENT_CONFIRMATION_TOMBSTONES = 256;
+const MAX_DREAM_AGENT_CONFIRMATION_MUTATIONS = 512;
 const RECONNECT_DELAYS = [500, 1000, 2000, 4000, 8000] as const;
 const DREAM_AGENT_ACTIVITY_LABELS: Readonly<Record<StoryWorkspaceDreamAgentActivityCategory, StoryWorkspaceDreamAgentActivityContent['label']>> = {
   workspace_read: '读取工作区资料',
@@ -71,6 +73,14 @@ type StoryWorkspaceDreamAgentWireRecord = Record<string, unknown>;
 
 function storyWorkspaceDreamAgentIsRecord(value: unknown): value is StoryWorkspaceDreamAgentWireRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function storyWorkspaceDreamAgentHasOnlyKeys(
+  value: StoryWorkspaceDreamAgentWireRecord,
+  allowed: readonly string[],
+): boolean {
+  const allowedKeys = new Set(allowed);
+  return Object.keys(value).every((key) => allowedKeys.has(key));
 }
 
 function storyWorkspaceDreamAgentString(value: unknown, field: string, maximum = 255): string {
@@ -172,6 +182,10 @@ export function storyWorkspaceParseDreamAgentSnapshot(
   if (!Array.isArray(value.pendingToolConfirmations)) {
     throw new Error('Dream Agent response has invalid pendingToolConfirmations.');
   }
+  if (value.toolConfirmationObservation !== 'known'
+    && value.toolConfirmationObservation !== 'unknown') {
+    throw new Error('Dream Agent response has invalid toolConfirmationObservation.');
+  }
   const pendingToolConfirmations: StoryWorkspaceDreamAgentToolConfirmation[] = [];
   const seenToolCallIds = new Set<string>();
   for (const candidate of value.pendingToolConfirmations) {
@@ -191,6 +205,7 @@ export function storyWorkspaceParseDreamAgentSnapshot(
     sendBlockReason: block as StoryWorkspaceDreamAgentMessageSnapshot['sendBlockReason'],
     messages,
     pendingToolConfirmations,
+    toolConfirmationObservation: value.toolConfirmationObservation,
     snapshotAt: storyWorkspaceDreamAgentDate(value.snapshotAt, 'snapshotAt'),
   };
 }
@@ -400,6 +415,7 @@ export interface StoryWorkspaceDreamAgentReducedState {
   readonly streamContent: readonly StoryWorkspaceDreamAgentContent[];
   readonly streamTurnId: string | null;
   readonly pendingToolConfirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
+  readonly resolvedToolConfirmationKeys: readonly string[];
   readonly seenCursors: readonly string[];
   readonly shouldReconcile: boolean;
 }
@@ -413,6 +429,68 @@ interface StoryWorkspaceDreamAgentVersionedConfirmationMutation {
   readonly mutation: StoryWorkspaceDreamAgentConfirmationMutation;
 }
 
+function storyWorkspaceBoundDreamAgentConfirmationTombstones(
+  tombstones: readonly string[],
+): readonly string[] {
+  return [...new Set(tombstones)].slice(-MAX_DREAM_AGENT_CONFIRMATION_TOMBSTONES);
+}
+
+function storyWorkspaceRememberDreamAgentConfirmationTombstone(
+  tombstones: Set<string>,
+  key: string,
+): void {
+  tombstones.delete(key);
+  tombstones.add(key);
+  while (tombstones.size > MAX_DREAM_AGENT_CONFIRMATION_TOMBSTONES) {
+    const oldest = tombstones.values().next().value as string | undefined;
+    if (oldest === undefined) break;
+    tombstones.delete(oldest);
+  }
+}
+
+function storyWorkspaceAppendDreamAgentConfirmationMutation(
+  journal: readonly StoryWorkspaceDreamAgentVersionedConfirmationMutation[],
+  entry: StoryWorkspaceDreamAgentVersionedConfirmationMutation,
+): StoryWorkspaceDreamAgentVersionedConfirmationMutation[] {
+  return [...journal, entry].slice(-MAX_DREAM_AGENT_CONFIRMATION_MUTATIONS);
+}
+
+function storyWorkspaceDreamAgentConfirmationKey(turnId: string, toolCallId: string): string {
+  return JSON.stringify([turnId, toolCallId]);
+}
+
+function storyWorkspaceDreamAgentConfirmationKeyParts(
+  key: string,
+): readonly [string, string] | null {
+  try {
+    const parsed = JSON.parse(key) as unknown;
+    return Array.isArray(parsed)
+      && parsed.length === 2
+      && typeof parsed[0] === 'string'
+      && typeof parsed[1] === 'string'
+      ? [parsed[0], parsed[1]]
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+/** GC only from a server observation; unknown can never mean a tool settled. */
+export function storyWorkspaceGarbageCollectDreamAgentConfirmationTombstones(
+  tombstones: readonly string[],
+  snapshot: StoryWorkspaceDreamAgentMessageSnapshot,
+): readonly string[] {
+  if (snapshot.toolConfirmationObservation !== 'known') {
+    return storyWorkspaceBoundDreamAgentConfirmationTombstones(tombstones);
+  }
+  if (snapshot.activeTurnId === null) return [];
+  return storyWorkspaceBoundDreamAgentConfirmationTombstones(tombstones.filter((key) => {
+    const parts = storyWorkspaceDreamAgentConfirmationKeyParts(key);
+    return parts !== null
+      && parts[0] === snapshot.activeTurnId;
+  }));
+}
+
 /**
  * Replace the local queue with the REST snapshot, then apply only SSE changes
  * that arrived after that snapshot request began. This keeps REST authoritative
@@ -424,17 +502,30 @@ export function storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
   mutationsAfterRequest: readonly (
     StoryWorkspaceDreamAgentEvent | StoryWorkspaceDreamAgentConfirmationMutation
   )[],
+  resolvedToolConfirmationKeys: readonly string[] = [],
 ): readonly StoryWorkspaceDreamAgentToolConfirmation[] {
   let activeTurnId = snapshot.activeTurnId;
-  let mayAdvanceFromSnapshotTurn = previousActiveTurnId !== null
-    && snapshot.activeTurnId === previousActiveTurnId;
-  let pending = [...snapshot.pendingToolConfirmations];
+  const snapshotReplacedLiveTurn = previousActiveTurnId !== null
+    && snapshot.activeTurnId !== null
+    && snapshot.activeTurnId !== previousActiveTurnId;
+  let mayAdvanceFromSnapshotTurn = !snapshotReplacedLiveTurn;
+  const tombstones = new Set(resolvedToolConfirmationKeys);
+  for (const mutation of mutationsAfterRequest) {
+    if (mutation.type === 'tool_confirmation_resolved') {
+      tombstones.add(storyWorkspaceDreamAgentConfirmationKey(mutation.turnId, mutation.toolCallId));
+    }
+  }
+  let pending = snapshot.pendingToolConfirmations.filter((confirmation) => (
+    activeTurnId === null
+    || !tombstones.has(storyWorkspaceDreamAgentConfirmationKey(activeTurnId, confirmation.toolCallId))
+  ));
 
   for (const mutation of mutationsAfterRequest) {
     if (mutation.type !== 'tool_confirmation_requested'
       && mutation.type !== 'tool_confirmation_resolved') continue;
     if (mutation.turnId !== activeTurnId) {
       if (!mayAdvanceFromSnapshotTurn || mutation.type !== 'tool_confirmation_requested') continue;
+      if (snapshot.activeTurnId === null && mutation.turnId === previousActiveTurnId) continue;
       activeTurnId = mutation.turnId;
       pending = [];
       mayAdvanceFromSnapshotTurn = false;
@@ -443,6 +534,10 @@ export function storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
       pending = pending.filter((item) => item.toolCallId !== mutation.toolCallId);
       continue;
     }
+    if (tombstones.has(storyWorkspaceDreamAgentConfirmationKey(
+      mutation.turnId,
+      mutation.confirmation.toolCallId,
+    ))) continue;
     if (!pending.some((item) => item.toolCallId === mutation.confirmation.toolCallId)) {
       pending.push(mutation.confirmation);
     }
@@ -492,8 +587,8 @@ export function storyWorkspaceComputeDreamAgentUnreadCount(
 
 /** Pure event seam: replay identities de-duplicate transient text, while terminal frames require a DB snapshot. */
 export function storyWorkspaceReduceDreamAgentEvents(
-  state: Omit<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations' | 'streamContent'>
-    & Partial<Pick<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations' | 'streamContent'>>,
+  state: Omit<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations' | 'streamContent' | 'resolvedToolConfirmationKeys'>
+    & Partial<Pick<StoryWorkspaceDreamAgentReducedState, 'shouldReconcile' | 'pendingToolConfirmations' | 'streamContent' | 'resolvedToolConfirmationKeys'>>,
   events: readonly StoryWorkspaceDreamAgentEvent[],
 ): StoryWorkspaceDreamAgentReducedState {
   let streamText = state.streamText;
@@ -504,6 +599,7 @@ export function storyWorkspaceReduceDreamAgentEvents(
   ];
   let shouldReconcile = Boolean(state.shouldReconcile);
   const seen = new Set(state.seenCursors);
+  const resolvedToolConfirmationKeys = new Set(state.resolvedToolConfirmationKeys ?? []);
   for (const event of events) {
     if (event.type === 'assistant_text_delta') {
       if (seen.has(event.cursor)) continue;
@@ -523,8 +619,15 @@ export function storyWorkspaceReduceDreamAgentEvents(
     if (event.type === 'tool_confirmation_requested') {
       if (seen.has(event.cursor)) continue;
       seen.add(event.cursor);
+      const previousConfirmationTurnId = streamTurnId ?? state.snapshot.activeTurnId;
+      if (previousConfirmationTurnId !== null && previousConfirmationTurnId !== event.turnId) {
+        pendingToolConfirmations = [];
+      }
       streamTurnId = event.turnId;
-      if (!pendingToolConfirmations.some((item) => item.toolCallId === event.confirmation.toolCallId)) {
+      if (!resolvedToolConfirmationKeys.has(storyWorkspaceDreamAgentConfirmationKey(
+        event.turnId,
+        event.confirmation.toolCallId,
+      )) && !pendingToolConfirmations.some((item) => item.toolCallId === event.confirmation.toolCallId)) {
         pendingToolConfirmations.push(event.confirmation);
       }
       continue;
@@ -532,7 +635,14 @@ export function storyWorkspaceReduceDreamAgentEvents(
     if (event.type === 'tool_confirmation_resolved') {
       if (seen.has(event.cursor)) continue;
       seen.add(event.cursor);
-      pendingToolConfirmations = pendingToolConfirmations.filter((item) => item.toolCallId !== event.toolCallId);
+      storyWorkspaceRememberDreamAgentConfirmationTombstone(
+        resolvedToolConfirmationKeys,
+        storyWorkspaceDreamAgentConfirmationKey(event.turnId, event.toolCallId),
+      );
+      const confirmationTurnId = streamTurnId ?? state.snapshot.activeTurnId;
+      if (confirmationTurnId === null || confirmationTurnId === event.turnId) {
+        pendingToolConfirmations = pendingToolConfirmations.filter((item) => item.toolCallId !== event.toolCallId);
+      }
       continue;
     }
     if (event.type === 'assistant_message_committed' || event.lifecycle === 'idle') {
@@ -543,27 +653,42 @@ export function storyWorkspaceReduceDreamAgentEvents(
       shouldReconcile = true;
     }
   }
-  return { snapshot: state.snapshot, streamText, streamContent, streamTurnId, pendingToolConfirmations, seenCursors: [...seen], shouldReconcile };
+  return {
+    snapshot: state.snapshot,
+    streamText,
+    streamContent,
+    streamTurnId,
+    pendingToolConfirmations,
+    resolvedToolConfirmationKeys: [...resolvedToolConfirmationKeys],
+    seenCursors: [...seen],
+    shouldReconcile,
+  };
 }
 
 function storyWorkspaceParseDreamAgentToolQuestion(value: unknown): StoryWorkspaceDreamAgentToolConfirmationQuestion | null {
-  if (!storyWorkspaceDreamAgentIsRecord(value)) return null;
+  if (!storyWorkspaceDreamAgentIsRecord(value)
+    || !storyWorkspaceDreamAgentHasOnlyKeys(value, [
+      'id', 'question', 'type', 'required', 'multiSelect', 'options', 'placeholder',
+    ])) return null;
   const allowedTypes = ['text', 'textarea', 'select', 'checkbox', 'radio', 'number'] as const;
-  if (typeof value.id !== 'string' || !value.id || value.id.length > 128
+  if (typeof value.id !== 'string' || !/^q[0-9]+$/.test(value.id) || value.id.length > 128
     || typeof value.question !== 'string' || !value.question || value.question.length > 300
     || !allowedTypes.includes(value.type as typeof allowedTypes[number])
-    || typeof value.required !== 'boolean') return null;
+    || typeof value.required !== 'boolean'
+    || (value.multiSelect !== undefined && value.multiSelect !== null && typeof value.multiSelect !== 'boolean')
+    || (value.placeholder !== undefined && value.placeholder !== null
+      && (typeof value.placeholder !== 'string' || value.placeholder.length > 160))) return null;
   const options = Array.isArray(value.options) ? value.options.map((option) => {
     if (!storyWorkspaceDreamAgentIsRecord(option)
+      || !storyWorkspaceDreamAgentHasOnlyKeys(option, ['label', 'value'])
       || typeof option.label !== 'string' || !option.label || option.label.length > 120
-      || typeof option.value !== 'string' || !option.value || option.value.length > 120
-      || (option.description !== undefined && (typeof option.description !== 'string' || option.description.length > 300))) return null;
+      || typeof option.value !== 'string' || !option.value || option.value.length > 120) return null;
     return {
       label: option.label,
       value: option.value,
-      ...(typeof option.description === 'string' ? { description: option.description } : {}),
     };
   }) : undefined;
+  if (value.options !== undefined && value.options !== null && !Array.isArray(value.options)) return null;
   if (options?.some((option) => option === null) || (options?.length ?? 0) > 12) return null;
   return {
     id: value.id,
@@ -572,34 +697,44 @@ function storyWorkspaceParseDreamAgentToolQuestion(value: unknown): StoryWorkspa
     required: value.required,
     ...(typeof value.multiSelect === 'boolean' ? { multiSelect: value.multiSelect } : {}),
     ...(options ? { options: options as NonNullable<StoryWorkspaceDreamAgentToolConfirmationQuestion['options']> } : {}),
-    ...(typeof value.placeholder === 'string' && value.placeholder.length <= 160 ? { placeholder: value.placeholder } : {}),
+    ...(typeof value.placeholder === 'string' ? { placeholder: value.placeholder } : {}),
   };
 }
 
 function storyWorkspaceParseDreamAgentToolConfirmation(value: unknown): StoryWorkspaceDreamAgentToolConfirmation | null {
   if (!storyWorkspaceDreamAgentIsRecord(value)
-    || typeof value.toolCallId !== 'string' || !value.toolCallId || value.toolCallId.length > 255
+    || !storyWorkspaceDreamAgentHasOnlyKeys(value, [
+      'toolCallId', 'kind', 'toolName', 'questions', 'network',
+    ])
+    || typeof value.toolCallId !== 'string' || !/^[A-Za-z0-9._:/-]+$/.test(value.toolCallId) || value.toolCallId.length > 255
     || (value.kind !== 'approval' && value.kind !== 'ask_user' && value.kind !== 'sandbox_network')
-    || typeof value.toolName !== 'string' || !value.toolName || value.toolName.length > 160) return null;
+    || typeof value.toolName !== 'string' || !/^[A-Za-z0-9 .:-]+$/.test(value.toolName)
+    || value.toolName.length > 80) return null;
   const questions = Array.isArray(value.questions)
     ? value.questions.map(storyWorkspaceParseDreamAgentToolQuestion)
     : undefined;
+  if (value.questions !== undefined && value.questions !== null && !Array.isArray(value.questions)) return null;
   if (questions?.some((question) => question === null) || (questions?.length ?? 0) > 8) return null;
   let network: StoryWorkspaceDreamAgentToolConfirmation['network'];
-  if (value.network !== undefined) {
+  if (value.network !== undefined && value.network !== null) {
     if (!storyWorkspaceDreamAgentIsRecord(value.network)
-      || (value.network.host !== null && (typeof value.network.host !== 'string' || value.network.host.length > 255))
+      || !storyWorkspaceDreamAgentHasOnlyKeys(value.network, ['host', 'policy'])
+      || (value.network.host !== null && (typeof value.network.host !== 'string'
+        || value.network.host.length > 253
+        || !/^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[A-Fa-f0-9:]+)(?::[0-9]{1,5})?$/.test(value.network.host)))
       || !['allowlist', 'open', 'deny', 'unknown'].includes(String(value.network.policy))) return null;
     network = {
       host: value.network.host as string | null,
       policy: value.network.policy as 'allowlist' | 'open' | 'deny' | 'unknown',
     };
   }
+  if (value.kind === 'ask_user' && (!questions?.length || network !== undefined)) return null;
+  if (value.kind === 'sandbox_network' && (!network || questions !== undefined)) return null;
+  if (value.kind === 'approval' && (questions !== undefined || network !== undefined)) return null;
   return {
     toolCallId: value.toolCallId,
     kind: value.kind,
     toolName: value.toolName,
-    ...(typeof value.title === 'string' && value.title.length <= 300 ? { title: value.title } : {}),
     ...(questions ? { questions: questions as NonNullable<StoryWorkspaceDreamAgentToolConfirmation['questions']> } : {}),
     ...(network ? { network } : {}),
   };
@@ -704,6 +839,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const activeTurnIdRef = useRef<string | null>(null);
   const confirmationMutationRevisionRef = useRef(0);
   const confirmationMutationsRef = useRef<StoryWorkspaceDreamAgentVersionedConfirmationMutation[]>([]);
+  const resolvedToolConfirmationKeysRef = useRef<Set<string>>(new Set());
   const refresh = useCallback(() => setReload((value) => value + 1), []);
 
   useEffect(() => {
@@ -712,11 +848,13 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       activeTurnIdRef.current = null;
       confirmationMutationRevisionRef.current = 0;
       confirmationMutationsRef.current = [];
+      resolvedToolConfirmationKeysRef.current.clear();
       return undefined;
     }
     activeTurnIdRef.current = null;
     confirmationMutationRevisionRef.current = 0;
     confirmationMutationsRef.current = [];
+    resolvedToolConfirmationKeysRef.current.clear();
     let active = true;
     let streamController: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -745,21 +883,35 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         setStreamContent([]);
         setStreamTurnId(null);
       }
-      const concurrentNextTurn = !snapshotReplacedTurn
-        ? mutationsAfterRequest.find((mutation) => (
+      const concurrentNextTurn = !(
+        previousActiveTurnId !== null
+        && next.activeTurnId !== null
+        && next.activeTurnId !== previousActiveTurnId
+      ) ? mutationsAfterRequest.find((mutation) => (
           mutation.type === 'tool_confirmation_requested'
           && mutation.turnId !== next.activeTurnId
-        ))?.turnId ?? null
-        : null;
+          && !(next.activeTurnId === null && mutation.turnId === previousActiveTurnId)
+        ))?.turnId ?? null : null;
       latestTurnId = concurrentNextTurn ?? next.activeTurnId;
       activeTurnIdRef.current = latestTurnId;
       latestSnapshot = next;
       setSnapshot(next);
+      const tombstonesBeforeObservation = [
+        ...resolvedToolConfirmationKeysRef.current,
+      ];
       setPendingToolConfirmations(storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
         next,
         previousActiveTurnId,
         mutationsAfterRequest,
+        tombstonesBeforeObservation,
       ));
+      resolvedToolConfirmationKeysRef.current = new Set(
+        storyWorkspaceGarbageCollectDreamAgentConfirmationTombstones(
+          tombstonesBeforeObservation,
+          next,
+        ),
+      );
+      confirmationMutationsRef.current = [];
       setError(null);
       return next;
     };
@@ -848,16 +1000,30 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       if (parsed.type === 'tool_confirmation_requested') {
         if (seenCursors.has(parsed.cursor)) return;
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor;
-        const replacedTurn = latestTurnId !== null && latestTurnId !== parsed.turnId;
-        latestTurnId = parsed.turnId;
-        activeTurnIdRef.current = parsed.turnId;
+        const confirmationKey = storyWorkspaceDreamAgentConfirmationKey(
+          parsed.turnId,
+          parsed.confirmation.toolCallId,
+        );
+        const replayWasResolved = resolvedToolConfirmationKeysRef.current.has(confirmationKey);
+        const replacedTurn = !replayWasResolved
+          && latestTurnId !== null
+          && latestTurnId !== parsed.turnId;
+        if (!replayWasResolved) {
+          latestTurnId = parsed.turnId;
+          activeTurnIdRef.current = parsed.turnId;
+        }
         confirmationMutationRevisionRef.current += 1;
-        confirmationMutationsRef.current.push({
-          revision: confirmationMutationRevisionRef.current,
-          mutation: parsed,
-        });
+        confirmationMutationsRef.current = storyWorkspaceAppendDreamAgentConfirmationMutation(
+          confirmationMutationsRef.current,
+          {
+            revision: confirmationMutationRevisionRef.current,
+            mutation: parsed,
+          },
+        );
         setPendingToolConfirmations((current) => (
-          !replacedTurn && current.some((item) => item.toolCallId === parsed.confirmation.toolCallId)
+          replayWasResolved
+            ? current
+            : !replacedTurn && current.some((item) => item.toolCallId === parsed.confirmation.toolCallId)
             ? current
             : [...(replacedTurn ? [] : current), parsed.confirmation]
         ));
@@ -865,14 +1031,27 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       }
       if (parsed.type === 'tool_confirmation_resolved') {
         if (seenCursors.has(parsed.cursor)) return;
-        seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
-        activeTurnIdRef.current = parsed.turnId;
+        seenCursors.add(parsed.cursor); latestCursor = parsed.cursor;
+        const resolvesCurrentTurn = latestTurnId === null || latestTurnId === parsed.turnId;
+        if (resolvesCurrentTurn) {
+          latestTurnId = parsed.turnId;
+          activeTurnIdRef.current = parsed.turnId;
+        }
         confirmationMutationRevisionRef.current += 1;
-        confirmationMutationsRef.current.push({
-          revision: confirmationMutationRevisionRef.current,
-          mutation: parsed,
-        });
-        setPendingToolConfirmations((current) => current.filter((item) => item.toolCallId !== parsed.toolCallId));
+        confirmationMutationsRef.current = storyWorkspaceAppendDreamAgentConfirmationMutation(
+          confirmationMutationsRef.current,
+          {
+            revision: confirmationMutationRevisionRef.current,
+            mutation: parsed,
+          },
+        );
+        storyWorkspaceRememberDreamAgentConfirmationTombstone(
+          resolvedToolConfirmationKeysRef.current,
+          storyWorkspaceDreamAgentConfirmationKey(parsed.turnId, parsed.toolCallId),
+        );
+        if (resolvesCurrentTurn) {
+          setPendingToolConfirmations((current) => current.filter((item) => item.toolCallId !== parsed.toolCallId));
+        }
         return;
       }
       if (parsed.type === 'assistant_message_committed'
@@ -963,14 +1142,24 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       });
       if (activeTurnIdRef.current) {
         confirmationMutationRevisionRef.current += 1;
-        confirmationMutationsRef.current.push({
-          revision: confirmationMutationRevisionRef.current,
-          mutation: {
-            type: 'tool_confirmation_resolved',
-            turnId: activeTurnIdRef.current,
-            toolCallId: pendingToolConfirmation.toolCallId,
+        confirmationMutationsRef.current = storyWorkspaceAppendDreamAgentConfirmationMutation(
+          confirmationMutationsRef.current,
+          {
+            revision: confirmationMutationRevisionRef.current,
+            mutation: {
+              type: 'tool_confirmation_resolved',
+              turnId: activeTurnIdRef.current,
+              toolCallId: pendingToolConfirmation.toolCallId,
+            },
           },
-        });
+        );
+        storyWorkspaceRememberDreamAgentConfirmationTombstone(
+          resolvedToolConfirmationKeysRef.current,
+          storyWorkspaceDreamAgentConfirmationKey(
+            activeTurnIdRef.current,
+            pendingToolConfirmation.toolCallId,
+          ),
+        );
       }
       setPendingToolConfirmations((current) => current.filter(
         (item) => item.toolCallId !== pendingToolConfirmation.toolCallId,

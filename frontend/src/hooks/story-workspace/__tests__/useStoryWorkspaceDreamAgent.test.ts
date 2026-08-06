@@ -32,6 +32,7 @@ const SNAPSHOT = {
   sendBlockReason: 'continuing',
   messages: [{ id: 'm1', role: 'assistant', text: '已保存的人物。', truncated: false, createdAt: '2026-08-05T00:00:00Z' }],
   pendingToolConfirmations: [],
+  toolConfirmationObservation: 'known',
   snapshotAt: '2026-08-05T00:00:01Z',
 };
 

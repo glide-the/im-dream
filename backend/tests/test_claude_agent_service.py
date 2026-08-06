@@ -43,7 +43,12 @@ import tests._sdk_stubs  # noqa: F401 — stub claude_agent_sdk before service i
 
 import claude_agent.service as service_module
 import claude_agent.workspace_context as workspace_context_module
-from claude_agent.service import ClaudeAgentRunRequest, ClaudeAgentService, _TurnContext
+from claude_agent.service import (
+    ClaudeAgentRunRequest,
+    ClaudeAgentService,
+    _TurnContext,
+    _trusted_story_workspace_episode_action,
+)
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
 from libs.claude_agent_kit.types import AgentRunResult, ToolEventPayload
@@ -153,6 +158,329 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             ],
             request.message_id,
         )
+
+    async def test_only_server_owned_episode_action_reaches_private_context_builder(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
+        state = AgentRunState(session_id="thread_dream_turn")
+        context = self._dream_context()
+        provenance = {
+            "schema": "story-workspace-episode-action/v1",
+            "action": "write_script",
+            "episode_uid": "a" * 32,
+            "input_revision": "sha256:" + "b" * 64,
+            "expected_facts_revision": 0,
+            "expected_manifest_revision": "sha256:" + "c" * 64,
+            "expected_workflow_revision": "sha256:" + "d" * 64,
+        }
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id="thread_dream_turn",
+            message_id="dream_agent_" + "a" * 64,
+            message_parts=[{"type": "text", "text": "继续剧本"}],
+            message_metadata={
+                "kind": "story-workspace-dream-agent-user",
+                "story_workspace_run_id": context.workflow_run_id,
+                "thread_id": context.thread_id,
+                "actor_id": "7",
+                "dispatch_status": "dispatching",
+                "dispatch_claim_id": "claim-workflow-guidance",
+                "dispatch_claim_lease_until": 9_999_999_999.0,
+                "story_workspace_episode_action": provenance,
+            },
+            story_workspace_dream_context=context,
+        )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            workspace_path = Path(tmp_dir) / "thread_dream_turn"
+            workspace_path.mkdir()
+            with (
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_system_config",
+                    return_value={"workspace_enabled": True},
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "get_chat_thread",
+                    return_value={"deck_id": "deck-dream"},
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "get_or_create_workspace",
+                    return_value=workspace_path,
+                ),
+                unittest.mock.patch.object(
+                    service_module,
+                    "_pack_thread_workspace_plugins",
+                ),
+                unittest.mock.patch.object(
+                    service_module._db,
+                    "list_chat_messages",
+                    return_value=[{
+                        "id": request.message_id,
+                        "role": "user",
+                        "parts": request.message_parts,
+                        "metadata": request.message_metadata,
+                    }],
+                ),
+            ):
+                await service.assemble_context(
+                    request,
+                    state=state,
+                    bus=_FakeBus(),
+                    runner=unittest.mock.Mock(),
+                )
+
+        self.assertEqual(
+            builder.user_message_calls[0]["story_workspace_episode_action"],
+            provenance,
+        )
+
+    async def test_plain_or_mismatched_metadata_does_not_reach_private_builder(self):
+        builder = _FakeContextBuilder()
+        service = ClaudeAgentService(context_builder=builder)
+        context = self._dream_context()
+        cases = [
+            None,
+            {
+                "kind": "story-workspace-dream-agent-user",
+                "story_workspace_run_id": "run_" + "9" * 32,
+                "thread_id": context.thread_id,
+                "actor_id": "7",
+                "story_workspace_episode_action": {
+                    "schema": "story-workspace-episode-action/v1",
+                    "action": "write_script",
+                },
+            },
+        ]
+
+        for index, metadata in enumerate(cases):
+            state = AgentRunState(session_id="thread_dream_turn")
+            request = ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id="thread_dream_turn",
+                message_id="dream_agent_" + str(index) * 64,
+                message_parts=[{"type": "text", "text": "普通留言"}],
+                message_metadata=metadata,
+                story_workspace_dream_context=context,
+            )
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                workspace_path = Path(tmp_dir) / "thread_dream_turn"
+                workspace_path.mkdir()
+                with (
+                    unittest.mock.patch.object(
+                        service_module._db,
+                        "get_system_config",
+                        return_value={"workspace_enabled": True},
+                    ),
+                    unittest.mock.patch.object(
+                        service_module._db,
+                        "get_chat_thread",
+                        return_value={"deck_id": "deck-dream"},
+                    ),
+                    unittest.mock.patch.object(
+                        service_module,
+                        "get_or_create_workspace",
+                        return_value=workspace_path,
+                    ),
+                    unittest.mock.patch.object(
+                        service_module,
+                        "_pack_thread_workspace_plugins",
+                    ),
+                ):
+                    await service.assemble_context(
+                        request,
+                        state=state,
+                        bus=_FakeBus(),
+                        runner=unittest.mock.Mock(),
+                    )
+
+        self.assertEqual(
+            [
+                call["story_workspace_episode_action"]
+                for call in builder.user_message_calls
+            ],
+            [None, None],
+        )
+
+    def test_episode_action_private_context_requires_exact_persisted_claim(self):
+        context = self._dream_context()
+        provenance = {
+            "schema": "story-workspace-episode-action/v1",
+            "action": "write_script",
+            "episode_uid": "a" * 32,
+            "input_revision": "sha256:" + "b" * 64,
+            "expected_facts_revision": 0,
+            "expected_manifest_revision": "sha256:" + "c" * 64,
+            "expected_workflow_revision": "sha256:" + "d" * 64,
+        }
+        metadata = {
+            "kind": "story-workspace-dream-agent-user",
+            "story_workspace_run_id": context.workflow_run_id,
+            "thread_id": context.thread_id,
+            "actor_id": "7",
+            "dispatch_status": "dispatching",
+            "dispatch_claim_id": "claim-workflow-guidance",
+            "dispatch_claim_lease_until": 9_999_999_999.0,
+            "story_workspace_episode_action": provenance,
+        }
+        request = ClaudeAgentRunRequest(
+            user_id="7",
+            thread_id=context.thread_id,
+            message_id="dream_agent_" + "a" * 64,
+            message_metadata=metadata,
+            story_workspace_dream_context=context,
+        )
+        persisted = [{
+            "id": request.message_id,
+            "role": "user",
+            "parts": [],
+            "metadata": metadata,
+        }]
+
+        with unittest.mock.patch.object(
+            service_module._db,
+            "list_chat_messages",
+            return_value=persisted,
+        ):
+            self.assertEqual(
+                _trusted_story_workspace_episode_action(request),
+                provenance,
+            )
+
+    def test_forged_non_persisted_expired_or_mutated_claim_has_no_private_context(self):
+        context = self._dream_context()
+        provenance = {
+            "schema": "story-workspace-episode-action/v1",
+            "action": "write_script",
+            "episode_uid": "a" * 32,
+            "input_revision": "sha256:" + "b" * 64,
+            "expected_facts_revision": 0,
+            "expected_manifest_revision": "sha256:" + "c" * 64,
+            "expected_workflow_revision": "sha256:" + "d" * 64,
+        }
+        metadata = {
+            "kind": "story-workspace-dream-agent-user",
+            "story_workspace_run_id": context.workflow_run_id,
+            "thread_id": context.thread_id,
+            "actor_id": "7",
+            "dispatch_status": "dispatching",
+            "dispatch_claim_id": "claim-workflow-guidance",
+            "dispatch_claim_lease_until": 9_999_999_999.0,
+            "story_workspace_episode_action": provenance,
+        }
+        valid_id = "dream_agent_" + "a" * 64
+
+        def request_with(**changes: object) -> ClaudeAgentRunRequest:
+            values = {
+                "user_id": "7",
+                "thread_id": context.thread_id,
+                "message_id": valid_id,
+                "message_metadata": metadata,
+                "story_workspace_dream_context": context,
+            }
+            values.update(changes)
+            return ClaudeAgentRunRequest(**values)
+
+        persisted = {
+            "id": valid_id,
+            "role": "user",
+            "parts": [],
+            "metadata": metadata,
+        }
+        cases = [
+            (request_with(message_id="dream_agent_not-hex"), [persisted]),
+            (request_with(), []),
+            (
+                request_with(),
+                [{**persisted, "role": "assistant"}],
+            ),
+            (
+                request_with(),
+                [{
+                    **persisted,
+                    "metadata": {
+                        **metadata,
+                        "dispatch_claim_lease_until": 1.0,
+                    },
+                }],
+            ),
+            (
+                request_with(),
+                [{
+                    **persisted,
+                    "metadata": {
+                        **metadata,
+                        "dispatch_claim_id": "claim-other",
+                    },
+                }],
+            ),
+            (
+                request_with(),
+                [{
+                    **persisted,
+                    "metadata": {
+                        **metadata,
+                        "story_workspace_episode_action": {
+                            **provenance,
+                            "expected_facts_revision": 1,
+                        },
+                    },
+                }],
+            ),
+        ]
+        provenance_mutations = {
+            "schema": "story-workspace-episode-action/v0",
+            "action": "review_script",
+            "episode_uid": "b" * 32,
+            "input_revision": "sha256:" + "e" * 64,
+            "expected_facts_revision": 1,
+            "expected_manifest_revision": "sha256:" + "e" * 64,
+            "expected_workflow_revision": "sha256:" + "f" * 64,
+        }
+        for field, replacement in provenance_mutations.items():
+            cases.append((
+                request_with(),
+                [{
+                    **persisted,
+                    "metadata": {
+                        **metadata,
+                        "story_workspace_episode_action": {
+                            **provenance,
+                            field: replacement,
+                        },
+                    },
+                }],
+            ))
+        metadata_mutations = {
+            "story_workspace_run_id": "run_" + "9" * 32,
+            "thread_id": "thread-other",
+            "actor_id": "8",
+            "dispatch_status": "dispatched",
+        }
+        for field, replacement in metadata_mutations.items():
+            cases.append((
+                request_with(),
+                [{
+                    **persisted,
+                    "metadata": {
+                        **metadata,
+                        field: replacement,
+                    },
+                }],
+            ))
+
+        for request, rows in cases:
+            with self.subTest(message_id=request.message_id, rows=rows):
+                with unittest.mock.patch.object(
+                    service_module._db,
+                    "list_chat_messages",
+                    return_value=rows,
+                ):
+                    self.assertIsNone(
+                        _trusted_story_workspace_episode_action(request)
+                    )
 
     async def test_dream_turn_skips_legacy_standalone_proposal_persistence(self):
         service = ClaudeAgentService(context_builder=_FakeContextBuilder())

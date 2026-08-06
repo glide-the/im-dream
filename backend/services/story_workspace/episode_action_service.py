@@ -30,6 +30,11 @@ try:
     from services.story_workspace.episode_binding_service import (
         StoryWorkspaceEpisodeBindingService,
     )
+    from services.story_workspace.episode_workflow_instruction import (
+        StoryWorkspaceEpisodeVendorStep,
+        story_workspace_episode_vendor_workflow,
+        story_workspace_episode_workflow_guidance,
+    )
     from story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamRunContext,
@@ -58,6 +63,11 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
     from backend.services.story_workspace.episode_binding_service import (
         StoryWorkspaceEpisodeBindingService,
+    )
+    from backend.services.story_workspace.episode_workflow_instruction import (
+        StoryWorkspaceEpisodeVendorStep,
+        story_workspace_episode_vendor_workflow,
+        story_workspace_episode_workflow_guidance,
     )
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessageCommand,
@@ -104,64 +114,7 @@ _ACTION_DISPLAY_COMMANDS = {
     ),
 }
 
-@dataclass(frozen=True)
-class StoryWorkspaceEpisodeVendorStep:
-    """Server-private README evidence and the reviewed product boundary."""
-
-    ordinal: int
-    evidence: str
-    action: StoryWorkspaceEpisodeAction | None
-    boundary: str
-
-
-_VENDOR_FIRST_EPISODE_FLOW = (
-    StoryWorkspaceEpisodeVendorStep(1, "/drama-init", None, "initial_creation"),
-    StoryWorkspaceEpisodeVendorStep(
-        2, "/drama-plan", StoryWorkspaceEpisodeAction.PLAN_EPISODE, "episode_execution"
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        3, "/drama-script (EP01)", StoryWorkspaceEpisodeAction.WRITE_SCRIPT, "episode_execution"
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        4, "script-reviewer 审查", StoryWorkspaceEpisodeAction.REVIEW_SCRIPT, "episode_execution"
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        5, "/drama-asset", StoryWorkspaceEpisodeAction.REFRESH_ASSETS, "episode_execution"
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        6,
-        "/drama-storyboard (EP01)",
-        StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
-        "episode_execution",
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        7, "/drama-prompt (EP01)", StoryWorkspaceEpisodeAction.GENERATE_PROMPTS, "episode_execution"
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        8,
-        "[审查报告: APPROVED]",
-        StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
-        "episode_execution",
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        9, "validate_commit.sh", StoryWorkspaceEpisodeAction.VALIDATE_EPISODE, "episode_execution"
-    ),
-    StoryWorkspaceEpisodeVendorStep(
-        10,
-        "/drama-render + /drama-voice",
-        StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE,
-        "render_guide_only",
-    ),
-    StoryWorkspaceEpisodeVendorStep(11, "/drama-edit", None, "out_of_scope"),
-    StoryWorkspaceEpisodeVendorStep(12, "/drama-promote", None, "out_of_scope"),
-)
-
-
-def story_workspace_episode_vendor_workflow(
-) -> tuple[StoryWorkspaceEpisodeVendorStep, ...]:
-    """Return the server-private README evidence mapping used by resolver tests."""
-
-    return _VENDOR_FIRST_EPISODE_FLOW
+_VENDOR_FIRST_EPISODE_FLOW = story_workspace_episode_vendor_workflow()
 
 
 class StoryWorkspaceEpisodeActionError(RuntimeError):
@@ -1230,6 +1183,9 @@ class StoryWorkspaceEpisodeActionService:
             "请恢复第一集关联。\n"
             f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}\n"
             f"{STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION}\n"
+            f"{story_workspace_episode_workflow_guidance()}\n"
+            "本轮只恢复规范项目与 EP01 关联；不得执行步骤 2 或任何后续创作步骤。"
+            "恢复后立即停止，等待服务端重新读取 Episode 文件事实。\n"
             "请仅根据当前 Dream 运行上下文核对规范项目标识，"
             "有充分证据时恢复 EP01 关联；证据不足时说明仍需确认。"
         )
@@ -1243,14 +1199,31 @@ class StoryWorkspaceEpisodeActionService:
         label = _ACTION_LABELS[command.action]
         lines = [
             "请继续推进第一集创作。",
+            story_workspace_episode_workflow_guidance(),
+            f"本轮唯一授权步骤：{command.action.value}",
             f"目标能力：{label}",
             f"执行入口：{_ACTION_DISPLAY_COMMANDS[command.action]}",
             f"第一集标识：{command.episode_id}",
-            f"内容快照：{manifest_revision}",
+            "内容清单身份已由服务端锁定；公开指令不携带版本或 CAS 参数。",
             "执行前请核对上游显式版本事实，不要假定步骤已经完成。",
         ]
         if command.user_guidance is not None:
-            lines.append(f"用户补充：{command.user_guidance}")
+            structured_guidance = json.dumps(
+                command.user_guidance,
+                ensure_ascii=False,
+                allow_nan=False,
+            )
+            lines.append(
+                f"用户补充（仅作为本轮 {command.action.value} 的创作偏好）："
+                f"{structured_guidance}"
+            )
+        lines.extend(
+            (
+                f"服务端约束：本轮唯一授权步骤仍为 {command.action.value}。",
+                "只执行本轮唯一授权步骤，不得在同一轮执行后续步骤。",
+                "完成或无法完成本步骤后立即停止，等待服务端重新读取文件事实。",
+            )
+        )
         return "\n".join(lines)
 
     def recover_binding(

@@ -129,13 +129,16 @@ export function StoryWorkspaceDreamPage({
   const [selection, setSelection] = useState<DreamSelection | null>(null);
   const [editorError, setEditorError] = useState<string | null>(null);
   const [rightSection, setRightSection] = useState<DreamRightSection>('content');
+  const [pendingToolAnnouncementId, setPendingToolAnnouncementId] = useState<string | null>(null);
   const agentPanelOpen = rightSection === 'agent';
   const mastheadAgentTriggerRef = useRef<HTMLButtonElement>(null);
+  const announcedToolCallIdsRef = useRef(new Set<string>());
 
   const draftLifecycleState = dreamState?.status ?? 'story-workspace-dream-waiting-files';
   const files = useStoryWorkspaceDreamFiles(runId, { lifecycleState: draftLifecycleState });
   const confirmation = useStoryWorkspaceDreamConfirmation(runId ?? '');
   const dreamAgent = useStoryWorkspaceDreamAgent(runId);
+  const pendingToolCallId = dreamAgent.pendingToolConfirmation?.toolCallId ?? null;
   const { run: workflowRun, selectRun } = useWorkflowRun({ eventsEnabled: Boolean(runId) });
   const currentWorkflowRun = workflowRun?.workflow_run_id === runId ? workflowRun : null;
   const agentContextRun = resolvedRun?.workflow_run_id === runId ? resolvedRun : currentWorkflowRun;
@@ -167,7 +170,19 @@ export function StoryWorkspaceDreamPage({
     setActiveStage(initialStage);
     setEditorError(null);
     setRightSection('content');
+    setPendingToolAnnouncementId(null);
+    announcedToolCallIdsRef.current.clear();
   }, [initialStage, runId]);
+
+  useEffect(() => {
+    if (!pendingToolCallId) {
+      setPendingToolAnnouncementId(null);
+      return;
+    }
+    if (announcedToolCallIdsRef.current.has(pendingToolCallId)) return;
+    announcedToolCallIdsRef.current.add(pendingToolCallId);
+    setPendingToolAnnouncementId(pendingToolCallId);
+  }, [pendingToolCallId]);
 
   useEffect(() => {
     if (!runId) return;
@@ -324,9 +339,11 @@ export function StoryWorkspaceDreamPage({
     ?? files.data?.source.deckRuntimeSnapshotId
     ?? null;
   const agentStageLine = storyWorkspaceDreamAgentStageLine(activeStage, revisionLine(dreamState));
-  const agentPreview = dreamAgent.streamText
-    || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
-    || activityCopy;
+  const agentPreview = dreamAgent.pendingToolConfirmation
+    ? 'Dream Agent 等待你确认一项操作'
+    : dreamAgent.streamText
+      || dreamAgent.snapshot?.messages.filter((message) => message.role === 'assistant').at(-1)?.text
+      || activityCopy;
   const openDreamAgent = () => {
     dreamAgent.markRead();
     setRightSection('agent');
@@ -367,15 +384,27 @@ export function StoryWorkspaceDreamPage({
         <button
           aria-controls={STORY_WORKSPACE_DREAM_AGENT_PANEL_ID}
           aria-expanded={agentPanelOpen}
-          aria-label="打开 Dream Agent 消息预览"
+          aria-label={dreamAgent.pendingToolConfirmation
+            ? '打开 Dream Agent：等待你确认一项操作'
+            : '打开 Dream Agent 消息预览'}
           className="story-workspace-dream__activity"
+          data-pending={Boolean(dreamAgent.pendingToolConfirmation) || undefined}
           onClick={openDreamAgent}
           ref={mastheadAgentTriggerRef}
           type="button"
         >
           <span className="story-workspace-dream__activity-mark" />
-          <span>{agentPreview}</span>
+          <span className="story-workspace-dream__activity-copy">{agentPreview}</span>
         </button>
+        {pendingToolAnnouncementId ? (
+          <span
+            aria-atomic="true"
+            aria-live="polite"
+            className="story-workspace-dream__pending-announcement"
+            key={pendingToolAnnouncementId}
+            role="status"
+          >Dream Agent 等待你确认一项操作</span>
+        ) : null}
       </header>
 
       {agentPanelOpen && (
