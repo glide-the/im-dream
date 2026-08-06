@@ -23,6 +23,10 @@ try:
         StoryWorkspaceDreamAgentMessageService,
         StoryWorkspaceDreamAgentPendingDispatch,
     )
+    from services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION,
+    )
     from services.story_workspace.episode_binding_service import (
         StoryWorkspaceEpisodeBindingService,
     )
@@ -33,6 +37,7 @@ try:
         StoryWorkspaceEpisodeActionAccepted,
         StoryWorkspaceEpisodeActionContinueCommand,
         StoryWorkspaceEpisodeActionDiagnostic,
+        StoryWorkspaceEpisodeActionOption,
         StoryWorkspaceEpisodeActionResolution,
         StoryWorkspaceEpisodeArtifactAvailability,
         StoryWorkspaceEpisodeBindingRecoveryCommand,
@@ -47,6 +52,10 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceDreamAgentMessageService,
         StoryWorkspaceDreamAgentPendingDispatch,
     )
+    from backend.services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION,
+    )
     from backend.services.story_workspace.episode_binding_service import (
         StoryWorkspaceEpisodeBindingService,
     )
@@ -57,6 +66,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeActionAccepted,
         StoryWorkspaceEpisodeActionContinueCommand,
         StoryWorkspaceEpisodeActionDiagnostic,
+        StoryWorkspaceEpisodeActionOption,
         StoryWorkspaceEpisodeActionResolution,
         StoryWorkspaceEpisodeArtifactAvailability,
         StoryWorkspaceEpisodeBindingRecoveryCommand,
@@ -79,6 +89,19 @@ _ACTION_LABELS = {
     StoryWorkspaceEpisodeAction.VALIDATE_EPISODE: "校验第一集完整产物",
     StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE: "准备第一集渲染指引",
     StoryWorkspaceEpisodeAction.NONE_IN_SCOPE: "本期工作流已无待推进步骤",
+}
+_ACTION_DISPLAY_COMMANDS = {
+    StoryWorkspaceEpisodeAction.PLAN_EPISODE: "/drama-plan",
+    StoryWorkspaceEpisodeAction.WRITE_SCRIPT: "/drama-script (EP01)",
+    StoryWorkspaceEpisodeAction.REVIEW_SCRIPT: "剧本审查",
+    StoryWorkspaceEpisodeAction.REFRESH_ASSETS: "/drama-asset",
+    StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD: "/drama-storyboard (EP01)",
+    StoryWorkspaceEpisodeAction.GENERATE_PROMPTS: "/drama-prompt (EP01)",
+    StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN: "完整链路审查",
+    StoryWorkspaceEpisodeAction.VALIDATE_EPISODE: "校验完整产物",
+    StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE: (
+        "/drama-render + /drama-voice"
+    ),
 }
 
 @dataclass(frozen=True)
@@ -628,6 +651,33 @@ class StoryWorkspaceEpisodeNextActionResolver:
             == cls.action_input_revision(action, surface, facts)
         )
 
+    @staticmethod
+    def _action_options(
+        resolution: StoryWorkspaceEpisodeActionResolution,
+    ) -> list[StoryWorkspaceEpisodeActionOption]:
+        if resolution.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
+            return []
+        steps = [
+            step
+            for step in _VENDOR_FIRST_EPISODE_FLOW
+            if step.action is not None
+        ]
+        start = next(
+            index
+            for index, step in enumerate(steps)
+            if step.action is resolution.action
+        )
+        return [
+            StoryWorkspaceEpisodeActionOption(
+                action=step.action,
+                label=_ACTION_LABELS[step.action],
+                displayCommand=_ACTION_DISPLAY_COMMANDS[step.action],
+                isCurrent=index == start,
+                canDispatch=index == start and resolution.can_dispatch,
+            )
+            for index, step in enumerate(steps[start:], start=start)
+        ]
+
     @classmethod
     def project(
         cls,
@@ -679,14 +729,16 @@ class StoryWorkspaceEpisodeNextActionResolver:
                 cls._available(artifacts.get(key))
                 for key in ("storyboard.yaml", "prompts/", "renders/")
             )
+            resolution = cls._resolution(
+                invalid_action,
+                StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
+                can_dispatch=False,
+            )
             return StoryWorkspaceEpisodeWorkflowProjection(
                 factsRevision=facts.revision,
-                nextAction=cls._resolution(
-                    invalid_action,
-                    StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
-                    can_dispatch=False,
-                ),
+                nextAction=resolution,
                 prerequisites=order[: order.index(invalid_action)],
+                actionOptions=cls._action_options(resolution),
                 legacyPartial=(
                     later_available
                     and (not cls._available(outline) or not cls._available(script))
@@ -846,6 +898,7 @@ class StoryWorkspaceEpisodeNextActionResolver:
             factsRevision=facts.revision,
             nextAction=resolution,
             prerequisites=order[:next_index],
+            actionOptions=cls._action_options(resolution),
             legacyPartial=legacy_partial,
         )
 
@@ -1174,7 +1227,9 @@ class StoryWorkspaceEpisodeActionService:
     @staticmethod
     def _recover_text() -> str:
         return (
-            "请恢复第一集关联。"
+            "请恢复第一集关联。\n"
+            f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}\n"
+            f"{STORY_WORKSPACE_CANONICAL_PROJECT_RECOVERY_INSTRUCTION}\n"
             "请仅根据当前 Dream 运行上下文核对规范项目标识，"
             "有充分证据时恢复 EP01 关联；证据不足时说明仍需确认。"
         )
@@ -1189,6 +1244,7 @@ class StoryWorkspaceEpisodeActionService:
         lines = [
             "请继续推进第一集创作。",
             f"目标能力：{label}",
+            f"执行入口：{_ACTION_DISPLAY_COMMANDS[command.action]}",
             f"第一集标识：{command.episode_id}",
             f"内容快照：{manifest_revision}",
             "执行前请核对上游显式版本事实，不要假定步骤已经完成。",

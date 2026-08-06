@@ -339,6 +339,182 @@ def test_resolver_follows_readme_order_without_inventing_business_states() -> No
     assert resolution.diagnostic is StoryWorkspaceEpisodeActionDiagnostic.READY
 
 
+def test_workflow_projects_ordered_server_owned_action_options() -> None:
+    resolver = StoryWorkspaceEpisodeNextActionResolver()
+    facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=0,
+        completions=[],
+        updated_at=datetime.now(UTC),
+    )
+
+    initial = resolver.project(_surface(set()), facts).model_dump(
+        mode="json",
+        by_alias=True,
+    )
+    options = initial["actionOptions"]
+    assert [option["action"] for option in options] == [
+        "plan_episode",
+        "write_script",
+        "review_script",
+        "refresh_assets",
+        "regenerate_storyboard",
+        "generate_prompts",
+        "review_full_chain",
+        "validate_episode",
+        "prepare_render_guide",
+    ]
+    assert [option["displayCommand"] for option in options] == [
+        "/drama-plan",
+        "/drama-script (EP01)",
+        "剧本审查",
+        "/drama-asset",
+        "/drama-storyboard (EP01)",
+        "/drama-prompt (EP01)",
+        "完整链路审查",
+        "校验完整产物",
+        "/drama-render + /drama-voice",
+    ]
+    assert options[0]["label"] == "规划第一集"
+    assert options[0]["isCurrent"] is True
+    assert options[0]["canDispatch"] is True
+    assert all(option["isCurrent"] is False for option in options[1:])
+    assert all(option["canDispatch"] is False for option in options[1:])
+    assert "mcp__" not in json.dumps(options)
+    assert "expectedBindingRevision" not in json.dumps(options)
+    assert "script-reviewer" not in json.dumps(options)
+    assert "APPROVED" not in json.dumps(options)
+    assert "validate_commit.sh" not in json.dumps(options)
+
+    after_outline = resolver.project(_surface({"episode-outline.md"}), facts)
+    assert [option.action.value for option in after_outline.action_options] == [
+        "write_script",
+        "review_script",
+        "refresh_assets",
+        "regenerate_storyboard",
+        "generate_prompts",
+        "review_full_chain",
+        "validate_episode",
+        "prepare_render_guide",
+    ]
+    assert after_outline.action_options[0].is_current is True
+    assert after_outline.action_options[0].can_dispatch is True
+
+    invalid_outline = _surface(set())
+    invalid_outline.artifacts[0] = _artifact(
+        "episode-outline.md",
+        StoryWorkspaceEpisodeArtifactAvailability.INVALID,
+        digit="1",
+    )
+    blocked = resolver.project(invalid_outline, facts)
+    assert blocked.action_options[0].is_current is True
+    assert blocked.action_options[0].can_dispatch is False
+    assert all(option.can_dispatch is False for option in blocked.action_options[1:])
+
+
+def test_none_in_scope_projects_no_action_options() -> None:
+    resolver = StoryWorkspaceEpisodeNextActionResolver()
+    surface = _surface(
+        {
+            "episode-outline.md",
+            "script.md",
+            "storyboard.yaml",
+            "prompts/",
+            "renders/",
+            "review-report.md",
+        },
+        review_scope=StoryWorkspaceEpisodeReviewScope.FULL_CHAIN,
+        review_source_revisions=[
+            SimpleNamespace(
+                source_artifact="script.md",
+                source_revision="sha256:" + "2" * 64,
+            ),
+            SimpleNamespace(
+                source_artifact="storyboard.yaml",
+                source_revision="sha256:" + "3" * 64,
+            ),
+        ],
+    )
+    facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=0,
+        completions=[],
+        updated_at=datetime.now(UTC),
+    )
+    for index, action in enumerate(
+        (
+            StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+            StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+            StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+            StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+            StoryWorkspaceEpisodeAction.VALIDATE_EPISODE,
+            StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE,
+        ),
+        start=1,
+    ):
+        completion = StoryWorkspaceEpisodeWorkflowCompletion(
+            action=action,
+            input_revision=resolver.action_input_revision(action, surface, facts),
+            manifest_revision=REVISION,
+            message_id="dream_agent_" + str(index) * 64,
+            recorded_at=datetime.now(UTC),
+        )
+        facts = StoryWorkspaceEpisodeWorkflowFile(
+            workflow_run_id=RUN_ID,
+            episode_uid=EPISODE_ID,
+            revision=index,
+            completions=[*facts.completions, completion],
+            updated_at=datetime.now(UTC),
+        )
+
+    workflow = resolver.project(surface, facts)
+    assert workflow.next_action.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE
+    assert workflow.action_options == []
+
+
+@pytest.mark.parametrize(
+    ("action", "display_command"),
+    (
+        (StoryWorkspaceEpisodeAction.PLAN_EPISODE, "/drama-plan"),
+        (StoryWorkspaceEpisodeAction.WRITE_SCRIPT, "/drama-script (EP01)"),
+        (StoryWorkspaceEpisodeAction.REVIEW_SCRIPT, "剧本审查"),
+        (StoryWorkspaceEpisodeAction.REFRESH_ASSETS, "/drama-asset"),
+        (
+            StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+            "/drama-storyboard (EP01)",
+        ),
+        (StoryWorkspaceEpisodeAction.GENERATE_PROMPTS, "/drama-prompt (EP01)"),
+        (StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN, "完整链路审查"),
+        (StoryWorkspaceEpisodeAction.VALIDATE_EPISODE, "校验完整产物"),
+        (
+            StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE,
+            "/drama-render + /drama-voice",
+        ),
+    ),
+)
+def test_continue_envelope_uses_server_owned_product_entry(
+    action: StoryWorkspaceEpisodeAction,
+    display_command: str,
+) -> None:
+    command = StoryWorkspaceEpisodeActionContinueCommand(
+        episodeId=EPISODE_ID,
+        action=action,
+        idempotencyKey="product-entry",
+    )
+
+    text = StoryWorkspaceEpisodeActionService._continue_text(  # noqa: SLF001
+        command,
+        manifest_revision=REVISION,
+    )
+
+    assert f"执行入口：{display_command}" in text
+    assert "mcp__" not in text
+    assert "workflowRunId" not in text
+    assert "expectedBindingRevision" not in text
+
+
 def test_resolver_marks_ambiguous_or_stale_evidence_needs_confirmation() -> None:
     resolver = StoryWorkspaceEpisodeNextActionResolver()
     surface = _surface({"episode-outline.md", "script.md", "review-report.md"},
@@ -512,7 +688,9 @@ class TestStoryWorkspaceEpisodeActionService:
         assert self.db.execute("SELECT COUNT(*) FROM chat_message").fetchone()[0] == 1
         persisted = self.db.execute("SELECT parts, metadata FROM chat_message").fetchone()
         payload = f"{persisted['parts']} {persisted['metadata']}"
-        assert "/drama-" not in payload
+        assert payload.count("执行入口：/drama-script (EP01)") == 1
+        assert "mcp__" not in payload
+        assert "expectedBindingRevision" not in payload
         assert "保留克制氛围" in payload
         assert "artifact" not in accepted.model_dump_json().lower()
         assert "保留克制氛围" not in accepted.model_dump_json()
@@ -634,6 +812,24 @@ class TestStoryWorkspaceEpisodeActionService:
         assert "story" not in accepted.model_dump_json().lower()
         assert "path" not in accepted.model_dump_json().lower()
         assert "/drama-" not in payload
+
+    def test_recover_requires_canonical_project_initialization_before_binding(self) -> None:
+        text = StoryWorkspaceEpisodeActionService._recover_text()  # noqa: SLF001
+
+        assert "若尚无规范项目" in text
+        assert "先完成 drama-init 的项目初始化语义" in text
+        assert "stories/<project_slug>/project.yaml" in text
+        assert "project_slug 必须与 project_id 完全相同" in text
+        assert "project_name 只用于显示" in text
+        assert "禁止把 project_name 当作目录" in text
+        assert "恰有一个非规范 story 目录" in text
+        assert "唯一合法 ASCII project_id" in text
+        assert "目标 stories/<project_id> 不存在" in text
+        assert "不存在符号链接" in text
+        assert "重同步 storyboards stage" in text
+        assert "不得移动" in text
+        assert "mcp__" not in text
+        assert "expectedBindingRevision" not in text
 
 
 class _RouteGateway:

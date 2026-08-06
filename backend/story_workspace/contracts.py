@@ -877,12 +877,37 @@ class StoryWorkspaceEpisodeActionResolution(_StoryWorkspaceDreamWireModel):
         return self
 
 
+class StoryWorkspaceEpisodeActionOption(_StoryWorkspaceDreamWireModel):
+    """One server-ordered workflow option exposed for navigation only."""
+
+    action: StoryWorkspaceEpisodeAction
+    label: StrictStr = Field(min_length=1, max_length=120)
+    display_command: StrictStr = Field(min_length=1, max_length=120)
+    is_current: StrictBool
+    can_dispatch: StrictBool
+
+    @model_validator(mode="after")
+    def dispatch_requires_current_option(self) -> "StoryWorkspaceEpisodeActionOption":
+        if self.can_dispatch and not self.is_current:
+            raise ValueError("only the current workflow option can be dispatched")
+        if any(
+            marker in self.display_command
+            for marker in ("mcp__", "workflowRunId", "expectedBindingRevision")
+        ):
+            raise ValueError("display_command must not expose internal tool details")
+        return self
+
+
 class StoryWorkspaceEpisodeWorkflowProjection(_StoryWorkspaceDreamWireModel):
     """Derived workflow navigation plus the revision of technical facts."""
 
     facts_revision: _StoryWorkspaceDreamNonNegativeInt
     next_action: StoryWorkspaceEpisodeActionResolution
     prerequisites: list[StoryWorkspaceEpisodeAction] = Field(
+        default_factory=list,
+        max_length=9,
+    )
+    action_options: list[StoryWorkspaceEpisodeActionOption] = Field(
         default_factory=list,
         max_length=9,
     )
@@ -899,6 +924,30 @@ class StoryWorkspaceEpisodeWorkflowProjection(_StoryWorkspaceDreamWireModel):
         if StoryWorkspaceEpisodeAction.NONE_IN_SCOPE in values:
             raise ValueError("none_in_scope is not a prerequisite")
         return values
+
+    @model_validator(mode="after")
+    def action_options_match_next_action(
+        self,
+    ) -> "StoryWorkspaceEpisodeWorkflowProjection":
+        if self.next_action.action is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE:
+            if self.action_options:
+                raise ValueError("none_in_scope cannot expose workflow options")
+            return self
+        if not self.action_options:
+            raise ValueError("an active workflow requires ordered action options")
+        current = self.action_options[0]
+        if (
+            current.action is not self.next_action.action
+            or not current.is_current
+            or current.can_dispatch != self.next_action.can_dispatch
+        ):
+            raise ValueError("the first workflow option must match next_action")
+        if any(option.is_current or option.can_dispatch for option in self.action_options[1:]):
+            raise ValueError("upcoming workflow options are display-only")
+        actions = [option.action for option in self.action_options]
+        if len(actions) != len(set(actions)):
+            raise ValueError("workflow action options must be unique")
+        return self
 
 
 class StoryWorkspaceEpisodeBindingRecoveryCommand(_StoryWorkspaceDreamWireModel):
@@ -2456,6 +2505,7 @@ __all__ = [
     "StoryWorkspaceEpisodeActionAccepted",
     "StoryWorkspaceEpisodeActionContinueCommand",
     "StoryWorkspaceEpisodeActionDiagnostic",
+    "StoryWorkspaceEpisodeActionOption",
     "StoryWorkspaceEpisodeActionResolution",
     "StoryWorkspaceEpisodeBindingToolInput",
     "StoryWorkspaceEpisodeArtifactSection",

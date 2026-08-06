@@ -69,6 +69,17 @@ from libs.claude_agent_kit.messages.message_parts import extract_text_from_parts
 from claude_agent.workspace_context import build_workspace_context_block
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
+try:
+    from services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
+    )
+except ModuleNotFoundError:  # Support repository-root package imports.
+    from backend.services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+        STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX,
+    )
+
 logger = logging.getLogger(__name__)
 
 # MIME types that can be rendered inline within chat transcripts.
@@ -454,8 +465,10 @@ class ClaudeAgentContextBuilder:
                         "are complete, call mcp__story_workspace__write_dream_stage "
                         "for characters. After all required scene files under "
                         "assets/scenes/ are complete, call it for scenes. After the "
-                        "canonical stories/<project>/episodes/EP??/storyboard.yaml "
+                        "canonical stories/<project_slug>/episodes/EP??/storyboard.yaml "
                         "is complete, call it for storyboards.\n"
+                        f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}\n"
+                        f"{STORY_WORKSPACE_CANONICAL_PROJECT_PRIVATE_WRITER_SUFFIX}\n"
                         "</story_workspace_dream_context>"
                     ),
                 }

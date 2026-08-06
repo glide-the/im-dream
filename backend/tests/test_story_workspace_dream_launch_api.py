@@ -656,6 +656,19 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("不调用 AskUserQuestion", launch_text)
         self.assertIn("可编辑草稿", launch_text)
 
+    async def test_launch_requires_canonical_project_identity_before_storyboard(self) -> None:
+        await self.start(launch_command())
+
+        launch_text = self.turn_dispatcher.calls[0]["parts"][0]["text"]
+        self.assertIn("先完成 drama-init 的项目初始化语义", launch_text)
+        self.assertIn("stories/<project_slug>/project.yaml", launch_text)
+        self.assertIn("project_slug 必须与 project_id 完全相同", launch_text)
+        self.assertIn("^[a-z0-9]+(?:-[a-z0-9]+)*$", launch_text)
+        self.assertIn("project_name 只用于显示", launch_text)
+        self.assertIn("规范项目身份成立后，才能写入 storyboard", launch_text)
+        self.assertNotIn("mcp__", launch_text)
+        self.assertNotIn("expectedBindingRevision", launch_text)
+
     async def test_dispatch_exception_leaves_pending_envelope_replayable(self) -> None:
         self.turn_dispatcher.failures_remaining = 1
 

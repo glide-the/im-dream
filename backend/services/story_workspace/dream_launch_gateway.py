@@ -53,6 +53,9 @@ try:
         StoryWorkspaceDreamLaunchService,
         StoryWorkspaceDreamLaunchSource,
     )
+    from services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
+    )
     from services.workflow.preflight_service import PreflightService, PreflightStatus
     from services.workflow.run_service import WorkflowRunService
     from story_workspace.contracts import (
@@ -94,6 +97,9 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamLaunchIdempotencyConflict,
         StoryWorkspaceDreamLaunchService,
         StoryWorkspaceDreamLaunchSource,
+    )
+    from backend.services.story_workspace.canonical_project_instruction import (
+        STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
     )
     from backend.services.workflow.preflight_service import (
         PreflightService,
@@ -687,7 +693,8 @@ def _launch_instruction(goal: str) -> str:
         "4. 仅在 canonical 分镜文件完成后调用 write_dream_stage(storyboards)。\n"
         "5. Dream flow 不调用 AskUserQuestion；缺少字段时写明"
         "显式假设，形成可编辑草稿。\n"
-        "6. 完成人物、场景、分镜后停在 Dream 页面等待用户确认。"
+        "6. 完成人物、场景、分镜后停在 Dream 页面等待用户确认。\n"
+        f"{STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION}"
     )
 
 

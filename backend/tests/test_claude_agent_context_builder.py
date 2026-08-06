@@ -262,6 +262,13 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("assets/scenes", combined)
         self.assertIn("storyboard.yaml", combined)
         self.assertIn("mcp__story_workspace__write_dream_stage", combined)
+        self.assertIn("先完成 drama-init 的项目初始化语义", combined)
+        self.assertIn("stories/<project_slug>/project.yaml", combined)
+        self.assertIn("project_slug 必须与 project_id 完全相同", combined)
+        self.assertIn("^[a-z0-9]+(?:-[a-z0-9]+)*$", combined)
+        self.assertIn("project_name 只用于显示", combined)
+        self.assertIn("规范项目身份成立后，才能写入 storyboard", combined)
+        self.assertIn("expectedBindingRevision=0", combined)
         self.assertLess(
             combined.index("<story_workspace_dream_context>"),
             combined.rindex("create the story"),
