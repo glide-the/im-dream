@@ -138,6 +138,15 @@ _SENSITIVE_ASK_USER_TEXT = re.compile(
     r")",
     re.IGNORECASE,
 )
+_SENSITIVE_INTERNAL_DREAM_DIAGNOSTIC = re.compile(
+    r"(?:"
+    r"(?<![A-Za-z0-9])(?:"
+    r"agent_id|binding_revision|bind_first_episode|DREAM_WRITE_REJECTED"
+    r")(?![A-Za-z0-9])|"
+    r"(?<![A-Za-z0-9])mcp__story_workspace__"
+    r")",
+    re.IGNORECASE,
+)
 _HIGH_CONFIDENCE_ASK_USER_SECRETS = (
     re.compile(
         r"(?<![A-Za-z0-9_-])"
@@ -372,6 +381,7 @@ def _public_text_is_sensitive(value: str) -> bool:
     normalized = value.strip()
     return bool(
         _SENSITIVE_ASK_USER_TEXT.search(normalized)
+        or _SENSITIVE_INTERNAL_DREAM_DIAGNOSTIC.search(normalized)
         or _SENSITIVE_ABSOLUTE_USER_PATH.search(normalized)
         or any(pattern.search(normalized) for pattern in _HIGH_CONFIDENCE_ASK_USER_SECRETS)
         or _looks_like_high_entropy_secret(normalized)
