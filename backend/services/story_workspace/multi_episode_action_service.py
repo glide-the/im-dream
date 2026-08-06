@@ -704,6 +704,11 @@ class StoryWorkspaceMultiEpisodeActionProjector:
         return StoryWorkspaceEpisodeActionOptionV2(
             actionId=cls._action_id(snapshot, descriptor, action, intent=intent),
             action=action,
+            inputRevision=(
+                snapshot.next_input_revision
+                if descriptor.relation == "next"
+                else snapshot.current_input_revision
+            ),
             targetEpisode=cls._target(descriptor),
             label=cls._label(action, descriptor, intent=intent),
             description=cls._description(action, descriptor, intent=intent),

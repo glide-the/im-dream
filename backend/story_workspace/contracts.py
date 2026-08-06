@@ -1108,6 +1108,7 @@ class StoryWorkspaceEpisodeActionOptionV2(_StoryWorkspaceDreamWireModel):
 
     action_id: str = Field(pattern=r"^episode_action_[0-9a-f]{64}$")
     action: StoryWorkspaceEpisodeAction
+    input_revision: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     target_episode: StoryWorkspaceEpisodeActionTarget
     label: StrictStr = Field(min_length=1, max_length=160)
     description: StrictStr = Field(min_length=1, max_length=500)
@@ -1372,6 +1373,25 @@ class StoryWorkspaceEpisodeActionContinueCommand(_StoryWorkspaceDreamWireModel):
         ):
             raise ValueError("user guidance contains disallowed sensitive content")
         return normalized
+
+
+class StoryWorkspaceEpisodeActionContinueCommandV2(_StoryWorkspaceDreamWireModel):
+    """Opaque request; target Episode and capability are reselected server-side."""
+
+    action_id: str = Field(pattern=r"^episode_action_[0-9a-f]{64}$")
+    idempotency_key: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=r"^[A-Za-z0-9._:-]+$",
+    )
+    user_guidance: Optional[StrictStr] = Field(default=None, max_length=2000)
+
+    @field_validator("user_guidance")
+    @classmethod
+    def guidance_is_bounded_plain_text(cls, value: str | None) -> str | None:
+        return StoryWorkspaceEpisodeActionContinueCommand.guidance_is_bounded_plain_text(
+            value
+        )
 
 
 class StoryWorkspaceEpisodeActionAccepted(_StoryWorkspaceDreamWireModel):
