@@ -1,5 +1,5 @@
 // [Input] Consume file upload hook, file proxy utility, input-dock helpers, chat icons, auth token, and keyboard interaction helpers.
-// [Output] Render the chat input dock, attachment upload controls, and message submit/stop actions.
+// [Output] Render the Markdown-aware chat input dock, attachment upload controls, and message submit/stop actions.
 // [Pos] chat-input-dock component node in frontend/src/components/chat
 // [Sync] 2026-05-25: remove frontend customer-context props and move helper exports to AIInputDock.helpers.
 // [Sync] 2026-05-27: add internal toolChoice state with Auto/逐步确认 segmented toggle; sends selected toolChoice via onSendMessage.
@@ -14,6 +14,8 @@
 // [Sync] 2026-07-20: i18n — tool-choice toggle, upload errors/hints, aria labels, and
 //                    send/stop button copy resolve through the chat.inputDock namespace
 //                    (en + zh) via useTranslation.
+// [Sync] 2026-08-06: replace the plain textarea with MarkdownInputEditor; user-authored rich text is
+//                    serialized to Markdown before transport and rendered through the shared chat chain.
 import {
   useCallback,
   useEffect,
@@ -42,6 +44,7 @@ import { shouldSendMessageOnKeyDown } from './interaction-utils';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
+import MarkdownInputEditor from './MarkdownInputEditor';
 
 type AIInputDockMode = 'simple' | 'full';
 
@@ -65,8 +68,6 @@ interface AIInputDockProps {
   contextControl?: ReactNode;
 }
 
-const QUERY_INPUT_MAX_HEIGHT = 320;
-const QUERY_INPUT_MIN_HEIGHT = 72;
 const MAX_UPLOAD_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
 function generateFileId(): string {
@@ -87,7 +88,7 @@ function revokeObjectPreviewUrl(url?: string) {
 
 function shouldSendWithKeyboard(
   mode: AIInputDockMode,
-  event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+  event: KeyboardEvent<HTMLElement>,
 ): boolean {
   if (event.nativeEvent.isComposing) {
     return false;
@@ -134,7 +135,6 @@ export default function AIInputDock({
   const [toolChoice, setToolChoice] = useState<ToolChoice>(defaultToolChoice);
   const [resolvedFullAccessEnabled, setResolvedFullAccessEnabled] = useState(fullAccessEnabled ?? false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const queryInputRef = useRef<HTMLTextAreaElement>(null);
   const lastHandledOpenFileDialogSignalRef = useRef(0);
   const { upload, error: uploadHookError } = useFileUpload();
 
@@ -379,24 +379,6 @@ export default function AIInputDock({
     [handleFiles],
   );
 
-  const updateQueryInputHeight = useCallback(() => {
-    const input = queryInputRef.current;
-    if (!input) {
-      return;
-    }
-    input.style.height = 'auto';
-    const nextHeight = Math.min(
-      Math.max(input.scrollHeight, QUERY_INPUT_MIN_HEIGHT),
-      QUERY_INPUT_MAX_HEIGHT,
-    );
-    input.style.height = `${nextHeight}px`;
-    input.style.overflowY = input.scrollHeight > QUERY_INPUT_MAX_HEIGHT ? 'auto' : 'hidden';
-  }, []);
-
-  useEffect(() => {
-    updateQueryInputHeight();
-  }, [query, updateQueryInputHeight]);
-
   const handleSend = useCallback(() => {
     if (loading) {
       return;
@@ -551,15 +533,13 @@ export default function AIInputDock({
         </div>
       ) : null}
 
-      <textarea
+      <MarkdownInputEditor
         id="chat-input"
-        ref={queryInputRef}
-        aria-label={t('chat.inputDock.inputAria')}
-        aria-describedby={showUploadHint ? 'chat-upload-hint' : undefined}
+        ariaLabel={t('chat.inputDock.inputAria')}
+        ariaDescribedBy={showUploadHint ? 'chat-upload-hint' : undefined}
         placeholder={placeholder}
         value={query}
-        rows={1}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={setQuery}
         onFocus={() => setIsInputFocused(true)}
         onBlur={() => setIsInputFocused(false)}
         disabled={disabled}
@@ -569,19 +549,6 @@ export default function AIInputDock({
           }
           event.preventDefault();
           handleSend();
-        }}
-        style={{
-          width: '100%',
-          minHeight: '4.5rem',
-          resize: 'none',
-          border: 'none',
-          outline: 'none',
-          background: 'transparent',
-          color: 'var(--color-text-body)',
-          fontSize: '1rem',
-          lineHeight: 1.65,
-          fontFamily: "'Excalifont', 'Xiaolai', Georgia, serif",
-          boxSizing: 'border-box',
         }}
       />
 
