@@ -101,7 +101,7 @@ flowchart TB
 ### 2.3 工作流推进原则
 
 - 同一 episode 沿用同一 Dream Agent、workflow run 和技术 thread；用户界面只出现 Dream Agent。
-- 页面不显示 raw slash command，而显示阶段目的，例如“继续生成剧本”。提交后由服务端把受控 action 翻译为同一 Dream Agent 的指令。
+- 页面不显示内部 raw command、MCP 名称或参数；可以按第 27.2 节显示后端审定的 vendor 产品操作名，例如 `/drama-plan`，并同时给出阶段目的。提交后仍由服务端把唯一当前 action 翻译为同一 Dream Agent 的受控指令。
 - 每一步是否可继续由 binding、canonical artifact 的存在性、source revision 和 review scope 推导；它是 capability，不是新增业务状态。
 - 若已有后序文件但前序文件缺失，显示“早期产物”，下一步仍回到最早缺失依赖；到达相应步骤时必须基于最新上游重新生成，不能仅因文件存在而跳过。
 - vendor Ask → Options → Decide → Draft → Approve 的创作暂停点保留在同一 Dream Agent 对话内；它们不是新的 Story Workspace confirmation。页面每次只派发一个可解释阶段，不自动串行到末端。
@@ -783,10 +783,10 @@ flowchart LR
 ### 24.1 工作流与合同
 
 1. 从 README 固化的步骤 fixture 与 next-step resolver 完全一致。
-2. 同一 Dream Agent/run/thread 推进；一次 Dream confirmation 与多个 Episode stage dispatch 在持久合同和 UI 文案上可区分，raw 命令和技术 thread 不出现在 UI。
+2. 同一 Dream Agent/run/thread 推进；一次 Dream confirmation 与多个 Episode stage dispatch 在持久合同和 UI 文案上可区分；UI 只允许第 27.2 节审定的 vendor 产品操作名，内部命令与技术 thread 不出现。
 3. actor 只能读取自己 Deck/run binding 的 Episode；错误 actor/Deck/run/story/episode 和路径穿越全部拒绝；unbound 时不探测 artifact，也不返回 episode continue。
 4. 缺失 artifact 返回 `not_generated`；无虚构内容。
-5. manifest 保存相对 artifact key、revision/mtime/size、受控 `producerAction` 和 `consumers[]`；前后两次可逐项比对，API/DOM 不出现 raw command。
+5. manifest 保存相对 artifact key、revision/mtime/size、受控 `producerAction` 和 `consumers[]`；前后两次可逐项比对；除 `actionOptions[].displayCommand` 的审定产品名外，API/DOM 不出现 raw command。
 
 ### 24.2 关联和渐进恢复
 
@@ -841,3 +841,52 @@ flowchart LR
 `2026-08-05-drama-forge-ep01-task3-implementation-and-acceptance-record.md`
 
 该实施记录不修改本设计 owner 或流程裁决；它明确区分“Episode artifact 与工作台通过”和“外部 Dream Agent runtime/renderer 全链路未被证明”。
+
+## 27. 2026-08-06 真实 Run 验收返工修订
+
+本节由真实用户 Run 的验收失败触发，是第 2.3、15、16、20 与 24 节的增量 canonical 修订；其余 truth ownership、文件 owner、权限与路径边界不变。完整调查与实施证据见 `2026-08-06-drama-forge-ep01-real-run-and-agent-actions-rework-record.md`。
+
+### 27.1 Canonical project 先于 Episode
+
+Dream 初始创作与后续绑定必须共享同一项目身份不变量：
+
+- 先完成 `drama-init` 的项目初始化语义，再推进 Episode；
+- 物理目录固定为 `stories/<project_slug>/`，`project_slug` 必须与 `project_id` 相等并符合 ASCII slug 规则；
+- `project_name` 只用于显示，不能成为物理目录、source path 或绑定身份；
+- 当原始 `project_name` 没有可保留的 ASCII 片段时，fallback 唯一定义为 `proj-` + `sha256(project_name 原始 UTF-8 bytes).hexdigest()[:8]`；不 trim、casefold 或执行 Unicode normalization，同一结果同时写入 `project_id` 与 `project_slug`；
+- binding reader 只兼容 vendor `project.yaml` 的唯一根级 quoted/unquoted ASCII `project_id`；值只能位于同一行，允许空格/Tab 与 LF/CRLF，跨行、VT、FF、重复或歧义声明继续拒绝；
+- 规范项目身份未成立时不得写入 canonical Episode storyboard 或建立 Episode 绑定；
+- 对已经存在的显示名目录，只允许在“唯一旧目录、唯一合法 `project_id`、目标不存在、无符号链接”全部成立时，由同一 Dream Agent 执行受控整理；证据不唯一时保持 unbound，不放宽 binding reader/writer。
+
+### 27.2 Dream Agent 阶段操作菜单
+
+第 2.3 节“页面不显示 raw slash command”修订为：页面可以显示后端明确审定的 drama-forge **产品操作名**，例如 `/drama-plan`、`/drama-script (EP01)`；仍禁止显示 MCP 工具名、tool args、CAS 参数、内部脚本路径、凭证和调试事件。
+
+菜单合同与交互如下：
+
+1. `workflow.nextAction` 仍是唯一当前可派发能力；浏览器不能从 README、本地数组或 Agent 消息推导授权。
+2. 后端从同一 vendor workflow owner 派生 `workflow.actionOptions[]`，每项只有 `action / label / displayCommand / isCurrent / canDispatch`；它不拥有创作内容，也不是新的业务状态机。
+3. 当前项可进入既有 Episode 确认链；后续项只预告顺序并保持不可派发，不能越过最早缺失依赖。
+4. Dream Agent 对话框在“正在处理”状态提示与自由留言之间显示操作区；前两项直接显示，第 3 项起由带 `aria-expanded`、`aria-controls` 的按钮控制折叠区。
+5. 后续项使用原生 `disabled` 按钮语义，不能进入 Tab 顺序；其可访问名称必须包含“后续，完成当前步骤后可用”。当前项包含“当前可执行”，pending 项包含“处理中”，不能只用颜色、`title` 或 `aria-hidden` 图标传达。
+6. 桌面与窄屏使用同一 Escape 栈：第一次收起已展开的更多操作并把焦点还给触发按钮；折叠区未展开时第二次 Escape 关闭 Dialog 并恢复外部触发焦点。
+7. 对话框只接收不透明 action view model 和回调；不持有 ETag、路径、命令模板或 Episode artifact truth。
+
+### 27.3 接受态归并与可恢复性
+
+HTTP 202 只证明消息已经持久接受，不能把页面永久锁到“已提交”。页面必须保存响应 `messageId`，并按下列服务端事实归并：
+
+- `idle + busy` 的 Dream Agent snapshot 继续低频 REST 读取，时间经过本身不等于完成；
+- 只有 snapshot 中出现相同 `messageId` 的持久化 user message，同时 `lifecycle=idle`、`activeTurnId=null` 且 `canSend=true`，才能认为该技术派发 claim 已经结束；`pending/dispatching` claim 会令服务端 `canSend=false`，因此该判定不依赖时间。公共 assistant 文本可能被安全投影丢弃，不能成为必要终止条件；
+- 若此时 Episode ETag/nextAction 已变化，按新 artifact facts 正常恢复；
+- 若轮次结束而 Episode identity 未变化，清除本地 accepted latch、轮换幂等键并提示“本轮结束但尚未检测到新产物”，允许用户再次执行当前服务端授权步骤；
+- Agent message 只证明技术派发轮次结束，不能证明 artifact 已生成，文件和 revision 仍由 Episode REST surface 拥有。
+
+### 27.4 新增验收门
+
+1. 真实 launch 指令和可信 Dream context 同时约束 canonical project identity；公共消息不出现内部 writer 名称或 CAS 参数。
+2. `actionOptions` 必须是当前 `nextAction` 开始的 vendor 有序后缀；只有第一项可能 `canDispatch=true`，`none_in_scope` 时为空。
+3. 0/1/2 项不显示折叠按钮；3 项以上仅前 2 项直显。
+4. 桌面与 390px 窄屏均无横向溢出；折叠按钮、当前操作、后续 disabled 语义与两级 Escape 焦点恢复均由浏览器测试覆盖。
+5. accepted message 在相同 Episode revision 下完成但未产生 artifact 时，页面不得永久显示“已交给 Dream Agent”。
+6. Dream Agent 的 snapshot 与 SSE 文本出现 `agent_id`、`binding_revision`、内部绑定工具名或统一拒绝码时，必须使用安全公共投影；受控 `/drama-*` 产品操作名不因此被误隐藏。
