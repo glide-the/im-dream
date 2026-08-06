@@ -338,6 +338,67 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
                     )
         self.assertFalse((self.workspace / ".dream" / "runtime").exists())
 
+    def test_canonical_project_identity_accepts_one_quoted_or_unquoted_ascii_id(
+        self,
+    ) -> None:
+        project_path = self.workspace / "stories" / "demo" / "project.yaml"
+
+        for serialized_id in ("demo", '"demo"', "'demo'"):
+            with self.subTest(serialized_id=serialized_id):
+                project_path.write_text(
+                    f"project_id: {serialized_id}\n",
+                    encoding="utf-8",
+                )
+                self.assertEqual(
+                    self.service.read_canonical_project_story_slug("demo"),
+                    "demo",
+                )
+                self.assertEqual(
+                    self.service.discover_unique_canonical_project_story_slug(),
+                    "demo",
+                )
+
+    def test_canonical_project_identity_rejects_ambiguous_or_unsafe_values(
+        self,
+    ) -> None:
+        project_path = self.workspace / "stories" / "demo" / "project.yaml"
+        payloads = (
+            "project_id: demo\nproject_id: demo\n",
+            'project_id: "demo"\nproject_id: demo\n',
+            "project_id: 项目\nproject_id: demo\n",
+            "project_id: []\nproject_id: demo\n",
+            " project_id: demo\n",
+            " project_id: other\nproject_id: demo\n",
+            "project_id: other\n",
+            "project_id: 项目\n",
+            "project_id: 'demo\"\n",
+            "project_id: demo # ambiguous trailing syntax\n",
+        )
+
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                project_path.write_text(payload, encoding="utf-8")
+                with self.assertRaises(StoryWorkspaceEpisodeBindingContractError):
+                    self.service.read_canonical_project_story_slug("demo")
+
+    def test_canonical_project_identity_rejects_symlink_and_oversize_file(
+        self,
+    ) -> None:
+        project_path = self.workspace / "stories" / "demo" / "project.yaml"
+        outside = self.workspace / "outside-project.yaml"
+        outside.write_text("project_id: demo\n", encoding="utf-8")
+        project_path.symlink_to(outside)
+        with self.assertRaises(StoryWorkspaceEpisodeBindingPathError):
+            self.service.read_canonical_project_story_slug("demo")
+
+        project_path.unlink()
+        project_path.write_text(
+            "project_id: demo\n" + "#" * (256 * 1024),
+            encoding="utf-8",
+        )
+        with self.assertRaises(StoryWorkspaceEpisodeBindingPathError):
+            self.service.read_canonical_project_story_slug("demo")
+
     def test_symlinked_story_root_is_rejected_without_binding_write(self) -> None:
         story_root = self.workspace / "stories" / "demo"
         shutil.rmtree(story_root)

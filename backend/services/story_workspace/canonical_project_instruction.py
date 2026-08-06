@@ -8,7 +8,10 @@ STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION = (
     "规范项目身份要求：先创建 stories/<project_slug>/project.yaml；"
     "project_slug 必须与 project_id 完全相同，并且两者都必须匹配 "
     "^[a-z0-9]+(?:-[a-z0-9]+)*$。\n"
-    "project_name 只用于显示，禁止把 project_name 当作目录或 source path 的项目段。\n"
+    "project_name 只用于显示，禁止把 project_name 当作目录或 source path 的项目段；"
+    "全中文 project_name 不得直接成为物理项目身份；没有可保留的 ASCII 片段时，"
+    "必须基于原始 project_name 生成稳定 proj-<8位小写十六进制摘要>，并将同一值"
+    "同时作为 project_id 与 project_slug。\n"
     "规范项目身份成立后，才能写入 storyboard canonical 文件。"
 )
 

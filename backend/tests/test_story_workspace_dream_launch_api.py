@@ -665,6 +665,8 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("project_slug 必须与 project_id 完全相同", launch_text)
         self.assertIn("^[a-z0-9]+(?:-[a-z0-9]+)*$", launch_text)
         self.assertIn("project_name 只用于显示", launch_text)
+        self.assertIn("全中文 project_name 不得直接成为物理项目身份", launch_text)
+        self.assertIn("稳定 proj-<8位小写十六进制摘要>", launch_text)
         self.assertIn("规范项目身份成立后，才能写入 storyboard", launch_text)
         self.assertNotIn("mcp__", launch_text)
         self.assertNotIn("expectedBindingRevision", launch_text)

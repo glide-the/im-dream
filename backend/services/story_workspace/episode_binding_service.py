@@ -34,7 +34,13 @@ _RUN_ID_PATTERN = re.compile(r"^run_[0-9a-f]{32}$")
 _STORY_SLUG_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _BINDING_MAX_BYTES = 16 * 1024
 _PROJECT_MAX_BYTES = 256 * 1024
-_PROJECT_ID_PATTERN = re.compile(r"(?m)^project_id:\s*([a-z0-9]+(?:-[a-z0-9]+)*)\s*$")
+_PROJECT_ID_PATTERN = re.compile(
+    r"(?m)^project_id:\s*"
+    r"(?P<quote>['\"]?)"
+    r"(?P<value>[a-z0-9]+(?:-[a-z0-9]+)*)"
+    r"(?P=quote)\s*$"
+)
+_PROJECT_ID_DECLARATION_PATTERN = re.compile(r"(?m)^[ \t]*project_id\s*:")
 
 
 class StoryWorkspaceEpisodeBindingError(RuntimeError):
@@ -379,8 +385,12 @@ class StoryWorkspaceEpisodeBindingService:
                 raise StoryWorkspaceEpisodeBindingContractError(
                     "canonical project identity is unreadable"
                 ) from exc
-            matches = _PROJECT_ID_PATTERN.findall(text)
-            if matches != [candidate]:
+            matches = [
+                match.group("value")
+                for match in _PROJECT_ID_PATTERN.finditer(text)
+            ]
+            declarations = _PROJECT_ID_DECLARATION_PATTERN.findall(text)
+            if len(declarations) != 1 or matches != [candidate]:
                 raise StoryWorkspaceEpisodeBindingContractError(
                     "canonical project identity does not match"
                 )

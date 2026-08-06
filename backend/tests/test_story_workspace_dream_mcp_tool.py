@@ -652,7 +652,10 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
     def test_agent_only_binding_validates_project_and_persisted_action(self) -> None:
         story = self.workspace / "stories" / "demo"
         (story / "episodes" / "EP01").mkdir(parents=True)
-        (story / "project.yaml").write_text("project_id: demo\n", encoding="utf-8")
+        (story / "project.yaml").write_text(
+            'project_id: "demo"\n',
+            encoding="utf-8",
+        )
         self._seed_episode_action(action="recover_first_episode_binding")
 
         result = self._call(

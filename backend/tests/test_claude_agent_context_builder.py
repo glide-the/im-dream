@@ -267,6 +267,8 @@ class TestBuildUserMessage(unittest.TestCase):
         self.assertIn("project_slug 必须与 project_id 完全相同", combined)
         self.assertIn("^[a-z0-9]+(?:-[a-z0-9]+)*$", combined)
         self.assertIn("project_name 只用于显示", combined)
+        self.assertIn("全中文 project_name 不得直接成为物理项目身份", combined)
+        self.assertIn("稳定 proj-<8位小写十六进制摘要>", combined)
         self.assertIn("规范项目身份成立后，才能写入 storyboard", combined)
         self.assertIn("expectedBindingRevision=0", combined)
         self.assertLess(
