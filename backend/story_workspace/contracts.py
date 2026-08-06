@@ -366,6 +366,83 @@ class StoryWorkspaceDreamAgentMessage(_StoryWorkspaceDreamWireModel):
     created_at: datetime
 
 
+class StoryWorkspaceDreamAgentToolConfirmationOption(_StoryWorkspaceDreamWireModel):
+    """One bounded public option; runner IDs and raw values never cross the wire."""
+
+    label: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX)
+    value: str = Field(min_length=1, max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX)
+
+
+class StoryWorkspaceDreamAgentToolConfirmationQuestion(_StoryWorkspaceDreamWireModel):
+    """Server-authored AskUser question with an opaque public identity."""
+
+    id: str = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_ID_MAX,
+        pattern=r"^q[0-9]+$",
+    )
+    question: str = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_TEXT_MAX,
+    )
+    type: Literal["text", "textarea", "select", "checkbox", "radio", "number"]
+    required: StrictBool
+    multi_select: Optional[StrictBool] = None
+    options: Optional[
+        list[StoryWorkspaceDreamAgentToolConfirmationOption]
+    ] = Field(default=None, max_length=12)
+    placeholder: Optional[str] = Field(
+        default=None,
+        max_length=STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
+    )
+
+
+class StoryWorkspaceDreamAgentToolConfirmationNetwork(_StoryWorkspaceDreamWireModel):
+    """Allowlisted network summary without raw request parameters."""
+
+    host: Optional[str] = Field(
+        default=None,
+        max_length=253,
+        pattern=(
+            r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?"
+            r"|[A-Fa-f0-9:]+)(?::[0-9]{1,5})?$"
+        ),
+    )
+    policy: Literal["allowlist", "open", "deny", "unknown"]
+
+
+class StoryWorkspaceDreamAgentToolConfirmation(_StoryWorkspaceDreamWireModel):
+    """Safe display projection for one runtime-pending Dream tool decision."""
+
+    tool_call_id: str = Field(
+        min_length=1,
+        max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
+        pattern=r"^[A-Za-z0-9._:/-]+$",
+    )
+    kind: Literal["approval", "ask_user", "sandbox_network"]
+    tool_name: str = Field(
+        min_length=1,
+        max_length=80,
+        pattern=r"^[A-Za-z0-9 .:-]+$",
+    )
+    questions: Optional[
+        list[StoryWorkspaceDreamAgentToolConfirmationQuestion]
+    ] = Field(default=None, max_length=8)
+    network: Optional[StoryWorkspaceDreamAgentToolConfirmationNetwork] = None
+
+    @model_validator(mode="after")
+    def fields_match_confirmation_kind(self) -> "StoryWorkspaceDreamAgentToolConfirmation":
+        if self.kind == "ask_user":
+            if not self.questions or self.network is not None:
+                raise ValueError("AskUser confirmation requires questions only")
+        elif self.kind == "sandbox_network":
+            if self.network is None or self.questions is not None:
+                raise ValueError("Sandbox confirmation requires network only")
+        elif self.questions is not None or self.network is not None:
+            raise ValueError("Approval confirmation cannot carry typed details")
+        return self
+
+
 class StoryWorkspaceDreamAgentMessageSnapshot(_StoryWorkspaceDreamWireModel):
     """Persisted safe history plus transient execution availability."""
 
@@ -377,6 +454,10 @@ class StoryWorkspaceDreamAgentMessageSnapshot(_StoryWorkspaceDreamWireModel):
         Literal["generating", "waiting_confirmation", "confirming", "continuing", "busy"]
     ] = None
     messages: list[StoryWorkspaceDreamAgentMessage]
+    pending_tool_confirmations: list[StoryWorkspaceDreamAgentToolConfirmation] = Field(
+        default_factory=list,
+        max_length=256,
+    )
     snapshot_at: datetime
 
 
@@ -2480,8 +2561,12 @@ __all__ = [
     "StoryWorkspaceDreamAgentMessageCommand",
     "StoryWorkspaceDreamAgentMessageSnapshot",
     "StoryWorkspaceDreamAgentTextContent",
+    "StoryWorkspaceDreamAgentToolConfirmation",
     "StoryWorkspaceDreamAgentToolConfirmationAccepted",
     "StoryWorkspaceDreamAgentToolConfirmationCommand",
+    "StoryWorkspaceDreamAgentToolConfirmationNetwork",
+    "StoryWorkspaceDreamAgentToolConfirmationOption",
+    "StoryWorkspaceDreamAgentToolConfirmationQuestion",
     "StoryWorkspaceDreamEdit",
     "StoryWorkspaceDreamFilesResponse",
     "StoryWorkspaceDreamReentryCollection",

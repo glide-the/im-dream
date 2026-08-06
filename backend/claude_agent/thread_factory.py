@@ -44,6 +44,13 @@ from claude_agent.thread_pool import (
 
 logger = logging.getLogger(__name__)
 
+_DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR = (
+    "_story_workspace_dream_public_tool_confirmations"
+)
+_DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR = (
+    "_story_workspace_dream_public_tool_confirmation_subscribers"
+)
+
 
 def _stop_wait_seconds() -> float:
     """Return the bounded wait for frontend stop requests."""
@@ -77,6 +84,14 @@ class ClaudeAgentThreadFactory:
             on_evicted=self._on_sessions_evicted,
         )
         self._observers.register(LoggingObserver())
+        # The factory owns cleanup because these projections are scoped to an
+        # in-memory turn, not to any browser's SSE subscription.
+        self._story_workspace_dream_public_tool_confirmations: dict[
+            tuple[str, str, str, str, str], dict[str, Any]
+        ] = {}
+        self._story_workspace_dream_public_tool_confirmation_subscribers: dict[
+            tuple[str, str, str, str], int
+        ] = {}
 
     def start(self) -> None:
         self._sweeper.start()
@@ -117,6 +132,10 @@ class ClaudeAgentThreadFactory:
                     f"Session {session_id!r} is already running; use reconnect instead"
                 )
 
+            self._clear_story_workspace_dream_public_turn(
+                session_id,
+                state.current_turn_id,
+            )
             state.current_turn_id = str(uuid4())
             state.current_dream_context = request.story_workspace_dream_context
             state.current_message_metadata = (
@@ -158,6 +177,10 @@ class ClaudeAgentThreadFactory:
                 )
                 if state.lifecycle == AgentRunLifecycle.RUNNING:
                     state.mark_idle()
+                self._clear_story_workspace_dream_public_turn(
+                    session_id,
+                    state.current_turn_id,
+                )
                 state.event_bus = None
                 error_text = _format_exception_for_sse(exc)
                 error_code = getattr(exc, "code", None)
@@ -261,14 +284,77 @@ class ClaudeAgentThreadFactory:
     ) -> bool:
         """Return whether the active turn is a trusted source of Dream output."""
 
+        return self._trusted_story_workspace_dream_state(
+            session_id,
+            run_id,
+            actor_id,
+            expected_turn_id=expected_turn_id,
+        ) is not None
+
+    def story_workspace_dream_turn_snapshot(
+        self,
+        session_id: str,
+        run_id: str,
+        actor_id: str,
+    ) -> Optional[dict[str, Any]]:
+        """Return the trusted Dream turn and runtime-pending tool identities.
+
+        This is deliberately separate from ``session_snapshot``. Generic Chat
+        diagnostics must not expose, or become evidence for, a Dream turn.
+        """
+
+        state = self._trusted_story_workspace_dream_state(
+            session_id,
+            run_id,
+            actor_id,
+        )
+        if state is None or not state.current_turn_id:
+            return None
+        turn_context = state.turn_context
+        store = getattr(turn_context, "confirmation_store", None)
+        pending_ids = getattr(store, "pending_ids", None)
+        if not callable(pending_ids):
+            runtime_pending: list[str] = []
+        else:
+            try:
+                runtime_pending = [
+                    item
+                    for item in pending_ids()
+                    if isinstance(item, str) and 0 < len(item) <= 255
+                ]
+            except Exception:
+                logger.exception(
+                    "Failed to read Dream runtime confirmations for session_id=%s",
+                    session_id,
+                )
+                runtime_pending = []
+        return {
+            "turn_id": state.current_turn_id,
+            "pending_tool_call_ids": runtime_pending,
+        }
+
+    def _trusted_story_workspace_dream_state(
+        self,
+        session_id: str,
+        run_id: str,
+        actor_id: str,
+        *,
+        expected_turn_id: Optional[str] = None,
+    ) -> Optional[AgentRunState]:
+        """Resolve one active state only when its Dream provenance is exact."""
+
         state = self._pool.get(session_id)
         if (
             state is None
             or state.lifecycle != AgentRunLifecycle.RUNNING
-            or state.current_turn_id != expected_turn_id
+            or not state.current_turn_id
+            or (
+                expected_turn_id is not None
+                and state.current_turn_id != expected_turn_id
+            )
             or str(state.current_user_id or "") != actor_id
         ):
-            return False
+            return None
         context = state.current_dream_context
         metadata = state.current_message_metadata or {}
         kind = metadata.get("kind") if isinstance(metadata, dict) else None
@@ -282,19 +368,46 @@ class ClaudeAgentThreadFactory:
                 "story-workspace-dream-agent-user",
             }
         ):
-            return False
+            return None
         if kind == "story-workspace-dream-launch":
-            return (
+            trusted = (
                 metadata.get("workflowRunId") == run_id
                 and metadata.get("threadId") == session_id
                 and str(metadata.get("actorId") or "") == actor_id
             )
-        return (
-            metadata.get("story_workspace_run_id") == run_id
-            and str(metadata.get("thread_id") or "") == session_id
-            and str(metadata.get("actor_id") or metadata.get("actor") or "")
-            == actor_id
-        )
+        else:
+            trusted = (
+                metadata.get("story_workspace_run_id") == run_id
+                and str(metadata.get("thread_id") or "") == session_id
+                and str(metadata.get("actor_id") or metadata.get("actor") or "")
+                == actor_id
+            )
+        return state if trusted else None
+
+    def _clear_story_workspace_dream_public_turn(
+        self,
+        session_id: str,
+        turn_id: Optional[str],
+    ) -> None:
+        """Drop public projections and observer leases owned by one old turn."""
+
+        if not turn_id:
+            return
+        for attribute in (
+            _DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR,
+            _DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR,
+        ):
+            registry = getattr(self, attribute, None)
+            if not isinstance(registry, dict):
+                continue
+            for key in tuple(registry):
+                if (
+                    isinstance(key, tuple)
+                    and len(key) >= 2
+                    and key[0] == session_id
+                    and key[1] == turn_id
+                ):
+                    registry.pop(key, None)
 
     async def _run_turn_task(
         self,
@@ -304,6 +417,7 @@ class ClaudeAgentThreadFactory:
     ) -> None:
         """Run execute_session and release per-session lock when the turn ends."""
         session_id = state.session_id
+        turn_id = state.current_turn_id
         try:
             await self._service.execute_session(execution)
         except asyncio.CancelledError:
@@ -312,6 +426,7 @@ class ClaudeAgentThreadFactory:
         except Exception:
             logger.exception("Turn failed for session_id=%s", session_id)
         finally:
+            self._clear_story_workspace_dream_public_turn(session_id, turn_id)
             state.turn_context = None
             state.current_dream_context = None
             state.current_message_metadata = None

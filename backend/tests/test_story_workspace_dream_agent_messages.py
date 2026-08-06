@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import sys
 import unittest
@@ -24,6 +25,7 @@ from story_workspace.contracts import (  # noqa: E402
     STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX,
     STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX,
     StoryWorkspaceDreamAgentMessageCommand,
+    StoryWorkspaceDreamAgentToolConfirmation,
     StoryWorkspaceDreamAgentToolConfirmationCommand,
     StoryWorkspaceDreamRunContext,
 )
@@ -55,6 +57,7 @@ class _Factory:
         self.frames = frames or []
         self.requests: list[object] = []
         self.current_turn_id = "turn-1"
+        self.pending_tool_call_ids: set[str] | None = None
 
     def session_snapshot(self, _thread_id: str):
         return (
@@ -69,6 +72,32 @@ class _Factory:
 
     def is_expected_story_workspace_dream_turn(self, *_args) -> bool:
         return True
+
+    def story_workspace_dream_turn_snapshot(
+        self,
+        thread_id: str,
+        run_id: str,
+        actor_id: str,
+    ):
+        if not self.running or not self.is_expected_story_workspace_dream_turn(
+            thread_id,
+            self.current_turn_id,
+            run_id,
+            actor_id,
+        ):
+            return None
+        pending = self.pending_tool_call_ids
+        if pending is None:
+            pending = {
+                match.group(1)
+                for frame in self.frames
+                for match in re.finditer(r'"toolCallId"\s*:\s*"([A-Za-z0-9._:/-]+)"', frame)
+                if '"type":"tool-approval-request"' in frame.replace(" ", "")
+            }
+        return {
+            "turn_id": self.current_turn_id,
+            "pending_tool_call_ids": sorted(pending),
+        }
 
     async def run_streaming(self, request):
         self.requests.append(request)
@@ -94,6 +123,18 @@ class _ToolConfirmationFactory(_Factory):
         return self.trusted
 
     def confirm_tool(self, **kwargs):
+        if self.resolved:
+            if self.pending_tool_call_ids is None:
+                self.pending_tool_call_ids = {
+                    match.group(1)
+                    for frame in self.frames
+                    for match in re.finditer(
+                        r'"toolCallId"\s*:\s*"([A-Za-z0-9._:/-]+)"',
+                        frame,
+                    )
+                    if '"type":"tool-approval-request"' in frame.replace(" ", "")
+                }
+            self.pending_tool_call_ids.discard(str(kwargs.get("tool_call_id") or ""))
         self.confirmations.append(("confirm", kwargs))
         return self.resolved
 
@@ -1417,6 +1458,20 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         from pydantic import ValidationError
 
         with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmation.model_validate({
+                "toolCallId": "tool-secret",
+                "kind": "approval",
+                "toolName": "Write",
+                "input": {"file_path": "/Users/private/script.md"},
+            })
+        with self.assertRaises(ValidationError):
+            StoryWorkspaceDreamAgentToolConfirmation.model_validate({
+                "toolCallId": "tool-secret",
+                "kind": "approval",
+                "toolName": "Write",
+                "title": "/Users/private/script.md",
+            })
+        with self.assertRaises(ValidationError):
             StoryWorkspaceDreamAgentToolConfirmationCommand.model_validate({
                 "toolCallId": "tool-1",
                 "approved": True,
@@ -1491,7 +1546,145 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         self.assertTrue(any(key[-1] == "tool-0" for key in registry))
         self.assertFalse(any(key[-1] == "tool-over-capacity" for key in registry))
 
-    def test_events_cleanup_only_the_subscribed_turn_and_actor_registry(self) -> None:
+    def test_snapshot_recovers_only_runtime_pending_safe_projection_and_prunes_stale(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.pending_tool_call_ids = {"tool-write"}
+        self.assertTrue(_remember_dream_public_confirmation(
+            factory,
+            thread_id=THREAD_ID,
+            turn_id="turn-1",
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+            confirmation={
+                "toolCallId": "tool-write",
+                "kind": "approval",
+                "toolName": "Write",
+            },
+        ))
+        self.assertTrue(_remember_dream_public_confirmation(
+            factory,
+            thread_id=THREAD_ID,
+            turn_id="turn-1",
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+            confirmation={
+                "toolCallId": "tool-timeout",
+                "kind": "approval",
+                "toolName": "Write",
+            },
+        ))
+        self.assertTrue(_remember_dream_public_confirmation(
+            factory,
+            thread_id=THREAD_ID,
+            turn_id="turn-1",
+            run_id=RUN_ID,
+            actor_id="other-actor",
+            confirmation={
+                "toolCallId": "tool-foreign",
+                "kind": "approval",
+                "toolName": "Write",
+            },
+        ))
+
+        with patch(
+            "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+            return_value=(True, True),
+        ):
+            snapshot = StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            ).snapshot(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+            )
+
+        self.assertEqual(
+            [item.tool_call_id for item in snapshot.pending_tool_confirmations],
+            ["tool-write"],
+        )
+        payload = snapshot.model_dump_json(by_alias=True)
+        self.assertNotIn("/Users/", payload)
+        self.assertNotIn("file_path", payload)
+        self.assertNotIn("input", payload)
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        assert registry is not None
+        self.assertFalse(any(key[-1] == "tool-timeout" for key in registry))
+        self.assertTrue(any(key[-1] == "tool-foreign" for key in registry))
+
+    def test_disconnect_keeps_runtime_pending_projection_recoverable_from_snapshot(self) -> None:
+        async def exercise():
+            factory = _ToolConfirmationFactory()
+            factory.frames = [
+                'data: {"type":"tool-approval-request","toolCallId":"tool-pending",'
+                '"toolName":"Write","input":{"file_path":"/Users/private/script.md"}}\n\n',
+            ]
+            service = StoryWorkspaceDreamAgentMessageService(
+                self.db,
+                thread_factory=factory,
+            )
+            stream = service.events(
+                thread_id=THREAD_ID,
+                run_id=RUN_ID,
+                actor_id=ACTOR_ID,
+            )
+            await _next_tool_confirmation(stream)
+            await stream.aclose()
+            with patch(
+                "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+                return_value=(True, True),
+            ):
+                return service.snapshot(
+                    run_id=RUN_ID,
+                    thread_id=THREAD_ID,
+                    actor_id=ACTOR_ID,
+                )
+
+        snapshot = asyncio.run(exercise())
+        self.assertEqual(
+            [item.tool_call_id for item in snapshot.pending_tool_confirmations],
+            ["tool-pending"],
+        )
+
+    def test_confirm_prunes_exact_projection_when_runtime_no_longer_pending(self) -> None:
+        factory = _ToolConfirmationFactory()
+        factory.pending_tool_call_ids = set()
+        self.assertTrue(_remember_dream_public_confirmation(
+            factory,
+            thread_id=THREAD_ID,
+            turn_id="turn-1",
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+            confirmation={
+                "toolCallId": "tool-timeout",
+                "kind": "approval",
+                "toolName": "Write",
+            },
+        ))
+        service = StoryWorkspaceDreamAgentMessageService(
+            self.db,
+            thread_factory=factory,
+        )
+
+        with self.assertRaisesRegex(
+            StoryWorkspaceDreamAgentMessageError,
+            "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+        ):
+            service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-timeout",
+                    approved=True,
+                ),
+            )
+
+        registry = _dream_public_confirmation_registry(factory, create=False)
+        self.assertEqual(registry, {})
+        self.assertFalse(any(item[0] == "confirm" for item in factory.confirmations))
+
+    def test_events_disconnect_retains_runtime_pending_turn_and_actor_registry(self) -> None:
         async def exercise() -> None:
             factory = _ToolConfirmationFactory()
             factory.frames = [
@@ -1523,7 +1716,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             self.assertTrue(any(key[1:4] == ("turn-2", RUN_ID, "8") for key in registry))
 
             await first_stream.aclose()
-            self.assertFalse(any(key[1:4] == ("turn-1", RUN_ID, ACTOR_ID) for key in registry))
+            self.assertTrue(any(key[1:4] == ("turn-1", RUN_ID, ACTOR_ID) for key in registry))
             self.assertTrue(any(key[1:4] == ("turn-2", RUN_ID, "8") for key in registry))
 
             accepted = service.confirm_tool(
@@ -1538,7 +1731,8 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             )
             self.assertTrue(accepted.resolved)
             await second_stream.aclose()
-            self.assertFalse(registry)
+            self.assertTrue(any(key[1:4] == ("turn-1", RUN_ID, ACTOR_ID) for key in registry))
+            self.assertFalse(any(key[1:4] == ("turn-2", RUN_ID, "8") for key in registry))
 
         asyncio.run(exercise())
 
@@ -1612,7 +1806,8 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
             self.assertEqual(len(registry), 1)
 
             await second_stream.aclose()
-            self.assertFalse(registry)
+            self.assertEqual(len(registry), 1)
+            self.assertTrue(any(key[-1] == "tool-two" for key in registry))
 
         asyncio.run(exercise())
 

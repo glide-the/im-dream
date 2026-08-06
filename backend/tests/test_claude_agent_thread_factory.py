@@ -25,6 +25,7 @@ import types
 import unittest
 import unittest.mock
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Optional
 
 ROOT = Path(__file__).resolve().parents[1]  # backend/
@@ -76,6 +77,24 @@ def _make_factory() -> ClaudeAgentThreadFactory:
     """Return a factory with Service and Runner stubbed out."""
     factory = ClaudeAgentThreadFactory()
     return factory
+
+
+def _make_dream_context(
+    *,
+    run_id: str = "run_" + "1" * 32,
+    thread_id: str = "thread_dream_trusted",
+) -> StoryWorkspaceDreamRunContext:
+    return StoryWorkspaceDreamRunContext(
+        workflow_run_id=run_id,
+        thread_id=thread_id,
+        deck_id="deck-dream",
+        deck_plugin_id="ink.dream.story-workflow",
+        deck_plugin_version="1.0.0",
+        deck_plugin_binding_id="dpb_" + "2" * 32,
+        binding_revision=1,
+        deck_runtime_snapshot_id="drs_" + "3" * 32,
+        runtime_plugin_lock_id="rpl_" + "4" * 32,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +320,104 @@ class TestAgentRunStateSweeper(unittest.TestCase):
         _run(self.sweeper.stop())  # should not raise
 
 
+class TestFactoryStoryWorkspaceDreamTurn(unittest.TestCase):
+    def setUp(self):
+        self.factory = ClaudeAgentThreadFactory()
+        self.run_id = "run_" + "1" * 32
+        self.thread_id = "thread_dream_trusted"
+        self.actor_id = "actor-dream"
+
+    def _running_state(self, *, kind: str = "story-workspace-dream-agent-user"):
+        state = self.factory._pool.get_or_create(self.thread_id)
+        state.current_turn_id = "turn-dream-trusted"
+        state.current_dream_context = _make_dream_context(
+            run_id=self.run_id,
+            thread_id=self.thread_id,
+        )
+        state.current_message_metadata = {
+            "kind": kind,
+            "story_workspace_run_id": self.run_id,
+            "thread_id": self.thread_id,
+            "actor_id": self.actor_id,
+        }
+        state.current_user_id = self.actor_id
+        state.turn_context = SimpleNamespace(
+            confirmation_store=SimpleNamespace(
+                pending_ids=lambda: ["tool-write", "tool-ask"]
+            )
+        )
+        state.mark_running()
+        return state
+
+    def test_trusted_dream_turn_snapshot_returns_only_runtime_pending_ids(self):
+        self._running_state()
+
+        snapshot = self.factory.story_workspace_dream_turn_snapshot(
+            self.thread_id,
+            self.run_id,
+            self.actor_id,
+        )
+
+        self.assertEqual(snapshot, {
+            "turn_id": "turn-dream-trusted",
+            "pending_tool_call_ids": ["tool-write", "tool-ask"],
+        })
+        self.assertNotIn(
+            "current_turn_id",
+            self.factory.session_snapshot(self.thread_id),
+        )
+
+    def test_trusted_dream_turn_snapshot_fails_closed_for_wrong_binding(self):
+        state = self._running_state()
+        self.assertIsNone(self.factory.story_workspace_dream_turn_snapshot(
+            self.thread_id,
+            "run_" + "9" * 32,
+            self.actor_id,
+        ))
+        self.assertIsNone(self.factory.story_workspace_dream_turn_snapshot(
+            self.thread_id,
+            self.run_id,
+            "other-actor",
+        ))
+
+        state.current_message_metadata = {"kind": "generic-chat-user"}
+        self.assertIsNone(self.factory.story_workspace_dream_turn_snapshot(
+            self.thread_id,
+            self.run_id,
+            self.actor_id,
+        ))
+
+    def test_turn_finally_cleans_only_the_completed_turn_public_projections(self):
+        async def exercise():
+            state = self._running_state()
+            lock = self.factory._pool.get_lock(self.thread_id)
+            await lock.acquire()
+            self.factory._story_workspace_dream_public_tool_confirmations = {
+                (self.thread_id, "turn-dream-trusted", self.run_id, self.actor_id, "tool-write"): {
+                    "toolCallId": "tool-write",
+                },
+                (self.thread_id, "other-turn", self.run_id, self.actor_id, "tool-other"): {
+                    "toolCallId": "tool-other",
+                },
+            }
+
+            async def _execute(_execution):
+                return None
+
+            self.factory._service.execute_session = _execute
+            await self.factory._run_turn_task(object(), state, lock)
+            return self.factory._story_workspace_dream_public_tool_confirmations
+
+        registry = _run(exercise())
+        self.assertNotIn(
+            (self.thread_id, "turn-dream-trusted", self.run_id, self.actor_id, "tool-write"),
+            registry,
+        )
+        self.assertIn(
+            (self.thread_id, "other-turn", self.run_id, self.actor_id, "tool-other"),
+            registry,
+        )
+
 # ---------------------------------------------------------------------------
 # ClaudeAgentThreadFactory — runner flyweight (Phase 2)
 # ---------------------------------------------------------------------------
@@ -479,6 +596,54 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
             ["first", "structured confirmation"],
         )
         self.assertEqual(snapshot["lifecycle"], "idle")
+
+    def test_starting_a_new_turn_cleans_the_replaced_turn_public_projection(self):
+        async def _scenario():
+            thread_id = "thread_dream_replacement"
+            run_id = "run_" + "5" * 32
+            actor_id = "actor-replacement"
+            state = self.factory._pool.get_or_create(thread_id)
+            state.current_turn_id = "turn-replaced"
+            old_key = (
+                thread_id,
+                "turn-replaced",
+                run_id,
+                actor_id,
+                "tool-stale",
+            )
+            self.factory._story_workspace_dream_public_tool_confirmations[old_key] = {
+                "toolCallId": "tool-stale",
+            }
+            started = asyncio.Event()
+            release = asyncio.Event()
+
+            async def _execute(execution):
+                started.set()
+                await release.wait()
+                await execution.turn_context.queue.put(
+                    'data: {"type":"finish","reason":"success"}\n\n'
+                )
+                await execution.turn_context.queue.put(None)
+
+            self.factory._service.execute_session = _execute
+            request = _make_request(
+                actor_id,
+                thread_id=thread_id,
+            )
+            with unittest.mock.patch(
+                "claude_agent.thread_factory.ClaudeAgentRunner",
+                self._FakeRunner,
+            ):
+                consumer = asyncio.create_task(self._collect_gen(request))
+                await asyncio.wait_for(started.wait(), timeout=1.0)
+                self.assertNotIn(
+                    old_key,
+                    self.factory._story_workspace_dream_public_tool_confirmations,
+                )
+                release.set()
+                await asyncio.wait_for(consumer, timeout=1.0)
+
+        _run(_scenario())
 
     async def _collect_gen(self, req):
         async for _ in self.factory.run_streaming(req):

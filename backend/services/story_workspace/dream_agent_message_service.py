@@ -28,6 +28,7 @@ try:
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentMessageSnapshot,
         StoryWorkspaceDreamAgentTextContent,
+        StoryWorkspaceDreamAgentToolConfirmation,
         StoryWorkspaceDreamAgentToolConfirmationAccepted,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
@@ -48,6 +49,7 @@ except ModuleNotFoundError:
         StoryWorkspaceDreamAgentMessageCommand,
         StoryWorkspaceDreamAgentMessageSnapshot,
         StoryWorkspaceDreamAgentTextContent,
+        StoryWorkspaceDreamAgentToolConfirmation,
         StoryWorkspaceDreamAgentToolConfirmationAccepted,
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
@@ -872,6 +874,70 @@ def _dream_public_confirmation_registry(
     return registry
 
 
+def _trusted_dream_turn_snapshot(
+    factory: Any,
+    *,
+    thread_id: str,
+    run_id: str,
+    actor_id: str,
+) -> tuple[str, list[str]] | None:
+    """Read the factory's Dream-only turn view and fail closed on bad doubles."""
+
+    accessor = getattr(factory, "story_workspace_dream_turn_snapshot", None)
+    if not callable(accessor):
+        return None
+    snapshot = accessor(thread_id, run_id, actor_id)
+    if not isinstance(snapshot, dict):
+        return None
+    turn_id = snapshot.get("turn_id")
+    pending = snapshot.get("pending_tool_call_ids")
+    if not isinstance(turn_id, str) or not turn_id or not isinstance(pending, list):
+        return None
+    pending_ids: list[str] = []
+    seen: set[str] = set()
+    for value in pending:
+        safe = _safe_tool_call_id(value)
+        if safe is None or safe in seen:
+            continue
+        seen.add(safe)
+        pending_ids.append(safe)
+    return turn_id, pending_ids
+
+
+def _pending_dream_public_confirmations(
+    factory: Any,
+    *,
+    thread_id: str,
+    turn_id: str,
+    run_id: str,
+    actor_id: str,
+    runtime_pending_ids: list[str],
+) -> list[StoryWorkspaceDreamAgentToolConfirmation]:
+    """Return runtime/display intersection and prune only this exact turn."""
+
+    registry = _dream_public_confirmation_registry(factory, create=False)
+    if registry is None:
+        return []
+    runtime_pending = set(runtime_pending_ids)
+    prefix = (thread_id, turn_id, run_id, actor_id)
+    safe: list[StoryWorkspaceDreamAgentToolConfirmation] = []
+    for key in tuple(registry):
+        if key[:4] != prefix:
+            continue
+        tool_call_id = key[4]
+        if tool_call_id not in runtime_pending:
+            registry.pop(key, None)
+            continue
+        try:
+            safe.append(StoryWorkspaceDreamAgentToolConfirmation.model_validate(
+                registry[key]
+            ))
+        except Exception:
+            # A malformed registry entry must never expand the public API.
+            registry.pop(key, None)
+    return safe
+
+
 def _remember_dream_public_confirmation(
     factory: Any,
     *,
@@ -991,7 +1057,7 @@ def _release_dream_public_confirmation_turn(
     subscribers = _dream_public_confirmation_subscribers(factory, create=False)
     turn_key = (thread_id, turn_id, run_id, actor_id)
     remaining = subscribers.get(turn_key, 0) if subscribers is not None else 0
-    if terminal or remaining <= 1:
+    if terminal:
         if subscribers is not None:
             subscribers.pop(turn_key, None)
         _forget_dream_public_confirmations_for_turn(
@@ -1002,7 +1068,12 @@ def _release_dream_public_confirmation_turn(
             actor_id=actor_id,
         )
         return
-    subscribers[turn_key] = remaining - 1
+    if subscribers is None:
+        return
+    if remaining <= 1:
+        subscribers.pop(turn_key, None)
+    else:
+        subscribers[turn_key] = remaining - 1
 
 
 def _validate_dream_public_confirmation_answers(
@@ -1133,7 +1204,29 @@ class StoryWorkspaceDreamAgentMessageService:
         )
         session = self._thread_factory.session_snapshot(thread_id) if self._thread_factory else None
         running = bool(session and session.get("lifecycle") == "running")
-        active_turn_id = str(session.get("current_turn_id")) if running and session.get("current_turn_id") else None
+        trusted_turn = (
+            _trusted_dream_turn_snapshot(
+                self._thread_factory,
+                thread_id=thread_id,
+                run_id=run_id,
+                actor_id=actor_id,
+            )
+            if running and self._thread_factory is not None
+            else None
+        )
+        active_turn_id = trusted_turn[0] if trusted_turn is not None else None
+        pending_tool_confirmations = (
+            _pending_dream_public_confirmations(
+                self._thread_factory,
+                thread_id=thread_id,
+                turn_id=trusted_turn[0],
+                run_id=run_id,
+                actor_id=actor_id,
+                runtime_pending_ids=trusted_turn[1],
+            )
+            if trusted_turn is not None
+            else []
+        )
         has_active_claim = self._has_active_claim(
             run_id=run_id,
             thread_id=thread_id,
@@ -1160,6 +1253,7 @@ class StoryWorkspaceDreamAgentMessageService:
             messages=self._safe_messages(
                 run_id=run_id, thread_id=thread_id, actor_id=actor_id
             ),
+            pending_tool_confirmations=pending_tool_confirmations,
             snapshot_at=datetime.now(UTC),
         )
 
@@ -1311,21 +1405,16 @@ class StoryWorkspaceDreamAgentMessageService:
         if self._thread_factory is None:
             yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
             return
-        snapshot = self._thread_factory.session_snapshot(thread_id)
-        if not snapshot or snapshot.get("lifecycle") != "running":
-            yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
-            return
-        turn_id = str(snapshot.get("current_turn_id") or "")
-        turn_matcher = getattr(
+        trusted_turn = _trusted_dream_turn_snapshot(
             self._thread_factory,
-            "is_expected_story_workspace_dream_turn",
-            None,
+            thread_id=thread_id,
+            run_id=run_id,
+            actor_id=actor_id,
         )
-        if not callable(turn_matcher) or not turn_matcher(
-            thread_id, turn_id, run_id, actor_id
-        ):
+        if trusted_turn is None:
             yield "event: status\ndata: {\"lifecycle\":\"idle\"}\n\n"
             return
+        turn_id, _runtime_pending_ids = trusted_turn
         after_position = _dream_public_cursor_position(after, turn_id=turn_id)
 
         def cursor_consumed(raw_ordinal: int, subevent: int = 0) -> bool:
@@ -1603,23 +1692,29 @@ class StoryWorkspaceDreamAgentMessageService:
                 "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
                 409,
             )
-        snapshot = factory.session_snapshot(thread_id)
-        turn_id = (
-            str(snapshot.get("current_turn_id") or "")
-            if isinstance(snapshot, dict)
-            and snapshot.get("lifecycle") == "running"
-            else ""
-        )
-        matcher = getattr(
+        trusted_turn = _trusted_dream_turn_snapshot(
             factory,
-            "is_expected_story_workspace_dream_turn",
-            None,
+            thread_id=thread_id,
+            run_id=run_id,
+            actor_id=actor_id,
         )
-        if (
-            not turn_id
-            or not callable(matcher)
-            or not matcher(thread_id, turn_id, run_id, actor_id)
-        ):
+        if trusted_turn is None:
+            raise StoryWorkspaceDreamAgentMessageError(
+                "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+                409,
+            )
+        turn_id, runtime_pending_ids = trusted_turn
+        pending_confirmations = _pending_dream_public_confirmations(
+            factory,
+            thread_id=thread_id,
+            turn_id=turn_id,
+            run_id=run_id,
+            actor_id=actor_id,
+            runtime_pending_ids=runtime_pending_ids,
+        )
+        if command.tool_call_id not in {
+            item.tool_call_id for item in pending_confirmations
+        }:
             raise StoryWorkspaceDreamAgentMessageError(
                 "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
                 409,
@@ -1650,6 +1745,15 @@ class StoryWorkspaceDreamAgentMessageService:
             answers=answers,
         )
         if not resolved:
+            if command.tool_call_id not in set(
+                (_trusted_dream_turn_snapshot(
+                    factory,
+                    thread_id=thread_id,
+                    run_id=run_id,
+                    actor_id=actor_id,
+                ) or ("", []))[1]
+            ):
+                registry.pop(confirmation_key, None)
             raise StoryWorkspaceDreamAgentMessageError(
                 "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
                 409,
