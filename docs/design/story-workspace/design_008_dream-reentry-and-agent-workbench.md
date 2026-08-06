@@ -822,3 +822,42 @@ message view model 与 dream files/local draft reducer 只能通过只读 run ID
 | 2026-08-05 | 消息交互复审返工：发送强制跟随到新对话；AskUser 改为不透明 `qN`；补齐危险命令 fail-closed、规范 run ID 豁免、稳定连接退避与重叠 SSE 租约 |
 | 2026-08-05 | 信息层级返工：Rail 移除重复回复/空态并增加 Dream Deck 元信息入口；Panel 移除重复 header；中间过程改为服务端安全 activity + Dream 专属折叠渲染 |
 | 2026-08-05 | 信息层级复审返工：补齐跨帧公开文本脱敏、confirmation activity 终态游标、activity-only 自动跟随/播报、元信息焦点管理与 72px 窄屏侧栏；Dream Agent section 打开时隐藏内容确认栏 |
+| 2026-08-06 | 工具确认真实链路返工：以 factory 的 run/actor-scoped trusted Dream turn accessor 取代对通用 session snapshot 私有字段的错误依赖；snapshot 恢复 runtime pending 与 safe projection 的交集；非 terminal SSE 断开不再删除仍等待的确认；Panel 隐藏时入口明确提示，打开后聚焦确认控件 |
+
+## 24. 2026-08-06 工具确认恢复修订
+
+真实运行证明 DEC-045 的 Dream 专属确认 UI 方向正确，但 DEC-046 把最后一个 SSE subscriber 的释放当成 confirmation projection 清理条件并不成立；同时 message adapter 错误依赖了通用 session snapshot 未承诺的 `current_turn_id`。本节覆盖与上述两点冲突的旧描述，完整问题证据见 `2026-08-06-dream-agent-tool-confirmation-recovery-rework-record.md`。
+
+### 24.1 真实 turn 与 pending owner
+
+- `ClaudeAgentThreadFactory` 提供仅供 Story Workspace 内部调用的 trusted Dream turn accessor；它必须同时校验 session、turn、run、actor、Dream context 与 message metadata，不把 turn ID 加入通用 diagnostic snapshot。
+- 同一 thread 上没有 Dream provenance 的 generic Chat turn 不得被 accessor 接管；共用 thread 不是 run 绑定证据。只有 Dream launch、Dream confirmation 与 `story-workspace-dream-agent-user` 三类受信来源可进入 Dream confirmation surface。
+- runtime `ToolConfirmationStore` 唯一拥有“工具是否仍等待决定”；Dream public registry 只拥有服务端 allowlist 后的显示 projection。
+- Dream snapshot 的 `pendingToolConfirmations` 是 exact thread/turn/run/actor 下 `runtime pending IDs ∩ safe projections`，按首次投影顺序返回；浏览器不得从消息文本、raw parts 或数组位置推导。
+- EventBus replay 继续负责页面首次订阅前尚未进入 registry 的 confirmation；snapshot 负责已投影 confirmation 的刷新、晚订阅与重连恢复。
+
+### 24.2 生命周期与清理
+
+- 非 terminal SSE 订阅释放只减少 observer lease，不删除仍在 runtime 等待的 safe projection。
+- safe projection registry 由 thread factory 的 turn lifecycle 持有：新 turn 建立前与 `_run_turn_task` finally 清理旧 turn；resolve 成功删除 exact key；snapshot/confirm 读取 runtime pending IDs 时 opportunistic prune stale key。在线 adapter 消费 tool output 后的清理只是提前收敛，不是无订阅清理 owner。
+- confirm POST 每次重新校验 exact trusted turn，并要求目标同时属于 runtime pending IDs 与 safe projection；timeout/turn replacement 后 fail closed 409，同时清理已识别的 stale exact key。
+- 后端进程重启会终止 in-memory Agent turn/Future；本设计不把不存在的 runtime wait 伪装成可恢复确认，也不新增业务失败状态。
+
+### 24.3 UI 与无障碍
+
+- Panel/Dialog 继续共用 `StoryWorkspaceDreamToolConfirmation`，在原 composer 位置显示；严禁复用通用 Chat Dock。
+- Dream 内容区不因 pending 自动切走焦点；masthead/rail 必须显式显示“等待你确认一项操作”并提供可访问的打开入口。
+- Panel 关闭时 pending 只更新入口并以 `role="status"` / `aria-live="polite"` 宣告，不移动焦点；同一 `toolCallId` 经 snapshot 与 SSE 重复到达只播报一次。
+- 主动打开 Panel 时聚焦 FIFO 队首；Panel 已打开且用户在 composer（或 composer 替换后焦点落空）时，新队首取得焦点；用户正在消息历史/返回导航时只播报、不抢焦。
+- 队首解决后，若仍有下一项则聚焦下一项首控件；最后一项解决且 Panel 仍打开则聚焦恢复后的 textarea；Panel 已关闭不迁移焦点。inline confirmation 保持命名 `region`，不冒充模态 `alertdialog`。
+- 公开标题只使用 server allowlist 的 action/tool display name；Write 的绝对目标路径和 raw input 不进入 API 或 DOM。
+
+### 24.4 新增验收
+
+- [ ] 真实 thread factory state 下 Dream SSE 能取得受信 turn，不因空 `current_turn_id` 退回 idle。
+- [ ] snapshot 可恢复仍在 runtime 等待的安全确认；断线/刷新后仍可从 Panel 允许或拒绝。
+- [ ] resolve、terminal、turn replacement 与 runtime timeout 不留下陈旧确认。
+- [ ] 无 SSE subscriber 时，factory turn finally / next-turn replacement 仍清理 registry；snapshot/confirm 会 prune runtime 已不 pending 的 stale key。
+- [ ] 错误 actor/run/thread 无法枚举或提交确认。
+- [ ] Panel 关闭、主动打开、已开且阅读历史、FIFO 下一项、最后一项解决五种焦点路径符合 §24.3；snapshot+SSE 对同一 toolCallId 只 polite 播报一次；390px 无不可达操作。
+- [ ] Dream API/DOM 与源码 import graph 不含通用 Dock、raw tool input、绝对敏感路径、凭证、隐藏推理或调试事件。
