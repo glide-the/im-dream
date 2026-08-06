@@ -111,6 +111,7 @@ test('allowlists visible next-action labels and reuses idempotency only for one 
         createKey: () => string,
       ) => {
         keyFor(runId: string, fact: string, action: string): string;
+        rotate(runId: string, fact: string, action: string): void;
       };
       readonly storyWorkspaceNormalizeEpisodeGuidance: (value: string) => string | null;
       readonly storyWorkspaceEpisodeCanonicalInputs: (surface: {
@@ -146,7 +147,9 @@ test('allowlists visible next-action labels and reuses idempotency only for one 
     expect(keys.keyFor('run-a', 'etag-1', 'write_script')).toBe('key-1');
     expect(keys.keyFor('run-a', 'etag-2', 'write_script')).toBe('key-2');
     expect(keys.keyFor('run-a', 'etag-2', 'write_script')).toBe('key-2');
-    expect(keys.keyFor('run-a', 'etag-2', 'review_script')).toBe('key-3');
+    keys.rotate('run-a', 'etag-2', 'write_script');
+    expect(keys.keyFor('run-a', 'etag-2', 'write_script')).toBe('key-3');
+    expect(keys.keyFor('run-a', 'etag-2', 'review_script')).toBe('unexpected');
 
     expect(module.storyWorkspaceNormalizeEpisodeGuidance('  保留克制感  ')).toBe('保留克制感');
     expect(module.storyWorkspaceNormalizeEpisodeGuidance(' \n\t ')).toBeNull();
@@ -478,6 +481,13 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
       workflow: {
         factsRevision: value === 'a' ? 1 : 2,
         nextAction: { action, diagnostic: 'ready', canDispatch: true },
+        actionOptions: [{
+          action,
+          label: action === 'write_script' ? '创作第一集剧本' : '生成第一集镜头提示词',
+          displayCommand: action === 'write_script' ? '/drama-script (EP01)' : '/drama-prompt (EP01)',
+          isCurrent: true,
+          canDispatch: true,
+        }],
         prerequisites: [], legacyPartial: false,
       },
     });
@@ -527,6 +537,7 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     }
   `;
   const storyWorkspaceHooksModule = `
+    import { useSyncExternalStore } from 'react';
     const RUN_ID = '${runId}';
     const files = {
       storyWorkspaceRunId: RUN_ID,
@@ -541,16 +552,45 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
       confirmationDispatched: true, canConfirm: false,
       confirmationLabel: '确认并继续',
     };
+    let agentSnapshot = {
+      storyWorkspaceRunId: RUN_ID,
+      messages: [], canSend: false, lifecycle: 'idle', activeTurnId: null,
+      sendBlockReason: 'continuing', snapshotAt: '2026-08-06T00:00:00Z',
+    };
+    const agentListeners = new Set();
+    const subscribeAgent = (listener) => {
+      agentListeners.add(listener);
+      return () => agentListeners.delete(listener);
+    };
     const agent = {
       streamText: '', streamContent: [], isSending: false, error: null,
       pendingToolConfirmation: null, isConfirmingTool: false,
-      snapshot: { messages: [], canSend: false, lifecycle: 'idle', sendBlockReason: 'continuing' },
-      markRead: () => undefined,
+      isLoading: false, isReconnecting: false, unreadCount: 0,
+      markRead: () => undefined, refresh: () => undefined,
     };
     export function useStoryWorkspaceDreamFiles() {
       return { data: files, error: null, isLoading: false };
     }
-    export function useStoryWorkspaceDreamAgent() { return agent; }
+    export function useStoryWorkspaceDreamAgent() {
+      const snapshot = useSyncExternalStore(subscribeAgent, () => agentSnapshot, () => agentSnapshot);
+      return { ...agent, snapshot };
+    }
+    export function __u11SetAgentSettled(messageId) {
+      agentSnapshot = {
+        ...agentSnapshot,
+        canSend: true,
+        sendBlockReason: null,
+        snapshotAt: '2026-08-06T00:00:03Z',
+        messages: [
+          {
+            id: messageId, role: 'user', text: '受控 Episode 操作', truncated: false,
+            content: [{ kind: 'text', text: '受控 Episode 操作', truncated: false }],
+            createdAt: '2026-08-06T00:00:01Z',
+          },
+        ],
+      };
+      for (const listener of agentListeners) listener();
+    }
   `;
   const workflowRunModule = `
     const RUN_ID = '${runId}';
@@ -568,7 +608,13 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     import { createRoot } from 'react-dom/client';
     import { StoryWorkspaceExecutionPage } from '/src/pages/story-workspace/StoryWorkspaceExecutionPage.tsx';
     import { __u11Settle, __u11Stats, __u11ToSurfaceB } from 'virtual:u11-episode-artifacts';
-    window.__u11Deferred = { settle: __u11Settle, stats: __u11Stats, toB: __u11ToSurfaceB };
+    import { __u11SetAgentSettled } from 'virtual:u11-story-workspace-hooks';
+    window.__u11Deferred = {
+      settle: __u11Settle,
+      settleAgent: __u11SetAgentSettled,
+      stats: __u11Stats,
+      toB: __u11ToSurfaceB,
+    };
     createRoot(document.querySelector('#root')).render(h(StoryWorkspaceExecutionPage, { runId: '${runId}' }));
   `;
   const virtualIds: Readonly<Record<string, string>> = {
@@ -623,6 +669,7 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
   }
   type DeferredHarness = {
     readonly settle: (value: 'a' | 'b', outcome: 'resolve' | 'reject') => void;
+    readonly settleAgent: (messageId: string) => void;
     readonly stats: () => {
       readonly refreshCount: number;
       readonly calls: ReadonlyArray<{
@@ -684,6 +731,21 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
       await expect(page.getByRole('dialog', { name: '确认 Episode 下一步' })).toHaveCount(0);
       await expect(page.getByRole('button', { name: '已交给 Dream Agent' })).toBeDisabled();
       expect((await stats()).refreshCount).toBe(1);
+
+      await page.evaluate(() => {
+        (window as unknown as { __u11Deferred: DeferredHarness })
+          .__u11Deferred.settleAgent('message-b');
+      });
+      await expect(page.getByRole('button', { name: '生成镜头 Prompt' })).toBeEnabled();
+      await expect(page.getByText('本轮结束但尚未检测到新产物'))
+        .toBeVisible();
+      expect((await stats()).refreshCount).toBe(2);
+
+      await page.getByRole('button', { name: '生成镜头 Prompt' }).click();
+      await page.getByRole('button', { name: '确认并继续' }).click();
+      await expect.poll(async () => (await stats()).calls).toHaveLength(3);
+      const retried = await stats();
+      expect(retried.calls[2]?.key).not.toBe(retried.calls[1]?.key);
     }
   } finally {
     await server.close();

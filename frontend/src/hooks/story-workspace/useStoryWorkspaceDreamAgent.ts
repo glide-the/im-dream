@@ -33,6 +33,32 @@ const DREAM_AGENT_ACTIVITY_LABELS: Readonly<Record<StoryWorkspaceDreamAgentActiv
 };
 const DREAM_AGENT_ACTIVITY_ID = /^dream_activity_[0-9a-f]{32,64}$/;
 export const STORY_WORKSPACE_DREAM_AGENT_STABLE_CONNECTION_MS = 10_000;
+export const STORY_WORKSPACE_DREAM_AGENT_BUSY_POLL_INTERVAL_MS = 3_000;
+
+export function storyWorkspaceDreamAgentShouldPollBusy(
+  snapshot: Pick<
+    StoryWorkspaceDreamAgentMessageSnapshot,
+    'lifecycle' | 'activeTurnId' | 'sendBlockReason' | 'canSend'
+  > | null | undefined,
+): boolean {
+  return snapshot?.lifecycle === 'idle'
+    && snapshot.sendBlockReason === 'busy'
+    && !snapshot.canSend;
+}
+
+export function storyWorkspaceDreamAgentHasSettledMessage(
+  snapshot: StoryWorkspaceDreamAgentMessageSnapshot | null | undefined,
+  messageId: string,
+): boolean {
+  if (
+    snapshot?.lifecycle !== 'idle'
+    || snapshot.activeTurnId !== null
+    || !snapshot.canSend
+  ) return false;
+  return snapshot.messages.some(
+    (message) => message.id === messageId && message.role === 'user',
+  );
+}
 
 export function storyWorkspaceDreamAgentReconnectDelay(attemptIndex: number): number {
   const normalizedIndex = Number.isFinite(attemptIndex)
@@ -623,6 +649,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     let streamController: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let stableConnectionTimer: ReturnType<typeof setTimeout> | null = null;
+    let busyPollTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectIndex = 0;
     let latestCursor: string | null = null;
     let latestTurnId: string | null = null;
@@ -659,6 +686,26 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       if (stableConnectionTimer) clearTimeout(stableConnectionTimer);
       stableConnectionTimer = null;
     };
+    const clearBusyPollTimer = () => {
+      if (busyPollTimer) clearTimeout(busyPollTimer);
+      busyPollTimer = null;
+    };
+    const scheduleBusyPoll = (
+      candidate: StoryWorkspaceDreamAgentMessageSnapshot | null | undefined,
+    ) => {
+      clearBusyPollTimer();
+      if (!active || !storyWorkspaceDreamAgentShouldPollBusy(candidate)) return;
+      busyPollTimer = setTimeout(() => {
+        busyPollTimer = null;
+        void reconcile().then((next) => {
+          if (next?.lifecycle === 'streaming') connect();
+          else scheduleBusyPoll(next);
+        }).catch((reason: unknown) => {
+          if (active && reason instanceof Error && reason.name !== 'AbortError') setError(reason);
+          scheduleBusyPoll(latestSnapshot);
+        });
+      }, STORY_WORKSPACE_DREAM_AGENT_BUSY_POLL_INTERVAL_MS);
+    };
     const markStreamOpen = () => {
       if (!active) return;
       clearStableConnectionTimer();
@@ -677,7 +724,10 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         reconnectTimer = null;
         void reconcile().then((next) => {
           if (next?.lifecycle === 'streaming') connect();
-          else if (active) setIsReconnecting(false);
+          else if (active) {
+            setIsReconnecting(false);
+            scheduleBusyPoll(next);
+          }
         }).catch((reason: unknown) => {
           if (active && reason instanceof Error && reason.name !== 'AbortError') setError(reason);
           scheduleReconnect();
@@ -721,13 +771,17 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         || (parsed.type === 'status' && parsed.lifecycle === 'idle')) {
         setPendingToolConfirmations([]);
         streamController?.abort(); streamController = null;
-        void reconcileTerminal().then((next) => { if (next?.lifecycle === 'streaming') connect(); }).catch((reason: unknown) => {
+        void reconcileTerminal().then((next) => {
+          if (next?.lifecycle === 'streaming') connect();
+          else scheduleBusyPoll(next);
+        }).catch((reason: unknown) => {
           if (active && reason instanceof Error && reason.name !== 'AbortError') { setError(reason); scheduleReconnect(); }
         });
       }
     };
     const connect = () => {
       if (!active) return;
+      clearBusyPollTimer();
       streamController?.abort();
       clearStableConnectionTimer();
       streamController = new AbortController();
@@ -745,12 +799,16 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       }).finally(clearStableConnectionTimer);
     };
     setIsLoading(true);
-    void reconcile().then((next) => { if (next?.lifecycle === 'streaming') connect(); }).catch((reason: unknown) => {
+    void reconcile().then((next) => {
+      if (next?.lifecycle === 'streaming') connect();
+      else scheduleBusyPoll(next);
+    }).catch((reason: unknown) => {
       if (active && reason instanceof Error && reason.name !== 'AbortError') { setError(reason); scheduleReconnect(); }
     }).finally(() => { if (active) setIsLoading(false); });
     return () => {
       active = false; controller.abort(); streamController?.abort();
       if (reconnectTimer) clearTimeout(reconnectTimer);
+      clearBusyPollTimer();
       clearStableConnectionTimer();
     };
   }, [reload, runId]);

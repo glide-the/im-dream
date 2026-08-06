@@ -3,16 +3,23 @@
 // [Pos] Dream Agent adapter Red/Green contract tests (design_008 §9/§20).
 
 import { expect, test } from '@playwright/test';
+// @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
+import { readFileSync } from 'node:fs';
 import {
+  STORY_WORKSPACE_DREAM_AGENT_BUSY_POLL_INTERVAL_MS,
   storyWorkspaceBuildDreamAgentSendPayload,
   storyWorkspaceComputeDreamAgentUnreadCount,
+  storyWorkspaceDreamAgentHasSettledMessage,
   storyWorkspaceDreamAgentEventsEndpoint,
   storyWorkspaceFetchDreamAgentSnapshot,
+  storyWorkspaceDreamAgentShouldPollBusy,
   storyWorkspaceReadDreamAgentEventStream,
   storyWorkspaceParseDreamAgentEvent,
   storyWorkspaceParseDreamAgentSnapshot,
   storyWorkspaceReduceDreamAgentEvents,
 } from '../useStoryWorkspaceDreamAgent';
+
+const ADAPTER_SOURCE = readFileSync(new URL('../useStoryWorkspaceDreamAgent.ts', import.meta.url), 'utf8');
 
 const RUN_ID = 'run_0123456789abcdef0123456789abcdef';
 
@@ -25,6 +32,57 @@ const SNAPSHOT = {
   messages: [{ id: 'm1', role: 'assistant', text: '已保存的人物。', truncated: false, createdAt: '2026-08-05T00:00:00Z' }],
   snapshotAt: '2026-08-05T00:00:01Z',
 };
+
+test('idle busy snapshots request low-frequency REST reconciliation without treating time as completion', () => {
+  expect(STORY_WORKSPACE_DREAM_AGENT_BUSY_POLL_INTERVAL_MS).toBeGreaterThanOrEqual(2_000);
+  expect(storyWorkspaceDreamAgentShouldPollBusy({
+    ...SNAPSHOT,
+    lifecycle: 'idle',
+    activeTurnId: null,
+    sendBlockReason: 'busy',
+  })).toBe(true);
+  expect(storyWorkspaceDreamAgentShouldPollBusy({
+    ...SNAPSHOT,
+    lifecycle: 'streaming',
+    sendBlockReason: 'busy',
+  })).toBe(false);
+  expect(storyWorkspaceDreamAgentShouldPollBusy({
+    ...SNAPSHOT,
+    lifecycle: 'idle',
+    activeTurnId: null,
+    canSend: true,
+    sendBlockReason: null,
+  })).toBe(false);
+  expect(ADAPTER_SOURCE).toContain('void reconcile()');
+  expect(ADAPTER_SOURCE).not.toMatch(/setTimeout\([^)]*setSnapshot\([^)]*canSend/s);
+});
+
+test('accepted action settles from its persisted user message and an authoritative idle send gate', () => {
+  const messageId = 'dream_agent_' + 'a'.repeat(64);
+  const base = storyWorkspaceParseDreamAgentSnapshot({
+    ...SNAPSHOT,
+    lifecycle: 'idle',
+    activeTurnId: null,
+    canSend: true,
+    sendBlockReason: null,
+    messages: [
+      { id: 'assistant-before', role: 'assistant', text: '旧回复', truncated: false, createdAt: '2026-08-05T00:00:00Z' },
+      { id: messageId, role: 'user', text: '受控 Episode 操作', truncated: false, createdAt: '2026-08-05T00:00:01Z' },
+    ],
+  });
+  expect(storyWorkspaceDreamAgentHasSettledMessage(base, messageId)).toBe(true);
+  expect(storyWorkspaceDreamAgentHasSettledMessage({
+    ...base,
+    canSend: false,
+    sendBlockReason: 'busy',
+  }, messageId)).toBe(false);
+  expect(storyWorkspaceDreamAgentHasSettledMessage({
+    ...base,
+    lifecycle: 'streaming',
+    activeTurnId: 'turn-after-accepted',
+  }, messageId)).toBe(false);
+  expect(storyWorkspaceDreamAgentHasSettledMessage(base, 'different-message')).toBe(false);
+});
 
 test('snapshot is a safe, complete first render before any increment is reduced', () => {
   const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);

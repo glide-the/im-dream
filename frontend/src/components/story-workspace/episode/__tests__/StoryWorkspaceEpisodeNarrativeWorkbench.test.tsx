@@ -265,6 +265,7 @@ function surface(stage: 'outline' | 'script' | 'storyboard'): StoryWorkspaceEpis
         canDispatch: true,
       },
       prerequisites: [],
+      actionOptions: [],
       legacyPartial: false,
     },
   };

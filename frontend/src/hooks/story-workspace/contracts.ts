@@ -494,6 +494,17 @@ export type StoryWorkspaceEpisodeDispatchAction = Exclude<
   StoryWorkspaceEpisodeAction,
   'none_in_scope'
 >;
+const STORY_WORKSPACE_EPISODE_ACTION_DISPLAY_COMMANDS = {
+  plan_episode: '/drama-plan',
+  write_script: '/drama-script (EP01)',
+  review_script: '剧本审查',
+  refresh_assets: '/drama-asset',
+  regenerate_storyboard: '/drama-storyboard (EP01)',
+  generate_prompts: '/drama-prompt (EP01)',
+  review_full_chain: '完整链路审查',
+  validate_episode: '校验完整产物',
+  prepare_render_guide: '/drama-render + /drama-voice',
+} as const satisfies Readonly<Record<StoryWorkspaceEpisodeDispatchAction, string>>;
 export type StoryWorkspaceEpisodeActionCapability =
   | StoryWorkspaceEpisodeAction
   | 'recover_first_episode_binding';
@@ -510,10 +521,19 @@ export interface StoryWorkspaceEpisodeActionResolution {
   readonly canDispatch: boolean;
 }
 
+export interface StoryWorkspaceEpisodeActionOption {
+  readonly action: StoryWorkspaceEpisodeDispatchAction;
+  readonly label: string;
+  readonly displayCommand: string;
+  readonly isCurrent: boolean;
+  readonly canDispatch: boolean;
+}
+
 export interface StoryWorkspaceEpisodeWorkflowProjection {
   readonly factsRevision: number;
   readonly nextAction: StoryWorkspaceEpisodeActionResolution;
   readonly prerequisites: readonly StoryWorkspaceEpisodeAction[];
+  readonly actionOptions: readonly StoryWorkspaceEpisodeActionOption[];
   readonly legacyPartial: boolean;
 }
 
@@ -828,6 +848,9 @@ export const storyWorkspaceEpisodeStringFieldClassification = {
   'workflow.nextAction.action': 'machine_enum_or_pattern',
   'workflow.nextAction.diagnostic': 'machine_enum_or_pattern',
   'workflow.prerequisites[]': 'machine_enum_or_pattern',
+  'workflow.actionOptions[].action': 'machine_enum_or_pattern',
+  'workflow.actionOptions[].label': 'public_text',
+  'workflow.actionOptions[].displayCommand': 'public_text',
   'artifacts[].relativeKey': 'canonical_relative_key',
   'artifacts[].availability': 'machine_enum_or_pattern',
   'artifacts[].contentRevision': 'machine_enum_or_pattern',
@@ -992,6 +1015,8 @@ const STORY_WORKSPACE_EPISODE_PRIVATE_MODEL_TEXT = /(?:\bchain[\s_-]*(?:of[\s_-]
 const STORY_WORKSPACE_EPISODE_RAW_COMMAND = /(?:^|[\s`])(?:\$\s+|sudo\s+|curl\b|wget\b|(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node\b|npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|cat\s+(?:~?\/\.ssh\/|\/etc\/(?:passwd|shadow)|\S*(?:credential|secret|token|private[_-]?key))|dd\s+[^\n]{0,240}\bif=\S+[^\n]{0,240}\bof=\S+|\/drama-forge:[a-z0-9_-]+|(?:tool(?:_name)?|renderer|raw_command|command(?:_line)?)\s*[:=])/i;
 const STORY_WORKSPACE_EPISODE_SENSITIVE_OPTION = /(?<![A-Za-z0-9_-])--(?:api[-_]?key|token|secret|password|credential|authorization)(?:[=\s]|$)/i;
 const STORY_WORKSPACE_EPISODE_TOOL_OPTION = /(?<![A-Za-z0-9_-])(?:tool|renderer)\b[^\r\n]*?(?<![A-Za-z0-9_-])--[A-Za-z0-9][A-Za-z0-9_-]*/i;
+const STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER =
+  /(?:agent_?id|binding_?revision|expected_?(?:binding_?)?revision|workflow_?run_?id|thread_?id|tool_?call_?id|bind_first_episode|write_dream_(?:run|stage)|record_episode_workflow_completion|dream_write_rejected|mcp__)/i;
 
 type StoryWorkspaceEpisodeWireRecord = Record<string, unknown>;
 type StoryWorkspaceEpisodeStringFieldVisitor = (
@@ -1362,7 +1387,7 @@ function storyWorkspaceParseEpisodeWorkflow(
   value: unknown,
 ): StoryWorkspaceEpisodeWorkflowProjection {
   const record = storyWorkspaceEpisodeRecord(value, 'workflow', [
-    'factsRevision', 'nextAction', 'prerequisites', 'legacyPartial',
+    'factsRevision', 'nextAction', 'prerequisites', 'actionOptions', 'legacyPartial',
   ]);
   const nextActionRecord = storyWorkspaceEpisodeRecord(record.nextAction, 'workflow.nextAction', [
     'action', 'diagnostic', 'canDispatch',
@@ -1400,6 +1425,79 @@ function storyWorkspaceParseEpisodeWorkflow(
   if (prerequisites.includes('none_in_scope')) {
     throw new Error('workflow.prerequisites cannot contain none_in_scope.');
   }
+  const dispatchActions = STORY_WORKSPACE_EPISODE_ACTIONS.filter(
+    (action): action is StoryWorkspaceEpisodeDispatchAction => action !== 'none_in_scope',
+  );
+  const actionOptions = storyWorkspaceEpisodeArray(
+    record.actionOptions,
+    'workflow.actionOptions',
+    (item, index): StoryWorkspaceEpisodeActionOption => {
+      const label = `workflow.actionOptions[${index}]`;
+      const option = storyWorkspaceEpisodeRecord(item, label, [
+        'action', 'label', 'displayCommand', 'isCurrent', 'canDispatch',
+      ]);
+      const optionAction = storyWorkspaceEpisodeEnum(
+        option.action,
+        `${label}.action`,
+        dispatchActions,
+      );
+      if (
+        (typeof option.label === 'string'
+          && STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER.test(option.label))
+        || (typeof option.displayCommand === 'string'
+          && STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER.test(option.displayCommand))
+      ) {
+        throw new Error(`${label} contains an internal workflow marker.`);
+      }
+      const optionLabel = storyWorkspaceEpisodePublicText(option.label, `${label}.label`, {
+        min: 1,
+        max: 120,
+      });
+      const displayCommand = storyWorkspaceEpisodeString(
+        option.displayCommand,
+        `${label}.displayCommand`,
+        { min: 1, max: 120, pathAudit: false },
+      );
+      if (displayCommand !== STORY_WORKSPACE_EPISODE_ACTION_DISPLAY_COMMANDS[optionAction]) {
+        throw new Error(`${label}.displayCommand does not match its action.`);
+      }
+      return {
+        action: optionAction,
+        label: optionLabel,
+        displayCommand,
+        isCurrent: storyWorkspaceEpisodeBoolean(option.isCurrent, `${label}.isCurrent`),
+        canDispatch: storyWorkspaceEpisodeBoolean(option.canDispatch, `${label}.canDispatch`),
+      };
+    },
+    9,
+  );
+  storyWorkspaceEpisodeUnique(
+    actionOptions.map((option) => option.action),
+    'workflow.actionOptions',
+  );
+  if (nextAction.action === 'none_in_scope') {
+    if (actionOptions.length !== 0) {
+      throw new Error('workflow.actionOptions must be empty for none_in_scope.');
+    }
+  } else {
+    const currentIndex = dispatchActions.indexOf(nextAction.action);
+    const expectedActions = dispatchActions.slice(currentIndex);
+    if (
+      actionOptions.length !== expectedActions.length
+      || actionOptions.some((option, index) => option.action !== expectedActions[index])
+    ) {
+      throw new Error('workflow.actionOptions must be the ordered workflow suffix.');
+    }
+    const current = actionOptions[0];
+    if (
+      current === undefined
+      || !current.isCurrent
+      || current.canDispatch !== nextAction.canDispatch
+      || actionOptions.slice(1).some((option) => option.isCurrent || option.canDispatch)
+    ) {
+      throw new Error('workflow.actionOptions has an invalid current action.');
+    }
+  }
   return {
     factsRevision: storyWorkspaceEpisodeNumber(record.factsRevision, 'workflow.factsRevision', {
       integer: true,
@@ -1408,6 +1506,7 @@ function storyWorkspaceParseEpisodeWorkflow(
     }),
     nextAction,
     prerequisites,
+    actionOptions,
     legacyPartial: storyWorkspaceEpisodeBoolean(record.legacyPartial, 'workflow.legacyPartial'),
   };
 }

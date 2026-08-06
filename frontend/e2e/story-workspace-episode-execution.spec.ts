@@ -317,6 +317,22 @@ function episodeSurface(revisionIndex: 0 | 1) {
       factsRevision: revisionIndex,
       nextAction: { action: 'validate_episode', diagnostic: 'needs_confirmation', canDispatch: true },
       prerequisites: ['review_full_chain'],
+      actionOptions: [
+        {
+          action: 'validate_episode',
+          label: '校验第一集完整产物',
+          displayCommand: '校验完整产物',
+          isCurrent: true,
+          canDispatch: true,
+        },
+        {
+          action: 'prepare_render_guide',
+          label: '准备第一集渲染指引',
+          displayCommand: '/drama-render + /drama-voice',
+          isCurrent: false,
+          canDispatch: false,
+        },
+      ],
       legacyPartial: false,
     },
   };

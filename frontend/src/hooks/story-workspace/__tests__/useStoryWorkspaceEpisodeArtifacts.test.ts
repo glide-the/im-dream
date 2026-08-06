@@ -158,10 +158,31 @@ function workflow(
   diagnostic = 'ready',
   canDispatch = true,
 ): Record<string, unknown> {
+  const actionOptions = [
+    ['plan_episode', '规划第一集', '/drama-plan'],
+    ['write_script', '创作第一集剧本', '/drama-script (EP01)'],
+    ['review_script', '审阅第一集剧本', '剧本审查'],
+    ['refresh_assets', '核对并完善角色与场景资产', '/drama-asset'],
+    ['regenerate_storyboard', '生成或更新第一集分镜', '/drama-storyboard (EP01)'],
+    ['generate_prompts', '生成第一集镜头提示词', '/drama-prompt (EP01)'],
+    ['review_full_chain', '审阅第一集完整创作链路', '完整链路审查'],
+    ['validate_episode', '校验第一集完整产物', '校验完整产物'],
+    ['prepare_render_guide', '准备第一集渲染指引', '/drama-render + /drama-voice'],
+  ] as const;
+  const currentIndex = actionOptions.findIndex(([candidate]) => candidate === action);
   return {
     factsRevision: 0,
     nextAction: { action, diagnostic, canDispatch },
     prerequisites: [],
+    actionOptions: currentIndex < 0 ? [] : actionOptions.slice(currentIndex).map(
+      ([optionAction, label, displayCommand], index) => ({
+        action: optionAction,
+        label,
+        displayCommand,
+        isCurrent: index === 0,
+        canDispatch: index === 0 && canDispatch,
+      }),
+    ),
     legacyPartial: false,
   };
 }
@@ -651,6 +672,36 @@ test('requires strict workflow truth on bound surfaces and null workflow on unbo
       canDispatch: true,
     },
     prerequisites: [],
+    actionOptions: [
+      {
+        action: 'generate_prompts',
+        label: '生成第一集镜头提示词',
+        displayCommand: '/drama-prompt (EP01)',
+        isCurrent: true,
+        canDispatch: true,
+      },
+      {
+        action: 'review_full_chain',
+        label: '审阅第一集完整创作链路',
+        displayCommand: '完整链路审查',
+        isCurrent: false,
+        canDispatch: false,
+      },
+      {
+        action: 'validate_episode',
+        label: '校验第一集完整产物',
+        displayCommand: '校验完整产物',
+        isCurrent: false,
+        canDispatch: false,
+      },
+      {
+        action: 'prepare_render_guide',
+        label: '准备第一集渲染指引',
+        displayCommand: '/drama-render + /drama-voice',
+        isCurrent: false,
+        canDispatch: false,
+      },
+    ],
     legacyPartial: false,
   });
   expect(storyWorkspaceParseEpisodeArtifactSurface(unboundSurface()).workflow).toBeNull();
@@ -673,6 +724,31 @@ test('requires strict workflow truth on bound surfaces and null workflow on unbo
     { ...workflow(), prerequisites: ['plan_episode', 'plan_episode'] },
     { ...workflow(), prerequisites: ['none_in_scope'] },
     { ...workflow(), prerequisites: Array.from({ length: 10 }, (_, index) => `step_${index}`) },
+    { ...workflow(), actionOptions: [] },
+    {
+      ...workflow(),
+      actionOptions: [{
+        action: 'write_script', label: '越过当前步骤', displayCommand: '/drama-script (EP01)',
+        isCurrent: true, canDispatch: true,
+      }],
+    },
+    {
+      ...workflow(),
+      actionOptions: [
+        ...((workflow().actionOptions as Array<Record<string, unknown>>) ?? []),
+        {
+          action: 'write_script', label: '重复步骤', displayCommand: '/drama-script (EP01)',
+          isCurrent: false, canDispatch: false,
+        },
+      ],
+    },
+    {
+      ...workflow(),
+      actionOptions: [{
+        action: 'plan_episode', label: '规划第一集', displayCommand: 'mcp__unsafe',
+        isCurrent: true, canDispatch: true,
+      }],
+    },
     { ...workflow(), legacyPartial: 'false' },
     { ...workflow(), rawAgentMessage: '/Users/private/agent.log' },
   ]) {
@@ -681,6 +757,60 @@ test('requires strict workflow truth on bound surfaces and null workflow on unbo
       workflow: invalidWorkflow,
     })).toThrow();
   }
+});
+
+test('workflow action options reject internal diagnostics, sensitive paths and command swapping', () => {
+  const internalMarkers = [
+    'agentId',
+    'agent_id',
+    'bindingRevision',
+    'binding_revision',
+    'expectedBindingRevision',
+    'expected_binding_revision',
+    'expectedRevision',
+    'expected_revision',
+    'workflowRunId',
+    'workflow_run_id',
+    'threadId',
+    'thread_id',
+    'toolCallId',
+    'tool_call_id',
+    'bind_first_episode',
+    'write_dream_run',
+    'write_dream_stage',
+    'record_episode_workflow_completion',
+    'DREAM_WRITE_REJECTED',
+    'mcp__',
+  ] as const;
+  for (const field of ['label', 'displayCommand'] as const) {
+    for (const marker of internalMarkers) {
+      const unsafeWorkflow = workflow();
+      const option = (unsafeWorkflow.actionOptions as Array<Record<string, unknown>>)[0];
+      option[field] = `公开步骤 ${marker}`;
+      expect(() => storyWorkspaceParseEpisodeArtifactSurface({
+        ...boundSurface(),
+        workflow: unsafeWorkflow,
+      }), `${field}: ${marker}`).toThrow(/internal workflow marker/i);
+    }
+    for (const path of ['/Users/private/story.md', '/srv/ink/private/story.md']) {
+      const unsafeWorkflow = workflow();
+      const option = (unsafeWorkflow.actionOptions as Array<Record<string, unknown>>)[0];
+      option[field] = path;
+      expect(() => storyWorkspaceParseEpisodeArtifactSurface({
+        ...boundSurface(),
+        workflow: unsafeWorkflow,
+      }), `${field}: ${path}`).toThrow();
+    }
+  }
+
+  const swappedCommandWorkflow = workflow();
+  const swappedOptions = swappedCommandWorkflow.actionOptions as Array<Record<string, unknown>>;
+  swappedOptions[0].displayCommand = '/drama-script (EP01)';
+  swappedOptions[1].displayCommand = '/drama-plan';
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface({
+    ...boundSurface(),
+    workflow: swappedCommandWorkflow,
+  })).toThrow(/displayCommand/i);
 });
 
 test('rejects unknown schema/enum, duplicate IDs, bad keys, malformed aggregate ETags, and path leaks', () => {
@@ -784,7 +914,7 @@ test('all public Episode text fails closed and parser diagnostics never echo hos
   }
 });
 
-test('one 152-field registry constrains every surface string parser at runtime', () => {
+test('one 155-field registry constrains every surface string parser at runtime', () => {
   const visited = new Map<string, StoryWorkspaceEpisodeStringFieldClass>();
   const onStringField = (
     field: string,
@@ -792,7 +922,7 @@ test('one 152-field registry constrains every surface string parser at runtime',
   ) => visited.set(field, classification);
   storyWorkspaceParseEpisodeArtifactSurface(fullyPopulatedSurface(), { onStringField });
   storyWorkspaceParseEpisodeArtifactSurface(recoverableUnboundSurface(), { onStringField });
-  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(152);
+  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(155);
   expect([...visited.keys()].sort()).toEqual(
     Object.keys(storyWorkspaceEpisodeStringFieldClassification).sort(),
   );
@@ -801,6 +931,9 @@ test('one 152-field registry constrains every surface string parser at runtime',
     new Set(['machine_enum_or_pattern', 'canonical_relative_key', 'public_text', 'diagnostic']),
   );
   expect(storyWorkspaceEpisodeStringFieldClassification).toMatchObject({
+    'workflow.actionOptions[].action': 'machine_enum_or_pattern',
+    'workflow.actionOptions[].label': 'public_text',
+    'workflow.actionOptions[].displayCommand': 'public_text',
     'narrative.shots[].shotType': 'public_text',
     'narrative.shots[].timing.transitionIn': 'public_text',
     'narrative.shots[].timing.transitionOut': 'public_text',

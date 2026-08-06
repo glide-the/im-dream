@@ -556,6 +556,7 @@ function surface(
         canDispatch: false,
       },
       prerequisites: [],
+      actionOptions: [],
       legacyPartial: false,
     },
   };
