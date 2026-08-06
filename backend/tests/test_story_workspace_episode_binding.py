@@ -365,6 +365,28 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
                     "demo",
                 )
 
+    def test_canonical_project_identity_accepts_legacy_project_mapping_id(
+        self,
+    ) -> None:
+        project_path = self.workspace / "stories" / "demo" / "project.yaml"
+        project_path.write_text(
+            "project:\n"
+            "  project_id: demo\n"
+            "  project_name: Legacy Dream project\n"
+            "concept:\n"
+            "  logline: Keep the existing project readable.\n",
+            encoding="utf-8",
+        )
+
+        self.assertEqual(
+            self.service.read_canonical_project_story_slug("demo"),
+            "demo",
+        )
+        self.assertEqual(
+            self.service.discover_unique_canonical_project_story_slug(),
+            "demo",
+        )
+
     def test_canonical_project_identity_rejects_ambiguous_or_unsafe_values(
         self,
     ) -> None:
@@ -386,6 +408,11 @@ class StoryWorkspaceEpisodeBindingTest(unittest.TestCase):
             "project_id:\fdemo\n",
             "project_id: demo\v\n",
             "project_id: demo\f\n",
+            "other:\n  project_id: demo\n",
+            "project:\n    project_id: demo\n",
+            "project:\n  project_id: other\n",
+            "project:\n  project_id: demo\nproject_id: demo\n",
+            "project:\n  project_id: demo\nproject:\n  project_name: duplicate\n",
         )
 
         for payload in payloads:

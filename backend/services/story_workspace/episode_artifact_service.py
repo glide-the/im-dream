@@ -30,6 +30,10 @@ try:
         StoryWorkspaceEpisodeAuxiliaryArtifactAdapter,
         StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
     )
+    from services.story_workspace.episode_binding_service import (
+        StoryWorkspaceEpisodeBindingContractError,
+        StoryWorkspaceEpisodeBindingService,
+    )
     from story_workspace.contracts import (
         StoryWorkspaceEpisodeArtifactAvailability,
         StoryWorkspaceEpisodeArtifactConsumer,
@@ -56,6 +60,10 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeAuxiliaryArtifactAdapter,
         StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
     )
+    from backend.services.story_workspace.episode_binding_service import (
+        StoryWorkspaceEpisodeBindingContractError,
+        StoryWorkspaceEpisodeBindingService,
+    )
     from backend.story_workspace.contracts import (
         StoryWorkspaceEpisodeArtifactAvailability,
         StoryWorkspaceEpisodeArtifactConsumer,
@@ -71,10 +79,6 @@ except ModuleNotFoundError:  # Support repository-root package imports.
 
 _RUN_ID_RE = re.compile(r"^run_[0-9a-f]{32}$")
 _STORY_SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_PROJECT_ID_RE = re.compile(
-    r"^project_id:\s*(?:['\"])?([a-z0-9]+(?:-[a-z0-9]+)*)(?:['\"])?\s*$",
-    re.MULTILINE,
-)
 _SAFE_DIRECTORY_ENTRY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,254}$")
 _BINDING_MAX_BYTES = 16 * 1024
 _PROJECT_MAX_BYTES = 256 * 1024
@@ -648,11 +652,15 @@ class StoryWorkspaceEpisodeArtifactService:
                 raise StoryWorkspaceEpisodeArtifactPathError(
                     "canonical project identity is unreadable"
                 ) from exc
-            project_ids = _PROJECT_ID_RE.findall(project_text)
-            if project_ids != [binding.story_slug]:
+            try:
+                StoryWorkspaceEpisodeBindingService.read_canonical_project_id_from_text(
+                    project_text,
+                    candidate=binding.story_slug,
+                )
+            except StoryWorkspaceEpisodeBindingContractError as exc:
                 raise StoryWorkspaceEpisodeArtifactPathError(
                     "canonical project identity does not match the binding"
-                )
+                ) from exc
             episodes = self._open_child_directory(parent, "episodes", optional=False)
             assert episodes is not None
             descriptors.append(episodes)

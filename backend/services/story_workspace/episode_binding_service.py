@@ -43,6 +43,13 @@ _PROJECT_ID_PATTERN = re.compile(
 _PROJECT_ID_DECLARATION_PATTERN = re.compile(
     r"(?m)^[ \t]*project_id[ \t]*:"
 )
+_PROJECT_MAPPING_HEADER_PATTERN = re.compile(r"^project:[ \t]*$")
+_PROJECT_MAPPING_ID_PATTERN = re.compile(
+    r"^  project_id:[ \t]*"
+    r"(?P<quote>['\"]?)"
+    r"(?P<value>[a-z0-9]+(?:-[a-z0-9]+)*)"
+    r"(?P=quote)[ \t]*$"
+)
 
 
 class StoryWorkspaceEpisodeBindingError(RuntimeError):
@@ -327,6 +334,53 @@ class StoryWorkspaceEpisodeBindingService:
                 os.close(descriptor)
 
     @classmethod
+    def _read_legacy_project_mapping_id(cls, text: str) -> str | None:
+        """Read the one direct ``project.project_id`` compatibility shape."""
+
+        lines = text.splitlines()
+        project_headers = [
+            index
+            for index, line in enumerate(lines)
+            if _PROJECT_MAPPING_HEADER_PATTERN.fullmatch(line) is not None
+        ]
+        if len(project_headers) != 1:
+            return None
+        for line in lines[project_headers[0] + 1 :]:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if not line.startswith((" ", "\t")):
+                return None
+            match = _PROJECT_MAPPING_ID_PATTERN.fullmatch(line)
+            if match is not None:
+                return match.group("value")
+        return None
+
+    @classmethod
+    def read_canonical_project_id_from_text(
+        cls,
+        text: str,
+        *,
+        candidate: str,
+    ) -> str:
+        """Validate one project identity through the shared lexical contract."""
+
+        canonical_candidate = cls._validate_story_slug(candidate)
+        matches = [
+            match.group("value")
+            for match in _PROJECT_ID_PATTERN.finditer(text)
+        ]
+        declarations = _PROJECT_ID_DECLARATION_PATTERN.findall(text)
+        legacy_project_id = cls._read_legacy_project_mapping_id(text)
+        if len(declarations) != 1 or (
+            matches != [canonical_candidate]
+            and legacy_project_id != canonical_candidate
+        ):
+            raise StoryWorkspaceEpisodeBindingContractError(
+                "canonical project identity does not match"
+            )
+        return canonical_candidate
+
+    @classmethod
     def _read_project_id_from_story_directory(
         cls,
         story_descriptor: int,
@@ -387,16 +441,10 @@ class StoryWorkspaceEpisodeBindingService:
                 raise StoryWorkspaceEpisodeBindingContractError(
                     "canonical project identity is unreadable"
                 ) from exc
-            matches = [
-                match.group("value")
-                for match in _PROJECT_ID_PATTERN.finditer(text)
-            ]
-            declarations = _PROJECT_ID_DECLARATION_PATTERN.findall(text)
-            if len(declarations) != 1 or matches != [candidate]:
-                raise StoryWorkspaceEpisodeBindingContractError(
-                    "canonical project identity does not match"
-                )
-            return candidate
+            return cls.read_canonical_project_id_from_text(
+                text,
+                candidate=candidate,
+            )
         except OSError as exc:
             raise StoryWorkspaceEpisodeBindingPathError(
                 "canonical project identity cannot be read safely"

@@ -692,6 +692,31 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         )
         self.assertEqual(forged, {"error": "DREAM_WRITE_REJECTED"})
 
+    def test_agent_only_binding_accepts_legacy_project_mapping_identity(
+        self,
+    ) -> None:
+        story = self.workspace / "stories" / "demo"
+        (story / "episodes" / "EP01").mkdir(parents=True)
+        (story / "project.yaml").write_text(
+            "project:\n"
+            "  project_id: demo\n"
+            "  project_name: Legacy Dream project\n",
+            encoding="utf-8",
+        )
+        self._seed_episode_action(action="recover_first_episode_binding")
+
+        result = self._call(
+            "bind_first_episode",
+            {
+                "workflowRunId": RUN_ID,
+                "expectedBindingRevision": 0,
+            },
+        )
+
+        self.assertEqual(result["run"], RUN_ID)
+        self.assertEqual(result["bindingRevision"], 1)
+        self.assertRegex(str(result["episodeId"]), r"^[0-9a-f]{32}$")
+
     def test_source_launch_generation_and_agent_provenance_matrix(self) -> None:
         self._seed_episode_action(action="recover_first_episode_binding")
         legacy = self._launch_metadata()

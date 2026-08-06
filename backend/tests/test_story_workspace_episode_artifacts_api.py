@@ -221,6 +221,21 @@ class TestStoryWorkspaceEpisodeArtifactService:
         assert "stories/didi-zhengzhou" not in surface.model_dump_json()
         assert str(self.workspace) not in surface.model_dump_json()
 
+    def test_bound_surface_accepts_the_same_legacy_project_mapping_identity(
+        self,
+    ) -> None:
+        (self.story / "project.yaml").write_text(
+            "project:\n"
+            "  project_id: didi-zhengzhou\n"
+            "  project_name: Legacy Dream project\n",
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+
+        assert surface.binding_availability is StoryWorkspaceEpisodeBindingAvailability.BOUND
+        assert surface.opaque_episode_id == self.binding.episode_uid
+
     def test_real_didi_episode_projects_45_prompts_45_queue_and_no_orphans(self) -> None:
         for name in (
             "episode-outline.md",
