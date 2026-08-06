@@ -848,7 +848,7 @@ test('keeps real DOM focus stable across navigation, controlled transitions and 
     root: fileURLToPath(new URL('../../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
-    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    server: { host: '127.0.0.1', port: 0, strictPort: false },
     plugins: [{
       name: 'u7-episode-narrative-browser-harness',
       configureServer(vite) {

@@ -24,7 +24,9 @@ test('composes the authoritative Episode query, U6 view model and U7-U9 workbenc
     '<StoryWorkspaceEpisodeReviewPanel',
     'promptsByShotViewId',
     'renderQueueByShotViewId',
-    'onLocateTarget={setEpisodeSelection}',
+    'onLocateTarget={locateEpisodeReviewTarget}',
+    "heading.focus({ preventScroll: true })",
+    "behavior: reducedMotion ? 'auto' : 'smooth'",
   ]) expect(PAGE_SOURCE).toContain(expected);
 });
 
@@ -283,7 +285,7 @@ test('dedicated dialog delays confirmation, preserves failed draft and restores 
     root: fileURLToPath(new URL('../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
-    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    server: { host: '127.0.0.1', port: 0, strictPort: false },
     plugins: [{
       name: 'u11-episode-dialog-harness',
       configureServer(vite) {
@@ -389,7 +391,7 @@ test('revision deletion moves selection, aria-live copy and DOM focus to the rec
     root: fileURLToPath(new URL('../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
-    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    server: { host: '127.0.0.1', port: 0, strictPort: false },
     plugins: [{
       name: 'u11-revision-focus-harness',
       configureServer(vite) {
@@ -501,7 +503,7 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     export function useStoryWorkspaceEpisodeArtifacts() {
       const data = useSyncExternalStore(subscribe, () => current, () => current);
       return {
-        data, latest: data, invalidArtifactKeys: [], staleArtifactKeys: [],
+        data, latest: data, invalidArtifactKeys: [], unavailableArtifactKeys: [], staleArtifactKeys: [],
         diagnostic: null, error: null, isLoading: false, isShowingLastGood: false,
         refresh,
       };
@@ -627,7 +629,7 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     root: fileURLToPath(new URL('../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
-    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    server: { host: '127.0.0.1', port: 0, strictPort: false },
     plugins: [{
       name: 'u11-real-page-deferred-harness',
       enforce: 'pre',

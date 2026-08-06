@@ -65,6 +65,7 @@ def _project(
     prompt_revisions = {
         key: REVISION_A for key in (prompts or {})
     }
+    namespace = UUID(hex=EPISODE_UID)
     return _adapter(canonical_episode_root).project(
         prompts=prompts,
         prompt_revisions=prompt_revisions,
@@ -72,9 +73,18 @@ def _project(
         render_revision=render_revision if render_guide is not None else None,
         review_report=review_report,
         review_revision=review_revision if review_report is not None else None,
-        shot_ids=shot_ids or [],
-        narrative_beat_keys=narrative_beat_keys or [],
-        script_scene_keys=script_scene_keys or [],
+        shot_view_ids={
+            key: uuid5(namespace, f"shot:{key}").hex
+            for key in (shot_ids or [])
+        },
+        narrative_beat_view_ids={
+            key: uuid5(namespace, f"beat:{key}").hex
+            for key in (narrative_beat_keys or [])
+        },
+        script_scene_view_ids={
+            key: uuid5(namespace, f"scene:{key}").hex
+            for key in (script_scene_keys or [])
+        },
         manifest_revision=manifest_revision,
         prompt_cursor=prompt_cursor,
         render_queue_cursor=render_queue_cursor,
@@ -606,6 +616,130 @@ S01-E01-001 needs work.
     assert len(renamed.review.targets) == 1
     assert first.review.targets[0].id == renamed.review.targets[0].id
     assert first.review.targets[0].section_id != renamed.review.targets[0].section_id
+
+
+def test_review_case_variant_reuses_lowercase_canonical_shot_identity() -> None:
+    report = b"""# Review
+
+## Shot finding
+S04-E01-020A needs a timing adjustment.
+"""
+
+    projection = _project(
+        review_report=report,
+        shot_ids=["S04-E01-020a"],
+    )
+
+    assert projection.review is not None
+    assert len(projection.review.targets) == 1
+    target = projection.review.targets[0]
+    assert target.source_key == "S04-E01-020a"
+    assert target.target_view_id == uuid5(
+        UUID(hex=EPISODE_UID),
+        "shot:S04-E01-020a",
+    ).hex
+
+
+def test_review_case_variant_duplicate_is_not_silently_deduplicated() -> None:
+    report = b"""# Review
+
+## First form
+S04-E01-020a needs work.
+
+## Second form
+S04-E01-020A repeats the same machine target.
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="duplicate_review_target_identity",
+    ):
+        _project(
+            review_report=report,
+            shot_ids=["S04-E01-020a"],
+        )
+
+
+def test_prompt_identity_rejects_whitespace_in_machine_key() -> None:
+    prompts = b"""shots:
+  - shot_id: 'S04-E01-020a '
+    positive: Unsafe identity whitespace.
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="invalid_explicit_key",
+    ):
+        _project(
+            prompts={"prompts/unsafe.yaml": prompts},
+            shot_ids=["S04-E01-020a"],
+        )
+
+
+def test_prompt_case_variant_collision_fails_closed() -> None:
+    prompts = b"""shots:
+  - shot_id: S04-E01-020a
+    positive: First representation.
+  - shot_id: S04-E01-020A
+    positive: Conflicting representation.
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="duplicate_prompt_identity",
+    ):
+        _project(
+            prompts={"prompts/collision.yaml": prompts},
+            shot_ids=["S04-E01-020a"],
+        )
+
+
+def test_render_queue_case_variant_collision_fails_closed() -> None:
+    render = b"""## Render Queue
+```yaml
+- shot_id: S04-E01-020a
+  status: pending
+- shot_id: S04-E01-020A
+  status: running
+```
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="duplicate_queue_shot_id",
+    ):
+        _project(
+            render_guide=render,
+            shot_ids=["S04-E01-020a"],
+        )
+
+
+@pytest.mark.parametrize(
+    "unsafe_shot_id",
+    [
+        " S04-E01-020a",
+        "S04-E01-020a\u00a0",
+        "S04\uff0dE01\uff0d020a",
+        "S04-E01-020\u0430",
+    ],
+)
+def test_prompt_identity_rejects_unicode_or_confusable_lookup_keys(
+    unsafe_shot_id: str,
+) -> None:
+    prompts = (
+        "shots:\n"
+        f"  - shot_id: '{unsafe_shot_id}'\n"
+        "    positive: Unsafe machine identity.\n"
+    ).encode("utf-8")
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="invalid_explicit_key",
+    ):
+        _project(
+            prompts={"prompts/unsafe.yaml": prompts},
+            shot_ids=["S04-E01-020a"],
+        )
 
 
 def test_review_cross_source_same_revision_is_explicitly_deduplicated() -> None:

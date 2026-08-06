@@ -530,18 +530,19 @@ class StoryWorkspaceEpisodeArtifactAdapter:
                     "storyboard",
                     "invalid_shape",
                 )
-            shot_id = _required_source_text(item.get("shot_id"), "storyboard")
+            shot_id = _required_identity_text(item.get("shot_id"), "storyboard")
             if _SHOT_ID_RE.fullmatch(shot_id) is None:
                 raise StoryWorkspaceEpisodeArtifactParseError(
                     "storyboard",
                     "invalid_shot_id",
                 )
-            if shot_id in seen:
+            canonical_shot_key = shot_id.upper()
+            if canonical_shot_key in seen:
                 raise StoryWorkspaceEpisodeArtifactParseError(
                     "storyboard",
                     "duplicate_shot_id",
                 )
-            seen.add(shot_id)
+            seen.add(canonical_shot_key)
             explicit_scene = _normalized_source_ref(
                 item.get("script_scene_ref"),
                 _SOURCE_SCENE_RE,
@@ -1011,6 +1012,21 @@ def _required_source_text(value: Any, artifact: str) -> str:
     if result is None:
         raise StoryWorkspaceEpisodeArtifactParseError(artifact, "missing_identity")
     return result
+
+
+def _required_identity_text(value: Any, artifact: str) -> str:
+    if (
+        not isinstance(value, str)
+        or not value.isascii()
+        or value != value.strip()
+        or not value
+        or len(value) > 128
+    ):
+        raise StoryWorkspaceEpisodeArtifactParseError(
+            artifact,
+            "invalid_shot_id",
+        )
+    return value
 
 
 def _optional_string_text(

@@ -150,6 +150,7 @@ _EXPLICIT_SHOT_RE = re.compile(
     r"(?<![A-Za-z0-9_-])([A-Za-z0-9][A-Za-z0-9._-]*-E[0-9]{2,3}-[0-9]{3}[a-z]?)(?![A-Za-z0-9_-])",
     re.IGNORECASE,
 )
+_VIEW_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 
 class StoryWorkspaceEpisodeAuxiliaryArtifactParseError(ValueError):
@@ -172,6 +173,12 @@ class _MarkdownSection:
     level: int
     title: str
     lines: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class _CanonicalTarget:
+    source_key: str
+    view_id: str
 
 
 class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
@@ -203,9 +210,9 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         render_revision: str | None,
         review_report: bytes | None,
         review_revision: str | None,
-        shot_ids: Sequence[str],
-        narrative_beat_keys: Sequence[str],
-        script_scene_keys: Sequence[str],
+        shot_view_ids: Mapping[str, str],
+        narrative_beat_view_ids: Mapping[str, str],
+        script_scene_view_ids: Mapping[str, str],
         manifest_revision: str,
         prompt_cursor: str | None = None,
         render_queue_cursor: str | None = None,
@@ -218,16 +225,20 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         if page_limit > STORY_WORKSPACE_EPISODE_AUXILIARY_PAGE_MAX:
             raise ValueError("page_limit must be less than or equal to 100")
 
-        known_shots = _known_keys(shot_ids, _SHOT_ID_RE, "shot_ids")
-        known_beats = _known_keys(
-            narrative_beat_keys,
-            re.compile(r"^SC-[0-9]{2,}$", re.IGNORECASE),
-            "narrative_beat_keys",
+        known_shots = _canonical_targets(
+            shot_view_ids,
+            _SHOT_ID_RE,
+            "shot_view_ids",
         )
-        known_scenes = _known_keys(
-            script_scene_keys,
+        known_beats = _canonical_targets(
+            narrative_beat_view_ids,
+            re.compile(r"^SC-[0-9]{2,}$", re.IGNORECASE),
+            "narrative_beat_view_ids",
+        )
+        known_scenes = _canonical_targets(
+            script_scene_view_ids,
             re.compile(r"^S[0-9]{2,}$", re.IGNORECASE),
-            "script_scene_keys",
+            "script_scene_view_ids",
         )
         prompt_items = self._project_prompts(
             prompts or {},
@@ -332,7 +343,7 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         self,
         files: Mapping[str, bytes],
         revisions: Mapping[str, str],
-        known_shots: set[str],
+        known_shots: Mapping[str, _CanonicalTarget],
     ) -> list[StoryWorkspaceEpisodePrompt]:
         if len(files) > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_FILES:
             raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
@@ -393,27 +404,33 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
                     shot_id = _required_key(raw.get("shot_id"), _SHOT_ID_RE, source_artifact)
                     raw_kind = raw.get("prompt_kind", raw.get("kind", "default"))
                     kind = _required_key(raw_kind, _PROMPT_KIND_RE, source_artifact).lower()
-                    identity = (shot_id, kind)
+                    target = known_shots.get(_ascii_lookup_key(shot_id))
+                    canonical_shot_id = (
+                        target.source_key if target is not None else shot_id
+                    )
+                    identity = (_ascii_lookup_key(canonical_shot_id), kind)
                     if identity in seen:
                         raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
                             source_artifact,
                             "duplicate_prompt_identity",
                         )
                     seen.add(identity)
-                    linked = shot_id in known_shots
                     params = _mapping(raw.get("params"), source_artifact)
                     generability = _mapping(raw.get("generability"), source_artifact)
                     items.append(
                         StoryWorkspaceEpisodePrompt(
-                            id=self._view_id("prompt", f"{shot_id}:{kind}"),
-                            shot_id=shot_id,
+                            id=self._view_id(
+                                "prompt",
+                                f"{canonical_shot_id}:{kind}",
+                            ),
+                            shot_id=canonical_shot_id,
                             kind=kind,
                             shot_view_id=(
-                                self._view_id("shot", shot_id) if linked else None
+                                target.view_id if target is not None else None
                             ),
                             association_status=(
                                 StoryWorkspaceEpisodeAssociationStatus.LINKED
-                                if linked
+                                if target is not None
                                 else StoryWorkspaceEpisodeAssociationStatus.ORPHAN
                             ),
                             positive=_required_text(
@@ -486,7 +503,7 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         self,
         content: bytes,
         source_revision: str,
-        known_shots: set[str],
+        known_shots: Mapping[str, _CanonicalTarget],
     ) -> tuple[
         list[StoryWorkspaceEpisodeArtifactSection],
         list[StoryWorkspaceEpisodeRenderQueueEntry],
@@ -523,23 +540,30 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
                                 "invalid_queue_shape",
                             )
                         shot_id = _required_key(raw.get("shot_id"), _SHOT_ID_RE, artifact)
-                        if shot_id in seen:
+                        target = known_shots.get(_ascii_lookup_key(shot_id))
+                        canonical_shot_id = (
+                            target.source_key if target is not None else shot_id
+                        )
+                        identity = _ascii_lookup_key(canonical_shot_id)
+                        if identity in seen:
                             raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
                                 artifact,
                                 "duplicate_queue_shot_id",
                             )
-                        seen.add(shot_id)
-                        linked = shot_id in known_shots
+                        seen.add(identity)
                         queue.append(
                             StoryWorkspaceEpisodeRenderQueueEntry(
-                                id=self._view_id("render-queue", shot_id),
-                                shot_id=shot_id,
+                                id=self._view_id(
+                                    "render-queue",
+                                    canonical_shot_id,
+                                ),
+                                shot_id=canonical_shot_id,
                                 shot_view_id=(
-                                    self._view_id("shot", shot_id) if linked else None
+                                    target.view_id if target is not None else None
                                 ),
                                 association_status=(
                                     StoryWorkspaceEpisodeAssociationStatus.LINKED
-                                    if linked
+                                    if target is not None
                                     else StoryWorkspaceEpisodeAssociationStatus.ORPHAN
                                 ),
                                 duration_sec=_duration_seconds(raw.get("duration"), artifact),
@@ -561,9 +585,9 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         self,
         content: bytes,
         source_revision: str,
-        known_beats: set[str],
-        known_scenes: set[str],
-        known_shots: set[str],
+        known_beats: Mapping[str, _CanonicalTarget],
+        known_scenes: Mapping[str, _CanonicalTarget],
+        known_shots: Mapping[str, _CanonicalTarget],
     ) -> StoryWorkspaceEpisodeReviewReport:
         artifact = "review-report.md"
         document = _parse_markdown(content, artifact)
@@ -586,7 +610,10 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
         )
         scope = _review_scope(document.metadata.get("scope"), reviewed_artifacts, artifact)
         targets: list[StoryWorkspaceEpisodeReviewTarget] = []
-        seen_targets: set[tuple[StoryWorkspaceEpisodeReviewTargetKind, str]] = set()
+        seen_targets: dict[
+            tuple[StoryWorkspaceEpisodeReviewTargetKind, str],
+            str,
+        ] = {}
         for raw_section, section in zip(raw_sections, sections, strict=True):
             searchable = f"{raw_section.title}\n{'\n'.join(raw_section.lines)}"
             target_specs = (
@@ -594,42 +621,49 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
                     StoryWorkspaceEpisodeReviewTargetKind.NARRATIVE_BEAT,
                     _ordered_matches(_BEAT_KEY_RE, searchable),
                     known_beats,
-                    "beat",
                 ),
                 (
                     StoryWorkspaceEpisodeReviewTargetKind.SCRIPT_SCENE,
                     _ordered_matches(_SCENE_KEY_RE, searchable),
                     known_scenes,
-                    "scene",
                 ),
                 (
                     StoryWorkspaceEpisodeReviewTargetKind.SHOT,
                     _ordered_matches(_EXPLICIT_SHOT_RE, searchable),
                     known_shots,
-                    "shot",
                 ),
             )
-            for kind, keys, known, view_kind in target_specs:
+            for kind, keys, known in target_specs:
                 for source_key in keys:
-                    locator = (kind, source_key)
-                    if locator in seen_targets:
-                        continue
-                    seen_targets.add(locator)
-                    linked = source_key in known
+                    lookup_key = _ascii_lookup_key(source_key)
+                    locator = (kind, lookup_key)
+                    previous = seen_targets.get(locator)
+                    if previous is not None:
+                        if previous == source_key:
+                            continue
+                        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                            artifact,
+                            "duplicate_review_target_identity",
+                        )
+                    seen_targets[locator] = source_key
+                    target = known.get(lookup_key)
+                    canonical_source_key = (
+                        target.source_key if target is not None else source_key
+                    )
                     targets.append(
                         StoryWorkspaceEpisodeReviewTarget(
                             id=self._view_id(
                                 "review-target",
-                                f"{kind.value}:{source_key}",
+                                f"{kind.value}:{canonical_source_key}",
                             ),
                             kind=kind,
-                            source_key=source_key,
+                            source_key=canonical_source_key,
                             target_view_id=(
-                                self._view_id(view_kind, source_key) if linked else None
+                                target.view_id if target is not None else None
                             ),
                             association_status=(
                                 StoryWorkspaceEpisodeAssociationStatus.LINKED
-                                if linked
+                                if target is not None
                                 else StoryWorkspaceEpisodeAssociationStatus.ORPHAN
                             ),
                             section_id=section.id,
@@ -793,15 +827,36 @@ def _base64url_decode(value: str) -> bytes:
     return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
 
 
-def _known_keys(values: Sequence[str], pattern: re.Pattern[str], field: str) -> set[str]:
-    normalized: list[str] = []
-    for value in values:
-        if not isinstance(value, str) or not pattern.fullmatch(value):
-            raise ValueError(f"{field} contains an invalid explicit key")
-        normalized.append(value.upper())
-    if len(normalized) != len(set(normalized)):
-        raise ValueError(f"{field} must not contain duplicates")
-    return set(normalized)
+def _ascii_lookup_key(value: str) -> str:
+    return value.upper()
+
+
+def _canonical_targets(
+    values: Mapping[str, str],
+    pattern: re.Pattern[str],
+    field: str,
+) -> dict[str, _CanonicalTarget]:
+    if not isinstance(values, Mapping):
+        raise ValueError(f"{field} must be a source-key-to-view-ID mapping")
+    targets: dict[str, _CanonicalTarget] = {}
+    for source_key, view_id in values.items():
+        if (
+            not isinstance(source_key, str)
+            or not source_key.isascii()
+            or source_key != source_key.strip()
+            or pattern.fullmatch(source_key) is None
+            or not isinstance(view_id, str)
+            or _VIEW_ID_RE.fullmatch(view_id) is None
+        ):
+            raise ValueError(f"{field} contains an invalid canonical target")
+        lookup_key = _ascii_lookup_key(source_key)
+        if lookup_key in targets:
+            raise ValueError(f"{field} contains a canonical key collision")
+        targets[lookup_key] = _CanonicalTarget(
+            source_key=source_key,
+            view_id=view_id,
+        )
+    return targets
 
 
 def _valid_prompt_path(value: str) -> bool:
@@ -1089,12 +1144,17 @@ def _mapping(value: Any, artifact: str) -> Mapping[str, Any]:
 
 
 def _required_key(value: Any, pattern: re.Pattern[str], artifact: str) -> str:
-    if not isinstance(value, str) or not pattern.fullmatch(value.strip()):
+    if (
+        not isinstance(value, str)
+        or not value.isascii()
+        or value != value.strip()
+        or not pattern.fullmatch(value)
+    ):
         raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
             artifact,
             "invalid_explicit_key",
         )
-    return value.strip().upper()
+    return value
 
 
 def _required_text(value: Any, limit: int, artifact: str) -> str:
@@ -1500,7 +1560,7 @@ def _ordered_matches(pattern: re.Pattern[str], value: str) -> list[str]:
     seen: set[str] = set()
     results: list[str] = []
     for match in pattern.finditer(value):
-        key = match.group(1).upper()
+        key = match.group(1)
         if key not in seen:
             seen.add(key)
             results.append(key)

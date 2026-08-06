@@ -208,6 +208,7 @@ export interface StoryWorkspaceEpisodeRevisionSelectionState {
   readonly announcement: string;
   readonly workbenchRef: RefObject<HTMLDivElement | null>;
   readonly onSelection: (selection: StoryWorkspaceEpisodeSelection) => void;
+  readonly onLocateSelection: (selection: StoryWorkspaceEpisodeSelection) => void;
 }
 
 export function useStoryWorkspaceEpisodeRevisionSelection(
@@ -219,6 +220,7 @@ export function useStoryWorkspaceEpisodeRevisionSelection(
   const selectionRef = useRef<StoryWorkspaceEpisodeSelection | null>(null);
   const previousViewModelRef = useRef<StoryWorkspaceEpisodeExecutionViewModel | null>(null);
   const pendingEpisodeFocusKeyRef = useRef<string | null>(null);
+  const pendingLocateFocusKeyRef = useRef<string | null>(null);
   const workbenchRef = useRef<HTMLDivElement>(null);
   const activeRunIdRef = useRef(runId);
 
@@ -228,6 +230,7 @@ export function useStoryWorkspaceEpisodeRevisionSelection(
       selectionRef.current = null;
       previousViewModelRef.current = null;
       pendingEpisodeFocusKeyRef.current = null;
+      pendingLocateFocusKeyRef.current = null;
     }
     if (viewModel === null) {
       selectionRef.current = null;
@@ -270,14 +273,48 @@ export function useStoryWorkspaceEpisodeRevisionSelection(
     )?.focus();
   }, [selection, viewModel]);
 
+  useLayoutEffect(() => {
+    const pendingKey = pendingLocateFocusKeyRef.current;
+    if (pendingKey === null || selection === null) return;
+    if (pendingKey !== storyWorkspaceEpisodeSelectionKey(selection)) return;
+    const heading = workbenchRef.current?.querySelector<HTMLElement>(
+      '[aria-label="叙事内容工作面"] h2',
+    );
+    if (heading === undefined || heading === null) return;
+    pendingLocateFocusKeyRef.current = null;
+    heading.tabIndex = -1;
+    heading.focus({ preventScroll: true });
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    heading.scrollIntoView({
+      behavior: reducedMotion ? 'auto' : 'smooth',
+      block: 'start',
+    });
+  }, [selection, viewModel]);
+
   const onSelection = useCallback((nextSelection: StoryWorkspaceEpisodeSelection) => {
     pendingEpisodeFocusKeyRef.current = null;
+    pendingLocateFocusKeyRef.current = null;
     selectionRef.current = nextSelection;
     setAnnouncement('');
     setSelection(nextSelection);
   }, []);
 
-  return { viewModel, selection, announcement, workbenchRef, onSelection };
+  const onLocateSelection = useCallback((nextSelection: StoryWorkspaceEpisodeSelection) => {
+    pendingEpisodeFocusKeyRef.current = null;
+    pendingLocateFocusKeyRef.current = storyWorkspaceEpisodeSelectionKey(nextSelection);
+    selectionRef.current = nextSelection;
+    setAnnouncement('');
+    setSelection(nextSelection);
+  }, []);
+
+  return {
+    viewModel,
+    selection,
+    announcement,
+    workbenchRef,
+    onSelection,
+    onLocateSelection,
+  };
 }
 
 function storyWorkspaceEpisodeArtifactAvailability(
@@ -507,10 +544,45 @@ export function StoryWorkspaceExecutionPage({
   const episodeActionMountedRef = useRef(false);
   const {
     announcement: episodeSelectionAnnouncement,
+    onLocateSelection: locateEpisodeSelection,
     onSelection: setEpisodeSelection,
     selection: episodeSelection,
     workbenchRef: episodeWorkbenchRef,
   } = useStoryWorkspaceEpisodeRevisionSelection(runId, episodeViewModel);
+
+  const locateEpisodeReviewTarget = useCallback((
+    selection: StoryWorkspaceEpisodeReviewLocateSelection,
+  ) => {
+    if (episodeViewModel === null) return;
+    setEpisodeExpandedKeys((current) => {
+      const next = new Set(current);
+      if (selection.kind === 'scene') {
+        const scene = episodeViewModel.scenesById[selection.id];
+        if (scene?.narrativeBeatId !== null && scene?.narrativeBeatId !== undefined) {
+          next.add(storyWorkspaceEpisodeSelectionKey({
+            kind: 'narrative-beat',
+            id: scene.narrativeBeatId,
+          }));
+        }
+      } else if (selection.kind === 'shot') {
+        const shot = episodeViewModel.shotsById[selection.id];
+        if (shot?.narrativeBeatId !== null && shot?.narrativeBeatId !== undefined) {
+          next.add(storyWorkspaceEpisodeSelectionKey({
+            kind: 'narrative-beat',
+            id: shot.narrativeBeatId,
+          }));
+        }
+        if (shot?.scriptSceneId !== null && shot?.scriptSceneId !== undefined) {
+          next.add(storyWorkspaceEpisodeSelectionKey({
+            kind: 'scene',
+            id: shot.scriptSceneId,
+          }));
+        }
+      }
+      return next;
+    });
+    locateEpisodeSelection(selection);
+  }, [episodeViewModel, locateEpisodeSelection]);
 
   const workspace = useMemo(
     () => files.data ? storyWorkspaceBuildExecutionWorkspace(files.data) : null,
@@ -1073,13 +1145,21 @@ export function StoryWorkspaceExecutionPage({
               )}
               {episodeArtifacts.isShowingLastGood && (
                 <p role="status">
-                  最新 revision 的部分来源无效；当前显示最近一次有效内容。
+                  最新 revision 的部分产物不可用；当前显示最近一次有效内容。
                 </p>
               )}
               {episodeArtifacts.invalidArtifactKeys.length > 0 && (
                 <p role="status">
                   部分产物来源无效：
                   {episodeArtifacts.invalidArtifactKeys.map(
+                    (key) => EPISODE_ARTIFACT_LABELS[key],
+                  ).join('、')}
+                </p>
+              )}
+              {episodeArtifacts.unavailableArtifactKeys.length > 0 && (
+                <p role="status">
+                  部分产物暂时无法同步：
+                  {episodeArtifacts.unavailableArtifactKeys.map(
                     (key) => EPISODE_ARTIFACT_LABELS[key],
                   ).join('、')}
                 </p>
@@ -1173,7 +1253,7 @@ export function StoryWorkspaceExecutionPage({
                           'review-report.md',
                         )}
                         currentTargetSelection={currentReviewSelection}
-                        onLocateTarget={setEpisodeSelection}
+                        onLocateTarget={locateEpisodeReviewTarget}
                         review={episodeSurface.auxiliary?.review ?? null}
                       />
                     </>

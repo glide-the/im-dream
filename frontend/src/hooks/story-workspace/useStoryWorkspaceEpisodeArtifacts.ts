@@ -457,6 +457,7 @@ export interface StoryWorkspaceEpisodeArtifactsFetchState {
   readonly latest: StoryWorkspaceEpisodeArtifactSurface | null;
   readonly artifactCache: StoryWorkspaceEpisodeArtifactSessionCache;
   readonly invalidArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
+  readonly unavailableArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
   readonly staleArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
   readonly diagnostic: StoryWorkspaceEpisodeArtifactsDiagnostic | null;
   readonly error: Error | null;
@@ -486,6 +487,7 @@ export function storyWorkspaceEpisodeArtifactsInitialState(
     latest: null,
     artifactCache: {},
     invalidArtifactKeys: [],
+    unavailableArtifactKeys: [],
     staleArtifactKeys: [],
     diagnostic: null,
     error: null,
@@ -512,7 +514,7 @@ function storyWorkspaceUpdateEpisodeArtifactCache(
   for (const key of STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS) {
     const availability = storyWorkspaceEpisodeArtifactAvailability(latest, key);
     if (availability === 'available') next[key] = latest;
-    else if (availability !== 'invalid') delete next[key];
+    else if (availability !== 'invalid' && availability !== 'unavailable') delete next[key];
   }
   return next;
 }
@@ -583,13 +585,25 @@ export function storyWorkspaceReduceEpisodeArtifactsFetch(
     const invalidArtifactKeys = STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS.filter(
       (key) => storyWorkspaceEpisodeArtifactAvailability(action.data, key) === 'invalid',
     );
-    const staleArtifactKeys = invalidArtifactKeys.filter((key) => artifactCache[key] !== undefined);
+    const unavailableArtifactKeys = STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS.filter(
+      (key) => storyWorkspaceEpisodeArtifactAvailability(action.data, key) === 'unavailable',
+    );
+    const recoverableArtifactKeys = STORY_WORKSPACE_EPISODE_ARTIFACT_KEYS.filter(
+      (key) => {
+        const availability = storyWorkspaceEpisodeArtifactAvailability(action.data, key);
+        return availability === 'invalid' || availability === 'unavailable';
+      },
+    );
+    const staleArtifactKeys = recoverableArtifactKeys.filter(
+      (key) => artifactCache[key] !== undefined,
+    );
     return {
       runId: state.runId,
       data: storyWorkspaceMergeEpisodeArtifactLastGood(action.data, artifactCache, staleArtifactKeys),
       latest: action.data,
       artifactCache,
       invalidArtifactKeys,
+      unavailableArtifactKeys,
       staleArtifactKeys,
       diagnostic: null,
       error: null,
@@ -636,6 +650,7 @@ export interface StoryWorkspaceEpisodeArtifactsState {
   readonly data: StoryWorkspaceEpisodeArtifactSurface | null;
   readonly latest: StoryWorkspaceEpisodeArtifactSurface | null;
   readonly invalidArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
+  readonly unavailableArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
   readonly staleArtifactKeys: readonly StoryWorkspaceEpisodeArtifactRoot[];
   readonly diagnostic: StoryWorkspaceEpisodeArtifactsDiagnostic | null;
   readonly error: Error | null;
@@ -758,6 +773,9 @@ export function useStoryWorkspaceEpisodeArtifacts(
     data: state.runId === normalizedRunId ? state.data : null,
     latest: state.runId === normalizedRunId ? state.latest : null,
     invalidArtifactKeys: state.runId === normalizedRunId ? state.invalidArtifactKeys : [],
+    unavailableArtifactKeys: state.runId === normalizedRunId
+      ? state.unavailableArtifactKeys
+      : [],
     staleArtifactKeys: state.runId === normalizedRunId ? state.staleArtifactKeys : [],
     diagnostic: state.runId === normalizedRunId ? state.diagnostic : null,
     error: state.runId === normalizedRunId ? state.error : null,

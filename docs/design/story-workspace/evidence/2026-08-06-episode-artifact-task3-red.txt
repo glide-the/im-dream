@@ -1,0 +1,52 @@
+Task 3 TDD Red evidence
+Captured: 2026-08-06 Asia/Shanghai
+
+Backend command:
+  cd backend
+  PYTHONPATH=. .venv/bin/pytest -q \
+    tests/test_story_workspace_episode_artifact_adapter.py::test_lowercase_shot_suffix_preserves_exact_stable_identity_seed \
+    tests/test_story_workspace_episode_artifact_adapter.py::test_storyboard_identity_rejects_leading_or_trailing_whitespace \
+    tests/test_story_workspace_episode_auxiliary_artifact_adapter.py::test_review_case_variant_reuses_lowercase_canonical_shot_identity \
+    tests/test_story_workspace_episode_auxiliary_artifact_adapter.py::test_review_case_variant_duplicate_is_not_silently_deduplicated \
+    tests/test_story_workspace_episode_auxiliary_artifact_adapter.py::test_prompt_identity_rejects_whitespace_in_machine_key \
+    tests/test_story_workspace_episode_artifacts_api.py::TestStoryWorkspaceEpisodeArtifactService::test_review_case_variant_links_to_storyboard_canonical_view_id \
+    tests/test_story_workspace_episode_artifacts_api.py::TestStoryWorkspaceEpisodeArtifactService::test_duplicate_case_variant_review_target_isolated_from_narrative \
+    tests/test_story_workspace_episode_artifacts_api.py::TestStoryWorkspaceEpisodeArtifactService::test_verified_file_read_eio_is_local_unavailable
+
+Backend result:
+  .FFFFFFF [100%]
+  7 failed, 1 passed in 0.60s
+
+Expected Red failures observed:
+  - storyboard identity with trailing whitespace did not raise invalid_shot_id.
+  - Review exposed S04-E01-020A instead of the canonical S04-E01-020a.
+  - Review case variants were silently deduplicated instead of raising duplicate_review_target_identity.
+  - Prompt identity whitespace was silently stripped.
+  - Service surface kept review-report.md available despite canonical collision.
+  - Verified storyboard os.read(EIO) became global StoryWorkspaceEpisodeArtifactPathError instead of local unavailable.
+
+Control:
+  test_lowercase_shot_suffix_preserves_exact_stable_identity_seed passed before implementation,
+  proving narrative already preserved the lowercase source identity and exact UUID seed.
+
+Frontend command:
+  cd frontend
+  npx playwright test \
+    src/hooks/story-workspace/__tests__/useStoryWorkspaceEpisodeArtifacts.test.ts \
+    --reporter=line --workers=1 \
+    -g "unavailable root preserves|strict parser rejects source-key"
+
+Frontend result:
+  Running 2 tests using 1 worker
+  2 failed
+
+Expected Red failures observed:
+  - unavailable review root produced staleArtifactKeys=[] instead of [review-report.md].
+  - sourceKey=S01-E01-999 cross-wired to an existing SHOT_VIEW_ID was accepted by the strict parser.
+
+Focused cross-wire rerun after fixing the test assertion itself:
+  Running 1 test using 1 worker
+  1 failed
+  Error: Received function did not throw
+
+No production code had been modified when these Red results were captured.

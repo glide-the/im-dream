@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import traceback
-from uuid import UUID
+from uuid import UUID, uuid5
 
 import pytest
 import yaml
@@ -161,6 +161,61 @@ shots:
 
 def _adapter() -> StoryWorkspaceEpisodeArtifactAdapter:
     return StoryWorkspaceEpisodeArtifactAdapter(episode_uid=EPISODE_UID)
+
+
+def test_lowercase_shot_suffix_preserves_exact_stable_identity_seed() -> None:
+    storyboard = b"""shots:
+  - shot_id: S04-E01-020a
+    visual: Lowercase suffix is canonical.
+  - shot_id: S04-E01-020b
+    visual: Second lowercase suffix is canonical.
+"""
+
+    projection = _adapter().project(
+        outline=None,
+        script=None,
+        storyboard=storyboard,
+    )
+
+    assert len(projection.shots) == 2
+    assert projection.shots[0].shot_id == "S04-E01-020a"
+    assert projection.shots[0].id == uuid5(
+        UUID(hex=EPISODE_UID),
+        "shot:S04-E01-020a",
+    ).hex
+    assert projection.shots[1].shot_id == "S04-E01-020b"
+    assert projection.shots[1].id == uuid5(
+        UUID(hex=EPISODE_UID),
+        "shot:S04-E01-020b",
+    ).hex
+
+
+def test_storyboard_case_variant_shot_collision_fails_closed() -> None:
+    storyboard = b"""shots:
+  - shot_id: S04-E01-020a
+    visual: First representation.
+  - shot_id: S04-E01-020A
+    visual: Conflicting representation.
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeArtifactParseError,
+        match="duplicate_shot_id",
+    ):
+        _adapter().project(outline=None, script=None, storyboard=storyboard)
+
+
+def test_storyboard_identity_rejects_leading_or_trailing_whitespace() -> None:
+    storyboard = b"""shots:
+  - shot_id: 'S04-E01-020a '
+    visual: Unsafe identity whitespace.
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeArtifactParseError,
+        match="invalid_shot_id",
+    ):
+        _adapter().project(outline=None, script=None, storyboard=storyboard)
 
 
 def test_projects_explicit_outline_beats_script_scenes_and_shot_links() -> None:

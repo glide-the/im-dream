@@ -1239,6 +1239,63 @@ test('last-good merging owns six independent artifact fragments, never the old w
   expect(merged.staleArtifactKeys).toEqual(allKeys);
 });
 
+test('unavailable root preserves only its per-artifact last-good and then recovers', () => {
+  const complete = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+    REVISION_1,
+    ['episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md'],
+  ));
+  const loaded = storyWorkspaceReduceEpisodeArtifactsFetch(
+    storyWorkspaceEpisodeArtifactsInitialState(RUN_ID),
+    { type: 'success', runId: RUN_ID, generation: 1, data: complete },
+  );
+  const unavailablePayload = boundSurface(
+    REVISION_2,
+    ['episode-outline.md', 'script.md', 'storyboard.yaml'],
+  );
+  const reviewArtifact = (unavailablePayload.artifacts as Array<Record<string, unknown>>)
+    .find((item) => item.relativeKey === 'review-report.md');
+  if (!reviewArtifact) throw new Error('missing review artifact');
+  Object.assign(reviewArtifact, {
+    availability: 'unavailable', contentRevision: null, mtime: null, size: null,
+  });
+  const unavailable = storyWorkspaceParseEpisodeArtifactSurface(unavailablePayload);
+  const stale = storyWorkspaceReduceEpisodeArtifactsFetch(loaded, {
+    type: 'success', runId: RUN_ID, generation: 2, data: unavailable,
+  });
+
+  expect(stale.latest).toBe(unavailable);
+  expect(stale.invalidArtifactKeys).toEqual([]);
+  expect(stale.unavailableArtifactKeys).toEqual(['review-report.md']);
+  expect(stale.staleArtifactKeys).toEqual(['review-report.md']);
+  expect(stale.data?.auxiliary?.review?.targets[0].id).toBe(REVIEW_TARGET_ID);
+
+  const recovered = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+    REVISION_3,
+    ['episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md'],
+  ));
+  const green = storyWorkspaceReduceEpisodeArtifactsFetch(stale, {
+    type: 'success', runId: RUN_ID, generation: 3, data: recovered,
+  });
+  expect(green.staleArtifactKeys).toEqual([]);
+  expect(green.unavailableArtifactKeys).toEqual([]);
+  expect(green.data).toBe(recovered);
+});
+
+test('strict parser rejects source-key and view-id cross-wiring to a real narrative id', () => {
+  const payload = boundSurface(
+    REVISION_1,
+    ['episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md'],
+  );
+  const auxiliary = payload.auxiliary as Record<string, unknown>;
+  const review = auxiliary.review as Record<string, unknown>;
+  const targets = review.targets as Array<Record<string, unknown>>;
+  targets[0].sourceKey = 'S01-E01-999';
+  targets[0].targetViewId = SHOT_VIEW_ID;
+  targets[0].associationStatus = 'linked';
+
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload)).toThrow();
+});
+
 test('each invalid root restores only its own fragment while every other fragment stays latest', () => {
   type Root = typeof ARTIFACT_SPECS[number][0];
   const allKeys = ARTIFACT_SPECS.map(([key]) => key);
@@ -1609,7 +1666,7 @@ test('real browser hook mount isolates unmount, remount, and run-switch late res
     root: fileURLToPath(new URL('../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
-    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    server: { host: '127.0.0.1', port: 0, strictPort: false },
     plugins: [{
       name: 'u5-episode-artifact-browser-harness',
       configureServer(vite) {

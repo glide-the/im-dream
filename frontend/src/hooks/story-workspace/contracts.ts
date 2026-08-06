@@ -2020,20 +2020,53 @@ function storyWorkspaceParseEpisodeAuxiliary(value: unknown): StoryWorkspaceEpis
 function storyWorkspaceEpisodeAssertLinks(surface: StoryWorkspaceEpisodeArtifactSurface): void {
   const narrative = surface.narrative;
   if (!narrative) return;
-  const shotIds = new Set(narrative.shots.map((item) => item.id));
-  const beatIds = new Set(narrative.narrativeBeats.map((item) => item.id));
-  const sceneIds = new Set(narrative.scenes.map((item) => item.id));
+  const canonicalMap = (
+    items: readonly { readonly sourceKey: string; readonly viewId: string }[],
+    label: string,
+  ): Map<string, { readonly sourceKey: string; readonly viewId: string }> => {
+    const result = new Map<string, { readonly sourceKey: string; readonly viewId: string }>();
+    for (const item of items) {
+      const lookupKey = item.sourceKey.toUpperCase();
+      if (result.has(lookupKey)) throw new Error(`${label} contains a canonical sourceKey collision.`);
+      result.set(lookupKey, item);
+    }
+    return result;
+  };
+  const shots = canonicalMap(
+    narrative.shots.map((item) => ({ sourceKey: item.shotId, viewId: item.id })),
+    'narrative.shots',
+  );
+  const beats = canonicalMap(
+    narrative.narrativeBeats.map((item) => ({ sourceKey: item.sourceKey, viewId: item.id })),
+    'narrative.narrativeBeats',
+  );
+  const scenes = canonicalMap(
+    narrative.scenes.map((item) => ({ sourceKey: item.sourceKey, viewId: item.id })),
+    'narrative.scenes',
+  );
+  const matchesCanonicalEntry = (
+    map: ReadonlyMap<string, { readonly sourceKey: string; readonly viewId: string }>,
+    sourceKey: string,
+    viewId: string | null,
+  ): boolean => {
+    if (viewId === null) return false;
+    const entry = map.get(sourceKey.toUpperCase());
+    return entry?.sourceKey === sourceKey && entry.viewId === viewId;
+  };
   const auxiliary = surface.auxiliary;
-  if (auxiliary?.prompts.items.some((item) => item.shotViewId !== null && !shotIds.has(item.shotViewId))) {
-    throw new Error('auxiliary.prompts contains an unknown shotViewId.');
-  }
-  if (auxiliary?.renderGuide?.queue.items.some((item) => item.shotViewId !== null && !shotIds.has(item.shotViewId))) {
-    throw new Error('auxiliary.renderGuide.queue contains an unknown shotViewId.');
-  }
-  const targetSets = { 'narrative-beat': beatIds, 'script-scene': sceneIds, shot: shotIds };
+  if (auxiliary?.prompts.items.some(
+    (item) => item.associationStatus === 'linked'
+      && !matchesCanonicalEntry(shots, item.shotId, item.shotViewId),
+  )) throw new Error('auxiliary.prompts contains an inconsistent canonical shot link.');
+  if (auxiliary?.renderGuide?.queue.items.some(
+    (item) => item.associationStatus === 'linked'
+      && !matchesCanonicalEntry(shots, item.shotId, item.shotViewId),
+  )) throw new Error('auxiliary.renderGuide.queue contains an inconsistent canonical shot link.');
+  const targetMaps = { 'narrative-beat': beats, 'script-scene': scenes, shot: shots };
   if (auxiliary?.review?.targets.some(
-    (item) => item.targetViewId !== null && !targetSets[item.kind].has(item.targetViewId),
-  )) throw new Error('auxiliary.review contains an unknown targetViewId.');
+    (item) => item.associationStatus === 'linked'
+      && !matchesCanonicalEntry(targetMaps[item.kind], item.sourceKey, item.targetViewId),
+  )) throw new Error('auxiliary.review contains an inconsistent canonical target link.');
 }
 
 function storyWorkspaceParseEpisodeArtifactSurfaceInternal(

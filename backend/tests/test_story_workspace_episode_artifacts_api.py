@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import errno
 import os
 import shutil
 import sqlite3
@@ -26,6 +27,9 @@ from services.errors.error_registry import ApiRouteError
 from services.story_workspace.episode_artifact_service import (
     StoryWorkspaceEpisodeArtifactPathError,
     StoryWorkspaceEpisodeArtifactService,
+)
+from services.story_workspace.episode_auxiliary_artifact_adapter import (
+    StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
 )
 from services.story_workspace.episode_binding_service import (
     StoryWorkspaceEpisodeBindingContext,
@@ -284,6 +288,139 @@ class TestStoryWorkspaceEpisodeArtifactService:
         )
         assert storyboard.availability is StoryWorkspaceEpisodeArtifactAvailability.INVALID
         assert "\\xff" not in surface.model_dump_json()
+
+    def test_review_case_variant_links_to_storyboard_canonical_view_id(self) -> None:
+        (self.episode / "storyboard.yaml").write_text(
+            "shots:\n  - shot_id: S04-E01-020a\n    visual: Canonical shot.\n",
+            encoding="utf-8",
+        )
+        (self.episode / "review-report.md").write_text(
+            "# Review\n\n## Shot finding\nS04-E01-020A needs work.\n",
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+
+        assert surface.narrative is not None
+        assert surface.auxiliary is not None
+        assert surface.auxiliary.review is not None
+        shot = surface.narrative.shots[0]
+        target = surface.auxiliary.review.targets[0]
+        assert target.source_key == shot.shot_id
+        assert target.target_view_id == shot.id
+        assert target.association_status.value == "linked"
+
+    def test_duplicate_case_variant_review_target_isolated_from_narrative(self) -> None:
+        (self.episode / "storyboard.yaml").write_text(
+            "shots:\n  - shot_id: S04-E01-020a\n    visual: Canonical shot.\n",
+            encoding="utf-8",
+        )
+        (self.episode / "review-report.md").write_text(
+            (
+                "# Review\n\n## First\nS04-E01-020a needs work.\n\n"
+                "## Second\nS04-E01-020A repeats the target.\n"
+            ),
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+
+        availability = {item.relative_key: item.availability for item in surface.artifacts}
+        assert availability["storyboard.yaml"] is StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
+        assert availability["review-report.md"] is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+        assert surface.narrative is not None
+        assert len(surface.narrative.shots) == 1
+        assert surface.auxiliary is not None
+        assert surface.auxiliary.review is None
+
+    def test_verified_file_read_eio_is_local_unavailable(self) -> None:
+        storyboard_path = self.episode / "storyboard.yaml"
+        storyboard_path.write_text(
+            "shots:\n  - shot_id: S04-E01-020a\n    visual: Canonical shot.\n",
+            encoding="utf-8",
+        )
+        real_read = os.read
+        storyboard_identity = (storyboard_path.stat().st_dev, storyboard_path.stat().st_ino)
+
+        def fail_storyboard_read(descriptor: int, size: int) -> bytes:
+            try:
+                metadata = os.fstat(descriptor)
+                descriptor_identity = (metadata.st_dev, metadata.st_ino)
+            except OSError:
+                descriptor_identity = None
+            if descriptor_identity == storyboard_identity:
+                raise OSError(errno.EIO, "simulated transient read failure")
+            return real_read(descriptor, size)
+
+        with patch("services.story_workspace.episode_artifact_service.os.read", fail_storyboard_read):
+            surface = self.read_surface()
+
+        availability = {item.relative_key: item.availability for item in surface.artifacts}
+        assert availability["storyboard.yaml"] is StoryWorkspaceEpisodeArtifactAvailability.UNAVAILABLE
+        assert availability["episode-outline.md"] is StoryWorkspaceEpisodeArtifactAvailability.NOT_GENERATED
+        assert surface.narrative is not None
+        assert surface.narrative.shots == []
+
+    def test_verified_directory_list_eio_is_local_unavailable(self) -> None:
+        prompts_path = self.episode / "prompts"
+        prompts_path.mkdir()
+        (prompts_path / "shot.yaml").write_text("shots: []\n", encoding="utf-8")
+        prompt_identity = (prompts_path.stat().st_dev, prompts_path.stat().st_ino)
+        real_listdir = os.listdir
+
+        def fail_prompt_list(directory: int | str | os.PathLike[str]):
+            if isinstance(directory, int):
+                metadata = os.fstat(directory)
+                if (metadata.st_dev, metadata.st_ino) == prompt_identity:
+                    raise OSError(errno.EIO, "simulated transient list failure")
+            return real_listdir(directory)
+
+        with patch(
+            "services.story_workspace.episode_artifact_service.os.listdir",
+            fail_prompt_list,
+        ):
+            surface = self.read_surface()
+
+        availability = {item.relative_key: item.availability for item in surface.artifacts}
+        assert availability["prompts/"] is StoryWorkspaceEpisodeArtifactAvailability.UNAVAILABLE
+        assert surface.auxiliary is not None
+        assert surface.auxiliary.prompts.items == []
+
+    def test_backend_same_entry_closure_rejects_crosswire_to_real_shot(self) -> None:
+        (self.episode / "storyboard.yaml").write_text(
+            (
+                "shots:\n"
+                "  - shot_id: S04-E01-020a\n    visual: First shot.\n"
+                "  - shot_id: S04-E01-020b\n    visual: Second shot.\n"
+            ),
+            encoding="utf-8",
+        )
+        (self.episode / "review-report.md").write_text(
+            "# Review\n\n## Shot finding\nS04-E01-020a needs work.\n",
+            encoding="utf-8",
+        )
+        surface = self.read_surface()
+        assert surface.narrative is not None
+        assert surface.auxiliary is not None
+        assert surface.auxiliary.review is not None
+        target = surface.auxiliary.review.targets[0]
+        wrong_target = target.model_copy(
+            update={"target_view_id": surface.narrative.shots[1].id}
+        )
+        review = surface.auxiliary.review.model_copy(
+            update={"targets": [wrong_target]}
+        )
+        auxiliary = surface.auxiliary.model_copy(update={"review": review})
+
+        with pytest.raises(
+            StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+            match="canonical_link_mismatch",
+        ):
+            self.service._assert_auxiliary_same_entry(
+                auxiliary,
+                surface.narrative,
+                root="review",
+            )
 
     def test_binding_story_or_canonical_project_identity_cannot_be_swapped(self) -> None:
         (self.story / "project.yaml").write_text(

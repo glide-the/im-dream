@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+import errno
 import hashlib
 import json
 import os
@@ -96,6 +97,14 @@ class StoryWorkspaceEpisodeArtifactContractError(StoryWorkspaceEpisodeArtifactEr
         super().__init__(message)
 
 
+class StoryWorkspaceEpisodeArtifactUnavailableError(StoryWorkspaceEpisodeArtifactError):
+    """A verified artifact root had a bounded transient content-read failure."""
+
+    def __init__(self, relative_key: str) -> None:
+        self.relative_key = relative_key
+        super().__init__("verified artifact content is temporarily unavailable")
+
+
 @dataclass(frozen=True)
 class StoryWorkspaceEpisodeAuthority:
     """Frozen launch-message authority; never derived from Episode files."""
@@ -173,6 +182,14 @@ class _EpisodeReads:
     renders: _DirectoryFact | None
     review: _FileFact | None
     invalid_revisions: Mapping[str, str]
+    unavailable_roots: frozenset[str]
+
+
+_TRANSIENT_ARTIFACT_ERRNOS = frozenset(
+    value
+    for name in ("EAGAIN", "EBUSY", "EIO", "ESTALE")
+    if isinstance((value := getattr(errno, name, None)), int)
+)
 
 
 _ARTIFACT_PRESENTATION = {
@@ -367,6 +384,7 @@ class StoryWorkspaceEpisodeArtifactService:
             raise StoryWorkspaceEpisodeArtifactPathError(
                 "artifact cannot be opened safely"
             ) from exc
+        identity_verified = False
         try:
             pinned = os.fstat(descriptor)
             visible = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -380,6 +398,7 @@ class StoryWorkspaceEpisodeArtifactService:
                 raise StoryWorkspaceEpisodeArtifactPathError(
                     "artifact inode is unsafe"
                 )
+            identity_verified = True
             if pinned.st_size > max_bytes:
                 raise StoryWorkspaceEpisodeArtifactContractError(
                     "artifact exceeds its byte limit",
@@ -399,6 +418,10 @@ class StoryWorkspaceEpisodeArtifactService:
                     )
                 chunks.append(chunk)
         except OSError as exc:
+            if identity_verified and exc.errno in _TRANSIENT_ARTIFACT_ERRNOS:
+                raise StoryWorkspaceEpisodeArtifactUnavailableError(
+                    relative_key
+                ) from None
             raise StoryWorkspaceEpisodeArtifactPathError(
                 "artifact cannot be read safely"
             ) from exc
@@ -433,6 +456,10 @@ class StoryWorkspaceEpisodeArtifactService:
             try:
                 entries = sorted(os.listdir(descriptor))
             except OSError as exc:
+                if exc.errno in _TRANSIENT_ARTIFACT_ERRNOS:
+                    raise StoryWorkspaceEpisodeArtifactUnavailableError(
+                        f"{name}/"
+                    ) from None
                 raise StoryWorkspaceEpisodeArtifactPathError(
                     "artifact directory cannot be listed safely"
                 ) from exc
@@ -631,9 +658,19 @@ class StoryWorkspaceEpisodeArtifactService:
             descriptors.append(episodes)
             episode = self._open_child_directory(episodes, "EP01", optional=True)
             if episode is None:
-                return _EpisodeReads(None, None, None, None, None, None, {})
+                return _EpisodeReads(
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    {},
+                    frozenset(),
+                )
             descriptors.append(episode)
             invalid_revisions: dict[str, str] = {}
+            unavailable_roots: set[str] = set()
 
             def read_root_file(
                 name: str,
@@ -648,6 +685,9 @@ class StoryWorkspaceEpisodeArtifactService:
                         max_bytes=max_bytes,
                         optional=True,
                     )
+                except StoryWorkspaceEpisodeArtifactUnavailableError:
+                    unavailable_roots.add(name)
+                    return None
                 except StoryWorkspaceEpisodeArtifactContractError as exc:
                     invalid_revisions[name] = (
                         exc.fact_revision
@@ -669,6 +709,9 @@ class StoryWorkspaceEpisodeArtifactService:
                         approved_extensions=approved_extensions,
                         per_file_max_bytes=per_file_max_bytes,
                     )
+                except StoryWorkspaceEpisodeArtifactUnavailableError:
+                    unavailable_roots.add(key)
+                    return None
                 except StoryWorkspaceEpisodeArtifactContractError as exc:
                     invalid_revisions[key] = (
                         exc.fact_revision
@@ -704,6 +747,7 @@ class StoryWorkspaceEpisodeArtifactService:
                     max_bytes=STORY_WORKSPACE_EPISODE_AUXILIARY_MARKDOWN_MAX_BYTES,
                 ),
                 invalid_revisions=invalid_revisions,
+                unavailable_roots=frozenset(unavailable_roots),
             )
         finally:
             for descriptor in reversed(descriptors):
@@ -899,9 +943,13 @@ class StoryWorkspaceEpisodeArtifactService:
             ),
             review_report=review.content if review is not None else None,
             review_revision=review.content_revision if review is not None else None,
-            shot_ids=[shot.shot_id for shot in narrative.shots],
-            narrative_beat_keys=[beat.source_key for beat in narrative.narrative_beats],
-            script_scene_keys=[scene.source_key for scene in narrative.scenes],
+            shot_view_ids={shot.shot_id: shot.id for shot in narrative.shots},
+            narrative_beat_view_ids={
+                beat.source_key: beat.id for beat in narrative.narrative_beats
+            },
+            script_scene_view_ids={
+                scene.source_key: scene.id for scene in narrative.scenes
+            },
             manifest_revision=preliminary_revision,
         )
         association_payload = {
@@ -918,9 +966,13 @@ class StoryWorkspaceEpisodeArtifactService:
             ),
             review_report=review.content if review is not None else None,
             review_revision=review.content_revision if review is not None else None,
-            shot_ids=[shot.shot_id for shot in narrative.shots],
-            narrative_beat_keys=[beat.source_key for beat in narrative.narrative_beats],
-            script_scene_keys=[scene.source_key for scene in narrative.scenes],
+            shot_view_ids={shot.shot_id: shot.id for shot in narrative.shots},
+            narrative_beat_view_ids={
+                beat.source_key: beat.id for beat in narrative.narrative_beats
+            },
+            script_scene_view_ids={
+                scene.source_key: scene.id for scene in narrative.scenes
+            },
             manifest_revision=manifest_revision,
         )
 
@@ -970,7 +1022,7 @@ class StoryWorkspaceEpisodeArtifactService:
             if not present:
                 continue
             try:
-                adapter.project(
+                projection = adapter.project(
                     prompts=prompt_files if kind == "prompts" else {},
                     prompt_revisions=prompt_revisions if kind == "prompts" else {},
                     render_guide=(
@@ -993,12 +1045,19 @@ class StoryWorkspaceEpisodeArtifactService:
                         if kind == "review" and review is not None
                         else None
                     ),
-                    shot_ids=[shot.shot_id for shot in narrative.shots],
-                    narrative_beat_keys=[
-                        beat.source_key for beat in narrative.narrative_beats
-                    ],
-                    script_scene_keys=[scene.source_key for scene in narrative.scenes],
+                    shot_view_ids={shot.shot_id: shot.id for shot in narrative.shots},
+                    narrative_beat_view_ids={
+                        beat.source_key: beat.id for beat in narrative.narrative_beats
+                    },
+                    script_scene_view_ids={
+                        scene.source_key: scene.id for scene in narrative.scenes
+                    },
                     manifest_revision=manifest_revision,
+                )
+                StoryWorkspaceEpisodeArtifactService._assert_auxiliary_same_entry(
+                    projection,
+                    narrative,
+                    root=kind,
                 )
             except StoryWorkspaceEpisodeAuxiliaryArtifactParseError:
                 if kind == "prompts":
@@ -1031,6 +1090,72 @@ class StoryWorkspaceEpisodeArtifactService:
         return prompt_files, prompt_revisions, render_guide, review
 
     @staticmethod
+    def _assert_auxiliary_same_entry(
+        auxiliary: object,
+        narrative: object,
+        *,
+        root: str,
+    ) -> None:
+        shots = {
+            shot.shot_id.upper(): (shot.shot_id, shot.id)
+            for shot in narrative.shots
+        }
+        beats = {
+            beat.source_key.upper(): (beat.source_key, beat.id)
+            for beat in narrative.narrative_beats
+        }
+        scenes = {
+            scene.source_key.upper(): (scene.source_key, scene.id)
+            for scene in narrative.scenes
+        }
+
+        def matches(
+            mapping: Mapping[str, tuple[str, str]],
+            source_key: str,
+            view_id: str | None,
+        ) -> bool:
+            entry = mapping.get(source_key.upper())
+            return entry == (source_key, view_id)
+
+        if root == "prompts" and any(
+            item.association_status.value == "linked"
+            and not matches(shots, item.shot_id, item.shot_view_id)
+            for item in auxiliary.prompts.items
+        ):
+            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                "prompts/",
+                "canonical_link_mismatch",
+            )
+        if root == "render" and auxiliary.render_guide is not None and any(
+            item.association_status.value == "linked"
+            and not matches(shots, item.shot_id, item.shot_view_id)
+            for item in auxiliary.render_guide.queue.items
+        ):
+            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                "renders/render-guide.md",
+                "canonical_link_mismatch",
+            )
+        if root == "review" and auxiliary.review is not None:
+            target_maps = {
+                "narrative-beat": beats,
+                "script-scene": scenes,
+                "shot": shots,
+            }
+            if any(
+                target.association_status.value == "linked"
+                and not matches(
+                    target_maps[target.kind.value],
+                    target.source_key,
+                    target.target_view_id,
+                )
+                for target in auxiliary.review.targets
+            ):
+                raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                    "review-report.md",
+                    "canonical_link_mismatch",
+                )
+
+    @staticmethod
     def _raw_manifest_facts(
         reads: _EpisodeReads,
         invalid: Mapping[str, str],
@@ -1050,6 +1175,11 @@ class StoryWorkspaceEpisodeArtifactService:
                 facts[key] = (
                     StoryWorkspaceEpisodeArtifactAvailability.INVALID.value,
                     invalid[key],
+                )
+            elif key in reads.unavailable_roots:
+                facts[key] = (
+                    StoryWorkspaceEpisodeArtifactAvailability.UNAVAILABLE.value,
+                    None,
                 )
             elif value is None or revision is None:
                 facts[key] = (
@@ -1092,9 +1222,13 @@ class StoryWorkspaceEpisodeArtifactService:
                 StoryWorkspaceEpisodeArtifactAvailability.INVALID
                 if key in invalid
                 else (
-                    StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
-                    if available
-                    else StoryWorkspaceEpisodeArtifactAvailability.NOT_GENERATED
+                    StoryWorkspaceEpisodeArtifactAvailability.UNAVAILABLE
+                    if key in reads.unavailable_roots
+                    else (
+                        StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
+                        if available
+                        else StoryWorkspaceEpisodeArtifactAvailability.NOT_GENERATED
+                    )
                 )
             )
             entries.append(
@@ -1115,6 +1249,7 @@ __all__ = [
     "StoryWorkspaceEpisodeArtifactContractError",
     "StoryWorkspaceEpisodeArtifactError",
     "StoryWorkspaceEpisodeArtifactPathError",
+    "StoryWorkspaceEpisodeArtifactUnavailableError",
     "StoryWorkspaceEpisodeArtifactService",
     "StoryWorkspaceEpisodeAuthority",
 ]
