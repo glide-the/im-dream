@@ -22,12 +22,24 @@ test('composes the authoritative Episode query, U6 view model and U7-U9 workbenc
     '<StoryWorkspaceEpisodeNarrativeWorkbench',
     '<StoryWorkspaceEpisodeShotAuxiliary',
     '<StoryWorkspaceEpisodeReviewPanel',
+    '<StoryWorkspaceEpisodeArtifactReader',
     'promptsByShotViewId',
     'renderQueueByShotViewId',
     'onLocateTarget={locateEpisodeReviewTarget}',
     "heading.focus({ preventScroll: true })",
     "behavior: reducedMotion ? 'auto' : 'smooth'",
   ]) expect(PAGE_SOURCE).toContain(expected);
+});
+
+test('opens canonical Episode artifacts inside the storyboard focus layer', () => {
+  const focusStart = PAGE_SOURCE.indexOf('data-execution-depth="focus"');
+  const focusEnd = PAGE_SOURCE.indexOf('data-execution-depth="overview"');
+  const focusBranch = PAGE_SOURCE.slice(focusStart, focusEnd);
+
+  expect(focusBranch).toContain("focusedEntry.stage === 'storyboards'");
+  expect(focusBranch).toContain('<StoryWorkspaceEpisodeArtifactReader');
+  expect(focusBranch).toContain('documents={episodeSurface.documents ?? []}');
+  expect(focusBranch).toContain('shots={episodeSurface.narrative?.shots ?? []}');
 });
 
 test('keeps Dream confirmation and Agent preview boundaries without browser-owned truth', () => {

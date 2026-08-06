@@ -13,7 +13,10 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { StoryWorkspaceEpisodeOverview } from '../../../hooks/story-workspace/contracts';
+import type {
+  StoryWorkspaceEpisodeArtifactManifestEntry,
+  StoryWorkspaceEpisodeOverview,
+} from '../../../hooks/story-workspace/contracts';
 import {
   storyWorkspaceEpisodeNavigationAction,
   storyWorkspaceEpisodeNavigationItems,
@@ -34,6 +37,7 @@ export interface StoryWorkspaceEpisodeNarrativeWorkbenchProps {
   ) => void;
   readonly onEscape: (selection: StoryWorkspaceEpisodeSelection) => void;
   readonly episodeOverview?: StoryWorkspaceEpisodeOverview | null;
+  readonly artifactProgress?: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
   readonly auxiliarySlot?: ReactNode;
   readonly onAuxiliarySelection?: (
     selection: StoryWorkspaceEpisodeSelection,
@@ -54,6 +58,22 @@ export interface StoryWorkspaceEpisodeNarrativeKeyInput {
 
 const STORYLINE_SHEET_ID = 'story-workspace-episode-storyline-sheet';
 const STORYLINE_NARROW_QUERY = '(max-width: 767px)';
+
+const ARTIFACT_PROGRESS_LABELS: Readonly<Record<string, string>> = {
+  'episode-outline.md': '分集大纲',
+  'script.md': '剧本',
+  'storyboard.yaml': '分镜',
+  'prompts/': 'Prompts',
+  'renders/': 'Renders',
+  'review-report.md': '审阅报告',
+};
+
+const ARTIFACT_PROGRESS_AVAILABILITY = {
+  available: '已生成',
+  not_generated: '尚未生成',
+  invalid: '来源无效',
+  unavailable: '当前不可用',
+} as const;
 
 function initialNarrowLayout(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(STORYLINE_NARROW_QUERY).matches;
@@ -235,9 +255,11 @@ function navigationLabel(
 function EpisodeOverviewContent({
   viewModel,
   overview,
+  artifactProgress,
 }: {
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly overview: StoryWorkspaceEpisodeOverview | null;
+  readonly artifactProgress: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
 }) {
   const episode = viewModel.episode;
   const hasScenes = Object.keys(viewModel.scenesById).length > 0;
@@ -247,6 +269,19 @@ function EpisodeOverviewContent({
     { 'aria-label': 'Episode Overview' },
     h('p', null, 'Episode Overview'),
     h('h2', null, pending(overview?.title ?? episode?.title)),
+    h(
+      'ol',
+      {
+        'aria-label': '第一集产物进度',
+        className: 'story-workspace-episode-artifact-progress',
+      },
+      artifactProgress.map((artifact) => h(
+        'li',
+        { key: artifact.relativeKey },
+        h('strong', null, ARTIFACT_PROGRESS_LABELS[artifact.relativeKey] ?? '受控产物'),
+        h('span', null, ARTIFACT_PROGRESS_AVAILABILITY[artifact.availability]),
+      )),
+    ),
     h('section', null, h('h3', null, '系列'), h('p', null, pending(overview?.series))),
     h(TextList, { title: '故事目标', values: overview?.storyGoals ?? [] }),
     h(
@@ -486,17 +521,23 @@ function NarrativeContent({
   viewModel,
   selection,
   episodeOverview,
+  artifactProgress,
   onNavigate,
   auxiliaryGroup,
 }: {
   readonly viewModel: StoryWorkspaceEpisodeExecutionViewModel;
   readonly selection: StoryWorkspaceEpisodeSelection;
   readonly episodeOverview: StoryWorkspaceEpisodeOverview | null;
+  readonly artifactProgress: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
   readonly onNavigate: (selection: StoryWorkspaceEpisodeSelection) => void;
   readonly auxiliaryGroup: StoryWorkspaceEpisodeNavigationItem['auxiliaryGroup'];
 }) {
   if (selection.kind === 'episode' || selection.kind === 'story-arc') {
-    return h(EpisodeOverviewContent, { viewModel, overview: episodeOverview });
+    return h(EpisodeOverviewContent, {
+      viewModel,
+      overview: episodeOverview,
+      artifactProgress,
+    });
   }
   if (selection.kind === 'narrative-beat') {
     return h(BeatContent, { viewModel, id: selection.id });
@@ -543,6 +584,7 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
   onExpanded,
   onEscape,
   episodeOverview = null,
+  artifactProgress = [],
   auxiliarySlot,
   onAuxiliarySelection,
 }: StoryWorkspaceEpisodeNarrativeWorkbenchProps) {
@@ -767,6 +809,7 @@ export function StoryWorkspaceEpisodeNarrativeWorkbench({
             viewModel,
             selection: activeSelection,
             episodeOverview,
+            artifactProgress,
             onNavigate: selectAndFocus,
             auxiliaryGroup: activeItem.auxiliaryGroup,
           }),

@@ -562,9 +562,19 @@ function storyWorkspaceMergeEpisodeArtifactLastGood(
       associations: latestAuxiliary.associations,
     };
   }
+  const documents = [...(latest.documents ?? [])];
+  for (const key of ['episode-outline.md', 'script.md', 'review-report.md'] as const) {
+    if (!stale.has(key)) continue;
+    const cached = cache[key]?.documents?.find((document) => document.relativeKey === key);
+    if (cached === undefined) continue;
+    const currentIndex = documents.findIndex((document) => document.relativeKey === key);
+    if (currentIndex < 0) documents.push(cached);
+    else documents[currentIndex] = cached;
+  }
   return {
     ...latest,
     artifacts: latest.artifacts,
+    documents,
     narrative,
     auxiliary,
   };

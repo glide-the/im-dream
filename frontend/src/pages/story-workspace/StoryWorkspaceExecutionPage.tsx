@@ -35,6 +35,10 @@ import {
 } from '../../components/story-workspace/dream/StoryWorkspaceDreamAgentDialog';
 import { StoryWorkspaceEpisodeNarrativeWorkbench } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeNarrativeWorkbench';
 import {
+  StoryWorkspaceEpisodeArtifactReader,
+  type StoryWorkspaceEpisodeReadableArtifact,
+} from '../../components/story-workspace/episode/StoryWorkspaceEpisodeArtifactReader';
+import {
   StoryWorkspaceEpisodeReviewPanel,
   type StoryWorkspaceEpisodeReviewLocateSelection,
 } from '../../components/story-workspace/episode/StoryWorkspaceEpisodeReviewPanel';
@@ -479,6 +483,8 @@ export function StoryWorkspaceExecutionPage({
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [episodeContinueDialogOpen, setEpisodeContinueDialogOpen] = useState(false);
+  const [focusedArtifact, setFocusedArtifact] =
+    useState<StoryWorkspaceEpisodeReadableArtifact>('storyboard.yaml');
   const [episodeExpandedKeys, setEpisodeExpandedKeys] =
     useState<ReadonlySet<string>>(() => new Set());
   const [episodeActionBusy, setEpisodeActionBusy] =
@@ -608,6 +614,7 @@ export function StoryWorkspaceExecutionPage({
   useEffect(() => {
     setActiveModule('outline');
     setFocusKey(null);
+    setFocusedArtifact('storyboard.yaml');
     setEpisodeExpandedKeys(new Set());
   }, [runId]);
 
@@ -979,13 +986,24 @@ export function StoryWorkspaceExecutionPage({
               </section>
 
               {focusedEntry.stage === 'storyboards' && (
-                <section className="story-workspace-collaboration__shot-note">
-                  <span>镜头说明</span>
-                  <div>
-                    <b>01</b>
-                    <p>{focusedEntry.summary || '等待镜头说明写入工作空间。'}</p>
-                  </div>
-                </section>
+                <>
+                  <section className="story-workspace-collaboration__shot-note">
+                    <span>镜头说明</span>
+                    <div>
+                      <b>01</b>
+                      <p>{focusedEntry.summary || '等待镜头说明写入工作空间。'}</p>
+                    </div>
+                  </section>
+                  <StoryWorkspaceEpisodeArtifactReader
+                    activeArtifact={focusedArtifact}
+                    artifacts={episodeSurface.artifacts}
+                    documents={episodeSurface.documents ?? []}
+                    onArtifactSelection={setFocusedArtifact}
+                    onShotSelection={(shotId) => setEpisodeSelection({ kind: 'shot', id: shotId })}
+                    selectedShotId={selectedEpisodeShot?.id ?? null}
+                    shots={episodeSurface.narrative?.shots ?? []}
+                  />
+                </>
               )}
 
               <section className="story-workspace-collaboration__history">
@@ -1128,18 +1146,6 @@ export function StoryWorkspaceExecutionPage({
               <h2 id="story-workspace-episode-title">
                 {episodeSurface.narrative?.overview.title ?? '第一集'}
               </h2>
-              <ol aria-label="第一集产物进度">
-                {episodeSurface.artifacts.map((artifact) => (
-                  <li key={artifact.relativeKey}>
-                    <strong>
-                      {EPISODE_ARTIFACT_LABELS[artifact.relativeKey] ?? '受控产物'}
-                    </strong>
-                    <span>
-                      {EPISODE_ARTIFACT_AVAILABILITY_LABELS[artifact.availability]}
-                    </span>
-                  </li>
-                ))}
-              </ol>
               {episodeArtifacts.isLoading && (
                 <p aria-live="polite">正在检查新的 artifact revision…</p>
               )}
@@ -1215,6 +1221,7 @@ export function StoryWorkspaceExecutionPage({
               <div ref={episodeWorkbenchRef}>
                 <p aria-live="polite">{episodeSelectionAnnouncement}</p>
                 <StoryWorkspaceEpisodeNarrativeWorkbench
+                  artifactProgress={episodeSurface.artifacts}
                   auxiliarySlot={(
                     <>
                       {selectedEpisodeShot !== null && (

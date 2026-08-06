@@ -103,6 +103,18 @@ test('Episode workbench uses a two-column master-detail hierarchy', () => {
   expect(auxiliaryView).toBeGreaterThan(contentWorkplane);
 });
 
+test('places the artifact progress directly below the Episode Overview title', () => {
+  const overviewStart = EPISODE_WORKBENCH_SOURCE.indexOf('function EpisodeOverviewContent');
+  const overviewEnd = EPISODE_WORKBENCH_SOURCE.indexOf('function BeatContent', overviewStart);
+  const overview = EPISODE_WORKBENCH_SOURCE.slice(overviewStart, overviewEnd);
+  const title = overview.indexOf("h('h2'");
+  const progress = overview.indexOf("'aria-label': '第一集产物进度'");
+
+  expect(title).toBeGreaterThan(-1);
+  expect(progress).toBeGreaterThan(title);
+  expect(PAGE_SOURCE.match(/aria-label="第一集产物进度"/g) ?? []).toHaveLength(0);
+});
+
 test('Episode layout has a mobile storyline sheet and 44px controls below 768px', () => {
   expect(CSS_SOURCE).toMatch(/@media\s*\(max-width:\s*767px\)/);
   const narrowStart = CSS_SOURCE.indexOf('@media (max-width: 767px)');
@@ -116,6 +128,12 @@ test('Episode layout has a mobile storyline sheet and 44px controls below 768px'
   expect(narrow).toContain('overflow-x: hidden');
   expect(narrow).toContain('.story-workspace-episode-storyline-sheet');
   expect(narrow).toContain('position: fixed');
+  expect(narrow).toMatch(
+    /\[aria-label="第一集文件导航"\][^{]*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/s,
+  );
+  expect(narrow).toMatch(
+    /\.story-workspace-episode-artifact-reader__markdown table\s*\{[^}]*overflow-x:\s*auto/s,
+  );
   expect(EPISODE_WORKBENCH_SOURCE).toContain("'aria-expanded': storylineOpen");
   expect(EPISODE_WORKBENCH_SOURCE).toContain("'aria-controls': STORYLINE_SHEET_ID");
   expect(EPISODE_WORKBENCH_SOURCE).toContain('hidden: isNarrowLayout && !storylineOpen');

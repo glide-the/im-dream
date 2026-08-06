@@ -205,6 +205,23 @@ function boundSurface(
       publicReason: null,
     },
     artifacts: artifacts(available),
+    documents: [
+      ...(available.includes('episode-outline.md') ? [{
+        relativeKey: 'episode-outline.md',
+        markdown: '# 雨夜重逢\n\n## 故事目标\n\n- 重新建立信任',
+        sourceRevision: CONTENT_REVISION,
+      }] : []),
+      ...(available.includes('script.md') ? [{
+        relativeKey: 'script.md',
+        markdown: '# 剧本\n\n## S01 雨夜站台\n\n林默停住脚步。',
+        sourceRevision: CONTENT_REVISION,
+      }] : []),
+      ...(available.includes('review-report.md') ? [{
+        relativeKey: 'review-report.md',
+        markdown: '# 审阅报告\n\n| 维度 | 结论 |\n| --- | --- |\n| 结构 | 通过 |',
+        sourceRevision: CONTENT_REVISION,
+      }] : []),
+    ],
     narrative: {
       episodeId: EPISODE_VIEW_ID,
       storyArcId: ARC_ID,
@@ -406,11 +423,57 @@ function unboundSurface(): Record<string, unknown> {
       publicReason: null,
     },
     artifacts: [],
+    documents: [],
     narrative: null,
     auxiliary: null,
     workflow: null,
   };
 }
+
+test('hydrates safe Markdown documents only for matching available revisions', () => {
+  const surface = storyWorkspaceParseEpisodeArtifactSurface(boundSurface(
+    REVISION_5,
+    ['episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md'],
+  ));
+
+  expect(surface.documents?.map((document) => document.relativeKey)).toEqual([
+    'episode-outline.md',
+    'script.md',
+    'review-report.md',
+  ]);
+  expect(surface.documents?.[2]?.markdown).toContain('| 结构 | 通过 |');
+
+  const mismatched = boundSurface(
+    REVISION_5,
+    ['episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md'],
+  );
+  const documents = mismatched.documents as Array<Record<string, unknown>>;
+  documents[0] = { ...documents[0], sourceRevision: `sha256:${'f'.repeat(64)}` };
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(mismatched)).toThrow(
+    /document.*revision/i,
+  );
+});
+
+test('accepts slash-delimited schema labels in a validated review Markdown document', () => {
+  const payload = boundSurface(
+    REVISION_5,
+    ['episode-outline.md', 'script.md', 'storyboard.yaml', 'review-report.md'],
+  );
+  const documents = payload.documents as Array<Record<string, unknown>>;
+  const review = documents.find((document) => document.relativeKey === 'review-report.md');
+  expect(review).toBeDefined();
+  review!.markdown = [
+    '# 审查报告',
+    '',
+    '| 检查项 | 结果 |',
+    '| --- | --- |',
+    '| Frontmatter必填字段 | ✅ |',
+    '',
+    'series/project/episode/title/genre/duration_estimate/character_refs/scene_refs/status/version齐全',
+  ].join('\n');
+
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload)).not.toThrow();
+});
 
 function recoverableUnboundSurface(): Record<string, unknown> {
   return {
@@ -914,7 +977,7 @@ test('all public Episode text fails closed and parser diagnostics never echo hos
   }
 });
 
-test('one 155-field registry constrains every surface string parser at runtime', () => {
+test('one exhaustive field registry constrains every surface string parser at runtime', () => {
   const visited = new Map<string, StoryWorkspaceEpisodeStringFieldClass>();
   const onStringField = (
     field: string,
@@ -922,7 +985,7 @@ test('one 155-field registry constrains every surface string parser at runtime',
   ) => visited.set(field, classification);
   storyWorkspaceParseEpisodeArtifactSurface(fullyPopulatedSurface(), { onStringField });
   storyWorkspaceParseEpisodeArtifactSurface(recoverableUnboundSurface(), { onStringField });
-  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(155);
+  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(158);
   expect([...visited.keys()].sort()).toEqual(
     Object.keys(storyWorkspaceEpisodeStringFieldClassification).sort(),
   );
@@ -1364,6 +1427,14 @@ test('each invalid root restores only its own fragment while every other fragmen
       mtime: null,
       size: null,
     });
+    if (
+      target === 'episode-outline.md'
+      || target === 'script.md'
+      || target === 'review-report.md'
+    ) {
+      payload.documents = (payload.documents as Array<Record<string, unknown>>)
+        .filter((document) => document.relativeKey !== target);
+    }
     if (target === 'episode-outline.md') {
       Object.assign(overview, {
         title: null,

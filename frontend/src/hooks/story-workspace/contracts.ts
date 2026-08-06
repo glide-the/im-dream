@@ -567,6 +567,12 @@ export interface StoryWorkspaceEpisodeArtifactManifestEntry {
   readonly consumers: readonly StoryWorkspaceEpisodeArtifactConsumer[];
 }
 
+export interface StoryWorkspaceEpisodeArtifactDocument {
+  readonly relativeKey: 'episode-outline.md' | 'script.md' | 'review-report.md';
+  readonly markdown: string;
+  readonly sourceRevision: string;
+}
+
 export interface StoryWorkspaceEpisodeAssociationCoverage {
   readonly availability: StoryWorkspaceEpisodeMetricAvailability;
   readonly linked: number;
@@ -826,6 +832,8 @@ export interface StoryWorkspaceEpisodeArtifactSurface {
   readonly bindingAvailability: StoryWorkspaceEpisodeBindingAvailability;
   readonly bindingRecovery: StoryWorkspaceEpisodeBindingRecovery;
   readonly artifacts: readonly StoryWorkspaceEpisodeArtifactManifestEntry[];
+  /** Additive v1.2 reader projection; absent only while talking to an older backend. */
+  readonly documents?: readonly StoryWorkspaceEpisodeArtifactDocument[];
   readonly narrative: StoryWorkspaceEpisodeNarrativeProjection | null;
   readonly auxiliary: StoryWorkspaceEpisodeAuxiliaryProjection | null;
   readonly workflow: StoryWorkspaceEpisodeWorkflowProjection | null;
@@ -857,6 +865,9 @@ export const storyWorkspaceEpisodeStringFieldClassification = {
   'artifacts[].mtime': 'machine_enum_or_pattern',
   'artifacts[].producerAction': 'machine_enum_or_pattern',
   'artifacts[].consumers[]': 'machine_enum_or_pattern',
+  'documents[].relativeKey': 'canonical_relative_key',
+  'documents[].markdown': 'public_text',
+  'documents[].sourceRevision': 'machine_enum_or_pattern',
   'coverage.availability': 'machine_enum_or_pattern',
   'narrative.episodeId': 'machine_enum_or_pattern',
   'narrative.storyArcId': 'machine_enum_or_pattern',
@@ -1133,6 +1144,12 @@ function storyWorkspaceEpisodeLooksLikeSecret(value: string): boolean {
   const candidates = value.match(/(?<![A-Za-z0-9+/_=-])[A-Za-z0-9+/_-]{32,}={0,2}(?![A-Za-z0-9+/_=-])/g) ?? [];
   return candidates.some((candidate) => {
     const token = candidate.replace(/=+$/, '');
+    const slashSeparatedLabels = token.split('/');
+    if (
+      slashSeparatedLabels.length >= 4
+      && slashSeparatedLabels.some((label) => label.includes('_'))
+      && slashSeparatedLabels.every((label) => /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(label))
+    ) return false;
     const characterClasses = Number(/[a-z]/.test(token))
       + Number(/[A-Z]/.test(token))
       + Number(/[0-9]/.test(token))
@@ -1805,6 +1822,30 @@ function storyWorkspaceParseEpisodeNarrative(value: unknown): StoryWorkspaceEpis
   };
 }
 
+function storyWorkspaceParseEpisodeArtifactDocument(
+  value: unknown,
+  index: number,
+): StoryWorkspaceEpisodeArtifactDocument {
+  const label = `documents[${index}]`;
+  const record = storyWorkspaceEpisodeRecord(value, label, [
+    'relativeKey', 'markdown', 'sourceRevision',
+  ]);
+  return {
+    relativeKey: storyWorkspaceEpisodeEnum(record.relativeKey, `${label}.relativeKey`, [
+      'episode-outline.md',
+      'script.md',
+      'review-report.md',
+    ]),
+    markdown: storyWorkspaceEpisodePublicText(record.markdown, `${label}.markdown`, {
+      max: 1024 * 1024,
+    }),
+    sourceRevision: storyWorkspaceEpisodeSourceRevision(
+      record.sourceRevision,
+      `${label}.sourceRevision`,
+    ),
+  };
+}
+
 function storyWorkspaceParseEpisodePrompt(value: unknown, index: number): StoryWorkspaceEpisodePrompt {
   const label = `auxiliary.prompts.items[${index}]`;
   const record = storyWorkspaceEpisodeRecord(value, label, [
@@ -2072,8 +2113,14 @@ function storyWorkspaceEpisodeAssertLinks(surface: StoryWorkspaceEpisodeArtifact
 function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   value: unknown,
 ): StoryWorkspaceEpisodeArtifactSurface {
-  const record = storyWorkspaceEpisodeRecord(value, 'Episode artifact surface', [
-    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'narrative', 'auxiliary', 'workflow',
+  const compatibleValue = typeof value === 'object'
+    && value !== null
+    && !Array.isArray(value)
+    && !Object.prototype.hasOwnProperty.call(value, 'documents')
+    ? { ...(value as StoryWorkspaceEpisodeWireRecord), documents: [] }
+    : value;
+  const record = storyWorkspaceEpisodeRecord(compatibleValue, 'Episode artifact surface', [
+    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'documents', 'narrative', 'auxiliary', 'workflow',
   ]);
   const runId = storyWorkspaceEpisodeString(record.runId, 'surface.runId', { pattern: STORY_WORKSPACE_EPISODE_RUN_ID });
   const bindingAvailability = storyWorkspaceEpisodeEnum(
@@ -2091,6 +2138,13 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   const bindingRecovery = storyWorkspaceParseEpisodeBindingRecovery(record.bindingRecovery);
   const artifacts = storyWorkspaceEpisodeArray(record.artifacts, 'artifacts', storyWorkspaceParseEpisodeManifestEntry, 256);
   storyWorkspaceEpisodeUnique(artifacts.map((item) => item.relativeKey), 'artifacts.relativeKey');
+  const documents = storyWorkspaceEpisodeArray(
+    record.documents,
+    'documents',
+    storyWorkspaceParseEpisodeArtifactDocument,
+    3,
+  );
+  storyWorkspaceEpisodeUnique(documents.map((item) => item.relativeKey), 'documents.relativeKey');
   const narrative = record.narrative === null ? null : storyWorkspaceParseEpisodeNarrative(record.narrative);
   const auxiliary = record.auxiliary === null ? null : storyWorkspaceParseEpisodeAuxiliary(record.auxiliary);
   const workflow = record.workflow === null ? null : storyWorkspaceParseEpisodeWorkflow(record.workflow);
@@ -2106,11 +2160,19 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     if (auxiliary !== null && auxiliary.manifestRevision !== manifestRevision) {
       throw new Error('auxiliary manifestRevision must equal manifestRevision.');
     }
+    for (const document of documents) {
+      const artifact = artifacts.find((item) => item.relativeKey === document.relativeKey);
+      if (
+        artifact?.availability !== 'available'
+        || artifact.contentRevision !== document.sourceRevision
+      ) throw new Error('document revision must match its available artifact.');
+    }
   } else if (
     opaqueEpisodeId !== null
     || manifestRevision !== null
     || etag !== null
     || artifacts.length > 0
+    || documents.length > 0
     || narrative !== null
     || auxiliary !== null
     || workflow !== null
@@ -2123,6 +2185,7 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     bindingAvailability,
     bindingRecovery,
     artifacts,
+    documents,
     narrative,
     auxiliary,
     workflow,
