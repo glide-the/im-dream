@@ -2328,6 +2328,7 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
     narrative: Optional[StoryWorkspaceEpisodeNarrativeProjection] = None
     auxiliary: Optional[StoryWorkspaceEpisodeAuxiliaryProjection] = None
     workflow: Optional[StoryWorkspaceEpisodeWorkflowProjection] = None
+    action_projection: Optional[StoryWorkspaceEpisodeActionProjectionV2] = None
 
     @model_validator(mode="after")
     def binding_controls_episode_surface(
@@ -2360,6 +2361,7 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
             or self.narrative is not None
             or self.auxiliary is not None
             or self.workflow is not None
+            or self.action_projection is not None
         ):
             raise ValueError("unbound surfaces cannot expose Episode artifacts")
         relative_keys = [artifact.relative_key for artifact in self.artifacts]

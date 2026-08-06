@@ -45,6 +45,7 @@ try:
         StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingFile,
         StoryWorkspaceEpisodeBindingRecovery,
+        StoryWorkspaceEpisodeRegistryFile,
         StoryWorkspaceEpisodeProducerAction,
         StoryWorkspaceEpisodeReviewScope,
     )
@@ -78,6 +79,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeBindingAvailability,
         StoryWorkspaceEpisodeBindingFile,
         StoryWorkspaceEpisodeBindingRecovery,
+        StoryWorkspaceEpisodeRegistryFile,
         StoryWorkspaceEpisodeProducerAction,
         StoryWorkspaceEpisodeReviewScope,
     )
@@ -154,14 +156,15 @@ class StoryWorkspaceEpisodeAuthority:
             or re.fullmatch(r"[0-9a-f]{32}", value["episode_uid"]) is None
             or not isinstance(value.get("story_slug"), str)
             or _STORY_SLUG_RE.fullmatch(value["story_slug"]) is None
-            or value.get("episode_code") != "EP01"
+            or not isinstance(value.get("episode_code"), str)
+            or re.fullmatch(r"EP[0-9]{2}", value["episode_code"]) is None
         ):
             return None
         return cls(
             workflow_run_id=expected_run_id,
             episode_uid=value["episode_uid"],
             story_slug=value["story_slug"],
-            episode_code="EP01",
+            episode_code=value["episode_code"],
         )
 
 
@@ -172,6 +175,15 @@ class _FileFact:
     content_revision: str
     mtime: datetime
     size: int
+
+
+@dataclass(frozen=True)
+class _ResolvedEpisodeBinding:
+    workflow_run_id: str
+    episode_uid: str
+    story_slug: str
+    episode_code: str
+    episode_root: str
 
 
 @dataclass(frozen=True)
@@ -584,7 +596,8 @@ class StoryWorkspaceEpisodeArtifactService:
     def _read_existing_binding(
         self,
         workflow_run_id: str,
-    ) -> StoryWorkspaceEpisodeBindingFile | None:
+        episode_uid: str,
+    ) -> _ResolvedEpisodeBinding | None:
         descriptors: list[int] = []
         try:
             parent = self._open_workspace()
@@ -608,24 +621,58 @@ class StoryWorkspaceEpisodeArtifactService:
             if fact is None:
                 return None
             try:
-                binding = StoryWorkspaceEpisodeBindingFile.model_validate_json(
+                legacy = StoryWorkspaceEpisodeBindingFile.model_validate_json(
+                    fact.content
+                )
+            except ValidationError:
+                legacy = None
+            if legacy is not None:
+                if legacy.episode_uid != episode_uid:
+                    return None
+                return _ResolvedEpisodeBinding(
+                    workflow_run_id=legacy.workflow_run_id,
+                    episode_uid=legacy.episode_uid,
+                    story_slug=legacy.story_slug,
+                    episode_code=legacy.episode_code,
+                    episode_root=legacy.episode_root,
+                )
+            try:
+                registry = StoryWorkspaceEpisodeRegistryFile.model_validate_json(
                     fact.content
                 )
             except ValidationError:
                 return None
-            return binding
+            if registry.workflow_run_id != workflow_run_id:
+                return None
+            episode = next(
+                (
+                    item
+                    for item in registry.episodes
+                    if item.episode_uid == episode_uid
+                ),
+                None,
+            )
+            if episode is None:
+                return None
+            return _ResolvedEpisodeBinding(
+                workflow_run_id=registry.workflow_run_id,
+                episode_uid=episode.episode_uid,
+                story_slug=registry.story_slug,
+                episode_code=episode.episode_code,
+                episode_root=episode.episode_root,
+            )
         finally:
             for descriptor in reversed(descriptors):
                 os.close(descriptor)
 
     def _read_bound_episode(
         self,
-        binding: StoryWorkspaceEpisodeBindingFile,
+        binding: _ResolvedEpisodeBinding,
     ) -> _EpisodeReads:
         if (
             _STORY_SLUG_RE.fullmatch(binding.story_slug) is None
             or binding.episode_root
-            != f"stories/{binding.story_slug}/episodes/EP01"
+            != f"stories/{binding.story_slug}/episodes/{binding.episode_code}"
         ):
             raise StoryWorkspaceEpisodeArtifactPathError(
                 "Episode binding root identity is invalid"
@@ -670,7 +717,11 @@ class StoryWorkspaceEpisodeArtifactService:
             episodes = self._open_child_directory(parent, "episodes", optional=False)
             assert episodes is not None
             descriptors.append(episodes)
-            episode = self._open_child_directory(episodes, "EP01", optional=True)
+            episode = self._open_child_directory(
+                episodes,
+                binding.episode_code,
+                optional=True,
+            )
             if episode is None:
                 return _EpisodeReads(
                     None,
@@ -839,7 +890,10 @@ class StoryWorkspaceEpisodeArtifactService:
         )
         if authority is None:
             return self.unbound_surface(workflow_run_id)
-        binding = self._read_existing_binding(workflow_run_id)
+        binding = self._read_existing_binding(
+            workflow_run_id,
+            authority.episode_uid,
+        )
         if binding is None:
             return self.unbound_surface(workflow_run_id)
         if (

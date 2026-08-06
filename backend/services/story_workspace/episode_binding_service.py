@@ -54,6 +54,12 @@ _PROJECT_MAPPING_ID_PATTERN = re.compile(
     r"(?P<value>[a-z0-9]+(?:-[a-z0-9]+)*)"
     r"(?P=quote)[ \t]*$"
 )
+_TOTAL_EPISODES_PATTERN = re.compile(
+    r"(?m)^  total_episodes:[ \t]*(?P<value>[1-9][0-9]?)[ \t]*(?:\r\n|\n|\Z)"
+)
+_TOTAL_EPISODES_DECLARATION_PATTERN = re.compile(
+    r"(?m)^[ \t]*total_episodes[ \t]*:"
+)
 
 
 class StoryWorkspaceEpisodeBindingError(RuntimeError):
@@ -385,11 +391,10 @@ class StoryWorkspaceEpisodeBindingService:
         return canonical_candidate
 
     @classmethod
-    def _read_project_id_from_story_directory(
+    def _read_project_text_from_story_directory(
         cls,
         story_descriptor: int,
         *,
-        candidate: str,
         optional: bool,
     ) -> str | None:
         descriptor = -1
@@ -445,10 +450,7 @@ class StoryWorkspaceEpisodeBindingService:
                 raise StoryWorkspaceEpisodeBindingContractError(
                     "canonical project identity is unreadable"
                 ) from exc
-            return cls.read_canonical_project_id_from_text(
-                text,
-                candidate=candidate,
-            )
+            return text
         except OSError as exc:
             raise StoryWorkspaceEpisodeBindingPathError(
                 "canonical project identity cannot be read safely"
@@ -456,6 +458,25 @@ class StoryWorkspaceEpisodeBindingService:
         finally:
             if descriptor >= 0:
                 os.close(descriptor)
+
+    @classmethod
+    def _read_project_id_from_story_directory(
+        cls,
+        story_descriptor: int,
+        *,
+        candidate: str,
+        optional: bool,
+    ) -> str | None:
+        text = cls._read_project_text_from_story_directory(
+            story_descriptor,
+            optional=optional,
+        )
+        if text is None:
+            return None
+        return cls.read_canonical_project_id_from_text(
+            text,
+            candidate=candidate,
+        )
 
     def discover_unique_canonical_project_story_slug(self) -> str | None:
         """Return the sole server-proven project identity, never an Agent choice."""
@@ -529,6 +550,41 @@ class StoryWorkspaceEpisodeBindingService:
             )
             assert project_id is not None
             return project_id
+        finally:
+            for opened in reversed(descriptors):
+                os.close(opened)
+
+    def read_canonical_project_total_episodes(self, story_slug: str) -> int | None:
+        """Read the optional trusted Drama Forge Episode horizon from project.yaml."""
+
+        candidate = self._validate_story_slug(story_slug)
+        descriptors: list[int] = []
+        try:
+            parent = self._open_workspace()
+            descriptors.append(parent)
+            for component in ("stories", candidate):
+                child = self._open_child_directory(parent, component, create=False)
+                assert child is not None
+                descriptors.append(child)
+                parent = child
+            text = self._read_project_text_from_story_directory(
+                parent,
+                optional=False,
+            )
+            assert text is not None
+            self.read_canonical_project_id_from_text(text, candidate=candidate)
+            declarations = _TOTAL_EPISODES_DECLARATION_PATTERN.findall(text)
+            matches = [
+                int(match.group("value"))
+                for match in _TOTAL_EPISODES_PATTERN.finditer(text)
+            ]
+            if not declarations:
+                return None
+            if len(declarations) != 1 or len(matches) != 1:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "canonical project Episode count is ambiguous"
+                )
+            return matches[0]
         finally:
             for opened in reversed(descriptors):
                 os.close(opened)
@@ -1000,6 +1056,34 @@ class StoryWorkspaceEpisodeBindingService:
         assert story_slug is not None
         run_id = self._validate_run_id(context.workflow_run_id)
         with self._locked_run_directory(run_id) as run_descriptor:
+            payload = self._read_binding_payload(run_descriptor)
+            if payload is not None and payload.get("schema_version") == "dream-episode/v2":
+                registry = self._read_registry(run_descriptor)
+                assert registry is not None
+                self._validate_registry_authority(
+                    registry,
+                    workflow_run_id=run_id,
+                    story_slug=story_slug,
+                )
+                requested_uid = (
+                    self._validate_episode_uid(context.episode_uid)
+                    if context.episode_uid is not None
+                    else registry.episodes[0].episode_uid
+                )
+                first = registry.episodes[0]
+                if requested_uid != first.episode_uid:
+                    raise StoryWorkspaceEpisodeBindingIdentityConflict(
+                        "legacy first-Episode binding view requires EP01 authority"
+                    )
+                return StoryWorkspaceEpisodeBindingFile(
+                    workflow_run_id=registry.workflow_run_id,
+                    episode_uid=first.episode_uid,
+                    story_slug=registry.story_slug,
+                    episode_code="EP01",
+                    episode_root=first.episode_root,
+                    revision=1,
+                    updated_at=first.created_at,
+                )
             current = self._read_binding(run_descriptor)
             if current is not None:
                 self._validate_binding_authority(

@@ -1,0 +1,13 @@
+U8 Red command:
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_episode_action_recovery_v2.py
+
+Result: exit 2 during collection.
+
+Relevant failure:
+ImportError: cannot import name
+'StoryWorkspaceEpisodeActionProjectionService' from
+'services.story_workspace.multi_episode_action_service'
+
+This proves the durable registry/manifest/facts-to-REST projection recovery
+service and per-Episode fact isolation did not exist before U8 production
+changes.

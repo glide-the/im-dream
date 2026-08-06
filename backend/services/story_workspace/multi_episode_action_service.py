@@ -887,10 +887,59 @@ class StoryWorkspaceMultiEpisodeActionProjector:
         )
 
 
+class StoryWorkspaceEpisodeActionProjectionService:
+    """Rebuild the public action projection solely from durable server facts."""
+
+    @staticmethod
+    def project(
+        *,
+        surface: object,
+        facts: StoryWorkspaceEpisodeWorkflowFile,
+        registry: StoryWorkspaceEpisodeRegistryFile,
+        total_episodes: int,
+    ) -> StoryWorkspaceEpisodeActionProjectionV2:
+        context = StoryWorkspaceEpisodeRegistryActionContext.build(
+            registry,
+            total_episodes=total_episodes,
+        )
+        current = StoryWorkspaceCurrentEpisodeActionSnapshotBuilder().build(
+            surface=surface,
+            facts=facts,
+            current_episode=context.current_episode,
+        )
+        snapshot = StoryWorkspaceNextEpisodeActionPlanner().attach(
+            current,
+            context=context,
+        )
+        return StoryWorkspaceMultiEpisodeActionProjector.project(snapshot)
+
+    @staticmethod
+    def surface_etag(
+        manifest_revision: str,
+        projection: StoryWorkspaceEpisodeActionProjectionV2,
+    ) -> str:
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", manifest_revision) is None:
+            raise ValueError("manifest revision must be opaque")
+        payload = {
+            "action_projection": projection.model_dump(mode="json", by_alias=True),
+            "manifest_revision": manifest_revision,
+        }
+        return "sha256:" + hashlib.sha256(
+            json.dumps(
+                payload,
+                ensure_ascii=True,
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
+
+
 __all__ = [
     "StoryWorkspaceCurrentEpisodeActionSnapshotBuilder",
     "StoryWorkspaceEpisodeActionSnapshot",
     "StoryWorkspaceEpisodeDescriptor",
+    "StoryWorkspaceEpisodeActionProjectionService",
     "StoryWorkspaceEpisodeRegistryActionContext",
     "StoryWorkspaceMultiEpisodeActionProjector",
     "StoryWorkspaceNextEpisodeActionPlanner",

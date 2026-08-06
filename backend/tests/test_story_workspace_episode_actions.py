@@ -1300,8 +1300,9 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
                 f"/api/story-workspace/workflow-runs/{RUN_ID}/episode-actions/continue",
                 headers={"If-Match": etag},
                 json={
-                    "episodeId": EPISODE_ID,
-                    "action": "write_script",
+                    "actionId": current.json()["actionProjection"]["actionOptions"][0][
+                        "actionId"
+                    ],
                     "idempotencyKey": "continue-real",
                 },
             )
@@ -1320,6 +1321,9 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
             )
 
         assert current.status_code == 200
+        assert current.json()["actionProjection"]["actionOptions"][0]["label"] == (
+            "创作 EP01 剧本"
+        )
         repaired_binding = json.loads(
             (
                 workspace

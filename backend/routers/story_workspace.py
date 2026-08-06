@@ -31,6 +31,7 @@ from story_workspace.contracts import (
     StoryWorkspaceDreamLaunchAccepted,
     StoryWorkspaceDreamLaunchCommand,
     StoryWorkspaceEpisodeActionContinueCommand,
+    StoryWorkspaceEpisodeActionContinueCommandV2,
     StoryWorkspaceEpisodeBindingRecoveryCommand,
     StoryWorkspaceGuidanceCommandPayload,
     StoryWorkspaceResourceType,
@@ -188,7 +189,8 @@ class StoryWorkflowGateway(Protocol):
     async def continue_episode_action(
         self,
         workflow_run_id: str,
-        request: StoryWorkspaceEpisodeActionContinueCommand,
+        request: StoryWorkspaceEpisodeActionContinueCommand
+        | StoryWorkspaceEpisodeActionContinueCommandV2,
         *,
         actor: dict[str, str],
         if_match: str,
@@ -1425,7 +1427,8 @@ async def story_workspace_recover_workflow_run_episode_binding(
 )
 async def story_workspace_continue_workflow_run_episode_action(
     workflow_run_id: str,
-    request: StoryWorkspaceEpisodeActionContinueCommand,
+    request: StoryWorkspaceEpisodeActionContinueCommand
+    | StoryWorkspaceEpisodeActionContinueCommandV2,
     if_match: str = Header(alias="If-Match", min_length=73, max_length=73),
     current_user: dict[str, Any] = Depends(get_current_user),
     gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),

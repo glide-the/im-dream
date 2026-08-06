@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 import hashlib
 import importlib.util
@@ -27,6 +27,7 @@ try:
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceEpisodeActionContinueCommand,
+        StoryWorkspaceEpisodeActionContinueCommandV2,
         StoryWorkspaceEpisodeBindingRecoveryCommand,
     )
     from services.deck.runtime_context import resolve_runtime_context
@@ -90,6 +91,13 @@ try:
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
     )
+    from services.story_workspace.multi_episode_action_service import (
+        StoryWorkspaceEpisodeActionProjectionService,
+    )
+    from services.story_workspace.episode_workflow_instruction import (
+        StoryWorkspaceEpisodeActionSelectionError,
+        StoryWorkspaceTrustedEpisodeActionSelector,
+    )
     from services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
         StoryWorkspaceDreamAgentMessageCoordinator,
@@ -103,6 +111,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamAgentToolConfirmationCommand,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceEpisodeActionContinueCommand,
+        StoryWorkspaceEpisodeActionContinueCommandV2,
         StoryWorkspaceEpisodeBindingRecoveryCommand,
     )
     from backend.services.deck.runtime_context import resolve_runtime_context
@@ -165,6 +174,13 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeBindingContext,
         StoryWorkspaceEpisodeBindingError,
         StoryWorkspaceEpisodeBindingService,
+    )
+    from backend.services.story_workspace.multi_episode_action_service import (
+        StoryWorkspaceEpisodeActionProjectionService,
+    )
+    from backend.services.story_workspace.episode_workflow_instruction import (
+        StoryWorkspaceEpisodeActionSelectionError,
+        StoryWorkspaceTrustedEpisodeActionSelector,
     )
     from backend.services.story_workspace.dream_agent_message_service import (
         StoryWorkspaceDreamAgentMessageError,
@@ -833,7 +849,8 @@ class StoryWorkflowApplicationGateway:
     async def continue_episode_action(
         self,
         workflow_run_id: str,
-        request: StoryWorkspaceEpisodeActionContinueCommand,
+        request: StoryWorkspaceEpisodeActionContinueCommand
+        | StoryWorkspaceEpisodeActionContinueCommandV2,
         *,
         actor: dict[str, str],
         if_match: str,
@@ -1387,13 +1404,23 @@ class StoryWorkflowApplicationGateway:
     def _continue_episode_action_sync(
         self,
         workflow_run_id: str,
-        request: StoryWorkspaceEpisodeActionContinueCommand,
+        request: StoryWorkspaceEpisodeActionContinueCommand
+        | StoryWorkspaceEpisodeActionContinueCommandV2,
         actor: dict[str, str],
         if_match: str,
     ) -> Any:
         db = database.get_db()
         try:
-            self._authorized_episode_row(db, workflow_run_id, actor)
+            authorized_row = self._authorized_episode_row(db, workflow_run_id, actor)
+            authority = self._episode_authority_from_source(
+                authorized_row,
+                workflow_run_id,
+            )
+            if authority is None:
+                raise StoryWorkspaceEpisodeActionError(
+                    "WORKFLOW_PERMISSION_DENIED",
+                    404,
+                )
             context = self._load_dream_agent_context_from_db(
                 db,
                 workflow_run_id,
@@ -1416,11 +1443,113 @@ class StoryWorkflowApplicationGateway:
                 episode_uid,
             )
             try:
-                return StoryWorkspaceEpisodeActionService(
+                service = StoryWorkspaceEpisodeActionService(
                     db,
                     thread_factory=self._dream_agent_thread_factory(),
                     db_factory=database.get_db,
-                ).continue_episode(
+                )
+                if isinstance(request, StoryWorkspaceEpisodeActionContinueCommandV2):
+                    projection = getattr(surface, "action_projection", None)
+                    if projection is None:
+                        raise StoryWorkspaceEpisodeActionError(
+                            "BINDING_REVISION_CONFLICT",
+                            409,
+                            latest_surface=surface,
+                        )
+                    try:
+                        selected = StoryWorkspaceTrustedEpisodeActionSelector.select(
+                            run_id=workflow_run_id,
+                            action_id=request.action_id,
+                            projection=projection,
+                        )
+                    except StoryWorkspaceEpisodeActionSelectionError as exc:
+                        raise StoryWorkspaceEpisodeActionError(
+                            "BINDING_REVISION_CONFLICT",
+                            409,
+                            latest_surface=surface,
+                        ) from exc
+                    if selected.candidate_id is not None:
+                        binding_service = StoryWorkspaceEpisodeBindingService(workspace)
+                        canonical_story_slug = (
+                            binding_service.read_canonical_project_story_slug(
+                                authority.story_slug
+                            )
+                        )
+                        binding_context = StoryWorkspaceEpisodeBindingContext(
+                            workflow_run_id=workflow_run_id,
+                            trusted_project_story_slug=canonical_story_slug,
+                            locked_context_story_slug=authority.story_slug,
+                            run_provenance_story_slug=authority.story_slug,
+                            episode_uid=authority.episode_uid,
+                        )
+                        registry = binding_service.read_episode_registry(binding_context)
+                        total_episodes = (
+                            binding_service.read_canonical_project_total_episodes(
+                                canonical_story_slug
+                            )
+                            or max(
+                                item.episode_number for item in registry.episodes
+                            )
+                        )
+                        updated_registry = binding_service.ensure_next_episode(
+                            binding_context,
+                            expected_revision=registry.revision,
+                            total_episodes=total_episodes,
+                        )
+                        target_entry = next(
+                            (
+                                item
+                                for item in updated_registry.episodes
+                                if item.episode_code == selected.episode_code
+                            ),
+                            None,
+                        )
+                        if target_entry is None:
+                            raise StoryWorkspaceEpisodeActionError(
+                                "BINDING_REVISION_CONFLICT",
+                                409,
+                                latest_surface=surface,
+                            )
+                        next_authority = StoryWorkspaceEpisodeAuthority(
+                            workflow_run_id=workflow_run_id,
+                            episode_uid=target_entry.episode_uid,
+                            story_slug=canonical_story_slug,
+                            episode_code=target_entry.episode_code,
+                        )
+                        next_surface = StoryWorkspaceEpisodeArtifactService(
+                            workspace
+                        ).read_surface(
+                            workflow_run_id,
+                            episode_authority=next_authority,
+                        ).model_copy(update={"etag": surface.etag})
+                        next_facts = StoryWorkspaceEpisodeWorkflowFactService(
+                            workspace
+                        ).read(workflow_run_id, target_entry.episode_uid)
+                        return service.continue_selected_episode(
+                            run_id=workflow_run_id,
+                            actor_id=actor["actor_id"],
+                            context=context,
+                            surface=next_surface,
+                            action_facts=next_facts,
+                            if_match=if_match,
+                            command=request,
+                            selected=replace(
+                                selected,
+                                target_episode_uid=target_entry.episode_uid,
+                                candidate_id=None,
+                            ),
+                        )
+                    return service.continue_selected_episode(
+                        run_id=workflow_run_id,
+                        actor_id=actor["actor_id"],
+                        context=context,
+                        surface=surface,
+                        action_facts=facts,
+                        if_match=if_match,
+                        command=request,
+                        selected=selected,
+                    )
+                return service.continue_episode(
                     run_id=workflow_run_id,
                     actor_id=actor["actor_id"],
                     context=context,
@@ -1533,15 +1662,14 @@ class StoryWorkflowApplicationGateway:
                     authority.story_slug
                 )
             )
-            binding_service.resolve_or_repair_binding(
-                StoryWorkspaceEpisodeBindingContext(
-                    workflow_run_id=workflow_run_id,
-                    trusted_project_story_slug=canonical_story_slug,
-                    locked_context_story_slug=authority.story_slug,
-                    run_provenance_story_slug=authority.story_slug,
-                    episode_uid=authority.episode_uid,
-                )
+            binding_context = StoryWorkspaceEpisodeBindingContext(
+                workflow_run_id=workflow_run_id,
+                trusted_project_story_slug=canonical_story_slug,
+                locked_context_story_slug=authority.story_slug,
+                run_provenance_story_slug=authority.story_slug,
+                episode_uid=authority.episode_uid,
             )
+            binding_service.resolve_or_repair_binding(binding_context)
             surface = StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
                 workflow_run_id,
                 episode_authority=authority,
@@ -1556,10 +1684,36 @@ class StoryWorkflowApplicationGateway:
             )
             resolver = StoryWorkspaceEpisodeNextActionResolver()
             workflow = resolver.project(surface, facts)
+            registry = binding_service.read_episode_registry(binding_context)
+            total_episodes = (
+                binding_service.read_canonical_project_total_episodes(
+                    canonical_story_slug
+                )
+                or max(item.episode_number for item in registry.episodes)
+            )
+            action_projection = StoryWorkspaceEpisodeActionProjectionService.project(
+                surface=surface,
+                facts=facts,
+                registry=registry,
+                total_episodes=total_episodes,
+            )
+            legacy_etag = resolver.surface_etag(manifest_revision, workflow)
+            action_etag = StoryWorkspaceEpisodeActionProjectionService.surface_etag(
+                manifest_revision,
+                action_projection,
+            )
+            aggregate_etag = "sha256:" + hashlib.sha256(
+                json.dumps(
+                    [legacy_etag, action_etag],
+                    ensure_ascii=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
             return surface.model_copy(
                 update={
                     "workflow": workflow,
-                    "etag": resolver.surface_etag(manifest_revision, workflow),
+                    "action_projection": action_projection,
+                    "etag": aggregate_etag,
                 }
             )
         except ApiRouteError:

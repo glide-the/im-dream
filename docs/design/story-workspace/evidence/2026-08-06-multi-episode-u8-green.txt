@@ -1,0 +1,29 @@
+U8 focused backend command:
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_episode_action_recovery_v2.py
+
+Result: 3 passed in 0.16s.
+
+U8 backend regression command:
+PYTHONPATH=backend backend/.venv/bin/python -m pytest -q backend/tests/test_story_workspace_episode_action_recovery_v2.py backend/tests/test_story_workspace_episode_actions.py backend/tests/test_story_workspace_episode_binding.py backend/tests/test_story_workspace_multi_episode_binding.py backend/tests/test_story_workspace_episode_artifacts_api.py backend/tests/test_story_workspace_episode_action_instruction_v2.py backend/tests/test_story_workspace_multi_episode_actions.py backend/tests/test_story_workspace_next_episode_actions.py backend/tests/test_story_workspace_current_episode_action_projection.py
+
+Result: 221 passed, 77 subtests passed in 1.91s.
+
+The real gateway continuation test now asserts:
+- GET surface contains actionProjection and a server-formatted EP01 label;
+- POST submits only actionId/idempotencyKey;
+- actor/Deck/run/story/Episode authorization still gates dispatch;
+- accepted metadata binds action, Episode, input/facts/manifest/workflow revisions.
+
+Frontend recovery/late-response regression:
+npx playwright test src/hooks/story-workspace/__tests__/StoryWorkspaceEpisodeActionV2.test.ts src/pages/story-workspace/__tests__/StoryWorkspaceExecutionEpisodeIntegration.test.ts --reporter=line --workers=1
+
+Result: 15 passed (3.4s).
+
+TypeScript: npx tsc -b -> exit 0.
+Python compileall over changed backend modules -> exit 0.
+
+Durable recovery facts:
+- projection rebuilds from Episode registry + manifest + per-Episode workflow facts;
+- EP01 retains episode-workflow.json compatibility;
+- EP02+ uses episode-workflow.<opaqueEpisodeId>.json;
+- no localStorage or Agent message owns the action projection.

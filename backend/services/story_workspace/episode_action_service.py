@@ -32,8 +32,10 @@ try:
     )
     from services.story_workspace.episode_workflow_instruction import (
         StoryWorkspaceEpisodeVendorStep,
+        StoryWorkspaceTrustedEpisodeAction,
         story_workspace_episode_vendor_workflow,
         story_workspace_episode_workflow_guidance,
+        story_workspace_trusted_episode_action_instruction,
     )
     from story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessageCommand,
@@ -41,6 +43,7 @@ try:
         StoryWorkspaceEpisodeAction,
         StoryWorkspaceEpisodeActionAccepted,
         StoryWorkspaceEpisodeActionContinueCommand,
+        StoryWorkspaceEpisodeActionContinueCommandV2,
         StoryWorkspaceEpisodeActionDiagnostic,
         StoryWorkspaceEpisodeActionOption,
         StoryWorkspaceEpisodeActionResolution,
@@ -66,8 +69,10 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
     from backend.services.story_workspace.episode_workflow_instruction import (
         StoryWorkspaceEpisodeVendorStep,
+        StoryWorkspaceTrustedEpisodeAction,
         story_workspace_episode_vendor_workflow,
         story_workspace_episode_workflow_guidance,
+        story_workspace_trusted_episode_action_instruction,
     )
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessageCommand,
@@ -75,6 +80,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceEpisodeAction,
         StoryWorkspaceEpisodeActionAccepted,
         StoryWorkspaceEpisodeActionContinueCommand,
+        StoryWorkspaceEpisodeActionContinueCommandV2,
         StoryWorkspaceEpisodeActionDiagnostic,
         StoryWorkspaceEpisodeActionOption,
         StoryWorkspaceEpisodeActionResolution,
@@ -199,6 +205,31 @@ class StoryWorkspaceEpisodeWorkflowFactService:
         )
 
     @classmethod
+    def _facts_filename(cls, run_descriptor: int, episode_uid: str) -> str:
+        registry = StoryWorkspaceEpisodeBindingService._read_registry(  # noqa: SLF001
+            run_descriptor
+        )
+        if registry is None:
+            return "episode-workflow.json"
+        episode = next(
+            (
+                item
+                for item in registry.episodes
+                if item.episode_uid == episode_uid
+            ),
+            None,
+        )
+        if episode is None:
+            raise StoryWorkspaceEpisodeWorkflowFactError(
+                "workflow facts Episode is not bound to the run registry"
+            )
+        return (
+            "episode-workflow.json"
+            if episode.episode_number == 1
+            else f"episode-workflow.{episode_uid}.json"
+        )
+
+    @classmethod
     def _read_from_run(
         cls,
         run_descriptor: int,
@@ -206,9 +237,10 @@ class StoryWorkspaceEpisodeWorkflowFactService:
         workflow_run_id: str,
         episode_uid: str,
     ) -> StoryWorkspaceEpisodeWorkflowFile:
+        filename = cls._facts_filename(run_descriptor, episode_uid)
         try:
             descriptor = os.open(
-                "episode-workflow.json",
+                filename,
                 os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
                 dir_fd=run_descriptor,
             )
@@ -221,7 +253,7 @@ class StoryWorkspaceEpisodeWorkflowFactService:
         try:
             pinned = os.fstat(descriptor)
             visible = os.stat(
-                "episode-workflow.json",
+                filename,
                 dir_fd=run_descriptor,
                 follow_symlinks=False,
             )
@@ -296,11 +328,13 @@ class StoryWorkspaceEpisodeWorkflowFactService:
             and completion.message_id == message_id
         )
 
-    @staticmethod
+    @classmethod
     def _write(
+        cls,
         run_descriptor: int,
         facts: StoryWorkspaceEpisodeWorkflowFile,
     ) -> None:
+        filename = cls._facts_filename(run_descriptor, facts.episode_uid)
         temporary_name = f".episode-workflow.{uuid4().hex}.tmp"
         descriptor = -1
         try:
@@ -326,7 +360,7 @@ class StoryWorkspaceEpisodeWorkflowFactService:
             descriptor = -1
             os.replace(
                 temporary_name,
-                "episode-workflow.json",
+                filename,
                 src_dir_fd=run_descriptor,
                 dst_dir_fd=run_descriptor,
             )
@@ -1355,6 +1389,86 @@ class StoryWorkspaceEpisodeActionService:
             ),
             input_revision=action_input_revision,
             text=text,
+        )
+
+    def continue_selected_episode(
+        self,
+        *,
+        run_id: str,
+        actor_id: str,
+        context: StoryWorkspaceDreamRunContext,
+        surface: object,
+        action_facts: StoryWorkspaceEpisodeWorkflowFile,
+        if_match: str,
+        command: StoryWorkspaceEpisodeActionContinueCommandV2,
+        selected: StoryWorkspaceTrustedEpisodeAction,
+    ) -> tuple[
+        StoryWorkspaceEpisodeActionAccepted,
+        StoryWorkspaceDreamAgentPendingDispatch | None,
+    ]:
+        """Dispatch a server-selected V2 option without trusting browser target data."""
+
+        surface_revision = getattr(surface, "etag", None)
+        manifest_revision = getattr(surface, "manifest_revision", None)
+        if (
+            selected.run_id != run_id
+            or selected.action_id != command.action_id
+            or selected.target_episode_uid is None
+            or selected.target_episode_uid != action_facts.episode_uid
+            or selected.target_episode_uid
+            != getattr(surface, "opaque_episode_id", None)
+        ):
+            raise StoryWorkspaceEpisodeActionError(
+                "WORKFLOW_PERMISSION_DENIED",
+                404,
+            )
+        guidance = story_workspace_trusted_episode_action_instruction(selected)
+        if command.user_guidance is not None:
+            guidance += (
+                "\n用户补充仅作为本轮创作偏好："
+                + json.dumps(
+                    command.user_guidance,
+                    ensure_ascii=False,
+                    allow_nan=False,
+                )
+            )
+        if self._has_existing_key(
+            run_id=run_id,
+            thread_id=context.thread_id,
+            actor_id=actor_id,
+            key=command.idempotency_key,
+        ):
+            return self._claim(
+                run_id=run_id,
+                actor_id=actor_id,
+                context=context,
+                key=command.idempotency_key,
+                capability=selected.action,
+                episode_id=selected.target_episode_uid,
+                workflow_revision=surface_revision,
+                manifest_revision=manifest_revision,
+                facts_revision=action_facts.revision,
+                input_revision=selected.input_revision,
+                text=guidance,
+            )
+        if not isinstance(surface_revision, str) or if_match != f'"{surface_revision}"':
+            raise StoryWorkspaceEpisodeActionError(
+                "BINDING_REVISION_CONFLICT",
+                409,
+                latest_surface=surface,
+            )
+        return self._claim(
+            run_id=run_id,
+            actor_id=actor_id,
+            context=context,
+            key=command.idempotency_key,
+            capability=selected.action,
+            episode_id=selected.target_episode_uid,
+            workflow_revision=surface_revision,
+            manifest_revision=manifest_revision,
+            facts_revision=action_facts.revision,
+            input_revision=selected.input_revision,
+            text=guidance,
         )
 
 
