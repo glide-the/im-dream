@@ -19,14 +19,18 @@ from pydantic import ValidationError
 try:
     from story_workspace.contracts import (
         StoryWorkspaceEpisodeBindingAvailability,
+        StoryWorkspaceEpisodeBindingEntry,
         StoryWorkspaceEpisodeBindingFile,
         StoryWorkspaceEpisodeBindingRecovery,
+        StoryWorkspaceEpisodeRegistryFile,
     )
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.story_workspace.contracts import (
         StoryWorkspaceEpisodeBindingAvailability,
+        StoryWorkspaceEpisodeBindingEntry,
         StoryWorkspaceEpisodeBindingFile,
         StoryWorkspaceEpisodeBindingRecovery,
+        StoryWorkspaceEpisodeRegistryFile,
     )
 
 
@@ -530,10 +534,10 @@ class StoryWorkspaceEpisodeBindingService:
                 os.close(opened)
 
     @classmethod
-    def _read_binding(
+    def _read_binding_payload(
         cls,
         run_descriptor: int,
-    ) -> StoryWorkspaceEpisodeBindingFile | None:
+    ) -> dict[str, object] | None:
         try:
             descriptor = os.open(
                 "episode.json",
@@ -587,10 +591,60 @@ class StoryWorkspaceEpisodeBindingService:
             os.close(descriptor)
         try:
             payload = json.loads(b"".join(chunks))
+            if not isinstance(payload, dict):
+                raise TypeError("Episode binding payload must be an object")
+            return payload
+        except (json.JSONDecodeError, UnicodeDecodeError, TypeError) as exc:
+            raise StoryWorkspaceEpisodeBindingContractError(
+                "Episode binding is not a valid JSON object"
+            ) from exc
+
+    @classmethod
+    def _read_binding(
+        cls,
+        run_descriptor: int,
+    ) -> StoryWorkspaceEpisodeBindingFile | None:
+        payload = cls._read_binding_payload(run_descriptor)
+        if payload is None:
+            return None
+        try:
             return StoryWorkspaceEpisodeBindingFile.model_validate(payload)
-        except (json.JSONDecodeError, UnicodeDecodeError, ValidationError) as exc:
+        except ValidationError as exc:
             raise StoryWorkspaceEpisodeBindingContractError(
                 "Episode binding violates dream-episode/v1"
+            ) from exc
+
+    @classmethod
+    def _read_registry(
+        cls,
+        run_descriptor: int,
+    ) -> StoryWorkspaceEpisodeRegistryFile | None:
+        payload = cls._read_binding_payload(run_descriptor)
+        if payload is None:
+            return None
+        try:
+            if payload.get("schema_version") == "dream-episode/v1":
+                legacy = StoryWorkspaceEpisodeBindingFile.model_validate(payload)
+                return StoryWorkspaceEpisodeRegistryFile(
+                    workflow_run_id=legacy.workflow_run_id,
+                    story_slug=legacy.story_slug,
+                    active_episode_uid=legacy.episode_uid,
+                    episodes=[
+                        StoryWorkspaceEpisodeBindingEntry(
+                            episode_uid=legacy.episode_uid,
+                            episode_number=1,
+                            episode_code=legacy.episode_code,
+                            episode_root=legacy.episode_root,
+                            created_at=legacy.updated_at,
+                        )
+                    ],
+                    revision=legacy.revision,
+                    updated_at=legacy.updated_at,
+                )
+            return StoryWorkspaceEpisodeRegistryFile.model_validate(payload)
+        except ValidationError as exc:
+            raise StoryWorkspaceEpisodeBindingContractError(
+                "Episode binding violates the supported registry contract"
             ) from exc
 
     @staticmethod
@@ -695,6 +749,246 @@ class StoryWorkspaceEpisodeBindingService:
                     os.fsync(run_descriptor)
                 except OSError:
                     pass
+
+    @classmethod
+    def _replace_registry(
+        cls,
+        run_descriptor: int,
+        registry: StoryWorkspaceEpisodeRegistryFile,
+    ) -> StoryWorkspaceEpisodeRegistryFile:
+        """Atomically replace a registry after its revision was checked under lock."""
+
+        temporary_name = f".episode.{uuid4().hex}.tmp"
+        descriptor = -1
+        try:
+            descriptor = os.open(
+                temporary_name,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_EXCL
+                | os.O_NOFOLLOW
+                | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=run_descriptor,
+            )
+            payload = (registry.model_dump_json() + "\n").encode("utf-8")
+            if len(payload) > _BINDING_MAX_BYTES:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "Episode registry exceeds the size limit"
+                )
+            view = memoryview(payload)
+            while view:
+                written = os.write(descriptor, view)
+                if written <= 0:
+                    raise OSError("short write")
+                view = view[written:]
+            os.fsync(descriptor)
+            os.close(descriptor)
+            descriptor = -1
+            os.replace(
+                temporary_name,
+                "episode.json",
+                src_dir_fd=run_descriptor,
+                dst_dir_fd=run_descriptor,
+            )
+            os.fsync(run_descriptor)
+            return registry
+        except StoryWorkspaceEpisodeBindingContractError:
+            raise
+        except OSError as exc:
+            raise StoryWorkspaceEpisodeBindingPathError(
+                "Episode registry cannot be committed safely"
+            ) from exc
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+            try:
+                os.unlink(temporary_name, dir_fd=run_descriptor)
+            except FileNotFoundError:
+                pass
+            except OSError:
+                pass
+
+    @staticmethod
+    def _validate_registry_authority(
+        registry: StoryWorkspaceEpisodeRegistryFile,
+        *,
+        workflow_run_id: str,
+        story_slug: str,
+    ) -> None:
+        if registry.workflow_run_id != workflow_run_id:
+            raise StoryWorkspaceEpisodeBindingIdentityConflict(
+                "Episode registry run identity cannot be changed"
+            )
+        if registry.story_slug != story_slug:
+            raise StoryWorkspaceEpisodeBindingIdentityConflict(
+                "Episode registry story identity cannot be changed"
+            )
+
+    @staticmethod
+    def _validate_registry_revision(value: object) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise StoryWorkspaceEpisodeBindingContractError(
+                "expected Episode registry revision is invalid"
+            )
+        return value
+
+    @staticmethod
+    def _validate_total_episodes(value: object) -> int:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or value < 1
+            or value > 99
+        ):
+            raise StoryWorkspaceEpisodeBindingContractError(
+                "trusted total Episode count is invalid"
+            )
+        return value
+
+    def read_episode_registry(
+        self,
+        context: StoryWorkspaceEpisodeBindingContext,
+    ) -> StoryWorkspaceEpisodeRegistryFile:
+        """Read v2 identity facts, projecting legacy EP01 without rewriting it."""
+
+        story_slug = self._proved_story_slug(context, allow_unproven=False)
+        assert story_slug is not None
+        run_id = self._validate_run_id(context.workflow_run_id)
+        with self._locked_run_directory(run_id) as run_descriptor:
+            registry = self._read_registry(run_descriptor)
+            if registry is None:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "Episode registry has not been bound"
+                )
+            self._validate_registry_authority(
+                registry,
+                workflow_run_id=run_id,
+                story_slug=story_slug,
+            )
+            return registry
+
+    def ensure_next_episode(
+        self,
+        context: StoryWorkspaceEpisodeBindingContext,
+        *,
+        expected_revision: int,
+        total_episodes: int,
+    ) -> StoryWorkspaceEpisodeRegistryFile:
+        """CAS-create the active Episode's next server-numbered binding."""
+
+        story_slug = self._proved_story_slug(context, allow_unproven=False)
+        assert story_slug is not None
+        run_id = self._validate_run_id(context.workflow_run_id)
+        expected = self._validate_registry_revision(expected_revision)
+        trusted_total = self._validate_total_episodes(total_episodes)
+        with self._locked_run_directory(run_id) as run_descriptor:
+            current = self._read_registry(run_descriptor)
+            if current is None:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "Episode registry has not been bound"
+                )
+            self._validate_registry_authority(
+                current,
+                workflow_run_id=run_id,
+                story_slug=story_slug,
+            )
+            active = next(
+                episode
+                for episode in current.episodes
+                if episode.episode_uid == current.active_episode_uid
+            )
+            next_number = active.episode_number + 1
+            existing_next = next(
+                (
+                    episode
+                    for episode in current.episodes
+                    if episode.episode_number == next_number
+                ),
+                None,
+            )
+            if current.revision != expected:
+                if current.revision == expected + 1 and existing_next is not None:
+                    return current
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "Episode registry revision is stale"
+                )
+            if existing_next is not None:
+                return current
+            if next_number > trusted_total:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "next Episode exceeds the trusted project plan"
+                )
+            episode_code = f"EP{next_number:02d}"
+            now = datetime.now(timezone.utc)
+            updated = StoryWorkspaceEpisodeRegistryFile(
+                workflow_run_id=current.workflow_run_id,
+                story_slug=current.story_slug,
+                active_episode_uid=current.active_episode_uid,
+                episodes=[
+                    *current.episodes,
+                    StoryWorkspaceEpisodeBindingEntry(
+                        episode_uid=uuid4().hex,
+                        episode_number=next_number,
+                        episode_code=episode_code,
+                        episode_root=(
+                            f"stories/{current.story_slug}/episodes/{episode_code}"
+                        ),
+                        created_at=now,
+                    ),
+                ],
+                revision=current.revision + 1,
+                updated_at=now,
+            )
+            return self._replace_registry(run_descriptor, updated)
+
+    def activate_episode(
+        self,
+        context: StoryWorkspaceEpisodeBindingContext,
+        *,
+        episode_uid: str,
+        expected_revision: int,
+    ) -> StoryWorkspaceEpisodeRegistryFile:
+        """CAS-select a registry member by opaque identity, never by list index."""
+
+        story_slug = self._proved_story_slug(context, allow_unproven=False)
+        assert story_slug is not None
+        run_id = self._validate_run_id(context.workflow_run_id)
+        target_uid = self._validate_episode_uid(episode_uid)
+        expected = self._validate_registry_revision(expected_revision)
+        with self._locked_run_directory(run_id) as run_descriptor:
+            current = self._read_registry(run_descriptor)
+            if current is None:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "Episode registry has not been bound"
+                )
+            self._validate_registry_authority(
+                current,
+                workflow_run_id=run_id,
+                story_slug=story_slug,
+            )
+            if current.revision != expected:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "Episode registry revision is stale"
+                )
+            if not any(
+                episode.episode_uid == target_uid for episode in current.episodes
+            ):
+                raise StoryWorkspaceEpisodeBindingIdentityConflict(
+                    "target Episode is not bound to this registry"
+                )
+            if current.active_episode_uid == target_uid:
+                return current
+            now = datetime.now(timezone.utc)
+            updated = StoryWorkspaceEpisodeRegistryFile(
+                workflow_run_id=current.workflow_run_id,
+                story_slug=current.story_slug,
+                active_episode_uid=target_uid,
+                episodes=current.episodes,
+                revision=current.revision + 1,
+                updated_at=now,
+            )
+            return self._replace_registry(run_descriptor, updated)
 
     def bind_first_episode(
         self,

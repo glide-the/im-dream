@@ -1421,6 +1421,54 @@ class StoryWorkspaceEpisodeBindingFile(_StoryWorkspaceDreamStorageModel):
         return self
 
 
+class StoryWorkspaceEpisodeBindingEntry(_StoryWorkspaceDreamStorageModel):
+    """One server-numbered Episode identity in the run-scoped registry."""
+
+    episode_uid: str = Field(pattern=r"^[0-9a-f]{32}$")
+    episode_number: _StoryWorkspaceDreamPositiveInt = Field(le=99)
+    episode_code: str = Field(pattern=r"^EP[0-9]{2}$")
+    episode_root: str = Field(min_length=1, max_length=512)
+    created_at: datetime
+
+
+class StoryWorkspaceEpisodeRegistryFile(_StoryWorkspaceDreamStorageModel):
+    """Revisioned multi-Episode identity owner persisted as ``episode.json``."""
+
+    schema_version: Literal["dream-episode/v2"] = "dream-episode/v2"
+    workflow_run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    story_slug: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    active_episode_uid: str = Field(pattern=r"^[0-9a-f]{32}$")
+    episodes: list[StoryWorkspaceEpisodeBindingEntry] = Field(
+        min_length=1,
+        max_length=99,
+    )
+    revision: _StoryWorkspaceDreamPositiveInt
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def registry_owns_contiguous_canonical_numbering(
+        self,
+    ) -> "StoryWorkspaceEpisodeRegistryFile":
+        seen_uids: set[str] = set()
+        for expected_number, episode in enumerate(self.episodes, start=1):
+            if episode.episode_number != expected_number:
+                raise ValueError("Episode registry numbering must be contiguous")
+            expected_code = f"EP{expected_number:02d}"
+            if episode.episode_code != expected_code:
+                raise ValueError("Episode code does not match the server-owned number")
+            expected_root = (
+                f"stories/{self.story_slug}/episodes/{expected_code}"
+            )
+            if episode.episode_root != expected_root:
+                raise ValueError("Episode root does not match the registry identity")
+            if episode.episode_uid in seen_uids:
+                raise ValueError("Episode registry identities must be unique")
+            seen_uids.add(episode.episode_uid)
+        if self.active_episode_uid not in seen_uids:
+            raise ValueError("active Episode must exist in the registry")
+        return self
+
+
 class StoryWorkspaceEpisodeBindingRecovery(_StoryWorkspaceDreamWireModel):
     """Public recovery facts without story paths or internal failure details."""
 
