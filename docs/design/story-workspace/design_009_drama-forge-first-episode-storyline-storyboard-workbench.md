@@ -933,3 +933,28 @@ HTTP 202 只证明消息已经持久接受，不能把页面永久锁到“已�
 - [ ] completion MCP 名称/参数/CAS/revision 不进入 public user message、actionOptions、Dream snapshot/SSE 或 DOM；generic Chat/普通留言不获得 private action guidance。
 - [ ] actionOptions 仍只有当前项可派发；模板不改变 resolver 或 artifact truth ownership。
 - [ ] Dream 工具确认、actor/run/turn/provenance、安全投影与无 Chat Dock 回归全部通过。
+
+## 29. 2026-08-06 Execution 同页展开顺序修订
+
+本节由真实页面层级反馈触发，增量修订第 8 节；完整问题证据与实施台账见 `2026-08-06-execution-artifact-workbench-order-rework-record.md`。第 7、15、16、18 节定义的 artifact truth ownership、revision 恢复和 API 边界保持不变。
+
+### 29.1 路由与阅读顺序
+
+- 第一集产物工作台继续使用既有 run-scoped canonical URL：`/story-workspace/runs/:storyWorkspaceRunId/execution`；不得新增 Episode artifact 子路由，也不得用新页面替换 `StoryWorkspaceExecutionPage`。
+- 同一页面的文档阅读顺序固定为：页面 masthead → 已绑定 run 的“Dream 初稿阶段投影” disclosure（内部 overview/focus，聚焦时为既有 article）→ `<section aria-label="第一集产物工作台">` → Dream Agent 浮层。
+- 第一集产物工作台在既有 Dream 初稿投影之后向下展开，表达“从已确认初稿继续推进完整 EP01”；不得仅以 CSS `order` 视觉换位造成 DOM、键盘和读屏顺序不一致。
+- “Dream 初稿阶段投影”继续保持既有 disclosure 语义和默认折叠行为；本轮不把它自动展开，也不改变 overview/focus 选择 owner。
+
+### 29.2 状态与恢复边界
+
+- DOM 重排不得重建或改写 `runId`、Episode binding、artifact surface、ETag/revisions、当前叙事点/场景/镜头选择和 Dream Agent message adapter。
+- Episode unbound、loading、缺失 artifact 与 bound 工作台仍在同一后置 section 中按服务端事实渐进显示；不能因为位置调整而虚构内容。
+- Episode continue dialog 与 Dream Agent dialog 保持现有模态/焦点恢复逻辑；它们不进入正文阅读层级，也不拥有 artifact。
+
+### 29.3 新增验收
+
+- [ ] router 仍只在 `run-execution` 分支按 run key 挂载 `StoryWorkspaceExecutionPage`。
+- [ ] 源码 DOM 中“Dream 初稿阶段投影”整体先于且只先于唯一的“第一集产物工作台” section；不得用 CSS order 伪造。
+- [ ] `<details>` 首次进入保持 `open=false`，源码不增加 `open`；用户手动展开后，artifact revision/polling 引发的同页重绘不把它折叠。
+- [ ] 页面根的 computed `overflow-y` 仍为 `auto`；桌面与 390px 窄屏均满足 `scrollHeight >= clientHeight`，且 `scrollIntoView` 能把后置产物工作台的可操作内容带入视口，无新增截断或横向溢出。
+- [ ] 既有 artifact polling/revision、选择稳定性、Episode continue 和 Dream Agent Dialog 回归通过。

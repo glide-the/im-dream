@@ -864,6 +864,157 @@ export function StoryWorkspaceExecutionPage({
         </button>
       </header>
 
+      {episodeSurface?.bindingAvailability === 'bound' && (
+      <details>
+        <summary>Dream 初稿阶段投影</summary>
+        <div className="story-workspace-collaboration__surface">
+        {focusedEntry ? (
+          <main
+            className="story-workspace-collaboration__focus-layer"
+            data-execution-depth="focus"
+          >
+            <article className="story-workspace-collaboration__focus">
+              <header className="story-workspace-collaboration__focus-nav">
+                <button onClick={() => setFocusKey(null)} type="button">← 返回故事线</button>
+                <div>
+                  <button
+                    disabled={!focusNeighbors.previousKey}
+                    onClick={() => focusByKey(focusNeighbors.previousKey)}
+                    type="button"
+                  >上一条</button>
+                  <button
+                    disabled={!focusNeighbors.nextKey}
+                    onClick={() => focusByKey(focusNeighbors.nextKey)}
+                    type="button"
+                  >下一条</button>
+                </div>
+              </header>
+
+              <div className="story-workspace-collaboration__focus-title">
+                <p>{focusedEntry.stageLabel} · r{focusedEntry.revision}</p>
+                <h2>{focusedEntry.title}</h2>
+                {focusedEntry.relations.length > 0 && (
+                  <dl>
+                    <dt>关联</dt>
+                    <dd>{focusedEntry.relations.join('、')}</dd>
+                  </dl>
+                )}
+              </div>
+
+              <section className="story-workspace-collaboration__prose">
+                <span>主要信息</span>
+                <p>{focusedEntry.summary || 'Agent 尚未写入摘要。'}</p>
+              </section>
+
+              {focusedEntry.stage === 'storyboards' && (
+                <section className="story-workspace-collaboration__shot-note">
+                  <span>镜头说明</span>
+                  <div>
+                    <b>01</b>
+                    <p>{focusedEntry.summary || '等待镜头说明写入工作空间。'}</p>
+                  </div>
+                </section>
+              )}
+
+              <section className="story-workspace-collaboration__history">
+                <header>
+                  <span>Agent 工作空间历史</span>
+                  <small>来自受控 stage 文件</small>
+                </header>
+                <ol>
+                  <li>
+                    <span>当前条目写入 r{focusedEntry.revision}</span>
+                    <code>{focusedEntry.sourceFile}</code>
+                  </li>
+                </ol>
+              </section>
+            </article>
+          </main>
+        ) : (
+          <main
+            className="story-workspace-collaboration__overview-layer"
+            data-execution-depth="overview"
+          >
+            <div className="story-workspace-collaboration__overview">
+              <div className="story-workspace-collaboration__module-switch" role="tablist">
+                {(Object.keys(MODULE_COPY) as ExecutionModule[]).map((module) => (
+                  <button
+                    aria-controls="story-workspace-execution-index"
+                    aria-selected={activeModule === module}
+                    key={module}
+                    onClick={() => setActiveModule(module)}
+                    role="tab"
+                    type="button"
+                  >
+                    <strong>{MODULE_COPY[module].label}</strong>
+                    <small>{MODULE_COPY[module].description}</small>
+                  </button>
+                ))}
+              </div>
+
+              <header>
+                <p>{MODULE_COPY[activeModule].label} · Narrative execution</p>
+                <h2>{activeModule === 'assets' ? '故事资产' : '故事线与叙事点'}</h2>
+                <span>
+                  {activeModule === 'assets'
+                    ? 'Agent 持续同步人物与场景；选择条目可查看聚焦上下文。'
+                    : '选择一条分镜摘要，进入同一工作面内的聚焦协作层。'}
+                </span>
+              </header>
+
+              <section
+                aria-label={`${MODULE_COPY[activeModule].label} 索引`}
+                id="story-workspace-execution-index"
+                role="tabpanel"
+              >
+                {visibleEntries.length > 0 ? (
+                  <ol className="story-workspace-collaboration__manuscript">
+                  {visibleEntries.map((entry, index) => (
+                    <li key={entry.key}>
+                      <button
+                        onClick={() => setFocusKey(entry.key)}
+                        onKeyDown={(event) => focusListItem(event, index, visibleEntries.length)}
+                        type="button"
+                      >
+                        <span>{String(index + 1).padStart(2, '0')}</span>
+                        <span>
+                          <small>{entry.stageLabel} · r{entry.revision}</small>
+                          <strong>{entry.title}</strong>
+                          <p>{entry.summary || '等待 Agent 补充主要信息。'}</p>
+                        </span>
+                        <b aria-hidden="true">→</b>
+                      </button>
+                    </li>
+                  ))}
+                  </ol>
+                ) : (
+                  <EmptyWorkspaceModule module={activeModule} />
+                )}
+              </section>
+
+              <section className="story-workspace-collaboration__activity">
+                <header>
+                  <span>工作空间更新流</span>
+                  <small>stage revisions</small>
+                </header>
+                <ol>
+                  {(workspace?.activity ?? []).map((entry) => (
+                    <li key={entry.key}>
+                      <span aria-hidden="true" />
+                      <div>
+                        <strong>{entry.label}</strong>
+                        <small>{entry.sourceCount} 个来源文件</small>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            </div>
+          </main>
+        )}
+        </div>
+      </details>
+      )}
       <section aria-label="第一集产物工作台">
         {episodeSurface === null ? (
           <div role="status">
@@ -1059,157 +1210,6 @@ export function StoryWorkspaceExecutionPage({
         />
       )}
 
-      {episodeSurface?.bindingAvailability === 'bound' && (
-      <details>
-        <summary>Dream 初稿阶段投影</summary>
-        <div className="story-workspace-collaboration__surface">
-        {focusedEntry ? (
-          <main
-            className="story-workspace-collaboration__focus-layer"
-            data-execution-depth="focus"
-          >
-            <article className="story-workspace-collaboration__focus">
-              <header className="story-workspace-collaboration__focus-nav">
-                <button onClick={() => setFocusKey(null)} type="button">← 返回故事线</button>
-                <div>
-                  <button
-                    disabled={!focusNeighbors.previousKey}
-                    onClick={() => focusByKey(focusNeighbors.previousKey)}
-                    type="button"
-                  >上一条</button>
-                  <button
-                    disabled={!focusNeighbors.nextKey}
-                    onClick={() => focusByKey(focusNeighbors.nextKey)}
-                    type="button"
-                  >下一条</button>
-                </div>
-              </header>
-
-              <div className="story-workspace-collaboration__focus-title">
-                <p>{focusedEntry.stageLabel} · r{focusedEntry.revision}</p>
-                <h2>{focusedEntry.title}</h2>
-                {focusedEntry.relations.length > 0 && (
-                  <dl>
-                    <dt>关联</dt>
-                    <dd>{focusedEntry.relations.join('、')}</dd>
-                  </dl>
-                )}
-              </div>
-
-              <section className="story-workspace-collaboration__prose">
-                <span>主要信息</span>
-                <p>{focusedEntry.summary || 'Agent 尚未写入摘要。'}</p>
-              </section>
-
-              {focusedEntry.stage === 'storyboards' && (
-                <section className="story-workspace-collaboration__shot-note">
-                  <span>镜头说明</span>
-                  <div>
-                    <b>01</b>
-                    <p>{focusedEntry.summary || '等待镜头说明写入工作空间。'}</p>
-                  </div>
-                </section>
-              )}
-
-              <section className="story-workspace-collaboration__history">
-                <header>
-                  <span>Agent 工作空间历史</span>
-                  <small>来自受控 stage 文件</small>
-                </header>
-                <ol>
-                  <li>
-                    <span>当前条目写入 r{focusedEntry.revision}</span>
-                    <code>{focusedEntry.sourceFile}</code>
-                  </li>
-                </ol>
-              </section>
-            </article>
-          </main>
-        ) : (
-          <main
-            className="story-workspace-collaboration__overview-layer"
-            data-execution-depth="overview"
-          >
-            <div className="story-workspace-collaboration__overview">
-              <div className="story-workspace-collaboration__module-switch" role="tablist">
-                {(Object.keys(MODULE_COPY) as ExecutionModule[]).map((module) => (
-                  <button
-                    aria-controls="story-workspace-execution-index"
-                    aria-selected={activeModule === module}
-                    key={module}
-                    onClick={() => setActiveModule(module)}
-                    role="tab"
-                    type="button"
-                  >
-                    <strong>{MODULE_COPY[module].label}</strong>
-                    <small>{MODULE_COPY[module].description}</small>
-                  </button>
-                ))}
-              </div>
-
-              <header>
-                <p>{MODULE_COPY[activeModule].label} · Narrative execution</p>
-                <h2>{activeModule === 'assets' ? '故事资产' : '故事线与叙事点'}</h2>
-                <span>
-                  {activeModule === 'assets'
-                    ? 'Agent 持续同步人物与场景；选择条目可查看聚焦上下文。'
-                    : '选择一条分镜摘要，进入同一工作面内的聚焦协作层。'}
-                </span>
-              </header>
-
-              <section
-                aria-label={`${MODULE_COPY[activeModule].label} 索引`}
-                id="story-workspace-execution-index"
-                role="tabpanel"
-              >
-                {visibleEntries.length > 0 ? (
-                  <ol className="story-workspace-collaboration__manuscript">
-                  {visibleEntries.map((entry, index) => (
-                    <li key={entry.key}>
-                      <button
-                        onClick={() => setFocusKey(entry.key)}
-                        onKeyDown={(event) => focusListItem(event, index, visibleEntries.length)}
-                        type="button"
-                      >
-                        <span>{String(index + 1).padStart(2, '0')}</span>
-                        <span>
-                          <small>{entry.stageLabel} · r{entry.revision}</small>
-                          <strong>{entry.title}</strong>
-                          <p>{entry.summary || '等待 Agent 补充主要信息。'}</p>
-                        </span>
-                        <b aria-hidden="true">→</b>
-                      </button>
-                    </li>
-                  ))}
-                  </ol>
-                ) : (
-                  <EmptyWorkspaceModule module={activeModule} />
-                )}
-              </section>
-
-              <section className="story-workspace-collaboration__activity">
-                <header>
-                  <span>工作空间更新流</span>
-                  <small>stage revisions</small>
-                </header>
-                <ol>
-                  {(workspace?.activity ?? []).map((entry) => (
-                    <li key={entry.key}>
-                      <span aria-hidden="true" />
-                      <div>
-                        <strong>{entry.label}</strong>
-                        <small>{entry.sourceCount} 个来源文件</small>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              </section>
-            </div>
-          </main>
-        )}
-        </div>
-      </details>
-      )}
       {agentDialogOpen && (
         <StoryWorkspaceDreamAgentDialog
           agent={dreamAgent}

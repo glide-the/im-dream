@@ -641,6 +641,30 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     }))).toEqual({ now: FROZEN_NOW, timezoneId: 'Asia/Shanghai' });
     await expect(page.getByRole('heading', { name: '雨夜重逢' }).first()).toBeVisible();
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeVisible();
+    const executionRoot = page.locator('.story-workspace-collaboration');
+    const dreamProjection = page.locator('details').filter({ hasText: 'Dream 初稿阶段投影' });
+    const artifactWorkbench = page.locator('section[aria-label="第一集产物工作台"]');
+    await expect(dreamProjection).toHaveCount(1);
+    await expect(artifactWorkbench).toHaveCount(1);
+    expect(await dreamProjection.evaluate((projection) => {
+      const artifact = document.querySelector('section[aria-label="第一集产物工作台"]');
+      return artifact !== null && Boolean(
+        projection.compareDocumentPosition(artifact) & Node.DOCUMENT_POSITION_FOLLOWING
+      );
+    })).toBe(true);
+    expect(await dreamProjection.evaluate((projection) => (
+      (projection as HTMLDetailsElement).open
+    ))).toBe(false);
+    expect(await executionRoot.evaluate((root) => getComputedStyle(root).overflowY)).toBe('auto');
+    const desktopScrollRange = await executionRoot.evaluate((root) => ({
+      clientHeight: root.clientHeight,
+      scrollHeight: root.scrollHeight,
+    }));
+    expect(desktopScrollRange.scrollHeight).toBeGreaterThanOrEqual(desktopScrollRange.clientHeight);
+    await dreamProjection.locator('summary').click();
+    expect(await dreamProjection.evaluate((projection) => (
+      (projection as HTMLDetailsElement).open
+    ))).toBe(true);
     const artifactProgress = page.getByRole('list', { name: '第一集产物进度' });
     await expect(artifactProgress.getByText('Prompts', { exact: true })).toBeVisible();
     await expect(artifactProgress.getByText('Render Guide', { exact: true })).toBeVisible();
@@ -694,6 +718,9 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     shot = page.getByRole('treeitem', { name: 'S01-E01-C01-SH001', exact: true });
     await expect(shot).toHaveAttribute('aria-current', 'true');
     await expect(page.getByText('雨夜车站，车灯从背景掠过。', { exact: true })).toBeVisible();
+    expect(await dreamProjection.evaluate((projection) => (
+      (projection as HTMLDetailsElement).open
+    ))).toBe(true);
     continueAction = page.getByRole('button', { name: '验证第一集产物' });
     await expect(continueAction).toBeEnabled();
 
@@ -713,6 +740,14 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
 
     await page.setViewportSize({ width: 390, height: 844 });
     await expectNoHorizontalOverflow(page);
+    expect(await executionRoot.evaluate((root) => getComputedStyle(root).overflowY)).toBe('auto');
+    const narrowScrollRange = await executionRoot.evaluate((root) => ({
+      clientHeight: root.clientHeight,
+      scrollHeight: root.scrollHeight,
+    }));
+    expect(narrowScrollRange.scrollHeight).toBeGreaterThanOrEqual(narrowScrollRange.clientHeight);
+    await continueAction.scrollIntoViewIfNeeded();
+    await expect(continueAction).toBeInViewport();
     const storylineToggle = page.getByRole('button', { name: '打开故事线' });
     await expect(storylineToggle).toHaveAttribute('aria-expanded', 'false');
     await expect(page.getByRole('tree', { name: 'Episode 故事线' })).toBeHidden();

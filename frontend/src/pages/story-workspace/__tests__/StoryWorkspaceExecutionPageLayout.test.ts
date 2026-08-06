@@ -26,6 +26,10 @@ const EPISODE_E2E_SOURCE = readFileSync(new URL(
   '../../../../e2e/story-workspace-episode-execution.spec.ts',
   import.meta.url,
 ), 'utf8');
+const ROUTER_SOURCE = readFileSync(new URL(
+  '../../../router/story-workspace.tsx',
+  import.meta.url,
+), 'utf8');
 
 test('overview is one workplane with tabs and index content, never a fixed rail grid', () => {
   expect(PAGE_SOURCE).toContain('data-execution-depth="overview"');
@@ -61,6 +65,28 @@ test('execution status preview opens the Dream Agent floating dialog without mou
   expect(PAGE_SOURCE).toContain('aria-controls="story-workspace-dream-agent-dialog"');
   expect(DIALOG_SOURCE).toContain('id="story-workspace-dream-agent-dialog"');
   expect(PAGE_SOURCE).not.toContain('<ChatView');
+});
+
+test('Episode artifacts unfold after the Dream projection on the same run execution route', () => {
+  const projectionStart = PAGE_SOURCE.indexOf('<details>');
+  const projectionEnd = PAGE_SOURCE.indexOf('</details>', projectionStart);
+  const artifactMarker = 'aria-label="第一集产物工作台"';
+  const artifactStart = PAGE_SOURCE.indexOf(artifactMarker);
+  const agentDialogStart = PAGE_SOURCE.indexOf('<StoryWorkspaceDreamAgentDialog');
+
+  expect(projectionStart).toBeGreaterThan(-1);
+  expect(projectionEnd).toBeGreaterThan(projectionStart);
+  expect(PAGE_SOURCE.match(new RegExp(artifactMarker, 'g')) ?? []).toHaveLength(1);
+  expect(artifactStart).toBeGreaterThan(projectionEnd);
+  expect(agentDialogStart).toBeGreaterThan(artifactStart);
+  expect(PAGE_SOURCE.slice(projectionStart, PAGE_SOURCE.indexOf('>', projectionStart) + 1))
+    .toBe('<details>');
+  expect(CSS_SOURCE).toMatch(
+    /\.story-workspace-collaboration\s*\{[^}]*overflow-y:\s*auto;/s,
+  );
+  expect(ROUTER_SOURCE).toContain("case 'run-execution':");
+  expect(ROUTER_SOURCE).toContain('key={match.params.storyWorkspaceRunId}');
+  expect(ROUTER_SOURCE).toContain('runId={match.params.storyWorkspaceRunId}');
 });
 
 test('Episode workbench uses a two-column master-detail hierarchy', () => {
