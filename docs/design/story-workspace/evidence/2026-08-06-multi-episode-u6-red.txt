@@ -1,0 +1,14 @@
+U6 Red command (from frontend/):
+npx playwright test src/components/story-workspace/dream/__tests__/StoryWorkspaceDreamAgentWorkflowActions.test.ts --reporter=line --workers=1
+
+Result: 1 failed in 7.1s.
+
+Relevant product failure after fixing the pre-existing Vite 8 port:0 harness issue:
+expect(locator).toBeVisible() failed
+Locator: dialog "Dream Agent" -> text "当前与后续 Episode"
+Error: element(s) not found
+
+The existing component still rendered the hard-coded heading "第一集创作流程"
+and could not distinguish a second executable regeneration action from a
+future action. The ephemeral harness owned and closed its temporary Vite
+server; existing listeners on 5173/8765 were untouched.

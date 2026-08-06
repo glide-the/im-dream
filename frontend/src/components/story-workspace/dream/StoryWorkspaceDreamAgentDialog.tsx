@@ -35,6 +35,10 @@ export interface StoryWorkspaceDreamAgentWorkflowActionViewModel {
   readonly canDispatch: boolean;
   readonly pending: boolean;
   readonly disabledReason: string | null;
+  readonly availability?: 'executable' | 'preview' | 'blocked';
+  readonly description?: string;
+  readonly targetEpisodeLabel?: string;
+  readonly isRecommended?: boolean;
 }
 
 export function storyWorkspaceSplitDreamAgentWorkflowActions(
@@ -217,6 +221,9 @@ export function StoryWorkspaceDreamAgentDialog({
   const workflowActionButton = (
     action: StoryWorkspaceDreamAgentWorkflowActionViewModel,
   ) => {
+    const availability = action.availability
+      ?? (action.isCurrent ? (action.canDispatch ? 'executable' : 'blocked') : 'preview');
+    const isRecommended = action.isRecommended ?? action.isCurrent;
     const agentBusy = !agent.snapshot?.canSend || agent.isSending;
     const disabled = !action.canDispatch || action.pending || agentBusy;
     const disabledReason = action.pending
@@ -236,14 +243,17 @@ export function StoryWorkspaceDreamAgentDialog({
       >
         <span>
           <strong>{action.label}</strong>
+          {action.description && <small>{action.description}</small>}
           <small>{action.displayCommand}</small>
         </span>
         <b>{
           action.pending
             ? '处理中'
-            : action.isCurrent
-              ? action.canDispatch ? '当前可执行' : '当前暂不可执行'
-              : '后续，完成当前步骤后可用'
+            : availability === 'executable'
+              ? isRecommended ? '推荐操作 · 当前可执行' : '当前可执行'
+              : availability === 'blocked'
+                ? '暂不可用'
+                : '未来可用'
         }</b>
       </button>
     );
@@ -306,7 +316,7 @@ export function StoryWorkspaceDreamAgentDialog({
               className="story-workspace-dream-agent-dialog__workflow-actions"
               role="group"
             >
-              <p>第一集创作流程</p>
+              <p>当前与后续 Episode</p>
               <div>{workflowActionGroups.direct.map(workflowActionButton)}</div>
               {workflowActionGroups.overflow.length > 0 && (
                 <>

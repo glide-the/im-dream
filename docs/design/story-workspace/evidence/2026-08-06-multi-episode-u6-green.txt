@@ -1,0 +1,26 @@
+U6 focused browser command (from frontend/):
+npx playwright test src/components/story-workspace/dream/__tests__/StoryWorkspaceDreamAgentWorkflowActions.test.ts --reporter=line --workers=1
+
+Result:
+1 passed (1.1s), process exit 0.
+
+Assertions cover:
+- exactly two direct actions and five overflow actions;
+- disclosure label "更多工作流操作（5）" matches the actual hidden count;
+- recommended executable, secondary executable, preview, and blocked labels;
+- EP01 and EP02 visible targets;
+- narrow/desktop Escape behavior and focus restoration;
+- no horizontal document overflow and zero browser diagnostics.
+
+TypeScript command (from frontend/):
+npx tsc -b
+
+Result: exit 0.
+
+Focused ESLint command (from frontend/):
+npx eslint src/components/story-workspace/dream/StoryWorkspaceDreamAgentDialog.tsx src/components/story-workspace/dream/__tests__/StoryWorkspaceDreamAgentWorkflowActions.test.ts
+
+Result: exit 0.
+
+The deterministic test reserved and released its own ephemeral Vite port.
+Existing services on 5173 and 8765 were not used or stopped.

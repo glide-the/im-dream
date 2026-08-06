@@ -5,6 +5,8 @@
 import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses built-ins omitted from browser app types.
 import { fileURLToPath } from 'node:url';
+// @ts-expect-error Playwright Node seam uses built-ins omitted from browser app types.
+import { createServer as createTcpServer } from 'node:net';
 import { createServer } from 'vite';
 
 interface WorkflowActionViewModel {
@@ -15,19 +17,58 @@ interface WorkflowActionViewModel {
   readonly canDispatch: boolean;
   readonly pending: boolean;
   readonly disabledReason: string | null;
+  readonly availability: 'executable' | 'preview' | 'blocked';
+  readonly description: string;
+  readonly targetEpisodeLabel: string;
 }
 
-const actions = Array.from({ length: 4 }, (_, index): WorkflowActionViewModel => ({
+const actions = Array.from({ length: 7 }, (_, index): WorkflowActionViewModel => ({
   id: `episode-action-${index}`,
-  label: ['规划第一集', '创作第一集剧本', '审阅第一集剧本', '完善角色与场景资产'][index] ?? '后续步骤',
-  displayCommand: ['/drama-plan', '/drama-script (EP01)', '剧本审查', '/drama-asset'][index] ?? '受控步骤',
+  label: [
+    '生成 EP01 Prompt 包',
+    '基于最新剧本更新 EP01 详细分镜',
+    '审阅 EP01 完整产物',
+    '校验并提交 EP01',
+    '准备 EP01 渲染与配音指引',
+    '开始 EP02 分集规划',
+    '创作 EP02 剧本',
+  ][index] ?? '后续步骤',
+  displayCommand: [
+    '/drama-prompt (EP01)',
+    '/drama-storyboard (EP01)',
+    'script-reviewer · EP01 完整链路',
+    '校验并提交 · EP01',
+    '/drama-render + /drama-voice · EP01',
+    '/drama-plan',
+    '/drama-script (EP02)',
+  ][index] ?? '受控步骤',
   isCurrent: index === 0,
-  canDispatch: index === 0,
+  canDispatch: index <= 1,
   pending: false,
-  disabledReason: index === 0 ? null : '完成当前步骤后可用',
+  disabledReason: index <= 1 ? null : '完成当前步骤后可用',
+  availability: index <= 1 ? 'executable' : index === 5 ? 'blocked' : 'preview',
+  description: `动作说明 ${index + 1}`,
+  targetEpisodeLabel: index < 5 ? 'EP01' : 'EP02',
 }));
 
 test.setTimeout(90_000);
+
+async function reserveEphemeralPort(): Promise<number> {
+  const tcpServer = createTcpServer();
+  await new Promise<void>((resolve, reject) => {
+    tcpServer.once('error', reject);
+    tcpServer.listen(0, '127.0.0.1', resolve);
+  });
+  const address = tcpServer.address();
+  if (address === null || typeof address === 'string') {
+    tcpServer.close();
+    throw new Error('Could not reserve an ephemeral workflow action test port.');
+  }
+  await new Promise<void>((resolve, reject) => {
+    tcpServer.close((error: unknown) => (error ? reject(error) : resolve()));
+  });
+  return address.port;
+}
 
 test('narrow dialog exposes only server actions, traps disclosure focus and has no overflow', async ({ page }) => {
   const diagnostics: string[] = [];
@@ -81,11 +122,12 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     }
     createRoot(document.querySelector('#root')).render(h(Harness));
   `;
+  const port = await reserveEphemeralPort();
   const server = await createServer({
     root: fileURLToPath(new URL('../../../../../', import.meta.url)),
     configFile: false,
     logLevel: 'silent',
-    server: { host: '127.0.0.1', port: 0, strictPort: true },
+    server: { host: '127.0.0.1', port, strictPort: true },
     plugins: [{
       name: 'r3-agent-workflow-actions-harness',
       configureServer(vite) {
@@ -125,22 +167,23 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
           overflow: readonly WorkflowActionViewModel[];
         };
       }).splitActions;
-      return [0, 1, 2, 4].map((count) => {
+      return [0, 1, 2, 7].map((count) => {
         const result = split(items.slice(0, count));
         return [result.direct.length, result.overflow.length];
       });
-    }, actions)).toEqual([[0, 0], [1, 0], [2, 0], [2, 2]]);
+    }, actions)).toEqual([[0, 0], [1, 0], [2, 0], [2, 5]]);
     const dialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await expect(dialog).toBeVisible();
-    const currentAction = dialog.getByRole('button', { name: /规划第一集.*当前可执行/ });
+    await expect(dialog.getByText('当前与后续 Episode')).toBeVisible();
+    const currentAction = dialog.getByRole('button', { name: /生成 EP01 Prompt 包.*推荐操作.*当前可执行/ });
     const nextAction = dialog.getByRole('button', {
-      name: /创作第一集剧本.*后续，完成当前步骤后可用/,
+      name: /基于最新剧本更新 EP01 详细分镜.*当前可执行/,
     });
     await expect(currentAction).toBeEnabled();
-    await expect(currentAction).toContainText('/drama-plan');
-    await expect(nextAction).toBeDisabled();
-    await expect(nextAction).toContainText('/drama-script (EP01)');
-    await expect(dialog.getByRole('button', { name: /审阅第一集剧本/ })).toHaveCount(0);
+    await expect(currentAction).toContainText('/drama-prompt (EP01)');
+    await expect(nextAction).toBeEnabled();
+    await expect(nextAction).toContainText('/drama-storyboard (EP01)');
+    await expect(dialog.getByRole('button', { name: /审阅 EP01 完整产物/ })).toHaveCount(0);
     await page.evaluate(() => {
       const disabledDecoy = document.createElement('button');
       disabledDecoy.disabled = true;
@@ -163,18 +206,18 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
       (window as unknown as { setWorkflowPending: (pending: boolean) => void })
         .setWorkflowPending(true);
     });
-    await expect(dialog.getByRole('button', { name: /规划第一集.*处理中/ })).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: /生成 EP01 Prompt 包.*处理中/ })).toBeDisabled();
     await page.evaluate(() => {
       (window as unknown as { setWorkflowPending: (pending: boolean) => void })
         .setWorkflowPending(false);
     });
 
-    const disclosure = dialog.getByRole('button', { name: '更多工作流操作（2）' });
+    const disclosure = dialog.getByRole('button', { name: '更多工作流操作（5）' });
     await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
     await disclosure.click();
     await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
-    await expect(dialog.getByRole('button', { name: /审阅第一集剧本/ })).toBeDisabled();
-    await expect(dialog.getByRole('button', { name: /完善角色与场景资产/ })).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: /审阅 EP01 完整产物.*未来可用/ })).toBeDisabled();
+    await expect(dialog.getByRole('button', { name: /开始 EP02 分集规划.*暂不可用/ })).toBeDisabled();
 
     await page.keyboard.press('Escape');
     await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
@@ -190,7 +233,7 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     await page.setViewportSize({ width: 1024, height: 800 });
     await page.getByRole('button', { name: '打开 Dream Agent' }).click();
     const desktopDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-    const desktopDisclosure = desktopDialog.getByRole('button', { name: '更多工作流操作（2）' });
+    const desktopDisclosure = desktopDialog.getByRole('button', { name: '更多工作流操作（5）' });
     await desktopDisclosure.click();
     await page.keyboard.press('Escape');
     await expect(desktopDisclosure).toHaveAttribute('aria-expanded', 'false');
