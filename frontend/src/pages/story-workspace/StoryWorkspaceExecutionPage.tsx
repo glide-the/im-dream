@@ -877,6 +877,10 @@ export function StoryWorkspaceExecutionPage({
       if (episodeActionTicketIsFresh(ticket)) setEpisodeActionBusy(null);
     }
   };
+  const recommendedEpisodeWorkflowAction: StoryWorkspaceEpisodeActionOptionV2 | null =
+    episodeSurface?.actionProjection?.actionOptions.find(
+      (option) => option.actionId === episodeSurface.actionProjection?.recommendedActionId,
+    ) ?? null;
   const selectedEpisodeWorkflowAction: StoryWorkspaceEpisodeActionOptionV2 | null =
     episodeSurface?.actionProjection?.actionOptions.find(
       (option) => option.actionId === selectedEpisodeWorkflowActionId,
@@ -912,6 +916,7 @@ export function StoryWorkspaceExecutionPage({
       setEpisodeActionNotice('已交给同一 Dream Agent；新产物仍以 REST revisions 到达为准。');
       setEpisodeContinueDialogOpen(false);
       setSelectedEpisodeWorkflowActionId(null);
+      setDreamAgentInitialWorkflowFocus(null);
       dreamAgent.refresh();
       refreshEpisodeArtifacts();
     } catch {
@@ -930,7 +935,13 @@ export function StoryWorkspaceExecutionPage({
     ? null
     : storyWorkspaceEpisodeNextActionLabel(nextEpisodeAction.action);
   const episodeContinueActionLabel = selectedEpisodeWorkflowAction?.label
+    ?? recommendedEpisodeWorkflowAction?.label
     ?? nextEpisodeActionLabel;
+  const primaryEpisodeActionLabel = recommendedEpisodeWorkflowAction?.label
+    ?? nextEpisodeActionLabel;
+  const primaryEpisodeActionCanDispatch = recommendedEpisodeWorkflowAction?.canDispatch
+    ?? nextEpisodeAction?.canDispatch
+    ?? false;
   const episodeActionBlockedByLastGood = episodeArtifacts.isShowingLastGood
     || episodeArtifacts.diagnostic !== null;
   const dreamAgentWorkflowActions: readonly StoryWorkspaceDreamAgentWorkflowActionViewModel[] =
@@ -1294,7 +1305,7 @@ export function StoryWorkspaceExecutionPage({
                 <p role="status">暂时无法检查新 revision；当前内容没有被消息覆盖。</p>
               )}
               <div aria-label="Episode 下一步">
-                {nextEpisodeAction?.canDispatch && nextEpisodeActionLabel !== null ? (
+                {primaryEpisodeActionCanDispatch && primaryEpisodeActionLabel !== null ? (
                   <button
                     aria-controls="story-workspace-episode-continue-dialog"
                     aria-expanded={episodeContinueDialogOpen}
@@ -1305,6 +1316,10 @@ export function StoryWorkspaceExecutionPage({
                     }
                     onClick={() => {
                       setEpisodeActionError(null);
+                      setDreamAgentInitialWorkflowFocus(null);
+                      setSelectedEpisodeWorkflowActionId(
+                        recommendedEpisodeWorkflowAction?.actionId ?? null,
+                      );
                       setEpisodeContinueDialogOpen(true);
                     }}
                     ref={episodeContinueTriggerRef}
@@ -1312,7 +1327,7 @@ export function StoryWorkspaceExecutionPage({
                   >
                     {episodeDispatchedIdentity === episodeActionIdentity
                       ? '已交给 Dream Agent'
-                      : nextEpisodeActionLabel}
+                      : primaryEpisodeActionLabel}
                   </button>
                 ) : (
                   <p>当前没有可派发的下一步，页面会继续读取工作流事实。</p>
@@ -1410,13 +1425,16 @@ export function StoryWorkspaceExecutionPage({
           error={episodeActionError}
           onCancel={() => {
             if (episodeActionBusy === 'continue') return;
+            const returnToAgent = dreamAgentInitialWorkflowFocus !== null;
             setEpisodeActionError(null);
             setEpisodeContinueDialogOpen(false);
             setSelectedEpisodeWorkflowActionId(null);
-            setAgentDialogOpen(true);
+            if (returnToAgent) setAgentDialogOpen(true);
           }}
           onConfirm={(userGuidance) => handleEpisodeContinue(userGuidance)}
-          restoreFocusRef={episodeContinueTriggerRef}
+          restoreFocusRef={dreamAgentInitialWorkflowFocus === null
+            ? episodeContinueTriggerRef
+            : agentPreviewTriggerRef}
           targetEpisodeLabel={selectedEpisodeWorkflowAction?.targetEpisode.displayLabel ?? 'EP01'}
         />
       )}

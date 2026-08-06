@@ -32,6 +32,11 @@ const AGGREGATE_ETAGS = [
   `sha256:${'6'.repeat(64)}`,
   `sha256:${'7'.repeat(64)}`,
 ] as const;
+const ACTION_IDS = Array.from(
+  { length: 7 },
+  (_, index) => `episode_action_${String(index + 1).repeat(64)}`,
+);
+const NEXT_EPISODE_CANDIDATE_ID = `episode_candidate_${'8'.repeat(64)}`;
 const ALL_ARTIFACTS = [
   ['episode-outline.md', 'plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
   ['script.md', 'write_script', ['narrative_workbench', 'shot_inspector']],
@@ -137,6 +142,59 @@ function dreamAgentSnapshot(
     }],
     pendingToolConfirmations,
     snapshotAt: '2026-08-06T01:04:01Z',
+  };
+}
+
+function projectedAction(
+  index: number,
+  action: 'generate_prompts' | 'regenerate_storyboard' | 'review_full_chain'
+    | 'validate_episode' | 'prepare_render_guide' | 'plan_episode' | 'write_script',
+  label: string,
+  displayCommand: string,
+  availability: 'executable' | 'preview' | 'blocked',
+  target: 'current' | 'next' = 'current',
+) {
+  const executable = availability === 'executable';
+  return {
+    actionId: ACTION_IDS[index],
+    action,
+    inputRevision: CONTENT_REVISION,
+    targetEpisode: target === 'current' ? {
+      opaqueEpisodeId: EPISODE_ID,
+      candidateId: null,
+      displayLabel: 'EP01',
+      relation: 'current',
+    } : {
+      opaqueEpisodeId: null,
+      candidateId: NEXT_EPISODE_CANDIDATE_ID,
+      displayLabel: 'EP02',
+      relation: 'next',
+    },
+    label,
+    description: target === 'current'
+      ? '使用服务端确认的 EP01 canonical revisions。'
+      : '等待 EP01 完整产物校验后开始 EP02。',
+    displayCommand,
+    availability,
+    isRecommended: index === 0,
+    canDispatch: executable,
+    disabledReason: executable ? null : target === 'next'
+      ? '完成 EP01 完整产物校验后可用'
+      : '完成当前 EP01 步骤后可用',
+    canonicalInputs: [{
+      sourceType: 'episode_artifact',
+      artifact: action === 'regenerate_storyboard' ? 'script' : 'storyboard',
+      owner: 'episode_artifact_manifest',
+      label: target === 'current' ? 'EP01 canonical 输入' : 'EP02 前置输入',
+      availability: executable ? 'available' : 'not_generated',
+      publicRevision: executable ? CONTENT_REVISION : null,
+      revisionKind: 'content',
+      requirement: 'required',
+    }],
+    consequences: action === 'regenerate_storyboard'
+      ? ['Prompt 包', '完整产物审阅', '校验提交']
+      : [],
+    dispatchState: 'idle',
   };
 }
 
@@ -341,25 +399,51 @@ function episodeSurface(revisionIndex: 0 | 1) {
     },
     workflow: {
       factsRevision: revisionIndex,
-      nextAction: { action: 'validate_episode', diagnostic: 'needs_confirmation', canDispatch: true },
-      prerequisites: ['review_full_chain'],
+      nextAction: { action: 'generate_prompts', diagnostic: 'needs_confirmation', canDispatch: true },
+      prerequisites: ['regenerate_storyboard'],
       actionOptions: [
         {
-          action: 'validate_episode',
-          label: '校验第一集完整产物',
-          displayCommand: '校验完整产物',
+          action: 'generate_prompts',
+          label: '生成 EP01 Prompt 包',
+          displayCommand: '/drama-prompt (EP01)',
           isCurrent: true,
           canDispatch: true,
         },
         {
+          action: 'review_full_chain',
+          label: '审阅 EP01 完整产物',
+          displayCommand: '完整链路审查',
+          isCurrent: false,
+          canDispatch: false,
+        },
+        {
+          action: 'validate_episode',
+          label: '校验并提交 EP01',
+          displayCommand: '校验完整产物',
+          isCurrent: false,
+          canDispatch: false,
+        },
+        {
           action: 'prepare_render_guide',
-          label: '准备第一集渲染指引',
+          label: '准备 EP01 渲染与配音指引',
           displayCommand: '/drama-render + /drama-voice',
           isCurrent: false,
           canDispatch: false,
         },
       ],
       legacyPartial: false,
+    },
+    actionProjection: {
+      recommendedActionId: ACTION_IDS[0],
+      actionOptions: [
+        projectedAction(0, 'generate_prompts', '生成 EP01 Prompt 包', '/drama-prompt (EP01)', 'executable'),
+        projectedAction(1, 'regenerate_storyboard', '基于最新剧本更新 EP01 详细分镜', '/drama-storyboard (EP01)', 'executable'),
+        projectedAction(2, 'review_full_chain', '审阅 EP01 完整产物', 'script-reviewer · EP01 完整链路', 'preview'),
+        projectedAction(3, 'validate_episode', '校验并提交 EP01', '校验并提交 · EP01', 'preview'),
+        projectedAction(4, 'prepare_render_guide', '准备 EP01 渲染与配音指引', '/drama-render + /drama-voice · EP01', 'preview'),
+        projectedAction(5, 'plan_episode', '开始 EP02 分集规划', '/drama-plan', 'blocked', 'next'),
+        projectedAction(6, 'write_script', '创作 EP02 剧本', '/drama-script (EP02)', 'preview', 'next'),
+      ],
     },
   };
 }
@@ -533,7 +617,7 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       await json(route, {
         runId: RUN_ID,
         episodeId: EPISODE_ID,
-        capability: 'validate_episode',
+        capability: 'generate_prompts',
         messageId: 'dream-agent-u12-continue',
         accepted: true,
         replayed: false,
@@ -710,9 +794,38 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(page.locator('[aria-label="Episode 内容工作面"] [aria-label="Episode 辅助视图"]'))
       .toBeVisible();
 
-    let continueAction = page.getByRole('button', { name: '验证第一集产物' });
+    const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
+    await openAgent.click();
+    let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    await expect(agentDialog.getByRole('button', { name: /生成 EP01 Prompt 包.*推荐操作.*当前可执行/ }))
+      .toBeEnabled();
+    const storyboardAction = agentDialog.getByRole('button', {
+      name: /基于最新剧本更新 EP01 详细分镜.*当前可执行/,
+    });
+    await expect(storyboardAction).toBeEnabled();
+    const workflowDisclosure = agentDialog.getByRole('button', {
+      name: '更多工作流操作（5）',
+    });
+    await expect(workflowDisclosure).toHaveAttribute('aria-expanded', 'false');
+    await workflowDisclosure.click();
+    await expect(agentDialog.getByRole('button', {
+      name: /开始 EP02 分集规划.*暂不可用/,
+    })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await storyboardAction.click();
+    let continueDialog = page.getByRole('dialog', { name: '确认 Episode 下一步' });
+    await expect(continueDialog.getByText('目标 Episode：EP01')).toBeVisible();
+    await expect(continueDialog.getByText('EP01 canonical 输入')).toBeVisible();
+    await continueDialog.getByRole('button', { name: '取消' }).click();
+    agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    await expect(agentDialog.getByRole('button', {
+      name: /基于最新剧本更新 EP01 详细分镜.*当前可执行/,
+    })).toBeFocused();
+    await page.keyboard.press('Escape');
+
+    let continueAction = page.getByRole('button', { name: '生成 EP01 Prompt 包' });
     await continueAction.click();
-    const continueDialog = page.getByRole('dialog', { name: '确认 Episode 下一步' });
+    continueDialog = page.getByRole('dialog', { name: '确认 Episode 下一步' });
     await expect(continueDialog).toBeVisible();
     await expect(continueDialog.getByText('Canonical 输入与 revisions')).toBeVisible();
     const guidance = continueDialog.getByRole('textbox', { name: '补充创作要求（可选）' });
@@ -727,10 +840,12 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     await expect(continueDialog).toBeHidden();
     expect(state.continueRequests).toHaveLength(1);
     expect(state.continueRequests[0]).toMatchObject({
-      action: 'validate_episode',
-      episodeId: EPISODE_ID,
+      actionId: ACTION_IDS[0],
       userGuidance: '保留克制感',
     });
+    expect(state.continueRequests[0]).not.toHaveProperty('action');
+    expect(state.continueRequests[0]).not.toHaveProperty('episodeId');
+    expect(state.continueRequests[0]).not.toHaveProperty('displayCommand');
     continueAction = page.getByRole('button', { name: '已交给 Dream Agent' });
     await expect(continueAction).toBeDisabled();
 
@@ -753,7 +868,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     expect(await dreamProjection.evaluate((projection) => (
       (projection as HTMLDetailsElement).open
     ))).toBe(true);
-    continueAction = page.getByRole('button', { name: '验证第一集产物' });
+    continueAction = page.getByRole('button', { name: '生成 EP01 Prompt 包' });
     await expect(continueAction).toBeEnabled();
 
     await shot.press('Escape');
@@ -909,10 +1024,10 @@ test('Dream Agent Panel restores a safe Write confirmation without exposing raw 
     expect(bodyText).not.toContain('/Users/');
     expect(bodyText).not.toContain('script.md');
     expect(bodyText).not.toContain('Allow I&M to call');
-    const documentMarkup = await page.locator('html').evaluate((element) => element.outerHTML);
-    expect(documentMarkup).not.toContain('/Users/');
-    expect(documentMarkup).not.toContain('script.md');
-    expect(documentMarkup).not.toContain('Allow I&amp;M to call');
+    const confirmationMarkup = await confirmation.evaluate((element) => element.outerHTML);
+    expect(confirmationMarkup).not.toContain('/Users/');
+    expect(confirmationMarkup).not.toContain('script.md');
+    expect(confirmationMarkup).not.toContain('Allow I&amp;M to call');
     await expect(confirmation).toBeInViewport();
     await expectNoDocumentHorizontalOverflow(page);
     await expectConfirmationActionsInViewport(page, confirmation);

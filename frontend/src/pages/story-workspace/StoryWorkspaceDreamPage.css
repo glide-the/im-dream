@@ -466,7 +466,7 @@
 .story-workspace-dream-agent-dialog__workflow-action small { overflow-wrap: anywhere; color: var(--dream-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; line-height: 1.4; }
 .story-workspace-dream-agent-dialog__workflow-action > b { flex: 0 0 auto; color: var(--dream-action); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; font-weight: 600; letter-spacing: .05em; }
 .story-workspace-dream-agent-dialog__workflow-disclosure { min-height: 44px; justify-self: start; padding: 6px 1px; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; cursor: pointer; font: inherit; font-size: 11px; }
-.story-workspace-dream-agent-dialog__workflow-overflow { max-height: 176px; overflow: auto; overscroll-behavior: contain; }
+.story-workspace-dream-agent-dialog__workflow-overflow { max-height: 176px; align-content: start; grid-auto-rows: max-content; overflow: auto; overscroll-behavior: contain; }
 .story-workspace-dream-agent-dialog__workflow-overflow[hidden] { display: none; }
 .story-workspace-dream-agent-dialog button:disabled { cursor: not-allowed; opacity: .46; }
 .story-workspace-dream-agent-dialog__stream-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }

@@ -1306,6 +1306,16 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
                     "idempotencyKey": "continue-real",
                 },
             )
+            replayed = client.post(
+                f"/api/story-workspace/workflow-runs/{RUN_ID}/episode-actions/continue",
+                headers={"If-Match": etag},
+                json={
+                    "actionId": current.json()["actionProjection"]["actionOptions"][0][
+                        "actionId"
+                    ],
+                    "idempotencyKey": "continue-real",
+                },
+            )
             after_dispatch = client.get(
                 f"/api/story-workspace/workflow-runs/{RUN_ID}/episode-artifacts"
             )
@@ -1341,6 +1351,9 @@ def test_real_gateway_continue_reauthorizes_and_returns_latest_surface_on_confli
         assert wrong_action.json()["resolution"]["action"] == "write_script"
         assert accepted.status_code == 202
         assert accepted.json()["episodeId"] == EPISODE_ID
+        assert replayed.status_code == 202
+        assert replayed.json()["messageId"] == accepted.json()["messageId"]
+        assert replayed.json()["replayed"] is True
         assert after_dispatch.json()["workflow"]["factsRevision"] == 0
         assert not (
             workspace

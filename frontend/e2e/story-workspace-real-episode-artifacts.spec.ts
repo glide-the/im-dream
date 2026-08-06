@@ -51,7 +51,9 @@ test('real actor can read Markdown documents and structured storyboard from the 
   mkdirSync(EVIDENCE_DIR, { recursive: true });
   const diagnostics: string[] = [];
   const apiFailures: string[] = [];
+  const episodeActionPosts: string[] = [];
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
+  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const page = await context.newPage();
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
   page.on('console', (message) => {
@@ -61,6 +63,12 @@ test('real actor can read Markdown documents and structured storyboard from the 
     if (response.status() >= 400 && response.url().includes('/api/story-workspace/')) {
       apiFailures.push(`${response.status()} ${response.url()}`);
     }
+  });
+  page.on('request', (request) => {
+    if (
+      request.method() === 'POST'
+      && request.url().includes('/episode-actions/')
+    ) episodeActionPosts.push(request.url());
   });
 
   const token = createActorToken(ACTOR_EMAIL);
@@ -79,6 +87,7 @@ test('real actor can read Markdown documents and structured storyboard from the 
     const episodeResponse = await surfaceResponse;
     const surface = await episodeResponse.json() as {
       bindingAvailability: string;
+      opaqueEpisodeId: string | null;
       manifestRevision: string;
       etag: string;
       documents?: Array<{ relativeKey: string; markdown: string; sourceRevision: string }>;
@@ -89,6 +98,19 @@ test('real actor can read Markdown documents and structured storyboard from the 
         size: number | null;
       }>;
       narrative?: { shots?: unknown[] };
+      actionProjection?: {
+        recommendedActionId: string | null;
+        actionOptions: Array<{
+          actionId: string;
+          action: string;
+          label: string;
+          targetEpisode: { displayLabel: string; relation: string };
+          availability: string;
+          canDispatch: boolean;
+          disabledReason: string | null;
+          canonicalInputs: unknown[];
+        }>;
+      } | null;
     };
     expect(surface.bindingAvailability).toBe('bound');
     expect(surface.documents?.map((document) => document.relativeKey)).toEqual([
@@ -97,6 +119,7 @@ test('real actor can read Markdown documents and structured storyboard from the 
       'review-report.md',
     ]);
     expect(surface.narrative?.shots).toHaveLength(22);
+    expect(surface.actionProjection?.actionOptions).toHaveLength(7);
     writeFileSync(
       resolve(EVIDENCE_DIR, 'episode-artifact-manifest.json'),
       JSON.stringify({
@@ -113,6 +136,28 @@ test('real actor can read Markdown documents and structured storyboard from the 
           characters: document.markdown.length,
         })) ?? [],
         projectedShotCount: surface.narrative?.shots?.length ?? 0,
+      }, null, 2),
+      'utf-8',
+    );
+    writeFileSync(
+      resolve(EVIDENCE_DIR, 'workflow-action-projection.json'),
+      JSON.stringify({
+        runId: RUN_ID,
+        actorEmail: ACTOR_EMAIL,
+        opaqueEpisodeId: surface.opaqueEpisodeId,
+        manifestRevision: surface.manifestRevision,
+        aggregateEtag: surface.etag,
+        recommendedActionId: surface.actionProjection?.recommendedActionId ?? null,
+        actionOptions: surface.actionProjection?.actionOptions.map((option) => ({
+          actionId: option.actionId,
+          action: option.action,
+          label: option.label,
+          targetEpisode: option.targetEpisode,
+          availability: option.availability,
+          canDispatch: option.canDispatch,
+          disabledReason: option.disabledReason,
+          canonicalInputCount: option.canonicalInputs.length,
+        })) ?? [],
       }, null, 2),
       'utf-8',
     );
@@ -142,6 +187,33 @@ test('real actor can read Markdown documents and structured storyboard from the 
 
     const overview = page.getByRole('article', { name: 'Episode Overview' });
     await expect(overview).toBeVisible();
+    const openAgent = page.getByRole('button', { name: '打开 Dream Agent 消息预览' });
+    await openAgent.click();
+    let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    await expect(agentDialog.getByRole('button', {
+      name: /审阅 EP01 剧本.*推荐操作.*当前可执行/,
+    })).toBeEnabled();
+    await expect(agentDialog.getByRole('button', {
+      name: /核对 EP01 资产引用.*未来可用/,
+    })).toBeDisabled();
+    let disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（5）' });
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await disclosure.click();
+    await expect(agentDialog.getByRole('button', {
+      name: /生成 EP01 详细分镜.*未来可用/,
+    })).toBeDisabled();
+    await expect(agentDialog.getByRole('button', {
+      name: /生成 EP01 Prompt 包.*未来可用/,
+    })).toBeDisabled();
+    await page.screenshot({
+      path: resolve(EVIDENCE_DIR, 'workflow-actions-desktop-1440x1000.png'),
+      fullPage: true,
+    });
+    await page.keyboard.press('Escape');
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await page.keyboard.press('Escape');
+    await expect(agentDialog).toHaveCount(0);
+    await expect(openAgent).toBeFocused();
     const progress = overview.getByRole('list', { name: '第一集产物进度' });
     await expect(progress).toBeVisible();
     await expect(progress.locator('li')).toHaveCount(6);
@@ -210,13 +282,43 @@ test('real actor can read Markdown documents and structured storyboard from the 
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'episode-artifacts-narrow-390x844.png'),
     });
+    await openAgent.click();
+    agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
+    disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（5）' });
+    await disclosure.click();
+    await expect(agentDialog).toBeVisible();
+    expect(await agentDialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
+      .toBe(true);
+    const overflowActionBoxes = await agentDialog.getByRole('group', {
+      name: '更多 Episode 工作流操作',
+    }).getByRole('button').evaluateAll((buttons) => buttons.map((button) => {
+      const box = button.getBoundingClientRect();
+      return {
+        top: box.top,
+        bottom: box.bottom,
+        height: box.height,
+        contentFits: button.scrollHeight <= button.clientHeight + 1,
+      };
+    }));
+    expect(overflowActionBoxes.every((box, index) => (
+      box.height >= 44
+      && box.contentFits
+      && (index === 0 || box.top >= (overflowActionBoxes[index - 1]?.bottom ?? 0) - 0.5)
+    ))).toBe(true);
+    await page.screenshot({
+      path: resolve(EVIDENCE_DIR, 'workflow-actions-narrow-390x844.png'),
+    });
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('Escape');
 
     const bodyText = await page.locator('body').innerText();
     expect(bodyText).not.toContain('/Users/');
     expect(bodyText).not.toContain('第一集产物来源无效');
     expect(apiFailures).toEqual([]);
     expect(diagnostics).toEqual([]);
+    expect(episodeActionPosts).toEqual([]);
   } finally {
+    await context.tracing.stop({ path: resolve(EVIDENCE_DIR, 'trace.zip') });
     await context.close();
   }
 });
