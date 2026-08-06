@@ -11,6 +11,7 @@ import {
   storyWorkspaceParseEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeActionAccepted,
   type StoryWorkspaceEpisodeActionContinueRequest,
+  type StoryWorkspaceEpisodeActionContinueRequestV2,
   type StoryWorkspaceEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeBindingRecoveryRequest,
   type StoryWorkspaceEpisodeDispatchAction,
@@ -118,6 +119,7 @@ export type StoryWorkspaceEpisodeBindingRecoveryOptions =
 
 export interface StoryWorkspaceEpisodeActionContinueOptions
   extends StoryWorkspaceEpisodeActionFetchOptions {
+  readonly actionId?: string;
   readonly userGuidance?: string | null;
 }
 
@@ -159,7 +161,9 @@ function storyWorkspaceEpisodeActionHeaders(
 
 async function storyWorkspacePostEpisodeAction(
   endpoint: string,
-  body: StoryWorkspaceEpisodeBindingRecoveryRequest | StoryWorkspaceEpisodeActionContinueRequest,
+  body: StoryWorkspaceEpisodeBindingRecoveryRequest
+    | StoryWorkspaceEpisodeActionContinueRequest
+    | StoryWorkspaceEpisodeActionContinueRequestV2,
   options: StoryWorkspaceEpisodeActionFetchOptions,
   etag?: string,
 ): Promise<StoryWorkspaceEpisodeActionAccepted> {
@@ -220,6 +224,46 @@ export async function storyWorkspaceContinueEpisodeAction(
   surface: StoryWorkspaceEpisodeArtifactSurface,
   options: StoryWorkspaceEpisodeActionContinueOptions,
 ): Promise<StoryWorkspaceEpisodeActionAccepted> {
+  const actionProjection = surface.actionProjection ?? null;
+  if (actionProjection !== null) {
+    const selected = actionProjection.actionOptions.find(
+      (option) => option.actionId === options.actionId,
+    );
+    const etag = surface.etag;
+    if (
+      !storyWorkspaceEpisodeActionRunMatches(runId, surface)
+      || surface.bindingAvailability !== 'bound'
+      || selected === undefined
+      || selected.availability !== 'executable'
+      || !selected.canDispatch
+      || selected.dispatchState !== 'idle'
+      || etag === null
+      || !STORY_WORKSPACE_EPISODE_REVISION.test(etag)
+    ) throw new StoryWorkspaceEpisodeActionUnavailableError();
+    const body: StoryWorkspaceEpisodeActionContinueRequestV2 = {
+      actionId: selected.actionId,
+      idempotencyKey: storyWorkspaceEpisodeActionIdempotencyKey(options.idempotencyKey),
+      userGuidance: storyWorkspaceEpisodeActionGuidance(options.userGuidance),
+    };
+    const accepted = await storyWorkspacePostEpisodeAction(
+      storyWorkspaceEpisodeActionContinueEndpoint(runId),
+      body,
+      options,
+      etag,
+    );
+    const targetId = selected.targetEpisode.opaqueEpisodeId;
+    if (
+      accepted.runId !== runId
+      || accepted.capability !== selected.action
+      || (
+        targetId !== null
+          ? accepted.episodeId !== targetId
+          : accepted.episodeId === null
+            || !STORY_WORKSPACE_EPISODE_HEX_ID.test(accepted.episodeId)
+      )
+    ) throw new StoryWorkspaceEpisodeActionContractError();
+    return accepted;
+  }
   const action = surface.workflow?.nextAction.action;
   const episodeId = surface.opaqueEpisodeId;
   const etag = surface.etag;

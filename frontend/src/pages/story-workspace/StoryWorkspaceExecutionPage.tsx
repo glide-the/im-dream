@@ -22,7 +22,9 @@ import type {
   StoryWorkspaceEpisodeArtifactAvailability,
   StoryWorkspaceEpisodeArtifactSurface,
   StoryWorkspaceEpisodeDispatchAction,
+  StoryWorkspaceEpisodeActionOptionV2,
 } from '../../hooks/story-workspace/contracts';
+import { storyWorkspaceEpisodeOptionCanonicalInputs } from '../../hooks/story-workspace/contracts';
 import {
   storyWorkspaceContinueEpisodeAction,
   storyWorkspaceRecoverEpisodeBinding,
@@ -362,7 +364,9 @@ function EmptyWorkspaceModule({ module }: { module: ExecutionModule }) {
 
 export interface StoryWorkspaceEpisodeContinueDialogProps {
   readonly actionLabel: string;
+  readonly targetEpisodeLabel?: string;
   readonly canonicalInputs: readonly StoryWorkspaceEpisodeCanonicalInput[];
+  readonly consequences?: readonly string[];
   readonly busy: boolean;
   readonly error: string | null;
   readonly onCancel: () => void;
@@ -372,7 +376,9 @@ export interface StoryWorkspaceEpisodeContinueDialogProps {
 
 export function StoryWorkspaceEpisodeContinueDialog({
   actionLabel,
+  targetEpisodeLabel = 'EP01',
   canonicalInputs,
+  consequences = [],
   busy,
   error,
   onCancel,
@@ -430,7 +436,7 @@ export function StoryWorkspaceEpisodeContinueDialog({
         <div>
           <p>Episode 下一步</p>
           <h2 id="story-workspace-episode-continue-dialog-title">确认 Episode 下一步</h2>
-          <span>目标：{actionLabel}</span>
+          <span>目标 Episode：{targetEpisodeLabel} · {actionLabel}</span>
         </div>
         <button disabled={busy} onClick={onCancel} type="button">取消</button>
       </header>
@@ -446,6 +452,12 @@ export function StoryWorkspaceEpisodeContinueDialog({
           ))}
         </ul>
       </section>
+      {consequences.length > 0 && (
+        <section aria-label="下游影响">
+          <h3>确认后需要更新</h3>
+          <ul>{consequences.map((item) => <li key={item}>{item}</li>)}</ul>
+        </section>
+      )}
       <form
         className="story-workspace-dream-agent-dialog__composer"
         onSubmit={(event) => {
@@ -484,6 +496,8 @@ export function StoryWorkspaceExecutionPage({
   const [focusKey, setFocusKey] = useState<string | null>(null);
   const [agentDialogOpen, setAgentDialogOpen] = useState(false);
   const [episodeContinueDialogOpen, setEpisodeContinueDialogOpen] = useState(false);
+  const [selectedEpisodeWorkflowActionId, setSelectedEpisodeWorkflowActionId] =
+    useState<string | null>(null);
   const [focusedArtifact, setFocusedArtifact] =
     useState<StoryWorkspaceEpisodeReadableArtifact>('storyboard.yaml');
   const [pendingArtifactReaderFocus, setPendingArtifactReaderFocus] =
@@ -548,7 +562,9 @@ export function StoryWorkspaceExecutionPage({
       : `unbound:${episodeSurface.bindingRecovery.autoRepairAttempted}`;
   const episodeActionName = episodeSurface?.bindingAvailability === 'unbound'
     ? 'recover_first_episode_binding'
-    : episodeSurface?.workflow?.nextAction.action ?? 'none_in_scope';
+    : episodeSurface?.actionProjection?.recommendedActionId
+      ?? episodeSurface?.workflow?.nextAction.action
+      ?? 'none_in_scope';
   const episodeActionIdentity = `${runId}\u0000${episodeActionFact}\u0000${episodeActionName}`;
   const episodeActionCurrentIdentityRef = useRef(episodeActionIdentity);
   const episodeActionGenerationRef = useRef(0);
@@ -858,21 +874,29 @@ export function StoryWorkspaceExecutionPage({
       if (episodeActionTicketIsFresh(ticket)) setEpisodeActionBusy(null);
     }
   };
+  const selectedEpisodeWorkflowAction: StoryWorkspaceEpisodeActionOptionV2 | null =
+    episodeSurface?.actionProjection?.actionOptions.find(
+      (option) => option.actionId === selectedEpisodeWorkflowActionId,
+    ) ?? null;
   const handleEpisodeContinue = async (userGuidance: string | null) => {
-    const action = episodeSurface?.workflow?.nextAction.action;
+    const action = selectedEpisodeWorkflowAction?.action
+      ?? episodeSurface?.workflow?.nextAction.action;
+    const actionIdentity = selectedEpisodeWorkflowAction?.actionId ?? action;
     if (
       episodeSurface === null
       || episodeSurface.bindingAvailability !== 'bound'
       || action === undefined
+      || actionIdentity === undefined
       || storyWorkspaceEpisodeNextActionLabel(action) === null
       || episodeDispatchedIdentity === episodeActionIdentity
     ) return;
-    const idempotencyKey = episodeActionKeys.keyFor(runId, episodeActionFact, action);
+    const idempotencyKey = episodeActionKeys.keyFor(runId, episodeActionFact, actionIdentity);
     const ticket = beginEpisodeAction();
     setEpisodeActionBusy('continue');
     setEpisodeActionError(null);
     try {
       const accepted = await storyWorkspaceContinueEpisodeAction(runId, episodeSurface, {
+        actionId: selectedEpisodeWorkflowAction?.actionId,
         idempotencyKey,
         token: getAuthToken(),
         userGuidance,
@@ -884,6 +908,7 @@ export function StoryWorkspaceExecutionPage({
       });
       setEpisodeActionNotice('已交给同一 Dream Agent；新产物仍以 REST revisions 到达为准。');
       setEpisodeContinueDialogOpen(false);
+      setSelectedEpisodeWorkflowActionId(null);
       dreamAgent.refresh();
       refreshEpisodeArtifacts();
     } catch {
@@ -901,6 +926,8 @@ export function StoryWorkspaceExecutionPage({
   const nextEpisodeActionLabel = nextEpisodeAction === null
     ? null
     : storyWorkspaceEpisodeNextActionLabel(nextEpisodeAction.action);
+  const episodeContinueActionLabel = selectedEpisodeWorkflowAction?.label
+    ?? nextEpisodeActionLabel;
   const episodeActionBlockedByLastGood = episodeArtifacts.isShowingLastGood
     || episodeArtifacts.diagnostic !== null;
   const dreamAgentWorkflowActions: readonly StoryWorkspaceDreamAgentWorkflowActionViewModel[] =
@@ -917,29 +944,55 @@ export function StoryWorkspaceExecutionPage({
           : '当前没有可恢复的可信 Episode 关联',
       }]
       : episodeSurface?.bindingAvailability === 'bound'
-        ? (episodeSurface.workflow?.actionOptions ?? []).map((option) => ({
-          id: option.action,
-          label: option.label,
-          displayCommand: option.displayCommand,
-          isCurrent: option.isCurrent,
-          canDispatch: option.canDispatch && !episodeActionBlockedByLastGood,
-          pending: option.isCurrent && episodeDispatchedIdentity === episodeActionIdentity,
-          disabledReason: option.isCurrent
-            ? episodeActionBlockedByLastGood
+        ? episodeSurface.actionProjection !== null
+          && episodeSurface.actionProjection !== undefined
+          ? episodeSurface.actionProjection.actionOptions.map((option) => ({
+            id: option.actionId,
+            label: option.label,
+            displayCommand: option.displayCommand,
+            description: option.description,
+            targetEpisodeLabel: option.targetEpisode.displayLabel,
+            availability: option.availability,
+            isRecommended: option.isRecommended,
+            isCurrent: option.isRecommended,
+            canDispatch: option.canDispatch && !episodeActionBlockedByLastGood,
+            pending: selectedEpisodeWorkflowActionId === option.actionId
+              && episodeActionBusy === 'continue',
+            disabledReason: episodeActionBlockedByLastGood && option.canDispatch
               ? '当前正在展示最近一次有效事实，暂不可派发'
-              : null
-            : '完成当前步骤后可用',
-        }))
+              : option.disabledReason,
+          }))
+          : (episodeSurface.workflow?.actionOptions ?? []).map((option) => ({
+            id: option.action,
+            label: option.label,
+            displayCommand: option.displayCommand,
+            isCurrent: option.isCurrent,
+            canDispatch: option.canDispatch && !episodeActionBlockedByLastGood,
+            pending: option.isCurrent && episodeDispatchedIdentity === episodeActionIdentity,
+            disabledReason: option.isCurrent
+              ? episodeActionBlockedByLastGood
+                ? '当前正在展示最近一次有效事实，暂不可派发'
+                : null
+              : '完成当前步骤后可用',
+          }))
         : [];
   const handleDreamAgentWorkflowAction = (actionId: string) => {
     const action = dreamAgentWorkflowActions.find((candidate) => candidate.id === actionId);
-    if (action === undefined || !action.isCurrent || !action.canDispatch || action.pending) return;
+    if (action === undefined || !action.canDispatch || action.pending) return;
     if (action.id === 'recover_first_episode_binding') {
       void handleEpisodeRecovery();
       return;
     }
-    if (action.id !== nextEpisodeAction?.action) return;
+    if (
+      episodeSurface?.actionProjection === null
+      || episodeSurface?.actionProjection === undefined
+    ) {
+      if (action.id !== nextEpisodeAction?.action) return;
+    } else if (!episodeSurface.actionProjection.actionOptions.some(
+      (option) => option.actionId === action.id && option.canDispatch,
+    )) return;
     setEpisodeActionError(null);
+    setSelectedEpisodeWorkflowActionId(action.id);
     setAgentDialogOpen(false);
     setEpisodeContinueDialogOpen(true);
   };
@@ -1334,19 +1387,24 @@ export function StoryWorkspaceExecutionPage({
 
       {episodeContinueDialogOpen
         && episodeSurface?.bindingAvailability === 'bound'
-        && nextEpisodeActionLabel !== null && (
+        && episodeContinueActionLabel !== null && (
         <StoryWorkspaceEpisodeContinueDialog
-          actionLabel={nextEpisodeActionLabel}
+          actionLabel={episodeContinueActionLabel}
           busy={episodeActionBusy === 'continue'}
-          canonicalInputs={storyWorkspaceEpisodeCanonicalInputs(episodeSurface)}
+          canonicalInputs={selectedEpisodeWorkflowAction === null
+            ? storyWorkspaceEpisodeCanonicalInputs(episodeSurface)
+            : storyWorkspaceEpisodeOptionCanonicalInputs(selectedEpisodeWorkflowAction)}
+          consequences={selectedEpisodeWorkflowAction?.consequences ?? []}
           error={episodeActionError}
           onCancel={() => {
             if (episodeActionBusy === 'continue') return;
             setEpisodeActionError(null);
             setEpisodeContinueDialogOpen(false);
+            setSelectedEpisodeWorkflowActionId(null);
           }}
           onConfirm={(userGuidance) => handleEpisodeContinue(userGuidance)}
           restoreFocusRef={episodeContinueTriggerRef}
+          targetEpisodeLabel={selectedEpisodeWorkflowAction?.targetEpisode.displayLabel ?? 'EP01'}
         />
       )}
 

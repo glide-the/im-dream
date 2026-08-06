@@ -93,7 +93,9 @@ test('opens a dedicated Episode confirmation before continuation and never subst
   for (const expected of [
     '<StoryWorkspaceEpisodeContinueDialog',
     'setEpisodeContinueDialogOpen(true)',
-    'canonicalInputs={storyWorkspaceEpisodeCanonicalInputs(episodeSurface)}',
+    'storyWorkspaceEpisodeOptionCanonicalInputs(selectedEpisodeWorkflowAction)',
+    'targetEpisodeLabel={selectedEpisodeWorkflowAction?.targetEpisode.displayLabel',
+    'consequences={selectedEpisodeWorkflowAction?.consequences',
     'handleEpisodeContinue(userGuidance)',
     'setEpisodeContinueDialogOpen(false)',
   ]) expect(PAGE_SOURCE).toContain(expected);

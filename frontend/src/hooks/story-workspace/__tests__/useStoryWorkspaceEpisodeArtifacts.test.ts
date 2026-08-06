@@ -23,6 +23,7 @@ import {
 import {
   STORY_WORKSPACE_EPISODE_ACTIONS,
   storyWorkspaceEpisodeStringFieldClassification,
+  storyWorkspaceParseEpisodeActionProjectionV2,
   storyWorkspaceParseEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeArtifactSurface,
   type StoryWorkspaceEpisodeStringFieldClass,
@@ -985,7 +986,64 @@ test('one exhaustive field registry constrains every surface string parser at ru
   ) => visited.set(field, classification);
   storyWorkspaceParseEpisodeArtifactSurface(fullyPopulatedSurface(), { onStringField });
   storyWorkspaceParseEpisodeArtifactSurface(recoverableUnboundSurface(), { onStringField });
-  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(158);
+  const optionBase = {
+    inputRevision: REVISION_1,
+    description: '受控动作说明',
+    displayCommand: '/drama-plan',
+    canonicalInputs: [
+      {
+        sourceType: 'episode_artifact', artifact: 'script',
+        owner: 'episode_artifact_manifest', label: '剧本', availability: 'available',
+        publicRevision: REVISION_1, revisionKind: 'content', requirement: 'required',
+      },
+      {
+        sourceType: 'project_artifact', artifact: 'master_outline',
+        owner: 'canonical_project_files', label: '全剧主线', availability: 'available',
+        publicRevision: null, revisionKind: 'content', requirement: 'context',
+      },
+      {
+        sourceType: 'asset_context', context: 'character_scene_prop_inventory',
+        owner: 'canonical_project_asset_inventory', label: '资产', availability: 'current',
+        publicRevision: null, revisionKind: 'aggregate', requirement: 'context',
+      },
+      {
+        sourceType: 'workflow_fact', fact: 'validation',
+        owner: 'episode_workflow_facts', label: '校验事实', availability: 'current',
+        publicRevision: REVISION_2, revisionKind: 'facts', requirement: 'required',
+      },
+    ],
+    consequences: ['后续产物需要更新'],
+    dispatchState: 'idle',
+  };
+  storyWorkspaceParseEpisodeActionProjectionV2({
+    recommendedActionId: `episode_action_${'a'.repeat(64)}`,
+    actionOptions: [
+      {
+        ...optionBase,
+        actionId: `episode_action_${'a'.repeat(64)}`,
+        action: 'plan_episode',
+        targetEpisode: {
+          opaqueEpisodeId: EPISODE_ID, candidateId: null,
+          displayLabel: 'EP01', relation: 'current',
+        },
+        label: '开始 EP01 分集规划', availability: 'executable',
+        isRecommended: true, canDispatch: true, disabledReason: null,
+      },
+      {
+        ...optionBase,
+        actionId: `episode_action_${'b'.repeat(64)}`,
+        action: 'write_script',
+        targetEpisode: {
+          opaqueEpisodeId: null,
+          candidateId: `episode_candidate_${'c'.repeat(64)}`,
+          displayLabel: 'EP02', relation: 'next',
+        },
+        label: '创作 EP02 剧本', availability: 'preview',
+        isRecommended: false, canDispatch: false, disabledReason: '先完成 EP02 分集规划',
+      },
+    ],
+  }, { onStringField });
+  expect(Object.keys(storyWorkspaceEpisodeStringFieldClassification)).toHaveLength(183);
   expect([...visited.keys()].sort()).toEqual(
     Object.keys(storyWorkspaceEpisodeStringFieldClassification).sort(),
   );

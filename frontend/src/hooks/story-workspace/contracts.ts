@@ -537,6 +537,61 @@ export interface StoryWorkspaceEpisodeWorkflowProjection {
   readonly legacyPartial: boolean;
 }
 
+export type StoryWorkspaceEpisodeActionAvailabilityV2 =
+  | 'executable'
+  | 'preview'
+  | 'blocked';
+export type StoryWorkspaceEpisodeActionDispatchStateV2 =
+  | 'idle'
+  | 'accepted'
+  | 'dispatching'
+  | 'dispatched';
+
+export interface StoryWorkspaceEpisodeActionTargetV2 {
+  readonly opaqueEpisodeId: string | null;
+  readonly candidateId: string | null;
+  readonly displayLabel: string;
+  readonly relation: 'current' | 'next';
+}
+
+export interface StoryWorkspaceEpisodeActionCanonicalInputV2 {
+  readonly sourceType: 'episode_artifact' | 'project_artifact' | 'asset_context' | 'workflow_fact';
+  readonly label: string;
+  readonly availability: string;
+  readonly publicRevision: string | null;
+  readonly revisionKind: 'content' | 'aggregate' | 'input' | 'facts';
+  readonly requirement: 'required' | 'context';
+  readonly [key: string]: unknown;
+}
+
+export interface StoryWorkspaceEpisodeActionOptionV2 {
+  readonly actionId: string;
+  readonly action: StoryWorkspaceEpisodeDispatchAction;
+  readonly inputRevision: string;
+  readonly targetEpisode: StoryWorkspaceEpisodeActionTargetV2;
+  readonly label: string;
+  readonly description: string;
+  readonly displayCommand: string;
+  readonly availability: StoryWorkspaceEpisodeActionAvailabilityV2;
+  readonly isRecommended: boolean;
+  readonly canDispatch: boolean;
+  readonly disabledReason: string | null;
+  readonly canonicalInputs: readonly StoryWorkspaceEpisodeActionCanonicalInputV2[];
+  readonly consequences: readonly string[];
+  readonly dispatchState: StoryWorkspaceEpisodeActionDispatchStateV2;
+}
+
+export interface StoryWorkspaceEpisodeActionProjectionV2 {
+  readonly recommendedActionId: string | null;
+  readonly actionOptions: readonly StoryWorkspaceEpisodeActionOptionV2[];
+}
+
+export interface StoryWorkspaceEpisodeCanonicalInputV2 {
+  readonly label: string;
+  readonly availability: string;
+  readonly revision: string | null;
+}
+
 export interface StoryWorkspaceEpisodeBindingRecoveryRequest {
   readonly idempotencyKey: string;
 }
@@ -544,6 +599,12 @@ export interface StoryWorkspaceEpisodeBindingRecoveryRequest {
 export interface StoryWorkspaceEpisodeActionContinueRequest {
   readonly episodeId: string;
   readonly action: StoryWorkspaceEpisodeDispatchAction;
+  readonly idempotencyKey: string;
+  readonly userGuidance: string | null;
+}
+
+export interface StoryWorkspaceEpisodeActionContinueRequestV2 {
+  readonly actionId: string;
   readonly idempotencyKey: string;
   readonly userGuidance: string | null;
 }
@@ -837,6 +898,7 @@ export interface StoryWorkspaceEpisodeArtifactSurface {
   readonly narrative: StoryWorkspaceEpisodeNarrativeProjection | null;
   readonly auxiliary: StoryWorkspaceEpisodeAuxiliaryProjection | null;
   readonly workflow: StoryWorkspaceEpisodeWorkflowProjection | null;
+  readonly actionProjection?: StoryWorkspaceEpisodeActionProjectionV2 | null;
 }
 
 export type StoryWorkspaceEpisodeStringFieldClass =
@@ -859,6 +921,31 @@ export const storyWorkspaceEpisodeStringFieldClassification = {
   'workflow.actionOptions[].action': 'machine_enum_or_pattern',
   'workflow.actionOptions[].label': 'public_text',
   'workflow.actionOptions[].displayCommand': 'public_text',
+  'actionProjection.recommendedActionId': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].actionId': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].action': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].inputRevision': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].targetEpisode.opaqueEpisodeId': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].targetEpisode.candidateId': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].targetEpisode.displayLabel': 'public_text',
+  'actionProjection.actionOptions[].targetEpisode.relation': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].label': 'public_text',
+  'actionProjection.actionOptions[].description': 'public_text',
+  'actionProjection.actionOptions[].displayCommand': 'public_text',
+  'actionProjection.actionOptions[].availability': 'machine_enum_or_pattern',
+  'actionProjection.actionOptions[].disabledReason': 'public_text',
+  'actionProjection.actionOptions[].consequences[]': 'public_text',
+  'actionProjection.actionOptions[].dispatchState': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].sourceType': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].artifact': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].context': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].fact': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].owner': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].label': 'public_text',
+  'actionProjection.canonicalInputs[].availability': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].publicRevision': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].revisionKind': 'machine_enum_or_pattern',
+  'actionProjection.canonicalInputs[].requirement': 'machine_enum_or_pattern',
   'artifacts[].relativeKey': 'canonical_relative_key',
   'artifacts[].availability': 'machine_enum_or_pattern',
   'artifacts[].contentRevision': 'machine_enum_or_pattern',
@@ -1528,6 +1615,325 @@ function storyWorkspaceParseEpisodeWorkflow(
   };
 }
 
+const STORY_WORKSPACE_EPISODE_ACTION_ID = /^episode_action_[0-9a-f]{64}$/;
+const STORY_WORKSPACE_EPISODE_CANDIDATE_ID = /^episode_candidate_[0-9a-f]{64}$/;
+const STORY_WORKSPACE_EPISODE_DISPLAY_LABEL = /^EP[0-9]{2}$/;
+
+function storyWorkspaceParseEpisodeActionCanonicalInputV2(
+  value: unknown,
+  index: number,
+): StoryWorkspaceEpisodeActionCanonicalInputV2 {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`actionProjection.canonicalInputs[${index}] must be an object.`);
+  }
+  const base = value as StoryWorkspaceEpisodeWireRecord;
+  const sourceType = storyWorkspaceEpisodeEnum(
+    base.sourceType,
+    `actionProjection.canonicalInputs[${index}].sourceType`,
+    ['episode_artifact', 'project_artifact', 'asset_context', 'workflow_fact'],
+  );
+  const allowedKeys = {
+    episode_artifact: [
+      'sourceType', 'artifact', 'owner', 'label', 'availability',
+      'publicRevision', 'revisionKind', 'requirement',
+    ],
+    project_artifact: [
+      'sourceType', 'artifact', 'owner', 'label', 'availability',
+      'publicRevision', 'revisionKind', 'requirement',
+    ],
+    asset_context: [
+      'sourceType', 'context', 'owner', 'label', 'availability',
+      'publicRevision', 'revisionKind', 'requirement',
+    ],
+    workflow_fact: [
+      'sourceType', 'fact', 'owner', 'label', 'availability',
+      'publicRevision', 'revisionKind', 'requirement',
+    ],
+  } as const;
+  const record = storyWorkspaceEpisodeRecord(
+    value,
+    `actionProjection.canonicalInputs[${index}]`,
+    allowedKeys[sourceType],
+  );
+  let identityFields: Readonly<Record<string, string>>;
+  if (sourceType === 'episode_artifact') {
+    identityFields = {
+      artifact: storyWorkspaceEpisodeEnum(
+        record.artifact,
+        `actionProjection.canonicalInputs[${index}].artifact`,
+        ['episode_outline', 'script', 'review_report', 'storyboard', 'prompts', 'renders'],
+      ),
+      owner: storyWorkspaceEpisodeEnum(
+        record.owner,
+        `actionProjection.canonicalInputs[${index}].owner`,
+        ['episode_artifact_manifest'],
+      ),
+    };
+  } else if (sourceType === 'project_artifact') {
+    identityFields = {
+      artifact: storyWorkspaceEpisodeEnum(
+        record.artifact,
+        `actionProjection.canonicalInputs[${index}].artifact`,
+        ['project_definition', 'master_outline', 'worldbuilding', 'character_arc_ledger'],
+      ),
+      owner: storyWorkspaceEpisodeEnum(
+        record.owner,
+        `actionProjection.canonicalInputs[${index}].owner`,
+        ['canonical_project_files'],
+      ),
+    };
+  } else if (sourceType === 'asset_context') {
+    identityFields = {
+      context: storyWorkspaceEpisodeEnum(
+        record.context,
+        `actionProjection.canonicalInputs[${index}].context`,
+        ['character_scene_prop_inventory'],
+      ),
+      owner: storyWorkspaceEpisodeEnum(
+        record.owner,
+        `actionProjection.canonicalInputs[${index}].owner`,
+        ['canonical_project_asset_inventory'],
+      ),
+    };
+  } else {
+    identityFields = {
+      fact: storyWorkspaceEpisodeEnum(
+        record.fact,
+        `actionProjection.canonicalInputs[${index}].fact`,
+        ['refresh_assets_completion', 'full_chain_review', 'validation', 'prior_episode_validation'],
+      ),
+      owner: storyWorkspaceEpisodeEnum(
+        record.owner,
+        `actionProjection.canonicalInputs[${index}].owner`,
+        ['episode_workflow_facts'],
+      ),
+    };
+  }
+  const publicRevision = record.publicRevision === null
+    ? null
+    : storyWorkspaceEpisodeString(
+      record.publicRevision,
+      `actionProjection.canonicalInputs[${index}].publicRevision`,
+      { pattern: STORY_WORKSPACE_EPISODE_REVISION },
+    );
+  return {
+    ...record,
+    ...identityFields,
+    sourceType,
+    label: storyWorkspaceEpisodePublicText(
+      record.label,
+      `actionProjection.canonicalInputs[${index}].label`,
+      { min: 1, max: 120 },
+    ),
+    availability: storyWorkspaceEpisodeEnum(
+      record.availability,
+      `actionProjection.canonicalInputs[${index}].availability`,
+      [
+        'available', 'not_generated', 'invalid', 'unavailable',
+        'current', 'stale', 'missing',
+      ],
+    ),
+    publicRevision,
+    revisionKind: storyWorkspaceEpisodeEnum(
+      record.revisionKind,
+      `actionProjection.canonicalInputs[${index}].revisionKind`,
+      ['content', 'aggregate', 'input', 'facts'],
+    ),
+    requirement: storyWorkspaceEpisodeEnum(
+      record.requirement,
+      `actionProjection.canonicalInputs[${index}].requirement`,
+      ['required', 'context'],
+    ),
+  };
+}
+
+export function storyWorkspaceParseEpisodeActionProjectionV2(
+  value: unknown,
+  options: {
+    readonly onStringField?: (
+      field: string,
+      classification: StoryWorkspaceEpisodeStringFieldClass,
+    ) => void;
+  } = {},
+): StoryWorkspaceEpisodeActionProjectionV2 {
+  const visitor = options.onStringField;
+  if (visitor !== undefined) storyWorkspaceEpisodeStringFieldVisitors.push(visitor);
+  try {
+  const record = storyWorkspaceEpisodeRecord(value, 'actionProjection', [
+    'recommendedActionId', 'actionOptions',
+  ]);
+  const recommendedActionId = record.recommendedActionId === null
+    ? null
+    : storyWorkspaceEpisodeString(
+      record.recommendedActionId,
+      'actionProjection.recommendedActionId',
+      { pattern: STORY_WORKSPACE_EPISODE_ACTION_ID },
+    );
+  const dispatchActions = STORY_WORKSPACE_EPISODE_ACTIONS.filter(
+    (action): action is StoryWorkspaceEpisodeDispatchAction => action !== 'none_in_scope',
+  );
+  const actionOptions = storyWorkspaceEpisodeArray(
+    record.actionOptions,
+    'actionProjection.actionOptions',
+    (item, index): StoryWorkspaceEpisodeActionOptionV2 => {
+      const label = `actionProjection.actionOptions[${index}]`;
+      const option = storyWorkspaceEpisodeRecord(item, label, [
+        'actionId', 'action', 'inputRevision', 'targetEpisode', 'label',
+        'description', 'displayCommand', 'availability', 'isRecommended',
+        'canDispatch', 'disabledReason', 'canonicalInputs', 'consequences',
+        'dispatchState',
+      ]);
+      const targetRecord = storyWorkspaceEpisodeRecord(
+        option.targetEpisode,
+        `${label}.targetEpisode`,
+        ['opaqueEpisodeId', 'candidateId', 'displayLabel', 'relation'],
+      );
+      const opaqueEpisodeId = targetRecord.opaqueEpisodeId === null
+        ? null
+        : storyWorkspaceEpisodeString(
+          targetRecord.opaqueEpisodeId,
+          `${label}.targetEpisode.opaqueEpisodeId`,
+          { pattern: STORY_WORKSPACE_EPISODE_HEX_ID },
+        );
+      const candidateId = targetRecord.candidateId === null
+        ? null
+        : storyWorkspaceEpisodeString(
+          targetRecord.candidateId,
+          `${label}.targetEpisode.candidateId`,
+          { pattern: STORY_WORKSPACE_EPISODE_CANDIDATE_ID },
+        );
+      const relation = storyWorkspaceEpisodeEnum(
+        targetRecord.relation,
+        `${label}.targetEpisode.relation`,
+        ['current', 'next'],
+      );
+      if ((opaqueEpisodeId === null) === (candidateId === null)) {
+        throw new Error(`${label}.targetEpisode requires one opaque identity.`);
+      }
+      if (relation === 'current' && opaqueEpisodeId === null) {
+        throw new Error(`${label}.targetEpisode current identity must be bound.`);
+      }
+      const availability = storyWorkspaceEpisodeEnum(
+        option.availability,
+        `${label}.availability`,
+        ['executable', 'preview', 'blocked'],
+      );
+      const canDispatch = storyWorkspaceEpisodeBoolean(option.canDispatch, `${label}.canDispatch`);
+      const disabledReason = option.disabledReason === null
+        ? null
+        : storyWorkspaceEpisodePublicText(option.disabledReason, `${label}.disabledReason`, {
+          min: 1, max: 300,
+        });
+      const dispatchState = storyWorkspaceEpisodeEnum(
+        option.dispatchState,
+        `${label}.dispatchState`,
+        ['idle', 'accepted', 'dispatching', 'dispatched'],
+      );
+      if (availability !== 'executable' && (canDispatch || dispatchState !== 'idle')) {
+        throw new Error(`${label} preview/blocked state cannot dispatch.`);
+      }
+      if (canDispatch && (disabledReason !== null || dispatchState !== 'idle')) {
+        throw new Error(`${label} executable state is inconsistent.`);
+      }
+      if (!canDispatch && disabledReason === null) {
+        throw new Error(`${label} non-dispatchable option requires a reason.`);
+      }
+      const displayCommand = storyWorkspaceEpisodeString(
+        option.displayCommand,
+        `${label}.displayCommand`,
+        { min: 1, max: 160, pathAudit: false },
+      );
+      if (STORY_WORKSPACE_EPISODE_INTERNAL_WORKFLOW_MARKER.test(displayCommand)) {
+        throw new Error(`${label}.displayCommand contains an internal marker.`);
+      }
+      return {
+        actionId: storyWorkspaceEpisodeString(option.actionId, `${label}.actionId`, {
+          pattern: STORY_WORKSPACE_EPISODE_ACTION_ID,
+        }),
+        action: storyWorkspaceEpisodeEnum(option.action, `${label}.action`, dispatchActions),
+        inputRevision: storyWorkspaceEpisodeString(
+          option.inputRevision,
+          `${label}.inputRevision`,
+          { pattern: STORY_WORKSPACE_EPISODE_REVISION },
+        ),
+        targetEpisode: {
+          opaqueEpisodeId,
+          candidateId,
+          displayLabel: storyWorkspaceEpisodeString(
+            targetRecord.displayLabel,
+            `${label}.targetEpisode.displayLabel`,
+            { pattern: STORY_WORKSPACE_EPISODE_DISPLAY_LABEL },
+          ),
+          relation,
+        },
+        label: storyWorkspaceEpisodePublicText(option.label, `${label}.label`, {
+          min: 1, max: 160,
+        }),
+        description: storyWorkspaceEpisodePublicText(
+          option.description,
+          `${label}.description`,
+          { min: 1, max: 500 },
+        ),
+        displayCommand,
+        availability,
+        isRecommended: storyWorkspaceEpisodeBoolean(
+          option.isRecommended,
+          `${label}.isRecommended`,
+        ),
+        canDispatch,
+        disabledReason,
+        canonicalInputs: storyWorkspaceEpisodeArray(
+          option.canonicalInputs,
+          `${label}.canonicalInputs`,
+          storyWorkspaceParseEpisodeActionCanonicalInputV2,
+          16,
+        ),
+        consequences: storyWorkspaceEpisodeArray(
+          option.consequences,
+          `${label}.consequences`,
+          (consequence, consequenceIndex) => storyWorkspaceEpisodePublicText(
+            consequence,
+            `${label}.consequences[${consequenceIndex}]`,
+            { min: 1, max: 200 },
+          ),
+          8,
+        ),
+        dispatchState,
+      };
+    },
+    9,
+  );
+  storyWorkspaceEpisodeUnique(
+    actionOptions.map((option) => option.actionId),
+    'actionProjection.actionOptions.actionId',
+  );
+  if (actionOptions.length === 0) {
+    if (recommendedActionId !== null) {
+      throw new Error('empty actionProjection cannot recommend an action.');
+    }
+  } else if (
+    recommendedActionId !== actionOptions[0]?.actionId
+    || actionOptions.filter((option) => option.isRecommended).length !== 1
+    || !actionOptions[0]?.isRecommended
+  ) {
+    throw new Error('actionProjection recommendation is inconsistent.');
+  }
+    return { recommendedActionId, actionOptions };
+  } finally {
+    if (visitor !== undefined) storyWorkspaceEpisodeStringFieldVisitors.pop();
+  }
+}
+
+export function storyWorkspaceEpisodeOptionCanonicalInputs(
+  option: StoryWorkspaceEpisodeActionOptionV2,
+): readonly StoryWorkspaceEpisodeCanonicalInputV2[] {
+  return option.canonicalInputs.map((input) => ({
+    label: input.label,
+    availability: input.availability,
+    revision: input.publicRevision,
+  }));
+}
+
 const STORY_WORKSPACE_EPISODE_ARTIFACT_RULES = {
   'episode-outline.md': ['plan_episode', ['episode_overview', 'storyline_navigator', 'narrative_workbench']],
   'script.md': ['write_script', ['narrative_workbench', 'shot_inspector']],
@@ -2113,14 +2519,19 @@ function storyWorkspaceEpisodeAssertLinks(surface: StoryWorkspaceEpisodeArtifact
 function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   value: unknown,
 ): StoryWorkspaceEpisodeArtifactSurface {
-  const compatibleValue = typeof value === 'object'
-    && value !== null
-    && !Array.isArray(value)
-    && !Object.prototype.hasOwnProperty.call(value, 'documents')
-    ? { ...(value as StoryWorkspaceEpisodeWireRecord), documents: [] }
-    : value;
+  let compatibleValue = value;
+  if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+    const compatibleRecord = { ...(value as StoryWorkspaceEpisodeWireRecord) };
+    if (!Object.prototype.hasOwnProperty.call(compatibleRecord, 'documents')) {
+      compatibleRecord.documents = [];
+    }
+    if (!Object.prototype.hasOwnProperty.call(compatibleRecord, 'actionProjection')) {
+      compatibleRecord.actionProjection = null;
+    }
+    compatibleValue = compatibleRecord;
+  }
   const record = storyWorkspaceEpisodeRecord(compatibleValue, 'Episode artifact surface', [
-    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'documents', 'narrative', 'auxiliary', 'workflow',
+    'runId', 'opaqueEpisodeId', 'manifestRevision', 'etag', 'bindingAvailability', 'bindingRecovery', 'artifacts', 'documents', 'narrative', 'auxiliary', 'workflow', 'actionProjection',
   ]);
   const runId = storyWorkspaceEpisodeString(record.runId, 'surface.runId', { pattern: STORY_WORKSPACE_EPISODE_RUN_ID });
   const bindingAvailability = storyWorkspaceEpisodeEnum(
@@ -2148,6 +2559,9 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
   const narrative = record.narrative === null ? null : storyWorkspaceParseEpisodeNarrative(record.narrative);
   const auxiliary = record.auxiliary === null ? null : storyWorkspaceParseEpisodeAuxiliary(record.auxiliary);
   const workflow = record.workflow === null ? null : storyWorkspaceParseEpisodeWorkflow(record.workflow);
+  const actionProjection = record.actionProjection === null
+    ? null
+    : storyWorkspaceParseEpisodeActionProjectionV2(record.actionProjection);
   if (bindingAvailability === 'bound') {
     if (opaqueEpisodeId === null || manifestRevision === null || etag === null || workflow === null) {
       throw new Error('bound Episode artifact surface requires identity, revisions, and workflow.');
@@ -2176,6 +2590,7 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     || narrative !== null
     || auxiliary !== null
     || workflow !== null
+    || actionProjection !== null
   ) throw new Error('unbound Episode artifact surface cannot contain artifacts.');
   const surface: StoryWorkspaceEpisodeArtifactSurface = {
     runId,
@@ -2189,6 +2604,7 @@ function storyWorkspaceParseEpisodeArtifactSurfaceInternal(
     narrative,
     auxiliary,
     workflow,
+    actionProjection,
   };
   storyWorkspaceEpisodeAssertLinks(surface);
   return surface;

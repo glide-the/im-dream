@@ -1,0 +1,12 @@
+U7 Red command (from frontend/):
+npx playwright test src/hooks/story-workspace/__tests__/StoryWorkspaceEpisodeActionV2.test.ts --reporter=line --workers=1
+
+Result: process exit 1 before tests.
+
+Relevant failure:
+SyntaxError: The requested module '../contracts' does not provide an export
+named 'storyWorkspaceEpisodeOptionCanonicalInputs'
+
+The same seam also imports the absent OptionV2 projection parser and expects a
+Continue request that contains only opaque actionId. This proves the frontend
+adapter/confirmation contract did not exist before U7 production changes.
