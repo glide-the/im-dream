@@ -98,7 +98,7 @@
 | EP02 validation current | 开始/创作 EP03 | 同规则 | 仅 current + next，不保留 previous |
 | 最后一集 validation current | 准备该集渲染与配音指引 | 更新该集详细分镜 | render 完成后 options 空 |
 
-EP01/EP02/EP03 测试使用不同 opaque UID、label 与 actionId；actionId 不依赖数组位置。真实 run 的项目计划当前只提供 EP01，因此真实证据诚实显示 7 个 EP01 动作，不伪造 EP02；EP02/03 由后端确定性测试和浏览器 fixture 覆盖。
+EP01/EP02/EP03 测试使用不同 opaque UID、label 与 actionId；actionId 不依赖数组位置。真实 run 的当前 action projection 尚未进入 next horizon，因此真实证据只显示 7 个 EP01 动作；这不能反推项目总集数，也不应伪造 EP02。EP02/03 由后端确定性测试和浏览器 fixture 覆盖。
 
 ## 5. TDD 与评审
 
@@ -190,7 +190,7 @@ U1—U9 的失败输出均已随相应提交保存在 `docs/design/story-workspa
 | 设计项 | 结果 | 备注 |
 | --- | --- | --- |
 | server truth ownership | 已实现 | registry + manifest + facts → projection |
-| EP01/02/03 稳定身份 | 已实现并测试 | 真实 run 当前只有 EP01 |
+| EP01/02/03 稳定身份 | 已实现并测试 | 真实 projection 当前只投影 EP01；未从 UI 反推项目总集数 |
 | current storyboard update / Prompt | 已实现 | 真实状态当前为 disabled preview |
 | next Episode plan/script | 已实现并测试 | 未在真实项目伪造下一集 |
 | 两直接项 + overflow(N) | 已实现 | 真实 2+5 |
