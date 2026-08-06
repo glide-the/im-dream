@@ -16,6 +16,7 @@ import {
   storyWorkspaceReadDreamAgentEventStream,
   storyWorkspaceParseDreamAgentEvent,
   storyWorkspaceParseDreamAgentSnapshot,
+  storyWorkspaceReconcileDreamAgentPendingToolConfirmations,
   storyWorkspaceReduceDreamAgentEvents,
 } from '../useStoryWorkspaceDreamAgent';
 
@@ -30,6 +31,7 @@ const SNAPSHOT = {
   canSend: false,
   sendBlockReason: 'continuing',
   messages: [{ id: 'm1', role: 'assistant', text: '已保存的人物。', truncated: false, createdAt: '2026-08-05T00:00:00Z' }],
+  pendingToolConfirmations: [],
   snapshotAt: '2026-08-05T00:00:01Z',
 };
 
@@ -89,6 +91,21 @@ test('snapshot is a safe, complete first render before any increment is reduced'
   const model = storyWorkspaceReduceDreamAgentEvents({ snapshot, streamText: '', streamTurnId: null, seenCursors: [] }, []);
   expect(model.snapshot.messages).toEqual(snapshot.messages);
   expect(model.streamText).toBe('');
+});
+
+test('a concurrent confirmation for a newer turn overlays an older in-flight snapshot', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot(SNAPSHOT);
+  const requested = storyWorkspaceParseDreamAgentEvent(
+    'tool_confirmation_requested',
+    '{"turnId":"turn-2","confirmation":{"toolCallId":"tool-turn-2","kind":"approval","toolName":"Write"}}',
+    'turn-2:1',
+  )!;
+
+  expect(storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
+    snapshot,
+    'turn-1',
+    [requested],
+  ).map((item) => item.toolCallId)).toEqual(['tool-turn-2']);
 });
 
 test('snapshot preserves safe text/activity order and drops untrusted extra fields', () => {

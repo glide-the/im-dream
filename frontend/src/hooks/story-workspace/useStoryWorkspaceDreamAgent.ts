@@ -169,6 +169,20 @@ export function storyWorkspaceParseDreamAgentSnapshot(
   if (new Set(messages.map((message) => message.id)).size !== messages.length) {
     throw new Error('Dream Agent response repeats a message id.');
   }
+  if (!Array.isArray(value.pendingToolConfirmations)) {
+    throw new Error('Dream Agent response has invalid pendingToolConfirmations.');
+  }
+  const pendingToolConfirmations: StoryWorkspaceDreamAgentToolConfirmation[] = [];
+  const seenToolCallIds = new Set<string>();
+  for (const candidate of value.pendingToolConfirmations) {
+    const confirmation = storyWorkspaceParseDreamAgentToolConfirmation(candidate);
+    if (!confirmation) {
+      throw new Error('Dream Agent response has invalid pending tool confirmation.');
+    }
+    if (seenToolCallIds.has(confirmation.toolCallId)) continue;
+    seenToolCallIds.add(confirmation.toolCallId);
+    pendingToolConfirmations.push(confirmation);
+  }
   return {
     storyWorkspaceRunId: runId,
     lifecycle: value.lifecycle,
@@ -176,6 +190,7 @@ export function storyWorkspaceParseDreamAgentSnapshot(
     canSend: value.canSend,
     sendBlockReason: block as StoryWorkspaceDreamAgentMessageSnapshot['sendBlockReason'],
     messages,
+    pendingToolConfirmations,
     snapshotAt: storyWorkspaceDreamAgentDate(value.snapshotAt, 'snapshotAt'),
   };
 }
@@ -389,6 +404,52 @@ export interface StoryWorkspaceDreamAgentReducedState {
   readonly shouldReconcile: boolean;
 }
 
+type StoryWorkspaceDreamAgentConfirmationMutation =
+  | Pick<Extract<StoryWorkspaceDreamAgentEvent, { type: 'tool_confirmation_requested' }>, 'type' | 'turnId' | 'confirmation'>
+  | Pick<Extract<StoryWorkspaceDreamAgentEvent, { type: 'tool_confirmation_resolved' }>, 'type' | 'turnId' | 'toolCallId'>;
+
+interface StoryWorkspaceDreamAgentVersionedConfirmationMutation {
+  readonly revision: number;
+  readonly mutation: StoryWorkspaceDreamAgentConfirmationMutation;
+}
+
+/**
+ * Replace the local queue with the REST snapshot, then apply only SSE changes
+ * that arrived after that snapshot request began. This keeps REST authoritative
+ * while preserving lower-latency confirmations and resolutions.
+ */
+export function storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
+  snapshot: StoryWorkspaceDreamAgentMessageSnapshot,
+  previousActiveTurnId: string | null,
+  mutationsAfterRequest: readonly (
+    StoryWorkspaceDreamAgentEvent | StoryWorkspaceDreamAgentConfirmationMutation
+  )[],
+): readonly StoryWorkspaceDreamAgentToolConfirmation[] {
+  let activeTurnId = snapshot.activeTurnId;
+  let mayAdvanceFromSnapshotTurn = previousActiveTurnId !== null
+    && snapshot.activeTurnId === previousActiveTurnId;
+  let pending = [...snapshot.pendingToolConfirmations];
+
+  for (const mutation of mutationsAfterRequest) {
+    if (mutation.type !== 'tool_confirmation_requested'
+      && mutation.type !== 'tool_confirmation_resolved') continue;
+    if (mutation.turnId !== activeTurnId) {
+      if (!mayAdvanceFromSnapshotTurn || mutation.type !== 'tool_confirmation_requested') continue;
+      activeTurnId = mutation.turnId;
+      pending = [];
+      mayAdvanceFromSnapshotTurn = false;
+    }
+    if (mutation.type === 'tool_confirmation_resolved') {
+      pending = pending.filter((item) => item.toolCallId !== mutation.toolCallId);
+      continue;
+    }
+    if (!pending.some((item) => item.toolCallId === mutation.confirmation.toolCallId)) {
+      pending.push(mutation.confirmation);
+    }
+  }
+  return pending;
+}
+
 function storyWorkspaceAppendDreamAgentStreamText(
   content: readonly StoryWorkspaceDreamAgentContent[],
   delta: string,
@@ -438,7 +499,9 @@ export function storyWorkspaceReduceDreamAgentEvents(
   let streamText = state.streamText;
   let streamContent = state.streamContent ?? [];
   let streamTurnId = state.streamTurnId;
-  let pendingToolConfirmations = [...(state.pendingToolConfirmations ?? [])];
+  let pendingToolConfirmations = [
+    ...(state.pendingToolConfirmations ?? state.snapshot.pendingToolConfirmations),
+  ];
   let shouldReconcile = Boolean(state.shouldReconcile);
   const seen = new Set(state.seenCursors);
   for (const event of events) {
@@ -638,13 +701,22 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const [readStreamTurnId, setReadStreamTurnId] = useState<string | null>(null);
   const inFlight = useRef(false);
   const toolConfirmationInFlight = useRef(false);
+  const activeTurnIdRef = useRef<string | null>(null);
+  const confirmationMutationRevisionRef = useRef(0);
+  const confirmationMutationsRef = useRef<StoryWorkspaceDreamAgentVersionedConfirmationMutation[]>([]);
   const refresh = useCallback(() => setReload((value) => value + 1), []);
 
   useEffect(() => {
     if (!runId) {
       setSnapshot(null); setStreamText(''); setStreamContent([]); setStreamTurnId(null); setPendingToolConfirmations([]); setIsLoading(false);
+      activeTurnIdRef.current = null;
+      confirmationMutationRevisionRef.current = 0;
+      confirmationMutationsRef.current = [];
       return undefined;
     }
+    activeTurnIdRef.current = null;
+    confirmationMutationRevisionRef.current = 0;
+    confirmationMutationsRef.current = [];
     let active = true;
     let streamController: AbortController | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -657,16 +729,38 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     const seenCursors = new Set<string>();
     const controller = new AbortController();
     const reconcile = async () => {
+      const previousActiveTurnId = latestTurnId ?? latestSnapshot?.activeTurnId ?? null;
+      const mutationRevisionAtRequest = confirmationMutationRevisionRef.current;
       const next = await storyWorkspaceFetchDreamAgentSnapshot(runId, { signal: controller.signal });
       if (!active) return null;
-      if (latestTurnId && next.activeTurnId && next.activeTurnId !== latestTurnId) {
+      const mutationsAfterRequest = confirmationMutationsRef.current
+        .filter((entry) => entry.revision > mutationRevisionAtRequest)
+        .map((entry) => entry.mutation);
+      const snapshotReplacedTurn = previousActiveTurnId !== null
+        && next.activeTurnId !== previousActiveTurnId;
+      if (snapshotReplacedTurn) {
         latestCursor = null;
         seenCursors.clear();
+        setStreamText('');
         setStreamContent([]);
-        setPendingToolConfirmations([]);
+        setStreamTurnId(null);
       }
+      const concurrentNextTurn = !snapshotReplacedTurn
+        ? mutationsAfterRequest.find((mutation) => (
+          mutation.type === 'tool_confirmation_requested'
+          && mutation.turnId !== next.activeTurnId
+        ))?.turnId ?? null
+        : null;
+      latestTurnId = concurrentNextTurn ?? next.activeTurnId;
+      activeTurnIdRef.current = latestTurnId;
       latestSnapshot = next;
-      setSnapshot(next); setError(null);
+      setSnapshot(next);
+      setPendingToolConfirmations(storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
+        next,
+        previousActiveTurnId,
+        mutationsAfterRequest,
+      ));
+      setError(null);
       return next;
     };
     const reconcileTerminal = async () => {
@@ -753,17 +847,31 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       }
       if (parsed.type === 'tool_confirmation_requested') {
         if (seenCursors.has(parsed.cursor)) return;
-        seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
+        seenCursors.add(parsed.cursor); latestCursor = parsed.cursor;
+        const replacedTurn = latestTurnId !== null && latestTurnId !== parsed.turnId;
+        latestTurnId = parsed.turnId;
+        activeTurnIdRef.current = parsed.turnId;
+        confirmationMutationRevisionRef.current += 1;
+        confirmationMutationsRef.current.push({
+          revision: confirmationMutationRevisionRef.current,
+          mutation: parsed,
+        });
         setPendingToolConfirmations((current) => (
-          current.some((item) => item.toolCallId === parsed.confirmation.toolCallId)
+          !replacedTurn && current.some((item) => item.toolCallId === parsed.confirmation.toolCallId)
             ? current
-            : [...current, parsed.confirmation]
+            : [...(replacedTurn ? [] : current), parsed.confirmation]
         ));
         return;
       }
       if (parsed.type === 'tool_confirmation_resolved') {
         if (seenCursors.has(parsed.cursor)) return;
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
+        activeTurnIdRef.current = parsed.turnId;
+        confirmationMutationRevisionRef.current += 1;
+        confirmationMutationsRef.current.push({
+          revision: confirmationMutationRevisionRef.current,
+          mutation: parsed,
+        });
         setPendingToolConfirmations((current) => current.filter((item) => item.toolCallId !== parsed.toolCallId));
         return;
       }
@@ -853,6 +961,17 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         ...(reason ? { reason } : {}),
         ...(answers ? { answers } : {}),
       });
+      if (activeTurnIdRef.current) {
+        confirmationMutationRevisionRef.current += 1;
+        confirmationMutationsRef.current.push({
+          revision: confirmationMutationRevisionRef.current,
+          mutation: {
+            type: 'tool_confirmation_resolved',
+            turnId: activeTurnIdRef.current,
+            toolCallId: pendingToolConfirmation.toolCallId,
+          },
+        });
+      }
       setPendingToolConfirmations((current) => current.filter(
         (item) => item.toolCallId !== pendingToolConfirmation.toolCallId,
       ));

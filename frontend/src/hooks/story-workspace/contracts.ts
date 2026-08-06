@@ -280,6 +280,7 @@ export interface StoryWorkspaceDreamAgentMessageSnapshot {
   readonly canSend: boolean;
   readonly sendBlockReason: 'generating' | 'waiting_confirmation' | 'confirming' | 'continuing' | 'busy' | null;
   readonly messages: readonly StoryWorkspaceDreamAgentMessage[];
+  readonly pendingToolConfirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
   readonly snapshotAt: string;
 }
 

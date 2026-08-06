@@ -11,6 +11,7 @@ import {
   storyWorkspaceDreamAgentToolConfirmationEndpoint,
   storyWorkspaceParseDreamAgentEvent,
   storyWorkspaceReduceDreamAgentEvents,
+  storyWorkspaceReconcileDreamAgentPendingToolConfirmations,
   storyWorkspaceSubmitDreamAgentToolConfirmation,
 } from '../useStoryWorkspaceDreamAgent';
 import { storyWorkspaceParseDreamAgentSnapshot } from '../useStoryWorkspaceDreamAgent';
@@ -24,7 +25,110 @@ const SNAPSHOT = storyWorkspaceParseDreamAgentSnapshot({
   canSend: false,
   sendBlockReason: 'busy',
   messages: [],
+  pendingToolConfirmations: [],
   snapshotAt: '2026-08-05T12:00:00Z',
+});
+
+test('hydrates an ordered safe confirmation queue from the durable snapshot projection', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot({
+    ...SNAPSHOT,
+    pendingToolConfirmations: [{
+      toolCallId: 'tool-write',
+      kind: 'approval',
+      toolName: 'Write',
+      title: '写入剧本文件',
+      input: { file_path: '/Users/private/story/script.md', token: 'secret' },
+    }, {
+      toolCallId: 'tool-question',
+      kind: 'ask_user',
+      toolName: 'AskUserQuestion',
+      questions: [{
+        id: 'q0',
+        question: '采用哪一种视角？',
+        type: 'radio',
+        required: true,
+        options: [{ label: '第一人称', value: 'first' }],
+      }],
+    }],
+  });
+
+  expect(snapshot.pendingToolConfirmations.map((item) => item.toolCallId)).toEqual([
+    'tool-write',
+    'tool-question',
+  ]);
+  expect(snapshot.pendingToolConfirmations[0]).toEqual({
+    toolCallId: 'tool-write',
+    kind: 'approval',
+    toolName: 'Write',
+    title: '写入剧本文件',
+  });
+  const hydrated = storyWorkspaceReduceDreamAgentEvents({
+    snapshot,
+    streamText: '',
+    streamTurnId: null,
+    seenCursors: [],
+  }, []);
+  expect(hydrated.pendingToolConfirmations.map((item) => item.toolCallId)).toEqual([
+    'tool-write',
+    'tool-question',
+  ]);
+  expect(JSON.stringify(snapshot.pendingToolConfirmations)).not.toContain('/Users/private');
+  expect(JSON.stringify(snapshot.pendingToolConfirmations)).not.toContain('secret');
+});
+
+test('snapshot reconciliation replaces stale local state, then overlays only later SSE mutations', () => {
+  const snapshot = storyWorkspaceParseDreamAgentSnapshot({
+    ...SNAPSHOT,
+    pendingToolConfirmations: [{
+      toolCallId: 'tool-a', kind: 'approval', toolName: 'Write', title: '写入文件',
+    }, {
+      toolCallId: 'tool-b', kind: 'approval', toolName: 'Bash', title: '运行创作工具',
+    }],
+  });
+  const afterRequest = [
+    storyWorkspaceParseDreamAgentEvent(
+      'tool_confirmation_resolved',
+      '{"turnId":"turn-1","toolCallId":"tool-a"}',
+      'turn-1:8',
+    )!,
+    storyWorkspaceParseDreamAgentEvent(
+      'tool_confirmation_requested',
+      '{"turnId":"turn-1","confirmation":{"toolCallId":"tool-b","kind":"approval","toolName":"Bash"}}',
+      'turn-1:9',
+    )!,
+    storyWorkspaceParseDreamAgentEvent(
+      'tool_confirmation_requested',
+      '{"turnId":"turn-1","confirmation":{"toolCallId":"tool-c","kind":"approval","toolName":"Write"}}',
+      'turn-1:10',
+    )!,
+  ];
+
+  expect(storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
+    snapshot,
+    'turn-1',
+    afterRequest,
+  ).map((item) => item.toolCallId)).toEqual(['tool-b', 'tool-c']);
+});
+
+test('snapshot turn replacement ignores late replay from the replaced turn', () => {
+  const replacement = storyWorkspaceParseDreamAgentSnapshot({
+    ...SNAPSHOT,
+    activeTurnId: 'turn-2',
+    pendingToolConfirmations: [{
+      toolCallId: 'tool-new', kind: 'approval', toolName: 'Write', title: '写入剧本',
+    }],
+  });
+  const oldReplay = storyWorkspaceParseDreamAgentEvent(
+    'tool_confirmation_requested',
+    '{"turnId":"turn-1","confirmation":{"toolCallId":"tool-old","kind":"approval","toolName":"Write"}}',
+    'turn-1:99',
+  )!;
+
+  expect(storyWorkspaceReconcileDreamAgentPendingToolConfirmations(
+    replacement,
+    'turn-1',
+    [oldReplay],
+  ).map((item) => item.toolCallId)).toEqual(['tool-new']);
 });
 
 test('parses only the allowlisted Dream tool-confirmation projection', () => {
