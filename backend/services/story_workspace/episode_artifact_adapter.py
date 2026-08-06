@@ -137,6 +137,14 @@ class StoryWorkspaceEpisodeArtifactParseError(ValueError):
         super().__init__(f"{artifact} artifact cannot be projected ({reason})")
 
 
+def story_workspace_episode_markdown_body(content: bytes, artifact: str) -> str:
+    """Return a validated Markdown body without exposing YAML frontmatter."""
+
+    if artifact not in {"episode-outline.md", "script.md"}:
+        raise StoryWorkspaceEpisodeArtifactParseError(artifact, "unsupported_document")
+    return _parse_markdown(content, artifact).body
+
+
 @dataclass(frozen=True)
 class _MarkdownDocument:
     metadata: Mapping[str, Any]

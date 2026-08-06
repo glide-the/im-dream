@@ -1976,6 +1976,33 @@ class StoryWorkspaceEpisodeAuxiliaryProjection(_StoryWorkspaceDreamWireModel):
     associations: StoryWorkspaceEpisodeAuxiliaryAssociationDiagnostics
 
 
+class StoryWorkspaceEpisodeArtifactDocument(_StoryWorkspaceDreamWireModel):
+    """Safe Markdown body from one canonical Episode document artifact."""
+
+    relative_key: Literal[
+        "episode-outline.md",
+        "script.md",
+        "review-report.md",
+    ]
+    markdown: str = Field(max_length=1024 * 1024)
+    source_revision: str = Field(
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$",
+    )
+
+    @field_validator("markdown")
+    @classmethod
+    def markdown_is_bounded_non_html_text(cls, value: str) -> str:
+        if re.search(r"<!--[\s\S]*?-->|</?[A-Za-z][^>]*>", value):
+            raise ValueError("artifact Markdown cannot contain raw HTML")
+        if any(
+            ord(character) == 127
+            or (ord(character) < 32 and character not in "\t\n\r")
+            for character in value
+        ):
+            raise ValueError("artifact Markdown cannot contain control characters")
+        return value
+
+
 class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
     """Actor-scoped Episode manifest plus normalized read-only projections."""
 
@@ -1997,6 +2024,10 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
     artifacts: list[StoryWorkspaceEpisodeArtifactManifestEntry] = Field(
         default_factory=list,
         max_length=256,
+    )
+    documents: list[StoryWorkspaceEpisodeArtifactDocument] = Field(
+        default_factory=list,
+        max_length=3,
     )
     narrative: Optional[StoryWorkspaceEpisodeNarrativeProjection] = None
     auxiliary: Optional[StoryWorkspaceEpisodeAuxiliaryProjection] = None
@@ -2029,6 +2060,7 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
             or self.manifest_revision is not None
             or self.etag is not None
             or self.artifacts
+            or self.documents
             or self.narrative is not None
             or self.auxiliary is not None
             or self.workflow is not None
@@ -2037,6 +2069,19 @@ class StoryWorkspaceEpisodeArtifactSurface(_StoryWorkspaceDreamWireModel):
         relative_keys = [artifact.relative_key for artifact in self.artifacts]
         if len(relative_keys) != len(set(relative_keys)):
             raise ValueError("artifacts must have unique relative_key values")
+        document_keys = [document.relative_key for document in self.documents]
+        if len(document_keys) != len(set(document_keys)):
+            raise ValueError("documents must have unique relative_key values")
+        manifest_by_key = {artifact.relative_key: artifact for artifact in self.artifacts}
+        for document in self.documents:
+            manifest = manifest_by_key.get(document.relative_key)
+            if (
+                manifest is None
+                or manifest.availability
+                is not StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
+                or manifest.content_revision != document.source_revision
+            ):
+                raise ValueError("documents require matching available artifact revisions")
         return self
 
 

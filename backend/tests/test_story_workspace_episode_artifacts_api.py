@@ -262,6 +262,92 @@ class TestStoryWorkspaceEpisodeArtifactService:
             for item in surface.artifacts
         )
 
+    def test_available_markdown_artifacts_project_safe_body_documents(self) -> None:
+        (self.episode / "episode-outline.md").write_text(
+            "---\ntitle: Afternoon Light\nproject: didi-zhengzhou\n---\n"
+            "# Episode Outline\n\n## Story Goals\n- Keep the shop open.\n",
+            encoding="utf-8",
+        )
+        (self.episode / "script.md").write_text(
+            "---\ntitle: Afternoon Light\nepisode: 1\n---\n"
+            "# Script\n\nS01. Shop [scene-shop] - Day - Interior\n\n"
+            "[The owner opens the blinds.]\n",
+            encoding="utf-8",
+        )
+        (self.episode / "review-report.md").write_text(
+            "---\nscope: script\noverall_verdict: APPROVED\n"
+            "reviewed_files:\n  - script.md\n---\n"
+            "# Review Report\n\n## Verdict\n\n| Item | Result |\n"
+            "| --- | --- |\n| Structure | Pass |\n",
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+
+        documents = {item.relative_key: item for item in surface.documents}
+        assert set(documents) == {
+            "episode-outline.md",
+            "script.md",
+            "review-report.md",
+        }
+        assert documents["episode-outline.md"].markdown.startswith("# Episode Outline")
+        assert documents["script.md"].markdown.startswith("# Script")
+        assert "| Structure | Pass |" in documents["review-report.md"].markdown
+        assert "project: didi-zhengzhou" not in surface.model_dump_json()
+        assert str(self.workspace) not in surface.model_dump_json()
+
+    def test_review_creative_slash_labels_are_not_misread_as_absolute_paths(self) -> None:
+        (self.episode / "review-report.md").write_text(
+            "---\nscope: script\noverall_verdict: APPROVED\n"
+            "reviewed_files:\n  - script.md\n---\n"
+            "# Review\n\n## Format\n\n"
+            "| Result | Evidence |\n| --- | --- |\n"
+            "| PASS | Scene/CAM/TRANS/@HOOK are valid. |\n",
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+
+        review_fact = next(
+            item for item in surface.artifacts
+            if item.relative_key == "review-report.md"
+        )
+        assert review_fact.availability is StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
+        assert surface.auxiliary is not None
+        assert surface.auxiliary.review is not None
+        document = next(
+            item for item in surface.documents
+            if item.relative_key == "review-report.md"
+        )
+        assert "Scene/CAM/TRANS/@HOOK" in document.markdown
+
+    @pytest.mark.parametrize(
+        "leaked_path",
+        [
+            "/Users/private/story.md",
+            "path: /etc/passwd",
+            "路径：/home/private/story.md",
+        ],
+    )
+    def test_review_document_still_rejects_actual_absolute_paths(
+        self,
+        leaked_path: str,
+    ) -> None:
+        (self.episode / "review-report.md").write_text(
+            f"# Review\n\n## Finding\n{leaked_path}\n",
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+
+        review_fact = next(
+            item for item in surface.artifacts
+            if item.relative_key == "review-report.md"
+        )
+        assert review_fact.availability is StoryWorkspaceEpisodeArtifactAvailability.INVALID
+        assert surface.documents == []
+        assert leaked_path not in surface.model_dump_json()
+
     def test_manifest_revision_and_etag_change_with_content_fact(self) -> None:
         first = self.read_surface()
         (self.episode / "episode-outline.md").write_text(

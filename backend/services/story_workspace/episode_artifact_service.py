@@ -21,6 +21,7 @@ try:
         STORY_WORKSPACE_EPISODE_YAML_MAX_BYTES,
         StoryWorkspaceEpisodeArtifactAdapter,
         StoryWorkspaceEpisodeArtifactParseError,
+        story_workspace_episode_markdown_body,
     )
     from services.story_workspace.episode_auxiliary_artifact_adapter import (
         STORY_WORKSPACE_EPISODE_AUXILIARY_COLLECTION_MAX_BYTES,
@@ -29,6 +30,7 @@ try:
         STORY_WORKSPACE_EPISODE_AUXILIARY_YAML_MAX_BYTES,
         StoryWorkspaceEpisodeAuxiliaryArtifactAdapter,
         StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        story_workspace_episode_review_markdown_body,
     )
     from services.story_workspace.episode_binding_service import (
         StoryWorkspaceEpisodeBindingContractError,
@@ -37,6 +39,7 @@ try:
     from story_workspace.contracts import (
         StoryWorkspaceEpisodeArtifactAvailability,
         StoryWorkspaceEpisodeArtifactConsumer,
+        StoryWorkspaceEpisodeArtifactDocument,
         StoryWorkspaceEpisodeArtifactManifestEntry,
         StoryWorkspaceEpisodeArtifactSurface,
         StoryWorkspaceEpisodeBindingAvailability,
@@ -51,6 +54,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         STORY_WORKSPACE_EPISODE_YAML_MAX_BYTES,
         StoryWorkspaceEpisodeArtifactAdapter,
         StoryWorkspaceEpisodeArtifactParseError,
+        story_workspace_episode_markdown_body,
     )
     from backend.services.story_workspace.episode_auxiliary_artifact_adapter import (
         STORY_WORKSPACE_EPISODE_AUXILIARY_COLLECTION_MAX_BYTES,
@@ -59,6 +63,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         STORY_WORKSPACE_EPISODE_AUXILIARY_YAML_MAX_BYTES,
         StoryWorkspaceEpisodeAuxiliaryArtifactAdapter,
         StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        story_workspace_episode_review_markdown_body,
     )
     from backend.services.story_workspace.episode_binding_service import (
         StoryWorkspaceEpisodeBindingContractError,
@@ -67,6 +72,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.story_workspace.contracts import (
         StoryWorkspaceEpisodeArtifactAvailability,
         StoryWorkspaceEpisodeArtifactConsumer,
+        StoryWorkspaceEpisodeArtifactDocument,
         StoryWorkspaceEpisodeArtifactManifestEntry,
         StoryWorkspaceEpisodeArtifactSurface,
         StoryWorkspaceEpisodeBindingAvailability,
@@ -995,6 +1001,31 @@ class StoryWorkspaceEpisodeArtifactService:
             invalid,
             review_producer=review_producer,
         )
+        documents: list[StoryWorkspaceEpisodeArtifactDocument] = []
+        for relative_key, fact in (
+            ("episode-outline.md", narrative_inputs["outline"]),
+            ("script.md", narrative_inputs["script"]),
+        ):
+            if fact is None:
+                continue
+            documents.append(
+                StoryWorkspaceEpisodeArtifactDocument(
+                    relativeKey=relative_key,
+                    markdown=story_workspace_episode_markdown_body(
+                        fact.content,
+                        relative_key,
+                    ),
+                    sourceRevision=fact.content_revision,
+                )
+            )
+        if review is not None:
+            documents.append(
+                StoryWorkspaceEpisodeArtifactDocument(
+                    relativeKey="review-report.md",
+                    markdown=story_workspace_episode_review_markdown_body(review.content),
+                    sourceRevision=review.content_revision,
+                )
+            )
         return StoryWorkspaceEpisodeArtifactSurface(
             runId=workflow_run_id,
             opaqueEpisodeId=binding.episode_uid,
@@ -1006,6 +1037,7 @@ class StoryWorkspaceEpisodeArtifactService:
                 canDispatch=False,
             ),
             artifacts=artifacts,
+            documents=documents,
             narrative=narrative,
             auxiliary=auxiliary,
         )

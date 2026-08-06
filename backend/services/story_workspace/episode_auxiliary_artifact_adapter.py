@@ -73,8 +73,8 @@ _CANONICAL_EPISODE_ROOT_RE = re.compile(
 )
 _RENDERER_IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _ABSOLUTE_PATH_RE = re.compile(
-    r"(?i)(?:"
-    r"(?<![A-Za-z0-9:/])/(?!/)(?:[A-Za-z0-9._~-]+/)+[^\s`]+|"
+    r"(?im)(?:"
+    r"(?:^|(?<=[\s('\"`=:：]))/(?!/)(?:[A-Za-z0-9._~-]+/)+[^\s`]+|"
     r"(?<![A-Za-z0-9])[A-Z]:[\\/][^\s`]+|"
     r"(?<![A-Za-z0-9])\\\\[^\\\s]+\\[^\s`]+|"
     r"(?<![A-Za-z0-9])(?:~|\$HOME|\$\{HOME\}|"
@@ -160,6 +160,19 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactParseError(ValueError):
         self.artifact = artifact
         self.reason = reason
         super().__init__(f"{artifact} artifact cannot be projected ({reason})")
+
+
+def story_workspace_episode_review_markdown_body(content: bytes) -> str:
+    """Return the validated Review body without path-bearing frontmatter."""
+
+    artifact = "review-report.md"
+    body = _parse_markdown(content, artifact).body
+    return _bounded_text(
+        body,
+        STORY_WORKSPACE_EPISODE_AUXILIARY_MARKDOWN_MAX_BYTES,
+        artifact,
+        empty_allowed=True,
+    )
 
 
 @dataclass(frozen=True)
