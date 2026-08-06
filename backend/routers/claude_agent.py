@@ -913,11 +913,12 @@ async def claude_agent_tool_confirm(
     awaiting approval in its ``on_tool_confirmation_request`` callback.
     ``body.thread_id`` must be the ``thread_id`` of the active conversation.
     """
-    del current_user
-
     session_id = body.thread_id
     if not session_id:
         raise HTTPException(status_code=400, detail="thread_id is required")
+    user_id = current_user["user_id"]
+    if database.get_chat_thread(session_id, user_id) is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
     resolved = claude_agent_thread_factory.confirm_tool(
         session_id=session_id,
         tool_call_id=body.tool_call_id,
@@ -927,7 +928,10 @@ async def claude_agent_tool_confirm(
     )
     if not resolved:
         raise HTTPException(
-            status_code=404,
-            detail=f"No pending confirmation for tool_call_id={body.tool_call_id}",
+            status_code=409,
+            detail={
+                "code": "TOOL_CONFIRMATION_NOT_PENDING",
+                "tool_call_id": body.tool_call_id,
+            },
         )
     return {"ok": True, "approved": body.approved}

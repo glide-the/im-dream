@@ -676,16 +676,22 @@ function ChatViewContent({
     };
   }, [activeThreadId]);
 
-  const handleReconnectComplete = useCallback(async () => {
-    if (!activeThreadId) return;
-    const snapshot = await fetchThreadMessages(activeThreadId);
+  const activeThreadIdRef = useRef(activeThreadId);
+  activeThreadIdRef.current = activeThreadId;
+
+  const handleReconnectComplete = useCallback(async (): Promise<UIMessage[] | undefined> => {
+    if (!activeThreadId) return undefined;
+    const requestedThreadId = activeThreadId;
+    const snapshot = await fetchThreadMessages(requestedThreadId);
+    if (activeThreadIdRef.current !== requestedThreadId) return undefined;
     setThreadMessages(snapshot.messages);
     setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
     setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
+    return snapshot.messages;
   }, [activeThreadId]);
 
   const notifyReconnectComplete = useCallback(() => {
-    void handleReconnectComplete();
+    return handleReconnectComplete();
   }, [handleReconnectComplete]);
 
   const queuePromptForThread = useCallback((

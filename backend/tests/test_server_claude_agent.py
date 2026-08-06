@@ -77,6 +77,15 @@ if "claude_agent_sdk" not in sys.modules:
     class McpStdioServerConfig(_SdkStub):
         pass
 
+    class PermissionResult(_SdkStub):
+        pass
+
+    class PermissionResultAllow(_SdkStub):
+        pass
+
+    class PermissionResultDeny(_SdkStub):
+        pass
+
     class ResultMessage(_SdkStub):
         pass
 
@@ -84,6 +93,9 @@ if "claude_agent_sdk" not in sys.modules:
         pass
 
     class SystemMessage(_SdkStub):
+        pass
+
+    class ToolPermissionContext(_SdkStub):
         pass
 
     class UserMessage(_SdkStub):
@@ -97,9 +109,13 @@ if "claude_agent_sdk" not in sys.modules:
         HookMatcher,
         McpServerConfig,
         McpStdioServerConfig,
+        PermissionResult,
+        PermissionResultAllow,
+        PermissionResultDeny,
         ResultMessage,
         StreamEvent,
         SystemMessage,
+        ToolPermissionContext,
         UserMessage,
     ]:
         setattr(sdk_types, _cls.__name__, _cls)
@@ -508,6 +524,124 @@ class TestClaudeAgentRouteStop(unittest.TestCase):
                 "lifecycle": "idle",
             },
         )
+
+
+@_skip_if_no_server
+class TestClaudeAgentToolConfirmationRoute(unittest.TestCase):
+    """Tool confirmation must distinguish stale state from thread ownership."""
+
+    def test_tool_confirm_rejects_an_unowned_thread_before_runtime_dispatch(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ToolConfirmRequestBody(
+            thread_id="thread-foreign",
+            tool_call_id="call-foreign",
+            approved=True,
+        )
+
+        async def _call_route():
+            return await route_module.claude_agent_tool_confirm(
+                body,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value=None,
+            ) as get_chat_thread,
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "confirm_tool",
+            ) as confirm_tool,
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(_call_route())
+
+        self.assertEqual(raised.exception.status_code, 404)
+        self.assertEqual(raised.exception.detail, "Thread not found")
+        get_chat_thread.assert_called_once_with("thread-foreign", 7)
+        confirm_tool.assert_not_called()
+
+    def test_tool_confirm_reports_a_typed_not_pending_conflict(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ToolConfirmRequestBody(
+            thread_id="thread-owned",
+            tool_call_id="call-stale",
+            approved=True,
+        )
+
+        async def _call_route():
+            return await route_module.claude_agent_tool_confirm(
+                body,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "confirm_tool",
+                return_value=False,
+            ),
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(_call_route())
+
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(
+            raised.exception.detail,
+            {
+                "code": "TOOL_CONFIRMATION_NOT_PENDING",
+                "tool_call_id": "call-stale",
+            },
+        )
+
+    def test_tool_confirm_resolves_an_owned_pending_confirmation(self):
+        import routers.claude_agent as route_module
+
+        body = route_module.ToolConfirmRequestBody(
+            thread_id="thread-owned",
+            tool_call_id="call-pending",
+            approved=False,
+            reason="user declined",
+        )
+
+        async def _call_route():
+            return await route_module.claude_agent_tool_confirm(
+                body,
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ) as get_chat_thread,
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "confirm_tool",
+                return_value=True,
+            ) as confirm_tool,
+        ):
+            response = asyncio.run(_call_route())
+
+        get_chat_thread.assert_called_once_with("thread-owned", 7)
+        confirm_tool.assert_called_once_with(
+            session_id="thread-owned",
+            tool_call_id="call-pending",
+            approved=False,
+            reason="user declined",
+            answers=None,
+        )
+        self.assertEqual(response, {"ok": True, "approved": False})
 
 
 # ---------------------------------------------------------------------------

@@ -23,6 +23,10 @@
 > **[Sync] 2026-07-26**: HOTFIX — `HookJSONOutput(...)` 构造调用全部改为纯字典
 > 字面量（0.2.128 中该类型为 TypedDict Union 不可调用；§5 头部注记两个生产
 > 症状与官方 dict 契约，§5.2 / §6.1 示例更新）。
+> **[Sync] 2026-08-06**: 修复 SSE 重连重放历史 `tool-approval-request` 后，已处理
+> 的工具确认重新占据输入区的问题。前端以精确 `tool_call_id` 保存本线程已处理
+> tombstone，并在 SSE EOF 后按 turn checkpoint 接纳持久化历史快照；后端先校验 thread 所有权，
+> 对“线程存在但确认已不再 pending”返回类型化 409。详见 §8.5。
 
 > 来源: When Claude Can't Ask: Building Interactive Tools for the Agent SDK
 >  https://oneryalcin.medium.com/when-claude-cant-ask-building-interactive-tools-for-the-agent-sdk-64ccc89558fa
@@ -599,7 +603,7 @@ ChatPanel
   第三态；授权粒度与后端 `PreToolUse` 决策保持一致。
 - 面板高度上限 `min(46vh, 24rem)`，超出内部滚动；AskUserQuestion 表单以
   `compact` 紧凑密度渲染（更小字体、更窄间距），避免面板占满聊天视口。
-- 面板按 `partKey` 作为 React key 挂载：同一确认在被 resolve/超时移除后状态
+- 面板按 `partKey + toolCallId` 作为 React key 挂载：同一确认在被 resolve/超时移除后状态
   自动复位；多个待确认项串行展示（取消息序最早的一项），与后端一次只阻塞
   一个 `PreToolUse` 回调的事实对齐。
 - 确认成功后仍调用 `addToolResult` 乐观标记 part 完成，面板随
@@ -622,3 +626,50 @@ ChatPanel
   行 + 「待确认」标记。
 - `frontend/src/components/chat/ChatPanel.tsx` — 派生 `pendingConfirmation`，
   待确认时在输入区容器内用确认面板替换 `AIInputDock`。
+
+### 8.5 重连重放与已处理确认收敛 **[2026-08-06]**
+
+EventBus 重连允许重放历史 SSE 帧，因此旧 `tool-approval-request` 不能单独作为
+“此工具仍等待用户确认”的权威事实。确认状态按以下合同收敛：
+
+1. 用户批准或拒绝成功后，`ChatPanel` 在当前 thread 内记录精确
+   `tool_call_id` tombstone；`resolvePendingToolConfirmation` 在派生确认面板前先
+   排除这些 ID。tombstone 不跨 thread 复用。
+2. `POST /api/claude-agent/tool-confirm` 必须先验证当前用户拥有 `session_id`
+   对应的 Chat thread。无权访问统一返回 404，且不得进入 Agent runtime。
+3. 线程属于当前用户、但对应确认 Future 已结束或不存在时，返回
+   `409` 与 `detail.code="TOOL_CONFIRMATION_NOT_PENDING"`，并回显精确
+   `tool_call_id`。前端只有在状态码、code 和回显 ID 全部匹配时，才把它视为
+   幂等终态并关闭面板；普通 404、鉴权失败、网络失败和畸形响应仍显示为可重试
+   错误，不能伪装成成功。
+4. `finish` 事件早于后端 partial assistant 持久化，不能作为读取历史的边界。
+   前端继续消费到 SSE EOF 后才请求权威快照；Stop 完成也走同一恢复路径。
+   每个请求携带 thread、reconnect nonce 与本地 turn generation checkpoint，三者
+   任一变化都丢弃迟到快照，避免覆盖快照获取期间开始的新一轮消息。
+5. 类型化 409 只消除过期确认 UI，不凭空生成工具输出。最终工具状态继续由
+   持久化消息和后续事件负责。普通 Dock、editor-write 专用确认和消息折叠行的
+   「待确认」徽标共用同一 settled ID 集，不能出现两份漂移状态。
+6. 确认组件使用同步 in-flight guard，保证按钮双击、快捷键与点击并发最多发出
+   一次 POST；React key 包含 `toolCallId`，A/B call 复用消息槽位时不继承状态。
+
+```mermaid
+sequenceDiagram
+    participant Browser as Chat 前端
+    participant EventBus as SSE EventBus
+    participant API as tool-confirm API
+    participant Store as Confirmation Store
+    participant History as 持久化消息
+
+    EventBus-->>Browser: 重放旧 tool-approval-request(call_id)
+    Browser->>API: POST tool-confirm(call_id)
+    API->>API: 校验 thread 所有权
+    API->>Store: confirm_tool(call_id)
+    Store-->>API: 已无 pending Future
+    API-->>Browser: 409 TOOL_CONFIRMATION_NOT_PENDING + call_id
+    Browser->>Browser: 写入本 thread 精确 tombstone\n关闭确认面板
+    EventBus-->>Browser: finish（仅 UI 终态，不刷新）
+    EventBus-->>Browser: SSE EOF（持久化已完成）
+    Browser->>History: 以 thread / nonce / turn checkpoint 请求快照
+    History-->>Browser: 返回权威消息快照
+    Browser->>Browser: checkpoint 未变化才应用
+```

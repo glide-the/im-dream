@@ -90,6 +90,10 @@ import {
 import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoEvent } from '../../hooks/useThreadTodos';
 import { IconArrowDown } from './Icons';
+import {
+  shouldApplyChatHistoryRecoverySnapshot,
+  type ChatHistoryRecoveryCheckpoint,
+} from './chatRecovery';
 import { API_BASE } from '../../lib/apiBase';
 const CHAT_BOTTOM_PROXIMITY_PX = 120;
 
@@ -115,7 +119,7 @@ interface ChatPanelProps {
   /** Incremented by ChatView when /status reports lifecycle=running — triggers SSE reconnect. */
   reconnectStreamNonce?: number;
   /** Called after reconnect stream finishes so parent can reload persisted messages. */
-  onReconnectComplete?: () => void;
+  onReconnectComplete?: () => Promise<UIMessage[] | undefined> | UIMessage[] | undefined;
   className?: string;
   inputPlaceholder?: string;
   queuedPrompt?: string;
@@ -189,6 +193,7 @@ export default function ChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const isNearBottomRef = useRef(true);
   const hasInitializedRef = useRef(false);
+  const turnGenerationRef = useRef(0);
   const lastQueuedNonceRef = useRef<number | undefined>(undefined);
   const lastReconnectNonceRef = useRef(0);
   const onReconnectCompleteRef = useRef(onReconnectComplete);
@@ -197,6 +202,9 @@ export default function ChatPanel({
   >(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [settledToolCallIds, setSettledToolCallIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const reconnectAbortRef = useRef<AbortController | null>(null);
   const { setActiveSessionId, workspaceEnabled } = useWorkspaceSession();
 
@@ -337,6 +345,11 @@ export default function ChatPanel({
   // Initialise the chat with messages provided by the parent (following the
   // better-chatbot pattern: parent fetches history, passes as initialMessages).
   useEffect(() => {
+    setSettledToolCallIds(new Set<string>());
+    turnGenerationRef.current = 0;
+  }, [threadId]);
+
+  useEffect(() => {
     if (hasInitializedRef.current) {
       return;
     }
@@ -381,9 +394,29 @@ export default function ChatPanel({
       if (queuedMessageParts.length === 0) {
         return;
       }
+      turnGenerationRef.current += 1;
       await sendMessage({ role: 'user', parts: queuedMessageParts });
     })();
   }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
+
+  const recoverAuthoritativeHistory = useCallback(() => {
+    const requestedAt: ChatHistoryRecoveryCheckpoint = {
+      threadId,
+      reconnectNonce: lastReconnectNonceRef.current,
+      turnGeneration: turnGenerationRef.current,
+    };
+    const recovery = onReconnectCompleteRef.current?.();
+    if (recovery === undefined) return;
+    void Promise.resolve(recovery).then((snapshot) => {
+      const current: ChatHistoryRecoveryCheckpoint = {
+        threadId,
+        reconnectNonce: lastReconnectNonceRef.current,
+        turnGeneration: turnGenerationRef.current,
+      };
+      if (!shouldApplyChatHistoryRecoverySnapshot(requestedAt, current, snapshot)) return;
+      setMessagesRef.current?.(snapshot as UIMessage[]);
+    });
+  }, [threadId]);
 
   useEffect(() => {
     if (!reconnectStreamNonce || reconnectStreamNonce === lastReconnectNonceRef.current) {
@@ -400,7 +433,7 @@ export default function ChatPanel({
       if (finished) return;
       finished = true;
       setIsReconnecting(false);
-      onReconnectCompleteRef.current?.();
+      recoverAuthoritativeHistory();
     };
 
     setIsReconnecting(true);
@@ -421,9 +454,10 @@ export default function ChatPanel({
 
         const reader = response.body.getReader();
         await consumeClaudeAgentSseStream(reader, (event) => {
-          if (event.type === 'finish' || event.type === 'error') {
-            finishReconnect();
-            return false;
+          if (event.type === 'finish') {
+            // The backend persists partial/final assistant state after emitting
+            // finish. Keep consuming until EOF; only then is history readable.
+            return;
           }
           // plan-* 生命周期帧不产生消息气泡，转发 plan store（claude-plan.md §5.4）。
           if (event.type === 'plan-mode-changed' || event.type === 'plan-updated') {
@@ -468,10 +502,19 @@ export default function ChatPanel({
         setIsReconnecting(false);
       }
     };
-  }, [reconnectStreamNonce, threadId]);
+  }, [reconnectStreamNonce, recoverAuthoritativeHistory, threadId]);
 
   const agentBusy = status === 'streaming' || status === 'submitted' || isReconnecting || isStopping;
   const chatLoading = agentBusy || isLoading;
+
+  const markToolConfirmationSettled = useCallback((toolCallId: string) => {
+    setSettledToolCallIds((current) => {
+      if (current.has(toolCallId)) return current;
+      const next = new Set(current);
+      next.add(toolCallId);
+      return next;
+    });
+  }, []);
 
   const handleStop = useCallback(async () => {
     if (isStopping) {
@@ -495,9 +538,9 @@ export default function ChatPanel({
       // will reconcile whether the backend turn is still running.
     } finally {
       setIsStopping(false);
-      onReconnectCompleteRef.current?.();
+      recoverAuthoritativeHistory();
     }
-  }, [isStopping, stop, threadId]);
+  }, [isStopping, recoverAuthoritativeHistory, stop, threadId]);
   const shouldShowMessageSurface = visibleMessages.length > 0 || Boolean(error) || chatLoading;
 
   const effectiveToolChoice: ToolChoice = imFullAccessEnabled ? 'auto' : currentToolChoice;
@@ -512,7 +555,11 @@ export default function ChatPanel({
         const part = parts[partIndex];
         if (!isToolUIPart(part)) continue;
         const toolPart = part as ToolUIPart | DynamicToolUIPart;
-        const kind = resolvePendingToolConfirmation(toolPart, effectiveToolChoice);
+        const kind = resolvePendingToolConfirmation(
+          toolPart,
+          effectiveToolChoice,
+          settledToolCallIds,
+        );
         if (!kind) continue;
         return {
           kind,
@@ -526,7 +573,7 @@ export default function ChatPanel({
       }
     }
     return null;
-  }, [visibleMessages, effectiveToolChoice]);
+  }, [visibleMessages, effectiveToolChoice, settledToolCallIds]);
 
   // Keep the export snapshot refs in sync with the derived dock state.
   pendingConfirmationForExportRef.current = pendingConfirmation;
@@ -608,6 +655,8 @@ export default function ChatPanel({
             sendMessage={sendMessage}
             onEditorWriteConfirmed={onEditorWriteConfirmed}
             onOpenSubagentTask={onOpenSubagentTask}
+            settledToolCallIds={settledToolCallIds}
+            onToolConfirmationSettled={markToolConfirmationSettled}
           />
           <div ref={bottomRef} aria-hidden="true" />
         </div>
@@ -645,10 +694,11 @@ export default function ChatPanel({
           // While a tool confirmation is pending, the input dock is replaced by
           // the confirmation panel — the composer returns once the user decides.
           <ToolConfirmationDock
-            key={pendingConfirmation.partKey}
+            key={`${pendingConfirmation.partKey}-${pendingConfirmation.toolCallId}`}
             confirmation={pendingConfirmation}
             threadId={threadId}
             addToolResult={addToolResult}
+            onSettled={markToolConfirmationSettled}
           />
         ) : (
           <AIInputDock
@@ -675,6 +725,7 @@ export default function ChatPanel({
               if (parts.length === 0) {
                 return;
               }
+              turnGenerationRef.current += 1;
               await sendMessage({ role: 'user', parts });
             }}
             placeholder={inputPlaceholder}

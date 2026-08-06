@@ -17,7 +17,7 @@
 //        (target host + sandbox policy mode, binary 拒绝/同意, no "remember" in this iteration)
 //        when kind==='sandbox-network'; generic card unchanged when the discriminator is absent
 //        (design: claude-agent-sandbox-network-permission-tool.md §5A).
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
 import { confirmToolCall, type PendingToolConfirmation } from './toolConfirmation';
@@ -30,6 +30,7 @@ interface ToolConfirmationDockProps {
   confirmation: PendingToolConfirmation;
   threadId: string;
   addToolResult?: (params: { tool: string; toolCallId: string; output: unknown }) => void;
+  onSettled: (toolCallId: string) => void;
 }
 
 function KbdHint({ label }: { label: string }) {
@@ -38,9 +39,10 @@ function KbdHint({ label }: { label: string }) {
   );
 }
 
-export default function ToolConfirmationDock({ confirmation, threadId, addToolResult }: ToolConfirmationDockProps) {
+export default function ToolConfirmationDock({ confirmation, threadId, addToolResult, onSettled }: ToolConfirmationDockProps) {
   const { t } = useTranslation();
   const [status, setStatus] = useState<DockStatus>('idle');
+  const requestInFlightRef = useRef(false);
   const { kind, toolCallId, toolName, input } = confirmation;
 
   const summaryText = useMemo(() => summarizeToolInvocation(toolName, input), [toolName, input]);
@@ -57,24 +59,34 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   }, [commandText, input]);
 
   const runConfirm = useCallback(async (approved: boolean, reason?: string, answers?: Record<string, unknown>) => {
-    if (status !== 'idle') return;
+    if (requestInFlightRef.current) return;
+    requestInFlightRef.current = true;
     setStatus('confirming');
     try {
       const result = await confirmToolCall(threadId, toolCallId, approved, reason, answers);
-      if (result.ok ?? result.success) {
+      if (result.state === 'resolved') {
         addToolResult?.({
           tool: toolName,
           toolCallId,
           output: answers ?? (approved ? { approved: true } : { approved: false, cancelled: true }),
         });
         setStatus(approved ? 'confirmed' : 'rejected');
+        onSettled(toolCallId);
+        return;
+      }
+      if (result.state === 'not-pending') {
+        // Reconnect replay can surface an approval event whose runtime Future
+        // was already resolved. Tombstone only this exact tool call; permission
+        // and ownership failures remain visible/retryable errors.
+        onSettled(toolCallId);
         return;
       }
     } catch {
       // fall through — restore the panel so the user can retry
     }
+    requestInFlightRef.current = false;
     setStatus('idle');
-  }, [addToolResult, status, threadId, toolCallId, toolName]);
+  }, [addToolResult, onSettled, threadId, toolCallId, toolName]);
 
   const handleApprove = useCallback(() => void runConfirm(true), [runConfirm]);
   const handleReject = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userRejectedTool')), [runConfirm, t]);

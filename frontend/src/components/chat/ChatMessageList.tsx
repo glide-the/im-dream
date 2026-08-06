@@ -54,6 +54,8 @@ interface ChatMessageListProps {
   sendMessage?: UseChatHelpers<UIMessage>['sendMessage'];
   /** Forwarded to ToolMessagePart for editor write tools — triggers Writing view reload. */
   onEditorWriteConfirmed?: (toolCallId: string) => void;
+  settledToolCallIds?: ReadonlySet<string>;
+  onToolConfirmationSettled?: (toolCallId: string) => void;
   /** Opens the right-side task panel for an Agent/Task tool invocation. */
   onOpenSubagentTask?: (toolCallId: string) => void;
 }
@@ -215,7 +217,7 @@ function WriteToolTerminalCard({
   );
 }
 
-export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask }: ChatMessageListProps) {
+export default function ChatMessageList({ messages, threadId, isLoading, error, addToolResult, shouldShowLoadingIndicator = false, readonly = false, toolChoice, setMessages, sendMessage, onEditorWriteConfirmed, onOpenSubagentTask, settledToolCallIds, onToolConfirmationSettled }: ChatMessageListProps) {
   const { t } = useTranslation();
   const subagents = useThreadSubagents(threadId);
   const [expandedParts, setExpandedParts] = useState<Record<string, boolean>>({});
@@ -441,7 +443,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 if (needsEditorWriteApproval) {
                   return (
                     <div key={partKey}>
-                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} />
+                      <ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} onEditorWriteConfirmed={onEditorWriteConfirmed} settledToolCallIds={settledToolCallIds} onConfirmationSettled={onToolConfirmationSettled} />
                     </div>
                   );
                 }
@@ -464,7 +466,11 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                 }
 
                 const toolRowSummary = summarizeToolInvocation(toolName, readToolInput(toolPart));
-                const pendingConfirmationKind = resolvePendingToolConfirmation(toolPart, toolChoice);
+                const pendingConfirmationKind = resolvePendingToolConfirmation(
+                  toolPart,
+                  toolChoice,
+                  settledToolCallIds,
+                );
                 return (
                   <div key={partKey} style={{ paddingLeft: '0.85rem', borderLeft: `2px solid ${pendingConfirmationKind ? '#f59e0b' : 'var(--color-action-link)'}` }}>
                     <button type="button" onClick={toggleExpanded} style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.55rem', border: 'none', background: 'transparent', padding: 0, color: 'var(--color-text-secondary)', fontSize: '0.88rem', cursor: 'pointer' }}>
@@ -479,7 +485,7 @@ export default function ChatMessageList({ messages, threadId, isLoading, error, 
                       ) : null}
                       <span style={{ color: 'var(--color-text-muted)' }}>{isExpanded ? '‹' : '›'}</span>
                     </button>
-                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} /></div> : null}
+                    {isExpanded ? <div style={{ marginTop: '0.6rem' }}><ToolMessagePart part={toolPart} threadId={threadId} isLast={isLastMessage} isLoading={isLoading} addToolResult={addToolResult} settledToolCallIds={settledToolCallIds} onConfirmationSettled={onToolConfirmationSettled} /></div> : null}
                   </div>
                 );
               }

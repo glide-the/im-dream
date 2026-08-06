@@ -21,6 +21,42 @@ export type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 const TOOL_COMPLETED_STATES = new Set(['output-available', 'output-error']);
 const ASK_USER_TOOL_NAMES = new Set(['askuserquestion', 'ask_user_question', 'ask_user', 'askuser']);
 
+export type ToolConfirmationRequestResult =
+  | { readonly state: 'resolved'; readonly approved: boolean }
+  | { readonly state: 'not-pending' }
+  | { readonly state: 'error'; readonly message: string };
+
+function readToolConfirmationError(payload: unknown): string {
+  if (!payload || typeof payload !== 'object') return 'Tool confirmation failed.';
+  const detail = (payload as { detail?: unknown }).detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  return 'Tool confirmation failed.';
+}
+
+/** Decode only the typed stale-state conflict; ownership and other errors stay errors. */
+export function interpretToolConfirmationResponse(
+  status: number,
+  payload: unknown,
+  expectedToolCallId?: string,
+): ToolConfirmationRequestResult {
+  if (status >= 200 && status < 300 && payload && typeof payload === 'object') {
+    const value = payload as { ok?: unknown; success?: unknown; approved?: unknown };
+    if (value.ok === true || value.success === true) {
+      return { state: 'resolved', approved: value.approved === true };
+    }
+  }
+  if (status === 409 && payload && typeof payload === 'object') {
+    const detail = (payload as { detail?: unknown }).detail;
+    if (detail && typeof detail === 'object'
+      && (detail as { code?: unknown }).code === 'TOOL_CONFIRMATION_NOT_PENDING'
+      && (expectedToolCallId === undefined
+        || (detail as { tool_call_id?: unknown }).tool_call_id === expectedToolCallId)) {
+      return { state: 'not-pending' };
+    }
+  }
+  return { state: 'error', message: readToolConfirmationError(payload) };
+}
+
 export async function confirmToolCall(
   threadId: string,
   toolCallId: string,
@@ -33,7 +69,13 @@ export async function confirmToolCall(
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${getAuthToken()}` },
     body: JSON.stringify({ thread_id: threadId, tool_call_id: toolCallId, approved, reason, answers }),
   });
-  return (await response.json()) as { ok?: boolean; success?: boolean; message?: string };
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // A malformed response is a transport error, never evidence of settlement.
+  }
+  return interpretToolConfirmationResponse(response.status, payload, toolCallId);
 }
 
 /**
@@ -129,7 +171,9 @@ export interface PendingToolConfirmation {
 export function resolvePendingToolConfirmation(
   part: AnyToolUIPart,
   toolChoice: string | undefined,
+  settledToolCallIds: ReadonlySet<string> = new Set<string>(),
 ): PendingConfirmationKind | null {
+  if (settledToolCallIds.has(part.toolCallId)) return null;
   if (TOOL_COMPLETED_STATES.has(part.state ?? '')) return null;
   const input = 'input' in part ? part.input : undefined;
   if (input === undefined || input === null) return null;
