@@ -53,7 +53,6 @@ test('real actor can read Markdown documents and structured storyboard from the 
   const apiFailures: string[] = [];
   const episodeActionPosts: string[] = [];
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
-  await context.tracing.start({ screenshots: true, snapshots: true, sources: true });
   const page = await context.newPage();
   page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
   page.on('console', (message) => {
@@ -119,7 +118,7 @@ test('real actor can read Markdown documents and structured storyboard from the 
       'review-report.md',
     ]);
     expect(surface.narrative?.shots).toHaveLength(22);
-    expect(surface.actionProjection?.actionOptions).toHaveLength(7);
+    expect(surface.actionProjection?.actionOptions).toHaveLength(6);
     writeFileSync(
       resolve(EVIDENCE_DIR, 'episode-artifact-manifest.json'),
       JSON.stringify({
@@ -191,19 +190,20 @@ test('real actor can read Markdown documents and structured storyboard from the 
     await openAgent.click();
     let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await expect(agentDialog.getByRole('button', {
-      name: /审阅 EP01 剧本.*推荐操作.*当前可执行/,
+      name: /生成 EP01 Prompt 包.*推荐操作.*当前可执行/,
     })).toBeEnabled();
     await expect(agentDialog.getByRole('button', {
-      name: /核对 EP01 资产引用.*未来可用/,
+      name: /审阅 EP01 完整产物.*未来可用/,
     })).toBeDisabled();
-    let disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（5）' });
+    await expect(agentDialog.getByRole('button', { name: /审阅 EP01 剧本/ })).toHaveCount(0);
+    let disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（4）' });
     await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
     await disclosure.click();
     await expect(agentDialog.getByRole('button', {
-      name: /生成 EP01 详细分镜.*未来可用/,
+      name: /校验并提交 EP01.*未来可用/,
     })).toBeDisabled();
     await expect(agentDialog.getByRole('button', {
-      name: /生成 EP01 Prompt 包.*未来可用/,
+      name: /开始 EP02 分集规划.*暂不可用/,
     })).toBeDisabled();
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'workflow-actions-desktop-1440x1000.png'),
@@ -284,7 +284,7 @@ test('real actor can read Markdown documents and structured storyboard from the 
     });
     await openAgent.click();
     agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-    disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（5）' });
+    disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（4）' });
     await disclosure.click();
     await expect(agentDialog).toBeVisible();
     expect(await agentDialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))
@@ -318,7 +318,6 @@ test('real actor can read Markdown documents and structured storyboard from the 
     expect(diagnostics).toEqual([]);
     expect(episodeActionPosts).toEqual([]);
   } finally {
-    await context.tracing.stop({ path: resolve(EVIDENCE_DIR, 'trace.zip') });
     await context.close();
   }
 });

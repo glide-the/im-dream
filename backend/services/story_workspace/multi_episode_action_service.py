@@ -349,8 +349,9 @@ class StoryWorkspaceCurrentEpisodeActionSnapshotBuilder:
             ) >= _VENDOR_ACTIONS.index(
                 StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
             )
-        storyboard_current = storyboard_available and self._resolver._completion_is_current(  # noqa: SLF001
+        storyboard_current = self._resolver._output_completion_is_current_or_legacy(  # noqa: SLF001
             StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+            storyboard,
             surface,
             facts,
         )

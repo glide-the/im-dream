@@ -666,6 +666,67 @@ class StoryWorkspaceEpisodeNextActionResolver:
         ]
 
     @classmethod
+    def _script_review_is_current(
+        cls,
+        review: object | None,
+        script_revision: str | None,
+        surface: object,
+        facts: StoryWorkspaceEpisodeWorkflowFile,
+    ) -> bool:
+        if (
+            getattr(review, "scope", None)
+            not in {
+                StoryWorkspaceEpisodeReviewScope.SCRIPT,
+                StoryWorkspaceEpisodeReviewScope.FULL_CHAIN,
+            }
+            or script_revision is None
+            or getattr(review, "overall_verdict", None) != "APPROVED"
+        ):
+            return False
+        reviewed_revision = cls._reviewed_revision(review, "script.md")
+        if reviewed_revision is not None:
+            return reviewed_revision == script_revision
+        reviewed_artifacts = getattr(review, "reviewed_artifacts", None)
+        return (
+            isinstance(reviewed_artifacts, list)
+            and "script.md" in reviewed_artifacts
+            and cls._completion_is_current(
+                StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+                surface,
+                facts,
+            )
+        )
+
+    @classmethod
+    def _output_completion_is_current_or_legacy(
+        cls,
+        action: StoryWorkspaceEpisodeAction,
+        artifact: object | None,
+        surface: object,
+        facts: StoryWorkspaceEpisodeWorkflowFile,
+    ) -> bool:
+        if not cls._available(artifact):
+            return False
+        completion = next(
+            (item for item in facts.completions if item.action is action),
+            None,
+        )
+        if completion is not None:
+            return cls._completion_is_current(action, surface, facts)
+        return (
+            action
+            in {
+                StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+                StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+            }
+            and cls._completion_is_current(
+                StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+                surface,
+                facts,
+            )
+        )
+
+    @classmethod
     def project(
         cls,
         surface: object,
@@ -756,14 +817,11 @@ class StoryWorkspaceEpisodeNextActionResolver:
             resolution = blocked_or_ready(StoryWorkspaceEpisodeAction.WRITE_SCRIPT, script)
         else:
             script_revision = cls._revision(script)
-            script_review_current = (
-                getattr(review, "scope", None)
-                in {
-                    StoryWorkspaceEpisodeReviewScope.SCRIPT,
-                    StoryWorkspaceEpisodeReviewScope.FULL_CHAIN,
-                }
-                and cls._reviewed_revision(review, "script.md") == script_revision
-                and getattr(review, "overall_verdict", None) == "APPROVED"
+            script_review_current = cls._script_review_is_current(
+                review,
+                script_revision,
+                surface,
+                facts,
             )
             if not script_review_current:
                 resolution = blocked_or_ready(
@@ -779,32 +837,63 @@ class StoryWorkspaceEpisodeNextActionResolver:
                             is StoryWorkspaceEpisodeReviewScope.SCRIPT
                         ),
                     )
-            elif not cls._completion_is_current(
-                StoryWorkspaceEpisodeAction.REFRESH_ASSETS, surface, facts
-            ):
-                resolution = cls._resolution(
-                    StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
-                    StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
-                )
             elif not cls._available(storyboard):
-                resolution = blocked_or_ready(
-                    StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
-                    storyboard,
-                )
-            elif not cls._completion_is_current(
-                StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD, surface, facts
+                if not cls._completion_is_current(
+                    StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+                    surface,
+                    facts,
+                ):
+                    resolution = cls._resolution(
+                        StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+                        StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
+                    )
+                else:
+                    resolution = blocked_or_ready(
+                        StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+                        storyboard,
+                    )
+            elif not cls._output_completion_is_current_or_legacy(
+                StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+                storyboard,
+                surface,
+                facts,
             ):
-                resolution = cls._resolution(
-                    StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
-                    StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
+                storyboard_completion = next(
+                    (
+                        item
+                        for item in facts.completions
+                        if item.action
+                        is StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
+                    ),
+                    None,
                 )
+                if (
+                    storyboard_completion is None
+                    and not cls._completion_is_current(
+                        StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+                        surface,
+                        facts,
+                    )
+                ):
+                    resolution = cls._resolution(
+                        StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+                        StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
+                    )
+                else:
+                    resolution = cls._resolution(
+                        StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+                        StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
+                    )
             elif not cls._available(prompts):
                 resolution = blocked_or_ready(
                     StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
                     prompts,
                 )
-            elif not cls._completion_is_current(
-                StoryWorkspaceEpisodeAction.GENERATE_PROMPTS, surface, facts
+            elif not cls._output_completion_is_current_or_legacy(
+                StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+                prompts,
+                surface,
+                facts,
             ):
                 resolution = cls._resolution(
                     StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,

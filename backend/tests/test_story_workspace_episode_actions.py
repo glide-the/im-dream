@@ -498,6 +498,133 @@ def test_workflow_projects_ordered_server_owned_action_options() -> None:
     assert all(option.can_dispatch is False for option in blocked.action_options[1:])
 
 
+def test_legacy_artifact_progress_advances_past_current_review_and_storyboard() -> None:
+    resolver = StoryWorkspaceEpisodeNextActionResolver()
+    surface = _surface(
+        {
+            "episode-outline.md",
+            "script.md",
+            "storyboard.yaml",
+            "review-report.md",
+        },
+        review_scope=StoryWorkspaceEpisodeReviewScope.SCRIPT,
+    )
+    surface.auxiliary.review.reviewed_artifacts = ["script.md"]
+    empty_facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=0,
+        completions=[],
+        updated_at=datetime.now(UTC),
+    )
+    review_completion = StoryWorkspaceEpisodeWorkflowCompletion(
+        action=StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+        input_revision=resolver.action_input_revision(
+            StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+            surface,
+            empty_facts,
+        ),
+        manifest_revision=REVISION,
+        message_id="dream_agent_" + "7" * 64,
+        recorded_at=datetime.now(UTC),
+    )
+    facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=1,
+        completions=[review_completion],
+        updated_at=datetime.now(UTC),
+    )
+
+    workflow = resolver.project(surface, facts)
+
+    assert workflow.next_action.action is StoryWorkspaceEpisodeAction.GENERATE_PROMPTS
+    assert workflow.next_action.diagnostic is StoryWorkspaceEpisodeActionDiagnostic.READY
+    assert workflow.action_options[0].action is StoryWorkspaceEpisodeAction.GENERATE_PROMPTS
+    assert all(
+        option.action is not StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+        for option in workflow.action_options
+    )
+
+
+def test_legacy_progress_keeps_explicit_stale_review_and_storyboard_facts_blocking() -> None:
+    resolver = StoryWorkspaceEpisodeNextActionResolver()
+    stale_review = _surface(
+        {
+            "episode-outline.md",
+            "script.md",
+            "storyboard.yaml",
+            "review-report.md",
+        },
+        review_scope=StoryWorkspaceEpisodeReviewScope.SCRIPT,
+        review_source_revisions=[SimpleNamespace(
+            source_artifact="script.md",
+            source_revision="sha256:" + "9" * 64,
+        )],
+    )
+    stale_review.auxiliary.review.reviewed_artifacts = ["script.md"]
+    empty_facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=0,
+        completions=[],
+        updated_at=datetime.now(UTC),
+    )
+    review_completion = StoryWorkspaceEpisodeWorkflowCompletion(
+        action=StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+        input_revision=resolver.action_input_revision(
+            StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+            stale_review,
+            empty_facts,
+        ),
+        manifest_revision=REVISION,
+        message_id="dream_agent_" + "8" * 64,
+        recorded_at=datetime.now(UTC),
+    )
+    review_facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=1,
+        completions=[review_completion],
+        updated_at=datetime.now(UTC),
+    )
+
+    assert (
+        resolver.project(stale_review, review_facts).next_action.action
+        is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+    )
+
+    current_review = _surface(
+        {
+            "episode-outline.md",
+            "script.md",
+            "storyboard.yaml",
+            "review-report.md",
+        },
+        review_scope=StoryWorkspaceEpisodeReviewScope.SCRIPT,
+    )
+    current_review.auxiliary.review.reviewed_artifacts = ["script.md"]
+    stale_storyboard_completion = StoryWorkspaceEpisodeWorkflowCompletion(
+        action=StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+        input_revision="sha256:" + "f" * 64,
+        manifest_revision=REVISION,
+        message_id="dream_agent_" + "9" * 64,
+        recorded_at=datetime.now(UTC),
+    )
+    storyboard_facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=2,
+        completions=[review_completion, stale_storyboard_completion],
+        updated_at=datetime.now(UTC),
+    )
+
+    assert (
+        resolver.project(current_review, storyboard_facts).next_action.action
+        is StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
+    )
+
+
 def test_none_in_scope_projects_no_action_options() -> None:
     resolver = StoryWorkspaceEpisodeNextActionResolver()
     surface = _surface(
