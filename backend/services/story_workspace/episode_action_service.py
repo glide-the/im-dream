@@ -755,18 +755,15 @@ class StoryWorkspaceEpisodeNextActionResolver:
             if step.action is not None
         ]
         review = cls._review(surface)
+        invalid_review_action = (
+            StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN
+            if cls._available(prompts)
+            else StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+        )
         invalid_actions = (
             (outline, StoryWorkspaceEpisodeAction.PLAN_EPISODE),
             (script, StoryWorkspaceEpisodeAction.WRITE_SCRIPT),
-            (
-                report,
-                (
-                    StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
-                    if getattr(review, "scope", None)
-                    is StoryWorkspaceEpisodeReviewScope.SCRIPT
-                    else StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN
-                ),
-            ),
+            (report, invalid_review_action),
             (storyboard, StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD),
             (prompts, StoryWorkspaceEpisodeAction.GENERATE_PROMPTS),
             (renders, StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE),
@@ -781,6 +778,10 @@ class StoryWorkspaceEpisodeNextActionResolver:
             None,
         )
         if invalid_action is not None:
+            repairable_review = invalid_action in {
+                StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+                StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+            }
             later_available = any(
                 cls._available(artifacts.get(key))
                 for key in ("storyboard.yaml", "prompts/", "renders/")
@@ -788,7 +789,7 @@ class StoryWorkspaceEpisodeNextActionResolver:
             resolution = cls._resolution(
                 invalid_action,
                 StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
-                can_dispatch=False,
+                can_dispatch=repairable_review,
             )
             return StoryWorkspaceEpisodeWorkflowProjection(
                 factsRevision=facts.revision,

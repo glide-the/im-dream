@@ -226,6 +226,38 @@ def test_new_script_revision_invalidates_review_and_hides_storyboard_update() ->
     assert all("更新 EP02 详细分镜" not in item.label for item in projection.action_options)
 
 
+def test_invalid_script_review_projects_a_recommended_repair_action() -> None:
+    surface = _surface(storyboard_digit="3")
+    report = next(
+        item
+        for item in surface.artifacts
+        if item.relative_key == "review-report.md"
+    )
+    object.__setattr__(
+        report,
+        "availability",
+        StoryWorkspaceEpisodeArtifactAvailability.INVALID,
+    )
+    object.__setattr__(report, "content_revision", None)
+    object.__setattr__(report, "mtime", None)
+    object.__setattr__(report, "size", None)
+    surface.auxiliary.review = None
+    facts = _facts_with_current_completions(surface)
+
+    snapshot = StoryWorkspaceCurrentEpisodeActionSnapshotBuilder().build(
+        surface=surface,
+        facts=facts,
+        current_episode=_descriptor(),
+    )
+    projection = StoryWorkspaceMultiEpisodeActionProjector.project(snapshot)
+
+    assert snapshot.current_action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+    assert snapshot.current_can_dispatch is True
+    assert projection.recommended_action_id == projection.action_options[0].action_id
+    assert projection.action_options[0].label == "审阅 EP02 剧本"
+    assert projection.action_options[0].can_dispatch is True
+
+
 def test_stale_asset_completion_requires_refresh_before_storyboard_update() -> None:
     original_surface = _surface(script_digit="2", reviewed_script_digit="2")
     facts = _facts_with_current_completions(

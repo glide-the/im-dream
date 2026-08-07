@@ -55,7 +55,10 @@ class StoryWorkspaceEpisodeCompletionValidator:
         surface: object,
         alias_report_present: bool,
     ) -> None:
-        if action is not StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN:
+        if action not in {
+            StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+            StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+        }:
             return
         artifacts = StoryWorkspaceEpisodeNextActionResolver._artifact_map(  # noqa: SLF001
             surface
@@ -70,8 +73,18 @@ class StoryWorkspaceEpisodeCompletionValidator:
         ):
             cls._reject(
                 "canonical_review_report_required",
-                "完整链路审阅必须更新当前 Episode 的规范 review-report.md。",
+                (
+                    "剧本审阅必须更新当前 Episode 的规范 review-report.md。"
+                    if action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+                    else "完整链路审阅必须更新当前 Episode 的规范 review-report.md。"
+                ),
             )
+        if action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT:
+            cls._validate_script_review(
+                artifacts=artifacts,
+                review=review,
+            )
+            return
         if (
             getattr(review, "scope", None)
             is not StoryWorkspaceEpisodeReviewScope.FULL_CHAIN
@@ -171,6 +184,55 @@ class StoryWorkspaceEpisodeCompletionValidator:
             )
 
     @classmethod
+    def _validate_script_review(
+        cls,
+        *,
+        artifacts: dict[str, object],
+        review: object,
+    ) -> None:
+        if (
+            getattr(review, "scope", None)
+            is not StoryWorkspaceEpisodeReviewScope.SCRIPT
+        ):
+            cls._reject(
+                "canonical_review_report_required",
+                "剧本审阅必须写入 review-report.md，并声明 scope: script。",
+            )
+        if getattr(review, "overall_verdict", None) != "APPROVED":
+            cls._reject(
+                "approved_verdict_required",
+                "剧本审阅尚未通过；overall_verdict 必须为 APPROVED。",
+            )
+        script_revision = getattr(
+            artifacts.get("script.md"),
+            "content_revision",
+            None,
+        )
+        if not isinstance(script_revision, str):
+            cls._reject(
+                "current_source_revisions_required",
+                "剧本审阅缺少当前 script.md revision。",
+            )
+        if getattr(review, "reviewed_artifacts", None) != ["script.md"]:
+            cls._reject(
+                "reviewed_artifacts_required",
+                "reviewed_files 必须且只能包含 script.md。",
+            )
+        reviewed_revisions = {
+            getattr(item, "source_artifact", None): getattr(
+                item,
+                "source_revision",
+                None,
+            )
+            for item in getattr(review, "source_revisions", [])
+        }
+        if reviewed_revisions != {"script.md": script_revision}:
+            cls._reject(
+                "current_source_revisions_required",
+                "source_revisions 必须且只能使用当前 script.md revision。",
+            )
+
+    @classmethod
     def validate_transition_ready(
         cls,
         *,
@@ -178,12 +240,22 @@ class StoryWorkspaceEpisodeCompletionValidator:
         surface: object,
         facts: StoryWorkspaceEpisodeWorkflowFile,
     ) -> None:
-        if action is not StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN:
+        if action not in {
+            StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+            StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+        }:
             return
         current_action = StoryWorkspaceEpisodeNextActionResolver.project(
             surface,
             facts,
         ).next_action
+        if action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT:
+            if current_action.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT:
+                cls._reject(
+                    "workflow_transition_not_ready",
+                    "规范剧本审阅尚未使当前 Episode 进入后续工作流阶段。",
+                )
+            return
         if (
             current_action.action is not StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN
             or not current_action.can_dispatch
@@ -201,12 +273,22 @@ class StoryWorkspaceEpisodeCompletionValidator:
         surface: object,
         facts: StoryWorkspaceEpisodeWorkflowFile,
     ) -> None:
-        if action is not StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN:
+        if action not in {
+            StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+            StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+        }:
             return
         next_action = StoryWorkspaceEpisodeNextActionResolver.project(
             surface,
             facts,
         ).next_action
+        if action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT:
+            if next_action.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT:
+                cls._reject(
+                    "workflow_transition_not_ready",
+                    "剧本审阅已写入，但服务端复核尚未进入后续工作流阶段。",
+                )
+            return
         if next_action.action is not StoryWorkspaceEpisodeAction.VALIDATE_EPISODE:
             cls._reject(
                 "workflow_transition_not_ready",

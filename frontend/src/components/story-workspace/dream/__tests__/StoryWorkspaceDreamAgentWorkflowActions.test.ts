@@ -113,7 +113,7 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
         setInitialWorkflowFocus({ actionId, wasOverflow });
         setOpen(true);
       };
-      return h('main', null,
+      return h('main', { className: 'story-workspace-dream' },
         h('button', {
           ref: triggerRef,
           onClick: () => {
@@ -150,7 +150,8 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
           const requestUrl = (request as unknown as { readonly url?: string }).url;
           if (requestUrl !== '/r3-agent-workflow-actions') return next();
           const html = await vite.transformIndexHtml(requestUrl, `
-            <!doctype html><html><body><div id="root"></div>
+            <!doctype html><html><head><style>html, body, #root { height: 100%; margin: 0; }</style></head>
+            <body><div id="root"></div>
             <script type="module" src="/r3-agent-workflow-actions.js"></script></body></html>
           `);
           response.statusCode = 200;
@@ -209,6 +210,32 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
 
     const closeButton = dialog.getByRole('button', { name: '收起 Dream Agent' });
     const composerInput = dialog.getByRole('textbox', { name: '给 Dream Agent 留言' });
+    const narrowLayout = await dialog.evaluate((element) => {
+      const history = element.querySelector<HTMLElement>(
+        '.story-workspace-dream-agent-dialog__history-shell',
+      );
+      const composer = element.querySelector<HTMLElement>(
+        '.story-workspace-dream-agent-dialog__composer',
+      );
+      const primaryActions = Array.from(element.querySelectorAll<HTMLElement>(
+        '.story-workspace-dream-agent-dialog__workflow-primary > button',
+      ));
+      const dialogBox = element.getBoundingClientRect();
+      return {
+        bottom: dialogBox.bottom,
+        composerHeight: composer?.getBoundingClientRect().height ?? 0,
+        historyHeight: history?.getBoundingClientRect().height ?? 0,
+        primaryActionColumns: new Set(primaryActions.map((action) => (
+          Math.round(action.getBoundingClientRect().x)
+        ))).size,
+        top: dialogBox.top,
+      };
+    });
+    expect(narrowLayout.top).toBeGreaterThanOrEqual(7);
+    expect(narrowLayout.bottom).toBeLessThanOrEqual(837);
+    expect(narrowLayout.composerHeight).toBeLessThanOrEqual(96);
+    expect(narrowLayout.historyHeight).toBeGreaterThanOrEqual(120);
+    expect(narrowLayout.primaryActionColumns).toBe(1);
     await closeButton.focus();
     await page.keyboard.press('Shift+Tab');
     await expect(composerInput).toBeFocused();
@@ -279,7 +306,30 @@ test('narrow dialog exposes only server actions, traps disclosure focus and has 
     await page.getByRole('button', { name: '打开 Dream Agent' }).click();
     const desktopDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     const desktopDisclosure = desktopDialog.getByRole('button', { name: '更多工作流操作（5）' });
+    const desktopLayoutBeforeDisclosure = await desktopDialog.evaluate((element) => {
+      const history = element.querySelector<HTMLElement>(
+        '.story-workspace-dream-agent-dialog__history-shell',
+      );
+      const primaryActions = Array.from(element.querySelectorAll<HTMLElement>(
+        '.story-workspace-dream-agent-dialog__workflow-primary > button',
+      ));
+      return {
+        historyHeight: history?.getBoundingClientRect().height ?? 0,
+        primaryActionColumns: new Set(primaryActions.map((action) => (
+          Math.round(action.getBoundingClientRect().x)
+        ))).size,
+      };
+    });
+    expect(desktopLayoutBeforeDisclosure.primaryActionColumns).toBe(2);
+    expect(desktopLayoutBeforeDisclosure.historyHeight).toBeGreaterThanOrEqual(160);
     await desktopDisclosure.click();
+    const desktopHistoryHeightAfterDisclosure = await desktopDialog.locator(
+      '.story-workspace-dream-agent-dialog__history-shell',
+    ).evaluate((element) => element.getBoundingClientRect().height);
+    expect(desktopHistoryHeightAfterDisclosure).toBeCloseTo(
+      desktopLayoutBeforeDisclosure.historyHeight,
+      1,
+    );
     await page.keyboard.press('Escape');
     await expect(desktopDisclosure).toHaveAttribute('aria-expanded', 'false');
     await expect(desktopDisclosure).toBeFocused();

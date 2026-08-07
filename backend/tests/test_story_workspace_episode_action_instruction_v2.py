@@ -194,6 +194,30 @@ def test_full_chain_instruction_names_the_canonical_report_contract() -> None:
     assert "/Users/" not in instruction
 
 
+def test_script_review_instruction_names_the_canonical_report_contract() -> None:
+    selected = StoryWorkspaceTrustedEpisodeAction(
+        run_id=RUN_ID,
+        action_id="episode_action_" + "2" * 64,
+        action=StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+        input_revision=CURRENT_REVISION,
+        episode_code="EP02",
+        target_episode_uid=EP02_ID,
+        candidate_id=None,
+    )
+
+    instruction = story_workspace_trusted_episode_action_instruction(selected)
+
+    assert "唯一规范输出：review-report.md" in instruction
+    assert "scope: script" in instruction
+    assert "reviewed_files 只能包含 script.md" in instruction
+    assert "source_revisions" in instruction
+    assert "当前 script.md" in instruction
+    assert "不得记录完成事实" in instruction
+    assert "EP02" in instruction
+    assert "stories/" not in instruction
+    assert "/Users/" not in instruction
+
+
 def test_current_and_next_options_expose_distinct_server_input_revisions() -> None:
     projection = _projection()
     current = projection.action_options[0]

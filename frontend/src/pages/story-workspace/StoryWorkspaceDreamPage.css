@@ -417,6 +417,16 @@
   box-shadow: 0 12px 30px color-mix(in srgb, var(--dream-ink) 13%, transparent);
 }
 
+.story-workspace-dream-agent-dialog--conversation {
+  right: 24px;
+  bottom: 24px;
+  width: min(540px, calc(100vw - 48px));
+  height: min(680px, calc(100dvh - 112px));
+  min-height: min(480px, calc(100dvh - 48px));
+  max-height: none;
+  grid-template-rows: auto minmax(160px, 1fr) auto auto;
+}
+
 .story-workspace-dream-agent-dialog__header {
   display: flex;
   align-items: start;
@@ -425,6 +435,16 @@
   padding: 18px 19px 14px;
   border-bottom: 1px solid var(--dream-rule);
 }
+
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__header {
+  align-items: center;
+  gap: 16px;
+  padding: 13px 18px 12px;
+}
+
+.story-workspace-dream-agent-dialog__heading-copy { min-width: 0; }
+.story-workspace-dream-agent-dialog__kicker { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.story-workspace-dream-agent-dialog__kicker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .story-workspace-dream-agent-dialog__header p,
 .story-workspace-dream-agent-dialog__header span,
@@ -439,11 +459,13 @@
 
 .story-workspace-dream-agent-dialog__header p { margin: 0 0 4px; }
 .story-workspace-dream-agent-dialog__header h2 { margin: 0 0 4px; color: var(--dream-ink); font-family: Georgia, "Times New Roman", serif; font-size: 21px; font-weight: 500; }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__header p { margin: 0; }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__header h2 { margin: 3px 0 0; font-size: 20px; line-height: 1.15; }
 .story-workspace-dream-agent-dialog__header button,
 .story-workspace-dream-agent-dialog__composer > button { padding: 0; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; cursor: pointer; font: inherit; font-size: 11px; }
 
 .story-workspace-dream-agent-dialog__history-shell { position: relative; min-height: 0; }
-.story-workspace-dream-agent-dialog__history { height: 100%; min-height: 0; box-sizing: border-box; padding: 15px 19px; overflow: auto; }
+.story-workspace-dream-agent-dialog__history { height: 100%; min-height: 0; box-sizing: border-box; padding: 16px 18px 18px; overflow: auto; overscroll-behavior: contain; }
 .story-workspace-dream-agent-dialog__message { margin: 0 0 16px; }
 .story-workspace-dream-agent-dialog__message p { margin: 5px 0 0; white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
 .story-workspace-dream-agent-dialog__message--user { padding-left: 26px; color: var(--dream-muted); }
@@ -456,21 +478,29 @@
 .story-workspace-dream-agent-dialog__composer textarea { width: 100%; box-sizing: border-box; padding: 8px 1px; color: var(--dream-ink); background: transparent; border: 0; border-bottom: 1px solid var(--dream-rule); border-radius: 0; font: inherit; font-size: 13px; line-height: 1.55; outline: none; resize: vertical; }
 .story-workspace-dream-agent-dialog__composer textarea:focus { border-bottom-color: var(--dream-action); box-shadow: 0 1px 0 var(--dream-action); }
 .story-workspace-dream-agent-dialog__composer > button { justify-self: end; min-height: 27px; font-weight: 700; }
-.story-workspace-dream-agent-dialog__workflow-actions { display: grid; min-width: 0; gap: 4px; padding: 3px 0 8px; border-bottom: 1px solid color-mix(in srgb, var(--dream-rule) 72%, transparent); }
-.story-workspace-dream-agent-dialog__workflow-actions > p { margin: 0 0 2px; color: var(--dream-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
-.story-workspace-dream-agent-dialog__workflow-actions > div,
-.story-workspace-dream-agent-dialog__workflow-overflow { display: grid; min-width: 0; }
-.story-workspace-dream-agent-dialog__workflow-action { display: flex; width: 100%; min-width: 0; min-height: 44px; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 1px; color: var(--dream-body); background: transparent; border: 0; border-bottom: 1px solid color-mix(in srgb, var(--dream-rule) 58%, transparent); border-radius: 0; cursor: pointer; text-align: left; }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__composer { grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 12px; padding: 10px 18px 14px; }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__composer > p { grid-column: 1 / -1; }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__composer label { min-width: 0; gap: 4px; }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__composer textarea { min-height: 52px; max-height: 124px; padding: 7px 1px; line-height: 1.45; }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__composer > button { min-width: 58px; min-height: 44px; padding: 0 13px; color: var(--dream-paper); background: var(--dream-action); border: 1px solid var(--dream-action); }
+.story-workspace-dream-agent-dialog--conversation .story-workspace-dream-agent-dialog__composer > button:disabled { color: var(--dream-muted); background: transparent; border-color: var(--dream-rule); }
+.story-workspace-dream-agent-dialog__workflow-actions { position: relative; display: grid; min-width: 0; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 12px; padding: 10px 18px 11px; border-top: 1px solid var(--dream-rule); background: color-mix(in srgb, var(--dream-paper) 96%, var(--dream-action) 4%); }
+.story-workspace-dream-agent-dialog__workflow-actions > p { grid-column: 1; align-self: center; margin: 0; color: var(--dream-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
+.story-workspace-dream-agent-dialog__workflow-primary { display: grid; min-width: 0; grid-column: 1 / -1; grid-row: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.story-workspace-dream-agent-dialog__workflow-action { display: grid; width: 100%; min-width: 0; min-height: 64px; align-content: start; gap: 5px; padding: 8px 9px; color: var(--dream-body); background: var(--dream-paper); border: 1px solid color-mix(in srgb, var(--dream-rule) 74%, transparent); border-radius: 0; cursor: pointer; text-align: left; }
 .story-workspace-dream-agent-dialog__workflow-action > span { display: grid; min-width: 0; gap: 2px; }
 .story-workspace-dream-agent-dialog__workflow-action strong { overflow-wrap: anywhere; color: var(--dream-ink); font-family: Georgia, "Times New Roman", serif; font-size: 13px; font-weight: 500; line-height: 1.35; }
 .story-workspace-dream-agent-dialog__workflow-action small { overflow-wrap: anywhere; color: var(--dream-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; line-height: 1.4; }
-.story-workspace-dream-agent-dialog__workflow-action > b { flex: 0 0 auto; color: var(--dream-action); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; font-weight: 600; letter-spacing: .05em; }
-.story-workspace-dream-agent-dialog__workflow-disclosure { min-height: 44px; justify-self: start; padding: 6px 1px; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; cursor: pointer; font: inherit; font-size: 11px; }
-.story-workspace-dream-agent-dialog__workflow-overflow { max-height: 176px; align-content: start; grid-auto-rows: max-content; overflow: auto; overscroll-behavior: contain; }
+.story-workspace-dream-agent-dialog__workflow-primary .story-workspace-dream-agent-dialog__workflow-description { display: none; }
+.story-workspace-dream-agent-dialog__workflow-action > b { justify-self: start; color: var(--dream-action); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; font-weight: 600; letter-spacing: .05em; }
+.story-workspace-dream-agent-dialog__workflow-disclosure { min-height: 32px; grid-column: 2; grid-row: 1; align-self: center; justify-self: end; padding: 4px 1px; color: var(--dream-action); background: transparent; border: 0; border-bottom: 1px solid currentColor; border-radius: 0; cursor: pointer; font: inherit; font-size: 10px; }
+.story-workspace-dream-agent-dialog__workflow-overflow { position: absolute; right: 18px; bottom: calc(100% - 1px); left: 18px; z-index: 3; display: grid; min-width: 0; max-height: min(300px, 42dvh); align-content: start; grid-auto-rows: max-content; gap: 6px; padding: 9px; overflow: auto; overscroll-behavior: contain; background: var(--dream-paper); border: 1px solid var(--dream-rule); box-shadow: 0 -10px 24px color-mix(in srgb, var(--dream-ink) 12%, transparent); }
+.story-workspace-dream-agent-dialog__workflow-overflow .story-workspace-dream-agent-dialog__workflow-action { min-height: 58px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
+.story-workspace-dream-agent-dialog__workflow-overflow .story-workspace-dream-agent-dialog__workflow-action > b { justify-self: end; }
 .story-workspace-dream-agent-dialog__workflow-overflow[hidden] { display: none; }
 .story-workspace-dream-agent-dialog button:disabled { cursor: not-allowed; opacity: .46; }
 .story-workspace-dream-agent-dialog__stream-announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-.story-workspace-dream-agent-dialog__status { display: flex; align-items: center; gap: 6px; margin: 9px 0 0; color: var(--dream-body) !important; font-family: inherit !important; font-size: 11px !important; letter-spacing: 0 !important; text-transform: none !important; }
+.story-workspace-dream-agent-dialog__status { display: flex; align-items: center; gap: 5px; margin-top: 5px !important; color: var(--dream-body) !important; font-family: inherit !important; font-size: 10px !important; letter-spacing: 0 !important; text-transform: none !important; }
 .story-workspace-dream-agent-dialog__status b { display: inline-grid; width: 14px; height: 14px; place-items: center; color: var(--dream-action); font-size: 13px; }
 
 .story-workspace-dream-agent-panel { display: grid; min-height: 0; grid-template-rows: auto minmax(120px, 1fr) auto; border-top: 1px solid var(--dream-rule); }
@@ -1202,6 +1232,11 @@
   .story-workspace-dream-agent-rail__preview,
   .story-workspace-dream-agent-rail__meta { grid-column: 1 / -1; }
   .story-workspace-dream-agent-dialog { position: fixed; inset: auto 8px 8px; width: auto; max-height: min(88dvh, 760px); min-height: min(520px, 82dvh); box-shadow: 0 0 0 100vmax color-mix(in srgb, var(--dream-ink) 24%, transparent), 0 12px 30px color-mix(in srgb, var(--dream-ink) 13%, transparent); }
+  .story-workspace-dream-agent-dialog--conversation { height: min(760px, calc(100dvh - 16px)); min-height: 0; max-height: none; grid-template-rows: auto minmax(120px, 1fr) auto auto; }
+  .story-workspace-dream-agent-dialog__workflow-primary { grid-template-columns: minmax(0, 1fr); }
+  .story-workspace-dream-agent-dialog__workflow-action { min-height: 58px; }
+  .story-workspace-dream-agent-dialog__workflow-disclosure { min-height: 44px; }
+  .story-workspace-dream-agent-dialog__workflow-overflow { right: 10px; left: 10px; max-height: min(300px, 48dvh); }
   .story-workspace-dream__confirmation { position: fixed; right: 0; bottom: 0; left: 0; min-height: 60px; gap: 12px; padding: 9px 18px; }
   .story-workspace-dream__confirmation > div:first-child { min-width: 0; }
   .story-workspace-dream__confirmation span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

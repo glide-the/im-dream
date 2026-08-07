@@ -179,7 +179,24 @@ def story_workspace_trusted_episode_action_instruction(
         raise StoryWorkspaceEpisodeActionSelectionError(
             "Episode action has no trusted vendor instruction"
         )
-    action_contract = (
+    script_review_contract = (
+        "\n<review_script_output_contract>\n"
+        "唯一规范输出：review-report.md；必须覆盖或更新该文件。"
+        "禁止创建 script-review-report.md、review-final.md 或其他别名。\n"
+        "frontmatter 必须显式包含 scope: script、"
+        "overall_verdict: APPROVED、reviewed_files 和 source_revisions。\n"
+        "reviewed_files 只能包含 script.md；不得把 review-report.md 自身列入其中。\n"
+        "source_revisions 必须且只能记录当前 script.md 的 server canonical sha256 revision；"
+        "不得猜测、硬编码或沿用旧 revision。\n"
+        "写入后必须重新读取 review-report.md 并核对文件名、scope、verdict、"
+        "reviewed_files 和 source_revisions。"
+        "任一校验失败时不得记录完成事实，不得继续资产、分镜、Prompt 或后续 Episode；"
+        "只返回缺失或无效项并立即停止。\n"
+        "</review_script_output_contract>"
+        if selected.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+        else ""
+    )
+    full_chain_review_contract = (
         "\n<review_full_chain_output_contract>\n"
         "唯一规范输出：review-report.md；必须覆盖或更新该文件。"
         "禁止创建 full-chain-review-report.md、review-final.md 或其他别名。\n"
@@ -202,6 +219,7 @@ def story_workspace_trusted_episode_action_instruction(
         if selected.action is StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN
         else ""
     )
+    action_contract = script_review_contract or full_chain_review_contract
     return (
         "<story_workspace_episode_action_private_v2>\n"
         f"目标 Episode：{episode}。只执行当前受控动作：{command}。"

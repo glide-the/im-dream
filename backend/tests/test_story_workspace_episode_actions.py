@@ -526,6 +526,48 @@ def test_workflow_projects_ordered_server_owned_action_options() -> None:
     assert all(option.can_dispatch is False for option in blocked.action_options[1:])
 
 
+def test_invalid_script_review_is_repairable_before_missing_prompts() -> None:
+    resolver = StoryWorkspaceEpisodeNextActionResolver()
+    surface = _surface(
+        {
+            "episode-outline.md",
+            "script.md",
+            "storyboard.yaml",
+            "review-report.md",
+        },
+        review_scope=StoryWorkspaceEpisodeReviewScope.SCRIPT,
+    )
+    report = next(
+        item
+        for item in surface.artifacts
+        if item.relative_key == "review-report.md"
+    )
+    object.__setattr__(
+        report,
+        "availability",
+        StoryWorkspaceEpisodeArtifactAvailability.INVALID,
+    )
+    object.__setattr__(report, "content_revision", None)
+    object.__setattr__(report, "mtime", None)
+    object.__setattr__(report, "size", None)
+    surface.auxiliary.review = None
+    facts = StoryWorkspaceEpisodeWorkflowFile(
+        workflow_run_id=RUN_ID,
+        episode_uid=EPISODE_ID,
+        revision=0,
+        completions=[],
+        updated_at=datetime.now(UTC),
+    )
+
+    workflow = resolver.project(surface, facts)
+
+    assert workflow.next_action.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+    assert workflow.next_action.can_dispatch is True
+    assert workflow.action_options[0].action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+    assert workflow.action_options[0].is_current is True
+    assert workflow.action_options[0].can_dispatch is True
+
+
 def test_legacy_artifact_progress_advances_past_current_review_and_storyboard() -> None:
     resolver = StoryWorkspaceEpisodeNextActionResolver()
     surface = _surface(
@@ -1943,7 +1985,8 @@ def test_full_chain_requires_current_approved_report_and_invalid_artifact_blocks
     object.__setattr__(report, "mtime", None)
     object.__setattr__(report, "size", None)
     invalid = resolver.project(base, approved_facts).next_action
-    assert invalid.can_dispatch is False
+    assert invalid.action is StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN
+    assert invalid.can_dispatch is True
 
 
 def test_bound_http_surface_includes_workflow_and_etag_changes_with_fact_revision() -> None:

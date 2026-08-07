@@ -450,6 +450,63 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
         )
         return episode_uid, authority, surface, facts
 
+    def _prepare_script_review_action(
+        self,
+        *,
+        review_report: str,
+    ) -> tuple[str, StoryWorkspaceEpisodeAuthority, object, object]:
+        vendor_story = (
+            Path(__file__).resolve().parents[2]
+            / "vendor"
+            / "drama-forge"
+            / "drama-forge"
+            / "stories"
+            / "didi-zhengzhou"
+        )
+        story = self.workspace / "stories" / "didi-zhengzhou"
+        shutil.copytree(vendor_story, story)
+        episode = story / "episodes" / "EP01"
+        shutil.rmtree(episode / "prompts")
+        shutil.rmtree(episode / "renders")
+        (episode / "review-report.md").write_text(
+            review_report,
+            encoding="utf-8",
+        )
+        self._seed_episode_action(action="recover_first_episode_binding")
+        bound = self._call(
+            "bind_first_episode",
+            {"workflowRunId": RUN_ID, "expectedBindingRevision": 0},
+        )
+        episode_uid = str(bound["episodeId"])
+        authority = StoryWorkspaceEpisodeAuthority(
+            workflow_run_id=RUN_ID,
+            episode_uid=episode_uid,
+            story_slug="didi-zhengzhou",
+            episode_code="EP01",
+        )
+        surface = StoryWorkspaceEpisodeArtifactService(self.workspace).read_surface(
+            RUN_ID,
+            episode_authority=authority,
+        )
+        facts = StoryWorkspaceEpisodeWorkflowFactService(self.workspace).read(
+            RUN_ID,
+            episode_uid,
+        )
+        self._seed_episode_action(
+            action=StoryWorkspaceEpisodeAction.REVIEW_SCRIPT.value,
+            episode_uid=episode_uid,
+            manifest_revision=surface.manifest_revision,
+            input_revision=(
+                StoryWorkspaceEpisodeNextActionResolver.action_input_revision(
+                    StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+                    surface,
+                    facts,
+                )
+            ),
+            facts_revision=facts.revision,
+        )
+        return episode_uid, authority, surface, facts
+
     @staticmethod
     def _valid_full_chain_report(surface: object) -> str:
         artifacts = {
@@ -488,6 +545,26 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
             "---\n"
             "# 完整链路审阅\n\n"
             "当前规范产物关联完整。\n"
+        )
+
+    @staticmethod
+    def _valid_script_review_report(surface: object) -> str:
+        script_revision = next(
+            item.content_revision
+            for item in surface.artifacts
+            if item.relative_key == "script.md"
+        )
+        return (
+            "---\n"
+            "scope: script\n"
+            "overall_verdict: APPROVED\n"
+            "reviewed_files:\n"
+            "  - script.md\n"
+            "source_revisions:\n"
+            f"  script.md: {script_revision}\n"
+            "---\n"
+            "# 剧本审阅\n\n"
+            "当前剧本审阅通过。\n"
         )
 
     def test_tool_contract_exposes_only_non_forgeable_arguments(self) -> None:
@@ -1224,6 +1301,95 @@ class StoryWorkspaceDreamMcpToolTest(unittest.TestCase):
                 for item in persisted.completions
             )
         )
+
+    def test_script_review_completion_rejects_noncanonical_report_without_fact(
+        self,
+    ) -> None:
+        episode_uid, _authority, _surface, facts = self._prepare_script_review_action(
+            review_report=(
+                "# EP01 剧本审阅\n\n"
+                "审阅结果：APPROVED\n"
+            ),
+        )
+
+        result = self._call(
+            "record_episode_workflow_completion",
+            {"workflowRunId": RUN_ID},
+        )
+
+        self.assertEqual(result["error"], "DREAM_WRITE_REJECTED")
+        self.assertEqual(result["reason"], "canonical_review_report_required")
+        persisted = StoryWorkspaceEpisodeWorkflowFactService(self.workspace).read(
+            RUN_ID,
+            episode_uid,
+        )
+        self.assertEqual(persisted.revision, facts.revision)
+        self.assertFalse(
+            any(
+                item.action is StoryWorkspaceEpisodeAction.REVIEW_SCRIPT
+                for item in persisted.completions
+            )
+        )
+
+    def test_script_review_completion_accepts_current_report_and_recommends_prompts(
+        self,
+    ) -> None:
+        episode_uid, authority, initial, facts = self._prepare_script_review_action(
+            review_report="# 待修复剧本审阅\n",
+        )
+        episode = (
+            self.workspace
+            / "stories"
+            / "didi-zhengzhou"
+            / "episodes"
+            / "EP01"
+        )
+        (episode / "review-report.md").write_text(
+            self._valid_script_review_report(initial),
+            encoding="utf-8",
+        )
+        surface = StoryWorkspaceEpisodeArtifactService(self.workspace).read_surface(
+            RUN_ID,
+            episode_authority=authority,
+        )
+        self._seed_episode_action(
+            action=StoryWorkspaceEpisodeAction.REVIEW_SCRIPT.value,
+            episode_uid=episode_uid,
+            manifest_revision=surface.manifest_revision,
+            input_revision=(
+                StoryWorkspaceEpisodeNextActionResolver.action_input_revision(
+                    StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+                    surface,
+                    facts,
+                )
+            ),
+            facts_revision=facts.revision,
+        )
+
+        result = self._call(
+            "record_episode_workflow_completion",
+            {"workflowRunId": RUN_ID},
+        )
+        replay = self._call(
+            "record_episode_workflow_completion",
+            {"workflowRunId": RUN_ID},
+        )
+
+        self.assertEqual(result["action"], "review_script")
+        self.assertEqual(replay, result)
+        persisted = StoryWorkspaceEpisodeWorkflowFactService(self.workspace).read(
+            RUN_ID,
+            episode_uid,
+        )
+        projection = StoryWorkspaceEpisodeNextActionResolver().project(
+            surface,
+            persisted,
+        )
+        self.assertEqual(
+            projection.next_action.action,
+            StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+        )
+        self.assertTrue(projection.next_action.can_dispatch)
 
     def test_full_chain_completion_rejects_missing_source_revisions(self) -> None:
         incomplete_review = (

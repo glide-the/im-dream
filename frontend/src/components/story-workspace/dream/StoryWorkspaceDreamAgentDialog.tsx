@@ -105,6 +105,7 @@ export function StoryWorkspaceDreamAgentDialog({
   const workflowOverflowId = useId();
   const workflowOverflowTriggerRef = useRef<HTMLButtonElement>(null);
   const workflowActionRefs = useRef(new Map<string, HTMLButtonElement>());
+  const pendingInitialWorkflowFocusRef = useRef(initialWorkflowFocus);
   const inputHint = storyWorkspaceDreamAgentInputHint(agent);
   const status = storyWorkspaceDreamAgentDialogStatus(agent);
   const { markRead, snapshot, streamText } = agent;
@@ -173,15 +174,27 @@ export function StoryWorkspaceDreamAgentDialog({
   }, [workflowActionGroups.overflow.length]);
 
   useEffect(() => {
-    if (initialWorkflowFocus === null) return undefined;
+    pendingInitialWorkflowFocusRef.current = initialWorkflowFocus;
+    if (initialWorkflowFocus === null) return;
     if (initialWorkflowFocus.wasOverflow && workflowActionGroups.overflow.length > 0) {
       setWorkflowOverflowOpen(true);
     }
+  }, [initialWorkflowFocus, workflowActionGroups.overflow.length]);
+
+  useEffect(() => {
+    const pendingFocus = pendingInitialWorkflowFocusRef.current;
+    if (pendingFocus === null) return undefined;
+    if (
+      pendingFocus.wasOverflow
+      && workflowActionGroups.overflow.length > 0
+      && !workflowOverflowOpen
+    ) return undefined;
+    pendingInitialWorkflowFocusRef.current = null;
     const frame = requestAnimationFrame(() => {
-      const action = workflowActionRefs.current.get(initialWorkflowFocus.actionId);
+      const action = workflowActionRefs.current.get(pendingFocus.actionId);
       if (action !== undefined) {
         action.focus();
-      } else if (initialWorkflowFocus.wasOverflow) {
+      } else if (pendingFocus.wasOverflow) {
         workflowOverflowTriggerRef.current?.focus();
       } else {
         headingRef.current?.focus();
@@ -189,9 +202,9 @@ export function StoryWorkspaceDreamAgentDialog({
     });
     return () => cancelAnimationFrame(frame);
   }, [
-    initialWorkflowFocus,
     workflowActionGroups.overflow.length,
     workflowActionIdentity,
+    workflowOverflowOpen,
   ]);
 
   useEffect(() => () => {
@@ -276,8 +289,14 @@ export function StoryWorkspaceDreamAgentDialog({
       >
         <span>
           <strong>{action.label}</strong>
-          {action.description && <small>{action.description}</small>}
-          <small>{action.displayCommand}</small>
+          {action.description && (
+            <small className="story-workspace-dream-agent-dialog__workflow-description">
+              {action.description}
+            </small>
+          )}
+          <small className="story-workspace-dream-agent-dialog__workflow-command">
+            {action.displayCommand}
+          </small>
         </span>
         <b>{
           action.pending
@@ -296,16 +315,18 @@ export function StoryWorkspaceDreamAgentDialog({
     <div
       aria-labelledby="story-workspace-dream-agent-dialog-title"
       aria-modal={isNarrow}
-      className="story-workspace-dream-agent-dialog"
+      className="story-workspace-dream-agent-dialog story-workspace-dream-agent-dialog--conversation"
       id="story-workspace-dream-agent-dialog"
       ref={dialogRef}
       role="dialog"
     >
       <header className="story-workspace-dream-agent-dialog__header">
-        <div>
-          <p>Dream Agent</p>
+        <div className="story-workspace-dream-agent-dialog__heading-copy">
+          <div className="story-workspace-dream-agent-dialog__kicker">
+            <p>Dream Agent</p>
+            <span>{deckName} · Run …{runId.slice(-6)}</span>
+          </div>
           <h2 id="story-workspace-dream-agent-dialog-title" ref={headingRef} tabIndex={-1}>Dream Agent</h2>
-          <span>{deckName} · Run …{runId.slice(-6)}</span>
           <p className="story-workspace-dream-agent-dialog__status" role="status">
             <b aria-hidden="true">{status.icon}</b>{status.label}
           </p>
@@ -340,9 +361,7 @@ export function StoryWorkspaceDreamAgentDialog({
           onResolve={agent.confirmTool}
         />
       ) : (
-        <form className="story-workspace-dream-agent-dialog__composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
-          {inputHint && <p role="status">{inputHint}</p>}
-          {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
+        <>
           {workflowActions.length > 0 && (
             <div
               aria-label="Episode 工作流操作"
@@ -350,7 +369,9 @@ export function StoryWorkspaceDreamAgentDialog({
               role="group"
             >
               <p>当前与后续 Episode</p>
-              <div>{workflowActionGroups.direct.map(workflowActionButton)}</div>
+              <div className="story-workspace-dream-agent-dialog__workflow-primary">
+                {workflowActionGroups.direct.map(workflowActionButton)}
+              </div>
               {workflowActionGroups.overflow.length > 0 && (
                 <>
                   <button
@@ -372,21 +393,25 @@ export function StoryWorkspaceDreamAgentDialog({
               )}
             </div>
           )}
-          <label>
-            <span>给 Dream Agent 留言</span>
-            <textarea
-              aria-label="给 Dream Agent 留言"
-              disabled={!agent.snapshot?.canSend || agent.isSending}
-              onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
-              onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
-              placeholder="写下后续创作指令…"
-              ref={inputRef}
-              rows={3}
-              value={draft}
-            />
-          </label>
-          <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
-        </form>
+          <form className="story-workspace-dream-agent-dialog__composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
+            {inputHint && <p role="status">{inputHint}</p>}
+            {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
+            <label>
+              <span>给 Dream Agent 留言</span>
+              <textarea
+                aria-label="给 Dream Agent 留言"
+                disabled={!agent.snapshot?.canSend || agent.isSending}
+                onChange={(event) => { pendingKeyRef.current = null; setDraft(event.currentTarget.value); }}
+                onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
+                placeholder="写下后续创作指令…"
+                ref={inputRef}
+                rows={2}
+                value={draft}
+              />
+            </label>
+            <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
+          </form>
+        </>
       )}
     </div>
   );
