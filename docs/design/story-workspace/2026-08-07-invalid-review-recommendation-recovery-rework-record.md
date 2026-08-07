@@ -48,9 +48,9 @@
 3. 服务端按 Prompt 产物阶段选择 reviewer 修复动作，并只允许两类审阅动作修复 invalid report：采用。
 
 最终决策  
-→ `prompts/` 尚未生成时，invalid canonical report 投影为 `review_script`；Prompt 包已存在时投影为 `review_full_chain`。  
-→ 两个 reviewer 修复动作可以派发；Outline、script、storyboard、prompts 或 renders 等其他 invalid artifact 仍 blocked。  
-→ UI 继续只消费服务端 action options；无需也禁止解析“第一集产物进度”来拼按钮。
+→ `prompts/` 尚未生成时，invalid canonical report 投影为 `review_script`；Prompt 包已存在时投影为 `review_full_chain`（`backend/services/story_workspace/episode_action_service.py:758-769`）。
+→ 两个 reviewer 修复动作可以派发；Outline、script、storyboard、prompts 或 renders 等其他 invalid artifact 仍 blocked（`backend/services/story_workspace/episode_action_service.py:780-798`）。
+→ UI 继续只消费服务端 action options；无需也禁止解析“第一集产物进度”来拼按钮。端到端 projection 断言推荐 label、action ID 与 canDispatch（`backend/tests/test_story_workspace_current_episode_action_projection.py:229-258`）。
 
 影响范围  
 → Episode next-action resolver、Dream Agent trusted instruction、MCP completion validator、current/multi-Episode action projection tests。
@@ -68,7 +68,7 @@
 → 用户已经多次点击审阅，但后续的 Prompt、渲染与下一 Episode 状态仍未打开。
 
 最终决策  
-→ `review_script` 的私有指令必须要求唯一规范输出 `review-report.md`，frontmatter 包含：
+→ `review_script` 的私有指令必须要求唯一规范输出 `review-report.md`，frontmatter 包含以下字段（`backend/services/story_workspace/episode_workflow_instruction.py:182-197`）：
 
 ```yaml
 scope: script
@@ -79,8 +79,8 @@ source_revisions:
   script.md: <current server canonical sha256>
 ```
 
-→ `reviewed_files` 只能包含 `script.md`；`source_revisions` 必须且只能等于当前 server canonical script revision。写入后 Agent 必须重读核验，任何失败都不得记录完成，不得继续资产、分镜、Prompt、渲染或下一 Episode。  
-→ 这些 Rule 不只存在于 Prompt：后端 completion validator 使用相同合同复核，避免 Agent 自报成功拥有 workflow truth。
+→ `reviewed_files` 只能包含 `script.md`；`source_revisions` 必须且只能等于当前 server canonical script revision。写入后 Agent 必须重读核验，任何失败都不得记录完成，不得继续资产、分镜、Prompt、渲染或下一 Episode（`backend/services/story_workspace/episode_workflow_instruction.py:188-194`）。
+→ 这些 Rule 不只存在于 Prompt：后端 completion validator 使用相同合同复核，避免 Agent 自报成功拥有 workflow truth（`backend/services/story_workspace/episode_completion_validator.py:50-87`、`187-233`）。完成前后还会验证服务端 action 已离开 `review_script`（同文件 `236-291`）。
 
 ## 状态转换
 
@@ -117,6 +117,8 @@ Truth ownership 未改变：artifact manifest 拥有 availability/revision；can
 - 改动工作区中的前端 TS/TSX ESLint：0 errors；CSS 不在 ESLint 配置内，报告 1 个 ignored warning。
 - Playwright Node seam：`1 passed (1.3s)`，覆盖两个直接操作、更多操作、窄屏与焦点行为。
 
+对应自动化断言：非规范报告拒绝且不写 facts（`backend/tests/test_story_workspace_dream_mcp_tool.py:1305-1332`）；规范报告接受、幂等重放并推荐 Prompt（同文件 `1334-1392`）。
+
 ## 真实 Run 只读与临时副本证据
 
 真实 Run 当前未被修改：
@@ -142,5 +144,5 @@ Truth ownership 未改变：artifact manifest 拥有 availability/revision；can
 - 运行中的 8765 是无 hot reload 的 debugpy Python 进程，因此不会在未重启前加载本次源码。为遵守“不关闭用户原有服务”，未替用户重启；源码、测试与临时副本证据均已完成。
 - 本轮未触发真实 reviewer、模型、Prompt 生成、渲染或付费调用。
 - 未修改 `backend/database.py`，未使用 localStorage 作为 workflow truth，未暴露 slash command 参数、绝对路径或凭证。
-- 工作区另有 Dream Agent Dialog/CSS/Playwright 布局改动，属于其他工作线；本轮不覆盖、不格式化、不纳入本修复提交。
+- 并行工作线的 Dream Agent Dialog/CSS/Playwright 布局改动与本轮后端修复被外部进程一并写入并推送为 `feb3262`；本轮没有回滚、改写或冒充该并发提交。当前 `.claude/worktrees/` 为其他工具生成的未跟踪目录，未纳入提交。
 - 未执行归档操作。
