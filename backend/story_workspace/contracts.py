@@ -419,7 +419,7 @@ class StoryWorkspaceDreamAgentToolConfirmation(_StoryWorkspaceDreamWireModel):
         max_length=STORY_WORKSPACE_DREAM_AGENT_TOOL_CALL_ID_MAX,
         pattern=r"^[A-Za-z0-9._:/-]+$",
     )
-    kind: Literal["approval", "ask_user", "sandbox_network"]
+    kind: Literal["approval", "ask_user", "sandbox_network", "reject_only"]
     tool_name: str = Field(
         min_length=1,
         max_length=80,
@@ -439,7 +439,7 @@ class StoryWorkspaceDreamAgentToolConfirmation(_StoryWorkspaceDreamWireModel):
             if self.network is None or self.questions is not None:
                 raise ValueError("Sandbox confirmation requires network only")
         elif self.questions is not None or self.network is not None:
-            raise ValueError("Approval confirmation cannot carry typed details")
+            raise ValueError("Untyped confirmation cannot carry typed details")
         return self
 
 

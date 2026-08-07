@@ -315,7 +315,7 @@ export interface StoryWorkspaceDreamAgentToolConfirmationQuestion {
 
 export interface StoryWorkspaceDreamAgentToolConfirmation {
   readonly toolCallId: string;
-  readonly kind: 'approval' | 'ask_user' | 'sandbox_network';
+  readonly kind: 'approval' | 'ask_user' | 'sandbox_network' | 'reject_only';
   readonly toolName: string;
   readonly questions?: readonly StoryWorkspaceDreamAgentToolConfirmationQuestion[];
   readonly network?: {

@@ -707,7 +707,8 @@ function storyWorkspaceParseDreamAgentToolConfirmation(value: unknown): StoryWor
       'toolCallId', 'kind', 'toolName', 'questions', 'network',
     ])
     || typeof value.toolCallId !== 'string' || !/^[A-Za-z0-9._:/-]+$/.test(value.toolCallId) || value.toolCallId.length > 255
-    || (value.kind !== 'approval' && value.kind !== 'ask_user' && value.kind !== 'sandbox_network')
+    || (value.kind !== 'approval' && value.kind !== 'ask_user'
+      && value.kind !== 'sandbox_network' && value.kind !== 'reject_only')
     || typeof value.toolName !== 'string' || !/^[A-Za-z0-9 .:-]+$/.test(value.toolName)
     || value.toolName.length > 80) return null;
   const questions = Array.isArray(value.questions)
@@ -730,7 +731,8 @@ function storyWorkspaceParseDreamAgentToolConfirmation(value: unknown): StoryWor
   }
   if (value.kind === 'ask_user' && (!questions?.length || network !== undefined)) return null;
   if (value.kind === 'sandbox_network' && (!network || questions !== undefined)) return null;
-  if (value.kind === 'approval' && (questions !== undefined || network !== undefined)) return null;
+  if ((value.kind === 'approval' || value.kind === 'reject_only')
+    && (questions !== undefined || network !== undefined)) return null;
   return {
     toolCallId: value.toolCallId,
     kind: value.kind,

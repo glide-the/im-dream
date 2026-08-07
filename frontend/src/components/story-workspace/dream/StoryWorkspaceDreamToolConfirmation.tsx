@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- exports a deterministic answer-submission seam for Node verification. */
 // [Input] Server-allowlisted Dream tool decision and run-bound resolve callback.
 // [Output] Dream-paper approval, question and network confirmation surface.
 // [Pos] Dream Agent tool-confirmation view; it never consumes generic Chat parts.
@@ -32,8 +33,25 @@ function storyWorkspaceDreamInitialAnswers(
   ]));
 }
 
+export function storyWorkspaceDreamSubmittedAnswers(
+  questions: readonly StoryWorkspaceDreamAgentToolConfirmationQuestion[],
+  answers: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  return questions.reduce<Record<string, unknown>>((submitted, question) => {
+    const key = storyWorkspaceDreamQuestionKey(question);
+    const value = answers[key];
+    const isEmpty = Array.isArray(value)
+      ? value.length === 0
+      : value === '' || value === null || value === undefined;
+    if (!question.required && isEmpty) return submitted;
+    submitted[key] = value;
+    return submitted;
+  }, {});
+}
+
 function storyWorkspaceDreamToolTitle(confirmation: StoryWorkspaceDreamAgentToolConfirmation): string {
   if (confirmation.kind === 'ask_user') return 'Dream Agent 需要你的选择';
+  if (confirmation.kind === 'reject_only') return '此请求需要安全处理';
   if (confirmation.kind === 'sandbox_network') {
     return confirmation.network?.host
       ? `允许访问 ${confirmation.network.host}`
@@ -47,8 +65,9 @@ function storyWorkspaceDreamAnswersAreValid(
   answers: Readonly<Record<string, unknown>>,
 ): boolean {
   return questions.every((question) => {
-    if (!question.required) return true;
     const value = answers[storyWorkspaceDreamQuestionKey(question)];
+    if (question.type === 'number' && value !== '' && !Number.isInteger(value)) return false;
+    if (!question.required) return true;
     return Array.isArray(value) ? value.length > 0 : value !== '' && value !== null && value !== undefined;
   });
 }
@@ -100,7 +119,11 @@ export function StoryWorkspaceDreamToolConfirmation({
 
   const reject = () => void onResolve(false, '用户拒绝本次工具操作');
   const approve = () => void onResolve(true);
-  const submitAnswers = () => void onResolve(true, undefined, answers);
+  const submitAnswers = () => void onResolve(
+    true,
+    undefined,
+    storyWorkspaceDreamSubmittedAnswers(questions, answers),
+  );
 
   return (
     <section
@@ -203,6 +226,7 @@ export function StoryWorkspaceDreamToolConfirmation({
                     maxLength={1000}
                     min={question.type === 'number' ? -1_000_000_000 : undefined}
                     required={question.required}
+                    step={question.type === 'number' ? 1 : undefined}
                     type={question.type === 'number' ? 'number' : 'text'}
                     value={String(value ?? '')}
                   />
@@ -217,7 +241,9 @@ export function StoryWorkspaceDreamToolConfirmation({
         </form>
       ) : (
         <div className="story-workspace-dream-tool-confirmation__decision">
-          {confirmation.kind === 'sandbox_network' ? (
+          {confirmation.kind === 'reject_only' ? (
+            <p>原始请求无法安全展示。你可以拒绝本次操作，让 Dream Agent 回到可继续处理的状态。</p>
+          ) : confirmation.kind === 'sandbox_network' ? (
             <dl>
               <div><dt>目标</dt><dd>{confirmation.network?.host ?? '未提供主机名'}</dd></div>
               <div><dt>规则</dt><dd>{confirmation.network?.policy === 'open' ? '开放网络' : confirmation.network?.policy === 'allowlist' ? '仅允许清单内地址' : confirmation.network?.policy === 'deny' ? '网络访问受限' : '网络规则待核验'}</dd></div>
@@ -226,8 +252,12 @@ export function StoryWorkspaceDreamToolConfirmation({
             <p>此操作需要你的明确许可。Dream 工作台不会展示原始工具参数或隐藏运行信息。</p>
           )}
           <div className="story-workspace-dream-tool-confirmation__actions">
-            <button disabled={isResolving} onClick={reject} type="button">拒绝</button>
-            <button disabled={isResolving} onClick={approve} type="button">{isResolving ? '处理中…' : '允许本次操作'}</button>
+            <button disabled={isResolving} onClick={reject} type="button">
+              {confirmation.kind === 'reject_only' ? (isResolving ? '处理中…' : '拒绝并继续') : '拒绝'}
+            </button>
+            {confirmation.kind !== 'reject_only' ? (
+              <button disabled={isResolving} onClick={approve} type="button">{isResolving ? '处理中…' : '允许本次操作'}</button>
+            ) : null}
           </div>
         </div>
       )}

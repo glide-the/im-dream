@@ -6,6 +6,7 @@ import { expect, test } from '@playwright/test';
 // @ts-expect-error Playwright Node seam uses a built-in omitted from browser app types.
 import { readFileSync } from 'node:fs';
 import { storyWorkspaceDreamAgentPanelFocusTarget } from '../storyWorkspaceDreamAgentFocus';
+import { storyWorkspaceDreamSubmittedAnswers } from '../StoryWorkspaceDreamToolConfirmation';
 
 const CONFIRMATION = readFileSync(new URL('../StoryWorkspaceDreamToolConfirmation.tsx', import.meta.url), 'utf8');
 const DIALOG = readFileSync(new URL('../StoryWorkspaceDreamAgentDialog.tsx', import.meta.url), 'utf8');
@@ -28,6 +29,13 @@ test('confirmation UI supports questions, safe approvals and network decisions w
   expect(CONFIRMATION).toContain('待你确认');
   expect(CONFIRMATION).toContain("confirmation.kind === 'ask_user'");
   expect(CONFIRMATION).toContain("confirmation.kind === 'sandbox_network'");
+  expect(CONFIRMATION).toContain("confirmation.kind === 'reject_only'");
+  expect(CONFIRMATION).toContain('原始请求无法安全展示');
+  expect(CONFIRMATION).toContain('拒绝并继续');
+  expect(CONFIRMATION).toContain('step={question.type === \'number\' ? 1 : undefined}');
+  expect(CONFIRMATION).toContain('Number.isInteger(value)');
+  expect(CONFIRMATION).toContain('if (!question.required) return true;');
+  expect(CONFIRMATION).toContain('disabled={isResolving || !answersAreValid}');
   expect(CONFIRMATION).toContain('用户拒绝本次工具操作');
   expect(CONFIRMATION).toContain('aria-busy={isResolving}');
   expect(CONFIRMATION).toContain('question.id');
@@ -40,6 +48,51 @@ test('confirmation UI supports questions, safe approvals and network decisions w
   expect(CONFIRMATION).not.toContain('JSON.stringify(confirmation');
   expect(CONFIRMATION).not.toContain('confirmation.title');
   expect(CONFIRMATION).not.toContain('option.description');
+});
+
+test('optional empty answers are omitted before submission', () => {
+  const questions = [
+    { id: 'number', question: '可选数字', type: 'number', required: false },
+    {
+      id: 'select',
+      question: '可选单选',
+      type: 'select',
+      required: false,
+      options: [{ label: '一', value: 'one' }, { label: '二', value: 'two' }],
+    },
+    { id: 'text', question: '可选文本', type: 'text', required: false },
+    {
+      id: 'multiSelect',
+      question: '可选多选',
+      type: 'select',
+      required: false,
+      multiSelect: true,
+      options: [{ label: '一', value: 'one' }, { label: '二', value: 'two' }],
+    },
+    { id: 'checkbox', question: '可选确认', type: 'checkbox', required: false },
+    { id: 'required', question: '必填文本', type: 'text', required: true },
+  ] as const;
+
+  expect(
+    storyWorkspaceDreamSubmittedAnswers(questions, {
+      number: '',
+      select: '',
+      text: '',
+      multiSelect: [],
+      required: '保留',
+    }),
+  ).toEqual({ required: '保留' });
+
+  expect(
+    storyWorkspaceDreamSubmittedAnswers(questions, {
+      number: 0,
+      select: '',
+      text: '',
+      multiSelect: [],
+      checkbox: false,
+      required: '保留',
+    }),
+  ).toEqual({ number: 0, checkbox: false, required: '保留' });
 });
 
 test('narrow Dream dialog makes every background branch inert while open', () => {

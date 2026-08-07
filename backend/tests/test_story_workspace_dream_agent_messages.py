@@ -820,7 +820,7 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         ):
             self.assertNotIn(secret, output)
 
-    def test_ask_user_sensitive_public_fields_fail_closed_before_sse(self) -> None:
+    def test_ask_user_sensitive_public_fields_fail_closed_as_reject_only(self) -> None:
         unsafe_inputs = (
             {
                 "questions": [{
@@ -1022,7 +1022,14 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                         actor_id=ACTOR_ID,
                     )
                 )))
-                self.assertNotIn("event: tool_confirmation_requested", output)
+                self.assertEqual(
+                    output.count("event: tool_confirmation_requested"),
+                    1,
+                )
+                self.assertIn('"kind":"reject_only"', output)
+                self.assertIn(f'"toolCallId":"tool-unsafe-{index}"', output)
+                self.assertNotIn('"questions"', output)
+                self.assertNotIn('"input"', output)
 
         safe_factory = _ToolConfirmationFactory()
         safe_factory.frames = [
@@ -1092,6 +1099,84 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         self.assertIn("是否继续推进 /drama-plan？", safe_output)
         self.assertIn("是否继续 /drama-script (EP01) 的创作？", safe_output)
         self.assertIn("角色沿山路返回旧城，这段剧情是否保留？", safe_output)
+
+    def test_unrenderable_ask_user_projects_reject_only_confirmation(self) -> None:
+        def pending_service() -> tuple[
+            StoryWorkspaceDreamAgentMessageService,
+            _ToolConfirmationFactory,
+        ]:
+            factory = _ToolConfirmationFactory()
+            factory.frames = [
+                "data: " + json.dumps({
+                    "type": "tool-approval-request",
+                    "toolCallId": "tool-unsafe-question",
+                    "toolName": "AskUserQuestion",
+                    "input": {
+                        "questions": [{
+                            "question": "请粘贴 Authorization bearer token",
+                            "placeholder": "/Users/dreamer/private/story.md",
+                        }],
+                    },
+                }, ensure_ascii=False) + "\n\n",
+            ]
+            return (
+                StoryWorkspaceDreamAgentMessageService(
+                    self.db,
+                    thread_factory=factory,
+                ),
+                factory,
+            )
+
+        service, factory = pending_service()
+        output = "".join(asyncio.run(_collect(service.events(
+            thread_id=THREAD_ID,
+            run_id=RUN_ID,
+            actor_id=ACTOR_ID,
+        ))))
+        self.assertEqual(output.count("event: tool_confirmation_requested"), 1)
+        self.assertIn('"kind":"reject_only"', output)
+        self.assertIn('"toolCallId":"tool-unsafe-question"', output)
+        self.assertNotIn("Authorization bearer token", output)
+        self.assertNotIn("/Users/dreamer/private/story.md", output)
+
+        approve_service, approve_factory = pending_service()
+        with self.assertRaisesRegex(
+            StoryWorkspaceDreamAgentMessageError,
+            "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+        ):
+            asyncio.run(_act_while_tool_confirmation_pending(
+                approve_service,
+                lambda: approve_service.confirm_tool(
+                    run_id=RUN_ID,
+                    thread_id=THREAD_ID,
+                    actor_id=ACTOR_ID,
+                    command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                        toolCallId="tool-unsafe-question",
+                        approved=True,
+                    ),
+                ),
+            ))
+        self.assertFalse(
+            any(item[0] == "confirm" for item in approve_factory.confirmations)
+        )
+
+        reject_service, reject_factory = pending_service()
+        accepted = asyncio.run(_act_while_tool_confirmation_pending(
+            reject_service,
+            lambda: reject_service.confirm_tool(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                command=StoryWorkspaceDreamAgentToolConfirmationCommand(
+                    toolCallId="tool-unsafe-question",
+                    approved=False,
+                    reason="无法安全展示工具问题",
+                ),
+            ),
+        ))
+        self.assertTrue(accepted.resolved)
+        self.assertEqual(reject_factory.confirmations[-1][1]["approved"], False)
+        self.assertIsNone(reject_factory.confirmations[-1][1]["answers"])
 
     def test_ask_user_public_question_lengths_and_keys_are_one_contract(self) -> None:
         from pydantic import ValidationError
@@ -1186,7 +1271,17 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 actor_id=ACTOR_ID,
             )
         )))
-        self.assertNotIn("event: tool_confirmation_requested", output)
+        self.assertEqual(output.count("event: tool_confirmation_requested"), 3)
+        self.assertEqual(output.count('"kind":"reject_only"'), 3)
+        self.assertNotIn(question_text + "超", output)
+        self.assertNotIn(
+            "v" * (STORY_WORKSPACE_DREAM_AGENT_QUESTION_OPTION_MAX + 1),
+            output,
+        )
+        self.assertNotIn(
+            "提" * (STORY_WORKSPACE_DREAM_AGENT_QUESTION_PLACEHOLDER_MAX + 1),
+            output,
+        )
 
         raw_id = "sk-ant-api03-" + "R" * 48
         raw_id_factory = _ToolConfirmationFactory()
@@ -1238,10 +1333,15 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
                 actor_id=ACTOR_ID,
             )
         )))
-        self.assertNotIn("event: tool_confirmation_requested", duplicate_text_output)
+        self.assertEqual(
+            duplicate_text_output.count("event: tool_confirmation_requested"),
+            1,
+        )
+        self.assertIn('"kind":"reject_only"', duplicate_text_output)
+        self.assertNotIn("同一个展示问题", duplicate_text_output)
         with self.assertRaisesRegex(
             StoryWorkspaceDreamAgentMessageError,
-            "DREAM_AGENT_TOOL_CONFIRMATION_NOT_READY",
+            "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
         ):
             duplicate_text_service.confirm_tool(
                 run_id=RUN_ID,

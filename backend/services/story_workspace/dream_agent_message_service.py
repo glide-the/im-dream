@@ -839,11 +839,12 @@ def story_workspace_project_dream_tool_confirmation(
     elif _is_ask_user_tool(tool_name):
         questions = _safe_ask_user_questions(data.get("input"))
         if questions is None:
-            return None
-        confirmation.update({
-            "kind": "ask_user",
-            "questions": questions,
-        })
+            confirmation["kind"] = "reject_only"
+        else:
+            confirmation.update({
+                "kind": "ask_user",
+                "questions": questions,
+            })
     return confirmation
 
 
@@ -1105,6 +1106,11 @@ def _validate_dream_public_confirmation_answers(
                 422,
             )
         return None
+    if confirmation.get("kind") == "reject_only":
+        raise StoryWorkspaceDreamAgentMessageError(
+            "DREAM_AGENT_TOOL_CONFIRMATION_INVALID",
+            422,
+        )
     if confirmation.get("kind") != "ask_user":
         if answers:
             raise StoryWorkspaceDreamAgentMessageError(

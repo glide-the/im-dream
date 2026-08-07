@@ -183,6 +183,26 @@ test('parses only the backend-isomorphic Dream tool-confirmation projection', ()
   expect(networkRequested && 'confirmation' in networkRequested
     ? networkRequested.confirmation.network
     : null).toEqual({ host: 'example.test', policy: 'deny' });
+
+  const rejectOnlyRequested = storyWorkspaceParseDreamAgentEvent(
+    'tool_confirmation_requested',
+    JSON.stringify({
+      turnId: 'turn-1',
+      confirmation: {
+        toolCallId: 'tool-unrenderable',
+        kind: 'reject_only',
+        toolName: 'AskUserQuestion',
+      },
+    }),
+    'turn-1:6',
+  );
+  expect(rejectOnlyRequested && 'confirmation' in rejectOnlyRequested
+    ? rejectOnlyRequested.confirmation
+    : null).toEqual({
+    toolCallId: 'tool-unrenderable',
+    kind: 'reject_only',
+    toolName: 'AskUserQuestion',
+  });
 });
 
 test('rejects title, option description, raw input and path-shaped tool names', () => {
