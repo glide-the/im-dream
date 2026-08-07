@@ -40,6 +40,52 @@ _VENDOR_ACTIONS = (
     StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE,
 )
 
+_STAGE_ACTIONS = {
+    StoryWorkspaceEpisodeAction.WRITE_SCRIPT: (
+        StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
+    ),
+    StoryWorkspaceEpisodeAction.REVIEW_SCRIPT: (
+        StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+    ),
+    StoryWorkspaceEpisodeAction.REFRESH_ASSETS: (
+        StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+    ),
+    StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD: (
+        StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+        StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+    ),
+    StoryWorkspaceEpisodeAction.GENERATE_PROMPTS: (
+        StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+    ),
+    StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN: (
+        StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+        StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
+        StoryWorkspaceEpisodeAction.VALIDATE_EPISODE,
+        StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE,
+    ),
+    StoryWorkspaceEpisodeAction.VALIDATE_EPISODE: (
+        StoryWorkspaceEpisodeAction.VALIDATE_EPISODE,
+        StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
+        StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+        StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+        StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+        StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+    ),
+}
+
+_STAGE_EXECUTABLE_REWORKS = {
+    StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN: {
+        StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
+    },
+    StoryWorkspaceEpisodeAction.VALIDATE_EPISODE: {
+        StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
+        StoryWorkspaceEpisodeAction.REVIEW_SCRIPT,
+        StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+        StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+        StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+    },
+}
+
 
 @dataclass(frozen=True)
 class StoryWorkspaceEpisodeDescriptor:
@@ -90,6 +136,10 @@ class StoryWorkspaceEpisodeActionSnapshot:
     next_entry_can_dispatch: bool
     project_has_next_episode: bool
     next_input_revision: str | None = None
+    current_action_input_revisions: dict[
+        StoryWorkspaceEpisodeAction,
+        str,
+    ] | None = None
 
     def __post_init__(self) -> None:
         if re.fullmatch(r"run_[0-9a-f]{32}", self.run_id) is None:
@@ -108,6 +158,19 @@ class StoryWorkspaceEpisodeActionSnapshot:
             r"sha256:[0-9a-f]{64}", self.next_input_revision
         ) is None:
             raise ValueError("next Episode actions require an opaque input revision")
+        for action, revision in (self.current_action_input_revisions or {}).items():
+            if action not in _VENDOR_ACTIONS or re.fullmatch(
+                r"sha256:[0-9a-f]{64}",
+                revision,
+            ) is None:
+                raise ValueError("current action input revisions must be canonical")
+        if (
+            self.current_action_input_revisions is not None
+            and self.current_action in self.current_action_input_revisions
+            and self.current_action_input_revisions[self.current_action]
+            != self.current_input_revision
+        ):
+            raise ValueError("current action revision must match the snapshot revision")
         if self.next_episode is not None and self.next_episode.relation != "next":
             raise ValueError("next_episode must use the next relation")
         if self.next_entry_action not in {
@@ -365,15 +428,23 @@ class StoryWorkspaceCurrentEpisodeActionSnapshotBuilder:
             surface,
             facts,
         )
+        current_action_input_revisions = {
+            action: self._resolver.action_input_revision(action, surface, facts)
+            for action in _VENDOR_ACTIONS
+        }
         return StoryWorkspaceEpisodeActionSnapshot(
             run_id=facts.workflow_run_id,
             current_episode=current_episode,
             current_action=current_action,
             current_can_dispatch=workflow.next_action.can_dispatch,
-            current_input_revision=self._resolver.action_input_revision(
-                current_action,
-                surface,
-                facts,
+            current_input_revision=(
+                current_action_input_revisions[current_action]
+                if current_action in current_action_input_revisions
+                else self._resolver.action_input_revision(
+                    current_action,
+                    surface,
+                    facts,
+                )
             ),
             storyboard_current=storyboard_current,
             storyboard_can_regenerate=(
@@ -386,6 +457,7 @@ class StoryWorkspaceCurrentEpisodeActionSnapshotBuilder:
             next_entry_can_dispatch=False,
             project_has_next_episode=False,
             next_input_revision=None,
+            current_action_input_revisions=current_action_input_revisions,
         )
 
 
@@ -413,10 +485,10 @@ class StoryWorkspaceMultiEpisodeActionProjector:
     ) -> str:
         payload = {
             "action": action.value,
-            "input_revision": (
-                snapshot.next_input_revision
-                if descriptor.relation == "next"
-                else snapshot.current_input_revision
+            "input_revision": StoryWorkspaceMultiEpisodeActionProjector._input_revision(
+                snapshot,
+                descriptor,
+                action,
             ),
             "intent": intent,
             "relation": descriptor.relation,
@@ -433,6 +505,21 @@ class StoryWorkspaceMultiEpisodeActionProjector:
         return "episode_action_" + hashlib.sha256(encoded).hexdigest()
 
     @staticmethod
+    def _input_revision(
+        snapshot: StoryWorkspaceEpisodeActionSnapshot,
+        descriptor: StoryWorkspaceEpisodeDescriptor,
+        action: StoryWorkspaceEpisodeAction,
+    ) -> str:
+        if descriptor.relation == "next":
+            if snapshot.next_input_revision is None:
+                raise ValueError("next Episode action revision is unavailable")
+            return snapshot.next_input_revision
+        return (snapshot.current_action_input_revisions or {}).get(
+            action,
+            snapshot.current_input_revision,
+        )
+
+    @staticmethod
     def _label(
         action: StoryWorkspaceEpisodeAction,
         descriptor: StoryWorkspaceEpisodeDescriptor,
@@ -444,7 +531,9 @@ class StoryWorkspaceMultiEpisodeActionProjector:
             StoryWorkspaceEpisodeAction.PLAN_EPISODE: f"开始 {episode} 分集规划",
             StoryWorkspaceEpisodeAction.WRITE_SCRIPT: f"创作 {episode} 剧本",
             StoryWorkspaceEpisodeAction.REVIEW_SCRIPT: f"审阅 {episode} 剧本",
-            StoryWorkspaceEpisodeAction.REFRESH_ASSETS: f"核对 {episode} 资产引用",
+            StoryWorkspaceEpisodeAction.REFRESH_ASSETS: (
+                f"刷新 {episode} 角色与场景资产"
+            ),
             StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD: (
                 f"基于最新剧本更新 {episode} 详细分镜"
                 if intent == "update"
@@ -478,7 +567,7 @@ class StoryWorkspaceMultiEpisodeActionProjector:
                 f"审阅当前 {episode} script revision 并生成剧本级报告。"
             ),
             StoryWorkspaceEpisodeAction.REFRESH_ASSETS: (
-                f"按已审阅剧本核对 {episode} 的角色、场景与道具引用。"
+                f"按已审阅剧本刷新 {episode} 的角色卡、场景卡与资产 revision。"
             ),
             StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD: (
                 f"重建 {episode} 详细分镜；Prompt、完整审阅与校验将需要更新。"
@@ -705,10 +794,10 @@ class StoryWorkspaceMultiEpisodeActionProjector:
         return StoryWorkspaceEpisodeActionOptionV2(
             actionId=cls._action_id(snapshot, descriptor, action, intent=intent),
             action=action,
-            inputRevision=(
-                snapshot.next_input_revision
-                if descriptor.relation == "next"
-                else snapshot.current_input_revision
+            inputRevision=cls._input_revision(
+                snapshot,
+                descriptor,
+                action,
             ),
             targetEpisode=cls._target(descriptor),
             label=cls._label(action, descriptor, intent=intent),
@@ -721,10 +810,10 @@ class StoryWorkspaceMultiEpisodeActionProjector:
             canonicalInputs=cls._canonical_inputs(
                 action,
                 descriptor,
-                revision=(
-                    snapshot.next_input_revision
-                    if descriptor.relation == "next"
-                    else snapshot.current_input_revision
+                revision=cls._input_revision(
+                    snapshot,
+                    descriptor,
+                    action,
                 ),
                 executable=availability is StoryWorkspaceEpisodeActionAvailability.EXECUTABLE,
             ),
@@ -733,20 +822,70 @@ class StoryWorkspaceMultiEpisodeActionProjector:
         )
 
     @classmethod
-    def _current_regeneration(
+    def _project_stage_actions(
         cls,
         snapshot: StoryWorkspaceEpisodeActionSnapshot,
-    ) -> StoryWorkspaceEpisodeActionOptionV2:
-        return cls._option(
-            snapshot,
-            snapshot.current_episode,
-            StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
-            availability=StoryWorkspaceEpisodeActionAvailability.EXECUTABLE,
-            recommended=False,
-            can_dispatch=True,
-            disabled_reason=None,
-            intent="update",
-        )
+    ) -> list[StoryWorkspaceEpisodeActionOptionV2] | None:
+        actions = _STAGE_ACTIONS.get(snapshot.current_action)
+        if actions is None:
+            return None
+        reworks = _STAGE_EXECUTABLE_REWORKS.get(snapshot.current_action, set())
+        options: list[StoryWorkspaceEpisodeActionOptionV2] = []
+        for index, action in enumerate(actions):
+            recommended = index == 0
+            executable = recommended or action in reworks
+            intent = (
+                "update"
+                if action is StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
+                and (
+                    snapshot.storyboard_current
+                    or snapshot.storyboard_can_regenerate
+                )
+                else "rework"
+                if action in reworks
+                else "advance"
+            )
+            if action is StoryWorkspaceEpisodeAction.GENERATE_PROMPTS and (
+                snapshot.current_action
+                is StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
+            ):
+                disabled_reason = (
+                    f"先完成 {cls._label(snapshot.current_action, snapshot.current_episode, intent='advance')}"
+                )
+            elif action is StoryWorkspaceEpisodeAction.VALIDATE_EPISODE and not executable:
+                disabled_reason = (
+                    f"先完成 {cls._label(StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN, snapshot.current_episode, intent='advance')}"
+                )
+            elif (
+                action is StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE
+                and not executable
+            ):
+                disabled_reason = (
+                    f"先完成 {cls._label(StoryWorkspaceEpisodeAction.VALIDATE_EPISODE, snapshot.current_episode, intent='advance')}"
+                )
+            else:
+                disabled_reason = None if executable else "当前依赖尚未满足"
+            options.append(cls._option(
+                snapshot,
+                snapshot.current_episode,
+                action,
+                availability=(
+                    StoryWorkspaceEpisodeActionAvailability.EXECUTABLE
+                    if executable
+                    else StoryWorkspaceEpisodeActionAvailability.PREVIEW
+                ),
+                recommended=recommended,
+                can_dispatch=(
+                    snapshot.current_can_dispatch if recommended else executable
+                ),
+                disabled_reason=(
+                    None
+                    if executable and (not recommended or snapshot.current_can_dispatch)
+                    else disabled_reason or "当前依赖尚未满足"
+                ),
+                intent=intent,
+            ))
+        return options
 
     @classmethod
     def project(
@@ -778,8 +917,6 @@ class StoryWorkspaceMultiEpisodeActionProjector:
                         None if snapshot.current_can_dispatch else "当前依赖尚未满足"
                     ),
                 ))
-                if snapshot.storyboard_can_regenerate:
-                    options.append(cls._current_regeneration(snapshot))
             else:
                 options.append(cls._option(
                     snapshot,
@@ -792,8 +929,6 @@ class StoryWorkspaceMultiEpisodeActionProjector:
                         None if snapshot.next_entry_can_dispatch else "当前依赖尚未满足"
                     ),
                 ))
-                if snapshot.storyboard_can_regenerate:
-                    options.append(cls._current_regeneration(snapshot))
                 if not snapshot.render_guide_current:
                     options.append(cls._option(
                         snapshot,
@@ -818,6 +953,13 @@ class StoryWorkspaceMultiEpisodeActionProjector:
                     disabled_reason=f"先完成 {cls._label(next_action, next_episode, intent='advance')}",
                 ))
         else:
+            stage_options = cls._project_stage_actions(snapshot)
+            if stage_options is not None:
+                options.extend(stage_options)
+                return StoryWorkspaceEpisodeActionProjectionV2(
+                    recommendedActionId=options[0].action_id,
+                    actionOptions=options,
+                )
             start = _VENDOR_ACTIONS.index(snapshot.current_action)
             for offset, action in enumerate(_VENDOR_ACTIONS[start:]):
                 if offset == 0:
@@ -838,14 +980,6 @@ class StoryWorkspaceMultiEpisodeActionProjector:
                             else "advance"
                         ),
                     ))
-                    if (
-                        snapshot.storyboard_can_regenerate
-                        and action is not StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
-                        and start > _VENDOR_ACTIONS.index(
-                            StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD
-                        )
-                    ):
-                        options.append(cls._current_regeneration(snapshot))
                     continue
                 options.append(cls._option(
                     snapshot,

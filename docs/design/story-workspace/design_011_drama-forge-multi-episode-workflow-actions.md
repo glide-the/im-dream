@@ -181,12 +181,12 @@ idempotency provenance 至少包含：
 
 | active | 当前事实 | 第 1 直接操作（recommended） | 第 2 直接操作 | overflow 示例 | 下一集规则 |
 | --- | --- | --- | --- | --- | --- |
-| EP01 | storyboard current；Prompt 缺失；EP02 outline 缺失 | 生成 EP01 Prompt 包 | 基于最新剧本更新 EP01 详细分镜 | current full review/validation/render + next plan/script | Prompt 优先；EP02 disabled |
-| EP01 | validation current；EP02 outline 缺失 | 开始 EP02 分集规划 | 基于最新剧本更新 EP01 详细分镜 | current render + next script preview | actionId target 是 server candidate |
-| EP01 | validation current；EP02 outline current | 创作 EP02 剧本 | 基于最新剧本更新 EP01 详细分镜 | current render + next script review preview | 不重复生成 outline |
+| EP01 | storyboard current；Prompt 缺失；EP02 outline 缺失 | 生成 EP01 Prompt 包 | 无 | 无；validation current 前不投影 EP02 | Prompt 优先 |
+| EP01 | validation current；EP02 outline 缺失 | 开始 EP02 分集规划 | 准备 EP01 渲染与配音指引 | next script preview | actionId target 是 server candidate |
+| EP01 | validation current；EP02 outline current | 创作 EP02 剧本 | 准备 EP01 渲染与配音指引 | next script review preview | 不重复生成 outline |
 | EP02 | outline current；script 缺失 | 创作 EP02 剧本 | 审阅 EP02 剧本（disabled preview） | EP02 assets/storyboard/Prompt/full review/validation/render | storyboard current 前不投影 EP03 horizon |
-| EP02 | storyboard current；Prompt 缺失；EP03 outline 缺失 | 生成 EP02 Prompt 包 | 基于最新剧本更新 EP02 详细分镜 | current full review/validation/render + next plan/script | EP01 facts 不参与 EP02 input |
-| EP02 | validation current；EP03 outline 缺失 | 开始 EP03 分集规划 | 基于最新剧本更新 EP02 详细分镜 | current render + next script preview | 服务端 CAS 建立 EP03 |
+| EP02 | storyboard current；Prompt 缺失；EP03 outline 缺失 | 生成 EP02 Prompt 包 | 无 | 无；validation current 前不投影 EP03 | EP01 facts 不参与 EP02 input |
+| EP02 | validation current；EP03 outline 缺失 | 开始 EP03 分集规划 | 准备 EP02 渲染与配音指引 | next script preview | 服务端 CAS 建立 EP03 |
 | EP03 | assets current；storyboard stale | 基于最新剧本更新 EP03 详细分镜 | 生成 EP03 Prompt 包（disabled preview） | current full review/validation/render previews；无 EP04 | storyboard current 前不开 next horizon |
 
 ### 6.1 EP01 → EP02 → EP03 扩展流程图
@@ -207,6 +207,23 @@ flowchart LR
     R1["更新 EP01 详细分镜"] -. "仅当前 EP alternative\n使本集下游 stale" .-> E1
     R2["更新 EP02 详细分镜"] -. "不修改 EP01 facts" .-> W2
 ```
+
+### 6.2 阶段推荐操作矩阵（2026-08-07 产品更新）
+
+本表覆盖当前 Episode 在各阶段投影到 Dream Agent 的精确操作集合；排列顺序也是 UI 顺序。第一项是唯一 recommended；其余项按表中状态成为可执行返工或不可执行预览。前端不读取产物 DOM 推导本表。
+
+| 当前阶段 | 有序操作集合 | 状态裁决 | 完成后推荐 |
+| --- | --- | --- | --- |
+| 剧本创作 | 创作 EPxx 剧本 | 当前可执行 | 审阅 EPxx 剧本 |
+| 剧本审阅 | 审阅 EPxx 剧本 | 当前可执行 | 刷新 EPxx 角色与场景资产 |
+| 资产定稿 | 刷新 EPxx 角色与场景资产 | 当前可执行 | 生成/更新 EPxx 详细分镜 |
+| 详细分镜 | 生成/更新 EPxx 详细分镜；生成 EPxx Prompt 包 | 分镜可执行；Prompt 为 disabled preview | 生成 EPxx Prompt 包 |
+| Prompt | 生成 EPxx Prompt 包 | 当前可执行 | 审阅 EPxx 完整产物 |
+| 全链路审阅 | 审阅 EPxx 完整产物；创作 EPxx 剧本；校验并提交 EPxx；准备 EPxx 渲染与配音指引 | 完整审阅 recommended；创作剧本是可执行返工；校验与制作指引为 disabled preview | 校验并提交 EPxx |
+| 原子校验 | 校验并提交 EPxx；创作 EPxx 剧本；审阅 EPxx 剧本；刷新 EPxx 角色与场景资产；生成/更新 EPxx 详细分镜；生成 EPxx Prompt 包 | 六项均为受控可执行操作；第一项唯一 recommended | 制作指引、下一 Episode |
+| 制作指引 | 准备 EPxx 渲染与配音指引 | validation current 后可执行；若存在下一 Episode，仍按多 Episode 规则同时投影下一集入口 | 后续媒体生产 |
+
+全链路审阅和原子校验阶段的早期动作不是“已完成步骤预览”，而是显式返工入口。每个入口必须拥有按自身 canonical inputs 计算的独立 `inputRevision`；不得复用当前 recommended action 的 revision。执行返工后，由文件 revision 和 workflow facts 自然使相关下游 completion stale。
 
 ## 7. Dream Agent Dialog 工作流操作信息架构
 
@@ -232,35 +249,39 @@ Episode 工作流
 - 服务端按相关性生成稳定有序列表；前端不排序。
 - `direct = actionOptions.slice(0, 2)`；不足两项时按实际数量显示，不补占位。
 - 第一项通常是唯一 `isRecommended=true` 的当前推进动作。
-- 第二项优先是当前 Episode 合法 re-generation；没有合法 alternative 时，必须是当前 Episode 沿 vendor 顺序最近的 disabled preview，不能跳到更远的下一 Episode。
+- 第二项严格取 6.2 阶段矩阵的第二项：可能是可执行返工，也可能是 disabled preview；矩阵只有一项时不补按钮。
 - 直接展示不等于可派发；`canDispatch=false` 必须为原生 disabled，并在可见正文给出真实原因。
-- 稳定排序键为：`recommended → current executable alternatives（storyboard regeneration 优先）→ current 最近后续 preview → next executable → next 最近后续 preview → 其余 vendor-order previews`。同组以固定 capability rank 排序，不使用数组 index、label 或 Episode code 排序。
+- 稳定排序由 6.2 的阶段矩阵拥有；validation current 后才切换到 `next executable → current render/rework alternatives → next 最近 preview`。不使用数组 index、label 或 Episode code 排序。
 - 如果服务端返回多个 `isRecommended=true`、重复 actionId、可派发但无 target/canonical inputs 或 recommended 不在第一个，前端 strict parser 拒绝该 workflow projection，保留 last-good 或显示局部恢复提示，不自行修复。
 
 ### 8.1 Server-owned option inclusion 与 horizon
 
-resolver 先决定集合，再按上节排序；前端不得裁剪或补项。设 current vendor rank 为：
+resolver 先决定 current stage，projector 再按 6.2 的显式矩阵生成集合；前端不得裁剪、补项或把 disabled preview 改成可点击。vendor rank 仍用于依赖与完成后阶段迁移：
 
 `plan → script → script review → assets → storyboard → prompts → full review → validation → render guide`。
 
 集合规则：
 
-1. **Current suffix**：current Episode validation 尚未 current 时，纳入从 recommended capability 起到 render guide 的全部 current vendor suffix；已经完成且仍 current 的前序动作不回填。
-2. **Storyboard regeneration**：已有 detailed storyboard 且最新 script review/assets 依赖允许更新时，即使该 capability 位于 recommended 之前，也作为唯一 current re-generation alternative 纳入；不得重复加入。
-3. **Next horizon gate**：只有 current detailed storyboard current 时才开始投影 next horizon；此前不显示下一 Episode 预览，以免比当前 review/assets 更早占据直接操作。
-4. **Next horizon width**：next horizon 只包含下一 Episode 的实际入口 capability（outline 缺失为 plan，outline current 为 script）以及它沿 vendor 顺序紧邻的一个 preview（plan→script，script→script review）。被省略的更远 capability 不改变 vendor 顺序、依赖或授权；它们在更近步骤完成后自然进入 horizon。
-5. **Validation current、仍有 next**：next 实际入口为 recommended；current storyboard regeneration 与尚未完成的 render guide 是 current alternatives，next 紧邻 preview 仍保留。
-6. **项目最后一集**：validation current 且 render guide 未完成时，`prepare_render_guide` 为 recommended，storyboard regeneration 为 alternative；render guide 已完成后 `NONE_IN_SCOPE`，options 为空，不把 optional regeneration 强行设为 recommended。
-7. **上限**：storyboard 尚未 current 时最多是 9 项 current suffix；storyboard current 后 current suffix 最多 4 项，加最多 1 个 regeneration 和 2 个 next horizon，仍最多 7 项。故 `0 ≤ actionOptions.length ≤ 9`、`0 ≤ N ≤ 7`。
+1. **阶段精确集合**：script 至 validation 阶段只投影 6.2 指定的 current Episode 操作，不再默认纳入完整 vendor suffix。
+2. **唯一推荐**：每个非空集合第一项是当前推进动作，也是唯一 `isRecommended=true`；其他可执行项是明确的 rework，不是第二推荐。
+3. **详细分镜预览**：storyboard 阶段把 Prompt 作为第二项 disabled preview；首次生成显示“生成”，已有但 stale 时显示“基于最新剧本更新”。
+4. **全链路返工**：full-chain 阶段仅 `write_script` 是可执行返工；validation 和 render guide 保持 preview，分别显示真实前置原因。
+5. **原子校验返工**：validation 阶段允许 script、script review、assets、storyboard、prompts 五类受控返工；每项使用自己的 server canonical `inputRevision` 和 actionId。
+6. **Next horizon gate**：validation current 前不投影下一 Episode，避免下一集入口与本集阶段矩阵混淆；validation current 后沿用 next plan/script 两步 horizon。
+7. **Validation current、仍有 next**：下一 Episode 实际入口为 recommended；尚未完成的当前 render guide 进入其后，不回填 storyboard 等已离开当前阶段的返工按钮。
+8. **项目最后一集**：validation current 且 render guide 未完成时，`prepare_render_guide` 为 recommended；完成后 `NONE_IN_SCOPE`，options 为空。
+9. **上限**：原子校验阶段最多 6 项；validation current 的 current/next horizon 不超过既有 4 项，因此仍满足 wire contract 的最多 9 项限制。
 
 确定性快照：
 
 | facts | ordered options | direct/overflow |
 | --- | --- | --- |
 | EP01 outline 缺失 | current plan, script, script review, assets, storyboard, prompts, full review, validation, render | 2 + 7 |
-| EP01 storyboard current、Prompt 缺失、EP02 outline 缺失 | current Prompt, current storyboard update, current full review, current validation, current render, next plan, next script | 2 + 5 |
-| EP01 validation current、EP02 outline current | next script, current storyboard update, current render, next script review | 2 + 2 |
-| 项目最后一集 validation current、render 未完成 | current render, current storyboard update | 2 + 0 |
+| EP01 storyboard current、Prompt 缺失、EP02 outline 缺失 | current Prompt | 1 + 0 |
+| EP01 full-chain 待审 | current full review, current script rework, current validation preview, current render preview | 2 + 2 |
+| EP01 validation 待执行 | current validation, current script/review/assets/storyboard/Prompt reworks | 2 + 4 |
+| EP01 validation current、EP02 outline current | next script, current render, next script review | 2 + 1 |
+| 项目最后一集 validation current、render 未完成 | current render | 1 + 0 |
 | 项目最后一集 render completion current | 空（`NONE_IN_SCOPE`） | 0 + 0 |
 
 ## 9. “更多工作流操作（N）”展开与折叠
@@ -356,7 +377,7 @@ interface StoryWorkspaceEpisodeActionOptionV2 {
 | `plan_episode` current/next missing outline | 开始 EP01 分集规划 | 在当前项目规划中建立或更新 EP01 分集 outline；下一集动作仅在上集 validation current 后可执行。 | `/drama-plan` | project definition/master outline/worldbuilding/character-arc ledger/asset inventory context；next 时加 prior validation fact | 若重规划已存在当前集：script 及下游 stale | 完成上一 Episode 完整产物校验后可用 |
 | `write_script` | 创作 EP01 剧本 | 使用已批准的 EP01 outline 和项目角色/场景上下文创作本集剧本。 | `/drama-script (EP01)` | episode outline required；worldbuilding/character-arc ledger/asset inventory context | script review、storyboard、Prompt、full review、validation stale | EP01 outline 尚未批准或已过期 |
 | `review_script` | 审阅 EP01 剧本 | 让 script-reviewer 审阅当前 EP01 script revision，并写入 script-scoped report。 | `script-reviewer · EP01 剧本` | episode script、outline context | 旧 assets completion 与下游在 source revision 不匹配时 stale | EP01 剧本尚未生成或已过期 |
-| `refresh_assets` | 核对 EP01 资产引用 | 按已审阅剧本核对并补齐跨集角色、场景与道具上下文，记录本集受控 completion。 | `/drama-asset` | episode script + script review；project asset context | 旧 storyboard 及下游在 completion input 改变时 stale | EP01 剧本审阅尚未适用于最新剧本 |
+| `refresh_assets` | 刷新 EP01 角色与场景资产 | 按已审阅剧本刷新角色卡、场景卡与资产 revision，记录本集受控 completion。 | `/drama-asset` | episode script + script review；project asset context | 旧 storyboard 及下游在 completion input 改变时 stale | EP01 剧本审阅尚未适用于最新剧本 |
 | `regenerate_storyboard` first | 生成 EP01 详细分镜 | 使用当前已审阅剧本与最新资产引用首次生成八层 detailed storyboard。 | `/drama-storyboard (EP01)` | episode script + script review；`refresh_assets` workflow fact；asset context（展示） | Prompt、full review、validation 尚待生成 | 先完成 EP01 剧本审阅和资产引用 |
 | `regenerate_storyboard` update | 基于最新剧本更新 EP01 详细分镜 | 重建当前 detailed storyboard；Prompt、完整审阅与校验将需要更新。 | `/drama-storyboard (EP01)` | 同上；已有 storyboard 为 context | prompts、full review、validation stale | 剧本审阅或资产引用尚未适用于最新 revision |
 | `generate_prompts` | 生成 EP01 Prompt 包 | 从 EP01 当前 detailed storyboard 生成逐镜头 Prompt 包，并使用同集 script 的情绪上下文与角色/场景锚点。 | `/drama-prompt (EP01)` | episode storyboard required；episode script emotional context；asset anchors context | full review、validation stale | EP01 详细分镜尚未生成或已过期 |

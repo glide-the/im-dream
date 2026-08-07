@@ -98,7 +98,7 @@ _ACTION_LABELS = {
     StoryWorkspaceEpisodeAction.PLAN_EPISODE: "规划第一集",
     StoryWorkspaceEpisodeAction.WRITE_SCRIPT: "创作第一集剧本",
     StoryWorkspaceEpisodeAction.REVIEW_SCRIPT: "审阅第一集剧本",
-    StoryWorkspaceEpisodeAction.REFRESH_ASSETS: "核对并完善角色与场景资产",
+    StoryWorkspaceEpisodeAction.REFRESH_ASSETS: "刷新第一集角色与场景资产",
     StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD: "生成或更新第一集分镜",
     StoryWorkspaceEpisodeAction.GENERATE_PROMPTS: "生成第一集镜头提示词",
     StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN: "审阅第一集完整创作链路",

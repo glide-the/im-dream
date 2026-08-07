@@ -182,7 +182,7 @@ def test_latest_review_and_assets_enable_current_episode_storyboard() -> None:
     assert projection.action_options[0].can_dispatch is True
 
 
-def test_current_storyboard_enables_prompt_and_safe_update_option() -> None:
+def test_current_storyboard_recommends_only_the_prompt_stage_action() -> None:
     surface = _surface(storyboard_digit="3")
     facts = _facts_with_current_completions(
         surface,
@@ -200,10 +200,51 @@ def test_current_storyboard_enables_prompt_and_safe_update_option() -> None:
     assert snapshot.current_action is StoryWorkspaceEpisodeAction.GENERATE_PROMPTS
     assert snapshot.storyboard_current is True
     assert snapshot.storyboard_can_regenerate is True
-    assert [item.label for item in projection.action_options[:2]] == [
+    assert [item.label for item in projection.action_options] == [
         "生成 EP02 Prompt 包",
-        "基于最新剧本更新 EP02 详细分镜",
     ]
+
+
+def test_full_chain_rework_options_use_action_specific_server_revisions() -> None:
+    surface = _surface(storyboard_digit="3", prompts_digit="4")
+    facts = _facts_with_current_completions(
+        surface,
+        StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+        StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+        StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+    )
+    resolver = StoryWorkspaceEpisodeNextActionResolver()
+
+    snapshot = StoryWorkspaceCurrentEpisodeActionSnapshotBuilder().build(
+        surface=surface,
+        facts=facts,
+        current_episode=_descriptor(),
+    )
+    projection = StoryWorkspaceMultiEpisodeActionProjector.project(snapshot)
+    revisions = {
+        option.action: option.input_revision
+        for option in projection.action_options
+    }
+
+    assert snapshot.current_action is StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN
+    assert revisions[StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN] == (
+        resolver.action_input_revision(
+            StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+            surface,
+            facts,
+        )
+    )
+    assert revisions[StoryWorkspaceEpisodeAction.WRITE_SCRIPT] == (
+        resolver.action_input_revision(
+            StoryWorkspaceEpisodeAction.WRITE_SCRIPT,
+            surface,
+            facts,
+        )
+    )
+    assert (
+        revisions[StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN]
+        != revisions[StoryWorkspaceEpisodeAction.WRITE_SCRIPT]
+    )
 
 
 def test_new_script_revision_invalidates_review_and_hides_storyboard_update() -> None:

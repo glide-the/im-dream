@@ -163,7 +163,7 @@ function workflow(
     ['plan_episode', '规划第一集', '/drama-plan'],
     ['write_script', '创作第一集剧本', '/drama-script (EP01)'],
     ['review_script', '审阅第一集剧本', '剧本审查'],
-    ['refresh_assets', '核对并完善角色与场景资产', '/drama-asset'],
+    ['refresh_assets', '刷新第一集角色与场景资产', '/drama-asset'],
     ['regenerate_storyboard', '生成或更新第一集分镜', '/drama-storyboard (EP01)'],
     ['generate_prompts', '生成第一集镜头提示词', '/drama-prompt (EP01)'],
     ['review_full_chain', '审阅第一集完整创作链路', '完整链路审查'],

@@ -141,7 +141,7 @@ def test_validated_ep01_recommends_server_candidate_ep02_plan() -> None:
     assert projection.action_options[1].target_episode.display_label == "EP01"
 
 
-def test_unvalidated_current_episode_keeps_next_plan_explicitly_blocked() -> None:
+def test_unvalidated_current_episode_does_not_project_next_episode_actions() -> None:
     context = StoryWorkspaceEpisodeRegistryActionContext.build(
         _registry(_entry(1, EP01_ID), active_uid=EP01_ID, revision=1),
         total_episodes=3,
@@ -151,16 +151,11 @@ def test_unvalidated_current_episode_keeps_next_plan_explicitly_blocked() -> Non
         context=context,
     )
     projection = StoryWorkspaceMultiEpisodeActionProjector.project(snapshot)
-    next_option = next(
-        item
-        for item in projection.action_options
-        if item.target_episode.relation == "next"
-        and item.action is StoryWorkspaceEpisodeAction.PLAN_EPISODE
-    )
 
-    assert next_option.can_dispatch is False
-    assert next_option.availability.value == "blocked"
-    assert next_option.disabled_reason == "完成 EP01 完整产物校验后可用"
+    assert all(
+        item.target_episode.relation == "current"
+        for item in projection.action_options
+    )
 
 
 def test_bound_ep02_outline_changes_next_entry_to_write_script() -> None:

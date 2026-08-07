@@ -67,6 +67,30 @@ def _projection():
     return StoryWorkspaceMultiEpisodeActionProjector.project(snapshot)
 
 
+def _full_chain_projection():
+    snapshot = StoryWorkspaceEpisodeActionSnapshot(
+        run_id=RUN_ID,
+        current_episode=StoryWorkspaceEpisodeDescriptor(
+            opaque_episode_id=EP01_ID,
+            episode_number=1,
+            display_label="EP01",
+            relation="current",
+        ),
+        current_action=StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+        current_can_dispatch=True,
+        current_input_revision=CURRENT_REVISION,
+        storyboard_current=True,
+        storyboard_can_regenerate=True,
+        validation_current=False,
+        render_guide_current=False,
+        next_episode=None,
+        next_entry_action=None,
+        next_entry_can_dispatch=False,
+        project_has_next_episode=False,
+    )
+    return StoryWorkspaceMultiEpisodeActionProjector.project(snapshot)
+
+
 def test_continue_v2_accepts_only_opaque_action_identity() -> None:
     action_id = _projection().action_options[0].action_id
     command = StoryWorkspaceEpisodeActionContinueCommandV2(
@@ -104,16 +128,12 @@ def test_selector_resolves_exact_executable_option_and_input_revision() -> None:
     assert selected.input_revision == CURRENT_REVISION
 
 
-def test_selector_rejects_unknown_preview_and_blocked_actions() -> None:
-    projection = _projection()
+def test_selector_rejects_unknown_and_preview_actions() -> None:
+    projection = _full_chain_projection()
     rejected_ids = (
         "episode_action_" + "f" * 64,
         projection.action_options[2].action_id,
-        next(
-            option.action_id
-            for option in projection.action_options
-            if option.target_episode.relation == "next"
-        ),
+        projection.action_options[3].action_id,
     )
 
     for action_id in rejected_ids:
@@ -219,8 +239,38 @@ def test_script_review_instruction_names_the_canonical_report_contract() -> None
 
 
 def test_current_and_next_options_expose_distinct_server_input_revisions() -> None:
-    projection = _projection()
-    current = projection.action_options[0]
+    snapshot = StoryWorkspaceEpisodeActionSnapshot(
+        run_id=RUN_ID,
+        current_episode=StoryWorkspaceEpisodeDescriptor(
+            opaque_episode_id=EP01_ID,
+            episode_number=1,
+            display_label="EP01",
+            relation="current",
+        ),
+        current_action=StoryWorkspaceEpisodeAction.PREPARE_RENDER_GUIDE,
+        current_can_dispatch=True,
+        current_input_revision=CURRENT_REVISION,
+        storyboard_current=True,
+        storyboard_can_regenerate=True,
+        validation_current=True,
+        render_guide_current=False,
+        next_episode=StoryWorkspaceEpisodeDescriptor(
+            opaque_episode_id=EP02_ID,
+            episode_number=2,
+            display_label="EP02",
+            relation="next",
+        ),
+        next_entry_action=StoryWorkspaceEpisodeAction.PLAN_EPISODE,
+        next_entry_can_dispatch=True,
+        project_has_next_episode=True,
+        next_input_revision=NEXT_REVISION,
+    )
+    projection = StoryWorkspaceMultiEpisodeActionProjector.project(snapshot)
+    current = next(
+        option
+        for option in projection.action_options
+        if option.target_episode.relation == "current"
+    )
     next_option = next(
         option
         for option in projection.action_options
