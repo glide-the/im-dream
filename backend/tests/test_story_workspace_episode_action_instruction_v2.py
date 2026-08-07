@@ -15,6 +15,7 @@ if str(BACKEND_ROOT) not in sys.path:
 
 from services.story_workspace.episode_workflow_instruction import (  # noqa: E402
     StoryWorkspaceEpisodeActionSelectionError,
+    StoryWorkspaceTrustedEpisodeAction,
     StoryWorkspaceTrustedEpisodeActionSelector,
     story_workspace_trusted_episode_action_instruction,
 )
@@ -159,6 +160,36 @@ def test_storyboard_instruction_uses_only_trusted_episode_code(number: int) -> N
     assert f"/drama-storyboard (EP{number:02d})" in instruction
     for other in {1, 2, 3} - {number}:
         assert f"/drama-storyboard (EP{other:02d})" not in instruction
+    assert "stories/" not in instruction
+    assert "/Users/" not in instruction
+
+
+def test_full_chain_instruction_names_the_canonical_report_contract() -> None:
+    selected = StoryWorkspaceTrustedEpisodeAction(
+        run_id=RUN_ID,
+        action_id="episode_action_" + "1" * 64,
+        action=StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
+        input_revision=CURRENT_REVISION,
+        episode_code="EP02",
+        target_episode_uid=EP02_ID,
+        candidate_id=None,
+    )
+
+    instruction = story_workspace_trusted_episode_action_instruction(selected)
+
+    assert "唯一规范输出：review-report.md" in instruction
+    assert "禁止创建 full-chain-review-report.md" in instruction
+    assert "scope: full-chain" in instruction
+    assert "overall_verdict: APPROVED" in instruction
+    assert "episode-outline.md" in instruction
+    assert "script.md" in instruction
+    assert "storyboard.yaml" in instruction
+    assert "prompts/" in instruction
+    assert "source_revisions" in instruction
+    assert "不得把 review-report.md 自身列入 reviewed_files" in instruction
+    assert "不得根据 total_shots" in instruction
+    assert "不得记录完成事实" in instruction
+    assert "EP02" in instruction
     assert "stories/" not in instruction
     assert "/Users/" not in instruction
 

@@ -632,11 +632,19 @@ class StoryWorkspaceEpisodeNextActionResolver:
             (item for item in facts.completions if item.action is action),
             None,
         )
-        return (
-            completion is not None
-            and completion.input_revision
-            == cls.action_input_revision(action, surface, facts)
-        )
+        if completion is None:
+            return False
+        if completion.input_revision == cls.action_input_revision(
+            action,
+            surface,
+            facts,
+        ):
+            return True
+        return action in {
+            StoryWorkspaceEpisodeAction.REFRESH_ASSETS,
+            StoryWorkspaceEpisodeAction.REGENERATE_STORYBOARD,
+            StoryWorkspaceEpisodeAction.GENERATE_PROMPTS,
+        } and cls.full_chain_review_is_current(surface)
 
     @staticmethod
     def _action_options(
@@ -900,15 +908,7 @@ class StoryWorkspaceEpisodeNextActionResolver:
                     StoryWorkspaceEpisodeActionDiagnostic.NEEDS_CONFIRMATION,
                 )
             else:
-                full_chain_current = (
-                    getattr(review, "scope", None)
-                    is StoryWorkspaceEpisodeReviewScope.FULL_CHAIN
-                    and getattr(review, "overall_verdict", None) == "APPROVED"
-                    and cls._reviewed_revision(review, "script.md")
-                    == cls._revision(script)
-                    and cls._reviewed_revision(review, "storyboard.yaml")
-                    == cls._revision(storyboard)
-                )
+                full_chain_current = cls.full_chain_review_is_current(surface)
                 if not full_chain_current:
                     invalid = (
                         cls._availability(report)
@@ -1015,6 +1015,65 @@ class StoryWorkspaceEpisodeNextActionResolver:
             if getattr(item, "source_artifact", None) == key
         ]
         return matches[0] if len(matches) == 1 and isinstance(matches[0], str) else None
+
+    @classmethod
+    def full_chain_review_is_current(cls, surface: object) -> bool:
+        """Require one approved report to cover every current canonical input."""
+
+        artifacts = cls._artifact_map(surface)
+        review = cls._review(surface)
+        auxiliary = getattr(surface, "auxiliary", None)
+        prompt_page = getattr(auxiliary, "prompts", None)
+        associations = getattr(auxiliary, "associations", None)
+        coverage = getattr(associations, "shot_prompt_coverage", None)
+        if (
+            getattr(review, "scope", None)
+            is not StoryWorkspaceEpisodeReviewScope.FULL_CHAIN
+            or getattr(review, "overall_verdict", None) != "APPROVED"
+            or prompt_page is None
+            or getattr(prompt_page, "next_cursor", None) is not None
+            or getattr(associations, "orphan_prompts", None) != []
+            or not isinstance(getattr(coverage, "total", None), int)
+            or getattr(coverage, "total", 0) <= 0
+            or getattr(coverage, "linked", None) != getattr(coverage, "total", None)
+        ):
+            return False
+        current_revisions = {
+            key: cls._revision(artifacts.get(key))
+            for key in (
+                "episode-outline.md",
+                "script.md",
+                "storyboard.yaml",
+            )
+        }
+        if any(revision is None for revision in current_revisions.values()):
+            return False
+        prompt_items = getattr(prompt_page, "items", None)
+        if (
+            not isinstance(prompt_items, list)
+            or getattr(prompt_page, "total", None) != len(prompt_items)
+        ):
+            return False
+        for item in prompt_items:
+            source = getattr(item, "source_artifact", None)
+            revision = getattr(item, "source_revision", None)
+            if not isinstance(source, str) or not isinstance(revision, str):
+                return False
+            existing = current_revisions.get(source)
+            if existing is not None and existing != revision:
+                return False
+            current_revisions[source] = revision
+        if not any(key.startswith("prompts/") for key in current_revisions):
+            return False
+        reviewed_artifacts = getattr(review, "reviewed_artifacts", None)
+        if not isinstance(reviewed_artifacts, list) or set(reviewed_artifacts) != set(
+            current_revisions
+        ):
+            return False
+        return all(
+            cls._reviewed_revision(review, key) == revision
+            for key, revision in current_revisions.items()
+        )
 
     def resolve(
         self,

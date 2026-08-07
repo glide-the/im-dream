@@ -167,16 +167,44 @@ def _surface(
             scope=review_scope,
             overall_verdict="APPROVED",
             source_revisions=review_source_revisions or [],
+            reviewed_artifacts=[
+                item.source_artifact
+                for item in (review_source_revisions or [])
+            ],
         )
         if review_scope is not None
         else None
+    )
+    prompt_items = (
+        [
+            SimpleNamespace(
+                source_artifact="prompts/prompt-package.yaml",
+                source_revision="sha256:" + "4" * 64,
+            )
+        ]
+        if "prompts/" in available
+        else []
     )
     return SimpleNamespace(
         run_id=RUN_ID,
         opaque_episode_id=EPISODE_ID,
         manifest_revision=revision,
         artifacts=artifacts,
-        auxiliary=SimpleNamespace(review=review),
+        auxiliary=SimpleNamespace(
+            review=review,
+            prompts=SimpleNamespace(
+                items=prompt_items,
+                total=len(prompt_items),
+                next_cursor=None,
+            ),
+            associations=SimpleNamespace(
+                orphan_prompts=[],
+                shot_prompt_coverage=SimpleNamespace(
+                    linked=(1 if prompt_items else 0),
+                    total=(1 if prompt_items else 0),
+                ),
+            ),
+        ),
     )
 
 
@@ -645,6 +673,14 @@ def test_none_in_scope_projects_no_action_options() -> None:
             SimpleNamespace(
                 source_artifact="storyboard.yaml",
                 source_revision="sha256:" + "3" * 64,
+            ),
+            SimpleNamespace(
+                source_artifact="episode-outline.md",
+                source_revision="sha256:" + "1" * 64,
+            ),
+            SimpleNamespace(
+                source_artifact="prompts/prompt-package.yaml",
+                source_revision="sha256:" + "4" * 64,
             ),
         ],
     )
@@ -1857,6 +1893,22 @@ def test_full_chain_requires_current_approved_report_and_invalid_artifact_blocks
             source_revision="sha256:" + "3" * 64,
         )
     )
+    base.auxiliary.review.source_revisions.extend(
+        [
+            SimpleNamespace(
+                source_artifact="episode-outline.md",
+                source_revision="sha256:" + "1" * 64,
+            ),
+            SimpleNamespace(
+                source_artifact="prompts/prompt-package.yaml",
+                source_revision="sha256:" + "4" * 64,
+            ),
+        ]
+    )
+    base.auxiliary.review.reviewed_artifacts = [
+        item.source_artifact
+        for item in base.auxiliary.review.source_revisions
+    ]
     full_chain = StoryWorkspaceEpisodeWorkflowCompletion(
         action=StoryWorkspaceEpisodeAction.REVIEW_FULL_CHAIN,
         input_revision=resolver.action_input_revision(
@@ -2198,16 +2250,34 @@ def test_real_vendor_ep01_surface_advances_by_completion_cas_to_scope_boundary(
         / "EP01"
         / "review-report.md"
     )
-    approved_review = review_path.read_text(encoding="utf-8").replace(
-        "overall_verdict: CONDITIONAL_APPROVAL",
-        "overall_verdict: APPROVED",
-    ).replace(
-        "review_mode: full",
-        "review_mode: full\n"
+    prompt_revisions = {
+        item.source_artifact: item.source_revision
+        for item in initial.auxiliary.prompts.items
+    }
+    reviewed_files = [
+        "episode-outline.md",
+        "script.md",
+        "storyboard.yaml",
+        *sorted(prompt_revisions),
+    ]
+    source_revisions = {
+        "episode-outline.md": revisions["episode-outline.md"],
+        "script.md": revisions["script.md"],
+        "storyboard.yaml": revisions["storyboard.yaml"],
+        **prompt_revisions,
+    }
+    approved_review = (
+        "---\n"
         "scope: full-chain\n"
-        "source_revisions:\n"
-        f"  script.md: {revisions['script.md']}\n"
-        f"  storyboard.yaml: {revisions['storyboard.yaml']}",
+        "overall_verdict: APPROVED\n"
+        "reviewed_files:\n"
+        + "\n".join(f"  - {path}" for path in reviewed_files)
+        + "\nsource_revisions:\n"
+        + "\n".join(
+            f"  {path}: {source_revision}"
+            for path, source_revision in source_revisions.items()
+        )
+        + "\n---\n# 完整链路审阅\n"
     )
     review_path.write_text(approved_review, encoding="utf-8")
     surface = artifact_service.read_surface(

@@ -38,6 +38,10 @@ from services.story_workspace.episode_binding_service import (
     StoryWorkspaceEpisodeBindingContext,
     StoryWorkspaceEpisodeBindingService,
 )
+from services.story_workspace.episode_completion_validator import (
+    StoryWorkspaceEpisodeCompletionContractError,
+    StoryWorkspaceEpisodeCompletionValidator,
+)
 from services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )
@@ -570,7 +574,8 @@ def _record_episode_workflow_completion(
         )
         if authority is None or authority.episode_uid != episode_uid:
             raise PermissionError("Episode authority is unavailable")
-        surface = StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+        artifact_service = StoryWorkspaceEpisodeArtifactService(workspace)
+        surface = artifact_service.read_surface(
             request.workflow_run_id,
             episode_authority=authority,
         )
@@ -583,6 +588,20 @@ def _record_episode_workflow_completion(
         )
         if expected_input != input_revision:
             raise PermissionError("Episode action input revision changed")
+        episode_root = (
+            workspace
+            / "stories"
+            / authority.story_slug
+            / "episodes"
+            / authority.episode_code
+        )
+        StoryWorkspaceEpisodeCompletionValidator.validate_before_record(
+            action=action,
+            surface=surface,
+            alias_report_present=(
+                episode_root / "full-chain-review-report.md"
+            ).is_file(),
+        )
         if facts.revision != expected_facts_revision:
             replay = next(
                 (
@@ -603,6 +622,11 @@ def _record_episode_workflow_completion(
                 "action": action.value,
                 "workflowRevision": facts.revision,
             }
+        StoryWorkspaceEpisodeCompletionValidator.validate_transition_ready(
+            action=action,
+            surface=surface,
+            facts=facts,
+        )
         updated = service.record_completion(
             workflow_run_id=request.workflow_run_id,
             episode_uid=episode_uid,
@@ -611,6 +635,15 @@ def _record_episode_workflow_completion(
             manifest_revision=surface.manifest_revision,
             message_id=message_id,
             expected_revision=expected_facts_revision,
+        )
+        refreshed_surface = artifact_service.read_surface(
+            request.workflow_run_id,
+            episode_authority=authority,
+        )
+        StoryWorkspaceEpisodeCompletionValidator.validate_after_record(
+            action=action,
+            surface=refreshed_surface,
+            facts=updated,
         )
         return {
             "run": request.workflow_run_id,
@@ -696,6 +729,18 @@ def story_workspace_handle_dream_tool(
             _require_trusted_workflow_run(request.workflow_run_id)
             return _success_json(_record_episode_workflow_completion(request))
         raise ValueError("unknown Story Workspace tool")
+    except StoryWorkspaceEpisodeCompletionContractError as exc:
+        _logger.info(
+            "Story Workspace Episode completion contract rejected: %s",
+            exc.reason,
+        )
+        return _success_json(
+            {
+                "error": "DREAM_WRITE_REJECTED",
+                "reason": exc.reason,
+                "message": exc.public_message,
+            }
+        )
     except Exception:  # noqa: BLE001 - public fail-closed seam.
         _logger.warning("Story Workspace Dream MCP write rejected", exc_info=True)
         return _success_json({"error": "DREAM_WRITE_REJECTED"})
