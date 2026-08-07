@@ -497,14 +497,16 @@ test('keeps artifact progress facts and exposes reading actions only for support
     onEscape: noOp,
   });
 
-  for (const label of ['分集大纲', '剧本', '分镜', 'Prompts', 'Renders', '审阅报告']) {
+  for (const label of ['分集大纲', '剧本', '分镜', 'Prompts', '审阅报告']) {
     expect(html).toContain(`<strong>${label}</strong><span>已生成</span>`);
   }
+  expect(html).toContain('<strong>渲染指引</strong><span>已准备</span>');
+  expect(html).not.toContain('<strong>Renders</strong>');
   for (const label of ['分集大纲', '剧本', '分镜', '审阅报告']) {
     expect(html).toContain(`aria-label="阅读${label}"`);
   }
   expect(html).not.toContain('aria-label="阅读Prompts"');
-  expect(html).not.toContain('aria-label="阅读Renders"');
+  expect(html).not.toContain('aria-label="阅读渲染指引"');
   expect(html.match(/aria-label="阅读/g)).toHaveLength(4);
 });
 

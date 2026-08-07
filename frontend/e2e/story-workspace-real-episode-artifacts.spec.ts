@@ -246,9 +246,12 @@ test('real actor can read Markdown documents and structured storyboard from the 
     await expect(progress.getByRole('button', { name: '阅读分镜' })).toBeVisible();
     await expect(progress.getByRole('button', { name: '阅读审阅报告' })).toBeVisible();
     await expect(progress.getByRole('button', { name: '阅读Prompts' })).toHaveCount(0);
-    await expect(progress.getByRole('button', { name: '阅读Renders' })).toHaveCount(0);
+    await expect(progress.getByRole('button', { name: '阅读渲染指引' })).toHaveCount(0);
     await expect(progress.locator('li').nth(0)).toContainText('分集大纲已生成');
     await expect(progress.locator('li').filter({ hasText: 'Prompts' })).toContainText('已生成');
+    await expect(progress.locator('li').filter({ hasText: '渲染指引' }))
+      .toContainText('尚未准备');
+    await expect(progress.getByText('Renders', { exact: true })).toHaveCount(0);
     expect(await progress.evaluate((element) => element.previousElementSibling?.tagName)).toBe('H2');
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'episode-overview-progress-desktop-1440x1000.png'),

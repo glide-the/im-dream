@@ -66,7 +66,7 @@ const ARTIFACT_PROGRESS_LABELS: Readonly<Record<string, string>> = {
   'script.md': '剧本',
   'storyboard.yaml': '分镜',
   'prompts/': 'Prompts',
-  'renders/': 'Renders',
+  'renders/': '渲染指引',
   'review-report.md': '审阅报告',
 };
 
@@ -75,6 +75,12 @@ const ARTIFACT_PROGRESS_AVAILABILITY = {
   not_generated: '尚未生成',
   invalid: '来源无效',
   unavailable: '当前不可用',
+} as const;
+
+const RENDER_GUIDE_PROGRESS_AVAILABILITY = {
+  ...ARTIFACT_PROGRESS_AVAILABILITY,
+  available: '已准备',
+  not_generated: '尚未准备',
 } as const;
 
 const ARTIFACT_PROGRESS_READER_TARGETS:
@@ -87,6 +93,15 @@ Readonly<Partial<Record<string, StoryWorkspaceEpisodeReadableArtifact>>> = {
 
 function initialNarrowLayout(): boolean {
   return typeof window !== 'undefined' && window.matchMedia(STORYLINE_NARROW_QUERY).matches;
+}
+
+function artifactProgressAvailabilityLabel(
+  artifact: StoryWorkspaceEpisodeArtifactManifestEntry,
+): string {
+  const labels = artifact.relativeKey === 'renders/'
+    ? RENDER_GUIDE_PROGRESS_AVAILABILITY
+    : ARTIFACT_PROGRESS_AVAILABILITY;
+  return labels[artifact.availability];
 }
 
 function storylineSheetFocusableElements(container: HTMLElement): HTMLElement[] {
@@ -294,7 +309,7 @@ function EpisodeOverviewContent({
           'li',
           { key: artifact.relativeKey },
           h('strong', null, label),
-          h('span', null, ARTIFACT_PROGRESS_AVAILABILITY[artifact.availability]),
+          h('span', null, artifactProgressAvailabilityLabel(artifact)),
           artifact.availability === 'available'
             && readerTarget !== null
             && onArtifactRead !== undefined

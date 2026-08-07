@@ -769,7 +769,7 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
     const artifactProgress = page.getByRole('list', { name: '第一集产物进度' });
     await expect(artifactProgress.getByRole('button')).toHaveCount(4);
     await expect(artifactProgress.getByRole('button', { name: '阅读Prompts' })).toHaveCount(0);
-    await expect(artifactProgress.getByRole('button', { name: '阅读Renders' })).toHaveCount(0);
+    await expect(artifactProgress.getByRole('button', { name: '阅读渲染指引' })).toHaveCount(0);
     const readOutline = artifactProgress.getByRole('button', { name: '阅读分集大纲' });
     await readOutline.focus();
     await readOutline.press('Enter');
@@ -783,7 +783,10 @@ test('mocked REST facts recover responsively and preserve the selected shot acro
       .toHaveAttribute('aria-selected', 'true');
     await expect(artifactReader.getByRole('tab', { name: /分集大纲/ })).toBeFocused();
     await expect(artifactProgress.getByText('Prompts', { exact: true })).toBeVisible();
-    await expect(artifactProgress.getByText('Renders', { exact: true })).toBeVisible();
+    await expect(artifactProgress.getByText('渲染指引', { exact: true })).toBeVisible();
+    await expect(artifactProgress.getByText('Renders', { exact: true })).toHaveCount(0);
+    await expect(artifactProgress.locator('li').filter({ hasText: '渲染指引' }))
+      .toContainText('已准备');
     await expect(artifactProgress.getByText('审阅报告', { exact: true })).toBeVisible();
     await expectNoHorizontalOverflow(page);
 
