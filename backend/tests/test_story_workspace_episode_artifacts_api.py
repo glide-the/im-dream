@@ -262,6 +262,37 @@ class TestStoryWorkspaceEpisodeArtifactService:
             for item in surface.artifacts
         )
 
+    def test_three_platform_prompt_package_is_available_and_linked(self) -> None:
+        (self.episode / "storyboard.yaml").write_text(
+            "shots:\n"
+            "  - shot_id: S01-E01-001\n"
+            "    visual: Safe establishing shot.\n",
+            encoding="utf-8",
+        )
+        prompts = self.episode / "prompts"
+        prompts.mkdir()
+        (prompts / "prompt_package.yaml").write_text(
+            "shots:\n"
+            "  - shot_id: S01-E01-001\n"
+            "    kling: Safe Kling prompt\n"
+            "    runway: Safe Runway prompt\n"
+            "    jimeng: Safe Jimeng prompt\n",
+            encoding="utf-8",
+        )
+
+        surface = self.read_surface()
+
+        prompt_artifact = next(
+            item for item in surface.artifacts if item.relative_key == "prompts/"
+        )
+        assert prompt_artifact.availability is (
+            StoryWorkspaceEpisodeArtifactAvailability.AVAILABLE
+        )
+        assert surface.auxiliary is not None
+        assert surface.auxiliary.prompts.total == 3
+        assert surface.auxiliary.associations.shot_prompt_coverage.linked == 1
+        assert surface.auxiliary.associations.shot_prompt_coverage.total == 1
+
     def test_available_markdown_artifacts_project_safe_body_documents(self) -> None:
         (self.episode / "episode-outline.md").write_text(
             "---\ntitle: Afternoon Light\nproject: didi-zhengzhou\n---\n"

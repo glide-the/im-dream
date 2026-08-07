@@ -208,6 +208,78 @@ shots:
     assert "rawCommand" not in str(projection.model_dump(by_alias=True))
 
 
+def test_projects_drama_prompt_three_platform_package_forms() -> None:
+    prompts = b"""episode: 1
+project: safe-project
+shots:
+  - shot_id: S01-E01-001
+    kling: Compact Kling prompt
+    runway: Compact Runway prompt
+    jimeng: Compact Jimeng prompt
+  - shot_id: S01-E01-002
+    kling:
+      prompt_text: Structured Kling prompt
+      negative_prompt: Kling negative prompt
+      duration_mode: 5s
+    runway:
+      prompt_text: Structured Runway prompt where one node flickers.
+      negative_prompt: Runway negative prompt
+      duration_seconds: 6
+    jimeng:
+      prompt_text: Structured Jimeng prompt
+      negative_prompt: Jimeng negative prompt
+      duration_mode: 10s
+      aspect_ratio: '9:16'
+"""
+
+    projection = _project(
+        prompts={"prompts/prompt_package.yaml": prompts},
+        shot_ids=["S01-E01-001", "S01-E01-002"],
+    )
+
+    assert projection.prompts.total == 6
+    assert [item.kind for item in projection.prompts.items] == [
+        "kling",
+        "runway",
+        "jimeng",
+        "kling",
+        "runway",
+        "jimeng",
+    ]
+    assert [item.positive for item in projection.prompts.items[:3]] == [
+        "Compact Kling prompt",
+        "Compact Runway prompt",
+        "Compact Jimeng prompt",
+    ]
+    assert projection.prompts.items[3].negative == "Kling negative prompt"
+    assert projection.prompts.items[3].parameters.duration_sec == 5
+    assert projection.prompts.items[4].parameters.duration_sec == 6
+    assert projection.prompts.items[5].parameters.aspect_ratio == "9:16"
+    assert all(
+        item.association_status is StoryWorkspaceEpisodeAssociationStatus.LINKED
+        for item in projection.prompts.items
+    )
+    assert projection.associations.shot_prompt_coverage.linked == 2
+    assert projection.associations.shot_prompt_coverage.total == 2
+
+
+def test_rejects_incomplete_drama_prompt_three_platform_package() -> None:
+    prompts = b"""shots:
+  - shot_id: S01-E01-001
+    kling: Kling prompt
+    runway: Runway prompt
+"""
+
+    with pytest.raises(
+        StoryWorkspaceEpisodeAuxiliaryArtifactParseError,
+        match="incomplete_multi_platform_prompt",
+    ):
+        _project(
+            prompts={"prompts/prompt_package.yaml": prompts},
+            shot_ids=["S01-E01-001"],
+        )
+
+
 def test_orphans_are_reported_without_positional_or_prompt_render_pairing() -> None:
     prompts = b"""shots:
   - shot_id: S01-E01-001
@@ -844,6 +916,7 @@ def test_public_text_policy_fails_closed_by_sensitive_category(
         ("  SeCrEt  =  visible-value  ", "credential_forbidden"),
         ("tool --verbose", "raw_command_forbidden"),
         ("renderer kling-v2 --seed=42", "raw_command_forbidden"),
+        ("node --eval script.js", "raw_command_forbidden"),
     ],
 )
 def test_remaining_public_text_bypasses_fail_closed(

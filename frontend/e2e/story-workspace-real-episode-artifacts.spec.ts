@@ -97,6 +97,17 @@ test('real actor can read Markdown documents and structured storyboard from the 
         size: number | null;
       }>;
       narrative?: { shots?: unknown[] };
+      auxiliary?: {
+        prompts?: { items: unknown[]; total: number };
+        associations?: {
+          shotPromptCoverage?: {
+            availability: string;
+            linked: number;
+            total: number;
+            ratio: number | null;
+          };
+        };
+      } | null;
       actionProjection?: {
         recommendedActionId: string | null;
         actionOptions: Array<{
@@ -118,7 +129,15 @@ test('real actor can read Markdown documents and structured storyboard from the 
       'review-report.md',
     ]);
     expect(surface.narrative?.shots).toHaveLength(22);
-    expect(surface.actionProjection?.actionOptions).toHaveLength(6);
+    expect(surface.auxiliary?.prompts?.total).toBe(66);
+    expect(surface.auxiliary?.prompts?.items).toHaveLength(66);
+    expect(surface.auxiliary?.associations?.shotPromptCoverage).toEqual({
+      availability: 'available',
+      linked: 22,
+      total: 22,
+      ratio: 1,
+    });
+    expect(surface.actionProjection?.actionOptions).toHaveLength(5);
     writeFileSync(
       resolve(EVIDENCE_DIR, 'episode-artifact-manifest.json'),
       JSON.stringify({
@@ -135,6 +154,9 @@ test('real actor can read Markdown documents and structured storyboard from the 
           characters: document.markdown.length,
         })) ?? [],
         projectedShotCount: surface.narrative?.shots?.length ?? 0,
+        projectedPromptCount: surface.auxiliary?.prompts?.total ?? 0,
+        promptPageItemCount: surface.auxiliary?.prompts?.items.length ?? 0,
+        shotPromptCoverage: surface.auxiliary?.associations?.shotPromptCoverage ?? null,
       }, null, 2),
       'utf-8',
     );
@@ -190,17 +212,18 @@ test('real actor can read Markdown documents and structured storyboard from the 
     await openAgent.click();
     let agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
     await expect(agentDialog.getByRole('button', {
-      name: /生成 EP01 Prompt 包.*推荐操作.*当前可执行/,
+      name: /审阅 EP01 完整产物.*推荐操作.*当前可执行/,
     })).toBeEnabled();
     await expect(agentDialog.getByRole('button', {
-      name: /审阅 EP01 完整产物.*未来可用/,
+      name: /校验并提交 EP01.*未来可用/,
     })).toBeDisabled();
     await expect(agentDialog.getByRole('button', { name: /审阅 EP01 剧本/ })).toHaveCount(0);
-    let disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（4）' });
+    await expect(agentDialog.getByRole('button', { name: /生成 EP01 Prompt 包/ })).toHaveCount(0);
+    let disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（3）' });
     await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
     await disclosure.click();
     await expect(agentDialog.getByRole('button', {
-      name: /校验并提交 EP01.*未来可用/,
+      name: /准备 EP01 渲染与配音指引.*未来可用/,
     })).toBeDisabled();
     await expect(agentDialog.getByRole('button', {
       name: /开始 EP02 分集规划.*暂不可用/,
@@ -225,6 +248,7 @@ test('real actor can read Markdown documents and structured storyboard from the 
     await expect(progress.getByRole('button', { name: '阅读Prompts' })).toHaveCount(0);
     await expect(progress.getByRole('button', { name: '阅读Renders' })).toHaveCount(0);
     await expect(progress.locator('li').nth(0)).toContainText('分集大纲已生成');
+    await expect(progress.locator('li').filter({ hasText: 'Prompts' })).toContainText('已生成');
     expect(await progress.evaluate((element) => element.previousElementSibling?.tagName)).toBe('H2');
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'episode-overview-progress-desktop-1440x1000.png'),
@@ -265,6 +289,10 @@ test('real actor can read Markdown documents and structured storyboard from the 
     await expect(reader.getByRole('tab', { name: /审阅/ })).toBeFocused();
     await expect(reader.getByRole('tab', { name: /审阅/ })).toBeInViewport();
     await expect(reader.getByRole('article', { name: '审阅文件内容' })).toContainText('审查报告');
+    await page.getByRole('button', { name: '定位镜头：S04-E01-020a' }).click();
+    await expect(page.getByRole('article', { name: 'Prompt kling' })).toBeVisible();
+    await expect(page.getByRole('article', { name: 'Prompt runway' })).toBeVisible();
+    await expect(page.getByRole('article', { name: 'Prompt jimeng' })).toBeVisible();
     await page.screenshot({
       path: resolve(EVIDENCE_DIR, 'episode-artifacts-desktop-1440x1000.png'),
       fullPage: true,
@@ -284,7 +312,7 @@ test('real actor can read Markdown documents and structured storyboard from the 
     });
     await openAgent.click();
     agentDialog = page.getByRole('dialog', { name: 'Dream Agent' });
-    disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（4）' });
+    disclosure = agentDialog.getByRole('button', { name: '更多工作流操作（3）' });
     await disclosure.click();
     await expect(agentDialog).toBeVisible();
     expect(await agentDialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1))

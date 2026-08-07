@@ -1151,6 +1151,20 @@ test('previously unclassified shot, prompt, render, and review strings reject un
   }
 });
 
+test('public Prompt text distinguishes a visual node from a Node.js command', () => {
+  const payload = boundSurface(REVISION_4, [
+    'episode-outline.md', 'script.md', 'storyboard.yaml', 'prompts/',
+  ]);
+  const auxiliary = payload.auxiliary as Record<string, unknown>;
+  const prompts = (auxiliary.prompts as Record<string, unknown>).items as Array<Record<string, unknown>>;
+
+  prompts[0].positive = 'A workflow diagram where one node flickers disconnected.';
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload)).not.toThrow();
+
+  prompts[0].positive = 'node scripts/build.js';
+  expect(() => storyWorkspaceParseEpisodeArtifactSurface(payload)).toThrow(/public_text/);
+});
+
 test('diagnostic fields use an independent single-line no-control validator', () => {
   const unicodeControlsAndSeparators = [
     ...Array.from({ length: 0x20 }, (_, codePoint) => codePoint),

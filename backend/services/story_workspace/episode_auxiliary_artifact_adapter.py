@@ -66,6 +66,7 @@ _HEADING_RE = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
 _YAML_FENCE_RE = re.compile(r"```ya?ml\s*\n(.*?)```", re.IGNORECASE | re.DOTALL)
 _SHOT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _PROMPT_KIND_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_MULTI_PLATFORM_PROMPT_KINDS = ("kling", "runway", "jimeng")
 _REVISION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
 _MANIFEST_REVISION_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CANONICAL_EPISODE_ROOT_RE = re.compile(
@@ -110,7 +111,9 @@ _PRIVATE_MODEL_TEXT_RE = re.compile(
 _RAW_COMMAND_RE = re.compile(
     r"(?i)(?:^|[\s`])(?:"
     r"\$\s+|sudo\s+|curl\b|wget\b|"
-    r"(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|node\b|"
+    r"(?:ba|z|fi)?sh\b|python(?:3(?:\.\d+)?)?\b|"
+    r"node(?=\s+(?:--?[A-Za-z0-9]|[./~$]|[A-Za-z0-9_.-]+/|"
+    r"[A-Za-z0-9_.-]+\.(?:c?js|mjs|ts|tsx|json)\b))|"
     r"npm\b|npx\b|pnpm\b|yarn\b|git\b|claude\b|"
     r"rm\s+(?:--recursive(?:\s+--force)?|-[A-Za-z]*r[A-Za-z]*)\s+|"
     r"cat\s+(?:~?/\.ssh/|/etc/(?:passwd|shadow)|\S*(?:credential|secret|token|private[_-]?key))|"
@@ -192,6 +195,15 @@ class _MarkdownSection:
 class _CanonicalTarget:
     source_key: str
     view_id: str
+
+
+@dataclass(frozen=True)
+class _PromptVariant:
+    kind: str
+    positive: str
+    negative: str | None
+    parameters: StoryWorkspaceEpisodePromptParameters
+    generability: StoryWorkspaceEpisodePromptGenerability
 
 
 class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
@@ -415,101 +427,50 @@ class StoryWorkspaceEpisodeAuxiliaryArtifactAdapter:
                             "invalid_shape",
                         )
                     shot_id = _required_key(raw.get("shot_id"), _SHOT_ID_RE, source_artifact)
-                    raw_kind = raw.get("prompt_kind", raw.get("kind", "default"))
-                    kind = _required_key(raw_kind, _PROMPT_KIND_RE, source_artifact).lower()
                     target = known_shots.get(_ascii_lookup_key(shot_id))
                     canonical_shot_id = (
                         target.source_key if target is not None else shot_id
                     )
-                    identity = (_ascii_lookup_key(canonical_shot_id), kind)
-                    if identity in seen:
-                        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
-                            source_artifact,
-                            "duplicate_prompt_identity",
+                    for variant in _prompt_variants(raw, source_artifact):
+                        identity = (
+                            _ascii_lookup_key(canonical_shot_id),
+                            variant.kind,
                         )
-                    seen.add(identity)
-                    params = _mapping(raw.get("params"), source_artifact)
-                    generability = _mapping(raw.get("generability"), source_artifact)
-                    items.append(
-                        StoryWorkspaceEpisodePrompt(
-                            id=self._view_id(
-                                "prompt",
-                                f"{canonical_shot_id}:{kind}",
-                            ),
-                            shot_id=canonical_shot_id,
-                            kind=kind,
-                            shot_view_id=(
-                                target.view_id if target is not None else None
-                            ),
-                            association_status=(
-                                StoryWorkspaceEpisodeAssociationStatus.LINKED
-                                if target is not None
-                                else StoryWorkspaceEpisodeAssociationStatus.ORPHAN
-                            ),
-                            positive=_required_text(
-                                raw.get("positive"),
-                                8000,
+                        if identity in seen:
+                            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
                                 source_artifact,
-                            ),
-                            negative=_optional_text(
-                                raw.get("negative"),
-                                4000,
-                                source_artifact,
-                            ),
-                            parameters=StoryWorkspaceEpisodePromptParameters(
-                                model=_optional_text(params.get("model"), 128, source_artifact),
-                                mode=_optional_text(params.get("mode"), 128, source_artifact),
-                                duration_sec=_optional_number(
-                                    params.get("duration"),
-                                    source_artifact,
+                                "duplicate_prompt_identity",
+                            )
+                        seen.add(identity)
+                        items.append(
+                            StoryWorkspaceEpisodePrompt(
+                                id=self._view_id(
+                                    "prompt",
+                                    f"{canonical_shot_id}:{variant.kind}",
                                 ),
-                                motion_strength=_optional_number(
-                                    params.get("motion_strength"),
-                                    source_artifact,
+                                shot_id=canonical_shot_id,
+                                kind=variant.kind,
+                                shot_view_id=(
+                                    target.view_id if target is not None else None
                                 ),
-                                camera_motion=_optional_text(
-                                    params.get("camera_motion"),
-                                    255,
-                                    source_artifact,
+                                association_status=(
+                                    StoryWorkspaceEpisodeAssociationStatus.LINKED
+                                    if target is not None
+                                    else StoryWorkspaceEpisodeAssociationStatus.ORPHAN
                                 ),
-                                aspect_ratio=_optional_text(
-                                    params.get("aspect_ratio"),
-                                    32,
-                                    source_artifact,
-                                ),
-                            ),
-                            generability=StoryWorkspaceEpisodePromptGenerability(
-                                character_anchor=_optional_text(
-                                    generability.get("character_anchor"),
-                                    128,
-                                    source_artifact,
-                                ),
-                                motion_feasibility=_optional_text(
-                                    generability.get("motion_feasibility"),
-                                    128,
-                                    source_artifact,
-                                ),
-                                duration_budget=_optional_text(
-                                    generability.get("duration_budget"),
-                                    128,
-                                    source_artifact,
-                                ),
-                                notes=_optional_text(
-                                    generability.get("notes"),
-                                    2000,
-                                    source_artifact,
-                                    empty_is_none=False,
-                                ),
-                            ),
-                            source_artifact=source_artifact,
-                            source_revision=source_revision,
+                                positive=variant.positive,
+                                negative=variant.negative,
+                                parameters=variant.parameters,
+                                generability=variant.generability,
+                                source_artifact=source_artifact,
+                                source_revision=source_revision,
+                            )
                         )
-                    )
-                    if len(items) > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_ITEMS:
-                        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
-                            "prompts/",
-                            "item_limit",
-                        )
+                        if len(items) > STORY_WORKSPACE_EPISODE_AUXILIARY_MAX_ITEMS:
+                            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                                "prompts/",
+                                "item_limit",
+                            )
         return items
 
     def _project_render_guide(
@@ -1143,6 +1104,151 @@ def _section_plain_text(lines: Sequence[str], artifact: str) -> str:
 
 def _normalized_title(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def _prompt_variants(
+    raw: Mapping[str, Any],
+    artifact: str,
+) -> list[_PromptVariant]:
+    platform_keys = [
+        kind for kind in _MULTI_PLATFORM_PROMPT_KINDS if kind in raw
+    ]
+    if platform_keys:
+        if len(platform_keys) != len(_MULTI_PLATFORM_PROMPT_KINDS):
+            raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+                artifact,
+                "incomplete_multi_platform_prompt",
+            )
+        generability = _prompt_generability(
+            _mapping(raw.get("generability"), artifact),
+            artifact,
+        )
+        return [
+            _platform_prompt_variant(
+                kind,
+                raw[kind],
+                generability,
+                artifact,
+            )
+            for kind in _MULTI_PLATFORM_PROMPT_KINDS
+        ]
+
+    kind = _required_key(
+        raw.get("prompt_kind", raw.get("kind", "default")),
+        _PROMPT_KIND_RE,
+        artifact,
+    ).lower()
+    params = _mapping(raw.get("params"), artifact)
+    return [
+        _PromptVariant(
+            kind=kind,
+            positive=_required_text(raw.get("positive"), 8000, artifact),
+            negative=_optional_text(raw.get("negative"), 4000, artifact),
+            parameters=_prompt_parameters(params, params, artifact),
+            generability=_prompt_generability(
+                _mapping(raw.get("generability"), artifact),
+                artifact,
+            ),
+        )
+    ]
+
+
+def _platform_prompt_variant(
+    kind: str,
+    value: Any,
+    generability: StoryWorkspaceEpisodePromptGenerability,
+    artifact: str,
+) -> _PromptVariant:
+    if isinstance(value, str):
+        return _PromptVariant(
+            kind=kind,
+            positive=_required_text(value, 8000, artifact),
+            negative=None,
+            parameters=StoryWorkspaceEpisodePromptParameters(),
+            generability=generability,
+        )
+    if not isinstance(value, Mapping):
+        raise StoryWorkspaceEpisodeAuxiliaryArtifactParseError(
+            artifact,
+            "invalid_shape",
+        )
+    nested_params = _mapping(value.get("params"), artifact)
+    return _PromptVariant(
+        kind=kind,
+        positive=_required_text(value.get("prompt_text"), 8000, artifact),
+        negative=_optional_text(
+            value.get("negative_prompt"),
+            4000,
+            artifact,
+        ),
+        parameters=_prompt_parameters(value, nested_params, artifact),
+        generability=generability,
+    )
+
+
+def _prompt_parameters(
+    direct: Mapping[str, Any],
+    nested: Mapping[str, Any],
+    artifact: str,
+) -> StoryWorkspaceEpisodePromptParameters:
+    def value(*keys: str) -> Any:
+        for key in keys:
+            if key in nested:
+                return nested[key]
+            if key in direct:
+                return direct[key]
+        return None
+
+    return StoryWorkspaceEpisodePromptParameters(
+        model=_optional_text(value("model"), 128, artifact),
+        mode=_optional_text(value("mode"), 128, artifact),
+        duration_sec=_platform_duration_seconds(
+            value("duration_seconds", "duration", "duration_mode"),
+            artifact,
+        ),
+        motion_strength=_optional_number(value("motion_strength"), artifact),
+        camera_motion=_optional_text(
+            value("camera_motion", "motion_keywords", "motion_tag"),
+            255,
+            artifact,
+        ),
+        aspect_ratio=_optional_text(value("aspect_ratio"), 32, artifact),
+    )
+
+
+def _prompt_generability(
+    value: Mapping[str, Any],
+    artifact: str,
+) -> StoryWorkspaceEpisodePromptGenerability:
+    return StoryWorkspaceEpisodePromptGenerability(
+        character_anchor=_optional_text(
+            value.get("character_anchor"),
+            128,
+            artifact,
+        ),
+        motion_feasibility=_optional_text(
+            value.get("motion_feasibility"),
+            128,
+            artifact,
+        ),
+        duration_budget=_optional_text(
+            value.get("duration_budget"),
+            128,
+            artifact,
+        ),
+        notes=_optional_text(
+            value.get("notes"),
+            2000,
+            artifact,
+            empty_is_none=False,
+        ),
+    )
+
+
+def _platform_duration_seconds(value: Any, artifact: str) -> float | None:
+    if isinstance(value, str) and value.strip() == "multi_segment":
+        return None
+    return _duration_seconds(value, artifact)
 
 
 def _mapping(value: Any, artifact: str) -> Mapping[str, Any]:
