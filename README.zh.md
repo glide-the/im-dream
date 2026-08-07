@@ -130,7 +130,7 @@ python database.py
 ```bash
 cd frontend
 npm install
-npm run dev  # 运行在 http://localhost:5173
+npm run dev  # 监听 0.0.0.0:5173；其他设备访问 http://<本机 IP>:5173
 ```
 
 ---

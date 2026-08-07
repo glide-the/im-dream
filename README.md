@@ -130,7 +130,7 @@ python database.py
 ```bash
 cd frontend
 npm install
-npm run dev  # Runs on http://localhost:5173
+npm run dev  # Listens on 0.0.0.0:5173; open http://<this-machine-ip>:5173 from another device
 ```
 
 ---

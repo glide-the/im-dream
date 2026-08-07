@@ -3,6 +3,7 @@
 # [Output] Local check/build/start/verify/stop workflow for Ink & Memory.
 # [Pos] platform release entry in deploy/local/
 # [Sync] 2026-06-12: add platform-scoped local release helper with help, dry-run, and check modes.
+# [Sync] 2026-08-07: expose the frontend dev server on all network interfaces by default.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -15,9 +16,9 @@ FRONTEND_PID="${LOG_DIR}/frontend.pid"
 BACKEND_LOG="${LOG_DIR}/backend.log"
 FRONTEND_LOG="${LOG_DIR}/frontend.log"
 LOCAL_BACKEND_URL="${LOCAL_BACKEND_URL:-http://127.0.0.1:8765}"
-LOCAL_FRONTEND_HOST="${LOCAL_FRONTEND_HOST:-127.0.0.1}"
+LOCAL_FRONTEND_HOST="${LOCAL_FRONTEND_HOST:-0.0.0.0}"
 LOCAL_FRONTEND_PORT="${LOCAL_FRONTEND_PORT:-5173}"
-LOCAL_FRONTEND_URL="${LOCAL_FRONTEND_URL:-http://${LOCAL_FRONTEND_HOST}:${LOCAL_FRONTEND_PORT}}"
+LOCAL_FRONTEND_URL="${LOCAL_FRONTEND_URL:-http://127.0.0.1:${LOCAL_FRONTEND_PORT}}"
 
 DRY_RUN=0
 COMMAND=""
@@ -41,9 +42,9 @@ Commands:
 
 Environment overrides:
   LOCAL_BACKEND_URL       default: http://127.0.0.1:8765
-  LOCAL_FRONTEND_HOST     default: 127.0.0.1
+  LOCAL_FRONTEND_HOST     default: 0.0.0.0 (listen on all network interfaces)
   LOCAL_FRONTEND_PORT     default: 5173
-  LOCAL_FRONTEND_URL      default: http://${LOCAL_FRONTEND_HOST}:${LOCAL_FRONTEND_PORT}
+  LOCAL_FRONTEND_URL      default: http://127.0.0.1:${LOCAL_FRONTEND_PORT} (local verification URL)
   LOCAL_RELEASE_LOG_DIR   default: logs/deploy-local
   PYTHON_BIN              default: backend/.venv/bin/python, python3, then python
 EOF
