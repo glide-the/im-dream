@@ -192,8 +192,12 @@
   display: grid;
   min-height: 0;
   flex: 1;
-  grid-template-columns: minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr) clamp(380px, 32vw, 460px);
   overflow: hidden;
+}
+
+.story-workspace-dream__body[data-agent-open] {
+  grid-template-columns: minmax(0, 1fr) clamp(430px, 40vw, 560px);
 }
 
 .story-workspace-dream__manuscript {
@@ -301,10 +305,28 @@
 
 .story-workspace-dream__editor {
   min-width: 0;
-  padding: 28px 26px 92px;
+  padding: 28px 30px 92px;
   overflow: auto;
+  scrollbar-gutter: stable;
   background: var(--dream-paper);
   border-left: 1px solid var(--dream-rule);
+  box-shadow: inset 3px 0 color-mix(in srgb, var(--dream-action) 9%, transparent);
+}
+
+.story-workspace-dream__editor[data-agent-open] {
+  display: grid;
+  min-height: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 20px 24px 24px;
+  overflow: hidden;
+}
+
+.story-workspace-dream__editor[data-agent-open] > .story-workspace-dream-agent-rail {
+  margin: 0 0 13px;
+}
+
+.story-workspace-dream__editor[data-agent-open] > .story-workspace-dream__agent-panel {
+  min-height: 0;
 }
 
 /* Dream Agent is a living marginal note, not a detached support-chat card. */
@@ -504,6 +526,7 @@
 .story-workspace-dream-agent-dialog__status b { display: inline-grid; width: 14px; height: 14px; place-items: center; color: var(--dream-action); font-size: 13px; }
 
 .story-workspace-dream-agent-panel { display: grid; min-height: 0; grid-template-rows: auto minmax(120px, 1fr) auto; border-top: 1px solid var(--dream-rule); }
+.story-workspace-dream__editor[data-agent-open] .story-workspace-dream-agent-panel { height: 100%; grid-template-rows: auto minmax(0, 1fr) auto; }
 .story-workspace-dream-agent-panel[hidden] { display: none; }
 .story-workspace-dream-agent-panel > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid color-mix(in srgb, var(--dream-rule) 74%, transparent); }
 .story-workspace-dream-agent-panel > header p, .story-workspace-dream-agent-panel small, .story-workspace-dream-agent-panel form label > span { margin: 0 0 4px; color: var(--dream-muted); font-family: ui-monospace, monospace; font-size: 9px; letter-spacing: .07em; text-transform: uppercase; }
@@ -512,6 +535,8 @@
 .story-workspace-dream-agent-panel button:disabled { cursor: not-allowed; opacity: .46; }
 .story-workspace-dream-agent-panel__history-shell { position: relative; min-height: 0; max-height: 36vh; }
 .story-workspace-dream-agent-panel__history { height: 100%; min-height: 0; max-height: 36vh; box-sizing: border-box; padding: 14px 0; overflow: auto; }
+.story-workspace-dream__editor[data-agent-open] .story-workspace-dream-agent-panel__history-shell,
+.story-workspace-dream__editor[data-agent-open] .story-workspace-dream-agent-panel__history { max-height: none; }
 .story-workspace-dream-agent-panel__history:focus-visible { outline: 1px solid var(--dream-action); outline-offset: 3px; }
 .story-workspace-dream-agent-panel__message { margin: 0 0 14px; }
 .story-workspace-dream-agent-panel__message p { margin: 5px 0 0; color: var(--dream-ink); white-space: pre-wrap; font-size: 13px; line-height: 1.6; }
@@ -519,11 +544,14 @@
 .story-workspace-dream-agent-panel__message--user p { color: var(--dream-muted); }
 .story-workspace-dream-agent-panel__empty { margin: 0; color: var(--dream-muted); font-size: 12px; line-height: 1.6; }
 .story-workspace-dream-agent-panel__announcement { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-.story-workspace-dream-agent-panel form { display: grid; gap: 9px; padding: 14px 0 4px; border-top: 1px solid color-mix(in srgb, var(--dream-rule) 74%, transparent); }
+.story-workspace-dream-agent-panel form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 8px 12px; padding: 12px 0 0; border-top: 1px solid color-mix(in srgb, var(--dream-rule) 74%, transparent); }
 .story-workspace-dream-agent-panel form > p { margin: 0; color: var(--dream-muted); font-size: 11px; line-height: 1.45; }
-.story-workspace-dream-agent-panel label { display: grid; gap: 7px; }
+.story-workspace-dream-agent-panel form > p { grid-column: 1 / -1; }
+.story-workspace-dream-agent-panel label { display: grid; min-width: 0; gap: 5px; }
 .story-workspace-dream-agent-panel textarea { width: 100%; box-sizing: border-box; padding: 8px 1px; color: var(--dream-ink); background: transparent; border: 0; border-bottom: 1px solid var(--dream-rule); border-radius: 0; font: inherit; font-size: 13px; line-height: 1.55; outline: none; resize: vertical; }
-.story-workspace-dream-agent-panel form > button { justify-self: end; min-height: 27px; font-weight: 700; }
+.story-workspace-dream-agent-panel form > button { justify-self: end; min-height: 44px; font-weight: 700; }
+.story-workspace-dream-agent-composer-button[data-state="running"] { display: grid; width: 36px; min-width: 36px !important; height: 36px; min-height: 36px !important; place-items: center; padding: 0 !important; color: var(--color-text-on-action, var(--dream-paper)) !important; background: var(--color-state-danger, #a44f3f) !important; border: 0 !important; border-radius: 999px !important; opacity: 1 !important; cursor: wait !important; }
+.story-workspace-dream-agent-composer-button[data-state="running"] svg { width: 14px; height: 14px; }
 
 .story-workspace-dream-tool-confirmation {
   position: relative;
@@ -623,6 +651,20 @@
   border-bottom: 1px dashed var(--dream-rule);
 }
 
+.story-workspace-dream__editor-fields {
+  display: grid;
+  gap: 22px;
+}
+
+.story-workspace-dream__editor-fields label { margin-top: 0; }
+.story-workspace-dream__editor-fields textarea { min-height: 168px; }
+
+.story-workspace-dream__editor-footer {
+  margin-top: 30px;
+  padding-top: 18px;
+  border-top: 1px solid color-mix(in srgb, var(--dream-rule) 72%, transparent);
+}
+
 .story-workspace-dream__editor label {
   display: grid;
   gap: 8px;
@@ -668,9 +710,7 @@
 .story-workspace-dream__source {
   display: grid;
   gap: 11px;
-  margin: 28px 0 0;
-  padding-top: 17px;
-  border-top: 1px dashed var(--dream-rule);
+  margin: 0;
 }
 
 .story-workspace-dream__source div {
@@ -1171,7 +1211,11 @@
 
 @media (max-width: 1180px) {
   .story-workspace-dream__body {
-    grid-template-columns: minmax(0, 1fr) minmax(290px, 36vw);
+    grid-template-columns: minmax(0, 1fr) minmax(330px, 38vw);
+  }
+
+  .story-workspace-dream__body[data-agent-open] {
+    grid-template-columns: minmax(0, 1fr) minmax(380px, 44vw);
   }
 
   .story-workspace-dream__masthead,
@@ -1222,8 +1266,11 @@
   .story-workspace-dream__body { display: flex; flex-direction: column-reverse; overflow: visible; }
   .story-workspace-dream__manuscript { min-height: 420px; padding: 23px 18px 96px; overflow: visible; }
   .story-workspace-dream__editor { padding: 18px; overflow: visible; border-bottom: 1px solid var(--dream-rule); border-left: 0; }
+  .story-workspace-dream__editor[data-agent-open] { display: block; padding: 18px; overflow: visible; }
   .story-workspace-dream__editor > .story-workspace-dream-agent-rail { display: none; }
-  .story-workspace-dream-agent-panel__history { max-height: 42dvh; }
+  .story-workspace-dream__editor[data-agent-open] .story-workspace-dream-agent-panel { height: auto; }
+  .story-workspace-dream__editor[data-agent-open] .story-workspace-dream-agent-panel__history-shell,
+  .story-workspace-dream__editor[data-agent-open] .story-workspace-dream-agent-panel__history { max-height: 42dvh; }
   .story-workspace-dream-tool-confirmation { max-height: min(52dvh, 420px); padding-right: 10px; }
   .story-workspace-dream-tool-confirmation__actions { flex-wrap: wrap; gap: 8px 14px; }
   .story-workspace-dream-agent-panel .story-workspace-dream-tool-confirmation__actions button { min-height: 44px; }

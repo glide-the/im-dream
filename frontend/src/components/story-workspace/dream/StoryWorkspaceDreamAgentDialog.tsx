@@ -10,6 +10,7 @@ import {
 } from '../../../hooks/story-workspace';
 import { storyWorkspaceDreamAgentFocusCycleIndex } from './storyWorkspaceDreamAgentFocus';
 import { StoryWorkspaceDreamAgentMessageList } from './StoryWorkspaceDreamAgentMessageList';
+import { StoryWorkspaceDreamAgentComposerButton } from './StoryWorkspaceDreamAgentComposerButton';
 import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
 import {
   storyWorkspaceDreamAgentContentRevision,
@@ -409,7 +410,7 @@ export function StoryWorkspaceDreamAgentDialog({
                 value={draft}
               />
             </label>
-            <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
+            <StoryWorkspaceDreamAgentComposerButton agent={agent} canSend={canSend} />
           </form>
         </>
       )}

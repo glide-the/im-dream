@@ -447,7 +447,10 @@ export function StoryWorkspaceDreamPage({
         })}
       </nav>
 
-      <div className="story-workspace-dream__body">
+      <div
+        className="story-workspace-dream__body"
+        data-agent-open={agentPanelOpen || undefined}
+      >
         <main className="story-workspace-dream__manuscript">
           <header className="story-workspace-dream__section-heading">
             <div>
@@ -509,7 +512,11 @@ export function StoryWorkspaceDreamPage({
           </ol>
         </main>
 
-        <aside className="story-workspace-dream__editor" aria-label="Dream 内容编辑器">
+        <aside
+          aria-label="Dream 内容编辑器"
+          className="story-workspace-dream__editor"
+          data-agent-open={agentPanelOpen || undefined}
+        >
           {agentPanelOpen && (
             <StoryWorkspaceDreamAgentRail
               agent={dreamAgent}
@@ -549,62 +556,66 @@ export function StoryWorkspaceDreamPage({
                 </div>
               )}
 
-              <label>
-                <span>名称</span>
-                <input
-                  disabled={isReadOnly}
-                  onBlur={() => normalizeField('displayName')}
-                  onChange={(event) => updateField('displayName', event.currentTarget.value)}
-                  value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
-                    dreamState, selection.stage, selection.entityId, 'displayName',
-                  ))}
-                />
-              </label>
-              <label>
-                <span>摘要</span>
-                <textarea
-                  disabled={isReadOnly}
-                  onBlur={() => normalizeField('summary')}
-                  onChange={(event) => updateField('summary', event.currentTarget.value)}
-                  rows={7}
-                  value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
-                    dreamState, selection.stage, selection.entityId, 'summary',
-                  ))}
-                />
-              </label>
-              <label>
-                <span>关联项</span>
-                <input
-                  disabled={isReadOnly}
-                  onChange={(event) => updateField('relations', event.currentTarget.value)}
-                  placeholder="用逗号分隔"
-                  value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
-                    dreamState, selection.stage, selection.entityId, 'relations',
-                  ))}
-                />
-              </label>
+              <div className="story-workspace-dream__editor-fields">
+                <label>
+                  <span>名称</span>
+                  <input
+                    disabled={isReadOnly}
+                    onBlur={() => normalizeField('displayName')}
+                    onChange={(event) => updateField('displayName', event.currentTarget.value)}
+                    value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
+                      dreamState, selection.stage, selection.entityId, 'displayName',
+                    ))}
+                  />
+                </label>
+                <label>
+                  <span>摘要</span>
+                  <textarea
+                    disabled={isReadOnly}
+                    onBlur={() => normalizeField('summary')}
+                    onChange={(event) => updateField('summary', event.currentTarget.value)}
+                    rows={7}
+                    value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
+                      dreamState, selection.stage, selection.entityId, 'summary',
+                    ))}
+                  />
+                </label>
+                <label>
+                  <span>关联项</span>
+                  <input
+                    disabled={isReadOnly}
+                    onChange={(event) => updateField('relations', event.currentTarget.value)}
+                    placeholder="用逗号分隔"
+                    value={storyWorkspaceDreamEditorValue(storyWorkspaceReadDreamField(
+                      dreamState, selection.stage, selection.entityId, 'relations',
+                    ))}
+                  />
+                </label>
+              </div>
 
-              <dl className="story-workspace-dream__source">
-                <div><dt>来源文件</dt><dd>{selectedFileItem.sourceFile}</dd></div>
-                <div><dt>实体 ID</dt><dd>{selection.entityId}</dd></div>
-              </dl>
+              <div className="story-workspace-dream__editor-footer">
+                <dl className="story-workspace-dream__source">
+                  <div><dt>来源文件</dt><dd>{selectedFileItem.sourceFile}</dd></div>
+                  <div><dt>实体 ID</dt><dd>{selection.entityId}</dd></div>
+                </dl>
 
-              {!isReadOnly && (
-                <button
-                  className="story-workspace-dream__reset"
-                  onClick={() => {
-                    let next = dreamState;
-                    for (const field of ['displayName', 'summary', 'relations'] as const) {
-                      next = storyWorkspaceResetDreamField(
-                        next, selection.stage, selection.entityId, field,
-                      );
-                    }
-                    setDreamState(next);
-                    setEditorError(null);
-                  }}
-                  type="button"
-                >撤销本项修改</button>
-              )}
+                {!isReadOnly && (
+                  <button
+                    className="story-workspace-dream__reset"
+                    onClick={() => {
+                      let next = dreamState;
+                      for (const field of ['displayName', 'summary', 'relations'] as const) {
+                        next = storyWorkspaceResetDreamField(
+                          next, selection.stage, selection.entityId, field,
+                        );
+                      }
+                      setDreamState(next);
+                      setEditorError(null);
+                    }}
+                    type="button"
+                  >撤销本项修改</button>
+                )}
+              </div>
             </>
           ) : (
             <div className="story-workspace-dream__editor-empty">

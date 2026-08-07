@@ -8,6 +8,7 @@ import {
   type StoryWorkspaceDreamAgentViewModel,
 } from '../../../hooks/story-workspace';
 import { StoryWorkspaceDreamAgentMessageList } from './StoryWorkspaceDreamAgentMessageList';
+import { StoryWorkspaceDreamAgentComposerButton } from './StoryWorkspaceDreamAgentComposerButton';
 import { StoryWorkspaceDreamToolConfirmation } from './StoryWorkspaceDreamToolConfirmation';
 import {
   storyWorkspaceDreamAgentContentRevision,
@@ -211,11 +212,11 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
               onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void submit(); } }}
               placeholder="写下后续创作指令…"
               ref={textareaRef}
-              rows={3}
+              rows={2}
               value={draft}
             />
           </label>
-          <button disabled={!canSend} type="submit">{agent.isSending ? '发送中…' : '发送'}</button>
+          <StoryWorkspaceDreamAgentComposerButton agent={agent} canSend={canSend} />
         </form>
       )}
     </section>

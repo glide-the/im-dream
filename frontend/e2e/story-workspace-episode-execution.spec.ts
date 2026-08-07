@@ -123,14 +123,20 @@ function dreamAgentSnapshot(
     kind: 'approval';
     toolName: string;
   }> = [],
+  lifecycleOverride?: 'idle' | 'streaming',
 ) {
   const isWaitingForToolConfirmation = pendingToolConfirmations.length > 0;
+  const lifecycle = lifecycleOverride
+    ?? (isWaitingForToolConfirmation ? 'streaming' : 'idle');
+  const isRunning = lifecycle === 'streaming';
   return {
     storyWorkspaceRunId: RUN_ID,
-    lifecycle: isWaitingForToolConfirmation ? 'streaming' : 'idle',
-    activeTurnId: isWaitingForToolConfirmation ? 'turn-u12-confirmation' : null,
-    canSend: !isWaitingForToolConfirmation,
-    sendBlockReason: isWaitingForToolConfirmation ? 'busy' : null,
+    lifecycle,
+    activeTurnId: isWaitingForToolConfirmation
+      ? 'turn-u12-confirmation'
+      : isRunning ? 'turn-u12-running' : null,
+    canSend: !isWaitingForToolConfirmation && !isRunning,
+    sendBlockReason: isWaitingForToolConfirmation || isRunning ? 'busy' : null,
     toolConfirmationObservation: 'known',
     messages: [{
       id: 'message-u12-browser',
@@ -461,6 +467,7 @@ type BrowserFixtureState = {
   revisionIndex: 0 | 1;
   artifactReads: number;
   continueRequests: Array<Record<string, unknown>>;
+  dreamAgentLifecycle?: 'idle' | 'streaming';
   pendingToolConfirmations: Array<{
     toolCallId: string;
     kind: 'approval';
@@ -582,7 +589,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
       return;
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/dream-agent/messages`)) {
-      await json(route, dreamAgentSnapshot(state.pendingToolConfirmations));
+      await json(route, dreamAgentSnapshot(
+        state.pendingToolConfirmations,
+        state.dreamAgentLifecycle,
+      ));
       return;
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/dream-agent/events`)) {
@@ -1068,4 +1078,130 @@ test('Dream Agent Panel restores a safe Write confirmation without exposing raw 
       path: resolve(EVIDENCE_DIR, 'dream-confirmation-trace.zip'),
     });
   }
+});
+
+test('Dream editor uses its proofing rail and both Agent surfaces share the running marker', async ({
+  page,
+}) => {
+  mkdirSync(EVIDENCE_DIR, { recursive: true });
+  const diagnostics: string[] = [];
+  const state: BrowserFixtureState = {
+    revisionIndex: 0,
+    artifactReads: 0,
+    continueRequests: [],
+    dreamAgentLifecycle: 'streaming',
+    pendingToolConfirmations: [],
+    toolConfirmationRequests: [],
+  };
+  page.on('console', (message) => {
+    if (message.type() === 'error') diagnostics.push(`console: ${message.text()}`);
+  });
+  page.on('pageerror', (error) => diagnostics.push(`pageerror: ${error.message}`));
+  page.on('requestfailed', (request) => {
+    if (request.failure()?.errorText === 'net::ERR_ABORTED') return;
+    const url = request.url();
+    if (!url.includes('fonts.googleapis.com') && !url.includes('fonts.gstatic.com')
+      && !url.includes('react-grab.com')) {
+      diagnostics.push(`requestfailed: ${request.failure()?.errorText ?? 'failed'} ${url}`);
+    }
+  });
+
+  await page.clock.setFixedTime(FROZEN_NOW);
+  await installApiFixture(page, state);
+  await page.addInitScript(() => {
+    localStorage.setItem('auth_token', 'u12-browser-token');
+    localStorage.setItem('migration_completed', 'true');
+    localStorage.setItem('ink-language', 'zh');
+  });
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${WEB_BASE}/story-workspace/dream?run=${RUN_ID}`);
+
+  const editor = page.locator('aside[aria-label="Dream 内容编辑器"]');
+  await page.getByRole('navigation', { name: 'Dream 文件模块' })
+    .getByRole('button', { name: /分镜/ })
+    .click();
+  await expect(editor.getByRole('heading', { name: '修改当前内容' })).toBeVisible();
+  await expect(editor.locator('.story-workspace-dream__editor-fields')).toBeVisible();
+  await expect(editor.locator('.story-workspace-dream__editor-footer')).toBeVisible();
+  const editorBox = await editor.boundingBox();
+  expect(editorBox).not.toBeNull();
+  expect(editorBox?.width ?? 0).toBeGreaterThanOrEqual(440);
+  await expectNoDocumentHorizontalOverflow(page);
+  await page.screenshot({
+    path: resolve(EVIDENCE_DIR, 'dream-editor-proofing-desktop-1440x1000.png'),
+  });
+
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  const panel = page.getByRole('region', { name: 'Dream Agent 完整消息' });
+  const panelRunningMarker = panel.getByRole('button', { name: 'Dream Agent 正在运行' });
+  await expect(panel).toBeVisible();
+  await expect(panelRunningMarker).toBeVisible();
+  await expect(panelRunningMarker).toBeDisabled();
+  await expect(panelRunningMarker.locator('svg rect')).toHaveCount(1);
+  await expect(editor).toHaveAttribute('data-agent-open', 'true');
+  const openEditorBox = await editor.boundingBox();
+  expect(openEditorBox).not.toBeNull();
+  expect(openEditorBox?.width ?? 0).toBeGreaterThanOrEqual(540);
+  expect(await panel.evaluate((element) => {
+    const historyShell = element.querySelector<HTMLElement>(
+      '.story-workspace-dream-agent-panel__history-shell',
+    );
+    const history = element.querySelector<HTMLElement>(
+      '.story-workspace-dream-agent-panel__history',
+    );
+    const composer = element.querySelector<HTMLElement>('form');
+    return {
+      historyHeight: history?.getBoundingClientRect().height ?? 0,
+      historyOverflowY: history ? getComputedStyle(history).overflowY : '',
+      historyShellMaxHeight: historyShell ? getComputedStyle(historyShell).maxHeight : '',
+      composerHeight: composer?.getBoundingClientRect().height ?? 0,
+    };
+  })).toEqual(expect.objectContaining({
+    historyOverflowY: 'auto',
+    historyShellMaxHeight: 'none',
+  }));
+  const desktopPanelMetrics = await panel.evaluate((element) => {
+    const history = element.querySelector<HTMLElement>(
+      '.story-workspace-dream-agent-panel__history',
+    );
+    const composer = element.querySelector<HTMLElement>('form');
+    return {
+      historyHeight: history?.getBoundingClientRect().height ?? 0,
+      composerHeight: composer?.getBoundingClientRect().height ?? 0,
+    };
+  });
+  expect(desktopPanelMetrics.historyHeight).toBeGreaterThan(desktopPanelMetrics.composerHeight);
+  await page.screenshot({
+    path: resolve(EVIDENCE_DIR, 'dream-agent-running-desktop-1440x1000.png'),
+  });
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(panelRunningMarker).toBeVisible();
+  await expect(panelRunningMarker).toBeInViewport();
+  await expectNoDocumentHorizontalOverflow(page);
+  const narrowEditorBox = await editor.boundingBox();
+  expect(narrowEditorBox).not.toBeNull();
+  expect(narrowEditorBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+  expect((narrowEditorBox?.x ?? 0) + (narrowEditorBox?.width ?? 0)).toBeLessThanOrEqual(391);
+  const narrowHistoryMaxHeight = await panel.locator(
+    '.story-workspace-dream-agent-panel__history-shell',
+  ).evaluate((element) => Number.parseFloat(getComputedStyle(element).maxHeight));
+  expect(narrowHistoryMaxHeight).toBeLessThanOrEqual(0.42 * 844 + 1);
+  await page.screenshot({
+    path: resolve(EVIDENCE_DIR, 'dream-agent-running-narrow-390x844.png'),
+  });
+
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto(`${WEB_BASE}/story-workspace/runs/${RUN_ID}/execution`);
+  await page.getByRole('button', { name: '打开 Dream Agent 消息预览' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Dream Agent' });
+  const dialogRunningMarker = dialog.getByRole('button', { name: 'Dream Agent 正在运行' });
+  await expect(dialogRunningMarker).toBeVisible();
+  await expect(dialogRunningMarker).toBeDisabled();
+  await expect(dialogRunningMarker.locator('svg rect')).toHaveCount(1);
+  await expectNoDocumentHorizontalOverflow(page);
+  await page.screenshot({
+    path: resolve(EVIDENCE_DIR, 'dream-agent-dialog-running-desktop-1440x1000.png'),
+  });
+  expect(diagnostics).toEqual([]);
 });

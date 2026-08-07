@@ -43,6 +43,23 @@ test('run-bound Dream keeps its full Agent history inside the editor rail, not i
   expect(PAGE.match(/<StoryWorkspaceDreamAgentPanel/g)).toHaveLength(1);
 });
 
+test('Dream editor expands as a proofing sheet and gives an open Agent full-height history ownership', () => {
+  expect(PAGE.match(/data-agent-open={agentPanelOpen \|\| undefined}/g)).toHaveLength(2);
+  expect(PAGE).toContain('className="story-workspace-dream__editor-fields"');
+  expect(PAGE).toContain('className="story-workspace-dream__editor-footer"');
+  expect(CSS).toContain('.story-workspace-dream__body[data-agent-open]');
+  expect(CSS).toMatch(
+    /\.story-workspace-dream__body\[data-agent-open\][^{]*\{[^}]*grid-template-columns:[^}]*clamp\(430px,\s*40vw,\s*560px\)/s,
+  );
+  expect(CSS).toMatch(
+    /\.story-workspace-dream__editor\[data-agent-open\][^{]*\{[^}]*grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)/s,
+  );
+  expect(CSS).toContain(
+    '.story-workspace-dream__editor[data-agent-open] .story-workspace-dream-agent-panel__history',
+  );
+  expect(CSS).toContain('max-height: none;');
+});
+
 test('Agent previews and Dream content controls switch one owned editor section', () => {
   expect(PAGE).toContain("type DreamRightSection = 'content' | 'agent'");
   expect(PAGE).toContain("const [rightSection, setRightSection] = useState<DreamRightSection>('content')");
