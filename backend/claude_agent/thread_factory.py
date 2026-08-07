@@ -50,6 +50,8 @@ _DREAM_PUBLIC_TOOL_CONFIRMATIONS_ATTR = (
 _DREAM_PUBLIC_TOOL_CONFIRMATION_SUBSCRIBERS_ATTR = (
     "_story_workspace_dream_public_tool_confirmation_subscribers"
 )
+_MAX_TOOL_CONFIRMATION_SNAPSHOT_IDS = 256
+_MAX_TOOL_CALL_ID_LENGTH = 255
 
 
 def _stop_wait_seconds() -> float:
@@ -541,6 +543,72 @@ class ClaudeAgentThreadFactory:
 
     def session_snapshot(self, session_id: str) -> Optional[dict[str, Any]]:
         return self._pool.snapshot_session(session_id)
+
+    def tool_confirmation_snapshot(self, session_id: str) -> dict[str, Any]:
+        """Return the Generic Chat runtime's pending confirmation identities.
+
+        A non-running thread has no runtime-owned confirmations, so its empty
+        observation is authoritative. A running turn is authoritative only
+        when its confirmation store can be read successfully; missing or
+        failing runtime state must remain unknown so a browser never treats a
+        transport failure as proof that a historical confirmation was settled.
+        """
+
+        _validate_session_id(session_id)
+        state = self._pool.get(session_id)
+        if state is None or state.lifecycle != AgentRunLifecycle.RUNNING:
+            return {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "known",
+            }
+
+        turn_context = getattr(state, "turn_context", None)
+        store = getattr(turn_context, "confirmation_store", None)
+        pending_ids = getattr(store, "pending_ids", None)
+        if not callable(pending_ids):
+            return {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "unknown",
+            }
+
+        try:
+            observed = pending_ids()
+            unique_ids: list[str] = []
+            seen: set[str] = set()
+            overflow = False
+            for item in observed:
+                if (
+                    not isinstance(item, str)
+                    or not item
+                    or len(item) > _MAX_TOOL_CALL_ID_LENGTH
+                    or item in seen
+                ):
+                    continue
+                if len(unique_ids) >= _MAX_TOOL_CONFIRMATION_SNAPSHOT_IDS:
+                    overflow = True
+                    break
+                seen.add(item)
+                unique_ids.append(item)
+        except Exception:
+            logger.exception(
+                "Failed to read Chat runtime confirmations for session_id=%s",
+                session_id,
+            )
+            return {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "unknown",
+            }
+
+        if overflow:
+            return {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "unknown",
+            }
+
+        return {
+            "pending_tool_call_ids": unique_ids,
+            "tool_confirmation_observation": "known",
+        }
 
     def list_session_snapshots(self) -> list[dict[str, Any]]:
         return self._pool.snapshot_all()

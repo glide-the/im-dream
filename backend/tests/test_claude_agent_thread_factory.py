@@ -718,6 +718,78 @@ class TestFactoryRunnerFlyweight(unittest.TestCase):
     def test_session_snapshot_none_for_unknown(self):
         self.assertIsNone(self.factory.session_snapshot("nonexistent"))
 
+    def test_tool_confirmation_snapshot_is_known_empty_without_a_running_turn(self):
+        self.factory._pool.get_or_create("thread-idle")
+
+        self.assertEqual(
+            self.factory.tool_confirmation_snapshot("thread-idle"),
+            {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "known",
+            },
+        )
+        self.assertEqual(
+            self.factory.tool_confirmation_snapshot("thread-not-found"),
+            {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "known",
+            },
+        )
+
+    def test_tool_confirmation_snapshot_reads_deduplicated_bounded_runtime_ids(self):
+        state = self.factory._pool.get_or_create("thread-running-confirmation")
+        state.turn_context = SimpleNamespace(
+            confirmation_store=SimpleNamespace(
+                pending_ids=lambda: [
+                    "call-pending",
+                    "call-pending",
+                    "",
+                    "x" * 256,
+                    42,
+                    "call-second",
+                ],
+            ),
+        )
+        state.mark_running()
+
+        self.assertEqual(
+            self.factory.tool_confirmation_snapshot("thread-running-confirmation"),
+            {
+                "pending_tool_call_ids": ["call-pending", "call-second"],
+                "tool_confirmation_observation": "known",
+            },
+        )
+
+    def test_tool_confirmation_snapshot_is_unknown_when_running_store_is_unreadable(self):
+        state = self.factory._pool.get_or_create("thread-running-unknown")
+        state.turn_context = SimpleNamespace(confirmation_store=None)
+        state.mark_running()
+
+        self.assertEqual(
+            self.factory.tool_confirmation_snapshot("thread-running-unknown"),
+            {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "unknown",
+            },
+        )
+
+    def test_tool_confirmation_snapshot_is_unknown_when_pending_ids_exceed_limit(self):
+        state = self.factory._pool.get_or_create("thread-running-overflow")
+        state.turn_context = SimpleNamespace(
+            confirmation_store=SimpleNamespace(
+                pending_ids=lambda: [f"call-{index}" for index in range(257)],
+            ),
+        )
+        state.mark_running()
+
+        self.assertEqual(
+            self.factory.tool_confirmation_snapshot("thread-running-overflow"),
+            {
+                "pending_tool_call_ids": [],
+                "tool_confirmation_observation": "unknown",
+            },
+        )
+
     def test_stop_thread_cancels_running_turn(self):
         req = _make_request("user_stop", thread_id="thread_stop")
 

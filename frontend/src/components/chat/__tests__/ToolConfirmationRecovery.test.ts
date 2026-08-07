@@ -9,8 +9,12 @@ import {
   shouldApplyChatHistoryRecoverySnapshot,
 } from '../chatRecovery';
 import {
+  deriveSettledToolCallIdsFromHistory,
   interpretToolConfirmationResponse,
+  loadChatHistoryThenRuntimeStatus,
+  parseChatThreadStatus,
   resolvePendingToolConfirmation,
+  runtimePendingToolCallIdsFromStatus,
 } from '../toolConfirmation';
 
 const stalePart: DynamicToolUIPart = {
@@ -29,6 +33,105 @@ test('a locally settled replayed tool part cannot reopen the confirmation dock',
     'auto',
     new Set(['call-stale']),
   )).toBeNull();
+});
+
+test('known runtime status settles only historical tool calls that are no longer pending', () => {
+  const history = [{
+    id: 'assistant-history',
+    role: 'assistant' as const,
+    parts: [
+      stalePart,
+      { ...stalePart, toolCallId: 'call-pending' },
+    ],
+  }];
+  const status = parseChatThreadStatus({
+    running: true,
+    lifecycle: 'running',
+    turn_count: 2,
+    pending_tool_call_ids: ['call-pending'],
+    tool_confirmation_observation: 'known',
+  });
+
+  const settled = deriveSettledToolCallIdsFromHistory(history, status);
+  const runtimePending = runtimePendingToolCallIdsFromStatus(status);
+
+  expect([...settled]).toEqual(['call-stale']);
+  expect(resolvePendingToolConfirmation(stalePart, 'manual', settled)).toBeNull();
+  expect(resolvePendingToolConfirmation(
+    { ...stalePart, toolCallId: 'call-pending', toolMetadata: undefined },
+    'auto',
+    settled,
+    runtimePending,
+  )).toBe('confirm');
+  expect(resolvePendingToolConfirmation(
+    { ...stalePart, toolCallId: 'call-live-new' },
+    'manual',
+    settled,
+  )).toBe('confirm');
+});
+
+test('known empty idle status settles stale history while unknown status settles nothing', () => {
+  const history = [{ id: 'assistant-history', role: 'assistant' as const, parts: [stalePart] }];
+  const known = parseChatThreadStatus({
+    running: false,
+    lifecycle: 'idle',
+    turn_count: 3,
+    pending_tool_call_ids: [],
+    tool_confirmation_observation: 'known',
+  });
+  const unknown = parseChatThreadStatus({
+    running: true,
+    lifecycle: 'running',
+    turn_count: 3,
+    pending_tool_call_ids: [],
+    tool_confirmation_observation: 'unknown',
+  });
+
+  expect([...deriveSettledToolCallIdsFromHistory(history, known)]).toEqual(['call-stale']);
+  expect([...deriveSettledToolCallIdsFromHistory(history, unknown)]).toEqual([]);
+});
+
+test('malformed status cannot be interpreted as a known-empty observation', () => {
+  const base = {
+    running: false,
+    lifecycle: 'idle',
+    turn_count: 3,
+    pending_tool_call_ids: [],
+    tool_confirmation_observation: 'known',
+  };
+  expect(parseChatThreadStatus(base)?.tool_confirmation_observation).toBe('known');
+  expect(parseChatThreadStatus({ ...base, pending_tool_call_ids: 'call-stale' })).toBeNull();
+  expect(parseChatThreadStatus({ ...base, pending_tool_call_ids: [''] })).toBeNull();
+  expect(parseChatThreadStatus({
+    ...base,
+    lifecycle: 'running',
+    running: true,
+    pending_tool_call_ids: Array.from({ length: 257 }, (_, index) => `call-${index}`),
+  })).toBeNull();
+  expect(parseChatThreadStatus({ ...base, tool_confirmation_observation: 'settled' })).toBeNull();
+  expect(parseChatThreadStatus({ ...base, running: 'false' })).toBeNull();
+  expect(parseChatThreadStatus({ ...base, lifecycle: 'unknown' })).toBeNull();
+  expect(parseChatThreadStatus({ ...base, turn_count: -1 })).toBeNull();
+});
+
+test('recovery samples runtime confirmation ownership only after history resolves', async () => {
+  const order: string[] = [];
+  const recovery = await loadChatHistoryThenRuntimeStatus(
+    async () => {
+      order.push('history:start');
+      await Promise.resolve();
+      order.push('history:end');
+      return [{ id: 'assistant-history' }];
+    },
+    async () => {
+      order.push('status');
+      return null;
+    },
+  );
+
+  expect(order).toEqual(['history:start', 'history:end', 'status']);
+  expect(recovery.history).toEqual([{ id: 'assistant-history' }]);
+  expect(recovery.status).toBeNull();
 });
 
 test('a delayed reconnect snapshot cannot overwrite a newer local turn', () => {

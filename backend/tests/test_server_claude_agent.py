@@ -644,6 +644,113 @@ class TestClaudeAgentToolConfirmationRoute(unittest.TestCase):
         self.assertEqual(response, {"ok": True, "approved": False})
 
 
+@_skip_if_no_server
+class TestClaudeAgentThreadStatusRoute(unittest.TestCase):
+    """Thread status exposes the actor-owned runtime confirmation snapshot."""
+
+    def test_status_rejects_an_unowned_thread_before_runtime_observation(self):
+        import routers.claude_agent as route_module
+
+        async def _call_route():
+            return await route_module.claude_agent_thread_status(
+                "thread-foreign",
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value=None,
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "tool_confirmation_snapshot",
+            ) as tool_confirmation_snapshot,
+        ):
+            with self.assertRaises(route_module.HTTPException) as raised:
+                asyncio.run(_call_route())
+
+        self.assertEqual(raised.exception.status_code, 404)
+        tool_confirmation_snapshot.assert_not_called()
+
+    def test_status_returns_runtime_pending_confirmation_ids(self):
+        import routers.claude_agent as route_module
+
+        async def _call_route():
+            return await route_module.claude_agent_thread_status(
+                "thread-owned",
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "session_snapshot",
+                return_value={"lifecycle": "running", "turn_count": 3},
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "tool_confirmation_snapshot",
+                return_value={
+                    "pending_tool_call_ids": ["call-pending"],
+                    "tool_confirmation_observation": "known",
+                },
+            ),
+        ):
+            response = asyncio.run(_call_route())
+
+        self.assertEqual(
+            response,
+            {
+                "running": True,
+                "lifecycle": "running",
+                "turn_count": 3,
+                "pending_tool_call_ids": ["call-pending"],
+                "tool_confirmation_observation": "known",
+            },
+        )
+
+    def test_status_not_found_is_known_empty_for_confirmations(self):
+        import routers.claude_agent as route_module
+
+        async def _call_route():
+            return await route_module.claude_agent_thread_status(
+                "thread-owned",
+                current_user={"user_id": 7},
+            )
+
+        with (
+            unittest.mock.patch.object(
+                route_module.database,
+                "get_chat_thread",
+                return_value={"id": "thread-owned", "user_id": 7},
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "session_snapshot",
+                return_value=None,
+            ),
+            unittest.mock.patch.object(
+                route_module.claude_agent_thread_factory,
+                "tool_confirmation_snapshot",
+                return_value={
+                    "pending_tool_call_ids": [],
+                    "tool_confirmation_observation": "known",
+                },
+            ),
+        ):
+            response = asyncio.run(_call_route())
+
+        self.assertEqual(response["tool_confirmation_observation"], "known")
+        self.assertEqual(response["pending_tool_call_ids"], [])
+
+
 # ---------------------------------------------------------------------------
 # Factory lifecycle tests
 # ---------------------------------------------------------------------------

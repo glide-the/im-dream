@@ -96,6 +96,7 @@ import {
 } from './chatRecovery';
 import { API_BASE } from '../../lib/apiBase';
 const CHAT_BOTTOM_PROXIMITY_PX = 120;
+const EMPTY_TOOL_CALL_IDS: ReadonlySet<string> = new Set<string>();
 
 interface SystemConfigData {
   provider?: string;
@@ -118,8 +119,16 @@ interface ChatPanelProps {
   isLoading?: boolean;
   /** Incremented by ChatView when /status reports lifecycle=running — triggers SSE reconnect. */
   reconnectStreamNonce?: number;
+  /** Exact historical tool calls proven absent from the runtime confirmation store. */
+  initialSettledToolCallIds?: ReadonlySet<string>;
+  /** Exact historical tool calls still owned by the active runtime turn. */
+  initialRuntimePendingToolCallIds?: ReadonlySet<string>;
   /** Called after reconnect stream finishes so parent can reload persisted messages. */
-  onReconnectComplete?: () => Promise<UIMessage[] | undefined> | UIMessage[] | undefined;
+  onReconnectComplete?: () => (
+    Promise<ChatPanelRecoverySnapshot | undefined>
+    | ChatPanelRecoverySnapshot
+    | undefined
+  );
   className?: string;
   inputPlaceholder?: string;
   queuedPrompt?: string;
@@ -144,6 +153,12 @@ interface ChatPanelProps {
   inputContextControl?: ReactNode;
 }
 
+export interface ChatPanelRecoverySnapshot {
+  messages: UIMessage[];
+  settledToolCallIds: ReadonlySet<string>;
+  runtimePendingToolCallIds: ReadonlySet<string>;
+}
+
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
   if (payload.data) {
     return payload.data;
@@ -164,6 +179,8 @@ export default function ChatPanel({
   initialMessages,
   isLoading = false,
   reconnectStreamNonce = 0,
+  initialSettledToolCallIds = EMPTY_TOOL_CALL_IDS,
+  initialRuntimePendingToolCallIds = EMPTY_TOOL_CALL_IDS,
   onReconnectComplete,
   className,
   inputPlaceholder = 'Press i to chat',
@@ -203,7 +220,10 @@ export default function ChatPanel({
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
   const [settledToolCallIds, setSettledToolCallIds] = useState<ReadonlySet<string>>(
-    () => new Set<string>(),
+    () => new Set(initialSettledToolCallIds),
+  );
+  const [runtimePendingToolCallIds, setRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
+    () => new Set(initialRuntimePendingToolCallIds),
   );
   const reconnectAbortRef = useRef<AbortController | null>(null);
   const { setActiveSessionId, workspaceEnabled } = useWorkspaceSession();
@@ -345,9 +365,25 @@ export default function ChatPanel({
   // Initialise the chat with messages provided by the parent (following the
   // better-chatbot pattern: parent fetches history, passes as initialMessages).
   useEffect(() => {
-    setSettledToolCallIds(new Set<string>());
+    setSettledToolCallIds(new Set(initialSettledToolCallIds));
+    setRuntimePendingToolCallIds(new Set(initialRuntimePendingToolCallIds));
     turnGenerationRef.current = 0;
+  // ChatView keys panels by threadId; the explicit reset also keeps direct
+  // consumers safe if they reuse an instance for another thread.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
+
+  useEffect(() => {
+    setSettledToolCallIds((current) => {
+      const next = new Set(current);
+      initialSettledToolCallIds.forEach((toolCallId) => next.add(toolCallId));
+      return next.size === current.size ? current : next;
+    });
+  }, [initialSettledToolCallIds]);
+
+  useEffect(() => {
+    setRuntimePendingToolCallIds(new Set(initialRuntimePendingToolCallIds));
+  }, [initialRuntimePendingToolCallIds]);
 
   useEffect(() => {
     if (hasInitializedRef.current) {
@@ -413,8 +449,16 @@ export default function ChatPanel({
         reconnectNonce: lastReconnectNonceRef.current,
         turnGeneration: turnGenerationRef.current,
       };
-      if (!shouldApplyChatHistoryRecoverySnapshot(requestedAt, current, snapshot)) return;
-      setMessagesRef.current?.(snapshot as UIMessage[]);
+      if (!snapshot) return;
+      const recoveredMessages = snapshot.messages;
+      if (!shouldApplyChatHistoryRecoverySnapshot(requestedAt, current, recoveredMessages)) return;
+      setSettledToolCallIds((settled) => {
+        const next = new Set(settled);
+        snapshot.settledToolCallIds.forEach((toolCallId) => next.add(toolCallId));
+        return next.size === settled.size ? settled : next;
+      });
+      setRuntimePendingToolCallIds(new Set(snapshot.runtimePendingToolCallIds));
+      setMessagesRef.current?.(recoveredMessages);
     });
   }, [threadId]);
 
@@ -559,6 +603,7 @@ export default function ChatPanel({
           toolPart,
           effectiveToolChoice,
           settledToolCallIds,
+          runtimePendingToolCallIds,
         );
         if (!kind) continue;
         return {
@@ -573,7 +618,7 @@ export default function ChatPanel({
       }
     }
     return null;
-  }, [visibleMessages, effectiveToolChoice, settledToolCallIds]);
+  }, [visibleMessages, effectiveToolChoice, settledToolCallIds, runtimePendingToolCallIds]);
 
   // Keep the export snapshot refs in sync with the derived dock state.
   pendingConfirmationForExportRef.current = pendingConfirmation;

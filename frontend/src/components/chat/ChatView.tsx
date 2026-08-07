@@ -75,7 +75,7 @@ import '../../styles/markdown.css';
 import { WorkspaceProvider, useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import FileSidebar from '../dashboard/FileSidebar';
 import AIInputDock from './AIInputDock';
-import ChatPanel from './ChatPanel';
+import ChatPanel, { type ChatPanelRecoverySnapshot } from './ChatPanel';
 import {
   type Attachment,
   type UploadedFile,
@@ -103,6 +103,13 @@ import { getDateLocale } from '../../i18n';
 import { listDecks, getDeck, type Deck } from '../../api/voiceApi';
 import DeckChatSelector from '../deck/DeckChatSelector';
 import PluginReceiptBadge from './PluginReceiptBadge';
+import {
+  deriveSettledToolCallIdsFromHistory,
+  loadChatHistoryThenRuntimeStatus,
+  parseChatThreadStatus,
+  runtimePendingToolCallIdsFromStatus,
+  type ChatThreadStatusResult,
+} from './toolConfirmation';
 
 interface ChatThread {
   id: string;
@@ -323,20 +330,14 @@ async function deleteThread(threadId: string): Promise<boolean> {
   }
 }
 
-interface ThreadStatusResult {
-  running: boolean;
-  lifecycle: 'idle' | 'running' | 'destroyed' | 'not_found';
-  turn_count: number;
-}
-
-async function fetchThreadStatus(threadId: string): Promise<ThreadStatusResult | null> {
+async function fetchThreadStatus(threadId: string): Promise<ChatThreadStatusResult | null> {
   try {
     const res = await fetch(
       `${API_BASE}/api/claude-agent/threads/${encodeURIComponent(threadId)}/status`,
       { headers: { 'Authorization': `Bearer ${getAuthToken()}` } },
     );
     if (!res.ok) return null;
-    return (await res.json()) as ThreadStatusResult;
+    return parseChatThreadStatus(await res.json());
   } catch {
     return null;
   }
@@ -408,6 +409,12 @@ function ChatViewContent({
   const [hasMoreThreads, setHasMoreThreads] = useState(false);
   const [isCreatingThread, setIsCreatingThread] = useState(false);
   const [threadMessages, setThreadMessages] = useState<UIMessage[] | null>(null);
+  const [initialSettledToolCallIds, setInitialSettledToolCallIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
+  const [initialRuntimePendingToolCallIds, setInitialRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
+    () => new Set<string>(),
+  );
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [draftInputError, setDraftInputError] = useState<string | null>(null);
   const [availableDecks, setAvailableDecks] = useState<Deck[]>([]);
@@ -614,6 +621,8 @@ function ChatViewContent({
   useEffect(() => {
     if (!requestedThreadId || requestedThreadId === activeThreadId) return;
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
     setIsLoadingMessages(true);
     setActiveThreadId(requestedThreadId);
     setHasConversationStarted(true);
@@ -633,6 +642,8 @@ function ChatViewContent({
     setSelectedAgentId(requestedAgentId);
     setActiveThreadId(null);
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
     setHasConversationStarted(false);
     setQueuedPrompt('');
     setQueuedAttachments([]);
@@ -648,19 +659,24 @@ function ChatViewContent({
     let cancelled = false;
     setIsLoadingMessages(true);
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
 
     void (async () => {
-      const snapshot = await fetchThreadMessages(activeThreadId);
+      const { history: snapshot, status } = await loadChatHistoryThenRuntimeStatus(
+        () => fetchThreadMessages(activeThreadId),
+        () => fetchThreadStatus(activeThreadId),
+      );
       if (cancelled) return;
       const msgs = snapshot.messages;
+      setInitialSettledToolCallIds(deriveSettledToolCallIdsFromHistory(msgs, status));
+      setInitialRuntimePendingToolCallIds(runtimePendingToolCallIdsFromStatus(status));
       setThreadMessages(msgs);
       setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
       setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
       if (msgs.length > 0) setHasConversationStarted(true);
       setIsLoadingMessages(false);
 
-      const status = await fetchThreadStatus(activeThreadId);
-      if (cancelled) return;
       if (status?.running) {
         setReconnectStreamNonce((value) => value + 1);
       }
@@ -679,15 +695,22 @@ function ChatViewContent({
   const activeThreadIdRef = useRef(activeThreadId);
   activeThreadIdRef.current = activeThreadId;
 
-  const handleReconnectComplete = useCallback(async (): Promise<UIMessage[] | undefined> => {
+  const handleReconnectComplete = useCallback(async (): Promise<ChatPanelRecoverySnapshot | undefined> => {
     if (!activeThreadId) return undefined;
     const requestedThreadId = activeThreadId;
-    const snapshot = await fetchThreadMessages(requestedThreadId);
+    const { history: snapshot, status } = await loadChatHistoryThenRuntimeStatus(
+      () => fetchThreadMessages(requestedThreadId),
+      () => fetchThreadStatus(requestedThreadId),
+    );
     if (activeThreadIdRef.current !== requestedThreadId) return undefined;
+    const settledToolCallIds = deriveSettledToolCallIdsFromHistory(snapshot.messages, status);
+    const runtimePendingToolCallIds = runtimePendingToolCallIdsFromStatus(status);
+    setInitialSettledToolCallIds(settledToolCallIds);
+    setInitialRuntimePendingToolCallIds(runtimePendingToolCallIds);
     setThreadMessages(snapshot.messages);
     setSelectedDeckId(snapshot.thread?.deck_id ?? undefined);
     setSelectedAgentId(snapshot.thread?.voice_id ?? undefined);
-    return snapshot.messages;
+    return { messages: snapshot.messages, settledToolCallIds, runtimePendingToolCallIds };
   }, [activeThreadId]);
 
   const notifyReconnectComplete = useCallback(() => {
@@ -701,6 +724,8 @@ function ChatViewContent({
     toolChoice: ToolChoice = 'auto',
   ) => {
     setThreadMessages([]);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
     setIsLoadingMessages(false);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -736,6 +761,8 @@ function ChatViewContent({
 
     setDraftInputError(null);
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
     setIsLoadingMessages(false);
     setActiveThreadId(null);
     setHasConversationStarted(false);
@@ -754,6 +781,8 @@ function ChatViewContent({
     // key={activeThreadId}) starts with initialMessages=undefined and doesn't
     // pick up the previous thread's messages before the fetch completes.
     setThreadMessages(null);
+    setInitialSettledToolCallIds(new Set<string>());
+    setInitialRuntimePendingToolCallIds(new Set<string>());
     setIsLoadingMessages(true);
     setActiveThreadId(threadId);
     setHasConversationStarted(true);
@@ -898,6 +927,8 @@ function ChatViewContent({
     if (threadId === activeThreadId) {
       setActiveThreadId(null);
       setThreadMessages(null);
+      setInitialSettledToolCallIds(new Set<string>());
+      setInitialRuntimePendingToolCallIds(new Set<string>());
       setHasConversationStarted(false);
       setQueuedPrompt('');
       setQueuedAttachments([]);
@@ -1115,13 +1146,19 @@ function ChatViewContent({
 
           <div style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', padding: '3rem 0.75rem 0.75rem', gap: '0.75rem', overflow: 'hidden', boxSizing: 'border-box' }}>
             <section style={{ flex: 1, minHeight: 0, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-              {activeThreadId && landingTab === 'history' ? (
+              {activeThreadId && landingTab === 'history' && threadMessages === null ? (
+                <div style={{ width: '100%', maxWidth: '52rem', margin: '1rem auto' }}>
+                  <SkeletonList rows={3} />
+                </div>
+              ) : activeThreadId && landingTab === 'history' ? (
                 <ChatPanel
                   key={activeThreadId}
                   threadId={activeThreadId}
                   initialMessages={threadMessages ?? undefined}
                   isLoading={isLoadingMessages}
                   reconnectStreamNonce={reconnectStreamNonce}
+                  initialSettledToolCallIds={initialSettledToolCallIds}
+                  initialRuntimePendingToolCallIds={initialRuntimePendingToolCallIds}
                   onReconnectComplete={notifyReconnectComplete}
                   queuedPrompt={queuedPrompt}
                   queuedAttachments={queuedAttachments}

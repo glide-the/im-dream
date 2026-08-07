@@ -702,7 +702,9 @@ async def claude_agent_thread_status(
         {
           "running": true,           // true when AgentRunState.lifecycle == "running"
           "lifecycle": "running",    // "idle" | "running" | "destroyed" | "not_found"
-          "turn_count": 3            // completed turn count (0 when not found)
+          "turn_count": 3,           // completed turn count (0 when not found)
+          "pending_tool_call_ids": ["call_..."],
+          "tool_confirmation_observation": "known" // "known" | "unknown"
         }
 
     Ownership is validated: returns 404 when the thread does not belong to the
@@ -716,14 +718,23 @@ async def claude_agent_thread_status(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    confirmation_snapshot = (
+        claude_agent_thread_factory.tool_confirmation_snapshot(thread_id)
+    )
     if snapshot is None:
-        return {"running": False, "lifecycle": "not_found", "turn_count": 0}
+        return {
+            "running": False,
+            "lifecycle": "not_found",
+            "turn_count": 0,
+            **confirmation_snapshot,
+        }
 
     lifecycle: str = snapshot.get("lifecycle", "idle")
     return {
         "running": lifecycle == "running",
         "lifecycle": lifecycle,
         "turn_count": snapshot.get("turn_count", 0),
+        **confirmation_snapshot,
     }
 
 
