@@ -266,7 +266,7 @@ def _store_story_workspace_output_sync(
                    deck.name_en AS deck_name_en
             FROM chat_thread AS thread
             LEFT JOIN decks AS deck ON deck.id = thread.deck_id
-            WHERE thread.id = ? AND thread.user_id = ?
+            WHERE thread.id = %s AND thread.user_id = %s
             """,
             (thread_id, user_id),
         ).fetchone()
@@ -1410,6 +1410,7 @@ class ClaudeAgentService:
         run_options = AgentRunOptions(
             thread_id=thread_id_for_agent,
             user_message=user_message_content,
+            canonical_user_id=str(request.user_id),
             resume=should_resume,
             model=request.model,
             cwd=cwd or None,

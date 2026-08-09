@@ -12,7 +12,6 @@ import hashlib
 import json
 import os
 from pathlib import Path
-import sqlite3
 from typing import Any
 import uuid
 
@@ -162,7 +161,7 @@ class DeckPluginAdminService:
     """Open one short-lived database connection per API operation."""
 
     @staticmethod
-    def _db() -> sqlite3.Connection:
+    def _db() -> Any:
         return database.get_db()
 
     @staticmethod
@@ -182,19 +181,19 @@ class DeckPluginAdminService:
 
     @staticmethod
     def _installation_row(
-        db: sqlite3.Connection,
+        db: Any,
         deck_plugin_id: str,
         *,
         scope_type: str | None = None,
         scope_id: str | None = None,
-    ) -> sqlite3.Row:
-        clauses = ["deck_plugin_id = ?", "status != 'uninstalled'"]
+    ) -> Any:
+        clauses = ["deck_plugin_id = %s", "status != 'uninstalled'"]
         parameters: list[Any] = [deck_plugin_id]
         if scope_type is not None:
-            clauses.append("scope_type = ?")
+            clauses.append("scope_type = %s")
             parameters.append(scope_type)
         if scope_id is not None:
-            clauses.append("scope_id = ?")
+            clauses.append("scope_id = %s")
             parameters.append(scope_id)
         row = db.execute(
             f"SELECT * FROM deck_plugin_installations WHERE {' AND '.join(clauses)} "
@@ -206,7 +205,7 @@ class DeckPluginAdminService:
         return row
 
     @staticmethod
-    def _release(db: sqlite3.Connection, deck_plugin_id: str, version: str) -> sqlite3.Row:
+    def _release(db: Any, deck_plugin_id: str, version: str) -> Any:
         row = db.execute(
             """
             SELECT release.*, runtime_lock.id AS runtime_plugin_lock_id,
@@ -215,7 +214,7 @@ class DeckPluginAdminService:
             JOIN deck_runtime_plugin_locks AS runtime_lock
               ON runtime_lock.deck_plugin_id = release.deck_plugin_id
              AND runtime_lock.deck_plugin_version = release.deck_plugin_version
-            WHERE release.deck_plugin_id = ? AND release.deck_plugin_version = ?
+            WHERE release.deck_plugin_id = %s AND release.deck_plugin_version = %s
               AND release.status IN ('published', 'deprecated')
             """,
             (deck_plugin_id, version),
@@ -226,7 +225,7 @@ class DeckPluginAdminService:
 
     @staticmethod
     def _materialize(
-        db: sqlite3.Connection,
+        db: Any,
         _deck_plugin_id: str,
         _version: str,
         runtime_lock: DeckRuntimePluginLock,
@@ -284,7 +283,7 @@ class DeckPluginAdminService:
             ).hexdigest()
             existing = db.execute(
                 "SELECT runtime_materialization_id FROM runtime_plugin_materializations "
-                "WHERE materialization_key = ?",
+                "WHERE materialization_key = %s",
                 (materialization_key,),
             ).fetchone()
             if existing is None:
@@ -299,9 +298,9 @@ class DeckPluginAdminService:
                         materialization_key, attempt_id, attempt_count,
                         verification_status, retention_state, cache_ref,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, 'local', ?, ?, ?, ?, ?, 'deck-admin/v1',
-                              'declared', 'materialized', 'loadable', ?, ?, 1,
-                              'verified', 'development_cache', ?, ?, ?)
+                    ) VALUES (%s, %s, %s, 'local', %s, %s, %s, %s, %s, 'deck-admin/v1',
+                              'declared', 'materialized', 'loadable', %s, %s, 1,
+                              'verified', 'development_cache', %s, %s, %s)
                     """,
                     (
                         f"rpm_{uuid.uuid4().hex}",
@@ -323,12 +322,12 @@ class DeckPluginAdminService:
                 db.execute(
                     """
                     UPDATE runtime_plugin_materializations
-                    SET materialized_digest = ?, declaration_status = 'declared',
+                    SET materialized_digest = %s, declaration_status = 'declared',
                         materialization_status = 'materialized',
                         activation_status = 'loadable', verification_status = 'verified',
-                        cache_ref = ?, last_error = NULL,
-                        attempt_count = attempt_count + 1, updated_at = ?
-                    WHERE runtime_materialization_id = ?
+                        cache_ref = %s, last_error = NULL,
+                        attempt_count = attempt_count + 1, updated_at = %s
+                    WHERE runtime_materialization_id = %s
                     """,
                     (actual_digest, str(path.resolve()), now, existing["runtime_materialization_id"]),
                 )
@@ -340,7 +339,7 @@ class DeckPluginAdminService:
         )
 
     @staticmethod
-    def _runtime_rows(db: sqlite3.Connection, runtime_lock: DeckRuntimePluginLock) -> list[dict[str, Any]]:
+    def _runtime_rows(db: Any, runtime_lock: DeckRuntimePluginLock) -> list[dict[str, Any]]:
         result: list[dict[str, Any]] = []
         for entry in runtime_lock.claude_code_plugins:
             row = db.execute(
@@ -348,8 +347,8 @@ class DeckPluginAdminService:
                 SELECT declaration_status, materialization_status, activation_status,
                        verification_status, last_error, updated_at
                 FROM runtime_plugin_materializations
-                WHERE claude_code_plugin_id = ? AND resolved_version = ?
-                  AND artifact_digest = ?
+                WHERE claude_code_plugin_id = %s AND resolved_version = %s
+                  AND artifact_digest = %s
                 ORDER BY updated_at DESC LIMIT 1
                 """,
                 (entry.claude_code_plugin_id, entry.resolved_version, entry.artifact_digest),
@@ -380,9 +379,9 @@ class DeckPluginAdminService:
     @classmethod
     def _view(
         cls,
-        db: sqlite3.Connection,
-        release: sqlite3.Row,
-        installation: sqlite3.Row | None,
+        db: Any,
+        release: Any,
+        installation: Any | None,
     ) -> dict[str, Any]:
         manifest = DeckPluginManifestV1.model_validate_json(release["manifest_json"])
         runtime_lock = DeckRuntimePluginLock.model_validate_json(release["lock_json"])
@@ -402,7 +401,7 @@ class DeckPluginAdminService:
             row["deck_plugin_version"]
             for row in db.execute(
                 "SELECT deck_plugin_version FROM deck_plugin_releases "
-                "WHERE deck_plugin_id = ? AND status IN ('published', 'deprecated')",
+                "WHERE deck_plugin_id = %s AND status IN ('published', 'deprecated')",
                 (manifest.deck_plugin_id,),
             ).fetchall()
         ]
@@ -468,7 +467,7 @@ class DeckPluginAdminService:
                 ).fetchall()
             else:
                 rows = db.execute(
-                    "SELECT * FROM deck_plugin_installations WHERE scope_id = ? "
+                    "SELECT * FROM deck_plugin_installations WHERE scope_id = %s "
                     "AND status != 'uninstalled' ORDER BY updated_at DESC",
                     (scope_id,),
                 ).fetchall()
@@ -499,8 +498,8 @@ class DeckPluginAdminService:
             if request.source_type == "local":
                 raise ApiRouteError("DECK_PLUGIN_SOURCE_DENIED", status_code=403)
             existing = db.execute(
-                "SELECT * FROM deck_plugin_installations WHERE scope_type = ? AND scope_id = ? "
-                "AND deck_plugin_id = ? AND status != 'uninstalled'",
+                "SELECT * FROM deck_plugin_installations WHERE scope_type = %s AND scope_id = %s "
+                "AND deck_plugin_id = %s AND status != 'uninstalled'",
                 (request.scope_type, request.scope_id, request.deck_plugin_id),
             ).fetchone()
             if existing is not None and existing["default_version"] == request.version:
@@ -539,7 +538,7 @@ class DeckPluginAdminService:
         try:
             release = self._release(db, deck_plugin_id, version)
             installation = db.execute(
-                "SELECT * FROM deck_plugin_installations WHERE deck_plugin_id = ? "
+                "SELECT * FROM deck_plugin_installations WHERE deck_plugin_id = %s "
                 "AND status != 'uninstalled' ORDER BY updated_at DESC LIMIT 1",
                 (deck_plugin_id,),
             ).fetchone()
@@ -580,24 +579,27 @@ class DeckPluginAdminService:
             )
             if row["status"] != "upgrade_pending":
                 raise ApiRouteError("DECK_RUNTIME_CONFIG_INVALID", status_code=409)
-            with db:
-                db.execute(
-                    """
-                    UPDATE deck_plugin_installations
-                    SET status = 'ready', pending_version = NULL,
-                        pending_capabilities_json = NULL, last_error_code = NULL,
-                        last_error_summary = NULL, revision = revision + 1,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = ? AND revision = ?
-                    """,
-                    (row["id"], row["revision"]),
-                )
+            db.execute(
+                """
+                UPDATE deck_plugin_installations
+                SET status = 'ready', pending_version = NULL,
+                    pending_capabilities_json = NULL, last_error_code = NULL,
+                    last_error_summary = NULL, revision = revision + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND revision = %s
+                """,
+                (row["id"], row["revision"]),
+            )
+            db.commit()
             return _operation(
                 operation_id=None,
                 deck_plugin_id=deck_plugin_id,
                 target_version=row["default_version"],
                 message="Capability expansion was rejected; the current ready version remains active.",
             )
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
 

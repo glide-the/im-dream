@@ -11,7 +11,6 @@ version + digest + enabled flag + order.  Selectable installations must be:
 
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
 
 try:
@@ -27,19 +26,18 @@ class DeckPluginRefError(ValueError):
         super().__init__(message)
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_dict(row: Any) -> dict[str, Any]:
     return {key: row[key] for key in row.keys()}
 
 
 class DeckPluginRefService:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: Any) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._installations = PluginInstallService(db)
 
     def assert_deck_owner(self, deck_id: str, actor_id: str) -> None:
         row = self.db.execute(
-            "SELECT owner_id, enabled FROM decks WHERE id = ?", (deck_id,)
+            "SELECT owner_id, enabled FROM decks WHERE id = %s", (deck_id,)
         ).fetchone()
         if row is None or str(row["owner_id"]) != str(actor_id):
             raise DeckPluginRefError(
@@ -57,7 +55,7 @@ class DeckPluginRefService:
                    i.component_inventory_json
             FROM deck_claude_plugin_refs r
             JOIN claude_plugin_installations i ON i.id = r.plugin_installation_id
-            WHERE r.deck_id = ?
+            WHERE r.deck_id = %s
             ORDER BY r.order_index, r.created_at, r.plugin_installation_id
             """,
             (deck_id,),
@@ -126,7 +124,7 @@ class DeckPluginRefService:
                 }
             )
         now_rows = self.db.execute(
-            "SELECT 1 FROM decks WHERE id = ?", (deck_id,)
+            "SELECT 1 FROM decks WHERE id = %s", (deck_id,)
         ).fetchone()
         if now_rows is None:  # pragma: no cover - ownership checked above
             raise DeckPluginRefError(

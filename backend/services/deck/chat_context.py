@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import sqlite3
 from typing import Any
 
 try:
@@ -54,10 +53,8 @@ class DeckChatContext:
 class DeckChatContextService:
     """Load Deck configuration and server-verified plugin references."""
 
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: Any) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
-
     async def resolve(
         self,
         *,
@@ -71,7 +68,7 @@ class DeckChatContextService:
             SELECT id, name, name_zh, name_en, description, description_zh,
                    description_en, enabled
             FROM decks
-            WHERE id = ? AND owner_id = ?
+            WHERE id = %s AND owner_id = %s
             """,
             (deck_id, actor_id),
         ).fetchone()
@@ -92,7 +89,7 @@ class DeckChatContextService:
             """
             SELECT id, name, name_zh, name_en, system_prompt
             FROM voices
-            WHERE deck_id = ? AND enabled = 1
+            WHERE deck_id = %s AND enabled IS TRUE
             ORDER BY order_index, created_at, id
             """,
             (deck_id,),
@@ -149,8 +146,8 @@ class DeckChatContextService:
 
     @staticmethod
     def _build_prompt(
-        deck: sqlite3.Row,
-        voices: list[sqlite3.Row],
+        deck: Any,
+        voices: list[Any],
         plugin_provenance: dict[str, Any] | None,
         *,
         dream_mode: bool = False,

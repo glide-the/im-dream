@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 from collections.abc import Callable
+from typing import Any
 
 try:
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
@@ -35,15 +35,15 @@ def _compatibility_flag(name: str) -> bool:
 
 
 def _installation_row(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     deck_plugin_id: str,
     workspace_id: str,
-) -> sqlite3.Row | None:
+) -> Any | None:
     row = db.execute(
         """
         SELECT * FROM deck_plugin_installations
-        WHERE scope_type = 'workspace' AND scope_id = ? AND deck_plugin_id = ?
+        WHERE scope_type = 'workspace' AND scope_id = %s AND deck_plugin_id = %s
         """,
         (workspace_id, deck_plugin_id),
     ).fetchone()
@@ -52,7 +52,7 @@ def _installation_row(
     return db.execute(
         """
         SELECT * FROM deck_plugin_installations
-        WHERE scope_type = 'instance' AND deck_plugin_id = ?
+        WHERE scope_type = 'instance' AND deck_plugin_id = %s
         ORDER BY created_at DESC, id DESC
         LIMIT 1
         """,
@@ -61,25 +61,24 @@ def _installation_row(
 
 
 def resolve_runtime_context(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     deck_plugin_id: str,
     deck_plugin_version: str,
     workspace_id: str,
 ) -> RuntimeContext:
     """Build compatibility input without accepting client-controlled facts."""
-    db.row_factory = sqlite3.Row
     release = db.execute(
         """
         SELECT manifest_json FROM deck_plugin_releases
-        WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+        WHERE deck_plugin_id = %s AND deck_plugin_version = %s
         """,
         (deck_plugin_id, deck_plugin_version),
     ).fetchone()
     lock_row = db.execute(
         """
         SELECT lock_json FROM deck_runtime_plugin_locks
-        WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+        WHERE deck_plugin_id = %s AND deck_plugin_version = %s
         """,
         (deck_plugin_id, deck_plugin_version),
     ).fetchone()
@@ -102,9 +101,9 @@ def resolve_runtime_context(
             """
             SELECT materialization_status, activation_status
             FROM runtime_plugin_materializations
-            WHERE claude_code_plugin_id = ?
-              AND resolved_version = ?
-              AND artifact_digest = ?
+            WHERE claude_code_plugin_id = %s
+              AND resolved_version = %s
+              AND artifact_digest = %s
             ORDER BY updated_at DESC
             """,
             (
@@ -139,7 +138,7 @@ def resolve_runtime_context(
 
 
 def make_runtime_context_resolver(
-    db: sqlite3.Connection,
+    db: Any,
 ) -> Callable[[str, str, str, str], RuntimeContext]:
     """Adapt the database resolver to SelectionValidationService's contract."""
 

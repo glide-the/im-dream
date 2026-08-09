@@ -173,10 +173,6 @@ if "dashscope" not in sys.modules:
 if "stateless_analyzer" not in sys.modules:
     _stub_deep("stateless_analyzer", analyze_stateless=lambda *a, **k: {})
 
-# speech_recognition (local module)
-if "speech_recognition" not in sys.modules:
-    _stub_deep("speech_recognition", init_speech_recognition=lambda *a, **k: None)
-
 # scheduler (local module)
 if "scheduler" not in sys.modules:
     _stub_deep("scheduler", daily_generation_job=lambda: None)

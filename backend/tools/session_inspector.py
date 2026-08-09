@@ -61,9 +61,9 @@ def fetch_sessions(user_id: int, utc_start: str, utc_end: str) -> list[dict]:
             """
             SELECT id, name, editor_state_json, created_at, updated_at
             FROM user_sessions
-            WHERE user_id = ?
-              AND created_at >= ?
-              AND created_at < ?
+            WHERE user_id = %s
+              AND created_at >= %s
+              AND created_at < %s
             ORDER BY created_at ASC
             """,
             (user_id, utc_start, utc_end),

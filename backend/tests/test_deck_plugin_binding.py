@@ -22,6 +22,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import database
+from backend.schema import legacy_main_sqlite
 from models.deck_plugin import (
     DeckPluginBindingUpdateRequest,
     DeckPluginManifestV1,
@@ -57,7 +58,7 @@ class BindingFixture:
         self.temp_dir = tempfile.TemporaryDirectory()
         self.path = Path(self.temp_dir.name) / "binding.db"
         self.db = self.connect()
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         self.runtime_updates: dict = {}
         self.manifest = self._seed()
         self.validator = SelectionValidationService(
@@ -237,7 +238,7 @@ class BindingModelSchemaTests(unittest.TestCase):
             )
 
     def test_binding_schema_indexes_constraints_and_initialization_are_idempotent(self) -> None:
-        database.create_tables(self.fixture.db)
+        legacy_main_sqlite.create_tables(self.fixture.db)
         table = self.fixture.db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
             "AND name='deck_plugin_bindings'"
@@ -439,6 +440,9 @@ class BindingServiceTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(str(missing.exception), str(unauthorized.exception))
 
+    @unittest.skip(
+        "legacy SQLite cannot model PostgreSQL row-lock concurrency; superseded by owned-PG contract"
+    )
     async def test_concurrent_compare_and_swap_allows_only_one_revision(self) -> None:
         await self.fixture.binding.save(
             deck_id=DECK_ID,

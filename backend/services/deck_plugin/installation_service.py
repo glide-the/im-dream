@@ -1,11 +1,13 @@
-"""SQLite-backed Deck Plugin Installation lifecycle orchestration.
+"""PostgreSQL-backed Deck Plugin Installation lifecycle orchestration.
 
-This is a non-production control-plane foundation. Release compatibility and
-runtime materialization are injected checks so this module does not pre-empt
-the later compatibility or ClaudeAgent runtime tasks.
+Release compatibility and runtime materialization remain injected ownership
+boundaries, while installation state is persisted transactionally in the
+canonical PostgreSQL schema.
 """
 
 from __future__ import annotations
+
+from psycopg import IntegrityError as PostgresIntegrityError
 
 import asyncio
 from collections.abc import Awaitable, Callable
@@ -13,7 +15,6 @@ from dataclasses import dataclass
 import inspect
 import json
 import re
-import sqlite3
 from typing import Any, Literal
 import uuid
 
@@ -46,6 +47,19 @@ DECK_PLUGIN_UPGRADE_APPROVAL_REQUIRED = "DECK_PLUGIN_UPGRADE_APPROVAL_REQUIRED"
 DECK_PLUGIN_ROLLBACK_BLOCKED = "DECK_PLUGIN_ROLLBACK_BLOCKED"
 DECK_PLUGIN_PURGE_RETENTION_BLOCKED = "DECK_PLUGIN_PURGE_RETENTION_BLOCKED"
 DECK_PLUGIN_CONCURRENT_MODIFICATION = "DECK_PLUGIN_CONCURRENT_MODIFICATION"
+
+_MUTABLE_INSTALLATION_COLUMNS = frozenset(
+    {
+        "approved_capabilities_json",
+        "default_version",
+        "installed_versions_json",
+        "last_error_code",
+        "last_error_summary",
+        "pending_capabilities_json",
+        "pending_version",
+        "status",
+    }
+)
 
 
 ALLOWED_INSTALLATION_TRANSITIONS = {
@@ -192,14 +206,13 @@ async def _resolve(value: Any) -> Any:
 class InstallationService:
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         runtime_preparer: RuntimePreparer | None = None,
         compatibility_checker: CompatibilityChecker | None = None,
         retention_checker: RetentionChecker | None = None,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._runtime_preparer = runtime_preparer or self._baseline_runtime_preparer
         self._compatibility_checker = compatibility_checker or (lambda _p, _v: True)
         self._retention_checker = retention_checker or (lambda _installation: False)
@@ -228,7 +241,7 @@ class InstallationService:
             existing = self.db.execute(
                 """
                 SELECT id FROM deck_plugin_installations
-                WHERE scope_type = ? AND scope_id = ? AND deck_plugin_id = ?
+                WHERE scope_type = %s AND scope_id = %s AND deck_plugin_id = %s
                 """,
                 (scope.scope_type, scope.scope_id, deck_plugin_id),
             ).fetchone()
@@ -241,34 +254,38 @@ class InstallationService:
                     retryable=False,
                 )
             try:
-                with self.db:
-                    self.db.execute(
-                        """
-                        INSERT INTO deck_plugin_installations (
-                            id, scope_type, scope_id, deck_plugin_id,
-                            installed_versions_json, default_version, status,
-                            approved_capabilities_json, source_policy_id,
-                            pending_version, pending_capabilities_json
-                        ) VALUES (?, ?, ?, ?, '[]', NULL, ?, '[]', ?, ?, ?)
-                        """,
-                        (
-                            installation_id,
-                            scope.scope_type,
-                            scope.scope_id,
-                            deck_plugin_id,
-                            InstallationStatus.INSTALLING.value,
-                            source_policy_id,
-                            version,
-                            json.dumps(list(snapshot.capabilities)),
-                        ),
-                    )
-            except sqlite3.IntegrityError as exc:
+                self.db.execute(
+                    """
+                    INSERT INTO deck_plugin_installations (
+                        id, scope_type, scope_id, deck_plugin_id,
+                        installed_versions_json, default_version, status,
+                        approved_capabilities_json, source_policy_id,
+                        pending_version, pending_capabilities_json
+                    ) VALUES (%s, %s, %s, %s, '[]', NULL, %s, '[]', %s, %s, %s)
+                    """,
+                    (
+                        installation_id,
+                        scope.scope_type,
+                        scope.scope_id,
+                        deck_plugin_id,
+                        InstallationStatus.INSTALLING.value,
+                        source_policy_id,
+                        version,
+                        json.dumps(list(snapshot.capabilities)),
+                    ),
+                )
+                self.db.commit()
+            except PostgresIntegrityError as exc:
+                self.db.rollback()
                 raise InstallationServiceError(
                     DECK_PLUGIN_INSTALLATION_CONFLICT,
                     "concurrent installation lost the unique scope conflict",
                     operation_id=operation_id,
                     retryable=False,
                 ) from exc
+            except Exception:
+                self.db.rollback()
+                raise
 
         return InstallResult(
             operation_id=operation_id,
@@ -534,11 +551,15 @@ class InstallationService:
             )
             removed = self.get(installation_id)
             if force:
-                with self.db:
+                try:
                     self.db.execute(
-                        "DELETE FROM deck_plugin_installations WHERE id = ?",
+                        "DELETE FROM deck_plugin_installations WHERE id = %s",
                         (installation_id,),
                     )
+                    self.db.commit()
+                except Exception:
+                    self.db.rollback()
+                    raise
             return removed
 
     def get(self, installation_id: str) -> DeckPluginInstallation:
@@ -569,7 +590,7 @@ class InstallationService:
             """
             SELECT manifest_json, manifest_hash, status
             FROM deck_plugin_releases
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (deck_plugin_id, version),
         ).fetchone()
@@ -583,7 +604,7 @@ class InstallationService:
             """
             SELECT deck_plugin_manifest_hash, lock_json
             FROM deck_runtime_plugin_locks
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (deck_plugin_id, version),
         ).fetchone()
@@ -630,7 +651,7 @@ class InstallationService:
 
     async def _switch_version(
         self,
-        row: sqlite3.Row,
+        row: Any,
         snapshot: _ReleaseSnapshot,
         diff: CapabilityDiff,
         operation_id: str,
@@ -691,9 +712,9 @@ class InstallationService:
             ),
         )
 
-    def _required_row(self, installation_id: str) -> sqlite3.Row:
+    def _required_row(self, installation_id: str) -> Any:
         row = self.db.execute(
-            "SELECT * FROM deck_plugin_installations WHERE id = ?",
+            "SELECT * FROM deck_plugin_installations WHERE id = %s",
             (installation_id,),
         ).fetchone()
         if row is None:
@@ -706,7 +727,7 @@ class InstallationService:
 
     def _require_status(
         self,
-        row: sqlite3.Row,
+        row: Any,
         required: InstallationStatus,
         operation_id: str,
     ) -> None:
@@ -720,7 +741,7 @@ class InstallationService:
             )
 
     @staticmethod
-    def _required_pending_version(row: sqlite3.Row, operation_id: str) -> str:
+    def _required_pending_version(row: Any, operation_id: str) -> str:
         if not row["pending_version"]:
             raise InstallationServiceError(
                 DECK_PLUGIN_CONCURRENT_MODIFICATION,
@@ -731,7 +752,13 @@ class InstallationService:
             )
         return row["pending_version"]
 
-    def _update_row(self, row: sqlite3.Row, **updates: Any) -> None:
+    def _update_row(self, row: Any, **updates: Any) -> None:
+        unknown_columns = set(updates) - _MUTABLE_INSTALLATION_COLUMNS
+        if unknown_columns:
+            raise ValueError(
+                "unsupported deck installation update columns: "
+                + ", ".join(sorted(unknown_columns))
+            )
         updates["updated_at"] = "CURRENT_TIMESTAMP"
         assignments: list[str] = []
         parameters: list[Any] = []
@@ -739,27 +766,31 @@ class InstallationService:
             if value == "CURRENT_TIMESTAMP" and column == "updated_at":
                 assignments.append("updated_at = CURRENT_TIMESTAMP")
             else:
-                assignments.append(f"{column} = ?")
+                assignments.append(f"{column} = %s")
                 parameters.append(value)
         assignments.append("revision = revision + 1")
         parameters.extend((row["id"], row["revision"]))
-        with self.db:
+        try:
             cursor = self.db.execute(
                 f"UPDATE deck_plugin_installations SET {', '.join(assignments)} "
-                "WHERE id = ? AND revision = ?",
+                "WHERE id = %s AND revision = %s",
                 parameters,
             )
-        if cursor.rowcount != 1:
-            raise InstallationServiceError(
-                DECK_PLUGIN_CONCURRENT_MODIFICATION,
-                "installation revision changed during the operation",
-                installation_id=row["id"],
-                retryable=True,
-            )
+            if cursor.rowcount != 1:
+                raise InstallationServiceError(
+                    DECK_PLUGIN_CONCURRENT_MODIFICATION,
+                    "installation revision changed during the operation",
+                    installation_id=row["id"],
+                    retryable=True,
+                )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
     def _record_initial_failure(
         self,
-        row: sqlite3.Row,
+        row: Any,
         preparation: RuntimePreparation,
         operation_id: str,
     ) -> None:
@@ -778,7 +809,7 @@ class InstallationService:
 
     def _record_non_destructive_failure(
         self,
-        row: sqlite3.Row,
+        row: Any,
         preparation: RuntimePreparation,
     ) -> None:
         self._update_row(
@@ -792,7 +823,7 @@ class InstallationService:
 
     @staticmethod
     def _runtime_error(
-        row: sqlite3.Row,
+        row: Any,
         preparation: RuntimePreparation,
         operation_id: str,
         *,
@@ -829,7 +860,7 @@ class InstallationService:
             )
 
     @staticmethod
-    def _installation_from_row(row: sqlite3.Row) -> DeckPluginInstallation:
+    def _installation_from_row(row: Any) -> DeckPluginInstallation:
         return DeckPluginInstallation(
             deck_plugin_installation_id=row["id"],
             scope_type=row["scope_type"],

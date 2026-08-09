@@ -19,6 +19,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import {
   saveAnalysisReport,
   getAnalysisReports,
@@ -160,7 +161,7 @@ interface SectionConfigModalProps {
 }
 
 function SectionConfigModal({
-  open, section: _section, displayName, files, loading, saving, isCustom, error,
+  open, displayName, files, loading, saving, isCustom, error,
   onClose, onSave, onReset, onFileChange,
 }: SectionConfigModalProps) {
   if (!open) return null;
@@ -562,7 +563,7 @@ export default function AnalysisView() {
     if (isAuthenticated) {
       try {
         const db = await getAnalysisReports(MAX_SAVED_REPORTS);
-        const individual: AnalysisReport[] = db.map((r: any) => ({
+        const individual: AnalysisReport[] = db.map((r) => ({
           id: r.id,
           echoes:   (r.report_data?.echoes   || []) as ReflectionResult[],
           traits:   (r.report_data?.traits   || []) as ReflectionResult[],
@@ -1474,7 +1475,7 @@ function SectionControlsRow({
   isMobile: boolean;
   onAnalyze: (s: SectionKey) => void;
   onConfig: (s: SectionKey) => void;
-  t: (k: string, opts?: any) => string;
+  t: TFunction;
 }) {
   const sections: { key: SectionKey; icon: string; titleKey: string }[] = [
     { key: 'echoes',   icon: '🔄', titleKey: 'analysis.papers.echoes.title' },
@@ -1621,7 +1622,7 @@ function PaperStack({
   currentPaper: number;
   onPaperChange: (i: number) => void;
   isMobile: boolean;
-  t: (k: string, opts?: any) => string;
+  t: TFunction;
   loading: Record<string, boolean>;
   streaming: Record<string, string>;
   isAuthenticated: boolean;
@@ -2041,7 +2042,7 @@ function ReflectionBlogPage({
   report: AnalysisReport;
   onBack: () => void;
   isMobile: boolean;
-  t: (k: string, opts?: any) => string;
+  t: TFunction;
   dateLocale: string;
   formatDaysLabel: (n: number) => string;
   formatEntriesLabel: (n: number) => string;

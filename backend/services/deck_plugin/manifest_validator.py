@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -94,17 +93,17 @@ def _source_is_allowed(source_ref: str, allowlist: set[str]) -> bool:
 
 
 def _assert_unique(
-    db: sqlite3.Connection,
+    db: Any,
     manifest: DeckPluginManifestV1,
     exclude_release_id: str | None,
 ) -> None:
     query = (
         "SELECT id FROM deck_plugin_releases "
-        "WHERE deck_plugin_id = ? AND deck_plugin_version = ?"
+        "WHERE deck_plugin_id = %s AND deck_plugin_version = %s"
     )
     params: list[str] = [manifest.deck_plugin_id, manifest.deck_plugin_version]
     if exclude_release_id is not None:
-        query += " AND id <> ?"
+        query += " AND id <> %s"
         params.append(exclude_release_id)
     if db.execute(query, params).fetchone() is not None:
         raise _invalid(
@@ -116,7 +115,7 @@ def validate_manifest(
     manifest: DeckPluginManifestV1 | Mapping[str, Any],
     *,
     source_allowlist: Iterable[str],
-    db: sqlite3.Connection | None = None,
+    db: Any | None = None,
     exclude_release_id: str | None = None,
     production: bool = True,
 ) -> DeckPluginManifestV1:

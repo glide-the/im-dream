@@ -33,6 +33,8 @@ for candidate in (str(ROOT), str(REPO_ROOT)):
         sys.path.insert(0, candidate)
 
 import database
+from backend.schema import legacy_main_sqlite
+from backend.tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from models.workflow_run import RunStatus, WorkflowRun
 from services.workflow.run_service import RunNotFound, WorkflowRunError
 from routers import story_workspace
@@ -132,10 +134,13 @@ class GuidanceFixture:
 
     def __init__(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.old_db_path = database.DB_PATH
-        database.DB_PATH = Path(self.temp_dir.name) / "guidance-test.db"
+        self.database_fixture = LegacyDatabaseModuleFixture(
+            database,
+            Path(self.temp_dir.name) / "guidance-test.db",
+        )
+        self.database_fixture.start()
         db = database.get_db()
-        database.create_tables(db)
+        legacy_main_sqlite.create_tables(db)
         db.execute(
             "INSERT INTO users (id, email, password_hash) VALUES (?, ?, 'hash')",
             (USER_ID, "guidance@example.com"),
@@ -204,7 +209,7 @@ class GuidanceFixture:
         return messages
 
     def close(self) -> None:
-        database.DB_PATH = self.old_db_path
+        self.database_fixture.stop()
         self.temp_dir.cleanup()
 
 

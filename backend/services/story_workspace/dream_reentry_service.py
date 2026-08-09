@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import UTC, datetime
 import json
-import sqlite3
 from typing import Any
 
 try:
@@ -28,7 +27,7 @@ except ModuleNotFoundError:  # Support repository-root package imports.
     )
 
 
-_StoryWorkspaceDreamProjectionLoader = Callable[[sqlite3.Row, dict[str, str], sqlite3.Connection], Any]
+_StoryWorkspaceDreamProjectionLoader = Callable[[Any, dict[str, str], Any], Any]
 _StoryWorkspaceDreamLiveTurnLookup = Callable[[str], bool]
 _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE = 400
 _STORY_WORKSPACE_DREAM_REENTRY_RECENT_LIMIT = 20
@@ -79,7 +78,7 @@ class StoryWorkspaceDreamReentryService:
     def __init__(
         self,
         *,
-        db_factory: Callable[[], sqlite3.Connection],
+        db_factory: Callable[[], Any],
         dream_files_loader: _StoryWorkspaceDreamProjectionLoader,
         live_turn_lookup: _StoryWorkspaceDreamLiveTurnLookup | None = None,
         close_connections: bool = True,
@@ -96,7 +95,6 @@ class StoryWorkspaceDreamReentryService:
     ) -> StoryWorkspaceDreamReentryCollection:
         actor_id = self._actor_id(actor)
         db = self._db_factory()
-        db.row_factory = sqlite3.Row
         try:
             rows = self._query_authorized_rows(db, actor_id)
             confirmation_facts = self._confirmation_facts(db, rows, actor_id)
@@ -132,9 +130,9 @@ class StoryWorkspaceDreamReentryService:
 
     @staticmethod
     def _query_authorized_rows(
-        db: sqlite3.Connection,
+        db: Any,
         actor_id: int,
-    ) -> list[sqlite3.Row]:
+    ) -> list[Any]:
         """Select only DB-consistent candidates before file projection.
 
         Workflow run status is intentionally absent: legacy status is not a
@@ -166,14 +164,19 @@ class StoryWorkspaceDreamReentryService:
             "AND release.deck_plugin_version = run.deck_plugin_version "
             "AND release.workflow_definition_ref = run.workflow_definition_ref "
             "AND release.manifest_hash = run.deck_plugin_manifest_hash "
-            "AND json_valid(release.manifest_json) "
             "AND ("
-            "EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.surfaces') AS surface "
-            "WHERE json_extract(surface.value, '$.name') = 'dream') "
-            "OR EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.capabilities') AS capability "
+            "EXISTS (SELECT 1 FROM jsonb_array_elements("
+            "COALESCE(release.manifest_json::jsonb -> 'surfaces', '[]'::jsonb)) AS surface(value) "
+            "WHERE surface.value ->> 'name' = 'dream') "
+            "OR EXISTS (SELECT 1 FROM jsonb_array_elements_text("
+            "COALESCE(release.manifest_json::jsonb -> 'capabilities', '[]'::jsonb)) AS capability(value) "
             "WHERE capability.value = 'story.workspace.propose') "
-            "OR EXISTS (SELECT 1 FROM json_each(release.manifest_json, '$.runtime.claude_code_plugins') AS plugin "
-            "JOIN json_each(plugin.value, '$.capability_bindings') AS binding_capability "
+            "OR EXISTS (SELECT 1 FROM jsonb_array_elements("
+            "COALESCE(release.manifest_json::jsonb #> '{runtime,claude_code_plugins}', "
+            "'[]'::jsonb)) AS plugin(value) "
+            "CROSS JOIN LATERAL jsonb_array_elements_text("
+            "COALESCE(plugin.value -> 'capability_bindings', '[]'::jsonb)) "
+            "AS binding_capability(value) "
             "WHERE binding_capability.value = 'story.workspace.propose')"
             ") "
             "JOIN deck_runtime_plugin_locks AS runtime_lock "
@@ -190,10 +193,10 @@ class StoryWorkspaceDreamReentryService:
             "JOIN chat_thread AS thread ON thread.id = run.source_voice_thread_id "
             "JOIN chat_message AS source "
             "ON source.id = run.source_message_id AND source.thread_id = thread.id "
-            "WHERE run.created_by = ? "
-            "AND workspace.owner_id = ? "
-            "AND deck.owner_id = ? AND deck.enabled = 1 "
-            "AND thread.user_id = ? AND thread.deck_id = binding.deck_id "
+            "WHERE run.created_by = %s "
+            "AND workspace.owner_id = %s "
+            "AND deck.owner_id = %s AND deck.enabled IS TRUE "
+            "AND thread.user_id = %s AND thread.deck_id = binding.deck_id "
             "AND source.role = 'user' "
             "AND preflight.created_by = run.created_by "
             "AND preflight.deck_id = binding.deck_id "
@@ -207,16 +210,17 @@ class StoryWorkspaceDreamReentryService:
             "AND binding.deck_plugin_id = run.deck_plugin_id "
             "AND binding.deck_plugin_version = run.deck_plugin_version "
             "AND binding.binding_revision = run.binding_revision "
-            "AND CASE WHEN json_valid(source.metadata) THEN ("
-            "(json_type(source.metadata, '$.schemaVersion') IS NULL "
-            "AND json_type(source.metadata, '$.agentId') IS NULL "
-            "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NULL) "
-            "OR (json_extract(source.metadata, '$.schemaVersion') = ? "
-            "AND json_type(source.metadata, '$.agentId') IS NOT NULL "
-            "AND json_type(source.metadata, '$.dreamContext.agent_id') IS NOT NULL "
-            "AND json_extract(source.metadata, '$.agentId') IS thread.voice_id "
-            "AND json_extract(source.metadata, '$.dreamContext.agent_id') IS thread.voice_id)"
-            ") ELSE 0 END "
+            "AND ("
+            "((COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb ->> 'schemaVersion') IS NULL "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb ->> 'agentId') IS NULL "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "#>> '{dreamContext,agent_id}') IS NULL) "
+            "OR ((COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "->> 'schemaVersion') = %s "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "->> 'agentId') IS NOT DISTINCT FROM thread.voice_id "
+            "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
+            "#>> '{dreamContext,agent_id}') IS NOT DISTINCT FROM thread.voice_id)) "
             "ORDER BY run.created_at DESC, run.id ASC",
             (
                 str(actor_id),
@@ -229,8 +233,8 @@ class StoryWorkspaceDreamReentryService:
 
     def _project_row(
         self,
-        db: sqlite3.Connection,
-        row: sqlite3.Row,
+        db: Any,
+        row: Any,
         actor_id: int,
         confirmation_facts: tuple[bool, bool],
     ) -> StoryWorkspaceDreamReentryItem | None:
@@ -297,8 +301,8 @@ class StoryWorkspaceDreamReentryService:
 
     def _stage_snapshot(
         self,
-        db: sqlite3.Connection,
-        row: sqlite3.Row,
+        db: Any,
+        row: Any,
         actor_id: int,
     ) -> tuple[dict[StoryWorkspaceDreamStage, int], datetime | None]:
         """Read stage truth through the established Dream files adapter only."""
@@ -330,8 +334,8 @@ class StoryWorkspaceDreamReentryService:
 
     @staticmethod
     def _confirmation_facts(
-        db: sqlite3.Connection,
-        rows: list[sqlite3.Row],
+        db: Any,
+        rows: list[Any],
         actor_id: int,
     ) -> dict[str, tuple[bool, bool]]:
         """Read at most one durable confirmation per re-entry candidate.
@@ -350,13 +354,12 @@ class StoryWorkspaceDreamReentryService:
         thread_ids = list(by_thread)
         for start in range(0, len(thread_ids), _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE):
             batch = thread_ids[start:start + _STORY_WORKSPACE_DREAM_REENTRY_CONFIRMATION_BATCH_SIZE]
-            placeholders = ", ".join("?" for _ in batch)
+            placeholders = ", ".join("%s" for _ in batch)
             matches = db.execute(
                 "SELECT thread_id, metadata FROM chat_message "
                 "WHERE role = 'user' AND thread_id IN (" + placeholders + ") "
-                "AND json_valid(metadata) "
-                "AND json_extract(metadata, '$.kind') = ? "
-                "ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT ?",
+                "AND (COALESCE(NULLIF(BTRIM(metadata), ''), '{}')::jsonb ->> 'kind') = %s "
+                "ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT %s",
                 (*batch, "story-workspace-dream-confirmation", len(batch) + 1),
             ).fetchall()
             if len(matches) > len(batch):

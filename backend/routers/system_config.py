@@ -49,7 +49,7 @@ from __future__ import annotations
 import re
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 import database
 from .deps import get_current_user
@@ -60,6 +60,28 @@ router = APIRouter()
 _ENV_VAR_KEY_MAX_LEN = 256
 _ENV_VAR_VALUE_MAX_LEN = 4096
 _ENV_VARS_MAX_ENTRIES = 64
+_SECRET_ENV_KEY_PATTERN = re.compile(
+    r"(?:^|_)(?:API_KEY|AUTH_TOKEN|ACCESS_TOKEN|REFRESH_TOKEN|TOKEN|SECRET|"
+    r"PASSWORD|PASSPHRASE|PRIVATE_KEY|CREDENTIAL|AUTHORIZATION)(?:$|_)",
+    re.IGNORECASE,
+)
+_SERVER_CONTROLLED_ENV_KEYS = frozenset(
+    {
+        "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "OPENAI_BASE_URL",
+        "INK_ADMIN_PRODUCT_API_BASE_URL",
+        "INK_ADMIN_PRODUCT_JWT_ISSUER",
+        "INK_ADMIN_PRODUCT_JWT_AUDIENCE",
+        "INK_ADMIN_PRODUCT_CLIENT_ID",
+        "INK_ADMIN_PRODUCT_ORIGIN",
+        "INK_GATEWAY_BASE_URL",
+        "INK_GATEWAY_SERVICE_CLIENT_ID",
+    }
+)
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
 _SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_ENTRIES = 64
 _SANDBOX_NETWORK_ALLOWED_DOMAIN_MAX_LEN = 253
@@ -85,11 +107,40 @@ def _sanitize_env_vars(raw: object) -> dict[str, str]:
     for key, value in raw.items():
         k = str(key).strip()[: _ENV_VAR_KEY_MAX_LEN]
         v = str(value).strip()[: _ENV_VAR_VALUE_MAX_LEN]
+        if _is_sensitive_or_server_controlled_env_key(k):
+            raise HTTPException(
+                status_code=400,
+                detail="Secret-like and provider-routing environment variables cannot be stored in user settings",
+            )
         if k:
             result[k] = v
         if len(result) >= _ENV_VARS_MAX_ENTRIES:
             break
     return result
+
+
+def _is_sensitive_or_server_controlled_env_key(key: str) -> bool:
+    normalized = key.strip().upper()
+    return bool(
+        normalized in _SERVER_CONTROLLED_ENV_KEYS
+        or _SECRET_ENV_KEY_PATTERN.search(normalized)
+    )
+
+
+def _public_system_config(raw: object) -> dict:
+    """Drop legacy secret-like values before a system config reaches a client."""
+
+    if not isinstance(raw, dict):
+        return {}
+    public = dict(raw)
+    env_vars = public.get("env_vars")
+    if isinstance(env_vars, dict):
+        public["env_vars"] = {
+            str(key): str(value)
+            for key, value in env_vars.items()
+            if not _is_sensitive_or_server_controlled_env_key(str(key))
+        }
+    return public
 
 
 def _domain_candidate(raw: object) -> str:
@@ -164,7 +215,7 @@ def _sanitize_sandbox_fs_allowed_write_paths(raw: object) -> list[str]:
 def get_system_config(current_user: dict = Depends(get_current_user)):
     """Return the caller's system configuration."""
     user_id = current_user["user_id"]
-    return database.get_system_config(user_id)
+    return _public_system_config(database.get_system_config(user_id))
 
 
 @router.put("/api/system-config")
@@ -220,4 +271,7 @@ def put_system_config(
     if patch:
         database.save_system_config(user_id, patch)
 
-    return {"success": True, "data": database.get_system_config(user_id)}
+    return {
+        "success": True,
+        "data": _public_system_config(database.get_system_config(user_id)),
+    }

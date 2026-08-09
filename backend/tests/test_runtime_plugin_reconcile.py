@@ -12,7 +12,7 @@ import unittest
 
 from pydantic import ValidationError
 
-from backend.database import (
+from backend.schema.legacy_main_sqlite import (
     create_agent_session_tables,
     create_runtime_plugin_tables,
     create_tables,

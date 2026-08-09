@@ -6,7 +6,6 @@ from collections.abc import Awaitable, Callable
 import inspect
 import json
 import re
-import sqlite3
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -56,6 +55,17 @@ CAPABILITY_EXPANSION_APPROVAL_REQUIRED = (
 )
 CAPABILITY_APPROVAL_DENIED = "CAPABILITY_APPROVAL_DENIED"
 CAPABILITY_APPROVAL_INVALID = "CAPABILITY_APPROVAL_INVALID"
+
+_MUTABLE_INSTALLATION_COLUMNS = frozenset(
+    {
+        "approved_capabilities_json",
+        "last_error_code",
+        "last_error_summary",
+        "pending_capabilities_json",
+        "pending_version",
+        "status",
+    }
+)
 
 
 RECOVERY_ACTIONS = {
@@ -135,12 +145,11 @@ class CompatibilityService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         administrator_authorizer: AdministratorAuthorizer | None = None,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._administrator_authorizer = (
             administrator_authorizer or (lambda _actor: False)
         )
@@ -158,14 +167,14 @@ class CompatibilityService:
             """
             SELECT status, manifest_json, manifest_hash
             FROM deck_plugin_releases
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (deck_plugin_id, deck_plugin_version),
         ).fetchone()
         installation = self.db.execute(
             """
             SELECT * FROM deck_plugin_installations
-            WHERE scope_type = ? AND scope_id = ? AND deck_plugin_id = ?
+            WHERE scope_type = %s AND scope_id = %s AND deck_plugin_id = %s
             """,
             (scope.scope_type, scope.scope_id, deck_plugin_id),
         ).fetchone()
@@ -351,8 +360,8 @@ class CompatibilityService:
 
     @staticmethod
     def _available_manifest(
-        release: sqlite3.Row | None,
-        installation: sqlite3.Row | None,
+        release: Any | None,
+        installation: Any | None,
         deck_plugin_id: str,
         deck_plugin_version: str,
         deprecated_allowed: bool,
@@ -386,7 +395,7 @@ class CompatibilityService:
 
     def _resolved_runtime_lock(
         self,
-        release: sqlite3.Row | None,
+        release: Any | None,
         manifest: DeckPluginManifestV1,
         deck_plugin_id: str,
         deck_plugin_version: str,
@@ -395,7 +404,7 @@ class CompatibilityService:
             """
             SELECT deck_plugin_manifest_hash, lock_json
             FROM deck_runtime_plugin_locks
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (deck_plugin_id, deck_plugin_version),
         ).fetchone()
@@ -461,9 +470,9 @@ class CompatibilityService:
             recovery_action=RECOVERY_ACTIONS[failed_check],
         )
 
-    def _installation_row(self, installation_id: str) -> sqlite3.Row:
+    def _installation_row(self, installation_id: str) -> Any:
         row = self.db.execute(
-            "SELECT * FROM deck_plugin_installations WHERE id = ?",
+            "SELECT * FROM deck_plugin_installations WHERE id = %s",
             (installation_id,),
         ).fetchone()
         if row is None:
@@ -479,27 +488,37 @@ class CompatibilityService:
             result = await result
         return bool(result)
 
-    def _update_installation(self, row: sqlite3.Row, **updates: Any) -> None:
+    def _update_installation(self, row: Any, **updates: Any) -> None:
+        unknown_columns = set(updates) - _MUTABLE_INSTALLATION_COLUMNS
+        if unknown_columns:
+            raise ValueError(
+                "unsupported deck installation update columns: "
+                + ", ".join(sorted(unknown_columns))
+            )
         assignments: list[str] = []
         parameters: list[Any] = []
         for column, value in updates.items():
-            assignments.append(f"{column} = ?")
+            assignments.append(f"{column} = %s")
             parameters.append(value)
         assignments.extend(
             ("updated_at = CURRENT_TIMESTAMP", "revision = revision + 1")
         )
         parameters.extend((row["id"], row["revision"]))
-        with self.db:
+        try:
             cursor = self.db.execute(
                 f"UPDATE deck_plugin_installations SET {', '.join(assignments)} "
-                "WHERE id = ? AND revision = ?",
+                "WHERE id = %s AND revision = %s",
                 parameters,
             )
-        if cursor.rowcount != 1:
-            raise CompatibilityServiceError(
-                CAPABILITY_APPROVAL_INVALID,
-                "installation changed during capability approval",
-            )
+            if cursor.rowcount != 1:
+                raise CompatibilityServiceError(
+                    CAPABILITY_APPROVAL_INVALID,
+                    "installation changed during capability approval",
+                )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
     @staticmethod
     def _json_set(value: str | None) -> set[str]:
@@ -516,7 +535,7 @@ class CompatibilityService:
         return set(parsed)
 
     @staticmethod
-    def _installation_model(row: sqlite3.Row) -> DeckPluginInstallation:
+    def _installation_model(row: Any) -> DeckPluginInstallation:
         return DeckPluginInstallation(
             deck_plugin_installation_id=row["id"],
             scope_type=row["scope_type"],

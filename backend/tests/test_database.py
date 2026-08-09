@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import database as db
 import auth
+from schema import legacy_main_sqlite
 
 
 STORY_WORKSPACE_COLUMNS = {
@@ -168,6 +169,7 @@ STORY_WORKSPACE_INDEXES = {
     "idx_sw_scenes_review": (("review_status", 0), ("updated_at", 1)),
 }
 
+@unittest.skip("legacy file-backed CRUD demo is superseded by the isolated PostgreSQL runtime contract")
 def test_crud():
     print("🧪 Testing Deck & Voice CRUD functions...\n")
 
@@ -280,7 +282,7 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
         self.connection = sqlite3.connect(":memory:")
         self.connection.row_factory = sqlite3.Row
         self.connection.execute("PRAGMA foreign_keys=ON")
-        db.create_tables(self.connection)
+        legacy_main_sqlite.create_tables(self.connection)
 
     def tearDown(self):
         self.connection.close()
@@ -488,7 +490,7 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
     def test_story_workspace_review_persistence_migrates_legacy_rows(self):
         legacy = self._legacy_review_connection()
         self.addCleanup(legacy.close)
-        db.create_tables(legacy)
+        legacy_main_sqlite.create_tables(legacy)
 
         for table in ("story_workspace_characters", "story_workspace_scenes"):
             with self.subTest(table=table):
@@ -534,7 +536,7 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
     def test_story_workspace_review_persistence_migration_idempotent(self):
         legacy = self._legacy_review_connection()
         self.addCleanup(legacy.close)
-        db.create_tables(legacy)
+        legacy_main_sqlite.create_tables(legacy)
         first_schema = {
             table: [tuple(row) for row in legacy.execute(
                 f"PRAGMA table_info({table})"
@@ -548,7 +550,7 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
             for table in ("story_workspace_characters", "story_workspace_scenes")
         }
 
-        db.create_tables(legacy)
+        legacy_main_sqlite.create_tables(legacy)
 
         for table in ("story_workspace_characters", "story_workspace_scenes"):
             self.assertEqual(
@@ -761,8 +763,8 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
             )
 
     def test_story_workspace_migration_idempotent(self):
-        db.create_tables(self.connection)
-        db.create_tables(self.connection)
+        legacy_main_sqlite.create_tables(self.connection)
+        legacy_main_sqlite.create_tables(self.connection)
 
         table_count = self.connection.execute(
             """
@@ -774,7 +776,7 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
         self.assertEqual(table_count, 6)
 
     def test_drop_story_workspace_tables(self):
-        db.drop_story_workspace_tables(self.connection)
+        legacy_main_sqlite.drop_story_workspace_tables(self.connection)
         remaining = self.connection.execute(
             """
             SELECT name
@@ -784,7 +786,7 @@ class StoryWorkspaceDatabaseTestCase(unittest.TestCase):
         ).fetchall()
         self.assertEqual(remaining, [])
 
-        db.create_tables(self.connection)
+        legacy_main_sqlite.create_tables(self.connection)
         recreated = self.connection.execute(
             """
             SELECT name

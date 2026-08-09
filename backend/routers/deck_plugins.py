@@ -131,7 +131,7 @@ async def _deck_plugin_current_user(
     try:
         user_id = int(current_user["user_id"])
         workspace_id = current_user.get("workspace_id") or get_or_create_default_workspace(db, user_id)
-        user_row = db.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        user_row = db.execute("SELECT role FROM users WHERE id = %s", (user_id,)).fetchone()
     finally:
         db.close()
     return {

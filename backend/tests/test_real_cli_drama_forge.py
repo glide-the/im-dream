@@ -37,6 +37,7 @@ if str(BACKEND_ROOT) not in sys.path:
 REPO_ROOT = BACKEND_ROOT.parent
 
 import database
+from backend.schema import legacy_main_sqlite
 from services.claude_plugin import cli as plugin_cli
 from services.claude_plugin.install_service import (
     PluginInstallError,
@@ -79,7 +80,7 @@ class TestRealDramaForgeChain(unittest.TestCase):
             "CREATE TABLE decks (id TEXT PRIMARY KEY, owner_id TEXT, enabled INTEGER DEFAULT 1)"
         )
         cls.db.execute("INSERT INTO decks (id, owner_id) VALUES ('deck-a', '1')")
-        database.create_claude_plugin_tables(cls.db)
+        legacy_main_sqlite.create_claude_plugin_tables(cls.db)
         cls.db.commit()
         cls.blocked_reason: str | None = None
         cls.operation: dict | None = None

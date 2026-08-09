@@ -1,6 +1,6 @@
 # [Input] Notion connector router and facade wiring for the business flow.
-# [Output] Exercise the create → auth → resources → sync path through the real
-#          FastAPI router with a temp SQLite store and mocked Notion CLI calls.
+# [Output] Exercise create → auth → resources → sync through the real router,
+#          PostgreSQL repository, pure transactional fake, and mocked CLI.
 # [Pos] test node in backend/tests
 # [Sync] 2026-07-04: route-level business flow coverage for Notion connector
 #                    create/auth/discovery/selection/sync.
@@ -18,6 +18,9 @@ from unittest.mock import AsyncMock, patch
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+TEST_ROOT = Path(__file__).resolve().parent
+if str(TEST_ROOT) not in sys.path:
+    sys.path.insert(0, str(TEST_ROOT))
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -26,15 +29,16 @@ from notion import auth as notion_auth
 from notion import operations as notion_operations
 from notion import store as notion_store
 from notion import sync as notion_sync
+from notion_postgres_fake import build_fake_notion_store
 from routers import notion as notion_router
 
 
 class TestNotionConnectorRouterFlow(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
-        self._db_path = Path(self._tmp.name) / "notion-connectors.db"
-        self._old_db_path = notion_store.DB_PATH
-        notion_store.DB_PATH = self._db_path
+        self._store, self._database, self._pool = build_fake_notion_store(users={7})
+        notion_store.close_default_store()
+        notion_store.open_default_store(store=self._store)
         self._notion_home = str(Path(self._tmp.name) / "notion-home")
         self._workspace_id = "workspace-business"
         self._snapshot_version = "snap-business-001"
@@ -82,7 +86,7 @@ class TestNotionConnectorRouterFlow(unittest.TestCase):
         self.client.close()
         for patcher in reversed(self._patches):
             patcher.stop()
-        notion_store.DB_PATH = self._old_db_path
+        notion_store.close_default_store()
         self._tmp.cleanup()
 
     def _mock_start_login(self, config=None):

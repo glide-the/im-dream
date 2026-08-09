@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- route metadata helper intentionally shares this page module. */
 import { useMemo, useState, type ReactNode } from 'react';
-import { FaArrowLeft, FaCog, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRegCreditCard, FaRobot, FaSearch } from 'react-icons/fa';
+import { FaArrowLeft, FaCog, FaCoins, FaDatabase, FaInfoCircle, FaPuzzlePiece, FaRobot, FaSearch } from 'react-icons/fa';
 import { useTranslation } from 'react-i18next';
 import AboutView from '../../components/AboutView';
 import ClaudePluginAdminPage from '../../components/claude-plugin-admin/ClaudePluginAdminPage';
@@ -81,7 +81,7 @@ export function StoryWorkspaceSettingsPage({
   const [searchQuery, setSearchQuery] = useState('');
   const navItems = useMemo<SettingsNavItem[]>(() => [
     { id: 'settings', label: '常规', icon: FaCog, path: '/story-workspace/settings' },
-    { id: 'settings-subscription', label: '订阅', icon: FaRegCreditCard, path: '/story-workspace/subscription' },
+    { id: 'settings-subscription', label: '订阅', icon: FaCoins, path: '/story-workspace/subscription' },
     { id: 'settings-resources', label: '资源连接', icon: FaDatabase, path: '/story-workspace/settings/resources' },
     { id: 'settings-plugins', label: '插件', icon: FaPuzzlePiece, path: '/story-workspace/settings/plugins' },
     { id: 'settings-model', label: 'AI 模型', icon: FaRobot, path: '/story-workspace/settings/model' },

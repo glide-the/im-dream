@@ -13,7 +13,6 @@ from datetime import UTC, datetime, timedelta
 import hashlib
 import json
 import os
-import sqlite3
 from typing import Any, Callable
 import uuid
 
@@ -162,10 +161,8 @@ class StoryWorkspaceDreamLaunchBinding:
 class StoryWorkspaceDreamLaunchSourceStore:
     """Atomically ensure one hidden Deck-bound source thread and message."""
 
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: Any) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
-
     async def ensure_source(
         self,
         *,
@@ -198,7 +195,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
             "dispatchStatus": "pending",
         }
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             self._require_scope(
                 actor_id=numeric_actor_id,
                 workspace_id=workspace_id,
@@ -207,7 +204,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
             existing_message = self.db.execute(
                 "SELECT message.*, thread.user_id, thread.deck_id, thread.voice_id "
                 "FROM chat_message AS message JOIN chat_thread AS thread "
-                "ON thread.id = message.thread_id WHERE message.id = ?",
+                "ON thread.id = message.thread_id WHERE message.id = %s",
                 (message_id,),
             ).fetchone()
             if existing_message is not None:
@@ -235,13 +232,13 @@ class StoryWorkspaceDreamLaunchSourceStore:
                 )
 
             existing_thread = self.db.execute(
-                "SELECT id, user_id, deck_id, voice_id FROM chat_thread WHERE id = ?",
+                "SELECT id, user_id, deck_id, voice_id FROM chat_thread WHERE id = %s",
                 (thread_id,),
             ).fetchone()
             if existing_thread is None:
                 self.db.execute(
                     "INSERT INTO chat_thread (id, user_id, title, deck_id, voice_id) "
-                    "VALUES (?, ?, ?, ?, ?)",
+                    "VALUES (%s, %s, %s, %s, %s)",
                     (
                         thread_id,
                         numeric_actor_id,
@@ -260,7 +257,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
             self.db.execute(
                 "INSERT INTO chat_message "
                 "(id, thread_id, role, parts, metadata, created_at) "
-                "VALUES (?, ?, 'user', ?, ?, ?)",
+                "VALUES (%s, %s, 'user', %s, %s, %s)",
                 (
                     message_id,
                     thread_id,
@@ -270,7 +267,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
                 ),
             )
             self.db.execute(
-                "UPDATE chat_thread SET updated_at = ? WHERE id = ?",
+                "UPDATE chat_thread SET updated_at = %s WHERE id = %s",
                 (now.isoformat(), thread_id),
             )
             self.db.commit()
@@ -296,8 +293,8 @@ class StoryWorkspaceDreamLaunchSourceStore:
         row = self.db.execute(
             "SELECT deck.id FROM decks AS deck "
             "JOIN story_workspace_workspaces AS workspace "
-            "ON workspace.id = ? AND workspace.owner_id = deck.owner_id "
-            "WHERE deck.id = ? AND deck.owner_id = ? AND deck.enabled = 1",
+            "ON workspace.id = %s AND workspace.owner_id = deck.owner_id "
+            "WHERE deck.id = %s AND deck.owner_id = %s AND deck.enabled IS TRUE",
             (workspace_id, deck_id, actor_id),
         ).fetchone()
         if row is None:
@@ -305,7 +302,7 @@ class StoryWorkspaceDreamLaunchSourceStore:
 
     @staticmethod
     def _validate_existing(
-        row: sqlite3.Row,
+        row: Any,
         *,
         actor_id: int,
         deck_id: str,
@@ -340,14 +337,13 @@ class StoryWorkspaceDreamLaunchProvisioner:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
-        claude_installer_factory: Callable[[sqlite3.Connection], Any] = (
+        claude_installer_factory: Callable[[Any], Any] = (
             PluginInstallService
         ),
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._claude_installer_factory = claude_installer_factory
 
     async def ensure_binding(
@@ -382,8 +378,8 @@ class StoryWorkspaceDreamLaunchProvisioner:
         row = self.db.execute(
             "SELECT deck.id FROM decks AS deck "
             "JOIN story_workspace_workspaces AS workspace "
-            "ON workspace.id = ? AND workspace.owner_id = deck.owner_id "
-            "WHERE deck.id = ? AND deck.owner_id = ? AND deck.enabled = 1",
+            "ON workspace.id = %s AND workspace.owner_id = deck.owner_id "
+            "WHERE deck.id = %s AND deck.owner_id = %s AND deck.enabled IS TRUE",
             (workspace_id, deck_id, numeric_actor),
         ).fetchone()
         if row is None:
@@ -393,7 +389,7 @@ class StoryWorkspaceDreamLaunchProvisioner:
         if agent_id is None:
             return
         row = self.db.execute(
-            "SELECT id FROM voices WHERE id = ? AND deck_id = ? AND enabled = 1",
+            "SELECT id FROM voices WHERE id = %s AND deck_id = %s AND enabled IS TRUE",
             (agent_id, deck_id),
         ).fetchone()
         if row is None:
@@ -402,7 +398,7 @@ class StoryWorkspaceDreamLaunchProvisioner:
     def _runtime_lock(self) -> DeckRuntimePluginLock:
         row = self.db.execute(
             "SELECT lock_json FROM deck_runtime_plugin_locks "
-            "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
+            "WHERE deck_plugin_id = %s AND deck_plugin_version = %s",
             (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
         ).fetchone()
         if row is None:
@@ -433,8 +429,8 @@ class StoryWorkspaceDreamLaunchProvisioner:
         row = self.db.execute(
             "SELECT * FROM claude_plugin_installations "
             "WHERE package_name = 'ink-dream-story' "
-            "AND marketplace = 'platform-builtin' AND resolved_version = ? "
-            "AND artifact_digest = ? AND status = 'ready' "
+            "AND marketplace = 'platform-builtin' AND resolved_version = %s "
+            "AND artifact_digest = %s AND status = 'ready' "
             "ORDER BY installed_at DESC, id DESC LIMIT 1",
             (entry.resolved_version, entry.artifact_digest),
         ).fetchone()
@@ -488,10 +484,10 @@ class StoryWorkspaceDreamLaunchProvisioner:
         ).hexdigest()
         existing = self.db.execute(
             "SELECT runtime_materialization_id FROM runtime_plugin_materializations "
-            "WHERE materialization_key = ?",
+            "WHERE materialization_key = %s",
             (key,),
         ).fetchone()
-        with self.db:
+        try:
             if existing is None:
                 self.db.execute(
                     """
@@ -504,9 +500,9 @@ class StoryWorkspaceDreamLaunchProvisioner:
                         materialization_key, attempt_id, attempt_count,
                         verification_status, retention_state, cache_ref,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, 'local', ?, ?, ?, ?, ?, 'dream-launch/v1',
-                              'declared', 'materialized', 'loadable', ?, ?, 1,
-                              'verified', 'shared_artifact', ?, ?, ?)
+                    ) VALUES (%s, %s, %s, 'local', %s, %s, %s, %s, %s, 'dream-launch/v1',
+                              'declared', 'materialized', 'loadable', %s, %s, 1,
+                              'verified', 'shared_artifact', %s, %s, %s)
                     """,
                     (
                         "rm_" + uuid.uuid4().hex,
@@ -527,11 +523,11 @@ class StoryWorkspaceDreamLaunchProvisioner:
             else:
                 self.db.execute(
                     "UPDATE runtime_plugin_materializations SET "
-                    "materialized_digest = ?, declaration_status = 'declared', "
+                    "materialized_digest = %s, declaration_status = 'declared', "
                     "materialization_status = 'materialized', "
                     "activation_status = 'loadable', verification_status = 'verified', "
-                    "cache_ref = ?, last_error = NULL, updated_at = ? "
-                    "WHERE runtime_materialization_id = ?",
+                    "cache_ref = %s, last_error = NULL, updated_at = %s "
+                    "WHERE runtime_materialization_id = %s",
                     (
                         entry.artifact_digest,
                         installation["artifact_path"],
@@ -539,6 +535,10 @@ class StoryWorkspaceDreamLaunchProvisioner:
                         existing["runtime_materialization_id"],
                     ),
                 )
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+            raise
 
     async def _ensure_deck_installation(
         self,
@@ -562,7 +562,7 @@ class StoryWorkspaceDreamLaunchProvisioner:
         service = InstallationService(self.db, runtime_preparer=prepared)
         row = self.db.execute(
             "SELECT * FROM deck_plugin_installations "
-            "WHERE scope_type = 'workspace' AND scope_id = ? AND deck_plugin_id = ?",
+            "WHERE scope_type = 'workspace' AND scope_id = %s AND deck_plugin_id = %s",
             (workspace_id, BUILTIN_DECK_PLUGIN_ID),
         ).fetchone()
         try:
@@ -652,16 +652,16 @@ class StoryWorkspaceDreamLaunchProvisioner:
             )
         raise StoryWorkspaceDreamLaunchGatewayError("DECK_BINDING_CONFLICT", 409)
 
-    def _active_binding_row(self, deck_id: str) -> sqlite3.Row | None:
+    def _active_binding_row(self, deck_id: str) -> Any | None:
         return self.db.execute(
             "SELECT * FROM deck_plugin_bindings "
-            "WHERE deck_id = ? AND status = 'active'",
+            "WHERE deck_id = %s AND status = 'active'",
             (deck_id,),
         ).fetchone()
 
     @staticmethod
     def _expected_builtin_binding(
-        row: sqlite3.Row | None,
+        row: Any | None,
         *,
         actor_id: str,
         workspace_id: str,
@@ -734,13 +734,12 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         turn_dispatcher: Callable[..., Any] | None = None,
         before_claim: Callable[[], Any] | None = None,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._turn_dispatcher = (
             turn_dispatcher or story_workspace_build_dream_launch_turn_dispatcher()
         )
@@ -759,7 +758,7 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
         now = datetime.now(UTC)
         claim_id = "dlc_" + uuid.uuid4().hex
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             row = self._message_row(source)
             if row is None or str(row["user_id"]) != actor_id:
                 raise PermissionError("Dream launch message scope mismatch")
@@ -788,7 +787,7 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
                 "dispatchClaimedAt": now.isoformat(),
             })
             self.db.execute(
-                "UPDATE chat_message SET parts = ?, metadata = ? WHERE id = ?",
+                "UPDATE chat_message SET parts = %s, metadata = %s WHERE id = %s",
                 (
                     _canonical_json(parts),
                     _canonical_json(metadata),
@@ -809,7 +808,7 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
             system_prompt = None
             if context.agent_id:
                 voice = self.db.execute(
-                    "SELECT system_prompt FROM voices WHERE id = ? AND deck_id = ? AND enabled = 1",
+                    "SELECT system_prompt FROM voices WHERE id = %s AND deck_id = %s AND enabled IS TRUE",
                     (context.agent_id, context.deck_id),
                 ).fetchone()
                 if voice is None:
@@ -848,12 +847,12 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
     def _message_row(
         self,
         source: StoryWorkspaceDreamLaunchSource,
-    ) -> sqlite3.Row | None:
+    ) -> Any | None:
         return self.db.execute(
             "SELECT message.parts, message.metadata, thread.user_id "
             "FROM chat_message AS message JOIN chat_thread AS thread "
             "ON thread.id = message.thread_id "
-            "WHERE message.id = ? AND message.thread_id = ?",
+            "WHERE message.id = %s AND message.thread_id = %s",
             (source.message_id, source.thread_id),
         ).fetchone()
 
@@ -878,9 +877,9 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
         status: str,
     ) -> bool:
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             row = self.db.execute(
-                "SELECT metadata FROM chat_message WHERE id = ?",
+                "SELECT metadata FROM chat_message WHERE id = %s",
                 (message_id,),
             ).fetchone()
             metadata = _decode_json_object(row["metadata"] if row else None)
@@ -894,7 +893,7 @@ class StoryWorkspaceDreamLaunchPersistentDispatcher:
             metadata.pop("dispatchClaimId", None)
             metadata.pop("dispatchClaimedAt", None)
             self.db.execute(
-                "UPDATE chat_message SET metadata = ? WHERE id = ?",
+                "UPDATE chat_message SET metadata = %s WHERE id = %s",
                 (_canonical_json(metadata), message_id),
             )
             self.db.commit()
@@ -910,18 +909,17 @@ class StoryWorkspaceDreamLaunchGateway:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         preflight_service: PreflightService,
         token_secret: bytes | str,
-        claude_installer_factory: Callable[[sqlite3.Connection], Any] = (
+        claude_installer_factory: Callable[[Any], Any] = (
             PluginInstallService
         ),
         turn_dispatcher: Callable[..., Any] | None = None,
         dispatch_before_claim: Callable[[], Any] | None = None,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._preflight_service = preflight_service
         self._run_service = WorkflowRunService(db, token_secret=token_secret)
         self._provisioner = StoryWorkspaceDreamLaunchProvisioner(
@@ -969,7 +967,7 @@ class StoryWorkspaceDreamLaunchGateway:
             if existing_run is not None:
                 row = self.db.execute(
                     "SELECT * FROM workflow_preflights "
-                    "WHERE workflow_preflight_id = ? AND created_by = ?",
+                    "WHERE workflow_preflight_id = %s AND created_by = %s",
                     (
                         existing_run["workflow_preflight_id"],
                         actor_context.actor_id,
@@ -1022,14 +1020,14 @@ class StoryWorkspaceDreamLaunchGateway:
         self,
         request: StoryWorkspaceDreamLaunchCommand,
         actor: AuthenticatedActorContext,
-    ) -> sqlite3.Row | None:
+    ) -> Any | None:
         run = self.db.execute(
             "SELECT run.*, preflight.deck_id AS preflight_deck_id "
             "FROM workflow_runs AS run "
             "JOIN workflow_preflights AS preflight "
             "ON preflight.workflow_preflight_id = run.workflow_preflight_id "
-            "WHERE run.workspace_id = ? AND run.created_by = ? "
-            "AND run.idempotency_key = ?",
+            "WHERE run.workspace_id = %s AND run.created_by = %s "
+            "AND run.idempotency_key = %s",
             (actor.workspace_id, actor.actor_id, request.idempotency_key),
         ).fetchone()
         if run is None:
@@ -1040,7 +1038,7 @@ class StoryWorkspaceDreamLaunchGateway:
             "thread.id AS thread_id, thread.user_id, thread.deck_id, thread.voice_id "
             "FROM chat_message AS message JOIN chat_thread AS thread "
             "ON thread.id = message.thread_id "
-            "WHERE message.id = ? AND thread.id = ?",
+            "WHERE message.id = %s AND thread.id = %s",
             (run["source_message_id"], run["source_voice_thread_id"]),
         ).fetchone()
         metadata = _decode_json_object(source["metadata"] if source else None)

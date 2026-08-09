@@ -8,12 +8,10 @@ import hashlib
 import hmac
 import inspect
 import json
-import sqlite3
 from typing import Any
 import uuid
 
 try:
-    from backend.database import create_agent_session_tables
     from backend.models.workflow_run import (
         AuthenticatedActorContext,
         RunStatus,
@@ -23,7 +21,6 @@ try:
         WorkflowRunTransition,
     )
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
-    from database import create_agent_session_tables
     from models.workflow_run import (
         AuthenticatedActorContext,
         RunStatus,
@@ -130,7 +127,7 @@ class WorkflowRunService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         token_secret: bytes | str,
         receipt_reader: ReceiptReader | None = None,
@@ -142,9 +139,7 @@ class WorkflowRunService:
             raise ValueError("token_secret must contain at least 32 bytes")
         if db.in_transaction:
             raise RuntimeError("workflow run service requires a clean transaction boundary")
-        create_agent_session_tables(db)
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._token_secret = secret
         self._receipt_reader = receipt_reader
         self._clock = clock or (lambda: datetime.now(UTC))
@@ -255,7 +250,7 @@ class WorkflowRunService:
 
         self._require_clean_transaction()
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             row = self._select_scoped_run(workflow_run_id, actor_context)
             if row is None:
                 raise RunNotFound()
@@ -288,9 +283,9 @@ class WorkflowRunService:
                 session_cursor = self.db.execute(
                     """
                     UPDATE agent_sessions
-                    SET status = 'active', started_at = ?, lease_expires_at = NULL,
+                    SET status = 'active', started_at = %s, lease_expires_at = NULL,
                         owner_token = NULL
-                    WHERE agent_session_id = ? AND status = 'creating'
+                    WHERE agent_session_id = %s AND status = 'creating'
                     """,
                     (self._iso(now), session_id),
                 )
@@ -300,14 +295,14 @@ class WorkflowRunService:
             cursor = self.db.execute(
                 """
                 UPDATE workflow_runs
-                SET status = ?, status_version = ?, runtime_load_receipt_id = ?,
-                    agent_session_id = ?, failed_step = ?, error_code = ?,
+                SET status = %s, status_version = %s, runtime_load_receipt_id = %s,
+                    agent_session_id = %s, failed_step = %s, error_code = %s,
                     started_at = CASE
-                        WHEN ? = 'running' THEN COALESCE(started_at, ?)
+                        WHEN %s = 'running' THEN COALESCE(started_at, %s)
                         ELSE started_at
                     END,
-                    completed_at = CASE WHEN ? THEN ? ELSE completed_at END
-                WHERE id = ? AND status = ? AND status_version = ?
+                    completed_at = CASE WHEN %s THEN %s ELSE completed_at END
+                WHERE id = %s AND status = %s AND status_version = %s
                 """,
                 (
                     target.value,
@@ -359,7 +354,7 @@ class WorkflowRunService:
         rows = self.db.execute(
             """
             SELECT * FROM workflow_run_transitions
-            WHERE workflow_run_id = ?
+            WHERE workflow_run_id = %s
             ORDER BY transition_seq
             """,
             (workflow_run_id,),
@@ -414,14 +409,14 @@ class WorkflowRunService:
         self._require_clean_transaction()
 
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             context = self._load_preflight_context(preflight_id)
             self._verify_preflight_token_signature(context, preflight_token)
             token_digest = self._token_digest(preflight_token)
             consumption = self.db.execute(
                 """
                 SELECT * FROM workflow_run_token_consumptions
-                WHERE token_digest = ?
+                WHERE token_digest = %s
                 """,
                 (token_digest,),
             ).fetchone()
@@ -453,7 +448,7 @@ class WorkflowRunService:
             scoped_run = self.db.execute(
                 """
                 SELECT * FROM workflow_runs
-                WHERE workspace_id = ? AND created_by = ? AND idempotency_key = ?
+                WHERE workspace_id = %s AND created_by = %s AND idempotency_key = %s
                 """,
                 (
                     actor_context.workspace_id,
@@ -512,8 +507,8 @@ class WorkflowRunService:
                     source_voice_thread_id, source_message_id, source_message_time,
                     idempotency_key, input_hash,
                     semantic_fingerprint, status_version, created_by, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, 'preflight', ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                          ?, ?, ?, 1, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, 'preflight', %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                          %s, %s, %s, 1, %s, %s)
                 """,
                 (
                     run_id,
@@ -562,7 +557,7 @@ class WorkflowRunService:
                 """
                 UPDATE workflow_runs
                 SET status = 'queued', status_version = 2
-                WHERE id = ? AND status = 'preflight' AND status_version = 1
+                WHERE id = %s AND status = 'preflight' AND status_version = 1
                 """,
                 (run_id,),
             )
@@ -577,7 +572,7 @@ class WorkflowRunService:
             )
             self._checkpoint("queued_transition_written")
             created = self.db.execute(
-                "SELECT * FROM workflow_runs WHERE id = ?",
+                "SELECT * FROM workflow_runs WHERE id = %s",
                 (run_id,),
             ).fetchone()
             assert created is not None
@@ -591,7 +586,7 @@ class WorkflowRunService:
     def _load_preflight_context(
         self,
         preflight_id: str,
-    ) -> sqlite3.Row:
+    ) -> Any:
         row = self.db.execute(
             """
             SELECT pf.*, b.deck_plugin_binding_id,
@@ -613,7 +608,7 @@ class WorkflowRunService:
               ON runtime_lock.id = pf.runtime_plugin_lock_id
              AND runtime_lock.deck_plugin_id = pf.deck_plugin_id
              AND runtime_lock.deck_plugin_version = pf.deck_plugin_version
-            WHERE pf.workflow_preflight_id = ?
+            WHERE pf.workflow_preflight_id = %s
             """,
             (preflight_id,),
         ).fetchone()
@@ -631,7 +626,7 @@ class WorkflowRunService:
 
     @staticmethod
     def _context_is_authorized(
-        context: sqlite3.Row,
+        context: Any,
         actor_context: AuthenticatedActorContext,
     ) -> bool:
         return bool(
@@ -642,7 +637,7 @@ class WorkflowRunService:
 
     def _verify_preflight_token_signature(
         self,
-        context: sqlite3.Row,
+        context: Any,
         token: str,
     ) -> None:
         payload = self._canonical_json(
@@ -664,7 +659,7 @@ class WorkflowRunService:
 
     def _require_current_unconsumed_preflight(
         self,
-        context: sqlite3.Row,
+        context: Any,
         token: str,
     ) -> None:
         if context["status"] != "passed":
@@ -685,7 +680,7 @@ class WorkflowRunService:
         *,
         token_digest: str,
         workflow_run_id: str,
-        context: sqlite3.Row,
+        context: Any,
         actor_context: AuthenticatedActorContext,
         idempotency_key: str,
         fingerprint: str,
@@ -695,7 +690,7 @@ class WorkflowRunService:
             INSERT INTO workflow_run_token_consumptions (
                 token_digest, workflow_run_id, workflow_preflight_id,
                 workspace_id, actor_id, idempotency_key, semantic_fingerprint
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 token_digest,
@@ -710,8 +705,8 @@ class WorkflowRunService:
         cursor = self.db.execute(
             """
             UPDATE workflow_preflights
-            SET consumed_at = ?, updated_at = ?
-            WHERE workflow_preflight_id = ? AND status = 'passed'
+            SET consumed_at = %s, updated_at = %s
+            WHERE workflow_preflight_id = %s AND status = 'passed'
               AND consumed_at IS NULL
             """,
             (
@@ -725,9 +720,9 @@ class WorkflowRunService:
 
     @staticmethod
     def _consumption_matches(
-        consumption: sqlite3.Row,
+        consumption: Any,
         *,
-        context: sqlite3.Row,
+        context: Any,
         actor_context: AuthenticatedActorContext,
         idempotency_key: str,
         fingerprint: str,
@@ -742,7 +737,7 @@ class WorkflowRunService:
 
     def _validate_transition(
         self,
-        row: sqlite3.Row,
+        row: Any,
         target: RunStatus,
         *,
         receipt: RuntimeLoadReceiptReadiness | None,
@@ -783,7 +778,7 @@ class WorkflowRunService:
 
     def _validate_agent_session_binding(
         self,
-        run: sqlite3.Row,
+        run: Any,
         readiness: RuntimeLoadReceiptReadiness,
         agent_session_id: str,
     ) -> None:
@@ -803,7 +798,7 @@ class WorkflowRunService:
             FROM agent_sessions AS session
             JOIN runtime_load_receipts AS receipt
               ON receipt.receipt_id = session.runtime_load_receipt_id
-            WHERE session.agent_session_id = ?
+            WHERE session.agent_session_id = %s
             """,
             (agent_session_id,),
         ).fetchone()
@@ -834,7 +829,7 @@ class WorkflowRunService:
 
     def _runtime_lock_digest(self, runtime_plugin_lock_id: str) -> str:
         row = self.db.execute(
-            "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = ?",
+            "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = %s",
             (runtime_plugin_lock_id,),
         ).fetchone()
         if row is None:
@@ -859,7 +854,7 @@ class WorkflowRunService:
             INSERT INTO workflow_run_transitions (
                 id, workflow_run_id, transition_seq, from_status, to_status,
                 actor_id, reason_code, failed_step, error_code, occurred_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 "wrt_" + uuid.uuid4().hex,
@@ -879,11 +874,11 @@ class WorkflowRunService:
         self,
         workflow_run_id: str,
         actor_context: AuthenticatedActorContext,
-    ) -> sqlite3.Row | None:
+    ) -> Any | None:
         return self.db.execute(
             """
             SELECT * FROM workflow_runs
-            WHERE id = ? AND workspace_id = ? AND created_by = ?
+            WHERE id = %s AND workspace_id = %s AND created_by = %s
             """,
             (
                 workflow_run_id,
@@ -895,7 +890,7 @@ class WorkflowRunService:
     @classmethod
     def _frozen_source_from_context(
         cls,
-        context: sqlite3.Row,
+        context: Any,
         *,
         source_voice_thread_id: str | None,
         source_message_id: str | None,
@@ -940,7 +935,7 @@ class WorkflowRunService:
     @classmethod
     def _semantic_fingerprint(
         cls,
-        context: sqlite3.Row,
+        context: Any,
         *,
         lock_digest: str,
         source_voice_thread_id: str | None,
@@ -982,7 +977,7 @@ class WorkflowRunService:
             sort_keys=True,
         ).encode("utf-8")
 
-    def _row_to_run(self, row: sqlite3.Row) -> WorkflowRun:
+    def _row_to_run(self, row: Any) -> WorkflowRun:
         return WorkflowRun(
             workflow_run_id=row["id"],
             deck_plugin_id=row["deck_plugin_id"],
@@ -1020,7 +1015,7 @@ class WorkflowRunService:
             else None,
         )
 
-    def _row_to_transition(self, row: sqlite3.Row) -> WorkflowRunTransition:
+    def _row_to_transition(self, row: Any) -> WorkflowRunTransition:
         return WorkflowRunTransition(
             transition_id=row["id"],
             workflow_run_id=row["workflow_run_id"],

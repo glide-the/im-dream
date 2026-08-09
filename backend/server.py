@@ -105,14 +105,6 @@ except ImportError:
             "stateless_analyzer dependencies are required for stateless analysis"
         )
 
-try:
-    from speech_recognition import init_speech_recognition
-except ImportError:
-    async def init_speech_recognition(*args, **kwargs):
-        raise RuntimeError(
-            "speech recognition dependencies are required for websocket recognition"
-        )
-
 import config
 from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
 from picture_service import _generate_picture_for_date, _today_in_tz
@@ -755,8 +747,15 @@ timeline_gen_scheduler = AsyncIOScheduler()
 
 @app.on_event("startup")
 async def startup_database():
-    """Initialize SQLite schema and idempotent auth migrations."""
+    """Open PostgreSQL and verify the reviewed Dream Alembic head."""
     database.init_db()
+
+
+@app.on_event("shutdown")
+async def shutdown_database():
+    """Release the process-wide PostgreSQL connection pool."""
+
+    database.close_db()
 
 
 @app.on_event("startup")
@@ -823,6 +822,7 @@ from routers.oauth import router as oauth_router
 from routers.pictures import GeneratePictureRequest, router as pictures_router
 from routers.preferences import router as preferences_router
 from routers.notion import router as notion_router
+from routers.product import router as product_router
 from routers.reports import router as reports_router
 from routers.sessions import SessionBatchRequest, router as sessions_router
 from routers.storage import UploadUrlRequest, router as storage_router
@@ -896,8 +896,8 @@ async def startup_claude_plugin_seed():
             for canonical in PLATFORM_BUILTIN_SOURCES:
                 existing = db.execute(
                     "SELECT id, resolved_version, artifact_digest FROM "
-                    "claude_plugin_installations WHERE package_name = ? AND "
-                    "marketplace = ? AND status = 'ready' ORDER BY created_at DESC "
+                    "claude_plugin_installations WHERE package_name = %s AND "
+                    "marketplace = %s AND status = 'ready' ORDER BY created_at DESC "
                     "LIMIT 1",
                     (canonical.split("@")[0], canonical.split("@")[1]),
                 ).fetchone()
@@ -913,8 +913,8 @@ async def startup_claude_plugin_seed():
                         continue
                     existing = db.execute(
                         "SELECT id, resolved_version, artifact_digest FROM "
-                        "claude_plugin_installations WHERE package_name = ? AND "
-                        "marketplace = ? AND status = 'ready' ORDER BY created_at "
+                        "claude_plugin_installations WHERE package_name = %s AND "
+                        "marketplace = %s AND status = 'ready' ORDER BY created_at "
                         "DESC LIMIT 1",
                         (canonical.split("@")[0], canonical.split("@")[1]),
                     ).fetchone()
@@ -1016,6 +1016,7 @@ app.include_router(sessions_router)
 app.include_router(pictures_router)
 app.include_router(preferences_router)
 app.include_router(notion_router)
+app.include_router(product_router)
 app.include_router(reports_router)
 app.include_router(admin_router)
 app.include_router(voices_router)
@@ -1033,9 +1034,10 @@ app.include_router(reflections_router)
 
 @app.websocket("/ws/speech-recognition")
 async def speech_recognition(websocket: WebSocket):
-    # TODO: find a way of authentication for websocket
-    await websocket.accept()
-    await init_speech_recognition(websocket)
+    # ASR Gateway is explicitly deferred for the Token-only release. Keep the
+    # legacy route fail-closed so no browser can stream audio or trigger a
+    # third-party request without the future authentication/limit design.
+    await websocket.close(code=1008, reason="Speech recognition is not enabled")
 
 
 registry = get_registry()

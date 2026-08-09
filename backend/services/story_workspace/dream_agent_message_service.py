@@ -7,13 +7,14 @@ into the small text-and-safe-activity contract consumed by the Dream workbench.
 
 from __future__ import annotations
 
+from psycopg import Error as PostgresError
+
 import asyncio
 import contextlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import hashlib
 import json
-import sqlite3
 import math
 import re
 import time
@@ -298,7 +299,7 @@ def _looks_like_high_entropy_secret(value: str) -> bool:
 
 
 def story_workspace_guard_persisted_dream_agent_message_turn(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     thread_id: str,
     actor_id: str,
@@ -307,7 +308,7 @@ def story_workspace_guard_persisted_dream_agent_message_turn(
 ) -> bool:
     """Keep a fresh widget claim from being overwritten by its queued runner.
 
-    The client command has already been persisted under ``BEGIN IMMEDIATE``.
+    The client command has already been persisted under ``BEGIN``.
     A runner may begin later with a stale metadata copy, so the generic user
     persistence path must verify and preserve the database owner rather than
     replacing a renewed lease.
@@ -318,7 +319,7 @@ def story_workspace_guard_persisted_dream_agent_message_turn(
     row = db.execute(
         "SELECT message.thread_id, message.role, message.metadata, thread.user_id "
         "FROM chat_message AS message JOIN chat_thread AS thread "
-        "ON thread.id = message.thread_id WHERE message.id = ?",
+        "ON thread.id = message.thread_id WHERE message.id = %s",
         (message_id,),
     ).fetchone()
     if row is None:
@@ -1207,10 +1208,10 @@ class StoryWorkspaceDreamAgentMessageService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         thread_factory: Any | None = None,
-        db_factory: Callable[[], sqlite3.Connection] | None = None,
+        db_factory: Callable[[], Any] | None = None,
     ) -> None:
         self._db = db
         self._thread_factory = thread_factory
@@ -1293,7 +1294,7 @@ class StoryWorkspaceDreamAgentMessageService:
     ) -> list[StoryWorkspaceDreamAgentMessage]:
         rows = self._db.execute(
             "SELECT id, thread_id, role, parts, metadata, created_at FROM chat_message "
-            "WHERE thread_id = ? ORDER BY created_at ASC, id ASC", (thread_id,)
+            "WHERE thread_id = %s ORDER BY created_at ASC, id ASC", (thread_id,)
         ).fetchall()
         source_rows = {
             str(row["id"]): row
@@ -1363,7 +1364,7 @@ class StoryWorkspaceDreamAgentMessageService:
         """A durable pending/leased command blocks a second visible send."""
 
         rows = self._db.execute(
-            "SELECT metadata FROM chat_message WHERE thread_id = ? AND role = 'user'",
+            "SELECT metadata FROM chat_message WHERE thread_id = %s AND role = 'user'",
             (thread_id,),
         ).fetchall()
         for row in rows:
@@ -1874,8 +1875,8 @@ class StoryWorkspaceDreamAgentMessageService:
         fingerprint = _fingerprint(actor_id, run_id, command)
         now = time.time()
         try:
-            self._db.execute("BEGIN IMMEDIATE")
-            existing = self._db.execute("SELECT metadata FROM chat_message WHERE id = ?", (message_id,)).fetchone()
+            self._db.execute("BEGIN")
+            existing = self._db.execute("SELECT metadata FROM chat_message WHERE id = %s", (message_id,)).fetchone()
             if existing is not None:
                 metadata = _decode(existing["metadata"])
                 if metadata.get("command_fingerprint") != fingerprint:
@@ -1896,7 +1897,7 @@ class StoryWorkspaceDreamAgentMessageService:
                     metadata["dispatch_claim_id"] = str(uuid4())
                     metadata["dispatch_claim_lease_until"] = now + _LEASE_SECONDS
                     handoff = self._db.execute(
-                        "UPDATE chat_message SET metadata = ? WHERE id = ? AND metadata = ?",
+                        "UPDATE chat_message SET metadata = %s WHERE id = %s AND metadata = %s",
                         (_json(metadata), message_id, previous_metadata),
                     )
                     if handoff.rowcount != 1:
@@ -1911,7 +1912,7 @@ class StoryWorkspaceDreamAgentMessageService:
                     ), pending
                 self._db.commit()
                 return StoryWorkspaceDreamAgentMessageAccepted(story_workspace_run_id=run_id, message_id=message_id), None
-            rows = self._db.execute("SELECT metadata FROM chat_message WHERE thread_id = ? AND role = 'user'", (thread_id,)).fetchall()
+            rows = self._db.execute("SELECT metadata FROM chat_message WHERE thread_id = %s AND role = 'user'", (thread_id,)).fetchall()
             for row in rows:
                 metadata = _decode(row["metadata"])
                 if (
@@ -1934,16 +1935,16 @@ class StoryWorkspaceDreamAgentMessageService:
             }
             parts = [{"type": "text", "text": command.text.strip()}]
             self._db.execute(
-                "INSERT INTO chat_message (id, thread_id, role, parts, metadata) VALUES (?, ?, 'user', ?, ?)",
+                "INSERT INTO chat_message (id, thread_id, role, parts, metadata) VALUES (%s, %s, 'user', %s, %s)",
                 (message_id, thread_id, _json(parts), _json(metadata)),
             )
-            self._db.execute("UPDATE chat_thread SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (thread_id,))
+            self._db.execute("UPDATE chat_thread SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (thread_id,))
             self._db.commit()
         except StoryWorkspaceDreamAgentMessageError:
             if self._db.in_transaction:
                 self._db.rollback()
             raise
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             if self._db.in_transaction:
                 self._db.rollback()
             raise StoryWorkspaceDreamAgentMessageError("DECK_RUNTIME_CONFIG_UNAVAILABLE", 503) from exc
@@ -2012,9 +2013,9 @@ class StoryWorkspaceDreamAgentMessageService:
         db = self._db_factory() if self._db_factory is not None else self._db
         close_after = db is not self._db
         try:
-            db.execute("BEGIN IMMEDIATE")
+            db.execute("BEGIN")
             row = db.execute(
-                "SELECT metadata FROM chat_message WHERE id = ?",
+                "SELECT metadata FROM chat_message WHERE id = %s",
                 (message_id,),
             ).fetchone()
             previous_metadata = row["metadata"] if row else None
@@ -2027,7 +2028,7 @@ class StoryWorkspaceDreamAgentMessageService:
                 return False
             metadata["dispatch_claim_lease_until"] = time.time() + _LEASE_SECONDS
             renewed = db.execute(
-                "UPDATE chat_message SET metadata = ? WHERE id = ? AND metadata = ?",
+                "UPDATE chat_message SET metadata = %s WHERE id = %s AND metadata = %s",
                 (_json(metadata), message_id, previous_metadata),
             )
             if renewed.rowcount != 1:
@@ -2035,7 +2036,7 @@ class StoryWorkspaceDreamAgentMessageService:
                 return False
             db.commit()
             return True
-        except sqlite3.Error:
+        except PostgresError:
             if db.in_transaction:
                 db.rollback()
             return False
@@ -2053,8 +2054,8 @@ class StoryWorkspaceDreamAgentMessageService:
         db = self._db_factory() if self._db_factory is not None else self._db
         close_after = db is not self._db
         try:
-            db.execute("BEGIN IMMEDIATE")
-            row = db.execute("SELECT metadata FROM chat_message WHERE id = ?", (message_id,)).fetchone()
+            db.execute("BEGIN")
+            row = db.execute("SELECT metadata FROM chat_message WHERE id = %s", (message_id,)).fetchone()
             previous_metadata = row["metadata"] if row else None
             metadata = _decode(previous_metadata) if previous_metadata else {}
             if (
@@ -2066,7 +2067,7 @@ class StoryWorkspaceDreamAgentMessageService:
             metadata["dispatch_status"] = "dispatched" if dispatched else "pending"
             metadata["dispatch_claim_lease_until"] = 0
             updated = db.execute(
-                "UPDATE chat_message SET metadata = ? WHERE id = ? AND metadata = ?",
+                "UPDATE chat_message SET metadata = %s WHERE id = %s AND metadata = %s",
                 (_json(metadata), message_id, previous_metadata),
             )
             if updated.rowcount != 1:
@@ -2074,7 +2075,7 @@ class StoryWorkspaceDreamAgentMessageService:
                 return False
             db.commit()
             return True
-        except sqlite3.Error:
+        except PostgresError:
             if db.in_transaction:
                 db.rollback()
             return False

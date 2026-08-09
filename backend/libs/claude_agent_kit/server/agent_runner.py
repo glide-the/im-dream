@@ -2724,6 +2724,15 @@ class ClaudeAgentRunner:
         apply_task_v2_env_to_options(sdk_options)
         # Overlay user-scoped SDK env vars (higher priority than backend/.env).
         apply_user_sdk_env_to_options(sdk_options, opts.user_sdk_env or {})
+        # Gateway enforcement runs after every project/user overlay. When the
+        # canary is enabled, missing service configuration or canonical user
+        # identity fails closed before the Claude subprocess starts.
+        from services.admin_gateway import apply_gateway_sdk_env_to_options
+
+        apply_gateway_sdk_env_to_options(
+            sdk_options,
+            opts.canonical_user_id,
+        )
         existing_extra_args = getattr(sdk_options, "extra_args", None)
         sdk_options.extra_args = dict(existing_extra_args or {})
         if tool_choice == "none":

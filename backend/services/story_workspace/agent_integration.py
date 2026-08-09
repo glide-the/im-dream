@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [Input] Consume validated Agent story bundles, a user/workspace identity, and SQLite.
+# [Input] Consume validated Agent story bundles, a user/workspace identity, and PostgreSQL.
 # [Output] Persist idempotent pending-review Story Workspace bundles and relationships.
 # [Pos] Story Workspace service boundary between Claude Agent output and canonical tables.
 # [Sync] 2026-08-01: add task_204 payload contract, parsing, and transactional persistence.
@@ -8,9 +8,10 @@
 
 from __future__ import annotations
 
+from psycopg import Error as PostgresError
+
 import json
 import logging
-import sqlite3
 from typing import Any, Optional
 from uuid import uuid4
 
@@ -59,13 +60,13 @@ def parse_agent_story_output(
 
 
 def get_or_create_default_workspace(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
 ) -> str:
     """Return the user's oldest workspace, creating the default when absent."""
 
     row = db.execute(
-        "SELECT id FROM story_workspace_workspaces WHERE owner_id = ? "
+        "SELECT id FROM story_workspace_workspaces WHERE owner_id = %s "
         "ORDER BY created_at ASC, id ASC LIMIT 1",
         (user_id,),
     ).fetchone()
@@ -74,13 +75,14 @@ def get_or_create_default_workspace(
 
     workspace_id = str(uuid4())
     try:
-        with db:
-            db.execute(
-                "INSERT INTO story_workspace_workspaces (id, name, owner_id, settings) "
-                "VALUES (?, ?, ?, ?)",
-                (workspace_id, "默认工作区", user_id, "{}"),
-            )
+        db.execute(
+            "INSERT INTO story_workspace_workspaces (id, name, owner_id, settings) "
+            "VALUES (%s, %s, %s, %s)",
+            (workspace_id, "默认工作区", user_id, "{}"),
+        )
+        db.commit()
     except Exception as exc:
+        db.rollback()
         raise AgentIntegrationError("Unable to create the default workspace") from exc
     return workspace_id
 
@@ -91,17 +93,17 @@ def _new_identity(prefix: str) -> tuple[str, str]:
 
 
 def _placeholders(values: list[str]) -> str:
-    return ", ".join("?" for _ in values)
+    return ", ".join("%s" for _ in values)
 
 
 def store_agent_story_output(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
     workspace_id: str,
     agent_session_id: str,
     payload: StoryWorkspaceAgentStoryPayload,
 ) -> dict[str, Any]:
-    """Persist one Agent-generated story bundle in a single SQLite savepoint.
+    """Persist one Agent-generated story bundle in a single PostgreSQL savepoint.
 
     Story identity is stable for ``author_id + agent_session_id + title``.
     Characters are reconciled by name within the current story and scenes by
@@ -114,7 +116,7 @@ def store_agent_story_output(
         raise AgentIntegrationError("agent_session_id must not be blank")
 
     workspace = db.execute(
-        "SELECT id FROM story_workspace_workspaces WHERE id = ? AND owner_id = ?",
+        "SELECT id FROM story_workspace_workspaces WHERE id = %s AND owner_id = %s",
         (workspace_id, user_id),
     ).fetchone()
     if workspace is None:
@@ -136,7 +138,7 @@ def store_agent_story_output(
     try:
         story_row = db.execute(
             "SELECT id FROM story_workspace_stories "
-            "WHERE agent_session_id = ? AND title = ? AND author_id = ? "
+            "WHERE agent_session_id = %s AND title = %s AND author_id = %s "
             "ORDER BY created_at ASC, id ASC LIMIT 1",
             (agent_session_id, payload.title, user_id),
         ).fetchone()
@@ -147,7 +149,7 @@ def store_agent_story_output(
                    (id, identifier, title, description, status, review_status, type,
                     content, author_id, workspace_id, character_count, scene_count,
                     agent_generated, agent_session_id)
-                   VALUES (?, ?, ?, ?, 'draft', 'pending', ?, ?, ?, ?, 0, 0, 1, ?)""",
+                   VALUES (%s, %s, %s, %s, 'draft', 'pending', %s, %s, %s, %s, 0, 0, 1, %s)""",
                 (
                     story_id,
                     story_identifier,
@@ -164,11 +166,11 @@ def store_agent_story_output(
             story_id = str(story_row[0])
             db.execute(
                 """UPDATE story_workspace_stories
-                   SET description = ?, status = 'draft', review_status = 'pending',
-                       type = ?, content = ?, workspace_id = ?, agent_generated = 1,
+                   SET description = %s, status = 'draft', review_status = 'pending',
+                       type = %s, content = %s, workspace_id = %s, agent_generated = 1,
                        review_notes = NULL, confirmed_at = NULL, published_at = NULL,
                        updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ? AND author_id = ?""",
+                   WHERE id = %s AND author_id = %s""",
                 (
                     payload.description,
                     payload.type,
@@ -182,7 +184,7 @@ def store_agent_story_output(
         existing_character_rows = db.execute(
             "SELECT c.id, c.name FROM story_workspace_characters c "
             "JOIN story_workspace_story_characters sc ON sc.character_id = c.id "
-            "WHERE sc.story_id = ? AND c.author_id = ?",
+            "WHERE sc.story_id = %s AND c.author_id = %s",
             (story_id, user_id),
         ).fetchall()
         existing_characters = {str(row[1]): str(row[0]) for row in existing_character_rows}
@@ -190,7 +192,7 @@ def store_agent_story_output(
 
         existing_scene_rows = db.execute(
             "SELECT id, order_index FROM story_workspace_scenes "
-            "WHERE story_id = ? AND author_id = ? AND agent_generated = 1 "
+            "WHERE story_id = %s AND author_id = %s AND agent_generated = 1 "
             "ORDER BY created_at ASC, id ASC",
             (story_id, user_id),
         ).fetchall()
@@ -211,7 +213,7 @@ def store_agent_story_output(
                 tuple(all_existing_scene_ids),
             )
         db.execute(
-            "DELETE FROM story_workspace_story_characters WHERE story_id = ?",
+            "DELETE FROM story_workspace_story_characters WHERE story_id = %s",
             (story_id,),
         )
 
@@ -226,7 +228,7 @@ def store_agent_story_output(
                        (id, identifier, name, identity, personality, background,
                         catchphrase, tags, author_id, workspace_id, story_count,
                         review_status, agent_generated)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', 1)""",
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 0, 'pending', 1)""",
                     (
                         character_id,
                         character_identifier,
@@ -243,11 +245,11 @@ def store_agent_story_output(
             else:
                 db.execute(
                     """UPDATE story_workspace_characters
-                       SET identity = ?, personality = ?, background = ?,
-                           catchphrase = ?, tags = ?, workspace_id = ?,
+                       SET identity = %s, personality = %s, background = %s,
+                           catchphrase = %s, tags = %s, workspace_id = %s,
                            review_status = 'pending', agent_generated = 1,
                            updated_at = CURRENT_TIMESTAMP
-                       WHERE id = ? AND author_id = ?""",
+                       WHERE id = %s AND author_id = %s""",
                     (
                         character.identity,
                         character.personality,
@@ -262,7 +264,7 @@ def store_agent_story_output(
             character_ids.append(character_id)
             db.execute(
                 "INSERT INTO story_workspace_story_characters "
-                "(story_id, character_id, role_type) VALUES (?, ?, NULL)",
+                "(story_id, character_id, role_type) VALUES (%s, %s, NULL)",
                 (story_id, character_id),
             )
 
@@ -277,7 +279,7 @@ def store_agent_story_output(
                        (id, identifier, name, description, story_id, author_id,
                         workspace_id, character_count, order_index, review_status,
                         agent_generated)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 1)""",
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', 1)""",
                     (
                         scene_id,
                         scene_identifier,
@@ -293,10 +295,10 @@ def store_agent_story_output(
             else:
                 db.execute(
                     """UPDATE story_workspace_scenes
-                       SET name = ?, description = ?, workspace_id = ?,
-                           character_count = ?, review_status = 'pending',
+                       SET name = %s, description = %s, workspace_id = %s,
+                           character_count = %s, review_status = 'pending',
                            agent_generated = 1, updated_at = CURRENT_TIMESTAMP
-                       WHERE id = ? AND author_id = ?""",
+                       WHERE id = %s AND author_id = %s""",
                     (
                         scene.name,
                         scene.description,
@@ -311,7 +313,7 @@ def store_agent_story_output(
             for character_id in character_ids:
                 db.execute(
                     "INSERT INTO story_workspace_scene_characters "
-                    "(scene_id, character_id) VALUES (?, ?)",
+                    "(scene_id, character_id) VALUES (%s, %s)",
                     (scene_id, character_id),
                 )
 
@@ -324,15 +326,15 @@ def store_agent_story_output(
             db.execute(
                 "DELETE FROM story_workspace_scenes "
                 f"WHERE id IN ({_placeholders(stale_scene_ids)}) "
-                "AND story_id = ? AND author_id = ? AND agent_generated = 1",
+                "AND story_id = %s AND author_id = %s AND agent_generated = 1",
                 tuple(stale_scene_ids) + (story_id, user_id),
             )
 
         db.execute(
             "UPDATE story_workspace_stories "
-            "SET character_count = ?, scene_count = ?, review_status = 'pending', "
+            "SET character_count = %s, scene_count = %s, review_status = 'pending', "
             "agent_generated = 1, updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = ? AND author_id = ?",
+            "WHERE id = %s AND author_id = %s",
             (len(character_ids), len(scene_ids), story_id, user_id),
         )
 
@@ -341,7 +343,7 @@ def store_agent_story_output(
             db.execute(
                 "UPDATE story_workspace_characters SET story_count = ("
                 "SELECT COUNT(*) FROM story_workspace_story_characters "
-                "WHERE character_id = ?), updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                "WHERE character_id = %s), updated_at = CURRENT_TIMESTAMP WHERE id = %s",
                 (character_id, character_id),
             )
 
@@ -350,7 +352,7 @@ def store_agent_story_output(
         try:
             db.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
             db.execute(f"RELEASE SAVEPOINT {savepoint}")
-        except sqlite3.Error:
+        except PostgresError:
             logger.exception("Failed to roll back Agent story bundle savepoint")
         if isinstance(exc, AgentIntegrationError):
             raise

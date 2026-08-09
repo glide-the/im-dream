@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-import sqlite3
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -57,7 +56,7 @@ except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
 router = APIRouter(prefix="/api/voice-decks", tags=["deck-plugin-binding"])
 
 
-async def _binding_db() -> AsyncIterator[sqlite3.Connection]:
+async def _binding_db() -> AsyncIterator[Any]:
     db = database.get_db()
     try:
         yield db
@@ -66,7 +65,7 @@ async def _binding_db() -> AsyncIterator[sqlite3.Connection]:
 
 
 def _selection_service(
-    db: sqlite3.Connection = Depends(_binding_db),
+    db: Any = Depends(_binding_db),
 ) -> SelectionValidationService:
     return SelectionValidationService(
         db,
@@ -75,7 +74,7 @@ def _selection_service(
 
 
 def _binding_service(
-    db: sqlite3.Connection = Depends(_binding_db),
+    db: Any = Depends(_binding_db),
     validator: SelectionValidationService = Depends(_selection_service),
 ) -> BindingService:
     return BindingService(db, selection_validator=validator)

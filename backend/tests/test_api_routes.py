@@ -212,7 +212,7 @@ def _authenticated_user():
 class ApiRouteContractTests(unittest.TestCase):
     def setUp(self):
         deck_app = FastAPI()
-        deck_app.dependency_overrides[deck_plugins.get_current_user] = _authenticated_user
+        deck_app.dependency_overrides[deck_plugins._deck_plugin_current_user] = _authenticated_user
         deck_app.dependency_overrides[deck_plugins.get_deck_plugin_gateway] = _DeckGateway
         deck_app.include_router(deck_plugins.router)
         self.deck_client = TestClient(deck_app)
@@ -370,7 +370,7 @@ class ErrorRegistryTests(unittest.TestCase):
                 )
 
         app = FastAPI()
-        app.dependency_overrides[deck_plugins.get_current_user] = _authenticated_user
+        app.dependency_overrides[deck_plugins._deck_plugin_current_user] = _authenticated_user
         app.dependency_overrides[deck_plugins.get_deck_plugin_gateway] = DeniedGateway
         app.include_router(deck_plugins.router)
         with TestClient(app) as client:
@@ -385,7 +385,7 @@ class ErrorRegistryTests(unittest.TestCase):
                 raise RuntimeError("/Users/private prompt secret api-key")
 
         app = FastAPI()
-        app.dependency_overrides[deck_plugins.get_current_user] = lambda: {
+        app.dependency_overrides[deck_plugins._deck_plugin_current_user] = lambda: {
             "user_id": 8,
             "role": "user",
             "permissions": [],

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# [Input] Consume authenticated users, Story Workspace SQLite tables, and REST requests.
+# [Input] Consume authenticated users, canonical PostgreSQL Story Workspace tables, and REST requests.
 # [Output] Publish user-scoped Story Workspace read and controlled-update API routes.
 # [Pos] Story Workspace baseline FastAPI router in backend/routers.
 # [Sync] 2026-08-01: add task_202 workspace, story, character, and scene REST baseline.
@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Iterator, Optional, Protocol
 from uuid import uuid4
@@ -76,6 +75,38 @@ _REVIEW_RESOURCES = {
     StoryWorkspaceResourceType.CHARACTER: "story_workspace_characters",
     StoryWorkspaceResourceType.SCENE: "story_workspace_scenes",
 }
+
+_RESOURCE_IDENTIFIER_POLICY = {
+    "story_workspace_workspaces": {
+        "owner_column": "owner_id",
+        "mutable_columns": frozenset({"name", "settings"}),
+    },
+    "story_workspace_stories": {
+        "owner_column": "author_id",
+        "mutable_columns": frozenset({"title", "description", "content", "type"}),
+    },
+    "story_workspace_characters": {
+        "owner_column": "author_id",
+        "mutable_columns": frozenset(
+            {
+                "name",
+                "identity",
+                "personality",
+                "background",
+                "catchphrase",
+                "tags",
+                "avatar_url",
+            }
+        ),
+    },
+    "story_workspace_scenes": {
+        "owner_column": "author_id",
+        "mutable_columns": frozenset(
+            {"name", "description", "story_id", "order_index"}
+        ),
+    },
+}
+_FILTER_COLUMNS = frozenset({"review_status", "status", "type"})
 
 
 class _ReviewActionRequest(BaseModel):
@@ -361,7 +392,7 @@ async def _episode_action_call(awaitable: Any) -> Any:
         )
 
 
-def _story_db() -> Iterator[sqlite3.Connection]:
+def _story_db() -> Iterator[Any]:
     db = database.get_db()
     try:
         yield db
@@ -384,7 +415,7 @@ def _decode_json(value: Any, default: Any) -> Any:
         return default
 
 
-def _row_to_dict(row: sqlite3.Row) -> dict[str, Any]:
+def _row_to_dict(row: Any) -> dict[str, Any]:
     item = dict(row)
     if "settings" in item:
         item["settings"] = _decode_json(item["settings"], {})
@@ -407,10 +438,12 @@ def _append_in_filter(
     column: str,
     raw: Optional[str],
 ) -> None:
+    if column not in _FILTER_COLUMNS:
+        raise HTTPException(status_code=400, detail="Unsupported filter field")
     values = _csv_values(raw)
     if not values:
         return
-    conditions.append(f"{column} IN ({', '.join('?' for _ in values)})")
+    conditions.append(f"{column} IN ({', '.join('%s' for _ in values)})")
     params.extend(values)
 
 
@@ -424,7 +457,7 @@ def _sort_clause(sort: str, order: str, allowed: set[str]) -> str:
 
 
 def _paginate_query(
-    db: sqlite3.Connection,
+    db: Any,
     select_sql: str,
     count_sql: str,
     params: list[Any],
@@ -434,7 +467,7 @@ def _paginate_query(
     total = int(db.execute(count_sql, tuple(params)).fetchone()[0])
     offset = (page - 1) * per_page
     rows = db.execute(
-        select_sql + " LIMIT ? OFFSET ?",
+        select_sql + " LIMIT %s OFFSET %s",
         tuple(params) + (per_page, offset),
     ).fetchall()
     return {
@@ -449,14 +482,17 @@ def _paginate_query(
 
 
 def _owned_row(
-    db: sqlite3.Connection,
+    db: Any,
     table: str,
     resource_id: str,
     owner_column: str,
     user_id: int,
-) -> sqlite3.Row:
+) -> Any:
+    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
+    if policy is None or policy["owner_column"] != owner_column:
+        raise HTTPException(status_code=400, detail="Unsupported resource mapping")
     row = db.execute(
-        f"SELECT * FROM {table} WHERE id = ? AND {owner_column} = ?",
+        f"SELECT * FROM {table} WHERE id = %s AND {owner_column} = %s",
         (resource_id, user_id),
     ).fetchone()
     if row is None:
@@ -465,7 +501,7 @@ def _owned_row(
 
 
 def _patch_owned_row(
-    db: sqlite3.Connection,
+    db: Any,
     table: str,
     resource_id: str,
     owner_column: str,
@@ -476,10 +512,14 @@ def _patch_owned_row(
     if not values:
         raise HTTPException(status_code=400, detail="At least one field is required")
     columns = list(values)
-    assignments = ", ".join(f"{column} = ?" for column in columns)
+    allowed_columns = _RESOURCE_IDENTIFIER_POLICY[table]["mutable_columns"]
+    unsupported_columns = set(columns) - allowed_columns
+    if unsupported_columns:
+        raise HTTPException(status_code=400, detail="Unsupported patch field")
+    assignments = ", ".join(f"{column} = %s" for column in columns)
     cursor = db.execute(
         f"UPDATE {table} SET {assignments}, updated_at = CURRENT_TIMESTAMP "
-        f"WHERE id = ? AND {owner_column} = ?",
+        f"WHERE id = %s AND {owner_column} = %s",
         tuple(values[column] for column in columns) + (resource_id, user_id),
     )
     if cursor.rowcount != 1:
@@ -490,14 +530,17 @@ def _patch_owned_row(
 
 
 def _owned_review_row(
-    db: sqlite3.Connection,
+    db: Any,
     table: str,
     resource_id: str,
     user_id: int,
-) -> sqlite3.Row:
+) -> Any:
+    policy = _RESOURCE_IDENTIFIER_POLICY.get(table)
+    if policy is None or policy["owner_column"] != "author_id":
+        raise HTTPException(status_code=400, detail="Unsupported review resource")
     row = db.execute(
         f"SELECT * FROM {table} "
-        "WHERE id = ? AND author_id = ? AND agent_generated = 1",
+        "WHERE id = %s AND author_id = %s AND agent_generated = 1",
         (resource_id, user_id),
     ).fetchone()
     if row is None:
@@ -531,7 +574,7 @@ def _audit_review_action(
 
 
 def _transition_pending_review(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
     resource_type: StoryWorkspaceResourceType,
     resource_id: str,
@@ -540,7 +583,7 @@ def _transition_pending_review(
 ) -> dict[str, Any]:
     table = _REVIEW_RESOURCES[resource_type]
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         previous = _owned_review_row(db, table, resource_id, user_id)
         if previous["status"] == "archived" or previous["review_status"] != "pending":
             raise HTTPException(
@@ -554,7 +597,7 @@ def _transition_pending_review(
                     f"UPDATE {table} SET review_status = 'confirmed', status = 'published', "
                     "confirmed_at = CURRENT_TIMESTAMP, published_at = CURRENT_TIMESTAMP, "
                     "updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
                     "AND review_status = 'pending' AND status != 'archived'",
                     (resource_id, user_id),
                 )
@@ -566,7 +609,7 @@ def _transition_pending_review(
                     UPDATE story_workspace_scenes
                     SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE story_id = ? AND author_id = ? AND agent_generated = 1
+                    WHERE story_id = %s AND author_id = %s AND agent_generated = 1
                       AND review_status = 'pending' AND status != 'archived'
                     """,
                     (resource_id, user_id),
@@ -576,11 +619,11 @@ def _transition_pending_review(
                     UPDATE story_workspace_characters
                     SET review_status = 'confirmed', confirmed_at = CURRENT_TIMESTAMP,
                         updated_at = CURRENT_TIMESTAMP
-                    WHERE author_id = ? AND agent_generated = 1
+                    WHERE author_id = %s AND agent_generated = 1
                       AND review_status = 'pending' AND status != 'archived'
                       AND id IN (
                         SELECT character_id FROM story_workspace_story_characters
-                        WHERE story_id = ?
+                        WHERE story_id = %s
                       )
                     """,
                     (user_id, resource_id),
@@ -589,16 +632,16 @@ def _transition_pending_review(
                 cursor = db.execute(
                     f"UPDATE {table} SET review_status = 'confirmed', "
                     "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                    "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                    "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
                     "AND review_status = 'pending' AND status != 'archived'",
                     (resource_id, user_id),
                 )
             new_status = "confirmed"
         else:
             cursor = db.execute(
-                f"UPDATE {table} SET review_status = 'rejected', review_notes = ?, "
+                f"UPDATE {table} SET review_status = 'rejected', review_notes = %s, "
                 "updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+                "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
                 "AND review_status = 'pending' AND status != 'archived'",
                 (review_notes, resource_id, user_id),
             )
@@ -634,12 +677,12 @@ def _transition_pending_review(
 
 
 def _archive_story(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
     story_id: str,
 ) -> dict[str, Any]:
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         previous = _owned_review_row(
             db,
             _REVIEW_RESOURCES[StoryWorkspaceResourceType.STORY],
@@ -651,7 +694,7 @@ def _archive_story(
         cursor = db.execute(
             "UPDATE story_workspace_stories "
             "SET status = 'archived', updated_at = CURRENT_TIMESTAMP "
-            "WHERE id = ? AND author_id = ? AND agent_generated = 1 "
+            "WHERE id = %s AND author_id = %s AND agent_generated = 1 "
             "AND status != 'archived'",
             (story_id, user_id),
         )
@@ -682,17 +725,17 @@ def _archive_story(
 
 
 def _batch_review(
-    db: sqlite3.Connection,
+    db: Any,
     user_id: int,
     request: _BatchReviewRequest,
 ) -> dict[str, Any]:
     table = _REVIEW_RESOURCES[request.resource_type]
-    placeholders = ", ".join("?" for _ in request.ids)
+    placeholders = ", ".join("%s" for _ in request.ids)
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         rows = db.execute(
             f"SELECT * FROM {table} WHERE id IN ({placeholders}) "
-            "AND author_id = ? AND agent_generated = 1",
+            "AND author_id = %s AND agent_generated = 1",
             tuple(request.ids) + (user_id,),
         ).fetchall()
         previous_by_id = {str(row["id"]): row for row in rows}
@@ -705,9 +748,9 @@ def _batch_review(
         ]
 
         if eligible_ids:
-            eligible_placeholders = ", ".join("?" for _ in eligible_ids)
+            eligible_placeholders = ", ".join("%s" for _ in eligible_ids)
             common_where = (
-                f"WHERE id IN ({eligible_placeholders}) AND author_id = ? "
+                f"WHERE id IN ({eligible_placeholders}) AND author_id = %s "
                 "AND agent_generated = 1 AND review_status = 'pending' "
                 "AND status != 'archived'"
             )
@@ -724,17 +767,17 @@ def _batch_review(
                         db.execute(
                             "UPDATE story_workspace_scenes SET review_status = 'confirmed', "
                             "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE story_id = ? AND author_id = ? AND agent_generated = 1 "
+                            "WHERE story_id = %s AND author_id = %s AND agent_generated = 1 "
                             "AND review_status = 'pending' AND status != 'archived'",
                             (story_id, user_id),
                         )
                         db.execute(
                             "UPDATE story_workspace_characters SET review_status = 'confirmed', "
                             "confirmed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP "
-                            "WHERE author_id = ? AND agent_generated = 1 "
+                            "WHERE author_id = %s AND agent_generated = 1 "
                             "AND review_status = 'pending' AND status != 'archived' "
                             "AND id IN (SELECT character_id FROM story_workspace_story_characters "
-                            "WHERE story_id = ?)",
+                            "WHERE story_id = %s)",
                             (user_id, story_id),
                         )
                 else:
@@ -748,7 +791,7 @@ def _batch_review(
             elif request.action == StoryWorkspaceBatchAction.REJECT:
                 cursor = db.execute(
                     f"UPDATE {table} SET review_status = 'rejected', "
-                    "review_notes = ?, updated_at = CURRENT_TIMESTAMP "
+                    "review_notes = %s, updated_at = CURRENT_TIMESTAMP "
                     + common_where,
                     (request.review_notes,) + params,
                 )
@@ -772,7 +815,7 @@ def _batch_review(
 
             updated_rows = db.execute(
                 f"SELECT * FROM {table} WHERE id IN ({eligible_placeholders}) "
-                "AND author_id = ?",
+                "AND author_id = %s",
                 params,
             ).fetchall()
             updated_by_id = {
@@ -822,11 +865,11 @@ def _batch_review(
 @router.get("/workspace")
 def get_workspace(
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     row = db.execute(
-        "SELECT * FROM story_workspace_workspaces WHERE owner_id = ? "
+        "SELECT * FROM story_workspace_workspaces WHERE owner_id = %s "
         "ORDER BY created_at ASC, id ASC LIMIT 1",
         (user_id,),
     ).fetchone()
@@ -834,12 +877,12 @@ def get_workspace(
         workspace_id = str(uuid4())
         db.execute(
             "INSERT INTO story_workspace_workspaces (id, name, owner_id, settings) "
-            "VALUES (?, ?, ?, ?)",
+            "VALUES (%s, %s, %s, %s)",
             (workspace_id, "默认工作区", user_id, "{}"),
         )
         db.commit()
         row = db.execute(
-            "SELECT * FROM story_workspace_workspaces WHERE id = ? AND owner_id = ?",
+            "SELECT * FROM story_workspace_workspaces WHERE id = %s AND owner_id = %s",
             (workspace_id, user_id),
         ).fetchone()
     return _row_to_dict(row)
@@ -850,7 +893,7 @@ def patch_workspace(
     workspace_id: str,
     patch: StoryWorkspaceWorkspacePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     values = patch.model_dump(exclude_unset=True)
     if "settings" in values:
@@ -876,12 +919,12 @@ def list_stories(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    conditions = ["author_id = ?"]
+    conditions = ["author_id = %s"]
     params: list[Any] = [_user_id(current_user)]
     if q:
-        conditions.append("title LIKE ?")
+        conditions.append("title ILIKE %s")
         params.append(f"%{q}%")
     _append_in_filter(conditions, params, "review_status", review_status)
     _append_in_filter(conditions, params, "status", status)
@@ -897,7 +940,7 @@ def list_stories(
 def get_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     result = _row_to_dict(
@@ -906,13 +949,13 @@ def get_story(
     characters = db.execute(
         "SELECT c.*, sc.role_type FROM story_workspace_characters c "
         "JOIN story_workspace_story_characters sc ON sc.character_id = c.id "
-        "WHERE sc.story_id = ? AND c.author_id = ? "
+        "WHERE sc.story_id = %s AND c.author_id = %s "
         "ORDER BY c.name ASC, c.id ASC",
         (story_id, user_id),
     ).fetchall()
     scenes = db.execute(
         "SELECT * FROM story_workspace_scenes "
-        "WHERE story_id = ? AND author_id = ? ORDER BY order_index ASC, id ASC",
+        "WHERE story_id = %s AND author_id = %s ORDER BY order_index ASC, id ASC",
         (story_id, user_id),
     ).fetchall()
     result["characters"] = [_row_to_dict(row) for row in characters]
@@ -925,7 +968,7 @@ def patch_story(
     story_id: str,
     patch: StoryWorkspaceStoryPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _patch_owned_row(
         db,
@@ -946,12 +989,12 @@ def list_characters(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    conditions = ["author_id = ?"]
+    conditions = ["author_id = %s"]
     params: list[Any] = [_user_id(current_user)]
     if q:
-        conditions.append("name LIKE ?")
+        conditions.append("name ILIKE %s")
         params.append(f"%{q}%")
     _append_in_filter(conditions, params, "review_status", review_status)
     where = " WHERE " + " AND ".join(conditions)
@@ -965,7 +1008,7 @@ def list_characters(
 def get_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     result = _row_to_dict(
@@ -980,7 +1023,7 @@ def get_character(
     stories = db.execute(
         "SELECT s.*, sc.role_type FROM story_workspace_stories s "
         "JOIN story_workspace_story_characters sc ON sc.story_id = s.id "
-        "WHERE sc.character_id = ? AND s.author_id = ? "
+        "WHERE sc.character_id = %s AND s.author_id = %s "
         "ORDER BY s.updated_at DESC, s.id ASC",
         (character_id, user_id),
     ).fetchall()
@@ -993,7 +1036,7 @@ def patch_character(
     character_id: str,
     patch: StoryWorkspaceCharacterPatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     values = patch.model_dump(exclude_unset=True)
     if "tags" in values:
@@ -1018,15 +1061,15 @@ def list_scenes(
     page: int = Query(1, ge=1),
     per_page: int = Query(20, ge=1, le=100),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    conditions = ["author_id = ?"]
+    conditions = ["author_id = %s"]
     params: list[Any] = [_user_id(current_user)]
     if q:
-        conditions.append("name LIKE ?")
+        conditions.append("name ILIKE %s")
         params.append(f"%{q}%")
     if story_id:
-        conditions.append("story_id = ?")
+        conditions.append("story_id = %s")
         params.append(story_id)
     _append_in_filter(conditions, params, "review_status", review_status)
     where = " WHERE " + " AND ".join(conditions)
@@ -1040,7 +1083,7 @@ def list_scenes(
 def get_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     result = _row_to_dict(
@@ -1049,7 +1092,7 @@ def get_scene(
     story = None
     if result.get("story_id"):
         story_row = db.execute(
-            "SELECT * FROM story_workspace_stories WHERE id = ? AND author_id = ?",
+            "SELECT * FROM story_workspace_stories WHERE id = %s AND author_id = %s",
             (result["story_id"], user_id),
         ).fetchone()
         if story_row is not None:
@@ -1057,7 +1100,7 @@ def get_scene(
     characters = db.execute(
         "SELECT c.* FROM story_workspace_characters c "
         "JOIN story_workspace_scene_characters sc ON sc.character_id = c.id "
-        "WHERE sc.scene_id = ? AND c.author_id = ? "
+        "WHERE sc.scene_id = %s AND c.author_id = %s "
         "ORDER BY c.name ASC, c.id ASC",
         (scene_id, user_id),
     ).fetchall()
@@ -1071,7 +1114,7 @@ def patch_scene(
     scene_id: str,
     patch: StoryWorkspaceScenePatch,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     user_id = _user_id(current_user)
     values = patch.model_dump(exclude_unset=True)
@@ -1097,7 +1140,7 @@ def patch_scene(
 def confirm_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1113,7 +1156,7 @@ def reject_story(
     story_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1129,7 +1172,7 @@ def reject_story(
 def archive_story(
     story_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _archive_story(db, _user_id(current_user), story_id)
 
@@ -1138,7 +1181,7 @@ def archive_story(
 def confirm_character(
     character_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1154,7 +1197,7 @@ def reject_character(
     character_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1170,7 +1213,7 @@ def reject_character(
 def confirm_scene(
     scene_id: str,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1186,7 +1229,7 @@ def reject_scene(
     scene_id: str,
     body: Optional[_ReviewActionRequest] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _transition_pending_review(
         db,
@@ -1202,7 +1245,7 @@ def reject_scene(
 def batch_review(
     body: _BatchReviewRequest,
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     return _batch_review(db, _user_id(current_user), body)
 
@@ -1212,7 +1255,7 @@ def receive_agent_story_output(
     body: StoryWorkspaceAgentStoryPayload,
     agent_session_id: Optional[str] = Header(None, alias="X-Agent-Session-Id"),
     current_user: dict[str, Any] = Depends(get_current_user),
-    db: sqlite3.Connection = Depends(_story_db),
+    db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
     """Receive one authenticated Agent story bundle and persist it atomically."""
 

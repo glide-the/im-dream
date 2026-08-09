@@ -482,7 +482,7 @@ async def sync_attachments_to_workspace_files(
         Absolute path to the workspace root (from ``get_or_create_workspace``).
     attachments:
         List of attachment dicts matching the ``ChatAttachment`` schema
-        ``{type, url, storageKey?, mediaType?, filename?, size?, workspacePath?, ...}``.
+        ``{type, url, storageKey%s, mediaType%s, filename%s, size%s, workspacePath%s, ...}``.
     download_file:
         Async callable ``(url, storage_key) -> (bytes, content_type)`` that
         retrieves the file content from the storage backend.

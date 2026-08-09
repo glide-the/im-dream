@@ -18,6 +18,7 @@
 
 import { STORAGE_KEYS } from '../constants/storageKeys';
 import { API_BASE } from '../lib/apiBase';
+import type { Commentor, EditorState } from '../engine/EditorEngine';
 
 // ========== Inline Types (workaround for Vite bug) ==========
 export interface VoiceConfig {
@@ -46,11 +47,11 @@ export interface UserSession {
   id: string;
   name?: string | null;
   labels: SessionLabels;
-  editor_state?: any;
+  editor_state: EditorState | null;
   created_at: string;
   updated_at: string;
   date_key?: string | null;
-  first_line?: string;
+  first_line?: string | null;
 }
 
 export interface Voice {
@@ -105,10 +106,38 @@ export function normalizeSessionLabels(labels: unknown): SessionLabels {
     .filter(label => label.length > 0);
 }
 
-function normalizeUserSession(session: any): UserSession {
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined;
+}
+
+function optionalNullableString(value: unknown): string | null | undefined {
+  return value === null ? null : optionalString(value);
+}
+
+function isEditorState(value: unknown): value is EditorState {
+  if (!isRecord(value) || typeof value.id !== 'string' || !Array.isArray(value.cells)) return false;
+  return Array.isArray(value.commentors)
+    && Array.isArray(value.tasks)
+    && Array.isArray(value.weightPath)
+    && Array.isArray(value.overlappedPhrases)
+    && Array.isArray(value.notFoundPhrases);
+}
+
+function normalizeUserSession(session: unknown): UserSession {
+  const value = isRecord(session) ? session : {};
   return {
-    ...session,
-    labels: normalizeSessionLabels(session?.labels)
+    id: optionalString(value.id) ?? '',
+    name: optionalNullableString(value.name),
+    labels: normalizeSessionLabels(value.labels),
+    editor_state: isEditorState(value.editor_state) ? value.editor_state : null,
+    created_at: optionalString(value.created_at) ?? '',
+    updated_at: optionalString(value.updated_at) ?? '',
+    date_key: optionalNullableString(value.date_key),
+    first_line: optionalNullableString(value.first_line),
   };
 }
 
@@ -130,9 +159,9 @@ function getAuthHeaders(): HeadersInit {
 /**
  * Get default voices from backend
  */
-export async function getDefaultVoices(): Promise<any> {
+export async function getDefaultVoices(): Promise<Record<string, Omit<VoiceConfig, 'name' | 'enabled'>>> {
   const response = await fetch(`${API_BASE}/api/default-voices`);
-  return await response.json();
+  return await response.json() as Record<string, Omit<VoiceConfig, 'name' | 'enabled'>>;
 }
 
 interface SyncResponse {
@@ -150,12 +179,15 @@ interface SyncResponse {
     status?: string;
     response?: string;  // For chat responses
     voice_name?: string;  // For chat responses
-    echoes?: any[];  // For echoes analysis
-    traits?: any[];  // For traits analysis
-    patterns?: any[];  // For patterns analysis
+    echoes?: ReflectionResult[];  // For echoes analysis
+    traits?: ReflectionResult[];  // For traits analysis
+    patterns?: ReflectionResult[];  // For patterns analysis
     image_base64?: string;  // For image generation
     thumbnail_base64?: string;  // Thumbnail for image generation
     prompt?: string;  // Image generation prompt
+    date?: string;
+    error?: string;
+    reason?: string;
   };
   error?: string;
   exec_id?: string;  // Still included for debugging
@@ -168,7 +200,7 @@ interface SyncResponse {
 export async function analyzeText(
   text: string,
   sessionId: string,
-  appliedComments?: any[],
+  appliedComments?: Commentor[],
   metaPrompt?: string,
   statePrompt?: string,
   overlappedPhrases?: string[],
@@ -499,10 +531,6 @@ function authHeaders(extra?: Record<string, string>): HeadersInit {
   return { ...(extra ?? {}), Authorization: `Bearer ${token}` };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 function normalizeReflectionResult(item: unknown): ReflectionResult {
   const record = isRecord(item) ? item : {};
   return {
@@ -774,7 +802,7 @@ export async function analyzePatterns(onDelta?: (d: string) => void): Promise<Re
  */
 export async function generateDailyPicture(targetDate?: string, timezone?: string): Promise<{ image_base64: string; thumbnail_base64?: string; prompt: string; date?: string }> {
   const token = localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN);
-  const params: Record<string, any> = {};
+  const params: Record<string, string> = {};
   if (targetDate) params.target_date = targetDate;
   if (timezone) params.timezone = timezone;
 
@@ -797,7 +825,7 @@ export async function generateDailyPicture(targetDate?: string, timezone?: strin
     throw new Error(data.error || 'Image generation failed');
   }
 
-  const res: any = data.result || {};
+  const res = data.result || {};
   if (res.image_base64) {
     return {
       image_base64: res.image_base64,
@@ -815,6 +843,13 @@ export async function generateDailyPicture(targetDate?: string, timezone?: strin
 /**
  * Import localStorage data to database (one-time migration)
  */
+export interface ImportSummary {
+  sessions: number;
+  pictures: number;
+  preferences: number;
+  reports: number;
+}
+
 export async function importLocalData(data: {
   currentSession?: string;
   calendarEntries?: string;
@@ -825,7 +860,7 @@ export async function importLocalData(data: {
   selectedState?: string;
   analysisReports?: string;
   oldDocument?: string;
-}): Promise<{ success: boolean; imported: any }> {
+}): Promise<{ success: boolean; imported: ImportSummary }> {
   const response = await fetch(`${API_BASE}/api/import-local-data`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -854,7 +889,7 @@ export async function importLocalData(data: {
 /**
  * Save session to database
  */
-export async function saveSession(sessionId: string, editorState: any, name?: string): Promise<void> {
+export async function saveSession(sessionId: string, editorState: EditorState, name?: string): Promise<void> {
   const response = await fetch(`${API_BASE}/api/sessions`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1000,7 +1035,14 @@ type PictureRangeOptions = {
   limit?: number;
 };
 
-export async function getDailyPictures(limit: number = 30, options: PictureRangeOptions = {}): Promise<any[]> {
+export interface DailyPicture {
+  date: string;
+  base64: string;
+  full_base64?: string;
+  prompt: string;
+}
+
+export async function getDailyPictures(limit: number = 30, options: PictureRangeOptions = {}): Promise<DailyPicture[]> {
   const params = new URLSearchParams();
   params.append('limit', String(options.limit ?? limit));
   if (options.startDate) params.append('start_date', options.startDate);
@@ -1017,8 +1059,8 @@ export async function getDailyPictures(limit: number = 30, options: PictureRange
     throw new Error(error.detail || 'Get pictures failed');
   }
 
-  const data = await response.json();
-  return data.pictures;
+  const data = await response.json() as { pictures?: DailyPicture[] };
+  return data.pictures ?? [];
 }
 
 /**
@@ -1041,13 +1083,17 @@ export async function getDailyPictureFull(date: string): Promise<string> {
 /**
  * Save user preferences
  */
-export async function savePreferences(preferences: {
-  voice_configs?: any;
+export interface UserPreferences {
+  voice_configs?: Record<string, VoiceConfig>;
   meta_prompt?: string;
-  state_config?: any;
+  state_config?: StateConfig;
   selected_state?: string;
   timezone?: string;
-}): Promise<void> {
+  first_login_completed?: boolean;
+  updated_at?: string;
+}
+
+export async function savePreferences(preferences: UserPreferences): Promise<void> {
   const response = await fetch(`${API_BASE}/api/preferences`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1063,7 +1109,7 @@ export async function savePreferences(preferences: {
 /**
  * Get user preferences
  */
-export async function getPreferences(): Promise<any> {
+export async function getPreferences(): Promise<UserPreferences> {
   const response = await fetch(`${API_BASE}/api/preferences`, {
     headers: getAuthHeaders()
   });
@@ -1073,7 +1119,7 @@ export async function getPreferences(): Promise<any> {
     throw new Error(error.detail || 'Get preferences failed');
   }
 
-  return await response.json();
+  return await response.json() as UserPreferences;
 }
 
 /**
@@ -1131,7 +1177,7 @@ export async function getSuggestion(text: string, metaPrompt?: string, stateProm
 /**
  * Save analysis report
  */
-export async function saveAnalysisReport(reportType: string, reportData: any, allNotesText?: string): Promise<void> {
+export async function saveAnalysisReport(reportType: string, reportData: unknown, allNotesText?: string): Promise<void> {
   const response = await fetch(`${API_BASE}/api/reports`, {
     method: 'POST',
     headers: getAuthHeaders(),
@@ -1151,7 +1197,18 @@ export async function saveAnalysisReport(reportType: string, reportData: any, al
 /**
  * Get analysis reports
  */
-export async function getAnalysisReports(limit: number = 10): Promise<any[]> {
+export interface SavedAnalysisReport {
+  id: number;
+  report_data?: {
+    echoes?: ReflectionResult[];
+    traits?: ReflectionResult[];
+    patterns?: ReflectionResult[];
+    stats?: { days: number; entries: number; words: number };
+  };
+  created_at: string;
+}
+
+export async function getAnalysisReports(limit: number = 10): Promise<SavedAnalysisReport[]> {
   const response = await fetch(`${API_BASE}/api/reports?limit=${limit}`, {
     headers: getAuthHeaders()
   });
@@ -1161,8 +1218,8 @@ export async function getAnalysisReports(limit: number = 10): Promise<any[]> {
     throw new Error(error.detail || 'Get reports failed');
   }
 
-  const data = await response.json();
-  return data.reports;
+  const data = await response.json() as { reports?: SavedAnalysisReport[] };
+  return data.reports ?? [];
 }
 
 /**
@@ -1653,7 +1710,7 @@ export async function removeFriend(friendId: number): Promise<{ success: boolean
 /**
  * Get friend's timeline (pictures)
  */
-export async function getFriendTimeline(friendId: number, limit: number = 30): Promise<any[]> {
+export async function getFriendTimeline(friendId: number, limit: number = 30): Promise<DailyPicture[]> {
   const response = await fetch(`${API_BASE}/api/friends/${friendId}/timeline?limit=${limit}`, {
     headers: getAuthHeaders()
   });
@@ -1663,8 +1720,8 @@ export async function getFriendTimeline(friendId: number, limit: number = 30): P
     throw new Error(error.detail || 'Get friend timeline failed');
   }
 
-  const data = await response.json();
-  return data.pictures;
+  const data = await response.json() as { pictures?: DailyPicture[] };
+  return data.pictures ?? [];
 }
 
 /**

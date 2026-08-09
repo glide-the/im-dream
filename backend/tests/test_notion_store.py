@@ -1,6 +1,5 @@
-# [Input] Notion connector SQLite store and canonical snapshot persistence.
-# [Output] Verify connector CRUD, resource selection persistence, and snapshot
-#          identity storage.
+# [Input] Notion Connector PostgreSQL repository with a pure transactional fake.
+# [Output] Verify five-table behavior, SQL contract, rollback, and snapshot identity.
 # [Pos] test node in backend/tests
 # [Sync] 2026-07-04: initial store coverage for Notion connector persistence.
 # [Sync] 2026-07-08: cover connector list/detail sources hydration for refresh-safe
@@ -9,13 +8,16 @@
 from __future__ import annotations
 
 import sys
-import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+TEST_ROOT = Path(__file__).resolve().parent
+if str(TEST_ROOT) not in sys.path:
+    sys.path.insert(0, str(TEST_ROOT))
 
 from libs.claude_agent_kit.server.notion_snapshot import (
     CanonicalWorkspaceSnapshot,
@@ -23,18 +25,17 @@ from libs.claude_agent_kit.server.notion_snapshot import (
     snapshot_identity,
 )
 from notion import store
+from notion_postgres_fake import TABLE_NAMES, build_fake_notion_store
 
 
 class TestNotionStore(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self._db_path = Path(self._tmp.name) / "notion-connectors.db"
-        self._old_db_path = store.DB_PATH
-        store.DB_PATH = self._db_path
+        self._store, self._database, self._pool = build_fake_notion_store(users={7, 8})
+        store.close_default_store()
+        store.open_default_store(store=self._store)
 
     def tearDown(self):
-        store.DB_PATH = self._old_db_path
-        self._tmp.cleanup()
+        store.close_default_store()
 
     def _sample_snapshot(self, connector_id: str, workspace_id: str = "workspace-1") -> CanonicalWorkspaceSnapshot:
         metadata = SnapshotMetadata(
@@ -155,6 +156,10 @@ class TestNotionStore(unittest.TestCase):
         self.assertEqual(current["pages"]["page-standalone"]["title"], "Standalone Page")
         self.assertEqual(store.list_snapshots(connector["id"], 7)[0]["snapshot"]["metadata"]["snapshot_version"], "snap-001")
         self.assertEqual(len(store.list_connector_resources(connector["id"], 7)), 2)
+        self.assertEqual(len(self._database.tables["resource_connectors"]), 1)
+        self.assertEqual(len(self._database.tables["connector_resources"]), 2)
+        self.assertEqual(len(self._database.tables["connector_resource_pages"]), 1)
+        self.assertEqual(len(self._database.tables["connector_snapshots"]), 1)
 
     def test_attach_thread_finds_connector(self):
         connector = store.create_connector(7, name="Notion")
@@ -163,6 +168,132 @@ class TestNotionStore(unittest.TestCase):
         found = store.get_connector_for_thread("thread-1", 7)
         self.assertIsNotNone(found)
         self.assertEqual(found["id"], connector["id"])
+        self.assertEqual(len(self._database.tables["connector_chat_threads"]), 1)
+
+    def test_connector_delete_cascades_all_five_tables(self):
+        connector = store.create_connector(7, name="Notion")
+        store.replace_connector_resources(
+            connector["id"],
+            7,
+            databases=[{"database_id": "db-1", "title": "Tasks"}],
+            pages=[],
+        )
+        store.save_snapshot(connector["id"], 7, "workspace-1", self._sample_snapshot(connector["id"]))
+        store.attach_thread_to_connector(connector["id"], 7, "thread-1")
+
+        self.assertTrue(store.delete_connector(connector["id"], 7))
+        self.assertEqual(
+            {table: len(self._database.tables[table]) for table in TABLE_NAMES},
+            {table: 0 for table in TABLE_NAMES},
+        )
+
+    def test_failed_resource_replacement_rolls_back_without_partial_delete(self):
+        connector = store.create_connector(7, name="Notion")
+        store.replace_connector_resources(
+            connector["id"],
+            7,
+            databases=[{"database_id": "db-original", "title": "Original"}],
+            pages=[],
+        )
+        before = {
+            table: [dict(row) for row in rows]
+            for table, rows in self._database.tables.items()
+        }
+        self._database.fail_marker = "notion.resource.insert"
+        with self.assertRaisesRegex(RuntimeError, "injected failure"):
+            store.replace_connector_resources(
+                connector["id"],
+                7,
+                databases=[{"database_id": "db-replacement", "title": "Replacement"}],
+                pages=[],
+            )
+        self._database.fail_marker = None
+
+        self.assertEqual(self._database.tables, before)
+        self.assertEqual(self._pool.connections[-1].commits, 0)
+        self.assertEqual(self._pool.connections[-1].rollbacks, 1)
+
+    def test_failed_page_materialization_rolls_back_snapshot_and_pointer(self):
+        connector = store.create_connector(7, name="Notion")
+        store.replace_connector_resources(
+            connector["id"],
+            7,
+            databases=[{"database_id": "db-1", "title": "Tasks"}],
+            pages=[],
+        )
+        before = {
+            table: [dict(row) for row in rows]
+            for table, rows in self._database.tables.items()
+        }
+        self._database.fail_marker = "notion.resource_page.insert"
+        with self.assertRaisesRegex(RuntimeError, "injected failure"):
+            store.save_snapshot(
+                connector["id"], 7, "workspace-1", self._sample_snapshot(connector["id"])
+            )
+        self._database.fail_marker = None
+
+        self.assertEqual(self._database.tables, before)
+        self.assertEqual(self._pool.connections[-1].commits, 0)
+        self.assertEqual(self._pool.connections[-1].rollbacks, 1)
+
+    def test_runtime_source_is_postgres_only_and_all_queries_are_bound(self):
+        connector = store.create_connector(7, name="Notion")
+        store.get_connector(connector["id"], 7)
+        source = Path(store.__file__).read_text(encoding="utf-8")
+        lowered = source.casefold()
+        for forbidden in (
+            "sqlite3",
+            "begin immediate",
+            "create table",
+            "ink_agent_notion_db_path",
+            "db_path",
+        ):
+            self.assertNotIn(forbidden, lowered)
+        self.assertNotIn("PRAGMA", source)
+        self.assertNotIn("?", source)
+        self.assertNotIn("import database", source)
+        self.assertIn("PostgresUnitOfWork", source)
+        self.assertIn("PostgresPool.from_env", source)
+        queries = [
+            query
+            for connection in self._pool.connections
+            for query, _params in connection.executions
+            if "notion." in query
+        ]
+        self.assertTrue(queries)
+        self.assertTrue(all("%s" in query for query in queries))
+        self.assertTrue(all("?" not in query for query in queries))
+
+    def test_default_runtime_opens_and_closes_only_its_lifecycle_pool(self):
+        class LifecyclePool:
+            def __init__(self):
+                self.open_calls = 0
+                self.close_calls = 0
+
+            def open(self):
+                self.open_calls += 1
+
+            def close(self):
+                self.close_calls += 1
+
+            def connection(self, timeout=None):  # pragma: no cover - not used here
+                raise AssertionError(timeout)
+
+        lifecycle_pool = LifecyclePool()
+        store.close_default_store()
+        with patch.object(
+            store.PostgresPool,
+            "from_env",
+            return_value=lifecycle_pool,
+        ) as factory:
+            configured = store.open_default_store()
+            self.assertIsInstance(configured, store.NotionConnectorStore)
+            self.assertEqual(lifecycle_pool.open_calls, 1)
+            factory.assert_called_once_with(
+                application_name="ink-dream-notion-connectors"
+            )
+            store.close_default_store()
+        self.assertEqual(lifecycle_pool.close_calls, 1)
 
 
 if __name__ == "__main__":

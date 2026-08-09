@@ -13,7 +13,6 @@ import logging
 import math
 import os
 import re
-import sqlite3
 import stat
 import time
 from dataclasses import dataclass
@@ -158,7 +157,7 @@ def _trusted_message_id() -> str:
 
 
 def _read_actor_scoped_run(
-    db: sqlite3.Connection,
+    db: Any,
     workflow_run_id: str,
     actor_context: AuthenticatedActorContext,
 ) -> WorkflowRun:
@@ -171,7 +170,6 @@ def _read_actor_scoped_run(
 
     service = WorkflowRunService.__new__(WorkflowRunService)
     service.db = db
-    db.row_factory = sqlite3.Row
     return service.read_run(workflow_run_id, actor_context)
 
 
@@ -207,14 +205,13 @@ def _with_authoritative_context(
     actor_id, thread_id = _trusted_actor_and_thread()
     db = database.get_db()
     try:
-        db.row_factory = sqlite3.Row
         workspace_row = db.execute(
             "SELECT workflow_runs.workspace_id AS id "
             "FROM workflow_runs "
             "INNER JOIN story_workspace_workspaces "
             "ON story_workspace_workspaces.id = workflow_runs.workspace_id "
-            "WHERE workflow_runs.id = ? "
-            "AND story_workspace_workspaces.owner_id = ? "
+            "WHERE workflow_runs.id = %s "
+            "AND story_workspace_workspaces.owner_id = %s "
             "LIMIT 1",
             (workflow_run_id, actor_id),
         ).fetchone()
@@ -240,7 +237,7 @@ def _with_authoritative_context(
         if workflow_run.source_voice_thread_id != thread_id:
             raise PermissionError("run and trusted thread do not match")
         thread_row = db.execute(
-            "SELECT id FROM chat_thread WHERE id = ? AND user_id = ?",
+            "SELECT id FROM chat_thread WHERE id = %s AND user_id = %s",
             (thread_id, actor_id),
         ).fetchone()
         if thread_row is None or str(thread_row["id"]) != thread_id:
@@ -256,7 +253,7 @@ def _with_authoritative_context(
 
 
 def _active_episode_action_provenance(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     message_id: str,
     actor_id: int,
@@ -265,7 +262,7 @@ def _active_episode_action_provenance(
 ) -> dict[str, Any]:
     row = db.execute(
         "SELECT metadata FROM chat_message "
-        "WHERE id = ? AND thread_id = ? AND role = 'user' LIMIT 1",
+        "WHERE id = %s AND thread_id = %s AND role = 'user' LIMIT 1",
         (message_id, thread_id),
     ).fetchone()
     if row is None:
@@ -310,7 +307,7 @@ def _with_authoritative_episode_context(
     workflow_run_id: str,
     operation: Callable[
         [
-            sqlite3.Connection,
+            Any,
             Path,
             WorkflowRun,
             int,
@@ -329,14 +326,13 @@ def _with_authoritative_episode_context(
     message_id = _trusted_message_id()
     db = database.get_db()
     try:
-        db.row_factory = sqlite3.Row
         workspace_row = db.execute(
             "SELECT workflow_runs.workspace_id AS id "
             "FROM workflow_runs INNER JOIN story_workspace_workspaces "
             "ON story_workspace_workspaces.id = workflow_runs.workspace_id "
-            "WHERE workflow_runs.id = ? "
-            "AND workflow_runs.created_by = ? "
-            "AND story_workspace_workspaces.owner_id = ? LIMIT 1",
+            "WHERE workflow_runs.id = %s "
+            "AND workflow_runs.created_by = %s "
+            "AND story_workspace_workspaces.owner_id = %s LIMIT 1",
             (workflow_run_id, str(actor_id), actor_id),
         ).fetchone()
         if workspace_row is None:
@@ -353,7 +349,7 @@ def _with_authoritative_episode_context(
             raise PermissionError("run and trusted thread do not match")
         thread = db.execute(
             "SELECT id FROM chat_thread "
-            "WHERE id = ? AND user_id = ? LIMIT 1",
+            "WHERE id = %s AND user_id = %s LIMIT 1",
             (thread_id, actor_id),
         ).fetchone()
         if thread is None:
@@ -380,7 +376,7 @@ def _with_authoritative_episode_context(
 
 
 def _source_launch_row(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     actor_id: int,
     thread_id: str,
@@ -405,8 +401,8 @@ def _source_launch_row(
         "JOIN chat_message AS source "
         "ON source.id = run.source_message_id "
         "AND source.thread_id = thread.id AND source.role = 'user' "
-        "WHERE run.id = ? AND run.created_by = ? "
-        "AND run.source_voice_thread_id = ? AND thread.user_id = ? LIMIT 1",
+        "WHERE run.id = %s AND run.created_by = %s "
+        "AND run.source_voice_thread_id = %s AND thread.user_id = %s LIMIT 1",
         (workflow_run_id, str(actor_id), thread_id, actor_id),
     ).fetchone()
     if locked is None:
@@ -441,7 +437,7 @@ def _bind_first_episode(
     request: StoryWorkspaceEpisodeBindingToolInput,
 ) -> dict[str, object]:
     def bind(
-        db: sqlite3.Connection,
+        db: Any,
         workspace: Path,
         _run: WorkflowRun,
         actor_id: int,
@@ -488,10 +484,10 @@ def _bind_first_episode(
                 separators=(",", ":"),
                 sort_keys=True,
             )
-            db.execute("BEGIN IMMEDIATE")
+            db.execute("BEGIN")
             updated = db.execute(
-                "UPDATE chat_message SET metadata = ? "
-                "WHERE id = ? AND metadata = ?",
+                "UPDATE chat_message SET metadata = %s "
+                "WHERE id = %s AND metadata = %s",
                 (encoded, source_id, raw_metadata),
             )
             if updated.rowcount != 1:
@@ -524,7 +520,7 @@ def _record_episode_workflow_completion(
     request: StoryWorkspaceEpisodeWorkflowCompletionToolInput,
 ) -> dict[str, object]:
     def record(
-        _db: sqlite3.Connection,
+        _db: Any,
         workspace: Path,
         _run: WorkflowRun,
         _actor_id: int,

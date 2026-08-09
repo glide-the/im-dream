@@ -140,7 +140,7 @@ export function useVoiceInput({
         const contentBefore = currentContent.slice(0, cursorPos);
         const contentAfter = currentContent.slice(cursorPos);
 
-        let sentences: Array<string> = [];
+        const sentences: Array<string> = [];
         let sentenceId = -1;
 
         const voiceInputModal = document.createElement('div');
@@ -187,7 +187,7 @@ export function useVoiceInput({
                 focusedTextarea.current.style.height = `${focusedTextarea.current.scrollHeight}px`;
               }
             }, 100);
-          } catch (err) {
+          } catch {
             console.log('Non-JSON message from server:', evt.data);
           }
         };

@@ -73,7 +73,7 @@ def _generate_picture_for_date(
     try:
         db = database.get_db()
         recent_prompts = db.execute(
-            "SELECT prompt FROM daily_pictures WHERE user_id = ? ORDER BY date DESC LIMIT 5",
+            "SELECT prompt FROM daily_pictures WHERE user_id = %s ORDER BY date DESC LIMIT 5",
             (user_id,),
         ).fetchall()
         db.close()

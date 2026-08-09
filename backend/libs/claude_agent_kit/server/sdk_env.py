@@ -88,6 +88,13 @@ _PROJECT_DOTENV_SDK_ENV_NAMES = frozenset(
     }
 )
 _REMOVED_PROJECT_DOTENV_SDK_ENV_NAMES = frozenset({"ANTHROPIC_API_KEY"})
+_USER_SDK_ENV_NAMES = frozenset(
+    {
+        "API_TIMEOUT_MS",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+        "DISABLE_INTERLEAVED_THINKING",
+    }
+)
 
 # Plan Mode / config-home injection (claude-plan §5.1).  CLAUDE_CONFIG_DIR is
 # deliberately NOT in ``_PROJECT_DOTENV_SDK_ENV_NAMES`` so backend/.env cannot
@@ -416,7 +423,7 @@ def apply_user_sdk_env_to_options(
     filtered = {
         str(k): str(v)
         for k, v in user_env.items()
-        if k and v is not None and _is_project_dotenv_sdk_env_key(str(k))
+        if k and v is not None and str(k) in _USER_SDK_ENV_NAMES
     }
     # Merge: filtered user env overlays existing (which already has backend/.env).
     merged = {**existing_env, **filtered}

@@ -343,7 +343,9 @@ class PackerSurfacesIntegrationTests(unittest.TestCase):
               claude_cli_version TEXT NOT NULL,
               compatibility_json TEXT NOT NULL DEFAULT '{}',
               status TEXT NOT NULL DEFAULT 'ready', operation_id TEXT NOT NULL,
-              file_count INTEGER NOT NULL DEFAULT 0
+              file_count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              installed_at TEXT
             );
             CREATE TABLE deck_claude_plugin_refs (
               deck_id TEXT NOT NULL, plugin_installation_id TEXT NOT NULL,

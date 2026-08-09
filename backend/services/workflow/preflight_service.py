@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from psycopg import IntegrityError as PostgresIntegrityError
+
 import asyncio
 import base64
 from collections.abc import Awaitable, Callable, Mapping
@@ -10,7 +12,6 @@ import hashlib
 import hmac
 import inspect
 import json
-import sqlite3
 from typing import Any, Literal
 import uuid
 
@@ -130,7 +131,7 @@ class PreflightService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         identity_checker: CheckCallable,
         binding_resolver: CheckCallable,
@@ -150,7 +151,6 @@ class PreflightService:
             raise ValueError("token_secret must contain at least 32 bytes")
 
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._identity_checker = identity_checker
         self._binding_resolver = binding_resolver
         self._manifest_schema_checker = manifest_schema_checker
@@ -210,7 +210,7 @@ class PreflightService:
                     created_at=now,
                     expires_at=expires_at,
                 )
-            except sqlite3.IntegrityError:
+            except PostgresIntegrityError:
                 # A different service instance may have won the database race.
                 # Reuse its active record instead of duplicating Deck work.
                 raced = self._active_preflight(fingerprint, self._now())
@@ -332,11 +332,11 @@ class PreflightService:
         token_hash = self._token_hash(token)
         now = self._now()
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             row = self.db.execute(
                 """
                 SELECT * FROM workflow_preflights
-                WHERE preflight_token_hash = ?
+                WHERE preflight_token_hash = %s
                 """,
                 (token_hash,),
             ).fetchone()
@@ -360,8 +360,8 @@ class PreflightService:
                     """
                     UPDATE workflow_preflights
                     SET status = 'expired', preflight_token_hash = NULL,
-                        updated_at = ?
-                    WHERE workflow_preflight_id = ?
+                        updated_at = %s
+                    WHERE workflow_preflight_id = %s
                     """,
                     (self._iso(now), row["workflow_preflight_id"]),
                 )
@@ -399,8 +399,8 @@ class PreflightService:
             cursor = self.db.execute(
                 """
                 UPDATE workflow_preflights
-                SET consumed_at = ?, updated_at = ?
-                WHERE workflow_preflight_id = ? AND consumed_at IS NULL
+                SET consumed_at = %s, updated_at = %s
+                WHERE workflow_preflight_id = %s AND consumed_at IS NULL
                 """,
                 (
                     self._iso(now),
@@ -426,7 +426,7 @@ class PreflightService:
         row = self.db.execute(
             """
             SELECT * FROM workflow_preflights
-            WHERE workflow_preflight_id = ? AND created_by = ?
+            WHERE workflow_preflight_id = %s AND created_by = %s
             """,
             (preflight_id, actor),
         ).fetchone()
@@ -499,22 +499,22 @@ class PreflightService:
         self,
         request_fingerprint: str,
         now: datetime,
-    ) -> sqlite3.Row | None:
+    ) -> Any | None:
         with self.db:
             self.db.execute(
                 """
                 UPDATE workflow_preflights
                 SET status = 'expired', preflight_token_hash = NULL,
-                    updated_at = ?
-                WHERE request_fingerprint = ? AND status = 'passed'
-                  AND expires_at <= ?
+                    updated_at = %s
+                WHERE request_fingerprint = %s AND status = 'passed'
+                  AND expires_at <= %s
                 """,
                 (self._iso(now), request_fingerprint, self._iso(now)),
             )
             return self.db.execute(
                 """
                 SELECT * FROM workflow_preflights
-                WHERE request_fingerprint = ?
+                WHERE request_fingerprint = %s
                   AND status IN ('checking', 'passed')
                   AND consumed_at IS NULL
                 ORDER BY created_at DESC
@@ -544,8 +544,8 @@ class PreflightService:
                     runtime_plugin_lock_id, deck_runtime_profile_id,
                     input_hash, status, expires_at, created_by,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 'unresolved', 'unresolved', 'unresolved',
-                          'unresolved', ?, 'checking', ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, 'unresolved', 'unresolved', 'unresolved',
+                          'unresolved', %s, 'checking', %s, %s, %s, %s)
                 """,
                 (
                     preflight_id,
@@ -569,10 +569,10 @@ class PreflightService:
             self.db.execute(
                 """
                 UPDATE workflow_preflights
-                SET deck_plugin_id = ?, deck_plugin_version = ?,
-                    runtime_plugin_lock_id = ?, deck_runtime_profile_id = ?,
-                    updated_at = ?
-                WHERE workflow_preflight_id = ?
+                SET deck_plugin_id = %s, deck_plugin_version = %s,
+                    runtime_plugin_lock_id = %s, deck_runtime_profile_id = %s,
+                    updated_at = %s
+                WHERE workflow_preflight_id = %s
                 """,
                 (
                     binding.deck_plugin_id,
@@ -593,9 +593,9 @@ class PreflightService:
             self.db.execute(
                 """
                 UPDATE workflow_preflights
-                SET deck_runtime_snapshot_id = ?,
-                    deck_runtime_snapshot_summary_hash = ?, updated_at = ?
-                WHERE workflow_preflight_id = ?
+                SET deck_runtime_snapshot_id = %s,
+                    deck_runtime_snapshot_summary_hash = %s, updated_at = %s
+                WHERE workflow_preflight_id = %s
                 """,
                 (
                     snapshot.deck_runtime_snapshot_id,
@@ -617,10 +617,10 @@ class PreflightService:
                 """
                 UPDATE workflow_preflights
                 SET status = 'passed', error_code = NULL, failed_check = NULL,
-                    deck_runtime_snapshot_id = ?,
-                    deck_runtime_snapshot_summary_hash = ?,
-                    preflight_token_hash = ?, expires_at = ?, updated_at = ?
-                WHERE workflow_preflight_id = ? AND status = 'checking'
+                    deck_runtime_snapshot_id = %s,
+                    deck_runtime_snapshot_summary_hash = %s,
+                    preflight_token_hash = %s, expires_at = %s, updated_at = %s
+                WHERE workflow_preflight_id = %s AND status = 'checking'
                 """,
                 (
                     snapshot.deck_runtime_snapshot_id,
@@ -642,9 +642,9 @@ class PreflightService:
             self.db.execute(
                 """
                 UPDATE workflow_preflights
-                SET status = 'failed', error_code = ?, failed_check = ?,
-                    preflight_token_hash = NULL, updated_at = ?
-                WHERE workflow_preflight_id = ?
+                SET status = 'failed', error_code = %s, failed_check = %s,
+                    preflight_token_hash = NULL, updated_at = %s
+                WHERE workflow_preflight_id = %s
                 """,
                 (
                     error_code,
@@ -663,7 +663,7 @@ class PreflightService:
         row = self.db.execute(
             """
             SELECT * FROM workflow_preflights
-            WHERE workflow_preflight_id = ?
+            WHERE workflow_preflight_id = %s
             """,
             (preflight_id,),
         ).fetchone()
@@ -673,7 +673,7 @@ class PreflightService:
 
     def _row_to_model(
         self,
-        row: sqlite3.Row,
+        row: Any,
         *,
         token: str | None,
     ) -> WorkflowPreflight:
@@ -722,7 +722,7 @@ class PreflightService:
         encoded = base64.urlsafe_b64encode(digest).rstrip(b"=").decode("ascii")
         return "pft_" + encoded
 
-    def _token_from_row(self, row: sqlite3.Row) -> str:
+    def _token_from_row(self, row: Any) -> str:
         return self._issue_preflight_token(
             row["workflow_preflight_id"],
             row["binding_revision"],

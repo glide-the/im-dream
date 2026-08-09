@@ -23,6 +23,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from services.deck.chat_context import DeckChatContextError, DeckChatContextService
 from services.deck.runtime_context import _compatibility_flag
 import database
+from backend.schema import legacy_main_sqlite
 from tests.test_deck_plugin_binding import BindingFixture, DECK_ID
 
 
@@ -74,8 +75,8 @@ class DeckChatContextTests(unittest.IsolatedAsyncioTestCase):
         )
         self.environment.start()
         self.fixture = BindingFixture()
-        database.create_runtime_plugin_tables(self.fixture.db)
-        database.create_claude_plugin_tables(self.fixture.db)
+        legacy_main_sqlite.create_runtime_plugin_tables(self.fixture.db)
+        legacy_main_sqlite.create_claude_plugin_tables(self.fixture.db)
         self.fixture.db.execute(
             """
             INSERT INTO voices (

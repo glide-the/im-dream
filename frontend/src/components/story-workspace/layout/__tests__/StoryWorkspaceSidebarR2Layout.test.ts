@@ -1,5 +1,5 @@
 // [Input] Story Workspace sidebar, router, App Decks handoff and subscription page sources.
-// [Output] Node seam for R2 navigation labels, concrete Decks reuse and static subscription boundary.
+// [Output] Node seam for R2 navigation labels, concrete Decks reuse and the Product BFF subscription boundary.
 // [Pos] Story Workspace sidebar R2 Red/Green regression test.
 
 import { expect, test } from '@playwright/test';
@@ -65,16 +65,19 @@ test('sidebar theme switch is a footer utility that follows the shared theme own
   expect(SIDEBAR).not.toContain('localStorage');
 });
 
-test('Dream keeps its durable recent list while subscription stays a static, accessible three-plan page', () => {
+test('Dream keeps its durable recent list while subscription uses the real monthly Token boundary', () => {
   expect(PATHS).toContain("subscription: '/story-workspace/subscription'");
   expect(ROUTER).toContain("case 'subscription'");
   expect(DREAM_LAUNCH).toContain('最近的 Dream');
-  expect(SUBSCRIPTION).toContain('Free');
-  expect(SUBSCRIPTION).toContain('Dream');
-  expect(SUBSCRIPTION).toContain('is Dreaming');
+  expect(SUBSCRIPTION).toContain('useStoryWorkspaceSubscription');
+  expect(SUBSCRIPTION).toContain('月度 Token 订阅');
+  expect(SUBSCRIPTION).toContain('本周期 Token 守恒');
   expect(SUBSCRIPTION).toContain('aria-labelledby');
+  expect(SUBSCRIPTION).not.toContain('STORY_WORKSPACE_DREAM_PLANS');
+  expect(SUBSCRIPTION).not.toContain('订阅功能即将开放');
   expect(SUBSCRIPTION).not.toContain('fetch(');
   expect(SUBSCRIPTION).not.toContain('apiUrl');
+  expect(SUBSCRIPTION).not.toContain('localStorage');
 });
 
 test('subscription moves into the focused Settings layout', () => {

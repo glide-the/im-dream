@@ -289,7 +289,7 @@ export function useComments({
     if (!comment) return;
 
     const newFeedback = comment.feedback === 'star' ? undefined : 'star';
-    engineRef.current.setCommentFeedback(commentId, newFeedback as any);
+    engineRef.current.setCommentFeedback(commentId, newFeedback);
   }, [engineRef]);
 
   const handleCommentKill = useCallback((commentId: string) => {

@@ -23,7 +23,6 @@ import asyncio
 import hashlib
 import json
 import logging
-import sqlite3
 from typing import Any, Callable, Optional
 from uuid import uuid4
 
@@ -174,7 +173,7 @@ class StoryWorkspaceGuidanceService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         run_reader: RunReader,
         dispatcher: Optional[GuidanceDispatcher] = None,
@@ -282,14 +281,14 @@ class StoryWorkspaceGuidanceService:
 
     def _thread_owned_by(self, thread_id: str, actor_id: str) -> bool:
         row = self._db.execute(
-            "SELECT user_id FROM chat_thread WHERE id = ?",
+            "SELECT user_id FROM chat_thread WHERE id = %s",
             (thread_id,),
         ).fetchone()
         return row is not None and str(row["user_id"]) == str(actor_id)
 
     def _select_guidance_message(self, message_id: str) -> Optional[dict[str, Any]]:
         row = self._db.execute(
-            "SELECT id, metadata FROM chat_message WHERE id = ?",
+            "SELECT id, metadata FROM chat_message WHERE id = %s",
             (message_id,),
         ).fetchone()
         if row is None:

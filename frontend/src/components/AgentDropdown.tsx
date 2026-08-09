@@ -33,7 +33,7 @@ interface AgentDropdownProps {
 }
 
 export default function AgentDropdown({ voices, position, onSelect, onClose }: AgentDropdownProps) {
-  const enabledVoices = Object.entries(voices).filter(([_, cfg]) => cfg.enabled);
+  const enabledVoices = Object.entries(voices).filter(([, cfg]) => cfg.enabled);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const containerRef = React.useRef<HTMLDivElement>(null);
   const itemRefs = React.useRef<Map<number, HTMLDivElement>>(new Map());

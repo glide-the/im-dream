@@ -10,7 +10,6 @@ import json
 import os
 from pathlib import Path
 import re
-import sqlite3
 import stat
 from typing import Any, Callable, Mapping
 from uuid import uuid4
@@ -1206,10 +1205,10 @@ class StoryWorkspaceEpisodeActionService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         thread_factory: object | None = None,
-        db_factory: Callable[[], sqlite3.Connection] | None = None,
+        db_factory: Callable[[], Any] | None = None,
         resolver: StoryWorkspaceEpisodeNextActionResolver | None = None,
     ) -> None:
         self._db = db
@@ -1229,7 +1228,7 @@ class StoryWorkspaceEpisodeActionService:
         key: str,
     ) -> bool:
         rows = self._db.execute(
-            "SELECT metadata FROM chat_message WHERE thread_id = ? AND role = 'user'",
+            "SELECT metadata FROM chat_message WHERE thread_id = %s AND role = 'user'",
             (thread_id,),
         ).fetchall()
         for row in rows:
@@ -1295,7 +1294,7 @@ class StoryWorkspaceEpisodeActionService:
             "expected_workflow_revision": workflow_revision,
         }
         row = self._db.execute(
-            "SELECT metadata FROM chat_message WHERE id = ?",
+            "SELECT metadata FROM chat_message WHERE id = %s",
             (accepted.message_id,),
         ).fetchone()
         if row is None:
@@ -1317,7 +1316,7 @@ class StoryWorkspaceEpisodeActionService:
             previous = row["metadata"]
             metadata["story_workspace_episode_action"] = provenance
             updated = self._db.execute(
-                "UPDATE chat_message SET metadata = ? WHERE id = ? AND metadata = ?",
+                "UPDATE chat_message SET metadata = %s WHERE id = %s AND metadata = %s",
                 (
                     json.dumps(
                         metadata,
@@ -1333,7 +1332,7 @@ class StoryWorkspaceEpisodeActionService:
             if updated.rowcount != 1:
                 self._db.rollback()
                 raced = self._db.execute(
-                    "SELECT metadata FROM chat_message WHERE id = ?",
+                    "SELECT metadata FROM chat_message WHERE id = %s",
                     (accepted.message_id,),
                 ).fetchone()
                 try:

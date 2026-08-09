@@ -180,7 +180,7 @@ async def install_plugin(
             INSERT INTO claude_plugin_operations (
                 id, operation_kind, requested_package_spec, status, phase,
                 progress, message, created_at, updated_at
-            ) VALUES (?, 'install', ?, 'queued', 'queued', 0, ?, ?, ?)
+            ) VALUES (%s, 'install', %s, 'queued', 'queued', 0, %s, %s, %s)
             """,
             (
                 operation_id,
@@ -217,7 +217,7 @@ async def list_operations(
     db = database.get_db()
     try:
         cursor = db.execute(
-            "SELECT * FROM claude_plugin_operations ORDER BY created_at DESC LIMIT ?",
+            "SELECT * FROM claude_plugin_operations ORDER BY created_at DESC LIMIT %s",
             (max(1, min(limit, 100)),),
         )
         columns = [desc[0] for desc in cursor.description]
@@ -259,7 +259,7 @@ async def get_installation(installation_id: str, current_user: dict = Depends(ge
             )
         refs = db.execute(
             "SELECT deck_id, enabled, order_index FROM deck_claude_plugin_refs "
-            "WHERE plugin_installation_id = ?",
+            "WHERE plugin_installation_id = %s",
             (installation_id,),
         ).fetchall()
         record["deck_refs"] = [

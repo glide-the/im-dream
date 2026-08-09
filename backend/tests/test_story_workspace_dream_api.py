@@ -26,6 +26,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 import database
+from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
 from routers import story_workspace
 from services.deck import story_workflow_gateway as gateway_module
@@ -289,8 +290,11 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
 
     def test_jwt_without_workspace_never_creates_one_for_dream_get(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            old_db_path = database.DB_PATH
-            database.DB_PATH = Path(temporary_directory) / "read-only-route.db"
+            database_fixture = LegacyDatabaseModuleFixture(
+                database,
+                Path(temporary_directory) / "read-only-route.db",
+            )
+            database_fixture.start()
             try:
                 db = database.get_db()
                 db.execute(
@@ -336,7 +340,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 ).fetchone()[0]
                 db.close()
             finally:
-                database.DB_PATH = old_db_path
+                database_fixture.stop()
 
         self.assertEqual(response.status_code, 403, response.text)
         self.assertEqual(response.json()["error"]["code"], "WORKFLOW_PERMISSION_DENIED")
@@ -347,8 +351,11 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
-            old_db_path = database.DB_PATH
-            database.DB_PATH = Path(temporary_directory) / "read-only-route.db"
+            database_fixture = LegacyDatabaseModuleFixture(
+                database,
+                Path(temporary_directory) / "read-only-route.db",
+            )
+            database_fixture.start()
             try:
                 db = database.get_db()
                 db.execute(
@@ -410,7 +417,7 @@ class StoryWorkspaceDreamFilesRouteTest(unittest.TestCase):
                 ).fetchone()[0]
                 db.close()
             finally:
-                database.DB_PATH = old_db_path
+                database_fixture.stop()
 
         self.assertEqual(response.status_code, 200, response.text)
         create_workspace.assert_not_called()

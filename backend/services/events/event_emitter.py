@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
+from psycopg import IntegrityError as PostgresIntegrityError
+
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 import inspect
 import json
-import sqlite3
 from typing import Any
 from uuid import uuid4
 
-from backend.database import create_event_tables
 from backend.models.events import CanonicalEventType, EventEnvelope
 
 
@@ -36,7 +36,7 @@ class EventEmitter:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         workspace_id: str,
         queue_publisher: EnvelopePublisher | None = None,
@@ -47,10 +47,7 @@ class EventEmitter:
             raise ValueError("workspace_id is required")
         if db.in_transaction:
             raise RuntimeError("event emitter requires a clean transaction boundary")
-        create_event_tables(db)
-        db.commit()
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self.workspace_id = workspace_id
         self._queue_publisher = queue_publisher
         self._projection_publisher = projection_publisher
@@ -68,7 +65,7 @@ class EventEmitter:
 
         row = self.db.execute(
             "SELECT COALESCE(MAX(aggregate_version), 0) AS version "
-            "FROM events WHERE aggregate_id = ?",
+            "FROM events WHERE aggregate_id = %s",
             (aggregate_id,),
         ).fetchone()
         aggregate_version = int(row["version"] if row is not None else 0) + 1
@@ -95,14 +92,14 @@ class EventEmitter:
 
         persisted = False
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             self.db.execute(
                 """
                 INSERT INTO events (
                     event_id, event_type, event_version, occurred_at,
                     workspace_id, aggregate_id, aggregate_version,
                     correlation_id, causation_id, payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     envelope.event_id,
@@ -119,7 +116,7 @@ class EventEmitter:
             )
             self.db.commit()
             persisted = True
-        except sqlite3.IntegrityError as exc:
+        except PostgresIntegrityError as exc:
             self.db.rollback()
             existing = self._load(envelope.event_id)
             if existing is None:
@@ -154,16 +151,22 @@ class EventEmitter:
 
     def _load(self, event_id: str) -> EventEnvelope | None:
         row = self.db.execute(
-            "SELECT * FROM events WHERE event_id = ?",
+            "SELECT * FROM events WHERE event_id = %s",
             (event_id,),
         ).fetchone()
         if row is None:
             return None
+        occurred_at_value = row["occurred_at"]
+        occurred_at = (
+            occurred_at_value
+            if isinstance(occurred_at_value, datetime)
+            else datetime.fromisoformat(str(occurred_at_value).replace("Z", "+00:00"))
+        )
         return EventEnvelope(
             event_id=row["event_id"],
             event_type=row["event_type"],
             event_version=row["event_version"],
-            occurred_at=datetime.fromisoformat(row["occurred_at"].replace("Z", "+00:00")),
+            occurred_at=occurred_at,
             workspace_id=row["workspace_id"],
             aggregate_id=row["aggregate_id"],
             aggregate_version=row["aggregate_version"],
@@ -196,4 +199,3 @@ class EventEmitter:
         result = publisher(value)
         if inspect.isawaitable(result):
             await result
-

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import sqlite3
 import uuid
+from typing import Any
 
 try:
     from backend.models.deck_plugin import (
@@ -66,12 +66,11 @@ class BindingSelectionRejected(ValueError):
 class BindingService:
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         selection_validator: SelectionValidationService,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._selection_validator = selection_validator
 
     def resolve_workspace_access(
@@ -82,7 +81,7 @@ class BindingService:
         requested_workspace_id: str | None = None,
     ) -> str:
         deck = self.db.execute(
-            "SELECT id FROM decks WHERE id = ? AND owner_id = ?",
+            "SELECT id FROM decks WHERE id = %s AND owner_id = %s",
             (deck_id, actor_id),
         ).fetchone()
         if deck is None:
@@ -92,7 +91,7 @@ class BindingService:
             workspace = self.db.execute(
                 """
                 SELECT id FROM story_workspace_workspaces
-                WHERE id = ? AND owner_id = ?
+                WHERE id = %s AND owner_id = %s
                 """,
                 (requested_workspace_id, actor_id),
             ).fetchone()
@@ -100,7 +99,7 @@ class BindingService:
             workspace = self.db.execute(
                 """
                 SELECT id FROM story_workspace_workspaces
-                WHERE owner_id = ?
+                WHERE owner_id = %s
                 ORDER BY created_at, id
                 LIMIT 1
                 """,
@@ -148,7 +147,7 @@ class BindingService:
     ) -> DeckPluginBindingResponse:
         if self.db.in_transaction:
             raise RuntimeError("binding save requires a clean transaction boundary")
-        self.db.execute("BEGIN IMMEDIATE")
+        self.db.execute("BEGIN")
         try:
             workspace_id = self.resolve_workspace_access(
                 deck_id=deck_id,
@@ -175,9 +174,9 @@ class BindingService:
                     """
                     UPDATE deck_plugin_bindings
                     SET status = 'stale', updated_at = CURRENT_TIMESTAMP
-                    WHERE deck_plugin_binding_id = ?
+                    WHERE deck_plugin_binding_id = %s
                       AND status = 'active'
-                      AND binding_revision = ?
+                      AND binding_revision = %s
                     """,
                     (current["deck_plugin_binding_id"], current_revision),
                 )
@@ -191,7 +190,7 @@ class BindingService:
                     deck_plugin_binding_id, deck_id, workspace_id, creator_id,
                     deck_plugin_id, deck_plugin_version, binding_revision,
                     status, applied_to
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', 'next_run')
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'active', 'next_run')
                 """,
                 (
                     binding_id,
@@ -206,7 +205,7 @@ class BindingService:
             created = self.db.execute(
                 """
                 SELECT * FROM deck_plugin_bindings
-                WHERE deck_plugin_binding_id = ?
+                WHERE deck_plugin_binding_id = %s
                 """,
                 (binding_id,),
             ).fetchone()
@@ -217,11 +216,11 @@ class BindingService:
             self.db.rollback()
             raise
 
-    def _current_row(self, deck_id: str) -> sqlite3.Row | None:
+    def _current_row(self, deck_id: str) -> Any | None:
         return self.db.execute(
             """
             SELECT * FROM deck_plugin_bindings
-            WHERE deck_id = ? AND status = 'active'
+            WHERE deck_id = %s AND status = 'active'
             """,
             (deck_id,),
         ).fetchone()
@@ -231,7 +230,7 @@ class BindingService:
         return int(row["binding_revision"]) if row else 0
 
     @staticmethod
-    def _model(row: sqlite3.Row) -> DeckPluginBinding:
+    def _model(row: Any) -> DeckPluginBinding:
         return DeckPluginBinding(
             deck_plugin_binding_id=row["deck_plugin_binding_id"],
             deck_id=row["deck_id"],
@@ -249,7 +248,7 @@ class BindingService:
     @classmethod
     def _response(
         cls,
-        row: sqlite3.Row,
+        row: Any,
         validation: SelectionValidationSummary,
     ) -> DeckPluginBindingResponse:
         binding = cls._model(row)

@@ -2427,6 +2427,33 @@ class TestClaudeSdkEnvHelper(unittest.TestCase):
             },
         )
 
+    def test_user_sdk_env_cannot_override_provider_credentials_or_routing(self):
+        options = _SDK_OPTIONS(
+            env={
+                "ANTHROPIC_AUTH_TOKEN": "server-token",
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+            }
+        )
+
+        sdk_env_module.apply_user_sdk_env_to_options(
+            options,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "user-token",
+                "ANTHROPIC_BASE_URL": "https://bypass.example",
+                "ANTHROPIC_MODEL": "provider-model",
+                "API_TIMEOUT_MS": "120000",
+            },
+        )
+
+        self.assertEqual(
+            options.env,
+            {
+                "ANTHROPIC_AUTH_TOKEN": "server-token",
+                "ANTHROPIC_BASE_URL": "https://gateway.example",
+                "API_TIMEOUT_MS": "120000",
+            },
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestEditorIndexRedirectHelper

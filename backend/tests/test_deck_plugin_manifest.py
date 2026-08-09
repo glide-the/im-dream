@@ -9,6 +9,7 @@ import unittest
 from pydantic import ValidationError
 
 from backend import database
+from backend.schema import legacy_main_sqlite
 from backend.models.deck_plugin import (
     DeckPluginManifestV1,
     DeckPluginReleaseStatus,
@@ -200,7 +201,7 @@ class ReleaseServiceTests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         self.service = DeckPluginReleaseService(
             self.db, source_allowlist=SOURCE_ALLOWLIST
         )
@@ -209,7 +210,7 @@ class ReleaseServiceTests(unittest.TestCase):
         self.db.close()
 
     def test_database_initialization_is_idempotent_and_indexed(self):
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         table = self.db.execute(
             "SELECT name FROM sqlite_master WHERE type='table' "
             "AND name='deck_plugin_releases'"
@@ -224,7 +225,7 @@ class ReleaseServiceTests(unittest.TestCase):
 
     def test_database_table_can_be_rolled_back_and_recovered(self):
         self.db.execute("DROP TABLE deck_plugin_releases")
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         self.assertIsNotNone(
             self.db.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "

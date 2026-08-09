@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from psycopg import Error as PostgresError
+
 import asyncio
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -11,7 +13,6 @@ import json
 import logging
 import os
 from pathlib import Path
-import sqlite3
 import stat
 import sys
 from typing import Any
@@ -291,7 +292,7 @@ class StoryWorkflowApplicationGateway:
 
     @staticmethod
     def _run_actor_context(
-        db: sqlite3.Connection,
+        db: Any,
         workflow_run_id: str,
         actor_id: int,
     ) -> AuthenticatedActorContext:
@@ -299,7 +300,7 @@ class StoryWorkflowApplicationGateway:
 
         owns_workspace = db.execute(
             "SELECT id FROM story_workspace_workspaces "
-            "WHERE owner_id = ? LIMIT 1",
+            "WHERE owner_id = %s LIMIT 1",
             (actor_id,),
         ).fetchone()
         if owns_workspace is None:
@@ -308,7 +309,7 @@ class StoryWorkflowApplicationGateway:
             "SELECT run.workspace_id FROM workflow_runs AS run "
             "JOIN story_workspace_workspaces AS workspace "
             "ON workspace.id = run.workspace_id "
-            "WHERE run.id = ? AND run.created_by = ? AND workspace.owner_id = ?",
+            "WHERE run.id = %s AND run.created_by = %s AND workspace.owner_id = %s",
             (workflow_run_id, str(actor_id), actor_id),
         ).fetchone()
         if row is None:
@@ -399,14 +400,14 @@ class StoryWorkflowApplicationGateway:
 
     @staticmethod
     def _installation_scope(
-        db: sqlite3.Connection,
+        db: Any,
         workspace_id: str,
         deck_plugin_id: str,
     ) -> Scope:
         row = db.execute(
             """
             SELECT scope_type, scope_id FROM deck_plugin_installations
-            WHERE scope_type = 'workspace' AND scope_id = ? AND deck_plugin_id = ?
+            WHERE scope_type = 'workspace' AND scope_id = %s AND deck_plugin_id = %s
               AND status = 'ready'
             """,
             (workspace_id, deck_plugin_id),
@@ -415,7 +416,7 @@ class StoryWorkflowApplicationGateway:
             row = db.execute(
                 """
                 SELECT scope_type, scope_id FROM deck_plugin_installations
-                WHERE scope_type = 'instance' AND deck_plugin_id = ? AND status = 'ready'
+                WHERE scope_type = 'instance' AND deck_plugin_id = %s AND status = 'ready'
                 ORDER BY updated_at DESC LIMIT 1
                 """,
                 (deck_plugin_id,),
@@ -426,7 +427,7 @@ class StoryWorkflowApplicationGateway:
 
     def _preflight_service(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         actor: dict[str, str],
     ) -> PreflightService:
         actor_id = actor["actor_id"]
@@ -439,8 +440,8 @@ class StoryWorkflowApplicationGateway:
                 """
                 SELECT deck.id FROM decks AS deck
                 JOIN story_workspace_workspaces AS workspace
-                  ON workspace.id = ? AND workspace.owner_id = deck.owner_id
-                WHERE deck.id = ? AND deck.owner_id = ? AND deck.enabled = 1
+                  ON workspace.id = %s AND workspace.owner_id = deck.owner_id
+                WHERE deck.id = %s AND deck.owner_id = %s AND deck.enabled IS TRUE
                 """,
                 (workspace_id, deck_id, actor_id),
             ).fetchone()
@@ -462,9 +463,9 @@ class StoryWorkflowApplicationGateway:
                 JOIN deck_runtime_plugin_locks AS runtime_lock
                   ON runtime_lock.deck_plugin_id = binding.deck_plugin_id
                  AND runtime_lock.deck_plugin_version = binding.deck_plugin_version
-                WHERE binding.deck_id = ? AND binding.binding_revision = ?
-                  AND binding.status = 'active' AND binding.workspace_id = ?
-                  AND binding.creator_id = ?
+                WHERE binding.deck_id = %s AND binding.binding_revision = %s
+                  AND binding.status = 'active' AND binding.workspace_id = %s
+                  AND binding.creator_id = %s
                 """,
                 (deck_id, binding_revision, workspace_id, actor_id),
             ).fetchone()
@@ -528,8 +529,8 @@ class StoryWorkflowApplicationGateway:
             installation = db.execute(
                 """
                 SELECT approved_capabilities_json FROM deck_plugin_installations
-                WHERE deck_plugin_id = ? AND status = 'ready'
-                  AND ((scope_type = 'workspace' AND scope_id = ?) OR scope_type = 'instance')
+                WHERE deck_plugin_id = %s AND status = 'ready'
+                  AND ((scope_type = 'workspace' AND scope_id = %s) OR scope_type = 'instance')
                 ORDER BY CASE scope_type WHEN 'workspace' THEN 0 ELSE 1 END,
                          updated_at DESC LIMIT 1
                 """,
@@ -540,8 +541,8 @@ class StoryWorkflowApplicationGateway:
             except (TypeError, json.JSONDecodeError):
                 approved = set()
             release = db.execute(
-                "SELECT manifest_json FROM deck_plugin_releases WHERE deck_plugin_id = ? "
-                "AND deck_plugin_version = ?",
+                "SELECT manifest_json FROM deck_plugin_releases WHERE deck_plugin_id = %s "
+                "AND deck_plugin_version = %s",
                 (binding.deck_plugin_id, binding.deck_plugin_version),
             ).fetchone()
             manifest = DeckPluginManifestV1.model_validate_json(release["manifest_json"])
@@ -558,18 +559,18 @@ class StoryWorkflowApplicationGateway:
             binding = db.execute(
                 """
                 SELECT * FROM deck_plugin_bindings
-                WHERE deck_id = ? AND workspace_id = ? AND creator_id = ? AND status = 'active'
+                WHERE deck_id = %s AND workspace_id = %s AND creator_id = %s AND status = 'active'
                 """,
                 (deck_id, workspace_id, actor_id),
             ).fetchone()
             deck = db.execute(
                 "SELECT id, name, name_zh, name_en, description, description_zh, description_en "
-                "FROM decks WHERE id = ? AND owner_id = ?",
+                "FROM decks WHERE id = %s AND owner_id = %s",
                 (deck_id, actor_id),
             ).fetchone()
             voices = db.execute(
                 "SELECT id, name, name_zh, name_en, system_prompt FROM voices "
-                "WHERE deck_id = ? AND enabled = 1 ORDER BY order_index, id",
+                "WHERE deck_id = %s AND enabled IS TRUE ORDER BY order_index, id",
                 (deck_id,),
             ).fetchall()
             if binding is None or deck is None:
@@ -592,8 +593,8 @@ class StoryWorkflowApplicationGateway:
                 """
                 SELECT deck_runtime_snapshot_id, sanitized_summary_hash
                 FROM deck_runtime_snapshots
-                WHERE deck_id = ? AND binding_revision = ?
-                  AND deck_runtime_profile_id = ? AND config_hash = ?
+                WHERE deck_id = %s AND binding_revision = %s
+                  AND deck_runtime_profile_id = %s AND config_hash = %s
                 """,
                 (deck_id, binding["binding_revision"], profile_id, config_hash),
             ).fetchone()
@@ -615,14 +616,14 @@ class StoryWorkflowApplicationGateway:
                     }
                 )
             )
-            with db:
+            try:
                 db.execute(
                     """
                     INSERT INTO deck_runtime_snapshots (
                         deck_runtime_snapshot_id, deck_id, deck_plugin_binding_id,
                         binding_revision, deck_runtime_profile_id, snapshot_contract,
                         config_hash, config_json, sanitized_summary_hash
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         snapshot_id,
@@ -636,6 +637,10 @@ class StoryWorkflowApplicationGateway:
                         summary_hash,
                     ),
                 )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
             return {
                 "deck_runtime_snapshot_id": snapshot_id,
                 "sanitized_summary_hash": summary_hash,
@@ -644,7 +649,7 @@ class StoryWorkflowApplicationGateway:
 
         def materialization_reader(runtime_lock_id: str) -> dict[str, Any]:
             lock_row = db.execute(
-                "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = ?",
+                "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = %s",
                 (runtime_lock_id,),
             ).fetchone()
             if lock_row is None:
@@ -656,8 +661,8 @@ class StoryWorkflowApplicationGateway:
                 row = db.execute(
                     """
                     SELECT * FROM runtime_plugin_materializations
-                    WHERE claude_code_plugin_id = ? AND resolved_version = ?
-                      AND artifact_digest = ?
+                    WHERE claude_code_plugin_id = %s AND resolved_version = %s
+                      AND artifact_digest = %s
                     ORDER BY updated_at DESC LIMIT 1
                     """,
                     (entry.claude_code_plugin_id, entry.resolved_version, entry.artifact_digest),
@@ -999,7 +1004,7 @@ class StoryWorkflowApplicationGateway:
             )
             rows = db.execute(
                 "SELECT id, parts, metadata FROM chat_message "
-                "WHERE thread_id = ? AND role = 'user'",
+                "WHERE thread_id = %s AND role = 'user'",
                 (context.thread_id,),
             ).fetchall()
             service = StoryWorkspaceDreamAgentMessageService(
@@ -1145,7 +1150,7 @@ class StoryWorkflowApplicationGateway:
 
     def _load_dream_agent_context_from_db(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         workflow_run_id: str,
         actor: dict[str, str],
     ) -> StoryWorkspaceDreamRunContext:
@@ -1181,11 +1186,11 @@ class StoryWorkflowApplicationGateway:
              AND binding.workspace_id = run.workspace_id
             JOIN chat_thread AS thread
               ON thread.id = run.source_voice_thread_id
-             AND thread.user_id = ?
+             AND thread.user_id = %s
              AND thread.deck_id = binding.deck_id
-            WHERE run.id = ?
-              AND run.created_by = ?
-              AND workspace.owner_id = ?
+            WHERE run.id = %s
+              AND run.created_by = %s
+              AND workspace.owner_id = %s
             LIMIT 1
             """,
             (actor_id, workflow_run_id, str(actor_id), actor_id),
@@ -1218,9 +1223,9 @@ class StoryWorkflowApplicationGateway:
 
     def _load_dream_reentry_stage_projection(
         self,
-        row: sqlite3.Row,
+        row: Any,
         actor: dict[str, str],
-        db: sqlite3.Connection,
+        db: Any,
     ) -> StoryWorkspaceDreamReentryStageProjection:
         """Preserve Dream files truth while retaining its reliable mtime for sort."""
 
@@ -1257,7 +1262,7 @@ class StoryWorkflowApplicationGateway:
         *,
         thread_id: str,
     ) -> Any:
-        """Use the row already proven by re-entry SQL; do not reopen SQLite."""
+        """Use the row already proven by re-entry SQL; do not reopen the database."""
 
         workspace = cls._thread_workspace(thread_id)
         reader = StoryWorkspaceDreamFileReader(workspace)
@@ -1316,7 +1321,7 @@ class StoryWorkflowApplicationGateway:
         workflow_run_id: str,
         actor: dict[str, str],
     ) -> Any:
-        """Run the complete SQLite/filesystem/flock chain in one worker."""
+        """Run the complete PostgreSQL/filesystem/flock chain in one worker."""
 
         db = database.get_db()
         try:
@@ -1393,7 +1398,7 @@ class StoryWorkflowApplicationGateway:
             raise
         except ApiRouteError:
             raise
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             raise ApiRouteError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE",
                 status_code=503,
@@ -1565,7 +1570,7 @@ class StoryWorkflowApplicationGateway:
                 ) from exc
         except (StoryWorkspaceEpisodeActionError, ApiRouteError):
             raise
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             raise ApiRouteError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE",
                 status_code=503,
@@ -1575,10 +1580,10 @@ class StoryWorkflowApplicationGateway:
 
     @staticmethod
     def _authorized_episode_row(
-        db: sqlite3.Connection,
+        db: Any,
         workflow_run_id: str,
         actor: dict[str, str],
-    ) -> sqlite3.Row:
+    ) -> Any:
         """Fail closed on every frozen run/Deck/thread provenance edge."""
 
         try:
@@ -1611,7 +1616,7 @@ class StoryWorkflowApplicationGateway:
 
     @staticmethod
     def _episode_authority_from_source(
-        row: sqlite3.Row,
+        row: Any,
         workflow_run_id: str,
     ) -> StoryWorkspaceEpisodeAuthority | None:
         try:
@@ -1631,7 +1636,7 @@ class StoryWorkflowApplicationGateway:
 
     def _get_episode_artifacts_from_db(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         workflow_run_id: str,
         actor: dict[str, str],
     ) -> Any:
@@ -1729,7 +1734,7 @@ class StoryWorkflowApplicationGateway:
             ) from exc
         except (StoryWorkspaceEpisodeBindingError, StoryWorkspaceEpisodeWorkflowFactError) as exc:
             raise ApiRouteError("WORKFLOW_PERMISSION_DENIED", status_code=404) from exc
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             raise ApiRouteError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE",
                 status_code=503,
@@ -1737,13 +1742,13 @@ class StoryWorkflowApplicationGateway:
 
     def _get_dream_files_from_db(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         workflow_run_id: str,
         actor: dict[str, str],
         *,
         include_confirmation: bool = True,
     ) -> Any:
-        """Reuse one already-authorized SQLite connection for a Dream projection."""
+        """Reuse one already-authorized PostgreSQL connection for a Dream projection."""
 
         try:
             try:
@@ -1766,7 +1771,7 @@ class StoryWorkflowApplicationGateway:
                 thread_id_value = str(thread.get("id")) if thread else None
             else:
                 thread = db.execute(
-                    "SELECT id FROM chat_thread WHERE id = ? AND user_id = ?",
+                    "SELECT id FROM chat_thread WHERE id = %s AND user_id = %s",
                     (thread_id, actor_id),
                 ).fetchone()
                 thread_id_value = str(thread["id"]) if thread else None

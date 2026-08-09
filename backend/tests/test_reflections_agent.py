@@ -28,6 +28,7 @@ from llm_json_parser import try_parse_json_array
 from reflections_agent import ReflectionsTaskEngine, create_reflections_task, get_or_create_reflection_event_bus
 from routers import deps as router_deps
 from routers.reflections import router as reflections_router
+from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 
 
 def _section_from_prompt(prompt: str) -> str:
@@ -86,11 +87,13 @@ def _run(coro):
 class ReflectionsAgentFunctionalTest(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.TemporaryDirectory()
-        self.old_db_path = database.DB_PATH
         self.old_agent_cwd = os.environ.get("AGENT_CWD")
-        database.DB_PATH = Path(self.tmp.name) / "ink-test.db"
+        self.database_fixture = LegacyDatabaseModuleFixture(
+            database,
+            Path(self.tmp.name) / "ink-test.db",
+        )
+        self.database_fixture.start(initialize_legacy_schema=True)
         os.environ["AGENT_CWD"] = str(Path(self.tmp.name) / "agent-workspace")
-        database.init_db()
         self.user_id = database.create_user(
             "reflections-agent@example.com",
             auth.hash_password("secret123"),
@@ -120,7 +123,7 @@ class ReflectionsAgentFunctionalTest(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.claude_stream_patch.stop()
-        database.DB_PATH = self.old_db_path
+        self.database_fixture.stop()
         if self.old_agent_cwd is None:
             os.environ.pop("AGENT_CWD", None)
         else:

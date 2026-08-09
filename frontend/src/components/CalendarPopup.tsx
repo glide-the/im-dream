@@ -10,8 +10,9 @@ import {
   getDateKey,
   getTodayKey,
   deleteEntry,
-  type CalendarEntry
+  type CalendarEntry,
 } from '../utils/calendarStorage';
+import type { UserSession } from '../api/voiceApi';
 import { useAuth } from '../contexts/AuthContext';
 import { parseFlexibleTimestamp } from '../utils/timezone';
 
@@ -60,7 +61,7 @@ export default function CalendarPopup({ onLoadEntry, onClose, currentEntryId, on
         const sessions = await listSessions(timezone);
         const grouped: Record<string, CalendarListEntry[]> = {};
 
-        sessions.forEach((session: any) => {
+        sessions.forEach((session: UserSession) => {
           const dateKey = session.date_key || getTodayKey();
           const tsRaw = session.updated_at || session.created_at;
           const ts = parseFlexibleTimestamp(tsRaw)?.getTime() ?? Date.now();

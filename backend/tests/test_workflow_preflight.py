@@ -10,7 +10,7 @@ from unittest.mock import Mock
 
 from pydantic import ValidationError
 
-from backend.database import create_tables
+from backend.schema.legacy_main_sqlite import create_tables
 from backend.models.workflow_preflight import (
     PreflightCheck,
     PreflightStatus,
@@ -33,6 +33,7 @@ TOKEN_SECRET = b"workflow-preflight-test-secret-32-bytes-minimum"
 class WorkflowPreflightTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self) -> None:
         self.db = sqlite3.connect(":memory:")
+        self.db.row_factory = sqlite3.Row
         create_tables(self.db)
         self.now = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
         self.calls: list[PreflightCheck] = []

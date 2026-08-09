@@ -89,6 +89,52 @@ class TestSystemConfigRouter(unittest.TestCase):
             },
         )
 
+    def test_put_rejects_secret_and_provider_routing_env_vars(self):
+        with (
+            unittest.mock.patch.object(
+                system_config_router.database,
+                "save_system_config",
+            ) as save_config,
+            unittest.mock.patch.object(
+                system_config_router.database,
+                "get_system_config",
+                return_value={},
+            ),
+        ):
+            response = self.client.put(
+                "/api/system-config",
+                json={
+                    "env_vars": {
+                        "ANTHROPIC_AUTH_TOKEN": "must-not-be-stored",
+                        "ANTHROPIC_BASE_URL": "https://bypass.example",
+                    }
+                },
+            )
+
+        self.assertEqual(response.status_code, 400, response.text)
+        save_config.assert_not_called()
+
+    def test_get_drops_legacy_secret_values(self):
+        with unittest.mock.patch.object(
+            system_config_router.database,
+            "get_system_config",
+            return_value={
+                "theme": "dark",
+                "env_vars": {
+                    "ANTHROPIC_AUTH_TOKEN": "legacy-secret",
+                    "ANTHROPIC_BASE_URL": "https://legacy.example",
+                    "API_TIMEOUT_MS": "120000",
+                },
+            },
+        ):
+            response = self.client.get("/api/system-config")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(
+            response.json(),
+            {"theme": "dark", "env_vars": {"API_TIMEOUT_MS": "120000"}},
+        )
+
 
 class TestSandboxFsAllowedWritePathsSanitizer(unittest.TestCase):
     """_sanitize_sandbox_fs_allowed_write_paths contract."""

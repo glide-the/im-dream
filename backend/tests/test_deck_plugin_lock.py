@@ -6,6 +6,7 @@ import sqlite3
 import unittest
 
 from backend import database
+from backend.schema import legacy_main_sqlite
 from backend.models.deck_plugin import DeckPluginManifestV1, DeckPluginReleaseStatus
 from backend.services.deck_plugin.lock_generator import (
     LockGenerator,
@@ -127,7 +128,7 @@ class RuntimeLockReleaseIntegrationTests(unittest.TestCase):
         self.db = sqlite3.connect(":memory:")
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         self.service = DeckPluginReleaseService(
             self.db,
             source_allowlist=SOURCE_ALLOWLIST,
@@ -254,7 +255,7 @@ class RuntimeLockReleaseIntegrationTests(unittest.TestCase):
         )
 
     def test_sqlite_constraints_foreign_key_index_and_idempotent_initialization(self):
-        database.create_tables(self.db)
+        legacy_main_sqlite.create_tables(self.db)
         indexes = {
             row["name"]
             for row in self.db.execute("PRAGMA index_list('deck_runtime_plugin_locks')")

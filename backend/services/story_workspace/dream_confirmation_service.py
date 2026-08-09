@@ -1,14 +1,16 @@
 """Persist one Dream confirmation and queue the original Chat Agent.
 
-The confirmation is a hidden ``chat_message`` user turn. SQLite persistence
+The confirmation is a hidden ``chat_message`` user turn. PostgreSQL persistence
 is atomic (message insert plus thread touch) and idempotent without adding a
 table or changing DDL. Dream files live on a separate filesystem durability
 domain, so their revisions are read once before and once while holding the
-SQLite write transaction; the command retains the accepted base revisions so
+PostgreSQL write transaction; the command retains the accepted base revisions so
 the Agent must apply them with the file protocol's own compare-and-swap rules.
 """
 
 from __future__ import annotations
+
+from psycopg import Error as PostgresError
 
 import asyncio
 from dataclasses import dataclass
@@ -16,7 +18,6 @@ import hashlib
 import json
 import logging
 import math
-import sqlite3
 import time
 from typing import Any, Awaitable, Callable, Optional, Protocol
 from uuid import uuid4
@@ -293,7 +294,7 @@ def _confirmation_metadata_matches_scope(
 
 
 def story_workspace_read_dream_confirmation_fact(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     actor_id: str,
     thread_id: str,
@@ -303,7 +304,7 @@ def story_workspace_read_dream_confirmation_fact(
 
     rows = db.execute(
         "SELECT metadata FROM chat_message "
-        "WHERE thread_id = ? AND role = 'user' ORDER BY created_at ASC, id ASC",
+        "WHERE thread_id = %s AND role = 'user' ORDER BY created_at ASC, id ASC",
         (thread_id,),
     ).fetchall()
     accepted = False
@@ -326,15 +327,15 @@ def story_workspace_read_dream_confirmation_fact(
 
 
 def story_workspace_mark_dream_confirmation_dispatched(
-    db: sqlite3.Connection,
+    db: Any,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
 ) -> bool:
     """Acknowledge only the coordinator that owns the durable claim."""
 
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         row = db.execute(
-            "SELECT thread_id, role, metadata FROM chat_message WHERE id = ?",
+            "SELECT thread_id, role, metadata FROM chat_message WHERE id = %s",
             (dispatch.message_id,),
         ).fetchone()
         if row is None:
@@ -388,7 +389,7 @@ def story_workspace_mark_dream_confirmation_dispatched(
         metadata.pop(_DISPATCH_CLAIM_ID, None)
         metadata.pop(_DISPATCH_CLAIM_LEASE_UNTIL, None)
         updated = db.execute(
-            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            "UPDATE chat_message SET metadata = %s WHERE id = %s",
             (_canonical_json(metadata), dispatch.message_id),
         )
         if updated.rowcount != 1:
@@ -399,7 +400,7 @@ def story_workspace_mark_dream_confirmation_dispatched(
         if db.in_transaction:
             db.rollback()
         raise
-    except sqlite3.Error as exc:
+    except PostgresError as exc:
         if db.in_transaction:
             db.rollback()
         raise StoryWorkspaceDreamConfirmationError(
@@ -480,15 +481,15 @@ def _decode_confirmation_dispatch_row(
 
 
 def _story_workspace_dream_confirmation_has_run_scope(
-    db: sqlite3.Connection,
+    db: Any,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
 ) -> bool:
     run_scope = db.execute(
         "SELECT run.id FROM workflow_runs AS run "
         "JOIN story_workspace_workspaces AS workspace "
         "ON workspace.id = run.workspace_id "
-        "WHERE run.id = ? AND run.created_by = ? "
-        "AND run.source_voice_thread_id = ? AND workspace.owner_id = ?",
+        "WHERE run.id = %s AND run.created_by = %s "
+        "AND run.source_voice_thread_id = %s AND workspace.owner_id = %s",
         (
             dispatch.metadata["story_workspace_run_id"],
             dispatch.actor_id,
@@ -517,7 +518,7 @@ def _story_workspace_dispatch_matches_expected(
 
 
 def story_workspace_guard_persisted_dream_confirmation_turn(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     thread_id: str,
     actor_id: str,
@@ -530,7 +531,7 @@ def story_workspace_guard_persisted_dream_confirmation_turn(
     Confirmation messages are already persisted and claimed before the Agent
     starts. The Agent may carry an older lease snapshot while waiting for the
     per-thread lock, so persistence must validate the immutable envelope and
-    claim identity without writing that stale snapshot back to SQLite.
+    claim identity without writing that stale snapshot back to PostgreSQL.
 
     Classification trusts the existing database row and reserved message-id
     namespace, never a request's mutable ``kind`` alone. ``False`` is returned
@@ -543,10 +544,10 @@ def story_workspace_guard_persisted_dream_confirmation_turn(
             "message.metadata, thread.user_id "
             "FROM chat_message AS message "
             "JOIN chat_thread AS thread ON thread.id = message.thread_id "
-            "WHERE message.id = ?",
+            "WHERE message.id = %s",
             (message_id,),
         ).fetchone()
-    except sqlite3.Error as exc:
+    except PostgresError as exc:
         raise StoryWorkspaceDreamConfirmationError(
             "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
         ) from exc
@@ -591,7 +592,7 @@ def story_workspace_guard_persisted_dream_confirmation_turn(
                 metadata.get(_DISPATCH_CLAIM_LEASE_UNTIL)
             )
         )
-    except sqlite3.Error as exc:
+    except PostgresError as exc:
         raise StoryWorkspaceDreamConfirmationError(
             "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
         ) from exc
@@ -621,14 +622,14 @@ def story_workspace_guard_persisted_dream_confirmation_turn(
 
 
 def story_workspace_claim_dream_confirmation(
-    db: sqlite3.Connection,
+    db: Any,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
     *,
     claim_id: str,
     clock: Callable[[], float],
     lease_duration_s: float,
 ) -> Optional[StoryWorkspaceDreamConfirmationDispatch]:
-    """Atomically acquire pending or expired confirmation work in SQLite."""
+    """Atomically acquire pending or expired confirmation work in PostgreSQL."""
 
     if not isinstance(claim_id, str) or not claim_id:
         raise ValueError("claim_id must be non-empty")
@@ -638,13 +639,13 @@ def story_workspace_claim_dream_confirmation(
     ):
         raise ValueError("claim lease must use finite non-negative time")
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         row = db.execute(
             "SELECT message.id, message.thread_id, message.role, message.parts, "
             "message.metadata, thread.user_id "
             "FROM chat_message AS message "
             "JOIN chat_thread AS thread ON thread.id = message.thread_id "
-            "WHERE message.id = ?",
+            "WHERE message.id = %s",
             (dispatch.message_id,),
         ).fetchone()
         current = (
@@ -690,7 +691,7 @@ def story_workspace_claim_dream_confirmation(
         )
         claimed_metadata.pop(_DISPATCH_ACK_CLAIM_SHA256, None)
         updated = db.execute(
-            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            "UPDATE chat_message SET metadata = %s WHERE id = %s",
             (_canonical_json(claimed_metadata), current.message_id),
         )
         if updated.rowcount != 1:
@@ -709,7 +710,7 @@ def story_workspace_claim_dream_confirmation(
         if db.in_transaction:
             db.rollback()
         raise
-    except sqlite3.Error as exc:
+    except PostgresError as exc:
         if db.in_transaction:
             db.rollback()
         raise StoryWorkspaceDreamConfirmationError(
@@ -722,7 +723,7 @@ def story_workspace_claim_dream_confirmation(
 
 
 def _story_workspace_set_dream_confirmation_claim_lease(
-    db: sqlite3.Connection,
+    db: Any,
     dispatch: StoryWorkspaceDreamConfirmationDispatch,
     *,
     clock: Callable[[], float],
@@ -738,9 +739,9 @@ def _story_workspace_set_dream_confirmation_claim_lease(
     ):
         return False
     try:
-        db.execute("BEGIN IMMEDIATE")
+        db.execute("BEGIN")
         row = db.execute(
-            "SELECT metadata FROM chat_message WHERE id = ?",
+            "SELECT metadata FROM chat_message WHERE id = %s",
             (dispatch.message_id,),
         ).fetchone()
         metadata = _decode_metadata(row["metadata"]) if row is not None else None
@@ -763,7 +764,7 @@ def _story_workspace_set_dream_confirmation_claim_lease(
             float(now_s) + float(lease_duration_s)
         )
         updated = db.execute(
-            "UPDATE chat_message SET metadata = ? WHERE id = ?",
+            "UPDATE chat_message SET metadata = %s WHERE id = %s",
             (_canonical_json(metadata), dispatch.message_id),
         )
         if updated.rowcount != 1:
@@ -776,7 +777,7 @@ def _story_workspace_set_dream_confirmation_claim_lease(
         if db.in_transaction:
             db.rollback()
         raise
-    except sqlite3.Error as exc:
+    except PostgresError as exc:
         if db.in_transaction:
             db.rollback()
         raise StoryWorkspaceDreamConfirmationError(
@@ -789,7 +790,7 @@ def _story_workspace_set_dream_confirmation_claim_lease(
 
 
 def story_workspace_read_pending_dream_confirmations(
-    db: sqlite3.Connection,
+    db: Any,
     *,
     now_s: Optional[float] = None,
 ) -> list[StoryWorkspaceDreamConfirmationDispatch]:
@@ -963,7 +964,6 @@ def _story_workspace_load_confirmation_dream_context(
 
     db = database.get_db()
     try:
-        db.row_factory = sqlite3.Row
         row = db.execute(
             """
             SELECT run.id AS workflow_run_id,
@@ -983,10 +983,10 @@ def _story_workspace_load_confirmation_dream_context(
              AND binding.binding_revision = run.binding_revision
              AND binding.deck_plugin_id = run.deck_plugin_id
              AND binding.deck_plugin_version = run.deck_plugin_version
-            WHERE run.id = ?
-              AND run.source_voice_thread_id = ?
-              AND run.created_by = ?
-              AND workspace.owner_id = ?
+            WHERE run.id = %s
+              AND run.source_voice_thread_id = %s
+              AND run.created_by = %s
+              AND workspace.owner_id = %s
             LIMIT 1
             """,
             (run_id, thread_id, actor_id, int(actor_id)),
@@ -1007,7 +1007,7 @@ class _StoryWorkspaceDreamRetryState:
 class StoryWorkspaceDreamConfirmationCoordinator:
     """Reconcile durable pending confirmations with same-thread Agent turns.
 
-    Delivery is at least once. SQLite atomically moves one message from
+    Delivery is at least once. PostgreSQL atomically moves one message from
     ``pending`` to a leased ``dispatching`` claim before an Agent starts. A
     process crash after stream completion but before acknowledgement can replay
     after lease expiry, but two live coordinators cannot consume one fresh
@@ -1016,7 +1016,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
 
     def __init__(
         self,
-        db_factory: Callable[[], sqlite3.Connection],
+        db_factory: Callable[[], Any],
         *,
         dispatcher_factory: Callable[
             [], StoryWorkspaceDreamConfirmationDispatcher
@@ -1325,7 +1325,7 @@ class StoryWorkspaceDreamConfirmationService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         run_reader: StoryWorkspaceDreamRunReader,
         projection_reader: StoryWorkspaceDreamProjectionReader,
@@ -1394,9 +1394,9 @@ class StoryWorkspaceDreamConfirmationService:
                 "IDEMPOTENCY_CONFLICT", 409
             )
 
-        # First read catches ordinary stale drafts without acquiring a SQLite
+        # First read catches ordinary stale drafts without acquiring a PostgreSQL
         # writer lock. A second read immediately before INSERT closes the
-        # common check/commit window, but cannot make FS and SQLite one domain.
+        # common check/commit window, but cannot make FS and PostgreSQL one domain.
         _validate_projection(
             self._projection_reader(workflow_run, thread_id),
             payload,
@@ -1421,7 +1421,7 @@ class StoryWorkspaceDreamConfirmationService:
         }
 
         try:
-            self._db.execute("BEGIN IMMEDIATE")
+            self._db.execute("BEGIN")
             existing = self._select_message(message_id)
             if existing is not None:
                 result = self._resolve_existing(
@@ -1449,8 +1449,9 @@ class StoryWorkspaceDreamConfirmationService:
                 payload,
             )
             cursor = self._db.execute(
-                "INSERT OR IGNORE INTO chat_message "
-                "(id, thread_id, role, parts, metadata) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO chat_message "
+                "(id, thread_id, role, parts, metadata) VALUES (%s, %s, %s, %s, %s) "
+                "ON CONFLICT (id) DO NOTHING",
                 (
                     message_id,
                     thread_id,
@@ -1479,7 +1480,7 @@ class StoryWorkspaceDreamConfirmationService:
 
             touched = self._db.execute(
                 "UPDATE chat_thread SET updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = ? AND user_id = ?",
+                "WHERE id = %s AND user_id = %s",
                 (thread_id, numeric_actor_id),
             )
             if touched.rowcount != 1:
@@ -1491,7 +1492,7 @@ class StoryWorkspaceDreamConfirmationService:
             if self._db.in_transaction:
                 self._db.rollback()
             raise
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             if self._db.in_transaction:
                 self._db.rollback()
             raise StoryWorkspaceDreamConfirmationError(
@@ -1525,10 +1526,10 @@ class StoryWorkspaceDreamConfirmationService:
     def _thread_owned_by(self, thread_id: str, actor_id: int) -> bool:
         try:
             row = self._db.execute(
-                "SELECT id FROM chat_thread WHERE id = ? AND user_id = ?",
+                "SELECT id FROM chat_thread WHERE id = %s AND user_id = %s",
                 (thread_id, actor_id),
             ).fetchone()
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             raise StoryWorkspaceDreamConfirmationError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
             ) from exc
@@ -1538,10 +1539,10 @@ class StoryWorkspaceDreamConfirmationService:
         try:
             row = self._db.execute(
                 "SELECT id, thread_id, role, parts, metadata "
-                "FROM chat_message WHERE id = ?",
+                "FROM chat_message WHERE id = %s",
                 (message_id,),
             ).fetchone()
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             raise StoryWorkspaceDreamConfirmationError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
             ) from exc
@@ -1568,7 +1569,7 @@ class StoryWorkspaceDreamConfirmationService:
                 "WHERE role = 'user' "
                 "ORDER BY created_at ASC, id ASC",
             ).fetchall()
-        except sqlite3.Error as exc:
+        except PostgresError as exc:
             raise StoryWorkspaceDreamConfirmationError(
                 "DECK_RUNTIME_CONFIG_UNAVAILABLE", 503
             ) from exc

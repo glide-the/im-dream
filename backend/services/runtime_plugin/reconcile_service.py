@@ -8,14 +8,12 @@ from datetime import UTC, datetime
 import inspect
 import json
 import re
-import sqlite3
-from typing import Awaitable, Callable, Literal, Protocol
+from typing import Any, Awaitable, Callable, Literal, Protocol
 import uuid
 
 from pydantic import BaseModel, ConfigDict
 
 try:
-    from backend.database import create_runtime_plugin_tables
     from backend.models.deck_plugin import DeckRuntimePluginLock
     from backend.models.runtime_plugin import (
         ActivationStatus,
@@ -32,7 +30,6 @@ try:
         runtime_lock_digest,
     )
 except ModuleNotFoundError:  # Support the backend directory on PYTHONPATH.
-    from database import create_runtime_plugin_tables
     from models.deck_plugin import DeckRuntimePluginLock
     from models.runtime_plugin import (
         ActivationStatus,
@@ -272,7 +269,7 @@ class CliAuditSink(Protocol):
 
 
 class SqliteCliAuditSink:
-    def __init__(self, db: sqlite3.Connection) -> None:
+    def __init__(self, db: Any) -> None:
         self.db = db
 
     def record(self, record: CliAuditRecord) -> None:
@@ -283,7 +280,7 @@ class SqliteCliAuditSink:
                 resolved_version, policy_revision, argv_json,
                 timeout_seconds, exit_code, stdout_summary, stderr_summary,
                 result_status, error_code, created_at
-            ) VALUES (?, 'cli', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, 'cli', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 record.attempt_id,
@@ -308,7 +305,7 @@ class ReconcileService:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         *,
         source_policy: RuntimeSourcePolicy,
         settings_writer: SettingsIntentWriter,
@@ -327,9 +324,7 @@ class ReconcileService:
             raise ValueError("CLI output limit must be within 256..65536 bytes")
         if not 1 <= max_reconcile_attempts <= 3:
             raise ValueError("headless reconcile attempts must be within 1..3")
-        create_runtime_plugin_tables(db)
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._source_policy = source_policy
         self._settings_writer = settings_writer
         self._headless_runner = headless_runner
@@ -523,7 +518,7 @@ class ReconcileService:
                 "reconcile result does not match trusted placement",
             )
         run = self.db.execute(
-            "SELECT id, runtime_plugin_lock_id FROM workflow_runs WHERE id = ?",
+            "SELECT id, runtime_plugin_lock_id FROM workflow_runs WHERE id = %s",
             (placement_context.workflow_run_id,),
         ).fetchone()
         if run is None or run["runtime_plugin_lock_id"] != runtime_lock.runtime_plugin_lock_id:
@@ -532,7 +527,7 @@ class ReconcileService:
                 "workflow run does not bind the supplied runtime lock",
             )
         lock_row = self.db.execute(
-            "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = ?",
+            "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = %s",
             (runtime_lock.runtime_plugin_lock_id,),
         ).fetchone()
         if lock_row is None:
@@ -637,7 +632,7 @@ class ReconcileService:
 
     def read_receipt(self, receipt_id: str) -> RuntimeLoadReceipt:
         receipt = self.db.execute(
-            "SELECT * FROM runtime_load_receipts WHERE receipt_id = ?",
+            "SELECT * FROM runtime_load_receipts WHERE receipt_id = %s",
             (receipt_id,),
         ).fetchone()
         if receipt is None:
@@ -645,7 +640,7 @@ class ReconcileService:
         rows = self.db.execute(
             """
             SELECT * FROM runtime_load_receipt_entries
-            WHERE receipt_id = ? ORDER BY claude_code_plugin_id
+            WHERE receipt_id = %s ORDER BY claude_code_plugin_id
             """,
             (receipt_id,),
         ).fetchall()
@@ -691,7 +686,7 @@ class ReconcileService:
             """
             SELECT receipt_id, workflow_run_id, runtime_plugin_lock_id,
                    runtime_plugin_lock_digest, required_entries_ready
-            FROM runtime_load_receipts WHERE receipt_id = ?
+            FROM runtime_load_receipts WHERE receipt_id = %s
             """,
             (receipt_id,),
         ).fetchone()
@@ -792,7 +787,7 @@ class ReconcileService:
             INSERT INTO runtime_plugin_reconcile_attempts (
                 attempt_id, workflow_run_id, reconcile_path, runtime_node_id,
                 policy_revision, result_status, error_code, created_at
-            ) VALUES (?, ?, 'headless', ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, 'headless', %s, %s, %s, %s, %s)
             """,
             (
                 result.attempt_id,
@@ -820,7 +815,7 @@ class ReconcileService:
                 attempt_id, workflow_run_id, reconcile_path, runtime_node_id,
                 policy_revision, stderr_summary, result_status, error_code,
                 created_at
-            ) VALUES (?, ?, 'headless', ?, ?, ?, 'failed', ?, ?)
+            ) VALUES (%s, %s, 'headless', %s, %s, %s, 'failed', %s, %s)
             """,
             (
                 attempt_id,
@@ -842,7 +837,7 @@ class ReconcileService:
         if self.db.in_transaction:
             raise RuntimeError("receipt persistence requires a clean transaction boundary")
         try:
-            self.db.execute("BEGIN IMMEDIATE")
+            self.db.execute("BEGIN")
             self.db.execute(
                 """
                 INSERT INTO runtime_load_receipts (
@@ -851,7 +846,7 @@ class ReconcileService:
                     runtime_pool_id, distribution_mode, runtime_node_id,
                     artifact_set_hash, policy_revision, deployment_tier,
                     scope, readiness_state, required_entries_ready, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     receipt.receipt_id,
@@ -879,7 +874,7 @@ class ReconcileService:
                         artifact_digest, materialized_digest, verification_status,
                         signature_bundle_ref, retention_state, restore_source_ref,
                         required, loaded_capabilities_json, load_status, loaded_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         receipt.receipt_id,
@@ -901,8 +896,8 @@ class ReconcileService:
                 self.db.execute(
                     """
                     UPDATE runtime_plugin_materializations
-                    SET activation_status = ?, updated_at = ?
-                    WHERE runtime_materialization_id = ?
+                    SET activation_status = %s, updated_at = %s
+                    WHERE runtime_materialization_id = %s
                     """,
                     (activation_status, self._iso(self._clock()), materialization_id),
                 )

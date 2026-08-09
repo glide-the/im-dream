@@ -36,6 +36,7 @@ import asyncio
 import base64
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any, List, Optional
 
@@ -186,6 +187,20 @@ class ClaudeAgentRequestBody(BaseModel):
                     + ", ".join(sorted(banned))
                 )
         return data
+
+    @model_validator(mode="after")
+    def _normalize_model_alias(self):
+        chat_model = self.chatModel if isinstance(self.chatModel, dict) else {}
+        chat_alias = chat_model.get("model")
+        if chat_alias is not None and not isinstance(chat_alias, str):
+            raise ValueError("chatModel.model must be a stable model alias")
+        if self.model and chat_alias and self.model != chat_alias:
+            raise ValueError("model and chatModel.model must identify the same alias")
+        candidate = (self.model or chat_alias or "").strip()
+        if candidate and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", candidate):
+            raise ValueError("model must be a stable model alias")
+        self.model = candidate or None
+        return self
 
     def get_thread_id(self) -> Optional[str]:
         return self.thread_id or self.id

@@ -249,7 +249,7 @@ def _load_editor_state_from_db(editor_session_id: str) -> dict[str, Any]:
         db = database.get_db()
         try:
             row = db.execute(
-                "SELECT editor_state_json FROM user_sessions WHERE id = ?",
+                "SELECT editor_state_json FROM user_sessions WHERE id = %s",
                 (editor_session_id,),
             ).fetchone()
             if row and row["editor_state_json"]:
@@ -282,8 +282,8 @@ def _save_editor_state_to_db(
         try:
             db.execute(
                 """UPDATE user_sessions
-                   SET editor_state_json = ?, updated_at = CURRENT_TIMESTAMP
-                   WHERE id = ?""",
+                   SET editor_state_json = %s, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = %s""",
                 (json.dumps(editor_state, ensure_ascii=False), editor_session_id),
             )
             db.commit()

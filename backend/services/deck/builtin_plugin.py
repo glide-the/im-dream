@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 import hashlib
 import json
 from pathlib import Path
-import sqlite3
+from typing import Any
 import uuid
 
 try:
@@ -127,8 +127,8 @@ def _manifest_json_and_hash(
 
 
 def _repair_legacy_builtin_release(
-    db: sqlite3.Connection,
-    existing: sqlite3.Row,
+    db: Any,
+    existing: Any,
 ) -> None:
     """Repair only the exact repository-owned pre-production built-in release."""
     try:
@@ -147,7 +147,7 @@ def _repair_legacy_builtin_release(
         """
         SELECT id, deck_plugin_manifest_hash, lock_json
         FROM deck_runtime_plugin_locks
-        WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+        WHERE deck_plugin_id = %s AND deck_plugin_version = %s
         """,
         (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
     ).fetchone()
@@ -206,10 +206,10 @@ def _repair_legacy_builtin_release(
         release_result = db.execute(
             """
             UPDATE deck_plugin_releases
-            SET manifest_json = ?, manifest_hash = ?, runtime_spec_json = ?,
-                updated_at = ?
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
-              AND manifest_hash = ? AND manifest_json = ?
+            SET manifest_json = %s, manifest_hash = %s, runtime_spec_json = %s,
+                updated_at = %s
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
+              AND manifest_hash = %s AND manifest_json = %s
             """,
             (
                 repaired_manifest_json,
@@ -225,9 +225,9 @@ def _repair_legacy_builtin_release(
         lock_result = db.execute(
             """
             UPDATE deck_runtime_plugin_locks
-            SET deck_plugin_manifest_hash = ?, lock_json = ?
-            WHERE id = ? AND deck_plugin_id = ? AND deck_plugin_version = ?
-              AND deck_plugin_manifest_hash = ? AND lock_json = ?
+            SET deck_plugin_manifest_hash = %s, lock_json = %s
+            WHERE id = %s AND deck_plugin_id = %s AND deck_plugin_version = %s
+              AND deck_plugin_manifest_hash = %s AND lock_json = %s
             """,
             (
                 repaired_manifest_hash,
@@ -243,12 +243,12 @@ def _repair_legacy_builtin_release(
             raise RuntimeError("built-in Deck Plugin legacy repair raced")
 
 
-def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
+def seed_builtin_deck_plugin(db: Any) -> None:
     """Publish the immutable built-in workflow release once per database."""
     existing = db.execute(
         """
         SELECT manifest_json, manifest_hash FROM deck_plugin_releases
-        WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+        WHERE deck_plugin_id = %s AND deck_plugin_version = %s
         """,
         (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
     ).fetchone()
@@ -292,7 +292,7 @@ def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
                 capabilities_json, compatibility_json,
                 deck_runtime_contract_json, runtime_spec_json,
                 dependencies_json, created_at, updated_at, published_at
-            ) VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, 'published', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 "dr_" + uuid.uuid5(uuid.NAMESPACE_URL, BUILTIN_DECK_PLUGIN_ID).hex,
@@ -324,7 +324,7 @@ def seed_builtin_deck_plugin(db: sqlite3.Connection) -> None:
             INSERT INTO deck_runtime_plugin_locks (
                 id, deck_plugin_id, deck_plugin_version,
                 deck_plugin_manifest_hash, lock_json, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s)
             """,
             (
                 lock_id,

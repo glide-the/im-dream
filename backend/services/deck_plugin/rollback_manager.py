@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import inspect
 import re
-import sqlite3
 from typing import Any
 import uuid
 
@@ -40,6 +39,10 @@ ROLLBACK_INCOMPATIBLE = "DECK_PLUGIN_ROLLBACK_INCOMPATIBLE"
 ROLLBACK_AUDIT_FAILED = "DECK_PLUGIN_ROLLBACK_AUDIT_FAILED"
 
 _DIGEST_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
+_PROJECTION_KEYS = {
+    ("deck_plugin_bindings", "deck_plugin_id"),
+    ("workflow_runs", "deck_plugin_id"),
+}
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,7 @@ class RollbackManager:
 
     def __init__(
         self,
-        db: sqlite3.Connection,
+        db: Any,
         installation_service: InstallationService,
         *,
         compatibility_checker: CompatibilityChecker,
@@ -98,7 +101,6 @@ class RollbackManager:
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         self.db = db
-        self.db.row_factory = sqlite3.Row
         self._installation_service = installation_service
         self._compatibility_checker = compatibility_checker
         self._digest_verifier = digest_verifier
@@ -115,7 +117,7 @@ class RollbackManager:
             raise RollbackManagerError(ROLLBACK_AUDIT_FAILED, "actor is required")
 
         row = self.db.execute(
-            "SELECT * FROM deck_plugin_installations WHERE id = ?",
+            "SELECT * FROM deck_plugin_installations WHERE id = %s",
             (installation_id,),
         ).fetchone()
         if row is None:
@@ -138,7 +140,7 @@ class RollbackManager:
             """
             SELECT status, manifest_json, manifest_hash
             FROM deck_plugin_releases
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (row["deck_plugin_id"], target_version),
         ).fetchone()
@@ -146,7 +148,7 @@ class RollbackManager:
             """
             SELECT deck_plugin_manifest_hash, lock_json
             FROM deck_runtime_plugin_locks
-            WHERE deck_plugin_id = ? AND deck_plugin_version = ?
+            WHERE deck_plugin_id = %s AND deck_plugin_version = %s
             """,
             (row["deck_plugin_id"], target_version),
         ).fetchone()
@@ -238,17 +240,32 @@ class RollbackManager:
     def _table_projection(
         self, table: str, key_column: str, key_value: str
     ) -> tuple[tuple[Any, ...], ...] | None:
+        if (table, key_column) not in _PROJECTION_KEYS:
+            raise RollbackManagerError(
+                ROLLBACK_AUDIT_FAILED,
+                "rollback projection is outside the approved table boundary",
+            )
         exists = self.db.execute(
-            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
-            (table,),
+            "SELECT to_regclass(%s) AS relation_name",
+            (f"public.{table}",),
         ).fetchone()
-        if exists is None:
+        if exists is None or exists["relation_name"] is None:
             return None
         columns = tuple(
-            row[1] for row in self.db.execute(f"PRAGMA table_info({table})")
+            row["column_name"]
+            for row in self.db.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = %s
+                ORDER BY ordinal_position
+                """,
+                (table,),
+            )
         )
         rows = self.db.execute(
-            f"SELECT * FROM {table} WHERE {key_column} = ? ORDER BY rowid",
+            f"SELECT * FROM {table} AS projected "
+            f"WHERE {key_column} = %s ORDER BY to_jsonb(projected)::text",
             (key_value,),
         ).fetchall()
         return tuple(tuple(row[column] for column in columns) for row in rows)

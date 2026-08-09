@@ -1,6 +1,8 @@
 import { useState, useEffect, useLayoutEffect, useRef, useMemo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Commentor } from '../engine/EditorEngine';
+import type { TFunction } from 'i18next';
+import type { Commentor, EditorState, TextCell } from '../engine/EditorEngine';
+import type { VoiceConfig } from '../api/voiceApi';
 import { findNormalizedPhrase } from '../utils/textNormalize';
 import { useAuth } from '../contexts/AuthContext';
 import { STORAGE_KEYS } from '../constants/storageKeys';
@@ -33,7 +35,7 @@ interface TimelineEntryData {
 interface SessionSummary {
   id: string;
   date_key?: string | null;
-  first_line?: string;
+  first_line?: string | null;
   name?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -41,7 +43,7 @@ interface SessionSummary {
 
 interface CollectionsViewProps {
   isVisible: boolean;
-  voiceConfigs: Record<string, any>;
+  voiceConfigs: Record<string, VoiceConfig>;
   timezone: string;
 }
 
@@ -210,7 +212,7 @@ interface TimelineCardProps {
   textByDate: Map<string, string>;
   firstLineByDate: Map<string, string>;
   dateLocale: string;
-  t: (key: string, options?: any) => string;
+  t: TFunction;
   onImageClick: (picture: TimelinePicture) => void;
   onGenerate?: (date: string) => void;
   side: 'left' | 'right';
@@ -397,7 +399,7 @@ function TimelineCard({
 // @@@ Timeline page - combines pictures and comments by date
 interface TimelinePageProps {
   isVisible: boolean;
-  voiceConfigs: Record<string, any>;
+  voiceConfigs: Record<string, VoiceConfig>;
   dateLocale: string;
   timezone: string;
   isMobile: boolean;
@@ -452,10 +454,10 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
     });
   }, []);
 
-  const mergePictures = useCallback((pictures: any[]) => {
+  const mergePictures = useCallback((pictures: TimelinePicture[]) => {
     setPicturesByDate(prev => {
       const next = new Map(prev);
-      pictures.forEach((p: any) => {
+      pictures.forEach((p) => {
         next.set(p.date, {
           date: p.date,
           base64: p.base64,
@@ -514,7 +516,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
         const savedState = localStorage.getItem(STORAGE_KEYS.EDITOR_STATE);
         if (savedState) {
           try {
-            const state = JSON.parse(savedState);
+            const state = JSON.parse(savedState) as EditorState;
             const todayKey = formatDate(new Date(), dateLocale);
             const comments = state.commentors?.filter((c: Commentor) => c.appliedAt) || [];
             if (comments.length > 0) {
@@ -526,8 +528,8 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
             if (state.cells) {
               const dateKey = state.createdAt || getLocalDateString();
               const combined = state.cells
-                .filter((c: any) => c.type === 'text')
-                .map((c: any) => c.content)
+                .filter((cell): cell is TextCell => cell.type === 'text')
+                .map((cell) => cell.content)
                 .join(' ')
                 .trim();
 
@@ -732,7 +734,7 @@ function TimelinePage({ isVisible, voiceConfigs, dateLocale, timezone, isMobile 
         const batch = await getSessionsBatch(sessionsForDate.map(s => s.id));
         const commentsForDate: Commentor[] = [];
 
-        batch.forEach((session: any) => {
+        batch.forEach((session) => {
           const comments = session.editor_state?.commentors || [];
 
           comments.filter((c: Commentor) => c.appliedAt).forEach((comment: Commentor) => {

@@ -60,7 +60,9 @@ test('execution page uses exactly one dashed rule', () => {
 test('execution status preview opens the Dream Agent floating dialog without mounting ChatView', () => {
   expect(PAGE_SOURCE).toContain('useStoryWorkspaceDreamAgent');
   expect(PAGE_SOURCE).toContain('<StoryWorkspaceDreamAgentDialog');
-  expect(PAGE_SOURCE).toContain('onClick={() => setAgentDialogOpen(true)}');
+  expect(PAGE_SOURCE).toMatch(
+    /onClick=\{\(\) => \{\s*setDreamAgentInitialWorkflowFocus\(null\);\s*setAgentDialogOpen\(true\);\s*\}\}/,
+  );
   expect(PAGE_SOURCE).toContain('Dream Agent 消息预览');
   expect(PAGE_SOURCE).toContain('aria-controls="story-workspace-dream-agent-dialog"');
   expect(DIALOG_SOURCE).toContain('id="story-workspace-dream-agent-dialog"');

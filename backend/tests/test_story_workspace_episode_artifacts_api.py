@@ -60,6 +60,15 @@ VENDOR_EPISODE = (
 )
 
 
+def _open_gateway_test_db(path: Path) -> sqlite3.Connection:
+    connection = sqlite3.connect(path, timeout=10, check_same_thread=False)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.execute("PRAGMA busy_timeout=10000")
+    connection.execute("PRAGMA journal_mode=WAL")
+    return connection
+
+
 def _binding_context(run_id: str = RUN_ID, story_slug: str = "didi-zhengzhou"):
     return StoryWorkspaceEpisodeBindingContext(
         workflow_run_id=run_id,
@@ -1130,7 +1139,11 @@ def test_real_route_owner_etag_refresh_and_other_actor_invisibility() -> None:
         ] = gateway_module.StoryWorkflowApplicationGateway
         app.include_router(story_workspace.router)
         with (
-            patch.object(gateway_module.database, "DB_PATH", db_path),
+            patch.object(
+                gateway_module.database,
+                "get_db",
+                side_effect=lambda: _open_gateway_test_db(db_path),
+            ),
             patch.object(
                 gateway_module,
                 "story_workspace_get_workspace_root",
