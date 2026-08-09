@@ -60,7 +60,10 @@ class AdminGatewayConfig:
         environment: Mapping[str, str] | None = None,
     ) -> "AdminGatewayConfig":
         values = os.environ if environment is None else environment
-        enabled = values.get("INK_GATEWAY_CLAUDE_AGENT_ENABLED", "").strip().lower()
+        enabled = (
+            values.get("INK_GATEWAY_ENABLED", "").strip()
+            or values.get("INK_GATEWAY_CLAUDE_AGENT_ENABLED", "").strip()
+        ).lower()
         if enabled not in _TRUE_VALUES:
             return cls(enabled=False)
         raw_lifetime = values.get(

@@ -1,51 +1,10 @@
 """Voice archetypes configuration - Echo system."""
 
 import os
-from typing import Optional
 
-# ---------------------------------------------------------------------------
-# Text model configuration — read from environment variables.
-#
-# All LLM text-generation roles (voice analysis, chat, echo / trait /
-# pattern analysis, image description) are configured entirely through .env.
-# ---------------------------------------------------------------------------
-
-# Shared provider endpoint and API key used by the PolyAgent text roles.
-TEXT_API_ENDPOINT: str = os.getenv("TEXT_API_ENDPOINT", "")
-TEXT_API_KEY: str = os.getenv("TEXT_API_KEY", "")
-
-# Default model used as fallback for all text roles when no per-role override
-# is set.
-_TEXT_MODEL_DEFAULT: str = os.getenv(
-    "INK_TEXT_MODEL_DEFAULT", "google/gemini-3-flash-preview"
-)
-
-VOICE_ANALYSIS_MODEL: str = os.getenv("INK_VOICE_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT)
-VOICE_INSPIRATION_MODEL: str = os.getenv(
-    "INK_VOICE_INSPIRATION_MODEL", _TEXT_MODEL_DEFAULT
-)
-VOICE_CHAT_MODEL: str = os.getenv("INK_VOICE_CHAT_MODEL", _TEXT_MODEL_DEFAULT)
-ECHO_ANALYSIS_MODEL: str = os.getenv("INK_ECHO_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT)
-TRAIT_ANALYSIS_MODEL: str = os.getenv("INK_TRAIT_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT)
-PATTERN_ANALYSIS_MODEL: str = os.getenv(
-    "INK_PATTERN_ANALYSIS_MODEL", _TEXT_MODEL_DEFAULT
-)
-
-# Image description uses the same API provider as image generation by default,
-# but the model name can be overridden independently.
-IMAGE_DESCRIPTION_MODEL: str = os.getenv(
-    "INK_IMAGE_DESCRIPTION_MODEL", "anthropic/claude-haiku-4.5"
-)
-
-# ---------------------------------------------------------------------------
-# Image generation model configuration — read from environment variables.
-# ---------------------------------------------------------------------------
-
-IMAGE_GENERATION_MODEL: str = os.getenv(
-    "INK_IMAGE_GENERATION_MODEL", "google/gemini-2.5-flash-image-preview"
-)
-IMAGE_API_KEY: Optional[str] = os.getenv("INK_IMAGE_API_KEY")
-IMAGE_API_ENDPOINT: Optional[str] = os.getenv("INK_IMAGE_API_ENDPOINT")
+# Runtime model routing and credentials are intentionally absent here. Every
+# inference entrypoint resolves an Admin-published alias through
+# services.admin_gateway and has no direct Provider endpoint/key fallback.
 
 # Retry configuration for image generation
 IMAGE_RETRY_MAX_ATTEMPTS: int = int(os.getenv("INK_IMAGE_RETRY_MAX_ATTEMPTS", "3"))
@@ -134,4 +93,3 @@ IMPORTANT:
 - Phrase must be verbatim from text
 - Each voice should be distinct
 """
-

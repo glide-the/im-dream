@@ -44,6 +44,8 @@ function planSummary(planVersionId = 'pv_creator', planName = 'Creator', version
     version,
     billingCycle: 'monthly',
     monthlyAllowanceTokens: tokens,
+    monthlyPriceMicrousd: 9_000_000,
+    currency: 'USD',
   };
 }
 
@@ -62,10 +64,31 @@ async function fulfill(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 }
 
-async function installProductMocks(page: Page) {
+type SubscriptionMockMode = 'active' | 'paid-create' | 'paid-renewal';
+
+async function installProductMocks(page: Page, mode: SubscriptionMockMode = 'active') {
   let pendingChange = false;
   let contextReads = 0;
   const executed: Array<{ body: Record<string, unknown>; idempotencyKey: string | null }> = [];
+  const payments: Array<{ body: Record<string, unknown>; idempotencyKey: string | null }> = [];
+  const paidCreate = mode === 'paid-create';
+  const paidRenewal = mode === 'paid-renewal';
+  const paymentIntent = {
+    data: {
+      id: 'pay_1234567890abcdef1234567890abcdef',
+      planVersionId: 'pv_studio',
+      subscriptionId: paidRenewal ? 'sub_7' : null,
+      operation: paidRenewal ? 'renewal' : 'initial_activation',
+      amountMicrousd: 9_000_000,
+      currency: 'USD',
+      status: 'requires_action',
+      nextAction: { type: 'test_webhook' },
+      failureCode: null,
+      createdAt: '2026-08-09T10:05:00Z',
+      updatedAt: '2026-08-09T10:05:00Z',
+    },
+    meta: { requestId: 'req_payment' },
+  } as const;
 
   await page.route(`${WEB_BASE}/api/**`, async (route) => {
     const request = route.request();
@@ -79,9 +102,9 @@ async function installProductMocks(page: Page) {
       await fulfill(route, {
         data: {
           canonicalUser: { id: '7' },
-          subscription: {
+          subscription: paidCreate ? null : {
             id: 'sub_7',
-            status: 'active',
+            status: paidRenewal ? 'past_due' : 'active',
             version: pendingChange ? 8 : 7,
             cycleAnchorAt: '2026-08-09T10:00:00Z',
             currentPeriodNumber: 0,
@@ -93,17 +116,17 @@ async function installProductMocks(page: Page) {
               ...planSummary('pv_studio', 'Studio', 2, 2_000_000),
               appliesAt: '2026-09-09T10:00:00Z',
             } : null,
-            allowedActions: ['upgrade', 'downgrade', 'pause', 'cancel'],
+            allowedActions: paidRenewal ? ['renew'] : ['upgrade', 'downgrade', 'pause', 'cancel'],
           },
-          planVersion: planSummary(),
-          entitlements: [{
+          planVersion: paidCreate ? null : planSummary(),
+          entitlements: paidCreate ? [] : [{
             gatewayScope: 'messages:create',
             modelAliases: ['dream-balanced'],
             rpmLimit: 30,
             dailyTokenLimit: 200_000,
             storageBytes: 10_737_418_240,
           }],
-          allowance: allowance(),
+          allowance: paidCreate ? null : allowance(),
           asOf: '2026-08-09T10:05:00Z',
         },
         meta: { requestId: `req_context_${contextReads}` },
@@ -123,8 +146,8 @@ async function installProductMocks(page: Page) {
               dailyTokenLimit: 400_000,
               storageBytes: 21_474_836_480,
             }],
-            eligibility: { eligible: true, reasonCode: null, appliesAt: '2026-09-09T10:00:00Z' },
-            availableActions: ['upgrade'],
+            eligibility: { eligible: true, reasonCode: null, appliesAt: paidCreate ? '2026-08-09T10:05:00Z' : '2026-09-09T10:00:00Z' },
+            availableActions: [paidCreate ? 'create' : 'upgrade'],
           },
           {
             ...planSummary('pv_archive', 'Archive', 1, 500_000),
@@ -229,19 +252,21 @@ async function installProductMocks(page: Page) {
             previewId: 'preview_abcdefghijklmnopqrstuv',
             digest: 'sha256:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ',
             expiresAt: '2026-08-09T10:10:00Z',
-            expectedVersion: 7,
-            current: planSummary(),
-            target: planSummary('pv_studio', 'Studio', 2, 2_000_000),
-            appliesAt: '2026-09-09T10:00:00Z',
+            expectedVersion: paidCreate ? null : 7,
+            current: paidCreate ? null : planSummary(),
+            target: paidRenewal
+              ? planSummary()
+              : planSummary('pv_studio', 'Studio', 2, 2_000_000),
+            appliesAt: paidCreate ? '2026-08-09T10:05:00Z' : '2026-09-09T10:00:00Z',
             allowanceImpact: {
               unit: 'tokens',
-              currentPeriodTokens: 1_000_000,
-              nextPeriodTokens: 2_000_000,
-              currentPeriodChanges: false,
+              currentPeriodTokens: paidCreate ? 0 : 1_000_000,
+              nextPeriodTokens: paidRenewal ? 1_000_000 : 2_000_000,
+              currentPeriodChanges: paidCreate,
             },
             entitlementImpact: {
-              currentModelAliases: ['dream-balanced'],
-              targetModelAliases: ['dream-balanced', 'dream-long'],
+              currentModelAliases: paidCreate ? [] : ['dream-balanced'],
+              targetModelAliases: paidRenewal ? ['dream-balanced'] : ['dream-balanced', 'dream-long'],
             },
             gatewayImpact: { callableAfterExecute: true },
             warnings: [],
@@ -282,16 +307,29 @@ async function installProductMocks(page: Page) {
       });
       return;
     }
+    if (url.pathname === '/api/story-workspace/subscription/payment-intents' && request.method() === 'POST') {
+      payments.push({
+        body: request.postDataJSON() as Record<string, unknown>,
+        idempotencyKey: request.headers()['idempotency-key'] ?? null,
+      });
+      await fulfill(route, paymentIntent, 201);
+      return;
+    }
+    if (url.pathname === `/api/story-workspace/subscription/payment-intents/${paymentIntent.data.id}`) {
+      await fulfill(route, paymentIntent);
+      return;
+    }
     await fulfill(route, {});
   });
 
   return {
     executed,
+    payments,
     contextReads: () => contextReads,
   };
 }
 
-async function preparePage(page: Page) {
+async function preparePage(page: Page, mode: SubscriptionMockMode = 'active') {
   const diagnostics: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') diagnostics.push(message.text());
@@ -307,7 +345,7 @@ async function preparePage(page: Page) {
     localStorage.setItem('auth_token', 'subscription-e2e-token');
     localStorage.setItem('migration_completed', 'true');
   });
-  const product = await installProductMocks(page);
+  const product = await installProductMocks(page, mode);
   await page.route(`${WEB_BASE}/@vite/client`, async (route) => {
     await route.fulfill({ status: 200, contentType: 'text/javascript', body: VITE_CLIENT_WITHOUT_HMR });
   });
@@ -383,5 +421,61 @@ test('390×844 remains single-column, overflow-free, and restores focus after Es
     path: testInfo.outputPath('subscription-mobile-390x844.png'),
     fullPage: true,
   });
+  expect(diagnostics).toEqual([]);
+});
+
+test('paid monthly create waits for a verified webhook and never fakes subscription activation', async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const { diagnostics, product } = await preparePage(page, 'paid-create');
+
+  await expect(page.getByText('尚未开通', { exact: true })).toBeVisible();
+  await expect(page.getByText('当前没有订阅', { exact: true })).toBeVisible();
+  await page.getByRole('radio', { name: /Studio/ }).check();
+  await page.getByRole('button', { name: '开通月度订阅' }).click();
+  const dialog = page.getByRole('dialog', { name: '开通月度订阅' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('US$9', { exact: true })).toBeVisible();
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button', { name: '确认开通月度订阅' }).click();
+
+  await expect(page.getByText('订阅支付：requires_action', { exact: true })).toBeVisible();
+  await expect(page.getByText(/等待签名测试 Webhook；页面不会自行伪造支付成功/)).toBeVisible();
+  await expect(page.getByText('操作已应用', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('当前没有订阅', { exact: true })).toBeVisible();
+  expect(product.executed).toHaveLength(0);
+  expect(product.payments).toHaveLength(1);
+  expect(product.payments[0]?.body).toEqual({ planVersionId: 'pv_studio' });
+  expect(product.payments[0]?.idempotencyKey).toMatch(/^dream-subscription-/);
+
+  await page.getByRole('button', { name: '刷新支付状态' }).click();
+  await expect(page.getByText('订阅支付：requires_action', { exact: true })).toBeVisible();
+  await expect(page.getByText('当前没有订阅', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath('subscription-payment-awaiting-webhook-1440x1000.png'),
+    fullPage: true,
+  });
+  expect(diagnostics).toEqual([]);
+});
+
+test('paid monthly renewal keeps a past-due subscription blocked until the webhook succeeds', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  const { diagnostics, product } = await preparePage(page, 'paid-renewal');
+
+  await expect(page.getByText('已逾期', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '续订下一个月度周期' }).click();
+  const dialog = page.getByRole('dialog', { name: '续订下一个月度周期' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('US$9', { exact: true })).toBeVisible();
+  await dialog.getByRole('checkbox').check();
+  await dialog.getByRole('button', { name: '确认续订下一个月度周期' }).click();
+
+  await expect(page.getByText('订阅续费：requires_action', { exact: true })).toBeVisible();
+  await expect(page.getByText('已逾期', { exact: true })).toBeVisible();
+  await expect(page.getByText('操作已应用', { exact: true })).toHaveCount(0);
+  expect(product.executed).toHaveLength(0);
+  expect(product.payments).toHaveLength(1);
+  expect(product.payments[0]?.body).toEqual({ planVersionId: 'pv_creator' });
+  expect(product.payments[0]?.idempotencyKey).toMatch(/^dream-subscription-/);
   expect(diagnostics).toEqual([]);
 });

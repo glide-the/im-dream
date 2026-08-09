@@ -1,4 +1,4 @@
-"""Injectable, no-retry client for the five Admin Product API routes."""
+"""Injectable, no-retry client for the Admin Product and payment API routes."""
 
 from __future__ import annotations
 
@@ -19,6 +19,8 @@ from .models import (
     ContextEnvelope,
     ExecuteSubscriptionCommand,
     ModelCatalogEnvelope,
+    PaymentIntentCreate,
+    PaymentIntentEnvelope,
     PlansEnvelope,
     PlansQuery,
     PreviewEnvelope,
@@ -36,18 +38,10 @@ _PASSTHROUGH_ERROR_STATUSES = {400, 401, 402, 403, 404, 409, 429, 502, 503}
 # entry-for-entry aligned with app/lib/product/safety.ts in ink-admin-memory.
 # Token-domain names such as ``tokenBalance`` are intentionally permitted.
 _FORBIDDEN_RESPONSE_KEY_FRAGMENTS = (
-    "price",
-    "amount",
-    "currency",
-    "microusd",
     "cash",
     "monetary",
     "financial",
-    "payment",
     "topup",
-    "checkout",
-    "refund",
-    "reversal",
     "ledger",
     "effectivefrom",
     "effectiveto",
@@ -149,6 +143,18 @@ class AdminProductGateway(Protocol):
         idempotency_key: str | None,
     ) -> dict[str, Any]: ...
 
+    async def create_payment_intent(
+        self,
+        canonical_user_id: str,
+        payment: PaymentIntentCreate,
+        request_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]: ...
+
+    async def payment_intent(
+        self, canonical_user_id: str, payment_intent_id: str, request_id: str
+    ) -> dict[str, Any]: ...
+
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
@@ -245,7 +251,7 @@ class AdminProductClient:
             raise invalid_product_response() from None
         assert_safe_product_payload(payload)
 
-        if response.status_code != 200:
+        if response.status_code not in {200, 201}:
             self._raise_upstream_error(response.status_code, payload, request_id)
         try:
             parsed = response_model.model_validate(payload)
@@ -368,4 +374,34 @@ class AdminProductClient:
             response_model=CommandResultEnvelope if execute else PreviewEnvelope,
             body=command.model_dump(mode="json", exclude_none=True),
             idempotency_key=idempotency_key,
+        )
+
+    async def create_payment_intent(
+        self,
+        canonical_user_id: str,
+        payment: PaymentIntentCreate,
+        request_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        return await self._request(
+            method="POST",
+            path="/api/product/v1/me/payment-intents",
+            canonical_user_id=canonical_user_id,
+            scope="product:write",
+            request_id=request_id,
+            response_model=PaymentIntentEnvelope,
+            body=payment.model_dump(mode="json"),
+            idempotency_key=idempotency_key,
+        )
+
+    async def payment_intent(
+        self, canonical_user_id: str, payment_intent_id: str, request_id: str
+    ) -> dict[str, Any]:
+        return await self._request(
+            method="GET",
+            path=f"/api/product/v1/me/payment-intents/{payment_intent_id}",
+            canonical_user_id=canonical_user_id,
+            scope="product:read",
+            request_id=request_id,
+            response_model=PaymentIntentEnvelope,
         )

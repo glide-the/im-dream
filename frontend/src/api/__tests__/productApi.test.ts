@@ -34,6 +34,8 @@ function contextEnvelope() {
         version: 4,
         billingCycle: 'monthly',
         monthlyAllowanceTokens: 1_000_000,
+        monthlyPriceMicrousd: 9_000_000,
+        currency: 'USD',
       },
       entitlements: [{
         gatewayScope: 'messages:create',
@@ -63,13 +65,14 @@ function jsonResponse(value: unknown, status = 200): Response {
   });
 }
 
-test('the browser product boundary contains exactly the five approved same-origin routes', () => {
+test('the browser product boundary contains exactly the six approved same-origin routes', () => {
   expect(Object.values(PRODUCT_BFF_ENDPOINTS)).toEqual([
     '/api/story-workspace/subscription/context',
     '/api/story-workspace/subscription/plans',
     '/api/story-workspace/subscription/commands',
     '/api/story-workspace/usage',
     '/api/story-workspace/models',
+    '/api/story-workspace/subscription/payment-intents',
   ]);
 });
 
@@ -90,10 +93,27 @@ test('context parsing preserves server Token facts and authenticated request beh
   expect(new Headers(calls[0]?.init?.headers).get('authorization')).toBe('Bearer session-token');
 });
 
+test('context parsing preserves the supported past-due renewal state', async () => {
+  const payload = contextEnvelope();
+  payload.data.subscription.status = 'past_due';
+  payload.data.subscription.allowedActions = ['renew'];
+
+  const result = await fetchProductSubscriptionContext({
+    token: null,
+    resolveUrl: (path) => path,
+    fetchImpl: (async () => jsonResponse(payload)) as typeof fetch,
+  });
+
+  expect(result.data.subscription).toMatchObject({
+    status: 'past_due',
+    allowedActions: ['renew'],
+  });
+});
+
 test('strict parsing rejects unknown nested fields, unsafe integers, and broken conservation', async () => {
   for (const mutate of [
     (payload: ReturnType<typeof contextEnvelope>) => {
-      Object.assign(payload.data.planVersion!, { currency: 'USD' });
+      Object.assign(payload.data.planVersion!, { providerRoute: 'forbidden' });
     },
     (payload: ReturnType<typeof contextEnvelope>) => {
       payload.data.allowance!.granted = Number.MAX_SAFE_INTEGER + 1;

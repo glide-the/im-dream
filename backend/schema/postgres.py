@@ -245,7 +245,7 @@ def _translate_trigger_condition(condition: str) -> str:
         r"\(NEW\.source_message_id\s+IS\s+NOT\s+NULL\)\s*\+\s*"
         r"\(NEW\.source_message_time\s+IS\s+NOT\s+NULL\)\s*\)\s*"
         r"NOT\s+IN\s*\(0,\s*3\)",
-        "num_nonnull(NEW.source_voice_thread_id, NEW.source_message_id, "
+        "num_nonnulls(NEW.source_voice_thread_id, NEW.source_message_id, "
         "NEW.source_message_time) NOT IN (0, 3)",
         result,
         flags=re.IGNORECASE | re.DOTALL,

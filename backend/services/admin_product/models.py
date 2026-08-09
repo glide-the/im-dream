@@ -177,6 +177,8 @@ class PlanSummary(StrictModel):
     version: NonNegativeInteger
     billingCycle: Literal["monthly"]
     monthlyAllowanceTokens: NonNegativeInteger
+    monthlyPriceMicrousd: NonNegativeInteger
+    currency: Literal["USD"]
 
 
 class PlanEligibility(StrictModel):
@@ -216,6 +218,7 @@ class Subscription(StrictModel):
     status: Literal[
         "trial",
         "active",
+        "past_due",
         "paused",
         "cancel_at_period_end",
         "cancelled",
@@ -415,6 +418,56 @@ class CommandResult(StrictModel):
     idempotentReplay: bool
 
 
+class PaymentIntentCreate(StrictModel):
+    planVersionId: TargetPlanVersionId
+
+
+class PaymentNextActionNone(StrictModel):
+    type: Literal["none"]
+
+
+class PaymentNextActionTestWebhook(StrictModel):
+    type: Literal["test_webhook"]
+
+
+class PaymentNextActionRedirect(StrictModel):
+    type: Literal["redirect"]
+    url: Annotated[str, StringConstraints(min_length=8, max_length=2_048)]
+
+
+PaymentNextAction = Annotated[
+    Union[
+        PaymentNextActionNone,
+        PaymentNextActionTestWebhook,
+        PaymentNextActionRedirect,
+    ],
+    Field(discriminator="type"),
+]
+
+
+class PaymentIntent(StrictModel):
+    id: Annotated[str, Field(pattern=r"^pay_[a-f0-9]{32}$")]
+    planVersionId: SafeIdentifier
+    subscriptionId: SafeIdentifier | None
+    operation: Literal["initial_activation", "renewal"]
+    amountMicrousd: PositiveInteger
+    currency: Literal["USD"]
+    status: Literal[
+        "creating",
+        "requires_action",
+        "processing",
+        "succeeded",
+        "failed",
+        "cancelled",
+        "refunded",
+        "reversed",
+    ]
+    nextAction: PaymentNextAction
+    failureCode: SafeIdentifier | None
+    createdAt: IsoTimestamp
+    updatedAt: IsoTimestamp
+
+
 class RequestMeta(StrictModel):
     requestId: SafeIdentifier
 
@@ -452,6 +505,11 @@ class PreviewEnvelope(StrictModel):
 
 class CommandResultEnvelope(StrictModel):
     data: CommandResult
+    meta: RequestMeta
+
+
+class PaymentIntentEnvelope(StrictModel):
+    data: PaymentIntent
     meta: RequestMeta
 
 

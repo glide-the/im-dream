@@ -5,6 +5,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ProductApiError,
+  createProductPaymentIntent,
+  fetchProductPaymentIntent,
   fetchProductModelCatalog,
   fetchProductPlans,
   fetchProductSubscriptionContext,
@@ -14,6 +16,7 @@ import {
   type CommandResultEnvelope,
   type ExecuteProductCommand,
   type ModelCatalogEnvelope,
+  type PaymentIntentEnvelope,
   type PlansEnvelope,
   type PreviewProductCommand,
   type ProductAction,
@@ -39,6 +42,8 @@ export interface StoryWorkspaceSubscriptionApi {
   usage: (input: { page: number; pageSize: number }, options?: ProductRequestOptions) => Promise<UsageEnvelope>;
   models: (options?: ProductRequestOptions) => Promise<ModelCatalogEnvelope>;
   command: typeof submitProductSubscriptionCommand;
+  createPayment: typeof createProductPaymentIntent;
+  payment: typeof fetchProductPaymentIntent;
 }
 
 const DEFAULT_API: StoryWorkspaceSubscriptionApi = {
@@ -47,6 +52,8 @@ const DEFAULT_API: StoryWorkspaceSubscriptionApi = {
   usage: fetchProductUsage,
   models: fetchProductModelCatalog,
   command: submitProductSubscriptionCommand,
+  createPayment: createProductPaymentIntent,
+  payment: fetchProductPaymentIntent,
 };
 
 export interface StoryWorkspaceSubscriptionCommandState {
@@ -56,6 +63,7 @@ export interface StoryWorkspaceSubscriptionCommandState {
   isPreviewing: boolean;
   isExecuting: boolean;
   error: ProductApiError | null;
+  paymentIntent: PaymentIntentEnvelope | null;
 }
 
 export interface UseStoryWorkspaceSubscriptionOptions {
@@ -134,6 +142,7 @@ export function useStoryWorkspaceSubscription(
     isPreviewing: false,
     isExecuting: false,
     error: null,
+    paymentIntent: null,
   });
   const idempotencyKeyRef = useRef<string | null>(null);
   const hasLoadedRef = useRef(false);
@@ -198,36 +207,39 @@ export function useStoryWorkspaceSubscription(
       return;
     }
 
-    setCommandState({
+    setCommandState((current) => ({
       preview: null,
       result: null,
       targetPlanVersionId,
       isPreviewing: true,
       isExecuting: false,
       error: null,
-    });
+      paymentIntent: current.paymentIntent,
+    }));
     try {
       const preview = await api.command(command);
       idempotencyKeyRef.current = newProductCommandIdempotencyKey();
-      setCommandState({
+      setCommandState((current) => ({
         preview,
         result: null,
         targetPlanVersionId,
         isPreviewing: false,
         isExecuting: false,
         error: null,
-      });
+        paymentIntent: current.paymentIntent,
+      }));
       setAnnouncement(`${action} 影响预览已就绪。`);
     } catch (cause) {
       const nextError = normalizeError(cause);
-      setCommandState({
+      setCommandState((current) => ({
         preview: null,
         result: null,
         targetPlanVersionId,
         isPreviewing: false,
         isExecuting: false,
         error: nextError,
-      });
+        paymentIntent: current.paymentIntent,
+      }));
       setAnnouncement(`操作预览失败：${nextError.code}。`);
     }
   }, [api, data]);
@@ -247,16 +259,40 @@ export function useStoryWorkspaceSubscription(
     };
     setCommandState((current) => ({ ...current, isExecuting: true, error: null }));
     try {
+      const paymentPlan = preview.data.target ?? preview.data.current;
+      if (
+        (preview.data.action === 'create' || preview.data.action === 'renew')
+        && (paymentPlan?.monthlyPriceMicrousd ?? 0) > 0
+        && paymentPlan?.planVersionId
+      ) {
+        const paymentIntent = await api.createPayment(
+          { planVersionId: paymentPlan.planVersionId },
+          requestOptions,
+        );
+        idempotencyKeyRef.current = null;
+        setCommandState({
+          preview: null,
+          result: null,
+          paymentIntent,
+          targetPlanVersionId: null,
+          isPreviewing: false,
+          isExecuting: false,
+          error: null,
+        });
+        setAnnouncement('支付请求已创建；订阅将在服务端确认付款后生效。');
+        return;
+      }
       const result = await api.command(command, requestOptions);
       idempotencyKeyRef.current = null;
-      setCommandState({
+      setCommandState((current) => ({
         preview: null,
         result,
         targetPlanVersionId: null,
         isPreviewing: false,
         isExecuting: false,
         error: null,
-      });
+        paymentIntent: current.paymentIntent,
+      }));
       setAnnouncement(`订阅操作已${result.data.outcome === 'scheduled' ? '安排' : '应用'}。`);
       setRefreshVersion((version) => version + 1);
     } catch (cause) {
@@ -267,6 +303,29 @@ export function useStoryWorkspaceSubscription(
     }
   }, [api, commandState.preview, commandState.targetPlanVersionId]);
 
+  const refreshPaymentIntent = useCallback(async () => {
+    const current = commandState.paymentIntent;
+    if (!current) return;
+    setCommandState((state) => ({ ...state, isExecuting: true, error: null }));
+    try {
+      const paymentIntent = await api.payment(current.data.id);
+      setCommandState((state) => ({
+        ...state,
+        paymentIntent,
+        isExecuting: false,
+        error: null,
+      }));
+      setAnnouncement(`支付状态已更新：${paymentIntent.data.status}。`);
+      if (paymentIntent.data.status === 'succeeded') {
+        setRefreshVersion((version) => version + 1);
+      }
+    } catch (cause) {
+      const nextError = normalizeError(cause);
+      setCommandState((state) => ({ ...state, isExecuting: false, error: nextError }));
+      setAnnouncement(`支付状态读取失败：${nextError.code}。`);
+    }
+  }, [api, commandState.paymentIntent]);
+
   const closeCommand = useCallback(() => {
     idempotencyKeyRef.current = null;
     setCommandState((current) => ({
@@ -276,11 +335,16 @@ export function useStoryWorkspaceSubscription(
       isPreviewing: false,
       isExecuting: false,
       error: null,
+      paymentIntent: current.paymentIntent,
     }));
   }, []);
 
   const clearCommandResult = useCallback(() => {
     setCommandState((current) => ({ ...current, result: null }));
+  }, []);
+
+  const clearPaymentIntent = useCallback(() => {
+    setCommandState((current) => ({ ...current, paymentIntent: null }));
   }, []);
 
   return {
@@ -299,5 +363,7 @@ export function useStoryWorkspaceSubscription(
     executeCommand,
     closeCommand,
     clearCommandResult,
+    refreshPaymentIntent,
+    clearPaymentIntent,
   };
 }

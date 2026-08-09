@@ -16,6 +16,7 @@ from .errors import ProductBffError, configuration_unavailable
 from .identity import PostgresCanonicalUserRepository
 from .models import (
     ExecuteSubscriptionCommand,
+    PaymentIntentCreate,
     PlansQuery,
     PreviewSubscriptionCommand,
     UsageQuery,
@@ -111,6 +112,24 @@ class LazyProductBffService:
             session_subject, command, request_id, idempotency_key
         )
 
+    async def create_payment_intent(
+        self,
+        session_subject: str,
+        payment: PaymentIntentCreate,
+        request_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        return await (await self._delegate()).create_payment_intent(
+            session_subject, payment, request_id, idempotency_key
+        )
+
+    async def payment_intent(
+        self, session_subject: str, payment_intent_id: str, request_id: str
+    ) -> dict[str, Any]:
+        return await (await self._delegate()).payment_intent(
+            session_subject, payment_intent_id, request_id
+        )
+
     async def aclose(self) -> None:
         async with self._lock:
             client, pool = self._client, self._pool
@@ -135,4 +154,3 @@ def get_default_product_bff_service() -> ProductBff:
 
 async def close_default_product_bff_service() -> None:
     await _default_service.aclose()
-

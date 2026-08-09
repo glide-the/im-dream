@@ -24,10 +24,12 @@ from .catalog import (
     catalog_snapshot,
 )
 from .config import (
+    DATABASE_ENV_FILE_ENV,
     DEFAULT_TEST_DATABASE_MARKERS,
     PostgresTarget,
     TestDatabaseSafetyError,
     TestDatabaseTarget,
+    load_database_url_from_env_file,
     parse_postgres_target,
     require_test_database_target,
     require_test_database_url,
@@ -77,6 +79,7 @@ __all__ = [
     "CheckConstraintError",
     "CheckViolationError",
     "ConnectionPool",
+    "DATABASE_ENV_FILE_ENV",
     "DEFAULT_TEST_DATABASE_MARKERS",
     "DeadlockDetectedError",
     "DeadlockError",
@@ -127,6 +130,7 @@ __all__ = [
     "check_postgres_health",
     "health_check",
     "is_postgres_error",
+    "load_database_url_from_env_file",
     "map_postgres_error",
     "parse_postgres_target",
     "probe_postgres_health",

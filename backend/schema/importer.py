@@ -41,6 +41,13 @@ TARGET_SCHEMA: Final = "public"
 APPROVED_EXTERNAL_TRIGGERS: Final = {
     ("users", "users_sync_billing_identity"),
 }
+# The long-lived SQLite source evolved through ALTER TABLE. Physical column
+# order is therefore not a semantic contract: every migration query names its
+# columns explicitly. One historical column also predates its builder default;
+# the snapshot is read-only, so either observed default is safe for migration.
+_APPROVED_SOURCE_DEFAULT_VARIANTS: Final = {
+    ("main", "users", "updated_at"): frozenset({None, "CURRENT_TIMESTAMP"}),
+}
 _IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 _INTEGER_MIN = -(2**31)
 _INTEGER_MAX = 2**31 - 1
@@ -131,6 +138,85 @@ def _qualified(schema: str, table: str) -> str:
 
 def _normalize_sql(value: object) -> str:
     return " ".join(str(value or "").strip().split())
+
+
+def _normalize_default(value: object) -> str | None:
+    if value is None:
+        return None
+    return _normalize_sql(value)
+
+
+def _source_columns_compatible(
+    *,
+    source: str,
+    table_name: str,
+    actual_columns: Sequence[tuple[int, str, str, bool, object, int, int]],
+    expected_columns: Sequence[tuple[int, str, str, bool, object, int, int]],
+) -> bool:
+    """Compare source columns by name while retaining every semantic guard."""
+
+    actual_by_name = {column[1]: column for column in actual_columns}
+    expected_by_name = {column[1]: column for column in expected_columns}
+    if len(actual_by_name) != len(actual_columns) or len(expected_by_name) != len(
+        expected_columns
+    ):
+        return False
+    if set(actual_by_name) != set(expected_by_name):
+        return False
+
+    for name in sorted(expected_by_name):
+        actual = actual_by_name[name]
+        expected = expected_by_name[name]
+        # cid/ordinal is intentionally excluded. Named SELECTs make SQLite's
+        # append order irrelevant, while type/nullability/PK/hidden remain
+        # strict migration contracts.
+        if (
+            str(actual[2]).upper(),
+            bool(actual[3]),
+            int(actual[5]),
+            int(actual[6]),
+        ) != (
+            str(expected[2]).upper(),
+            bool(expected[3]),
+            int(expected[5]),
+            int(expected[6]),
+        ):
+            return False
+        actual_default = _normalize_default(actual[4])
+        expected_default = _normalize_default(expected[4])
+        if actual_default == expected_default:
+            continue
+        approved = _APPROVED_SOURCE_DEFAULT_VARIANTS.get((source, table_name, name))
+        if approved is None or {actual_default, expected_default} - approved:
+            return False
+    return True
+
+
+def _foreign_key_signature(foreign_key: Mapping[str, Any]) -> tuple[object, ...]:
+    return (
+        tuple(str(column) for column in foreign_key["columns"]),
+        str(foreign_key["target_table"]),
+        tuple(str(column) for column in foreign_key["target_columns"]),
+        str(foreign_key["on_update"]).upper(),
+        str(foreign_key["on_delete"]).upper(),
+        str(foreign_key["match"]).upper(),
+    )
+
+
+def _source_foreign_keys_compatible(
+    actual_foreign_keys: Sequence[Mapping[str, Any]],
+    expected_foreign_keys: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Allow target-only FKs to be present or absent in legacy SQLite."""
+
+    actual = {_foreign_key_signature(item) for item in actual_foreign_keys}
+    required = {
+        _foreign_key_signature(item)
+        for item in expected_foreign_keys
+        if not bool(item.get("target_only"))
+    }
+    allowed = {_foreign_key_signature(item) for item in expected_foreign_keys}
+    return len(actual) == len(actual_foreign_keys) and required <= actual <= allowed
 
 
 def _sha256_file(path: Path) -> str:
@@ -379,16 +465,20 @@ def _validate_source_schema(
             )
             for column in table["columns"]
         ]
-        if actual_columns != expected_columns:
+        if not _source_columns_compatible(
+            source=source,
+            table_name=name,
+            actual_columns=actual_columns,
+            expected_columns=expected_columns,
+        ):
             raise LegacyMigrationError("SOURCE_COLUMN_SCHEMA_MISMATCH", phase="manifest")
 
         actual_foreign_keys = _sqlite_foreign_keys(connection, name)
-        expected_foreign_keys = [
-            dict(foreign_key)
-            for foreign_key in table["foreign_keys"]
-            if not bool(foreign_key.get("target_only"))
-        ]
-        if actual_foreign_keys != expected_foreign_keys:
+        expected_foreign_keys = [dict(foreign_key) for foreign_key in table["foreign_keys"]]
+        if not _source_foreign_keys_compatible(
+            actual_foreign_keys,
+            expected_foreign_keys,
+        ):
             raise LegacyMigrationError("SOURCE_FOREIGN_KEY_SCHEMA_MISMATCH", phase="manifest")
 
         expected_checks = [_normalize_sql(check) for check in table["checks"]]
@@ -1303,8 +1393,28 @@ def _insert_from_stage(
     try:
         cursor = connection.execute(statement)
         return int(cursor.rowcount)
-    except Exception:
-        raise LegacyMigrationError("TARGET_IMPORT_FAILED", phase="import") from None
+    except Exception as error:
+        # Schema identifiers and SQLSTATE are safe operational evidence. Never
+        # expose the driver message/detail because either can contain row data.
+        details: dict[str, Any] = {"table": name}
+        sqlstate = getattr(error, "sqlstate", None)
+        if isinstance(sqlstate, str) and re.fullmatch(r"[0-9A-Z]{5}", sqlstate):
+            details["sqlstate"] = sqlstate
+        diagnostic = getattr(error, "diag", None)
+        if diagnostic is not None:
+            for attribute, key in (
+                ("constraint_name", "constraint"),
+                ("column_name", "column"),
+                ("table_name", "reportedTable"),
+            ):
+                value = getattr(diagnostic, attribute, None)
+                if isinstance(value, str) and _IDENTIFIER.fullmatch(value):
+                    details[key] = value
+        raise LegacyMigrationError(
+            "TARGET_IMPORT_FAILED",
+            phase="import",
+            details=details,
+        ) from None
 
 
 def _validate_target_conflicts(
@@ -1659,18 +1769,48 @@ def run_legacy_migration(
     expected_notion_filename: str = DEFAULT_NOTION_FILENAME,
     expected_target_database: str | None = None,
     approve_baseline_inserts: bool = False,
+    expected_target_host: str | None = None,
+    expected_target_port: int | None = None,
+    expected_target_owner: str | None = None,
+    production_approval: str | None = None,
     batch_size: int = 1_000,
     run_id: UUID | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """Run source validation, target rehearsal, or explicit isolated import."""
 
-    if mode not in {"source-dry-run", "target-dry-run", "execute"}:
+    supported_modes = {
+        "source-dry-run",
+        "target-dry-run",
+        "execute",
+        "production-execute",
+    }
+    commit_modes = {"execute", "production-execute"}
+    target_modes = {"target-dry-run", *commit_modes}
+    if mode not in supported_modes:
         raise LegacyMigrationError("MODE_INVALID", phase="configuration")
-    if mode != "execute" and approve_baseline_inserts:
+    if mode not in commit_modes and approve_baseline_inserts:
         raise LegacyMigrationError("BASELINE_APPROVAL_MODE_INVALID", phase="configuration")
-    if mode in {"target-dry-run", "execute"} and not expected_target_database:
+    if mode in target_modes and not expected_target_database:
         raise LegacyMigrationError("EXPECTED_TARGET_DATABASE_REQUIRED", phase="configuration")
+    if mode == "production-execute":
+        expected_approval = f"MIGRATE-43+5-TO:{expected_target_database}"
+        if production_approval != expected_approval:
+            raise LegacyMigrationError(
+                "PRODUCTION_TARGET_APPROVAL_REQUIRED",
+                phase="configuration",
+            )
+        if (
+            not expected_target_host
+            or expected_target_port is None
+            or expected_target_port < 1
+            or expected_target_port > 65535
+            or not expected_target_owner
+        ):
+            raise LegacyMigrationError(
+                "PRODUCTION_TARGET_IDENTITY_REQUIRED",
+                phase="configuration",
+            )
     migration_run_id = run_id or uuid4()
     if not isinstance(migration_run_id, UUID):
         raise LegacyMigrationError("RUN_ID_INVALID", phase="configuration")
@@ -1690,19 +1830,43 @@ def run_legacy_migration(
             "validated": False,
             "transaction": "not_started",
         }
-        if mode in {"target-dry-run", "execute"}:
-            from persistence.config import require_test_database_url
+        if mode in target_modes:
+            from persistence.config import (
+                DATABASE_URL_ENV,
+                parse_postgres_target,
+                require_test_database_url,
+            )
 
             values = os.environ if environ is None else environ
-            try:
-                dsn = require_test_database_url(
-                    expected_target_database,
-                    environ=values,
-                )
-            except Exception:
-                raise LegacyMigrationError(
-                    "TARGET_SAFETY_CHECK_FAILED", phase="configuration"
-                ) from None
+            if mode == "production-execute":
+                try:
+                    target = parse_postgres_target(values.get(DATABASE_URL_ENV, ""))
+                except Exception:
+                    raise LegacyMigrationError(
+                        "PRODUCTION_TARGET_SAFETY_CHECK_FAILED",
+                        phase="configuration",
+                    ) from None
+                if (
+                    target.database_name != expected_target_database
+                    or (target.host or "").casefold()
+                    != str(expected_target_host).casefold()
+                    or target.port != expected_target_port
+                ):
+                    raise LegacyMigrationError(
+                        "PRODUCTION_TARGET_SAFETY_CHECK_FAILED",
+                        phase="configuration",
+                    )
+                dsn = target.dsn
+            else:
+                try:
+                    dsn = require_test_database_url(
+                        expected_target_database,
+                        environ=values,
+                    )
+                except Exception:
+                    raise LegacyMigrationError(
+                        "TARGET_SAFETY_CHECK_FAILED", phase="configuration"
+                    ) from None
             try:
                 import psycopg
 
@@ -1714,6 +1878,30 @@ def run_legacy_migration(
             except Exception:
                 raise LegacyMigrationError("TARGET_CONNECTION_FAILED", phase="target") from None
             try:
+                if mode == "production-execute":
+                    identity = connection.execute(
+                        "SELECT current_database(), current_user, "
+                        "pg_catalog.pg_get_userbyid(datdba) "
+                        "FROM pg_catalog.pg_database WHERE datname=current_database()"
+                    ).fetchone()
+                    identity_values = (
+                        tuple(identity.values())
+                        if isinstance(identity, Mapping)
+                        else tuple(identity or ())
+                    )
+                    if identity_values != (
+                        expected_target_database,
+                        expected_target_owner,
+                        expected_target_owner,
+                    ):
+                        raise LegacyMigrationError(
+                            "PRODUCTION_TARGET_IDENTITY_MISMATCH",
+                            phase="configuration",
+                        )
+                    # The read-only identity query starts psycopg's implicit
+                    # transaction. End it before migrate_to_postgres opens its
+                    # required SERIALIZABLE transaction.
+                    connection.rollback()
                 target_receipt, reports = migrate_to_postgres(
                     connection,
                     snapshots,
@@ -1721,7 +1909,7 @@ def run_legacy_migration(
                     reports,
                     run_id=migration_run_id,
                     batch_size=batch_size,
-                    commit=mode == "execute",
+                    commit=mode in commit_modes,
                     approve_baseline_inserts=approve_baseline_inserts,
                 )
                 target_receipt["validated"] = True
@@ -1733,7 +1921,7 @@ def run_legacy_migration(
             "receiptVersion": 1,
             "runId": str(migration_run_id),
             "mode": mode,
-            "status": "committed" if mode == "execute" else "validated",
+            "status": "committed" if mode in commit_modes else "validated",
             "manifestSha256": str(manifest["catalog_sha256"]),
             "source": _source_receipt(
                 snapshots, schema_digests, reports
@@ -1746,7 +1934,7 @@ def run_legacy_migration(
                 "staging": "passed" if mode != "source-dry-run" else "not_run",
                 "import": (
                     "committed"
-                    if mode == "execute"
+                    if mode in commit_modes
                     else "rolled_back"
                     if mode == "target-dry-run"
                     else "not_run"

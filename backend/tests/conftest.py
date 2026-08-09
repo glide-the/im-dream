@@ -9,11 +9,17 @@ SQLite imports, or a fallback connection path into production modules.
 
 from __future__ import annotations
 
+import os
 import re
 import sqlite3
 from typing import Any
 
 from psycopg import IntegrityError as PostgresIntegrityError
+
+
+# Never let importing backend/server.py inherit the developer's runtime DSN.
+# Tests that need PostgreSQL must opt in through validated TEST_DATABASE_URL.
+os.environ["INK_LOAD_DATABASE_URL_FROM_ENV_FILE"] = "0"
 
 
 _ORIGINAL_CONNECT = sqlite3.connect

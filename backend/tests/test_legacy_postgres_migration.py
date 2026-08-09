@@ -169,6 +169,41 @@ def test_manifest_order_covers_all_43_plus_5_tables_and_respects_foreign_keys() 
                 assert positions[target] < positions[name]
 
 
+def test_live_source_column_order_and_approved_default_drift_are_compatible() -> None:
+    expected = [
+        (0, "id", "INTEGER", False, None, 1, 0),
+        (1, "created_at", "DATETIME", False, "CURRENT_TIMESTAMP", 0, 0),
+        (2, "updated_at", "DATETIME", False, "CURRENT_TIMESTAMP", 0, 0),
+    ]
+    actual = [
+        (0, "id", "INTEGER", False, None, 1, 0),
+        (1, "updated_at", "DATETIME", False, None, 0, 0),
+        (2, "created_at", "DATETIME", False, "CURRENT_TIMESTAMP", 0, 0),
+    ]
+    assert legacy_importer._source_columns_compatible(
+        source="main",
+        table_name="users",
+        actual_columns=actual,
+        expected_columns=expected,
+    )
+
+
+def test_unapproved_source_default_or_semantic_column_drift_is_rejected() -> None:
+    expected = [(0, "created_at", "DATETIME", False, "CURRENT_TIMESTAMP", 0, 0)]
+    assert not legacy_importer._source_columns_compatible(
+        source="main",
+        table_name="user_sessions",
+        actual_columns=[(0, "created_at", "DATETIME", False, None, 0, 0)],
+        expected_columns=expected,
+    )
+    assert not legacy_importer._source_columns_compatible(
+        source="main",
+        table_name="users",
+        actual_columns=[(0, "created_at", "TEXT", False, "CURRENT_TIMESTAMP", 0, 0)],
+        expected_columns=expected,
+    )
+
+
 def test_readonly_online_backup_and_source_validation_cover_all_tables(
     tmp_path: Path,
 ) -> None:
@@ -426,6 +461,43 @@ def test_target_modes_require_exact_database_and_isolation_safety(
             environ={},
         )
     assert captured.value.code == "TARGET_SAFETY_CHECK_FAILED"
+
+
+def test_production_execute_requires_explicit_target_approval_and_identity(
+    tmp_path: Path,
+) -> None:
+    main, notion = _legacy_pair(tmp_path, populated=False)
+    with pytest.raises(LegacyMigrationError) as captured:
+        run_legacy_migration(
+            **_snapshot_kwargs(main, notion),
+            mode="production-execute",
+            expected_target_database="ink-memory",
+            environ={"DATABASE_URL": "postgresql://localhost:5433/ink-memory"},
+        )
+    assert captured.value.code == "PRODUCTION_TARGET_APPROVAL_REQUIRED"
+
+    with pytest.raises(LegacyMigrationError) as captured:
+        run_legacy_migration(
+            **_snapshot_kwargs(main, notion),
+            mode="production-execute",
+            expected_target_database="ink-memory",
+            production_approval="MIGRATE-43+5-TO:ink-memory",
+            environ={"DATABASE_URL": "postgresql://localhost:5433/ink-memory"},
+        )
+    assert captured.value.code == "PRODUCTION_TARGET_IDENTITY_REQUIRED"
+
+    with pytest.raises(LegacyMigrationError) as captured:
+        run_legacy_migration(
+            **_snapshot_kwargs(main, notion),
+            mode="production-execute",
+            expected_target_database="ink-memory",
+            expected_target_host="localhost",
+            expected_target_port=5434,
+            expected_target_owner="ink_memory",
+            production_approval="MIGRATE-43+5-TO:ink-memory",
+            environ={"DATABASE_URL": "postgresql://localhost:5433/ink-memory"},
+        )
+    assert captured.value.code == "PRODUCTION_TARGET_SAFETY_CHECK_FAILED"
 
 
 def test_migration_sql_has_no_implicit_overwrite_or_destructive_target_statement() -> None:

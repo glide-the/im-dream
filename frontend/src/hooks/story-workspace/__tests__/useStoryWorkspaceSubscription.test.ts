@@ -31,6 +31,8 @@ function previewEnvelope(): CommandPreviewEnvelope {
         version: 4,
         billingCycle: 'monthly',
         monthlyAllowanceTokens: 1_000_000,
+        monthlyPriceMicrousd: 9_000_000,
+        currency: 'USD',
       },
       target: {
         planCode: 'studio',
@@ -39,6 +41,8 @@ function previewEnvelope(): CommandPreviewEnvelope {
         version: 5,
         billingCycle: 'monthly',
         monthlyAllowanceTokens: 2_000_000,
+        monthlyPriceMicrousd: 19_000_000,
+        currency: 'USD',
       },
       appliesAt: '2026-09-09T10:00:00Z',
       allowanceImpact: {

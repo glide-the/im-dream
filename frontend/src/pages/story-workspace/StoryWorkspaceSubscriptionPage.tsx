@@ -26,6 +26,7 @@ const ACTION_LABELS: Record<ProductAction, string> = {
 const STATUS_LABELS: Record<string, string> = {
   trial: '试用中',
   active: '使用中',
+  past_due: '已逾期',
   paused: '已暂停',
   cancel_at_period_end: '将于周期末取消',
   cancelled: '已取消',
@@ -37,6 +38,13 @@ const TARGET_ACTIONS = new Set<ProductAction>(['create', 'upgrade', 'downgrade']
 
 function formatInteger(value: number): string {
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value);
+}
+
+function formatMicroUsd(value: number): string {
+  const micros = BigInt(value);
+  const whole = micros / 1_000_000n;
+  const fraction = (micros % 1_000_000n).toString().padStart(6, '0').replace(/0+$/, '');
+  return `US$${whole.toString()}${fraction ? `.${fraction}` : ''}`;
 }
 
 function formatTimestamp(value: string | null | undefined): string {
@@ -222,7 +230,7 @@ function PlanRow({ plan, selected, onSelect }: {
       />
       <span className="story-workspace-subscription__plan-main">
         <span><strong>{plan.planName}</strong><small>v{plan.version} · 月度</small></span>
-        <b>{formatInteger(plan.monthlyAllowanceTokens)} Token / 月</b>
+        <b>{formatInteger(plan.monthlyAllowanceTokens)} Token / 月 · {plan.monthlyPriceMicrousd === 0 ? '免费' : formatMicroUsd(plan.monthlyPriceMicrousd)}</b>
       </span>
       <span id={`plan-${plan.planVersionId}-description`} className="story-workspace-subscription__plan-detail">
         {plan.description ? <span>{plan.description}</span> : null}
@@ -316,6 +324,7 @@ function CommandDialog({ preview, isExecuting, error, restoreFocus, onClose, onE
             <DefinitionItem label="目标版本" value={preview.data.target ? `${preview.data.target.planName} v${preview.data.target.version}` : '保持当前版本'} />
             <DefinitionItem label="当前周期 Token" value={preview.data.allowanceImpact.currentPeriodTokens === null ? '无' : `${formatInteger(preview.data.allowanceImpact.currentPeriodTokens)} Token`} />
             <DefinitionItem label="下周期 Token" value={preview.data.allowanceImpact.nextPeriodTokens === null ? '无' : `${formatInteger(preview.data.allowanceImpact.nextPeriodTokens)} Token`} />
+            <DefinitionItem label="目标月费" value={preview.data.target ? (preview.data.target.monthlyPriceMicrousd === 0 ? '免费' : formatMicroUsd(preview.data.target.monthlyPriceMicrousd)) : '保持当前版本'} />
           </dl>
           <section className="story-workspace-subscription__impact">
             <h3>模型权益变化</h3>
@@ -346,7 +355,7 @@ function CommandDialog({ preview, isExecuting, error, restoreFocus, onClose, onE
           </div>
           <label className="story-workspace-subscription__confirm">
             <input checked={confirmed} disabled={isExecuting || !preview.data.allowed} onChange={(event) => setConfirmed(event.target.checked)} type="checkbox" />
-            <span>我已核对应用时点、个人月度周期、Token 与模型权益影响。</span>
+            <span>我已核对应用时点、月费、个人月度周期、Token 与模型权益影响。</span>
           </label>
           <small className="story-workspace-subscription__receipt">预览有效至 {formatTimestamp(preview.data.expiresAt)} · 请求编号 {preview.meta.requestId}</small>
         </div>
@@ -456,6 +465,25 @@ export function StoryWorkspaceSubscriptionPage() {
         </section>
       ) : null}
 
+      {commandState.paymentIntent ? (
+        <section className="story-workspace-subscription__receipt-banner" role="status">
+          <div>
+            <strong>{commandState.paymentIntent.data.operation === 'renewal' ? '订阅续费' : '订阅支付'}：{commandState.paymentIntent.data.status}</strong>
+            <span>{formatMicroUsd(commandState.paymentIntent.data.amountMicrousd)} · 支付请求 {commandState.paymentIntent.data.id}</span>
+            {commandState.paymentIntent.data.nextAction.type === 'test_webhook' ? (
+              <small>仅隔离测试环境：等待签名测试 Webhook；页面不会自行伪造支付成功。</small>
+            ) : null}
+            {commandState.paymentIntent.data.nextAction.type === 'redirect' ? (
+              <a href={commandState.paymentIntent.data.nextAction.url} rel="noreferrer" target="_blank">前往安全支付页</a>
+            ) : null}
+          </div>
+          <button disabled={commandState.isExecuting} onClick={() => void subscription.refreshPaymentIntent()} type="button">
+            {commandState.isExecuting ? '正在确认…' : '刷新支付状态'}
+          </button>
+          <button onClick={subscription.clearPaymentIntent} type="button">关闭</button>
+        </section>
+      ) : null}
+
       <div className="story-workspace-subscription__summary-grid" id="subscription-current">
         <section aria-labelledby="current-subscription-title" className="story-workspace-subscription__panel is-current">
           <header className="story-workspace-subscription__panel-header">
@@ -467,6 +495,7 @@ export function StoryWorkspaceSubscriptionPage() {
               <div className="story-workspace-subscription__current-plan">
                 <strong>{context.planVersion.planName}</strong>
                 <span>v{context.planVersion.version} · 每月 {formatInteger(context.planVersion.monthlyAllowanceTokens)} Token</span>
+                <small>月费 {context.planVersion.monthlyPriceMicrousd === 0 ? '免费' : formatMicroUsd(context.planVersion.monthlyPriceMicrousd)}</small>
               </div>
               <dl className="story-workspace-subscription__metrics is-two">
                 <DefinitionItem label="周期开始" value={formatTimestamp(current.currentPeriodStart)} />

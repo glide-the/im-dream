@@ -2,9 +2,10 @@
 """Rehearse or execute the Dream 43 + 5 SQLite to PostgreSQL import.
 
 The default mode validates read-only SQLite Online Backup snapshots and does
-not connect to PostgreSQL.  ``--target-dry-run`` rehearses staging/import in an
-isolated PostgreSQL transaction and rolls it back.  ``--execute`` is the only
-commit mode and requires an exact, safety-validated ``TEST_DATABASE_URL``.
+not connect to PostgreSQL. ``--target-dry-run`` rehearses staging/import in an
+isolated PostgreSQL transaction and rolls it back. ``--execute`` commits only
+to a safety-validated ``TEST_DATABASE_URL``. ``--production-execute`` is a
+separate explicit cutover path that verifies DATABASE_URL name/host/port/owner.
 """
 
 from __future__ import annotations
@@ -62,7 +63,12 @@ def _parser() -> argparse.ArgumentParser:
     mode.add_argument(
         "--execute",
         action="store_true",
-        help="commit only after all 48 tables and validations pass",
+        help="commit to an isolated TEST_DATABASE_URL after all validations pass",
+    )
+    mode.add_argument(
+        "--production-execute",
+        action="store_true",
+        help="commit to DATABASE_URL only with complete explicit target identity",
     )
     parser.add_argument(
         "--expected-target-database",
@@ -72,6 +78,13 @@ def _parser() -> argparse.ArgumentParser:
         "--approve-baseline-inserts",
         action="store_true",
         help="with --execute, approve insertion of missing canonical baseline rows",
+    )
+    parser.add_argument("--expected-target-host")
+    parser.add_argument("--expected-target-port", type=int)
+    parser.add_argument("--expected-target-owner")
+    parser.add_argument(
+        "--production-approval",
+        help="must equal MIGRATE-43+5-TO:<expected database>",
     )
     parser.add_argument(
         "--batch-size",
@@ -88,6 +101,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _mode(arguments: argparse.Namespace) -> str:
+    if arguments.production_execute:
+        return "production-execute"
     if arguments.execute:
         return "execute"
     if arguments.target_dry_run:
@@ -118,6 +133,10 @@ def main(argv: list[str] | None = None) -> int:
             expected_notion_filename=arguments.expected_notion_filename,
             expected_target_database=arguments.expected_target_database,
             approve_baseline_inserts=arguments.approve_baseline_inserts,
+            expected_target_host=arguments.expected_target_host,
+            expected_target_port=arguments.expected_target_port,
+            expected_target_owner=arguments.expected_target_owner,
+            production_approval=arguments.production_approval,
             batch_size=arguments.batch_size,
             run_id=migration_run_id,
         )

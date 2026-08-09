@@ -10,6 +10,7 @@ from .errors import ProductBffError, dependency_unavailable, invalid_product_res
 from .identity import CanonicalUserLookup
 from .models import (
     ExecuteSubscriptionCommand,
+    PaymentIntentCreate,
     PlansQuery,
     PreviewSubscriptionCommand,
     UsageQuery,
@@ -43,6 +44,18 @@ class ProductBff(Protocol):
         command: PreviewSubscriptionCommand | ExecuteSubscriptionCommand,
         request_id: str,
         idempotency_key: str | None,
+    ) -> dict[str, Any]: ...
+
+    async def create_payment_intent(
+        self,
+        session_subject: str,
+        payment: PaymentIntentCreate,
+        request_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]: ...
+
+    async def payment_intent(
+        self, session_subject: str, payment_intent_id: str, request_id: str
     ) -> dict[str, Any]: ...
 
 
@@ -121,4 +134,24 @@ class ProductBffService:
         subject = await self._canonical_subject(session_subject)
         return await self._admin_product.subscription_command(
             subject, command, request_id, idempotency_key
+        )
+
+    async def create_payment_intent(
+        self,
+        session_subject: str,
+        payment: PaymentIntentCreate,
+        request_id: str,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        subject = await self._canonical_subject(session_subject)
+        return await self._admin_product.create_payment_intent(
+            subject, payment, request_id, idempotency_key
+        )
+
+    async def payment_intent(
+        self, session_subject: str, payment_intent_id: str, request_id: str
+    ) -> dict[str, Any]:
+        subject = await self._canonical_subject(session_subject)
+        return await self._admin_product.payment_intent(
+            subject, payment_intent_id, request_id
         )

@@ -12,6 +12,7 @@ export const PRODUCT_BFF_ENDPOINTS = {
   commands: '/api/story-workspace/subscription/commands',
   usage: '/api/story-workspace/usage',
   models: '/api/story-workspace/models',
+  paymentIntents: '/api/story-workspace/subscription/payment-intents',
 } as const;
 
 const MAX_SAFE_INTEGER = Number.MAX_SAFE_INTEGER;
@@ -50,6 +51,8 @@ const planSummarySchema = z.object({
   version: nonNegativeIntegerSchema,
   billingCycle: z.literal('monthly'),
   monthlyAllowanceTokens: nonNegativeIntegerSchema,
+  monthlyPriceMicrousd: nonNegativeIntegerSchema,
+  currency: z.literal('USD'),
 }).strict();
 
 const planEligibilitySchema = z.object({
@@ -92,6 +95,7 @@ const subscriptionSchema = z.object({
   status: z.enum([
     'trial',
     'active',
+    'past_due',
     'paused',
     'cancel_at_period_end',
     'cancelled',
@@ -281,6 +285,36 @@ export const commandResultEnvelopeSchema = z.object({
   meta: z.object({ requestId: safeIdentifierSchema }).strict(),
 }).strict();
 
+export const paymentIntentEnvelopeSchema = z.object({
+  data: z.object({
+    id: z.string().regex(/^pay_[a-f0-9]{32}$/),
+    planVersionId: safeIdentifierSchema,
+    subscriptionId: safeIdentifierSchema.nullable(),
+    operation: z.enum(['initial_activation', 'renewal']),
+    amountMicrousd: positiveIntegerSchema,
+    currency: z.literal('USD'),
+    status: z.enum([
+      'creating',
+      'requires_action',
+      'processing',
+      'succeeded',
+      'failed',
+      'cancelled',
+      'refunded',
+      'reversed',
+    ]),
+    nextAction: z.discriminatedUnion('type', [
+      z.object({ type: z.literal('none') }).strict(),
+      z.object({ type: z.literal('test_webhook') }).strict(),
+      z.object({ type: z.literal('redirect'), url: z.url().max(2_048) }).strict(),
+    ]),
+    failureCode: safeIdentifierSchema.nullable(),
+    createdAt: isoTimestampSchema,
+    updatedAt: isoTimestampSchema,
+  }).strict(),
+  meta: z.object({ requestId: safeIdentifierSchema }).strict(),
+}).strict();
+
 const productErrorDetailsSchema = z.object({
   field: safeTextSchema.nullable().optional(),
   issues: z.array(z.object({
@@ -327,6 +361,7 @@ export type UsageEnvelope = z.infer<typeof usageEnvelopeSchema>;
 export type ModelCatalogEnvelope = z.infer<typeof modelCatalogEnvelopeSchema>;
 export type CommandPreviewEnvelope = z.infer<typeof commandPreviewEnvelopeSchema>;
 export type CommandResultEnvelope = z.infer<typeof commandResultEnvelopeSchema>;
+export type PaymentIntentEnvelope = z.infer<typeof paymentIntentEnvelopeSchema>;
 export type ProductErrorDetails = z.infer<typeof productErrorDetailsSchema>;
 
 export interface PreviewProductCommand {
@@ -530,6 +565,43 @@ export function fetchProductModelCatalog(
   options: ProductRequestOptions = {},
 ): Promise<ModelCatalogEnvelope> {
   return requestProduct(PRODUCT_BFF_ENDPOINTS.models, modelCatalogEnvelopeSchema, options);
+}
+
+export function createProductPaymentIntent(
+  input: { planVersionId: string },
+  options: ProductCommandRequestOptions & { idempotencyKey: string },
+): Promise<PaymentIntentEnvelope> {
+  if (!/^[A-Za-z0-9._~-]{8,128}$/.test(options.idempotencyKey)) {
+    throw new TypeError('Payment intents require a valid idempotency key.');
+  }
+  const headers = requestHeaders(true, options.token);
+  headers.set('Idempotency-Key', options.idempotencyKey);
+  return requestProduct(
+    PRODUCT_BFF_ENDPOINTS.paymentIntents,
+    paymentIntentEnvelopeSchema,
+    options,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(z.object({
+        planVersionId: safeIdentifierSchema,
+      }).strict().parse(input)),
+    },
+  );
+}
+
+export function fetchProductPaymentIntent(
+  id: string,
+  options: ProductRequestOptions = {},
+): Promise<PaymentIntentEnvelope> {
+  if (!/^pay_[a-f0-9]{32}$/.test(id)) {
+    throw new TypeError('Payment intent id is invalid.');
+  }
+  return requestProduct(
+    `${PRODUCT_BFF_ENDPOINTS.paymentIntents}/${encodeURIComponent(id)}`,
+    paymentIntentEnvelopeSchema,
+    options,
+  );
 }
 
 function assertCommandShape(command: ProductCommand): void {

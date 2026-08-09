@@ -17,6 +17,7 @@ from services.admin_product.errors import ProductBffError
 from services.admin_product.identity import PostgresCanonicalUserRepository
 from services.admin_product.models import (
     ExecuteSubscriptionCommand,
+    PaymentIntentCreate,
     PlansQuery,
     PreviewSubscriptionCommand,
     UsageQuery,
@@ -50,6 +51,8 @@ def _plan() -> dict:
         "version": 1,
         "billingCycle": "monthly",
         "monthlyAllowanceTokens": 100_000,
+        "monthlyPriceMicrousd": 9_000_000,
+        "currency": "USD",
         "entitlements": [
             {
                 "gatewayScopes": ["messages:create"],
@@ -91,6 +94,8 @@ def _context() -> dict:
             "version": 1,
             "billingCycle": "monthly",
             "monthlyAllowanceTokens": 100_000,
+            "monthlyPriceMicrousd": 9_000_000,
+            "currency": "USD",
         },
         "entitlements": [
             {
@@ -248,23 +253,31 @@ def _command_result() -> dict:
     }
 
 
+def _payment_intent() -> dict:
+    return {
+        "id": "pay_1234567890abcdef1234567890abcdef",
+        "planVersionId": "pv_creator_1",
+        "subscriptionId": None,
+        "operation": "initial_activation",
+        "amountMicrousd": 9_000_000,
+        "currency": "USD",
+        "status": "requires_action",
+        "nextAction": {"type": "test_webhook"},
+        "failureCode": None,
+        "createdAt": "2030-01-01T00:00:00.000Z",
+        "updatedAt": "2030-01-01T00:00:00.000Z",
+    }
+
+
 class AdminProductConfigurationTests(unittest.TestCase):
     def test_token_only_field_firewall_is_exact_and_allows_token_balance(self) -> None:
         self.assertEqual(
             _FORBIDDEN_RESPONSE_KEY_FRAGMENTS,
             (
-                "price",
-                "amount",
-                "currency",
-                "microusd",
                 "cash",
                 "monetary",
                 "financial",
-                "payment",
                 "topup",
-                "checkout",
-                "refund",
-                "reversal",
                 "ledger",
                 "effectivefrom",
                 "effectiveto",
@@ -279,14 +292,16 @@ class AdminProductConfigurationTests(unittest.TestCase):
             ),
         )
         assert_safe_product_payload(
-            {"tokenBalance": {"remainingTokens": 100, "unit": "tokens"}}
+            {
+                "tokenBalance": {"remainingTokens": 100, "unit": "tokens"},
+                "payment": {"amountMicrousd": 9_000_000, "currency": "USD"},
+            }
         )
         for forbidden in (
             "cashAvailable",
             "monetaryBalance",
             "financialLedgerEntries",
-            "paymentStatus",
-            "refundAmount",
+            "providerSecret",
         ):
             with self.assertRaises(ProductBffError):
                 assert_safe_product_payload({forbidden: "unsafe"})
@@ -326,7 +341,7 @@ class AdminProductConfigurationTests(unittest.TestCase):
 
 
 class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
-    async def test_exact_five_routes_claim_scopes_and_command_headers(self) -> None:
+    async def test_product_routes_claim_scopes_and_write_idempotency(self) -> None:
         configuration = _configuration()
         observed: list[httpx.Request] = []
 
@@ -361,6 +376,13 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
                 )
             if request.url.path == "/api/product/v1/me/model-catalog":
                 return httpx.Response(200, json={"data": _catalog(), "meta": _meta()})
+            if request.url.path == "/api/product/v1/me/payment-intents":
+                self.assertEqual(claims["scope"], "product:write")
+                self.assertEqual(request.headers["idempotency-key"], "payment-key-123")
+                return httpx.Response(200, json={"data": _payment_intent(), "meta": _meta()})
+            if request.url.path.startswith("/api/product/v1/me/payment-intents/"):
+                self.assertEqual(claims["scope"], "product:read")
+                return httpx.Response(200, json={"data": _payment_intent(), "meta": _meta()})
             self.assertEqual(request.url.path, "/api/product/v1/me/subscription-commands")
             self.assertEqual(request.headers["origin"], "https://dream.example.test")
             self.assertEqual(claims["scope"], "product:write")
@@ -400,6 +422,15 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
                 "req_test",
                 "command-key-123",
             )
+            await client.create_payment_intent(
+                "7",
+                PaymentIntentCreate(planVersionId="pv_creator_1"),
+                "req_test",
+                "payment-key-123",
+            )
+            await client.payment_intent(
+                "7", "pay_1234567890abcdef1234567890abcdef", "req_test"
+            )
 
         self.assertEqual(
             [(request.method, request.url.path) for request in observed],
@@ -410,6 +441,8 @@ class AdminProductClientTests(unittest.IsolatedAsyncioTestCase):
                 ("GET", "/api/product/v1/me/model-catalog"),
                 ("POST", "/api/product/v1/me/subscription-commands"),
                 ("POST", "/api/product/v1/me/subscription-commands"),
+                ("POST", "/api/product/v1/me/payment-intents"),
+                ("GET", "/api/product/v1/me/payment-intents/pay_1234567890abcdef1234567890abcdef"),
             ],
         )
         self.assertEqual(dict(observed[0].url.params), {"page": "1", "pageSize": "20"})

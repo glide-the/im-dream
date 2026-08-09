@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 import os
+from pathlib import Path
 import re
+import stat
 from typing import Final
 from urllib.parse import parse_qsl, unquote, urlsplit
 
@@ -14,6 +16,7 @@ from .errors import PersistenceConfigurationError
 
 TEST_DATABASE_URL_ENV: Final = "TEST_DATABASE_URL"
 DATABASE_URL_ENV: Final = "DATABASE_URL"
+DATABASE_ENV_FILE_ENV: Final = "INK_DATABASE_ENV_FILE"
 
 # Isolation labels must be distinct tokens in the database name.  Accepting a
 # substring such as ``contest`` would turn a typo into authorization to run
@@ -133,6 +136,40 @@ def parse_postgres_target(value: str) -> PostgresTarget:
     return _parse_postgres_target(value, reason_prefix="database_url")
 
 
+def load_database_url_from_env_file(
+    *,
+    environ: MutableMapping[str, str] | None = None,
+) -> bool:
+    """Load only DATABASE_URL from an explicitly configured local env file."""
+
+    values = os.environ if environ is None else environ
+    existing = values.get(DATABASE_URL_ENV)
+    if isinstance(existing, str) and existing.strip():
+        parse_postgres_target(existing)
+        return False
+    configured_path = values.get(DATABASE_ENV_FILE_ENV)
+    if not isinstance(configured_path, str) or not configured_path.strip():
+        return False
+    path = Path(configured_path)
+    if not path.is_absolute():
+        raise PersistenceConfigurationError()
+    try:
+        metadata = path.lstat()
+    except OSError:
+        raise PersistenceConfigurationError() from None
+    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+        raise PersistenceConfigurationError()
+    try:
+        from dotenv import dotenv_values
+
+        selected = dotenv_values(path).get(DATABASE_URL_ENV)
+    except Exception:
+        raise PersistenceConfigurationError() from None
+    target = parse_postgres_target(selected if isinstance(selected, str) else "")
+    values[DATABASE_URL_ENV] = target.dsn
+    return True
+
+
 def _database_name_tokens(database_name: str) -> frozenset[str]:
     return frozenset(
         token
@@ -230,12 +267,14 @@ def require_test_database_url(
 
 
 __all__ = [
+    "DATABASE_ENV_FILE_ENV",
     "DATABASE_URL_ENV",
     "DEFAULT_TEST_DATABASE_MARKERS",
     "PostgresTarget",
     "TEST_DATABASE_URL_ENV",
     "TestDatabaseSafetyError",
     "TestDatabaseTarget",
+    "load_database_url_from_env_file",
     "parse_postgres_target",
     "require_test_database_target",
     "require_test_database_url",

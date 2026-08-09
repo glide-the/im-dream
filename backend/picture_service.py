@@ -9,6 +9,7 @@ from typing import Optional
 
 import config
 import database
+from services.admin_gateway import GatewayInferenceClient
 
 
 def _today_in_tz(tz_name: str) -> str:
@@ -66,7 +67,7 @@ def _generate_picture_for_date(
     print(f"   Target date: {target_date}")
     print(f"{'=' * 60}\n")
 
-    import requests
+    gateway = GatewayInferenceClient(user_id)
 
     # @@@ Fetch recent prompts to avoid duplication
     recent_prompts_text = ""
@@ -127,24 +128,12 @@ Return ONLY the minimal image description, no other text."""
 
     print("🧠 Creating image description from notes with Claude Haiku...")
 
-    claude_response = requests.post(
-        f"{config.IMAGE_API_ENDPOINT}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {config.IMAGE_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json={
-            "model": config.IMAGE_DESCRIPTION_MODEL,
-            "messages": [{"role": "user", "content": description_prompt}],
-            "max_tokens": config.IMAGE_DESCRIPTION_MAX_TOKENS,
-        },
+    claude_data = gateway.chat(
+        model_alias=gateway.models.image_description,
+        messages=[{"role": "user", "content": description_prompt}],
+        max_tokens=config.IMAGE_DESCRIPTION_MAX_TOKENS,
         timeout=config.IMAGE_DESCRIPTION_TIMEOUT,
     )
-
-    if claude_response.status_code != 200:
-        return {"image_base64": None, "error": "Failed to create image description", "date": target_date}
-
-    claude_data = claude_response.json()
     image_description = (
         claude_data.get("choices", [{}])[0]
         .get("message", {})
@@ -158,18 +147,6 @@ Return ONLY the minimal image description, no other text."""
     print(f"📝 Image description: {image_description}")
 
     # Step 2: Generate image from description with retry logic
-    url = f"{config.IMAGE_API_ENDPOINT}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {config.IMAGE_API_KEY}",
-        "Content-Type": "application/json",
-    }
-
-    payload = {
-        "model": config.IMAGE_GENERATION_MODEL,
-        "messages": [{"role": "user", "content": image_description}],
-        "max_tokens": config.IMAGE_MAX_TOKENS,
-    }
-
     # Retry logic with increasing timeouts
     for attempt in range(1, config.IMAGE_RETRY_MAX_ATTEMPTS + 1):
         try:
@@ -178,24 +155,12 @@ Return ONLY the minimal image description, no other text."""
                 + (attempt - 1) * config.IMAGE_RETRY_TIMEOUT_INCREMENT
             )
             print(f"🎨 Generating image (attempt {attempt}/{config.IMAGE_RETRY_MAX_ATTEMPTS}, timeout={timeout_seconds}s)...")
-            response = requests.post(
-                url,
-                headers=headers,
-                json=payload,
+            data = gateway.chat(
+                model_alias=gateway.models.image_generation,
+                messages=[{"role": "user", "content": image_description}],
+                max_tokens=config.IMAGE_MAX_TOKENS,
                 timeout=timeout_seconds,
             )
-
-            if response.status_code != 200:
-                print(f"❌ Error: {response.status_code}")
-                if attempt < config.IMAGE_RETRY_MAX_ATTEMPTS:
-                    print("⏳ Retrying in 2 seconds...")
-                    import time
-
-                    time.sleep(2)
-                    continue
-                return {"image_base64": None, "error": "Image generation failed", "date": target_date}
-
-            data = response.json()
 
             # Extract image from response
             if "choices" in data and len(data["choices"]) > 0:

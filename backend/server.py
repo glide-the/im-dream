@@ -26,6 +26,14 @@ from dotenv import load_dotenv
 _BACKEND_ENV_FILE = Path(__file__).resolve().with_name(".env")
 load_dotenv(_BACKEND_ENV_FILE, override=False)
 
+try:
+    from persistence.config import load_database_url_from_env_file
+except ModuleNotFoundError:  # pragma: no cover - package import compatibility
+    from backend.persistence.config import load_database_url_from_env_file
+
+if os.environ.get("INK_LOAD_DATABASE_URL_FROM_ENV_FILE") == "1":
+    load_database_url_from_env_file()
+
 
 def _drop_unsupported_agent_env() -> None:
     """Remove stale Agent env aliases that are outside this project's contract."""
@@ -106,6 +114,7 @@ except ImportError:
         )
 
 import config
+from services.admin_gateway import GatewayPolyAgent
 from seo_content import build_llms_txt, build_robots_txt, build_sitemap_xml
 from picture_service import _generate_picture_for_date, _today_in_tz
 from typing import Optional, List, Any
@@ -250,7 +259,7 @@ def get_writing_suggestion(
     print(f"🎭 Selected voice: {voice_info['name']} ({voice_key})")
     print(f"📚 Selected from {len(voices)} enabled voices")
 
-    agent = PolyAgent(id="writing-suggester")
+    agent = GatewayPolyAgent(user_id, agent_id="writing-suggester")
 
     # Build system prompt - voice gives inspiration, not continuation
     system_prompt = f"""You are {voice_info["name"]}, an inner voice persona.
@@ -293,11 +302,10 @@ Speak in {voice_info["name"]}'s characteristic style, but keep it brief and insp
 Give them ONE very short, gentle nudge about what to write next (max 15 words)."""
 
     # Generate inspiration
-    print(f"📤 Calling agent.run() with model='{config.VOICE_INSPIRATION_MODEL}'...")
+    print("📤 Calling Admin Gateway for writing inspiration...")
     result = agent.run(
         user_prompt,
         system_prompt=system_prompt,
-        model=config.VOICE_INSPIRATION_MODEL,
         cli="no-tools",
         tracked=True,
     )
@@ -370,7 +378,7 @@ def chat_with_voice(
             "error": f"Voice {voice_id} not found in your enabled decks. Please enable it in the Decks tab.",
         }
 
-    agent = PolyAgent(id=f"voice-chat-{voice_name.lower()}")
+    agent = GatewayPolyAgent(user_id, agent_id=f"voice-chat-{voice_name.lower()}")
 
     # Build system prompt for this voice
     system_prompt = f"""You are {voice_name}, an inner voice archetype from Disco Elysium.
@@ -417,7 +425,7 @@ User's current state:
     prompt += f"\n\nUser: {user_message}\n\n{voice_name}:"
 
     # Get response from LLM
-    result = agent.run(prompt, model=config.VOICE_CHAT_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         response = "..."
@@ -472,7 +480,7 @@ def analyze_text(
         f"📚 Loaded {len(voices)} enabled voices from deck system: {list(voices.keys()) if voices else 'None (will use defaults)'}"
     )
 
-    agent = PolyAgent(id="voice-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="voice-analyzer")
 
     # Get voices from stateless analyzer
     result = analyze_stateless(
@@ -515,7 +523,7 @@ def analyze_echoes(user_id: int, language: str = "en"):
     print(f"   Language: {language_code}")
     print(f"{'=' * 60}\n")
 
-    agent = PolyAgent(id="echoes-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="echoes-analyzer")
 
     prompt = f"""Analyze these personal notes and identify recurring themes, topics, or concerns that keep appearing.
 
@@ -538,7 +546,7 @@ Format as a JSON array:
 Return ONLY the JSON array, no other text."""
     prompt += f"\n\n{language_instruction(language_code, 'All titles, descriptions, and examples should use this language. Keep the JSON keys the same.')}"
 
-    result = agent.run(prompt, model=config.ECHO_ANALYSIS_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         return {"echoes": []}
@@ -572,7 +580,7 @@ def analyze_traits(user_id: int, language: str = "en"):
     print(f"   Language: {language_code}")
     print(f"{'=' * 60}\n")
 
-    agent = PolyAgent(id="traits-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="traits-analyzer")
 
     prompt = f"""Analyze these personal notes and identify personality traits and characteristics.
 
@@ -595,7 +603,7 @@ Format as a JSON array:
 Return ONLY the JSON array, no other text."""
     prompt += f"\n\n{language_instruction(language_code, 'Use this language for trait names, explanations, and evidence (JSON keys stay in English).')}"
 
-    result = agent.run(prompt, model=config.TRAIT_ANALYSIS_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         return {"traits": []}
@@ -631,7 +639,7 @@ def analyze_patterns(
     print(f"   Language: {language_code}")
     print(f"{'=' * 60}\n")
 
-    agent = PolyAgent(id="patterns-analyzer")
+    agent = GatewayPolyAgent(user_id, agent_id="patterns-analyzer")
 
     prompt = f"""Analyze these personal notes and identify behavioral patterns or habits.
 
@@ -654,7 +662,7 @@ Format as a JSON array:
 Return ONLY the JSON array, no other text."""
     prompt += f"\n\n{language_instruction(language_code, 'Use this language for pattern names, descriptions, and frequency notes (JSON keys stay in English).')}"
 
-    result = agent.run(prompt, model=config.PATTERN_ANALYSIS_MODEL, cli="no-tools", tracked=True)
+    result = agent.run(prompt, cli="no-tools", tracked=True)
 
     if not result.is_success or not result.content:
         return {"patterns": []}

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -23,6 +25,7 @@ from persistence import (  # noqa: E402
     DeadlockError,
     ForeignKeyConstraintError,
     NotNullConstraintError,
+    PersistenceConfigurationError,
     PersistenceTimeoutError,
     PostgresPool,
     PostgresUnitOfWork,
@@ -31,12 +34,59 @@ from persistence import (  # noqa: E402
     UniqueConstraintError,
     catalog_snapshot,
     check_postgres_health,
+    load_database_url_from_env_file,
     map_postgres_error,
     probe_postgres_health,
     require_test_database_target,
     require_test_database_url,
     validate_test_database_url,
 )
+
+
+class DatabaseEnvFileTest(unittest.TestCase):
+    def test_loads_only_database_url_from_explicit_regular_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / "admin.env"
+            env_file.write_text(
+                "DATABASE_URL=postgresql://local:not-real@localhost:5433/ink-memory\n"
+                "UNRELATED_SECRET=must-not-be-imported\n",
+                encoding="utf-8",
+            )
+            environ = {"INK_DATABASE_ENV_FILE": str(env_file)}
+            self.assertTrue(load_database_url_from_env_file(environ=environ))
+            self.assertEqual(
+                environ["DATABASE_URL"],
+                "postgresql://local:not-real@localhost:5433/ink-memory",
+            )
+            self.assertNotIn("UNRELATED_SECRET", environ)
+
+    def test_existing_database_url_is_validated_and_not_overridden(self):
+        environ = {
+            "DATABASE_URL": "postgresql://localhost/current",
+            "INK_DATABASE_ENV_FILE": "/missing/file",
+        }
+        self.assertFalse(load_database_url_from_env_file(environ=environ))
+        self.assertEqual(environ["DATABASE_URL"], "postgresql://localhost/current")
+
+    def test_relative_missing_and_symlink_env_files_fail_closed(self):
+        with self.assertRaises(PersistenceConfigurationError):
+            load_database_url_from_env_file(
+                environ={"INK_DATABASE_ENV_FILE": "relative.env"}
+            )
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "missing.env"
+            with self.assertRaises(PersistenceConfigurationError):
+                load_database_url_from_env_file(
+                    environ={"INK_DATABASE_ENV_FILE": str(missing)}
+                )
+            real = Path(directory) / "real.env"
+            real.write_text("DATABASE_URL=postgresql://localhost/example\n")
+            linked = Path(directory) / "linked.env"
+            linked.symlink_to(real)
+            with self.assertRaises(PersistenceConfigurationError):
+                load_database_url_from_env_file(
+                    environ={"INK_DATABASE_ENV_FILE": str(linked)}
+                )
 
 
 class _FakeCursor:

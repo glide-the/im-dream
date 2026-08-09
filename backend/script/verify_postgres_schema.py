@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Verify static schema artifacts and optionally a read-only isolated PG catalog."""
+"""Verify static schema artifacts and an explicitly identified PG catalog."""
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -16,7 +17,7 @@ if str(BACKEND_ROOT) not in sys.path:
     sys.path.insert(0, str(BACKEND_ROOT))
 
 from persistence.catalog import catalog_snapshot
-from persistence.config import require_test_database_url
+from persistence.config import DATABASE_URL_ENV, parse_postgres_target, require_test_database_url
 from schema.catalog import (
     EXPECTED_POSTGRES_COUNTS,
     MANIFEST_PATH,
@@ -90,16 +91,30 @@ def _expected_index_names(manifest: dict[str, Any]) -> set[str]:
     return names
 
 
-def verify_isolated_catalog() -> dict[str, Any]:
-    """Connect only to an explicitly isolated TEST_DATABASE_URL, read-only."""
-
-    dsn = require_test_database_url()
+def _verify_catalog(
+    dsn: str,
+    *,
+    expected_database: str | None = None,
+    expected_owner: str | None = None,
+) -> dict[str, Any]:
     import psycopg
 
     manifest = load_manifest()
     expected_names = {str(table["name"]) for table in manifest["tables"]}
     with psycopg.connect(dsn) as connection:
         connection.execute("SET TRANSACTION READ ONLY")
+        if expected_database is not None or expected_owner is not None:
+            identity = connection.execute(
+                "SELECT current_database(), current_user, "
+                "pg_catalog.pg_get_userbyid(datdba) "
+                "FROM pg_catalog.pg_database WHERE datname=current_database()"
+            ).fetchone()
+            if tuple(identity or ()) != (
+                expected_database,
+                expected_owner,
+                expected_owner,
+            ):
+                raise RuntimeError("PostgreSQL runtime identity mismatch")
         snapshot = catalog_snapshot(connection)
     dream_tables = {
         str(table["table"]): table
@@ -107,7 +122,7 @@ def verify_isolated_catalog() -> dict[str, Any]:
         if str(table["table"]) in expected_names
     }
     if set(dream_tables) != expected_names:
-        raise RuntimeError("isolated PostgreSQL catalog is missing Dream tables")
+        raise RuntimeError("PostgreSQL catalog is missing Dream tables")
     expected_triggers = {
         (str(trigger["table"]), str(trigger["name"]))
         for trigger in manifest["triggers"]
@@ -118,10 +133,10 @@ def verify_isolated_catalog() -> dict[str, Any]:
         for trigger in table["triggers"]
     }
     if expected_triggers - actual_triggers:
-        raise RuntimeError("isolated PostgreSQL trigger inventory is incomplete")
+        raise RuntimeError("PostgreSQL trigger inventory is incomplete")
     unrecognised_triggers = actual_triggers - expected_triggers
     if not unrecognised_triggers.issubset(APPROVED_BASELINE_EXTERNAL_TRIGGERS):
-        raise RuntimeError("isolated PostgreSQL trigger inventory has unknown extensions")
+        raise RuntimeError("PostgreSQL trigger inventory has unknown extensions")
     counts = {
         "tables": len(dream_tables),
         "columns": sum(len(table["columns"]) for table in dream_tables.values()),
@@ -129,28 +144,81 @@ def verify_isolated_catalog() -> dict[str, Any]:
         "triggers": len(expected_triggers),
     }
     if counts != EXPECTED_POSTGRES_COUNTS:
-        raise RuntimeError(f"isolated PostgreSQL target count mismatch: {counts!r}")
+        raise RuntimeError(f"PostgreSQL target count mismatch: {counts!r}")
     actual_indexes = {
         str(index["name"])
         for table in dream_tables.values()
         for index in table["indexes"]
     }
     if actual_indexes != _expected_index_names(manifest):
-        raise RuntimeError("isolated PostgreSQL explicit index inventory mismatch")
+        raise RuntimeError("PostgreSQL explicit index inventory mismatch")
     return {"target": counts, "catalogSha256": snapshot.sha256}
+
+
+def verify_isolated_catalog() -> dict[str, Any]:
+    """Connect only to an explicitly isolated TEST_DATABASE_URL, read-only."""
+
+    return _verify_catalog(require_test_database_url())
+
+
+def verify_runtime_catalog(
+    *,
+    expected_database: str,
+    expected_host: str,
+    expected_port: int,
+    expected_owner: str,
+) -> dict[str, Any]:
+    """Read a runtime catalog only after exact URL and owner attestation."""
+
+    target = parse_postgres_target(os.environ.get(DATABASE_URL_ENV, ""))
+    if (
+        target.database_name != expected_database
+        or (target.host or "").casefold() != expected_host.casefold()
+        or target.port != expected_port
+    ):
+        raise RuntimeError("PostgreSQL runtime target mismatch")
+    return _verify_catalog(
+        target.dsn,
+        expected_database=expected_database,
+        expected_owner=expected_owner,
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
+    database_mode = parser.add_mutually_exclusive_group()
+    database_mode.add_argument(
         "--database",
         action="store_true",
         help="also inspect an explicitly isolated TEST_DATABASE_URL in read-only mode",
     )
+    database_mode.add_argument(
+        "--runtime-database",
+        action="store_true",
+        help="inspect DATABASE_URL read-only after exact name/host/port/owner attestation",
+    )
+    parser.add_argument("--expected-target-database")
+    parser.add_argument("--expected-target-host")
+    parser.add_argument("--expected-target-port", type=int)
+    parser.add_argument("--expected-target-owner")
     arguments = parser.parse_args(argv)
     receipt: dict[str, Any] = {"static": verify_static_artifacts()}
     if arguments.database:
         receipt["database"] = verify_isolated_catalog()
+    if arguments.runtime_database:
+        if (
+            not arguments.expected_target_database
+            or not arguments.expected_target_host
+            or arguments.expected_target_port is None
+            or not arguments.expected_target_owner
+        ):
+            parser.error("runtime database verification requires exact target identity")
+        receipt["database"] = verify_runtime_catalog(
+            expected_database=arguments.expected_target_database,
+            expected_host=arguments.expected_target_host,
+            expected_port=arguments.expected_target_port,
+            expected_owner=arguments.expected_target_owner,
+        )
     print(json.dumps(receipt, sort_keys=True, separators=(",", ":")))
     return 0
 

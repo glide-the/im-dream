@@ -220,7 +220,8 @@
 
 .story-workspace-subscription__status.is-paused,
 .story-workspace-subscription__status.is-cancel_at_period_end,
-.story-workspace-subscription__status.is-legacyUnavailable {
+.story-workspace-subscription__status.is-legacyUnavailable,
+.story-workspace-subscription__status.is-past_due {
   border-style: dashed;
 }
 

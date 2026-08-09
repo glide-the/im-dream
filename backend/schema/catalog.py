@@ -419,6 +419,18 @@ def _extract_database(
         foreign_keys = _group_foreign_keys(
             db.execute(f"PRAGMA foreign_key_list({_quoted_identifier(table_name)})").fetchall()
         )
+        if table_name == "chat_thread":
+            # The live legacy database gained deck_id/voice_id through ALTER
+            # TABLE. SQLite cannot add FK constraints with that operation, so
+            # those relations exist only in freshly built fixtures. Preserve
+            # the intended PostgreSQL constraints while validating the real
+            # 43-table source against the one FK it physically contains.
+            for foreign_key in foreign_keys:
+                if foreign_key["columns"] in (["deck_id"], ["voice_id"]):
+                    foreign_key["target_only"] = True
+                    foreign_key["precondition"] = (
+                        "source orphan count must be zero before target FK creation"
+                    )
         if table_name == "resource_connectors":
             foreign_keys.append(
                 {

@@ -25,7 +25,7 @@ class _FakeProductBff:
             raise self.error
         data = {"kind": kind}
         if self.forbidden_response:
-            data["payment"] = "must-not-leak"
+            data["providerSecret"] = "must-not-leak"
         return {"data": data, "meta": {"requestId": request_id}}
 
     async def plans(self, subject, query, request_id):
@@ -52,6 +52,18 @@ class _FakeProductBff:
         )
         return self._result(command.phase, request_id)
 
+    async def create_payment_intent(
+        self, subject, payment, request_id, idempotency_key
+    ):
+        self.calls.append(
+            ("create_payment", subject, payment, request_id, idempotency_key)
+        )
+        return self._result("create_payment", request_id)
+
+    async def payment_intent(self, subject, payment_intent_id, request_id):
+        self.calls.append(("payment", subject, payment_intent_id, request_id))
+        return self._result("payment", request_id)
+
 
 class ProductBffRouteTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -73,7 +85,7 @@ class ProductBffRouteTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.environment.stop()
 
-    def test_router_exposes_only_the_five_documented_bff_operations(self) -> None:
+    def test_router_exposes_the_subscription_payment_and_usage_operations(self) -> None:
         operations = {
             (method, route.path)
             for route in product.router.routes
@@ -87,6 +99,8 @@ class ProductBffRouteTests(unittest.TestCase):
                 ("POST", "/api/story-workspace/subscription/commands"),
                 ("GET", "/api/story-workspace/usage"),
                 ("GET", "/api/story-workspace/models"),
+                ("POST", "/api/story-workspace/subscription/payment-intents"),
+                ("GET", "/api/story-workspace/subscription/payment-intents/{payment_intent_id}"),
             },
         )
 
@@ -114,8 +128,22 @@ class ProductBffRouteTests(unittest.TestCase):
                 },
                 json={"action": "pause", "phase": "preview", "expectedVersion": 7},
             )
+            create_payment = client.post(
+                "/api/story-workspace/subscription/payment-intents",
+                headers={
+                    **self.headers,
+                    "origin": "https://dream.example.test",
+                    "content-type": "application/json",
+                    "idempotency-key": "payment-key-123",
+                },
+                json={"planVersionId": "pv_creator_1"},
+            )
+            payment = client.get(
+                "/api/story-workspace/subscription/payment-intents/pay_1234567890abcdef1234567890abcdef",
+                headers=self.headers,
+            )
 
-        for response in [context, plans, usage, models, preview]:
+        for response in [context, plans, usage, models, preview, create_payment, payment]:
             self.assertEqual(response.status_code, 200, response.text)
             self.assertEqual(response.headers["cache-control"], "no-store")
         self.assertEqual(context.json()["meta"]["requestId"], "req_context")
@@ -127,6 +155,9 @@ class ProductBffRouteTests(unittest.TestCase):
         command_call = next(call for call in self.service.calls if call[0] == "commands")
         self.assertEqual(command_call[2].phase, "preview")
         self.assertIsNone(command_call[4])
+        payment_call = next(call for call in self.service.calls if call[0] == "create_payment")
+        self.assertEqual(payment_call[2].planVersionId, "pv_creator_1")
+        self.assertEqual(payment_call[4], "payment-key-123")
 
     def test_execute_requires_and_forwards_idempotency_key(self) -> None:
         body = {

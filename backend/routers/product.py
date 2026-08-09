@@ -1,4 +1,4 @@
-"""Five same-origin Dream BFF routes for the Token-only Product API."""
+"""Same-origin Dream BFF routes for subscription, payment and usage."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from services.admin_product.errors import (
 from services.admin_product.models import (
     EmptyQuery,
     ExecuteSubscriptionCommand,
+    PaymentIntentCreate,
     PlansQuery,
     PreviewSubscriptionCommand,
     UsageQuery,
@@ -40,6 +41,7 @@ router = APIRouter(tags=["product-subscription-bff"])
 
 _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,99}$")
 _IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._~-]{8,128}$")
+_PAYMENT_INTENT_ID_PATTERN = re.compile(r"^pay_[a-f0-9]{32}$")
 _MAX_BODY_BYTES = 16_384
 _POSTGRES_BIGINT_MAXIMUM = 9_223_372_036_854_775_807
 _IDENTITY_OVERRIDE_HEADERS = (
@@ -136,9 +138,7 @@ def _parse_query(request: Request, model: type[QueryT]) -> QueryT:
         raise invalid_input(field=field) from None
 
 
-async def _parse_command(
-    request: Request,
-) -> PreviewSubscriptionCommand | ExecuteSubscriptionCommand:
+async def _strict_json_payload(request: Request) -> dict[str, Any]:
     content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip()
     if content_type != "application/json":
         raise ProductBffError(
@@ -179,13 +179,46 @@ async def _parse_command(
             message="The request body must contain valid JSON.",
             status_code=400,
         ) from None
+    if not isinstance(payload, dict):
+        raise invalid_input(field="body")
+    return payload
+
+
+async def _parse_command(
+    request: Request,
+) -> PreviewSubscriptionCommand | ExecuteSubscriptionCommand:
     try:
-        return subscription_command_adapter.validate_python(payload)
+        return subscription_command_adapter.validate_python(
+            await _strict_json_payload(request)
+        )
     except ValidationError as exc:
         errors = exc.errors()
         location = errors[0].get("loc", ["body"]) if errors else ["body"]
         field = str(location[-1]) if location else "body"
         raise invalid_input(field=field) from None
+
+
+async def _parse_payment_intent(request: Request) -> PaymentIntentCreate:
+    try:
+        return PaymentIntentCreate.model_validate(await _strict_json_payload(request))
+    except ValidationError as exc:
+        errors = exc.errors()
+        location = errors[0].get("loc", ["body"]) if errors else ["body"]
+        field = str(location[-1]) if location else "body"
+        raise invalid_input(field=field) from None
+
+
+def _required_idempotency_key(request: Request) -> str:
+    supplied = request.headers.get("idempotency-key")
+    if not supplied:
+        raise ProductBffError(
+            code="PRODUCT_IDEMPOTENCY_KEY_REQUIRED",
+            message="Idempotency-Key is required for this request.",
+            status_code=400,
+        )
+    if not _IDEMPOTENCY_KEY_PATTERN.fullmatch(supplied):
+        raise invalid_input(field="Idempotency-Key")
+    return supplied
 
 
 def _idempotency_key(
@@ -201,15 +234,7 @@ def _idempotency_key(
                 status_code=400,
             )
         return None
-    if not supplied:
-        raise ProductBffError(
-            code="PRODUCT_IDEMPOTENCY_KEY_REQUIRED",
-            message="Idempotency-Key is required for command execution.",
-            status_code=400,
-        )
-    if not _IDEMPOTENCY_KEY_PATTERN.fullmatch(supplied):
-        raise invalid_input(field="Idempotency-Key")
-    return supplied
+    return _required_idempotency_key(request)
 
 
 def _copy_session_renewal(source: Response, target: Response) -> None:
@@ -374,6 +399,55 @@ async def subscription_commands(
         idempotency_key = _idempotency_key(request, command)
         payload = await service.subscription_command(
             subject, command, request_id, idempotency_key
+        )
+        return _success(payload, response, request_id)
+    except ProductBffError as exc:
+        return _error(exc, request_id)
+    except Exception:
+        return _error(dependency_unavailable(), request_id)
+
+
+@router.post("/api/story-workspace/subscription/payment-intents")
+async def create_payment_intent(
+    request: Request,
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
+    service: ProductBff = Depends(get_product_bff_service),
+) -> JSONResponse:
+    request_id = _request_id(request)
+    try:
+        _assert_write_origin(request)
+        _assert_no_identity_override(request)
+        subject = _session_subject(request, response, credentials)
+        payment = await _parse_payment_intent(request)
+        idempotency_key = _required_idempotency_key(request)
+        payload = await service.create_payment_intent(
+            subject, payment, request_id, idempotency_key
+        )
+        return _success(payload, response, request_id)
+    except ProductBffError as exc:
+        return _error(exc, request_id)
+    except Exception:
+        return _error(dependency_unavailable(), request_id)
+
+
+@router.get("/api/story-workspace/subscription/payment-intents/{payment_intent_id}")
+async def payment_intent(
+    payment_intent_id: str,
+    request: Request,
+    response: Response,
+    credentials: HTTPAuthorizationCredentials | None = Depends(http_bearer),
+    service: ProductBff = Depends(get_product_bff_service),
+) -> JSONResponse:
+    request_id = _request_id(request)
+    try:
+        _assert_no_identity_override(request)
+        if not _PAYMENT_INTENT_ID_PATTERN.fullmatch(payment_intent_id):
+            raise invalid_input(field="paymentIntentId")
+        subject = _session_subject(request, response, credentials)
+        _parse_query(request, EmptyQuery)
+        payload = await service.payment_intent(
+            subject, payment_intent_id, request_id
         )
         return _success(payload, response, request_id)
     except ProductBffError as exc:

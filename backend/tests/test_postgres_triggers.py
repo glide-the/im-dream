@@ -40,7 +40,7 @@ def test_append_only_tables_have_update_and_delete_guards() -> None:
         assert f"{prefix}_no_delete" in trigger_names
 
 
-def test_voice_source_guard_uses_postgres_num_nonnull() -> None:
+def test_voice_source_guard_uses_postgres_num_nonnulls() -> None:
     manifest = load_manifest()
     source = next(
         trigger
@@ -53,7 +53,8 @@ def test_voice_source_guard_uses_postgres_num_nonnull() -> None:
         if item["name"] == source["name"]
     )
 
-    assert "num_nonnull(" in function
+    assert "num_nonnulls(" in function
+    assert "num_nonnull(" not in function
     assert "+ (NEW." not in function
     assert "BEFORE INSERT" in trigger
 
