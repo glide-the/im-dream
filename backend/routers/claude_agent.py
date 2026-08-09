@@ -86,31 +86,26 @@ async def _resolve_platform_model_alias(
     client_model_alias: str | None,
 ) -> str:
     try:
-        models = await asyncio.to_thread(GatewayModelCatalogClient(user_id).list_models)
+        catalog = await asyncio.to_thread(GatewayModelCatalogClient(user_id).fetch_catalog)
     except GatewayInferenceError as exc:
         raise HTTPException(
             status_code=exc.status_code,
             detail={"error_code": exc.code, "message": "The platform model catalog is unavailable."},
         ) from exc
-    callable_aliases = {
-        model.model_alias
-        for model in models
-        if "messages:create" in model.gateway_scopes
-    }
+    callable_aliases = {model.model_alias for model in catalog.models if model.callable}
     config = await asyncio.to_thread(database.get_system_config, user_id)
     configured = str(config.get("model") or "").strip()
     if configured not in callable_aliases:
-        default_alias = os.environ.get("INK_GATEWAY_TEXT_MODEL_ALIAS", "").strip()
-        if not _PLATFORM_MODEL_ALIAS.fullmatch(default_alias):
+        configured = catalog.default_model_alias or ""
+    if not configured:
+        if str(config.get("model") or "").strip():
             raise HTTPException(
                 status_code=409,
                 detail={
-                    "error_code": "GATEWAY_MODEL_SELECTION_REQUIRED",
-                    "message": "Select an available platform model in Settings before starting Claude Agent.",
+                    "error_code": "GATEWAY_MODEL_SELECTION_STALE",
+                    "message": "The saved platform model is no longer callable. Select another model or review subscription plans.",
                 },
             )
-        configured = default_alias if default_alias in callable_aliases else ""
-    if not configured:
         raise HTTPException(
             status_code=403,
             detail={

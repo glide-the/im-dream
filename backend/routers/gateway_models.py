@@ -17,8 +17,8 @@ router = APIRouter()
 @router.get("/api/gateway/models")
 async def gateway_models(current_user: dict = Depends(get_current_user)):
     try:
-        models = await asyncio.to_thread(
-            GatewayModelCatalogClient(current_user["user_id"]).list_models
+        catalog = await asyncio.to_thread(
+            GatewayModelCatalogClient(current_user["user_id"]).fetch_catalog
         )
     except GatewayInferenceError as exc:
         raise HTTPException(
@@ -26,6 +26,6 @@ async def gateway_models(current_user: dict = Depends(get_current_user)):
             detail={"code": exc.code, "message": "The platform model catalog is unavailable."},
         ) from exc
     return {
-        "data": [model.public_dict() for model in models if "messages:create" in model.gateway_scopes],
+        "data": [model.public_dict() for model in catalog.models],
+        "defaultModelAlias": catalog.default_model_alias,
     }
-

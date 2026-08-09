@@ -7,7 +7,7 @@ from .inference import (
     GatewayInferenceModels,
     GatewayPolyAgent,
 )
-from .models import GatewayModel, GatewayModelCatalogClient
+from .models import GatewayModel, GatewayModelCatalog, GatewayModelCatalogClient
 
 __all__ = [
     "apply_gateway_sdk_env_to_options",
@@ -17,5 +17,6 @@ __all__ = [
     "GatewayInferenceModels",
     "GatewayPolyAgent",
     "GatewayModel",
+    "GatewayModelCatalog",
     "GatewayModelCatalogClient",
 ]

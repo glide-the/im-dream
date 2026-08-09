@@ -46,13 +46,19 @@ def _plan() -> dict:
     return {
         "planCode": "creator",
         "planName": "Creator",
+        "eyebrow": "For active stories",
+        "note": "A real monthly plan",
+        "details": ["More room to create"],
         "description": None,
         "planVersionId": "pv_creator_1",
         "version": 1,
+        "versionStatus": "published",
         "billingCycle": "monthly",
         "monthlyAllowanceTokens": 100_000,
         "monthlyPriceMicrousd": 9_000_000,
         "currency": "USD",
+        "available": True,
+        "unavailableReason": None,
         "entitlements": [
             {
                 "gatewayScopes": ["messages:create"],

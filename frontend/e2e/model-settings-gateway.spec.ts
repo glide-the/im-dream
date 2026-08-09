@@ -27,9 +27,11 @@ test('platform Gateway catalog drives model selection and persists only alias', 
   }));
   await page.route(`${WEB_BASE}/api/gateway/models`, (route) => json(route, {
     data: [
-      { modelAlias: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', protocol: 'anthropic', capabilities: { tools: true }, gatewayScopes: ['messages:create'], contextWindow: 128000, maxOutputTokens: 8192 },
-      { modelAlias: 'hy-preview', displayName: 'HY Preview', protocol: 'openai', capabilities: { tools: true }, gatewayScopes: ['messages:create'], contextWindow: 200000, maxOutputTokens: 16384 },
+      { modelAlias: 'deepseek-v4-flash', displayName: 'DeepSeek V4 Flash', protocol: 'anthropic', capabilities: { tools: true }, contextWindow: 128000, maxOutputTokens: 8192, enabled: true, callable: true, availability: 'included', requiredPlanCode: 'free', upgradeHint: null },
+      { modelAlias: 'dream-fast', displayName: 'Dream Fast', protocol: 'anthropic', capabilities: { tools: true }, contextWindow: 128000, maxOutputTokens: 8192, enabled: true, callable: true, availability: 'included', requiredPlanCode: 'free', upgradeHint: null },
+      { modelAlias: 'hy-preview', displayName: 'HY Preview', protocol: 'openai', capabilities: { tools: true }, contextWindow: 200000, maxOutputTokens: 16384, enabled: true, callable: false, availability: 'upgrade_required', requiredPlanCode: 'dream', upgradeHint: '升级 Dream 后可用' },
     ],
+    defaultModelAlias: 'deepseek-v4-flash',
   }));
   await page.route(`${WEB_BASE}/api/system-config`, async (route) => {
     if (route.request().method() === 'PUT') {
@@ -42,16 +44,13 @@ test('platform Gateway catalog drives model selection and persists only alias', 
   });
 
   await page.goto(`${WEB_BASE}/e2e/model-settings-harness`);
-  const select = page.getByLabel('平台 Gateway 模型');
-  await expect(select).toHaveValue('deepseek-v4-flash');
-  await expect(select.locator('option')).toHaveText([
-    'DeepSeek V4 Flash · deepseek-v4-flash',
-    'HY Preview · hy-preview',
-  ]);
-  await expect(page.getByText(/上下文 128,000 Token/)).toBeVisible();
-  await select.selectOption('hy-preview');
+  const current = page.getByRole('radio', { name: /DeepSeek V4 Flash/ });
+  await expect(current).toBeChecked();
+  await expect(page.getByRole('radio', { name: /HY Preview/ })).toBeDisabled();
+  await expect(page.getByText(/需要 dream 套餐/)).toBeVisible();
+  await page.getByRole('radio', { name: /Dream Fast/ }).check();
   await expect(page.getByText(/新 Claude Agent 对话将通过 Gateway 使用该模型/)).toBeVisible();
-  expect(updates.at(-1)).toEqual({ model: 'hy-preview' });
+  expect(updates.at(-1)).toEqual({ model: 'dream-fast' });
   expect(JSON.stringify(updates)).not.toMatch(/provider|secret|api.?key/i);
   await expect(page.getByText('GPT-4.1')).toHaveCount(0);
   await expect(page.getByText('Claude Sonnet')).toHaveCount(0);

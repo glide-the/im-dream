@@ -28,8 +28,8 @@ from services.admin_gateway.config import AdminGatewayConfig  # noqa: E402
 from services.admin_gateway.token import issue_gateway_subject_token  # noqa: E402
 
 
-TEST_EMAIL = "codex-gateway-e2e@ink-memory.test"
-DREAM_BASE_URL = "http://127.0.0.1:8765"
+TEST_EMAIL = os.environ.get("INK_GATEWAY_E2E_EMAIL", "codex-free-round55@ink-memory.test")
+DREAM_BASE_URL = os.environ.get("INK_GATEWAY_E2E_DREAM_BASE_URL", "http://127.0.0.1:8765").rstrip("/")
 
 
 def _json(response: requests.Response) -> dict:
@@ -122,7 +122,14 @@ def main() -> int:
             "errorCode": _safe_error_code(admin_models),
         }))
         return 1
-    model_alias = str(admin_data[0].get("id") or "")
+    callable_admin_models = [
+        item for item in admin_data
+        if isinstance(item, dict) and item.get("callable") is True
+    ]
+    if not callable_admin_models:
+        print(json.dumps({"phase": "admin-model-catalog", "status": 200, "errorCode": "NO_CALLABLE_MODEL"}))
+        return 1
+    model_alias = str(callable_admin_models[0].get("id") or "")
 
     auth_headers = {"authorization": f"Bearer {dream_token}"}
     dream_health = requests.get(f"{DREAM_BASE_URL}/api/health", timeout=10)
@@ -141,6 +148,35 @@ def main() -> int:
             "healthStatus": dream_health.status_code,
             "status": dream_models.status_code,
             "errorCode": _safe_error_code(dream_models),
+        }))
+        return 1
+    selected_dream_model = next(
+        (item for item in dream_data if isinstance(item, dict) and item.get("modelAlias") == model_alias),
+        None,
+    )
+    if not selected_dream_model or selected_dream_model.get("callable") is not True:
+        print(json.dumps({"phase": "dream-model-callability", "status": dream_models.status_code}))
+        return 1
+
+    plans_response = requests.get(
+        f"{DREAM_BASE_URL}/api/story-workspace/subscription/plans",
+        headers=auth_headers,
+        timeout=20,
+    )
+    plans_payload = _json(plans_response)
+    plans_data = plans_payload.get("data") if isinstance(plans_payload.get("data"), list) else []
+    plan_states = {
+        str(plan.get("planCode")): {
+            "available": plan.get("available"),
+            "versionStatus": plan.get("versionStatus"),
+        }
+        for plan in plans_data if isinstance(plan, dict)
+    }
+    if plans_response.status_code != 200 or set(plan_states) != {"free", "dream", "is-dreaming"}:
+        print(json.dumps({
+            "phase": "dream-product-plans",
+            "status": plans_response.status_code,
+            "errorCode": _safe_error_code(plans_response),
         }))
         return 1
 
@@ -237,7 +273,11 @@ def main() -> int:
             "healthStatus": dream_health.status_code,
             "status": dream_models.status_code,
             "count": len(dream_data),
+            "availabilityCounts": dict(sorted(Counter(
+                str(item.get("availability")) for item in dream_data if isinstance(item, dict)
+            ).items())),
         },
+        "productPlans": {"status": plans_response.status_code, "states": plan_states},
         "modelSelection": {"status": config_response.status_code},
         "claudeAgent": {
             "threadStatus": thread_response.status_code,

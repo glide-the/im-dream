@@ -187,11 +187,49 @@ class PlanEligibility(StrictModel):
     appliesAt: IsoTimestamp | None
 
 
-class ProductPlan(PlanSummary):
+class ProductPlan(StrictModel):
+    planCode: SafeIdentifier
+    planName: Annotated[str, StringConstraints(min_length=1, max_length=160)]
+    eyebrow: Annotated[str, StringConstraints(min_length=1, max_length=160)]
+    note: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    details: list[Annotated[str, StringConstraints(min_length=1, max_length=500)]]
     description: SafeText | None
+    planVersionId: SafeIdentifier | None
+    version: PositiveInteger | None
+    versionStatus: Literal["draft", "published", "retired"] | None
+    billingCycle: Literal["monthly"]
+    monthlyAllowanceTokens: NonNegativeInteger | None
+    monthlyPriceMicrousd: NonNegativeInteger | None
+    currency: Literal["USD"]
+    available: bool
+    unavailableReason: Literal[
+        "commercial_parameters_pending", "configuration_incomplete"
+    ] | None
     entitlements: list[ProductEntitlement]
     eligibility: PlanEligibility
     availableActions: list[ProductAction]
+
+    @model_validator(mode="after")
+    def validate_availability_contract(self) -> "ProductPlan":
+        commercial = (self.monthlyAllowanceTokens, self.monthlyPriceMicrousd)
+        if self.available:
+            if (
+                self.versionStatus != "published"
+                or self.planVersionId is None
+                or self.version is None
+                or any(value is None for value in commercial)
+                or self.unavailableReason is not None
+            ):
+                raise ValueError("available plan must expose a published commercial version")
+        elif (
+            any(value is not None for value in commercial)
+            or self.unavailableReason is None
+            or self.availableActions
+            or ((self.planVersionId is None) != (self.version is None))
+            or (self.planVersionId is not None and self.versionStatus not in {"draft", "retired"})
+        ):
+            raise ValueError("unavailable plan must expose no commercial values or actions")
+        return self
 
 
 class Allowance(StrictModel):

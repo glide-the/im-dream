@@ -206,9 +206,10 @@ function PageControls({ page, pageSize, total, onPage }: {
   );
 }
 
-function PlanRow({ plan, selected, onSelect }: {
+function PlanCard({ plan, selected, current, onSelect }: {
   plan: ProductPlan;
   selected: boolean;
+  current: boolean;
   onSelect: () => void;
 }) {
   const modelAliases = [...new Set(plan.entitlements.flatMap((item) => item.modelAliases))];
@@ -216,31 +217,38 @@ function PlanRow({ plan, selected, onSelect }: {
   const rpmLimits = [...new Set(plan.entitlements.flatMap((item) => item.rpmLimit === null ? [] : [formatInteger(item.rpmLimit)]))];
   const dailyTokenLimits = [...new Set(plan.entitlements.flatMap((item) => item.dailyTokenLimit === null ? [] : [`${formatInteger(item.dailyTokenLimit)} Token`]))];
   const storageLimits = [...new Set(plan.entitlements.flatMap((item) => item.storageBytes === null ? [] : [formatStorage(item.storageBytes)]))];
-  const name = `${plan.planName}，版本 ${plan.version}，每月 ${formatInteger(plan.monthlyAllowanceTokens)} Token`;
+  const canSelect = plan.available && plan.eligibility.eligible && plan.planVersionId !== null;
+  const descriptionId = `plan-${plan.planCode}-description`;
+  const commercialSummary = plan.available && plan.monthlyAllowanceTokens !== null && plan.monthlyPriceMicrousd !== null
+    ? `${formatInteger(plan.monthlyAllowanceTokens)} Token / 月 · ${plan.monthlyPriceMicrousd === 0 ? '免费' : formatMicroUsd(plan.monthlyPriceMicrousd)}`
+    : '商业参数待发布 · 暂不可开通';
+  const name = `${plan.planName}，${commercialSummary}`;
   return (
-    <label className={`story-workspace-subscription__plan${selected ? ' is-selected' : ''}${!plan.eligibility.eligible ? ' is-ineligible' : ''}`}>
+    <label className={`story-workspace-subscription__plan${selected ? ' is-selected' : ''}${!canSelect ? ' is-ineligible' : ''}`}>
       <input
-        aria-describedby={`plan-${plan.planVersionId}-description`}
+        aria-describedby={descriptionId}
         checked={selected}
-        disabled={!plan.eligibility.eligible}
+        disabled={!canSelect}
         name="monthly-token-plan"
         onChange={onSelect}
         type="radio"
-        value={plan.planVersionId}
+        value={plan.planVersionId ?? ''}
       />
       <span className="story-workspace-subscription__plan-main">
-        <span><strong>{plan.planName}</strong><small>v{plan.version} · 月度</small></span>
-        <b>{formatInteger(plan.monthlyAllowanceTokens)} Token / 月 · {plan.monthlyPriceMicrousd === 0 ? '免费' : formatMicroUsd(plan.monthlyPriceMicrousd)}</b>
+        <span><small className="story-workspace-subscription__plan-eyebrow">{plan.eyebrow}</small><strong>{plan.planName}</strong><small>{current ? '当前套餐 · ' : ''}{plan.version === null ? '版本准备中' : `v${plan.version}`} · 月度</small></span>
+        <b>{commercialSummary}</b>
+        <span>{plan.note}</span>
       </span>
-      <span id={`plan-${plan.planVersionId}-description`} className="story-workspace-subscription__plan-detail">
+      <span id={descriptionId} className="story-workspace-subscription__plan-detail">
         {plan.description ? <span>{plan.description}</span> : null}
+        {plan.details.map((detail) => <span className="story-workspace-subscription__plan-story-detail" key={detail}>— {detail}</span>)}
         <span>模型：{joinValues(modelAliases)}</span>
         <span>范围：{joinValues(gatewayScopes)}</span>
         <span>RPM：{joinValues(rpmLimits)}</span>
         <span>每日 Token：{joinValues(dailyTokenLimits)}</span>
         <span>存储：{joinValues(storageLimits)}</span>
         <span>预计应用：{formatTimestamp(plan.eligibility.appliesAt)}</span>
-        <span>{plan.eligibility.eligible ? '当前可选择' : `当前不可选择：${plan.eligibility.reasonCode ?? '条件未满足'}`}</span>
+        <span>{canSelect ? '当前可选择' : plan.available ? `当前不可选择：${plan.eligibility.reasonCode ?? '条件未满足'}` : '暂不可开通；不会创建支付或订阅结果'}</span>
       </span>
       <span className="story-workspace-subscription__sr-only">{name}</span>
     </label>
@@ -388,7 +396,7 @@ export function StoryWorkspaceSubscriptionPage() {
   );
 
   useEffect(() => {
-    if (selectedPlanVersionId && !data?.plans.data.some((plan) => plan.planVersionId === selectedPlanVersionId)) {
+    if (selectedPlanVersionId && !data?.plans.data.some((plan) => plan.available && plan.planVersionId === selectedPlanVersionId)) {
       setSelectedPlanVersionId(null);
     }
   }, [data?.plans.data, selectedPlanVersionId]);
@@ -609,11 +617,17 @@ export function StoryWorkspaceSubscriptionPage() {
       </section>
 
       <section aria-labelledby="plans-title" className="story-workspace-subscription__section" id="subscription-plans">
-        <header className="story-workspace-subscription__section-header"><div><p className="story-workspace-subscription__kicker">Published monthly versions</p><h2 id="plans-title">可用月度套餐与操作</h2></div><p>选择 Admin 已发布的真实版本。升级与降级均在你的下一个周期边界应用。</p></header>
+        <header className="story-workspace-subscription__section-header"><div><p className="story-workspace-subscription__kicker">A place for stories to keep growing</p><h2 id="plans-title">为正在形成的故事留出空间</h2></div><p>套餐与展示文案来自 Admin Product API。未发布商业参数的套餐只做诚实预告，不会发起支付。</p></header>
         {data.plans.data.length > 0 ? (
           <fieldset className="story-workspace-subscription__plan-list">
             <legend>选择一个月度 Token 套餐版本</legend>
-            {data.plans.data.map((plan) => <PlanRow key={plan.planVersionId} onSelect={() => setSelectedPlanVersionId(plan.planVersionId)} plan={plan} selected={selectedPlanVersionId === plan.planVersionId} />)}
+            {data.plans.data.map((plan) => <PlanCard
+              current={data.context.data.planVersion?.planCode === plan.planCode}
+              key={plan.planCode}
+              onSelect={() => { if (plan.available && plan.planVersionId) setSelectedPlanVersionId(plan.planVersionId); }}
+              plan={plan}
+              selected={plan.planVersionId !== null && selectedPlanVersionId === plan.planVersionId}
+            />)}
           </fieldset>
         ) : <div className="story-workspace-subscription__empty"><strong>暂无已发布的月度套餐</strong><span>请稍后刷新；页面不会显示过期或本地套餐。</span><small>请求编号：{data.plans.meta.requestId}</small></div>}
         {data.plans.data.length > 0 ? <PageControls onPage={subscription.setPlanPage} page={data.plans.meta.page} pageSize={data.plans.meta.pageSize} total={data.plans.meta.total} /> : null}
@@ -621,14 +635,14 @@ export function StoryWorkspaceSubscriptionPage() {
         <div className="story-workspace-subscription__actions">
           <section aria-labelledby="plan-actions-title">
             <h3 id="plan-actions-title">套餐操作</h3>
-            <p>{selectedPlan ? `已选择 ${selectedPlan.planName} v${selectedPlan.version}` : '先选择一个真实套餐版本。'}</p>
+            <p>{selectedPlan ? `已选择 ${selectedPlan.planName} v${selectedPlan.version}` : '选择一个已发布、可开通的真实套餐版本。'}</p>
             <div>{targetActions.map((action) => <button
               className="story-workspace-subscription__button is-primary"
-              disabled={!selectedPlan?.eligibility.eligible || commandState.isPreviewing}
+              disabled={!selectedPlan?.available || !selectedPlan.eligibility.eligible || selectedPlan.planVersionId === null || commandState.isPreviewing}
               key={action}
               onClick={(event) => {
                 commandTriggerRef.current = event.currentTarget;
-                void subscription.previewCommand(action, selectedPlan!.planVersionId);
+                if (selectedPlan?.planVersionId) void subscription.previewCommand(action, selectedPlan.planVersionId);
               }}
               type="button"
             >{commandState.isPreviewing ? '正在预览…' : actionLabel(action)}</button>)}</div>

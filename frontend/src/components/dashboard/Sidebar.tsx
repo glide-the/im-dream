@@ -47,7 +47,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
     let active = true;
     void (async () => {
       try {
-        const [response, models] = await Promise.all([
+        const [response, catalog] = await Promise.all([
           fetch(`${API_BASE}/api/system-config`, {
             headers: { 'Authorization': `Bearer ${getAuthToken()}` },
           }),
@@ -68,7 +68,7 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
         }
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
-        setModelOptions(models);
+        setModelOptions(catalog.models);
         setModelError(null);
         setSelectedModel(config.model ?? '');
         setDirty(false);
@@ -114,13 +114,15 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
   }, [updateConfig]);
 
   const handleModelChange = useCallback((value: string) => {
+    const target = modelOptions.find((option) => option.modelAlias === value);
+    if (!target?.callable) return;
     const previous = selectedModel;
     setSelectedModel(value);
     void (async () => {
       if (await updateConfig({ model: value })) return;
       setSelectedModel(previous);
     })();
-  }, [selectedModel, updateConfig]);
+  }, [modelOptions, selectedModel, updateConfig]);
 
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
@@ -170,11 +172,11 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
 
               <section>
                 <p style={{ margin: 0, fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Model</p>
-                {modelError ? <p role="alert" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{modelError}</p> : modelOptions.length === 0 ? <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>当前订阅没有可用模型。</p> : (
+                {modelError ? <p role="alert" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{modelError}</p> : modelOptions.length === 0 ? <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>平台尚未启用模型。</p> : (
                   <select aria-label="平台 Gateway 模型" value={selectedModel} onChange={(event) => handleModelChange(event.target.value)} style={{ width: '100%', marginTop: '0.65rem', padding: '0.75rem 0.85rem', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)' }}>
                     {!selectedModel ? <option value="" disabled>请选择模型</option> : null}
                     {selectedModel && !modelOptions.some((option) => option.modelAlias === selectedModel) ? <option value={selectedModel} disabled>{selectedModel}（不可用）</option> : null}
-                    {modelOptions.map((option) => <option key={option.modelAlias} value={option.modelAlias}>{option.displayName} · {option.modelAlias}</option>)}
+                    {modelOptions.map((option) => <option key={option.modelAlias} value={option.modelAlias} disabled={!option.callable}>{option.displayName} · {option.modelAlias}{option.callable ? '' : `（${option.requiredPlanCode ? `需要 ${option.requiredPlanCode}` : '不可调用'}）`}</option>)}
                   </select>
                 )}
               </section>

@@ -61,12 +61,41 @@ const planEligibilitySchema = z.object({
   appliesAt: isoTimestampSchema.nullable(),
 }).strict();
 
-const productPlanSchema = planSummarySchema.extend({
+const productPlanSchema = z.object({
+  planCode: safeIdentifierSchema,
+  planName: z.string().min(1).max(160),
+  eyebrow: z.string().min(1).max(160),
+  note: z.string().min(1).max(500),
+  details: z.array(z.string().min(1).max(500)),
   description: safeTextSchema.nullable(),
+  planVersionId: safeIdentifierSchema.nullable(),
+  version: positiveIntegerSchema.nullable(),
+  versionStatus: z.enum(['draft', 'published', 'retired']).nullable(),
+  billingCycle: z.literal('monthly'),
+  monthlyAllowanceTokens: nonNegativeIntegerSchema.nullable(),
+  monthlyPriceMicrousd: nonNegativeIntegerSchema.nullable(),
+  currency: z.literal('USD'),
+  available: z.boolean(),
+  unavailableReason: z.enum(['commercial_parameters_pending', 'configuration_incomplete']).nullable(),
   entitlements: z.array(productEntitlementSchema),
   eligibility: planEligibilitySchema,
   availableActions: z.array(productActionSchema),
-}).strict();
+}).strict().superRefine((plan, context) => {
+  const commercial = [plan.monthlyAllowanceTokens, plan.monthlyPriceMicrousd];
+  if (plan.available) {
+    if (plan.versionStatus !== 'published' || plan.planVersionId === null || plan.version === null || commercial.some((value) => value === null) || plan.unavailableReason !== null) {
+      context.addIssue({ code: 'custom', message: 'Available plan must expose a published commercial version.' });
+    }
+  } else if (
+    commercial.some((value) => value !== null)
+    || plan.unavailableReason === null
+    || plan.availableActions.length > 0
+    || ((plan.planVersionId === null) !== (plan.version === null))
+    || (plan.planVersionId !== null && plan.versionStatus !== 'draft' && plan.versionStatus !== 'retired')
+  ) {
+    context.addIssue({ code: 'custom', message: 'Unavailable plan must not expose commercial values or actions.' });
+  }
+});
 
 const allowanceSchema = z.object({
   unit: z.literal('tokens'),

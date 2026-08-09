@@ -255,21 +255,32 @@ async def put_system_config(
         if not _MODEL_ALIAS_PATTERN.fullmatch(model_alias):
             raise HTTPException(status_code=422, detail="Invalid platform model alias")
         try:
-            models = await asyncio.to_thread(
-                GatewayModelCatalogClient(user_id).list_models
+            catalog = await asyncio.to_thread(
+                GatewayModelCatalogClient(user_id).fetch_catalog
             )
         except GatewayInferenceError as exc:
             raise _gateway_error(exc) from exc
-        if model_alias not in {
-            model.model_alias
-            for model in models
-            if "messages:create" in model.gateway_scopes
-        }:
+        selected = next(
+            (model for model in catalog.models if model.model_alias == model_alias),
+            None,
+        )
+        if selected is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "GATEWAY_MODEL_SELECTION_STALE",
+                    "message": "The selected model is no longer enabled. Refresh and choose another model.",
+                },
+            )
+        if not selected.callable:
             raise HTTPException(
                 status_code=403,
                 detail={
                     "code": "GATEWAY_MODEL_NOT_AVAILABLE",
-                    "message": "The selected model is not available for this subscription.",
+                    "message": "The selected model is visible but not callable for the current subscription.",
+                    "availability": selected.availability,
+                    "requiredPlanCode": selected.required_plan_code,
+                    "upgradeHint": selected.upgrade_hint,
                 },
             )
         patch["model"] = model_alias

@@ -166,6 +166,7 @@ export default function ModelConfigSection() {
   const [imFullAccessEnabled, setImFullAccessEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('');
   const [modelOptions, setModelOptions] = useState<GatewayModel[]>([]);
+  const [defaultModelAlias, setDefaultModelAlias] = useState<string | null>(null);
   const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
   const [modelStatus, setModelStatus] = useState<string | null>(null);
   const [modelLoadNonce, setModelLoadNonce] = useState(0);
@@ -189,7 +190,8 @@ export default function ModelConfigSection() {
         const [configResult, modelsResult] = await Promise.allSettled([configRequest, modelsRequest]);
         if (!active) return;
         if (modelsResult.status === 'fulfilled') {
-          setModelOptions(modelsResult.value);
+          setModelOptions(modelsResult.value.models);
+          setDefaultModelAlias(modelsResult.value.defaultModelAlias);
           setModelCatalogError(null);
         } else if (modelsResult.reason?.name !== 'AbortError') {
           setModelOptions([]);
@@ -261,20 +263,46 @@ export default function ModelConfigSection() {
   }, [updateConfig]);
 
   const handleModelChange = useCallback((value: string) => {
+    const target = modelOptions.find((option) => option.modelAlias === value);
+    if (!target?.callable) {
+      setModelStatus(target?.upgradeHint ?? '此模型当前不可调用，请查看所需套餐或稍后重试。');
+      return;
+    }
     const previous = selectedModel;
     setSelectedModel(value);
     setModelStatus('正在保存平台模型…');
     void (async () => {
-      const savedConfig = await updateConfig({ model: value });
-      if (savedConfig) {
-        setSelectedModel(savedConfig.model ?? value);
-        setModelStatus('模型已保存，新 Claude Agent 对话将通过 Gateway 使用该模型。');
-        return;
+      try {
+        setSaving(true);
+        const response = await fetch(`${API_BASE}/api/system-config`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getAuthToken()}` },
+          body: JSON.stringify({ model: value }),
+        });
+        if (response.ok) {
+          const payload = (await response.json().catch(() => null)) as SystemConfigResponse | null;
+          const savedConfig = payload ? readSystemConfigResponse(payload) : { model: value };
+          setSelectedModel(savedConfig.model ?? value);
+          setModelStatus('模型已保存，新 Claude Agent 对话将通过 Gateway 使用该模型。');
+          return;
+        }
+        setSelectedModel(previous);
+        if (response.status === 403) {
+          setModelStatus('当前套餐不能调用此模型，请查看套餐后重新选择。');
+        } else if (response.status === 409) {
+          setModelStatus('此模型已停用或资格已变化，目录正在刷新，请重新选择。');
+          setModelLoadNonce((nonce) => nonce + 1);
+        } else {
+          setModelStatus('模型保存失败，请刷新目录后重试。');
+        }
+      } catch {
+        setSelectedModel(previous);
+        setModelStatus('网络连接失败，请稍后重试。');
+      } finally {
+        setSaving(false);
       }
-      setSelectedModel(previous);
-      setModelStatus('模型保存失败，请刷新目录后重试。');
     })();
-  }, [selectedModel, updateConfig]);
+  }, [modelOptions, selectedModel]);
 
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
@@ -548,36 +576,52 @@ export default function ModelConfigSection() {
             <button type="button" onClick={() => { setConfigLoading(true); setModelLoadNonce((value) => value + 1); }}>重新加载模型</button>
           </div>
         ) : modelOptions.length === 0 ? (
-          <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>当前订阅没有可供 Claude Agent 使用的模型。</p>
+          <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>平台尚未启用可展示的模型。</p>
         ) : (
           <>
-            <label htmlFor="platform-model-select" style={{ display: 'block', fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>平台 Gateway 模型</label>
-            <select
-              id="platform-model-select"
-              value={selectedModel}
-              onChange={(event) => handleModelChange(event.target.value)}
-              disabled={saving}
-              style={fieldStyle}
-            >
-              {!selectedModel ? <option value="" disabled>请选择模型</option> : null}
-              {selectedModel && !modelOptions.some((option) => option.modelAlias === selectedModel) ? (
-                <option value={selectedModel} disabled>{selectedModel}（已下架或无权限）</option>
-              ) : null}
-              {modelOptions.map((option) => (
-                <option key={option.modelAlias} value={option.modelAlias}>
-                  {option.displayName} · {option.modelAlias}
-                </option>
-              ))}
-            </select>
-            {selectedModel ? (() => {
-              const selected = modelOptions.find((option) => option.modelAlias === selectedModel);
-              if (!selected) return null;
-              const limits = [
-                selected.contextWindow ? `上下文 ${selected.contextWindow.toLocaleString()} Token` : null,
-                selected.maxOutputTokens ? `最大输出 ${selected.maxOutputTokens.toLocaleString()} Token` : null,
-              ].filter(Boolean).join(' · ');
-              return <p style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{limits || '平台 Gateway 已授权'}</p>;
-            })() : null}
+            {selectedModel && !modelOptions.some((option) => option.modelAlias === selectedModel) ? (
+              <div role="alert" style={{ marginBottom: '0.75rem', padding: '0.75rem', border: '1px solid var(--color-border-paper)', borderRadius: '12px', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+                已保存的模型 {selectedModel} 已停用或不再存在。请选择新的可调用模型。
+              </div>
+            ) : null}
+            {!modelOptions.some((option) => option.callable) ? (
+              <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+                当前没有可调用模型。<a href="/story-workspace/subscription#subscription-plans">查看套餐与 Free 资格</a>
+              </p>
+            ) : null}
+            <fieldset disabled={saving} style={{ margin: 0, padding: 0, border: 0 }}>
+              <legend style={{ marginBottom: '0.65rem', fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>平台 Gateway 模型</legend>
+              <div style={{ display: 'grid', gap: '0.65rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
+                {modelOptions.map((option) => {
+                  const limits = [
+                    option.contextWindow ? `上下文 ${option.contextWindow.toLocaleString()}` : null,
+                    option.maxOutputTokens ? `输出 ${option.maxOutputTokens.toLocaleString()}` : null,
+                  ].filter(Boolean).join(' · ');
+                  const capabilities = Object.entries(option.capabilities).filter(([, enabled]) => enabled).map(([name]) => name).join(' · ');
+                  const reason = option.callable
+                    ? '当前套餐可调用'
+                    : option.availability === 'upgrade_required'
+                      ? `需要 ${option.requiredPlanCode ?? '更高'} 套餐`
+                      : option.availability === 'allowance_exhausted'
+                        ? '本周期 Token 已用完'
+                        : option.availability === 'maintenance'
+                          ? '平台维护中'
+                          : '当前资格不可调用';
+                  return (
+                    <label key={option.modelAlias} style={{ display: 'grid', gap: '0.35rem', padding: '0.85rem', borderRadius: '14px', border: `1px solid ${selectedModel === option.modelAlias ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`, opacity: option.callable ? 1 : 0.72, cursor: option.callable ? 'pointer' : 'not-allowed' }}>
+                      <span style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
+                        <input type="radio" name="platform-model" value={option.modelAlias} checked={selectedModel === option.modelAlias} disabled={!option.callable || saving} onChange={() => handleModelChange(option.modelAlias)} />
+                        <span><strong>{option.displayName}</strong><br /><code style={{ overflowWrap: 'anywhere' }}>{option.modelAlias}</code></span>
+                      </span>
+                      <span style={{ fontSize: '0.75rem', color: option.callable ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>{reason}{defaultModelAlias === option.modelAlias ? ' · Free 默认' : ''}</span>
+                      {capabilities ? <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{capabilities}</span> : null}
+                      {limits ? <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{limits}</span> : null}
+                      {!option.callable && option.requiredPlanCode ? <a href="/story-workspace/subscription#subscription-plans" onClick={(event) => event.stopPropagation()} style={{ fontSize: '0.74rem' }}>查看套餐</a> : null}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
             {modelStatus ? <p aria-live="polite" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{modelStatus}</p> : null}
           </>
         )}

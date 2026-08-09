@@ -18,7 +18,7 @@ test('page hierarchy follows subscription, Token conservation, entitlements, mod
     '当前权益',
     '当前可用模型',
     '本周期 Usage',
-    '可用月度套餐与操作',
+    '为正在形成的故事留出空间',
   ];
   for (let index = 1; index < headings.length; index += 1) {
     expect(PAGE.indexOf(headings[index - 1]!)).toBeLessThan(PAGE.indexOf(headings[index]!));
@@ -26,7 +26,7 @@ test('page hierarchy follows subscription, Token conservation, entitlements, mod
   expect(PAGE).not.toContain('STORY_WORKSPACE_DREAM_PLANS');
   expect(PAGE).not.toContain('订阅功能即将开放');
   expect(PAGE).not.toContain('正式开通后可在此管理');
-  expect(PAGE).toContain('disabled={!plan.eligibility.eligible}');
+  expect(PAGE).toContain('const canSelect = plan.available && plan.eligibility.eligible');
 });
 
 test('browser code reaches only the five same-origin BFF routes through one API owner', () => {
@@ -43,10 +43,14 @@ test('browser code reaches only the five same-origin BFF routes through one API 
   expect(HOOK).not.toContain('localStorage');
 });
 
-test('strict DTOs and rendered copy exclude subscription-incompatible financial fields', () => {
-  for (const term of ['price', 'currency', 'microusd', 'cashBalance', 'topUp', 'checkout', 'refund', 'reversal', 'financialLedger', 'payment', 'billing']) {
+test('strict DTOs allow only server commercial facts and exclude local balances or fake checkout state', () => {
+  for (const term of ['cashBalance', 'topUp', 'refund', 'reversal', 'financialLedger', 'fakePrice', 'mockPrice']) {
     expect(PAGE.toLocaleLowerCase()).not.toContain(term.toLocaleLowerCase());
   }
+  expect(PAGE).toContain('商业参数待发布 · 暂不可开通');
+  expect(PAGE).toContain('不会创建支付或订阅结果');
+  expect(API).toContain('monthlyPriceMicrousd: nonNegativeIntegerSchema.nullable()');
+  expect(API).toContain("unavailableReason: z.enum(['commercial_parameters_pending', 'configuration_incomplete']).nullable()");
   expect(API).toContain("unit: z.literal('tokens')");
   expect(API).toContain('Number.MAX_SAFE_INTEGER');
   expect(API).toContain('Token allowance conservation failed.');

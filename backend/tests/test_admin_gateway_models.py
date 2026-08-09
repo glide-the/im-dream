@@ -55,24 +55,33 @@ def test_catalog_uses_models_scope_and_strict_public_projection() -> None:
             "context_window": 200000,
             "max_output_tokens": 8192,
             "capabilities": {"tools": True},
-            "gateway_scopes": ["messages:create", "models:list"],
-            "owned_by": "internal-provider",
+            "enabled": True,
+            "callable": True,
+            "availability": "included",
+            "required_plan_code": "free",
+            "upgrade_hint": None,
         }],
+        "default_model_alias": "dream-balanced",
     }))
-    models = GatewayModelCatalogClient(
+    catalog = GatewayModelCatalogClient(
         42,
         configuration=configuration(),
         transport=transport,
-    ).list_models()
+    ).fetch_catalog()
 
-    assert models[0].public_dict() == {
+    assert catalog.default_model_alias == "dream-balanced"
+    assert catalog.models[0].public_dict() == {
         "modelAlias": "dream-balanced",
         "displayName": "Dream Balanced",
         "protocol": "anthropic",
         "capabilities": {"tools": True},
-        "gatewayScopes": ["messages:create", "models:list"],
         "contextWindow": 200000,
         "maxOutputTokens": 8192,
+        "enabled": True,
+        "callable": True,
+        "availability": "included",
+        "requiredPlanCode": "free",
+        "upgradeHint": None,
     }
     call = transport.calls[0]
     assert call["url"] == "http://127.0.0.1:3000/v1/models"
@@ -91,6 +100,7 @@ def test_catalog_rejects_malformed_or_duplicate_aliases() -> None:
     malformed = RecordingTransport(FakeResponse(200, {
         "object": "list",
         "data": [{"id": "unsafe alias"}],
+        "default_model_alias": None,
     }))
     with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
         GatewayModelCatalogClient(
@@ -98,4 +108,3 @@ def test_catalog_rejects_malformed_or_duplicate_aliases() -> None:
             configuration=configuration(),
             transport=malformed,
         ).list_models()
-

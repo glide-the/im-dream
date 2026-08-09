@@ -138,7 +138,13 @@ async function installProductMocks(page: Page, mode: SubscriptionMockMode = 'act
         data: [
           {
             ...planSummary('pv_studio', 'Studio', 2, 2_000_000),
+            eyebrow: 'For active stories',
+            note: 'Room for ongoing work',
+            details: ['Long-form support', 'More monthly Token'],
             description: 'For long-form story work.',
+            versionStatus: 'published',
+            available: true,
+            unavailableReason: null,
             entitlements: [{
               gatewayScopes: ['messages:create', 'chat:create'],
               modelAliases: ['dream-balanced', 'dream-long'],
@@ -151,7 +157,13 @@ async function installProductMocks(page: Page, mode: SubscriptionMockMode = 'act
           },
           {
             ...planSummary('pv_archive', 'Archive', 1, 500_000),
+            eyebrow: 'For quiet archives',
+            note: 'Keep work close',
+            details: ['A smaller monthly workspace'],
             description: 'Not eligible for the current subscription state.',
+            versionStatus: 'published',
+            available: true,
+            unavailableReason: null,
             entitlements: [{
               gatewayScopes: ['messages:create'],
               modelAliases: ['dream-balanced'],

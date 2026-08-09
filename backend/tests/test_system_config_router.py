@@ -136,7 +136,7 @@ class TestSystemConfigRouter(unittest.TestCase):
         )
 
     def test_put_model_accepts_only_admin_gateway_catalog_alias(self):
-        from services.admin_gateway.models import GatewayModel
+        from services.admin_gateway.models import GatewayModel, GatewayModelCatalog
 
         saved_patch: dict = {}
         model = GatewayModel(
@@ -144,12 +144,16 @@ class TestSystemConfigRouter(unittest.TestCase):
             display_name="Dream Balanced",
             protocol="anthropic",
             capabilities={"tools": True},
-            gateway_scopes=("messages:create",),
             context_window=200000,
             max_output_tokens=8192,
+            enabled=True,
+            callable=True,
+            availability="included",
+            required_plan_code="free",
+            upgrade_hint=None,
         )
         catalog = unittest.mock.MagicMock()
-        catalog.list_models.return_value = [model]
+        catalog.fetch_catalog.return_value = GatewayModelCatalog((model,), "dream-balanced")
         with (
             unittest.mock.patch.object(
                 system_config_router,
@@ -176,8 +180,10 @@ class TestSystemConfigRouter(unittest.TestCase):
         self.assertEqual(saved_patch, {"model": "dream-balanced", "provider": "gateway"})
 
     def test_put_model_rejects_alias_not_returned_by_gateway(self):
+        from services.admin_gateway.models import GatewayModelCatalog
+
         catalog = unittest.mock.MagicMock()
-        catalog.list_models.return_value = []
+        catalog.fetch_catalog.return_value = GatewayModelCatalog((), None)
         with (
             unittest.mock.patch.object(
                 system_config_router,
@@ -194,7 +200,35 @@ class TestSystemConfigRouter(unittest.TestCase):
                 json={"model": "provider-upstream-name"},
             )
 
+        self.assertEqual(response.status_code, 409, response.text)
+        save_config.assert_not_called()
+
+    def test_put_model_rejects_visible_but_uncallable_alias(self):
+        from services.admin_gateway.models import GatewayModel, GatewayModelCatalog
+
+        model = GatewayModel(
+            model_alias="dream-premium",
+            display_name="Dream Premium",
+            protocol="anthropic",
+            capabilities={"tools": True},
+            context_window=200000,
+            max_output_tokens=8192,
+            enabled=True,
+            callable=False,
+            availability="upgrade_required",
+            required_plan_code="dream",
+            upgrade_hint="升级 Dream 后可用",
+        )
+        catalog = unittest.mock.MagicMock()
+        catalog.fetch_catalog.return_value = GatewayModelCatalog((model,), None)
+        with (
+            unittest.mock.patch.object(system_config_router, "GatewayModelCatalogClient", return_value=catalog),
+            unittest.mock.patch.object(system_config_router.database, "save_system_config") as save_config,
+        ):
+            response = self.client.put("/api/system-config", json={"model": "dream-premium"})
+
         self.assertEqual(response.status_code, 403, response.text)
+        self.assertEqual(response.json()["detail"]["requiredPlanCode"], "dream")
         save_config.assert_not_called()
 
 
