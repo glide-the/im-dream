@@ -46,12 +46,14 @@ The system config is a freeform dict stored per user.  Known fields:
 
 from __future__ import annotations
 
+import asyncio
 import re
 from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException
 
 import database
+from services.admin_gateway import GatewayInferenceError, GatewayModelCatalogClient
 from .deps import get_current_user
 
 router = APIRouter()
@@ -91,6 +93,14 @@ _SANDBOX_DOMAIN_PATTERN = re.compile(
     r"^(?:\*\.)?(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*"
     r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
 )
+_MODEL_ALIAS_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+
+
+def _gateway_error(exc: GatewayInferenceError) -> HTTPException:
+    return HTTPException(
+        status_code=exc.status_code,
+        detail={"code": exc.code, "message": "The platform model catalog is unavailable."},
+    )
 
 
 def _sanitize_env_vars(raw: object) -> dict[str, str]:
@@ -219,7 +229,7 @@ def get_system_config(current_user: dict = Depends(get_current_user)):
 
 
 @router.put("/api/system-config")
-def put_system_config(
+async def put_system_config(
     request: dict,
     current_user: dict = Depends(get_current_user),
 ):
@@ -235,10 +245,35 @@ def put_system_config(
 
     patch: dict = {}
 
-    if "provider" in request:
-        patch["provider"] = str(request["provider"])[:64]
+    if "provider" in request and str(request["provider"]).strip() != "gateway":
+        raise HTTPException(
+            status_code=400,
+            detail="AI provider routing is controlled by the Admin Gateway",
+        )
     if "model" in request:
-        patch["model"] = str(request["model"])[:256]
+        model_alias = str(request["model"]).strip()
+        if not _MODEL_ALIAS_PATTERN.fullmatch(model_alias):
+            raise HTTPException(status_code=422, detail="Invalid platform model alias")
+        try:
+            models = await asyncio.to_thread(
+                GatewayModelCatalogClient(user_id).list_models
+            )
+        except GatewayInferenceError as exc:
+            raise _gateway_error(exc) from exc
+        if model_alias not in {
+            model.model_alias
+            for model in models
+            if "messages:create" in model.gateway_scopes
+        }:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "GATEWAY_MODEL_NOT_AVAILABLE",
+                    "message": "The selected model is not available for this subscription.",
+                },
+            )
+        patch["model"] = model_alias
+        patch["provider"] = "gateway"
     if "system_prompt" in request:
         patch["system_prompt"] = str(request["system_prompt"])[:16_384]
     if "workspace_enabled" in request:

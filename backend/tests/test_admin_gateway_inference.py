@@ -156,3 +156,12 @@ def test_runtime_inference_entrypoints_have_no_direct_provider_transport() -> No
     assert "requests.post" not in picture_source
     assert "IMAGE_API_ENDPOINT" not in picture_source
     assert "IMAGE_API_KEY" not in picture_source
+
+
+def test_claude_runner_applies_server_selected_model_when_gateway_is_enforced() -> None:
+    backend_root = Path(__file__).resolve().parents[1]
+    runner_source = (
+        backend_root / "libs/claude_agent_kit/server/agent_runner.py"
+    ).read_text(encoding="utf-8")
+    assert "gateway_model_override = gateway_enabled()" in runner_source
+    assert "sdk_options.model = model" in runner_source

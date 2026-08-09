@@ -13,11 +13,11 @@ import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
 import { emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
+import { fetchGatewayModels, gatewayModelsErrorMessage, type GatewayModel } from '../../api/gatewayModelsApi';
 
 export type { ThemeMode };
 
 interface SystemConfigData {
-  provider?: string;
   model?: string;
   system_prompt?: string;
   workspace_enabled?: boolean;
@@ -30,19 +30,15 @@ const THEME_OPTIONS: { mode: ThemeMode; label: string; Icon: typeof IconSun }[] 
   { mode: 'dark', label: 'Dark', Icon: IconMoon },
 ];
 
-const MODEL_OPTIONS = [
-  { label: 'Auto', value: 'auto', model: 'claude-sonnet-4-20250514', provider: 'anthropic' },
-  { label: 'Claude Sonnet', value: 'claude-sonnet-4-20250514', model: 'claude-sonnet-4-20250514', provider: 'anthropic' },
-  { label: 'GPT-4.1', value: 'gpt-4.1-2025-04-14', model: 'gpt-4.1-2025-04-14', provider: 'openai' },
-] as const;
-
 const DEFAULT_SYSTEM_PROMPT = 'You are a concise and practical AI sales assistant.';
 
 export default function Sidebar({ open, desktopCollapsed = false, onClose }: { open: boolean; desktopCollapsed?: boolean; onClose: () => void }) {
   const [theme, setTheme] = useState<ThemeMode>(() => getThemeMode());
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [workspaceMode, setWorkspaceMode] = useState(true);
-  const [selectedModel, setSelectedModel] = useState('auto');
+  const [selectedModel, setSelectedModel] = useState('');
+  const [modelOptions, setModelOptions] = useState<GatewayModel[]>([]);
+  const [modelError, setModelError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -51,9 +47,12 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
     let active = true;
     void (async () => {
       try {
-        const response = await fetch(`${API_BASE}/api/system-config`, {
-          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
-        });
+        const [response, models] = await Promise.all([
+          fetch(`${API_BASE}/api/system-config`, {
+            headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+          }),
+          fetchGatewayModels(),
+        ]);
         if (!response.ok) {
           return;
         }
@@ -69,11 +68,12 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
         }
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
-        const match = MODEL_OPTIONS.find((option) => option.model === config.model);
-        setSelectedModel(match?.value ?? 'auto');
+        setModelOptions(models);
+        setModelError(null);
+        setSelectedModel(config.model ?? '');
         setDirty(false);
-      } catch {
-        // ignore fetch errors
+      } catch (error) {
+        if (active) setModelError(gatewayModelsErrorMessage(error));
       } finally {
         if (active) {
           setConfigLoading(false);
@@ -114,10 +114,13 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
   }, [updateConfig]);
 
   const handleModelChange = useCallback((value: string) => {
+    const previous = selectedModel;
     setSelectedModel(value);
-    const option = MODEL_OPTIONS.find((entry) => entry.value === value) ?? MODEL_OPTIONS[0];
-    void updateConfig({ model: option.model, provider: option.provider });
-  }, [updateConfig]);
+    void (async () => {
+      if (await updateConfig({ model: value })) return;
+      setSelectedModel(previous);
+    })();
+  }, [selectedModel, updateConfig]);
 
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
@@ -167,9 +170,13 @@ export default function Sidebar({ open, desktopCollapsed = false, onClose }: { o
 
               <section>
                 <p style={{ margin: 0, fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>Model</p>
-                <select value={selectedModel} onChange={(event) => handleModelChange(event.target.value)} style={{ width: '100%', marginTop: '0.65rem', padding: '0.75rem 0.85rem', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)' }}>
-                  {MODEL_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                </select>
+                {modelError ? <p role="alert" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{modelError}</p> : modelOptions.length === 0 ? <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>当前订阅没有可用模型。</p> : (
+                  <select aria-label="平台 Gateway 模型" value={selectedModel} onChange={(event) => handleModelChange(event.target.value)} style={{ width: '100%', marginTop: '0.65rem', padding: '0.75rem 0.85rem', borderRadius: '12px', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-paper)', color: 'var(--color-text-primary)' }}>
+                    {!selectedModel ? <option value="" disabled>请选择模型</option> : null}
+                    {selectedModel && !modelOptions.some((option) => option.modelAlias === selectedModel) ? <option value={selectedModel} disabled>{selectedModel}（不可用）</option> : null}
+                    {modelOptions.map((option) => <option key={option.modelAlias} value={option.modelAlias}>{option.displayName} · {option.modelAlias}</option>)}
+                  </select>
+                )}
               </section>
 
               <section>

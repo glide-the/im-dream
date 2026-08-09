@@ -2727,8 +2727,9 @@ class ClaudeAgentRunner:
         # Gateway enforcement runs after every project/user overlay. When the
         # canary is enabled, missing service configuration or canonical user
         # identity fails closed before the Claude subprocess starts.
-        from services.admin_gateway import apply_gateway_sdk_env_to_options
+        from services.admin_gateway import apply_gateway_sdk_env_to_options, gateway_enabled
 
+        gateway_model_override = gateway_enabled()
         apply_gateway_sdk_env_to_options(
             sdk_options,
             opts.canonical_user_id,
@@ -2742,7 +2743,10 @@ class ClaudeAgentRunner:
         sdk_options.stderr = _make_cli_stderr_capture(_stderr_buf)
         if resume:
             sdk_options.resume = thread_id
-        _apply_request_model_override_if_allowed(sdk_options, model)
+        if gateway_model_override and model:
+            sdk_options.model = model
+        else:
+            _apply_request_model_override_if_allowed(sdk_options, model)
         if system_prompt:
             sdk_options.system_prompt = system_prompt
         # ------------------------------------------------------------------

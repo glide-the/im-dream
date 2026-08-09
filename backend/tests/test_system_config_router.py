@@ -135,6 +135,68 @@ class TestSystemConfigRouter(unittest.TestCase):
             {"theme": "dark", "env_vars": {"API_TIMEOUT_MS": "120000"}},
         )
 
+    def test_put_model_accepts_only_admin_gateway_catalog_alias(self):
+        from services.admin_gateway.models import GatewayModel
+
+        saved_patch: dict = {}
+        model = GatewayModel(
+            model_alias="dream-balanced",
+            display_name="Dream Balanced",
+            protocol="anthropic",
+            capabilities={"tools": True},
+            gateway_scopes=("messages:create",),
+            context_window=200000,
+            max_output_tokens=8192,
+        )
+        catalog = unittest.mock.MagicMock()
+        catalog.list_models.return_value = [model]
+        with (
+            unittest.mock.patch.object(
+                system_config_router,
+                "GatewayModelCatalogClient",
+                return_value=catalog,
+            ),
+            unittest.mock.patch.object(
+                system_config_router.database,
+                "save_system_config",
+                side_effect=lambda _user_id, patch: saved_patch.update(patch),
+            ),
+            unittest.mock.patch.object(
+                system_config_router.database,
+                "get_system_config",
+                side_effect=lambda _user_id: dict(saved_patch),
+            ),
+        ):
+            response = self.client.put(
+                "/api/system-config",
+                json={"model": "dream-balanced"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(saved_patch, {"model": "dream-balanced", "provider": "gateway"})
+
+    def test_put_model_rejects_alias_not_returned_by_gateway(self):
+        catalog = unittest.mock.MagicMock()
+        catalog.list_models.return_value = []
+        with (
+            unittest.mock.patch.object(
+                system_config_router,
+                "GatewayModelCatalogClient",
+                return_value=catalog,
+            ),
+            unittest.mock.patch.object(
+                system_config_router.database,
+                "save_system_config",
+            ) as save_config,
+        ):
+            response = self.client.put(
+                "/api/system-config",
+                json={"model": "provider-upstream-name"},
+            )
+
+        self.assertEqual(response.status_code, 403, response.text)
+        save_config.assert_not_called()
+
 
 class TestSandboxFsAllowedWritePathsSanitizer(unittest.TestCase):
     """_sanitize_sandbox_fs_allowed_write_paths contract."""

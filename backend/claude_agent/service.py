@@ -1721,7 +1721,7 @@ class ClaudeAgentService:
             execution.request,
         )
         if execution.request.model:
-            asst_metadata["chatModel"] = {"provider": "anthropic", "model": execution.request.model}
+            asst_metadata["chatModel"] = {"provider": "gateway", "model": execution.request.model}
         tool_count = sum(1 for p in asst_parts if p.get("type") == "tool-invocation")
         if tool_count:
             asst_metadata["toolCount"] = tool_count
@@ -1778,7 +1778,7 @@ class ClaudeAgentService:
                 }
             if execution.request.model:
                 asst_metadata["chatModel"] = {
-                    "provider": "anthropic",
+                    "provider": "gateway",
                     "model": execution.request.model,
                 }
             tool_count = sum(1 for p in asst_parts if p.get("type") == "tool-invocation")

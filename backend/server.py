@@ -839,6 +839,7 @@ from routers.claude_plugins import router as claude_plugins_router
 from routers.deck_plugin_binding import router as deck_plugin_binding_router
 from routers.story_workspace import router as story_workspace_router
 from routers.system_config import router as system_config_router
+from routers.gateway_models import router as gateway_models_router
 from routers.workspace import router as workspace_router
 from routers.reflections import router as reflections_router
 from routers.voices import (
@@ -1036,6 +1037,7 @@ app.include_router(claude_plugins_router)
 app.include_router(deck_plugin_binding_router)
 app.include_router(story_workspace_router)
 app.include_router(system_config_router)
+app.include_router(gateway_models_router)
 app.include_router(workspace_router)
 app.include_router(reflections_router)
 

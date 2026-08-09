@@ -38,6 +38,11 @@ import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
+import {
+  fetchGatewayModels,
+  gatewayModelsErrorMessage,
+  type GatewayModel,
+} from '../../api/gatewayModelsApi';
 import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
 
 export type { ThemeMode };
@@ -49,7 +54,6 @@ interface EnvVar {
 }
 
 interface SystemConfigData {
-  provider?: string;
   model?: string;
   system_prompt?: string;
   workspace_enabled?: boolean;
@@ -68,12 +72,6 @@ const THEME_OPTIONS: { mode: ThemeMode; label: string; Icon: typeof IconSun }[] 
   { mode: 'system', label: 'System', Icon: IconMonitor },
   { mode: 'dark', label: 'Dark', Icon: IconMoon },
 ];
-
-const MODEL_OPTIONS = [
-  { label: 'Auto', value: 'auto', model: 'claude-sonnet-4-20250514', provider: 'anthropic' },
-  { label: 'Claude Sonnet', value: 'claude-sonnet-4-20250514', model: 'claude-sonnet-4-20250514', provider: 'anthropic' },
-  { label: 'GPT-4.1', value: 'gpt-4.1-2025-04-14', model: 'gpt-4.1-2025-04-14', provider: 'openai' },
-] as const;
 
 const SANDBOX_NETWORK_ACCESS_OPTIONS: {
   enabled: boolean;
@@ -138,8 +136,7 @@ function readSystemConfigResponse(payload: SystemConfigResponse): SystemConfigDa
 
 function hasSystemConfigFields(config: SystemConfigData): boolean {
   return Boolean(
-    config.provider !== undefined
-    || config.model !== undefined
+    config.model !== undefined
     || config.system_prompt !== undefined
     || config.workspace_enabled !== undefined
     || config.sandbox_network_mode !== undefined
@@ -167,7 +164,11 @@ export default function ModelConfigSection() {
   const [sandboxFsAddingPath, setSandboxFsAddingPath] = useState(false);
   const [sandboxFsNewPath, setSandboxFsNewPath] = useState('');
   const [imFullAccessEnabled, setImFullAccessEnabled] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('auto');
+  const [selectedModel, setSelectedModel] = useState('');
+  const [modelOptions, setModelOptions] = useState<GatewayModel[]>([]);
+  const [modelCatalogError, setModelCatalogError] = useState<string | null>(null);
+  const [modelStatus, setModelStatus] = useState<string | null>(null);
+  const [modelLoadNonce, setModelLoadNonce] = useState(0);
   const [dirty, setDirty] = useState(false);
   const [configLoading, setConfigLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -177,13 +178,25 @@ export default function ModelConfigSection() {
 
   useEffect(() => {
     let active = true;
+    const controller = new AbortController();
     void (async () => {
+      const configRequest = fetch(`${API_BASE}/api/system-config`, {
+        headers: { 'Authorization': `Bearer ${getAuthToken()}` },
+        signal: controller.signal,
+      });
+      const modelsRequest = fetchGatewayModels(controller.signal);
       try {
-        const response = await fetch(`${API_BASE}/api/system-config`, {
-          headers: { 'Authorization': `Bearer ${getAuthToken()}` },
-        });
-        if (!response.ok) return;
-        const payload = (await response.json()) as SystemConfigResponse;
+        const [configResult, modelsResult] = await Promise.allSettled([configRequest, modelsRequest]);
+        if (!active) return;
+        if (modelsResult.status === 'fulfilled') {
+          setModelOptions(modelsResult.value);
+          setModelCatalogError(null);
+        } else if (modelsResult.reason?.name !== 'AbortError') {
+          setModelOptions([]);
+          setModelCatalogError(gatewayModelsErrorMessage(modelsResult.reason));
+        }
+        if (configResult.status !== 'fulfilled' || !configResult.value.ok) return;
+        const payload = (await configResult.value.json()) as SystemConfigResponse;
         const config = readSystemConfigResponse(payload);
         if (!active) return;
         // Do not apply the persisted backend theme while mounting this section.
@@ -199,20 +212,21 @@ export default function ModelConfigSection() {
         setSandboxFsStatus(null);
         setSandboxNetworkStatus(null);
         setImFullAccessEnabled(config.im_full_access_enabled ?? false);
-        const match = MODEL_OPTIONS.find((option) => option.model === config.model);
-        setSelectedModel(match?.value ?? 'auto');
+        setSelectedModel(config.model ?? '');
         const savedEnvVars = config.env_vars ?? {};
         setEnvVars(Object.entries(savedEnvVars).map(([key, value]) => ({ key, value })));
         setDirty(false);
         setEnvVarsDirty(false);
-      } catch {
-        // ignore fetch errors
+      } catch (error) {
+        if ((error as { name?: string }).name !== 'AbortError') {
+          setModelCatalogError(gatewayModelsErrorMessage(error));
+        }
       } finally {
         if (active) setConfigLoading(false);
       }
     })();
-    return () => { active = false; };
-  }, []);
+    return () => { active = false; controller.abort(); };
+  }, [modelLoadNonce]);
 
   // Keep the segmented control in sync with the unified theme store; applying
   // data-theme / colorScheme and following the system preference is handled
@@ -247,10 +261,20 @@ export default function ModelConfigSection() {
   }, [updateConfig]);
 
   const handleModelChange = useCallback((value: string) => {
+    const previous = selectedModel;
     setSelectedModel(value);
-    const option = MODEL_OPTIONS.find((entry) => entry.value === value) ?? MODEL_OPTIONS[0];
-    void updateConfig({ model: option.model, provider: option.provider });
-  }, [updateConfig]);
+    setModelStatus('正在保存平台模型…');
+    void (async () => {
+      const savedConfig = await updateConfig({ model: value });
+      if (savedConfig) {
+        setSelectedModel(savedConfig.model ?? value);
+        setModelStatus('模型已保存，新 Claude Agent 对话将通过 Gateway 使用该模型。');
+        return;
+      }
+      setSelectedModel(previous);
+      setModelStatus('模型保存失败，请刷新目录后重试。');
+    })();
+  }, [selectedModel, updateConfig]);
 
   const handleWorkspaceToggle = useCallback(() => {
     const next = !workspaceMode;
@@ -518,15 +542,45 @@ export default function ModelConfigSection() {
         <p style={{ margin: '0 0 0.65rem', fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           AI 模型 / Model
         </p>
-        <select
-          value={selectedModel}
-          onChange={(event) => handleModelChange(event.target.value)}
-          style={fieldStyle}
-        >
-          {MODEL_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
+        {modelCatalogError ? (
+          <div role="alert" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
+            <p>{modelCatalogError}</p>
+            <button type="button" onClick={() => { setConfigLoading(true); setModelLoadNonce((value) => value + 1); }}>重新加载模型</button>
+          </div>
+        ) : modelOptions.length === 0 ? (
+          <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>当前订阅没有可供 Claude Agent 使用的模型。</p>
+        ) : (
+          <>
+            <label htmlFor="platform-model-select" style={{ display: 'block', fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>平台 Gateway 模型</label>
+            <select
+              id="platform-model-select"
+              value={selectedModel}
+              onChange={(event) => handleModelChange(event.target.value)}
+              disabled={saving}
+              style={fieldStyle}
+            >
+              {!selectedModel ? <option value="" disabled>请选择模型</option> : null}
+              {selectedModel && !modelOptions.some((option) => option.modelAlias === selectedModel) ? (
+                <option value={selectedModel} disabled>{selectedModel}（已下架或无权限）</option>
+              ) : null}
+              {modelOptions.map((option) => (
+                <option key={option.modelAlias} value={option.modelAlias}>
+                  {option.displayName} · {option.modelAlias}
+                </option>
+              ))}
+            </select>
+            {selectedModel ? (() => {
+              const selected = modelOptions.find((option) => option.modelAlias === selectedModel);
+              if (!selected) return null;
+              const limits = [
+                selected.contextWindow ? `上下文 ${selected.contextWindow.toLocaleString()} Token` : null,
+                selected.maxOutputTokens ? `最大输出 ${selected.maxOutputTokens.toLocaleString()} Token` : null,
+              ].filter(Boolean).join(' · ');
+              return <p style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{limits || '平台 Gateway 已授权'}</p>;
+            })() : null}
+            {modelStatus ? <p aria-live="polite" style={{ color: 'var(--color-text-muted)', fontSize: '0.76rem' }}>{modelStatus}</p> : null}
+          </>
+        )}
       </div>
 
       {/* System Prompt */}

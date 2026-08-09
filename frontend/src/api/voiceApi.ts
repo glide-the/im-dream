@@ -291,7 +291,6 @@ export async function chatWithVoiceSSE({
           role: 'user',
           parts: [{ type: 'text', text: message }],
         },
-        chatModel: { provider: 'anthropic', model: 'claude-sonnet-4-20250514' },
         toolChoice: 'auto',
         allowedAppDefaultToolkit: [],
         allowedMcpServers: {},

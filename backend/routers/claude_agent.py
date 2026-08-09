@@ -36,6 +36,7 @@ import asyncio
 import base64
 import json
 import logging
+import os
 import re
 from pathlib import Path
 from typing import Any, List, Optional
@@ -65,6 +66,10 @@ from libs.claude_agent_kit.server.workspace_file_sync import (
 )
 from libs.file_storage import server_file_storage
 from services.deck.chat_context import DeckChatContextError, DeckChatContextService
+from services.admin_gateway import (
+    GatewayInferenceError,
+    GatewayModelCatalogClient,
+)
 
 from .deps import get_current_user
 
@@ -73,6 +78,55 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _SANDBOX_NETWORK_MODES = {"disabled", "allowlist", "open"}
+_PLATFORM_MODEL_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
+
+
+async def _resolve_platform_model_alias(
+    user_id: int,
+    client_model_alias: str | None,
+) -> str:
+    try:
+        models = await asyncio.to_thread(GatewayModelCatalogClient(user_id).list_models)
+    except GatewayInferenceError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"error_code": exc.code, "message": "The platform model catalog is unavailable."},
+        ) from exc
+    callable_aliases = {
+        model.model_alias
+        for model in models
+        if "messages:create" in model.gateway_scopes
+    }
+    config = await asyncio.to_thread(database.get_system_config, user_id)
+    configured = str(config.get("model") or "").strip()
+    if configured not in callable_aliases:
+        default_alias = os.environ.get("INK_GATEWAY_TEXT_MODEL_ALIAS", "").strip()
+        if not _PLATFORM_MODEL_ALIAS.fullmatch(default_alias):
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error_code": "GATEWAY_MODEL_SELECTION_REQUIRED",
+                    "message": "Select an available platform model in Settings before starting Claude Agent.",
+                },
+            )
+        configured = default_alias if default_alias in callable_aliases else ""
+    if not configured:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error_code": "GATEWAY_MODEL_NOT_AVAILABLE",
+                "message": "No Claude Agent model is available for this subscription.",
+            },
+        )
+    if client_model_alias and client_model_alias != configured:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error_code": "GATEWAY_MODEL_SELECTION_CONFLICT",
+                "message": "The requested model does not match the server-side platform selection.",
+            },
+        )
+    return configured
 
 
 def _coerce_sandbox_network_mode(value: object) -> str:
@@ -338,6 +392,8 @@ async def claude_agent_stream(
     if not message_text:
         raise HTTPException(status_code=400, detail="message text is required")
 
+    platform_model_alias = await _resolve_platform_model_alias(user_id, body.model)
+
     _msg_dict = body.message if isinstance(body.message, dict) else None
     message_parts = list(_msg_dict.get("parts") or []) if _msg_dict else None
 
@@ -440,7 +496,7 @@ async def claude_agent_stream(
         thread_id=thread_id,
         resume=body.resume,
         tool_choice=body.tool_choice,
-        model=body.model,
+        model=platform_model_alias,
         max_turns=body.max_turns,
         cwd=body.cwd,
         message_id=_msg_dict.get("id") if _msg_dict else None,

@@ -106,6 +106,13 @@ INK_GATEWAY_IMAGE_GENERATION_MODEL_ALIAS=dream-image-generation
 The service key is injected at runtime and must never be committed, returned
 to the browser or written to application logs.
 
+Dream Settings → AI 模型 does not contain a static model list. The browser
+calls Dream `GET /api/gateway/models`; Dream signs the canonical subject and
+calls Admin `GET /v1/models` with `models:list`. Saving a model stores only the
+platform alias, and every Claude Agent turn revalidates it before the SDK is
+forced through Admin Gateway. Provider IDs, upstream model names and Gateway
+credentials are never accepted from the browser.
+
 Configure the PostgreSQL-only runtime in `backend/.env`. Set `DATABASE_URL`
 directly, or point Dream at an existing env file and it will load only that
 file's `DATABASE_URL` value:

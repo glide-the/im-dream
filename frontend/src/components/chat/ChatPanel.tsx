@@ -57,9 +57,7 @@ import { useWorkspaceSession } from '../../contexts/WorkspaceContext';
 import {
   type ChatApiSchemaRequestBody,
   type ChatAttachment,
-  type ChatModel,
   type ToolChoice,
-  DEFAULT_CHAT_MODEL,
 } from '../../lib/chat-schema';
 import { toFileProxyUrl } from '../../lib/toFileProxyUrl';
 import {
@@ -99,16 +97,12 @@ const CHAT_BOTTOM_PROXIMITY_PX = 120;
 const EMPTY_TOOL_CALL_IDS: ReadonlySet<string> = new Set<string>();
 
 interface SystemConfigData {
-  provider?: string;
-  model?: string;
   system_prompt?: string;
   im_full_access_enabled?: boolean;
 }
 
 interface SystemConfigResponse {
   data?: SystemConfigData;
-  provider?: string;
-  model?: string;
   system_prompt?: string;
   im_full_access_enabled?: boolean;
 }
@@ -294,10 +288,6 @@ export default function ChatPanel({
             hash: file.hash,
           }));
 
-        const resolvedChatModel: ChatModel = systemConfig?.provider && systemConfig?.model
-          ? { provider: systemConfig.provider, model: systemConfig.model }
-          : DEFAULT_CHAT_MODEL;
-
         const requestToolChoice: ToolChoice = imFullAccessEnabled
           ? 'auto'
           : getPendingData()?.toolChoice ?? currentToolChoice;
@@ -308,7 +298,6 @@ export default function ChatPanel({
           ...(voiceId ? { voiceId } : {}),
           resume: true,
           message: lastMessage,
-          chatModel: resolvedChatModel,
           toolChoice: requestToolChoice,
           allowedAppDefaultToolkit: [],
           allowedMcpServers: {},

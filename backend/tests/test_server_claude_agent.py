@@ -467,6 +467,11 @@ class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
                 route_module,
                 "sync_attachments_to_workspace_files",
             ) as sync_attachments_to_workspace_files,
+            unittest.mock.patch.object(
+                route_module,
+                "_resolve_platform_model_alias",
+                new=unittest.mock.AsyncMock(return_value="dream-balanced"),
+            ),
         ):
             response = asyncio.run(_call_route())
 
