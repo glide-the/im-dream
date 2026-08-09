@@ -70,8 +70,10 @@ test('Dream keeps its durable recent list while subscription uses the real month
   expect(ROUTER).toContain("case 'subscription'");
   expect(DREAM_LAUNCH).toContain('最近的 Dream');
   expect(SUBSCRIPTION).toContain('useStoryWorkspaceSubscription');
-  expect(SUBSCRIPTION).toContain('月度 Token 订阅');
-  expect(SUBSCRIPTION).toContain('本周期 Token 守恒');
+  expect(SUBSCRIPTION).toContain('Dream · Subscription');
+  expect(SUBSCRIPTION).toContain("{ id: 'info', label: '订阅信息' }");
+  expect(SUBSCRIPTION).toContain("{ id: 'allowance', label: '我的额度' }");
+  expect(SUBSCRIPTION).toContain("{ id: 'plans', label: '可选套餐' }");
   expect(SUBSCRIPTION).toContain('aria-labelledby');
   expect(SUBSCRIPTION).not.toContain('STORY_WORKSPACE_DREAM_PLANS');
   expect(SUBSCRIPTION).not.toContain('订阅功能即将开放');

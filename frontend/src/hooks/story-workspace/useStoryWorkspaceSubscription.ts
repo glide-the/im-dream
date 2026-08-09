@@ -1,5 +1,5 @@
-// [Input] Strict Product API client and the current subscription page pagination/commands.
-// [Output] One authoritative Token-only page state with preview/execute/refetch orchestration.
+// [Input] Strict Product API client and the current subscription page plans/commands.
+// [Output] One authoritative Token-only page state with lightweight context/plan loading and command orchestration.
 // [Pos] Story Workspace subscription application hook; it never derives server facts locally.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -7,15 +7,12 @@ import {
   ProductApiError,
   createProductPaymentIntent,
   fetchProductPaymentIntent,
-  fetchProductModelCatalog,
   fetchProductPlans,
   fetchProductSubscriptionContext,
-  fetchProductUsage,
   submitProductSubscriptionCommand,
   type CommandPreviewEnvelope,
   type CommandResultEnvelope,
   type ExecuteProductCommand,
-  type ModelCatalogEnvelope,
   type PaymentIntentEnvelope,
   type PlansEnvelope,
   type PreviewProductCommand,
@@ -23,24 +20,18 @@ import {
   type ProductCommandRequestOptions,
   type ProductRequestOptions,
   type SubscriptionContextEnvelope,
-  type UsageEnvelope,
 } from '../../api/productApi';
 
 const DEFAULT_PLAN_PAGE_SIZE = 20;
-const DEFAULT_USAGE_PAGE_SIZE = 25;
 
 export interface StoryWorkspaceSubscriptionData {
   context: SubscriptionContextEnvelope;
   plans: PlansEnvelope;
-  usage: UsageEnvelope;
-  models: ModelCatalogEnvelope;
 }
 
 export interface StoryWorkspaceSubscriptionApi {
   context: (options?: ProductRequestOptions) => Promise<SubscriptionContextEnvelope>;
   plans: (input: { page: number; pageSize: number }, options?: ProductRequestOptions) => Promise<PlansEnvelope>;
-  usage: (input: { page: number; pageSize: number }, options?: ProductRequestOptions) => Promise<UsageEnvelope>;
-  models: (options?: ProductRequestOptions) => Promise<ModelCatalogEnvelope>;
   command: typeof submitProductSubscriptionCommand;
   createPayment: typeof createProductPaymentIntent;
   payment: typeof fetchProductPaymentIntent;
@@ -49,8 +40,6 @@ export interface StoryWorkspaceSubscriptionApi {
 const DEFAULT_API: StoryWorkspaceSubscriptionApi = {
   context: fetchProductSubscriptionContext,
   plans: fetchProductPlans,
-  usage: fetchProductUsage,
-  models: fetchProductModelCatalog,
   command: submitProductSubscriptionCommand,
   createPayment: createProductPaymentIntent,
   payment: fetchProductPaymentIntent,
@@ -69,7 +58,6 @@ export interface StoryWorkspaceSubscriptionCommandState {
 export interface UseStoryWorkspaceSubscriptionOptions {
   api?: StoryWorkspaceSubscriptionApi;
   planPageSize?: number;
-  usagePageSize?: number;
 }
 
 function normalizeError(cause: unknown): ProductApiError {
@@ -126,9 +114,7 @@ export function useStoryWorkspaceSubscription(
 ) {
   const api = options.api ?? DEFAULT_API;
   const planPageSize = options.planPageSize ?? DEFAULT_PLAN_PAGE_SIZE;
-  const usagePageSize = options.usagePageSize ?? DEFAULT_USAGE_PAGE_SIZE;
   const [planPage, setPlanPageState] = useState(1);
-  const [usagePage, setUsagePageState] = useState(1);
   const [refreshVersion, setRefreshVersion] = useState(0);
   const [data, setData] = useState<StoryWorkspaceSubscriptionData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -156,12 +142,10 @@ export function useStoryWorkspaceSubscription(
     void Promise.all([
       api.context({ signal: controller.signal }),
       api.plans({ page: planPage, pageSize: planPageSize }, { signal: controller.signal }),
-      api.usage({ page: usagePage, pageSize: usagePageSize }, { signal: controller.signal }),
-      api.models({ signal: controller.signal }),
-    ]).then(([context, plans, usage, models]) => {
+    ]).then(([context, plans]) => {
       if (controller.signal.aborted) return;
       hasLoadedRef.current = true;
-      setData({ context, plans, usage, models });
+      setData({ context, plans });
       setAnnouncement(`月度 Token 订阅已更新，数据时间 ${context.data.asOf}。`);
     }).catch((cause: unknown) => {
       if (controller.signal.aborted || isAbortError(cause)) return;
@@ -175,7 +159,7 @@ export function useStoryWorkspaceSubscription(
     });
 
     return () => controller.abort();
-  }, [api, planPage, planPageSize, refreshVersion, usagePage, usagePageSize]);
+  }, [api, planPage, planPageSize, refreshVersion]);
 
   const refetch = useCallback(() => {
     setRefreshVersion((version) => version + 1);
@@ -183,10 +167,6 @@ export function useStoryWorkspaceSubscription(
 
   const setPlanPage = useCallback((page: number) => {
     setPlanPageState(Math.max(1, Math.trunc(page)));
-  }, []);
-
-  const setUsagePage = useCallback((page: number) => {
-    setUsagePageState(Math.max(1, Math.trunc(page)));
   }, []);
 
   const previewCommand = useCallback(async (
@@ -354,11 +334,9 @@ export function useStoryWorkspaceSubscription(
     error,
     announcement,
     planPage,
-    usagePage,
     commandState,
     refetch,
     setPlanPage,
-    setUsagePage,
     previewCommand,
     executeCommand,
     closeCommand,

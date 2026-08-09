@@ -176,16 +176,17 @@ for (const viewport of [
     expect(plansPayload.data.find((plan) => plan.planCode === 'free')).toMatchObject({ available: true, versionStatus: 'published' });
     expect(plansPayload.data.find((plan) => plan.planCode === 'dream')).toMatchObject({ available: false, versionStatus: 'draft' });
     expect(plansPayload.data.find((plan) => plan.planCode === 'is-dreaming')).toMatchObject({ available: false, versionStatus: 'draft' });
-    const planSection = page.locator('#subscription-plans');
+    await page.getByRole('tab', { name: '可选套餐' }).click();
+    const planSection = page.getByRole('tabpanel', { name: '可选套餐' });
     await expect(planSection.getByText('Free', { exact: true })).toBeVisible();
     await expect(planSection.getByText('Dream', { exact: true })).toBeVisible();
     await expect(planSection.getByText('is Dreaming', { exact: true })).toBeVisible();
-    const unavailableLabels = planSection.getByText('商业参数待发布 · 暂不可开通', { exact: true });
+    const unavailableLabels = planSection.getByText('暂不可开通', { exact: true });
     await expect(unavailableLabels.first()).toBeVisible();
     expect(await unavailableLabels.evaluateAll((elements) => (
       elements.filter((element) => (element as HTMLElement).offsetParent !== null).length
     ))).toBe(2);
-    await expect(page.getByText('100,000 Token', { exact: true }).first()).toBeVisible();
+    await expect(planSection.getByText(/每月 100,000 Token/).first()).toBeVisible();
     const horizontalOverflow = await page.evaluate(() => (
       document.documentElement.scrollWidth > document.documentElement.clientWidth + 1
     ));
