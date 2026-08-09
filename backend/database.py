@@ -1643,8 +1643,8 @@ def list_sessions_in_range(
         SELECT id, name, editor_state_json, labels, created_at, updated_at
         FROM user_sessions
         WHERE user_id = %s
-          AND (%s IS NULL OR date(COALESCE(created_at, updated_at)) >= %s)
-          AND (%s IS NULL OR date(COALESCE(created_at, updated_at)) <= %s)
+          AND (CAST(%s AS date) IS NULL OR date(COALESCE(created_at, updated_at)) >= CAST(%s AS date))
+          AND (CAST(%s AS date) IS NULL OR date(COALESCE(created_at, updated_at)) <= CAST(%s AS date))
         ORDER BY updated_at DESC
         """, (user_id, start_date, start_date, end_date, end_date)).fetchall()
 
@@ -2494,8 +2494,8 @@ def get_daily_pictures_range(user_id: int, start_date: Optional[str], end_date: 
         SELECT date, COALESCE(thumbnail_base64, image_base64) as base64, prompt, created_at
         FROM daily_pictures
         WHERE user_id = %s
-          AND (%s IS NULL OR date(date) >= %s)
-          AND (%s IS NULL OR date(date) <= %s)
+          AND (CAST(%s AS date) IS NULL OR date(date) >= CAST(%s AS date))
+          AND (CAST(%s AS date) IS NULL OR date(date) <= CAST(%s AS date))
         ORDER BY date DESC
         LIMIT %s
         """, (user_id, start_date, start_date, end_date, end_date, limit)).fetchall()

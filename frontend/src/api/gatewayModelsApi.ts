@@ -24,8 +24,11 @@ const gatewayModelsEnvelopeSchema = z.object({
 export type GatewayModel = z.infer<typeof gatewayModelSchema>;
 
 export class GatewayModelsApiError extends Error {
-  constructor(public readonly status: number) {
+  readonly status: number;
+
+  constructor(status: number) {
     super(`Gateway model catalog request failed (${status})`);
+    this.status = status;
   }
 }
 

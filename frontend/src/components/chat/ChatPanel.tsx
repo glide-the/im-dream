@@ -158,8 +158,6 @@ function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData 
     return payload.data;
   }
   if (
-    payload.provider ||
-    payload.model ||
     payload.system_prompt ||
     payload.im_full_access_enabled !== undefined
   ) {

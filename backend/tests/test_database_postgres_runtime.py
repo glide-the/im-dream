@@ -82,6 +82,20 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
         )
         assert database.get_session(user_id, session_id)["labels"] == ["postgresql"]
         assert database.get_sessions_batch(user_id, [session_id])[0]["editor_state"]
+        assert database.list_sessions_in_range(user_id, None, None, include_text=True)[0][
+            "text"
+        ] == "PostgreSQL runtime"
+        database.save_daily_picture(
+            user_id,
+            "2026-08-09",
+            "data:image/png;base64,postgresql-runtime",
+            prompt="PostgreSQL range",
+        )
+        assert database.get_daily_pictures_range(
+            user_id,
+            "2026-08-09",
+            "2026-08-09",
+        )[0]["prompt"] == "PostgreSQL range"
 
         thread_id = database.create_chat_thread(user_id, title="PostgreSQL chat")
         database.save_chat_message(
@@ -139,6 +153,7 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
             SELECT
               (SELECT count(*) FROM users) AS users,
               (SELECT count(*) FROM user_sessions) AS sessions,
+              (SELECT count(*) FROM daily_pictures) AS daily_pictures,
               (SELECT count(*) FROM chat_thread) AS threads,
               (SELECT count(*) FROM reflection_task) AS reflection_tasks,
               (SELECT count(*) FROM decks) AS decks,
@@ -148,6 +163,7 @@ def test_runtime_helpers_execute_on_postgres_and_rollback(monkeypatch) -> None:
         assert dict(counts) == {
             "users": 0,
             "sessions": 0,
+            "daily_pictures": 0,
             "threads": 0,
             "reflection_tasks": 0,
             "decks": 0,

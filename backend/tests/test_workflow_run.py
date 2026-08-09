@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -52,6 +52,27 @@ WORKFLOW_REF = "deck://voice-decks.story-dramatize/3.1.0/workflow.json"
 
 class InjectedFailure(RuntimeError):
     pass
+
+
+class RecordingConnection:
+    def __init__(self, connection):
+        self.connection = connection
+        self.transition_parameters = None
+
+    @property
+    def in_transaction(self):
+        return self.connection.in_transaction
+
+    def execute(self, query, parameters=()):
+        if "completed_at = CASE WHEN" in query:
+            self.transition_parameters = parameters
+        return self.connection.execute(query, parameters)
+
+    def commit(self):
+        return self.connection.commit()
+
+    def rollback(self):
+        return self.connection.rollback()
 
 
 class WorkflowRunFixture:
@@ -393,6 +414,91 @@ class WorkflowRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(consumption)
         self.assertNotIn(token, " ".join(str(value) for value in consumption))
         self.assertTrue(consumption["token_digest"].startswith("hmac-sha256:"))
+
+    async def test_postgres_datetime_rows_are_normalized_to_utc(self):
+        run = await self.fixture.create()
+        row = dict(
+            self.fixture.db.execute(
+                "SELECT * FROM workflow_runs WHERE id = ?",
+                (run.workflow_run_id,),
+            ).fetchone()
+        )
+        east_eight = timezone(timedelta(hours=8))
+        row.update(
+            {
+                "status": "completed",
+                "runtime_load_receipt_id": "receipt-postgres-native-time",
+                "agent_session_id": "as_" + "8" * 32,
+                "source_message_time": datetime(2026, 8, 1, 18, 0, tzinfo=east_eight),
+                "created_at": datetime(2026, 8, 1, 17, 0, tzinfo=east_eight),
+                "started_at": datetime(2026, 8, 1, 18, 30, tzinfo=east_eight),
+                "completed_at": datetime(2026, 8, 1, 19, 0, tzinfo=east_eight),
+            }
+        )
+
+        parsed = self.fixture.service._row_to_run(row)
+
+        self.assertEqual(parsed.created_at, datetime(2026, 8, 1, 9, 0, tzinfo=UTC))
+        self.assertEqual(
+            parsed.source_message_time,
+            datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+        )
+        self.assertEqual(parsed.started_at, datetime(2026, 8, 1, 10, 30, tzinfo=UTC))
+        self.assertEqual(parsed.completed_at, datetime(2026, 8, 1, 11, 0, tzinfo=UTC))
+
+    async def test_read_run_can_join_an_existing_read_transaction(self):
+        created = await self.fixture.create()
+        self.fixture.db.execute("BEGIN")
+        service = self.fixture.make_service(self.fixture.db)
+
+        observed = service.read_run(created.workflow_run_id, self.fixture.actor)
+
+        self.assertEqual(observed.workflow_run_id, created.workflow_run_id)
+        self.assertTrue(self.fixture.db.in_transaction)
+        self.fixture.db.rollback()
+
+    async def test_mutation_still_rejects_a_caller_owned_transaction(self):
+        preflight = self.fixture.issue_preflight()
+        self.fixture.db.execute("BEGIN")
+        service = self.fixture.make_service(self.fixture.db)
+
+        with self.assertRaisesRegex(RuntimeError, "clean transaction boundary"):
+            await service.create_run(
+                preflight[0],
+                preflight[1],
+                "caller-owned-transaction",
+                "voice-thread-1",
+                self.fixture.actor,
+                source_message_id="voice-message-1",
+                source_message_time=self.fixture.voice_message_time,
+            )
+        self.fixture.db.rollback()
+
+    async def test_terminal_transition_uses_a_postgres_boolean_parameter(self):
+        created = await self.fixture.create()
+        connection = RecordingConnection(self.fixture.db)
+        service = self.fixture.make_service(connection)
+
+        cancelled = await service.transition_run(
+            created.workflow_run_id,
+            RunStatus.CANCELLED,
+            self.fixture.actor,
+            reason_code="boolean-contract",
+        )
+
+        self.assertEqual(cancelled.status, RunStatus.CANCELLED)
+        self.assertIsNotNone(connection.transition_parameters)
+        self.assertIs(type(connection.transition_parameters[8]), bool)
+
+    def test_datetime_parser_keeps_iso_text_compatibility_and_rejects_invalid_values(self):
+        self.assertEqual(
+            self.fixture.service._parse_datetime("2026-08-01T10:00:00Z"),
+            datetime(2026, 8, 1, 10, 0, tzinfo=UTC),
+        )
+        with self.assertRaises(ValueError):
+            self.fixture.service._parse_datetime("not-a-timestamp")
+        with self.assertRaises(TypeError):
+            self.fixture.service._parse_datetime(1)  # type: ignore[arg-type]
 
     async def test_exact_replay_survives_token_expiry_without_new_transition(self):
         preflight = self.fixture.issue_preflight()

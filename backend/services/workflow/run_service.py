@@ -137,8 +137,6 @@ class WorkflowRunService:
         secret = token_secret.encode("utf-8") if isinstance(token_secret, str) else token_secret
         if len(secret) < 32:
             raise ValueError("token_secret must contain at least 32 bytes")
-        if db.in_transaction:
-            raise RuntimeError("workflow run service requires a clean transaction boundary")
         self.db = db
         self._token_secret = secret
         self._receipt_reader = receipt_reader
@@ -181,20 +179,23 @@ class WorkflowRunService:
     ) -> WorkflowRun:
         """Create a new attempt after a fresh preflight, preserving all sources."""
 
-        original_row = self._select_scoped_run(workflow_run_id, actor_context)
-        if original_row is None:
-            raise RunNotFound()
-        original = self._row_to_run(original_row)
-        if original.status not in {
-            RunStatus.FAILED,
-            RunStatus.REJECTED,
-            RunStatus.CANCELLED,
-        }:
-            raise RetrySourceMismatch("only a terminated unsuccessful run can be retried")
-        if idempotency_key == original.idempotency_key:
-            raise RetrySourceMismatch("retry requires a new idempotency key")
-
-        expected_source = self._frozen_source_from_run(original)
+        self._require_clean_transaction()
+        try:
+            original_row = self._select_scoped_run(workflow_run_id, actor_context)
+            if original_row is None:
+                raise RunNotFound()
+            original = self._row_to_run(original_row)
+            if original.status not in {
+                RunStatus.FAILED,
+                RunStatus.REJECTED,
+                RunStatus.CANCELLED,
+            }:
+                raise RetrySourceMismatch("only a terminated unsuccessful run can be retried")
+            if idempotency_key == original.idempotency_key:
+                raise RetrySourceMismatch("retry requires a new idempotency key")
+            expected_source = self._frozen_source_from_run(original)
+        finally:
+            self._rollback_read_transaction()
         return self._create_run(
             preflight_id=preflight_id,
             preflight_token=preflight_token,
@@ -225,17 +226,25 @@ class WorkflowRunService:
 
         target = RunStatus(to_status)
         receipt: RuntimeLoadReceiptReadiness | None = None
-        observed = self._select_scoped_run(workflow_run_id, actor_context)
-        if observed is None:
-            raise RunNotFound()
-        observed_status = RunStatus(observed["status"])
-        if observed_status is target:
-            if target is RunStatus.RUNNING and (
-                observed["runtime_load_receipt_id"] != runtime_load_receipt_id
-                or observed["agent_session_id"] != agent_session_id
-            ):
-                raise AgentSessionNotReady()
-            return self._row_to_run(observed)
+        self._require_clean_transaction()
+        try:
+            observed = self._select_scoped_run(workflow_run_id, actor_context)
+            if observed is None:
+                raise RunNotFound()
+            observed_status = RunStatus(observed["status"])
+            if observed_status is target:
+                if target is RunStatus.RUNNING and (
+                    observed["runtime_load_receipt_id"] != runtime_load_receipt_id
+                    or observed["agent_session_id"] != agent_session_id
+                ):
+                    raise AgentSessionNotReady()
+                replay = self._row_to_run(observed)
+            else:
+                replay = None
+        finally:
+            self._rollback_read_transaction()
+        if replay is not None:
+            return replay
         if target is RunStatus.RUNNING:
             if (
                 runtime_load_receipt_id is None
@@ -313,7 +322,7 @@ class WorkflowRunService:
                     error_code if target is RunStatus.FAILED else None,
                     target.value,
                     self._iso(now),
-                    int(terminal),
+                    terminal,
                     self._iso(now),
                     workflow_run_id,
                     current.value,
@@ -1039,6 +1048,10 @@ class WorkflowRunService:
         if self.db.in_transaction:
             raise RuntimeError("workflow run service requires a clean transaction boundary")
 
+    def _rollback_read_transaction(self) -> None:
+        if self.db.in_transaction:
+            self.db.rollback()
+
     def _now(self) -> datetime:
         value = self._clock()
         if value.tzinfo is None:
@@ -1046,8 +1059,13 @@ class WorkflowRunService:
         return value.astimezone(UTC)
 
     @staticmethod
-    def _parse_datetime(value: str) -> datetime:
-        parsed = datetime.fromisoformat(value)
+    def _parse_datetime(value: datetime | str) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            raise TypeError("workflow run timestamp must be datetime or ISO-8601 text")
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
         return parsed.astimezone(UTC)
