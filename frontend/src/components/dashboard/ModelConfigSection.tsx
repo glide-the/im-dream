@@ -288,7 +288,7 @@ export default function ModelConfigSection() {
         }
         setSelectedModel(previous);
         if (response.status === 403) {
-          setModelStatus('当前套餐不能调用此模型，请查看套餐后重新选择。');
+          setModelStatus('当前账号没有此模型的调用权限，请重新选择。');
         } else if (response.status === 409) {
           setModelStatus('此模型已停用或资格已变化，目录正在刷新，请重新选择。');
           setModelLoadNonce((nonce) => nonce + 1);
@@ -586,7 +586,7 @@ export default function ModelConfigSection() {
             ) : null}
             {!modelOptions.some((option) => option.callable) ? (
               <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
-                当前没有可调用模型。<a href="/story-workspace/subscription#subscription-plans">查看套餐与 Free 资格</a>
+                当前没有可调用模型。<a href="/story-workspace/subscription#subscription-plans">查看 Token 额度与订阅状态</a>
               </p>
             ) : null}
             <fieldset disabled={saving} style={{ margin: 0, padding: 0, border: 0 }}>
@@ -599,7 +599,7 @@ export default function ModelConfigSection() {
                   ].filter(Boolean).join(' · ');
                   const capabilities = Object.entries(option.capabilities).filter(([, enabled]) => enabled).map(([name]) => name).join(' · ');
                   const reason = option.callable
-                    ? '当前套餐可调用'
+                    ? '当前 Token 额度可调用'
                     : option.availability === 'upgrade_required'
                       ? `需要 ${option.requiredPlanCode ?? '更高'} 套餐`
                       : option.availability === 'allowance_exhausted'

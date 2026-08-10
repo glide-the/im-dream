@@ -123,23 +123,26 @@ for (const viewport of [
       data: Array<{ modelAlias: string; callable: boolean; availability: string }>;
       defaultModelAlias: string | null;
     };
-    expect(catalog.data).toHaveLength(2);
+    expect(catalog.data).toHaveLength(3);
     expect(catalog.defaultModelAlias).toBe('deepseek-v4-flash');
     expect(catalog.data.find((model) => model.modelAlias === 'deepseek-v4-flash')).toMatchObject({ callable: true, availability: 'included' });
-    expect(catalog.data.find((model) => model.modelAlias === 'hy-preview')).toMatchObject({ callable: false, availability: 'maintenance' });
+    expect(catalog.data.find((model) => model.modelAlias === 'deepseek-v4-pro')).toMatchObject({ callable: true, availability: 'included' });
+    expect(catalog.data.find((model) => model.modelAlias === 'hy-preview')).toMatchObject({ callable: true, availability: 'included' });
     const freeModel = page.getByRole('radio', { name: /deepseek-v4-flash/i });
-    const maintenanceModel = page.getByRole('radio', { name: /hy-preview/i });
+    const unboundModel = page.getByRole('radio', { name: /deepseek-v4-pro/i });
+    const hyModel = page.getByRole('radio', { name: /hy-preview/i });
     await expect(freeModel).toBeVisible();
-    await expect(maintenanceModel).toBeDisabled();
-    await expect(page.getByText('平台维护中')).toBeVisible();
+    await expect(unboundModel).toBeEnabled();
+    await expect(hyModel).toBeEnabled();
+    await expect(page.getByText('平台维护中')).toHaveCount(0);
     const saveResponse = page.waitForResponse((response) => (
       response.url().endsWith('/api/system-config')
       && response.request().method() === 'PUT'
       && response.status() === 200
     ));
-    await freeModel.check();
+    await hyModel.check();
     await saveResponse;
-    await expect(freeModel).toBeChecked();
+    await expect(hyModel).toBeChecked();
     await expect(page.getByText(/新 Claude Agent 对话将通过 Gateway 使用该模型/)).toBeVisible();
     await expect(page.getByText('平台模型目录暂不可用，请稍后重试。')).toHaveCount(0);
     await expect(page.getByText('GPT-4.1')).toHaveCount(0);
