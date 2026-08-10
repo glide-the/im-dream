@@ -138,10 +138,16 @@ PostgreSQL driver (`psycopg`) or the rest of the backend dependencies.
 ### PostgreSQL migration
 
 Dream does not create tables at application startup and has no SQLite/JSON/
-memory fallback. Apply the Admin migrations, Dream Alembic head and the 43+5
-importer before first launch. The importer defaults to a source-only dry run;
-production execution additionally requires exact database/host/port/owner and
-an explicit approval string.
+memory fallback. Dream Alembic owns the 48 canonical table definitions and the
+Dream importer owns snapshot/staging/validation; Admin Drizzle owns the ordered
+data-migration registry and subscription bootstrap. A fresh database must run
+Admin `0000–0026`, Dream Alembic head `20260809_06`, Admin `0027–0028`, then
+the two `drizzle/data` runners. This order lets Dream exactly adopt the three
+canonical tables before the approved Admin Story extensions are applied.
+
+The importer defaults to a source-only dry run; production execution
+additionally requires exact database/host/port/owner and an explicit approval
+string.
 
 ```bash
 python backend/script/migrate_legacy_to_postgres.py \
@@ -149,12 +155,25 @@ python backend/script/migrate_legacy_to_postgres.py \
   --notion-sqlite /absolute/path/to/notion-connectors.db
 ```
 
-The local Admin-owned `localhost:5433/ink-memory` migration completed on
-2026-08-09 with Admin migration count 25, Dream head `20260809_06`, and a
-verified Dream catalog of 48 tables / 4,921 rows / 569 columns / 81 indexes /
-25 triggers. The 48-table total is the complete 43-table Dream main source plus
-the 5-table Notion Connector source; it is not the earlier three-table Admin
-importer.
+From the Admin repository, `pnpm db:data:legacy -- --main-sqlite <absolute>
+--notion-sqlite <absolute> --mode execute --record` runs the same Dream-owned
+importer and records only safe table counts/digests. `pnpm
+db:data:subscriptions -- --apply` initializes `Free`, `Dream`, and `is
+Dreaming` plus the canonical-user subscription projections. Existing
+PostgreSQL installations use `--mode verify-existing`; post-cutover changes
+are accepted only with the explicit flag and only when every source PK exists
+and the target timestamp proves that the PostgreSQL row is newer.
+
+The local Admin-owned `localhost:5433/ink-memory` was re-verified on
+2026-08-10 with Admin migration count 29 and Dream head `20260809_06`. All 48
+source tables / 4,921 source primary keys are present: 4,919 rows match exactly
+and 2 rows are verified newer PostgreSQL writes; no source row is missing and
+the adoption transaction wrote no business data. The append-only Drizzle
+registry contains two runs and 48 table results; all 30 canonical users have
+their internal projection, billing account, and Subscription, and all three
+default Plans exist. The 48-table total is the complete 43-table Dream main
+source plus the 5-table Notion Connector source; it is not the earlier
+three-table Admin importer.
 See the Admin architecture runbook and correction worklog before migrating a
 different environment.
 

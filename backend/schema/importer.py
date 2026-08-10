@@ -40,6 +40,42 @@ DEFAULT_NOTION_FILENAME: Final = "notion-connectors.db"
 TARGET_SCHEMA: Final = "public"
 APPROVED_EXTERNAL_TRIGGERS: Final = {
     ("users", "users_sync_billing_identity"),
+    ("users", "zz_users_default_free_subscription"),
+}
+APPROVED_TARGET_COLUMN_EXTENSIONS: Final = {
+    "story_workspace_stories": (
+        ("artifact_source_type", "text"),
+        ("source_run_id", "text"),
+        ("source_thread_ref", "text"),
+        ("source_project_id", "text"),
+        ("episode_count", "integer"),
+        ("artifact_manifest_revision", "text"),
+        ("script_revision", "text"),
+        ("artifact_sync_status", "text"),
+        ("artifact_indexed_at", "timestamptz"),
+        ("artifact_sync_error_code", "text"),
+        ("script_size_bytes", "bigint"),
+        ("artifact_available", "boolean"),
+        ("reconcile_version", "integer"),
+        ("reviewed_script_revision", "text"),
+    ),
+}
+APPROVED_TARGET_INDEX_EXTENSIONS: Final = {
+    "story_workspace_stories_artifact_identity_uidx": (
+        "story_workspace_stories",
+        True,
+    ),
+    "story_workspace_stories_artifact_status_idx": (
+        "story_workspace_stories",
+        False,
+    ),
+    "story_workspace_stories_workspace_project_idx": (
+        "story_workspace_stories",
+        False,
+    ),
+}
+APPROVED_TARGET_CHECK_COUNT_EXTENSIONS: Final = {
+    "story_workspace_stories": 8,
 }
 # The long-lived SQLite source evolved through ALTER TABLE. Physical column
 # order is therefore not a semantic contract: every migration query names its
@@ -872,7 +908,11 @@ def wave_topological_order(manifest: Mapping[str, Any]) -> list[str]:
     return ordered
 
 
-def _expected_target_columns(table: Mapping[str, Any]) -> list[tuple[str, str]]:
+def _expected_target_columns(
+    table: Mapping[str, Any],
+    *,
+    include_extensions: bool = False,
+) -> list[tuple[str, str]]:
     columns = [
         (str(column["name"]), str(column["transform"]["target_type"]))
         for column in table["columns"]
@@ -899,6 +939,8 @@ def _expected_target_columns(table: Mapping[str, Any]) -> list[tuple[str, str]]:
             for column_name, column_type in columns
         ]
         columns.append(("status", "text"))
+    if include_extensions:
+        columns.extend(APPROVED_TARGET_COLUMN_EXTENSIONS.get(name, ()))
     return columns
 
 
@@ -912,6 +954,8 @@ def _target_type(data_type: str) -> str:
 
 def _expected_target_indexes(
     manifest: Mapping[str, Any],
+    *,
+    enabled_extensions: frozenset[str] = frozenset(),
 ) -> dict[str, tuple[str, bool]]:
     baseline_tables = set(BASELINE_TABLES)
     expected: dict[str, tuple[str, bool]] = {}
@@ -938,11 +982,20 @@ def _expected_target_indexes(
             match.group("table"),
             bool(match.group("unique")),
         )
+    expected.update(
+        {
+            name: contract
+            for name, contract in APPROVED_TARGET_INDEX_EXTENSIONS.items()
+            if contract[0] in enabled_extensions
+        }
+    )
     return expected
 
 
 def _expected_target_constraints(
     manifest: Mapping[str, Any],
+    *,
+    enabled_extensions: frozenset[str] = frozenset(),
 ) -> tuple[
     dict[str, tuple[str, ...]],
     set[tuple[str, tuple[str, ...], str, tuple[str, ...], str, str]],
@@ -984,15 +1037,24 @@ def _expected_target_constraints(
     check_counts["users"] += 1
     check_counts["story_workspace_workspaces"] += 1
     check_counts["story_workspace_stories"] += 2
+    for name, count in APPROVED_TARGET_CHECK_COUNT_EXTENSIONS.items():
+        if name in enabled_extensions:
+            check_counts[name] += count
     return primary_keys, foreign_keys, unique_constraints, check_counts
 
 
 def _validate_target_constraints_and_indexes(
-    connection: Any, manifest: Mapping[str, Any]
+    connection: Any,
+    manifest: Mapping[str, Any],
+    *,
+    enabled_extensions: frozenset[str] = frozenset(),
 ) -> dict[str, int]:
     expected_names = {str(table["name"]) for table in manifest["tables"]}
     expected_pk, expected_fk, expected_unique, expected_checks = (
-        _expected_target_constraints(manifest)
+        _expected_target_constraints(
+            manifest,
+            enabled_extensions=enabled_extensions,
+        )
     )
     action_names = {
         "a": "NO ACTION",
@@ -1059,7 +1121,10 @@ def _validate_target_constraints_and_indexes(
     if actual_checks != expected_checks:
         raise LegacyMigrationError("TARGET_CHECK_CONTRACT_MISMATCH", phase="target")
 
-    expected_indexes = _expected_target_indexes(manifest)
+    expected_indexes = _expected_target_indexes(
+        manifest,
+        enabled_extensions=enabled_extensions,
+    )
     index_rows = connection.execute(
         "SELECT c.relname, irel.relname, i.indisunique, i.indisvalid "
         "FROM pg_catalog.pg_index AS i "
@@ -1127,9 +1192,18 @@ def _validate_target_catalog(
             columns_by_table.setdefault(table_name, []).append(
                 (column_name, _target_type(data_type))
             )
+        enabled_extensions: set[str] = set()
         for table in manifest["tables"]:
             name = str(table["name"])
-            if columns_by_table.get(name) != _expected_target_columns(table):
+            actual_columns = columns_by_table.get(name)
+            base_columns = _expected_target_columns(table)
+            extended_columns = _expected_target_columns(
+                table,
+                include_extensions=True,
+            )
+            if actual_columns == extended_columns and extended_columns != base_columns:
+                enabled_extensions.add(name)
+            elif actual_columns != base_columns:
                 raise LegacyMigrationError("TARGET_TABLE_CONTRACT_MISMATCH", phase="target")
 
         trigger_rows = connection.execute(
@@ -1181,13 +1255,19 @@ def _validate_target_catalog(
         if len(ownership_contract) != len(dream_table_names):
             raise LegacyMigrationError("TARGET_OWNER_ACL_INVENTORY_MISMATCH", phase="target")
         constraint_receipt = _validate_target_constraints_and_indexes(
-            connection, manifest
+            connection,
+            manifest,
+            enabled_extensions=frozenset(enabled_extensions),
         )
         return {
             "databaseSha256": hashlib.sha256(database_name.encode("utf-8")).hexdigest(),
             "alembicHead": EXPECTED_ALEMBIC_HEAD,
             "tables": len(manifest["tables"]),
-            "columns": sum(len(_expected_target_columns(table)) for table in manifest["tables"]),
+            "columns": sum(
+                len(columns_by_table[str(table["name"])])
+                for table in manifest["tables"]
+            ),
+            "approvedExtensionTables": sorted(enabled_extensions),
             "triggers": len(manifest["triggers"]),
             "ownerAclSha256": hashlib.sha256(
                 _canonical_json(ownership_contract).encode("utf-8")
@@ -1332,6 +1412,47 @@ def _pk_join(table: Mapping[str, Any], left: str, right: str) -> str:
         f"{left}.{_quote(str(column))} = {right}.{_quote(str(column))}"
         for column in table["primary_key"]
     )
+
+
+def _staged_drift_summary(
+    connection: Any,
+    table: Mapping[str, Any],
+    stage: str,
+) -> dict[str, Any]:
+    """Return schema/count-only evidence for rows changed after import."""
+
+    name = str(table["name"])
+    target = _qualified(TARGET_SCHEMA, name)
+    columns = [str(column["name"]) for column in table["columns"]]
+    comparison = _row_comparison(table, "target", "stage")
+    joined = (
+        f"{_quote(stage)} AS stage JOIN {target} AS target "
+        f"ON {_pk_join(table, 'stage', 'target')}"
+    )
+    changed_columns: dict[str, int] = {}
+    for column in columns:
+        count = int(
+            _fetch_scalar(
+                connection,
+                f"SELECT count(*) FROM {joined} WHERE {comparison} AND "
+                f"target.{_quote(column)} IS DISTINCT FROM stage.{_quote(column)}",
+            )
+        )
+        if count:
+            changed_columns[column] = count
+    newer_count = 0
+    if "updated_at" in columns:
+        newer_count = int(
+            _fetch_scalar(
+                connection,
+                f"SELECT count(*) FROM {joined} WHERE {comparison} AND "
+                "target.updated_at > stage.updated_at",
+            )
+        )
+    return {
+        "changedColumns": changed_columns,
+        "postCutoverNewer": newer_count,
+    }
 
 
 def _baseline_conflicts(
@@ -1577,6 +1698,7 @@ def _verify_staged_subset(
     *,
     source_report: Mapping[str, Any],
     batch_size: int,
+    allow_target_extras: bool = False,
 ) -> dict[str, Any]:
     target = _qualified(TARGET_SCHEMA, str(table["name"]))
     first_pk = _quote(str(table["primary_key"][0]))
@@ -1592,10 +1714,21 @@ def _verify_staged_subset(
     values = tuple(row.values()) if isinstance(row, Mapping) else tuple(row)
     missing, mismatched = map(int, values)
     if missing or mismatched:
-        raise LegacyMigrationError("TARGET_ROW_VERIFICATION_FAILED", phase="verify")
+        raise LegacyMigrationError(
+            "TARGET_ROW_VERIFICATION_FAILED",
+            phase="verify",
+            details={
+                "table": str(table["name"]),
+                "missing": missing,
+                "mismatched": mismatched,
+            },
+        )
     target_count = int(_fetch_scalar(connection, f"SELECT count(*) FROM {target}"))
-    if str(table["name"]) not in BASELINE_TABLES and target_count != int(
-        source_report["sourceCount"]
+    source_count = int(source_report["sourceCount"])
+    if (
+        not allow_target_extras
+        and str(table["name"]) not in BASELINE_TABLES
+        and target_count != source_count
     ):
         raise LegacyMigrationError("TARGET_COUNT_VERIFICATION_FAILED", phase="verify")
     digest_count, pk_digest, row_digest = _digest_database_query(
@@ -1616,10 +1749,188 @@ def _verify_staged_subset(
         raise LegacyMigrationError("TARGET_DIGEST_VERIFICATION_FAILED", phase="verify")
     return {
         "targetCount": target_count,
-        "verifiedSubsetCount": int(source_report["sourceCount"]),
+        "verifiedSubsetCount": source_count,
+        "targetExtraCount": target_count - source_count,
         "targetPkSha256": pk_digest,
         "targetRowSha256": row_digest,
     }
+
+
+def verify_existing_postgres(
+    connection: Any,
+    snapshots: SnapshotBundle,
+    manifest: Mapping[str, Any],
+    source_reports: list[dict[str, Any]],
+    *,
+    run_id: UUID,
+    batch_size: int,
+    accept_post_cutover_changes: bool = False,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    """Prove every legacy row exists while allowing post-cutover target rows.
+
+    All source rows are transformed into transaction-local temporary staging.
+    The target subset must match by primary key and canonical row digest.  No
+    business table, sequence, or durable migration state is changed here.
+    """
+
+    reports = {str(report["table"]): dict(report) for report in source_reports}
+    tables = {str(table["name"]): table for table in manifest["tables"]}
+    stage_names: dict[str, str] = {}
+    try:
+        # PostgreSQL READ ONLY transactions reject INSERTs into temporary
+        # staging tables.  This path contains no durable DML and always rolls
+        # the SERIALIZABLE transaction back after subset verification.
+        connection.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+        connection.execute("SET LOCAL lock_timeout='5s'")
+        connection.execute("SET LOCAL statement_timeout='30min'")
+        target_receipt = _validate_target_catalog(connection, manifest)
+
+        for name in sorted(tables):
+            stage, staged = _stage_table(
+                connection,
+                snapshots,
+                tables[name],
+                run_id=run_id,
+                batch_size=batch_size,
+            )
+            stage_names[name] = stage
+            if staged != int(reports[name]["sourceCount"]):
+                raise LegacyMigrationError(
+                    "STAGING_SOURCE_COUNT_MISMATCH", phase="staging"
+                )
+            reports[name]["stageCount"] = staged
+            stage_count, stage_pk_digest, stage_row_digest = _digest_database_query(
+                connection,
+                tables[name],
+                from_clause=f"{_quote(stage)} AS stage",
+                alias="stage",
+                batch_size=batch_size,
+            )
+            if (
+                stage_count != int(reports[name]["sourceCount"])
+                or stage_pk_digest != str(reports[name]["pkSha256"])
+                or stage_row_digest != str(reports[name]["rowSha256"])
+            ):
+                raise LegacyMigrationError("STAGING_DIGEST_MISMATCH", phase="staging")
+            reports[name]["stagePkSha256"] = stage_pk_digest
+            reports[name]["stageRowSha256"] = stage_row_digest
+
+        target_fk_checks = _validate_target_foreign_keys(connection, manifest)
+        verified_primary_keys = 0
+        exact_matched_rows = 0
+        post_cutover_changed_rows = 0
+        target_rows = 0
+        blocking_drifts: list[dict[str, Any]] = []
+        for name, table in tables.items():
+            try:
+                verification = _verify_staged_subset(
+                    connection,
+                    table,
+                    stage_names[name],
+                    source_report=reports[name],
+                    batch_size=batch_size,
+                    allow_target_extras=True,
+                )
+            except LegacyMigrationError as error:
+                if error.code != "TARGET_ROW_VERIFICATION_FAILED":
+                    raise
+                drift = {
+                    "table": name,
+                    "missing": int(error.details.get("missing", 0)),
+                    "mismatched": int(error.details.get("mismatched", 0)),
+                }
+                if drift["mismatched"]:
+                    drift.update(
+                        _staged_drift_summary(
+                            connection,
+                            table,
+                            stage_names[name],
+                        )
+                    )
+                target = _qualified(TARGET_SCHEMA, name)
+                target_count = int(
+                    _fetch_scalar(connection, f"SELECT count(*) FROM {target}")
+                )
+                source_count = int(reports[name]["sourceCount"])
+                is_proven_post_cutover = (
+                    drift["missing"] == 0
+                    and drift["mismatched"] > 0
+                    and drift.get("postCutoverNewer") == drift["mismatched"]
+                )
+                reports[name].update(
+                    {
+                        **drift,
+                        "targetCount": target_count,
+                        "targetExtraCount": target_count - source_count,
+                        "verifiedPrimaryKeyCount": source_count - drift["missing"],
+                        "exactMatchedCount": (
+                            source_count - drift["missing"] - drift["mismatched"]
+                        ),
+                        "postCutoverChangedCount": (
+                            drift["mismatched"] if is_proven_post_cutover else 0
+                        ),
+                        "inserted": 0,
+                    }
+                )
+                target_rows += target_count
+                if accept_post_cutover_changes and is_proven_post_cutover:
+                    verified_primary_keys += source_count
+                    exact_matched_rows += source_count - drift["mismatched"]
+                    post_cutover_changed_rows += drift["mismatched"]
+                    continue
+                blocking_drifts.append(drift)
+                continue
+            reports[name].update(verification)
+            reports[name]["inserted"] = 0
+            source_count = int(verification["verifiedSubsetCount"])
+            reports[name]["verifiedPrimaryKeyCount"] = source_count
+            reports[name]["exactMatchedCount"] = source_count
+            reports[name]["postCutoverChangedCount"] = 0
+            verified_primary_keys += source_count
+            exact_matched_rows += source_count
+            target_rows += int(verification["targetCount"])
+
+        if blocking_drifts:
+            raise LegacyMigrationError(
+                "TARGET_ROW_VERIFICATION_FAILED",
+                phase="verify",
+                details={
+                    "drifts": blocking_drifts,
+                    "missing": sum(item["missing"] for item in blocking_drifts),
+                    "mismatched": sum(
+                        item["mismatched"] for item in blocking_drifts
+                    ),
+                },
+            )
+
+        target_receipt.update(
+            {
+                "stagingTables": len(stage_names),
+                "insertedRows": 0,
+                "verifiedSourcePrimaryKeys": verified_primary_keys,
+                "exactMatchedRows": exact_matched_rows,
+                "postCutoverChangedRows": post_cutover_changed_rows,
+                "targetExtraRows": target_rows - verified_primary_keys,
+                "targetRows": target_rows,
+                "foreignKeyChecks": target_fk_checks,
+                "sequenceColumns": 0,
+                "transaction": "rolled_back_temporary_staging_verification",
+            }
+        )
+        connection.rollback()
+        return target_receipt, [reports[name] for name in sorted(reports)]
+    except LegacyMigrationError:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        raise
+    except Exception:
+        try:
+            connection.rollback()
+        except Exception:
+            pass
+        raise LegacyMigrationError("TARGET_TRANSACTION_FAILED", phase="target") from None
 
 
 def migrate_to_postgres(
@@ -1773,6 +2084,7 @@ def run_legacy_migration(
     expected_target_port: int | None = None,
     expected_target_owner: str | None = None,
     production_approval: str | None = None,
+    accept_post_cutover_changes: bool = False,
     batch_size: int = 1_000,
     run_id: UUID | None = None,
     environ: Mapping[str, str] | None = None,
@@ -1783,21 +2095,36 @@ def run_legacy_migration(
         "source-dry-run",
         "target-dry-run",
         "execute",
+        "verify-existing",
         "production-execute",
     }
     commit_modes = {"execute", "production-execute"}
-    target_modes = {"target-dry-run", *commit_modes}
+    target_modes = {"target-dry-run", "verify-existing", *commit_modes}
+    direct_database_modes = {"verify-existing", "production-execute"}
     if mode not in supported_modes:
         raise LegacyMigrationError("MODE_INVALID", phase="configuration")
     if mode not in commit_modes and approve_baseline_inserts:
         raise LegacyMigrationError("BASELINE_APPROVAL_MODE_INVALID", phase="configuration")
+    if accept_post_cutover_changes and mode != "verify-existing":
+        raise LegacyMigrationError(
+            "POST_CUTOVER_APPROVAL_MODE_INVALID", phase="configuration"
+        )
     if mode in target_modes and not expected_target_database:
         raise LegacyMigrationError("EXPECTED_TARGET_DATABASE_REQUIRED", phase="configuration")
-    if mode == "production-execute":
-        expected_approval = f"MIGRATE-43+5-TO:{expected_target_database}"
+    if mode in direct_database_modes:
+        approval_action = (
+            "MIGRATE-43+5-TO"
+            if mode == "production-execute"
+            else "VERIFY-43+5-IN"
+        )
+        expected_approval = f"{approval_action}:{expected_target_database}"
         if production_approval != expected_approval:
             raise LegacyMigrationError(
-                "PRODUCTION_TARGET_APPROVAL_REQUIRED",
+                (
+                    "PRODUCTION_TARGET_APPROVAL_REQUIRED"
+                    if mode == "production-execute"
+                    else "TARGET_VERIFY_APPROVAL_REQUIRED"
+                ),
                 phase="configuration",
             )
         if (
@@ -1808,7 +2135,11 @@ def run_legacy_migration(
             or not expected_target_owner
         ):
             raise LegacyMigrationError(
-                "PRODUCTION_TARGET_IDENTITY_REQUIRED",
+                (
+                    "PRODUCTION_TARGET_IDENTITY_REQUIRED"
+                    if mode == "production-execute"
+                    else "TARGET_VERIFY_IDENTITY_REQUIRED"
+                ),
                 phase="configuration",
             )
     migration_run_id = run_id or uuid4()
@@ -1838,12 +2169,16 @@ def run_legacy_migration(
             )
 
             values = os.environ if environ is None else environ
-            if mode == "production-execute":
+            if mode in direct_database_modes:
                 try:
                     target = parse_postgres_target(values.get(DATABASE_URL_ENV, ""))
                 except Exception:
                     raise LegacyMigrationError(
-                        "PRODUCTION_TARGET_SAFETY_CHECK_FAILED",
+                        (
+                            "PRODUCTION_TARGET_SAFETY_CHECK_FAILED"
+                            if mode == "production-execute"
+                            else "TARGET_VERIFY_SAFETY_CHECK_FAILED"
+                        ),
                         phase="configuration",
                     ) from None
                 if (
@@ -1853,7 +2188,11 @@ def run_legacy_migration(
                     or target.port != expected_target_port
                 ):
                     raise LegacyMigrationError(
-                        "PRODUCTION_TARGET_SAFETY_CHECK_FAILED",
+                        (
+                            "PRODUCTION_TARGET_SAFETY_CHECK_FAILED"
+                            if mode == "production-execute"
+                            else "TARGET_VERIFY_SAFETY_CHECK_FAILED"
+                        ),
                         phase="configuration",
                     )
                 dsn = target.dsn
@@ -1878,7 +2217,7 @@ def run_legacy_migration(
             except Exception:
                 raise LegacyMigrationError("TARGET_CONNECTION_FAILED", phase="target") from None
             try:
-                if mode == "production-execute":
+                if mode in direct_database_modes:
                     identity = connection.execute(
                         "SELECT current_database(), current_user, "
                         "pg_catalog.pg_get_userbyid(datdba) "
@@ -1895,23 +2234,38 @@ def run_legacy_migration(
                         expected_target_owner,
                     ):
                         raise LegacyMigrationError(
-                            "PRODUCTION_TARGET_IDENTITY_MISMATCH",
+                            (
+                                "PRODUCTION_TARGET_IDENTITY_MISMATCH"
+                                if mode == "production-execute"
+                                else "TARGET_VERIFY_IDENTITY_MISMATCH"
+                            ),
                             phase="configuration",
                         )
                     # The read-only identity query starts psycopg's implicit
                     # transaction. End it before migrate_to_postgres opens its
                     # required SERIALIZABLE transaction.
                     connection.rollback()
-                target_receipt, reports = migrate_to_postgres(
-                    connection,
-                    snapshots,
-                    manifest,
-                    reports,
-                    run_id=migration_run_id,
-                    batch_size=batch_size,
-                    commit=mode in commit_modes,
-                    approve_baseline_inserts=approve_baseline_inserts,
-                )
+                if mode == "verify-existing":
+                    target_receipt, reports = verify_existing_postgres(
+                        connection,
+                        snapshots,
+                        manifest,
+                        reports,
+                        run_id=migration_run_id,
+                        batch_size=batch_size,
+                        accept_post_cutover_changes=accept_post_cutover_changes,
+                    )
+                else:
+                    target_receipt, reports = migrate_to_postgres(
+                        connection,
+                        snapshots,
+                        manifest,
+                        reports,
+                        run_id=migration_run_id,
+                        batch_size=batch_size,
+                        commit=mode in commit_modes,
+                        approve_baseline_inserts=approve_baseline_inserts,
+                    )
                 target_receipt["validated"] = True
             finally:
                 connection.close()
@@ -1921,7 +2275,19 @@ def run_legacy_migration(
             "receiptVersion": 1,
             "runId": str(migration_run_id),
             "mode": mode,
-            "status": "committed" if mode in commit_modes else "validated",
+            "status": (
+                "committed"
+                if mode in commit_modes
+                else "adopted_with_post_cutover_changes"
+                if mode == "verify-existing"
+                and accept_post_cutover_changes
+                and int(target_receipt.get("postCutoverChangedRows", 0)) > 0
+                else "adopted_exact"
+                if mode == "verify-existing" and accept_post_cutover_changes
+                else "verified_existing"
+                if mode == "verify-existing"
+                else "validated"
+            ),
             "manifestSha256": str(manifest["catalog_sha256"]),
             "source": _source_receipt(
                 snapshots, schema_digests, reports
@@ -1930,7 +2296,13 @@ def run_legacy_migration(
                 "snapshot": "passed",
                 "manifest": "passed",
                 "transform": "passed",
-                "conflict": "passed" if mode != "source-dry-run" else "not_run",
+                "conflict": (
+                    "not_applicable"
+                    if mode == "verify-existing"
+                    else "passed"
+                    if mode != "source-dry-run"
+                    else "not_run"
+                ),
                 "staging": "passed" if mode != "source-dry-run" else "not_run",
                 "import": (
                     "committed"
@@ -1973,5 +2345,6 @@ __all__ = [
     "scan_sources",
     "transform_row",
     "transform_value",
+    "verify_existing_postgres",
     "wave_topological_order",
 ]

@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- Compact public metadata formatters are deterministic test seams. */
 import type {
   StoryWorkspaceSortOrder,
   StoryWorkspaceStory,
@@ -7,6 +8,7 @@ import {
   StoryWorkspaceSurfaceLinkButton,
   type StoryWorkspaceSurfaceLinkButtonProps,
 } from '../StoryWorkspaceSurfaceLinkButton';
+import { storyWorkspaceExecutionDeepLink } from '../surfaceLink';
 import { StoryWorkspaceReviewStatusBadge } from './StoryWorkspaceReviewStatusBadge';
 import { StoryWorkspaceSortButton } from './StoryWorkspaceSortButton';
 import { StoryWorkspaceTableRow } from './StoryWorkspaceTableRow';
@@ -22,6 +24,36 @@ const STORY_TYPE_LABELS: Record<StoryWorkspaceStoryType, string> = {
   script: '剧本',
   outline: '大纲',
 };
+
+const ARTIFACT_SYNC_STATUS_LABELS = {
+  syncing: '同步中',
+  indexed: '已就绪',
+  stale: '版本已过期',
+  missing: '未建立',
+  failed: '同步失败',
+} as const;
+
+const STORY_REVISION = /^sha256:([0-9a-f]{64})$/;
+const STORY_RUN_ID = /^run_[0-9a-f]{32}$/;
+
+export function storyWorkspaceShortRevision(value: string | null | undefined): string {
+  const match = value?.match(STORY_REVISION);
+  return match?.[1] ? `${match[1].slice(0, 10)}…` : '—';
+}
+
+export function storyWorkspaceArtifactIndexStatus(story: StoryWorkspaceStory): string {
+  const file = story.artifact_available === true
+    ? '文件可读'
+    : story.artifact_available === false
+      ? '文件缺失'
+      : '文件状态未知';
+  const syncStatus = story.artifact_sync_status;
+  const index = syncStatus !== null
+    && Object.prototype.hasOwnProperty.call(ARTIFACT_SYNC_STATUS_LABELS, syncStatus)
+    ? `索引${ARTIFACT_SYNC_STATUS_LABELS[syncStatus]}`
+    : '索引未建立';
+  return `${file} · ${index}`;
+}
 
 export interface StoryWorkspaceStoryTableProps {
   items: StoryWorkspaceStory[];
@@ -83,7 +115,8 @@ export function StoryWorkspaceStoryTable({
             <th style={{ width: 80 }}>角色数</th>
             <th style={{ width: 80 }}>场景数</th>
             <th style={{ width: 150 }}>生成时间</th>
-            <th style={{ width: 76 }}>操作</th>
+            <th style={{ width: 220 }}>产物 / 索引</th>
+            <th style={{ width: 132 }}>操作</th>
           </tr>
         </thead>
         <tbody>
@@ -112,6 +145,25 @@ export function StoryWorkspaceStoryTable({
               <td>{story.scene_count}</td>
               <td>{formatStoryWorkspaceDate(story.created_at)}</td>
               <td>
+                <div
+                  className="story-workspace-table__artifact-status"
+                  data-artifact-sync-status={story.artifact_sync_status ?? 'missing'}
+                >
+                  {storyWorkspaceArtifactIndexStatus(story)}
+                </div>
+                <div className="story-workspace-table__artifact-facts">
+                  <span>集数 {story.episode_count ?? '—'}</span>
+                  <code title={story.script_revision ?? story.artifact_manifest_revision ?? undefined}>
+                    {storyWorkspaceShortRevision(
+                      story.script_revision ?? story.artifact_manifest_revision,
+                    )}
+                  </code>
+                </div>
+                <time className="story-workspace-table__artifact-time">
+                  {formatStoryWorkspaceDate(story.artifact_indexed_at)}
+                </time>
+              </td>
+              <td>
                 <button
                   className="story-workspace-table__action"
                   onClick={() => onReview?.(story)}
@@ -119,6 +171,14 @@ export function StoryWorkspaceStoryTable({
                 >
                   审阅
                 </button>
+                {story.source_run_id !== null && STORY_RUN_ID.test(story.source_run_id) && (
+                  <a
+                    className="story-workspace-table__execution-link"
+                    href={storyWorkspaceExecutionDeepLink(story.source_run_id)}
+                  >
+                    查看执行
+                  </a>
+                )}
                 {surfaceLinkProps && <StoryWorkspaceSurfaceLinkButton {...surfaceLinkProps} />}
               </td>
               </StoryWorkspaceTableRow>

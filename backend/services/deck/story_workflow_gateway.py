@@ -30,6 +30,8 @@ try:
         StoryWorkspaceEpisodeActionContinueCommand,
         StoryWorkspaceEpisodeActionContinueCommandV2,
         StoryWorkspaceEpisodeBindingRecoveryCommand,
+        StoryWorkspaceStoryIndexProjection,
+        StoryWorkspaceStoryIndexReconcileCommand,
     )
     from services.deck.runtime_context import resolve_runtime_context
     from services.deck_plugin.compatibility_service import CompatibilityService
@@ -104,6 +106,17 @@ try:
         StoryWorkspaceDreamAgentMessageCoordinator,
         StoryWorkspaceDreamAgentMessageService,
     )
+    from services.story_workspace.artifact_story_index_projector import (
+        ArtifactStoryProjectionError,
+    )
+    from services.story_workspace.artifact_story_index_repository import (
+        ArtifactStoryIndexRepositoryError,
+    )
+    from services.story_workspace.artifact_story_index_service import (
+        ArtifactStoryIndexObservation,
+        ArtifactStoryIndexService,
+        ArtifactStoryIndexSnapshot,
+    )
 except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
     from backend.models.workflow_run import AuthenticatedActorContext, RunStatus, WorkflowRun
@@ -114,6 +127,8 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceEpisodeActionContinueCommand,
         StoryWorkspaceEpisodeActionContinueCommandV2,
         StoryWorkspaceEpisodeBindingRecoveryCommand,
+        StoryWorkspaceStoryIndexProjection,
+        StoryWorkspaceStoryIndexReconcileCommand,
     )
     from backend.services.deck.runtime_context import resolve_runtime_context
     from backend.services.deck_plugin.compatibility_service import CompatibilityService
@@ -188,9 +203,29 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         StoryWorkspaceDreamAgentMessageCoordinator,
         StoryWorkspaceDreamAgentMessageService,
     )
+    from backend.services.story_workspace.artifact_story_index_projector import (
+        ArtifactStoryProjectionError,
+    )
+    from backend.services.story_workspace.artifact_story_index_repository import (
+        ArtifactStoryIndexRepositoryError,
+    )
+    from backend.services.story_workspace.artifact_story_index_service import (
+        ArtifactStoryIndexObservation,
+        ArtifactStoryIndexService,
+        ArtifactStoryIndexSnapshot,
+    )
 
 
 _DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "test", "testing"}
+_STORY_INDEX_ERROR_STATUSES = {
+    "artifact_missing": 404,
+    "story_index_revision_conflict": 409,
+    "story_index_conflict": 409,
+    "story_index_invalid_artifact": 422,
+    "story_index_schema_unavailable": 503,
+    "story_index_database_unavailable": 503,
+    "story_index_write_failed": 503,
+}
 _DEV_TOKEN_SECRET = "ink-dream-development-workflow-token-secret-v1"
 logger = logging.getLogger(__name__)
 _DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
@@ -204,6 +239,18 @@ class StoryWorkspaceDreamReentryStageProjection:
 
     stages: Any
     stage_activity_at: datetime | None
+
+
+@dataclass(frozen=True)
+class _AuthorizedStoryIndexContext:
+    """Internal authorization facts; never serialize thread or workspace paths."""
+
+    workflow_run_row: Any
+    actor_id: int
+    thread_id: str
+    thread_workspace: Path
+    episode_authority: StoryWorkspaceEpisodeAuthority
+    refreshed_surface: Any
 
 
 def story_workspace_get_workspace_root() -> Path:
@@ -832,6 +879,38 @@ class StoryWorkflowApplicationGateway:
             actor,
         )
 
+    async def get_story_index(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> StoryWorkspaceStoryIndexProjection:
+        """Read the independent Artifact/PostgreSQL revision comparison."""
+
+        return await asyncio.to_thread(
+            self._get_story_index_sync,
+            workflow_run_id,
+            actor,
+        )
+
+    async def reconcile_story_index(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceStoryIndexReconcileCommand,
+        *,
+        actor: dict[str, str],
+        if_match: str,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        """Synchronously retry one authorized, revision-guarded materialization."""
+
+        return await asyncio.to_thread(
+            self._reconcile_story_index_sync,
+            workflow_run_id,
+            request,
+            actor,
+            if_match,
+        )
+
     async def recover_episode_binding(
         self,
         workflow_run_id: str,
@@ -1343,6 +1422,216 @@ class StoryWorkflowApplicationGateway:
                 workflow_run_id,
                 actor,
             )
+        finally:
+            db.close()
+
+    @staticmethod
+    def _story_index_error_status(code: str) -> int:
+        return _STORY_INDEX_ERROR_STATUSES.get(code, 503)
+
+    @classmethod
+    def _raise_story_index_error(cls, code: str) -> None:
+        safe_code = (
+            code
+            if code in _STORY_INDEX_ERROR_STATUSES
+            else "story_index_database_unavailable"
+        )
+        raise ApiRouteError(
+            safe_code,
+            status_code=cls._story_index_error_status(safe_code),
+        )
+
+    @classmethod
+    def _read_story_index_surface(
+        cls,
+        workspace: Path,
+        workflow_run_id: str,
+        authority: StoryWorkspaceEpisodeAuthority,
+    ) -> Any:
+        """Read one authorized surface through the fixed Story-index boundary."""
+
+        try:
+            return StoryWorkspaceEpisodeArtifactService(workspace).read_surface(
+                workflow_run_id,
+                episode_authority=authority,
+            )
+        except StoryWorkspaceEpisodeArtifactPathError as exc:
+            raise ApiRouteError("artifact_missing", status_code=404) from exc
+        except StoryWorkspaceEpisodeArtifactError as exc:
+            raise ApiRouteError(
+                "story_index_invalid_artifact",
+                status_code=422,
+            ) from exc
+
+    def _authorized_story_index_context(
+        self,
+        db: Any,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> _AuthorizedStoryIndexContext:
+        """Finish relational authorization before the first filesystem probe."""
+
+        row = self._authorized_episode_row(db, workflow_run_id, actor)
+        authority = self._episode_authority_from_source(row, workflow_run_id)
+        if authority is None:
+            self._raise_story_index_error("artifact_missing")
+        try:
+            actor_id = int(actor["actor_id"])
+            thread_id = str(row["thread_id"])
+            workspace = self._thread_workspace(thread_id)
+        except ApiRouteError as exc:
+            if exc.status_code == 503:
+                raise ApiRouteError(
+                    "story_index_database_unavailable",
+                    status_code=503,
+                ) from exc
+            # A missing, moved, or non-canonical server-owned thread workspace
+            # is intentionally indistinguishable from a missing Artifact.
+            raise ApiRouteError("artifact_missing", status_code=404) from exc
+        surface = self._read_story_index_surface(
+            workspace,
+            workflow_run_id,
+            authority,
+        )
+        if getattr(surface, "opaque_episode_id", None) is None:
+            self._raise_story_index_error("artifact_missing")
+        return _AuthorizedStoryIndexContext(
+            workflow_run_row=row,
+            actor_id=actor_id,
+            thread_id=thread_id,
+            thread_workspace=workspace,
+            episode_authority=authority,
+            refreshed_surface=surface,
+        )
+
+    @classmethod
+    def _story_index_wire_projection(
+        cls,
+        observation: ArtifactStoryIndexObservation,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        try:
+            return StoryWorkspaceStoryIndexProjection.model_validate(
+                observation.public_dict()
+            )
+        except (TypeError, ValueError) as exc:
+            raise ApiRouteError(
+                "story_index_invalid_artifact",
+                status_code=422,
+            ) from exc
+
+    def _inspect_story_index(
+        self,
+        db: Any,
+        context: _AuthorizedStoryIndexContext,
+    ) -> ArtifactStoryIndexObservation:
+        return self._inspect_story_index_snapshot(db, context).observation
+
+    def _inspect_story_index_snapshot(
+        self,
+        db: Any,
+        context: _AuthorizedStoryIndexContext,
+    ) -> ArtifactStoryIndexSnapshot:
+        try:
+            return ArtifactStoryIndexService().inspect_snapshot(
+                db=db,
+                workspace_root=context.thread_workspace,
+                workflow_run=context.workflow_run_row,
+                actor_id=context.actor_id,
+                thread_id=context.thread_id,
+                episode_authority=context.episode_authority,
+                refreshed_surface=context.refreshed_surface,
+            )
+        except (ArtifactStoryProjectionError, ArtifactStoryIndexRepositoryError) as exc:
+            self._raise_story_index_error(exc.code)
+
+    def _get_story_index_sync(
+        self,
+        workflow_run_id: str,
+        actor: dict[str, str],
+    ) -> StoryWorkspaceStoryIndexProjection:
+        db = database.get_db()
+        try:
+            context = self._authorized_story_index_context(
+                db,
+                workflow_run_id,
+                actor,
+            )
+            return self._story_index_wire_projection(
+                self._inspect_story_index(db, context)
+            )
+        except (ApiRouteError, ArtifactStoryProjectionError, ArtifactStoryIndexRepositoryError):
+            raise
+        except PostgresError as exc:
+            raise ApiRouteError(
+                "story_index_database_unavailable",
+                status_code=503,
+            ) from exc
+        finally:
+            db.close()
+
+    def _reconcile_story_index_sync(
+        self,
+        workflow_run_id: str,
+        _request: StoryWorkspaceStoryIndexReconcileCommand,
+        actor: dict[str, str],
+        if_match: str,
+    ) -> StoryWorkspaceStoryIndexProjection:
+        db = database.get_db()
+        try:
+            context = self._authorized_story_index_context(
+                db,
+                workflow_run_id,
+                actor,
+            )
+            before = self._inspect_story_index_snapshot(db, context)
+            expected = f'"{before.observation.etag}"'
+            if if_match != expected:
+                self._raise_story_index_error("story_index_revision_conflict")
+
+            # Re-read the pinned canonical surface after the If-Match check.
+            refreshed = self._read_story_index_surface(
+                context.thread_workspace,
+                workflow_run_id,
+                context.episode_authority,
+            )
+            refreshed_context = _AuthorizedStoryIndexContext(
+                workflow_run_row=context.workflow_run_row,
+                actor_id=context.actor_id,
+                thread_id=context.thread_id,
+                thread_workspace=context.thread_workspace,
+                episode_authority=context.episode_authority,
+                refreshed_surface=refreshed,
+            )
+            fresh_snapshot = self._inspect_story_index_snapshot(db, refreshed_context)
+            if if_match != f'"{fresh_snapshot.observation.etag}"':
+                self._raise_story_index_error("story_index_revision_conflict")
+
+            story_index_service = ArtifactStoryIndexService()
+            result = story_index_service.materialize_projection(
+                db=db,
+                projection=fresh_snapshot.projection,
+                expected_record=fresh_snapshot.record,
+                require_expected_record=True,
+            )
+            status = str(result.get("status") or "failed")
+            if status in {"failed", "conflict"}:
+                code = str(result.get("errorCode") or "story_index_write_failed")
+                self._raise_story_index_error(code)
+            return self._story_index_wire_projection(
+                story_index_service.inspect_projection(
+                    db=db,
+                    projection=fresh_snapshot.projection,
+                ).observation
+            )
+        except ApiRouteError:
+            raise
+        except (ArtifactStoryProjectionError, ArtifactStoryIndexRepositoryError) as exc:
+            self._raise_story_index_error(exc.code)
+        except PostgresError as exc:
+            raise ApiRouteError(
+                "story_index_database_unavailable",
+                status_code=503,
+            ) from exc
         finally:
             db.close()
 

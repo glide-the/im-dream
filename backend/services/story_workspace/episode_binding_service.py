@@ -60,6 +60,15 @@ _TOTAL_EPISODES_PATTERN = re.compile(
 _TOTAL_EPISODES_DECLARATION_PATTERN = re.compile(
     r"(?m)^[ \t]*total_episodes[ \t]*:"
 )
+_PROJECT_NAME_DECLARATION_PATTERN = re.compile(
+    r"(?m)^(?:  )?project_name[ \t]*:[ \t]*(?P<value>[^\r\n]*)$"
+)
+_PROJECT_NAME_SECRET_PATTERN = re.compile(
+    r"(?:\bBearer\s+\S+|(?:^|[^A-Za-z0-9_-])(?:sk-(?:ant-|proj-)?|"
+    r"gh[pousr]_|xox[baprs]-)[A-Za-z0-9_-]{12,}|"
+    r"\b[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\b)",
+    re.IGNORECASE,
+)
 
 
 class StoryWorkspaceEpisodeBindingError(RuntimeError):
@@ -589,6 +598,58 @@ class StoryWorkspaceEpisodeBindingService:
             for opened in reversed(descriptors):
                 os.close(opened)
 
+    def read_canonical_project_name(self, story_slug: str) -> str | None:
+        """Read one bounded display name through the pinned project.yaml FD.
+
+        Project identity remains the directory/project_id slug.  The optional
+        name is display-only and deliberately uses a conservative lexical
+        parser so arbitrary YAML objects, tags, paths, or credential-looking
+        values never reach a public Story title.
+        """
+
+        candidate = self._validate_story_slug(story_slug)
+        descriptors: list[int] = []
+        try:
+            parent = self._open_workspace()
+            descriptors.append(parent)
+            for component in ("stories", candidate):
+                child = self._open_child_directory(parent, component, create=False)
+                assert child is not None
+                descriptors.append(child)
+                parent = child
+            text = self._read_project_text_from_story_directory(
+                parent,
+                optional=False,
+            )
+            assert text is not None
+            self.read_canonical_project_id_from_text(text, candidate=candidate)
+            matches = [
+                match.group("value").strip()
+                for match in _PROJECT_NAME_DECLARATION_PATTERN.finditer(text)
+            ]
+            if len(matches) != 1:
+                return None
+            value = matches[0]
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                value = value[1:-1].strip()
+            if (
+                not value
+                or len(value) > 255
+                or value in {".", ".."}
+                or value.startswith(("/", "~/", "./", "../"))
+                or re.match(r"^[A-Za-z]:[\\/]", value) is not None
+                or "/" in value
+                or "\\" in value
+                or "://" in value
+                or any(ord(character) < 32 or ord(character) == 127 for character in value)
+                or _PROJECT_NAME_SECRET_PATTERN.search(value) is not None
+            ):
+                return None
+            return value
+        finally:
+            for opened in reversed(descriptors):
+                os.close(opened)
+
     @classmethod
     def _read_binding_payload(
         cls,
@@ -923,6 +984,44 @@ class StoryWorkspaceEpisodeBindingService:
                 story_slug=story_slug,
             )
             return registry
+
+    def read_episode_registry_read_only(
+        self,
+        context: StoryWorkspaceEpisodeBindingContext,
+    ) -> StoryWorkspaceEpisodeRegistryFile:
+        """Read an existing registry without creating run directories or locks."""
+
+        story_slug = self._proved_story_slug(context, allow_unproven=False)
+        assert story_slug is not None
+        run_id = self._validate_run_id(context.workflow_run_id)
+        descriptors: list[int] = []
+        try:
+            parent = self._open_workspace()
+            descriptors.append(parent)
+            for name in (".dream", "runtime", "runs", run_id):
+                child = self._open_child_directory(
+                    parent,
+                    name,
+                    create=False,
+                    optional=False,
+                )
+                assert child is not None
+                descriptors.append(child)
+                parent = child
+            registry = self._read_registry(parent)
+            if registry is None:
+                raise StoryWorkspaceEpisodeBindingContractError(
+                    "Episode registry has not been bound"
+                )
+            self._validate_registry_authority(
+                registry,
+                workflow_run_id=run_id,
+                story_slug=story_slug,
+            )
+            return registry
+        finally:
+            for descriptor in reversed(descriptors):
+                os.close(descriptor)
 
     def ensure_next_episode(
         self,

@@ -37,6 +37,9 @@ from services.story_workspace.episode_binding_service import (
     StoryWorkspaceEpisodeBindingContext,
     StoryWorkspaceEpisodeBindingService,
 )
+from services.story_workspace.artifact_story_index_service import (
+    ArtifactStoryIndexService,
+)
 from services.story_workspace.episode_completion_validator import (
     StoryWorkspaceEpisodeCompletionContractError,
     StoryWorkspaceEpisodeCompletionValidator,
@@ -612,26 +615,22 @@ def _record_episode_workflow_completion(
             )
             if replay is None:
                 raise PermissionError("Episode workflow revision changed")
-            return {
-                "run": request.workflow_run_id,
-                "episodeId": episode_uid,
-                "action": action.value,
-                "workflowRevision": facts.revision,
-            }
-        StoryWorkspaceEpisodeCompletionValidator.validate_transition_ready(
-            action=action,
-            surface=surface,
-            facts=facts,
-        )
-        updated = service.record_completion(
-            workflow_run_id=request.workflow_run_id,
-            episode_uid=episode_uid,
-            action=action,
-            input_revision=input_revision,
-            manifest_revision=surface.manifest_revision,
-            message_id=message_id,
-            expected_revision=expected_facts_revision,
-        )
+            updated = facts
+        else:
+            StoryWorkspaceEpisodeCompletionValidator.validate_transition_ready(
+                action=action,
+                surface=surface,
+                facts=facts,
+            )
+            updated = service.record_completion(
+                workflow_run_id=request.workflow_run_id,
+                episode_uid=episode_uid,
+                action=action,
+                input_revision=input_revision,
+                manifest_revision=surface.manifest_revision,
+                message_id=message_id,
+                expected_revision=expected_facts_revision,
+            )
         refreshed_surface = artifact_service.read_surface(
             request.workflow_run_id,
             episode_authority=authority,
@@ -641,11 +640,32 @@ def _record_episode_workflow_completion(
             surface=refreshed_surface,
             facts=updated,
         )
+        try:
+            index_result = ArtifactStoryIndexService().materialize(
+                db=_db,
+                workspace_root=workspace,
+                workflow_run=_run,
+                actor_id=_actor_id,
+                thread_id=_thread_id,
+                episode_authority=authority,
+                refreshed_surface=refreshed_surface,
+            )
+        except Exception:
+            _logger.exception(
+                "Story Artifact index materialization failed",
+                extra={"workflow_run_id": request.workflow_run_id},
+            )
+            index_result = {
+                "status": "failed",
+                "errorCode": "story_index_write_failed",
+                "retryable": True,
+            }
         return {
             "run": request.workflow_run_id,
             "episodeId": episode_uid,
             "action": action.value,
             "workflowRevision": updated.revision,
+            "storyIndex": index_result,
         }
 
     return _with_authoritative_episode_context(request.workflow_run_id, record)

@@ -169,6 +169,34 @@ def test_manifest_order_covers_all_43_plus_5_tables_and_respects_foreign_keys() 
                 assert positions[target] < positions[name]
 
 
+def test_approved_story_target_extensions_do_not_enter_legacy_source_columns() -> None:
+    manifest = load_manifest()
+    stories = next(
+        table for table in manifest["tables"]
+        if table["name"] == "story_workspace_stories"
+    )
+    source_columns = [column["name"] for column in stories["columns"]]
+    target_columns = legacy_importer._expected_target_columns(
+        stories,
+        include_extensions=True,
+    )
+    assert len(source_columns) == 19
+    assert [name for name, _ in target_columns[:19]] == source_columns
+    assert target_columns[19:] == list(
+        legacy_importer.APPROVED_TARGET_COLUMN_EXTENSIONS[
+            "story_workspace_stories"
+        ]
+    )
+    expected_indexes = legacy_importer._expected_target_indexes(
+        manifest,
+        enabled_extensions=frozenset({"story_workspace_stories"}),
+    )
+    assert {
+        name: expected_indexes[name]
+        for name in legacy_importer.APPROVED_TARGET_INDEX_EXTENSIONS
+    } == legacy_importer.APPROVED_TARGET_INDEX_EXTENSIONS
+
+
 def test_live_source_column_order_and_approved_default_drift_are_compatible() -> None:
     expected = [
         (0, "id", "INTEGER", False, None, 1, 0),
@@ -498,6 +526,52 @@ def test_production_execute_requires_explicit_target_approval_and_identity(
             environ={"DATABASE_URL": "postgresql://localhost:5433/ink-memory"},
         )
     assert captured.value.code == "PRODUCTION_TARGET_SAFETY_CHECK_FAILED"
+
+
+def test_verify_existing_requires_explicit_read_only_target_identity(
+    tmp_path: Path,
+) -> None:
+    main, notion = _legacy_pair(tmp_path, populated=False)
+    database_url = "postgresql://localhost:5433/ink-memory"
+    with pytest.raises(LegacyMigrationError) as captured:
+        run_legacy_migration(
+            **_snapshot_kwargs(main, notion),
+            mode="source-dry-run",
+            accept_post_cutover_changes=True,
+        )
+    assert captured.value.code == "POST_CUTOVER_APPROVAL_MODE_INVALID"
+
+    with pytest.raises(LegacyMigrationError) as captured:
+        run_legacy_migration(
+            **_snapshot_kwargs(main, notion),
+            mode="verify-existing",
+            expected_target_database="ink-memory",
+            environ={"DATABASE_URL": database_url},
+        )
+    assert captured.value.code == "TARGET_VERIFY_APPROVAL_REQUIRED"
+
+    with pytest.raises(LegacyMigrationError) as captured:
+        run_legacy_migration(
+            **_snapshot_kwargs(main, notion),
+            mode="verify-existing",
+            expected_target_database="ink-memory",
+            production_approval="VERIFY-43+5-IN:ink-memory",
+            environ={"DATABASE_URL": database_url},
+        )
+    assert captured.value.code == "TARGET_VERIFY_IDENTITY_REQUIRED"
+
+    with pytest.raises(LegacyMigrationError) as captured:
+        run_legacy_migration(
+            **_snapshot_kwargs(main, notion),
+            mode="verify-existing",
+            expected_target_database="ink-memory",
+            expected_target_host="localhost",
+            expected_target_port=5434,
+            expected_target_owner="ink_memory",
+            production_approval="VERIFY-43+5-IN:ink-memory",
+            environ={"DATABASE_URL": database_url},
+        )
+    assert captured.value.code == "TARGET_VERIFY_SAFETY_CHECK_FAILED"
 
 
 def test_migration_sql_has_no_implicit_overwrite_or_destructive_target_statement() -> None:

@@ -263,7 +263,7 @@ class StoryWorkspaceReviewTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["review_status"], "confirmed")
         self.assertEqual(response.json()["status"], "published")
-        self.assertEqual(response.json()["execution"]["status"], "completed")
+        self.assertNotIn("execution", response.json())
         self.assertEqual(
             self._db_value("story_workspace_characters", "character-bundle", "review_status"),
             "confirmed",
@@ -341,6 +341,16 @@ class StoryWorkspaceReviewTest(unittest.TestCase):
             [item["id"] for item in response.json()["updated_items"]],
             ["story-pending-confirm"],
         )
+        for forbidden in (
+            "content",
+            "source_thread_ref",
+            "artifact_source_type",
+            "reviewed_script_revision",
+        ):
+            self.assertNotIn(
+                forbidden,
+                response.json()["updated_items"][0],
+            )
 
         response = self.client.post(
             "/api/story-workspace/batch",

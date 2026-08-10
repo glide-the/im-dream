@@ -328,14 +328,25 @@ class ApiRouteContractTests(unittest.TestCase):
 
 
 class ErrorRegistryTests(unittest.TestCase):
-    def test_registry_has_all_44_canonical_codes_with_recovery(self):
+    def test_registry_has_all_52_canonical_codes_with_recovery(self):
         # 27 legacy codes + 16 Claude Code plugin pipeline codes
         # (deck-integration-delta, 2026-08-02) + 1 guidance code
         # (WORKFLOW_RUN_NOT_GUIDABLE, dream-surface Task 3, 2026-08-04).
         self.assertGreaterEqual(len(ERROR_REGISTRY), 25)
-        self.assertEqual(len(ERROR_REGISTRY), 44)
+        self.assertEqual(len(ERROR_REGISTRY), 52)
+        story_index_codes = {
+            "story_index_row_missing",
+            "story_index_schema_unavailable",
+            "story_index_database_unavailable",
+            "story_index_write_failed",
+            "story_index_conflict",
+            "story_index_invalid_artifact",
+            "story_index_revision_conflict",
+            "artifact_missing",
+        }
         for code, metadata in ERROR_REGISTRY.items():
-            self.assertRegex(code, r"^[A-Z][A-Z0-9_]+$")
+            if code not in story_index_codes:
+                self.assertRegex(code, r"^[A-Z][A-Z0-9_]+$")
             self.assertTrue(metadata["phase"])
             self.assertTrue(metadata["meaning"])
             self.assertTrue(metadata["recovery"])

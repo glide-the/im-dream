@@ -132,12 +132,33 @@ class StoryWorkspaceDreamReentryService:
     def _query_authorized_rows(
         db: Any,
         actor_id: int,
+        *,
+        workflow_run_id: str | None = None,
+        limit: int | None = None,
     ) -> list[Any]:
         """Select only DB-consistent candidates before file projection.
 
         Workflow run status is intentionally absent: legacy status is not a
         durable Dream lifecycle fact (DEC-034/035).
         """
+
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000
+        ):
+            raise ValueError("authorized Dream row limit is invalid")
+        run_filter = "AND run.id = %s " if workflow_run_id is not None else ""
+        limit_clause = " LIMIT %s" if limit is not None else ""
+        parameters: list[Any] = [
+            str(actor_id),
+            actor_id,
+            actor_id,
+            actor_id,
+            _STORY_WORKSPACE_DREAM_LAUNCH_SCHEMA,
+        ]
+        if workflow_run_id is not None:
+            parameters.append(workflow_run_id)
+        if limit is not None:
+            parameters.append(limit)
 
         return db.execute(
             "SELECT "
@@ -221,14 +242,10 @@ class StoryWorkspaceDreamReentryService:
             "->> 'agentId') IS NOT DISTINCT FROM thread.voice_id "
             "AND (COALESCE(NULLIF(BTRIM(source.metadata), ''), '{}')::jsonb "
             "#>> '{dreamContext,agent_id}') IS NOT DISTINCT FROM thread.voice_id)) "
-            "ORDER BY run.created_at DESC, run.id ASC",
-            (
-                str(actor_id),
-                actor_id,
-                actor_id,
-                actor_id,
-                _STORY_WORKSPACE_DREAM_LAUNCH_SCHEMA,
-            ),
+            + run_filter
+            + "ORDER BY run.created_at DESC, run.id ASC"
+            + limit_clause,
+            tuple(parameters),
         ).fetchall()
 
     def _project_row(

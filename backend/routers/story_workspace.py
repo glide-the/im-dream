@@ -36,6 +36,7 @@ from story_workspace.contracts import (
     StoryWorkspaceResourceType,
     StoryWorkspaceScenePatch,
     StoryWorkspaceStoryPatch,
+    StoryWorkspaceStoryIndexReconcileCommand,
     StoryWorkspaceWorkspacePatch,
 )
 from services.story_workspace.agent_integration import (
@@ -53,6 +54,9 @@ try:
     from services.story_workspace.episode_action_service import (
         StoryWorkspaceEpisodeActionError,
     )
+    from services.story_workspace.artifact_story_index_repository import (
+        StoryWorkspacePublicStoryRepository,
+    )
 except ModuleNotFoundError:
     from backend.services.errors.error_registry import ApiRouteError, build_error_payload
     from backend.services.deck.story_workflow_gateway import (
@@ -61,10 +65,23 @@ except ModuleNotFoundError:
     from backend.services.story_workspace.episode_action_service import (
         StoryWorkspaceEpisodeActionError,
     )
+    from backend.services.story_workspace.artifact_story_index_repository import (
+        StoryWorkspacePublicStoryRepository,
+    )
 
 
 router = APIRouter(prefix="/api/story-workspace", tags=["story-workspace"])
 logger = logging.getLogger(__name__)
+_STORY_INDEX_ROUTE_ERROR_STATUSES: dict[str, frozenset[int]] = {
+    "WORKFLOW_PERMISSION_DENIED": frozenset({403, 404}),
+    "artifact_missing": frozenset({404}),
+    "story_index_revision_conflict": frozenset({409}),
+    "story_index_conflict": frozenset({409}),
+    "story_index_invalid_artifact": frozenset({422}),
+    "story_index_schema_unavailable": frozenset({503}),
+    "story_index_database_unavailable": frozenset({503}),
+    "story_index_write_failed": frozenset({503}),
+}
 
 _STORY_SORT_FIELDS = {"updated_at", "created_at", "title"}
 _CHARACTER_SORT_FIELDS = {"updated_at", "created_at", "name"}
@@ -207,6 +224,22 @@ class StoryWorkflowGateway(Protocol):
         workflow_run_id: str,
         *,
         actor: dict[str, str],
+    ) -> Any: ...
+
+    async def get_story_index(
+        self,
+        workflow_run_id: str,
+        *,
+        actor: dict[str, str],
+    ) -> Any: ...
+
+    async def reconcile_story_index(
+        self,
+        workflow_run_id: str,
+        request: StoryWorkspaceStoryIndexReconcileCommand,
+        *,
+        actor: dict[str, str],
+        if_match: str,
     ) -> Any: ...
 
     async def recover_episode_binding(
@@ -392,6 +425,31 @@ async def _episode_action_call(awaitable: Any) -> Any:
         )
 
 
+async def _story_index_call(awaitable: Any) -> Any:
+    """Serialize only the fixed Story index error vocabulary."""
+
+    try:
+        return _workflow_json(await awaitable, by_alias=True)
+    except ApiRouteError as exc:
+        allowed_statuses = _STORY_INDEX_ROUTE_ERROR_STATUSES.get(exc.code)
+        if allowed_statuses is None or exc.status_code not in allowed_statuses:
+            logger.error("Story index gateway returned a non-public error")
+            return JSONResponse(
+                status_code=503,
+                content=build_error_payload("story_index_database_unavailable"),
+            )
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=build_error_payload(exc.code),
+        )
+    except Exception:
+        logger.exception("Story index request failed")
+        return JSONResponse(
+            status_code=503,
+            content=build_error_payload("story_index_database_unavailable"),
+        )
+
+
 def _story_db() -> Iterator[Any]:
     db = database.get_db()
     try:
@@ -526,6 +584,14 @@ def _patch_owned_row(
         db.rollback()
         raise HTTPException(status_code=404, detail="Resource not found")
     db.commit()
+    if table == "story_workspace_stories":
+        public_story = StoryWorkspacePublicStoryRepository(db).get_story_row(
+            story_id=resource_id,
+            author_id=user_id,
+        )
+        if public_story is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
+        return public_story
     return _row_to_dict(_owned_row(db, table, resource_id, owner_column, user_id))
 
 
@@ -652,13 +718,15 @@ def _transition_pending_review(
                 status_code=400,
                 detail="Item is not in pending review status",
             )
-        updated = _row_to_dict(_owned_review_row(db, table, resource_id, user_id))
-        if action == StoryWorkspaceBatchAction.CONFIRM and resource_type == StoryWorkspaceResourceType.STORY:
-            updated["execution"] = {
-                "action": "publish_story_bundle",
-                "status": "completed",
-                "completed_at": updated.get("published_at"),
-            }
+        if resource_type == StoryWorkspaceResourceType.STORY:
+            updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
+                story_id=resource_id,
+                author_id=user_id,
+            )
+            if updated is None:
+                raise HTTPException(status_code=404, detail="Resource not found")
+        else:
+            updated = _row_to_dict(_owned_review_row(db, table, resource_id, user_id))
         db.commit()
     except Exception:
         db.rollback()
@@ -700,14 +768,12 @@ def _archive_story(
         )
         if cursor.rowcount != 1:
             raise HTTPException(status_code=400, detail="Item is already archived")
-        updated = _row_to_dict(
-            _owned_review_row(
-                db,
-                _REVIEW_RESOURCES[StoryWorkspaceResourceType.STORY],
-                story_id,
-                user_id,
-            )
+        updated = StoryWorkspacePublicStoryRepository(db).get_story_row(
+            story_id=story_id,
+            author_id=user_id,
         )
+        if updated is None:
+            raise HTTPException(status_code=404, detail="Resource not found")
         db.commit()
     except Exception:
         db.rollback()
@@ -813,14 +879,29 @@ def _batch_review(
                     detail="Review state changed during batch operation",
                 )
 
-            updated_rows = db.execute(
-                f"SELECT * FROM {table} WHERE id IN ({eligible_placeholders}) "
-                "AND author_id = %s",
-                params,
-            ).fetchall()
-            updated_by_id = {
-                str(row["id"]): _row_to_dict(row) for row in updated_rows
-            }
+            if request.resource_type == StoryWorkspaceResourceType.STORY:
+                public_repository = StoryWorkspacePublicStoryRepository(db)
+                updated_by_id = {}
+                for story_id in eligible_ids:
+                    public_story = public_repository.get_story_row(
+                        story_id=story_id,
+                        author_id=user_id,
+                    )
+                    if public_story is None:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Resource not found",
+                        )
+                    updated_by_id[story_id] = public_story
+            else:
+                updated_rows = db.execute(
+                    f"SELECT * FROM {table} WHERE id IN ({eligible_placeholders}) "
+                    "AND author_id = %s",
+                    params,
+                ).fetchall()
+                updated_by_id = {
+                    str(row["id"]): _row_to_dict(row) for row in updated_rows
+                }
         else:
             new_status = request.action.value
             updated_by_id = {}
@@ -921,19 +1002,20 @@ def list_stories(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    conditions = ["author_id = %s"]
-    params: list[Any] = [_user_id(current_user)]
-    if q:
-        conditions.append("title ILIKE %s")
-        params.append(f"%{q}%")
-    _append_in_filter(conditions, params, "review_status", review_status)
-    _append_in_filter(conditions, params, "status", status)
-    _append_in_filter(conditions, params, "type", type)
-    where = " WHERE " + " AND ".join(conditions)
-    select_sql = "SELECT * FROM story_workspace_stories" + where
-    select_sql += _sort_clause(sort, order, _STORY_SORT_FIELDS)
-    count_sql = "SELECT COUNT(*) FROM story_workspace_stories" + where
-    return _paginate_query(db, select_sql, count_sql, params, page, per_page)
+    try:
+        return StoryWorkspacePublicStoryRepository(db).list_stories(
+            author_id=_user_id(current_user),
+            q=q,
+            review_status=review_status,
+            status=status,
+            story_type=type,
+            sort=sort,
+            order=order,
+            page=page,
+            per_page=per_page,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unsupported Story query") from exc
 
 
 @router.get("/stories/{story_id}")
@@ -942,25 +1024,13 @@ def get_story(
     current_user: dict[str, Any] = Depends(get_current_user),
     db: Any = Depends(_story_db),
 ) -> dict[str, Any]:
-    user_id = _user_id(current_user)
-    result = _row_to_dict(
-        _owned_row(db, "story_workspace_stories", story_id, "author_id", user_id)
-    )
-    characters = db.execute(
-        "SELECT c.*, sc.role_type FROM story_workspace_characters c "
-        "JOIN story_workspace_story_characters sc ON sc.character_id = c.id "
-        "WHERE sc.story_id = %s AND c.author_id = %s "
-        "ORDER BY c.name ASC, c.id ASC",
-        (story_id, user_id),
-    ).fetchall()
-    scenes = db.execute(
-        "SELECT * FROM story_workspace_scenes "
-        "WHERE story_id = %s AND author_id = %s ORDER BY order_index ASC, id ASC",
-        (story_id, user_id),
-    ).fetchall()
-    result["characters"] = [_row_to_dict(row) for row in characters]
-    result["scenes"] = [_row_to_dict(row) for row in scenes]
-    return result
+    try:
+        return StoryWorkspacePublicStoryRepository(db).get_story(
+            story_id=story_id,
+            author_id=_user_id(current_user),
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail="Resource not found") from exc
 
 
 @router.patch("/stories/{story_id}")
@@ -1020,14 +1090,12 @@ def get_character(
             user_id,
         )
     )
-    stories = db.execute(
-        "SELECT s.*, sc.role_type FROM story_workspace_stories s "
-        "JOIN story_workspace_story_characters sc ON sc.story_id = s.id "
-        "WHERE sc.character_id = %s AND s.author_id = %s "
-        "ORDER BY s.updated_at DESC, s.id ASC",
-        (character_id, user_id),
-    ).fetchall()
-    result["stories"] = [_row_to_dict(row) for row in stories]
+    result["stories"] = StoryWorkspacePublicStoryRepository(
+        db
+    ).list_stories_for_character(
+        character_id=character_id,
+        author_id=user_id,
+    )
     return result
 
 
@@ -1091,12 +1159,10 @@ def get_scene(
     )
     story = None
     if result.get("story_id"):
-        story_row = db.execute(
-            "SELECT * FROM story_workspace_stories WHERE id = %s AND author_id = %s",
-            (result["story_id"], user_id),
-        ).fetchone()
-        if story_row is not None:
-            story = _row_to_dict(story_row)
+        story = StoryWorkspacePublicStoryRepository(db).get_story_row(
+            story_id=str(result["story_id"]),
+            author_id=user_id,
+        )
     characters = db.execute(
         "SELECT c.* FROM story_workspace_characters c "
         "JOIN story_workspace_scene_characters sc ON sc.character_id = c.id "
@@ -1432,6 +1498,74 @@ async def story_workspace_get_workflow_run_episode_artifacts(
         headers["ETag"] = quoted_etag
         if if_none_match is not None and if_none_match.strip() == quoted_etag:
             return Response(status_code=304, headers=headers)
+    return JSONResponse(content=result, headers=headers)
+
+
+@router.get("/workflow-runs/{workflow_run_id}/story-index")
+async def story_workspace_get_workflow_run_story_index(
+    workflow_run_id: str,
+    if_none_match: Optional[str] = Header(default=None, alias="If-None-Match"),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Compare server-bound Artifact revisions with PostgreSQL without writing."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse(
+            status_code=403,
+            content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
+        )
+    result = await _story_index_call(
+        gateway.get_story_index(workflow_run_id, actor=actor)
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    etag = result.get("etag") if isinstance(result, dict) else None
+    headers: dict[str, str] = {}
+    if isinstance(etag, str):
+        quoted = f'"{etag}"'
+        headers["ETag"] = quoted
+        if if_none_match is not None and if_none_match.strip() == quoted:
+            return Response(status_code=304, headers=headers)
+    return JSONResponse(content=result, headers=headers)
+
+
+@router.post("/workflow-runs/{workflow_run_id}/story-index/reconcile")
+async def story_workspace_reconcile_workflow_run_story_index(
+    workflow_run_id: str,
+    request: StoryWorkspaceStoryIndexReconcileCommand,
+    if_match: str = Header(
+        alias="If-Match",
+        min_length=73,
+        max_length=73,
+        pattern=r'^"sha256:[0-9a-f]{64}"$',
+    ),
+    current_user: dict[str, Any] = Depends(get_current_user),
+    gateway: StoryWorkflowGateway = Depends(get_story_workflow_gateway),
+):
+    """Retry one revision-guarded materialization; no locator input is accepted."""
+
+    try:
+        actor = {"actor_id": str(current_user["user_id"])}
+    except (KeyError, TypeError, ValueError):
+        return JSONResponse(
+            status_code=403,
+            content=build_error_payload("WORKFLOW_PERMISSION_DENIED"),
+        )
+    result = await _story_index_call(
+        gateway.reconcile_story_index(
+            workflow_run_id,
+            request,
+            actor=actor,
+            if_match=if_match,
+        )
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    etag = result.get("etag") if isinstance(result, dict) else None
+    headers = {"ETag": f'"{etag}"'} if isinstance(etag, str) else {}
     return JSONResponse(content=result, headers=headers)
 
 

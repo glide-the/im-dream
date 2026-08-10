@@ -14,8 +14,17 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react';
-import { storyWorkspaceReviewDeepLink } from '../../components/story-workspace';
-import { useStoryWorkspaceDreamAgent, useStoryWorkspaceDreamFiles } from '../../hooks/story-workspace';
+import {
+  StoryWorkspaceStoryIndexStatus,
+  storyWorkspaceReviewDeepLink,
+  type StoryWorkspaceStoryIndexFileStatus,
+} from '../../components/story-workspace';
+import {
+  StoryWorkspaceStoryIndexHttpError,
+  useStoryWorkspaceDreamAgent,
+  useStoryWorkspaceDreamFiles,
+  useStoryWorkspaceStoryIndex,
+} from '../../hooks/story-workspace';
 import { storyWorkspaceDreamAgentHasSettledMessage } from '../../hooks/story-workspace/useStoryWorkspaceDreamAgent';
 import type {
   StoryWorkspaceEpisodeAssociationCoverage,
@@ -549,7 +558,18 @@ export function StoryWorkspaceExecutionPage({
   const episodeArtifacts = useStoryWorkspaceEpisodeArtifacts(
     canQueryEpisode ? runId : null,
   );
+  const storyIndex = useStoryWorkspaceStoryIndex(runId, { enabled: canQueryEpisode });
   const refreshEpisodeArtifacts = episodeArtifacts.refresh;
+  const retryStoryIndex = useCallback(async () => {
+    try {
+      await storyIndex.reconcile();
+    } catch (reason) {
+      if (reason instanceof StoryWorkspaceStoryIndexHttpError && reason.status === 409) {
+        refreshEpisodeArtifacts();
+        storyIndex.refresh();
+      }
+    }
+  }, [refreshEpisodeArtifacts, storyIndex]);
   const episodeSurface = episodeArtifacts.data;
   const episodeViewModel = useMemo(
     () => episodeSurface?.bindingAvailability === 'bound'
@@ -944,6 +964,25 @@ export function StoryWorkspaceExecutionPage({
     ?? false;
   const episodeActionBlockedByLastGood = episodeArtifacts.isShowingLastGood
     || episodeArtifacts.diagnostic !== null;
+  const scriptArtifactAvailability = episodeSurface?.bindingAvailability === 'bound'
+    ? storyWorkspaceEpisodeArtifactAvailability(episodeSurface, 'script.md')
+    : 'not_generated';
+  const storyIndexFileStatus: StoryWorkspaceStoryIndexFileStatus =
+    episodeArtifacts.diagnostic !== null
+      || episodeArtifacts.invalidArtifactKeys.includes('script.md')
+      ? 'invalid'
+      : episodeArtifacts.error !== null
+        || episodeArtifacts.unavailableArtifactKeys.includes('script.md')
+        ? 'unavailable'
+        : scriptArtifactAvailability === 'available'
+          ? 'available'
+          : storyIndex.data?.errorCode === 'artifact_missing'
+            ? 'missing'
+            : scriptArtifactAvailability === 'not_generated'
+              ? 'generating'
+              : scriptArtifactAvailability === 'invalid'
+                ? 'invalid'
+                : 'unavailable';
   const dreamAgentWorkflowActions: readonly StoryWorkspaceDreamAgentWorkflowActionViewModel[] =
     episodeSurface?.bindingAvailability === 'unbound'
       ? [{
@@ -1274,6 +1313,15 @@ export function StoryWorkspaceExecutionPage({
               <h2 id="story-workspace-episode-title">
                 {episodeSurface.narrative?.overview.title ?? '第一集'}
               </h2>
+              <StoryWorkspaceStoryIndexStatus
+                error={storyIndex.error}
+                fileStatus={storyIndexFileStatus}
+                isLoading={storyIndex.isLoading}
+                isSyncing={storyIndex.isReconciling}
+                onRefresh={storyIndex.refresh}
+                onRetry={() => { void retryStoryIndex(); }}
+                projection={storyIndex.data}
+              />
               {episodeArtifacts.isLoading && (
                 <p aria-live="polite">正在检查新的 artifact revision…</p>
               )}

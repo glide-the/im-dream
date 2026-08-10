@@ -6,7 +6,7 @@ respective router and service modules.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 import json
 import math
@@ -1407,6 +1407,87 @@ class StoryWorkspaceEpisodeActionAccepted(_StoryWorkspaceDreamWireModel):
     replayed: StrictBool
 
 
+class StoryWorkspaceStoryIndexReconcileCommand(_StoryWorkspaceDreamWireModel):
+    """Path-free request for one synchronous idempotent index retry."""
+
+    idempotency_key: Optional[str] = Field(
+        default=None,
+        pattern=r"^[A-Za-z0-9._:-]{1,255}$",
+    )
+
+
+class StoryWorkspaceStoryIndexProjection(_StoryWorkspaceDreamWireModel):
+    """Browser-safe comparison of current Artifact and PostgreSQL revisions."""
+
+    run_id: str = Field(pattern=r"^run_[0-9a-f]{32}$")
+    project_id: str = Field(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    story_id: Optional[str] = Field(
+        default=None,
+        pattern=(
+            r"^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-"
+            r"[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        ),
+    )
+    status: Literal["indexed", "stale", "missing", "failed"]
+    observed_manifest_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    observed_script_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    indexed_manifest_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    indexed_script_revision: Optional[str] = Field(
+        default=None,
+        pattern=r"^sha256:[0-9a-f]{64}$",
+    )
+    episode_count: int = Field(ge=1, le=99)
+    last_indexed_at: Optional[datetime] = None
+    error_code: Optional[
+        Literal[
+            "story_index_row_missing",
+            "story_index_schema_unavailable",
+            "story_index_database_unavailable",
+            "story_index_write_failed",
+            "story_index_conflict",
+            "story_index_invalid_artifact",
+            "story_index_revision_conflict",
+            "artifact_missing",
+        ]
+    ] = None
+    retryable: StrictBool
+    etag: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @field_validator("last_indexed_at")
+    @classmethod
+    def last_indexed_at_is_utc(
+        cls,
+        value: datetime | None,
+    ) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None or value.utcoffset() is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    @model_validator(mode="after")
+    def indexed_state_is_revision_exact(self) -> "StoryWorkspaceStoryIndexProjection":
+        if self.status == "indexed" and (
+            self.story_id is None
+            or self.error_code is not None
+            or self.observed_manifest_revision is None
+            or self.observed_script_revision is None
+            or self.observed_manifest_revision != self.indexed_manifest_revision
+            or self.observed_script_revision != self.indexed_script_revision
+        ):
+            raise ValueError("indexed Story projections require matching revisions")
+        return self
+
+
 class StoryWorkspaceEpisodeArtifactConsumer(str, Enum):
     """Allowlisted UI consumers; never accepts arbitrary component names."""
 
@@ -2495,7 +2576,6 @@ class StoryWorkspaceStory:
     status: StoryWorkspaceContentStatus = StoryWorkspaceContentStatus.DRAFT
     review_status: StoryWorkspaceReviewStatus = StoryWorkspaceReviewStatus.PENDING
     type: StoryWorkspaceStoryType = StoryWorkspaceStoryType.SHORT
-    content: Optional[str] = None
     author_id: int = 0
     workspace_id: str = ""
     character_count: int = 0
@@ -2507,6 +2587,17 @@ class StoryWorkspaceStory:
     updated_at: Optional[datetime] = None
     confirmed_at: Optional[datetime] = None
     published_at: Optional[datetime] = None
+    source_run_id: Optional[str] = None
+    source_project_id: Optional[str] = None
+    episode_count: Optional[int] = None
+    artifact_manifest_revision: Optional[str] = None
+    script_revision: Optional[str] = None
+    artifact_sync_status: Optional[str] = None
+    artifact_indexed_at: Optional[datetime] = None
+    artifact_sync_error_code: Optional[str] = None
+    script_size_bytes: Optional[int] = None
+    artifact_available: Optional[bool] = None
+    reconcile_version: Optional[int] = None
 
 
 @dataclass
@@ -2992,6 +3083,8 @@ __all__ = [
     "StoryWorkspaceEpisodeWorkflowCompletionToolInput",
     "StoryWorkspaceEpisodeWorkflowFile",
     "StoryWorkspaceEpisodeWorkflowProjection",
+    "StoryWorkspaceStoryIndexProjection",
+    "StoryWorkspaceStoryIndexReconcileCommand",
     "StoryWorkspaceProjectArtifactCanonicalInput",
     "StoryWorkspaceWorkflowFactCanonicalInput",
     "StoryWorkspaceEpisodeBindingRecoveryCommand",

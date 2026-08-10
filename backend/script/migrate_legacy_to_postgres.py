@@ -4,8 +4,10 @@
 The default mode validates read-only SQLite Online Backup snapshots and does
 not connect to PostgreSQL. ``--target-dry-run`` rehearses staging/import in an
 isolated PostgreSQL transaction and rolls it back. ``--execute`` commits only
-to a safety-validated ``TEST_DATABASE_URL``. ``--production-execute`` is a
-separate explicit cutover path that verifies DATABASE_URL name/host/port/owner.
+to a safety-validated ``TEST_DATABASE_URL``. ``--verify-existing`` proves that
+all source rows already exist in a target that may have post-cutover additions.
+``--production-execute`` is a separate explicit cutover path that verifies the
+DATABASE_URL name/host/port/owner.
 """
 
 from __future__ import annotations
@@ -66,6 +68,11 @@ def _parser() -> argparse.ArgumentParser:
         help="commit to an isolated TEST_DATABASE_URL after all validations pass",
     )
     mode.add_argument(
+        "--verify-existing",
+        action="store_true",
+        help="read-only source-subset verification against an exact DATABASE_URL identity",
+    )
+    mode.add_argument(
         "--production-execute",
         action="store_true",
         help="commit to DATABASE_URL only with complete explicit target identity",
@@ -79,12 +86,23 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="with --execute, approve insertion of missing canonical baseline rows",
     )
+    parser.add_argument(
+        "--accept-post-cutover-changes",
+        action="store_true",
+        help=(
+            "with --verify-existing, adopt only rows whose target updated_at "
+            "is strictly newer; missing or unproven drift still fails"
+        ),
+    )
     parser.add_argument("--expected-target-host")
     parser.add_argument("--expected-target-port", type=int)
     parser.add_argument("--expected-target-owner")
     parser.add_argument(
         "--production-approval",
-        help="must equal MIGRATE-43+5-TO:<expected database>",
+        help=(
+            "must equal MIGRATE-43+5-TO:<database> for production execute or "
+            "VERIFY-43+5-IN:<database> for existing-data verification"
+        ),
     )
     parser.add_argument(
         "--batch-size",
@@ -105,6 +123,8 @@ def _mode(arguments: argparse.Namespace) -> str:
         return "production-execute"
     if arguments.execute:
         return "execute"
+    if arguments.verify_existing:
+        return "verify-existing"
     if arguments.target_dry_run:
         return "target-dry-run"
     return "source-dry-run"
@@ -137,6 +157,7 @@ def main(argv: list[str] | None = None) -> int:
             expected_target_port=arguments.expected_target_port,
             expected_target_owner=arguments.expected_target_owner,
             production_approval=arguments.production_approval,
+            accept_post_cutover_changes=arguments.accept_post_cutover_changes,
             batch_size=arguments.batch_size,
             run_id=migration_run_id,
         )

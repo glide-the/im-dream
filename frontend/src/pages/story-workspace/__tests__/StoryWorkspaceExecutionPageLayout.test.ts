@@ -117,6 +117,22 @@ test('places the artifact progress directly below the Episode Overview title', (
   expect(PAGE_SOURCE.match(/aria-label="第一集产物进度"/g) ?? []).toHaveLength(0);
 });
 
+test('places the independent Story Index facts below the Episode title and before its action', () => {
+  const episodeHeader = PAGE_SOURCE.slice(
+    PAGE_SOURCE.indexOf('<main aria-labelledby="story-workspace-episode-title">'),
+    PAGE_SOURCE.indexOf('</header>', PAGE_SOURCE.indexOf('<main aria-labelledby="story-workspace-episode-title">')),
+  );
+  const title = episodeHeader.indexOf('id="story-workspace-episode-title"');
+  const indexStatus = episodeHeader.indexOf('<StoryWorkspaceStoryIndexStatus');
+  const nextAction = episodeHeader.indexOf('aria-label="Episode 下一步"');
+  expect(title).toBeGreaterThan(-1);
+  expect(indexStatus).toBeGreaterThan(title);
+  expect(nextAction).toBeGreaterThan(indexStatus);
+  expect(CSS_SOURCE).toMatch(
+    /\.story-workspace-story-index-status\s*\{[^}]*min-width:\s*0;[^}]*grid-column:\s*1\s*\/\s*-1;/s,
+  );
+});
+
 test('Episode layout has a mobile storyline sheet and 44px controls below 768px', () => {
   expect(CSS_SOURCE).toMatch(/@media\s*\(max-width:\s*767px\)/);
   const narrowStart = CSS_SOURCE.indexOf('@media (max-width: 767px)');

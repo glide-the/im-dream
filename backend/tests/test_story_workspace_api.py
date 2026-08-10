@@ -226,6 +226,15 @@ class StoryWorkspaceAPITest(unittest.TestCase):
         self.database_fixture.stop()
         self.temp_dir.cleanup()
 
+    def assert_public_story(self, payload: dict[str, object]) -> None:
+        for forbidden in (
+            "content",
+            "source_thread_ref",
+            "artifact_source_type",
+            "reviewed_script_revision",
+        ):
+            self.assertNotIn(forbidden, payload)
+
     def test_unauthenticated_request_is_rejected(self) -> None:
         app = FastAPI()
         app.include_router(story_workspace.router)
@@ -282,6 +291,21 @@ class StoryWorkspaceAPITest(unittest.TestCase):
         self.assertEqual(len(payload["data"]), 1)
         self.assertEqual(payload["data"][0]["title"], "午夜咖啡馆")
         self.assertEqual(
+            set(payload["data"][0]),
+            {
+                "id", "identifier", "title", "description", "status",
+                "review_status", "review_notes", "type", "character_count", "scene_count",
+                "created_at", "updated_at", "confirmed_at", "source_run_id",
+                "source_project_id", "episode_count", "artifact_manifest_revision",
+                "script_revision", "artifact_sync_status", "artifact_indexed_at",
+                "artifact_sync_error_code", "script_size_bytes", "artifact_available",
+                "reconcile_version",
+            },
+        )
+        self.assertIsNone(payload["data"][0]["source_run_id"])
+        self.assert_public_story(payload["data"][0])
+        self.assertNotIn("agent_session_id", payload["data"][0])
+        self.assertEqual(
             payload["pagination"],
             {"page": 1, "per_page": 1, "total": 2, "total_pages": 2},
         )
@@ -305,6 +329,8 @@ class StoryWorkspaceAPITest(unittest.TestCase):
         response = self.client.get("/api/story-workspace/stories/story-1")
         self.assertEqual(response.status_code, 200, response.text)
         payload = response.json()
+        self.assert_public_story(payload)
+        self.assertNotIn("agent_session_id", payload)
         self.assertEqual([item["id"] for item in payload["characters"]], ["char-1"])
         self.assertEqual([item["id"] for item in payload["scenes"]], ["scene-1"])
         self.assertEqual(payload["characters"][0]["tags"], ["温柔"])
@@ -321,6 +347,8 @@ class StoryWorkspaceAPITest(unittest.TestCase):
         response = self.client.get("/api/story-workspace/characters/char-1")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual([item["id"] for item in response.json()["stories"]], ["story-1"])
+        self.assert_public_story(response.json()["stories"][0])
+        self.assertNotIn("agent_session_id", response.json()["stories"][0])
 
         response = self.client.get(
             "/api/story-workspace/scenes",
@@ -332,6 +360,8 @@ class StoryWorkspaceAPITest(unittest.TestCase):
         response = self.client.get("/api/story-workspace/scenes/scene-1")
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["story"]["id"], "story-1")
+        self.assert_public_story(response.json()["story"])
+        self.assertNotIn("agent_session_id", response.json()["story"])
         self.assertEqual([item["id"] for item in response.json()["characters"]], ["char-1"])
 
     def test_controlled_patches_update_only_allowed_fields(self) -> None:
@@ -342,6 +372,8 @@ class StoryWorkspaceAPITest(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(response.json()["title"], "新标题")
         self.assertEqual(response.json()["review_status"], "pending")
+        self.assert_public_story(response.json())
+        self.assertNotIn("agent_session_id", response.json())
 
         response = self.client.patch(
             "/api/story-workspace/characters/char-1",
@@ -436,6 +468,8 @@ class StoryWorkspaceAPITest(unittest.TestCase):
             "/api/story-workspace/workflow-runs/{workflow_run_id}": {"GET"},
             "/api/story-workspace/workflow-runs/{workflow_run_id}/retry": {"POST"},
             "/api/story-workspace/workflow-runs/{workflow_run_id}/cancel": {"POST"},
+            "/api/story-workspace/workflow-runs/{workflow_run_id}/story-index": {"GET"},
+            "/api/story-workspace/workflow-runs/{workflow_run_id}/story-index/reconcile": {"POST"},
         }
         for path, methods in expected.items():
             self.assertIn(path, methods_by_path)

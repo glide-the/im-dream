@@ -13,9 +13,7 @@ import type {
 export type StoryWorkspaceReviewResourceType = 'story' | 'character' | 'scene';
 
 export interface StoryWorkspaceStoryDetail extends StoryWorkspaceStory {
-  content: string | null;
   review_notes?: string | null;
-  agent_session_id?: string | null;
   characters?: StoryWorkspaceCharacter[];
   scenes?: StoryWorkspaceScene[];
   execution?: {
@@ -69,14 +67,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     headers,
   });
   if (!response.ok) {
-    let detail = `Story Workspace 请求失败（${response.status}）`;
-    try {
-      const body = await response.json() as { detail?: string };
-      if (typeof body.detail === 'string') detail = body.detail;
-    } catch {
-      // Keep the safe status-based message.
-    }
-    throw new Error(detail);
+    // Review surfaces never render arbitrary server detail because it may carry
+    // implementation locators. The status is enough for a safe retry message.
+    throw new Error(`Story Workspace 请求失败（${response.status}）`);
   }
   return response.json() as Promise<T>;
 }

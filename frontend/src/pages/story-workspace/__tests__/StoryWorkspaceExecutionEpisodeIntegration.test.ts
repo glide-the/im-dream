@@ -17,6 +17,8 @@ const PAGE_SOURCE = readFileSync(new URL(
 test('composes the authoritative Episode query, U6 view model and U7-U9 workbench', () => {
   for (const expected of [
     'useStoryWorkspaceEpisodeArtifacts',
+    'useStoryWorkspaceStoryIndex',
+    '<StoryWorkspaceStoryIndexStatus',
     'storyWorkspaceBuildEpisodeExecutionViewModel',
     'storyWorkspaceReconcileEpisodeSelection',
     '<StoryWorkspaceEpisodeNarrativeWorkbench',
@@ -29,6 +31,33 @@ test('composes the authoritative Episode query, U6 view model and U7-U9 workbenc
     "heading.focus({ preventScroll: true })",
     "behavior: reducedMotion ? 'auto' : 'smooth'",
   ]) expect(PAGE_SOURCE).toContain(expected);
+});
+
+test('keeps Story Index failure independent from Episode action availability', () => {
+  const blockerStart = PAGE_SOURCE.indexOf('const episodeActionBlockedByLastGood');
+  const blockerEnd = PAGE_SOURCE.indexOf(';', blockerStart);
+  const blocker = PAGE_SOURCE.slice(blockerStart, blockerEnd);
+  expect(blocker).toContain('episodeArtifacts.isShowingLastGood');
+  expect(blocker).toContain('episodeArtifacts.diagnostic');
+  expect(blocker).not.toContain('storyIndex');
+});
+
+test('loads Story Index only after the existing Dream-files access fact succeeds', () => {
+  expect(PAGE_SOURCE).toContain(
+    'useStoryWorkspaceStoryIndex(runId, { enabled: canQueryEpisode })',
+  );
+  expect(PAGE_SOURCE).toContain('onRefresh={storyIndex.refresh}');
+});
+
+test('refreshes both reads after one Story Index 409 without a blind reconcile retry', () => {
+  const retryStart = PAGE_SOURCE.indexOf('const retryStoryIndex');
+  const retryEnd = PAGE_SOURCE.indexOf('const episodeSurface', retryStart);
+  const retry = PAGE_SOURCE.slice(retryStart, retryEnd);
+  expect(retry).toContain('await storyIndex.reconcile()');
+  expect(retry).toContain('reason.status === 409');
+  expect(retry).toContain('refreshEpisodeArtifacts()');
+  expect(retry).toContain('storyIndex.refresh()');
+  expect(retry.match(/storyIndex\.reconcile\(/g) ?? []).toHaveLength(1);
 });
 
 test('opens canonical Episode artifacts inside the storyboard focus layer', () => {
@@ -604,6 +633,19 @@ test('real Page ignores stale A resolve, reject and finally after REST identity 
     export function useStoryWorkspaceDreamAgent() {
       const snapshot = useSyncExternalStore(subscribeAgent, () => agentSnapshot, () => agentSnapshot);
       return { ...agent, snapshot };
+    }
+    export class StoryWorkspaceStoryIndexHttpError extends Error {
+      constructor(status) {
+        super('Story index request failed (' + status + ').');
+        this.status = status;
+      }
+    }
+    export function useStoryWorkspaceStoryIndex() {
+      return {
+        data: null, error: null, isLoading: false, isReconciling: false,
+        isShowingLastGood: false, refresh: () => undefined,
+        reconcile: async () => { throw new Error('Story Index retry is outside this harness'); },
+      };
     }
     export function __u11SetAgentSettled(messageId) {
       agentSnapshot = {

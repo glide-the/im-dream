@@ -228,6 +228,46 @@ ERROR_REGISTRY: dict[str, dict[str, str]] = {
         "meaning": "A packed plugin directory is missing from the workspace.",
         "recovery": "Recreate the chat workspace so plugins are re-packed.",
     },
+    "story_index_row_missing": {
+        "phase": "result",
+        "meaning": "The PostgreSQL Story index has not been created.",
+        "recovery": "Retry the idempotent Story index synchronization.",
+    },
+    "story_index_schema_unavailable": {
+        "phase": "config",
+        "meaning": "The PostgreSQL Story index schema is not available.",
+        "recovery": "Wait for the Admin-owned schema migration and retry.",
+    },
+    "story_index_database_unavailable": {
+        "phase": "result",
+        "meaning": "The PostgreSQL Story index is temporarily unavailable.",
+        "recovery": "Keep using the generated file and retry indexing later.",
+    },
+    "story_index_write_failed": {
+        "phase": "result",
+        "meaning": "The PostgreSQL Story index could not be updated.",
+        "recovery": "Keep using the generated file and retry the idempotent write.",
+    },
+    "story_index_conflict": {
+        "phase": "concurrency",
+        "meaning": "The Project Story index belongs to another trusted thread.",
+        "recovery": "Resolve the ownership conflict before retrying.",
+    },
+    "story_index_invalid_artifact": {
+        "phase": "result",
+        "meaning": "The canonical Story Artifact is invalid.",
+        "recovery": "Repair the canonical Project or Episode Artifact and retry.",
+    },
+    "story_index_revision_conflict": {
+        "phase": "concurrency",
+        "meaning": "The Story Artifact revision changed before indexing.",
+        "recovery": "Refresh the file and Story index status before retrying.",
+    },
+    "artifact_missing": {
+        "phase": "result",
+        "meaning": "The canonical script Artifact is missing.",
+        "recovery": "Generate the script Artifact before retrying the Story index.",
+    },
 }
 
 

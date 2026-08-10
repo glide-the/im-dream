@@ -33,6 +33,28 @@ export interface StoryWorkspaceSceneQuery extends StoryWorkspaceListQuery {
 
 export type StoryWorkspaceStoryType = 'short' | 'long' | 'script' | 'outline';
 
+export type StoryWorkspaceArtifactSyncStatus =
+  | 'syncing'
+  | 'indexed'
+  | 'stale'
+  | 'missing'
+  | 'failed';
+
+export type StoryWorkspaceStoryIndexStatus = Exclude<
+  StoryWorkspaceArtifactSyncStatus,
+  'syncing'
+>;
+
+export type StoryWorkspaceStoryIndexErrorCode =
+  | 'story_index_row_missing'
+  | 'story_index_schema_unavailable'
+  | 'story_index_database_unavailable'
+  | 'story_index_write_failed'
+  | 'story_index_conflict'
+  | 'story_index_invalid_artifact'
+  | 'story_index_revision_conflict'
+  | 'artifact_missing';
+
 export interface StoryWorkspaceStory {
   id: string;
   identifier: string;
@@ -46,6 +68,34 @@ export interface StoryWorkspaceStory {
   created_at: string;
   updated_at: string;
   confirmed_at: string | null;
+  source_run_id: string | null;
+  source_project_id: string | null;
+  episode_count: number | null;
+  artifact_manifest_revision: string | null;
+  script_revision: string | null;
+  artifact_sync_status: StoryWorkspaceArtifactSyncStatus | null;
+  artifact_indexed_at: string | null;
+  artifact_sync_error_code: StoryWorkspaceStoryIndexErrorCode | null;
+  script_size_bytes: number | null;
+  artifact_available: boolean | null;
+  reconcile_version: number | null;
+}
+
+/** GET/POST /api/story-workspace/workflow-runs/{runId}/story-index. */
+export interface StoryWorkspaceStoryIndexProjection {
+  readonly runId: string;
+  readonly projectId: string;
+  readonly storyId: string | null;
+  readonly status: StoryWorkspaceStoryIndexStatus;
+  readonly observedManifestRevision: string | null;
+  readonly observedScriptRevision: string | null;
+  readonly indexedManifestRevision: string | null;
+  readonly indexedScriptRevision: string | null;
+  readonly episodeCount: number;
+  readonly lastIndexedAt: string | null;
+  readonly errorCode: StoryWorkspaceStoryIndexErrorCode | null;
+  readonly retryable: boolean;
+  readonly etag: string;
 }
 
 export interface StoryWorkspaceCharacter {
