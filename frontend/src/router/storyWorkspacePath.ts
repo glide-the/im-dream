@@ -130,7 +130,8 @@ export function resolveStoryWorkspacePath(
   const query = new URLSearchParams(search);
 
   if (
-    normalizedPath === '/story-workspace'
+    normalizedPath === '/'
+    || normalizedPath === '/story-workspace'
     || normalizedPath === '/story-workspace/dashboard'
     || normalizedPath === STORY_WORKSPACE_PATHS.dream
   ) {

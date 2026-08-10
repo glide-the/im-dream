@@ -33,6 +33,11 @@ import {
 const ROUTER_SOURCE = readFileSync(new URL('../story-workspace.tsx', import.meta.url), 'utf8');
 
 test('static routes resolve exactly as before (no regression)', () => {
+  expect(resolveStoryWorkspacePath('/')).toMatchObject({
+    canonicalPath: STORY_WORKSPACE_PATHS.dream,
+    route: 'dream',
+    params: {},
+  });
   expect(resolveStoryWorkspacePath('/story-workspace')).toMatchObject({
     canonicalPath: STORY_WORKSPACE_PATHS.dream,
     route: 'dream',
