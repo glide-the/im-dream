@@ -120,7 +120,7 @@ for (const viewport of [
 
     await expect(page.getByRole('heading', { name: 'AI 模型配置' })).toBeVisible();
     const catalog = await (await catalogResponse).json() as {
-      data: Array<{ modelAlias: string; callable: boolean; availability: string }>;
+      data: Array<{ modelAlias: string; displayName: string; callable: boolean; availability: string }>;
       defaultModelAlias: string | null;
     };
     expect(catalog.data).toHaveLength(3);
@@ -128,9 +128,9 @@ for (const viewport of [
     expect(catalog.data.find((model) => model.modelAlias === 'deepseek-v4-flash')).toMatchObject({ callable: true, availability: 'included' });
     expect(catalog.data.find((model) => model.modelAlias === 'deepseek-v4-pro')).toMatchObject({ callable: true, availability: 'included' });
     expect(catalog.data.find((model) => model.modelAlias === 'hy-preview')).toMatchObject({ callable: true, availability: 'included' });
-    const freeModel = page.getByRole('radio', { name: /deepseek-v4-flash/i });
-    const unboundModel = page.getByRole('radio', { name: /deepseek-v4-pro/i });
-    const hyModel = page.getByRole('radio', { name: /hy-preview/i });
+    const freeModel = page.getByRole('radio', { name: catalog.data.find((model) => model.modelAlias === 'deepseek-v4-flash')?.displayName });
+    const unboundModel = page.getByRole('radio', { name: catalog.data.find((model) => model.modelAlias === 'deepseek-v4-pro')?.displayName });
+    const hyModel = page.getByRole('radio', { name: catalog.data.find((model) => model.modelAlias === 'hy-preview')?.displayName });
     await expect(freeModel).toBeVisible();
     await expect(unboundModel).toBeEnabled();
     await expect(hyModel).toBeEnabled();
@@ -143,7 +143,7 @@ for (const viewport of [
     await hyModel.check();
     await saveResponse;
     await expect(hyModel).toBeChecked();
-    await expect(page.getByText(/新 Claude Agent 对话将通过 Gateway 使用该模型/)).toBeVisible();
+    await expect(page.getByText('模型已保存，将用于新对话。')).toBeVisible();
     await expect(page.getByText('平台模型目录暂不可用，请稍后重试。')).toHaveCount(0);
     await expect(page.getByText('GPT-4.1')).toHaveCount(0);
     await expect(page.getByText('Claude Sonnet')).toHaveCount(0);

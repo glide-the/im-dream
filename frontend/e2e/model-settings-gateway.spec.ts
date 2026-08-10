@@ -47,9 +47,9 @@ test('platform Gateway catalog drives model selection and persists only alias', 
   const current = page.getByRole('radio', { name: /DeepSeek V4 Flash/ });
   await expect(current).toBeChecked();
   await expect(page.getByRole('radio', { name: /HY Preview/ })).toBeDisabled();
-  await expect(page.getByText(/需要 dream 套餐/)).toBeVisible();
+  await expect(page.getByText(/需要 dream 套餐/i)).toBeVisible();
   await page.getByRole('radio', { name: /Dream Fast/ }).check();
-  await expect(page.getByText(/新 Claude Agent 对话将通过 Gateway 使用该模型/)).toBeVisible();
+  await expect(page.getByText('模型已保存，将用于新对话。')).toBeVisible();
   expect(updates.at(-1)).toEqual({ model: 'dream-fast' });
   expect(JSON.stringify(updates)).not.toMatch(/provider|secret|api.?key/i);
   await expect(page.getByText('GPT-4.1')).toHaveCount(0);

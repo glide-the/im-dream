@@ -1,5 +1,5 @@
-// [Input] System config API, chat icons, AuthContext token, dashboard design tokens.
-// [Output] Render Settings AI model/theme/system-prompt/workspace/full-access/env controls.
+// [Input] System config API, AuthContext token, dashboard design tokens.
+// [Output] Render Settings AI model/system-prompt/workspace/full-access/env controls.
 // [Pos] settings-model-config component node in frontend/src/components/dashboard
 // [Sync] 2026-06-09: add IM full-access approval toggle backed by
 //                    system_config.im_full_access_enabled.
@@ -27,14 +27,9 @@
 //                    in this component).
 // [Sync] 2026-06-25: hide the HTTP method placeholder in open network mode
 //                    while keeping the high-risk internet access warning.
-// [Sync] 2026-07-23: theme control now reads/writes the unified theme store
-//                    (utils/theme) instead of its own 'dashboard-theme' key and
-//                    private data-theme effect, fixing the two-click toggle and
-//                    stale navbar icon caused by the two competing theme systems.
-//                    Backend config.theme is applied only when explicitly set,
-//                    so opening Settings no longer stomps a local toggle.
+// [Sync] 2026-08-10: move appearance controls to General settings and simplify
+//                    model choices to names plus only actionable availability.
 import { useCallback, useEffect, useState } from 'react';
-import { IconMonitor, IconMoon, IconSun } from '../chat/Icons';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { emitImFullAccessChanged, emitWorkspaceModeChanged } from '../../lib/system-config-events';
 import { API_BASE } from '../../lib/apiBase';
@@ -43,9 +38,6 @@ import {
   gatewayModelsErrorMessage,
   type GatewayModel,
 } from '../../api/gatewayModelsApi';
-import { getThemeMode, onThemeChange, setThemeMode, type ThemeMode } from '../../utils/theme';
-
-export type { ThemeMode };
 export type SandboxNetworkMode = 'disabled' | 'allowlist' | 'open';
 
 interface EnvVar {
@@ -61,17 +53,10 @@ interface SystemConfigData {
   sandbox_network_allowed_domains?: string[];
   sandbox_fs_allowed_write_paths?: string[];
   im_full_access_enabled?: boolean;
-  theme?: ThemeMode;
   env_vars?: Record<string, string>;
 }
 
 type SystemConfigResponse = { success?: boolean; data?: SystemConfigData } & SystemConfigData;
-
-const THEME_OPTIONS: { mode: ThemeMode; label: string; Icon: typeof IconSun }[] = [
-  { mode: 'light', label: 'Light', Icon: IconSun },
-  { mode: 'system', label: 'System', Icon: IconMonitor },
-  { mode: 'dark', label: 'Dark', Icon: IconMoon },
-];
 
 const SANDBOX_NETWORK_ACCESS_OPTIONS: {
   enabled: boolean;
@@ -143,13 +128,11 @@ function hasSystemConfigFields(config: SystemConfigData): boolean {
     || config.sandbox_network_allowed_domains !== undefined
     || config.sandbox_fs_allowed_write_paths !== undefined
     || config.im_full_access_enabled !== undefined
-    || config.theme !== undefined
     || config.env_vars !== undefined
   );
 }
 
 export default function ModelConfigSection() {
-  const [theme, setTheme] = useState<ThemeMode>(() => getThemeMode());
   const [systemPrompt, setSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [workspaceMode, setWorkspaceMode] = useState(true);
   const [sandboxNetworkMode, setSandboxNetworkMode] = useState<SandboxNetworkMode>('allowlist');
@@ -201,11 +184,6 @@ export default function ModelConfigSection() {
         const payload = (await configResult.value.json()) as SystemConfigResponse;
         const config = readSystemConfigResponse(payload);
         if (!active) return;
-        // Do not apply the persisted backend theme while mounting this section.
-        // Settings sections are route-scoped and may mount/unmount while the
-        // user is navigating; applying it here would unexpectedly change the
-        // document theme just by opening the AI model section. Theme changes
-        // remain explicit through the segmented control below.
         setSystemPrompt(config.system_prompt ?? DEFAULT_SYSTEM_PROMPT);
         setWorkspaceMode(config.workspace_enabled ?? true);
         setSandboxNetworkMode(isSandboxNetworkMode(config.sandbox_network_mode) ? config.sandbox_network_mode : 'allowlist');
@@ -230,13 +208,6 @@ export default function ModelConfigSection() {
     return () => { active = false; controller.abort(); };
   }, [modelLoadNonce]);
 
-  // Keep the segmented control in sync with the unified theme store; applying
-  // data-theme / colorScheme and following the system preference is handled
-  // centrally by utils/theme.
-  useEffect(() => {
-    return onThemeChange((_resolved, mode) => setTheme(mode));
-  }, []);
-
   const updateConfig = useCallback(async (patch: Partial<SystemConfigData>): Promise<SystemConfigData | null> => {
     setSaving(true);
     try {
@@ -256,11 +227,6 @@ export default function ModelConfigSection() {
       setSaving(false);
     }
   }, []);
-
-  const handleThemeChange = useCallback((mode: ThemeMode) => {
-    setThemeMode(mode);
-    void updateConfig({ theme: mode });
-  }, [updateConfig]);
 
   const handleModelChange = useCallback((value: string) => {
     const target = modelOptions.find((option) => option.modelAlias === value);
@@ -283,17 +249,17 @@ export default function ModelConfigSection() {
           const payload = (await response.json().catch(() => null)) as SystemConfigResponse | null;
           const savedConfig = payload ? readSystemConfigResponse(payload) : { model: value };
           setSelectedModel(savedConfig.model ?? value);
-          setModelStatus('模型已保存，新 Claude Agent 对话将通过 Gateway 使用该模型。');
+          setModelStatus('模型已保存，将用于新对话。');
           return;
         }
         setSelectedModel(previous);
         if (response.status === 403) {
           setModelStatus('当前账号没有此模型的调用权限，请重新选择。');
         } else if (response.status === 409) {
-          setModelStatus('此模型已停用或资格已变化，目录正在刷新，请重新选择。');
+          setModelStatus('模型状态已变化，请重新选择。');
           setModelLoadNonce((nonce) => nonce + 1);
         } else {
-          setModelStatus('模型保存失败，请刷新目录后重试。');
+          setModelStatus('模型保存失败，请重试。');
         }
       } catch {
         setSelectedModel(previous);
@@ -528,47 +494,13 @@ export default function ModelConfigSection() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      {/* Theme */}
-      <div>
-        <p style={{ margin: '0 0 0.75rem', fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          外观主题 / Theme
-        </p>
-        <div style={{ display: 'flex', gap: '0.65rem' }}>
-          {THEME_OPTIONS.map(({ mode, label, Icon }) => {
-            const active = theme === mode;
-            return (
-              <button
-                key={mode}
-                type="button"
-                onClick={() => handleThemeChange(mode)}
-                title={label}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  padding: '0.5rem 0.9rem',
-                  borderRadius: '999px',
-                  border: `1px solid ${active ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`,
-                  background: active ? 'var(--color-bg-paper)' : 'transparent',
-                  color: active ? 'var(--color-text-primary)' : 'var(--color-text-muted)',
-                  cursor: 'pointer',
-                  fontSize: '0.82rem',
-                  fontWeight: active ? 600 : 400,
-                  transition: 'all 0.2s ease',
-                }}
-              >
-                <Icon style={{ width: '0.9rem', height: '0.9rem' }} />
-                {label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
       {/* Model */}
       <div>
         <p style={{ margin: '0 0 0.65rem', fontSize: '0.88rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
           AI 模型 / Model
+        </p>
+        <p style={{ margin: '-0.35rem 0 0.85rem', color: 'var(--color-text-muted)', fontSize: '0.78rem' }}>
+          选择新对话使用的模型。
         </p>
         {modelCatalogError ? (
           <div role="alert" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
@@ -589,34 +521,23 @@ export default function ModelConfigSection() {
                 当前没有可调用模型。<a href="/story-workspace/subscription#subscription-plans">查看 Token 额度与订阅状态</a>
               </p>
             ) : null}
-            <fieldset disabled={saving} style={{ margin: 0, padding: 0, border: 0 }}>
-              <legend style={{ marginBottom: '0.65rem', fontSize: '0.76rem', color: 'var(--color-text-muted)' }}>平台 Gateway 模型</legend>
-              <div style={{ display: 'grid', gap: '0.65rem', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 16rem), 1fr))' }}>
+            <fieldset disabled={saving} style={{ width: 'min(100%, 36rem)', margin: 0, padding: 0, border: 0 }}>
+              <legend style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)', whiteSpace: 'nowrap' }}>选择 AI 模型</legend>
+              <div style={{ display: 'grid', gap: '0.5rem' }}>
                 {modelOptions.map((option) => {
-                  const limits = [
-                    option.contextWindow ? `上下文 ${option.contextWindow.toLocaleString()}` : null,
-                    option.maxOutputTokens ? `输出 ${option.maxOutputTokens.toLocaleString()}` : null,
-                  ].filter(Boolean).join(' · ');
-                  const capabilities = Object.entries(option.capabilities).filter(([, enabled]) => enabled).map(([name]) => name).join(' · ');
-                  const reason = option.callable
-                    ? '当前 Token 额度可调用'
+                  const availabilityLabel = option.callable
+                    ? defaultModelAlias === option.modelAlias ? '推荐' : null
                     : option.availability === 'upgrade_required'
                       ? `需要 ${option.requiredPlanCode ?? '更高'} 套餐`
                       : option.availability === 'allowance_exhausted'
-                        ? '本周期 Token 已用完'
-                        : option.availability === 'maintenance'
-                          ? '平台维护中'
-                          : '当前资格不可调用';
+                        ? '额度已用完'
+                        : '暂不可用';
+                  const selected = selectedModel === option.modelAlias;
                   return (
-                    <label key={option.modelAlias} style={{ display: 'grid', gap: '0.35rem', padding: '0.85rem', borderRadius: '14px', border: `1px solid ${selectedModel === option.modelAlias ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`, opacity: option.callable ? 1 : 0.72, cursor: option.callable ? 'pointer' : 'not-allowed' }}>
-                      <span style={{ display: 'flex', alignItems: 'flex-start', gap: '0.65rem' }}>
-                        <input type="radio" name="platform-model" value={option.modelAlias} checked={selectedModel === option.modelAlias} disabled={!option.callable || saving} onChange={() => handleModelChange(option.modelAlias)} />
-                        <span><strong>{option.displayName}</strong><br /><code style={{ overflowWrap: 'anywhere' }}>{option.modelAlias}</code></span>
-                      </span>
-                      <span style={{ fontSize: '0.75rem', color: option.callable ? 'var(--color-text-primary)' : 'var(--color-text-muted)' }}>{reason}{defaultModelAlias === option.modelAlias ? ' · Free 默认' : ''}</span>
-                      {capabilities ? <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{capabilities}</span> : null}
-                      {limits ? <span style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>{limits}</span> : null}
-                      {!option.callable && option.requiredPlanCode ? <a href="/story-workspace/subscription#subscription-plans" onClick={(event) => event.stopPropagation()} style={{ fontSize: '0.74rem' }}>查看套餐</a> : null}
+                    <label key={option.modelAlias} style={{ display: 'flex', minHeight: '2.9rem', alignItems: 'center', gap: '0.7rem', padding: '0.7rem 0.8rem', borderRadius: '10px', border: `1px solid ${selected ? 'var(--color-border-focus)' : 'var(--color-border-paper)'}`, background: selected ? 'var(--color-bg-hover)' : 'transparent', opacity: option.callable ? 1 : 0.6, cursor: option.callable ? 'pointer' : 'not-allowed' }}>
+                      <input type="radio" name="platform-model" value={option.modelAlias} checked={selected} disabled={!option.callable || saving} onChange={() => handleModelChange(option.modelAlias)} />
+                      <strong style={{ minWidth: 0, flex: '1 1 auto', color: 'var(--color-text-primary)', fontSize: '0.84rem' }}>{option.displayName}</strong>
+                      {availabilityLabel ? <span style={{ flex: '0 0 auto', color: 'var(--color-text-muted)', fontSize: '0.72rem' }}>{availabilityLabel}</span> : null}
                     </label>
                   );
                 })}
