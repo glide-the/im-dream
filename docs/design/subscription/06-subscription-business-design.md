@@ -3,7 +3,7 @@
 > 文档状态：最终设计
 > 设计日期：2026-08-10
 > 适用系统：`ink-admin-memory`、`ink-dream-memory`、PostgreSQL `ink-memory`
-> 配套文档：`07-model-service-integration-design.md`
+> 配套文档：`../model-service/07-model-service-integration-design.md`
 > 文档性质：最终产品方案与代码级设计；本稿不实现业务代码
 
 ## 术语与概念定义

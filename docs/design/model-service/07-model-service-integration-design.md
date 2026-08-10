@@ -3,7 +3,7 @@
 > 文档状态：最终设计
 > 设计日期：2026-08-10
 > 适用系统：`ink-admin-memory`、`ink-dream-memory`、PostgreSQL `ink-memory`
-> 配套文档：`06-subscription-business-design.md`
+> 配套文档：`../subscription/06-subscription-business-design.md`
 > 文档性质：最终产品方案与代码级设计；本稿不实现业务代码
 
 ## 术语与概念定义
@@ -418,7 +418,7 @@ required plan 从公开、active、published、配置完整且含该 model/scope
 | Allowance remaining/reserved | reserve 与 402 | Browser 传余额 |
 | current Plan Catalog | requiredPlanCode/升级入口 | 按价格猜推荐套餐 |
 
-Subscription Context 是 UI 投影，不是授权 token。Gateway 直接从 PostgreSQL/统一 application service 读取最新事实。三套餐发布、Free、backfill 和订阅命令见 `06-subscription-business-design.md`。
+Subscription Context 是 UI 投影，不是授权 token。Gateway 直接从 PostgreSQL/统一 application service 读取最新事实。三套餐发布、Free、backfill 和订阅命令见 `../subscription/06-subscription-business-design.md`。
 
 ## 9. Dream 模型设置交互
 
