@@ -15,6 +15,7 @@ import { getToolName, type DynamicToolUIPart, type ToolUIPart, type UIMessage } 
 import { getAuthToken } from '../../contexts/AuthContext';
 import { API_BASE } from '../../lib/apiBase';
 import { isEditorWriteTool } from './editorWriteTools';
+import type { StoryWorkspaceDreamAgentToolConfirmation } from '../../hooks/story-workspace/contracts';
 
 export type AnyToolUIPart = ToolUIPart | DynamicToolUIPart;
 
@@ -242,7 +243,12 @@ export function resolveSandboxNetworkRequest(part: AnyToolUIPart): SandboxNetwor
   };
 }
 
-export type PendingConfirmationKind = 'confirm' | 'askuser' | 'sandbox-network';
+export type PendingConfirmationKind = 'confirm' | 'askuser' | 'sandbox-network' | 'reject-only';
+
+export interface PendingDreamToolConfirmationSource {
+  runId: string;
+  confirmation: StoryWorkspaceDreamAgentToolConfirmation;
+}
 
 export interface PendingToolConfirmation {
   kind: PendingConfirmationKind;
@@ -253,6 +259,52 @@ export interface PendingToolConfirmation {
   input: unknown;
   /** Present only when kind === 'sandbox-network'. */
   networkRequest?: SandboxNetworkRequestInfo | null;
+  /** Safe Dream adapter source; confirmation must use the run-scoped endpoint. */
+  dream?: PendingDreamToolConfirmationSource;
+}
+
+/** Convert the already-validated Dream public projection into Chat's dock model. */
+export function pendingToolConfirmationFromDream(
+  runId: string,
+  confirmation: StoryWorkspaceDreamAgentToolConfirmation,
+): PendingToolConfirmation {
+  const kind: PendingConfirmationKind = confirmation.kind === 'ask_user'
+    ? 'askuser'
+    : confirmation.kind === 'sandbox_network'
+      ? 'sandbox-network'
+      : confirmation.kind === 'reject_only'
+        ? 'reject-only'
+        : 'confirm';
+  return {
+    kind,
+    partKey: `dream-confirmation-${confirmation.toolCallId}`,
+    toolCallId: confirmation.toolCallId,
+    toolName: confirmation.toolName,
+    input: confirmation.questions ? { questions: confirmation.questions } : {},
+    networkRequest: confirmation.network
+      ? {
+          host: confirmation.network.host,
+          policyMode: confirmation.network.policy,
+          matchedAllowedDomain: null,
+        }
+      : undefined,
+    dream: { runId, confirmation },
+  };
+}
+
+/** Translate Chat's question-text answer keys back to Dream's opaque public IDs. */
+export function dreamToolConfirmationAnswers(
+  confirmation: StoryWorkspaceDreamAgentToolConfirmation,
+  answers?: Readonly<Record<string, unknown>>,
+): Readonly<Record<string, unknown>> | undefined {
+  if (!confirmation.questions) return answers;
+  const mapped: Record<string, unknown> = {};
+  for (const question of confirmation.questions) {
+    if (Object.prototype.hasOwnProperty.call(answers ?? {}, question.question)) {
+      mapped[question.id] = answers?.[question.question];
+    }
+  }
+  return mapped;
 }
 
 /**

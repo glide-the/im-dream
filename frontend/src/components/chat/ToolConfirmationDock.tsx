@@ -17,12 +17,19 @@
 //        (target host + sandbox policy mode, binary 拒绝/同意, no "remember" in this iteration)
 //        when kind==='sandbox-network'; generic card unchanged when the discriminator is absent
 //        (design: claude-agent-sandbox-network-permission-tool.md §5A).
+// [Sync] 2026-08-11: resolve bridged Dream confirmations through their run-scoped
+//                    safe endpoint, including reject-only and opaque question IDs.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AskUserQuestionUI, { type AskUserQuestionInput } from './AskUserQuestionUI';
-import { confirmToolCall, type PendingToolConfirmation } from './toolConfirmation';
+import {
+  confirmToolCall,
+  dreamToolConfirmationAnswers,
+  type PendingToolConfirmation,
+} from './toolConfirmation';
 import { isShellTool, resolveToolInputSummary, summarizeToolInvocation } from './toolInputSummary';
 import { IconCheck, IconLoader, IconX } from './Icons';
+import { storyWorkspaceSubmitDreamAgentToolConfirmation } from '../../hooks/story-workspace/useStoryWorkspaceDreamAgent';
 
 type DockStatus = 'idle' | 'confirming' | 'confirmed' | 'rejected';
 
@@ -43,7 +50,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
   const { t } = useTranslation();
   const [status, setStatus] = useState<DockStatus>('idle');
   const requestInFlightRef = useRef(false);
-  const { kind, toolCallId, toolName, input } = confirmation;
+  const { kind, toolCallId, toolName, input, dream } = confirmation;
 
   const summaryText = useMemo(() => summarizeToolInvocation(toolName, input), [toolName, input]);
   const commandText = useMemo(() => (isShellTool(toolName) ? resolveToolInputSummary(input).command : ''), [toolName, input]);
@@ -63,13 +70,25 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
     requestInFlightRef.current = true;
     setStatus('confirming');
     try {
-      const result = await confirmToolCall(threadId, toolCallId, approved, reason, answers);
+      const dreamAnswers = dream
+        ? dreamToolConfirmationAnswers(dream.confirmation, answers)
+        : answers;
+      const result = dream
+        ? await storyWorkspaceSubmitDreamAgentToolConfirmation(dream.runId, {
+            toolCallId,
+            approved,
+            ...(reason ? { reason } : {}),
+            ...(dreamAnswers ? { answers: dreamAnswers } : {}),
+          }).then(() => ({ state: 'resolved' as const, approved }))
+        : await confirmToolCall(threadId, toolCallId, approved, reason, answers);
       if (result.state === 'resolved') {
-        addToolResult?.({
-          tool: toolName,
-          toolCallId,
-          output: answers ?? (approved ? { approved: true } : { approved: false, cancelled: true }),
-        });
+        if (!dream) {
+          addToolResult?.({
+            tool: toolName,
+            toolCallId,
+            output: answers ?? (approved ? { approved: true } : { approved: false, cancelled: true }),
+          });
+        }
         setStatus(approved ? 'confirmed' : 'rejected');
         onSettled(toolCallId);
         return;
@@ -86,7 +105,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
     }
     requestInFlightRef.current = false;
     setStatus('idle');
-  }, [addToolResult, onSettled, threadId, toolCallId, toolName]);
+  }, [addToolResult, dream, onSettled, threadId, toolCallId, toolName]);
 
   const handleApprove = useCallback(() => void runConfirm(true), [runConfirm]);
   const handleReject = useCallback(() => void runConfirm(false, t('chat.toolConfirmation.userRejectedTool')), [runConfirm, t]);
@@ -113,6 +132,7 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
 
   const isAskUser = kind === 'askuser';
   const isSandboxNetwork = kind === 'sandbox-network';
+  const isRejectOnly = kind === 'reject-only';
   const networkRequest = confirmation.networkRequest ?? null;
   const networkPolicyModeText = networkRequest?.policyMode === 'allowlist'
     ? t('chat.toolConfirmation.networkPolicyAllowlist')
@@ -123,7 +143,9 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
     ? t('chat.toolConfirmation.askUserTitle')
     : isSandboxNetwork
       ? t('chat.toolConfirmation.networkConfirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
-      : t('chat.toolConfirmation.confirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
+      : isRejectOnly
+        ? t('chat.toolConfirmation.rejectOnlyTitle')
+        : t('chat.toolConfirmation.confirmTitle', { tool: toolName || t('chat.toolConfirmation.unknownTool') })
         + (summaryText ? t('chat.toolConfirmation.withSummary', { summary: summaryText }) : '');
 
   return (
@@ -223,7 +245,23 @@ export default function ToolConfirmationDock({ confirmation, threadId, addToolRe
         </div>
       ) : null}
 
-      {status === 'idle' && !isAskUser ? (
+      {status === 'idle' && isRejectOnly ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+          <p style={{ margin: 0, color: 'var(--color-text-muted)', fontSize: '0.85rem', lineHeight: 1.65 }}>
+            {t('chat.toolConfirmation.rejectOnlyDescription')}
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+            <button
+              type="button"
+              onClick={handleReject}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', borderRadius: '999px', padding: '0.5rem 1.05rem', border: '1px solid var(--color-border-paper)', background: 'var(--color-bg-surface)', color: 'var(--color-text-secondary)', fontSize: '0.86rem', fontWeight: 600, cursor: 'pointer' }}
+            >
+              {t('chat.toolConfirmation.rejectAndContinue')}
+              <KbdHint label="ESC" />
+            </button>
+          </div>
+        </div>
+      ) : status === 'idle' && !isAskUser && !isRejectOnly ? (
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
           <button
             type="button"

@@ -42,6 +42,8 @@
 // [Sync] 2026-08-04: forward Agent/Task chat-row navigation to ChatView's subagent sidebar.
 // [Sync] 2026-08-11: claim parent-owned queued first turns before send so a ChatPanel
 //                    history-load remount cannot replay the same /api/claude-agent POST.
+// [Sync] 2026-08-11: reflect thread-owned subagent work in the composer action
+//                    without treating it as a stoppable main-agent stream.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -70,11 +72,13 @@ import AIInputDock from './AIInputDock';
 import ChatMessageList from './ChatMessageList';
 import ToolConfirmationDock from './ToolConfirmationDock';
 import {
+  pendingToolConfirmationFromDream,
   resolvePendingToolConfirmation,
   resolveSandboxNetworkRequest,
   resolveToolName,
   type PendingToolConfirmation,
 } from './toolConfirmation';
+import type { StoryWorkspaceDreamAgentToolConfirmation } from '../../hooks/story-workspace/contracts';
 import { getAuthToken } from '../../contexts/AuthContext';
 import { registerChatExportSource } from '../../lib/chat-export-registry';
 import { subscribeImFullAccessChanged } from '../../lib/system-config-events';
@@ -89,6 +93,7 @@ import {
 } from '../../lib/claude-agent-sse-utils';
 import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoEvent } from '../../hooks/useThreadTodos';
+import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { IconArrowDown } from './Icons';
 import {
   shouldApplyChatHistoryRecoverySnapshot,
@@ -119,6 +124,8 @@ interface ChatPanelProps {
   initialSettledToolCallIds?: ReadonlySet<string>;
   /** Exact historical tool calls still owned by the active runtime turn. */
   initialRuntimePendingToolCallIds?: ReadonlySet<string>;
+  /** Run-scoped safe Dream confirmations recovered during a cross-page handoff. */
+  initialDreamToolConfirmations?: ChatPanelDreamToolConfirmationSnapshot | null;
   /** Called after reconnect stream finishes so parent can reload persisted messages. */
   onReconnectComplete?: () => (
     Promise<ChatPanelRecoverySnapshot | undefined>
@@ -158,6 +165,12 @@ export interface ChatPanelRecoverySnapshot {
   messages: UIMessage[];
   settledToolCallIds: ReadonlySet<string>;
   runtimePendingToolCallIds: ReadonlySet<string>;
+  dreamToolConfirmations: ChatPanelDreamToolConfirmationSnapshot | null;
+}
+
+export interface ChatPanelDreamToolConfirmationSnapshot {
+  runId: string;
+  confirmations: readonly StoryWorkspaceDreamAgentToolConfirmation[];
 }
 
 function normalizeSystemConfig(payload: SystemConfigResponse): SystemConfigData | undefined {
@@ -180,6 +193,7 @@ export default function ChatPanel({
   reconnectStreamNonce = 0,
   initialSettledToolCallIds = EMPTY_TOOL_CALL_IDS,
   initialRuntimePendingToolCallIds = EMPTY_TOOL_CALL_IDS,
+  initialDreamToolConfirmations = null,
   onReconnectComplete,
   className,
   inputPlaceholder = 'Press i to chat',
@@ -199,6 +213,7 @@ export default function ChatPanel({
   inputContextControl,
 }: ChatPanelProps) {
   const { t } = useTranslation();
+  const subagentState = useThreadSubagents(threadId);
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
     toolChoice: ToolChoice;
@@ -225,6 +240,7 @@ export default function ChatPanel({
   const [runtimePendingToolCallIds, setRuntimePendingToolCallIds] = useState<ReadonlySet<string>>(
     () => new Set(initialRuntimePendingToolCallIds),
   );
+  const [dreamToolConfirmations, setDreamToolConfirmations] = useState(initialDreamToolConfirmations);
   const reconnectAbortRef = useRef<AbortController | null>(null);
   const { setActiveSessionId, workspaceEnabled } = useWorkspaceSession();
 
@@ -362,6 +378,7 @@ export default function ChatPanel({
   useEffect(() => {
     setSettledToolCallIds(new Set(initialSettledToolCallIds));
     setRuntimePendingToolCallIds(new Set(initialRuntimePendingToolCallIds));
+    setDreamToolConfirmations(initialDreamToolConfirmations);
     turnGenerationRef.current = 0;
   // ChatView keys panels by threadId; the explicit reset also keeps direct
   // consumers safe if they reuse an instance for another thread.
@@ -379,6 +396,10 @@ export default function ChatPanel({
   useEffect(() => {
     setRuntimePendingToolCallIds(new Set(initialRuntimePendingToolCallIds));
   }, [initialRuntimePendingToolCallIds]);
+
+  useEffect(() => {
+    setDreamToolConfirmations(initialDreamToolConfirmations);
+  }, [initialDreamToolConfirmations]);
 
   useEffect(() => {
     if (hasInitializedRef.current) {
@@ -457,6 +478,7 @@ export default function ChatPanel({
         return next.size === settled.size ? settled : next;
       });
       setRuntimePendingToolCallIds(new Set(snapshot.runtimePendingToolCallIds));
+      setDreamToolConfirmations(snapshot.dreamToolConfirmations);
       setMessagesRef.current?.(recoveredMessages);
     });
   }, [threadId]);
@@ -549,8 +571,19 @@ export default function ChatPanel({
 
   const agentBusy = status === 'streaming' || status === 'submitted' || isReconnecting || isStopping;
   const chatLoading = agentBusy || isLoading;
+  const runningSubagentCount = subagentState.counts.running;
+  const inputBusy = agentBusy || runningSubagentCount > 0;
+  const inputBusyLabel = !agentBusy && runningSubagentCount > 0
+    ? t('chat.inputDock.subagentsRunning', { count: runningSubagentCount })
+    : undefined;
 
   const markToolConfirmationSettled = useCallback((toolCallId: string) => {
+    setDreamToolConfirmations((current) => current
+      ? {
+          ...current,
+          confirmations: current.confirmations.filter((item) => item.toolCallId !== toolCallId),
+        }
+      : current);
     setSettledToolCallIds((current) => {
       if (current.has(toolCallId)) return current;
       const next = new Set(current);
@@ -592,6 +625,12 @@ export default function ChatPanel({
   // confirmation UI (approve/reject or AskUserQuestion form) floats above the
   // input dock instead of rendering inline in the message list.
   const pendingConfirmation = useMemo<PendingToolConfirmation | null>(() => {
+    const dreamConfirmation = dreamToolConfirmations?.confirmations.find(
+      (item) => !settledToolCallIds.has(item.toolCallId),
+    );
+    if (dreamConfirmation && dreamToolConfirmations) {
+      return pendingToolConfirmationFromDream(dreamToolConfirmations.runId, dreamConfirmation);
+    }
     for (const message of visibleMessages) {
       const parts = message.parts ?? [];
       for (let partIndex = 0; partIndex < parts.length; partIndex += 1) {
@@ -617,7 +656,7 @@ export default function ChatPanel({
       }
     }
     return null;
-  }, [visibleMessages, effectiveToolChoice, settledToolCallIds, runtimePendingToolCallIds]);
+  }, [dreamToolConfirmations, visibleMessages, effectiveToolChoice, settledToolCallIds, runtimePendingToolCallIds]);
 
   // Keep the export snapshot refs in sync with the derived dock state.
   pendingConfirmationForExportRef.current = pendingConfirmation;
@@ -773,7 +812,8 @@ export default function ChatPanel({
               await sendMessage({ role: 'user', parts });
             }}
             placeholder={inputPlaceholder}
-            loading={agentBusy}
+            loading={inputBusy}
+            loadingLabel={inputBusyLabel}
             onStop={agentBusy ? handleStop : undefined}
             stopPending={isStopping}
             workspaceSessionId={workspaceEnabled ? threadId : undefined}

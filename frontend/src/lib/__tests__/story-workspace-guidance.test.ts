@@ -8,7 +8,10 @@
 import { expect, test } from '@playwright/test';
 import {
   filterStoryWorkspaceGuidanceMessages,
+  isStoryWorkspacePrivateEpisodeActionMetadata,
   isStoryWorkspaceGuidanceMetadata,
+  STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+  STORY_WORKSPACE_EPISODE_ACTION_SCHEMA,
   STORY_WORKSPACE_GUIDANCE_KIND,
 } from '../story-workspace-guidance';
 
@@ -44,12 +47,49 @@ test('Chat compatibility filter drops guidance and Dream confirmation rows', () 
     { id: 'guide_k-1', role: 'user', metadata: { kind: 'story-workspace-guidance', actor: '11' } },
     { id: 'm2', role: 'assistant', metadata: { kind: 'other' } },
     { id: 'dream_k-1', role: 'user', metadata: { kind: 'story-workspace-dream-confirmation' } },
+    {
+      id: 'dream_agent_private',
+      role: 'user',
+      metadata: {
+        kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+        story_workspace_episode_action: {
+          schema: STORY_WORKSPACE_EPISODE_ACTION_SCHEMA,
+          action: 'review_script',
+        },
+      },
+    },
+    {
+      id: 'dream_agent_human',
+      role: 'user',
+      metadata: { kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND },
+    },
     { id: 'm3', role: 'assistant' },
     { id: 'guide_k-2', role: 'user', metadata: { kind: 'story-workspace-guidance' } },
   ];
 
   const visible = filterStoryWorkspaceGuidanceMessages(messages);
-  expect(visible.map((message) => message.id)).toEqual(['m1', 'm2', 'm3']);
+  expect(visible.map((message) => message.id)).toEqual([
+    'm1',
+    'm2',
+    'dream_agent_human',
+    'm3',
+  ]);
+});
+
+test('recognizes only server-attested private episode actions', () => {
+  expect(isStoryWorkspacePrivateEpisodeActionMetadata({
+    kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+    story_workspace_episode_action: {
+      schema: STORY_WORKSPACE_EPISODE_ACTION_SCHEMA,
+    },
+  })).toBe(true);
+  expect(isStoryWorkspacePrivateEpisodeActionMetadata({
+    kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+  })).toBe(false);
+  expect(isStoryWorkspacePrivateEpisodeActionMetadata({
+    kind: STORY_WORKSPACE_DREAM_AGENT_USER_KIND,
+    story_workspace_episode_action: { schema: 'untrusted/v1' },
+  })).toBe(false);
 });
 
 test('filter preserves the input array and handles empty lists', () => {

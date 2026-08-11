@@ -14,9 +14,11 @@ import {
 } from '../chatRecovery';
 import {
   deriveSettledToolCallIdsFromHistory,
+  dreamToolConfirmationAnswers,
   interpretToolConfirmationResponse,
   loadChatHistoryThenRuntimeStatus,
   parseChatThreadStatus,
+  pendingToolConfirmationFromDream,
   resolvePendingToolConfirmation,
   runtimePendingToolCallIdsFromStatus,
 } from '../toolConfirmation';
@@ -29,6 +31,54 @@ const stalePart: DynamicToolUIPart = {
   input: { description: 'Compute sha256 project slug' },
   toolMetadata: { approvalRequested: true },
 };
+
+test('Dream safe confirmations map into Chat without exposing generic runtime parts', () => {
+  const runId = 'run_0123456789abcdef0123456789abcdef';
+  const askUser = pendingToolConfirmationFromDream(runId, {
+    toolCallId: 'dream-tool-ask',
+    kind: 'ask_user',
+    toolName: 'AskUserQuestion',
+    questions: [{
+      id: 'q0',
+      question: '选择叙事视角',
+      type: 'radio',
+      required: true,
+      options: [{ label: '第一人称', value: 'first_person' }],
+    }],
+  });
+  const rejectOnly = pendingToolConfirmationFromDream(runId, {
+    toolCallId: 'dream-tool-reject',
+    kind: 'reject_only',
+    toolName: 'UnsupportedTool',
+  });
+  const network = pendingToolConfirmationFromDream(runId, {
+    toolCallId: 'dream-tool-network',
+    kind: 'sandbox_network',
+    toolName: 'WebFetch',
+    network: { host: 'example.com', policy: 'allowlist' },
+  });
+
+  expect(askUser).toMatchObject({
+    kind: 'askuser',
+    toolCallId: 'dream-tool-ask',
+    dream: { runId },
+    input: { questions: [{ id: 'q0', question: '选择叙事视角' }] },
+  });
+  expect(rejectOnly).toMatchObject({
+    kind: 'reject-only',
+    toolCallId: 'dream-tool-reject',
+    dream: { runId },
+  });
+  expect(network).toMatchObject({
+    kind: 'sandbox-network',
+    networkRequest: { host: 'example.com', policyMode: 'allowlist' },
+    dream: { runId },
+  });
+  expect(dreamToolConfirmationAnswers(
+    askUser.dream!.confirmation,
+    { '选择叙事视角': 'first_person', ignored: 'not-forwarded' },
+  )).toEqual({ q0: 'first_person' });
+});
 
 test('a locally settled replayed tool part cannot reopen the confirmation dock', () => {
   expect(resolvePendingToolConfirmation(stalePart, 'auto')).toBe('confirm');

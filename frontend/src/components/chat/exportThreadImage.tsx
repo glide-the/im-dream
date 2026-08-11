@@ -269,6 +269,17 @@ export function buildExportPendingConfirmation(
     };
   }
 
+  if (kind === 'reject-only') {
+    return {
+      kind,
+      title: t('chat.toolConfirmation.rejectOnlyTitle'),
+      badge: t('chat.toolConfirmation.pendingApproval'),
+      detail: t('chat.toolConfirmation.rejectOnlyDescription'),
+      primaryActionLabel: t('chat.toolConfirmation.rejectAndContinue'),
+      secondaryActionLabel: '',
+    };
+  }
+
   const commandText = isShellTool(toolName) ? resolveToolInputSummary(input).command : '';
   let detail = commandText;
   if (!detail && input != null) {

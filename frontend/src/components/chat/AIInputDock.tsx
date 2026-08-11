@@ -16,6 +16,8 @@
 //                    (en + zh) via useTranslation.
 // [Sync] 2026-08-06: replace the plain textarea with MarkdownInputEditor; user-authored rich text is
 //                    serialized to Markdown before transport and rendered through the shared chat chain.
+// [Sync] 2026-08-11: accept a passive loading label so subagent-only activity is
+//                    announced accurately without exposing a non-functional Stop action.
 import {
   useCallback,
   useEffect,
@@ -57,6 +59,8 @@ interface AIInputDockProps {
   placeholder?: string;
   disabled?: boolean;
   loading?: boolean;
+  /** Accessible status for passive loading states that do not expose Stop. */
+  loadingLabel?: string;
   defaultToolChoice?: ToolChoice;
   openFileDialogSignal?: number;
   onStop?: () => void | Promise<void>;
@@ -116,6 +120,7 @@ export default function AIInputDock({
   placeholder = 'Ask Ink & Memory…',
   disabled = false,
   loading = false,
+  loadingLabel,
   defaultToolChoice = 'auto',
   openFileDialogSignal,
   onStop,
@@ -665,8 +670,8 @@ export default function AIInputDock({
           <button
             type="button"
             disabled
-            title={t('chat.inputDock.generating')}
-            aria-label={t('chat.inputDock.generating')}
+            title={loadingLabel ?? t('chat.inputDock.generating')}
+            aria-label={loadingLabel ?? t('chat.inputDock.generating')}
             style={{
               display: 'grid',
               placeItems: 'center',
