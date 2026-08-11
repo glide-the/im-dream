@@ -99,6 +99,50 @@ class TestDreamStreamAdapter(unittest.TestCase):
         self.assertFalse(result.handled)
         self.assertEqual(result.frames, ())
 
+    def test_error_is_one_safe_terminal_without_raw_details(self) -> None:
+        result = _adapter().adapt(
+            NormalizedAgentEvent.create(
+                "error",
+                {"errorText": "/private/path provider-secret stack trace"},
+            ),
+            ordinal=4,
+            cursor_consumed=lambda _ordinal, _subevent=None: False,
+        )
+
+        self.assertTrue(result.handled)
+        self.assertTrue(result.terminal)
+        self.assertEqual(len(result.frames), 1)
+        self.assertIn("event: agent_turn_failed", result.frames[0])
+        self.assertEqual(_payload(result.frames[0]), {
+            "turnId": "turn-1",
+            "code": "DREAM_AGENT_TURN_FAILED",
+        })
+        self.assertNotIn("provider-secret", result.frames[0])
+        self.assertNotIn("/private/path", result.frames[0])
+
+    def test_finish_without_message_final_projects_cancelled(self) -> None:
+        result = _adapter().adapt(
+            NormalizedAgentEvent.create("finish", {"finishReason": "stop"}),
+            ordinal=5,
+            cursor_consumed=lambda _ordinal, _subevent=None: False,
+        )
+
+        self.assertTrue(result.terminal)
+        self.assertEqual(len(result.frames), 1)
+        self.assertIn("event: agent_turn_cancelled", result.frames[0])
+        self.assertEqual(_payload(result.frames[0]), {"turnId": "turn-1"})
+
+    def test_finish_error_without_error_frame_still_projects_failed(self) -> None:
+        result = _adapter().adapt(
+            NormalizedAgentEvent.create("finish", {"finishReason": "error"}),
+            ordinal=6,
+            cursor_consumed=lambda _ordinal, _subevent=None: False,
+        )
+
+        self.assertTrue(result.terminal)
+        self.assertEqual(len(result.frames), 1)
+        self.assertIn("event: agent_turn_failed", result.frames[0])
+
     def test_dream_execution_prefers_normalized_api_and_never_calls_chat(self) -> None:
         class Factory:
             async def run_events(self, _request):

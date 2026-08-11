@@ -286,6 +286,74 @@ test('replayed cursor is de-duplicated and terminal event requests durable recon
   expect(terminal.streamText).toBe('');
 });
 
+test('safe failed and cancelled terminal events parse without exposing backend details', () => {
+  const failed = storyWorkspaceParseDreamAgentEvent(
+    'agent_turn_failed',
+    JSON.stringify({ turnId: 'turn-failed', code: 'DREAM_AGENT_TURN_FAILED' }),
+    'turn-failed:7',
+  );
+  const cancelled = storyWorkspaceParseDreamAgentEvent(
+    'agent_turn_cancelled',
+    JSON.stringify({ turnId: 'turn-cancelled' }),
+    'turn-cancelled:8',
+  );
+  const leaked = storyWorkspaceParseDreamAgentEvent(
+    'agent_turn_failed',
+    JSON.stringify({
+      turnId: 'turn-failed',
+      code: 'DREAM_AGENT_TURN_FAILED',
+      errorText: '/private/path provider-secret',
+    }),
+    'turn-failed:9',
+  );
+
+  expect(failed).toEqual({
+    type: 'agent_turn_failed',
+    cursor: 'turn-failed:7',
+    turnId: 'turn-failed',
+    code: 'DREAM_AGENT_TURN_FAILED',
+  });
+  expect(cancelled).toEqual({
+    type: 'agent_turn_cancelled',
+    cursor: 'turn-cancelled:8',
+    turnId: 'turn-cancelled',
+  });
+  expect(leaked).toEqual({
+    type: 'agent_turn_failed',
+    cursor: 'turn-failed:9',
+    turnId: 'turn-failed',
+    code: 'DREAM_AGENT_TURN_FAILED',
+  });
+  expect(JSON.stringify(leaked)).not.toContain('provider-secret');
+  expect(JSON.stringify(leaked)).not.toContain('/private/path');
+});
+
+test('failed terminal de-duplicates by cursor and reconciles transient output', () => {
+  const terminal = storyWorkspaceParseDreamAgentEvent(
+    'agent_turn_failed',
+    JSON.stringify({ turnId: 'turn-1', code: 'DREAM_AGENT_TURN_FAILED' }),
+    'turn-1:failure',
+  );
+  expect(terminal).not.toBeNull();
+  const reduced = storyWorkspaceReduceDreamAgentEvents({
+    snapshot: storyWorkspaceParseDreamAgentSnapshot({
+      ...SNAPSHOT,
+      lifecycle: 'streaming',
+      activeTurnId: 'turn-1',
+      canSend: false,
+      sendBlockReason: 'generating',
+    }),
+    streamText: 'partial',
+    streamTurnId: 'turn-1',
+    seenCursors: [],
+  }, [terminal!, terminal!]);
+
+  expect(reduced.shouldReconcile).toBe(true);
+  expect(reduced.streamText).toBe('');
+  expect(reduced.streamTurnId).toBeNull();
+  expect(reduced.seenCursors).toEqual(['turn-1:failure']);
+});
+
 test('send payload has only text and idempotency key and is bound by run path', () => {
   expect(storyWorkspaceBuildDreamAgentSendPayload(RUN_ID, '  保持雨夜氛围  ', 'key-1')).toEqual({
     endpoint: `/api/story-workspace/workflow-runs/${RUN_ID}/dream-agent/messages`,

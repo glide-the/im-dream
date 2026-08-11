@@ -177,6 +177,41 @@ class TestSubagentProjection(unittest.TestCase):
         self.assertNotIn("/private/path", serialized)
         self.assertIn("Review complete.", serialized)
 
+    def test_inactive_thread_settles_unclosed_transcript_without_rewriting_it(self) -> None:
+        self._write_agent(
+            "orphaned",
+            [
+                _record("2026-08-04T10:00:00Z", "user", [{"type": "text", "text": "work"}]),
+                _record(
+                    "2026-08-04T10:00:04Z",
+                    "assistant",
+                    [{"type": "tool_use", "id": "read-1", "name": "Read", "input": {"path": "/private"}}],
+                ),
+            ],
+        )
+
+        inactive = build_thread_subagents_payload(
+            self.thread_id,
+            self.root,
+            runtime_running=False,
+        )
+        task = inactive["tasks"][0]
+        self.assertEqual(task["status"], "cancelled")
+        self.assertIsNone(task["finished_at"])
+        self.assertEqual(task["messages"][-1]["status"], "cancelled")
+        self.assertEqual(
+            inactive["counts"],
+            {"running": 0, "completed": 0, "ended": 1, "total": 1},
+        )
+
+        live = build_thread_subagents_payload(
+            self.thread_id,
+            self.root,
+            runtime_running=True,
+        )
+        self.assertEqual(live["tasks"][0]["status"], "running")
+        self.assertEqual(live["counts"]["running"], 1)
+
     def test_messages_project_dispatch_tools_final_and_terminal_status(self) -> None:
         self._write_agent(
             "conversation",

@@ -18,6 +18,7 @@ import type {
   StoryWorkspaceDreamAgentToolConfirmationCommand,
   StoryWorkspaceDreamAgentToolConfirmationQuestion,
   StoryWorkspaceDreamAgentToolConfirmationResolved,
+  StoryWorkspaceDreamAgentTerminalOutcome,
 } from './contracts';
 
 const RUN_ID_PATTERN = /^run_[0-9a-f]{32}$/;
@@ -651,7 +652,15 @@ export function storyWorkspaceReduceDreamAgentEvents(
       }
       continue;
     }
-    if (event.type === 'assistant_message_committed' || event.lifecycle === 'idle') {
+    if (event.type === 'agent_turn_failed' || event.type === 'agent_turn_cancelled') {
+      if (seen.has(event.cursor)) continue;
+      seen.add(event.cursor);
+      streamTurnId = event.turnId;
+    }
+    if (event.type === 'assistant_message_committed'
+      || event.type === 'agent_turn_failed'
+      || event.type === 'agent_turn_cancelled'
+      || (event.type === 'status' && event.lifecycle === 'idle')) {
       streamText = '';
       streamContent = [];
       streamTurnId = null;
@@ -780,6 +789,22 @@ export function storyWorkspaceParseDreamAgentEvent(
   if (eventName === 'assistant_message_committed' && typeof value.turnId === 'string') {
     return { type: 'assistant_message_committed', turnId: value.turnId };
   }
+  if (eventName === 'agent_turn_failed'
+    && typeof value.turnId === 'string'
+    && value.code === 'DREAM_AGENT_TURN_FAILED'
+    && cursor) {
+    return {
+      type: 'agent_turn_failed',
+      cursor,
+      turnId: value.turnId,
+      code: 'DREAM_AGENT_TURN_FAILED',
+    };
+  }
+  if (eventName === 'agent_turn_cancelled'
+    && typeof value.turnId === 'string'
+    && cursor) {
+    return { type: 'agent_turn_cancelled', cursor, turnId: value.turnId };
+  }
   if (eventName === 'tool_confirmation_requested'
     && typeof value.turnId === 'string'
     && cursor) {
@@ -820,6 +845,7 @@ export interface StoryWorkspaceDreamAgentViewModel {
   readonly isConfirmingTool: boolean;
   readonly isReconnecting: boolean;
   readonly error: Error | null;
+  readonly terminalOutcome?: StoryWorkspaceDreamAgentTerminalOutcome | null;
   readonly unreadCount: number;
   /** View-local invalidation signal emitted after a terminal turn is durably reconciled. */
   readonly settledRevision: number;
@@ -842,12 +868,14 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const [isConfirmingTool, setIsConfirmingTool] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [terminalOutcome, setTerminalOutcome] = useState<StoryWorkspaceDreamAgentTerminalOutcome | null>(null);
   const [readThroughId, setReadThroughId] = useState<string | null>(null);
   const [readStreamTurnId, setReadStreamTurnId] = useState<string | null>(null);
   const [settledRevision, setSettledRevision] = useState(0);
   const inFlight = useRef(false);
   const toolConfirmationInFlight = useRef(false);
   const activeTurnIdRef = useRef<string | null>(null);
+  const terminalOutcomeRef = useRef<StoryWorkspaceDreamAgentTerminalOutcome | null>(null);
   const confirmationMutationRevisionRef = useRef(0);
   const confirmationMutationsRef = useRef<StoryWorkspaceDreamAgentVersionedConfirmationMutation[]>([]);
   const resolvedToolConfirmationKeysRef = useRef<Set<string>>(new Set());
@@ -857,6 +885,8 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     if (!runId) {
       setSnapshot(null); setStreamText(''); setStreamContent([]); setStreamTurnId(null); setPendingToolConfirmations([]); setIsLoading(false);
       setSettledRevision(0);
+      setTerminalOutcome(null);
+      terminalOutcomeRef.current = null;
       activeTurnIdRef.current = null;
       confirmationMutationRevisionRef.current = 0;
       confirmationMutationsRef.current = [];
@@ -864,6 +894,8 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       return undefined;
     }
     activeTurnIdRef.current = null;
+    setTerminalOutcome(null);
+    terminalOutcomeRef.current = null;
     confirmationMutationRevisionRef.current = 0;
     confirmationMutationsRef.current = [];
     resolvedToolConfirmationKeysRef.current.clear();
@@ -941,7 +973,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         ),
       );
       confirmationMutationsRef.current = [];
-      setError(null);
+      if (terminalOutcomeRef.current !== 'failed') setError(null);
       return next;
     };
     const reconcileTerminal = async () => {
@@ -1021,6 +1053,12 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     };
     const process = (parsed: StoryWorkspaceDreamAgentEvent) => {
       if (!parsed || !active) return;
+      if (parsed.type === 'status' && parsed.lifecycle === 'streaming') {
+        terminalOutcomeRef.current = null;
+        setTerminalOutcome(null);
+        setError(null);
+        return;
+      }
       if (parsed.type === 'assistant_text_delta') {
         if (seenCursors.has(parsed.cursor)) return;
         seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
@@ -1093,7 +1131,26 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
         }
         return;
       }
+      if (parsed.type === 'assistant_message_committed') {
+        terminalOutcomeRef.current = 'completed';
+        setTerminalOutcome('completed');
+        setError(null);
+      } else if (parsed.type === 'agent_turn_failed') {
+        if (seenCursors.has(parsed.cursor)) return;
+        seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
+        terminalOutcomeRef.current = 'failed';
+        setTerminalOutcome('failed');
+        setError(new Error('Dream Agent 本次执行失败，请重试。'));
+      } else if (parsed.type === 'agent_turn_cancelled') {
+        if (seenCursors.has(parsed.cursor)) return;
+        seenCursors.add(parsed.cursor); latestCursor = parsed.cursor; latestTurnId = parsed.turnId;
+        terminalOutcomeRef.current = 'cancelled';
+        setTerminalOutcome('cancelled');
+        setError(null);
+      }
       if (parsed.type === 'assistant_message_committed'
+        || parsed.type === 'agent_turn_failed'
+        || parsed.type === 'agent_turn_cancelled'
         || (parsed.type === 'status' && parsed.lifecycle === 'idle')) {
         if (terminalReconcileInFlight) return;
         terminalReconcileInFlight = true;
@@ -1158,6 +1215,9 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const pendingToolConfirmation = pendingToolConfirmations[0] ?? null;
   const send = useCallback(async (text: string, idempotencyKey: string) => {
     if (!runId || !snapshot?.canSend || inFlight.current) return false;
+    terminalOutcomeRef.current = null;
+    setTerminalOutcome(null);
+    setError(null);
     inFlight.current = true; setIsSending(true);
     try {
       await storyWorkspaceSubmitDreamAgentMessage(runId, {
@@ -1223,7 +1283,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
 
   return {
     snapshot, streamText, streamContent, streamTurnId, pendingToolConfirmation,
-    isLoading, isSending, isConfirmingTool, isReconnecting, error, unreadCount,
+    isLoading, isSending, isConfirmingTool, isReconnecting, error, terminalOutcome, unreadCount,
     settledRevision, refresh, markRead, send, confirmTool,
   };
 }

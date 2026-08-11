@@ -75,8 +75,48 @@ class DreamStreamAdapter:
         if event.is_keepalive:
             return DreamAdaptation(handled=True, frames=(": keepalive\n\n",))
 
+        if event.type == "error":
+            # Raw Chat/SDK error text can contain paths, provider diagnostics,
+            # or request context. Dream exposes only a stable safe code.
+            if cursor_consumed(ordinal, None):
+                return DreamAdaptation(handled=True, terminal=True)
+            return DreamAdaptation(
+                handled=True,
+                terminal=True,
+                frames=(
+                    self._frame(
+                        "agent_turn_failed",
+                        {
+                            "turnId": self.turn_id,
+                            "code": "DREAM_AGENT_TURN_FAILED",
+                        },
+                        f"{self.turn_id}:{ordinal}",
+                    ),
+                ),
+            )
+
         if event.type == "finish":
-            return DreamAdaptation(handled=True, terminal=True)
+            failed = event.data.get("finishReason") == "error"
+            if cursor_consumed(ordinal, None):
+                return DreamAdaptation(handled=True, terminal=True)
+            return DreamAdaptation(
+                handled=True,
+                terminal=True,
+                frames=(
+                    self._frame(
+                        "agent_turn_failed" if failed else "agent_turn_cancelled",
+                        {
+                            "turnId": self.turn_id,
+                            **(
+                                {"code": "DREAM_AGENT_TURN_FAILED"}
+                                if failed
+                                else {}
+                            ),
+                        },
+                        f"{self.turn_id}:{ordinal}",
+                    ),
+                ),
+            )
 
         if event.type == "message-final":
             frames: list[str] = []

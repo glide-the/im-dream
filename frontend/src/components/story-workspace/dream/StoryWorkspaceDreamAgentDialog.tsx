@@ -67,6 +67,8 @@ function storyWorkspaceDreamAgentInputHint(agent: StoryWorkspaceDreamAgentViewMo
 }
 
 function storyWorkspaceDreamAgentDialogStatus(agent: StoryWorkspaceDreamAgentViewModel) {
+  if (agent.terminalOutcome === 'failed') return { icon: '!', label: 'Dream Agent 本轮执行失败' };
+  if (agent.terminalOutcome === 'cancelled') return { icon: '◇', label: 'Dream Agent 本轮已取消' };
   if (agent.snapshot?.lifecycle === 'streaming') {
     return { icon: '◌', label: 'Dream Agent 正在执行' };
   }
@@ -396,7 +398,8 @@ export function StoryWorkspaceDreamAgentDialog({
           )}
           <form className="story-workspace-dream-agent-dialog__composer" onSubmit={(event) => { event.preventDefault(); void submit(); }}>
             {inputHint && <p role="status">{inputHint}</p>}
-            {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
+            {agent.error && <p role="status">{agent.terminalOutcome === 'failed' ? '本次执行失败，请重试。' : '正在恢复 Dream Agent 消息。'}</p>}
+            {!agent.error && agent.terminalOutcome === 'cancelled' && <p role="status">本次执行已取消。</p>}
             <label>
               <span>给 Dream Agent 留言</span>
               <textarea

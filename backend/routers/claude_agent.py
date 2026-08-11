@@ -700,10 +700,16 @@ async def claude_agent_thread_subagents(
     thread = database.get_chat_thread(thread_id, user_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+    runtime_snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
+    runtime_running = (
+        runtime_snapshot is not None
+        and runtime_snapshot.get("lifecycle") == "running"
+    )
     return await asyncio.to_thread(
         build_thread_subagents_payload,
         thread_id,
         get_workspace_root(),
+        runtime_running=runtime_running,
     )
 
 

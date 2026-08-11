@@ -42,8 +42,8 @@
 // [Sync] 2026-08-04: forward Agent/Task chat-row navigation to ChatView's subagent sidebar.
 // [Sync] 2026-08-11: claim parent-owned queued first turns before send so a ChatPanel
 //                    history-load remount cannot replay the same /api/claude-agent POST.
-// [Sync] 2026-08-11: reflect thread-owned subagent work in the composer action
-//                    without treating it as a stoppable main-agent stream.
+// [Sync] 2026-08-11: keep the composer bound to the main thread runtime;
+//                    transcript-derived subagent counts are observation-only.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -93,7 +93,6 @@ import {
 } from '../../lib/claude-agent-sse-utils';
 import { applyPlanEvent, type ThreadPlanEvent } from '../../hooks/useThreadPlan';
 import { applyTodoEvent, type ThreadTodoEvent } from '../../hooks/useThreadTodos';
-import { useThreadSubagents } from '../../hooks/useThreadSubagents';
 import { IconArrowDown } from './Icons';
 import {
   shouldApplyChatHistoryRecoverySnapshot,
@@ -213,7 +212,6 @@ export default function ChatPanel({
   inputContextControl,
 }: ChatPanelProps) {
   const { t } = useTranslation();
-  const subagentState = useThreadSubagents(threadId);
   const pendingDataRef = useRef<{
     rawAttachments: Attachment[];
     toolChoice: ToolChoice;
@@ -571,11 +569,6 @@ export default function ChatPanel({
 
   const agentBusy = status === 'streaming' || status === 'submitted' || isReconnecting || isStopping;
   const chatLoading = agentBusy || isLoading;
-  const runningSubagentCount = subagentState.counts.running;
-  const inputBusy = agentBusy || runningSubagentCount > 0;
-  const inputBusyLabel = !agentBusy && runningSubagentCount > 0
-    ? t('chat.inputDock.subagentsRunning', { count: runningSubagentCount })
-    : undefined;
 
   const markToolConfirmationSettled = useCallback((toolCallId: string) => {
     setDreamToolConfirmations((current) => current
@@ -812,8 +805,7 @@ export default function ChatPanel({
               await sendMessage({ role: 'user', parts });
             }}
             placeholder={inputPlaceholder}
-            loading={inputBusy}
-            loadingLabel={inputBusyLabel}
+            loading={agentBusy}
             onStop={agentBusy ? handleStop : undefined}
             stopPending={isStopping}
             workspaceSessionId={workspaceEnabled ? threadId : undefined}

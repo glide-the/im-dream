@@ -1,7 +1,7 @@
 // [Input] A Chat thread containing human Dream messages, a private episode-action
 //         envelope, and thread-owned subagents that outlive the main stream.
 // [Output] Browser regression proving private envelopes stay hidden while the
-//          composer exposes an accurate passive subagent-running state.
+//          composer uses the main thread runtime rather than transcript counts.
 // [Pos] Dream-to-Chat rendering and subagent composer status regression seam.
 
 import { expect, test } from '@playwright/test';
@@ -51,7 +51,7 @@ function subagentTask(index: number, status: 'running' | 'completed') {
   };
 }
 
-test('Chat hides private Dream actions and reports subagents that are still running', async ({ page }) => {
+test('Chat hides private Dream actions and does not let stale subagent transcripts block input', async ({ page }) => {
   const dreamRunId = 'run_0123456789abcdef0123456789abcdef';
   const harnessModule = `
     import React from 'react';
@@ -291,21 +291,18 @@ test('Chat hides private Dream actions and reports subagents that are still runn
       name: 'Subagent tasks: 4 running · 4 completed',
     });
     await expect(subagentButton).toBeVisible();
-    const passiveStatus = page.getByRole('button', { name: '4 subagents running' });
-    await expect(passiveStatus).toBeVisible();
-    await expect(passiveStatus).toBeDisabled();
+    await expect(page.getByRole('button', { name: '4 subagents running' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Stop generating' })).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Send message' })).toHaveCount(0);
-
-    subagentsRunning = false;
-    await subagentButton.click();
-    await page.getByRole('button', { name: 'Refresh tasks' }).click();
     const sendButton = page.getByRole('button', { name: 'Send message' });
     await expect(sendButton).toBeVisible();
     await expect(sendButton).toBeDisabled();
     const input = page.getByRole('textbox', { name: 'Chat input' });
     await input.fill('continue in Chat');
     await expect(sendButton).toBeEnabled();
+
+    subagentsRunning = false;
+    await subagentButton.click();
+    await page.getByRole('button', { name: 'Refresh tasks' }).click();
 
     dreamConfirmationPending = true;
     await page.reload();

@@ -55,6 +55,29 @@ _MAX_TOOL_CONFIRMATION_SNAPSHOT_IDS = 256
 _MAX_TOOL_CALL_ID_LENGTH = 255
 
 
+async def _publish_failure_terminal(
+    bus: IEventBus,
+    error_text: str,
+) -> None:
+    """Close one still-open turn with the existing Chat failure contract.
+
+    Normal execution remains owned by ``ClaudeAgentService.execute_session``.
+    This helper is only for factory failures that occur outside that method's
+    normal runner-result path.  ``IEventBus.is_done`` keeps the fallback from
+    adding a second terminal after a service already closed the stream.
+    """
+
+    if bus.is_done:
+        return
+    await bus.publish(
+        NormalizedAgentEvent.create("error", {"errorText": error_text})
+    )
+    await bus.publish(
+        NormalizedAgentEvent.create("finish", {"finishReason": "error"})
+    )
+    await bus.publish(None)
+
+
 def _stop_wait_seconds() -> float:
     """Return the bounded wait for frontend stop requests."""
 
@@ -200,10 +223,7 @@ class ClaudeAgentThreadFactory:
                 error_code = getattr(exc, "code", None)
                 if isinstance(error_code, str) and error_code:
                     error_text = f"[{error_code}] {error_text}"
-                await bus.publish(
-                    NormalizedAgentEvent.create("error", {"errorText": error_text})
-                )
-                await bus.publish(None)  # sentinel — closes the stream
+                await _publish_failure_terminal(bus, error_text)
                 token = await bus.subscribe()
                 try:
                     async for event in bus.read(token):
@@ -459,13 +479,27 @@ class ClaudeAgentThreadFactory:
         """Run execute_session and release per-session lock when the turn ends."""
         session_id = state.session_id
         turn_id = state.current_turn_id
+        bus = state.event_bus
         try:
             await self._service.execute_session(execution)
         except asyncio.CancelledError:
             logger.info("Turn cancelled for session_id=%s", session_id)
             raise
-        except Exception:
+        except Exception as exc:
             logger.exception("Turn failed for session_id=%s", session_id)
+            if bus is not None and not bus.is_done:
+                try:
+                    await _publish_failure_terminal(
+                        bus,
+                        _format_exception_for_sse(exc),
+                    )
+                except Exception:
+                    # A broken external EventBus must not prevent lifecycle and
+                    # per-session lock cleanup below.
+                    logger.exception(
+                        "Failed to publish fallback terminal for session_id=%s",
+                        session_id,
+                    )
         finally:
             self._clear_story_workspace_dream_public_turn(session_id, turn_id)
             state.turn_context = None

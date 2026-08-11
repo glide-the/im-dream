@@ -41,6 +41,7 @@ if "claude_agent_sdk" not in sys.modules:
     sys.modules["claude_agent_sdk.types"] = types.ModuleType("claude_agent_sdk.types")
 
 from claude_agent.thread_factory import ClaudeAgentThreadFactory, build_session_id
+from claude_agent.event_bus import create_event_bus
 from claude_agent.thread_pool import (
     AgentRunLifecycle,
     AgentRunState,
@@ -909,6 +910,11 @@ class TestAssembleContextFailure(unittest.TestCase):
         self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
         self.assertIn("WORKSPACE_PACK_DIGEST_MISMATCH", error_frames[0])
         self.assertIn("digest mismatch", error_frames[0])
+        self.assertEqual(
+            sum('"type":"finish"' in frame.replace(" ", "") for frame in frames),
+            1,
+        )
+        self.assertIn('"finishReason":"error"', "".join(frames))
 
     def test_generic_failure_emits_sse_error_frame(self):
         self._fail_assemble(RuntimeError("kaboom"))
@@ -937,6 +943,39 @@ class TestAssembleContextFailure(unittest.TestCase):
             "retry after pack failure should emit a fresh error frame, "
             f"got: {frames!r}",
         )
+
+    def test_unexpected_execution_failure_closes_the_stream_once(self):
+        async def exercise():
+            factory = ClaudeAgentThreadFactory()
+            state = factory._pool.get_or_create("thread_unexpected_failure")
+            state.mark_running()
+            state.current_turn_id = "turn-unexpected"
+            bus = create_event_bus(state.session_id, state.current_turn_id)
+            state.event_bus = bus
+            lock = factory._pool.get_lock(state.session_id)
+            await lock.acquire()
+
+            async def _execute(_execution):
+                raise RuntimeError("unexpected persistence failure")
+
+            factory._service.execute_session = _execute
+            token = await bus.subscribe()
+            task = asyncio.create_task(
+                factory._run_turn_task(object(), state, lock)
+            )
+            events = [event async for event in bus.read(token)]
+            await task
+            await bus.unsubscribe(token)
+            return events, state
+
+        events, state = _run(exercise())
+        self.assertEqual(
+            [event.type for event in events],
+            ["error", "finish"],
+        )
+        self.assertEqual(events[1].data["finishReason"], "error")
+        self.assertEqual(state.lifecycle, AgentRunLifecycle.IDLE)
+        self.assertIsNone(state.event_bus)
 
 
 if __name__ == "__main__":

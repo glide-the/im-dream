@@ -388,12 +388,16 @@ export interface StoryWorkspaceDreamAgentToolConfirmationResolved {
   readonly resolved: true;
 }
 
+export type StoryWorkspaceDreamAgentTerminalOutcome = 'completed' | 'failed' | 'cancelled';
+
 /** Allowlisted event surface emitted by the Story Workspace Dream SSE adapter. */
 export type StoryWorkspaceDreamAgentEvent =
   | { readonly type: 'assistant_text_delta'; readonly cursor: string; readonly turnId: string; readonly delta: string }
   | { readonly type: 'agent_activity_started'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
   | { readonly type: 'agent_activity_finished'; readonly cursor: string; readonly turnId: string; readonly activity: StoryWorkspaceDreamAgentActivityContent }
   | { readonly type: 'assistant_message_committed'; readonly turnId: string }
+  | { readonly type: 'agent_turn_failed'; readonly cursor: string; readonly turnId: string; readonly code: 'DREAM_AGENT_TURN_FAILED' }
+  | { readonly type: 'agent_turn_cancelled'; readonly cursor: string; readonly turnId: string }
   | { readonly type: 'tool_confirmation_requested'; readonly cursor: string; readonly turnId: string; readonly confirmation: StoryWorkspaceDreamAgentToolConfirmation }
   | { readonly type: 'tool_confirmation_resolved'; readonly cursor: string; readonly turnId: string; readonly toolCallId: string }
   | { readonly type: 'status'; readonly lifecycle: 'idle' | 'streaming' };

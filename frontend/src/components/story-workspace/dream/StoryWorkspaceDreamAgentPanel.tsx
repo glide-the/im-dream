@@ -202,7 +202,8 @@ export function StoryWorkspaceDreamAgentPanel({ agent, isOpen, onClose, restoreF
       ) : (
         <form onSubmit={(event) => { event.preventDefault(); void submit(); }}>
           {inputHint && <p role="status">{inputHint}</p>}
-          {agent.error && <p role="status">正在恢复 Dream Agent 消息。</p>}
+          {agent.error && <p role="status">{agent.terminalOutcome === 'failed' ? '本次执行失败，请重试。' : '正在恢复 Dream Agent 消息。'}</p>}
+          {!agent.error && agent.terminalOutcome === 'cancelled' && <p role="status">本次执行已取消。</p>}
           <label>
             <span>给 Dream Agent 留言</span>
             <textarea
