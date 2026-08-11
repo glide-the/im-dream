@@ -40,6 +40,8 @@
 // [Sync] 2026-08-03: register a live message getter in chat-export-registry for the share
 //                    dialog long-image export.
 // [Sync] 2026-08-04: forward Agent/Task chat-row navigation to ChatView's subagent sidebar.
+// [Sync] 2026-08-11: claim parent-owned queued first turns before send so a ChatPanel
+//                    history-load remount cannot replay the same /api/claude-agent POST.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useChat } from '@ai-sdk/react';
@@ -129,6 +131,11 @@ interface ChatPanelProps {
   queuedAttachments?: Attachment[];
   queuedToolChoice?: ToolChoice;
   queuedPromptNonce?: number;
+  /**
+   * Parent-owned at-most-once gate for queued sends. ChatPanel-local refs do not
+   * survive the history-load remount that follows lazy thread creation.
+   */
+  claimQueuedPrompt?: (nonce: number) => boolean;
   openFileDialogSignal?: number;
   onConversationStart?: () => void;
   /** Current EditorState snapshot forwarded to the backend agent runner via editor_state request field. */
@@ -180,6 +187,7 @@ export default function ChatPanel({
   queuedAttachments = [],
   queuedToolChoice = 'auto',
   queuedPromptNonce,
+  claimQueuedPrompt,
   openFileDialogSignal,
   onConversationStart,
   editorState,
@@ -392,6 +400,10 @@ export default function ChatPanel({
     if (!queuedPrompt?.trim() && queuedAttachments.length === 0) {
       return;
     }
+    if (claimQueuedPrompt && !claimQueuedPrompt(queuedPromptNonce)) {
+      lastQueuedNonceRef.current = queuedPromptNonce;
+      return;
+    }
     lastQueuedNonceRef.current = queuedPromptNonce;
 
     void (async () => {
@@ -420,7 +432,7 @@ export default function ChatPanel({
       turnGenerationRef.current += 1;
       await sendMessage({ role: 'user', parts: queuedMessageParts });
     })();
-  }, [onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
+  }, [claimQueuedPrompt, onConversationStart, queuedAttachments, queuedPrompt, queuedPromptNonce, queuedToolChoice, sendMessage]);
 
   const recoverAuthoritativeHistory = useCallback(() => {
     const requestedAt: ChatHistoryRecoveryCheckpoint = {

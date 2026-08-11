@@ -68,6 +68,9 @@
 // [Sync] 2026-08-03: share button now opens ChatShareDialog (复制链接 placeholder +
 //                    导出图片 long-image export via chat-export-registry + exportThreadImage).
 // [Sync] 2026-08-04: add thread subagent summary/right sidebar; Agent/Task chat buttons focus the matching task row.
+// [Sync] 2026-08-11: keep a lazy-created thread's first ChatPanel mounted while
+//                    it streams, and make ChatView own queued-turn consumption
+//                    so remounts cannot duplicate the /api/claude-agent request.
 import { Component, useMemo, useState, useEffect, useCallback, useRef, type ReactNode, type UIEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TFunction } from 'i18next';
@@ -400,8 +403,15 @@ function ChatViewContent({
   const [queuedAttachments, setQueuedAttachments] = useState<Attachment[]>([]);
   const [queuedToolChoice, setQueuedToolChoice] = useState<ToolChoice>('auto');
   const [queuedPromptNonce, setQueuedPromptNonce] = useState(0);
+  // This ref belongs to ChatView, which remains mounted while the child ChatPanel
+  // is temporarily removed for active-thread history loading. A ChatPanel-local
+  // useRef resets during that remount and cannot provide request-level de-duplication.
+  const lastClaimedQueuedPromptNonceRef = useRef(0);
   const [hasConversationStarted, setHasConversationStarted] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
+  // A thread created by this view is known to have no history yet. Skipping its
+  // first hydration keeps the ChatPanel (and its live fetch reader) mounted.
+  const freshQueuedThreadIdRef = useRef<string | null>(null);
   const [threads, setThreads] = useState<ChatThread[]>([]);
   const [threadSidebarOpen, setThreadSidebarOpen] = useState(false);
   const [isLoadingThreads, setIsLoadingThreads] = useState(false);
@@ -656,6 +666,10 @@ function ChatViewContent({
   // Load history, then reconnect SSE when the backend turn is still running.
   useEffect(() => {
     if (!activeThreadId) return;
+    if (freshQueuedThreadIdRef.current === activeThreadId) {
+      freshQueuedThreadIdRef.current = null;
+      return;
+    }
     let cancelled = false;
     setIsLoadingMessages(true);
     setThreadMessages(null);
@@ -723,6 +737,7 @@ function ChatViewContent({
     attachments: Attachment[] = [],
     toolChoice: ToolChoice = 'auto',
   ) => {
+    freshQueuedThreadIdRef.current = threadId;
     setThreadMessages([]);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
@@ -736,6 +751,20 @@ function ChatViewContent({
     setQueuedPromptNonce((value) => value + 1);
     void reloadThreads();
   }, [onLandingTabChange, reloadThreads]);
+
+  const claimQueuedPrompt = useCallback((nonce: number): boolean => {
+    if (nonce <= lastClaimedQueuedPromptNonceRef.current) {
+      return false;
+    }
+    lastClaimedQueuedPromptNonceRef.current = nonce;
+
+    // Clear the payload as soon as it has an owner. The nonce remains monotonic
+    // so delayed child effects can still be rejected by the gate above.
+    setQueuedPrompt('');
+    setQueuedAttachments([]);
+    setQueuedToolChoice('auto');
+    return true;
+  }, []);
 
   const startThreadWithQueuedSend = useCallback(async (
     message: string,
@@ -1164,6 +1193,7 @@ function ChatViewContent({
                   queuedAttachments={queuedAttachments}
                   queuedToolChoice={queuedToolChoice}
                   queuedPromptNonce={queuedPromptNonce}
+                  claimQueuedPrompt={claimQueuedPrompt}
                   inputPlaceholder="Ask Ink & Memory…"
                   editorState={editorState}
                   onEditorWriteConfirmed={onEditorWriteConfirmed}
