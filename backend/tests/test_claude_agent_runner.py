@@ -373,6 +373,20 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
 
     def setUp(self):
         self._mock_client = _MockSDKClient()
+        # These tests exercise the SDK runner in isolation.  A developer's
+        # live backend configuration may enable the Admin Gateway while the
+        # synthetic AgentRunOptions below intentionally have no authenticated
+        # canonical user.  Keep that integration disabled for this base seam;
+        # its fail-closed and refresh-helper contracts have dedicated tests.
+        self._gateway_env_patch = patch.dict(
+            os.environ,
+            {
+                "INK_GATEWAY_ENABLED": "0",
+                "INK_GATEWAY_CLAUDE_AGENT_ENABLED": "0",
+            },
+            clear=False,
+        )
+        self._gateway_env_patch.start()
         # Bypass the real auth-key check: these tests exercise runner logic,
         # not env propagation (see TestClaudeAgentRunnerSdkEnvDiagnostics).
         self._verify_patch = patch.object(
@@ -383,6 +397,7 @@ class _RunnerBase(unittest.IsolatedAsyncioTestCase):
 
     def tearDown(self):
         self._verify_patch.stop()
+        self._gateway_env_patch.stop()
 
     def make_runner(self, session_id: str = "test-session") -> ClaudeAgentRunner:
         return ClaudeAgentRunner(sdk_client=self._mock_client)
@@ -2301,6 +2316,29 @@ class TestClaudeAgentRunnerSdkEnvDiagnostics(unittest.TestCase):
 
     def test_anthropic_auth_token_counts_as_auth(self):
         options = _SDK_OPTIONS(env={"ANTHROPIC_AUTH_TOKEN": "sk-test"})
+
+        with patch.object(agent_runner_module.logger, "warning") as warning:
+            agent_runner_module._verify_claude_sdk_env_for_query_stream(options)
+
+        warning.assert_not_called()
+
+    def test_server_owned_gateway_api_key_helper_counts_as_auth(self):
+        from services.admin_gateway.sdk import apply_gateway_sdk_env_to_options
+
+        options = _SDK_OPTIONS(env={})
+        apply_gateway_sdk_env_to_options(
+            options,
+            "205",
+            environment={
+                "INK_GATEWAY_ENABLED": "1",
+                "INK_GATEWAY_BASE_URL": "https://admin.example.test",
+                "INK_GATEWAY_SERVICE_KEY": "gw_" + "k" * 43,
+                "INK_GATEWAY_SUBJECT_JWT_ISSUER": "https://dream.example.test",
+                "INK_GATEWAY_SUBJECT_JWT_AUDIENCE": "ink-memory-gateway",
+                "INK_GATEWAY_SERVICE_CLIENT_ID": "dream-bff",
+                "INK_GATEWAY_SUBJECT_TOKEN_LIFETIME_SECONDS": "240",
+            },
+        )
 
         with patch.object(agent_runner_module.logger, "warning") as warning:
             agent_runner_module._verify_claude_sdk_env_for_query_stream(options)

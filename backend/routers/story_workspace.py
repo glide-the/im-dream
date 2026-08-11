@@ -15,10 +15,11 @@ from typing import Any, Iterator, Optional, Protocol
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 import database
+from claude_agent.sse import streaming_sse_response
 from story_workspace.contracts import (
     STORY_WORKSPACE_REVIEW_NOTES_MAX_LENGTH,
     StoryWorkspaceAgentStoryPayload,
@@ -389,6 +390,7 @@ async def _workflow_call(awaitable: Any, *, by_alias: bool = False) -> Any:
             ),
         )
     except Exception:
+        logger.exception("Story Workspace workflow call failed closed")
         return JSONResponse(
             status_code=503,
             content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
@@ -1677,11 +1679,7 @@ async def story_workspace_stream_dream_agent_events(
             status_code=503,
             content=build_error_payload("DECK_RUNTIME_CONFIG_UNAVAILABLE"),
         )
-    return StreamingResponse(
-        frames,
-        media_type="text/event-stream",
-        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-    )
+    return streaming_sse_response(frames)
 
 
 @router.post("/workflow-runs/{workflow_run_id}/dream-agent/messages", status_code=202)

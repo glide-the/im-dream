@@ -33,6 +33,7 @@ try:
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
     )
+    from services.story_workspace.dream_stream_adapter import iter_dream_run_events
 except ModuleNotFoundError:  # Support repository-root package imports.
     from backend.models.workflow_run import WorkflowRun
     from backend.story_workspace.contracts import (
@@ -43,6 +44,9 @@ except ModuleNotFoundError:  # Support repository-root package imports.
         StoryWorkspaceDreamFilesResponse,
         StoryWorkspaceDreamRunContext,
         StoryWorkspaceDreamStage,
+    )
+    from backend.services.story_workspace.dream_stream_adapter import (
+        iter_dream_run_events,
     )
 
 
@@ -881,34 +885,14 @@ def story_workspace_build_dream_confirmation_turn_dispatcher(
                 message_metadata=metadata,
                 story_workspace_dream_context=dream_context,
             )
-            stream = selected_factory.run_streaming(request)
-
             saw_message_final = False
-            async for frame in stream:
-                if not isinstance(frame, str):
-                    continue
-                data_line = next(
-                    (
-                        line.removeprefix("data: ")
-                        for line in frame.splitlines()
-                        if line.startswith("data: ")
-                    ),
-                    None,
-                )
-                if data_line is None:
-                    continue
-                try:
-                    event = json.loads(data_line)
-                except (TypeError, ValueError):
-                    continue
-                if not isinstance(event, dict):
-                    continue
-                if event.get("type") == "error":
+            async for event in iter_dream_run_events(selected_factory, request):
+                if event.type == "error":
                     return False
-                if event.get("type") == "message-final":
+                if event.type == "message-final":
                     saw_message_final = True
-                if event.get("type") == "finish":
-                    if event.get("finishReason") == "error":
+                if event.type == "finish":
+                    if event.data.get("finishReason") == "error":
                         return False
                     return saw_message_final
             return False
@@ -1031,6 +1015,10 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         claim_id_factory: Callable[[], str] = lambda: uuid4().hex,
         retry_base_s: float = 2.0,
         retry_max_s: float = 60.0,
+        before_dispatched_ack: (
+            Callable[[Any, StoryWorkspaceDreamConfirmationDispatch], None]
+            | None
+        ) = None,
     ) -> None:
         self._db_factory = db_factory
         self._dispatcher_factory = dispatcher_factory
@@ -1064,6 +1052,7 @@ class StoryWorkspaceDreamConfirmationCoordinator:
         self._claim_id_factory = claim_id_factory
         self._retry_base_s = max(float(retry_base_s), 0.01)
         self._retry_max_s = max(float(retry_max_s), self._retry_base_s)
+        self._before_dispatched_ack = before_dispatched_ack
         self._in_flight: dict[str, asyncio.Task[None]] = {}
         self._retry_state: dict[str, _StoryWorkspaceDreamRetryState] = {}
         self._loop_task: Optional[asyncio.Task[None]] = None
@@ -1160,6 +1149,8 @@ class StoryWorkspaceDreamConfirmationCoordinator:
     ) -> bool:
         db = self._db_factory()
         try:
+            if self._before_dispatched_ack is not None:
+                self._before_dispatched_ack(db, dispatch)
             return story_workspace_mark_dream_confirmation_dispatched(db, dispatch)
         finally:
             db.close()

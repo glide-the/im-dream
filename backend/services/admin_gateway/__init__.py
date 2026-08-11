@@ -8,6 +8,7 @@ from .inference import (
     GatewayPolyAgent,
 )
 from .models import GatewayModel, GatewayModelCatalog, GatewayModelCatalogClient
+from .selection import resolve_platform_model_alias
 
 __all__ = [
     "apply_gateway_sdk_env_to_options",
@@ -19,4 +20,5 @@ __all__ = [
     "GatewayModel",
     "GatewayModelCatalog",
     "GatewayModelCatalogClient",
+    "resolve_platform_model_alias",
 ]

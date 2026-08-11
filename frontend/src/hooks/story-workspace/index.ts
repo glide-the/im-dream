@@ -37,6 +37,7 @@ export {
   storyWorkspaceReduceDreamFilesFetch,
   storyWorkspaceShouldInvalidateDreamFiles,
   storyWorkspaceShouldPollDreamFiles,
+  storyWorkspaceShouldReadDreamFilesForAgent,
   useStoryWorkspaceDreamFiles,
 } from './useStoryWorkspaceDreamFiles';
 export type {

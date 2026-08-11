@@ -161,6 +161,7 @@ SSE event schema (aligned with Pawkeyland)::
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import math
@@ -170,7 +171,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator, Mapping, Optional
+from typing import Any, AsyncGenerator, Awaitable, Callable, Mapping, Optional
 from uuid import uuid4
 
 import database as _db
@@ -199,7 +200,10 @@ from story_workspace.contracts import (
 )
 from libs.claude_agent_kit.types import AgentRunOptions, AgentStreamingCallbacks, ToolEventPayload
 from services.claude_plugin.workspace_packer import pack_workspace_plugins
+from services.admin_gateway import resolve_platform_model_alias
 from session_events import EditSessionEvent, session_event_bus
+from claude_agent.chat_stream_adapter import ChatStreamAdapter
+from claude_agent.stream_events import NormalizedAgentEvent
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +246,95 @@ def _pack_thread_workspace_plugins(
         db.close()
 
 
+async def _activate_story_workspace_dream_runtime(
+    *,
+    context: StoryWorkspaceDreamRunContext,
+    actor_id: str,
+    sdk_init: dict[str, Any],
+    cwd: str,
+) -> None:
+    """Bind verified Claude init evidence to the authoritative Workflow Run."""
+
+    from libs.claude_agent_kit.server.plugin_launcher import (
+        read_workspace_launch_manifest,
+    )
+    from models.workflow_run import AuthenticatedActorContext
+    from services.deck.story_workflow_gateway import (
+        story_workspace_workflow_token_secret,
+    )
+    from services.story_workspace.dream_launch_gateway import (
+        StoryWorkspaceDreamLaunchGatewayError,
+        StoryWorkspaceDreamLaunchProvisioner,
+    )
+    from services.story_workspace.dream_runtime_activation_service import (
+        DREAM_RUNTIME_NOT_READY,
+        StoryWorkspaceDreamRuntimeActivationError,
+        StoryWorkspaceDreamRuntimeActivationService,
+    )
+
+    verified_plugins = read_workspace_launch_manifest(cwd)
+    db = _db.get_db()
+    try:
+        row = db.execute(
+            "SELECT workspace_id, source_voice_thread_id FROM workflow_runs "
+            "WHERE id = %s AND created_by = %s",
+            (context.workflow_run_id, actor_id),
+        ).fetchone()
+        if db.in_transaction:
+            db.rollback()
+        if row is None or row["source_voice_thread_id"] != context.thread_id:
+            raise PermissionError("Dream runtime actor/run/thread scope mismatch")
+        environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
+        deployment_tier = (
+            "test" if environment in {"test", "testing"} else "development"
+        )
+        try:
+            # A queued Run may outlive an older materialization identity
+            # algorithm. Rebuild only the server-frozen lock's evidence from
+            # the verified immutable installation before enforcing the exact
+            # activation join. Never accept the stale row as equivalent.
+            try:
+                StoryWorkspaceDreamLaunchProvisioner(
+                    db
+                ).ensure_frozen_runtime_evidence(
+                    context.runtime_plugin_lock_id
+                )
+            except StoryWorkspaceDreamLaunchGatewayError as exc:
+                raise StoryWorkspaceDreamRuntimeActivationError(
+                    DREAM_RUNTIME_NOT_READY,
+                    "Dream runtime materialization could not be refreshed",
+                ) from exc
+            await StoryWorkspaceDreamRuntimeActivationService(
+                db,
+                token_secret=story_workspace_workflow_token_secret(),
+                environment_id=environment,
+                deployment_tier=deployment_tier,
+            ).activate_from_sdk_init(
+                workflow_run_id=context.workflow_run_id,
+                actor_context=AuthenticatedActorContext(
+                    actor_id=actor_id,
+                    workspace_id=str(row["workspace_id"]),
+                ),
+                sdk_init=sdk_init,
+                verified_plugins=verified_plugins,
+            )
+        except StoryWorkspaceDreamRuntimeActivationError:
+            tools = sdk_init.get("tools")
+            mcp_servers = sdk_init.get("mcp_servers")
+            logger.warning(
+                "Dream SDK init rejected: run=%s tools_count=%s "
+                "has_story_workspace_tool=%s mcp_server_names=%s",
+                context.workflow_run_id,
+                len(tools) if isinstance(tools, list) else None,
+                isinstance(tools, list)
+                and "mcp__story_workspace__write_dream_run" in tools,
+                sorted(mcp_servers) if isinstance(mcp_servers, dict) else [],
+            )
+            raise
+    finally:
+        db.close()
+
+
 def _store_story_workspace_output_sync(
     user_id: int,
     thread_id: str,
@@ -280,7 +373,11 @@ def _store_story_workspace_output_sync(
                     "deck_name_en": source["deck_name_en"],
                 }
             )
+        db.commit()
         return result
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -509,7 +606,7 @@ async def _emit_plan_updated(
     plan_state.file_name = data["fileName"]
     plan_state.updated_at = data["updatedAt"]
     plan_state.content_bytes = data["contentBytes"]
-    await queue.put(_sse("plan-updated", data))
+    await queue.put(_event("plan-updated", data))
 
 
 async def _observe_plan_mode_transition(
@@ -533,7 +630,7 @@ async def _observe_plan_mode_transition(
     plan_state = _ensure_plan_state(state)
     plan_state.plan_mode = plan_mode
     await queue.put(
-        _sse("plan-mode-changed", {"planMode": plan_mode, "toolCallId": tool_call_id})
+        _event("plan-mode-changed", {"planMode": plan_mode, "toolCallId": tool_call_id})
     )
     if tool_name == "ExitPlanMode" and state is not None:
         plans_dir = get_plans_dir(getattr(state, "session_id", "") or "")
@@ -624,7 +721,7 @@ async def _emit_todo_updated(queue: Any, todo_state: TodoState) -> None:
 
     todos, truncated = _truncate_todos(todo_state.todos)
     await queue.put(
-        _sse(
+        _event(
             "todo-updated",
             {
                 "source": todo_state.source,
@@ -1089,8 +1186,44 @@ class ClaudeAgentService:
     def __init__(
         self,
         context_builder: Optional[ClaudeAgentContextBuilder] = None,
+        platform_model_resolver: Callable[[int | str, str | None], str] | None = None,
+        dream_runtime_init_activator: (
+            Callable[..., Awaitable[None]] | None
+        ) = None,
     ) -> None:
         self._context_builder = context_builder or ClaudeAgentContextBuilder()
+        self._platform_model_resolver = (
+            platform_model_resolver or resolve_platform_model_alias
+        )
+        self._dream_runtime_init_activator = (
+            dream_runtime_init_activator
+            or _activate_story_workspace_dream_runtime
+        )
+
+    def _make_dream_runtime_init_cb(
+        self,
+        execution: "_TurnExecution",
+    ) -> Callable[[Any], Awaitable[None]]:
+        """Activate a Dream Run on the SDK init frame, before output callbacks."""
+
+        async def on_message(message: Any) -> None:
+            context = execution.request.story_workspace_dream_context
+            if context is None or getattr(message, "subtype", None) != "init":
+                return
+            data = getattr(message, "data", None)
+            if not isinstance(data, dict):
+                raise RuntimeError("Claude SDK init payload is invalid")
+            cwd = str(getattr(execution.run_options, "cwd", "") or "")
+            if not cwd:
+                raise RuntimeError("Dream SDK init has no server-owned workspace")
+            await self._dream_runtime_init_activator(
+                context=context,
+                actor_id=execution.request.user_id,
+                sdk_init=data,
+                cwd=cwd,
+            )
+
+        return on_message
 
     # ------------------------------------------------------------------
     # Phase 1: Context Assembly
@@ -1157,6 +1290,17 @@ class ClaudeAgentService:
             logger.warning(
                 "Failed to load user agent settings from system_config; skipping. Error: %s",
                 e,
+            )
+
+        if request.story_workspace_dream_context is not None:
+            # Internal Dream dispatchers bypass the public Chat router. Resolve
+            # the live server-owned alias here so every Dream turn is subject
+            # to the same catalog/entitlement boundary immediately before the
+            # runner is assembled. Errors intentionally propagate fail-closed.
+            request.model = await asyncio.to_thread(
+                self._platform_model_resolver,
+                request.user_id,
+                request.model,
             )
 
         settings_prompt_changed = (
@@ -1411,6 +1555,17 @@ class ClaudeAgentService:
             thread_id=thread_id_for_agent,
             user_message=user_message_content,
             canonical_user_id=str(request.user_id),
+            gateway_idempotency_key=(
+                "dream-turn-"
+                + hashlib.sha256(
+                    (
+                        f"{request.user_id}\n{request.thread_id}\n"
+                        f"{request.message_id}"
+                    ).encode("utf-8")
+                ).hexdigest()
+                if request.message_id
+                else None
+            ),
             resume=should_resume,
             model=request.model,
             cwd=cwd or None,
@@ -1494,7 +1649,7 @@ class ClaudeAgentService:
 
         # Emit session metadata header
         await queue.put(
-            _sse("message-metadata", {"sessionId": execution.state.session_id, "turnIndex": execution.state.turn_count})
+            _event("message-metadata", {"sessionId": execution.state.session_id, "turnIndex": execution.state.turn_count})
         )
 
         error_event_emitted = False
@@ -1510,6 +1665,14 @@ class ClaudeAgentService:
         callbacks = AgentStreamingCallbacks(
             on_text_delta=self._make_text_delta_cb(queue, execution.turn_context),
             on_text_done=self._make_text_done_cb(queue, execution.turn_context),
+            # Chat turns do not install or execute Dream lifecycle policy.
+            # Dream runtime activation remains an opt-in source adapter for a
+            # request that carries a server-authored Dream context.
+            on_message=(
+                self._make_dream_runtime_init_cb(execution)
+                if execution.request.story_workspace_dream_context is not None
+                else None
+            ),
             on_tool_event=self._make_tool_event_cb(
                 queue, execution.turn_context, execution.state
             ),
@@ -1525,14 +1688,14 @@ class ClaudeAgentService:
             # Explicit stop / shutdown cancellation — flush partial assistant
             # content so the next load of this thread shows completed pieces.
             await self._persist_partial_assistant(execution)
-            await queue.put(_sse("finish", {"finishReason": "stop"}))
+            await queue.put(_event("finish", {"finishReason": "stop"}))
             await queue.put(None)
             raise
 
         if result.success:
             full_text = result.full_text
             await queue.put(
-                _sse("message-final", {
+                _event("message-final", {
                     "text": full_text,
                     "usage": result.usage,
                     "sessionId": result.session_id,
@@ -1545,14 +1708,14 @@ class ClaudeAgentService:
             # trusting client-derived provenance.
             story_output = await self._store_story_workspace_output(execution, full_text)
             if story_output is not None:
-                await queue.put(_sse("story-workspace-output", story_output))
-            await queue.put(_sse("finish", {"finishReason": "stop"}))
+                await queue.put(_event("story-workspace-output", story_output))
+            await queue.put(_event("finish", {"finishReason": "stop"}))
         else:
             error_msg = _format_exception_for_sse(result.error)
             if not error_event_emitted:
                 error_event_emitted = True
-                await queue.put(_sse("error", {"errorText": error_msg}))
-            await queue.put(_sse("finish", {"finishReason": "error"}))
+                await queue.put(_event("error", {"errorText": error_msg}))
+            await queue.put(_event("finish", {"finishReason": "error"}))
             # Even on error, flush whatever partial assistant content was collected.
             await self._persist_partial_assistant(execution)
 
@@ -1852,9 +2015,9 @@ class ClaudeAgentService:
             # Emit text-start when this is the first delta of a new text block.
             last_type = turn_ctx.collected_parts[-1].get("type") if turn_ctx.collected_parts else None
             if last_type not in ("text-start", "text-delta"):
-                await queue.put(_sse("text-start", {"id": _TEXT_PART_ID}))
+                await queue.put(_event("text-start", {"id": _TEXT_PART_ID}))
                 turn_ctx.collected_parts.append({"type": "text-start", "id": _TEXT_PART_ID})
-            await queue.put(_sse("text-delta", {"id": _TEXT_PART_ID, "delta": delta}))
+            await queue.put(_event("text-delta", {"id": _TEXT_PART_ID, "delta": delta}))
             turn_ctx.collected_parts.append({"type": "text-delta", "id": _TEXT_PART_ID, "delta": delta})
 
         return on_text_delta
@@ -1863,7 +2026,7 @@ class ClaudeAgentService:
     def _make_text_done_cb(queue: asyncio.Queue, turn_ctx: _TurnContext):
         async def on_text_done(full_text: str) -> None:
             if full_text:
-                await queue.put(_sse("text-end", {"id": _TEXT_PART_ID}))
+                await queue.put(_event("text-end", {"id": _TEXT_PART_ID}))
                 turn_ctx.collected_parts.append({"type": "text-end", "id": _TEXT_PART_ID})
 
         return on_text_done
@@ -1909,12 +2072,12 @@ class ClaudeAgentService:
             if event_type == "thinking_delta" and payload.output:
                 if not turn_ctx.current_reasoning_id:
                     turn_ctx.current_reasoning_id = str(uuid4())
-                    await queue.put(_sse("reasoning-start", {"id": turn_ctx.current_reasoning_id}))
+                    await queue.put(_event("reasoning-start", {"id": turn_ctx.current_reasoning_id}))
                     turn_ctx.collected_parts.append({"type": "reasoning-start", "id": turn_ctx.current_reasoning_id})
                 turn_ctx.has_thinking_delta = True
                 delta_text = str(payload.output)
                 turn_ctx.current_reasoning_text.append(delta_text)
-                await queue.put(_sse("reasoning-delta", {"id": turn_ctx.current_reasoning_id, "delta": delta_text}))
+                await queue.put(_event("reasoning-delta", {"id": turn_ctx.current_reasoning_id, "delta": delta_text}))
                 turn_ctx.collected_parts.append({"type": "reasoning-delta", "id": turn_ctx.current_reasoning_id, "delta": delta_text})
                 return
 
@@ -1927,7 +2090,7 @@ class ClaudeAgentService:
                     and turn_ctx.has_thinking_delta
                     and turn_ctx.current_reasoning_id
                 ):
-                    await queue.put(_sse("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
+                    await queue.put(_event("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
                     turn_ctx.collected_parts.append({"type": "reasoning-end", "id": turn_ctx.current_reasoning_id})
                     turn_ctx.completed_streamed_reasoning_texts.append(
                         str(content_block.get("thinking") or "".join(turn_ctx.current_reasoning_text))
@@ -1947,18 +2110,18 @@ class ClaudeAgentService:
                     turn_ctx.completed_streamed_reasoning_texts.pop(0)
                     return
                 if turn_ctx.has_thinking_delta and turn_ctx.current_reasoning_id:
-                    await queue.put(_sse("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
+                    await queue.put(_event("reasoning-end", {"id": turn_ctx.current_reasoning_id}))
                     turn_ctx.collected_parts.append({"type": "reasoning-end", "id": turn_ctx.current_reasoning_id})
                     turn_ctx.current_reasoning_id = None
                     turn_ctx.has_thinking_delta = False
                     turn_ctx.current_reasoning_text.clear()
                     return
                 reasoning_id = str(uuid4())
-                await queue.put(_sse("reasoning-start", {"id": reasoning_id}))
+                await queue.put(_event("reasoning-start", {"id": reasoning_id}))
                 turn_ctx.collected_parts.append({"type": "reasoning-start", "id": reasoning_id})
-                await queue.put(_sse("reasoning-delta", {"id": reasoning_id, "delta": thinking_output}))
+                await queue.put(_event("reasoning-delta", {"id": reasoning_id, "delta": thinking_output}))
                 turn_ctx.collected_parts.append({"type": "reasoning-delta", "id": reasoning_id, "delta": thinking_output})
-                await queue.put(_sse("reasoning-end", {"id": reasoning_id}))
+                await queue.put(_event("reasoning-end", {"id": reasoning_id}))
                 turn_ctx.collected_parts.append({"type": "reasoning-end", "id": reasoning_id})
                 return
 
@@ -1968,11 +2131,11 @@ class ClaudeAgentService:
                 turn_ctx.tool_name_by_id[tool_call_id] = tool_name
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+                    await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
                 if payload.input is not None and tool_call_id not in turn_ctx.emitted_tool_input_ids:
                     turn_ctx.emitted_tool_input_ids.add(tool_call_id)
                     evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}
-                    await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}))
+                    await queue.put(_event("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input}))
                     turn_ctx.collected_parts.append(evt)
                     await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
                     await _observe_todo_write(queue, state, tool_name, payload.input)
@@ -1983,10 +2146,10 @@ class ClaudeAgentService:
                 turn_ctx.tool_name_by_id[tool_call_id] = tool_name
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+                    await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
                 delta_text = "" if payload.output is None else str(payload.output)
                 if delta_text:
-                    await queue.put(_sse("tool-input-delta", {"toolCallId": tool_call_id, "toolName": tool_name, "delta": delta_text}))
+                    await queue.put(_event("tool-input-delta", {"toolCallId": tool_call_id, "toolName": tool_name, "delta": delta_text}))
                 return
 
             # --- tool_input_available: complete streamed JSON input ready ---
@@ -1995,11 +2158,11 @@ class ClaudeAgentService:
                 turn_ctx.tool_name_by_id[tool_call_id] = tool_name
                 if tool_call_id not in turn_ctx.registered_tool_call_ids:
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+                    await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
                 if tool_call_id not in turn_ctx.emitted_tool_input_ids:
                     turn_ctx.emitted_tool_input_ids.add(tool_call_id)
                     evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}
-                    await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}))
+                    await queue.put(_event("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": payload.input or {}}))
                     turn_ctx.collected_parts.append(evt)
                     await _observe_plan_mode_transition(queue, state, tool_call_id, tool_name)
                     await _observe_todo_write(queue, state, tool_name, payload.input or {})
@@ -2014,14 +2177,14 @@ class ClaudeAgentService:
                         tool_call_id, fallback_name,
                     )
                     turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                    await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": fallback_name}))
+                    await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": fallback_name}))
                     turn_ctx.emitted_tool_input_ids.add(tool_call_id)
                     fallback_evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}
-                    await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}))
+                    await queue.put(_event("tool-input-available", {"toolCallId": tool_call_id, "toolName": fallback_name, "input": {}}))
                     turn_ctx.collected_parts.append(fallback_evt)
                 is_error = bool(payload.is_error)
                 evt = {"type": "tool-output-available", "toolCallId": tool_call_id, "output": payload.output, "isError": is_error}
-                await queue.put(_sse("tool-output-available", {"toolCallId": tool_call_id, "output": payload.output, "isError": is_error}))
+                await queue.put(_event("tool-output-available", {"toolCallId": tool_call_id, "output": payload.output, "isError": is_error}))
                 turn_ctx.collected_parts.append(evt)
 
                 # After a confirmed editor write-tool result, reload editor_state from
@@ -2108,11 +2271,11 @@ class ClaudeAgentService:
             # events already sent by _make_tool_event_cb are not repeated.
             if tool_call_id not in turn_ctx.registered_tool_call_ids:
                 turn_ctx.registered_tool_call_ids.add(tool_call_id)
-                await queue.put(_sse("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
+                await queue.put(_event("tool-input-start", {"toolCallId": tool_call_id, "toolName": tool_name}))
             if tool_call_id not in turn_ctx.emitted_tool_input_ids:
                 turn_ctx.emitted_tool_input_ids.add(tool_call_id)
                 evt = {"type": "tool-input-available", "toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}
-                await queue.put(_sse("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
+                await queue.put(_event("tool-input-available", {"toolCallId": tool_call_id, "toolName": tool_name, "input": tool_input}))
                 turn_ctx.collected_parts.append(evt)
 
             # Step 2: emit tool-approval-request (lifecycle frame — not collected).
@@ -2125,7 +2288,7 @@ class ClaudeAgentService:
                 approval_event["confirmationKind"] = payload["confirmationKind"]
             if isinstance(payload.get("networkRequest"), dict):
                 approval_event["networkRequest"] = payload["networkRequest"]
-            await queue.put(_sse("tool-approval-request", approval_event))
+            await queue.put(_event("tool-approval-request", approval_event))
 
             # Step 3 & 4: block until user responds.
             try:
@@ -2149,7 +2312,7 @@ class ClaudeAgentService:
     @staticmethod
     def _make_error_cb(queue: asyncio.Queue):
         async def on_error(exc: Exception) -> None:
-            await queue.put(_sse("error", {"errorText": _format_exception_for_sse(exc)}))
+            await queue.put(_event("error", {"errorText": _format_exception_for_sse(exc)}))
 
         return on_error
 
@@ -2288,6 +2451,13 @@ def _sse_events_to_ui_parts(events: list) -> list:
 # ---------------------------------------------------------------------------
 
 
+def _event(event_type: str, data: dict[str, Any]) -> NormalizedAgentEvent:
+    """Create one protocol-neutral event for the internal EventBus."""
+
+    return NormalizedAgentEvent.create(event_type, data)
+
+
 def _sse(event_type: str, data: dict[str, Any]) -> str:
-    """Format a single SSE data frame."""
-    return f"data: {json.dumps({'type': event_type, **data})}\n\n"
+    """Legacy Chat-frame helper retained for external test/caller compatibility."""
+
+    return ChatStreamAdapter.encode(_event(event_type, data))

@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import sys
 import tempfile
@@ -51,6 +52,7 @@ from claude_agent.service import (
 )
 from claude_agent.thread_pool import AgentRunState
 from claude_agent.tool_confirmation_store import ToolConfirmationStore
+from claude_agent.stream_events import NormalizedAgentEvent
 from libs.claude_agent_kit.types import AgentRunResult, ToolEventPayload
 from story_workspace.contracts import StoryWorkspaceDreamRunContext
 
@@ -80,6 +82,53 @@ class _FakeBus:
         pass
 
 
+class TestStoryWorkspaceOutputTransaction(unittest.TestCase):
+    def test_commits_the_story_bundle_before_emitting_success(self):
+        db = unittest.mock.Mock()
+        db.execute.return_value.fetchone.return_value = None
+        payload = unittest.mock.Mock()
+        with (
+            unittest.mock.patch.object(service_module._db, "get_db", return_value=db),
+            unittest.mock.patch.object(
+                service_module, "get_or_create_default_workspace", return_value="workspace-1"
+            ),
+            unittest.mock.patch.object(
+                service_module,
+                "store_agent_story_output",
+                return_value={"story_id": "story-1"},
+            ),
+        ):
+            result = service_module._store_story_workspace_output_sync(
+                7, "thread-1", payload
+            )
+
+        self.assertEqual(result["story_id"], "story-1")
+        db.commit.assert_called_once_with()
+        db.rollback.assert_not_called()
+        db.close.assert_called_once_with()
+
+    def test_rolls_back_the_story_bundle_when_persistence_fails(self):
+        db = unittest.mock.Mock()
+        failure = RuntimeError("fixture persistence failure")
+        with (
+            unittest.mock.patch.object(service_module._db, "get_db", return_value=db),
+            unittest.mock.patch.object(
+                service_module, "get_or_create_default_workspace", return_value="workspace-1"
+            ),
+            unittest.mock.patch.object(
+                service_module, "store_agent_story_output", side_effect=failure
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "fixture persistence failure"):
+                service_module._store_story_workspace_output_sync(
+                    7, "thread-1", unittest.mock.Mock()
+                )
+
+        db.rollback.assert_called_once_with()
+        db.commit.assert_not_called()
+        db.close.assert_called_once_with()
+
+
 class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
     @staticmethod
     def _dream_context() -> StoryWorkspaceDreamRunContext:
@@ -97,7 +146,16 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_dream_turn_packs_adapter_and_propagates_only_its_run_context(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        selected_models: list[tuple[str, str | None]] = []
+
+        def resolve_model(user_id: str, client_alias: str | None) -> str:
+            selected_models.append((user_id, client_alias))
+            return "dream-balanced"
+
+        service = ClaudeAgentService(
+            context_builder=builder,
+            platform_model_resolver=resolve_model,
+        )
         state = AgentRunState(session_id="thread_dream_turn")
         context = self._dream_context()
         request = ClaudeAgentRunRequest(
@@ -158,10 +216,115 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
             ],
             request.message_id,
         )
+        self.assertEqual(selected_models, [("7", None)])
+        self.assertEqual(execution.run_options.model, "dream-balanced")
+        expected_gateway_key = "dream-turn-" + hashlib.sha256(
+            f"7\nthread_dream_turn\n{request.message_id}".encode("utf-8")
+        ).hexdigest()
+        self.assertEqual(
+            execution.run_options.gateway_idempotency_key,
+            expected_gateway_key,
+        )
+        self.assertEqual(
+            builder.user_message_calls[0]["model"],
+            "dream-balanced",
+        )
+
+    async def test_dream_sdk_init_is_activated_before_stream_output(self):
+        activator = unittest.mock.AsyncMock()
+        service = ClaudeAgentService(dream_runtime_init_activator=activator)
+        context = self._dream_context()
+        execution = SimpleNamespace(
+            request=ClaudeAgentRunRequest(
+                user_id="7",
+                thread_id=context.thread_id,
+                message_parts=[{"type": "text", "text": "create Dream"}],
+                story_workspace_dream_context=context,
+            ),
+            run_options=SimpleNamespace(cwd="/server-owned/thread-workspace"),
+        )
+        callback = service._make_dream_runtime_init_cb(execution)
+
+        await callback(
+            SimpleNamespace(
+                subtype="hook_started",
+                data={"session_id": "ignored"},
+            )
+        )
+        activator.assert_not_awaited()
+
+        init = {
+            "session_id": "claude-session-1",
+            "tools": ["mcp__story_workspace__write_dream_run"],
+        }
+        await callback(SimpleNamespace(subtype="init", data=init))
+
+        activator.assert_awaited_once_with(
+            context=context,
+            actor_id="7",
+            sdk_init=init,
+            cwd="/server-owned/thread-workspace",
+        )
+
+    async def test_dream_sdk_init_reprovisions_frozen_runtime_evidence_before_activation(self):
+        context = self._dream_context()
+        db = unittest.mock.Mock()
+        db.in_transaction = True
+        db.execute.return_value.fetchone.return_value = {
+            "workspace_id": "workspace-dream",
+            "source_voice_thread_id": context.thread_id,
+        }
+        provisioner = unittest.mock.Mock()
+        provisioner_factory = unittest.mock.Mock(return_value=provisioner)
+        activation = unittest.mock.Mock()
+        activation.activate_from_sdk_init = unittest.mock.AsyncMock()
+        activation_factory = unittest.mock.Mock(return_value=activation)
+        init = {
+            "session_id": "claude-session-runtime-repair",
+            "tools": ["mcp__story_workspace__write_dream_run"],
+        }
+
+        with (
+            unittest.mock.patch.object(
+                service_module._db, "get_db", return_value=db
+            ),
+            unittest.mock.patch(
+                "libs.claude_agent_kit.server.plugin_launcher.read_workspace_launch_manifest",
+                return_value=[{"package_spec": "ink-dream-story@platform-builtin"}],
+            ),
+            unittest.mock.patch(
+                "services.story_workspace.dream_launch_gateway.StoryWorkspaceDreamLaunchProvisioner",
+                provisioner_factory,
+            ),
+            unittest.mock.patch(
+                "services.story_workspace.dream_runtime_activation_service.StoryWorkspaceDreamRuntimeActivationService",
+                activation_factory,
+            ),
+            unittest.mock.patch(
+                "services.deck.story_workflow_gateway.story_workspace_workflow_token_secret",
+                return_value=b"runtime-test-secret",
+            ),
+        ):
+            await service_module._activate_story_workspace_dream_runtime(
+                context=context,
+                actor_id="7",
+                sdk_init=init,
+                cwd="/server-owned/thread-workspace",
+            )
+
+        provisioner_factory.assert_called_once_with(db)
+        provisioner.ensure_frozen_runtime_evidence.assert_called_once_with(
+            context.runtime_plugin_lock_id
+        )
+        activation.activate_from_sdk_init.assert_awaited_once()
+        db.close.assert_called_once_with()
 
     async def test_only_server_owned_episode_action_reaches_private_context_builder(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            platform_model_resolver=lambda _user_id, _alias: "dream-balanced",
+        )
         state = AgentRunState(session_id="thread_dream_turn")
         context = self._dream_context()
         provenance = {
@@ -239,7 +402,10 @@ class TestClaudeAgentServiceAssembleContext(unittest.IsolatedAsyncioTestCase):
 
     async def test_plain_or_mismatched_metadata_does_not_reach_private_builder(self):
         builder = _FakeContextBuilder()
-        service = ClaudeAgentService(context_builder=builder)
+        service = ClaudeAgentService(
+            context_builder=builder,
+            platform_model_resolver=lambda _user_id, _alias: "dream-balanced",
+        )
         context = self._dream_context()
         cases = [
             None,
@@ -918,7 +1084,9 @@ def _run(coro):
         asyncio.set_event_loop(None)
 
 
-def _parse_sse(frame: str) -> dict:
+def _parse_sse(frame: str | NormalizedAgentEvent) -> dict:
+    if isinstance(frame, NormalizedAgentEvent):
+        return frame.payload()
     assert frame.startswith("data: ")
     return json.loads(frame[len("data: "):].strip())
 

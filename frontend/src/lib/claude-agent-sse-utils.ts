@@ -23,29 +23,44 @@ export function drainClaudeAgentSseFrames(buffer: string): {
   buffer: string;
   frames: string[];
 } {
-  const parts = buffer.split('\n\n');
+  const frames: string[] = [];
+  let remaining = buffer;
+  const blankLine = /(?:\r\n|\n|\r)(?:\r\n|\n|\r)/;
+  let boundary = blankLine.exec(remaining);
+  while (boundary?.index !== undefined) {
+    frames.push(remaining.slice(0, boundary.index));
+    remaining = remaining.slice(boundary.index + boundary[0].length);
+    boundary = blankLine.exec(remaining);
+  }
   return {
-    buffer: parts.pop() ?? '',
-    frames: parts.filter((frame) => frame.trim() && !frame.startsWith(':')),
+    buffer: remaining,
+    frames: frames.filter((frame) => frame.trim()),
   };
 }
 
 export function parseClaudeAgentSseBuffer(raw: string): BackendEvent[] {
   const events: BackendEvent[] = [];
-  const frames = raw.split(/\n\n+/);
+  const frames = raw.split(/(?:\r\n|\n|\r){2,}/);
   for (const frame of frames) {
-    for (const line of frame.split('\n')) {
-      if (!line.startsWith('data: ')) continue;
-      const json = line.slice('data: '.length).trim();
-      if (!json) continue;
-      try {
-        const parsed = JSON.parse(json) as BackendEvent;
-        if (parsed && typeof parsed.type === 'string') {
-          events.push(parsed);
-        }
-      } catch {
-        // ignore malformed frames
+    const dataLines: string[] = [];
+    for (const line of frame.split(/\r\n|\n|\r/)) {
+      if (!line || line.startsWith(':')) continue;
+      const separator = line.indexOf(':');
+      const field = separator < 0 ? line : line.slice(0, separator);
+      if (field !== 'data') continue;
+      let value = separator < 0 ? '' : line.slice(separator + 1);
+      if (value.startsWith(' ')) value = value.slice(1);
+      dataLines.push(value);
+    }
+    if (!dataLines.length) continue;
+    try {
+      const parsed = JSON.parse(dataLines.join('\n')) as BackendEvent;
+      if (parsed && typeof parsed.type === 'string') {
+        events.push(parsed);
       }
+    } catch {
+      // Ignore malformed or non-JSON application frames. The caller retains
+      // incomplete frames until a blank-line boundary has arrived.
     }
   }
   return events;
@@ -294,7 +309,7 @@ export async function consumeClaudeAgentSseStream(
   if (tail) {
     sseBuffer += tail;
   }
-  if (sseBuffer.trim() && !sseBuffer.startsWith(':')) {
+  if (sseBuffer.trim()) {
     dispatchBuffer(`${sseBuffer}\n\n`);
   }
 }

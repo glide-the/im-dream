@@ -2277,6 +2277,45 @@ class StoryWorkspaceDreamAgentMessageServiceTest(unittest.TestCase):
         metadata = json.loads(self.db.execute("SELECT metadata FROM chat_message").fetchone()[0])
         self.assertEqual(metadata["dispatch_status"], "dispatched")
 
+    def test_dispatch_error_is_terminal_and_does_not_leave_poll_recoverable_pending(self) -> None:
+        class ErrorFactory(_Factory):
+            async def run_streaming(self, request):
+                self.requests.append(request)
+                yield 'data: {"type":"error","errorText":"runtime unavailable"}\n\n'
+                yield 'data: {"type":"finish","finishReason":"error"}\n\n'
+
+        factory = ErrorFactory()
+        service = StoryWorkspaceDreamAgentMessageService(self.db, thread_factory=factory)
+        command = StoryWorkspaceDreamAgentMessageCommand(
+            text="继续",
+            idempotencyKey="key-terminal-error",
+        )
+        with patch(
+            "services.story_workspace.dream_agent_message_service.story_workspace_read_dream_confirmation_fact",
+            return_value=(True, True),
+        ):
+            _accepted, pending = service.claim_message(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+                context=_context(),
+                command=command,
+            )
+            assert pending is not None
+            self.assertFalse(asyncio.run(service.dispatch(pending)))
+            snapshot = service.snapshot(
+                run_id=RUN_ID,
+                thread_id=THREAD_ID,
+                actor_id=ACTOR_ID,
+            )
+
+        metadata = json.loads(self.db.execute("SELECT metadata FROM chat_message").fetchone()[0])
+        self.assertEqual(len(factory.requests), 1)
+        self.assertEqual(metadata["dispatch_status"], "failed")
+        self.assertEqual(metadata["dispatch_error_code"], "DREAM_AGENT_DISPATCH_FAILED")
+        self.assertTrue(snapshot.can_send)
+        self.assertIsNone(snapshot.send_block_reason)
+
 
 class StoryWorkspaceDreamAgentBindingTest(unittest.TestCase):
     def setUp(self) -> None:
@@ -2551,6 +2590,14 @@ class StoryWorkspaceDreamAgentRouteTest(unittest.TestCase):
         self.assertEqual(snapshot.status_code, 200, snapshot.text)
         self.assertEqual(snapshot.json()["storyWorkspaceRunId"], RUN_ID)
         self.assertEqual(events.status_code, 200, events.text)
+        self.assertEqual(
+            events.headers["content-type"],
+            "text/event-stream; charset=utf-8",
+        )
+        self.assertEqual(events.headers["cache-control"], "no-cache, no-transform")
+        self.assertEqual(events.headers["x-accel-buffering"], "no")
+        self.assertNotIn("content-length", events.headers)
+        self.assertNotIn("content-encoding", events.headers)
         self.assertIn("assistant_text_delta", events.text)
         self.assertNotIn("reasoning", events.text)
         self.assertEqual(sent.status_code, 202, sent.text)

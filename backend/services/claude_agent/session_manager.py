@@ -170,13 +170,16 @@ class SessionManager:
                 trusted_marketplaces=trusted_marketplaces,
             )
         except AgentSessionError:
+            self._rollback_read_transaction()
             raise
         except Exception as exc:
+            self._rollback_read_transaction()
             raise AgentSessionError(
                 AGENT_SESSION_RECEIPT_INVALID,
                 "runtime load receipt or frozen Session inputs are invalid",
             ) from exc
 
+        self._rollback_read_transaction()
         request_key = compute_session_request_key(
             workflow_run_id,
             runtime_load_receipt_id,
@@ -842,9 +845,18 @@ class SessionManager:
             value = value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
 
+    def _rollback_read_transaction(self) -> None:
+        if self.db.in_transaction:
+            self.db.rollback()
+
     @staticmethod
-    def _parse_datetime(value: str) -> datetime:
-        parsed = datetime.fromisoformat(value)
+    def _parse_datetime(value: datetime | str) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            raise TypeError("agent session timestamp must be datetime or ISO-8601 text")
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=UTC)
         return parsed.astimezone(UTC)

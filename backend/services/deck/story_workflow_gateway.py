@@ -59,6 +59,7 @@ try:
     )
     from services.story_workspace.dream_confirmation_service import (
         StoryWorkspacePersistedDreamConfirmation,
+        StoryWorkspaceDreamConfirmationDispatch,
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
@@ -71,6 +72,9 @@ try:
     from services.story_workspace.dream_launch_service import (
         StoryWorkspaceDreamLaunchIdempotencyConflict,
         StoryWorkspaceDreamLaunchProvenanceError,
+    )
+    from services.story_workspace.dream_workflow_lifecycle_service import (
+        StoryWorkspaceDreamWorkflowLifecycleService,
     )
     from services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
@@ -156,6 +160,7 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     )
     from backend.services.story_workspace.dream_confirmation_service import (
         StoryWorkspacePersistedDreamConfirmation,
+        StoryWorkspaceDreamConfirmationDispatch,
         StoryWorkspaceDreamConfirmationCoordinator,
         StoryWorkspaceDreamConfirmationError,
         StoryWorkspaceDreamConfirmationService,
@@ -168,6 +173,9 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.story_workspace.dream_launch_service import (
         StoryWorkspaceDreamLaunchIdempotencyConflict,
         StoryWorkspaceDreamLaunchProvenanceError,
+    )
+    from backend.services.story_workspace.dream_workflow_lifecycle_service import (
+        StoryWorkspaceDreamWorkflowLifecycleService,
     )
     from backend.services.story_workspace.dream_reentry_service import (
         StoryWorkspaceDreamReentryService,
@@ -228,9 +236,6 @@ _STORY_INDEX_ERROR_STATUSES = {
 }
 _DEV_TOKEN_SECRET = "ink-dream-development-workflow-token-secret-v1"
 logger = logging.getLogger(__name__)
-_DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
-    database.get_db,
-)
 
 
 @dataclass(frozen=True)
@@ -311,6 +316,48 @@ def _token_secret() -> str:
     if environment in _DEVELOPMENT_ENVIRONMENTS:
         return _DEV_TOKEN_SECRET
     raise ApiRouteError("DECK_RUNTIME_CONFIG_UNAVAILABLE", status_code=503)
+
+
+def story_workspace_workflow_token_secret() -> str:
+    """Return the server-owned Workflow token secret for internal coordinators."""
+
+    return _token_secret()
+
+
+def _advance_dream_continuation_before_ack(
+    db: Any,
+    dispatch: StoryWorkspaceDreamConfirmationDispatch,
+) -> None:
+    run_id = dispatch.metadata.get("story_workspace_run_id")
+    if not isinstance(run_id, str) or not run_id:
+        raise PermissionError("Dream confirmation Run scope is unavailable")
+    row = db.execute(
+        "SELECT workspace_id, source_voice_thread_id FROM workflow_runs "
+        "WHERE id = %s AND created_by = %s",
+        (run_id, dispatch.actor_id),
+    ).fetchone()
+    if db.in_transaction:
+        db.rollback()
+    if row is None or row["source_voice_thread_id"] != dispatch.thread_id:
+        raise PermissionError("Dream confirmation actor/thread scope mismatch")
+    asyncio.run(
+        StoryWorkspaceDreamWorkflowLifecycleService(
+            db,
+            token_secret=_token_secret(),
+        ).record_continuation_dispatched(
+            run_id,
+            AuthenticatedActorContext(
+                actor_id=dispatch.actor_id,
+                workspace_id=str(row["workspace_id"]),
+            ),
+        )
+    )
+
+
+_DREAM_CONFIRMATION_COORDINATOR = StoryWorkspaceDreamConfirmationCoordinator(
+    database.get_db,
+    before_dispatched_ack=_advance_dream_continuation_before_ack,
+)
 
 
 class StoryWorkflowApplicationGateway:
@@ -2201,11 +2248,22 @@ class StoryWorkflowApplicationGateway:
                         thread_id=authoritative_thread_id,
                     ),
                 )
-                return service.submit_confirmation(
+                persisted = service.submit_confirmation(
                     workflow_run_id,
                     request,
                     actor_id=str(actor_id),
                 )
+                asyncio.run(
+                    StoryWorkspaceDreamWorkflowLifecycleService(
+                        db,
+                        token_secret=_token_secret(),
+                    ).record_confirmation_accepted(
+                        workflow_run_id,
+                        actor_context,
+                        review_items_approved=True,
+                    )
+                )
+                return persisted
             finally:
                 db.close()
         except StoryWorkspaceDreamConfirmationError as exc:

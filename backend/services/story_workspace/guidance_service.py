@@ -131,6 +131,7 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
     ) -> bool:
         from agent_factory import claude_agent_thread_factory
         from claude_agent.service import ClaudeAgentRunRequest
+        from services.admin_gateway import resolve_platform_model_alias
 
         snapshot = claude_agent_thread_factory.session_snapshot(thread_id)
         if snapshot and snapshot.get("lifecycle") == "running":
@@ -146,6 +147,7 @@ def build_thread_turn_dispatcher() -> GuidanceDispatcher:
             user_id=str(actor_id),
             thread_id=thread_id,
             resume=True,
+            model=resolve_platform_model_alias(actor_id),
             message_id=message_id,
             message_parts=parts,
             message_metadata=metadata,

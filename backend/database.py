@@ -1083,7 +1083,7 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
         db.execute("""
         INSERT INTO voices (id, deck_id, name, name_zh, name_en, system_prompt,
                            icon, color, is_system, parent_id, owner_id, enabled, order_index, memory_workspace_config)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, %s, %s, 1, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (new_voice_id,
               target_deck_id,
               source_voice['name'],
@@ -1092,8 +1092,10 @@ def fork_voice(user_id: int, voice_id: str, target_deck_id: str) -> str:
               source_voice['system_prompt'],
               source_voice['icon'],
               source_voice['color'],
+              False,
               voice_id,  # parent_id tracks fork source
               user_id,
+              True,
               order_index,
               memory_config_json))
 

@@ -26,13 +26,14 @@ from typing import Any, AsyncGenerator, Optional
 from uuid import uuid4
 
 from claude_agent.event_bus import IEventBus, create_event_bus
+from claude_agent.chat_stream_adapter import ChatStreamAdapter
 from claude_agent.observer import LoggingObserver, SessionObserverRegistry
+from claude_agent.stream_events import NormalizedAgentEvent
 from libs.claude_agent_kit.server.agent_runner import ClaudeAgentRunner
 from claude_agent.service import (
     ClaudeAgentRunRequest,
     ClaudeAgentService,
     _format_exception_for_sse,
-    _sse,
 )
 from claude_agent.thread_pool import (
     AgentRunLifecycle,
@@ -117,11 +118,22 @@ class ClaudeAgentThreadFactory:
         self,
         request: ClaudeAgentRunRequest,
     ) -> AsyncGenerator[str, None]:
-        """Execute a streaming agent turn or reconnect to an in-flight turn."""
+        """Execute a turn using the public Chat SSE adapter."""
+
+        adapter = ChatStreamAdapter()
+        async for event in self.run_events(request):
+            yield adapter.encode(event)
+
+    async def run_events(
+        self,
+        request: ClaudeAgentRunRequest,
+    ) -> AsyncGenerator[NormalizedAgentEvent, None]:
+        """Execute a turn and expose only protocol-neutral internal events."""
+
         session_id = build_session_id(request)
         if request.reconnect:
-            async for frame in self.subscribe_stream(session_id):
-                yield frame
+            async for event in self.subscribe_events(session_id):
+                yield event
             return
 
         lock = self._pool.get_lock(session_id)
@@ -188,12 +200,14 @@ class ClaudeAgentThreadFactory:
                 error_code = getattr(exc, "code", None)
                 if isinstance(error_code, str) and error_code:
                     error_text = f"[{error_code}] {error_text}"
-                await bus.publish(_sse("error", {"errorText": error_text}))
+                await bus.publish(
+                    NormalizedAgentEvent.create("error", {"errorText": error_text})
+                )
                 await bus.publish(None)  # sentinel — closes the stream
                 token = await bus.subscribe()
                 try:
-                    async for frame in bus.read(token):
-                        yield frame
+                    async for event in bus.read(token):
+                        yield event
                 finally:
                     await bus.unsubscribe(token)
                 return
@@ -217,8 +231,8 @@ class ClaudeAgentThreadFactory:
 
             token = await bus.subscribe()
             try:
-                async for frame in bus.read(token):
-                    yield frame
+                async for event in bus.read(token):
+                    yield event
             finally:
                 await bus.unsubscribe(token)
         finally:
@@ -226,7 +240,18 @@ class ClaudeAgentThreadFactory:
                 lock.release()
 
     async def subscribe_stream(self, session_id: str) -> AsyncGenerator[str, None]:
-        """Subscribe to an in-flight turn's EventBus (replay + live frames)."""
+        """Subscribe to an in-flight turn using the public Chat SSE adapter."""
+
+        adapter = ChatStreamAdapter()
+        async for event in self.subscribe_events(session_id):
+            yield adapter.encode(event)
+
+    async def subscribe_events(
+        self,
+        session_id: str,
+    ) -> AsyncGenerator[NormalizedAgentEvent, None]:
+        """Subscribe to protocol-neutral replay and live events."""
+
         _validate_session_id(session_id)
         state = self._pool.get(session_id)
         if state is None or state.lifecycle != AgentRunLifecycle.RUNNING:
@@ -237,8 +262,8 @@ class ClaudeAgentThreadFactory:
 
         token = await bus.subscribe()
         try:
-            async for frame in bus.read(token):
-                yield frame
+            async for event in bus.read(token):
+                yield event
         finally:
             await bus.unsubscribe(token)
 
@@ -247,6 +272,17 @@ class ClaudeAgentThreadFactory:
         session_id: str,
         expected_turn_id: str,
     ) -> AsyncGenerator[str, None]:
+        """Replay one expected live turn using the Chat SSE adapter."""
+
+        adapter = ChatStreamAdapter()
+        async for event in self.subscribe_expected_events(session_id, expected_turn_id):
+            yield adapter.encode(event)
+
+    async def subscribe_expected_events(
+        self,
+        session_id: str,
+        expected_turn_id: str,
+    ) -> AsyncGenerator[NormalizedAgentEvent, None]:
         """Replay one expected live turn without surfacing turn-race errors.
 
         Dream's adapter snapshots a turn ID before subscribing. A completed or
@@ -272,8 +308,8 @@ class ClaudeAgentThreadFactory:
         except Exception:
             return
         try:
-            async for frame in bus.read(token):
-                yield frame
+            async for event in bus.read(token):
+                yield event
         finally:
             await bus.unsubscribe(token)
 

@@ -48,6 +48,12 @@ export function storyWorkspaceDreamAgentShouldPollBusy(
     && !snapshot.canSend;
 }
 
+export function storyWorkspaceDreamAgentShouldPollSettlement(
+  snapshot: Pick<StoryWorkspaceDreamAgentMessageSnapshot, 'lifecycle'> | null | undefined,
+): boolean {
+  return snapshot?.lifecycle === 'streaming';
+}
+
 export function storyWorkspaceDreamAgentHasSettledMessage(
   snapshot: StoryWorkspaceDreamAgentMessageSnapshot | null | undefined,
   messageId: string,
@@ -815,6 +821,8 @@ export interface StoryWorkspaceDreamAgentViewModel {
   readonly isReconnecting: boolean;
   readonly error: Error | null;
   readonly unreadCount: number;
+  /** View-local invalidation signal emitted after a terminal turn is durably reconciled. */
+  readonly settledRevision: number;
   readonly refresh: () => void;
   readonly markRead: () => void;
   readonly send: (text: string, idempotencyKey: string) => Promise<boolean>;
@@ -836,6 +844,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   const [error, setError] = useState<Error | null>(null);
   const [readThroughId, setReadThroughId] = useState<string | null>(null);
   const [readStreamTurnId, setReadStreamTurnId] = useState<string | null>(null);
+  const [settledRevision, setSettledRevision] = useState(0);
   const inFlight = useRef(false);
   const toolConfirmationInFlight = useRef(false);
   const activeTurnIdRef = useRef<string | null>(null);
@@ -847,6 +856,7 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   useEffect(() => {
     if (!runId) {
       setSnapshot(null); setStreamText(''); setStreamContent([]); setStreamTurnId(null); setPendingToolConfirmations([]); setIsLoading(false);
+      setSettledRevision(0);
       activeTurnIdRef.current = null;
       confirmationMutationRevisionRef.current = 0;
       confirmationMutationsRef.current = [];
@@ -866,9 +876,17 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     let latestCursor: string | null = null;
     let latestTurnId: string | null = null;
     let latestSnapshot: StoryWorkspaceDreamAgentMessageSnapshot | null = null;
+    let terminalReconcileInFlight = false;
     const seenCursors = new Set<string>();
+    const settledTurnKeys = new Set<string>();
     const controller = new AbortController();
+    const markSettled = (key: string | null | undefined) => {
+      if (!active || !key || settledTurnKeys.has(key)) return;
+      settledTurnKeys.add(key);
+      setSettledRevision((value) => value + 1);
+    };
     const reconcile = async () => {
+      const previousSnapshot = latestSnapshot;
       const previousActiveTurnId = latestTurnId ?? latestSnapshot?.activeTurnId ?? null;
       const mutationRevisionAtRequest = confirmationMutationRevisionRef.current;
       const next = await storyWorkspaceFetchDreamAgentSnapshot(runId, { signal: controller.signal });
@@ -898,6 +916,15 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       activeTurnIdRef.current = latestTurnId;
       latestSnapshot = next;
       setSnapshot(next);
+      const terminalGateObserved = next.lifecycle === 'idle'
+        && next.activeTurnId === null
+        && (next.sendBlockReason === 'waiting_confirmation'
+          || next.sendBlockReason === 'continuing');
+      if ((previousSnapshot?.lifecycle === 'streaming' && next.lifecycle === 'idle')
+        || (previousSnapshot === null && terminalGateObserved)) {
+        markSettled(previousActiveTurnId
+          ?? next.messages.filter((message) => message.role === 'assistant').at(-1)?.id);
+      }
       const tombstonesBeforeObservation = [
         ...resolvedToolConfirmationKeysRef.current,
       ];
@@ -918,12 +945,15 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       return next;
     };
     const reconcileTerminal = async () => {
+      const terminalTurnId = latestTurnId ?? latestSnapshot?.activeTurnId ?? null;
       const beforeIds = new Set(latestSnapshot?.messages.filter((message) => message.role === 'assistant').map((message) => message.id));
       for (let attempt = 0; attempt < 4; attempt += 1) {
         const next = await reconcile();
         const persisted = next?.messages.some((message) => message.role === 'assistant' && !beforeIds.has(message.id));
         if (persisted || attempt === 3 || !active) {
           setStreamText(''); setStreamContent([]); setStreamTurnId(null);
+          markSettled(terminalTurnId
+            ?? next?.messages.filter((message) => message.role === 'assistant').at(-1)?.id);
           return next;
         }
         await new Promise<void>((resolve) => { setTimeout(resolve, 150 * (attempt + 1)); });
@@ -942,11 +972,15 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       candidate: StoryWorkspaceDreamAgentMessageSnapshot | null | undefined,
     ) => {
       clearBusyPollTimer();
-      if (!active || !storyWorkspaceDreamAgentShouldPollBusy(candidate)) return;
+      if (!active || (!storyWorkspaceDreamAgentShouldPollBusy(candidate)
+        && !storyWorkspaceDreamAgentShouldPollSettlement(candidate))) return;
       busyPollTimer = setTimeout(() => {
         busyPollTimer = null;
         void reconcile().then((next) => {
-          if (next?.lifecycle === 'streaming') connect();
+          if (next?.lifecycle === 'streaming') {
+            if (!streamController) connect();
+            scheduleBusyPoll(next);
+          }
           else scheduleBusyPoll(next);
         }).catch((reason: unknown) => {
           if (active && reason instanceof Error && reason.name !== 'AbortError') setError(reason);
@@ -971,7 +1005,10 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       reconnectTimer = setTimeout(() => {
         reconnectTimer = null;
         void reconcile().then((next) => {
-          if (next?.lifecycle === 'streaming') connect();
+          if (next?.lifecycle === 'streaming') {
+            connect();
+            scheduleBusyPoll(next);
+          }
           else if (active) {
             setIsReconnecting(false);
             scheduleBusyPoll(next);
@@ -1058,14 +1095,19 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
       }
       if (parsed.type === 'assistant_message_committed'
         || (parsed.type === 'status' && parsed.lifecycle === 'idle')) {
+        if (terminalReconcileInFlight) return;
+        terminalReconcileInFlight = true;
         setPendingToolConfirmations([]);
         streamController?.abort(); streamController = null;
         void reconcileTerminal().then((next) => {
-          if (next?.lifecycle === 'streaming') connect();
+          if (next?.lifecycle === 'streaming') {
+            connect();
+            scheduleBusyPoll(next);
+          }
           else scheduleBusyPoll(next);
         }).catch((reason: unknown) => {
           if (active && reason instanceof Error && reason.name !== 'AbortError') { setError(reason); scheduleReconnect(); }
-        });
+        }).finally(() => { terminalReconcileInFlight = false; });
       }
     };
     const connect = () => {
@@ -1089,7 +1131,10 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
     };
     setIsLoading(true);
     void reconcile().then((next) => {
-      if (next?.lifecycle === 'streaming') connect();
+      if (next?.lifecycle === 'streaming') {
+        connect();
+        scheduleBusyPoll(next);
+      }
       else scheduleBusyPoll(next);
     }).catch((reason: unknown) => {
       if (active && reason instanceof Error && reason.name !== 'AbortError') { setError(reason); scheduleReconnect(); }
@@ -1179,6 +1224,6 @@ export function useStoryWorkspaceDreamAgent(runId: string | null | undefined): S
   return {
     snapshot, streamText, streamContent, streamTurnId, pendingToolConfirmation,
     isLoading, isSending, isConfirmingTool, isReconnecting, error, unreadCount,
-    refresh, markRead, send, confirmTool,
+    settledRevision, refresh, markRead, send, confirmTool,
   };
 }

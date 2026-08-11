@@ -176,6 +176,10 @@ class AgentRunOptions:
     # Required when the Admin Gateway Claude canary is enabled; never accepted
     # from a browser header or model payload.
     canonical_user_id: Optional[str] = None
+    # Server-derived stable key that correlates one persisted Dream message
+    # with exactly one Admin Gateway settlement. Never accept the raw header
+    # value from a browser request.
+    gateway_idempotency_key: Optional[str] = None
     # Whether to resume an existing conversation.
     resume: bool = False
     # Model to use.

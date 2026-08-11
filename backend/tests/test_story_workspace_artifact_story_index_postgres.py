@@ -45,6 +45,7 @@ REQUIRED_INDEX_COLUMNS = frozenset(
         "source_thread_ref",
         "source_project_id",
         "episode_count",
+        "artifact_status",
         "artifact_manifest_revision",
         "script_revision",
         "artifact_sync_status",
@@ -74,6 +75,7 @@ EXPECTED_PUBLIC_STORY_COLUMNS = (
     "source_run_id",
     "source_project_id",
     "episode_count",
+    "artifact_status",
     "artifact_manifest_revision",
     "script_revision",
     "artifact_sync_status",
@@ -163,7 +165,12 @@ class _FakeRepositoryDB:
                         ],
                         "key_count": self.identity_key_count,
                         "all_direct_columns": self.identity_key_all_direct,
-                        "is_full_index": self.identity_key_full,
+                        "predicate": (
+                            "(artifact_source_type IS NOT NULL) AND "
+                            "(source_project_id IS NOT NULL)"
+                            if self.identity_key_full
+                            else None
+                        ),
                     }
                 ]
                 if self.identity_key_available
@@ -214,7 +221,8 @@ class _FakeRepositoryDB:
                 "artifact_indexed_at": timestamp,
                 "artifact_sync_error_code": None,
                 "script_size_bytes": params[12],
-                "artifact_available": params[13],
+                "artifact_status": params[13],
+                "artifact_available": params[14],
                 "reconcile_version": 1,
                 "review_notes": None,
                 "confirmed_at": None,
@@ -226,7 +234,7 @@ class _FakeRepositoryDB:
             self.stories.append(story)
             return _Rows([story], rowcount=1)
         if upper.startswith("UPDATE STORY_WORKSPACE_STORIES SET"):
-            story = next(item for item in self.stories if item["id"] == params[8])
+            story = next(item for item in self.stories if item["id"] == params[13])
             timestamp = self._timestamp()
             story.update(
                 {
@@ -240,11 +248,21 @@ class _FakeRepositoryDB:
                     "artifact_indexed_at": timestamp,
                     "artifact_sync_error_code": None,
                     "script_size_bytes": params[6],
-                    "artifact_available": params[7],
+                    "artifact_status": params[7],
+                    "artifact_available": params[8],
                     "reconcile_version": 1,
                     "updated_at": timestamp,
                 }
             )
+            if (
+                story.get("status") == "published"
+                and (
+                    story.get("reviewed_script_revision") != params[9]
+                    or params[10] != "available"
+                )
+            ):
+                story["status"] = "draft"
+                story["published_at"] = None
             return _Rows([story], rowcount=1)
         raise AssertionError(f"Unexpected repository SQL: {rendered}")
 
@@ -387,6 +405,7 @@ def _record(**changes: Any) -> ArtifactStoryIndexRecord:
         "artifact_sync_error_code": None,
         "episode_count": 1,
         "script_size_bytes": 512,
+        "artifact_status": "available",
         "artifact_available": True,
         "reconcile_version": 1,
     }
@@ -577,7 +596,7 @@ def test_same_revision_repairs_retryable_index_metadata_drift() -> None:
     assert story["reconcile_version"] == 1
 
 
-def test_new_revision_updates_same_id_but_not_review_history_or_content() -> None:
+def test_new_revision_updates_same_id_preserves_review_history_and_demotes_publish() -> None:
     db = _FakeRepositoryDB()
     repository = ArtifactStoryIndexRepository(db)
     created = repository.upsert(_projection())
@@ -612,11 +631,11 @@ def test_new_revision_updates_same_id_but_not_review_history_or_content() -> Non
     assert story["artifact_manifest_revision"] == NEXT_MANIFEST_REVISION
     assert story["script_revision"] == NEXT_SCRIPT_REVISION
     assert story["reconcile_version"] == 1
-    assert story["status"] == "published"
+    assert story["status"] == "draft"
     assert story["review_status"] == "confirmed"
     assert story["review_notes"] == "Admin-owned note"
     assert story["confirmed_at"] == "confirmed"
-    assert story["published_at"] == "published"
+    assert story["published_at"] is None
     assert story["reviewed_script_revision"] == SCRIPT_REVISION
     assert story["content"] == "legacy content that the projector must preserve"
 
@@ -628,10 +647,9 @@ def test_new_revision_updates_same_id_but_not_review_history_or_content() -> Non
     for forbidden_assignment in (
         "content =",
         "review_status =",
-        "review_notes =",
-        "confirmed_at =",
-        "published_at =",
-        "reviewed_script_revision =",
+            "review_notes =",
+            "confirmed_at =",
+            "reviewed_script_revision =",
     ):
         assert forbidden_assignment not in update_sql
 
@@ -1210,12 +1228,12 @@ def test_postgres_create_noop_update_and_conflict_are_rollback_only(
         (projection.story_id,),
     ).fetchone()
     assert protected is not None
-    assert protected["status"] == "published"
+    assert protected["status"] == "draft"
     assert protected["review_status"] == "confirmed"
     assert protected["review_notes"] == "Admin-owned note"
     assert protected["content"] == "legacy content"
     assert protected["confirmed_at"] is not None
-    assert protected["published_at"] is not None
+    assert protected["published_at"] is None
     assert protected["reviewed_script_revision"] == SCRIPT_REVISION
     assert protected["reconcile_version"] == 1
     assert protected["source_run_id"] == NEXT_RUN_ID

@@ -49,6 +49,7 @@ APPROVED_TARGET_COLUMN_EXTENSIONS: Final = {
         ("source_thread_ref", "text"),
         ("source_project_id", "text"),
         ("episode_count", "integer"),
+        ("artifact_status", "text"),
         ("artifact_manifest_revision", "text"),
         ("script_revision", "text"),
         ("artifact_sync_status", "text"),
@@ -75,7 +76,7 @@ APPROVED_TARGET_INDEX_EXTENSIONS: Final = {
     ),
 }
 APPROVED_TARGET_CHECK_COUNT_EXTENSIONS: Final = {
-    "story_workspace_stories": 8,
+    "story_workspace_stories": 13,
 }
 # The long-lived SQLite source evolved through ALTER TABLE. Physical column
 # order is therefore not a semantic contract: every migration query names its

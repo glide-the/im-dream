@@ -938,6 +938,13 @@ def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> 
     present_keys = [key for key in _CLAUDE_SDK_ENV_KEYS if bool(env.get(key))]
     missing_keys = [key for key in _CLAUDE_SDK_ENV_KEYS if not env.get(key)]
     has_auth_key = any(bool(env.get(key)) for key in _CLAUDE_SDK_AUTH_ENV_KEYS)
+    if not has_auth_key:
+        try:
+            from services.admin_gateway.sdk import gateway_sdk_helper_is_configured
+
+            has_auth_key = gateway_sdk_helper_is_configured(sdk_options)
+        except (ImportError, RuntimeError, TypeError, ValueError):
+            has_auth_key = False
 
     if not has_auth_key:
         logger.warning(
@@ -949,7 +956,8 @@ def _verify_claude_sdk_env_for_query_stream(sdk_options: ClaudeAgentOptions) -> 
         )
         raise RuntimeError(
             f"Claude SDK has no auth key in subprocess env; "
-            f"expected one of {_CLAUDE_SDK_AUTH_ENV_KEYS!r}. "
+            f"expected one of {_CLAUDE_SDK_AUTH_ENV_KEYS!r} or the "
+            "server-owned Gateway apiKeyHelper. "
             f"present_keys={present_keys!r} env_count={len(env)}"
         )
 
@@ -2733,6 +2741,7 @@ class ClaudeAgentRunner:
         apply_gateway_sdk_env_to_options(
             sdk_options,
             opts.canonical_user_id,
+            gateway_idempotency_key=opts.gateway_idempotency_key,
         )
         existing_extra_args = getattr(sdk_options, "extra_args", None)
         sdk_options.extra_args = dict(existing_extra_args or {})

@@ -12,6 +12,7 @@ import {
   storyWorkspaceDreamAgentHasSettledMessage,
   storyWorkspaceDreamAgentEventsEndpoint,
   storyWorkspaceFetchDreamAgentSnapshot,
+  storyWorkspaceDreamAgentShouldPollSettlement,
   storyWorkspaceDreamAgentShouldPollBusy,
   storyWorkspaceReadDreamAgentEventStream,
   storyWorkspaceParseDreamAgentEvent,
@@ -58,6 +59,12 @@ test('idle busy snapshots request low-frequency REST reconciliation without trea
   })).toBe(false);
   expect(ADAPTER_SOURCE).toContain('void reconcile()');
   expect(ADAPTER_SOURCE).not.toMatch(/setTimeout\([^)]*setSnapshot\([^)]*canSend/s);
+});
+
+test('streaming snapshots keep a REST settlement watchdog when SSE has no terminal frame', () => {
+  expect(storyWorkspaceDreamAgentShouldPollSettlement({ lifecycle: 'streaming' })).toBe(true);
+  expect(storyWorkspaceDreamAgentShouldPollSettlement({ lifecycle: 'idle' })).toBe(false);
+  expect(ADAPTER_SOURCE).toContain('storyWorkspaceDreamAgentShouldPollSettlement(candidate)');
 });
 
 test('accepted action settles from its persisted user message and an authoritative idle send gate', () => {

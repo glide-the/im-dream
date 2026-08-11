@@ -37,8 +37,15 @@ export async function loadChatHistoryThenRuntimeStatus<T>(
   loadHistory: () => Promise<T>,
   loadStatus: () => Promise<ChatThreadStatusResult | null>,
 ): Promise<{ history: T; status: ChatThreadStatusResult | null }> {
-  const history = await loadHistory();
+  let history = await loadHistory();
   const status = await loadStatus();
+  // A turn can finish after the first history read but before the status read.
+  // Once idle is observed, persistence is stable; read once more so opening
+  // Chat from Dream cannot miss the just-completed assistant turn and then
+  // skip SSE reconnect because the runtime is already idle.
+  if (status?.lifecycle === 'idle') {
+    history = await loadHistory();
+  }
   return { history, status };
 }
 

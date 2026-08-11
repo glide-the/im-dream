@@ -14,12 +14,15 @@ from datetime import UTC, datetime
 import os
 import re
 from typing import Any
+from unittest import mock
 
 import psycopg
 from psycopg import sql
 from psycopg.pq import TransactionStatus
 from psycopg.rows import dict_row
 import pytest
+
+import database as legacy_database
 
 from backend.models.deck_plugin import InstallationStatus
 from backend.models.events import CanonicalEventType, EventEnvelope
@@ -28,13 +31,9 @@ from backend.services.events.event_emitter import EventEmitter
 from backend.services.story_workspace.dream_reentry_service import (
     StoryWorkspaceDreamReentryService,
 )
+from backend.persistence.config import require_test_database_target
 
 
-_EXPECTED_TEST_DATABASE_URL = (
-    "postgresql://postgres@127.0.0.1:55439/"
-    "ink_memory_dream_empty_codex_test"
-)
-_EXPECTED_DATABASE_NAME = "ink_memory_dream_empty_codex_test"
 _INSTALLATION_ID = "dpi_11111111111111111111111111111111"
 _CORE_EMPTY_TABLES = (
     "users",
@@ -45,6 +44,8 @@ _CORE_EMPTY_TABLES = (
     "chat_thread",
     "chat_message",
     "events",
+    "decks",
+    "voices",
 )
 _FORBIDDEN_MUTATION = re.compile(
     r"^\s*(?:DROP|TRUNCATE|DELETE)\b",
@@ -121,6 +122,12 @@ class _RollbackOnlyServiceConnection:
         )
         self._savepoint = None
 
+    def close(self) -> None:
+        # Legacy database helpers own/close their connection.  The integration
+        # fixture owns the real PostgreSQL connection and rolls it back after
+        # every test, so expose the same interface without closing it early.
+        return None
+
     def _required_savepoint(self) -> str:
         if self._savepoint is None:
             raise RuntimeError("service transaction has not started")
@@ -144,10 +151,10 @@ class _PostgresCase:
 
 @pytest.fixture
 def postgres_case() -> Any:
-    test_database_url = os.environ.get("TEST_DATABASE_URL")
-    if test_database_url is None:
+    if os.environ.get("TEST_DATABASE_URL") is None:
         pytest.skip("set the explicit TEST_DATABASE_URL to run real PostgreSQL checks")
-    assert test_database_url == _EXPECTED_TEST_DATABASE_URL
+    target = require_test_database_target()
+    test_database_url = target.dsn
 
     observer = psycopg.connect(
         test_database_url,
@@ -166,7 +173,7 @@ def postgres_case() -> Any:
             "SELECT current_database() AS database_name"
         ).fetchone()
         assert identity is not None
-        assert identity["database_name"] == _EXPECTED_DATABASE_NAME
+        assert identity["database_name"] == target.database_name
         assert _row_counts(observer) == expected_empty
 
         connection.execute("BEGIN")
@@ -301,3 +308,62 @@ def test_dream_reentry_jsonb_queries_execute_on_real_postgres(
         _CORE_EMPTY_TABLES,
         0,
     )
+
+
+def test_legacy_voice_fork_binds_native_postgres_booleans(
+    postgres_case: _PostgresCase,
+) -> None:
+    postgres_case.expect_rows(users=1, decks=1, voices=2)
+    postgres_case.db.execute(
+        "INSERT INTO users (id, email, password_hash) VALUES (%s, %s, %s)",
+        (7, "voice-fork-pg@example.test", "test-only"),
+    )
+    postgres_case.db.execute(
+        """
+        INSERT INTO decks (id, name, owner_id, is_system, enabled)
+        VALUES (%s, %s, %s, %s, %s)
+        """,
+        ("deck-pg-voice-fork", "PostgreSQL Voice Fork", 7, False, True),
+    )
+    postgres_case.db.execute(
+        """
+        INSERT INTO voices (
+            id, deck_id, name, system_prompt, is_system, owner_id,
+            enabled, order_index, memory_workspace_config
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            "voice-pg-source",
+            "deck-pg-voice-fork",
+            "Source Voice",
+            "Source prompt",
+            True,
+            7,
+            True,
+            1,
+            "{}",
+        ),
+    )
+
+    postgres_case.db.begin_service_scope()
+    with mock.patch.object(legacy_database, "get_db", return_value=postgres_case.db):
+        forked_voice_id = legacy_database.fork_voice(
+            7,
+            "voice-pg-source",
+            "deck-pg-voice-fork",
+        )
+
+    row = postgres_case.db.execute(
+        """
+        SELECT is_system, enabled, parent_id, owner_id, order_index
+        FROM voices WHERE id = %s
+        """,
+        (forked_voice_id,),
+    ).fetchone()
+    assert row == {
+        "is_system": False,
+        "enabled": True,
+        "parent_id": "voice-pg-source",
+        "owner_id": 7,
+        "order_index": 2,
+    }

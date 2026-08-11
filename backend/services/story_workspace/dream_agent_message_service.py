@@ -42,6 +42,11 @@ try:
     from services.story_workspace.dream_confirmation_service import (
         story_workspace_read_dream_confirmation_fact,
     )
+    from services.story_workspace.dream_stream_adapter import (
+        DreamStreamAdapter,
+        iter_dream_run_events,
+        iter_dream_subscription_events,
+    )
 except ModuleNotFoundError:
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamAgentMessage,
@@ -62,6 +67,11 @@ except ModuleNotFoundError:
     )
     from backend.services.story_workspace.dream_confirmation_service import (
         story_workspace_read_dream_confirmation_fact,
+    )
+    from backend.services.story_workspace.dream_stream_adapter import (
+        DreamStreamAdapter,
+        iter_dream_run_events,
+        iter_dream_subscription_events,
     )
 
 
@@ -578,29 +588,6 @@ def _fingerprint(actor_id: str, run_id: str, command: StoryWorkspaceDreamAgentMe
     return "sha256:" + hashlib.sha256(
         _json({"actor": actor_id, "run": run_id, "text": command.text, "key": command.idempotency_key}).encode()
     ).hexdigest()
-
-
-def _parse_sse(frame: str) -> tuple[str, dict[str, Any]] | None:
-    event = "message"
-    raw_data: list[str] = []
-    for line in frame.splitlines():
-        if line.startswith("event:"):
-            event = line[6:].strip()
-        elif line.startswith("data:"):
-            raw_data.append(line[5:].strip())
-    if not raw_data:
-        return None
-    try:
-        data = json.loads("\n".join(raw_data))
-    except ValueError:
-        return None
-    return (event, data) if isinstance(data, dict) else None
-
-
-def _has_data_frame(frame: str) -> bool:
-    """Whether an upstream SSE frame consumes one stable raw ordinal."""
-
-    return any(line.startswith("data:") for line in frame.splitlines())
 
 
 def _dream_public_cursor_position(
@@ -1445,8 +1432,11 @@ class StoryWorkspaceDreamAgentMessageService:
         turn_id, _runtime_pending_ids, _runtime_pending_observation = trusted_turn
         after_position = _dream_public_cursor_position(after, turn_id=turn_id)
 
-        def cursor_consumed(raw_ordinal: int, subevent: int = 0) -> bool:
-            return (raw_ordinal, subevent) <= after_position
+        def cursor_consumed(
+            raw_ordinal: int,
+            subevent: int | None = None,
+        ) -> bool:
+            return (raw_ordinal, 0 if subevent is None else subevent) <= after_position
 
         async def observe_runtime_confirmation() -> tuple[str, list[str], str] | None:
             observation: tuple[str, list[str], str] | None = None
@@ -1473,10 +1463,15 @@ class StoryWorkspaceDreamAgentMessageService:
         pending_tool_call_ids: set[str] = set()
         activity_tool_names: dict[str, str] = {}
         started_activity_ids: set[str] = set()
-        public_text_pending = ""
-        public_text_redacted = False
-        public_text_redaction_emitted = False
-        public_text_emitted_chars = 0
+        stream_adapter = DreamStreamAdapter(
+            turn_id=turn_id,
+            public_text_projection=_public_text_projection,
+            public_text_is_sensitive=_public_text_is_sensitive,
+            incremental_text_split=_incremental_public_text_split,
+            redaction_text=_DREAM_PUBLIC_TEXT_REDACTION,
+            max_text_length=STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX,
+            max_pending_length=_DREAM_PUBLIC_TEXT_STREAM_MAX_PENDING,
+        )
         if not _retain_dream_public_confirmation_turn(
             self._thread_factory,
             thread_id=thread_id,
@@ -1493,31 +1488,24 @@ class StoryWorkspaceDreamAgentMessageService:
             # proves intermediary/proxy connections remain alive without leaking a
             # generic Claude Agent frame.
             yield ": keepalive\n\n"
-            subscribe_expected = getattr(
+            stream = iter_dream_subscription_events(
                 self._thread_factory,
-                "subscribe_expected_stream",
-                None,
+                thread_id=thread_id,
+                expected_turn_id=turn_id,
             )
-            stream = (
-                subscribe_expected(thread_id, turn_id)
-                if callable(subscribe_expected)
-                else self._thread_factory.subscribe_stream(thread_id)
-            )
-            async for frame in stream:
-                if isinstance(frame, str) and frame.lstrip().startswith(":"):
-                    yield ": keepalive\n\n"
-                    continue
-                if not isinstance(frame, str) or not _has_data_frame(frame):
+            async for event in stream:
+                if event.is_keepalive:
+                    adaptation = stream_adapter.adapt(
+                        event,
+                        ordinal=ordinal,
+                        cursor_consumed=cursor_consumed,
+                    )
+                    for output_frame in adaptation.frames:
+                        yield output_frame
                     continue
                 ordinal += 1
-                parsed = _parse_sse(frame)
-                if parsed is None:
-                    continue
-                _event, data = parsed
-                frame_type = data.get("type")
-                if frame_type == "finish":
-                    terminal = True
-                    break
+                data = event.payload()
+                frame_type = event.type
                 if frame_type in {"tool-input-start", "tool-input-available"}:
                     tool_call_id = _safe_tool_call_id(data.get("toolCallId"))
                     tool_name = data.get("toolName")
@@ -1653,91 +1641,16 @@ class StoryWorkspaceDreamAgentMessageService:
                             f"data: {_json(payload)}\n\n"
                         )
                     continue
-                if frame_type == "message-final":
+                adaptation = stream_adapter.adapt(
+                    event,
+                    ordinal=ordinal,
+                    cursor_consumed=cursor_consumed,
+                )
+                for output_frame in adaptation.frames:
+                    yield output_frame
+                if adaptation.terminal:
                     terminal = True
-                    payload = {"turnId": turn_id}
-                    final_text = ""
-                    if not public_text_redacted:
-                        public_text, _truncated, text_is_redacted = (
-                            _public_text_projection(public_text_pending)
-                        )
-                        if text_is_redacted:
-                            public_text_redacted = True
-                            public_text_pending = ""
-                            if not public_text_redaction_emitted:
-                                final_text = _DREAM_PUBLIC_TEXT_REDACTION
-                                public_text_redaction_emitted = True
-                        else:
-                            remaining = max(
-                                0,
-                                STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX
-                                - public_text_emitted_chars,
-                            )
-                            final_text = public_text[:remaining]
-                            public_text_emitted_chars += len(final_text)
-                            public_text_pending = ""
-                    if final_text:
-                        if not cursor_consumed(ordinal, 0):
-                            text_payload = {"turnId": turn_id, "delta": final_text}
-                            yield (
-                                f"id: {turn_id}:{ordinal}:0\n"
-                                f"event: assistant_text_delta\n"
-                                f"data: {_json(text_payload)}\n\n"
-                            )
-                        if not cursor_consumed(ordinal, 1):
-                            yield (
-                                f"id: {turn_id}:{ordinal}:1\n"
-                                f"event: assistant_message_committed\n"
-                                f"data: {_json(payload)}\n\n"
-                            )
-                    elif not cursor_consumed(ordinal):
-                        yield f"id: {turn_id}:{ordinal}\nevent: assistant_message_committed\ndata: {_json(payload)}\n\n"
                     break
-                if frame_type == "text-delta" and isinstance(data.get("delta"), str):
-                    if public_text_redacted:
-                        continue
-                    public_text_pending += data["delta"]
-                    text_is_sensitive = (
-                        len(public_text_pending)
-                        > _DREAM_PUBLIC_TEXT_STREAM_MAX_PENDING
-                        or _public_text_is_sensitive(public_text_pending)
-                    )
-                    if text_is_sensitive:
-                        public_text_redacted = True
-                        public_text_pending = ""
-                        if not public_text_redaction_emitted:
-                            public_text_redaction_emitted = True
-                            if not cursor_consumed(ordinal):
-                                text_payload = {
-                                    "turnId": turn_id,
-                                    "delta": _DREAM_PUBLIC_TEXT_REDACTION,
-                                }
-                                yield (
-                                    f"id: {turn_id}:{ordinal}\n"
-                                    f"event: assistant_text_delta\n"
-                                    f"data: {_json(text_payload)}\n\n"
-                                )
-                        continue
-                    public_prefix, public_text_pending = (
-                        _incremental_public_text_split(public_text_pending)
-                    )
-                    remaining = max(
-                        0,
-                        STORY_WORKSPACE_DREAM_AGENT_MESSAGE_TEXT_MAX
-                        - public_text_emitted_chars,
-                    )
-                    public_prefix = public_prefix[:remaining]
-                    public_text_emitted_chars += len(public_prefix)
-                    if public_prefix and not cursor_consumed(ordinal):
-                        text_payload = {
-                            "turnId": turn_id,
-                            "delta": public_prefix,
-                        }
-                        yield (
-                            f"id: {turn_id}:{ordinal}\n"
-                            f"event: assistant_text_delta\n"
-                            f"data: {_json(text_payload)}\n\n"
-                        )
         finally:
             _release_dream_public_confirmation_turn(
                 self._thread_factory,
@@ -1975,17 +1888,13 @@ class StoryWorkspaceDreamAgentMessageService:
             )
             saw_final = False
             finished = False
-            async for frame in self._thread_factory.run_streaming(request):
-                parsed = _parse_sse(frame) if isinstance(frame, str) else None
-                if parsed is None:
-                    continue
-                _event, event = parsed
-                if event.get("type") == "error":
+            async for event in iter_dream_run_events(self._thread_factory, request):
+                if event.type == "error":
                     break
-                if event.get("type") == "message-final":
+                if event.type == "message-final":
                     saw_final = True
-                if event.get("type") == "finish":
-                    finished = event.get("finishReason") != "error"
+                if event.type == "finish":
+                    finished = event.data.get("finishReason") != "error"
                     break
             if not (saw_final and finished):
                 self._release_claim(pending.message_id, pending.metadata["dispatch_claim_id"])
@@ -2064,8 +1973,20 @@ class StoryWorkspaceDreamAgentMessageService:
             ):
                 db.rollback()
                 return False
-            metadata["dispatch_status"] = "dispatched" if dispatched else "pending"
+            # A completed SDK stream is terminal success.  A stream error is
+            # terminal for this delivery attempt as well: automatically
+            # returning it to ``pending`` made every read-side 3s poll reclaim
+            # and re-run the same inference request indefinitely.  Crashed
+            # workers remain recoverable through an expired ``dispatching``
+            # lease; explicit user retries use a new idempotency key.
+            metadata["dispatch_status"] = "dispatched" if dispatched else "failed"
             metadata["dispatch_claim_lease_until"] = 0
+            if dispatched:
+                metadata.pop("dispatch_error_code", None)
+                metadata.pop("dispatch_failed_at", None)
+            else:
+                metadata["dispatch_error_code"] = "DREAM_AGENT_DISPATCH_FAILED"
+                metadata["dispatch_failed_at"] = datetime.now(UTC).isoformat()
             updated = db.execute(
                 "UPDATE chat_message SET metadata = %s WHERE id = %s AND metadata = %s",
                 (_json(metadata), message_id, previous_metadata),

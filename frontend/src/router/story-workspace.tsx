@@ -58,6 +58,7 @@ import {
   type StoryWorkspaceRouteMatch,
 } from './storyWorkspacePath';
 import { storyWorkspaceDreamWorkflowContext } from './storyWorkspaceDreamContext';
+import { storyWorkspaceDreamChatThread } from './storyWorkspaceChatBridge';
 
 export {
   resolveStoryWorkspacePath,
@@ -206,11 +207,19 @@ function renderStoryWorkspaceRoute(
 export interface StoryWorkspaceRouterProps {
   decksContent: ReactNode;
   legacyContent?: Partial<Record<'writing' | 'timeline' | 'analysis' | 'chat', ReactNode>>;
+  /** Reopen the actor-scoped Dream source thread before rendering legacy Chat. */
+  onChatThreadRequest?: (threadId: string) => void;
   onRouteChange?: (route: StoryWorkspaceRoute) => void;
   renderSettings?: (section: ReturnType<typeof storyWorkspaceSettingsSectionForRoute>, onNavigate: (path: string, notice?: string) => void) => ReactNode;
 }
 
-export function StoryWorkspaceRouter({ decksContent, legacyContent = {}, onRouteChange, renderSettings }: StoryWorkspaceRouterProps) {
+export function StoryWorkspaceRouter({
+  decksContent,
+  legacyContent = {},
+  onChatThreadRequest,
+  onRouteChange,
+  renderSettings,
+}: StoryWorkspaceRouterProps) {
   const [activeMatch, setActiveMatch] = useState<StoryWorkspaceRouteMatch>(
     () => resolveStoryWorkspacePath(window.location.pathname, window.location.search) ?? DEFAULT_MATCH,
   );
@@ -312,6 +321,13 @@ export function StoryWorkspaceRouter({ decksContent, legacyContent = {}, onRoute
     const navigation = storyWorkspaceNavigationTarget(pathname, search);
     if (!navigation) return;
 
+    const dreamThreadId = storyWorkspaceDreamChatThread(
+      activeMatch,
+      navigation.match.route,
+      runDeepLink.run,
+    );
+    if (dreamThreadId) onChatThreadRequest?.(dreamThreadId);
+
     const target = navigation.href;
     if (window.location.pathname + window.location.search !== target) {
       // Legacy canonicalization replaces; ordinary in-app navigation adds a history entry.
@@ -326,7 +342,7 @@ export function StoryWorkspaceRouter({ decksContent, legacyContent = {}, onRoute
     setActiveMatch(navigation.match);
     onRouteChange?.(navigation.match.route);
     setRouteNotice(notice ?? null);
-  }, [onRouteChange]);
+  }, [activeMatch, onChatThreadRequest, onRouteChange, runDeepLink.run]);
 
   // DEC-030: the execution page keeps the Dream entry selected in the app
   // chrome (it is a Dream surface page, not a fifth sidebar entry).

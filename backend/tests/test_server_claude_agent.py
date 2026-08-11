@@ -476,6 +476,18 @@ class TestClaudeAgentRouteWorkspaceMode(unittest.TestCase):
             response = asyncio.run(_call_route())
 
         self.assertEqual(response.media_type, "text/event-stream")
+        self.assertEqual(
+            response.headers["content-type"],
+            "text/event-stream; charset=utf-8",
+        )
+        self.assertEqual(
+            response.headers["cache-control"],
+            "no-cache, no-transform",
+        )
+        self.assertEqual(response.headers["x-accel-buffering"], "no")
+        self.assertEqual(response.headers["connection"], "keep-alive")
+        self.assertNotIn("content-length", response.headers)
+        self.assertNotIn("content-encoding", response.headers)
         get_or_create_workspace.assert_not_called()
         sync_attachments_to_workspace_files.assert_not_called()
 

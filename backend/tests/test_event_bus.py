@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import importlib.util
+from claude_agent.stream_events import NormalizedAgentEvent
 
 _EVENT_BUS_PATH = ROOT / "claude_agent" / "event_bus.py"
 _spec = importlib.util.spec_from_file_location("claude_agent_event_bus", _EVENT_BUS_PATH)
@@ -36,13 +37,13 @@ def _run(coro):
         asyncio.set_event_loop(None)
 
 
-async def _read_n(bus, token, count: int) -> list[str]:
-    frames: list[str] = []
-    async for frame in bus.read(token):
-        frames.append(frame)
-        if len(frames) >= count:
+async def _read_n(bus, token, count: int) -> list[NormalizedAgentEvent]:
+    events: list[NormalizedAgentEvent] = []
+    async for event in bus.read(token):
+        events.append(event)
+        if len(events) >= count:
             break
-    return frames
+    return events
 
 
 class TestInMemoryEventBus(unittest.TestCase):
@@ -50,10 +51,11 @@ class TestInMemoryEventBus(unittest.TestCase):
         async def _case():
             bus = InMemoryEventBus()
             token = await bus.subscribe()
-            await bus.publish('data: {"type":"text-delta"}\n\n')
+            event = NormalizedAgentEvent.create("text-delta")
+            await bus.publish(event)
             await bus.publish(None)
-            frames = [f async for f in bus.read(token)]
-            self.assertEqual(frames, ['data: {"type":"text-delta"}\n\n'])
+            events = [item async for item in bus.read(token)]
+            self.assertEqual(events, [event])
             self.assertTrue(bus.is_done)
 
         _run(_case())
@@ -61,11 +63,13 @@ class TestInMemoryEventBus(unittest.TestCase):
     def test_late_subscriber_replays_buffer(self):
         async def _case():
             bus = InMemoryEventBus()
-            await bus.publish("frame-1")
-            await bus.publish("frame-2")
+            first = NormalizedAgentEvent.create("test", {"value": "frame-1"})
+            second = NormalizedAgentEvent.create("test", {"value": "frame-2"})
+            await bus.publish(first)
+            await bus.publish(second)
             token = await bus.subscribe()
-            frames = await _read_n(bus, token, 2)
-            self.assertEqual(frames, ["frame-1", "frame-2"])
+            events = await _read_n(bus, token, 2)
+            self.assertEqual(events, [first, second])
 
         _run(_case())
 
@@ -74,10 +78,11 @@ class TestInMemoryEventBus(unittest.TestCase):
             bus = InMemoryEventBus()
             token = await bus.subscribe()
             await bus.unsubscribe(token)
-            await bus.publish("after-unsub")
+            event = NormalizedAgentEvent.create("test", {"value": "after-unsub"})
+            await bus.publish(event)
             token2 = await bus.subscribe()
-            frames = await _read_n(bus, token2, 1)
-            self.assertEqual(frames, ["after-unsub"])
+            events = await _read_n(bus, token2, 1)
+            self.assertEqual(events, [event])
             await bus.publish(None)
 
         _run(_case())
@@ -96,13 +101,14 @@ class TestInMemoryEventBus(unittest.TestCase):
 
             task = asyncio.create_task(_collect(t1))
 
-            await bus.publish("live-1")
+            event = NormalizedAgentEvent.create("test", {"value": "live-1"})
+            await bus.publish(event)
             await bus.publish(None)
 
-            frames1 = await task
-            frames2 = [f async for f in bus.read(t2)]
-            self.assertEqual(frames1, ["live-1"])
-            self.assertEqual(frames2, ["live-1"])
+            events1 = await task
+            events2 = [item async for item in bus.read(t2)]
+            self.assertEqual(events1, [event])
+            self.assertEqual(events2, [event])
 
         _run(_case())
 
@@ -111,10 +117,11 @@ class TestInMemoryEventBus(unittest.TestCase):
             bus = InMemoryEventBus()
             proxy = BusProxyQueue(bus)
             token = await bus.subscribe()
-            await proxy.put("via-proxy")
+            event = NormalizedAgentEvent.create("test", {"value": "via-proxy"})
+            await proxy.put(event)
             await proxy.put(None)
-            frames = [f async for f in bus.read(token)]
-            self.assertEqual(frames, ["via-proxy"])
+            events = [item async for item in bus.read(token)]
+            self.assertEqual(events, [event])
 
         _run(_case())
 

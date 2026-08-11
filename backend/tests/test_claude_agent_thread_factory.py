@@ -905,7 +905,7 @@ class TestAssembleContextFailure(unittest.TestCase):
         )
         req = _make_request("user_pack_fail_1")
         frames = self._drain(req)
-        error_frames = [f for f in frames if '"type": "error"' in f]
+        error_frames = [f for f in frames if '"type":"error"' in f.replace(" ", "")]
         self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
         self.assertIn("WORKSPACE_PACK_DIGEST_MISMATCH", error_frames[0])
         self.assertIn("digest mismatch", error_frames[0])
@@ -914,7 +914,7 @@ class TestAssembleContextFailure(unittest.TestCase):
         self._fail_assemble(RuntimeError("kaboom"))
         req = _make_request("user_pack_fail_generic")
         frames = self._drain(req)
-        error_frames = [f for f in frames if '"type": "error"' in f]
+        error_frames = [f for f in frames if '"type":"error"' in f.replace(" ", "")]
         self.assertTrue(error_frames, f"expected an SSE error frame, got: {frames!r}")
         self.assertIn("kaboom", error_frames[0])
 
@@ -931,7 +931,7 @@ class TestAssembleContextFailure(unittest.TestCase):
         # Retry on the same session must NOT raise "already running";
         # it should run the turn again and emit another error frame.
         frames = self._drain(req)
-        error_frames = [f for f in frames if '"type": "error"' in f]
+        error_frames = [f for f in frames if '"type":"error"' in f.replace(" ", "")]
         self.assertTrue(
             error_frames,
             "retry after pack failure should emit a fresh error frame, "

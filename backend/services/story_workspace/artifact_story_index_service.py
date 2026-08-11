@@ -334,7 +334,7 @@ class ArtifactStoryIndexService:
             if (
                 record.artifact_indexed_at is None
                 or record.artifact_sync_error_code is not None
-                or record.artifact_available is not True
+                or record.artifact_status != "available"
                 or record.reconcile_version != 1
             ):
                 status = "stale"
@@ -367,7 +367,7 @@ class ArtifactStoryIndexService:
             "artifactManifestRevision": projection.artifact_manifest_revision,
             "scriptRevision": projection.script_revision,
             "scriptSizeBytes": projection.script_size_bytes,
-            "artifactAvailable": projection.artifact_available,
+            "artifactStatus": projection.artifact_status,
             "artifactSourceType": projection.artifact_source_type,
         }
         indexed_state: dict[str, object] | None = None
@@ -391,7 +391,7 @@ class ArtifactStoryIndexService:
                 "artifactSyncErrorCode": record.artifact_sync_error_code,
                 "episodeCount": record.episode_count,
                 "scriptSizeBytes": record.script_size_bytes,
-                "artifactAvailable": record.artifact_available,
+                "artifactStatus": record.artifact_status,
                 "reconcileVersion": record.reconcile_version,
             }
         etag_payload: dict[str, object] = {

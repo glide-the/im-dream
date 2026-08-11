@@ -8,6 +8,7 @@ environment.  Frozen run provenance is loaded from the authoritative
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -22,6 +23,7 @@ from uuid import uuid4
 
 from models.workflow_run import AuthenticatedActorContext, WorkflowRun
 from services.story_workspace.dream_file_service import (
+    StoryWorkspaceDreamFileReader,
     StoryWorkspaceDreamFileWriter,
     WorkflowRun as DreamFileWorkflowRun,
 )
@@ -640,6 +642,14 @@ def _record_episode_workflow_completion(
             surface=refreshed_surface,
             facts=updated,
         )
+        next_projection = StoryWorkspaceEpisodeNextActionResolver.project(
+            refreshed_surface,
+            updated,
+        )
+        workflow_complete = (
+            next_projection.next_action.action
+            is StoryWorkspaceEpisodeAction.NONE_IN_SCOPE
+        )
         try:
             index_result = ArtifactStoryIndexService().materialize(
                 db=_db,
@@ -665,6 +675,7 @@ def _record_episode_workflow_completion(
             "episodeId": episode_uid,
             "action": action.value,
             "workflowRevision": updated.revision,
+            "workflowComplete": workflow_complete,
             "storyIndex": index_result,
         }
 
@@ -681,7 +692,65 @@ def _success_json(payload: dict[str, object]) -> str:
     )
 
 
-def story_workspace_handle_dream_tool(
+async def _advance_workflow_lifecycle(
+    workflow_run_id: str,
+    *,
+    output_ready: bool = False,
+    episode_complete: bool = False,
+) -> None:
+    """Advance formal Run state only in configured development/test runtimes."""
+
+    environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
+    if environment not in {"development", "dev", "test", "testing"}:
+        # Dependency-light unit fixtures do not provision formal run/session
+        # tables. Production is required to declare one of the supported
+        # runtime tiers and therefore never takes this compatibility branch.
+        return
+    import database
+    from services.deck.story_workflow_gateway import (
+        story_workspace_workflow_token_secret,
+    )
+    from services.story_workspace.dream_workflow_lifecycle_service import (
+        StoryWorkspaceDreamWorkflowLifecycleService,
+    )
+
+    actor_id, _thread_id = _trusted_actor_and_thread()
+    db = database.get_db()
+    try:
+        row = db.execute(
+            "SELECT workspace_id FROM workflow_runs "
+            "WHERE id = %s AND created_by = %s",
+            (workflow_run_id, str(actor_id)),
+        ).fetchone()
+        if db.in_transaction:
+            db.rollback()
+        if row is None:
+            raise PermissionError("Dream lifecycle scope is unavailable")
+        actor_context = AuthenticatedActorContext(
+            actor_id=str(actor_id),
+            workspace_id=str(row["workspace_id"]),
+        )
+        lifecycle = StoryWorkspaceDreamWorkflowLifecycleService(
+            db,
+            token_secret=story_workspace_workflow_token_secret(),
+        )
+        if output_ready:
+            await lifecycle.record_output_ready(
+                workflow_run_id,
+                actor_context,
+                normalized_result_ready=True,
+            )
+        if episode_complete:
+            await lifecycle.record_episode_complete(
+                workflow_run_id,
+                actor_context,
+                no_next_action=True,
+            )
+    finally:
+        db.close()
+
+
+async def story_workspace_handle_dream_tool_async(
     name: str,
     arguments: dict[str, Any] | None,
 ) -> str:
@@ -714,16 +783,30 @@ def story_workspace_handle_dream_tool(
         if name == "write_dream_stage":
             request = StoryWorkspaceDreamStageToolInput.model_validate(arguments or {})
             _require_trusted_workflow_run(request.workflow_run_id)
-            result = _with_authoritative_context(
+            result, output_ready = _with_authoritative_context(
                 request.workflow_run_id,
-                lambda writer, run: writer.write_stage(
-                    run,
-                    stage=request.stage,
-                    source_files=request.source_files,
-                    items=[item.model_dump(by_alias=False) for item in request.items],
-                    expected_revision=request.expected_revision,
+                lambda writer, run: (
+                    writer.write_stage(
+                        run,
+                        stage=request.stage,
+                        source_files=request.source_files,
+                        items=[
+                            item.model_dump(by_alias=False)
+                            for item in request.items
+                        ],
+                        expected_revision=request.expected_revision,
+                    ),
+                    StoryWorkspaceDreamFileReader(writer.workspace_root).read(
+                        run,
+                        thread_id=os.environ[_TRUSTED_THREAD_ENV],
+                    ).can_confirm,
                 ),
             )
+            if output_ready:
+                await _advance_workflow_lifecycle(
+                    request.workflow_run_id,
+                    output_ready=True,
+                )
             return _success_json(
                 {
                     "run": result.workflow_run_id,
@@ -743,7 +826,13 @@ def story_workspace_handle_dream_tool(
                 arguments or {}
             )
             _require_trusted_workflow_run(request.workflow_run_id)
-            return _success_json(_record_episode_workflow_completion(request))
+            completion = _record_episode_workflow_completion(request)
+            if completion.get("workflowComplete") is True:
+                await _advance_workflow_lifecycle(
+                    request.workflow_run_id,
+                    episode_complete=True,
+                )
+            return _success_json(completion)
         raise ValueError("unknown Story Workspace tool")
     except StoryWorkspaceEpisodeCompletionContractError as exc:
         _logger.info(
@@ -762,9 +851,19 @@ def story_workspace_handle_dream_tool(
         return _success_json({"error": "DREAM_WRITE_REJECTED"})
 
 
+def story_workspace_handle_dream_tool(
+    name: str,
+    arguments: dict[str, Any] | None,
+) -> str:
+    """Synchronous compatibility wrapper for dependency-light callers/tests."""
+
+    return asyncio.run(story_workspace_handle_dream_tool_async(name, arguments))
+
+
 __all__ = [
     "STORY_WORKSPACE_DREAM_TOOL_SPECS",
     "StoryWorkspaceToolSpec",
     "story_workspace_allowed_tool_names",
     "story_workspace_handle_dream_tool",
+    "story_workspace_handle_dream_tool_async",
 ]

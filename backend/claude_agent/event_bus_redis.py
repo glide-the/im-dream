@@ -16,12 +16,12 @@ INK_AGENT_EVENT_BUS_TTL_S   3600                     (stream key expiry, seconds
 
 Redis key pattern
 -----------------
-ink:sse:{session_id}:{turn_id}
+ink:sse:{session_id}:{turn_id}  (name retained for rolling compatibility)
 
 Protocol
 --------
-- publish  → XADD ink:sse:{session}:{turn} * frame <data>
-             EXPIRE ink:sse:{session}:{turn} TTL_S
+- publish  → XADD the existing compatibility key with a versioned event payload
+             and refresh its TTL
 - subscribe → XRANGE (replay) + XREAD BLOCK (live)
 - sentinel  → published as the magic string "__sentinel__"
 - unsubscribe → no-op (stateless consumers)
@@ -35,6 +35,11 @@ import uuid
 from typing import AsyncIterator, Optional
 
 from claude_agent.event_bus import IEventBus
+from claude_agent.stream_events import (
+    NormalizedAgentEvent,
+    coerce_normalized_event,
+    normalized_event_from_legacy_chat_frame,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +63,8 @@ class RedisStreamEventBus(IEventBus):
     """
 
     def __init__(self, session_id: str, turn_id: str) -> None:
+        # Keep the historical key name during the wire-format migration so an
+        # in-flight turn remains reconnectable across a rolling deployment.
         self._key = f"ink:sse:{session_id}:{turn_id}"
         self._done_flag: bool = False
 
@@ -78,14 +85,18 @@ class RedisStreamEventBus(IEventBus):
     # IEventBus
     # ------------------------------------------------------------------
 
-    async def publish(self, frame: Optional[str]) -> None:
+    async def publish(self, event: Optional[NormalizedAgentEvent]) -> None:
         if self._done_flag:
             return
         r = await self._redis()
-        payload = frame if frame is not None else _SENTINEL_PAYLOAD
+        payload = (
+            coerce_normalized_event(event).to_wire_json()
+            if event is not None
+            else _SENTINEL_PAYLOAD
+        )
         await r.xadd(self._key, {"frame": payload})
         await r.expire(self._key, _STREAM_TTL)
-        if frame is None:
+        if event is None:
             self._done_flag = True
 
     async def subscribe(self) -> str:
@@ -100,7 +111,16 @@ class RedisStreamEventBus(IEventBus):
         # Stateless — no server-side cleanup required.
         pass
 
-    async def read(self, token: object) -> AsyncIterator[str]:  # type: ignore[override]
+    @staticmethod
+    def _decode_event(raw: str) -> NormalizedAgentEvent:
+        try:
+            return NormalizedAgentEvent.from_wire_json(raw)
+        except ValueError:
+            # Rolling-deploy compatibility for streams started by the previous
+            # Chat-SSE-as-EventBus implementation.
+            return normalized_event_from_legacy_chat_frame(raw)
+
+    async def read(self, token: object) -> AsyncIterator[NormalizedAgentEvent]:  # type: ignore[override]
         r = await self._redis()
 
         # 1. Replay history (XRANGE 0 +)
@@ -111,7 +131,7 @@ class RedisStreamEventBus(IEventBus):
             frame = data.get("frame")
             if frame == _SENTINEL_PAYLOAD:
                 return
-            yield frame
+            yield self._decode_event(frame)
 
         # 2. Live delivery (XREAD BLOCK)
         while True:
@@ -122,7 +142,7 @@ class RedisStreamEventBus(IEventBus):
                 # Timeout → emit keepalive
                 if self._done_flag:
                     break
-                yield ": keepalive\n\n"
+                yield NormalizedAgentEvent.keepalive()
                 continue
             for _stream_key, messages in results:
                 for msg_id, data in messages:
@@ -130,7 +150,7 @@ class RedisStreamEventBus(IEventBus):
                     frame = data.get("frame")
                     if frame == _SENTINEL_PAYLOAD:
                         return
-                    yield frame
+                    yield self._decode_event(frame)
 
     @property
     def is_done(self) -> bool:

@@ -5,6 +5,7 @@ import sys
 import os
 import sqlite3
 import unittest
+from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import database as db
@@ -273,6 +274,60 @@ def test_crud():
     print(f"User now has {len(final_decks)} decks")
 
     print("\n✅ All CRUD tests passed!")
+
+
+def test_fork_voice_binds_native_boolean_parameters():
+    class Result:
+        def __init__(self, row=None):
+            self.row = row
+
+        def fetchone(self):
+            return self.row
+
+    class Connection:
+        def __init__(self):
+            self.executions = []
+            self.committed = False
+            self.closed = False
+
+        def execute(self, statement, parameters=()):
+            self.executions.append((statement, parameters))
+            if "SELECT owner_id FROM decks" in statement:
+                return Result({"owner_id": 7})
+            if "SELECT * FROM voices" in statement:
+                return Result({
+                    "name": "Source",
+                    "name_zh": None,
+                    "name_en": None,
+                    "system_prompt": "Prompt",
+                    "icon": "spark",
+                    "color": "blue",
+                    "memory_workspace_config": "{}",
+                })
+            if "SELECT MAX(order_index)" in statement:
+                return Result({"max_order": 2})
+            return Result()
+
+        def commit(self):
+            self.committed = True
+
+        def close(self):
+            self.closed = True
+
+    connection = Connection()
+    with mock.patch.object(db, "get_db", return_value=connection):
+        voice_id = db.fork_voice(7, "source-voice", "target-deck")
+
+    insert = next(
+        parameters
+        for statement, parameters in connection.executions
+        if "INSERT INTO voices" in statement
+    )
+    assert insert[0] == voice_id
+    assert insert[8] is False
+    assert insert[11] is True
+    assert connection.committed is True
+    assert connection.closed is True
 
 
 class StoryWorkspaceDatabaseTestCase(unittest.TestCase):

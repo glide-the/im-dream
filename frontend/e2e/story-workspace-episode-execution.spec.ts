@@ -22,6 +22,8 @@ const QUEUE_ID = '2'.repeat(32);
 const RENDER_SECTION_ID = '3'.repeat(32);
 const REVIEW_SECTION_ID = '4'.repeat(32);
 const REVIEW_TARGET_ID = '5'.repeat(32);
+const STORY_INDEX_ID = '123e4567-e89b-52d3-a456-426614174000';
+const STORY_INDEX_ETAG = `sha256:${'9'.repeat(64)}`;
 const FROZEN_NOW = '2026-08-06T04:00:00.000Z';
 const CONTENT_REVISION = `sha256:${'a'.repeat(64)}`;
 const MANIFEST_REVISIONS = [
@@ -114,6 +116,24 @@ function workflowRun() {
     created_at: '2026-08-06T01:00:00Z',
     started_at: '2026-08-06T01:00:01Z',
     completed_at: null,
+  };
+}
+
+function storyIndexProjection() {
+  return {
+    runId: RUN_ID,
+    projectId: 'rainy-night',
+    storyId: STORY_INDEX_ID,
+    status: 'indexed',
+    observedManifestRevision: MANIFEST_REVISIONS[0],
+    observedScriptRevision: CONTENT_REVISION,
+    indexedManifestRevision: MANIFEST_REVISIONS[0],
+    indexedScriptRevision: CONTENT_REVISION,
+    episodeCount: 1,
+    lastIndexedAt: FROZEN_NOW,
+    errorCode: null,
+    retryable: false,
+    etag: STORY_INDEX_ETAG,
   };
 }
 
@@ -578,6 +598,10 @@ async function installApiFixture(page: Page, state: BrowserFixtureState) {
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}`)) {
       await json(route, workflowRun());
+      return;
+    }
+    if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/story-index`)) {
+      await json(route, storyIndexProjection(), 200, { ETag: `"${STORY_INDEX_ETAG}"` });
       return;
     }
     if (matches('GET', `/api/story-workspace/workflow-runs/${RUN_ID}/events`)) {

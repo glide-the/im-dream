@@ -42,13 +42,13 @@ from pathlib import Path
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
 from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 import database
 from agent_factory import claude_agent_thread_factory
 from claude_agent import ClaudeAgentRunRequest
 from claude_agent.service import build_thread_plan_payload, build_thread_todos_payload
+from claude_agent.sse import streaming_sse_response
 from claude_agent.subagent_projection import build_thread_subagents_payload
 from claude_agent.thread_retrieval import (
     build_chat_thread_search_config,
@@ -69,6 +69,7 @@ from services.deck.chat_context import DeckChatContextError, DeckChatContextServ
 from services.admin_gateway import (
     GatewayInferenceError,
     GatewayModelCatalogClient,
+    resolve_platform_model_alias,
 )
 
 from .deps import get_current_user
@@ -86,42 +87,18 @@ async def _resolve_platform_model_alias(
     client_model_alias: str | None,
 ) -> str:
     try:
-        catalog = await asyncio.to_thread(GatewayModelCatalogClient(user_id).fetch_catalog)
+        return await asyncio.to_thread(
+            resolve_platform_model_alias,
+            user_id,
+            client_model_alias,
+            catalog_client_factory=GatewayModelCatalogClient,
+            system_config_reader=database.get_system_config,
+        )
     except GatewayInferenceError as exc:
         raise HTTPException(
             status_code=exc.status_code,
             detail={"error_code": exc.code, "message": "The platform model catalog is unavailable."},
         ) from exc
-    callable_aliases = {model.model_alias for model in catalog.models if model.callable}
-    config = await asyncio.to_thread(database.get_system_config, user_id)
-    configured = str(config.get("model") or "").strip()
-    if configured not in callable_aliases:
-        configured = catalog.default_model_alias or ""
-    if not configured:
-        if str(config.get("model") or "").strip():
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error_code": "GATEWAY_MODEL_SELECTION_STALE",
-                    "message": "The saved platform model is no longer callable. Select another model or review subscription plans.",
-                },
-            )
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "error_code": "GATEWAY_MODEL_NOT_AVAILABLE",
-                "message": "No Claude Agent model is available for this subscription.",
-            },
-        )
-    if client_model_alias and client_model_alias != configured:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "error_code": "GATEWAY_MODEL_SELECTION_CONFLICT",
-                "message": "The requested model does not match the server-side platform selection.",
-            },
-        )
-    return configured
 
 
 def _coerce_sandbox_network_mode(value: object) -> str:
@@ -315,7 +292,7 @@ async def claude_agent_stream(
             async for frame in claude_agent_thread_factory.run_streaming(request):
                 yield frame
 
-        return StreamingResponse(generate_reconnect(), media_type="text/event-stream")
+        return streaming_sse_response(generate_reconnect())
 
     requested_deck_id = body.deck_id
     persisted_deck_id = thread.get("deck_id")
@@ -514,7 +491,7 @@ async def claude_agent_stream(
         async for frame in claude_agent_thread_factory.run_streaming(request):
             yield frame
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return streaming_sse_response(generate())
 
 
 @router.get("/api/claude-agent/chat-history")
@@ -753,7 +730,7 @@ async def claude_agent_thread_stream(
         async for frame in claude_agent_thread_factory.subscribe_stream(thread_id):
             yield frame
 
-    return StreamingResponse(generate(), media_type="text/event-stream")
+    return streaming_sse_response(generate())
 
 
 @router.get("/api/claude-agent/threads/{thread_id}/status")

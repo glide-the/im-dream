@@ -34,6 +34,32 @@
   border-bottom: 1px dashed var(--dream-rule);
 }
 
+.story-workspace-dream__run-alert {
+  margin: 14px 34px 0;
+  padding: 14px 16px;
+  border: 1px solid var(--color-danger, #a3483f);
+  border-radius: 12px;
+  background: var(--dream-paper);
+  color: var(--dream-ink);
+}
+
+.story-workspace-dream__run-alert p {
+  margin: 6px 0 10px;
+}
+
+.story-workspace-dream__run-alert div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+@media (max-width: 640px) {
+  .story-workspace-dream__run-alert {
+    margin: 10px 14px 0;
+  }
+}
+
 .story-workspace-dream__folio,
 .story-workspace-dream__section-heading p,
 .story-workspace-dream__editor header p,

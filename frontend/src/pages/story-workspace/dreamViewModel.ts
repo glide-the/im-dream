@@ -7,7 +7,7 @@ import type {
   StoryWorkspaceDreamFilesResponse,
   StoryWorkspaceDreamLifecycleState,
 } from '../../hooks/story-workspace/contracts';
-import type { WorkflowRunStatus } from '../../api/storyWorkspaceApi';
+import type { WorkflowRun, WorkflowRunStatus } from '../../api/storyWorkspaceApi';
 import type { StoryWorkspaceDreamStageSnapshot } from '../../components/story-workspace/dreamState';
 import { STORY_WORKSPACE_DREAM_STAGES } from '../../components/story-workspace/dreamState';
 
@@ -74,10 +74,37 @@ export function storyWorkspaceDreamLifecycleFromPersistence(
   runStatus: WorkflowRunStatus | null | undefined,
   fallback: StoryWorkspaceDreamLifecycleState,
 ): StoryWorkspaceDreamLifecycleState {
+  if (runStatus === 'failed' || runStatus === 'rejected' || runStatus === 'cancelled') {
+    return fallback;
+  }
   if (!persistence?.confirmationAccepted) return fallback;
   return persistence.confirmationDispatched && runStatus === 'completed'
     ? 'story-workspace-dream-completed'
     : 'story-workspace-dream-continuing';
+}
+
+export function storyWorkspaceDreamRunFailureNotice(
+  run: Pick<WorkflowRun, 'status' | 'error_code' | 'failed_step'> | null,
+): string | null {
+  if (run?.status !== 'failed') return null;
+  if (run.error_code === 'GATEWAY_TOKEN_ALLOWANCE_EXHAUSTED') {
+    return '当前周期 Token 额度已用完。运行已安全停止，请查看订阅与用量后重试。';
+  }
+  if (
+    run.error_code === 'GATEWAY_MODEL_SELECTION_STALE'
+    || run.error_code === 'GATEWAY_MODEL_NOT_AVAILABLE'
+    || run.error_code === 'GATEWAY_FORBIDDEN'
+  ) {
+    return '当前平台模型已不可调用。运行已安全停止，请在设置中重新选择模型或查看订阅资格。';
+  }
+  if (
+    run.error_code === 'GATEWAY_UNAVAILABLE'
+    || run.error_code === 'GATEWAY_PROVIDER_FAILED'
+    || run.error_code === 'DREAM_AGENT_DISPATCH_FAILED'
+  ) {
+    return 'Dream Agent 暂时无法连接平台模型服务。运行已安全停止，未完成的步骤不会显示为成功。';
+  }
+  return 'Dream Agent 执行失败。运行已安全停止，未完成的步骤不会显示为成功。';
 }
 
 /** Copy has no rejected/failed/retry branch: acceptance is monotonic. */

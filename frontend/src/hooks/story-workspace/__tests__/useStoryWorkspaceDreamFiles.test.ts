@@ -11,6 +11,7 @@ import {
   storyWorkspaceReduceDreamFilesFetch,
   storyWorkspaceShouldInvalidateDreamFiles,
   storyWorkspaceShouldPollDreamFiles,
+  storyWorkspaceShouldReadDreamFilesForAgent,
 } from '../useStoryWorkspaceDreamFiles';
 
 const RUN_ID = `run_${'1'.repeat(32)}`;
@@ -173,6 +174,23 @@ test('polling includes editing so Agent revision conflicts surface within five s
   ] as const) {
     expect(storyWorkspaceShouldPollDreamFiles(state)).toBe(false);
   }
+});
+
+test('strict Dream files reads wait for an authoritative idle Agent gate', () => {
+  expect(storyWorkspaceShouldReadDreamFilesForAgent(undefined)).toBe(false);
+  expect(storyWorkspaceShouldReadDreamFilesForAgent(null)).toBe(false);
+  expect(storyWorkspaceShouldReadDreamFilesForAgent({
+    lifecycle: 'streaming',
+    messages: [],
+  })).toBe(false);
+  expect(storyWorkspaceShouldReadDreamFilesForAgent({
+    lifecycle: 'streaming',
+    messages: [{ role: 'assistant' }],
+  })).toBe(true);
+  expect(storyWorkspaceShouldReadDreamFilesForAgent({
+    lifecycle: 'idle',
+    messages: [],
+  })).toBe(true);
 });
 
 test('only same-run story-workspace output invalidates the REST snapshot', () => {

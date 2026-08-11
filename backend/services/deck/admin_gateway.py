@@ -19,6 +19,7 @@ import database
 
 try:
     from models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
+    from models.runtime_plugin import compute_artifact_set_hash
     from services.deck.builtin_plugin import (
         plugin_artifact_digest,
         resolve_builtin_source,
@@ -40,6 +41,7 @@ try:
     from services.errors.error_registry import ApiRouteError
 except ModuleNotFoundError:  # Support backend directory on PYTHONPATH.
     from backend.models.deck_plugin import DeckPluginManifestV1, DeckRuntimePluginLock
+    from backend.models.runtime_plugin import compute_artifact_set_hash
     from backend.services.deck.builtin_plugin import plugin_artifact_digest, resolve_builtin_source
     from backend.services.deck_plugin.installation_service import (
         DECK_PLUGIN_CONCURRENT_MODIFICATION,
@@ -245,9 +247,7 @@ class DeckPluginAdminService:
             pass
 
         now = datetime.now(UTC).isoformat()
-        artifact_set_hash = "sha256:" + hashlib.sha256(
-            runtime_lock.model_dump_json().encode("utf-8")
-        ).hexdigest()
+        artifact_set_hash = compute_artifact_set_hash(runtime_lock)
         for entry in runtime_lock.claude_code_plugins:
             path = _entry_path(entry)
             if path is None or not path.is_dir():
@@ -277,9 +277,10 @@ class DeckPluginAdminService:
                     error_summary="runtime plugin artifact digest does not match the immutable lock",
                 )
 
-            materialization_key = hashlib.sha256(
+            materialization_key = "sha256:" + hashlib.sha256(
                 f"{environment}\0local\0{entry.claude_code_plugin_id}\0"
-                f"{entry.resolved_version}\0{entry.artifact_digest}".encode("utf-8")
+                f"{entry.resolved_version}\0{entry.artifact_digest}\0"
+                f"{artifact_set_hash}".encode("utf-8")
             ).hexdigest()
             existing = db.execute(
                 "SELECT runtime_materialization_id FROM runtime_plugin_materializations "

@@ -180,6 +180,7 @@ def test_projects_only_bounded_metadata_and_actual_registry_count(
     assert projection.episode_count == len(registry.episodes) == 2
     assert projection.script_revision == "sha256:" + hashlib.sha256(script).hexdigest()
     assert projection.script_size_bytes == len(script)
+    assert projection.artifact_status == "available"
     assert projection.artifact_available is True
     assert projection.artifact_manifest_revision.startswith("sha256:")
     assert projection.story_id == ArtifactStoryIndexProjector.deterministic_story_id(
@@ -198,6 +199,7 @@ def test_projects_only_bounded_metadata_and_actual_registry_count(
         "artifact_manifest_revision",
         "script_revision",
         "script_size_bytes",
+        "artifact_status",
         "artifact_available",
         "artifact_source_type",
     }

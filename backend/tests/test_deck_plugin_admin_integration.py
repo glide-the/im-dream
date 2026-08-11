@@ -10,6 +10,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import database
+from models.deck_plugin import DeckRuntimePluginLock
+from models.runtime_plugin import compute_artifact_set_hash
 from routers import deck_plugins, story_workspace
 from tests.legacy_database_fixture import LegacyDatabaseModuleFixture
 from services.deck.builtin_plugin import (
@@ -114,9 +116,14 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
             materialization = db.execute(
                 """
                 SELECT cache_ref, verification_status, materialization_status,
-                       activation_status
+                       activation_status, artifact_set_hash
                 FROM runtime_plugin_materializations
                 """
+            ).fetchone()
+            lock_row = db.execute(
+                "SELECT lock_json FROM deck_runtime_plugin_locks "
+                "WHERE deck_plugin_id = ? AND deck_plugin_version = ?",
+                (BUILTIN_DECK_PLUGIN_ID, BUILTIN_DECK_PLUGIN_VERSION),
             ).fetchone()
         finally:
             db.close()
@@ -124,6 +131,12 @@ class DeckPluginAdminIntegrationTests(unittest.TestCase):
         self.assertEqual(materialization["verification_status"], "verified")
         self.assertEqual(materialization["materialization_status"], "materialized")
         self.assertEqual(materialization["activation_status"], "loadable")
+        self.assertEqual(
+            materialization["artifact_set_hash"],
+            compute_artifact_set_hash(
+                DeckRuntimePluginLock.model_validate_json(lock_row["lock_json"])
+            ),
+        )
 
         # New architecture (deck-integration-delta): the chat plugin path is
         # shared-installation based.  The legacy binding above stays for the

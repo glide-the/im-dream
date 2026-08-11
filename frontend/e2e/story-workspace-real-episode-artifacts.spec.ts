@@ -20,10 +20,9 @@ const ACTOR_EMAIL = process.env.INK_REAL_EPISODE_ACTOR_EMAIL
 const REPO_ROOT = resolve(process.cwd(), '..');
 const BACKEND_DIR = resolve(REPO_ROOT, 'backend');
 const BACKEND_PYTHON = resolve(BACKEND_DIR, '.venv/bin/python');
-const EVIDENCE_DIR = resolve(
-  REPO_ROOT,
-  'output/playwright/story-workspace-real-episode-artifacts',
-);
+const EVIDENCE_DIR = process.env.INK_REAL_EPISODE_EVIDENCE_DIR
+  ? resolve(process.env.INK_REAL_EPISODE_EVIDENCE_DIR)
+  : resolve(REPO_ROOT, 'output/playwright/story-workspace-real-episode-artifacts');
 
 test.use({ channel: 'chromium', timezoneId: 'Asia/Shanghai' });
 test.skip(!ENABLED, 'Set INK_REAL_EPISODE_QA=1 to run against the persisted local actor and run.');

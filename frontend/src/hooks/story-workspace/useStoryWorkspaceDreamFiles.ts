@@ -229,6 +229,17 @@ export function storyWorkspaceShouldPollDreamFiles(
     || state === 'story-workspace-dream-continuing';
 }
 
+/** Do not probe the strict output contract while the owning Agent turn is active. */
+export function storyWorkspaceShouldReadDreamFilesForAgent(
+  snapshot: {
+    lifecycle: 'idle' | 'streaming';
+    messages: readonly { role: 'user' | 'assistant' }[];
+  } | null | undefined,
+): boolean {
+  return snapshot?.lifecycle === 'idle'
+    || snapshot?.messages.some((message) => message.role === 'assistant') === true;
+}
+
 /** SSE notices carry identity only; their content never replaces a REST snapshot. */
 export function storyWorkspaceShouldInvalidateDreamFiles(
   event: unknown,
@@ -277,6 +288,8 @@ export function storyWorkspaceReduceDreamFilesFetch(
 
 export interface StoryWorkspaceDreamFilesUseOptions {
   lifecycleState: StoryWorkspaceDreamLifecycleState;
+  enabled?: boolean;
+  updatesEnabled?: boolean;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch;
   token?: string | null;
@@ -304,9 +317,11 @@ export function useStoryWorkspaceDreamFiles(
   );
   const generation = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const enabled = options.enabled !== false;
+  const updatesEnabled = options.updatesEnabled ?? enabled;
 
   const refresh = useCallback(() => {
-    if (!runId) return;
+    if (!runId || !enabled) return;
     controller.current?.abort();
     const nextController = new AbortController();
     controller.current = nextController;
@@ -330,35 +345,39 @@ export function useStoryWorkspaceDreamFiles(
         });
       }
     });
-  }, [options.fetchImpl, options.token, runId]);
+  }, [enabled, options.fetchImpl, options.token, runId]);
 
   useEffect(() => {
-    if (!runId) {
+    controller.current?.abort();
+    generation.current += 1;
+    dispatch({ type: 'reset' });
+  }, [runId]);
+
+  useEffect(() => {
+    if (!runId || !enabled) {
       controller.current?.abort();
-      generation.current += 1;
-      dispatch({ type: 'reset' });
       return;
     }
     refresh();
     return () => controller.current?.abort();
-  }, [refresh, runId]);
+  }, [enabled, refresh, runId]);
 
   useEffect(() => {
-    if (!runId || !storyWorkspaceShouldPollDreamFiles(options.lifecycleState)) return;
+    if (!runId || !updatesEnabled || !storyWorkspaceShouldPollDreamFiles(options.lifecycleState)) return;
     const intervalMs = Math.max(options.pollIntervalMs ?? 5000, 5000);
     const interval = window.setInterval(refresh, intervalMs);
     return () => window.clearInterval(interval);
-  }, [options.lifecycleState, options.pollIntervalMs, refresh, runId]);
+  }, [options.lifecycleState, options.pollIntervalMs, refresh, runId, updatesEnabled]);
 
   useEffect(() => {
-    if (!runId) return;
+    if (!runId || !updatesEnabled) return;
     const handleOutput = (event: Event) => {
       const detail = (event as CustomEvent<unknown>).detail;
       if (storyWorkspaceShouldInvalidateDreamFiles(detail, runId)) refresh();
     };
     window.addEventListener(DREAM_OUTPUT_EVENT, handleOutput);
     return () => window.removeEventListener(DREAM_OUTPUT_EVENT, handleOutput);
-  }, [refresh, runId]);
+  }, [refresh, runId, updatesEnabled]);
 
   return {
     data: state.data,

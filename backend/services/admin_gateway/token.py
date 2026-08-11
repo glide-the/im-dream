@@ -13,6 +13,18 @@ _CANONICAL_USER_PATTERN = re.compile(r"^[1-9][0-9]{0,18}$")
 _POSTGRES_BIGINT_MAXIMUM = 9_223_372_036_854_775_807
 
 
+def validate_gateway_subject(canonical_user_id: str) -> str:
+    subject = str(canonical_user_id).strip()
+    if (
+        not _CANONICAL_USER_PATTERN.fullmatch(subject)
+        or int(subject) > _POSTGRES_BIGINT_MAXIMUM
+    ):
+        raise AdminGatewayConfigurationError(
+            "The canonical Gateway subject is invalid"
+        )
+    return subject
+
+
 def issue_gateway_subject_token(
     configuration: AdminGatewayConfig,
     canonical_user_id: str,
@@ -25,14 +37,7 @@ def issue_gateway_subject_token(
         raise AdminGatewayConfigurationError(
             "Admin Gateway integration is not enabled"
         )
-    subject = str(canonical_user_id).strip()
-    if (
-        not _CANONICAL_USER_PATTERN.fullmatch(subject)
-        or int(subject) > _POSTGRES_BIGINT_MAXIMUM
-    ):
-        raise AdminGatewayConfigurationError(
-            "The canonical Gateway subject is invalid"
-        )
+    subject = validate_gateway_subject(canonical_user_id)
     issued_at = int(clock())
     payload = {
         "sub": subject,

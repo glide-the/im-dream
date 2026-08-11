@@ -619,7 +619,10 @@ class _ReadOnlyRepositoryDB(_TransactionDB):
                         ],
                         "key_count": 3,
                         "all_direct_columns": True,
-                        "is_full_index": True,
+                        "predicate": (
+                            "(artifact_source_type IS NOT NULL) AND "
+                            "(source_project_id IS NOT NULL)"
+                        ),
                     }
                 ]
             )

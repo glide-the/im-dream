@@ -145,6 +145,17 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
     def tearDown(self) -> None:
         self.fixture.close()
 
+    def test_datetime_parser_accepts_psycopg_native_datetime(self) -> None:
+        native = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+
+        self.assertEqual(SessionManager._parse_datetime(native), native)
+        self.assertEqual(
+            SessionManager._parse_datetime("2026-08-01T12:00:00Z"),
+            native,
+        )
+        with self.assertRaises(TypeError):
+            SessionManager._parse_datetime(1)  # type: ignore[arg-type]
+
     async def prepare(
         self,
         key: str = "session-start",
@@ -293,6 +304,41 @@ class AgentSessionTests(unittest.IsolatedAsyncioTestCase):
         replay = await self._start(manager, run, reader)
         self.assertEqual(replay.agent_session_id, session.agent_session_id)
         self.assertEqual(adapter.starts, 1)
+
+    async def test_psycopg_validation_reads_end_before_session_write(self) -> None:
+        manager, _, reader, run = await self.prepare("session-postgres-boundary")
+
+        class PsycopgReadTransactionConnection:
+            def __init__(self, target):
+                self.target = target
+                self.read_transaction = False
+
+            @property
+            def in_transaction(self):
+                return self.read_transaction or self.target.in_transaction
+
+            def execute(self, statement, params=()):
+                normalized = statement.lstrip().upper()
+                if normalized == "BEGIN" and self.read_transaction:
+                    raise RuntimeError("cannot begin inside psycopg read transaction")
+                cursor = self.target.execute(statement, params)
+                if normalized.startswith("SELECT"):
+                    self.read_transaction = True
+                return cursor
+
+            def rollback(self):
+                self.target.rollback()
+                self.read_transaction = False
+
+            def commit(self):
+                self.target.commit()
+                self.read_transaction = False
+
+        manager.db = PsycopgReadTransactionConnection(self.fixture.db)
+
+        session = await self._start(manager, run, reader)
+
+        self.assertEqual(session.status, AgentSessionStatus.ACTIVE)
 
     async def test_concurrent_same_key_has_one_owner_and_competing_settings_fail(self) -> None:
         adapter = FakeRunSessionAdapter()

@@ -299,7 +299,7 @@ class StoryWorkspaceAPITest(unittest.TestCase):
                 "source_project_id", "episode_count", "artifact_manifest_revision",
                 "script_revision", "artifact_sync_status", "artifact_indexed_at",
                 "artifact_sync_error_code", "script_size_bytes", "artifact_available",
-                "reconcile_version",
+                "reconcile_version", "artifact_status",
             },
         )
         self.assertIsNone(payload["data"][0]["source_run_id"])

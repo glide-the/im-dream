@@ -108,3 +108,30 @@ def test_catalog_rejects_malformed_or_duplicate_aliases() -> None:
             configuration=configuration(),
             transport=malformed,
         ).list_models()
+
+
+def test_catalog_rejects_capabilities_outside_the_public_allowlist() -> None:
+    transport = RecordingTransport(FakeResponse(200, {
+        "object": "list",
+        "data": [{
+            "id": "dream-balanced",
+            "display_name": "Dream Balanced",
+            "protocol": "anthropic",
+            "context_window": 200000,
+            "max_output_tokens": 8192,
+            "capabilities": {"tools": True, "provider_debug": True},
+            "enabled": True,
+            "callable": True,
+            "availability": "included",
+            "required_plan_code": None,
+            "upgrade_hint": None,
+        }],
+        "default_model_alias": "dream-balanced",
+    }))
+
+    with pytest.raises(GatewayInferenceError, match="GATEWAY_MODEL_CATALOG_INVALID"):
+        GatewayModelCatalogClient(
+            7,
+            configuration=configuration(),
+            transport=transport,
+        ).list_models()

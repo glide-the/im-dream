@@ -15,6 +15,7 @@ from .token import issue_gateway_subject_token
 
 _MODEL_ALIAS = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,119}$")
 _PROTOCOLS = frozenset({"anthropic", "openai"})
+_PUBLIC_CAPABILITIES = frozenset({"chat", "json", "tools", "vision", "streaming"})
 _AVAILABILITY = frozenset({
     "included",
     "upgrade_required",
@@ -106,6 +107,7 @@ def _parse_model(raw: Any) -> GatewayModel:
         or protocol not in _PROTOCOLS
         or not isinstance(capabilities, dict)
         or any(not isinstance(key, str) or not isinstance(value, bool) for key, value in capabilities.items())
+        or not set(capabilities).issubset(_PUBLIC_CAPABILITIES)
         or enabled is not True
         or not isinstance(callable_value, bool)
         or availability not in _AVAILABILITY

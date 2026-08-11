@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,6 +33,7 @@ _INDEX_COLUMNS = frozenset(
         "source_thread_ref",
         "source_project_id",
         "episode_count",
+        "artifact_status",
         "artifact_manifest_revision",
         "script_revision",
         "artifact_sync_status",
@@ -47,6 +49,12 @@ _IDENTITY_KEY_COLUMNS = (
     "workspace_id",
     "artifact_source_type",
     "source_project_id",
+)
+_IDENTITY_PREDICATE_PARTS = frozenset(
+    {
+        "artifact_source_typeisnotnull",
+        "source_project_idisnotnull",
+    }
 )
 
 PUBLIC_STORY_COLUMNS: tuple[str, ...] = (
@@ -66,6 +74,7 @@ PUBLIC_STORY_COLUMNS: tuple[str, ...] = (
     "source_run_id",
     "source_project_id",
     "episode_count",
+    "artifact_status",
     "artifact_manifest_revision",
     "script_revision",
     "artifact_sync_status",
@@ -150,6 +159,7 @@ class ArtifactStoryIndexRecord:
     script_size_bytes: int | None
     artifact_available: bool | None
     reconcile_version: int | None
+    artifact_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -202,7 +212,7 @@ class ArtifactStoryIndexRepository:
                 "AS column_names, index_info.indnkeyatts AS key_count, "
                 "BOOL_AND(key.attnum > 0 AND attribute.attname IS NOT NULL) "
                 "AS all_direct_columns, "
-                "BOOL_AND(index_info.indpred IS NULL) AS is_full_index "
+                "pg_get_expr(index_info.indpred, index_info.indrelid) AS predicate "
                 "FROM pg_catalog.pg_index AS index_info "
                 "JOIN pg_catalog.pg_class AS table_info "
                 "ON table_info.oid = index_info.indrelid "
@@ -218,7 +228,8 @@ class ArtifactStoryIndexRepository:
                 "AND index_info.indisunique IS TRUE "
                 "AND index_info.indisvalid IS TRUE "
                 "AND key.position <= index_info.indnkeyatts "
-                "GROUP BY index_info.indexrelid, index_info.indnkeyatts"
+                "GROUP BY index_info.indexrelid, index_info.indnkeyatts, "
+                "index_info.indpred, index_info.indrelid"
             ).fetchall()
         except Exception as exc:
             self._rollback_quietly(self.db)
@@ -231,7 +242,7 @@ class ArtifactStoryIndexRepository:
             isinstance(row["column_names"], (list, tuple))
             and row["key_count"] == len(_IDENTITY_KEY_COLUMNS)
             and row["all_direct_columns"] is True
-            and row["is_full_index"] is True
+            and self._is_identity_predicate(row["predicate"])
             and len(row["column_names"]) == len(_IDENTITY_KEY_COLUMNS)
             and all(value is not None for value in row["column_names"])
             and frozenset(str(value) for value in row["column_names"])
@@ -243,6 +254,15 @@ class ArtifactStoryIndexRepository:
                 STORY_INDEX_SCHEMA_UNAVAILABLE,
                 retryable=True,
             )
+
+    @staticmethod
+    def _is_identity_predicate(value: object) -> bool:
+        """Accept only the final stable-key partial-index predicate."""
+
+        if not isinstance(value, str):
+            return False
+        normalized = re.sub(r'[\s"()]', "", value.casefold())
+        return frozenset(normalized.split("and")) == _IDENTITY_PREDICATE_PARTS
 
     @staticmethod
     def _record(row: Any) -> ArtifactStoryIndexRecord:
@@ -277,6 +297,7 @@ class ArtifactStoryIndexRepository:
                 if row["script_size_bytes"] is not None
                 else None
             ),
+            artifact_status=row["artifact_status"],
             artifact_available=(
                 bool(row["artifact_available"])
                 if row["artifact_available"] is not None
@@ -296,7 +317,7 @@ class ArtifactStoryIndexRepository:
             "source_thread_ref, source_project_id, artifact_manifest_revision, "
             "script_revision, artifact_sync_status, artifact_indexed_at, "
             "artifact_sync_error_code, episode_count, script_size_bytes, "
-            "artifact_available, reconcile_version"
+            "artifact_status, artifact_available, reconcile_version"
         )
 
     def find(
@@ -409,8 +430,7 @@ class ArtifactStoryIndexRepository:
                     and current.artifact_indexed_at is not None
                     and current.artifact_sync_error_code is None
                     and current.script_size_bytes == projection.script_size_bytes
-                    and current.artifact_available
-                    is projection.artifact_available
+                    and current.artifact_status == projection.artifact_status
                     and current.reconcile_version == 1
                 ):
                     self.db.commit()
@@ -426,7 +446,14 @@ class ArtifactStoryIndexRepository:
                     "script_revision = %s, artifact_sync_status = 'indexed', "
                     "artifact_indexed_at = CURRENT_TIMESTAMP, "
                     "artifact_sync_error_code = NULL, script_size_bytes = %s, "
-                    "artifact_available = %s, reconcile_version = 1, "
+                    "artifact_status = %s, artifact_available = %s, "
+                    "reconcile_version = 1, "
+                    "status = CASE WHEN status = 'published' AND "
+                    "(reviewed_script_revision IS DISTINCT FROM %s OR %s <> 'available') "
+                    "THEN 'draft' ELSE status END, "
+                    "published_at = CASE WHEN status = 'published' AND "
+                    "(reviewed_script_revision IS DISTINCT FROM %s OR %s <> 'available') "
+                    "THEN NULL ELSE published_at END, "
                     "updated_at = CURRENT_TIMESTAMP "
                     "WHERE id = %s "
                     f"RETURNING {self._record_columns()}",
@@ -438,7 +465,12 @@ class ArtifactStoryIndexRepository:
                         projection.artifact_manifest_revision,
                         projection.script_revision,
                         projection.script_size_bytes,
+                        projection.artifact_status,
                         projection.artifact_available,
+                        projection.script_revision,
+                        projection.artifact_status,
+                        projection.script_revision,
+                        projection.artifact_status,
                         current.story_id,
                     ),
                 ).fetchone()
@@ -472,11 +504,11 @@ class ArtifactStoryIndexRepository:
                 "source_thread_ref, source_project_id, episode_count, "
                 "artifact_manifest_revision, script_revision, artifact_sync_status, "
                 "artifact_indexed_at, artifact_sync_error_code, script_size_bytes, "
-                "artifact_available, reconcile_version"
+                "artifact_status, artifact_available, reconcile_version"
                 ") VALUES ("
                 "%s, %s, %s, NULL, 'draft', 'pending', 'script', NULL, %s, %s, "
                 "0, 0, 1, %s, %s, %s, %s, %s, %s, %s, 'indexed', "
-                "CURRENT_TIMESTAMP, NULL, %s, %s, 1"
+                "CURRENT_TIMESTAMP, NULL, %s, %s, %s, 1"
                 f") RETURNING {self._record_columns()}",
                 (
                     projection.story_id,
@@ -492,6 +524,7 @@ class ArtifactStoryIndexRepository:
                     projection.artifact_manifest_revision,
                     projection.script_revision,
                     projection.script_size_bytes,
+                    projection.artifact_status,
                     projection.artifact_available,
                 ),
             ).fetchone()
@@ -585,7 +618,10 @@ class StoryWorkspacePublicStoryRepository:
     def _public_row(row: Any) -> dict[str, Any]:
         item = dict(row)
         if item.get("artifact_available") is not None:
-            item["artifact_available"] = bool(item["artifact_available"])
+            if item.get("artifact_status") is not None:
+                item["artifact_available"] = item["artifact_status"] == "available"
+            else:
+                item["artifact_available"] = bool(item["artifact_available"])
         stored_error = item.get("artifact_sync_error_code")
         if stored_error is not None and stored_error not in _PUBLIC_SYNC_ERROR_CODES:
             item["artifact_sync_error_code"] = None

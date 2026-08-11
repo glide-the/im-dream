@@ -313,6 +313,8 @@ export default function App() {
   const [chatStreaming, setChatStreaming] = useState<Map<string, { text: string; reasoning: string; reasoningDone: boolean }>>(new Map());
   /** @@@ Thread to open in ChatView (set when navigating from Deck or editor widget). */
   const [requestedChatThreadId, setRequestedChatThreadId] = useState<string | undefined>(undefined);
+  /** Bump for repeated requests to reopen/reconnect the same Chat thread. */
+  const [requestedChatThreadNonce, setRequestedChatThreadNonce] = useState(0);
   const [requestedChatDeck, setRequestedChatDeck] = useState<{ deckId: string; agentId?: string; nonce: number } | undefined>(undefined);
   /** @@@ Active deck voice shown in ChatView top-right badge; carries system prompt forwarded to the agent. */
   const [activeChatVoice, setActiveChatVoice] = useState<ActiveChatVoice | undefined>(undefined);
@@ -1068,9 +1070,21 @@ export default function App() {
   // @@@ Navigate to Chat view with a specific thread (used by editor widgets and Deck manager).
   const handleOpenChatThread = useCallback((threadId: string, voiceInfo?: ActiveChatVoice) => {
     setRequestedChatThreadId(threadId);
+    setRequestedChatThreadNonce((value) => value + 1);
+    setRequestedChatDeck(undefined);
     setActiveChatVoice(voiceInfo);
     setCurrentView('chat');
     setHasOpenedChatView(true);
+  }, []);
+
+  // Dream owns its presentation protocol, but its source thread remains a
+  // normal Chat thread. Selecting Chat reopens that thread so Chat can attach
+  // its own SSE adapter and continue with the ordinary POST interaction.
+  const handleStoryWorkspaceChatThreadRequest = useCallback((threadId: string) => {
+    setRequestedChatThreadId(threadId);
+    setRequestedChatThreadNonce((value) => value + 1);
+    setRequestedChatDeck(undefined);
+    setActiveChatVoice(undefined);
   }, []);
 
   // @@@ Deck editor "Chat →": preselect the selected Agent and its parent Deck.
@@ -1533,6 +1547,7 @@ export default function App() {
         }}>
           <StoryWorkspaceRouter
             decksContent={storyWorkspaceDeckManager}
+            onChatThreadRequest={handleStoryWorkspaceChatThreadRequest}
             onRouteChange={handleStoryWorkspaceRouteChange}
             legacyContent={{
               timeline: (
@@ -1551,6 +1566,7 @@ export default function App() {
                     editorState={state ? (state as unknown as Record<string, unknown>) : null}
                     onEditorWriteConfirmed={handleEditorWriteConfirmed}
                     requestedThreadId={requestedChatThreadId}
+                    requestedThreadNonce={requestedChatThreadNonce}
                     requestedDeckId={requestedChatDeck?.deckId}
                     requestedAgentId={requestedChatDeck?.agentId}
                     requestedDeckNonce={requestedChatDeck?.nonce}
@@ -2332,6 +2348,7 @@ export default function App() {
             editorState={state ? (state as unknown as Record<string, unknown>) : null}
             onEditorWriteConfirmed={handleEditorWriteConfirmed}
             requestedThreadId={requestedChatThreadId}
+            requestedThreadNonce={requestedChatThreadNonce}
             requestedDeckId={requestedChatDeck?.deckId}
             requestedAgentId={requestedChatDeck?.agentId}
             requestedDeckNonce={requestedChatDeck?.nonce}

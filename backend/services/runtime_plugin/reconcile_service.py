@@ -522,6 +522,8 @@ class ReconcileService:
             (placement_context.workflow_run_id,),
         ).fetchone()
         if run is None or run["runtime_plugin_lock_id"] != runtime_lock.runtime_plugin_lock_id:
+            if self.db.in_transaction:
+                self.db.rollback()
             raise ReconcileError(
                 LOAD_RECEIPT_NOT_READY,
                 "workflow run does not bind the supplied runtime lock",
@@ -530,6 +532,11 @@ class ReconcileService:
             "SELECT lock_json FROM deck_runtime_plugin_locks WHERE id = %s",
             (runtime_lock.runtime_plugin_lock_id,),
         ).fetchone()
+        # psycopg begins a transaction for these validation SELECTs. Receipt
+        # persistence owns the following atomic write boundary, so close the
+        # read-only transaction after retaining the returned row values.
+        if self.db.in_transaction:
+            self.db.rollback()
         if lock_row is None:
             raise ReconcileError(LOAD_RECEIPT_NOT_READY, "runtime lock was not found")
 
@@ -926,8 +933,16 @@ class ReconcileService:
         return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
 
     @staticmethod
-    def _parse_datetime(value: str) -> datetime:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    def _parse_datetime(value: datetime | str) -> datetime:
+        if isinstance(value, datetime):
+            parsed = value
+        elif isinstance(value, str):
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        else:
+            raise TypeError("runtime receipt timestamp must be datetime or ISO-8601 text")
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC)
 
 
 async def _resolve(value):

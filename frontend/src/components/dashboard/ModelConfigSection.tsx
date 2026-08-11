@@ -177,7 +177,6 @@ export default function ModelConfigSection() {
           setDefaultModelAlias(modelsResult.value.defaultModelAlias);
           setModelCatalogError(null);
         } else if (modelsResult.reason?.name !== 'AbortError') {
-          setModelOptions([]);
           setModelCatalogError(gatewayModelsErrorMessage(modelsResult.reason));
         }
         if (configResult.status !== 'fulfilled' || !configResult.value.ok) return;
@@ -504,11 +503,17 @@ export default function ModelConfigSection() {
         </p>
         {modelCatalogError ? (
           <div role="alert" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>
-            <p>{modelCatalogError}</p>
+            <p>
+              {modelCatalogError}
+              {modelOptions.length > 0 ? ' 当前展示上次成功加载的模型目录。' : ''}
+            </p>
             <button type="button" onClick={() => { setConfigLoading(true); setModelLoadNonce((value) => value + 1); }}>重新加载模型</button>
           </div>
-        ) : modelOptions.length === 0 ? (
-          <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>平台尚未启用可展示的模型。</p>
+        ) : null}
+        {modelOptions.length === 0 ? (
+          modelCatalogError ? null : (
+            <p role="status" style={{ color: 'var(--color-text-muted)', fontSize: '0.8rem' }}>平台尚未启用可展示的模型。</p>
+          )
         ) : (
           <>
             {selectedModel && !modelOptions.some((option) => option.modelAlias === selectedModel) ? (

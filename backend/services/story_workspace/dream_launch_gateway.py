@@ -11,20 +11,30 @@ import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 import hashlib
+import inspect
 import json
+import logging
 import os
+import re
 from typing import Any, Callable
 import uuid
+
+logger = logging.getLogger(__name__)
 
 try:
     from models.deck_plugin import (
         DeckPluginBindingUpdateRequest,
         DeckRuntimePluginLock,
     )
-    from models.workflow_run import AuthenticatedActorContext
+    from models.workflow_run import AuthenticatedActorContext, RunStatus
+    from models.runtime_plugin import compute_artifact_set_hash
     from services.claude_plugin.install_service import (
         PluginInstallError,
         PluginInstallService,
+    )
+    from services.admin_gateway import (
+        GatewayInferenceError,
+        resolve_platform_model_alias,
     )
     from services.deck.builtin_plugin import (
         BUILTIN_CLAUDE_PLUGIN_ID,
@@ -55,8 +65,9 @@ try:
     from services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
     )
+    from services.story_workspace.dream_stream_adapter import iter_dream_run_events
     from services.workflow.preflight_service import PreflightService, PreflightStatus
-    from services.workflow.run_service import WorkflowRunService
+    from services.workflow.run_service import WorkflowRunError, WorkflowRunService
     from story_workspace.contracts import (
         StoryWorkspaceDreamLaunchCommand,
         StoryWorkspaceDreamRunContext,
@@ -66,10 +77,15 @@ except ModuleNotFoundError:  # Support package imports from repository root.
         DeckPluginBindingUpdateRequest,
         DeckRuntimePluginLock,
     )
-    from backend.models.workflow_run import AuthenticatedActorContext
+    from backend.models.workflow_run import AuthenticatedActorContext, RunStatus
+    from backend.models.runtime_plugin import compute_artifact_set_hash
     from backend.services.claude_plugin.install_service import (
         PluginInstallError,
         PluginInstallService,
+    )
+    from backend.services.admin_gateway import (
+        GatewayInferenceError,
+        resolve_platform_model_alias,
     )
     from backend.services.deck.builtin_plugin import (
         BUILTIN_CLAUDE_PLUGIN_ID,
@@ -100,11 +116,17 @@ except ModuleNotFoundError:  # Support package imports from repository root.
     from backend.services.story_workspace.canonical_project_instruction import (
         STORY_WORKSPACE_CANONICAL_PROJECT_INSTRUCTION,
     )
+    from backend.services.story_workspace.dream_stream_adapter import (
+        iter_dream_run_events,
+    )
     from backend.services.workflow.preflight_service import (
         PreflightService,
         PreflightStatus,
     )
-    from backend.services.workflow.run_service import WorkflowRunService
+    from backend.services.workflow.run_service import (
+        WorkflowRunError,
+        WorkflowRunService,
+    )
     from backend.story_workspace.contracts import (
         StoryWorkspaceDreamLaunchCommand,
         StoryWorkspaceDreamRunContext,
@@ -136,6 +158,8 @@ def _canonical_json(value: Any) -> str:
 
 
 def _decode_json_object(raw: Any) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
     try:
         value = json.loads(str(raw or "{}"))
     except (TypeError, json.JSONDecodeError):
@@ -365,6 +389,31 @@ class StoryWorkspaceDreamLaunchProvisioner:
             workspace_id=workspace_id,
         )
 
+    def ensure_frozen_runtime_evidence(self, runtime_plugin_lock_id: str) -> None:
+        """Re-provision immutable launch evidence for an idempotent queued replay."""
+
+        row = self.db.execute(
+            "SELECT lock_json FROM deck_runtime_plugin_locks "
+            "WHERE id = %s AND deck_plugin_id = %s AND deck_plugin_version = %s",
+            (
+                runtime_plugin_lock_id,
+                BUILTIN_DECK_PLUGIN_ID,
+                BUILTIN_DECK_PLUGIN_VERSION,
+            ),
+        ).fetchone()
+        if row is None:
+            raise StoryWorkspaceDreamLaunchGatewayError(
+                "DECK_RUNTIME_CONFIG_INVALID", 503
+            )
+        raw_lock = row["lock_json"]
+        runtime_lock = self._validate_runtime_lock(
+            DeckRuntimePluginLock.model_validate(raw_lock)
+            if isinstance(raw_lock, dict)
+            else DeckRuntimePluginLock.model_validate_json(str(raw_lock))
+        )
+        installation = self._ensure_claude_installation(runtime_lock)
+        self._ensure_materialization(runtime_lock, installation)
+
     def _require_scope(
         self,
         deck_id: str,
@@ -405,7 +454,18 @@ class StoryWorkspaceDreamLaunchProvisioner:
             raise StoryWorkspaceDreamLaunchGatewayError(
                 "DECK_PLUGIN_UNAVAILABLE", 503
             )
-        runtime_lock = DeckRuntimePluginLock.model_validate_json(row["lock_json"])
+        raw_lock = row["lock_json"]
+        runtime_lock = (
+            DeckRuntimePluginLock.model_validate(raw_lock)
+            if isinstance(raw_lock, dict)
+            else DeckRuntimePluginLock.model_validate_json(str(raw_lock))
+        )
+        return self._validate_runtime_lock(runtime_lock)
+
+    @staticmethod
+    def _validate_runtime_lock(
+        runtime_lock: DeckRuntimePluginLock,
+    ) -> DeckRuntimePluginLock:
         required = [
             entry for entry in runtime_lock.claude_code_plugins if entry.required
         ]
@@ -475,12 +535,11 @@ class StoryWorkspaceDreamLaunchProvisioner:
         entry = next(item for item in runtime_lock.claude_code_plugins if item.required)
         environment = os.getenv("INK_ENVIRONMENT", "unknown").strip().lower()
         now = datetime.now(UTC).isoformat()
-        key = hashlib.sha256(
+        artifact_set_hash = compute_artifact_set_hash(runtime_lock)
+        key = "sha256:" + hashlib.sha256(
             f"{environment}\0dream-launch\0{entry.claude_code_plugin_id}\0"
-            f"{entry.resolved_version}\0{entry.artifact_digest}".encode("utf-8")
-        ).hexdigest()
-        artifact_set_hash = "sha256:" + hashlib.sha256(
-            runtime_lock.model_dump_json().encode("utf-8")
+            f"{entry.resolved_version}\0{entry.artifact_digest}\0"
+            f"{artifact_set_hash}".encode("utf-8")
         ).hexdigest()
         existing = self.db.execute(
             "SELECT runtime_materialization_id FROM runtime_plugin_materializations "
@@ -608,6 +667,11 @@ class StoryWorkspaceDreamLaunchProvisioner:
         )
         for attempt in range(2):
             current = self._active_binding_row(deck_id)
+            # psycopg opens a transaction for this SELECT. BindingService.save
+            # intentionally owns the following CAS transaction and rejects a
+            # dirty boundary, so finish the read-only observation first.
+            if self.db.in_transaction:
+                self.db.rollback()
             existing = self._expected_builtin_binding(
                 current,
                 actor_id=actor_id,
@@ -632,8 +696,11 @@ class StoryWorkspaceDreamLaunchProvisioner:
                     ),
                 )
             except BindingRevisionConflict as exc:
+                winner_row = self._active_binding_row(deck_id)
+                if self.db.in_transaction:
+                    self.db.rollback()
                 winner = self._expected_builtin_binding(
-                    self._active_binding_row(deck_id),
+                    winner_row,
                     actor_id=actor_id,
                     workspace_id=workspace_id,
                 )
@@ -698,14 +765,39 @@ def _launch_instruction(goal: str) -> str:
     )
 
 
-def story_workspace_build_dream_launch_turn_dispatcher() -> Callable[..., Any]:
+_SAFE_AGENT_ERROR_CODE = re.compile(r"^\[([A-Z][A-Z0-9_]{2,79})\]")
+
+
+def _dream_launch_event_error_code(event: Any) -> str | None:
+    if event.type == "error":
+        match = _SAFE_AGENT_ERROR_CODE.match(str(event.data.get("errorText") or ""))
+        return match.group(1) if match else "DREAM_AGENT_DISPATCH_FAILED"
+    if event.type == "finish" and event.data.get("finishReason") == "error":
+        return "DREAM_AGENT_DISPATCH_FAILED"
+    return None
+
+
+def story_workspace_build_dream_launch_turn_dispatcher(
+    factory: Any | None = None,
+    *,
+    request_factory: Callable[..., Any] | None = None,
+    failure_handler: Callable[..., Any] | None = None,
+) -> Callable[..., Any]:
     """Resolve the U2b Agent request only when a launch is dispatched."""
 
     def dispatch(**values: Any) -> Any:
-        from agent_factory import claude_agent_thread_factory
-        from claude_agent.service import ClaudeAgentRunRequest
+        selected_factory = factory
+        if selected_factory is None:
+            from agent_factory import claude_agent_thread_factory
 
-        request = ClaudeAgentRunRequest(
+            selected_factory = claude_agent_thread_factory
+        selected_request_factory = request_factory
+        if selected_request_factory is None:
+            from claude_agent.service import ClaudeAgentRunRequest
+
+            selected_request_factory = ClaudeAgentRunRequest
+
+        request = selected_request_factory(
             user_id=values["actor_id"],
             thread_id=values["thread_id"],
             resume=False,
@@ -715,11 +807,26 @@ def story_workspace_build_dream_launch_turn_dispatcher() -> Callable[..., Any]:
             story_workspace_dream_context=values["context"],
             system_prompt=values.get("system_prompt"),
         )
-        stream = claude_agent_thread_factory.run_streaming(request)
-
         async def consume() -> None:
-            async for _frame in stream:
-                pass
+            error_code = None
+            try:
+                async for event in iter_dream_run_events(selected_factory, request):
+                    error_code = _dream_launch_event_error_code(event)
+                    if error_code is not None:
+                        break
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                error_code = "DREAM_AGENT_DISPATCH_FAILED"
+            if error_code is not None and failure_handler is not None:
+                result = failure_handler(
+                    workflow_run_id=values["context"].workflow_run_id,
+                    actor_id=str(values["actor_id"]),
+                    message_id=str(values["message_id"]),
+                    error_code=error_code,
+                )
+                if inspect.isawaitable(result):
+                    await result
 
         return asyncio.create_task(
             consume(),
@@ -918,10 +1025,15 @@ class StoryWorkspaceDreamLaunchGateway:
         ),
         turn_dispatcher: Callable[..., Any] | None = None,
         dispatch_before_claim: Callable[[], Any] | None = None,
+        platform_model_resolver: Callable[[int | str, str | None], str] = (
+            resolve_platform_model_alias
+        ),
     ) -> None:
         self.db = db
         self._preflight_service = preflight_service
+        self._token_secret = token_secret
         self._run_service = WorkflowRunService(db, token_secret=token_secret)
+        self._platform_model_resolver = platform_model_resolver
         self._provisioner = StoryWorkspaceDreamLaunchProvisioner(
             db,
             claude_installer_factory=claude_installer_factory,
@@ -929,9 +1041,86 @@ class StoryWorkspaceDreamLaunchGateway:
         self._source_store = StoryWorkspaceDreamLaunchSourceStore(db)
         self._dispatcher = StoryWorkspaceDreamLaunchPersistentDispatcher(
             db,
-            turn_dispatcher=turn_dispatcher,
+            turn_dispatcher=(
+                turn_dispatcher
+                or story_workspace_build_dream_launch_turn_dispatcher(
+                    failure_handler=self._record_dispatch_failure,
+                )
+            ),
             before_claim=dispatch_before_claim,
         )
+
+    async def _record_dispatch_failure(
+        self,
+        *,
+        workflow_run_id: str,
+        actor_id: str,
+        message_id: str,
+        error_code: str,
+    ) -> None:
+        """Persist a safe terminal Agent failure using a fresh connection."""
+
+        import database as runtime_database
+
+        db = runtime_database.get_db()
+        try:
+            row = db.execute(
+                "SELECT workspace_id, source_voice_thread_id, source_message_id "
+                "FROM workflow_runs WHERE id = %s AND created_by = %s",
+                (workflow_run_id, actor_id),
+            ).fetchone()
+            if row is None or row["source_message_id"] != message_id:
+                if db.in_transaction:
+                    db.rollback()
+                return
+            actor_context = AuthenticatedActorContext(
+                actor_id=actor_id,
+                workspace_id=str(row["workspace_id"]),
+            )
+            if db.in_transaction:
+                db.rollback()
+            try:
+                failed = await WorkflowRunService(
+                    db,
+                    token_secret=self._token_secret,
+                ).transition_run(
+                    workflow_run_id,
+                    RunStatus.FAILED,
+                    actor_context,
+                    failed_step="dream_agent_dispatch",
+                    error_code=error_code,
+                    reason_code="dream_agent_terminal_error",
+                )
+            except WorkflowRunError:
+                return
+            if str(getattr(failed.status, "value", failed.status)) != RunStatus.FAILED.value:
+                return
+            db.execute("BEGIN")
+            message = db.execute(
+                "SELECT metadata FROM chat_message "
+                "WHERE id = %s AND thread_id = %s",
+                (message_id, row["source_voice_thread_id"]),
+            ).fetchone()
+            metadata = _decode_json_object(message["metadata"] if message else None)
+            if message is not None:
+                metadata["dispatchStatus"] = "failed"
+                metadata["dispatchErrorCode"] = error_code
+                metadata.pop("dispatchClaimId", None)
+                metadata.pop("dispatchClaimedAt", None)
+                db.execute(
+                    "UPDATE chat_message SET metadata = %s WHERE id = %s",
+                    (_canonical_json(metadata), message_id),
+                )
+            db.commit()
+        except Exception:
+            if db.in_transaction:
+                db.rollback()
+            logger.exception(
+                "Failed to persist Dream launch terminal error for run_id=%s",
+                workflow_run_id,
+            )
+        finally:
+            db.close()
 
     async def start(
         self,
@@ -945,6 +1134,24 @@ class StoryWorkspaceDreamLaunchGateway:
         )
         self._provisioner.require_agent_scope(request.deck_id, request.agent_id)
         existing_run = self._existing_replay_run(request, actor_context)
+        if existing_run is None:
+            # Do not hold a database read transaction across the Admin call.
+            # A replay returns its already-created authoritative run even when
+            # the catalog is temporarily unavailable; a new run must prove
+            # current model eligibility before any source/run write occurs.
+            if self.db.in_transaction:
+                self.db.rollback()
+            try:
+                await asyncio.to_thread(
+                    self._platform_model_resolver,
+                    actor["actor_id"],
+                    None,
+                )
+            except GatewayInferenceError as exc:
+                raise StoryWorkspaceDreamLaunchGatewayError(
+                    exc.code,
+                    exc.status_code,
+                ) from exc
 
         async def resolve_binding(**values: Any) -> Any:
             if existing_run is not None:
@@ -952,6 +1159,9 @@ class StoryWorkspaceDreamLaunchGateway:
                     values["deck_id"],
                     values["actor_id"],
                     values["workspace_id"],
+                )
+                self._provisioner.ensure_frozen_runtime_evidence(
+                    existing_run["runtime_plugin_lock_id"]
                 )
                 return StoryWorkspaceDreamLaunchBinding(
                     deck_plugin_id=existing_run["deck_plugin_id"],
@@ -993,6 +1203,11 @@ class StoryWorkspaceDreamLaunchGateway:
             return preflight
 
         async def create_run(**values: Any) -> Any:
+            # Preflight returns its authoritative row through a final SELECT.
+            # psycopg opens a read transaction for that SELECT, while the run
+            # service deliberately requires ownership of a clean write boundary.
+            if self.db.in_transaction:
+                self.db.rollback()
             return await self._run_service.create_run(
                 values["preflight_id"],
                 values["preflight_token"],

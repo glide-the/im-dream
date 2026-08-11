@@ -67,6 +67,9 @@ class ArtifactStoryProjection:
     artifact_manifest_revision: str
     script_revision: str
     script_size_bytes: int
+    artifact_status: str = "available"
+    # Rolling-release compatibility projection only. PostgreSQL/API truth is
+    # artifact_status; the legacy column is dual-written until contract phase.
     artifact_available: bool = True
     artifact_source_type: str = ARTIFACT_SOURCE_TYPE
 

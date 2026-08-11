@@ -11,6 +11,7 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from fastapi import FastAPI
@@ -29,9 +30,15 @@ from services.deck.builtin_plugin import (
 )
 from services.deck.story_workflow_gateway import StoryWorkflowApplicationGateway
 from services.deck_plugin.binding_service import BindingRevisionConflict
+from models.runtime_plugin import compute_artifact_set_hash
 from services.story_workspace.dream_launch_gateway import (
     StoryWorkspaceDreamLaunchGateway,
+    StoryWorkspaceDreamLaunchGatewayError,
+    StoryWorkspaceDreamLaunchProvisioner,
+    _decode_json_object,
+    story_workspace_build_dream_launch_turn_dispatcher,
 )
+from services.admin_gateway import GatewayInferenceError
 from services.story_workspace.dream_launch_service import (
     StoryWorkspaceDreamLaunchIdempotencyConflict,
 )
@@ -41,12 +48,130 @@ from story_workspace.contracts import (
 )
 
 
+def test_decode_json_object_accepts_psycopg_native_jsonb_dict() -> None:
+    native_jsonb = {"enabled": True, "nullable": None, "items": ["one"]}
+
+    decoded = _decode_json_object(native_jsonb)
+
+    assert decoded == native_jsonb
+    assert decoded is not native_jsonb
+
+
 ACTOR_ID = "71"
 OTHER_ACTOR_ID = "72"
 WORKSPACE_ID = "workspace-dream-launch-api"
 OTHER_WORKSPACE_ID = "workspace-dream-launch-api-other"
 DECK_ID = "deck-dream-launch-api"
 ALTERNATE_DECK_ID = "deck-dream-launch-api-alternate"
+
+
+def test_active_binding_ends_psycopg_read_transaction_before_save() -> None:
+    class TrackingDb:
+        in_transaction = False
+
+        def execute(self, _statement, _params=()):
+            self.in_transaction = True
+            return SimpleNamespace(fetchone=lambda: None)
+
+        def rollback(self):
+            self.in_transaction = False
+
+    db = TrackingDb()
+
+    class CleanBoundaryBindingService:
+        def __init__(self, target, **_kwargs):
+            self.target = target
+
+        async def save(self, **_kwargs):
+            assert self.target.in_transaction is False
+            return SimpleNamespace(
+                deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
+                deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
+                deck_plugin_binding_id="dpb_" + "1" * 32,
+                binding_revision=1,
+            )
+
+    with (
+        patch(
+            "services.story_workspace.dream_launch_gateway.BindingService",
+            CleanBoundaryBindingService,
+        ),
+        patch(
+            "services.story_workspace.dream_launch_gateway.SelectionValidationService",
+            lambda *_args, **_kwargs: object(),
+        ),
+        patch(
+            "services.story_workspace.dream_launch_gateway.make_runtime_context_resolver",
+            lambda *_args, **_kwargs: object(),
+        ),
+    ):
+        binding = asyncio.run(
+            StoryWorkspaceDreamLaunchProvisioner(db)._ensure_active_binding(
+                deck_id=DECK_ID,
+                actor_id=ACTOR_ID,
+                workspace_id=WORKSPACE_ID,
+            )
+        )
+
+    assert binding.binding_revision == 1
+
+
+def test_launch_ends_preflight_read_transaction_before_run_create() -> None:
+    class TrackingDb:
+        in_transaction = False
+
+        def rollback(self):
+            self.in_transaction = False
+
+    db = TrackingDb()
+
+    class Provisioner:
+        @staticmethod
+        def require_agent_scope(_deck_id, _agent_id):
+            return None
+
+    class CleanBoundaryRunService:
+        async def create_run(self, *_args, **_kwargs):
+            assert db.in_transaction is False
+            return "created"
+
+    class LaunchService:
+        def __init__(self, *, run_creator, **_kwargs):
+            self.run_creator = run_creator
+
+        async def launch(self, _request, **_kwargs):
+            # psycopg opens a transaction for the final preflight SELECT.
+            db.in_transaction = True
+            return await self.run_creator(
+                preflight_id="wpf_" + "1" * 32,
+                preflight_token="pft-token",
+                idempotency_key="dream-api-launch-clean-boundary",
+                source_thread_id="thread-clean-boundary",
+                source_message_id="message-clean-boundary",
+                source_message_time=datetime(2026, 8, 1, 9, 0, tzinfo=UTC),
+            )
+
+    gateway = StoryWorkspaceDreamLaunchGateway.__new__(StoryWorkspaceDreamLaunchGateway)
+    gateway.db = db
+    gateway._provisioner = Provisioner()
+    gateway._run_service = CleanBoundaryRunService()
+    gateway._source_store = object()
+    gateway._dispatcher = lambda *_args, **_kwargs: None
+    gateway._platform_model_resolver = lambda *_args, **_kwargs: "model-alias"
+    gateway._existing_replay_run = lambda _request, _actor: None
+
+    with patch(
+        "services.story_workspace.dream_launch_gateway.StoryWorkspaceDreamLaunchService",
+        LaunchService,
+    ):
+        created = asyncio.run(
+            gateway.start(
+                launch_command(idempotencyKey="dream-api-launch-clean-boundary"),
+                actor={"actor_id": ACTOR_ID, "workspace_id": WORKSPACE_ID},
+            )
+        )
+
+    assert created == "created"
 
 
 def launch_command(**overrides: object) -> StoryWorkspaceDreamLaunchCommand:
@@ -344,6 +469,7 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         actor: dict[str, str],
         *,
         dispatch_before_claim=None,
+        model_resolver=lambda _actor_id, _client_alias=None: "dream-balanced",
     ):
         application = StoryWorkflowApplicationGateway()
         options = {}
@@ -355,8 +481,137 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
             token_secret="ink-dream-development-workflow-token-secret-v1",
             claude_installer_factory=FakeClaudePluginInstaller,
             turn_dispatcher=self.turn_dispatcher,
+            platform_model_resolver=model_resolver,
             **options,
         )
+
+    async def test_model_eligibility_failures_prevent_run_and_source_creation(self):
+        db = database.get_db()
+        try:
+            selected_actor = {
+                "actor_id": ACTOR_ID,
+                "workspace_id": WORKSPACE_ID,
+            }
+            for error_code, status_code in [
+                ("GATEWAY_AUTH_REQUIRED", 401),
+                ("SUBSCRIPTION_TOKEN_ALLOWANCE_EXHAUSTED", 402),
+                ("GATEWAY_MODEL_NOT_AVAILABLE", 403),
+                ("GATEWAY_MODEL_SELECTION_STALE", 409),
+                ("GATEWAY_RATE_LIMITED", 429),
+                ("GATEWAY_UPSTREAM_ERROR", 502),
+                ("GATEWAY_UNAVAILABLE", 503),
+            ]:
+                with self.subTest(status_code=status_code):
+                    def unavailable(_actor_id, _client_alias=None):
+                        raise GatewayInferenceError(error_code, status_code)
+
+                    gateway = self.make_gateway(
+                        db,
+                        selected_actor,
+                        model_resolver=unavailable,
+                    )
+                    with self.assertRaises(StoryWorkspaceDreamLaunchGatewayError) as captured:
+                        await gateway.start(launch_command(), actor=selected_actor)
+                    self.assertEqual(
+                        (captured.exception.code, captured.exception.status_code),
+                        (error_code, status_code),
+                    )
+                    self.assertEqual(
+                        db.execute("SELECT COUNT(*) AS count FROM workflow_runs").fetchone()["count"],
+                        0,
+                    )
+                    self.assertEqual(
+                        db.execute("SELECT COUNT(*) AS count FROM chat_message").fetchone()["count"],
+                        0,
+                    )
+                    self.assertEqual(self.turn_dispatcher.calls, [])
+        finally:
+            db.close()
+
+    async def test_default_dispatcher_reports_safe_terminal_stream_error(self):
+        failures: list[dict[str, str]] = []
+
+        class Factory:
+            async def run_streaming(self, _request):
+                yield 'data: {"type":"error","errorText":"[GATEWAY_UNAVAILABLE] upstream unavailable"}\n\n'
+
+        async def record_failure(**values):
+            failures.append(values)
+
+        dispatcher = story_workspace_build_dream_launch_turn_dispatcher(
+            factory=Factory(),
+            request_factory=lambda **values: values,
+            failure_handler=record_failure,
+        )
+        context = StoryWorkspaceDreamRunContext(
+            workflow_run_id="run_" + "1" * 32,
+            thread_id="thread-dream-error",
+            deck_id=DECK_ID,
+            deck_plugin_id=BUILTIN_DECK_PLUGIN_ID,
+            deck_plugin_version=BUILTIN_DECK_PLUGIN_VERSION,
+            deck_plugin_binding_id="dpb_" + "2" * 32,
+            binding_revision=1,
+            deck_runtime_snapshot_id="drs_" + "3" * 32,
+            runtime_plugin_lock_id="rpl_" + "4" * 32,
+        )
+        task = dispatcher(
+            actor_id=ACTOR_ID,
+            thread_id=context.thread_id,
+            message_id="dream-launch-error-message",
+            parts=[{"type": "text", "text": "launch"}],
+            metadata={},
+            context=context,
+            system_prompt=None,
+        )
+        await task
+        self.assertEqual(
+            failures,
+            [{
+                "workflow_run_id": context.workflow_run_id,
+                "actor_id": ACTOR_ID,
+                "message_id": "dream-launch-error-message",
+                "error_code": "GATEWAY_UNAVAILABLE",
+            }],
+        )
+
+    async def test_terminal_dispatch_error_marks_run_and_source_failed(self):
+        selected_actor = {
+            "actor_id": ACTOR_ID,
+            "workspace_id": WORKSPACE_ID,
+        }
+        db = database.get_db()
+        try:
+            gateway = self.make_gateway(db, selected_actor)
+            context = await gateway.start(launch_command(), actor=selected_actor)
+            message_id = self.turn_dispatcher.calls[0]["message_id"]
+            await gateway._record_dispatch_failure(
+                workflow_run_id=context.workflow_run_id,
+                actor_id=ACTOR_ID,
+                message_id=str(message_id),
+                error_code="GATEWAY_UNAVAILABLE",
+            )
+        finally:
+            db.close()
+
+        read_db = database.get_db()
+        try:
+            run = read_db.execute(
+                "SELECT status, failed_step, error_code FROM workflow_runs WHERE id = ?",
+                (context.workflow_run_id,),
+            ).fetchone()
+            source = read_db.execute(
+                "SELECT metadata FROM chat_message WHERE id = ?",
+                (message_id,),
+            ).fetchone()
+            metadata = json.loads(source["metadata"])
+            self.assertEqual(
+                (run["status"], run["failed_step"], run["error_code"]),
+                ("failed", "dream_agent_dispatch", "GATEWAY_UNAVAILABLE"),
+            )
+            self.assertEqual(metadata["dispatchStatus"], "failed")
+            self.assertEqual(metadata["dispatchErrorCode"], "GATEWAY_UNAVAILABLE")
+        finally:
+            read_db.close()
 
     async def start(
         self,
@@ -442,6 +697,64 @@ class StoryWorkspaceDreamLaunchProductionTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("write_dream_stage", launch_text)
         self.assertIn("AskUserQuestion", launch_text)
         self.assertIn("可编辑草稿", launch_text)
+
+    async def test_materialization_identity_includes_the_artifact_set_hash(self) -> None:
+        await self.start(launch_command())
+        db = database.get_db()
+        try:
+            provisioner = StoryWorkspaceDreamLaunchProvisioner(
+                db,
+                claude_installer_factory=FakeClaudePluginInstaller,
+            )
+            runtime_lock = provisioner._runtime_lock()
+            entry = runtime_lock.claude_code_plugins[0]
+            artifact_set_hash = compute_artifact_set_hash(runtime_lock)
+            expected_key = "sha256:" + hashlib.sha256(
+                f"test\0dream-launch\0{entry.claude_code_plugin_id}\0"
+                f"{entry.resolved_version}\0{entry.artifact_digest}\0"
+                f"{artifact_set_hash}".encode("utf-8")
+            ).hexdigest()
+            installation = dict(
+                db.execute("SELECT * FROM claude_plugin_installations").fetchone()
+            )
+
+            provisioner._ensure_materialization(runtime_lock, installation)
+
+            rows = db.execute(
+                "SELECT artifact_set_hash, materialization_key "
+                "FROM runtime_plugin_materializations"
+            ).fetchall()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["artifact_set_hash"], artifact_set_hash)
+            self.assertEqual(rows[0]["materialization_key"], expected_key)
+        finally:
+            db.close()
+
+    async def test_existing_queued_replay_reprovisions_missing_runtime_evidence(self) -> None:
+        first = await self.start(launch_command())
+        db = database.get_db()
+        try:
+            db.execute("DELETE FROM runtime_plugin_materializations")
+            db.commit()
+        finally:
+            db.close()
+
+        replay = await self.start(launch_command())
+
+        self.assertEqual(replay, first)
+        db = database.get_db()
+        try:
+            runtime_lock = StoryWorkspaceDreamLaunchProvisioner(db)._runtime_lock()
+            row = db.execute(
+                "SELECT artifact_set_hash FROM runtime_plugin_materializations"
+            ).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(
+                row["artifact_set_hash"],
+                compute_artifact_set_hash(runtime_lock),
+            )
+        finally:
+            db.close()
 
     async def test_replay_and_conflict_preserve_single_source_run_and_dispatch(self) -> None:
         first = await self.start(launch_command())

@@ -8,6 +8,7 @@ import {
   storyWorkspaceDreamStageSnapshotsFromFiles,
   storyWorkspaceDreamLifecycleFromPersistence,
   storyWorkspaceDreamPersistenceNotice,
+  storyWorkspaceDreamRunFailureNotice,
   storyWorkspaceParseDreamEditorValue,
   storyWorkspaceDreamEditorValue,
 } from '../dreamViewModel';
@@ -84,7 +85,7 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
     saved,
     'failed',
     'story-workspace-dream-editing',
-  )).toBe('story-workspace-dream-continuing');
+  )).toBe('story-workspace-dream-editing');
   expect(storyWorkspaceDreamPersistenceNotice(saved, 'continuing')).toBe(
     '命令已保存，等待同一 Dream Agent 接续',
   );
@@ -109,6 +110,19 @@ test('restores the one-confirm lifecycle from durable confirmation and run facts
   expect(storyWorkspaceDreamPersistenceNotice(dispatched, 'completed')).toBe(
     '同一 Dream Agent 已完成后续执行',
   );
+});
+
+test('renders a safe durable Workflow failure instead of continuing copy', () => {
+  expect(storyWorkspaceDreamRunFailureNotice({
+    status: 'failed',
+    error_code: 'GATEWAY_UNAVAILABLE',
+    failed_step: 'dream_agent_dispatch',
+  })).toBe('Dream Agent 暂时无法连接平台模型服务。运行已安全停止，未完成的步骤不会显示为成功。');
+  expect(storyWorkspaceDreamRunFailureNotice({
+    status: 'running',
+    error_code: null,
+    failed_step: null,
+  })).toBeNull();
 });
 
 test('formats editor values and parses relations without empty duplicates', () => {

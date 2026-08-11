@@ -144,6 +144,8 @@ interface ChatViewProps {
   threadId?: string;
   /** When set, the view switches to this thread (used for external navigation from Deck / editor widgets). */
   requestedThreadId?: string;
+  /** Bump-only companion so reopening the same external thread refreshes status and reconnects SSE. */
+  requestedThreadNonce?: number;
   /** When set (with requestedDeckNonce), preselect this Deck in the input dock and land on a fresh conversation (Deck editor "Chat →"). */
   requestedDeckId?: string;
   /** Agent selected under requestedDeckId. */
@@ -382,6 +384,7 @@ async function fetchThreadMessages(threadId: string): Promise<ThreadMessagesSnap
 function ChatViewContent({
   threadId: initialThreadId,
   requestedThreadId,
+  requestedThreadNonce,
   requestedDeckId,
   requestedAgentId,
   requestedDeckNonce,
@@ -409,6 +412,7 @@ function ChatViewContent({
   const lastClaimedQueuedPromptNonceRef = useRef(0);
   const [hasConversationStarted, setHasConversationStarted] = useState(false);
   const [activeThreadId, setActiveThreadId] = useState<string | null>(initialThreadId ?? null);
+  const [threadReloadNonce, setThreadReloadNonce] = useState(0);
   // A thread created by this view is known to have no history yet. Skipping its
   // first hydration keeps the ChatPanel (and its live fetch reader) mounted.
   const freshQueuedThreadIdRef = useRef<string | null>(null);
@@ -627,14 +631,20 @@ function ChatViewContent({
     setSubagentSidebarOpen(false);
   }, [activeThreadId]);
 
-  // @@@ External navigation: switch to a specific thread when requestedThreadId changes.
+  // @@@ External navigation: switch threads, or rehydrate/reconnect when the
+  // same thread is explicitly reopened after another surface consumed it.
   useEffect(() => {
-    if (!requestedThreadId || requestedThreadId === activeThreadId) return;
+    if (!requestedThreadId) return;
+    if (requestedThreadId === activeThreadId && requestedThreadNonce === undefined) return;
     setThreadMessages(null);
     setInitialSettledToolCallIds(new Set<string>());
     setInitialRuntimePendingToolCallIds(new Set<string>());
     setIsLoadingMessages(true);
-    setActiveThreadId(requestedThreadId);
+    if (requestedThreadId === activeThreadId) {
+      setThreadReloadNonce((value) => value + 1);
+    } else {
+      setActiveThreadId(requestedThreadId);
+    }
     setHasConversationStarted(true);
     onLandingTabChange('history');
     setQueuedPrompt('');
@@ -642,7 +652,7 @@ function ChatViewContent({
     setQueuedToolChoice('auto');
     void reloadThreads();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [requestedThreadId]);
+  }, [requestedThreadId, requestedThreadNonce]);
 
   // @@@ External navigation (Deck editor "Chat →"): preselect the Agent under
   // its Deck and land on a fresh conversation.
@@ -704,7 +714,7 @@ function ChatViewContent({
     return () => {
       cancelled = true;
     };
-  }, [activeThreadId]);
+  }, [activeThreadId, threadReloadNonce]);
 
   const activeThreadIdRef = useRef(activeThreadId);
   activeThreadIdRef.current = activeThreadId;

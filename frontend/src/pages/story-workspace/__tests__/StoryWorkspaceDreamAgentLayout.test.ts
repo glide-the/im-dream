@@ -35,6 +35,28 @@ test('Dream page integrates the dedicated rail/dialog and never a generic Chat v
   expect(`${PAGE}\n${RAIL}\n${DECK_METADATA}\n${DIALOG}`).not.toContain('ChatWidgetUI');
 });
 
+test('a durably settled Agent turn invalidates the same-run server projections', () => {
+  expect(PAGE).toContain('dreamAgent.settledRevision');
+  expect(PAGE).toContain('settledProjectionRefreshRef.current === refreshKey');
+  expect(PAGE).toContain('refreshDreamFiles();');
+  expect(PAGE).toContain('void selectRun(runId).catch(() => undefined);');
+  expect(PAGE).toMatch(
+    /useEffect\(\(\) => \{[\s\S]*dreamAgent\.settledRevision[\s\S]*settledProjectionRefreshRef\.current === refreshKey[\s\S]*refreshDreamFiles\(\);[\s\S]*selectRun\(runId\)[\s\S]*\}, \[dreamAgent\.settledRevision, refreshDreamFiles, runId, selectRun\]\)/,
+  );
+});
+
+test('Dream confirmation validation stays fail-closed during files-to-draft hydration', () => {
+  expect(PAGE).toMatch(
+    /function draftIsValid\([\s\S]*state\.stageData\[stage\][\s\S]*return false[\s\S]*storyWorkspaceReadDreamField/,
+  );
+});
+
+test('an accepted confirmation reconnects the Agent transport before waiting for continuation truth', () => {
+  expect(PAGE).toMatch(
+    /await confirmation\.submit\(started\.command\);[\s\S]*refreshDreamAgent\(\);/,
+  );
+});
+
 test('run-bound Dream keeps its full Agent history inside the editor rail, not in a floating dialog', () => {
   expect(PAGE).toContain('className="story-workspace-dream__agent-panel"');
   expect(PAGE).toContain('{agentPanelOpen && (');

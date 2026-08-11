@@ -252,10 +252,15 @@ class WorkflowRunService:
                 or self._receipt_reader is None
             ):
                 raise RuntimeLoadReceiptNotReady()
-            raw_receipt = self._receipt_reader(runtime_load_receipt_id)
-            if inspect.isawaitable(raw_receipt):
-                raw_receipt = await raw_receipt
-            receipt = RuntimeLoadReceiptReadiness.model_validate(raw_receipt)
+            try:
+                raw_receipt = self._receipt_reader(runtime_load_receipt_id)
+                if inspect.isawaitable(raw_receipt):
+                    raw_receipt = await raw_receipt
+                receipt = RuntimeLoadReceiptReadiness.model_validate(raw_receipt)
+            finally:
+                # A PostgreSQL receipt projection is a read-only prerequisite;
+                # the transition below owns a separate atomic write boundary.
+                self._rollback_read_transaction()
 
         self._require_clean_transaction()
         try:

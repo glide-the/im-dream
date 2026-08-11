@@ -728,6 +728,63 @@ class WorkflowRunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item.transition_seq for item in transitions], list(range(1, 8)))
         self.assertEqual(transitions[-1].to_status, RunStatus.COMPLETED)
 
+    async def test_running_transition_closes_psycopg_receipt_read_before_write(self):
+        run = await self.fixture.create("postgres-receipt-boundary")
+        receipt_id = self.fixture.ready_receipt(run, "postgres-receipt-boundary")
+        session_id = self.fixture.ready_session(run, receipt_id)
+
+        class PsycopgReadTransactionConnection:
+            def __init__(self, target):
+                self.target = target
+                self.read_transaction = False
+
+            @property
+            def in_transaction(self):
+                return self.read_transaction or self.target.in_transaction
+
+            def execute(self, statement, params=()):
+                normalized = statement.lstrip().upper()
+                if normalized == "BEGIN" and self.read_transaction:
+                    raise RuntimeError("cannot begin inside psycopg read transaction")
+                cursor = self.target.execute(statement, params)
+                if normalized.startswith("SELECT"):
+                    self.read_transaction = True
+                return cursor
+
+            def rollback(self):
+                self.target.rollback()
+                self.read_transaction = False
+
+            def commit(self):
+                self.target.commit()
+                self.read_transaction = False
+
+        connection = PsycopgReadTransactionConnection(self.fixture.db)
+
+        def read_receipt(selected_receipt_id):
+            connection.execute(
+                "SELECT receipt_id FROM runtime_load_receipts WHERE receipt_id = ?",
+                (selected_receipt_id,),
+            ).fetchone()
+            return self.fixture.receipts[selected_receipt_id]
+
+        service = WorkflowRunService(
+            connection,
+            token_secret=TOKEN_SECRET,
+            receipt_reader=read_receipt,
+            clock=lambda: self.fixture.now,
+        )
+
+        running = await service.transition_run(
+            run.workflow_run_id,
+            RunStatus.RUNNING,
+            self.fixture.actor,
+            runtime_load_receipt_id=receipt_id,
+            agent_session_id=session_id,
+        )
+
+        self.assertEqual(running.status, RunStatus.RUNNING)
+
     async def test_continuing_rejected_and_cancelled_legal_terminal_paths(self):
         async def advance_to_pending(key: str) -> WorkflowRun:
             candidate = await self.fixture.create(key)
