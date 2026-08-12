@@ -2722,3 +2722,47 @@ exact heading/tree is injected only in server-resolved Dream context, generic
 Chat absence is asserted, and no protected runner or public wire changed. The
 account-specific Provider proof cannot exercise the updated prompt until the
 separate model-entitlement blocker from R46 is resolved.
+
+## Round 48 — Confirm the public request alias and upstream model identity
+
+**Current-round objective**
+
+Confirm the existing-account real-model harness uses `hy-preview` as the public
+request name and resolves that server-owned alias to the `hy3-preview` display
+and upstream model identity.
+
+**Optimized Prompt**
+
+> Treat the Admin model form as the authoritative naming contract:
+> `hy-preview` is the public request name (`ai_models.code`) and
+> `hy3-preview` is the display/upstream model identity. Keep Dream and Gateway
+> requests on `hy-preview`; let the server resolve the corresponding model row
+> and forward `hy3-preview` upstream. Bind authorization to that model row ID,
+> not to display text. Preserve the existing private-clone account test and its
+> provider-free preflight without changing the real account, subscription,
+> quota or model permissions.
+
+**Optional Enhancers**
+
+- Record requested alias, resolved upstream and provider-reported model as
+  separate evidence fields.
+
+**Scope checked or modified**
+
+- Dream model DTO/UI selection, Admin model resolver and subscription binding.
+- Existing-account real-model harness and redacted validation evidence.
+- No production account or Gateway policy mutation.
+
+**Completion standard**
+
+The harness submits the public request alias, verifies the resolved upstream
+model separately, and either completes or reports a genuine model-row
+entitlement blocker.
+
+**Actual result and unverified inferences**
+
+Confirmed from the authoritative Admin form and current contracts:
+`hy-preview` is the request name while `hy3-preview` is the display/upstream
+identity. The existing harness already uses exactly that pair, so no production
+or test code change is required. The earlier attempt to reinterpret
+`hy3-preview` as the public request value was incorrect and was not implemented.
